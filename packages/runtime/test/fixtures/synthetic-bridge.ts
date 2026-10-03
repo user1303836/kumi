@@ -35,7 +35,8 @@ type Options = {
   /** The session's own hooks, for a session over this bridge. */ onConnection?: (state: ConnectionState) => void; onAudition?: (event: AuditionEvent) => void;
   /** Where the audition keeps Main's level while it renders. */ restoreFile?: string;
   /** Kumi's listening devices: a fake link, and the Browser listing the device (live_browser_inspect). Off when left out. */ ears?: { open: () => Promise<EarsLink> };
-  /** Kumi's hands (Live's menus): fake ones, with selecting and showing in Live. Off when left out. */ hands?: { open: () => Promise<Hands | undefined> } };
+  /** Kumi's hands (Live's menus): fake ones, with selecting and showing in Live. Off when left out. */ hands?: { open: () => Promise<Hands | undefined> };
+  /** false: parameters through the bridge's preview and apply even where it runs Python (fast.ts otherwise). */ fast?: boolean };
 export function bridge(options: Options = {}) {
   const requests: { name: string; args: JsonObject }[] = [];
   const records: ChangeRecord[] = [];
@@ -363,6 +364,7 @@ export function bridge(options: Options = {}) {
     // Never the producer's own ~/.kumi: each bridge its own file.
     restoreFile: options.restoreFile ?? join(mkdtempSync(join(tmpdir(), "kumi-restore-")), "audition-restore.json"),
     lowDisk: (path, needed, what) => lowDisk(path, needed, what, async () => options.freeDisk ?? 1e12), ears: options.ears ?? false, hands: options.hands ?? false,
+    ...(options.fast !== undefined ? { fast: options.fast } : {}),
     // Never the producer's own User Library: wavetables and devices go in a throwaway one.
     userLibrary: mkdtempSync(join(tmpdir(), "kumi-user-library-")) });
   return {

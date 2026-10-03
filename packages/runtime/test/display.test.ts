@@ -40,7 +40,8 @@ test("a value is placed from what the device shows: by ratio for frequencies and
 });
 
 test("set_device_parameter takes what the device shows, read once from Live's own text", async () => {
-  const b = await opened({ version: "1.0.70", parameters: true, python: (args) => ({ ok: true, result: { min: 0, max: 1, items: [], grid: cutoff.grid }, stdout: "", ref: args.ref }) });
+  // Through the bridge's preview and apply; fast.test.ts has the fast way.
+  const b = await opened({ version: "1.0.70", parameters: true, fast: false, python: (args) => ({ ok: true, result: { min: 0, max: 1, items: [], grid: cutoff.grid }, stdout: "", ref: args.ref }) });
   try {
     await tool(b.tools, "live_discover").execute({ kind: "parameter", parent: "device:1" }, signal());
     const knob = { ref: "parameter:1" };

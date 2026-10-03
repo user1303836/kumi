@@ -317,6 +317,7 @@ Kumi はすべてを `~/.kumi` に保存します。`~/.kumi/settings.json` に�
 | `KUMI_LIBRARY_DIR` | Kumi が学習したサウンド、プリセット、Set |
 | `OLLAMA_HOST`、`LM_API_TOKEN` | Ollama の待ち受け先（Ollama 自身の読み方で）、LM Studio のサーバーが求めるときの API トークン |
 | `KUMI_EARS=0` | Kumi Ears を使わず、録音して Set を聴く |
+| `KUMI_FAST=0` | デバイスのパラメータを、ブリッジのプレビューと適用という遅いほうの道で設定する（[変更の流れ](KUMI_CHANGES.md#変更の流れ)） |
 | `KUMI_YTDLP`、`KUMI_FFMPEG`、`KUMI_WHISPER`、`KUMI_WHISPER_MODEL` | 自分で用意した yt-dlp、ffmpeg、whisper.cpp（`whisper-cli`）、音声モデル（`ggml-*.bin`）のパス |
 | `KUMI_REMOTE_SCRIPTS_DIR` | Kumi が見つけられないときの、Live の Remote Scripts フォルダー |
 | `KUMI_LIVE_EXTENSIONS_DIR` | Kumi が Live の Extensions フォルダーを見つけられないときに、`kumi bridge` が Kumi の拡張機能を入れ、`kumi doctor` がそれを探す場所 |

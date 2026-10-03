@@ -632,6 +632,7 @@ Environment variables (paths must be absolute):
 | `KUMI_LIBRARY_DIR` | What Kumi learned of your sounds, presets and Sets |
 | `OLLAMA_HOST`, `LM_API_TOKEN` | Where Ollama listens, as Ollama reads it; LM Studio's API token, when its server wants one |
 | `KUMI_EARS=0` | Hear the Set by recording, without Kumi Ears |
+| `KUMI_FAST=0` | Set device parameters through the bridge's preview and apply, the slower way ([how a change works](KUMI_CHANGES.md#how-a-change-works)) |
 | `KUMI_YTDLP`, `KUMI_FFMPEG`, `KUMI_WHISPER`, `KUMI_WHISPER_MODEL` | Your own yt-dlp, ffmpeg, whisper.cpp (`whisper-cli`) or speech model (`ggml-*.bin`), by path |
 | `KUMI_REMOTE_SCRIPTS_DIR` | Live's Remote Scripts folder, when Kumi doesn't find it |
 | `KUMI_LIVE_EXTENSIONS_DIR` | Where `kumi bridge` puts Kumi's extension and `kumi doctor` looks for it, when Kumi doesn't find Live's Extensions folder |

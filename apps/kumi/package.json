@@ -1,6 +1,6 @@
 {
   "name": "@kumi/app",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -15,7 +15,7 @@
     "accept:live": "npm run build && node scripts/accept-live.mjs"
   },
   "dependencies": {
-    "@kumi/runtime": "1.7.1",
+    "@kumi/runtime": "1.7.2",
     "string-width": "8.1.0"
   }
 }

@@ -35,6 +35,7 @@ import { frameAt, readCapture, runs, writeCaptureWav } from "../../ears/capture.
 import { HandsError, openHands, type Hands, type HandsReply, type MenuItem } from "../../hands/index.js";
 import { COMMANDS, findItem, LIVE_COMMAND_DESCRIPTION, LIVE_COMMAND_SCHEMA, LIVE_COMMAND_TOOL, shortcut } from "./live-command.js";
 import { DISPLAY_MAP_SCRIPT, valueForDisplay, type DisplayMap } from "./display.js";
+import { findScript, revertScript, setScript, type FastFound, type FastRevert, type FastSet, type FastTarget } from "./fast.js";
 import { PLUGIN_DESCRIPTION, PLUGIN_SCHEMA, PLUGIN_TOOL } from "./plugin-tool.js";
 import { adapterFor, folderFor, pluginGuide } from "../../plugins/registry.js";
 import { buildWavetable, writeWavetable, type Keyframe } from "../../audio/wavetable.js";
@@ -147,6 +148,11 @@ interface Options {
   ears?: false | { open: () => Promise<EarsLink> };
   /** Kumi's hands (Live's own menus and keys): on where the OS has them, false for none; tests give their own. */
   hands?: false | { open: () => Promise<Hands | undefined> };
+  /**
+   * A device's parameters set in one trip into Live, through Kumi's own Python (fast.ts), where the
+   * bridge runs Python: on by default; false (or KUMI_FAST=0) for the bridge's preview and apply.
+   */
+  fast?: boolean;
 }
 
 /** `restore` is the name or colour a rename or recolour replaced in Kumi's picture of the track, put back if it's undone. */
@@ -158,6 +164,8 @@ interface Applied {
   members?: string[];
   /** The line this change is part of: it isn't one of its own. */
   within?: string;
+  /** A fast change (fast.ts): undone by putting its parameters back, not through the bridge. */
+  revert?: FastRevert[];
 }
 
 const resultText = (result: CallToolResult) => result.content.map((item) => (item.type === "text" ? item.text : "")).join("\n");
@@ -785,6 +793,109 @@ export function createAbletonIntegration(options: Options): Integration {
     }
     return valueForDisplay(map, text);
   }
+
+  /** Whether parameters go the fast way (fast.ts): this bridge runs Python, and it isn't turned off. */
+  const fastOn = () => options.fast !== false && process.env.KUMI_FAST !== "0" && supported({ since: PYTHON_BRIDGE }) && Boolean(tools?.has("live_run_python"));
+  /**
+   * A parameter named on a device, found once while Kumi's references hold: where it is on the device
+   * and its range. Forgotten when they're retired, or devices move; the scripts check the name anyway.
+   */
+  const fastFound = new Map<string, FastFound & { index: number }>();
+  let fastGeneration = -1;
+  /** Kumi's own Python in Live, for a fast change: its result, or why not (`sent`: it reached Live, so it may have happened). */
+  async function runFast(code: string, signal: AbortSignal): Promise<{ result: unknown } | { error: string; sent: boolean }> {
+    let called: CallToolResult;
+    try { called = await tools!.call("live_run_python", { code, mode: "exec", timeoutMs: 10_000 }, signal, { host: true }); }
+    catch { return { error: "Live didn't answer", sent: true }; }
+    if (called.isError) return { error: resultText(called).slice(0, 600), sent: uncertain(called) };
+    let body: JsonObject;
+    try { body = payload(called); } catch { return { error: "Kumi couldn't read Live's answer", sent: true }; }
+    if (body.ok !== true) return { error: String(object(body.error ?? {}).message ?? "Live refused it").slice(0, 600), sent: false };
+    return { result: body.result };
+  }
+
+  /**
+   * A device's parameters set in one trip into Live (fast.ts), with one trip more first when one is
+   * named or its value is given as Live shows it. HISTORY gets the change as ever, and its undo puts
+   * back only what's still where Kumi left it.
+   */
+  async function fastParameters(kind: ChangeKind, input: JsonObject, signal: AbortSignal): Promise<{ text: string; isError: boolean }> {
+    const deviceRef = typeof input.deviceRef === "string" ? input.deviceRef : undefined;
+    if (!deviceRef) return { text: "Name the device (deviceRef) whose parameter this is.", isError: true };
+    if (fastGeneration !== observationGeneration) { fastFound.clear(); fastGeneration = observationGeneration; }
+    const several = Array.isArray(input.values);
+    const asked = (several ? input.values as unknown[] : [input]).map((item) => object(item));
+    if (!asked.length) return { text: "Give at least one parameter and its value.", isError: true };
+    const numeric = (value: unknown) => (typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)) ? Number(value) : undefined);
+    const steps = asked.map((item) => ({ ref: typeof item.parameterRef === "string" ? item.parameterRef : undefined, name: typeof item.parameter === "string" ? item.parameter : undefined,
+      number: numeric(item.value), text: typeof item.value === "string" && numeric(item.value) === undefined ? item.value : undefined }));
+    for (const step of steps) {
+      if (!step.ref && !step.name) return { text: "Each parameter needs its parameterRef from discovery, or its name as parameter (\"Drive\").", isError: true };
+      if (step.number === undefined && step.text === undefined) return { text: `Give ${step.name ?? "the parameter"} a value: a number in its range, or what Live shows ("2 dB").`, isError: true };
+    }
+    const key = (step: (typeof steps)[number]) => step.ref ?? `${deviceRef}\u0000${step.name!.trim().toLowerCase()}`;
+    const mapKey = (step: (typeof steps)[number], index?: number) => step.ref ?? `${deviceRef}\u0000#${index}`;
+    // The first trip, for what Kumi doesn't know yet: a named parameter's place, Live's text across a range.
+    const unknown = steps.filter((step) => (step.name && !step.ref && !fastFound.has(key(step))) || (step.text !== undefined && !displayMaps.has(mapKey(step, fastFound.get(key(step))?.index))));
+    if (unknown.length) {
+      const found = await runFast(findScript(unknown.map((step) => (step.ref ? { ref: step.ref, map: step.text !== undefined } : { device: deviceRef, parameter: step.name!, map: step.text !== undefined }))), signal);
+      if ("error" in found) return { text: `Kumi couldn't find those parameters on the device: ${found.error}`, isError: true };
+      const rows = Array.isArray(found.result) ? found.result.map((row) => object(row)) : [];
+      for (const [index, step] of unknown.entries()) {
+        const row = rows[index] ?? {};
+        if (Array.isArray(row.missing)) return { text: `The device has no parameter called ${JSON.stringify(step.name!.slice(0, 64))}; its parameters include ${row.missing.slice(0, 12).join(", ")}.`, isError: true };
+        if (typeof row.error === "string" || typeof row.name !== "string" || typeof row.min !== "number" || typeof row.max !== "number") return { text: `Kumi couldn't read ${step.name ?? "that parameter"} in Live: ${String(row.error ?? "no answer")}. Discover the device again.`, isError: true };
+        if (typeof row.index === "number") fastFound.set(key(step), { index: row.index, name: row.name, min: row.min, max: row.max });
+        if (Array.isArray(row.grid)) displayMaps.set(mapKey(step, typeof row.index === "number" ? row.index : undefined), { min: row.min, max: row.max,
+          items: Array.isArray(row.items) ? row.items.filter((item): item is string => typeof item === "string") : [],
+          grid: row.grid.filter((pair): pair is [number, string] => Array.isArray(pair) && typeof pair[0] === "number" && typeof pair[1] === "string") });
+      }
+    }
+    // Each value as the parameter takes it, and where the parameter is.
+    const targets: (FastTarget & { value: number })[] = [];
+    for (const step of steps) {
+      const place = step.ref ? undefined : fastFound.get(key(step))!;
+      const target: FastTarget = step.ref ? { ref: step.ref } : { device: deviceRef, index: place!.index, name: place!.name };
+      let value = step.number;
+      if (value === undefined) {
+        const placed = valueForDisplay(displayMaps.get(mapKey(step, place?.index))!, step.text!);
+        if (typeof placed === "string") return { text: placed, isError: true };
+        value = placed;
+      }
+      targets.push({ ...target, value });
+    }
+    signal.throwIfAborted();
+    changesThisTurn++;
+    const set = await runFast(setScript(targets), AbortSignal.any([lifetime.signal, AbortSignal.timeout(changeTimeoutMs)]));
+    if ("error" in set) {
+      if (!set.sent) return { text: `Live didn't change them: ${set.error}`, isError: true };
+      remember(newRecord(kind, { title: `${steps.length === 1 ? steps[0]!.name ?? "A parameter" : `${steps.length} parameters`} (unconfirmed)` }, "unsure", now().getTime()), "");
+      return { text: "Live didn't confirm this change, so it may or may not have happened. Tell the producer to check Live; discover again before more changes.", isError: true };
+    }
+    const result = object(set.result);
+    const rows = (Array.isArray(result.items) ? result.items : []).map((row) => object(row) as unknown as FastSet);
+    const device = { ref: deviceRef, name: typeof result.device === "string" ? result.device : undefined, trackRef: object(result.track).ref };
+    // The shapes the bridge's preview and apply have, so HISTORY says it the same way.
+    const shownRows = rows.map((row, index) => { const target = targets[index]!; return { ref: "ref" in target ? target.ref : `${deviceRef}#${target.index}`, name: row.name, currentValue: row.prior, proposedValue: row.value, min: row.min, max: row.max, displayValue: row.priorDisplay }; });
+    const summary = several || rows.length > 1
+      ? kind.summarize({ device, parameters: shownRows }, input, knownTrack, { parameters: shownRows.map((row, index) => ({ ref: row.ref, displayValue: rows[index]!.display })) })
+      : kind.summarize({ device, parameter: shownRows[0] }, input, knownTrack, { displayValue: rows[0]?.display });
+    const record = newRecord(kind, summary, "applied", now().getTime());
+    remember(record, "");
+    const entry = changes.get(record.id);
+    if (entry) entry.revert = targets.map((target, index) => ({ ...(("ref" in target) ? { ref: target.ref } : { device: target.device, index: target.index, name: target.name }), prior: rows[index]!.prior, applied: rows[index]!.value }));
+    const reply = { changed: record.title, change: record.id, state: record.state, ...(summary.lines?.length ? { lines: summary.lines } : {}),
+      live: { parameters: rows.map((row) => ({ name: row.name, value: row.value, displayValue: row.display })) } };
+    return { text: JSON.stringify(reply), isError: false };
+  }
+  /** A fast change undone: its parameters put back, each only if it's still where Kumi left it. */
+  async function fastRevert(revert: FastRevert[], signal: AbortSignal): Promise<{ back: number; moved: string[]; gone: string[] } | string> {
+    const done = await runFast(revertScript(revert), AbortSignal.any([signal, lifetime.signal, AbortSignal.timeout(changeTimeoutMs)]));
+    if ("error" in done) return done.error;
+    const result = object(done.result);
+    const names = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, 16) : []);
+    return { back: typeof result.back === "number" ? result.back : 0, moved: names(result.moved), gone: names(result.gone) };
+  }
   function changeContext(signal: AbortSignal): ChangeContext {
     return {
       sample: (path) => samples.get(path) ?? audioFileAt(path),
@@ -1221,6 +1332,7 @@ export function createAbletonIntegration(options: Options): Integration {
       if (!supported(kind)) throw new ObservationError(tooOld(kind));
       if (changesThisTurn >= MAX_CHANGES_PER_TURN) throw new ObservationError(`That's ${MAX_CHANGES_PER_TURN} changes in one answer; carry on in the next one`);
       requireFreshReferences(input);
+      if (kind.family === "parameter" && fastOn()) return await fastParameters(kind, input, signal);
       const prepared = kind.prepare ? await kind.prepare(input, changeContext(signal)) : input;
       if (typeof prepared === "string") return { text: prepared, isError: true };
       assertLease(lease, signal);
@@ -1300,6 +1412,7 @@ export function createAbletonIntegration(options: Options): Integration {
       // A device moved or deleted shifts the ones after it: on the tracks involved, earlier device,
       // parameter and chain references (and their short names) are retired.
       const shifted = DEVICE_SHIFTS.has(kind.tool);
+      if (shifted || kind.restructures) fastFound.clear();
       if (shifted) {
         const tracks = new Set([args.deviceRef, args.ref, args.targetTrackRef, args.targetChainRef].filter((value): value is string => typeof value === "string")
           .map((ref) => trackIndexOf(ref)).filter((index): index is number => index !== undefined));
@@ -1501,16 +1614,32 @@ export function createAbletonIntegration(options: Options): Integration {
     // changed since may have gone back (a track inserted above, taken out again).
     if (entry.permanent) return { record: entry.record, text: entry.record.note ?? "Kumi can't take this back; Live's own undo (Cmd-Z in Live) can.", isError: true };
     try { await ensureCatalog(signal); } catch { /* reported just below */ }
-    if (!available || lost || !tools?.has("live_undo")) return { text: "Kumi can't reach Live right now, so it can't undo.", isError: true };
-    signal.throwIfAborted();
-    // One key per change, so a retry after an unconfirmed undo reconciles instead of undoing twice.
-    entry.undoKey ??= randomUUID();
     const update = (next: Partial<ChangeRecord>) => {
       const { note: _note, ...rest } = entry.record;
       entry.record = { ...rest, ...next };
       emitChange(entry.record);
       return entry.record;
     };
+    if (entry.revert) {
+      if (!available || lost || !tools?.has("live_run_python")) return { text: "Kumi can't reach Live right now, so it can't undo.", isError: true };
+      signal.throwIfAborted();
+      const back = await fastRevert(entry.revert, signal);
+      if (typeof back === "string") return { record: update({ state: "unsure", note: "Live didn't confirm the undo; try again." }), text: `Live didn't confirm the undo: ${back}`, isError: true };
+      scheduleSave(20_000);
+      const left = [...back.moved, ...back.gone];
+      if (!left.length) return { record: update({ state: "undone" }), text: JSON.stringify({ undone: entry.record.title, change: entry.record.id }), isError: false };
+      // Only what's still where Kumi left it goes back: what was moved since stays as it is. Nothing put
+      // back can be tried again (it may be moved back); part put back can't.
+      if (back.back) delete entry.revert;
+      const them = left.length === 1 ? "it" : "them";
+      const note = back.back ? `Kumi put back ${back.back} of its parameters; ${left.join(", ")} changed in Live since, so Kumi left ${them}.`
+        : `${left.join(", ")} changed in Live since Kumi set ${them}, so Kumi left ${them} as ${left.length === 1 ? "it is" : "they are"}.`;
+      return { record: update({ state: "kept", note }), text: note, isError: true };
+    }
+    if (!available || lost || !tools?.has("live_undo")) return { text: "Kumi can't reach Live right now, so it can't undo.", isError: true };
+    signal.throwIfAborted();
+    // One key per change, so a retry after an unconfirmed undo reconciles instead of undoing twice.
+    entry.undoKey ??= randomUUID();
     if (entry.members) {
       // Several changes as one: each taken back by its own undo, latest first, and HISTORY keeps the one line.
       const members = entry.members;
@@ -1520,6 +1649,8 @@ export function createAbletonIntegration(options: Options): Integration {
       const note = `Kumi took back ${members.length - left} of its ${members.length} changes; the rest changed in Live since, so Kumi left them.`;
       return { record: update({ state: "kept", note }), text: note, isError: true };
     }
+    // A fast change Live never confirmed has nothing to undo it with.
+    if (!entry.transactionId) return { record: entry.record, text: "Kumi can't take this back; Live's own undo (Cmd-Z in Live) can.", isError: true };
     let result: CallToolResult;
     try {
       result = await tools.call("live_undo", { transactionId: entry.transactionId, confirmation: "undo", idempotencyKey: entry.undoKey, ...(discard ? { discard: true } : {}) }, AbortSignal.any([lifetime.signal, AbortSignal.timeout(changeTimeoutMs)]), { host: true });
@@ -1638,7 +1769,9 @@ export function createAbletonIntegration(options: Options): Integration {
     }
   }
   /** Give up the bridge's undo of these transactions (bridge 1.0.50), in the background; best effort. */
-  function release(transactionIds: readonly string[]): void {
+  function release(given: readonly string[]): void {
+    // A fast change has no bridge transaction to release.
+    const transactionIds = given.filter(Boolean);
     if (!transactionIds.length || !tools?.has("live_transaction_release")) return;
     for (let at = 0; at < transactionIds.length; at += 64) {
       void tools.call("live_transaction_release", { transactionIds: transactionIds.slice(at, at + 64) }, AbortSignal.any([lifetime.signal, AbortSignal.timeout(10_000)]), { host: true }).catch(() => undefined);

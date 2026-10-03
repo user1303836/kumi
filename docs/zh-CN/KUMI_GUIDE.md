@@ -317,6 +317,7 @@ Kumi 把一切都保存在 `~/.kumi` 中。`~/.kumi/settings.json` 包含：
 | `KUMI_LIBRARY_DIR` | Kumi 学到的你的声音、预设和工程 |
 | `OLLAMA_HOST`、`LM_API_TOKEN` | Ollama 的监听地址（按 Ollama 自己的读法）；LM Studio 的服务器需要时的 API 令牌 |
 | `KUMI_EARS=0` | 不用 Kumi Ears，改为录音后再聆听工程 |
+| `KUMI_FAST=0` | 通过桥接的预览和应用这条较慢的路来设置设备参数（[一项修改如何进行](KUMI_CHANGES.md#一项修改如何进行)） |
 | `KUMI_YTDLP`、`KUMI_FFMPEG`、`KUMI_WHISPER`、`KUMI_WHISPER_MODEL` | 按路径指定你自己的 yt-dlp、ffmpeg、whisper.cpp（`whisper-cli`）或语音模型（`ggml-*.bin`） |
 | `KUMI_REMOTE_SCRIPTS_DIR` | Kumi 找不到 Live 的 Remote Scripts 文件夹时，用它指定 |
 | `KUMI_LIVE_EXTENSIONS_DIR` | Kumi 找不到 Live 的 Extensions 文件夹时，指定 `kumi bridge` 放置 Kumi 扩展、`kumi doctor` 查找扩展的位置 |

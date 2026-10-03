@@ -3,6 +3,19 @@
 Kumi's releases. The Ableton bridge (`apps/mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.7.2 — 2026-10-03
+
+Kumi turns a device's knobs several times faster. Ships with bridge 1.0.73, as 1.7.0 and 1.7.1 did.
+
+- Kumi sets a device's parameters in one request to Live instead of five. Each request waits for
+  one of Live's display ticks, so nine parameters on three devices (a rack from a tutorial, say)
+  went from 4.2 to 1.7 seconds on real Live, 0.7 seconds when set again (as in matching a sound),
+  and their undo from 3.2 to 0.9 seconds. Kumi's own Python sets them inside Live, where the
+  bridge runs Python (1.0.68 and later); HISTORY reads as before. `KUMI_FAST=0` goes back to the
+  bridge's preview and apply.
+- Undoing a parameter change now leaves a parameter you turned since where you put it, and says
+  which, instead of putting it back anyway.
+
 ## 1.7.1 — 2026-10-03
 
 Kumi's commands show they're working, and `kumi bridge` gets past its first line in moments on

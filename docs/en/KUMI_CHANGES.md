@@ -26,6 +26,18 @@ that works and lists every change Kumi can make.
 6. The model gets the title and says in a few words what changed, unless the
    plan ended with Kumi's own summary.
 
+Device parameters take a shorter way, because a rack built from a tutorial or
+a sound being matched sets dozens of them. Kumi's own Python runs inside Live
+(where the bridge runs Python: 1.0.68 or later) and sets all of a change's
+parameters in one request: each within its range and on its steps, all of them
+or none, with Live's text before and after for HISTORY. Nothing else happens in
+Live while it runs, so there's nothing to preview. A parameter given by name
+("Drive"), or a value given as Live shows it ("-6 dB"), takes one request more
+the first time. Each request waits for one of Live's display ticks (about a
+tenth of a second), and the preview and apply took five: nine parameters on
+three devices went from 4.2 to 1.7 seconds, and to 0.7 seconds when set again.
+`KUMI_FAST=0` goes back to the preview and apply.
+
 Once a change is sent to Live it runs to the end (up to 30 seconds), even if
 you press Esc, so every change that reaches Live is in HISTORY. If Live doesn't
 confirm it, the row reads **check Live** rather than vanishing. Each turn, the
@@ -36,9 +48,11 @@ unsure, or expired after a reconnect), so an undo you clicked isn't news to it.
 
 - **Kumi's undo** (**undo** in HISTORY, `/undo`, or asking Kumi) restores
   exactly what the change replaced, on the object it was made on. For what Kumi
-  created (tracks, scenes, devices, clips), mixer values, device parameters and
-  names, it does so however that changed since, and is refused only when the
-  object is gone. For a track's colour, song and scene settings, the transport,
+  created (tracks, scenes, devices, clips), mixer values and names, it does so
+  however that changed since, and is refused only when the object is gone.
+  Device parameters go back only where they're still as Kumi left them: one you
+  turned since stays where you put it, and the row says which (**kept**, if
+  none went back). For a track's colour, song and scene settings, the transport,
   notes, MIDI transforms and warp markers, and for a Session MIDI clip whose
   name, length or notes changed, it's refused when you changed the same thing
   again since. A refused undo leaves the row reading **kept**, with the reason.
@@ -76,6 +90,7 @@ as few replies as it can.
   every step is done, and the answer ends there.
 - **Batches.** Several pad loads on one rack, or several parameters on one
   device, become one change: one request to Live, one HISTORY row, one undo.
+  Parameters are set the [shorter way](#how-a-change-works).
 - **Less to discover.** Each turn starts with the Set's tracks, devices and rack
   chains already listed, with references the model can use at once, and short
   names for Live's long references (`track:5`).
