@@ -2662,6 +2662,15 @@ class ControlSurfaceTests(unittest.TestCase):
         self.arrangement_move(mapper, take, 9.0)
         self.assertEqual([(clip.name, clip.start_time) for clip in track.arrangement_clips], [("Vox", 0.0), ("Take", 9.0)], "a clip inside the new place goes")
 
+    def test_a_looped_clip_is_cut_into_only_by_clear_range_for_now_and_one_inside_goes(self):
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Groove", 0.0, 16.0), ("Fill", 18.0, 2.0), ("Hook", 24.0, 4.0))
+        for clip in track.arrangement_clips[:2]: clip.looping = True
+        mapper = LiveObjectMapper(song); hook = mapper.snapshot()["arrangement"]["clips"][2]
+        with self.assertRaisesRegex(ValueError, r"^Kumi can't cut into a looped clip here yet: \"Groove\" \(beats 0 to 16\) crosses the span from beat 6 to 10; .*; nothing changed$"): self.arrangement_move(mapper, hook, 6.0)
+        self.assertEqual((track.copies, len(track.arrangement_clips)), ([], 3))
+        self.arrangement_move(mapper, hook, 17.0)
+        self.assertEqual([(clip.name, clip.start_time) for clip in track.arrangement_clips], [("Groove", 0.0), ("Hook", 17.0)], "a looped clip inside the new place goes")
+
     def test_a_parked_clip_that_cant_be_copied_into_place_goes_back_where_it_was(self):
         song, track = self.arrangement_track_that_crashes_on_overlap(("Loop", 4.0, 8.0)); copy = track.duplicate_clip_to_arrangement
         def refuse_the_target(source, position):

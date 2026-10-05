@@ -60,7 +60,8 @@ fn in_new_place(snapshot: &Value, moving: &Value, track: &Value, position: f64) 
                     "from": other_start.max(position),
                     "to": other_end.min(target_end),
                     "whole": other_start >= position - 1e-6 && other_end <= target_end + 1e-6,
-                    "audio": clip["kind"] == "audio"
+                    "audio": clip["kind"] == "audio",
+                    "looping": clip["looping"] == true
                 })
             })
         })
@@ -119,6 +120,15 @@ impl McpHost {
                             named(across),
                             beat(&across["from"]),
                             beat(&across["to"])
+                        )));
+                    }
+                    // How Live trims a looped clip from the left isn't known yet.
+                    if let Some(looped) = replaces.iter().find(|r| r["audio"] != true && r["looping"] == true && r["whole"] != true) {
+                        return Err(LiveError::error(format!(
+                            "Kumi can't cut into a looped clip here yet: {} crosses beats {} to {}; clear that span first (clear_range) or pick a free spot",
+                            named(looped),
+                            beat(&looped["from"]),
+                            beat(&looped["to"])
                         )));
                     }
                     if let Some(cut) = cuts.first() {
@@ -239,7 +249,9 @@ impl McpHost {
             "expiresAt":t["expiresAt"]});
             if !replaces.is_empty() {
                 for r in &mut replaces {
-                    r.as_object_mut().unwrap().remove("audio");
+                    let r = r.as_object_mut().unwrap();
+                    r.remove("audio");
+                    r.remove("looping");
                 }
                 body["impact"] = json!("moves-clip-replacing");
                 body["replaces"] = json!(replaces);

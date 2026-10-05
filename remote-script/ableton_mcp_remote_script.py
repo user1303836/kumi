@@ -5475,8 +5475,11 @@ class LiveObjectMapper:
             return {"ref": row["ref"], "objectIdentity": expected_identity, "start": start, "createdFingerprint": hashlib.sha256(self._bounded_canonical(_without_fields(row, _VOLATILE_CLIP_FIELDS)).encode("utf-8")).hexdigest()}
         in_the_way = [(clips[index], other_start, other_end) for index, (other_start, other_end) in enumerate(spans) if index != source_index and other_start < target_end - 1e-6 and other_end > target + 1e-6]
         for other, other_start, other_end in in_the_way:
-            if self._read_attr(other, "is_audio_clip") is True and (other_start < target - 1e-6 or other_end > target_end + 1e-6):
-                raise ValueError(f"Kumi can't cut into an audio clip here yet: \"{str(getattr(other, 'name', ''))[:60]}\" (beats {other_start:g} to {other_end:g}) crosses the span from beat {target:g} to {target_end:g}; clear that span first (clear_range) or pick a free spot{UNRUN_SUFFIX}")
+            if other_start >= target - 1e-6 and other_end <= target_end + 1e-6: continue
+            # Cutting into an audio clip takes the Live extension (the host does it first); how Live trims
+            # a looped clip from the left isn't known yet.
+            kind = "an audio clip" if self._read_attr(other, "is_audio_clip") is True else "a looped clip" if self._read_attr(other, "looping") is True else None
+            if kind: raise ValueError(f"Kumi can't cut into {kind} here yet: \"{str(getattr(other, 'name', ''))[:60]}\" (beats {other_start:g} to {other_end:g}) crosses the span from beat {target:g} to {target_end:g}; clear that span first (clear_range) or pick a free spot{UNRUN_SUFFIX}")
         checkpoint = self.refs.checkpoint()
         if in_the_way:
             self._arrangement_clear(owner, in_the_way, target, target_end, (clip, expected_identity), checkpoint)

@@ -393,6 +393,7 @@ fn arrangement_clip(sim: &DeterministicLiveSimulator, name: &str, start: f64, le
     clip["name"] = json!(name);
     clip["start"] = json!(start);
     clip["length"] = json!(length);
+    clip["looping"] = json!(false);
     if audio {
         clip["kind"] = json!("audio");
         clip["notes"] = json!([]);
@@ -472,4 +473,20 @@ async fn an_audio_clip_crossing_the_new_place_is_cut_by_the_live_extension_first
     );
     assert_eq!(body(&applied)["state"], "applied", "{applied}");
     assert_eq!(layout(&adapter.sim), [("Vox".to_string(), 10.0, 16.0), ("Kick Pattern".into(), 16.0, 20.0)]);
+}
+#[tokio::test]
+async fn cutting_into_a_looped_clip_waits_until_live_has_been_probed() {
+    let adapter = Rc::new(Adapter::new());
+    setup(&adapter.sim, "arrangement-midi");
+    arrangement_clip(&adapter.sim, "Groove", 10.0, 8.0, false);
+    arrangement_clip(&adapter.sim, "Fill", 21.0, 2.0, false);
+    for row in [1, 2] {
+        adapter.sim.state.borrow_mut()["arrangementClips"][row]["clip"]["looping"] = json!(true);
+    }
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let (refused, _) = move_clip(&host, 12.0).await;
+    let refused = refused.to_string();
+    assert!(refused.contains("Kumi can't cut into a looped clip here yet") && refused.contains("crosses beats 12 to 16"), "{refused}");
+    let (whole, applied) = move_clip(&host, 20.0).await;
+    assert_eq!(body(&applied)["state"], "applied", "a looped clip inside the new place just goes: {whole}");
 }
