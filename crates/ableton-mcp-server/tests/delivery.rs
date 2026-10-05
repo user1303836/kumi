@@ -248,6 +248,71 @@ fn script_install_is_atomic_and_keeps_backup_configuration_and_cache_blocker() {
         .starts_with(".ableton-mcp-install")));
 }
 #[test]
+fn script_install_carries_willington_runtime_files_with_cache_blockers() {
+    let folder = tempfile::tempdir().unwrap();
+    let source = install_source(folder.path());
+    let payload = source.parent().unwrap().join(REMOTE_SCRIPT_PACKAGE).join(WILLINGTON_FOLDER);
+    for (name, text) in [
+        ("release.json", "{}\n"),
+        ("WillingtonRuntime/__init__.py", "LOADED = True\n"),
+        ("WillingtonDeviceTools/__init__.py", ""),
+        ("WillingtonDeviceTools/api.py", "def install(): pass\n"),
+        ("WillingtonDeviceTools/build/live-12.4.15b5-windows-x86_64/build.json", "{}\n"),
+    ] {
+        std::fs::create_dir_all(payload.join(name).parent().unwrap()).unwrap();
+        std::fs::write(payload.join(name), text).unwrap();
+    }
+    let destination = folder.path().join(REMOTE_SCRIPT_PACKAGE);
+    install_remote_script(&source, &destination, &InstallOptions::default()).unwrap();
+    let installed = destination.join(WILLINGTON_FOLDER);
+    assert_eq!(std::fs::read_to_string(installed.join("WillingtonDeviceTools/api.py")).unwrap(), "def install(): pass\n");
+    assert_eq!(std::fs::read_to_string(installed.join("release.json")).unwrap(), "{}\n");
+    // A blocker beside each folder's Python files, and none where there are none.
+    for blocked in ["WillingtonRuntime", "WillingtonDeviceTools"] {
+        let blocker = installed.join(blocked).join("__pycache__");
+        assert!(blocker.is_file() && std::fs::metadata(&blocker).unwrap().len() == 0, "{blocked}");
+    }
+    for unblocked in ["", "WillingtonDeviceTools/build", "WillingtonDeviceTools/build/live-12.4.15b5-windows-x86_64"] {
+        assert!(!installed.join(unblocked).join("__pycache__").exists(), "{unblocked}");
+    }
+    let python = if cfg!(windows) { "python.exe" } else { "python3" };
+    let imported = std::process::Command::new(python)
+        .args(["-c", "import WillingtonRuntime; assert WillingtonRuntime.LOADED"])
+        .env("PYTHONPATH", &installed)
+        .output()
+        .unwrap();
+    assert!(imported.status.success(), "{}", String::from_utf8_lossy(&imported.stderr));
+    assert!(installed.join("WillingtonRuntime/__pycache__").is_file());
+    // A bytecode cache in the payload refuses the install and keeps the installed generation.
+    std::fs::create_dir(payload.join("WillingtonRuntime/__pycache__")).unwrap();
+    let force = InstallOptions { force: true, ..Default::default() };
+    assert!(install_remote_script(&source, &destination, &force).unwrap_err().message().contains("can't contain"));
+    assert_eq!(std::fs::read_to_string(installed.join("WillingtonRuntime/__init__.py")).unwrap(), "LOADED = True\n");
+    assert!(folder.path().read_dir().unwrap().all(|entry| !entry
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .starts_with(".ableton-mcp-install")));
+}
+#[test]
+fn script_install_keeps_the_willington_switch_owner_only() {
+    let folder = tempfile::tempdir().unwrap();
+    let source = install_source(folder.path());
+    let destination = folder.path().join(REMOTE_SCRIPT_PACKAGE);
+    install_remote_script(&source, &destination, &InstallOptions::default()).unwrap();
+    let switch = destination.join(WILLINGTON_CONFIG);
+    let on = br#"{"version":1,"followActions":true,"deviceTools":true,"rackZones":true,"enableWrites":true}"#;
+    write_owner_file(&switch, on).unwrap();
+    assert_eq!(secret_permissions(&switch), SecretPermissions::OwnerOnly);
+    // Replaced whole, still owner-only.
+    write_owner_file(&switch, on).unwrap();
+    assert_eq!(std::fs::read(&switch).unwrap(), on);
+    install_remote_script(&source, &destination, &InstallOptions { force: true, ..Default::default() }).unwrap();
+    assert_eq!(std::fs::read(&switch).unwrap(), on);
+    assert_eq!(secret_permissions(&switch), SecretPermissions::OwnerOnly);
+    assert!(destination.read_dir().unwrap().all(|entry| !entry.unwrap().file_name().to_string_lossy().starts_with(".ableton-mcp-")));
+}
+#[test]
 fn failed_install_keeps_existing_generation_and_cleans_staging() {
     let folder = tempfile::tempdir().unwrap();
     let source = install_source(folder.path());

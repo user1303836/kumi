@@ -29,6 +29,14 @@ DOCUMENTS = [("crates/ableton-mcp-server/README.md", "README.md")] + [(f"docs/en
 EXCLUSIONS = ["tests", "verification-scripts", "source-maps", "credentials", "configuration", "local-state", "logs",
               "backups", "captured-media", "generated-evidence", "dependency-trees", "protected-local-material"]
 MIT_SHA256 = "f6a4bf820a492313c9d4e100e16bd474cd5cf06c0fba27c1035238acb4af75cb"
+# Willington's runtime files, as its sync puts them in vendor/willington with a release.json naming each
+# file's SHA-256. Only these may ship: its C++ sources, headers and debug files stay in its own repository.
+WILLINGTON = "vendor/willington"
+WILLINGTON_SCHEMA = "kumi-willington-vendor/v1"
+WILLINGTON_COMPONENTS = ("WillingtonRuntime", "WillingtonBindings", "WillingtonDeviceTools", "WillingtonRackZones")
+WILLINGTON_SUFFIXES = (".py", ".json", ".md", ".pyd", ".dylib")
+WILLINGTON_LICENSES = ("LICENSE", "LICENSE.md")
+WILLINGTON_MAX_BYTES = 16 * 1024 * 1024
 
 def digest(path: Path) -> str:
     with path.open("rb") as file:
@@ -127,6 +135,56 @@ def transform_document(text: str, root: Path, source: str, revision: str) -> str
     text = re.sub(r"(\b(?:href|src)\s*=\s*)([\"'])([^\"']+)\2", html, text, flags=re.I)
     return re.sub(r"^(\s*\[[^\]]+\]:\s*)(<[^>]+>|\S+)(.*)$", markdown, text, flags=re.M)
 
+def willington_files(folder: Path) -> dict[str, str] | None:
+    """The vendored Willington files and their SHA-256, each checked against release.json; None when there are none.
+
+    Any file release.json doesn't list, or that it lists but isn't one of Willington's runtime files (a
+    source, a header, a debug file), refuses the release.
+    """
+    if not folder.exists():
+        return None
+    manifest_path = folder / "release.json"
+    if folder.is_symlink() or not folder.is_dir() or manifest_path.is_symlink() or not manifest_path.is_file():
+        raise ValueError(f"{WILLINGTON} must be a folder with its release.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict) or set(manifest) != {"schema", "version", "commit", "files"} or manifest["schema"] != WILLINGTON_SCHEMA:
+        raise ValueError(f"{WILLINGTON}/release.json isn't a {WILLINGTON_SCHEMA} manifest")
+    version, commit, listed = manifest["version"], manifest["commit"], manifest["files"]
+    if not isinstance(version, str) or not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.+-]{0,63}", version):
+        raise ValueError(f"{WILLINGTON}/release.json has an invalid version")
+    if not isinstance(commit, str) or not re.fullmatch("[a-f0-9]{40}", commit):
+        raise ValueError(f"{WILLINGTON}/release.json has an invalid commit")
+    if not isinstance(listed, dict) or not listed:
+        raise ValueError(f"{WILLINGTON}/release.json lists no files")
+    present = inventory(folder)
+    del present["release.json"]
+    if set(present) != set(listed):
+        raise ValueError(f"{WILLINGTON} differs from its release.json: {', '.join(sorted(set(present) ^ set(listed)))}")
+    for name, expected in listed.items():
+        parts = name.split("/")
+        runtime = parts[0] in WILLINGTON_COMPONENTS and len(parts) > 1 and name.endswith(WILLINGTON_SUFFIXES) and "__pycache__" not in parts
+        if not runtime and name not in WILLINGTON_LICENSES:
+            raise ValueError(f"{WILLINGTON}/{name} isn't one of Willington's runtime files")
+        if present[name] != expected:
+            raise ValueError(f"{WILLINGTON}/{name} doesn't match its SHA-256 in release.json")
+    for required in ("WillingtonRuntime/__init__.py", "WillingtonRuntime/matrix.json"):
+        if required not in present:
+            raise ValueError(f"{WILLINGTON} is missing {required}")
+    if not any(name in present for name in WILLINGTON_LICENSES):
+        raise ValueError(f"{WILLINGTON} needs Willington's license notice: Kumi's MIT license doesn't cover these files")
+    if sum((folder / name).stat().st_size for name in present) > WILLINGTON_MAX_BYTES:
+        raise ValueError(f"{WILLINGTON} is larger than {WILLINGTON_MAX_BYTES // (1024 * 1024)} MiB")
+    return present
+
+def stage_willington(root: Path, remote: Path) -> None:
+    """Willington's vendored files, inside AbletonMcpBridge: only the bridge loads them from there, and Live
+    doesn't list a folder inside another as a Control Surface."""
+    folder = root / WILLINGTON
+    files = willington_files(folder)
+    if files is not None:
+        for name in (*files, "release.json"):
+            copy(folder / name, remote / "willington" / name)
+
 def stage_assets(root: Path, package: Path, revision: str) -> str:
     remote = package / "remote-script" / "AbletonMcpBridge"
     for source, dest in [("remote-script/README.md", "remote-script/README.md"),
@@ -134,6 +192,7 @@ def stage_assets(root: Path, package: Path, revision: str) -> str:
                          ("remote-script/ableton_mcp_remote_script.py", "remote-script/AbletonMcpBridge/ableton_mcp_remote_script.py"),
                          ("protocol/ableton-live-v1.operations.json", "remote-script/AbletonMcpBridge/ableton-live-v1.operations.json")]:
         copy(root / source, package / dest)
+    stage_willington(root, remote)
     registry = json.loads((remote / "ableton-live-v1.operations.json").read_text())
     canonical = json.dumps(registry, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     registry_hash = hashlib.sha256(canonical.encode()).hexdigest()

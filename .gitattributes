@@ -1,1 +1,3 @@
 * text=auto eol=lf
+# Willington's files are checked byte for byte against the SHA-256 its release.json gives each.
+vendor/willington/** -text

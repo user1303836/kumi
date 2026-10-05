@@ -156,6 +156,21 @@ async fn repair_compensation_restores_original_drift_and_legacy_cache_blocker() 
     assert_eq!(fs::metadata(blocker).unwrap().len(), 0);
 }
 #[tokio::test(flavor = "current_thread")]
+async fn the_willington_switch_is_not_drift_and_upgrades_keep_it_owner_only() {
+    let f = Fixture::new();
+    run_lifecycle(&f.options).await.unwrap();
+    // /willington writes the switch after an install, and removes it again: neither is drift.
+    let switch = f.remote().join(WILLINGTON_CONFIG);
+    write_owner_file(&switch, br#"{"version":1,"followActions":true,"deviceTools":true,"rackZones":true,"enableWrites":true}"#).unwrap();
+    let bytes = fs::read(&switch).unwrap();
+    assert_eq!(run_lifecycle(&f.action("status")).await.unwrap()["verification"]["installationIntegrityValid"], true);
+    run_lifecycle(&f.upgrade("1.1.0")).await.unwrap();
+    assert_eq!(fs::read(&switch).unwrap(), bytes);
+    assert_eq!(secret_permissions(&switch), SecretPermissions::OwnerOnly);
+    fs::remove_file(&switch).unwrap();
+    assert_eq!(run_lifecycle(&f.action("status")).await.unwrap()["verification"]["installationIntegrityValid"], true);
+}
+#[tokio::test(flavor = "current_thread")]
 async fn upgrades_retain_generation_and_rollback_compensates_configuration_exactly() {
     let f = Fixture::new();
     run_lifecycle(&f.options).await.unwrap();

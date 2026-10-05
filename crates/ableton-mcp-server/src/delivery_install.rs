@@ -44,6 +44,38 @@ fn copy(source: &Path, destination: &Path) -> Result<(), LiveError> {
     }
     Ok(())
 }
+/// A folder of runtime files the bridge carries, copied file by file: regular files only, and in each folder
+/// with Python files a `__pycache__` blocker like the package's own, so Live's Python adds nothing to the
+/// installed tree (whose files the install receipt records).
+fn copy_runtime_tree(source: &Path, destination: &Path) -> Result<(), LiveError> {
+    let entry = lstat(source)?;
+    if !entry.is_dir() || entry.file_type().is_symlink() {
+        return Err(fail(format!("bridge payload must be a regular folder: {}", source.display())));
+    }
+    fs::create_dir(destination).map_err(|e| io_error(&e, "mkdir", &[destination]))?;
+    let mut python = false;
+    for child in fs::read_dir(source).map_err(|e| io_error(&e, "scandir", &[source]))? {
+        let child = child.map_err(|e| io_error(&e, "scandir", &[source]))?;
+        let (from, to) = (child.path(), destination.join(child.file_name()));
+        let kind = lstat(&from)?;
+        if kind.file_type().is_symlink() || child.file_name() == "__pycache__" {
+            return Err(fail(format!("bridge payload can't contain {}", from.display())));
+        }
+        if kind.is_dir() {
+            copy_runtime_tree(&from, &to)?;
+        } else if kind.is_file() {
+            copy(&from, &to)?;
+            chmod(&to, 0o644)?;
+            python |= from.extension().is_some_and(|extension| extension == "py");
+        } else {
+            return Err(fail(format!("bridge payload must hold only regular files: {}", from.display())));
+        }
+    }
+    if python {
+        write_new(&destination.join("__pycache__"), b"", 0o400)?;
+    }
+    Ok(())
+}
 pub fn install_remote_script(
     source_file: &Path,
     destination_directory: &Path,
@@ -102,19 +134,27 @@ pub fn install_remote_script(
         copy(&init, &staged_package.join("__init__.py"))?;
         let module_source = package_source.join(REMOTE_SCRIPT_ASSET);
         copy(if module_source.exists() { &module_source } else { source_file }, &staged_asset)?;
-        let willington = destination_directory.join("willington.json");
+        // Willington's runtime files, when this bridge carries them. Inside the package, Live doesn't list
+        // their folders as Control Surfaces of their own.
+        let willington_files = package_source.join(WILLINGTON_FOLDER);
+        if willington_files.exists() {
+            copy_runtime_tree(&willington_files, &staged_package.join(WILLINGTON_FOLDER))?;
+        }
+        let willington = destination_directory.join(WILLINGTON_CONFIG);
         if willington.exists() {
             let entry = lstat(&willington)?;
             if !entry.is_file() || entry.file_type().is_symlink() || entry.len() > 4096 {
                 return Err(fail("Willington configuration must be a bounded regular file"));
             }
-            let destination = staged_package.join("willington.json");
+            let destination = staged_package.join(WILLINGTON_CONFIG);
             copy(&willington, &destination)?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 chmod(&destination, entry.permissions().mode() & 0o777)?;
             }
+            // A copy on Windows takes the folder's permissions, and the bridge reads only an owner-only file.
+            secure_windows_file(&destination)?;
         }
         // The native bridge carries the registry it was built against. This same text
         // feeds the authenticated wire validator; a caller's working directory cannot replace it.

@@ -3,6 +3,21 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## Unreleased
+
+### Bridge 1.0.75
+
+- Kumi's bridge carries Willington's runtime files inside its Remote Script, where Live doesn't list
+  them as Control Surfaces. A release includes them once Willington's sync has put them in
+  `vendor/willington`; packaging refuses anything there but the runtime files its `release.json`
+  lists.
+- Willington stays off until `/willington` turns it on, and Kumi says so when it starts. The bridge
+  picks the switch up within a second, without Live restarting, and Kumi tells the model what the
+  bindings add, or that `/willington` turns them on.
+- An update keeps `willington.json` owner-only on Windows: its copy took the folder's permissions,
+  which turned Willington off. Turning Willington on or off no longer counts as a changed
+  installation that stops `kumi update`.
+
 ## 1.8.1 — 2026-10-05
 
 Ships with bridge 1.0.74.

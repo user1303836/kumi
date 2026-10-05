@@ -417,7 +417,11 @@ pub(super) fn hash_regular_tree(root: &Path) -> Result<serde_json::Map<String, V
 pub(super) fn verify_files(root: &Path, expected: &Value) -> Result<Value, LiveError> {
     let mut required = expected.as_object().cloned().unwrap_or_default();
     required.entry("__pycache__").or_insert_with(|| sha256(b"").into());
-    let current = if root.exists() { hash_regular_tree(root)? } else { serde_json::Map::new() };
+    let mut current = if root.exists() { hash_regular_tree(root)? } else { serde_json::Map::new() };
+    // The producer's Willington switch (/willington) comes and goes after an install: it isn't drift.
+    for files in [&mut required, &mut current] {
+        files.remove(crate::delivery::WILLINGTON_CONFIG);
+    }
     let missing = required.keys().filter(|name| !current.contains_key(*name)).cloned().collect::<Vec<_>>();
     let changed =
         required.keys().filter(|name| current.contains_key(*name) && current[*name] != required[*name]).cloned().collect::<Vec<_>>();

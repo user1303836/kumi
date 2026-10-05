@@ -13,6 +13,8 @@ import json
 import os
 import stat
 import subprocess
+import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -327,6 +329,11 @@ class _WillingtonProvider:
                 raise ValueError("rack zone bindings already installed")
             self.live = Live
             Live._kumi_willington_owner = self
+            # Kumi's own copy of Willington, inside this package where Live lists no Control Surfaces, for
+            # when none is installed beside the package: providers put there by hand come first.
+            bundled = Path(__file__).with_name("willington")
+            if bundled.is_dir() and str(bundled) not in sys.path:
+                sys.path.append(str(bundled))
             try:
                 from WillingtonRuntime import ComponentUnavailableError as unavailable
             except ImportError:
@@ -417,6 +424,18 @@ class _WillingtonProvider:
                     self.follow = self.devices = self.zones = None
 
 
+_WILLINGTON_CHECK_SECONDS = 1.0
+
+
+def _willington_switch() -> tuple[int, int, int] | None:
+    """The Willington opt-in file as it stands, None when there's none: what tells that it changed."""
+    try:
+        entry = Path(__file__).with_name("willington.json").stat()
+    except OSError:
+        return None
+    return entry.st_mtime_ns, entry.st_size, entry.st_ino
+
+
 class AbletonMcpBridge(_ControlSurface):
     """Control Surface lifecycle wrapper around the dependency-free bridge."""
 
@@ -432,17 +451,37 @@ class AbletonMcpBridge(_ControlSurface):
         scheduler = getattr(self, "schedule_message", None)
         self._scheduled = scheduler(1, self._drain) if not self._disconnected and callable(scheduler) else None
 
+    def _keep_willington(self) -> None:
+        """Make the Willington provider, and make it again when its opt-in file changes (Kumi's /willington
+        writes or removes it), looking at most once a second: the switch takes effect without Live restarting."""
+        now = time.monotonic()
+        current = getattr(self, "_willington", None)
+        if current is not None and now - getattr(self, "_willington_checked", 0.0) < _WILLINGTON_CHECK_SECONDS:
+            return
+        self._willington_checked = now
+        switch = _willington_switch()
+        if current is not None and switch == getattr(self, "_willington_seen", None):
+            return
+        log = getattr(self, "log_message", None)
+        if current is not None:
+            try:
+                current.close()
+            except Exception:
+                if callable(log): log("Willington teardown failed; its changed configuration loads anyway")
+            if switch is None and callable(log):
+                log("Willington extensions off: willington.json was removed")
+        self._willington_seen = switch
+        self._willington = _WillingtonProvider(self._bridge.mapper, log)
+
     def _drain(self) -> None:
         if self._disconnected:
             return
-        if self._willington is None:
-            self._willington = _WillingtonProvider(self._bridge.mapper, getattr(self, "log_message", None))
+        self._keep_willington()
         self._bridge.update_display()
         self._schedule_next()
 
     def update_display(self) -> None:
-        if self._willington is None:
-            self._willington = _WillingtonProvider(self._bridge.mapper, getattr(self, "log_message", None))
+        self._keep_willington()
         self._bridge.update_display()
 
     def disconnect(self) -> None:

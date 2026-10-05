@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import tomllib
 from pathlib import Path
 import tarfile
@@ -206,6 +207,67 @@ class NativeRelease(unittest.TestCase):
             release.inventory(source)
         with self.assertRaises(ValueError):
             release.copy(source / "link", self.root / "copied")
+
+    def vendor_willington(self, files=None, **manifest):
+        """vendor/willington in the fixture root, as Willington's sync writes it (replacing any earlier one)."""
+        folder = self.root / release.WILLINGTON
+        shutil.rmtree(folder, ignore_errors=True)
+        files = files or {"LICENSE": b"Willington license fixture\n", "WillingtonRuntime/__init__.py": b"def resolve(*args): pass\n",
+            "WillingtonRuntime/matrix.json": b"{}\n", "WillingtonDeviceTools/api.py": b"def install(): pass\n",
+            "WillingtonDeviceTools/build/live-12.4.15b5-windows-x86_64/willington_devices.pyd": b"MZ fixture\0",
+            "WillingtonDeviceTools/build/live-12.4.15b5-windows-x86_64/build.json": b"{}\n"}
+        for name, content in files.items():
+            (folder / name).parent.mkdir(parents=True, exist_ok=True)
+            (folder / name).write_bytes(content)
+        listed = {name: hashlib.sha256(content).hexdigest() for name, content in files.items()}
+        (folder / "release.json").write_text(json.dumps({"schema": release.WILLINGTON_SCHEMA, "version": "0.4.0",
+            "commit": "d" * 40, "files": listed, **manifest}))
+        return folder, files
+
+    def test_vendored_willington_is_staged_inside_the_bridge(self):
+        remote = self.root / "package/remote-script/AbletonMcpBridge"
+        release.stage_willington(self.root, remote)
+        self.assertFalse(remote.exists())
+        folder, files = self.vendor_willington()
+        release.stage_willington(self.root, remote)
+        staged = release.inventory(remote / "willington")
+        self.assertEqual(set(staged), {*files, "release.json"})
+        self.assertEqual(staged, release.inventory(folder))
+        for name in staged:
+            self.assertEqual(release.role("remote-script/AbletonMcpBridge/willington/" + name), "ableton-remote-script")
+
+    def test_vendored_willington_refuses_anything_but_its_listed_runtime_files(self):
+        folder, files = self.vendor_willington()
+        (folder / "WillingtonDeviceTools/native_windows.cpp").write_text("// stays in Willington's repository")
+        with self.assertRaisesRegex(ValueError, "differs from its release.json: WillingtonDeviceTools/native_windows.cpp"):
+            release.willington_files(folder)
+        # Listed or not, a source, a header, a debug file or a bytecode cache never ships.
+        for name in ("WillingtonDeviceTools/native_windows.cpp", "WillingtonRuntime/windows_image.hpp",
+                     "WillingtonDeviceTools/build/live-12.4.15b5-windows-x86_64/willington_devices.pdb",
+                     "WillingtonRuntime/__pycache__/__init__.cpython-311.pyc", "profiles/live-12.4.15b5-windows-x86_64.json"):
+            with self.subTest(name=name):
+                self.vendor_willington({**files, name: b"fixture"})
+                with self.assertRaisesRegex(ValueError, "isn't one of Willington's runtime files"):
+                    release.willington_files(folder)
+        self.vendor_willington()
+        (folder / "WillingtonRuntime/matrix.json").write_bytes(b'{"changed": true}\n')
+        with self.assertRaisesRegex(ValueError, "matrix.json doesn't match its SHA-256"):
+            release.willington_files(folder)
+        for left_out, refused in [("LICENSE", "license notice"), ("WillingtonRuntime/matrix.json", "missing WillingtonRuntime/matrix.json")]:
+            with self.subTest(left_out=left_out):
+                self.vendor_willington({name: content for name, content in files.items() if name != left_out})
+                with self.assertRaisesRegex(ValueError, refused):
+                    release.willington_files(folder)
+        for manifest, refused in [({"schema": "other/v1"}, "manifest"), ({"extra": True}, "manifest"),
+                                  ({"commit": "main"}, "invalid commit"), ({"version": "../1"}, "invalid version")]:
+            with self.subTest(manifest=manifest):
+                self.vendor_willington(None, **manifest)
+                with self.assertRaisesRegex(ValueError, refused):
+                    release.willington_files(folder)
+
+    def test_the_repository_vendors_only_listed_willington_runtime_files(self):
+        # Willington's sync pull requests change vendor/willington: CI checks them here, before a release ships them.
+        release.willington_files(release.ROOT / release.WILLINGTON)
 
     def test_every_packaged_document_rewrites_its_links(self):
         revision = "a" * 40
