@@ -405,13 +405,21 @@ async fn captions_for(
     }
 }
 static PAGES: LazyLock<Mutex<indexmap::IndexMap<String, (Value, i64)>>> = LazyLock::new(|| Mutex::new(indexmap::IndexMap::new()));
-/// Stretches of speech Kumi couldn't transcribe in the last hour, and why: watching the video again
-/// (for a closer look, say) doesn't wait for the same failure.
-static UNHEARD: LazyLock<Mutex<std::collections::HashMap<String, (String, i64)>>> = LazyLock::new(Default::default);
-fn unheard(stretch: &str) -> Option<String> {
+/// Stretches of speech Kumi couldn't take or transcribe in this turn, and why: a closer look at the
+/// video in the same answer doesn't wait for the same failure, and the next request tries again. A
+/// turn is known by its signal, which each of its tools is given.
+type Unheard = (Option<Signal>, std::collections::HashMap<String, String>);
+static UNHEARD: LazyLock<Mutex<Unheard>> = LazyLock::new(Default::default);
+fn unheard(turn: Option<&Signal>, remember: Option<(&str, String)>, stretch: &str) -> Option<String> {
+    let turn = turn?;
     let mut unheard = UNHEARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    unheard.retain(|_, (_, at)| now_ms() - *at < 3_600_000);
-    unheard.get(stretch).map(|(why, _)| why.clone())
+    if !unheard.0.as_ref().is_some_and(|known| known.same_as(turn)) {
+        *unheard = (Some(turn.clone()), Default::default());
+    }
+    if let Some((stretch, why)) = remember {
+        unheard.1.insert(stretch.to_string(), why);
+    }
+    unheard.1.get(stretch).cloned()
 }
 struct Watcher<'a> {
     options: &'a WatchOptions,
@@ -672,8 +680,11 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                 to.min(from + 5400.0)
             };
             let stretch = format!("{}|{}-{}", meta.key, to_fixed(start, 0), to_fixed(stop, 0));
-            let heard = if let Some(why) = unheard(&stretch) {
-                Err(VideoFailure::other(format!("{why}, when it tried earlier")))
+            let heard = if let Some(why) = unheard(signal.as_ref(), None, &stretch) {
+                notes.push(format!(
+                    "Kumi couldn't transcribe the video's speech earlier in this request ({why}), so it didn't try again; it will on the next request."
+                ));
+                Ok(None)
             } else {
                 watcher.progress("taking the video's speech");
                 // Taking the speech can fail as transcribing it can (a stream that stalls, say): either way,
@@ -715,19 +726,19 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                             Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
                             _ => {}
                         }
-                        heard
+                        heard.map(Some)
                     }
                     Err(error) => Err(error),
                 }
                 .inspect_err(|error| {
                     if !error.is_aborted() {
-                        let mut unheard = UNHEARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                        unheard.insert(stretch.clone(), (head(&error.to_string(), 160), now_ms()));
+                        unheard(signal.as_ref(), Some((&stretch, head(&error.to_string(), 160))), &stretch);
                     }
                 })
             };
             match heard {
-                Ok(heard) => {
+                Ok(None) => {}
+                Ok(Some(heard)) => {
                     cues = heard
                         .into_iter()
                         .map(|mut c| {
