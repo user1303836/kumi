@@ -15,7 +15,7 @@ tools, built on these, are in [how Kumi changes your Set](KUMI_CHANGES.md).
 | --- | --- |
 | Remote Script | `AbletonMcpBridge`, inside Live, through Live's Python API |
 | Extension | Kumi's Live extension, in Live's Extension Host (Live 12.4 or later) |
-| Willington | The optional native provider, for the Live builds it has bindings for: macOS ARM64 12.4.15b4 and b5 ([Willington integration](WILLINGTON_INTEGRATION.md)) |
+| Willington | The native bindings Kumi's bridge carries, off until `/willington`, for the Live builds they cover: macOS ARM64 12.4.15b4 and b5, Windows x64 12.4.15b5 ([Willington](WILLINGTON_INTEGRATION.md)) |
 | Bridge | The bridge process itself, without Live |
 
 A tool is offered only when the Live it's connected to has the operations it

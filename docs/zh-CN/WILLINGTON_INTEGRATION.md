@@ -1,8 +1,8 @@
-# 可选的 Willington 集成
+# Willington
 
 [English](../en/WILLINGTON_INTEGRATION.md) · 简体中文 · [日本語](../ja/WILLINGTON_INTEGRATION.md)
 
-Willington 是一组需要单独安装的原生提供程序（provider），能触及 Live 的 Python API 触及不到的部分：Session 片段的跟随动作（Follow Actions）、机架宏的映射与名称，以及机架链的区域。多版本包会为所连接的那个确切的 Live 构建版本选择绑定。跟随动作和 DeviceTools 有经过验证的 macOS ARM64 b4/b5 profile；RackZones 在 macOS ARM64 上的 Live 12.4.15b5 中受支持。普通的 Kumi 和桥接完全不需要它：没有它，这些工具就不会出现。
+Willington 是一组原生提供程序（provider），能触及 Live 的 Python API 触及不到的部分：Session 片段的跟随动作（Follow Actions）、机架宏的映射与名称，以及机架链的区域。Kumi 的桥接把 Willington 的运行时文件放在它的 Remote Script 里，在你用 `/willington` 开启之前一直是关闭的。每个提供程序都会为所连接的那个确切的 Live 构建版本选择绑定；在其他构建版本上，这些工具只是不会出现，Kumi 的其余部分照常工作。
 
 ## 它增加了什么
 
@@ -12,42 +12,51 @@ Willington 是一组需要单独安装的原生提供程序（provider），能�
 | `edit_rack_mapping` | `live_willington_device_preview/apply` | `macro-name`、`variation-name`、`macro-mapping` | WillingtonDeviceTools |
 | `edit_rack_mapping` | `live_willington_device_preview/apply` | `selector-zone`、`key-zone`、`velocity-zone` | WillingtonRackZones |
 
-桥接只提供那些提供程序已安装且启用了写入的编辑类型：`live_willington_device_preview` 只列出这些 `kind` 值。每次编辑都需要走带处于停止状态。
+桥接只提供那些提供程序已加载且启用了写入的编辑类型：`live_willington_device_preview` 只列出这些 `kind` 值。每次编辑都需要走带处于停止状态。
 
 有些机架方面的改进不需要 Willington：按 Live 自身的宏布局读取机架、按索引调用或删除变体，以及当 Live 的 Browser 没有 Modulators 类别时回退到自带的调制器设备。它们适用于任何桥接。
 
-## 安装与启用
+## 开启与关闭
 
-1. 把多版本包安装到 Live 的 Remote Scripts 文件夹中，与 AbletonMcpBridge 并列。除了你需要的提供程序，还要包含必需的 `WillingtonRuntime`。提供程序有 `WillingtonBindings`（跟随动作）、`WillingtonDeviceTools`（宏和变体；它必须提供 `get_macro_mapping` 和 `get_selected_variation_name`）以及 `WillingtonRackZones`（区域）。手动复制时，必须保留运行时、`build/<profile-id>/` 目录和清单文件。每个提供程序会根据正在运行的 Live 进程的操作系统、架构、版本和可执行文件哈希，选择经过验证的绑定。原生包还会验证正在运行的 Mach-O UUID。Windows 和 Intel macOS 的绑定尚未提供。
-2. 在 Live 中关闭任何独立的 Willington 控制界面，然后重启 Live。桥接不会与其他所有者共享这些提供程序。
-3. 在 `Remote Scripts/AbletonMcpBridge` 中、桥接的 `__init__.py` 旁边创建 `willington.json`。它必须是普通文件、仅所有者可访问、最多 4 KiB，并包含以下这些键（`rackZones` 可选）：
+在 Kumi 中输入 `/willington`。它会在 `Remote Scripts/AbletonMcpBridge` 中、桥接的 `__init__.py` 旁边写入 `willington.json`，开启每个提供程序及其编辑；桥接会在一秒内加载它们，Live 照常运行。再次输入 `/willington` 会删除这个文件：桥接会卸载 DeviceTools 和 RackZones，并关闭跟随动作写入。绑定处于关闭状态时，Kumi 会在启动时告诉你。
 
-   ```json
-   {"version": 1, "followActions": true, "deviceTools": true, "rackZones": true, "enableWrites": false}
-   ```
+Kumi 也会告诉它的模型。绑定关闭时，遇到需要这些编辑的请求，会附上一句：`/willington` 可以开启它们；绑定开启时，Kumi 会自己映射宏，而不是请你在 Live 中映射。
 
-   | 键 | 含义 |
-   | --- | --- |
-   | `version` | 始终为 `1` |
-   | `followActions` | 加载 WillingtonBindings |
-   | `deviceTools` | 加载 WillingtonDeviceTools |
-   | `rackZones` | 可选；加载 WillingtonRackZones |
-   | `enableWrites` | 允许编辑；为 `false` 时加载提供程序，但不提供编辑 |
+覆盖哪些 Live 构建版本，取决于 Kumi 所带的 Willington 版本，写在桥接文件夹里的 `willington/release.json` 中。Willington 经过验证的绑定：macOS ARM64 上 Live 12.4.15b4 和 b5 的跟随动作和 DeviceTools，macOS ARM64 上 b5 的 RackZones，以及 Windows x64 上 Live 12.4.15b5 的全部三者。不支持 Intel macOS。每个提供程序会根据正在运行的 Live 进程的操作系统、架构、版本和可执行文件哈希选择绑定，原生库还会检查正在运行的可执行文件本身（macOS 上是 Mach-O UUID，Windows 上是 CodeView GUID）。
 
-4. 要进行跟随动作编辑，WillingtonBindings 还需要一次通过的自检：它的文件夹中要有 `self-test.json`，其中 `"status": "passed"`，并且 `library_sha256` 等于所选的 `build/<profile-id>/libwillington.dylib`（旧版包则为根目录下的库）的 SHA-256。切换构建版本或替换该库之后，请重新进行[独立自检](#跟随动作自检)。没有匹配的证据，跟随动作编辑保持关闭，其他提供程序仍然可用。准备好启用编辑时，把 `enableWrites` 设为 `true`。
-5. 重启 Live。配置更改只在 Live 启动时生效。
-
-Kumi 更新会保留 `willington.json`。删除它即可回到普通的桥接。
+跟随动作编辑还需要所选的库通过一次自检：WillingtonBindings 文件夹中要有 `self-test.json`，其中 `"status": "passed"`，并且 `library_sha256` 等于该库的 SHA-256。没有它，只有跟随动作编辑保持关闭；宏、名称和区域编辑仍然可用。
 
 缺少经过验证的 profile 时，只会跳过那一个组件：同一份配置在 b4 上可以使用跟随动作和 DeviceTools，在 b5 上还可以使用 RackZones。这类因缺少 profile 而产生的带类型的拒绝，会在每个 Live 进程中按组件缓存，每个组件只记录一次日志。
 
 配置格式错误、缺少产物、完整性错误、意外的启动失败，或者已有其他活动的所有者时，原生扩展不可用；普通的桥接保持运行。Live 的日志（Log.txt）会报告原因，并列出实际处于活动状态的提供程序，以及已启用写入的提供程序。跟随动作自检缺失或过时时，只会关闭跟随动作写入。
 
-Remote Script 停止时，会关闭跟随动作写入，并卸载 DeviceTools 和 RackZones。跟随动作的绑定无法卸载：它们在该 Live 进程中保持注册状态，桥接再次启动时会在写入关闭的状态下重新使用它们。
+Remote Script 停止时，会关闭跟随动作写入，并卸载 DeviceTools 和 RackZones。跟随动作的绑定无法卸载：它们在该 Live 进程中保持注册状态，桥接再次启动时，或在 `/willington` 之后重新加载提供程序时，会在写入关闭的状态下重新使用它们。
+
+### willington.json
+
+`/willington` 会写入这个文件；你也可以自己写。它必须是普通文件、仅所有者可访问、最多 4 KiB，并包含以下这些键（`rackZones` 可选）。`/willington` 写入的内容：
+
+```json
+{"version": 1, "followActions": true, "deviceTools": true, "rackZones": true, "enableWrites": true}
+```
+
+| 键 | 含义 |
+| --- | --- |
+| `version` | 始终为 `1` |
+| `followActions` | 加载 WillingtonBindings |
+| `deviceTools` | 加载 WillingtonDeviceTools |
+| `rackZones` | 可选；加载 WillingtonRackZones |
+| `enableWrites` | 允许编辑；为 `false` 时加载提供程序，但不提供编辑 |
+
+这个文件变化后，桥接会在一秒内重新读取它。Kumi 更新会保留它，它也不会影响桥接的安装检查。没有它，桥接就是普通的桥接。
+
+## 自己安装 Willington
+
+要使用 Kumi 尚未带上的 Willington 构建版本（例如为新的 Live 版本），请把 Willington 的多版本包安装到 Live 的 Remote Scripts 文件夹中，与 AbletonMcpBridge 并列：必需的 `WillingtonRuntime`，以及你需要的提供程序 `WillingtonBindings`（跟随动作）、`WillingtonDeviceTools`（宏和变体；它必须提供 `get_macro_mapping` 和 `get_selected_variation_name`）和 `WillingtonRackZones`（区域）。手动复制时，必须保留运行时、`build/<profile-id>/` 目录和清单文件。安装在那里的提供程序优先于 Kumi 自己的副本。在 Live 中关闭任何独立的 Willington 控制界面，然后重启 Live：桥接不会与其他所有者共享这些提供程序。然后用 `/willington` 开启它们。
 
 ## 跟随动作自检
 
-切换 Live 构建版本或替换所选的跟随动作库之后，请重新进行自检。此流程适用于分发的包，不需要源代码检出或 `manage.py`。独立测试会在当前工程中创建一条测试夹具轨道，并执行原生写入和 Live 的撤销，所以请使用一个一次性工程。
+切换 Live 构建版本或替换所选的跟随动作库之后，请重新进行自检。这项测试把 WillingtonBindings 作为独立的控制界面运行，所以需要一份[安装在桥接旁边的](#自己安装-willington)副本：Kumi 自己的副本在桥接内部，不会出现在 Live 的列表中。此流程适用于分发的包，不需要源代码检出或 `manage.py`。独立测试会在当前工程中创建一条测试夹具轨道，并执行原生写入和 Live 的撤销，所以请使用一个一次性工程。
 
 1. 在 Live 的控制界面设置中停用 `AbletonMcpBridge` 和独立的 Willington 控制界面，然后退出 Live。原生的跟随动作属性会一直保持注册，直到进程退出。
 2. 启动目标 Live 构建版本，在播放停止的状态下打开一个一次性工程，并只选择 `WillingtonBindings` 作为 Willington 控制界面，MIDI 输入/输出设为 None。它安装后的 `status.json` 应显示 `"status": "registered"`。

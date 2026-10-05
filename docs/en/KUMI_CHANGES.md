@@ -151,7 +151,7 @@ as few replies as it can.
 | `set_chain`, `set_chain_mixer` | A rack chain's mute, solo or colour; its volume, pan or on/off |
 | `delete_device`, `delete_clip`, `delete_scene`, `delete_track`, `delete_locator` | Deletions, all kept: Live's undo brings them back |
 | `clear_range` | A stretch of one track in the Arrangement cleared, clips at its edges cut (needs the extension; kept) |
-| `set_clip_follow_actions`, `edit_rack_mapping` | With [Willington](WILLINGTON_INTEGRATION.md) only: Follow Actions; macro names, mappings, variation names and chain zones |
+| `set_clip_follow_actions`, `edit_rack_mapping` | With [Willington](WILLINGTON_INTEGRATION.md)'s bindings on (`/willington`): Follow Actions; macro names, mappings, variation names and chain zones |
 | `live_command` | Live's own commands its scripting lacks: group, freeze, flatten, bounce, consolidate, convert to MIDI, separate stems, slice, save, export ([the guide](KUMI_GUIDE.md#lives-own-commands); kept: Live's undo takes it back) |
 
 `make_changes` runs any of these in a plan, and `undo_change` undoes one.
@@ -226,8 +226,9 @@ rack's chains stacked, with the new device lit:
 
 Live doesn't let scripts map a macro or a modulator to a parameter, set a
 macro's range or name a macro. Kumi says so and you do it in Live (Map, then
-click the parameter). With [Willington](WILLINGTON_INTEGRATION.md), Kumi can
-name macros and map them; modulators still can't be mapped.
+click the parameter). With [Willington](WILLINGTON_INTEGRATION.md)'s bindings on
+(`/willington`), Kumi can name macros and map them; modulators still can't be
+mapped.
 
 ## Samples and drum kits
 
@@ -348,9 +349,10 @@ stops there and says to update; `kumi update` or `kumi bridge` does it.
 | 1.0.58 | `delete_clip`, `delete_scene`, `delete_track`, `delete_locator`; a plan as one Live undo step; `undo_in_live`; `edit_device`, `duplicate_device`; Live's events for FOCUS; Kumi's Live extension (`write_arrangement_clip`, `clear_range`, `render`) |
 | 1.0.68 | `run_python` |
 | 1.0.73 | Hearing a track, a return or the mix through Kumi Ears (older bridges record to listen) |
+| 1.0.75 | Willington from Kumi's own copy, switched by `/willington` with Live running |
 
-The Willington tools appear whenever the bridge offers them, which it does only
-with the provider set up.
+The Willington tools appear whenever the bridge offers them: with Willington's
+bindings on (`/willington`) and a Live build they cover.
 
 Each Kumi release ships with a bridge: Kumi 1.7.5 to 1.8.1 with bridge 1.0.74, 1.7.0 to 1.7.4 with 1.0.73, 1.6.1 with 1.0.72, 1.6.0 with 1.0.71, 1.5 with
 1.0.70, 1.4 with 1.0.69, 1.3 with 1.0.68, 1.2 with 1.0.66, 1.1 with 1.0.53 and

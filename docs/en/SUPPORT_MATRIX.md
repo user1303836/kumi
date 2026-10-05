@@ -31,9 +31,10 @@ Real-Live results below describe the earlier TypeScript releases. Native CI and 
 Editions: the bridge discovers what the Live it connects to offers, so devices
 and content an edition lacks (Standard and Intro have fewer) stay unavailable
 rather than guessed. Making Max for Live devices needs Max for Live (Suite, or
-Standard with the add-on). The optional Willington provider has bindings
-for macOS ARM64 Live 12.4.15b4 and b5 (rack chain zones on b5 only); see
-[Willington integration](WILLINGTON_INTEGRATION.md).
+Standard with the add-on). Willington, which Kumi's bridge carries (off until
+`/willington`), has bindings for macOS ARM64 Live 12.4.15b4 and b5 (rack chain
+zones on b5 only) and Windows x64 Live 12.4.15b5; see
+[Willington](WILLINGTON_INTEGRATION.md).
 
 ## Windows
 

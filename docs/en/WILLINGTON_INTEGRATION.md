@@ -1,13 +1,13 @@
-# Optional Willington integration
+# Willington
 
 English · [简体中文](../zh-CN/WILLINGTON_INTEGRATION.md) · [日本語](../ja/WILLINGTON_INTEGRATION.md)
 
-Willington is a separately installed set of native providers that reach parts
-of Live its Python API doesn't: Session clip Follow Actions, rack macro
-mappings and names, and rack chain zones. The multi-version bundle selects bindings for the exact
-connected Live build. Follow Actions and DeviceTools have validated macOS ARM64
-b4/b5 profiles; Rack Zones is supported on Live 12.4.15b5 macOS ARM64. Ordinary Kumi and the bridge
-need none of it: without it, these tools simply don't appear.
+Willington is a set of native providers that reach parts of Live its Python API
+doesn't: Session clip Follow Actions, rack macro mappings and names, and rack
+chain zones. Kumi's bridge carries Willington's runtime files inside its Remote
+Script, off until you turn them on with `/willington`. Each provider selects
+bindings for the exact Live build it's connected to; on any other build its
+tools simply don't appear, and the rest of Kumi works as before.
 
 ## What it adds
 
@@ -17,7 +17,7 @@ need none of it: without it, these tools simply don't appear.
 | `edit_rack_mapping` | `live_willington_device_preview/apply` | `macro-name`, `variation-name`, `macro-mapping` | WillingtonDeviceTools |
 | `edit_rack_mapping` | `live_willington_device_preview/apply` | `selector-zone`, `key-zone`, `velocity-zone` | WillingtonRackZones |
 
-The bridge offers only the edit kinds whose provider is installed with writes
+The bridge offers only the edit kinds whose provider is loaded with writes
 enabled: `live_willington_device_preview` lists just those `kind` values. Every
 edit needs the transport stopped.
 
@@ -26,47 +26,32 @@ layout, recalling or deleting a variation by index, and the fallback to the
 stock modulator devices when Live's Browser has no Modulators category. They
 work with any bridge.
 
-## Install and enable
+## Turning it on and off
 
-1. Install the multi-version bundle into Live's Remote Scripts folder, beside
-   AbletonMcpBridge. Include the required `WillingtonRuntime` alongside the
-   providers you want: `WillingtonBindings` (Follow Actions),
-   `WillingtonDeviceTools` (macros and variations; it must provide
-   `get_macro_mapping` and `get_selected_variation_name`) and
-   `WillingtonRackZones` (zones). Manual copies must preserve the runtime,
-   `build/<profile-id>/` directories and manifests. Each provider selects
-   validated bindings using the running Live process’s OS, architecture, version
-   and executable hash. Native packages also verify the running Mach-O UUID.
-   Windows and Intel macOS bindings are not yet available.
-2. Turn off any standalone Willington control surface in Live and restart Live.
-   The bridge won't share the providers with another owner.
-3. Create `willington.json` beside the bridge's `__init__.py`, in
-   `Remote Scripts/AbletonMcpBridge`. It must be a regular file, owner-only and
-   at most 4 KiB, with the keys below (`rackZones` is optional):
+Type `/willington` in Kumi. It writes `willington.json` beside the bridge's
+`__init__.py`, in `Remote Scripts/AbletonMcpBridge`, turning every provider on
+with its edits, and the bridge loads them within a second, Live running.
+`/willington` again removes the file: the bridge uninstalls DeviceTools and
+RackZones and turns Follow Action writes off. While the bindings are off, Kumi
+says so when it starts.
 
-   ```json
-   {"version": 1, "followActions": true, "deviceTools": true, "rackZones": true, "enableWrites": false}
-   ```
+Kumi tells its model too. With the bindings off, a request that needs one of
+their edits gets a sentence saying that `/willington` turns them on; with them
+on, Kumi maps macros itself instead of asking you to map them in Live.
 
-   | Key | Meaning |
-   | --- | --- |
-   | `version` | Always `1` |
-   | `followActions` | Load WillingtonBindings |
-   | `deviceTools` | Load WillingtonDeviceTools |
-   | `rackZones` | Optional; load WillingtonRackZones |
-   | `enableWrites` | Allow edits; `false` loads the providers without offering edits |
+Which Live builds they cover depends on the Willington release Kumi carries,
+named in `willington/release.json` in the bridge's folder. Willington's
+validated bindings: Follow Actions and DeviceTools for macOS ARM64 Live
+12.4.15b4 and b5, Rack Zones for macOS ARM64 b5, and all three for Windows x64
+Live 12.4.15b5. Intel macOS isn't covered. Each provider selects bindings using
+the running Live process's OS, architecture, version and executable hash, and
+the native libraries also check the running executable itself (its Mach-O UUID
+on macOS, its CodeView GUID on Windows).
 
-4. For Follow Action edits, WillingtonBindings also needs a passing self-test:
-   `self-test.json` in its folder with `"status": "passed"` and
-   `library_sha256` equal to the SHA-256 of the selected
-   `build/<profile-id>/libwillington.dylib` (the root library for legacy packages).
-   Repeat the [standalone self-test](#follow-action-self-test) after switching
-   builds or replacing that library. Without matching evidence, Follow Action
-   edits stay off and the other providers still work. Set `enableWrites` to
-   `true` when ready to enable edits.
-5. Restart Live. Config changes take effect only at Live's start.
-
-Kumi updates keep `willington.json`. Delete it to go back to the plain bridge.
+Follow Action edits also need a passing self-test for the selected library:
+`self-test.json` in the WillingtonBindings folder with `"status": "passed"` and
+`library_sha256` equal to that library's SHA-256. Without it, only Follow Action
+edits stay off; macro, name and zone edits still work.
 
 A missing validated profile skips only that component: one configuration can
 use Follow Actions and DeviceTools on b4 and also Rack Zones on b5. These typed
@@ -81,14 +66,52 @@ self-test disables only Follow writes.
 When the Remote Script stops, it turns Follow Action writes off and uninstalls
 DeviceTools and RackZones. Follow Action bindings can't be uninstalled: they
 stay registered in that Live process, and the bridge reuses them, writes off,
-when it starts again.
+when it starts again or loads the providers again after `/willington`.
+
+### willington.json
+
+`/willington` writes this file; you can also write it yourself. It must be a
+regular file, owner-only and at most 4 KiB, with the keys below (`rackZones` is
+optional). `/willington` writes:
+
+```json
+{"version": 1, "followActions": true, "deviceTools": true, "rackZones": true, "enableWrites": true}
+```
+
+| Key | Meaning |
+| --- | --- |
+| `version` | Always `1` |
+| `followActions` | Load WillingtonBindings |
+| `deviceTools` | Load WillingtonDeviceTools |
+| `rackZones` | Optional; load WillingtonRackZones |
+| `enableWrites` | Allow edits; `false` loads the providers without offering edits |
+
+The bridge reads it again within a second of its changing. Kumi updates keep it,
+and it doesn't count against the bridge's installation check. Without it, the
+bridge is the plain bridge.
+
+## Installing Willington yourself
+
+For a Willington build Kumi doesn't carry yet (for a new Live version, say),
+install Willington's multi-version bundle into Live's Remote Scripts folder,
+beside AbletonMcpBridge: the required `WillingtonRuntime` with the providers you
+want, `WillingtonBindings` (Follow Actions), `WillingtonDeviceTools` (macros and
+variations; it must provide `get_macro_mapping` and
+`get_selected_variation_name`) and `WillingtonRackZones` (zones). Manual copies
+must keep the runtime, `build/<profile-id>/` folders and manifests. Providers
+installed there come before Kumi's own copy. Turn off any standalone Willington
+control surface in Live and restart Live: the bridge won't share the providers
+with another owner. Then turn them on with `/willington`.
 
 ## Follow Action self-test
 
-Repeat after switching Live builds or replacing the selected Follow library. This
-procedure works with the distributed bundle; no source checkout or `manage.py`
-is needed. The standalone test creates a fixture track and performs native writes
-and Live Undo in the current Set, so use a disposable Set.
+Repeat after switching Live builds or replacing the selected Follow library. The
+test runs WillingtonBindings as a Control Surface of its own, so it needs a copy
+[installed beside the bridge](#installing-willington-yourself): Kumi's own copy,
+inside the bridge, isn't in Live's list. This procedure works with the
+distributed bundle; no source checkout or `manage.py` is needed. The standalone
+test creates a fixture track and performs native writes and Live Undo in the
+current Set, so use a disposable Set.
 
 1. Disable `AbletonMcpBridge` and standalone Willington surfaces in Live’s Control
    Surface settings, then quit Live. Native Follow properties remain registered
