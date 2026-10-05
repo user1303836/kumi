@@ -8,10 +8,11 @@ use regex::Regex;
 /// Longest option offered as a one-key answer (UTF-16 units); past it, the list is prose, not options.
 const LONGEST: usize = 100;
 
-/// An answer's options: a question, then a numbered list (2 to 9 short items, "1." or "1)", in order)
-/// with nothing after it. None when the answer doesn't end that way.
+/// An answer's options: a question ("?" or Japanese and Chinese "？"), then a numbered list (2 to 9
+/// short items, "1." or "1)", or "1．" and "1、" with no space needed, in order) with nothing after it.
+/// None when the answer doesn't end that way.
 pub fn choices(answer: &str) -> Option<Vec<String>> {
-    static ITEM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([1-9])[.)]\s+(\S.*)$").unwrap());
+    static ITEM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([1-9])(?:[.)]\s+|[．、]\s*)(\S.*)$").unwrap());
     let mut items = Vec::new();
     let mut question = None;
     for line in answer.lines().rev().map(str::trim).filter(|line| !line.is_empty()) {
@@ -26,7 +27,7 @@ pub fn choices(answer: &str) -> Option<Vec<String>> {
     items.reverse();
     let numbered = items.iter().enumerate().all(|(index, (n, _))| *n == index + 1);
     let short = items.iter().all(|(_, text)| !text.is_empty() && utf16_len(text) <= LONGEST);
-    (question?.contains('?') && (2..=9).contains(&items.len()) && numbered && short)
+    (question?.contains(['?', '？']) && (2..=9).contains(&items.len()) && numbered && short)
         .then(|| items.into_iter().map(|(_, text)| text).collect())
 }
 
@@ -46,6 +47,11 @@ mod tests {
             Some(vec!["Sub Bass".to_string(), "Reese".to_string()])
         );
         assert_eq!(choices("Which track?\n1. Bass\n\n2. Lead\n\n3. A new track").map(|c| c.len()), Some(3));
+        assert_eq!(
+            choices("どちらのベースにサイドチェインをかけますか？\n1．サブベース\n2．リース"),
+            Some(vec!["サブベース".to_string(), "リース".to_string()])
+        );
+        assert_eq!(choices("要给哪一条贝斯加侧链？\n1、低音\n2、Reese"), Some(vec!["低音".to_string(), "Reese".to_string()]));
     }
 
     #[test]
@@ -55,6 +61,7 @@ mod tests {
             "Here's what changed:\n1. Tempo 120 → 124\n2. Swing 10%",
             "Which one?\n1. Bass",
             "Which one?\n1. Bass\n3. Lead",
+            "Which one?\n1.5 dB\n2.5 dB",
             "Which one?\n1. Bass\n2. Lead\n\nOr tell me another.",
             &format!("Which one?\n1. {}\n2. Lead", "x".repeat(101)),
         ] {

@@ -670,8 +670,8 @@ impl TuiApp {
         self.0.scheduler.request();
         picker
     }
-    /// Kumi's answer asked the producer to pick: its options, one key each. Other typing goes to the
-    /// input box, so a free answer still works.
+    /// Kumi's answer asked the producer to pick: its options, picked by number (or ↑↓) and sent with
+    /// Enter. Other typing goes to the input box, so a free answer still works.
     pub(super) fn open_answers(&self, choices: Vec<String>) {
         let items = choices.iter().enumerate().map(|(at, choice)| PickerItem::new(format!("{}. {choice}", at + 1), choice)).collect();
         let options = PickerOptions { answers: true, ..Default::default() };
@@ -781,25 +781,26 @@ impl TuiApp {
                 self.0.tty.write(&format!("\x1b]52;c;{}\x07", base64::engine::general_purpose::STANDARD.encode(url)));
                 self.notice("Copied the sign-in link.", NoticeTone::Info);
             }
-            Panel::Pick { picker, choose } => {
+            Panel::Pick { picker, .. } => {
                 if picker.borrow().options.answers {
-                    let item = text.parse().ok().and_then(|n| picker.borrow().numbered(n).cloned());
-                    let choose = choose.clone();
-                    drop(p);
-                    match item {
-                        Some(item) => {
-                            self.task(move |app| async move {
-                                if let Err(error) = choose(item).await {
-                                    app.panel_failed(&error);
-                                }
-                                Ok(())
-                            });
-                        }
-                        None => {
-                            self.close_panel();
-                            self.on_input(event);
-                        }
+                    // A number picks its option and Enter sends it; typing on ("2 dB quieter") takes the number
+                    // into the input box with the rest, so a free answer that starts with one arrives whole.
+                    let picked = {
+                        let picker = picker.borrow();
+                        let number = text.parse().ok().filter(|_| picker.typed.is_empty());
+                        number.and_then(|n| picker.numbered(n)).and_then(|item| item.value.clone())
+                    };
+                    if let Some(value) = picked {
+                        let mut picker = picker.borrow_mut();
+                        picker.select(Some(&value));
+                        picker.typed = text.clone();
+                        return;
                     }
+                    let typed = std::mem::take(&mut picker.borrow_mut().typed);
+                    drop(p);
+                    self.close_panel();
+                    self.0.state.borrow_mut().editor.insert(&typed);
+                    self.on_input(event);
                     return;
                 }
                 if picker.borrow().filter.is_empty() && text.starts_with('/') {
