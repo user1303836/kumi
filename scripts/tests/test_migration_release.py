@@ -281,15 +281,14 @@ class MigrationRelease(unittest.TestCase):
 
     def rollback_to_native(self, command, env, manifest, old):
         """The unchanged old rollback command returns to the retained native generation. A release whose bridge
-        is newer than 1.7.5's then asks whether Live is closed before updating it: unanswered here, it changes
-        nothing, says how to finish and exits 1, leaving the bridge to native startup (as the update does)."""
+        is newer than 1.7.5's then asks whether Live is closed before updating it: unanswered here, it says the
+        bridge waits for that, leaving it to native startup (as the update does). The rollback succeeded."""
         result = self.launch_result(command, env, "update", "--rollback")
         said = result.stdout + result.stderr
-        if manifest["bridge"] == old["packageVersion"]:
-            self.assertEqual(result.returncode, 0, said)
-        else:
-            self.assertEqual(result.returncode, 1, said)
-            self.assertIn("Nothing was changed. Quit Live, then run:", said)
+        self.assertEqual(result.returncode, 0, said)
+        if manifest["bridge"] != old["packageVersion"]:
+            self.assertIn("The bridge wasn't updated yet: quit Live, then run:", said)
+            self.assertNotIn("Nothing was changed", said)
         self.assertIn(f"Kumi is back to {manifest['kumi']}", said)
 
     @contextmanager
@@ -497,13 +496,12 @@ class MigrationRelease(unittest.TestCase):
         with self.release_server(artifacts) as base:
             result = self.launch_result(launcher, dict(env, KUMI_RELEASES=base), "update")
         updated = result.stdout + result.stderr
-        if manifest["bridge"] == old["packageVersion"]:
-            self.assertEqual(result.returncode, 0, updated)
-        else:
-            # A newer bridge waits for the producer to say Live is closed. Unanswered here, the update leaves
-            # it to native startup, the same handoff a same-version bridge gets.
-            self.assertEqual(result.returncode, 1, updated)
-            self.assertIn("Nothing was changed. Quit Live, then run:", updated)
+        self.assertEqual(result.returncode, 0, updated)
+        if manifest["bridge"] != old["packageVersion"]:
+            # A newer bridge waits for the producer to say Live is closed. Unanswered here, the update says so
+            # and leaves it to native startup, the same handoff a same-version bridge gets.
+            self.assertIn("The bridge wasn't updated yet: quit Live, then run:", updated)
+            self.assertNotIn("Nothing was changed", updated)
         self.assertIn(f"Kumi is now {manifest['kumi']}", updated)
         self.assertTrue((home / "app" / self.binary).is_file())
         self.assertEqual(config.read_bytes(), config_before, "the old version-only updater leaves the bridge for native startup")

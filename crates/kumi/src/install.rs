@@ -194,6 +194,7 @@ async fn bridge_after(io: &InstalledIo, home: &str, app: &str) -> i32 {
         .arg("bridge")
         .current_dir(home)
         .env("KUMI_INSTALLED", "1")
+        .env("KUMI_BRIDGE_AFTER", "1")
         .env("KUMI_HOME", home)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
