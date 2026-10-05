@@ -512,7 +512,13 @@ local_test!(disconnect_cancels_invalidates_and_offers_resend_once, {
     running.await.unwrap().unwrap();
     assert_eq!(h.session.status().observation, None);
     assert!(h.notice("Live closed"));
-    delay(35).await;
+    // The note comes missing_after_ms (30) after the drop; a busy runner's timer fires later than that.
+    for _ in 0..1000 {
+        if h.notice("Is it open") {
+            break;
+        }
+        delay(2).await;
+    }
     assert!(h.notice("Is it open"));
     h.connection(ConnectionState::Connected, None);
     settle().await;

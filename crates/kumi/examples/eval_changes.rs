@@ -1059,7 +1059,24 @@ struct Run<'a> {
     gaps: &'a [Value],
 }
 
+/// EVAL_TUTORIAL=1 adds a real tutorial from YouTube (16.5 minutes, with captions): how many looks and
+/// replies the model takes from watching to building. It needs the network.
 fn cases() -> Vec<Case> {
+    let mut cases = every_case();
+    if std::env::var_os("EVAL_TUTORIAL").is_some_and(|on| !on.is_empty()) {
+        cases.push(said(
+            "watch a real tutorial",
+            &["Watch this tutorial: https://www.youtube.com/watch?v=KQlGU3LTWMk\n\nThen recreate the instrument/audio effect chain(s) on a new track(s)"],
+            |run| {
+                run.tools.iter().any(|tool| tool == "watch_video")
+                    && run.requests.iter().any(|request| stringify(&Value::Object(request.args.clone())).contains("Drift"))
+            },
+        ));
+    }
+    cases
+}
+
+fn every_case() -> Vec<Case> {
     vec![
         said("tempo", &["Set the tempo to 124."], |run| {
             run.changes.len() == 1 && run.changes[0].family == ChangeFamily::Tempo && run.state.tempo_is(124.0) && run.notes.is_empty()
