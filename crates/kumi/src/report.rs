@@ -231,8 +231,8 @@ fn describe_conversation(value: &Value) -> Vec<String> {
     lines
 }
 /// Each column's median over the logged turns (so the parts needn't add up to the time); "first part"
-/// is each turn's first model call's. Then the tools that took longest across them (from each turn's
-/// slowest three), and the efforts the model was asked for.
+/// is each turn's first model call's. Then the slowest tools across them (each turn logs its slowest
+/// three), and the efforts and service tiers the model was asked for.
 fn summarize_timings(lines: &[&str]) -> String {
     let turns: Vec<Value> = lines.iter().filter_map(|line| serde_json::from_str(line).ok()).collect();
     let median = |key: &str| {
@@ -254,6 +254,7 @@ fn summarize_timings(lines: &[&str]) -> String {
         median("liveRequests"),
         (median("sentBytes") / 1024.).round(),
     );
+    let count = |n: f64, what: &str| format!("{n} {what}{}", if n == 1. { "" } else { "s" });
     let mut tools: Vec<(String, f64, f64)> = Vec::new();
     for slow in turns.iter().filter_map(|turn| turn["slowTools"].as_array()).flatten() {
         let (Some(tool), Some(calls), Some(ms)) = (slow["tool"].as_str(), slow["calls"].as_f64(), slow["ms"].as_f64()) else { continue };
@@ -264,19 +265,23 @@ fn summarize_timings(lines: &[&str]) -> String {
     }
     tools.sort_by(|a, b| b.2.total_cmp(&a.2));
     if !tools.is_empty() {
-        let longest: Vec<_> = tools.iter().take(3).map(|(tool, calls, ms)| format!("{tool} {} ({calls} calls)", seconds(*ms))).collect();
-        summary.push_str(&format!("\nLongest tools in all: {}", longest.join(" · ")));
+        let slowest: Vec<_> =
+            tools.iter().take(3).map(|(tool, calls, ms)| format!("{tool} {} ({})", seconds(*ms), count(*calls, "call"))).collect();
+        summary.push_str(&format!("\nSlowest tools (each turn's three, summed): {}", slowest.join(" · ")));
     }
-    let mut efforts: Vec<(String, usize)> = Vec::new();
-    for effort in turns.iter().filter_map(|turn| turn["effort"].as_str()) {
-        match efforts.iter_mut().find(|(name, _)| name == effort) {
-            Some((_, count)) => *count += 1,
-            None => efforts.push((effort.to_string(), 1)),
+    // Lines from before efforts were logged have none, and aren't counted.
+    for (key, label) in [("effort", "Effort"), ("tier", "Service tier")] {
+        let mut asked: Vec<(String, f64)> = Vec::new();
+        for value in turns.iter().filter_map(|turn| turn[key].as_str()) {
+            match asked.iter_mut().find(|(name, _)| name == value) {
+                Some((_, turns)) => *turns += 1.,
+                None => asked.push((value.to_string(), 1.)),
+            }
         }
-    }
-    if !efforts.is_empty() {
-        let said: Vec<_> = efforts.iter().map(|(effort, count)| format!("{effort} ({count} turns)")).collect();
-        summary.push_str(&format!("\nEffort: {}", said.join(" · ")));
+        if !asked.is_empty() {
+            let said: Vec<_> = asked.iter().map(|(value, turns)| format!("{value} ({})", count(*turns, "turn"))).collect();
+            summary.push_str(&format!("\n{label}: {}", said.join(" · ")));
+        }
     }
     summary
 }

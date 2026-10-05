@@ -398,7 +398,6 @@ impl AgentKernel {
             let attempted: Result<StepResult, StepError> = async {
                 let mut call = request.clone();
                 call.abort_signal = Some(abort.signal());
-                crate::core::timing::effort(&call);
                 let timed = crate::core::timing::model_call(&inner.binding.id);
                 let parts = inner.binding.model.do_stream(call).await.map_err(StepError::Model)?;
                 consume(crate::core::timing::timed(parts, timed), &abort, &hear, None).await
@@ -959,16 +958,16 @@ impl Turn {
                         reply = result.reply.map(|words| head(trim(&words), MAX_REPLY));
                         Outcome { text: capped(result.text), is_error: result.is_error, images: result.images }
                     }
-                    Err(_) if self.abort.is_cancelled() => return Ran::Stopped,
+                    Err(_) if self.abort.is_cancelled() => {
+                        // A call stopped while it ran still took its time: often the slowest of the turn.
+                        self.timed(call, started, alone);
+                        return Ran::Stopped;
+                    }
                     Err(error) => Outcome { text: head(&error.to_string(), MAX_TOOL_ERROR), is_error: true, images: Vec::new() },
                 }
             }
         };
-        let elapsed_ms = round(perf_now() - started).max(0.0) as u64;
-        crate::core::timing::tool_call(&call.tool_name, elapsed_ms);
-        if alone {
-            crate::core::timing::tool(elapsed_ms);
-        }
+        let elapsed_ms = self.timed(call, started, alone);
         (self.deliver)(KernelEvent::ToolEnd {
             id: call.tool_call_id.clone(),
             name: call.tool_name.clone(),
@@ -976,6 +975,17 @@ impl Turn {
             elapsed_ms,
         });
         Ran::Done { outcome, reply }
+    }
+
+    /// A call's time, from `started`, added to the turn's: by its tool, and to the turn's tool time when
+    /// it ran alone (calls run together add their group's).
+    fn timed(&self, call: &ToolCall, started: f64, alone: bool) -> u64 {
+        let elapsed_ms = round(perf_now() - started).max(0.0) as u64;
+        crate::core::timing::tool_call(&call.tool_name, elapsed_ms);
+        if alone {
+            crate::core::timing::tool(elapsed_ms);
+        }
+        elapsed_ms
     }
 
     /// A batch's results once it's stopped: the finished calls' and those cut off while running, then a
