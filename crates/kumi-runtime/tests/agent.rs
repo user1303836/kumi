@@ -1060,6 +1060,23 @@ async fn long_conversations_stay_in_budget_earlier_reads_are_cleared_in_requests
     .await
 }
 
+#[tokio::test]
+async fn a_huge_tool_result_is_cut_to_its_opening_so_the_request_stays_in_budget() {
+    local(async {
+        let huge = "x".repeat(1024 * 1024);
+        let h = harness(
+            |_, n| if n == 1 { Scripted::Parts(vec![call_id("read", "{}", "c1"), tool_calls()]) } else { answer("done") },
+            Options { tools: vec![saying("read", &huge)], ..Options::default() },
+        );
+        h.kernel.run(&observed("read it"), signal(), ignore()).await.unwrap();
+        let sent = js(&h.request(1).prompt);
+        assert!(sent.len() < 70 * 1024, "{} bytes went to the model", sent.len());
+        assert!(sent.contains("Kumi cut the rest of this result: it was 1024 KB, and one result carries 64 KB."));
+        h.kernel.close().await;
+    })
+    .await
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Mode {
     Answer,

@@ -170,6 +170,9 @@ const MAX_TOOLS: usize = 128;
 const MAX_INSTRUCTIONS: usize = 64 * 1024;
 const MAX_STEER: usize = 16 * 1024;
 const MAX_TOOL_ERROR: usize = 4 * 1024;
+/// The most of a tool's words one result carries, as the bridge's results are capped: past it the opening
+/// stays with a note saying how much was cut, so one huge result can't take a request past its budget.
+const MAX_TOOL_RESULT: usize = 64 * 1024;
 /// A tool's own answer to the producer, when it finished the request.
 const MAX_REPLY: usize = 8 * 1024;
 /// Images one tool result shows, and the media types models read.
@@ -803,7 +806,7 @@ impl Turn {
                     };
                     match until_aborted(work, &self.abort).await {
                         Ok(result) => {
-                            let outcome = Outcome { text: result.text, is_error: result.is_error, images: result.images };
+                            let outcome = Outcome { text: capped(result.text), is_error: result.is_error, images: result.images };
                             if !outcome.is_error {
                                 if let Some(reply) = result.reply {
                                     let words = trim(&reply);
@@ -1149,6 +1152,20 @@ pub fn without_reasoning(messages: &[Message]) -> Vec<Message> {
             }
         })
         .collect()
+}
+
+/// A tool's words, cut to their opening past MAX_TOOL_RESULT, with how much went and how to see more.
+fn capped(text: String) -> String {
+    let length = utf16_len(&text);
+    if length <= MAX_TOOL_RESULT {
+        return text;
+    }
+    format!(
+        "{}\n[Kumi cut the rest of this result: it was {} KB, and one result carries {} KB. Ask for less of it (a narrower read, a page, a filter) to see more.]",
+        head(&text, MAX_TOOL_RESULT - 256),
+        length / 1024,
+        MAX_TOOL_RESULT / 1024
+    )
 }
 
 /// A tool's result as the model reads it: its words, then each image after its caption.
