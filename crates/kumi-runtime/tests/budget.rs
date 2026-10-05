@@ -7,7 +7,7 @@ use kumi_runtime::ai::types::{
     AssistantPart, DataContent, FileData, Message, ReasoningPart, TextPart, ToolCallPart, ToolPart, ToolResultContentItem,
     ToolResultOutput, ToolResultPart, UserPart,
 };
-use kumi_runtime::kernel::budget::{drop_earliest, fit, ContextBudget, OBSERVATION_MARKER, SHORTENED};
+use kumi_runtime::kernel::budget::{drop_earliest, fit, transcript_of, ContextBudget, ASKED, OBSERVATION_MARKER, SHORTENED};
 use serde::Serialize;
 use serde_json::json;
 
@@ -198,7 +198,36 @@ fn if_no_earlier_exchange_fits_the_note_goes_on_this_turn() {
     let turn = vec![user(&observed("now"))];
     let fitted = fit(&history, &turn, &budget(4096.0, 16.0 * 1024.0));
     assert!(fitted.history.is_empty());
-    assert_eq!(text_of(fitted.turn.first()).unwrap(), format!("{SHORTENED}{}", text_of(turn.first()).unwrap()));
+    let asked = format!("{ASKED}- {}…\n\n", "w".repeat(300));
+    assert_eq!(text_of(fitted.turn.first()).unwrap(), format!("{SHORTENED}{asked}{}", text_of(turn.first()).unwrap()));
+}
+
+#[test]
+fn the_producers_words_outlive_repeated_reductions_kumis_own_prompts_and_observations_dont_join_them() {
+    let budget = budget(4096.0, 16.0 * 1024.0);
+    let mut history = vec![user(&observed("Match this pad, and don't touch the drums")), said(&"w".repeat(900))];
+    let mut reductions = 0;
+    for round in 0..60 {
+        let asked = if round % 5 == 0 { format!("round {round}: warmer") } else { format!("[Kumi] Score {round}%. Keep going") };
+        let turn = vec![user(&observed(&asked)), said(&format!("built {round} {}", "w".repeat(900)))];
+        let fitted = fit(&history, &turn, &budget);
+        if fitted.changed() {
+            reductions += 1;
+        }
+        history = [fitted.history.into_owned(), fitted.turn.into_owned()].concat();
+    }
+    assert!(reductions >= 5, "{reductions} reductions");
+    let first = text_of(history.first()).unwrap();
+    assert!(first.starts_with(&format!("{SHORTENED}{ASKED}- Match this pad, and don't touch the drums\n")), "{first}");
+    let sent = serde_json::to_string(&history).unwrap();
+    for round in (5..60).step_by(5) {
+        assert!(sent.contains(&format!("round {round}: warmer")), "round {round}'s words are listed or still there");
+    }
+    assert!(first.contains("- round 5: warmer"));
+    assert!(!first.contains("[Kumi] Score") && !first.contains("current_observation"), "{first}");
+    assert!(size(&history) as f64 <= budget.limit);
+    let transcript = transcript_of(&serde_json::to_value(&history).unwrap().as_array().unwrap().clone());
+    assert!(!transcript.iter().any(|line| line.text.contains("don't touch the drums")), "the list is for the model, not the transcript");
 }
 
 #[test]

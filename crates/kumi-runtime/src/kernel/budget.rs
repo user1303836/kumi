@@ -3,13 +3,14 @@
 //! Keeps a conversation within what a model can take. Live reads go stale as the producer works, so
 //! they go first: earlier turns' larger tool results shrink to their opening and a note, and the Live
 //! observation attached to earlier requests is dropped (the producer's words stay). Only when that
-//! isn't enough do the earliest exchanges go. Clearing happens past thresholds, not on every request,
-//! so providers' prompt caches keep working in between.
+//! isn't enough do the earliest exchanges go, and even then the producer's own words in them stay, as
+//! a short list where the conversation now starts. Clearing happens past thresholds, not on every
+//! request, so providers' prompt caches keep working in between.
 
 use std::borrow::Cow;
 
 use kumi_common::js::json::stringify;
-use kumi_common::js::string::{head, trim};
+use kumi_common::js::string::{head, trim, utf16_len};
 use serde_json::Value;
 
 use crate::ai::types::{
@@ -43,10 +44,15 @@ pub fn budget_for(window: f64, fixed: f64, answer: f64) -> ContextBudget {
 pub const OBSERVATION_MARKER: &str = "\n\n<current_observation_untrusted>";
 /// Starts the first kept message once the earliest exchanges are gone.
 pub const SHORTENED: &str = "[Kumi removed the earlier part of this conversation to save room.]\n\n";
+/// After `SHORTENED`: what the producer said in the removed part, one "- " line each, then a blank line.
+pub const ASKED: &str = "[What the producer said in that part, oldest first:]\n";
+/// Longest one of the producer's messages runs in that list (UTF-16 units), and the most its lines take (bytes, as sent).
+const ASK: usize = 300;
+const ASKS: usize = 3 * 1024;
 
 /// A conversation's words, for showing it: what the producer said and Kumi's answers. The host
 /// appends each turn's Live observation to the producer's words, and the budget may note that
-/// earlier exchanges are gone; neither is theirs. Saved conversations are data from disk, so any shape is taken.
+/// earlier exchanges are gone (listing what the producer said in them); none of that is theirs. Saved conversations are data from disk, so any shape is taken.
 pub fn transcript_of(messages: &[Value]) -> Vec<TranscriptLine> {
     messages
         .iter()
@@ -72,7 +78,9 @@ pub fn transcript_of(messages: &[Value]) -> Vec<TranscriptLine> {
                     .collect(),
             };
             let words = match role {
-                TranscriptRole::User => text.split(OBSERVATION_MARKER).next().unwrap_or("").replacen(SHORTENED, "", 1),
+                TranscriptRole::User => {
+                    split_asks(&text.split(OBSERVATION_MARKER).next().unwrap_or("").replacen(SHORTENED, "", 1)).1.to_string()
+                }
                 TranscriptRole::Assistant => text,
             };
             // An answer's steps come back too: the tools it called, in order.
@@ -355,21 +363,74 @@ pub fn drop_earliest(messages: &[Message], room: usize) -> &[Message] {
     &messages[start..]
 }
 
-/// The conversation's first message, marked as following a removed part (once).
-pub fn note_shortened(mut messages: Vec<Message>) -> Vec<Message> {
+/// The conversation's first message, marked as following a removed part (once), with what the
+/// producer said there (`asks`, oldest first) ahead of any it already listed.
+pub fn note_shortened(mut messages: Vec<Message>, asks: Vec<String>) -> Vec<Message> {
     // Saved conversations are data from disk: anything unexpected stays as it is.
     let Some(Message::User { content, .. }) = messages.first_mut() else { return messages };
     let at = content.iter().position(|part| matches!(part, UserPart::Text(_)));
     match at {
         Some(at) => {
             let UserPart::Text(text) = &mut content[at] else { unreachable!() };
-            if !text.text.starts_with(SHORTENED) {
-                text.text = format!("{SHORTENED}{}", text.text);
-            }
+            let (listed, rest) = split_asks(&text.text);
+            let asks = bounded([asks, listed].concat());
+            text.text = format!("{SHORTENED}{}{rest}", list(&asks));
         }
-        None => content.insert(0, UserPart::Text(TextPart::new(trim(SHORTENED)))),
+        None => content.insert(0, UserPart::Text(TextPart::new(trim(&format!("{SHORTENED}{}", list(&bounded(asks))))))),
     }
     messages
+}
+
+/// What the producer said in these messages, oldest first: each of their messages' own words (not
+/// the Live observation Kumi attached, nor Kumi's own "[Kumi] …" prompts), with the list an earlier
+/// removal kept in their place.
+fn asks_in(messages: &[Message]) -> Vec<String> {
+    let mut asks = Vec::new();
+    for message in messages {
+        let Message::User { content, .. } = message else { continue };
+        for part in content {
+            let UserPart::Text(text) = part else { continue };
+            let (listed, rest) = split_asks(&text.text);
+            asks.extend(listed);
+            let words = trim(rest.split(OBSERVATION_MARKER).next().unwrap_or_default());
+            if !words.is_empty() && !words.starts_with("[Kumi]") {
+                let line = words.split_whitespace().collect::<Vec<_>>().join(" ");
+                asks.push(if utf16_len(&line) > ASK { format!("{}…", head(&line, ASK)) } else { line });
+            }
+        }
+    }
+    asks
+}
+
+/// A message's text split into the list a removal put at its start and the rest.
+fn split_asks(text: &str) -> (Vec<String>, &str) {
+    let text = text.strip_prefix(SHORTENED).unwrap_or(text);
+    let Some(listed) = text.strip_prefix(ASKED) else { return (Vec::new(), text) };
+    let (block, rest) = listed.split_once("\n\n").unwrap_or((listed, ""));
+    (block.lines().filter_map(|line| line.strip_prefix("- ")).map(str::to_string).collect(), rest)
+}
+
+/// The list within `ASKS` bytes: the earliest few (often the ground rules) and the latest stay, the ones
+/// between go first.
+fn bounded(mut asks: Vec<String>) -> Vec<String> {
+    asks.dedup();
+    while asks.len() > 1 && asks.iter().map(|ask| sent(ask) + 4).sum::<usize>() > ASKS {
+        asks.remove(3.min(asks.len() - 1));
+    }
+    asks
+}
+
+/// Bytes a text takes in a request (as a JSON string, without its quotes).
+fn sent(text: &str) -> usize {
+    stringify(&Value::String(text.to_string())).len() - 2
+}
+
+fn list(asks: &[String]) -> String {
+    if asks.is_empty() {
+        String::new()
+    } else {
+        format!("{ASKED}{}\n\n", asks.iter().map(|ask| format!("- {ask}")).collect::<Vec<_>>().join("\n"))
+    }
 }
 
 /// What `fit` made of the settled history and the running turn: each borrowed when nothing had to go.
@@ -416,15 +477,18 @@ pub fn fit<'a>(history: &'a [Message], turn: &'a [Message], budget: &ContextBudg
     if within(&history, &turn, budget.limit) {
         return Fitted { history, turn };
     }
-    // Then whole exchanges from the front, down to three quarters of the limit so this doesn't recur on every request.
-    let room = ((budget.limit * 0.75).floor() - bytes(&turn) as f64).max(0.0) as usize;
+    // Then whole exchanges from the front, down to three quarters of the limit so this doesn't recur on every
+    // request, with room kept for the note and the list of the producer's words from them.
+    let listed = sent(SHORTENED) + sent(&list(&asks_in(&history))).min(ASKS + sent(ASKED) + 4);
+    let room = ((budget.limit * 0.75).floor() - (bytes(&turn) + listed) as f64).max(0.0) as usize;
     let kept = drop_earliest(&history, room);
     if kept.len() == history.len() {
         return Fitted { history, turn };
     }
+    let asks = asks_in(&history[..history.len() - kept.len()]);
     if kept.is_empty() {
-        Fitted { history: Cow::Owned(Vec::new()), turn: Cow::Owned(note_shortened(turn.into_owned())) }
+        Fitted { history: Cow::Owned(Vec::new()), turn: Cow::Owned(note_shortened(turn.into_owned(), asks)) }
     } else {
-        Fitted { history: Cow::Owned(note_shortened(kept.to_vec())), turn }
+        Fitted { history: Cow::Owned(note_shortened(kept.to_vec(), asks)), turn }
     }
 }
