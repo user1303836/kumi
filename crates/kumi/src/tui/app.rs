@@ -212,6 +212,8 @@ struct State {
     transport: Option<LiveTransport>,
     activity: String,
     panel: Option<PanelRef>,
+    /// The picker asking whether to keep a technique: closing it is a no.
+    offer: Option<Rc<RefCell<Picker>>>,
     planning: Option<String>,
     planning_since: f64,
     /// A model call being tried again: why, and when (perf time) the next try starts.
@@ -290,6 +292,7 @@ impl State {
             transport: None,
             activity: "connecting to Live".into(),
             panel: None,
+            offer: None,
             planning: None,
             planning_since: 0.,
             retry: None,

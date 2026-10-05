@@ -5,7 +5,7 @@ each Kumi release names the bridge it ships with.
 
 ## Unreleased
 
-### Bridge 1.0.75
+### Bridge 1.0.76
 
 - Kumi's bridge carries Willington's runtime files inside its Remote Script, where Live doesn't list
   them as Control Surfaces. A release includes them once Willington's sync has put them in
@@ -17,6 +17,12 @@ each Kumi release names the bridge it ships with.
 - An update keeps `willington.json` owner-only on Windows: its copy took the folder's permissions,
   which turned Willington off. Turning Willington on or off no longer counts as a changed
   installation that stops `kumi update`.
+
+### Bridge 1.0.75
+
+- Live's own timer serves Kumi between Live's display ticks, so a look at the Set takes about 20 ms
+  rather than about 100, and a plan's changes don't each wait for a tick. Kumi's reads keep to the
+  same share of Live's main thread as before; a change takes what Live takes to make it.
 
 ## 1.8.1 — 2026-10-05
 

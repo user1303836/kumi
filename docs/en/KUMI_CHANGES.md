@@ -33,9 +33,11 @@ parameters in one request: each within its range and on its steps, all of them
 or none, with Live's text before and after for HISTORY. Nothing else happens in
 Live while it runs, so there's nothing to preview. A parameter given by name
 ("Drive"), or a value given as Live shows it ("-6 dB"), takes one request more
-the first time. Each request waits for one of Live's display ticks (about a
+the first time. Each request waited for one of Live's display ticks (about a
 tenth of a second), and the preview and apply took five: nine parameters on
 three devices went from 4.2 to 1.7 seconds, and to 0.7 seconds when set again.
+Live's own timer now serves requests between ticks too, so a request waits
+milliseconds rather than a tick.
 `KUMI_FAST=0` goes back to the preview and apply.
 
 Once a change is sent to Live it runs to the end (up to 30 seconds), even if
@@ -349,7 +351,7 @@ stops there and says to update; `kumi update` or `kumi bridge` does it.
 | 1.0.58 | `delete_clip`, `delete_scene`, `delete_track`, `delete_locator`; a plan as one Live undo step; `undo_in_live`; `edit_device`, `duplicate_device`; Live's events for FOCUS; Kumi's Live extension (`write_arrangement_clip`, `clear_range`, `render`) |
 | 1.0.68 | `run_python` |
 | 1.0.73 | Hearing a track, a return or the mix through Kumi Ears (older bridges record to listen) |
-| 1.0.75 | Willington from Kumi's own copy, switched by `/willington` with Live running |
+| 1.0.76 | Willington from Kumi's own copy, switched by `/willington` with Live running |
 
 The Willington tools appear whenever the bridge offers them: with Willington's
 bindings on (`/willington`) and a Live build they cover.

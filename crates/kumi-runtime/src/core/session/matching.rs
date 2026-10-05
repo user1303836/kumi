@@ -4,7 +4,7 @@ use crate::core::{
     evolve::{Evolution, NewSlot, TrialHow, EVOLVE},
     match_run::{starts_match, MatchBudget, MatchDecision, MatchRun, MatchState, MatchStop, KEEP_GOING, MATCH_BUDGET},
     playbook::{lesson_from, lesson_line, playbook_brief, PlaybookStore, Reaction},
-    techniques::{NEGATIVE, POSITIVE},
+    techniques::{waiting_note, NEGATIVE, POSITIVE},
 };
 use kumi_common::js::number::{round, to_string};
 
@@ -108,6 +108,7 @@ impl Session {
         observation: &str,
         said: Option<Rc<RefCell<String>>>,
         pictures: Vec<Picture>,
+        note: &str,
     ) -> Result<TurnResult, RuntimeError> {
         let held = self.0.state.borrow().kernel.clone().ok_or_else(|| RuntimeError::plain("Operation cancelled"))?;
         let current = self.clone();
@@ -122,7 +123,8 @@ impl Session {
             }
             Ok(())
         });
-        let input = format!("{text}{OBSERVATION_MARKER}\n{observation}\n</current_observation_untrusted>");
+        // Kumi's own note goes after the observation: it isn't the producer's words, and it goes when the observation does.
+        let input = format!("{text}{OBSERVATION_MARKER}\n{observation}\n</current_observation_untrusted>{note}");
         if pictures.is_empty() {
             held.value.run(&input, op.signal.clone(), emit).await
         } else {
@@ -138,10 +140,13 @@ impl Session {
     ) -> Result<Option<TurnResult>, RuntimeError> {
         let snapshot = self.observe(&op, pinned, false).await?;
         self.assert_current(&op)?;
-        if let Some(l) = &self.0.learned {
-            l.drafts.said(&text);
-            l.drafts.turn_started(&text);
-        }
+        let note = match &self.0.learned {
+            Some(l) => {
+                l.drafts.turn_started(&text, true);
+                l.drafts.waiting().map(|name| waiting_note(&name)).unwrap_or_default()
+            }
+            None => String::new(),
+        };
         let budget = self.0.options.match_budget.unwrap_or(MATCH_BUDGET);
         let carried =
             self.0.options.matching && !starts_match(&text) && KEEP_GOING.is_match(&text) && self.0.state.borrow().last_run.is_some();
@@ -177,7 +182,7 @@ impl Session {
         op.phase.set(Phase::Inference);
         let prompt = if brief.is_empty() { text } else { format!("{text}\n\n{brief}") };
         let showing = !pictures.is_empty();
-        let result = match self.ask(&op, &prompt, &snapshot.context, None, pictures).await {
+        let result = match self.ask(&op, &prompt, &snapshot.context, None, pictures, &note).await {
             // A model that can't see pictures refuses the request: say so, and what to do.
             Err(RuntimeError::Kumi(error)) if showing && error.kind == FailureKind::Request => {
                 return Err(KumiError {
@@ -251,7 +256,7 @@ impl Session {
             let snapshot = self.observe(op, None, true).await?;
             self.assert_current(op)?;
             op.phase.set(Phase::Inference);
-            result = self.ask(op, &text, &snapshot.context, None, vec![]).await?;
+            result = self.ask(op, &text, &snapshot.context, None, vec![], "").await?;
             add_usage(&mut usage, result.usage.as_ref());
             if stop.is_some() {
                 self.emit(run.borrow().status(MatchState::Done, stop).into());

@@ -107,7 +107,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 - `protocol/` 中的注册表是唯一的操作列表。宿主和 Remote Script 各自计算它的哈希，两者必须一致，否则 Live 永远不会连接；有一个宿主测试会运行 Remote Script 的哈希计算，确保两者相等。绝不要把操作名称或哈希复制到其他源文件中。
 - 修改通过各有专门用途的操作进行，每个操作都有预览、应用和撤销。唯一的例外是 `python.run`（`live_run_python`），它在 Live 的主线程上运行 Python，唯一的回退方式是 Live 的撤销；它有自己的策略类别 `python`，只有 `full` 配置文件允许使用。
 - 桥接内部的 `get(ref)` 是基于固定行的有界序列化器，而不是 Live 对象模型的通用读取器；MCP 读取保持各有专门用途。
-- Remote Script 在 Live 的主线程上完成它与 Live 打交道的全部工作：它在 Live 的显示刷新周期内、在限定的时间预算内自己处理套接字。它仅有的其他线程用于写入诊断文件和接收实时 UDP。新的 epoch 会使之前的所有引用和游标失效。Remote Script 无法识别的 Live 结构会被报告为不可用，绝不伪造。
+- Remote Script 在 Live 的主线程上完成它与 Live 打交道的全部工作：它在 Live 的显示刷新周期内（两次刷新之间借助 Live 自己的计时器）、在限定的时间预算内自己处理套接字。它仅有的其他线程用于写入诊断文件和接收实时 UDP。新的 epoch 会使之前的所有引用和游标失效。Remote Script 无法识别的 Live 结构会被报告为不可用，绝不伪造。
 - stdout 只承载 MCP 协议。诊断信息输出到 stderr，且不含请求数据。
 - 基于进程的操作使用 `AsyncLiveAdapter`；模拟器仍保留同步方法。兼容性改动要针对这两条路径测试。
 - 测试绝不需要正在运行的 Live、某个设备、某台特定的机器或仅限本地的材料。每个新操作都要有测试，包括错误输入和恢复。
