@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/tui/markdown.ts`.
-//!
 //! Markdown as terminal rows: the subset models actually write in chat. Headings, bold,
 //! italic, inline code, fenced code, lists with hanging indents, quotes, links and rules.
 //! Single newlines stay line breaks, as in chat. Names like Kick_01_final stay literal.

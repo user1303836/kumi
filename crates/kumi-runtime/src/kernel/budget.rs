@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/kernel/budget.ts`.
-//!
 //! Keeps a conversation within what a model can take. Live reads go stale as the producer works, so
 //! they go first: earlier turns' larger tool results shrink to their opening and a note, and the Live
 //! observation attached to earlier requests is dropped (the producer's words stay). Only when that

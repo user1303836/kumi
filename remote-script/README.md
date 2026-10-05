@@ -3,10 +3,10 @@
 AbletonMcpBridge is the half of the Ableton bridge that runs inside Live: a
 Control Surface script that reads and changes the Set through Live's own
 Python API. The other half is the MCP server in the `@ableton-mcp/mcp-server`
-package (apps/mcp-server in the repository), which Kumi and other MCP clients
-start. The two talk over an authenticated loopback socket. On Live 12.4 and
-later, the server also reaches Kumi's Live extension, a separate channel this
-script isn't part of.
+package (crates/ableton-mcp-server in the repository), which Kumi and other MCP
+clients start. The two talk over an authenticated loopback socket. On Live 12.4
+and later, the server also reaches Kumi's Live extension, a separate channel
+this script isn't part of.
 
 Repository: https://github.com/user1303836/kumi
 
@@ -25,7 +25,7 @@ Remote Scripts folder of Live's User Library, as `Remote Scripts/AbletonMcpBridg
 | `__pycache__` | An empty, read-only file, so Python never writes bytecode beside the checked sources |
 | `willington.json` | Optional, yours: see Willington below. Updates keep it. |
 
-This README ships in the npm package only; it isn't copied into Live.
+This README ships in the bridge's package only; it isn't copied into Live.
 
 After installing, open Live and choose AbletonMcpBridge as a Control Surface in
 Settings → Link, Tempo & MIDI, once. Live loads the script when it starts, so
@@ -44,7 +44,7 @@ its configuration from files, never from environment variables or arguments:
    ```json
    {
      "version": 2,
-     "server": {"command": "/absolute/path/to/node", "args": ["/absolute/path/to/dist/src/cli.js", "--config", "/absolute/path/to/bridge-config.json"]},
+     "server": {"command": "/absolute/path/to/ableton-mcp-server", "args": ["--config", "/absolute/path/to/bridge-config.json"]},
      "bridge": {
        "host": "127.0.0.1",
        "port": 9765,

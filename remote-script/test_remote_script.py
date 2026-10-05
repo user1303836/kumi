@@ -4881,14 +4881,14 @@ class FakeRackDevice:
 
 
 def host_rack_state_revision(device_row):
-    """The host's rackStateRevision (host.ts), from a snapshot rack row: what rack edits are fenced on."""
+    """The host's rack state revision (host/racks.rs `rack_state_revision`), from a snapshot rack row: what rack edits are fenced on."""
     state = {"visibleMacroCount": device_row.get("visibleMacroCount"), "selectedVariationIndex": device_row.get("selectedVariationIndex"), "variationCount": device_row.get("variationCount"),
              "macros": [macro["objectIdentity"] for macro in device_row.get("macros") or []], "chains": [chain["objectIdentity"] for chain in device_row.get("chains") or []], "drumPads": [pad["objectIdentity"] for pad in device_row.get("drumPads") or []]}
     return hashlib.sha256(AuthenticatedRemoteScript._bounded_canonical(state).encode()).hexdigest()
 
 
 def host_capture_authority_revision(snapshot):
-    """The host's captureAuthorityRevision (host.ts), over the snapshot as the host receives it."""
+    """The host's capture authority revision (host/session_capture.rs `capture_authority_revision`), over the snapshot as the host receives it."""
     snapshot = json.loads(json.dumps(snapshot))
     authority = {"tracks": [{"ref": track["ref"], "objectIdentity": track["objectIdentity"], "clips": [{"ref": clip["ref"], "objectIdentity": clip["objectIdentity"], "notesRevision": clip["notesRevision"]} for clip in track["clips"]]} for track in snapshot["tracks"]],
                  "scenes": [{"ref": scene["ref"], "objectIdentity": scene["objectIdentity"], "index": scene["index"]} for scene in snapshot["scenes"]], "playbackRevision": snapshot["playback"]["revision"]}

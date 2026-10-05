@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/library/state.ts`.
 use super::{
     learn::{Counts, LearnPhase, LearnProgress},
     store::{read_json, write_json},

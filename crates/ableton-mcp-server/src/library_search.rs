@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/library-search.ts`.
-//!
 //! Opt-in read-only query surface over Live's own library database
 //! (Live-files-*.db and Live-plugins-*.db), issue #54.
 //!

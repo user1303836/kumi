@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/midi-transforms.ts`.
-//!
 //! Deterministic, seeded MIDI transformation primitives. Every transform is a
 //! pure function over the canonical note schema: identical input notes,
 //! parameters, and seed always produce byte-for-byte identical output. No

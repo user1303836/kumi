@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/core/recipes.ts`.
 //! Repeatable plans of changes with named blanks, saved privately and replayed through make_changes.
 use super::{
     contracts::{JsonObject, KernelTool, RecipeAction, RecipeEvent, ToolResult},

@@ -10,7 +10,7 @@ Kumi 及其桥接如何送到用户手中，这能证明什么、不能证明什
 | --- | --- | --- |
 | Kumi | `user1303836/kumi` 的 GitHub Releases：原生 `kumi-<target>.tar.gz`、兼容包 `kumi.tar.gz`、`kumi-release.json` 和 `SHA256SUMS`，由 Installer 工作流附加到每个 `vX.Y.Z` 标签上 | `install.sh` 或 `install.ps1`，之后用 `kumi update` |
 | 桥接（`@ableton-mcp/mcp-server`） | 包含在每个 Kumi 发行包中：既有原生桥接 tarball，也有已解包的桥接包 | `kumi bridge`，它通过桥接的生命周期进行安装（[安装桥接](DELIVERY.md)） |
-| 单独的桥接 | 没有自己的发布版本。用 `python3 scripts/build-native-release.py --bridge-only` 构建（[构建选项](../en/DEVELOPER_GUIDE.md#releasing)） | 生命周期 CLI（[安装桥接](DELIVERY.md#独立桥接)） |
+| 单独的桥接 | 没有自己的发布版本。用 `python3 scripts/build-native-release.py --bridge-only` 构建（[构建选项](DEVELOPER_GUIDE.md#发布)） | 生命周期 CLI（[安装桥接](DELIVERY.md#独立桥接)） |
 
 安装脚本从 `main` 分支读取；它们安装的发行包来自最新的已发布版本（或 `KUMI_VERSION` 指定的版本）。在维护者发布之前，发布版本只是草稿，只有已发布的版本才是“latest”。不会向 npm 发布任何内容：每个包都是 `private: true`，所以 `npm publish` 会拒绝。
 
@@ -30,22 +30,20 @@ Kumi 及其桥接如何送到用户手中，这能证明什么、不能证明什
 
 除此之外别无他物：没有构建脚本、测试夹具、`node_modules`、凭据、配置、本地状态、日志、捕获的媒体或证据。原生构建器和生命周期会严格核对 `release-manifest.json` 中的文件清单和哈希。
 
-保留的旧 npm 包使用编译后的 JavaScript 和类型声明，而非原生二进制文件。其 `npm run package:verify` 核对明确的文件清单；CI 会将这个旧包打包两次，第二次使用全新克隆和 `npm ci`，并要求字节完全相同。
-
 ## 发布清单
 
 `release-manifest.json`（schema 为 `ableton-mcp-native-release/v1`）记录包名和版本、源码提交及工作树是否有未提交的修改、Rust 目标平台、rustc 和 Cargo 版本、运行器镜像、`Cargo.lock` 和 CI 工作流的 SHA-256、构建方法、协议注册表哈希，以及每个载荷文件的角色和 SHA-256。
 
 分发字段为 `channel: "local-native-tarball"`，`published`、`signed`、`notarized` 和 `integrityIsIdentityProof` 均为 `false`。生命周期要求这些值。tarball 根据哈希从本地路径安装，随 GitHub Releases 上的 Kumi 发行包送到用户手中，不发布到包注册表。
 
-为支持现有安装的升级和回滚，生命周期也接受旧 schema `ableton-mcp-release/v2` 和 `ableton-mcp-private-release/v1`。这些清单的 Node/npm/TypeScript 构建记录及 `local-npm-tarball` 渠道描述的是保留的旧产物。
+为支持现有安装的升级和回滚，生命周期也接受旧 schema `ableton-mcp-release/v2` 和 `ableton-mcp-private-release/v1`。这些清单的 Node/npm/TypeScript 构建记录及 `local-npm-tarball` 渠道描述的是 Kumi 1.7.5 及更早版本的桥接包。
 
 ## 合并门禁
 
 `main` 分支有一套规则集：
 
 - 修改通过拉取请求进入；不要求批准性审查；
-- 必需的检查，必须在分支与 `main` 保持同步的状态下通过：`Required CI`、`Kumi / Node 22`、`Kumi / Node 24`、`Kumi / Windows / Node 24` 和 `Kumi / macOS / Node 24`；
+- 一项必需的检查 `Required CI`，必须在分支与 `main` 保持同步的状态下通过；
 - `main` 不能被删除或强制推送；
 - 仓库管理员角色可以对拉取请求绕过这些规则。
 

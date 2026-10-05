@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/library/learn.ts`.
 //! Learn changed sounds, presets and Sets, persisting progress as each batch finishes.
 use super::{
     classify::{ClassFrom, SoundClass, SoundKind},

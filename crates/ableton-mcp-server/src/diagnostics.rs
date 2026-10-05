@@ -1,4 +1,3 @@
-//! Native equivalent of `apps/mcp-server/src/diagnostics.ts`.
 use crate::{command::CommandOutput, delivery::diagnostics_async};
 use std::path::Path;
 pub async fn run(args: &[String]) -> CommandOutput {

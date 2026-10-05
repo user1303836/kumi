@@ -1,4 +1,4 @@
-//! Port of `apps/kumi/test/update.test.ts`, rebuilding with Cargo.
+//! `kumi update` for a checkout, rebuilding with Cargo.
 use futures::FutureExt;
 use kumi::{
     bridge_setup::{executable_name, Ran, Run},
@@ -29,6 +29,10 @@ impl TtyOutput for Out {
         self.0.borrow_mut().push_str(s)
     }
 }
+/// A checkout's bridge crate manifest, where a source update reads the bridge version it brings.
+fn bridge_manifest(version: &str) -> String {
+    format!("[package]\nname = \"ableton-mcp-server\"\nversion = \"{version}\"\nedition.workspace = true\n\n[dependencies]\nserde_json = {{ version = \"1\" }}\n")
+}
 struct Checkout {
     root: tempfile::TempDir,
     repo: String,
@@ -39,9 +43,9 @@ impl Checkout {
         let root = tempfile::tempdir().unwrap();
         let repo = root.path().join("repo");
         fs::create_dir_all(repo.join(".git")).unwrap();
-        fs::create_dir_all(repo.join("apps/mcp-server")).unwrap();
+        fs::create_dir_all(repo.join("crates/ableton-mcp-server")).unwrap();
         fs::write(repo.join("package.json"), json!({"version":kumi}).to_string()).unwrap();
-        fs::write(repo.join("apps/mcp-server/package.json"), json!({"version":bundled}).to_string()).unwrap();
+        fs::write(repo.join("crates/ableton-mcp-server/Cargo.toml"), bridge_manifest(bundled)).unwrap();
         let mut env = Env::from([("KUMI_REMOTE_SCRIPTS_DIR".into(), root.path().join("none").display().to_string())]);
         if let Some(installed) = installed {
             let scripts = root.path().join("Remote Scripts");
@@ -200,7 +204,7 @@ async fn update_moves_forward_rebuilds_native_and_updates_bridge_only_when_live_
         behind: 3,
         on_merge: Some(Rc::new(move || {
             fs::write(PathBuf::from(&repo).join("package.json"), json!({"version":"1.0.1"}).to_string()).unwrap();
-            fs::write(PathBuf::from(&repo).join("apps/mcp-server/package.json"), json!({"version":"1.0.40"}).to_string()).unwrap();
+            fs::write(PathBuf::from(&repo).join("crates/ableton-mcp-server/Cargo.toml"), bridge_manifest("1.0.40")).unwrap();
         })),
         ..Default::default()
     });

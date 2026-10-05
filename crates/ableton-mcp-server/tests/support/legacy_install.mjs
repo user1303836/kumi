@@ -1,26 +1,12 @@
-// Create the old installation with the unmodified TypeScript lifecycle, including its
-// source fixture package/archive, receipt, config, secret, and managed Live assets.
-import fs from 'node:fs';import path from 'node:path';import {pathToFileURL} from 'node:url';import {createRequire} from 'node:module';
-const ts=createRequire(path.join(process.cwd(),'package.json'))('typescript');
+// Create the old installation with the last JavaScript bridge's own lifecycle, from the published
+// Kumi 1.7.5 bundle (input.bundle): its source fixture package/archive, receipt, config, secret,
+// and managed Live assets. The fixture writes the preexisting user-owned secret with the bundle's
+// secure writer too: a mode of 0600 alone does not remove inherited Windows access rules.
+import fs from 'node:fs';import path from 'node:path';import {pathToFileURL} from 'node:url';
 const input=JSON.parse(process.argv[2]),root=process.cwd();
-// Build only the reference dependency graph into this test's temporary tree. CI needs
-// TypeScript from npm ci, but no checked-out dist files or separate reference build.
-const reference=path.join(input.root,'source-reference');const packageRoot=path.join(reference,'apps/mcp-server');
-fs.mkdirSync(packageRoot,{recursive:true});fs.copyFileSync('apps/mcp-server/package.json',path.join(packageRoot,'package.json'));
-fs.mkdirSync(path.join(reference,'protocol'),{recursive:true});fs.copyFileSync('protocol/ableton-live-v1.operations.json',path.join(reference,'protocol/ableton-live-v1.operations.json'));
-const compiled=new Set();
-function compile(name){
- const sourcePath=path.resolve(root,'apps/mcp-server/src',name);if(compiled.has(sourcePath))return;compiled.add(sourcePath);
- const input=fs.readFileSync(sourcePath,'utf8');const code=ts.transpileModule(input,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
- const output=path.join(packageRoot,'dist/src',path.relative(path.join(root,'apps/mcp-server/src'),sourcePath).replace(/\.ts$/,'.js'));fs.mkdirSync(path.dirname(output),{recursive:true});fs.writeFileSync(output,code);
- for(const imported of ts.preProcessFile(code,true,true).importedFiles){if(imported.fileName.startsWith('.'))compile(path.relative(path.join(root,'apps/mcp-server/src'),path.resolve(path.dirname(sourcePath),imported.fileName.replace(/\.js$/,'.ts'))));}
-}
-for(const name of ['delivery','live','lifecycle'])compile(name+'.ts');
-let source=fs.readFileSync('apps/mcp-server/test/lifecycle.test.ts','utf8').split('test("lifecycle plan is')[0];
-// Use the source's secure writer for the preexisting user-owned secret too.
-// A mode of 0600 alone does not remove inherited Windows access rules.
-source=source.replace('import { secretPermissions }','import { secretPermissions, writeSecretFile }');
-for(const name of ['delivery','live','lifecycle'])source=source.replaceAll(`"../src/${name}.js"`,JSON.stringify(pathToFileURL(path.join(packageRoot,`dist/src/${name}.js`)).href));
+const dist=path.join(input.bundle,'apps/mcp-server/dist/src');
+let source=fs.readFileSync(new URL('./legacy_lifecycle_fixture.mjs',import.meta.url),'utf8');
+for(const name of ['delivery','live','lifecycle'])source=source.replaceAll(`"../src/${name}.js"`,JSON.stringify(pathToFileURL(path.join(dist,`${name}.js`)).href));
 source=source.replace('new URL("../../../../LICENSE.md", import.meta.url)',JSON.stringify(path.join(root,'LICENSE.md')));
 source+=`
 const input=${JSON.stringify(input)};
@@ -41,7 +27,5 @@ const options=await withPorts(lifecycleOptions(input.root,packageRoot,'install',
 const installed=await runLifecycle(options);
 export default {options,installed,receipt:receipt(options)};
 `;
-const code=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
-const {default:result}=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
-fs.rmSync(reference,{recursive:true,force:true});
+const {default:result}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
 process.stdout.write(JSON.stringify(result));

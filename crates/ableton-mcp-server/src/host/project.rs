@@ -139,7 +139,7 @@ impl McpHost {
                     &serde_json::to_value(snapshot).unwrap(),
                     &CreateSemanticProjectOptions {
                         profile: Some(wanted.into()),
-                        exporter_version: SERVER_VERSION.into(),
+                        exporter_version: self.server_version().into(),
                         live,
                         project_path: path,
                         source_evidence: None,
@@ -211,7 +211,7 @@ let artifact = project(create_offline_als_artifact(
                     &model,
                     &OfflineAlsArtifactOptions {
                         profile: Some(profile(params.get("profile"), "collaboration")?),
-                        exporter_version: SERVER_VERSION.into(),
+                        exporter_version: self.server_version().into(),
                         max_records: params["maxRecords"].as_f64(),
                     },
                 ))?;
@@ -310,7 +310,7 @@ result["midi"] = json!({"clips":clips,"truncated":truncated,"noteBudget":4096,"c
                     &model,
                     &OfflineAlsArtifactOptions {
                         profile: Some(profile(args.get("profile"), fallback)?),
-                        exporter_version: SERVER_VERSION.into(),
+                        exporter_version: self.server_version().into(),
                         max_records: None,
                     },
                 ));

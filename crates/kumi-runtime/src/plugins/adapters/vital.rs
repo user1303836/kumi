@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/plugins/adapters/vital.ts`.
-
 use std::sync::LazyLock;
 
 use crate::plugins::adapter::{

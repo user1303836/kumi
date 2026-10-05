@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/ears/capture.ts`.
-//!
 //! What a listening device wrote, made sense of: its raw 32-bit floats (left, right, the beat's phase and
 //! Live's position), trimmed to what it recorded, cut where Live's transport ran or jumped, and placed on
 //! the Set's beats, so Kumi can take exactly the part it played and hand it to the ear as an ordinary WAV.

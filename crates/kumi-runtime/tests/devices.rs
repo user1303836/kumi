@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/test/devices.test.ts`.
-
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Once;

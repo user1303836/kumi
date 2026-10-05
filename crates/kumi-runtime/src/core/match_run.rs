@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/core/match-run.ts`.
-//!
 //! Match runs: for "make it sound like this", the harness decides when to stop, not the model. Each
 //! time the model ends its answer, the run looks at the auditions so far (auditioning the current
 //! best itself when something changed since), and either ends it (the target reached, no gain after

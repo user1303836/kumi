@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/audio/worker.ts`.
-
 use super::{
     analyze::{analyze_file, Analysis, AnalyzeOptions},
     decode::AudioError,

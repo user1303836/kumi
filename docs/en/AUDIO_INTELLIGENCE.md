@@ -90,12 +90,11 @@ experiment to try and capture again, not a promised dB correction.
 ## Workers
 
 Analysis never runs on the host's own event loop. Each job runs in a
-throwaway Node process:
+throwaway worker process, `ableton-mcp-analysis-worker`:
 
 | What | Limit |
 | --- | --- |
 | Jobs | 2 at once, 4 waiting |
-| Memory | 512 MiB heap |
 | Time | 30 seconds |
 | Request | 64 MiB |
 | Output | 2 MiB result, 16 KiB of error text |
@@ -184,21 +183,17 @@ Don't start another capture while anything is left.
 ## Checking the analysis
 
 The standards analysis is checked against FFmpeg's independent `ebur128`
-filter with generated audio (no third-party recordings):
+filter with generated audio (no third-party recordings): the bridge's tests
+(`crates/ableton-mcp-server/tests/audio_standards.rs`) hold it to FFmpeg's
+results for those signals, from the tracked report
+[phase-8-audio-oracle.json](../evidence/phase-8-audio-oracle.json)
+(2026-07-27). The tolerance is 0.1 LU or dB at 48 kHz and 0.15 dBTP for
+44.1 kHz true peak. The published standards stay the definition; FFmpeg is a
+cross-check.
 
-```sh
-cd apps/mcp-server
-npm run audio:oracle
-```
-
-The tolerance is 0.1 LU or dB at 48 kHz and 0.15 dBTP for 44.1 kHz true peak.
-The published standards stay the definition; FFmpeg is a cross-check. The
-tracked report is [phase-8-audio-oracle.json](../evidence/phase-8-audio-oracle.json)
-(2026-07-27).
-
-`npm run audio:live-verify` (`apps/mcp-server/scripts/verify-phase8-live.mjs`)
-repeats the capture checks on real Live; [testing](TESTING.md) lists what it
-needs. Its last tracked run,
+On real Live, Kumi's opt-in acceptance run (`accept_live`; see
+[testing](TESTING.md)) plays, bounces and listens. The last tracked run of the
+earlier capture verifier,
 [phase-8-audio-live.json](../evidence/phase-8-audio-live.json), was on Live
 12.4.5b8 on macOS (2026-07-27, bridge 0.1.0) and predates the current bridge.
 No Windows run is tracked.

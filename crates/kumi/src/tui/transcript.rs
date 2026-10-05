@@ -1,4 +1,4 @@
-//! Port of `apps/kumi/src/tui/transcript.ts`: conversation rows and timed repeated-step folding.
+//! Conversation rows and timed repeated-step folding.
 use super::{
     activity::{activity_of, blend_steps, Activity},
     markdown::render_markdown,

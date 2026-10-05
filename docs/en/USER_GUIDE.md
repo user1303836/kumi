@@ -29,9 +29,6 @@ must remain beside the server. No separate Node runtime is needed.
 - **From source:** run `cargo build --release --locked -p ableton-mcp-server --bins` at the repository
   root. `target/release/ableton-mcp-server` starts with offline tools until given a configuration.
 
-The retained Node package and its npm commands are legacy tooling and the TypeScript parity
-reference. They require Node 22 or 24; that requirement does not apply to native packages.
-
 ## Connect to Live
 
 The lifecycle installer creates the owner-only secret and configuration, installs the Remote

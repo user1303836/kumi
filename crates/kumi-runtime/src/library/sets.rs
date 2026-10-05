@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/library/sets.ts`.
 //! The producer's Live Sets, read without opening Live: tracks, chains, clips, samples and settings.
 use super::{
     sources::{dirname, is_absolute, join},

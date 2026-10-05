@@ -12,7 +12,7 @@ publish = false
 name = "kumi_runtime"
 path = "src/lib.rs"
 
-# The device harness's isolated child (packages/runtime/src/devices/harness-child.ts).
+# The device harness's isolated child.
 [[bin]]
 name = "kumi-harness"
 path = "src/bin/kumi-harness.rs"
@@ -44,7 +44,7 @@ rand.workspace = true
 regex.workspace = true
 fancy-regex.workspace = true
 reqwest.workspace = true
-# Max for Live device code, run in a sandbox (packages/runtime/src/devices/harness.ts used node:vm).
+# Max for Live device code, run in a sandbox.
 rquickjs = { version = "0.9", features = ["bindgen", "classes", "properties"] }
 serde.workspace = true
 serde_json.workspace = true

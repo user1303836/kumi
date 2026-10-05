@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/devices/`.
-
 pub mod amxd;
 pub mod gen;
 pub mod harness;

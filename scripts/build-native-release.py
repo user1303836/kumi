@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "ableton-mcp-native-release/v1"
 BRIDGE_BINARIES = ("ableton-mcp-server", "ableton-mcp-analysis-worker")
 BINARIES = ("kumi", *BRIDGE_BINARIES, "kumi-harness", "kumi-library-measure", "kumi-library-learner")
-DOCUMENTS = [("apps/mcp-server/README.md", "README.md")] + [(f"docs/en/{name}.md", f"{name}.md") for name in (
+DOCUMENTS = [("crates/ableton-mcp-server/README.md", "README.md")] + [(f"docs/en/{name}.md", f"{name}.md") for name in (
     "USER_GUIDE", "USER_JOURNEYS", "OPERATIONS", "RECOVERY", "LIVE_SAFETY", "AUDIO_INTELLIGENCE",
     "REALTIME_CONTROL", "DELIVERY", "DEVELOPER_GUIDE", "TESTING", "IMPLEMENTATION_STATUS",
     "DISTRIBUTION_POLICY", "SUPPORT_MATRIX", "CAPABILITY_MATRIX")]
@@ -101,7 +101,7 @@ def document_target(root: Path, source: str, target: str, revision: str, kind: s
         if normalized == ".." or normalized.startswith("../"):
             raise ValueError(f"documentation target escapes repository: {source} -> {target}")
         mapped = dict(DOCUMENTS).get(normalized)
-        relative = {"LICENSE.md": "../LICENSE.md", "apps/mcp-server/package.json": "../package.json",
+        relative = {"LICENSE.md": "../LICENSE.md",
                     "protocol/ableton-live-v1.operations.json": "../remote-script/AbletonMcpBridge/ableton-live-v1.operations.json"}
         if mapped or normalized in relative:
             result = (mapped or relative[normalized]) + suffix
@@ -151,7 +151,7 @@ def stage_assets(root: Path, package: Path, revision: str) -> str:
     copy(root / "LICENSE.md", package / "LICENSE.md")
     if digest(package / "LICENSE.md") != MIT_SHA256:
         raise ValueError("release license differs from the receipt policy's MIT license")
-    copy(root / "apps/mcp-server/README.md", package / "README.md")
+    copy(root / "crates/ableton-mcp-server/README.md", package / "README.md")
     for source, destination in DOCUMENTS:
         target = package / "release-docs" / destination
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -199,7 +199,7 @@ def archive(folder: Path, destination: Path, prefix: str, timestamp: int) -> str
 
 def stage_hands(root: Path, bundle: Path, target: str) -> None:
     name = "kumi-hands-" + digest(root / "crates/kumi-runtime/src/hands/KumiHands.swift")[:12]
-    hands = root / "packages/runtime/hands"
+    hands = root / "target/hands"
     files = inventory(hands) if hands.exists() else {}
     if any(candidate != name for candidate in files):
         raise ValueError(f"hands helper payload must match the current source: {name}")
@@ -207,7 +207,7 @@ def stage_hands(root: Path, bundle: Path, target: str) -> None:
         if target.endswith("-apple-darwin"):
             raise ValueError(f"macOS release requires {hands / name}; run python3 scripts/build-hands.py first")
         return
-    # Keep the installed path used by the JavaScript release's Accessibility helper.
+    # The installed path of the JavaScript releases' helper: macOS ties the Accessibility permission to it.
     destination = bundle / "packages/runtime/hands" / name
     copy(hands / name, destination)
     destination.chmod(0o755)

@@ -153,7 +153,7 @@ pub(super) async fn run_session(
             .boxed_local()
         })
     };
-    let bundled = bridge_setup::bridge_version(&bridge_setup::bundled_bridge_dir());
+    let bundled = bridge_setup::bundled_bridge_version();
     let project_store = create_project_store(&projects_dir);
     let restore_file = load_restore_file(&io.env)?;
     let user_library = live_user_library(&io.env);
@@ -276,6 +276,7 @@ pub(super) async fn run_session(
     options.playbook = Some(create_playbook_store(load_playbook_file(&io.env)?));
     options.goals = Some(create_goal_store(load_goals_dir(&io.env)?));
     options.gaps = Some(load_gaps_file(&io.env)?);
+    options.timings = Some(load_timings_file(&io.env)?);
     options.watch = Some(VideoDirectories { videos_dir: load_videos_dir(&io.env)?, tools_dir: tools_dir.clone() });
     options.web = true;
     options.library = Some(library.clone());

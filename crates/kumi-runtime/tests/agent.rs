@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/test/agent.test.ts`.
-
 use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::rc::Rc;

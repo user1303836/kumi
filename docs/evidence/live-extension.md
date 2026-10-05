@@ -1,7 +1,7 @@
 # Kumi's Live extension on real Live
 
 Measured on Live 12.4.15b5 (macOS, arm64) with the Extensions SDK 1.0.0-beta.1, 2026-09-30.
-Kumi's extension is `apps/live-extension`; the bridge reaches it through `apps/mcp-server/src/bridge/`.
+Kumi's extension is `apps/live-extension`; the bridge reaches it through `crates/ableton-mcp-server/src/bridge/`.
 
 > A record of measurements on bridges 1.0.57 to 1.0.65, on macOS only; it isn't updated as the bridge
 > changes. The Remote Script's read costs below come from before reads were paged: the later numbers

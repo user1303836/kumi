@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/tui/tabs.ts`.
-//!
 //! The right pane's lower half: tabs in a fixed corner, each tab's rows right under its name. A tab is a
 //! module that says its title, an optional count, and its rows for a width; the panel owns the strip,
 //! which tab is showing, each tab's scroll and the keyboard's place, and draws the window of rows with

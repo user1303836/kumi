@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/test/stdio.test.ts`.
-
 #[path = "support/streams.rs"]
 mod streams;
 

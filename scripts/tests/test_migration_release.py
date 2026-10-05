@@ -164,22 +164,10 @@ class MigrationRelease(unittest.TestCase):
         subprocess.run(["rustc", str(fixture), "-C", "debuginfo=0", "-o", str(cargo)], check=True)
         log = self.root / "cargo.log"
         env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"], KUMI_SHIM_LOG=str(log), KUMI_INSTALLED="1")
-        env.pop("KUMI_REFERENCE_RUNTIME", None)
         result = subprocess.run(["node", str(release.native.ROOT / "scripts/native-kumi.mjs"), "--model", "a model with spaces"], env=env, cwd=self.root, capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("checkout native fixture", result.stdout)
         self.assertEqual(log.read_text(encoding="utf-8").splitlines(), ["--version", "build|--quiet|--release|--locked|--workspace|--bins", "run|--quiet|--release|--locked|-p|kumi|--|--model|a model with spaces"])
-
-    def test_reference_switch_is_confined_to_npm_shim_and_skips_native_acquisition(self):
-        checkout = self.root / "reference checkout"
-        (checkout / "scripts").mkdir(parents=True)
-        shutil.copyfile(release.native.ROOT / "scripts/native-kumi.mjs", checkout / "scripts/native-kumi.mjs")
-        entry = checkout / "apps/kumi/bin/kumi.mjs"
-        entry.parent.mkdir(parents=True)
-        entry.write_text("console.log('reference fixture: ' + process.argv.slice(2).join('|'))", encoding="utf-8")
-        result = subprocess.run(["node", str(checkout / "scripts/native-kumi.mjs"), "--help"], env=dict(os.environ, KUMI_REFERENCE_RUNTIME="1"), capture_output=True, text=True, encoding="utf-8")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "reference fixture: --help\n")
 
     def test_npm_handoff_failure_does_not_log_private_environment_values(self):
         checkout = self.root / "launcher checkout"
@@ -200,7 +188,6 @@ class MigrationRelease(unittest.TestCase):
         env = dict(os.environ, PATH=str(tools), KUMI_TEST_SYSTEM_ROOT=str(system),
                    KUMI_HOME=str(self.root / "launcher-home-private-marker"),
                    KUMI_VERSION="launcher-version-private-marker")
-        env.pop("KUMI_REFERENCE_RUNTIME", None)
         for missing_helper in (False, True):
             if missing_helper:
                 helper.unlink()
@@ -228,7 +215,6 @@ class MigrationRelease(unittest.TestCase):
             (home / "auth.json").write_text('{"version":1,"credentials":{"fixture":"unchanged"}}', encoding="utf-8")
             env = dict(os.environ, KUMI_HOME=str(home), KUMI_RELEASES=f"http://127.0.0.1:{server.server_port}",
                        KUMI_NO_MODIFY_PATH="1", PATH="/usr/bin:/bin:/usr/sbin:/sbin")
-            env.pop("KUMI_REFERENCE_RUNTIME", None)
             result = subprocess.run([shutil.which("node"), str(release.native.ROOT / "scripts/native-kumi.mjs"), "--setup"], env=env, capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("switching this npm installation to the native release", result.stdout)
@@ -320,17 +306,22 @@ class MigrationRelease(unittest.TestCase):
         template = script.split("$launcher = @'\n", 1)[1].split("\n'@", 1)[0]
         return (template.replace("\n", "\r\n") + "\r\n").encode("ascii")
 
+    def legacy_app(self):
+        if not os.environ.get("KUMI_LEGACY_APP"):
+            self.skipTest("set KUMI_LEGACY_APP to an unpacked Kumi 1.7.5 (python3 scripts/fetch-legacy-release.py prints one)")
+        return Path(os.environ["KUMI_LEGACY_APP"])
+
     def legacy_installation(self, home, windows_crlf=False):
-        reference_root = Path(os.environ.get("KUMI_TS_REFERENCE", release.native.ROOT))
+        legacy_app = self.legacy_app()
         home.mkdir()
         markers = self.existing_data(home)
         old_entry = home / "app/apps/kumi/bin/kumi.mjs"
         old_entry.parent.mkdir(parents=True)
-        # The actual old Node entry and CLI execute; a wrapper resolves reference dependencies.
-        shutil.copyfile(reference_root / "apps/kumi/bin/kumi.mjs", old_entry)
+        # The published 1.7.5 Node entry and CLI execute; a wrapper resolves their dependencies there.
+        shutil.copyfile(legacy_app / "apps/kumi/bin/kumi.mjs", old_entry)
         old_cli = home / "app/apps/kumi/dist/src/cli.js"
         old_cli.parent.mkdir(parents=True)
-        old_cli.write_text("await import(" + json.dumps((reference_root / "apps/kumi/dist/src/cli.js").as_uri()) + ");\n", encoding="utf-8")
+        old_cli.write_text("await import(" + json.dumps((legacy_app / "apps/kumi/dist/src/cli.js").as_uri()) + ");\n", encoding="utf-8")
         (home / "app/package.json").write_text('{"version":"1.7.5","type":"module"}', encoding="utf-8")
         original_entry = old_entry.read_bytes()
         node = home / "node" / ("node.exe" if os.name == "nt" else "bin/node")
@@ -356,8 +347,8 @@ class MigrationRelease(unittest.TestCase):
         legacy_root = home / "legacy bridge"
         legacy_root.mkdir()
         installed = subprocess.run(["node", str(release.native.ROOT / "crates/ableton-mcp-server/tests/support/legacy_install.mjs"),
-                                    json.dumps({"root":str(legacy_root),"version":"1.0.74","custom":False,"clean":True})],
-                                   cwd=reference_root, capture_output=True, text=True, encoding="utf-8", timeout=60)
+                                    json.dumps({"root":str(legacy_root),"version":"1.0.74","custom":False,"clean":True,"bundle":str(legacy_app)})],
+                                   cwd=release.native.ROOT, capture_output=True, text=True, encoding="utf-8", timeout=60)
         self.assertEqual(installed.returncode, 0, installed.stderr)
         old = json.loads(installed.stdout)["receipt"]
         env = self.production_environment(home, Path(old["remoteScriptsDirectory"]))
@@ -529,10 +520,8 @@ class MigrationRelease(unittest.TestCase):
         self.check_existing_data(home, markers)
         self.check_windows_launcher(launcher, self.native_windows_launcher())
 
-    def test_actual_source_installed_updater_swaps_after_native_probe_and_retains_user_data(self):
-        reference = Path(os.environ.get("KUMI_TS_REFERENCE", release.native.ROOT)) / "apps/kumi/dist/src/install.js"
-        if not reference.exists():
-            self.skipTest("build the authoritative TypeScript reference or set KUMI_TS_REFERENCE")
+    def test_published_updater_swaps_after_native_probe_and_retains_user_data(self):
+        reference = self.legacy_app() / "apps/kumi/dist/src/install.js"
         home = self.root / "home"
         entry = home / "app/apps/kumi/bin/kumi.mjs"
         entry.parent.mkdir(parents=True)

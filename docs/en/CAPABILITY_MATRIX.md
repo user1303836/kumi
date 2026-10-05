@@ -32,11 +32,11 @@ to undo: playback, momentary actions, reads. [Live safety](LIVE_SAFETY.md) has
 the details.
 
 **Real Live** says where an area was last exercised on real Live:
-*acceptance* is Kumi's acceptance run (`accept:live`) on Live 12.4.15b5 with
+*acceptance* is Kumi's acceptance run (`accept_live`) on Live 12.4.15b5 with
 bridge 1.0.63; *earlier runs* are other runs on Live 12.4.15 beta with bridges
 1.0.0 to 1.0.65; *July runs* are the bridge's first runs, on Live 12.4.5b8 with
-bridge 0.1.0. *Not yet* means only the tests, which run with Node 22/24 on
-macOS, Linux and Windows against fake Live objects. The records are indexed in
+bridge 0.1.0. *Not yet* means only the tests, which run on macOS, Linux and
+Windows against fake Live objects. The records are indexed in
 [implementation status](IMPLEMENTATION_STATUS.md#evidence).
 
 ## Coverage by area

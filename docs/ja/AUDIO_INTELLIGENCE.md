@@ -53,12 +53,11 @@ MCP クライアント向けの、ブリッジのオーディオツールです�
 
 ## ワーカー
 
-解析がホスト自身のイベントループで実行されることはありません。各ジョブは使い捨ての Node プロセスで実行されます。
+解析がホスト自身のイベントループで実行されることはありません。各ジョブは使い捨てのワーカープロセス `ableton-mcp-analysis-worker` で実行されます。
 
 | 項目 | 制限 |
 | --- | --- |
 | ジョブ | 同時に 2 つ、待機 4 つ |
-| メモリー | 512 MiB のヒープ |
 | 時間 | 30 秒 |
 | リクエスト | 64 MiB |
 | 出力 | 結果 2 MiB、エラーテキスト 16 KiB |
@@ -107,16 +106,9 @@ Live 内のウォッチドッグは、最大 10 秒（要求された長さ + 3 
 
 ## 解析の検証
 
-規格に沿った解析は、生成したオーディオ（第三者の録音は使いません）で、FFmpeg の独立した `ebur128` フィルターと照らし合わせて確認しています。
+規格に沿った解析は、生成したオーディオ（第三者の録音は使いません）で、FFmpeg の独立した `ebur128` フィルターと照らし合わせて確認しています。ブリッジのテスト（`crates/ableton-mcp-server/tests/audio_standards.rs`）が、記録されているレポート [phase-8-audio-oracle.json](../evidence/phase-8-audio-oracle.json)（2026-07-27）にある、それらの信号に対する FFmpeg の結果と解析を照らし合わせます。許容誤差は、48 kHz で 0.1 LU または dB、44.1 kHz のトゥルーピークで 0.15 dBTP です。定義はあくまで公開された規格で、FFmpeg は照合のためのものです。
 
-```sh
-cd apps/mcp-server
-npm run audio:oracle
-```
-
-許容誤差は、48 kHz で 0.1 LU または dB、44.1 kHz のトゥルーピークで 0.15 dBTP です。定義はあくまで公開された規格で、FFmpeg は照合のためのものです。記録されているレポートは [phase-8-audio-oracle.json](../evidence/phase-8-audio-oracle.json)（2026-07-27）です。
-
-`npm run audio:live-verify`（`apps/mcp-server/scripts/verify-phase8-live.mjs`）は、実際の Live でキャプチャの確認を繰り返します。必要なものは[テスト](TESTING.md)に載っています。記録されている最後の実行 [phase-8-audio-live.json](../evidence/phase-8-audio-live.json) は、macOS 上の Live 12.4.5b8（2026-07-27、ブリッジ 0.1.0）でのもので、現在のブリッジより前のものです。Windows での実行は記録されていません。
+実際の Live では、Kumi のオプトインの受け入れテスト（`accept_live`。[テスト](TESTING.md)を参照）が再生、バウンス、聴き取りを行います。以前のキャプチャ検証ツールで記録されている最後の実行 [phase-8-audio-live.json](../evidence/phase-8-audio-live.json) は、macOS 上の Live 12.4.5b8（2026-07-27、ブリッジ 0.1.0）でのもので、現在のブリッジより前のものです。Windows での実行は記録されていません。
 
 ## 制限
 

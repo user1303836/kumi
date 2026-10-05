@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/kernel/failure.ts`.
-
 use std::collections::HashMap;
 use std::sync::LazyLock;
 

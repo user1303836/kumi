@@ -6,20 +6,20 @@
 
 ## バージョン
 
-[変更履歴](../../CHANGELOG.md)の各リリースには、同梱されるブリッジのバージョンが記載されています。すべてのブリッジのバージョンは[ブリッジのバージョン](KUMI_CHANGES.md#ブリッジのバージョン)に一覧があります。バージョン番号そのものは、`Cargo.toml` と `package.json` ファイル（Kumi、ブリッジ）と `apps/live-extension/manifest.json`（拡張機能）にあります。
+[変更履歴](../../CHANGELOG.md)の各リリースには、同梱されるブリッジのバージョンが記載されています。すべてのブリッジのバージョンは[ブリッジのバージョン](KUMI_CHANGES.md#ブリッジのバージョン)に一覧があります。バージョン番号そのものは、クレートの `Cargo.toml` ファイル（Kumi、ブリッジ）、ルートの `package.json`（Kumi）、`apps/live-extension/manifest.json`（拡張機能）にあります。
 
 | 部分 | バージョン |
 | --- | --- |
-| Live プロトコル | `ableton-live/v1`。レジストリのハッシュは[機能マニフェスト](../evidence/capability-manifest.json)にあります |
+| Live プロトコル | `ableton-live/v1`。レジストリのハッシュは各リリースの `release-manifest.json` に記録されます |
 | MCP プロトコルの世代 | `2025-11-25` と `2026-07-28` |
 | ランタイム | アプリと単体のブリッジはネイティブ Rust。新規インストールに Node は不要 |
-| TypeScript 参照版と旧インストール | Node 22/24。残された Node はロールバックと任意の YouTube チャレンジ処理にも使用（[詳細](SUPPORT_MATRIX.md)） |
+| 以前のインストール（Kumi 1.7.5 以前） | Node 22/24。残された Node はロールバックと任意の YouTube チャレンジ処理にも使用（[詳細](SUPPORT_MATRIX.md)） |
 
 ## どこで何をテストしたか
 
 以下の本物の Live の記録は、過去の TypeScript リリースのものです。ネイティブ版の CI と移行テストは、新たな実機での受け入れテストの代わりにはなりません。
 
-- **すべてのプルリクエスト：** ネイティブ Rust のビルドとテスト、6 ターゲットのバンドル、インストールと移行テスト、および Node 22 と 24 の TypeScript 参照テスト。[CI](TESTING.md#ci) を参照してください。
+- **すべてのプルリクエスト：** ネイティブ Rust のビルドとテスト、Remote Script と Live 拡張機能のテスト、6 ターゲットのバンドル、インストールと移行のテスト。[CI](TESTING.md#ci) を参照してください。
 - **macOS 上の本物の Live**（Apple silicon、Live 12.4.15 beta）：Kumi が行うあらゆる種類の変更と、そのそれぞれを Kumi で取り消すこと（ブリッジ 1.0.62 と 1.0.63 で 65 件中 65 件、19 トラックと 200 トラックの Set で）、再生、バウンス、聴き取り、監視、Kumi の拡張機能によるオフラインレンダリングと右クリックメニュー、そして Willington による編集。
 - **Windows 上の本物の Live**（Windows 10、Live 12.4.15 beta、Kumi 1.6.0 とブリッジ 1.0.71）：移動した User Library へのブリッジのインストール、Remote Script の読み込み、Kumi の接続。これについての記録ファイルはまだありません。
 
@@ -36,7 +36,7 @@
 | [kumi-clip-follow-actions-b5.json](../evidence/kumi-clip-follow-actions-b5.json) | 2026-09-30 | 12.4.15b5 | 1.0.53 | Willington を通じた Follow Actions と Legato。読み戻しと取り消し |
 | [willington-kumi-chat.json](../evidence/willington-kumi-chat.json) | 2026-09-30 | 12.4.15b4 | 1.0.52 | Willington による編集を使った Kumi との会話。それぞれ取り消し済み |
 | [rack-zones-b5.json](../evidence/rack-zones-b5.json) | 2026-10-01、2026-10-02 | 12.4.15b5 | 1.0.66 | Willington を通じたラックのチェーンゾーン：読み取り、書き込み、取り消し、保存して開き直し。その後、信号のゲート、フェード、Max の `live.object` での書き込み・読み戻し・復元 |
-| [capability-manifest.json](../evidence/capability-manifest.json) | レジストリとともに再生成 | — | 現行 | レジストリのすべての操作（実行可能なものと予約済みのもの）と、レジストリのハッシュ |
+| [capability-manifest.json](../evidence/capability-manifest.json) | Kumi 1.7.6 時点（2026-10-04） | — | 1.0.74 | レジストリのすべての操作（実行可能なものと予約済みのもの）と、レジストリのハッシュ。今後は再生成されません |
 | `phase-3`〜`phase-9` のファイル | 2026-07-26〜07-28 | 12.4.5b8 | 0.1.0 | Kumi 以前の、ブリッジの最初の本物の Live での実行：ディスカバリー、試聴、トランスポート、クリップ、アレンジメント、ミキサー、オートメーション、デバイス、Browser、ルーティング、録音、プロジェクトファイル、イベント、リアルタイムとキャプチャ。加えて [FFmpeg のラウドネスオラクル](../evidence/phase-8-audio-oracle.json)と、偽の Live に対するパッケージ版でのジャーニー。過去の記録です：ブリッジはその後大きく変わっています。 |
 
 ## 既知の制限

@@ -13,32 +13,21 @@ smithers.db-wal
 /.agents/
 /.claude/
 /.pi-subagents/
-apps/mcp-server/remote-script/
-apps/mcp-server/live-extension/
-apps/mcp-server/release-docs/
-apps/mcp-server/release-manifest.json
-apps/mcp-server/LICENSE.md
-apps/mcp-server/*.tgz
 
 # Python bytecode
 __pycache__/
 *.pyc
 /.pi/
 
-# Kumi workspace generated output
+# npm installs
 /node_modules/
-/apps/kumi/node_modules/
-/apps/kumi/dist/
-/packages/runtime/node_modules/
-/packages/runtime/dist/
 /apps/live-extension/node_modules/
-# scripts/build-release.mjs output
+/crates/kumi-runtime/tests/support/node_modules/
+# Release bundles built locally
 /release/
 
 # Local review bookkeeping
 docs/evidence/willington-review.json
-# Kumi's Mac helper, built for releases (scripts/build-hands.mjs)
-packages/runtime/hands/
 
 /target/
 

@@ -1,4 +1,4 @@
-//! Port of `apps/mcp-server/test/fixtures.ts`: PCM generators. Each builds the `Float32Array` the
+//! PCM generators. Each builds the `Float32Array` the
 //! TypeScript did, so values are `f32`; `as_f64` widens them for the analysis, as reading a
 //! `Float32Array` in JavaScript does.
 

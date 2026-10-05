@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/test/recipes.test.ts`.
 use async_trait::async_trait;
 use kumi_common::abort::{self, Signal};
 use kumi_runtime::core::{

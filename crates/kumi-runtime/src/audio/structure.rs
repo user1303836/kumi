@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/audio/structure.ts`.
 //! A song's form from bar-by-bar chroma, timbre, level and low-end similarity.
 
 use super::{

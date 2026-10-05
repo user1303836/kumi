@@ -1,4 +1,4 @@
-//! Port of `apps/kumi/test/config.test.ts`, including full source command/settings/error oracles.
+//! Configuration, with full command, settings and error oracles.
 use kumi::config::*;
 use kumi_runtime::{
     providers::Effort,

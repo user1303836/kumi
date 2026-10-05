@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/tui/screen.ts`.
-//!
 //! A grid of terminal cells that components draw into; the renderer turns it into output.
 
 use std::rc::Rc;

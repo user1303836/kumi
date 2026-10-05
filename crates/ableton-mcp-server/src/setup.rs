@@ -1,4 +1,3 @@
-//! Native equivalent of `apps/mcp-server/src/setup.ts`.
 use crate::{
     command::{number, resolve, validate, value, CommandOutput},
     delivery::*,

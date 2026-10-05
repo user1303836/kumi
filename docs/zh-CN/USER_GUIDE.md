@@ -2,8 +2,6 @@
 
 [English](../en/USER_GUIDE.md) · 简体中文 · [日本語](../ja/USER_GUIDE.md)
 
-Kumi 1.7.6 的原生桥接不需要 Node，使用 `ableton-mcp-server` 的子命令。本页中面向 Node/npm 发行包的步骤适用于旧版；当前原生版步骤请参阅[英文版](../en/USER_GUIDE.md)。使用 Kumi 时，关闭 Live 后运行 `kumi bridge` 即可。
-
 桥接是 Kumi 与 Ableton Live 之间的连接，任何 MCP 客户端也可以单独使用它。它由两部分组成：
 
 - 一个本地 MCP 服务器 `@ableton-mcp/mcp-server`；
@@ -15,79 +13,34 @@ Kumi 1.7.6 的原生桥接不需要 Node，使用 `ableton-mcp-server` 的子命
 
 ## 安装
 
-桥接运行在 Node.js 22 和 24 上（推荐 Node 24 LTS）；在其他任何主版本上，它的命令都会拒绝启动。Live 12 运行在 macOS 或 Windows 上；见[支持的平台](SUPPORT_MATRIX.md)。
+原生服务器以可执行文件的形式在 macOS、Windows 或 Linux 上运行。连接 Live 需要 macOS 或 Windows。请使用与你的操作系统和架构对应的归档包；分析工作进程必须留在服务器旁边。不需要单独的 Node 运行时。
 
-获取桥接有两种方式：
-
-- **发布 tarball**，用 `ableton-mcp-lifecycle` 安装。见[交付](DELIVERY.md)。
-- **源码检出：**
-
-  ```sh
-  cd apps/mcp-server
-  npm ci
-  npm run build
-  node dist/src/cli.js        # 服务器，未连接到 Live
-  ```
-
-不带 `--config` 启动时，服务器永远不会连接 Live，此时只有离线工具可用。
+- **使用 Kumi：** 关闭 Live，然后运行 `kumi bridge`。
+- **独立使用：** 按照[交付](DELIVERY.md)中的说明，通过 `ableton-mcp-server lifecycle` 安装原生 tarball。
+- **从源码构建：** 在仓库根目录运行 `cargo build --release --locked -p ableton-mcp-server --bins`。在得到配置之前，`target/release/ableton-mcp-server` 启动后只提供离线工具。
 
 ## 连接到 Live
 
-使用发布版时，`ableton-mcp-lifecycle install` 会完成下面的所有步骤：创建密钥和配置，安装 Remote Script，并保留一份回执用于升级和回滚。请按照[交付](DELIVERY.md)操作。在 Windows 上请使用生命周期工具：它会给密钥和配置设置桥接所检查的“仅所有者可访问”权限。
+生命周期安装程序会创建仅所有者可访问的密钥和配置，安装 Remote Script，并保留一份回执用于升级和回滚。在 Windows 上也请使用它，这样它会设置所需的文件权限。请按照[交付](DELIVERY.md)操作。
 
-从源码检出安装：
+然后打开 Live，在 **Settings → Link, Tempo & MIDI** 中选择 **AbletonMcpBridge**。用下面的命令检查连接：
 
-1. 把 Remote Script 放到构建好的包旁边：
+```sh
+/absolute/path/ableton-mcp-server diagnostics --config /absolute/path/bridge-config.json
+```
 
-   ```sh
-   node scripts/stage-remote-script.mjs
-   ```
-
-2. 生成密钥：一行至少 32 个字符、不含空格、只有你能读取的文本。
-
-   ```sh
-   umask 077
-   node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))" > /absolute/path/bridge.secret
-   ```
-
-3. 写入配置：
-
-   ```sh
-   npm run setup -- --output /absolute/path/bridge-config.json \
-     --bridge-port 9765 --realtime-port 9766 \
-     --secret-file /absolute/path/bridge.secret
-   ```
-
-4. 退出 Live。把 Remote Script 安装到 User Library 的 `Remote Scripts` 文件夹中，放在名为 `AbletonMcpBridge` 的文件夹里。先用 `--dry-run` 试一下：
-
-   ```sh
-   node dist/src/install-remote-script.js \
-     --destination "$HOME/Music/Ableton/User Library/Remote Scripts/AbletonMcpBridge" \
-     --config /absolute/path/bridge-config.json
-   ```
-
-   一定要传入 `--config`：它告诉 Remote Script 配置在哪里，没有它脚本不会启动。`--force` 会替换已有的文件夹，并把旧文件夹以 `AbletonMcpBridge.backup-<time>` 的名字保留在旁边。
-
-5. 打开 Live。在 **Settings → Link, Tempo & MIDI** 中，将 **AbletonMcpBridge** 选为控制界面（Control Surface）。
-
-6. 检查连接：
-
-   ```sh
-   npm run diagnostics -- --config /absolute/path/bridge-config.json
-   ```
-
-   查找 `"provenance": "real-live"` 和 `"readiness": { … "realLiveOperational": true }`。即使桥接没有连接，这个命令也会以 0 退出，所以请阅读报告内容。[交付](DELIVERY.md)解释了每个字段。
+查找 `"provenance": "real-live"` 和 `"readiness": { … "realLiveOperational": true }`。即使没有连接，诊断也可能以成功状态退出；请阅读报告中的 readiness 字段。
 
 ### 配置文件
 
-`ableton-mcp-setup` 会写出版本 2 的文件。服务器、Remote Script 和生命周期工具都会读取它：
+`ableton-mcp-server setup` 会写出版本 2 的文件。服务器、Remote Script 和生命周期工具都会读取它：
 
 ```json
 {
   "version": 2,
   "server": {
-    "command": "/absolute/path/node",
-    "args": ["/absolute/path/dist/src/cli.js", "--config", "/absolute/path/bridge-config.json"]
+    "command": "/absolute/path/ableton-mcp-server",
+    "args": ["--config", "/absolute/path/bridge-config.json"]
   },
   "bridge": {
     "host": "127.0.0.1",
@@ -101,15 +54,16 @@ Kumi 1.7.6 的原生桥接不需要 Node，使用 `ableton-mcp-server` 的子命
 
 | 字段 | 规则 |
 | --- | --- |
-| `server.args` | 服务器的 `cli.js`、`--config` 以及本文件自身的绝对路径 |
+| `server.command` | 原生服务器可执行文件的绝对路径 |
+| `server.args` | `--config` 以及本文件自身的绝对路径 |
 | `bridge.host` | `127.0.0.1` 或 `::1` |
 | `bridge.port` | 1–65535；Remote Script 在此端口监听 |
 | `bridge.secretFile` | 绝对路径；仅所有者可访问，至少 32 个字符 |
 | `bridge.timeoutMs` | 每个发往 Live 的请求 100–60,000 ms（默认 5,000） |
 | `bridge.realtimePort` | 可选；必须与 `port` 不同；见[实时控制](REALTIME_CONTROL.md) |
-| `bridge.diagnostics` | 可选；只由 `ableton-mcp-lifecycle install --enable-bridge-diagnostics` 写入（见[运维](OPERATIONS.md)） |
+| `bridge.diagnostics` | 可选；只由 `ableton-mcp-server lifecycle install --enable-bridge-diagnostics` 写入（见[运维](OPERATIONS.md)） |
 
-未知字段会被拒绝。该文件必须只有你能读取。不带桥接选项运行 `ableton-mcp-setup` 会写出版本 1 的文件。这种文件只说明如何启动服务器；传给 `--config` 时会被拒绝。`ableton-mcp-migrate` 可以转换旧文件（见[交付](DELIVERY.md)）。
+迁移期间，仍可读取写明 Node 和 `cli.js` 的旧版本 2 配置。未知字段会被拒绝。该文件必须只有你能读取。不带桥接选项运行 `ableton-mcp-server setup` 会写出版本 1 的文件。这种文件只说明如何启动服务器；传给 `--config` 时会被拒绝。`ableton-mcp-server migrate` 可以转换旧文件（见[交付](DELIVERY.md)）。
 
 ## 把桥接添加到 MCP 客户端
 
@@ -119,8 +73,8 @@ Kumi 1.7.6 的原生桥接不需要 Node，使用 `ableton-mcp-server` 的子命
 {
   "mcpServers": {
     "ableton": {
-      "command": "/absolute/path/node",
-      "args": ["/absolute/path/dist/src/cli.js", "--config", "/absolute/path/bridge-config.json"],
+      "command": "/absolute/path/ableton-mcp-server",
+      "args": ["--config", "/absolute/path/bridge-config.json"],
       "env": { "ABLETON_MCP_TOOL_POLICY": "edit-no-audio" }
     }
   }
@@ -158,11 +112,11 @@ Live 连接期间，桥接每 10 秒寻找一次扩展。扩展一旦应答，�
 
 | 命令 | 选项 |
 | --- | --- |
-| `ableton-mcp-server` (`npm start`) | 无，或恰好一个 `--config PATH` |
-| `ableton-mcp-setup` (`npm run setup`) | `--output PATH`；版本 2 还需要 `--bridge-port N`、`--secret-file PATH`，以及可选的 `--bridge-host`、`--bridge-timeout MS`、`--realtime-port N`。`--force` 会覆盖已有文件。 |
-| `ableton-mcp-install-remote-script` | `--destination DIR`、`--config PATH`、`--dry-run`、`--force` |
-| `ableton-mcp-diagnostics` (`npm run diagnostics`) | 无，或恰好一个 `--config PATH`；输出一份 JSON 报告 |
-| `ableton-mcp-lifecycle`、`ableton-mcp-migrate` | 见[交付](DELIVERY.md) |
+| `ableton-mcp-server` | 无，或恰好一个 `--config PATH` |
+| `ableton-mcp-server setup` | `--output PATH`；版本 2 还需要 `--bridge-port N`、`--secret-file PATH`，以及可选的 `--bridge-host`、`--bridge-timeout MS`、`--realtime-port N`。`--force` 会覆盖已有文件。 |
+| `ableton-mcp-server install-remote-script` | `--destination DIR`、`--config PATH`、`--dry-run`、`--force` |
+| `ableton-mcp-server diagnostics` | 无，或恰好一个 `--config PATH`；输出一份 JSON 报告 |
+| `ableton-mcp-server lifecycle`、`ableton-mcp-server migrate` | 见[交付](DELIVERY.md) |
 
 前四个命令遇到错误选项时以 2 退出，执行失败时以 1 退出。
 

@@ -1,4 +1,4 @@
-//! Quiet render rigs, listening devices, auditions, and held goal passes from `ableton/index.ts`.
+//! Quiet render rigs, listening devices, auditions, and held goal passes.
 mod ears;
 mod ears_pass;
 mod goal;

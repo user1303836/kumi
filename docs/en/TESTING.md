@@ -7,83 +7,62 @@ CI runs. None of the ordinary tests need Live or a sign-in.
 
 ## Quick start
 
-Native tests use Cargo. The isolated runner gives tests a temporary home:
+From the repository root:
 
 ```sh
+npm ci --prefix crates/kumi-runtime/tests/support   # once: the official SDKs some Rust tests run
 cargo build --workspace --all-targets --locked
-sh scripts/test-isolated.sh                   # Windows: ./scripts/test-isolated.ps1
+sh scripts/test-isolated.sh                        # Windows: ./scripts/test-isolated.ps1
 python3 -m unittest discover -s remote-script -p 'test_*.py'
+npm ci --prefix apps/live-extension
+npm test --prefix apps/live-extension
 python3 -m unittest discover -s scripts/tests -p 'test_*release.py'
 ```
 
-For the TypeScript parity reference, use Node 22 or 24:
-
-```sh
-npm ci
-npm run build
-npm ci --prefix apps/mcp-server
-npm run build --prefix apps/mcp-server
-npm test
-(cd apps/mcp-server && npm test)
-```
-
-`npm test` explicitly selects the unchanged TypeScript reference entrypoint. Ordinary npm
-start/setup commands use native Kumi. Migration tests run the old updater against native
-fixtures; installer CI also checks real native artifacts on supported systems.
-
-Additional tools:
+What they need:
 
 | Needs | For |
 | --- | --- |
-| Python 3 on PATH (`python3`, or `python.exe` on Windows; CI uses 3.11) | the Remote Script tests, `package:verify`, `journey:verify` |
-| `ffmpeg` on PATH | `audio:oracle` |
-| A locally supplied Extensions SDK in `vendor/` | building or type-checking the Live extension (its tests don't need it) |
+| Rust and Cargo | The crates and the migration tests |
+| Node.js on PATH (CI uses 24) | Some Rust tests, the Live extension's tests and the migration tests |
+| Python 3.11 or later on PATH (`python3`, or `python.exe` on Windows) | The Remote Script tests, the release scripts' tests, and Rust tests that run Python |
+| A locally supplied Extensions SDK in `vendor/` | Building or type-checking the Live extension (its tests don't need it) |
 
 On Windows, a few tests create symlinks, which needs Developer Mode or an
 administrator account. Without it, some of them skip and a few fail with
 `EPERM`; CI's Windows runner has the right.
 
-## Kumi
+## Kumi and the bridge
 
 Run from the repository root.
 
 | Command | What it does |
 | --- | --- |
-| `npm run typecheck` | Builds the runtime, then type-checks the app and the runtime |
-| `npm test` | Builds, then runs the app's, the runtime's and the Live extension's tests |
-| `KUMI_TEST_BRIDGE=1 npm test` | The same, with the bridge interoperability test required rather than skipped; build the reference bridge first (`npm run build --prefix apps/mcp-server`) |
+| `sh scripts/test-isolated.sh` (Windows: `./scripts/test-isolated.ps1`) | `cargo test --workspace --locked` in a home of its own; arguments go to `cargo test` |
+| `sh scripts/test-isolated.sh -p kumi-runtime --test hands_transport` | One test file of one crate |
+| `cargo fmt --all --check` | Formatting, as CI checks it |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lints; advisory in CI for now |
+| `cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark` | The bridge's performance budgets; see [the developer guide](DEVELOPER_GUIDE.md#build-test-and-measure) |
 
-`npm test` gives the tests a home of their own: `HOME`, `USERPROFILE`,
+The isolated runner gives the tests a home of their own: `HOME`, `USERPROFILE`,
 `APPDATA`, `LOCALAPPDATA`, `XDG_CONFIG_HOME` and `KUMI_HOME` point into a fresh
 temporary folder, and `KUMI_REMOTE_SCRIPTS_DIR` and `KUMI_LIVE_EXTENSIONS_DIR`
 are dropped, so no test can reach your Live folders or `~/.kumi`.
 
-## The bridge
+The tests that run the official MCP and model SDKs beside Kumi's own client and
+providers fail until `npm ci --prefix crates/kumi-runtime/tests/support` has
+run. The loudness and true-peak tests hold the analysis to FFmpeg's `ebur128`
+results for generated audio.
 
-Run from `apps/mcp-server`, after `npm ci`.
-
-| Command | What it does |
-| --- | --- |
-| `npm run typecheck` | Type-checks the bridge |
-| `npm test` | Builds, runs every test file one at a time, then the script tests: release docs, capability manifest, docs drift and CI retention |
-| `npm run property-test` | Property tests of the audio analysis on generated audio: bounded, finite, no raw PCM in results |
-| `npm run coverage` | Tests with V8 coverage: at least 85% of lines, 65% of branches and 84% of functions overall, a floor for every module, and higher bars for delivery, lifecycle, host, remote-adapter, project and Session MIDI |
-| `npm run benchmark` | Latency at the largest audio input, uninstrumented; not part of `npm test` or coverage |
-| `npm run audio:oracle` | Compares the loudness and true-peak measurements with FFmpeg's `ebur128` on generated audio |
-| `npm run compatibility` | `policy:verify` (the Node policy in package.json, CI and the docs), then this Node and system |
-| `npm run package:verify` | Packs the bridge, installs the tarball and checks it (below) |
-| `npm run journey:verify` | Installs the packed bridge and drives the five user journeys through it, against a fake Live |
-| `npm run capability:manifest` | Regenerates `docs/evidence/capability-manifest.json` after a registry change; a test compares it |
-
-`package:verify` refuses any file outside its own list, checks every hash in
-`release-manifest.json` and that `LICENSE.md` matches the repository's. Then it
-starts the installed server in both MCP protocol eras, runs `setup`, `migrate`
-and `diagnostics`, runs the lifecycle (install, an activation that can't reach
-Live, repair, a refused rollback, uninstall) in a folder whose name has spaces
-and non-ASCII letters, and has the installed Remote Script answer an
-authenticated discovery against a fake Live. `ABLETON_MCP_ARTIFACT=<tarball>`
-makes `package:verify` and `journey:verify` check a given tarball instead of
-packing one.
+The JSON oracle files in the crates' tests are golden files recorded from the
+TypeScript implementation; it and the scripts that generated them stay at the
+git tag `v1.7.6`, and nothing in this tree regenerates them. After an
+intentional change in behavior, rewrite the affected oracle entries from the
+native output: the failing assertion prints what it got, and for a SHA-256
+entry, hash that output. Review the diff, and say in the commit message that
+the golden files changed and why. The host tests pin the bridge version the
+golden files were recorded with (`ORACLE_VERSION`), so a bridge version bump
+changes no golden file.
 
 ## The Remote Script
 
@@ -100,11 +79,31 @@ transactions, capture and realtime safety, and the optional Willington provider.
 
 ## Kumi's Live extension
 
-Root `npm test` runs `apps/live-extension/test`, which loads the committed
-`dist/extension.js` against a fake Live and checks it against its recorded
-sha256. Building it (`npm run build` in `apps/live-extension`) needs the
-Extensions SDK in `vendor/`; without it, the committed build stays as it is.
-After a rebuild, commit `dist/extension.js` with its `.sha256`.
+`apps/live-extension` has its own `package.json`. After
+`npm ci --prefix apps/live-extension`, `npm test --prefix apps/live-extension`
+loads the committed `dist/extension.js` against a fake Live and checks it
+against its recorded sha256. Building it (`npm run build`) and type-checking it
+(`npm run typecheck`) there need the Extensions SDK in `vendor/`; without it,
+the committed build stays as it is. After a rebuild, commit `dist/extension.js`
+with its `.sha256`.
+
+## The release scripts
+
+`python3 -m unittest discover -s scripts/tests -p 'test_*release.py'` runs
+the packaging and migration tests. The packaging tests check the bundle's
+contents and versions, and that every link in the packaged guides resolves.
+The migration tests run the last JavaScript release's updater against native
+bundles. Without these variables, the tests that need them skip:
+
+| Variable | What it names |
+| --- | --- |
+| `KUMI_LEGACY_APP` | An unpacked Kumi 1.7.5: `python3 scripts/fetch-legacy-release.py [folder]` downloads it, checks its SHA-256, unpacks it and prints the folder |
+| `KUMI_NATIVE_RELEASES` | A folder of built release artifacts (see [releasing](DEVELOPER_GUIDE.md#releasing)) |
+
+`KUMI_LEGACY_APP` serves the bridge's own migration test too,
+`crates/ableton-mcp-server/tests/lifecycle_migration.rs`. That test doesn't
+skip without it: it downloads the published Kumi 1.7.5 bundle and checks its
+SHA-256. With the variable set, it runs offline once the bundle is fetched.
 
 ## Checks with Live or a model
 
@@ -113,61 +112,44 @@ run them.
 
 | Command (from the root) | Needs | What it does |
 | --- | --- | --- |
-| `npm run accept:live --workspace @kumi/app -- --set "<Set>"` | Live with a disposable copy of a Set open | Makes every kind of change Kumi can, undoes each with Kumi's undo, plays, bounces, listens and watches, and times reads of a big Set. No model. |
-| `npm run eval:changes --workspace @kumi/app [-- <case>, <case>]` | Your sign-in and model | How the model uses Kumi's tools, against a synthetic bridge with the real bridge's tool schemas. Never touches Live. Each case says its time, its tools' share of it, and how many model calls it took; `EVAL_EFFORT` sets the model's reasoning effort, and `EVAL_TRACE=1` prints each call. |
-| `npm run probe:inference --workspace @kumi/app` | Your sign-in | One authenticated request with a harmless tool. Never touches Live. |
+| `cargo run --release -p kumi --example accept_live -- --set "<Set>"` | Live with a disposable copy of a Set open; the bridge, built first with `cargo build --release -p ableton-mcp-server --bins` (for a debug run, the same without `--release`) | Makes every kind of change Kumi can, undoes each with Kumi's undo, plays, bounces, listens and watches, and times reads of a big Set. No model. |
+| `cargo run --release -p kumi --example eval_changes [-- <part of a case name>]` | Your sign-in and model | How the model uses Kumi's tools, against a synthetic bridge with the real bridge's tool schemas, read from its native catalog. Never touches Live. Each case says its time, its tools' share of it, and how many model calls it took; `EVAL_EFFORT` sets the model's reasoning effort, and `EVAL_TRACE=1` prints each call. |
+| `cargo run --release -p kumi --example probe_inference` | Your sign-in | One authenticated request with a harmless tool. Never touches Live. |
 
-After the bridge's tools change, run `node apps/kumi/scripts/make-bridge-tools.mjs`
-(with the bridge built) to refresh the schemas `eval:changes` uses. Its Operator,
-Saturator and EQ Eight have every parameter Live 12.4 gives them, read from Live
-into `apps/kumi/scripts/live-devices.json`, and it runs Kumi's own scripts for
-setting parameters as Live does.
-
-The bridge also has an operator-only capture check, `npm run audio:live-verify`
-in `apps/mcp-server`. It needs a bridge installed by the lifecycle and activated
-on real Live, a prepared disposable Set, and `PHASE8_CLI`, `PHASE8_RECEIPT`,
-`PHASE8_EXPECTED_GIT_SHA`, `PHASE8_TARBALL_SHA`,
-`PHASE8_EXPECTED_REGISTRY_HASH` and `PHASE8_OUTPUT_SAFETY_PROVENANCE` (optional:
-`PHASE8_CONFIG`, `PHASE8_SET_NAME`, `PHASE8_LIVE_VERSION`,
-`PHASE8_SOURCE_TRACK_INDEX`, `PHASE8_DESTINATION_TRACK_INDEX`,
-`PHASE8_RECORDED_DIRECTORY`). It checks the installed files against the receipt
-before touching Live, then records, cancels and recovers a capture, and puts
-back everything it changed.
+The synthetic bridge's Operator, Saturator and EQ Eight have every parameter
+Live 12.4 gives them, read from Live into
+`crates/kumi/examples/fixtures/eval_changes/live-devices.json`, and it runs
+Kumi's own scripts for setting parameters as Live does.
 
 ## Docs
 
-After editing docs, from `apps/mcp-server` (once `npm ci` has run there):
+After editing docs, run the packaging tests:
 
 ```sh
-npm run policy:verify
-node --test scripts/docs-drift.test.mjs scripts/release-documentation.test.mjs
+python3 -m unittest discover -s scripts/tests -p test_native_release.py
 ```
 
-`policy:verify` checks that the docs stating the supported Node versions, and
-the README badges, still say 22 and 24. The drift test checks that the English,
-Chinese and Japanese user guides name the same tools, and that no file count
-sits next to words like manifest or tarball (name `release-manifest.json`
-instead). The release-documentation test stages the bridge's packed guides
-and checks every link in them. `npm run package:verify` checks the same guides
-inside the installed package.
+They check every link in the guides the bridge ships with: its README and the
+fourteen `docs/en` pages listed in `DOCUMENTS` in
+`scripts/build-native-release.py`. Nothing checks that the three languages
+agree; keep them in step by hand.
 
 ## CI
 
-Three workflows run on every pull request and every push to `main`:
+Two workflows run on every pull request and every push to `main`:
 
 | Workflow | Jobs | What runs |
 | --- | --- | --- |
-| **CI** | `Build exact local candidate` (Ubuntu, Node 24) | Whitespace check; packs the bridge twice (the second time from a fresh clone) and requires identical bytes; keeps the tarball as the `exact-local-candidate` artifact for 90 days |
-| | `Coverage, benchmarks and the audio oracle` (Ubuntu, Node 24, beside the candidate) | The bridge's typecheck, coverage (the functional tests), the release scripts' tests, property tests, benchmark, `audio:oracle`, `compatibility` and `package:verify` |
-| | `Node 22, 24 / ubuntu-24.04`, `Node 24 / macos-15`, `Node 24 / windows-2025 / candidate` and `/ tests 1/4` to `4/4` | The bridge's typecheck and tests (on Windows in four shards balanced by what each file costs there; `TEST_SHARD=1/4` picks one), property tests and `compatibility`; `package:verify`, `scripts/verify-candidate.mjs` and `journey:verify` against that same tarball; setup, migration and diagnostics |
-| | `Python Remote Script contract` (the same three systems, Python 3.11) | Checks the Remote Script files against the tarball, runs the Python tests, compiles the package |
+| **CI** | `Rust / Linux`, `Rust / macOS`, `Rust / Windows` | `cargo fmt --check`, the build of every target, every test through the isolated runner with the official SDKs installed (on Windows, the console input tests first), Clippy (advisory) and `git diff --check` |
+| | `Python Remote Script / ubuntu-24.04`, `macos-15`, `windows-2025` (Python 3.11) | The Remote Script's tests; compiles the package |
+| | `Live extension` (Ubuntu, Node 24) | The extension's tests, against its committed build |
+| | `Release scripts` (Ubuntu) | The whitespace check of the change, then the packaging tests |
 | | `Required CI` | Passes only when all of the above passed |
-| **Kumi** | `Kumi / Node 22`, `Kumi / Node 24` (Ubuntu), `Kumi / macOS / Node 24`, `Kumi / Windows / Node 24` | Root typecheck, builds the bridge, `npm test` with `KUMI_TEST_BRIDGE=1`, `git diff --check` |
-| **Installer** | `Build Kumi's Mac helper`, `Build the release bundle`, then `Install / macOS`, `Linux`, `Windows` | Builds the helper Kumi uses Live's menus with on a Mac (universal, signed), then the bundle with it, and serves it locally. On each system: installs as producers do (Windows PowerShell 5.1 on Windows), checks the version, `doctor` and the bridge loading, installs again as a repair, runs `kumi bridge --yes` into a scratch Remote Scripts folder, `kumi update` (and `--rollback` on macOS and Linux), and `kumi uninstall`. On a `v*` tag, `publish` then attaches the bundle to the release. |
+| **Installer** | `Build Kumi's Mac helper`, `Native bundle / <target>` (six), `Aggregate native and existing-installer releases`, then `Install / <system>` (six) and `Existing installer transition / <system>` (three) | Builds the helper Kumi uses Live's menus with on a Mac (universal, ad hoc signed), a native bundle for Intel and ARM on macOS, Linux and Windows, then the compatibility release that existing installations update from, and serves them locally. On each system: installs as producers do (Windows PowerShell 5.1 on Windows), checks the version, `doctor`, the bridge and its analysis worker, installs again as a repair, runs `kumi bridge --yes` into a scratch Remote Scripts folder, `kumi update`, `kumi update --rollback` and `kumi uninstall`. The transition jobs run the migration tests with Kumi 1.7.5 and the new bundles. On a `v*` tag, `publish` then attaches the bundle to the release. |
 
-To merge into `main`, `Required CI` and the four Kumi jobs must pass. The
-Installer isn't required. [Releases and distribution](DISTRIBUTION_POLICY.md#merge-gate)
-has the rest of the rules.
+To merge into `main`, `Required CI` must pass. The Installer isn't required.
+[Releases and distribution](DISTRIBUTION_POLICY.md#merge-gate) has the rest of
+the rules.
 
 ## What passing means
 

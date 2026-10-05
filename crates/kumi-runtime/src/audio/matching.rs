@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/audio/match.ts`.
-//!
 //! How close a render is to a reference, as one number to watch rise while matching a sound, and the
 //! differences behind it, biggest first, in words the model can act on ("brighter above 4 kHz by
 //! ~3 dB", "attack too slow", "too dense"). Each feature is a similarity from 0 to 1; the score is
