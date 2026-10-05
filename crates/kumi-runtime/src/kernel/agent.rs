@@ -398,6 +398,7 @@ impl AgentKernel {
             let attempted: Result<StepResult, StepError> = async {
                 let mut call = request.clone();
                 call.abort_signal = Some(abort.signal());
+                crate::core::timing::effort(&call);
                 let timed = crate::core::timing::model_call(&inner.binding.id);
                 let parts = inner.binding.model.do_stream(call).await.map_err(StepError::Model)?;
                 consume(crate::core::timing::timed(parts, timed), &abort, &hear, None).await
@@ -806,6 +807,7 @@ impl Turn {
             let attempted: Result<StepResult, StepError> = async {
                 let mut call = request.clone();
                 call.abort_signal = Some(self.abort.signal());
+                crate::core::timing::effort(&call);
                 let timed = crate::core::timing::model_call(&self.inner.binding.id);
                 let parts = self.inner.binding.model.do_stream(call).await.map_err(StepError::Model)?;
                 consume(crate::core::timing::timed(parts, timed), &self.abort, &on_text, Some(&input as &dyn InputStream)).await
@@ -963,6 +965,7 @@ impl Turn {
             }
         };
         let elapsed_ms = round(perf_now() - started).max(0.0) as u64;
+        crate::core::timing::tool_call(&call.tool_name, elapsed_ms);
         if alone {
             crate::core::timing::tool(elapsed_ms);
         }

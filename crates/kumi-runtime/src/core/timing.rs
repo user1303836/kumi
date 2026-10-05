@@ -1,10 +1,11 @@
-//! Where each turn's time went: its model calls (time to first part and in all), its tools, its Live
-//! requests and the bytes it sent. One line per turn in a local log (`timings.jsonl`), which `kumi
-//! report` shows, so every change to Kumi can be measured before and after.
+//! Where each turn's time went: its model calls (time to first part and in all) and their reasoning
+//! effort, its tools (and the slowest of them), its Live requests and the bytes it sent. One line per
+//! turn in a local log (`timings.jsonl`), which `kumi report` shows, so every change to Kumi can be
+//! measured before and after, and a slow answer says what it waited on.
 //!
 //! A turn runs on the session's one thread, and one turn runs at a time, so the turn being timed is
 //! a thread-local the kernel, the model client and the Live client add to as they go.
-use std::{cell::RefCell, path::Path, rc::Rc, time::Instant};
+use std::{cell::RefCell, collections::BTreeMap, path::Path, rc::Rc, time::Instant};
 
 use kumi_common::{
     js::json,
@@ -13,7 +14,7 @@ use kumi_common::{
 use serde_json::{json, Value};
 
 use super::contracts::Usage;
-use crate::ai::types::{StreamPart, StreamParts};
+use crate::ai::types::{CallOptions, StreamPart, StreamParts};
 use crate::version::KUMI_VERSION;
 
 const MAX_BYTES: u64 = 512 * 1024;
@@ -22,6 +23,8 @@ const KEEP_LINES: usize = 1000;
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct TurnTiming {
     pub model: Option<String>,
+    /// The reasoning effort its model calls asked for ("high"), where the provider takes one.
+    pub effort: Option<String>,
     pub model_calls: u32,
     pub model_ms: u64,
     /// Each model call's wait for its first content: text, reasoning or a tool call (not the stream's
@@ -29,6 +32,8 @@ pub struct TurnTiming {
     pub first_part_ms: Vec<u64>,
     pub tools: u32,
     pub tool_ms: u64,
+    /// Each tool's calls and their time. Calls that ran together each count their own.
+    pub by_tool: BTreeMap<String, (u32, u64)>,
     /// Requests to Live's bridge, FOCUS's own reads while the turn ran left out.
     pub live_requests: u32,
     /// Request bodies sent to the model.
@@ -134,6 +139,28 @@ pub fn timed(parts: StreamParts, mut call: ModelCall) -> StreamParts {
     }))
 }
 
+/// The effort a model call asks for, as its provider's options carry it: `reasoningEffort` (OpenAI's
+/// and the like) or `effort` (Anthropic's).
+pub fn effort(options: &CallOptions) {
+    let asked = options.provider_options.as_ref().and_then(|providers| {
+        providers
+            .values()
+            .find_map(|options| options.get("reasoningEffort").or_else(|| options.get("effort"))?.as_str().map(str::to_string))
+    });
+    if let Some(asked) = asked {
+        with(|timing| timing.effort = Some(asked));
+    }
+}
+
+/// One tool call's own time, by its tool's name.
+pub fn tool_call(name: &str, elapsed_ms: u64) {
+    with(|timing| {
+        let (calls, ms) = timing.by_tool.entry(name.to_string()).or_default();
+        *calls += 1;
+        *ms += elapsed_ms;
+    });
+}
+
 pub fn tool(elapsed_ms: u64) {
     with(|timing| {
         timing.tools += 1;
@@ -180,6 +207,16 @@ pub fn line(timing: &TurnTiming, elapsed_ms: u64, stop: Value, usage: Option<&Us
     });
     if let Some(model) = &timing.model {
         line["model"] = json!(model);
+    }
+    if let Some(effort) = &timing.effort {
+        line["effort"] = json!(effort);
+    }
+    // The three tools that took longest, longest first: what a slow turn waited on.
+    let mut slowest: Vec<_> = timing.by_tool.iter().collect();
+    slowest.sort_by(|a, b| b.1 .1.cmp(&a.1 .1));
+    if !slowest.is_empty() {
+        line["slowTools"] =
+            json!(slowest.into_iter().take(3).map(|(tool, (calls, ms))| json!({"tool":tool,"calls":calls,"ms":ms})).collect::<Vec<_>>());
     }
     if let Some(usage) = usage {
         line["inputTokens"] = json!(usage.input_tokens);
@@ -259,6 +296,42 @@ mod tests {
         tool(9);
         let after = begin().finish();
         assert_eq!(after.tools, 0);
+    }
+
+    #[tokio::test]
+    async fn a_turn_says_its_effort_and_its_slowest_tools() {
+        let asked = |provider: &str, options: Value| CallOptions {
+            provider_options: Some(serde_json::Map::from_iter([(provider.to_string(), options)])),
+            ..Default::default()
+        };
+        let recorder = begin();
+        effort(&asked("openai", json!({"store":false,"reasoningEffort":"xhigh"})));
+        effort(&CallOptions::default());
+        for (name, ms) in
+            [("live_discover", 40), ("watch_video", 31_000), ("make_changes", 900), ("live_discover", 60), ("search_web", 2_000)]
+        {
+            tool_call(name, ms);
+        }
+        background(async {
+            tool_call("watch_video", 99_999);
+            effort(&asked("anthropic", json!({"effort":"low"})));
+        })
+        .await;
+        let line = line(&recorder.finish(), 40_000, json!("completed"), None);
+        assert_eq!(line["effort"], "xhigh", "a call without an effort, or a side question's, leaves it");
+        assert_eq!(
+            line["slowTools"],
+            json!([{"tool":"watch_video","calls":1,"ms":31000},{"tool":"search_web","calls":1,"ms":2000},{"tool":"make_changes","calls":1,"ms":900}])
+        );
+        let recorder = begin();
+        effort(&asked("anthropic", json!({"effort":"high"})));
+        tool_call("live_discover", 40);
+        tool_call("live_discover", 60);
+        let line = super::line(&recorder.finish(), 500, json!("completed"), None);
+        assert_eq!(line["effort"], "high");
+        assert_eq!(line["slowTools"], json!([{"tool":"live_discover","calls":2,"ms":100}]));
+        let quiet = super::line(&begin().finish(), 10, json!("completed"), None);
+        assert!(quiet.get("effort").is_none() && quiet.get("slowTools").is_none(), "{quiet}");
     }
 
     #[tokio::test]

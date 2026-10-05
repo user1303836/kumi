@@ -52,7 +52,7 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
     fs::write(
         kumi.join("timings.jsonl"),
         [1800, 4200, 9000]
-            .map(|ms| json!({"ms":ms,"stop":"completed","modelCalls":2,"modelMs":ms-600,"firstPartMs":[700,500],"tools":1,"toolMs":400,"liveRequests":3,"sentBytes":204800}).to_string() + "\n")
+            .map(|ms| json!({"ms":ms,"stop":"completed","modelCalls":2,"modelMs":ms-600,"firstPartMs":[700,500],"tools":1,"toolMs":400,"liveRequests":3,"sentBytes":204800,"effort":"high","slowTools":[{"tool":"watch_video","calls":1,"ms":ms-1000},{"tool":"make_changes","calls":2,"ms":300}]}).to_string() + "\n")
             .concat(),
     )
     .unwrap();
@@ -137,7 +137,7 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
         "← {\"type\":\"text\",\"value\":",
         "applied · Tempo 120 → 124 BPM",
         "Freezing a track",
-        "3 turns. Medians: 4.2 s an answer · model 3.6 s · tools 0.4 s · 2 model calls · first part 0.7 s · 3 Live requests · 200 KB sent",
+        "3 turns. Medians: 4.2 s an answer · model 3.6 s · tools 0.4 s · 2 model calls · first part 0.7 s · 3 Live requests · 200 KB sent\nLongest tools in all: watch_video 12.0 s (3 calls) · make_changes 0.9 s (6 calls)\nEffort: high (3 turns)",
         "AbletonMcpBridge) Initializing",
         "RuntimeError: boom",
         "File \"bridge.py\"",
