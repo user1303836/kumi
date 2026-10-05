@@ -575,6 +575,14 @@ impl ChangeKind {
         Some(why.into())
     }
 }
+impl ChangeKind {
+    /// Why Kumi can't take back part of an applied change, from its preview: an Arrangement move that
+    /// replaced what was in its new place.
+    pub fn replaced(&self, preview: &JsonObject) -> Option<String> {
+        (self.tool == "move_clip" && preview.get("replaces").and_then(Value::as_array).is_some_and(|r| !r.is_empty()))
+            .then(|| "Kumi can't bring back what the move replaced; Live's own undo can.".into())
+    }
+}
 pub fn undo_note(message: &str) -> String {
     let message = message.to_ascii_lowercase();
     let groups:[(&[&str],&str);8]=[

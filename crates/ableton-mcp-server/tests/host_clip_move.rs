@@ -52,6 +52,7 @@ struct Adapter {
     fault: RefCell<String>,
     fired: Cell<bool>,
     after_invoke: Cell<bool>,
+    no_extension: Cell<bool>,
 }
 impl Adapter {
     fn new() -> Self {
@@ -62,7 +63,15 @@ impl Adapter {
             fault: Default::default(),
             fired: Cell::new(false),
             after_invoke: Cell::new(false),
+            no_extension: Cell::new(false),
         }
+    }
+    fn status_now(&self) -> Result<LiveStatus, LiveError> {
+        let mut status = self.sim.status()?;
+        if self.no_extension.get() {
+            status.operations.iter_mut().for_each(|operations| operations.retain(|operation| operation != "clip.clear-range"));
+        }
+        Ok(status)
     }
     fn reset(&self, fault: &str) {
         *self.fault.borrow_mut() = fault.into();
@@ -136,7 +145,7 @@ impl Adapter {
 }
 impl LiveAdapter for Adapter {
     fn status(&self) -> Result<LiveStatus, LiveError> {
-        self.sim.status()
+        self.status_now()
     }
     fn snapshot(&self) -> Result<LiveSnapshot, LiveError> {
         self.sim.snapshot()
@@ -185,7 +194,7 @@ impl AsyncLiveAdapter for Adapter {
     }
     async fn refresh_status_async(&self, c: Option<&LiveOperationContext>) -> Result<LiveStatus, LiveError> {
         self.calls.borrow_mut().push(clean(json!({"method":"status","context":context(c)})));
-        self.sim.status()
+        self.status_now()
     }
 }
 
@@ -375,32 +384,92 @@ async fn clip_move_apply_and_exact_key_undo_match_source() {
         same(&adapter.sim.state.borrow(), &row["state"], &format!("{label} state"));
     }
 }
-#[tokio::test]
-async fn an_arrangement_move_onto_another_clip_is_refused_at_preview() {
-    // Live crashes when an Arrangement clip is copied onto a span a clip holds, and a move is a copy.
-    let sim = Rc::new(DeterministicLiveSimulator::new());
-    setup(&sim, "arrangement-midi");
-    {
-        let mut s = sim.state.borrow_mut();
-        let mut chorus = s["arrangementClips"][0]["clip"].clone();
-        chorus["ref"] = json!("arrangement-clip:track-1:12");
-        chorus["objectIdentity"] = json!("simulator:arrangement-clip:1");
-        chorus["name"] = json!("Chorus");
-        chorus["start"] = json!(12);
-        s["arrangementClips"].as_array_mut().unwrap().push(json!({"trackRef":"track:track-1","clip":chorus}));
+/// Another clip on track 1's Arrangement: `name` from `start`, `length` beats long.
+fn arrangement_clip(sim: &DeterministicLiveSimulator, name: &str, start: f64, length: f64, audio: bool) {
+    let mut s = sim.state.borrow_mut();
+    let mut clip = s["arrangementClips"][0]["clip"].clone();
+    clip["ref"] = json!(format!("arrangement-clip:track-1:{name}"));
+    clip["objectIdentity"] = json!(format!("simulator:arrangement-clip:{name}"));
+    clip["name"] = json!(name);
+    clip["start"] = json!(start);
+    clip["length"] = json!(length);
+    if audio {
+        clip["kind"] = json!("audio");
+        clip["notes"] = json!([]);
     }
-    let host = McpHost::new(sim, McpHostOptions::default()).unwrap();
-    let refused =
-        host.live_clip_move_preview_async(&json!(1), &json!({"clipRef":"arrangement-clip:track-1:4","position":10})).await.to_string();
-    assert!(refused.contains("Kumi can't move a clip onto another clip yet") && refused.contains("Chorus"), "{refused}");
-    assert!(
-        refused.contains("(beats 12 to 16) is in the way at beat 10; clear that span first (clear_range) or pick a free spot"),
-        "{refused}"
+    s["arrangementClips"].as_array_mut().unwrap().push(json!({"trackRef":"track:track-1","clip":clip}));
+}
+/// Track 1's Arrangement clips as (name, start, end), in time order.
+fn layout(sim: &DeterministicLiveSimulator) -> Vec<(String, f64, f64)> {
+    let s = sim.state.borrow();
+    let mut rows: Vec<_> = s["arrangementClips"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| {
+            let start = r["clip"]["start"].as_f64().unwrap();
+            (r["clip"]["name"].as_str().unwrap().to_string(), start, start + r["clip"]["length"].as_f64().unwrap())
+        })
+        .collect();
+    rows.sort_by(|a, b| a.1.total_cmp(&b.1));
+    rows
+}
+fn body(response: &Value) -> Value {
+    response["result"]["content"][0]["text"].as_str().and_then(|text| serde_json::from_str(text).ok()).unwrap_or(Value::Null)
+}
+async fn move_clip(host: &McpHost, position: f64) -> (Value, Value) {
+    let preview = host.live_clip_move_preview_async(&json!(1), &json!({"clipRef":"arrangement-clip:track-1:4","position":position})).await;
+    let shown = body(&preview);
+    if shown["transactionId"].is_null() {
+        return (preview, Value::Null);
+    }
+    let args = json!({"transactionId":shown["transactionId"],"confirmation":"apply","idempotencyKey":format!("apply-{position}")});
+    let applied = host.live_clip_move_apply_async(&json!(2), &args, None).await.unwrap_or(Value::Null);
+    (preview, applied)
+}
+#[tokio::test]
+async fn an_arrangement_move_replaces_what_is_in_its_new_place() {
+    // As dropping a clip in Live does. Live crashes when an Arrangement clip is copied onto a span a clip
+    // holds, and a move is a copy, so what's there is cleared first.
+    let adapter = Rc::new(Adapter::new());
+    setup(&adapter.sim, "arrangement-midi");
+    arrangement_clip(&adapter.sim, "Chorus", 12.0, 4.0, false);
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let (preview, applied) = move_clip(&host, 10.0).await;
+    let shown = body(&preview);
+    assert_eq!(shown["impact"], "moves-clip-replacing", "{preview}");
+    assert_eq!(shown["replaces"], json!([{"name":"Chorus","start":12,"end":16,"from":12,"to":14,"whole":false}]));
+    assert_eq!(body(&applied)["state"], "applied", "{applied}");
+    let kick = "Kick Pattern".to_string();
+    assert_eq!(layout(&adapter.sim), [(kick.clone(), 10.0, 14.0), ("Chorus".into(), 14.0, 16.0)]);
+    // An undo would replace whatever is in the clip's old place now, so it leaves the clip where it is.
+    arrangement_clip(&adapter.sim, "Fill", 4.0, 4.0, false);
+    let txid = body(&preview)["transactionId"].clone();
+    let undo =
+        host.undo_clip_move_async(&json!(3), &json!({"transactionId":txid,"confirmation":"undo","idempotencyKey":"undo-key"}), None).await;
+    assert!(undo.to_string().contains("(beats 4 to 8) is in the clip's old place now, so Kumi left the clip where it is"), "{undo}");
+    assert_eq!(layout(&adapter.sim)[1], (kick, 10.0, 14.0));
+}
+#[tokio::test]
+async fn an_audio_clip_crossing_the_new_place_is_cut_by_the_live_extension_first() {
+    let adapter = Rc::new(Adapter::new());
+    setup(&adapter.sim, "arrangement-audio");
+    arrangement_clip(&adapter.sim, "Vox", 10.0, 8.0, true);
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let (middle, _) = move_clip(&host, 12.0).await;
+    let refused = middle.to_string();
+    assert!(refused.contains("Kumi can't move a clip into the middle of an audio clip yet"), "{refused}");
+    assert!(refused.contains("Vox") && refused.contains("(beats 10 to 18) holds beats 12 to 16; pick a free spot"), "{refused}");
+    adapter.no_extension.set(true);
+    let (without, _) = move_clip(&host, 16.0).await;
+    assert!(without.to_string().contains("Kumi can't cut into an audio clip without its Live extension yet"), "{without}");
+    adapter.no_extension.set(false);
+    let (preview, applied) = move_clip(&host, 16.0).await;
+    assert_eq!(
+        body(&preview)["payload"]["clearFirst"],
+        json!([{"trackRef":"track:track-1","fromBeat":16,"toBeat":18,"expectedName":"Drums"}]),
+        "{preview}"
     );
-    assert!(refused.contains("Nothing changed in Live"), "{refused}");
-    let beside = host.live_clip_move_preview_async(&json!(2), &json!({"clipRef":"arrangement-clip:track-1:4","position":8})).await;
-    assert!(
-        beside["result"]["content"][0]["text"].as_str().is_some_and(|text| text.contains("transactionId")),
-        "right up against it is fine: {beside}"
-    );
+    assert_eq!(body(&applied)["state"], "applied", "{applied}");
+    assert_eq!(layout(&adapter.sim), [("Vox".to_string(), 10.0, 16.0), ("Kick Pattern".into(), 16.0, 20.0)]);
 }

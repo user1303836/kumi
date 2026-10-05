@@ -101,6 +101,44 @@ impl DeterministicLiveSimulator {
                 } else {
                     let position =
                         ranged_number(args.get("position").unwrap_or(&Value::Null), 0., f64::INFINITY, false, "position is invalid")?;
+                    // Like dropping a clip in Live, and as the Remote Script does: a clip in the new place goes,
+                    // one crossing its edges is cut there, and one it lands in the middle of keeps both ends.
+                    let moving = state["arrangementClips"][index.unwrap()].clone();
+                    let (from, to) = (position, position + moving["clip"]["length"].as_f64().unwrap_or(0.));
+                    let mut rows = Vec::new();
+                    for row in array(&state["arrangementClips"]).to_vec() {
+                        let start = row["clip"]["start"].as_f64().unwrap_or(0.);
+                        let end = row["clip"]["endTime"].as_f64().unwrap_or(start + row["clip"]["length"].as_f64().unwrap_or(0.));
+                        if row["trackRef"] != moving["trackRef"]
+                            || row["clip"]["ref"] == reference
+                            || start >= to - 1e-6
+                            || end <= from + 1e-6
+                        {
+                            rows.push(row);
+                            continue;
+                        }
+                        if start < from - 1e-6 {
+                            let mut head = row.clone();
+                            head["clip"]["length"] = (from - start).into();
+                            head["clip"]["endTime"] = from.into();
+                            rows.push(head);
+                        }
+                        if end > to + 1e-6 {
+                            let mut tail = row.clone();
+                            if start < from - 1e-6 {
+                                let sequence = self.next_sequence();
+                                tail["clip"]["ref"] =
+                                    format!("arrangement-clip:{}:{sequence}", row["trackRef"].as_str().unwrap_or("")).into();
+                                tail["clip"]["objectIdentity"] = format!("simulator:arrangement-clip:{sequence}").into();
+                            }
+                            tail["clip"]["start"] = to.into();
+                            tail["clip"]["length"] = (end - to).into();
+                            tail["clip"]["endTime"] = end.into();
+                            rows.push(tail);
+                        }
+                    }
+                    let index = rows.iter().position(|r| r["clip"]["ref"] == reference);
+                    state["arrangementClips"] = Value::Array(rows);
                     state["arrangementClips"][index.unwrap()]["clip"]["start"] = position.into();
                     let identity = state["arrangementClips"][index.unwrap()]["clip"]["objectIdentity"].clone();
                     drop(state);
