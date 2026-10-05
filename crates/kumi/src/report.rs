@@ -1,6 +1,6 @@
 //! Port of `apps/kumi/src/report.ts`, with native runtime version information.
 use crate::{
-    config::{load_auth_file, load_gaps_file, load_projects_dir, load_settings_file},
+    config::{load_auth_file, load_gaps_file, load_projects_dir, load_settings_file, load_timings_file},
     doctor::{doctor_checks, format_doctor, Check, DoctorIo},
     spinner::step,
     tui::style::os_release,
@@ -230,6 +230,29 @@ fn describe_conversation(value: &Value) -> Vec<String> {
     }
     lines
 }
+/// The middle turn of the logged ones: its time, and where that time went.
+fn summarize_timings(lines: &[&str]) -> String {
+    let turns: Vec<Value> = lines.iter().filter_map(|line| serde_json::from_str(line).ok()).collect();
+    let median = |key: &str| {
+        let mut values: Vec<f64> = turns.iter().filter_map(|turn| turn[key].as_f64()).collect();
+        values.sort_by(f64::total_cmp);
+        values.get(values.len() / 2).copied().unwrap_or(0.)
+    };
+    let mut first: Vec<f64> = turns.iter().filter_map(|turn| turn["firstPartMs"][0].as_f64()).collect();
+    first.sort_by(f64::total_cmp);
+    let seconds = |ms: f64| format!("{:.1} s", ms / 1000.);
+    format!(
+        "{} turns · median {} (model {}, tools {}) · {} model calls · first part {} · {} Live requests · {} KB sent",
+        turns.len(),
+        seconds(median("ms")),
+        seconds(median("modelMs")),
+        seconds(median("toolMs")),
+        median("modelCalls"),
+        seconds(first.get(first.len() / 2).copied().unwrap_or(0.)),
+        median("liveRequests"),
+        (median("sentBytes") / 1024.).round(),
+    )
+}
 async fn find_live_logs(env: &Env, home: &str) -> Vec<String> {
     let root = if system::platform() == "win32" {
         join(env.get("APPDATA").map(String::as_str).unwrap_or(&join(home, "AppData/Roaming")), "Ableton")
@@ -398,6 +421,20 @@ async fn compose(io: &ReportIo, redact: &dyn Fn(&str) -> String, home: &str, now
             "nothing logged".into()
         } else {
             gaps.iter().skip(gaps.len().saturating_sub(50)).map(|s| clip(s, 500)).collect::<Vec<_>>().join("\n")
+        },
+    );
+    let timings = match load_timings_file(env) {
+        Ok(file) => read(&file).await.unwrap_or_default(),
+        _ => String::new(),
+    };
+    let timings: Vec<_> = trim(&timings).split('\n').filter(|s| !s.is_empty()).collect();
+    let timings = &timings[timings.len().saturating_sub(50)..];
+    section(
+        "Turn timing (last 50 turns)",
+        if timings.is_empty() {
+            "nothing timed yet".into()
+        } else {
+            format!("{}\n\n{}", summarize_timings(timings), timings.iter().map(|s| clip(s, 500)).collect::<Vec<_>>().join("\n"))
         },
     );
     let logs = if let Some(logs) = &io.live_logs { logs().await.unwrap_or_default() } else { find_live_logs(env, home).await };

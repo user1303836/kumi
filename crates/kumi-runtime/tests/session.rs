@@ -1517,3 +1517,47 @@ local_test!(library_tools_preferences_status_and_forgetting_follow_session_lifec
     assert!(without.session.library().is_none());
     without.session.close().await.unwrap();
 });
+
+local_test!(each_turn_logs_where_its_time_went, {
+    use kumi_runtime::core::timing;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("timings.jsonl");
+    let fail = Rc::new(Cell::new(false));
+    let failing = fail.clone();
+    let h = harness(
+        Some(Rc::new(move |_, _, _| {
+            let fail = failing.get();
+            async move {
+                drop(timing::model_call("openai/gpt-test"));
+                timing::tool(40);
+                timing::live_request();
+                timing::background(async { timing::live_request() }).await;
+                timing::sent(1000);
+                if fail {
+                    return Err(RuntimeError::plain("model went away"));
+                }
+                Ok(TurnResult {
+                    usage: Some(Usage { input_tokens: 900., cache_read_tokens: 600., output_tokens: 20., ..Default::default() }),
+                    ..complete()
+                })
+            }
+            .boxed_local()
+        })),
+        |o| o.timings = Some(file.to_string_lossy().into_owned()),
+    );
+    h.session.start().await.unwrap();
+    h.session.submit("make it louder", None).await.unwrap();
+    fail.set(true);
+    let _ = h.session.submit("and again", None).await;
+    settle().await;
+    let lines: Vec<Value> = std::fs::read_to_string(&file).unwrap().lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    assert_eq!(lines.len(), 2, "one line a turn; starting the session isn't a turn");
+    let turn = &lines[0];
+    assert_eq!(
+        [&turn["stop"], &turn["model"], &turn["modelCalls"], &turn["tools"], &turn["toolMs"], &turn["liveRequests"], &turn["sentBytes"]],
+        [&json!("completed"), &json!("openai/gpt-test"), &json!(1), &json!(1), &json!(40), &json!(1), &json!(1000)]
+    );
+    assert_eq!([&turn["inputTokens"], &turn["cachedTokens"], &turn["outputTokens"]], [&json!(900), &json!(600), &json!(20)]);
+    assert_eq!(lines[1]["stop"], "error");
+    h.session.close().await.unwrap();
+});

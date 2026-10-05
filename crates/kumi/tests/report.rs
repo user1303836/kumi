@@ -50,6 +50,13 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
     fs::write(kumi.join("settings.json"), json!({"model":"openai-codex/gpt-6-astra"}).to_string()).unwrap();
     fs::write(kumi.join("gaps.jsonl"), format!("{}\n", json!({"missing":"Freezing a track","asked":"Freeze the Bass"}))).unwrap();
     fs::write(
+        kumi.join("timings.jsonl"),
+        [1800, 4200, 9000]
+            .map(|ms| json!({"ms":ms,"stop":"completed","modelCalls":2,"modelMs":ms-600,"firstPartMs":[700,500],"tools":1,"toolMs":400,"liveRequests":3,"sentBytes":204800}).to_string() + "\n")
+            .concat(),
+    )
+    .unwrap();
+    fs::write(
         conversations.join("older1.json"),
         json!({"savedAt":1,"checkpoint":{"version":1,"messages":[{"role":"user","content":"an older one"}]}}).to_string(),
     )
@@ -78,6 +85,7 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
         ("KUMI_SETTINGS_FILE".into(), kumi.join("settings.json").display().to_string()),
         ("KUMI_PROJECTS_DIR".into(), projects.display().to_string()),
         ("KUMI_GAPS_FILE".into(), kumi.join("gaps.jsonl").display().to_string()),
+        ("KUMI_TIMINGS_FILE".into(), kumi.join("timings.jsonl").display().to_string()),
         ("KUMI_REMOTE_SCRIPTS_DIR".into(), dir.path().join("none").display().to_string()),
         ("OPENAI_API_KEY".into(), "sk-live-abcdefghijklmnop".into()),
         ("TERM_PROGRAM".into(), "ghostty".into()),
@@ -109,9 +117,15 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
     }
     assert!(out.0.borrow().contains(&format!("Kumi's report is in ~{}kumi-report-2026-09-29T20-00-00.txt", std::path::MAIN_SEPARATOR)));
     let text = fs::read_to_string(file).unwrap();
-    for heading in
-        ["## Versions", "## Doctor", "## Settings", "## Last conversation", "## What Kumi couldn't do (gap log)", "## Live's log"]
-    {
+    for heading in [
+        "## Versions",
+        "## Doctor",
+        "## Settings",
+        "## Last conversation",
+        "## What Kumi couldn't do (gap log)",
+        "## Turn timing (last 50 turns)",
+        "## Live's log",
+    ] {
         assert!(text.contains(heading), "{heading}; report had {} bytes", text.len())
     }
     for expected in [
@@ -123,6 +137,7 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
         "← {\"type\":\"text\",\"value\":",
         "applied · Tempo 120 → 124 BPM",
         "Freezing a track",
+        "3 turns · median 4.2 s (model 3.6 s, tools 0.4 s) · 2 model calls · first part 0.7 s · 3 Live requests · 200 KB sent",
         "AbletonMcpBridge) Initializing",
         "RuntimeError: boom",
         "File \"bridge.py\"",

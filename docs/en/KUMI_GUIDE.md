@@ -485,6 +485,10 @@ Kumi tells you, offers a way round and notes the missing capability in
 `~/.kumi/gaps.jsonl` for Kumi's developers. It's never read back into a
 conversation; `kumi report` includes it when you choose to send one.
 
+Kumi also notes where each answer's time went (model, tools, Live requests,
+bytes sent) in `~/.kumi/timings.jsonl`, the latest 1000 answers. Like the gap
+log, it stays on your computer and goes out only in a `kumi report`.
+
 ## Conversations and catching up
 
 Kumi keeps each saved Set's conversations in `~/.kumi/projects`: saved after

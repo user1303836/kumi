@@ -141,8 +141,9 @@ pub async fn post_json(
 ) -> Result<Response, LanguageModelError> {
     let mut headers = headers;
     headers.entry("content-type".into()).or_insert_with(|| "application/json".into());
-    let mut response =
-        fetch.fetch(url, FetchInit { method: "POST".into(), headers, body: Some(stringify(&body)), signal: signal.clone() }).await?;
+    let text = stringify(&body);
+    crate::core::timing::sent(text.len());
+    let mut response = fetch.fetch(url, FetchInit { method: "POST".into(), headers, body: Some(text), signal: signal.clone() }).await?;
     if response.ok() && response.body.is_some() {
         let status = response.status;
         let response_headers = response.headers.clone();
