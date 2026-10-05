@@ -104,6 +104,12 @@ times a second) and a scheduled callback. Each tick it:
    lets go of fire buttons held past 30 seconds, and ages its cached view of the
    Set's track and scene structure.
 
+Where Live has a timer (`Live.Base.Timer`, about every 10 ms), it does 1 and 2
+between ticks too, so a request doesn't wait for the next tick. Reads keep to
+the same 50 ms of Live's main thread in each tenth of a second, the timer's and
+the ticks' together. A change isn't counted: it takes what Live takes to make
+it. A timer that fails stops, and the ticks serve as before.
+
 A read stops after about 30 ms of work and returns a cursor for the rest, so no
 request holds Live's interface for long. Only two other threads exist: the
 realtime UDP receiver, which decodes and checks packets and queues writes for

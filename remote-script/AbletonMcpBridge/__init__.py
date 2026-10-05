@@ -426,7 +426,41 @@ class AbletonMcpBridge(_ControlSurface):
         self._bridge = _Bridge(c_instance, _read_config(), song=accessor() if callable(accessor) else None, provenance="real-live", diagnostics_validator=_diagnostics_path_safe)
         self._disconnected = False
         self._willington = None
+        self._timer = None
         self._schedule_next()
+        self._start_timer()
+
+    def _start_timer(self) -> None:
+        """Live's own timer serves the bridge between display ticks, where this Live has one; without it,
+        each display tick serves it, as before."""
+        try:
+            import Live  # type: ignore[import-not-found]
+            timer = Live.Base.Timer(callback=self._between_ticks, interval=1, repeat=True)
+            timer.start()
+        except Exception:
+            return
+        self._timer = timer
+        self._bridge.between_ticks = True
+
+    def _stop_timer(self) -> None:
+        timer, self._timer = getattr(self, "_timer", None), None
+        bridge = getattr(self, "_bridge", None)
+        if bridge is not None: bridge.between_ticks = False
+        if timer is not None:
+            try: timer.stop()
+            except Exception: pass
+
+    def _between_ticks(self) -> None:
+        # A stopped timer's callback already on its way does nothing.
+        if self._disconnected or self._timer is None:
+            return
+        try:
+            self._bridge.serve_between_ticks()
+        except Exception as error:
+            # The ticks still serve the bridge: a timer that fails once stops, rather than failing a thousand times a second.
+            self._stop_timer()
+            log = getattr(self, "log_message", None)
+            if callable(log): log("Bridge timer stopped (" + str(error) + "); display ticks serve the bridge")
 
     def _schedule_next(self) -> None:
         scheduler = getattr(self, "schedule_message", None)
@@ -447,6 +481,7 @@ class AbletonMcpBridge(_ControlSurface):
 
     def disconnect(self) -> None:
         self._disconnected = True
+        self._stop_timer()
         if self._scheduled is not None:
             self._scheduled = None
         if self._willington is not None:

@@ -33,9 +33,11 @@ parameters in one request: each within its range and on its steps, all of them
 or none, with Live's text before and after for HISTORY. Nothing else happens in
 Live while it runs, so there's nothing to preview. A parameter given by name
 ("Drive"), or a value given as Live shows it ("-6 dB"), takes one request more
-the first time. Each request waits for one of Live's display ticks (about a
+the first time. Each request waited for one of Live's display ticks (about a
 tenth of a second), and the preview and apply took five: nine parameters on
 three devices went from 4.2 to 1.7 seconds, and to 0.7 seconds when set again.
+Live's own timer now serves requests between ticks too, so a request waits
+milliseconds rather than a tick.
 `KUMI_FAST=0` goes back to the preview and apply.
 
 Once a change is sent to Live it runs to the end (up to 30 seconds), even if

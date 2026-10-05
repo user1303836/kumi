@@ -283,6 +283,53 @@ class RemoteScriptTests(unittest.TestCase):
         self.assertEqual(seen["args"][0], os.path.join(r"D:\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"))
         self.assertEqual(seen["kwargs"]["creationflags"], getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
+    def surface_with_timer(self, serve=None):
+        """A Control Surface whose Live has a timer (Live.Base.Timer), the timers it made, its bridge."""
+        package = __import__("AbletonMcpBridge"); made = []
+        class Timer:
+            def __init__(self, callback, interval, repeat):
+                self.callback, self.interval, self.repeat, self.running = callback, interval, repeat, False; made.append(self)
+            def start(self): self.running = True
+            def stop(self): self.running = False
+        class Bridge:
+            between_ticks = False; served = 0; disconnected = False
+            def serve_between_ticks(self):
+                self.served += 1
+                if serve is not None: serve()
+            def disconnect(self): self.disconnected = True
+        live = types.ModuleType("Live"); live.Base = types.SimpleNamespace(Timer=Timer)
+        surface = object.__new__(package.AbletonMcpBridge)
+        surface._bridge, surface._disconnected, surface._willington, surface._timer, surface._scheduled = Bridge(), False, None, None, None
+        logged = []; surface.log_message = logged.append
+        with patch.dict(sys.modules, {"Live": live}): surface._start_timer()
+        return surface, made, logged
+
+    def test_lives_timer_serves_the_bridge_between_ticks_until_disconnect(self):
+        surface, made, _ = self.surface_with_timer()
+        timer = made[0]
+        self.assertEqual((timer.interval, timer.repeat, timer.running, surface._bridge.between_ticks), (1, True, True, True))
+        timer.callback(); timer.callback()
+        self.assertEqual(surface._bridge.served, 2)
+        surface.disconnect()
+        self.assertEqual((timer.running, surface._bridge.between_ticks, surface._bridge.disconnected), (False, False, True))
+        timer.callback()
+        self.assertEqual(surface._bridge.served, 2, "a late timer callback doesn't touch the bridge")
+
+    def test_a_timer_that_fails_stops_and_the_ticks_serve_as_before(self):
+        def fail(): raise RuntimeError("boom")
+        surface, made, logged = self.surface_with_timer(fail)
+        made[0].callback(); made[0].callback()
+        self.assertEqual(surface._bridge.served, 1, "stopped after its first failure")
+        self.assertEqual((made[0].running, surface._bridge.between_ticks), (False, False))
+        self.assertEqual(logged, ["Bridge timer stopped (boom); display ticks serve the bridge"])
+
+    def test_a_live_without_a_timer_is_served_by_its_ticks(self):
+        package = __import__("AbletonMcpBridge")
+        surface = object.__new__(package.AbletonMcpBridge)
+        surface._bridge = types.SimpleNamespace(between_ticks=False); surface._timer = None
+        with patch.dict(sys.modules, {"Live": None}): surface._start_timer()
+        self.assertEqual((surface._timer, surface._bridge.between_ticks), (None, False))
+
     def test_scheduled_callback_does_not_touch_bridge_after_disconnect(self):
         surface = object.__new__(__import__("AbletonMcpBridge").AbletonMcpBridge)
         surface._disconnected = True
@@ -6320,6 +6367,59 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
         answer_once(1); before = len(os.listdir("/dev/fd"))
         for sequence in range(2, 152): answer_once(sequence)
         self.assertLessEqual(len(os.listdir("/dev/fd")), before)
+
+    def answered_between_ticks(self, client, seconds=2.0):
+        """Serve the bridge from its timer only (no display tick) until an answer arrives, or time's up."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            self.bridge.serve_between_ticks()
+            if select_module.select([client], [], [], 0.001)[0]: return client.recv(1 << 20)
+        return b""
+
+    def test_between_ticks_a_change_is_served_without_a_display_tick(self):
+        # Its first request when the timer next fires; the ones after it (read, change, confirm) at once,
+        # as a tick serves them, in the same turn.
+        client, channel = self.connect(); self.bridge.between_ticks = True; answered = []
+        def ask():
+            buffer = bytearray()
+            for sequence in (1, 2, 3):
+                client.sendall(self.frame(channel, sequence))
+                while b"\n" not in buffer:
+                    chunk = client.recv(1 << 20)
+                    if not chunk: return
+                    buffer.extend(chunk)
+                index = buffer.find(b"\n"); answered.append(json.loads(bytes(buffer[:index]))); del buffer[:index + 1]
+        asker = threading.Thread(target=ask); asker.start()
+        deadline = time.time() + 2; turns = 0
+        while len(answered) < 3 and time.time() < deadline: self.bridge.serve_between_ticks(); turns += 1; time.sleep(0.001)
+        asker.join(timeout=2)
+        self.assertEqual([item["id"] for item in answered], ["status-1", "status-2", "status-3"])
+        started = time.perf_counter()
+        for _ in range(50): self.bridge.serve_between_ticks()
+        self.assertLess((time.perf_counter() - started) / 50, remote_module.PUMP_LINGER_SECONDS / 4, "nothing waiting: back at once")
+
+    def test_the_timer_and_the_ticks_share_one_budget_a_tick(self):
+        client, channel = self.connect(); self.bridge.between_ticks = True
+        self.bridge._budget_left(); self.bridge._window_spent = remote_module.PUMP_BUDGET_SECONDS
+        client.sendall(self.frame(channel, 1)); time.sleep(0.05)
+        for _ in range(5): self.bridge.serve_between_ticks()
+        self.bridge.update_display()
+        self.assertFalse(select_module.select([client], [], [], 0.05)[0], "this tick's share is spent: no service until the next")
+        self.bridge._window_started -= remote_module.PUMP_WINDOW_SECONDS
+        self.assertIn(b'"status-1"', self.answered_between_ticks(client), "the next tick's share serves it")
+        self.assertGreater(self.bridge._window_spent, 0.0, "and counts toward it")
+
+    def test_a_change_takes_what_live_takes_and_reads_keep_to_the_budget(self):
+        client, channel = self.connect(); self.bridge.between_ticks = True
+        auth = self.bridge._connections[0].auth; answer = auth.dispatch
+        def slow(request):
+            time.sleep(0.03); return answer(request)
+        auth.dispatch = slow
+        self.bridge._budget_left()
+        client.sendall(self.frame(channel, 1, method="mutate")); self.answered_between_ticks(client)
+        self.assertLess(self.bridge._window_spent, 0.02, "a change's own time isn't counted")
+        client.sendall(self.frame(channel, 2)); self.answered_between_ticks(client)
+        self.assertGreaterEqual(self.bridge._window_spent, 0.03, "a read's is")
 
     def test_a_tick_that_answered_no_one_doesnt_wait(self):
         self.connect()

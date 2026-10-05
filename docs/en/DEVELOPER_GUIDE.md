@@ -155,7 +155,8 @@ Paths below are relative to `crates/ableton-mcp-server`.
 - The bridge's internal `get(ref)` is a bounded serializer over fixed rows, not
   a general reader of Live's object model; MCP reads stay purpose-specific.
 - The Remote Script does all its work with Live on Live's main thread: it
-  serves the sockets itself inside Live's display tick, within a time budget.
+  serves the sockets itself inside Live's display tick (and, between ticks,
+  Live's own timer), within a time budget.
   Its only other threads write the diagnostics file and receive realtime UDP. A
   new epoch invalidates every earlier reference and cursor. A Live shape
   the Remote Script doesn't recognize is reported unavailable, never faked.
