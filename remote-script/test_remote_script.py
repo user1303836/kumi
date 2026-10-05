@@ -6406,16 +6406,24 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
         for _ in range(50): self.bridge.serve_between_ticks()
         self.assertLess((time.perf_counter() - started) / 50, remote_module.PUMP_LINGER_SECONDS / 4, "nothing waiting: back at once")
 
+    def frozen_window(self, spent=0.0):
+        """A budget window that doesn't roll over while the test runs (on a slow runner 100 ms pass in no
+        time), with spent of it used."""
+        self.bridge._window_started = time.perf_counter() + 60; self.bridge._window_spent = spent
+
     def test_the_timer_and_the_ticks_share_one_budget_a_tick(self):
         client, channel = self.connect(); self.bridge.between_ticks = True
-        self.bridge._budget_left(); self.bridge._window_spent = remote_module.PUMP_BUDGET_SECONDS
+        self.frozen_window(remote_module.PUMP_BUDGET_SECONDS)
         client.sendall(self.frame(channel, 1)); time.sleep(0.05)
         for _ in range(5): self.bridge.serve_between_ticks()
         self.bridge.update_display()
         self.assertFalse(select_module.select([client], [], [], 0.05)[0], "this tick's share is spent: no service until the next")
-        self.bridge._window_started -= remote_module.PUMP_WINDOW_SECONDS
+        self.frozen_window()
         self.assertIn(b'"status-1"', self.answered_between_ticks(client), "the next tick's share serves it")
         self.assertGreater(self.bridge._window_spent, 0.0, "and counts toward it")
+        # A window rolls over by itself once a tick's worth of time has passed.
+        self.bridge._window_started = time.perf_counter() - remote_module.PUMP_WINDOW_SECONDS; self.bridge._window_spent = remote_module.PUMP_BUDGET_SECONDS
+        self.assertEqual(self.bridge._budget_left(), remote_module.PUMP_BUDGET_SECONDS)
 
     def test_a_change_takes_what_live_takes_and_reads_keep_to_the_budget(self):
         client, channel = self.connect(); self.bridge.between_ticks = True
@@ -6424,18 +6432,18 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
             # Long enough that a change counted shows over lingering (Windows rounds a 12 ms wait up to 15.6 ms).
             time.sleep(0.1); return answer(request)
         auth.dispatch = slow
-        self.bridge._budget_left()
+        self.frozen_window()
         client.sendall(self.frame(channel, 1, method="mutate")); self.answered_between_ticks(client)
         self.assertLess(self.bridge._window_spent, 0.05, "a change's own time isn't counted")
         client.sendall(self.frame(channel, 2)); self.answered_between_ticks(client)
         self.assertGreaterEqual(self.bridge._window_spent, 0.1, "a read's is")
-        self.bridge._window_started -= remote_module.PUMP_WINDOW_SECONDS; self.bridge._budget_left()
+        self.frozen_window()
         client.sendall(self.frame(channel, 3, method="invoke", operation="browser.search", args={})); self.answered_between_ticks(client)
         self.assertGreaterEqual(self.bridge._window_spent, 0.1, "a read made through invoke counts")
-        self.bridge._window_started -= remote_module.PUMP_WINDOW_SECONDS; self.bridge._budget_left()
+        self.frozen_window()
         client.sendall(self.frame(channel, 4, method="invoke", operation="python.run", args={})); self.answered_between_ticks(client)
         self.assertGreaterEqual(self.bridge._window_spent, 0.1, "so does Python")
-        self.bridge._window_started -= remote_module.PUMP_WINDOW_SECONDS; self.bridge._budget_left()
+        self.frozen_window()
         client.sendall(self.frame(channel, 5, method="invoke", operation="track.create", args={})); self.answered_between_ticks(client)
         self.assertLess(self.bridge._window_spent, 0.05, "a change made through invoke doesn't")
 
