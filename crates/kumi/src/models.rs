@@ -75,7 +75,7 @@ pub struct CurrentModel {
     pub r#where: Option<String>,
     /// The faster tier in use ("Fast"): `/fast` is on and this model's provider offers one.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub fast: Option<String>,
+    pub fast: Option<ServiceTier>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DefaultModel {
@@ -305,7 +305,7 @@ impl ModelControl {
         let parsed = self.parse(model.as_deref());
         let fast = self.inner.state.borrow().fast;
         CurrentModel {
-            fast: info.as_ref().filter(|_| fast).and_then(|i| i.service_tiers.first()).map(|tier| tier.name.clone()),
+            fast: info.as_ref().filter(|_| fast).and_then(|i| i.service_tiers.first()).cloned(),
             model: model.filter(|s| !s.is_empty()),
             provider: parsed.as_ref().map(|p| p.provider.clone()),
             name: info.as_ref().map(|i| i.name.clone()),
@@ -480,6 +480,10 @@ impl ModelControl {
         self.save()?;
         (self.inner.options.changed)().await
     }
+    /// Whether `/fast` is on, whether or not the current model has a faster tier.
+    pub fn fast_enabled(&self) -> bool {
+        self.inner.state.borrow().fast
+    }
     /// Turn the model's faster tier on or off. On: the tier the model's provider lists, or None (and
     /// nothing changes) when it lists none.
     pub async fn set_fast(&self, on: bool) -> Result<Option<ServiceTier>, RuntimeError> {
@@ -625,6 +629,10 @@ pub trait ModelController {
     async fn models(&self, provider: &str, refresh: bool) -> Result<Vec<ModelInfo>, RuntimeError>;
     async fn choose(&self, next: &str) -> Result<Option<String>, RuntimeError>;
     async fn set_effort(&self, next: Option<Effort>) -> Result<(), RuntimeError>;
+    /// Whether `/fast` is on (the setting, whether or not this model has a faster tier).
+    fn fast_enabled(&self) -> bool {
+        false
+    }
     /// `/fast`: the model's faster tier on or off; None when turning it on and the model has none.
     async fn set_fast(&self, on: bool) -> Result<Option<ServiceTier>, RuntimeError> {
         let _ = on;
@@ -659,6 +667,9 @@ impl ModelController for ModelControl {
     }
     async fn set_effort(&self, next: Option<Effort>) -> Result<(), RuntimeError> {
         ModelControl::set_effort(self, next).await
+    }
+    fn fast_enabled(&self) -> bool {
+        ModelControl::fast_enabled(self)
     }
     async fn set_fast(&self, on: bool) -> Result<Option<ServiceTier>, RuntimeError> {
         ModelControl::set_fast(self, on).await

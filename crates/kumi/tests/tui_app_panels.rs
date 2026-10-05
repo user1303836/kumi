@@ -648,9 +648,24 @@ case!(fast_turns_on_the_tier_the_model_offers_and_shows_it_beside_the_model, asy
     h.type_text("/fast\r").await;
     h.has("Back to the standard tier.");
     assert!(!has(&h.screen(), "Astra · fast"));
+    h.type_text("/fast\r").await;
     *m.model.borrow_mut() = Some("openai-codex/gpt-6-luna".into());
     h.type_text("/fast\r").await;
+    h.has("Back to the standard tier.");
+    h.type_text("/fast\r").await;
     h.has("GPT-6 Luna has no faster tier to turn on.");
-    assert_eq!(m.calls.borrow().iter().filter(|c| c.starts_with("fast:")).collect::<Vec<_>>(), ["fast:true", "fast:false"]);
+    assert_eq!(
+        m.calls.borrow().iter().filter(|c| c.starts_with("fast:")).collect::<Vec<_>>(),
+        ["fast:true", "fast:false", "fast:true", "fast:false"],
+        "on a model without a tier, a saved \"on\" still turns off"
+    );
+    // Choosing a model that Fast applies to says so, since it costs more.
+    *m.model.borrow_mut() = Some("openai-codex/gpt-6-astra".into());
+    h.type_text("/fast\r").await;
+    *m.model.borrow_mut() = Some("openai-codex/gpt-6-luna".into());
+    h.type_text("/model\r").await;
+    h.type_text("astra").await;
+    h.type_text("\r").await;
+    h.has("Fast is on: 2x speed, increased usage; /fast turns it off.");
     h.close().await;
 });

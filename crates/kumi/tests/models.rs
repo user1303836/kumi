@@ -173,14 +173,16 @@ async fn fast_uses_the_tier_the_models_list_offers_persists_and_reaches_the_requ
     f.control.choose("openai-codex/gpt-6-astra").await.unwrap();
     assert_eq!(f.control.set_fast(true).await.unwrap().map(|t| t.name), Some("Fast".into()));
     assert_eq!(f.settings(), json!({"model":"openai-codex/gpt-6-astra","fast":true}));
-    assert_eq!(f.control.current().fast.as_deref(), Some("Fast"));
+    assert_eq!(f.control.current().fast.map(|t| t.name).as_deref(), Some("Fast"));
     assert_eq!(tier(&f.control).await, Some(json!("priority")));
     f.control.choose("openai-codex/gpt-6-luna").await.unwrap();
     assert_eq!(f.control.current().fast, None, "on, but this model has no faster tier");
+    assert!(f.control.fast_enabled());
     assert_eq!(tier(&f.control).await, None);
-    f.control.choose("openai-codex/gpt-6-astra").await.unwrap();
+    // A saved "on" turns off from a model without a tier too, so the next model doesn't get it unasked.
     assert_eq!(f.control.set_fast(false).await.unwrap(), None);
-    assert_eq!(f.settings(), json!({"model":"openai-codex/gpt-6-astra"}));
+    assert_eq!(f.settings(), json!({"model":"openai-codex/gpt-6-luna"}));
+    f.control.choose("openai-codex/gpt-6-astra").await.unwrap();
     assert_eq!(tier(&f.control).await, None);
 }
 #[tokio::test(flavor = "current_thread")]

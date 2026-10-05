@@ -388,7 +388,8 @@ impl TuiApp {
         if let Some(models) = self.0.options.models.clone().filter(|_| command == "/fast") {
             self.clear_editor();
             let current = models.current();
-            let on = current.fast.is_none();
+            // The setting, not whether this model uses it: a saved "on" can always be turned off.
+            let on = !models.fast_enabled();
             let name = current.name.or(current.model).unwrap_or_else(|| "This model".into());
             match models.set_fast(on).await {
                 Ok(Some(tier)) => self.notice(

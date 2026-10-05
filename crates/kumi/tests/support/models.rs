@@ -96,7 +96,7 @@ impl ModelController for FakeModels {
             efforts: info.as_ref().map(|m| m.efforts.clone()).unwrap_or_default(),
             pinned: false,
             r#where: local.map(|s| s.r#where),
-            fast: info.as_ref().filter(|_| *self.fast.borrow()).and_then(|m| m.service_tiers.first()).map(|t| t.name.clone()),
+            fast: info.as_ref().filter(|_| *self.fast.borrow()).and_then(|m| m.service_tiers.first()).cloned(),
         }
     }
     async fn providers(&self) -> Result<Vec<ProviderStatus>, RuntimeError> {
@@ -171,6 +171,9 @@ impl ModelController for FakeModels {
         *self.effort.borrow_mut() = next;
         self.calls.borrow_mut().push(format!("effort:{}", next.map(|e| e.as_str()).unwrap_or("default")));
         Ok(())
+    }
+    fn fast_enabled(&self) -> bool {
+        *self.fast.borrow()
     }
     async fn set_fast(&self, on: bool) -> Result<Option<kumi_runtime::providers::models::ServiceTier>, RuntimeError> {
         let tier = self.model.borrow().as_ref().and_then(|m| self.info(m)).and_then(|m| m.service_tiers.first().cloned());
