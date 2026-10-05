@@ -89,8 +89,11 @@ pub async fn transcribe(whisper: &str, model: &str, wav: &str, options: Transcri
     } else {
         "auto"
     };
+    // One guess at each step (`-bs 1`) rather than whisper.cpp's beam of five: a tutorial's words come
+    // out the same, in about two-thirds of the time. A stretch it's unsure of is still tried five ways.
+    // Its threads stay its own default (up to 4), leaving Live the rest.
     let mut args: Vec<String> =
-        ["-m", model, "-f", wav, "-oj", "-of", &out, "-pp", "-sns", "-l", language].into_iter().map(str::to_string).collect();
+        ["-m", model, "-f", wav, "-oj", "-of", &out, "-pp", "-sns", "-bs", "1", "-l", language].into_iter().map(str::to_string).collect();
     if let Some(prompt) = options.prompt.as_deref().filter(|s| !s.is_empty()) {
         args.extend(["--prompt".into(), head(prompt, 600)]);
     }

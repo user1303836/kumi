@@ -288,6 +288,110 @@ async fn a_video_without_captions_says_how_it_could_be_transcribed() {
     assert!(watched.notes.join(" ").contains("whisper.cpp"));
 }
 
+/// A program that writes its runs to `runs` beside it, then does `then`.
+#[cfg(unix)]
+fn program(folder: &Path, name: &str, then: &str) -> String {
+    use std::os::unix::fs::PermissionsExt;
+    let path = folder.join(name);
+    std::fs::write(&path, format!("#!/bin/sh\necho {name} >> \"$(dirname \"$0\")/runs\"\n{then}\n")).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    path.to_string_lossy().into()
+}
+#[cfg(unix)]
+fn runs(folder: &Path, name: &str) -> usize {
+    std::fs::read_to_string(folder.join("runs")).unwrap_or_default().lines().filter(|line| *line == name).count()
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn speech_that_couldnt_be_transcribed_is_tried_again_only_in_the_next_request() {
+    let folder = tempfile::tempdir().unwrap();
+    let Some(video) = test_video(folder.path(), "unheard", false).await else {
+        eprintln!("ffmpeg makes the test video; unavailable");
+        return;
+    };
+    let whisper = program(folder.path(), "whisper", "echo 'error: the model ran out of memory' >&2\nexit 1");
+    std::fs::write(folder.path().join("model.bin"), "").unwrap();
+    let mut env = kumi_runtime::system::process_env();
+    env.insert("KUMI_WHISPER".into(), whisper);
+    env.insert("KUMI_WHISPER_MODEL".into(), folder.path().join("model.bin").to_string_lossy().into());
+    let mut options = watch_options(folder.path(), "unheard-videos");
+    options.env = Some(env);
+    // A turn gives each of its tools its own signal, copied.
+    options.signal = Some(kumi_common::abort::any([Signal::new()]));
+    let first =
+        watch_video(WatchRequest { url: video.clone(), look_at: Some(vec![1.0]), ..Default::default() }, options.clone()).await.unwrap();
+    assert_eq!(runs(folder.path(), "whisper"), 1);
+    assert!(
+        first.notes.contains(&"Kumi couldn't transcribe the video's speech (error: the model ran out of memory).".into()),
+        "{:?}",
+        first.notes
+    );
+    assert_eq!(first.frames.len(), 1, "{:?}", first.notes);
+    // Another request runs between the two looks, as tests running together do: it hasn't seen the
+    // failure, and it doesn't make the first request forget it.
+    let turn = options.signal.replace(kumi_common::abort::any([Signal::new()]));
+    watch_video(WatchRequest { url: video.clone(), look_at: Some(vec![1.0]), ..Default::default() }, options.clone()).await.unwrap();
+    assert_eq!(runs(folder.path(), "whisper"), 2);
+    options.signal = turn;
+    let again =
+        watch_video(WatchRequest { url: video.clone(), look_at: Some(vec![2.0]), ..Default::default() }, options.clone()).await.unwrap();
+    assert_eq!(runs(folder.path(), "whisper"), 2, "a closer look in the same request doesn't wait for the same failure");
+    assert_eq!(
+        again.notes,
+        vec!["Kumi couldn't transcribe the video's speech earlier in this request (error: the model ran out of memory), so it didn't try again; it will on the next request."]
+    );
+    assert_eq!(again.frames.len(), 1, "{:?}", again.notes);
+    options.signal = Some(kumi_common::abort::any([Signal::new()]));
+    let next = watch_video(WatchRequest { url: video, look_at: Some(vec![2.0]), ..Default::default() }, options).await.unwrap();
+    assert_eq!(runs(folder.path(), "whisper"), 3, "the next request tries again");
+    assert!(
+        next.notes.contains(&"Kumi couldn't transcribe the video's speech (error: the model ran out of memory).".into()),
+        "{:?}",
+        next.notes
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn speech_that_couldnt_be_taken_leaves_a_note_and_the_frames() {
+    let folder = tempfile::tempdir().unwrap();
+    let Some(video) = test_video(folder.path(), "stalled", false).await else {
+        eprintln!("ffmpeg makes the test video; unavailable");
+        return;
+    };
+    let real = find_ffmpeg(FfmpegOptions { installed_only: true, ..Default::default() }).await.unwrap().unwrap();
+    // ffmpeg that stalls taking the sound (-vn) and takes frames as ever, with ffprobe beside it.
+    let tools = folder.path().join("stalling");
+    std::fs::create_dir_all(&tools).unwrap();
+    let ffmpeg = program(
+        &tools,
+        "ffmpeg",
+        &format!("for arg in \"$@\"; do if [ \"$arg\" = -vn ]; then echo sound >> \"$(dirname \"$0\")/runs\"; echo 'Connection timed out' >&2; exit 1; fi; done\nexec '{real}' \"$@\""),
+    );
+    let probe = Path::new(&real).with_file_name("ffprobe");
+    if probe.exists() {
+        std::os::unix::fs::symlink(probe, tools.join("ffprobe")).unwrap();
+    }
+    let whisper = program(folder.path(), "whisper", "exit 1");
+    std::fs::write(folder.path().join("model.bin"), "").unwrap();
+    let mut env = kumi_runtime::system::process_env();
+    env.insert("KUMI_FFMPEG".into(), ffmpeg);
+    env.insert("KUMI_WHISPER".into(), whisper);
+    env.insert("KUMI_WHISPER_MODEL".into(), folder.path().join("model.bin").to_string_lossy().into());
+    let mut options = watch_options(folder.path(), "stalled-videos");
+    options.env = Some(env);
+    options.signal = Some(kumi_common::abort::any([Signal::new()]));
+    let watched =
+        watch_video(WatchRequest { url: video.clone(), look_at: Some(vec![1.0]), ..Default::default() }, options.clone()).await.unwrap();
+    assert_eq!((runs(&tools, "sound"), runs(folder.path(), "whisper")), (1, 0));
+    assert_eq!(watched.notes, vec!["Kumi couldn't transcribe the video's speech (Connection timed out)."]);
+    assert_eq!(watched.frames.len(), 1, "the frames still come");
+    let again = watch_video(WatchRequest { url: video, look_at: Some(vec![2.0]), ..Default::default() }, options).await.unwrap();
+    assert_eq!(runs(&tools, "sound"), 1, "a stalled stream is remembered for the request, like a failed transcription");
+    assert_eq!(again.frames.len(), 1);
+}
+
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
 async fn speech_process_receives_options_reports_progress_and_cleans_up_after_success_timeout_and_abort() {
@@ -328,6 +432,8 @@ if [ -f "$(dirname "$0")/sleep" ]; then exec sleep 10; fi
     assert_eq!(*progress.borrow(), vec![12.0, 100.0]);
     let args = std::fs::read_to_string(folder.path().join("args")).unwrap();
     assert!(args.contains("-l\nde\n--prompt\nAbleton\n-ac\n96\n--vad\n-vm\nvad.bin\n"), "{args}");
+    assert!(args.contains("\n-sns\n-bs\n1\n-l\n"), "{args}");
+    assert!(!args.contains("\n-t\n"), "whisper.cpp keeps its own threads, leaving Live the rest: {args}");
     let leftovers = || {
         std::fs::read_dir(folder.path()).unwrap().flatten().filter(|f| f.file_name().to_string_lossy().starts_with(".transcript-")).count()
     };
