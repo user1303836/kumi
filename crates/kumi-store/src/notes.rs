@@ -15,11 +15,12 @@ pub struct Note {
     pub at: i64,
 }
 
-/// The scope's notes in use, oldest first.
+/// The scope's notes in use, in the order they were kept: a note changed with `update` keeps its place,
+/// one kept in place of another (`replace`) goes last.
 pub fn in_use(connection: &Connection, scope: &Scope) -> Result<Vec<Note>, StoreError> {
     let mut statement = connection.prepare_cached(
         "SELECT label, text, pinned, updated_at FROM notes
-         WHERE scope_kind = ?1 AND scope_id = ?2 AND archived_at IS NULL ORDER BY updated_at, label",
+         WHERE scope_kind = ?1 AND scope_id = ?2 AND archived_at IS NULL ORDER BY created_at, rowid",
     )?;
     let rows = statement.query_map(params![scope.kind(), scope.id()], |row| {
         Ok(Note { label: row.get(0)?, text: row.get(1)?, pinned: row.get(2)?, at: row.get(3)? })
@@ -69,6 +70,47 @@ pub fn keep(connection: &Connection, scope: &Scope, notes: &[Note], now: i64) ->
         connection.prepare_cached("UPDATE notes SET archived_at = ?2 WHERE id = ?1")?.execute(params![id, now])?;
     }
     Ok(())
+}
+
+/// Add a note to the scope, as it is. Its label must be free among the notes in use.
+pub fn insert(connection: &Connection, scope: &Scope, note: &Note) -> Result<(), StoreError> {
+    connection
+        .prepare_cached(
+            "INSERT INTO notes (id, scope_kind, scope_id, label, text, pinned, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+        )?
+        .execute(params![new_id(), scope.kind(), scope.id(), note.label, note.text, note.pinned, note.at])?;
+    Ok(())
+}
+
+/// New words, pin and time for the note in use with this label, in its place. Whether there was one.
+pub fn update(connection: &Connection, scope: &Scope, note: &Note) -> Result<bool, StoreError> {
+    Ok(connection
+        .prepare_cached(
+            "UPDATE notes SET text = ?4, pinned = ?5, updated_at = ?6 WHERE scope_kind = ?1 AND scope_id = ?2 AND label = ?3 AND archived_at IS NULL",
+        )?
+        .execute(params![scope.kind(), scope.id(), note.label, note.text, note.pinned, note.at])?
+        > 0)
+}
+
+/// The note in use with this label, kept anew in place of itself: new words, pin and time, and it goes
+/// last. Whether there was one.
+pub fn replace(connection: &Connection, scope: &Scope, note: &Note) -> Result<bool, StoreError> {
+    Ok(connection
+        .prepare_cached(
+            "UPDATE notes SET text = ?4, pinned = ?5, created_at = ?6, updated_at = ?6, rowid = (SELECT max(rowid) + 1 FROM notes)
+             WHERE scope_kind = ?1 AND scope_id = ?2 AND label = ?3 AND archived_at IS NULL",
+        )?
+        .execute(params![scope.kind(), scope.id(), note.label, note.text, note.pinned, note.at])?
+        > 0)
+}
+
+/// Set the note in use with this label aside, as a full list makes room: kept, out of use. Whether there
+/// was one.
+pub fn archive(connection: &Connection, scope: &Scope, label: &str, now: i64) -> Result<bool, StoreError> {
+    Ok(connection
+        .prepare_cached("UPDATE notes SET archived_at = ?4 WHERE scope_kind = ?1 AND scope_id = ?2 AND label = ?3 AND archived_at IS NULL")?
+        .execute(params![scope.kind(), scope.id(), label, now])?
+        > 0)
 }
 
 /// Forget a note the producer no longer wants: deleted, and remembered as forgotten so no import brings
@@ -147,6 +189,23 @@ mod tests {
         // A label set aside can be used again.
         keep(&db, &producer, &[note("p1", "Mixes on headphones", 60)], 70).unwrap();
         assert_eq!(in_use(&db, &producer).unwrap(), [note("p1", "Mixes on headphones", 60)]);
+    }
+
+    #[test]
+    fn notes_stay_in_the_order_they_were_kept() {
+        let db = database();
+        // Kept in one millisecond: p10 comes after p9, as it was kept.
+        for n in 1..=10 {
+            insert(&db, &Scope::Global, &note(&format!("p{n}"), &format!("Habit {n}"), 5)).unwrap();
+        }
+        let labels = || in_use(&db, &Scope::Global).unwrap().into_iter().map(|n| n.label).collect::<Vec<_>>();
+        assert_eq!(labels(), ["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10"]);
+        // Reworded, p3 keeps its place; kept in place of itself, p2 goes last, though kept in the same
+        // millisecond as p10.
+        assert!(update(&db, &Scope::Global, &note("p3", "Habit three", 6)).unwrap());
+        assert!(replace(&db, &Scope::Global, &note("p2", "Habit two", 5)).unwrap());
+        assert_eq!(labels(), ["p1", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10", "p2"]);
+        assert!(!replace(&db, &Scope::Global, &note("p11", "Not kept", 7)).unwrap(), "no such note");
     }
 
     #[test]

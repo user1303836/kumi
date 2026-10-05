@@ -108,3 +108,21 @@ impl KernelTool for GapTool {
         Ok(ToolResult { text: json::stringify(&json!({"noted":missing})), reply: Some(String::new()), ..Default::default() })
     }
 }
+
+/// The gaps Kumi's database has logged, oldest first, each as the gap log writes it (one JSON line).
+pub async fn gap_lines(store: &StoreClient) -> Result<Vec<String>, RuntimeError> {
+    let logged = store.read(gaps::all).await.map_err(|e| RuntimeError::plain(e.to_string()))?;
+    Ok(logged
+        .into_iter()
+        .map(|gap| {
+            let mut entry = json!({"at":iso_string(gap.at),"kumi":gap.kumi_version,"missing":gap.missing});
+            if let Some(asked) = gap.asked {
+                entry["asked"] = Value::String(asked);
+            }
+            if let Some(workaround) = gap.workaround {
+                entry["workaround"] = Value::String(workaround);
+            }
+            json::stringify(&entry)
+        })
+        .collect())
+}

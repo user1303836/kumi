@@ -52,6 +52,34 @@ pub const MAX_LESSONS: usize = 60;
 pub trait PlaybookStore {
     async fn list(&self) -> Result<Vec<Lesson>, RuntimeError>;
     async fn save(&self, lessons: &[Lesson]) -> Result<(), RuntimeError>;
+    /// Keep a lesson, in place of one with its id. Whether there was one.
+    async fn put(&self, lesson: &Lesson) -> Result<bool, RuntimeError> {
+        let mut lessons = self.list().await?;
+        let existed = lessons.iter().any(|l| l.id == lesson.id);
+        lessons.retain(|l| l.id != lesson.id);
+        lessons.push(lesson.clone());
+        self.save(&lessons).await?;
+        Ok(existed)
+    }
+    /// Forget a lesson: the lesson, if there was one.
+    async fn forget(&self, id: &str) -> Result<Option<Lesson>, RuntimeError> {
+        let mut lessons = self.list().await?;
+        let Some(at) = lessons.iter().position(|l| l.id == id) else {
+            return Ok(None);
+        };
+        let gone = lessons.remove(at);
+        self.save(&lessons).await?;
+        Ok(Some(gone))
+    }
+    /// The producer's reaction to a lesson's result.
+    async fn react(&self, id: &str, reaction: Reaction) -> Result<(), RuntimeError> {
+        let mut lessons = self.list().await?;
+        if let Some(lesson) = lessons.iter_mut().find(|l| l.id == id) {
+            lesson.reaction = Some(reaction);
+            self.save(&lessons).await?;
+        }
+        Ok(())
+    }
 }
 fn text(value: &str, max: usize) -> String {
     let cleaned: String = value.chars().map(|c| if c <= '\u{1f}' || c == '<' || c == '>' { ' ' } else { c }).collect();
@@ -61,6 +89,11 @@ fn score(value: &Value) -> Option<f64> {
     value.as_f64().filter(|v| v.is_finite()).map(|v| round(v).clamp(0.0, 100.0))
 }
 static ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^l[0-9a-f]{8}$").unwrap());
+/// A lesson read back from anywhere but one just made, as a file's would be read: what doesn't check out
+/// is left out.
+pub(crate) fn checked_lesson(lesson: Lesson) -> Option<Lesson> {
+    checked(&serde_json::to_value(&lesson).ok()?)
+}
 fn checked(raw: &Value) -> Option<Lesson> {
     let id = raw["id"].as_str()?;
     let at = raw["at"].as_f64()?;

@@ -1273,11 +1273,74 @@ pub struct Memory {
     pub set: Vec<MemoryNote>,
 }
 
+/// How keeping a note went: kept (with the note it replaced, or that made room), or not, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Remembering {
+    Kept {
+        note: MemoryNote,
+        replaced: Option<MemoryNote>,
+    },
+    /// `replaces` names no note in the scope.
+    NoSuchNote,
+    /// The scope is full and every note in it is pinned.
+    AllPinned,
+}
+
 #[async_trait(?Send)]
 pub trait MemoryStore {
     /// Notes about the producer, and about the saved Set `project` when there is one.
     async fn load(&self, project: Option<&str>) -> Result<Memory, RuntimeError>;
     async fn save(&self, scope: MemoryScope, project: Option<&str>, notes: &[MemoryNote]) -> Result<(), RuntimeError>;
+    /// Keep a note: in place of `replaces` (keeping its pin), or added with the next id, the oldest
+    /// unpinned making room when the scope is full.
+    async fn remember(
+        &self,
+        scope: MemoryScope,
+        project: Option<&str>,
+        text: &str,
+        replaces: Option<&str>,
+        at: i64,
+    ) -> Result<Remembering, RuntimeError> {
+        let memory = self.load(project).await?;
+        let mut notes = if scope == MemoryScope::Set { memory.set } else { memory.producer };
+        let remembering = super::memory::remember_in(&mut notes, scope, text, replaces, at);
+        if matches!(remembering, Remembering::Kept { .. }) {
+            self.save(scope, project, &notes).await?;
+        }
+        Ok(remembering)
+    }
+    /// The producer's change to a note (its words already checked): the note as changed, if there is one.
+    async fn change(
+        &self,
+        scope: MemoryScope,
+        project: Option<&str>,
+        id: &str,
+        change: NoteChange,
+        at: i64,
+    ) -> Result<Option<MemoryNote>, RuntimeError> {
+        let memory = self.load(project).await?;
+        let mut notes = if scope == MemoryScope::Set { memory.set } else { memory.producer };
+        let Some(note) = notes.iter_mut().find(|n| n.id == id) else {
+            return Ok(None);
+        };
+        match change {
+            NoteChange::Text(text) => {
+                note.text = text;
+                note.at = at;
+            }
+            NoteChange::Pinned(pinned) => note.pinned = pinned,
+        }
+        let note = note.clone();
+        self.save(scope, project, &notes).await?;
+        Ok(Some(note))
+    }
+    /// Notes kept while a Set was unsaved, added now that it's saved, while there's room.
+    async fn add(&self, scope: MemoryScope, project: Option<&str>, texts: &[String], at: i64) -> Result<(), RuntimeError> {
+        let memory = self.load(project).await?;
+        let mut notes = if scope == MemoryScope::Set { memory.set } else { memory.producer };
+        super::memory::add_in(&mut notes, scope, texts, at);
+        self.save(scope, project, &notes).await
+    }
     /// Forget a note the producer no longer wants: the note, if there was one.
     async fn forget(&self, scope: MemoryScope, project: Option<&str>, id: &str) -> Result<Option<MemoryNote>, RuntimeError> {
         let memory = self.load(project).await?;

@@ -1881,12 +1881,9 @@ impl SessionController for Session {
         Ok(self
             .playbook_serial(move |store| {
                 async move {
-                    let mut lessons = store.list().await?;
-                    let Some(at) = lessons.iter().position(|l| l.id == id) else {
+                    let Some(gone) = store.forget(&id).await? else {
                         return Ok(false);
                     };
-                    let gone = lessons.remove(at);
-                    store.save(&lessons).await?;
                     this.emit(SessionEvent::Lesson { action: LessonAction::Forgot, id, line: super::playbook::lesson_line(&gone) });
                     Ok(true)
                 }

@@ -16,7 +16,6 @@ use kumi_runtime::{
         session::VideoDirectories,
         store_backed::{SqliteMemoryStore, SqlitePlaybookStore, SqliteTechniqueStore},
         store_client::StoreClient,
-        store_import::JsonFiles,
     },
     library::{create_library, LibraryOptions},
     video::programs::{configure_programs, ProgramDefaults},
@@ -401,17 +400,15 @@ pub(super) async fn run_session(
     }
     // Kumi's database keeps notes, techniques, lessons and gaps, with what earlier Kumis kept in files
     // read in. When it can't open, they stay in their files this time, as before, and Kumi says so once.
-    let files = JsonFiles {
-        memory: load_memory_file(&io.env)?.into(),
-        projects: projects_dir.clone().into(),
-        techniques: load_techniques_file(&io.env)?.into(),
-        playbook: load_playbook_file(&io.env)?.into(),
-        gaps: load_gaps_file(&io.env)?.into(),
+    let database = StoreClient::open(load_db_file(&io.env)?.into(), json_files(&io.env)?, kumi_common::time::now_ms()).await;
+    let database_notice = match &database {
+        Ok((_, Ok(_))) => None,
+        Ok((_, Err(why))) => {
+            Some(format!("Kumi couldn't read in the notes and techniques kept in files this time ({why}); it tries again next start."))
+        }
+        Err(why) => Some(format!("Your notes, techniques and lessons stay in their files this time: {why}.")),
     };
-    let database = StoreClient::open(load_db_file(&io.env)?.into(), files, kumi_common::time::now_ms()).await;
-    let database_notice =
-        database.as_ref().err().map(|why| format!("Your notes, techniques and lessons stay in their files this time: {why}."));
-    let database = database.ok();
+    let database = database.ok().map(|(client, _)| client);
     options.memory = Some(match &database {
         Some(client) => Rc::new(SqliteMemoryStore::new(client.clone())) as Rc<dyn MemoryStore>,
         None => create_memory_store(MemoryStoreOptions {

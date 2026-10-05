@@ -53,7 +53,7 @@ fn row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Technique> {
 /// The techniques in use, in the order they were kept.
 pub fn in_use(connection: &Connection) -> Result<Vec<Technique>, StoreError> {
     let mut statement =
-        connection.prepare_cached(&format!("SELECT {COLUMNS} FROM techniques WHERE archived_at IS NULL ORDER BY created_at, label"))?;
+        connection.prepare_cached(&format!("SELECT {COLUMNS} FROM techniques WHERE archived_at IS NULL ORDER BY created_at, rowid"))?;
     let rows = statement.query_map([], row)?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
@@ -129,6 +129,81 @@ pub fn keep(connection: &Connection, techniques: &[Technique], now: i64) -> Resu
         connection.prepare_cached("UPDATE techniques SET archived_at = ?2 WHERE id = ?1")?.execute(params![id, now])?;
     }
     Ok(())
+}
+
+/// Add a technique, or write a known one's content anew (by label, among those in use).
+pub fn put(connection: &Connection, t: &Technique) -> Result<(), StoreError> {
+    let updated = connection
+        .prepare_cached(
+            "UPDATE techniques SET name = ?2, fits = ?3, idea = ?4, settings = ?5, substitutes = ?6, recipe = ?7, source_title = ?8,
+             source_url = ?9, request = ?10, used = ?11, undone = ?12, created_at = ?13, updated_at = ?14, last_used_at = ?15
+             WHERE label = ?1 AND archived_at IS NULL",
+        )?
+        .execute(params![
+            t.label,
+            t.name,
+            t.fits,
+            t.idea,
+            t.settings,
+            t.substitutes,
+            t.recipe,
+            t.source_title,
+            t.source_url,
+            t.request,
+            t.used,
+            t.undone,
+            t.at,
+            t.updated,
+            t.last_used
+        ])?;
+    if updated == 0 {
+        connection
+            .prepare_cached(&format!(
+                "INSERT INTO techniques (id, {COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"
+            ))?
+            .execute(params![
+                new_id(),
+                t.label,
+                t.name,
+                t.fits,
+                t.idea,
+                t.settings,
+                t.substitutes,
+                t.recipe,
+                t.source_title,
+                t.source_url,
+                t.request,
+                t.used,
+                t.undone,
+                t.at,
+                t.updated,
+                t.last_used
+            ])?;
+    }
+    Ok(())
+}
+
+/// A build that used the technique went in (`undone` false: one more use, the latest), or the producer
+/// undid one (one use fewer, one undo more). Whether there was one in use.
+pub fn record(connection: &Connection, label: &str, undone: bool, now: i64) -> Result<bool, StoreError> {
+    let changed = if undone {
+        connection
+            .prepare_cached("UPDATE techniques SET used = max(used - 1, 0), undone = undone + 1 WHERE label = ?1 AND archived_at IS NULL")?
+            .execute(params![label])?
+    } else {
+        connection
+            .prepare_cached("UPDATE techniques SET used = used + 1, last_used_at = ?2 WHERE label = ?1 AND archived_at IS NULL")?
+            .execute(params![label, now])?
+    };
+    Ok(changed > 0)
+}
+
+/// Set the technique in use with this label aside, as a full list makes room. Whether there was one.
+pub fn archive(connection: &Connection, label: &str, now: i64) -> Result<bool, StoreError> {
+    Ok(connection
+        .prepare_cached("UPDATE techniques SET archived_at = ?2 WHERE label = ?1 AND archived_at IS NULL")?
+        .execute(params![label, now])?
+        > 0)
 }
 
 /// Forget a technique: deleted, and remembered as forgotten so no import brings it back. Whether there

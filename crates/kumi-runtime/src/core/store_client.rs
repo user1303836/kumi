@@ -2,7 +2,7 @@
 //! store's writer and answered here once committed; a read runs on a blocking thread, at most as many
 //! at once as the store has read connections.
 
-use super::store_import::{import_json, JsonFiles};
+use super::store_import::{import_json, Imported, JsonFiles};
 use kumi_store::{Connection, Store, StoreError};
 use std::{path::PathBuf, sync::Arc};
 
@@ -14,12 +14,14 @@ pub struct StoreClient {
 
 impl StoreClient {
     /// Open Kumi's database at `path` and read in what earlier Kumis kept in `files`, on a blocking
-    /// thread. An error means Kumi keeps its notes and the rest in the files this time, as before.
-    pub async fn open(path: PathBuf, files: JsonFiles, now: i64) -> Result<StoreClient, StoreError> {
+    /// thread: the client, and how reading in went. When the database can't open, Kumi keeps its notes
+    /// and the rest in the files this time, as before; when only the reading in fails (another Kumi held
+    /// the database too long, a file can't be read), Kumi keeps the database and reads in next start.
+    pub async fn open(path: PathBuf, files: JsonFiles, now: i64) -> Result<(StoreClient, Result<Imported, StoreError>), StoreError> {
         tokio::task::spawn_blocking(move || {
             let store = Store::open(&path)?;
-            import_json(&store, &files, now)?;
-            Ok(StoreClient::new(store))
+            let imported = import_json(&store, &files, now);
+            Ok((StoreClient::new(store), imported))
         })
         .await
         .unwrap_or(Err(StoreError::Closed))

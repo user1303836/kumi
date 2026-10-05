@@ -2,7 +2,7 @@
 
 use crate::{
     ids::{content_id, new_id},
-    imports, params, Connection, StoreError,
+    imports, params, Connection, OptionalExtension, StoreError,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -25,7 +25,7 @@ pub struct Lesson {
 pub fn in_use(connection: &Connection) -> Result<Vec<Lesson>, StoreError> {
     let mut statement = connection.prepare_cached(
         "SELECT label, matched, winner, from_score, to_score, json(moves), reaction, created_at FROM lessons
-         WHERE archived_at IS NULL ORDER BY created_at, label",
+         WHERE archived_at IS NULL ORDER BY created_at, rowid",
     )?;
     let rows = statement.query_map([], |row| {
         Ok((
@@ -82,6 +82,55 @@ pub fn keep(connection: &Connection, lessons: &[Lesson], now: i64) -> Result<(),
         connection.prepare_cached("UPDATE lessons SET archived_at = ?2 WHERE id = ?1")?.execute(params![id, now])?;
     }
     Ok(())
+}
+
+/// Add a lesson, or keep a known one (by label, among those in use) anew, last; then, past `most` in use,
+/// the oldest are set aside. Whether it was known.
+pub fn put(connection: &Connection, l: &Lesson, most: usize, now: i64) -> Result<bool, StoreError> {
+    let moves = serde_json::to_string(&l.moves).map_err(|error| StoreError::Sqlite(error.to_string()))?;
+    let known = connection
+        .prepare_cached(
+            "UPDATE lessons SET matched = ?2, winner = ?3, from_score = ?4, to_score = ?5, moves = jsonb(?6), reaction = ?7, created_at = ?8,
+             rowid = (SELECT max(rowid) + 1 FROM lessons) WHERE label = ?1 AND archived_at IS NULL",
+        )?
+        .execute(params![l.label, l.matched, l.winner, l.from, l.to, moves, l.reaction, l.at])?
+        > 0;
+    if !known {
+        connection
+            .prepare_cached(
+                "INSERT INTO lessons (id, label, matched, winner, from_score, to_score, moves, reaction, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, jsonb(?7), ?8, ?9)",
+            )?
+            .execute(params![new_id(), l.label, l.matched, l.winner, l.from, l.to, moves, l.reaction, l.at])?;
+    }
+    connection
+        .prepare_cached(
+            "UPDATE lessons SET archived_at = ?2 WHERE id IN (SELECT id FROM lessons WHERE archived_at IS NULL
+             ORDER BY created_at DESC, rowid DESC LIMIT -1 OFFSET ?1)",
+        )?
+        .execute(params![most as i64, now])?;
+    Ok(known)
+}
+
+/// The producer's reaction to a lesson's result. Whether there was one in use.
+pub fn react(connection: &Connection, label: &str, reaction: &str) -> Result<bool, StoreError> {
+    Ok(connection
+        .prepare_cached("UPDATE lessons SET reaction = ?2 WHERE label = ?1 AND archived_at IS NULL")?
+        .execute(params![label, reaction])?
+        > 0)
+}
+
+/// Forget a lesson: deleted, and remembered as forgotten so no import brings it back. Whether there was
+/// one in use.
+pub fn forget(connection: &Connection, label: &str, now: i64) -> Result<bool, StoreError> {
+    let id: Option<String> = connection
+        .prepare_cached("SELECT id FROM lessons WHERE label = ?1 AND archived_at IS NULL")?
+        .query_row(params![label], |row| row.get(0))
+        .optional()?;
+    let Some(id) = id else { return Ok(false) };
+    connection.prepare_cached("DELETE FROM lessons WHERE id = ?1")?.execute(params![id])?;
+    connection.prepare_cached("INSERT OR REPLACE INTO forgotten (id, at) VALUES (?1, ?2)")?.execute(params![id, now])?;
+    Ok(true)
 }
 
 /// Read in a lesson an earlier Kumi kept in a file, once: its id comes from its label and time, and a

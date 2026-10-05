@@ -1,6 +1,6 @@
 //! `kumi report`, with native runtime version information.
 use crate::{
-    config::{load_auth_file, load_gaps_file, load_projects_dir, load_settings_file, load_timings_file},
+    config::{json_files, load_auth_file, load_db_file, load_gaps_file, load_projects_dir, load_settings_file, load_timings_file},
     doctor::{doctor_checks, format_doctor, Check, DoctorIo},
     spinner::step,
     tui::style::os_release,
@@ -12,9 +12,10 @@ use kumi_common::js::{
     number,
     string::{trim, trim_end, utf16_len},
 };
+use kumi_common::time::now_ms;
 use kumi_runtime::{
     auth::store::{open_credential_store, CredentialStore},
-    core::errors::RuntimeError,
+    core::{errors::RuntimeError, gaps::gap_lines, store_client::StoreClient},
     library::sources::join,
     system::{self, Env},
     KUMI_VERSION,
@@ -442,8 +443,17 @@ async fn compose(io: &ReportIo, redact: &dyn Fn(&str) -> String, home: &str, now
             "none kept yet".into()
         },
     );
-    let gaps = match load_gaps_file(env) {
-        Ok(file) => read(&file).await.unwrap_or_default(),
+    // Kumi's database holds the gap log once Kumi has used it (opening it reads the file in too).
+    let logged = match (load_db_file(env), json_files(env)) {
+        (Ok(db), Ok(files)) if std::path::Path::new(&db).is_file() => match StoreClient::open(db.into(), files, now_ms()).await {
+            Ok((store, _)) => gap_lines(&store).await.ok(),
+            Err(_) => None,
+        },
+        _ => None,
+    };
+    let gaps = match (&logged, load_gaps_file(env)) {
+        (Some(lines), _) => lines.join("\n"),
+        (None, Ok(file)) => read(&file).await.unwrap_or_default(),
         _ => String::new(),
     };
     let gaps: Vec<_> = trim(&gaps).split('\n').filter(|s| !s.is_empty()).collect();
