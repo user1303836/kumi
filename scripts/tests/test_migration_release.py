@@ -279,6 +279,19 @@ class MigrationRelease(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result.stdout
 
+    def launched_leaving_the_bridge(self, manifest, old, command, env, *args):
+        """A command that ends by updating a bridge older than the release's. When the release's bridge is newer
+        than 1.7.5's, it waits for the producer to say Live is closed: unanswered here, it changes nothing, says
+        how to finish and exits 1, leaving the bridge to native startup, the handoff a same-version bridge gets."""
+        result = self.launch_result(command, env, *args)
+        output = result.stdout + result.stderr
+        if manifest["bridge"] == old["packageVersion"]:
+            self.assertEqual(result.returncode, 0, output)
+        else:
+            self.assertEqual(result.returncode, 1, output)
+            self.assertIn("Nothing was changed. Quit Live, then run:", output)
+        return output
+
     @contextmanager
     def release_server(self, artifacts):
         class Quiet(http.server.SimpleHTTPRequestHandler):
@@ -456,7 +469,7 @@ class MigrationRelease(unittest.TestCase):
         self.assertIn("anthropic     API key saved in Kumi", self.launched(launcher, env, "auth"))
         self.check_existing_data(home, markers)
         self.check_windows_launcher(launcher, self.native_windows_launcher())
-        self.launched(launcher, env, "update", "--rollback")
+        self.launched_leaving_the_bridge(manifest, old, launcher, env, "update", "--rollback")
         self.assertIn(manifest["kumi"], self.launched(launcher, env, "--version"))
         self.launched(launcher, env, input="/quit\n")
         self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["config"]["server"]["args"], ["--config", str(config)])
@@ -482,15 +495,7 @@ class MigrationRelease(unittest.TestCase):
         # The producer's installed command performs the real HTTP updater and application swap.
         # Direct Node imports or a native --version preflight would bypass the active .cmd hazard.
         with self.release_server(artifacts) as base:
-            result = self.launch_result(launcher, dict(env, KUMI_RELEASES=base), "update")
-        updated = result.stdout + result.stderr
-        if manifest["bridge"] == old["packageVersion"]:
-            self.assertEqual(result.returncode, 0, updated)
-        else:
-            # A newer bridge waits for the producer to say Live is closed. Unanswered here, the update leaves
-            # it to native startup, the same handoff a same-version bridge gets.
-            self.assertEqual(result.returncode, 1, updated)
-            self.assertIn("Nothing was changed. Quit Live, then run:", updated)
+            updated = self.launched_leaving_the_bridge(manifest, old, launcher, dict(env, KUMI_RELEASES=base), "update")
         self.assertIn(f"Kumi is now {manifest['kumi']}", updated)
         self.assertTrue((home / "app" / self.binary).is_file())
         self.assertEqual(config.read_bytes(), config_before, "the old version-only updater leaves the bridge for native startup")
@@ -520,7 +525,7 @@ class MigrationRelease(unittest.TestCase):
         self.check_existing_data(home, markers)
         self.check_windows_launcher(launcher, self.native_windows_launcher())
         # The unchanged old rollback command can return to the retained native generation.
-        self.launched(launcher, env, "update", "--rollback")
+        self.launched_leaving_the_bridge(manifest, old, launcher, env, "update", "--rollback")
         self.assertIn(manifest["kumi"], self.launched(launcher, env, "--version"))
         self.assertTrue((home / "app" / self.binary).is_file())
         self.launched(launcher, env, "--bridge-config", str(config), input="/quit\n")
