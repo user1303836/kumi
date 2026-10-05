@@ -31,8 +31,9 @@ closes, crashes or is stopped.
   or **kept** / **no undo** / **check Live** when it can't be undone. **GOAL**
   shows a `/goal` ("No goal yet" until there is one): the target, the best
   score with its trend, the leading candidate, and the time.
-- **Input box** (bottom left): messages waiting to be sent show above it, and a
-  pinned device as a chip. Empty, it says "ctrl+t to talk". While Kumi listens,
+- **Input box** (bottom left): messages waiting to be sent show above it, a
+  pinned device as a chip, and the files that go with your next message (name,
+  kind, size and ×). Empty, it says "ctrl+t to talk". While Kumi listens,
   its bottom line shows a pulsing mint `●`, the time and a level meter, with the
   keys that apply at its right; no red, which in Live means recording.
 
@@ -87,8 +88,10 @@ message, not a command.
 | `/fast` | Turn on the model's faster tier when its provider lists one (ChatGPT's "Fast": quicker answers, more of your usage); `/fast` again turns it off. Shown as "· fast" beside the model |
 | `/login`, `/logout` | Sign in (ChatGPT in the browser, or an API key shown only as dots) or out |
 | `/goal <what to reach>` | Go after a sound until Kumi gets there. `/goal` alone picks up a paused goal; `/goal stop` (or `/goal end`) ends it |
-| `/memory` | Everything Kumi keeps: notes about you and this Set, what it learned from your Sets, techniques, recipes and lessons; choose one to forget it (a recipe to run or forget) |
-| `/recipes` | Your recipes: run one (Kumi starts the message `Run my recipe "<name>" on ` for you to finish) or forget it |
+| `/memory` | Everything Kumi keeps: notes about you and this Set, what it learned from your Sets, techniques, recipes and lessons; choose one to forget it (a note to change its words or pin it, a recipe to run or forget) |
+| `/note <id> <new words>` | Change a note's words without the model; a note's "Change the words" in `/memory` starts it for you |
+| `/recipes` | Your recipes: run one or forget it. One with blanks starts a `/recipe` line for you to finish, with what's pinned filled in |
+| `/recipe <name> blank=value …` | Run a recipe now, with no model call; a value with spaces goes in quotes, an unquoted number or true/false goes as itself (quote it to keep it words), and Kumi names any blank left empty |
 | `/status` | What Kumi is connected to, the model, how far it has got learning your library, and on an API key the tokens this session used |
 | `/voice` | Talking instead of typing: start or stop, "Send when you stop", the language you speak and the microphone |
 | `/update` | Get the newest Kumi: it asks, closes, updates and opens again with the same conversation |
@@ -114,6 +117,8 @@ answering; during an answer, Kumi says so and leaves things as they are.
 | Ctrl-W, Alt-Backspace, Ctrl-Backspace | Delete the word before the cursor |
 | Ctrl-K / Ctrl-U | Delete to the end / start of the line |
 | Ctrl-T | Talk instead of typing: press it again to stop, or hold it while you talk. What you said lands in the box at the cursor; Enter stops and sends at once, Esc drops it |
+| Ctrl-V | Add the picture on the clipboard (a screenshot, say) to your next message; files dragged into the window are added the same way |
+| Backspace, in an empty box | Take back the last file added |
 
 **Stopping and moving around**
 
@@ -148,7 +153,8 @@ copies, and Esc, Enter or Space closes it.
 instead, which suits screen readers and logs. It has `/help`, `/status`,
 `/undo`, `/stop`, `/refresh`, `/reconnect`, `/new`, `/conversations [n]`,
 `/model [provider/model]`, `/effort [level|default]`, `/fast`, `/logout <provider>`,
-`/memory`, `/forget <id>`, `/recipes`, `/update` and `/quit`, but no `/btw`,
+`/memory`, `/forget <id>`, `/note <id> <new words>`, `/pin <id>`, `/unpin <id>`,
+`/recipes`, `/update` and `/quit`, but no `/btw`,
 `/goal` or `/copy`. Sign in from a shell with `kumi login`. Ctrl-C stops the
 answer, or quits when idle.
 

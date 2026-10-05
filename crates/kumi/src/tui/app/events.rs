@@ -1,4 +1,5 @@
 use super::super::{
+    choices::choices,
     icons::IconKind,
     transcript::{step_label, Step, WebLine},
 };
@@ -658,6 +659,7 @@ impl TuiApp {
             }
             "turn-complete" => {
                 let reason = s(&value["result"]["stopReason"]);
+                let mut offered = None;
                 {
                     let mut state = self.0.state.borrow_mut();
                     if let Some(usage) = value["result"].get("usage") {
@@ -682,9 +684,17 @@ impl TuiApp {
                         text.push_str(&tail);
                         *status = if cancelled { AnswerStatus::Stopped } else { AnswerStatus::Done };
                         *elapsed_ms = Some(n("elapsedMs"));
+                        // An answer that ends asking the producer to pick: one key answers, unless they've already
+                        // typed or queued something.
+                        if reason == "completed" && state.held.is_empty() && state.editor.is_empty() && state.panel.is_none() {
+                            offered = choices(text);
+                        }
                     }
                     end_steps(&entry);
                     state.transcript.touch(&entry);
+                }
+                if let Some(offered) = offered {
+                    self.open_answers(offered);
                 }
                 if reason == "max-steps" {
                     self.notice("Kumi reached its step limit for one answer. Ask it to carry on.", NoticeTone::Info);

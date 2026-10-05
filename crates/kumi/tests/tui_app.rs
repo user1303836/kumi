@@ -146,6 +146,36 @@ case!(narrow_resize_paste_and_scroll, async {
     h.has("note number 31");
     h.close().await;
 });
+case!(dragged_files_go_with_the_next_message, async {
+    let dir = tempfile::tempdir().unwrap();
+    let picture = dir.path().join("Screen Shot.png");
+    std::fs::write(&picture, vec![1u8; 1500]).unwrap();
+    let dragged = format!("\x1b[200~'{}'\x1b[201~", picture.display());
+    let h = Harness::new(120, 30);
+    h.start().await;
+    h.connect();
+    h.type_text(&dragged).await;
+    h.has("with Screen Shot.png · PNG picture · 2 KB ×");
+    // The same file twice is added once, and backspace in an empty box takes the last one back.
+    h.type_text(&dragged).await;
+    assert_eq!(h.screen().iter().filter(|line| line.contains("Screen Shot.png")).count(), 1);
+    h.type_text("\x7f").await;
+    assert!(!has(&h.screen(), "Screen Shot.png"));
+    h.type_text(&dragged).await;
+    // A send that's refused keeps the file, to change or send again.
+    h.control.set("submit-error", json!("Screen Shot.png is too big."));
+    h.type_text("make this\r").await;
+    h.has("Screen Shot.png is too big.");
+    h.has("with Screen Shot.png");
+    h.control.extra.borrow_mut().as_object_mut().unwrap().remove("submit-error");
+    h.type_text("make this\r").await;
+    assert!(h.calls().contains(&"submit-with:make this [Screen Shot.png image/png 1500]".into()));
+    assert!(!has(&h.screen(), "with Screen Shot.png"));
+    // Words that aren't a file paste as words.
+    h.type_text("\x1b[200~/no/such/file.png\x1b[201~").await;
+    h.has("/no/such/file.png");
+    h.close().await;
+});
 case!(failure_disconnect_focus, async {
     for (w, rows) in [(120, 36), (80, 24)] {
         let h = Harness::new(w, rows);
@@ -807,6 +837,40 @@ async fn quitting_right_after_a_change_leaves_nothing_running() {
     assert_eq!(code, 0);
     assert!(tokio::time::timeout(std::time::Duration::from_millis(500), local).await.is_ok(), "a task outlived the app");
 }
+case!(a_question_with_numbered_options_answers_by_number_and_free_text_still_works, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    let ask = |h: &Harness| {
+        h.emit(json!({"type":"state","state":"running"}));
+        h.emit(json!({"type":"text","text":"Which bass should duck under the kick?\n\n1. **Sub Bass**\n2. Reese\n3. Both"}));
+        h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+        h.emit(json!({"type":"state","state":"idle"}));
+    };
+    h.type_text("sidechain the bass\r").await;
+    ask(&h);
+    h.has("Your answer");
+    h.has("2. Reese");
+    h.has("a number, then enter answers");
+    h.type_text("2").await;
+    assert!(!h.calls().iter().any(|c| c == "submit:Reese"), "a number picks; it doesn't send");
+    h.type_text("\r").await;
+    h.wait_for_call("submit:Reese").await;
+    assert!(!has(&h.screen(), "Your answer"), "answering closes the choices");
+    ask(&h);
+    h.type_text("2 dB quieter, keep both").await;
+    assert!(!has(&h.screen(), "Your answer"), "typing goes to the input box");
+    h.has("2 dB quieter, keep both");
+    assert_eq!(h.calls().iter().filter(|c| c.starts_with("submit:")).count(), 2, "nothing more was sent");
+    h.type_text("\x03").await;
+    assert!(!has(&h.screen(), "keep both"));
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"Done:\n1. Sidechained Reese\n2. Lowered the sub 2 dB"}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    assert!(!has(&h.screen(), "Your answer"), "a list that isn't a question offers nothing");
+    h.close().await;
+});
 case!(a_provider_wait_shows_why_and_counts_down_until_the_model_answers, async {
     let h = Harness::new(120, 36);
     h.start().await;

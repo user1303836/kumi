@@ -12,11 +12,12 @@ use kumi_common::js::json::stringify;
 use kumi_runtime::ai::error::{ApiCallError, LanguageModelError};
 use kumi_runtime::ai::types::{
     AssistantPart, CallOptions, DataContent, FileData, FinishReason, FinishReasonUnified, InputTokens, Message, OutputTokens,
-    ProviderMetadata, StreamPart, StreamParts, ToolCall, ToolPart, ToolResultContentItem, ToolResultOutput, Usage as ModelUsage,
+    ProviderMetadata, StreamPart, StreamParts, TextPart, ToolCall, ToolPart, ToolResultContentItem, ToolResultOutput, Usage as ModelUsage,
+    UserPart,
 };
 use kumi_runtime::core::contracts::{
-    ChangeState, Integration, JsonObject, KernelCheckpoint, KernelEmit, KernelEvent, KernelTool, StopReason, StreamingCall, ToolImage,
-    ToolResult, TranscriptLine, TranscriptRole, Usage,
+    ChangeState, Integration, JsonObject, KernelCheckpoint, KernelEmit, KernelEvent, KernelTool, Picture, StopReason, StreamingCall,
+    ToolImage, ToolResult, TranscriptLine, TranscriptRole, Usage,
 };
 use kumi_runtime::core::errors::{FailureKind, RuntimeError};
 use kumi_runtime::integrations::ableton::{integration::Ableton, observation::ObservationHost, options::AbletonOptions};
@@ -319,6 +320,37 @@ async fn streams_text_reports_summed_usage_and_settles_the_turn_into_history() {
         assert_eq!(result.stop_reason, StopReason::Completed);
         assert_eq!(result.usage, Some(Usage { input_tokens: 3.0, output_tokens: 2.0, cache_read_tokens: 1.0, cache_write_tokens: 0.0 }));
         assert_eq!(h.messages(), vec![user("hi"), assistant("hello")]);
+        h.kernel.close().await;
+    })
+    .await
+}
+
+#[tokio::test]
+async fn pictures_the_producer_added_go_beside_their_words_in_the_request() {
+    local(async {
+        let h = harness(|_, _| answer("a warm pad"), Options::default());
+        let picture = Picture { name: "synth.png".into(), media_type: "image/png".into(), data: vec![137, 80, 78, 71] };
+        h.kernel.run_with("make this", vec![picture], signal(), ignore()).await.unwrap();
+        let Message::User { content, .. } = &h.request(0).prompt[0] else { panic!("the producer's message comes first") };
+        assert_eq!(content[0], UserPart::Text(TextPart::new("make this")));
+        let UserPart::File(file) = &content[1] else { panic!("the picture follows the words") };
+        assert_eq!((file.filename.as_deref(), file.media_type.as_str()), (Some("synth.png"), "image/png"));
+        assert_eq!(file.data, FileData::Data { data: DataContent::Bytes(vec![137, 80, 78, 71]) });
+        h.kernel.close().await;
+    })
+    .await
+}
+
+#[tokio::test]
+async fn a_picture_goes_with_its_own_request_only_and_is_named_after() {
+    local(async {
+        let h = harness(|_, _| answer("A warm pad."), Options::default());
+        let picture = Picture { name: "synth.png".into(), media_type: "image/png".into(), data: vec![137, 80, 78, 71] };
+        h.kernel.run_with("make this", vec![picture], signal(), ignore()).await.unwrap();
+        h.kernel.run("now brighter", signal(), ignore()).await.unwrap();
+        let later = js(&h.request(1).prompt);
+        assert!(!later.contains("\"type\":\"file\""), "{later}");
+        assert!(later.contains("The producer showed synth.png with this message"), "{later}");
         h.kernel.close().await;
     })
     .await
@@ -1090,6 +1122,23 @@ async fn long_conversations_stay_in_budget_earlier_reads_are_cleared_in_requests
         assert_eq!(h.transcript_texts(), ["one", "answer 1", "two", "answer 2", "three", "answer 3"]);
         let tools: Vec<String> = h.kernel.transcript().into_iter().flat_map(|line| line.tools.unwrap_or_default()).collect();
         assert_eq!(tools, ["read", "read", "read"], "each answer's steps come back with it");
+        h.kernel.close().await;
+    })
+    .await
+}
+
+#[tokio::test]
+async fn a_huge_tool_result_is_cut_to_its_opening_so_the_request_stays_in_budget() {
+    local(async {
+        let huge = "x".repeat(1024 * 1024);
+        let h = harness(
+            |_, n| if n == 1 { Scripted::Parts(vec![call_id("read", "{}", "c1"), tool_calls()]) } else { answer("done") },
+            Options { tools: vec![saying("read", &huge)], ..Options::default() },
+        );
+        h.kernel.run(&observed("read it"), signal(), ignore()).await.unwrap();
+        let sent = js(&h.request(1).prompt);
+        assert!(sent.len() < 70 * 1024, "{} bytes went to the model", sent.len());
+        assert!(sent.contains("Kumi cut the rest of this result: it was 1024 KB, and one result carries 64 KB."));
         h.kernel.close().await;
     })
     .await

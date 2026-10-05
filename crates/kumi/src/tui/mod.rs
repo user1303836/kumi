@@ -1,5 +1,7 @@
 pub mod activity;
 pub mod app;
+pub mod attach;
+pub mod choices;
 pub mod editor;
 pub mod icons;
 pub mod keys;

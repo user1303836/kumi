@@ -31,9 +31,10 @@ pub use core::contracts::{
     ArrangementStrip, AuditionEvent, AuditionRequest, AuditionResult, CatchUp, ChainNode, ChangeFamily, ChangeRecord, ClipNote, ClipView,
     ConnectionState, ConversationStore, ConversationSummary, DeviceNode, DevicePlacement, DeviceTree, DisconnectCause, HeardEvent,
     Integration, IntegrationFactory, JsonObject, Kernel, KernelCheckpoint, KernelEvent, KernelFactory, KernelOptions, KernelTool,
-    LibraryEvent, LibraryStatus, LiveFocus, LiveTransport, Memory, MemoryEvent, MemoryNote, MemoryScope, MemoryStore, Observation,
-    PinnedNode, RecipeEvent, RecipeSummary, SavedConversation, SessionController, SessionEvent, SessionStatus, SessionStrip, StreamingCall,
-    TechniqueEvent, TechniqueSummary, ToolImage, ToolResult, TranscriptLine, TurnResult, TurnState, Usage, WatchedEvent, WebEvent,
+    LibraryEvent, LibraryStatus, LiveFocus, LiveTransport, Memory, MemoryEvent, MemoryNote, MemoryScope, MemoryStore, NoteChange,
+    Observation, PinnedNode, RecipeEvent, RecipeSummary, SavedConversation, SessionController, SessionEvent, SessionStatus, SessionStrip,
+    StreamingCall, TechniqueEvent, TechniqueSummary, ToolImage, ToolResult, TranscriptLine, TurnResult, TurnState, Usage, WatchedEvent,
+    WebEvent,
 };
 pub use core::errors::{FailureKind, KumiError, RuntimeError};
 pub use core::gaps::{gap_tools, GAP_GUIDANCE, GAP_TOOL};

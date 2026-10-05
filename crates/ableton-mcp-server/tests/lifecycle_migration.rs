@@ -54,6 +54,16 @@ fn legacy_app() -> PathBuf {
     })
     .clone()
 }
+async fn bind_retrying(port: u16) -> tokio::net::TcpListener {
+    for _ in 0..50 {
+        match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
+            Ok(listener) => return listener,
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
+            Err(error) => panic!("{error}"),
+        }
+    }
+    panic!("port {port} stayed in use")
+}
 fn old_install(root: &Path, custom: bool) -> (LifecycleOptions, Value) {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let out = Command::new("node")
@@ -230,7 +240,8 @@ async fn migrated_activation_uses_preserved_port_secret_and_authenticated_discov
   let folder=tempfile::tempdir().unwrap();let root=folder.path().canonicalize().unwrap();let(old,prior)=old_install(&root,true);let upgrade=native_upgrade(&root,&old,"1.0.73");run_lifecycle(&upgrade).await.unwrap();
   let secret=read_secret_file(Path::new(prior["secretPath"].as_str().unwrap())).unwrap();let port=prior["config"]["bridge"]["port"].as_u64().unwrap()as u16;
   for provenance in ["fake-live","real-live"] {
-   let listener=tokio::net::TcpListener::bind(("127.0.0.1",port)).await.unwrap();let secret=secret.clone();let peer=tokio::task::spawn_local(async move{
+   // The last round's listener may still be letting go of the port.
+   let listener=bind_retrying(port).await;let secret=secret.clone();let peer=tokio::task::spawn_local(async move{
     let(stream,_)=listener.accept().await.unwrap();let(read,mut write)=stream.into_split();write.write_all(format!("{}\n",frame("hello",json!({"protocol":"ableton-live/v1","registryHash":live_registry_hash(),"maxDeadlineMs":60000}),&secret)).as_bytes()).await.unwrap();let mut lines=BufReader::new(read).lines();let mut methods=vec![];
     while let Some(line)=lines.next_line().await.unwrap(){let request:Value=serde_json::from_str(&line).unwrap();let mut unsigned=request.clone();let supplied=unsigned.as_object_mut().unwrap().shift_remove("mac").unwrap();assert_eq!(sign(unsigned,&secret)["mac"],supplied);let method=request["method"].as_str().unwrap();methods.push(method.to_string());let result=if method=="status"{json!({"connected":true,"adapter":"remote-script","epoch":1,"protocol":"ableton-live/v1","capabilities":[],"registryHash":live_registry_hash(),"operations":["status","snapshot","discover","get","reconnect","session.playback"],"provenance":provenance})}else{assert_eq!(method,"discover");let kind=&request["args"]["kind"];if kind=="session_playback"{json!({"ref":"live:1:set:1","epoch":1,"revision":"1","transport":{"playing":false,"arrangementRecord":false,"sessionRecord":false,"position":0,"launchQuantization":{"raw":0,"normalized":"none"},"loop":{"enabled":false,"start":0,"length":4},"punchIn":false,"punchOut":false,"metronome":false,"countIn":0},"firedTargets":[],"playingTargets":[]})}else{let items=if kind=="scene"{json!([{"ref":"live:1:scene:1"}])}else if kind=="track"{json!([{"ref":"live:1:track:1"}])}else{json!([])};json!({"epoch":1,"kind":kind,"items":items,"truncated":false,"revision":"1"})}};write.write_all(format!("{}\n",frame(request["id"].as_str().unwrap(),result,&secret)).as_bytes()).await.unwrap();}methods
    });

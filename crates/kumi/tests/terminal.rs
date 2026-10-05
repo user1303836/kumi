@@ -185,6 +185,21 @@ impl SessionController for Control {
     async fn memory(&self) -> Result<Option<MemoryView>, RuntimeError> {
         Ok(self.memory.borrow().clone())
     }
+    fn has_change_note(&self) -> bool {
+        true
+    }
+    async fn change_note(&self, id: &str, change: NoteChange) -> Result<Option<MemoryNote>, RuntimeError> {
+        let mut memory = self.memory.borrow_mut();
+        let memory = memory.as_mut().unwrap();
+        let Some(note) = memory.memory.producer.iter_mut().chain(memory.memory.set.iter_mut()).find(|n| n.id == id) else {
+            return Ok(None);
+        };
+        match change {
+            NoteChange::Text(text) => note.text = text,
+            NoteChange::Pinned(pinned) => note.pinned = pinned,
+        }
+        Ok(Some(note.clone()))
+    }
     async fn forget(&self, id: &str) -> Result<Option<MemoryNote>, RuntimeError> {
         let note = {
             let mut memory = self.memory.borrow_mut();
@@ -439,7 +454,7 @@ async fn model_listing_choosing_effort_and_auth_advice() {
 }
 #[tokio::test]
 async fn memory_and_library_learning_taste_are_listed_and_forgotten() {
-    tokio::task::LocalSet::new().run_until(async{let f=Fixture::new(false,false,None,None,None);flush().await;*f.control.memory.borrow_mut()=Some(serde_json::from_value(json!({"producer":[{"id":"p1","text":"Prefers short reverbs","at":1}],"set":[{"id":"s1","text":"The Reese is the main bass","at":2}],"setName":"Night Drive","saved":true})).unwrap());f.input.write("/memory\n/forget s1\n/forget s9\n");flush().await;f.emit(json!({"type":"remembered","scope":"producer","note":{"id":"p2","text":"Names buses BUS - <what>","at":3}}));for want in ["[memory] About you: p1 Prefers short reverbs","[memory] About Night Drive: s1 The Reese is the main bass","[memory] Forgot: The Reese is the main bass","[memory] Use: /forget <id>","[memory] Noted about you: Names buses BUS - <what>"]{assert!(f.text().contains(want));}
+    tokio::task::LocalSet::new().run_until(async{let f=Fixture::new(false,false,None,None,None);flush().await;*f.control.memory.borrow_mut()=Some(serde_json::from_value(json!({"producer":[{"id":"p1","text":"Prefers short reverbs","at":1}],"set":[{"id":"s1","text":"The Reese is the main bass","at":2}],"setName":"Night Drive","saved":true})).unwrap());f.input.write("/note p1 Prefers short, dark reverbs\n/pin p1\n/note p9 x\n/memory\n/forget s1\n/forget s9\n");flush().await;f.emit(json!({"type":"remembered","scope":"producer","note":{"id":"p2","text":"Names buses BUS - <what>","at":3}}));for want in ["[memory] Changed note p1.","[memory] Pinned p1: Kumi keeps it even when its memory is full.","[memory] Use: /note <id> <new words>","[memory] About you: p1 (pinned) Prefers short, dark reverbs","[memory] About Night Drive: s1 The Reese is the main bass","[memory] Forgot: The Reese is the main bass","[memory] Use: /forget <id>","[memory] Noted about you: Names buses BUS - <what>"]{assert!(f.text().contains(want));}
  let status:LibraryStatus=serde_json::from_value(json!({"state":"learning","sounds":10,"presets":2,"sets":1,"todo":50,"done":10})).unwrap();*f.control.library.borrow_mut()=Some(status.clone());*f.control.taste.borrow_mut()=vec![KeptLine{id:"tempo".into(),line:"Tempo: usually 124 BPM".into()},KeptLine{id:"chain-vocal".into(),line:"Vocals: EQ Eight → Compressor".into()}];for _ in 0..3{f.terminal.handle_event(SessionEvent::Library(LibraryEvent{status:status.clone()}));}f.input.write("/status\n/memory\n/forget u2\n/forget u9\n");flush().await;let text=f.text();assert_eq!(text.matches("Learning your library in the background…").count(),1);for want in ["; Learning your library in the background · 10 of 50 sounds","[memory] From your Sets: u1 Tempo: usually 124 BPM · u2 Vocals: EQ Eight → Compressor","[memory] Forgot, from your Sets: Vocals: EQ Eight → Compressor"]{assert!(text.contains(want),"{text}");}f.quit().await;}).await;
 }
 #[tokio::test]

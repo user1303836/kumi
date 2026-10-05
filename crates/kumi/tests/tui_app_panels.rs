@@ -241,11 +241,30 @@ case!(memory_notes_techniques_recipes_and_taste, async {
     for s in ["What Kumi remembers", "About you", "Prefers short, dark reverbs", "About Night Drive", "The Reese is the main bass"] {
         h.has(s)
     }
+    // A note: change its words in the box, pin it, or forget it, without the model.
     h.type_text("\x1b[B\r").await;
-    h.has("Forget this note?");
+    for s in ["“The Reese is the main bass”", "Change the words", "Pin it", "A full memory never drops it to make room", "Forget it"] {
+        h.has(s)
+    }
+    h.type_text("\x1b[B\r").await;
+    assert!(h.calls().contains(&"change-note:s1 Pinned(true)".into()));
+    h.has("Pinned: Kumi keeps this note even when its memory is full.");
+    h.type_text("/memory\r").await;
+    h.has("pinned ·");
     h.type_text("\r").await;
+    h.has("“Prefers short, dark reverbs”");
+    h.type_text("\r").await;
+    h.has("/note p1 Prefers short, dark reverbs");
+    h.type_text(" on drums\r").await;
+    assert!(h.calls().contains(&"change-note:p1 Text(\"Prefers short, dark reverbs on drums\")".into()));
+    h.has("Changed note p1.");
+    h.type_text("/note p1\r").await;
+    h.has("Give the note's id and its new words");
+    h.type_text("\x15/memory\r").await;
+    h.type_text("\x1b[B\r").await;
+    h.type_text("\x1b[B\x1b[B\r").await;
     assert!(h.calls().contains(&"forget:s1".into()));
-    assert!(!has(&h.screen(), "Forget this note?"));
+    assert!(!has(&h.screen(), "Change the words"));
     h.close().await;
     c.set("techniques", json!([{"id":"t1","name":"Neuro from a Reese","fits":"gritty, moving neuro basses","source":"Au5 · Neuro bass"}]));
     c.set("recipes", json!([{"name":"Drum bus","about":"a return with glue compression","params":[],"steps":3,"used":0,"created":1}]));
@@ -317,7 +336,41 @@ case!(recipes_run_and_fill_blanks, async {
     h.has("Run it on…");
     h.has("Kumi needs: the track to resample");
     h.type_text("\r").await;
-    h.has("Run my recipe “Resample twice” on");
+    // Its blanks go on a /recipe line; one left empty is named, and nothing runs.
+    h.has("/recipe \"Resample twice\" track=");
+    h.type_text("\r").await;
+    h.has("“Resample twice” needs track (the track to resample).");
+    let resampled = |calls: Vec<String>| calls.into_iter().filter(|c| c.starts_with("run-recipe:Resample")).collect::<Vec<_>>();
+    assert!(resampled(h.calls()).is_empty());
+    // Filled in, it runs straight away: no model call.
+    h.type_text("3:track:2\r").await;
+    assert_eq!(resampled(h.calls()), [r#"run-recipe:Resample twice {"track":"3:track:2"}"#]);
+    assert!(!h.calls().iter().any(|c| c.starts_with("submit")));
+    h.type_text("/recipe \"resample twice\" track=\"My \\\"Bass\\\"\"\r").await;
+    assert_eq!(resampled(h.calls())[1], r#"run-recipe:Resample twice {"track":"My \"Bass\""}"#);
+    // Unquoted, a number goes as a number, as the model would pass it; in quotes, as words.
+    h.type_text("/recipe \"resample twice\" track=124\r").await;
+    assert_eq!(resampled(h.calls())[2], r#"run-recipe:Resample twice {"track":124}"#);
+    h.type_text("/recipe \"resample twice\" track=\"124\"\r").await;
+    assert_eq!(resampled(h.calls())[3], r#"run-recipe:Resample twice {"track":"124"}"#);
+    for (line, says) in [
+        ("/recipe", "Run a recipe with: /recipe <name> blank=value"),
+        ("/recipe \"Resample twice track=1", "Run a recipe with: /recipe <name> blank=value"),
+        ("/recipe Gone", "Kumi keeps no recipe called “Gone”"),
+        ("/recipe \"Resample twice\" track=1 amount=2", "“Resample twice” has no blank called amount; its blanks are track."),
+        ("/recipe \"Drum bus\" track=1", "“Drum bus” has no blanks to fill: /recipe \"Drum bus\" runs it."),
+    ] {
+        h.type_text(&format!("{line}\r")).await;
+        h.has(says);
+        h.type_text("\x15").await;
+    }
+    assert_eq!(resampled(h.calls()).len(), 4);
+    // What's pinned fills the blank named for it.
+    h.emit(json!({"type":"pointed","pin":{"trackRef":"3:track:1","ref":"3:track:1","node":"track","name":"Bass","trail":[],"siblings":[],"live":true}}));
+    h.type_text("/recipes\r").await;
+    h.type_text("\x1b[B\r").await;
+    h.type_text("\r").await;
+    h.has("/recipe \"Resample twice\" track=3:track:1");
     h.emit(json!({"type":"recipe","action":"saved","name":"Vocal chain","steps":4}));
     h.has("↻ Saved a recipe: Vocal chain (4 steps)");
     h.close().await;

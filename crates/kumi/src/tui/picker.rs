@@ -40,6 +40,8 @@ impl PickerItem {
 pub struct PickerOptions {
     pub filterable: bool,
     pub hint: Option<String>,
+    /// Answers to Kumi's question: a number picks one (Enter sends it), and other typing goes to the input box.
+    pub answers: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -47,6 +49,9 @@ pub struct Picker {
     pub title: String,
     pub options: PickerOptions,
     pub filter: String,
+    /// In answers to Kumi's question: the number typed to pick one, carried into the input box when
+    /// the producer types on ("2 dB quieter").
+    pub typed: String,
     items: Vec<PickerItem>,
     index: usize,
 }
@@ -57,7 +62,7 @@ impl Picker {
     }
 
     pub fn with_options(title: impl Into<String>, items: Vec<PickerItem>, options: PickerOptions) -> Picker {
-        let mut picker = Picker { title: title.into(), options, filter: String::new(), items, index: 0 };
+        let mut picker = Picker { title: title.into(), options, filter: String::new(), typed: String::new(), items, index: 0 };
         picker.index = picker.choosable().iter().position(|item| item.note.as_deref() == Some("current")).unwrap_or(0);
         picker
     }
@@ -111,6 +116,11 @@ impl Picker {
         self.visible().into_iter().filter(|item| !item.heading && !item.inert).collect()
     }
 
+    /// The `n`th choosable item, counting from 1 (an answer's number).
+    pub fn numbered(&self, n: usize) -> Option<&PickerItem> {
+        n.checked_sub(1).and_then(|at| self.choosable().get(at).copied())
+    }
+
     pub fn selected(&self) -> Option<&PickerItem> {
         self.choosable().get(self.index).copied()
     }
@@ -124,6 +134,7 @@ impl Picker {
     }
 
     pub fn r#move(&mut self, delta: i32) {
+        self.typed.clear();
         let count = self.choosable().len() as i64;
         if count > 0 {
             self.index = (self.index as i64 + delta as i64 + count).rem_euclid(count) as usize;
@@ -140,6 +151,10 @@ impl Picker {
     }
 
     pub fn erase(&mut self) {
+        if !self.typed.is_empty() {
+            self.typed.clear();
+            return;
+        }
         self.filter = js::string::slice(&self.filter, 0, Some(-1));
         self.index = 0;
     }

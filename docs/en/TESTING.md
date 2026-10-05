@@ -113,7 +113,7 @@ run them.
 | Command (from the root) | Needs | What it does |
 | --- | --- | --- |
 | `cargo run --release -p kumi --example accept_live -- --set "<Set>"` | Live with a disposable copy of a Set open; the bridge, built first with `cargo build --release -p ableton-mcp-server --bins` (for a debug run, the same without `--release`) | Makes every kind of change Kumi can, undoes each with Kumi's undo, plays, bounces, listens and watches, and times reads of a big Set. No model. |
-| `cargo run --release -p kumi --example eval_changes [-- <part of a case name>]` | Your sign-in and model | How the model uses Kumi's tools, against a synthetic bridge with the real bridge's tool schemas, read from its native catalog. Never touches Live. Each case says its time, its tools' share of it, and how many model calls it took; `EVAL_EFFORT` sets the model's reasoning effort, and `EVAL_TRACE=1` prints each call. |
+| `cargo run --release -p kumi --example eval_changes [-- <part of a case name>]` | Your sign-in and model | How the model uses Kumi's tools, against a synthetic bridge with the real bridge's tool schemas, read from its native catalog. Never touches Live. Each case says its time, its tools' share of it, and how many model calls it took; `EVAL_EFFORT` sets the model's reasoning effort, and `EVAL_TRACE=1` prints each call. `EVAL_MEASURE=1`, with no sign-in or model, prints what every request carries: the instructions and each tool's definition in bytes (`EVAL_MEASURE=tools` adds the definitions). |
 | `cargo run --release -p kumi --example probe_inference` | Your sign-in | One authenticated request with a harmless tool. Never touches Live. |
 
 The synthetic bridge's Operator, Saturator and EQ Eight have every parameter

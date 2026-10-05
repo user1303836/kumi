@@ -4,26 +4,100 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Every test on every platform each night, besides each push to main.
+    - cron: "17 6 * * *"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A pull request's newer push replaces its run. Every other run (each push to main, a tag, the nightly)
+  # has a group of its own, so a newer one can't cancel it while it waits for a runner.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Tests need no debug info or incremental artifacts: linking and the build cache stay small.
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
 
 jobs:
-  rust:
+  changes:
+    name: What changed
+    runs-on: ubuntu-24.04
+    outputs:
+      code: ${{ steps.paths.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
+        with:
+          fetch-depth: 0
+      - id: paths
+        shell: bash
+        run: |
+          # A pull request that changes only documentation skips the builds; main and the nightly run build everything.
+          if [[ "${{ github.event_name }}" != "pull_request" ]] || git diff --name-only "origin/${GITHUB_BASE_REF}...HEAD" | grep -v -E '^(docs/|LICENSE)|\.md$' | grep -q .; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  rust-linux:
+    name: Rust / Linux
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
+        with:
+          tool: nextest
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: crates/kumi-runtime/tests/support/package-lock.json
+      - name: Install the official MCP and model SDKs the interoperability tests run beside Kumi's
+        run: npm ci --prefix crates/kumi-runtime/tests/support --ignore-scripts
+      - name: The published Kumi 1.7.5, fetched once for the migration tests
+        shell: bash
+        run: |
+          python="$(command -v python3 || command -v python)"
+          echo "KUMI_LEGACY_APP=$("$python" scripts/fetch-legacy-release.py "$RUNNER_TEMP/kumi-1.7.5")" >> "$GITHUB_ENV"
+      - run: cargo fmt --all --check
+      - name: Every test, in a home of their own (no test reaches this machine's Live folders or ~/.kumi)
+        env:
+          KUMI_NEXTEST: "1"
+        run: sh scripts/test-isolated.sh --no-fail-fast
+      - name: Documentation tests and examples
+        run: |
+          cargo test --workspace --locked --doc
+          cargo check --workspace --locked --examples
+      - name: Clippy (advisory while the port is under way)
+        continue-on-error: true
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: git diff --check
+
+  rust-platforms:
     name: Rust / ${{ matrix.label }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04, label: Linux }
           - { os: macos-15, label: macOS }
           - { os: windows-2025, label: Windows }
     timeout-minutes: 45
+    env:
+      # Rust's own linker: Microsoft's is a large part of linking two hundred test binaries.
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld
     steps:
       - name: Stop Windows Defender scanning the workspace (it slows every file the build touches)
         if: runner.os == 'Windows'
@@ -32,9 +106,10 @@ jobs:
         run: Set-MpPreference -DisableRealtimeMonitoring $true
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-        with:
-          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
+        with:
+          tool: nextest
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
@@ -42,28 +117,50 @@ jobs:
           cache-dependency-path: crates/kumi-runtime/tests/support/package-lock.json
       - name: Install the official MCP and model SDKs the interoperability tests run beside Kumi's
         run: npm ci --prefix crates/kumi-runtime/tests/support --ignore-scripts
-      - run: cargo fmt --all --check
+      - name: The published Kumi 1.7.5, fetched once for the migration tests
+        shell: bash
+        run: |
+          python="$(command -v python3 || command -v python)"
+          echo "KUMI_LEGACY_APP=$("$python" scripts/fetch-legacy-release.py "$RUNNER_TEMP/kumi-1.7.5")" >> "$GITHUB_ENV"
       - name: Windows input regressions
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           RUST_TEST_NOCAPTURE: '1'
         run: ./scripts/test-isolated.ps1 --test stdin_handoff --test windows_console_control --test windows_stdin --test windows_tty --no-fail-fast
-      - run: cargo build --workspace --all-targets --locked
-      - name: Tests, in a home of their own (no test reaches this machine's Live folders or ~/.kumi)
+      - name: Choose the tests
+        shell: bash
+        run: |
+          # A pull request runs what differs by platform, beside every test on Linux: installing, launching and
+          # updating; the terminal and stdin; Hands; paths, files and child processes; and a few smoke tests.
+          # main and the nightly run take every test.
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            tests="install cli_binary cli update bridge_setup doctor live_extension report login config history library stdin_handoff terminal tui voice_input"
+            tests+=" hands_transport mcp auth system disk samples project_runtime library_files library_learn library_state_plan voice video local_servers session agent"
+            tests+=" lifecycle lifecycle_migration lifecycle_release delivery delivery_cli extension_launcher extension_channel stdio fixture_paths project host_probes analysis_runner sqlite_reader tool_catalog"
+            tests+=" native_connected remote_adapter loopback ai_transport"
+            echo "KUMI_TESTS=$(printf -- '--test %s ' $tests)" >> "$GITHUB_ENV"
+          fi
+      - name: Every test and example compiles here (checked, not linked), beside the tests that run
+        run: cargo check --workspace --all-targets --locked
+      - name: Tests, in a home of their own
         if: runner.os != 'Windows'
-        run: sh scripts/test-isolated.sh --no-fail-fast
+        env:
+          KUMI_NEXTEST: "1"
+        run: sh scripts/test-isolated.sh --no-fail-fast $KUMI_TESTS
       - name: Tests, in a home of their own (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./scripts/test-isolated.ps1 --no-fail-fast
-      - name: Clippy (advisory while the port is under way)
-        continue-on-error: true
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: git diff --check
+        env:
+          KUMI_NEXTEST: "1"
+        run: |
+          $tests = if ($env:KUMI_TESTS) { $env:KUMI_TESTS.Trim() -split ' +' } else { @() }
+          ./scripts/test-isolated.ps1 --no-fail-fast @tests
 
   remote-script:
     name: Python Remote Script / ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -90,6 +187,8 @@ jobs:
   live-extension:
     # Its type check needs the Ableton Extensions SDK, which can't be redistributed; the tests run Live fakes.
     name: Live extension
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -122,20 +221,23 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
         with:
           python-version: "3.13"
-      - name: Native release packaging
+      - name: Native release packaging (and every packaged document's links)
         run: python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
   required:
     name: Required CI
     if: always()
-    needs: [rust, remote-script, live-extension, scripts]
+    needs: [changes, rust-linux, rust-platforms, remote-script, live-extension, scripts]
     runs-on: ubuntu-24.04
     steps:
-      - name: Require every job above
+      - name: Require every job above (the builds may skip a documentation-only change)
         shell: bash
         run: |
           set -euo pipefail
-          test "${{ needs.rust.result }}" = "success"
-          test "${{ needs.remote-script.result }}" = "success"
-          test "${{ needs.live-extension.result }}" = "success"
+          test "${{ needs.changes.result }}" = "success"
           test "${{ needs.scripts.result }}" = "success"
+          ok() { [[ "$1" == "success" || ( "$1" == "skipped" && "${{ needs.changes.outputs.code }}" == "false" ) ]]; }
+          ok "${{ needs.rust-linux.result }}"
+          ok "${{ needs.rust-platforms.result }}"
+          ok "${{ needs.remote-script.result }}"
+          ok "${{ needs.live-extension.result }}"

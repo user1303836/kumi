@@ -99,7 +99,7 @@ impl Session {
         self.assert_current(op)?;
         op.phase.set(Phase::Inference);
         said.borrow_mut().clear();
-        let result = self.ask(op, prompt, &snapshot.context, Some(said.clone())).await?;
+        let result = self.ask(op, prompt, &snapshot.context, Some(said.clone()), vec![]).await?;
         add_usage(usage, result.usage.as_ref());
         Ok(result)
     }

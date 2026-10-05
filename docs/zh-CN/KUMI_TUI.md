@@ -13,7 +13,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 - **FOCUS**（右上）：你在 Live 中所处的位置，随你的选择变化而更新：轨道的设备树（含机架链）、以小型钢琴卷帘显示的片段音符，或 Session 视图、编曲视图的条带。你指向的设备（点击它，或在 Live 中使用 **Ask Kumi about this**）会被固定，用于你接下来的消息。
 - **NOW**（右侧中部）：Kumi 正在做的事，随进行实时绘出：某个值修改前后的样子、新片段的音符、色块、落入设备链的设备、“▶ Playing from the start marker”。
 - **标签页**（右下）：**HISTORY** 先列出 Kumi 最近记住的三项内容（各带 **forget**），然后是每项修改，最新的在前，各带 **undo**；无法撤销时则显示 **kept** / **no undo** / **check Live**。**GOAL** 显示 `/goal`（设定之前显示“No goal yet”）：目标、最佳得分及其趋势、领先的候选方案，以及用时。
-- **输入框**（左下）：等待发送的消息显示在它上方，被固定的设备显示为一个小标签。为空时显示 “ctrl+t to talk”。Kumi 聆听时，它的底行会显示一个闪烁的薄荷绿 `●`、时间和电平表，右侧是可用的按键；不用红色，因为在 Live 中红色表示录音。
+- **输入框**（左下）：等待发送的消息显示在它上方，被固定的设备显示为一个小标签，随下一条消息发送的文件则显示名称、类型、大小和 ×。为空时显示 “ctrl+t to talk”。Kumi 聆听时，它的底行会显示一个闪烁的薄荷绿 `●`、时间和电平表，右侧是可用的按键；不用红色，因为在 Live 中红色表示录音。
 
 欢迎界面会显示自你上次使用以来工程中发生的变化；有更新的 Kumi 时也会显示；第一次时还会说明 Kumi 正在后台学习你的素材库。
 
@@ -59,8 +59,10 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | `/fast` | 当提供方在列表中提供时，开启模型的更快档位（ChatGPT 的“Fast”：回答更快，用量也更多）；再次输入 `/fast` 关闭。模型名旁会显示“· fast” |
 | `/login`、`/logout` | 登录（在浏览器中用 ChatGPT 登录，或输入只显示为圆点的 API 密钥）或退出登录 |
 | `/goal <what to reach>` | 追求一种声音，直到 Kumi 做到为止。只输入 `/goal` 会继续已暂停的目标；`/goal stop`（或 `/goal end`）结束它 |
-| `/memory` | Kumi 记住的一切：关于你和本工程的笔记、从你的工程中学到的东西、技巧、配方和经验；选择一项即可让它忘掉（配方可以运行或忘掉） |
-| `/recipes` | 你的配方：运行一个（Kumi 会为你写好消息开头 `Run my recipe "<name>" on `，由你补完）或忘掉它 |
+| `/memory` | Kumi 记住的一切：关于你和本工程的笔记、从你的工程中学到的东西、技巧、配方和经验；选择一项即可让它忘掉（笔记还可以修改文字或置顶，配方可以运行或忘掉） |
+| `/note <id> <new words>` | 不经模型修改一条笔记的文字；在 `/memory` 中选择笔记的 “Change the words” 会替你开头 |
+| `/recipes` | 你的配方：运行或忘掉一个。有空位的配方会写好一行 `/recipe`，填上已固定的对象，由你补完 |
+| `/recipe <name> blank=value …` | 立即运行一个配方，不调用模型；含空格的值用引号括起，不带引号的数字或 true/false 按原值发送（要作为文字发送就加引号），没填的空位 Kumi 会指出 |
 | `/status` | Kumi 连接到了什么、当前模型、学习素材库的进度，以及使用 API 密钥时本次会话用掉的 token |
 | `/voice` | 说话功能：开始或停止、“停止后直接发送”、你说的语言和麦克风 |
 | `/update` | 获取最新的 Kumi：它会先询问，然后关闭、更新，再以同一段对话重新打开 |
@@ -85,6 +87,8 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | Ctrl-W、Alt-Backspace、Ctrl-Backspace | 删除光标前的词 |
 | Ctrl-K / Ctrl-U | 删除到行尾 / 行首 |
 | Ctrl-T | 用说话代替打字：再按一次停止，或按住说话。你说的话会出现在光标处；Enter 立即停止并发送，Esc 放弃 |
+| Ctrl-V | 把剪贴板中的图片（比如截图）添加到下一条消息；拖进窗口的文件也会这样添加 |
+| 输入框为空时按 Backspace | 撤回最后添加的文件 |
 
 **停止与移动**
 
@@ -109,7 +113,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 
 ## 纯文本模式
 
-设置 `KUMI_UI=plain`，或者输入或输出经过管道时，Kumi 会改用逐行显示的纯文本界面，适合屏幕阅读器和日志。它支持 `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new`、`/conversations [n]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/recipes`、`/update` 和 `/quit`，但没有 `/btw`、`/goal` 或 `/copy`。请在 shell 中用 `kumi login` 登录。Ctrl-C 停止回答，空闲时则退出。
+设置 `KUMI_UI=plain`，或者输入或输出经过管道时，Kumi 会改用逐行显示的纯文本界面，适合屏幕阅读器和日志。它支持 `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new`、`/conversations [n]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/update` 和 `/quit`，但没有 `/btw`、`/goal` 或 `/copy`。请在 shell 中用 `kumi login` 登录。Ctrl-C 停止回答，空闲时则退出。
 
 ## 终端
 

@@ -7,6 +7,7 @@ pub mod goal;
 pub mod match_run;
 pub mod memory;
 pub mod playbook;
+pub mod recall;
 pub mod recipes;
 pub mod session;
 pub mod techniques;
