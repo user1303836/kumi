@@ -26,6 +26,11 @@ impl Signal {
     pub fn cancel(&self) {
         self.token.cancel();
     }
+    /// Whether `other` is a copy of this signal: the one a turn gives each of its tools, say. Only a
+    /// combined signal (from [`any`]) can be told apart this way; a plain one is never the same.
+    pub fn same_as(&self, other: &Signal) -> bool {
+        !self.parents.is_empty() && Arc::ptr_eq(&self.parents, &other.parents)
+    }
     pub fn is_cancelled(&self) -> bool {
         self.token.is_cancelled() || self.parents.iter().any(Self::is_cancelled)
     }
@@ -123,6 +128,16 @@ impl Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_combined_signal_is_the_same_as_its_copies_only() {
+        let turn = any([Signal::new()]);
+        assert!(turn.same_as(&turn.clone()));
+        assert!(!turn.same_as(&any([Signal::new()])));
+        assert!(!turn.same_as(&Signal::new()));
+        let plain = Signal::new();
+        assert!(!plain.same_as(&plain.clone()));
+    }
 
     #[tokio::test]
     async fn any_fires_with_the_first() {
