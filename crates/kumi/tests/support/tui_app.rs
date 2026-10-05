@@ -153,6 +153,10 @@ impl SessionController for Control {
         self.call("start");
         Ok(())
     }
+    async fn reconfigure(&self) -> Result<(), RuntimeError> {
+        self.call("reconfigure");
+        Ok(())
+    }
     async fn submit(&self, s: &str, pin: Option<PinnedNode>) -> Result<(), RuntimeError> {
         if let Some(error) = self.get::<String>("submit-error") {
             return Err(RuntimeError::plain(error));

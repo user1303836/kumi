@@ -15,7 +15,7 @@ use super::{
 };
 use crate::{
     audio::tools::{listening_tools, ListeningOptions},
-    integrations::ableton::project::new_conversation_id,
+    integrations::ableton::{project::new_conversation_id, willington::willington_instructions},
     kernel::budget::{transcript_of, OBSERVATION_MARKER},
     library::{Library, LibraryToolsOptions, FIND_SOUNDS_TOOL},
     web::{
@@ -94,6 +94,9 @@ pub struct SessionOptions {
     pub goal_random: Option<Rc<dyn Fn() -> f64>>,
     pub goals: Option<Rc<dyn GoalStore>>,
     pub goal_budget: Option<GoalBudget>,
+    /// Whether Willington's bindings are on, None while Kumi's bridge in Live doesn't carry them: asked each
+    /// time the model's session is made, since /willington switches them while Kumi runs.
+    pub willington: Option<Rc<dyn Fn() -> Option<bool>>>,
 }
 impl SessionOptions {
     pub fn new(kernel_factory: KernelFactory, integration_factory: IntegrationFactory, on_event: Rc<dyn Fn(SessionEvent)>) -> Self {
@@ -126,6 +129,7 @@ impl SessionOptions {
             goal_random: None,
             goals: None,
             goal_budget: None,
+            willington: None,
         }
     }
 }
@@ -754,6 +758,10 @@ impl Session {
                 if self.0.learned.is_some() { TECHNIQUE_GUIDANCE.into() } else { String::new() },
                 technique_instructions(&techniques),
                 if self.0.gaps.is_empty() { String::new() } else { GAP_GUIDANCE.into() },
+                willington_instructions(self.0.options.willington.as_ref().and_then(|on| on()), |name| {
+                    observation.tools.iter().any(|tool| tool.name() == name)
+                })
+                .into(),
             ]
             .into_iter()
             .filter(|s: &String| !s.is_empty())

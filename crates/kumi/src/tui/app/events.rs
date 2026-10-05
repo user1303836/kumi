@@ -135,6 +135,7 @@ impl TuiApp {
             }
             "resumed" => {
                 let when = since(n("savedAt"), now_ms_f64());
+                let at_start = self.0.state.borrow().transcript.is_empty();
                 if value["chosen"] == true {
                     self.0.state.borrow_mut().transcript.add(Entry::Divider { text: format!("Back to your conversation from {when}") });
                 } else if value["unreadable"] == true {
@@ -186,6 +187,12 @@ impl TuiApp {
                         earlier.drain(..earlier.len() - 500);
                     }
                     state.changes = earlier;
+                }
+                // Carried on at the start, the conversation takes the welcome screen's place, and its word on Willington.
+                let tell = at_start && state.willington_off;
+                drop(state);
+                if tell {
+                    self.notice(crate::willington::OFF_AT_START, NoticeTone::Info);
                 }
             }
             "resend" => {

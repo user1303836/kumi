@@ -872,6 +872,23 @@ local_test!(memory_instructions_tools_and_forgetting, {
     h.session.close().await.unwrap();
 });
 
+local_test!(willington_instructions_follow_the_switch_each_time_the_kernel_is_made, {
+    let on = Rc::new(Cell::new(false));
+    let switch = on.clone();
+    let h = harness(None, move |o| o.willington = Some(Rc::new(move || Some(switch.get()))));
+    // Kumi can change the Set (make_changes): the instructions say what the bindings would add.
+    h.observation.borrow_mut().tools = vec![Rc::new(Plan { received: Rc::new(RefCell::new(vec![])) })];
+    h.session.start().await.unwrap();
+    assert!(h.record.created.borrow()[0].instructions.contains("/willington turns the bindings on"));
+    // Turned on, for a Live they have no bindings for: the next kernel says so, without pointing at /willington.
+    on.set(true);
+    h.session.reconfigure().await.unwrap();
+    h.session.refresh().await.unwrap();
+    let instructions = h.record.created.borrow().last().unwrap().instructions.clone();
+    assert!(instructions.contains("none fit the Live that's open") && !instructions.contains("/willington"));
+    h.session.close().await.unwrap();
+});
+
 #[derive(Clone)]
 struct Plan {
     received: Rc<RefCell<Vec<JsonObject>>>,

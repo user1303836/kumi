@@ -32,6 +32,7 @@ use crate::{
     terminal::Terminal,
     text::{sanitize_text, StreamingText},
     update::UpdateControl,
+    willington::WillingtonControl,
 };
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_common::{
@@ -77,6 +78,8 @@ pub struct TuiOptions {
     pub voice: Option<Rc<dyn VoiceController>>,
     /// Live's part of first-run setup; `None` when Kumi chats without Live by choice.
     pub connect_live: Option<ConnectLive>,
+    /// /willington, where Kumi's bridge can carry Willington.
+    pub willington: Option<WillingtonControl>,
 }
 /// Live's part of first-run setup: the setup shows it when Kumi's bridge isn't in Live yet, or is older
 /// than Kumi's.
@@ -108,6 +111,7 @@ impl TuiOptions {
             updates: None,
             voice: None,
             connect_live: None,
+            willington: None,
         }
     }
 }
@@ -178,6 +182,8 @@ struct State {
     newer: Option<String>,
     library: Option<LibraryStatus>,
     told_library: bool,
+    /// Willington's bindings are off in the bridge that carries them, and the producer has yet to be told.
+    willington_off: bool,
     changes: Vec<ChangeRecord>,
     last_change: Option<(String, f64)>,
     last_action: Option<LastAction>,
@@ -255,6 +261,7 @@ impl State {
             newer: None,
             library: None,
             told_library: false,
+            willington_off: false,
             changes: vec![],
             last_change: None,
             last_action: None,
@@ -633,6 +640,8 @@ impl Terminal for TuiApp {
         if let Some(notice) = &self.0.options.startup_notice {
             self.notice(notice, NoticeTone::Info);
         }
+        // Said on the welcome screen, which a notice would replace; a conversation carried on says it below.
+        self.0.state.borrow_mut().willington_off = self.0.options.willington.as_ref().is_some_and(|w| (w.on)() == Some(false));
         self.0.state.borrow_mut().library = self.0.options.controller.library();
         self.0.scheduler.request();
         self.task(|app| async move {
