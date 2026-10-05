@@ -27,6 +27,7 @@ path = "src/bin/kumi-library-learner.rs"
 
 [dependencies]
 kumi-common.workspace = true
+kumi-store.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 bytes.workspace = true

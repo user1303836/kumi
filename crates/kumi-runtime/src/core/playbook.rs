@@ -89,6 +89,21 @@ fn checked(raw: &Value) -> Option<Lesson> {
     };
     Some(Lesson { id: id.into(), at, matched, winner, from, to, moves, reaction })
 }
+/// The lessons a playbook file holds, as the store keeps them: what doesn't check out is left out, and
+/// a full file keeps its newest.
+pub fn parse_lessons(bytes: &[u8]) -> Vec<Lesson> {
+    let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
+        return vec![];
+    };
+    if value["version"].as_f64() != Some(1.0) {
+        return vec![];
+    }
+    let mut lessons: Vec<_> = value["lessons"].as_array().into_iter().flatten().filter_map(checked).collect();
+    if lessons.len() > MAX_LESSONS {
+        lessons.drain(..lessons.len() - MAX_LESSONS);
+    }
+    lessons
+}
 pub struct FilePlaybookStore {
     file: PathBuf,
 }
@@ -101,17 +116,7 @@ impl PlaybookStore for FilePlaybookStore {
         let Ok(data) = tokio::fs::read(&self.file).await else {
             return Ok(vec![]);
         };
-        let Ok(value) = serde_json::from_slice::<Value>(&data) else {
-            return Ok(vec![]);
-        };
-        if value["version"].as_f64() != Some(1.0) {
-            return Ok(vec![]);
-        }
-        let mut lessons: Vec<_> = value["lessons"].as_array().into_iter().flatten().filter_map(checked).collect();
-        if lessons.len() > MAX_LESSONS {
-            lessons.drain(..lessons.len() - MAX_LESSONS);
-        }
-        Ok(lessons)
+        Ok(parse_lessons(&data))
     }
     async fn save(&self, lessons: &[Lesson]) -> Result<(), RuntimeError> {
         let folder = self.file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));

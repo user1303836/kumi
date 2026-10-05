@@ -1,6 +1,9 @@
 //! Notes in the producer's words: about them (`Scope::Global`) or about one Set (`Scope::Project`).
 
-use crate::{ids::new_id, params, Connection, OptionalExtension, Scope, StoreError};
+use crate::{
+    ids::{content_id, new_id},
+    imports, params, Connection, OptionalExtension, Scope, StoreError,
+};
 use std::collections::HashMap;
 
 /// A note in use: its label (`p3`, `s1`), words, whether it's pinned, and when it was last written.
@@ -78,6 +81,33 @@ pub fn forget(connection: &Connection, scope: &Scope, label: &str, now: i64) -> 
     let Some(id) = id else { return Ok(false) };
     connection.prepare_cached("DELETE FROM notes WHERE id = ?1")?.execute(params![id])?;
     connection.prepare_cached("INSERT OR REPLACE INTO forgotten (id, at) VALUES (?1, ?2)")?.execute(params![id, now])?;
+    Ok(true)
+}
+
+/// Read in a note an earlier Kumi kept in a file. Its id comes from its scope, label and words, so the
+/// same note is read in once and one forgotten here stays forgotten; a note in use with that label and
+/// those words (one written back for an older Kumi) is the same note. A label another note in use has
+/// gets the next free one. Whether it was added.
+pub fn import(connection: &Connection, scope: &Scope, note: &Note) -> Result<bool, StoreError> {
+    let id = content_id(&["note", scope.kind(), scope.id(), &note.label, &note.text]);
+    if imports::known_or_forgotten(connection, "notes", &id)?
+        || connection
+            .prepare_cached(
+                "SELECT EXISTS (SELECT 1 FROM notes WHERE scope_kind = ?1 AND scope_id = ?2 AND label = ?3 AND text = ?4 AND archived_at IS NULL)",
+            )?
+            .query_row(params![scope.kind(), scope.id(), note.label, note.text], |row| row.get::<_, bool>(0))?
+    {
+        return Ok(false);
+    }
+    let in_use: Vec<String> = connection
+        .prepare_cached("SELECT label FROM notes WHERE scope_kind = ?1 AND scope_id = ?2 AND archived_at IS NULL")?
+        .query_map(params![scope.kind(), scope.id()], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    connection
+        .prepare_cached(
+            "INSERT INTO notes (id, scope_kind, scope_id, label, text, pinned, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+        )?
+        .execute(params![id, scope.kind(), scope.id(), imports::free_label(&in_use, &note.label), note.text, note.pinned, note.at])?;
     Ok(true)
 }
 

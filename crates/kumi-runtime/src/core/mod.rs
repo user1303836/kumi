@@ -10,5 +10,6 @@ pub mod playbook;
 pub mod recall;
 pub mod recipes;
 pub mod session;
+pub mod store_import;
 pub mod techniques;
 pub mod timing;

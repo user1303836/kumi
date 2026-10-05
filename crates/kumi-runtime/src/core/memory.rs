@@ -80,32 +80,37 @@ impl FileMemoryStore {
         let Ok(bytes) = tokio::fs::read(file).await else {
             return vec![];
         };
-        let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
-            return vec![];
-        };
-        if value["version"].as_f64() != Some(1.0) {
-            return vec![];
-        }
-        let Some(notes) = value["notes"].as_array() else {
-            return vec![];
-        };
-        let mut found: Vec<_> = notes
-            .iter()
-            .filter_map(|raw| {
-                let id = raw["id"].as_str()?;
-                let digits = id.strip_prefix(prefix)?;
-                if digits.is_empty() || digits.len() > 4 || !digits.bytes().all(|b| b.is_ascii_digit()) {
-                    return None;
-                }
-                let text = clean(raw["text"].as_str()?);
-                let at = raw["at"].as_i64()?;
-                let pinned = raw["pinned"] == true;
-                (!text.is_empty() && !suspect_note(&text)).then(|| MemoryNote { id: id.into(), text, at, pinned })
-            })
-            .collect();
-        fit(&mut found);
-        found
+        parse_notes(&bytes, prefix)
     }
+}
+/// The notes a memory file holds (ids `p…` about the producer, `s…` about a Set), as the store keeps
+/// them: what doesn't read as a note is left out, and a full file keeps its newest.
+pub fn parse_notes(bytes: &[u8], prefix: char) -> Vec<MemoryNote> {
+    let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
+        return vec![];
+    };
+    if value["version"].as_f64() != Some(1.0) {
+        return vec![];
+    }
+    let Some(notes) = value["notes"].as_array() else {
+        return vec![];
+    };
+    let mut found: Vec<_> = notes
+        .iter()
+        .filter_map(|raw| {
+            let id = raw["id"].as_str()?;
+            let digits = id.strip_prefix(prefix)?;
+            if digits.is_empty() || digits.len() > 4 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            let text = clean(raw["text"].as_str()?);
+            let at = raw["at"].as_i64()?;
+            let pinned = raw["pinned"] == true;
+            (!text.is_empty() && !suspect_note(&text)).then(|| MemoryNote { id: id.into(), text, at, pinned })
+        })
+        .collect();
+    fit(&mut found);
+    found
 }
 #[async_trait(?Send)]
 impl MemoryStore for FileMemoryStore {

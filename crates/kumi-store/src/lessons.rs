@@ -1,6 +1,9 @@
 //! Lessons from matching sounds: what was matched, what won, the scores, the moves that helped.
 
-use crate::{ids::new_id, params, Connection, StoreError};
+use crate::{
+    ids::{content_id, new_id},
+    imports, params, Connection, StoreError,
+};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -79,6 +82,32 @@ pub fn keep(connection: &Connection, lessons: &[Lesson], now: i64) -> Result<(),
         connection.prepare_cached("UPDATE lessons SET archived_at = ?2 WHERE id = ?1")?.execute(params![id, now])?;
     }
     Ok(())
+}
+
+/// Read in a lesson an earlier Kumi kept in a file, once: its id comes from its label and time, and a
+/// lesson in use with its label (written back for an older Kumi) is the same lesson. Whether it was
+/// added.
+pub fn import(connection: &Connection, l: &Lesson) -> Result<bool, StoreError> {
+    let id = content_id(&["lesson", &l.label, &l.at.to_string()]);
+    if imports::known_or_forgotten(connection, "lessons", &id)?
+        || connection
+            .prepare_cached("SELECT EXISTS (SELECT 1 FROM lessons WHERE label = ?1 AND archived_at IS NULL)")?
+            .query_row(params![l.label], |row| row.get::<_, bool>(0))?
+    {
+        return Ok(false);
+    }
+    let in_use: Vec<String> = connection
+        .prepare_cached("SELECT label FROM lessons WHERE archived_at IS NULL")?
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    let moves = serde_json::to_string(&l.moves).map_err(|error| StoreError::Sqlite(error.to_string()))?;
+    connection
+        .prepare_cached(
+            "INSERT INTO lessons (id, label, matched, winner, from_score, to_score, moves, reaction, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, jsonb(?7), ?8, ?9)",
+        )?
+        .execute(params![id, imports::free_label(&in_use, &l.label), l.matched, l.winner, l.from, l.to, moves, l.reaction, l.at])?;
+    Ok(true)
 }
 
 #[cfg(test)]

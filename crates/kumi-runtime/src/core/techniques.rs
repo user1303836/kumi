@@ -152,34 +152,7 @@ pub fn create_technique_store(file: impl Into<PathBuf>) -> Rc<FileTechniqueStore
 impl TechniqueStore for FileTechniqueStore {
     async fn list(&self) -> Result<Vec<Technique>, RuntimeError> {
         let Ok(bytes) = tokio::fs::read(&self.file).await else { return Ok(vec![]) };
-        let Ok(value) = serde_json::from_slice::<Value>(&bytes) else { return Ok(vec![]) };
-        if value["version"].as_f64() != Some(1.0) {
-            return Ok(vec![]);
-        }
-        let mut list: Vec<_> = value["techniques"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|raw| {
-                let body = check_technique(raw).ok()?;
-                let id = raw["id"].as_str().filter(|id| ID.is_match(id))?.to_owned();
-                let at = raw["at"].as_f64()?;
-                Some(Technique {
-                    body,
-                    id,
-                    at,
-                    used: raw["used"].as_f64().unwrap_or(0.0),
-                    updated: raw["updated"].as_f64(),
-                    last_used: raw["lastUsed"].as_f64(),
-                    request: raw["request"].as_str().and_then(request_of),
-                    undone: raw["undone"].as_f64().unwrap_or(0.0),
-                })
-            })
-            .collect();
-        if list.len() > MAX_TECHNIQUES {
-            list.drain(..list.len() - MAX_TECHNIQUES);
-        }
-        Ok(list)
+        Ok(parse_techniques(&bytes))
     }
     async fn save(&self, techniques: &[Technique]) -> Result<(), RuntimeError> {
         let parent = self.file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
@@ -208,6 +181,38 @@ impl TechniqueStore for FileTechniqueStore {
         }
         Ok(())
     }
+}
+/// The techniques a techniques file holds, as the store keeps them: what doesn't check out as a
+/// technique is left out, and a full file keeps its newest.
+pub fn parse_techniques(bytes: &[u8]) -> Vec<Technique> {
+    let Ok(value) = serde_json::from_slice::<Value>(bytes) else { return vec![] };
+    if value["version"].as_f64() != Some(1.0) {
+        return vec![];
+    }
+    let mut list: Vec<_> = value["techniques"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|raw| {
+            let body = check_technique(raw).ok()?;
+            let id = raw["id"].as_str().filter(|id| ID.is_match(id))?.to_owned();
+            let at = raw["at"].as_f64()?;
+            Some(Technique {
+                body,
+                id,
+                at,
+                used: raw["used"].as_f64().unwrap_or(0.0),
+                updated: raw["updated"].as_f64(),
+                last_used: raw["lastUsed"].as_f64(),
+                request: raw["request"].as_str().and_then(request_of),
+                undone: raw["undone"].as_f64().unwrap_or(0.0),
+            })
+        })
+        .collect();
+    if list.len() > MAX_TECHNIQUES {
+        list.drain(..list.len() - MAX_TECHNIQUES);
+    }
+    list
 }
 pub fn technique_instructions(techniques: &[Technique]) -> String {
     if techniques.is_empty() {

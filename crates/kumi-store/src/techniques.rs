@@ -1,6 +1,9 @@
 //! Sound-building techniques the producer chose to keep.
 
-use crate::{ids::new_id, params, Connection, OptionalExtension, StoreError};
+use crate::{
+    ids::{content_id, new_id},
+    imports, params, Connection, OptionalExtension, StoreError,
+};
 use std::collections::HashMap;
 
 /// A technique in use, as Kumi keeps it: its label (`t12`), what it is, and how it has fared.
@@ -138,6 +141,50 @@ pub fn forget(connection: &Connection, label: &str, now: i64) -> Result<bool, St
     let Some(id) = id else { return Ok(false) };
     connection.prepare_cached("DELETE FROM techniques WHERE id = ?1")?.execute(params![id])?;
     connection.prepare_cached("INSERT OR REPLACE INTO forgotten (id, at) VALUES (?1, ?2)")?.execute(params![id, now])?;
+    Ok(true)
+}
+
+/// Read in a technique an earlier Kumi kept in a file. Its id comes from its label and when it was
+/// kept, so it's read in once and one forgotten here stays forgotten; one in use with that label, name
+/// and idea (written back for an older Kumi) is the same technique. A label another technique in use
+/// has gets the next free one. Whether it was added.
+pub fn import(connection: &Connection, t: &Technique) -> Result<bool, StoreError> {
+    let id = content_id(&["technique", &t.label, &t.at.to_string()]);
+    if imports::known_or_forgotten(connection, "techniques", &id)?
+        || connection
+            .prepare_cached(
+                "SELECT EXISTS (SELECT 1 FROM techniques WHERE label = ?1 AND name = ?2 AND idea = ?3 AND archived_at IS NULL)",
+            )?
+            .query_row(params![t.label, t.name, t.idea], |row| row.get::<_, bool>(0))?
+    {
+        return Ok(false);
+    }
+    let in_use: Vec<String> = connection
+        .prepare_cached("SELECT label FROM techniques WHERE archived_at IS NULL")?
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    connection
+        .prepare_cached(&format!(
+            "INSERT INTO techniques (id, {COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"
+        ))?
+        .execute(params![
+            id,
+            imports::free_label(&in_use, &t.label),
+            t.name,
+            t.fits,
+            t.idea,
+            t.settings,
+            t.substitutes,
+            t.recipe,
+            t.source_title,
+            t.source_url,
+            t.request,
+            t.used,
+            t.undone,
+            t.at,
+            t.updated,
+            t.last_used
+        ])?;
     Ok(true)
 }
 

@@ -8,6 +8,7 @@
 
 pub mod gaps;
 pub mod ids;
+pub mod imports;
 pub mod lessons;
 pub mod notes;
 mod reader;
