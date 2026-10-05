@@ -111,6 +111,13 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 | | `Required CI` | 上記がすべてパスした場合にだけパスします |
 | **Installer** | `Build Kumi's Mac helper`、`Native bundle / <target>`（6 つ）、`Aggregate native and existing-installer releases`、続いて `Install / <system>`（6 つ）と `Existing installer transition / <system>`（3 つ） | Mac で Kumi が Live のメニューを使うためのヘルパー（ユニバーサル、アドホック署名）、macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドル、続いて既存のインストールが更新に使う互換リリースをビルドし、ローカルで配信します。各システムで：プロデューサーと同じ方法でインストールし（Windows では Windows PowerShell 5.1）、バージョン、`doctor`、ブリッジとその解析ワーカーを確認し、修復として再インストールし、使い捨ての Remote Scripts フォルダーに `kumi bridge --yes` を実行し、`kumi update`、`kumi update --rollback`、`kumi uninstall` を実行します。移行のジョブは、Kumi 1.7.5 と新しいバンドルで移行テストを実行します。`v*` タグでは、続いて `publish` がバンドルをリリースに添付します。 |
 
+プルリクエストでは、実行される範囲が狭くなります：
+
+- `Rust / macOS` と `Rust / Windows` はプラットフォームによって異なるテストを実行し、`Python Remote Script` は macOS を省きます。
+- Installer が 6 つすべてをビルドしてインストールするのは、インストール、更新、リリース、または依存関係を変える変更の場合だけです。ブリッジやバージョン番号を変える変更では Linux のものをビルド、インストール、確認し、それ以外の変更では Linux のバンドルをビルドするだけです。
+
+`main` へのプッシュとタグではすべてが実行され、CI は毎晩すべてを実行します。
+
 `main` にマージするには、`Required CI` がパスする必要があります。Installer は必須ではありません。残りのルールは[リリースと配布](DISTRIBUTION_POLICY.md#マージゲート)にあります。
 
 ## パスが意味すること
