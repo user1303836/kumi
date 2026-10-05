@@ -878,15 +878,26 @@ impl TuiApp {
         });
     }
     /// After an answer, whether to keep the technique from what Kumi built: 1 keeps it, 2 doesn't. Like
-    /// an answer's own options, it opens only when nothing else is open, typed or waiting; other typing
-    /// goes to the input box, and moving on leaves it unkept unless the next message says yes.
-    pub(super) fn offer_technique(&self, name: &str) {
+    /// an answer's own options, it opens only when nothing else is open, typed or waiting, and never over
+    /// a question the answer ends on; other typing goes to the input box, and moving on leaves it unkept
+    /// unless the next message says yes. True when it opened.
+    pub(super) fn offer_technique(&self, name: &str) -> bool {
         let free = {
             let state = self.0.state.borrow();
-            state.held.is_empty() && state.editor.is_empty() && state.panel.is_none()
+            let asked = state
+                .transcript
+                .entries
+                .iter()
+                .rev()
+                .find_map(|entry| match &*entry.borrow() {
+                    Entry::Assistant { text, .. } => Some(text.trim_end().ends_with(['?', '？'])),
+                    _ => None,
+                })
+                .unwrap_or(false);
+            !asked && state.held.is_empty() && state.editor.is_empty() && state.panel.is_none()
         };
         if !free || !self.0.options.controller.has_answer_technique() {
-            return;
+            return false;
         }
         let items = vec![PickerItem::new("1. Yes, keep it", "yes"), PickerItem::new("2. No", "no")];
         let title = format!("Keep “{}” as a technique?", self.clean(&name.replace('\n', " "), 60));
@@ -898,6 +909,7 @@ impl TuiApp {
             }
             Ok(())
         });
+        true
     }
     fn same_panel(&self, panel: &PanelRef) -> bool {
         self.0.state.borrow().panel.as_ref().is_some_and(|p| Rc::ptr_eq(p, panel))

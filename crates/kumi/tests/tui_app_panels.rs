@@ -598,6 +598,13 @@ case!(a_technique_offered_after_an_answer_is_answered_by_number, async {
     built(&h, "Which track should get the reverb?\n\n1. Bubbles\n2. Drums");
     h.has("Your answer");
     assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"));
+    h.has("Keep this as a technique? Liquid bubbles · say yes to keep it");
+    // So does a plain question.
+    h.type_text("\x1b").await;
+    h.type_text("make it darker\r").await;
+    built(&h, "Darker now. Should the riser come in earlier?");
+    assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"));
+    assert!(!has(&h.screen(), "Your answer"));
     h.close().await;
 });
 case!(stop_live_and_held_cancel_refusal, async {

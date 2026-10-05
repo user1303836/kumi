@@ -330,8 +330,12 @@ impl TuiApp {
             }
             "technique" if get("action") == "offered" => {
                 let name = s(&value["technique"]["name"]);
-                self.memory_line(MemoryKind::Technique, &format!("Keep this as a technique? {name}"));
-                self.offer_technique(name);
+                let line = if self.offer_technique(name) {
+                    format!("Keep this as a technique? {name}")
+                } else {
+                    format!("Keep this as a technique? {name} · say yes to keep it")
+                };
+                self.memory_line(MemoryKind::Technique, &line);
             }
             "technique" => {
                 let technique = &value["technique"];
