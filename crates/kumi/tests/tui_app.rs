@@ -841,3 +841,16 @@ case!(a_question_with_numbered_options_answers_by_number_and_free_text_still_wor
     assert!(!has(&h.screen(), "Your answer"), "a list that isn't a question offers nothing");
     h.close().await;
 });
+case!(a_provider_wait_shows_why_and_counts_down_until_the_model_answers, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.type_text("make it louder\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"retry","reason":"ChatGPT is busy (HTTP 429)","waitMs":4200}));
+    h.has("retrying in 5s · ChatGPT is busy");
+    h.has("esc to stop");
+    h.emit(json!({"type":"text","text":"Raised the master 2 dB."}));
+    assert!(!has(&h.screen(), "retrying in"), "the answer ends the wait");
+    h.close().await;
+});

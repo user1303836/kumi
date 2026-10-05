@@ -194,6 +194,8 @@ struct State {
     panel: Option<PanelRef>,
     planning: Option<String>,
     planning_since: f64,
+    /// A model call being tried again: why, and when (perf time) the next try starts.
+    retry: Option<(String, f64)>,
     busy_since: f64,
     turn_changes: usize,
     recall: Option<(usize, String)>,
@@ -264,6 +266,7 @@ impl State {
             panel: None,
             planning: None,
             planning_since: 0.,
+            retry: None,
             busy_since: 0.,
             turn_changes: 0,
             recall: None,

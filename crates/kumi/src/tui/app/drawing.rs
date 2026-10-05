@@ -343,6 +343,11 @@ impl TuiApp {
             } else {
                 "working".into()
             };
+            // A provider asked Kumi to wait: say why and for how long (esc still stops).
+            if let Some((reason, until)) = state.retry.as_ref().filter(|(_, until)| *until > now) {
+                let seconds = ((until - now) / 1000.).ceil().max(1.);
+                return NowLine { dot, label, detail: format!("retrying in {seconds}s · {reason}"), style: st::DIM, activity: None };
+            }
             if let Some(action) = action.filter(|a| flash.is_none() || a.at > state.last_change.as_ref().unwrap().1) {
                 if action.memory
                     || running.is_none()

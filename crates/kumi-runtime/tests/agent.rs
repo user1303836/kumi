@@ -21,7 +21,8 @@ use kumi_runtime::core::contracts::{
 use kumi_runtime::core::errors::{FailureKind, RuntimeError};
 use kumi_runtime::integrations::ableton::{integration::Ableton, observation::ObservationHost, options::AbletonOptions};
 use kumi_runtime::kernel::agent::{
-    create_agent_kernel, plain_words, AgentKernel, AgentKernelOptions, LanguageModel, ModelBinding, STOPPED_NOTE,
+    create_agent_kernel, plain_words, AgentKernel, AgentKernelOptions, LanguageModel, ModelBinding, STOPPED_BEFORE_RUNNING, STOPPED_NOTE,
+    STOPPED_WHILE_RUNNING,
 };
 use kumi_runtime::kernel::budget::ContextBudget;
 use kumi_runtime::mcp::{
@@ -213,6 +214,7 @@ fn types(events: &[KernelEvent]) -> Vec<&'static str> {
             KernelEvent::ToolStart { .. } => "tool-start",
             KernelEvent::ToolEnd { .. } => "tool-end",
             KernelEvent::Steer { .. } => "steer",
+            KernelEvent::Retry { .. } => "retry",
         })
         .collect()
 }
@@ -575,12 +577,45 @@ fn unavailable() -> LanguageModelError {
     LanguageModelError::ApiCall(error)
 }
 
+#[test]
+fn a_retrys_reason_says_what_happened() {
+    use kumi_runtime::kernel::failure::retry_reason;
+    let status = |code: Option<u16>| LanguageModelError::ApiCall(ApiCallError::new("x", "u", Some(json!({})), code));
+    let said: Vec<String> = [Some(200), Some(429), Some(503), Some(502), Some(408), None]
+        .into_iter()
+        .map(|code| retry_reason(&status(code), "openai-codex/gpt-6-astra"))
+        .collect();
+    assert_eq!(
+        said,
+        [
+            "ChatGPT's answer broke off",
+            "ChatGPT is busy (HTTP 429)",
+            "ChatGPT is overloaded (HTTP 503)",
+            "ChatGPT is having trouble (HTTP 502)",
+            "ChatGPT asked Kumi to wait (HTTP 408)",
+            "ChatGPT couldn't be reached",
+        ]
+    );
+}
+
 #[tokio::test]
 async fn retries_up_to_three_times_before_any_output_escapes_but_never_after_text_was_delivered() {
     local(async {
         let retried = harness(|_, n| if n <= 3 { Scripted::Reject(unavailable()) } else { answer("ok") }, Options::default());
-        assert_eq!(retried.kernel.run("q", signal(), ignore()).await.unwrap().stop_reason, StopReason::Completed);
+        let (events, emit) = collect();
+        assert_eq!(retried.kernel.run("q", signal(), emit).await.unwrap().stop_reason, StopReason::Completed);
         assert_eq!(retried.count(), 4);
+        // Each wait is shown, with why: the status line counts it down, from code rather than the model.
+        let waits: Vec<_> = events
+            .borrow()
+            .iter()
+            .filter_map(|event| match event {
+                KernelEvent::Retry { reason, wait_ms } => Some((reason.clone(), *wait_ms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(waits, vec![("test is overloaded (HTTP 503)".to_string(), 250); 3]);
+        assert_eq!(types(&events.borrow()), ["retry", "retry", "retry", "text"]);
         let gave_up = harness(|_, _| Scripted::Reject(unavailable()), Options::default());
         assert!(gave_up.kernel.run("q", signal(), ignore()).await.unwrap_err().to_string().contains("overloaded right now"));
         assert_eq!(gave_up.count(), 4, "the first try and three more");
@@ -1153,6 +1188,48 @@ async fn a_turn_stopped_during_a_tool_keeps_what_finished_before_it_never_a_call
         let messages = h.messages();
         assert_eq!(roles(&messages), ["user", "assistant", "tool", "assistant"]);
         assert!(!js(&messages).contains("\"s1\""), "the slow call, which has no result, is gone");
+        h.kernel.close().await;
+    })
+    .await
+}
+
+#[tokio::test]
+async fn a_batch_stopped_on_its_second_call_keeps_the_first_calls_result_and_the_next_turn_sees_it() {
+    local(async {
+        let h = Rc::new(harness(
+            |_, n| match n {
+                1 => {
+                    Scripted::Parts(vec![call_id("add", "{}", "a1"), call_id("slow", "{}", "s1"), call_id("add", "{}", "a2"), tool_calls()])
+                }
+                _ => answer("done"),
+            },
+            Options { tools: vec![saying("add", "Added Reverb"), tool("slow", |_| std::future::pending())], ..Options::default() },
+        ));
+        let controller = Controller::new();
+        let held = h.clone();
+        let stop_signal = controller.signal.clone();
+        let stopped = spawn_local(async move { held.kernel.run("go", stop_signal, ignore()).await });
+        sleep(Duration::from_millis(20)).await;
+        controller.abort();
+        assert_eq!(stopped.await.unwrap().unwrap().stop_reason, StopReason::Cancelled);
+        let messages = h.messages();
+        assert_eq!(roles(&messages), ["user", "assistant", "tool", "assistant"]);
+        let results: Vec<_> = tool_message(&messages[2])
+            .iter()
+            .map(|part| match part {
+                ToolPart::ToolResult(result) => (result.tool_call_id.as_str(), output_type(part), js(&result.output)),
+                other => panic!("not a result: {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            results.iter().map(|(id, kind, _)| (*id, *kind)).collect::<Vec<_>>(),
+            [("a1", "text"), ("s1", "error-text"), ("a2", "error-text")],
+            "every call keeps a result"
+        );
+        assert!(results[0].2.contains("Added Reverb"), "the finished call's result stays");
+        assert!(results[1].2.contains(STOPPED_WHILE_RUNNING) && results[2].2.contains(STOPPED_BEFORE_RUNNING));
+        h.kernel.run("carry on", signal(), ignore()).await.unwrap();
+        assert!(js(&h.request(1).prompt).contains("Added Reverb"), "the next request says the first change happened");
         h.kernel.close().await;
     })
     .await
