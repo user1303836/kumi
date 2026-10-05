@@ -66,11 +66,14 @@ impl Writer {
 }
 
 impl Drop for Writer {
-    /// Whatever is queued is written, then the thread ends.
+    /// Whatever is queued is written, then the thread ends. Dropped on the writer's own thread (the
+    /// last `Store` held by a write), it ends by itself once that write is answered.
     fn drop(&mut self) {
         self.queue.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
         if let Some(thread) = self.thread.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take() {
-            let _ = thread.join();
+            if thread.thread().id() != std::thread::current().id() {
+                let _ = thread.join();
+            }
         }
     }
 }
@@ -103,8 +106,26 @@ fn run(mut connection: Connection, jobs: mpsc::Receiver<Job>) {
                 }
             }
             Ok(transaction) => {
-                let answers: Vec<Answer> = batch.into_iter().map(|job| job(Ok(&*transaction))).collect();
-                let committed = transaction.commit().map_err(StoreError::from).err();
+                // SQLite can roll the whole transaction back mid-batch (a full disk, an I/O error): then
+                // nothing of the batch is kept, and the writes still queued in it don't run, since they would
+                // land outside any transaction while their callers heard of a failure.
+                let mut lost: Option<StoreError> = None;
+                let mut answers: Vec<Answer> = Vec::with_capacity(batch.len());
+                for job in batch {
+                    match &lost {
+                        Some(why) => answers.push(job(Err(why))),
+                        None => {
+                            answers.push(job(Ok(&*transaction)));
+                            if transaction.is_autocommit() {
+                                lost = Some(StoreError::Sqlite("SQLite gave up the write (a full disk or a read or write error)".into()));
+                            }
+                        }
+                    }
+                }
+                let committed = match lost {
+                    Some(why) => Some(why),
+                    None => transaction.commit().map_err(StoreError::from).err(),
+                };
                 for answer in answers {
                     answer(committed.as_ref());
                 }

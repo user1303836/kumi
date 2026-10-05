@@ -174,3 +174,90 @@ fn a_crash_mid_write_keeps_whole_transactions_only() {
 fn gaps_written(path: &Path) -> i64 {
     Connection::open(path).and_then(|c| c.query_row("SELECT count(*) FROM gaps", [], |row| row.get(0))).unwrap_or(0)
 }
+
+/// Queue `jobs` so the writer takes them as one batch: they go in while the writer is busy with a write
+/// that waits until they're all queued. Each job's answer, in order.
+fn one_batch(store: &Store, jobs: Vec<Box<dyn FnOnce(&Connection) -> Result<(), StoreError> + Send>>) -> Vec<Result<(), StoreError>> {
+    let (release, wait) = std::sync::mpsc::channel::<()>();
+    store.write(
+        move |_| {
+            wait.recv().ok();
+            Ok(())
+        },
+        |_| {},
+    );
+    let (sender, answers) = std::sync::mpsc::channel();
+    let count = jobs.len();
+    for (index, job) in jobs.into_iter().enumerate() {
+        let sender = sender.clone();
+        store.write(job, move |result| sender.send((index, result)).unwrap());
+    }
+    release.send(()).unwrap();
+    let mut answered: Vec<_> = (0..count).map(|_| answers.recv_timeout(Duration::from_secs(10)).unwrap()).collect();
+    answered.sort_by_key(|(index, _)| *index);
+    answered.into_iter().map(|(_, result)| result).collect()
+}
+fn insert(missing: &'static str) -> Box<dyn FnOnce(&Connection) -> Result<(), StoreError> + Send> {
+    Box::new(move |c| gaps::add(c, &gap(missing, 1)))
+}
+
+#[test]
+fn when_sqlite_gives_up_a_batch_no_write_of_it_is_kept_and_every_caller_hears_so() {
+    let folder = tempfile::tempdir().unwrap();
+    let store = Store::open(folder.path().join("kumi.db")).unwrap();
+    // The transaction ends mid-batch, as SQLite ends it on a full disk or an I/O error.
+    let answers = one_batch(
+        &store,
+        vec![
+            insert("before"),
+            Box::new(|c| {
+                c.execute_batch("ROLLBACK")?;
+                Ok(())
+            }),
+            insert("after"),
+        ],
+    );
+    assert!(answers.iter().all(Result::is_err), "{answers:?}");
+    assert_eq!(count(&store, "SELECT count(*) FROM gaps"), 0, "nothing landed outside the transaction");
+    store.write_wait(|c| gaps::add(c, &gap("next", 2))).unwrap();
+    assert_eq!(count(&store, "SELECT count(*) FROM gaps"), 1, "the writer carries on");
+}
+
+#[test]
+fn on_a_full_disk_a_caller_hears_ok_exactly_when_its_write_is_kept() {
+    let folder = tempfile::tempdir().unwrap();
+    let store = Store::open(folder.path().join("kumi.db")).unwrap();
+    store
+        .write_wait(|c| {
+            let pages: i64 = c.query_row("PRAGMA page_count", [], |row| row.get(0))?;
+            c.query_row(&format!("PRAGMA max_page_count = {}", pages + 2), [], |_| Ok(()))?;
+            Ok(())
+        })
+        .unwrap();
+    let big = "x".repeat(64 * 1024);
+    let answers = one_batch(&store, vec![insert("small before"), Box::new(move |c| gaps::add(c, &gap(&big, 1))), insert("small after")]);
+    assert!(answers[1].is_err(), "the write that doesn't fit fails: {answers:?}");
+    for (index, missing) in [(0, "small before"), (2, "small after")] {
+        let kept = store
+            .read(move |c| Ok(c.query_row("SELECT count(*) FROM gaps WHERE missing = ?1", [missing], |row| row.get::<_, i64>(0))?))
+            .unwrap();
+        assert_eq!(answers[index].is_ok(), kept == 1, "{missing}: told {:?}, kept {kept}", answers[index]);
+    }
+}
+
+#[test]
+fn a_store_dropped_by_its_own_last_write_ends_without_waiting_on_itself() {
+    let folder = tempfile::tempdir().unwrap();
+    let store = Store::open(folder.path().join("kumi.db")).unwrap();
+    let held = store.clone();
+    let (sender, done) = std::sync::mpsc::channel();
+    drop(store);
+    held.clone().write(
+        move |c| {
+            drop(held);
+            gaps::add(c, &gap("last", 1))
+        },
+        move |result| sender.send(result).unwrap(),
+    );
+    assert_eq!(done.recv_timeout(Duration::from_secs(10)).unwrap(), Ok(()));
+}
