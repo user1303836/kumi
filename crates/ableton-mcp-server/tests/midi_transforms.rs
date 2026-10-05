@@ -51,3 +51,20 @@ fn stochastic_transforms_without_a_seed_draw_one_from_the_request() {
         assert!(apply_midi_transform(&notes, &spec, None).unwrap_err().to_string().contains("seed"));
     }
 }
+
+#[test]
+fn chord_progression_takes_chords_as_its_tool_text_says() {
+    let progression = |params: Value| {
+        apply_midi_transform(
+            &[],
+            &MidiTransformSpec { r#type: "chord-progression".into(), params: params.as_object().unwrap().clone() },
+            None,
+        )
+    };
+    let symbols = progression(serde_json::json!({"symbols":["Cm","Ab","Eb","Bb"]})).unwrap();
+    assert_eq!(progression(serde_json::json!({"chords":["Cm","Ab","Eb","Bb"]})).unwrap(), symbols);
+    let numerals = progression(serde_json::json!({"numerals":["i","VI","III","VII"],"root":0,"scale":"minor"})).unwrap();
+    assert_eq!(progression(serde_json::json!({"chords":["i","VI","III","VII"],"root":0,"scale":"minor"})).unwrap(), numerals);
+    let both = progression(serde_json::json!({"chords":["Cm"],"symbols":["Cm"]})).unwrap_err();
+    assert_eq!(both.to_string(), "exactly one of chords, numerals or symbols is required");
+}

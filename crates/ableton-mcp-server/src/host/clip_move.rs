@@ -35,6 +35,32 @@ fn exact_created(result: &Value) -> bool {
         && is_non_empty_string(&result["objectIdentity"], 256)
         && is_non_empty_string(&result["createdFingerprint"], 64)
 }
+/// Where an Arrangement clip row sits, in beats: its start and its right edge (Live's end time; start
+/// plus length on a row without one).
+fn arrangement_span(clip: &Value) -> Option<(f64, f64)> {
+    let start = clip["start"].as_f64()?;
+    Some((start, clip["endTime"].as_f64().filter(|end| *end > start).or_else(|| Some(start + clip["length"].as_f64()?))?))
+}
+/// The refusal for moving an Arrangement clip onto another clip of its track, which isn't done yet: Live
+/// crashes when an Arrangement clip is copied onto a span a clip already holds, and a move is a copy.
+fn arrangement_move_blocker(snapshot: &Value, moving: &Value, track: &Value, position: f64) -> Option<String> {
+    let (start, end) = arrangement_span(moving)?;
+    let target_end = position + (end - start);
+    let clips = snapshot["arrangement"]["clips"].as_array().into_iter().flatten();
+    clips.filter(|clip| clip["trackRef"] == track["ref"] && clip["ref"] != moving["ref"]).find_map(|clip| {
+        let (other_start, other_end) = arrangement_span(clip)?;
+        (other_start < target_end - 1e-6 && other_end > position + 1e-6).then(|| {
+            let name: String = clip["name"].as_str().unwrap_or("").chars().take(60).collect();
+            let beat = kumi_common::js::number::to_string;
+            format!(
+                "Kumi can't move a clip onto another clip yet: \"{name}\" (beats {} to {}) is in the way at beat {}; clear that span first (clear_range) or pick a free spot",
+                beat(other_start),
+                beat(other_end),
+                beat(position)
+            )
+        })
+    })
+}
 
 impl McpHost {
     pub async fn dispatch_clip_move_tool(&self, call: &ToolCall, signal: Option<&Signal>) -> Option<Result<Option<Value>, LiveError>> {
@@ -68,6 +94,12 @@ impl McpHost {
                 }
                 if !params["position"].as_f64().is_some_and(|n| n.is_finite() && n >= 0.0) {
                     return Ok(error(id, -32602, "position is required for an Arrangement clip move", None));
+                }
+                if let (Some(track), None) = (&row.track, &row.take_lane) {
+                    let value = serde_json::to_value(&snapshot).unwrap();
+                    if let Some(reason) = arrangement_move_blocker(&value, &row.clip, track, params["position"].as_f64().unwrap()) {
+                        return Err(LiveError::error(reason));
+                    }
                 }
 
                 payload["ref"] = params["clipRef"].clone();

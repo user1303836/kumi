@@ -2594,6 +2594,50 @@ class ControlSurfaceTests(unittest.TestCase):
         track.arrangement_clips[0].playing_position = 0.5
         self.assertEqual(moved["createdFingerprint"], mapper._mapped_fingerprint(moved["ref"]), "playback moving on doesn't change the moved clip's fingerprint")
 
+    @staticmethod
+    def arrangement_track_that_crashes_on_overlap(*clips):
+        """A track whose Arrangement copy fails where Live crashes: onto a span a clip already holds."""
+        song = FakeSong(); track = song.tracks[0]; track.arrangement_clips = []; track.copies = []
+        for name, start, length in clips:
+            clip = FakeClip(length); clip.name = name; clip.start_time = start; clip.end_time = start + length; clip.add_new_notes([{"pitch": 60, "start_time": 0.0, "duration": 1.0, "velocity": 100}]); track.arrangement_clips.append(clip)
+        def duplicate_to_arrangement(source, position):
+            span = source.end_time - source.start_time
+            if any(other.start_time < position + span and other.end_time > position for other in track.arrangement_clips): raise RuntimeError("Live crashed: an Arrangement clip copied onto a clip")
+            created = FakeClip(source.length); created.name = source.name; created.start_time = position; created.end_time = position + span; created.notes = [dict(note) for note in source.notes]
+            track.copies.append(position); track.arrangement_clips.append(created); track.arrangement_clips.sort(key=lambda clip: clip.start_time)
+        track.duplicate_clip_to_arrangement = duplicate_to_arrangement; track.delete_clip = lambda candidate: track.arrangement_clips.remove(candidate)
+        return song, track
+
+    @staticmethod
+    def arrangement_move(mapper, row, position):
+        return mapper.invoke("arrangement.clip.move", {"ref": row["ref"], "position": position, "expectedObjectIdentity": row["objectIdentity"], "expectedAuthorityRevision": mapper._arrangement_clip_authority_revision(row["ref"]), "expectedContentFingerprint": mapper._mapped_fingerprint(row["ref"])})
+
+    def test_a_move_by_less_than_the_clips_length_parks_it_past_the_end_of_the_set_first(self):
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Loop", 4.0, 8.0)); song.song_length = 64.0
+        mapper = LiveObjectMapper(song); moved = self.arrangement_move(mapper, mapper.snapshot()["arrangement"]["clips"][0], 6.0)
+        self.assertEqual(track.copies, [68.0, 6.0], "parked past the end of the Set, then copied into place")
+        self.assertEqual([(clip.name, clip.start_time, len(clip.notes)) for clip in track.arrangement_clips], [("Loop", 6.0, 1)])
+        self.assertEqual(moved["start"], 6.0); self.assertEqual(moved["createdFingerprint"], mapper._mapped_fingerprint(moved["ref"]))
+        back = self.arrangement_move(mapper, mapper.snapshot()["arrangement"]["clips"][0], 4.0)
+        self.assertEqual((track.copies[2:], back["start"], [clip.start_time for clip in track.arrangement_clips]), ([68.0, 4.0], 4.0, [4.0]), "undo moves it back the same way")
+
+    def test_a_move_onto_another_clip_is_refused_before_anything_is_copied(self):
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Verse", 0.0, 4.0), ("Chorus", 8.0, 4.0))
+        mapper = LiveObjectMapper(song); row = mapper.snapshot()["arrangement"]["clips"][0]
+        with self.assertRaisesRegex(ValueError, r"^Kumi can't move a clip onto another clip yet: \"Chorus\" \(beats 8 to 12\) is in the way at beat 6; clear that span first \(clear_range\) or pick a free spot; nothing changed$"): self.arrangement_move(mapper, row, 6.0)
+        self.assertEqual((track.copies, [(clip.name, clip.start_time) for clip in track.arrangement_clips]), ([], [("Verse", 0.0), ("Chorus", 8.0)]))
+        self.assertEqual(self.arrangement_move(mapper, row, 4.0)["start"], 4.0, "right up against it is fine")
+
+    def test_a_parked_clip_that_cant_be_copied_into_place_goes_back_where_it_was(self):
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Loop", 4.0, 8.0)); copy = track.duplicate_clip_to_arrangement
+        def refuse_the_target(source, position):
+            if position == 6.0: raise RuntimeError("injected copy failure")
+            copy(source, position)
+        track.duplicate_clip_to_arrangement = refuse_the_target
+        mapper = LiveObjectMapper(song)
+        with self.assertRaisesRegex(ValueError, "back where it was, as a new clip"): self.arrangement_move(mapper, mapper.snapshot()["arrangement"]["clips"][0], 6.0)
+        self.assertEqual((track.copies, [(clip.name, clip.start_time) for clip in track.arrangement_clips]), ([18.0, 4.0], [("Loop", 4.0)]))
+
     def test_transport_revision_rejects_observed_aba_state(self):
         song = FakeSong()
         song.loop = False
