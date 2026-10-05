@@ -1,4 +1,4 @@
-//! The native `kumi` process entrypoint and command dispatch from `apps/kumi/src/cli.ts`.
+//! The native `kumi` process entrypoint and command dispatch.
 mod native;
 pub use native::{help, main_with, run, AbletonFactory, CliIo};
 

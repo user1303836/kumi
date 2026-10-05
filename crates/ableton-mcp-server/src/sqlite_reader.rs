@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/sqlite-reader.ts`.
-//!
 //! Minimal dependency-free read-only SQLite 3 file reader.
 //!
 //! Scope (deliberately bounded for the Live library-database surface, issue #54):

@@ -1,4 +1,3 @@
-//! Port of `apps/kumi/src/config.ts`.
 use kumi_common::js::{
     json::file_text,
     string::{trim, utf16_len},
@@ -123,6 +122,7 @@ location!(load_restore_file, "KUMI_RESTORE_FILE", "audition-restore.json");
 location!(load_goals_dir, "KUMI_GOALS_DIR", "goals");
 location!(load_playbook_file, "KUMI_PLAYBOOK_FILE", "playbook.json");
 location!(load_gaps_file, "KUMI_GAPS_FILE", "gaps.jsonl");
+location!(load_timings_file, "KUMI_TIMINGS_FILE", "timings.jsonl");
 location!(load_recipes_dir, "KUMI_RECIPES_DIR", "recipes");
 location!(load_videos_dir, "KUMI_VIDEOS_DIR", "videos");
 location!(load_tools_dir, "KUMI_TOOLS_DIR", "tools");

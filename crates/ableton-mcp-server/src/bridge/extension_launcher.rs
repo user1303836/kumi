@@ -90,7 +90,7 @@ pub fn find_extension_host(live_app: Option<&Path>) -> Option<ExtensionHostBinar
 fn is_extension(path: &Path) -> bool {
     path.join("manifest.json").exists() && path.join("package.json").exists() && path.join("dist/extension.js").exists()
 }
-/// A bundle staged beside the native bridge, or the repository's retained production extension.
+/// A bundle staged beside the native bridge, or, for a checkout's build, the checkout's extension.
 pub fn find_extension_bundle() -> Option<PathBuf> {
     let mut candidates = vec![];
     if let Ok(executable) = std::env::current_exe() {
@@ -99,9 +99,7 @@ pub fn find_extension_bundle() -> Option<PathBuf> {
             candidates.push(directory.join("../live-extension"));
         }
     }
-    let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/mcp-server");
-    candidates.push(package.join("live-extension"));
-    candidates.push(package.join("../live-extension"));
+    candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/live-extension"));
     candidates.into_iter().find(|path| is_extension(path)).map(|path| std::fs::canonicalize(&path).unwrap_or(path))
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

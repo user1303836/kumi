@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/web/github.ts`.
 //! GitHub repositories as files and a README, files from their raw address.
 use super::net::{decode_text, status_words, WebClient, WebError, WebFailure, WebRequest};
 use kumi_common::{

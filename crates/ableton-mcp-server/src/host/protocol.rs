@@ -29,13 +29,14 @@ pub struct HostRequest {
     pub modern: bool,
     pub decision: RequestDecision,
     format: bool,
+    version: String,
     _lease: Option<RequestLease>,
 }
 impl HostRequest {
     /// Format the completed family result; dropping this request releases its modern in-flight ID.
     pub fn finish(self, frame: Option<Value>) -> Option<Value> {
         if self.format {
-            format_mcp_response(frame, &self.input, self.modern, &json!({"name":"ableton-mcp-host","version":SERVER_VERSION}))
+            format_mcp_response(frame, &self.input, self.modern, &json!({"name":"ableton-mcp-host","version":self.version}))
         } else {
             frame
         }
@@ -58,8 +59,14 @@ impl McpHost {
     /// This boundary is also used directly by protocol conformance tests.
     pub fn begin_request(&self, input: &Value, asynchronous: bool) -> Result<HostRequest, LiveError> {
         let wire = prepare_mcp_request(input, self.protocol_era.get());
-        let mut request =
-            HostRequest { input: wire.input, modern: wire.modern, decision: RequestDecision::Complete(None), format: false, _lease: None };
+        let mut request = HostRequest {
+            input: wire.input,
+            modern: wire.modern,
+            decision: RequestDecision::Complete(None),
+            format: false,
+            version: self.server_version().to_owned(),
+            _lease: None,
+        };
         if let Some(error) = wire.error {
             request.decision = RequestDecision::Complete(Some(error));
             return Ok(request);
@@ -242,7 +249,7 @@ impl McpHost {
         self.protocol_era.set(Some(ProtocolEra::Legacy));
         response(
             id,
-            json!({"protocolVersion":LEGACY_PROTOCOL_VERSION,"capabilities":{"tools":{"listChanged":true},"resources":{},"prompts":{}},"serverInfo":{"name":"ableton-mcp-host","version":SERVER_VERSION}}),
+            json!({"protocolVersion":LEGACY_PROTOCOL_VERSION,"capabilities":{"tools":{"listChanged":true},"resources":{},"prompts":{}},"serverInfo":{"name":"ableton-mcp-host","version":self.server_version()}}),
         )
     }
     fn decide_sync_tool(&self, id: &Value, params: Option<&Value>) -> Result<RequestDecision, LiveError> {

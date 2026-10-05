@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/mcp-protocol.ts`.
-//!
 //! MCP wire semantics only: never creates Live authority or transaction state.
 
 use std::sync::LazyLock;

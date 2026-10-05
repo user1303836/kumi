@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/tui/scheduler.ts`.
-//!
 //! Coalesces redraw requests into frames; keeps frames coming only while something animates.
 //!
 //! Frames are timed with Tokio, so a scheduler lives inside a `LocalSet`.

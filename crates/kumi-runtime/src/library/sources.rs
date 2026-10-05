@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/library/sources.ts`.
-//!
 //! Where the producer's sounds, presets and Sets are: Live's User Library and Places (as Live's own
 //! preferences name them), the packs Live installed and its Core Library, Splice's folder, and folders
 //! the producer named. Only folders that exist; a folder inside another counts once.

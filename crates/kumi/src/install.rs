@@ -1,4 +1,4 @@
-//! Port of `apps/kumi/src/install.ts` for native release bundles.
+//! Installed Kumi and its native release bundles.
 mod migration;
 pub use crate::config::kumi_dir as kumi_home;
 pub use crate::update::newer as newer_version;

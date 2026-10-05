@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/providers/compat.ts`.
-
 use crate::ai::{
     error::LanguageModelError,
     http::{ByteStream, Fetch, FetchInit, Response},

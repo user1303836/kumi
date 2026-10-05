@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/web/free.ts`.
 //! Public, keyless readers and searches, taking turns and resting after service trouble.
 use super::{
     exa::{exa_read, exa_search, Found, ReadText, SearchOptions},

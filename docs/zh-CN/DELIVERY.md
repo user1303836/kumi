@@ -2,28 +2,26 @@
 
 [English](../en/DELIVERY.md) · 简体中文 · [日本語](../ja/DELIVERY.md)
 
-Kumi 1.7.6 的原生桥接不需要 Node，使用 `ableton-mcp-server` 的子命令。本页中面向 Node/npm 发行包的步骤适用于旧版；当前原生版步骤请参阅[英文版](../en/DELIVERY.md)。使用 Kumi 时，关闭 Live 后运行 `kumi bridge` 即可。
-
-桥接由两部分组成：由 Live 加载的 `AbletonMcpBridge` Remote Script，以及由 Kumi（或其他 MCP 客户端）启动的本地 MCP 服务器。两者都在同一个包 `@ableton-mcp/mcp-server` 中，并由同一个工具安装：桥接的生命周期 CLI `ableton-mcp-lifecycle`。它在做任何修改之前先制定计划，把安装的内容记录在回执中，并且能够精确地修复、回滚和移除这些内容。使用 Kumi 时，`kumi bridge` 会替你运行它。
+桥接由两部分组成：由 Live 加载的 `AbletonMcpBridge` Remote Script，以及由 Kumi（或其他 MCP 客户端）启动的本地 MCP 服务器。两者都在同一个包 `@ableton-mcp/mcp-server` 中，并由同一个工具安装：桥接的生命周期 CLI `ableton-mcp-server lifecycle`。它在做任何修改之前先制定计划，把安装的内容记录在回执中，并且能够精确地修复、回滚和移除这些内容。使用 Kumi 时，`kumi bridge` 会替你运行它。
 
 ## 使用 Kumi 安装
 
 退出 Live，然后运行 `kumi bridge`。它会：
 
 1. 在 Live 运行时拒绝执行，并请你确认 Live 已关闭（`--yes` 可事先确认）；
-2. 从 Kumi 发行包中把桥接的包复制到它专用的文件夹（在源码副本中则改用 `npm pack` 打包），并检查其哈希；
+2. 从 Kumi 发行包中把桥接的包复制到它专用的文件夹（在源码副本中则改用 `scripts/build-native-release.py --bridge-only` 打包），并检查其哈希；
 3. 运行生命周期的 `install`，如果已经装有桥接则运行 `upgrade`：先给出计划，再执行修改；
 4. 把 Kumi 的 Live 扩展放进 Live 的 Extensions 文件夹，Live 12.4 及更高版本会运行它；
 5. 最多等待十分钟，等 Live 通过新桥接连接上来，期间每隔几秒运行一次生命周期的 `activate`。
 
 之后首次打开 Live 时，请在 **Settings → Link, Tempo & MIDI** 中将 **AbletonMcpBridge** 选为 Control Surface。在有未提交修改的源码副本中，`kumi bridge --allow-dirty` 仍会安装（仅供开发者使用）。
 
-当 Live 中的桥接比 Kumi 自带的旧、且 Live 已关闭时，`kumi update` 会替你运行 `kumi bridge`。`kumi uninstall` 会提出通过生命周期的 `uninstall` 把桥接和扩展从 Live 中移除，并且在 Live 仍从桥接的文件加载时保留这些文件。`kumi doctor` 检查整条链路。[Kumi 指南](KUMI_GUIDE.md#连接-live)从制作人的角度介绍了这些内容。
+当桥接需要更新且 Live 已关闭时，`kumi update` 会运行 `kumi bridge`。原生应用首次启动时，还会迁移桥接版本相同的旧 JavaScript 桥接，并保留与回执绑定的配置、密钥和端口。`kumi uninstall` 会提出通过生命周期的 `uninstall` 把桥接和扩展从 Live 中移除，并且在 Live 仍从桥接的文件加载时保留这些文件。`kumi doctor` 检查整条链路。[Kumi 指南](KUMI_GUIDE.md#连接-live)从制作人的角度介绍了这些内容。
 
 | 内容 | 位置 |
 | --- | --- |
-| 桥接的包 | `~/.kumi/bridge/<version>-<time>/node_modules/@ableton-mcp/mcp-server` |
-| 它的状态：密钥、配置、回执、操作日志 | `~/.kumi/bridge/state`，或已安装的桥接配置所在的文件夹 |
+| 桥接的包 | `~/.kumi/bridge/<version>-<time>/package`（较早的 Node 世代保留原来的 `node_modules` 布局） |
+| 它的状态：密钥、配置、回执、操作日志 | `~/.kumi/bridge/state`，或现有所有者回执所在的状态文件夹 |
 | Remote Script | User Library 的 Remote Scripts 文件夹中的 `AbletonMcpBridge`（见 [Live 的文件夹](#live-的文件夹)） |
 | Kumi 的 Live 扩展 | Live 的 Extensions 文件夹中的 `kumi.kumi` |
 
@@ -31,68 +29,52 @@ Kumi 1.7.6 的原生桥接不需要 Node，使用 `ableton-mcp-server` 的子命
 
 ## 独立桥接
 
-供 Kumi 以外的 MCP 客户端使用。你需要 Node：支持 Node 22 和 24，推荐 Node 24 LTS。你还需要桥接的 tarball：
-
-- **自己构建：** 在干净的源码副本中运行 `cd apps/mcp-server && npm ci && npm pack`。用未提交的修改构建的 tarball 只有加上 `--allow-dirty-private-build` 才能安装。
-- **或从 CI 获取：** 每次 CI 运行都会把 `exact-local-candidate` 产物保留 90 天，其中的 `candidate-metadata.json` 给出它的 sha256。在拉取请求上，它是用 GitHub 的合并提交构建的，而不是分支的最新提交。
-
-把包安装到它长期存放的位置，然后把桥接安装进 Live。macOS（bash 或 zsh）：
+供 Kumi 以外的 MCP 客户端使用时，请使用适合你平台的原生归档包，不需要单独的 Node 运行时。在干净的源码副本中这样构建一个：
 
 ```sh
-ARTIFACT=/absolute/path/to/ableton-mcp-mcp-server-x.y.z.tgz
+python3 scripts/build-native-release.py --bridge-only --out release/bridge
+```
+
+输出包含一个对应目标平台的 `.tar.gz`，以及记录其精确 SHA-256 的 `prepared.json`。用未提交的修改构建的包需要加上 `--allow-dirty-private-build`。
+
+把归档包解压到一个长期存放的目录中。让 `ableton-mcp-server` 和 `ableton-mcp-analysis-worker` 与包中的资源和发布清单放在一起。以 macOS 为例：
+
+```sh
+ARTIFACT=/absolute/path/to/ableton-mcp-server-1.0.74-aarch64-apple-darwin.tar.gz
 ARTIFACT_SHA="$(shasum -a 256 "$ARTIFACT" | awk '{print $1}')"
 INSTALL_ROOT="$HOME/Library/Application Support/AbletonMcp/package"
 STATE="$HOME/Library/Application Support/AbletonMcp/state"
 REMOTE_SCRIPTS="$HOME/Music/Ableton/User Library/Remote Scripts"
 mkdir -p "$INSTALL_ROOT" "$REMOTE_SCRIPTS"
-npm install --prefix "$INSTALL_ROOT" --ignore-scripts --no-audit --no-fund "$ARTIFACT"
-PACKAGE_ROOT="$INSTALL_ROOT/node_modules/@ableton-mcp/mcp-server"
-LIFECYCLE="$INSTALL_ROOT/node_modules/.bin/ableton-mcp-lifecycle"
+tar -xzf "$ARTIFACT" -C "$INSTALL_ROOT"
+PACKAGE_ROOT="$INSTALL_ROOT/package"
+SERVER="$PACKAGE_ROOT/ableton-mcp-server"
 
-"$LIFECYCLE" install --remote-scripts-dir "$REMOTE_SCRIPTS" --state-dir "$STATE" \
+"$SERVER" lifecycle install --remote-scripts-dir "$REMOTE_SCRIPTS" --state-dir "$STATE" \
   --package-root "$PACKAGE_ROOT" --artifact "$ARTIFACT" --artifact-sha256 "$ARTIFACT_SHA"
 # 阅读计划，退出 Live，然后：
-"$LIFECYCLE" install --remote-scripts-dir "$REMOTE_SCRIPTS" --state-dir "$STATE" \
+"$SERVER" lifecycle install --remote-scripts-dir "$REMOTE_SCRIPTS" --state-dir "$STATE" \
   --package-root "$PACKAGE_ROOT" --artifact "$ARTIFACT" --artifact-sha256 "$ARTIFACT_SHA" \
   --apply --confirm-live-stopped
 ```
 
-Windows（PowerShell）：
+在 Windows 上，用 `tar -xzf` 解压对应的归档包，然后用同样的选项和你的 Windows 绝对路径运行 `& "$PackageRoot\ableton-mcp-server.exe" lifecycle install`。`Get-FileHash -Algorithm SHA256 $Artifact` 会给出归档包的哈希。请使用你的 User Library 的 Remote Scripts 文件夹（见 [Live 的文件夹](#live-的文件夹)）。
 
-```powershell
-$Artifact = (Resolve-Path 'C:\absolute\path\to\ableton-mcp-mcp-server-x.y.z.tgz').Path
-$ArtifactSha = (Get-FileHash -Algorithm SHA256 $Artifact).Hash.ToLowerInvariant()
-$InstallRoot = Join-Path $env:LOCALAPPDATA 'AbletonMcp\package'
-$State = Join-Path $env:LOCALAPPDATA 'AbletonMcp\state'
-$RemoteScripts = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Ableton\User Library\Remote Scripts'
-New-Item -ItemType Directory -Force $InstallRoot, $RemoteScripts | Out-Null
-npm install --prefix $InstallRoot --ignore-scripts --no-audit --no-fund $Artifact
-$PackageRoot = Join-Path $InstallRoot 'node_modules\@ableton-mcp\mcp-server'
-$Lifecycle = Join-Path $InstallRoot 'node_modules\.bin\ableton-mcp-lifecycle.cmd'
+打开 Live，将 **AbletonMcpBridge** 选为 Control Surface，然后用同样的 `--remote-scripts-dir`、`--state-dir` 和 `--package-root` 运行 `activate`。用 `--config <state>/bridge-config.json` 让 MCP 客户端指向已安装的服务器；见[用户指南](USER_GUIDE.md)。
 
-& $Lifecycle install --remote-scripts-dir $RemoteScripts --state-dir $State `
-  --package-root $PackageRoot --artifact $Artifact --artifact-sha256 $ArtifactSha
-# 阅读计划，退出 Live（在任务管理器中确认），然后：
-& $Lifecycle install --remote-scripts-dir $RemoteScripts --state-dir $State `
-  --package-root $PackageRoot --artifact $Artifact --artifact-sha256 $ArtifactSha `
-  --apply --confirm-live-stopped
-```
-
-如果你移动过 User Library，请改用它的 Remote Scripts 文件夹（见 [Live 的文件夹](#live-的文件夹)）。然后打开 Live，将 **AbletonMcpBridge** 选为 Control Surface，并用同样的三个文件夹选项运行 `activate`。[用户指南](USER_GUIDE.md)介绍了如何用 `--config <state>/bridge-config.json` 让 MCP 客户端指向已安装的服务器。
-
-升级时，把新的 tarball 安装到新的前缀下，然后用新的 `--package-root`、`--artifact` 和 `--artifact-sha256` 运行 `upgrade`。移除时，运行 `uninstall`，重启 Live，更新 MCP 客户端的配置，最后才删除 npm 前缀目录。
+升级时，把新的 tarball 解压到一个新目录中，用它的包根目录、产物和哈希运行 `upgrade`，并沿用现有的状态、配置和密钥路径。经过验证的旧 Node 安装可以迁移到桥接版本相同的原生包；其他升级必须提高版本。请保留上一个包以便回滚。删除包目录之前先运行 `uninstall`。生命周期仍然接受旧的 Node 发布产物和回执；这些需要 Node 22 或 24。
 
 ## 生命周期 CLI 参考
 
 ```text
-ableton-mcp-lifecycle <action> --remote-scripts-dir DIR [options]
+ableton-mcp-server lifecycle <action> --remote-scripts-dir DIR [options]
 ```
 
 | 操作 | 作用 | 需要 |
 | --- | --- | --- |
 | `install` | 创建仅限所有者访问的密钥和桥接配置，安装 Remote Script，写入回执 | `--artifact`、`--artifact-sha256`；Live 已停止 |
 | `activate` | 在不改动 Live 或安装的情况下，检查 Live 是否加载了这个桥接并通过它应答；把结果记录在回执中 | Live 正在运行，已选择 Control Surface |
-| `upgrade` | 用更新的包替换桥接，保留密钥，并保留上一个版本以供 `rollback` | 更新的 `--artifact`、它的 sha256、它的 `--package-root`；Live 已停止 |
+| `upgrade` | 用更新的包替换桥接，保留密钥，并保留上一个版本以供 `rollback` | 更新的产物，或经过验证的同版本 Node → 原生迁移；它的 SHA-256 和包根目录；Live 已停止 |
 | `repair` | 把已安装的内容与回执比较；加上 `--apply` 时，把被改动的文件移到隔离区，并恢复包自带的文件 | — |
 | `rollback` | 回到上次升级时保留的版本 | Live 已停止 |
 | `uninstall` | 移除回执所拥有的文件；把被改动或未知的文件移到隔离区；保留密钥 | Live 已停止 |
@@ -140,14 +122,14 @@ ableton-mcp-lifecycle <action> --remote-scripts-dir DIR [options]
 ## 检查安装
 
 ```sh
-ableton-mcp-diagnostics --config /absolute/path/to/bridge-config.json
+ableton-mcp-server diagnostics --config /absolute/path/to/bridge-config.json
 ```
 
-它会输出一份 JSON 报告。遇到不受支持的 Node 或系统时以 1 退出；即使无法连接 Live 也以 0 退出，因此请阅读它的各个字段：
+它会输出一份 JSON 报告。遇到不受支持的系统时以 1 退出；即使无法连接 Live 也以 0 退出，因此请阅读它的各个字段：
 
 | 字段 | 含义 |
 | --- | --- |
-| `nodeSupported`、`platformSupported` | Node 和系统受支持 |
+| `runtime`、`runtimeVersion`、`runtimeSupported`、`platformSupported` | 原生 Rust 运行时、桥接版本和平台支持情况 |
 | `readiness.package` | 包及其 Remote Script 文件存在且完好（并不表示 Live 已加载它们；`status` 检查的是已安装的副本） |
 | `readiness.configured` | 配置有效，指定了桥接，并且有可读取的密钥 |
 | `readiness.authenticatedBridge` | Remote Script 通过经认证的连接作出了应答，且探查成功（`registryHash` 显示其注册表） |
@@ -158,10 +140,10 @@ ableton-mcp-diagnostics --config /absolute/path/to/bridge-config.json
 
 ## 把配置迁移到版本 2
 
-默认情况下，`ableton-mcp-migrate` 会原样保留旧的（旧式或版本 1 的）客户端配置。如果提供了所有桥接字段和一个已存在的、仅限所有者访问的密钥，它会写出一份版本 2 的桥接配置：
+默认情况下，`ableton-mcp-server migrate` 会原样保留旧的（旧式或版本 1 的）客户端配置。如果提供了所有桥接字段和一个已存在的、仅限所有者访问的密钥，它会写出一份版本 2 的桥接配置：
 
 ```sh
-ableton-mcp-migrate --input /absolute/old.json --output /absolute/bridge-v2.json \
+ableton-mcp-server migrate --input /absolute/old.json --output /absolute/bridge-v2.json \
   --bridge-host 127.0.0.1 --bridge-port 9765 --realtime-port 9766 \
   --secret-file /absolute/bridge.secret
 ```

@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/test/drum-sampler-preset.test.ts`.
-
 #[path = "support/drum_sampler.rs"]
 mod drum_sampler;
 

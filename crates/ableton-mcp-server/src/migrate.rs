@@ -1,4 +1,3 @@
-//! Native equivalent of `apps/mcp-server/src/migrate.ts`.
 use crate::{
     command::{number, resolve, CommandOutput},
     delivery::*,

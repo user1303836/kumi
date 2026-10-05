@@ -1,4 +1,4 @@
-//! Port of `packages/runtime/test/video.test.ts`, with complete-result TypeScript caption/moment oracles.
+//! Video watching, with complete-result caption and moment oracles.
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_runtime::video::{
     captions::{said_around, TranscriptOptions},
@@ -337,7 +337,8 @@ if [ -f "$(dirname "$0")/sleep" ]; then exec sleep 10; fi
         command.to_str().unwrap(),
         "model.en.bin",
         wav.to_str().unwrap(),
-        TranscribeOptions { timeout_ms: Some(50), ..Default::default() },
+        // Long enough for a loaded runner to reach the progress lines before the sleep.
+        TranscribeOptions { timeout_ms: Some(500), ..Default::default() },
     )
     .await
     .unwrap_err();

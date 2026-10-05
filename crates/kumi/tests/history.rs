@@ -1,4 +1,4 @@
-//! Persistence assertions from `apps/kumi/test/app.test.ts`, plus redaction and retention boundaries.
+//! Input history persistence, plus redaction and retention boundaries.
 use kumi::history::*;
 #[test]
 fn history_persists_between_conversations_without_secrets() {

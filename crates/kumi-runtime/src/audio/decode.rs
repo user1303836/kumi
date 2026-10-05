@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/audio/decode.ts`.
 //! Reading audio files as blocks of samples, without loading a whole song into memory.
 
 use crate::video::programs::{find_ffmpeg, run, FfmpegOptions, RunOptions, VideoFailure};

@@ -1,4 +1,4 @@
-//! The `ableton-mcp-server` command: `apps/mcp-server/src/cli.ts`.
+//! The `ableton-mcp-server` command.
 fn main() {
     std::process::exit(ableton_mcp_server::cli::main());
 }

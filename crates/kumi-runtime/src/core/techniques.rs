@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/core/techniques.ts`.
 //! Learned sound-building ideas and drafts judged by the producer's later actions.
 
 use super::{

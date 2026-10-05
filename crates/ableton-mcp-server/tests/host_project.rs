@@ -67,6 +67,12 @@ impl AsyncLiveAdapter for Adapter {
         Ok(())
     }
 }
+/// The bridge version the golden files were recorded with; pinned so a version bump changes none of them.
+const ORACLE_VERSION: &str = "1.0.74";
+/// A host that reports `ORACLE_VERSION`.
+fn pinned_host(adapter: Rc<dyn AsyncLiveAdapter>) -> McpHost {
+    McpHost::new(adapter, McpHostOptions { server_version: Some(ORACLE_VERSION.into()), ..Default::default() }).unwrap()
+}
 fn adapter(case: Value) -> Rc<Adapter> {
     let sim = DeterministicLiveSimulator::new();
     let mut status = serde_json::to_value(sim.status().unwrap()).unwrap();
@@ -134,7 +140,7 @@ async fn call(host: &McpHost, tool: &str, args: Value) -> Value {
 async fn project_host_matches_source_validation_and_adapter_dispatch() {
     for (i, row) in fixture()["cases"].as_array().unwrap().iter().enumerate() {
         let adapter = adapter(row.clone());
-        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+        let host = pinned_host(adapter.clone());
         let actual = call(&host, row["tool"].as_str().unwrap(), row["args"].clone()).await;
         equal(&actual, &row["result"], &format!("{i} {} {}", row["tool"], row["args"]));
         equal(&json!(*adapter.calls.borrow()), &row["calls"], &format!("dispatch {i}"));
@@ -157,7 +163,7 @@ async fn offline_project_host_source_artifacts_and_shared_profile_diff() {
     for (name, key) in [("Test.als", "raw"), ("Changed.als", "changedRaw")] {
         std::fs::write(root.join(name), base64::engine::general_purpose::STANDARD.decode(f[key].as_str().unwrap()).unwrap()).unwrap();
     }
-    let host = McpHost::default();
+    let host = pinned_host(Rc::new(UnavailableLiveAdapter));
     for row in f["offline"].as_array().unwrap() {
         let args = if row.get("args").is_some() {
             substitute(&row["args"], root.to_str().unwrap())
@@ -178,7 +184,7 @@ async fn offline_project_host_source_artifacts_and_shared_profile_diff() {
 async fn live_export_cache_and_guarded_backup_lifecycle() {
     let f = fixture();
     let adapter = adapter(json!({}));
-    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let host = pinned_host(adapter.clone());
     let first = call(&host, "live_project_snapshot_export", json!({"limit":1})).await;
     let cursor = first["result"]["content"][0]["text"]["page"]["nextCursor"].as_str().unwrap();
     let calls = adapter.calls.borrow().len();
@@ -244,7 +250,7 @@ async fn source_backup_complete_traces_preserve_cancellation_replay_uncertainty_
         std::fs::write(&path, base64::engine::general_purpose::STANDARD.decode(fixture["raw"].as_str().unwrap()).unwrap()).unwrap();
         let adapter = adapter(json!({}));
         *adapter.path.borrow_mut() = Some(path.to_string_lossy().into_owned());
-        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+        let host = pinned_host(adapter.clone());
         let mut results = vec![];
         let preview = call(
             &host,

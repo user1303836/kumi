@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/test/evolve.test.ts`.
 use kumi_runtime::core::evolve::*;
 use std::collections::{HashMap, HashSet};
 fn knobs(device: &str, values: &[f64]) -> Vec<Knob> {

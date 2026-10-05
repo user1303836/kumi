@@ -1,4 +1,4 @@
-//! Port of `packages/runtime/test/voice.test.ts`, plus source meter oracles and process failure cases.
+//! Voice input, with meter oracles and process failure cases.
 use kumi_runtime::{
     system::{self, Env},
     video::programs::*,

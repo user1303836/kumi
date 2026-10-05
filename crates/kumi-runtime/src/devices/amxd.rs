@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/devices/amxd.ts`.
-//!
 //! Max for Live's device file (.amxd): "ampf", the device's type, a "meta" chunk and a "ptch" chunk
 //! holding the Max patcher as JSON (NUL-terminated), as Live's own device templates are laid out.
 

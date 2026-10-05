@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/providers/ollama.ts`.
-
 use super::compat::{think_splitter, ThinkSplitter};
 use crate::{
     ai::{

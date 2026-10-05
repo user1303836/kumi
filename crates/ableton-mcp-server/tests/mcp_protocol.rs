@@ -1,4 +1,4 @@
-//! Port of `apps/mcp-server/test/mcp-protocol.test.ts`: the parts that exercise `mcp_protocol` and
+//! The parts that exercise `mcp_protocol` and
 //! `stdio` directly. The tests there that drive `McpHost` (discovery, tool calls, policy, the stdio
 //! `serve` wrapper) belong with the host's port; the wire expectations they assert through the host
 //! are checked here against `prepare_mcp_request` and `format_mcp_response` themselves.

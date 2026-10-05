@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/text.ts`.
-
 use kumi_common::js;
 use kumi_runtime::core::contracts::{LibraryState, LibraryStatus, WebAction, WebEvent, WebWhere};
 

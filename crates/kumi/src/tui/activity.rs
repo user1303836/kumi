@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/tui/activity.ts`.
-//!
 //! What Kumi is doing, as motion: each kind of task has its own small animation, so a step at work
 //! reads as searching, reading, building or listening at a glance. A one-cell glyph for a step's row,
 //! a wider scene for NOW, and a shimmer that passes over the words of whatever is under way.

@@ -11,6 +11,7 @@
     "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
+    "@types/node": "24.19.0",
     "esbuild": "0.28.1",
     "typescript": "~5.9.3"
   }

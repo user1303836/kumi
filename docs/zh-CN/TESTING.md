@@ -6,55 +6,46 @@
 
 ## 快速开始
 
-在源码副本中，使用 Node 22/24（推荐 Node 24 LTS）：
+在仓库根目录运行：
 
 ```sh
-npm run setup                                   # 安装并构建所有内容
-npm test                                        # Kumi：应用、运行时和 Live 扩展
-(cd apps/mcp-server && npm test)                # 桥接
-python3 -m unittest discover -s remote-script -p 'test_*.py'   # Remote Script
+npm ci --prefix crates/kumi-runtime/tests/support   # 只需一次：部分 Rust 测试运行的官方 SDK
+cargo build --workspace --all-targets --locked
+sh scripts/test-isolated.sh                        # Windows: ./scripts/test-isolated.ps1
+python3 -m unittest discover -s remote-script -p 'test_*.py'
+npm ci --prefix apps/live-extension
+npm test --prefix apps/live-extension
+python3 -m unittest discover -s scripts/tests -p 'test_*release.py'
 ```
 
-有些检查需要 Node 以外的东西：
+它们需要：
 
 | 需要 | 用于 |
 | --- | --- |
-| PATH 上的 Python 3（`python3`，在 Windows 上为 `python.exe`；CI 使用 3.11） | Remote Script 测试、`package:verify`、`journey:verify` |
-| PATH 上的 `ffmpeg` | `audio:oracle` |
+| Rust 和 Cargo | 各个 crate 和迁移测试 |
+| PATH 上的 Node.js（CI 使用 24） | 部分 Rust 测试、Live 扩展的测试和迁移测试 |
+| PATH 上的 Python 3.11 或更高版本（`python3`，在 Windows 上为 `python.exe`） | Remote Script 测试、发布脚本的测试，以及会运行 Python 的 Rust 测试 |
 | 在 `vendor/` 中本地提供的 Extensions SDK | 构建 Live 扩展或对其做类型检查（它的测试不需要） |
 
 在 Windows 上，有几个测试会创建符号链接，这需要开发人员模式或管理员账户。没有这项权限时，其中一些会跳过，少数会以 `EPERM` 失败；CI 的 Windows 运行器具有这项权限。
 
-## Kumi
+## Kumi 与桥接
 
 在仓库根目录运行。
 
 | 命令 | 作用 |
 | --- | --- |
-| `npm run typecheck` | 先构建运行时，再对应用和运行时做类型检查 |
-| `npm test` | 先构建，再运行应用、运行时和 Live 扩展的测试 |
-| `KUMI_TEST_BRIDGE=1 npm test` | 同上，但桥接互操作测试为必需而不是跳过；需先构建桥接（`npm run setup` 会构建） |
+| `sh scripts/test-isolated.sh`（Windows：`./scripts/test-isolated.ps1`） | 在独立的主目录中运行 `cargo test --workspace --locked`；参数会传给 `cargo test` |
+| `sh scripts/test-isolated.sh -p kumi-runtime --test hands_transport` | 只运行一个 crate 的一个测试文件 |
+| `cargo fmt --all --check` | 按 CI 的方式检查格式 |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lint 检查；目前在 CI 中仅供参考 |
+| `cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark` | 桥接的性能预算；见[开发者指南](DEVELOPER_GUIDE.md#构建测试与测量) |
 
-`npm test` 为测试提供独立的主目录：`HOME`、`USERPROFILE`、`APPDATA`、`LOCALAPPDATA`、`XDG_CONFIG_HOME` 和 `KUMI_HOME` 都指向一个全新的临时文件夹，`KUMI_REMOTE_SCRIPTS_DIR` 和 `KUMI_LIVE_EXTENSIONS_DIR` 则被移除，因此任何测试都无法触及你的 Live 文件夹或 `~/.kumi`。
+隔离运行器为测试提供独立的主目录：`HOME`、`USERPROFILE`、`APPDATA`、`LOCALAPPDATA`、`XDG_CONFIG_HOME` 和 `KUMI_HOME` 都指向一个全新的临时文件夹，`KUMI_REMOTE_SCRIPTS_DIR` 和 `KUMI_LIVE_EXTENSIONS_DIR` 则被移除，因此任何测试都无法触及你的 Live 文件夹或 `~/.kumi`。
 
-## 桥接
+有些测试会在 Kumi 自己的客户端和提供方旁边运行官方的 MCP 和模型 SDK；在运行 `npm ci --prefix crates/kumi-runtime/tests/support` 之前，这些测试会失败。响度和真峰值测试会把分析结果与 FFmpeg 的 `ebur128` 对生成音频得出的结果进行比对。
 
-在 `apps/mcp-server` 中运行过 `npm ci` 之后，在该目录中运行。
-
-| 命令 | 作用 |
-| --- | --- |
-| `npm run typecheck` | 对桥接做类型检查 |
-| `npm test` | 先构建，逐个运行每个测试文件，然后运行脚本测试：发布文档、能力清单、文档漂移和 CI 保留期 |
-| `npm run property-test` | 在生成的音频上对音频分析做属性测试：有界、有限、结果中没有原始 PCM |
-| `npm run coverage` | 带 V8 覆盖率的测试：总体至少 85% 的行、65% 的分支和 84% 的函数，每个模块都有下限，delivery、lifecycle、host、remote-adapter、project 和 Session MIDI 的门槛更高 |
-| `npm run benchmark` | 在最大音频输入下测量延迟，不插桩；不属于 `npm test` 或覆盖率 |
-| `npm run audio:oracle` | 在生成的音频上，把响度和真峰值的测量结果与 FFmpeg 的 `ebur128` 对比 |
-| `npm run compatibility` | 先运行 `policy:verify`（检查 package.json、CI 和文档中的 Node 策略），再检查当前的 Node 和系统 |
-| `npm run package:verify` | 打包桥接，安装该 tarball 并进行检查（见下文） |
-| `npm run journey:verify` | 安装打包好的桥接，并通过它针对假 Live 走完五个用户旅程 |
-| `npm run capability:manifest` | 注册表变化后重新生成 `docs/evidence/capability-manifest.json`；有测试会对比它 |
-
-`package:verify` 会拒绝其列表之外的任何文件，检查 `release-manifest.json` 中的每个哈希，并检查 `LICENSE.md` 与仓库中的一致。然后，它在两代 MCP 协议下启动已安装的服务器，运行 `setup`、`migrate` 和 `diagnostics`，在名称含空格和非 ASCII 字母的文件夹中运行生命周期（安装、一次连不上 Live 的激活、修复、一次被拒绝的回滚、卸载），并让已安装的 Remote Script 针对假 Live 应答一次经认证的探查。`ABLETON_MCP_ARTIFACT=<tarball>` 让 `package:verify` 和 `journey:verify` 检查指定的 tarball，而不是自己打包。
+各 crate 测试中的 JSON oracle 文件是从 TypeScript 实现记录下来的基准文件（golden file）；该实现以及生成这些文件的脚本保留在 git 标签 `v1.7.6` 上，当前代码树中没有任何东西能重新生成它们。有意改变行为之后，请根据原生输出改写受影响的 oracle 条目：失败的断言会打印实际得到的结果；对于 SHA-256 条目，写入该输出的哈希。检查差异，并在提交信息中说明基准文件有改动及其原因。宿主测试固定使用记录基准文件时的桥接版本（`ORACLE_VERSION`），所以提升桥接版本号不会改变任何基准文件。
 
 ## Remote Script
 
@@ -69,7 +60,18 @@ python3 -m compileall -q remote-script/AbletonMcpBridge
 
 ## Kumi 的 Live 扩展
 
-根目录的 `npm test` 会运行 `apps/live-extension/test`，它针对假 Live 加载已提交的 `dist/extension.js`，并对照记录的 sha256 检查它。构建扩展（在 `apps/live-extension` 中运行 `npm run build`）需要 `vendor/` 中的 Extensions SDK；没有 SDK 时，已提交的构建保持原样。重新构建之后，请把 `dist/extension.js` 连同它的 `.sha256` 一起提交。
+`apps/live-extension` 有自己的 `package.json`。运行 `npm ci --prefix apps/live-extension` 之后，`npm test --prefix apps/live-extension` 会针对假 Live 加载已提交的 `dist/extension.js`，并对照记录的 sha256 检查它。在该目录中构建（`npm run build`）和类型检查（`npm run typecheck`）都需要 `vendor/` 中的 Extensions SDK；没有 SDK 时，已提交的构建保持原样。重新构建之后，请把 `dist/extension.js` 连同它的 `.sha256` 一起提交。
+
+## 发布脚本
+
+`python3 -m unittest discover -s scripts/tests -p 'test_*release.py'` 运行打包测试和迁移测试。打包测试检查发行包的内容和版本，以及打包的指南中每个链接都能解析。迁移测试针对原生发行包运行最后一个 JavaScript 版本的更新器。缺少以下变量时，需要它们的测试会跳过：
+
+| 变量 | 指向什么 |
+| --- | --- |
+| `KUMI_LEGACY_APP` | 解包后的 Kumi 1.7.5：`python3 scripts/fetch-legacy-release.py [folder]` 会下载它、检查其 SHA-256、解包并打印所在文件夹 |
+| `KUMI_NATIVE_RELEASES` | 存放已构建发布产物的文件夹（见[发布](DEVELOPER_GUIDE.md#发布)） |
+
+`KUMI_LEGACY_APP` 也用于桥接自己的迁移测试 `crates/ableton-mcp-server/tests/lifecycle_migration.rs`。缺少该变量时，这个测试不会跳过，而是下载已发布的 Kumi 1.7.5 发行包并检查其 SHA-256。设置该变量后，只要发行包已下载过一次，它就可以离线运行。
 
 ## 需要 Live 或模型的检查
 
@@ -77,40 +79,36 @@ python3 -m compileall -q remote-script/AbletonMcpBridge
 
 | 命令（在根目录运行） | 需要 | 作用 |
 | --- | --- | --- |
-| `npm run accept:live --workspace @kumi/app -- --set "<Set>"` | 打开了某个工程的一次性副本的 Live | 做出 Kumi 能做的每一类修改，用 Kumi 的撤销逐一撤销，播放、并轨、聆听和观看，并测量读取大型工程的耗时。不使用模型。 |
-| `npm run eval:changes --workspace @kumi/app [-- <case>, <case>]` | 你的登录和模型 | 检验模型如何使用 Kumi 的工具，针对一个带有真实桥接工具 schema 的合成桥接进行。从不触及 Live。每个用例给出所用时间、其中工具所占的时间，以及调用模型的次数；`EVAL_EFFORT` 设置模型的推理强度，`EVAL_TRACE=1` 逐一打印每次调用。 |
-| `npm run probe:inference --workspace @kumi/app` | 你的登录 | 用一个无害的工具发送一次经认证的请求。从不触及 Live。 |
+| `cargo run --release -p kumi --example accept_live -- --set "<Set>"` | 打开了某个工程的一次性副本的 Live，以及事先构建好的桥接：`cargo build --release -p ableton-mcp-server --bins`（调试运行时，去掉 `--release` 即可） | 做出 Kumi 能做的每一类修改，用 Kumi 的撤销逐一撤销，播放、并轨、聆听和观看，并测量读取大型工程的耗时。不使用模型。 |
+| `cargo run --release -p kumi --example eval_changes [-- <part of a case name>]` | 你的登录和模型 | 检验模型如何使用 Kumi 的工具，针对一个合成桥接进行，它带有从原生工具目录读取的真实桥接工具 schema。从不触及 Live。每个用例给出所用时间、其中工具所占的时间，以及调用模型的次数；`EVAL_EFFORT` 设置模型的推理强度，`EVAL_TRACE=1` 逐一打印每次调用。 |
+| `cargo run --release -p kumi --example probe_inference` | 你的登录 | 用一个无害的工具发送一次经认证的请求。从不触及 Live。 |
 
-桥接的工具变化之后，运行 `node apps/kumi/scripts/make-bridge-tools.mjs`（需已构建桥接），以刷新 `eval:changes` 使用的 schema。其中的 Operator、Saturator 和 EQ Eight 带有 Live 12.4 给它们的全部参数（从 Live 读入 `apps/kumi/scripts/live-devices.json`），并像 Live 一样运行 Kumi 自己设置参数的脚本。
-
-桥接还有一项仅供操作者使用的捕获检查：`apps/mcp-server` 中的 `npm run audio:live-verify`。它需要一个由生命周期安装并在真实 Live 上激活的桥接、一个准备好的一次性工程，以及 `PHASE8_CLI`、`PHASE8_RECEIPT`、`PHASE8_EXPECTED_GIT_SHA`、`PHASE8_TARBALL_SHA`、`PHASE8_EXPECTED_REGISTRY_HASH` 和 `PHASE8_OUTPUT_SAFETY_PROVENANCE`（可选：`PHASE8_CONFIG`、`PHASE8_SET_NAME`、`PHASE8_LIVE_VERSION`、`PHASE8_SOURCE_TRACK_INDEX`、`PHASE8_DESTINATION_TRACK_INDEX`、`PHASE8_RECORDED_DIRECTORY`）。它在触及 Live 之前对照回执检查已安装的文件，然后录制、取消并恢复一次捕获，并还原它改动过的所有内容。
+合成桥接中的 Operator、Saturator 和 EQ Eight 带有 Live 12.4 给它们的全部参数（从 Live 读入 `crates/kumi/examples/fixtures/eval_changes/live-devices.json`），并像 Live 一样运行 Kumi 自己设置参数的脚本。
 
 ## 文档
 
-编辑文档之后，在 `apps/mcp-server` 中（先在那里运行过 `npm ci`）运行：
+编辑文档之后，运行打包测试：
 
 ```sh
-npm run policy:verify
-node --test scripts/docs-drift.test.mjs scripts/release-documentation.test.mjs
+python3 -m unittest discover -s scripts/tests -p test_native_release.py
 ```
 
-`policy:verify` 检查写明受支持 Node 版本的文档以及 README 徽章是否仍然写着 22 和 24。漂移测试检查英文、中文和日文的用户指南是否列出相同的工具，以及是否没有文件数量紧挨着清单（manifest）或 tarball 之类的词（请改为写出 `release-manifest.json`）。发布文档测试会暂存桥接打包的指南，并检查其中的每个链接。`npm run package:verify` 会在已安装的包中检查同样的指南。
+它们检查桥接随附的指南中的每个链接：桥接的 README，以及 `scripts/build-native-release.py` 的 `DOCUMENTS` 中列出的十四篇 `docs/en` 页面。没有任何检查会核对三种语言是否一致，请手动保持同步。
 
 ## CI
 
-每个拉取请求以及每次推送到 `main` 时，都会运行三个工作流：
+每个拉取请求以及每次推送到 `main` 时，都会运行两个工作流：
 
 | 工作流 | 作业 | 运行内容 |
 | --- | --- | --- |
-| **CI** | `Build exact local candidate`（Ubuntu，Node 24） | 空白字符检查；打包桥接两次（第二次在全新的克隆中）并要求字节完全相同；把 tarball 作为 `exact-local-candidate` 产物保留 90 天 |
-| | `Coverage, benchmarks and the audio oracle`（Ubuntu，Node 24，与候选并行） | 桥接的类型检查、覆盖率（功能测试）、发布脚本的测试、属性测试、基准测试、`audio:oracle`、`compatibility` 和 `package:verify` |
-| | `Node 22, 24 / ubuntu-24.04`、`Node 24 / macos-15`、`Node 24 / windows-2025 / candidate` 以及 `/ tests 1/4` 到 `4/4` | 桥接的类型检查和测试（在 Windows 上分为按各文件耗时均衡的四个分片；`TEST_SHARD=1/4` 选择其一）、属性测试和 `compatibility`；针对同一个 tarball 运行 `package:verify`、`scripts/verify-candidate.mjs` 和 `journey:verify`；设置、迁移和诊断 |
-| | `Python Remote Script contract`（同样的三个系统，Python 3.11） | 对照 tarball 检查 Remote Script 的文件，运行 Python 测试，编译该包 |
+| **CI** | `Rust / Linux`、`Rust / macOS`、`Rust / Windows` | `cargo fmt --check`、构建所有目标、在装好官方 SDK 的情况下通过隔离运行器运行全部测试（在 Windows 上先运行控制台输入测试）、Clippy（仅供参考）和 `git diff --check` |
+| | `Python Remote Script / ubuntu-24.04`、`macos-15`、`windows-2025`（Python 3.11） | Remote Script 的测试；编译该包 |
+| | `Live extension`（Ubuntu，Node 24） | 针对已提交的构建运行扩展的测试 |
+| | `Release scripts`（Ubuntu） | 检查本次修改的空白字符，然后运行打包测试 |
 | | `Required CI` | 只有以上全部通过时才通过 |
-| **Kumi** | `Kumi / Node 22`、`Kumi / Node 24`（Ubuntu）、`Kumi / macOS / Node 24`、`Kumi / Windows / Node 24` | 根目录类型检查，构建桥接，使用 `KUMI_TEST_BRIDGE=1` 运行 `npm test`，`git diff --check` |
-| **Installer** | `Build Kumi's Mac helper`、`Build the release bundle`，然后是 `Install / macOS`、`Linux`、`Windows` | 构建 Kumi 在 Mac 上使用 Live 菜单的辅助程序（通用、已签名），再构建包含它的发行包并在本地提供。在每个系统上：像制作人那样安装（在 Windows 上使用 Windows PowerShell 5.1），检查版本、`doctor` 和桥接加载，再次安装作为修复，运行 `kumi bridge --yes` 安装到一个临时的 Remote Scripts 文件夹，运行 `kumi update`（在 macOS 和 Linux 上还有 `--rollback`），以及 `kumi uninstall`。在 `v*` 标签上，`publish` 随后把发行包附加到发布版本上。 |
+| **Installer** | `Build Kumi's Mac helper`、`Native bundle / <target>`（六个）、`Aggregate native and existing-installer releases`，然后是 `Install / <system>`（六个）和 `Existing installer transition / <system>`（三个） | 构建 Kumi 在 Mac 上使用 Live 菜单的辅助程序（通用、临时签名），为 macOS、Linux 和 Windows 的 Intel 与 ARM 构建原生发行包，再构建现有安装用来更新的兼容版本，并在本地提供它们。在每个系统上：像制作人那样安装（在 Windows 上使用 Windows PowerShell 5.1），检查版本、`doctor`、桥接及其分析工作进程，再次安装作为修复，运行 `kumi bridge --yes` 安装到一个临时的 Remote Scripts 文件夹，运行 `kumi update`、`kumi update --rollback` 和 `kumi uninstall`。过渡作业用 Kumi 1.7.5 和新的发行包运行迁移测试。在 `v*` 标签上，`publish` 随后把发行包附加到发布版本上。 |
 
-要合并到 `main`，`Required CI` 和四个 Kumi 作业必须通过。Installer 不是必需的。其余规则见[发布与分发](DISTRIBUTION_POLICY.md#合并门禁)。
+要合并到 `main`，`Required CI` 必须通过。Installer 不是必需的。其余规则见[发布与分发](DISTRIBUTION_POLICY.md#合并门禁)。
 
 ## 通过意味着什么
 

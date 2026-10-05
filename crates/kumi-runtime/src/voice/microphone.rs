@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/voice/microphone.ts`.
 use crate::system::{self, Env};
 use kumi_common::abort::Signal;
 use kumi_common::js::{

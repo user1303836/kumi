@@ -4,17 +4,9 @@
   "private": true,
   "type": "module",
   "license": "MIT",
-  "workspaces": ["apps/kumi", "packages/runtime"],
-  "engines": { "node": ">=22 <23 || >=24 <25" },
+  "engines": { "node": ">=22" },
   "scripts": {
-    "build": "npm run build --workspace @kumi/runtime && npm run build --workspace @kumi/app",
-    "typecheck": "npm run build --workspace @kumi/runtime && npm run typecheck --workspaces",
-    "test": "npm run build && node scripts/test-isolated.mjs apps/kumi/dist/test/*.test.js packages/runtime/dist/test/*.test.js apps/live-extension/test/*.test.mjs",
     "setup": "node scripts/native-kumi.mjs --setup",
     "kumi": "node scripts/native-kumi.mjs"
-  },
-  "devDependencies": {
-    "@types/node": "^24.0.0",
-    "typescript": "~5.9.3"
   }
 }

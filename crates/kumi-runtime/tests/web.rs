@@ -1,4 +1,4 @@
-//! Port of `packages/runtime/test/web.test.ts` and complete-result source oracles.
+//! Web reading, with complete-result oracles.
 use kumi_runtime::web::html::{html_to_text, read_html};
 use serde_json::Value;
 #[test]
@@ -19,7 +19,9 @@ fn a_big_page_reads_in_a_moment() {
     let start = std::time::Instant::now();
     let page = read_html(&format!("<html><body>{}</body></html>", block.repeat(25_000)), "https://example.com/");
     assert!(page.text.len() > 1_000_000);
-    assert!(start.elapsed().as_millis() < 4_000, "4 MB of HTML took {} ms", start.elapsed().as_millis());
+    // A debug build on a busy runner is slower; its budget still catches quadratic work.
+    let budget = if cfg!(debug_assertions) { 10_000 } else { 4_000 };
+    assert!(start.elapsed().as_millis() < budget, "4 MB of HTML took {} ms", start.elapsed().as_millis());
 }
 
 use async_trait::async_trait;

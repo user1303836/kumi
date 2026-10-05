@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/test/spinner.test.ts`.
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::future::Future;

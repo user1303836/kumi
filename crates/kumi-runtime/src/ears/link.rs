@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/ears/link.ts`.
 //! Kumi's end of its listening devices: a UDP socket on loopback, requests answered by token.
 
 use super::{

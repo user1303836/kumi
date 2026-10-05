@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/audio-standards.ts`.
-//!
 //! Standards-grounded programme loudness and true-peak analysis.
 //!
 //! Loudness follows ITU-R BS.1770-5 Annex 1 and EBU R128/Tech 3341/3342.

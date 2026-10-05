@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/kernel/agent.ts`.
-
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -359,8 +357,9 @@ impl AgentKernel {
             let attempted: Result<StepResult, StepError> = async {
                 let mut call = request.clone();
                 call.abort_signal = Some(abort.signal());
+                let timed = crate::core::timing::model_call(&inner.binding.id);
                 let parts = inner.binding.model.do_stream(call).await.map_err(StepError::Model)?;
-                consume(parts, &abort, &hear, None).await
+                consume(crate::core::timing::timed(parts, timed), &abort, &hear, None).await
             }
             .await;
             match attempted {
@@ -723,8 +722,9 @@ impl Turn {
             let attempted: Result<StepResult, StepError> = async {
                 let mut call = request.clone();
                 call.abort_signal = Some(self.abort.signal());
+                let timed = crate::core::timing::model_call(&self.inner.binding.id);
                 let parts = self.inner.binding.model.do_stream(call).await.map_err(StepError::Model)?;
-                consume(parts, &self.abort, &on_text, Some(&input as &dyn InputStream)).await
+                consume(crate::core::timing::timed(parts, timed), &self.abort, &on_text, Some(&input as &dyn InputStream)).await
             }
             .await;
             match attempted {
@@ -828,11 +828,13 @@ impl Turn {
             };
             self.abort.check()?;
             failed |= outcome.is_error;
+            let elapsed_ms = round(perf_now() - started).max(0.0) as u64;
+            crate::core::timing::tool(elapsed_ms);
             (self.deliver)(KernelEvent::ToolEnd {
                 id: call.tool_call_id.clone(),
                 name: call.tool_name.clone(),
                 is_error: outcome.is_error,
-                elapsed_ms: round(perf_now() - started).max(0.0) as u64,
+                elapsed_ms,
             });
             results.push(ToolPart::ToolResult(ToolResultPart {
                 tool_call_id: call.tool_call_id.clone(),

@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/plugins/registry.ts`.
-//!
 //! Kumi's knowledge of popular plug-ins, matched to a plug-in device by its name, and set against the
 //! plug-in's real parameters in Live: which of its knobs are which, which Live lets Kumi turn (the ones
 //! configured in the device), and the rest of its thousands, grouped so the model reads them at a glance.

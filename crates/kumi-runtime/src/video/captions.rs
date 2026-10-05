@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/video/captions.ts`.
 //! Timed captions from YouTube json3, WebVTT and SRT.
 use kumi_common::js::{
     number::to_string,

@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/web/mcp-call.ts`.
 //! One public MCP tool asked over plain HTTP, without a session.
 use super::net::{busy_words, js_string, service_trouble, Method, WebClient, WebError, WebFailure, WebRequest, WebTrouble};
 use kumi_common::{

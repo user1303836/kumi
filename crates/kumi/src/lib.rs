@@ -1,5 +1,3 @@
-//! Rust port of `apps/kumi/src`.
-
 pub mod bridge_setup;
 pub mod cli;
 pub mod config;

@@ -1,4 +1,3 @@
-//! Port of `apps/kumi/src/models.ts`.
 use crate::config::{read_settings, write_settings};
 use futures::{
     future::{LocalBoxFuture, Shared},

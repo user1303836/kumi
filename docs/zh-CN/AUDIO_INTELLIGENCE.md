@@ -53,12 +53,11 @@
 
 ## 工作进程
 
-分析从不在宿主自己的事件循环上运行。每个任务都在一个用完即弃的 Node 进程中运行：
+分析从不在宿主自己的事件循环上运行。每个任务都在一个用完即弃的工作进程 `ableton-mcp-analysis-worker` 中运行：
 
 | 项目 | 限制 |
 | --- | --- |
 | 任务 | 同时 2 个，排队 4 个 |
-| 内存 | 512 MiB 堆 |
 | 时间 | 30 秒 |
 | 请求 | 64 MiB |
 | 输出 | 2 MiB 结果，16 KiB 错误文本 |
@@ -107,16 +106,9 @@ Live 中的看门狗最多在 10 秒后（请求的时长加 3 秒）停止捕�
 
 ## 核对分析结果
 
-标准分析会用生成的音频（不使用第三方录音），与 FFmpeg 独立的 `ebur128` 滤镜进行核对：
+标准分析会用生成的音频（不使用第三方录音），与 FFmpeg 独立的 `ebur128` 滤镜进行核对：桥接的测试（`crates/ableton-mcp-server/tests/audio_standards.rs`）要求分析结果与 FFmpeg 对这些信号得出的结果一致，这些结果来自已记录的报告 [phase-8-audio-oracle.json](../evidence/phase-8-audio-oracle.json)（2026-07-27）。容差在 48 kHz 下为 0.1 LU 或 dB，对 44.1 kHz 的真峰值为 0.15 dBTP。已发布的标准仍然是定义；FFmpeg 只是交叉核对。
 
-```sh
-cd apps/mcp-server
-npm run audio:oracle
-```
-
-容差在 48 kHz 下为 0.1 LU 或 dB，对 44.1 kHz 的真峰值为 0.15 dBTP。已发布的标准仍然是定义；FFmpeg 只是交叉核对。已记录的报告是 [phase-8-audio-oracle.json](../evidence/phase-8-audio-oracle.json)（2026-07-27）。
-
-`npm run audio:live-verify`（`apps/mcp-server/scripts/verify-phase8-live.mjs`）在真实 Live 上重复捕获检查；所需条件见[测试](TESTING.md)。它最近一次记录的运行 [phase-8-audio-live.json](../evidence/phase-8-audio-live.json) 是在 macOS 上的 Live 12.4.5b8 上进行的（2026-07-27，桥接 0.1.0），早于当前的桥接。没有记录任何 Windows 上的运行。
+在真实 Live 上，Kumi 需要主动运行的验收（`accept_live`；见[测试](TESTING.md)）会播放、并轨并聆听。早先的捕获验证程序最近一次记录的运行 [phase-8-audio-live.json](../evidence/phase-8-audio-live.json) 是在 macOS 上的 Live 12.4.5b8 上进行的（2026-07-27，桥接 0.1.0），早于当前的桥接。没有记录任何 Windows 上的运行。
 
 ## 限制
 

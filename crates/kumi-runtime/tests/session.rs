@@ -1,4 +1,4 @@
-//! Session behavior ported from packages/runtime/test/session.test.ts.
+//! Session behavior.
 use async_trait::async_trait;
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_common::abort::Signal;
@@ -81,6 +81,15 @@ impl Kernel for TestKernel {
     }
     fn transcript(&self) -> Vec<TranscriptLine> {
         transcript_of(&self.history.borrow())
+    }
+    fn has_aside(&self) -> bool {
+        true
+    }
+    async fn aside(&self, _: &str, _: Signal, _: OnText) -> Result<String, RuntimeError> {
+        use kumi_runtime::core::timing;
+        drop(timing::model_call("openai/a-side-question"));
+        timing::sent(500_000);
+        Ok("aside".into())
     }
 }
 struct TestIntegration {
@@ -592,7 +601,8 @@ local_test!(reconnect_carries_same_set_but_other_saved_set_starts_fresh, {
 });
 
 async fn saved(store: &dyn ConversationStore, place: &str, turns: u32) -> CurrentConversation {
-    for _ in 0..100 {
+    // Up to 2 s: a busy Windows runner writes slowly, and close waits for the save only so long.
+    for _ in 0..1000 {
         if let Some(kept) = store.current(place).await.unwrap() {
             if kept.conversation.turns == Some(turns) {
                 return kept;
@@ -615,7 +625,7 @@ local_test!(saved_conversation_restart_new_and_explicit_resume, {
     one.session.start().await.unwrap();
     one.session.submit("remember 42", None).await.unwrap();
     one.session.close().await.unwrap();
-    let kept = store.current("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").await.unwrap().unwrap();
+    let kept = saved(store.as_ref(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 1).await;
     assert_eq!(kept.conversation.turns, Some(1));
     let two = harness(None, |o| o.conversations = Some(store.clone()));
     project(&two, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
@@ -636,7 +646,15 @@ local_test!(saved_conversation_restart_new_and_explicit_resume, {
     assert_eq!(two.words(2).unwrap(), ["remember 42"]);
     assert!(two.events.borrow().iter().any(|e| matches!(e, SessionEvent::Resumed { chosen: Some(true), .. })));
     two.session.close().await.unwrap();
-    assert_eq!(store.current("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").await.unwrap().unwrap().id, original.id);
+    let mut current = None;
+    for _ in 0..1000 {
+        current = store.current("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").await.unwrap().map(|kept| kept.id);
+        if current.as_deref() == Some(original.id.as_str()) {
+            break;
+        }
+        delay(2).await;
+    }
+    assert_eq!(current.as_deref(), Some(original.id.as_str()));
 });
 local_test!(unsaved_conversation_moves_with_first_save, {
     let dir = tempfile::tempdir().unwrap();
@@ -1516,4 +1534,78 @@ local_test!(library_tools_preferences_status_and_forgetting_follow_session_lifec
     assert!(!without.session.has_library() && !without.session.has_taste() && !without.session.has_forget_taste());
     assert!(without.session.library().is_none());
     without.session.close().await.unwrap();
+});
+
+local_test!(each_turn_logs_where_its_time_went, {
+    use kumi_runtime::core::timing;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("timings.jsonl");
+    let fail = Rc::new(Cell::new(false));
+    let failing = fail.clone();
+    let h = harness(
+        Some(Rc::new(move |_, _, _| {
+            let fail = failing.get();
+            async move {
+                drop(timing::model_call("openai/gpt-test"));
+                timing::tool(40);
+                timing::live_request();
+                timing::background(async { timing::live_request() }).await;
+                timing::sent(1000);
+                if fail {
+                    return Err(RuntimeError::plain("model went away"));
+                }
+                Ok(TurnResult {
+                    usage: Some(Usage { input_tokens: 900., cache_read_tokens: 600., output_tokens: 20., ..Default::default() }),
+                    ..complete()
+                })
+            }
+            .boxed_local()
+        })),
+        |o| o.timings = Some(file.to_string_lossy().into_owned()),
+    );
+    h.session.start().await.unwrap();
+    h.session.submit("make it louder", None).await.unwrap();
+    fail.set(true);
+    let _ = h.session.submit("and again", None).await;
+    settle().await;
+    let lines: Vec<Value> = std::fs::read_to_string(&file).unwrap().lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    assert_eq!(lines.len(), 2, "one line a turn; starting the session isn't a turn");
+    let turn = &lines[0];
+    assert_eq!(
+        [&turn["stop"], &turn["model"], &turn["modelCalls"], &turn["tools"], &turn["toolMs"], &turn["liveRequests"], &turn["sentBytes"]],
+        [&json!("completed"), &json!("openai/gpt-test"), &json!(1), &json!(1), &json!(40), &json!(1), &json!(1000)]
+    );
+    assert_eq!([&turn["inputTokens"], &turn["cachedTokens"], &turn["outputTokens"]], [&json!(900), &json!(600), &json!(20)]);
+    assert_eq!(lines[1]["stop"], "error");
+    h.session.close().await.unwrap();
+});
+
+local_test!(a_side_question_asked_during_an_answer_isnt_part_of_its_timing, {
+    use kumi_runtime::core::timing;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("timings.jsonl");
+    let gate = Rc::new(Notify::new());
+    let hold = gate.clone();
+    let h = harness(
+        Some(Rc::new(move |_, _, _| {
+            let gate = hold.clone();
+            async move {
+                drop(timing::model_call("openai/gpt-test"));
+                timing::sent(1000);
+                gate.notified().await;
+                Ok(complete())
+            }
+            .boxed_local()
+        })),
+        |o| o.timings = Some(file.to_string_lossy().into_owned()),
+    );
+    h.session.start().await.unwrap();
+    let answer = spawned(&h.session, "make it louder");
+    delay(10).await;
+    assert_eq!(h.session.aside("what did you change?", Rc::new(|_| {}), None).await.unwrap(), "aside");
+    gate.notify_one();
+    answer.await.unwrap().unwrap();
+    let line: Value = serde_json::from_str(std::fs::read_to_string(&file).unwrap().trim()).unwrap();
+    assert_eq!([&line["modelCalls"], &line["sentBytes"], &line["model"]], [&json!(1), &json!(1000), &json!("openai/gpt-test")]);
+    h.session.close().await.unwrap();
 });

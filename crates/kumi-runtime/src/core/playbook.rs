@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/core/playbook.ts`.
 //! Lessons from matching sounds, with the scores that support them, kept privately between runs.
 use super::{errors::RuntimeError, goal::Best, match_run::MatchRun};
 use async_trait::async_trait;

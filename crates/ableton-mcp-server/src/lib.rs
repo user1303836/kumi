@@ -1,4 +1,4 @@
-//! Port of `apps/mcp-server/src/index.ts`: the crate root.
+//! The crate root.
 
 pub mod als;
 pub mod analysis;

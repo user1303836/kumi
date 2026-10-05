@@ -1,4 +1,4 @@
-//! Port of `packages/runtime/test/latency-budgets.test.ts` (the kernel's budgets; the Live ones go with the Ableton integration).
+//! The kernel's latency budgets (the Live ones go with the Ableton integration).
 //!
 //! Latency budgets, counted rather than timed (CI machines are too noisy for milliseconds): the
 //! things Kumi's speed is made of. On real Live every Live round trip waits for a display tick,

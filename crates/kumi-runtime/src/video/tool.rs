@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/video/tool.ts`.
 //! Watching a tutorial to learn from its words, frames, close-ups and sound.
 use super::{
     captions::{format_time, parse_time},

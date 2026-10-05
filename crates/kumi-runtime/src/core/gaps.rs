@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/core/gaps.ts`.
 //! Capabilities the producer needed that Kumi or Live does not offer, logged locally for developers.
 use super::{
     contracts::{JsonObject, KernelTool, ToolResult},

@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/test/models.test.ts`.
 use async_trait::async_trait;
 use kumi_common::time::now_ms;
 use kumi_runtime::{

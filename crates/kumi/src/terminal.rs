@@ -1,4 +1,4 @@
-//! Port of `apps/kumi/src/terminal.ts`, with a native line editor in place of Node readline.
+//! The plain terminal, for pipes and KUMI_UI=plain, with a native line editor.
 use crate::{
     config::safe_error_message,
     history::InputHistory,

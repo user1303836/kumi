@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/devices/gen.ts`.
-//!
 //! Audio effects and instruments: the model writes GenExpr (the language of Max's gen~) and Kumi
 //! builds the device around it.
 //!

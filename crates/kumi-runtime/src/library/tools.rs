@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/library/tools.ts`.
 use super::{
     classify::{SoundClass, SoundKind},
     features::MeasureOptions,

@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/tui/keys.ts`.
-//!
 //! Decodes what a terminal sends in raw mode: typed text, keys with modifiers (xterm and
 //! CSI u encodings), bracketed pastes, SGR mouse reports and focus changes. Sequences can
 //! arrive split across reads; a lone Escape is only a key once nothing follows it. Terminals

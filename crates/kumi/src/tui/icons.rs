@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/tui/icons.ts`.
-//!
 //! Kumi's icons for what's in a Set: a small silhouette, two cells wide, tinted by family (audio,
 //! MIDI, instruments, plug-ins; a track in its own Live colour). Only characters every terminal Kumi
 //! supports draws (box drawing, blocks and a few geometric shapes, no Braille, no pictures); where

@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/core/disk.ts`.
-//!
 //! Free space before Kumi writes something big (a recording, a video, a program) or something that
 //! must not be cut short (a device file): with the disk nearly full, Live's recordings and saves and
 //! Kumi's own files fail partway, often without saying why.

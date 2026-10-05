@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/test/disk.test.ts`.
-
 use kumi_runtime::core::disk::{free_bytes, low_disk_with, MB};
 
 #[tokio::test]

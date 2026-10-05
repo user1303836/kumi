@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/test/project.test.ts`.
-
 use std::fs;
 use std::io::Write;
 use std::path::Path;

@@ -1,4 +1,3 @@
-//! Native equivalent of `apps/mcp-server/src/install-remote-script.ts`.
 use crate::{
     command::{resolve, validate, value, CommandOutput},
     delivery::*,
