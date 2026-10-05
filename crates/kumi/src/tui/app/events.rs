@@ -333,7 +333,7 @@ impl TuiApp {
                 let line = if self.offer_technique(name) {
                     format!("Keep this as a technique? {name}")
                 } else {
-                    format!("Keep this as a technique? {name} · say yes to keep it")
+                    format!("Keep this as a technique? {name} · say “keep the technique”")
                 };
                 self.memory_line(MemoryKind::Technique, &line);
             }

@@ -219,7 +219,6 @@ struct State {
     chosen: Option<Chosen>,
     project: Option<String>,
     set: Option<String>,
-    saved_at: Option<f64>,
     set_name: Option<String>,
     plan: Option<Rc<dyn KernelTool>>,
     turns: u32,
@@ -522,7 +521,6 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                 chosen: None,
                 project: None,
                 set: None,
-                saved_at: None,
                 set_name: None,
                 plan: None,
                 turns: 0,
@@ -1009,7 +1007,6 @@ impl Session {
         self.assert_current(op)?;
         {
             let mut s = self.0.state.borrow_mut();
-            s.saved_at = snapshot.saved_at;
             s.project = snapshot.project.as_ref().map(|p| p.id.clone());
             s.set_name = snapshot.project.as_ref().map(|p| p.name.clone());
             s.set = Some(snapshot.key.clone());
@@ -1435,6 +1432,9 @@ impl SessionController for Session {
                 async move {
                     this.drop_kernel().await?;
                     this.assert_current(&op)?;
+                    if let Some(l) = &this.0.learned {
+                        l.drafts.reset();
+                    }
                     let (place, integrated) = {
                         let mut s = this.0.state.borrow_mut();
                         s.start_fresh = true;
@@ -1534,6 +1534,9 @@ impl SessionController for Session {
                 async move {
                     this.drop_kernel().await?;
                     this.assert_current(&op)?;
+                    if let Some(l) = &this.0.learned {
+                        l.drafts.reset();
+                    }
                     {
                         let mut s = this.0.state.borrow_mut();
                         s.chosen = Some(Chosen { place, id, conversation });

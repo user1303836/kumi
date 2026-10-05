@@ -901,7 +901,11 @@ impl TuiApp {
         }
         let items = vec![PickerItem::new("1. Yes, keep it", "yes"), PickerItem::new("2. No", "no")];
         let title = format!("Keep “{}” as a technique?", self.clean(&name.replace('\n', " "), 60));
-        self.pick(Picker::with_options(title, items, PickerOptions { answers: true, ..Default::default() }), |app, item| async move {
+        let mut picker = Picker::with_options(title, items, PickerOptions { answers: true, ..Default::default() });
+        // A bare Enter is a no: only 1 (or moving to it) keeps it.
+        picker.select(Some("no"));
+        let picker = self.pick(picker, |app, item| async move {
+            app.0.state.borrow_mut().offer = None;
             app.close_panel();
             let keep = item.value.as_deref() == Some("yes");
             if !app.0.options.controller.answer_technique(keep).await? && keep {
@@ -909,7 +913,13 @@ impl TuiApp {
             }
             Ok(())
         });
+        self.0.state.borrow_mut().offer = Some(picker);
         true
+    }
+    /// Whether `panel` is the technique offer, letting go of it: closing that is a no.
+    fn closing_offer(&self, panel: &PanelRef) -> bool {
+        let offer = self.0.state.borrow_mut().offer.take();
+        offer.is_some_and(|offer| matches!(&*panel.borrow(), Panel::Pick { picker, .. } if Rc::ptr_eq(picker, &offer)))
     }
     fn same_panel(&self, panel: &PanelRef) -> bool {
         self.0.state.borrow().panel.as_ref().is_some_and(|p| Rc::ptr_eq(p, panel))
@@ -956,7 +966,11 @@ impl TuiApp {
         }
         if let InputEvent::Key { name, mods, .. } = &event {
             if name == "escape" || (mods.ctrl && name == "c") {
+                let declined = self.closing_offer(&panel);
                 self.close_panel();
+                if declined {
+                    self.task(|app| async move { app.0.options.controller.answer_technique(false).await.map(|_| ()) });
+                }
                 return;
             }
             let mut p = panel.borrow_mut();

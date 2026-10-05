@@ -574,37 +574,51 @@ case!(a_technique_offered_after_an_answer_is_answered_by_number, async {
         h.emit(json!({"type":"technique","action":"offered","technique":{"id":"","name":"Liquid bubbles","fits":"bubbly FM effects"}}));
         h.emit(json!({"type":"state","state":"idle"}));
     };
+    let answers = |h: &Harness| h.calls().into_iter().filter(|c| c.starts_with("answer-technique:")).collect::<Vec<_>>();
     h.type_text("recreate the bubbles from this tutorial\r").await;
     built(&h, "Built the bubble chain on Bubbles.");
     h.has("◆ Keep this as a technique? Liquid bubbles");
     h.has("Keep “Liquid bubbles” as a technique?");
     h.has("1. Yes, keep it");
     h.type_text("1").await;
-    assert!(!h.calls().iter().any(|c| c.starts_with("answer-technique:")), "a number picks; enter answers");
+    assert!(answers(&h).is_empty(), "a number picks; enter answers");
     h.type_text("\r").await;
     h.wait_for_call("answer-technique:yes").await;
     assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"), "answering closes the offer");
+    // Enter alone, or Esc, is a no.
+    for (key, why) in [("\r", "a bare enter"), ("\x1b", "esc")] {
+        h.type_text("another one\r").await;
+        built(&h, "Built another.");
+        h.has("Keep “Liquid bubbles” as a technique?");
+        let before = answers(&h).len();
+        h.type_text(key).await;
+        h.wait_for_calls("answer-technique:", before + 1).await;
+        assert_eq!(answers(&h).last().map(String::as_str), Some("answer-technique:no"), "{why}");
+        assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"), "{why}");
+    }
     // Typing on goes to the input box and answers nothing.
+    let answered = answers(&h).len();
     h.type_text("now a wetter one\r").await;
     built(&h, "Built it again, wetter.");
     h.has("Keep “Liquid bubbles” as a technique?");
     h.type_text("make it wetter").await;
     assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"));
     h.has("make it wetter");
-    assert_eq!(h.calls().iter().filter(|c| c.starts_with("answer-technique:")).count(), 1);
+    assert_eq!(answers(&h).len(), answered);
     h.type_text("\x03").await;
     // An answer that ends on its own question keeps its options, and the offer doesn't cover them.
     h.type_text("add a reverb\r").await;
     built(&h, "Which track should get the reverb?\n\n1. Bubbles\n2. Drums");
     h.has("Your answer");
     assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"));
-    h.has("Keep this as a technique? Liquid bubbles · say yes to keep it");
-    // So does a plain question.
+    // So does a plain question; closing the answer's options answers nothing about the technique.
     h.type_text("\x1b").await;
     h.type_text("make it darker\r").await;
     built(&h, "Darker now. Should the riser come in earlier?");
     assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"));
     assert!(!has(&h.screen(), "Your answer"));
+    h.has("◆ Keep this as a technique? Liquid bubbles · say “keep the technique”");
+    assert_eq!(answers(&h).len(), answered);
     h.close().await;
 });
 case!(stop_live_and_held_cancel_refusal, async {

@@ -1455,8 +1455,9 @@ pub enum TechniqueAction {
     Forgot,
 }
 
-/// A technique offered for keeping after an answer (with no id yet), kept on the producer's yes, updated, read for
-/// use, or forgotten. Names are data (a `{ type: "technique" }` session event).
+/// A technique offered for keeping after an answer (its id empty, or that of the technique it would refine),
+/// kept on the producer's yes, updated, read for use, or forgotten. Names are data (a `{ type: "technique" }`
+/// session event).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TechniqueEvent {
     pub action: TechniqueAction,

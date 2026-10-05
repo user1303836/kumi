@@ -486,6 +486,20 @@ impl Harness {
         .await
         .unwrap_or_else(|_| panic!("Missing controller call {expected:?}: {:?}", self.calls()));
     }
+    /// Waits until `count` controller calls start with `prefix`.
+    pub async fn wait_for_calls(&self, prefix: &str, count: usize) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let called = self.control.called.notified();
+                if self.control.calls.borrow().iter().filter(|call| call.starts_with(prefix)).count() >= count {
+                    return;
+                }
+                called.await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("Missing {count} controller calls starting {prefix:?}: {:?}", self.calls()));
+    }
     async fn wait_for_screen(&self, description: &str, ready: impl Fn(&[String]) -> bool) {
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {

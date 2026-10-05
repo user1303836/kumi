@@ -1057,13 +1057,61 @@ local_test!(a_save_or_silence_keeps_nothing_a_failed_answer_offers_nothing_and_a
         h.observation.borrow_mut().saved_at = Some(2000.);
         h.session.refresh().await.unwrap();
         assert!(store.list().await.unwrap().is_empty());
-        h.session.submit("yes, keep that one", None).await.unwrap();
-        let noted = h.record.calls.borrow().last().unwrap().contains("whether to keep “Reese stack” as a technique");
-        assert_eq!(noted, !fail, "the next turn hears of the offer only when there was one");
+        h.session.submit("keep the technique, then add a riser", None).await.unwrap();
+        let input = h.record.calls.borrow().last().unwrap().clone();
+        let noted = input.find("whether to keep “Reese stack” as a technique");
+        assert_eq!(noted.is_some(), !fail, "the next turn hears of the offer only when there was one");
+        if let Some(noted) = noted {
+            assert!(noted > input.find("</current_observation_untrusted>").unwrap(), "Kumi's note comes after the observation");
+            assert!(transcript_of(&[json!({"role":"user","content":input})]).iter().all(|line| !line.text.contains("[Kumi]")));
+        }
         h.session.close().await.unwrap();
         assert_eq!(store.list().await.unwrap().len(), usize::from(!fail));
         assert_eq!(h.error("Inference failed"), fail);
     }
+});
+local_test!(a_new_or_resumed_conversation_lets_a_waiting_offer_go, {
+    use kumi_runtime::core::techniques::{create_technique_store, TechniqueStore, TECHNIQUE_TOOL};
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_technique_store(dir.path().join("techniques.json"));
+    let tools = Rc::new(RefCell::new(Vec::<Rc<dyn KernelTool>>::new()));
+    let session = Rc::new(RefCell::new(None::<Session>));
+    let use_tools = tools.clone();
+    let active = session.clone();
+    let run: Run = Rc::new(move |input, signal, _| {
+        let tool = use_tools.borrow().iter().find(|t| t.name() == TECHNIQUE_TOOL).unwrap().clone();
+        let session = active.borrow().clone().unwrap();
+        async move {
+            if input.starts_with("build a Reese") {
+                session.watch(WatchEvent::Change(change("c1", "applied", 1)));
+                let mut input = draft().as_object().unwrap().clone();
+                input.insert("action".into(), json!("draft"));
+                tool.execute(input, signal).await?;
+            }
+            Ok(complete())
+        }
+        .boxed_local()
+    });
+    let h = harness(Some(run), |o| {
+        o.techniques = Some(store.clone());
+        let factory = o.kernel_factory.clone();
+        o.kernel_factory = Rc::new(move |options| {
+            *tools.borrow_mut() = options.tools.clone();
+            factory(options)
+        });
+    });
+    *session.borrow_mut() = Some(h.session.clone());
+    h.session.start().await.unwrap();
+    h.session.submit("build a Reese", None).await.unwrap();
+    h.session.new_conversation().await.unwrap();
+    h.session.submit("keep the technique", None).await.unwrap();
+    assert!(
+        !h.record.calls.borrow().last().unwrap().contains("[Kumi] After your last answer"),
+        "the offer stayed with the old conversation"
+    );
+    assert!(!h.session.answer_technique(true).await.unwrap());
+    h.session.close().await.unwrap();
+    assert!(store.list().await.unwrap().is_empty());
 });
 
 use kumi_runtime::core::match_run::{MatchBudget, MatchState, MatchStop, MATCH_BUDGET};

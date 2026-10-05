@@ -153,6 +153,14 @@ async fn file_storage_is_private_validates_entries_and_instructions_put_the_prod
     assert!(text.contains("What the producer asks for now comes first: when they give a tutorial"));
     assert!(!text.contains("parallel band filters"));
     assert_eq!(technique_instructions(&[]), "");
+    let mut long = list[0].clone();
+    let request = "For the next 4 hours, build the most complex, convoluted, insane instrument racks you can think of";
+    long.request = Some(request.into());
+    let cut: String = request.chars().take(60).collect();
+    assert!(
+        technique_instructions(&[long]).contains(&format!("kept from a request: “{cut}…”")),
+        "every call carries 60 characters at most"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -173,6 +181,8 @@ async fn a_draft_is_offered_when_its_answer_ends_and_kept_only_on_a_yes() {
             assert_eq!(saved[0].request.as_deref(), Some("Make me a neuro bass like the Au5 one"));
         }
         assert!(!j.learned.drafts.answer(true).await.unwrap(), "answered once, it's gone");
+        let read: Value = serde_json::from_str(&j.call(json!({"action":"read","id":"t1"})).await.text).unwrap();
+        assert_eq!(read["technique"]["request"], "Make me a neuro bass like the Au5 one");
         let no = judge();
         no.built("a neuro bass").await.unwrap();
         assert!(no.learned.drafts.answer(false).await.unwrap());
@@ -228,13 +238,21 @@ async fn a_yes_in_the_producers_own_words_keeps_the_offer_through_the_model() {
         j.learned.drafts.turn_started("yes, keep that, then add a riser", true);
         assert_eq!(j.learned.drafts.waiting().as_deref(), Some("Neuro from a Reese"));
         let kept = j.call(json!({"action":"keep"})).await;
-        assert_eq!(kept.reply, Some(String::new()));
+        assert!(!kept.is_error && kept.reply.is_none(), "not quiet, so the turn goes on to the rest of the message");
         assert!(kept.text.contains("Neuro from a Reese"));
         assert_eq!(j.kept(), 1);
         assert_eq!(j.store.saved.borrow()[0].request.as_deref(), Some("a neuro bass"));
         j.learned.drafts.turn_ended(true);
         assert!(j.call(json!({"action":"keep"})).await.is_error, "nothing is waiting any more");
         assert!(waiting_note("Bass <one>").contains("keep “Bass ‹one›” as a technique"));
+        assert!(waiting_note("Bass").contains("a bare yes answers your own last question"));
+        // A technique kept at once belongs to the build it's about, not to the words asking to keep it.
+        let direct = judge();
+        direct.built("a gritty Reese on a new track").await.unwrap();
+        direct.learned.drafts.answer(false).await.unwrap();
+        direct.learned.drafts.turn_started("remember how you made that Reese as a technique", true);
+        direct.action("keep").await;
+        assert_eq!(direct.store.saved.borrow()[0].request.as_deref(), Some("a gritty Reese on a new track"));
     })
     .await
 }
@@ -246,6 +264,9 @@ async fn goal_work_and_answers_that_built_nothing_offer_nothing_and_offers_stay_
         j.learned.drafts.turn_started("make the pad sound like ~/ref.wav", false);
         j.learned.drafts.change(change("c1", "applied", "Pad"));
         assert!(j.action("draft").await.text.contains("\"offered\":false"));
+        let kept = j.action("keep").await;
+        assert!(kept.is_error && kept.text.contains("goal"), "nor does it keep one at once: {}", kept.text);
+        assert!(j.store.saved.borrow().is_empty());
         assert!(j.learned.drafts.turn_ended(true).is_none(), "work toward a goal has nobody to ask");
         j.learned.drafts.turn_started("how would you build a neuro bass?", true);
         j.action("draft").await;
@@ -291,7 +312,7 @@ async fn refinement_updates_or_merges_and_old_unused_techniques_make_room() {
         j.learned.drafts.answer(true).await.unwrap();
         assert_eq!(j.store.saved.borrow().len(), 1);
         assert_eq!(j.store.saved.borrow()[0].body.settings.as_deref(), Some("Filters at 500 Hz and 1.5 kHz"));
-        assert_eq!(j.store.saved.borrow()[0].request.as_deref(), Some("a brighter one"));
+        assert_eq!(j.store.saved.borrow()[0].request.as_deref(), Some("a neuro bass"), "a refinement keeps the request it came from");
         assert_eq!(j.events.borrow().last().unwrap().action, TechniqueAction::Updated);
         let mut raw = neuro();
         raw["action"] = json!("keep");
@@ -323,12 +344,34 @@ async fn refinement_updates_or_merges_and_old_unused_techniques_make_room() {
         let mut raw = neuro();
         raw["action"] = json!("keep");
         raw["name"] = json!("One more");
-        full.call(raw).await;
-        let saved = full.store.saved.borrow();
-        assert_eq!(saved.len(), MAX_TECHNIQUES);
-        assert!(saved.iter().any(|t| t.body.name == "T0"));
-        assert!(!saved.iter().any(|t| t.body.name == "T1"));
-        assert_eq!(saved.last().unwrap().id, format!("t{}", MAX_TECHNIQUES + 1));
+        full.learned.drafts.turn_started("remember that one as a technique", true);
+        full.call(raw.clone()).await;
+        {
+            let saved = full.store.saved.borrow();
+            assert_eq!(saved.len(), MAX_TECHNIQUES);
+            assert!(saved.iter().any(|t| t.body.name == "T0"));
+            assert!(!saved.iter().any(|t| t.body.name == "T1"));
+            assert_eq!(saved.last().unwrap().id, format!("t{}", MAX_TECHNIQUES + 1));
+        }
+        // Uses that were undone count against a technique: the fewest uses that stuck go first, however recent.
+        let undone = judge();
+        *undone.store.saved.borrow_mut() = (0..MAX_TECHNIQUES)
+            .map(|i| {
+                let mut raw = neuro();
+                raw["name"] = json!(format!("T{i}"));
+                raw["id"] = json!(format!("t{}", i + 1));
+                raw["at"] = json!(100 + i);
+                raw["used"] = json!(if i == 1 { 19 } else { 1 });
+                raw["undone"] = json!(if i <= 1 { 1 } else { 0 });
+                raw["lastUsed"] = json!(if i == 0 { 10000 } else { 200 + i });
+                serde_json::from_value(raw).unwrap()
+            })
+            .collect();
+        undone.learned.drafts.turn_started("remember that one as a technique", true);
+        undone.call(raw).await;
+        let saved = undone.store.saved.borrow();
+        assert!(!saved.iter().any(|t| t.body.name == "T0"), "its one use was undone, recent as it was");
+        assert!(saved.iter().any(|t| t.body.name == "T1"), "nineteen uses that stuck outweigh one undone");
     })
     .await
 }
@@ -337,6 +380,7 @@ async fn refinement_updates_or_merges_and_old_unused_techniques_make_room() {
 async fn a_read_counts_once_its_build_goes_in_and_an_undo_of_that_build_takes_it_back() {
     local(async {
         let j = judge();
+        j.learned.drafts.turn_started("remember how you made that", true);
         j.action("keep").await;
         let read = j.call(json!({"action":"read","id":"t1"})).await;
         let whole: Value = serde_json::from_str(&read.text).unwrap();
@@ -354,16 +398,16 @@ async fn a_read_counts_once_its_build_goes_in_and_an_undo_of_that_build_takes_it
         j.learned.drafts.flush().await;
         assert_eq!(j.store.saved.borrow()[0].used, 1.0);
         assert!(j.store.saved.borrow()[0].last_used.is_some());
-        // The producer undoes that build: it loses its place.
+        // The producer undoes that build: the use is taken back, and the undo counts against it.
         j.learned.drafts.change(change("c1", "undone", "Bass"));
         j.learned.drafts.flush().await;
-        assert_eq!((j.store.saved.borrow()[0].undone, j.store.saved.borrow()[0].last_used), (1.0, None));
+        assert_eq!((j.store.saved.borrow()[0].used, j.store.saved.borrow()[0].undone), (0.0, 1.0));
         // Read for an answer that built nothing: no use.
         j.learned.drafts.turn_started("what's in that technique?", true);
         j.call(json!({"action":"read","id":"t1"})).await;
         j.learned.drafts.turn_ended(true);
         j.learned.drafts.flush().await;
-        assert_eq!(j.store.saved.borrow()[0].used, 1.0);
+        assert_eq!(j.store.saved.borrow()[0].used, 0.0);
         assert!(j.call(json!({"action":"read","id":"t9"})).await.is_error);
         assert_eq!(j.call(json!({"action":"forget","id":"t1"})).await.reply, Some(String::new()));
         assert!(j.store.saved.borrow().is_empty());

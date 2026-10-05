@@ -80,8 +80,11 @@ pub trait TechniqueStore {
 pub const MAX_TECHNIQUES: usize = 40;
 /// The most of the producer's request a technique keeps.
 const MAX_REQUEST: usize = 200;
-/// Answers between two offers to keep a technique, at least, so asking stays rare.
+/// An offer to keep a technique comes at most once in this many answers (offers at answers 1, 4, 7…),
+/// so asking stays rare.
 pub const OFFER_GAP: u32 = 3;
+/// The most of a technique's request the instructions show on every model call; `read` gives it whole.
+const LISTED_REQUEST: usize = 60;
 /// Builds that used a technique, watched for an undo, at most.
 const WATCHED: usize = 8;
 static ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^t[0-9]{1,4}$").unwrap());
@@ -217,7 +220,9 @@ pub fn technique_instructions(techniques: &[Technique]) -> String {
             line.push_str(&format!(" (from {title})"));
         }
         if let Some(request) = &t.request {
-            line.push_str(&format!("; kept from a request: “{}”", string::head(request, 120)));
+            let cut = string::head(request, LISTED_REQUEST);
+            let more = if cut.len() < request.len() { "…" } else { "" };
+            line.push_str(&format!("; kept from a request: “{cut}{more}”"));
         }
         if t.undone > 0.0 {
             line.push_str(&if t.undone == 1.0 {
@@ -235,7 +240,7 @@ pub const TECHNIQUE_TOOL: &str = "technique";
 /// Kumi's note to the model, after the turn's observation, while an offer waits on the producer's answer.
 pub fn waiting_note(name: &str) -> String {
     let name = name.replace('<', "‹").replace('>', "›");
-    format!("\n\n[Kumi] After your last answer, the producer was asked whether to keep “{name}” as a technique, and they didn't pick an answer. If what they say now is yes to keeping it, call technique with only action keep; otherwise leave it, and it isn't kept.")
+    format!("\n\n[Kumi] After your last answer, the producer was asked whether to keep “{name}” as a technique, and they didn't pick an answer. Keep it (technique with only action keep) only if what they say now clearly asks to keep it as a technique, such as \"keep the technique\"; a bare yes answers your own last question, if you asked one. Otherwise leave it, and it isn't kept.")
 }
 pub const TECHNIQUE_GUIDANCE:&str="When something you built is a reusable idea for a kind of sound (devices loaded and set up to a purpose, or a tutorial's chain), give it a technique in the same reply as the make_changes that builds it (technique, or technique action draft): after your answer Kumi asks the producer whether to keep it, so don't ask or mention it yourself. Not for one-off or routine changes, fixes, or work toward a goal. A technique already kept never overrides what the producer asks for now: a tutorial, a reference or steps they give come first.";
 static TOOL_DATA: LazyLock<Value> =
@@ -290,6 +295,8 @@ struct DraftState {
     recent: Vec<ChangeRecord>,
     request: String,
     attended: bool,
+    /// The producer's request of the last answer that built something for them.
+    built: Option<String>,
     read: Vec<String>,
     uses: Vec<Use>,
     turns: u32,
@@ -348,9 +355,28 @@ impl TechniqueDrafts {
             _ => s.offer = None,
         }
     }
-    /// The producer's request this turn, as a technique keeps it.
-    pub fn request(&self) -> Option<String> {
-        request_of(&self.0.state.borrow().request)
+    /// Whether this turn is the producer's own request, rather than work toward a goal.
+    pub fn attended(&self) -> bool {
+        self.0.state.borrow().attended
+    }
+    /// The request a technique kept at once belongs to: this turn's when it built something, or else that
+    /// of the last answer that did ("remember how you made that Reese").
+    pub fn build_request(&self) -> Option<String> {
+        let s = self.0.state.borrow();
+        if s.recent.is_empty() {
+            s.built.clone()
+        } else {
+            request_of(&s.request)
+        }
+    }
+    /// A fresh or resumed conversation: what was drafted or offered belongs to the one left behind.
+    pub fn reset(&self) {
+        let mut s = self.0.state.borrow_mut();
+        s.draft = None;
+        s.offer = None;
+        s.read.clear();
+        s.recent.clear();
+        s.built = None;
     }
     /// The name of the offer the producer moved on from without an answer, if any.
     pub fn waiting(&self) -> Option<String> {
@@ -429,7 +455,11 @@ impl TechniqueDrafts {
         let (used, offer) = {
             let mut s = self.0.state.borrow_mut();
             let build = unique(&s.recent);
-            let used = if build.iter().any(|r| r.state == ChangeState::Applied) { std::mem::take(&mut s.read) } else { vec![] };
+            let built = build.iter().any(|r| r.state == ChangeState::Applied);
+            if built && s.attended {
+                s.built = request_of(&s.request);
+            }
+            let used = if built { std::mem::take(&mut s.read) } else { vec![] };
             s.read.clear();
             for id in &used {
                 s.uses.push(Use { id: id.clone(), build: build.clone() });
@@ -547,7 +577,8 @@ impl TechniqueService {
                     if draft.body.source.is_some() {
                         old.body.source = draft.body.source
                     }
-                    if request.is_some() {
+                    // A refinement keeps the request the technique came from.
+                    if old.request.is_none() {
                         old.request = request
                     }
                     old.updated = Some(now_ms() as f64);
@@ -568,13 +599,20 @@ impl TechniqueService {
                         undone: 0.0,
                     };
                     if list.len() >= MAX_TECHNIQUES {
-                        let oldest = list
+                        // The fewest uses that stuck go first (undone ones count against it), then the longest unused.
+                        let worth = |t: &Technique| t.used - t.undone;
+                        let least = list
                             .iter()
                             .enumerate()
-                            .min_by(|(ia, a), (ib, b)| a.last_used.unwrap_or(a.at).total_cmp(&b.last_used.unwrap_or(b.at)).then(ia.cmp(ib)))
+                            .min_by(|(ia, a), (ib, b)| {
+                                worth(a)
+                                    .total_cmp(&worth(b))
+                                    .then(a.last_used.unwrap_or(a.at).total_cmp(&b.last_used.unwrap_or(b.at)))
+                                    .then(ia.cmp(ib))
+                            })
                             .map(|(i, _)| i)
                             .unwrap();
-                        list.remove(oldest);
+                        list.remove(least);
                     }
                     list.push(kept.clone());
                     kept
@@ -596,11 +634,12 @@ impl TechniqueService {
             t.last_used = Some(now_ms() as f64);
         })
     }
-    /// The producer undid a build that used it: it loses its place, first to make room when the list is full.
+    /// The producer undid a build that used it: the use is taken back and counts against it when the list
+    /// is full and something has to make room.
     fn undone(self: &Rc<Self>, id: String) -> LocalBoxFuture<'static, ()> {
         self.update(id, |t| {
+            t.used = (t.used - 1.0).max(0.0);
             t.undone += 1.0;
-            t.last_used = None;
         })
     }
     fn update(self: &Rc<Self>, id: String, change: impl FnOnce(&mut Technique) + 'static) -> LocalBoxFuture<'static, ()> {
@@ -685,7 +724,9 @@ impl KernelTool for TechniqueTool {
                 return Ok(ToolResult::error("No technique is waiting for the producer's answer."));
             };
             self.drafts.answer(true).await?;
-            return Ok(quiet(json!({"kept":name})));
+            // Not quiet: the same message usually asks for more ("keep the technique, then…"), and a quiet call
+            // beside the model's opening words would end the turn before it does the rest.
+            return Ok(ToolResult::text(json::stringify(&json!({"kept":name}))));
         }
         if action == "draft" || action == "keep" {
             let body = match check_technique(&input) {
@@ -695,7 +736,11 @@ impl KernelTool for TechniqueTool {
             let name = body.name.clone();
             let draft = TechniqueDraft { body, replaces: input["replaces"].as_str().map(str::to_owned) };
             let result = if action == "keep" {
-                self.service.keep(draft, self.drafts.request()).await?;
+                // Kept at once only on the producer's word, which work toward a goal never has.
+                if !self.drafts.attended() {
+                    return Ok(ToolResult::error("Work toward a goal keeps no techniques: nobody is there to ask for one."));
+                }
+                self.service.keep(draft, self.drafts.build_request()).await?;
                 json!({"kept":name})
             } else if self.drafts.draft(draft) {
                 json!({"drafted":name})
@@ -723,6 +768,9 @@ impl KernelTool for TechniqueTool {
             (self.service.on_event)(TechniqueEvent { action: TechniqueAction::Used, technique: summary(&read) });
             let mut whole = serde_json::to_value(&read.body).unwrap();
             whole["id"] = json!(read.id);
+            if let Some(request) = &read.request {
+                whole["request"] = json!(request);
+            }
             return Ok(ToolResult::text(json::stringify(&json!({
                 "technique":whole,
                 "note":"Adapt it to this sound and Set, and tell the producer you're using it. What they asked for comes first."
