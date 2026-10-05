@@ -35,11 +35,10 @@ fn exact_created(result: &Value) -> bool {
         && is_non_empty_string(&result["objectIdentity"], 256)
         && is_non_empty_string(&result["createdFingerprint"], 64)
 }
-/// Where an Arrangement clip row sits, in beats: its start and its right edge (Live's end time; start
-/// plus length on a row without one).
+/// Where an Arrangement clip row sits, in beats: its start and its right edge.
 fn arrangement_span(clip: &Value) -> Option<(f64, f64)> {
-    let start = clip["start"].as_f64()?;
-    Some((start, clip["endTime"].as_f64().filter(|end| *end > start).or_else(|| Some(start + clip["length"].as_f64()?))?))
+    let span = (clip["start"].as_f64()?, helpers::arrangement_clip_end(clip));
+    span.1.is_finite().then_some(span)
 }
 /// The refusal for moving an Arrangement clip onto another clip of its track, which isn't done yet: Live
 /// crashes when an Arrangement clip is copied onto a span a clip already holds, and a move is a copy.

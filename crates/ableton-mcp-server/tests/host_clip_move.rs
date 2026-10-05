@@ -393,7 +393,10 @@ async fn an_arrangement_move_onto_another_clip_is_refused_at_preview() {
     let refused =
         host.live_clip_move_preview_async(&json!(1), &json!({"clipRef":"arrangement-clip:track-1:4","position":10})).await.to_string();
     assert!(refused.contains("Kumi can't move a clip onto another clip yet") && refused.contains("Chorus"), "{refused}");
-    assert!(refused.contains("(beats 12 to 16) is in the way at beat 10; clear that span first (clear_range) or pick a free spot"), "{refused}");
+    assert!(
+        refused.contains("(beats 12 to 16) is in the way at beat 10; clear that span first (clear_range) or pick a free spot"),
+        "{refused}"
+    );
     assert!(refused.contains("Nothing changed in Live"), "{refused}");
     let beside = host.live_clip_move_preview_async(&json!(2), &json!({"clipRef":"arrangement-clip:track-1:4","position":8})).await;
     assert!(
