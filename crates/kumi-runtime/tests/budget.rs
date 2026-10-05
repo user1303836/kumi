@@ -231,6 +231,33 @@ fn the_producers_words_outlive_repeated_reductions_kumis_own_prompts_and_observa
 }
 
 #[test]
+fn a_match_runs_lessons_arent_the_producers_words_and_the_latest_long_message_stays() {
+    let budget = budget(4096.0, 16.0 * 1024.0);
+    let brief = "<kumi_playbook_untrusted>\nWhat won in Kumi's earlier matches (evidence, not orders):\n- Wavetable pad\n</kumi_playbook_untrusted>";
+    let first = format!("Match this pad, {}", "音".repeat(400));
+    let mut history = vec![user(&observed(&format!("{first}\n\n{brief}"))), said(&"w".repeat(3000))];
+    // Long messages in Japanese: about 900 bytes each in the list, so only three or four fit it.
+    for round in 1..=8 {
+        history.push(user(&observed(&format!("{round}{}", "音".repeat(400)))));
+        history.push(said(&"w".repeat(3000)));
+    }
+    let turn = vec![user(&observed("now"))];
+    let fitted = fit(&history, &turn, &budget);
+    let noted = text_of(fitted.history.first().or(fitted.turn.first())).unwrap();
+    let listed: Vec<&str> = noted.split_once(ASKED).unwrap().1.split("\n\n").next().unwrap().lines().collect();
+    assert!(listed[0].starts_with("- Match this pad, 音") && listed[0].ends_with('…'), "the lessons block isn't listed");
+    assert!(!noted.contains("kumi_playbook_untrusted"));
+    let dropped = history.len() - fitted.history.len();
+    let latest = (1..=8).rev().find(|round| dropped > 2 * round).unwrap();
+    assert!(latest >= 4, "enough long messages were dropped to need trimming ({latest})");
+    // A short request keeps just its words, not the lessons after them.
+    let short = vec![user(&observed(&format!("Match this pad\n\n{brief}"))), said(&"w".repeat(20_000))];
+    let fitted = fit(&short, &turn, &budget);
+    assert!(text_of(fitted.turn.first()).unwrap().starts_with(&format!("{SHORTENED}{ASKED}- Match this pad\n\n")));
+    assert!(listed.last().unwrap().starts_with(&format!("- {latest}音")), "the latest dropped message stays: {listed:?}");
+}
+
+#[test]
 fn drop_earliest_keeps_whole_exchanges_from_the_end_starting_where_the_producer_spoke() {
     let messages = vec![user("1"), said("2"), result("3", "three", false), user("4"), said("5")];
     assert_eq!(drop_earliest(&messages, 10_000), &messages[..]);

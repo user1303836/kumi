@@ -17,6 +17,7 @@ use crate::ai::types::{
     AssistantPart, DataContent, FileData, Message, Role, TextPart, ToolPart, ToolResultContentItem, ToolResultOutput, UserPart,
 };
 use crate::core::contracts::{TranscriptLine, TranscriptRole};
+use crate::core::playbook::PLAYBOOK_OPEN;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ContextBudget {
@@ -382,8 +383,8 @@ pub fn note_shortened(mut messages: Vec<Message>, asks: Vec<String>) -> Vec<Mess
 }
 
 /// What the producer said in these messages, oldest first: each of their messages' own words (not
-/// the Live observation Kumi attached, nor Kumi's own "[Kumi] …" prompts), with the list an earlier
-/// removal kept in their place.
+/// the lessons or the Live observation Kumi attached, nor Kumi's own "[Kumi] …" prompts), with the
+/// list an earlier removal kept in their place.
 fn asks_in(messages: &[Message]) -> Vec<String> {
     let mut asks = Vec::new();
     for message in messages {
@@ -392,7 +393,8 @@ fn asks_in(messages: &[Message]) -> Vec<String> {
             let UserPart::Text(text) = part else { continue };
             let (listed, rest) = split_asks(&text.text);
             asks.extend(listed);
-            let words = trim(rest.split(OBSERVATION_MARKER).next().unwrap_or_default());
+            let words = rest.split(OBSERVATION_MARKER).next().unwrap_or_default();
+            let words = trim(words.split(&format!("\n\n{PLAYBOOK_OPEN}")).next().unwrap_or_default());
             if !words.is_empty() && !words.starts_with("[Kumi]") {
                 let line = words.split_whitespace().collect::<Vec<_>>().join(" ");
                 asks.push(if utf16_len(&line) > ASK { format!("{}…", head(&line, ASK)) } else { line });
@@ -411,11 +413,11 @@ fn split_asks(text: &str) -> (Vec<String>, &str) {
 }
 
 /// The list within `ASKS` bytes: the earliest few (often the ground rules) and the latest stay, the ones
-/// between go first.
+/// between go first. Two always fit (each is at most about 900 bytes).
 fn bounded(mut asks: Vec<String>) -> Vec<String> {
     asks.dedup();
-    while asks.len() > 1 && asks.iter().map(|ask| sent(ask) + 4).sum::<usize>() > ASKS {
-        asks.remove(3.min(asks.len() - 1));
+    while asks.len() > 2 && asks.iter().map(|ask| sent(ask) + 4).sum::<usize>() > ASKS {
+        asks.remove(3.min(asks.len() - 2));
     }
     asks
 }
