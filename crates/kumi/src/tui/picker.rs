@@ -42,6 +42,8 @@ impl PickerItem {
 pub struct PickerOptions {
     pub filterable: bool,
     pub hint: Option<String>,
+    /// Answers to Kumi's question: a digit chooses, and other typing goes to the input box.
+    pub answers: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -111,6 +113,11 @@ impl Picker {
 
     fn choosable(&self) -> Vec<&PickerItem> {
         self.visible().into_iter().filter(|item| !item.heading && !item.inert).collect()
+    }
+
+    /// The `n`th choosable item, counting from 1 (an answer's number).
+    pub fn numbered(&self, n: usize) -> Option<&PickerItem> {
+        n.checked_sub(1).and_then(|at| self.choosable().get(at).copied())
     }
 
     pub fn selected(&self) -> Option<&PickerItem> {

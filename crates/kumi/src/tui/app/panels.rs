@@ -159,7 +159,7 @@ impl TuiApp {
             Picker::with_options(
                 "What Kumi remembers · notes, techniques and recipes",
                 items,
-                PickerOptions { filterable: true, hint: None },
+                PickerOptions { filterable: true, ..Default::default() },
             ),
             move |app, selected| {
                 let recipes = recipes.clone();
@@ -244,7 +244,7 @@ impl TuiApp {
                 .collect()
         };
         let title = format!("Conversations about {}", self.0.state.borrow().set_name.as_deref().unwrap_or("this Set"));
-        self.pick(Picker::with_options(title, items, PickerOptions { filterable: true, hint: None }), move |app, item| {
+        self.pick(Picker::with_options(title, items, PickerOptions { filterable: true, ..Default::default() }), move |app, item| {
             let row = kept.iter().find(|r| Some(&r.id) == item.value.as_ref()).cloned();
             async move {
                 app.close_panel();
@@ -291,7 +291,7 @@ impl TuiApp {
             Picker::with_options(
                 "Your recipes · ways of working Kumi replays without planning again",
                 items,
-                PickerOptions { filterable: true, hint: None },
+                PickerOptions { filterable: true, ..Default::default() },
             ),
             move |app, item| {
                 let recipe = recipes.iter().find(|r| Some(&r.name) == item.value.as_ref()).cloned();
@@ -670,6 +670,18 @@ impl TuiApp {
         self.0.scheduler.request();
         picker
     }
+    /// Kumi's answer asked the producer to pick: its options, one key each. Other typing goes to the
+    /// input box, so a free answer still works.
+    pub(super) fn open_answers(&self, choices: Vec<String>) {
+        let items = choices.iter().enumerate().map(|(at, choice)| PickerItem::new(format!("{}. {choice}", at + 1), choice)).collect();
+        let options = PickerOptions { answers: true, ..Default::default() };
+        self.pick(Picker::with_options("Your answer", items, options), |app, item| async move {
+            app.close_panel();
+            let Some(words) = item.value else { return Ok(()) };
+            app.0.state.borrow_mut().editor.set(&words);
+            app.submit().await
+        });
+    }
     fn same_panel(&self, panel: &PanelRef) -> bool {
         self.0.state.borrow().panel.as_ref().is_some_and(|p| Rc::ptr_eq(p, panel))
     }
@@ -769,7 +781,27 @@ impl TuiApp {
                 self.0.tty.write(&format!("\x1b]52;c;{}\x07", base64::engine::general_purpose::STANDARD.encode(url)));
                 self.notice("Copied the sign-in link.", NoticeTone::Info);
             }
-            Panel::Pick { picker, .. } => {
+            Panel::Pick { picker, choose } => {
+                if picker.borrow().options.answers {
+                    let item = text.parse().ok().and_then(|n| picker.borrow().numbered(n).cloned());
+                    let choose = choose.clone();
+                    drop(p);
+                    match item {
+                        Some(item) => {
+                            self.task(move |app| async move {
+                                if let Err(error) = choose(item).await {
+                                    app.panel_failed(&error);
+                                }
+                                Ok(())
+                            });
+                        }
+                        None => {
+                            self.close_panel();
+                            self.on_input(event);
+                        }
+                    }
+                    return;
+                }
                 if picker.borrow().filter.is_empty() && text.starts_with('/') {
                     drop(p);
                     self.close_panel();
@@ -867,7 +899,11 @@ impl TuiApp {
             return Ok(());
         };
         let picker = self.pick(
-            Picker::with_options("Choose a model", vec![inert("Reading your sign-ins…")], PickerOptions { filterable: true, hint: None }),
+            Picker::with_options(
+                "Choose a model",
+                vec![inert("Reading your sign-ins…")],
+                PickerOptions { filterable: true, ..Default::default() },
+            ),
             |app, item| async move { app.choose_model_item(item).await },
         );
         let m = models.clone();

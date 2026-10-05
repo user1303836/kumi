@@ -807,3 +807,35 @@ async fn quitting_right_after_a_change_leaves_nothing_running() {
     assert_eq!(code, 0);
     assert!(tokio::time::timeout(std::time::Duration::from_millis(500), local).await.is_ok(), "a task outlived the app");
 }
+case!(a_question_with_numbered_options_answers_with_one_key_and_free_text_still_works, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    let ask = |h: &Harness| {
+        h.emit(json!({"type":"state","state":"running"}));
+        h.emit(json!({"type":"text","text":"Which bass should duck under the kick?\n\n1. **Sub Bass**\n2. Reese\n3. Both"}));
+        h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+        h.emit(json!({"type":"state","state":"idle"}));
+    };
+    h.type_text("sidechain the bass\r").await;
+    ask(&h);
+    h.has("Your answer");
+    h.has("2. Reese");
+    h.has("a number or enter answers");
+    h.type_text("2").await;
+    h.wait_for_call("submit:Reese").await;
+    assert!(!has(&h.screen(), "Your answer"), "answering closes the choices");
+    ask(&h);
+    h.type_text("the 808 instead").await;
+    assert!(!has(&h.screen(), "Your answer"), "typing goes to the input box");
+    h.has("the 808 instead");
+    assert!(!h.calls().contains(&"submit:the 808 instead".into()));
+    h.type_text("\x03").await;
+    assert!(!has(&h.screen(), "the 808 instead"));
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"Done:\n1. Sidechained Reese\n2. Lowered the sub 2 dB"}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    assert!(!has(&h.screen(), "Your answer"), "a list that isn't a question offers nothing");
+    h.close().await;
+});

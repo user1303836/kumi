@@ -359,7 +359,7 @@ impl TuiApp {
             tokio::task::spawn_local(future);
         }
     }
-    async fn submit(&self) -> Result<(), RuntimeError> {
+    pub(super) async fn submit(&self) -> Result<(), RuntimeError> {
         let raw = self.0.state.borrow().editor.text();
         let command = string::trim(&raw);
         if command.is_empty() {
