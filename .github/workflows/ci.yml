@@ -69,6 +69,20 @@ jobs:
         run: |
           python="$(command -v python3 || command -v python)"
           echo "KUMI_LEGACY_APP=$("$python" scripts/fetch-legacy-release.py "$RUNNER_TEMP/kumi-1.7.5")" >> "$GITHUB_ENV"
+      # The video tests skip without ffmpeg. This is the build Kumi itself fetches on Linux (BtbN's newest
+      # numbered LGPL one), at 8.1 or later, which asks for a stream in pieces (-request_size) as YouTube wants.
+      - name: ffmpeg, for the video tests
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release=repos/BtbN/FFmpeg-Builds/releases/latest
+          asset="$(gh api "$release" --jq '.assets[].name' | grep -E '^ffmpeg-n[0-9]+\.[0-9]+-latest-linux64-lgpl-[0-9]+\.[0-9]+\.tar\.xz$' | sort -V | tail -1)"
+          curl -fsSL --retry 3 "https://github.com/BtbN/FFmpeg-Builds/releases/download/$(gh api "$release" --jq .tag_name)/$asset" | tar -xJ -C "$RUNNER_TEMP"
+          bin="$RUNNER_TEMP/${asset%.tar.xz}/bin"
+          "$bin/ffmpeg" -hide_banner -h protocol=http | grep -q -- -request_size
+          "$bin/ffmpeg" -version | head -1
+          echo "$bin" >> "$GITHUB_PATH"
       - run: cargo fmt --all --check
       - name: Every test, in a home of their own (no test reaches this machine's Live folders or ~/.kumi)
         env:
