@@ -4,7 +4,7 @@ pub use crate::config::kumi_dir as kumi_home;
 pub use crate::update::newer as newer_version;
 use crate::{
     bridge_setup::{ask_yes_no, bridge_version, default_run, executable_dir, executable_name, is_live_running, AsyncBool, Confirm, Run},
-    config::{find_bridge_config, remote_scripts_dir},
+    config::{find_bridge_config, json_files, load_db_file, remote_scripts_dir},
     doctor::read_bridge_server,
     input::TerminalInput,
     live_extension::{extension_data_dir, live_extensions_dir, remove_extension, remove_former_extension, KUMI_EXTENSION_ID},
@@ -19,7 +19,7 @@ use kumi_common::{
 };
 use kumi_runtime::{
     ai::http::{default_fetch, Fetch, FetchInit},
-    core::errors::RuntimeError,
+    core::{errors::RuntimeError, store_import::write_back},
     ears::device::EARS_NAME,
     library::sources::{basename, dirname, join, resolve},
     system::{self, Env, SystemProgram},
@@ -403,6 +403,18 @@ pub async fn rollback_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
     if !migration::has_app(&previous) {
         say("There's no earlier Kumi to go back to.".into());
         return Ok(1);
+    }
+    // The older Kumi reads notes, techniques and lessons from files: what the database keeps is written
+    // back for it first. If that fails, the rollback still goes ahead.
+    let written = match (load_db_file(&io.env), json_files(&io.env)) {
+        (Ok(db), Ok(files)) => write_back(db.into(), files, kumi_common::time::now_ms()).await,
+        (Err(why), _) | (_, Err(why)) => Err(why),
+    };
+    if let Err(why) = written {
+        say(format!(
+            "The older Kumi won't see the notes, techniques or lessons kept since the update ({}); they stay in Kumi's database for when you update again.",
+            why.message()
+        ));
     }
     let legacy = !Path::new(&join(&previous, &executable_name("kumi"))).is_file();
     let bridge_rollback = if legacy { migration::prepare_legacy_rollback(&io, &home).await? } else { None };

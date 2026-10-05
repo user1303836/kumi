@@ -2,7 +2,9 @@
 
 use crate::{
     ids::{content_id, new_id},
-    imports, params, Connection, OptionalExtension, StoreError,
+    imports, params,
+    sync::{self, BaseRow, Kept, Table},
+    Connection, OptionalExtension, StoreError,
 };
 use std::collections::HashMap;
 
@@ -222,18 +224,25 @@ pub fn forget(connection: &Connection, label: &str, now: i64) -> Result<bool, St
 /// Read in a technique an earlier Kumi kept in a file. Its id comes from its label and when it was
 /// kept, so it's read in once and one forgotten here stays forgotten; one in use with that label, name
 /// and idea (written back for an older Kumi) is the same technique. A label another technique in use
-/// has gets the next free one. Whether it was added.
-pub fn import(connection: &Connection, t: &Technique) -> Result<bool, StoreError> {
+/// has gets the next free one. The id of the technique that holds it, and whether it was added.
+pub fn import(connection: &Connection, t: &Technique) -> Result<(String, bool), StoreError> {
     let id = content_id(&["technique", &t.label, &t.at.to_string()]);
-    if imports::known_or_forgotten(connection, "techniques", &id)?
-        || connection
-            .prepare_cached(
-                "SELECT EXISTS (SELECT 1 FROM techniques WHERE label = ?1 AND name = ?2 AND idea = ?3 AND archived_at IS NULL)",
-            )?
-            .query_row(params![t.label, t.name, t.idea], |row| row.get::<_, bool>(0))?
-    {
-        return Ok(false);
+    if imports::known_or_forgotten(connection, "techniques", &id)? {
+        return Ok((id, false));
     }
+    let same: Option<String> = connection
+        .prepare_cached("SELECT id FROM techniques WHERE label = ?1 AND name = ?2 AND idea = ?3 AND archived_at IS NULL")?
+        .query_row(params![t.label, t.name, t.idea], |row| row.get(0))
+        .optional()?;
+    if let Some(same) = same {
+        return Ok((same, false));
+    }
+    insert_as(connection, &id, t)?;
+    Ok((id, true))
+}
+
+/// Add `t` with this id, under its label or, when another technique in use has it, the next free one.
+fn insert_as(connection: &Connection, id: &str, t: &Technique) -> Result<(), StoreError> {
     let in_use: Vec<String> = connection
         .prepare_cached("SELECT label FROM techniques WHERE archived_at IS NULL")?
         .query_map([], |row| row.get(0))?
@@ -260,7 +269,110 @@ pub fn import(connection: &Connection, t: &Technique) -> Result<bool, StoreError
             t.updated,
             t.last_used
         ])?;
-    Ok(true)
+    Ok(())
+}
+
+/// A hash of what a technique says: everything but how it has fared and when (`sync`).
+pub fn hash(t: &Technique) -> String {
+    let given = |value: &Option<String>| value.as_deref().map_or_else(|| "-".to_string(), |value| format!("+{value}"));
+    content_id(&[
+        "technique",
+        &t.name,
+        &t.fits,
+        &t.idea,
+        &given(&t.settings),
+        &given(&t.substitutes),
+        &given(&t.recipe),
+        &given(&t.source_title),
+        &given(&t.source_url),
+        &given(&t.request),
+    ])
+}
+/// A techniques file read in with no base yet: the file's base, and how many were added.
+pub fn read_in(connection: &Connection, file: &[Technique]) -> Result<(Vec<BaseRow>, usize), StoreError> {
+    sync::read_in(connection, &Techniques, file)
+}
+/// What changed in a techniques file since `base`, brought in (`sync::merge`): uses, undos and the
+/// last use take the larger of the file's and the database's.
+pub fn merge(connection: &Connection, base: &[BaseRow], file: &[Technique], now: i64) -> Result<(Vec<BaseRow>, Kept), StoreError> {
+    sync::merge(connection, &Techniques, base, file, now)
+}
+/// The base of a file just written with the techniques in use.
+pub fn base_of(connection: &Connection, file: &[Technique]) -> Result<Vec<BaseRow>, StoreError> {
+    sync::base_of(connection, &Techniques, file)
+}
+
+/// The techniques, as `sync` reaches them.
+struct Techniques;
+impl Table for Techniques {
+    type Row = Technique;
+    fn label<'a>(&self, row: &'a Technique) -> &'a str {
+        &row.label
+    }
+    fn hash(&self, row: &Technique) -> String {
+        hash(row)
+    }
+    fn get(&self, c: &Connection, id: &str) -> Result<Option<(Technique, bool)>, StoreError> {
+        Ok(c.prepare_cached(&format!("SELECT {COLUMNS}, archived_at IS NOT NULL FROM techniques WHERE id = ?1"))?
+            .query_row(params![id], |found| Ok((row(found)?, found.get(15)?)))
+            .optional()?)
+    }
+    fn in_use(&self, c: &Connection, label: &str) -> Result<Option<String>, StoreError> {
+        Ok(c.prepare_cached("SELECT id FROM techniques WHERE label = ?1 AND archived_at IS NULL")?
+            .query_row(params![label], |row| row.get(0))
+            .optional()?)
+    }
+    fn overwrite(&self, c: &Connection, id: &str, t: &Technique) -> Result<(), StoreError> {
+        let Some((here, archived)) = self.get(c, id)? else { return Ok(()) };
+        let label = if archived {
+            let in_use: Vec<String> = c
+                .prepare_cached("SELECT label FROM techniques WHERE archived_at IS NULL")?
+                .query_map([], |row| row.get(0))?
+                .collect::<Result<_, _>>()?;
+            imports::free_label(&in_use, &here.label)
+        } else {
+            here.label
+        };
+        c.prepare_cached(
+            "UPDATE techniques SET label = ?2, name = ?3, fits = ?4, idea = ?5, settings = ?6, substitutes = ?7, recipe = ?8,
+             source_title = ?9, source_url = ?10, request = ?11, updated_at = ?12, archived_at = NULL WHERE id = ?1",
+        )?
+        .execute(params![
+            id,
+            label,
+            t.name,
+            t.fits,
+            t.idea,
+            t.settings,
+            t.substitutes,
+            t.recipe,
+            t.source_title,
+            t.source_url,
+            t.request,
+            t.updated
+        ])?;
+        Ok(())
+    }
+    fn add(&self, c: &Connection, t: &Technique) -> Result<String, StoreError> {
+        let id = new_id();
+        insert_as(c, &id, t)?;
+        Ok(id)
+    }
+    fn import(&self, c: &Connection, t: &Technique) -> Result<(String, bool), StoreError> {
+        import(c, t)
+    }
+    fn archive(&self, c: &Connection, id: &str, now: i64) -> Result<bool, StoreError> {
+        Ok(c.prepare_cached("UPDATE techniques SET archived_at = ?2 WHERE id = ?1 AND archived_at IS NULL")?.execute(params![id, now])? > 0)
+    }
+    fn count(&self, c: &Connection, id: &str, t: &Technique) -> Result<(), StoreError> {
+        c.prepare_cached(
+            "UPDATE techniques SET used = max(used, ?2), undone = max(undone, ?3),
+             last_used_at = CASE WHEN ?4 IS NULL THEN last_used_at WHEN last_used_at IS NULL THEN ?4 ELSE max(last_used_at, ?4) END
+             WHERE id = ?1",
+        )?
+        .execute(params![id, t.used, t.undone, t.last_used])?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
