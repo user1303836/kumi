@@ -60,6 +60,9 @@ pub struct Rendering {
     open_ears: Option<OpeningEars>,
     ears_setup: RefCell<Option<EarsFuture>>,
     ears_refused: Cell<bool>,
+    /// When Kumi last couldn't set its listening device up (Live's Browser never showed it, say): an
+    /// audition in the next EARS_RETRY_MS records instead, rather than waiting for the same failure.
+    ears_failed_at: Cell<Option<i64>>,
     ears_folder: PathBuf,
     rendering: Cell<bool>,
     rounds: Cell<usize>,
@@ -94,6 +97,7 @@ impl Rendering {
             },
             ears_setup: RefCell::new(None),
             ears_refused: Cell::new(false),
+            ears_failed_at: Cell::new(None),
             ears_folder,
             rendering: Cell::new(false),
             rounds: Cell::new(0),
@@ -116,6 +120,7 @@ impl Rendering {
     /// A restart of Live may make Max for Live available; bridge-only disconnects leave refusal intact.
     pub fn reset_live(&self) {
         self.ears_refused.set(false);
+        self.ears_failed_at.set(None);
     }
     fn connection(&self) -> &LiveConnection {
         &self.history.connection

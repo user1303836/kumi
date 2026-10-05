@@ -122,6 +122,8 @@ pub struct McpHostOptions {
     /// The version the host reports (`serverInfo`, `exporterVersion`); the bridge's own when unset.
     /// Golden-file tests pin it, so a version bump changes none of them.
     pub server_version: Option<String>,
+    /// The clock (milliseconds) the Browser search's kept walk is aged by; the system's when unset.
+    pub now: Option<std::rc::Rc<dyn Fn() -> f64>>,
 }
 /// Shared state of one stdio host. Protocol decisions retain their request lease until execution ends.
 pub struct McpHost {

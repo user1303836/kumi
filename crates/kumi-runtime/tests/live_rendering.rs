@@ -215,7 +215,15 @@ async fn replay() {
             at: Cell::new(0),
             folder: folder.path().into(),
         });
-        if config.get("ears").is_some() {
+        // Ears that can't be set up (no Max for Live, say): each try is counted.
+        let opened = Rc::new(Cell::new(0));
+        if config["ears"] == "unopenable" {
+            let opens = opened.clone();
+            options.ears = Some(EarsSetup::Open(Rc::new(move || {
+                opens.set(opens.get() + 1);
+                async { Err::<Rc<dyn EarsLink>, _>(RuntimeError::plain("Max for Live isn't in this Live")) }.boxed_local()
+            })));
+        } else if config.get("ears").is_some() {
             let link = ears.clone();
             options.ears = Some(EarsSetup::Open(Rc::new(move || {
                 let link: Rc<dyn EarsLink> = link.clone();
@@ -312,6 +320,9 @@ async fn replay() {
         eq(&json!(*actions.borrow()), &case["actions"], &format!("{} actions", case["label"]));
         eq(&json!(*auditions.borrow()), &case["auditions"], &format!("{} auditions", case["label"]));
         eq(&json!(*endpoint.releases.borrow()), &case["releases"], &format!("{} transaction releases", case["label"]));
+        if config["ears"] == "unopenable" {
+            assert_eq!(opened.get(), 1, "a listening device that couldn't be set up isn't tried again at each audition");
+        }
         rendering.close().await;
         connection.close().await.unwrap();
         assert_eq!(ears.at.get(), ears.calls.len(), "{} Ears call count", case["label"]);

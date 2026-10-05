@@ -10,7 +10,13 @@ use kumi_common::{
 };
 use serde::Serialize;
 const CANDIDATES: usize = 10_000;
-const CACHE_MS: f64 = 60_000.;
+/// How long a walk of Live's Browser is kept. A walk holds Live's main thread (0.6–0.75 s for Live's
+/// own library, more with packs and plug-ins), and the Browser rarely changes: when nothing kept has the
+/// whole query in its name, the Browser is walked again, once, for what's new (a pack, a device Kumi
+/// made), unless what's kept is under a minute old: a search for something that isn't there walks at
+/// most once a minute.
+const CACHE_MS: f64 = 600_000.;
+const MISS_WALK_MS: f64 = 60_000.;
 const ROOTS: &[&str] =
     &["instruments", "audio_effects", "midi_effects", "modulators", "drums", "plugins", "packs", "max_for_live", "clips"];
 #[derive(Clone)]
@@ -75,6 +81,9 @@ impl McpHost {
             _ => return None,
         })
     }
+    fn browser_now(&self) -> f64 {
+        self.options.now.as_ref().map_or_else(now_ms_f64, |now| now())
+    }
     pub async fn live_browser_search_async(&self, id: &Value, params: &Value) -> Result<Value, LiveError> {
         if !has_only(params, &["category", "query", "limit", "matchMode", "refresh"])
             || (params.get("category").is_some() && !ROOTS.contains(&js_string(&params["category"])?.as_str()))
@@ -97,8 +106,12 @@ impl McpHost {
                 return Ok(success_text(id,&json!({"items":result["items"].as_array().cloned().unwrap_or_default()})));
             }
             let epoch=status.epoch.unwrap_or(0);let key=params["category"].as_str().unwrap_or("all");
+            let query=params["query"].as_str().unwrap_or("");let lower=trim(query).to_lowercase();let mut seen=HashSet::new();
+            let tokens:Vec<_>=words(&lower).filter(|w|w.len()<=64&&seen.insert(w.to_string())).take(8).map(str::to_owned).collect();
+            let mut refresh=params["refresh"]==true;
+            let (entry,from_cache)=loop{
             let prior=self.browser_search_cache.borrow().iter().find(|(name,_)|name==key).map(|(_,v)|v.clone());
-            let (entry,from_cache)=if let Some(prior)=prior.filter(|c|c.epoch==epoch&&now_ms_f64()-c.at<CACHE_MS&&params["refresh"]!=true){
+            let (entry,from_cache)=if let Some(prior)=prior.filter(|c|c.epoch==epoch&&self.browser_now()-c.at<CACHE_MS&&!refresh){
                 self.browser_search_cache.borrow_mut().retain(|(name,_)|name!=key);self.browser_search_cache.borrow_mut().push_back((key.into(),prior.clone()));(prior,true)
             }else{
                 let mut args=json!({"query":"","limit":CANDIDATES});if let Some(category)=params.get("category"){args["category"]=category.clone();}
@@ -112,18 +125,21 @@ impl McpHost {
                         ||!row["path"].as_str().is_some_and(|s|utf16_len(s)<=512)||!row["isDevice"].is_boolean(){return Err(LiveError::error("browser search returned a malformed candidate set"));}
                     items.push(json!({"id":row["id"],"objectIdentity":row["objectIdentity"],"name":row["name"],"category":row["category"],"path":row["path"],"isDevice":row["isDevice"]}));
                 }
-                let entry=BrowserCache{items:std::rc::Rc::new(items),at:now_ms_f64(),epoch};let mut cache=self.browser_search_cache.borrow_mut();
+                let entry=BrowserCache{items:std::rc::Rc::new(items),at:self.browser_now(),epoch};let mut cache=self.browser_search_cache.borrow_mut();
                 if let Some((_,old))=cache.iter_mut().find(|(name,_)|name==key){*old=entry.clone();}else{cache.push_back((key.into(),entry.clone()));}
                 while cache.len()>16{cache.pop_front();}(entry,false)
             };
-            let query=params["query"].as_str().unwrap_or("");let lower=trim(query).to_lowercase();let mut seen=HashSet::new();
-            let tokens:Vec<_>=words(&lower).filter(|w|w.len()<=64&&seen.insert(w.to_string())).take(8).map(str::to_owned).collect();
+            // Nothing kept has the whole query in its name (a new "Gritty Reese Bass" besides an old "Bass"):
+            // walk again, once, for what's new since.
+            if from_cache&&!tokens.is_empty()&&self.browser_now()-entry.at>=MISS_WALK_MS&&!entry.items.iter().any(|item|rank(item,&lower,&tokens).exact_name_match){refresh=true;continue;}
+            break (entry,from_cache);
+            };
             let mut ranked:Vec<_>=entry.items.iter().map(|item|(item,rank(item,&lower,&tokens))).filter(|(_,r)|tokens.is_empty()||!r.matched_tokens.is_empty()).collect();
             ranked.sort_by(|(a,ar),(b,br)|br.score.cmp(&ar.score).then_with(||a["name"].as_str().unwrap().encode_utf16().cmp(b["name"].as_str().unwrap().encode_utf16())).then_with(||a["id"].as_str().unwrap().encode_utf16().cmp(b["id"].as_str().unwrap().encode_utf16())));
             let limit=params["limit"].as_f64().unwrap_or(50.) as usize;
             let page:Vec<_>=ranked.iter().take(limit).map(|(item,r)|{let mut row=(*item).clone();row["score"]=json!(r.score);row["match"]=json!({"matchedTokens":r.matched_tokens,"exactNameMatch":r.exact_name_match});row}).collect();
             let mut roots:Vec<_>=entry.items.iter().map(|i|i["category"].as_str().unwrap()).collect::<HashSet<_>>().into_iter().collect();roots.sort_by(|a,b|a.encode_utf16().cmp(b.encode_utf16()));
-            Ok(success_text(id,&json!({"items":page,"matchMode":"ranked","query":query,"tokens":tokens,"searchedRoots":roots,"candidates":entry.items.len(),"candidateBound":CANDIDATES,"candidateBoundReached":entry.items.len()>=CANDIDATES,"truncated":ranked.len()>page.len(),"fromCache":from_cache,"cacheAgeSeconds":round((now_ms_f64()-entry.at)/1000.).max(0.),"cacheTtlSeconds":CACHE_MS/1000.,"epoch":epoch,"note":"Ranked host-side over one bounded candidate traversal per root; searchedRoots are the roots that contributed candidates, so a bound-limited traversal may not have reached every requested root. Substring-exact matching remains available with matchMode=substring. Load an item straight from these results."})))
+            Ok(success_text(id,&json!({"items":page,"matchMode":"ranked","query":query,"tokens":tokens,"searchedRoots":roots,"candidates":entry.items.len(),"candidateBound":CANDIDATES,"candidateBoundReached":entry.items.len()>=CANDIDATES,"truncated":ranked.len()>page.len(),"fromCache":from_cache,"cacheAgeSeconds":round((self.browser_now()-entry.at)/1000.).max(0.),"cacheTtlSeconds":CACHE_MS/1000.,"epoch":epoch,"note":"Ranked host-side over one bounded candidate traversal per root; searchedRoots are the roots that contributed candidates, so a bound-limited traversal may not have reached every requested root. Substring-exact matching remains available with matchMode=substring. Load an item straight from these results."})))
         }.await;
         Ok(result.unwrap_or_else(|cause| adapter_tool_error(id, &cause, "Browser search requires an available Live Browser.")))
     }

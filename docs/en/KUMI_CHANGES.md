@@ -354,6 +354,6 @@ stops there and says to update; `kumi update` or `kumi bridge` does it.
 The Willington tools appear whenever the bridge offers them, which it does only
 with the provider set up.
 
-Each Kumi release ships with a bridge: Kumi 1.7.5 to 1.8.1 with bridge 1.0.74, 1.7.0 to 1.7.4 with 1.0.73, 1.6.1 with 1.0.72, 1.6.0 with 1.0.71, 1.5 with
+Each Kumi release ships with a bridge: Kumi 1.8.2 with bridge 1.0.76, 1.7.5 to 1.8.1 with 1.0.74, 1.7.0 to 1.7.4 with 1.0.73, 1.6.1 with 1.0.72, 1.6.0 with 1.0.71, 1.5 with
 1.0.70, 1.4 with 1.0.69, 1.3 with 1.0.68, 1.2 with 1.0.66, 1.1 with 1.0.53 and
 1.0 with 1.0.52.
