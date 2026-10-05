@@ -182,6 +182,9 @@ const ASIDE_NOTE: &str = "(A side question while you work. Answer it briefly, in
 /// Ends a stopped turn's kept steps, for the model and in the transcript.
 pub const STOPPED_NOTE: &str =
     "(Stopped before finishing. The steps above happened; the one in progress may have too, so check Live before carrying on.)";
+/// The result of a call a stopped batch never ran, and of the one it was running.
+pub const STOPPED_BEFORE_RUNNING: &str = "Stopped before running; nothing was done.";
+pub const STOPPED_WHILE_RUNNING: &str = "Stopped while running; it may have changed Live, so check before running it again.";
 
 /// The turn under way: guidance waiting for its next step, what it has said and done so far, and when it settles.
 struct Running {
@@ -561,6 +564,8 @@ async fn turn(inner: Rc<Inner>, input: String, signal: Signal, emit: KernelEmit,
             if !result.calls.is_empty() {
                 let (results, reply) = turn.execute(&result.calls).await?;
                 turn.messages.borrow_mut().push(Message::Tool { content: results, provider_options: None });
+                // A batch stopped partway is kept with what it finished (see `execute`); the turn stops here.
+                abort.check()?;
                 // The tools finished the request and said so: their reply is the answer, with no model call to
                 // write one. A quiet call (a note kept) adds nothing: it ends the turn only when this reply
                 // already holds the model's answer; a model that kept a note first still gets to answer.
@@ -764,13 +769,19 @@ impl Turn {
     /// Runs a step's calls in order. `reply` is set when all succeeded and some finished the request, or
     /// every call was quiet (an empty reply: done, nothing to add); then no model reply follows. A call
     /// that started while it was written finishes with its whole input.
+    ///
+    /// Stopped partway, a batch keeps the calls that finished, and each of the rest gets a result saying
+    /// it was stopped (every call needs one), so the next request doesn't redo what's done. A batch
+    /// stopped before any call finished goes, as before.
     async fn execute(&self, calls: &[(ToolCall, Option<JsonObject>)]) -> Result<(Vec<ToolPart>, Option<String>), StepError> {
         let mut results = Vec::new();
         let mut replies: Vec<String> = Vec::new();
         let mut failed = false;
         let mut quiet = 0;
         for (call, input) in calls {
-            self.abort.check()?;
+            if self.abort.is_cancelled() {
+                return self.stopped(results, calls, false);
+            }
             let streamed = self.early.borrow().get(&call.tool_call_id).cloned();
             let begun = streamed.as_ref().map_or(0.0, |entry| entry.begun.get());
             let started = if begun != 0.0 { begun } else { perf_now() };
@@ -819,13 +830,14 @@ impl Turn {
                             outcome
                         }
                         Err(error) => {
-                            self.abort.check()?;
+                            if self.abort.is_cancelled() {
+                                return self.stopped(results, calls, true);
+                            }
                             Outcome { text: head(&error.to_string(), MAX_TOOL_ERROR), is_error: true, images: Vec::new() }
                         }
                     }
                 }
             };
-            self.abort.check()?;
             failed |= outcome.is_error;
             (self.deliver)(KernelEvent::ToolEnd {
                 id: call.tool_call_id.clone(),
@@ -840,6 +852,9 @@ impl Turn {
                 provider_options: None,
             }));
         }
+        if self.abort.is_cancelled() {
+            return self.stopped(results, calls, false);
+        }
         let reply = if !failed && !replies.is_empty() {
             Some(replies.join("\n\n"))
         } else if !failed && quiet == calls.len() {
@@ -848,6 +863,29 @@ impl Turn {
             None
         };
         Ok((results, reply))
+    }
+
+    /// A batch's results once it's stopped: the finished calls', then a stopped result for each of the
+    /// rest, the first marked as running when it was cut off. None finished: the batch goes.
+    fn stopped(
+        &self,
+        mut results: Vec<ToolPart>,
+        calls: &[(ToolCall, Option<JsonObject>)],
+        running: bool,
+    ) -> Result<(Vec<ToolPart>, Option<String>), StepError> {
+        if results.is_empty() {
+            return Err(StepError::Aborted);
+        }
+        for (index, (call, _)) in calls[results.len()..].iter().enumerate() {
+            let text = if running && index == 0 { STOPPED_WHILE_RUNNING } else { STOPPED_BEFORE_RUNNING };
+            results.push(ToolPart::ToolResult(ToolResultPart {
+                tool_call_id: call.tool_call_id.clone(),
+                tool_name: call.tool_name.clone(),
+                output: tool_output(Outcome { text: text.into(), is_error: true, images: Vec::new() }),
+                provider_options: None,
+            }));
+        }
+        Ok((results, None))
     }
 }
 
