@@ -248,6 +248,8 @@ pub struct ResolveModelOptions {
     pub env: Option<HashMap<String, String>>,
     pub fetch: Option<Rc<dyn Fetch>>,
     pub effort: Option<Effort>,
+    /// A faster tier the model's list offers ("priority"), asked for on every request.
+    pub service_tier: Option<String>,
 }
 struct IdentifiedFetch(Rc<dyn Fetch>);
 #[async_trait(?Send)]
@@ -291,6 +293,7 @@ pub async fn resolve_model(options: ResolveModelOptions) -> Result<ModelBinding,
     let base = options.fetch.unwrap_or_else(default_fetch);
     let identified: Rc<dyn Fetch> = Rc::new(IdentifiedFetch(base.clone()));
     let effort = options.effort;
+    let service_tier = options.service_tier.clone();
     let bind = |model, prepare| ModelBinding { id: options.model.clone(), model, prepare, budget: None };
     if provider == ProviderId::OpenaiCodex {
         let token = codex_token_source(options.store, TokenOptions { fetch: Some(base), now: None });
@@ -309,6 +312,9 @@ pub async fn resolve_model(options: ResolveModelOptions) -> Result<ModelBinding,
                 let mut extra = Map::from_iter([("textVerbosity".into(), json!("low"))]);
                 if let Some(effort) = effort {
                     extra.insert("reasoningEffort".into(), json!(effort));
+                }
+                if let Some(tier) = &service_tier {
+                    extra.insert("serviceTier".into(), json!(tier));
                 }
                 let mut options = responses_request(request, extra);
                 options.headers = Some([(String::from("session-id"), session)].into());

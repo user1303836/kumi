@@ -132,7 +132,7 @@ fn kernel(binding: ModelBinding) -> AgentKernel {
     .unwrap()
 }
 fn options(model: &str, store: Rc<dyn CredentialStore>, fetch: Rc<dyn Fetch>) -> ResolveModelOptions {
-    ResolveModelOptions { model: model.into(), store, fetch: Some(fetch), env: None, effort: None }
+    ResolveModelOptions { model: model.into(), store, fetch: Some(fetch), env: None, effort: None, service_tier: None }
 }
 fn request(messages: Vec<Message>) -> ModelRequest {
     ModelRequest { instructions: "fixture instructions".into(), messages, tools: vec![], session_id: "session-1".into() }
@@ -208,6 +208,24 @@ async fn codex_stateless_requests_identify_kumi_carry_account_session_headers_an
                 }
             }
             kernel.close().await;
+        })
+        .await;
+}
+#[tokio::test]
+async fn codex_asks_for_the_faster_tier_only_when_it_is_chosen() {
+    LocalSet::new()
+        .run_until(async {
+            for tier in [None, Some("priority")] {
+                let (_dir, store) = store();
+                let credential = credential();
+                store.update_with("openai-codex", move |_| async move { Ok(Some(Credential::Oauth(credential))) }).await.unwrap();
+                let (fetch, requests) = recorder(|_, _| sse(answer()));
+                let mut opts = options("openai-codex/gpt-6-astra", store, fetch);
+                opts.service_tier = tier.map(str::to_string);
+                let binding = resolve_model(opts).await.unwrap();
+                let _ = binding.model.do_stream((binding.prepare)(request(vec![Message::user_text("tempo?")]))).await.unwrap();
+                assert_eq!(requests.borrow()[0].body.get("service_tier").and_then(|v| v.as_str()), tier);
+            }
         })
         .await;
 }

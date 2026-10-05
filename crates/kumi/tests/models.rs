@@ -42,6 +42,23 @@ impl Fetch for Offline {
         Err(LanguageModelError::other("offline"))
     }
 }
+/// ChatGPT's model list: Astra offers a faster tier, Luna none.
+struct Chatgpt;
+#[async_trait(?Send)]
+impl Fetch for Chatgpt {
+    async fn fetch(&self, url: &str, _: FetchInit) -> Result<Response, LanguageModelError> {
+        if !url.starts_with("https://chatgpt.com/backend-api/codex/models") {
+            return Ok(Response::text_response(404, ""));
+        }
+        Ok(Response::json_response(
+            200,
+            json!({"models":[
+                {"slug":"gpt-6-astra","display_name":"GPT-6 Astra","priority":1,"visibility":"list","service_tiers":[{"id":"priority","name":"Fast","description":"2x speed, increased usage"}]},
+                {"slug":"gpt-6-luna","display_name":"GPT-6 Luna","priority":2,"visibility":"list","service_tiers":[]}
+            ]}),
+        ))
+    }
+}
 struct Fixture {
     _folder: tempfile::TempDir,
     control: ModelControl,
@@ -51,6 +68,9 @@ struct Fixture {
 }
 impl Fixture {
     fn new(env: Env) -> Self {
+        Self::with_fetch(env, Rc::new(Anthropic))
+    }
+    fn with_fetch(env: Env, fetch: Rc<dyn Fetch>) -> Self {
         let folder = tempfile::tempdir().unwrap();
         let store: Rc<dyn CredentialStore> = Rc::new(open_credential_store(folder.path().join("auth.json")));
         let settings_file = folder.path().join("settings.json").to_string_lossy().into_owned();
@@ -59,7 +79,7 @@ impl Fixture {
             store: store.clone(),
             settings_file: settings_file.clone(),
             env,
-            fetch: Some(Rc::new(Anthropic)),
+            fetch: Some(fetch),
             changed: Rc::new({
                 let changes = changes.clone();
                 move || {
@@ -120,6 +140,48 @@ async fn model_and_effort_persist_an_unsupported_effort_reverts_and_signout_is_a
     assert_eq!(error.kumi().unwrap().kind, FailureKind::Auth);
     assert_eq!(error.kumi().unwrap().provider.as_deref(), Some("anthropic"));
     assert!(!f.control.sign_out(ProviderId::Anthropic).await.unwrap());
+}
+#[tokio::test(flavor = "current_thread")]
+async fn fast_uses_the_tier_the_models_list_offers_persists_and_reaches_the_request() {
+    use base64::Engine;
+    let f = Fixture::with_fetch(Env::new(), Rc::new(Chatgpt));
+    let claims = json!({"https://api.openai.com/auth":{"chatgpt_account_id":"acct-1"},"exp":kumi_common::time::now_ms()/1000+3600});
+    let access = format!("e30.{}.sig", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).unwrap()));
+    let credential = kumi_runtime::auth::store::OAuthCredential {
+        access,
+        refresh: "refresh-1".into(),
+        expires: kumi_common::time::now_ms() as f64 + 86400000.,
+        account_id: "acct-1".into(),
+    };
+    f.store.update("openai-codex", Box::new(move |_| async move { Ok(Some(Credential::Oauth(credential))) }.boxed_local())).await.unwrap();
+    let tier = |control: &ModelControl| {
+        let control = control.clone();
+        async move {
+            let binding = control.binding().await.unwrap();
+            let request = kumi_runtime::kernel::agent::ModelRequest {
+                instructions: "i".into(),
+                messages: vec![],
+                tools: vec![],
+                session_id: "s".into(),
+            };
+            (binding.prepare)(request).provider_options.unwrap()["openai"].get("serviceTier").cloned()
+        }
+    };
+    f.control.choose("openai-codex/gpt-6-luna").await.unwrap();
+    assert_eq!(f.control.set_fast(true).await.unwrap(), None, "Luna's list offers no faster tier");
+    assert!(f.settings().get("fast").is_none());
+    f.control.choose("openai-codex/gpt-6-astra").await.unwrap();
+    assert_eq!(f.control.set_fast(true).await.unwrap().map(|t| t.name), Some("Fast".into()));
+    assert_eq!(f.settings(), json!({"model":"openai-codex/gpt-6-astra","fast":true}));
+    assert_eq!(f.control.current().fast.as_deref(), Some("Fast"));
+    assert_eq!(tier(&f.control).await, Some(json!("priority")));
+    f.control.choose("openai-codex/gpt-6-luna").await.unwrap();
+    assert_eq!(f.control.current().fast, None, "on, but this model has no faster tier");
+    assert_eq!(tier(&f.control).await, None);
+    f.control.choose("openai-codex/gpt-6-astra").await.unwrap();
+    assert_eq!(f.control.set_fast(false).await.unwrap(), None);
+    assert_eq!(f.settings(), json!({"model":"openai-codex/gpt-6-astra"}));
+    assert_eq!(tier(&f.control).await, None);
 }
 #[tokio::test(flavor = "current_thread")]
 async fn opencode_zen_and_go_share_new_keys_and_invalidate_the_current_binding() {

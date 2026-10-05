@@ -56,6 +56,7 @@ Kumi はターミナルウィンドウ全体を使い、Kumi が閉じたとき�
 | `/refresh` | モデルに尋ねずに Set を読み直す |
 | `/copy` | Kumi の最後の答えをクリップボードにコピーする |
 | `/model`, `/effort` | モデル（各プロバイダー自身の一覧から、続いてこのコンピューター上のモデルサーバー：Ollama、LM Studio、settings.json に書いたもの。入力して絞り込める）と、どれだけ深く考えるかを選ぶ。次のメッセージから反映される |
+| `/fast` | プロバイダーが一覧に載せているとき、モデルの高速ティアをオンにする（ChatGPT の「Fast」：回答が速くなり、使用量も増える）。もう一度 `/fast` でオフ。モデル名の横に「· fast」と表示される |
 | `/login`, `/logout` | サインイン（ブラウザで ChatGPT、またはドットでだけ表示される API キー）またはサインアウト |
 | `/goal <what to reach>` | Kumi がたどり着くまで、ある音を追い求める。`/goal` だけなら一時停止した目標を再開し、`/goal stop`（または `/goal end`）で終える |
 | `/memory` | Kumi が保存しているすべて：あなたとこの Set についてのメモ、あなたの Set から学んだこと、テクニック、レシピ、教訓。一つ選ぶと忘れさせられる（レシピは実行するか忘れさせる） |
@@ -108,7 +109,7 @@ Kumi はターミナルウィンドウ全体を使い、Kumi が閉じたとき�
 
 ## プレーンモード
 
-`KUMI_UI=plain`、またはパイプを通した入力や出力では、代わりに一行ずつのプレーンなインターフェースになり、スクリーンリーダーやログに向いています。使えるのは `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new`、`/conversations [n]`、`/model [provider/model]`、`/effort [level|default]`、`/logout <provider>`、`/memory`、`/forget <id>`、`/recipes`、`/update`、`/quit` で、`/btw`、`/goal`、`/copy` はありません。サインインはシェルから `kumi login` で行います。Ctrl-C は答えを止め、Kumi が何もしていないときは終了します。
+`KUMI_UI=plain`、またはパイプを通した入力や出力では、代わりに一行ずつのプレーンなインターフェースになり、スクリーンリーダーやログに向いています。使えるのは `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new`、`/conversations [n]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/recipes`、`/update`、`/quit` で、`/btw`、`/goal`、`/copy` はありません。サインインはシェルから `kumi login` で行います。Ctrl-C は答えを止め、Kumi が何もしていないときは終了します。
 
 ## ターミナル
 

@@ -638,3 +638,19 @@ case!(history_scroll_mouse_keyboard_and_badges, async {
     h.has("└ FX Saturator");
     h.close().await;
 });
+case!(fast_turns_on_the_tier_the_model_offers_and_shows_it_beside_the_model, async {
+    let m = FakeModels::catalog();
+    let h = model_harness(m.clone(), 120);
+    h.start().await;
+    h.type_text("/fast\r").await;
+    h.has("Fast is on: 2x speed, increased usage. /fast again turns it off.");
+    h.has("GPT-6 Astra · fast");
+    h.type_text("/fast\r").await;
+    h.has("Back to the standard tier.");
+    assert!(!has(&h.screen(), "Astra · fast"));
+    *m.model.borrow_mut() = Some("openai-codex/gpt-6-luna".into());
+    h.type_text("/fast\r").await;
+    h.has("GPT-6 Luna has no faster tier to turn on.");
+    assert_eq!(m.calls.borrow().iter().filter(|c| c.starts_with("fast:")).collect::<Vec<_>>(), ["fast:true", "fast:false"]);
+    h.close().await;
+});

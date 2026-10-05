@@ -491,6 +491,7 @@ fn info_of(server: &LocalServer, facts: Facts) -> ModelInfo {
         context: facts.served.or(facts.most),
         loaded: facts.in_memory.then_some(true),
         r#where: Some(server.r#where.clone()),
+        service_tiers: Vec::new(),
     }
 }
 pub async fn list_local_models(server: &LocalServer, options: Transport) -> Result<Vec<ModelInfo>, RuntimeError> {

@@ -835,7 +835,8 @@ impl TuiApp {
             return Some("no model chosen".into());
         };
         let name = current.name.unwrap_or_else(|| model.split_once('/').map(|(_, m)| m).unwrap_or(&model).into());
-        Some(current.effort.map(|e| format!("{name} · {}", e.as_str())).unwrap_or(name))
+        let label = current.effort.map(|e| format!("{name} · {}", e.as_str())).unwrap_or(name);
+        Some(current.fast.map(|tier| format!("{label} · {}", tier.to_lowercase())).unwrap_or(label))
     }
     pub(super) fn tokens_used(&self) -> String {
         let Some(provider) = self.0.options.models.as_ref().and_then(|m| m.current().provider).as_deref().and_then(ProviderId::parse)

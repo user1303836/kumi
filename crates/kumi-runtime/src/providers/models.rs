@@ -41,6 +41,18 @@ pub struct ModelInfo {
     pub loaded: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub r#where: Option<String>,
+    /// Faster processing the provider offers for this model (ChatGPT's "Fast"), as its list names it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub service_tiers: Vec<ServiceTier>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceTier {
+    /// What a request asks for ("priority").
+    pub id: String,
+    /// What the provider calls it ("Fast").
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EffortInfo {
@@ -124,6 +136,7 @@ fn from_id(provider: ProviderId, model: &str, name: Option<String>) -> ModelInfo
         context: None,
         loaded: None,
         r#where: None,
+        service_tiers: Vec::new(),
     }
 }
 fn rank(value: &Value) -> f64 {
@@ -193,6 +206,16 @@ pub async fn list_models(provider: ProviderId, options: ListOptions) -> Result<V
                     })
                     .collect();
                 info.default_effort = row["default_reasoning_level"].as_str().and_then(Effort::parse);
+                info.service_tiers = row["service_tiers"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|tier| {
+                        let id =
+                            tier["id"].as_str().filter(|id| (1..=40).contains(&id.len()) && id.bytes().all(|c| c.is_ascii_graphic()))?;
+                        Some(ServiceTier { id: id.into(), name: text(&tier["name"], 40)?, description: text(&tier["description"], 120) })
+                    })
+                    .collect();
                 info
             })
             .collect());

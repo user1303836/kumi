@@ -329,7 +329,7 @@ impl TuiApp {
             .filter(|cmd| {
                 cmd.name.starts_with(&text)
                     && match cmd.name {
-                        "/model" | "/effort" | "/login" | "/logout" => self.0.options.models.is_some(),
+                        "/model" | "/effort" | "/fast" | "/login" | "/logout" => self.0.options.models.is_some(),
                         "/memory" => c.has_memory(),
                         "/recipes" => c.has_recipes(),
                         "/conversations" => c.has_conversations(),
@@ -383,6 +383,26 @@ impl TuiApp {
         if command == "/voice" && self.0.voice.is_some() {
             self.clear_editor();
             self.open_voice(None);
+            return Ok(());
+        }
+        if let Some(models) = self.0.options.models.clone().filter(|_| command == "/fast") {
+            self.clear_editor();
+            let current = models.current();
+            let on = current.fast.is_none();
+            let name = current.name.or(current.model).unwrap_or_else(|| "This model".into());
+            match models.set_fast(on).await {
+                Ok(Some(tier)) => self.notice(
+                    &format!(
+                        "{} is on{}. /fast again turns it off.",
+                        tier.name,
+                        tier.description.map(|d| format!(": {d}")).unwrap_or_default()
+                    ),
+                    NoticeTone::Info,
+                ),
+                Ok(None) if on => self.notice(&format!("{name} has no faster tier to turn on."), NoticeTone::Info),
+                Ok(None) => self.notice("Back to the standard tier.", NoticeTone::Info),
+                Err(error) => self.error(&error),
+            }
             return Ok(());
         }
         if self.0.options.models.is_some() && matches!(command, "/model" | "/effort" | "/login" | "/logout") {
@@ -768,7 +788,7 @@ pub(super) struct Command {
     pub about: &'static str,
 }
 
-pub(super) const HELP: &str = "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, and /conversations goes back to an earlier one · /reconnect connects to Live again, keeping the conversation · /copy copies the last answer; to select text yourself, hold Shift while dragging (Option in iTerm2) · /model and /effort choose the model and how hard it thinks; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your Sets), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi · ctrl+c clears the box, then quits · type / for commands";
+pub(super) const HELP: &str = "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, and /conversations goes back to an earlier one · /reconnect connects to Live again, keeping the conversation · /copy copies the last answer; to select text yourself, hold Shift while dragging (Option in iTerm2) · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your Sets), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi · ctrl+c clears the box, then quits · type / for commands";
 pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/new", about: "Forget this conversation and start fresh" },
     Command { name: "/btw", about: "Ask something on the side, without interrupting Kumi" },
@@ -781,6 +801,7 @@ pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/copy", about: "Copy Kumi's last answer" },
     Command { name: "/model", about: "Choose the model Kumi talks to" },
     Command { name: "/effort", about: "How hard the model thinks" },
+    Command { name: "/fast", about: "The model's faster tier, when its provider offers one" },
     Command { name: "/login", about: "Sign in to a provider" },
     Command { name: "/goal", about: "Go after a sound until Kumi gets there" },
     Command { name: "/memory", about: "What Kumi remembers" },

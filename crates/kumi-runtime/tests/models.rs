@@ -61,7 +61,7 @@ async fn chatgpt_catalog_keeps_priority_zero_and_its_supported_effort_levels() {
             json!({"models":[
                 {"slug":"gpt-6-luna","display_name":"GPT-6 Luna","description":"Fast","priority":3,"visibility":"list","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low","description":"Quick"},{"effort":"medium"}]},
                 {"slug":"gpt-reserve","display_name":"Reserve","priority":0,"visibility":"hide"},
-                {"slug":"gpt-6-astra","display_name":"GPT-6 Astra","priority":1,"visibility":"list","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"turbo"}]},
+                {"slug":"gpt-6-astra","display_name":"GPT-6 Astra","priority":1,"visibility":"list","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"turbo"}],"service_tiers":[{"id":"priority","name":"Fast","description":"2x speed, increased usage"},{"id":"no spaces allowed","name":"Odd"}]},
                 {"slug":"gpt-6-nova","display_name":"GPT-6 Nova","priority":0,"visibility":"list"},
                 {"slug":"gpt-6-draft","display_name":"GPT-6 Draft","visibility":"list"}
             ]}),
@@ -74,6 +74,11 @@ async fn chatgpt_catalog_keeps_priority_zero_and_its_supported_effort_levels() {
     );
     assert_eq!(models[1].efforts.iter().map(|e| e.effort).collect::<Vec<_>>(), [Effort::Low, Effort::Medium, Effort::High, Effort::Xhigh]);
     assert_eq!(models[1].default_effort, Some(Effort::Medium));
+    assert_eq!(
+        serde_json::to_value(&models[1].service_tiers).unwrap(),
+        json!([{"id":"priority","name":"Fast","description":"2x speed, increased usage"}]),
+        "the faster tier the list names, read as it is"
+    );
     assert_eq!(
         serde_json::to_value(&models[2]).unwrap(),
         json!({"id":"openai-codex/gpt-6-luna","provider":"openai-codex","model":"gpt-6-luna","name":"GPT-6 Luna","description":"Fast","efforts":[{"effort":"low","description":"Quick"},{"effort":"medium"}],"defaultEffort":"low"})

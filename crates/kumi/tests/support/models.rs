@@ -19,6 +19,7 @@ pub struct FakeModels {
     pub calls: RefCell<Vec<String>>,
     pub model: RefCell<Option<String>>,
     pub effort: RefCell<Option<Effort>>,
+    pub fast: RefCell<bool>,
     pub signed_in: RefCell<HashSet<ProviderId>>,
     pub lists: RefCell<HashMap<String, Vec<ModelInfo>>>,
     pub local: RefCell<Vec<LocalStatus>>,
@@ -31,6 +32,7 @@ impl Default for FakeModels {
             calls: RefCell::new(vec![]),
             model: RefCell::new(None),
             effort: RefCell::new(None),
+            fast: RefCell::new(false),
             signed_in: RefCell::new(HashSet::new()),
             lists: RefCell::new(HashMap::new()),
             local: RefCell::new(vec![]),
@@ -49,7 +51,7 @@ impl FakeModels {
     pub fn catalog() -> Rc<Self> {
         let models = Self::chosen();
         *models.model.borrow_mut() = Some("openai-codex/gpt-6-astra".into());
-        let values = serde_json::json!({"openai-codex":[{"id":"openai-codex/gpt-6-astra","provider":"openai-codex","model":"gpt-6-astra","name":"GPT-6 Astra","description":"Frontier model for complex work","efforts":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"}],"defaultEffort":"medium"},{"id":"openai-codex/gpt-6-luna","provider":"openai-codex","model":"gpt-6-luna","name":"GPT-6 Luna","description":"Fast and light","efforts":[{"effort":"low"},{"effort":"medium"}],"defaultEffort":"low"}],"anthropic":[{"id":"anthropic/claude-sonnet-5-5","provider":"anthropic","model":"claude-sonnet-5-5","name":"Claude Sonnet 5.5","efforts":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]},{"id":"anthropic/claude-haiku-4-5","provider":"anthropic","model":"claude-haiku-4-5","name":"Claude Haiku 4.5","efforts":[]}]});
+        let values = serde_json::json!({"openai-codex":[{"id":"openai-codex/gpt-6-astra","provider":"openai-codex","model":"gpt-6-astra","name":"GPT-6 Astra","description":"Frontier model for complex work","efforts":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"}],"defaultEffort":"medium","serviceTiers":[{"id":"priority","name":"Fast","description":"2x speed, increased usage"}]},{"id":"openai-codex/gpt-6-luna","provider":"openai-codex","model":"gpt-6-luna","name":"GPT-6 Luna","description":"Fast and light","efforts":[{"effort":"low"},{"effort":"medium"}],"defaultEffort":"low"}],"anthropic":[{"id":"anthropic/claude-sonnet-5-5","provider":"anthropic","model":"claude-sonnet-5-5","name":"Claude Sonnet 5.5","efforts":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]},{"id":"anthropic/claude-haiku-4-5","provider":"anthropic","model":"claude-haiku-4-5","name":"Claude Haiku 4.5","efforts":[]}]});
         *models.lists.borrow_mut() = serde_json::from_value(values).unwrap();
         models
     }
@@ -91,9 +93,10 @@ impl ModelController for FakeModels {
             name: info.as_ref().map(|m| m.name.clone()),
             effort: *self.effort.borrow(),
             default_effort: info.as_ref().and_then(|m| m.default_effort),
-            efforts: info.map(|m| m.efforts).unwrap_or_default(),
+            efforts: info.as_ref().map(|m| m.efforts.clone()).unwrap_or_default(),
             pinned: false,
             r#where: local.map(|s| s.r#where),
+            fast: info.as_ref().filter(|_| *self.fast.borrow()).and_then(|m| m.service_tiers.first()).map(|t| t.name.clone()),
         }
     }
     async fn providers(&self) -> Result<Vec<ProviderStatus>, RuntimeError> {
@@ -168,6 +171,15 @@ impl ModelController for FakeModels {
         *self.effort.borrow_mut() = next;
         self.calls.borrow_mut().push(format!("effort:{}", next.map(|e| e.as_str()).unwrap_or("default")));
         Ok(())
+    }
+    async fn set_fast(&self, on: bool) -> Result<Option<kumi_runtime::providers::models::ServiceTier>, RuntimeError> {
+        let tier = self.model.borrow().as_ref().and_then(|m| self.info(m)).and_then(|m| m.service_tiers.first().cloned());
+        if on && tier.is_none() {
+            return Ok(None);
+        }
+        *self.fast.borrow_mut() = on;
+        self.calls.borrow_mut().push(format!("fast:{on}"));
+        Ok(tier.filter(|_| on))
     }
     async fn save_key(&self, provider: ProviderId, key: &str, _: Option<Signal>) -> Result<ApiKeyCheck, RuntimeError> {
         self.calls.borrow_mut().push(format!("key:{}:{}", provider.as_str(), key.encode_utf16().count()));

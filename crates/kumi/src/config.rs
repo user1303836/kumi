@@ -145,6 +145,9 @@ pub struct Settings {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<Effort>,
+    /// The model's faster tier, when its provider offers one (`/fast`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fast: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub panel_tab: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -203,6 +206,7 @@ pub fn read_settings(file: &str) -> Settings {
     Settings {
         model,
         effort,
+        fast: (value["fast"] == true).then_some(true),
         panel_tab: value["panelTab"].as_str().filter(|s| TAB.is_match(s)).map(str::to_string),
         update_check: (value["updateCheck"] == false).then_some(false),
         library_folders: value["libraryFolders"]
@@ -223,7 +227,7 @@ pub fn write_settings(file: &str, next: &Value) -> Result<(), RuntimeError> {
     let before = serde_json::to_value(read_settings(file)).unwrap();
     let raw = read_json(file);
     let mut settings = Map::new();
-    for key in ["model", "effort"] {
+    for key in ["model", "effort", "fast"] {
         if let Some(value) = next.get(key).filter(|v| truthy(v)) {
             settings.insert(key.into(), value.clone());
         }
