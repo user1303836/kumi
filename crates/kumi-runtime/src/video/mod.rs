@@ -405,21 +405,31 @@ async fn captions_for(
     }
 }
 static PAGES: LazyLock<Mutex<indexmap::IndexMap<String, (Value, i64)>>> = LazyLock::new(|| Mutex::new(indexmap::IndexMap::new()));
-/// Stretches of speech Kumi couldn't take or transcribe in this turn, and why: a closer look at the
-/// video in the same answer doesn't wait for the same failure, and the next request tries again. A
-/// turn is known by its signal, which each of its tools is given.
-type Unheard = (Option<Signal>, std::collections::HashMap<String, String>);
-static UNHEARD: LazyLock<Mutex<Unheard>> = LazyLock::new(Default::default);
-fn unheard(turn: Option<&Signal>, remember: Option<(&str, String)>, stretch: &str) -> Option<String> {
+/// Stretches of speech Kumi couldn't take or transcribe, and why, by turn: a closer look at the video
+/// in the same answer doesn't wait for the same failure, and the next request tries again. A turn is
+/// known by its signal, which each of its tools is given. The last few turns are kept, so turns that
+/// overlap (tests running together, say) keep their own.
+static UNHEARD: LazyLock<Mutex<Vec<(Signal, std::collections::HashMap<String, String>)>>> = LazyLock::new(Default::default);
+const UNHEARD_TURNS: usize = 8;
+fn unheard(turn: Option<&Signal>, stretch: &str) -> Option<String> {
     let turn = turn?;
-    let mut unheard = UNHEARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    if !unheard.0.as_ref().is_some_and(|known| known.same_as(turn)) {
-        *unheard = (Some(turn.clone()), Default::default());
-    }
-    if let Some((stretch, why)) = remember {
-        unheard.1.insert(stretch.to_string(), why);
-    }
-    unheard.1.get(stretch).cloned()
+    let turns = UNHEARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    turns.iter().find(|(known, _)| known.same_as(turn))?.1.get(stretch).cloned()
+}
+fn remember_unheard(turn: Option<&Signal>, stretch: &str, why: String) {
+    let Some(turn) = turn else { return };
+    let mut turns = UNHEARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let index = match turns.iter().position(|(known, _)| known.same_as(turn)) {
+        Some(index) => index,
+        None => {
+            if turns.len() == UNHEARD_TURNS {
+                turns.remove(0);
+            }
+            turns.push((turn.clone(), Default::default()));
+            turns.len() - 1
+        }
+    };
+    turns[index].1.insert(stretch.to_string(), why);
 }
 struct Watcher<'a> {
     options: &'a WatchOptions,
@@ -680,7 +690,7 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                 to.min(from + 5400.0)
             };
             let stretch = format!("{}|{}-{}", meta.key, to_fixed(start, 0), to_fixed(stop, 0));
-            let heard = if let Some(why) = unheard(signal.as_ref(), None, &stretch) {
+            let heard = if let Some(why) = unheard(signal.as_ref(), &stretch) {
                 notes.push(format!(
                     "Kumi couldn't transcribe the video's speech earlier in this request ({why}), so it didn't try again; it will on the next request."
                 ));
@@ -732,7 +742,7 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                 }
                 .inspect_err(|error| {
                     if !error.is_aborted() {
-                        unheard(signal.as_ref(), Some((&stretch, head(&error.to_string(), 160))), &stretch);
+                        remember_unheard(signal.as_ref(), &stretch, head(&error.to_string(), 160));
                     }
                 })
             };
