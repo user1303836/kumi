@@ -10,7 +10,14 @@ use crate::{
 use async_trait::async_trait;
 use kumi_runtime::{
     auth::store::{open_credential_store, Credential, CredentialStore},
-    core::{contracts::*, memory::MemoryStoreOptions, session::VideoDirectories},
+    core::{
+        contracts::*,
+        memory::MemoryStoreOptions,
+        session::VideoDirectories,
+        store_backed::{SqliteMemoryStore, SqlitePlaybookStore, SqliteTechniqueStore},
+        store_client::StoreClient,
+        store_import::JsonFiles,
+    },
     library::{create_library, LibraryOptions},
     video::programs::{configure_programs, ProgramDefaults},
     *,
@@ -392,14 +399,37 @@ pub(super) async fn run_session(
     if live_possible {
         options.conversations = Some(create_conversation_store(&projects_dir));
     }
-    options.memory = Some(create_memory_store(MemoryStoreOptions {
-        projects_dir: projects_dir.clone().into(),
-        producer_file: load_memory_file(&io.env)?.into(),
-    }));
+    // Kumi's database keeps notes, techniques, lessons and gaps, with what earlier Kumis kept in files
+    // read in. When it can't open, they stay in their files this time, as before, and Kumi says so once.
+    let files = JsonFiles {
+        memory: load_memory_file(&io.env)?.into(),
+        projects: projects_dir.clone().into(),
+        techniques: load_techniques_file(&io.env)?.into(),
+        playbook: load_playbook_file(&io.env)?.into(),
+        gaps: load_gaps_file(&io.env)?.into(),
+    };
+    let database = StoreClient::open(load_db_file(&io.env)?.into(), files, kumi_common::time::now_ms()).await;
+    let database_notice =
+        database.as_ref().err().map(|why| format!("Your notes, techniques and lessons stay in their files this time: {why}."));
+    let database = database.ok();
+    options.memory = Some(match &database {
+        Some(client) => Rc::new(SqliteMemoryStore::new(client.clone())) as Rc<dyn MemoryStore>,
+        None => create_memory_store(MemoryStoreOptions {
+            projects_dir: projects_dir.clone().into(),
+            producer_file: load_memory_file(&io.env)?.into(),
+        }),
+    });
     options.listen = true;
     options.recipes = Some(create_recipe_store(load_recipes_dir(&io.env)?));
-    options.techniques = Some(create_technique_store(load_techniques_file(&io.env)?));
-    options.playbook = Some(create_playbook_store(load_playbook_file(&io.env)?));
+    options.techniques = Some(match &database {
+        Some(client) => Rc::new(SqliteTechniqueStore::new(client.clone())) as Rc<dyn TechniqueStore>,
+        None => create_technique_store(load_techniques_file(&io.env)?),
+    });
+    options.playbook = Some(match &database {
+        Some(client) => Rc::new(SqlitePlaybookStore::new(client.clone())) as Rc<dyn PlaybookStore>,
+        None => create_playbook_store(load_playbook_file(&io.env)?),
+    });
+    options.store = database;
     options.goals = Some(create_goal_store(load_goals_dir(&io.env)?));
     options.gaps = Some(load_gaps_file(&io.env)?);
     options.timings = Some(load_timings_file(&io.env)?);
@@ -429,7 +459,7 @@ pub(super) async fn run_session(
         .as_ref()
         .and_then(|_| update::older_bridge(&io.env, bundled.as_deref()))
         .filter(|stale| !(stale.runtime_migration && crate::install::only_the_host_differs(&io.env)));
-    let notice = if bridge_missing {
+    let bridge_notice = if bridge_missing {
         Some(format!("The Ableton bridge isn't installed yet, so Kumi can't see Live; chatting without it. To connect Live, quit Live and run: {} bridge",io.command()))
     } else {
         stale.as_ref().map(|stale| if stale.runtime_migration {
@@ -437,6 +467,10 @@ pub(super) async fn run_session(
         } else {
             format!("The bridge in Live is {}, older than this Kumi's ({}), so some changes aren't offered. Quit Kumi and Live, then run: {} update",stale.installed,stale.bundled,io.command())
         })
+    };
+    let notice = match (bridge_notice, database_notice) {
+        (Some(bridge), Some(database)) => Some(format!("{bridge} {database}")),
+        (bridge, database) => bridge.or(database),
     };
     // In the app, first-run setup puts the bridge in place instead, with Live restarting around it.
     let connect_why = if bridge_missing {

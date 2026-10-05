@@ -3,6 +3,7 @@ use super::{
     contracts::{JsonObject, KernelTool, ToolResult},
     errors::RuntimeError,
     memory::suspect_note,
+    store_client::StoreClient,
 };
 use crate::version::KUMI_VERSION;
 use async_trait::async_trait;
@@ -11,6 +12,7 @@ use kumi_common::{
     js::{json, string},
     time::{iso_string, now_ms},
 };
+use kumi_store::gaps;
 use serde_json::{json, Value};
 use std::{
     path::{Path, PathBuf},
@@ -31,11 +33,13 @@ fn clean(value: Option<&Value>) -> String {
         .collect();
     string::head(&text.split_whitespace().collect::<Vec<_>>().join(" "), 300)
 }
-pub fn gap_tools(file: impl Into<PathBuf>) -> Vec<Rc<dyn KernelTool>> {
-    vec![Rc::new(GapTool { file: file.into() })]
+/// The gap tool, logging to Kumi's database when there is one, otherwise to `file`.
+pub fn gap_tools(file: impl Into<PathBuf>, store: Option<StoreClient>) -> Vec<Rc<dyn KernelTool>> {
+    vec![Rc::new(GapTool { file: file.into(), store })]
 }
 struct GapTool {
     file: PathBuf,
+    store: Option<StoreClient>,
 }
 #[async_trait(?Send)]
 impl KernelTool for GapTool {
@@ -66,6 +70,18 @@ impl KernelTool for GapTool {
         }
         if entry.as_object().unwrap().values().any(|v| suspect_note(v.as_str().unwrap_or(""))) {
             return Ok(ToolResult::error("That holds something that reads as a secret, so it wasn't logged."));
+        }
+        if let Some(store) = &self.store {
+            let text = |key: &str| entry.get(key).and_then(Value::as_str).map(str::to_string);
+            let gap = gaps::Gap {
+                kumi_version: KUMI_VERSION.into(),
+                missing: missing.clone(),
+                asked: text("asked"),
+                workaround: text("workaround"),
+                at: now_ms(),
+            };
+            store.write(move |c| gaps::add(c, &gap)).await.map_err(|e| RuntimeError::plain(e.to_string()))?;
+            return Ok(ToolResult { text: json::stringify(&json!({"noted":missing})), reply: Some(String::new()), ..Default::default() });
         }
         let folder = self.file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
         let mut builder = tokio::fs::DirBuilder::new();

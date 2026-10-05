@@ -76,6 +76,14 @@ pub struct TechniqueDraft {
 pub trait TechniqueStore {
     async fn list(&self) -> Result<Vec<Technique>, RuntimeError>;
     async fn save(&self, techniques: &[Technique]) -> Result<(), RuntimeError>;
+    /// Forget a technique the producer no longer wants: the technique, if there was one.
+    async fn forget(&self, id: &str) -> Result<Option<Technique>, RuntimeError> {
+        let mut list = self.list().await?;
+        let Some(index) = list.iter().position(|t| t.id == id) else { return Ok(None) };
+        let found = list.remove(index);
+        self.save(&list).await?;
+        Ok(Some(found))
+    }
 }
 pub const MAX_TECHNIQUES: usize = 40;
 /// The most of the producer's request a technique keeps.
@@ -663,10 +671,7 @@ impl TechniqueService {
         let this = self.clone();
         self.queue.run(
             async move {
-                let mut list = this.store.list().await?;
-                let Some(index) = list.iter().position(|t| t.id == id) else { return Ok(None) };
-                let found = list.remove(index);
-                this.store.save(&list).await?;
+                let Some(found) = this.store.forget(&id).await? else { return Ok(None) };
                 (this.on_event)(TechniqueEvent { action: TechniqueAction::Forgot, technique: summary(&found) });
                 Ok(Some(found))
             }

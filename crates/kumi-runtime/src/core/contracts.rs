@@ -1278,6 +1278,17 @@ pub trait MemoryStore {
     /// Notes about the producer, and about the saved Set `project` when there is one.
     async fn load(&self, project: Option<&str>) -> Result<Memory, RuntimeError>;
     async fn save(&self, scope: MemoryScope, project: Option<&str>, notes: &[MemoryNote]) -> Result<(), RuntimeError>;
+    /// Forget a note the producer no longer wants: the note, if there was one.
+    async fn forget(&self, scope: MemoryScope, project: Option<&str>, id: &str) -> Result<Option<MemoryNote>, RuntimeError> {
+        let memory = self.load(project).await?;
+        let mut notes = if scope == MemoryScope::Set { memory.set } else { memory.producer };
+        let Some(index) = notes.iter().position(|n| n.id == id) else {
+            return Ok(None);
+        };
+        let note = notes.remove(index);
+        self.save(scope, project, &notes).await?;
+        Ok(Some(note))
+    }
 }
 
 /// A comparison's reference and the differences per band.

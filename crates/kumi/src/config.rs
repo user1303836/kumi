@@ -116,6 +116,7 @@ macro_rules! location {
 }
 location!(load_auth_file, "KUMI_AUTH_FILE", "auth.json");
 location!(load_settings_file, "KUMI_SETTINGS_FILE", "settings.json");
+location!(load_db_file, "KUMI_DB_FILE", "kumi.db");
 location!(load_memory_file, "KUMI_MEMORY_FILE", "memory.json");
 location!(load_techniques_file, "KUMI_TECHNIQUES_FILE", "techniques.json");
 location!(load_restore_file, "KUMI_RESTORE_FILE", "audition-restore.json");

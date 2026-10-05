@@ -51,7 +51,7 @@ fn droppable(notes: &[MemoryNote]) -> Option<usize> {
     notes.iter().enumerate().filter(|(_, n)| !n.pinned).min_by_key(|(_, n)| n.at).map(|(i, _)| i)
 }
 /// At most MAX_NOTES, dropping the oldest unpinned notes first.
-fn fit(notes: &mut Vec<MemoryNote>) {
+pub(crate) fn fit(notes: &mut Vec<MemoryNote>) {
     while notes.len() > MAX_NOTES {
         let index = droppable(notes).unwrap_or(0);
         notes.remove(index);
@@ -296,13 +296,9 @@ impl State {
             (self.options.on_event)(MemoryEvent::Forgot { scope, note: note.clone() });
             return Ok(Some(note));
         }
-        let memory = self.options.store.load(project.as_deref()).await?;
-        let mut notes = if scope == MemoryScope::Set { memory.set } else { memory.producer };
-        let Some(index) = notes.iter().position(|n| n.id == id) else {
+        let Some(note) = self.options.store.forget(scope, project.as_deref(), id).await? else {
             return Ok(None);
         };
-        let note = notes.remove(index);
-        self.options.store.save(scope, project.as_deref(), &notes).await?;
         (self.options.on_event)(MemoryEvent::Forgot { scope, note: note.clone() });
         Ok(Some(note))
     }

@@ -2,10 +2,10 @@
 //! once per version of each file. The files are never changed, so an older Kumi still finds them.
 
 use super::{
-    contracts::MemoryNote,
     memory::parse_notes,
-    playbook::{parse_lessons, Lesson, Reaction},
-    techniques::{parse_techniques, Technique},
+    playbook::parse_lessons,
+    store_rows::{lesson_row, note_row, technique_row},
+    techniques::parse_techniques,
 };
 use kumi_store::{gaps, imports, lessons, notes, techniques as stored, Scope, Store, StoreError};
 use serde_json::Value;
@@ -42,7 +42,7 @@ enum Rows {
 pub fn import_json(store: &Store, files: &JsonFiles, now: i64) -> Result<Imported, StoreError> {
     let mut sources = vec![];
     if let Some((source, bytes)) = imports::read(&files.memory, "notes")? {
-        sources.push((source, Rows::Notes(Scope::Global, parse_notes(&bytes, 'p').iter().map(note).collect())));
+        sources.push((source, Rows::Notes(Scope::Global, parse_notes(&bytes, 'p').iter().map(note_row).collect())));
     }
     let mut projects: Vec<String> = std::fs::read_dir(&files.projects)
         .map(|entries| entries.flatten().filter_map(|entry| entry.file_name().into_string().ok()).filter(|name| project_id(name)).collect())
@@ -50,14 +50,14 @@ pub fn import_json(store: &Store, files: &JsonFiles, now: i64) -> Result<Importe
     projects.sort();
     for project in projects {
         if let Some((source, bytes)) = imports::read(&files.projects.join(&project).join("memory.json"), "notes")? {
-            sources.push((source, Rows::Notes(Scope::Project(project), parse_notes(&bytes, 's').iter().map(note).collect())));
+            sources.push((source, Rows::Notes(Scope::Project(project), parse_notes(&bytes, 's').iter().map(note_row).collect())));
         }
     }
     if let Some((source, bytes)) = imports::read(&files.techniques, "techniques")? {
-        sources.push((source, Rows::Techniques(parse_techniques(&bytes).iter().map(technique).collect())));
+        sources.push((source, Rows::Techniques(parse_techniques(&bytes).iter().map(technique_row).collect())));
     }
     if let Some((source, bytes)) = imports::read(&files.playbook, "lessons")? {
-        sources.push((source, Rows::Lessons(parse_lessons(&bytes).iter().map(lesson).collect())));
+        sources.push((source, Rows::Lessons(parse_lessons(&bytes).iter().map(lesson_row).collect())));
     }
     if let Some((source, bytes)) = imports::read(&files.gaps, "gaps")? {
         sources.push((source, Rows::Gaps(parse_gaps(&String::from_utf8_lossy(&bytes)))));
@@ -102,47 +102,6 @@ pub fn import_json(store: &Store, files: &JsonFiles, now: i64) -> Result<Importe
 /// A project folder's name: the 32 lowercase hex digits Kumi names a Set's folder with.
 fn project_id(name: &str) -> bool {
     name.len() == 32 && name.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
-
-fn note(n: &MemoryNote) -> notes::Note {
-    notes::Note { label: n.id.clone(), text: n.text.clone(), pinned: n.pinned, at: n.at }
-}
-
-fn technique(t: &Technique) -> stored::Technique {
-    let source = t.body.source.as_ref();
-    stored::Technique {
-        label: t.id.clone(),
-        name: t.body.name.clone(),
-        fits: t.body.fits.clone(),
-        idea: t.body.idea.clone(),
-        settings: t.body.settings.clone(),
-        substitutes: t.body.substitutes.clone(),
-        recipe: t.body.recipe.clone(),
-        source_title: source.and_then(|s| s.title.clone()),
-        source_url: source.and_then(|s| s.url.clone()),
-        request: t.request.clone(),
-        used: t.used,
-        undone: t.undone,
-        at: t.at as i64,
-        updated: t.updated.map(|at| at as i64),
-        last_used: t.last_used.map(|at| at as i64),
-    }
-}
-
-fn lesson(l: &Lesson) -> lessons::Lesson {
-    lessons::Lesson {
-        label: l.id.clone(),
-        matched: l.matched.clone(),
-        winner: l.winner.clone(),
-        from: l.from,
-        to: l.to,
-        moves: serde_json::to_value(&l.moves).unwrap_or(Value::Array(vec![])),
-        reaction: l.reaction.map(|r| match r {
-            Reaction::Liked => "liked".into(),
-            Reaction::Disliked => "disliked".into(),
-        }),
-        at: l.at as i64,
-    }
 }
 
 /// The gaps a gaps log holds: a line that isn't a whole entry (time and what was missing) is left out.
