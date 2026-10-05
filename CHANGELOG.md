@@ -3,6 +3,30 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.8.1 — 2026-10-05
+
+Ships with bridge 1.0.74.
+
+- Setup takes one command. The one-line installer starts Kumi when it finishes (`KUMI_NO_LAUNCH=1`
+  skips it). On first run Kumi shows the steps still missing, in its own window:
+  - signing in;
+  - putting its bridge in Live. An open Live is asked to quit; it asks to save first, then opens again
+    by itself.
+  - choosing AbletonMcpBridge as a Control Surface.
+
+  Esc chats without Live for now.
+- In a chat without Live, Kumi connects by itself once Live answers, so `/reconnect` is no longer
+  needed.
+- Searches and reads that don't touch Live run at the same time, up to four at once: the web, sounds,
+  presets, your Sets, the Live manual and earlier conversations.
+- When an answer breaks off partway (a dropped connection, say), Kumi carries on once from where it
+  stopped, and the status line says so.
+- A conversation keeps its provider's prompt cache across restarts: a resumed conversation's first
+  answer reads most of its prompt from the cache.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.8.0 — 2026-10-05
 
 Ships with bridge 1.0.74.
