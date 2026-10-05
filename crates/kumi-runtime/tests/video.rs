@@ -271,6 +271,63 @@ async fn video_tool_shows_the_model_frames_and_app_thumbnails_and_heard_sound() 
     );
 }
 #[tokio::test(flavor = "current_thread")]
+async fn one_look_shows_each_moment_in_each_part_asked_for() {
+    use kumi_runtime::video::tool::{video_tools, VideoToolOptions};
+    let folder = tempfile::tempdir().unwrap();
+    let Some(video) = test_video(folder.path(), "views", true).await else {
+        eprintln!("ffmpeg makes the test video; unavailable");
+        return;
+    };
+    let tool = video_tools(VideoToolOptions {
+        videos_dir: folder.path().join("views-videos").to_string_lossy().into(),
+        tools_dir: folder.path().join("tools").to_string_lossy().into(),
+        env: None,
+        on_event: Rc::new(|_| {}),
+    })
+    .remove(0);
+    let look = |input: Value| {
+        let tool = tool.clone();
+        async move { tool.execute(input.as_object().unwrap().clone(), Signal::new()).await.unwrap() }
+    };
+    let result = look(json!({"url":video,"look_at":["0:07","0:02"],"zoom":["bottom-left","whole","bottom-left"]})).await;
+    assert!(!result.is_error, "{}", result.text);
+    let captions: Vec<_> = result.images.iter().map(|image| image.caption.clone().unwrap()).collect();
+    assert_eq!(captions.len(), 4, "two moments, each whole and close up (a part named twice counts once): {captions:?}");
+    // By time, each moment's parts in the order asked for.
+    assert!(captions[0].starts_with("Frame at 0:02 (close-up: bottom-left)") && captions[1].starts_with("Frame at 0:02,"), "{captions:?}");
+    assert!(captions[2].starts_with("Frame at 0:07 (close-up: bottom-left)") && captions[3].starts_with("Frame at 0:07,"), "{captions:?}");
+    assert!(result.text.contains("0:02 (bottom-left close-up), 0:02, 0:07 (bottom-left close-up), 0:07."), "{}", result.text);
+    // Twelve moments in two parts each are 24 pictures: the earliest moments' 16 come, however the moments
+    // were given, and the note names the rest.
+    let moments: Vec<_> = (0..12).rev().map(|second| json!(second)).collect();
+    let many = look(json!({"url":video,"look_at":moments,"zoom":["whole","bottom"]})).await;
+    assert_eq!(many.images.len(), 16);
+    assert!(many.images.first().unwrap().caption.as_deref().unwrap().starts_with("Frame at 0:00"), "{:?}", many.images[0].caption);
+    assert!(
+        many.images.last().unwrap().caption.as_deref().unwrap().starts_with("Frame at 0:07 (close-up: bottom)"),
+        "{:?}",
+        many.images[15].caption
+    );
+    assert!(
+        many.text.contains(
+            "That's 24 views; Kumi showed the first 16, the earliest moments: ask for 0:08, 0:09, 0:10 and 0:11 in another look."
+        ),
+        "{}",
+        many.text
+    );
+    let wrong = look(json!({"url":video,"look_at":["0:02"],"zoom":["bottom","sideways"]})).await;
+    assert!(wrong.is_error && wrong.text.contains("zoom has no part called \"sideways\""), "{}", wrong.text);
+    let string = look(json!({"url":video,"look_at":["0:02"],"zoom":"bottom-left, bottom-right"})).await;
+    assert!(string.is_error && string.text.contains("zoom has no part called \"bottom-left, bottom-right\""), "{}", string.text);
+    let whole = look(json!({"url":video,"look_at":["0:02"],"zoom":"whole"})).await;
+    assert_eq!((whole.is_error, whole.images.len()), (false, 1), "{}", whole.text);
+    let named = look(json!({"url":video,"look_at":["0:02"],"zoom":["bottom", 3]})).await;
+    assert!(named.is_error && named.text.contains("zoom's parts are names"), "{}", named.text);
+    let alone = look(json!({"url":video,"zoom":["bottom"]})).await;
+    assert!(alone.is_error && alone.text.contains("zoom goes with look_at"), "{}", alone.text);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn a_video_without_captions_says_how_it_could_be_transcribed() {
     let folder = tempfile::tempdir().unwrap();
     let Some(video) = test_video(folder.path(), "silent", false).await else {
