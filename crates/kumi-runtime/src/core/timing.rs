@@ -13,6 +13,7 @@ use kumi_common::{
 use serde_json::{json, Value};
 
 use super::contracts::Usage;
+use crate::ai::types::{StreamPart, StreamParts};
 use crate::version::KUMI_VERSION;
 
 const MAX_BYTES: u64 = 512 * 1024;
@@ -23,7 +24,8 @@ pub struct TurnTiming {
     pub model: Option<String>,
     pub model_calls: u32,
     pub model_ms: u64,
-    /// Each model call's wait for its first part (text, reasoning or a tool call).
+    /// Each model call's wait for its first content: text, reasoning or a tool call (not the stream's
+    /// start or its metadata, which come with the response's headers).
     pub first_part_ms: Vec<u64>,
     pub tools: u32,
     pub tool_ms: u64,
@@ -71,7 +73,11 @@ impl Drop for Recorder {
     }
 }
 
+/// Adds to the turn being timed; work done for something else (`background`) adds nothing.
 fn with(add: impl FnOnce(&mut TurnTiming)) {
+    if BACKGROUND.try_with(|_| ()).is_ok() {
+        return;
+    }
     ACTIVE.with(|active| {
         if let Some(timing) = active.borrow().as_ref() {
             add(&mut timing.borrow_mut());
@@ -91,7 +97,7 @@ pub fn model_call(model: &str) -> ModelCall {
 }
 
 impl ModelCall {
-    /// A part arrived; the first one sets the call's time to first part.
+    /// Content arrived; the first sets the call's time to first part.
     pub fn part(&mut self) {
         if self.first.is_none() {
             self.first = Some(self.began.elapsed().as_millis() as u64);
@@ -113,11 +119,19 @@ impl Drop for ModelCall {
     }
 }
 
-/// A model's parts, timed: the first one sets the call's time to first part, and the stream's end
-/// (its drop) the call's time in all.
-pub fn timed(parts: crate::ai::types::StreamParts, mut call: ModelCall) -> crate::ai::types::StreamParts {
+/// A model's parts, timed: the first content (text, reasoning or a tool call) sets the call's time to
+/// first part, and the stream's end (its drop) the call's time in all. A reasoning item's start isn't
+/// content: some providers send it before anything is thought.
+pub fn timed(parts: StreamParts, mut call: ModelCall) -> StreamParts {
     use futures::StreamExt;
-    Box::pin(parts.inspect(move |_| call.part()))
+    Box::pin(parts.inspect(move |part| {
+        if matches!(
+            part,
+            StreamPart::TextDelta { .. } | StreamPart::ReasoningDelta { .. } | StreamPart::ToolInputStart { .. } | StreamPart::ToolCall(_)
+        ) {
+            call.part();
+        }
+    }))
 }
 
 pub fn tool(elapsed_ms: u64) {
@@ -128,13 +142,11 @@ pub fn tool(elapsed_ms: u64) {
 }
 
 pub fn live_request() {
-    if BACKGROUND.try_with(|_| ()).is_err() {
-        with(|timing| timing.live_requests += 1);
-    }
+    with(|timing| timing.live_requests += 1);
 }
 
-/// Work done for FOCUS (the producer's view of Live), not for the turn: its Live requests aren't
-/// the turn's.
+/// Work done while a turn runs but not for it (FOCUS's and the transport clock's reads of Live, a
+/// side question): its model calls, bytes and Live requests aren't the turn's.
 pub async fn background<F: std::future::Future>(work: F) -> F::Output {
     BACKGROUND.scope((), work).await
 }
@@ -169,8 +181,9 @@ pub fn line(timing: &TurnTiming, elapsed_ms: u64, stop: Value, usage: Option<&Us
     line
 }
 
-/// Append a line to the log, keeping it to its last lines once it grows. Best effort: timing never
-/// gets in the way of a turn. Written in place (one short line), so turns log in the order they end.
+/// Append a line to the log; once it passes `MAX_BYTES`, keep its last `KEEP_LINES` (through a temporary
+/// file, so the log is never left empty). Best effort: timing never gets in the way of a turn. Written in
+/// place (one short line), so turns log in the order they end.
 pub fn append(file: &Path, line: &Value) {
     let _ = write(file, json::stringify(line));
 }
@@ -192,7 +205,12 @@ fn write(file: &Path, text: String) -> std::io::Result<()> {
     if std::fs::metadata(file).is_ok_and(|meta| meta.len() > MAX_BYTES) {
         let kept = std::fs::read_to_string(file)?;
         let lines: Vec<_> = kept.split('\n').filter(|line| !line.is_empty()).collect();
-        std::fs::write(file, format!("{}\n", lines[lines.len().saturating_sub(KEEP_LINES)..].join("\n")))?;
+        let trimmed = file.with_extension(format!("{}.tmp", std::process::id()));
+        std::fs::write(&trimmed, format!("{}\n", lines[lines.len().saturating_sub(KEEP_LINES)..].join("\n")))?;
+        if let Err(error) = std::fs::rename(&trimmed, file) {
+            let _ = std::fs::remove_file(&trimmed);
+            return Err(error);
+        }
     }
     Ok(())
 }
@@ -214,17 +232,44 @@ mod tests {
         tool(120);
         live_request();
         live_request();
-        background(async { live_request() }).await;
+        background(async {
+            live_request();
+            drop(model_call("openai/a-side-question"));
+            sent(9999);
+            tool(7);
+        })
+        .await;
         sent(2048);
         let timing = recorder.finish();
         assert_eq!(timing.model.as_deref(), Some("openai/gpt-test"));
         assert_eq!((timing.model_calls, timing.first_part_ms.len()), (1, 1));
         assert_eq!((timing.tools, timing.tool_ms), (1, 120));
         assert_eq!(timing.live_requests, 2, "FOCUS's own read is left out");
+        assert_eq!(timing.model.as_deref(), Some("openai/gpt-test"), "a side question's call is left out");
         assert_eq!(timing.sent_bytes, 2048);
         // Nothing is timed after the turn.
         tool(9);
         let after = begin().finish();
         assert_eq!(after.tools, 0);
+    }
+
+    #[tokio::test]
+    async fn the_first_part_is_the_first_content_not_the_streams_start() {
+        use futures::{stream, StreamExt};
+        let recorder = begin();
+        let parts: StreamParts = Box::pin(
+            stream::iter([
+                StreamPart::StreamStart { warnings: Vec::new() },
+                StreamPart::ResponseMetadata { id: None, timestamp: None, model_id: None },
+            ])
+            .chain(stream::once(async {
+                tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+                StreamPart::TextDelta { id: "t".into(), delta: "hi".into(), provider_metadata: None }
+            })),
+        );
+        timed(parts, model_call("openai/gpt-test")).collect::<Vec<_>>().await;
+        let timing = recorder.finish();
+        assert_eq!(timing.model_calls, 1);
+        assert!(timing.first_part_ms[0] >= 60, "{:?}", timing.first_part_ms);
     }
 }

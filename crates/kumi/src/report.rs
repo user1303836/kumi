@@ -230,7 +230,8 @@ fn describe_conversation(value: &Value) -> Vec<String> {
     }
     lines
 }
-/// The middle turn of the logged ones: its time, and where that time went.
+/// Each column's median over the logged turns (so the parts needn't add up to the time); "first part"
+/// is each turn's first model call's.
 fn summarize_timings(lines: &[&str]) -> String {
     let turns: Vec<Value> = lines.iter().filter_map(|line| serde_json::from_str(line).ok()).collect();
     let median = |key: &str| {
@@ -242,7 +243,7 @@ fn summarize_timings(lines: &[&str]) -> String {
     first.sort_by(f64::total_cmp);
     let seconds = |ms: f64| format!("{:.1} s", ms / 1000.);
     format!(
-        "{} turns · median {} (model {}, tools {}) · {} model calls · first part {} · {} Live requests · {} KB sent",
+        "{} turns. Medians: {} an answer · model {} · tools {} · {} model calls · first part {} · {} Live requests · {} KB sent",
         turns.len(),
         seconds(median("ms")),
         seconds(median("modelMs")),

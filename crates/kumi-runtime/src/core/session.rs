@@ -1335,7 +1335,8 @@ impl SessionController for Session {
         let held = held
             .filter(|h| h.value.has_aside())
             .ok_or_else(|| KumiError::new(FailureKind::Request, "Kumi isn't ready for a side question yet; ask again in a moment."))?;
-        held.value.aside(question, signal.unwrap_or_default(), on_text).await
+        // A side question can run while a turn does; it isn't part of that turn's timing.
+        timing::background(held.value.aside(question, signal.unwrap_or_default(), on_text)).await
     }
     async fn refresh(&self) -> Result<(), RuntimeError> {
         if !self.0.state.borrow().started {

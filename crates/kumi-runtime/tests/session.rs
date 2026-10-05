@@ -82,6 +82,15 @@ impl Kernel for TestKernel {
     fn transcript(&self) -> Vec<TranscriptLine> {
         transcript_of(&self.history.borrow())
     }
+    fn has_aside(&self) -> bool {
+        true
+    }
+    async fn aside(&self, _: &str, _: Signal, _: OnText) -> Result<String, RuntimeError> {
+        use kumi_runtime::core::timing;
+        drop(timing::model_call("openai/a-side-question"));
+        timing::sent(500_000);
+        Ok("aside".into())
+    }
 }
 struct TestIntegration {
     record: Rc<Record>,
@@ -1559,5 +1568,35 @@ local_test!(each_turn_logs_where_its_time_went, {
     );
     assert_eq!([&turn["inputTokens"], &turn["cachedTokens"], &turn["outputTokens"]], [&json!(900), &json!(600), &json!(20)]);
     assert_eq!(lines[1]["stop"], "error");
+    h.session.close().await.unwrap();
+});
+
+local_test!(a_side_question_asked_during_an_answer_isnt_part_of_its_timing, {
+    use kumi_runtime::core::timing;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("timings.jsonl");
+    let gate = Rc::new(Notify::new());
+    let hold = gate.clone();
+    let h = harness(
+        Some(Rc::new(move |_, _, _| {
+            let gate = hold.clone();
+            async move {
+                drop(timing::model_call("openai/gpt-test"));
+                timing::sent(1000);
+                gate.notified().await;
+                Ok(complete())
+            }
+            .boxed_local()
+        })),
+        |o| o.timings = Some(file.to_string_lossy().into_owned()),
+    );
+    h.session.start().await.unwrap();
+    let answer = spawned(&h.session, "make it louder");
+    delay(10).await;
+    assert_eq!(h.session.aside("what did you change?", Rc::new(|_| {}), None).await.unwrap(), "aside");
+    gate.notify_one();
+    answer.await.unwrap().unwrap();
+    let line: Value = serde_json::from_str(std::fs::read_to_string(&file).unwrap().trim()).unwrap();
+    assert_eq!([&line["modelCalls"], &line["sentBytes"], &line["model"]], [&json!(1), &json!(1000), &json!("openai/gpt-test")]);
     h.session.close().await.unwrap();
 });

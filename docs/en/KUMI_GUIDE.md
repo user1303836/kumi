@@ -486,7 +486,7 @@ Kumi tells you, offers a way round and notes the missing capability in
 conversation; `kumi report` includes it when you choose to send one.
 
 Kumi also notes where each answer's time went (model, tools, Live requests,
-bytes sent) in `~/.kumi/timings.jsonl`, the latest 1000 answers. Like the gap
+bytes sent) in `~/.kumi/timings.jsonl`, about the latest 1000 answers. Like the gap
 log, it stays on your computer and goes out only in a `kumi report`.
 
 ## Conversations and catching up

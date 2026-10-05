@@ -137,7 +137,7 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
         "← {\"type\":\"text\",\"value\":",
         "applied · Tempo 120 → 124 BPM",
         "Freezing a track",
-        "3 turns · median 4.2 s (model 3.6 s, tools 0.4 s) · 2 model calls · first part 0.7 s · 3 Live requests · 200 KB sent",
+        "3 turns. Medians: 4.2 s an answer · model 3.6 s · tools 0.4 s · 2 model calls · first part 0.7 s · 3 Live requests · 200 KB sent",
         "AbletonMcpBridge) Initializing",
         "RuntimeError: boom",
         "File \"bridge.py\"",
