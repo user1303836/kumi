@@ -22,7 +22,9 @@ use kumi_common::{
 };
 use moments::MomentOptions;
 pub use moments::{choose_moments, Chapter};
-use programs::{ffmpeg_hint, run, whisper_hint, whisper_model, yt_dlp_extras, FfmpegOptions, ProgramOptions, RunOptions};
+use programs::{
+    ffmpeg_hint, ffmpeg_reads_in_pieces, run, whisper_hint, whisper_model, yt_dlp_extras, FfmpegOptions, ProgramOptions, RunOptions,
+};
 pub use programs::{find_ffmpeg, find_whisper, find_yt_dlp, whisper_asset, yt_dlp_asset, VideoError, VideoFailure};
 use regex::Regex;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -286,6 +288,7 @@ fn streams(info: &Value) -> Sources {
             headers: f["http_headers"]
                 .as_object()
                 .map(|o| o.iter().filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.into()))).collect()),
+            piece: f["downloader_options"]["http_chunk_size"].as_u64(),
         })
     };
     let picture = |limit: f64| {
@@ -475,7 +478,7 @@ impl Watcher<'_> {
             return Ok(sources.clone());
         }
         let sources = if let Some(file) = &self.file {
-            let input = Some(Input { url: file.clone(), headers: None });
+            let input = Some(Input { url: file.clone(), headers: None, piece: None });
             Sources { video: input.clone(), sharp: input.clone(), audio: input }
         } else {
             if self.info.is_none() {
@@ -486,6 +489,31 @@ impl Watcher<'_> {
         self.sources = Some(sources.clone());
         Ok(sources)
     }
+}
+
+/// What's said of the frames Kumi couldn't take: one note for each reason, with their times, rather
+/// than one per frame; and how many it then didn't try.
+pub fn missed_frames(missed: &[(f64, String)], untried: usize) -> Vec<String> {
+    let mut reasons: Vec<(&str, Vec<f64>)> = Vec::new();
+    for (time, reason) in missed {
+        match reasons.iter_mut().find(|(seen, _)| seen == reason) {
+            Some((_, times)) => times.push(*time),
+            None => reasons.push((reason, vec![*time])),
+        }
+    }
+    let count = reasons.len();
+    reasons
+        .into_iter()
+        .enumerate()
+        .map(|(index, (reason, mut times))| {
+            times.sort_by(f64::total_cmp);
+            let mut at: Vec<String> = times.iter().map(|time| format_time(*time)).collect();
+            let last = at.pop().unwrap_or_default();
+            let which = if at.is_empty() { format!("the frame at {last}") } else { format!("the frames at {} and {last}", at.join(", ")) };
+            let rest = if index + 1 == count && untried > 0 { format!(", so it didn't try the other {untried}") } else { String::new() };
+            format!("Kumi couldn't take {which} ({reason}){rest}.")
+        })
+        .collect()
 }
 
 /// Watch a video's words, selected frames, close-ups and a requested stretch of its sound.
@@ -781,6 +809,8 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
     if (!wanted.is_empty() || listen.is_some()) && ffmpeg.is_none() {
         notes.push(format!("Frames and the video's sound need ffmpeg ({}); this is the transcript alone.", ffmpeg_hint()));
     } else if let Some(ffmpeg) = ffmpeg {
+        // Whether a frame or the sound failed from a stream the site wants asked for in pieces.
+        let mut pieced = false;
         let frame_path = |time| {
             join(
                 &join(&folder, "frames"),
@@ -801,7 +831,10 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
         if missing && input.is_none() {
             notes.push("Kumi couldn't find a stream of that video to take frames from; this is the transcript alone.".into());
         } else {
+            let mut missed = Vec::new();
+            let mut tried = 0;
             for chunk in wanted.chunks(3) {
+                let before = missed.len();
                 let mut tasks = FuturesUnordered::new();
                 for time in chunk {
                     watcher.progress(&format!("looking at {}", format_time(*time)));
@@ -824,16 +857,21 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                             if let Some(signal) = &signal {
                                 signal.check()?;
                             }
-                            notes.push(format!(
-                                "Kumi couldn't take the frame at {} ({}).",
-                                format_time(time),
-                                head(&error.to_string(), 120)
-                            ));
+                            missed.push((time, head(&error.to_string(), 120)));
                         }
                     }
                 }
+                tried += chunk.len();
+                // A stream that gives none of a chunk's frames won't give the rest either.
+                if missed.len() - before == chunk.len() {
+                    break;
+                }
             }
             frames.sort_by(|a, b| a.at.total_cmp(&b.at));
+            if !missed.is_empty() {
+                pieced |= input.as_ref().is_some_and(|input| input.piece.is_some());
+            }
+            notes.extend(missed_frames(&missed, wanted.len() - tried));
         }
         if let Some(listen) = listen {
             let start = listen.from.max(0.0);
@@ -857,6 +895,7 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                         if let Some(signal) = &signal {
                             signal.check()?;
                         }
+                        pieced |= audio.piece.is_some();
                         notes.push(format!(
                             "Kumi couldn't take the sound at {}–{} ({}).",
                             format_time(start),
@@ -868,6 +907,11 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
             } else {
                 notes.push("Kumi couldn't find the video's sound to take.".into());
             }
+        }
+        if pieced && !ffmpeg_reads_in_pieces(&ffmpeg, signal.clone()).await? {
+            notes.push(
+                "YouTube wants its streams asked for a piece at a time, which ffmpeg does from version 8.1; this one is older.".into(),
+            );
         }
     }
     Ok(Watched { meta, from, to, lines, cut_at, frames, sound, notes })

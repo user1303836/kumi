@@ -177,7 +177,7 @@ Kumi はビデオのタイトル、チャプター、言葉を読みます。言
 必要なもの：
 
 - **yt-dlp**：初回に Kumi が `~/.kumi/tools` に取得します（約 35 MB、リリースのチェックサムで確認）。その後も毎月取得し直します。 JavaScript の処理が必要な動画では、Kumi は旧インストーラーから残した Node を優先し、次に PATH 上の `node` を探して yt-dlp に渡します。新規のネイティブインストールにはこの任意のランタイムは付属しません。一部の YouTube 動画で必要です。
-- **ffmpeg**：フレームと音声に使います。Mac では `brew install ffmpeg`、Windows では初回に Kumi が取得します（約 170 MB、確認付き）。ない場合、Kumi はビデオの言葉だけを読みます。
+- **ffmpeg**：フレームと音声に使います。Mac では `brew install ffmpeg`、Windows では初回に Kumi が取得します（約 170 MB、確認付き）。ない場合、Kumi はビデオの言葉だけを読みます。YouTube には ffmpeg 8.1 以降を使ってください。YouTube の求めるとおり、ストリームを少しずつ要求します。古い ffmpeg では、YouTube が転送をごく遅くしたり、拒否したりすることがあります。
 - **whisper.cpp**：字幕のないビデオにだけ使います。Mac では `brew install whisper-cpp`、Windows では Kumi が取得します。その音声モデル（約 190 MB）は初回に取得します。
 
 ffmpeg と whisper.cpp があるかどうかは `kumi doctor` が知らせます。ビデオを丸ごとダウンロードすることはありません。フレームと音声は、Kumi が見る時点のぶんだけビデオのストリームから取り出します。最近の 24 本のビデオは `~/.kumi/videos` に保存されるので、同じビデオをもう一度見るときはすぐに済みます。ビデオの言葉や映像は Kumi にとって情報であり、Kumi への指示として扱われることはありません。

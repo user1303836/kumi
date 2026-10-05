@@ -400,7 +400,9 @@ What it needs:
   Fresh native installs do not include that optional runtime; some YouTube videos need it.
 - **ffmpeg**, for frames and sound: `brew install ffmpeg` on a Mac; on Windows
   Kumi fetches it the first time (about 170 MB, checked). Without it, Kumi reads
-  only a video's words.
+  only a video's words. For YouTube, use ffmpeg 8.1 or later: it asks for a stream
+  a piece at a time, as YouTube wants. YouTube can slow an older one to a trickle
+  or refuse it.
 - **whisper.cpp**, only for videos without captions: `brew install whisper-cpp`
   on a Mac; on Windows Kumi fetches it. Its speech model (about 190 MB) is
   fetched the first time.

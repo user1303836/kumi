@@ -618,6 +618,26 @@ pub async fn yt_dlp_extras(ytdlp: &str, signal: Option<Signal>) -> Vec<String> {
     extras.await
 }
 
+type Pieces = Shared<BoxFuture<'static, bool>>;
+static PIECES: LazyLock<Mutex<HashMap<String, Pieces>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+async fn probe_pieces(ffmpeg: String) -> bool {
+    match run(&ffmpeg, &["-hide_banner", "-h", "protocol=http"], RunOptions { timeout_ms: Some(20_000), ..Default::default() }).await {
+        Ok(output) => output.stdout_text().contains("-request_size"),
+        Err(_) => false,
+    }
+}
+
+/// Whether this ffmpeg can ask for a stream a piece at a time (`-request_size`, from ffmpeg 8.1).
+/// YouTube wants its streams asked for that way: one asked for whole slows to a trickle or is refused.
+pub async fn ffmpeg_reads_in_pieces(ffmpeg: &str, signal: Option<Signal>) -> Result<bool, VideoFailure> {
+    let pieces = {
+        let mut known = PIECES.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        known.entry(ffmpeg.to_string()).or_insert_with(|| probe_pieces(ffmpeg.to_string()).boxed().shared()).clone()
+    };
+    with_signal(&signal, pieces).await
+}
+
 /// Where Kumi keeps the programs it fetches, and who's told when it fetches one: set once as Kumi starts.
 #[derive(Clone, Default)]
 pub struct ProgramDefaults {

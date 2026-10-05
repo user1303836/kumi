@@ -287,6 +287,121 @@ async fn a_video_without_captions_says_how_it_could_be_transcribed() {
     assert!(watched.notes.join(" ").contains("no captions beside it"));
     assert!(watched.notes.join(" ").contains("whisper.cpp"));
 }
+#[test]
+fn frames_kumi_couldnt_take_are_said_once_for_each_reason() {
+    let refused = "Server returned 403 Forbidden (access denied)".to_string();
+    assert!(missed_frames(&[], 0).is_empty());
+    assert_eq!(
+        missed_frames(&[(70.0, refused.clone())], 0),
+        ["Kumi couldn't take the frame at 1:10 (Server returned 403 Forbidden (access denied))."]
+    );
+    assert_eq!(
+        missed_frames(&[(247.0, refused.clone()), (99.0, refused.clone()), (20.0, refused.clone())], 9),
+        ["Kumi couldn't take the frames at 0:20, 1:39 and 4:07 (Server returned 403 Forbidden (access denied)), so it didn't try the other 9."]
+    );
+    assert_eq!(
+        missed_frames(&[(30.0, "timed out".into()), (5.0, refused), (10.0, "timed out".into())], 2),
+        [
+            "Kumi couldn't take the frames at 0:10 and 0:30 (timed out).",
+            "Kumi couldn't take the frame at 0:05 (Server returned 403 Forbidden (access denied)), so it didn't try the other 2."
+        ]
+    );
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_video_that_gives_no_frames_is_said_once_and_the_rest_are_not_tried() {
+    let folder = tempfile::tempdir().unwrap();
+    if find_ffmpeg(FfmpegOptions { installed_only: true, ..Default::default() }).await.unwrap().is_none() {
+        eprintln!("ffmpeg takes the frames; unavailable");
+        return;
+    }
+    let video = folder.path().join("broken.mp4");
+    std::fs::write(&video, "not a video").unwrap();
+    std::fs::write(folder.path().join("broken.srt"), "1\n00:00:01,000 --> 00:00:08,000\nload Operator\n").unwrap();
+    let watched = watch_video(
+        WatchRequest { url: video.to_string_lossy().into(), look_at: Some(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), ..Default::default() },
+        watch_options(folder.path(), "videos"),
+    )
+    .await
+    .unwrap();
+    assert!(watched.frames.is_empty());
+    assert_eq!(watched.notes.len(), 1, "{:?}", watched.notes);
+    assert!(watched.notes[0].starts_with("Kumi couldn't take the frames at 0:01, 0:02 and 0:03 ("), "{}", watched.notes[0]);
+    assert!(watched.notes[0].ends_with("), so it didn't try the other 3."), "{}", watched.notes[0]);
+}
+/// Serves a file the way YouTube serves its streams: a request for more than a piece of it is refused.
+async fn piece_server(body: Vec<u8>, piece: u64) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let address = format!("http://{}/video.mp4", listener.local_addr().unwrap());
+    let body = std::sync::Arc::new(body);
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let body = body.clone();
+            tokio::spawn(async move {
+                let mut buffer = Vec::new();
+                let mut read = [0u8; 4096];
+                loop {
+                    let request = loop {
+                        if let Some(end) = buffer.windows(4).position(|w| w == b"\r\n\r\n") {
+                            let request = String::from_utf8_lossy(&buffer[..end]).to_ascii_lowercase();
+                            buffer.drain(..end + 4);
+                            break request;
+                        }
+                        match socket.read(&mut read).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(count) => buffer.extend_from_slice(&read[..count]),
+                        }
+                    };
+                    let size = body.len() as u64;
+                    let range = request.lines().find_map(|line| line.strip_prefix("range: bytes=")?.split_once('-'));
+                    let bounds = range.and_then(|(start, end)| Some((start.trim().parse::<u64>().ok()?, end.trim().parse::<u64>().ok()?)));
+                    let reply = match bounds {
+                        Some((start, end)) if start < size && start <= end && end - start < piece => {
+                            let end = end.min(size - 1);
+                            let mut reply = format!(
+                                "HTTP/1.1 206 Partial Content\r\nContent-Type: video/mp4\r\nAccept-Ranges: bytes\r\nContent-Range: bytes {start}-{end}/{size}\r\nContent-Length: {}\r\n\r\n",
+                                end - start + 1
+                            )
+                            .into_bytes();
+                            reply.extend_from_slice(&body[start as usize..=end as usize]);
+                            reply
+                        }
+                        _ => b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n".to_vec(),
+                    };
+                    if socket.write_all(&reply).await.is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    address
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_stream_its_site_wants_in_pieces_is_asked_for_in_pieces() {
+    use kumi_runtime::video::frames::{frame_at, sound_between, Input};
+    let folder = tempfile::tempdir().unwrap();
+    let Some(video) = test_video(folder.path(), "pieces", false).await else {
+        eprintln!("ffmpeg makes the test video; unavailable");
+        return;
+    };
+    let ffmpeg = find_ffmpeg(FfmpegOptions { installed_only: true, ..Default::default() }).await.unwrap().unwrap();
+    if !programs::ffmpeg_reads_in_pieces(&ffmpeg, None).await.unwrap() {
+        eprintln!("this ffmpeg asks for a stream whole (before 8.1); unavailable");
+        return;
+    }
+    const PIECE: u64 = 64 * 1024;
+    let url = piece_server(std::fs::read(&video).unwrap(), PIECE).await;
+    let path = |name: &str| folder.path().join(name).to_string_lossy().into_owned();
+    let whole = Input { url: url.clone(), headers: None, piece: None };
+    let error = frame_at(&ffmpeg, Some(&whole), 7.0, &path("whole.jpg"), None, None).await.unwrap_err();
+    assert!(error.to_string().contains("403"), "{error}");
+    let pieces = Input { url, headers: None, piece: Some(PIECE) };
+    let frame = frame_at(&ffmpeg, Some(&pieces), 7.0, &path("pieces.jpg"), None, None).await.unwrap();
+    assert_eq!(&frame.jpeg[..2], [0xff, 0xd8]);
+    let sound = sound_between(&ffmpeg, &pieces, 2.0, 4.0, &path("pieces.wav"), None, false).await.unwrap();
+    assert!(std::fs::metadata(sound).unwrap().len() > 44_100 * 2 * 2);
+}
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]

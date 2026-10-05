@@ -177,7 +177,7 @@ Kumi 会读取视频的标题、章节和文字内容。文字来自视频的字
 所需工具：
 
 - **yt-dlp**：Kumi 会在第一次时把它下载到 `~/.kumi/tools`（约 35 MB，按其发布版本的校验和验证），之后每月更新一次。 对于需要执行 JavaScript 的视频，Kumi 会优先复用旧安装版保留的 Node，其次查找 PATH 中的 `node`，并传给 yt-dlp。全新原生安装不会附带这个可选运行时；部分 YouTube 视频需要它。
-- **ffmpeg**：用于画面和声音。在 Mac 上运行 `brew install ffmpeg`；在 Windows 上，Kumi 会在第一次时下载它（约 170 MB，经过校验）。没有它时，Kumi 只能读取视频的文字内容。
+- **ffmpeg**：用于画面和声音。在 Mac 上运行 `brew install ffmpeg`；在 Windows 上，Kumi 会在第一次时下载它（约 170 MB，经过校验）。没有它时，Kumi 只能读取视频的文字内容。用于 YouTube 时请使用 ffmpeg 8.1 或更高版本：它会按 YouTube 的要求，一段一段地请求视频流。对较旧的版本，YouTube 可能把传输放慢到极慢，或直接拒绝。
 - **whisper.cpp**：只用于没有字幕的视频。在 Mac 上运行 `brew install whisper-cpp`；在 Windows 上由 Kumi 下载。它的语音模型（约 190 MB）会在第一次时下载。
 
 `kumi doctor` 会告诉你是否已有 ffmpeg 和 whisper.cpp。视频不会被完整下载：画面和声音取自视频流中 Kumi 要看的那些时刻。最近 24 个视频保存在 `~/.kumi/videos` 中，所以再看同一个视频会很快。视频的文字和画面对 Kumi 来说只是信息，绝不是给它的指令。
