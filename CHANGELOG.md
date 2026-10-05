@@ -1,7 +1,44 @@
 # Changelog
 
-Kumi's releases. The Ableton bridge (`apps/mcp-server`) is versioned on its own;
+Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
+
+## 1.8.0 — 2026-10-05
+
+Ships with bridge 1.0.74.
+
+- Stopping Kumi partway through a batch of changes keeps the ones that finished in the
+  conversation, so the next request doesn't redo them. The change that was cut off is marked to
+  check in Live.
+- In long tasks such as matching a sound or a goal, when the earliest exchanges are dropped to make
+  room, what you said in them stays at the start of the conversation. An early "don't touch the
+  drums" keeps holding.
+- When Kumi asks you to pick (which track, which version), its options appear above the input box.
+  Press a number and Enter, or type your own answer.
+- When the provider is busy or a connection drops, NOW says why and counts down to the next try
+  ("retrying in 5s · ChatGPT is busy (HTTP 429)"). Esc still stops.
+- `/fast` turns on the model's faster tier when its provider offers one: ChatGPT's "Fast" answers
+  sooner and uses more of your plan. It shows as "· fast" beside the model.
+- `/recipe <name> blank=value …` runs a saved recipe straight away, without a model call. Values with
+  spaces go in quotes. In `/recipes`, "Run it on…" starts that line with what's pinned filled in.
+- Show Kumi pictures and files: drag them into the window, or press ctrl+v for a picture on the
+  clipboard. PNG, JPEG, GIF and WebP pictures up to 3.75 MB each (20 MB a message) go to the model
+  beside your words, and every file also goes by its path. Saved conversations name each picture
+  instead of keeping it.
+- Notes can be pinned: a full memory drops its oldest unpinned note. In `/memory`, a note's words
+  can be changed, and the note pinned, unpinned or forgotten (`/note`, `/pin` and `/unpin` in plain
+  mode).
+- Kumi can search earlier conversations in every Set by their words, with what they changed and the
+  kept techniques and recipes.
+- Every tool result is capped at 64 KB, keeping its opening and saying how to see more, so one huge
+  read no longer overflows a request.
+- Kumi notes where each answer's time went (model, tools, Live requests, bytes sent) in
+  `~/.kumi/timings.jsonl`, and `kumi report` includes a summary.
+- The source tree is Rust only: the TypeScript app, runtime and bridge are gone (they stay at the
+  v1.7.6 tag). `npm run kumi` still builds and runs the checkout with Cargo, as in 1.7.6.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
 
 ## 1.7.6 — 2026-10-04
 
