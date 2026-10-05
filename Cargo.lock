@@ -1125,6 +1125,7 @@ dependencies = [
  "home",
  "indexmap",
  "kumi-common",
+ "kumi-store",
  "libc",
  "memchr",
  "percent-encoding",
