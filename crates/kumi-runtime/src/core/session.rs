@@ -11,6 +11,7 @@ use super::{
         asks_for_technique, technique_instructions, technique_tools, TechniqueStore, TechniqueTools, TechniqueToolsOptions, PLAN_TECHNIQUE,
         TECHNIQUE_GUIDANCE, TECHNIQUE_NUDGE,
     },
+    timing,
 };
 use crate::{
     audio::tools::{listening_tools, ListeningOptions},
@@ -84,6 +85,8 @@ pub struct SessionOptions {
     pub techniques: Option<Rc<dyn TechniqueStore>>,
     pub technique_settle_ms: Option<u64>,
     pub gaps: Option<String>,
+    /// Where each turn's timing goes (`timings.jsonl`); none keeps no log.
+    pub timings: Option<String>,
     pub library: Option<Rc<Library>>,
     pub matching: bool,
     pub match_budget: Option<MatchBudget>,
@@ -115,6 +118,7 @@ impl SessionOptions {
             techniques: None,
             technique_settle_ms: None,
             gaps: None,
+            timings: None,
             library: None,
             matching: true,
             match_budget: None,
@@ -239,6 +243,7 @@ struct Inner {
     listening: Vec<Rc<dyn KernelTool>>,
     browsing: Vec<Rc<dyn KernelTool>>,
     gaps: Vec<Rc<dyn KernelTool>>,
+    timings: Option<String>,
     shelf: Vec<Rc<dyn KernelTool>>,
     unlisten_library: RefCell<Option<Box<dyn FnOnce()>>>,
     timeout_ms: u64,
@@ -270,6 +275,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
     let turn_limit_ms = options.turn_limit_ms.unwrap_or(3_600_000);
     let close_ms = options.close_timeout_ms.unwrap_or(5_000);
     let grace_ms = options.cancel_grace_ms.unwrap_or(500);
+    let timings = options.timings.clone();
     if [timeout_ms, idle_ms, turn_limit_ms, close_ms, grace_ms, options.max_turns.unwrap_or(1) as u64]
         .iter()
         .any(|n| *n == 0 || *n > 9_007_199_254_740_991)
@@ -403,6 +409,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             watching,
             browsing,
             gaps,
+            timings,
             shelf,
             unlisten_library: RefCell::new(unlisten_library),
             saving: RefCell::new(ready()),
@@ -1035,6 +1042,8 @@ impl Session {
     }
     async fn drive(&self, op: Rc<Operation>, initial_phase: Phase, work: Work, limit_ms: u64) -> Result<(), RuntimeError> {
         let began = Instant::now();
+        let recorder = op.is_turn.then(timing::begin);
+        let mut ended: Option<(Value, Option<Usage>)> = None;
         let settled = Rc::new(Cell::new(false));
         let mark = settled.clone();
         let this = self.clone();
@@ -1092,8 +1101,10 @@ impl Session {
                 if let Some(l) = &self.0.learned {
                     l.drafts.abandon();
                 }
+                let usage = settled_result.and_then(|r| r.usage);
+                ended = Some((json!(StopReason::Cancelled), usage.clone()));
                 self.emit(SessionEvent::TurnComplete {
-                    result: TurnResult { stop_reason: StopReason::Cancelled, usage: settled_result.and_then(|r| r.usage) },
+                    result: TurnResult { stop_reason: StopReason::Cancelled, usage },
                     elapsed_ms: began.elapsed().as_millis() as u64,
                 });
                 if settled.get() {
@@ -1111,6 +1122,7 @@ impl Session {
                         }
                     }
                     let save = turn.stop_reason != StopReason::Cancelled;
+                    ended = Some((json!(turn.stop_reason), turn.usage.clone()));
                     self.emit(SessionEvent::TurnComplete { result: turn, elapsed_ms: began.elapsed().as_millis() as u64 });
                     if save {
                         self.save_conversation(true);
@@ -1136,6 +1148,7 @@ impl Session {
                     };
                     self.emit(SessionEvent::Error { message, kind: kumi.map(|e| e.kind), provider: kumi.and_then(|e| e.provider.clone()) });
                     if op.is_turn {
+                        ended = Some((json!("error"), None));
                         if op.phase.get() == Phase::Inference {
                             self.save_conversation(true);
                         }
@@ -1150,6 +1163,10 @@ impl Session {
                 }
                 _ => {}
             }
+        }
+        if let (Some(recorder), Some((stop, usage)), Some(file)) = (recorder, ended, self.0.timings.clone()) {
+            let line = timing::line(&recorder.finish(), began.elapsed().as_millis() as u64, stop, usage.as_ref());
+            timing::append(std::path::Path::new(&file), &line);
         }
         let current = self.0.state.borrow().active.as_ref().is_some_and(|a| a.id == op.id);
         if current {
@@ -1318,7 +1335,8 @@ impl SessionController for Session {
         let held = held
             .filter(|h| h.value.has_aside())
             .ok_or_else(|| KumiError::new(FailureKind::Request, "Kumi isn't ready for a side question yet; ask again in a moment."))?;
-        held.value.aside(question, signal.unwrap_or_default(), on_text).await
+        // A side question can run while a turn does; it isn't part of that turn's timing.
+        timing::background(held.value.aside(question, signal.unwrap_or_default(), on_text)).await
     }
     async fn refresh(&self) -> Result<(), RuntimeError> {
         if !self.0.state.borrow().started {

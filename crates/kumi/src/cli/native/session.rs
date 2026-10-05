@@ -276,6 +276,7 @@ pub(super) async fn run_session(
     options.playbook = Some(create_playbook_store(load_playbook_file(&io.env)?));
     options.goals = Some(create_goal_store(load_goals_dir(&io.env)?));
     options.gaps = Some(load_gaps_file(&io.env)?);
+    options.timings = Some(load_timings_file(&io.env)?);
     options.watch = Some(VideoDirectories { videos_dir: load_videos_dir(&io.env)?, tools_dir: tools_dir.clone() });
     options.web = true;
     options.library = Some(library.clone());

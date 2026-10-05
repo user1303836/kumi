@@ -24,6 +24,7 @@ use crate::{
     core::{
         contracts::*,
         errors::{FailureKind, KumiError, RuntimeError},
+        timing,
     },
     devices::tool::{device_tool, DeviceToolOptions},
     mcp::allowed_tools::CallOptions,
@@ -612,25 +613,25 @@ impl Integration for Ableton {
         true
     }
     async fn device_tree(&self, track: &str, signal: Signal) -> Result<Option<DeviceTree>, RuntimeError> {
-        views::device_tree(self.connection.as_ref(), track, self.combined(signal)).await
+        timing::background(views::device_tree(self.connection.as_ref(), track, self.combined(signal))).await
     }
     fn has_clip_view(&self) -> bool {
         true
     }
     async fn clip_view(&self, slot: &str, signal: Signal) -> Result<Option<ClipView>, RuntimeError> {
-        views::clip_view(self.connection.as_ref(), slot, self.combined(signal)).await
+        timing::background(views::clip_view(self.connection.as_ref(), slot, self.combined(signal))).await
     }
     fn has_session_strip(&self) -> bool {
         true
     }
     async fn session_strip(&self, track: &str, scene: f64, signal: Signal) -> Result<Option<SessionStrip>, RuntimeError> {
-        views::session_strip(self.connection.as_ref(), track, scene, self.combined(signal)).await
+        timing::background(views::session_strip(self.connection.as_ref(), track, scene, self.combined(signal))).await
     }
     fn has_arrangement_strip(&self) -> bool {
         true
     }
     async fn arrangement_strip(&self, signal: Signal) -> Result<Option<ArrangementStrip>, RuntimeError> {
-        views::arrangement_strip(self.connection.as_ref(), self.combined(signal)).await
+        timing::background(views::arrangement_strip(self.connection.as_ref(), self.combined(signal))).await
     }
     fn has_audition(&self) -> bool {
         true
