@@ -175,9 +175,11 @@ fn gaps_written(path: &Path) -> i64 {
     Connection::open(path).and_then(|c| c.query_row("SELECT count(*) FROM gaps", [], |row| row.get(0))).unwrap_or(0)
 }
 
+type Job = Box<dyn FnOnce(&Connection) -> Result<(), StoreError> + Send>;
+
 /// Queue `jobs` so the writer takes them as one batch: they go in while the writer is busy with a write
 /// that waits until they're all queued. Each job's answer, in order.
-fn one_batch(store: &Store, jobs: Vec<Box<dyn FnOnce(&Connection) -> Result<(), StoreError> + Send>>) -> Vec<Result<(), StoreError>> {
+fn one_batch(store: &Store, jobs: Vec<Job>) -> Vec<Result<(), StoreError>> {
     let (release, wait) = std::sync::mpsc::channel::<()>();
     store.write(
         move |_| {
@@ -197,7 +199,7 @@ fn one_batch(store: &Store, jobs: Vec<Box<dyn FnOnce(&Connection) -> Result<(), 
     answered.sort_by_key(|(index, _)| *index);
     answered.into_iter().map(|(_, result)| result).collect()
 }
-fn insert(missing: &'static str) -> Box<dyn FnOnce(&Connection) -> Result<(), StoreError> + Send> {
+fn insert(missing: &'static str) -> Job {
     Box::new(move |c| gaps::add(c, &gap(missing, 1)))
 }
 
