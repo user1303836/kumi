@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/web/exa.ts`.
 //! Exa's public MCP search and reader.
 use super::{
     mcp_call::{mcp_tool, McpCall},

@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/bridge/`.
-
 pub mod extension_channel;
 pub mod extension_launcher;
 pub mod extension_setup;

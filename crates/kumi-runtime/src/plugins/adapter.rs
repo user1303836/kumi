@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/plugins/adapter.ts`.
-
 use serde::{Deserialize, Serialize};
 
 /// A forgiving pattern for the names a host shows (the TypeScript's `RegExp`; lookarounds need fancy_regex).

@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/spinner.ts`.
-//!
 //! A spinner after a step's words while Kumi works ("Updating Live's Remote Script and the bridge… ⠹"),
 //! so a step that takes a minute doesn't look stuck. Only in a terminal: piped, or with KUMI_UI=plain
 //! (screen readers) or TERM=dumb, a step is just its line and nothing moves. It's the full-screen app's

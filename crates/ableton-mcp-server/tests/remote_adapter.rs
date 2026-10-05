@@ -1,4 +1,3 @@
-//! Native counterparts of `apps/mcp-server/test/remote-adapter.test.ts`.
 use ableton_mcp_server::{
     bridge::remote_adapter::*,
     live::*,
@@ -194,9 +193,8 @@ fn digest_reference_fields_and_pad_expansion() {
     assert_eq!(rack["drumPads"][1]["chains"][0]["devices"], json!([]));
 }
 #[test]
-fn authority_classifications_match_python_and_typescript() {
+fn authority_classifications_match_python() {
     let python = include_str!("../../../remote-script/ableton_mcp_remote_script.py");
-    let ts = include_str!("../../../apps/mcp-server/src/bridge/remote-adapter.ts");
     for (name, values) in [
         ("READ_ONLY_INVOKES", READ_ONLY_INVOKES),
         ("AUTHORITY_FREE_INVOKES", AUTHORITY_FREE_INVOKES),
@@ -206,11 +204,9 @@ fn authority_classifications_match_python_and_typescript() {
     ] {
         let quoted = regex::Regex::new(r#""([^"]+)""#).unwrap();
         let py = regex::Regex::new(&format!(r"_{name} = \{{([^}}]*)\}}")).unwrap().captures(python).unwrap();
-        let source = regex::Regex::new(&format!(r"export const {name} = new Set\(\[([^\]]*)\]\)")).unwrap().captures(ts).unwrap();
         let set = |text: &str| quoted.captures_iter(text).map(|m| m[1].to_owned()).collect::<std::collections::BTreeSet<_>>();
         let native = values.iter().map(|s| s.to_string()).collect();
         assert_eq!(set(&py[1]), native, "{name}");
-        assert_eq!(set(&source[1]), native, "{name}");
     }
 }
 #[tokio::test]

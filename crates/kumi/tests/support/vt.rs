@@ -1,4 +1,4 @@
-//! Port of `apps/kumi/test/vt.ts`: a minimal terminal, enough of xterm to replay Kumi's renderer output in tests.
+//! A minimal terminal, enough of xterm to replay Kumi's renderer output in tests.
 
 use kumi::tui::style::{style_key, Rgb, Style};
 use kumi::tui::width::{cell_width, graphemes};

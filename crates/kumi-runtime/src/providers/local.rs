@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/providers/local.ts`.
 pub use super::models::Transport;
 use super::{
     compat::mending_fetch,

@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/analysis.ts`.
-//!
 //! Deterministic, local-only analysis of normalized PCM samples.
 //!
 //! This module deliberately accepts samples rather than paths or URLs. It never

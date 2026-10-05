@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/auth/openai-codex.ts`.
-
 use super::store::{Credential, CredentialStore, OAuthCredential};
 use crate::{
     ai::{

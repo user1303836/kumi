@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/loopback.ts`.
-
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 

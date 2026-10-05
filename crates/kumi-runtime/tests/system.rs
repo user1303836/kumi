@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/test/system.test.ts`.
-
 use kumi_runtime::system::{system_program, Env, SystemProgram};
 
 fn env(pairs: &[(&str, &str)]) -> Env {

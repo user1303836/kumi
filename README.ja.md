@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/user1303836/kumi/actions/workflows/kumi.yml"><img alt="CI" src="https://github.com/user1303836/kumi/actions/workflows/kumi.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/user1303836/kumi/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/user1303836/kumi/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/user1303836/kumi/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/user1303836/kumi?label=release"></a>
   <img alt="Ableton Live 12" src="https://img.shields.io/badge/Ableton%20Live-12-111111">
   <img alt="Native Rust runtime" src="https://img.shields.io/badge/runtime-native%20Rust-555555">
@@ -85,8 +85,9 @@ Windows ではインストールと更新を確認済みですが、Live と一�
 
 ```sh
 cargo build --release --locked --workspace --bins
-cargo run --release -p kumi --        # -- の後に bridge、doctor などを追加
-sh scripts/test-isolated.sh          # Live もサインインも不要
+cargo run --release -p kumi --                     # -- の後に bridge、doctor などを追加
+npm ci --prefix crates/kumi-runtime/tests/support  # 初回のみ：一部のテストが使う公式 SDK
+sh scripts/test-isolated.sh                        # Live もサインインも不要
 ```
 
 従来の `npm run setup` と `npm run kumi -- ...` も使えます。Cargo がある場合はこのチェックアウトを
@@ -94,14 +95,11 @@ sh scripts/test-isolated.sh          # Live もサインインも不要
 実行します。`~/.kumi` の設定、サインイン、会話、ライブラリーはそのままです。
 以後は `kumi` でネイティブ版を直接起動できます。
 
-TypeScript は互換性を検証する参照実装として残しています。その `npm ci`、`npm run build`、
-`npm run typecheck`、`npm test` には Node.js 22 または 24 を使います。
-
 | フォルダー | 内容 |
 | --- | --- |
 | `crates/kumi` | ターミナルアプリと `kumi` コマンド |
 | `crates/kumi-runtime` | Kumi のエージェントコア：モデルのプロバイダー、メモリー、音声解析、ビデオ、ウェブ、Live との連携 |
-| `crates/ableton-mcp-server` | ブリッジ：Kumi が起動するローカルの MCP サーバー。ほかの MCP クライアントからも単独で使えます（[ブリッジのガイド（英語）](apps/mcp-server/README.md)） |
+| `crates/ableton-mcp-server` | ブリッジ：Kumi が起動するローカルの MCP サーバー。ほかの MCP クライアントからも単独で使えます（[ブリッジのガイド（英語）](crates/ableton-mcp-server/README.md)） |
 | `remote-script` | Live の中で動く、ブリッジの Remote Script |
 | `apps/live-extension` | Kumi の Live 拡張機能（Live 12.4 以降） |
 | `protocol` | ブリッジと Remote Script が共有する操作の一覧 |

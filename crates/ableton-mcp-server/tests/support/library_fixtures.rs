@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/test/library-fixtures.ts`.
-//!
 //! Generated test fixtures (real SQLite files produced by sqlite3 with the
 //! first-hand-probed Live 12.4.5 schema shapes; embedded as base64 so the suite
 //! stays dependency-free and immune to text-mode line-ending conversion).

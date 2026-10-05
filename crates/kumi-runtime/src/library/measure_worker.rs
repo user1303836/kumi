@@ -1,4 +1,4 @@
-//! Port of `packages/runtime/src/library/measure-worker.ts` and learn.ts's measurement pool.
+//! The library's measurement worker and its pool.
 //! Persistent native child processes retain worker isolation and can be killed on decoder timeouts.
 use super::{
     features::MeasureOptions,

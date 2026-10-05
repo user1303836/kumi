@@ -2,7 +2,7 @@
 
 [English](../en/LIVE_SAFETY.md) · [简体中文](../zh-CN/LIVE_SAFETY.md) · 日本語
 
-ブリッジが Live の Set を読み取り、変更するときに保証すること、保証しないことをまとめます。ブリッジとは、`apps/mcp-server` にある MCP サーバーと、Live の中で動くその Remote Script のことです。ブリッジを操作するのは Kumi ですが、どの MCP クライアントからも操作できます（[ユーザーガイド](USER_GUIDE.md)）。大事な Set にクライアントを向ける前に、このページを読んでください。
+ブリッジが Live の Set を読み取り、変更するときに保証すること、保証しないことをまとめます。ブリッジとは、`crates/ableton-mcp-server` にある MCP サーバーと、Live の中で動くその Remote Script のことです。ブリッジを操作するのは Kumi ですが、どの MCP クライアントからも操作できます（[ユーザーガイド](USER_GUIDE.md)）。大事な Set にクライアントを向ける前に、このページを読んでください。
 
 ## 信頼の境界
 

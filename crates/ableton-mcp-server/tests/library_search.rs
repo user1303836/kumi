@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/test/library-search.test.ts`.
-//!
 //! The TypeScript test drives `live_library_search` through `McpHost`; the host's own glue
 //! (allowlist containment, the `-wal` file check, the response envelope with `schema`,
 //! `unavailable`, `privacy` and `provenance`) belongs to the host's tests. Everything the

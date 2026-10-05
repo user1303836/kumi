@@ -56,7 +56,7 @@ Not yet confirmed on Windows:
   Bash). Run the installer line again, or run
   `$env:Path = "$env:SystemRoot\System32;$env:Path"` before `kumi update`.
 
-## Node.js for the TypeScript reference and legacy bridge
+## Node.js for older installations
 
 | Node.js | Status |
 | --- | --- |
@@ -64,13 +64,12 @@ Not yet confirmed on Windows:
 | 25.x | Not supported: it reached end of life on June 1, 2026 |
 | 26.x and later, 21.x and earlier, prereleases | Not supported until tested |
 
-This table applies to the retained TypeScript reference and legacy Node installations.
-Their npm engine range is `>=22 <23 || >=24 <25`; the legacy TypeScript
-`kumi` refuses other majors (except `kumi doctor`, which says what's wrong).
-The bridge's server and `ableton-mcp-setup` refuse them too;
-`ableton-mcp-diagnostics` reports them; `ableton-mcp-lifecycle` and
-`ableton-mcp-migrate` still run, so an older installation can be inspected or
-removed.
+This table applies to installations of Kumi 1.7.5 and earlier, which run on
+Node. Their npm engine range is `>=22 <23 || >=24 <25`; their `kumi` refuses
+other majors (except `kumi doctor`, which says what's wrong). Their bridge's
+server and `ableton-mcp-setup` refuse them too; `ableton-mcp-diagnostics`
+reports them; `ableton-mcp-lifecycle` and `ableton-mcp-migrate` still run, so
+an older installation can be inspected or removed.
 
 ## MCP protocol
 
@@ -92,7 +91,7 @@ makers decide.
 
 ## What CI covers
 
-CI runs on GitHub's hosted macOS 15, Ubuntu 24.04 and Windows Server 2025
-runners: native Rust checks, six target bundles and installer migration tests,
-plus the TypeScript reference on Node 22 and 24. None has Live. [Testing](TESTING.md#ci)
+CI runs on GitHub's hosted macOS, Ubuntu and Windows runners: Rust builds and
+tests, the Remote Script's and the Live extension's tests, six target bundles,
+and installation and migration tests. None has Live. [Testing](TESTING.md#ci)
 lists every job.

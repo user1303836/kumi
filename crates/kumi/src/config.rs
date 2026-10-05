@@ -1,4 +1,3 @@
-//! Port of `apps/kumi/src/config.ts`.
 use kumi_common::js::{
     json::file_text,
     string::{trim, utf16_len},

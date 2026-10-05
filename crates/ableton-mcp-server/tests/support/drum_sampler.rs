@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/test/helpers/drum-sampler.ts`.
-
 #![allow(dead_code)]
 
 use std::fs;

@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/ears/device.ts`.
 //! Kumi Ears passes the sound through and records audio with Live's beat phase and position.
 
 use crate::devices::amxd::{encode_amxd, DeviceType};

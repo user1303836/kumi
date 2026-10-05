@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/analysis-job-worker.ts`.
-//!
 //! The disposable analysis process: one job as JSON on stdin, one `{ ok, result | error }`
 //! envelope on stdout, exit code 1 on failure.
 

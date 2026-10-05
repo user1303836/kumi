@@ -15,6 +15,8 @@ from unittest.mock import patch
 SPEC = importlib.util.spec_from_file_location("native_release", Path(__file__).parents[1] / "build-native-release.py")
 release = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release)
+# Windows files carry no exec bits, so a bundle built there marks only .exe files executable.
+EXEC_BITS = os.name != "nt"
 
 class NativeRelease(unittest.TestCase):
     def setUp(self):
@@ -40,26 +42,17 @@ class NativeRelease(unittest.TestCase):
         read_json = lambda name: json.loads((root / name).read_text())
         cargo_version = lambda name: tomllib.loads((root / name).read_text())["package"]["version"]
         version = cargo_version("crates/kumi/Cargo.toml")
-        for name in ("package.json", "apps/kumi/package.json", "packages/runtime/package.json"):
-            self.assertEqual(read_json(name)["version"], version, name)
-        self.assertEqual(read_json("apps/kumi/package.json")["dependencies"]["@kumi/runtime"], version)
+        self.assertEqual(read_json("package.json")["version"], version)
         for name in ("crates/kumi-common/Cargo.toml", "crates/kumi-runtime/Cargo.toml"):
             self.assertEqual(cargo_version(name), version, name)
-        for name in ("packages/runtime/src/version.ts", "crates/kumi-runtime/src/version.rs"):
-            declared = re.search(r'KUMI_VERSION[^=]*=\s*"([^"\n]+)"', (root / name).read_text())
-            self.assertIsNotNone(declared, name)
-            self.assertEqual(declared[1], version, name)
-        npm_lock = read_json("package-lock.json")
-        self.assertEqual(npm_lock["version"], version)
-        for name in ("", "apps/kumi", "packages/runtime"):
-            self.assertEqual(npm_lock["packages"][name]["version"], version, name)
-        self.assertEqual(npm_lock["packages"]["apps/kumi"]["dependencies"]["@kumi/runtime"], version)
+        declared = re.search(r'KUMI_VERSION[^=]*=\s*"([^"\n]+)"', (root / "crates/kumi-runtime/src/version.rs").read_text())
+        self.assertIsNotNone(declared)
+        self.assertEqual(declared[1], version)
         cargo_lock = tomllib.loads((root / "Cargo.lock").read_text())["package"]
         for package in cargo_lock:
             if package["name"] in ("kumi", "kumi-runtime", "kumi-common"):
                 self.assertEqual(package["version"], version, package["name"])
         bridge = cargo_version("crates/ableton-mcp-server/Cargo.toml")
-        self.assertEqual(read_json("apps/mcp-server/package.json")["version"], bridge)
         self.assertEqual(next(p["version"] for p in cargo_lock if p["name"] == "ableton-mcp-server"), bridge)
 
     def helper_source(self):
@@ -73,7 +66,7 @@ class NativeRelease(unittest.TestCase):
         bundle = self.root / "bundle"
         with self.assertRaisesRegex(ValueError, "run python3 scripts/build-hands.py first"):
             release.stage_hands(self.root, bundle, "aarch64-apple-darwin")
-        helper = self.root / "packages/runtime/hands" / name
+        helper = self.root / "target/hands" / name
         helper.parent.mkdir(parents=True)
         helper.write_bytes(b"signed universal fixture")
         release.stage_hands(self.root, bundle, "aarch64-apple-darwin")
@@ -85,7 +78,7 @@ class NativeRelease(unittest.TestCase):
 
     def test_mac_release_rejects_stale_source_names_and_linked_helpers(self):
         name = self.helper_source()
-        hands = self.root / "packages/runtime/hands"
+        hands = self.root / "target/hands"
         hands.mkdir(parents=True)
         stale = hands / "kumi-hands-000000000000"
         stale.write_bytes(b"old helper")
@@ -124,11 +117,12 @@ class NativeRelease(unittest.TestCase):
             self.assertTrue(all(binary in names for binary in release.BINARIES))
             self.assertIn("apps/kumi/bin/kumi.mjs", names)
             helper_name = "kumi-hands-" + release.digest(release.ROOT / "crates/kumi-runtime/src/hands/KumiHands.swift")[:12]
-            source_helper = release.ROOT / "packages/runtime/hands" / helper_name
+            source_helper = release.ROOT / "target/hands" / helper_name
             if source_helper.is_file():
                 helper_path = "packages/runtime/hands/" + helper_name
                 self.assertEqual(tar.extractfile(helper_path).read(), source_helper.read_bytes())
-                self.assertEqual(tar.getmember(helper_path).mode, 0o755)
+                if EXEC_BITS:
+                    self.assertEqual(tar.getmember(helper_path).mode, 0o755)
                 self.assertNotIn("hands/" + helper_name, names)
             self.assertEqual(json.load(tar.extractfile("apps/mcp-server/package.json"))["version"], result["bridge"])
             self.assertFalse(any("node_modules" in name or name.startswith("node/") for name in names))
@@ -149,7 +143,7 @@ class NativeRelease(unittest.TestCase):
             self.assertEqual(set(manifest["files"]), set(manifest["roles"]))
             self.assertNotIn("release-manifest.json", manifest["files"])
             self.assertGreaterEqual(len(manifest["files"]), 10)
-            # This is the canonical JSON hash from the TypeScript registry hasher.
+            # The canonical JSON hash of the protocol registry.
             self.assertEqual(manifest["protocol"]["registryHash"], "ec05dd401ec098adb77da1c185aff1857be2bd87859afe9dda4bfeb14e04aa57")
             self.assertEqual(manifest["distribution"], {"channel": "local-native-tarball", "published": False,
                 "signed": False, "notarized": False, "integrityIsIdentityProof": False})
@@ -161,7 +155,8 @@ class NativeRelease(unittest.TestCase):
                 self.assertEqual(set(bridge.getnames()), expected)
                 self.assertTrue(all(member.isfile() and not member.pax_headers for member in bridge.getmembers()))
                 for binary in release.BRIDGE_BINARIES:
-                    self.assertEqual(bridge.getmember("package/" + binary).mode, 0o755)
+                    if EXEC_BITS:
+                        self.assertEqual(bridge.getmember("package/" + binary).mode, 0o755)
                 for member in bridge.getmembers():
                     self.assertEqual(bridge.extractfile(member).read(), tar.extractfile("bridge/" + member.name).read())
         self.assertTrue(gzip.decompress(artifact).endswith(b"\0" * 1024))
@@ -212,15 +207,16 @@ class NativeRelease(unittest.TestCase):
         with self.assertRaises(ValueError):
             release.copy(source / "link", self.root / "copied")
 
-    def test_all_packaged_documents_match_the_source_rewrite(self):
-        oracle = json.loads((Path(__file__).parent / "native-release-doc-oracle.json").read_text())
-        for source, expected in oracle["docs"].items():
-            text = (release.ROOT / source).read_text(encoding="utf-8")
-            actual = release.transform_document(text, release.ROOT, source, oracle["revision"])
-            self.assertEqual(hashlib.sha256(actual.encode()).hexdigest(), expected, source)
+    def test_every_packaged_document_rewrites_its_links(self):
+        revision = "a" * 40
+        # A relative link to a missing file raises: every packaged document's links resolve, to another
+        # packaged document or to this revision on GitHub.
+        for source, _ in release.DOCUMENTS:
+            release.transform_document((release.ROOT / source).read_text(encoding="utf-8"), release.ROOT, source, revision)
+        self.assertEqual(release.document_target(release.ROOT, "docs/en/test.md", "../../crates/ableton-mcp-server/README.md", revision, "href"), "README.md")
         for target in ("../../../../outside", "/absolute", "C:/user", "a\\b", "x\0y"):
             with self.assertRaises(ValueError):
-                release.document_target(release.ROOT, "docs/en/test.md", target, oracle["revision"], "href")
+                release.document_target(release.ROOT, "docs/en/test.md", target, revision, "href")
 
 if __name__ == "__main__":
     unittest.main()

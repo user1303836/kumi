@@ -1,4 +1,4 @@
-//! Port of `packages/runtime/src/providers/models.ts`: model lists come from the provider itself.
+//! Model lists come from the provider itself.
 use super::{api_key_for, provider_info, Effort, ProviderId, EFFORTS, USER_AGENT};
 use crate::{
     ai::{

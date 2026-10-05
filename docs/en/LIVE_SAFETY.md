@@ -3,8 +3,8 @@
 English · [简体中文](../zh-CN/LIVE_SAFETY.md) · [日本語](../ja/LIVE_SAFETY.md)
 
 What the bridge guarantees when it reads and changes your Live Set, and what it
-doesn't. The bridge is the MCP server in `apps/mcp-server` together with its
-Remote Script inside Live. Kumi drives it, and so can any MCP client
+doesn't. The bridge is the MCP server in `crates/ableton-mcp-server` together
+with its Remote Script inside Live. Kumi drives it, and so can any MCP client
 ([user guide](USER_GUIDE.md)). Read this before you point a client at a Set you
 care about.
 

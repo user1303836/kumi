@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/registry.ts`.
-//!
 //! The canonical Live operation registry (`protocol/ableton-live-v1.operations.json`): its hash,
 //! which the Remote Script must match before Live connects, and validation of production wire
 //! values against the exact schema subset the registry uses.

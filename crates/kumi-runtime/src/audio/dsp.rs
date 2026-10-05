@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/audio/dsp.ts`.
 //! The signal processing Kumi's listening is built from: FFT, windows, filters, conversions.
 
 use serde::{Deserialize, Serialize};
@@ -209,7 +208,7 @@ mod tests {
             history[at] = sample;
             at = (at + 1) % 12;
             peak.push(sample);
-            // Direct convolution from dsp.ts, independent of the mirrored-ring layout.
+            // Direct convolution, independent of the mirrored-ring layout.
             let mut expected = 0.0_f64;
             for coefficients in PHASES.iter() {
                 let mut sum = 0.0;

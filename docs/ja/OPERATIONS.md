@@ -2,8 +2,6 @@
 
 [English](../en/OPERATIONS.md) · [简体中文](../zh-CN/OPERATIONS.md) · 日本語
 
-ネイティブ版 Kumi 1.7.6 のブリッジは Node を必要とせず、`ableton-mcp-server` のサブコマンドを使います。このページの Node・npm 配布向けの手順は旧版用です。現在のネイティブ版の手順は[英語版](../en/OPERATIONS.md)を参照してください。Kumi を使う場合は、Live を閉じて `kumi bridge` を実行します。
-
 ブリッジの日々の運用について説明します：起動、確認、制限、ディスクに書き込むもの。インストールについては[ブリッジのインストール](DELIVERY.md)を、問題が起きたときは[回復手順](RECOVERY.md)を参照してください。
 
 ## 起動
@@ -11,12 +9,12 @@
 MCP クライアントがサーバーを起動します。クライアントごとに一つのプロセスです。
 
 ```sh
-node /absolute/path/dist/src/cli.js --config /absolute/path/bridge-config.json
+/absolute/path/ableton-mcp-server --config /absolute/path/bridge-config.json
 ```
 
 サーバーは stdin から JSON lines で MCP メッセージを読み、stdout に書き出します。stdout は MCP 専用にしておいてください。サーバー自身のログ行は、先頭に `mcp-host:` を付けて stderr に出力されます。[デプロイメントポリシー](USER_GUIDE.md#デプロイメントポリシー)やその他の[環境変数](USER_GUIDE.md#環境変数)は、サーバーの環境で設定します。
 
-Kumi は自分でサーバーを起動します。ポリシーを Kumi が使うツールに合わせ、Node のフォルダだけを含む PATH をサーバーに渡し、応答を最大 65 秒待ちます。
+Kumi は自分の隣にあるネイティブのサーバーを起動し、ポリシーを Kumi が使うツールに合わせ、応答を最大 65 秒待ちます。解析ワーカーはサーバーの隣に置かれたままです。
 
 ## 接続を確認する
 
@@ -30,7 +28,7 @@ Kumi は自分でサーバーを起動します。ポリシーを Kumi が使う
 
 ポートが開いていることや、Live が動いていることを接続の証拠とみなさないでください。証拠になるのは、認証された `live_status` だけです。
 
-ターミナルからは、`ableton-mcp-diagnostics --config <path>` で同じ確認ができます。Node、パッケージ、設定、シークレットのアクセス権を報告し、そのあと Set を認証付きで短く読み取ります（Set、シーン、トラック、再生状態、一つのトラックのクリップスロット）。レポートの各段階は、[ブリッジのインストール](DELIVERY.md)で説明しています。
+ターミナルからは、`ableton-mcp-server diagnostics --config <path>` で同じ確認ができます。ネイティブのランタイム、パッケージ、設定、シークレットのアクセス権を報告し、そのあと Set を認証付きで短く読み取ります（Set、シーン、トラック、再生状態、一つのトラックのクリップスロット）。レポートの各段階は、[ブリッジのインストール](DELIVERY.md)で説明しています。
 
 ## 制限
 
@@ -65,7 +63,7 @@ stdin を閉じると、サーバーは終了します。開いたままの取�
 | 内容 | 場所 |
 | --- | --- |
 | 設定、シークレット、レシート、ジャーナル | ライフサイクルの状態フォルダ：`~/.config/ableton-mcp`、Windows では `%APPDATA%\ableton-mcp`（別の場所を選んだ場合を除く） |
-| Remote Script の診断ログ | 状態フォルダの `bridge-diagnostics.log`。`ableton-mcp-lifecycle install --enable-bridge-diagnostics` を実行したあとだけ作られます。名前やデータを含まないイベントコードだけを記録し、16 MiB に達すると最初から書き直します。 |
+| Remote Script の診断ログ | 状態フォルダの `bridge-diagnostics.log`。`ableton-mcp-server lifecycle install --enable-bridge-diagnostics` を実行したあとだけ作られます。名前やデータを含まないイベントコードだけを記録し、16 MiB に達すると最初から書き直します。 |
 | 取り込んだオーディオのコピー | `~/.config/ableton-mcp/import-staging`（`%APPDATA%\ableton-mcp\import-staging`）、または `ABLETON_MCP_IMPORT_STAGING_DIR`。Live はこのコピーを再生するので、どのクリップも使わなくなってから削除してください。[Live の安全性](LIVE_SAFETY.md)を参照。 |
 | Drum Sampler のキャリアプリセット | Live の User Library にある `Kumi` フォルダ。読み込んだあとに削除されます |
 | デバイスの状態 | `live_device_state_save` に指定したフォルダ |

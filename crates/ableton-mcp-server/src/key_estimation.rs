@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/key-estimation.ts`.
-//!
 //! Deterministic musical key/scale estimation (read-only).
 //!
 //! Pitch-class profile: each note contributes `duration * (velocity / 127)`,

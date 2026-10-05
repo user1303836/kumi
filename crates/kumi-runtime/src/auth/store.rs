@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/auth/store.ts`.
-
 use crate::core::errors::{FailureKind, KumiError, RuntimeError};
 use async_trait::async_trait;
 use futures::future::LocalBoxFuture;

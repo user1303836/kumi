@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/mcp/client.ts`.
-//!
 //! The TypeScript spoke through `@modelcontextprotocol/sdk`'s `Client` over its `StdioClientTransport`;
 //! here the same wire behaviour is written out: the child and its environment, newline-delimited
 //! JSON-RPC, the `initialize` handshake, one deadline and a `notifications/cancelled` per request,
@@ -101,7 +99,6 @@ impl LinearReadBuffer {
 }
 
 /// The bridge Kumi starts: the `ableton-mcp-server` binary beside Kumi's own.
-/// TS: `apps/mcp-server/dist/src/cli.js`, run by Node.
 pub fn bridge_entry() -> PathBuf {
     let name = if cfg!(windows) { "ableton-mcp-server.exe" } else { "ableton-mcp-server" };
     match std::env::current_exe().ok().and_then(|exe| exe.parent().map(|folder| folder.join(name))) {

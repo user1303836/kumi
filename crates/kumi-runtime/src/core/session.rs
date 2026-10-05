@@ -1,5 +1,4 @@
 //! Session ownership, cancellation, context refresh and conversation recovery.
-//! Port of `packages/runtime/src/core/session.ts`.
 
 use super::{
     contracts::*,

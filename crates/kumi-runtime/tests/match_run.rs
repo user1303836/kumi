@@ -1,4 +1,4 @@
-//! Controller and playbook cases from `packages/runtime/test/match-run.test.ts`.
+//! Controller and playbook cases.
 //! Session orchestration cases remain with the session port.
 use kumi_runtime::core::{
     contracts::{AuditionEvent, MIX_CANDIDATE},

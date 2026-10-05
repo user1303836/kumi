@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/library/presets.ts`.
 use super::{
     sets::device_name,
     xml::{attribute, scan_tags, xml_head, TagHandler},

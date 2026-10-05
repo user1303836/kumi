@@ -1,4 +1,4 @@
-//! Port of voice settings/control cases in `apps/kumi/test/voice.test.ts`.
+//! Voice settings and controls.
 use kumi::{
     config::{read_settings, write_settings},
     voice::*,

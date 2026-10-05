@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/plugins/adapters/index.ts`.
-
 pub mod decapitator;
 pub mod ott;
 pub mod ozone12;

@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/mcp/allowed-tools.ts`.
-
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;

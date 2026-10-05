@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/audio/wavetable.ts`.
 //! Frames of one cycle each, written as a mono 32-bit WAV with Serum's "clm " chunk.
 
 use super::decode::{open_audio, AudioError};

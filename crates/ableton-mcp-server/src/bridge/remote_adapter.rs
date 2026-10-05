@@ -1,4 +1,4 @@
-//! Authenticated Remote Script channel, ported from `bridge/remote-adapter.ts`.
+//! The authenticated channel to the Remote Script.
 use super::wire;
 use crate::live::*;
 use serde_json::{json, Value};

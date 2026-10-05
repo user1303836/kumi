@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/tui/`.
-
 pub mod activity;
 pub mod app;
 pub mod editor;

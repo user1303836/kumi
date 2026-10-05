@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/test/tui.test.ts`.
-
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::future::Future;

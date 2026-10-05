@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/devices/spec.ts`.
-//!
 //! What the model asks for when it makes a device, and the checks it has to pass. The model never
 //! writes a patch: it names the device, its knobs and its code, and Kumi builds the rest.
 

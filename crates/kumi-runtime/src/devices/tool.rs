@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/devices/tool.ts`.
 //! Build a checked Max for Live device in Live's User Library, then wait for its Browser.
 
 use super::{

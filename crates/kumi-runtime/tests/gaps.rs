@@ -1,4 +1,4 @@
-//! The note_gap case from `packages/runtime/test/techniques.test.ts`.
+//! The note_gap case.
 use kumi_common::abort;
 use kumi_runtime::core::gaps::*;
 use serde_json::{json, Value};

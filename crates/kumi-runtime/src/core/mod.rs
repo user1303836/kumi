@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/core/`.
-
 pub mod contracts;
 pub mod disk;
 pub mod errors;

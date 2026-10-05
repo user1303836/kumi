@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/tui/logo.ts`.
-//!
 //! Kumi's wordmark: lowercase letters in half blocks over a dithered rule. The same pixels make the
 //! README's logo (docs/assets/kumi-logo.svg).
 

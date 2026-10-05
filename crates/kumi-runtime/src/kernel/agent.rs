@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/kernel/agent.ts`.
-
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;

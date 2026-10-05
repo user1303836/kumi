@@ -10,7 +10,7 @@ Kumi とそのブリッジがどのように人の手に届くか、それによ
 | --- | --- | --- |
 | Kumi | `user1303836/kumi` の GitHub Releases：ネイティブの `kumi-<target>.tar.gz`、互換用の `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS`。Installer ワークフローが各 `vX.Y.Z` タグに添付します | `install.sh` または `install.ps1`、その後は `kumi update` |
 | ブリッジ（`@ableton-mcp/mcp-server`） | 各 Kumi バンドルの中に、ネイティブのブリッジ tarball と展開済みのパッケージが入っています | `kumi bridge`。ブリッジのライフサイクルを通じてインストールします（[ブリッジのインストール](DELIVERY.md)） |
-| ブリッジ単体 | 独自のリリースはありません。`python3 scripts/build-native-release.py --bridge-only` でビルドします（[ビルドオプション](../en/DEVELOPER_GUIDE.md#releasing)） | ライフサイクル CLI（[ブリッジのインストール](DELIVERY.md#スタンドアロンのブリッジ)） |
+| ブリッジ単体 | 独自のリリースはありません。`python3 scripts/build-native-release.py --bridge-only` でビルドします（[ビルドオプション](DEVELOPER_GUIDE.md#リリース)） | ライフサイクル CLI（[ブリッジのインストール](DELIVERY.md#スタンドアロンのブリッジ)） |
 
 インストーラーのスクリプトは `main` ブランチから読み込まれ、それがインストールするバンドルは最新の公開リリース（または `KUMI_VERSION` で指定したリリース）から取得されます。リリースはメンテナーが公開するまでは下書きで、公開されたリリースだけが「latest」になります。npm には何も公開しません。すべてのパッケージが `private: true` なので、`npm publish` は拒否されます。
 
@@ -30,22 +30,20 @@ Kumi とそのブリッジがどのように人の手に届くか、それによ
 
 それ以外は含みません。ビルドスクリプト、テストのフィクスチャ、`node_modules`、認証情報、設定、ローカルの状態、ログ、キャプチャしたメディア、エビデンスは入りません。ネイティブのビルダーとライフサイクルは `release-manifest.json` の正確なファイル一覧とハッシュを検証します。
 
-保持している旧 npm パッケージには、ネイティブ実行ファイルの代わりにコンパイル済み JavaScript と型宣言が入ります。その `npm run package:verify` は明示的なファイル一覧を確認します。CI はこの旧パッケージを二回パックし（二回目は新しいクローンと `npm ci` から）、バイト列の一致を求めます。
-
 ## リリースマニフェスト
 
 `release-manifest.json`（スキーマ `ableton-mcp-native-release/v1`）には、パッケージ名とバージョン、ソースのコミットと未コミット変更の有無、Rust ターゲット、rustc と Cargo のバージョン、ランナーイメージ、`Cargo.lock` と CI ワークフローの SHA-256、ビルドレシピ、プロトコルのレジストリハッシュ、各ペイロードファイルの役割と SHA-256 を記録します。
 
 配布フィールドは `channel: "local-native-tarball"` で、`published`、`signed`、`notarized`、`integrityIsIdentityProof` はすべて `false` です。ライフサイクルはこれらの値を要求します。tarball はローカルのパスからハッシュを確認してインストールされ、GitHub Releases 上の Kumi バンドルに入って届きます。パッケージレジストリには公開しません。
 
-既存のインストールのアップグレードとロールバックのため、ライフサイクルは旧スキーマ `ableton-mcp-release/v2` と `ableton-mcp-private-release/v1` も受け付けます。これらの Node/npm/TypeScript のビルド記録と `local-npm-tarball` チャンネルは、保持している旧アーティファクトについてのものです。
+既存のインストールのアップグレードとロールバックのため、ライフサイクルは旧スキーマ `ableton-mcp-release/v2` と `ableton-mcp-private-release/v1` も受け付けます。これらの Node/npm/TypeScript のビルド記録と `local-npm-tarball` チャンネルは、Kumi 1.7.5 以前のブリッジのパッケージについてのものです。
 
 ## マージゲート
 
 `main` ブランチにはルールセットが一つあります：
 
 - 変更はプルリクエストで入ります。承認のレビューは必要ありません。
-- 必須チェックは、`main` に対して最新の状態にしたブランチでパスする必要があります：`Required CI`、`Kumi / Node 22`、`Kumi / Node 24`、`Kumi / Windows / Node 24`、`Kumi / macOS / Node 24`。
+- 必須チェックは `Required CI` の一つだけで、`main` に対して最新の状態にしたブランチでパスする必要があります。
 - `main` は削除もフォースプッシュもできません。
 - リポジトリの管理者ロールは、プルリクエストについてこれらのルールをバイパスできます。
 

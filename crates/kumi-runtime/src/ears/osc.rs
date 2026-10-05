@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/ears/osc.ts`.
-//!
 //! The little of Open Sound Control that Kumi's listening device speaks: messages of ints, floats and
 //! strings, as Max's udpsend and udpreceive send and read them. Big-endian, every part padded to four bytes.
 

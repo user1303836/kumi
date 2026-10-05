@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/library/search.ts`.
 //! In-memory sound, preset and Set search, including measured similarity and reasons for each hit.
 pub use super::classify::tokens;
 use super::{

@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/tui/width.ts`.
-//!
 //! How many terminal cells text occupies, measured per grapheme (what a reader sees as one character).
 //!
 //! Widths follow `string-width` (the TypeScript's dependency), per grapheme cluster: a cluster of

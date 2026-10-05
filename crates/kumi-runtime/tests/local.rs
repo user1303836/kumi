@@ -1,4 +1,4 @@
-//! Port of the stream-normalization scenarios in `packages/runtime/test/local.test.ts`.
+//! Stream normalization for local models.
 
 use futures::{stream, StreamExt};
 use kumi_runtime::{

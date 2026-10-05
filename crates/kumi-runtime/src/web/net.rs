@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/web/net.ts`.
-//!
 //! Kumi's way onto the web: http and https only, and only to public addresses. A name is checked
 //! before anything is sent, and again on every address it resolves to as the connection is made, so
 //! a page can't point Kumi at this computer or a private network, not by a redirect either. Bodies

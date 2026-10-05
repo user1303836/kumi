@@ -1,4 +1,4 @@
-//! Source extension-folder cases from bridge-setup.test.ts and doctor.test.ts.
+//! Live extension folders, as bridge setup and doctor find them.
 use kumi::live_extension::*;
 use kumi_runtime::system::Env;
 use serde_json::json;

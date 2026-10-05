@@ -1,4 +1,4 @@
-//! Port of `apps/kumi/test/report.test.ts` with full TypeScript redaction oracle results.
+//! `kumi report`, with full redaction oracle results.
 use futures::FutureExt;
 use kumi::{
     doctor::{DoctorIo, TerminalInfo, VideoPrograms},

@@ -1,4 +1,4 @@
-//! Port of `apps/kumi/src/report.ts`, with native runtime version information.
+//! `kumi report`, with native runtime version information.
 use crate::{
     config::{load_auth_file, load_gaps_file, load_projects_dir, load_settings_file, load_timings_file},
     doctor::{doctor_checks, format_doctor, Check, DoctorIo},

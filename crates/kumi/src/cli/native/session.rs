@@ -153,7 +153,7 @@ pub(super) async fn run_session(
             .boxed_local()
         })
     };
-    let bundled = bridge_setup::bridge_version(&bridge_setup::bundled_bridge_dir());
+    let bundled = bridge_setup::bundled_bridge_version();
     let project_store = create_project_store(&projects_dir);
     let restore_file = load_restore_file(&io.env)?;
     let user_library = live_user_library(&io.env);

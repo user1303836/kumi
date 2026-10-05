@@ -17,10 +17,7 @@ const run = (command, argv, env = process.env) => {
   return result.status ?? 1;
 };
 try {
-  // The isolated TypeScript suite explicitly selects its unchanged reference entrypoint.
-  if (process.env.KUMI_REFERENCE_RUNTIME === '1') {
-    process.exitCode = run(process.execPath, [join(root, 'apps/kumi/bin/kumi.mjs'), ...args]);
-  } else if (spawnSync('cargo', ['--version'], { stdio: 'ignore' }).status === 0) {
+  if (spawnSync('cargo', ['--version'], { stdio: 'ignore' }).status === 0) {
     const env = { ...process.env };
     delete env.KUMI_INSTALLED;
     const built = run('cargo', ['build', '--quiet', '--release', '--locked', '--workspace', '--bins'], env);

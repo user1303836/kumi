@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/audio/tools.ts`.
 //! The listen tool: files or the Set, alone or against a reference.
 
 use super::{

@@ -1,4 +1,4 @@
-//! Goal persistence/prompts only; source goal.test.ts's session/search scenarios await integration.
+//! Goal persistence and prompts.
 use kumi_runtime::{core::contracts::StructuralMove as Structural, core::goal::*};
 use serde_json::{json, Value};
 

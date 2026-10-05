@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/library/classify.ts`.
-//!
 //! What a sound is, the way a producer would file it: its instrument class (kick, snare, pad…),
 //! one-shot or loop, a loop's tempo and a sound's key or note. Names say most of it ("Kick 808
 //! Long", "Bass Loop 128 Fmin", a "Hats" folder); the sound itself says the rest, and checks the

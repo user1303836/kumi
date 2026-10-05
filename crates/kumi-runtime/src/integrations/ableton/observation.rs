@@ -1,4 +1,4 @@
-//! The fresh, bounded Set context at the start of a turn (`ableton/index.ts::observe`).
+//! The fresh, bounded Set context at the start of a turn.
 use super::{
     connection::{LiveConnection, ReadError},
     context::{self, ObservationError, FIELDS, INSTRUCTIONS},

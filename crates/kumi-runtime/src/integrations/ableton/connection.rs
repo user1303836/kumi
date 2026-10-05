@@ -1,4 +1,4 @@
-//! Bridge connection, reconnection, catalog refresh, and observation leases from `ableton/index.ts`.
+//! Bridge connection, reconnection, catalog refresh, and observation leases.
 use super::{
     context::{self, ObservationError},
     focus::{start_focus_feed, FocusFeed, FocusFeedOptions},
