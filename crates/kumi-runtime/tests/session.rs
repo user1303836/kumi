@@ -915,18 +915,21 @@ impl StreamingCall for PlanStream {
 fn draft() -> Value {
     json!({"name":"Reese stack","fits":"wide Reese basses","idea":"Two detuned saws with glide, then saturation and a low cut."})
 }
-local_test!(technique_is_removed_before_whole_and_streamed_plans_and_kept_when_played, {
+local_test!(technique_is_taken_out_of_whole_and_streamed_plans_and_offered_after_the_answer, {
     use kumi_runtime::core::techniques::{create_technique_store, TechniqueStore};
     let dir = tempfile::tempdir().unwrap();
     let store = create_technique_store(dir.path().join("techniques.json"));
     let received = Rc::new(RefCell::new(vec![]));
     let tools = Rc::new(RefCell::new(Vec::<Rc<dyn KernelTool>>::new()));
     let streamed = Rc::new(Cell::new(false));
+    let session = Rc::new(RefCell::new(None::<Session>));
     let use_tools = tools.clone();
     let way = streamed.clone();
+    let active = session.clone();
     let run: Run = Rc::new(move |_, signal, _| {
         let plan = use_tools.borrow().iter().find(|t| t.name() == "make_changes").unwrap().clone();
         let streamed = way.get();
+        let session = active.borrow().clone().unwrap();
         async move {
             let input = json!({"steps":[{"tool":"load_device"}],"technique":draft()}).as_object().unwrap().clone();
             if streamed {
@@ -938,6 +941,7 @@ local_test!(technique_is_removed_before_whole_and_streamed_plans_and_kept_when_p
             } else {
                 plan.execute(input, signal).await?;
             }
+            session.watch(WatchEvent::Change(change("c1", "applied", 1)));
             Ok(complete())
         }
         .boxed_local()
@@ -951,12 +955,13 @@ local_test!(technique_is_removed_before_whole_and_streamed_plans_and_kept_when_p
             factory(options)
         });
     });
+    *session.borrow_mut() = Some(h.session.clone());
     h.observation.borrow_mut().tools.push(Rc::new(Plan { received: received.clone() }));
     h.session.start().await.unwrap();
     let plan = h.record.created.borrow()[0].tools[0].clone();
     assert!(plan.description().starts_with("Make changes. When the plan builds"));
     assert!(plan.input_schema()["properties"]["technique"].is_object());
-    let kept = || {
+    let actions = || {
         h.events
             .borrow()
             .iter()
@@ -966,21 +971,33 @@ local_test!(technique_is_removed_before_whole_and_streamed_plans_and_kept_when_p
             })
             .collect::<Vec<_>>()
     };
-    for (round, way) in [false, true].into_iter().enumerate() {
-        streamed.set(way);
-        h.session.submit("build a Reese", None).await.unwrap();
-        assert_eq!(received.borrow().last().unwrap(), json!({"steps":[{"tool":"load_device"}]}).as_object().unwrap());
-        h.session.watch(WatchEvent::Action(ActionEvent { title: "Playing".into(), playing: Some(true), recording: None }));
-        // Keeping it writes the store first; a busy runner's disk takes longer than a few ms.
-        for _ in 0..1000 {
-            if kept().len() > round {
-                break;
-            }
-            delay(2).await;
-        }
-    }
-    assert_eq!(kept(), [TechniqueAction::Kept, TechniqueAction::Updated]);
+    h.session.submit("build a Reese", None).await.unwrap();
+    assert_eq!(received.borrow().last().unwrap(), json!({"steps":[{"tool":"load_device"}]}).as_object().unwrap());
+    assert_eq!(actions(), [TechniqueAction::Offered]);
+    let order = h
+        .events
+        .borrow()
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::TurnComplete { .. } => Some("answered"),
+            SessionEvent::Technique(_) => Some("offered"),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(order, ["answered", "offered"], "the offer comes after the answer, so the answer's own question comes first");
+    // Playing it isn't a yes; the producer's answer is.
+    h.session.watch(WatchEvent::Action(ActionEvent { title: "Playing".into(), playing: Some(true), recording: None }));
+    assert!(store.list().await.unwrap().is_empty());
+    assert!(h.session.answer_technique(true).await.unwrap());
+    assert_eq!(actions(), [TechniqueAction::Offered, TechniqueAction::Kept]);
     assert_eq!(h.session.techniques().await.unwrap()[0].name, "Reese stack");
+    assert_eq!(store.list().await.unwrap()[0].request.as_deref(), Some("build a Reese"));
+    assert!(!h.session.answer_technique(true).await.unwrap(), "answered once, nothing waits");
+    // A streamed plan loses its technique too; right after an offer, Kumi doesn't ask again.
+    streamed.set(true);
+    h.session.submit("build another Reese", None).await.unwrap();
+    assert_eq!(received.borrow().last().unwrap(), json!({"steps":[{"tool":"load_device"}]}).as_object().unwrap());
+    assert_eq!(actions(), [TechniqueAction::Offered, TechniqueAction::Kept]);
     let id = store.list().await.unwrap()[0].id.clone();
     assert!(h.session.forget_technique(&id).await.unwrap());
     assert!(store.list().await.unwrap().is_empty());
@@ -988,29 +1005,36 @@ local_test!(technique_is_removed_before_whole_and_streamed_plans_and_kept_when_p
         .execute(json!({"steps":[{"tool":"load_device"},{"tool":"load_device"}]}).as_object().unwrap().clone(), Signal::new())
         .await
         .unwrap();
-    assert!(result.text.contains("technique"));
+    assert!(!result.text.contains("technique"), "nothing nudges the model to draft one");
     h.session.close().await.unwrap();
 });
-local_test!(set_save_keeps_a_draft_and_failed_answer_abandons_it, {
+local_test!(a_save_or_silence_keeps_nothing_a_failed_answer_offers_nothing_and_a_yes_in_words_keeps_it, {
     use kumi_runtime::core::techniques::{create_technique_store, TechniqueStore, TECHNIQUE_TOOL};
     for fail in [false, true] {
         let dir = tempfile::tempdir().unwrap();
         let store = create_technique_store(dir.path().join("techniques.json"));
         let tools = Rc::new(RefCell::new(Vec::<Rc<dyn KernelTool>>::new()));
+        let session = Rc::new(RefCell::new(None::<Session>));
         let use_tools = tools.clone();
+        let active = session.clone();
         let count = Rc::new(Cell::new(0));
-        let run: Run = Rc::new(move |_, signal, _| {
-            let first = count.get() == 0;
-            count.set(count.get() + 1);
+        let run: Run = Rc::new(move |input, signal, _| {
+            let turn = count.get();
+            count.set(turn + 1);
             let tool = use_tools.borrow().iter().find(|t| t.name() == TECHNIQUE_TOOL).unwrap().clone();
+            let session = active.borrow().clone().unwrap();
             async move {
-                if first {
+                if turn == 0 {
+                    session.watch(WatchEvent::Change(change("c1", "applied", 1)));
                     let mut input = draft().as_object().unwrap().clone();
                     input.insert("action".into(), json!("draft"));
                     tool.execute(input, signal).await?;
                     if fail {
                         return Err(RuntimeError::plain("provider went away"));
                     }
+                } else if input.contains("whether to keep “Reese stack” as a technique") {
+                    // The producer's words say yes, so the model keeps it.
+                    tool.execute(json!({"action":"keep"}).as_object().unwrap().clone(), signal).await?;
                 }
                 Ok(complete())
             }
@@ -1024,30 +1048,18 @@ local_test!(set_save_keeps_a_draft_and_failed_answer_abandons_it, {
                 factory(options)
             });
         });
+        *session.borrow_mut() = Some(h.session.clone());
         project(&h, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         h.observation.borrow_mut().saved_at = Some(1000.);
         h.session.start().await.unwrap();
         h.session.submit("build a Reese", None).await.unwrap();
+        // Saving the Set isn't a yes.
+        h.observation.borrow_mut().saved_at = Some(2000.);
         h.session.refresh().await.unwrap();
         assert!(store.list().await.unwrap().is_empty());
-        if fail {
-            h.session.submit("I love it", None).await.unwrap();
-        } else {
-            h.observation.borrow_mut().saved_at = Some(2000.);
-            h.session.refresh().await.unwrap();
-        }
-        // Keeping the draft writes the store; a busy runner's disk takes longer than a few ms. An abandoned
-        // draft gets the same 10 ms it always had to show up wrongly.
-        if fail {
-            delay(10).await;
-        } else {
-            for _ in 0..1000 {
-                if !store.list().await.unwrap().is_empty() {
-                    break;
-                }
-                delay(2).await;
-            }
-        }
+        h.session.submit("yes, keep that one", None).await.unwrap();
+        let noted = h.record.calls.borrow().last().unwrap().contains("whether to keep “Reese stack” as a technique");
+        assert_eq!(noted, !fail, "the next turn hears of the offer only when there was one");
         h.session.close().await.unwrap();
         assert_eq!(store.list().await.unwrap().len(), usize::from(!fail));
         assert_eq!(h.error("Inference failed"), fail);

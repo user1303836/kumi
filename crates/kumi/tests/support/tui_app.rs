@@ -280,6 +280,13 @@ impl SessionController for Control {
         self.call(format!("forget-technique:{id}"));
         Ok(true)
     }
+    fn has_answer_technique(&self) -> bool {
+        self.enabled("techniques")
+    }
+    async fn answer_technique(&self, keep: bool) -> Result<bool, RuntimeError> {
+        self.call(format!("answer-technique:{}", if keep { "yes" } else { "no" }));
+        Ok(self.get("technique-waiting").unwrap_or(true))
+    }
     fn has_taste(&self) -> bool {
         self.enabled("taste")
     }

@@ -561,6 +561,45 @@ case!(memory_rows_forget_and_use, async {
     h.has("◆ Using your technique: Parallel drum crush");
     h.close().await;
 });
+case!(a_technique_offered_after_an_answer_is_answered_by_number, async {
+    let c = Rc::new(Control::default());
+    c.set("techniques", json!([]));
+    let h = Harness::with(120, 36, c, |_| {});
+    h.start().await;
+    h.connect();
+    let built = |h: &Harness, text: &str| {
+        h.emit(json!({"type":"state","state":"running"}));
+        h.emit(json!({"type":"text","text":text}));
+        h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+        h.emit(json!({"type":"technique","action":"offered","technique":{"id":"","name":"Liquid bubbles","fits":"bubbly FM effects"}}));
+        h.emit(json!({"type":"state","state":"idle"}));
+    };
+    h.type_text("recreate the bubbles from this tutorial\r").await;
+    built(&h, "Built the bubble chain on Bubbles.");
+    h.has("◆ Keep this as a technique? Liquid bubbles");
+    h.has("Keep “Liquid bubbles” as a technique?");
+    h.has("1. Yes, keep it");
+    h.type_text("1").await;
+    assert!(!h.calls().iter().any(|c| c.starts_with("answer-technique:")), "a number picks; enter answers");
+    h.type_text("\r").await;
+    h.wait_for_call("answer-technique:yes").await;
+    assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"), "answering closes the offer");
+    // Typing on goes to the input box and answers nothing.
+    h.type_text("now a wetter one\r").await;
+    built(&h, "Built it again, wetter.");
+    h.has("Keep “Liquid bubbles” as a technique?");
+    h.type_text("make it wetter").await;
+    assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"));
+    h.has("make it wetter");
+    assert_eq!(h.calls().iter().filter(|c| c.starts_with("answer-technique:")).count(), 1);
+    h.type_text("\x03").await;
+    // An answer that ends on its own question keeps its options, and the offer doesn't cover them.
+    h.type_text("add a reverb\r").await;
+    built(&h, "Which track should get the reverb?\n\n1. Bubbles\n2. Drums");
+    h.has("Your answer");
+    assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"));
+    h.close().await;
+});
 case!(stop_live_and_held_cancel_refusal, async {
     let c = Rc::new(Control::default());
     c.stop.set(true);

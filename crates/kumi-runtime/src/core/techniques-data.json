@@ -1,5 +1,5 @@
 {
-  "description": "Kumi's learned techniques: ideas that made a sound the producer liked, kept to adapt for similar sounds later (a recipe, by contrast, replays exact steps). action draft: when you build a sound or a chain (from a tutorial, or a request of several steps), draft what's worth keeping in the same reply as the make_changes that builds it (a final make_changes ends the answer): its name, what it fits (the kind of sound or request), the idea (the chain and why each part), the settings that mattered, substitutes (what to use when a part isn't available, such as a plugin or a step Kumi can't do), and where it came from (a tutorial's title and address). Kumi keeps it only if the producer's next moves say they liked it, and shows them then; don't mention the draft. When it refines a technique you read, pass replaces with its id. action keep: the same fields, kept at once, only when the producer asks you in so many words to remember how something was done, or to change a technique (with replaces). action read: the whole of a technique listed in your instructions, when a request fits it; then adapt it and say you're using it. action forget: remove one when the producer asks.",
+  "description": "Kumi's techniques: ideas behind sounds Kumi built that the producer chose to keep, to adapt for the same kind of sound later (a recipe, by contrast, replays exact steps). action draft: when something you built is a reusable idea for a kind of sound (not a one-off, a routine change, a fix or work toward a goal), draft it in the same reply as the make_changes that builds it: its name, what it fits (narrowly: the kind of sound, such as \"glassy FM plucks\", not \"synths\"), the idea (the chain and why each part), the settings that mattered, substitutes (what to use when a part isn't available, such as a plugin or a step Kumi can't do), and where it came from (a tutorial's title and address). After your answer Kumi asks the producer whether to keep it; don't ask or mention it yourself. When it refines a technique you read, pass replaces with its id. action keep: with those fields, keeps one at once, only when the producer asks in so many words to remember how something was done, or to change a technique (with replaces); with no other fields, keeps the technique Kumi offered, when the producer's message says yes to keeping it. action read: the whole of a technique listed in your instructions, when the producer asks for it, or when a request leaves the approach open and is about the kind of sound it fits; not when they give a tutorial, a reference or steps to follow. Then adapt it and say you're using it. action forget: remove one when the producer asks.",
   "schema": {
     "type": "object",
     "additionalProperties": false,
@@ -28,7 +28,7 @@
       "fits": {
         "type": "string",
         "maxLength": 160,
-        "description": "The kind of sound or request it fits"
+        "description": "The kind of sound or request it fits, narrowly"
       },
       "idea": {
         "type": "string",
@@ -72,7 +72,7 @@
     }
   },
   "plan": {
-    "description": "When the plan builds a sound or a chain (devices loaded, and set up if you set them up), give it technique: its name, what it fits, and the idea (the chain and why each part), with the settings that matter and substitutes when you know them. Kumi keeps it only if the producer likes the result; don't mention it.",
+    "description": "When the plan builds something that's a reusable idea for a kind of sound (devices loaded and set up to a purpose), give it technique: its name, what it fits (narrowly), and the idea (the chain and why each part), with the settings that matter and substitutes when you know them. After your answer Kumi asks the producer whether to keep it; don't ask or mention it. Leave it out for one-off or routine changes and fixes.",
     "schema": {
       "type": "object",
       "additionalProperties": false,
@@ -89,7 +89,7 @@
         "fits": {
           "type": "string",
           "maxLength": 160,
-          "description": "The kind of sound or request it fits"
+          "description": "The kind of sound or request it fits, narrowly"
         },
         "idea": {
           "type": "string",
@@ -131,7 +131,7 @@
           "description": "The id of a technique this refines"
         }
       },
-      "description": "When this plan builds a sound or a chain worth keeping: what makes it work (the chain and why, the settings that matter, substitutes, where it came from). Kumi keeps it only if the producer likes the result; don't mention it."
+      "description": "When this plan builds a reusable idea for a kind of sound: what makes it work (the chain and why, the settings that matter, substitutes, where it came from). Kumi asks the producer after your answer whether to keep it."
     }
   }
 }

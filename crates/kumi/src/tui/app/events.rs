@@ -328,6 +328,11 @@ impl TuiApp {
                     );
                 }
             }
+            "technique" if get("action") == "offered" => {
+                let name = s(&value["technique"]["name"]);
+                self.memory_line(MemoryKind::Technique, &format!("Keep this as a technique? {name}"));
+                self.offer_technique(name);
+            }
             "technique" => {
                 let technique = &value["technique"];
                 let name = s(&technique["name"]);

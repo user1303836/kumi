@@ -8,8 +8,7 @@ use super::{
     recall::{recall_tool, RecallOptions},
     recipes::{recipe_instructions, recipe_tools, RecipeStore, RecipeToolsOptions, RUN_RECIPE_TOOL},
     techniques::{
-        asks_for_technique, technique_instructions, technique_tools, TechniqueStore, TechniqueTools, TechniqueToolsOptions, PLAN_TECHNIQUE,
-        TECHNIQUE_GUIDANCE, TECHNIQUE_NUDGE,
+        technique_instructions, technique_tools, TechniqueStore, TechniqueTools, TechniqueToolsOptions, PLAN_TECHNIQUE, TECHNIQUE_GUIDANCE,
     },
     timing,
 };
@@ -83,7 +82,6 @@ pub struct SessionOptions {
     pub web: bool,
     pub web_client: Option<Rc<dyn WebClient>>,
     pub techniques: Option<Rc<dyn TechniqueStore>>,
-    pub technique_settle_ms: Option<u64>,
     pub gaps: Option<String>,
     /// Where each turn's timing goes (`timings.jsonl`); none keeps no log.
     pub timings: Option<String>,
@@ -116,7 +114,6 @@ impl SessionOptions {
             web: false,
             web_client: None,
             techniques: None,
-            technique_settle_ms: None,
             gaps: None,
             timings: None,
             library: None,
@@ -397,7 +394,6 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             Rc::new(technique_tools(TechniqueToolsOptions {
                 store: store.clone(),
                 on_event: Rc::new(move |e| emit(SessionEvent::Technique(e))),
-                settle_ms: options.technique_settle_ms,
             }))
         });
         let listening = if options.listen {
@@ -1011,16 +1007,6 @@ impl Session {
         let hints = (pinned.is_some() || continuing).then_some(ObserveHints { pinned, continuing: continuing.then_some(true) });
         let snapshot = integration.observe(op.signal.clone(), hints).await?;
         self.assert_current(op)?;
-        let saved = {
-            let s = self.0.state.borrow();
-            s.set.as_deref() == Some(&snapshot.key)
-                && ((s.project.is_none() && snapshot.project.is_some()) || s.saved_at.zip(snapshot.saved_at).is_some_and(|(a, b)| b > a))
-        };
-        if saved {
-            if let Some(l) = &self.0.learned {
-                l.drafts.saved();
-            }
-        }
         {
             let mut s = self.0.state.borrow_mut();
             s.saved_at = snapshot.saved_at;
@@ -1195,16 +1181,21 @@ impl Session {
         } else {
             match outcome {
                 Ok(Some(turn)) if op.is_turn => {
+                    let mut offer = None;
                     if let Some(l) = &self.0.learned {
                         if turn.stop_reason == StopReason::Cancelled {
                             l.drafts.abandon();
                         } else {
-                            l.drafts.turn_ended();
+                            offer = l.drafts.turn_ended(turn.stop_reason == StopReason::Completed);
                         }
                     }
                     let save = turn.stop_reason != StopReason::Cancelled;
                     ended = Some((json!(turn.stop_reason), turn.usage.clone()));
                     self.emit(SessionEvent::TurnComplete { result: turn, elapsed_ms: began.elapsed().as_millis() as u64 });
+                    // Asked after the answer, so the answer's own question, if it ends on one, comes first.
+                    if let Some(technique) = offer {
+                        self.emit(SessionEvent::Technique(TechniqueEvent { action: TechniqueAction::Offered, technique }));
+                    }
                     if save {
                         self.save_conversation(true);
                     }
@@ -1279,13 +1270,6 @@ fn take_technique(mut input: JsonObject, learned: &TechniqueTools) -> JsonObject
     }
     input
 }
-fn nudge(input: Option<&JsonObject>, mut outcome: ToolResult) -> ToolResult {
-    if input.is_some_and(asks_for_technique) && !outcome.is_error && outcome.reply.is_none() {
-        outcome.text.push('\n');
-        outcome.text.push_str(TECHNIQUE_NUDGE);
-    }
-    outcome
-}
 #[async_trait(?Send)]
 impl KernelTool for TechniquePlan {
     fn name(&self) -> &str {
@@ -1303,8 +1287,7 @@ impl KernelTool for TechniquePlan {
         schema
     }
     async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
-        let result = self.tool.execute(take_technique(input.clone(), &self.learned), signal).await?;
-        Ok(nudge(Some(&input), result))
+        self.tool.execute(take_technique(input, &self.learned), signal).await
     }
     fn stream(&self, signal: Signal, on_start: Rc<dyn Fn()>) -> Option<Box<dyn StreamingCall>> {
         self.tool
@@ -1322,8 +1305,7 @@ impl StreamingCall for TechniqueStream {
         self.call.push(delta);
     }
     async fn finish(&self, input: Option<JsonObject>) -> Result<ToolResult, RuntimeError> {
-        let result = self.call.finish(input.clone().map(|input| take_technique(input, &self.learned))).await?;
-        Ok(nudge(input.as_ref(), result))
+        self.call.finish(input.map(|input| take_technique(input, &self.learned))).await
     }
     async fn abandon(&self) {
         self.call.abandon().await;
@@ -1584,14 +1566,7 @@ impl SessionController for Session {
                 self.0.state.borrow_mut().heard_last = Some(event);
                 return;
             }
-            WatchEvent::Action(action) => {
-                if action.playing == Some(true) {
-                    if let Some(l) = &self.0.learned {
-                        l.drafts.played();
-                    }
-                }
-                return;
-            }
+            WatchEvent::Action(_) => return,
             WatchEvent::Change(c) => {
                 if c.state == ChangeState::Applied {
                     let run = self.0.state.borrow().matching.clone();
@@ -1821,6 +1796,15 @@ impl SessionController for Session {
             Ok(l.forget(id).await?.is_some())
         } else {
             Ok(false)
+        }
+    }
+    fn has_answer_technique(&self) -> bool {
+        self.0.learned.is_some()
+    }
+    async fn answer_technique(&self, keep: bool) -> Result<bool, RuntimeError> {
+        match &self.0.learned {
+            Some(l) => l.drafts.answer(keep).await,
+            None => Ok(false),
         }
     }
     fn has_goal(&self) -> bool {

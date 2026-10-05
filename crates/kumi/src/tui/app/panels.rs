@@ -217,7 +217,7 @@ impl TuiApp {
         if c.has_techniques() {
             items.push(PickerItem::heading("Techniques"));
             if techniques.is_empty() {
-                items.push(inert("None yet: what worked in things Kumi built that you liked"));
+                items.push(inert("None yet: Kumi asks before it keeps one"));
             } else {
                 items.extend(techniques.iter().map(|t| {
                     let i = item(
@@ -875,6 +875,28 @@ impl TuiApp {
             let Some(words) = item.value else { return Ok(()) };
             app.0.state.borrow_mut().editor.set(&words);
             app.submit().await
+        });
+    }
+    /// After an answer, whether to keep the technique from what Kumi built: 1 keeps it, 2 doesn't. Like
+    /// an answer's own options, it opens only when nothing else is open, typed or waiting; other typing
+    /// goes to the input box, and moving on leaves it unkept unless the next message says yes.
+    pub(super) fn offer_technique(&self, name: &str) {
+        let free = {
+            let state = self.0.state.borrow();
+            state.held.is_empty() && state.editor.is_empty() && state.panel.is_none()
+        };
+        if !free || !self.0.options.controller.has_answer_technique() {
+            return;
+        }
+        let items = vec![PickerItem::new("1. Yes, keep it", "yes"), PickerItem::new("2. No", "no")];
+        let title = format!("Keep “{}” as a technique?", self.clean(&name.replace('\n', " "), 60));
+        self.pick(Picker::with_options(title, items, PickerOptions { answers: true, ..Default::default() }), |app, item| async move {
+            app.close_panel();
+            let keep = item.value.as_deref() == Some("yes");
+            if !app.0.options.controller.answer_technique(keep).await? && keep {
+                app.notice("That technique isn't waiting any more: its build was undone or its tracks deleted.", NoticeTone::Info);
+            }
+            Ok(())
         });
     }
     fn same_panel(&self, panel: &PanelRef) -> bool {
