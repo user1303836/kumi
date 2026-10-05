@@ -217,7 +217,7 @@ impl TuiApp {
         if c.has_techniques() {
             items.push(PickerItem::heading("Techniques"));
             if techniques.is_empty() {
-                items.push(inert("None yet: what worked in things Kumi built that you liked"));
+                items.push(inert("None yet: Kumi asks before it keeps one"));
             } else {
                 items.extend(techniques.iter().map(|t| {
                     let i = item(
@@ -877,6 +877,50 @@ impl TuiApp {
             app.submit().await
         });
     }
+    /// After an answer, whether to keep the technique from what Kumi built: 1 keeps it, 2 doesn't. Like
+    /// an answer's own options, it opens only when nothing else is open, typed or waiting, and never over
+    /// a question the answer ends on; other typing goes to the input box, and moving on leaves it unkept
+    /// unless the next message says yes. True when it opened.
+    pub(super) fn offer_technique(&self, name: &str) -> bool {
+        let free = {
+            let state = self.0.state.borrow();
+            let asked = state
+                .transcript
+                .entries
+                .iter()
+                .rev()
+                .find_map(|entry| match &*entry.borrow() {
+                    Entry::Assistant { text, .. } => Some(text.trim_end().ends_with(['?', '？'])),
+                    _ => None,
+                })
+                .unwrap_or(false);
+            !asked && state.held.is_empty() && state.editor.is_empty() && state.panel.is_none()
+        };
+        if !free || !self.0.options.controller.has_answer_technique() {
+            return false;
+        }
+        let items = vec![PickerItem::new("1. Yes, keep it", "yes"), PickerItem::new("2. No", "no")];
+        let title = format!("Keep “{}” as a technique?", self.clean(&name.replace('\n', " "), 60));
+        let mut picker = Picker::with_options(title, items, PickerOptions { answers: true, ..Default::default() });
+        // A bare Enter is a no: only 1 (or moving to it) keeps it.
+        picker.select(Some("no"));
+        let picker = self.pick(picker, |app, item| async move {
+            app.0.state.borrow_mut().offer = None;
+            app.close_panel();
+            let keep = item.value.as_deref() == Some("yes");
+            if !app.0.options.controller.answer_technique(keep).await? && keep {
+                app.notice("That technique isn't waiting any more: its build was undone or its tracks deleted.", NoticeTone::Info);
+            }
+            Ok(())
+        });
+        self.0.state.borrow_mut().offer = Some(picker);
+        true
+    }
+    /// Whether `panel` is the technique offer, letting go of it: closing that is a no.
+    fn closing_offer(&self, panel: &PanelRef) -> bool {
+        let offer = self.0.state.borrow_mut().offer.take();
+        offer.is_some_and(|offer| matches!(&*panel.borrow(), Panel::Pick { picker, .. } if Rc::ptr_eq(picker, &offer)))
+    }
     fn same_panel(&self, panel: &PanelRef) -> bool {
         self.0.state.borrow().panel.as_ref().is_some_and(|p| Rc::ptr_eq(p, panel))
     }
@@ -922,7 +966,11 @@ impl TuiApp {
         }
         if let InputEvent::Key { name, mods, .. } = &event {
             if name == "escape" || (mods.ctrl && name == "c") {
+                let declined = self.closing_offer(&panel);
                 self.close_panel();
+                if declined {
+                    self.task(|app| async move { app.0.options.controller.answer_technique(false).await.map(|_| ()) });
+                }
                 return;
             }
             let mut p = panel.borrow_mut();
