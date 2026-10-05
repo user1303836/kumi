@@ -209,6 +209,7 @@ async fn gate_a(probe: &Probe) -> Result<(), RuntimeError> {
         env: Some(env),
         fetch: None,
         effort: None,
+        service_tier: None,
     })
     .await?;
     let calls = Rc::new(Cell::new(0));
