@@ -6421,22 +6421,23 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
         client, channel = self.connect(); self.bridge.between_ticks = True
         auth = self.bridge._connections[0].auth; answer = auth.dispatch
         def slow(request):
-            time.sleep(0.03); return answer(request)
+            # Long enough that a change counted shows over lingering (Windows rounds a 12 ms wait up to 15.6 ms).
+            time.sleep(0.1); return answer(request)
         auth.dispatch = slow
         self.bridge._budget_left()
         client.sendall(self.frame(channel, 1, method="mutate")); self.answered_between_ticks(client)
-        self.assertLess(self.bridge._window_spent, 0.02, "a change's own time isn't counted")
+        self.assertLess(self.bridge._window_spent, 0.05, "a change's own time isn't counted")
         client.sendall(self.frame(channel, 2)); self.answered_between_ticks(client)
-        self.assertGreaterEqual(self.bridge._window_spent, 0.03, "a read's is")
+        self.assertGreaterEqual(self.bridge._window_spent, 0.1, "a read's is")
         self.bridge._window_started -= remote_module.PUMP_WINDOW_SECONDS; self.bridge._budget_left()
         client.sendall(self.frame(channel, 3, method="invoke", operation="browser.search", args={})); self.answered_between_ticks(client)
-        self.assertGreaterEqual(self.bridge._window_spent, 0.03, "a read made through invoke counts")
+        self.assertGreaterEqual(self.bridge._window_spent, 0.1, "a read made through invoke counts")
         self.bridge._window_started -= remote_module.PUMP_WINDOW_SECONDS; self.bridge._budget_left()
         client.sendall(self.frame(channel, 4, method="invoke", operation="python.run", args={})); self.answered_between_ticks(client)
-        self.assertGreaterEqual(self.bridge._window_spent, 0.03, "so does Python")
+        self.assertGreaterEqual(self.bridge._window_spent, 0.1, "so does Python")
         self.bridge._window_started -= remote_module.PUMP_WINDOW_SECONDS; self.bridge._budget_left()
         client.sendall(self.frame(channel, 5, method="invoke", operation="track.create", args={})); self.answered_between_ticks(client)
-        self.assertLess(self.bridge._window_spent, 0.02, "a change made through invoke doesn't")
+        self.assertLess(self.bridge._window_spent, 0.05, "a change made through invoke doesn't")
 
     def test_a_tick_that_answered_no_one_doesnt_wait(self):
         self.connect()
