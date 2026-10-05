@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/kumi-common", "crates/kumi-runtime", "crates/ableton-mcp-server", "crates/kumi"]
+members = ["crates/kumi-common", "crates/kumi-store", "crates/kumi-runtime", "crates/ableton-mcp-server", "crates/kumi"]
 
 [workspace.package]
 edition = "2021"
@@ -10,11 +10,13 @@ rust-version = "1.89"
 
 [workspace.dependencies]
 kumi-common = { path = "crates/kumi-common" }
+kumi-store = { path = "crates/kumi-store" }
 kumi-runtime = { path = "crates/kumi-runtime" }
 ableton-mcp-server = { path = "crates/ableton-mcp-server" }
 
 async-trait = "0.1"
 base64 = "0.22"
+blake3 = "1.8"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
@@ -36,6 +38,8 @@ fancy-regex = "0.14"
 rand = "0.9"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "gzip", "brotli", "deflate", "http2"] }
+# SQLite compiled in (FTS5, JSONB): no system library to find on any platform.
+rusqlite = { version = "0.40", features = ["bundled"] }
 encoding_rs = "0.8"
 ryu = "1"
 # preserve_order: JSON objects keep insertion order, as JavaScript's do, so files and hashes come out the same.
