@@ -290,6 +290,46 @@ async fn a_video_without_captions_says_how_it_could_be_transcribed() {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
+async fn speech_that_couldnt_be_transcribed_isnt_tried_again_on_the_next_watch() {
+    use std::os::unix::fs::PermissionsExt;
+    let folder = tempfile::tempdir().unwrap();
+    let Some(video) = test_video(folder.path(), "unheard", false).await else {
+        eprintln!("ffmpeg makes the test video; unavailable");
+        return;
+    };
+    let whisper = folder.path().join("whisper");
+    std::fs::write(&whisper, "#!/bin/sh\necho run >> \"$(dirname \"$0\")/runs\"\necho 'error: the model ran out of memory' >&2\nexit 1\n")
+        .unwrap();
+    std::fs::set_permissions(&whisper, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::write(folder.path().join("model.bin"), "").unwrap();
+    let mut env = kumi_runtime::system::process_env();
+    env.insert("KUMI_WHISPER".into(), whisper.to_string_lossy().into());
+    env.insert("KUMI_WHISPER_MODEL".into(), folder.path().join("model.bin").to_string_lossy().into());
+    let mut options = watch_options(folder.path(), "unheard-videos");
+    options.env = Some(env);
+    let runs = || std::fs::read_to_string(folder.path().join("runs")).unwrap_or_default().lines().count();
+    let first = watch_video(WatchRequest { url: video.clone(), frames: Some(1.0), ..Default::default() }, options.clone()).await.unwrap();
+    assert_eq!(runs(), 1);
+    assert!(
+        first.notes.contains(&"Kumi couldn't transcribe the video's speech (error: the model ran out of memory).".into()),
+        "{:?}",
+        first.notes
+    );
+    assert_eq!(first.frames.len(), 1, "{:?}", first.notes);
+    let again = watch_video(WatchRequest { url: video, look_at: Some(vec![2.0]), ..Default::default() }, options).await.unwrap();
+    assert_eq!(runs(), 1, "the same failure isn't waited for twice");
+    assert!(
+        again
+            .notes
+            .contains(&"Kumi couldn't transcribe the video's speech (error: the model ran out of memory, when it tried earlier).".into()),
+        "{:?}",
+        again.notes
+    );
+    assert_eq!(again.frames.len(), 1, "{:?}", again.notes);
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
 async fn speech_process_receives_options_reports_progress_and_cleans_up_after_success_timeout_and_abort() {
     use kumi_runtime::video::speech::{transcribe, TranscribeOptions};
     use std::os::unix::fs::PermissionsExt;
@@ -328,6 +368,8 @@ if [ -f "$(dirname "$0")/sleep" ]; then exec sleep 10; fi
     assert_eq!(*progress.borrow(), vec![12.0, 100.0]);
     let args = std::fs::read_to_string(folder.path().join("args")).unwrap();
     assert!(args.contains("-l\nde\n--prompt\nAbleton\n-ac\n96\n--vad\n-vm\nvad.bin\n"), "{args}");
+    assert!(args.contains(&format!("\n-sns\n-bs\n1\n-t\n{}\n-l\n", kumi_runtime::video::speech::speech_threads())), "{args}");
+    assert!((4..=8).contains(&kumi_runtime::video::speech::speech_threads()));
     let leftovers = || {
         std::fs::read_dir(folder.path()).unwrap().flatten().filter(|f| f.file_name().to_string_lossy().starts_with(".transcript-")).count()
     };

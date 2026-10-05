@@ -64,6 +64,11 @@ pub fn cues_from_whisper(text: &str) -> Vec<Cue> {
         })
         .collect()
 }
+/// whisper.cpp's threads: this computer's cores less two, for Live and Kumi, from 4 (whisper.cpp's
+/// own default) to 8, past which it gains little.
+pub fn speech_threads() -> usize {
+    std::thread::available_parallelism().map_or(4, |cores| cores.get().saturating_sub(2)).clamp(4, 8)
+}
 pub fn speech_prompt(title: &str) -> String {
     format!("{}. Ableton Live tutorial: Operator, Wavetable, Drift, Simpler, Sampler, Drum Rack, Instrument Rack, Saturator, Dynamic Tube, EQ Eight, EQ Three, Glue Compressor, OTT, Roar, Auto Filter, Utility, reverb, delay, LFO, envelope, oscillator, detune, sidechain, dry/wet, Serum, Vital.",head(title,200))
 }
@@ -89,8 +94,13 @@ pub async fn transcribe(whisper: &str, model: &str, wav: &str, options: Transcri
     } else {
         "auto"
     };
-    let mut args: Vec<String> =
-        ["-m", model, "-f", wav, "-oj", "-of", &out, "-pp", "-sns", "-l", language].into_iter().map(str::to_string).collect();
+    // One guess at each step (`-bs 1`) rather than whisper.cpp's beam of five: a tutorial's words come
+    // out the same, in about two-thirds of the time. A stretch it's unsure of is still tried five ways.
+    let threads = speech_threads().to_string();
+    let mut args: Vec<String> = ["-m", model, "-f", wav, "-oj", "-of", &out, "-pp", "-sns", "-bs", "1", "-t", &threads, "-l", language]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
     if let Some(prompt) = options.prompt.as_deref().filter(|s| !s.is_empty()) {
         args.extend(["--prompt".into(), head(prompt, 600)]);
     }
