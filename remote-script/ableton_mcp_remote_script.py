@@ -5468,6 +5468,10 @@ class LiveObjectMapper:
         # clip's own included. Moving onto another clip isn't done yet; a move by less than the clip's
         # own length parks the clip past the end of the Set first, then copies it into place.
         clips = self._items(self._read_attr(owner, "arrangement_clips") or []); spans = [self._arrangement_span(item) for item in clips]; start, end = spans[source_index]; target, target_end = float(position), float(position) + (end - start)
+        if _same_number(target, start):
+            # A move to where the clip already is changes nothing: the clip, as it is.
+            row = self._arrangement_clip_row(owner, clip, track_index, source_index)
+            return {"ref": row["ref"], "objectIdentity": expected_identity, "start": start, "createdFingerprint": hashlib.sha256(self._bounded_canonical(_without_fields(row, _VOLATILE_CLIP_FIELDS)).encode("utf-8")).hexdigest()}
         for index, (other_start, other_end) in enumerate(spans):
             if index != source_index and other_start < target_end - 1e-6 and other_end > target + 1e-6:
                 raise ValueError(f"Kumi can't move a clip onto another clip yet: \"{str(getattr(clips[index], 'name', ''))[:60]}\" (beats {other_start:g} to {other_end:g}) is in the way at beat {target:g}; clear that span first (clear_range) or pick a free spot{UNRUN_SUFFIX}")

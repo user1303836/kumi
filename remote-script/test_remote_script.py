@@ -2620,6 +2620,8 @@ class ControlSurfaceTests(unittest.TestCase):
         self.assertEqual(moved["start"], 6.0); self.assertEqual(moved["createdFingerprint"], mapper._mapped_fingerprint(moved["ref"]))
         back = self.arrangement_move(mapper, mapper.snapshot()["arrangement"]["clips"][0], 4.0)
         self.assertEqual((track.copies[2:], back["start"], [clip.start_time for clip in track.arrangement_clips]), ([68.0, 4.0], 4.0, [4.0]), "undo moves it back the same way")
+        row = mapper.snapshot()["arrangement"]["clips"][0]; stay = self.arrangement_move(mapper, row, 4.0)
+        self.assertEqual((track.copies[4:], stay["objectIdentity"], stay["createdFingerprint"]), ([], row["objectIdentity"], mapper._mapped_fingerprint(row["ref"])), "a move to where it is copies nothing")
 
     def test_a_move_onto_another_clip_is_refused_before_anything_is_copied(self):
         song, track = self.arrangement_track_that_crashes_on_overlap(("Verse", 0.0, 4.0), ("Chorus", 8.0, 4.0))
