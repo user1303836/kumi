@@ -75,7 +75,7 @@ async fn source(ffmpeg: &str, input: &Input, at: f64, signal: &Option<Signal>) -
     if lower.starts_with("http:") || lower.starts_with("https:") {
         args.extend(["-rw_timeout".into(), "20000000".into()]);
         if let Some(piece) = input.piece.filter(|piece| *piece > 0) {
-            if ffmpeg_reads_in_pieces(ffmpeg, signal.clone()).await? {
+            if ffmpeg_reads_in_pieces(ffmpeg, signal.clone()).await? == Some(true) {
                 args.extend(["-request_size".into(), piece.to_string(), "-multiple_requests".into(), "1".into()]);
             }
         }

@@ -542,6 +542,21 @@ pub fn missed_frames(missed: &[(f64, String)], untried: usize) -> Vec<String> {
         .collect()
 }
 
+/// Said once when a stream Kumi takes wants asking for in pieces and this ffmpeg can't.
+const OLDER_FFMPEG: &str = "YouTube wants its streams asked for a piece at a time, which ffmpeg does from version 8.1; this one is older, so the video's frames and sound come slowly or not at all.";
+
+/// What a progress line taking from `input` adds: nothing, unless its site wants it asked for in pieces
+/// and this ffmpeg can't (it's older than 8.1). Then the wait is slow, and a note says why, once.
+async fn slow_stream(ffmpeg: &str, input: &Input, notes: &mut Vec<String>, signal: &Option<Signal>) -> Result<&'static str, VideoFailure> {
+    if input.piece.filter(|piece| *piece > 0).is_none() || ffmpeg_reads_in_pieces(ffmpeg, signal.clone()).await? != Some(false) {
+        return Ok("");
+    }
+    if !notes.iter().any(|note| note == OLDER_FFMPEG) {
+        notes.push(OLDER_FFMPEG.into());
+    }
+    Ok(" · slowly: this ffmpeg is older than 8.1")
+}
+
 /// Watch a video's words, selected frames, close-ups and a requested stretch of its sound.
 pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result<Watched, VideoFailure> {
     use crate::core::contracts::WordsSource;
@@ -724,7 +739,8 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                 ));
                 Ok(None)
             } else {
-                watcher.progress("taking the video's speech");
+                let slowly = slow_stream(ffmpeg.as_deref().unwrap(), &audio, &mut notes, &signal).await?;
+                watcher.progress(&format!("taking the video's speech{slowly}"));
                 // Taking the speech can fail as transcribing it can (a stream that stalls, say): either way,
                 // the frames still come.
                 match sound_between(
@@ -857,8 +873,6 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
     if (!wanted.is_empty() || listen.is_some()) && ffmpeg.is_none() {
         notes.push(format!("Frames and the video's sound need ffmpeg ({}); this is the transcript alone.", ffmpeg_hint()));
     } else if let Some(ffmpeg) = ffmpeg {
-        // Whether a frame or the sound failed from a stream the site wants asked for in pieces.
-        let mut pieced = false;
         let frame_path = |time| {
             join(
                 &join(&folder, "frames"),
@@ -879,13 +893,17 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
         if missing && input.is_none() {
             notes.push("Kumi couldn't find a stream of that video to take frames from; this is the transcript alone.".into());
         } else {
+            let slowly = match &input {
+                Some(input) => slow_stream(&ffmpeg, input, &mut notes, &signal).await?,
+                None => "",
+            };
             let mut missed = Vec::new();
             let mut tried = 0;
             for chunk in wanted.chunks(3) {
                 let before = missed.len();
                 let mut tasks = FuturesUnordered::new();
                 for time in chunk {
-                    watcher.progress(&format!("looking at {}", format_time(*time)));
+                    watcher.progress(&format!("looking at {}{slowly}", format_time(*time)));
                     let path = frame_path(*time);
                     let input = input.as_ref();
                     let ffmpeg = &ffmpeg;
@@ -916,9 +934,6 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                 }
             }
             frames.sort_by(|a, b| a.at.total_cmp(&b.at));
-            if !missed.is_empty() {
-                pieced |= input.as_ref().is_some_and(|input| input.piece.is_some());
-            }
             notes.extend(missed_frames(&missed, wanted.len() - tried));
         }
         if let Some(listen) = listen {
@@ -926,7 +941,8 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
             let stop = listen.to.min(start + MAX_SOUND).min(if end == 0.0 { f64::INFINITY } else { end });
             let audio = if stop > start { watcher.streams().await?.audio } else { None };
             if let Some(audio) = audio {
-                watcher.progress(&format!("taking the sound at {}–{}", format_time(start), format_time(stop)));
+                let slowly = slow_stream(&ffmpeg, &audio, &mut notes, &signal).await?;
+                watcher.progress(&format!("taking the sound at {}–{}{slowly}", format_time(start), format_time(stop)));
                 match sound_between(
                     &ffmpeg,
                     &audio,
@@ -943,7 +959,6 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                         if let Some(signal) = &signal {
                             signal.check()?;
                         }
-                        pieced |= audio.piece.is_some();
                         notes.push(format!(
                             "Kumi couldn't take the sound at {}–{} ({}).",
                             format_time(start),
@@ -955,11 +970,6 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
             } else {
                 notes.push("Kumi couldn't find the video's sound to take.".into());
             }
-        }
-        if pieced && !ffmpeg_reads_in_pieces(&ffmpeg, signal.clone()).await? {
-            notes.push(
-                "YouTube wants its streams asked for a piece at a time, which ffmpeg does from version 8.1; this one is older.".into(),
-            );
         }
     }
     Ok(Watched { meta, from, to, lines, cut_at, frames, sound, notes })

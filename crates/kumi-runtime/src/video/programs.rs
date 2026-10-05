@@ -245,13 +245,8 @@ pub async fn run<S: AsRef<OsStr>>(command: &str, args: &[S], options: RunOptions
         }
     };
     let stderr_text = String::from_utf8_lossy(&err).into_owned();
-    let failed = |message: String| {
-        let last = trim(&stderr_text).split('\n').filter(|line| !line.is_empty()).next_back();
-        VideoFailure::other(match last {
-            Some(last) => head(last, 400),
-            None => message,
-        })
-    };
+    let last = trim(&stderr_text).split('\n').rfind(|line| !line.is_empty()).map(|line| head(line, 400));
+    let failed = |message: String| VideoFailure::other(last.clone().unwrap_or(message));
     match outcome {
         Outcome::Done(Ok(status)) if status.success() => Ok(RunOutput { stdout: out, stderr: stderr_text }),
         Outcome::Done(Ok(_)) => Err(failed(format!("Command failed: {shown}\n{stderr_text}"))),
@@ -263,7 +258,12 @@ pub async fn run<S: AsRef<OsStr>>(command: &str, args: &[S], options: RunOptions
         Outcome::TimedOut => {
             let _ = child.start_kill();
             let _ = child.wait().await;
-            Err(failed(format!("Command failed: {shown}\n{stderr_text}")))
+            // A program that stalls (ffmpeg on a stream that stopped coming, say) has often said nothing.
+            let waited = format!("timed out after {} s", to_string(timeout.as_secs_f64()));
+            Err(VideoFailure::other(match &last {
+                Some(last) => format!("{waited}: {last}"),
+                None => waited,
+            }))
         }
         Outcome::Aborted => {
             let _ = child.start_kill();
@@ -618,24 +618,36 @@ pub async fn yt_dlp_extras(ytdlp: &str, signal: Option<Signal>) -> Vec<String> {
     extras.await
 }
 
-type Pieces = Shared<BoxFuture<'static, bool>>;
+type Pieces = Shared<BoxFuture<'static, Option<bool>>>;
 static PIECES: LazyLock<Mutex<HashMap<String, Pieces>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
-async fn probe_pieces(ffmpeg: String) -> bool {
-    match run(&ffmpeg, &["-hide_banner", "-h", "protocol=http"], RunOptions { timeout_ms: Some(20_000), ..Default::default() }).await {
-        Ok(output) => output.stdout_text().contains("-request_size"),
-        Err(_) => false,
-    }
+/// Whether ffmpeg's help for HTTP lists `-request_size`; None when ffmpeg couldn't be asked.
+async fn probe_pieces(ffmpeg: String) -> Option<bool> {
+    let help = run(&ffmpeg, &["-hide_banner", "-h", "protocol=http"], RunOptions { timeout_ms: Some(20_000), ..Default::default() }).await;
+    Some(help.ok()?.stdout_text().contains("-request_size"))
 }
 
 /// Whether this ffmpeg can ask for a stream a piece at a time (`-request_size`, from ffmpeg 8.1).
 /// YouTube wants its streams asked for that way: one asked for whole slows to a trickle or is refused.
-pub async fn ffmpeg_reads_in_pieces(ffmpeg: &str, signal: Option<Signal>) -> Result<bool, VideoFailure> {
-    let pieces = {
+/// None when ffmpeg couldn't be asked (it didn't start, failed or took too long); only an answer is
+/// kept, so it's asked again next time. The asking is a task of its own: when the watch that started
+/// it is stopped, it still runs to its end, and the next watch gets its answer.
+pub async fn ffmpeg_reads_in_pieces(ffmpeg: &str, signal: Option<Signal>) -> Result<Option<bool>, VideoFailure> {
+    let probe = {
         let mut known = PIECES.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        known.entry(ffmpeg.to_string()).or_insert_with(|| probe_pieces(ffmpeg.to_string()).boxed().shared()).clone()
+        known
+            .entry(ffmpeg.to_string())
+            .or_insert_with(|| tokio::spawn(probe_pieces(ffmpeg.to_string())).map(|probed| probed.ok().flatten()).boxed().shared())
+            .clone()
     };
-    with_signal(&signal, pieces).await
+    let answer = with_signal(&signal, probe.clone()).await?;
+    if answer.is_none() {
+        let mut known = PIECES.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if known.get(ffmpeg).is_some_and(|kept| kept.ptr_eq(&probe)) {
+            known.remove(ffmpeg);
+        }
+    }
+    Ok(answer)
 }
 
 /// Where Kumi keeps the programs it fetches, and who's told when it fetches one: set once as Kumi starts.

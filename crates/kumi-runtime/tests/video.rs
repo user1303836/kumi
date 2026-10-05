@@ -386,7 +386,7 @@ async fn a_stream_its_site_wants_in_pieces_is_asked_for_in_pieces() {
         return;
     };
     let ffmpeg = find_ffmpeg(FfmpegOptions { installed_only: true, ..Default::default() }).await.unwrap().unwrap();
-    if !programs::ffmpeg_reads_in_pieces(&ffmpeg, None).await.unwrap() {
+    if programs::ffmpeg_reads_in_pieces(&ffmpeg, None).await.unwrap() != Some(true) {
         eprintln!("this ffmpeg asks for a stream whole (before 8.1); unavailable");
         return;
     }
@@ -401,6 +401,178 @@ async fn a_stream_its_site_wants_in_pieces_is_asked_for_in_pieces() {
     assert_eq!(&frame.jpeg[..2], [0xff, 0xd8]);
     let sound = sound_between(&ffmpeg, &pieces, 2.0, 4.0, &path("pieces.wav"), None, false).await.unwrap();
     assert!(std::fs::metadata(sound).unwrap().len() > 44_100 * 2 * 2);
+}
+
+/// A program in `folder`: a shell script, or on Windows a batch file, so the tests that use one run
+/// everywhere, without ffmpeg.
+fn fake(folder: &Path, name: &str, unix: &str, windows: &str) -> String {
+    if cfg!(windows) {
+        let path = folder.join(format!("{name}.cmd"));
+        std::fs::write(&path, format!("@echo off\r\n{}\r\n", windows.replace('\n', "\r\n"))).unwrap();
+        return path.to_string_lossy().into();
+    }
+    let path = folder.join(name);
+    std::fs::write(&path, format!("#!/bin/sh\n{unix}\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    path.to_string_lossy().into()
+}
+/// ffmpeg's help for HTTP from 8.1, which asks for a stream in pieces.
+const HELP_8_1: &str =
+    "HTTP AVOptions:\n  -request_size      <int64>      .D......... size (in bytes) of requests to make (from 0 to I64_MAX) (default 0)\n";
+/// ffmpeg that YouTube refuses. Asked for its help (`-h`), it gives `help` beside it, or fails when
+/// there's none, and writes down each time it's asked (`asked`); with `wait` beside it, it answers after a
+/// second. Asked for a frame or sound, it writes down its arguments (`takes`) and fails as ffmpeg does
+/// when refused. A batch file appending to a file another has open fails, so it tries again.
+fn refused_ffmpeg(folder: &Path) -> String {
+    fake(
+        folder,
+        "ffmpeg",
+        r#"here="$(dirname "$0")"
+if [ "$2" = -h ]; then
+  echo help >> "$here/asked"
+  if [ -f "$here/wait" ]; then sleep 1; fi
+  if [ ! -f "$here/help" ]; then exit 1; fi
+  cat "$here/help"
+  exit 0
+fi
+echo "$*" >> "$here/takes"
+echo 'Server returned 403 Forbidden (access denied)' >&2
+exit 1"#,
+        r#"if "%~2"=="-h" goto help
+:take
+>>"%~dp0takes" echo %* || goto take
+>&2 echo Server returned 403 Forbidden (access denied)
+exit /b 1
+:help
+>>"%~dp0asked" echo help || goto help
+if exist "%~dp0wait" ping -n 2 127.0.0.1 >nul
+if not exist "%~dp0help" exit /b 1
+type "%~dp0help""#,
+    )
+}
+fn lines_in(folder: &Path, name: &str) -> Vec<String> {
+    std::fs::read_to_string(folder.join(name)).unwrap_or_default().lines().map(str::to_string).collect()
+}
+#[tokio::test(flavor = "current_thread")]
+async fn only_ffmpegs_answer_on_pieces_is_kept() {
+    let folder = tempfile::tempdir().unwrap();
+    let ffmpeg = refused_ffmpeg(folder.path());
+    assert_eq!(programs::ffmpeg_reads_in_pieces(&ffmpeg, None).await.unwrap(), None, "it failed: no answer");
+    std::fs::write(folder.path().join("help"), HELP_8_1).unwrap();
+    assert_eq!(programs::ffmpeg_reads_in_pieces(&ffmpeg, None).await.unwrap(), Some(true), "asked again");
+    std::fs::remove_file(folder.path().join("help")).unwrap();
+    assert_eq!(programs::ffmpeg_reads_in_pieces(&ffmpeg, None).await.unwrap(), Some(true), "the answer is kept");
+    assert_eq!(lines_in(folder.path(), "asked").len(), 2);
+    // A watch stopped while ffmpeg is asked leaves its answer to the next.
+    let slow = folder.path().join("slow");
+    std::fs::create_dir_all(&slow).unwrap();
+    let ffmpeg = refused_ffmpeg(&slow);
+    std::fs::write(slow.join("help"), "HTTP AVOptions:\n").unwrap();
+    std::fs::write(slow.join("wait"), "").unwrap();
+    let stopped = programs::ffmpeg_reads_in_pieces(&ffmpeg, Some(kumi_common::abort::timeout(100))).await;
+    assert!(matches!(stopped, Err(VideoFailure::Aborted)), "{stopped:?}");
+    assert_eq!(programs::ffmpeg_reads_in_pieces(&ffmpeg, None).await.unwrap(), Some(false));
+    assert_eq!(lines_in(&slow, "asked").len(), 1);
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_youtube_stream_is_asked_for_in_its_pieces_and_an_older_ffmpeg_says_so_before_the_wait() {
+    let folder = tempfile::tempdir().unwrap();
+    let stream = |itag: u32, picture: bool| {
+        json!({
+            "format_id": itag.to_string(),
+            "url": format!("https://rr1---sn-kumi.googlevideo.com/videoplayback/itag/{itag}"),
+            "protocol": "https",
+            "ext": if picture { "mp4" } else { "m4a" },
+            "vcodec": if picture { "avc1.4d401f" } else { "none" },
+            "acodec": if picture { "none" } else { "mp4a.40.2" },
+            "height": if picture { json!(720) } else { Value::Null },
+            "downloader_options": {"http_chunk_size": 10485760}
+        })
+    };
+    // Without captions, so its speech is taken to be transcribed.
+    let page = json!({
+        "id": "pieces00001",
+        "extractor_key": "Youtube",
+        "title": "Pieces",
+        "duration": 300,
+        "webpage_url": "https://www.youtube.com/watch?v=pieces00001",
+        "formats": [stream(298, true), stream(140, false)]
+    });
+    let refused = "Server returned 403 Forbidden (access denied)";
+    for (version, help) in [("8.1", HELP_8_1), ("8.0", "HTTP AVOptions:\n")] {
+        let tools = folder.path().join(version);
+        std::fs::create_dir_all(&tools).unwrap();
+        let ffmpeg = refused_ffmpeg(&tools);
+        std::fs::write(tools.join("help"), help).unwrap();
+        std::fs::write(tools.join("page.json"), page.to_string()).unwrap();
+        let ytdlp = fake(
+            &tools,
+            "yt-dlp",
+            "if [ \"$1\" = --version ]; then echo 2025.01.01; exit 0; fi\ncat \"$(dirname \"$0\")/page.json\"",
+            "if \"%~1\"==\"--version\" (\n  echo 2025.01.01\n  exit /b 0\n)\ntype \"%~dp0page.json\"",
+        );
+        std::fs::write(tools.join("model.bin"), "").unwrap();
+        let mut env = kumi_runtime::system::process_env();
+        env.insert("KUMI_FFMPEG".into(), ffmpeg.clone());
+        env.insert("KUMI_YTDLP".into(), ytdlp);
+        // whisper.cpp is there, and never runs: taking the speech fails first.
+        env.insert("KUMI_WHISPER".into(), ffmpeg);
+        env.insert("KUMI_WHISPER_MODEL".into(), tools.join("model.bin").to_string_lossy().into());
+        let mut options = watch_options(&tools, "videos");
+        options.env = Some(env);
+        let progress = Rc::new(RefCell::new(Vec::<String>::new()));
+        options.on_progress = Some(Rc::new({
+            let progress = progress.clone();
+            move |text| progress.borrow_mut().push(text.to_string())
+        }));
+        let watched = watch_video(
+            WatchRequest {
+                url: "https://youtu.be/pieces00001".into(),
+                look_at: Some(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]),
+                ..Default::default()
+            },
+            options,
+        )
+        .await
+        .unwrap();
+        let takes = lines_in(&tools, "takes");
+        assert_eq!(takes.len(), 4, "the speech, then a batch of three frames, and not the other three: {takes:?}");
+        let in_pieces = version == "8.1";
+        for take in &takes {
+            assert_eq!(take.contains("-request_size 10485760 -multiple_requests 1"), in_pieces, "{version}: {take}");
+        }
+        assert_eq!(lines_in(&tools, "asked").len(), 1, "ffmpeg is asked once");
+        let mut notes = vec![
+            format!("Kumi couldn't transcribe the video's speech ({refused})."),
+            format!("Kumi couldn't take the frames at 0:10, 0:20 and 0:30 ({refused}), so it didn't try the other 3."),
+        ];
+        let slowly = if in_pieces { "" } else { " · slowly: this ffmpeg is older than 8.1" };
+        if !in_pieces {
+            notes.insert(0, "YouTube wants its streams asked for a piece at a time, which ffmpeg does from version 8.1; this one is older, so the video's frames and sound come slowly or not at all.".into());
+        }
+        assert_eq!(watched.notes, notes);
+        let progress = progress.borrow();
+        for line in [format!("taking the video's speech{slowly}"), format!("looking at 0:10{slowly}")] {
+            assert!(progress.contains(&line), "{line} in {progress:?}");
+        }
+    }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_program_that_stalls_is_said_to_have_timed_out() {
+    let folder = tempfile::tempdir().unwrap();
+    // A batch file's ping outlives it, holding its pipes until it ends: these end soon after the timeouts.
+    let silent = fake(folder.path(), "silent", "exec sleep 5", "ping -n 3 127.0.0.1 >nul");
+    let said = fake(folder.path(), "said", "echo 'Reconnecting' >&2\nexec sleep 5", ">&2 echo Reconnecting\nping -n 4 127.0.0.1 >nul");
+    let (silent, said) = tokio::join!(
+        run(&silent, &["-i", "https://example.com/video.mp4"], RunOptions { timeout_ms: Some(500), ..Default::default() }),
+        run(&said, &["-i", "https://example.com/video.mp4"], RunOptions { timeout_ms: Some(2_000), ..Default::default() }),
+    );
+    assert_eq!(silent.unwrap_err().to_string(), "timed out after 0.5 s");
+    assert_eq!(said.unwrap_err().to_string(), "timed out after 2 s: Reconnecting");
 }
 
 /// A program that writes its runs to `runs` beside it, then does `then`.
