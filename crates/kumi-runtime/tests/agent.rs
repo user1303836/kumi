@@ -21,7 +21,8 @@ use kumi_runtime::core::contracts::{
 use kumi_runtime::core::errors::{FailureKind, RuntimeError};
 use kumi_runtime::integrations::ableton::{integration::Ableton, observation::ObservationHost, options::AbletonOptions};
 use kumi_runtime::kernel::agent::{
-    create_agent_kernel, plain_words, AgentKernel, AgentKernelOptions, LanguageModel, ModelBinding, STOPPED_NOTE,
+    create_agent_kernel, plain_words, AgentKernel, AgentKernelOptions, LanguageModel, ModelBinding, STOPPED_BEFORE_RUNNING, STOPPED_NOTE,
+    STOPPED_WHILE_RUNNING,
 };
 use kumi_runtime::kernel::budget::ContextBudget;
 use kumi_runtime::mcp::{
@@ -1187,6 +1188,48 @@ async fn a_turn_stopped_during_a_tool_keeps_what_finished_before_it_never_a_call
         let messages = h.messages();
         assert_eq!(roles(&messages), ["user", "assistant", "tool", "assistant"]);
         assert!(!js(&messages).contains("\"s1\""), "the slow call, which has no result, is gone");
+        h.kernel.close().await;
+    })
+    .await
+}
+
+#[tokio::test]
+async fn a_batch_stopped_on_its_second_call_keeps_the_first_calls_result_and_the_next_turn_sees_it() {
+    local(async {
+        let h = Rc::new(harness(
+            |_, n| match n {
+                1 => {
+                    Scripted::Parts(vec![call_id("add", "{}", "a1"), call_id("slow", "{}", "s1"), call_id("add", "{}", "a2"), tool_calls()])
+                }
+                _ => answer("done"),
+            },
+            Options { tools: vec![saying("add", "Added Reverb"), tool("slow", |_| std::future::pending())], ..Options::default() },
+        ));
+        let controller = Controller::new();
+        let held = h.clone();
+        let stop_signal = controller.signal.clone();
+        let stopped = spawn_local(async move { held.kernel.run("go", stop_signal, ignore()).await });
+        sleep(Duration::from_millis(20)).await;
+        controller.abort();
+        assert_eq!(stopped.await.unwrap().unwrap().stop_reason, StopReason::Cancelled);
+        let messages = h.messages();
+        assert_eq!(roles(&messages), ["user", "assistant", "tool", "assistant"]);
+        let results: Vec<_> = tool_message(&messages[2])
+            .iter()
+            .map(|part| match part {
+                ToolPart::ToolResult(result) => (result.tool_call_id.as_str(), output_type(part), js(&result.output)),
+                other => panic!("not a result: {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            results.iter().map(|(id, kind, _)| (*id, *kind)).collect::<Vec<_>>(),
+            [("a1", "text"), ("s1", "error-text"), ("a2", "error-text")],
+            "every call keeps a result"
+        );
+        assert!(results[0].2.contains("Added Reverb"), "the finished call's result stays");
+        assert!(results[1].2.contains(STOPPED_WHILE_RUNNING) && results[2].2.contains(STOPPED_BEFORE_RUNNING));
+        h.kernel.run("carry on", signal(), ignore()).await.unwrap();
+        assert!(js(&h.request(1).prompt).contains("Added Reverb"), "the next request says the first change happened");
         h.kernel.close().await;
     })
     .await
