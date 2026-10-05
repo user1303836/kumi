@@ -290,6 +290,31 @@ impl TuiApp {
             y += 1;
         }
     }
+    /// The files that go with the next message: name, kind and size, each with × to take it back.
+    pub(super) fn draw_attachments(&self, screen: &mut Screen, x: i32, y: i32, width: i32) {
+        let files = self.0.state.borrow().attachments.clone();
+        let mut column = screen.put(x, y, "with ", &st::FAINT);
+        for (index, file) in files.iter().enumerate() {
+            let details = format!(" · {} · {}", super::super::attach::kind_of(file), super::super::attach::size_of(file.bytes));
+            let left = files.len() - index;
+            let more = if left > 1 { format!("   +{} more", left - 1) } else { String::new() };
+            let need = text_width(&file.name).min(32) + text_width(&details) + 2 + text_width(&more);
+            if index > 0 && column + need > x + width {
+                screen.put(column, y, &format!("+{left} more"), &st::FAINT);
+                return;
+            }
+            column = screen.put(column, y, &truncate(&file.name, 32), &st::BRIGHT);
+            column = screen.put(column, y, &details, &st::DIM);
+            let at = column + 1;
+            screen.put(at, y, "×", &st::FAINT);
+            let path = file.path.clone();
+            self.hit(at, y, 1, move |app| {
+                app.0.state.borrow_mut().attachments.retain(|a| a.path != path);
+                app.0.scheduler.request();
+            });
+            column = at + 4;
+        }
+    }
     pub(super) fn draw_pin(&self, screen: &mut Screen, x: i32, y: i32, width: i32) {
         let pin = self.0.state.borrow().pinned.clone().unwrap();
         let mark = icon(pin.kind, self.0.icons, None);

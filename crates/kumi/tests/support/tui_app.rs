@@ -161,6 +161,21 @@ impl SessionController for Control {
         self.pins.borrow_mut().push(pin);
         Ok(())
     }
+    fn has_attachments(&self) -> bool {
+        true
+    }
+    async fn submit_with(&self, s: &str, pin: Option<PinnedNode>, attachments: Vec<Attachment>) -> Result<(), RuntimeError> {
+        if attachments.is_empty() {
+            return self.submit(s, pin).await;
+        }
+        if let Some(error) = self.get::<String>("submit-error") {
+            return Err(RuntimeError::plain(error));
+        }
+        let files: Vec<_> = attachments.iter().map(|a| format!("{} {} {}", a.name, a.media_type, a.bytes)).collect();
+        self.call(format!("submit-with:{s} [{}]", files.join(", ")));
+        self.pins.borrow_mut().push(pin);
+        Ok(())
+    }
     async fn refresh(&self) -> Result<(), RuntimeError> {
         self.call("refresh");
         Ok(())
@@ -241,8 +256,8 @@ impl SessionController for Control {
     fn has_run_recipe(&self) -> bool {
         self.enabled("recipes")
     }
-    async fn run_recipe(&self, name: &str) -> Result<RecipeOutcome, RuntimeError> {
-        self.call(format!("run-recipe:{name}"));
+    async fn run_recipe(&self, name: &str, with: JsonObject) -> Result<RecipeOutcome, RuntimeError> {
+        self.call(if with.is_empty() { format!("run-recipe:{name}") } else { format!("run-recipe:{name} {}", Value::Object(with)) });
         Ok(self.get("recipe-result").unwrap())
     }
     fn has_forget_recipe(&self) -> bool {
@@ -284,6 +299,22 @@ impl SessionController for Control {
     async fn forget(&self, id: &str) -> Result<Option<MemoryNote>, RuntimeError> {
         self.call(format!("forget:{id}"));
         Ok(self.get("forgot"))
+    }
+    fn has_change_note(&self) -> bool {
+        self.memory.borrow().is_some()
+    }
+    async fn change_note(&self, id: &str, change: NoteChange) -> Result<Option<MemoryNote>, RuntimeError> {
+        self.call(format!("change-note:{id} {change:?}"));
+        let mut view = self.memory.borrow_mut();
+        let Some(view) = view.as_mut() else { return Ok(None) };
+        let Some(note) = view.memory.producer.iter_mut().chain(view.memory.set.iter_mut()).find(|n| n.id == id) else {
+            return Ok(None);
+        };
+        match change {
+            NoteChange::Text(text) => note.text = text,
+            NoteChange::Pinned(pinned) => note.pinned = pinned,
+        }
+        Ok(Some(note.clone()))
     }
     fn has_stop_live(&self) -> bool {
         self.stop.get()

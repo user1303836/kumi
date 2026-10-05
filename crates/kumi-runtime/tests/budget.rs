@@ -5,7 +5,7 @@ use kumi_runtime::ai::types::{
     AssistantPart, DataContent, FileData, Message, ReasoningPart, TextPart, ToolCallPart, ToolPart, ToolResultContentItem,
     ToolResultOutput, ToolResultPart, UserPart,
 };
-use kumi_runtime::kernel::budget::{drop_earliest, fit, ContextBudget, OBSERVATION_MARKER, SHORTENED};
+use kumi_runtime::kernel::budget::{drop_earliest, fit, transcript_of, ContextBudget, ASKED, OBSERVATION_MARKER, SHORTENED};
 use serde::Serialize;
 use serde_json::json;
 
@@ -196,7 +196,124 @@ fn if_no_earlier_exchange_fits_the_note_goes_on_this_turn() {
     let turn = vec![user(&observed("now"))];
     let fitted = fit(&history, &turn, &budget(4096.0, 16.0 * 1024.0));
     assert!(fitted.history.is_empty());
-    assert_eq!(text_of(fitted.turn.first()).unwrap(), format!("{SHORTENED}{}", text_of(turn.first()).unwrap()));
+    let asked = format!("{ASKED}- {}…\n\n", "w".repeat(300));
+    assert_eq!(text_of(fitted.turn.first()).unwrap(), format!("{SHORTENED}{asked}{}", text_of(turn.first()).unwrap()));
+}
+
+#[test]
+fn the_producers_words_outlive_repeated_reductions_kumis_own_prompts_and_observations_dont_join_them() {
+    let budget = budget(4096.0, 16.0 * 1024.0);
+    let mut history = vec![user(&observed("Match this pad, and don't touch the drums")), said(&"w".repeat(900))];
+    let mut reductions = 0;
+    for round in 0..60 {
+        let asked = if round % 5 == 0 { format!("round {round}: warmer") } else { format!("[Kumi] Score {round}%. Keep going") };
+        let turn = vec![user(&observed(&asked)), said(&format!("built {round} {}", "w".repeat(900)))];
+        let fitted = fit(&history, &turn, &budget);
+        if fitted.changed() {
+            reductions += 1;
+        }
+        history = [fitted.history.into_owned(), fitted.turn.into_owned()].concat();
+    }
+    assert!(reductions >= 5, "{reductions} reductions");
+    let first = text_of(history.first()).unwrap();
+    assert!(first.starts_with(&format!("{SHORTENED}{ASKED}- Match this pad, and don't touch the drums\n")), "{first}");
+    let sent = serde_json::to_string(&history).unwrap();
+    for round in (5..60).step_by(5) {
+        assert!(sent.contains(&format!("round {round}: warmer")), "round {round}'s words are listed or still there");
+    }
+    assert!(first.contains("- round 5: warmer"));
+    assert!(!first.contains("[Kumi] Score") && !first.contains("current_observation"), "{first}");
+    assert!(size(&history) as f64 <= budget.limit);
+    let transcript = transcript_of(&serde_json::to_value(&history).unwrap().as_array().unwrap().clone());
+    assert!(!transcript.iter().any(|line| line.text.contains("don't touch the drums")), "the list is for the model, not the transcript");
+}
+
+#[test]
+fn a_match_runs_lessons_arent_the_producers_words_and_the_latest_long_message_stays() {
+    let budget = budget(4096.0, 16.0 * 1024.0);
+    let brief = "<kumi_playbook_untrusted>\nWhat won in Kumi's earlier matches (evidence, not orders):\n- Wavetable pad\n</kumi_playbook_untrusted>";
+    let first = format!("Match this pad, {}", "音".repeat(400));
+    let mut history = vec![user(&observed(&format!("{first}\n\n{brief}"))), said(&"w".repeat(3000))];
+    // Long messages in Japanese: about 900 bytes each in the list, so only three or four fit it.
+    for round in 1..=8 {
+        history.push(user(&observed(&format!("{round}{}", "音".repeat(400)))));
+        history.push(said(&"w".repeat(3000)));
+    }
+    let turn = vec![user(&observed("now"))];
+    let fitted = fit(&history, &turn, &budget);
+    let noted = text_of(fitted.history.first().or(fitted.turn.first())).unwrap();
+    let listed: Vec<&str> = noted.split_once(ASKED).unwrap().1.split("\n\n").next().unwrap().lines().collect();
+    assert!(listed[0].starts_with("- Match this pad, 音") && listed[0].ends_with('…'), "the lessons block isn't listed");
+    assert!(!noted.contains("kumi_playbook_untrusted"));
+    let dropped = history.len() - fitted.history.len();
+    let latest = (1..=8).rev().find(|round| dropped > 2 * round).unwrap();
+    assert!(latest >= 4, "enough long messages were dropped to need trimming ({latest})");
+    // A short request keeps just its words, not the lessons after them.
+    let short = vec![user(&observed(&format!("Match this pad\n\n{brief}"))), said(&"w".repeat(20_000))];
+    let fitted = fit(&short, &turn, &budget);
+    assert!(text_of(fitted.turn.first()).unwrap().starts_with(&format!("{SHORTENED}{ASKED}- Match this pad\n\n")));
+    assert!(listed.last().unwrap().starts_with(&format!("- {latest}音")), "the latest dropped message stays: {listed:?}");
+}
+
+#[test]
+fn a_turn_whose_latest_results_alone_are_past_the_limit_has_them_cut_to_fit() {
+    let part = |id: &str| {
+        ToolPart::ToolResult(ToolResultPart {
+            tool_call_id: id.into(),
+            tool_name: "read_web".into(),
+            output: ToolResultOutput::text(read(id, 30_000)),
+            provider_options: None,
+        })
+    };
+    let turn = vec![user(&observed("now")), called("t1"), Message::Tool { content: vec![part("t1"), part("t2")], provider_options: None }];
+    let history: Vec<Message> = vec![];
+    let budget = budget(4096.0, 16.0 * 1024.0);
+    let fitted = fit(&history, &turn, &budget);
+    assert!(size(&[fitted.history.as_ref(), fitted.turn.as_ref()].concat()) as f64 <= budget.limit);
+    assert_eq!(text_of(fitted.turn.first()), text_of(turn.first()));
+    let Some(Message::Tool { content, .. }) = fitted.turn.last() else { panic!("the results stay last") };
+    for (part, id) in content.iter().zip(["t1", "t2"]) {
+        let ToolPart::ToolResult(ToolResultPart { output: ToolResultOutput::Text { value, .. }, .. }) = part else {
+            panic!("a text result")
+        };
+        assert!(value.starts_with(&format!("{{\"changed\":\"{id}\"")) && value.ends_with("to see more.]"), "{value}");
+    }
+}
+
+#[test]
+fn with_no_room_left_each_latest_result_still_keeps_its_opening_cut_between_characters() {
+    let part = |id: &str, output: ToolResultOutput| {
+        ToolPart::ToolResult(ToolResultPart { tool_call_id: id.into(), tool_name: "read".into(), output, provider_options: None })
+    };
+    let results: Vec<ToolPart> = vec![
+        part("ok", ToolResultOutput::text(format!("Applied: tempo 124. {}", "x".repeat(40_000)))),
+        part("err", ToolResultOutput::error_text(format!("Refused: the track is frozen. {}", "y".repeat(40_000)))),
+        part("cjk", ToolResultOutput::text("リバーブ".repeat(10_000))),
+    ]
+    .into_iter()
+    .chain((0..20).map(|i| part(&format!("many{i}"), ToolResultOutput::text("z".repeat(5_000)))))
+    .collect();
+    // The turn's own opening already takes the whole limit: there's no room for the results at all.
+    let turn = vec![user(&observed(&"w".repeat(20_000))), called("ok"), Message::Tool { content: results, provider_options: None }];
+    let history: Vec<Message> = vec![];
+    let fitted = fit(&history, &turn, &budget(4096.0, 16.0 * 1024.0));
+    let Some(Message::Tool { content, .. }) = fitted.turn.last() else { panic!("the results stay last") };
+    let texts: Vec<String> = content
+        .iter()
+        .map(|part| match part {
+            ToolPart::ToolResult(ToolResultPart {
+                output: ToolResultOutput::Text { value, .. } | ToolResultOutput::ErrorText { value, .. },
+                ..
+            }) => value.clone(),
+            other => panic!("a text result: {other:?}"),
+        })
+        .collect();
+    assert_eq!(texts.len(), 23);
+    assert!(texts[0].starts_with("Applied: tempo 124.") && texts[0].ends_with("to see more.]"), "{}", texts[0]);
+    assert!(texts[1].starts_with("Refused: the track is frozen."), "{}", texts[1]);
+    assert!(matches!(content[1], ToolPart::ToolResult(ToolResultPart { output: ToolResultOutput::ErrorText { .. }, .. })));
+    assert!(texts[2].starts_with("リバーブ"), "{}", texts[2]);
+    assert!(texts.iter().all(|text| text.len() >= 200), "each keeps an opening");
 }
 
 #[test]

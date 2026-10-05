@@ -67,6 +67,11 @@ impl Kernel for TestKernel {
             Ok(complete())
         }
     }
+    async fn run_with(&self, input: &str, pictures: Vec<Picture>, signal: Signal, emit: KernelEmit) -> Result<TurnResult, RuntimeError> {
+        let names: Vec<_> = pictures.iter().map(|p| format!("{} {} {}", p.name, p.media_type, p.data.len())).collect();
+        self.record.calls.borrow_mut().push(format!("pictures: {}", names.join(", ")));
+        self.run(input, signal, emit).await
+    }
     async fn close(&self) {
         self.record.closes.set(self.record.closes.get() + 1);
     }
@@ -188,7 +193,8 @@ fn harness(run: Option<Run>, config: impl FnOnce(&mut SessionOptions)) -> Harnes
     let mut options = SessionOptions::new(factory, integration, Rc::new(move |e| out.borrow_mut().push(e)));
     options.timeout_ms = Some(5000);
     options.cancel_grace_ms = Some(10);
-    options.close_timeout_ms = Some(25);
+    // Long enough for a slow disk to finish the saves close waits for; a test of a stuck close sets its own.
+    options.close_timeout_ms = Some(2000);
     options.missing_after_ms = Some(30);
     config(&mut options);
     Harness { session: create_session(options).unwrap(), record, events, observation }
@@ -600,6 +606,53 @@ local_test!(reconnect_carries_same_set_but_other_saved_set_starts_fresh, {
     h.session.close().await.unwrap();
 });
 
+local_test!(added_files_go_with_the_words_and_pictures_to_the_model, {
+    let dir = tempfile::tempdir().unwrap();
+    let file = |name: &str, bytes: usize| {
+        let path = dir.path().join(name);
+        std::fs::write(&path, vec![7u8; bytes]).unwrap();
+        path
+    };
+    let attach = |path: &std::path::Path, media_type: &str| Attachment {
+        path: path.to_string_lossy().into_owned(),
+        name: path.file_name().unwrap().to_string_lossy().into_owned(),
+        media_type: media_type.into(),
+        bytes: std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
+    };
+    let (picture, reference) = (file("synth.png", 1500), file("reference.wav", 3 * 1024 * 1024 + 1));
+    let h = harness(None, |_| {});
+    h.session.start().await.unwrap();
+    h.session.submit_with("make this", None, vec![attach(&picture, "image/png"), attach(&reference, "audio/wav")]).await.unwrap();
+    {
+        let calls = h.record.calls.borrow();
+        assert_eq!(calls[0], "pictures: synth.png image/png 1500");
+        let said = format!(
+            "make this\n\n[The producer added: synth.png (image/png, 2 KB) at {}; reference.wav (audio/wav, 3.0 MB) at {}]",
+            picture.display(),
+            reference.display()
+        );
+        assert!(calls[1].starts_with(&format!("{said}{OBSERVATION_MARKER}")), "{}", calls[1]);
+    }
+    // What can't go is refused before anything is sent, with what to do instead.
+    let missing = dir.path().join("gone.png");
+    let cases = [
+        (attach(&missing, "image/png"), "gone.png isn't there any more; add it again."),
+        (attach(&file("scan.tiff", 10), "image/tiff"), "The model sees PNG, JPEG, GIF and WebP pictures; save scan.tiff as one of those"),
+        (attach(&file("huge.png", 4 * 1024 * 1024), "image/png"), "huge.png is 4.0 MB; the model takes pictures up to 3.75 MB."),
+        (attach(dir.path(), "application/octet-stream"), "is a folder; add the files in it instead."),
+    ];
+    for (attachment, refusal) in cases {
+        let error = h.session.submit_with("make this", None, vec![attachment]).await.unwrap_err();
+        assert!(error.message().contains(refusal), "{}", error.message());
+    }
+    let big = |name: &str| attach(&file(name, 3 * 1024 * 1024), "image/png");
+    let error = h.session.submit_with("make this", None, (0..7).map(|i| big(&format!("shot{i}.png"))).collect()).await.unwrap_err();
+    assert!(error.message().contains("one message takes up to 20 MB of them"), "{}", error.message());
+    let many = vec![attach(&reference, "audio/wav"); 11];
+    assert!(h.session.submit_with("make this", None, many).await.unwrap_err().message().contains("at most 10 files"));
+    assert_eq!(h.record.calls.borrow().len(), 2);
+    h.session.close().await.unwrap();
+});
 async fn saved(store: &dyn ConversationStore, place: &str, turns: u32) -> CurrentConversation {
     // Up to 2 s: a busy Windows runner writes slowly, and close waits for the save only so long.
     for _ in 0..1000 {
@@ -791,7 +844,10 @@ local_test!(memory_instructions_tools_and_forgetting, {
         projects_dir: dir.path().join("projects"),
         producer_file: dir.path().join("producer.json"),
     });
-    store.save(MemoryScope::Producer, None, &[MemoryNote { id: "p1".into(), text: "Prefers short reverbs".into(), at: 1 }]).await.unwrap();
+    store
+        .save(MemoryScope::Producer, None, &[MemoryNote { id: "p1".into(), text: "Prefers short reverbs".into(), at: 1, pinned: false }])
+        .await
+        .unwrap();
     let h = harness(None, |o| o.memory = Some(store.clone()));
     h.session.start().await.unwrap();
     let tools = {
@@ -893,14 +949,7 @@ local_test!(technique_is_removed_before_whole_and_streamed_plans_and_kept_when_p
     let plan = h.record.created.borrow()[0].tools[0].clone();
     assert!(plan.description().starts_with("Make changes. When the plan builds"));
     assert!(plan.input_schema()["properties"]["technique"].is_object());
-    for way in [false, true] {
-        streamed.set(way);
-        h.session.submit("build a Reese", None).await.unwrap();
-        assert_eq!(received.borrow().last().unwrap(), json!({"steps":[{"tool":"load_device"}]}).as_object().unwrap());
-        h.session.watch(WatchEvent::Action(ActionEvent { title: "Playing".into(), playing: Some(true), recording: None }));
-        delay(10).await;
-    }
-    assert_eq!(
+    let kept = || {
         h.events
             .borrow()
             .iter()
@@ -908,9 +957,22 @@ local_test!(technique_is_removed_before_whole_and_streamed_plans_and_kept_when_p
                 SessionEvent::Technique(t) => Some(t.action),
                 _ => None,
             })
-            .collect::<Vec<_>>(),
-        [TechniqueAction::Kept, TechniqueAction::Updated]
-    );
+            .collect::<Vec<_>>()
+    };
+    for (round, way) in [false, true].into_iter().enumerate() {
+        streamed.set(way);
+        h.session.submit("build a Reese", None).await.unwrap();
+        assert_eq!(received.borrow().last().unwrap(), json!({"steps":[{"tool":"load_device"}]}).as_object().unwrap());
+        h.session.watch(WatchEvent::Action(ActionEvent { title: "Playing".into(), playing: Some(true), recording: None }));
+        // Keeping it writes the store first; a busy runner's disk takes longer than a few ms.
+        for _ in 0..1000 {
+            if kept().len() > round {
+                break;
+            }
+            delay(2).await;
+        }
+    }
+    assert_eq!(kept(), [TechniqueAction::Kept, TechniqueAction::Updated]);
     assert_eq!(h.session.techniques().await.unwrap()[0].name, "Reese stack");
     let id = store.list().await.unwrap()[0].id.clone();
     assert!(h.session.forget_technique(&id).await.unwrap());
@@ -1374,7 +1436,16 @@ local_test!(goal_pauses_persists_resumes_without_setup_and_stop_finishes, {
     assert_eq!(h.session.goal_status().unwrap().why.as_deref(), Some("stopped"));
     assert!(rig.cleanup.borrow().iter().any(|s| s.starts_with("tidy:")));
     h.session.close().await.unwrap();
-    assert_eq!(store.load("unsaved").await.unwrap().unwrap().status, GoalRun::Done);
+    // close waits for the goal's save only 25 ms here; a busy runner writes slower.
+    let mut status = None;
+    for _ in 0..1000 {
+        status = store.load("unsaved").await.unwrap().map(|kept| kept.status);
+        if status == Some(GoalRun::Done) {
+            break;
+        }
+        delay(2).await;
+    }
+    assert_eq!(status, Some(GoalRun::Done));
     assert!(!h.session.stop_goal().await.unwrap());
 });
 local_test!(goal_silent_renders_pause_and_structural_gap_prompts_leap, {

@@ -146,6 +146,36 @@ case!(narrow_resize_paste_and_scroll, async {
     h.has("note number 31");
     h.close().await;
 });
+case!(dragged_files_go_with_the_next_message, async {
+    let dir = tempfile::tempdir().unwrap();
+    let picture = dir.path().join("Screen Shot.png");
+    std::fs::write(&picture, vec![1u8; 1500]).unwrap();
+    let dragged = format!("\x1b[200~'{}'\x1b[201~", picture.display());
+    let h = Harness::new(120, 30);
+    h.start().await;
+    h.connect();
+    h.type_text(&dragged).await;
+    h.has("with Screen Shot.png · PNG picture · 2 KB ×");
+    // The same file twice is added once, and backspace in an empty box takes the last one back.
+    h.type_text(&dragged).await;
+    assert_eq!(h.screen().iter().filter(|line| line.contains("Screen Shot.png")).count(), 1);
+    h.type_text("\x7f").await;
+    assert!(!has(&h.screen(), "Screen Shot.png"));
+    h.type_text(&dragged).await;
+    // A send that's refused keeps the file, to change or send again.
+    h.control.set("submit-error", json!("Screen Shot.png is too big."));
+    h.type_text("make this\r").await;
+    h.has("Screen Shot.png is too big.");
+    h.has("with Screen Shot.png");
+    h.control.extra.borrow_mut().as_object_mut().unwrap().remove("submit-error");
+    h.type_text("make this\r").await;
+    assert!(h.calls().contains(&"submit-with:make this [Screen Shot.png image/png 1500]".into()));
+    assert!(!has(&h.screen(), "with Screen Shot.png"));
+    // Words that aren't a file paste as words.
+    h.type_text("\x1b[200~/no/such/file.png\x1b[201~").await;
+    h.has("/no/such/file.png");
+    h.close().await;
+});
 case!(failure_disconnect_focus, async {
     for (w, rows) in [(120, 36), (80, 24)] {
         let h = Harness::new(w, rows);

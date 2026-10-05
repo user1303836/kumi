@@ -20,16 +20,16 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
 
-use super::budget::{fit, put_away_images, transcript_of, ContextBudget, DEFAULT_BUDGET};
+use super::budget::{fit, opening, put_away_images, transcript_of, ContextBudget, DEFAULT_BUDGET};
 use super::failure::{describe_failure, retry_delay_ms, retry_reason, MAX_RETRIES};
 use crate::ai::error::LanguageModelError;
 use crate::ai::types::{
-    AssistantPart, CallOptions, DataContent, FileData, FinishReason, FinishReasonUnified, FunctionTool, Message, Prompt, ProviderMetadata,
-    ReasoningPart, StreamPart, StreamParts, TextPart, ToolCall, ToolCallPart, ToolPart, ToolResultContentItem, ToolResultOutput,
-    ToolResultPart, Usage as ModelUsage, UserPart,
+    AssistantPart, CallOptions, DataContent, FileData, FilePart, FinishReason, FinishReasonUnified, FunctionTool, Message, Prompt,
+    ProviderMetadata, ReasoningPart, StreamPart, StreamParts, TextPart, ToolCall, ToolCallPart, ToolPart, ToolResultContentItem,
+    ToolResultOutput, ToolResultPart, Usage as ModelUsage, UserPart,
 };
 use crate::core::contracts::{
-    JsonObject, Kernel, KernelCheckpoint, KernelEmit, KernelEvent, KernelTool, OnText, StopReason, StreamingCall, ToolImage,
+    JsonObject, Kernel, KernelCheckpoint, KernelEmit, KernelEvent, KernelTool, OnText, Picture, StopReason, StreamingCall, ToolImage,
     TranscriptLine, TurnResult, Usage,
 };
 use crate::core::errors::{FailureKind, KumiError, RuntimeError};
@@ -170,6 +170,9 @@ const MAX_TOOLS: usize = 128;
 const MAX_INSTRUCTIONS: usize = 64 * 1024;
 const MAX_STEER: usize = 16 * 1024;
 const MAX_TOOL_ERROR: usize = 4 * 1024;
+/// The most of a tool's words one result carries, as the bridge's results are capped: past it the opening
+/// stays with a note saying how much was cut, so one huge result can't take a request past its budget.
+const MAX_TOOL_RESULT: usize = 64 * 1024;
 /// A tool's own answer to the producer, when it finished the request.
 const MAX_REPLY: usize = 8 * 1024;
 /// Images one tool result shows, and the media types models read.
@@ -296,6 +299,17 @@ impl Drop for TurnGuard {
 
 impl AgentKernel {
     pub async fn run(&self, input: &str, signal: Signal, emit: KernelEmit) -> Result<TurnResult, RuntimeError> {
+        self.run_with(input, vec![], signal, emit).await
+    }
+
+    /// A turn whose request carries pictures beside the words, for the model to see.
+    pub async fn run_with(
+        &self,
+        input: &str,
+        pictures: Vec<Picture>,
+        signal: Signal,
+        emit: KernelEmit,
+    ) -> Result<TurnResult, RuntimeError> {
         if self.inner.closing.borrow().is_some() {
             return Err(RuntimeError::plain("Kernel is closed"));
         }
@@ -309,7 +323,16 @@ impl AgentKernel {
         let state = Rc::new(Running { steering: RefCell::new(Vec::new()), context: RefCell::new(None), done: settled });
         *self.inner.running.borrow_mut() = Some(state.clone());
         let _guard = TurnGuard { inner: self.inner.clone(), done };
-        turn(self.inner.clone(), input.to_string(), signal, emit, state).await
+        let mut content = vec![UserPart::Text(TextPart::new(input))];
+        content.extend(pictures.into_iter().map(|picture| {
+            UserPart::File(FilePart {
+                filename: Some(picture.name),
+                data: FileData::Data { data: DataContent::Bytes(picture.data) },
+                media_type: picture.media_type,
+                provider_options: None,
+            })
+        }));
+        turn(self.inner.clone(), Message::User { content, provider_options: None }, signal, emit, state).await
     }
 
     /// Queue guidance for the running turn; it enters at the next model boundary. False when idle.
@@ -442,6 +465,9 @@ impl Kernel for AgentKernel {
     async fn run(&self, input: &str, signal: Signal, emit: KernelEmit) -> Result<TurnResult, RuntimeError> {
         AgentKernel::run(self, input, signal, emit).await
     }
+    async fn run_with(&self, input: &str, pictures: Vec<Picture>, signal: Signal, emit: KernelEmit) -> Result<TurnResult, RuntimeError> {
+        AgentKernel::run_with(self, input, pictures, signal, emit).await
+    }
     async fn close(&self) {
         AgentKernel::close(self).await
     }
@@ -481,9 +507,9 @@ fn settled_end(messages: &[Message]) -> usize {
     }
 }
 
-/// A reply's first call, running while it's written; `begun` is when its work started (0 before).
+/// A reply's first call, running while it's written; `begun` is when its work started.
 struct Early {
-    begun: Rc<Cell<f64>>,
+    begun: Rc<Cell<Option<f64>>>,
     call: Box<dyn StreamingCall>,
 }
 
@@ -501,7 +527,7 @@ struct Turn {
     spoke: Cell<bool>,
 }
 
-async fn turn(inner: Rc<Inner>, input: String, signal: Signal, emit: KernelEmit, state: Rc<Running>) -> Result<TurnResult, RuntimeError> {
+async fn turn(inner: Rc<Inner>, first: Message, signal: Signal, emit: KernelEmit, state: Rc<Running>) -> Result<TurnResult, RuntimeError> {
     let failed = Controller::new();
     let abort = Abort::new(vec![signal.clone(), inner.lifetime.signal.clone(), failed.signal.clone()]);
     // A throwing listener must not leave a half-delivered turn in history.
@@ -521,7 +547,7 @@ async fn turn(inner: Rc<Inner>, input: String, signal: Signal, emit: KernelEmit,
         inner: inner.clone(),
         abort: abort.clone(),
         deliver,
-        messages: Rc::new(RefCell::new(vec![Message::user_text(&input)])),
+        messages: Rc::new(RefCell::new(vec![first])),
         earlier: Rc::new(RefCell::new(inner.history.borrow().clone())),
         early: RefCell::new(HashMap::new()),
         spoke: Cell::new(false),
@@ -638,16 +664,16 @@ impl InputStream for TurnInput<'_> {
         self.calls.set(calls + 1);
         if calls == 0 {
             if let Some(tool) = tool {
-                let begun = Rc::new(Cell::new(0.0));
+                let begun = Rc::new(Cell::new(None));
                 let on_start: Rc<dyn Fn()> = {
                     let begun = begun.clone();
                     let deliver = self.turn.deliver.clone();
                     let (id, name) = (id.to_string(), name.to_string());
                     Rc::new(move || {
-                        if begun.get() != 0.0 {
+                        if begun.get().is_some() {
                             return;
                         }
-                        begun.set(perf_now());
+                        begun.set(Some(perf_now()));
                         deliver(KernelEvent::ToolStart { id: id.clone(), name: name.clone() });
                     })
                 };
@@ -784,16 +810,16 @@ impl Turn {
                 return self.stopped(results, calls, false);
             }
             let streamed = self.early.borrow().get(&call.tool_call_id).cloned();
-            let begun = streamed.as_ref().map_or(0.0, |entry| entry.begun.get());
-            let started = if begun != 0.0 { begun } else { perf_now() };
-            if begun == 0.0 {
+            let begun = streamed.as_ref().and_then(|entry| entry.begun.get());
+            let started = begun.unwrap_or_else(perf_now);
+            if begun.is_none() {
                 (self.deliver)(KernelEvent::ToolStart { id: call.tool_call_id.clone(), name: call.tool_name.clone() });
             }
             // A streamed call that hadn't begun (its first step waiting for the next, to batch them) begins in
             // finish: it's started now, so beginning there doesn't say so a second time.
             if let Some(entry) = &streamed {
-                if entry.begun.get() == 0.0 {
-                    entry.begun.set(started);
+                if entry.begun.get().is_none() {
+                    entry.begun.set(Some(started));
                 }
             }
             let tool = self.inner.tools.get(&call.tool_name).cloned();
@@ -817,7 +843,7 @@ impl Turn {
                     };
                     match until_aborted(work, &self.abort).await {
                         Ok(result) => {
-                            let outcome = Outcome { text: result.text, is_error: result.is_error, images: result.images };
+                            let outcome = Outcome { text: capped(result.text), is_error: result.is_error, images: result.images };
                             if !outcome.is_error {
                                 if let Some(reply) = result.reply {
                                     let words = trim(&reply);
@@ -1194,6 +1220,19 @@ pub fn without_reasoning(messages: &[Message]) -> Vec<Message> {
         .collect()
 }
 
+/// A tool's words, cut to their opening past MAX_TOOL_RESULT, with how much went and how to see more.
+fn capped(text: String) -> String {
+    if text.len() <= MAX_TOOL_RESULT {
+        return text;
+    }
+    format!(
+        "{}\n[Kumi cut the rest of this result: it was {} KB, and one result carries {} KB. Ask for less of it (a narrower read, a page, a filter) to see more.]",
+        opening(&text, MAX_TOOL_RESULT - 256),
+        text.len() / 1024,
+        MAX_TOOL_RESULT / 1024
+    )
+}
+
 /// A tool's result as the model reads it: its words, then each image after its caption.
 fn tool_output(outcome: Outcome) -> ToolResultOutput {
     if outcome.is_error {
@@ -1228,10 +1267,29 @@ fn tool_output(outcome: Outcome) -> ToolResultOutput {
 /// that turn, and kept, they'd cost every later request (and a saved conversation) their size. The
 /// reasoning written after the first goes too, since it was written seeing them. A plain copy when there were none.
 pub fn without_images(messages: &[Message]) -> Vec<Message> {
-    let cleared = put_away_images(messages, 0);
-    let std::borrow::Cow::Owned(cleared) = cleared else { return messages.to_vec() };
-    let first = cleared.iter().zip(messages).position(|(after, before)| after != before).unwrap_or(cleared.len());
+    let cleared: Vec<Message> = put_away_images(messages, 0).iter().map(pictures_named).collect();
+    let Some(first) = cleared.iter().zip(messages).position(|(after, before)| after != before) else { return messages.to_vec() };
     [cleared[..first].to_vec(), without_reasoning(&cleared[first..])].concat()
+}
+
+/// A message without the pictures the producer added to it, each named in its place: they went with
+/// that request, and kept, every later one would carry them again.
+fn pictures_named(message: &Message) -> Message {
+    let Message::User { content, provider_options } = message else { return message.clone() };
+    if !content.iter().any(|part| matches!(part, UserPart::File(_))) {
+        return message.clone();
+    }
+    let content = content
+        .iter()
+        .map(|part| match part {
+            UserPart::File(file) => UserPart::Text(TextPart::new(format!(
+                "[The producer showed {} with this message; it went with that request only.]",
+                file.filename.as_deref().unwrap_or("a picture")
+            ))),
+            other => other.clone(),
+        })
+        .collect();
+    Message::User { content, provider_options: provider_options.clone() }
 }
 
 /// Stop waiting on abort without dropping the admitted execution: sent mutations still record

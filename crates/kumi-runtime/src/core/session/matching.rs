@@ -107,6 +107,7 @@ impl Session {
         text: &str,
         observation: &str,
         said: Option<Rc<RefCell<String>>>,
+        pictures: Vec<Picture>,
     ) -> Result<TurnResult, RuntimeError> {
         let held = self.0.state.borrow().kernel.clone().ok_or_else(|| RuntimeError::plain("Operation cancelled"))?;
         let current = self.clone();
@@ -121,15 +122,19 @@ impl Session {
             }
             Ok(())
         });
-        held.value
-            .run(&format!("{text}{OBSERVATION_MARKER}\n{observation}\n</current_observation_untrusted>"), op.signal.clone(), emit)
-            .await
+        let input = format!("{text}{OBSERVATION_MARKER}\n{observation}\n</current_observation_untrusted>");
+        if pictures.is_empty() {
+            held.value.run(&input, op.signal.clone(), emit).await
+        } else {
+            held.value.run_with(&input, pictures, op.signal.clone(), emit).await
+        }
     }
     pub(super) async fn submit_turn(
         &self,
         op: Rc<Operation>,
         text: String,
         pinned: Option<PinnedNode>,
+        pictures: Vec<Picture>,
     ) -> Result<Option<TurnResult>, RuntimeError> {
         let snapshot = self.observe(&op, pinned, false).await?;
         self.assert_current(&op)?;
@@ -171,7 +176,21 @@ impl Session {
         self.assert_current(&op)?;
         op.phase.set(Phase::Inference);
         let prompt = if brief.is_empty() { text } else { format!("{text}\n\n{brief}") };
-        let result = self.ask(&op, &prompt, &snapshot.context, None).await?;
+        let showing = !pictures.is_empty();
+        let result = match self.ask(&op, &prompt, &snapshot.context, None, pictures).await {
+            // A model that can't see pictures refuses the request: say so, and what to do.
+            Err(RuntimeError::Kumi(error)) if showing && error.kind == FailureKind::Request => {
+                return Err(KumiError {
+                    message: format!(
+                        "{} The model may not take pictures: choose another with /model, or send this without the picture.",
+                        error.message
+                    ),
+                    ..error
+                }
+                .into())
+            }
+            result => result?,
+        };
         let Some(run) = run else {
             return Ok(Some(result));
         };
@@ -232,7 +251,7 @@ impl Session {
             let snapshot = self.observe(op, None, true).await?;
             self.assert_current(op)?;
             op.phase.set(Phase::Inference);
-            result = self.ask(op, &text, &snapshot.context, None).await?;
+            result = self.ask(op, &text, &snapshot.context, None, vec![]).await?;
             add_usage(&mut usage, result.usage.as_ref());
             if stop.is_some() {
                 self.emit(run.borrow().status(MatchState::Done, stop).into());
