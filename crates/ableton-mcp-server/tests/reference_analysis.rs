@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/test/reference-analysis.test.ts`.
-
 use std::f64::consts::PI;
 
 use ableton_mcp_server::reference_analysis::{

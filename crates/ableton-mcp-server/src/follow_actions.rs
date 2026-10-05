@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/follow-actions.ts`.
-//!
 //! The Follow Action fields and their bounds, as the registry's `clip.follow-actions.set` declares them.
 
 use std::sync::LazyLock;

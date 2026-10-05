@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/host.ts`.
-//!
 //! Host helpers are shared by the exact request and transaction families.
 
 #![allow(dead_code)]
@@ -121,6 +119,9 @@ pub struct McpHostOptions {
     pub import_staging_dir: Option<String>,
     pub user_library_dir: Option<String>,
     pub live_resources_dir: Option<String>,
+    /// The version the host reports (`serverInfo`, `exporterVersion`); the bridge's own when unset.
+    /// Golden-file tests pin it, so a version bump changes none of them.
+    pub server_version: Option<String>,
 }
 /// Shared state of one stdio host. Protocol decisions retain their request lease until execution ends.
 pub struct McpHost {
@@ -174,6 +175,9 @@ impl Default for McpHost {
     }
 }
 impl McpHost {
+    pub fn server_version(&self) -> &str {
+        self.options.server_version.as_deref().unwrap_or(SERVER_VERSION)
+    }
     pub fn new(adapter: Rc<dyn AsyncLiveAdapter>, options: McpHostOptions) -> Result<Self, LiveError> {
         let policy = Rc::new(RefCell::new(tool_catalog::parse_tool_policy_spec(options.tool_policy.as_ref()).map_err(policy_error)?));
         let provider = adapter.clone();

@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/platform.ts`.
-
 use std::collections::HashMap;
 
 /// `process.platform` as Node names this platform.

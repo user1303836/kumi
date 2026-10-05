@@ -1,4 +1,4 @@
-//! Port of `apps/kumi/test/activity.test.ts`: the activity half. The Transcript tests in that file
+//! The activity half. The Transcript tests in that file
 //! belong with `tui/transcript.rs` and are ported alongside it.
 
 use std::collections::HashSet;

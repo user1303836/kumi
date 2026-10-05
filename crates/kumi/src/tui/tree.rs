@@ -1,4 +1,4 @@
-//! Port of `apps/kumi/src/tui/tree.ts`: the selected path open, other racks folded.
+//! The selected path open, other racks folded.
 use super::icons::{device_kind, DeviceRow, IconKind};
 use kumi_runtime::core::contracts::{ChainNode, DeviceNode, DeviceTree, DeviceType};
 #[derive(Clone, Debug, PartialEq, Eq)]

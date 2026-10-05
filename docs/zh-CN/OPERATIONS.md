@@ -2,8 +2,6 @@
 
 [English](../en/OPERATIONS.md) · 简体中文 · [日本語](../ja/OPERATIONS.md)
 
-Kumi 1.7.6 的原生桥接不需要 Node，使用 `ableton-mcp-server` 的子命令。本页中面向 Node/npm 发行包的步骤适用于旧版；当前原生版步骤请参阅[英文版](../en/OPERATIONS.md)。使用 Kumi 时，关闭 Live 后运行 `kumi bridge` 即可。
-
 日常运行桥接：启动、检查、限制，以及它写入磁盘的内容。安装方法见[交付](DELIVERY.md)。出现故障时，见[恢复](RECOVERY.md)。
 
 ## 启动
@@ -11,12 +9,12 @@ Kumi 1.7.6 的原生桥接不需要 Node，使用 `ableton-mcp-server` 的子命
 由 MCP 客户端启动服务器，每个客户端一个进程：
 
 ```sh
-node /absolute/path/dist/src/cli.js --config /absolute/path/bridge-config.json
+/absolute/path/ableton-mcp-server --config /absolute/path/bridge-config.json
 ```
 
 服务器从 stdin 读取 JSON 行形式的 MCP 消息，并把消息写到 stdout。stdout 只能用于 MCP。服务器自己的日志行写到 stderr，带 `mcp-host:` 前缀。请在服务器的环境中设置[部署策略](USER_GUIDE.md#部署策略)和其他[环境变量](USER_GUIDE.md#环境变量)。
 
-Kumi 会启动自己的服务器。它把策略设为自己用到的那些工具，给服务器一个只包含 Node 所在文件夹的 PATH，并最多等待 65 秒的应答。
+Kumi 会启动放在它旁边的原生服务器，把策略设为自己用到的那些工具，并最多等待 65 秒的应答。分析工作进程留在服务器旁边。
 
 ## 检查连接
 
@@ -30,7 +28,7 @@ Kumi 会启动自己的服务器。它把策略设为自己用到的那些工具
 
 不要把端口开着或 Live 正在运行当作连接正常的证明：只有经过认证的 `live_status` 才算。
 
-`ableton-mcp-diagnostics --config <path>` 在终端中做同样的检查。它报告 Node、软件包、配置和密钥的权限，然后对工程进行一次简短的认证读取（工程、场景、轨道、播放状态、一条轨道的片段槽）。[交付](DELIVERY.md)逐阶段解释了这份报告。
+`ableton-mcp-server diagnostics --config <path>` 在终端中做同样的检查。它报告原生运行时、软件包、配置和密钥的权限，然后对工程进行一次简短的认证读取（工程、场景、轨道、播放状态、一条轨道的片段槽）。[交付](DELIVERY.md)逐阶段解释了这份报告。
 
 ## 限制
 
@@ -65,7 +63,7 @@ Kumi 会启动自己的服务器。它把策略设为自己用到的那些工具
 | 内容 | 位置 |
 | --- | --- |
 | 配置、密钥、回执、操作日志 | 生命周期工具的状态文件夹：`~/.config/ableton-mcp`，Windows 上为 `%APPDATA%\ableton-mcp`，除非你另选了位置 |
-| Remote Script 诊断日志 | 状态文件夹中的 `bridge-diagnostics.log`，仅在 `ableton-mcp-lifecycle install --enable-bridge-diagnostics` 之后生成。它只记录事件代码，不含名称或数据；上限 16 MiB，达到后从头开始。 |
+| Remote Script 诊断日志 | 状态文件夹中的 `bridge-diagnostics.log`，仅在 `ableton-mcp-server lifecycle install --enable-bridge-diagnostics` 之后生成。它只记录事件代码，不含名称或数据；上限 16 MiB，达到后从头开始。 |
 | 导入音频的副本 | `~/.config/ableton-mcp/import-staging`（`%APPDATA%\ableton-mcp\import-staging`），或 `ABLETON_MCP_IMPORT_STAGING_DIR`。Live 播放的是这些副本，所以只有在没有片段再使用它们时才能删除；见 [Live 安全](LIVE_SAFETY.md)。 |
 | Drum Sampler 载体预设 | Live 的 User Library 中的 `Kumi` 文件夹，加载后即删除 |
 | 设备状态 | 你传给 `live_device_state_save` 的文件夹 |

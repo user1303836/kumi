@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/core/errors.ts`.
-
 use std::fmt;
 
 use kumi_common::abort::Aborted;

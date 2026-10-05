@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/project.ts`.
-//!
 //! Host-side project file operations. The current set file is read only after
 //! its identity is proven through the authenticated bridge; backups are written
 //! only into the set's own directory with atomic replacement and sha256

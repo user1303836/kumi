@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/tui/tty.ts`.
-//!
 //! Owns the terminal while Kumi is on screen: raw input, the alternate screen, bracketed
 //! paste, mouse and focus reporting, no autowrap. Restoring is idempotent and also runs on
 //! process exit and before a crash is printed, so a producer is never left with a broken

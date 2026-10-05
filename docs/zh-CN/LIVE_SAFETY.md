@@ -2,7 +2,7 @@
 
 [English](../en/LIVE_SAFETY.md) · 简体中文 · [日本語](../ja/LIVE_SAFETY.md)
 
-桥接在读取和修改你的 Live 工程时保证什么、不保证什么。桥接指 `apps/mcp-server` 中的 MCP 服务器，以及它在 Live 内运行的 Remote Script。Kumi 驱动它，任何 MCP 客户端也可以驱动它（[用户指南](USER_GUIDE.md)）。在让客户端操作一个你在乎的工程之前，请先读完本文。
+桥接在读取和修改你的 Live 工程时保证什么、不保证什么。桥接指 `crates/ableton-mcp-server` 中的 MCP 服务器，以及它在 Live 内运行的 Remote Script。Kumi 驱动它，任何 MCP 客户端也可以驱动它（[用户指南](USER_GUIDE.md)）。在让客户端操作一个你在乎的工程之前，请先读完本文。
 
 ## 信任边界
 

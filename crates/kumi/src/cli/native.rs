@@ -1,4 +1,4 @@
-//! Command dispatch and native process I/O from `apps/kumi/src/cli.ts`.
+//! Command dispatch and native process I/O.
 mod session;
 mod shutdown;
 use crate::{
@@ -146,7 +146,7 @@ fn installed_io(io: &CliIo) -> InstalledIo {
 }
 fn doctor_io(io: &CliIo, factory: AbletonFactory) -> DoctorIo {
     let mut doctor = DoctorIo::new(io.out.clone(), io.env.clone());
-    doctor.bundled_bridge_version = bridge_setup::bridge_version(&bridge_setup::bundled_bridge_dir());
+    doctor.bundled_bridge_version = bridge_setup::bundled_bridge_version();
     doctor.probe_live = Some(Rc::new(move |config| {
         let factory = factory.clone();
         async move { Ok(session::probe_live(config, factory).await) }.boxed_local()

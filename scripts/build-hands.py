@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the source-bound universal macOS Accessibility helper without a JavaScript build."""
+"""Build the source-bound universal macOS Accessibility helper, at target/hands/kumi-hands-<source digest>."""
 import hashlib
 from pathlib import Path
 import platform
@@ -19,7 +19,7 @@ def main():
             output = Path(directory) / arch
             subprocess.run(["xcrun", "swiftc", "-O", "-target", f"{arch}-apple-macos13", "-o", str(output), str(source)], check=True)
             slices.append(str(output))
-        target = ROOT / "packages/runtime/hands" / f"kumi-hands-{digest}"
+        target = ROOT / "target/hands" / f"kumi-hands-{digest}"
         target.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(["lipo", "-create", "-output", str(target), *slices], check=True)
         subprocess.run(["codesign", "--force", "--sign", "-", str(target)], check=True)

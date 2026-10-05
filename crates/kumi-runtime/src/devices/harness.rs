@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/devices/harness.ts`.
-//!
 //! A MIDI device's code, run here before it's made: the same frame and code the device runs in Max,
 //! with Max's globals stood in for (outlet, Task, inlet, messagename, post) and a clock Kumi moves,
 //! so a test is exact and instant. The device's own tests run, and Kumi's checks: it runs, it

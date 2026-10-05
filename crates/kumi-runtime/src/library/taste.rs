@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/library/taste.ts`.
 //! Habits learned from the producer's Sets, each reported with its evidence and a stable id.
 use super::sets::{DeviceRole, SetDevice, SetSummary, SetTrack, TrackKind};
 use crate::core::memory::suspect_note;

@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/analysis-runner.ts`.
-//!
 //! Each job runs in a disposable child process: the `ableton-mcp-analysis-worker` binary beside
 //! this one (`analysis_job_worker`), fed the job as JSON on stdin.
 

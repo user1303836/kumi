@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/library/plan.ts`.
 use super::{
     learn::{plugin_preset_folders, set_folders, LearnPlan},
     sources::{current_platform, homedir, join, library_sources, recent_sets, SourceKind, SourceOptions, SEP},

@@ -1,4 +1,4 @@
-//! Bridge connection, reconnection, catalog refresh, and observation leases from `ableton/index.ts`.
+//! Bridge connection, reconnection, catalog refresh, and observation leases.
 use super::{
     context::{self, ObservationError},
     focus::{start_focus_feed, FocusFeed, FocusFeedOptions},
@@ -550,9 +550,10 @@ impl LiveConnection {
     }
     fn spawn_transport(&self) {
         if let Some(this) = self.weak.upgrade() {
-            tokio::task::spawn_local(async move {
+            // The transport clock reads Live on a timer, for the producer's view, not for a turn.
+            tokio::task::spawn_local(crate::core::timing::background(async move {
                 this.read_transport().await;
-            });
+            }));
         }
     }
     fn report_transport(&self, transport: Option<LiveTransport>) {

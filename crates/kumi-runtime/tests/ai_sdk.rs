@@ -36,7 +36,7 @@ fn oracle(test: &Value) -> Value {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command.spawn().expect("SDK parity tests need Node and npm ci");
+    let mut child = command.spawn().expect("SDK parity tests need Node and: npm ci --prefix crates/kumi-runtime/tests/support");
     child.stdin.take().unwrap().write_all(serde_json::to_string(test).unwrap().as_bytes()).unwrap();
     let output = child.wait_with_output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));

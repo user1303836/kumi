@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/video/speech.ts`.
 //! whisper.cpp speech transcription on this computer.
 use super::{captions::Cue, programs::VideoFailure};
 use kumi_common::{

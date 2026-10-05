@@ -1,4 +1,4 @@
-//! Interoperability with the retained Live extension, as the TypeScript bridge tests exercise it.
+//! Interoperability with the Live extension.
 use ableton_mcp_server::{
     bridge::{extension_channel::*, live_extension_folders::*, router::*},
     live::*,
@@ -39,7 +39,8 @@ impl Peer {
             .expect("extension interoperability tests require Node, as Live's Extension Host does");
         let stdin = child.stdin.take().unwrap();
         let stdout = BufReader::new(child.stdout.take().unwrap()).lines();
-        for _ in 0..500 {
+        // Up to 30 s: on a busy Windows runner, Node starting beside six others can take more than 5.
+        for _ in 0..3000 {
             if read_extension_endpoint(folder.path()).is_some() {
                 return Self { _child: child, stdin, stdout, folder };
             }

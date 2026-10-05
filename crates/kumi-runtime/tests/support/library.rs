@@ -1,4 +1,4 @@
-//! Synthesized fixtures from `packages/runtime/test/fixtures/library.ts`.
+//! Synthesized fixtures.
 #![allow(dead_code)]
 use kumi_common::js::number::round;
 use std::f64::consts::PI;

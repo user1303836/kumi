@@ -38,7 +38,7 @@ Windows でまだ確認できていないこと：
 - **Windows のターミナルでのフルスクリーンアプリ。** Windows Terminal を推奨します。[ターミナル](KUMI_TUI.md#ターミナル)を参照してください。
 - **Kumi 1.6.0 以前からの `kumi update`** は、PATH 上で Git の `tar` が Windows 自身の `tar` より前にあると（Git Bash から起動した PowerShell など）、tar のエラーで失敗します。インストールのコマンドをもう一度実行するか、`kumi update` の前に `$env:Path = "$env:SystemRoot\System32;$env:Path"` を実行してください。
 
-## TypeScript 参照版と旧ブリッジ向けの Node.js
+## 以前のインストール向けの Node.js
 
 | Node.js | 状況 |
 | --- | --- |
@@ -46,7 +46,7 @@ Windows でまだ確認できていないこと：
 | 25.x | 非対応：2026年6月1日にサポートが終了しました |
 | 26.x 以降、21.x 以前、プレリリース | テストされるまで非対応 |
 
-この表は保持している TypeScript 参照版と旧 Node インストールに適用されます。npm のエンジン範囲は `>=22 <23 || >=24 <25` です。旧 TypeScript 版の `kumi` はそれ以外のメジャーバージョンでは動作を拒否します（例外は `kumi doctor` で、何が問題かを伝えます）。ブリッジのサーバーと `ableton-mcp-setup` も拒否し、`ableton-mcp-diagnostics` はそれを報告します。`ableton-mcp-lifecycle` と `ableton-mcp-migrate` は引き続き動作するので、古いインストールを調べたり削除したりできます。
+この表は、Node で動く Kumi 1.7.5 以前のインストールに適用されます。その npm のエンジン範囲は `>=22 <23 || >=24 <25` です。その `kumi` はそれ以外のメジャーバージョンでは動作を拒否します（例外は `kumi doctor` で、何が問題かを伝えます）。そのブリッジのサーバーと `ableton-mcp-setup` も拒否し、`ableton-mcp-diagnostics` はそれを報告します。`ableton-mcp-lifecycle` と `ableton-mcp-migrate` は引き続き動作するので、古いインストールを調べたり削除したりできます。
 
 ## MCP プロトコル
 
@@ -58,4 +58,4 @@ Windows でまだ確認できていないこと：
 
 ## CI がカバーする範囲
 
-CI は GitHub がホストする macOS 15、Ubuntu 24.04、Windows Server 2025 上で、Rust のチェック、6 ターゲットのバンドル、インストールと移行テスト、および Node 22 と 24 の TypeScript 参照テストを実行します。どのランナーにも Live はありません。すべてのジョブは[テスト](TESTING.md#ci)に記載しています。
+CI は GitHub がホストする macOS、Ubuntu、Windows のランナー上で、Rust のビルドとテスト、Remote Script と Live 拡張機能のテスト、6 ターゲットのバンドル、インストールと移行のテストを実行します。どのランナーにも Live はありません。すべてのジョブは[テスト](TESTING.md#ci)に記載しています。

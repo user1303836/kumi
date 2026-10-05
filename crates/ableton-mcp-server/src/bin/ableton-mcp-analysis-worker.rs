@@ -1,4 +1,4 @@
-//! The analysis job worker the bridge spawns: `apps/mcp-server/src/analysis-job-worker.ts`.
+//! The analysis job worker the bridge spawns.
 #[global_allocator]
 static ALLOCATOR: ableton_mcp_server::benchmark::memory::MeasuredAllocator = ableton_mcp_server::benchmark::memory::MeasuredAllocator;
 

@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/web/read.ts`.
 //! Read pages, code, repositories, Max patches and pictures, using free readers when needed.
 use super::{
     free::{free_services, free_trouble, FreeFailure, FreeServices},

@@ -1,4 +1,4 @@
-//! Live's own menu commands and the plug-in guide/wavetable glue from `ableton/index.ts`.
+//! Live's own menu commands and the plug-in guide/wavetable glue.
 use super::{
     connection::{LiveConnection, ReadError, NO_CURRENT_LIVE},
     context::{object, payload, ObservationError},

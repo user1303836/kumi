@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/core/memory.ts`.
 //! Notes kept between conversations, in the producer's words, about the producer and each saved Set.
 
 use super::{

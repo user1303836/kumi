@@ -49,11 +49,6 @@ configuration, local state, logs, captured media or evidence. The native
 producer and lifecycle enforce the exact file inventory and hashes in
 `release-manifest.json`.
 
-The retained legacy npm package contains compiled JavaScript and type
-declarations instead of native binaries. Its `npm run package:verify` checks
-an explicit file list; CI packs that legacy package twice, including once
-from a fresh clone and `npm ci`, and requires identical bytes.
-
 ## The release manifest
 
 `release-manifest.json` (schema `ableton-mcp-native-release/v1`) records the
@@ -70,16 +65,16 @@ it is not published to a package registry.
 For existing installations, the lifecycle also accepts the legacy
 `ableton-mcp-release/v2` and `ableton-mcp-private-release/v1` schemas for
 upgrade and rollback. Their Node/npm/TypeScript build evidence and
-`local-npm-tarball` channel describe the retained legacy artifacts.
+`local-npm-tarball` channel describe the bridge packages of Kumi 1.7.5 and
+earlier.
 
 ## Merge gate
 
 The `main` branch has one ruleset:
 
 - changes arrive by pull request; no approving review is required;
-- required checks, which must pass on the branch as it is up to date with
-  `main`: `Required CI`, `Kumi / Node 22`, `Kumi / Node 24`,
-  `Kumi / Windows / Node 24` and `Kumi / macOS / Node 24`;
+- one required check, `Required CI`, which must pass on the branch as it is
+  up to date with `main`;
 - `main` can't be deleted or force-pushed;
 - the repository admin role can bypass these rules for pull requests.
 

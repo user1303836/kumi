@@ -1,4 +1,4 @@
-//! Local discovery/binding scenarios from `packages/runtime/test/local.test.ts`.
+//! Local discovery/binding scenarios.
 use async_trait::async_trait;
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_runtime::{

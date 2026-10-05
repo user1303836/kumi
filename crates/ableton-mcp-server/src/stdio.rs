@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/stdio.ts`.
-//!
 //! `serve_stdio` spawns a task per request with `tokio::task::spawn_local`, so it runs inside a
 //! `tokio::task::LocalSet` on a current-thread runtime, as every binary does.
 

@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/tui/style.ts`.
-//!
 //! Colours, text styles and the terminal escape codes that draw them.
 
 use std::cell::RefCell;

@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/core/contracts.ts`.
-
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 

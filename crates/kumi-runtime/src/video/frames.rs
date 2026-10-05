@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/video/frames.ts`.
 //! Frames and stretches of sound taken by ffmpeg, with atomic cache writes.
 use super::programs::{run, RunOptions, VideoFailure};
 use kumi_common::{abort::Signal, js::number::to_fixed};

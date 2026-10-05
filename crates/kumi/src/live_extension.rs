@@ -1,4 +1,3 @@
-//! Port of `apps/kumi/src/live-extension.ts`.
 use kumi_common::js::json::file_text;
 use kumi_runtime::{
     library::sources::{dirname, join},

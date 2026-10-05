@@ -1,4 +1,4 @@
-//! Port of `apps/kumi/test/doctor.test.ts` and voice readiness checks.
+//! `kumi doctor`, and voice readiness checks.
 use futures::FutureExt;
 use kumi::{doctor::*, live_extension::install_extension, tui::tty::TtyOutput};
 use kumi_common::time::now_ms;

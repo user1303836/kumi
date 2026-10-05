@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/command.ts`.
-
 use std::sync::LazyLock;
 
 /// How the producer runs Kumi, for every message that says what to type: "kumi bridge" once Kumi is

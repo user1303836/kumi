@@ -1,4 +1,4 @@
-//! Port of `apps/kumi/src/bridge-setup.ts` using native bridge executables.
+//! `kumi bridge`: installs and updates the native bridge.
 use crate::{input::TerminalInput, tui::tty::TtyOutput};
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_common::{abort::Signal, js::string::trim};
@@ -225,12 +225,24 @@ pub fn repository_dir() -> String {
         .display()
         .to_string()
 }
+/// The folder of the bridge this Kumi brings: an installed app's (its package.json is beside the
+/// executable), or, for a checkout's build, the checkout's apps folder, whose live-extension it places.
 pub fn bundled_bridge_dir() -> String {
     let folder = executable_dir();
     if Path::new(&join(&folder, "package.json")).exists() {
         folder
     } else {
-        join(&repository_dir(), "apps/mcp-server")
+        join(&repository_dir(), "apps")
+    }
+}
+/// The version of the bridge this Kumi brings: an installed app names it in its package.json; a
+/// checkout's build carries the bridge crate it was built with.
+pub fn bundled_bridge_version() -> Option<String> {
+    let folder = executable_dir();
+    if Path::new(&join(&folder, "package.json")).exists() {
+        bridge_version(&folder)
+    } else {
+        Some(ableton_mcp_server::delivery::PACKAGE_VERSION.into())
     }
 }
 pub fn bridge_version(root: &str) -> Option<String> {
@@ -466,7 +478,10 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
     let run = io.run.clone().unwrap_or_else(default_run);
     let bridge_dir = io.bridge_dir.clone().unwrap_or_else(bundled_bridge_dir);
     let mut scripts = remote_scripts_dir(&io.env);
-    let Some(bundled) = bridge_version(&bridge_dir) else {
+    let Some(bundled) = (match &io.bridge_dir {
+        Some(dir) => bridge_version(dir),
+        None => bundled_bridge_version(),
+    }) else {
         say(&format!("Kumi's copy of the bridge is missing. Run {}.", *KUMI_REPAIR));
         return Ok(1);
     };

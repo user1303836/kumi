@@ -1,6 +1,6 @@
 [package]
 name = "ableton-mcp-server"
-# The bridge is versioned on its own, as apps/mcp-server always was; each Kumi release names the bridge it ships with.
+# The bridge is versioned on its own; each Kumi release names the bridge it ships with.
 version = "1.0.74"
 description = "The Ableton Live MCP bridge: an MCP host over stdio, speaking to Live's Remote Script and Kumi's Live extension."
 edition.workspace = true

@@ -1,4 +1,4 @@
-//! Port of `apps/kumi/src/update.ts`, rebuilding and launching native binaries.
+//! `kumi update` for a checkout: pulls, rebuilds and launches native binaries.
 use crate::{
     bridge_setup::{default_run, executable_name, is_live_running, repository_dir, AsyncBool, Ran, Run},
     config::find_bridge_config,
@@ -220,7 +220,7 @@ pub async fn run_update(io: UpdateIo) -> i32 {
         }
     }
     let version = read_version(&join(&repo, "package.json")).unwrap_or(KUMI_VERSION.into());
-    let bundled = read_version(&join(&repo, "apps/mcp-server/package.json"));
+    let bundled = read_cargo_version(&join(&repo, "crates/ableton-mcp-server/Cargo.toml"));
     say(if behind > 0. { format!("Kumi is now {version}.") } else { format!("Kumi is up to date ({version}).") });
     let bridge = older_bridge(&io.env, bundled.as_deref());
     if find_bridge_config(&io.env).is_none() {
@@ -262,4 +262,13 @@ pub async fn run_update(io: UpdateIo) -> i32 {
 }
 fn read_version(file: &str) -> Option<String> {
     serde_json::from_slice::<Value>(&fs::read(file).ok()?).ok()?.get("version")?.as_str().map(str::to_string)
+}
+/// A Cargo.toml's `[package]` version, as written there (`version = "1.0.74"`).
+fn read_cargo_version(file: &str) -> Option<String> {
+    let text = fs::read_to_string(file).ok()?;
+    let package = text.split("[package]").nth(1)?.split("\n[").next()?;
+    package.lines().find_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        (key.trim() == "version").then(|| value.trim().trim_matches('"').to_string())
+    })
 }

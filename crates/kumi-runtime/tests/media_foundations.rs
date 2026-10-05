@@ -1,4 +1,4 @@
-//! Native audio formats and transport fixtures from audio.test.ts, ears.test.ts and video.test.ts.
+//! Native audio formats and transport fixtures for audio, listening and video.
 use futures::FutureExt;
 use kumi_runtime::{
     audio::decode::open_audio,

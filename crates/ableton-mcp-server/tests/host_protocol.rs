@@ -47,6 +47,8 @@ impl AsyncLiveAdapter for StatusAdapter {
         Ok(())
     }
 }
+/// The bridge version the golden files were recorded with; pinned so a version bump changes none of them.
+const ORACLE_VERSION: &str = "1.0.74";
 fn initialize(host: &McpHost) {
     host.begin_request(&json!({"jsonrpc":"2.0","id":"setup","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}),false).unwrap().completed();
     host.begin_request(&json!({"jsonrpc":"2.0","method":"notifications/initialized"}), false).unwrap().completed();
@@ -68,8 +70,15 @@ async fn host_lifecycle_resources_status_and_gates_match_source() {
             UnavailableLiveAdapter.status()
         };
         let host = Rc::new(
-            McpHost::new(Rc::new(StatusAdapter(status)), McpHostOptions { tool_policy: case.get("policy").cloned(), ..Default::default() })
-                .unwrap(),
+            McpHost::new(
+                Rc::new(StatusAdapter(status)),
+                McpHostOptions {
+                    tool_policy: case.get("policy").cloned(),
+                    server_version: Some(ORACLE_VERSION.into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap(),
         );
         for (index, step) in case["steps"].as_array().unwrap().iter().enumerate() {
             let request =

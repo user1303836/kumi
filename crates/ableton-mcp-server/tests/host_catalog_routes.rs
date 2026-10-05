@@ -57,6 +57,8 @@ impl AsyncLiveAdapter for Advertised {
         self.status()
     }
 }
+/// The bridge version the golden files were recorded with; pinned so a version bump changes none of them.
+const ORACLE_VERSION: &str = "1.0.74";
 fn clean(value: &Value) -> Value {
     match value {
         Value::Array(a) => json!(a.iter().map(clean).collect::<Vec<_>>()),
@@ -132,7 +134,7 @@ async fn every_catalog_tool_matches_source_at_the_public_boundary() {
                 } else {
                     sim.clone()
                 };
-                let host = Rc::new(McpHost::new(adapter, McpHostOptions::default()).unwrap());
+                let host = Rc::new(McpHost::new(adapter, McpHostOptions { server_version: Some(ORACLE_VERSION.into()), ..Default::default() }).unwrap());
                 if case["modern"] != true {
                     host.handle(&json!({"jsonrpc":"2.0","id":"setup","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"catalog-oracle","version":"1"}}})).unwrap();
                     host.handle(&json!({"jsonrpc":"2.0","method":"notifications/initialized"})).unwrap();

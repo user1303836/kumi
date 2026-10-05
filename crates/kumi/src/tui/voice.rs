@@ -1,4 +1,4 @@
-//! Port of `apps/kumi/src/tui/voice.ts`: taps, holds, quiet-stop, transcription and cancellation.
+//! Taps, holds, quiet-stop, transcription and cancellation.
 use super::{
     activity::{activity_glyph, shimmer, Activity},
     style::{palette, Style},

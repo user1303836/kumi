@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/audio/analyze.ts`.
 //! One pass measures loudness, balance, stereo, dynamics, tempo, key, pitch, harmonics and movement.
 
 use super::{

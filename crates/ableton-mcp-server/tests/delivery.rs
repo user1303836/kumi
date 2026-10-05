@@ -146,10 +146,10 @@ fn bridge_reference_names_only_its_absolute_config() {
     assert!(write_bridge_reference(Path::new("relative"), &config, true).is_err());
 }
 #[test]
-fn retained_node_policy_matches_canonical_package_and_platforms() {
-    let metadata: serde_json::Value = serde_json::from_str(include_str!("../../../apps/mcp-server/package.json")).unwrap();
-    assert_eq!(metadata["engines"]["node"], NODE_ENGINE_RANGE);
-    assert_eq!(metadata["abletonMcpSupport"]["nodeMajors"], json!(SUPPORTED_NODE_MAJORS));
+fn retained_node_policy_matches_the_javascript_bridge_and_platforms() {
+    // What the last JavaScript bridge (1.0.74) declared: configurations it wrote still name Node.
+    assert_eq!(NODE_ENGINE_RANGE, ">=22 <23 || >=24 <25");
+    assert_eq!(json!(SUPPORTED_NODE_MAJORS), json!([22, 24]));
     for major in 21..=27 {
         assert_eq!(supported_node_major(&format!("{major}.0.0")), [22, 24].contains(&major));
     }

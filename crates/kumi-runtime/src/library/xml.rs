@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/library/xml.ts`.
-//!
 //! Reading Live's own files (Sets, presets, racks): gzipped XML, read as a stream of tags without
 //! building a tree, so a 30 MB Set takes a fraction of a second and little memory. Only tags and
 //! their attributes are seen: Live keeps its values in attributes, and text (sample data, plug-in

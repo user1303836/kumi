@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/drum-sampler-preset.ts`.
-//!
 //! Drum Sampler presets that hold a sample. Live 12's Drum Sampler has no scripting call that takes a
 //! sample, and Live makes a Simpler of any sample the Browser loads onto a pad. A preset does it: Live's
 //! own default Drum Sampler preset, with the sample in its UserSample, written where the Browser sees it

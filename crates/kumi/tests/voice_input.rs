@@ -1,4 +1,4 @@
-//! Voice state transitions from app.test.ts, exercised with its fake microphone contract.
+//! Voice state transitions, exercised with a fake microphone.
 use async_trait::async_trait;
 use kumi::{
     tui::{transcript::NoticeTone, voice::*},

@@ -1,4 +1,3 @@
-//! Port of `apps/kumi/src/history.ts`.
 //! Input history kept across conversations and restarts, with secrets and key-shaped text removed.
 use crate::text::sanitize_text;
 use fancy_regex::Regex;

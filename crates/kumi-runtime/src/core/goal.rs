@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/core/goal.ts`.
-//!
 //! Goal mode (/goal): Kumi goes after a sound or part until it gets there, the producer stops it, or
 //! a safety cap of hours. Code does most of the searching (evolve.rs: knobs nudged, crossed and
 //! redrawn around the best, a generation of candidates rendered in one silent pass); the model makes

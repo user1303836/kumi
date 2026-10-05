@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/web/html.ts`.
 //! A page as readable text, preserving its structure and code while leaving out site furniture.
 
 use kumi_common::js::string::{trim, utf16_len};

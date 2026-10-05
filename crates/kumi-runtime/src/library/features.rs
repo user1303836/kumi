@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/library/features.ts`.
 //! Compact measurements for sound classification and similarity search.
 use super::classify::{Heard, HeardKey, Pitch};
 use crate::audio::{

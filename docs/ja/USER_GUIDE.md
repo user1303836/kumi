@@ -2,8 +2,6 @@
 
 [English](../en/USER_GUIDE.md) · [简体中文](../zh-CN/USER_GUIDE.md) · 日本語
 
-ネイティブ版 Kumi 1.7.6 のブリッジは Node を必要とせず、`ableton-mcp-server` のサブコマンドを使います。このページの Node・npm 配布向けの手順は旧版用です。現在のネイティブ版の手順は[英語版](../en/USER_GUIDE.md)を参照してください。Kumi を使う場合は、Live を閉じて `kumi bridge` を実行します。
-
 ブリッジは Kumi と Ableton Live をつなぐもので、どの MCP クライアントからも単独で使えます。ブリッジは二つの部分からなります。
 
 - ローカルの MCP サーバー `@ableton-mcp/mcp-server`
@@ -15,79 +13,34 @@
 
 ## インストール
 
-ブリッジは Node.js 22 と 24 で動きます（Node 24 LTS を推奨）。それ以外のメジャーバージョンでは、ブリッジのコマンドは起動を拒否します。Live 12 は macOS または Windows で動きます。[対応プラットフォーム](SUPPORT_MATRIX.md)を参照してください。
+ネイティブのサーバーは、macOS、Windows、Linux 上で実行ファイルとして動きます。Live に接続するには macOS か Windows が必要です。自分の OS とアーキテクチャに合ったアーカイブを使ってください。解析ワーカーはサーバーの隣に置いたままにする必要があります。別途 Node のランタイムを用意する必要はありません。
 
-ブリッジは次のどちらかの方法で入手します。
-
-- **リリースの tarball** を `ableton-mcp-lifecycle` でインストールする。[ブリッジのインストール](DELIVERY.md)を参照してください。
-- **ソースのチェックアウト：**
-
-  ```sh
-  cd apps/mcp-server
-  npm ci
-  npm run build
-  node dist/src/cli.js        # サーバー（Live には接続しない）
-  ```
-
-`--config` なしで起動したサーバーは、Live に一切接続しません。その場合に使えるのはオフラインのツールだけです。
+- **Kumi で使う：** Live を閉じて `kumi bridge` を実行します。
+- **単体で使う：** [ブリッジのインストール](DELIVERY.md)の説明に従い、`ableton-mcp-server lifecycle` でネイティブの tarball をインストールします。
+- **ソースから：** リポジトリのルートで `cargo build --release --locked -p ableton-mcp-server --bins` を実行します。`target/release/ableton-mcp-server` は、設定を与えられるまではオフラインのツールだけで起動します。
 
 ## Live に接続する
 
-リリース版では、`ableton-mcp-lifecycle install` が以下の作業をすべて行います。シークレットと設定を作成し、Remote Script をインストールし、アップグレードとロールバックのためのレシートを残します。[ブリッジのインストール](DELIVERY.md)の手順に従ってください。Windows ではライフサイクルを使ってください。ブリッジが確認する所有者専用のアクセス権を、シークレットと設定に付けてくれます。
+ライフサイクルのインストーラーは、所有者専用のシークレットと設定を作成し、Remote Script をインストールし、アップグレードとロールバックのためのレシートを残します。Windows でもライフサイクルを使ってください。必要なファイルのアクセス権を付けてくれます。[ブリッジのインストール](DELIVERY.md)の手順に従ってください。
 
-ソースのチェックアウトからは、次のようにします。
+次に Live を開き、**Settings → Link, Tempo & MIDI** で **AbletonMcpBridge** を選びます。接続は次のように確認します。
 
-1. ビルドしたパッケージの隣に Remote Script を置きます。
+```sh
+/absolute/path/ableton-mcp-server diagnostics --config /absolute/path/bridge-config.json
+```
 
-   ```sh
-   node scripts/stage-remote-script.mjs
-   ```
-
-2. シークレットを作ります。32 文字以上・空白なしの 1 行で、自分だけが読めるようにします。
-
-   ```sh
-   umask 077
-   node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))" > /absolute/path/bridge.secret
-   ```
-
-3. 設定を書き出します。
-
-   ```sh
-   npm run setup -- --output /absolute/path/bridge-config.json \
-     --bridge-port 9765 --realtime-port 9766 \
-     --secret-file /absolute/path/bridge.secret
-   ```
-
-4. Live を終了します。User Library の `Remote Scripts` フォルダに、`AbletonMcpBridge` という名前のフォルダで Remote Script をインストールします。まず `--dry-run` で試してください。
-
-   ```sh
-   node dist/src/install-remote-script.js \
-     --destination "$HOME/Music/Ableton/User Library/Remote Scripts/AbletonMcpBridge" \
-     --config /absolute/path/bridge-config.json
-   ```
-
-   `--config` は必ず渡してください。Remote Script に設定の場所を伝えるもので、これがないとスクリプトは起動しません。`--force` は既存のフォルダを置き換え、古いフォルダを `AbletonMcpBridge.backup-<time>` として隣に残します。
-
-5. Live を開きます。**Settings → Link, Tempo & MIDI** で、**AbletonMcpBridge** を Control Surface として選びます。
-
-6. 接続を確認します。
-
-   ```sh
-   npm run diagnostics -- --config /absolute/path/bridge-config.json
-   ```
-
-   `"provenance": "real-live"` と `"readiness": { … "realLiveOperational": true }` を探してください。このコマンドはブリッジが接続されていなくても 0 で終了するので、レポートの中身を読んでください。各フィールドの意味は[ブリッジのインストール](DELIVERY.md)で説明しています。
+`"provenance": "real-live"` と `"readiness": { … "realLiveOperational": true }` を探してください。診断は接続されていなくても正常に終了することがあるので、レポートの readiness のフィールドを読んでください。
 
 ### 設定ファイル
 
-`ableton-mcp-setup` はバージョン 2 のファイルを書き出します。サーバー、Remote Script、ライフサイクルのすべてがこのファイルを読みます。
+`ableton-mcp-server setup` はバージョン 2 のファイルを書き出します。サーバー、Remote Script、ライフサイクルのすべてがこのファイルを読みます。
 
 ```json
 {
   "version": 2,
   "server": {
-    "command": "/absolute/path/node",
-    "args": ["/absolute/path/dist/src/cli.js", "--config", "/absolute/path/bridge-config.json"]
+    "command": "/absolute/path/ableton-mcp-server",
+    "args": ["--config", "/absolute/path/bridge-config.json"]
   },
   "bridge": {
     "host": "127.0.0.1",
@@ -101,15 +54,16 @@
 
 | フィールド | ルール |
 | --- | --- |
-| `server.args` | サーバーの `cli.js`、`--config`、そしてこのファイル自身の絶対パス |
+| `server.command` | ネイティブのサーバーの実行ファイルの絶対パス |
+| `server.args` | `--config` と、このファイル自身の絶対パス |
 | `bridge.host` | `127.0.0.1` または `::1` |
 | `bridge.port` | 1–65535。Remote Script がここで待ち受けます |
 | `bridge.secretFile` | 絶対パス。所有者専用で、32 文字以上 |
 | `bridge.timeoutMs` | Live への 1 リクエストあたり 100–60,000 ms（デフォルト 5,000） |
 | `bridge.realtimePort` | 省略可。`port` とは異なる値にします。[リアルタイムコントロール](REALTIME_CONTROL.md)を参照 |
-| `bridge.diagnostics` | 省略可。`ableton-mcp-lifecycle install --enable-bridge-diagnostics` だけが書き込みます（[運用ガイド](OPERATIONS.md)を参照） |
+| `bridge.diagnostics` | 省略可。`ableton-mcp-server lifecycle install --enable-bridge-diagnostics` だけが書き込みます（[運用ガイド](OPERATIONS.md)を参照） |
 
-未知のフィールドは拒否されます。ファイルは自分だけが読めるようにしておく必要があります。ブリッジのオプションなしで `ableton-mcp-setup` を実行すると、バージョン 1 のファイルが書き出されます。このファイルはサーバーの起動方法しか記述しておらず、`--config` に渡すと拒否されます。古いファイルは `ableton-mcp-migrate` で変換できます（[ブリッジのインストール](DELIVERY.md)を参照）。
+Node と `cli.js` を指定した旧形式のバージョン 2 の設定も、移行のあいだは読み込めます。未知のフィールドは拒否されます。ファイルは自分だけが読めるようにしておく必要があります。ブリッジのオプションなしで `ableton-mcp-server setup` を実行すると、バージョン 1 のファイルが書き出されます。このファイルはサーバーの起動方法しか記述しておらず、`--config` に渡すと拒否されます。古いファイルは `ableton-mcp-server migrate` で変換できます（[ブリッジのインストール](DELIVERY.md)を参照）。
 
 ## MCP クライアントにブリッジを追加する
 
@@ -119,8 +73,8 @@
 {
   "mcpServers": {
     "ableton": {
-      "command": "/absolute/path/node",
-      "args": ["/absolute/path/dist/src/cli.js", "--config", "/absolute/path/bridge-config.json"],
+      "command": "/absolute/path/ableton-mcp-server",
+      "args": ["--config", "/absolute/path/bridge-config.json"],
       "env": { "ABLETON_MCP_TOOL_POLICY": "edit-no-audio" }
     }
   }
@@ -158,11 +112,11 @@ Live が接続している間、ブリッジは 10 秒ごとに拡張機能を�
 
 | コマンド | オプション |
 | --- | --- |
-| `ableton-mcp-server`（`npm start`） | なし、または `--config PATH` のみ |
-| `ableton-mcp-setup`（`npm run setup`） | `--output PATH`。バージョン 2 ではさらに `--bridge-port N`、`--secret-file PATH`、必要に応じて `--bridge-host`、`--bridge-timeout MS`、`--realtime-port N`。`--force` で上書きします。 |
-| `ableton-mcp-install-remote-script` | `--destination DIR`、`--config PATH`、`--dry-run`、`--force` |
-| `ableton-mcp-diagnostics`（`npm run diagnostics`） | なし、または `--config PATH` のみ。JSON のレポートを出力します |
-| `ableton-mcp-lifecycle`、`ableton-mcp-migrate` | [ブリッジのインストール](DELIVERY.md)を参照 |
+| `ableton-mcp-server` | なし、または `--config PATH` のみ |
+| `ableton-mcp-server setup` | `--output PATH`。バージョン 2 ではさらに `--bridge-port N`、`--secret-file PATH`、必要に応じて `--bridge-host`、`--bridge-timeout MS`、`--realtime-port N`。`--force` で上書きします。 |
+| `ableton-mcp-server install-remote-script` | `--destination DIR`、`--config PATH`、`--dry-run`、`--force` |
+| `ableton-mcp-server diagnostics` | なし、または `--config PATH` のみ。JSON のレポートを出力します |
+| `ableton-mcp-server lifecycle`、`ableton-mcp-server migrate` | [ブリッジのインストール](DELIVERY.md)を参照 |
 
 最初の四つのコマンドは、不正なオプションでは 2、失敗したときは 1 で終了します。
 

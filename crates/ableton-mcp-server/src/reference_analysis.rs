@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/reference-analysis.ts`.
-
 use std::f64::consts::PI;
 
 use kumi_common::js::number;
