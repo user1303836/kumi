@@ -1233,21 +1233,21 @@ fn optional_scale(params: &Params) -> Result<Option<String>, MidiTransformError>
 }
 
 fn chord_progression(_notes: &[Note], params: &Params) -> Outcome {
-    let has_numerals = params.contains_key("numerals");
-    let has_symbols = params.contains_key("symbols");
-    if has_numerals == has_symbols {
-        return Err(range("exactly one of numerals or symbols is required"));
-    }
-    let tokens = string_array_param(params, if has_numerals { "numerals" } else { "symbols" })?;
+    // `chords` takes chord symbols or roman numerals, as bassline's does; `numerals` and `symbols` still work.
+    let given: Vec<&str> = ["chords", "numerals", "symbols"].into_iter().filter(|name| params.contains_key(*name)).collect();
+    let [name] = given[..] else {
+        return Err(range("exactly one of chords, numerals or symbols is required"));
+    };
+    let tokens = string_array_param(params, name)?;
     let root = optional_root(params)?;
     let scale = optional_scale(params)?;
-    let ChordList { chords, source } = if has_numerals {
-        parse_chord_list(&tokens, root, scale.as_deref())?
-    } else {
+    let ChordList { chords, source } = if name == "symbols" {
         ChordList {
             chords: tokens.iter().map(|token| parse_chord_symbol(token)).collect::<Result<Vec<_>, _>>()?,
             source: "explicit chord symbols".to_string(),
         }
+    } else {
+        parse_chord_list(&tokens, root, scale.as_deref())?
     };
     let voicing_style = string_param(params, "voicing", &["close", "drop2", "spread"], Some("close"))?;
     let voice_leading = integer_param(params, "voiceLeading", 0, 1, Some(1))? == 1;
