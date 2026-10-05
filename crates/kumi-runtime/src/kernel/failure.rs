@@ -42,11 +42,13 @@ pub fn retry_reason(error: &LanguageModelError, binding_id: &str) -> String {
     let provider = binding_id.split('/').next().unwrap_or(binding_id);
     let name = PROVIDER_NAMES.get(provider).copied().unwrap_or(provider);
     match error.api_call().and_then(|error| error.status_code) {
+        // A stream that broke off after the response began keeps its 200.
+        Some(200..=299) => format!("{name}'s answer broke off"),
         Some(429) => format!("{name} is busy (HTTP 429)"),
         Some(status @ (503 | 529)) => format!("{name} is overloaded (HTTP {status})"),
         Some(status) if status >= 500 => format!("{name} is having trouble (HTTP {status})"),
         Some(status) => format!("{name} asked Kumi to wait (HTTP {status})"),
-        None => format!("{name} didn't answer"),
+        None => format!("{name} couldn't be reached"),
     }
 }
 

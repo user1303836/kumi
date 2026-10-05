@@ -578,6 +578,27 @@ fn unavailable() -> LanguageModelError {
     LanguageModelError::ApiCall(error)
 }
 
+#[test]
+fn a_retrys_reason_says_what_happened() {
+    use kumi_runtime::kernel::failure::retry_reason;
+    let status = |code: Option<u16>| LanguageModelError::ApiCall(ApiCallError::new("x", "u", Some(json!({})), code));
+    let said: Vec<String> = [Some(200), Some(429), Some(503), Some(502), Some(408), None]
+        .into_iter()
+        .map(|code| retry_reason(&status(code), "openai-codex/gpt-6-astra"))
+        .collect();
+    assert_eq!(
+        said,
+        [
+            "ChatGPT's answer broke off",
+            "ChatGPT is busy (HTTP 429)",
+            "ChatGPT is overloaded (HTTP 503)",
+            "ChatGPT is having trouble (HTTP 502)",
+            "ChatGPT asked Kumi to wait (HTTP 408)",
+            "ChatGPT couldn't be reached",
+        ]
+    );
+}
+
 #[tokio::test]
 async fn retries_up_to_three_times_before_any_output_escapes_but_never_after_text_was_delivered() {
     local(async {
