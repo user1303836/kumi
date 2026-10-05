@@ -78,10 +78,16 @@ jobs:
         run: |
           release=repos/BtbN/FFmpeg-Builds/releases/latest
           asset="$(gh api "$release" --jq '.assets[].name' | grep -E '^ffmpeg-n[0-9]+\.[0-9]+-latest-linux64-lgpl-[0-9]+\.[0-9]+\.tar\.xz$' | sort -V | tail -1)"
-          curl -fsSL --retry 3 "https://github.com/BtbN/FFmpeg-Builds/releases/download/$(gh api "$release" --jq .tag_name)/$asset" | tar -xJ -C "$RUNNER_TEMP"
+          from="https://github.com/BtbN/FFmpeg-Builds/releases/download/$(gh api "$release" --jq .tag_name)"
+          cd "$RUNNER_TEMP"
+          curl -fsSL --retry 3 -o "$asset" "$from/$asset"
+          curl -fsSL --retry 3 "$from/checksums.sha256" | grep -F "  $asset" | sha256sum -c -
+          tar -xJf "$asset"
           bin="$RUNNER_TEMP/${asset%.tar.xz}/bin"
-          "$bin/ffmpeg" -hide_banner -h protocol=http | grep -q -- -request_size
-          "$bin/ffmpeg" -version | head -1
+          # Read whole, then searched: a pipe into grep -q can close early, and ffmpeg, still writing, fails under pipefail.
+          help="$("$bin/ffmpeg" -hide_banner -h protocol=http)"
+          grep -q -- -request_size <<<"$help"
+          "$bin/ffmpeg" -version | sed -n 1p
           echo "$bin" >> "$GITHUB_PATH"
       - run: cargo fmt --all --check
       - name: Every test, in a home of their own (no test reaches this machine's Live folders or ~/.kumi)
