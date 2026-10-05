@@ -45,7 +45,7 @@ class MigrationRelease(unittest.TestCase):
         stage.mkdir()
         self.binary = "kumi.exe" if os.name == "nt" else "kumi"
         source = self.root / "fixture.rs"
-        source.write_text('fn main() { let args: Vec<_> = std::env::args().skip(1).collect(); if args == ["--version"] {println!("Kumi 99.0.0")} else {println!("native fixture: {}", args.join("|"));} }', encoding="utf-8")
+        source.write_text('fn main() { let args: Vec<_> = std::env::args().skip(1).collect(); if args == ["--version"] {println!("Kumi 99.0.0")} else {println!("native fixture: {}{}", args.join("|"), if std::env::var("KUMI_BRIDGE_AFTER").as_deref() == Ok("1") {" (after an update)"} else {""});} }', encoding="utf-8")
         subprocess.run(["rustc", str(source), "-C", "debuginfo=0", "-o", str(stage / self.binary)], check=True)
         (stage / "package.json").write_text(json.dumps({"version":"99.0.0", "bridge":"1.0.73", "runtime":"rust-native"}), encoding="utf-8")
         bundle = f"kumi-{self.target}.tar.gz"
@@ -64,9 +64,9 @@ class MigrationRelease(unittest.TestCase):
             archive.extractall(folder, filter="data")
         return folder / "apps/kumi/bin/kumi.mjs"
 
-    def shim(self, entry, *args, releases):
-        return subprocess.run(["node", str(entry), *args], capture_output=True, text=True, encoding="utf-8",
-                              env=dict(os.environ, KUMI_RELEASES=releases))
+    def shim(self, entry, *args, releases, cwd=None, home=None):
+        return subprocess.run(["node", str(entry), *args], capture_output=True, text=True, encoding="utf-8", cwd=cwd,
+                              env=dict(os.environ, KUMI_RELEASES=releases, **({"KUMI_HOME": str(home)} if home else {})))
 
     def test_index_and_archive_are_bound_and_old_probe_materializes_native_once(self):
         self.assertEqual(release.native.digest(self.out / "kumi.tar.gz"), self.index["sha256"])
@@ -84,6 +84,21 @@ class MigrationRelease(unittest.TestCase):
             again = self.shim(entry, "argument with spaces", "--model=example", releases="http://127.0.0.1:9")
         self.assertEqual(again.stdout, "native fixture: argument with spaces|--model=example\n")
         self.assertEqual(again.returncode, 0, again.stderr)
+
+    def test_only_an_old_updaters_own_bridge_step_is_marked_as_an_update(self):
+        # Every installed updater from 1.6.1 to 1.7.5 ends with exactly `kumi bridge`, run from Kumi's folder.
+        home = self.root / "home"
+        entry = self.unpack(home / "app")
+        with self.release_server(self.out) as base:
+            self.assertEqual(self.shim(entry, "--version", releases=base).returncode, 0)
+        offline = "http://127.0.0.1:9"
+        # KUMI_HOME spelled unlike the folder's real path, as /var is /private/var on macOS.
+        step = self.shim(entry, "bridge", releases=offline, cwd=home, home=home / "app" / "..")
+        self.assertEqual(step.stdout, "native fixture: bridge (after an update)\n", step.stderr)
+        # A kumi bridge the producer runs through the old launcher, from elsewhere or with more to it, isn't.
+        for args, cwd in ((("bridge",), self.root), (("bridge", "--yes"), home)):
+            own = self.shim(entry, *args, releases=offline, cwd=cwd, home=home)
+            self.assertEqual(own.stdout, f"native fixture: {'|'.join(args)}\n", own.stderr)
 
     def test_compatibility_bundle_carries_where_targets_are_not_the_targets(self):
         # Old updaters read kumi.tar.gz whole into memory under a fixed timeout: it stays small.

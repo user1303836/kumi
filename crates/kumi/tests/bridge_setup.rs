@@ -173,26 +173,33 @@ async fn current_bridge_is_left_alone_and_live_open_or_confirmation_declined_cha
 }
 #[tokio::test(flavor = "current_thread")]
 async fn after_an_update_a_bridge_left_for_later_says_so_and_isnt_a_failure() {
-    // Kumi's updater (KUMI_BRIDGE_AFTER), or an older Kumi's through the migration shim (KUMI_LEGACY_HANDOFF).
-    for marker in ["KUMI_BRIDGE_AFTER", "KUMI_LEGACY_HANDOFF"] {
-        let w = World::new(Some("1.0.33"));
-        let mut io = w.io();
-        io.env.insert(marker.into(), "1".into());
-        io.yes = false;
-        io.confirm = Some(Rc::new(|_| async { false }.boxed_local()));
-        assert_eq!(setup_bridge(io).await.unwrap(), 0, "{marker}");
-        let said = w.out.0.borrow().clone();
-        assert!(said.contains("The bridge wasn't updated yet: quit Live, then run:"), "{marker}: {said}");
-        assert!(!said.contains("Nothing was changed"), "{marker}: {said}");
-        assert!(w.calls.borrow().is_empty());
-        let w = World::new(Some("1.0.33"));
-        let mut io = w.io();
-        io.env.insert(marker.into(), "1".into());
-        io.live_running = Some(Rc::new(|| async { true }.boxed_local()));
-        assert_eq!(setup_bridge(io).await.unwrap(), 0, "{marker}");
-        assert!(w.out.0.borrow().contains("The bridge wasn't updated yet: save your work, quit Live, then run:"), "{marker}");
-        assert!(w.calls.borrow().is_empty());
-    }
+    // Kumi's updater sets KUMI_BRIDGE_AFTER, and so does the migration shim for an older Kumi's.
+    let w = World::new(Some("1.0.33"));
+    let mut io = w.io();
+    io.env.insert("KUMI_BRIDGE_AFTER".into(), "1".into());
+    io.yes = false;
+    io.confirm = Some(Rc::new(|_| async { false }.boxed_local()));
+    assert_eq!(setup_bridge(io).await.unwrap(), 0);
+    let said = w.out.0.borrow().clone();
+    assert!(said.contains("The bridge wasn't updated yet: quit Live, then run:"), "{said}");
+    assert!(!said.contains("Nothing was changed"), "{said}");
+    assert!(w.calls.borrow().is_empty());
+    let w = World::new(Some("1.0.33"));
+    let mut io = w.io();
+    io.env.insert("KUMI_BRIDGE_AFTER".into(), "1".into());
+    io.live_running = Some(Rc::new(|| async { true }.boxed_local()));
+    assert_eq!(setup_bridge(io).await.unwrap(), 0);
+    assert!(w.out.0.borrow().contains("The bridge wasn't updated yet: save your work, quit Live, then run:"));
+    assert!(w.calls.borrow().is_empty());
+    // The shim marks every command it forwards with KUMI_LEGACY_HANDOFF: alone, it's a kumi bridge the
+    // producer runs through an older launcher.
+    let w = World::new(Some("1.0.33"));
+    let mut io = w.io();
+    io.env.insert("KUMI_LEGACY_HANDOFF".into(), "1".into());
+    io.yes = false;
+    io.confirm = Some(Rc::new(|_| async { false }.boxed_local()));
+    assert_eq!(setup_bridge(io).await.unwrap(), 1);
+    assert!(w.out.0.borrow().contains("Nothing was changed. Quit Live, then run:"));
 }
 #[tokio::test(flavor = "current_thread")]
 async fn developer_bridge_artifact_is_prepared_then_native_lifecycle_plans_before_apply() {

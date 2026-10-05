@@ -588,7 +588,7 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
     });
     // An update's or a rollback's last step (Kumi's updater, or an older Kumi's through the migration
     // shim): Kumi itself has changed, so a bridge left for later isn't the command failing.
-    let after_update = ["KUMI_BRIDGE_AFTER", "KUMI_LEGACY_HANDOFF"].iter().any(|name| io.env.get(*name).is_some_and(|value| value == "1"));
+    let after_update = io.env.get("KUMI_BRIDGE_AFTER").is_some_and(|value| value == "1");
     let later = |what: &str| {
         say(&format!("The bridge wasn't updated yet: {what}, then run: {} bridge", *KUMI));
         Ok(0)
