@@ -125,7 +125,8 @@ fn line(what: &str, ran: &Ran, changes: usize) {
     let each = if changes > 0 { format!("  {:6.0} ms a change", ran.ms / changes as f64) } else { String::new() };
     println!("  {} {:58} {:8.0} ms  {:4} requests{each}", if ran.ok { "ok  " } else { "FAIL" }, what, ran.ms, ran.requests);
     if !ran.ok {
-        println!("       {}", head(&ran.text, 600));
+        let stopped = &ran.body["stopped"];
+        println!("       {}", if stopped.is_null() { head(&ran.text, 600) } else { head(&stopped.to_string(), 1500) });
     }
 }
 
@@ -228,8 +229,47 @@ async fn run(bridge_config: String, bridge: PathBuf) {
     line(&format!("plan: the same {total} parameters, one change each"), &ran, single.len());
     print_steps(&driver.records.borrow()[before..]);
 
-    // 4. Put the Set back.
+    // 4. With TIME_REBUILD_TRACKS=N, a longer plan: N more tracks, each with Drift and the effects.
+    let more: usize = std::env::var("TIME_REBUILD_TRACKS").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
+    if more > 0 {
+        let mut steps = Vec::new();
+        for track in 1..=more {
+            steps.push(json!({"tool":"add_tracks_and_scenes","input":{"tracks":[{"name":format!("{name} {track}"),"kind":"midi"}],"scenes":[]},"as":format!("t{track}")}));
+            for (_, item) in DEVICES {
+                steps.push(json!({"tool":"load_device","input":{"trackRef":format!("@t{track}"),"itemId":item}}));
+            }
+        }
+        let count = steps.len();
+        let ran = driver.run("make_changes", json!({"steps": steps})).await;
+        line(&format!("plan: {more} more tracks with Drift and 4 effects ({count} changes)"), &ran, count);
+        // One at a time, looked up again each time: a deletion moves the tracks after it.
+        let began = perf_now();
+        let mut deleted = 0;
+        loop {
+            line("look at the Set", &driver.observe().await, 0);
+            let tracks = driver.run("live_discover", json!({"kind":"track","limit":100})).await;
+            let found = tracks.body["live"]["items"]
+                .as_array()
+                .and_then(|rows| rows.iter().find(|row| row["name"].as_str().is_some_and(|n| n.starts_with(&format!("{name} ")))).cloned());
+            let Some(found) = found else { break };
+            let ran = driver.run("make_changes", json!({"steps":[{"tool":"delete_track","input":{"trackRef":found["ref"]}}]})).await;
+            if !ran.ok {
+                line("delete a track", &ran, 1);
+                break;
+            }
+            deleted += 1;
+        }
+        println!("  ok   {:58} {:8.0} ms", format!("deleted those {deleted} tracks, one at a time"), perf_now() - began);
+    }
+
+    // 5. Put the Set back.
     line("look at the Set", &driver.observe().await, 0);
+    let tracks = driver.run("live_discover", json!({"kind":"track","limit":100})).await;
+    let track = tracks.body["live"]["items"]
+        .as_array()
+        .and_then(|items| items.iter().rev().find(|row| row["name"] == name.as_str()))
+        .cloned()
+        .unwrap_or(track);
     let ran = driver.run("make_changes", json!({"steps":[{"tool":"delete_track","input":{"trackRef":track["ref"]}}]})).await;
     line("delete the run's track", &ran, 1);
     let _ = driver.integration.close().await;

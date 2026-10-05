@@ -13,6 +13,8 @@ import json
 import os
 import stat
 import subprocess
+import time
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -440,6 +442,7 @@ class AbletonMcpBridge(_ControlSurface):
         except Exception:
             return
         self._timer = timer
+        self._timer_calls, self._timer_counted_from = 0, time.perf_counter()
         self._bridge.between_ticks = True
 
     def _stop_timer(self) -> None:
@@ -454,13 +457,22 @@ class AbletonMcpBridge(_ControlSurface):
         # A stopped timer's callback already on its way does nothing.
         if self._disconnected or self._timer is None:
             return
+        counted_from = getattr(self, "_timer_counted_from", None)
+        if counted_from is not None:
+            # How often this Live calls back, said once: about every 10 ms on a Mac; Windows may differ.
+            self._timer_calls += 1
+            elapsed = time.perf_counter() - counted_from
+            if elapsed >= 5.0:
+                self._timer_counted_from = None
+                log = getattr(self, "log_message", None)
+                if callable(log): log("Bridge timer: " + str(round(self._timer_calls / elapsed)) + " calls a second")
         try:
             self._bridge.serve_between_ticks()
         except Exception as error:
             # The ticks still serve the bridge: a timer that fails once stops, rather than failing a thousand times a second.
             self._stop_timer()
             log = getattr(self, "log_message", None)
-            if callable(log): log("Bridge timer stopped (" + str(error) + "); display ticks serve the bridge")
+            if callable(log): log("Bridge timer stopped (" + type(error).__name__ + ": " + str(error) + "); display ticks serve the bridge\n" + traceback.format_exc(limit=3))
 
     def _schedule_next(self) -> None:
         scheduler = getattr(self, "schedule_message", None)

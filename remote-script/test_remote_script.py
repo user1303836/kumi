@@ -321,7 +321,15 @@ class RemoteScriptTests(unittest.TestCase):
         made[0].callback(); made[0].callback()
         self.assertEqual(surface._bridge.served, 1, "stopped after its first failure")
         self.assertEqual((made[0].running, surface._bridge.between_ticks), (False, False))
-        self.assertEqual(logged, ["Bridge timer stopped (boom); display ticks serve the bridge"])
+        self.assertEqual(len(logged), 1)
+        self.assertTrue(logged[0].startswith("Bridge timer stopped (RuntimeError: boom); display ticks serve the bridge\nTraceback"), logged[0])
+
+    def test_the_timers_rate_is_said_once(self):
+        package = __import__("AbletonMcpBridge")
+        with patch.object(package.time, "perf_counter", return_value=100.0): surface, made, logged = self.surface_with_timer()
+        for at in (101.0, 102.0, 103.0, 104.0, 105.0, 106.0):
+            with patch.object(package.time, "perf_counter", return_value=at): made[0].callback()
+        self.assertEqual(logged, ["Bridge timer: 1 calls a second"])
 
     def test_a_live_without_a_timer_is_served_by_its_ticks(self):
         package = __import__("AbletonMcpBridge")
@@ -6420,6 +6428,15 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
         self.assertLess(self.bridge._window_spent, 0.02, "a change's own time isn't counted")
         client.sendall(self.frame(channel, 2)); self.answered_between_ticks(client)
         self.assertGreaterEqual(self.bridge._window_spent, 0.03, "a read's is")
+        self.bridge._window_started -= remote_module.PUMP_WINDOW_SECONDS; self.bridge._budget_left()
+        client.sendall(self.frame(channel, 3, method="invoke", operation="browser.search", args={})); self.answered_between_ticks(client)
+        self.assertGreaterEqual(self.bridge._window_spent, 0.03, "a read made through invoke counts")
+        self.bridge._window_started -= remote_module.PUMP_WINDOW_SECONDS; self.bridge._budget_left()
+        client.sendall(self.frame(channel, 4, method="invoke", operation="python.run", args={})); self.answered_between_ticks(client)
+        self.assertGreaterEqual(self.bridge._window_spent, 0.03, "so does Python")
+        self.bridge._window_started -= remote_module.PUMP_WINDOW_SECONDS; self.bridge._budget_left()
+        client.sendall(self.frame(channel, 5, method="invoke", operation="track.create", args={})); self.answered_between_ticks(client)
+        self.assertLess(self.bridge._window_spent, 0.02, "a change made through invoke doesn't")
 
     def test_a_tick_that_answered_no_one_doesnt_wait(self):
         self.connect()

@@ -12698,8 +12698,16 @@ PUMP_LINGER_SECONDS = 0.012
 # Set, its background reads, a big Set's catch-up) keep to PUMP_BUDGET_SECONDS of Live's main thread in
 # each tick's worth of time, the timer's and the ticks' together. A change the producer asked for isn't
 # counted: it takes what Live takes to make it, and the requests after it don't wait for a new window.
+# Reads made through invoke (browser.search, song.read, …) and Python (python.run) count as reads.
 PUMP_WINDOW_SECONDS = 0.1
-_CHANGE_METHODS = frozenset({"preflight", "prepare", "invoke", "mutate"})
+
+
+def _changes_live(request: Any) -> bool:
+    """Whether a request is a step of a change to the Set (its time isn't held to the reads' budget)."""
+    if not isinstance(request, dict): return False
+    method = request.get("method")
+    if method == "invoke": return _mutation_authority_required(str(request.get("operation", "")))
+    return method in {"preflight", "prepare", "mutate"}
 MAX_OUTBOUND_BYTES = 4 * MAX_WIRE_BYTES
 # How much one socket read takes, and one send hands the socket.
 RECEIVE_CHUNK_BYTES = 1 << 20
@@ -12928,7 +12936,7 @@ class AbletonMcpBridge:
                 frames += 1; began = time.perf_counter(); request = None
                 try: request = json.loads(line.decode("utf-8")); response = connection.auth.dispatch(request)
                 except Exception: response = connection.auth.error_response()
-                if isinstance(request, dict) and request.get("method") in _CHANGE_METHODS: self._change_seconds += time.perf_counter() - began
+                if _changes_live(request): self._change_seconds += time.perf_counter() - began
                 connection.outbound += self._frame(response)
             if start: del inbound[:start]
             connection.scanned = max(0, search - start)
