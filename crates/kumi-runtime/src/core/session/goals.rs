@@ -99,7 +99,7 @@ impl Session {
         self.assert_current(op)?;
         op.phase.set(Phase::Inference);
         said.borrow_mut().clear();
-        let result = self.ask(op, prompt, &snapshot.context, Some(said.clone()), vec![]).await?;
+        let result = self.ask(op, prompt, &snapshot.context, Some(said.clone()), vec![], "").await?;
         add_usage(usage, result.usage.as_ref());
         Ok(result)
     }
@@ -131,6 +131,10 @@ impl Session {
                 ),
             )
             .into());
+        }
+        // Work toward a goal goes on with nobody to ask, so it makes no techniques.
+        if let Some(l) = &self.0.learned {
+            l.drafts.turn_started(text.as_deref().unwrap_or_default(), false);
         }
         let budget = self.0.options.goal_budget.unwrap_or(GOAL_BUDGET);
         op.extend(budget.ms + 15 * 60_000);

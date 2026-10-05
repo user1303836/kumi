@@ -424,6 +424,18 @@
     },
     {
       "event": {
+        "type": "technique",
+        "action": "offered",
+        "technique": {
+          "id": "",
+          "name": "Soft pads",
+          "fits": "quiet arrangements"
+        }
+      },
+      "expected": "[technique] Keep “Soft pads” as a technique? Say “keep the technique” in your next message to keep it.\n"
+    },
+    {
+      "event": {
         "type": "lesson",
         "action": "learned",
         "id": "l1",

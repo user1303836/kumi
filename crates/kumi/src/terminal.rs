@@ -935,6 +935,10 @@ impl Terminal for PlainTerminal {
                 get("name"),
                 n("steps")
             )),
+            "technique" if get("action") == "offered" => self.notice(&format!(
+                "[technique] Keep “{}” as a technique? Say “keep the technique” in your next message to keep it.",
+                str_(&value["technique"]["name"])
+            )),
             "technique" => {
                 let t = &value["technique"];
                 self.notice(&format!(

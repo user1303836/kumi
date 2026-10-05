@@ -1448,13 +1448,16 @@ pub struct RecipeEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TechniqueAction {
+    Offered,
     Kept,
     Updated,
     Used,
     Forgot,
 }
 
-/// A technique kept (from a draft the producer's moves approved), updated, read for use, or forgotten. Names are data (a `{ type: "technique" }` session event).
+/// A technique offered for keeping after an answer (its id empty, or that of the technique it would refine),
+/// kept on the producer's yes, updated, read for use, or forgotten. Names are data (a `{ type: "technique" }`
+/// session event).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TechniqueEvent {
     pub action: TechniqueAction,
@@ -1649,8 +1652,8 @@ pub trait SessionController {
         false
     }
     /// What the integration reports outside a turn's own events: a change Kumi made (kept with the
-    /// conversation, for HISTORY), or an action in Live. A technique drafted from a build is kept or
-    /// dropped by what happens next.
+    /// conversation, for HISTORY), or an action in Live. Undoing a build withdraws the technique
+    /// Kumi offered for it.
     fn watch(&self, event: WatchEvent) {
         let _ = event;
     }
@@ -1740,6 +1743,15 @@ pub trait SessionController {
     }
     async fn forget_technique(&self, id: &str) -> Result<bool, RuntimeError> {
         let _ = id;
+        Ok(false)
+    }
+    fn has_answer_technique(&self) -> bool {
+        false
+    }
+    /// The producer's answer to the technique Kumi offered after an answer: kept on yes. False when
+    /// nothing was waiting (they had moved on, or undid the build).
+    async fn answer_technique(&self, keep: bool) -> Result<bool, RuntimeError> {
+        let _ = keep;
         Ok(false)
     }
     fn has_goal(&self) -> bool {

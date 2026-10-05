@@ -500,11 +500,16 @@ choose an item to forget it, or a note to change its words or pin it.
   you haven't pinned makes room. Kumi doesn't keep what the Set shows, what it did, or anything that
   reads as instructions or looks like a key, so text inside a Set can't become a
   standing order.
-- **Techniques** (◆): what made something Kumi built work, kept to adapt to
-  similar sounds later. Kumi keeps one only when your next moves say you liked
-  the result (you played it, kept working with it, saved the Set or said so),
-  and drops it quietly when you undo it or say no. Up to 40, in
-  `~/.kumi/techniques.json`.
+- **Techniques** (◆): the idea behind something Kumi built, kept to adapt to
+  the same kind of sound later. When a build is worth reusing, Kumi asks after
+  its answer whether to keep it: 1 keeps it, while 2, Enter, Esc or carrying on
+  without answering doesn't (saying “keep the technique” in your next message
+  still does); undoing the build with Kumi's undo withdraws the question. It
+  asks only about builds you asked for, never about work toward a `/goal`, never
+  over a question Kumi itself just asked, and at most once every three answers.
+  A tutorial, reference or steps you give always come first: Kumi reaches for a
+  technique only when you leave the approach open, and says when it does. Up to
+  40, in `~/.kumi/techniques.json`.
 - **Recipes** (↻): ways of working you can replay in any Set, such as a vocal
   chain or a resampling loop. Ask Kumi to keep what it just did, describe a
   routine, or say "watch me", do it by hand in Live and say when you're done:

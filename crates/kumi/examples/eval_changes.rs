@@ -1207,16 +1207,42 @@ fn cases() -> Vec<Case> {
                 run.state.tracks.last().is_some_and(|track| named(track, "STRINGS")) && run.notes.is_empty()
             })
         },
-        // Techniques: drafted while building, kept when the producer likes it; read when a request fits one.
+        // Techniques: offered after a build worth keeping and kept on the producer's yes; read when a request leaves the
+        // approach open and fits one, never over the producer's own steps.
         said(
             "technique: learned",
             &[
                 "Build me a gritty Reese bass on a new MIDI track: Operator with two detuned oscillators and glide, then a Saturator \
                  and an EQ Eight after it, and set them up.",
-                "That sounds great, I love it. Now make the Keys a bit quieter.",
+                "That sounds great, keep it as a technique. Now make the Keys a bit quieter.",
             ],
-            |run| run.techniques.iter().any(|event| event.action == TechniqueAction::Kept),
+            |run| {
+                run.techniques.iter().any(|event| event.action == TechniqueAction::Offered)
+                    && run.techniques.iter().any(|event| event.action == TechniqueAction::Kept)
+            },
         ),
+        Case {
+            seed: Seed {
+                techniques: Some(json!([{
+                    "id": "t1", "name": "Rack navigator", "fits": "playable instrument racks without mapping macros by hand",
+                    "at": 1, "used": 0,
+                    "idea": "A custom Max for Live device inside the rack links eight of its devices' parameters to curated \
+                             multi-target ranges, in place of the rack's macros.",
+                    "request": "Build the most complex, convoluted instrument racks you can think of"
+                }])),
+                ..Seed::default()
+            },
+            ..said(
+                "technique: the producer's steps come first",
+                &["Recreate the rack from this tutorial on a new MIDI track: an Instrument Rack with Wavetable in it, then a \
+                   Chorus-Ensemble and a Reverb after it."],
+                |run| {
+                    !run.techniques.iter().any(|event| event.action == TechniqueAction::Used)
+                        && !run.tools.iter().any(|tool| tool == "make_device")
+                        && run.requests.iter().any(|request| stringify(&Value::Object(request.args.clone())).contains("Wavetable"))
+                },
+            )
+        },
         Case {
             seed: Seed {
                 techniques: Some(json!([{

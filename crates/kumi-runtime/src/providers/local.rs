@@ -787,6 +787,7 @@ impl LanguageModel for LocalCompatible {
         })?;
         if let Some(level) = self.state.effort_of() {
             call.provider_options.get_or_insert_with(Map::new).insert(self.state.server.id.clone(), json!({"reasoningEffort":level}));
+            crate::core::timing::asked_effort(level.as_str());
         }
         let provider = openai_compatible(CompatibleSettings {
             name: self.state.server.id.clone(),
@@ -859,8 +860,11 @@ pub fn resolve_local_model(server: LocalServer, model: String, options: LocalMod
                     })?;
                     let facts = state.facts.borrow();
                     let facts = facts.as_ref().expect("readied learned facts");
-                    let think = state
-                        .effort_of()
+                    let asked = state.effort_of();
+                    if let Some(effort) = asked {
+                        crate::core::timing::asked_effort(effort.as_str());
+                    }
+                    let think = asked
                         .map(|effort| json!(effort))
                         .or_else(|| (facts.thinks == Some(true)).then(|| facts.think_default.clone().unwrap_or(json!(true))));
                     Ok(OllamaShape {

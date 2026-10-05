@@ -280,6 +280,13 @@ impl SessionController for Control {
         self.call(format!("forget-technique:{id}"));
         Ok(true)
     }
+    fn has_answer_technique(&self) -> bool {
+        self.enabled("techniques")
+    }
+    async fn answer_technique(&self, keep: bool) -> Result<bool, RuntimeError> {
+        self.call(format!("answer-technique:{}", if keep { "yes" } else { "no" }));
+        Ok(self.get("technique-waiting").unwrap_or(true))
+    }
     fn has_taste(&self) -> bool {
         self.enabled("taste")
     }
@@ -478,6 +485,20 @@ impl Harness {
         })
         .await
         .unwrap_or_else(|_| panic!("Missing controller call {expected:?}: {:?}", self.calls()));
+    }
+    /// Waits until `count` controller calls start with `prefix`.
+    pub async fn wait_for_calls(&self, prefix: &str, count: usize) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let called = self.control.called.notified();
+                if self.control.calls.borrow().iter().filter(|call| call.starts_with(prefix)).count() >= count {
+                    return;
+                }
+                called.await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("Missing {count} controller calls starting {prefix:?}: {:?}", self.calls()));
     }
     async fn wait_for_screen(&self, description: &str, ready: impl Fn(&[String]) -> bool) {
         tokio::time::timeout(Duration::from_secs(10), async {
