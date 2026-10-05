@@ -886,6 +886,15 @@ impl Terminal for PlainTerminal {
                     self.notice(&format!("[tool] {} started", get("name")));
                 }
             }
+            "retry" => {
+                if !self.0.state.borrow().suppress {
+                    self.notice(&format!(
+                        "[wait] {}; trying again in {} s",
+                        get("reason"),
+                        (value["waitMs"].as_f64().unwrap_or(0.) / 1000.).ceil().max(1.)
+                    ));
+                }
+            }
             "tool-end" => {
                 if !self.0.state.borrow().suppress {
                     self.notice(&format!(

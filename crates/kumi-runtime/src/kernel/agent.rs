@@ -23,7 +23,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::watch;
 
 use super::budget::{fit, put_away_images, transcript_of, ContextBudget, DEFAULT_BUDGET};
-use super::failure::{describe_failure, retry_delay_ms, MAX_RETRIES};
+use super::failure::{describe_failure, retry_delay_ms, retry_reason, MAX_RETRIES};
 use crate::ai::error::LanguageModelError;
 use crate::ai::types::{
     AssistantPart, CallOptions, DataContent, FileData, FinishReason, FinishReasonUnified, FunctionTool, Message, Prompt, ProviderMetadata,
@@ -745,11 +745,12 @@ impl Turn {
                     let escaped = delivered.get() || self.early.borrow().values().any(|entry| entry.call.started());
                     let wait = match &error {
                         StepError::Model(model) if attempt < MAX_RETRIES && !escaped && !self.abort.is_cancelled() => {
-                            retry_delay_ms(model, attempt)
+                            retry_delay_ms(model, attempt).map(|wait| (wait, retry_reason(model, &self.inner.binding.id)))
                         }
                         _ => None,
                     };
-                    let Some(wait) = wait else { return Err(error) };
+                    let Some((wait, reason)) = wait else { return Err(error) };
+                    (self.deliver)(KernelEvent::Retry { reason, wait_ms: wait.round() as u64 });
                     // Nothing began, so the retry starts clean.
                     let entries: Vec<Rc<Early>> = self.early.borrow().values().cloned().collect();
                     join_all(entries.iter().map(|entry| entry.call.abandon())).await;

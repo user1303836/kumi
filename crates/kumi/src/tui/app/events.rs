@@ -16,7 +16,15 @@ impl TuiApp {
         let kind = value["type"].as_str().unwrap_or("");
         let get = |key: &str| value[key].as_str().unwrap_or("");
         let n = |key: &str| value[key].as_f64().unwrap_or(0.);
+        // Anything from the model, or the turn's end, means the wait is over.
+        if matches!(kind, "text" | "tool-input" | "tool-start" | "turn-complete" | "state") {
+            self.0.state.borrow_mut().retry = None;
+        }
         match kind {
+            "retry" => {
+                let reason = self.clean_line(get("reason"), 80);
+                self.0.state.borrow_mut().retry = Some((reason, perf_now() + n("waitMs")));
+            }
             "state" => {
                 {
                     let mut state = self.0.state.borrow_mut();

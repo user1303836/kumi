@@ -215,6 +215,7 @@ fn types(events: &[KernelEvent]) -> Vec<&'static str> {
             KernelEvent::ToolStart { .. } => "tool-start",
             KernelEvent::ToolEnd { .. } => "tool-end",
             KernelEvent::Steer { .. } => "steer",
+            KernelEvent::Retry { .. } => "retry",
         })
         .collect()
 }
@@ -581,8 +582,20 @@ fn unavailable() -> LanguageModelError {
 async fn retries_up_to_three_times_before_any_output_escapes_but_never_after_text_was_delivered() {
     local(async {
         let retried = harness(|_, n| if n <= 3 { Scripted::Reject(unavailable()) } else { answer("ok") }, Options::default());
-        assert_eq!(retried.kernel.run("q", signal(), ignore()).await.unwrap().stop_reason, StopReason::Completed);
+        let (events, emit) = collect();
+        assert_eq!(retried.kernel.run("q", signal(), emit).await.unwrap().stop_reason, StopReason::Completed);
         assert_eq!(retried.count(), 4);
+        // Each wait is shown, with why: the status line counts it down, from code rather than the model.
+        let waits: Vec<_> = events
+            .borrow()
+            .iter()
+            .filter_map(|event| match event {
+                KernelEvent::Retry { reason, wait_ms } => Some((reason.clone(), *wait_ms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(waits, vec![("test is overloaded (HTTP 503)".to_string(), 250); 3]);
+        assert_eq!(types(&events.borrow()), ["retry", "retry", "retry", "text"]);
         let gave_up = harness(|_, _| Scripted::Reject(unavailable()), Options::default());
         assert!(gave_up.kernel.run("q", signal(), ignore()).await.unwrap_err().to_string().contains("overloaded right now"));
         assert_eq!(gave_up.count(), 4, "the first try and three more");
