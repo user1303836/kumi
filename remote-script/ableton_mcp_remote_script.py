@@ -5464,13 +5464,55 @@ class LiveObjectMapper:
         deleter = getattr(owner, "delete_clip", None)
         if not callable(duplicate) or not callable(deleter):
             raise ValueError("arrangement clip move is unavailable")
-        before_clips = self._items(self._read_attr(owner, "arrangement_clips") or []); before_identity_order = [self._capture_object_identity(item) for item in before_clips]; before_identities = set(before_identity_order); checkpoint = self.refs.checkpoint()
+        # Live crashes when an Arrangement clip is copied onto a span a clip already holds, the copied
+        # clip's own included. Moving onto another clip isn't done yet; a move by less than the clip's
+        # own length parks the clip past the end of the Set first, then copies it into place.
+        clips = self._items(self._read_attr(owner, "arrangement_clips") or []); spans = [self._arrangement_span(item) for item in clips]; start, end = spans[source_index]; target, target_end = float(position), float(position) + (end - start)
+        if _same_number(target, start):
+            # A move to where the clip already is changes nothing: the clip, as it is.
+            row = self._arrangement_clip_row(owner, clip, track_index, source_index)
+            return {"ref": row["ref"], "objectIdentity": expected_identity, "start": start, "createdFingerprint": hashlib.sha256(self._bounded_canonical(_without_fields(row, _VOLATILE_CLIP_FIELDS)).encode("utf-8")).hexdigest()}
+        for index, (other_start, other_end) in enumerate(spans):
+            if index != source_index and other_start < target_end - 1e-6 and other_end > target + 1e-6:
+                raise ValueError(f"Kumi can't move a clip onto another clip yet: \"{str(getattr(clips[index], 'name', ''))[:60]}\" (beats {other_start:g} to {other_end:g}) is in the way at beat {target:g}; clear that span first (clear_range) or pick a free spot{UNRUN_SUFFIX}")
+        checkpoint = self.refs.checkpoint()
+        if start < target_end - 1e-6 and end > target + 1e-6:
+            song_end = self._read_attr(self.song, "song_length"); song_end = float(song_end) if isinstance(song_end, (int, float)) and not isinstance(song_end, bool) and math.isfinite(float(song_end)) else 0.0
+            parking = float(math.ceil(max([song_end, target_end] + [span_end for _, span_end in spans]))) + 4.0
+            parked, parked_identity, parked_index = self._arrangement_move_step(owner, clip, expected_identity, source_index, parking, source_content_fingerprint, checkpoint)
+            try: created, created_identity, final_index = self._arrangement_move_step(owner, parked, parked_identity, parked_index, target, source_content_fingerprint, checkpoint)
+            except BaseException as error:
+                # The clip's own span is clear again, so it goes back there, as a new clip.
+                try: self._arrangement_move_step(owner, parked, parked_identity, parked_index, start, source_content_fingerprint, checkpoint)
+                except BaseException: raise ValueError(f"Arrangement clip move failed and left the clip parked at beat {parking:g}") from error
+                self.refs.restore(checkpoint); raise ValueError("Arrangement clip move failed; the clip is back where it was, as a new clip") from error
+        else: created, created_identity, final_index = self._arrangement_move_step(owner, clip, expected_identity, source_index, target, source_content_fingerprint, checkpoint)
+        projected_row = self._arrangement_clip_row(owner, created, track_index, final_index); fingerprint = hashlib.sha256(self._bounded_canonical(_without_fields(projected_row, _VOLATILE_CLIP_FIELDS)).encode("utf-8")).hexdigest()
+        return {"ref": projected_row["ref"], "objectIdentity": created_identity, "start": float(getattr(created, "start_time", position)), "createdFingerprint": fingerprint}
+
+    def _arrangement_span(self, clip: Any) -> tuple[float, float]:
+        """Where an Arrangement clip sits, in beats: its start and its right edge (end_time; start plus
+        length on a shape without one)."""
+        def number(value: Any) -> float | None:
+            return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) else None
+        start = number(self._read_attr(clip, "start_time", "start")); end = number(self._read_attr(clip, "end_time")); length = number(self._read_attr(clip, "length"))
+        if start is None or (end is None and length is None): raise ValueError("arrangement clip span is unreadable")
+        return start, end if end is not None and end > start else start + (length or 0.0)
+
+    def _arrangement_move_step(self, owner: Any, clip: Any, identity: str, source_index: int, position: float, content_fingerprint: str, checkpoint: tuple[dict[str, Any], dict[str, int]]) -> tuple[Any, str, int]:
+        """Copy an Arrangement clip to a clear span of its track, then delete it: the copy, its identity
+        and its index once the source is gone. A failure removes the copy and raises; a span that isn't
+        clear (the clip's own included) refuses before anything is copied."""
+        duplicate = getattr(owner, "duplicate_clip_to_arrangement"); deleter = getattr(owner, "delete_clip")
+        before_clips = self._items(self._read_attr(owner, "arrangement_clips") or []); before_identity_order = [self._capture_object_identity(item) for item in before_clips]; before_identities = set(before_identity_order)
+        start, end = self._arrangement_span(clip); position_end = position + (end - start)
+        if any(other_start < position_end - 1e-6 and other_end > position + 1e-6 for other_start, other_end in (self._arrangement_span(item) for item in before_clips)): raise ValueError(f"Arrangement clip copy target at beat {position:g} isn't clear")
         try:
-            duplicate(clip, float(position)); clips_after = self._items(self._read_attr(owner, "arrangement_clips") or []); created_rows = [(index, candidate) for index, candidate in enumerate(clips_after) if self._capture_object_identity(candidate) not in before_identities]
+            duplicate(clip, position); clips_after = self._items(self._read_attr(owner, "arrangement_clips") or []); created_rows = [(index, candidate) for index, candidate in enumerate(clips_after) if self._capture_object_identity(candidate) not in before_identities]
             if len(clips_after) != len(before_clips) + 1 or len(created_rows) != 1: raise ValueError("arrangement clip move did not produce one identity-distinct duplicate")
             created_pre_index, created = created_rows[0]; actual_start = self._read_attr(created, "start_time", "start")
-            if self._clip_content_fingerprint(created) != source_content_fingerprint or not isinstance(actual_start, (int, float)) or not _same_number(actual_start, position): raise ValueError("Arrangement move did not preserve exact clip content and requested position")
-            created_identity = self._capture_object_identity(created); final_index = created_pre_index - 1 if source_index < created_pre_index else created_pre_index; projected_row = self._arrangement_clip_row(owner, created, track_index, final_index); created_ref = projected_row["ref"]; fingerprint = hashlib.sha256(self._bounded_canonical(_without_fields(projected_row, _VOLATILE_CLIP_FIELDS)).encode("utf-8")).hexdigest()
+            if self._clip_content_fingerprint(created) != content_fingerprint or not isinstance(actual_start, (int, float)) or not _same_number(actual_start, position): raise ValueError("Arrangement move did not preserve exact clip content and requested position")
+            created_identity = self._capture_object_identity(created); final_index = created_pre_index - 1 if source_index < created_pre_index else created_pre_index
         except BaseException as error:
             rollback_failed = False; current = self._items(self._read_attr(owner, "arrangement_clips") or []); owned = [candidate for candidate in current if self._capture_object_identity(candidate) not in before_identities]
             for candidate in owned:
@@ -5482,7 +5524,7 @@ class LiveObjectMapper:
         deletion_error: BaseException | None = None
         try: deleter(clip)
         except BaseException as error: deletion_error = error
-        remaining = self._items(self._read_attr(owner, "arrangement_clips") or []); source_matches = [candidate for candidate in remaining if self._capture_same_object(candidate, clip, expected_identity)]; created_matches = [candidate for candidate in remaining if self._capture_same_object(candidate, created, created_identity)]
+        remaining = self._items(self._read_attr(owner, "arrangement_clips") or []); source_matches = [candidate for candidate in remaining if self._capture_same_object(candidate, clip, identity)]; created_matches = [candidate for candidate in remaining if self._capture_same_object(candidate, created, created_identity)]
         if source_matches:
             rollback_failed = len(source_matches) != 1 or len(created_matches) != 1
             if len(created_matches) == 1:
@@ -5496,7 +5538,7 @@ class LiveObjectMapper:
         if created_current is None: raise ValueError("Arrangement clip move destination disappeared")
         created_index = self._capture_index(remaining, created_current, created_identity)
         if created_index is None or created_index != final_index: raise ValueError("Arrangement clip move destination identity is ambiguous")
-        return {"ref": created_ref, "objectIdentity": created_identity, "start": float(getattr(created_current, "start_time", position)), "createdFingerprint": fingerprint}
+        return created_current, created_identity, final_index
 
     def _audio_clip_set(self, args: dict[str, Any]) -> dict[str, Any]:
         reference = args.get("ref")
