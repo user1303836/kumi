@@ -106,6 +106,12 @@ pub enum KernelEvent {
     Steer {
         text: String,
     },
+    /// A model call failed in a way worth trying again: why, and how long Kumi waits first (the turn can
+    /// still be stopped meanwhile).
+    Retry {
+        reason: String,
+        wait_ms: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
