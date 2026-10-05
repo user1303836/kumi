@@ -8736,7 +8736,7 @@ class MeasuredSetBenchmarkTests(unittest.TestCase):
         # The two budgeted reads below each run twice, and the faster pass counts: a shared runner can pause
         # a request (another job, Python's collector) well past its budget, but rarely in both passes, while
         # a read that ignores its budget overruns in both.
-        notes, total, slowest_notes, pages = min((self.paged(mapper, "note", f"{mapper.refs.epoch}:arrangement_clip:0:0") for _ in range(2)), key=lambda run: run[2]); line("discover note, parent the Arrangement clip", total, slowest_notes, pages)
+        notes, total, slowest_notes, pages = min((self.paged(mapper, "note", f"{mapper.refs.epoch}:arrangement_clip:0:0") for _ in range(2)), key=lambda run: run[2]); line("discover note, parent the Arrangement clip (faster of 2)", total, slowest_notes, pages)
         self.assertEqual(len(notes), 20000)
         started = time.perf_counter(); whole = mapper.snapshot(); line("snapshot without arguments (the whole Set, unbudgeted)", (time.perf_counter() - started) * 1000)
         self.assertNotIn("notes", whole["arrangement"]["clips"][0]); self.assertEqual(whole["arrangement"]["clips"][0]["noteCount"], 20000)
@@ -8747,7 +8747,7 @@ class MeasuredSetBenchmarkTests(unittest.TestCase):
                 start += page["window"]["tracks"]["count"]; requests += 1; slowest = max(slowest, elapsed); total += elapsed
             return total, slowest, requests
         total, slowest_window, requests = min((windows() for _ in range(2)), key=lambda run: run[1])
-        line("snapshot, the whole Set in windows of 16 tracks", total * 1000, slowest_window * 1000, requests)
+        line("snapshot, the whole Set in windows of 16 (faster of 2)", total * 1000, slowest_window * 1000, requests)
         # No budgeted request runs away: its budget, plus one unit at most (a whole track row here).
         self.assertLess(max(slowest_notes, slowest_window * 1000), 150)
         for size in (20, 200):
