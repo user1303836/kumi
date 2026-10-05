@@ -3,6 +3,14 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## Unreleased
+
+### Bridge 1.0.75
+
+- Live's own timer serves Kumi between Live's display ticks, so a look at the Set takes about 20 ms
+  rather than about 100, and a plan's changes don't each wait for a tick. Kumi's reads keep to the
+  same share of Live's main thread as before; a change takes what Live takes to make it.
+
 ## 1.8.1 — 2026-10-05
 
 Ships with bridge 1.0.74.

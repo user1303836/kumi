@@ -12693,6 +12693,21 @@ PUMP_BUDGET_SECONDS = 0.05
 # change, confirm), within the tick's budget: on loopback it asks within a few milliseconds, and serving
 # it now saves a whole display tick (about 100 ms) a step.
 PUMP_LINGER_SECONDS = 0.012
+# Live's own timer (Live.Base.Timer, about every 10 ms) serves the socket between display ticks, where
+# this Live has one: a request waits for the timer rather than up to a tick. Reads (Kumi's looks at the
+# Set, its background reads, a big Set's catch-up) keep to PUMP_BUDGET_SECONDS of Live's main thread in
+# each tick's worth of time, the timer's and the ticks' together. A change the producer asked for isn't
+# counted: it takes what Live takes to make it, and the requests after it don't wait for a new window.
+# Reads made through invoke (browser.search, song.read, …) and Python (python.run) count as reads.
+PUMP_WINDOW_SECONDS = 0.1
+
+
+def _changes_live(request: Any) -> bool:
+    """Whether a request is a step of a change to the Set (its time isn't held to the reads' budget)."""
+    if not isinstance(request, dict): return False
+    method = request.get("method")
+    if method == "invoke": return _mutation_authority_required(str(request.get("operation", "")))
+    return method in {"preflight", "prepare", "mutate"}
 MAX_OUTBOUND_BYTES = 4 * MAX_WIRE_BYTES
 # How much one socket read takes, and one send hands the socket.
 RECEIVE_CHUNK_BYTES = 1 << 20
@@ -12769,6 +12784,9 @@ class AbletonMcpBridge:
         self._clients: set[socket.socket] = set()
         self._connections: list[_Connection] = []
         self._pump_turn = 0
+        # Set while Live's timer serves the socket between ticks (the Control Surface starts it).
+        self.between_ticks = False
+        self._window_started = 0.0; self._window_spent = 0.0; self._change_seconds = 0.0
         self._secret_value = secret
         self._executed_mutations: dict[str, dict[str, Any]] = {}
         self._pending_mutations: dict[str, dict[str, Any]] = {}
@@ -12804,14 +12822,32 @@ class AbletonMcpBridge:
 
     def update_display(self) -> None:
         """Control Surface callback on Live's main thread: serve the socket, then queued Live work."""
-        self._pump()
+        if not self.between_ticks: self._pump()
+        else:
+            # The timer serves; a tick serves too (should the timer pause), from the same budget.
+            left = self._budget_left()
+            if left > 0: self._pump(left)
         self.queue.drain()
         self.mapper.capture_tick()
         self.mapper.undo_step_tick()
         self.mapper.fire_button_tick()
         self.mapper.structure_tick()
 
-    def _pump(self) -> None:
+    def serve_between_ticks(self) -> None:
+        """Live's timer callback, between display ticks: serve what's waiting now, within what's left of
+        this tick's budget, then queued Live work."""
+        if self._stop.is_set(): return
+        left = self._budget_left()
+        if left > 0: self._pump(left)
+        self.queue.drain()
+
+    def _budget_left(self) -> float:
+        """What's left of the bridge's share of Live's main thread in this tick's worth of time."""
+        now = time.perf_counter()
+        if now - self._window_started >= PUMP_WINDOW_SECONDS: self._window_started, self._window_spent = now, 0.0
+        return PUMP_BUDGET_SECONDS - self._window_spent
+
+    def _pump(self, budget: float = PUMP_BUDGET_SECONDS) -> None:
         """Serve every connection with non-blocking I/O on Live's main thread.
 
         Live's embedded Python starves background threads (an unauthenticated hello
@@ -12820,7 +12856,7 @@ class AbletonMcpBridge:
         tick so Live's UI thread is never held for long."""
         if self._stop.is_set(): return
         # perf_counter: Windows' monotonic clock moves in steps of about 15.6 ms.
-        deadline = time.perf_counter() + PUMP_BUDGET_SECONDS
+        started = time.perf_counter(); deadline = started + budget
         self.queue.inline_thread = threading.get_ident()
         mapper = getattr(self, "mapper", None)
         if mapper is not None: mapper.tick_deadline = deadline
@@ -12845,6 +12881,7 @@ class AbletonMcpBridge:
         finally:
             self.queue.inline_thread = None
             if mapper is not None: mapper.tick_deadline = None
+            self._window_spent += time.perf_counter() - started - self._change_seconds; self._change_seconds = 0.0
 
     @staticmethod
     def _frame(payload: dict[str, Any]) -> bytes:
@@ -12896,9 +12933,10 @@ class AbletonMcpBridge:
                     search = len(inbound); break
                 line = bytes(inbound[start:newline]); start = search = newline + 1
                 if not line: continue
-                frames += 1
+                frames += 1; began = time.perf_counter(); request = None
                 try: request = json.loads(line.decode("utf-8")); response = connection.auth.dispatch(request)
                 except Exception: response = connection.auth.error_response()
+                if _changes_live(request): self._change_seconds += time.perf_counter() - began
                 connection.outbound += self._frame(response)
             if start: del inbound[:start]
             connection.scanned = max(0, search - start)
