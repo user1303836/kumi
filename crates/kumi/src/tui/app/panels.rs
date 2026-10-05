@@ -18,6 +18,103 @@ use kumi_runtime::{
 };
 use std::collections::HashMap;
 
+/// A word of a /recipe line: quoted when it has spaces, quotes or backslashes, so the line reads back the same.
+fn recipe_word(text: &str) -> String {
+    if !text.is_empty() && !text.chars().any(|c| c.is_whitespace() || c == '"' || c == '\\') {
+        return text.into();
+    }
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
+}
+/// What the pinned object fills in for a blank named for it: `track` takes its track; `clip`, `device`,
+/// `scene` and the like take the object itself.
+fn pinned_value(pin: &PinnedNode, blank: &str) -> Option<String> {
+    let kind = match pin.node {
+        PinKind::Device => "device",
+        PinKind::Chain => "chain",
+        PinKind::Track => "track",
+        PinKind::Clip => "clip",
+        PinKind::Scene => "scene",
+        PinKind::ClipSlot => "slot",
+        PinKind::Selection => return None,
+    };
+    if blank.contains(kind) {
+        Some(pin.r#ref.clone())
+    } else if blank.contains("track") && !pin.track_ref.is_empty() {
+        Some(pin.track_ref.clone())
+    } else {
+        None
+    }
+}
+/// The /recipe line that runs `recipe` with no model call, each blank filled from what's pinned where it can
+/// be, and how many characters of it follow the first blank left empty (where the cursor goes).
+pub(super) fn recipe_line(recipe: &RecipeSummary, pinned: Option<&PinnedNode>) -> (String, usize) {
+    let mut line = format!("/recipe {}", recipe_word(&recipe.name));
+    let mut empty = None;
+    for blank in &recipe.params {
+        line.push_str(&format!(" {}=", blank.name));
+        match pinned.and_then(|pin| pinned_value(pin, &blank.name)) {
+            Some(value) => line.push_str(&recipe_word(&value)),
+            None => {
+                empty.get_or_insert(graphemes(&line).len());
+            }
+        }
+    }
+    let after = empty.map_or(0, |at| graphemes(&line).len() - at);
+    (line, after)
+}
+/// `/recipe <name> blank=value …` read back: the recipe's name and a value for each blank it names.
+pub(super) fn recipe_command(line: &str) -> Result<(String, JsonObject), String> {
+    let how = || "Run a recipe with: /recipe <name> blank=value … (a value with spaces goes in quotes)".to_string();
+    let mut words = Vec::new();
+    let mut word: Option<String> = None;
+    let mut quoted = false;
+    let mut chars = line.strip_prefix("/recipe").unwrap_or(line).chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if quoted => {
+                if let Some(next) = chars.next() {
+                    word.get_or_insert_with(String::new).push(next);
+                }
+            }
+            '"' => {
+                quoted = !quoted;
+                word.get_or_insert_with(String::new);
+            }
+            c if c.is_whitespace() && !quoted => words.extend(word.take()),
+            c => word.get_or_insert_with(String::new).push(c),
+        }
+    }
+    if quoted {
+        return Err(how());
+    }
+    words.extend(word);
+    let mut words = words.into_iter();
+    let name = words.next().ok_or_else(how)?;
+    let mut with = JsonObject::new();
+    for word in words {
+        let (blank, value) = word.split_once('=').ok_or_else(how)?;
+        with.insert(blank.into(), Value::String(value.into()));
+    }
+    Ok((name, with))
+}
+/// Why a /recipe line can't run yet: a blank it doesn't fill (with what it's for), or one the recipe doesn't have.
+pub(super) fn recipe_blanks_problem(recipe: &RecipeSummary, with: &JsonObject) -> Option<String> {
+    if let Some(unknown) = with.keys().find(|k| !recipe.params.iter().any(|p| &p.name == *k)) {
+        let blanks = recipe.params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ");
+        return Some(if blanks.is_empty() {
+            format!("“{}” has no blanks to fill: /recipe {} runs it.", recipe.name, recipe_word(&recipe.name))
+        } else {
+            format!("“{}” has no blank called {unknown}; its blanks are {blanks}.", recipe.name)
+        });
+    }
+    let empty: Vec<_> = recipe
+        .params
+        .iter()
+        .filter(|p| with.get(&p.name).and_then(Value::as_str).is_none_or(|v| string::trim(v).is_empty()))
+        .map(|p| if p.about.is_empty() { p.name.clone() } else { format!("{} ({})", p.name, p.about) })
+        .collect();
+    (!empty.is_empty()).then(|| format!("“{}” needs {}.", recipe.name, empty.join(", ")))
+}
 fn item(label: impl Into<String>, value: impl Into<String>, detail: impl Into<String>) -> PickerItem {
     let detail = detail.into();
     PickerItem { detail: (!detail.is_empty()).then_some(detail), ..PickerItem::new(label, value) }
@@ -335,29 +432,42 @@ impl TuiApp {
                         return Ok(());
                     }
                     if !recipe.params.is_empty() {
-                        app.0.state.borrow_mut().editor.set(&format!("Run my recipe “{}” on ", recipe.name));
+                        // Its blanks go on a /recipe line, filled from what's pinned where a blank's name says what
+                        // it is; enter runs it with no model call. The cursor waits at the first one left empty.
+                        let pinned = app.0.state.borrow().pinned.as_ref().map(|p| p.pin.clone());
+                        let (line, after) = recipe_line(&recipe, pinned.as_ref());
+                        let mut state = app.0.state.borrow_mut();
+                        state.editor.set(&line);
+                        for _ in 0..after {
+                            state.editor.left();
+                        }
+                        drop(state);
                         app.0.scheduler.request();
                         return Ok(());
                     }
-                    if app.busy() {
-                        app.notice("Kumi is still working. Press esc to stop it first.", NoticeTone::Info);
-                        return Ok(());
-                    }
-                    app.0.state.borrow_mut().activity = format!("running “{}”", recipe.name);
-                    if app.0.options.controller.has_run_recipe() {
-                        let outcome = app.0.options.controller.run_recipe(&recipe.name).await.unwrap_or_else(|error| RecipeOutcome {
-                            text: safe_error_message(Some(&error.message()), &app.0.state.borrow().secrets),
-                            is_error: true,
-                        });
-                        app.notice(
-                            &if outcome.is_error { format!("The recipe stopped: {}", outcome.text) } else { outcome.text },
-                            if outcome.is_error { NoticeTone::Warn } else { NoticeTone::Info },
-                        );
-                    }
+                    app.run_recipe_now(&recipe, JsonObject::new()).await;
                     Ok(())
                 }
             },
         );
+    }
+    /// Run a recipe with its blanks filled, straight away: no model call.
+    pub(super) async fn run_recipe_now(&self, recipe: &RecipeSummary, with: JsonObject) {
+        if self.busy() {
+            self.notice("Kumi is still working. Press esc to stop it first.", NoticeTone::Info);
+            return;
+        }
+        self.0.state.borrow_mut().activity = format!("running “{}”", recipe.name);
+        if self.0.options.controller.has_run_recipe() {
+            let outcome = self.0.options.controller.run_recipe(&recipe.name, with).await.unwrap_or_else(|error| RecipeOutcome {
+                text: safe_error_message(Some(&error.message()), &self.0.state.borrow().secrets),
+                is_error: true,
+            });
+            self.notice(
+                &if outcome.is_error { format!("The recipe stopped: {}", outcome.text) } else { outcome.text },
+                if outcome.is_error { NoticeTone::Warn } else { NoticeTone::Info },
+            );
+        }
     }
     fn sign_in(&self, provider: ProviderId, then: Option<Action>) {
         let Some(models) = self.0.options.models.clone() else {

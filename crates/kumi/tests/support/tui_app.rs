@@ -241,8 +241,8 @@ impl SessionController for Control {
     fn has_run_recipe(&self) -> bool {
         self.enabled("recipes")
     }
-    async fn run_recipe(&self, name: &str) -> Result<RecipeOutcome, RuntimeError> {
-        self.call(format!("run-recipe:{name}"));
+    async fn run_recipe(&self, name: &str, with: JsonObject) -> Result<RecipeOutcome, RuntimeError> {
+        self.call(if with.is_empty() { format!("run-recipe:{name}") } else { format!("run-recipe:{name} {}", Value::Object(with)) });
         Ok(self.get("recipe-result").unwrap())
     }
     fn has_forget_recipe(&self) -> bool {

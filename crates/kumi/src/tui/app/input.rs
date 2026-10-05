@@ -332,6 +332,7 @@ impl TuiApp {
                         "/model" | "/effort" | "/login" | "/logout" => self.0.options.models.is_some(),
                         "/memory" => c.has_memory(),
                         "/recipes" => c.has_recipes(),
+                        "/recipe" => c.has_run_recipe(),
                         "/conversations" => c.has_conversations(),
                         "/reconnect" => c.has_reconnect(),
                         "/stop" => c.has_stop_live(),
@@ -342,6 +343,12 @@ impl TuiApp {
                     }
             })
             .collect();
+        // A command typed in full comes first, even when it begins a longer one (/recipe, /recipes).
+        let mut matches = matches;
+        if let Some(at) = matches.iter().position(|cmd| cmd.name == text) {
+            let exact = matches.remove(at);
+            matches.insert(0, exact);
+        }
         if state.menu_index >= matches.len() {
             state.menu_index = 0;
         }
@@ -415,6 +422,31 @@ impl TuiApp {
                 }
                 return Ok(());
             }
+        }
+        // A recipe with its blanks filled runs straight away, with no model call; a line that can't run yet
+        // stays to be fixed.
+        if (command == "/recipe" || command.starts_with("/recipe ")) && controller.has_run_recipe() {
+            let (name, with) = match panels::recipe_command(command) {
+                Ok(parsed) => parsed,
+                Err(how) => {
+                    self.notice(&how, NoticeTone::Info);
+                    return Ok(());
+                }
+            };
+            let recipes = controller.recipes().await?;
+            let lower = name.to_lowercase();
+            let Some(recipe) = recipes.iter().find(|r| r.name == name).or_else(|| recipes.iter().find(|r| r.name.to_lowercase() == lower))
+            else {
+                self.notice(&format!("Kumi keeps no recipe called “{name}”; /recipes lists them."), NoticeTone::Info);
+                return Ok(());
+            };
+            if let Some(problem) = panels::recipe_blanks_problem(recipe, &with) {
+                self.notice(&problem, NoticeTone::Warn);
+                return Ok(());
+            }
+            self.clear_editor();
+            self.run_recipe_now(recipe, with).await;
+            return Ok(());
         }
         if command == "/stop" && controller.has_stop_live() {
             self.clear_editor();
@@ -785,6 +817,7 @@ pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/goal", about: "Go after a sound until Kumi gets there" },
     Command { name: "/memory", about: "What Kumi remembers" },
     Command { name: "/recipes", about: "Your saved ways of working" },
+    Command { name: "/recipe", about: "Run a recipe now: /recipe <name> blank=value …" },
     Command { name: "/logout", about: "Sign out of a provider" },
     Command { name: "/status", about: "What Kumi is connected to" },
     Command { name: "/update", about: "Get the newest Kumi" },

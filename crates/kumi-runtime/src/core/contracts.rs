@@ -1624,9 +1624,10 @@ pub trait SessionController {
     fn has_run_recipe(&self) -> bool {
         false
     }
-    /// Run a recipe that has no blanks, straight away (no model involved); what it did, in words.
-    async fn run_recipe(&self, name: &str) -> Result<RecipeOutcome, RuntimeError> {
-        let _ = name;
+    /// Run a recipe straight away (no model involved), `with` a value for each of its blanks; what it did,
+    /// in words.
+    async fn run_recipe(&self, name: &str, with: JsonObject) -> Result<RecipeOutcome, RuntimeError> {
+        let _ = (name, with);
         Err(absent())
     }
     fn has_forget_recipe(&self) -> bool {

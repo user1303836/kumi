@@ -1625,7 +1625,7 @@ impl SessionController for Session {
     fn has_run_recipe(&self) -> bool {
         true
     }
-    async fn run_recipe(&self, name: &str) -> Result<RecipeOutcome, RuntimeError> {
+    async fn run_recipe(&self, name: &str, with: JsonObject) -> Result<RecipeOutcome, RuntimeError> {
         if !self.0.state.borrow().started {
             return Err(RuntimeError::plain("Session is not started"));
         }
@@ -1633,6 +1633,7 @@ impl SessionController for Session {
             return Ok(RecipeOutcome { text: "Kumi keeps no recipes here.".into(), is_error: true });
         };
         let name = name.to_owned();
+        let with = Value::Object(with);
         let outcome = Rc::new(RefCell::new(None));
         let put = outcome.clone();
         self.perform(
@@ -1642,7 +1643,7 @@ impl SessionController for Session {
                 async move {
                     this.observe(&op, None, false).await?;
                     let result =
-                        run.execute(json!({"name":name,"with":{},"final":true}).as_object().unwrap().clone(), op.signal.clone()).await?;
+                        run.execute(json!({"name":name,"with":with,"final":true}).as_object().unwrap().clone(), op.signal.clone()).await?;
                     *put.borrow_mut() = Some(RecipeOutcome { text: result.reply.unwrap_or(result.text), is_error: result.is_error });
                     Ok(None)
                 }

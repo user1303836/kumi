@@ -87,7 +87,8 @@ message, not a command.
 | `/login`, `/logout` | Sign in (ChatGPT in the browser, or an API key shown only as dots) or out |
 | `/goal <what to reach>` | Go after a sound until Kumi gets there. `/goal` alone picks up a paused goal; `/goal stop` (or `/goal end`) ends it |
 | `/memory` | Everything Kumi keeps: notes about you and this Set, what it learned from your Sets, techniques, recipes and lessons; choose one to forget it (a recipe to run or forget) |
-| `/recipes` | Your recipes: run one (Kumi starts the message `Run my recipe "<name>" on ` for you to finish) or forget it |
+| `/recipes` | Your recipes: run one or forget it. One with blanks starts a `/recipe` line for you to finish, with what's pinned filled in |
+| `/recipe <name> blank=value …` | Run a recipe now, with no model call; a value with spaces goes in quotes, and Kumi names any blank left empty |
 | `/status` | What Kumi is connected to, the model, how far it has got learning your library, and on an API key the tokens this session used |
 | `/voice` | Talking instead of typing: start or stop, "Send when you stop", the language you speak and the microphone |
 | `/update` | Get the newest Kumi: it asks, closes, updates and opens again with the same conversation |
