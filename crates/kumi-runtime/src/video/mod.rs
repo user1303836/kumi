@@ -405,6 +405,32 @@ async fn captions_for(
     }
 }
 static PAGES: LazyLock<Mutex<indexmap::IndexMap<String, (Value, i64)>>> = LazyLock::new(|| Mutex::new(indexmap::IndexMap::new()));
+/// Stretches of speech Kumi couldn't take or transcribe, and why, by turn: a closer look at the video
+/// in the same answer doesn't wait for the same failure, and the next request tries again. A turn is
+/// known by its signal, which each of its tools is given. The last few turns are kept, so turns that
+/// overlap (tests running together, say) keep their own.
+static UNHEARD: LazyLock<Mutex<Vec<(Signal, std::collections::HashMap<String, String>)>>> = LazyLock::new(Default::default);
+const UNHEARD_TURNS: usize = 8;
+fn unheard(turn: Option<&Signal>, stretch: &str) -> Option<String> {
+    let turn = turn?;
+    let turns = UNHEARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    turns.iter().find(|(known, _)| known.same_as(turn))?.1.get(stretch).cloned()
+}
+fn remember_unheard(turn: Option<&Signal>, stretch: &str, why: String) {
+    let Some(turn) = turn else { return };
+    let mut turns = UNHEARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let index = match turns.iter().position(|(known, _)| known.same_as(turn)) {
+        Some(index) => index,
+        None => {
+            if turns.len() == UNHEARD_TURNS {
+                turns.remove(0);
+            }
+            turns.push((turn.clone(), Default::default()));
+            turns.len() - 1
+        }
+    };
+    turns[index].1.insert(stretch.to_string(), why);
+}
 struct Watcher<'a> {
     options: &'a WatchOptions,
     address: String,
@@ -663,44 +689,66 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
             } else {
                 to.min(from + 5400.0)
             };
-            watcher.progress("taking the video's speech");
-            let wav = sound_between(
-                ffmpeg.as_deref().unwrap(),
-                &audio,
-                start,
-                stop,
-                &join(&folder, &format!("speech-{}-{}.wav", to_fixed(start, 0), to_fixed(stop, 0))),
-                signal.clone(),
-                true,
-            )
-            .await?;
-            watcher.progress("transcribing what's said");
-            let on_progress = options.on_progress.clone();
-            let heard = transcribe(
-                whisper.as_deref().unwrap(),
-                &model,
-                &wav,
-                TranscribeOptions {
-                    language: Some(language.clone()),
-                    prompt: Some(speech_prompt(&meta.title)),
-                    signal: signal.clone(),
-                    on_progress: Some(Rc::new(move |percent| {
-                        if let Some(progress) = &on_progress {
-                            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                progress(&format!("transcribing what's said · {}%", to_string(percent)))
-                            }));
+            let stretch = format!("{}|{}-{}", meta.key, to_fixed(start, 0), to_fixed(stop, 0));
+            let heard = if let Some(why) = unheard(signal.as_ref(), &stretch) {
+                notes.push(format!(
+                    "Kumi couldn't transcribe the video's speech earlier in this request ({why}), so it didn't try again; it will on the next request."
+                ));
+                Ok(None)
+            } else {
+                watcher.progress("taking the video's speech");
+                // Taking the speech can fail as transcribing it can (a stream that stalls, say): either way,
+                // the frames still come.
+                match sound_between(
+                    ffmpeg.as_deref().unwrap(),
+                    &audio,
+                    start,
+                    stop,
+                    &join(&folder, &format!("speech-{}-{}.wav", to_fixed(start, 0), to_fixed(stop, 0))),
+                    signal.clone(),
+                    true,
+                )
+                .await
+                {
+                    Ok(wav) => {
+                        watcher.progress("transcribing what's said");
+                        let on_progress = options.on_progress.clone();
+                        let heard = transcribe(
+                            whisper.as_deref().unwrap(),
+                            &model,
+                            &wav,
+                            TranscribeOptions {
+                                language: Some(language.clone()),
+                                prompt: Some(speech_prompt(&meta.title)),
+                                signal: signal.clone(),
+                                on_progress: Some(Rc::new(move |percent| {
+                                    if let Some(progress) = &on_progress {
+                                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                            progress(&format!("transcribing what's said · {}%", to_string(percent)))
+                                        }));
+                                    }
+                                })),
+                                ..Default::default()
+                            },
+                        )
+                        .await;
+                        match tokio::fs::remove_file(&wav).await {
+                            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+                            _ => {}
                         }
-                    })),
-                    ..Default::default()
-                },
-            )
-            .await;
-            match tokio::fs::remove_file(&wav).await {
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
-                _ => {}
-            }
+                        heard.map(Some)
+                    }
+                    Err(error) => Err(error),
+                }
+                .inspect_err(|error| {
+                    if !error.is_aborted() {
+                        remember_unheard(signal.as_ref(), &stretch, head(&error.to_string(), 160));
+                    }
+                })
+            };
             match heard {
-                Ok(heard) => {
+                Ok(None) => {}
+                Ok(Some(heard)) => {
                     cues = heard
                         .into_iter()
                         .map(|mut c| {

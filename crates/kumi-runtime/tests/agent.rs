@@ -559,6 +559,88 @@ async fn cancellation_during_an_uncooperative_tool_settles_without_waiting_for_i
 }
 
 #[tokio::test]
+async fn a_turns_timing_has_the_effort_its_model_asked_for_and_each_tools_time_a_stopped_ones_too() {
+    use kumi_runtime::core::timing;
+    local(async {
+        let model = ScriptedModel {
+            script: Rc::new(|_, n| match n {
+                1 => Scripted::Parts(vec![call_id("quick", "{}", "a"), call_id("slow", "{}", "b"), tool_calls()]),
+                _ => Scripted::Parts(vec![call_id("stuck", "{}", "c"), tool_calls()]),
+            }),
+            requests: Rc::new(RefCell::new(Vec::new())),
+        };
+        let pause = |name: &str, ms: u64| {
+            tool(name, move |_| async move {
+                sleep(Duration::from_millis(ms)).await;
+                Ok(ToolResult::text("done"))
+            })
+        };
+        let kernel = create_agent_kernel(AgentKernelOptions {
+            conversation: None,
+            binding: ModelBinding {
+                id: "openai-codex/fixture".into(),
+                model: Rc::new(model),
+                // As the provider asks: its options carry the effort and the service tier.
+                prepare: Box::new(|request| CallOptions {
+                    prompt: request.messages,
+                    tools: (!request.tools.is_empty()).then_some(request.tools),
+                    provider_options: Some(serde_json::Map::from_iter([(
+                        "openai".to_string(),
+                        json!({"reasoningEffort":"xhigh","serviceTier":"priority"}),
+                    )])),
+                    ..CallOptions::default()
+                }),
+                budget: None,
+            },
+            instructions: "fixture instructions".into(),
+            tools: vec![pause("quick", 10), pause("slow", 120), pause("stuck", 60_000)],
+            signal: signal(),
+            checkpoint: None,
+            max_steps: None,
+            budget: None,
+        })
+        .unwrap();
+        let controller = Controller::new();
+        let aborter = controller.clone();
+        let recorder = timing::begin();
+        let result = kernel
+            .run(
+                "go",
+                controller.signal.clone(),
+                Rc::new(move |event| {
+                    if matches!(&event, KernelEvent::ToolStart { name, .. } if name == "stuck") {
+                        let aborter = aborter.clone();
+                        spawn_local(async move {
+                            sleep(Duration::from_millis(60)).await;
+                            aborter.abort();
+                        });
+                    }
+                    Ok(())
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.stop_reason, StopReason::Cancelled);
+        let line = timing::line(&recorder.finish(), 0, json!("cancelled"), None);
+        assert_eq!((&line["effort"], &line["tier"]), (&json!("xhigh"), &json!("priority")), "{line}");
+        let took = |name: &str| {
+            line["slowTools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|tool| tool["tool"] == name)
+                .map(|tool| (tool["calls"].clone(), tool["ms"].as_u64().unwrap()))
+        };
+        assert!(took("slow").is_some_and(|(calls, ms)| calls == 1 && ms >= 120), "{line}");
+        assert!(took("stuck").is_some_and(|(calls, ms)| calls == 1 && ms >= 60), "a call stopped while it ran keeps its time: {line}");
+        assert!(took("quick").is_some_and(|(calls, _)| calls == 1), "{line}");
+        assert!(line["toolMs"].as_u64().unwrap() >= 190, "{line}");
+        kernel.close().await;
+    })
+    .await
+}
+
+#[tokio::test]
 async fn an_already_aborted_turn_makes_no_request_concurrent_turns_are_rejected_close_is_idempotent_and_aborts_work() {
     local(async {
         let h = Rc::new(harness(|_, _| hanging(Vec::new()), Options::default()));

@@ -360,8 +360,11 @@ assert!(chosen.note().unwrap().ends_with("None of Ollama's models can; pull one 
 #[tokio::test]
 async fn effort_is_only_sent_when_ollama_offers_it() {
     LocalSet::new().run_until(async{let fake=ollama(json!({"gpt-oss:20b":{"capabilities":["completion","tools","thinking"],"thinking":{"values":["low","medium","high"],"default":"medium"}},"qwen3:8b":{"capabilities":["completion","tools","thinking"],"thinking":{"values":[false,true],"default":true}}}),|_,_|ndjson(vec![said("Ok."),done()]));
-for (name,effort) in [("gpt-oss:20b",Some(Effort::High)),("gpt-oss:20b",None),("qwen3:8b",Some(Effort::High))]{run(binding(ollama_at("127.0.0.1"),name,Some(fake.clone()),effort),"fixture instructions",vec![tempo(Default::default())]).await.unwrap();
+let mut timed=Vec::new();
+for (name,effort) in [("gpt-oss:20b",Some(Effort::High)),("gpt-oss:20b",None),("qwen3:8b",Some(Effort::High))]{let recorder=kumi_runtime::core::timing::begin();run(binding(ollama_at("127.0.0.1"),name,Some(fake.clone()),effort),"fixture instructions",vec![tempo(Default::default())]).await.unwrap();timed.push(recorder.finish().effort);
 }assert_eq!(json!(fake.requests("/api/chat").iter().map(|r|&r.body["think"]).collect::<Vec<_>>()),json!(["high","medium",true]));
+// The turn's timing says the effort that was sent: none when Ollama's own default thinks.
+assert_eq!(timed,[Some("high".to_string()),None,None]);
 }).await;
 }
 struct Down;
@@ -456,8 +459,10 @@ async fn lm_studio_lists_then_loads_once_across_tool_roundtrips() {
     let fake=lm_studio(vec![lm_model("qwen/qwen3-8b",json!({"capabilities":{"trained_for_tool_use":true,"reasoning":{"allowed_options":["off","low","medium","high"],"default":"medium"}}})),lm_model("google/gemma-3-4b",json!({"capabilities":{"trained_for_tool_use":false}})),json!({"type":"embedding","key":"text-embedding-nomic","loaded_instances":[]})],|_,n|if n==1{vec![delta(json!({"role":"assistant","content":""}),None),delta(json!({"tool_calls":[{"index":0,"id":"call_7","type":"function","function":{"name":"get_tempo","arguments":"{}"}}]}),None),delta(json!({}),Some("tool_calls"))]}else{vec![delta(json!({"reasoning_content":"Tempo read."}),None),delta(json!({"content":"120 BPM."}),None),delta(json!({}),Some("stop"))]});
     let models=list_local_models(&lm_at(),fake.transport()).await.unwrap();
 assert_eq!(json!(models.iter().map(|m|json!([m.id,m.name,m.description,m.efforts.iter().map(|e|e.effort.as_str()).collect::<Vec<_>>().join(" ")])).collect::<Vec<_>>()),json!([["lmstudio/qwen/qwen3-8b","qwen3-8b","8B · Q4_K_M","low medium high"],["lmstudio/google/gemma-3-4b","gemma-3-4b","8B · Q4_K_M · can't change the Set",""]]));
+    let recorder=kumi_runtime::core::timing::begin();
     let(text,_)=run(binding(lm_at(),"qwen/qwen3-8b",Some(fake.clone()),Some(Effort::Low)),"fixture instructions",vec![tempo(Default::default())]).await.unwrap();
 assert_eq!(text,"120 BPM.");
+assert_eq!(recorder.finish().effort.as_deref(),Some("low"),"added as the request goes, it still reaches the turn's timing");
 let loads=fake.requests("/api/v1/models/load");
 assert_eq!(loads.len(),1);
 assert_eq!(loads[0].body,json!({"model":"qwen/qwen3-8b","context_length":32768,"echo_load_config":true}));
