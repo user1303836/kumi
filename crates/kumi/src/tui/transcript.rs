@@ -832,6 +832,7 @@ pub fn step_label(tool: &str) -> String {
         "make_device" => "made a device".into(),
         "search_web" => "searched the web".into(),
         "read_web" => "read a page".into(),
+        "search_conversations" => "looked through earlier conversations".into(),
         _ => tool.strip_prefix("live_").unwrap_or(tool).replace("_", " "),
     }
 }
@@ -866,6 +867,7 @@ pub fn doing_label(tool: Option<&str>, fallback: &str) -> String {
         "make_device" => "making a device".into(),
         "search_web" => "searching the web".into(),
         "read_web" => "reading a page".into(),
+        "search_conversations" => "looking through earlier conversations".into(),
         _ => fallback.into(),
     }
 }

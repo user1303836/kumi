@@ -59,6 +59,7 @@ impl Activity {
 fn kind_of(tool: &str) -> Option<Activity> {
     Some(match tool {
         "search_web"
+        | "search_conversations"
         | "live_browser_search"
         | "find_sounds"
         | "find_presets"

@@ -482,13 +482,85 @@ pub fn fit<'a>(history: &'a [Message], turn: &'a [Message], budget: &ContextBudg
     let listed = sent(SHORTENED) + sent(&list(&asks_in(&history))).min(ASKS + sent(ASKED) + 4);
     let room = ((budget.limit * 0.75).floor() - (bytes(&turn) + listed) as f64).max(0.0) as usize;
     let kept = drop_earliest(&history, room);
-    if kept.len() == history.len() {
-        return Fitted { history, turn };
-    }
     let asks = asks_in(&history[..history.len() - kept.len()]);
-    if kept.is_empty() {
+    let fitted = if kept.len() == history.len() {
+        Fitted { history, turn }
+    } else if kept.is_empty() {
         Fitted { history: Cow::Owned(Vec::new()), turn: Cow::Owned(note_shortened(turn.into_owned(), asks)) }
     } else {
         Fitted { history: Cow::Owned(note_shortened(kept.to_vec(), asks)), turn }
+    };
+    // Last, when this turn alone is past the limit: its latest results, each cut to a share of the room left.
+    let total = bytes(&fitted.history) + bytes(&fitted.turn);
+    if total as f64 <= budget.limit {
+        return fitted;
+    }
+    let Some(at) = last_index(&fitted.turn, Role::Tool) else { return fitted };
+    let room = (budget.limit as usize).saturating_sub(total - bytes_of(&fitted.turn[at]));
+    match cut_latest(&fitted.turn, at, room) {
+        Some(turn) => Fitted { history: fitted.history, turn: Cow::Owned(turn) },
+        None => fitted,
+    }
+}
+
+const CUT: &str = " … [Kumi cut the rest of this result: the request had no more room. Ask for less of it (a narrower read, a page, a filter) to see more.]";
+
+/// The start of `text`, at most `bytes` long, ending between characters.
+pub fn opening(text: &str, bytes: usize) -> &str {
+    if text.len() <= bytes {
+        return text;
+    }
+    let mut end = bytes;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+/// The results at `at`, each cut to an even share of `room` bytes (halving the share until they fit),
+/// never below an opening of `HEAD` bytes; None when there are none.
+fn cut_latest(turn: &[Message], at: usize, room: usize) -> Option<Vec<Message>> {
+    let Message::Tool { content, provider_options } = &turn[at] else { return None };
+    let count = content.iter().filter(|part| matches!(part, ToolPart::ToolResult(_))).count();
+    if count == 0 {
+        return None;
+    }
+    let floor = HEAD + CUT.len();
+    let mut share = (room / count).max(floor);
+    loop {
+        let cut: Vec<ToolPart> = content
+            .iter()
+            .map(|part| {
+                let ToolPart::ToolResult(result) = part else { return part.clone() };
+                let pictures = matches!(result.output, ToolResultOutput::Content { .. });
+                let value = match &result.output {
+                    ToolResultOutput::Text { value, .. } | ToolResultOutput::ErrorText { value, .. } => value.clone(),
+                    ToolResultOutput::Content { .. } => words_of(&result.output),
+                    _ => return part.clone(),
+                };
+                if value.len() <= share && !pictures {
+                    return part.clone();
+                }
+                let kept = if value.len() <= share { value } else { format!("{}{CUT}", opening(&value, share - CUT.len())) };
+                let mut result = result.clone();
+                result.output = match &result.output {
+                    ToolResultOutput::ErrorText { provider_options, .. } => {
+                        ToolResultOutput::ErrorText { value: kept, provider_options: provider_options.clone() }
+                    }
+                    ToolResultOutput::Text { provider_options, .. } => {
+                        ToolResultOutput::Text { value: kept, provider_options: provider_options.clone() }
+                    }
+                    _ => ToolResultOutput::Text { value: kept, provider_options: None },
+                };
+                ToolPart::ToolResult(result)
+            })
+            .collect();
+        let message = Message::Tool { content: cut, provider_options: provider_options.clone() };
+        if bytes_of(&message) <= room || share == floor {
+            let mut turn = turn.to_vec();
+            turn[at] = message;
+            return Some(turn);
+        }
+        share = (share / 2).max(floor);
     }
 }

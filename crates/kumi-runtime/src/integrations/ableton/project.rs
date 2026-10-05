@@ -2,7 +2,10 @@
 
 use crate::{
     core::{
-        contracts::{CatchUp, ConversationStore, ConversationSummary, CurrentConversation, JsonObject, SavedConversation, TranscriptRole},
+        contracts::{
+            CatchUp, ChangeState, ConversationStore, ConversationSummary, CurrentConversation, FoundExchange, JsonObject,
+            SavedConversation, TranscriptRole,
+        },
         errors::RuntimeError,
     },
     kernel::budget::transcript_of,
@@ -24,7 +27,7 @@ use std::{
     rc::Rc,
     sync::LazyLock,
 };
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -126,6 +129,19 @@ pub fn new_conversation_id(at: i64) -> String {
 }
 static PLACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([0-9a-f]{32}|unsaved)$").unwrap());
 static CONVERSATION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-z]{6,24}$").unwrap());
+/// The Set's name in a baseline file: its first key `name`, which comes before the pages.
+static BASELINE_NAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"[{,]"name":("(?:[^"\\]|\\.)*")"#).unwrap());
+/// The most kept conversations a search reads, newest first.
+const MAX_SEARCHED: usize = 400;
+async fn modified_ms(path: &Path) -> f64 {
+    tokio::fs::metadata(path)
+        .await
+        .ok()
+        .and_then(|s| s.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs_f64() * 1000.0)
+        .unwrap_or(0.0)
+}
 pub struct FileConversationStore {
     directory: PathBuf,
 }
@@ -200,6 +216,18 @@ impl FileConversationStore {
         names.sort();
         names
     }
+    /// A saved Set's name, read from the start of its baseline (the pages after it can be megabytes).
+    async fn set_name(&self, place: &str) -> Option<String> {
+        if place == "unsaved" {
+            return None;
+        }
+        let file = tokio::fs::File::open(self.folder(place).ok()?.join("last-seen.json")).await.ok()?;
+        let mut start = Vec::with_capacity(16 * 1024);
+        file.take(16 * 1024).read_to_end(&mut start).await.ok()?;
+        let text = String::from_utf8_lossy(&start);
+        let quoted = BASELINE_NAME.captures(&text)?.get(1)?.as_str();
+        serde_json::from_str::<String>(quoted).ok().filter(|name| !trim(name).is_empty())
+    }
     async fn trim(&self, place: &str) -> Result<(), RuntimeError> {
         let current = format!("{}.json", self.current_id(place).await.as_deref().unwrap_or("undefined"));
         let names = self.names(place).await;
@@ -220,6 +248,26 @@ impl FileConversationStore {
         }
         Ok(())
     }
+}
+/// A message as kept on disk: a picture the producer added is named, not kept, so one screenshot
+/// can't crowd out the conversation.
+fn without_pictures(message: &Value) -> Value {
+    let Some(parts) = message["content"].as_array().filter(|_| message["role"] == "user") else { return message.clone() };
+    if !parts.iter().any(|part| part["type"] == "file") {
+        return message.clone();
+    }
+    let mut kept = message.clone();
+    kept["content"] = parts
+        .iter()
+        .map(|part| {
+            if part["type"] != "file" {
+                return part.clone();
+            }
+            let name = part["filename"].as_str().unwrap_or("a picture");
+            json!({"type":"text","text":format!("[The producer showed {name} here; pictures aren't kept with saved conversations.]")})
+        })
+        .collect();
+    kept
 }
 // Disk checkpoints also contain older string-form messages; keep those forms intact.
 fn bounded_messages(all: &[Value]) -> Vec<Value> {
@@ -279,7 +327,7 @@ impl ConversationStore for FileConversationStore {
         Ok(Self::read(&file).await)
     }
     async fn save(&self, place: &str, id: &str, conversation: &SavedConversation) -> Result<(), RuntimeError> {
-        let all = &conversation.checkpoint.messages;
+        let all: &Vec<Value> = &conversation.checkpoint.messages.iter().map(without_pictures).collect();
         let messages = bounded_messages(all);
         if messages.is_empty() {
             return Ok(());
@@ -342,6 +390,98 @@ impl ConversationStore for FileConversationStore {
             write_privately(&self.folder(from)?, "current", "").await?
         }
         self.trim(to).await
+    }
+    async fn search(
+        &self,
+        words: &[String],
+        needed: usize,
+        limit: usize,
+        skip: Option<(&str, &str)>,
+    ) -> Result<Vec<FoundExchange>, RuntimeError> {
+        if words.is_empty() || limit == 0 {
+            return Ok(vec![]);
+        }
+        let mut files = vec![];
+        if let Ok(mut places) = tokio::fs::read_dir(&self.directory).await {
+            while let Ok(Some(entry)) = places.next_entry().await {
+                let Some(place) = entry.file_name().to_str().filter(|p| PLACE.is_match(p)).map(str::to_owned) else { continue };
+                for name in self.names(&place).await {
+                    let path = self.kept(&place)?.join(&name);
+                    let at = modified_ms(&path).await;
+                    files.push((place.clone(), name, path, at));
+                }
+            }
+        }
+        files.sort_by(|a, b| b.3.total_cmp(&a.3));
+        files.truncate(MAX_SEARCHED);
+        let mut found = vec![];
+        for (place, name, path, _) in files {
+            let id = name[..name.len() - 5].to_owned();
+            if skip == Some((place.as_str(), id.as_str())) {
+                continue;
+            }
+            // Reading and scoring hundreds of files: the app keeps drawing between them.
+            tokio::task::yield_now().await;
+            let Some(conversation) = Self::read(&path).await else { continue };
+            let mut exchange = |said: String, answer: String, tools: Vec<String>| {
+                let text = format!("{said}\n{answer}\n{}", tools.join(" ")).to_lowercase();
+                let matched = words.iter().filter(|word| text.contains(word.as_str())).count();
+                if matched >= needed {
+                    found.push(FoundExchange {
+                        place: place.clone(),
+                        set: None,
+                        conversation: id.clone(),
+                        saved_at: conversation.saved_at,
+                        said,
+                        answer,
+                        tools,
+                        matched,
+                    });
+                }
+            };
+            // An exchange is a request and the answers to it, with the tools they used.
+            let mut current: Option<(String, Vec<String>, Vec<String>)> = None;
+            for line in transcript_of(&conversation.checkpoint.messages) {
+                match line.role {
+                    TranscriptRole::User => {
+                        if let Some((said, answers, tools)) = current.take() {
+                            exchange(said, answers.join("\n"), tools);
+                        }
+                        current = Some((line.text, vec![], vec![]));
+                    }
+                    TranscriptRole::Assistant => {
+                        if let Some((_, answers, tools)) = current.as_mut() {
+                            if !line.text.is_empty() {
+                                answers.push(line.text);
+                            }
+                            tools.extend(line.tools.unwrap_or_default());
+                        }
+                    }
+                }
+            }
+            if let Some((said, answers, tools)) = current.take() {
+                exchange(said, answers.join("\n"), tools);
+            }
+            // What the conversation changed in Live, in plain words.
+            let titles: Vec<_> =
+                conversation.changes.iter().flatten().filter(|c| c.state != ChangeState::Undone).map(|c| c.title.as_str()).collect();
+            if !titles.is_empty() {
+                exchange(conversation.first.clone().unwrap_or_default(), format!("Changed: {}", titles.join("; ")), vec![]);
+            }
+        }
+        found.sort_by(|a, b| b.matched.cmp(&a.matched).then(b.saved_at.cmp(&a.saved_at)));
+        found.truncate(limit);
+        let mut names: Vec<(String, Option<String>)> = vec![];
+        for hit in &mut found {
+            if let Some((_, name)) = names.iter().find(|(place, _)| *place == hit.place) {
+                hit.set = name.clone();
+            } else {
+                let name = self.set_name(&hit.place).await;
+                names.push((hit.place.clone(), name.clone()));
+                hit.set = name;
+            }
+        }
+        Ok(found)
     }
 }
 

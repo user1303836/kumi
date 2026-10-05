@@ -185,6 +185,11 @@ fn absent() -> RuntimeError {
 #[async_trait(?Send)]
 pub trait Kernel {
     async fn run(&self, input: &str, signal: Signal, emit: KernelEmit) -> Result<TurnResult, RuntimeError>;
+    /// `run` with pictures the model sees beside the words.
+    async fn run_with(&self, input: &str, pictures: Vec<Picture>, signal: Signal, emit: KernelEmit) -> Result<TurnResult, RuntimeError> {
+        let _ = pictures;
+        self.run(input, signal, emit).await
+    }
     async fn close(&self);
     fn has_checkpoint(&self) -> bool {
         false
@@ -329,6 +334,35 @@ pub trait ConversationStore {
     async fn list(&self, place: &str) -> Result<Vec<ConversationSummary>, RuntimeError>;
     /// A conversation moves with its Set (an unsaved Set's, when the Set is first saved).
     async fn move_conversation(&self, id: &str, from: &str, to: &str) -> Result<(), RuntimeError>;
+    /// Exchanges in every place's kept conversations that hold at least `needed` of `words`
+    /// (lowercase), most words first, then newest; at most `limit`. `skip` (place, id) is left out:
+    /// the conversation going on now.
+    async fn search(
+        &self,
+        words: &[String],
+        needed: usize,
+        limit: usize,
+        skip: Option<(&str, &str)>,
+    ) -> Result<Vec<FoundExchange>, RuntimeError> {
+        let _ = (words, needed, limit, skip);
+        Ok(vec![])
+    }
+}
+
+/// An earlier exchange a search found: where and when, what the producer said, and Kumi's answer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FoundExchange {
+    pub place: String,
+    /// The Set's name, when Kumi has seen it saved.
+    pub set: Option<String>,
+    pub conversation: String,
+    pub saved_at: i64,
+    pub said: String,
+    pub answer: String,
+    /// The tools Kumi used in its answer, in order.
+    pub tools: Vec<String>,
+    /// How many of the searched words it holds.
+    pub matched: usize,
 }
 
 /// What `observe` is told besides the signal.
@@ -1218,6 +1252,16 @@ pub struct MemoryNote {
     pub text: String,
     /// Epoch milliseconds it was written.
     pub at: i64,
+    /// The producer pinned it: a full store never drops it to make room.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
+}
+
+/// What the producer changes about a note in /memory, without the model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoteChange {
+    Text(String),
+    Pinned(bool),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1510,6 +1554,25 @@ pub struct LessonEntry {
     pub at: f64,
 }
 
+/// A file the producer added to a request, pasted or dragged in: a picture the model sees, or any
+/// file, which the model works with by its path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment {
+    pub path: String,
+    pub name: String,
+    pub media_type: String,
+    pub bytes: u64,
+}
+
+/// A picture the model sees with the producer's words.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Picture {
+    pub name: String,
+    pub media_type: String,
+    pub data: Vec<u8>,
+}
+
 /// What running a recipe did, in words.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1525,6 +1588,17 @@ pub trait SessionController {
     async fn start(&self) -> Result<(), RuntimeError>;
     /// `pinned`: what the producer points at in Kumi, which "this" means in the message.
     async fn submit(&self, input: &str, pinned: Option<PinnedNode>) -> Result<(), RuntimeError>;
+    fn has_attachments(&self) -> bool {
+        false
+    }
+    /// `submit` with files the producer added: pictures go to the model to see, and every file by its path.
+    async fn submit_with(&self, input: &str, pinned: Option<PinnedNode>, attachments: Vec<Attachment>) -> Result<(), RuntimeError> {
+        if attachments.is_empty() {
+            self.submit(input, pinned).await
+        } else {
+            Err(RuntimeError::plain("Kumi can't take files here."))
+        }
+    }
     fn has_steer(&self) -> bool {
         false
     }
@@ -1620,6 +1694,14 @@ pub trait SessionController {
         let _ = id;
         Ok(None)
     }
+    fn has_change_note(&self) -> bool {
+        false
+    }
+    /// Change a note's words or pin it, as the producer asks in /memory; None when there's no such note.
+    async fn change_note(&self, id: &str, change: NoteChange) -> Result<Option<MemoryNote>, RuntimeError> {
+        let _ = (id, change);
+        Ok(None)
+    }
     fn has_recipes(&self) -> bool {
         false
     }
@@ -1630,9 +1712,10 @@ pub trait SessionController {
     fn has_run_recipe(&self) -> bool {
         false
     }
-    /// Run a recipe that has no blanks, straight away (no model involved); what it did, in words.
-    async fn run_recipe(&self, name: &str) -> Result<RecipeOutcome, RuntimeError> {
-        let _ = name;
+    /// Run a recipe straight away (no model involved), `with` a value for each of its blanks; what it did,
+    /// in words.
+    async fn run_recipe(&self, name: &str, with: JsonObject) -> Result<RecipeOutcome, RuntimeError> {
+        let _ = (name, with);
         Err(absent())
     }
     fn has_forget_recipe(&self) -> bool {

@@ -1,0 +1,6 @@
+# nextest runs many test binaries at once. Tests that hold work to a time bound run alone, so the
+# tests beside them can't make them late.
+[[profile.default.overrides]]
+# The Remote Script adapter's tests give each local connection 500 ms.
+filter = 'test(/bounded_latency|reads_in_a_moment|looks_at_each_byte_once|read_in_linear_time|analyzed_quickly_part_by_part|keeps_the_runtime_responsive|returns_promptly/) | binary(remote_adapter)'
+threads-required = "num-cpus"

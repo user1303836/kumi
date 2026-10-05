@@ -64,3 +64,5 @@ libc.workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true
+# live_views reads deep Set snapshots, as the bridge does.
+serde_json = { workspace = true, features = ["unbounded_depth"] }

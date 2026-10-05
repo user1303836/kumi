@@ -21,7 +21,7 @@ use kumi_common::{
 use kumi_runtime::{
     ai::{
         error::LanguageModelError,
-        types::{CallOptions, StreamParts},
+        types::{CallOptions, FunctionTool, StreamParts},
     },
     core::{
         contracts::{ActionEvent, ChangeFamily, ChangeState, MemoryEvent, MemoryScope, TechniqueAction, WatchEvent},
@@ -31,7 +31,7 @@ use kumi_runtime::{
     create_ableton_integration, create_agent_kernel, create_memory_store, create_recipe_store, create_session, create_technique_store,
     find_ffmpeg,
     integrations::ableton::AbletonOptions,
-    kernel::agent::LanguageModel,
+    kernel::agent::{LanguageModel, ModelRequest},
     mcp::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, Implementation, ListToolsResult},
@@ -1708,9 +1708,57 @@ fn report(outcome: &Outcome) {
     }
 }
 
+/// A model that answers nothing, for measuring what a request carries.
+struct Unanswered;
+
+#[async_trait(?Send)]
+impl LanguageModel for Unanswered {
+    async fn do_stream(&self, _: CallOptions) -> Result<StreamParts, LanguageModelError> {
+        Err(LanguageModelError::other("measured"))
+    }
+}
+
+/// EVAL_MEASURE=1: what every request carries before any conversation, the instructions and each tool's
+/// definition, in bytes (EVAL_MEASURE=tools adds the definitions themselves). It's the first case's
+/// session, with no model and no sign-in.
+async fn measure(catalog: &Rc<ListToolsResult>, watched: &Rc<Watched>) -> Result<i32, RuntimeError> {
+    let seen: Rc<RefCell<Option<(String, Vec<FunctionTool>)>>> = Rc::default();
+    let keep = seen.clone();
+    let model = Counted::new(ModelBinding {
+        id: "measure/none".into(),
+        model: Rc::new(Unanswered),
+        prepare: Box::new(move |request: ModelRequest| {
+            keep.borrow_mut().get_or_insert((request.instructions, request.tools));
+            CallOptions::default()
+        }),
+        budget: None,
+    });
+    let _ = run_case(&model, &cases()[0], catalog, watched).await;
+    let Some((instructions, tools)) = seen.borrow_mut().take() else {
+        return Err(RuntimeError::plain("The first case made no request to measure."));
+    };
+    let sizes: Vec<Value> = tools
+        .iter()
+        .map(|tool| json!({"name": tool.name, "bytes": stringify(&serde_json::to_value(tool).unwrap_or_default()).len()}))
+        .collect();
+    let schema: u64 = sizes.iter().filter_map(|size| size["bytes"].as_u64()).sum();
+    let instruction_bytes = instructions.len() as u64;
+    let mut measured = json!({"toolCount": tools.len(), "instructionBytes": instruction_bytes, "schemaBytes": schema, "fixedBytes": instruction_bytes + schema, "sizes": sizes});
+    // EVAL_MEASURE=tools: each tool's definition too, as it's sent.
+    if std::env::var("EVAL_MEASURE").is_ok_and(|measure| measure == "tools") {
+        measured["tools"] = serde_json::to_value(&tools).unwrap_or_default();
+        measured["instructions"] = Value::String(instructions);
+    }
+    println!("{}", stringify(&measured));
+    Ok(0)
+}
+
 async fn run() -> Result<i32, RuntimeError> {
     let catalog = Rc::new(bridge_tools()?);
     let watched = Rc::new(Watched::load()?);
+    if std::env::var_os("EVAL_MEASURE").is_some_and(|measure| !measure.is_empty()) {
+        return measure(&catalog, &watched).await;
+    }
     let env = process_env();
     let config = load_inference_config(&env)?;
     // EVAL_EFFORT=low|medium|high…: the model's reasoning effort for this run (its own default otherwise).

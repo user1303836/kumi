@@ -107,7 +107,7 @@ fn mode(console: &File) -> u32 {
 }
 
 fn queue_empty(console: &File) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let mut count = 0;
         assert_ne!(unsafe { GetNumberOfConsoleInputEvents(console.as_raw_handle(), &mut count) }, 0);
@@ -115,7 +115,9 @@ fn queue_empty(console: &File) {
             return;
         }
         assert!(Instant::now() < deadline, "reader did not consume the prepared console records ({count} remain)");
-        std::thread::yield_now();
+        // Sleep, not yield: on Windows a yield hands the processor only to a thread ready on the same one,
+        // so seven tests spinning at once could starve the reader they wait for.
+        std::thread::sleep(Duration::from_millis(2));
     }
 }
 

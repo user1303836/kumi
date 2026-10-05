@@ -71,11 +71,11 @@ impl TuiApp {
         let box_height = visible + 2;
         let box_top = rows - 1 - box_height;
         let dock = if pane != 0 { 0 } else { 2 };
-        let (chip, waiting) = {
+        let (chip, files, waiting) = {
             let state = self.0.state.borrow();
-            (i32::from(state.pinned.is_some()), state.held.len().min(3) as i32)
+            (i32::from(state.pinned.is_some()), i32::from(!state.attachments.is_empty()), state.held.len().min(3) as i32)
         };
-        let area = Rect::new(0, 2, left, (box_top - dock - 3 - chip - waiting).max(1));
+        let area = Rect::new(0, 2, left, (box_top - dock - 3 - chip - files - waiting).max(1));
         self.0.state.borrow_mut().page = (area.height - 2).max(1);
         self.draw_conversation(&mut screen, area);
         if pane != 0 {
@@ -86,9 +86,12 @@ impl TuiApp {
         if chip != 0 {
             self.draw_pin(&mut screen, 3, box_top - dock - 2, left - 6);
         }
+        if files != 0 {
+            self.draw_attachments(&mut screen, 3, box_top - dock - 2 - chip, left - 6);
+        }
         let no_panel = self.0.state.borrow().panel.is_none();
         if waiting != 0 && no_panel && self.menu().is_empty() {
-            self.draw_held(&mut screen, 3, box_top - dock - 1 - chip - waiting, left - 6, waiting);
+            self.draw_held(&mut screen, 3, box_top - dock - 1 - chip - files - waiting, left - 6, waiting);
         }
         let mut cursor = Some(self.draw_composer(&mut screen, Rect::new(1, box_top, left - 2, box_height), &layout, visible));
         let panel = self.0.state.borrow().panel.clone();

@@ -142,6 +142,15 @@ under way), Tab sends a message for after the answer, and `/btw` asks something
 on the side without interrupting. Esc stops the answer; the steps it finished
 stay. `/stop` stops Live (clips, the transport and recording) at any time.
 
+To show Kumi something, drag files into the window or press **Ctrl-V** for a
+picture on the clipboard, such as a screenshot of a synth: "make this". Each
+shows above the input box and goes with your next message; × or Backspace in an
+empty box takes one back. The model sees PNG, JPEG, GIF and WebP pictures, up to
+3.75 MB each and 20 MB in one message. Other files, such as reference audio, a preset or a Live Set, go by their
+path for Kumi to use. A picture goes with its own message only: after it, the
+conversation, saved or not, keeps each file's name and path but not the picture.
+Clipboard pictures are kept in `~/.kumi/attachments` for a week.
+
 ## Talking to Kumi
 
 Press **Ctrl-T** and say what you want, then press it again. What you said lands
@@ -457,13 +466,13 @@ reference", "my usual vocal chain" or "the bass from my Night Drive Set".
 
 Everything Kumi keeps shows as it happens, as a line in the conversation and a
 row at the top of the HISTORY tab with **forget**. `/memory` lists it all;
-choose an item to forget it.
+choose an item to forget it, or a note to change its words or pin it.
 
 - **Notes** (✎): what you tell Kumi that Live can't show, such as what a track
   is for, what you're going for, your habits and what you like. Notes about you
   are in `~/.kumi/memory.json`; notes about a saved Set are in its folder in
-  `~/.kumi/projects`. Up to 24 in each place, a sentence each; the oldest makes
-  room. Kumi doesn't keep what the Set shows, what it did, or anything that
+  `~/.kumi/projects`. Up to 24 in each place, a sentence each; the oldest one
+  you haven't pinned makes room. Kumi doesn't keep what the Set shows, what it did, or anything that
   reads as instructions or looks like a key, so text inside a Set can't become a
   standing order.
 - **Techniques** (◆): what made something Kumi built work, kept to adapt to
@@ -497,6 +506,11 @@ exchanges drop off). Opening Kumi on a saved Set carries on its latest
 conversation, with its last 100 changes in HISTORY (without undo). `/new` starts afresh and
 keeps the last one; `/conversations` goes back to any of them. An unsaved Set's
 conversation moves to the Set's own folder when you first save it.
+
+When you mention something from before ("the reverb chain from last week's
+vocal"), Kumi looks through the conversations kept for every Set, and its
+techniques and recipes, by their words. The search runs on your computer; what
+it finds goes to the model like any other read.
 
 Kumi also remembers each saved Set as it last saw it. Next time, the welcome
 screen says what changed meanwhile ("Since you were last here · 3 days ago:
@@ -612,7 +626,8 @@ says which need which.
 ## Privacy: what leaves your computer
 
 - **Your model provider** gets your messages, the conversation, what Kumi reads
-  from the Set, the frames of videos it watches and the pictures it reads. With a
+  from the Set, the frames of videos it watches, the pictures it reads and the
+  pictures you add to a message. With a
   model on your computer, they stay on it (a server named in `settings.json` gets
   them wherever it runs).
 - **Web search and reading** go to the search services above, and the pages Kumi

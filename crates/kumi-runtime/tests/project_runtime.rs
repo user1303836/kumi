@@ -164,3 +164,21 @@ async fn saved_set_baselines_are_private_hashed_and_bad_or_oversized_files_are_i
     store.save(&big).await.unwrap();
     assert_eq!(std::fs::read_to_string(file).unwrap(), "{broken");
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_picture_the_producer_added_is_named_not_kept_in_a_saved_conversation() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_conversation_store(dir.path());
+    let conversation: SavedConversation = serde_json::from_value(json!({"savedAt":1,"checkpoint":{"version":1,"messages":[
+        {"role":"user","content":[{"type":"text","text":"make this"},{"type":"file","filename":"synth.png","data":"iVBORw0KGgo=","mediaType":"image/png"}]},
+        {"role":"assistant","content":"ok"}
+    ]}}))
+    .unwrap();
+    store.save("unsaved", "pics01", &conversation).await.unwrap();
+    let kept = store.load("unsaved", "pics01").await.unwrap().unwrap();
+    assert_eq!(kept.checkpoint.messages[0]["content"][0], json!({"type":"text","text":"make this"}));
+    assert_eq!(
+        kept.checkpoint.messages[0]["content"][1],
+        json!({"type":"text","text":"[The producer showed synth.png here; pictures aren't kept with saved conversations.]"})
+    );
+}

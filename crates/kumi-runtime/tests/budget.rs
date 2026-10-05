@@ -256,6 +256,67 @@ fn a_match_runs_lessons_arent_the_producers_words_and_the_latest_long_message_st
 }
 
 #[test]
+fn a_turn_whose_latest_results_alone_are_past_the_limit_has_them_cut_to_fit() {
+    let part = |id: &str| {
+        ToolPart::ToolResult(ToolResultPart {
+            tool_call_id: id.into(),
+            tool_name: "read_web".into(),
+            output: ToolResultOutput::text(read(id, 30_000)),
+            provider_options: None,
+        })
+    };
+    let turn = vec![user(&observed("now")), called("t1"), Message::Tool { content: vec![part("t1"), part("t2")], provider_options: None }];
+    let history: Vec<Message> = vec![];
+    let budget = budget(4096.0, 16.0 * 1024.0);
+    let fitted = fit(&history, &turn, &budget);
+    assert!(size(&[fitted.history.as_ref(), fitted.turn.as_ref()].concat()) as f64 <= budget.limit);
+    assert_eq!(text_of(fitted.turn.first()), text_of(turn.first()));
+    let Some(Message::Tool { content, .. }) = fitted.turn.last() else { panic!("the results stay last") };
+    for (part, id) in content.iter().zip(["t1", "t2"]) {
+        let ToolPart::ToolResult(ToolResultPart { output: ToolResultOutput::Text { value, .. }, .. }) = part else {
+            panic!("a text result")
+        };
+        assert!(value.starts_with(&format!("{{\"changed\":\"{id}\"")) && value.ends_with("to see more.]"), "{value}");
+    }
+}
+
+#[test]
+fn with_no_room_left_each_latest_result_still_keeps_its_opening_cut_between_characters() {
+    let part = |id: &str, output: ToolResultOutput| {
+        ToolPart::ToolResult(ToolResultPart { tool_call_id: id.into(), tool_name: "read".into(), output, provider_options: None })
+    };
+    let results: Vec<ToolPart> = vec![
+        part("ok", ToolResultOutput::text(format!("Applied: tempo 124. {}", "x".repeat(40_000)))),
+        part("err", ToolResultOutput::error_text(format!("Refused: the track is frozen. {}", "y".repeat(40_000)))),
+        part("cjk", ToolResultOutput::text("リバーブ".repeat(10_000))),
+    ]
+    .into_iter()
+    .chain((0..20).map(|i| part(&format!("many{i}"), ToolResultOutput::text("z".repeat(5_000)))))
+    .collect();
+    // The turn's own opening already takes the whole limit: there's no room for the results at all.
+    let turn = vec![user(&observed(&"w".repeat(20_000))), called("ok"), Message::Tool { content: results, provider_options: None }];
+    let history: Vec<Message> = vec![];
+    let fitted = fit(&history, &turn, &budget(4096.0, 16.0 * 1024.0));
+    let Some(Message::Tool { content, .. }) = fitted.turn.last() else { panic!("the results stay last") };
+    let texts: Vec<String> = content
+        .iter()
+        .map(|part| match part {
+            ToolPart::ToolResult(ToolResultPart {
+                output: ToolResultOutput::Text { value, .. } | ToolResultOutput::ErrorText { value, .. },
+                ..
+            }) => value.clone(),
+            other => panic!("a text result: {other:?}"),
+        })
+        .collect();
+    assert_eq!(texts.len(), 23);
+    assert!(texts[0].starts_with("Applied: tempo 124.") && texts[0].ends_with("to see more.]"), "{}", texts[0]);
+    assert!(texts[1].starts_with("Refused: the track is frozen."), "{}", texts[1]);
+    assert!(matches!(content[1], ToolPart::ToolResult(ToolResultPart { output: ToolResultOutput::ErrorText { .. }, .. })));
+    assert!(texts[2].starts_with("リバーブ"), "{}", texts[2]);
+    assert!(texts.iter().all(|text| text.len() >= 200), "each keeps an opening");
+}
+
+#[test]
 fn drop_earliest_keeps_whole_exchanges_from_the_end_starting_where_the_producer_spoke() {
     let messages = vec![user("1"), said("2"), result("3", "three", false), user("4"), said("5")];
     assert_eq!(drop_earliest(&messages, 10_000), &messages[..]);
