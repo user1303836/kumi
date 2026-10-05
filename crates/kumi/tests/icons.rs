@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/test/icons.test.ts`.
-
 use std::collections::{HashMap, HashSet};
 
 use kumi::tui::icons::{detect_icon_style, device_kind, icon, icons, track_kind, DeviceRow, IconKind, IconStyle};

@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/library/learner.ts`.
 //! A low-priority process that learns, accepts pause/resume/stop, and reports progress over JSON lines.
 use super::{
     learn::{learn, LearnOptions, LearnPhase, LearnProgress},

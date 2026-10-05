@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/test/sqlite-reader.test.ts`.
-
 use ableton_mcp_server::sqlite_reader::{SqliteReader, SqliteValue, DEFAULT_SCAN_MAX_ROWS};
 
 fn write_u16(bytes: &mut [u8], offset: usize, value: u16) {

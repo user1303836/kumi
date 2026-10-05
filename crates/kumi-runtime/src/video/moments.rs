@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/video/moments.ts`.
 //! Moments whose narration names devices/settings/values, chapter starts, or spread through.
 use super::captions::Cue;
 use kumi_common::js::number::round;

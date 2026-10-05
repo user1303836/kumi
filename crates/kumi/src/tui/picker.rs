@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/tui/picker.ts`.
-//!
 //! A list to choose from in a panel above the input box: models grouped by provider, effort
 //! levels, providers to sign in to. Typing filters it; headings stay with what they head.
 

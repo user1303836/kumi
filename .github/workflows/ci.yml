@@ -13,193 +13,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  candidate:
-    name: Build exact local candidate
-    runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: apps/mcp-server
-    outputs:
-      artifact_sha256: ${{ steps.metadata.outputs.artifact_sha256 }}
-      artifact_name: ${{ steps.metadata.outputs.artifact_name }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
-        with:
-          fetch-depth: 0
-      - name: Check committed whitespace in this change
-        shell: bash
-        run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            git diff --check "origin/${GITHUB_BASE_REF}...HEAD"
-          else
-            git diff-tree --check --no-commit-id -r HEAD
-          fi
-        working-directory: .
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (Node 24)
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: apps/mcp-server/package-lock.json
-      - run: npm ci
-      - shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf "$RUNNER_TEMP/candidate-a" "$RUNNER_TEMP/candidate-b" "$RUNNER_TEMP/candidate"
-          mkdir "$RUNNER_TEMP/candidate-a" "$RUNNER_TEMP/candidate-b" "$RUNNER_TEMP/candidate"
-          pack_a=$(npm pack --json --pack-destination "$RUNNER_TEMP/candidate-a")
-          artifact=$(node -e 'let input="";process.stdin.on("data",c=>input+=c).on("end",()=>process.stdout.write(JSON.parse(input).at(-1).filename))' <<<"$pack_a")
-          git clone --quiet --no-hardlinks "$GITHUB_WORKSPACE" "$RUNNER_TEMP/repro-source"
-          git -C "$RUNNER_TEMP/repro-source" checkout --quiet --detach "$GITHUB_SHA"
-          pack_b=$(cd "$RUNNER_TEMP/repro-source/apps/mcp-server" && npm ci >/dev/null && npm pack --json --pack-destination "$RUNNER_TEMP/candidate-b")
-          reproduced=$(node -e 'let input="";process.stdin.on("data",c=>input+=c).on("end",()=>process.stdout.write(JSON.parse(input).at(-1).filename))' <<<"$pack_b")
-          test "$artifact" = "$reproduced"
-          cmp "$RUNNER_TEMP/candidate-a/$artifact" "$RUNNER_TEMP/candidate-b/$artifact"
-          cp "$RUNNER_TEMP/candidate-a/$artifact" "$RUNNER_TEMP/candidate/"
-      - id: metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          artifacts=("$RUNNER_TEMP/candidate/"*.tgz)
-          test "${#artifacts[@]}" -eq 1
-          artifact=${artifacts[0]}
-          filename=$(basename "$artifact")
-          sha=$(shasum -a 256 "$artifact" | awk '{print $1}')
-          printf '{"schema":"ableton-mcp-candidate/v1","gitSha":"%s","filename":"%s","sha256":"%s"}\n' "$GITHUB_SHA" "$filename" "$sha" > "$RUNNER_TEMP/candidate/candidate-metadata.json"
-          echo "artifact_sha256=$sha" >> "$GITHUB_OUTPUT"
-          echo "artifact_name=$filename" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
-        with:
-          name: exact-local-candidate
-          path: ${{ runner.temp }}/candidate/
-          if-no-files-found: error
-          retention-days: 90
-
-  quality:
-    # Linux-only checks, run beside the candidate rather than before it, so the OS matrix starts
-    # as soon as the candidate is packed. The coverage run is the functional test run.
-    name: Coverage, benchmarks and the audio oracle
-    runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: apps/mcp-server
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (Node 24)
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: apps/mcp-server/package-lock.json
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run coverage
-      - run: node --test scripts/release-documentation.test.mjs scripts/capability-manifest.test.mjs scripts/docs-drift.test.mjs scripts/release-retention.test.mjs
-      - run: npm run property-test
-      - run: npm run benchmark
-      - name: Install independent FFmpeg oracle
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends ffmpeg
-      - run: npm run audio:oracle
-      - run: npm run compatibility
-      - run: npm run package:verify
-
-  node:
-    name: Node ${{ matrix.node }} / ${{ matrix.os }}${{ matrix.part && format(' / {0}', matrix.part) || '' }}
-    needs: candidate
+  rust:
+    name: Rust / ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        # tests: run the functional tests (a shard of them where given); verify: install and exercise the
-        # exact candidate. Windows runs its tests as four shards (balanced by cost) and its verification side by side.
         include:
-          - { os: ubuntu-24.04, node: 22, tests: true, verify: true }
-          - { os: ubuntu-24.04, node: 24, tests: true, verify: true }
-          - { os: macos-15, node: 24, tests: true, verify: true }
-          - { os: windows-2025, node: 24, tests: true, shard: "1/4", part: "tests 1/4" }
-          - { os: windows-2025, node: 24, tests: true, shard: "2/4", part: "tests 2/4" }
-          - { os: windows-2025, node: 24, tests: true, shard: "3/4", part: "tests 3/4" }
-          - { os: windows-2025, node: 24, tests: true, shard: "4/4", part: "tests 4/4" }
-          - { os: windows-2025, node: 24, verify: true, part: "candidate" }
-    defaults:
-      run:
-        working-directory: apps/mcp-server
+          - { os: ubuntu-24.04, label: Linux }
+          - { os: macos-15, label: macOS }
+          - { os: windows-2025, label: Windows }
+    timeout-minutes: 45
     steps:
-      - name: Stop Windows Defender scanning the workspace (it slows every file the tests touch)
+      - name: Stop Windows Defender scanning the workspace (it slows every file the build touches)
         if: runner.os == 'Windows'
         continue-on-error: true
         shell: pwsh
-        working-directory: ${{ runner.temp }}
         run: Set-MpPreference -DisableRealtimeMonitoring $true
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (Node 24)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
-          node-version: ${{ matrix.node }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
           cache: npm
-          cache-dependency-path: apps/mcp-server/package-lock.json
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
-        with:
-          python-version: "3.11"
-      - run: npm ci
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1 (Node 24)
-        with:
-          name: exact-local-candidate
-          path: ${{ runner.temp }}/ableton-candidate
-      - run: npm run typecheck
-      - if: matrix.tests
-        run: npm test
+          cache-dependency-path: crates/kumi-runtime/tests/support/package-lock.json
+      - name: Install the official MCP and model SDKs the interoperability tests run beside Kumi's
+        run: npm ci --prefix crates/kumi-runtime/tests/support --ignore-scripts
+      - run: cargo fmt --all --check
+      - name: Windows input regressions
+        if: runner.os == 'Windows'
+        shell: pwsh
         env:
-          TEST_SHARD: ${{ matrix.shard }}
-      - if: matrix.tests && !matrix.shard
-        run: npm run property-test
-      - if: matrix.verify
-        run: npm run compatibility
-      - name: Verify installed package from the exact shared candidate
-        if: matrix.verify
-        env:
-          ABLETON_MCP_ARTIFACT: ${{ runner.temp }}/ableton-candidate/${{ needs.candidate.outputs.artifact_name }}
-        run: npm run package:verify
-      - name: Verify the exact shared candidate
-        if: matrix.verify
-        shell: bash
-        env:
-          CANDIDATE_DIR: ${{ runner.temp }}/ableton-candidate
-        run: node scripts/verify-candidate.mjs "$CANDIDATE_DIR/${{ needs.candidate.outputs.artifact_name }}" "$CANDIDATE_DIR/candidate-metadata.json" | tee "$RUNNER_TEMP/candidate-verification.json"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
-        if: matrix.verify
-        with:
-          name: candidate-verification-${{ matrix.os }}-node-${{ matrix.node }}
-          path: ${{ runner.temp }}/candidate-verification.json
-          if-no-files-found: error
-          retention-days: 90
-      - name: Verify production journeys from the exact shared candidate
-        if: matrix.verify
-        env:
-          ABLETON_MCP_ARTIFACT: ${{ runner.temp }}/ableton-candidate/${{ needs.candidate.outputs.artifact_name }}
-        run: npm run journey:verify
-      - if: matrix.verify
-        run: npm pack --dry-run --json
-      - if: matrix.verify
-        run: npm run setup -- --output "${{ runner.temp }}/ableton-mcp-host.json"
-      - if: matrix.verify
-        shell: bash
-        run: |
-          printf '%s\n' '{"command":"node","args":["dist/src/cli.js"]}' > "${{ runner.temp }}/ableton-mcp-legacy.json"
-          npm run migrate -- --input "${{ runner.temp }}/ableton-mcp-legacy.json" --output "${{ runner.temp }}/ableton-mcp-migrated.json"
-      - name: Exercise exact version-2 migration
-        if: matrix.verify
-        shell: bash
-        run: |
-          node --input-type=module -e "import { writeSecretFile } from './dist/src/delivery.js'; writeSecretFile(process.argv[1], 'm'.repeat(32))" "${{ runner.temp }}/ableton-mcp-migration.secret"
-          npm run migrate -- --input "${{ runner.temp }}/ableton-mcp-host.json" --output "${{ runner.temp }}/ableton-mcp-v2.json" --bridge-host 127.0.0.1 --bridge-port 19765 --realtime-port 19766 --secret-file "${{ runner.temp }}/ableton-mcp-migration.secret"
-          node -e "const c=require(process.argv[1]);if(c.version!==2||c.bridge.host!=='127.0.0.1')process.exit(1)" "${{ runner.temp }}/ableton-mcp-v2.json"
-      - if: matrix.verify
-        run: npm run diagnostics -- --config "${{ runner.temp }}/ableton-mcp-host.json"
+          RUST_TEST_NOCAPTURE: '1'
+        run: ./scripts/test-isolated.ps1 --test stdin_handoff --test windows_console_control --test windows_stdin --test windows_tty --no-fail-fast
+      - run: cargo build --workspace --all-targets --locked
+      - name: Tests, in a home of their own (no test reaches this machine's Live folders or ~/.kumi)
+        if: runner.os != 'Windows'
+        run: sh scripts/test-isolated.sh --no-fail-fast
+      - name: Tests, in a home of their own (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test-isolated.ps1 --no-fail-fast
+      - name: Clippy (advisory while the port is under way)
+        continue-on-error: true
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: git diff --check
 
   remote-script:
-    name: Python Remote Script contract / ${{ matrix.os }}
-    needs: candidate
+    name: Python Remote Script / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -220,26 +84,58 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
         with:
           python-version: "3.11"
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1 (Node 24)
-        with:
-          name: exact-local-candidate
-          path: ${{ runner.temp }}/ableton-candidate
-      - name: Bind Python assets to the exact shared candidate
-        run: python ../apps/mcp-server/scripts/verify-candidate-python.py "${{ runner.temp }}/ableton-candidate/${{ needs.candidate.outputs.artifact_name }}" "${{ runner.temp }}/ableton-candidate/candidate-metadata.json"
       - run: python -m unittest discover -s . -p 'test_*.py'
       - run: python -m compileall -q AbletonMcpBridge
+
+  live-extension:
+    # Its type check needs the Ableton Extensions SDK, which can't be redistributed; the tests run Live fakes.
+    name: Live extension
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/live-extension
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (Node 24)
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/live-extension/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm test
+
+  scripts:
+    name: Release scripts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
+        with:
+          fetch-depth: 0
+      - name: Check committed whitespace in this change
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git diff --check "origin/${GITHUB_BASE_REF}...HEAD"
+          else
+            git diff-tree --check --no-commit-id -r HEAD
+          fi
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
+        with:
+          python-version: "3.13"
+      - name: Native release packaging
+        run: python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
   required:
     name: Required CI
     if: always()
-    needs: [candidate, quality, node, remote-script]
+    needs: [rust, remote-script, live-extension, scripts]
     runs-on: ubuntu-24.04
     steps:
-      - name: Require the complete exact-candidate contract matrix
+      - name: Require every job above
         shell: bash
         run: |
           set -euo pipefail
-          test "${{ needs.candidate.result }}" = "success"
-          test "${{ needs.quality.result }}" = "success"
-          test "${{ needs.node.result }}" = "success"
+          test "${{ needs.rust.result }}" = "success"
           test "${{ needs.remote-script.result }}" = "success"
+          test "${{ needs.live-extension.result }}" = "success"
+          test "${{ needs.scripts.result }}" = "success"

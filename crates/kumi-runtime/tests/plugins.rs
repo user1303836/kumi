@@ -1,4 +1,4 @@
-//! Port of `packages/runtime/test/plugins.test.ts`: the guide. The plugin tool's test (reading a
+//! The guide. The plugin tool's test (reading a
 //! plug-in's names through the synthetic bridge and making a wavetable) waits for the integration.
 
 use kumi_runtime::plugins::adapter::{

@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/plugins/adapters/ozone12.ts`.
-
 use std::sync::LazyLock;
 
 use crate::plugins::adapter::{pattern, PluginAdapter, PluginKind, PluginParameterHint, PluginRecipe, PluginSection};

@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/tui/render.ts`.
-//!
 //! Turns screens into terminal output, writing only the cells that changed since the last frame.
 
 use std::rc::Rc;

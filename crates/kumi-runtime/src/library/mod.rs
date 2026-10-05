@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/library/index.ts`.
-
 pub mod classify;
 pub mod features;
 pub mod learn;

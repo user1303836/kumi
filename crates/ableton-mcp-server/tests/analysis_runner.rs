@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/test/analysis-runner.test.ts`.
-
 use std::f64::consts::PI;
 use std::future::Future;
 use std::time::Duration;

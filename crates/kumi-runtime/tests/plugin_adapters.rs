@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/test/plugin-adapters.test.ts`.
-
 use std::collections::HashSet;
 
 use kumi_runtime::plugins::adapter::{matches, Pattern, PluginAdapter, PluginKind};

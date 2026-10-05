@@ -1,4 +1,3 @@
-//! Port of `apps/kumi/src/login.ts`.
 use crate::{
     config::{read_settings, AppConfig, LoginMethod},
     input::TerminalInput,

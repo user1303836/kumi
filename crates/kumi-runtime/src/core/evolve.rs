@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/core/evolve.ts`.
-//!
 //! The goal mode's cheap monkeys: an evolutionary search over the knobs of a few candidate chains,
 //! with no model call. Each slot is a track with its own chain; a candidate is a set of values for
 //! that chain's knobs. Each generation proposes one trial per slot: a few knobs nudged around the

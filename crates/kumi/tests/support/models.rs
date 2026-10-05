@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-//! Source fake-models.ts contract shared by plain terminal and full-screen app tests.
+//! Fake models shared by the plain terminal and full-screen app tests.
 use async_trait::async_trait;
 use kumi::models::{ChatGptSignIn, CurrentModel, DefaultModel, LocalStatus, ModelController, ProviderStatus};
 use kumi_common::abort::Signal;

@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/mcp/allowed-tools.ts`.
-
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -13,7 +11,7 @@ use tokio::sync::oneshot;
 
 use super::client::{McpEndpoint, MAX_BRIDGE_MESSAGE_BYTES};
 use super::types::{CallToolResult, Tool};
-use crate::core::{contracts::JsonObject, errors::RuntimeError};
+use crate::core::{contracts::JsonObject, errors::RuntimeError, timing};
 
 /// Tools the model may call directly: reads.
 // Not live_snapshot: a whole big Set in one answer is more than the link carries (discovery pages instead).
@@ -253,11 +251,13 @@ impl AllowedTools {
             limited.insert("limit".into(), json!(SMALL_PAGE));
             limited
         };
+        timing::live_request();
         let mut result = self
             .endpoint
             .call(name, if big && self.state.borrow().small_pages { small_args() } else { args.clone() }, signal.clone())
             .await?;
         if big && !self.state.borrow().small_pages && result.is_error == Some(true) {
+            timing::live_request();
             let retried = self.endpoint.call(name, small_args(), signal.clone()).await?;
             if retried.is_error != Some(true) {
                 self.state.borrow_mut().small_pages = true;

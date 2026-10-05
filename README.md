@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/user1303836/kumi/actions/workflows/kumi.yml"><img alt="CI" src="https://github.com/user1303836/kumi/actions/workflows/kumi.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/user1303836/kumi/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/user1303836/kumi/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/user1303836/kumi/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/user1303836/kumi?label=release"></a>
   <img alt="Ableton Live 12" src="https://img.shields.io/badge/Ableton%20Live-12-111111">
   <img alt="Native Rust runtime" src="https://img.shields.io/badge/runtime-native%20Rust-555555">
@@ -85,8 +85,9 @@ Build this checkout with Rust and Cargo:
 
 ```sh
 cargo build --release --locked --workspace --bins
-cargo run --release -p kumi --        # add bridge, doctor, or other arguments after --
-sh scripts/test-isolated.sh          # no Live or sign-in needed
+cargo run --release -p kumi --                     # add bridge, doctor, or other arguments after --
+npm ci --prefix crates/kumi-runtime/tests/support  # once: the official SDKs some tests run
+sh scripts/test-isolated.sh                        # no Live or sign-in needed
 ```
 
 Existing `npm run setup` and `npm run kumi -- ...` commands remain available. With Cargo installed,
@@ -94,14 +95,11 @@ these build and run this checkout. Without Cargo, they install and launch the ma
 native release, keeping the same settings, sign-ins, conversations and library in `~/.kumi`.
 After that handoff, `kumi` runs the native application directly.
 
-The TypeScript source remains the parity reference. Node.js 22 or 24 is needed only for its
-`npm ci`, `npm run build`, `npm run typecheck`, and `npm test` commands.
-
 | Folder | What's in it |
 | --- | --- |
 | `crates/kumi` | The native terminal app and `kumi` command |
 | `crates/kumi-runtime` | Model providers, memory, audio analysis, video, the web, and the Live integration |
-| `crates/ableton-mcp-server` | The native bridge, also usable by other MCP clients ([bridge guide](apps/mcp-server/README.md)) |
+| `crates/ableton-mcp-server` | The native bridge, also usable by other MCP clients ([bridge guide](crates/ableton-mcp-server/README.md)) |
 | `remote-script` | The bridge's Remote Script, which runs inside Live |
 | `apps/live-extension` | Kumi's Live extension (Live 12.4 and later) |
 | `protocol` | The list of operations the bridge and the Remote Script share |

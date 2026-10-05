@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/library/manual.ts`.
 //! Live's manual, cached locally and searched by section with cited passages.
 use super::{
     store::{read_json, write_json},

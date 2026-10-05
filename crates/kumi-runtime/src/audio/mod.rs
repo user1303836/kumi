@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/audio/index.ts`.
-
 pub mod analyze;
 pub mod decode;
 pub mod dsp;

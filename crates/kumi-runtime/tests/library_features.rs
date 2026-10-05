@@ -1,4 +1,4 @@
-//! Measurement/classification assertions from library.test.ts and TypeScript differential cases.
+//! Library measurement and classification, with differential cases.
 #[path = "support/library.rs"]
 mod fixtures;
 use fixtures::*;

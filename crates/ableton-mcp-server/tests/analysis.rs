@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/test/analysis.test.ts`.
-
 #[path = "support/fixtures.rs"]
 mod fixtures;
 

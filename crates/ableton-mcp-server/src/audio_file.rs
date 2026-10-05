@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/audio-file.ts`.
-//!
 //! Reading and removing the one WAV file a capture owns, with the identity fences the TypeScript
 //! kept: a fresh regular file with one link, opened without following symlinks, re-checked by
 //! device and inode after every step, and quarantined before it is unlinked.

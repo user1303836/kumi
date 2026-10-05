@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/test/registry.test.ts`.
-
 use std::path::PathBuf;
 use std::process::Command;
 

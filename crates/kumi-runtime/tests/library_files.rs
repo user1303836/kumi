@@ -1,4 +1,4 @@
-//! Live files from the TypeScript library tests, plus differential parser cases.
+//! Live files the library reads, plus differential parser cases.
 use base64::{engine::general_purpose::STANDARD, Engine};
 use kumi_common::js::json::stringify;
 use kumi_runtime::library::{

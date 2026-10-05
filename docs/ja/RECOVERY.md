@@ -51,7 +51,7 @@
 
 | 問題 | 対処 |
 | --- | --- |
-| サーバーが "Unsupported Node.js" で終了する | Node 22 または 24 で実行してください。 |
+| Kumi 1.7.5 以前がインストールした JavaScript 版のブリッジが "Unsupported Node.js" で終了する | Node 22 または 24 で実行してください。ネイティブ版のブリッジは Node を使いません。 |
 | "version-1 configuration does not enable a Live adapter" | `ableton-mcp-setup` とブリッジのオプションで、バージョン 2 のファイルを書き出してください。[設定ファイル](USER_GUIDE.md#設定ファイル)を参照。 |
 | "secret file is invalid"、またはアクセス権が "must be conclusively owner-only" | シークレットは 32 文字以上の 1 行で、自分だけが読めるようにする必要があります。ライフサイクルでインストールした場合は、`ableton-mcp-lifecycle repair` で元に戻せます。 |
 | `live_status` が `"connected": false` を返す | Live が動いていて **AbletonMcpBridge** が Control Surface として選ばれていること、そして設定のポートとシークレットが、Remote Script の使っているものと同じであることを確認してください。そのあと `ableton-mcp-diagnostics --config <path>` を実行します。 |

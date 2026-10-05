@@ -71,7 +71,7 @@ until you finalize them.
 
 | Problem | What to do |
 | --- | --- |
-| The server exits with "Unsupported Node.js" | Run it with Node 22 or 24. |
+| A JavaScript bridge, installed by Kumi 1.7.5 or earlier, exits with "Unsupported Node.js" | Run it with Node 22 or 24. The native bridge doesn't use Node. |
 | "version-1 configuration does not enable a Live adapter" | Write a version 2 file with `ableton-mcp-setup` and the bridge options; see [the configuration file](USER_GUIDE.md#the-configuration-file). |
 | "secret file is invalid", or its permissions "must be conclusively owner-only" | The secret must be one line of 32 or more characters, readable only by you. For a lifecycle install, `ableton-mcp-lifecycle repair` restores them. |
 | `live_status` says `"connected": false` | Check that Live is running with **AbletonMcpBridge** chosen as a Control Surface, and that the configuration's port and secret are the ones the Remote Script uses. Then run `ableton-mcp-diagnostics --config <path>`. |

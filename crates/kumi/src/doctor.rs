@@ -1,4 +1,4 @@
-//! Port of `apps/kumi/src/doctor.ts`; native installs also diagnose legacy bridge configurations.
+//! `kumi doctor`; native installs also diagnose legacy bridge configurations.
 use crate::{
     config::*,
     live_extension::*,

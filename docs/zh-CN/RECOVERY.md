@@ -51,7 +51,7 @@
 
 | 问题 | 处理方法 |
 | --- | --- |
-| 服务器以 “Unsupported Node.js” 退出 | 用 Node 22 或 24 运行。 |
+| 由 Kumi 1.7.5 或更早版本安装的 JavaScript 桥接以 “Unsupported Node.js” 退出 | 用 Node 22 或 24 运行。原生桥接不使用 Node。 |
 | “version-1 configuration does not enable a Live adapter” | 用 `ableton-mcp-setup` 加上桥接选项写出版本 2 的文件；见[配置文件](USER_GUIDE.md#配置文件)。 |
 | “secret file is invalid”，或其权限 “must be conclusively owner-only” | 密钥必须是一行 32 个或更多字符，且只有你能读取。如果是通过生命周期工具安装的，`ableton-mcp-lifecycle repair` 会恢复正确的权限。 |
 | `live_status` 显示 `"connected": false` | 确认 Live 正在运行，并已将 **AbletonMcpBridge** 选为控制界面（Control Surface），且配置中的端口和密钥与 Remote Script 使用的一致。然后运行 `ableton-mcp-diagnostics --config <path>`。 |

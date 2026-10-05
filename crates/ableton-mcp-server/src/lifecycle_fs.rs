@@ -1,4 +1,4 @@
-//! Owner-state and compensation primitives from lifecycle.ts.
+//! Owner-state and compensation primitives for the bridge's install lifecycle.
 use super::*;
 use sha2::{Digest, Sha256};
 use std::{

@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/framing.ts`.
-
 use memchr::memchr_iter;
 
 // One MCP message as large as a string can be: V8 stops strings at about 512 MiB, and a record becomes

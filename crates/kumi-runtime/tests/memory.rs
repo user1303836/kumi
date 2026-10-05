@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/test/memory.test.ts`.
 use kumi_common::abort;
 use kumi_runtime::core::{
     contracts::{Memory, MemoryEvent, MemoryNote, MemoryScope, MemoryStore, ToolResult},

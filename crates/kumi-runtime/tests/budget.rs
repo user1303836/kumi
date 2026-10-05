@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/test/budget.test.ts`.
-
 use std::borrow::Cow;
 
 use kumi_common::js::json::stringify;

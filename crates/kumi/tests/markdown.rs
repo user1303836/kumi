@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/test/markdown.test.ts`.
-
 use std::rc::Rc;
 
 use kumi::tui::markdown::{inline, render_markdown, MarkdownRow};

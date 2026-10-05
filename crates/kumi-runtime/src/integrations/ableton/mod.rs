@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/integrations/ableton/index.ts`.
-
 pub mod action_execution;
 pub mod actions;
 pub mod arrange;

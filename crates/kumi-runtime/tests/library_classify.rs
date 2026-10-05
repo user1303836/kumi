@@ -1,4 +1,4 @@
-//! Naming and XML cases from `packages/runtime/test/library.test.ts`.
+//! Naming and XML cases.
 use kumi_runtime::library::{classify::*, xml::*};
 #[test]
 fn names_say_class_kind_tempo_key_and_note() {

@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/devices/harness-child.ts`.
-//!
 //! The device check's own process: the spec in on stdin, the result out on stdout, nothing else. Kumi
 //! starts it with no environment, a memory limit, no code generation from strings and a deadline, so a
 //! device's code can't reach Kumi, the producer's files or keys, or hang Kumi (see check_midi_device_isolated).

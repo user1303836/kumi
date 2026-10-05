@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/test/key-estimation.test.ts`.
-
 use ableton_mcp_server::key_estimation::{estimate_key, KeyConfidence, KeyEstimateNote};
 
 fn melody(pitches: &[i32], velocity: Option<f64>, beats_per_note: f64) -> Vec<KeyEstimateNote> {

@@ -164,7 +164,7 @@ repeats stop.
 
 ## Design notes
 
-For people working on the app (`apps/kumi/src/tui/`).
+For people working on the app (`crates/kumi/src/tui/`).
 
 **Principles.** Kumi owns the whole window and draws every cell, so panes scroll
 on their own and stay put. No boxes: areas are separated by background shade.
@@ -173,7 +173,7 @@ Colour always means something. Words before symbols, and steps read as music
 something is happening or changing. The pane is a view: the runtime describes
 what to draw as data, so another front end could draw the same things.
 
-**Palette** (`style.ts`). Greys from `#0e0f12` (ground) to `#f4f6f8` (bright),
+**Palette** (`style.rs`). Greys from `#0e0f12` (ground) to `#f4f6f8` (bright),
 one accent, mint `#86e3b5`, and Live's own track colours (very dark ones are
 lightened for display). Warning `#e7b45f`, error `#ee8479`, the beat light
 `#ffe14d`. What Kumi keeps has a colour per kind: notes `#8cc8ff`, techniques
@@ -181,23 +181,23 @@ lightened for display). Warning `#e7b45f`, error `#ee8479`, the beat light
 
 **Foundations**, built from terminal primitives with no UI framework:
 
-1. Terminal I/O (`tty.ts`): raw mode, the alternate screen, bracketed paste,
+1. Terminal I/O (`tty.rs`): raw mode, the alternate screen, bracketed paste,
    SGR mouse, focus events, the kitty keyboard protocol where offered; the
    terminal is restored on exit, crashes and signals.
-2. Input (`keys.ts`): keys with modifiers (xterm and CSI u), pastes, mouse,
+2. Input (`keys.rs`): keys with modifiers (xterm and CSI u), pastes, mouse,
    sequences split across reads, and a lone Esc resolved by a short timeout.
    With the kitty protocol, a held key's repeats and its let-go are events of
    their own.
-3. Screen and renderer (`screen.ts`, `render.ts`): a grid of cells; each frame
+3. Screen and renderer (`screen.rs`, `render.rs`): a grid of cells; each frame
    is diffed against the last and only changed cells are written, inside a
    synchronized update. Colour falls back from 24-bit to 256, 16 and none.
-4. Text (`width.ts`, `wrap.ts`): grapheme widths (wide CJK and emoji take two
+4. Text (`width.rs`, `wrap.rs`): grapheme widths (wide CJK and emoji take two
    cells), wrapping and truncation.
-5. Frames (`scheduler.ts`): redraws are coalesced, and an animation clock runs
+5. Frames (`scheduler.rs`): redraws are coalesced, and an animation clock runs
    only while something moves.
 
-`app.ts` draws the layout and handles input; `editor.ts` is the input box,
-`transcript.ts` the conversation, `tree.ts` the device tree and `tabs.ts` the
+`app.rs` draws the layout and handles input; `editor.rs` is the input box,
+`transcript.rs` the conversation, `tree.rs` the device tree and `tabs.rs` the
 tabs. Tests replay the renderer's output through a small terminal interpreter,
 which must reproduce the intended frame exactly.
 

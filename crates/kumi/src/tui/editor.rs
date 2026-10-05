@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/tui/editor.ts`.
-//!
 //! The input box: text and cursor. Positions count graphemes, so the cursor never splits a character.
 
 use super::width::{cell_width, graphemes};

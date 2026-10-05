@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/src/live.ts`.
-//!
 //! Live-domain contract and deterministic simulator.
 //!
 //! The simulator is deliberately an adapter test double: it models stable

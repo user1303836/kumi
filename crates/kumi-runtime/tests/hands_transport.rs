@@ -3,22 +3,16 @@ use kumi_runtime::hands::*;
 use serde_json::{json, Value};
 use std::{path::Path, time::Duration};
 #[test]
-fn embedded_helpers_are_the_complete_source_programs_with_identical_hashes() {
+fn embedded_helpers_keep_their_hashes() {
+    // The Mac helper installs as kumi-hands-<first 12 hex of its hash>, and macOS ties the producer's
+    // Accessibility permission to that file: a changed MAC_SOURCE asks for the permission again.
     use sha2::{Digest, Sha256};
-    for (source, typescript, name) in [
-        (mac::MAC_SOURCE, include_str!("../../../packages/runtime/src/hands/mac.ts"), "MAC_SOURCE"),
-        (windows::WINDOWS_SOURCE, include_str!("../../../packages/runtime/src/hands/windows.ts"), "WINDOWS_SOURCE"),
+    assert_eq!(HANDS_VERSION, 2);
+    for (source, expected) in [
+        (mac::MAC_SOURCE, "16045380d38220f9dfd1a6dd318dac9b655fc41758f2531efc46ab97f82a7ba3"),
+        (windows::WINDOWS_SOURCE, "7cc8e2446ce4202521b8e9238ecf882f42abfb9bc131c25872c4d424f2d323c8"),
     ] {
-        let expected = typescript
-            .split_once(&format!("export const {name} = String.raw`"))
-            .unwrap()
-            .1
-            .rsplit_once("`;")
-            .unwrap()
-            .0
-            .replace("${HANDS_VERSION}", &HANDS_VERSION.to_string());
-        assert_eq!(source, expected);
-        assert_eq!(hex::encode(Sha256::digest(source)), hex::encode(Sha256::digest(expected)));
+        assert_eq!(hex::encode(Sha256::digest(source)), expected);
     }
 }
 #[cfg(unix)]

@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/video/programs.ts`.
-//!
 //! The programs watching a video needs: yt-dlp (what a video page holds: captions, chapters, its
 //! streams), ffmpeg (a frame, or a stretch of sound, from a stream) and, for a video without
 //! captions, whisper.cpp (its speech, transcribed on this computer) with a speech model. yt-dlp,

@@ -1,4 +1,4 @@
-//! Port of `apps/mcp-server/test/follow-actions.test.ts`, as far as it runs without the host.
+//! Follow actions, as far as they run without the host.
 //!
 //! The TypeScript tests drive `live_follow_actions_preview/apply` and `live_undo` through `McpHost`;
 //! those belong with the host port. What the simulator and the validator do on their own is tested here:

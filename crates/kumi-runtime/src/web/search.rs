@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/web/search.ts`.
 //! Search through public services, DuckDuckGo fallback, or GitHub, and share cached requests.
 pub use super::exa::Found;
 use super::{

@@ -1,5 +1,3 @@
-//! Port of `apps/mcp-server/test/framing.test.ts`.
-
 use ableton_mcp_server::framing::{FrameError, FrameEvent, NdjsonFramer, MAX_FRAME_BYTES};
 
 #[test]

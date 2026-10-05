@@ -1,0 +1,275 @@
+//! Where each turn's time went: its model calls (time to first part and in all), its tools, its Live
+//! requests and the bytes it sent. One line per turn in a local log (`timings.jsonl`), which `kumi
+//! report` shows, so every change to Kumi can be measured before and after.
+//!
+//! A turn runs on the session's one thread, and one turn runs at a time, so the turn being timed is
+//! a thread-local the kernel, the model client and the Live client add to as they go.
+use std::{cell::RefCell, path::Path, rc::Rc, time::Instant};
+
+use kumi_common::{
+    js::json,
+    time::{iso_string, now_ms},
+};
+use serde_json::{json, Value};
+
+use super::contracts::Usage;
+use crate::ai::types::{StreamPart, StreamParts};
+use crate::version::KUMI_VERSION;
+
+const MAX_BYTES: u64 = 512 * 1024;
+const KEEP_LINES: usize = 1000;
+
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct TurnTiming {
+    pub model: Option<String>,
+    pub model_calls: u32,
+    pub model_ms: u64,
+    /// Each model call's wait for its first content: text, reasoning or a tool call (not the stream's
+    /// start or its metadata, which come with the response's headers).
+    pub first_part_ms: Vec<u64>,
+    pub tools: u32,
+    pub tool_ms: u64,
+    /// Requests to Live's bridge, FOCUS's own reads while the turn ran left out.
+    pub live_requests: u32,
+    /// Request bodies sent to the model.
+    pub sent_bytes: u64,
+}
+
+thread_local! {
+    static ACTIVE: RefCell<Option<Rc<RefCell<TurnTiming>>>> = const { RefCell::new(None) };
+}
+
+tokio::task_local! {
+    static BACKGROUND: ();
+}
+
+/// The turn being timed, from `begin` until `finish` (or until it's dropped).
+pub struct Recorder {
+    timing: Rc<RefCell<TurnTiming>>,
+}
+
+/// Start timing a turn; a turn already being timed is replaced.
+pub fn begin() -> Recorder {
+    let timing = Rc::new(RefCell::new(TurnTiming::default()));
+    ACTIVE.with(|active| *active.borrow_mut() = Some(timing.clone()));
+    Recorder { timing }
+}
+
+impl Recorder {
+    /// The turn's numbers; timing stops.
+    pub fn finish(self) -> TurnTiming {
+        self.timing.borrow().clone()
+    }
+}
+
+impl Drop for Recorder {
+    fn drop(&mut self) {
+        ACTIVE.with(|active| {
+            let mut active = active.borrow_mut();
+            if active.as_ref().is_some_and(|current| Rc::ptr_eq(current, &self.timing)) {
+                *active = None;
+            }
+        });
+    }
+}
+
+/// Adds to the turn being timed; work done for something else (`background`) adds nothing.
+fn with(add: impl FnOnce(&mut TurnTiming)) {
+    if BACKGROUND.try_with(|_| ()).is_ok() {
+        return;
+    }
+    ACTIVE.with(|active| {
+        if let Some(timing) = active.borrow().as_ref() {
+            add(&mut timing.borrow_mut());
+        }
+    });
+}
+
+/// One model call, from its request to the end of its stream.
+pub struct ModelCall {
+    began: Instant,
+    first: Option<u64>,
+}
+
+pub fn model_call(model: &str) -> ModelCall {
+    with(|timing| timing.model = Some(model.to_string()));
+    ModelCall { began: Instant::now(), first: None }
+}
+
+impl ModelCall {
+    /// Content arrived; the first sets the call's time to first part.
+    pub fn part(&mut self) {
+        if self.first.is_none() {
+            self.first = Some(self.began.elapsed().as_millis() as u64);
+        }
+    }
+}
+
+impl Drop for ModelCall {
+    fn drop(&mut self) {
+        let total = self.began.elapsed().as_millis() as u64;
+        let first = self.first;
+        with(|timing| {
+            timing.model_calls += 1;
+            timing.model_ms += total;
+            if let Some(first) = first {
+                timing.first_part_ms.push(first);
+            }
+        });
+    }
+}
+
+/// A model's parts, timed: the first content (text, reasoning or a tool call) sets the call's time to
+/// first part, and the stream's end (its drop) the call's time in all. A reasoning item's start isn't
+/// content: some providers send it before anything is thought.
+pub fn timed(parts: StreamParts, mut call: ModelCall) -> StreamParts {
+    use futures::StreamExt;
+    Box::pin(parts.inspect(move |part| {
+        if matches!(
+            part,
+            StreamPart::TextDelta { .. } | StreamPart::ReasoningDelta { .. } | StreamPart::ToolInputStart { .. } | StreamPart::ToolCall(_)
+        ) {
+            call.part();
+        }
+    }))
+}
+
+pub fn tool(elapsed_ms: u64) {
+    with(|timing| {
+        timing.tools += 1;
+        timing.tool_ms += elapsed_ms;
+    });
+}
+
+pub fn live_request() {
+    with(|timing| timing.live_requests += 1);
+}
+
+/// Work done while a turn runs but not for it (FOCUS's and the transport clock's reads of Live, a
+/// side question): its model calls, bytes and Live requests aren't the turn's.
+pub async fn background<F: std::future::Future>(work: F) -> F::Output {
+    BACKGROUND.scope((), work).await
+}
+
+pub fn sent(bytes: usize) {
+    with(|timing| timing.sent_bytes += bytes as u64);
+}
+
+/// The log line for a finished turn; `stop` is how it ended (a `StopReason`, or "error").
+pub fn line(timing: &TurnTiming, elapsed_ms: u64, stop: Value, usage: Option<&Usage>) -> Value {
+    let mut line = json!({
+        "at": iso_string(now_ms()),
+        "kumi": KUMI_VERSION,
+        "ms": elapsed_ms,
+        "stop": stop,
+        "modelCalls": timing.model_calls,
+        "modelMs": timing.model_ms,
+        "firstPartMs": timing.first_part_ms,
+        "tools": timing.tools,
+        "toolMs": timing.tool_ms,
+        "liveRequests": timing.live_requests,
+        "sentBytes": timing.sent_bytes,
+    });
+    if let Some(model) = &timing.model {
+        line["model"] = json!(model);
+    }
+    if let Some(usage) = usage {
+        line["inputTokens"] = json!(usage.input_tokens);
+        line["cachedTokens"] = json!(usage.cache_read_tokens);
+        line["outputTokens"] = json!(usage.output_tokens);
+    }
+    line
+}
+
+/// Append a line to the log; once it passes `MAX_BYTES`, keep its last `KEEP_LINES` (through a temporary
+/// file, so the log is never left empty). Best effort: timing never gets in the way of a turn. Written in
+/// place (one short line), so turns log in the order they end.
+pub fn append(file: &Path, line: &Value) {
+    let _ = write(file, json::stringify(line));
+}
+
+fn write(file: &Path, text: String) -> std::io::Result<()> {
+    use std::io::Write;
+    if let Some(folder) = file.parent().filter(|folder| !folder.as_os_str().is_empty()) {
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder.create(folder)?;
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options.open(file)?.write_all(format!("{text}\n").as_bytes())?;
+    if std::fs::metadata(file).is_ok_and(|meta| meta.len() > MAX_BYTES) {
+        let kept = std::fs::read_to_string(file)?;
+        let lines: Vec<_> = kept.split('\n').filter(|line| !line.is_empty()).collect();
+        let trimmed = file.with_extension(format!("{}.tmp", std::process::id()));
+        std::fs::write(&trimmed, format!("{}\n", lines[lines.len().saturating_sub(KEEP_LINES)..].join("\n")))?;
+        if let Err(error) = std::fs::rename(&trimmed, file) {
+            let _ = std::fs::remove_file(&trimmed);
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_turn_adds_up_only_while_it_is_timed() {
+        tool(5);
+        live_request();
+        let recorder = begin();
+        {
+            let mut call = model_call("openai/gpt-test");
+            call.part();
+            call.part();
+        }
+        tool(120);
+        live_request();
+        live_request();
+        background(async {
+            live_request();
+            drop(model_call("openai/a-side-question"));
+            sent(9999);
+            tool(7);
+        })
+        .await;
+        sent(2048);
+        let timing = recorder.finish();
+        assert_eq!(timing.model.as_deref(), Some("openai/gpt-test"));
+        assert_eq!((timing.model_calls, timing.first_part_ms.len()), (1, 1));
+        assert_eq!((timing.tools, timing.tool_ms), (1, 120));
+        assert_eq!(timing.live_requests, 2, "FOCUS's own read is left out");
+        assert_eq!(timing.model.as_deref(), Some("openai/gpt-test"), "a side question's call is left out");
+        assert_eq!(timing.sent_bytes, 2048);
+        // Nothing is timed after the turn.
+        tool(9);
+        let after = begin().finish();
+        assert_eq!(after.tools, 0);
+    }
+
+    #[tokio::test]
+    async fn the_first_part_is_the_first_content_not_the_streams_start() {
+        use futures::{stream, StreamExt};
+        let recorder = begin();
+        let parts: StreamParts = Box::pin(
+            stream::iter([
+                StreamPart::StreamStart { warnings: Vec::new() },
+                StreamPart::ResponseMetadata { id: None, timestamp: None, model_id: None },
+            ])
+            .chain(stream::once(async {
+                tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+                StreamPart::TextDelta { id: "t".into(), delta: "hi".into(), provider_metadata: None }
+            })),
+        );
+        timed(parts, model_call("openai/gpt-test")).collect::<Vec<_>>().await;
+        let timing = recorder.finish();
+        assert_eq!(timing.model_calls, 1);
+        assert!(timing.first_part_ms[0] >= 60, "{:?}", timing.first_part_ms);
+    }
+}

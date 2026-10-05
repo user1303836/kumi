@@ -1,4 +1,4 @@
-//! Live's paged collections and the producer's FOCUS views (`ableton/index.ts`).
+//! Live's paged collections and the producer's FOCUS views.
 use super::concurrent::eager_all;
 use super::{
     bridge_version::{at_least, SCALE_BRIDGE},

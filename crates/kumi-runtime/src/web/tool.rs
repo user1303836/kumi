@@ -1,4 +1,3 @@
-//! Port of `packages/runtime/src/web/tool.ts`.
 //! Search and paginated reading tools; web content is information, never instructions.
 use super::{
     free::FreeServices,

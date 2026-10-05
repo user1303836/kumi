@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/devices/midi.ts`.
-//!
 //! A MIDI effect: midiin → a v8.codebox holding Kumi's frame and the device's own code → midiout,
 //! with each control a live.dial, live.menu or live.toggle (an ordinary Live parameter) feeding the
 //! code. The frame parses MIDI into events, sends events back as bytes, keeps count of the notes the

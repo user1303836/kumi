@@ -1,4 +1,4 @@
-//! Native Ollama request/stream parity for `packages/runtime/src/providers/ollama.ts`.
+//! Ollama requests and streams.
 
 use async_trait::async_trait;
 use futures::{future::FutureExt, stream, StreamExt};

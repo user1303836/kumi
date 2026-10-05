@@ -1,5 +1,3 @@
-//! Port of `apps/kumi/src/tui/wrap.ts`.
-//!
 //! Word wrapping of styled text into terminal lines.
 
 use std::rc::Rc;

@@ -1,5 +1,4 @@
-//! Port of `apps/mcp-server/test/audio-diagnosis.test.ts`. The TypeScript took its Live state from
-//! `DeterministicLiveSimulator`; the snapshot here is that simulator's seed Set: one track, "Drums",
+//! Audio diagnosis, on the Live simulator's seed Set: one track, "Drums",
 //! with a Utility device and one published parameter.
 
 use std::f64::consts::PI;

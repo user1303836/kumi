@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/system.ts`.
-
 use std::collections::HashMap;
 
 /// `process.env`, as the functions that took an `env` parameter read it (tests pass their own).

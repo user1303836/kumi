@@ -1,4 +1,3 @@
-//! Port of `apps/kumi/test/models.test.ts`.
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi::models::*;

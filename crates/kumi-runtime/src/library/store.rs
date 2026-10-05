@@ -1,5 +1,3 @@
-//! Port of `packages/runtime/src/library/store.ts`.
-//!
 //! The library on disk: one log per kind (sounds, presets, Sets), a line of JSON per file, appended
 //! as each is learned, so learning that stops (Kumi quits, the computer sleeps) carries on where it
 //! was. A file learned again adds a line that replaces the one before; one that's gone adds a line

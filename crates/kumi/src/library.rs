@@ -1,4 +1,4 @@
-//! Port of `apps/kumi/src/library.ts`: inspect and rebuild the producer's library.
+//! Inspect and rebuild the producer's library.
 use crate::{
     config::{load_library_dir, load_projects_dir, load_settings_file, read_settings},
     tui::tty::TtyOutput,

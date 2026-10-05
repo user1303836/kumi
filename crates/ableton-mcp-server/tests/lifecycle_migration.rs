@@ -1,4 +1,4 @@
-//! Real source installation → native migration, with the existing receipt and files untouched by fixture rebinding.
+//! A real JavaScript bridge installation (Kumi 1.7.5's lifecycle) → native migration, with the existing receipt and files untouched by fixture rebinding.
 #[path = "support/lifecycle_fixture.rs"]
 mod fixture;
 use ableton_mcp_server::{delivery::*, lifecycle::*};
@@ -9,11 +9,56 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
+/// The published Kumi 1.7.5 bundle, the last JavaScript release, unpacked once: KUMI_LEGACY_APP names
+/// an unpacked copy; otherwise it's downloaded, checked against its SHA-256 and kept in the build's
+/// temporary folder.
+fn legacy_app() -> PathBuf {
+    static APP: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    APP.get_or_init(|| {
+        if let Some(app) = std::env::var_os("KUMI_LEGACY_APP") {
+            return PathBuf::from(app);
+        }
+        const SHA256: &str = "1e932a401e88a1e6d3985d1f21c2c6af11883887675d5ae1de291dbb75385795";
+        let cache = Path::new(env!("CARGO_TARGET_TMPDIR")).join("kumi-1.7.5");
+        let lifecycle = |app: &Path| app.join("apps/mcp-server/dist/src/lifecycle.js").is_file();
+        if lifecycle(&cache) {
+            return cache;
+        }
+        let staging = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+        let archive = staging.path().join("kumi.tar.gz");
+        let fetched = Command::new("curl")
+            .args(["--fail", "--silent", "--show-error", "--location", "--retry", "3", "--output"])
+            .arg(&archive)
+            .arg("https://github.com/user1303836/kumi/releases/download/v1.7.5/kumi.tar.gz")
+            .status()
+            .expect("curl fetches the Kumi 1.7.5 bundle (or set KUMI_LEGACY_APP to an unpacked copy)");
+        assert!(fetched.success(), "couldn't download the Kumi 1.7.5 bundle; set KUMI_LEGACY_APP to an unpacked copy");
+        assert_eq!(sha(fs::read(&archive).unwrap()), SHA256, "the Kumi 1.7.5 bundle isn't the published one");
+        let unpacked = staging.path().join("app");
+        fs::create_dir_all(&unpacked).unwrap();
+        // Windows' own tar: Git's GNU tar reads "D:\…" as a remote host.
+        let tar = if cfg!(windows) {
+            PathBuf::from(std::env::var_os("SystemRoot").unwrap_or("C:\\Windows".into())).join("System32\\tar.exe")
+        } else {
+            "tar".into()
+        };
+        assert!(Command::new(tar).arg("-xzf").arg(&archive).arg("-C").arg(&unpacked).status().unwrap().success());
+        assert!(lifecycle(&unpacked), "the Kumi 1.7.5 bundle has no bridge lifecycle");
+        // Another test process may have put its copy in place first. When the move fails otherwise (an
+        // interrupted run's copy is in the way, or Windows is still scanning the new files), this copy
+        // serves where it is.
+        if fs::rename(&unpacked, &cache).is_ok() || lifecycle(&cache) {
+            return cache;
+        }
+        staging.keep().join("app")
+    })
+    .clone()
+}
 fn old_install(root: &Path, custom: bool) -> (LifecycleOptions, Value) {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let out = Command::new("node")
         .arg("crates/ableton-mcp-server/tests/support/legacy_install.mjs")
-        .arg(json!({"root":root,"version":"1.0.73","custom":custom}).to_string())
+        .arg(json!({"root":root,"version":"1.0.73","custom":custom,"bundle":legacy_app()}).to_string())
         .current_dir(workspace)
         .output()
         .expect("Node is required to validate source-to-native upgrade");

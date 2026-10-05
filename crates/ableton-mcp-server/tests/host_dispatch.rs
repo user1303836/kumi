@@ -5,6 +5,8 @@ use ableton_mcp_server::{
 use kumi_common::abort::Signal;
 use serde_json::{json, Value};
 use std::{rc::Rc, sync::LazyLock};
+/// The bridge version the golden files were recorded with; pinned so a version bump changes none of them.
+const ORACLE_VERSION: &str = "1.0.74";
 fn clean(value: &Value) -> Value {
     static ID: LazyLock<regex::Regex> = LazyLock::new(|| {
         regex::Regex::new(
@@ -40,7 +42,7 @@ async fn public_requests_fused_changes_and_undo_match_source() {
         let data:Value=serde_json::from_str(include_str!("fixtures/host-dispatch-oracle.json")).unwrap();
         for (index,case) in data["cases"].as_array().unwrap().iter().enumerate(){
             let sim=Rc::new(DeterministicLiveSimulator::new());
-            let host=Rc::new(McpHost::new(sim.clone(),McpHostOptions{tool_policy:case.get("policy").cloned(),..Default::default()}).unwrap());
+            let host=Rc::new(McpHost::new(sim.clone(),McpHostOptions{tool_policy:case.get("policy").cloned(),server_version:Some(ORACLE_VERSION.into()),..Default::default()}).unwrap());
             if case["modern"]!=true{
                 host.handle(&json!({"jsonrpc":"2.0","id":"setup","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"oracle","version":"1"}}})).unwrap();
                 host.handle(&json!({"jsonrpc":"2.0","method":"notifications/initialized"})).unwrap();
