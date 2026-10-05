@@ -413,7 +413,7 @@ class MigrationRelease(unittest.TestCase):
         self.assertEqual(reply["result"]["peak"], 0.5)
 
     @unittest.skipUnless(os.environ.get("KUMI_NATIVE_RELEASES"), "built release interoperability runs in installer CI")
-    def test_actual_built_bundle_migrates_same_version_bridge_and_restores_legacy_launch(self):
+    def test_actual_built_bundle_migrates_the_bridge_and_restores_legacy_launch(self):
         # Exercise bridge/launcher handoff independently of the separate newer-app updater gate.
         artifacts = Path(os.environ["KUMI_NATIVE_RELEASES"])
         manifest = json.loads((artifacts / "kumi-release.json").read_text(encoding="utf-8"))
@@ -438,10 +438,11 @@ class MigrationRelease(unittest.TestCase):
         self.check_windows_launcher(launcher, self.native_windows_launcher())
         self.assertEqual(config.read_bytes(), config_before)
         self.assertEqual(self.launched(launcher, env, "--version"), f"Kumi {manifest['kumi']}\n")
-        # No new flags or sign-in: the existing bridge reference leads to its original receipt.
+        # No new flags or sign-in: the existing bridge reference leads to its original receipt. The handoff
+        # installs this release's bridge, which is 1.7.5's own version until a release bumps it.
         opened = self.launched(launcher, env, input="/quit\n")
         current = json.loads(receipt.read_text(encoding="utf-8"))
-        self.assertEqual(current["packageVersion"], old["packageVersion"])
+        self.assertEqual(current["packageVersion"], manifest["bridge"])
         self.assertEqual(current["config"]["bridge"], old["config"]["bridge"])
         self.assertEqual(current["config"]["server"]["args"], ["--config", str(config)], opened)
         self.assertEqual(secret.read_bytes(), secret_before)
@@ -481,10 +482,18 @@ class MigrationRelease(unittest.TestCase):
         # The producer's installed command performs the real HTTP updater and application swap.
         # Direct Node imports or a native --version preflight would bypass the active .cmd hazard.
         with self.release_server(artifacts) as base:
-            updated = self.launched(launcher, dict(env, KUMI_RELEASES=base), "update")
+            result = self.launch_result(launcher, dict(env, KUMI_RELEASES=base), "update")
+        updated = result.stdout + result.stderr
+        if manifest["bridge"] == old["packageVersion"]:
+            self.assertEqual(result.returncode, 0, updated)
+        else:
+            # A newer bridge waits for the producer to say Live is closed. Unanswered here, the update leaves
+            # it to native startup, the same handoff a same-version bridge gets.
+            self.assertEqual(result.returncode, 1, updated)
+            self.assertIn("Nothing was changed. Quit Live, then run:", updated)
         self.assertIn(f"Kumi is now {manifest['kumi']}", updated)
         self.assertTrue((home / "app" / self.binary).is_file())
-        self.assertEqual(config.read_bytes(), config_before, "the old version-only updater leaves the same-version bridge for native startup")
+        self.assertEqual(config.read_bytes(), config_before, "the old version-only updater leaves the bridge for native startup")
         self.check_windows_launcher(launcher, original_launcher)
         self.assertEqual(self.launched(launcher, env, "--version"), f"Kumi {manifest['kumi']}\n")
         self.check_windows_launcher(launcher, self.native_windows_launcher())
@@ -494,7 +503,7 @@ class MigrationRelease(unittest.TestCase):
         # Opening as usual performs the receipt-bound bridge handoff before the conversation starts.
         self.launched(launcher, env, "--bridge-config", str(config), input="/quit\n")
         current = json.loads(receipt.read_text(encoding="utf-8"))
-        self.assertEqual(current["packageVersion"], old["packageVersion"])
+        self.assertEqual(current["packageVersion"], manifest["bridge"])
         self.assertEqual(current["config"]["bridge"], old["config"]["bridge"])
         self.assertEqual(current["config"]["server"]["args"], ["--config", str(config)])
         self.assertEqual(secret.read_bytes(), secret_before)
