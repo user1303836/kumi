@@ -78,7 +78,16 @@ impl Observer {
     pub fn model(&self) -> Rc<SetModel> {
         self.model.borrow().clone()
     }
+    /// The tracks weren't read this turn: what the model holds may be out of date.
+    fn model_stale(&self) {
+        if self.model.borrow().complete {
+            let mut stale = (**self.model.borrow()).clone();
+            stale.complete = false;
+            *self.model.borrow_mut() = Rc::new(stale);
+        }
+    }
     fn away(&self) -> Observation {
+        self.model_stale();
         let previous = self.previous.borrow();
         no_access(
             &previous.as_ref().map(|p| p.key.clone()).unwrap_or_else(|| format!("{}:no-live", self.connection.generation)),
@@ -289,6 +298,8 @@ impl Observer {
                 let complete = devices.is_some() && !more_tracks && !more_devices;
                 let next = SetModel::next(&self.model.borrow(), tracks, devices.as_deref().unwrap_or(&[]), complete);
                 *self.model.borrow_mut() = Rc::new(next);
+            } else {
+                self.model_stale();
             }
             let selected: Option<JsonObject> = (|| {
                 let read = selection_read.ok()?;

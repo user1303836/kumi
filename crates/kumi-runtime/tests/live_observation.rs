@@ -166,6 +166,8 @@ async fn observation_context_dispatches_and_authority_match_source() {
                     // The Set model is built from the same rows: the tracks the observation names, in order (a row
                     // without a ref can't be found again, so the model leaves it out).
                     if let Some(names)=&v.tracks{let model=observer.model();let mut named=names.iter();assert!(model.tracks.iter().all(|t|named.any(|n|*n==t.name)),"{} turn {index}: the Set model {:?} against {names:?}",case["label"],model.tracks.iter().map(|t|&t.name).collect::<Vec<_>>());named_turns.set(named_turns.get()+1);if model.tracks.len()==names.len(){whole_turns.set(whole_turns.get()+1);}}
+                    // A turn that read no whole track list leaves the model marked as out of date.
+                    if v.tracks.is_none(){assert!(!observer.model().complete,"{} turn {index}: the Set model is marked incomplete",case["label"]);}
                     observation(v)
                 },Err(RuntimeError::Aborted)=>json!({"error":"cancelled"}),Err(e)=>json!({"error":e.to_string()})};
                 let state={let book=connection.references.borrow();json!({"epoch":connection.epoch.get(),"lease":connection.lease.get(),"lastTrackCount":observer.last_track_count.get(),"currentTempo":observer.tempo.get(),"beatsPerBar":observer.beats_per_bar.get(),"refs":book.refs.iter().collect::<Vec<_>>(),"cursors":book.cursors.iter().collect::<Vec<_>>(),"known":book.known.iter().collect::<Vec<_>>()})};

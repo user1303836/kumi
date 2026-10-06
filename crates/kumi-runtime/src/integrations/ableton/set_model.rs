@@ -34,7 +34,7 @@ pub struct TrackNode {
     pub name: String,
     pub kind: Option<String>,
     pub media: Option<String>,
-    /// The ref of the group track it's in.
+    /// The key of the group track it's in: Kumi's id for it, else its ref.
     pub group: Option<String>,
     pub devices: Vec<DeviceNode>,
     /// A digest of what it is (not where): its name, kind, media, group and devices.
@@ -95,6 +95,11 @@ impl SetModel {
         let mut model = SetModel { generation, complete, ..Default::default() };
         let mut on: HashMap<String, Vec<DeviceNode>> = HashMap::new();
         nest(devices, &mut on);
+        // A group by its key, so a track inserted above it changes nothing of the tracks inside it.
+        let keys: HashMap<String, String> = tracks
+            .iter()
+            .filter_map(|row| Some((text(row, "ref")?, text(row, "kumiTrack").filter(|id| super::track_ids::track_id(id))?)))
+            .collect();
         for (index, row) in tracks.iter().enumerate() {
             // A row without a ref or a name isn't a track as Live lists it.
             let (Some(reference), Some(name)) = (text(row, "ref"), text(row, "name")) else { continue };
@@ -106,7 +111,7 @@ impl SetModel {
                 name,
                 kind: text(row, "kind"),
                 media: text(row, "mediaKind"),
-                group: text(row, "groupTrackRef"),
+                group: text(row, "groupTrackRef").map(|group| keys.get(&group).cloned().unwrap_or(group)),
                 devices,
                 hash: String::new(),
                 generation,

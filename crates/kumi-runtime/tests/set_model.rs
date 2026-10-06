@@ -35,7 +35,7 @@ fn a_set_is_built_from_the_rows_the_observation_reads_with_devices_one_rack_leve
     let model = SetModel::next(&SetModel::default(), &tracks, &devices, true);
     assert_eq!((model.generation, model.complete, model.tracks.len()), (1, true, 3));
     let bass = model.track(BASS).unwrap();
-    assert_eq!((bass.index, bass.group.as_deref(), bass.devices.len()), (1, Some("1:track:0"), 2));
+    assert_eq!((bass.index, bass.group.as_deref(), bass.devices.len()), (1, Some(DRUMS), 2), "its group by the group's id");
     let rack = &bass.devices[0];
     assert_eq!((rack.name.as_str(), rack.class.as_deref(), rack.chains[0].name.as_str()), ("Rack", Some("InstrumentGroupDevice"), "Low"));
     assert_eq!(
@@ -83,6 +83,25 @@ fn a_track_inserted_moves_the_refs_but_not_the_ids_and_a_build_says_what_changed
     );
     assert!(third.tracks_named("bass").is_empty() && third.tracks_named("sub bass")[0].generation == 3);
     assert!(third.diff(&third).is_empty());
+}
+
+#[test]
+fn a_track_inserted_above_a_group_changes_nothing_of_the_tracks_inside_it() {
+    let grouped = |above: bool| {
+        let mut list = vec![json!({"ref":"1:track:0","name":"Drums","kind":"group","kumiTrack":DRUMS})];
+        if above {
+            list.insert(0, json!({"ref":"1:track:0","name":"Pad","kind":"regular","kumiTrack":PAD}));
+            list[1]["ref"] = json!("1:track:1");
+        }
+        let group = list.last().unwrap()["ref"].clone();
+        list.push(json!({"ref":format!("1:track:{}", list.len()),"name":"Bass","kind":"regular","groupTrackRef":group,"kumiTrack":BASS}));
+        rows(json!(list))
+    };
+    let first = SetModel::next(&SetModel::default(), &grouped(false), &[], true);
+    let second = SetModel::next(&first, &grouped(true), &[], true);
+    // The group is known by its id: the bass inside it moved, but nothing of it changed.
+    assert_eq!(second.track(BASS).unwrap().group.as_deref(), Some(DRUMS));
+    assert_eq!(second.changed_since(1).iter().map(|t| t.key()).collect::<Vec<_>>(), [PAD]);
 }
 
 #[test]
