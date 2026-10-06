@@ -4,3 +4,9 @@
 # The Remote Script adapter's tests give each local connection 500 ms.
 filter = 'test(/bounded_latency|reads_in_a_moment|looks_at_each_byte_once|read_in_linear_time|analyzed_quickly_part_by_part|keeps_the_runtime_responsive|returns_promptly|maximum_duplicate_ambiguity/) | binary(remote_adapter)'
 threads-required = "num-cpus"
+
+[[profile.default.overrides]]
+# Windows' console tests write records into the one console every test process shares: two at once
+# read each other's input ("reader did not consume the prepared console records").
+filter = 'binary(windows_stdin) | binary(windows_tty) | binary(windows_console_control)'
+threads-required = "num-cpus"
