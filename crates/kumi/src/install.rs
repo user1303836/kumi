@@ -205,6 +205,27 @@ async fn bridge_after(io: &InstalledIo, home: &str, app: &str) -> i32 {
 trait Folders {
     fn rename(&self, from: &str, to: &str) -> std::io::Result<()>;
     fn remove(&self, path: &str) -> std::io::Result<()>;
+    /// A move waits for a busy folder.
+    fn waiting(&self) {}
+}
+/// Folders that say, once, when a move first has to wait: holding a folder can keep an update waiting a minute.
+struct Saying<'a, F: Folders, S: Fn()> {
+    folders: &'a F,
+    say: S,
+    said: std::cell::Cell<bool>,
+}
+impl<F: Folders, S: Fn()> Folders for Saying<'_, F, S> {
+    fn rename(&self, from: &str, to: &str) -> std::io::Result<()> {
+        self.folders.rename(from, to)
+    }
+    fn remove(&self, path: &str) -> std::io::Result<()> {
+        self.folders.remove(path)
+    }
+    fn waiting(&self) {
+        if !self.said.replace(true) {
+            (self.say)()
+        }
+    }
 }
 struct Disk;
 impl Folders for Disk {
@@ -232,6 +253,7 @@ async fn rename_in(folders: &impl Folders, from: &str, to: &str) -> std::io::Res
                             matches!(e.raw_os_error(), Some(1 | 16))
                         })) =>
             {
+                folders.waiting();
                 tokio::time::sleep(Duration::from_millis(250)).await
             }
             Err(e) => return Err(e),
@@ -446,7 +468,18 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
                     return Ok(Some("The new Kumi didn't start, so this one stays. Try again, or run the installer again.".into()));
                 }
                 write_launcher(&home).map_err(error)?;
-                if swap_in(&fresh, &app, &join(&home, "app.previous")).await.is_err() {
+                // Printed above the spinner, which draws its line again below.
+                let spinning = crate::spinner::spins(io.out.as_ref(), &io.env);
+                let say = || {
+                    let line = if cfg!(windows) {
+                        "Windows is holding Kumi's folder (a Kumi window, or an antivirus scan); waiting…"
+                    } else {
+                        "Kumi's folder is busy; waiting…"
+                    };
+                    io.out.write(&if spinning { format!("\r\u{1b}[2K{line}\n") } else { format!("{line}\n") })
+                };
+                let folders = Saying { folders: &Disk, say, said: Default::default() };
+                if swap_in_with(&folders, &fresh, &app, &join(&home, "app.previous")).await.is_err() {
                     return Ok(Some(swap_failed(cfg!(windows), migration::has_app(&app))));
                 }
                 Ok(None)
@@ -1023,6 +1056,20 @@ mod swap_tests {
         settle_installed(home.0.path().to_str().unwrap()).await;
         assert_eq!(home.version("app").as_deref(), Some("1.2"));
         assert_eq!(home.version("app.previous").as_deref(), Some("1.1"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_wait_for_a_busy_folder_is_said_once() {
+        let home = updating();
+        let said = std::cell::Cell::new(0);
+        let windows = Windows::default().holds("app.new", "app", ALWAYS, Then::Moves);
+        let folders = Saying { folders: &windows, say: || said.set(said.get() + 1), said: Default::default() };
+        assert!(swap_in_with(&folders, &home.path("app.new"), &home.path("app"), &home.path("app.previous")).await.is_err());
+        assert_eq!(said.get(), 1);
+        let quiet = updating();
+        let folders = Saying { folders: &Windows::default(), say: || said.set(said.get() + 1), said: Default::default() };
+        swap_in_with(&folders, &quiet.path("app.new"), &quiet.path("app"), &quiet.path("app.previous")).await.unwrap();
+        assert_eq!(said.get(), 1, "a swap that never waits says nothing");
     }
 
     #[test]
