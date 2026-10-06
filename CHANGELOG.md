@@ -3,26 +3,43 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
-## Unreleased
+## 1.8.2 — 2026-10-05
+
+Ships with bridge 1.0.76, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+
+- Watching a YouTube video asks YouTube for its streams in pieces, as YouTube wants, so frames and
+  sound come in seconds instead of slowing to a trickle or failing. This needs ffmpeg 8.1 or later;
+  with an older one, Kumi says so before the wait. Frames that fail are reported once, with their
+  times, and when a batch of three all fail, Kumi doesn't try the rest.
+- A video without usable captions is transcribed sooner: with the change above its speech arrives in
+  about a second, and transcribing takes about two-thirds of the time. On a recent Mac, a 16-minute
+  tutorial goes from about 9 minutes to about 30 seconds before the model sees it. If the speech can't
+  be taken or transcribed, the frames still come, and a closer look in the same request doesn't wait
+  for the same failure again.
+- Following a tutorial takes fewer looks at it: one look can show each moment whole and close up in
+  several places, up to 16 pictures.
+- Techniques: after an answer that built something worth reusing, Kumi asks whether to keep it.
+  1 keeps it; 2, Enter, Esc or carrying on doesn't (saying "keep the technique" in your next message
+  still does). Nothing is kept without your yes, never for work toward a `/goal`, and Kumi asks at
+  most once every three answers. A tutorial, reference or steps you give come first: Kumi uses a
+  technique only when you leave the approach open.
+- When Kumi's listening device (Ears) can't be set up, auditions record instead for the next ten
+  minutes, rather than each waiting up to about 9 seconds for the same failure.
+- `kumi report` shows each turn's slowest tools, and the reasoning effort and service tier the model
+  was asked for.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
 
 ### Bridge 1.0.76
-
-- Kumi's bridge carries Willington's runtime files inside its Remote Script, where Live doesn't list
-  them as Control Surfaces. A release includes them once Willington's sync has put them in
-  `vendor/willington`; packaging refuses anything there but the runtime files its `release.json`
-  lists.
-- Willington stays off until `/willington` turns it on, and Kumi says so when it starts. The bridge
-  picks the switch up within a second, without Live restarting, and Kumi tells the model what the
-  bindings add, or that `/willington` turns them on.
-- An update keeps `willington.json` owner-only on Windows: its copy took the folder's permissions,
-  which turned Willington off. Turning Willington on or off no longer counts as a changed
-  installation that stops `kumi update`.
-
-### Bridge 1.0.75
 
 - Live's own timer serves Kumi between Live's display ticks, so a look at the Set takes about 20 ms
   rather than about 100, and a plan's changes don't each wait for a tick. Kumi's reads keep to the
   same share of Live's main thread as before; a change takes what Live takes to make it.
+- A search of Live's Browser keeps what it walked for ten minutes rather than one: a walk holds Live
+  for 0.6–0.75 s with Live's own library, longer with packs and plug-ins. When nothing kept has the
+  whole query in its name, the search walks again, at most once a minute, for what's new since.
 
 ## 1.8.1 — 2026-10-05
 

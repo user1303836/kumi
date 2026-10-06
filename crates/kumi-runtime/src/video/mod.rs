@@ -22,7 +22,9 @@ use kumi_common::{
 };
 use moments::MomentOptions;
 pub use moments::{choose_moments, Chapter};
-use programs::{ffmpeg_hint, run, whisper_hint, whisper_model, yt_dlp_extras, FfmpegOptions, ProgramOptions, RunOptions};
+use programs::{
+    ffmpeg_hint, ffmpeg_reads_in_pieces, run, whisper_hint, whisper_model, yt_dlp_extras, FfmpegOptions, ProgramOptions, RunOptions,
+};
 pub use programs::{find_ffmpeg, find_whisper, find_yt_dlp, whisper_asset, yt_dlp_asset, VideoError, VideoFailure};
 use regex::Regex;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -39,6 +41,8 @@ use tokio::io::AsyncWriteExt;
 
 pub const VIDEO_EXTENSIONS: [&str; 6] = [".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi"];
 pub const MAX_SOUND: f64 = 120.0;
+/// The most frames one watch shows (each moment in each part of look_at's views counts).
+pub const MAX_SHOTS: usize = 16;
 #[derive(Clone, Default)]
 pub struct WatchRequest {
     pub url: String,
@@ -46,6 +50,8 @@ pub struct WatchRequest {
     pub to: Option<f64>,
     pub look_at: Option<Vec<f64>>,
     pub zoom: Option<Region>,
+    /// Several parts of the picture for each moment in look_at (None: the whole frame), in place of zoom.
+    pub views: Vec<Option<Region>>,
     pub frames: Option<f64>,
     pub listen: Option<SoundSpan>,
 }
@@ -286,6 +292,7 @@ fn streams(info: &Value) -> Sources {
             headers: f["http_headers"]
                 .as_object()
                 .map(|o| o.iter().filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.into()))).collect()),
+            piece: f["downloader_options"]["http_chunk_size"].as_u64(),
         })
     };
     let picture = |limit: f64| {
@@ -501,7 +508,7 @@ impl Watcher<'_> {
             return Ok(sources.clone());
         }
         let sources = if let Some(file) = &self.file {
-            let input = Some(Input { url: file.clone(), headers: None });
+            let input = Some(Input { url: file.clone(), headers: None, piece: None });
             Sources { video: input.clone(), sharp: input.clone(), audio: input }
         } else {
             if self.info.is_none() {
@@ -512,6 +519,54 @@ impl Watcher<'_> {
         self.sources = Some(sources.clone());
         Ok(sources)
     }
+}
+
+/// "a, b and c".
+fn and_list(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+/// What's said of the frames Kumi couldn't take: one note for each reason, with their times, rather
+/// than one per frame; and how many it then didn't try.
+pub fn missed_frames(missed: &[(f64, String)], untried: usize) -> Vec<String> {
+    let mut reasons: Vec<(&str, Vec<f64>)> = Vec::new();
+    for (time, reason) in missed {
+        match reasons.iter_mut().find(|(seen, _)| seen == reason) {
+            Some((_, times)) => times.push(*time),
+            None => reasons.push((reason, vec![*time])),
+        }
+    }
+    let count = reasons.len();
+    reasons
+        .into_iter()
+        .enumerate()
+        .map(|(index, (reason, mut times))| {
+            times.sort_by(f64::total_cmp);
+            let mut at: Vec<String> = times.iter().map(|time| format_time(*time)).collect();
+            let last = at.pop().unwrap_or_default();
+            let which = if at.is_empty() { format!("the frame at {last}") } else { format!("the frames at {} and {last}", at.join(", ")) };
+            let rest = if index + 1 == count && untried > 0 { format!(", so it didn't try the other {untried}") } else { String::new() };
+            format!("Kumi couldn't take {which} ({reason}){rest}.")
+        })
+        .collect()
+}
+
+/// Said once when a stream Kumi takes wants asking for in pieces and this ffmpeg can't.
+const OLDER_FFMPEG: &str = "YouTube wants its streams asked for a piece at a time, which ffmpeg does from version 8.1; this one is older, so the video's frames and sound come slowly or not at all.";
+
+/// What a progress line taking from `input` adds: nothing, unless its site wants it asked for in pieces
+/// and this ffmpeg can't (it's older than 8.1). Then the wait is slow, and a note says why, once.
+async fn slow_stream(ffmpeg: &str, input: &Input, notes: &mut Vec<String>, signal: &Option<Signal>) -> Result<&'static str, VideoFailure> {
+    if input.piece.filter(|piece| *piece > 0).is_none() || ffmpeg_reads_in_pieces(ffmpeg, signal.clone()).await? != Some(false) {
+        return Ok("");
+    }
+    if !notes.iter().any(|note| note == OLDER_FFMPEG) {
+        notes.push(OLDER_FFMPEG.into());
+    }
+    Ok(" · slowly: this ffmpeg is older than 8.1")
 }
 
 /// Watch a video's words, selected frames, close-ups and a requested stretch of its sound.
@@ -696,7 +751,8 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                 ));
                 Ok(None)
             } else {
-                watcher.progress("taking the video's speech");
+                let slowly = slow_stream(ffmpeg.as_deref().unwrap(), &audio, &mut notes, &signal).await?;
+                watcher.progress(&format!("taking the video's speech{slowly}"));
                 // Taking the speech can fail as transcribing it can (a stream that stalls, say): either way,
                 // the frames still come.
                 match sound_between(
@@ -801,6 +857,7 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
         lines.push(line);
     }
     let region = request.zoom;
+    let looked = request.look_at.as_ref().is_some_and(|v| !v.is_empty());
     let wanted = if let Some(look) = request.look_at.filter(|v| !v.is_empty()) {
         let mut unique = Vec::new();
         for at in look.into_iter().filter(|t| *t >= 0.0 && (end == 0.0 || *t <= end)).map(|t| round(t * 10.0) / 10.0) {
@@ -823,43 +880,68 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
             },
         )
     };
+    // Each frame Kumi takes, and the part of the picture: with views, each moment in each part, the
+    // earliest moments first, at most MAX_SHOTS of them.
+    let views = if looked && !request.views.is_empty() { request.views.clone() } else { vec![region] };
+    let mut moments = wanted.clone();
+    moments.sort_by(f64::total_cmp);
+    let mut shots: Vec<(f64, Option<Region>)> = moments.iter().flat_map(|at| views.iter().map(move |view| (*at, *view))).collect();
+    if shots.len() > MAX_SHOTS {
+        let asked = shots.len();
+        shots.truncate(MAX_SHOTS);
+        let left: Vec<_> = moments
+            .iter()
+            .filter(|at| shots.iter().filter(|(shot, _)| shot == *at).count() < views.len())
+            .map(|at| format_time(*at))
+            .collect();
+        notes.push(format!(
+            "That's {asked} views; Kumi showed the first {MAX_SHOTS}, the earliest moments: ask for {} in another look.",
+            and_list(&left)
+        ));
+    }
     let mut frames = Vec::new();
     let mut sound = None;
     let listen = request.listen.filter(|span| span.to > span.from);
-    if (!wanted.is_empty() || listen.is_some()) && ffmpeg.is_none() {
+    if (!shots.is_empty() || listen.is_some()) && ffmpeg.is_none() {
         notes.push(format!("Frames and the video's sound need ffmpeg ({}); this is the transcript alone.", ffmpeg_hint()));
     } else if let Some(ffmpeg) = ffmpeg {
-        let frame_path = |time| {
+        let frame_path = |time, region: Option<Region>| {
             join(
                 &join(&folder, "frames"),
                 &format!("{}{}.jpg", to_fixed(time, 1), region.map_or_else(String::new, |r| format!("-{}", r.as_str()))),
             )
         };
-        let missing = wanted.iter().any(|time| !Path::new(&frame_path(*time)).exists());
-        let input = if missing {
+        let missing = shots.iter().any(|(time, region)| !Path::new(&frame_path(*time, *region)).exists());
+        // Whole frames from the video's stream; close-ups from its sharpest.
+        let (input, sharp) = if missing {
             let sources = watcher.streams().await?;
-            if region.is_some() {
-                sources.sharp
-            } else {
-                sources.video
-            }
+            (sources.video, sources.sharp)
         } else {
-            None
+            (None, None)
         };
+        let input = if shots.iter().any(|(_, region)| region.is_none()) { input } else { sharp.clone() };
         if missing && input.is_none() {
             notes.push("Kumi couldn't find a stream of that video to take frames from; this is the transcript alone.".into());
         } else {
-            for chunk in wanted.chunks(3) {
+            let slowly = match &input {
+                Some(input) => slow_stream(&ffmpeg, input, &mut notes, &signal).await?,
+                None => "",
+            };
+            let mut missed = Vec::new();
+            let mut tried = 0;
+            for chunk in shots.chunks(3) {
+                let before = missed.len();
                 let mut tasks = FuturesUnordered::new();
-                for time in chunk {
-                    watcher.progress(&format!("looking at {}", format_time(*time)));
-                    let path = frame_path(*time);
-                    let input = input.as_ref();
+                for (time, region) in chunk {
+                    watcher.progress(&format!("looking at {}{slowly}", format_time(*time)));
+                    let path = frame_path(*time, *region);
+                    let input = if region.is_some() { sharp.as_ref().or(input.as_ref()) } else { input.as_ref() };
                     let ffmpeg = &ffmpeg;
                     let signal = signal.clone();
-                    tasks.push(async move { (*time, frame_at(ffmpeg, input, *time, &path, signal, region).await) });
+                    let region = *region;
+                    tasks.push(async move { (*time, region, frame_at(ffmpeg, input, *time, &path, signal, region).await) });
                 }
-                while let Some((time, frame)) = tasks.next().await {
+                while let Some((time, region, frame)) = tasks.next().await {
                     match frame {
                         Ok(frame) => frames.push(WatchedFrame {
                             at: time,
@@ -872,23 +954,28 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                             if let Some(signal) = &signal {
                                 signal.check()?;
                             }
-                            notes.push(format!(
-                                "Kumi couldn't take the frame at {} ({}).",
-                                format_time(time),
-                                head(&error.to_string(), 120)
-                            ));
+                            missed.push((time, head(&error.to_string(), 120)));
                         }
                     }
                 }
+                tried += chunk.len();
+                // A stream that gives none of a chunk's frames won't give the rest either.
+                if missed.len() - before == chunk.len() {
+                    break;
+                }
             }
-            frames.sort_by(|a, b| a.at.total_cmp(&b.at));
+            // By time, then each moment's parts in the order they were asked for (they finish in any order).
+            let part = |frame: &WatchedFrame| views.iter().position(|view| *view == frame.region);
+            frames.sort_by(|a, b| a.at.total_cmp(&b.at).then_with(|| part(a).cmp(&part(b))));
+            notes.extend(missed_frames(&missed, shots.len() - tried));
         }
         if let Some(listen) = listen {
             let start = listen.from.max(0.0);
             let stop = listen.to.min(start + MAX_SOUND).min(if end == 0.0 { f64::INFINITY } else { end });
             let audio = if stop > start { watcher.streams().await?.audio } else { None };
             if let Some(audio) = audio {
-                watcher.progress(&format!("taking the sound at {}–{}", format_time(start), format_time(stop)));
+                let slowly = slow_stream(&ffmpeg, &audio, &mut notes, &signal).await?;
+                watcher.progress(&format!("taking the sound at {}–{}{slowly}", format_time(start), format_time(stop)));
                 match sound_between(
                     &ffmpeg,
                     &audio,

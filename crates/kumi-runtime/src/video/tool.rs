@@ -79,7 +79,16 @@ fn describe(watched: &Watched, heard: Option<&Analysis>) -> String {
             String::new(),
             format!(
                 "Frames, shown after this, each with what's said around it: {}.",
-                watched.frames.iter().map(|f| format_time(f.at)).collect::<Vec<_>>().join(", ")
+                watched
+                    .frames
+                    .iter()
+                    .map(|f| format!(
+                        "{}{}",
+                        format_time(f.at),
+                        f.region.map_or_else(String::new, |r| format!(" ({} close-up)", r.as_str()))
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
             "Look at them for what the words leave out; look_at with zoom shows a moment closely.".into(),
         ]);
@@ -142,17 +151,41 @@ impl KernelTool for VideoTool {
             .and_then(Value::as_array)
             .map(|v| v.iter().filter_map(parse_time).collect::<Vec<_>>())
             .filter(|v| !v.is_empty());
-        let zoom = input.get("zoom").and_then(Value::as_str).and_then(Region::parse);
+        // zoom: one part of the picture, or several ("whole" for the whole frame), each moment in each.
+        let (zoom, views) = match input.get("zoom") {
+            Some(Value::Array(parts)) => {
+                let mut views = Vec::new();
+                for part in parts {
+                    let Some(part) = part.as_str() else {
+                        return Ok(ToolResult::error("zoom's parts are names: \"bottom\", \"bottom-left\", \"whole\" and the like."));
+                    };
+                    let view = if part == "whole" { Some(None) } else { Region::parse(part).map(Some) };
+                    match view {
+                        Some(view) if !views.contains(&view) => views.push(view),
+                        Some(_) => {}
+                        None => return Ok(ToolResult::error(format!("zoom has no part called {}.", stringify(&json!(part))))),
+                    }
+                }
+                (views.iter().flatten().next().copied(), views)
+            }
+            Some(Value::String(part)) if part == "whole" => (None, Vec::new()),
+            Some(Value::String(part)) => match Region::parse(part) {
+                Some(region) => (Some(region), Vec::new()),
+                None => return Ok(ToolResult::error(format!("zoom has no part called {}.", stringify(&json!(part))))),
+            },
+            Some(Value::Null) | None => (None, Vec::new()),
+            Some(_) => return Ok(ToolResult::error("zoom is a part of the picture (\"bottom\") or a list of them.")),
+        };
         let listen_from = time("listen_from");
         let listen_to = time("listen_to");
-        if zoom.is_some() && look_at.is_none() {
+        if (zoom.is_some() || !views.is_empty()) && look_at.is_none() {
             return Ok(ToolResult::error("zoom goes with look_at: name the moments to see closely."));
         }
         if listen_from.is_some() != listen_to.is_some() || listen_from.zip(listen_to).is_some_and(|(a, b)| b <= a) {
             return Ok(ToolResult::error("listen_from and listen_to go together, the second after the first."));
         }
         let result:Result<ToolResult,VideoFailure>=async{
-            let(notices,mut received)=tokio::sync::mpsc::unbounded_channel();let event=self.options.on_event.clone();let watching=watch_video(WatchRequest{url:url.into(),from,to,look_at,zoom,frames:input.get("frames").and_then(Value::as_f64),listen:listen_from.zip(listen_to).map(|(from,to)|SoundSpan{from,to})},WatchOptions{videos_dir:self.options.videos_dir.clone(),tools_dir:self.options.tools_dir.clone(),env:self.options.env.clone(),signal:Some(signal.clone()),on_fetch:Some(Arc::new(move|message|{let _=notices.send(message.to_string());})),on_progress:Some(Rc::new(move|text|tell(&event,SessionEvent::Doing{text:text.into()})))});tokio::pin!(watching);
+            let(notices,mut received)=tokio::sync::mpsc::unbounded_channel();let event=self.options.on_event.clone();let watching=watch_video(WatchRequest{url:url.into(),from,to,look_at,zoom,views,frames:input.get("frames").and_then(Value::as_f64),listen:listen_from.zip(listen_to).map(|(from,to)|SoundSpan{from,to})},WatchOptions{videos_dir:self.options.videos_dir.clone(),tools_dir:self.options.tools_dir.clone(),env:self.options.env.clone(),signal:Some(signal.clone()),on_fetch:Some(Arc::new(move|message|{let _=notices.send(message.to_string());})),on_progress:Some(Rc::new(move|text|tell(&event,SessionEvent::Doing{text:text.into()})))});tokio::pin!(watching);
             let watched=loop{tokio::select!{result=&mut watching=>break result,Some(message)=received.recv()=>tell(&self.options.on_event,SessionEvent::Notice{message})}};while let Ok(message)=received.try_recv(){tell(&self.options.on_event,SessionEvent::Notice{message});}let mut watched=watched?;
             let mut heard=None;if let Some(sound)=&watched.sound{tell(&self.options.on_event,SessionEvent::Doing{text:"listening to the video's sound".into()});match hear(&sound.file,AnalyzeOptions{signal:Some(signal.clone()),..Default::default()}).await{Ok(analysis)=>heard=Some(analysis),Err(error)=>{signal.check()?;watched.notes.push(format!("Kumi couldn't listen to the video's sound ({}).",head(&error.to_string(),120)));}}}
             tell(&self.options.on_event,SessionEvent::Watched(WatchedEvent{title:watched.title.clone(),channel:watched.channel.clone().filter(|s|!s.is_empty()),url:watched.url.clone(),duration:watched.duration.filter(|n|*n!=0.0),from:watched.from,to:watched.to,chapters:watched.chapters.iter().filter(|c|c.start>=watched.from&&c.start<=watched.to).map(|c|c.title.clone()).collect(),words:watched.words.as_ref().map_or(WordsSource::None,|w|w.source),lines:watched.lines.len(),frames:watched.frames.iter().map(|f|crate::core::contracts::WatchedFrame{at:f.at,zoom:f.region.map(|r|r.as_str().into()),thumb:crate::core::contracts::Thumb{width:f.thumb.width as u32,height:f.thumb.height as u32,rgb:f.thumb.rgb.clone()}}).collect(),sound:watched.sound.as_ref().map(|s|crate::core::contracts::SoundSpan{from:s.from,to:s.to}),notes:watched.notes.clone()}));

@@ -375,3 +375,32 @@ async fn clip_move_apply_and_exact_key_undo_match_source() {
         same(&adapter.sim.state.borrow(), &row["state"], &format!("{label} state"));
     }
 }
+#[tokio::test]
+async fn an_arrangement_move_onto_another_clip_is_refused_at_preview() {
+    // Live crashes when an Arrangement clip is copied onto a span a clip holds, and a move is a copy.
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    setup(&sim, "arrangement-midi");
+    {
+        let mut s = sim.state.borrow_mut();
+        let mut chorus = s["arrangementClips"][0]["clip"].clone();
+        chorus["ref"] = json!("arrangement-clip:track-1:12");
+        chorus["objectIdentity"] = json!("simulator:arrangement-clip:1");
+        chorus["name"] = json!("Chorus");
+        chorus["start"] = json!(12);
+        s["arrangementClips"].as_array_mut().unwrap().push(json!({"trackRef":"track:track-1","clip":chorus}));
+    }
+    let host = McpHost::new(sim, McpHostOptions::default()).unwrap();
+    let refused =
+        host.live_clip_move_preview_async(&json!(1), &json!({"clipRef":"arrangement-clip:track-1:4","position":10})).await.to_string();
+    assert!(refused.contains("Kumi can't move a clip onto another clip yet") && refused.contains("Chorus"), "{refused}");
+    assert!(
+        refused.contains("(beats 12 to 16) is in the way at beat 10; clear that span first (clear_range) or pick a free spot"),
+        "{refused}"
+    );
+    assert!(refused.contains("Nothing changed in Live"), "{refused}");
+    let beside = host.live_clip_move_preview_async(&json!(2), &json!({"clipRef":"arrangement-clip:track-1:4","position":8})).await;
+    assert!(
+        beside["result"]["content"][0]["text"].as_str().is_some_and(|text| text.contains("transactionId")),
+        "right up against it is fine: {beside}"
+    );
+}

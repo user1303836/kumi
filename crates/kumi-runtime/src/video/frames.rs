@@ -1,5 +1,5 @@
 //! Frames and stretches of sound taken by ffmpeg, with atomic cache writes.
-use super::programs::{run, RunOptions, VideoFailure};
+use super::programs::{ffmpeg_reads_in_pieces, run, RunOptions, VideoFailure};
 use kumi_common::{abort::Signal, js::number::to_fixed};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -8,6 +8,8 @@ use std::{future::Future, path::Path, sync::LazyLock};
 pub struct Input {
     pub url: String,
     pub headers: Option<indexmap::IndexMap<String, String>>,
+    /// The size of the pieces the site wants its stream asked for in (yt-dlp's `http_chunk_size`).
+    pub piece: Option<u64>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Thumb {
@@ -53,7 +55,7 @@ impl Region {
             .find(|r| r.as_str() == s)
     }
 }
-fn source(input: &Input, at: f64) -> Vec<String> {
+async fn source(ffmpeg: &str, input: &Input, at: f64, signal: &Option<Signal>) -> Result<Vec<String>, VideoFailure> {
     let mut args = Vec::new();
     let headers = input
         .headers
@@ -72,9 +74,14 @@ fn source(input: &Input, at: f64) -> Vec<String> {
     let lower = input.url.to_ascii_lowercase();
     if lower.starts_with("http:") || lower.starts_with("https:") {
         args.extend(["-rw_timeout".into(), "20000000".into()]);
+        if let Some(piece) = input.piece.filter(|piece| *piece > 0) {
+            if ffmpeg_reads_in_pieces(ffmpeg, signal.clone()).await? == Some(true) {
+                args.extend(["-request_size".into(), piece.to_string(), "-multiple_requests".into(), "1".into()]);
+            }
+        }
     }
     args.extend(["-ss".into(), to_fixed(at, 2), "-i".into(), input.url.clone()]);
-    args
+    Ok(args)
 }
 async fn into<F, Fut>(path: &str, write: F) -> Result<(), VideoFailure>
 where
@@ -122,7 +129,7 @@ pub async fn frame_at(
         let frame_signal = signal.clone();
         into(path, |temporary| async move {
             let mut args = vec!["-hide_banner".into(), "-loglevel".into(), "error".into(), "-nostdin".into()];
-            args.extend(source(input, at));
+            args.extend(source(ffmpeg, input, at, &frame_signal).await?);
             args.extend([
                 "-frames:v".into(),
                 "1".into(),
@@ -190,7 +197,7 @@ pub async fn sound_between(
     if !Path::new(path).exists() {
         into(path, |temporary| async move {
             let mut args = vec!["-hide_banner".into(), "-loglevel".into(), "error".into(), "-nostdin".into()];
-            args.extend(source(input, from));
+            args.extend(source(ffmpeg, input, from, &signal).await?);
             args.extend([
                 "-t".into(),
                 to_fixed(to - from, 2),

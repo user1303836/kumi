@@ -351,11 +351,10 @@ stops there and says to update; `kumi update` or `kumi bridge` does it.
 | 1.0.58 | `delete_clip`, `delete_scene`, `delete_track`, `delete_locator`; a plan as one Live undo step; `undo_in_live`; `edit_device`, `duplicate_device`; Live's events for FOCUS; Kumi's Live extension (`write_arrangement_clip`, `clear_range`, `render`) |
 | 1.0.68 | `run_python` |
 | 1.0.73 | Hearing a track, a return or the mix through Kumi Ears (older bridges record to listen) |
-| 1.0.76 | Willington from Kumi's own copy, switched by `/willington` with Live running |
 
 The Willington tools appear whenever the bridge offers them: with Willington's
 bindings on (`/willington`) and a Live build they cover.
 
-Each Kumi release ships with a bridge: Kumi 1.7.5 to 1.8.1 with bridge 1.0.74, 1.7.0 to 1.7.4 with 1.0.73, 1.6.1 with 1.0.72, 1.6.0 with 1.0.71, 1.5 with
+Each Kumi release ships with a bridge: Kumi 1.8.2 with bridge 1.0.76, 1.7.5 to 1.8.1 with 1.0.74, 1.7.0 to 1.7.4 with 1.0.73, 1.6.1 with 1.0.72, 1.6.0 with 1.0.71, 1.5 with
 1.0.70, 1.4 with 1.0.69, 1.3 with 1.0.68, 1.2 with 1.0.66, 1.1 with 1.0.53 and
 1.0 with 1.0.52.
