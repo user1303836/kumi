@@ -102,7 +102,7 @@ async fn stdio_runs_bounded_concurrent_work_and_writes_each_response_when_its_wo
                     let id = id_of(&record);
                     active.set(active.get() + 1);
                     peak.set(peak.get().max(active.get()));
-                    tokio::time::sleep(Duration::from_millis(if id == 1 { 20 } else { 1 })).await;
+                    tokio::time::sleep(Duration::from_millis(if id == 1 { 300 } else { 1 })).await;
                     active.set(active.get() - 1);
                     Ok(Some(record))
                 }
@@ -112,7 +112,8 @@ async fn stdio_runs_bounded_concurrent_work_and_writes_each_response_when_its_wo
         input.end_with("{\"jsonrpc\":\"2.0\",\"id\":1}\n{\"jsonrpc\":\"2.0\",\"id\":2}\n{\"jsonrpc\":\"2.0\",\"id\":3}\n");
         done.await.unwrap().unwrap();
         assert_eq!(peak.get(), 2);
-        // Request 1 takes 20 ms; 2 and 3 finish first and are answered first (JSON-RPC matches answers by id).
+        // Request 1 takes 300 ms; 2 and 3 finish first and are answered first (JSON-RPC matches answers by id). Windows'
+        // 15.6 ms timer turns each 1 ms sleep into about 16 ms, so 3 ends near 32 ms: well before 1, where 20 ms wasn't.
         assert_eq!(output.received_ids(), vec![json!(2), json!(3), json!(1)]);
     })
     .await;

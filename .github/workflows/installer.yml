@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       full: ${{ steps.plan.outputs.full }}
+      checks: ${{ steps.plan.outputs.checks }}
       targets: ${{ steps.plan.outputs.targets }}
       installs: ${{ steps.plan.outputs.installs }}
       migrations: ${{ steps.plan.outputs.migrations }}
@@ -35,15 +36,31 @@ jobs:
       - id: plan
         shell: bash
         run: |
-          # Tags, main and pull requests that change installing, updating or releasing build all six platforms
-          # and install each; any other pull request builds Linux's bundle and checks the update from the
-          # JavaScript release with it.
+          # Tags, main and pull requests that change installing, updating or releasing build all six platforms,
+          # install each and check the update from the JavaScript release. A pull request that changes the
+          # bridge, a version number or how Kumi stores what it keeps (the store, settings and sign-ins, memory,
+          # techniques, playbook, gaps, an older Kumi's files), which the update and rollback must carry over,
+          # does that on Linux. Any other builds Linux's bundle only; main installs and checks it once merged.
           full=true
-          if [[ "${{ github.event_name }}" == "pull_request" ]] && ! git diff --name-only "origin/${GITHUB_BASE_REF}...HEAD" \
-            | grep -q -E '^(install\.(sh|ps1)|scripts/|\.github/workflows/installer\.yml|Cargo\.(toml|lock)|crates/[^/]+/Cargo\.toml|crates/kumi/src/(install|update|bridge_setup|cli/)|crates/ableton-mcp-server/src/(lifecycle|delivery|migrate|setup|install_remote_script|platform)|remote-script/)'; then
-            full=false
+          checks=true
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="origin/${GITHUB_BASE_REF}"
+            # Read whole, then searched: grep -q can close a pipe early, and git, still writing, fails under pipefail.
+            changed="$(git diff --name-only "$base...HEAD")"
+            installing="$(grep -E '^(install\.(sh|ps1)|scripts/|\.github/workflows/installer\.yml|crates/kumi/src/(install|update|bridge_setup|cli/)|crates/ableton-mcp-server/src/(lifecycle|delivery|migrate|setup|install_remote_script|platform))' <<<"$changed" \
+              | grep -v -E '^scripts/test-isolated\.' || true)"
+            # Cargo's changed lines less version numbers (a bridge or release bump): what's left is a dependency.
+            dependencies="$(git diff -U0 "$base...HEAD" -- Cargo.toml Cargo.lock 'crates/*/Cargo.toml' \
+              | grep -E '^[-+]' | grep -v -E '^(---|\+\+\+) |^[-+]version = "[^"]*"$' || true)"
+            if [[ -z "$installing" && -z "$dependencies" ]]; then
+              full=false
+              if ! grep -q -E '^(remote-script/|Cargo\.(toml|lock)$|crates/[^/]+/Cargo\.toml$|crates/kumi-store/|crates/kumi-runtime/src/core/(memory|techniques|playbook|gaps|file_sync|store_[a-z_]+)\.rs$|crates/kumi/src/config\.rs$)' <<<"$changed"; then
+                checks=false
+              fi
+            fi
           fi
           echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "checks=$checks" >> "$GITHUB_OUTPUT"
           if $full; then
             echo 'targets=[{"os":"macos-15","target":"aarch64-apple-darwin"},{"os":"macos-15-intel","target":"x86_64-apple-darwin"},{"os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"},{"os":"ubuntu-22.04-arm","target":"aarch64-unknown-linux-gnu"},{"os":"windows-2025","target":"x86_64-pc-windows-msvc"},{"os":"windows-11-arm","target":"aarch64-pc-windows-msvc"}]' >> "$GITHUB_OUTPUT"
             echo 'installs=[{"os":"macos-15","label":"macOS-arm64"},{"os":"macos-15-intel","label":"macOS-x64"},{"os":"ubuntu-22.04","label":"Linux-x64"},{"os":"ubuntu-22.04-arm","label":"Linux-arm64"},{"os":"windows-2025","label":"Windows-x64"},{"os":"windows-11-arm","label":"Windows-arm64"}]' >> "$GITHUB_OUTPUT"
@@ -115,8 +132,9 @@ jobs:
 
   bundle:
     name: Aggregate native and existing-installer releases
-    needs: native
-    if: ${{ !cancelled() && needs.native.result == 'success' }}
+    needs: [plan, native]
+    # With the installs and update checks after it, only where they're wanted (see What to build).
+    if: ${{ !cancelled() && needs.native.result == 'success' && needs.plan.outputs.checks == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

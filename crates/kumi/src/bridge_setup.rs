@@ -586,7 +586,17 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
     } else {
         format!("Kumi will install the Ableton bridge {bundled}: the Remote Script Live loads, and the local server Kumi talks to.")
     });
+    // An update's or a rollback's last step (Kumi's updater, or an older Kumi's through the migration
+    // shim): Kumi itself has changed, so a bridge left for later isn't the command failing.
+    let after_update = io.env.get("KUMI_BRIDGE_AFTER").is_some_and(|value| value == "1");
+    let later = |what: &str| {
+        say(&format!("The bridge wasn't updated yet: {what}, then run: {} bridge", *KUMI));
+        Ok(0)
+    };
     if live_open(&io, run.clone()).await {
+        if after_update {
+            return later("save your work, quit Live");
+        }
         say(&format!("Live is open. Save your work, quit Live, then run this again: {} bridge", *KUMI));
         return Ok(1);
     }
@@ -597,6 +607,9 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
             ask_yes_no(io.input.clone(), io.out.clone(), "Is Live closed, with your work saved?").await
         })
     {
+        if after_update {
+            return later("quit Live");
+        }
         say(&format!("Nothing was changed. Quit Live, then run: {} bridge", *KUMI));
         return Ok(1);
     }

@@ -3,6 +3,26 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.8.3 — 2026-10-05
+
+Ships with bridge 1.0.77, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+
+- When an update's new bridge has to wait for Live to close, the update no longer looks like it
+  failed: `kumi bridge` says "The bridge wasn't updated yet: quit Live, then run: kumi bridge" (with
+  Live open: "save your work, quit Live") and exits 0. A `kumi bridge` you run yourself still exits 1
+  when it changes nothing.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.77
+
+- Moving an Arrangement clip by less than its own length no longer crashes Live, and neither does
+  undoing it. A move onto another clip is refused before anything is copied, and Kumi names the clip
+  in the way. If a copy fails partway, the clip goes back where it was.
+- Chord progressions take `chords` (chord symbols or roman numerals), as their description says.
+
 ## 1.8.2 — 2026-10-05
 
 Ships with bridge 1.0.76, which Live loads when it restarts. After updating, Kumi offers to quit Live
