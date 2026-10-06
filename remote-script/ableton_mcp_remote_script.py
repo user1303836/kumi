@@ -10881,6 +10881,10 @@ class LiveObjectMapper:
     # its item tree are undocumented Python Remote Script internals. No root is
     # a stable public binding; the tier labels below say so explicitly.
     _BROWSER_SEARCHABLE_CATEGORIES = {"instruments", "audio_effects", "midi_effects", "modulators", "drums", "plugins", "packs", "max_for_live", "clips"}
+    # A search with no category walks these in this order: the producer's own places first (the User Library,
+    # this project, their folders), so the bound a big Pack can fill doesn't keep them out (#183).
+    _BROWSER_SEARCH_ORDER = ("user_library", "current_project", "user_folders", "instruments", "audio_effects", "midi_effects",
+                             "modulators", "plugins", "max_for_live", "drums", "clips", "sounds", "samples", "packs")
 
     def _browser_item_identity(self, path: str, item: Any) -> str:
         uri = self._read_attr(item, "uri")
@@ -10953,13 +10957,17 @@ class LiveObjectMapper:
                 is_device = explicit_device is True or (explicit_device is None and category_name in self._DEVICE_BROWSER_CATEGORIES and is_loadable)
                 if not self._items(self._read_attr(child, "children") or []) or is_device:
                     if not needle or needle in name.lower() or needle in child_path.lower():
-                        if child_path in seen_ids: raise ValueError("browser item identity collision")
-                        object_identity = self._browser_item_identity(child_path, child)
-                        seen_ids.add(child_path); items.append({"id": child_path, "objectIdentity": object_identity, "name": name, "category": category_name, "path": child_path, "isDevice": is_device})
+                        # Live lists one thing twice under one path when it comes from two files (Core Library
+                        # and a Pack, two library versions): the second is "<path>#2", and so on (#183).
+                        repeats[child_path] = repeats.get(child_path, 0) + 1
+                        item_id = child_path if repeats[child_path] == 1 else f"{child_path}#{repeats[child_path]}"
+                        if len(item_id) <= 256 and item_id not in seen_ids:
+                            seen_ids.add(item_id); items.append({"id": item_id, "objectIdentity": self._browser_item_identity(item_id, child), "name": name, "category": category_name, "path": child_path, "isDevice": is_device})
                 if not is_device:
                     walk(child, child_path, depth + 1)
 
-        categories = [category] if category else sorted(self._BROWSER_CATEGORIES)
+        repeats: dict[str, int] = {}
+        categories = [category] if category else [name for name in self._BROWSER_SEARCH_ORDER if name in self._BROWSER_CATEGORIES]
         for category_name in categories:
             if len(items) >= limit:
                 break
@@ -10969,30 +10977,37 @@ class LiveObjectMapper:
         return {"items": items}
 
     def _browser_find(self, item_id: Any) -> tuple[Any, dict[str, Any]]:
+        """The Browser item a search named: by its path, the first of several Live lists under it, or the nth
+        by "<path>#n" as a search names a repeat (#183). Its identity holds its uri, so a different file at
+        the same place isn't taken for it."""
         if not isinstance(item_id, str) or not 1 <= len(item_id) <= 256:
             raise ValueError("browser item id is invalid")
         browser = self._browser(); item_category = item_id.split("/", 1)[0] if "/" in item_id else ""
         if item_category not in self._BROWSER_CATEGORIES: raise ValueError("browser item id is invalid")
-        matches: list[Any] = []; traversal_count = 0
-        def find(node: Any, path: str, depth: int) -> None:
-            nonlocal traversal_count
-            if depth > 6: return
-            children = self._items(self._read_attr(node, "children") or [])
-            if len(children) > MAX_DISCOVERY_COLLECTION_LENGTH: raise ValueError("browser child collection exceeds its traversal bound")
-            for child in children:
-                traversal_count += 1
-                if traversal_count > MAX_DISCOVERY_COLLECTION_LENGTH * 7: raise ValueError("browser lookup exceeds its path traversal bound")
-                name = str(self._read_attr(child, "name") or ""); child_path = f"{path}/{name}"
-                if len(name) > 256 or len(child_path) > 256: continue
-                if child_path == item_id:
-                    matches.append(child)
-                    if len(matches) > 1: raise ValueError("browser item identity is ambiguous")
-                elif item_id.startswith(f"{child_path}/"):
-                    find(child, child_path, depth + 1)
-        find(self._browser_category(browser, item_category), item_category, 0)
-        if len(matches) != 1: raise ValueError("browser item identity is missing or ambiguous")
-        item = matches[0]; name = str(self._read_attr(item, "name") or ""); explicit_device = self._read_attr(item, "is_device"); is_device = explicit_device is True or (explicit_device is None and item_category in self._DEVICE_BROWSER_CATEGORIES and self._read_attr(item, "is_loadable") is True)
-        return item, {"id": item_id, "objectIdentity": self._browser_item_identity(item_id, item), "name": name, "category": item_category, "path": item_id, "isDevice": is_device}
+        def lookup(path_id: str) -> list[Any]:
+            matches: list[Any] = []; traversal_count = 0
+            def find(node: Any, path: str, depth: int) -> None:
+                nonlocal traversal_count
+                if depth > 6: return
+                children = self._items(self._read_attr(node, "children") or [])
+                if len(children) > MAX_DISCOVERY_COLLECTION_LENGTH: raise ValueError("browser child collection exceeds its traversal bound")
+                for child in children:
+                    traversal_count += 1
+                    if traversal_count > MAX_DISCOVERY_COLLECTION_LENGTH * 7: raise ValueError("browser lookup exceeds its path traversal bound")
+                    name = str(self._read_attr(child, "name") or ""); child_path = f"{path}/{name}"
+                    if len(name) > 256 or len(child_path) > 256: continue
+                    if child_path == path_id: matches.append(child)
+                    elif path_id.startswith(f"{child_path}/"): find(child, child_path, depth + 1)
+            find(self._browser_category(browser, item_category), item_category, 0)
+            return matches
+        matches = lookup(item_id); path = item_id
+        repeat = re.fullmatch(r"(.+)#([2-9]|[1-9]\d+)", item_id)
+        if matches: item = matches[0]
+        elif repeat and len(again := lookup(repeat.group(1))) >= int(repeat.group(2)):
+            item = again[int(repeat.group(2)) - 1]; path = repeat.group(1)
+        else: raise ValueError("browser item identity is missing")
+        name = str(self._read_attr(item, "name") or ""); explicit_device = self._read_attr(item, "is_device"); is_device = explicit_device is True or (explicit_device is None and item_category in self._DEVICE_BROWSER_CATEGORIES and self._read_attr(item, "is_loadable") is True)
+        return item, {"id": item_id, "objectIdentity": self._browser_item_identity(item_id, item), "name": name, "category": item_category, "path": path, "isDevice": is_device}
 
     def _browser_inspect(self, args: dict[str, Any]) -> dict[str, Any]:
         return self._browser_find(args.get("itemId"))[1]

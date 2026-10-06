@@ -2623,6 +2623,31 @@ class ControlSurfaceTests(unittest.TestCase):
         mapper._browser = lambda: BroadBrowser()
         with patch.object(remote_module, "MAX_DISCOVERY_COLLECTION_LENGTH", 256), self.assertRaisesRegex(ValueError, "traversal bound"): mapper.invoke("browser.search", {"category": "instruments", "query": "never-matches", "limit": 10})
 
+    def test_browser_search_names_a_repeated_path_apart_instead_of_failing_and_finds_each_again(self):
+        # #183: Live lists one thing twice under one path when it comes from two files, and the whole search
+        # failed with "browser item identity collision", every query, once the walk reached one.
+        class Item:
+            def __init__(self, name, children=None, uri=None): self.name = name; self.children = children or []; self.is_loadable = not bool(children); self.is_device = not bool(children); self.uri = uri
+        class Browser:
+            def __init__(self):
+                self.drums = Item("drums", [Item("Drum Hits", [Item("Clap", [Item("Clap 808.aif", uri="query:Drums#FileId_1"), Item("Clap 808.aif", uri="query:Drums#FileId_2"), Item("Clap 909.aif", uri="query:Drums#FileId_3")])])])
+                self.user_library = Item("user_library", [Item("Presets", [Item("My Chain.adg", uri="query:UserLibrary#FileId_9")])])
+                self.packs = Item("packs", [Item(f"Pack sound {index}", uri=f"query:Packs#FileId_{100 + index}") for index in range(30)])
+        mapper = LiveObjectMapper(FakeSong()); browser = Browser(); mapper._browser = lambda: browser
+        found = mapper.invoke("browser.search", {"category": "drums", "query": "clap", "limit": 10})
+        validate_operation_payload("browser.search", "result", found)
+        self.assertEqual([item["id"] for item in found["items"]], ["drums/Drum Hits/Clap/Clap 808.aif", "drums/Drum Hits/Clap/Clap 808.aif#2", "drums/Drum Hits/Clap/Clap 909.aif"])
+        self.assertEqual(found["items"][1]["path"], "drums/Drum Hits/Clap/Clap 808.aif")
+        self.assertEqual(len({item["objectIdentity"] for item in found["items"]}), 3)
+        # Each is found again as the search named it, the second by its #2.
+        for item in found["items"]:
+            self.assertEqual(mapper.invoke("browser.inspect", {"itemId": item["id"]}), item)
+        with self.assertRaisesRegex(ValueError, "missing"): mapper.invoke("browser.inspect", {"itemId": "drums/Drum Hits/Clap/Clap 808.aif#3"})
+        # Without a category the producer's own places come first, before a big Pack can fill the bound.
+        everywhere = mapper.invoke("browser.search", {"query": "", "limit": 5})
+        self.assertEqual(everywhere["items"][0]["id"], "user_library/Presets/My Chain.adg")
+        self.assertEqual(everywhere["items"][0]["category"], "user_library")
+
     def test_browser_inspect_follows_the_returned_path_without_scanning_unrelated_subtrees(self):
         class Item:
             def __init__(self, name, children=None): self.name = name; self.children = children or []; self.is_loadable = not bool(children); self.is_device = not bool(children)

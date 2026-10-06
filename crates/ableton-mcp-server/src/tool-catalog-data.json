@@ -2381,7 +2381,7 @@
     },
     {
       "name": "live_browser_search",
-      "description": "Search the Live Browser catalog with ranked multi-term matching over a bounded per-root candidate cache (or exact substring fallback), returning scored results with stable identities and explicit traversal/cache provenance.",
+      "description": "Search the Live Browser catalog with ranked multi-term matching over a bounded per-root candidate cache (or exact substring fallback), returning scored results with stable identities and explicit traversal/cache provenance. Without a category it searches everywhere, the producer's User Library, this project and their folders first. An item Live lists twice under one path (from a Pack and the Core Library, say) has its own id, \"…#2\".",
       "inputSchema": {
         "type": "object",
         "properties": {
