@@ -45,8 +45,8 @@ pub trait ProjectStore {
     /// moved Set finds it here).
     async fn load(&self, project: &str) -> Result<Option<Baseline>, RuntimeError>;
     /// The baseline to compare the Set at `path` with: the last one saved for that Set (each version of a
-    /// song keeps its own), or the project's latest when that Set moved here. A version first seen here has
-    /// none.
+    /// song keeps its own), or, without one, the project's latest when that Set moved here. A version first
+    /// seen here has none.
     async fn load_set(&self, project: &str, path: &str) -> Result<Option<Baseline>, RuntimeError> {
         Ok(self.load(project).await?.filter(|latest| moved_to(&latest.path, path)))
     }
@@ -209,11 +209,19 @@ impl ProjectStore for FileProjectStore {
             return Ok(None);
         }
         let folder = self.directory.join(project);
-        if baseline_path(&folder.join("last-seen.json")).await.is_some_and(|last| moved_to(&last, path)) {
+        let last = baseline_path(&folder.join("last-seen.json")).await;
+        if last.as_deref() == Some(path) {
             return Ok(read_baseline(&folder.join("last-seen.json")).await);
         }
+        // Its own first: the latest version being deleted or renamed doesn't make this one a move.
         let file = folder.join("sets").join(format!("{}.json", project_id_of(path)));
-        Ok(read_baseline(&file).await.filter(|baseline| baseline.path == path))
+        if let Some(own) = read_baseline(&file).await.filter(|baseline| baseline.path == path) {
+            return Ok(Some(own));
+        }
+        Ok(match last {
+            Some(last) if moved_to(&last, path) => read_baseline(&folder.join("last-seen.json")).await,
+            _ => None,
+        })
     }
     async fn save(&self, project: &str, baseline: &Baseline) -> Result<(), RuntimeError> {
         if !project_id(project) {

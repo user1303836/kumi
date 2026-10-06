@@ -290,8 +290,10 @@ async fn each_version_of_a_song_keeps_its_own_baseline_and_a_moved_set_finds_the
     store.save(project, &Baseline { saved_at: 4, ..first.clone() }).await.unwrap();
     assert_eq!(store.load_set(project, &second.path).await.unwrap(), Some(second.clone()));
     assert_eq!(store.load(project).await.unwrap().map(|latest| latest.saved_at), Some(4));
-    // Moved: its last place is gone, so the Set in its new place finds the project's latest.
+    // The latest version deleted (or renamed): the second still compares with its own, not the latest.
     std::fs::remove_file(&first.path).unwrap();
+    assert_eq!(store.load_set(project, &second.path).await.unwrap(), Some(second.clone()));
+    // Moved: its last place is gone, so the Set in its new place finds the project's latest.
     let moved = dir.path().join("Moved").join("Night Drive.als").to_string_lossy().into_owned();
     assert_eq!(store.load_set(project, &moved).await.unwrap().map(|latest| latest.saved_at), Some(4));
     // A song with many versions keeps a bounded number of them.

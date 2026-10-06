@@ -195,13 +195,21 @@ async fn a_set_saved_for_the_first_time_is_a_new_song_whatever_id_its_template_g
             // A new Set from that template carries its id, unsaved until now.
             set.data.replace(Some(id.clone()));
             *remember.current.borrow_mut() =
-                Some(Rc::new(CurrentProject { identity: "new".into(), name: "Untitled".into(), path: None, project: None }));
+                Some(Rc::new(CurrentProject { identity: "new".into(), name: "Untitled".into(), path: None, project: None, unsaved: true }));
             let saved = set_in(&dir.path().join("Footwork Project"), "Footwork.als");
             assert_eq!(remember.project_of("new", &saved, Signal::new()).await, project_id_of(&saved));
             assert_eq!(*set.data.borrow(), Some(project_id_of(&saved)), "kept in the Set");
-            // Opened from its file instead (not a first save), the same id would read as the song moved.
+            // A saved Set whose file went missing for a moment (moved while open, a dropped volume) has no path
+            // either, but Live never called it unsaved: saved again, it's still the same song.
             set.data.replace(Some(id.clone()));
-            assert_eq!(remember.project_of("other", &saved, Signal::new()).await, id);
+            *remember.current.borrow_mut() = Some(Rc::new(CurrentProject {
+                identity: "song".into(),
+                name: "Night Drive".into(),
+                path: None,
+                project: None,
+                unsaved: false,
+            }));
+            assert_eq!(remember.project_of("song", &saved, Signal::new()).await, id);
         })
         .await;
 }

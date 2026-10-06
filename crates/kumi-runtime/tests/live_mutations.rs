@@ -222,6 +222,7 @@ async fn replay() {
                 project: path.as_deref().map(kumi_runtime::integrations::ableton::project::project_id_of),
                 path,
                 name: project["name"].as_str().unwrap().into(),
+                unsaved: false,
             }));
         }
         history.changes_this_turn.set(config["count"].as_u64().unwrap_or(0) as usize);

@@ -280,6 +280,7 @@ async fn replay(chunk: usize, chunks: usize) {
             path: config["path"].as_str().map(str::to_owned),
             name: "Fixture Set".into(),
             project: config["path"].as_str().map(kumi_runtime::integrations::ableton::project::project_id_of),
+            unsaved: false,
         }));
         let history = Rc::new(History::new(connection.clone(), remember.clone(), options.change_timeout_ms, options.on_change.clone()));
         let observer = Rc::new(Observer::new(connection.clone(), remember));
@@ -521,8 +522,13 @@ async fn cancelled_kernel_audition_restores_main_and_removes_scratch_tracks_afte
             integration.connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
             integration.connection.epoch.set(Some(7.0));
             *integration.connection.set.borrow_mut() = Some("fixture".into());
-            *integration.history.remember.current.borrow_mut() =
-                Some(Rc::new(CurrentProject { identity: "fixture".into(), path: None, name: "Fixture Set".into(), project: None }));
+            *integration.history.remember.current.borrow_mut() = Some(Rc::new(CurrentProject {
+                identity: "fixture".into(),
+                path: None,
+                name: "Fixture Set".into(),
+                project: None,
+                unsaved: false,
+            }));
             integration.observer.tempo.set(Some(120.0));
             let audition = integration.definitions().into_iter().find(|tool| tool.name() == "audition").unwrap();
             let mut input = case["operations"][0]["request"].as_object().unwrap().clone();

@@ -31,6 +31,7 @@ fn current() -> Rc<CurrentProject> {
         name: "Set".into(),
         path: Some("/saved.als".into()),
         project: Some("/saved.als".into()),
+        unsaved: false,
     })
 }
 #[async_trait(?Send)]
@@ -158,6 +159,7 @@ async fn saved_set_memory_export_queue_and_catch_up_match_source() {
                         name: p["name"].as_str().unwrap().into(),
                         path: p["path"].as_str().map(str::to_owned),
                         project: p["path"].as_str().map(str::to_owned),
+                        unsaved: false,
                     })),
                 };
                 let result: Result<Value, RuntimeError> = match case["operation"].as_str().unwrap() {

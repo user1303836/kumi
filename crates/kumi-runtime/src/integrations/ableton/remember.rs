@@ -28,6 +28,8 @@ pub struct CurrentProject {
     pub name: String,
     /// The project a saved Set is (`project::decide_project`); none while it's unsaved.
     pub project: Option<String>,
+    /// Live says the Set was never saved (not only that its file can't be found now).
+    pub unsaved: bool,
 }
 pub type Saving = Shared<LocalBoxFuture<'static, ()>>;
 pub struct Remember {
@@ -158,7 +160,7 @@ impl Remember {
     /// whatever id its template gave it. Read once for a Set. Without the bridge's Set data it's the id the
     /// path gives, as before.
     pub async fn project_of(&self, identity: &str, path: &str, signal: Signal) -> String {
-        let first_save = self.current().is_some_and(|set| set.identity == identity && set.path.is_none());
+        let first_save = self.current().is_some_and(|set| set.identity == identity && set.unsaved);
         let connection = &self.connection;
         if connection.ensure_catalog(signal.clone()).await.is_err() || !connection.has("live_data_read") {
             return project::project_id_of(path);
@@ -198,21 +200,25 @@ impl Remember {
         id
     }
     pub async fn project_path(&self, signal: Signal) -> Option<String> {
-        let result: Result<Option<String>, RuntimeError> = async {
+        self.project_place(signal).await.0
+    }
+    /// Where the Set is saved (none while its file can't be found), and whether Live says it was never saved
+    /// (false when Live can't say).
+    pub async fn project_place(&self, signal: Signal) -> (Option<String>, bool) {
+        let result: Result<(Option<String>, bool), RuntimeError> = async {
             self.connection.ensure_catalog(signal.clone()).await.map_err(RuntimeError::from)?;
             if !self.connection.has("live_project_info") {
-                return Ok(None);
+                return Ok((None, false));
             }
             let info =
                 payload(&self.connection.call("live_project_info", JsonObject::new(), abort::any([signal, abort::timeout(5000)])).await?)?;
-            Ok(info
-                .get("path")
-                .and_then(Value::as_str)
-                .filter(|s| !s.is_empty() && info.get("exists") != Some(&Value::Bool(false)))
-                .map(str::to_owned))
+            let file = info.get("path").and_then(Value::as_str).filter(|s| !s.is_empty());
+            // A Set never saved has no path at all; a saved one whose file is gone keeps its path.
+            let unsaved = info.get("path").is_none() && info.get("exists") == Some(&Value::Bool(false));
+            Ok((file.filter(|_| info.get("exists") != Some(&Value::Bool(false))).map(str::to_owned), unsaved))
         }
         .await;
-        result.ok().flatten()
+        result.unwrap_or((None, false))
     }
     pub fn catch_up(self: &Rc<Self>, identity: String, name: String, after_reconnect: bool) {
         *self.context.borrow_mut() = None;

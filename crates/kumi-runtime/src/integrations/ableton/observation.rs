@@ -291,16 +291,16 @@ impl Observer {
             let project = self.remember.current();
             let new_set = !project.as_ref().is_some_and(|p| p.identity == identity);
             let mut path = if new_set { None } else { project.as_ref().and_then(|p| p.path.clone()) };
+            // Never saved, as Live says (a saved Set whose file can't be found now has no path either).
+            let mut unsaved = !new_set && project.as_ref().is_some_and(|p| p.unsaved);
 
             if new_set || project.as_ref().is_some_and(|p| p.name != name) {
                 if row.contains_key("filePath") {
-                    path = row
-                        .get("filePath")
-                        .and_then(Value::as_str)
-                        .filter(|s| !s.is_empty() && std::path::Path::new(s).exists())
-                        .map(str::to_owned);
+                    let file = row.get("filePath").and_then(Value::as_str).filter(|s| !s.is_empty());
+                    unsaved = file.is_none();
+                    path = file.filter(|s| std::path::Path::new(s).exists()).map(str::to_owned);
                 } else {
-                    path = self.remember.project_path(signal.clone()).await;
+                    (path, unsaved) = self.remember.project_place(signal.clone()).await;
                     connection.assert_lease(lease, &signal)?;
                 }
             }
@@ -332,7 +332,7 @@ impl Observer {
             };
             connection.assert_lease(lease, &signal)?;
             *self.remember.current.borrow_mut() =
-                Some(Rc::new(CurrentProject { identity: identity.clone(), name: name.clone(), path: path.clone(), project: project_id.clone() }));
+                Some(Rc::new(CurrentProject { identity: identity.clone(), name: name.clone(), path: path.clone(), project: project_id.clone(), unsaved }));
             let project_ref = project_id.map(|id| ProjectRef { id, name: name.clone() });
             *self.previous.borrow_mut() =
                 Some(Previous { key: key.clone(), identity: identity.clone(), path: path.clone(), project: project_ref.clone() });
