@@ -1777,7 +1777,7 @@ local_test!(a_turn_brings_in_what_an_older_kumi_changed_beside_it_and_never_wait
     std::fs::write(&files.memory, r#"{"version":1,"notes":[{"id":"p1","text":"Likes short reverbs","at":100}]}"#).unwrap();
     let db = dir.path().join("kumi.db");
     let (client, _) = StoreClient::open(db.clone(), files.clone(), 1).await.unwrap();
-    let h = harness(None, |options| options.files = Some(FileSync::new(client, files.clone())));
+    let h = harness(None, |options| options.files = Some(FileSync::new(client, files.clone(), &[])));
     h.session.start().await.unwrap();
     // An older Kumi open beside this one keeps a note, while another Kumi holds the database's write lock.
     std::fs::write(

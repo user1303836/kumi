@@ -21,7 +21,7 @@ async fn a_look_brings_in_what_changed_once_and_passes_over_files_as_they_were()
     let files = files(dir.path());
     std::fs::write(&files.memory, ONE).unwrap();
     let (client, _) = StoreClient::open(dir.path().join("kumi.db"), files.clone(), 1).await.unwrap();
-    let sync = FileSync::new(client, files.clone());
+    let sync = FileSync::new(client, files.clone(), &[]);
     assert_eq!(
         sync.look().await.unwrap().map(|looked| looked.brought_in),
         Some(Default::default()),
@@ -30,7 +30,7 @@ async fn a_look_brings_in_what_changed_once_and_passes_over_files_as_they_were()
     assert_eq!(sync.look().await.unwrap(), None, "and the next sees nothing changed");
     std::fs::write(&files.memory, TWO).unwrap();
     let looked = sync.look().await.unwrap().unwrap();
-    assert_eq!(looked.brought_in.notes, Kept { added: 1, changed: 0, archived: 0 });
+    assert_eq!(looked.brought_in.notes, Kept { added: 1, changed: 0, archived: 0, both: 0 });
     assert_eq!(looked.brought_in.sentence().as_deref(), Some("Brought in changes made with the older Kumi: 1 note added."));
     assert_eq!(sync.look().await.unwrap(), None);
 }
@@ -41,7 +41,7 @@ async fn a_look_under_way_isnt_started_again() {
     let files = files(dir.path());
     std::fs::write(&files.memory, ONE).unwrap();
     let (client, _) = StoreClient::open(dir.path().join("kumi.db"), files.clone(), 1).await.unwrap();
-    let sync = FileSync::new(client, files.clone());
+    let sync = FileSync::new(client, files.clone(), &[]);
     std::fs::write(&files.memory, TWO).unwrap();
     // Another Kumi holds the database's write lock, so the first look waits for it.
     let other = Connection::open(dir.path().join("kumi.db")).unwrap();
@@ -53,5 +53,19 @@ async fn a_look_under_way_isnt_started_again() {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     assert_eq!(sync.look().await.unwrap(), None, "a look is under way");
     other.execute_batch("ROLLBACK").unwrap();
-    assert_eq!(first.await.unwrap().unwrap().unwrap().brought_in.notes, Kept { added: 1, changed: 0, archived: 0 });
+    assert_eq!(first.await.unwrap().unwrap().unwrap().brought_in.notes, Kept { added: 1, changed: 0, archived: 0, both: 0 });
+}
+
+#[tokio::test]
+async fn a_file_that_isnt_whole_is_named_once_a_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let files = files(dir.path());
+    std::fs::write(&files.memory, ONE).unwrap();
+    let (client, _) = StoreClient::open(dir.path().join("kumi.db"), files.clone(), 1).await.unwrap();
+    let sync = FileSync::new(client, files.clone(), &[]);
+    std::fs::write(&files.memory, r#"{"version":1,"notes":[{"id":"p1""#).unwrap();
+    assert_eq!(sync.look().await.unwrap().unwrap().not_whole, [files.memory.clone()]);
+    // Still not whole, changed again: not named again.
+    std::fs::write(&files.memory, r#"{"version":1,"notes":[{"id":"p1","te"#).unwrap();
+    assert!(sync.look().await.unwrap().unwrap().not_whole.is_empty());
 }

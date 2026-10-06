@@ -568,7 +568,7 @@ impl Session {
             if let Some(turn) = turn {
                 turn.files(began.elapsed().as_millis() as u64);
             }
-            if let Some(message) = looked.ok().flatten().and_then(|imported| imported.brought_in.sentence()) {
+            for message in looked.ok().flatten().map(|imported| imported.sentences()).unwrap_or_default() {
                 this.notice(message);
             }
         });

@@ -410,6 +410,11 @@ pub(super) async fn run_session(
         }
         Err(why) => Some(format!("Your notes, techniques and lessons stay in their files this time: {why}.")),
     };
+    // Files the start named as not whole aren't named again a turn later.
+    let named = match &database {
+        Ok((_, Ok(imported))) => imported.not_whole.clone(),
+        _ => vec![],
+    };
     let database = database.ok().map(|(client, _)| client);
     options.memory = Some(match &database {
         Some(client) => Rc::new(SqliteMemoryStore::new(client.clone())) as Rc<dyn MemoryStore>,
@@ -429,7 +434,7 @@ pub(super) async fn run_session(
         None => create_playbook_store(load_playbook_file(&io.env)?),
     });
     // An older Kumi open beside this one writes the files: what it changes comes in a turn later.
-    options.files = database.as_ref().map(|client| FileSync::new(client.clone(), files));
+    options.files = database.as_ref().map(|client| FileSync::new(client.clone(), files, &named));
     options.store = database;
     options.goals = Some(create_goal_store(load_goals_dir(&io.env)?));
     options.gaps = Some(load_gaps_file(&io.env)?);
