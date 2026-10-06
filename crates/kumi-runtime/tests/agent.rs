@@ -1905,6 +1905,37 @@ async fn a_quiet_call_a_note_kept_beside_the_models_answer_ends_the_turn_before_
 }
 
 #[tokio::test]
+async fn words_beside_a_reaction_alone_get_another_model_call() {
+    use kumi_runtime::core::{
+        store_client::StoreClient,
+        taste_log::{TasteLog, Whereabouts},
+    };
+    local(async {
+        // The producer's reaction noted beside progress words: the change comes in the model's next call.
+        let folder = tempfile::tempdir().unwrap();
+        let store = StoreClient::new(kumi_store::Store::open(folder.path().join("kumi.db")).unwrap());
+        let taste = TasteLog::new(store, Rc::new(Whereabouts::default), Rc::new(|_| None));
+        taste.turn_started("too bright, make it darker", true);
+        let h = harness(
+            |_, n| {
+                if n == 1 {
+                    Scripted::Parts(
+                        [text("Making it darker now."), vec![call("reaction", "{\"quote\":\"too bright\",\"lean\":\"less\"}"), tool_calls()]].concat(),
+                    )
+                } else {
+                    answer("Darker: the filter is down 2 kHz.")
+                }
+            },
+            Options { tools: vec![taste.tool()], ..Options::default() },
+        );
+        assert_eq!(h.kernel.run("too bright, make it darker", signal(), ignore()).await.unwrap().stop_reason, StopReason::Completed);
+        assert_eq!(h.count(), 2, "the reaction doesn't end the turn");
+        h.kernel.close().await;
+    })
+    .await
+}
+
+#[tokio::test]
 async fn a_conversation_carried_into_other_instructions_other_notes_say_continues_without_its_reasoning() {
     local(async {
         let first = harness(

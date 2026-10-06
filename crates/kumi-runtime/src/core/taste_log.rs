@@ -37,9 +37,13 @@ const DESCRIPTION: &str = concat!(
 );
 /// Kept in place of a request that reads as a secret (a pasted key, say): rows are kept for good.
 const LEFT_OUT: &str = "(left out: it read as a secret)";
-/// A request that asks for an undo: "undo that", "take it back", "revert", in the languages Kumi speaks.
+/// A request that asks for an undo, aimed at what Kumi did: "undo that", "revert c3", "take it back", in the languages
+/// Kumi speaks. A change's id counts only inside such words ("tune the 808 to c1" asks for nothing).
 static UNDO_ASKED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-    regex::Regex::new(r"(?i)\b(undo|revert|take (it|that|this|them) (back|out)|put (it|that|this) back|go back|get rid of)\b|元に戻|戻して|取り消|撤销|撤消|还原|恢复").unwrap()
+    regex::Regex::new(
+        r"(?i)\b(undo|revert|take (it|that|this|them|c\d+) (back|out)|put (it|that|this|them|c\d+) back|scrap (it|that|this))\b|元に戻|取り消|撤销|撤消|还原",
+    )
+    .unwrap()
 });
 
 /// Where an observation happens, from the session: its conversation, the Set's project, and the Set's fingerprint.
@@ -146,7 +150,7 @@ impl TasteLog {
                 return;
             }
             // Kumi's undo tool on a turn whose request doesn't ask for one is the model's choice, not the producer's.
-            let asked = by == UndoneBy::Producer || UNDO_ASKED.is_match(&state.request) || state.request.contains(&record.id);
+            let asked = by == UndoneBy::Producer || UNDO_ASKED.is_match(&state.request);
             (record, asked)
         };
         let now = (self.now)();
@@ -310,7 +314,9 @@ impl KernelTool for ReactionTool {
     }
     async fn execute(&self, input: JsonObject, _signal: Signal) -> Result<ToolResult, RuntimeError> {
         Ok(match self.log.reaction(&input) {
-            Ok(()) => ToolResult { text: stringify(&json!({"noted":true})), reply: Some(String::new()), ..Default::default() },
+            // Not quiet yet: a quiet call ends the answer, and words beside it ("Making it darker now.") would end
+            // the turn before its change. It gets `final` when quiet calls take one.
+            Ok(()) => ToolResult { text: stringify(&json!({"noted":true})), ..Default::default() },
             Err(why) => ToolResult::error(why),
         })
     }
@@ -494,15 +500,21 @@ mod tests {
         // The next request doesn't ask for an undo: the model took the change back on its own.
         f.log.turn_started("now make the drums swing", true);
         f.log.undone("c1", UndoneBy::Tool);
-        // One that names the change does: heard at 1 010 000, undone 20 s later.
+        // One that asks for it does: heard at 1 010 000, undone 20 s later.
         f.log.change(&record("c2", 1_005_000));
         f.log.turn_started("take c2 out", true);
         f.clock.set(1_030_000);
         f.log.undone("c2", UndoneBy::Tool);
+        // A note name, or going back to a part of the song, isn't asking for an undo.
+        for (id, request) in [("c3", "tune the 808 to c1"), ("c4", "go back to the verse")] {
+            f.log.change(&record(id, 1_031_000));
+            f.log.turn_started(request, true);
+            f.log.undone(id, UndoneBy::Tool);
+        }
         let rows = f.rows();
         assert_eq!(
             rows.iter().map(|row| (row.facts["by"].clone(), row.weight)).collect::<Vec<_>>(),
-            [(json!("model"), None), (json!("asked"), Some(-2.0)),]
+            [(json!("model"), None), (json!("asked"), Some(-2.0)), (json!("model"), None), (json!("model"), None)]
         );
     }
 }
