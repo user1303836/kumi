@@ -624,8 +624,9 @@ async fn turn(inner: Rc<Inner>, first: Message, signal: Signal, emit: KernelEmit
                 // A batch stopped partway is kept with what it finished (see `execute`); the turn stops here.
                 abort.check()?;
                 // The tools finished the request and said so: their reply is the answer, with no model call to
-                // write one. A quiet call (a note kept) adds nothing: it ends the turn only when this reply
-                // already holds the model's answer; a model that kept a note first still gets to answer.
+                // write one. A quiet call (a note kept, with final) adds nothing: it ends the turn only when
+                // this reply already holds the model's answer; a model that kept a note first still gets to
+                // answer.
                 let answered = result.content.iter().any(|part| matches!(part, AssistantPart::Text(text) if !trim(&text.text).is_empty()));
                 if let Some(reply) = reply {
                     if state.steering.borrow().is_empty() && (!reply.is_empty() || answered) {
@@ -849,7 +850,8 @@ impl Turn {
     }
 
     /// Runs a step's calls in order. `reply` is set when all succeeded and some finished the request, or
-    /// every call was quiet (an empty reply: done, nothing to add); then no model reply follows. A call
+    /// every call was quiet (an empty reply: done, nothing to add) and said `final`; then no model reply
+    /// follows. A call
     /// that started while it was written finishes with its whole input. Consecutive calls that only read
     /// away from Live run together (`TOGETHER`), their results kept in the reply's order.
     ///
@@ -878,7 +880,7 @@ impl Turn {
             } else {
                 vec![self.call(&group[0].0, &group[0].1, true).await]
             };
-            for ((call, _), ran) in group.iter().zip(ran) {
+            for ((call, input), ran) in group.iter().zip(ran) {
                 let outcome = match ran {
                     Ran::Stopped => {
                         // A read away from Live can't have changed it.
@@ -888,7 +890,13 @@ impl Turn {
                     Ran::Done { outcome, reply } => {
                         finished += 1;
                         match reply.filter(|_| !outcome.is_error) {
-                            Some(words) if words.is_empty() => quiet += 1,
+                            // A note kept ends the answer only beside the finished one: words such as
+                            // "removing the test clip now" with a note mid-task aren't it (#180).
+                            Some(words) if words.is_empty() => {
+                                if input.as_ref().and_then(|input| input.get("final")) == Some(&Value::Bool(true)) {
+                                    quiet += 1;
+                                }
+                            }
                             Some(words) => replies.push(words),
                             None => {}
                         }

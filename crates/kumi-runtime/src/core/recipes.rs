@@ -1,6 +1,6 @@
 //! Repeatable plans of changes with named blanks, saved privately and replayed through make_changes.
 use super::{
-    contracts::{JsonObject, KernelTool, RecipeAction, RecipeEvent, ToolResult},
+    contracts::{with_final, JsonObject, KernelTool, RecipeAction, RecipeEvent, ToolResult},
     errors::RuntimeError,
     memory::suspect_note,
 };
@@ -322,7 +322,13 @@ impl KernelTool for RecipeTool {
                 json!({"type":"object","additionalProperties":false,"required":["name"],"properties":{"name":{"type":"string","minLength":1,"maxLength":80}}})
             }
         };
-        value.as_object().unwrap().clone()
+        // Saving and forgetting are quiet; running has its own final.
+        let value = value.as_object().unwrap().clone();
+        if self.action == RecipeAction::Running {
+            value
+        } else {
+            with_final(value)
+        }
     }
     async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
         match self.action {

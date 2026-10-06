@@ -2,7 +2,9 @@
 //! only when the producer says yes, and read back when a request leaves the approach open.
 
 use super::{
-    contracts::{ChangeRecord, ChangeState, JsonObject, KernelTool, TechniqueAction, TechniqueEvent, TechniqueSummary, ToolResult},
+    contracts::{
+        with_final, ChangeRecord, ChangeState, JsonObject, KernelTool, TechniqueAction, TechniqueEvent, TechniqueSummary, ToolResult,
+    },
     errors::RuntimeError,
     memory::suspect_note,
 };
@@ -739,7 +741,7 @@ impl KernelTool for TechniqueTool {
         TOOL_DATA["description"].as_str().unwrap()
     }
     fn input_schema(&self) -> JsonObject {
-        TOOL_DATA["schema"].as_object().unwrap().clone()
+        with_final(TOOL_DATA["schema"].as_object().unwrap().clone())
     }
     async fn execute(&self, input: JsonObject, _signal: Signal) -> Result<ToolResult, RuntimeError> {
         let input = Value::Object(input);

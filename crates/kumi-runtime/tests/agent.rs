@@ -1870,7 +1870,7 @@ async fn a_quiet_call_a_note_kept_beside_the_models_answer_ends_the_turn_before_
         let note = || replying("remember", "{\"kept\":\"s1\"}", "");
         let read = || saying("read", "{\"tempo\":120}");
         let answered = harness(
-            |_, _| Scripted::Parts([text("Got it: the Reese carries the low end."), vec![call("remember", "{\"note\":\"The Reese is the main bass\",\"about\":\"set\"}"), tool_calls()]].concat()),
+            |_, _| Scripted::Parts([text("Got it: the Reese carries the low end."), vec![call("remember", "{\"note\":\"The Reese is the main bass\",\"about\":\"set\",\"final\":true}"), tool_calls()]].concat()),
             Options { tools: vec![note(), read()], ..Options::default() },
         );
         let (events, emit) = collect();
@@ -1900,6 +1900,53 @@ async fn a_quiet_call_a_note_kept_beside_the_models_answer_ends_the_turn_before_
         let empty_answer = first.messages().iter().any(|message| matches!(message, Message::Assistant { content, .. } if content.iter().any(|part| matches!(part, AssistantPart::Text(text) if text.text.is_empty()))));
         assert!(!empty_answer, "no empty answer is kept");
         first.kernel.close().await;
+    })
+    .await
+}
+
+#[tokio::test]
+async fn a_note_kept_beside_words_about_what_comes_next_lets_the_model_carry_on_and_do_it() {
+    // #180: "removing the test clip now" with note_gap in the same reply ended the turn, and the
+    // test clip stayed in the producer's Set. Without final, the note doesn't end the answer.
+    local(async {
+        let gap = || replying("note_gap", "{\"noted\":\"custom device faces\"}", "");
+        let delete = || saying("delete_clip", "{\"deleted\":\"Kumi temporary soundcheck\"}");
+        let midway = harness(
+            |_, n| match n {
+                1 => Scripted::Parts(
+                    [
+                        text("PANIC VHS is on Audio. Removing the test clip now."),
+                        vec![call("note_gap", "{\"missing\":\"custom device faces\"}"), tool_calls()],
+                    ]
+                    .concat(),
+                ),
+                2 => Scripted::Parts(vec![call("delete_clip", "{\"clip\":\"clip:1\"}"), tool_calls()]),
+                _ => answer("The test clip is gone."),
+            },
+            Options { tools: vec![gap(), delete()], ..Options::default() },
+        );
+        let (events, emit) = collect();
+        assert_eq!(midway.kernel.run("make me a dying-robot effect", signal(), emit).await.unwrap().stop_reason, StopReason::Completed);
+        assert_eq!(midway.count(), 3, "the model goes on to remove the clip, then answers");
+        assert!(texts(&events.borrow()).concat().ends_with("The test clip is gone."));
+        midway.kernel.close().await;
+
+        // With final, a note beside the finished answer still ends it, with no model reply after it.
+        let done = harness(
+            |_, _| {
+                Scripted::Parts(
+                    [
+                        text("Done; the face can't be styled yet."),
+                        vec![call("note_gap", "{\"missing\":\"custom device faces\",\"final\":true}"), tool_calls()],
+                    ]
+                    .concat(),
+                )
+            },
+            Options { tools: vec![gap()], ..Options::default() },
+        );
+        done.kernel.run("make me a dying-robot effect", signal(), ignore()).await.unwrap();
+        assert_eq!(done.count(), 1);
+        done.kernel.close().await;
     })
     .await
 }

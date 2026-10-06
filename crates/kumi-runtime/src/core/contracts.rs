@@ -17,7 +17,8 @@ pub type JsonObject = serde_json::Map<String, Value>;
 
 /// `reply`, from a tool that finished what the producer asked, is the answer: when every call in
 /// the step succeeded and no guidance is waiting, the turn ends there without another model call.
-/// An empty reply is quiet (a note kept): when every call in the step is, the turn ends as is.
+/// An empty reply is quiet (a note kept): when every call in the step is, and says `final` (see
+/// `with_final`), the turn ends as is.
 /// `images` go to the model after the text, each after its caption, for the rest of the turn.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +30,20 @@ pub struct ToolResult {
     pub reply: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<ToolImage>,
+}
+
+/// `schema` with `final`, for a tool whose result is quiet (a note kept, a recipe saved). A reply of
+/// the model's words and nothing but such calls ends the answer only when they say `final: true`;
+/// otherwise the model carries on, since its words may be a step on the way ("removing the test clip
+/// now") rather than its answer (#180).
+pub fn with_final(mut schema: JsonObject) -> JsonObject {
+    if let Some(Value::Object(properties)) = schema.get_mut("properties") {
+        properties.insert(
+            "final".into(),
+            serde_json::json!({"type":"boolean","description":"true when this goes with your finished answer, in the same reply: the answer ends there. Leave it out while there's more to do, and you're called again."}),
+        );
+    }
+    schema
 }
 
 impl ToolResult {
