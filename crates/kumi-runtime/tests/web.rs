@@ -23,6 +23,34 @@ fn a_big_page_reads_in_a_moment() {
     let budget = if cfg!(debug_assertions) { 10_000 } else { 4_000 };
     assert!(start.elapsed().as_millis() < budget, "4 MB of HTML took {} ms", start.elapsed().as_millis());
 }
+#[test]
+fn tags_closed_out_of_order_never_cut_the_text_inside_a_character() {
+    // A tag closed out of order rewrites text that a tag still open kept an offset into.
+    let base = "https://example.com/";
+    assert_eq!(html_to_text("<blockquote>\u{20ac}<a href=\"https://x.y/\"></blockquote>", base), "> [\u{20ac}](https://x.y/)");
+    assert_eq!(html_to_text("<sup>\u{65e5}<a href=\"https://x.y/\">x</sup></a>", base), "^([\u{65e5}x)](https://x.y/)");
+    // Every mix of up to four of the tags whose ends rewrite the text, around characters of two to three bytes.
+    let pieces = [
+        "<a href=\"https://x.y/\">",
+        "</a>",
+        "<sup>",
+        "</sup>",
+        "<code>",
+        "</code>",
+        "<blockquote>",
+        "</blockquote>",
+        "\u{20ac}",
+        "\u{65e5}\u{672c}",
+        " \u{e9} ",
+    ];
+    let mut mixes: Vec<String> = vec![String::new()];
+    for _ in 0..4 {
+        mixes = mixes.iter().flat_map(|mix| pieces.iter().map(move |piece| format!("{mix}{piece}"))).collect();
+        for mix in &mixes {
+            html_to_text(mix, base);
+        }
+    }
+}
 
 use async_trait::async_trait;
 use kumi_common::{abort::Signal, js::json::stringify};

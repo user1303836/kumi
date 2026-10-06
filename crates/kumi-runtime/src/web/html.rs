@@ -238,6 +238,15 @@ impl Builder {
     fn trim_end(&mut self) {
         self.out.truncate(self.out.trim_end_matches([' ', '\t']).len());
     }
+    /// Where `out` can be cut at `at`, an offset kept when a tag opened: a tag closed out of order may have rewritten
+    /// what came before since, so `at` can be past the end or inside a character.
+    fn cut(&self, at: usize) -> usize {
+        let mut at = at.min(self.out.len());
+        while !self.out.is_char_boundary(at) {
+            at -= 1;
+        }
+        at
+    }
     fn newline(&mut self) {
         if self.opening() {
             return;
@@ -441,6 +450,7 @@ impl Builder {
                     return;
                 }
                 if let Some(start) = self.codes.pop() {
+                    let start = self.cut(start);
                     if self.out.len() == start + 1 {
                         self.out.truncate(start);
                     } else {
@@ -450,7 +460,7 @@ impl Builder {
             }
             "sup" | "sub" => {
                 if let Some((mark, start)) = self.scripts.pop() {
-                    let inside = self.out.split_off(start);
+                    let inside = self.out.split_off(self.cut(start));
                     let inside = trim(&inside);
                     if inside.is_empty() {
                         return;
@@ -491,7 +501,7 @@ impl Builder {
             "blockquote" => {
                 if let Some(start) = self.quotes.pop() {
                     self.trim_end();
-                    let quoted = self.out.split_off(start.min(self.out.len()));
+                    let quoted = self.out.split_off(self.cut(start));
                     let quoted = trim(&quoted)
                         .split('\n')
                         .map(|line| if line.is_empty() { ">".into() } else { format!("> {line}") })
@@ -503,7 +513,7 @@ impl Builder {
             }
             "a" => {
                 if let Some((href, start)) = self.links.pop() {
-                    let inside = self.out.split_off(start.min(self.out.len()));
+                    let inside = self.out.split_off(self.cut(start));
                     let text = words(&inside);
                     let text = trim(&text);
                     if self.pre == 0
