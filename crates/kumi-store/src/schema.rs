@@ -108,6 +108,7 @@ CREATE TABLE observations (
   context BLOB NOT NULL
 ) STRICT;
 CREATE INDEX observations_project ON observations (project, at);
+CREATE INDEX observations_at ON observations (at);
 ";
 
 const MIGRATIONS: &[&str] = &[V1, V2, V3];

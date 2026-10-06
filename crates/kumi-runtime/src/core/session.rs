@@ -1456,7 +1456,13 @@ impl SessionController for Session {
             }
             s.kernel.clone()
         };
-        held.is_some_and(|h| h.value.has_steer() && h.value.steer(text))
+        let steered = held.is_some_and(|h| h.value.has_steer() && h.value.steer(text));
+        if steered {
+            if let Some(taste) = &self.0.taste {
+                taste.steered(text);
+            }
+        }
+        steered
     }
     fn has_aside(&self) -> bool {
         true
@@ -1650,14 +1656,14 @@ impl SessionController for Session {
                 c
             }
         };
-        if let Some(taste) = &self.0.taste {
-            taste.change(&change);
-        }
         if let Some(l) = &self.0.learned {
             l.drafts.change(change.clone());
         }
         change.clip = None;
         change.devices = None;
+        if let Some(taste) = &self.0.taste {
+            taste.change(&change);
+        }
         {
             let mut s = self.0.state.borrow_mut();
             s.seen.insert(change.id.clone(), change.clone());

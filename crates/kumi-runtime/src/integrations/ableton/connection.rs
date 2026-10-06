@@ -604,11 +604,15 @@ impl LiveConnection {
             }));
         }
     }
+    /// What a transport read found: Live playing is heard, unless Kumi is playing the Set for itself.
+    pub fn note_transport(&self, playing: bool) {
+        self.note_heard(playing && !self.rendering.get());
+    }
     /// Whether Live is heard playing now, kept when that changes.
     fn note_heard(&self, playing: bool) {
         let mut heard = self.heard.borrow_mut();
         if heard.back().map(|(_, was)| *was) != Some(playing) {
-            heard.push_back((kumi_common::time::now_ms(), playing));
+            heard.push_back((self.now().timestamp_millis(), playing));
             while heard.len() > HEARD_KEPT {
                 heard.pop_front();
             }
@@ -678,7 +682,7 @@ impl LiveConnection {
             let row = if read.is_error == Some(true) { None } else { views::rows(&context::payload(&read)?).first().cloned() };
             if let Some(row) = row.filter(|_| !self.closed.get()) {
                 playing = row.get("playing") == Some(&Value::Bool(true));
-                self.note_heard(playing && !self.rendering.get());
+                self.note_transport(playing);
                 self.report_transport(Some(LiveTransport {
                     playing,
                     at,

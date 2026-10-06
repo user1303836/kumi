@@ -359,7 +359,7 @@ impl GoalRig for Goal {
                 trial.values.iter().map(|value| to_fixed(*value, 4)).collect::<Vec<_>>().join(",")
             )
         };
-        if r.rendering.replace(true) {
+        if r.begin_rendering() {
             return Err(observation("Another render is running."));
         }
         let set_from = now_ms();
@@ -443,7 +443,7 @@ impl GoalRig for Goal {
             }
         }
         .await;
-        r.set_rendering(false);
+        r.end_rendering();
         let files = result?;
         let heard_from = now_ms();
         let tempo = r.observer.tempo.get().unwrap_or(f64::NAN);

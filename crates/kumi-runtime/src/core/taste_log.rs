@@ -32,9 +32,15 @@ const QUOTE_CHARS: usize = 200;
 const DESCRIPTION: &str = concat!(
     "When the producer's message reacts to what you did, or says what they like or don't in their music (\"too bright\", ",
     "\"love that groove\", \"never put reverb on the kick\", \"more like Burial\"), note it here in the same reply, ",
-    "quoting their own words. The producer doesn't see it, and it changes nothing now. Not for a request with no ",
-    "opinion in it (\"add a kick\"), and never for your own judgement."
+    "quoting their own words, even when you also remember it. The producer doesn't see it, and it changes nothing now. ",
+    "Not for a request with no opinion in it (\"add a kick\"), and never for your own judgement."
 );
+/// Kept in place of a request that reads as a secret (a pasted key, say): rows are kept for good.
+const LEFT_OUT: &str = "(left out: it read as a secret)";
+/// A request that asks for an undo: "undo that", "take it back", "revert", in the languages Kumi speaks.
+static UNDO_ASKED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"(?i)\b(undo|revert|take (it|that|this|them) (back|out)|put (it|that|this) back|go back|get rid of)\b|元に戻|戻して|取り消|撤销|撤消|还原|恢复").unwrap()
+});
 
 /// Where an observation happens, from the session: its conversation, the Set's project, and the Set's fingerprint.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -102,10 +108,22 @@ impl TasteLog {
         state.attended = attended;
         state.request = if attended { request.to_owned() } else { String::new() };
         if attended {
-            state.requests.push_back(request.chars().take(REQUEST_CHARS).collect());
+            state.requests.push_back(kept_request(request));
             while state.requests.len() > REQUESTS {
                 state.requests.pop_front();
             }
+        }
+    }
+    /// The producer's words steering the turn under way: theirs to quote too.
+    pub fn steered(&self, text: &str) {
+        let mut state = self.state.borrow_mut();
+        if !state.attended {
+            return;
+        }
+        state.request = format!("{}\n{text}", state.request);
+        let joined = state.requests.back().map(|last| format!("{last}\n{text}"));
+        if let (Some(last), Some(joined)) = (state.requests.back_mut(), joined) {
+            *last = if *last == LEFT_OUT { LEFT_OUT.to_owned() } else { kept_request(&joined) };
         }
     }
     /// One of Kumi's changes, as it is now: tied to the turn it was first seen in.
@@ -121,20 +139,32 @@ impl TasteLog {
     /// Kumi in a later turn of their own (not in the turn that made it, nor work toward a goal). It counts most when
     /// it came soon after they first heard the change.
     pub fn undone(&self, id: &str, by: UndoneBy) {
-        let record = {
+        let (record, asked) = {
             let state = self.state.borrow();
             let Some((turn, record)) = state.changes.get(id).cloned() else { return };
             if by == UndoneBy::Tool && (!state.attended || turn >= state.turn) {
                 return;
             }
-            record
+            // Kumi's undo tool on a turn whose request doesn't ask for one is the model's choice, not the producer's.
+            let asked = by == UndoneBy::Producer || UNDO_ASKED.is_match(&state.request) || state.request.contains(&record.id);
+            (record, asked)
         };
         let now = (self.now)();
         let heard = (self.heard)(record.at);
         let since_heard = heard.map(|at| now - at);
-        let weight = if since_heard.is_some_and(|ms| ms <= HEARD_UNDO_MS) { -2.0 } else { -0.5 };
+        let weight = if !asked {
+            None
+        } else if since_heard.is_some_and(|ms| ms <= HEARD_UNDO_MS) {
+            Some(-2.0)
+        } else {
+            Some(-0.5)
+        };
         let mut facts = json!({
-            "by":if by == UndoneBy::Producer {"producer"} else {"asked"},
+            "by":match (by, asked) {
+                (UndoneBy::Producer, _) => "producer",
+                (UndoneBy::Tool, true) => "asked",
+                (UndoneBy::Tool, false) => "model",
+            },
             "sinceChange":now - record.at,
             "sinceHeard":since_heard,
         });
@@ -146,7 +176,7 @@ impl TasteLog {
         if let Some(range) = record.range {
             facts["range"] = json!(range);
         }
-        self.log(Kind::Undo, Some(weight), Some(heard.is_some()), subject(&record), facts);
+        self.log(Kind::Undo, weight, Some(heard.is_some()), subject(&record), facts);
     }
     /// The producer's own words, tagged by the model. Err is why it wasn't kept, for the model.
     pub fn reaction(&self, input: &JsonObject) -> Result<(), String> {
@@ -221,6 +251,14 @@ impl TasteLog {
         // Best effort: a row that can't be written is a reaction not learned from, nothing more.
         self.store.store().write(move |connection| observations::append(connection, &observation), |_| {});
     }
+}
+
+/// A request as rows keep it: its first characters, or a mark in place of one that reads as a secret.
+fn kept_request(request: &str) -> String {
+    if suspect_note(request) {
+        return LEFT_OUT.to_owned();
+    }
+    request.chars().take(REQUEST_CHARS).collect()
 }
 
 /// What a change was, as a row says it.
@@ -397,7 +435,7 @@ mod tests {
         f.log.turn_started("no, undo that", true);
         f.clock.set(1_040_000);
         f.log.undone("c1", UndoneBy::Tool);
-        // With the undo key, long after hearing it: counted, less.
+        // With the undo key, never heard: counted, less.
         f.log.change(&record("c2", 1_050_000));
         f.clock.set(1_500_000);
         f.log.undone("c2", UndoneBy::Producer);
@@ -428,5 +466,43 @@ mod tests {
         );
         assert_eq!(rows[0].facts, json!({"picked":2,"of":2,"option":"Glassy"}));
         assert_eq!(rows[1].subject, json!({"technique":"Shimmer pad","request":"make a pad"}));
+    }
+
+    #[test]
+    fn a_request_that_reads_as_a_secret_is_left_out_of_every_row() {
+        let f = fixture(None);
+        f.log.turn_started("use my key api_key=sk-test-0123456789abcdefghijklmnopqrstuv", true);
+        f.log.picked(&Picked::Answer { question: "Which?".into(), options: vec!["A".into(), "B".into()], index: 0 });
+        assert_eq!(f.rows()[0].context["requests"], json!([LEFT_OUT]));
+    }
+
+    #[test]
+    fn words_steering_a_turn_are_the_producers_to_quote() {
+        let f = fixture(None);
+        f.log.turn_started("make the pad brighter", true);
+        f.log.steered("too bright!");
+        let input = json!({"quote":"too bright","lean":"less"}).as_object().unwrap().clone();
+        assert!(f.log.reaction(&input).is_ok());
+        assert_eq!(f.rows()[0].context["requests"], json!(["make the pad brighter\ntoo bright!"]));
+    }
+
+    #[test]
+    fn an_undo_the_model_chose_is_kept_without_weight() {
+        let f = fixture(Some(1_010_000));
+        f.log.turn_started("add a test clip", true);
+        f.log.change(&record("c1", 1_000_000));
+        // The next request doesn't ask for an undo: the model took the change back on its own.
+        f.log.turn_started("now make the drums swing", true);
+        f.log.undone("c1", UndoneBy::Tool);
+        // One that names the change does: heard at 1 010 000, undone 20 s later.
+        f.log.change(&record("c2", 1_005_000));
+        f.log.turn_started("take c2 out", true);
+        f.clock.set(1_030_000);
+        f.log.undone("c2", UndoneBy::Tool);
+        let rows = f.rows();
+        assert_eq!(
+            rows.iter().map(|row| (row.facts["by"].clone(), row.weight)).collect::<Vec<_>>(),
+            [(json!("model"), None), (json!("asked"), Some(-2.0)),]
+        );
     }
 }
