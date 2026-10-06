@@ -283,12 +283,14 @@ pub(super) struct EarlierBridge {
     pub(super) rollback: Option<BridgeRollback>,
     /// What to say once Kumi is back, in place of checking the bridge again.
     pub(super) said: Option<String>,
+    /// With a rollback: what to say if it can't run after all (Live opened meanwhile), which is how to finish later.
+    pub(super) later: Option<String>,
 }
 /// A rollback to a native Kumi whose own bridge is older than the one in Live. The bridge goes back too when its
 /// receipt kept that Kumi's and Live is closed; in a terminal, the producer can close Live first. Otherwise the newer
 /// bridge stays: it serves the earlier Kumi too. Kumi never quits Live itself here.
 pub(super) async fn earlier_bridge(io: &InstalledIo, home: &str, previous: &str, earlier: &str) -> EarlierBridge {
-    let unchanged = || EarlierBridge { rollback: None, said: None };
+    let unchanged = || EarlierBridge { rollback: None, said: None, later: None };
     let Some(config) = find_bridge_config(&io.env) else { return unchanged() };
     let Ok(server) = read_bridge_server(&config) else { return unchanged() };
     let (Some(installed), Some(bundled)) = (server.version.clone().filter(|_| server.native()), bridge_version(previous)) else {
@@ -298,16 +300,25 @@ pub(super) async fn earlier_bridge(io: &InstalledIo, home: &str, previous: &str,
         return unchanged();
     }
     let stays = format!("The bridge in Live stays {installed}, which works with {earlier}.");
+    let twice = format!("{stays} To put back bridge {bundled} too, quit Live, then run {} update --rollback twice.", *KUMI);
+    // The bridge goes back after the swap, run from its own folders: one inside the app's folders, which the swap
+    // moves, stays.
+    let in_app = server.command.as_deref().is_some_and(|command| {
+        ["app", "app.previous", "app.rollback"].iter().any(|folder| Path::new(command).starts_with(join(home, folder)))
+    });
     let package = server.package_root();
     let owner = package.as_deref().and_then(|package| crate::bridge_setup::owner_paths(&config, package, home));
-    let kept = owner.as_ref().and_then(|(state, _, _)| kept_generation(state)).filter(|(_, version)| *version == bundled);
-    let (Some(command), Some(package), Some(owner), Some((kept, _))) = (server.command.clone(), package, owner, kept) else {
-        return EarlierBridge { rollback: None, said: Some(stays) };
+    // That Kumi's own bridge: its version and, when its bundle lists it, its artifact.
+    let artifact = crate::bridge_setup::prepared_sha256(&join(previous, "bridge"));
+    let kept = owner.as_ref().and_then(|(state, _, _)| kept_generation(state)).filter(|kept| kept.is(&bundled, artifact.as_deref()));
+    let (false, Some(command), Some(package), Some(owner), Some(kept)) = (in_app, server.command.clone(), package, owner, kept) else {
+        return EarlierBridge { rollback: None, said: Some(stays), later: None };
     };
     let run = io.run.clone().unwrap_or_else(default_run);
     let back = EarlierBridge {
-        rollback: Some(BridgeRollback::new(command, package, owner, config, kept, run.clone())),
+        rollback: Some(BridgeRollback::new(command, package, owner, config, kept.root, run.clone())),
         said: Some(format!("The bridge went back to {bundled} with it; Live loads it when it starts.")),
+        later: Some(twice.clone()),
     };
     if !live_open(io, run.clone()).await {
         return back;
@@ -324,8 +335,5 @@ pub(super) async fn earlier_bridge(io: &InstalledIo, home: &str, previous: &str,
         }
         question = format!("Live is still open. Put back bridge {bundled} too, once it's closed?");
     }
-    EarlierBridge {
-        rollback: None,
-        said: Some(format!("{stays} To put back bridge {bundled} too, quit Live, then run {} update --rollback twice.", *KUMI)),
-    }
+    EarlierBridge { rollback: None, said: Some(twice), later: None }
 }

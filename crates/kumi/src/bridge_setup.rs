@@ -438,16 +438,34 @@ pub(crate) fn owner_paths(config: &str, package: &str, home: &str) -> Option<(St
     }
     None
 }
-/// The native generation an installed bridge's receipt keeps to go back to (in the owner's `state`): its package
-/// root and its version.
-pub(crate) fn kept_generation(state: &str) -> Option<(String, String)> {
+/// The native generation an installed bridge's receipt keeps to go back to.
+pub(crate) struct Kept {
+    pub(crate) root: String,
+    pub(crate) version: String,
+    /// The SHA-256 of the artifact it was installed from, as the receipt has it.
+    pub(crate) artifact_sha256: Option<String>,
+}
+impl Kept {
+    /// Whether it's a Kumi's own bridge: its version and, when the Kumi's bundle lists one, its artifact.
+    pub(crate) fn is(&self, version: &str, artifact_sha256: Option<&str>) -> bool {
+        self.version == version && artifact_sha256.is_none_or(|sha| self.artifact_sha256.as_deref() == Some(sha))
+    }
+}
+/// The generation the receipt in the owner's `state` keeps, when it's a native one.
+pub(crate) fn kept_generation(state: &str) -> Option<Kept> {
     let receipt: Value = serde_json::from_slice(&fs::read(join(state, "install-receipt.json")).ok()?).ok()?;
     let root = receipt["previous"]["packageRoot"].as_str().filter(|path| Path::new(path).is_absolute())?;
     let manifest: Value = serde_json::from_slice(&fs::read(join(root, "release-manifest.json")).ok()?).ok()?;
     if manifest["schema"] != "ableton-mcp-native-release/v1" {
         return None;
     }
-    Some((root.into(), bridge_version(root)?))
+    let artifact_sha256 = receipt["previous"]["artifactSha256"].as_str().map(str::to_string);
+    Some(Kept { root: root.into(), version: bridge_version(root)?, artifact_sha256 })
+}
+/// The SHA-256 a Kumi's bundled bridge lists for its artifact, in `<bridge>/prepared.json`.
+pub(crate) fn prepared_sha256(dir: &str) -> Option<String> {
+    let manifest: Value = serde_json::from_slice(&fs::read(join(dir, "prepared.json")).ok()?).ok()?;
+    manifest.get("sha256")?.as_str().map(str::to_string)
 }
 /// The installed bridge's own rollback to the generation its receipt keeps (`lifecycle rollback`), and that
 /// generation's Live extension put back after it. Applied again, it goes forward to the one it left.
@@ -656,8 +674,10 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
         installed.as_ref().filter(|s| s.native()).and_then(|s| s.version.clone()).filter(|v| crate::update::newer(v, &bundled))
     {
         let package = installed.as_ref().and_then(|s| s.package_root());
-        let kept = secret.as_ref().and_then(|_| kept_generation(&state)).filter(|(_, version)| *version == bundled);
-        let (Some(config), Some(command), Some(package), Some(secret), Some((kept, _))) =
+        let prepared = io.prepared.clone().unwrap_or_else(|| join(&executable_dir(), "bridge"));
+        let kept =
+            secret.as_ref().and_then(|_| kept_generation(&state)).filter(|kept| kept.is(&bundled, prepared_sha256(&prepared).as_deref()));
+        let (Some(config), Some(command), Some(package), Some(secret), Some(kept)) =
             (config.clone(), installed.as_ref().and_then(|s| s.command.clone()), package.clone(), secret.clone(), kept)
         else {
             say(&format!("The bridge in Live is {newer}, from a newer Kumi. It works with this one, so it stays."));
@@ -665,6 +685,7 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
             place_ears(io.out.as_ref(), &scripts).await;
             return Ok(0);
         };
+        let kept = kept.root;
         say(&format!("The bridge in Live is {newer}, from a newer Kumi. It works with this one; this Kumi's own, {bundled}, is kept and can go back."));
         let after_update = io.env.get("KUMI_BRIDGE_AFTER").is_some_and(|value| value == "1");
         let later = |what: &str| {

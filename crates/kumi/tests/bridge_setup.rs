@@ -547,8 +547,8 @@ async fn discoverable_owner_receipt_preserves_custom_config_secret_and_state_pat
     }
 }
 /// After an app rollback: a newer Kumi's bridge (1.0.35) in Live and its extension, with a receipt keeping `kept` (a
-/// bridge's version) to go back to.
-fn after_an_app_rollback(kept: Option<&str>) -> World {
+/// bridge's version) to go back to, installed from this Kumi's bundled artifact or, when `ours` is false, another.
+fn after_an_app_rollback(kept: Option<&str>, ours: bool) -> World {
     let w = World::new(Some("1.0.35"));
     let native = json!({"schema":"ableton-mcp-native-release/v1"}).to_string();
     let installed = w.root.path().join("installed");
@@ -560,7 +560,8 @@ fn after_an_app_rollback(kept: Option<&str>) -> World {
         package(&root, version);
         fs::write(root.join("release-manifest.json"), &native).unwrap();
         extension(&root, "// this Kumi's bridge's\n");
-        previous = json!({"packageRoot":root});
+        let artifact = if ours { hex::encode(Sha256::digest(b"tarball bytes")) } else { "0".repeat(64) };
+        previous = json!({"packageRoot":root,"artifactSha256":artifact});
     }
     let live = w.root.path().join("Ableton/Extensions/kumi.kumi");
     fs::create_dir_all(live.join("dist")).unwrap();
@@ -580,7 +581,7 @@ fn live_extension(w: &World) -> String {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn after_an_app_rollback_the_kept_bridge_of_this_kumi_goes_back_with_its_extension() {
-    let w = after_an_app_rollback(Some("1.0.34"));
+    let w = after_an_app_rollback(Some("1.0.34"), true);
     let installed = w.root.path().join("installed");
     let kept = w.root.path().join("kept");
     let mut io = w.io();
@@ -609,7 +610,7 @@ async fn after_an_app_rollback_the_kept_bridge_of_this_kumi_goes_back_with_its_e
 }
 #[tokio::test(flavor = "current_thread")]
 async fn after_an_app_rollback_live_open_a_no_or_a_refused_rollback_changes_nothing() {
-    let w = after_an_app_rollback(Some("1.0.34"));
+    let w = after_an_app_rollback(Some("1.0.34"), true);
     let mut io = w.io();
     io.live_running = Some(Rc::new(|| async { true }.boxed_local()));
     assert_eq!(setup_bridge(io).await.unwrap(), 1);
@@ -647,8 +648,9 @@ async fn after_an_app_rollback_live_open_a_no_or_a_refused_rollback_changes_noth
 }
 #[tokio::test(flavor = "current_thread")]
 async fn after_an_app_rollback_a_newer_bridge_without_this_kumis_kept_stays_and_works() {
-    for kept in [None, Some("1.0.33")] {
-        let w = after_an_app_rollback(kept);
+    // None kept, another version kept, or this version from another artifact (a checkout's, say).
+    for (kept, ours) in [(None, true), (Some("1.0.33"), true), (Some("1.0.34"), false)] {
+        let w = after_an_app_rollback(kept, ours);
         assert_eq!(setup_bridge(w.io()).await.unwrap(), 0);
         let said = w.out.0.borrow().clone();
         assert!(said.contains("The bridge in Live is 1.0.35, from a newer Kumi. It works with this one, so it stays."), "{said}");

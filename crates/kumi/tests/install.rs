@@ -770,6 +770,7 @@ fn native_rollback(dir: &Path, kept: Option<&str>) -> (Env, std::path::PathBuf) 
     put(home.join("app/package.json"), json!({"version":KUMI_VERSION,"bridge":"1.0.85"}).to_string());
     put(home.join("app.previous").join(executable_name("kumi")), "the earlier Kumi");
     put(home.join("app.previous/package.json"), json!({"version":"1.8.11","bridge":"1.0.84"}).to_string());
+    put(home.join("app.previous/bridge/prepared.json"), json!({"artifact":"bridge.tar.gz","sha256":KEPT_ARTIFACT}).to_string());
     let extension = |folder: std::path::PathBuf, code: &str| {
         put(folder.join("manifest.json"), json!({"name":"kumi","version":"1.0.0"}).to_string());
         put(folder.join("dist/extension.js"), code);
@@ -785,7 +786,7 @@ fn native_rollback(dir: &Path, kept: Option<&str>) -> (Env, std::path::PathBuf) 
         put(root.join("package.json"), json!({"version":version}).to_string());
         put(root.join("release-manifest.json"), &native);
         extension(root.join("live-extension"), &format!("// {version}'s"));
-        previous = json!({"packageRoot":root});
+        previous = json!({"packageRoot":root,"artifactSha256":KEPT_ARTIFACT});
     }
     let state = home.join("bridge/state");
     let config = state.join("bridge-config.json");
@@ -802,7 +803,7 @@ fn native_rollback(dir: &Path, kept: Option<&str>) -> (Env, std::path::PathBuf) 
     (env, home)
 }
 /// What a rollback did: its exit, what it said, the questions it asked and the bridge commands it ran. Live is open
-/// for as many looks as `open` says (then closed); `answers` are the producer's in a terminal, or None for none.
+/// at the looks `live` says (by count); `answers` are the producer's in a terminal, or None for none.
 /// `on_run` sees each bridge command's count, and can answer it in the bridge's place.
 struct RolledBack {
     code: i32,
@@ -812,7 +813,7 @@ struct RolledBack {
 }
 async fn roll_back(
     env: &Env,
-    open: usize,
+    live: Rc<dyn Fn(usize) -> bool>,
     answers: Option<Vec<bool>>,
     ran: Rc<RefCell<Vec<Vec<String>>>>,
     on_run: Rc<dyn Fn(usize) -> Option<Ran>>,
@@ -820,12 +821,9 @@ async fn roll_back(
     let (mut io, out) = io(env);
     let looks = Rc::new(std::cell::Cell::new(0));
     io.live_running = Some(Rc::new(move || {
-        let looks = looks.clone();
-        async move {
-            looks.set(looks.get() + 1);
-            looks.get() <= open
-        }
-        .boxed_local()
+        looks.set(looks.get() + 1);
+        let open = live(looks.get());
+        async move { open }.boxed_local()
     }));
     let asked = Rc::new(RefCell::new(Vec::new()));
     if let Some(answers) = answers {
@@ -858,6 +856,12 @@ async fn roll_back(
     let ran = ran.borrow()[before..].to_vec();
     RolledBack { code, said, asked, ran }
 }
+/// Live open for its first `n` looks, then closed.
+fn open_for(n: usize) -> Rc<dyn Fn(usize) -> bool> {
+    Rc::new(move |look| look <= n)
+}
+/// The SHA-256 the earlier Kumi's bundle lists for its bridge's artifact, which the receipt kept.
+const KEPT_ARTIFACT: &str = "4b9a1d3f0c2e8a7b6d5c4b3a29180f7e6d5c4b3a29180f7e6d5c4b3a29180f7e";
 fn version_of(app: impl AsRef<Path>) -> String {
     serde_json::from_slice::<Value>(&fs::read(app.as_ref().join("package.json")).unwrap()).unwrap()["version"].as_str().unwrap().into()
 }
@@ -872,11 +876,12 @@ const STAYS: &str = "The bridge in Live stays 1.0.85, which works with 1.8.11.";
 async fn a_rollback_with_live_closed_puts_back_the_earlier_kumis_bridge_and_its_extension() {
     let dir = tempfile::tempdir().unwrap();
     let (env, home) = native_rollback(dir.path(), Some("1.0.84"));
-    let done = roll_back(&env, 0, None, calls(), Rc::new(|_| None)).await;
+    let done = roll_back(&env, open_for(0), None, calls(), Rc::new(|_| None)).await;
     assert_eq!(done.code, 0, "{}", done.said);
     assert!(done.said.contains("Kumi is back to 1.8.11."), "{}", done.said);
     assert!(done.said.contains("The bridge went back to 1.0.84 with it; Live loads it when it starts."), "{}", done.said);
     assert!(done.said.contains("Kumi's extension in Live went back with it."), "{}", done.said);
+    assert!(done.said.contains("Putting back the bridge…"), "{}", done.said);
     assert!(!done.said.contains("up to date"), "{}", done.said);
     // The installed bridge's own rollback: it checks the kept generation against that one's registry.
     assert_eq!(done.ran.len(), 1);
@@ -892,7 +897,7 @@ async fn a_rollback_with_live_open_keeps_the_newer_bridge_unless_the_producer_cl
     for (answers, open) in [(None, 1), (Some(vec![false]), 1), (Some(vec![true, true, true]), 9)] {
         let dir = tempfile::tempdir().unwrap();
         let (env, home) = native_rollback(dir.path(), Some("1.0.84"));
-        let done = roll_back(&env, open, answers.clone(), calls(), Rc::new(|_| None)).await;
+        let done = roll_back(&env, open_for(open), answers.clone(), calls(), Rc::new(|_| None)).await;
         assert_eq!(done.code, 0, "{}", done.said);
         assert!(done.said.contains(STAYS), "{}", done.said);
         assert!(done.said.contains("To put back bridge 1.0.84 too, quit Live, then run"), "{}", done.said);
@@ -913,7 +918,7 @@ async fn a_rollback_with_live_open_keeps_the_newer_bridge_unless_the_producer_cl
     // A yes once Live is closed: the bridge goes back with the app.
     let dir = tempfile::tempdir().unwrap();
     let (env, home) = native_rollback(dir.path(), Some("1.0.84"));
-    let done = roll_back(&env, 1, Some(vec![true]), calls(), Rc::new(|_| None)).await;
+    let done = roll_back(&env, open_for(1), Some(vec![true]), calls(), Rc::new(|_| None)).await;
     assert_eq!(done.code, 0, "{}", done.said);
     assert_eq!(done.asked.len(), 1);
     assert_eq!(done.ran.len(), 1);
@@ -960,7 +965,7 @@ async fn a_rollback_without_the_earlier_kumis_bridge_kept_keeps_the_newer_one() 
     for kept in [None, Some("1.0.83")] {
         let dir = tempfile::tempdir().unwrap();
         let (env, home) = native_rollback(dir.path(), kept);
-        let done = roll_back(&env, 0, None, calls(), Rc::new(|_| None)).await;
+        let done = roll_back(&env, open_for(0), None, calls(), Rc::new(|_| None)).await;
         assert_eq!(done.code, 0, "{}", done.said);
         assert!(done.said.contains(STAYS), "{}", done.said);
         assert!(!done.said.contains("twice"), "{}", done.said);
@@ -976,16 +981,16 @@ async fn going_back_twice_after_an_app_only_rollback_puts_back_the_earlier_bridg
     let (env, home) = native_rollback(dir.path(), Some("1.0.84"));
     let ran = calls();
     // Live open, no terminal: the app alone.
-    let first = roll_back(&env, 1, None, ran.clone(), Rc::new(|_| None)).await;
+    let first = roll_back(&env, open_for(1), None, ran.clone(), Rc::new(|_| None)).await;
     assert!(first.said.contains("update --rollback twice."), "{}", first.said);
     assert_eq!(version_of(home.join("app")), "1.8.11");
     // Forward to the newer Kumi, whose bridge is the one in Live (here run by this Kumi, as any Kumi's is the same).
-    let forward = roll_back(&env, 0, None, ran.clone(), Rc::new(|_| None)).await;
+    let forward = roll_back(&env, open_for(0), None, ran.clone(), Rc::new(|_| None)).await;
     assert_eq!(forward.code, 0, "{}", forward.said);
     assert!(forward.said.contains("The bridge in Live is up to date."), "{}", forward.said);
     assert_eq!(version_of(home.join("app")), KUMI_VERSION);
     // Back again with Live closed: the bridge goes back with the app.
-    let back = roll_back(&env, 0, None, ran.clone(), Rc::new(|_| None)).await;
+    let back = roll_back(&env, open_for(0), None, ran.clone(), Rc::new(|_| None)).await;
     assert_eq!(back.code, 0, "{}", back.said);
     assert!(back.said.contains("The bridge went back to 1.0.84 with it"), "{}", back.said);
     assert_eq!(ran.borrow().len(), 1);
@@ -993,17 +998,70 @@ async fn going_back_twice_after_an_app_only_rollback_puts_back_the_earlier_bridg
     assert_eq!(extension_in_live(dir.path()), "// 1.0.84's");
 }
 #[tokio::test]
-async fn a_bridge_that_cant_go_back_stays_and_the_app_goes_back_alone() {
+async fn a_bridge_that_cant_go_back_stays_and_says_how_to_finish_or_where_to_look() {
+    for (reason, code, says) in [
+        (
+            "no verified previous generation is available",
+            0,
+            "the one in Live stays, and works with 1.8.11. To try again, quit Live, then run",
+        ),
+        ("rollback failed and active-generation compensation was incomplete", 1, "doctor says how to repair it."),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let (env, home) = native_rollback(dir.path(), Some("1.0.84"));
+        let refused = json!({"version":"ableton-mcp-lifecycle-error/v1","reason":reason});
+        let refuse: Rc<dyn Fn(usize) -> Option<Ran>> =
+            Rc::new(move |_| Some(Ran { code: 1, stdout: String::new(), stderr: format!("{refused}\n") }));
+        let done = roll_back(&env, open_for(0), None, calls(), refuse).await;
+        assert_eq!(done.code, code, "{}", done.said);
+        assert!(done.said.contains(reason), "{}", done.said);
+        assert!(done.said.contains(says), "{}", done.said);
+        assert_eq!(code == 1, done.said.contains("stopped partway"), "{}", done.said);
+        assert_eq!(done.ran.len(), 1);
+        assert_eq!(version_of(home.join("app")), "1.8.11");
+        assert_eq!(extension_in_live(dir.path()), "// 1.0.85's");
+    }
+}
+#[tokio::test]
+async fn live_opening_while_the_app_swaps_leaves_the_bridge_and_says_how_to_finish() {
     let dir = tempfile::tempdir().unwrap();
     let (env, home) = native_rollback(dir.path(), Some("1.0.84"));
-    let refused = json!({"version":"ableton-mcp-lifecycle-error/v1","reason":"no verified previous generation is available"});
-    let refuse: Rc<dyn Fn(usize) -> Option<Ran>> =
-        Rc::new(move |_| Some(Ran { code: 1, stdout: String::new(), stderr: format!("{refused}\n") }));
-    let done = roll_back(&env, 0, None, calls(), refuse).await;
+    // Closed at the first look, open at the one after the swap.
+    let done = roll_back(&env, Rc::new(|look| look > 1), None, calls(), Rc::new(|_| None)).await;
     assert_eq!(done.code, 0, "{}", done.said);
-    let why = "The bridge couldn't go back (no verified previous generation is available): the one in Live stays, and works with 1.8.11.";
-    assert!(done.said.contains(why), "{}", done.said);
-    assert_eq!(done.ran.len(), 1);
+    assert!(done.said.contains("Kumi is back to 1.8.11."), "{}", done.said);
+    assert!(done.said.contains(STAYS), "{}", done.said);
+    assert!(done.said.contains("update --rollback twice."), "{}", done.said);
+    assert!(done.ran.is_empty());
     assert_eq!(version_of(home.join("app")), "1.8.11");
     assert_eq!(extension_in_live(dir.path()), "// 1.0.85's");
+}
+#[tokio::test]
+async fn only_the_earlier_kumis_own_bridge_goes_back() {
+    // The same version from another artifact (a checkout's, say) isn't that Kumi's.
+    let dir = tempfile::tempdir().unwrap();
+    let (env, home) = native_rollback(dir.path(), Some("1.0.84"));
+    let receipt = home.join("bridge/state/install-receipt.json");
+    let mut kept: Value = serde_json::from_slice(&fs::read(&receipt).unwrap()).unwrap();
+    kept["previous"]["artifactSha256"] = json!("0".repeat(64));
+    fs::write(&receipt, kept.to_string()).unwrap();
+    let done = roll_back(&env, open_for(0), None, calls(), Rc::new(|_| None)).await;
+    assert!(done.said.contains(STAYS) && !done.said.contains("twice"), "{}", done.said);
+    assert!(done.ran.is_empty());
+    // A bridge run from the app's own folders, which the swap moves, stays too.
+    let dir = tempfile::tempdir().unwrap();
+    let (env, home) = native_rollback(dir.path(), Some("1.0.84"));
+    let inside = home.join("app/bridge/package");
+    put(inside.join("package.json"), json!({"version":"1.0.85"}).to_string());
+    let state = home.join("bridge/state");
+    let config = state.join("bridge-config.json");
+    put(&config, json!({"server":{"command":inside.join(executable_name("ableton-mcp-server")),"args":["--config",config]}}).to_string());
+    let receipt = state.join("install-receipt.json");
+    let mut moved: Value = serde_json::from_slice(&fs::read(&receipt).unwrap()).unwrap();
+    moved["packageRoot"] = json!(inside);
+    fs::write(&receipt, moved.to_string()).unwrap();
+    let done = roll_back(&env, open_for(0), None, calls(), Rc::new(|_| None)).await;
+    assert!(done.said.contains(STAYS) && !done.said.contains("twice"), "{}", done.said);
+    assert!(done.ran.is_empty());
+    assert_eq!(version_of(home.join("app")), "1.8.11");
 }
