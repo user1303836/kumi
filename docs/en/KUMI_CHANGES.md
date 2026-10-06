@@ -355,6 +355,6 @@ stops there and says to update; `kumi update` or `kumi bridge` does it.
 The Willington tools appear whenever the bridge offers them: with Willington's
 bindings on (`/willington`) and a Live build they cover.
 
-Each Kumi release ships with a bridge: Kumi 1.8.9 with bridge 1.0.82, 1.8.7 to 1.8.8 with 1.0.81, 1.8.6 with 1.0.80, 1.8.5 with 1.0.79, 1.8.4 with 1.0.78, 1.8.3 with 1.0.77, 1.8.2 with 1.0.76, 1.7.5 to 1.8.1 with 1.0.74, 1.7.0 to 1.7.4 with 1.0.73, 1.6.1 with 1.0.72, 1.6.0 with 1.0.71, 1.5 with
+Each Kumi release ships with a bridge: Kumi 1.8.10 with bridge 1.0.83, 1.8.9 with 1.0.82, 1.8.7 to 1.8.8 with 1.0.81, 1.8.6 with 1.0.80, 1.8.5 with 1.0.79, 1.8.4 with 1.0.78, 1.8.3 with 1.0.77, 1.8.2 with 1.0.76, 1.7.5 to 1.8.1 with 1.0.74, 1.7.0 to 1.7.4 with 1.0.73, 1.6.1 with 1.0.72, 1.6.0 with 1.0.71, 1.5 with
 1.0.70, 1.4 with 1.0.69, 1.3 with 1.0.68, 1.2 with 1.0.66, 1.1 with 1.0.53 and
 1.0 with 1.0.52.

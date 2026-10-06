@@ -248,6 +248,13 @@ def _live_module() -> Any:
         return None
 
 
+def _warp_marker_maker() -> Any:
+    """Live's WarpMarker, which Clip.add_warp_marker takes: called by keyword, since its positional order is sample
+    time, then beat time. Live 12.4 refuses the dict the LOM docs show. None outside Live."""
+    maker = getattr(getattr(_live_module(), "Clip", None), "WarpMarker", None)
+    return maker if callable(maker) else None
+
+
 # Live's pre-11 calls that remove notes. Live stops a Remote Script that calls one to ask the producer
 # ("A custom MIDI Remote Script uses an older process to modify MIDI notes…"), holding the bridge until
 # someone answers, and notes rewritten that way lose their MPE, probability and velocity data.
@@ -1300,7 +1307,9 @@ class LiveObjectMapper:
         if operation == "audio.warp-marker.read":
             return self._offers("audio_clip", "warp_markers", method=False)
         if operation in {"audio.warp-marker.add", "audio.warp-marker.move", "audio.warp-marker.delete"}:
-            return self._offers("audio_clip", {"audio.warp-marker.add": "add_warp_marker", "audio.warp-marker.move": "move_warp_marker", "audio.warp-marker.delete": "remove_warp_marker"}[operation])
+            offered = self._offers("audio_clip", {"audio.warp-marker.add": "add_warp_marker", "audio.warp-marker.move": "move_warp_marker", "audio.warp-marker.delete": "remove_warp_marker"}[operation])
+            # Adding one (and putting back one a failed delete removed) takes Live's WarpMarker.
+            return offered and (operation == "audio.warp-marker.move" or _warp_marker_maker() is not None)
         if operation == "arrangement.automation.read":
             return self._offers("arrangement_clip", "automation_envelope")
         if operation == "audio.take-lane.read":
@@ -6249,6 +6258,25 @@ class LiveObjectMapper:
         rows.sort(key=lambda row: row["beatTime"])
         return rows
 
+    def _warp_marker(self, clip: Any, beat_time: float, sample_time: float | None, rows: list[dict[str, Any]]) -> Any:
+        """A warp marker for add_warp_marker at beat_time. Without a sample time it takes the one the clip plays at that
+        beat now, so adding it moves no audio: Live's beat_to_sample_time (in sample frames) over the sample rate, or the
+        line through the nearest two markers (in seconds, as markers keep it)."""
+        maker = _warp_marker_maker()
+        if maker is None: raise ValueError("warp-marker creation is unavailable")
+        if sample_time is None:
+            convert = getattr(clip, "beat_to_sample_time", None); rate = self._read_attr(clip, "sample_rate")
+            def finite(value: Any) -> bool: return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+            frames = convert(beat_time) if callable(convert) and finite(rate) and float(rate) > 0 else None
+            if finite(frames): sample_time = float(frames) / float(rate)
+            else:
+                points = sorted((row["beatTime"], row["sampleTime"]) for row in rows)
+                if len(points) < 2: raise ValueError("the clip's sample time at that beat is unknown")
+                left, right = next(((a, b) for a, b in zip(points, points[1:]) if beat_time <= b[0]), (points[-2], points[-1]))
+                if right[0] == left[0]: raise ValueError("the clip's sample time at that beat is unknown")
+                sample_time = left[1] + (beat_time - left[0]) * (right[1] - left[1]) / (right[0] - left[0])
+        return maker(beat_time=float(beat_time), sample_time=float(sample_time))
+
     def _warp_marker_collection_revision(self, clip: Any) -> str:
         return hashlib.sha256(self._bounded_canonical(self._warp_marker_rows(clip)).encode("utf-8")).hexdigest()
 
@@ -6288,8 +6316,8 @@ class LiveObjectMapper:
             method = getattr(clip, "add_warp_marker", None)
             if not callable(method): raise ValueError("warp-marker creation is unavailable")
             if beat_time < 0 or beat_time in before_beats: raise ValueError("a warp marker already exists at that beat time")
-            # Documented signature: add_warp_marker({"beat_time": beat}).
-            call = lambda: method({"beat_time": beat_time})
+            marker = self._warp_marker(clip, beat_time, None, before_rows)
+            call = lambda: method(marker)
         elif operation == "audio.warp-marker.move":
             method = getattr(clip, "move_warp_marker", None)
             raw_distance = args.get("distance")
@@ -6338,7 +6366,7 @@ class LiveObjectMapper:
                 else:
                     adder = getattr(clip, "add_warp_marker", None)
                     prior_pair = next((pair for pair in before_pairs if pair[0] == beat_time), None)
-                    if callable(adder) and prior_pair is not None: adder({"beat_time": prior_pair[0], "sample_time": prior_pair[1]})
+                    if callable(adder) and prior_pair is not None: adder(self._warp_marker(clip, prior_pair[0], prior_pair[1], before_rows))
             except BaseException: rollback_failed = True
             try:
                 restored_pairs = sorted((row["beatTime"], row["sampleTime"]) for row in self._warp_marker_rows(clip))

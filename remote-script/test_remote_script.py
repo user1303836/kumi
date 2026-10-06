@@ -3806,6 +3806,16 @@ class FakeWarpMarker:
     def __init__(self, beat, sample): self.beat_time = beat; self.sample_time = sample
 
 
+class LiveWarpMarker:
+    """Live.Clip.WarpMarker as Live 12.4 has it: sample time first when called positionally."""
+    def __init__(self, sample_time, beat_time): self.beat_time = beat_time; self.sample_time = sample_time
+
+
+def live_with_warp_markers():
+    live = types.ModuleType("Live"); live.Clip = types.SimpleNamespace(WarpMarker=LiveWarpMarker)
+    return live
+
+
 class FakeAudioClipFull(FakeClip):
     def __init__(self, length):
         super().__init__(length)
@@ -3818,9 +3828,10 @@ class FakeAudioClipFull(FakeClip):
         self.sample_length = 176400.0
 
     def add_warp_marker(self, spec):
-        if not isinstance(spec, dict) or "beat_time" not in spec: raise TypeError("add_warp_marker takes a dict")
-        beat = float(spec["beat_time"]); sample = float(spec.get("sample_time", beat * 44100.0))
-        marker = FakeWarpMarker(beat, sample); self.warp_markers.append(marker); self.warp_markers.sort(key=lambda item: item.beat_time); return marker
+        # Live 12.4 takes only its own WarpMarker (the LOM docs' dict raises this).
+        if not isinstance(spec, LiveWarpMarker):
+            raise TypeError(f"No registered converter was able to produce a C++ rvalue of type NApiHelpers::TWarpMarker from this Python object of type {type(spec).__name__}")
+        marker = FakeWarpMarker(float(spec.beat_time), float(spec.sample_time)); self.warp_markers.append(marker); self.warp_markers.sort(key=lambda item: item.beat_time); return marker
 
     def move_warp_marker(self, beat, distance):
         for marker in self.warp_markers:
@@ -3836,6 +3847,12 @@ class FakeAudioClipFull(FakeClip):
 
 
 class AudioWarpNoteExpansionTests(unittest.TestCase):
+    def setUp(self):
+        self.live_patch = patch.dict(sys.modules, {"Live": live_with_warp_markers()}); self.live_patch.start()
+
+    def tearDown(self):
+        self.live_patch.stop()
+
     def _mapper_with_audio_clip(self):
         song = FakeSong(); clip = FakeAudioClipFull(4.0); song.tracks[0].clip_slots[0].clip = clip
         mapper = LiveObjectMapper(song); row = mapper.snapshot()["tracks"][0]["clips"][0]
@@ -3868,6 +3885,36 @@ class AudioWarpNoteExpansionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "collides"): mapper.invoke("audio.warp-marker.move", {**self._fences(mapper, row, clip), "beatTime": 1.5, "distance": 0.5})
         deleted = mapper.invoke("audio.warp-marker.delete", {**self._fences(mapper, row, clip), "beatTime": 3.0})
         self.assertTrue(deleted["changed"]); self.assertEqual([marker.beat_time for marker in clip.warp_markers], [1.5, 2.0])
+
+    def test_a_marker_is_added_as_lives_warp_marker_where_the_sample_plays_now(self):
+        # Between two markers it takes the sample time on the line through them, so adding it moves no audio.
+        _, clip, mapper, row = self._mapper_with_audio_clip()
+        mapper.invoke("audio.warp-marker.add", {**self._fences(mapper, row, clip), "beatTime": 2.0})
+        self.assertEqual([(marker.beat_time, marker.sample_time) for marker in clip.warp_markers], [(1.0, 44100.0), (2.0, 88200.0), (3.0, 132300.0)])
+        # Live's own conversion (sample frames, over the sample rate: markers keep seconds) when the clip has it.
+        clip.warp_markers = [FakeWarpMarker(0.0, 0.0), FakeWarpMarker(32.0, 16.0)]; clip.sample_rate = 48000.0
+        clip.beat_to_sample_time = lambda beat: beat * 0.5 * 48000.0 + 4800.0
+        mapper.invoke("audio.warp-marker.add", {**self._fences(mapper, row, clip), "beatTime": 8.0})
+        self.assertEqual([(marker.beat_time, marker.sample_time) for marker in clip.warp_markers], [(0.0, 0.0), (8.0, 4.1), (32.0, 16.0)])
+
+    def test_a_failed_delete_puts_the_marker_back_as_lives_warp_marker(self):
+        _, clip, mapper, row = self._mapper_with_audio_clip()
+        original_remove = clip.remove_warp_marker
+        def lost(beat):
+            original_remove(beat); raise RuntimeError("ack lost")
+        clip.remove_warp_marker = lost
+        with self.assertRaisesRegex(RuntimeError, "ack lost"):
+            mapper.invoke("audio.warp-marker.delete", {**self._fences(mapper, row, clip), "beatTime": 3.0})
+        self.assertEqual([(marker.beat_time, marker.sample_time) for marker in clip.warp_markers], [(1.0, 44100.0), (3.0, 132300.0)])
+
+    def test_adding_a_marker_needs_lives_warp_marker(self):
+        _, clip, mapper, row = self._mapper_with_audio_clip()
+        with patch.dict(sys.modules, {"Live": None}):
+            self.assertFalse(mapper._operation_supported("audio.warp-marker.add")); self.assertFalse(mapper._operation_supported("audio.warp-marker.delete"))
+            self.assertTrue(mapper._operation_supported("audio.warp-marker.move"))
+            with self.assertRaisesRegex(ValueError, "warp-marker creation is unavailable"):
+                mapper.invoke("audio.warp-marker.add", {**self._fences(mapper, row, clip), "beatTime": 2.0})
+        self.assertEqual([marker.beat_time for marker in clip.warp_markers], [1.0, 3.0])
 
     def test_warp_marker_acknowledgement_loss_compensates_exactly(self):
         _, clip, mapper, row = self._mapper_with_audio_clip()
