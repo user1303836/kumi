@@ -395,6 +395,11 @@ the video builds and builds it in your Set. Where the video uses something your
 Set doesn't have (a plugin, a sample), Kumi says so and uses Live's closest
 device.
 
+In one answer, Kumi isn't shown a moment again once it has seen it three times,
+and it sees at most 240 pictures of one video. A long request ("every setting
+it uses") ends with what Kumi read, saying what it couldn't, instead of going
+round the same frames again.
+
 What it needs:
 
 - **yt-dlp**, which Kumi fetches into `~/.kumi/tools` the first time (about

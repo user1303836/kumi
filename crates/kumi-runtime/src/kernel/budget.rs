@@ -122,13 +122,27 @@ const IMAGE_BYTES: usize = 4 * 1024;
 /// The most images a request carries; past this, this turn's earliest are put away.
 pub const MAX_IMAGES: usize = 40;
 
-fn put_away(count: usize) -> String {
-    format!(
-        "[{} shown here; {} no longer attached (the tool shows {} again when asked).]",
-        if count == 1 { "An image was".to_string() } else { format!("{count} images were") },
-        if count == 1 { "it's" } else { "they're" },
-        if count == 1 { "it" } else { "them" }
-    )
+/// Why a result's images were put away.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PutAway {
+    /// Past the most a request carries, during the turn: asking for the same pictures again only puts
+    /// away others, so the note says to keep what was read instead (#193: a tutorial was watched 205
+    /// times in one answer, each look evicting the frames the next one asked for again).
+    Room,
+    /// The turn they served is over: a later request can ask for them again.
+    TurnEnded,
+}
+
+fn put_away(count: usize, why: PutAway) -> String {
+    let (shown, it) = if count == 1 { ("An image was".to_string(), "it") } else { (format!("{count} images were"), "them") };
+    match why {
+        PutAway::Room => format!(
+            "[{shown} shown here and put away to make room: a request carries the latest {MAX_IMAGES}. Keep what you read from pictures in your own words as they come. Asking for the same moments again only puts away others.]"
+        ),
+        PutAway::TurnEnded => {
+            format!("[{shown} shown here; {} no longer attached (the tool shows {it} again when asked).]", if count == 1 { "it's" } else { "they're" })
+        }
+    }
 }
 
 /// Raw image bytes measure as what they cost a model, not their size: each counts once, as "" in the JSON.
@@ -198,7 +212,7 @@ fn image_count(output: &ToolResultOutput) -> usize {
 }
 
 /// A result's words, with a line where its images were.
-fn words_of(output: &ToolResultOutput) -> String {
+fn words_of(output: &ToolResultOutput, why: PutAway) -> String {
     let ToolResultOutput::Content { value, .. } = output else { return String::new() };
     let images = image_count(output);
     let mut lines: Vec<String> = value
@@ -206,7 +220,7 @@ fn words_of(output: &ToolResultOutput) -> String {
         .filter_map(|item| if let ToolResultContentItem::Text { text, .. } = item { Some(text.clone()) } else { None })
         .collect();
     if images > 0 {
-        lines.push(put_away(images));
+        lines.push(put_away(images, why));
     }
     lines.join("\n")
 }
@@ -221,8 +235,9 @@ fn result_images(message: &Message) -> usize {
 }
 
 /// The messages with the images tool results showed put away, all but the latest `keep`: a result
-/// keeps its words and says how many images it had. Borrowed (the same messages) when nothing changed.
-pub fn put_away_images(messages: &[Message], keep: usize) -> Cow<'_, [Message]> {
+/// keeps its words and says how many images it had, and why they went. Borrowed (the same messages)
+/// when nothing changed.
+pub fn put_away_images(messages: &[Message], keep: usize, why: PutAway) -> Cow<'_, [Message]> {
     let total: usize = messages.iter().map(result_images).sum();
     if total <= keep {
         return Cow::Borrowed(messages);
@@ -245,7 +260,7 @@ pub fn put_away_images(messages: &[Message], keep: usize) -> Cow<'_, [Message]> 
                     }
                     excess = excess.saturating_sub(images);
                     let mut result = result.clone();
-                    result.output = ToolResultOutput::Text { value: words_of(&part_output(part)), provider_options: None };
+                    result.output = ToolResultOutput::Text { value: words_of(&part_output(part), why), provider_options: None };
                     ToolPart::ToolResult(result)
                 })
                 .collect();
@@ -296,7 +311,7 @@ fn clear_until(messages: &[Message], end: usize, observations: bool) -> Option<V
                             // Words and pictures: the pictures go with the rest.
                             let value = match output {
                                 ToolResultOutput::Text { value, .. } | ToolResultOutput::ErrorText { value, .. } => value.clone(),
-                                ToolResultOutput::Content { .. } => words_of(output),
+                                ToolResultOutput::Content { .. } => words_of(output, PutAway::TurnEnded),
                                 _ => return part.clone(),
                             };
                             let content_output = matches!(output, ToolResultOutput::Content { .. });
@@ -464,7 +479,7 @@ impl Fitted<'_> {
 /// nothing had to go; otherwise the caller keeps the result, since the clearing now belongs to the conversation.
 pub fn fit<'a>(history: &'a [Message], turn: &'a [Message], budget: &ContextBudget) -> Fitted<'a> {
     // A request carries only so many images: this turn's earliest go first.
-    let mut turn: Cow<'a, [Message]> = put_away_images(turn, MAX_IMAGES);
+    let mut turn: Cow<'a, [Message]> = put_away_images(turn, MAX_IMAGES, PutAway::Room);
     let mut history: Cow<'a, [Message]> = Cow::Borrowed(history);
     let within = |history: &[Message], turn: &[Message], bound: f64| (bytes(history) + bytes(turn)) as f64 <= bound;
     if within(&history, &turn, budget.clear_at) {
@@ -548,7 +563,7 @@ fn cut_latest(turn: &[Message], at: usize, room: usize) -> Option<Vec<Message>> 
                 let pictures = matches!(result.output, ToolResultOutput::Content { .. });
                 let value = match &result.output {
                     ToolResultOutput::Text { value, .. } | ToolResultOutput::ErrorText { value, .. } => value.clone(),
-                    ToolResultOutput::Content { .. } => words_of(&result.output),
+                    ToolResultOutput::Content { .. } => words_of(&result.output, PutAway::Room),
                     _ => return part.clone(),
                 };
                 if value.len() <= share && !pictures {

@@ -20,7 +20,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
 
-use super::budget::{fit, opening, put_away_images, transcript_of, ContextBudget, DEFAULT_BUDGET};
+use super::budget::{fit, opening, put_away_images, transcript_of, ContextBudget, PutAway, DEFAULT_BUDGET};
 use super::failure::{describe_failure, retry_delay_ms, retry_reason, MAX_RETRIES};
 use crate::ai::error::LanguageModelError;
 use crate::ai::types::{
@@ -1380,7 +1380,7 @@ fn tool_output(outcome: Outcome) -> ToolResultOutput {
 /// that turn, and kept, they'd cost every later request (and a saved conversation) their size. The
 /// reasoning written after the first goes too, since it was written seeing them. A plain copy when there were none.
 pub fn without_images(messages: &[Message]) -> Vec<Message> {
-    let cleared: Vec<Message> = put_away_images(messages, 0).iter().map(pictures_named).collect();
+    let cleared: Vec<Message> = put_away_images(messages, 0, PutAway::TurnEnded).iter().map(pictures_named).collect();
     let Some(first) = cleared.iter().zip(messages).position(|(after, before)| after != before) else { return messages.to_vec() };
     [cleared[..first].to_vec(), without_reasoning(&cleared[first..])].concat()
 }

@@ -362,7 +362,7 @@ fn images_count_at_what_they_cost_a_model_not_their_size_past_the_most_a_request
     assert_eq!(kept, 40);
     assert_eq!(
         output_of(trimmed.get(1)).as_deref(),
-        Some("frames i0\n[An image was shown here; it's no longer attached (the tool shows it again when asked).]")
+        Some("frames i0\n[An image was shown here and put away to make room: a request carries the latest 40. Keep what you read from pictures in your own words as they come. Asking for the same moments again only puts away others.]")
     );
 }
 

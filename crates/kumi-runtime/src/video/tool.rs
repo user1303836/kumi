@@ -9,6 +9,7 @@ use crate::{
         contracts::{HeardEvent, JsonObject, KernelTool, SessionEvent, ToolImage, ToolResult, WatchedEvent, WordsSource},
         errors::RuntimeError,
     },
+    kernel::budget::MAX_IMAGES,
     system::Env,
 };
 use async_trait::async_trait;
@@ -21,10 +22,16 @@ use kumi_common::{
 };
 use serde_json::{json, Value};
 use std::{
+    cell::RefCell,
+    collections::HashMap,
     rc::Rc,
     sync::{Arc, LazyLock},
 };
 pub const WATCH_VIDEO_TOOL: &str = "watch_video";
+/// Shown this many times in one answer, a moment isn't shown again.
+const REPEATS: u32 = 3;
+/// The most pictures of one video an answer gets: six requests' worth.
+const PER_VIDEO: usize = 6 * MAX_IMAGES;
 static DATA: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("tool-data.json")).unwrap());
 fn caption(frame: &WatchedFrame) -> String {
     format!(
@@ -91,6 +98,7 @@ fn describe(watched: &Watched, heard: Option<&Analysis>) -> String {
                     .join(", ")
             ),
             "Look at them for what the words leave out; look_at with zoom shows a moment closely.".into(),
+            format!("Note what you read from them as you go: a request keeps the latest {MAX_IMAGES} pictures."),
         ]);
     }
     if let Some(sound) = &watched.sound {
@@ -117,12 +125,83 @@ pub struct VideoToolOptions {
     pub tools_dir: String,
     pub env: Option<Env>,
     pub on_event: Rc<dyn Fn(SessionEvent)>,
+    /// Which answer this is (it changes when a new one starts), so what was shown is counted per answer;
+    /// None counts over the tool's life.
+    pub answer: Option<Rc<dyn Fn() -> u64>>,
 }
 struct VideoTool {
     options: VideoToolOptions,
+    seen: RefCell<Seen>,
 }
 pub fn video_tools(options: VideoToolOptions) -> Vec<Rc<dyn KernelTool>> {
-    vec![Rc::new(VideoTool { options })]
+    vec![Rc::new(VideoTool { options, seen: RefCell::new(Seen::default()) })]
+}
+/// What this answer was shown of each video. A model that can no longer see frames put away to make
+/// room asks for the same moments again, which puts away others: an 11-minute tutorial was watched 205
+/// times in one answer, 2,166 frames in 45 minutes (#193). Moments shown before are said so, and past
+/// REPEATS times, or PER_VIDEO pictures of a video, no more pictures come.
+#[derive(Default)]
+struct Seen {
+    answer: u64,
+    videos: HashMap<String, Looks>,
+}
+#[derive(Default)]
+struct Looks {
+    pictures: usize,
+    /// Times each moment (to the second) was shown, by view (None: the whole picture).
+    moments: HashMap<(i64, Option<&'static str>), u32>,
+}
+fn moment(frame: &WatchedFrame) -> (i64, Option<&'static str>) {
+    (frame.at.round() as i64, frame.region.map(|region| region.as_str()))
+}
+impl VideoTool {
+    /// The frames to show of `watched`, recorded as shown, and a note on what was held back or seen before.
+    fn ration(&self, watched: &mut Watched) -> Option<String> {
+        if watched.frames.is_empty() {
+            return None;
+        }
+        let mut seen = self.seen.borrow_mut();
+        let answer = self.options.answer.as_ref().map_or(0, |answer| answer());
+        if seen.answer != answer {
+            *seen = Seen { answer, ..Seen::default() };
+        }
+        let looks = seen.videos.entry(watched.url.clone()).or_default();
+        let before = watched.frames.iter().map(|frame| looks.moments.get(&moment(frame)).copied().unwrap_or(0)).min().unwrap_or(0);
+        let total = watched.frames.len();
+        let note = if before >= REPEATS {
+            watched.frames.clear();
+            Some(format!(
+                "Kumi showed each of these moments {before} times in this answer already, so it doesn't show them again. Answer with what you read from them, and say which settings you couldn't read."
+            ))
+        } else if looks.pictures >= PER_VIDEO {
+            watched.frames.clear();
+            Some(format!(
+                "This answer was shown {} pictures of this video, the most Kumi shows of one video in an answer, so these {total} aren't shown. Finish with what you read, or ask the producer which moments matter.",
+                looks.pictures
+            ))
+        } else {
+            watched.frames.truncate(PER_VIDEO - looks.pictures);
+            let held = total - watched.frames.len();
+            let mut notes = vec![];
+            if before > 0 {
+                notes.push(format!(
+                    "Each of these moments was shown in this answer before ({before} {}): keep what you read from pictures in your own words, since asking again only puts away others.",
+                    if before == 1 { "time" } else { "times" }
+                ));
+            }
+            if held > 0 {
+                notes.push(format!(
+                    "{held} more aren't shown: this answer reached the most pictures Kumi shows of one video ({PER_VIDEO})."
+                ));
+            }
+            (!notes.is_empty()).then(|| notes.join(" "))
+        };
+        for frame in &watched.frames {
+            *looks.moments.entry(moment(frame)).or_default() += 1;
+        }
+        looks.pictures += watched.frames.len();
+        note
+    }
 }
 fn tell(callback: &Rc<dyn Fn(SessionEvent)>, event: SessionEvent) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(event)));
@@ -187,6 +266,7 @@ impl KernelTool for VideoTool {
         let result:Result<ToolResult,VideoFailure>=async{
             let(notices,mut received)=tokio::sync::mpsc::unbounded_channel();let event=self.options.on_event.clone();let watching=watch_video(WatchRequest{url:url.into(),from,to,look_at,zoom,views,frames:input.get("frames").and_then(Value::as_f64),listen:listen_from.zip(listen_to).map(|(from,to)|SoundSpan{from,to})},WatchOptions{videos_dir:self.options.videos_dir.clone(),tools_dir:self.options.tools_dir.clone(),env:self.options.env.clone(),signal:Some(signal.clone()),on_fetch:Some(Arc::new(move|message|{let _=notices.send(message.to_string());})),on_progress:Some(Rc::new(move|text|tell(&event,SessionEvent::Doing{text:text.into()})))});tokio::pin!(watching);
             let watched=loop{tokio::select!{result=&mut watching=>break result,Some(message)=received.recv()=>tell(&self.options.on_event,SessionEvent::Notice{message})}};while let Ok(message)=received.try_recv(){tell(&self.options.on_event,SessionEvent::Notice{message});}let mut watched=watched?;
+            if let Some(note)=self.ration(&mut watched){watched.notes.push(note);}
             let mut heard=None;if let Some(sound)=&watched.sound{tell(&self.options.on_event,SessionEvent::Doing{text:"listening to the video's sound".into()});match hear(&sound.file,AnalyzeOptions{signal:Some(signal.clone()),..Default::default()}).await{Ok(analysis)=>heard=Some(analysis),Err(error)=>{signal.check()?;watched.notes.push(format!("Kumi couldn't listen to the video's sound ({}).",head(&error.to_string(),120)));}}}
             tell(&self.options.on_event,SessionEvent::Watched(WatchedEvent{title:watched.title.clone(),channel:watched.channel.clone().filter(|s|!s.is_empty()),url:watched.url.clone(),duration:watched.duration.filter(|n|*n!=0.0),from:watched.from,to:watched.to,chapters:watched.chapters.iter().filter(|c|c.start>=watched.from&&c.start<=watched.to).map(|c|c.title.clone()).collect(),words:watched.words.as_ref().map_or(WordsSource::None,|w|w.source),lines:watched.lines.len(),frames:watched.frames.iter().map(|f|crate::core::contracts::WatchedFrame{at:f.at,zoom:f.region.map(|r|r.as_str().into()),thumb:crate::core::contracts::Thumb{width:f.thumb.width as u32,height:f.thumb.height as u32,rgb:f.thumb.rgb.clone()}}).collect(),sound:watched.sound.as_ref().map(|s|crate::core::contracts::SoundSpan{from:s.from,to:s.to}),notes:watched.notes.clone()}));
             if let(Some(heard),Some(sound))=(&heard,&watched.sound){tell(&self.options.on_event,SessionEvent::Heard(HeardEvent{file:format!("the video's sound, {}–{}",format_time(sound.from),format_time(sound.to)),summary:summary(heard),bands:heard.balance.bands.iter().map(|b|b.db).collect(),compared:None}));}

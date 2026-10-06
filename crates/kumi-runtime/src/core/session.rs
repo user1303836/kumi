@@ -258,6 +258,8 @@ struct Inner {
     gaps: Vec<Rc<dyn KernelTool>>,
     timings: Option<String>,
     shelf: Vec<Rc<dyn KernelTool>>,
+    /// Answers begun in this session: tools that count per answer (watch_video) read it.
+    answers: Rc<Cell<u64>>,
     unlisten_library: RefCell<Option<Box<dyn FnOnce()>>>,
     timeout_ms: u64,
     idle_ms: u64,
@@ -441,15 +443,18 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
         } else {
             vec![]
         };
+        let answers = Rc::new(Cell::new(0));
         let watching = options
             .watch
             .as_ref()
             .map(|dirs| {
+                let answers = answers.clone();
                 crate::video::tool::video_tools(crate::video::tool::VideoToolOptions {
                     videos_dir: dirs.videos_dir.clone(),
                     tools_dir: dirs.tools_dir.clone(),
                     env: None,
                     on_event: emit.clone(),
+                    answer: Some(Rc::new(move || answers.get())),
                 })
             })
             .unwrap_or_default();
@@ -500,6 +505,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             gaps,
             timings,
             shelf,
+            answers,
             unlisten_library: RefCell::new(unlisten_library),
             saving: RefCell::new(ready()),
             playbook_queue: RefCell::new(ready()),
@@ -1144,6 +1150,7 @@ impl Session {
         let began = Instant::now();
         let recorder = op.is_turn.then(timing::begin);
         if op.is_turn {
+            self.0.answers.set(self.0.answers.get() + 1);
             self.look_at_files();
         }
         let mut ended: Option<(Value, Option<Usage>)> = None;
