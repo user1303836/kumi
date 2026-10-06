@@ -57,7 +57,7 @@ Kumi は User Library の中から Live の Remote Scripts フォルダーを見
 
 ブリッジをインストールして Live で選べば、`kumi` がそれを見つけて接続します。設定することは何もありません。ブリッジがなくても Kumi は起動し、Live なしでチャットし（**No Live access**）、接続を提案します。`kumi --bridge-config <absolute path>` は自分で用意したブリッジ設定を使い、`kumi --inference-only` は Live なしでチャットします。
 
-**オプション：Willington。** 別途インストールする Willington プロバイダーがあれば、Kumi は Follow Actions の編集、ラックのマクロのマッピング、チェーンゾーンの設定もできます。macOS ARM64 の Live 12.4.15b4 と b5 用のバインディングがあります（チェーンのゾーンは b5 のみ）。[オプションの Willington 連携](WILLINGTON_INTEGRATION.md)を参照してください。
+**Willington。** Willington のファイルを収めたリリースからは、Kumi のブリッジに Willington のネイティブバインディングが入ります。それまでは自分でインストールできます。どちらの場合も、`/willington` でオンにするまではオフです。オンにすると、Kumi はラックのマクロのマッピングとチェーンゾーンの設定もでき、セルフテストが合格していれば Follow Actions も編集できます。Willington のバインディングがある Live のバージョンは、macOS ARM64 の Live 12.4.15b4 と b5（チェーンのゾーンは b5 のみ）と、Windows x64 の Live 12.4.15b5 です。[Willington](WILLINGTON_INTEGRATION.md)を参照してください。
 
 ## Kumi との作業
 
@@ -93,7 +93,7 @@ Kumi が元に戻せない変更もあります（トラックの削除、クリ
 
 **Live の中の Python。** ほかのツールでは届かないところについては、Kumi は Live 自身の API を使って Live の中で Python を実行できます。スクリプトによる変更は Live の取り消しでは一つのステップになりますが、HISTORY には記録されません。Live の取り消しで元に戻せます。
 
-**Live がスクリプトに許していないこと：** マクロやモジュレーターのパラメータへのマッピング（Willington ならマクロをマッピングできます）、アレンジメントのオートメーションレーンの編集。Kumi はそう伝え、回避策を提案します。保存、書き出し、フリーズ、バウンス、グループ化は [Live 自身のコマンド](#live-自身のコマンド)で行います。
+**Live がスクリプトに許していないこと：** マクロやモジュレーターのパラメータへのマッピング（Willington ならマクロをマッピングできます：`/willington`）、アレンジメントのオートメーションレーンの編集。Kumi はそう伝え、回避策を提案します。保存、書き出し、フリーズ、バウンス、グループ化は [Live 自身のコマンド](#live-自身のコマンド)で行います。
 
 Kumi が行えるすべての変更の一覧は[Kumi が Set を変更するしくみ](KUMI_CHANGES.md)にあります。
 

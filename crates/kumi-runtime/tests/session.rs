@@ -878,6 +878,30 @@ local_test!(memory_instructions_tools_and_forgetting, {
     h.session.close().await.unwrap();
 });
 
+local_test!(willington_instructions_follow_the_switch_each_time_the_kernel_is_made, {
+    use kumi_runtime::integrations::ableton::willington::WillingtonSwitch;
+    let switch = Rc::new(Cell::new(WillingtonSwitch::Off));
+    let read = switch.clone();
+    let h = harness(None, move |o| o.willington = Some(Rc::new(move || Some(read.get()))));
+    // Kumi can change the Set (make_changes): the instructions say what the bindings would add.
+    h.observation.borrow_mut().tools = vec![Rc::new(Plan { received: Rc::new(RefCell::new(vec![])) })];
+    h.session.start().await.unwrap();
+    assert!(h.record.created.borrow()[0].instructions.contains("/willington turns the bindings on"));
+    // Turned on a moment ago, before the bridge offers their tools: nothing said about them yet.
+    switch.set(WillingtonSwitch::JustOn);
+    h.session.reconfigure().await.unwrap();
+    h.session.refresh().await.unwrap();
+    let instructions = h.record.created.borrow().last().unwrap().instructions.clone();
+    assert!(!instructions.contains("Willington"), "{instructions}");
+    // On for a while, for a Live they have no bindings for: the next kernel says so, without pointing at /willington.
+    switch.set(WillingtonSwitch::On);
+    h.session.reconfigure().await.unwrap();
+    h.session.refresh().await.unwrap();
+    let instructions = h.record.created.borrow().last().unwrap().instructions.clone();
+    assert!(instructions.contains("none fit the Live that's open") && !instructions.contains("/willington"));
+    h.session.close().await.unwrap();
+});
+
 #[derive(Clone)]
 struct Plan {
     received: Rc<RefCell<Vec<JsonObject>>>,

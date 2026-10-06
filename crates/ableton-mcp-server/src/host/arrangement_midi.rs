@@ -2,6 +2,12 @@
 use super::*;
 use kumi_common::{abort::Signal, js::json as js_json, time::now_ms_f64};
 const KEPT: &str = "Kumi can't bring this back; Live's undo can.";
+/// How long an apply waits for Live to show the clips Kumi's extension made, and how often it looks.
+const LANDING_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
+const LANDING_LOOK: std::time::Duration = std::time::Duration::from_millis(25);
+fn js_number(n: f64) -> String {
+    kumi_common::js::number::to_string(n)
+}
 fn finite_at_least(v: &Value, min: f64) -> bool {
     v.as_f64().is_some_and(|n| n.is_finite() && n >= min)
 }
@@ -149,6 +155,86 @@ impl McpHost {
         }
         Ok(found)
     }
+    /// The clips the transaction made, each with its notes, once Live shows them whole. Live shows what
+    /// Kumi's extension made a moment after the extension answers (about 0.1 s on a recent Mac), so this
+    /// looks again every 25 ms, for up to half a second, until every clip is there with all its notes.
+    /// A cancelled apply stops waiting and goes on with what the last look found.
+    async fn landed_arrangement_midi_clips(
+        &self,
+        t: &Value,
+        context: &LiveOperationContext,
+    ) -> Result<(Vec<Option<Value>>, Vec<Option<Vec<Value>>>), LiveError> {
+        let clips = t["payload"]["clips"].as_array().unwrap();
+        let began = tokio::time::Instant::now();
+        loop {
+            let made = self.created_arrangement_midi_clips(t, context).await?;
+            let mut notes = vec![];
+            for row in &made {
+                notes.push(match row {
+                    Some(row) => Some(self.clip_notes_async(row["ref"].as_str().unwrap(), Some(context)).await?),
+                    None => None,
+                });
+            }
+            let landed = notes
+                .iter()
+                .zip(clips)
+                .all(|(notes, clip)| notes.as_ref().is_some_and(|notes| notes.len() == clip["notes"].as_array().map_or(0, Vec::len)));
+            let signal = context.signal.as_ref();
+            if landed || began.elapsed() >= LANDING_WAIT || signal.is_some_and(Signal::is_cancelled) {
+                return Ok((made, notes));
+            }
+            match signal {
+                Some(signal) => tokio::select! {
+                    _ = tokio::time::sleep(LANDING_LOOK) => {}
+                    _ = signal.cancelled() => {}
+                },
+                None => tokio::time::sleep(LANDING_LOOK).await,
+            }
+        }
+    }
+    /// What Live shows where the transaction asked for its clips, when it can't find them: each new clip
+    /// over the asked place, with its name, start, length and notes.
+    async fn arrangement_midi_seen(&self, t: &Value, context: &LiveOperationContext) -> Result<String, LiveError> {
+        let before = t["prior"]["clipIdentities"].as_array().cloned().unwrap_or_default();
+        let mut said = vec![];
+        for c in t["payload"]["clips"].as_array().unwrap() {
+            let (start, end) = (number(&c["start"]), number(&c["start"]) + number(&c["length"]));
+            let rows = self
+                .views
+                .discover_all(
+                    &serde_json::from_value(json!({"kind":"arrangement-clip","parent":c["trackRef"]})).unwrap(),
+                    Some(context),
+                    None,
+                )
+                .await?;
+            let new: Vec<_> = rows
+                .into_iter()
+                .map(Value::Object)
+                .filter(|r| {
+                    !before.contains(&r["objectIdentity"])
+                        && number(&r["start"]) < end
+                        && number(&r["start"]) + number(&r["length"]) > start
+                })
+                .collect();
+            if new.is_empty() {
+                said.push(format!("nothing new at beat {}", js_number(start)));
+            }
+            for row in new {
+                let notes = match row["ref"].as_str() {
+                    Some(reference) => js_number(self.clip_notes_async(reference, Some(context)).await?.len() as f64),
+                    None => "?".into(),
+                };
+                let name = row["name"].as_str().filter(|n| !n.is_empty()).map_or("an unnamed clip".into(), |n| format!("“{n}”"));
+                said.push(format!(
+                    "{name} at beat {}, {} beats long, with {notes} of {} notes",
+                    js_number(number(&row["start"])),
+                    js_number(number(&row["length"])),
+                    c["notes"].as_array().map_or(0, Vec::len)
+                ));
+            }
+        }
+        Ok(said.join("; "))
+    }
     pub async fn live_arrangement_midi_clip_apply_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Option<Value> {
         if !valid_transaction_params(p, "apply") {
             return Some(error(id, -32602, "transactionId, confirmation=apply, and idempotencyKey are required", None));
@@ -178,6 +264,8 @@ impl McpHost {
             if json!(status.epoch)!=t["epoch"]{return Ok(transaction_error(id,"Live connection epoch changed; preview again"));}
             let context=self.transaction_context(p,signal,reads::AUDITION_DEADLINE_MS);let clips=t["payload"]["clips"].as_array().unwrap();let refs=refs(clips);
             let mut made=if reconciliation{self.created_arrangement_midi_clips(&t,&context).await?}else{vec![]};
+            // Each made clip's notes as they were read once they had landed, for its fence.
+            let mut landed:Vec<Option<Vec<Value>>>=vec![];
             let mut partial=if reconciliation&&made.iter().any(Option::is_some)&&!made.iter().all(Option::is_some){Some("only some of the clips are there".to_owned())}else{None};
             if !made.iter().any(Option::is_some){
                 let snapshot=self.views.view_for(Some(&context),&refs,None,&[]).await?;
@@ -190,11 +278,16 @@ impl McpHost {
                     if clips.len()==1||signal.is_some_and(Signal::is_cancelled)||!is_step{return Err(e);}
                     made=self.created_arrangement_midi_clips(&t,&context).await?;if !made.iter().any(Option::is_some){return Err(e);}partial=Some(kumi_common::js::string::head(&message, 300));
                 }
-                if partial.is_none(){made=self.created_arrangement_midi_clips(&t,&context).await?;if !made.iter().any(Option::is_some){return Err(LiveError::error("Live made the clips, but the Arrangement doesn't show them where they were asked"));}if !made.iter().all(Option::is_some){partial=Some("the Arrangement doesn't show every clip where it was asked".into());}}
+                if partial.is_none(){
+                    (made,landed)=self.landed_arrangement_midi_clips(&t,&context).await?;
+                    if !made.iter().any(Option::is_some){return Err(LiveError::error(format!("Live made the clips, but the Arrangement doesn't show them where they were asked; Live shows {}",self.arrangement_midi_seen(&t,&context).await?)));}
+                    if !made.iter().all(Option::is_some){partial=Some("the Arrangement doesn't show every clip where it was asked".into());}
+                    else if let Some((i,notes))=landed.iter().zip(clips).enumerate().find_map(|(i,(notes,clip))|notes.as_ref().filter(|n|n.len()!=clip["notes"].as_array().map_or(0,Vec::len)).map(|n|(i,n.len()))){partial=Some(format!("Live shows {notes} of the {} notes asked for in the clip at beat {}",clips[i]["notes"].as_array().map_or(0,Vec::len),js_number(number(&clips[i]["start"]))));}
+                }
             }
             let mut fences=vec![];let mut created=vec![];let mut not_made=vec![];
             for (i,row) in made.iter().enumerate(){if let Some(row)=row{
-                fences.push(json!({"objectIdentity":row["objectIdentity"],"name":row["name"],"start":row["start"],"end":arrangement_clip_end(row),"notesRevision":Self::notes_revision(&self.clip_notes_async(row["ref"].as_str().unwrap(),Some(&context)).await?)?}));
+                fences.push(json!({"objectIdentity":row["objectIdentity"],"name":row["name"],"start":row["start"],"end":arrangement_clip_end(row),"notesRevision":Self::notes_revision(&match landed.get(i).cloned().flatten(){Some(notes)=>notes,None=>self.clip_notes_async(row["ref"].as_str().unwrap(),Some(&context)).await?})?}));
                 created.push(json!({"ref":row["ref"],"objectIdentity":row["objectIdentity"],"trackRef":clips[i]["trackRef"],"name":row["name"],"start":row["start"],"length":row["length"],"notes":clips[i]["notes"].as_array().unwrap().len()}));
             }else{let mut c=json!({"trackRef":clips[i]["trackRef"],"start":clips[i]["start"]});if let Some(n)=clips[i].get("name"){c["name"]=n.clone();}not_made.push(c);}}
             record.borrow_mut()["created"]=json!({"clips":created,"fences":fences});record.borrow_mut()["applyKey"]=p["idempotencyKey"].clone();record.borrow_mut()["state"]=json!("applied");

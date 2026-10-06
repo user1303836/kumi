@@ -45,7 +45,7 @@
 - 一部の変更は Kumi では取り消せず、Live 自身の取り消しでしか戻せません。[Live の安全性](LIVE_SAFETY.md)を参照してください。
 - Windows では、Kumi の拡張機能は未テストで、1.6.0 以前からの `kumi update` は tar のエラーで失敗することがあります。[Windows](SUPPORT_MATRIX.md#windows) を参照してください。
 - これまでの本物の Live でのテストは Live 12.4.15 beta で、ほとんどが Apple silicon の Mac です。Live 12.0〜12.3、Intel Mac、スクリーンリーダーは未テストです。
-- Willington による編集には、Willington のバインディングがある Live ビルドが必要です：macOS ARM64 の Live 12.4.15b4 と b5（ラックのチェーンのゾーンは b5 のみ）。[Willington 連携](WILLINGTON_INTEGRATION.md)を参照してください。
+- Willington による編集は `/willington` でオンにするまではオフで、Willington のバインディングがある Live ビルドが必要です：macOS ARM64 の Live 12.4.15b4 と b5（ラックのチェーンのゾーンは b5 のみ）と、Windows x64 の Live 12.4.15b5。Windows では、バインディングは Live の中の Python を通じてテストされていますが、Kumi 自身の編集を通じたテストはまだです。[Willington](WILLINGTON_INTEGRATION.md)を参照してください。
 - Kumi とブリッジには署名がありません。[リリースと配布](DISTRIBUTION_POLICY.md)を参照してください。
 
 ## 残っている作業
