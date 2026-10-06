@@ -56,6 +56,41 @@ def _wire_keys(value: dict[Any, Any]) -> list[Any]:
     return sorted(value, key=lambda key: (key if type(key) is str else str(key)).encode("utf-16-be", "surrogatepass"))
 
 
+# Each object's key list, laid out for the wire once: its keys in the bridge's order, each with its text and
+# colon. A big read is thousands of rows of a few shapes (a parameter's, a device's), so most are reused.
+_WIRE_LAYOUTS: dict[tuple[Any, ...], tuple[tuple[Any, str], ...]] = {}
+_WIRE_LAYOUTS_KEPT = 1024
+
+
+def _wire_layout(value: dict[Any, Any]) -> tuple[tuple[Any, str], ...]:
+    keys = tuple(value)
+    layout = _WIRE_LAYOUTS.get(keys)
+    if layout is None:
+        layout = tuple((key, (_encode_string(key) if type(key) is str else json.dumps(key, ensure_ascii=False)) + ":") for key in _wire_keys(value))
+        # Only string keys are kept: 1 and True are equal keys with different texts.
+        if len(_WIRE_LAYOUTS) < _WIRE_LAYOUTS_KEPT and all(type(key) is str for key in keys): _WIRE_LAYOUTS[keys] = layout
+    return layout
+
+
+def _wire_scalar(value: Any) -> str | None:
+    """A plain string's, number's, boolean's or null's canonical text; None for anything else (a container,
+    a subclass, a string too long or a number the general path writes or refuses)."""
+    kind = type(value)
+    if kind is str: return _encode_string(value) if len(value) * 2 <= MAX_WIRE_STRING_LENGTH else None
+    if kind is float:
+        if value.is_integer(): return str(int(value)) if abs(value) < 1e21 else None
+        if math.isfinite(value):
+            # Python and JavaScript both write a float's shortest round-trip digits; they differ only in
+            # where they switch to an exponent, so without one Python's text is JavaScript's.
+            text = repr(value)
+            return text if "e" not in text else _js_number(value)
+        return None
+    if kind is int: return str(value)
+    if value is None: return "null"
+    if kind is bool: return "true" if value else "false"
+    return None
+
+
 def _too_long_for_wire(text: str) -> bool:
     """Whether the bridge refuses a string this long. It counts UTF-16 code units, so an emoji counts two."""
     if len(text) * 2 <= MAX_WIRE_STRING_LENGTH or text.isascii():
@@ -758,34 +793,45 @@ class AuthenticatedRemoteScript:
     @classmethod
     def _canonical(cls, value: Any, depth: int = 0) -> str:
         """The canonical wire text both ends sign. The common types go straight to their text (a big
-        Set's answer is thousands of strings and numbers, and Live's thread waits while it's made);
-        anything else takes the general path, which writes the same text."""
+        Set's answer is thousands of strings and numbers, and Live's thread waits while it's made): an
+        object's or list's plain values are written in its own loop, and an object's key order and key
+        texts are laid out once per key list (#174). Anything else takes the general path, which
+        writes the same text."""
         if depth > MAX_WIRE_DEPTH:
             raise ValueError("wire payload is too deeply nested")
         kind = type(value)
+        if kind is dict:
+            if len(value) > MAX_WIRE_OBJECT_PROPERTIES:
+                raise ValueError("wire object is too large")
+            if not value:
+                return "{}"
+            # Its values are a level down, where any value is too deep.
+            if depth >= MAX_WIRE_DEPTH:
+                raise ValueError("wire payload is too deeply nested")
+            depth += 1; parts = []
+            for key, prefix in _wire_layout(value):
+                item = value[key]; text = _wire_scalar(item)
+                parts.append(prefix + (text if text is not None else cls._canonical(item, depth)))
+            return "{" + ",".join(parts) + "}"
+        if kind is list:
+            if len(value) > MAX_WIRE_ARRAY_LENGTH:
+                raise ValueError("wire array is too large")
+            if not value:
+                return "[]"
+            if depth >= MAX_WIRE_DEPTH:
+                raise ValueError("wire payload is too deeply nested")
+            depth += 1; parts = []
+            for item in value:
+                text = _wire_scalar(item)
+                parts.append(text if text is not None else cls._canonical(item, depth))
+            return "[" + ",".join(parts) + "]"
+        text = _wire_scalar(value)
+        if text is not None:
+            return text
         if kind is str:
             if _too_long_for_wire(value):
                 raise ValueError("wire string is too large")
             return _encode_string(value)
-        if kind is dict:
-            if len(value) > MAX_WIRE_OBJECT_PROPERTIES:
-                raise ValueError("wire object is too large")
-            return "{" + ",".join((_encode_string(key) if type(key) is str else json.dumps(key, ensure_ascii=False)) + ":" + cls._canonical(value[key], depth + 1) for key in _wire_keys(value)) + "}"
-        if kind is list:
-            if len(value) > MAX_WIRE_ARRAY_LENGTH:
-                raise ValueError("wire array is too large")
-            return "[" + ",".join(cls._canonical(item, depth + 1) for item in value) + "]"
-        if kind is int:
-            return str(value)
-        if kind is float and math.isfinite(value) and value != 0 and not (value.is_integer() and abs(value) < 1e21):
-            # Python and JavaScript both write a float's shortest round-trip digits; they differ only in
-            # where they switch to an exponent, so without one Python's text is JavaScript's.
-            text = repr(value)
-            return text if "e" not in text else _js_number(value)
-        if value is None:
-            return "null"
-        if kind is bool:
-            return "true" if value else "false"
         return cls._canonical_general(value, depth)
 
     @classmethod
@@ -1882,40 +1928,49 @@ class LiveObjectMapper:
         return [row for parameter_index, parameter in enumerate(native_parameters) for row in [self._parameter_row(parameter, parameter_index, device_ref)] if row is not None]
 
     def _parameter_row(self, parameter: Any, parameter_index: int, device_ref: str) -> dict[str, Any] | None:
-        """One parameter's row; None for one without a numeric value and range (rows leave it out)."""
-        minimum = self._read_attr(parameter, "min", "min_value")
-        maximum = self._read_attr(parameter, "max", "max_value")
-        value = self._read_attr(parameter, "value")
-        numeric = (minimum, maximum, value)
-        if any(not isinstance(item, (int, float)) or isinstance(item, bool) or not math.isfinite(float(item)) for item in numeric):
-            return None
+        """One parameter's row; None for one without a numeric value and range (rows leave it out).
+        A big rack's whole read is thousands of these on Live's thread (#174), so each of Live's
+        attributes is read once."""
+        read = self._read_attr
+        minimum = read(parameter, "min", "min_value")
+        maximum = read(parameter, "max", "max_value")
+        value = read(parameter, "value")
+        for item in (minimum, maximum, value):
+            if not isinstance(item, (int, float)) or isinstance(item, bool) or not math.isfinite(float(item)):
+                return None
         parameter_ref = self.refs.put("parameter", parameter, f"{device_ref}:{parameter_index}")
         # Live's own text for the value, as its panel shows it ("20.0 kHz"). Live 12's
         # display_value is a bare number in those units, so it is only the fallback.
         display = None
-        formatter = self._read_attr(parameter, "str_for_value")
+        formatter = read(parameter, "str_for_value")
         if callable(formatter):
             try:
                 display = formatter(value)
             except Exception:
                 display = None
         if display is None or str(display) == "":
-            display = self._read_attr(parameter, "display_value")
+            display = read(parameter, "display_value")
         if display is None:
             display = value
+        enabled = read(parameter, "is_enabled", "enabled"); automatable = read(parameter, "is_automatable", "automatable")
+        default = read(parameter, "default_value"); original_name = read(parameter, "original_name"); state = read(parameter, "state")
+        # Live raises for a continuous parameter's value_items ("Only quantized parameters have value
+        # items"), and a raise costs Live's thread more than the rest of the row.
+        quantized = read(parameter, "is_quantized")
+        items = None if quantized is False else read(parameter, "value_items")
         return {
             "ref": parameter_ref, "parentRef": device_ref, "objectIdentity": self._capture_object_identity(parameter),
-            "name": str(self._read_attr(parameter, "name") or f"Parameter {parameter_index + 1}"),
+            "name": str(read(parameter, "name") or f"Parameter {parameter_index + 1}"),
             "value": float(value), "min": float(minimum), "max": float(maximum),
-            "quantization": self._parameter_step(parameter),
-            "enabled": bool(self._read_attr(parameter, "is_enabled", "enabled") if self._read_attr(parameter, "is_enabled", "enabled") is not None else True),
-            "automatable": bool(self._read_attr(parameter, "is_automatable", "automatable") if self._read_attr(parameter, "is_automatable", "automatable") is not None else True),
-            "automationState": str(self._read_attr(parameter, "automation_state") or "none"),
+            "quantization": self._parameter_step(parameter, quantized),
+            "enabled": bool(enabled if enabled is not None else True),
+            "automatable": bool(automatable if automatable is not None else True),
+            "automationState": str(read(parameter, "automation_state") or "none"),
             "displayValue": str(display), "revision": self.refs.revision(parameter_ref),
-            "defaultValue": float(self._read_attr(parameter, "default_value")) if isinstance(self._read_attr(parameter, "default_value"), (int, float)) and not isinstance(self._read_attr(parameter, "default_value"), bool) and math.isfinite(float(self._read_attr(parameter, "default_value"))) else None,
-            "originalName": str(self._read_attr(parameter, "original_name") or "") if isinstance(self._read_attr(parameter, "original_name"), str) else None,
-            "state": int(self._read_attr(parameter, "state")) if isinstance(self._read_attr(parameter, "state"), int) and not isinstance(self._read_attr(parameter, "state"), bool) else None,
-            "valueItems": [str(item) for item in self._items(self._read_attr(parameter, "value_items") or [])] if self._read_attr(parameter, "value_items") is not None else None,
+            "defaultValue": float(default) if isinstance(default, (int, float)) and not isinstance(default, bool) and math.isfinite(float(default)) else None,
+            "originalName": str(original_name or "") if isinstance(original_name, str) else None,
+            "state": int(state) if isinstance(state, int) and not isinstance(state, bool) else None,
+            "valueItems": [str(item) for item in self._items(items or [])] if items is not None else None,
         }
 
     def _device_row(self, device: Any, device_ref: str, track_ref: str, track_index: int, path: str, index: int, traversal: dict[str, Any], depth: int) -> dict[str, Any]:
@@ -2858,13 +2913,18 @@ class LiveObjectMapper:
         if cache is not None: cache[key] = rows
         return rows
 
-    def _parameter_step(self, parameter: Any) -> float:
+    # A parameter's is_quantized, when its caller hasn't read it already.
+    _UNREAD: Any = object()
+
+    def _parameter_step(self, parameter: Any, quantized: Any = _UNREAD) -> float:
         """The step between a parameter's values: 1 for Live's stepped parameters (a switch, a
         waveform choice), which only take whole numbers; 0 for continuous ones. Live's API has no
-        step size of its own; an explicit one (the simulator's) is used as given."""
+        step size of its own; an explicit one (the simulator's) is used as given. `quantized` is
+        is_quantized as a row read it (it reads each attribute once)."""
         step = self._read_attr(parameter, "quantization")
         if isinstance(step, (int, float)) and not isinstance(step, bool) and math.isfinite(float(step)) and step > 0: return float(step)
-        return 1.0 if self._read_attr(parameter, "is_quantized") is True else 0.0
+        if quantized is self._UNREAD: quantized = self._read_attr(parameter, "is_quantized")
+        return 1.0 if quantized is True else 0.0
 
     def _set_parameter_in_gesture(self, reference: str, value: Any) -> dict[str, Any]:
         """A parameter change as a hand on a control makes it (begin_gesture, the value, end_gesture):

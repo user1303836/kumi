@@ -3380,6 +3380,71 @@ class RealtimePlaneTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "wire string is too large"):
                 AuthenticatedRemoteScript._canonical_general(text, 0)
 
+    def test_the_fast_wire_text_is_the_plain_rules_text(self):
+        # #174: an object's key layout is kept, and plain values are written in their container's loop. The
+        # text, or the refusal, is still what the plain rules make, for every shape a payload takes.
+        import enum, math
+        def plain(value, depth=0):
+            if depth > remote_module.MAX_WIRE_DEPTH: raise ValueError("wire payload is too deeply nested")
+            if value is None: return "null"
+            if isinstance(value, bool): return "true" if value else "false"
+            if isinstance(value, int): return str(int(value))
+            if isinstance(value, float):
+                if not math.isfinite(value): raise ValueError("non-finite wire number")
+                return str(int(value)) if value == 0 or (value.is_integer() and abs(value) < 1e21) else remote_module._js_number(value)
+            if isinstance(value, str):
+                if remote_module._too_long_for_wire(value): raise ValueError("wire string is too large")
+                return json.dumps(value, ensure_ascii=False)
+            if isinstance(value, list): return "[" + ",".join(plain(item, depth + 1) for item in value) + "]"
+            if isinstance(value, dict): return "{" + ",".join(json.dumps(key, ensure_ascii=False) + ":" + plain(value[key], depth + 1) for key in remote_module._wire_keys(value)) + "}"
+            raise TypeError("unsupported wire value")
+        def outcome(write, value):
+            try: return write(value)
+            except (TypeError, ValueError) as error: return (type(error).__name__, str(error))
+        def nested(depth, leaf):
+            for _ in range(depth): leaf = [leaf]
+            return leaf
+        class Quantization(enum.IntEnum): STEPPED = 4
+        class Name(str): pass
+        deepest = remote_module.MAX_WIRE_DEPTH
+        song = FakeSong(); song.tracks[0].devices[0].parameters[0].value_items = ["Off", "On"]
+        cases = [0.0, -0.0, 1.0, -3.0, 0.1, 1e21, -1e21, 1e20, 1e-7, 5e-324, 1.5e300, 2**53, True, False, None, "", "aé\"\\\n",
+                 {"b": 1, "a": [1, 2.5, {"z": None}]}, {"a": 1, "b": 2}, {"b": 2, "a": 1}, {1: "x"}, {True: "y"}, {"💀 KICK": 1, "ＢＡＳＳ": 2, "a": 3},
+                 [], {}, Quantization.STEPPED, {"raw": Quantization.STEPPED}, Name("named"), {Name("k"): 1}, (1, 2), [float("nan")], {"x": float("inf")},
+                 ["a" * (remote_module.MAX_WIRE_STRING_LENGTH + 1)], nested(deepest, []), nested(deepest, 1), nested(deepest + 1, []),
+                 {"k": nested(deepest - 1, "leaf")}, {"k": nested(deepest, "leaf")}, LiveObjectMapper(song).snapshot()]
+        for value in cases:
+            self.assertEqual(outcome(AuthenticatedRemoteScript._canonical, value), outcome(plain, value), repr(value)[:80])
+
+    def test_the_key_layouts_kept_for_wire_text_are_bounded(self):
+        remote_module._WIRE_LAYOUTS.clear()
+        for n in range(remote_module._WIRE_LAYOUTS_KEPT + 50):
+            self.assertEqual(AuthenticatedRemoteScript._canonical({f"k{n}": n, "a": 1}), f'{{"a":1,"k{n}":{n}}}')
+        self.assertEqual(len(remote_module._WIRE_LAYOUTS), remote_module._WIRE_LAYOUTS_KEPT)
+        self.assertEqual(AuthenticatedRemoteScript._canonical({"k1": 1, "a": 1}), '{"a":1,"k1":1}', "a kept layout")
+
+    def test_a_parameter_row_reads_each_of_lives_attributes_once(self):
+        # #174: a big rack's whole read is thousands of rows on Live's thread. A continuous parameter's
+        # value_items isn't asked for: Live raises for it ("Only quantized parameters have value items").
+        reads = []
+        class Counted(FakeParameter):
+            def __getattribute__(self, name):
+                if not name.startswith("__"): reads.append(name)
+                return object.__getattribute__(self, name)
+        class Continuous(Counted):
+            @property
+            def value_items(self): raise RuntimeError("Only quantized parameters have value items")
+        mapper = LiveObjectMapper(FakeSong())
+        for parameter, items in ((Continuous(), None), (Counted(), ["Off", "On"])):
+            parameter.default_value = 0.25; parameter.original_name = "Drive"; parameter.state = 0
+            if items is None: parameter.is_quantized = False; del parameter.quantization
+            else: parameter.value_items = items
+            reads.clear()
+            row = mapper._parameter_row(parameter, 0, f"{mapper.refs.epoch}:device:0:0")
+            self.assertEqual([name for name in set(reads) if reads.count(name) > 1], [], reads)
+            self.assertEqual(("value_items" in reads, row["valueItems"]), (items is not None, items))
+            self.assertEqual((row["defaultValue"], row["originalName"], row["state"], row["quantization"]), (0.25, "Drive", 0, 0.0 if items is None else 0.25))
+
     def test_racks_nested_three_deep_still_snapshot_and_sign(self):
         # A device in a rack in a rack's chain, and one more: once past the wire's depth, no snapshot could be sent.
         song = FakeSong(); leaf = FakeDevice(); leaf.parameters[0].value_items = ["Off", "On"]; device = leaf

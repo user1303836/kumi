@@ -108,25 +108,28 @@ pub fn expand_pad_chains(value: &mut Value) {
                 for child in row.values_mut() {
                     expand(child, depth + 1);
                 }
-                let chains = row.get("chains").and_then(Value::as_array).cloned().unwrap_or_default();
-                if let Some(pads) = row.get_mut("drumPads").and_then(Value::as_array_mut) {
-                    for pad in pads {
-                        if let Some(named) = pad.get_mut("chains").and_then(Value::as_array_mut) {
-                            for chain in named {
-                                if chain.get("listedOnRack") != Some(&Value::Bool(true)) {
-                                    continue;
-                                }
-                                if let Some(full) = chains
-                                    .iter()
-                                    .rev()
-                                    .find(|full| full.is_object() && full.get("objectIdentity") == chain.get("objectIdentity"))
-                                {
-                                    *chain = full.clone();
-                                } else {
-                                    chain["devices"] = json!([]);
-                                }
-                            }
+                // Each pad chain the rack lists, with the rack's row for it (the last with its identity), found
+                // first and copied alone: a rack without pads, or a big one, copies none of its chains (#174).
+                let Some(pads) = row.get("drumPads").and_then(Value::as_array) else { return };
+                let chains = row.get("chains").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+                let mut listed = Vec::new();
+                for (at, pad) in pads.iter().enumerate() {
+                    for (place, chain) in pad.get("chains").and_then(Value::as_array).into_iter().flatten().enumerate() {
+                        if chain.get("listedOnRack") == Some(&Value::Bool(true)) {
+                            let full = chains
+                                .iter()
+                                .rev()
+                                .find(|full| full.is_object() && full.get("objectIdentity") == chain.get("objectIdentity"));
+                            listed.push((at, place, full.cloned()));
                         }
+                    }
+                }
+                let Some(pads) = row.get_mut("drumPads").and_then(Value::as_array_mut) else { return };
+                for (at, place, full) in listed {
+                    let chain = &mut pads[at]["chains"][place];
+                    match full {
+                        Some(full) => *chain = full,
+                        None => chain["devices"] = json!([]),
                     }
                 }
             }

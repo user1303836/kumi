@@ -35,9 +35,9 @@ pub(super) fn authority_fields(value: &Value, keys: &[&str]) -> Result<Value, Li
 }
 impl McpHost {
     pub(super) fn device_row(&self, snapshot: &LiveSnapshot, reference: &str) -> Result<DeviceRow, LiveError> {
-        fn visit(values: &Value, owner_ref: &str, owner_identity: &str) -> Result<Option<(Value, String, String, Vec<Value>)>, LiveError> {
+        fn siblings(values: &Value) -> Result<Option<Vec<Value>>, LiveError> {
             let Some(values) = values.as_array() else { return Ok(None) };
-            let siblings = values
+            values
                 .iter()
                 .map(|value| {
                     if !value.is_object() || !value["ref"].is_string() || !value["objectIdentity"].is_string() {
@@ -45,20 +45,21 @@ impl McpHost {
                     }
                     Ok(fields(value, &["ref", "objectIdentity"]))
                 })
-                .collect::<Result<Vec<_>, _>>()?;
-            // The reference is passed separately to keep recursion scoped to the selected tree.
-            Ok(Some((json!(values), owner_ref.into(), owner_identity.into(), siblings)))
+                .collect::<Result<Vec<_>, _>>()
+                .map(Some)
         }
+        // The reference is passed separately to keep recursion scoped to the selected tree. Only the row found is
+        // copied: a big rack's devices are megabytes (#174).
         fn walk(
             values: &Value,
             owner_ref: &str,
             owner_identity: &str,
             reference: &str,
         ) -> Result<Option<(Value, String, String, Vec<Value>)>, LiveError> {
-            let Some((values, owner_ref, owner_identity, siblings)) = visit(values, owner_ref, owner_identity)? else { return Ok(None) };
-            for value in rows(&values) {
+            let Some(siblings) = siblings(values)? else { return Ok(None) };
+            for value in rows(values) {
                 if value["ref"] == reference {
-                    return Ok(Some((value.clone(), owner_ref, owner_identity, siblings)));
+                    return Ok(Some((value.clone(), owner_ref.into(), owner_identity.into(), siblings)));
                 }
                 for chain in rows(&value["chains"]).chain(rows(&value["drumPads"]).flat_map(|pad| rows(&pad["chains"]))) {
                     if let (Some(reference_), Some(identity)) = (chain["ref"].as_str(), chain["objectIdentity"].as_str()) {

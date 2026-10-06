@@ -221,6 +221,19 @@ fn digest_reference_fields_and_pad_expansion() {
     expand_pad_chains(&mut rack);
     assert_eq!(rack["drumPads"][0]["chains"][0], rack["chains"][0]);
     assert_eq!(rack["drumPads"][1]["chains"][0]["devices"], json!([]));
+    // The rack's last chain with the identity; a pad's own chain is left as it is; a rack without pads keeps its
+    // chains as they were (#174: only what's replaced is copied).
+    let first = json!({"objectIdentity":"live:snare","name":"first","devices":[]});
+    let last = json!({"objectIdentity":"live:snare","name":"last","devices":[{"name":"Sampler"}]});
+    let own = json!({"objectIdentity":"live:own","devices":[{"name":"Operator"}]});
+    let mut rack = json!({"chains":[first,last],"drumPads":[{"chains":[{"objectIdentity":"live:snare","listedOnRack":true},own]}]});
+    expand_pad_chains(&mut rack);
+    assert_eq!((&rack["drumPads"][0]["chains"][0], &rack["drumPads"][0]["chains"][0]["name"]), (&rack["chains"][1], &json!("last")));
+    assert_eq!(rack["drumPads"][0]["chains"][1], json!({"objectIdentity":"live:own","devices":[{"name":"Operator"}]}));
+    let mut layered = json!({"chains":[{"objectIdentity":"live:a","devices":[{"name":"Operator","chains":[]}]}]});
+    let before = layered.clone();
+    expand_pad_chains(&mut layered);
+    assert_eq!(layered, before);
 }
 #[test]
 fn authority_classifications_match_python() {
