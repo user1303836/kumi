@@ -16,6 +16,10 @@ use serde_json::{json, Value};
 /// The fields `read_notes` reads of each note.
 const NOTE_FIELDS: [&str; 9] =
     ["pitch", "start", "duration", "velocity", "mute", "probability", "velocityDeviation", "releaseVelocity", "channel"];
+/// The fields `read_notes` reads of an Arrangement clip: where it sits, and the part of its notes it plays.
+const ARRANGEMENT_FIELDS: [&str; 9] = ["name", "start", "endTime", "length", "isAudio", "looping", "loopStart", "loopEnd", "startMarker"];
+/// The most clips one `read_notes` reads.
+const CLIPS: usize = 16;
 
 /// A write tool's input with its `notation` turned into `notes` (and the clip's length, and an Arrangement clip's
 /// start, filled in when left out).
@@ -103,7 +107,7 @@ async fn arrangement(
         if let Some(length) = clip.get("length").and_then(Value::as_f64) {
             if let Some(note) = notes.iter().find(|note| note.start + note.duration > length + 1e-9) {
                 return Err(format!(
-                    "a note at {} ends after the clip, which ends at {}: shorten it, or make the clip longer",
+                    "a note at {} ends after the clip, which ends at {}: Kumi writes notes inside a clip, so end it by then or make the clip longer",
                     frame.position(start + note.start),
                     frame.position(start + length)
                 ));
@@ -178,7 +182,7 @@ pub async fn read_notes(input: &JsonObject, connection: &LiveConnection, tempo: 
     }
     let json = input.get("format").and_then(Value::as_str) == Some("json");
     let mut clips = vec![];
-    for short in named.iter().take(16) {
+    for short in named.iter().take(CLIPS) {
         let long = connection.references.borrow().lengthen(&json!({"clipRef": short}))["clipRef"].as_str().unwrap_or(short).to_owned();
         let mut row = match read_clip(connection, &long, json, tempo, &signal).await {
             Ok(row) => row,
@@ -187,10 +191,14 @@ pub async fn read_notes(input: &JsonObject, connection: &LiveConnection, tempo: 
         row.insert("clip".into(), json!(short));
         clips.push(row);
     }
-    ToolResult::text(stringify(&json!({"clips": clips})))
+    let mut result = json!({"clips": clips});
+    if named.len() > CLIPS {
+        result["more"] = json!(format!("{CLIPS} clips at a time: ask again for the other {}", named.len() - CLIPS));
+    }
+    ToolResult::text(stringify(&result))
 }
-/// One clip's notes, printed in its frame: song time for an Arrangement clip, its own time (and meter) for a Session
-/// clip, with drums as lanes on a Drum Rack track.
+/// One clip's notes, printed in its frame: song time for an Arrangement clip (what it plays, where it plays it), its
+/// own time (and meter) for a Session clip, with drums as lanes on a Drum Rack track.
 async fn read_clip(connection: &LiveConnection, clip: &str, json: bool, tempo: Option<f64>, signal: &Signal) -> Result<JsonObject, String> {
     let read = |args: Value| views::pages(connection, args.as_object().cloned().unwrap_or_default(), signal.clone());
     let wrong =
@@ -208,11 +216,9 @@ async fn read_clip(connection: &LiveConnection, clip: &str, json: bool, tempo: O
         let read = read(json!({"kind":"session-clip","parent":slot,"fields":fields,"limit":1})).await.map_err(|error| error.to_string())?;
         rows(&read).into_iter().next()
     } else {
-        let read = read(
-            json!({"kind":"arrangement-clip","parent":track,"fields":["name","start","length","isAudio"],"limit":connection.page_limit()}),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
+        let read = read(json!({"kind":"arrangement-clip","parent":track,"fields":ARRANGEMENT_FIELDS,"limit":connection.page_limit()}))
+            .await
+            .map_err(|error| error.to_string())?;
         rows(&read).into_iter().find(|row| row.get("ref").and_then(Value::as_str) == Some(clip))
     };
     let row = row.ok_or_else(wrong)?;
@@ -223,9 +229,26 @@ async fn read_clip(connection: &LiveConnection, clip: &str, json: bool, tempo: O
         .await
         .map_err(|error| error.to_string())?;
     let found = rows(&read);
+    // A clip past the page's limit is read only in part: said, so a write-back doesn't lose the rest.
+    let partial = (context::payload(&read).ok().and_then(|page| page.get("truncated").and_then(Value::as_bool)) == Some(true))
+        .then(|| format!("only its first {} notes were read: a clip this big is read in part", found.len()));
     let name = row.get("name").cloned().unwrap_or(Value::Null);
     if json {
-        return Ok(json!({"name": name, "notes": found}).as_object().cloned().unwrap_or_default());
+        let mut result = json!({"name": name, "notes": found});
+        if !session {
+            // Live's rows are in the clip's own time; this says where the clip plays them.
+            let placed: JsonObject = ARRANGEMENT_FIELDS[1..]
+                .iter()
+                .filter(|field| **field != "isAudio")
+                .filter_map(|field| Some((field.to_string(), row.get(*field)?.clone())))
+                .collect();
+            result["time"] = json!("the clip's own time, in beats; placement says where it plays them (its start marker at its start)");
+            result["placement"] = Value::Object(placed);
+        }
+        if let Some(partial) = partial {
+            result["truncated"] = json!(partial);
+        }
+        return Ok(result.as_object().cloned().unwrap_or_default());
     }
     let notes: Vec<Note> = found.iter().filter_map(note_of).collect();
     let (numerator, denominator) =
@@ -234,19 +257,146 @@ async fn read_clip(connection: &LiveConnection, clip: &str, json: bool, tempo: O
             _ => more_changes::meter(),
         };
     let pads = pads(connection, &track, signal).await;
-    let origin = if session { 0. } else { row.get("start").and_then(Value::as_f64).unwrap_or(0.) };
-    let length = row.get("length").and_then(Value::as_f64);
-    let frame = Frame { origin, numerator, denominator, tempo: tempo.unwrap_or(120.), length, drums: !pads.is_empty(), pads };
-    let printed = notation::print(&notes, &frame);
-    let time = match (session, length) {
-        (true, _) => format!("the clip's own time, in {numerator}/{denominator}"),
-        (false, Some(length)) => format!("song time: the clip runs from {} to {}", frame.position(origin), frame.position(origin + length)),
-        (false, None) => format!("song time: the clip starts at {}", frame.position(origin)),
+    let start = row.get("start").and_then(Value::as_f64).unwrap_or(0.);
+    let frame = |origin: f64, length: Option<f64>| Frame {
+        origin,
+        numerator,
+        denominator,
+        tempo: tempo.unwrap_or(120.),
+        length,
+        drums: !pads.is_empty(),
+        pads: pads.clone(),
     };
-    Ok(json!({"name": name, "time": time, "notes": notes.len(), "exact": printed.exact, "notation": printed.text})
-        .as_object()
-        .cloned()
-        .unwrap_or_default())
+    let mut result = JsonObject::new();
+    let (shown, frame) = if session {
+        result.insert("time".into(), json!(format!("the clip's own time, in {numerator}/{denominator}")));
+        (notes, frame(0., row.get("length").and_then(Value::as_f64)))
+    } else {
+        let song = frame(start, None);
+        match played(&notes, &row) {
+            Some(Played { notes: heard, unheard, span, looping, assumed }) => {
+                let mut time = format!(
+                    "song time in {numerator}/{denominator}: the clip plays from {} to {}",
+                    song.position(start),
+                    song.position(start + span)
+                );
+                if looping {
+                    time += ", looping: each pass is shown";
+                }
+                if assumed {
+                    time += " (from its loop's start: this bridge doesn't say where in its loop it starts)";
+                }
+                result.insert("time".into(), json!(time));
+                if unheard > 0 {
+                    result.insert(
+                        "unheard".into(),
+                        json!(format!(
+                            "{unheard} of its notes lie outside what it plays (before its start or past its end), so they aren't shown"
+                        )),
+                    );
+                }
+                (heard, frame(start, Some(span)))
+            }
+            None => {
+                let (from, to) = (number(&row, "loopStart").unwrap_or(0.), number(&row, "loopEnd").unwrap_or(0.));
+                let own = frame(0., None);
+                result.insert(
+                    "time".into(),
+                    json!(format!(
+                        "the clip's own time, in {numerator}/{denominator}: it plays from {} to {} in song time, its loop ({} to {}) repeating too many times to show each pass",
+                        song.position(start),
+                        song.position(number(&row, "endTime").unwrap_or(start)),
+                        own.position(from),
+                        own.position(to)
+                    )),
+                );
+                (notes, own)
+            }
+        }
+    };
+    let printed = notation::print(&shown, &frame);
+    let mut left_out: Vec<String> = printed.left_out.iter().map(|why| why.to_string()).collect();
+    left_out.extend(partial);
+    result.insert("name".into(), name);
+    result.insert("notes".into(), json!(shown.len()));
+    result.insert("exact".into(), json!(left_out.is_empty()));
+    if !left_out.is_empty() {
+        result.insert("leftOut".into(), json!(format!("{}: format \"json\" gives every field", left_out.join("; "))));
+    }
+    result.insert("notation".into(), json!(printed.text));
+    Ok(result)
+}
+fn number(row: &JsonObject, field: &str) -> Option<f64> {
+    row.get(field).and_then(Value::as_f64).filter(|value| value.is_finite())
+}
+/// What an Arrangement clip plays of its notes.
+struct Played {
+    /// From the clip's start, cut where the clip (or a loop's pass) ends.
+    notes: Vec<Note>,
+    /// The notes it never plays: before its start marker, past its end, or never reached.
+    unheard: usize,
+    /// How long it plays, in beats.
+    span: f64,
+    looping: bool,
+    /// Whether where it starts in its loop was taken to be the loop's start (an older bridge doesn't give the marker).
+    assumed: bool,
+}
+/// What an Arrangement clip plays of its notes, where it plays them: an unlooped clip its window (from its start
+/// marker, which Live also gives as its loop start), a looped one its first pass from the start marker and then each
+/// pass of its loop (a split moves the marker, not the loop). None when the passes would come to more notes than a
+/// print takes.
+fn played(notes: &[Note], clip: &JsonObject) -> Option<Played> {
+    let start = number(clip, "start").unwrap_or(0.);
+    let span = number(clip, "endTime").map(|end| end - start).or_else(|| number(clip, "length")).unwrap_or(0.).max(0.);
+    let loop_start = number(clip, "loopStart").unwrap_or(0.);
+    let loop_end = number(clip, "loopEnd").filter(|end| *end > loop_start + 1e-9);
+    let looping = clip.get("looping") == Some(&json!(true)) && loop_end.is_some();
+    // A pass: the notes from `from` to `to` in the clip's own time, heard from `at` on, from its start.
+    let mut passes: Vec<(f64, f64, f64)> = vec![];
+    let mut assumed = false;
+    match loop_end.filter(|_| looping) {
+        Some(loop_end) => {
+            let marker = number(clip, "startMarker").unwrap_or_else(|| {
+                assumed = true;
+                loop_start
+            });
+            let period = loop_end - loop_start;
+            let first = (loop_end - marker).max(0.);
+            let laps = ((span - first) / period).ceil().max(0.);
+            let per_lap = notes.iter().filter(|note| note.start >= loop_start - 1e-9 && note.start < loop_end - 1e-9).count();
+            if laps * per_lap as f64 > notation::MOST as f64 {
+                return None;
+            }
+            passes.push((marker, loop_end, 0.));
+            if per_lap > 0 {
+                for lap in 0..laps as usize {
+                    passes.push((loop_start, loop_end, first + lap as f64 * period));
+                }
+            }
+        }
+        None => {
+            let marker = number(clip, "startMarker").unwrap_or(loop_start);
+            passes.push((marker, marker + span, 0.));
+        }
+    }
+    let mut heard = vec![];
+    let mut unheard = 0;
+    for note in notes {
+        let before = heard.len();
+        for &(from, to, at) in &passes {
+            if note.start < from - 1e-9 || note.start >= to - 1e-9 {
+                continue;
+            }
+            let time = at + note.start - from;
+            if time >= span - 1e-9 {
+                continue;
+            }
+            let end = (at + to - from).min(span);
+            heard.push(Note { start: time, duration: note.duration.min(end - time), ..note.clone() });
+        }
+        unheard += usize::from(heard.len() == before);
+    }
+    Some(Played { notes: heard, unheard, span, looping, assumed })
 }
 /// A note from a row Live read.
 fn note_of(row: &JsonObject) -> Option<Note> {

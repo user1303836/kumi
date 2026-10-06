@@ -13,8 +13,10 @@ pub(super) const GLIDE: f64 = 0.0625;
 pub(super) const LENGTH: f64 = 1.;
 /// A lane's step until it sets another: a sixteenth.
 pub(super) const STEP: f64 = 0.25;
-/// A lane's velocities until it sets others.
+/// A lane's velocities until it sets others; `x` plays at the velocity set (`v`), 100 until one is.
 pub(super) const CLASSES: [(char, f64); 3] = [('x', 100.), ('X', 127.), ('o', 60.)];
+/// The most notes a text writes: what one read of a clip's notes returns.
+pub const MOST: usize = 100_000;
 /// The characters a lane's pattern is made of.
 pub(super) const PATTERN: &str = "xXo.-23456789";
 
@@ -88,10 +90,11 @@ pub fn parse(text: &str, frame: &Frame) -> Result<Vec<Note>, NotationError> {
                 frame.position(frame.origin)
             )));
         }
+        // The bridge takes a clip's notes only inside it, though Live keeps notes that run past its end.
         if let Some(length) = frame.length {
             if start + note.duration > length + EPSILON {
                 return Err(at(format!(
-                    "a note at {} ends after the clip, which ends at {}: shorten it, or make the clip longer",
+                    "a note at {} ends after the clip, which ends at {}: Kumi writes notes inside a clip, so end it by then or make the clip longer",
                     frame.position(note.start),
                     frame.position(frame.origin + length)
                 )));
@@ -121,15 +124,18 @@ pub(super) fn order(a: &Note, b: &Note) -> Ordering {
 fn tokens(line: &str, number: usize) -> Result<Vec<Token<'_>>, NotationError> {
     let mut tokens = vec![];
     let mut chars = line.char_indices().peekable();
+    // The column of the next character, counted as they're taken.
+    let mut next = 1;
     while let Some(&(start, first)) = chars.peek() {
         if first.is_whitespace() {
             chars.next();
+            next += 1;
             continue;
         }
         if first == '#' {
             break;
         }
-        let column = line[..start].chars().count() + 1;
+        let column = next;
         let mut closing = match first {
             '[' => Some(']'),
             '{' => Some('}'),
@@ -138,6 +144,7 @@ fn tokens(line: &str, number: usize) -> Result<Vec<Token<'_>>, NotationError> {
         };
         let mut end = start;
         chars.next();
+        next += 1;
         end += first.len_utf8();
         while let Some(&(at, c)) = chars.peek() {
             match closing {
@@ -148,6 +155,7 @@ fn tokens(line: &str, number: usize) -> Result<Vec<Token<'_>>, NotationError> {
             }
             end = at + c.len_utf8();
             chars.next();
+            next += 1;
         }
         if let Some(close) = closing {
             return Err(NotationError {
@@ -178,9 +186,13 @@ pub(super) fn setting(state: &mut State, text: &str) -> Result<bool, String> {
     match &text[..1] {
         "v" => {
             let velocity = |text: &str| number(text).filter(|velocity| (1.0..=127.).contains(velocity));
-            let wrong = || format!("“{text}” isn't a velocity: 1–127, or a range like v80-110");
+            let wrong = || format!("“{text}” isn't a velocity: 1–127, or a range like v80-110 (its ends at most 127 apart)");
+            // A range's other end is the velocity plus Live's deviation (up to 127 either way), so it may pass 1–127.
             let (low, high) = match value.split_once('-') {
-                Some((low, high)) => (velocity(low).ok_or_else(wrong)?, Some(velocity(high).ok_or_else(wrong)?)),
+                Some((low, high)) => {
+                    let low = velocity(low).ok_or_else(wrong)?;
+                    (low, Some(number(high).filter(|high| (high - low).abs() <= 127.).ok_or_else(wrong)?))
+                }
                 None => (velocity(value).ok_or_else(wrong)?, None),
             };
             state.velocity = low;
@@ -234,7 +246,9 @@ fn sequence(tokens: &[Token], line: usize, frame: &Frame, state: &mut State, wri
             }
             _ => {
                 last.clear();
-                for (pitch, mute) in pitches(body, state).map_err(at)? {
+                let chord = pitches(body, state).map_err(at)?;
+                room(written, chord.len(), line, token.column)?;
+                for (pitch, mute) in chord {
                     last.push(written.len());
                     let duration = length + if glide { GLIDE } else { 0. };
                     let note = Note {
@@ -317,6 +331,8 @@ fn lane(tokens: &[Token], line: usize, frame: &Frame, state: &mut State, written
     };
     let (mut step, mut start, mut fill, mut shift) = (STEP, frame.origin, Fill::Once, 0.);
     let mut classes = CLASSES;
+    // Whether the line sets `x=`; when it doesn't, `x` plays at the velocity set.
+    let mut x_set = false;
     let mut pattern: Vec<char> = vec![];
     let mut rest = tokens[1..].iter();
     while let Some(token) = rest.next() {
@@ -326,6 +342,12 @@ fn lane(tokens: &[Token], line: usize, frame: &Frame, state: &mut State, written
         }
         if let Some(time) = frame.parse_position(text) {
             start = time;
+        } else if text.len() > 1 && text.starts_with('-') && text[1..].bytes().all(|b| (b'2'..=b'9').contains(&b)) {
+            // A hold then ratchets, or a shift back in ticks: neither is taken for the other.
+            return Err(at(
+                token,
+                format!("“{text}” could be a shift or a pattern: write {text}t to shift the lane back by ticks, or join it to the pattern before it"),
+            ));
         } else if text.chars().all(|c| PATTERN.contains(c)) {
             pattern.extend(text.chars());
         } else if text.starts_with('/') {
@@ -346,7 +368,10 @@ fn lane(tokens: &[Token], line: usize, frame: &Frame, state: &mut State, written
         } else if let Some((class, value)) = text.split_once('=') {
             let velocity = number(value).filter(|velocity| (1.0..=127.).contains(velocity));
             match (classes.iter_mut().find(|(name, _)| class.len() == 1 && class.starts_with(*name)), velocity) {
-                (Some((_, kept)), Some(velocity)) => *kept = velocity,
+                (Some((name, kept)), Some(velocity)) => {
+                    *kept = velocity;
+                    x_set |= *name == 'x';
+                }
                 _ => return Err(at(token, format!("“{text}” isn't a lane velocity: x=100, X=127 or o=60 (1–127)"))),
             }
         } else if let Some(by) = shift_of(text, frame.tempo) {
@@ -361,9 +386,12 @@ fn lane(tokens: &[Token], line: usize, frame: &Frame, state: &mut State, written
     if pattern.is_empty() {
         return Err(at(name, format!("the lane “{}” has no pattern: write one after it, like {} x..x..x...x..x..", name.text, name.text)));
     }
+    if !x_set {
+        classes[0].1 = state.velocity;
+    }
     let steps = match fill {
         Fill::Once => pattern.len(),
-        Fill::Times(times) => pattern.len() * times,
+        Fill::Times(times) => pattern.len().saturating_mul(times),
         Fill::To(end) => ((end - start) / step + EPSILON).floor().max(0.) as usize,
         Fill::End => {
             let length = frame.length.ok_or_else(|| {
@@ -376,6 +404,17 @@ fn lane(tokens: &[Token], line: usize, frame: &Frame, state: &mut State, written
             ((frame.origin + length - start) / step + EPSILON).floor().max(0.) as usize
         }
     };
+    if steps > MOST {
+        return Err(at(
+            name,
+            format!("the lane “{}” runs {} steps: a lane takes at most {}", name.text, thousands(steps), thousands(MOST)),
+        ));
+    }
+    // The notes it lays, before laying them: one a hit, a ratchet's count.
+    let hits = |steps: &[char]| -> usize {
+        steps.iter().map(|c| c.to_digit(10).map_or(usize::from(!matches!(c, '.' | '-')), |n| n as usize)).sum()
+    };
+    room(written, steps / pattern.len() * hits(&pattern) + hits(&pattern[..steps % pattern.len()]), line, name.column)?;
     let velocity = |class: char| classes.iter().find(|(name, _)| *name == class).map_or(100., |(_, velocity)| *velocity);
     let mut push = |time: f64, duration: f64, velocity: f64| {
         let note =
@@ -409,6 +448,31 @@ fn lane(tokens: &[Token], line: usize, frame: &Frame, state: &mut State, written
     }
     Ok(())
 }
+/// Refuses what would take the text past the notes it may write.
+fn room(written: &[Written], adding: usize, line: usize, column: usize) -> Result<(), NotationError> {
+    let total = written.len().saturating_add(adding);
+    if total <= MOST {
+        return Ok(());
+    }
+    Err(NotationError {
+        line,
+        column,
+        message: format!("that makes {} notes: notation writes at most {} to a clip", thousands(total), thousands(MOST)),
+    })
+}
+/// A count with its thousands marked: 100,000.
+fn thousands(count: usize) -> String {
+    let digits = count.to_string();
+    let mut text = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            text.push(',');
+        }
+        text.push(digit);
+    }
+    text
+}
+
 /// A lane's shift: `+12` or `-12t` in ticks (960 to a quarter), or `+8ms` at the tempo.
 fn shift_of(text: &str, tempo: f64) -> Option<f64> {
     let sign = match text.chars().next()? {
@@ -440,14 +504,19 @@ fn copy(tokens: &[Token], line: usize, frame: &Frame, written: &mut Vec<Written>
     if into <= last && first <= until {
         return Err(at(to, format!("bars {} overlap the bars copied ({})", to.text, from.text)));
     }
-    let (source, end) = (frame.bar_start(first), frame.bar_start(last + 1));
-    let (length, fill_end) = (end - source, frame.bar_start(until + 1));
+    let (source, end) = (frame.bar_start(first), frame.bar_start(last.saturating_add(1)));
+    let (length, fill_end) = (end - source, frame.bar_start(until.saturating_add(1)));
     let copied: Vec<Written> =
         written.iter().filter(|w| w.note.start >= source - EPSILON && w.note.start < end - EPSILON).cloned().collect();
     if copied.is_empty() {
         return Err(at(from, format!("bars {} have no notes above this line to copy", from.text)));
     }
     let mut base = frame.bar_start(into);
+    // The notes it lays, before laying them: whole laps, then the part of the last that fits.
+    let laps = ((fill_end - base) / length + EPSILON).floor().max(0.);
+    let last_lap = base + laps * length;
+    let part = copied.iter().filter(|w| w.note.start - source + last_lap < fill_end - EPSILON).count();
+    room(written, (laps as usize).saturating_mul(copied.len()).saturating_add(part), line, tokens[0].column)?;
     while base < fill_end - EPSILON {
         for w in &copied {
             let start = w.note.start - source + base;
@@ -540,7 +609,41 @@ mod tests {
         let parsed = parse("5|1 C3 . E3\ncopy 5 6", &frame).unwrap();
         assert_eq!(parsed.iter().map(|n| (n.pitch, n.start)).collect::<Vec<_>>(), [(60, 0.), (64, 2.), (60, 4.), (64, 6.)]);
         assert!(parse("1|1 C3", &frame).unwrap_err().to_string().contains("before the clip, which starts at 5|1"));
-        assert!(parse("6|4 C3/2", &frame).unwrap_err().to_string().contains("ends after the clip"));
+        // Kumi's bridge writes notes inside a clip, and the error says so.
+        assert!(parse("6|4 C3/2", &frame)
+            .unwrap_err()
+            .to_string()
+            .contains("ends after the clip, which ends at 7|1: Kumi writes notes inside a clip"));
+    }
+
+    #[test]
+    fn a_lanes_x_plays_at_the_velocity_set_and_a_shift_back_takes_its_t() {
+        let velocities = |text: &str| notes(text).into_iter().map(|note| note.3).collect::<Vec<_>>();
+        assert_eq!(velocities("v80\nkick xXo."), [80., 127., 60.]);
+        assert_eq!(velocities("kick v70 x."), [70.]);
+        assert_eq!(velocities("kick v80 x x=90"), [90.]);
+        let ranged = parse("v80-110\nkick x.", &Frame::default()).unwrap();
+        assert_eq!((ranged[0].velocity, ranged[0].velocity_deviation), (80., 30.));
+        // A range's other end may pass 1–127: Live's deviation runs to 127 either way.
+        let wide = parse("v100-150 1|1 C3\nv20--40 1|2 D3", &Frame::default()).unwrap();
+        assert_eq!(wide.iter().map(|n| (n.velocity, n.velocity_deviation)).collect::<Vec<_>>(), [(100., 50.), (20., -60.)]);
+        assert!(error("v100-300 1|1 C3").contains("at most 127 apart"));
+        // -24 could be a hold and two ratchets: a shift back in ticks says so with its t. -12 can't be a pattern.
+        assert!((notes("hat 1|2 x -24t")[0].1 - (1. - 24. / 960.)).abs() < 1e-12);
+        assert!(error("hat 1|2 x -24").contains("“-24” could be a shift or a pattern: write -24t"));
+        assert!((notes("hat 1|2 x -12")[0].1 - (1. - 12. / 960.)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_text_writes_at_most_so_many_notes() {
+        assert!(error("kick x *100000000").contains("runs 100,000,000 steps: a lane takes at most 100,000"));
+        assert!(error("kick x... *to 4000000000|1").contains("a lane takes at most 100,000"));
+        assert!(error("kick 4444 *10000").contains("that makes 160,000 notes: notation writes at most 100,000"));
+        assert!(error("1|1 C3\ncopy 1 2-4000000000").contains("notation writes at most 100,000"));
+        assert!(error("1|1 C3\ncopy 1 2-4294967295").contains("notation writes at most 100,000"));
+        assert_eq!(notes("1|1 C3\ncopy 1 2-1000").len(), 1000);
+        // Columns count characters, however long the line.
+        assert!(error("1|1 F♯2 Q3").starts_with("Notation line 1, column 9:"));
     }
 
     #[test]

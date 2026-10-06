@@ -67,8 +67,8 @@ fn notes_on_a_grid_read_back_as_they_were() {
                     note.probability = rng.random_range(0..=20) as f64 / 20.;
                 }
                 if rng.random_bool(0.1) {
-                    note.velocity_deviation = rng.random_range(-20..=20) as f64;
-                    note.velocity = note.velocity.clamp(21., 106.);
+                    // Live's whole range, whatever the velocity: a range's other end may pass 1–127.
+                    note.velocity_deviation = rng.random_range(-127..=127) as f64;
                 }
                 note.mute = rng.random_bool(0.05);
                 note
@@ -99,7 +99,13 @@ fn drum_patterns_print_as_lanes_and_read_back() {
     for _ in 0..300 {
         let frame = Frame { drums: true, ..frames(&mut rng) };
         let mut notes = vec![];
+        // Sometimes a part before the drums, setting a velocity their lanes' `x` would otherwise play at.
+        if rng.random_bool(0.3) {
+            notes.push(Note::new(60, 0., 1., [80., 100., 127.][rng.random_range(0..3)]));
+        }
         for pitch in [36, 38, 42, 46] {
+            // Sometimes one deviation for the drum's hits, to Live's ends (±127).
+            let deviation = if rng.random_bool(0.3) { [-127., -40., 30., 127.][rng.random_range(0..4)] } else { 0. };
             let step = [0.25, 0.5, 1. / 3., 1. / 6., 0.125][rng.random_range(0..5)];
             let period = rng.random_range(1..=16);
             let shift = if rng.random_bool(0.2) { rng.random_range(-20..20) as f64 / 960. } else { 0. };
@@ -109,14 +115,17 @@ fn drum_patterns_print_as_lanes_and_read_back() {
                 let time = start + at as f64 * step + shift;
                 match cells[at % period] {
                     0 | 1 => {}
-                    2 => notes.push(Note::new(pitch, time - frame.origin, step, 100.)),
-                    3 => notes.push(Note::new(pitch, time - frame.origin, step, 127.)),
-                    4 => notes.push(Note::new(pitch, time - frame.origin, step, 60.)),
+                    2 => notes.push(Note { velocity_deviation: deviation, ..Note::new(pitch, time - frame.origin, step, 100.) }),
+                    3 => notes.push(Note { velocity_deviation: deviation, ..Note::new(pitch, time - frame.origin, step, 127.) }),
+                    4 => notes.push(Note { velocity_deviation: deviation, ..Note::new(pitch, time - frame.origin, step, 60.) }),
                     _ => {
                         let count = rng.random_range(2..=4);
                         for hit in 0..count {
                             let part = step / count as f64;
-                            notes.push(Note::new(pitch, time + hit as f64 * part - frame.origin, part, 100.));
+                            notes.push(Note {
+                                velocity_deviation: deviation,
+                                ..Note::new(pitch, time + hit as f64 * part - frame.origin, part, 100.)
+                            });
                         }
                     }
                 }
@@ -133,6 +142,7 @@ fn drum_patterns_print_as_lanes_and_read_back() {
             };
             lanes += text.lines().filter(|line| line.starts_with(|c: char| c.is_ascii_alphabetic()) && !setting(line)).count();
             let mut pitches: Vec<u8> = notes.iter().map(|note| note.pitch).collect();
+            pitches.retain(|pitch| *pitch != 60);
             pitches.sort_unstable();
             pitches.dedup();
             drums += pitches.len();

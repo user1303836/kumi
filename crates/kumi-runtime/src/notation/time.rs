@@ -124,7 +124,7 @@ pub fn length(beats: f64) -> String {
         }
         for value in [1, 2, 4, 8, 16, 32, 64, 128] {
             let base = 3840 / value;
-            if ticks % base == 0 {
+            if ticks.is_multiple_of(base) {
                 return format!("{}/{value}", ticks / base);
             }
         }

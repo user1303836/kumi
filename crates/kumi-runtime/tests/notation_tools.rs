@@ -14,17 +14,21 @@ use kumi_runtime::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, Implementation, ListToolsResult},
     },
+    notation::{parse, Frame},
 };
 use serde_json::{json, Value};
 use std::{cell::RefCell, rc::Rc};
 
-/// A Live with a Drum Rack on track 0 (pads Kick 808 at 36 and Snare at 38), a Session clip on track 0 slot 0, and an
-/// Arrangement clip on track 1 at bar 9, with their notes.
+/// A Live with a Drum Rack on track 0 (pads Kick 808 at 36 and Snare at 38), Session clips on track 0, and Arrangement
+/// clips on track 1 (at bar 9; split; looped; looped on a bridge without start markers), with their notes.
 struct Live {
     calls: RefCell<Vec<JsonObject>>,
 }
 fn reply(kind: &str, items: Value) -> CallToolResult {
-    let body = json!({"epoch":7,"kind":kind,"items":items,"revision":"r1","truncated":false});
+    page(kind, items, false)
+}
+fn page(kind: &str, items: Value, truncated: bool) -> CallToolResult {
+    let body = json!({"epoch":7,"kind":kind,"items":items,"revision":"r1","truncated":truncated});
     serde_json::from_value(json!({"content":[{"type":"text","text":stringify(&body)}],"structuredContent":body})).unwrap()
 }
 #[async_trait(?Send)]
@@ -53,14 +57,53 @@ impl McpEndpoint for Live {
                 "session-clip",
                 json!([{"ref":"7:clip:0:0","name":"Beat","length":4.0,"isAudio":false,"signatureNumerator":4,"signatureDenominator":4}]),
             ),
-            "arrangement-clip" if parent == "7:track:1" => {
-                reply("arrangement-clip", json!([{"ref":"7:arrangement_clip:1:0","name":"Bass","start":32.0,"length":8.0,"isAudio":false}]))
-            }
+            "arrangement-clip" if parent == "7:track:1" => reply(
+                "arrangement-clip",
+                json!([
+                    {"ref":"7:arrangement_clip:1:0","name":"Bass","start":32.0,"length":8.0,"isAudio":false},
+                    // The right half of a clip split at bar 13: its window starts 16 beats into its notes.
+                    {"ref":"7:arrangement_clip:1:1","name":"Split","start":48.0,"endTime":56.0,"length":8.0,"isAudio":false,
+                        "looping":false,"loopStart":16.0,"loopEnd":24.0,"startMarker":16.0},
+                    // A one-bar loop from beat 4, started halfway through it (beat 6), playing three bars from bar 17.
+                    {"ref":"7:arrangement_clip:1:2","name":"Loop","start":64.0,"endTime":76.0,"length":4.0,"isAudio":false,
+                        "looping":true,"loopStart":4.0,"loopEnd":8.0,"startMarker":6.0},
+                    // A loop on a bridge that doesn't give MIDI clips' start markers.
+                    {"ref":"7:arrangement_clip:1:3","name":"Old","start":80.0,"endTime":88.0,"length":4.0,"isAudio":false,
+                        "looping":true,"loopStart":0.0,"loopEnd":4.0,"startMarker":null},
+                    // As Live left a new clip (looped over its 16 beats) split 8 beats in: the loop kept, the marker moved.
+                    {"ref":"7:arrangement_clip:1:4","name":"Right","start":40.0,"endTime":48.0,"length":16.0,"isAudio":false,
+                        "looping":true,"loopStart":0.0,"loopEnd":16.0,"startMarker":8.0}
+                ]),
+            ),
             "arrangement-clip" => reply("arrangement-clip", json!([{"ref":"7:arrangement_clip:2:0","name":"Vox","start":0.0,"length":4.0,"isAudio":true}])),
-            "note" if parent == "7:clip:0:0" => reply(
+            "note" if parent.starts_with("7:clip:0:") => page(
                 "note",
                 json!((0..8).map(|step| json!({"pitch": if step % 2 == 0 { 36 } else { 38 },"start":step as f64 * 0.5,"duration":0.25,"velocity":100})).collect::<Vec<_>>()),
+                // Slot 1's clip has more notes than a page holds.
+                parent == "7:clip:0:1",
             ),
+            "note" if parent == "7:arrangement_clip:1:1" => reply(
+                "note",
+                json!([
+                    {"pitch":48,"start":2.0,"duration":1.0,"velocity":100},
+                    {"pitch":60,"start":16.0,"duration":1.0,"velocity":100},
+                    {"pitch":64,"start":20.0,"duration":8.0,"velocity":100},
+                    {"pitch":72,"start":24.0,"duration":1.0,"velocity":100}
+                ]),
+            ),
+            "note" if parent == "7:arrangement_clip:1:2" => reply(
+                "note",
+                json!([
+                    {"pitch":65,"start":1.0,"duration":1.0,"velocity":100},
+                    {"pitch":60,"start":4.0,"duration":1.0,"velocity":100},
+                    {"pitch":62,"start":6.0,"duration":1.0,"velocity":100},
+                    {"pitch":64,"start":7.5,"duration":2.0,"velocity":100}
+                ]),
+            ),
+            "note" if parent == "7:arrangement_clip:1:3" => reply("note", json!([{"pitch":60,"start":0.0,"duration":1.0,"velocity":100}])),
+            "note" if parent == "7:arrangement_clip:1:4" => {
+                reply("note", json!([0, 4, 8, 12].map(|at| json!({"pitch":60,"start":at,"duration":0.25,"velocity":100}))))
+            }
             "note" => reply("note", json!([{"pitch":36,"start":0.0,"duration":1.5,"velocity":110},{"pitch":43,"start":2.0,"duration":0.5,"velocity":90,"releaseVelocity":20}])),
             other => panic!("not a read here: {other}"),
         })
@@ -140,8 +183,12 @@ async fn a_mistake_in_the_notation_is_the_changes_error() {
             );
             let both = object(json!({"trackRef":"7:track:1","notes":[],"notation":"1|1 C3"}));
             assert!(expand("write_midi_clip", both, &connection, None, &signal).await.unwrap_err().contains("not both"));
-            let short = object(json!({"trackRef":"7:track:1","length":4,"notation":"2|1 C3"}));
-            assert!(expand("write_midi_clip", short, &connection, None, &signal).await.unwrap_err().contains("ends after the clip"));
+            // Kumi's bridge writes notes inside a clip, and the error says so.
+            let over = object(json!({"trackRef":"7:track:1","length":4,"notation":"1|4 C3/2"}));
+            assert!(expand("write_midi_clip", over, &connection, None, &signal)
+                .await
+                .unwrap_err()
+                .contains("Kumi writes notes inside a clip"));
             let clip = object(json!({"clips":[{"trackRef":"7:track:1","start":0,"notation":"1|1 snr"}]}));
             assert!(expand("write_arrangement_clip", clip, &connection, None, &signal)
                 .await
@@ -167,17 +214,87 @@ async fn read_notes_prints_each_clip_in_its_own_frame() {
             // A Session clip on a Drum Rack track: its own time, drums as lanes named by the pads.
             assert_eq!(clips["clips"][0]["notation"], json!("kick808 x... *4\nsnare ..x. *4"));
             assert_eq!((clips["clips"][0]["notes"].clone(), clips["clips"][0]["exact"].clone()), (json!(8), json!(true)));
-            // An Arrangement clip at bar 9: song time; a release velocity isn't written, so it isn't exact.
+            // An Arrangement clip at bar 9: song time; a release velocity isn't written, so it isn't exact, and says why.
             assert_eq!(clips["clips"][1]["notation"], json!("9|1 l/4. v110 C1 9|3 v90 G1/8"));
-            assert_eq!(clips["clips"][1]["time"], json!("song time: the clip runs from 9|1 to 11|1"));
+            assert_eq!(clips["clips"][1]["time"], json!("song time in 4/4: the clip plays from 9|1 to 11|1"));
             assert_eq!(clips["clips"][1]["exact"], json!(false));
+            assert_eq!(clips["clips"][1]["leftOut"], json!("release velocities aren't written: format \"json\" gives every field"));
             assert!(clips["clips"][2]["error"].as_str().unwrap().contains("audio clip"));
-            // Live's own rows, for exact edits.
+            // Live's own rows, for exact edits, with where the clip plays them.
             let read =
-                read_notes(&object(json!({"clipRef":"7:arrangement_clip:1:0","format":"json"})), &connection, None, Signal::new()).await;
+                read_notes(&object(json!({"clipRef":"7:arrangement_clip:1:1","format":"json"})), &connection, None, Signal::new()).await;
             let clips: Value = serde_json::from_str(&read.text).unwrap();
-            assert_eq!(clips["clips"][0]["notes"][1]["releaseVelocity"], json!(20));
+            assert_eq!(clips["clips"][0]["notes"][1]["start"].as_f64(), Some(16.));
+            assert_eq!(clips["clips"][0]["placement"]["startMarker"].as_f64(), Some(16.));
             assert!(read_notes(&object(json!({})), &connection, None, Signal::new()).await.is_error);
+        })
+        .await;
+}
+
+/// The notes a printed clip reads back as: (pitch, song beat, length).
+fn heard(clip: &Value, origin: f64) -> Vec<(u8, f64, f64)> {
+    let frame = Frame { origin, ..Frame::default() };
+    let mut notes: Vec<_> = parse(clip["notation"].as_str().unwrap(), &frame)
+        .unwrap()
+        .into_iter()
+        .map(|note| (note.pitch, origin + note.start, note.duration))
+        .collect();
+    notes.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+    notes
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_arrangement_clip_prints_what_it_plays_where_it_plays_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (_, connection) = connection().await;
+            let refs = ["7:arrangement_clip:1:1", "7:arrangement_clip:1:2", "7:arrangement_clip:1:3", "7:arrangement_clip:1:4"];
+            let read = read_notes(&object(json!({"clipRefs": refs})), &connection, Some(120.), Signal::new()).await;
+            let clips: Value = serde_json::from_str(&read.text).unwrap();
+            // A split clip: its window, from its start marker; a note past its end is cut there, and the notes outside
+            // the window are counted, not shown.
+            let split = &clips["clips"][0];
+            assert_eq!(split["time"], json!("song time in 4/4: the clip plays from 13|1 to 15|1"));
+            assert_eq!(heard(split, 48.), [(60, 48., 1.), (64, 52., 4.)]);
+            assert!(split["unheard"].as_str().unwrap().starts_with("2 of its notes lie outside what it plays"));
+            assert_eq!(split["exact"], json!(true));
+            // A loop started halfway through: the rest of that pass, then each pass; a note held over the loop's end is
+            // cut there each time, and one before the loop never plays.
+            let looped = &clips["clips"][1];
+            assert_eq!(looped["time"], json!("song time in 4/4: the clip plays from 17|1 to 20|1, looping: each pass is shown"));
+            let pass = |at: f64| [(62, at, 1.), (64, at + 1.5, 0.5), (60, at + 2., 1.)];
+            assert_eq!(heard(looped, 64.), [pass(64.), pass(68.), pass(72.)].concat());
+            assert!(looped["unheard"].as_str().unwrap().starts_with("1 of its notes"));
+            // Without the start marker, the loop is taken to start at its start, and that's said.
+            let old = &clips["clips"][2];
+            assert!(old["time"]
+                .as_str()
+                .unwrap()
+                .ends_with("(from its loop's start: this bridge doesn't say where in its loop it starts)"));
+            assert_eq!(heard(old, 80.), [(60, 80., 1.), (60, 84., 1.)]);
+            // Live's own split: the right half plays on from the clip's ninth beat, where the whole clip did.
+            let right = &clips["clips"][3];
+            assert_eq!(heard(right, 40.), [(60, 40., 0.25), (60, 44., 0.25)]);
+            assert!(right["unheard"].as_str().unwrap().starts_with("2 of its notes"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn read_notes_says_what_it_leaves_out() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (_, connection) = connection().await;
+            // A clip read in part isn't exact, and says so.
+            let read = read_notes(&object(json!({"clipRef":"7:clip:0:1"})), &connection, None, Signal::new()).await;
+            let clips: Value = serde_json::from_str(&read.text).unwrap();
+            assert_eq!(clips["clips"][0]["exact"], json!(false));
+            assert!(clips["clips"][0]["leftOut"].as_str().unwrap().starts_with("only its first 8 notes were read"));
+            // Sixteen clips at a time, and the rest said.
+            let read = read_notes(&object(json!({"clipRefs": vec!["7:clip:0:0"; 17]})), &connection, None, Signal::new()).await;
+            let clips: Value = serde_json::from_str(&read.text).unwrap();
+            assert_eq!(clips["clips"].as_array().unwrap().len(), 16);
+            assert_eq!(clips["more"], json!("16 clips at a time: ask again for the other 1"));
         })
         .await;
 }

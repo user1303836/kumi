@@ -3,8 +3,8 @@
 //!
 //! A text is lines, and `#` at the start of a token begins a comment. A line is settings, a sequence, a lane, a copy
 //! or a key:
-//! - **Settings** stay until changed: `v100` (velocity; `v80-110` is 80 with Live's velocity deviation of +30),
-//!   `p0.8` (probability) and `l/8` (length). A length is a note value (`/8`, `/8.` dotted, `/8t` triplet, `3/8`) or
+//! - **Settings** stay until changed: `v100` (velocity; `v80-110` is 80 with Live's velocity deviation of +30, and
+//!   the other end may pass 1–127, at most 127 away), `p0.8` (probability) and `l/8` (length). A length is a note value (`/8`, `/8.` dotted, `/8t` triplet, `3/8`) or
 //!   beats (`0.37b`).
 //! - **A sequence** starts at a position, `bar|beat` with the beat in the meter's unit (`3|2.5`, `3|1+1/3`). Its
 //!   items follow one after another, each taking the length:
@@ -18,10 +18,12 @@
 //!     ratchet that many even hits into the step.
 //!   - The step is a note value (`/16`, `/16t`, `/8t`, `/32`…). `*` repeats the pattern to the clip's end, `*8`
 //!     plays it 8 times, and `*to 17|1` until there.
-//!   - `x=100 X=127 o=60` (the defaults) set the lane's velocities. `+12` (ticks, 960 to a quarter) or `-8ms`
-//!     shifts every hit.
+//!   - `x` plays at the velocity set (`v`, 100 until set), `X` at 127 and `o` at 60; `x=90 X=120 o=40` set them for
+//!     the line. `+12t` or `-12t` (ticks, 960 to a quarter) or `-8ms` shifts every hit.
 //! - **A copy** tiles bars: `copy 1-2 3-16` lays bars 1–2 over bars 3–16, again and again.
 //! - **A key** names the tonic and mode that roman numerals use: `key D dorian`.
+//!
+//! A text's notes end by the clip's end (the bridge writes notes inside a clip), and it writes at most [`MOST`].
 mod harmony;
 mod parse;
 mod pitch;
@@ -29,7 +31,7 @@ mod print;
 mod time;
 
 pub use harmony::{chord, Key};
-pub use parse::{names_drums, parse};
+pub use parse::{names_drums, parse, MOST};
 pub use pitch::{drum_pitch, name as pitch_name, parse as parse_pitch};
 pub use print::{print, Printed};
 pub use time::{Frame, TICKS};

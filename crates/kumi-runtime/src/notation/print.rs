@@ -9,11 +9,13 @@ use super::{
 };
 use std::collections::BTreeMap;
 
-/// A print: the text, and whether it holds everything the notes do (channel and release velocity aren't written).
+/// A print: the text, and whether it holds everything the notes do.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Printed {
     pub text: String,
     pub exact: bool,
+    /// Why it doesn't, when it doesn't: release velocities and MIDI channels aren't written.
+    pub left_out: Vec<&'static str>,
 }
 
 /// The notes (in the clip's own time) as the notation, in the frame's time.
@@ -22,11 +24,17 @@ pub fn print(notes: &[Note], frame: &Frame) -> Printed {
     sorted.sort_by(order);
     let compact = compact(&sorted, frame);
     let text = if reads_back(&compact, &sorted, frame) { compact } else { plain(&sorted, frame) };
-    let kept = sorted
-        .iter()
-        .all(|note| note.release_velocity.is_none_or(|velocity| velocity == 64.) && note.channel.is_none_or(|channel| channel <= 1));
-    let exact = kept && reads_back(&text, &sorted, frame);
-    Printed { text, exact }
+    let mut left_out = vec![];
+    if sorted.iter().any(|note| note.release_velocity.is_some_and(|velocity| velocity != 64.)) {
+        left_out.push("release velocities aren't written");
+    }
+    if sorted.iter().any(|note| note.channel.is_some_and(|channel| channel > 1)) {
+        left_out.push("MIDI channels aren't written");
+    }
+    if !reads_back(&text, &sorted, frame) {
+        left_out.push("the text doesn't read back as the notes");
+    }
+    Printed { text, exact: left_out.is_empty(), left_out }
 }
 /// Whether a text reads back as the notes. Times may differ by float noise; nothing else may.
 fn reads_back(text: &str, notes: &[Note], frame: &Frame) -> bool {
@@ -65,8 +73,9 @@ fn compact(notes: &[Note], frame: &Frame) -> String {
         pitches.dedup();
         for pitch in pitches {
             let hits: Vec<Note> = rest.iter().filter(|note| note.pitch == pitch).cloned().collect();
-            if let Some(line) = lane(&hits, frame) {
-                lanes.push((hits[0].clone(), line));
+            // Whether they fit doesn't hang on the velocity set; the line, written later, does.
+            if lane(&hits, frame, state.velocity).is_some() {
+                lanes.push(hits);
                 rest.retain(|note| note.pitch != pitch);
             }
         }
@@ -74,9 +83,9 @@ fn compact(notes: &[Note], frame: &Frame) -> String {
     let (phrase, copy) = repeat(&rest, frame);
     sequences(&phrase, frame, &mut state, &mut lines);
     lines.extend(copy);
-    for (first, line) in lanes {
-        lane_settings(&first, &mut state, &mut lines);
-        lines.push(line);
+    for hits in lanes {
+        lane_settings(&hits[0], &mut state, &mut lines);
+        lines.extend(lane(&hits, frame, state.velocity));
     }
     lines.join("\n")
 }
@@ -234,13 +243,17 @@ fn settings(note: &Note, state: &mut State, line: &mut Vec<String>) {
     }
 }
 
-/// A lane for one pitch's notes, when they fit one exactly (the shortest of the grids they fit).
-fn lane(hits: &[Note], frame: &Frame) -> Option<String> {
+/// A lane for one pitch's notes, when they fit one exactly (the shortest of the grids they fit), with `x` at the
+/// velocity set unless the line says otherwise.
+fn lane(hits: &[Note], frame: &Frame, velocity: f64) -> Option<String> {
     let first = hits.first()?;
     if hits.iter().any(|hit| hit.mute || hit.probability != first.probability || hit.velocity_deviation != first.velocity_deviation) {
         return None;
     }
-    ["/16", "/8", "/16t", "/8t", "/32", "/32t", "/4", "/64"].iter().filter_map(|step| fit(hits, step, frame)).min_by_key(|line| line.len())
+    ["/16", "/8", "/16t", "/8t", "/32", "/32t", "/4", "/64"]
+        .iter()
+        .filter_map(|step| fit(hits, step, frame, velocity))
+        .min_by_key(|line| line.len())
 }
 /// The settings a lane's hits need (probability, velocity deviation), on a line of their own before it.
 fn lane_settings(first: &Note, state: &mut State, lines: &mut Vec<String>) {
@@ -249,9 +262,13 @@ fn lane_settings(first: &Note, state: &mut State, lines: &mut Vec<String>) {
         needed.push(format!("p{}", time::decimal(first.probability)));
     }
     if first.velocity_deviation != state.deviation {
-        // Lanes take their velocities from their classes; the setting is for the deviation.
-        let low = state.velocity.clamp(1. - first.velocity_deviation.min(0.), 127. - first.velocity_deviation.max(0.));
-        needed.push(format!("v{}-{}", time::decimal(low), time::decimal(low + first.velocity_deviation)));
+        // The velocity set stays (`x` plays at it); the setting is for the deviation, its other end past 1–127 if so.
+        let (low, deviation) = (state.velocity, first.velocity_deviation);
+        needed.push(if deviation == 0. {
+            format!("v{}", time::decimal(low))
+        } else {
+            format!("v{}-{}", time::decimal(low), time::decimal(low + deviation))
+        });
     }
     for text in &needed {
         let _ = setting(state, text);
@@ -269,7 +286,7 @@ enum Step {
     Ratchet(usize, f64),
 }
 /// A lane line for the hits on one grid, if every hit sits on it exactly (with one shift for all).
-fn fit(hits: &[Note], step_text: &str, frame: &Frame) -> Option<String> {
+fn fit(hits: &[Note], step_text: &str, frame: &Frame, velocity: f64) -> Option<String> {
     let step = time::parse_length(step_text)?;
     let times: Vec<f64> = hits.iter().map(|hit| frame.origin + hit.start).collect();
     let start = frame.bar_start(frame.bar_of(times[0]));
@@ -316,7 +333,8 @@ fn fit(hits: &[Note], step_text: &str, frame: &Frame) -> Option<String> {
             _ => return None,
         }
     }
-    let classes = classes(&pattern)?;
+    let defaults = [('x', velocity), CLASSES[1], CLASSES[2]];
+    let classes = classes(&pattern, &defaults)?;
     let class_of = |velocity: f64| classes.iter().find(|(_, at)| *at == velocity).map(|(class, _)| *class);
     let chars: Vec<char> = pattern
         .iter()
@@ -354,7 +372,7 @@ fn fit(hits: &[Note], step_text: &str, frame: &Frame) -> Option<String> {
     }
     line += &format!(" {shown}{fill}");
     for (class, velocity) in &classes {
-        if CLASSES.iter().all(|(name, default)| name != class || default != velocity) {
+        if defaults.iter().all(|(name, default)| name != class || default != velocity) {
             line += &format!(" {class}={}", time::decimal(*velocity));
         }
     }
@@ -366,7 +384,7 @@ fn fit(hits: &[Note], step_text: &str, frame: &Frame) -> Option<String> {
     Some(line)
 }
 /// The lane's velocity classes: at most three velocities (a ratchet's must be `x`'s), the defaults where they serve.
-fn classes(pattern: &[Step]) -> Option<Vec<(char, f64)>> {
+fn classes(pattern: &[Step], defaults: &[(char, f64); 3]) -> Option<Vec<(char, f64)>> {
     let mut velocities: Vec<f64> = vec![];
     let mut ratchet = None;
     for step in pattern {
@@ -385,9 +403,9 @@ fn classes(pattern: &[Step]) -> Option<Vec<(char, f64)>> {
     if velocities.len() > 3 {
         return None;
     }
-    let default = |velocity: f64| CLASSES.iter().find(|(_, at)| *at == velocity).map(|(class, _)| *class);
+    let default = |velocity: f64| defaults.iter().find(|(_, at)| *at == velocity).map(|(class, _)| *class);
     if ratchet.is_none_or(|velocity| default(velocity) == Some('x')) && velocities.iter().all(|velocity| default(*velocity).is_some()) {
-        return Some(CLASSES.to_vec());
+        return Some(defaults.to_vec());
     }
     // `x` takes the ratchets' velocity (or the most used), and the others take the rest, louder first.
     let x = ratchet.unwrap_or_else(|| {
@@ -439,6 +457,25 @@ mod tests {
     fn what_the_notation_leaves_out_makes_a_print_inexact() {
         let mut note = Note::new(60, 0., 1., 100.);
         note.release_velocity = Some(20.);
-        assert!(!print(&[note], &Frame::default()).exact);
+        let printed = print(&[note], &Frame::default());
+        assert_eq!((printed.exact, printed.left_out), (false, vec!["release velocities aren't written"]));
+    }
+
+    #[test]
+    fn a_lane_holds_lives_whole_velocity_deviation() {
+        let frame = Frame { drums: true, ..Frame::default() };
+        for (deviation, text) in [(127., "v100-227\nkick x... *4"), (-127., "v100--27\nkick x... *4")] {
+            let notes: Vec<Note> =
+                (0..4).map(|at| Note { velocity_deviation: deviation, ..Note::new(36, at as f64, 0.25, 100.) }).collect();
+            let printed = print(&notes, &frame);
+            assert_eq!((printed.text.as_str(), printed.exact), (text, true));
+        }
+        // After a part at another velocity, a lane's `x` says its own.
+        let notes = parse("v80 1|1 C3\nkick 2|1 x...", &frame).unwrap();
+        assert_eq!(notes.iter().map(|note| note.velocity).collect::<Vec<_>>(), [80., 80.]);
+        // (The part muted, so it isn't a lane itself.)
+        let mixed = [Note { mute: true, ..Note::new(60, 0., 1., 80.) }, Note::new(36, 4., 0.25, 100.)];
+        let printed = print(&mixed, &frame);
+        assert_eq!((printed.text.as_str(), printed.exact), ("1|1 v80 (C3)\nkick 2|1 x x=100", true));
     }
 }
