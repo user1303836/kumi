@@ -146,15 +146,20 @@ fn upgrade(
     // The first native distribution keeps the bridge protocol/package version. A runtime
     // migration at that version is allowed only from the exact verified Node generation;
     // ordinary native upgrades and all downgrades retain the semantic-version fence.
+    // No real install takes this branch any more: every shipped Node generation carries the
+    // registry before this bridge's (ec05dd40…), which the last check refuses. It goes with
+    // the Node removal; until then it stays fenced, never loosened.
     let runtime_migration = if order == std::cmp::Ordering::Equal
         && evidence.manifest["package"]["version"] == receipt["packageVersion"]
         && evidence.manifest["schema"] == "ableton-mcp-native-release/v1"
     {
-        let current = verify_release_package(p(&receipt["packageRoot"]), o.allow_dirty_private_build)?;
+        let current = verify_retained_package(p(&receipt["packageRoot"]), o.allow_dirty_private_build)?;
         ["ableton-mcp-release/v2", "ableton-mcp-private-release/v1"].iter().any(|schema| current.manifest["schema"] == *schema)
             && json!(current.manifest_sha256) == receipt["releaseManifestSha256"]
             && current.manifest["package"]["version"] == receipt["packageVersion"]
             && current.manifest["protocol"]["registryHash"] == receipt["registryHash"]
+            // The same version keeps the same protocol: a registry change comes with a newer bridge.
+            && current.manifest["protocol"]["registryHash"] == registry_digest()
     } else {
         false
     };
@@ -380,7 +385,8 @@ fn rollback(o: &LifecycleOptions, paths: &Paths, receipt: &Value, result: &mut V
         return Err(fail("current generation is drifted; repair or preserve it before rollback"));
     }
     assert_no_linked_ancestors(p(&previous["remoteBackup"]))?;
-    let previous_package = verify_release_package(p(&previous["packageRoot"]), o.allow_dirty_private_build)?;
+    // The previous generation runs its own bridge again, with its own registry, which may be older than this one's.
+    let previous_package = verify_retained_package(p(&previous["packageRoot"]), o.allow_dirty_private_build)?;
     if json!(previous_package.manifest_sha256) != previous["releaseManifestSha256"]
         || previous_package.manifest["protocol"]["registryHash"] != previous["registryHash"]
     {

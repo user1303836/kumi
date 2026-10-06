@@ -16,6 +16,8 @@ import { LIVE_REGISTRY_HASH } from "../src/live.js";
 import { assertNoLinkedAncestors, runLifecycle } from "../src/lifecycle.js";
 const sha = (value) => createHash("sha256").update(value).digest("hex");
 const mitLicense = readFileSync(new URL("../../../../LICENSE.md", import.meta.url), "utf8");
+// The registry the bundle's bridge was built with, carried as a release carries it (its manifest names its hash).
+const legacyRegistry = readFileSync(new URL("../../../../protocol/ableton-live-v1.operations.json", import.meta.url), "utf8");
 const artifacts = new Map();
 function createArtifact(path, manifest, packageRoot, extras = {}) {
     const parsed = JSON.parse(manifest.toString("utf8"));
@@ -54,6 +56,7 @@ function fixturePackage(root, version, marker, policy = "current") {
         ["dist/src/cli.js", `#!/usr/bin/env node\n// ${marker}\n`],
         ["remote-script/AbletonMcpBridge/__init__.py", "def create_instance(c_instance):\n    return None\n"],
         ["remote-script/AbletonMcpBridge/ableton_mcp_remote_script.py", `class AbletonMcpBridge:\n    marker = ${JSON.stringify(marker)}\n`],
+        ["remote-script/AbletonMcpBridge/ableton-live-v1.operations.json", legacyRegistry],
         ...Array.from({ length: 9 }, (_, index) => [`release-docs/doc-${index}.md`, `# ${marker} ${index}\n`]),
     ]);
     for (const [name, content] of files) {
