@@ -10,7 +10,7 @@ fn embedded_helpers_keep_their_hashes() {
     assert_eq!(HANDS_VERSION, 2);
     for (source, expected) in [
         (mac::MAC_SOURCE, "16045380d38220f9dfd1a6dd318dac9b655fc41758f2531efc46ab97f82a7ba3"),
-        (windows::WINDOWS_SOURCE, "7cc8e2446ce4202521b8e9238ecf882f42abfb9bc131c25872c4d424f2d323c8"),
+        (windows::WINDOWS_SOURCE, "2049777001cf9014ca8cf8038e6a23f01008ca11592c81949d1f4040037c9cf5"),
     ] {
         assert_eq!(hex::encode(Sha256::digest(source)), expected);
     }
@@ -153,4 +153,127 @@ async fn native_mac_helper_compiles_and_answers_without_requesting_access() {
     let hands = persistent(command.to_string_lossy().into(), vec![], Some(4000));
     let _allowed = hands.trusted(false).await.unwrap();
     hands.close();
+}
+
+/// A stand-in for Live on Windows: a window with a Win32 menu bar (which Live's UI Automation tree leaves
+/// out, #192), a Yes / No / Cancel prompt and a Save dialog, both owned by it (#187, #189). It says what
+/// happened on its stdout.
+#[cfg(windows)]
+const STAND_IN: &str = r#"
+Add-Type -AssemblyName System.Windows.Forms
+$form = New-Object System.Windows.Forms.Form
+$form.Text = 'Kumi hands test'
+$form.Width = 420; $form.Height = 200
+function Say($text) { [Console]::Out.WriteLine($text); [Console]::Out.Flush() }
+$menu = New-Object System.Windows.Forms.MainMenu
+$file = $menu.MenuItems.Add('&File')
+$new = $file.MenuItems.Add('&New Live Set')
+$new.Shortcut = [System.Windows.Forms.Shortcut]::CtrlN
+$new.add_Click({ $choice = [System.Windows.Forms.MessageBox]::Show($form, 'Save changes to "Test" before closing?', 'Ableton Live', 'YesNoCancel'); Say "answered $choice" })
+$saveAs = $file.MenuItems.Add('Save Live Set &As...')
+$saveAs.add_Click({ $dialog = New-Object System.Windows.Forms.SaveFileDialog; $dialog.Title = 'Save Live Set As'; if ($dialog.ShowDialog($form) -eq 'OK') { Say "saved $($dialog.FileName)" } else { Say 'save cancelled' } })
+$file.MenuItems.Add('-') | Out-Null
+$file.MenuItems.Add('E&xit') | Out-Null
+$edit = $menu.MenuItems.Add('&Edit')
+$group = $edit.MenuItems.Add('&Group')
+$group.Shortcut = [System.Windows.Forms.Shortcut]::CtrlG
+$group.add_Click({ Say 'group' })
+$freeze = $edit.MenuItems.Add('Freeze Track')
+$freeze.Enabled = $false
+$create = $menu.MenuItems.Add('&Create')
+$create.MenuItems.Add('Insert &MIDI Track') | Out-Null
+$form.Menu = $menu
+$form.add_Shown({ Say "ready $PID" })
+[System.Windows.Forms.Application]::Run($form)
+"#;
+
+#[cfg(windows)]
+#[tokio::test(flavor = "current_thread")]
+async fn on_windows_the_helper_uses_the_win32_menu_finds_the_owned_dialog_and_fills_a_save_dialog() {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let folder = tempfile::tempdir().unwrap();
+    let stand_in = folder.path().join("stand-in.ps1");
+    std::fs::write(&stand_in, STAND_IN).unwrap();
+    let mut window = tokio::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
+        .arg(&stand_in)
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut said = BufReader::new(window.stdout.take().unwrap()).lines();
+    async fn next(said: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>) -> Option<String> {
+        tokio::time::timeout(Duration::from_secs(15), said.next_line()).await.ok().and_then(|line| line.ok().flatten())
+    }
+    // No desktop to open a window on (a service session): nothing to test here.
+    let Some(ready) = next(&mut said).await else {
+        eprintln!("the stand-in window didn't open; skipped");
+        return;
+    };
+    let pid = ready.strip_prefix("ready ").unwrap().trim().to_string();
+    let script = folder.path().join("kumi-hands.ps1");
+    std::fs::write(&script, windows::WINDOWS_SOURCE).unwrap();
+    let command = format!("$env:KUMI_HANDS_PID = '{pid}'; & '{}'", script.display());
+    let hands = persistent(
+        "powershell.exe".into(),
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &command].map(str::to_string).into(),
+        Some(15_000),
+    );
+
+    // The menu bar, read from Win32: titles without their & marks, shortcuts as Windows writes them.
+    let menus = hands.menus(None).await.unwrap();
+    let find = |path: &[&str]| menus.iter().find(|item| item.path == path).cloned();
+    assert_eq!(find(&["File", "New Live Set"]).unwrap().key.as_deref(), Some("Ctrl+N"), "{menus:?}");
+    assert!(find(&["Edit", "Group"]).unwrap().enabled);
+    assert!(!find(&["Edit", "Freeze Track"]).unwrap().enabled);
+    assert!(find(&["Create", "Insert MIDI Track"]).is_some());
+    assert!(!menus.iter().any(|item| item.path.last().is_some_and(|title| title.is_empty() || title == "-")), "no separators");
+
+    // Chosen without bringing the window to the front.
+    let group = hands.menu(&["Edit".into(), "Group".into()], MenuOptions::default()).await.unwrap();
+    assert!(group.ok, "{group:?}");
+    assert_eq!(next(&mut said).await.as_deref(), Some("group"));
+    let freeze = hands.menu(&["Edit".into(), "Freeze Track".into()], MenuOptions::default()).await.unwrap();
+    assert_eq!(freeze.error.as_deref(), Some("disabled"));
+    assert!(hands.dialog(None).await.unwrap() == Dialog { open: false, title: None, words: None, buttons: None });
+
+    // An item that opens a modal prompt answers at once, and the prompt is the dialog: its own words and
+    // buttons, not the main window's. "Don't Save" is Windows' No.
+    let started = std::time::Instant::now();
+    assert!(hands.menu(&["File".into(), "New Live Set".into()], MenuOptions::default()).await.unwrap().ok);
+    assert!(started.elapsed() < Duration::from_secs(5), "the menu didn't wait for the dialog");
+    let mut dialog = hands.dialog(None).await.unwrap();
+    for _ in 0..20 {
+        if dialog.open {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        dialog = hands.dialog(None).await.unwrap();
+    }
+    assert!(dialog.open, "{dialog:?}");
+    assert_eq!(dialog.title.as_deref(), Some("Ableton Live"));
+    assert!(dialog.words.as_ref().unwrap().iter().any(|w| w.contains("Save changes to")), "{dialog:?}");
+    let buttons = dialog.buttons.unwrap();
+    assert!(["Yes", "No", "Cancel"].iter().all(|b| buttons.iter().any(|x| x == b)), "{buttons:?}");
+    let answered = hands.answer("Don't Save", None).await.unwrap();
+    assert!(answered.ok, "{answered:?}");
+    assert_eq!(answered.fields["pressed"], "No");
+    assert_eq!(next(&mut said).await.as_deref(), Some("answered No"));
+
+    // A Save dialog filled with a path and saved.
+    assert!(hands.menu(&["File".into(), "Save Live Set As".into()], MenuOptions::default()).await.unwrap().ok);
+    let path = folder.path().join("CHAOS 02.als");
+    let saved = hands.file(&path.to_string_lossy(), None).await.unwrap();
+    assert!(saved.ok, "{saved:?}");
+    assert_eq!(next(&mut said).await, Some(format!("saved {}", path.display())));
+
+    // Keys land in the window when it can be brought to the front (a locked or busy desktop can refuse).
+    let keys = hands.keys(&["ctrl+g".into()], KeysOptions::default()).await.unwrap();
+    if keys.ok {
+        assert_eq!(next(&mut said).await.as_deref(), Some("group"));
+    } else {
+        assert_eq!(keys.error.as_deref(), Some("not-front"), "{keys:?}");
+    }
+    hands.close();
+    let _ = window.kill().await;
 }

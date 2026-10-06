@@ -46,6 +46,14 @@ use std::{
 mod conversions;
 
 pub type CommandAction = Rc<dyn Fn(String, JsonObject, Signal) -> LocalBoxFuture<'static, Result<ToolResult, RuntimeError>>>;
+/// How long a Set Kumi asked for may take to open (Live drops Kumi while it loads).
+const SET_OPENING_MS: i64 = 120_000;
+/// Keys and menu items that put another Set in place of the open one.
+const SET_KEYS: &[&str] = &["ctrl+n", "cmd+n", "ctrl+o", "cmd+o"];
+fn switches_set(title: &str) -> bool {
+    let title = title.trim().to_lowercase();
+    ["new live set", "open live set", "open recent"].iter().any(|start| title.starts_with(start))
+}
 /// Bringing Live's window forward: true when it came.
 pub type FrontLive = Rc<dyn Fn() -> LocalBoxFuture<'static, bool>>;
 #[derive(Default)]
@@ -274,7 +282,8 @@ impl CommandTools {
             return Ok(ToolResult::error("Kumi needs Accessibility access to use Live's menus. macOS just asked for it: in System Settings › Privacy & Security › Accessibility, turn on the app Kumi runs in (your terminal), then ask again. Tell the producer exactly that."));
         }
         if let Some(answer) = input.get("answer").and_then(Value::as_str) {
-            if !hands.answer(answer, Some(signal.clone())).await?.ok {
+            let answered = hands.answer(answer, Some(signal.clone())).await?;
+            if !answered.ok {
                 let open = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
                 return Ok(ToolResult::error(if open.open {
                     format!(
@@ -285,10 +294,12 @@ impl CommandTools {
                     "Live has no dialog open.".into()
                 }));
             }
-            self.tell(format!("Pressed {answer} in Live's dialog"));
+            // Windows says No where macOS says Don't Save: what was pressed is said as Live says it.
+            let pressed = answered.fields.get("pressed").and_then(Value::as_str).filter(|s| !s.is_empty()).unwrap_or(answer).to_owned();
+            self.tell(format!("Pressed {pressed} in Live's dialog"));
             delay(200, signal).await?;
             let next = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
-            let mut out = args(json!({"pressed":answer}));
+            let mut out = args(json!({"pressed":pressed}));
             if next.open {
                 out.insert("dialog".into(), serde_json::to_value(next).unwrap());
             }
@@ -298,6 +309,11 @@ impl CommandTools {
         let command = named_command.and_then(|name| COMMANDS.get(name));
         if let Some(name) = named_command.filter(|_| command.is_none()) {
             return Ok(ToolResult::error(format!("Kumi doesn't know the command {name}; name the menu item instead (menu).")));
+        }
+        if let (Some(name), Some(command)) = (named_command, command) {
+            if matches!(name, "save_as" | "new_set" | "open_set") || (name == "save" && input.contains_key("path")) {
+                return self.set_file(name, command, input, signal, hands).await;
+            }
         }
         let menu = strings(input.get("menu"));
         let keys = strings(input.get("keys"));
@@ -442,6 +458,10 @@ impl CommandTools {
                     command.map(|c| c.titles[0].clone()).unwrap_or_else(|| menu.join(" › "))
                 )));
             };
+            // A new Set or another opened: Live drops Kumi while it loads, and this request carries on (#188).
+            if switches_set(item.path.last().map(String::as_str).unwrap_or("")) {
+                self.connection.expect_set_change(SET_OPENING_MS);
+            }
             let reply = hands
                 .menu(
                     &item.path,
@@ -473,9 +493,16 @@ impl CommandTools {
             path.push(said.into());
             (path.join(" › "), shortcut(&item))
         } else {
+            if keys.iter().any(|combo| SET_KEYS.contains(&combo.to_lowercase().replace(' ', "").as_str())) {
+                self.connection.expect_set_change(SET_OPENING_MS);
+            }
             let reply = hands.keys(&keys, KeysOptions { signal: Some(signal.clone()), ..Default::default() }).await?;
             if !reply.ok {
-                return Ok(ToolResult::error(format!("Live didn't take those keys ({}).", reply.error.as_deref().unwrap_or("undefined"))));
+                return Ok(ToolResult::error(match reply.error.as_deref() {
+                    Some("not-front") => "Kumi couldn't bring Live to the front, so the keys weren't pressed: another window may be holding the front (a dialog or a full-screen app).".into(),
+                    Some("keys-refused") => "Windows refused Kumi's key presses, so nothing was pressed: another app may be blocking input.".into(),
+                    error => format!("Live didn't take those keys ({}).", error.unwrap_or("undefined")),
+                }));
             }
             (keys.join(", "), None)
         };
@@ -586,6 +613,160 @@ impl CommandTools {
         }
         out.insert("note".into(), json!("References from before are gone: discover again before using any."));
         Ok(ToolResult::text(stringify(&Value::Object(out))))
+    }
+    /// The Set's file through Live's own commands: save it under a name (save_as, or save with a path for a
+    /// Set never saved), start a new one (new_set) or open one (open_set). Live answers with dialogs Kumi's
+    /// hands fill in: its "Save changes?" prompt (save_current) and the Save and Open dialogs (path) (#189).
+    /// A new or opened Set replaces the open one, and Live drops Kumi while it loads; this request carries
+    /// on, waiting until Live is back with it (#188).
+    async fn set_file(
+        &self,
+        name: &str,
+        command: &Command,
+        input: &JsonObject,
+        signal: &Signal,
+        hands: &dyn Hands,
+    ) -> Result<ToolResult, CommandError> {
+        let save_current = input.get("save_current").and_then(Value::as_str);
+        let path = match (name, input.get("path").and_then(Value::as_str).map(trim).filter(|p| !p.is_empty())) {
+            ("save_as" | "open_set", None) => {
+                return Ok(ToolResult::error(format!("{name} needs path: the Set's file, as a full path (….als).")));
+            }
+            (_, Some(given)) => {
+                let mut path = PathBuf::from(given);
+                if !path.is_absolute() {
+                    return Ok(ToolResult::error(format!(
+                        "path is a full path, such as C:\\Music\\My Set.als or /Users/me/Music/My Set.als; {given} isn't."
+                    )));
+                }
+                if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("als")) {
+                    path = PathBuf::from(format!("{}.als", path.display()));
+                }
+                if name == "open_set" && !path.is_file() {
+                    return Ok(ToolResult::error(format!("There's no Set at {}.", path.display())));
+                }
+                if name != "open_set" && !path.parent().is_some_and(|folder| folder.is_dir()) {
+                    return Ok(ToolResult::error(format!(
+                        "The folder {} doesn't exist.",
+                        path.parent().map(|f| f.display().to_string()).unwrap_or_default()
+                    )));
+                }
+                Some(path)
+            }
+            (_, None) => None,
+        };
+        if self.menu_items.borrow().is_none() {
+            let items = hands.menus(Some(signal.clone())).await?;
+            *self.menu_items.borrow_mut() = Some(items);
+        }
+        let Some(item) = self.find_menu(Some(command), &[]) else {
+            return Ok(ToolResult::error(format!("Live's menus don't have “{}” here.", command.titles[0])));
+        };
+        let switching = matches!(name, "new_set" | "open_set");
+        if switching {
+            self.connection.expect_set_change(SET_OPENING_MS);
+        }
+        let before = path.as_ref().and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+        let reply = hands
+            .menu(&item.path, MenuOptions { signal: Some(signal.clone()), titles: command.titles.clone(), ..Default::default() })
+            .await?;
+        if !reply.ok {
+            return Ok(ToolResult::error(if reply.error.as_deref() == Some("disabled") {
+                format!("Live has “{}” greyed out right now.", item.path.join(" › "))
+            } else {
+                format!("Live didn't take “{}” ({}).", item.path.join(" › "), reply.error.as_deref().unwrap_or("undefined"))
+            }));
+        }
+        let pressed = item.path.join(" › ");
+        let mut out = args(json!({"pressed":pressed}));
+        let (mut filled, mut away, mut quiet) = (false, false, 0);
+        let rounds = if switching { SET_OPENING_MS / 250 } else { 120 };
+        for _ in 0..rounds {
+            delay(250, signal).await?;
+            if switching {
+                away |= self.connection.lost.get();
+                if away && self.connection.is_back() {
+                    let opened = path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "a new Set".into());
+                    self.tell(format!("{} ({opened})", command.done));
+                    out.insert(if name == "new_set" { "opened".into() } else { "openedSet".into() }, json!(opened));
+                    out.insert(
+                        "note".into(),
+                        json!("Live has the Set open now. References from before are gone: read the Set again before changing anything."),
+                    );
+                    return Ok(ToolResult::text(stringify(&Value::Object(out))));
+                }
+                if away {
+                    continue;
+                }
+            }
+            let dialog = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
+            if dialog.open {
+                quiet = 0;
+                let words = dialog.words.clone().unwrap_or_default().join(" ").to_lowercase();
+                if words.contains("save changes") || words.contains("before closing") {
+                    let Some(answer) = save_current else {
+                        out.insert("dialog".into(), serde_json::to_value(&dialog).unwrap());
+                        out.insert("next".into(), json!("Live asks whether to save the open Set first: ask the producer, then answer it (Yes saves, No discards, Cancel keeps the Set open), or give save_current."));
+                        return Ok(ToolResult::text(stringify(&Value::Object(out))));
+                    };
+                    let button = match answer {
+                        "yes" => "Yes",
+                        "no" => "No",
+                        _ => "Cancel",
+                    };
+                    let answered = hands.answer(button, Some(signal.clone())).await?;
+                    if !answered.ok {
+                        out.insert("dialog".into(), serde_json::to_value(&dialog).unwrap());
+                        out.insert("next".into(), json!("Kumi couldn't answer it: answer it yourself with answer, by its button's title."));
+                        return Ok(ToolResult::text(stringify(&Value::Object(out))));
+                    }
+                    if answer == "cancel" {
+                        out.insert("cancelled".into(), json!(true));
+                        self.tell("Live kept the Set open");
+                        return Ok(ToolResult::text(stringify(&Value::Object(out))));
+                    }
+                    continue;
+                }
+                if let Some(path) = path.as_ref().filter(|_| !filled) {
+                    let reply = hands.file(&path.to_string_lossy(), Some(signal.clone())).await;
+                    if reply.as_ref().is_ok_and(|reply| reply.ok) {
+                        filled = true;
+                        continue;
+                    }
+                }
+                // Something else: a file for a Set never saved, replacing a file, an error, a question Kumi has
+                // no answer for.
+                let unsaved = !filled && path.is_none() && dialog.title.as_deref().is_some_and(|t| t.to_lowercase().contains("save"));
+                out.insert("dialog".into(), serde_json::to_value(&dialog).unwrap());
+                out.insert("next".into(), json!(if unsaved {
+                    "Live wants a file for the open Set, which was never saved: answer Cancel, save it with save_as and a path, then ask again; or give save_current no to discard it."
+                } else {
+                    "Answer it with answer (the button's title), or tell the producer what it asks."
+                }));
+                return Ok(ToolResult::text(stringify(&Value::Object(out))));
+            }
+            if switching {
+                continue;
+            }
+            // Saved: the file is written (or rewritten), or a Set saved before saves where it is.
+            let written = path.as_ref().is_some_and(|p| {
+                std::fs::metadata(p).and_then(|m| m.modified()).ok().is_some_and(|at| before.is_none_or(|before| at > before))
+            });
+            quiet += 1;
+            // A Set saved before is saved where it is, without a dialog: path is for one never saved.
+            let in_place = name == "save" && !filled && quiet >= 8;
+            if written || in_place {
+                let saved = path.as_ref().filter(|_| !in_place).map(|p| p.display().to_string()).unwrap_or_else(|| "where it was".into());
+                self.tell(format!("{} {saved}", command.done));
+                out.insert("saved".into(), json!(saved));
+                return Ok(ToolResult::text(stringify(&Value::Object(out))));
+            }
+        }
+        Ok(ToolResult::error(if switching {
+            "Live hasn't opened the Set yet: it may still be loading, or showing something Kumi can't see. Check Live.".to_owned()
+        } else {
+            "Live didn't confirm the save in time: check Live.".to_owned()
+        }))
     }
     fn find_menu(&self, command: Option<&Command>, menu: &[String]) -> Option<MenuItem> {
         let items = self.menu_items.borrow();

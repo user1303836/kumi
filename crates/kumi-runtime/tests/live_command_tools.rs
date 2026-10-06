@@ -90,6 +90,13 @@ impl Hands for Fixture {
     async fn windows(&self, _: Option<Signal>) -> Result<Vec<Window>, HandsError> {
         unreachable!()
     }
+    async fn file(&self, path: &str, _: Option<Signal>) -> Result<HandsReply, HandsError> {
+        // As Live does once its Save dialog is filled: the Set is written there.
+        if self.config["writes"] != false {
+            std::fs::write(path, b"Set").unwrap();
+        }
+        Ok(serde_json::from_value(self.hand("file", vec![json!(path)])?).unwrap())
+    }
     fn close(&self) {}
 }
 #[async_trait(?Send)]
@@ -346,4 +353,114 @@ fn normalize_paths(value: &mut Value, library: &str) {
         }
         _ => {}
     }
+}
+
+/// CommandTools over a Fixture, for one case's config: what live_command answers, the hands calls it made,
+/// and the connection (to play Live dropping Kumi while a Set opens).
+async fn set_file_harness(config: Value) -> (CommandTools, Rc<Fixture>, Rc<LiveConnection>) {
+    let endpoint = Rc::new(Fixture {
+        config,
+        changed: Cell::new(false),
+        calls: RefCell::new(vec![]),
+        hands_calls: RefCell::new(vec![]),
+        counts: RefCell::new(HashMap::new()),
+    });
+    let connected = endpoint.clone();
+    let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
+    options.connect = Some(Rc::new(move |_| {
+        let ep: Rc<dyn McpEndpoint> = connected.clone();
+        async move { Ok(ep) }.boxed_local()
+    }));
+    options.generation = Some("connection".into());
+    let connection = LiveConnection::new(options);
+    connection.start(Signal::new()).await.unwrap();
+    connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
+    connection.available.set(true);
+    connection.lost.set(false);
+    connection.epoch.set(Some(7.0));
+    let remember = Remember::new(connection.clone(), None, None);
+    let history = Rc::new(History::new(connection.clone(), remember.clone(), None, None));
+    let hands = endpoint.clone();
+    let commands = CommandTools::new(
+        connection.clone(),
+        history,
+        remember,
+        CommandToolsOptions {
+            hands: Some(HandsSetup::Open(Rc::new(move || {
+                let hands: Rc<dyn Hands> = hands.clone();
+                async move { Ok(Some(hands)) }.boxed_local()
+            }))),
+            ..Default::default()
+        },
+        Rc::new(|_, _, _| async { Ok(ToolResult::text("selected")) }.boxed_local()),
+    );
+    (commands, endpoint, connection)
+}
+const FILE_MENU: &str = r#"[{"path":["File","New Live Set"],"enabled":true,"key":"Ctrl+N"},{"path":["File","Open Live Set"],"enabled":true},{"path":["File","Save Live Set"],"enabled":true},{"path":["File","Save Live Set As"],"enabled":true}]"#;
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_set_is_saved_as_a_file_started_new_or_opened_through_lives_file_menu() {
+    // #189: "save this set as CHAOS 02 in the project folder" took 96 s through PowerShell, and "start a new
+    // Set" became a hand-forged .als Live called corrupt.
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let menus: Value = serde_json::from_str(FILE_MENU).unwrap();
+            let saving = json!({"open":true,"title":"Save Live Set As","words":[],"buttons":["Save","Cancel"]});
+
+            // Save as: the Save dialog is filled and the Set is written there, .als added.
+            let (commands, hands, _) = set_file_harness(json!({"hands":{"menus":[menus],"dialog":[saving,{"open":false}]}})).await;
+            let path = folder.path().join("CHAOS 02");
+            let result = commands.live_command(&json!({"command":"save_as","path":path}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert!(!result.is_error, "{}", result.text);
+            let saved: Value = serde_json::from_str(&result.text).unwrap();
+            assert_eq!(saved["pressed"], "File › Save Live Set As");
+            assert_eq!(saved["saved"], folder.path().join("CHAOS 02.als").display().to_string());
+            assert!(hands.hands_calls.borrow().iter().any(|c| c[0] == "file" && c[1] == folder.path().join("CHAOS 02.als").display().to_string()));
+
+            // A new Set with unsaved changes: Live's prompt is answered as asked (No discards them on Windows),
+            // and the answer comes once Live is back with the new Set.
+            let prompt = json!({"open":true,"title":"Ableton Live","words":["Save changes to \"Untitled\" before closing?"],"buttons":["Yes","No","Cancel"]});
+            let (commands, hands, connection) =
+                set_file_harness(json!({"hands":{"menus":[menus],"dialog":[prompt,{"open":false}],"answer":[{"ok":true,"pressed":"No"}]}})).await;
+            let switching = connection.clone();
+            let watched = hands.clone();
+            tokio::task::spawn_local(async move {
+                while !watched.hands_calls.borrow().iter().any(|c| c[0] == "answer") {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+                switching.lost.set(true);
+                tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
+                switching.lost.set(false);
+            });
+            let result =
+                commands.live_command(&json!({"command":"new_set","save_current":"no"}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert!(!result.is_error, "{}", result.text);
+            let opened: Value = serde_json::from_str(&result.text).unwrap();
+            assert_eq!(opened["opened"], "a new Set");
+            assert!(opened["note"].as_str().unwrap().contains("References from before are gone"));
+            assert!(hands.hands_calls.borrow().iter().any(|c| c[0] == "answer" && c[1] == "No"));
+
+            // Unsaved changes and no word on them: the prompt comes back, for the producer to decide.
+            let (commands, hands, _) = set_file_harness(json!({"hands":{"menus":[menus],"dialog":[prompt]}})).await;
+            let result = commands.live_command(&json!({"command":"new_set"}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            let asked: Value = serde_json::from_str(&result.text).unwrap();
+            assert_eq!(asked["dialog"]["buttons"], json!(["Yes", "No", "Cancel"]));
+            assert!(asked["next"].as_str().unwrap().contains("ask the producer"));
+            assert!(!hands.hands_calls.borrow().iter().any(|c| c[0] == "answer"));
+
+            // Paths that can't work are refused before anything is pressed.
+            let (commands, hands, _) = set_file_harness(json!({"hands":{"menus":[menus]}})).await;
+            for (input, said) in [
+                (json!({"command":"open_set","path":folder.path().join("nowhere.als")}), "There's no Set at"),
+                (json!({"command":"save_as"}), "save_as needs path"),
+                (json!({"command":"save_as","path":"CHAOS 03.als"}), "path is a full path"),
+                (json!({"command":"save_as","path":folder.path().join("missing").join("x.als")}), "doesn't exist"),
+            ] {
+                let result = commands.live_command(input.as_object().unwrap(), Signal::new()).await.unwrap();
+                assert!(result.is_error && result.text.contains(said), "{input}: {}", result.text);
+            }
+            assert!(!hands.hands_calls.borrow().iter().any(|c| c[0] == "menu"));
+        })
+        .await;
 }

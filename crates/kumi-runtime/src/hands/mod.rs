@@ -113,6 +113,11 @@ pub trait Hands {
     async fn dialog(&self, signal: Option<Signal>) -> Result<Dialog, HandsError>;
     async fn answer(&self, button: &str, signal: Option<Signal>) -> Result<HandsReply, HandsError>;
     async fn windows(&self, signal: Option<Signal>) -> Result<Vec<Window>, HandsError>;
+    /// Fill the Save or Open dialog Live has open with `path`, and press its default button (Windows).
+    async fn file(&self, path: &str, signal: Option<Signal>) -> Result<HandsReply, HandsError> {
+        let _ = (path, signal);
+        Err(HandsError::new("Kumi can't fill Live's file dialogs here.", HandsErrorKind::Unavailable))
+    }
     fn close(&self);
 }
 pub type OnBuild = Rc<dyn Fn(&str)>;
@@ -361,6 +366,9 @@ impl Hands for Persistent {
     }
     async fn answer(&self, button: &str, signal: Option<Signal>) -> Result<HandsReply, HandsError> {
         Self::checked(self.ask("answer", json!({"button":button}), signal).await?)
+    }
+    async fn file(&self, path: &str, signal: Option<Signal>) -> Result<HandsReply, HandsError> {
+        Self::checked(self.ask("file", json!({"path":path}), signal).await?)
     }
     async fn windows(&self, signal: Option<Signal>) -> Result<Vec<Window>, HandsError> {
         let reply = Self::checked(self.ask("windows", json!({}), signal).await?)?;

@@ -51,6 +51,10 @@ pub fn find_item<'a>(items: &'a [MenuItem], titles: &[String]) -> Option<&'a Men
 }
 pub fn shortcut(item: &MenuItem) -> Option<String> {
     let key = item.key.as_ref().filter(|s| !s.is_empty())?;
+    // Windows' menus write their shortcut out ("Ctrl+N").
+    if item.modifiers.is_none() && key.chars().count() > 1 {
+        return Some(key.clone());
+    }
     let modifiers = item.modifiers.filter(|n| n.is_finite()).unwrap_or(0.0).trunc().rem_euclid(4294967296.0) as u32;
     Some(format!(
         "{}{}{}{}{key}",

@@ -24,7 +24,7 @@ use kumi_runtime::{
         store::{open_credential_store, Credential, CredentialStore},
     },
     core::errors::RuntimeError,
-    hands::{can_build_hands, open_hands, OpenHandsOptions},
+    hands::{can_build_hands, open_hands, HandsErrorKind, OpenHandsOptions},
     integrations::ableton::project::since,
     library::{
         learn::LearnPhase,
@@ -360,7 +360,25 @@ async fn extension_check(env: &Env, config: &str, server: &BridgeServer, live: &
 }
 async fn hands_check() -> Option<Check> {
     if system::platform() == "win32" {
-        return Some(Check::ok("Uses Live's own menus for what Live's scripting can't do (grouping, freezing, bouncing, saving)"));
+        // Read Live's menu bar as live_command does: it said "ok" while Live's menus were out of reach (#192).
+        let hands = open_hands(OpenHandsOptions { timeout_ms: Some(15_000), ..Default::default() }).await.ok().flatten()?;
+        let menus = hands.menus(None).await;
+        hands.close();
+        return Some(match menus {
+            Ok(items)
+                if ["File", "Edit", "Create"].iter().all(|top| items.iter().any(|item| item.path.first().is_some_and(|t| t == top))) =>
+            {
+                Check::ok("Uses Live's own menus for what Live's scripting can't do (grouping, freezing, bouncing, saving)")
+            }
+            Err(error) if error.kind == HandsErrorKind::NoLive => {
+                Check::ok("Uses Live's own menus for what Live's scripting can't do (checked once Live is open)")
+            }
+            Ok(_) => Check::fix(
+                "Kumi can't read Live's menus (grouping, freezing, bouncing, saving won't work)",
+                Some("Run kumi report and send it: Live's menu bar didn't have File, Edit and Create".into()),
+            ),
+            Err(error) => Check::fix(format!("Kumi can't use Live's menus: {error}"), Some("Run kumi report and send it".into())),
+        });
     }
     if system::platform() != "darwin" {
         return None;

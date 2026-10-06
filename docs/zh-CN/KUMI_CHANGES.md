@@ -84,7 +84,7 @@ Kumi 读取打开的工程，并做出你要求的修改。每项修改都以平
 | `delete_device`、`delete_clip`、`delete_scene`、`delete_track`、`delete_locator` | 删除操作，全部为 kept：Live 的撤销可以恢复它们 |
 | `clear_range` | 清除编曲视图中一条轨道上的一段，切开位于两端边缘的片段（需要扩展；kept） |
 | `set_clip_follow_actions`、`edit_rack_mapping` | 仅在 [Willington](WILLINGTON_INTEGRATION.md) 的绑定开启时（`/willington`）：Follow Actions；宏名称、映射、变体名称和链区域 |
-| `live_command` | Live 自己的、其脚本接口没有的命令：编组、冻结、平铺、并轨、合并、转换为 MIDI、分离音轨、切片、保存、导出（[指南](KUMI_GUIDE.md#live-自己的命令)；保留：用 Live 的撤销撤回） |
+| `live_command` | Live 自己的、其脚本接口没有的命令：编组、冻结、平铺、并轨、合并、转换为 MIDI、分离音轨、切片、保存、另存为、新建工程、打开工程、导出（[指南](KUMI_GUIDE.md#live-自己的命令)；保留：用 Live 的撤销撤回） |
 
 `make_changes` 可以在计划中运行以上任意工具，`undo_change` 撤销其中一项。
 

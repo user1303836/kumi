@@ -107,12 +107,14 @@ Live 不给脚本提供并轨（bounce）功能，所以 Kumi 通过重采样来
 
 有些事 Live 的脚本接口完全没有提供。对于这些，Kumi 会像你一样使用 Live 自己的菜单：编组和取消编组轨道；冻结、解冻和平铺（flatten）；不播放即可并轨（Bounce to New Track、Bounce Track in Place）；合并（Consolidate）；把音频转换成 MIDI（旋律、和声、鼓）；分离音轨（stems）；切片到 MIDI 轨道；保存工程，或收集全部并保存；导出音频或 MIDI 片段。
 
+Kumi 也通过 Live 的 File 菜单处理工程文件：按你给的名字和文件夹另存工程（Save Live Set As）、新建工程，或按文件打开一个工程。如果当前工程有未保存的改动，Live 会先询问；Kumi 按你说的保存或放弃，你没说时就问你。打开工程期间 Live 会暂时断开与 Kumi 的连接，而要求打开它的那个请求会在新工程里继续。Kumi 从不自己写 `.als` 文件。
+
 - Kumi 会选中命令要作用的对象，按下命令，并说明发生了什么变化。Live 打开对话框时（比如导出），Kumi 会读取并回答它。
 - 轨道是通过 Live 12 为屏幕阅读器提供的辅助功能按名称选中的。Live 保持原样：不会有任何窗口跳到前面，一条命令用不了一秒（并轨或冻结则取决于 Live 渲染所需的时间）。
 - 已经冻结的轨道不会被再次冻结：Live 的命令会把它撤回，所以 Kumi 会先检查。
 - 片段命令作用于 Session 中的片段，或你在 Live 中选中的片段。Kumi 目前还不能选中编曲视图中的片段。
 - HISTORY 会列出每条命令，Live 自己的撤销（Cmd-Z）可以撤回它。
-- **在 Mac 上**这使用辅助功能。第一次时 macOS 会询问：请在 系统设置 › 隐私与安全性 › 辅助功能 中打开运行 Kumi 的应用（你的终端）。`kumi doctor` 会告诉你它是否已打开。**在 Windows 上**它使用 UI 自动化，无需任何设置。
+- **在 Mac 上**这使用辅助功能。第一次时 macOS 会询问：请在 系统设置 › 隐私与安全性 › 辅助功能 中打开运行 Kumi 的应用（你的终端）。`kumi doctor` 会告诉你它是否已打开。**在 Windows 上**它通过 Windows 本身读取 Live 的菜单栏和对话框（选中轨道则用 UI 自动化），无需任何设置；`kumi doctor` 会检查它能否读取 Live 的菜单。在 Windows 上，Live 的确认对话框用 Yes、No、Cancel 代替 Mac 上的 Save 和 Don't Save：两种说法 Kumi 都接受。
 
 ## 聆听
 

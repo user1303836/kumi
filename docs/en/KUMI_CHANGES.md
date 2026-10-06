@@ -154,7 +154,7 @@ as few replies as it can.
 | `delete_device`, `delete_clip`, `delete_scene`, `delete_track`, `delete_locator` | Deletions, all kept: Live's undo brings them back |
 | `clear_range` | A stretch of one track in the Arrangement cleared, clips at its edges cut (needs the extension; kept) |
 | `set_clip_follow_actions`, `edit_rack_mapping` | With [Willington](WILLINGTON_INTEGRATION.md)'s bindings on (`/willington`): Follow Actions; macro names, mappings, variation names and chain zones |
-| `live_command` | Live's own commands its scripting lacks: group, freeze, flatten, bounce, consolidate, convert to MIDI, separate stems, slice, save, export ([the guide](KUMI_GUIDE.md#lives-own-commands); kept: Live's undo takes it back) |
+| `live_command` | Live's own commands its scripting lacks: group, freeze, flatten, bounce, consolidate, convert to MIDI, separate stems, slice, save, save as, new Set, open a Set, export ([the guide](KUMI_GUIDE.md#lives-own-commands); kept: Live's undo takes it back) |
 
 `make_changes` runs any of these in a plan, and `undo_change` undoes one.
 

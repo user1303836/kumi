@@ -257,6 +257,13 @@ Place); consolidating; converting audio to MIDI (melody, harmony, drums);
 separating stems; slicing to a MIDI track; saving the Set, or collecting all and
 saving; exporting audio or a MIDI clip.
 
+Kumi also works with Set files through Live's File menu: it saves the Set under
+a name and folder you give (Save Live Set As), starts a new Set, or opens one by
+its file. When the open Set has unsaved changes, Live asks first; Kumi saves or
+discards them as you said, and asks you when you didn't. Live drops Kumi for a
+moment while a Set opens, and the request that asked for it carries on in the
+new Set. Kumi never writes `.als` files itself.
+
 - Kumi selects what the command works on, presses it, and says what changed.
   When Live opens a dialog (Export, say), Kumi reads it and answers it.
 - Tracks are selected by name through the accessibility Live 12 offers screen
@@ -270,8 +277,11 @@ saving; exporting audio or a MIDI clip.
 - HISTORY lists each command, and Live's own undo (Cmd-Z) takes it back.
 - **On a Mac** this uses Accessibility. The first time, macOS asks: turn on the
   app Kumi runs in (your terminal) in System Settings › Privacy & Security ›
-  Accessibility. `kumi doctor` says whether it's on. **On Windows** it uses UI
-  Automation and needs nothing set up.
+  Accessibility. `kumi doctor` says whether it's on. **On Windows** it reads
+  Live's menu bar and dialogs through Windows itself (and selects tracks through
+  UI Automation), and needs nothing set up; `kumi doctor` checks it can read
+  Live's menus. On Windows, Live's prompts say Yes, No and Cancel where a Mac
+  says Save and Don't Save: Kumi takes either.
 
 ## Listening
 
