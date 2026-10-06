@@ -948,6 +948,11 @@ class AuthenticatedRemoteScript:
             return self._error(request["id"], "response contract failed")
         return self._response(request["id"], True, result=result)
 
+    @property
+    def authenticated(self) -> bool:
+        """Whether a request on this channel has passed its MAC check: who's on it is known."""
+        return self._last_sequence > 0
+
     def new_nonce(self) -> str:
         return secrets.token_urlsafe(18)
 
@@ -13271,6 +13276,11 @@ def _changes_live(request: Any) -> bool:
     if method == "invoke": return _mutation_authority_required(str(request.get("operation", "")))
     return method in {"preflight", "prepare", "mutate"}
 MAX_OUTBOUND_BYTES = 4 * MAX_WIRE_BYTES
+# Until a connection's first request passes its MAC check, anyone may be on it (any local process can
+# connect): it gets this much buffered in and out, and this long, before it's closed. Kumi's first
+# request is a status of a few hundred bytes, sent as soon as the hello arrives.
+MAX_UNAUTHENTICATED_BYTES = 64 * 1024
+AUTHENTICATION_SECONDS = 10.0
 # How much one socket read takes, and one send hands the socket.
 RECEIVE_CHUNK_BYTES = 1 << 20
 SEND_CHUNK_BYTES = 1 << 20
@@ -13282,7 +13292,7 @@ class _Connection:
     Buffers grow in place and are consumed by offset, compacted once per service: a big frame
     arriving (or leaving) in pieces is copied a bounded number of times, not once per piece."""
 
-    __slots__ = ("socket", "auth", "holder", "inbound", "scanned", "outbound", "sent", "closing")
+    __slots__ = ("socket", "auth", "holder", "inbound", "scanned", "outbound", "sent", "closing", "opened")
 
     def __init__(self, client: socket.socket, auth: "AuthenticatedRemoteScript", holder: dict[str, Any]) -> None:
         self.socket = client
@@ -13295,6 +13305,7 @@ class _Connection:
         # Bytes of outbound already handed to the socket.
         self.sent = 0
         self.closing = False
+        self.opened = time.monotonic()
 
     def pending_outbound(self) -> int:
         return len(self.outbound) - self.sent
@@ -13479,7 +13490,13 @@ class AbletonMcpBridge:
                     connection.outbound += self._frame(frame)
             inbound = connection.inbound
             while not connection.closing:
-                try: chunk = connection.socket.recv(RECEIVE_CHUNK_BYTES)
+                # Before it says who it is, a connection gets no more than a first request's worth read (once
+                # it's signed in, the tick's lingering serves what it sent behind that request).
+                size = RECEIVE_CHUNK_BYTES
+                if not connection.auth.authenticated:
+                    size = min(size, MAX_UNAUTHENTICATED_BYTES + 1 - len(inbound))
+                    if size <= 0: break
+                try: chunk = connection.socket.recv(size)
                 except (BlockingIOError, InterruptedError): break
                 if not chunk: connection.closing = True; break
                 inbound += chunk
@@ -13504,6 +13521,10 @@ class AbletonMcpBridge:
             if start: del inbound[:start]
             connection.scanned = max(0, search - start)
             if connection.auth.invalid: connection.closing = True
+            # Still unknown after what it sent was read: more than a first request waiting, answers it isn't
+            # reading, or too long to say who it is, and it's closed (its slot and buffers back).
+            if not connection.auth.authenticated and (len(inbound) > MAX_UNAUTHENTICATED_BYTES or connection.pending_outbound() > MAX_UNAUTHENTICATED_BYTES or time.monotonic() - connection.opened > AUTHENTICATION_SECONDS):
+                self._close(connection); return frames
             outbound = connection.outbound
             while connection.sent < len(outbound):
                 try: sent = connection.socket.send(outbound[connection.sent:connection.sent + SEND_CHUNK_BYTES])

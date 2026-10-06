@@ -7102,6 +7102,8 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
 class LargeFrameTransportTests(_BridgeSocketFixture, unittest.TestCase):
     def test_a_big_frame_arriving_in_pieces_is_scanned_once_and_answered(self):
         client, channel = self.connect()
+        # Signed in first: before that, a connection gets no more than a first request's worth read.
+        client.sendall(self.frame(channel, 1)); self.assertTrue(self.read_lines(client, 1)[0]["ok"])
         connection = self.bridge._connections[0]
         body = b"x" * (8 * 1024 * 1024)
         for offset in range(0, len(body), 256 * 1024):
@@ -7111,7 +7113,7 @@ class LargeFrameTransportTests(_BridgeSocketFixture, unittest.TestCase):
         while len(connection.inbound) < len(body) and time.time() < deadline: self.bridge.update_display()
         # Everything that came is searched once: the next piece is searched from where this one ended.
         self.assertEqual(len(connection.inbound), len(body)); self.assertEqual(connection.scanned, len(body))
-        client.sendall(b"\n" + self.frame(channel, 1))
+        client.sendall(b"\n" + self.frame(channel, 2))
         malformed, answered = self.read_lines(client, 2)
         self.assertEqual(malformed["error"], "malformed request"); self.assertTrue(answered["ok"])
         self.assertEqual((len(connection.inbound), connection.scanned), (0, 0))
@@ -7161,10 +7163,59 @@ class HostileLineTests(_BridgeSocketFixture, unittest.TestCase):
 
     def test_blank_lines_count_toward_the_ticks_budget(self):
         client, channel = self.connect(); connection = self.bridge._connections[0]
-        client.sendall(b"\n" * 200_000 + self.frame(channel, 1)); time.sleep(0.05)
+        client.sendall(self.frame(channel, 1)); self.assertTrue(self.read_lines(client, 1)[0]["ok"])
+        client.sendall(b"\n" * 200_000 + self.frame(channel, 2)); time.sleep(0.05)
         self.bridge._pump(0.0)
         self.assertGreater(len(connection.inbound), 100_000, "a spent budget stops after the first line, blank or not")
         self.assertTrue(self.read_lines(client, 1)[0]["ok"], "the request after them is answered over the next ticks")
+
+    def closed(self, client, seconds=5.0):
+        """Tick until the bridge closes client's connection (its socket reads end of file)."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            self.bridge.update_display()
+            if select_module.select([client], [], [], 0.001)[0]:
+                try:
+                    if not client.recv(1 << 20): return True
+                except ConnectionResetError: return True
+        return False
+
+    def test_before_it_signs_in_a_connection_gets_a_first_requests_worth_read(self):
+        hostile, _ = self.connect(); connection = self.bridge._connections[0]; client, channel = self.connect()
+        def flood():
+            try: hostile.sendall(b"x" * (4 * 1024 * 1024))
+            except OSError: pass
+        sender = threading.Thread(target=flood, daemon=True); sender.start()
+        most = 0; deadline = time.monotonic() + 5
+        while connection in self.bridge._connections and time.monotonic() < deadline:
+            self.bridge.update_display(); most = max(most, len(connection.inbound))
+        self.assertNotIn(connection, self.bridge._connections, "a first line past the cap is closed")
+        self.assertLessEqual(most, remote_module.MAX_UNAUTHENTICATED_BYTES + 1, "and no more than that was read")
+        hostile.close(); sender.join(timeout=5)
+        client.sendall(self.frame(channel, 1)); self.assertTrue(self.read_lines(client, 1)[0]["ok"])
+
+    def test_answers_an_unknown_connection_isnt_reading_close_it(self):
+        hostile, _ = self.connect()
+        hostile.sendall(b"{}\n" * 4000)
+        self.assertTrue(self.closed(hostile))
+
+    def test_a_connection_that_never_signs_in_is_closed_after_a_while(self):
+        idle, _ = self.connect(); client, channel = self.connect()
+        client.sendall(self.frame(channel, 1)); self.assertTrue(self.read_lines(client, 1)[0]["ok"])
+        with patch.object(remote_module, "AUTHENTICATION_SECONDS", 0.05):
+            self.assertTrue(self.closed(idle))
+            for _ in range(20): self.bridge.update_display()
+        self.assertEqual(len(self.bridge._connections), 1, "the signed-in one stays, however quiet")
+        client.sendall(self.frame(channel, 2)); self.assertTrue(self.read_lines(client, 1)[0]["ok"])
+
+    def test_requests_sent_right_behind_the_first_are_read_once_it_signs_in(self):
+        # Kumi's first request is a status, but others may follow it before its answer comes.
+        client, channel = self.connect()
+        big = self.frame(channel, 2, method="invoke", operation="browser.search", args={"query": "x" * 300_000})
+        client.sendall(self.frame(channel, 1) + big + self.frame(channel, 3))
+        answers = self.read_lines(client, 3)
+        self.assertEqual([answer["id"] for answer in answers], ["status-1", "invoke-2", "status-3"])
+        self.assertTrue(answers[0]["ok"] and answers[2]["ok"])
 
 
 def rich_song(links=True, playing=True, tracks=6):
