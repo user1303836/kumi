@@ -97,8 +97,9 @@ pub async fn before(
         }
         _ => return None,
     };
-    // A clip too big to make again in one call to Live (its notes aside) stays Live's to undo.
-    let clips = capture(history, read, signal.clone()).await.filter(|clips| !clips.is_empty() && clips.iter().all(Captured::fits))?;
+    // A clip Kumi's undo can't make again (drawn out past its file, or too big for one call to Live, its notes aside)
+    // leaves the change to Live's undo.
+    let clips = capture(history, read, signal.clone()).await.filter(|clips| !clips.is_empty() && clips.iter().all(Captured::makeable))?;
     Some(Cut { anchor, clips, host_undo })
 }
 

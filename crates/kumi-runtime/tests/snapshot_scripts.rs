@@ -18,7 +18,7 @@ fn clips_are_captured_and_made_again_in_a_fake_live() {
     let output = child.wait_with_output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let scenarios: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(scenarios.len(), 11, "{scenarios:?}");
+    assert_eq!(scenarios.len(), 13, "{scenarios:?}");
     for scenario in &scenarios {
         assert_eq!(scenario["problems"], json!([]), "{}", scenario["scenario"]);
     }
@@ -32,5 +32,5 @@ fn the_script_carries_its_args_as_live_python_reads_them() {
     assert!(code.contains(r#"\"op\":\"capture\""#));
     assert!(code.ends_with(include_str!("../src/integrations/ableton/assets/snapshots.py")));
     // Within what python.run takes, with room for notes.
-    assert!(code.len() < 24 * 1024, "{}", code.len());
+    assert!(code.len() < 28 * 1024, "{}", code.len());
 }

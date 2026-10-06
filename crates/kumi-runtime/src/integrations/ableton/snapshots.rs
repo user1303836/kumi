@@ -49,6 +49,8 @@ const CHECKS: &[&str] = &[
     "isn't in the Set any more",
     "its track takes",
     "is frozen",
+    "isn't the track it was",
+    "again at its length",
 ];
 
 pub fn script(args: &Value) -> String {
@@ -77,6 +79,9 @@ pub struct Captured {
     pub hash: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes_hash: Option<String>,
+    /// A looping audio clip drawn out past its file: Live can't make one that long again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub over_file: bool,
 }
 impl Captured {
     pub fn name(&self) -> String {
@@ -98,6 +103,11 @@ impl Captured {
                 _ => "its automation",
             })
             .collect()
+    }
+    /// Whether Kumi's undo can make it again: Live can make it at its length, and it fits one call, its notes aside
+    /// (they can follow in more).
+    pub fn makeable(&self) -> bool {
+        !self.over_file && self.fits()
     }
     /// Whether it fits one call to make it again, its notes aside (they can follow in more).
     pub fn fits(&self) -> bool {
@@ -243,7 +253,7 @@ pub async fn capture(history: &History, mut args: Value, signal: Signal) -> Opti
 
 /// Check that `material`'s clips can be made again (the remnants as the change left them, each place free, each file
 /// there, the track as it was), changing nothing: Err is why not, in Live's words where it said.
-pub async fn check(history: &History, material: &Material, leaves: &[Rc<Value>], signal: Signal) -> Result<(), String> {
+pub async fn check(history: &History, material: &Material, leaves: &[Rc<Value>], bound: &dyn Fn() -> Signal) -> Result<(), String> {
     let mut base = material.track_args("restore");
     base["remnants"] = json!(material.remnants);
     base["leaving"] = json!(material.leaving);
@@ -264,7 +274,7 @@ pub async fn check(history: &History, material: &Material, leaves: &[Rc<Value>],
     for chunk in packed(&base, "clips", clips) {
         let mut args = base.clone();
         args["clips"] = json!(chunk);
-        match call(history, &args, signal.clone()).await {
+        match call(history, &args, bound()).await {
             Said::Done(_) => {}
             Said::Refused(why) | Said::Failed(why) => return Err(why),
         }
@@ -296,8 +306,14 @@ fn packed(base: &Value, field: &str, items: Vec<Value>) -> Vec<Vec<Value>> {
 }
 
 /// Make `material`'s clips again from their kept leaves (in its order), once `check` passed. The remnants go first;
-/// a clip whose notes don't fit its call takes the rest in more, the last of which checks every note is in.
-pub async fn restore(history: &History, material: &Material, leaves: &[Rc<Value>], signal: Signal) -> Result<Restored, Stopped> {
+/// a clip whose notes don't fit its call takes the rest in more, the last of which checks every note is in. Each call
+/// waits for Live as long as a fresh `bound` lets it.
+pub async fn restore(
+    history: &History,
+    material: &Material,
+    leaves: &[Rc<Value>],
+    bound: &dyn Fn() -> Signal,
+) -> Result<Restored, Stopped> {
     let mut done = Restored::default();
     let mut remnants = Some(&material.remnants);
     let mut clips: VecDeque<(&KeptClip, Value)> =
@@ -345,7 +361,7 @@ pub async fn restore(history: &History, material: &Material, leaves: &[Rc<Value>
             break;
         }
         args["clips"] = json!(call_clips);
-        let answer = match call(history, &args, signal.clone()).await {
+        let answer = match call(history, &args, bound()).await {
             Said::Done(answer) => answer,
             // The script's checks run first in every call: nothing of this call changed.
             Said::Refused(why) if !done.changed() => return Err(Stopped::Nothing(why)),
@@ -361,7 +377,7 @@ pub async fn restore(history: &History, material: &Material, leaves: &[Rc<Value>
             if rest.is_empty() {
                 continue;
             }
-            if let Err(why) = more_notes(history, material, clip, rest, hash, signal.clone(), &mut done).await {
+            if let Err(why) = more_notes(history, material, clip, rest, hash, bound, &mut done).await {
                 return Err(Stopped::Partway(why, done));
             }
         }
@@ -376,7 +392,7 @@ async fn more_notes(
     made: &Value,
     notes: Vec<Value>,
     hash: Option<String>,
-    signal: Signal,
+    bound: &dyn Fn() -> Signal,
     done: &mut Restored,
 ) -> Result<(), String> {
     let mut base = material.track_args("notes");
@@ -390,7 +406,7 @@ async fn more_notes(
         if index + 1 < count {
             args["notesHash"] = Value::Null;
         }
-        match call(history, &args, signal.clone()).await {
+        match call(history, &args, bound()).await {
             Said::Done(answer) if answer["exact"] == json!(false) => {
                 done.partial.push(json!({"name":made["name"],"missing":["its notes"]}));
             }
@@ -438,7 +454,13 @@ fn in_words(error: &str) -> String {
     } else {
         let said =
             error.split(": ").skip_while(|part| part.ends_with("Error") || part.ends_with("Exception")).collect::<Vec<_>>().join(": ");
-        format!("Live said: {}", if said.is_empty() { error } else { &said })
+        let said = if said.is_empty() { error.to_owned() } else { said };
+        // The script's own sentences say what happened already.
+        if said.starts_with("Live ") {
+            said
+        } else {
+            format!("Live said: {said}")
+        }
     }
 }
 
@@ -472,6 +494,13 @@ impl SetHistory {
     pub async fn kept_leaf(&self, hash: &str, store: Option<&Rc<dyn ProjectStore>>, current: Option<&CurrentProject>) -> Option<Rc<Value>> {
         if let Some(leaf) = self.leaf(hash) {
             return Some(leaf);
+        }
+        // An unsaved Set's, waiting to be written.
+        let waiting = self.pending.borrow().as_ref().and_then(|(_, rows, _)| {
+            rows.iter().flat_map(|(objects, _)| objects).find(|object| object.hash == hash).map(|object| object.raw.clone())
+        });
+        if let Some(raw) = waiting {
+            return serde_json::from_str(&raw).ok().map(Rc::new);
         }
         let project = current?.project.clone()?;
         let open = self.writes.open.borrow().as_ref().filter(|(open, _)| *open == project).map(|(_, store)| store.clone());
@@ -629,6 +658,26 @@ mod tests {
         }
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_unsaved_sets_leaf_is_read_from_its_queue_once_memory_let_it_go() {
+        let history = SetHistory::default();
+        let current = CurrentProject { identity: "set".into(), path: None, name: "Set".into(), project: None, unsaved: true };
+        let clip = Captured {
+            identity: "live:1".into(),
+            track: "live:2".into(),
+            track_name: "Keys".into(),
+            track_id: None,
+            place: json!({"start":0.0,"end":4.0}),
+            leaf: json!({"kind":"midi","name":"Verse","notes":[[60, 0, 1, 100]]}),
+            hash: "h".into(),
+            notes_hash: None,
+            over_file: false,
+        };
+        let hash = history.keep(None, Some(&current), &[clip], "Deleted", json!({}), 1).remove(0);
+        history.leaves.borrow_mut().clear();
+        assert_eq!(history.kept_leaf(&hash, None, Some(&current)).await.unwrap()["name"], "Verse");
+    }
+
     #[test]
     fn memory_keeps_the_newest_leaves_by_their_bytes() {
         let history = SetHistory::default();
@@ -642,6 +691,7 @@ mod tests {
             leaf: json!({"kind":"midi","name":name,"notes":vec![[60, 0, 1, 100]; 20_000]}),
             hash: "h".into(),
             notes_hash: None,
+            over_file: false,
         };
         let mut kept = vec![];
         for n in 0..300 {

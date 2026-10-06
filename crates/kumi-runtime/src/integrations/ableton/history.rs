@@ -28,7 +28,7 @@ use std::{
     rc::Rc,
 };
 
-/// The most each call of Kumi's undo of a cut waits for Live.
+/// The most each call to Live of Kumi's undo of a cut waits.
 const RESTORE_MS: u64 = 30_000;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -518,8 +518,8 @@ impl History {
             )));
         }
         let bound = || abort::any([self.connection.lifetime.clone(), abort::timeout(RESTORE_MS)]);
-        if let Err(why) = snapshots::check(self, &material, &leaves, bound()).await {
-            return Ok(self.refused(entry, &names, &why));
+        if let Err(why) = snapshots::check(self, &material, &leaves, &bound).await {
+            return Ok(self.refused(entry, &material, &names, &why));
         }
         // What the track holds before: a rollback is only ever made back to it.
         let before = snapshots::state(self, &material, bound()).await;
@@ -534,7 +534,7 @@ impl History {
                     return Ok(Err(stopped));
                 }
             }
-            Ok::<_, RuntimeError>(Ok(snapshots::restore(self, &material, &leaves, bound()).await))
+            Ok::<_, RuntimeError>(Ok(snapshots::restore(self, &material, &leaves, &bound).await))
         }
         .await;
         self.close_undo_step(Some(step)).await;
@@ -552,7 +552,7 @@ impl History {
                 }
                 UndoResult::with(record, stringify(&text), false)
             }
-            Ok(Err(snapshots::Stopped::Nothing(why))) if !material.host_undo => self.refused(entry, &names, &why),
+            Ok(Err(snapshots::Stopped::Nothing(why))) if !material.host_undo => self.refused(entry, &material, &names, &why),
             Ok(Err(stopped)) => self.roll_back(entry, &material, &names, before, stopped, bound).await,
         })
     }
@@ -563,9 +563,18 @@ impl History {
         UndoResult::with(self.update(entry, ChangeState::Kept, Some(note.clone())), note, true)
     }
     /// A restore's checks refused, so nothing changed. What the producer can clear (a clip in the way, a file moved, a
-    /// frozen track) leaves the change for Kumi's undo once they have; anything else leaves it to Live's.
-    fn refused(&self, entry: &Rc<RefCell<Applied>>, names: &str, why: &str) -> UndoResult {
-        let fix = if why.contains("'s place now") {
+    /// frozen or renamed track) leaves the change for Kumi's undo once they have; anything else leaves it to Live's.
+    fn refused(&self, entry: &Rc<RefCell<Applied>>, material: &Material, names: &str, why: &str) -> UndoResult {
+        if why.contains("again at its length") {
+            // Its clips were made aside and deleted: Live's history keeps that empty step of Kumi's.
+            let note = format!(
+                "Kumi can't bring back {names}: {why}. It left the change as it is; Live's own undo can take it back: press Cmd-Z in Live twice (Kumi's try left an empty step first)."
+            );
+            return UndoResult::with(self.update(entry, ChangeState::Kept, Some(note.clone())), note, true);
+        }
+        let fix = if why.contains("isn't the track it was") {
+            Some(format!("Name it \u{201c}{}\u{201d} again, then undo again.", material.track_name))
+        } else if why.contains("'s place now") {
             why.find('\u{201d}').map(|end| format!("Move or delete {}, then undo again.", &why[..end + '\u{201d}'.len_utf8()]))
         } else if why.contains("'s slot now") {
             Some("Move or delete the clip in its slot, then undo again.".to_owned())
@@ -584,9 +593,11 @@ impl History {
             None => self.left(entry, names, why),
         }
     }
-    /// Kumi's undo stopped partway. Its step is closed by now, so one Live undo takes all of it back, but only if what
-    /// the track holds shows Kumi's step changed it, which makes it Live's last. And it has to be back as it was before
-    /// after that. Otherwise Kumi doesn't touch Live's undo, and says what the producer can do.
+    /// Kumi's undo stopped partway, its step closed by now. One Live undo takes all of the step back: made right away
+    /// when Kumi knows its step changed something (its answer says what it removed or made, or the change's own undo
+    /// ran), or else once the track shows it changed. Then the track has to be back as it was before. If the producer
+    /// changed something in Live in that moment, Live's last step is theirs and the track isn't back: Kumi says so.
+    /// Without what the track held before, Kumi doesn't touch Live's undo, and says what the producer can do.
     async fn roll_back(
         &self,
         entry: &Rc<RefCell<Applied>>,
@@ -596,12 +607,12 @@ impl History {
         stopped: snapshots::Stopped,
         bound: impl Fn() -> Signal,
     ) -> UndoResult {
-        let why = match stopped {
-            snapshots::Stopped::Nothing(why) | snapshots::Stopped::Partway(why, _) => why,
+        let (why, known) = match stopped {
+            snapshots::Stopped::Nothing(why) => (why, material.host_undo),
+            snapshots::Stopped::Partway(why, done) => (why, material.host_undo || done.changed()),
         };
-        let now = snapshots::state(self, material, bound()).await;
-        if let (Some(before), Some(now)) = (&before, &now) {
-            if before == now && !material.host_undo {
+        if let Some(before) = &before {
+            if !known && snapshots::state(self, material, bound()).await.as_ref() == Some(before) {
                 let record = entry.borrow().record.clone();
                 return UndoResult::with(
                     record,
@@ -609,7 +620,7 @@ impl History {
                     true,
                 );
             }
-            if before != now && self.live_undo_once(bound()).await {
+            if self.live_undo_once(bound()).await {
                 if snapshots::state(self, material, bound()).await.as_ref() == Some(before) {
                     if material.host_undo {
                         // The change's own undo went with it, and the bridge counts it done: only Live's undo is left.
@@ -623,7 +634,7 @@ impl History {
                         true,
                     );
                 }
-                let note = format!("Kumi's undo didn't finish ({why}), and taking it back didn't leave things as they were: check Live, where Cmd-Z and Shift-Cmd-Z step through it.");
+                let note = format!("Kumi's undo didn't finish ({why}), and taking it back didn't leave things as they were: something else may have changed in Live meanwhile. Check Live, where Cmd-Z and Shift-Cmd-Z step through it.");
                 return UndoResult::with(self.update(entry, ChangeState::Unsure, Some(note.clone())), note, true);
             }
         }

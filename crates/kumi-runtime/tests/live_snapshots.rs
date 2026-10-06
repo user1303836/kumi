@@ -485,19 +485,13 @@ async fn a_move_that_replaces_part_of_a_clip_is_moved_back_and_that_clip_made_wh
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn an_undo_live_stops_partway_is_taken_back_in_one_live_undo_when_its_lives_last() {
+async fn an_undo_live_stops_partway_is_taken_back_with_one_live_undo_right_after_its_step() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            // The track as it was, then with the pieces gone, then as it was again after Live's undo.
-            let reads = Rc::new(Cell::new(0));
-            let count = reads.clone();
+            // Kumi's answer says it removed a piece before Live stopped: its step changed the Set.
             let python: Python = Rc::new(move |args| match args["op"].as_str() {
                 Some("restore") if args["check"] != true => {
                     Some(json!({"removed":["Verse"],"made":[],"partial":[],"error":"RuntimeError: Live refused"}))
-                }
-                Some("state") => {
-                    count.set(count.get() + 1);
-                    Some(if count.get() == 2 { held("") } else { held("Verse") })
                 }
                 _ => None,
             });
@@ -507,12 +501,12 @@ async fn an_undo_live_stops_partway_is_taken_back_in_one_live_undo_when_its_live
             assert!(is_error);
             assert_eq!(
                 text,
-                "Kumi's undo didn't finish (Live said: Live refused), so it took back what it did: the change is as it was. Undo again, or Live's own undo (Cmd-Z in Live) can take it back."
+                "Kumi's undo didn't finish (Live refused), so it took back what it did: the change is as it was. Undo again, or Live's own undo (Cmd-Z in Live) can take it back."
             );
             assert_eq!(live.state(), ChangeState::Applied);
-            // The step closed, the state read, Live's undo once, and the state read again.
+            // Live's undo once, right after the step closed, then the track read: back as it was.
             let tail = after_apply(&live, "live_clip_delete_apply");
-            assert_eq!(tail[tail.len() - 4..], ["live_undo_step_end", "python state", "live_song_undo", "python state"]);
+            assert_eq!(tail[tail.len() - 3..], ["live_undo_step_end", "live_song_undo", "python state"]);
         })
         .await;
 }
@@ -553,7 +547,9 @@ async fn an_undo_live_stops_partway_is_left_to_the_producer_when_kumi_cant_tell(
             two.change("delete_clip", json!({"clipRef":VERSE})).await;
             let (text, _) = two.undo().await;
             assert!(
-                text.ends_with("taking it back didn't leave things as they were: check Live, where Cmd-Z and Shift-Cmd-Z step through it."),
+                text.ends_with(
+                    "something else may have changed in Live meanwhile. Check Live, where Cmd-Z and Shift-Cmd-Z step through it."
+                ),
                 "{text}"
             );
             assert_eq!(two.state(), ChangeState::Unsure);
@@ -663,4 +659,76 @@ fn a_clip_too_big_for_one_call_stays_lives_to_undo() {
     assert!(big.fits());
     big.leaf["warpMarkers"] = json!(vec![json!([1.0, 0.5]); 10_000]);
     assert!(!big.fits());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_undo_live_stops_without_saying_what_it_did_is_left_alone_when_nothing_changed() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Live stopped the call with no answer of Kumi's: the track, read again, is as it was.
+            let python: Python =
+                Rc::new(|args| (args["op"] == "restore" && args["check"] != true).then(|| json!({"raise":"RuntimeError: boom"})));
+            let live = live(TOOLS, bridge_reply(python), None).await;
+            live.change("delete_clip", json!({"clipRef":VERSE})).await;
+            let (text, _) = live.undo().await;
+            assert_eq!(
+                text,
+                "Kumi couldn't bring back \u{201c}Verse\u{201d} (Live said: boom); nothing changed. Undo again, or Live's own undo (Cmd-Z in Live) can take it back."
+            );
+            assert_eq!(live.state(), ChangeState::Applied);
+            let tail = after_apply(&live, "live_clip_delete_apply");
+            assert_eq!(tail[tail.len() - 2..], ["live_undo_step_end", "python state"]);
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_clip_live_cant_make_at_its_length_leaves_the_change_to_lives_undo() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Drawn out past its file, seen at capture: the change stays Live's to undo, as before.
+            let mut long = verse();
+            long["overFile"] = json!(true);
+            let python: Python = Rc::new(move |args| (args["op"] == "capture").then(|| json!({"clips":[long]})));
+            let one = live(TOOLS, bridge_reply(python), None).await;
+            let (text, _) = one.change("delete_clip", json!({"clipRef":VERSE})).await;
+            assert_eq!(one.state(), ChangeState::Kept, "{text}");
+            let answer: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(answer["live"]["kept"], "Kumi can't bring this back; Live's undo can.");
+            // Found only when the stand-in comes up short: refused before anything in the Set changed.
+            let python: Python = Rc::new(|args| {
+                (args["op"] == "restore" && args["check"] != true)
+                    .then(|| json!({"raise":"Live can't make \u{201c}Verse\u{201d} again at its length: the clip is longer than its file"}))
+            });
+            let two = live(TOOLS, bridge_reply(python), None).await;
+            two.change("delete_clip", json!({"clipRef":VERSE})).await;
+            let (text, is_error) = two.undo().await;
+            assert!(is_error);
+            assert_eq!(
+                text,
+                "Kumi can't bring back \u{201c}Verse\u{201d}: Live can't make \u{201c}Verse\u{201d} again at its length: the clip is longer than its file. It left the change as it is; Live's own undo can take it back: press Cmd-Z in Live twice (Kumi's try left an empty step first)."
+            );
+            assert_eq!(two.state(), ChangeState::Kept);
+            assert!(!two.calls().contains(&"live_song_undo".to_owned()), "Kumi's empty step stays in Live's history");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_renamed_track_says_how_to_clear_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let python: Python = Rc::new(|args| {
+                (args["check"] == true).then(|| json!({"raise":"\u{201c}Pad\u{201d} isn't the track it was (renamed, or another in its place)"}))
+            });
+            let live = live(TOOLS, bridge_reply(python), None).await;
+            live.change("delete_clip", json!({"clipRef":VERSE})).await;
+            let (text, _) = live.undo().await;
+            assert_eq!(
+                text,
+                "Kumi can't bring back \u{201c}Verse\u{201d} yet: \u{201c}Pad\u{201d} isn't the track it was (renamed, or another in its place). Name it \u{201c}Keys\u{201d} again, then undo again."
+            );
+            assert_eq!(live.state(), ChangeState::Applied);
+        })
+        .await;
 }

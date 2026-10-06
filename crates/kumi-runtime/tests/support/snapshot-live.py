@@ -94,7 +94,7 @@ class Clip:
         if audio:
             self.file_path, self.warping, self.warp_mode, self.gain = file_path, True, 0, 0.4
             self.pitch_coarse, self.pitch_fine, self.ram_mode = 0, 0.0, False
-            self.warp_markers = [WarpMarker(0.0, 0.0), WarpMarker(16.0, 32.0)]
+            self.warp_markers = [WarpMarker(0.0, 0.0), WarpMarker(length / 2.0, length)]
     @property
     def length(self):
         if self.is_arrangement_clip:
@@ -336,9 +336,12 @@ def scenario_an_audio_clip_comes_back_without_cutting_its_neighbours(fail):
     long.end_time = 264.0
     kept = run(song, {"r:long": long}, {"op": "capture", "clips": ["r:long"]})["clips"]
     vox.delete_clip(long)
-    done = run(song, {}, restore_args(kept))
-    if "at its length" not in done.get("error", "") or done["made"] or [name for name, _, _ in spans(vox)] != ["Take", "Take 2", "Loop", "After"]:
-        fail("a clip too long to make: %r %r" % (done, spans(vox)))
+    try:
+        run(song, {}, restore_args(kept)); fail("a clip too long to make was made")
+    except ValueError as error:
+        if "Live can't make “Long” again at its length" not in str(error): fail("too long: %s" % error)
+    if [name for name, _, _ in spans(vox)] != ["Take", "Take 2", "Loop", "After"]:
+        fail("a clip too long to make: %r" % spans(vox))
     os.unlink(sample)
 
 def scenario_a_session_clips_automation_groove_and_follow_actions_come_back(fail):
@@ -461,7 +464,7 @@ def scenario_nothing_changes_when_a_check_fails(fail):
     refused(args, "“Keys” is frozen", "a frozen track")
     keys.is_frozen = False
     keys.name = "Pad"
-    refused(args, "its track isn't in the Set any more", "another track")
+    refused(args, "“Pad” isn't the track it was (renamed, or another in its place)", "a renamed track with no id")
     keys.name = "Keys"
     if [clip.name for clip in keys.arrangement_clips] != ["Verse"]: fail("something changed: %r" % layout(keys))
     # An audio clip whose file has gone, and a clip of the other kind than its track.
@@ -473,6 +476,52 @@ def scenario_nothing_changes_when_a_check_fails(fail):
     refused(dict(restore_args([kept_take]), clips=[{"where": {"start": 40.0, "end": 44.0}, "leaf": kept["leaf"]}]),
             "“Verse” is a MIDI clip, and its track takes audio now", "the other kind")
     if vox.arrangement_clips: fail("audio track changed")
+
+def scenario_the_track_is_known_by_kumis_id(fail):
+    keys = Track("Keys"); song = make_song(keys); keys.data["kumi.track"] = "01J9KEYS"
+    verse = midi_clip(keys, "Verse", 0.0, 4.0, [note(60, 0.0)])
+    kept = run(song, {"r:verse": verse}, {"op": "capture", "clips": ["r:verse"]})["clips"]
+    keys.delete_clip(verse)
+    # Renamed since, with its id: the same track.
+    keys.name = "Lead"
+    done = run(song, {}, restore_args(kept))
+    if "error" in done or [name for name, _, _ in spans(keys)] != ["Verse"]:
+        fail("renamed, with its id: %r" % done)
+    keys.delete_clip(keys.arrangement_clips[0])
+    # Another track at its address, its name and another id: refused.
+    keys.name, keys.data["kumi.track"] = "Keys", "01J9OTHER"
+    try:
+        run(song, {}, restore_args(kept)); fail("another track was used")
+    except ValueError as error:
+        if "its track isn't in the Set any more" not in str(error): fail("another id: %s" % error)
+
+def scenario_a_clip_longer_than_its_file_is_refused_before_anything_changes(fail):
+    # An 8-beat file looped over 32 beats: Live makes it 8 beats long, and nothing lengthens it.
+    vox = Track("Vox", midi=False); song = make_song(vox)
+    sample = audio_file(8.0)
+    loop = audio_clip(vox, "Loop", sample, 0.0); loop.end_time = 32.0
+    kept = run(song, {"r:loop": loop}, {"op": "capture", "clips": ["r:loop"]})["clips"]
+    if not kept[0].get("overFile"):
+        fail("not flagged at capture: %r" % kept[0])
+    def refused(args, what):
+        try:
+            run(song, {}, args); fail("%s was made short" % what)
+        except ValueError as error:
+            if "Live can't make “Loop” again at its length: the clip is longer than its file" not in str(error): fail("%s: %s" % (what, error))
+    # Deleted: refused, with nothing made and nothing left aside.
+    vox.delete_clip(loop)
+    refused(restore_args(kept), "deleted")
+    if vox.arrangement_clips: fail("something left: %r" % spans(vox))
+    # Cleared over 8 to 16: refused before its pieces go.
+    loop = audio_clip(vox, "Loop", sample, 0.0); loop.end_time = 32.0
+    whole = run(song, {"r:vox": vox}, {"op": "capture", "track": "r:vox", "from": 8.0, "to": 16.0})["clips"]
+    right = loop.copy(vox, 16.0, 32.0); right.start_marker = 16.0
+    loop.end_time = 8.0; vox.arrangement_clips.append(right)
+    pieces = run(song, {"r:vox": vox}, {"op": "capture", "track": "r:vox", "from": 0.0, "to": 32.0, "except": []})["clips"]
+    refused(restore_args(whole, remnants=[{"identity": r["identity"], "hash": r["hash"], "name": "Loop"} for r in pieces]), "cleared")
+    if spans(vox) != [("Loop", 0.0, 8.0), ("Loop", 16.0, 32.0)]:
+        fail("the pieces: %r" % spans(vox))
+    os.unlink(sample)
 
 def scenario_a_session_clip_goes_back_to_its_scene(fail):
     keys = Track("Keys"); song = make_song(keys)

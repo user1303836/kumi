@@ -5,9 +5,11 @@
 #   out}). Each comes with its identity, its track's (with the track's name and Kumi's id for it), its place (with its
 #   scene's identity, for a Session clip), what it is (its leaf: settings and every note field, or its file, warping
 #   and markers; its groove; a Session clip's automation and follow actions) and a hash of that, which a restore checks
-#   before deleting anything, and of its notes.
+#   before deleting anything, and of its notes. overFile: a looping audio clip drawn out past its file, which Live can't
+#   make again.
 # - "restore": {"track", "trackName", "trackId", "remnants": [{"identity", "hash", "name"}], "leaving": identities,
-#   "clips": [{"where", "leaf", "notesToCome"}], "check"}: every check first (nothing changes when one fails); then the
+#   "clips": [{"where", "leaf", "notesToCome"}], "check"}: every check first (nothing changes when one fails); then
+#   Arrangement audio clips are made aside at their length (one Live can't make that long refuses here); then the
 #   remnants (the pieces Live left) go, and each clip is made again whole. Leaving: clips the change's own undo takes
 #   away first, so not in a clip's way. With check, only the checks. What Live won't set back exactly is named in
 #   partial. A failure once something changed is answered with how far it got ("error", "removed", "made").
@@ -148,11 +150,21 @@ def track_of(track):
         out["trackId"] = kumi_id(track)
     return out
 
+def over_file(clip):
+    """Whether a looping, warped Arrangement audio clip is drawn out past its file's length in beats (its first warp
+    marker to its last): Live can't make one that long again."""
+    if not (clip.is_arrangement_clip and clip.is_audio_clip and clip.looping and clip.warping):
+        return False
+    beats = [float(marker.beat_time) for marker in clip.warp_markers]
+    return len(beats) > 1 and clip.end_time - clip.start_time > max(beats) - min(beats) + 1e-6
+
 def row(clip):
     kept = leaf(clip)
     out = dict(track_of(owner(clip)), identity=identity(clip), where=place(clip), leaf=kept, hash=digest(kept))
     if "notes" in kept:
         out["notesHash"] = digest(kept["notes"])
+    if over_file(clip):
+        out["overFile"] = True
     return out
 
 def capture(args):
@@ -165,14 +177,14 @@ def capture(args):
                 if identity(clip) not in left_out and clip.start_time < high - 1e-6 and clip.end_time > low + 1e-6])
 
 def find_track(args):
-    """The track by its identity, still the track it was: Kumi's id for it, or else its name, says so (Live can give
-    a new track a deleted one's address)."""
+    """The track by its identity, still the track it was (Live can give a new track a deleted one's address): Kumi's
+    id for it says so, or, when it had none, its name."""
     for track in song.tracks:
         if identity(track) == args["track"]:
             if args.get("trackId") is not None and kumi_id(track) != args["trackId"]:
                 break
             if args.get("trackId") is None and args.get("trackName") not in (None, track.name):
-                break
+                raise ValueError("%s isn't the track it was (renamed, or another in its place)" % quoted(track.name))
             return track
     raise ValueError("its track isn't in the Set any more")
 
@@ -224,21 +236,26 @@ def made_by(track, step, name):
         raise ValueError("Live didn't make %s again" % quoted(name))
     return made[0]
 
-def make_audio(track, where, kept):
-    """An Arrangement audio clip, made again at its own length and cutting nothing. Live makes one at its file's length
-    and lays it over whatever is there, and setting its markers doesn't shorten it. So a stand-in is made past the
-    track's last clip and settled, a throwaway clip laid over the stand-in's tail cuts it to length (and is deleted),
-    and the stand-in is copied into its place, which the check found free, and then deleted."""
+def make_aside(track, where, kept, aside):
+    """An Arrangement audio clip, made past the track's last clip and cut to its length, to be put in its place later.
+    Live makes one at its file's length, laid over whatever is there, and setting its markers doesn't shorten it: so a
+    throwaway clip laid over its tail cuts it, and is deleted. One Live can't make that long (a loop drawn out past its
+    file, a warp stretched past Live's own) raises. Each one made is added to `aside`."""
     length = float(where["end"]) - float(where["start"])
     far = max([float(clip.end_time) for clip in track.arrangement_clips] + [float(where["end"])]) + 4.0
     stand = made_by(track, lambda: track.create_audio_clip(kept["file"], far), kept["name"])
-    try:
+    aside.append(stand)
+    settle(stand, kept)
+    if stand.end_time - stand.start_time > length + 1e-6:
+        track.delete_clip(made_by(track, lambda: track.create_audio_clip(kept["file"], far + length), kept["name"]))
         settle(stand, kept)
-        if stand.end_time - stand.start_time > length + 1e-6:
-            track.delete_clip(made_by(track, lambda: track.create_audio_clip(kept["file"], far + length), kept["name"]))
-            settle(stand, kept)
-        if abs(stand.end_time - stand.start_time - length) > 1e-6:
-            raise ValueError("Live couldn't make %s at its length" % quoted(kept["name"]))
+    if abs(stand.end_time - stand.start_time - length) > 1e-6:
+        raise ValueError("Live can't make %s again at its length: the clip is longer than its file" % quoted(kept["name"]))
+    return stand
+
+def put_in_place(track, stand, where, kept):
+    """A clip made aside, copied into its place (which the check found free), and the stand-in deleted."""
+    try:
         return made_by(track, lambda: track.duplicate_clip_to_arrangement(stand, float(where["start"])), kept["name"])
     finally:
         track.delete_clip(stand)
@@ -251,8 +268,6 @@ def create(track, where, kept):
         else:
             slot.create_audio_clip(kept["file"])
         return slot.clip
-    if kept["kind"] == "audio":
-        return make_audio(track, where, kept)
     return made_by(track, lambda: track.create_midi_clip(float(where["start"]), float(where["end"] - where["start"])), kept["name"])
 
 def attempt(step):
@@ -401,21 +416,34 @@ def restore(args):
     remnants = check(track, args)
     if args.get("check"):
         return {"checked": True}
+    # Arrangement audio clips are made aside first, so one Live can't make at its length refuses before anything in the
+    # Set changes (Live keeps a step of Kumi's that changed nothing).
+    aside, stands = [], {}
+    try:
+        for index, item in enumerate(args["clips"]):
+            if item["leaf"]["kind"] == "audio" and "slot" not in item["where"]:
+                stands[index] = make_aside(track, item["where"], item["leaf"], aside)
+    except Exception:
+        for stand in aside:
+            attempt(lambda stand=stand: track.delete_clip(stand))
+        raise
     done = {"removed": [], "made": [], "partial": []}
     try:
         for clip in remnants:
             name = clip.name
             track.delete_clip(clip)
             done["removed"].append(name)
-        for item in args["clips"]:
+        for index, item in enumerate(args["clips"]):
             kept = item["leaf"]
-            clip = create(track, item["where"], kept)
+            clip = put_in_place(track, stands.pop(index), item["where"], kept) if index in stands else create(track, item["where"], kept)
             done["made"].append({"identity": identity(clip), "where": place(clip), "name": kept["name"]})
             settle(clip, kept)
             gaps = missing(clip, kept, item.get("notesToCome", False), put_back(clip, track, kept))
             if gaps:
                 done["partial"].append({"name": kept["name"], "missing": gaps})
     except Exception as error:
+        for stand in stands.values():
+            attempt(lambda stand=stand: track.delete_clip(stand))
         done["error"] = "%s: %s" % (type(error).__name__, error)
     return done
 
