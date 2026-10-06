@@ -51,15 +51,6 @@ fn fixed_choices(field: &str) -> Option<&'static [&'static str]> {
         _ => return None,
     })
 }
-/// Meld's settings whose first choice Live has but the bridge's protocol doesn't take yet (it starts
-/// them at 1): run_python sets those, through the device property each names.
-fn first_not_yet(field: &str) -> Option<&'static str> {
-    match field {
-        "unison" => Some("unison_voices"),
-        "polyphony" => Some("poly_voices"),
-        _ => None,
-    }
-}
 /// Places and what they mean, "1 two, 2 three or 3 four".
 fn said_places(choices: &[&str], from: usize) -> String {
     let places: Vec<_> = choices.iter().enumerate().skip(from).map(|(place, name)| format!("{place} {name}")).collect();
@@ -68,28 +59,16 @@ fn said_places(choices: &[&str], from: usize) -> String {
         _ => places.join(""),
     }
 }
-fn out_of_bounds(field: &str, value: &Value) -> String {
-    match (fixed_choices(field), first_not_yet(field)) {
-        (Some(choices), Some(property)) if value.as_f64() == Some(0.) => format!(
-            "Kumi's Meld tool can't set {field} to 0 ({}) yet ({} work); run_python can set the device's {property} to 0",
-            choices[0],
-            said_places(choices, 1)
-        ),
-        (Some(choices), Some(_)) => {
-            format!(
-                "{field} is out of bounds; its choices are {} (0 {} only through run_python for now)",
-                said_places(choices, 1),
-                choices[0]
-            )
-        }
-        (Some(choices), None) => format!("{field} is out of bounds; its choices are {}", said_places(choices, 0)),
+fn out_of_bounds(field: &str, _value: &Value) -> String {
+    match fixed_choices(field) {
+        Some(choices) => format!("{field} is out of bounds; its choices are {}", said_places(choices, 0)),
         _ if field == "unisonVoiceCount" => "unisonVoiceCount is out of bounds; Wavetable has 2 to 8 unison voices".into(),
         _ => format!("{field} is out of bounds"),
     }
 }
 fn bounds(field: &str) -> Option<(f64, f64, bool)> {
     if let Some(choices) = fixed_choices(field) {
-        return Some((if first_not_yet(field).is_some() { 1. } else { 0. }, (choices.len() - 1) as f64, true));
+        return Some((0., (choices.len() - 1) as f64, true));
     }
     Some(match field {
         "pitchBendRange" => (1., 96., true),
@@ -153,17 +132,6 @@ fn drift_choices(proposed: &mut Value, row: &Value) -> Result<(), String> {
         let Some(index) = list.iter().position(|name| voices(name) == Some(count)) else {
             return Err(format!("voiceCount {count} isn't one of this Drift's voice counts ({})", list.join(", ")));
         };
-        // The bridge's protocol takes Drift's voice count from place 1, so its first count waits for it.
-        if index == 0 {
-            let (first, rest) = list.split_first().unwrap();
-            let rest = match rest.split_last() {
-                Some((last, others)) if !others.is_empty() => format!("{} or {last}", others.join(", ")),
-                _ => rest.join(""),
-            };
-            return Err(format!(
-                "Kumi's Drift tool can't set {first} voices yet ({rest} work); run_python can set the device's voice_count_index to 0"
-            ));
-        }
         proposed["voiceCount"] = json!(index);
     }
     for (field, choices) in DRIFT_CHOICES {
@@ -437,11 +405,9 @@ mod tests {
             "voiceMode 4 isn't a place in this Drift's voiceModeList (0 Poly, 1 Mono, 2 Stereo, 3 Unison)"
         );
         assert!(refused(json!({"modSource3": 8})).starts_with("modSource3 8 isn't a place in this Drift's modSources (0 Env 1,"));
-        assert_eq!(
-            refused(json!({"voiceCount": 4})),
-            "Kumi's Drift tool can't set 4 voices yet (8, 16, 24 or 32 work); run_python can set the device's voice_count_index to 0",
-            "the protocol takes Drift's voice count from place 1"
-        );
+        let mut first = json!({"voiceCount": 4});
+        drift_choices(&mut first, &row).unwrap();
+        assert_eq!(first, json!({"voiceCount": 0}), "Drift's first voice count is its list's place 0");
         let mut older = json!({"voiceCount": 3, "voiceMode": 6});
         drift_choices(&mut older, &json!({"voiceCount": 2})).unwrap();
         assert_eq!(older, json!({"voiceCount": 3, "voiceMode": 6}), "a row without the lists passes as it is");
@@ -465,19 +431,16 @@ mod tests {
     }
     #[test]
     fn settings_without_a_list_from_live_are_bounded_by_their_choices() {
-        assert_eq!(bounds("unison"), Some((1., 3., true)), "off waits for the protocol");
-        assert_eq!(bounds("polyphony"), Some((1., 6., true)), "two voices wait for the protocol");
+        assert_eq!(bounds("unison"), Some((0., 3., true)), "0 is off");
+        assert_eq!(bounds("polyphony"), Some((0., 6., true)), "0 is two voices");
         assert_eq!(bounds("unisonMode"), Some((0., 6., true)));
         assert_eq!(bounds("unisonVoiceCount"), Some((2., 8., true)));
         assert_eq!(bounds("voiceCount"), Some((1., 64., true)));
         assert_eq!(
             out_of_bounds("polyphony", &json!(9)),
-            "polyphony is out of bounds; its choices are 1 three, 2 four, 3 five, 4 six, 5 eight or 6 twelve (0 two only through run_python for now)"
+            "polyphony is out of bounds; its choices are 0 two, 1 three, 2 four, 3 five, 4 six, 5 eight or 6 twelve"
         );
-        assert_eq!(
-            out_of_bounds("unison", &json!(0)),
-            "Kumi's Meld tool can't set unison to 0 (off) yet (1 two, 2 three or 3 four work); run_python can set the device's unison_voices to 0"
-        );
+        assert_eq!(out_of_bounds("unison", &json!(4)), "unison is out of bounds; its choices are 0 off, 1 two, 2 three or 3 four");
         assert_eq!(
             out_of_bounds("filterRouting", &json!(3)),
             "filterRouting is out of bounds; its choices are 0 Serial, 1 Parallel or 2 Split"

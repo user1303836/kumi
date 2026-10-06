@@ -258,6 +258,25 @@ async fn authenticated_hello_and_registry_negotiation() {
             )
             .await;
             assert!(RemoteScriptLiveAdapter::connect(forged.endpoint.clone()).await.err().unwrap().message().contains("authentication"));
+            // A Remote Script of another bridge version (Live left running through an update): restart Live, which
+            // loads the one installed. Its hello says so, and so would its status.
+            let older = Server::configured(
+                vec![],
+                |_, _| Reply::Silent,
+                |_| {
+                    response(
+                        "hello",
+                        json!({"protocol":"ableton-live/v1","registryHash":"0".repeat(64),"maxDeadlineMs":60000}),
+                        true,
+                        EPOCH,
+                    )
+                },
+                |_, s| s,
+            )
+            .await;
+            let refused = RemoteScriptLiveAdapter::connect(older.endpoint.clone()).await.err().unwrap();
+            assert_eq!(refused.message(), ableton_mcp_server::bridge::remote_adapter::ANOTHER_BRIDGE);
+            assert!(refused.message().contains("restart Live"));
             for change in [
                 json!({"epoch":-1,"capabilities":[42]}),
                 json!({"capabilities":["session.write"]}),

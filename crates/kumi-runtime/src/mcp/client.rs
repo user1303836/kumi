@@ -251,7 +251,12 @@ pub async fn connect_mcp(options: Options) -> Result<Rc<dyn McpEndpoint>, Runtim
         Ok(()) => Ok(endpoint),
         Err(_) => {
             endpoint.close().await?;
-            Err(RuntimeError::plain("MCP connection failed; check the built bridge, config and Live setup"))
+            // The bridge's own words when it stopped (Live running another version of the bridge, say), else
+            // where to look.
+            Err(RuntimeError::plain(match endpoint.bridge_said() {
+                Some(said) => format!("Kumi's bridge didn't start: {said}"),
+                None => "MCP connection failed; check the built bridge, config and Live setup".into(),
+            }))
         }
     }
 }
@@ -306,6 +311,10 @@ struct Transport {
     shutdown: RefCell<Option<Shared<LocalBoxFuture<'static, ()>>>>,
     stderr_bytes: Cell<usize>,
     stderr_truncated: Cell<bool>,
+    /// The bridge's own last line ("mcp-host: …", why it stopped), the only stderr text kept; and the line being
+    /// read, at most a KiB of it, dropped once read.
+    stderr_said: RefCell<Option<String>>,
+    stderr_line: RefCell<Vec<u8>>,
 }
 
 impl Transport {
@@ -332,6 +341,8 @@ impl Transport {
             shutdown: RefCell::new(None),
             stderr_bytes: Cell::new(0),
             stderr_truncated: Cell::new(false),
+            stderr_said: RefCell::new(None),
+            stderr_line: RefCell::new(Vec::new()),
         });
         spawn_local(Self::write_loop(Rc::downgrade(&transport), stdin, write_queue));
         spawn_local(transport.clone().read_stdout(stdout));
@@ -417,11 +428,28 @@ impl Transport {
                             self.stderr_truncated.set(true);
                         }
                         self.stderr_bytes.set((bytes + read).min(64 * 1024));
+                        for &byte in &chunk[..read] {
+                            if byte == b'\n' {
+                                self.end_stderr_line();
+                            } else if self.stderr_line.borrow().len() < 1024 {
+                                self.stderr_line.borrow_mut().push(byte);
+                            }
+                        }
                     }
                 }
             }
         }
+        self.end_stderr_line();
         self.one_closed();
+    }
+
+    /// A line of the bridge's stderr, read: kept only when it's the bridge's own ("mcp-host: …").
+    fn end_stderr_line(&self) {
+        let line = std::mem::take(&mut *self.stderr_line.borrow_mut());
+        let text = String::from_utf8_lossy(&line);
+        if let Some(said) = text.trim().strip_prefix("mcp-host: ") {
+            *self.stderr_said.borrow_mut() = Some(said.chars().take(300).collect());
+        }
     }
 
     /// Owns the child: waits for its exit, and sends the signals `close()` asks for meanwhile.
@@ -615,6 +643,11 @@ impl Endpoint {
             disconnected: Cell::new(false),
             closing: RefCell::new(None),
         })
+    }
+
+    /// Why the bridge stopped, as it said it: its own last line ("mcp-host: …") on stderr, if it wrote one.
+    fn bridge_said(&self) -> Option<String> {
+        self.owned.borrow().as_ref()?.stderr_said.borrow().clone()
     }
 
     /// `client.connect(transport, …)`, then Kumi's own checks: the endpoint is ready, or the reason it isn't.

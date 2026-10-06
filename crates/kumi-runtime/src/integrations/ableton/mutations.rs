@@ -38,6 +38,29 @@ impl Mutations {
     pub fn supported(&self, since: Option<&str>) -> bool {
         since.is_none_or(|since| super::bridge_version::at_least(self.parameters.history.connection.version().as_deref(), since))
     }
+    /// What a change asks of the bridge that one from before Arrangement editing can't do (its clip move takes no
+    /// keepSource), if it does. Said here, never sent: an older bridge would move an Arrangement clip on its own track
+    /// whatever track it's given, and refuses an Arrangement clip's notes in words that would read like Kumi's fault.
+    fn needs_newer_bridge(&self, kind: &ChangeKind, input: &JsonObject) -> Option<&'static str> {
+        let tools = self.parameters.history.connection.tools()?;
+        let move_tool = tools.tool("live_clip_move_preview");
+        let edits_arrangement = move_tool
+            .as_ref()
+            .and_then(|tool| tool.input_schema.properties.as_ref())
+            .is_some_and(|properties| properties.contains_key("keepSource"));
+        if edits_arrangement || move_tool.is_none() {
+            return None;
+        }
+        let arrangement = input.get("clipRef").and_then(Value::as_str).is_some_and(|clip| clip.contains(":arrangement_clip:"));
+        match kind.tool.as_str() {
+            "move_clip" if input.get("keepSource") == Some(&Value::Bool(true)) => Some("copying an Arrangement clip"),
+            "move_clip" if arrangement && input.get("targetTrackRef").is_some_and(|track| !track.is_null()) => {
+                Some("moving an Arrangement clip to another track")
+            }
+            "change_notes" | "delete_notes" | "edit_notes" | "transform_midi" if arrangement => Some("editing an Arrangement clip's notes"),
+            _ => None,
+        }
+    }
     pub fn too_old(&self, since: Option<&str>) -> String {
         format!(
             "That needs the Ableton bridge {} or later; this one is {}. Tell the producer to update it (kumi doctor says how).",
@@ -92,6 +115,12 @@ impl Mutations {
         }
         if !self.supported(kind.since.as_deref()) {
             return Err(observation(&self.too_old(kind.since.as_deref())));
+        }
+        if let Some(what) = self.needs_newer_bridge(kind, &input) {
+            return Err(observation(&format!(
+                "That needs a newer Ableton bridge than this one ({}): {what}. Tell the producer to update it (kumi doctor says how).",
+                connection.version().as_deref().unwrap_or("older")
+            )));
         }
         if history.changes_this_turn.get() >= 5_000 {
             return Err(observation("That's 5000 changes in one answer; carry on in the next one"));
@@ -215,6 +244,11 @@ impl Mutations {
                     preview.insert("replacesUnknown".into(), json!(true));
                 }
             }
+        }
+        // A move or copy that cut something its preview didn't name (a clip put in its new place in between): the
+        // bridge says so, and Kumi's undo can't put that back.
+        if kind.tool == "move_clip" && result.get("replacesUnknown") == Some(&json!(true)) {
+            preview.insert("replacesUnknown".into(), json!(true));
         }
         let final_summary = kind.summarize(&preview, &args, &known, Some(&result));
         let applied = result.get("state").and_then(Value::as_str) == Some("applied");

@@ -292,6 +292,8 @@ struct RemoteInner {
 /// Background readers run on a Tokio `LocalSet`, matching the host's single-threaded callback model.
 #[derive(Clone)]
 pub struct RemoteScriptLiveAdapter(Rc<RemoteInner>);
+/// What the bridge says when Live runs another version of Kumi's Remote Script than this bridge's.
+pub use kumi_common::bridge::ANOTHER_BRIDGE;
 impl RemoteScriptLiveAdapter {
     pub async fn connect(endpoint: RemoteScriptEndpoint) -> Result<Self, LiveError> {
         endpoint.validate()?;
@@ -327,6 +329,9 @@ impl RemoteScriptLiveAdapter {
         let value = adapter.request(json!({"method":"status"}), "status", None).await?;
         if !valid_status(&value) || value["connected"] != true || value["adapter"] != "remote-script" || value["epoch"].is_null() {
             adapter.close().await?;
+            if value["registryHash"].is_string() && value["registryHash"] != *LIVE_REGISTRY_HASH {
+                return Err(LiveError::error(ANOTHER_BRIDGE));
+            }
             return Err(LiveError::error("remote script handshake or negotiation failed"));
         }
         let status: LiveStatus = serde_json::from_value(value)?;
@@ -480,9 +485,12 @@ impl RemoteScriptLiveAdapter {
                 return Err(LiveError::error("invalid or duplicate remote hello"));
             }
             let hello = &response["result"];
-            if hello["protocol"] != LIVE_PROTOCOL_VERSION
-                || hello["registryHash"] != *LIVE_REGISTRY_HASH
-                || !wire::safe_integer(&hello["maxDeadlineMs"]).is_some_and(|n| n >= 100.0)
+            // Live loads Kumi's Remote Script when it starts: one with another registry is another bridge version's,
+            // Live left running through an update (or another Kumi's). Restarting Live loads the installed one.
+            if hello["protocol"] != LIVE_PROTOCOL_VERSION || hello["registryHash"] != *LIVE_REGISTRY_HASH {
+                return Err(LiveError::error(ANOTHER_BRIDGE));
+            }
+            if !wire::safe_integer(&hello["maxDeadlineMs"]).is_some_and(|n| n >= 100.0)
                 || kumi_common::js::string::utf16_len(response["bridgeEpoch"].as_str().unwrap()) < 16
                 || kumi_common::js::string::utf16_len(response["connectionChallenge"].as_str().unwrap()) < 16
             {

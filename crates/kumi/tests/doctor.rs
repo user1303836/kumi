@@ -146,6 +146,15 @@ async fn doctor_explains_live_bridge_and_terminal_in_plain_words() {
     let checks = doctor_checks(&io).await.unwrap();
     assert!(find(&checks, "couldn't reach Live").next.as_ref().unwrap().contains("answer it first"));
     assert!(!checks.iter().any(|c| c.text.contains("didn't start")));
+    // Live still runs the bridge it loaded before an update (the installed one is current): restart Live, never the
+    // Control Surface advice.
+    let said = format!("Kumi's bridge didn't start: {}", kumi_common::bridge::ANOTHER_BRIDGE);
+    probe(&mut io, LiveProbe { said: Some(said), ..Default::default() });
+    let checks = doctor_checks(&io).await.unwrap();
+    let restart = find(&checks, "Live is running another version of Kumi's bridge");
+    assert_eq!(restart.status, CheckStatus::Fix);
+    assert!(restart.next.as_ref().unwrap().starts_with("Restart Live"), "{:?}", restart.next);
+    assert!(!checks.iter().any(|c| c.text.contains("couldn't reach Live")));
     io.terminal = Some(TerminalInfo { is_tty: true, columns: Some(50), rows: Some(12) });
     assert!(find(&doctor_checks(&io).await.unwrap(), "Terminal").text.contains("small"));
     io.env.insert("KUMI_REMOTE_SCRIPTS_DIR".into(), s.root.path().join("nowhere").display().to_string());

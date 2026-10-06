@@ -97,9 +97,9 @@ pub(super) async fn probe_live(config: String, factory: AbletonFactory) -> docto
     let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
     options.bridge_config = Some(config);
     let integration = factory(options);
-    if integration.start(abort::timeout(20000)).await.is_err() {
+    if let Err(error) = integration.start(abort::timeout(20000)).await {
         let _ = integration.close().await;
-        return doctor::LiveProbe { started: false, ..Default::default() };
+        return doctor::LiveProbe { started: false, said: Some(error.to_string()), ..Default::default() };
     }
     let result = async {
         let observation = integration.observe(abort::timeout(20000), None).await?;
@@ -113,6 +113,7 @@ pub(super) async fn probe_live(config: String, factory: AbletonFactory) -> docto
             live_version: context["liveVersion"].as_str().map(str::to_string),
             set: context["set"]["name"].as_str().map(str::to_string),
             real_live: Some(context["provenance"] == "real-live"),
+            said: None,
         })
     }
     .await;
@@ -150,6 +151,7 @@ async fn connect_when_live_answers<F, A, O, B>(
     controller: Rc<RefCell<Option<Weak<dyn SessionController>>>>,
     emit: Rc<dyn Fn(SessionEvent)>,
     watching: Rc<Cell<bool>>,
+    told: bool,
     pace: Pace,
 ) where
     F: Fn() -> A,
@@ -158,8 +160,13 @@ async fn connect_when_live_answers<F, A, O, B>(
     B: std::future::Future<Output = bool>,
 {
     let began = std::time::Instant::now();
-    let mut said = !live_open().await;
-    emit(SessionEvent::Notice { message: if said { NO_LIVE } else { LIVE_STARTING }.into() });
+    let open = live_open().await;
+    // Told what to do already (restart Live, when it runs another version of the bridge): nothing more to say until
+    // it connects.
+    let mut said = told || !open;
+    if !told {
+        emit(SessionEvent::Notice { message: if said { NO_LIVE } else { LIVE_STARTING }.into() });
+    }
     let mut tries = 0;
     let mut next: Option<std::time::Instant> = Some(std::time::Instant::now());
     for _ in 0..pace.looks {
@@ -301,10 +308,13 @@ pub(super) async fn run_session(
     let trace = io.env.get("KUMI_TRACE").is_some_and(|s| s == "1");
     // Watching for Live to answer, so a chat without Live connects by itself once it does.
     let watching_live = Rc::new(Cell::new(false));
+    // Whether the producer was told to restart Live (it runs another version of the bridge): said once a session.
+    let restart_said = Rc::new(Cell::new(false));
     // Where the session finds Live: first-run setup sets it once the bridge is in place.
     let live_config = Rc::new(RefCell::new(bridge_config.clone()));
     let integration_factory: IntegrationFactory = {
         let watching_live = watching_live.clone();
+        let restart_said = restart_said.clone();
         let library = library.clone();
         let emit = emit.clone();
         let controller = controller.clone();
@@ -390,6 +400,7 @@ pub(super) async fn run_session(
             let bundled = bundled.clone();
             let controller = controller.clone();
             let watching_live = watching_live.clone();
+            let restart_said = restart_said.clone();
             let env = env.clone();
             with_fallback(
                 factory(options),
@@ -397,10 +408,17 @@ pub(super) async fn run_session(
                     let on_connection = on_connection.clone();
                     create_inference_only_integration(Rc::new(move |state| on_connection(state, None)))
                 }),
-                Rc::new(move |message| {
+                Rc::new(move |message: String| {
                     let installed = doctor::read_bridge_server(&bridge_config).ok().and_then(|s| s.version);
                     let current = installed.is_some() && installed == bundled;
-                    if !current {
+                    // Live still runs the bridge it loaded before an update: restarting Live is the fix whether or not
+                    // the installed bridge is current (right after kumi bridge it is). Said once; the watch then
+                    // connects once Live answers with the one installed.
+                    let restart = message.contains(kumi_common::bridge::ANOTHER_BRIDGE);
+                    if restart && !restart_said.replace(true) {
+                        emit(SessionEvent::Notice { message: message.clone() });
+                    }
+                    if !current && !restart {
                         emit(SessionEvent::Notice { message });
                     } else if !watching_live.replace(true) {
                         // Said once, by the watch: its own retries fall back here too, quietly.
@@ -417,6 +435,7 @@ pub(super) async fn run_session(
                             controller.clone(),
                             emit.clone(),
                             watching_live.clone(),
+                            restart,
                             PACE,
                         ));
                     }
@@ -727,6 +746,9 @@ mod watch_tests {
         }
     }
     async fn watch(connect_on: u32, answers: bool, live_open: bool, hold_ms: u64) -> (u32, Vec<String>, bool) {
+        watch_told(connect_on, answers, live_open, hold_ms, false).await
+    }
+    async fn watch_told(connect_on: u32, answers: bool, live_open: bool, hold_ms: u64, told: bool) -> (u32, Vec<String>, bool) {
         let fake = Rc::new(Fake { reconnects: Cell::new(0), connect_on, connected: Cell::new(false) });
         let session: Rc<dyn SessionController> = fake.clone();
         let controller = Rc::new(RefCell::new(Some(Rc::downgrade(&session))));
@@ -747,6 +769,7 @@ mod watch_tests {
             controller,
             emit,
             watching.clone(),
+            told,
             pace,
         )
         .await;
@@ -776,6 +799,17 @@ mod watch_tests {
         let looked_up = side(false);
         looked_up.connect().await;
         assert_eq!(looked_up.bridge.borrow().as_deref(), found.to_str(), "the one put in place");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn told_to_restart_live_the_watch_says_nothing_else_and_connects_once_live_answers() {
+        // Live runs another version of the bridge (right after kumi bridge, the installed one is current): the
+        // session has said to restart Live, so the watch never says to choose AbletonMcpBridge, and connects once
+        // Live, restarted, answers with the one installed.
+        let (reconnects, notices, watching) = watch_told(2, true, true, 0, true).await;
+        assert_eq!(reconnects, 2);
+        assert_eq!(notices, ["Live answered, so Kumi is connected to it now."]);
+        assert!(!watching);
     }
 
     #[tokio::test(flavor = "current_thread")]
