@@ -382,16 +382,40 @@ async fn failed_swap_restores_rollback_copy() {
     let dir = tempfile::tempdir().unwrap();
     let app = dir.path().join("app");
     let prev = dir.path().join("app.previous");
-    put(app.join("v"), "2");
-    put(prev.join("v"), "1");
+    let kumi = executable_name("kumi");
+    put(app.join(&kumi), "2");
+    put(prev.join(&kumi), "1");
     assert!(swap_in(dir.path().join("missing").to_str().unwrap(), app.to_str().unwrap(), prev.to_str().unwrap()).await.is_err());
-    assert_eq!(fs::read_to_string(app.join("v")).unwrap(), "2");
-    assert_eq!(fs::read_to_string(prev.join("v")).unwrap(), "1");
+    assert_eq!(fs::read_to_string(app.join(&kumi)).unwrap(), "2");
+    assert_eq!(fs::read_to_string(prev.join(&kumi)).unwrap(), "1");
     let fresh = dir.path().join("app.new");
-    put(fresh.join("v"), "3");
+    put(fresh.join(&kumi), "3");
     swap_in(fresh.to_str().unwrap(), app.to_str().unwrap(), prev.to_str().unwrap()).await.unwrap();
-    assert_eq!(fs::read_to_string(app.join("v")).unwrap(), "3");
-    assert_eq!(fs::read_to_string(prev.join("v")).unwrap(), "2");
+    assert_eq!(fs::read_to_string(app.join(&kumi)).unwrap(), "3");
+    assert_eq!(fs::read_to_string(prev.join(&kumi)).unwrap(), "2");
+    assert!(!dir.path().join("app.previous.old").exists());
+}
+/// A Kumi window or an antivirus scan holds a file in Kumi's folder with no sharing, so Windows won't move the
+/// folder: the update gives up with the Kumi that was there in place, and goes through once it's let go.
+#[cfg(windows)]
+#[tokio::test]
+async fn a_kumi_folder_windows_holds_keeps_the_kumi_that_was_there() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let (app, prev, fresh) = (dir.path().join("app"), dir.path().join("app.previous"), dir.path().join("app.new"));
+    let kumi = executable_name("kumi");
+    put(app.join(&kumi), "2");
+    put(prev.join(&kumi), "1");
+    put(fresh.join(&kumi), "3");
+    let held = fs::OpenOptions::new().read(true).share_mode(0).open(app.join(&kumi)).unwrap();
+    assert!(swap_in(fresh.to_str().unwrap(), app.to_str().unwrap(), prev.to_str().unwrap()).await.is_err());
+    assert_eq!(fs::read_to_string(app.join(&kumi)).unwrap_err().raw_os_error(), Some(32), "still held, and still in app");
+    drop(held);
+    assert_eq!(fs::read_to_string(app.join(&kumi)).unwrap(), "2");
+    assert_eq!(fs::read_to_string(prev.join(&kumi)).unwrap(), "1");
+    swap_in(fresh.to_str().unwrap(), app.to_str().unwrap(), prev.to_str().unwrap()).await.unwrap();
+    assert_eq!(fs::read_to_string(app.join(&kumi)).unwrap(), "3");
+    assert_eq!(fs::read_to_string(prev.join(&kumi)).unwrap(), "2");
     assert!(!dir.path().join("app.previous.old").exists());
 }
 #[tokio::test]
