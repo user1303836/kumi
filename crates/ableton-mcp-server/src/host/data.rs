@@ -96,9 +96,8 @@ impl McpHost {
         result.unwrap_or_else(|e| adapter_tool_error(id, &e, "Nothing was saved; preview again from a fresh read of the tracks."))
     }
     /// A batch, applied: every track named is checked to be the one read (together, one read each) before
-    /// any text is written, then each track's text is written, all sent at once so Live takes them in one
-    /// tick. Each write still checks what the track holds, so one that changed since is left as it is, and the
-    /// apply says how many were saved.
+    /// any text is written, then all of it is written in one call, all or none: each track's write checks what
+    /// it holds, and one that changed since leaves every track as it was.
     async fn apply_data_batch(
         &self,
         id: &Value,
@@ -123,24 +122,33 @@ impl McpHost {
         }
         record.borrow_mut()["state"] = json!("applying");
         record.borrow_mut()["applyKey"] = p["idempotencyKey"].clone();
-        let writes = futures::future::join_all(places.iter().map(|place| {
-            let args = json!({"ref":place["ref"],"key":payload["key"],"value":place["value"],"expectedValue":place["expectedValue"]});
-            async move { self.async_adapter().invoke_async(&LiveInvocation::new("data.set", args), Some(context)).await }
-        }))
-        .await;
+        // One call: Live saves them all or none, so a track whose text changed since it was read leaves every
+        // track as it was.
+        let entries: Vec<Value> = places
+            .iter()
+            .map(|place| json!({"ref":place["ref"],"key":payload["key"],"value":place["value"],"expectedValue":place["expectedValue"]}))
+            .collect();
+        let written = match self
+            .async_adapter()
+            .invoke_async(&LiveInvocation::new("data.set", json!({"entries":entries})), Some(context))
+            .await
+        {
+            Ok(written) => written,
+            // Refused before anything was written: the transaction is as it was.
+            Err(error) if error.message().contains("changed since it was read") => {
+                record.borrow_mut()["state"] = json!("previewed");
+                return Ok(transaction_error(id, "A track's text changed since it was read, so nothing was saved; read the tracks again"));
+            }
+            Err(error) => return Err(error),
+        };
         let saved: Vec<Value> = places
             .iter()
-            .zip(&writes)
-            .filter_map(|(place, write)| {
-                write
-                    .as_ref()
-                    .ok()
-                    .filter(|r| r["value"] == place["value"])
-                    .map(|r| json!({"ref":place["ref"],"value":r["value"],"prior":r["prior"]}))
-            })
+            .zip(written["entries"].as_array().into_iter().flatten())
+            .filter(|(place, write)| write["ref"] == place["ref"] && write["value"] == place["value"])
+            .map(|(place, write)| json!({"ref":place["ref"],"value":write["value"],"prior":write["prior"]}))
             .collect();
         if saved.len() != places.len() {
-            return Err(LiveError::error(format!("The text was saved on {} of {} tracks; read them again", saved.len(), places.len())));
+            return Err(LiveError::error("Live didn't confirm the text on every track; read them again"));
         }
         record.borrow_mut()["state"] = json!("applied");
         Ok(success_text(id, &json!({"transactionId":t["id"],"state":"applied","key":payload["key"],"saved":saved,"idempotent":false})))

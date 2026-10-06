@@ -357,8 +357,9 @@ async fn several_tracks_take_text_in_one_apply_each_track_checked_first() {
         (saved(&adapter, "track:track-1"), saved(&adapter, "track:track-2")),
         (json!("01J00000000000000000000001"), json!("01J00000000000000000000002"))
     );
-    let writes = adapter.calls.borrow().iter().filter(|c| c["invocation"]["operation"] == "data.set").count();
-    assert_eq!(writes, 2, "each track's text, in one apply");
+    let writes: Vec<Value> = adapter.calls.borrow().iter().filter(|c| c["invocation"]["operation"] == "data.set").cloned().collect();
+    assert_eq!(writes.len(), 1, "both tracks' text in one call to Live: {writes:?}");
+    assert_eq!(writes[0]["invocation"]["args"]["entries"].as_array().map(Vec::len), Some(2), "{writes:?}");
     let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     let undo = host
         .undo_data_async(&json!(3), &json!({"transactionId":body["transactionId"],"confirmation":"undo","idempotencyKey":"undo-key"}), None)
@@ -370,12 +371,12 @@ async fn several_tracks_take_text_in_one_apply_each_track_checked_first() {
     let applied = apply_batch(&host, &preview, "batch-key").await;
     assert!(applied.to_string().contains("nothing was saved"), "{applied}");
     assert_eq!((saved(&adapter, "track:track-1"), saved(&adapter, "track:track-2")), (Value::Null, Value::Null));
-    // Text that changed on one track since it was read: that track is left as it is, and the apply says so.
+    // Text that changed on one track since it was read: all or none, so nothing is saved, and the apply says so.
     let (adapter, host) = setup();
     let preview = host.live_data_preview_async(&json!(1), &batch(json!("01J0000000000000000000000X"), "simulator:track:track-2")).await;
     let applied = apply_batch(&host, &preview, "batch-key").await;
-    assert!(applied.to_string().contains("saved on 1 of 2 tracks"), "{applied}");
-    assert_eq!((saved(&adapter, "track:track-1"), saved(&adapter, "track:track-2")), (json!("01J00000000000000000000001"), Value::Null));
+    assert!(applied.to_string().contains("nothing was saved"), "{applied}");
+    assert_eq!((saved(&adapter, "track:track-1"), saved(&adapter, "track:track-2")), (Value::Null, Value::Null));
     // A track named twice, or a place without what was read there, is refused before anything is asked of Live.
     let (_, host) = setup();
     let mut twice = batch(Value::Null, "simulator:track:track-2");

@@ -356,3 +356,23 @@ fn guarded_audition_and_emergency_operations_replace_generic_audible_invocation(
     validate_live_operation_request("recording.session", &recording_authority).unwrap();
     assert_throws(validate_live_operation_request("recording.session", &json!({ "action": "start" })), "required");
 }
+
+#[test]
+fn data_set_takes_one_key_or_entries_alone() {
+    // The registry's dialect has no oneOf: the host holds data.set to one form or the other.
+    use ableton_mcp_server::registry::{validate_live_operation_request, validate_live_operation_result};
+    let one = json!({"ref":"live:1:track:0","key":"kumi.track","value":"id"});
+    let entries = json!({"entries":[{"ref":"live:1:track:0","key":"kumi.track","value":"id"}]});
+    assert!(validate_live_operation_request("data.set", &one).is_ok());
+    assert!(validate_live_operation_request("data.set", &entries).is_ok());
+    for neither_or_both in [json!({}), json!({"ref":"live:1:track:0","key":"kumi.track","value":"id","entries":entries["entries"]})] {
+        let refused = validate_live_operation_request("data.set", &neither_or_both).unwrap_err();
+        assert!(refused.0.contains("takes one key (ref, key, value) or entries alone"), "{}", refused.0);
+    }
+    let saved = json!({"entries":[{"ref":"live:1:track:0","key":"kumi.track","value":"id","prior":null}]});
+    assert!(validate_live_operation_result("data.set", &saved).is_ok());
+    assert!(
+        validate_live_operation_result("data.set", &json!({"ref":"live:1:track:0","key":"kumi.track","value":"id","prior":null})).is_ok()
+    );
+    assert!(validate_live_operation_result("data.set", &json!({})).is_err());
+}

@@ -41,6 +41,42 @@ fn numeric(value: &Value) -> f64 {
 impl DeterministicLiveSimulator {
     pub(super) fn invoke_lom(&self, operation: &str, args: &Map<String, Value>) -> Result<Value, LiveError> {
         match operation {
+            "data.set" if args.get("entries").is_some() => {
+                // Entries, all or none, as the Remote Script saves them: every one checked before any is written.
+                let entries: Vec<Map<String, Value>> =
+                    args["entries"].as_array().into_iter().flatten().filter_map(|entry| entry.as_object().cloned()).collect();
+                let mut prior = Vec::new();
+                {
+                    let state = self.state.borrow();
+                    for entry in &entries {
+                        let owner = text(entry, "ref")?;
+                        if state["set"]["ref"] != owner && !array(&state["tracks"]).iter().any(|t| t["ref"] == owner) {
+                            return Err(LiveError::error("track reference is stale or invalid"));
+                        }
+                        let key = text(entry, "key")?;
+                        if !key.starts_with("kumi.") {
+                            return Err(LiveError::error("Kumi writes only its own keys (kumi.…); other keys are read-only"));
+                        }
+                        let held =
+                            self.stored_data.borrow().get(&format!("{owner}\0{key}")).cloned().map(Value::String).unwrap_or(Value::Null);
+                        if entry.get("expectedValue").is_some_and(|v| v != &held) {
+                            return Err(LiveError::error("the data under that key changed since it was read"));
+                        }
+                        prior.push(held);
+                    }
+                }
+                let mut saved = Vec::new();
+                for (entry, prior) in entries.iter().zip(prior) {
+                    let (owner, key) = (text(entry, "ref")?, text(entry, "key")?);
+                    let slot = format!("{owner}\0{key}");
+                    match entry.get("value").and_then(Value::as_str) {
+                        Some(v) => self.stored_data.borrow_mut().insert(slot, v.into()),
+                        None => self.stored_data.borrow_mut().remove(&slot),
+                    };
+                    saved.push(json!({"ref":owner,"key":key,"value":entry.get("value"),"prior":prior}));
+                }
+                Ok(json!({"entries":saved}))
+            }
             "data.get" | "data.set" => {
                 let owner = text(args, "ref")?;
                 let state = self.state.borrow();

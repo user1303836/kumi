@@ -634,3 +634,144 @@ async fn a_split_before_the_clip_to_move_renumbers_it_and_it_still_moves() {
     assert_eq!(body(&applied)["state"], "applied", "{applied}");
     assert_eq!(layout(&adapter.sim), [("Vox".to_string(), 10.0, 12.0), ("Kick Pattern".into(), 12.0, 16.0), ("Vox".into(), 16.0, 18.0)]);
 }
+/// A track's Arrangement clips as (name, start, end), in time order.
+fn layout_on(sim: &DeterministicLiveSimulator, track: &str) -> Vec<(String, f64, f64)> {
+    let s = sim.state.borrow();
+    let mut rows: Vec<_> = s["arrangementClips"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["trackRef"] == track)
+        .map(|r| {
+            let start = r["clip"]["start"].as_f64().unwrap();
+            (r["clip"]["name"].as_str().unwrap().to_string(), start, start + r["clip"]["length"].as_f64().unwrap())
+        })
+        .collect();
+    rows.sort_by(|a, b| a.1.total_cmp(&b.1));
+    rows
+}
+async fn apply(host: &McpHost, preview: &Value, key: &str) -> Value {
+    let args = json!({"transactionId":body(preview)["transactionId"],"confirmation":"apply","idempotencyKey":key});
+    host.live_clip_move_apply_async(&json!(2), &args, None).await.unwrap_or(Value::Null)
+}
+async fn undo(host: &McpHost, preview: &Value, key: &str) -> Value {
+    let args = json!({"transactionId":body(preview)["transactionId"],"confirmation":"undo","idempotencyKey":key});
+    host.undo_clip_move_async(&json!(3), &args, None).await
+}
+#[tokio::test]
+async fn a_copy_keeps_its_source_and_its_undo_removes_only_the_copy() {
+    let adapter = Rc::new(Adapter::new());
+    setup(&adapter.sim, "arrangement-midi");
+    arrangement_clip(&adapter.sim, "Chorus", 18.0, 4.0, false);
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let kick = || "Kick Pattern".to_string();
+    // Onto empty space: the source stays, and the undo removes only the copy.
+    let copy = |position: f64| json!({"clipRef":"arrangement-clip:track-1:4","position":position,"keepSource":true});
+    let preview = host.live_clip_move_preview_async(&json!(1), &copy(12.0)).await;
+    assert_eq!(
+        (body(&preview)["impact"].clone(), body(&preview)["payload"]["keepSource"].clone()),
+        (json!("copies-clip"), json!(true)),
+        "{preview}"
+    );
+    assert_eq!(body(&apply(&host, &preview, "copy-apply-1").await)["state"], "applied");
+    assert_eq!(layout(&adapter.sim), [(kick(), 4.0, 8.0), (kick(), 12.0, 16.0), ("Chorus".into(), 18.0, 22.0)]);
+    let undone = undo(&host, &preview, "copy-undo-1").await;
+    assert_eq!(body(&undone)["state"], "undone", "{undone}");
+    assert!(body(&undone)["removed"].is_object() && body(&undone).get("restored").is_none(), "{undone}");
+    assert_eq!(layout(&adapter.sim), [(kick(), 4.0, 8.0), ("Chorus".into(), 18.0, 22.0)]);
+    // Over a clip: it says what it replaces, and leaves putting that back to Live's undo.
+    let preview = host.live_clip_move_preview_async(&json!(1), &copy(16.0)).await;
+    assert_eq!(body(&preview)["impact"], "copies-clip-replacing", "{preview}");
+    assert_eq!(body(&preview)["replaces"], json!([{"name":"Chorus","start":18,"end":22,"from":18,"to":20,"whole":false}]));
+    assert_eq!(body(&apply(&host, &preview, "copy-apply-2").await)["state"], "applied");
+    assert_eq!(layout(&adapter.sim), [(kick(), 4.0, 8.0), (kick(), 16.0, 20.0), ("Chorus".into(), 20.0, 22.0)]);
+    let refused = undo(&host, &preview, "copy-undo-2").await;
+    let reason = body(&refused)["reason"].as_str().unwrap_or_default().to_owned();
+    assert!(reason.starts_with("the copy replaced \"Chorus\" (beats 18 to 22), which Kumi can't put back"), "{refused}");
+    assert_eq!(
+        body(&refused)["remediation"],
+        json!("Nothing changed. Undo it in Live (Cmd-Z, or live_song_undo): Live takes back what came after it first.")
+    );
+    // Over its own clip: the copy lands whole, and the source is cut where it lands.
+    let preview = host.live_clip_move_preview_async(&json!(1), &copy(6.0)).await;
+    assert_eq!(body(&preview)["replaces"][0]["name"], json!("Kick Pattern"), "{preview}");
+    assert_eq!(body(&apply(&host, &preview, "copy-apply-3").await)["state"], "applied");
+    assert_eq!(layout(&adapter.sim)[..2], [(kick(), 4.0, 6.0), (kick(), 6.0, 10.0)]);
+    // Onto its own place: refused, nothing done.
+    let preview =
+        host.live_clip_move_preview_async(&json!(1), &json!({"clipRef":"arrangement-clip:track-1:4","position":4,"keepSource":true})).await;
+    assert!(preview.to_string().contains("would land on the clip itself"), "{preview}");
+}
+#[tokio::test]
+async fn a_clip_moves_or_copies_to_another_track_of_its_kind() {
+    let adapter = Rc::new(Adapter::new());
+    setup(&adapter.sim, "arrangement-midi");
+    {
+        let mut s = adapter.sim.state.borrow_mut();
+        let first = s["tracks"][0].clone();
+        for (key, name, media) in [("track-2", "Bass", "midi"), ("track-3", "Vox", "audio")] {
+            let mut track = first.clone();
+            track["ref"] = json!(format!("track:{key}"));
+            track["objectIdentity"] = json!(format!("simulator:track:{key}"));
+            track["name"] = json!(name);
+            track["mediaKind"] = json!(media);
+            for key in ["clips", "clipSlots", "takeLanes", "devices"] {
+                track[key] = json!([]);
+            }
+            s["tracks"].as_array_mut().unwrap().push(track);
+        }
+        let mut clip = s["arrangementClips"][0]["clip"].clone();
+        for (key, value) in [
+            ("ref", json!("arrangement-clip:track-2:Riff")),
+            ("objectIdentity", json!("simulator:arrangement-clip:Riff")),
+            ("name", json!("Riff")),
+            ("start", json!(8.0)),
+            ("length", json!(4.0)),
+        ] {
+            clip[key] = value;
+        }
+        s["arrangementClips"].as_array_mut().unwrap().push(json!({"trackRef":"track:track-2","clip":clip}));
+    }
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let kick = || "Kick Pattern".to_string();
+    let to = |clip: &Value, track: &str, position: f64, keep: bool| json!({"clipRef":clip,"position":position,"targetTrackRef":format!("track:{track}"),"keepSource":keep});
+    // Moved to another track, partly over a clip there: cut where it lands, the source gone from its track.
+    let kick_ref = json!("arrangement-clip:track-1:4");
+    let preview = host.live_clip_move_preview_async(&json!(1), &to(&kick_ref, "track-2", 6.0, false)).await;
+    let shown = body(&preview);
+    assert_eq!(
+        (shown["payload"]["targetTrackRef"].clone(), shown["payload"]["sourceTrackRef"].clone()),
+        (json!("track:track-2"), json!("track:track-1")),
+        "{preview}"
+    );
+    assert_eq!(shown["replaces"], json!([{"name":"Riff","start":8,"end":12,"from":8,"to":10,"whole":false}]));
+    assert_eq!(body(&apply(&host, &preview, "cross-apply-1").await)["state"], "applied");
+    assert_eq!(layout_on(&adapter.sim, "track:track-1"), []);
+    assert_eq!(layout_on(&adapter.sim, "track:track-2"), [(kick(), 6.0, 10.0), ("Riff".into(), 10.0, 12.0)]);
+    // Its undo moves it back to the track it came from, as a new clip there (as Live makes one).
+    let undone = undo(&host, &preview, "cross-undo-1").await;
+    assert_eq!(body(&undone)["state"], "undone", "{undone}");
+    assert_eq!(layout_on(&adapter.sim, "track:track-1"), [(kick(), 4.0, 8.0)]);
+    assert_eq!(layout_on(&adapter.sim, "track:track-2"), [("Riff".into(), 10.0, 12.0)]);
+    let kick_ref = body(&undone)["restored"]["ref"].clone();
+    // Copied to another track onto empty space: the source stays.
+    let preview = host.live_clip_move_preview_async(&json!(1), &to(&kick_ref, "track-2", 20.0, true)).await;
+    assert_eq!(body(&apply(&host, &preview, "cross-apply-2").await)["state"], "applied", "{preview}");
+    assert_eq!(layout_on(&adapter.sim, "track:track-1"), [(kick(), 4.0, 8.0)]);
+    assert_eq!(layout_on(&adapter.sim, "track:track-2")[1], (kick(), 20.0, 24.0));
+    // An audio track takes no MIDI clip, as Live has it; nothing is previewed.
+    let refused = host.live_clip_move_preview_async(&json!(1), &to(&kick_ref, "track-3", 0.0, true)).await;
+    assert!(
+        body(&refused)["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("“Vox” is an audio track (Live: “MIDI clips can only be created on MIDI tracks”)"),
+        "{refused}"
+    );
+    // A target track that changed since the preview: the apply refuses, nothing moved.
+    let preview = host.live_clip_move_preview_async(&json!(1), &to(&kick_ref, "track-2", 40.0, false)).await;
+    adapter.sim.state.borrow_mut()["tracks"][1]["objectIdentity"] = json!("simulator:track:other");
+    let applied = apply(&host, &preview, "cross-apply-3").await;
+    assert!(applied.to_string().contains("changed since preview"), "{applied}");
+    assert_eq!(layout_on(&adapter.sim, "track:track-1"), [(kick(), 4.0, 8.0)]);
+}
