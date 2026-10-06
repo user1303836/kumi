@@ -201,3 +201,21 @@ fn a_new_clip_whose_cut_kumi_couldnt_tell_leaves_its_undo_to_live() {
         Some("Kumi couldn't tell what the new clip cut where it landed, so it leaves taking it back to Live's own undo.")
     );
 }
+
+#[test]
+fn an_arrangement_copy_says_so_and_another_track_is_named() {
+    kumi_runtime::integrations::ableton::more_changes::set_meter(4.0, 4.0);
+    let kind = CHANGES.iter().find(|kind| kind.tool == "move_clip").unwrap();
+    let bass = |value: &Value| (value == "7:track:2").then(|| serde_json::from_value(json!({"name":"Bass"})).unwrap());
+    let summary = |input: Value| kind.summarize(json!({}).as_object().unwrap(), input.as_object().unwrap(), &bass, None).title;
+    assert_eq!(summary(json!({"clipRef":"7:arrangement_clip:1:0","position":16,"keepSource":true})), "Copied a clip to bar 5");
+    assert_eq!(
+        summary(json!({"clipRef":"7:arrangement_clip:1:0","position":16,"targetTrackRef":"7:track:2"})),
+        "Moved a clip to bar 5 on Bass"
+    );
+    assert_eq!(
+        summary(json!({"clipRef":"7:arrangement_clip:1:0","position":16,"keepSource":true,"targetTrackRef":"7:track:2"})),
+        "Copied a clip to bar 5 on Bass"
+    );
+    assert_eq!(summary(json!({"clipRef":"7:arrangement_clip:1:0","position":16})), "Moved a clip to bar 5");
+}

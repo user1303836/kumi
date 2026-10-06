@@ -505,7 +505,7 @@
       "preview": "live_clip_move_preview",
       "apply": "live_clip_move_apply",
       "family": "clip",
-      "description": "Move a clip: an Arrangement clip to a new position (beats), replacing what's there as dropping it in Live does (the preview names it; Live's own undo brings it back), or a Session clip to another slot (targetTrackRef and targetSceneIndex, both needed; the clip's own track to keep it on its track).",
+      "description": "Move a clip: an Arrangement clip to a new position (beats), on its own track or another of its kind (targetTrackRef), replacing what's there as dropping it in Live does (the preview names it; Live's own undo brings it back); keepSource: true copies it there instead, leaving it where it is. Or a Session clip to another slot (targetTrackRef and targetSceneIndex, both needed; the clip's own track to keep it on its track).",
       "methods": [
         "summarize"
       ]
@@ -561,7 +561,7 @@
       "preview": "live_note_update_preview",
       "apply": "live_note_update_apply",
       "family": "clip",
-      "description": "Change notes already in a Session clip, by id: pitch, start, duration (beats), velocity, mute, probability, velocityDeviation, releaseVelocity. Get their ids first: live_discover kind note with the clip's clipRef as parent lists its notes, and live_note_read with selected: true gives the ones selected in Live.",
+      "description": "Change notes already in a clip, Session or Arrangement, by id: pitch, start, duration (beats), velocity, mute, probability, velocityDeviation, releaseVelocity. Get their ids first: live_discover kind note with the clip's clipRef as parent lists its notes, and live_note_read with selected: true gives the ones selected in Live.",
       "methods": [
         "summarize"
       ]
@@ -571,7 +571,7 @@
       "preview": "live_note_delete_preview",
       "apply": "live_note_delete_apply",
       "family": "clip",
-      "description": "Delete notes from a Session clip, by id (live_discover kind note with the clip's clipRef as parent lists them with their ids).",
+      "description": "Delete notes from a clip, Session or Arrangement, by id (live_discover kind note with the clip's clipRef as parent lists them with their ids).",
       "methods": [
         "summarize"
       ]
@@ -582,7 +582,7 @@
       "preview": "live_note_edit_preview",
       "apply": "live_note_edit_apply",
       "family": "clip",
-      "description": "Quantize a Session clip's notes (action quantize: grid in beats, 0.25 is 1/16; amount 0–1), move them to one pitch (quantize-pitch with pitch), or duplicate them (duplicate). noteIds limits it to some notes; left out, all. select selects notes in the clip as a click would (noteIds, all: true or none: true; nothing to undo); delete-range deletes the notes starting in a region of pitch (fromPitch, pitchSpan) and time (fromTime, timeSpan, in beats).",
+      "description": "Quantize a clip's notes (Session or Arrangement) (action quantize: grid in beats, 0.25 is 1/16; amount 0–1), move them to one pitch (quantize-pitch with pitch), or duplicate them (duplicate). noteIds limits it to some notes; left out, all. select selects notes in the clip as a click would (noteIds, all: true or none: true; nothing to undo); delete-range deletes the notes starting in a region of pitch (fromPitch, pitchSpan) and time (fromTime, timeSpan, in beats).",
       "methods": [
         "permanent",
         "summarize"
@@ -594,7 +594,7 @@
       "preview": "live_midi_transform_preview",
       "apply": "live_midi_transform_apply",
       "family": "clip",
-      "description": "Transform or generate a Session clip's notes. transform and its params: transpose {semitones}; scale-constrain {root 0–11 (0 is C), scale}; quantize {grid beats, amount, target start|end|both}; swing {grid, amount}; velocity-curve {curve linear-up|linear-down|arch|exp-up|exp-down, amount}; humanize-velocity {maxDelta}; humanize-timing {maxOffset beats}; legato {gap}; staccato {factor 0.05–1}; rotate {steps} (rotates pitches, keeps rhythm); repeat {times 2–8, decay}; ratchet {subdivisions 2–16, probability}; chord-voicing {strategy close|open|drop2}; arpeggiate {pattern up|down|updown|downup|random, rate beats}; seeded-variation {velocityMax, timingMax, probabilityDepth, seed}; euclidean {pulses, steps, rotation, pitch, velocity, stepLength, noteLength, bars}; chord-progression {chords [\"Cm\",\"Ab\",\"Eb\",\"Bb\"] or roman numerals with root and scale, voicing close|drop2|spread, chordDuration beats, octave, velocity}; drum-pattern {style four-on-the-floor|backbeat|breakbeat|trap-hats, bars, density 0–1, mapping {kick: 36, snare: 38, closedHat: 42, …}}; bassline {pattern octave|walking|arpeggiated, chords, root, scale, stepBeats, octave}; motif-invert {axis pitch}; motif-retrograde {}; motif-augment and motif-diminish {numerator, denominator}. Scales: major, minor, harmonic-minor, melodic-minor, dorian, phrygian, lydian, mixolydian, locrian, major-pentatonic, minor-pentatonic, blues, chromatic. scope duplicate writes the result to a copy (target {trackRef, sceneIndex}) and leaves the original; generative ones (repeat, ratchet, arpeggiate, euclidean, chord-progression, drum-pattern, bassline) do by default.",
+      "description": "Transform or generate a clip's notes (Session or Arrangement). transform and its params: transpose {semitones}; scale-constrain {root 0–11 (0 is C), scale}; quantize {grid beats, amount, target start|end|both}; swing {grid, amount}; velocity-curve {curve linear-up|linear-down|arch|exp-up|exp-down, amount}; humanize-velocity {maxDelta}; humanize-timing {maxOffset beats}; legato {gap}; staccato {factor 0.05–1}; rotate {steps} (rotates pitches, keeps rhythm); repeat {times 2–8, decay}; ratchet {subdivisions 2–16, probability}; chord-voicing {strategy close|open|drop2}; arpeggiate {pattern up|down|updown|downup|random, rate beats}; seeded-variation {velocityMax, timingMax, probabilityDepth, seed}; euclidean {pulses, steps, rotation, pitch, velocity, stepLength, noteLength, bars}; chord-progression {chords [\"Cm\",\"Ab\",\"Eb\",\"Bb\"] or roman numerals with root and scale, voicing close|drop2|spread, chordDuration beats, octave, velocity}; drum-pattern {style four-on-the-floor|backbeat|breakbeat|trap-hats, bars, density 0–1, mapping {kick: 36, snare: 38, closedHat: 42, …}}; bassline {pattern octave|walking|arpeggiated, chords, root, scale, stepBeats, octave}; motif-invert {axis pitch}; motif-retrograde {}; motif-augment and motif-diminish {numerator, denominator}. Scales: major, minor, harmonic-minor, melodic-minor, dorian, phrygian, lydian, mixolydian, locrian, major-pentatonic, minor-pentatonic, blues, chromatic. scope duplicate writes the result to a copy (target {trackRef, sceneIndex}) and leaves the original; generative ones (repeat, ratchet, arpeggiate, euclidean, chord-progression, drum-pattern, bassline) do by default.",
       "methods": [
         "summarize"
       ]

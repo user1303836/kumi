@@ -1809,7 +1809,7 @@
     },
     {
       "name": "live_clip_move_preview",
-      "description": "Read-only preflight for repositioning an Arrangement clip or moving a Session clip to another slot.",
+      "description": "Read-only preflight for moving an Arrangement clip to a position, on its own track or another (targetTrackRef), or copying it there (keepSource: true), or moving a Session clip to another slot.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1825,12 +1825,17 @@
           "targetTrackRef": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 256
+            "maxLength": 256,
+            "description": "A Session clip's new track (with targetSceneIndex), or the track an Arrangement clip goes to (its own when left out)."
           },
           "targetSceneIndex": {
             "type": "integer",
             "minimum": 0,
             "maximum": 100000
+          },
+          "keepSource": {
+            "type": "boolean",
+            "description": "An Arrangement clip copied: it stays where it is."
           }
         },
         "required": [
