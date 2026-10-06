@@ -69,3 +69,11 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# The Installer's builds on pull requests and main, which are installed and checked but never published: the
+# release build without whole-program optimization and with parallel code generation, to build faster. Tags, the
+# builds that are published, use `release`.
+[profile.ci-release]
+inherits = "release"
+lto = "off"
+codegen-units = 16

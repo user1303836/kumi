@@ -149,7 +149,7 @@ These workflows run on every pull request, and the first two on every push to `m
 | | `Release scripts` (Ubuntu) | The whitespace check of the change, then the packaging tests |
 | | `Required CI` | Passes only when all of the above passed |
 | **Willington files** | `Willington files` (Ubuntu) | Only the repository owner's pull requests, from a `willington/` branch in this repository, change `vendor/willington/`, and such a pull request changes nothing else. `main`'s copy of the check runs, reading the pull request's file list, never its code |
-| **Installer** | `Build Kumi's Mac helper`, `Native bundle / <target>` (six), `Aggregate native and existing-installer releases`, then `Install / <system>` (six) and `Existing installer transition / <system>` (three) | Builds the helper Kumi uses Live's menus with on a Mac (universal, ad hoc signed), a native bundle for Intel and ARM on macOS, Linux and Windows, then the compatibility release that existing installations update from, and serves them locally. On each system: installs as producers do (Windows PowerShell 5.1 on Windows), checks the version, `doctor`, the bridge and its analysis worker, installs again as a repair, runs `kumi bridge --yes` into a scratch Remote Scripts folder, `kumi update`, `kumi update --rollback` and `kumi uninstall`. The transition jobs run the migration tests with Kumi 1.7.5 and the new bundles. On a `v*` tag, `publish` then attaches the bundle to the release. |
+| **Installer** | `Native bundle / <target>` (six), `Aggregate native and existing-installer releases`, then `Install / <system>` (six) and `Existing installer transition / <system>` (three) | Builds a native bundle for Intel and ARM on macOS, Linux and Windows (each Mac bundle with the helper Kumi uses Live's menus with, universal and ad hoc signed; the Intel one cross-built on Apple Silicon), then the compatibility release that existing installations update from, and serves them locally. On each system: installs as producers do (Windows PowerShell 5.1 on Windows), checks the version, `doctor`, the bridge and its analysis worker, installs again as a repair, runs `kumi bridge --yes` into a scratch Remote Scripts folder, `kumi update`, `kumi update --rollback` and `kumi uninstall`. The transition jobs run the migration tests with Kumi 1.7.5 and the new bundles. On a `v*` tag, `publish` then attaches the bundle to the release. |
 
 On a pull request, less runs:
 
@@ -163,8 +163,13 @@ On a pull request, less runs:
   sign-ins, memory, techniques, playbook, gaps, an older Kumi's files) also gets
   Linux's install and update check, which updates and rolls back over existing
   data.
+- The Installer's bundles, on pull requests and pushes to `main`, build with
+  the `ci-release` profile, which skips the release profile's whole-program
+  optimization. Tags build with `release`.
 
-Each push to `main` and each tag run everything, and CI runs in full each night.
+Each push to `main` and each tag run everything. CI runs in full each night, and
+so does the Installer, with the `release` profile: that keeps the profile's
+build cache warm for the next tag.
 
 To merge into `main`, `Required CI` and `Willington files` must pass. The Installer isn't required.
 [Releases and distribution](DISTRIBUTION_POLICY.md#merge-gate) has the rest of

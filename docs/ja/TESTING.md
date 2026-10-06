@@ -110,15 +110,16 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 | | `Release scripts`（Ubuntu） | この変更の空白のチェック、続いてパッケージングのテスト |
 | | `Required CI` | 上記がすべてパスした場合にだけパスします |
 | **Willington files** | `Willington files`（Ubuntu） | `vendor/willington/` を変えられるのは、このリポジトリの `willington/` ブランチから出たリポジトリ所有者のプルリクエストだけで、そのプルリクエストはほかに何も変えません。`main` にあるこのチェックが、プルリクエストのコードではなくファイルの一覧を読んで実行されます |
-| **Installer** | `Build Kumi's Mac helper`、`Native bundle / <target>`（6 つ）、`Aggregate native and existing-installer releases`、続いて `Install / <system>`（6 つ）と `Existing installer transition / <system>`（3 つ） | Mac で Kumi が Live のメニューを使うためのヘルパー（ユニバーサル、アドホック署名）、macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドル、続いて既存のインストールが更新に使う互換リリースをビルドし、ローカルで配信します。各システムで：プロデューサーと同じ方法でインストールし（Windows では Windows PowerShell 5.1）、バージョン、`doctor`、ブリッジとその解析ワーカーを確認し、修復として再インストールし、使い捨ての Remote Scripts フォルダーに `kumi bridge --yes` を実行し、`kumi update`、`kumi update --rollback`、`kumi uninstall` を実行します。移行のジョブは、Kumi 1.7.5 と新しいバンドルで移行テストを実行します。`v*` タグでは、続いて `publish` がバンドルをリリースに添付します。 |
+| **Installer** | `Native bundle / <target>`（6 つ）、`Aggregate native and existing-installer releases`、続いて `Install / <system>`（6 つ）と `Existing installer transition / <system>`（3 つ） | macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドル（Mac のバンドルには、Kumi が Live のメニューを使うためのヘルパー（ユニバーサル、アドホック署名）が入り、Intel 向けは Apple Silicon でクロスビルドします）、続いて既存のインストールが更新に使う互換リリースをビルドし、ローカルで配信します。各システムで：プロデューサーと同じ方法でインストールし（Windows では Windows PowerShell 5.1）、バージョン、`doctor`、ブリッジとその解析ワーカーを確認し、修復として再インストールし、使い捨ての Remote Scripts フォルダーに `kumi bridge --yes` を実行し、`kumi update`、`kumi update --rollback`、`kumi uninstall` を実行します。移行のジョブは、Kumi 1.7.5 と新しいバンドルで移行テストを実行します。`v*` タグでは、続いて `publish` がバンドルをリリースに添付します。 |
 
 プルリクエストでは、実行される範囲が狭くなります：
 
 - `Rust / macOS` と `Rust / Windows` はプラットフォームによって異なるテストを実行し、`Python Remote Script` は macOS を省きます。
 - Installer が 6 つすべてをビルドしてインストールするのは、インストール、更新、リリース、Willington のファイル、または依存関係を変える変更の場合だけです。ブリッジやバージョン番号を変える変更では Linux のものをビルド、インストール、確認し、それ以外の変更では Linux のバンドルをビルドするだけです。
 - Kumi が保持するものの保存方法（`crates/kumi-store`、設定とサインイン、メモリー、テクニック、プレイブック、ギャップ、以前の Kumi のファイル）を変える変更にも、既存のデータを残したまま更新とロールバックを行う、Linux のインストールと更新の確認が付きます。
+- プルリクエストと `main` へのプッシュでは、Installer のバンドルを `ci-release` プロファイルでビルドします。これはリリースプロファイルのプログラム全体の最適化を省きます。タグは `release` でビルドします。
 
-`main` へのプッシュとタグではすべてが実行され、CI は毎晩すべてを実行します。
+`main` へのプッシュとタグではすべてが実行されます。CI は毎晩すべてを実行し、Installer も `release` プロファイルで毎晩すべてを実行して、次のタグのためにそのプロファイルのビルドキャッシュを温めておきます。
 
 `main` にマージするには、`Required CI` と `Willington files` がパスする必要があります。Installer は必須ではありません。残りのルールは[リリースと配布](DISTRIBUTION_POLICY.md#マージゲート)にあります。
 

@@ -160,7 +160,7 @@ MACOSX_DEPLOYMENT_TARGET=13.0 python3 scripts/build-native-release.py --target a
 python3 -m unittest discover -s scripts/tests -p test_native_release.py
 ```
 
-使用本机的 Rust 目标三元组。构建器会运行锁定的 release 构建，并把桥接产物绑定到提交、Cargo 锁文件、构建方法和精确的文件哈希。Mac 发行包需要 `target/hands/` 中当前的辅助程序；其他构建器从 Mac 作业获取它。服务器和分析工作进程必须一起发布。`--binaries-dir` 选项会打包已有的二进制文件，但不能证明它们是用 release 优化构建的。
+使用本机的 Rust 目标三元组；在 Apple Silicon 的 Mac 上，`--target x86_64-apple-darwin` 可以交叉构建 Intel 的发行包。构建器会运行锁定的 release 构建，并把桥接产物绑定到提交、Cargo 锁文件、构建方法和精确的文件哈希。CI 在拉取请求和 `main` 上使用的 `--profile ci-release` 省去 release 配置的全程序优化，以便更快地构建；发布的发行包始终使用默认的 `release`。Mac 发行包需要 `target/hands/` 中当前的辅助程序；其他发行包不包含它。服务器和分析工作进程必须一起发布。`--binaries-dir` 选项会打包已有的二进制文件，但不能证明它们是用 release 优化构建的。
 
 聚合步骤会保留现有 Node 24 安装所使用的清单：
 

@@ -289,11 +289,15 @@ MACOSX_DEPLOYMENT_TARGET=13.0 python3 scripts/build-native-release.py --target a
 python3 -m unittest discover -s scripts/tests -p test_native_release.py
 ```
 
-Use the host's Rust target triple. The builder runs a locked release build and
-binds the bridge artifact to the commit, Cargo lockfile, build recipe and exact
-file hashes. Mac bundles need the current helper in `target/hands/`; other
-builders take it from the Mac job. The server and analysis worker must be
-shipped together. The `--binaries-dir` override packages existing binaries and
+Use the host's Rust target triple; on an Apple Silicon Mac,
+`--target x86_64-apple-darwin` cross-builds the Intel bundle. The builder runs a
+locked release build and binds the bridge artifact to the commit, Cargo
+lockfile, build recipe and exact file hashes. `--profile ci-release`, which CI
+uses on pull requests and `main`, skips the release profile's whole-program
+optimization to build faster; a published bundle always uses the default
+`release`. Mac bundles need the current helper in `target/hands/`; other
+bundles don't carry it. The server and analysis worker must be shipped
+together. The `--binaries-dir` override packages existing binaries and
 does not establish that they were built with release optimizations.
 
 The aggregation step retains the manifest consumed by existing Node 24

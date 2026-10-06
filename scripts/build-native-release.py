@@ -355,17 +355,22 @@ def main() -> None:
     parser.add_argument("--out", type=Path, help="output folder (release/native/<target>)")
     parser.add_argument("--binaries-dir", type=Path, help="already built binaries; skips cargo build")
     parser.add_argument("--bridge-only", action="store_true", help="build only the receipt-bound bridge artifact")
+    parser.add_argument("--profile", default="release",
+                        help="Cargo profile: release (the default, what's published) or ci-release (CI's quicker build)")
     args = parser.parse_args()
     target = args.target or re.search(r"^host: (.+)$", run(["rustc", "-vV"]), re.M)[1]
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", target):
         raise ValueError("invalid Rust target triple")
     source = source_evidence(ROOT)
-    command = ["cargo", "build", "--locked", "--release", "--target", target]
+    if not re.fullmatch(r"[a-z][a-z0-9-]*", args.profile):
+        raise ValueError("invalid Cargo profile name")
+    profile = ["--release"] if args.profile == "release" else ["--profile", args.profile]
+    command = ["cargo", "build", "--locked", *profile, "--target", target]
     command += ["-p", "ableton-mcp-server", "--bin", "ableton-mcp-server", "--bin", "ableton-mcp-analysis-worker"] if args.bridge_only else ["--workspace", "--bins"]
     recipe = " ".join(command)
     if args.binaries_dir is None:
         subprocess.run(command, cwd=ROOT, check=True)
-        binaries = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / target / "release"
+        binaries = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / target / args.profile
     else:
         binaries = args.binaries_dir.resolve()
         recipe = "prebuilt binaries supplied with --binaries-dir; expected build: " + recipe
