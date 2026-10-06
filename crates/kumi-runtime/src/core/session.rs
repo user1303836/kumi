@@ -14,7 +14,10 @@ use super::{
 };
 use crate::{
     audio::tools::{listening_tools, ListeningOptions},
-    integrations::ableton::{project::new_conversation_id, willington::willington_instructions},
+    integrations::ableton::{
+        project::new_conversation_id,
+        willington::{willington_instructions, WillingtonSwitch},
+    },
     kernel::budget::{transcript_of, OBSERVATION_MARKER},
     library::{Library, LibraryToolsOptions, FIND_SOUNDS_TOOL},
     web::{
@@ -92,9 +95,9 @@ pub struct SessionOptions {
     pub goal_random: Option<Rc<dyn Fn() -> f64>>,
     pub goals: Option<Rc<dyn GoalStore>>,
     pub goal_budget: Option<GoalBudget>,
-    /// Whether Willington's bindings are on, None while Kumi's bridge in Live doesn't carry them: asked each
-    /// time the model's session is made, since /willington switches them while Kumi runs.
-    pub willington: Option<Rc<dyn Fn() -> Option<bool>>>,
+    /// How Willington's bindings stand, None while Kumi's bridge in Live doesn't carry them: asked each time
+    /// the model's session is made, since /willington switches them while Kumi runs.
+    pub willington: Option<Rc<dyn Fn() -> Option<WillingtonSwitch>>>,
 }
 impl SessionOptions {
     pub fn new(kernel_factory: KernelFactory, integration_factory: IntegrationFactory, on_event: Rc<dyn Fn(SessionEvent)>) -> Self {

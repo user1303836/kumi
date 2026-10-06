@@ -764,7 +764,8 @@ fn willington(on: bool) -> (kumi::willington::WillingtonControl, Rc<RefCell<Vec<
             Rc::new(move |value| {
                 on.set(value);
                 switched.borrow_mut().push(value);
-                async { Ok(()) }.boxed_local()
+                let said = if value { kumi::willington::TURNED_ON } else { kumi::willington::TURNED_OFF };
+                async move { Ok(said) }.boxed_local()
             })
         },
     };

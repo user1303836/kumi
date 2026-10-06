@@ -655,9 +655,9 @@ impl TuiApp {
         if let Some((willington, on)) = self.willington().filter(|_| command == "/willington") {
             self.clear_editor();
             match (willington.set)(!on).await {
-                Ok(()) => {
+                Ok(said) => {
                     self.0.state.borrow_mut().willington_off = on;
-                    self.notice(if on { crate::willington::TURNED_OFF } else { crate::willington::TURNED_ON }, NoticeTone::Info);
+                    self.notice(said, NoticeTone::Info);
                     // The bridge picks the switch up within a second; the model, from the next message.
                     controller.reconfigure().await?;
                 }

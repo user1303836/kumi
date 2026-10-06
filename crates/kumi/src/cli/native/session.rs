@@ -409,7 +409,7 @@ pub(super) async fn run_session(
     options.library = Some(library.clone());
     options.willington = Some({
         let env = io.env.clone();
-        Rc::new(move || Willington::find(&env).map(|willington| willington.on()))
+        Rc::new(move || Willington::find(&env).map(|willington| willington.switch()))
     });
     let session: Rc<dyn SessionController> = Rc::new(create_session(options)?);
     *controller.borrow_mut() = Some(Rc::downgrade(&session));

@@ -3,24 +3,29 @@
 //! Remote Script, which the bridge reads again within a second of it changing, Live running.
 
 use crate::config::remote_scripts_dir;
-use ableton_mcp_server::delivery::{write_owner_file, REMOTE_SCRIPT_PACKAGE, WILLINGTON_CONFIG, WILLINGTON_FOLDER};
+use ableton_mcp_server::delivery::{write_owner_file, REMOTE_SCRIPT_PACKAGE, WILLINGTON_CONFIG, WILLINGTON_FOLDER, WILLINGTON_RECEIPT};
 use futures::future::{FutureExt, LocalBoxFuture};
 use kumi_common::time::now_ms_f64;
-use kumi_runtime::system::Env;
+use kumi_runtime::{integrations::ableton::willington::WillingtonSwitch, system::Env};
 use serde_json::Value;
 use std::{
     cell::RefCell,
     path::{Path, PathBuf},
     rc::Rc,
+    time::{Duration, SystemTime},
 };
 
 /// What Kumi says when it starts while the bindings are off.
 pub const OFF_AT_START: &str = "Willington bindings are OFF currently, type /willington to toggle them on";
 pub const TURNED_ON: &str = "Willington bindings are ON: Kumi can map rack macros with their ranges, name macros and variations, and set rack chain zones, on the Live versions Willington supports. /willington again turns them off.";
+pub const TURNED_ON_WITH_FOLLOW: &str = "Willington bindings are ON: Kumi can map rack macros with their ranges, name macros and variations, set rack chain zones and set Session clips' Follow Actions, on the Live versions Willington supports. /willington again turns them off.";
 pub const TURNED_OFF: &str = "Willington bindings are OFF. /willington turns them on again.";
+/// Live can't unload Follow Actions' bindings once it has them.
+pub const TURNED_OFF_FOLLOW_STAYS: &str = "Willington bindings are OFF. Follow Actions' bindings, once Live has loaded them, stay until it restarts, with their edits off. /willington turns them on again.";
 
-/// Every binding, with its edits: the switch /willington writes.
-const ON: &[u8] = b"{\"version\": 1, \"followActions\": true, \"deviceTools\": true, \"rackZones\": true, \"enableWrites\": true}\n";
+/// How long after the bindings are turned on the bridge may still be loading them: it looks at the switch
+/// once a second, then checks each binding against Live's own executable.
+const LOADING: Duration = Duration::from_secs(10);
 
 /// Willington in the bridge in Live, when the bridge carries its files (or they're installed beside it).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,37 +42,83 @@ impl Willington {
         let runtime = |folder: &Path| folder.join("WillingtonRuntime").join("__init__.py").is_file();
         (bridge.join("__init__.py").is_file() && (runtime(&bridge.join(WILLINGTON_FOLDER)) || runtime(scripts))).then_some(Self { bridge })
     }
+    fn scripts(&self) -> &Path {
+        self.bridge.parent().unwrap_or(Path::new("."))
+    }
+    fn switch_file(&self) -> PathBuf {
+        self.bridge.join(WILLINGTON_CONFIG)
+    }
     /// On while the switch asks for edits from at least one binding; anything else, a missing switch too, is off.
     pub fn on(&self) -> bool {
-        let Ok(bytes) = std::fs::read(self.bridge.join(WILLINGTON_CONFIG)) else { return false };
-        let Ok(value) = serde_json::from_slice::<Value>(&bytes) else { return false };
-        value["enableWrites"] == true && ["followActions", "deviceTools", "rackZones"].iter().any(|key| value[*key] == true)
+        read_json(&self.switch_file()).is_some_and(|value| {
+            value["enableWrites"] == true && ["followActions", "deviceTools", "rackZones"].iter().any(|key| value[*key] == true)
+        })
     }
-    /// On writes the switch, owner-only (the bridge reads no other kind); off removes it.
-    pub fn set(&self, on: bool) -> Result<(), String> {
-        let switch = self.bridge.join(WILLINGTON_CONFIG);
-        if on {
-            return write_owner_file(&switch, ON).map_err(|error| error.message().to_string());
+    /// The switch as the model is told of it: turned on moments ago, the bindings may not be loaded yet.
+    pub fn switch(&self) -> WillingtonSwitch {
+        if !self.on() {
+            return WillingtonSwitch::Off;
         }
+        // A time ahead of the clock counts as just now.
+        let modified = std::fs::metadata(self.switch_file()).and_then(|entry| entry.modified());
+        if modified.is_ok_and(|at| at.elapsed().map_or(true, |age| age < LOADING)) {
+            WillingtonSwitch::JustOn
+        } else {
+            WillingtonSwitch::On
+        }
+    }
+    /// The switch file as it stands (its time and size), None when there's none: what tells that it changed.
+    fn stamp(&self) -> Option<(SystemTime, u64)> {
+        let entry = std::fs::metadata(self.switch_file()).ok()?;
+        Some((entry.modified().ok()?, entry.len()))
+    }
+    /// Whether a passing Follow Action self-test sits beside the WillingtonBindings the bridge loads: one
+    /// installed beside the bridge comes first on Python's path, then the bridge's own copy. The bridge checks
+    /// the receipt against the library itself; without one, Follow Action edits stay off.
+    fn follow_receipt(&self) -> bool {
+        let beside = self.scripts().join("WillingtonBindings");
+        let receipt =
+            if beside.join("__init__.py").is_file() { beside.join("self-test.json") } else { self.bridge.join(WILLINGTON_RECEIPT) };
+        read_json(&receipt).is_some_and(|value| value["status"] == "passed")
+    }
+    /// On writes the switch, owner-only (the bridge reads no other kind); off removes it. Follow Actions come
+    /// on only with a self-test receipt that can turn their edits on, since Live can't unload their bindings.
+    /// Done, it says what to tell the producer.
+    pub fn set(&self, on: bool) -> Result<&'static str, String> {
+        let switch = self.switch_file();
+        if on {
+            let follow = self.follow_receipt();
+            let bytes = format!(
+                "{{\"version\": 1, \"followActions\": {follow}, \"deviceTools\": true, \"rackZones\": true, \"enableWrites\": true}}\n"
+            );
+            // Staged beside the bridge, so a write cut short leaves nothing among its installed files.
+            write_owner_file(&switch, self.scripts(), bytes.as_bytes()).map_err(|error| error.message().to_string())?;
+            return Ok(if follow { TURNED_ON_WITH_FOLLOW } else { TURNED_ON });
+        }
+        let follow = read_json(&switch).is_some_and(|value| value["followActions"] == true);
         match std::fs::remove_file(&switch) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.to_string()),
-            _ => Ok(()),
+            _ => Ok(if follow { TURNED_OFF_FOLLOW_STAYS } else { TURNED_OFF }),
         }
     }
 }
+fn read_json(path: &Path) -> Option<Value> {
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
 
 /// /willington for the app: whether the bindings are on (None while the bridge in Live doesn't carry
-/// Willington), and switching them.
+/// Willington), and switching them, which ends with what to tell the producer.
 #[derive(Clone)]
 pub struct WillingtonControl {
     pub on: Rc<dyn Fn() -> Option<bool>>,
-    pub set: Rc<dyn Fn(bool) -> LocalBoxFuture<'static, Result<(), String>>>,
+    pub set: Rc<dyn Fn(bool) -> LocalBoxFuture<'static, Result<&'static str, String>>>,
 }
 /// How often Kumi looks again for a bridge that doesn't carry Willington yet: first-run setup can put one in place.
 const LOOK_AGAIN_MS: f64 = 2000.;
 impl WillingtonControl {
     pub fn new(env: Env) -> Self {
-        // The command menu asks on every frame it's drawn: the bridge, once found, stays where it is.
+        // The command menu asks on every frame it's drawn: the bridge, once found, stays where it is, and the
+        // switch is read again only when its file changes.
         let found = RefCell::new((None::<Willington>, f64::NEG_INFINITY));
         let find: Rc<dyn Fn() -> Option<Willington>> = Rc::new(move || {
             let mut found = found.borrow_mut();
@@ -77,17 +128,33 @@ impl WillingtonControl {
             }
             found.0.clone()
         });
+        let read = Rc::new(RefCell::new(None::<(Option<(SystemTime, u64)>, bool)>));
         Self {
             on: {
-                let find = find.clone();
-                Rc::new(move || find().map(|willington| willington.on()))
+                let (find, read) = (find.clone(), read.clone());
+                Rc::new(move || {
+                    let willington = find()?;
+                    let stamp = willington.stamp();
+                    let mut read = read.borrow_mut();
+                    if let Some((seen, on)) = *read {
+                        if seen == stamp {
+                            return Some(on);
+                        }
+                    }
+                    let on = willington.on();
+                    *read = Some((stamp, on));
+                    Some(on)
+                })
             },
             set: Rc::new(move |on| {
-                let found = find();
+                let (found, read) = (find(), read.clone());
                 async move {
                     let willington = found.ok_or_else(|| "the bridge in Live doesn't carry Willington".to_string())?;
                     // On Windows an owner-only file takes PowerShell: off the app's thread.
-                    tokio::task::spawn_blocking(move || willington.set(on)).await.map_err(|error| error.to_string())?
+                    let said = tokio::task::spawn_blocking(move || willington.set(on)).await.map_err(|error| error.to_string())?;
+                    // Written within the same tick as the last read, the switch could keep its time: read it again.
+                    *read.borrow_mut() = None;
+                    said
                 }
                 .boxed_local()
             }),

@@ -11,15 +11,26 @@ const OFF: &str = "Willington's bindings are off. Turned on, they let Kumi map a
 const ON: &str = "Willington's bindings are on, so the macro mapping Live otherwise doesn't allow is here: edit_rack_mapping maps a parameter in a rack to one of its macros with the mapping's range, and names macros and variations. Map macros with it, playback stopped, rather than asking the producer to; modulators still can't be mapped.";
 const UNSUPPORTED: &str = "Willington's bindings are on, but none fit the Live that's open: they're made for exact Live versions. Its macro mapping isn't here, so go on as Live allows without it.";
 
-/// The instructions for Willington: `on` is whether its bindings are on, None when Kumi's bridge doesn't
+/// Willington's bindings, as their switch stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WillingtonSwitch {
+    Off,
+    On,
+    /// Turned on moments ago: the bridge may still be loading them, so their tools may not be offered yet.
+    JustOn,
+}
+
+/// The instructions for Willington: `switch` is how its bindings stand, None when Kumi's bridge doesn't
 /// carry them; `offered` whether the model has a tool by a name. Nothing while Live isn't connected.
-pub fn willington_instructions(on: Option<bool>, offered: impl Fn(&str) -> bool) -> &'static str {
-    match on {
+pub fn willington_instructions(switch: Option<WillingtonSwitch>, offered: impl Fn(&str) -> bool) -> &'static str {
+    match switch {
         Some(_) if !offered(CHANGES_TOOL) => "",
         None => "",
-        Some(false) => OFF,
-        Some(true) if offered(MAPPING_TOOL) => ON,
-        Some(true) => UNSUPPORTED,
+        Some(WillingtonSwitch::Off) => OFF,
+        Some(_) if offered(MAPPING_TOOL) => ON,
+        // Not "none fit" yet: once the bridge has loaded them, their tools arrive and the session is made again.
+        Some(WillingtonSwitch::JustOn) => "",
+        Some(WillingtonSwitch::On) => UNSUPPORTED,
     }
 }
 
@@ -29,14 +40,19 @@ mod tests {
 
     #[test]
     fn each_state_has_its_own_words_and_none_without_live_or_willington() {
+        use WillingtonSwitch::*;
         let connected = |names: &'static [&'static str]| move |name: &str| names.contains(&name);
         assert_eq!(willington_instructions(None, connected(&[CHANGES_TOOL, MAPPING_TOOL])), "");
-        for on in [false, true] {
-            assert_eq!(willington_instructions(Some(on), connected(&[])), "");
+        for switch in [Off, On, JustOn] {
+            assert_eq!(willington_instructions(Some(switch), connected(&[])), "");
         }
-        assert_eq!(willington_instructions(Some(false), connected(&[CHANGES_TOOL])), OFF);
-        assert_eq!(willington_instructions(Some(true), connected(&[CHANGES_TOOL, MAPPING_TOOL])), ON);
-        assert_eq!(willington_instructions(Some(true), connected(&[CHANGES_TOOL])), UNSUPPORTED);
+        assert_eq!(willington_instructions(Some(Off), connected(&[CHANGES_TOOL])), OFF);
+        for switch in [On, JustOn] {
+            assert_eq!(willington_instructions(Some(switch), connected(&[CHANGES_TOOL, MAPPING_TOOL])), ON);
+        }
+        assert_eq!(willington_instructions(Some(On), connected(&[CHANGES_TOOL])), UNSUPPORTED);
+        // Turned on a moment ago, the bridge may not have loaded them yet: nothing said, rather than "none fit".
+        assert_eq!(willington_instructions(Some(JustOn), connected(&[CHANGES_TOOL])), "");
         assert!(OFF.contains("/willington") && !ON.contains("/willington") && !UNSUPPORTED.contains("/willington"));
     }
 }
