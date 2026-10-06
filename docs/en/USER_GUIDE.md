@@ -459,7 +459,7 @@ kept in a managed folder (see [Live safety](LIVE_SAFETY.md)).
 | --- | --- | --- |
 | `live_tempo_preview/apply` | edit | Tempo, 20–999 BPM. |
 | `live_song_settings_preview/apply` | edit | Time signature, swing, launch and record quantization, select on launch. |
-| `live_tuning_preview/apply` | edit | Tuning system and scale. |
+| `live_tuning_preview/apply` | edit | The scale, and the loaded tuning's name, range and reference pitch. A tuning is loaded in Live's Browser (Python can't), and its note tunings are read, never set. |
 | `live_groove_preview/apply` | edit | Global groove amount and the grooves in the pool. |
 
 ### Playback

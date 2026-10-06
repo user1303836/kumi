@@ -7605,7 +7605,7 @@
     },
     {
       "name": "live_tuning_preview",
-      "description": "Read-only preflight for tuning-system and scale edits (name, note range, reference pitch, note tunings, root note, scale). Changes affect playback pitch globally.",
+      "description": "Read-only preflight for the loaded tuning system and the Set's scale: the tuning's name, its lowestNote and highestNote ({indexInOctave, octave}: a step of its pseudo-octave, from 0, and an octave) (Live keeps 128 notes from the lowest to the highest: setting one moves the other) and its referencePitch ({frequency, indexInOctave, octave}), and the scale's root note, name and mode. A tuning's note tunings are read (one row a step, as cents from the pseudo-octave split evenly), never set. Live's Python can't load or make a tuning: the producer loads one by double-clicking its .ascl in Live's Browser. Changes affect playback pitch globally.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -7616,40 +7616,69 @@
           },
           "lowestNote": {
             "type": "object",
-            "maxProperties": 8
+            "properties": {
+              "indexInOctave": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1024
+              },
+              "octave": {
+                "type": "integer",
+                "minimum": -64,
+                "maximum": 64
+              }
+            },
+            "required": [
+              "indexInOctave",
+              "octave"
+            ],
+            "additionalProperties": false
           },
           "highestNote": {
             "type": "object",
-            "maxProperties": 8
+            "properties": {
+              "indexInOctave": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1024
+              },
+              "octave": {
+                "type": "integer",
+                "minimum": -64,
+                "maximum": 64
+              }
+            },
+            "required": [
+              "indexInOctave",
+              "octave"
+            ],
+            "additionalProperties": false
           },
           "referencePitch": {
             "type": "object",
-            "maxProperties": 8
-          },
-          "noteTunings": {
-            "type": "array",
-            "minItems": 128,
-            "maxItems": 128,
-            "items": {
-              "type": "object",
-              "properties": {
-                "note": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 127
-                },
-                "deviation": {
-                  "type": "number",
-                  "minimum": -1200,
-                  "maximum": 1200
-                }
+            "properties": {
+              "frequency": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100000
               },
-              "required": [
-                "note",
-                "deviation"
-              ],
-              "additionalProperties": false
-            }
+              "indexInOctave": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1024
+              },
+              "octave": {
+                "type": "integer",
+                "minimum": -64,
+                "maximum": 64
+              }
+            },
+            "required": [
+              "frequency",
+              "indexInOctave",
+              "octave"
+            ],
+            "additionalProperties": false
           },
           "rootNote": {
             "type": "integer",

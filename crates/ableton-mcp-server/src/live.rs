@@ -1715,6 +1715,10 @@ pub struct LiveSongState {
     pub tempo_follower: Option<bool>,
 }
 
+/// Live keeps a tuning's note tunings one value a step of its pseudo-octave, and its Python can't load or make
+/// a tuning: they're read, never set (#206). The Remote Script says the same.
+pub const NOTE_TUNINGS_FIXED: &str = "noteTunings can't be set: Live tunes each step of the loaded tuning's pseudo-octave (13 for Bohlen-Pierce), not 128 MIDI notes, and loads a tuning only from an .ascl file in its Browser.";
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteTuning {
@@ -5357,40 +5361,25 @@ impl DeterministicLiveSimulator {
                     if let Some(value) = args.get("name") {
                         target["system"]["name"] = bounded_text(value, 256, "name is invalid")?.into();
                     }
+                    // As Live takes them (#206): a PitchClassAndOctave for the lowest and highest notes, a
+                    // ReferencePitch, and note tunings never.
+                    let whole =
+                        |value: &Value, low: f64, high: f64| value.as_f64().is_some_and(|n| n.fract() == 0.0 && (low..=high).contains(&n));
                     for key in ["lowestNote", "highestNote", "referencePitch"] {
                         if let Some(value) = args.get(key) {
-                            let valid = value.as_object().is_some_and(|fields| {
-                                fields.len() <= 8
-                                    && fields.iter().all(|(key, value)| {
-                                        let length = kumi_common::js::string::utf16_len(key);
-                                        length > 0
-                                            && length <= 64
-                                            && (value.is_null()
-                                                || value.is_boolean()
-                                                || value.as_f64().is_some_and(|v| v.is_finite() && v.abs() <= 1e9)
-                                                || value.as_str().is_some_and(|s| kumi_common::js::string::utf16_len(s) <= 256))
-                                    })
-                            });
+                            let pitch = key == "referencePitch";
+                            let valid = value.as_object().is_some_and(|fields| fields.len() == if pitch { 3 } else { 2 })
+                                && whole(&value["indexInOctave"], 0.0, 1024.0)
+                                && whole(&value["octave"], -64.0, 64.0)
+                                && (!pitch || value["frequency"].as_f64().is_some_and(|hz| hz.is_finite() && hz > 0.0 && hz <= 100_000.0));
                             if !valid {
-                                return Err(LiveError::range_error("tuning setting dictionaries are invalid"));
+                                return Err(LiveError::range_error(format!("{key} is invalid")));
                             }
                             target["system"][key] = value.clone();
                         }
                     }
-                    if let Some(value) = args.get("noteTunings") {
-                        if !value.as_array().is_some_and(|rows| {
-                            rows.len() == 128
-                                && rows.iter().all(|row| {
-                                    row["note"].as_f64().is_some_and(|n| n.is_finite() && n.fract() == 0.0 && (0.0..=127.0).contains(&n))
-                                        && row["deviation"].as_f64().is_some_and(|n| n.is_finite() && n.abs() <= 1200.0)
-                                })
-                        }) {
-                            return Err(LiveError::range_error("noteTunings must contain exactly 128 valid entries"));
-                        }
-                        if array(value).iter().map(|row| row["note"].as_f64().unwrap() as i64).collect::<HashSet<_>>().len() != 128 {
-                            return Err(LiveError::range_error("noteTunings notes are invalid"));
-                        }
-                        target["system"]["noteTunings"] = value.clone();
+                    if args.contains_key("noteTunings") {
+                        return Err(LiveError::error(NOTE_TUNINGS_FIXED));
                     }
                     if let Some(value) = args.get("rootNote") {
                         ranged_number(value, 0.0, 11.0, true, "rootNote is invalid")?;

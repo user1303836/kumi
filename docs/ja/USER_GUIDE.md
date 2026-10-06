@@ -363,7 +363,7 @@ Live が接続している間、ブリッジは 10 秒ごとに拡張機能を�
 | --- | --- | --- |
 | `live_tempo_preview/apply` | edit | テンポ、20–999 BPM。 |
 | `live_song_settings_preview/apply` | edit | 拍子、スウィング、起動と録音のクオンタイズ、起動時の選択（select on launch）。 |
-| `live_tuning_preview/apply` | edit | チューニングシステムとスケール。 |
+| `live_tuning_preview/apply` | edit | スケールと、読み込まれたチューニングの名前、音域、基準ピッチ。チューニングは Live のブラウザーで読み込みます（Python からはできません）。ノートごとのチューニングは読むだけで、設定はできません。 |
 | `live_groove_preview/apply` | edit | グローバルのグルーヴ量と、プールにあるグルーヴ。 |
 
 ### 再生

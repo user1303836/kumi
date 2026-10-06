@@ -363,7 +363,7 @@ Live 连接期间，桥接每 10 秒寻找一次扩展。扩展一旦应答，�
 | --- | --- | --- |
 | `live_tempo_preview/apply` | edit | 速度，20–999 BPM。 |
 | `live_song_settings_preview/apply` | edit | 拍号、摇摆、触发和录音量化、触发时选中（select on launch）。 |
-| `live_tuning_preview/apply` | edit | 调律系统和音阶。 |
+| `live_tuning_preview/apply` | edit | 音阶，以及已载入调律的名称、音域和参考音高。调律在 Live 的浏览器里载入（Python 不能），各音的调律只读不写。 |
 | `live_groove_preview/apply` | edit | 全局律动量和律动池中的律动。 |
 
 ### 播放

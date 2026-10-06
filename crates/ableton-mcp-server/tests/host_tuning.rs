@@ -253,25 +253,76 @@ fn context(c: Option<&LiveOperationContext>) -> Value {
         }
     }
 }
-fn setup(_: &DeterministicLiveSimulator, _: &str) {}
+/// The simulator's tuning as Live 12.4 reports one (#206): its lowest and highest notes are places (a step of
+/// the pseudo-octave and an octave), its reference pitch a frequency on one, its note tunings a row a step.
+fn setup(sim: &DeterministicLiveSimulator, _: &str) {
+    let mut state = sim.state.borrow_mut();
+    let system = &mut state["tuning"]["system"];
+    system["lowestNote"] = json!({"indexInOctave":0,"octave":-2});
+    system["highestNote"] = json!({"indexInOctave":7,"octave":8});
+    system["referencePitch"] = json!({"frequency":440,"indexInOctave":9,"octave":3});
+    system["noteTunings"] = json!((0..12).map(|note| json!({"note":note,"deviation":0})).collect::<Vec<_>>());
+}
 fn params(kind: &str) -> Value {
     match kind {
         "scale" => json!({"rootNote":7,"scaleName":"Minor","scaleMode":false}),
-        "system" => {
-            json!({"name":"Custom","lowestNote":{"note":2,"deviation":5},"highestNote":{"deviation":-5,"note":125},"referencePitch":{"frequency":442,"note":69}})
-        }
-        "notes" => json!({"noteTunings":(0..128).map(|note|json!({"note":note,"deviation":(note%12)*10})).collect::<Vec<_>>()}),
+        "system" => json!({
+            "name":"Custom",
+            "lowestNote":{"indexInOctave":2,"octave":-1},
+            "highestNote":{"octave":7,"indexInOctave":11},
+            "referencePitch":{"frequency":442,"indexInOctave":9,"octave":3}
+        }),
         _ => json!({"name":"Custom"}),
     }
 }
 fn alter(s: &mut Value, kind: &str) {
     if kind == "scale" {
         s["tuning"]["scale"]["rootNote"] = json!(5);
-    } else if kind == "notes" {
-        s["tuning"]["system"]["noteTunings"][0]["deviation"] = json!(8);
     } else {
         s["tuning"]["system"]["name"] = json!("Manual");
     }
+}
+
+#[tokio::test]
+async fn note_tunings_are_read_never_set_and_notes_take_lives_shapes() {
+    // #206: Live keeps one value a step of the loaded tuning's pseudo-octave, so 128 MIDI-note rows failed in
+    // Live on every write. They're refused before anything is read, and so is a note or a reference pitch in
+    // any shape but Live's.
+    let adapter = Rc::new(Adapter::new("system"));
+    setup(&adapter.sim, "system");
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let rows: Vec<_> = (0..128).map(|note| json!({"note":note,"deviation":0})).collect();
+    let refused = host.live_tuning_preview_async(&json!(1), &json!({"noteTunings":rows})).await;
+    assert_eq!(refused["error"]["message"], NOTE_TUNINGS_FIXED, "{refused}");
+    for (args, said) in [
+        (json!({"lowestNote":{"note":2,"deviation":5}}), "lowestNote is {indexInOctave, octave}"),
+        (json!({"highestNote":{"indexInOctave":2,"octave":1,"cents":0}}), "highestNote is {indexInOctave, octave}"),
+        (json!({"referencePitch":{"frequency":442,"note":69}}), "referencePitch is {frequency, indexInOctave, octave}"),
+        (json!({"referencePitch":{"frequency":0,"indexInOctave":9,"octave":3}}), "referencePitch is {frequency, indexInOctave, octave}"),
+    ] {
+        let refused = host.live_tuning_preview_async(&json!(1), &args).await;
+        assert!(refused["error"]["message"].as_str().unwrap().starts_with(said), "{args}: {refused}");
+    }
+    assert!(adapter.calls.borrow().is_empty(), "nothing read or written: {:?}", adapter.calls.borrow());
+    // Live's shapes go through, in Live's order, and the read after confirms them exactly.
+    let preview = host
+        .live_tuning_preview_async(
+            &json!(1),
+            &json!({"highestNote":{"octave":7,"indexInOctave":11},"referencePitch":{"octave":3,"indexInOctave":9,"frequency":432}}),
+        )
+        .await;
+    let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["proposed"]["highestNote"].to_string(), r#"{"indexInOctave":11,"octave":7}"#);
+    let applied = host
+        .live_tuning_apply_async(
+            &json!(2),
+            &json!({"transactionId":body["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"}),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(applied["result"]["isError"] != true, "{applied}");
+    assert_eq!(adapter.sim.state.borrow()["tuning"]["system"]["referencePitch"], json!({"frequency":432,"indexInOctave":9,"octave":3}));
 }
 #[tokio::test]
 async fn tuning_validation_matches_source() {

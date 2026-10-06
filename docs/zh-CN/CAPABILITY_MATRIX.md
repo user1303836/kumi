@@ -34,7 +34,7 @@
 | 设备 | 从 Browser 加载；参数、开关、移动、复制、删除；机架、链、鼓垫、宏和变体；保存、调用和渐变（morph）设备状态；Drift、Drum Cell、EQ Eight、Hybrid Reverb、Meld、Looper、Simpler、Wavetable、Roar、Shifter、Spectral Resonator 和 CC Control 的设置；插件参数、预设和编辑器窗口 | Remote Script；复制时使用扩展或 Remote Script | 精确；删除设备和机架操作：不可撤销 | 验收；早期运行（Browser 中的每个设备） |
 | 宏映射、Follow Actions | 宏和变体的名称、把参数映射到宏、机架链区域（zone）、Session 片段的 Follow Actions | Willington | 精确 | Willington 记录 |
 | Browser 与音色库 | 搜索、根目录、查看、预览；Live 的库数据库（标签、类型、插件列表；需主动开启，只读） | Remote Script；数据库由桥接读取 | 无 | 早期运行 |
-| 走带与歌曲 | 播放、停止、继续、位置、循环、节拍器、穿插录音（punch）、敲击速度（tap tempo）、微调（nudge）；速度、拍号、摇摆（swing）、启动和录音量化；音阶与调律；律动池；Link 设置；Live 自己的撤销和重做；把几项修改合成 Live 的一个撤销步骤 | Remote Script | 设置：精确；动作：无 | 验收 |
+| 走带与歌曲 | 播放、停止、继续、位置、循环、节拍器、穿插录音（punch）、敲击速度（tap tempo）、微调（nudge）；速度、拍号、摇摆（swing）、启动和录音量化；音阶；已载入调律的名称、音域和参考音高（Live 只能从浏览器载入调律，不能从 Python 载入）；律动池；Link 设置；Live 自己的撤销和重做；把几项修改合成 Live 的一个撤销步骤 | Remote Script | 设置：精确；动作：无 | 验收 |
 | 播放与录音 | 启动片段和场景、按住启动按钮、受保护的场景试听、紧急停止；Session 和编曲视图录音；捕获 MIDI 和场景 | Remote Script | 无（只是播放）；捕获的片段：精确 | 验收；早期运行 |
 | 离线渲染 | 音频轨道自身的片段（在经过其设备之前），比实时快许多倍 | 扩展 | 无 | 验收 |
 | 视图与选择 | 选中的轨道、场景、片段、设备、参数和链；Session 或编曲视图、缩放、细节视图；Live 的对话框；状态栏消息 | Remote Script | 在 Live 允许恢复之处：精确；对话框和消息：无 | 早期运行 |

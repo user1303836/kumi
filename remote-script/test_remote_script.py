@@ -4241,61 +4241,140 @@ class TakeLaneExpansionTests(unittest.TestCase):
         self.assertTrue(result["changed"]); self.assertTrue(lane.arrangement_clips[1].muted)
 
 
+class FakePitchClassAndOctave:
+    """Live's PitchClassAndOctave: made by keyword or position, read-only once made."""
+    def __init__(self, index_in_octave, octave): self._place = (int(index_in_octave), int(octave))
+    index_in_octave = property(lambda self: self._place[0])
+    octave = property(lambda self: self._place[1])
+    def __eq__(self, other): return isinstance(other, FakePitchClassAndOctave) and self._place == other._place
+
+
+class FakeReferencePitch:
+    """Live's ReferencePitch: a frequency in Hz on a step of an octave, read-only once made, made as Live 12.4
+    makes it: ReferencePitch(index_in_octave, octave, frequency)."""
+    def __init__(self, index_in_octave, octave, frequency): self._pitch = (float(frequency), int(index_in_octave), int(octave))
+    frequency = property(lambda self: self._pitch[0])
+    index_in_octave = property(lambda self: self._pitch[1])
+    octave = property(lambda self: self._pitch[2])
+    def __eq__(self, other): return isinstance(other, FakeReferencePitch) and self._pitch == other._pitch
+
+
+def live_with_tuning_types():
+    live = types.ModuleType("Live")
+    live.TuningSystem = types.SimpleNamespace(PitchClassAndOctave=FakePitchClassAndOctave, ReferencePitch=FakeReferencePitch)
+    return live
+
+
 class FakeTuningSystem:
-    def __init__(self):
-        self.name = "Equal"
-        self.lowest_note = {"note": 0, "deviation": 0.0}
-        self.highest_note = {"note": 127, "deviation": 0.0}
-        self.reference_pitch = {"note": 69, "frequency": 440.0}
-        self.pseudo_octave_in_cents = 1200.0
-        self.note_tunings = [{"note": index, "deviation": 0.0} for index in range(128)]
+    """Live 12.4's TuningSystem, refusing what Live refuses (#206): note_tunings are the cents of each step of the
+    pseudo-octave and take a tuple; lowest_note and highest_note take a PitchClassAndOctave, reference_pitch a
+    ReferencePitch, never a dict."""
+    def __init__(self, name="Equal", steps=12, pseudo_octave=1200.0):
+        self.name = name; self.pseudo_octave_in_cents = pseudo_octave
+        self._tunings = [pseudo_octave * index / steps for index in range(steps)]
+        self._lowest = FakePitchClassAndOctave(0, -2); self._highest = FakePitchClassAndOctave(7, 8); self._reference = FakeReferencePitch(frequency=440.0, index_in_octave=9, octave=3)
+    number_of_notes_in_pseudo_octave = property(lambda self: len(self._tunings))
+    @property
+    def note_tunings(self): return list(self._tunings)
+    @note_tunings.setter
+    def note_tunings(self, value):
+        if not isinstance(value, tuple): raise TypeError(f"Python argument types in None.None(TuningSystem, {type(value).__name__}) did not match C++ signature")
+        self._tunings = [float(cents) for cents in value]
+    def _place(kind):
+        def get(self): return getattr(self, kind)
+        def put(self, value):
+            if not isinstance(value, FakePitchClassAndOctave): raise TypeError(f"No registered converter was able to produce a C++ rvalue of type TPitchClassAndOctave from this Python object of type {type(value).__name__}")
+            setattr(self, kind, value)
+        return property(get, put)
+    lowest_note = _place("_lowest"); highest_note = _place("_highest")
+    @property
+    def reference_pitch(self): return self._reference
+    @reference_pitch.setter
+    def reference_pitch(self, value):
+        if not isinstance(value, FakeReferencePitch): raise TypeError(f"Python argument types in None.None(TuningSystem, {type(value).__name__}) did not match C++ signature")
+        self._reference = value
 
 
 class TuningScaleTests(unittest.TestCase):
-    def _mapper_with_tuning(self):
-        song = FakeSong()
-        song.tuning_system = FakeTuningSystem()
-        song.root_note = 0; song.scale_name = "Major"; song.scale_mode = True; song.scale_intervals = [0, 2, 4, 5, 7, 9, 11]
-        return song, mapper if False else LiveObjectMapper(song)
+    def setUp(self):
+        self.live_patch = patch.dict(sys.modules, {"Live": live_with_tuning_types()}); self.live_patch.start()
+        self.addCleanup(self.live_patch.stop)
 
-    def test_tuning_read_exposes_system_and_scale(self):
+    def _mapper_with_tuning(self, tuning=None):
+        song = FakeSong()
+        song.tuning_system = tuning or FakeTuningSystem()
+        song.root_note = 0; song.scale_name = "Major"; song.scale_mode = True; song.scale_intervals = [0, 2, 4, 5, 7, 9, 11]
+        return song, LiveObjectMapper(song)
+
+    def test_tuning_read_exposes_lives_tuning_and_the_scale(self):
         song, mapper = self._mapper_with_tuning()
         self.assertTrue(mapper._operation_supported("tuning.read")); self.assertTrue(mapper._operation_supported("tuning.set"))
         set_ref = mapper.snapshot()["set"]["ref"]
         result = mapper.invoke("tuning.read", {"setRef": set_ref})
-        self.assertEqual(result["tuningSystem"]["name"], "Equal"); self.assertEqual(result["tuningSystem"]["referencePitch"], {"note": 69, "frequency": 440.0})
-        self.assertEqual(result["tuningSystem"]["pseudoOctaveInCents"], 1200.0); self.assertEqual(len(result["tuningSystem"]["noteTunings"]), 128)
+        system = result["tuningSystem"]
+        self.assertEqual(system["name"], "Equal"); self.assertEqual(system["pseudoOctaveInCents"], 1200.0)
+        self.assertEqual((system["lowestNote"], system["highestNote"]), ({"indexInOctave": 0, "octave": -2}, {"indexInOctave": 7, "octave": 8}))
+        self.assertEqual(system["referencePitch"], {"frequency": 440.0, "indexInOctave": 9, "octave": 3}); self.assertEqual(result["referencePitch"], system["referencePitch"])
+        # One row a step, as cents from the pseudo-octave split evenly: 12-TET is all 0.
+        self.assertEqual(system["noteTunings"], [{"note": index, "deviation": 0.0} for index in range(12)]); self.assertEqual(result["notesInPseudoOctave"], 12)
         self.assertEqual(result["scale"], {"rootNote": 0, "scaleName": "Major", "scaleMode": True, "scaleIntervals": [0, 2, 4, 5, 7, 9, 11]})
         validate_operation_payload("tuning.read", "result", result)
 
-    def test_tuning_set_validates_and_rolls_back_exactly(self):
+    def test_a_tuning_live_loads_is_read_within_its_bounds_whatever_its_steps(self):
+        # #206: Bohlen-Pierce's steps run to 1,756 cents, past the read's ±1200, and every read of it failed.
+        bohlen = FakeTuningSystem("Bohlen Pierce", 13, 1901.955)
+        song, mapper = self._mapper_with_tuning(bohlen)
+        result = mapper.invoke("tuning.read", {"setRef": mapper.snapshot()["set"]["ref"]})
+        self.assertEqual(len(result["tuningSystem"]["noteTunings"]), 13); self.assertEqual(result["notesInPseudoOctave"], 13)
+        self.assertTrue(all(abs(row["deviation"]) < 0.001 for row in result["tuningSystem"]["noteTunings"]))
+        validate_operation_payload("tuning.read", "result", result)
+        # Just intonation's third sits 13.7 cents under the equal one.
+        just = FakeTuningSystem("Just", 12, 1200.0); just._tunings[4] = 386.3137
+        song.tuning_system = just
+        rows = mapper.invoke("tuning.read", {"setRef": mapper.snapshot()["set"]["ref"]})["tuningSystem"]["noteTunings"]
+        self.assertEqual(rows[4], {"note": 4, "deviation": -13.6863})
+        # More steps than the read holds: no rows, and the read still answers.
+        song.tuning_system = FakeTuningSystem("311-EDO", 311, 1200.0)
+        result = mapper.invoke("tuning.read", {"setRef": mapper.snapshot()["set"]["ref"]})
+        self.assertEqual((result["tuningSystem"]["noteTunings"], result["notesInPseudoOctave"]), ([], 311)); validate_operation_payload("tuning.read", "result", result)
+
+    def test_tuning_set_takes_lives_types_and_rolls_back_with_them(self):
         song, mapper = self._mapper_with_tuning()
         set_ref = mapper.snapshot()["set"]["ref"]; identity = mapper.snapshot()["set"]["objectIdentity"]
         def fences(): return {"setRef": set_ref, "expectedObjectIdentity": identity, "expectedRevision": mapper._tuning_revision()}
-        result = mapper.invoke("tuning.set", {**fences(), "referencePitch": {"note": 69, "frequency": 432.0}, "rootNote": 9, "scaleName": "Minor", "scaleMode": False})
+        result = mapper.invoke("tuning.set", {**fences(), "referencePitch": {"frequency": 432, "indexInOctave": 9, "octave": 3}, "lowestNote": {"indexInOctave": 0, "octave": -1},
+                                              "rootNote": 9, "scaleName": "Minor", "scaleMode": False})
         self.assertTrue(result["changed"]); validate_operation_payload("tuning.set", "result", result)
-        self.assertEqual(song.tuning_system.reference_pitch, {"note": 69, "frequency": 432.0}); self.assertEqual(song.root_note, 9); self.assertEqual(song.scale_name, "Minor"); self.assertEqual(song.scale_mode, False)
+        self.assertEqual(song.tuning_system.reference_pitch, FakeReferencePitch(frequency=432.0, index_in_octave=9, octave=3)); self.assertEqual(song.tuning_system.lowest_note, FakePitchClassAndOctave(0, -1))
+        self.assertEqual((song.root_note, song.scale_name, song.scale_mode), (9, "Minor", False))
         stale = fences(); stale["expectedRevision"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "changed since preview"): mapper.invoke("tuning.set", {**stale, "rootNote": 0})
-        with self.assertRaisesRegex(ValueError, "referencePitch is invalid"): mapper.invoke("tuning.set", {**fences(), "referencePitch": 432.0})
+        for bad in (432.0, {"note": 69, "frequency": 432.0}, {"frequency": 0, "indexInOctave": 9, "octave": 3}, {"frequency": 440, "indexInOctave": 12, "octave": 3}):
+            with self.assertRaisesRegex(ValueError, "referencePitch is invalid"): mapper.invoke("tuning.set", {**fences(), "referencePitch": bad})
+        with self.assertRaisesRegex(ValueError, "highestNote is invalid"): mapper.invoke("tuning.set", {**fences(), "highestNote": {"note": 127, "deviation": 0.0}})
         with self.assertRaisesRegex(ValueError, "tuning fields are invalid"): mapper.invoke("tuning.set", {**fences(), "scaleIntervals": [0, 2, 3]})
         with self.assertRaisesRegex(ValueError, "scaleMode is invalid"): mapper.invoke("tuning.set", {**fences(), "scaleMode": "Ionian"})
-        with self.assertRaisesRegex(ValueError, "exactly 128"): mapper.invoke("tuning.set", {**fences(), "noteTunings": [{"note": 0, "deviation": 0.0}]})
+        with self.assertRaisesRegex(ValueError, "noteTunings can't be set"): mapper.invoke("tuning.set", {**fences(), "noteTunings": [{"note": index, "deviation": 0.0} for index in range(128)]})
         with self.assertRaisesRegex(ValueError, "no fields"): mapper.invoke("tuning.set", fences())
-        rows = [{"note": index, "deviation": 5.0 if index == 69 else 0.0} for index in range(128)]
-        result = mapper.invoke("tuning.set", {**fences(), "noteTunings": rows})
-        self.assertTrue(result["changed"]); self.assertEqual(song.tuning_system.note_tunings[69]["deviation"], 5.0)
+        # Live refusing one value: the others go back as Live had them, in its own types.
         class FailingTuning(FakeTuningSystem):
-            @property
-            def reference_pitch(self): return self._pitch
-            @reference_pitch.setter
+            @FakeTuningSystem.reference_pitch.setter
             def reference_pitch(self, value):
-                if value == {"note": 69, "frequency": 415.0}: raise RuntimeError("tuning rejected")
-                self._pitch = value
-        failing = FailingTuning(); failing._pitch = {"note": 69, "frequency": 440.0}; song.tuning_system = failing
+                if isinstance(value, FakeReferencePitch) and value.frequency == 415.0: raise RuntimeError("tuning rejected")
+                FakeTuningSystem.reference_pitch.fset(self, value)
+        failing = FailingTuning(); song.tuning_system = failing
         with self.assertRaisesRegex(RuntimeError, "tuning rejected"):
-            mapper.invoke("tuning.set", {**fences(), "referencePitch": {"note": 69, "frequency": 415.0}, "rootNote": 2})
-        self.assertEqual(failing.reference_pitch, {"note": 69, "frequency": 440.0}); self.assertEqual(song.root_note, 9)
+            mapper.invoke("tuning.set", {**fences(), "highestNote": {"indexInOctave": 0, "octave": 9}, "referencePitch": {"frequency": 415, "indexInOctave": 9, "octave": 3}, "rootNote": 2})
+        self.assertEqual((failing.highest_note, failing.reference_pitch, song.root_note), (FakePitchClassAndOctave(7, 8), FakeReferencePitch(frequency=440.0, index_in_octave=9, octave=3), 9))
+
+    def test_without_lives_types_nothing_is_set(self):
+        song, mapper = self._mapper_with_tuning()
+        set_ref = mapper.snapshot()["set"]["ref"]; identity = mapper.snapshot()["set"]["objectIdentity"]
+        with patch.dict(sys.modules, {"Live": None}):
+            with self.assertRaisesRegex(ValueError, "needs Live's ReferencePitch"):
+                mapper.invoke("tuning.set", {"setRef": set_ref, "expectedObjectIdentity": identity, "expectedRevision": mapper._tuning_revision(),
+                                             "referencePitch": {"frequency": 432, "indexInOctave": 9, "octave": 3}})
+        self.assertEqual(song.tuning_system.reference_pitch, FakeReferencePitch(frequency=440.0, index_in_octave=9, octave=3))
 
 
 class FakeGroove:
@@ -8841,14 +8920,14 @@ class ExtendedOperationTests(unittest.TestCase):
 
     def test_tuning_read_gives_the_reference_pitch_and_the_pseudo_octave(self):
         song = FakeSong(); song.tuning_system = FakeTuningSystem(); song.root_note = 0; song.scale_name = "Major"; song.scale_mode = True; song.scale_intervals = [0, 2, 4, 5, 7, 9, 11]
-        song.tuning_system.reference_pitch = types.SimpleNamespace(frequency=432.0, index_in_octave=9, octave=4); song.tuning_system.number_of_notes_in_pseudo_octave = 12
+        song.tuning_system.reference_pitch = FakeReferencePitch(frequency=432.0, index_in_octave=9, octave=4)
         mapper = LiveObjectMapper(song); set_ref = mapper.snapshot()["set"]["ref"]
         read = mapper.invoke("tuning.read", {"setRef": set_ref}); validate_operation_payload("tuning.read", "result", read)
         self.assertEqual((read["referencePitch"], read["notesInPseudoOctave"]), ({"frequency": 432.0, "indexInOctave": 9, "octave": 4}, 12))
         # The revision covers them: a new reference pitch is a new revision.
-        song.tuning_system.reference_pitch = types.SimpleNamespace(frequency=440.0, index_in_octave=9, octave=4)
+        song.tuning_system.reference_pitch = FakeReferencePitch(frequency=440.0, index_in_octave=9, octave=4)
         self.assertNotEqual(mapper.invoke("tuning.read", {"setRef": set_ref})["revision"], read["revision"])
-        song.tuning_system.reference_pitch = {"note": 69, "frequency": 440.0}
+        song.tuning_system._reference = {"note": 69, "frequency": 440.0}  # nothing Live returns: read as none
         self.assertIsNone(mapper.invoke("tuning.read", {"setRef": set_ref})["referencePitch"])
 
     def test_a_track_shows_its_racks_chains_and_a_clip_shows_a_parameters_envelope(self):

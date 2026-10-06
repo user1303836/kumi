@@ -819,7 +819,7 @@
       "preview": "live_tuning_preview",
       "apply": "live_tuning_apply",
       "family": "tempo",
-      "description": "Set the Set's scale (Live 12's Scale Mode, which Live's MIDI tools and devices follow): rootNote (0 C … 11 B) and scaleName as Live names it (Major, Minor, Dorian, …), or the tuning system.",
+      "description": "Set the Set's scale (Live 12's Scale Mode, which Live's MIDI tools and devices follow): rootNote (0 C … 11 B) and scaleName as Live names it (Major, Minor, Dorian, …); or the loaded tuning's name, lowestNote and highestNote ({indexInOctave, octave}: Live keeps 128 notes between them) and referencePitch ({frequency, indexInOctave, octave}). Live loads a tuning only from its Browser, never from Python, and its note tunings can't be set.",
       "methods": [
         "summarize"
       ]

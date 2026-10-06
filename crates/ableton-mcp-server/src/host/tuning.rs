@@ -6,6 +6,22 @@ use kumi_common::{
 };
 const SYSTEM: [&str; 5] = ["name", "lowestNote", "highestNote", "referencePitch", "noteTunings"];
 const SCALE: [&str; 3] = ["rootNote", "scaleName", "scaleMode"];
+/// A tuning's lowest or highest note as Live takes it (a PitchClassAndOctave): a step of the pseudo-octave and
+/// an octave, in that order, or None.
+fn pitch_place(value: &Value) -> Option<Value> {
+    (value.as_object()?.len() == 2
+        && is_integer_in_range(&value["indexInOctave"], 0.0, 1024.0)
+        && is_integer_in_range(&value["octave"], -64.0, 64.0))
+    .then(|| json!({"indexInOctave":value["indexInOctave"],"octave":value["octave"]}))
+}
+/// A reference pitch as Live takes it (a ReferencePitch): a frequency in Hz on a step of an octave, or None.
+fn reference_pitch(value: &Value) -> Option<Value> {
+    (value.as_object()?.len() == 3
+        && value["frequency"].as_f64().is_some_and(|hz| hz.is_finite() && hz > 0.0 && hz <= 100_000.0)
+        && is_integer_in_range(&value["indexInOctave"], 0.0, 1024.0)
+        && is_integer_in_range(&value["octave"], -64.0, 64.0))
+    .then(|| json!({"frequency":value["frequency"],"indexInOctave":value["indexInOctave"],"octave":value["octave"]}))
+}
 fn same_json(a: Option<&Value>, b: Option<&Value>) -> bool {
     a.map(js_json::stringify) == b.map(js_json::stringify)
 }
@@ -62,18 +78,36 @@ impl McpHost {
         if fields.iter().all(|f| params.get(*f).is_none()) {
             return error(id, -32602, "at least one tuning field is required", None);
         }
-        if let Some(tunings) = params.get("noteTunings") {
-            if !tunings.as_array().is_some_and(|rows| {
-                rows.len() == 128
-                    && rows.iter().all(|r| {
-                        has_only(r, &["note", "deviation"])
-                            && is_integer_in_range(&r["note"], 0.0, 127.0)
-                            && r["deviation"].as_f64().is_some_and(|n| n.is_finite() && n.abs() <= 1200.0)
-                    })
-            }) {
-                return error(id, -32602, "noteTunings must contain exactly 128 valid entries", None);
+        if params.get("noteTunings").is_some() {
+            return error(id, -32602, crate::live::NOTE_TUNINGS_FIXED, None);
+        }
+        // Live's own shapes, in their order, so what's read back after compares exactly (#206).
+        let mut params = params.clone();
+        for key in ["lowestNote", "highestNote"] {
+            if let Some(value) = params.get(key) {
+                let Some(place) = pitch_place(value) else {
+                    return error(
+                        id,
+                        -32602,
+                        &format!("{key} is {{indexInOctave, octave}}: a step of the tuning's pseudo-octave (from 0) and an octave"),
+                        None,
+                    );
+                };
+                params[key] = place;
             }
         }
+        if let Some(value) = params.get("referencePitch") {
+            let Some(pitch) = reference_pitch(value) else {
+                return error(
+                    id,
+                    -32602,
+                    "referencePitch is {frequency, indexInOctave, octave}: a frequency in Hz on a step of an octave",
+                    None,
+                );
+            };
+            params["referencePitch"] = pitch;
+        }
+        let params = &params;
 
         let result = async {
             let status = self.fresh_status(Some(&LiveOperationContext::with_deadline(self.deadline(reads::AUDITION_DEADLINE_MS)))).await?;
@@ -331,8 +365,10 @@ impl McpHost {
 
             let mut restore =
                 json!({"setRef":payload["setRef"],"expectedObjectIdentity":set["objectIdentity"],"expectedRevision":before["revision"]});
+            // What the apply changed goes back, and nothing else: the rest is as it was, and a tuning's note
+            // tunings can't be set at all (#206).
             for (category, fields) in [("tuningSystem", SYSTEM.as_slice()), ("scale", SCALE.as_slice())] {
-                for f in fields {
+                for f in fields.iter().filter(|f| payload.get(**f).is_some()) {
                     let row = prior
                         .get(category)
                         .ok_or_else(|| LiveError::type_error(format!("Cannot read properties of undefined (reading '{f}')")))?;

@@ -265,6 +265,29 @@ def _live_module() -> Any:
         return None
 
 
+def _tuning_makers() -> tuple[Any, Any]:
+    """Live's PitchClassAndOctave and ReferencePitch, the types a TuningSystem's lowest_note, highest_note and
+    reference_pitch take: Live 12.4 refuses a dict for any of them (#206). None outside Live."""
+    module = getattr(_live_module(), "TuningSystem", None)
+    place, pitch = getattr(module, "PitchClassAndOctave", None), getattr(module, "ReferencePitch", None)
+    return (place if callable(place) else None), (pitch if callable(pitch) else None)
+
+
+def _made(maker: Any, **fields: Any) -> Any:
+    """One of Live's small value types, by keyword, or in the order given (Live's own) where it takes no keywords.
+    Live 12.4: PitchClassAndOctave(index_in_octave, octave), ReferencePitch(index_in_octave, octave, frequency)."""
+    try:
+        return maker(**fields)
+    except TypeError:
+        return maker(*fields.values())
+
+
+# What a tuning's note tunings can't be: Live keeps one value a step of the loaded tuning's pseudo-octave, and
+# Live's Python can neither load a tuning nor make one (#206).
+NOTE_TUNINGS_FIXED = ("noteTunings can't be set: Live tunes each step of the loaded tuning's pseudo-octave (13 for "
+                      "Bohlen-Pierce), not 128 MIDI notes, and loads a tuning only from an .ascl file in its Browser.")
+
+
 def _warp_marker_maker() -> Any:
     """Live's WarpMarker, which Clip.add_warp_marker takes: called by keyword, since its positional order is sample
     time, then beat time. Live 12.4 refuses the dict the LOM docs show. None outside Live."""
@@ -6824,32 +6847,21 @@ class LiveObjectMapper:
         return result
 
     def _tuning_state(self) -> dict[str, Any]:
+        """The loaded tuning system (Live's, #206) and the Set's scale. Live has no tuning loaded in a Set in
+        12-TET: then the system is empty. Its lowest and highest notes are places, a step of the
+        pseudo-octave and an octave; its note tunings one row a step (see _step_tunings)."""
         tuning = getattr(self.song, "tuning_system", None)
         def float_or_none(value: Any) -> float | None:
             return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) else None
         def int_or_none(value: Any) -> int | None:
             return int(value) if isinstance(value, int) and not isinstance(value, bool) else None
-        note_tunings = []
-        if tuning is not None:
-            raw_tunings = self._items(self._read_attr(tuning, "note_tunings") or [])
-            if len(raw_tunings) > 128: raise ValueError("note tunings exceed their bound")
-            for index, entry in enumerate(raw_tunings):
-                if isinstance(entry, dict):
-                    note = entry.get("note", index); deviation = entry.get("deviation", entry.get("tuning", entry.get("cents")))
-                elif isinstance(entry, (int, float)) and not isinstance(entry, bool):
-                    note, deviation = index, entry
-                else:
-                    note = self._read_attr(entry, "note"); deviation = self._read_attr(entry, "deviation", "tuning", "cents")
-                    note = note if isinstance(note, int) else index
-                deviation_value = float_or_none(deviation)
-                if not isinstance(note, int) or isinstance(note, bool) or not 0 <= note <= 127 or deviation_value is None: raise ValueError("note tunings contain an unreadable entry")
-                note_tunings.append({"note": int(note), "deviation": deviation_value})
+        pseudo_octave = float_or_none(self._read_attr(tuning, "pseudo_octave_in_cents")) if tuning is not None else None
         system = {"name": str(self._read_attr(tuning, "name") or "") if tuning is not None else "",
-                  "lowestNote": self._setting_dict_or_none(self._read_attr(tuning, "lowest_note")) if tuning is not None else None,
-                  "highestNote": self._setting_dict_or_none(self._read_attr(tuning, "highest_note")) if tuning is not None else None,
-                  "referencePitch": self._setting_dict_or_none(self._read_attr(tuning, "reference_pitch")) if tuning is not None else None,
-                  "pseudoOctaveInCents": float_or_none(self._read_attr(tuning, "pseudo_octave_in_cents")) if tuning is not None else None,
-                  "noteTunings": note_tunings}
+                  "lowestNote": self._pitch_place(self._read_attr(tuning, "lowest_note")) if tuning is not None else None,
+                  "highestNote": self._pitch_place(self._read_attr(tuning, "highest_note")) if tuning is not None else None,
+                  "referencePitch": self._reference_pitch(tuning),
+                  "pseudoOctaveInCents": pseudo_octave,
+                  "noteTunings": self._step_tunings(self._read_attr(tuning, "note_tunings"), pseudo_octave) if tuning is not None else []}
         intervals = []
         for value in self._items(self._read_attr(self.song, "scale_intervals") or []):
             if not isinstance(value, int) or isinstance(value, bool): raise ValueError("scale intervals contain an unreadable entry")
@@ -6872,6 +6884,30 @@ class LiveObjectMapper:
         if isinstance(frequency, bool) or not isinstance(frequency, (int, float)) or not math.isfinite(float(frequency)) or not 0 <= float(frequency) <= 100000: return None
         if any(not isinstance(value, int) or isinstance(value, bool) for value in (index, octave)) or not 0 <= index <= 1024 or not -64 <= octave <= 64: return None
         return {"frequency": float(frequency), "indexInOctave": int(index), "octave": int(octave)}
+
+    def _pitch_place(self, value: Any) -> dict[str, int] | None:
+        """A PitchClassAndOctave (a tuning's lowest or highest note) as the wire has it: the step of the
+        pseudo-octave, from 0, and the octave."""
+        if value is None: return None
+        read = (lambda name, alias: value.get(name, value.get(alias))) if isinstance(value, dict) else (lambda name, alias: self._read_attr(value, name))
+        index, octave = read("index_in_octave", "indexInOctave"), read("octave", "octave")
+        if any(not isinstance(item, int) or isinstance(item, bool) for item in (index, octave)) or not 0 <= index <= 1024 or not -64 <= octave <= 64: return None
+        return {"indexInOctave": int(index), "octave": int(octave)}
+
+    @staticmethod
+    def _step_tunings(cents: Any, pseudo_octave: float | None) -> list[dict[str, Any]]:
+        """Live's note tunings: the cents of each step of the loaded tuning's pseudo-octave from its first,
+        one value a step (13 for Bohlen-Pierce), up to 1,902 cents. As rows, each step (note, from 0) and how
+        far it lies from the pseudo-octave split evenly (step × pseudoOctaveInCents ÷ steps), which keeps any
+        tuning Live loads within ±1200: an equal tuning is all 0. Empty for more than 128 steps or values
+        Kumi can't place, so a read never fails on them (#206)."""
+        try: values = list(cents) if cents is not None and not isinstance(cents, (str, bytes, dict)) else []
+        except TypeError: return []
+        if not values or len(values) > 128 or pseudo_octave is None or pseudo_octave <= 0: return []
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) for value in values): return []
+        step = pseudo_octave / len(values)
+        rows = [{"note": index, "deviation": round(float(value) - index * step, 4) + 0.0} for index, value in enumerate(values)]
+        return rows if all(abs(row["deviation"]) <= 1200 for row in rows) else []
 
     def _setting_dict_or_none(self, value: Any) -> dict[str, Any] | None:
         if not isinstance(value, dict) or len(value) > 8: return None
@@ -6902,60 +6938,67 @@ class LiveObjectMapper:
         if not isinstance(args.get("expectedObjectIdentity"), str) or not hmac.compare_digest(self._capture_object_identity(self.song), args["expectedObjectIdentity"]): raise ValueError("Set identity changed since preview")
         if not isinstance(args.get("expectedRevision"), str) or not hmac.compare_digest(self._tuning_revision(), args["expectedRevision"]): raise ValueError("tuning or scale state changed since preview")
         tuning = getattr(self.song, "tuning_system", None)
-        proposals: list[tuple[Any, str, Any]] = []
+        # Each change: what's set, Live's own value for it, and what a read must show after.
+        proposals: list[tuple[Any, str, Any, Any]] = []
         if "name" in args:
             if tuning is None or not isinstance(args["name"], str) or not 1 <= len(args["name"]) <= 256: raise ValueError("name is invalid")
-            proposals.append((tuning, "name", args["name"]))
-        for key, attr in (("lowestNote", "lowest_note"), ("highestNote", "highest_note"), ("referencePitch", "reference_pitch")):
+            proposals.append((tuning, "name", args["name"], args["name"]))
+        place_maker, pitch_maker = _tuning_makers()
+        steps = self._read_attr(tuning, "number_of_notes_in_pseudo_octave") if tuning is not None else None
+        steps = steps if isinstance(steps, int) and not isinstance(steps, bool) and steps > 0 else 1025
+        def whole(value: Any) -> bool: return isinstance(value, int) and not isinstance(value, bool)
+        for key, attr in (("lowestNote", "lowest_note"), ("highestNote", "highest_note")):
             if key in args:
                 if tuning is None: raise ValueError("tuning system is unavailable")
-                normalized = self._setting_dict_or_none(args[key])
-                if normalized is None: raise ValueError(f"{key} is invalid")
-                proposals.append((tuning, attr, normalized))
-        if "noteTunings" in args:
-            rows = args["noteTunings"]
-            if tuning is None or not isinstance(rows, list) or len(rows) != 128: raise ValueError("noteTunings must contain exactly 128 entries")
-            seen: set[int] = set()
-            for row in rows:
-                if not isinstance(row, dict) or set(row) - {"note", "deviation"}: raise ValueError("noteTunings entries are invalid")
-                note, deviation = row.get("note"), row.get("deviation")
-                if not isinstance(note, int) or isinstance(note, bool) or not 0 <= note <= 127 or note in seen: raise ValueError("noteTunings notes are invalid")
-                if not isinstance(deviation, (int, float)) or isinstance(deviation, bool) or not math.isfinite(float(deviation)) or not -1200 <= float(deviation) <= 1200: raise ValueError("noteTunings deviations are invalid")
-                seen.add(note)
-            if self._read_attr(tuning, "note_tunings") is None: raise ValueError("note tunings are unavailable")
-            proposals.append((tuning, "note_tunings", rows))
+                place = args[key]
+                if not isinstance(place, dict) or set(place) != {"indexInOctave", "octave"} or not all(whole(place[name]) for name in place) \
+                        or not 0 <= place["indexInOctave"] < steps or not -64 <= place["octave"] <= 64:
+                    raise ValueError(f"{key} is invalid: it's {{indexInOctave, octave}}, a step of the tuning's pseudo-octave (from 0) and an octave")
+                if place_maker is None: raise ValueError(f"{key} needs Live's PitchClassAndOctave")
+                wanted = {"indexInOctave": place["indexInOctave"], "octave": place["octave"]}
+                proposals.append((tuning, attr, _made(place_maker, index_in_octave=wanted["indexInOctave"], octave=wanted["octave"]), wanted))
+        if "referencePitch" in args:
+            if tuning is None: raise ValueError("tuning system is unavailable")
+            pitch = args["referencePitch"]
+            frequency = pitch.get("frequency") if isinstance(pitch, dict) else None
+            if not isinstance(pitch, dict) or set(pitch) != {"frequency", "indexInOctave", "octave"} or isinstance(frequency, bool) or not isinstance(frequency, (int, float)) \
+                    or not math.isfinite(float(frequency)) or not 0 < float(frequency) <= 100000 or not whole(pitch["indexInOctave"]) or not whole(pitch["octave"]) \
+                    or not 0 <= pitch["indexInOctave"] < steps or not -64 <= pitch["octave"] <= 64:
+                raise ValueError("referencePitch is invalid: it's {frequency, indexInOctave, octave}, a frequency in Hz on a step of an octave")
+            if pitch_maker is None: raise ValueError("referencePitch needs Live's ReferencePitch")
+            wanted = {"frequency": float(frequency), "indexInOctave": pitch["indexInOctave"], "octave": pitch["octave"]}
+            proposals.append((tuning, "reference_pitch", _made(pitch_maker, index_in_octave=wanted["indexInOctave"], octave=wanted["octave"], frequency=wanted["frequency"]), wanted))
+        if "noteTunings" in args: raise ValueError(NOTE_TUNINGS_FIXED)
         if "rootNote" in args:
             value = args["rootNote"]
             if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 11: raise ValueError("rootNote is invalid")
             if self._read_attr(self.song, "root_note") is None: raise ValueError("root_note is unavailable")
-            proposals.append((self.song, "root_note", value))
+            proposals.append((self.song, "root_note", value, value))
         if "scaleName" in args:
             value = args["scaleName"]
             if not isinstance(value, str) or not 1 <= len(value) <= 256: raise ValueError("scaleName is invalid")
             if not isinstance(self._read_attr(self.song, "scale_name"), str): raise ValueError("scale_name is unavailable")
-            proposals.append((self.song, "scale_name", value))
+            proposals.append((self.song, "scale_name", value, value))
         if "scaleMode" in args:
             value = args["scaleMode"]
             if not isinstance(value, bool): raise ValueError("scaleMode is invalid")
             if not isinstance(self._read_attr(self.song, "scale_mode"), bool): raise ValueError("scale_mode is unavailable")
-            proposals.append((self.song, "scale_mode", value))
+            proposals.append((self.song, "scale_mode", value, value))
         if not proposals: raise ValueError("tuning mutation has no fields")
-        assignments = [(target, attr, value, self._read_attr(target, attr)) for target, attr, value in proposals]
+        def observed(target: Any, attr: str) -> Any:
+            if attr in ("lowest_note", "highest_note"): return self._pitch_place(self._read_attr(target, attr))
+            if attr == "reference_pitch": return self._reference_pitch(target)
+            return self._read_attr(target, attr)
+        # The prior values as Live returned them, its own types: a rollback sets those back.
+        assignments = [(target, attr, value, wanted, self._read_attr(target, attr)) for target, attr, value, wanted in proposals]
         before_state = self._tuning_state()
         try:
-            for target, attr, value, _ in assignments: setattr(target, attr, value)
-            after = self._tuning_state()
-            for target, attr, value, _ in assignments:
-                if attr == "note_tunings":
-                    normalized = sorted(([row["note"], row["deviation"]] for row in value), key=lambda item: item[0])
-                    observed = sorted(([row["note"], row["deviation"]] for row in after["tuningSystem"]["noteTunings"]), key=lambda item: item[0])
-                    if self._bounded_canonical(observed) != self._bounded_canonical(normalized): raise ValueError("note tunings were not confirmed")
-                else:
-                    observed = self._read_attr(target, attr)
-                    if self._bounded_canonical(observed) != self._bounded_canonical(value): raise ValueError(f"tuning field {attr} was not confirmed")
+            for target, attr, value, _, _ in assignments: setattr(target, attr, value)
+            for target, attr, _, wanted, _ in assignments:
+                if self._bounded_canonical(observed(target, attr)) != self._bounded_canonical(wanted): raise ValueError(f"tuning field {attr} was not confirmed")
         except BaseException as error:
             rollback_failed = False
-            for target, attr, _, prior in reversed(assignments):
+            for target, attr, _, _, prior in reversed(assignments):
                 try: setattr(target, attr, prior)
                 except BaseException: rollback_failed = True
             if rollback_failed or self._bounded_canonical(self._tuning_state()) != self._bounded_canonical(before_state): raise ValueError("tuning change failed and exact rollback failed") from error
