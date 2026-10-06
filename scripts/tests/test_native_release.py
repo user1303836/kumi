@@ -226,15 +226,63 @@ class NativeRelease(unittest.TestCase):
 
     def test_vendored_willington_is_staged_inside_the_bridge(self):
         remote = self.root / "package/remote-script/AbletonMcpBridge"
-        release.stage_willington(self.root, remote)
+        release.stage_willington(self.root, remote, "x86_64-pc-windows-msvc")
         self.assertFalse(remote.exists())
         folder, files = self.vendor_willington()
-        release.stage_willington(self.root, remote)
+        release.stage_willington(self.root, remote, "x86_64-pc-windows-msvc")
         staged = release.inventory(remote / "willington")
         self.assertEqual(set(staged), {*files, "release.json"})
         self.assertEqual(staged, release.inventory(folder))
         for name in staged:
             self.assertEqual(release.role("remote-script/AbletonMcpBridge/willington/" + name), "ableton-remote-script")
+
+    def test_each_bundle_carries_willingtons_native_libraries_for_its_own_platform_only(self):
+        dylib = "WillingtonDeviceTools/build/live-12.4.15b5-arm64/libwillington_devices.dylib"
+        _, files = self.vendor_willington()
+        pyd = next(name for name in files if name.endswith(".pyd"))
+        folder, files = self.vendor_willington({**files, dylib: b"\xcf\xfa\xed\xfe fixture"})
+        for target, native, other in [("x86_64-pc-windows-msvc", pyd, dylib), ("aarch64-apple-darwin", dylib, pyd),
+                                      ("x86_64-apple-darwin", dylib, pyd)]:
+            with self.subTest(target=target):
+                remote = self.root / target / "AbletonMcpBridge"
+                release.stage_willington(self.root, remote, target)
+                staged = release.inventory(remote / "willington")
+                self.assertIn(native, staged)
+                self.assertNotIn(other, staged)
+                # release.json stays Willington's own, naming every platform's files.
+                self.assertEqual(staged["release.json"], release.digest(folder / "release.json"))
+        # Live doesn't run on Linux: nothing to carry there.
+        remote = self.root / "linux" / "AbletonMcpBridge"
+        release.stage_willington(self.root, remote, "x86_64-unknown-linux-gnu")
+        self.assertFalse(remote.exists())
+        # The size cap is for what one platform's bundle carries, not every platform's libraries together.
+        common = sum(len(content) for name, content in files.items() if not name.endswith((".pyd", ".dylib")))
+        largest = max(len(files[pyd]), len(files[dylib]))
+        with patch.object(release, "WILLINGTON_MAX_BYTES", common + largest):
+            release.willington_files(folder)
+        with patch.object(release, "WILLINGTON_MAX_BYTES", common + largest - 1):
+            with self.assertRaisesRegex(ValueError, "larger than"):
+                release.willington_files(folder)
+
+    def test_vendored_willington_names_must_check_out_on_every_platform(self):
+        # A backslash or a colon is an ordinary character on macOS and Linux; Windows can't check either out,
+        # nor a device name or a name ending in a dot. (Names, not files: this system may not hold them either.)
+        for name in ("WillingtonRuntime/x.py\\..\\y.py", "WillingtonRuntime/aux.json", "WillingtonRuntime/CON",
+                     "WillingtonRuntime/lpt1.py", "WillingtonRuntime/x.py.", "WillingtonRuntime/..", "WillingtonRuntime//x.py",
+                     "WillingtonRuntime/x:y.py", "WillingtonRuntime/ü.py", "WillingtonRuntime/a b.py"):
+            self.assertFalse(release.portable(name), name)
+        for name in ("WillingtonRuntime/console.py", "WillingtonDeviceTools/build/live-12.4.15b5-windows-x86_64/build.json"):
+            self.assertTrue(release.portable(name), name)
+        _, files = self.vendor_willington()
+        folder, _ = self.vendor_willington({**files, "WillingtonRuntime/a b.py": b"fixture"})
+        with self.assertRaisesRegex(ValueError, "some systems can't hold: WillingtonRuntime/a b.py"):
+            release.willington_files(folder)
+        # Two names one letter's case apart are one file on macOS and Windows.
+        folder, _ = self.vendor_willington({**files, "WillingtonRuntime/Matrix.json": b"{}\n"})
+        with self.assertRaisesRegex(ValueError, "differ only in case"):
+            release.willington_files(folder)
+        folder, _ = self.vendor_willington({**files, "WillingtonRuntime/console_check.py": b"fixture"})
+        release.willington_files(folder)
 
     def test_vendored_willington_refuses_anything_but_its_listed_runtime_files(self):
         folder, files = self.vendor_willington()
