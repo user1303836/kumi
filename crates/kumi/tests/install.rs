@@ -757,3 +757,243 @@ async fn ctrl_c_stops_a_stalled_update_download_and_changes_nothing() {
     assert_eq!(fs::read_to_string(home.join("app").join(executable_name("kumi"))).unwrap(), "earlier");
     assert!(!home.join("app.new").exists() && !home.join("downloads/kumi.tar.gz").exists());
 }
+
+/// A native Kumi going back to an earlier native one (1.8.11, whose bridge is 1.0.84), with the newer bridge 1.0.85
+/// in Live and its extension. The bridge's receipt keeps `kept` (a bridge version) to go back to.
+fn native_rollback(dir: &Path, kept: Option<&str>) -> (Env, std::path::PathBuf) {
+    let mut env = env(dir);
+    let extensions = dir.join("Ableton/Extensions");
+    env.insert("KUMI_LIVE_EXTENSIONS_DIR".into(), extensions.display().to_string());
+    let home = Path::new(&env["KUMI_HOME"]).to_path_buf();
+    let native = json!({"schema":"ableton-mcp-native-release/v1"}).to_string();
+    put(home.join("app").join(executable_name("kumi")), "the newer Kumi");
+    put(home.join("app/package.json"), json!({"version":KUMI_VERSION,"bridge":"1.0.85"}).to_string());
+    put(home.join("app.previous").join(executable_name("kumi")), "the earlier Kumi");
+    put(home.join("app.previous/package.json"), json!({"version":"1.8.11","bridge":"1.0.84"}).to_string());
+    let extension = |folder: std::path::PathBuf, code: &str| {
+        put(folder.join("manifest.json"), json!({"name":"kumi","version":"1.0.0"}).to_string());
+        put(folder.join("dist/extension.js"), code);
+    };
+    let newer = home.join("bridge/1.0.85/package");
+    put(newer.join("package.json"), json!({"version":"1.0.85"}).to_string());
+    put(newer.join("release-manifest.json"), &native);
+    extension(newer.join("live-extension"), "// 1.0.85's");
+    extension(extensions.join("kumi.kumi"), "// 1.0.85's");
+    let mut previous = Value::Null;
+    if let Some(version) = kept {
+        let root = home.join(format!("bridge/{version}/package"));
+        put(root.join("package.json"), json!({"version":version}).to_string());
+        put(root.join("release-manifest.json"), &native);
+        extension(root.join("live-extension"), &format!("// {version}'s"));
+        previous = json!({"packageRoot":root});
+    }
+    let state = home.join("bridge/state");
+    let config = state.join("bridge-config.json");
+    let scripts = Path::new(&env["KUMI_REMOTE_SCRIPTS_DIR"]).to_path_buf();
+    put(&config, json!({"server":{"command":newer.join(executable_name("ableton-mcp-server")),"args":["--config",config]}}).to_string());
+    put(scripts.join("AbletonMcpBridge/bridge-reference.json"), json!({"config":config}).to_string());
+    let receipt = state.join("install-receipt.json");
+    put(&receipt, json!({"version":1,"packageRoot":newer,"stateDirectory":state,"configPath":config,"secretPath":state.join("bridge.secret"),"remoteScriptsDirectory":scripts,"previous":previous}).to_string());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&receipt, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    (env, home)
+}
+/// What a rollback did: its exit, what it said, the questions it asked and the bridge commands it ran. Live is open
+/// for as many looks as `open` says (then closed); `answers` are the producer's in a terminal, or None for none.
+/// `on_run` sees each bridge command's count, and can answer it in the bridge's place.
+struct RolledBack {
+    code: i32,
+    said: String,
+    asked: Vec<String>,
+    ran: Vec<Vec<String>>,
+}
+async fn roll_back(
+    env: &Env,
+    open: usize,
+    answers: Option<Vec<bool>>,
+    ran: Rc<RefCell<Vec<Vec<String>>>>,
+    on_run: Rc<dyn Fn(usize) -> Option<Ran>>,
+) -> RolledBack {
+    let (mut io, out) = io(env);
+    let looks = Rc::new(std::cell::Cell::new(0));
+    io.live_running = Some(Rc::new(move || {
+        let looks = looks.clone();
+        async move {
+            looks.set(looks.get() + 1);
+            looks.get() <= open
+        }
+        .boxed_local()
+    }));
+    let asked = Rc::new(RefCell::new(Vec::new()));
+    if let Some(answers) = answers {
+        let answers = Rc::new(RefCell::new(std::collections::VecDeque::from(answers)));
+        let asked = asked.clone();
+        io.confirm = Some(Rc::new(move |question| {
+            asked.borrow_mut().push(question);
+            let answer = answers.borrow_mut().pop_front().unwrap_or(false);
+            async move { answer }.boxed_local()
+        }));
+    }
+    let before = ran.borrow().len();
+    io.run = Some(Rc::new({
+        let ran = ran.clone();
+        move |command, mut args, _| {
+            assert!(command.ends_with(&executable_name("ableton-mcp-server")), "{command}");
+            args.insert(0, command);
+            ran.borrow_mut().push(args);
+            let answer = on_run(ran.borrow().len()).unwrap_or_else(|| Ran {
+                code: 0,
+                stdout: json!({"state":"completed"}).to_string(),
+                stderr: String::new(),
+            });
+            async move { answer }.boxed_local()
+        }
+    }));
+    let code = rollback_installed(io).await.unwrap();
+    let said = out.0.borrow().clone();
+    let asked = asked.borrow().clone();
+    let ran = ran.borrow()[before..].to_vec();
+    RolledBack { code, said, asked, ran }
+}
+fn version_of(app: impl AsRef<Path>) -> String {
+    serde_json::from_slice::<Value>(&fs::read(app.as_ref().join("package.json")).unwrap()).unwrap()["version"].as_str().unwrap().into()
+}
+fn extension_in_live(dir: &Path) -> String {
+    fs::read_to_string(dir.join("Ableton/Extensions/kumi.kumi/dist/extension.js")).unwrap()
+}
+fn calls() -> Rc<RefCell<Vec<Vec<String>>>> {
+    Rc::new(RefCell::new(Vec::new()))
+}
+const STAYS: &str = "The bridge in Live stays 1.0.85, which works with 1.8.11.";
+#[tokio::test]
+async fn a_rollback_with_live_closed_puts_back_the_earlier_kumis_bridge_and_its_extension() {
+    let dir = tempfile::tempdir().unwrap();
+    let (env, home) = native_rollback(dir.path(), Some("1.0.84"));
+    let done = roll_back(&env, 0, None, calls(), Rc::new(|_| None)).await;
+    assert_eq!(done.code, 0, "{}", done.said);
+    assert!(done.said.contains("Kumi is back to 1.8.11."), "{}", done.said);
+    assert!(done.said.contains("The bridge went back to 1.0.84 with it; Live loads it when it starts."), "{}", done.said);
+    assert!(done.said.contains("Kumi's extension in Live went back with it."), "{}", done.said);
+    assert!(!done.said.contains("up to date"), "{}", done.said);
+    // The installed bridge's own rollback: it checks the kept generation against that one's registry.
+    assert_eq!(done.ran.len(), 1);
+    assert!(done.ran[0][0].ends_with(&format!("1.0.85/package/{}", executable_name("ableton-mcp-server"))));
+    assert_eq!(&done.ran[0][1..3], ["lifecycle", "rollback"]);
+    assert!(done.ran[0].contains(&"--confirm-live-stopped".into()));
+    assert_eq!(version_of(home.join("app")), "1.8.11");
+    assert_eq!(extension_in_live(dir.path()), "// 1.0.84's");
+}
+#[tokio::test]
+async fn a_rollback_with_live_open_keeps_the_newer_bridge_unless_the_producer_closes_live_first() {
+    // No terminal to ask in, a no, and a yes while Live stays open: the app goes back alone, and says how to finish.
+    for (answers, open) in [(None, 1), (Some(vec![false]), 1), (Some(vec![true, true, true]), 9)] {
+        let dir = tempfile::tempdir().unwrap();
+        let (env, home) = native_rollback(dir.path(), Some("1.0.84"));
+        let done = roll_back(&env, open, answers.clone(), calls(), Rc::new(|_| None)).await;
+        assert_eq!(done.code, 0, "{}", done.said);
+        assert!(done.said.contains(STAYS), "{}", done.said);
+        assert!(done.said.contains("To put back bridge 1.0.84 too, quit Live, then run"), "{}", done.said);
+        assert!(done.said.contains("update --rollback twice."), "{}", done.said);
+        assert!(done.ran.is_empty());
+        assert_eq!(version_of(home.join("app")), "1.8.11");
+        assert_eq!(extension_in_live(dir.path()), "// 1.0.85's");
+        if answers.is_some_and(|a| a.len() == 3) {
+            assert_eq!(done.asked.len(), 3);
+            assert!(
+                done.asked[0].starts_with("Live is open. Going back to 1.8.11 can also put back its bridge 1.0.84"),
+                "{:?}",
+                done.asked
+            );
+            assert!(done.asked[1].starts_with("Live is still open."), "{:?}", done.asked);
+        }
+    }
+    // A yes once Live is closed: the bridge goes back with the app.
+    let dir = tempfile::tempdir().unwrap();
+    let (env, home) = native_rollback(dir.path(), Some("1.0.84"));
+    let done = roll_back(&env, 1, Some(vec![true]), calls(), Rc::new(|_| None)).await;
+    assert_eq!(done.code, 0, "{}", done.said);
+    assert_eq!(done.asked.len(), 1);
+    assert_eq!(done.ran.len(), 1);
+    assert!(done.said.contains("The bridge went back to 1.0.84 with it"), "{}", done.said);
+    assert_eq!(version_of(home.join("app")), "1.8.11");
+    assert_eq!(extension_in_live(dir.path()), "// 1.0.84's");
+}
+#[tokio::test]
+async fn a_failed_app_swap_after_the_bridge_went_back_puts_the_newer_bridge_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let (env, home) = native_rollback(dir.path(), Some("1.0.84"));
+    // The earlier app goes missing while the bridge goes back, so the swap fails; it returns with the next command.
+    let (previous, aside) = (home.join("app.previous"), home.join("app.previous.aside"));
+    let on_run: Rc<dyn Fn(usize) -> Option<Ran>> = Rc::new(move |n| {
+        match n {
+            1 => fs::rename(&previous, &aside).unwrap(),
+            2 => fs::rename(&aside, &previous).unwrap(),
+            _ => {}
+        }
+        None
+    });
+    let done = roll_back(&env, 0, None, calls(), on_run).await;
+    assert_eq!(done.code, 1, "{}", done.said);
+    assert!(done.said.contains("Couldn't switch back"), "{}", done.said);
+    assert!(!done.said.contains("restoring its bridge also failed"), "{}", done.said);
+    // The bridge went back, then forward again: a rollback again restores the generation it left.
+    assert_eq!(done.ran.len(), 2);
+    assert!(done.ran.iter().all(|args| args[1..3] == ["lifecycle", "rollback"]));
+    assert_eq!(version_of(home.join("app")), KUMI_VERSION);
+    assert_eq!(version_of(home.join("app.previous")), "1.8.11");
+}
+#[tokio::test]
+async fn a_rollback_without_the_earlier_kumis_bridge_kept_keeps_the_newer_one() {
+    for kept in [None, Some("1.0.83")] {
+        let dir = tempfile::tempdir().unwrap();
+        let (env, home) = native_rollback(dir.path(), kept);
+        let done = roll_back(&env, 0, None, calls(), Rc::new(|_| None)).await;
+        assert_eq!(done.code, 0, "{}", done.said);
+        assert!(done.said.contains(STAYS), "{}", done.said);
+        assert!(!done.said.contains("twice"), "{}", done.said);
+        assert!(!done.said.contains("up to date"), "{}", done.said);
+        assert!(done.ran.is_empty());
+        assert_eq!(version_of(home.join("app")), "1.8.11");
+        assert_eq!(extension_in_live(dir.path()), "// 1.0.85's");
+    }
+}
+#[tokio::test]
+async fn going_back_twice_after_an_app_only_rollback_puts_back_the_earlier_bridge_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let (env, home) = native_rollback(dir.path(), Some("1.0.84"));
+    let ran = calls();
+    // Live open, no terminal: the app alone.
+    let first = roll_back(&env, 1, None, ran.clone(), Rc::new(|_| None)).await;
+    assert!(first.said.contains("update --rollback twice."), "{}", first.said);
+    assert_eq!(version_of(home.join("app")), "1.8.11");
+    // Forward to the newer Kumi, whose bridge is the one in Live (here run by this Kumi, as any Kumi's is the same).
+    let forward = roll_back(&env, 0, None, ran.clone(), Rc::new(|_| None)).await;
+    assert_eq!(forward.code, 0, "{}", forward.said);
+    assert!(forward.said.contains("The bridge in Live is up to date."), "{}", forward.said);
+    assert_eq!(version_of(home.join("app")), KUMI_VERSION);
+    // Back again with Live closed: the bridge goes back with the app.
+    let back = roll_back(&env, 0, None, ran.clone(), Rc::new(|_| None)).await;
+    assert_eq!(back.code, 0, "{}", back.said);
+    assert!(back.said.contains("The bridge went back to 1.0.84 with it"), "{}", back.said);
+    assert_eq!(ran.borrow().len(), 1);
+    assert_eq!(version_of(home.join("app")), "1.8.11");
+    assert_eq!(extension_in_live(dir.path()), "// 1.0.84's");
+}
+#[tokio::test]
+async fn a_bridge_that_cant_go_back_stays_and_the_app_goes_back_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let (env, home) = native_rollback(dir.path(), Some("1.0.84"));
+    let refused = json!({"version":"ableton-mcp-lifecycle-error/v1","reason":"no verified previous generation is available"});
+    let refuse: Rc<dyn Fn(usize) -> Option<Ran>> =
+        Rc::new(move |_| Some(Ran { code: 1, stdout: String::new(), stderr: format!("{refused}\n") }));
+    let done = roll_back(&env, 0, None, calls(), refuse).await;
+    assert_eq!(done.code, 0, "{}", done.said);
+    let why = "The bridge couldn't go back (no verified previous generation is available): the one in Live stays, and works with 1.8.11.";
+    assert!(done.said.contains(why), "{}", done.said);
+    assert_eq!(done.ran.len(), 1);
+    assert_eq!(version_of(home.join("app")), "1.8.11");
+    assert_eq!(extension_in_live(dir.path()), "// 1.0.85's");
+}

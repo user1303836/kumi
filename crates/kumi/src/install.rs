@@ -546,16 +546,31 @@ pub async fn rollback_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
         ));
     }
     let legacy = !Path::new(&join(&previous, &executable_name("kumi"))).is_file();
-    let bridge_rollback = if legacy { migration::prepare_legacy_rollback(&io, &home).await? } else { None };
-    write_launcher(&home).map_err(error)?;
-    if let Some(rollback) = &bridge_rollback {
-        rollback.apply().await?;
-    }
     let version = fs::read(join(&previous, "package.json"))
         .ok()
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
         .and_then(|v| v.get("version").and_then(Value::as_str).map(str::to_string))
         .unwrap_or("the one before".into());
+    // A Node Kumi needs its own bridge back. A native one runs with a newer bridge too, which goes back with it when
+    // it can; what to say about the bridge then replaces checking it again.
+    let (mut bridge_rollback, mut said) = if legacy {
+        (migration::prepare_legacy_rollback(&io, &home).await?, None)
+    } else {
+        let earlier = migration::earlier_bridge(&io, &home, &previous, &version).await;
+        (earlier.rollback, earlier.said)
+    };
+    write_launcher(&home).map_err(error)?;
+    let applied = match &bridge_rollback {
+        Some(rollback) => rollback.apply().await,
+        None => Ok(()),
+    };
+    if let Err(reason) = applied {
+        if legacy {
+            return Err(reason);
+        }
+        said = Some(format!("The bridge couldn't go back ({}): the one in Live stays, and works with {version}.", reason.message()));
+        bridge_rollback = None;
+    }
     let switched = async {
         remove(&hold)?;
         rename(&app, &hold).await?;
@@ -585,7 +600,12 @@ pub async fn rollback_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
     }
     say(format!("Kumi is back to {version}. {} update --rollback again returns to {KUMI_VERSION}.", *KUMI));
     if Path::new(&join(&app, &executable_name("kumi"))).exists() {
-        Ok(bridge_after(&io, &home, &app).await)
+        let Some(said) = said else { return Ok(bridge_after(&io, &home, &app).await) };
+        say(said);
+        if let Some(placed) = bridge_rollback.as_ref().and_then(|rollback| rollback.place_extension(&io.env)) {
+            say(placed);
+        }
+        Ok(0)
     } else {
         // The receipt-bound bridge rollback above restored the legacy command/config as well; Live's extension goes
         // back with it.
