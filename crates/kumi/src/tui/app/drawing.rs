@@ -25,7 +25,6 @@ pub(super) mod st {
     pub const FAINT: Style = Style::fg(palette::FAINT);
     pub const LABEL: Style = Style { bold: true, ..FAINT };
     pub const ACCENT: Style = Style::fg(palette::ACCENT);
-    pub const PULSE: Style = Style::fg(palette::PULSE);
     pub const WARN: Style = Style::fg(palette::WARN);
 }
 pub(super) fn sp(text: impl Into<String>, style: Style) -> Span {
@@ -319,7 +318,8 @@ impl TuiApp {
             .and_then(|(id, _)| state.changes.iter().find(|c| &c.id == id));
         let action = state.last_action.as_ref().filter(|a| now - a.at < CHANGE_FLASH_MS);
         if turn == TurnState::Running {
-            let dot = Some(if (now / 500.).floor() as i64 % 2 == 0 { st::ACCENT } else { st::PULSE });
+            // A steady dot: NOW's glyph already shows Kumi is at work.
+            let dot = Some(st::ACCENT);
             let entry = state.current.as_ref().map(|e| e.borrow());
             let (steps, started) = if let Some(Entry::Assistant { steps, started_at, .. }) = entry.as_deref() {
                 (steps.as_slice(), *started_at)

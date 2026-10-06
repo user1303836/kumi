@@ -1,5 +1,5 @@
 use super::super::{
-    activity::{activity_glyph, activity_scene},
+    activity::activity_glyph,
     icons::{icon, track_kind},
     screen::Screen,
     style::Style,
@@ -113,19 +113,18 @@ impl TuiApp {
             screen.put(at, area.y + now_at, "●", &dot);
             screen.put(at + 1, area.y + now_at, &label, &st::DIM);
         }
-        let moment = perf_now();
-        if let Some((_, since)) = now.activity {
-            spans(screen, x, area.y + now_at + 1, &super::super::activity::shimmer(&truncate(&now.detail, width), moment - since), None);
+        if let Some((kind, since)) = now.activity {
+            // One glyph turning beside steady words, as on a step's row: enough to show Kumi is at work.
+            let glyph = activity_glyph(kind, perf_now() - since, self.0.icons == IconStyle::Badges);
+            screen.put(x, area.y + now_at + 1, &glyph.text, &glyph.style);
+            screen.put(x + 2, area.y + now_at + 1, &truncate(&now.detail, (width - 2).max(1)), &now.style);
         } else {
             screen.put(x, area.y + now_at + 1, &truncate(&now.detail, width), &now.style);
         }
-        let picture = self.flashing().and_then(|c| change_picture(&c, width, self.0.depth));
-        if let Some(picture) = &picture {
+        if let Some(picture) = self.flashing().and_then(|c| change_picture(&c, width, self.0.depth)) {
             for (row, line) in picture.iter().take(2).enumerate() {
                 spans(screen, x, area.y + now_at + 2 + row as i32, line, None);
             }
-        } else if let Some((kind, since)) = now.activity {
-            spans(screen, x, area.y + now_at + 2, &activity_scene(kind, moment - since, width.min(28)), None);
         }
         let bottom = Self::bottom_height(area.height);
         let top = area.y + area.height - bottom;
