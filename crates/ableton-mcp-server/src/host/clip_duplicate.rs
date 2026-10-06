@@ -123,6 +123,24 @@ impl McpHost {
             if to_arrangement {
                 payload["arrangementPosition"] = params["arrangementPosition"].clone();
                 let track = &source.track.as_ref().unwrap()["ref"];
+                // Live cuts what a copy lands on, and a copy that splits or covers a clip fails after the cut, so
+                // nothing is copied over another clip yet.
+                let start = params["arrangementPosition"].as_f64().unwrap_or(f64::NAN);
+                let end = start + source.clip["length"].as_f64().unwrap_or(f64::NAN);
+                let value = serde_json::to_value(&snapshot).unwrap();
+                if let Some(other) = value["arrangement"]["clips"].as_array().into_iter().flatten().find(|clip| {
+                    clip["trackRef"] == *track
+                        && clip["start"].as_f64().is_some_and(|other_start| other_start < end - 1e-6)
+                        && helpers::arrangement_clip_end(clip) > start + 1e-6
+                }) {
+                    let beat = |v: f64| kumi_common::js::number::to_string(v);
+                    return Err(LiveError::error(format!(
+                        "Kumi can't place a copy over other clips yet: \u{201c}{}\u{201d} is at beats {} to {}. Clear that span first or pick a free spot",
+                        other["name"].as_str().unwrap_or(""),
+                        beat(other["start"].as_f64().unwrap_or(f64::NAN)),
+                        beat(helpers::arrangement_clip_end(other))
+                    )));
+                }
                 payload["expectedTargetCollectionRevision"] =
                     json!(self.arrangement_collection_revision(&snapshot, track.as_str().unwrap())?);
                 fence = js_json::stringify(&json!({

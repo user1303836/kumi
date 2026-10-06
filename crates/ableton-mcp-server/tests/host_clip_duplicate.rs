@@ -353,3 +353,42 @@ async fn clip_duplicate_apply_and_exact_key_undo_match_source() {
         same(&adapter.sim.state.borrow(), &row["state"], &format!("{label} state"));
     }
 }
+#[tokio::test]
+async fn a_copy_into_the_arrangement_never_lands_on_another_clip() {
+    // Live cuts what a copy lands on, and a copy that splits or covers a clip fails after the cut: refused before
+    // anything happens, naming the clip in the way.
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    {
+        let mut s = sim.state.borrow_mut();
+        let mut clip = s["tracks"][0]["clips"][0].clone();
+        for (key, value) in [
+            ("ref", json!("arrangement-clip:track-1:Chorus")),
+            ("objectIdentity", json!("simulator:arrangement-clip:Chorus")),
+            ("name", json!("Chorus")),
+            ("start", json!(12)),
+            ("length", json!(4)),
+        ] {
+            clip[key] = value;
+        }
+        s["arrangementClips"].as_array_mut().unwrap().push(json!({"trackRef":"track:track-1","clip":clip}));
+    }
+    let host = McpHost::new(sim.clone(), McpHostOptions::default()).unwrap();
+    let preview = |position: f64| {
+        let host = &host;
+        async move { host.live_clip_duplicate_preview_async(&json!(1), &json!({"clipRef":"clip:clip-1","arrangementPosition":position})).await }
+    };
+    for position in [10.0, 14.0, 12.0] {
+        let refused = preview(position).await;
+        let text = refused["result"]["content"][0]["text"].as_str().unwrap_or_default().to_owned();
+        assert!(
+            text.contains("Kumi can't place a copy over other clips yet: \u{201c}Chorus\u{201d} is at beats 12 to 16. Clear that span first or pick a free spot"),
+            "{position}: {refused}"
+        );
+    }
+    // Next to it, either side, is free.
+    for position in [8.0, 16.0] {
+        let shown = preview(position).await;
+        assert!(shown["result"]["content"][0]["text"].as_str().is_some_and(|t| t.contains("transactionId")), "{position}: {shown}");
+    }
+}
+
