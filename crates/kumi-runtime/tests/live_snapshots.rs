@@ -662,6 +662,35 @@ fn a_clip_too_big_for_one_call_stays_lives_to_undo() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn what_an_unsaved_set_kept_is_written_once_its_saved_and_its_ops_carry_on() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let projects = tempfile::tempdir().unwrap();
+            let store: Rc<dyn ProjectStore> = create_project_store(projects.path());
+            let history = SetHistory::default();
+            let clip: Captured = serde_json::from_value(verse()).unwrap();
+            let unsaved = CurrentProject { path: None, project: None, unsaved: true, ..project() };
+            history.keep(Some(&store), Some(&unsaved), &[clip.clone()], "Deleted Verse", json!({}), 1);
+            // The producer saves: the next observation finds the project id.
+            history.identified(Some(&store), Some(&project()));
+            history.keep(Some(&store), Some(&project()), &[clip], "Deleted Verse again", json!({}), 2);
+            let path = projects.path().join("0123456789abcdef0123456789abcdef/history.db");
+            let mut ops = vec![];
+            for _ in 0..300 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                ops = kumi_store::read_only(&path, |c| kumi_store::history::recent_ops(c, 10)).unwrap_or_default();
+                if ops.len() == 2 {
+                    break;
+                }
+            }
+            assert_eq!(ops.len(), 2, "both ops written under the project");
+            assert_eq!(ops[1].parent, None);
+            assert_eq!(ops[0].parent.as_deref(), Some(ops[1].id.as_str()), "the saved Set's op follows the unsaved one's");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn an_undo_live_stops_without_saying_what_it_did_is_left_alone_when_nothing_changed() {
     tokio::task::LocalSet::new()
         .run_until(async {

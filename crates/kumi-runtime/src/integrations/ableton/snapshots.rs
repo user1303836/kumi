@@ -562,9 +562,12 @@ impl SetHistory {
             *self.pending.borrow_mut() = Some((identity, rows, bytes));
             return;
         };
-        // Its ops carry on the project's chain.
-        if let Some(last) = self.last_op.borrow_mut().remove(&identity) {
-            self.last_op.borrow_mut().entry(project).or_insert(last);
+        // Its ops carry on the project's chain (under one borrow: an `if let`'s guard lives through its body).
+        {
+            let mut last_op = self.last_op.borrow_mut();
+            if let Some(last) = last_op.remove(&identity) {
+                last_op.entry(project).or_insert(last);
+            }
         }
         for (objects, op) in rows {
             self.write(store, Some(current), objects, op);
