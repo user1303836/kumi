@@ -12,7 +12,10 @@ use super::{
     track_ids,
     views::{self, ViewHost},
 };
-use crate::core::{contracts::*, errors::RuntimeError};
+use crate::{
+    core::{contracts::*, errors::RuntimeError, timing},
+    mcp::types::CallToolResult,
+};
 use async_trait::async_trait;
 use indexmap::{IndexMap, IndexSet};
 use kumi_common::{
@@ -22,16 +25,55 @@ use kumi_common::{
         number::to_string,
         string::{head, trim},
     },
+    time::now_ms,
 };
+use regex::Regex;
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     future::Future,
     rc::Rc,
+    sync::LazyLock,
     time::UNIX_EPOCH,
 };
 const MIXER_TRACKS: usize = 64;
+/// The backstop for Live's events: the kept devices are read whole again, beside the turns, after this many turns
+/// reused them or this long.
+const REUSES: u32 = 10;
+const REUSE_MS: i64 = 5 * 60_000;
+/// What the observation reads of each device, the Set's at once or one parent's.
+const DEVICE_FIELDS: [&str; 4] = ["parentRef", "name", "className", "chainList"];
+/// The Set's devices as a turn last had them whole, for the turns after it to reuse while Live tells of no change.
+#[derive(Clone)]
+struct KeptDevices {
+    epoch: f64,
+    identity: String,
+    /// The track page's revision they were read with: a track added, removed or moved renumbers their refs.
+    tracks: Option<String>,
+    /// The track rows read with them, for the Set model when some devices are read again between turns.
+    track_rows: Vec<JsonObject>,
+    rows: Vec<JsonObject>,
+    /// Live's structure events heard, and the endpoints attached, when they were read whole.
+    structure: u64,
+    attachments: u64,
+    /// Turns that reused them since, and when they were read whole.
+    reused: u32,
+    at: i64,
+    /// Tracks (refs) whose devices Kumi changed since: read again on the next turn.
+    changed: IndexSet<String>,
+}
+/// The kept devices and the work around them, shared with the backstop read that runs beside the turns.
+#[derive(Default)]
+struct Devices {
+    kept: Option<KeptDevices>,
+    /// Tracks read again this turn before a change acted on them: once a turn is enough.
+    refreshed: IndexSet<String>,
+    /// The backstop read is running.
+    refreshing: bool,
+    /// How many rows the last backstop read found changed from the kept ones, for the next turn's timing.
+    drift: Option<u32>,
+}
 #[derive(Clone)]
 pub struct ObservedChange {
     pub record: ChangeRecord,
@@ -61,6 +103,8 @@ pub struct Observer {
     previous: RefCell<Option<Previous>>,
     /// The Set as the last observation read it.
     model: RefCell<Rc<SetModel>>,
+    /// The Set's devices kept between turns.
+    devices: Rc<RefCell<Devices>>,
 }
 impl Observer {
     pub fn new(connection: Rc<LiveConnection>, remember: Rc<Remember>) -> Self {
@@ -72,6 +116,7 @@ impl Observer {
             last_track_count: Cell::new(0),
             previous: RefCell::new(None),
             model: RefCell::new(Rc::new(SetModel::default())),
+            devices: Rc::new(RefCell::new(Devices::default())),
         }
     }
     /// The Set as the last observation read it: its tracks and their devices, found by id or name.
@@ -85,6 +130,73 @@ impl Observer {
             stale.complete = false;
             *self.model.borrow_mut() = Rc::new(stale);
         }
+    }
+    /// The tracks (refs) a change names devices on: by a device's or a chain's ref, or by the track's own when
+    /// `tracks_too` (a device loaded onto a track).
+    pub fn device_tracks(&self, input: &JsonObject, tracks_too: bool) -> Vec<String> {
+        let long = self.connection.references.borrow().lengthen(&Value::Object(input.clone()));
+        let mut tracks = IndexSet::new();
+        named_tracks(&long, tracks_too, &mut tracks, 0);
+        tracks.into_iter().collect()
+    }
+    /// Reads these tracks' devices again into the kept ones, once a turn each, before a change acts on them: what
+    /// Kumi holds of them (the Set model's names and chains among it) is current where it acts.
+    pub async fn refresh_devices(&self, tracks: &[String], signal: Signal) {
+        let (rows, epoch, tracks) = {
+            let mut devices = self.devices.borrow_mut();
+            let tracks: IndexSet<String> = tracks.iter().filter(|track| devices.refreshed.insert((*track).clone())).cloned().collect();
+            match devices.kept.as_ref() {
+                Some(kept) if !tracks.is_empty() => (kept.rows.clone(), kept.epoch, tracks),
+                _ => return,
+            }
+        };
+        let read = reread(&self.connection, rows, &tracks, epoch, signal).await;
+        let mut devices = self.devices.borrow_mut();
+        match (read, devices.kept.as_mut().filter(|kept| kept.epoch == epoch)) {
+            (Ok(rows), Some(kept)) => {
+                let previous = self.model();
+                *self.model.borrow_mut() = Rc::new(SetModel::next(&previous, &kept.track_rows, &rows, previous.complete));
+                kept.rows = rows;
+            }
+            // Not read again: the next turn reads them all.
+            _ => devices.kept = None,
+        }
+    }
+    /// Kumi changed these tracks' devices: the next turn reads them again, since Live tells of no device renamed.
+    pub fn devices_changed(&self, tracks: &[String]) {
+        if let Some(kept) = self.devices.borrow_mut().kept.as_mut() {
+            kept.changed.extend(tracks.iter().cloned());
+        }
+    }
+    /// Something may have changed any device (Python run in Live, an undo): the next turn reads them all.
+    pub fn forget_devices(&self) {
+        self.devices.borrow_mut().kept = None;
+    }
+    /// The backstop for Live's events: the Set's devices read whole beside the turns, the rows found changed from
+    /// the kept ones counted (the drift the next turn's timing shows), and the read kept in their place.
+    fn backstop(&self, args: JsonObject) {
+        let (devices, connection) = (self.devices.clone(), self.connection.clone());
+        tokio::task::spawn_local(timing::background(async move {
+            let structure = connection.structure_events.get();
+            let read = views::pages(connection.as_ref(), args, connection.lifetime.clone()).await;
+            let mut devices = devices.borrow_mut();
+            devices.refreshing = false;
+            let Some(kept) = devices.kept.as_ref() else { return };
+            let Ok(Ok(Some((rows, false)))) = read.map(|read| device_page(&read, kept.epoch)) else { return };
+            let drift = drift(&kept.rows, &rows, &kept.changed);
+            let unchanged = connection.structure_events.get() == structure
+                && kept.structure == structure
+                && connection.attachments.get() == kept.attachments;
+            devices.drift = Some(drift);
+            match devices.kept.as_mut() {
+                Some(kept) if unchanged => {
+                    kept.rows = rows;
+                    kept.reused = 0;
+                    kept.at = now_ms();
+                }
+                _ => devices.kept = None,
+            }
+        }));
     }
     fn away(&self) -> Observation {
         self.model_stale();
@@ -145,10 +257,25 @@ impl Observer {
             ))?;
 
             let device_args = context::discovery_args(&object(
-                json!({"kind":"device","fields":["parentRef","name","className","chainList"],"limit":connection.page_limit(),"budget":connection.whole_budget()}),
+                json!({"kind":"device","fields":DEVICE_FIELDS,"limit":connection.page_limit(),"budget":connection.whole_budget()}),
             ))?;
 
             let selection_args = context::discovery_args(&object(json!({"kind":"selection","limit":1})))?;
+
+            // The Set's devices are kept from the last whole read while Live tells of no structure change (checked
+            // again with what they were read with once this turn's reads are in); otherwise they're read whole, and
+            // the kept ones are dropped at once (a gap in Live's events may lie behind them).
+            let structure = connection.structure_events.get();
+            let reusable = {
+                let mut devices = self.devices.borrow_mut();
+                devices.refreshed.clear();
+                let reusable = connection.hears_live()
+                    && devices.kept.as_ref().is_some_and(|kept| kept.structure == structure && kept.attachments == connection.attachments.get());
+                if !reusable {
+                    devices.kept = None;
+                }
+                reusable
+            };
 
             // Calling the async song read starts it immediately in JavaScript. A synchronous disconnect
             // from that dispatch invalidates the catalog before discovery availability is captured.
@@ -200,7 +327,13 @@ impl Observer {
                 async { Ok::<_, ReadError>(context::status_payload(&connection.call("live_status", JsonObject::new(), signal.clone()).await?)?) },
                 read(set_args.clone()),
                 read(track_args.clone()),
-                read(device_args.clone()),
+                async {
+                    if reusable {
+                        None
+                    } else {
+                        Some(read(device_args.clone()).await)
+                    }
+                },
                 read(selection_args)
             );
 
@@ -238,6 +371,37 @@ impl Observer {
 
             connection.register_rows("set", &set_rows, &set_args, cursor(&page))?;
 
+            // The devices as this turn's tracks have them: read whole this turn, or the kept ones when what they were
+            // read with is unchanged, with the selected track's and those Kumi changed read again.
+            let mut reusing: Option<KeptDevices> = None;
+            let devices_read: Result<Option<(Vec<JsonObject>, bool)>, ReadError> = match devices_read {
+                Some(read) => read.and_then(|read| device_page(&read, epoch)),
+                None => {
+                    let revision = tracks_read
+                        .as_ref()
+                        .ok()
+                        .filter(|read| read.is_error != Some(true))
+                        .and_then(|read| context::payload(read).ok())
+                        .and_then(|page| page.get("revision").and_then(Value::as_str).map(str::to_owned));
+                    // Out of the store while this turn has them: a turn that fails part way leaves none to reuse.
+                    let kept = self.devices.borrow_mut().kept.take();
+                    let again = match kept.filter(|kept| kept.epoch == epoch && kept.identity == identity && revision.is_some() && kept.tracks == revision) {
+                        Some(mut kept) => {
+                            let tracks: IndexSet<String> = selected_track(&selection_read, epoch).into_iter().chain(kept.changed.iter().cloned()).collect();
+                            let rows = reread(connection, std::mem::take(&mut kept.rows), &tracks, epoch, signal.clone()).await.ok();
+                            reusing = rows.is_some().then_some(kept);
+                            rows
+                        }
+                        None => None,
+                    };
+                    match again {
+                        Some(rows) => Ok(Some((rows, false))),
+                        None => read(device_args.clone()).await.and_then(|read| device_page(&read, epoch)),
+                    }
+                }
+            };
+            connection.assert_lease(lease, &signal)?;
+
             let mut track_list = None;
             let mut more_tracks = false;
             // What the tracks read says about their ids: the list's revision, and the tracks whose id is missing or shared.
@@ -265,19 +429,14 @@ impl Observer {
                 more_tracks = cursor(&page).is_some() || page.get("truncated") == Some(&Value::Bool(true));
 
                 let devices_result: Result<(), ReadError> = (|| {
-                    let read = devices_read?;
-                    if read.is_error == Some(true) {
-                        return Ok(());
-                    }
-                    let page = context::discovery_payload(&read, "device", epoch)?;
-                    let devices = objects(&page)?;
+                    let Some((devices, more)) = devices_read? else { return Ok(()) };
                     connection.register_rows("device", &devices, &device_args, None)?;
                     if let Some((_, read)) = model_rows.as_mut() {
                         *read = Some(devices.clone());
                     }
 
                     add_devices(connection, &rows, &mut shown, &devices)?;
-                    more_devices = cursor(&page).is_some() || page.get("truncated") == Some(&Value::Bool(true));
+                    more_devices = more;
                     Ok(())
                 })();
                 if let Err(error) = devices_result {
@@ -300,6 +459,35 @@ impl Observer {
                 *self.model.borrow_mut() = Rc::new(next);
             } else {
                 self.model_stale();
+            }
+            // What the next turns may reuse: the devices as this turn has them, when it has them all.
+            // Kept only while Live's events are heard, since nothing else says when to read them again.
+            let whole = model_rows.and_then(|(tracks, devices)| Some((tracks, devices?))).filter(|_| !more_tracks && !more_devices && connection.hears_live());
+            let reused = reusing.is_some() && whole.is_some();
+            let due = {
+                let mut devices = self.devices.borrow_mut();
+                devices.kept = whole.map(|(track_rows, rows)| match reusing {
+                    Some(kept) => KeptDevices { track_rows, rows, reused: kept.reused + 1, changed: IndexSet::new(), ..kept },
+                    None => KeptDevices {
+                        epoch,
+                        identity: identity.clone(),
+                        tracks: track_revision.clone(),
+                        track_rows,
+                        rows,
+                        structure,
+                        attachments: connection.attachments.get(),
+                        reused: 0,
+                        at: now_ms(),
+                        changed: IndexSet::new(),
+                    },
+                });
+                timing::set_devices(reused, devices.drift.take());
+                let due = !devices.refreshing && devices.kept.as_ref().is_some_and(|kept| kept.reused >= REUSES || now_ms() - kept.at >= REUSE_MS);
+                devices.refreshing |= due;
+                due
+            };
+            if due {
+                self.backstop(device_args.clone());
             }
             let selected: Option<JsonObject> = (|| {
                 let read = selection_read.ok()?;
@@ -559,6 +747,107 @@ async fn start_background(work: impl std::future::Future<Output = ()> + 'static)
 }
 fn object(value: Value) -> JsonObject {
     value.as_object().cloned().unwrap_or_default()
+}
+/// A read of devices: its rows, and whether it was cut short; none when Live answered with an error.
+fn device_page(read: &CallToolResult, epoch: f64) -> Result<Option<(Vec<JsonObject>, bool)>, ReadError> {
+    if read.is_error == Some(true) {
+        return Ok(None);
+    }
+    let page = context::discovery_payload(read, "device", epoch)?;
+    let more = cursor(&page).is_some() || page.get("truncated") == Some(&Value::Bool(true));
+    Ok(Some((objects(&page)?, more)))
+}
+/// The selected track's ref, as this turn's selection read has it.
+fn selected_track(read: &Result<CallToolResult, ReadError>, epoch: f64) -> Option<String> {
+    let read = read.as_ref().ok().filter(|read| read.is_error != Some(true))?;
+    let page = context::discovery_payload(read, "selection", epoch).ok()?;
+    page.get("items")?.as_array()?.first()?.get("selectedTrackRef")?.as_str().map(str::to_owned)
+}
+/// The prefix of every device ref on a track (`7:device:3:`, from `7:track:3`), at any rack level.
+fn device_prefix(track: &str) -> Option<String> {
+    let mut parts = track.split(':');
+    let (epoch, kind, index) = (parts.next()?, parts.next()?, parts.next()?);
+    (kind == "track" && parts.next().is_none() && index.parse::<u32>().is_ok()).then(|| format!("{epoch}:device:{index}:"))
+}
+/// The Set's device rows with these tracks' read again in place of theirs.
+async fn reread(
+    connection: &LiveConnection,
+    mut rows: Vec<JsonObject>,
+    tracks: &IndexSet<String>,
+    epoch: f64,
+    signal: Signal,
+) -> Result<Vec<JsonObject>, ReadError> {
+    for track in tracks {
+        let Some(prefix) = device_prefix(track) else { continue };
+        let fresh = track_devices(connection, track, epoch, signal.clone()).await?;
+        let on_track = |row: &JsonObject| row.get("ref").and_then(Value::as_str).is_some_and(|reference| reference.starts_with(&prefix));
+        let at = rows.iter().position(on_track).unwrap_or(rows.len());
+        rows.retain(|row| !on_track(row));
+        rows.splice(at.min(rows.len())..at.min(rows.len()), fresh);
+    }
+    Ok(rows)
+}
+/// One track's device rows, every rack level down: read a level at a time, since a chain's devices name it as their
+/// parent.
+async fn track_devices(connection: &LiveConnection, track: &str, epoch: f64, signal: Signal) -> Result<Vec<JsonObject>, ReadError> {
+    let mut rows = vec![];
+    let mut parents = vec![track.to_owned()];
+    for _ in 0..32 {
+        if parents.is_empty() {
+            break;
+        }
+        let reads = futures::future::join_all(parents.iter().map(|parent| {
+            let args = object(json!({"kind":"device","parent":parent,"fields":DEVICE_FIELDS,"limit":connection.page_limit(),"budget":connection.whole_budget()}));
+            views::pages(connection, args, signal.clone())
+        }))
+        .await;
+        parents = vec![];
+        for read in reads {
+            let Some((level, false)) = device_page(&read?, epoch)? else {
+                return Err(ObservationError("Live didn't list a track's devices whole".into()).into());
+            };
+            for row in &level {
+                let chains = row.get("chainList").and_then(Value::as_array).into_iter().flatten();
+                parents.extend(chains.filter_map(|chain| chain.get("ref").and_then(Value::as_str).map(str::to_owned)));
+            }
+            rows.extend(level);
+        }
+    }
+    Ok(rows)
+}
+/// How many device rows differ between the kept ones and a whole read (changed, added or gone): what Live's events
+/// missed. The tracks Kumi changed since are left out, since they're read again anyway.
+fn drift(kept: &[JsonObject], read: &[JsonObject], changed: &IndexSet<String>) -> u32 {
+    let prefixes: Vec<String> = changed.iter().filter_map(|track| device_prefix(track)).collect();
+    let rows = |rows: &[JsonObject]| -> HashMap<String, String> {
+        rows.iter()
+            .filter_map(|row| {
+                let reference = row.get("ref")?.as_str()?;
+                (!prefixes.iter().any(|prefix| reference.starts_with(prefix)))
+                    .then(|| (reference.to_owned(), stringify(&Value::Object(row.clone()))))
+            })
+            .collect()
+    };
+    let (kept, read) = (rows(kept), rows(read));
+    (kept.iter().filter(|(reference, row)| read.get(*reference) != Some(*row)).count()
+        + read.keys().filter(|reference| !kept.contains_key(*reference)).count()) as u32
+}
+/// The tracks a value names devices on (see `Observer::device_tracks`), from long refs.
+fn named_tracks(value: &Value, tracks_too: bool, tracks: &mut IndexSet<String>, depth: usize) {
+    static NAMED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([0-9]+):(device|chain|track):([0-9]+)").unwrap());
+    if depth > 32 {
+        return;
+    }
+    match value {
+        Value::String(text) => {
+            if let Some(found) = NAMED.captures(text).filter(|found| &found[2] != "track" || tracks_too) {
+                tracks.insert(format!("{}:track:{}", &found[1], &found[3]));
+            }
+        }
+        Value::Array(items) => items.iter().for_each(|item| named_tracks(item, tracks_too, tracks, depth + 1)),
+        Value::Object(row) => row.values().for_each(|item| named_tracks(item, tracks_too, tracks, depth + 1)),
+        _ => {}
+    }
 }
 fn objects(page: &JsonObject) -> Result<Vec<JsonObject>, ObservationError> {
     page.get("items").and_then(Value::as_array).into_iter().flatten().map(context::object).collect()

@@ -134,6 +134,10 @@ pub struct LiveConnection {
     pub reconnected: Cell<bool>,
     /// How many structure changes Live has told of (tracks, returns or scenes added, removed or moved).
     pub structure_events: Cell<u64>,
+    /// Endpoints attached so far: Live's events between two of them reach no one.
+    pub attachments: Cell<u64>,
+    /// Whether the endpoint attached passes Live's events on.
+    listening: Cell<bool>,
     lost_epoch: Cell<Option<f64>>,
     looking: Cell<bool>,
     watcher: RefCell<Option<Signal>>,
@@ -171,6 +175,8 @@ impl LiveConnection {
             last_epoch: Cell::new(None),
             reconnected: Cell::new(false),
             structure_events: Cell::new(0),
+            attachments: Cell::new(0),
+            listening: Cell::new(false),
             lost_epoch: Cell::new(None),
             looking: Cell::new(false),
             watcher: RefCell::new(None),
@@ -224,6 +230,10 @@ impl LiveConnection {
         } else {
             Ok(())
         }
+    }
+    /// Whether Live's events reach Kumi now: subscribed, through an endpoint that passes them on.
+    pub fn hears_live(&self) -> bool {
+        self.subscribed.get() && self.listening.get()
     }
     pub fn register_rows(&self, kind: &str, rows: &[JsonObject], args: &JsonObject, next: Option<&str>) -> Result<(), ReadError> {
         let result = self.references.borrow_mut().register_rows(kind, rows, args, next);
@@ -320,6 +330,8 @@ impl LiveConnection {
             }));
         }
         self.subscribed.set(false);
+        self.attachments.set(self.attachments.get() + 1);
+        self.listening.set(endpoint.has_on_live_event());
         if endpoint.has_on_live_event() {
             let weak = self.weak.clone();
             self.unlisten.borrow_mut().push(endpoint.on_live_event(Rc::new(move |event| {
