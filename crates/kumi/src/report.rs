@@ -255,6 +255,15 @@ fn summarize_timings(lines: &[&str]) -> String {
         (median("sentBytes") / 1024.).round(),
     );
     let count = |n: f64, what: &str| format!("{n} {what}{}", if n == 1. { "" } else { "s" });
+    // Each turn's look at the Set before the model is asked, where it was timed (#191).
+    if turns.iter().any(|turn| turn["lookMs"].is_number()) {
+        summary.push_str(&format!(
+            "\nLooking at the Set before each answer (medians): {} · {} · {} KB",
+            seconds(median("lookMs")),
+            count(median("lookRequests"), "Live request"),
+            (median("lookBytes") / 1024.).round(),
+        ));
+    }
     let mut tools: Vec<(String, f64, f64)> = Vec::new();
     for slow in turns.iter().filter_map(|turn| turn["slowTools"].as_array()).flatten() {
         let (Some(tool), Some(calls), Some(ms)) = (slow["tool"].as_str(), slow["calls"].as_f64(), slow["ms"].as_f64()) else { continue };

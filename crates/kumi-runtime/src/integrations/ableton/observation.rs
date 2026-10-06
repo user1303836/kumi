@@ -260,6 +260,9 @@ impl Observer {
         if !connection.started.get() || connection.closed.get() {
             return Err(ObservationError("Integration is not open".into()).into());
         }
+        // The look's own time, Live requests and bytes, beside the turn's (#191).
+        let looked = std::time::Instant::now();
+        let (requests, bytes) = timing::live_so_far();
         connection.invalidate();
         let lease = connection.lease.get();
         host.reset_turn(hints.as_ref().is_some_and(|h| h.continuing == Some(true)));
@@ -780,6 +783,8 @@ impl Observer {
                 context: stringify(&Value::Object(context)),
             })
         }.await;
+        let (all_requests, all_bytes) = timing::live_so_far();
+        timing::look(looked.elapsed().as_millis() as u64, all_requests.saturating_sub(requests), all_bytes.saturating_sub(bytes));
 
         result.map_err(|error| {
             if lease != connection.lease.get() {

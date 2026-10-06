@@ -51,6 +51,11 @@ pub struct TurnTiming {
     /// The look at the files an older Kumi may be writing that the turn started (`FileSync`): its own
     /// time, beside the turn's, not part of it.
     pub files_ms: Option<u64>,
+    /// The turn's look at the Set before the model is asked: its own time, its Live requests and the bytes of
+    /// their answers (#191). Part of the turn's, which count them too.
+    pub look_ms: Option<u64>,
+    pub look_requests: u32,
+    pub look_bytes: u64,
 }
 
 thread_local! {
@@ -220,6 +225,21 @@ pub fn set_devices(reused: bool, drift: Option<u32>) {
     });
 }
 
+/// The turn's Live requests and the bytes of their answers so far, for a part of it to count its own.
+pub fn live_so_far() -> (u32, u64) {
+    ACTIVE
+        .with(|active| active.borrow().as_ref().map(|timing| (timing.borrow().live_requests, timing.borrow().live_bytes)).unwrap_or((0, 0)))
+}
+
+/// The turn's look at the Set took this long, with these Live requests and bytes (#191).
+pub fn look(ms: u64, requests: u32, bytes: u64) {
+    with(|timing| {
+        timing.look_ms = Some(timing.look_ms.unwrap_or(0) + ms);
+        timing.look_requests += requests;
+        timing.look_bytes += bytes;
+    });
+}
+
 /// Work done while a turn runs but not for it (FOCUS's and the transport clock's reads of Live, a
 /// side question): its model calls, bytes and Live requests aren't the turn's.
 pub async fn background<F: std::future::Future>(work: F) -> F::Output {
@@ -285,6 +305,11 @@ pub fn line(timing: &TurnTiming, elapsed_ms: u64, stop: Value, usage: Option<&Us
     }
     if let Some(ms) = timing.files_ms {
         line["filesMs"] = json!(ms);
+    }
+    if let Some(ms) = timing.look_ms {
+        line["lookMs"] = json!(ms);
+        line["lookRequests"] = json!(timing.look_requests);
+        line["lookBytes"] = json!(timing.look_bytes);
     }
     if let Some(usage) = usage {
         line["inputTokens"] = json!(usage.input_tokens);
@@ -413,6 +438,22 @@ mod tests {
         assert_eq!((&left["effort"], left.get("tier")), (&json!("default"), None));
         let quiet = super::line(&begin().finish(), 10, json!("completed"), None);
         assert!(quiet.get("effort").is_none() && quiet.get("slowTools").is_none(), "no model call, no effort: {quiet}");
+    }
+
+    #[test]
+    fn a_turns_look_at_the_set_shows_as_its_own_time_requests_and_bytes() {
+        let recorder = begin();
+        live_request();
+        live_bytes(100);
+        let before = live_so_far();
+        live_request();
+        live_bytes(2048);
+        let after = live_so_far();
+        look(40, after.0 - before.0, after.1 - before.1);
+        let line = line(&recorder.finish(), 900, json!("completed"), None);
+        assert_eq!((&line["lookMs"], &line["lookRequests"], &line["lookBytes"]), (&json!(40), &json!(1), &json!(2048)));
+        assert_eq!((&line["liveRequests"], &line["liveBytes"]), (&json!(2), &json!(2148)), "the turn's own count them too");
+        assert!(super::line(&begin().finish(), 10, json!("completed"), None).get("lookMs").is_none(), "no look, no field");
     }
 
     #[test]

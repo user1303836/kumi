@@ -279,6 +279,9 @@ async fn a_turn_reuses_the_devices_while_live_tells_of_no_change_and_reads_the_s
             assert_eq!((second.clone(), session.live.whole_reads(), timing.set_reused), (first, 1, Some(true)));
             assert_eq!(session.live.parent_reads("7:track:1"), 1, "the selected track's devices");
             assert!(timing.live_bytes > 0 && timing.live_bytes < 2_000, "{}", timing.live_bytes);
+            // The look is the whole of this turn: its own count is the turn's (#191).
+            assert_eq!((timing.look_requests, timing.look_bytes), (timing.live_requests, timing.live_bytes));
+            assert!(timing.look_ms.is_some());
             // The selected track's device renamed (Live tells of no rename): the next turn shows it.
             session.live.rename(1, 0, "Glue");
             assert_eq!(names(&session.turn().await.0)[3], "Glue");

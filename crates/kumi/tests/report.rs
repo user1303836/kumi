@@ -69,7 +69,7 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
         kumi.join("timings.jsonl"),
         [(1800, "high"), (4200, "high"), (9000, "default")]
             .map(|(ms, effort)| {
-                let mut turn = json!({"ms":ms,"stop":"completed","modelCalls":2,"modelMs":ms-600,"firstPartMs":[700,500],"tools":1,"toolMs":400,"liveRequests":3,"sentBytes":204800,"effort":effort,"slowTools":[{"tool":"watch_video","calls":1,"ms":ms-1000},{"tool":"make_changes","calls":2,"ms":300}]});
+                let mut turn = json!({"ms":ms,"stop":"completed","modelCalls":2,"modelMs":ms-600,"firstPartMs":[700,500],"tools":1,"toolMs":400,"liveRequests":3,"sentBytes":204800,"lookMs":ms/30,"lookRequests":3,"lookBytes":58368,"effort":effort,"slowTools":[{"tool":"watch_video","calls":1,"ms":ms-1000},{"tool":"make_changes","calls":2,"ms":300}]});
                 if ms == 9000 {
                     turn["tier"] = json!("priority");
                     turn["slowTools"].as_array_mut().unwrap().push(json!({"tool":"search_web","calls":1,"ms":40}));
@@ -153,7 +153,7 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
         "← {\"type\":\"text\",\"value\":",
         "applied · Tempo 120 → 124 BPM",
         "Freezing a track",
-        "3 turns. Medians: 4.2 s an answer · model 3.6 s · tools 0.4 s · 2 model calls · first part 0.7 s · 3 Live requests · 200 KB sent\nSlowest tools (each turn's three, summed): watch_video 12.0 s (3 calls) · make_changes 0.9 s (6 calls) · search_web 0.0 s (1 call)\nEffort: high (2 turns) · default (1 turn)\nService tier: priority (1 turn)",
+        "3 turns. Medians: 4.2 s an answer · model 3.6 s · tools 0.4 s · 2 model calls · first part 0.7 s · 3 Live requests · 200 KB sent\nLooking at the Set before each answer (medians): 0.1 s · 3 Live requests · 57 KB\nSlowest tools (each turn's three, summed): watch_video 12.0 s (3 calls) · make_changes 0.9 s (6 calls) · search_web 0.0 s (1 call)\nEffort: high (2 turns) · default (1 turn)\nService tier: priority (1 turn)",
         "AbletonMcpBridge) Initializing",
         "RuntimeError: boom",
         "File \"bridge.py\"",
