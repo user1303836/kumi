@@ -7586,6 +7586,30 @@ class PythonRunTests(unittest.TestCase):
         allowed = self.run_python(f"# not remove_notes or replace_selected_notes\nresult = [callable(getattr({clip}, name, None)) for name in ('remove_notes_extended', 'remove_notes_by_id')]")
         self.assertTrue(allowed["ok"], allowed)
 
+    def test_a_script_that_routes_an_input_from_main_is_refused_before_it_runs(self):
+        # #195: Live 12.4 crashed (EXCEPTION_ACCESS_VIOLATION, unsaved work lost) on this line from the model.
+        crashing = [
+            "song.tempo = 126\nt = song.tracks[0]\nt.input_routing_type = next(r for r in t.available_input_routing_types if r.display_name == 'Main')",
+            "song.tempo = 126\ndef route(t, name):\n    t.input_routing_type = [r for r in t.available_input_routing_types if r.display_name == name][0]\nroute(song.tracks[0], 'Master')",
+            "song.tempo = 126\nsetattr(song.tracks[0], 'input_routing_type', [r for r in song.tracks[0].available_input_routing_types if r.display_name == 'Main'][0])",
+        ]
+        for code in crashing:
+            with self.subTest(code=code):
+                result = self.run_python(code)
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["error"]["type"], "ValueError")
+                self.assertTrue(result["error"]["message"].startswith("Live crashes when a track's input is set to Main"), result["error"]["message"])
+                self.assertIn('"Resampling"', result["error"]["message"])
+                self.assertEqual(self.song.tempo, 120, "nothing in the script ran")
+        # An output to Main, an input read or compared, and an input from Resampling all run.
+        for code in [
+            "t = song.tracks[0]\nresult = [r.display_name for r in t.available_output_routing_types if r.display_name == 'Main']",
+            "result = song.tracks[0].input_routing_type == 'Main'",
+            "t = song.tracks[0]\nchoices = [r for r in t.available_input_routing_types if r.display_name == 'Resampling']\nresult = len(choices)",
+        ]:
+            with self.subTest(code=code):
+                self.assertNotIn("crashes", str(self.run_python(code).get("error")), code)
+
     def test_authenticated_invoke_needs_no_authority_and_runs_on_the_live_queue(self):
         self.assertIn("python.run", remote_module._AUTHORITY_FREE_INVOKES)
         self.assertNotIn("python.run", remote_module._READ_ONLY_INVOKES)

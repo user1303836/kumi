@@ -397,3 +397,19 @@ fn deadline_polls(value: &Value) -> Value {
     }
     json!(out)
 }
+
+#[tokio::test]
+async fn an_input_from_main_is_refused_since_it_crashes_live() {
+    // #195: Live 12.4 crashed, losing the producer's unsaved work, when an audio track's input was set to Main.
+    let host = McpHost::new(Rc::new(DeterministicLiveSimulator::new()), McpHostOptions::default()).unwrap();
+    for input in ["Main", "Master", " Main "] {
+        let result = host.live_routing_preview_async(&json!(1), &json!({"trackRef":"track:track-1","inputType":input})).await.unwrap();
+        assert_eq!(result["result"]["isError"], true, "{result}");
+        let body: Value = serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert!(body["reason"].as_str().unwrap().starts_with("Live crashes when a track's input is set to Main"), "{body}");
+        assert_eq!(body["remediation"], "Record the mix with inputType \"Resampling\" instead.");
+    }
+    // An output to Main is a track's usual output, and fine.
+    let output = host.live_routing_preview_async(&json!(1), &json!({"trackRef":"track:track-1","outputType":"Main"})).await.unwrap();
+    assert!(!output.to_string().contains("crashes"), "{output}");
+}

@@ -4,6 +4,9 @@ use super::{device_parameter::fields, reads::AUDITION_DEADLINE_MS};
 use kumi_common::{abort::Signal, js::json as js_json, time::now_ms_f64};
 use sha2::{Digest, Sha256};
 const FIELDS: &[&str] = &["inputType", "inputSubRouting", "outputType", "outputSubRouting", "arm", "monitoring"];
+/// Live 12.4 crashes, losing unsaved work, when a track's input is set to Main, the main output (#195);
+/// Live 11 called it Master. "Resampling" records what Main plays.
+const INPUT_FROM_MAIN: &str = "Live crashes when a track's input is set to Main (Live 12.4: unsaved work is lost), so nothing changed. To record the mix, set inputType to \"Resampling\", which is what Main plays.";
 fn tracks(snapshot: &Value) -> impl Iterator<Item = &Value> {
     snapshot["tracks"].as_array().into_iter().flatten()
 }
@@ -173,6 +176,9 @@ impl McpHost {
         }
         if proposed.as_object().unwrap().is_empty() {
             return Ok(error(id, -32602, "at least one routing field is required", None));
+        }
+        if proposed.get("inputType").and_then(Value::as_str).is_some_and(|input| ["Main", "Master"].contains(&input.trim())) {
+            return Ok(adapter_tool_error(id, &LiveError::error(INPUT_FROM_MAIN), "Record the mix with inputType \"Resampling\" instead."));
         }
         let result = async {
             let status = self.fresh_status(Some(&LiveOperationContext::with_deadline(self.deadline(AUDITION_DEADLINE_MS)))).await?;

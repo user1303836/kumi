@@ -278,6 +278,33 @@ def _warp_marker_maker() -> Any:
 _LEGACY_NOTE_CALLS = ("remove_notes", "replace_selected_notes")
 
 
+# Live 12.4 crashes (EXCEPTION_ACCESS_VIOLATION, unsaved work lost) when an audio track's input is
+# set to "Main", the main output (#195); Live 11 called it "Master". Recording the mix goes through
+# "Resampling", as Kumi's own capture does.
+_CRASHING_INPUTS = frozenset({"Main", "Master"})
+INPUT_FROM_MAIN = ("Live crashes when a track's input is set to Main (Live 12.4: unsaved work is lost), so nothing ran. "
+                   "To record the mix, set the input to \"Resampling\", which is what Main plays. A script that sets an output to Main "
+                   "and an input to something else can do them in two scripts.")
+
+
+def _sets_input_from_main(code: Any) -> bool:
+    """Whether a compiled script assigns a track's input routing and names Main (or Master) anywhere:
+    crude by design, since the choice is usually found by its name. Its functions are included."""
+    try:
+        import dis
+    except ImportError:
+        dis = None
+    sets_input = False; strings: set[str] = set(); pending = [code]
+    while pending:
+        current = pending.pop()
+        if dis is None: sets_input = sets_input or "input_routing_type" in current.co_names
+        else: sets_input = sets_input or any(instruction.opname == "STORE_ATTR" and instruction.argval == "input_routing_type" for instruction in dis.get_instructions(current))
+        for constant in current.co_consts:
+            if isinstance(constant, str): strings.add(constant)
+            elif hasattr(constant, "co_consts"): pending.append(constant)
+    return (sets_input or "input_routing_type" in strings) and bool(strings & _CRASHING_INPUTS)
+
+
 def _legacy_note_calls(code: Any) -> list[str]:
     """The legacy note calls a compiled script names (as attributes or strings), its functions included."""
     found: set[str] = set(); pending = [code]
@@ -9886,6 +9913,7 @@ class LiveObjectMapper:
             try:
                 sys.settrace(trace)
                 compiled = compile(code, "<python.run>", mode)
+                if _sets_input_from_main(compiled): raise ValueError(INPUT_FROM_MAIN)
                 legacy = _legacy_note_calls(compiled)
                 if legacy:
                     raise ValueError(f"{' and '.join(legacy)} {'is' if len(legacy) == 1 else 'are'} Live's old way to remove notes: Live would stop to ask the producer before it ran, and the notes would lose their MPE, probability and velocity data. Nothing ran. "

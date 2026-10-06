@@ -354,7 +354,7 @@
       "preview": "live_routing_preview",
       "apply": "live_routing_apply",
       "family": "mixer",
-      "description": "Route a track and get it ready to record: its input (inputType and inputSubRouting, such as another track and \"Post FX\", or \"Resampling\" for the main output) and output (outputType, outputSubRouting), exactly as Live names them (live_discover kind routing-choice with the track as parent lists them), arm on or off, and monitoring in, auto or off. A new audio track fed by another track and armed is how audio gets bounced (resampling).",
+      "description": "Route a track and get it ready to record: its input (inputType and inputSubRouting, such as another track and \"Post FX\", or \"Resampling\" for the main output; never \"Main\", which crashes Live) and output (outputType, outputSubRouting), exactly as Live names them (live_discover kind routing-choice with the track as parent lists them), arm on or off, and monitoring in, auto or off. A new audio track fed by another track and armed is how audio gets bounced (resampling).",
       "methods": [
         "summarize"
       ]
