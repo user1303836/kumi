@@ -35,7 +35,7 @@ use kumi_common::{
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     panic::{catch_unwind, AssertUnwindSafe},
     path::PathBuf,
     rc::Rc,
@@ -63,6 +63,11 @@ impl<'a> ExpectedSwitch<'a> {
     fn new(connection: &'a LiveConnection) -> Self {
         connection.expect_set_change(SET_OPENING_MS);
         Self(connection)
+    }
+    /// Still expected past this call: Kumi handed Live's dialog back mid-switch, and the model's `answer` (Yes
+    /// to a replace prompt, say) may finish it. A Cancel through `answer`, or the time running out, ends it.
+    fn handed_back(self) {
+        std::mem::forget(self);
     }
 }
 impl Drop for ExpectedSwitch<'_> {
@@ -118,6 +123,8 @@ pub struct CommandTools {
     act: CommandAction,
     hands_setup: RefCell<Option<HandsReady>>,
     menu_items: RefCell<Option<Vec<MenuItem>>>,
+    /// A Set switch set_file handed back a dialog for, which the model's answer can finish or cancel.
+    switch_handed_back: Cell<bool>,
 }
 #[derive(Debug)]
 enum CommandError {
@@ -194,7 +201,16 @@ impl CommandTools {
         options: CommandToolsOptions,
         act: CommandAction,
     ) -> Self {
-        Self { connection, history, remember, options, act, hands_setup: RefCell::new(None), menu_items: RefCell::new(None) }
+        Self {
+            connection,
+            history,
+            remember,
+            options,
+            act,
+            hands_setup: RefCell::new(None),
+            menu_items: RefCell::new(None),
+            switch_handed_back: Cell::new(false),
+        }
     }
     fn tell(&self, title: impl Into<String>) {
         if let Some(listener) = &self.options.on_action {
@@ -342,6 +358,11 @@ impl CommandTools {
             // Windows says No where macOS says Don't Save: what was pressed is said as Live says it.
             let pressed = answered.fields.get("pressed").and_then(Value::as_str).filter(|s| !s.is_empty()).unwrap_or(answer).to_owned();
             self.tell(format!("Pressed {pressed} in Live's dialog"));
+            // A switch Kumi handed back stays Kumi's until it's cancelled here.
+            if self.switch_handed_back.get() && button_title(&pressed) == "cancel" {
+                self.switch_handed_back.set(false);
+                self.connection.forget_set_change();
+            }
             delay(200, signal).await?;
             let next = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
             let mut out = args(json!({"pressed":pressed}));
@@ -727,7 +748,14 @@ impl CommandTools {
             return Ok(ToolResult::error(format!("Live's menus don't have “{}” here.", command.titles[0])));
         };
         let switching = matches!(name, "new_set" | "open_set");
-        let _expected = switching.then(|| ExpectedSwitch::new(&self.connection));
+        let mut expected = switching.then(|| ExpectedSwitch::new(&self.connection));
+        self.switch_handed_back.set(false);
+        let hand_back = |expected: &mut Option<ExpectedSwitch>| {
+            if let Some(expected) = expected.take() {
+                expected.handed_back();
+                self.switch_handed_back.set(true);
+            }
+        };
         // The dialog the path is for: the Open dialog for open_set; a Save dialog for the rest (new_set's path
         // is where the open Set, never saved, is saved first).
         let wanted = if name == "open_set" { "open" } else { "save" };
@@ -798,6 +826,7 @@ impl CommandTools {
                         // Answered by hand, the Open dialog that follows would be left for no one to fill.
                         out.insert("dialog".into(), serde_json::to_value(&dialog).unwrap());
                         out.insert("next".into(), json!("Live asks whether to save the open Set first: answer Cancel, ask the producer, then run this again with save_current (yes saves it, no discards it)."));
+                        hand_back(&mut expected);
                         return Ok(ToolResult::text(stringify(&Value::Object(out))));
                     };
                     // The prompt's own button: Yes / No on Windows, Save / Don't Save on a Mac.
@@ -816,6 +845,7 @@ impl CommandTools {
                     if !answered.ok {
                         out.insert("dialog".into(), serde_json::to_value(&dialog).unwrap());
                         out.insert("next".into(), json!("Kumi couldn't answer it: answer it yourself with answer, by its button's title."));
+                        hand_back(&mut expected);
                         return Ok(ToolResult::text(stringify(&Value::Object(out))));
                     }
                     if answer == "cancel" {
@@ -842,14 +872,12 @@ impl CommandTools {
                 // dialog took the path and Yes answered its prompt (Live 12.4's order).
                 let unsaved = saving && (name == "open_set" || (path.is_none() && !filled));
                 // Windows asks before a save writes over a file: that's the producer's to decide. Its prompt is
-                // known by its words, or as a Yes / No question once the path given was already a file.
-                let yes_no = dialog
-                    .buttons
-                    .as_ref()
-                    .is_some_and(|buttons| ["yes", "no"].iter().all(|wanted| buttons.iter().any(|button| button_title(button) == *wanted)));
+                // known by its words, or, once the path given was already a file, as any two-button question
+                // after the fill (Ja / Nein, Oui / Non: its buttons are in Windows' language).
+                let question = dialog.buttons.as_ref().is_some_and(|buttons| buttons.len() == 2);
                 let replacing = filled
                     && wanted == "save"
-                    && ((existed && yes_no)
+                    && ((existed && question)
                         || ["already exists", "replace", "既に存在", "置き換え", "已存在", "替换"].iter().any(|w| words.contains(w)));
                 out.insert("dialog".into(), serde_json::to_value(&dialog).unwrap());
                 out.insert("next".into(), json!(if unsaved {
@@ -859,6 +887,7 @@ impl CommandTools {
                 } else {
                     "Answer it with answer (the button's title), or tell the producer what it asks.".to_owned()
                 }));
+                hand_back(&mut expected);
                 return Ok(ToolResult::text(stringify(&Value::Object(out))));
             }
             if switching {

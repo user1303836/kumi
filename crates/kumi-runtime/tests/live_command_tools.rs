@@ -635,6 +635,49 @@ async fn lives_own_dialogs_order_folders_and_progress_and_a_switch_seen_through_
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_switch_the_models_answer_finishes_stays_kumis_and_one_cancelled_there_doesnt() {
+    // Round 7 (review): new_set handed back Windows' replace prompt; the model asked the producer and answered
+    // Yes, and Live went on to the new Set, which then read as one the producer opened by hand.
+    if cfg!(target_os = "macos") {
+        return;
+    }
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let menus: Value = serde_json::from_str(FILE_MENU).unwrap();
+            let taken = folder.path().join("Song B.als");
+            std::fs::write(&taken, b"the producer's song").unwrap();
+            let prompt = json!({"open":true,"title":"","words":["Save changes to \"Untitled\" before closing?"],"buttons":["Yes","No","Cancel"]});
+            let saving = json!({"open":true,"title":"Save Live Set As:","words":["File name:","Save as type:"],"buttons":["Save","Cancel"],"file":"save"});
+            // A German Windows: its replace prompt is known as a two-button question once the path was a file.
+            let replace = json!({"open":true,"title":"Speichern unter bestätigen","words":["Song B.als ist bereits vorhanden."],"buttons":["Ja","Nein"]});
+            for (answer, cause) in [("Ja", DisconnectCause::AskedSet), ("Cancel", DisconnectCause::Set)] {
+                let causes = Rc::new(RefCell::new(vec![]));
+                let seen = causes.clone();
+                let (commands, _, connection) = set_file_harness_with(
+                    json!({"writes":false,"hands":{"menus":[menus],"dialog":[prompt,saving,replace],"answer":[{"ok":true,"pressed":"Yes"},{"ok":true,"pressed":answer}]}}),
+                    move |options| {
+                        options.on_connection = Rc::new(move |_, cause| seen.borrow_mut().push(cause));
+                        options.live_running = Some(Rc::new(|| async { true }.boxed_local()));
+                    },
+                )
+                .await;
+                let result = commands
+                    .live_command(&json!({"command":"new_set","path":taken,"save_current":"yes"}).as_object().unwrap().clone(), Signal::new())
+                    .await
+                    .unwrap();
+                let said: Value = serde_json::from_str(&result.text).unwrap();
+                assert!(said["next"].as_str().unwrap().starts_with("A file is already at"), "{}", result.text);
+                commands.live_command(&json!({"answer":answer}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+                connection.lose_live();
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                assert_eq!(causes.borrow().last(), Some(&Some(cause)), "after {answer}");
+            }
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn a_switch_cancelled_at_lives_prompt_is_no_longer_expected() {
     // Round 7: the 120 s expectation outlived a cancel, so a Set the producer opened by hand right after
     // counted as Kumi's and the request carried on into it (#188).
