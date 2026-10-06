@@ -264,7 +264,7 @@ async fn what_live_refuses_is_said_and_what_may_still_land_isnt_a_failure() {
             let run = convert(json!({"ok":true,"result":{"name":"Vox take"}}), None, melody("7:clip:1:0")).await;
             assert!(!run.result.is_error, "{}", run.result.text);
             let result: Value = serde_json::from_str(&run.result.text).unwrap();
-            assert_eq!(result["converting"], json!("Melody to MIDI"));
+            assert_eq!((result["converting"].clone(), result["from"].clone(), result["landed"].clone()), (json!("Melody to MIDI"), json!("Vox take"), json!(false)));
             assert!(
                 result["note"].as_str().unwrap().starts_with(
                     "Kumi hasn't seen Melody to MIDI on “Vox take” land after two minutes, and Live may still be converting. Don't ask again"
@@ -285,7 +285,7 @@ async fn what_live_refuses_is_said_and_what_may_still_land_isnt_a_failure() {
 async fn an_answer_lost_once_live_may_be_converting_says_so() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let lost = "Kumi lost Live's answer to Melody to MIDI";
+            let unsure = "Kumi can't tell whether Live started Melody to MIDI";
             // The call's answer lost on the way back.
             let run = convert(json!({"lost":"the bridge didn't answer"}), Some(0), melody("7:clip:1:0")).await;
             // Python past its time once it had asked Live (a slow conversion call), or the bridge failing on the way.
@@ -296,7 +296,9 @@ async fn an_answer_lost_once_live_may_be_converting_says_so() {
                 assert!(!run.result.is_error, "{}", run.result.text);
                 let result: Value = serde_json::from_str(&run.result.text).unwrap();
                 let note = result["note"].as_str().unwrap();
-                assert!(note.starts_with(&format!("{lost} ({why}), and Live may still be converting. Don't ask again")), "{note}");
+                assert!(note.starts_with(&format!("{unsure} ({why}), and Live may still be converting. Don't ask again")), "{note}");
+                assert!(note.ends_with("look in Live for a new MIDI track next to the clip's in a moment, then discover again."), "{note}");
+                assert_eq!(result["landed"], json!(false));
                 assert!(run.retired, "a track may land next to the clip's: references retire");
                 assert_eq!(run.python.len(), 1, "never asked again");
             }

@@ -98,14 +98,12 @@ impl CommandTools {
             let error = reply.as_ref().and_then(|body| body.get("error"));
             let why =
                 error.and_then(|error| error.get("message")).and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| reason(&ran));
-            // No API, or no Python in Live to call it with: the menus do it.
-            if ["no conversions API", "Python execution is unavailable", "Python module is unavailable"]
-                .iter()
-                .any(|said| why.contains(said))
-            {
+            let asked = reply.as_ref().and_then(|body| body.get("stdout")).and_then(Value::as_str).is_some_and(|out| out.contains(ASKED));
+            // No API, or no Python in Live to call it with: the menus do it (never once Live was asked).
+            let unavailable = ["no conversions API", "Python execution is unavailable", "Python module is unavailable"];
+            if !asked && unavailable.iter().any(|said| why.contains(said)) {
                 return Ok(None);
             }
-            let asked = reply.as_ref().and_then(|body| body.get("stdout")).and_then(Value::as_str).is_some_and(|out| out.contains(ASKED));
             // The bridge's own words for a ref it no longer holds (a KeyError before the script runs).
             let gone = ["stale", "reference is invalid", "unknown reference"].iter().any(|said| why.contains(said))
                 || error.and_then(|error| error.get("type")) == Some(&json!("KeyError"));
@@ -127,7 +125,7 @@ impl CommandTools {
         // Once Live is converting, a track may land next to the clip's whatever happens here.
         self.retire_references();
         let Some(landed) = landed? else {
-            return Ok(Some(may_still_land(title, format!("Kumi hasn't seen {title} on “{name}” land after two minutes"))));
+            return Ok(Some(may_still_land(title, Some(&name), format!("Kumi hasn't seen {title} on “{name}” land after two minutes"))));
         };
         let done = format!("{title}: new track “{landed}”");
         self.tell(&done);
@@ -140,11 +138,11 @@ impl CommandTools {
             "note": "Tracks after the new one moved along: discover again before using earlier track references."
         })))))
     }
-    /// Live's answer lost, or failing once the script had asked Live to convert: Live may be converting all the same,
+    /// Live's answer lost, or an error once the script had asked Live to convert: Live may be converting all the same,
     /// so the turn's references retire and it isn't said as a failure.
     fn unsure(&self, title: &str, why: &str) -> ToolResult {
         self.retire_references();
-        may_still_land(title, format!("Kumi lost Live's answer to {title} ({why})"))
+        may_still_land(title, None, format!("Kumi can't tell whether Live started {title} ({why})"))
     }
     /// A new track moves the ones after it along: the turn's references retire.
     fn retire_references(&self) {
@@ -237,11 +235,16 @@ fn reason(result: &crate::mcp::types::CallToolResult) -> String {
 
 /// What Kumi says when it can't tell whether a conversion's new track will land: Live may still be converting, so it
 /// isn't a failure, and asking again could make a second track.
-fn may_still_land(title: &str, what: String) -> ToolResult {
-    ToolResult::text(stringify(&json!({
+fn may_still_land(title: &str, from: Option<&str>, what: String) -> ToolResult {
+    let mut said = json!({
         "converting": title,
-        "note": format!("{what}, and Live may still be converting. Don't ask again (that could make a second track): look in Live for its new MIDI track in a moment, then discover again.")
-    })))
+        "landed": false,
+        "note": format!("{what}, and Live may still be converting. Don't ask again (that could make a second track): look in Live for a new MIDI track next to the clip's in a moment, then discover again.")
+    });
+    if let Some(from) = from {
+        said["from"] = json!(from);
+    }
+    ToolResult::text(stringify(&said))
 }
 
 /// Bring Live's window forward: the Live that's open, by its app (macOS); false where Kumi can't.
