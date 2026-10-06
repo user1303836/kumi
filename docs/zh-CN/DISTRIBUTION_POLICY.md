@@ -40,7 +40,7 @@ Kumi 及其桥接如何送到用户手中，这能证明什么、不能证明什
 
 ## 合并门禁
 
-仓库有两套规则集：
+仓库有三套规则集：
 
 - **`main`：**
   - 修改通过拉取请求进入；不要求批准性审查；
@@ -48,8 +48,14 @@ Kumi 及其桥接如何送到用户手中，这能证明什么、不能证明什
   - `main` 不能被删除或强制推送；
   - 仓库管理员角色可以对拉取请求绕过这些规则。
 - **`Release tags`：** 只有仓库管理员角色可以创建、移动或删除 `v*` 标签。推送标签会运行 Installer，由它发布版本。
+- **`Willington sync branch`：** 只有 Willington 的同步可以创建、推送或删除分支 `willington-sync`，所以它的拉取请求只包含同步的提交。管理员也不行：由同步让这个拉取请求与 `main` 保持同步，否则由管理员借助 `main` 的绕过规则来合并。只有同步会修改 `vendor/willington/`，所以不会产生冲突。
 
-`Willington files` 只允许 Willington 的同步修改 `vendor/willington/`，并且它的拉取请求不修改其他任何内容。同步是一个 GitHub App，它的登录名（`<app>[bot]`）放在仓库变量 `WILLINGTON_SYNC_APP` 中，它推送的分支是 `willington-sync`。在这个变量设置之前，任何人都不能修改这个文件夹。
+`Willington files` 只允许 Willington 的同步修改 `vendor/willington/`，并且它的拉取请求不修改其他任何内容。同步是一个推送分支 `willington-sync` 的 GitHub App。这个 App 创建之后：
+
+1. 把它的登录名（`<app>[bot]`）放进仓库变量 `WILLINGTON_SYNC_APP`；
+2. 把这个 App 加入 `Willington sync branch` 规则集的绕过列表，作为唯一的一项。
+
+在此之前，任何人都不能修改 `vendor/willington/`，也不能推送 `willington-sync`。
 
 Installer 工作流不是必需的检查，但在标签上，它的 `publish` 作业只有在发行包已在 macOS、Linux 和 Windows 上安装成功之后才会运行。[测试](TESTING.md#ci)介绍了每个作业。
 

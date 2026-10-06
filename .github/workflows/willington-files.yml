@@ -2,8 +2,9 @@ name: Willington files
 
 # Only Willington's sync changes vendor/willington/, and its pull requests change nothing else. Those files
 # ship to every producer, and their native libraries can't be reviewed, so who sends them is the check.
-# The sync is a GitHub App that pushes the branch willington-sync. Its login (`<app>[bot]`) goes in the
-# WILLINGTON_SYNC_APP repository variable once it exists; until then, nothing may change the folder.
+# The sync is a GitHub App that pushes the branch willington-sync, which only it can push (the "Willington
+# sync branch" ruleset), so a pull request it opened holds only its commits. Its login (`<app>[bot]`) goes in
+# the WILLINGTON_SYNC_APP repository variable once it exists; until then, nothing may change the folder.
 on:
   # The base branch's copy of this workflow runs, never the pull request's, so a pull request can't change
   # the check it's held to. It reads the pull request's metadata only, never its code. `edited` covers a
