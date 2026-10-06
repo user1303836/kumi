@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use futures::FutureExt;
 use kumi::{
     bridge_setup::{executable_name, run_program, Ran},
+    config::json_files,
     install::*,
     tui::tty::TtyOutput,
 };
@@ -10,6 +11,11 @@ use kumi_runtime::{
     ai::{
         error::LanguageModelError,
         http::{Fetch, FetchInit, Response},
+    },
+    core::{
+        contracts::{MemoryScope, MemoryStore},
+        store_backed::SqliteMemoryStore,
+        store_client::StoreClient,
     },
     system::{self, Env, SystemProgram},
     KUMI_VERSION,
@@ -179,6 +185,7 @@ async fn checked_executable_update_swap_and_rollback() {
     }));
     assert_eq!(update_installed(updated).await.unwrap(), 0, "{}", out.0.borrow());
     assert!(out.0.borrow().contains("Kumi is now 99.0.0"));
+    assert_eq!(out.0.borrow().contains(&format!("Kumi windows opened before the update keep running {KUMI_VERSION}")), !cfg!(windows));
     assert!(calls.borrow().iter().any(|(cmd, _)| cmd == &system::system_program_default(SystemProgram::Tar)));
     assert!(calls.borrow().iter().any(|(cmd, args)| cmd.ends_with(&executable_name("kumi")) && args == &["--version"]));
     assert_eq!(
@@ -188,7 +195,15 @@ async fn checked_executable_update_swap_and_rollback() {
     assert!(!home.join("app.new").exists());
     assert!(!home.join("downloads/kumi.tar.gz").exists());
     assert!(out.0.borrow().contains("To connect Live"));
-    assert_eq!(rollback_installed(io(&env).0).await.unwrap(), 0);
+    // What this Kumi kept in its database is written back for the older Kumi to read.
+    let (database, _) = StoreClient::open(home.join("kumi.db"), json_files(&env).unwrap(), 1).await.unwrap();
+    SqliteMemoryStore::new(database).remember(MemoryScope::Producer, None, "Mixes on headphones", None, 2).await.unwrap();
+    let (rollback, out) = io(&env);
+    assert_eq!(rollback_installed(rollback).await.unwrap(), 0);
+    assert!(!out.0.borrow().contains("won't see"), "{}", out.0.borrow());
+    assert_eq!(out.0.borrow().contains(&format!("Kumi windows still open keep running {KUMI_VERSION}")), !cfg!(windows));
+    let written: Value = serde_json::from_slice(&fs::read(home.join("memory.json")).unwrap()).unwrap();
+    assert_eq!(written["notes"][0]["text"], "Mixes on headphones");
     assert_eq!(serde_json::from_slice::<Value>(&fs::read(home.join("app/package.json")).unwrap()).unwrap()["version"], KUMI_VERSION);
     assert_eq!(serde_json::from_slice::<Value>(&fs::read(home.join("app.previous/package.json")).unwrap()).unwrap()["version"], "99.0.0");
     let (mut same, out) = io(&env);
@@ -196,6 +211,18 @@ async fn checked_executable_update_swap_and_rollback() {
     same.fetcher = Some(serve(good));
     assert_eq!(update_installed(same).await.unwrap(), 0);
     assert!(out.0.borrow().contains("up to date"));
+    // A write-back that can't run doesn't stop a rollback.
+    for leftover in ["kumi.db", "kumi.db-wal", "kumi.db-shm"] {
+        let _ = fs::remove_file(home.join(leftover));
+    }
+    fs::write(home.join("kumi.db"), "not a database").unwrap();
+    let (rollback, out) = io(&env);
+    assert_eq!(rollback_installed(rollback).await.unwrap(), 0);
+    assert!(
+        out.0.borrow().contains("The older Kumi won't see the notes, techniques or lessons kept since the update"),
+        "{}",
+        out.0.borrow()
+    );
 }
 #[tokio::test]
 async fn failed_unpack_or_probe_preserves_current_app() {

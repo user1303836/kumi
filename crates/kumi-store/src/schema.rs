@@ -89,7 +89,10 @@ CREATE TABLE forgotten (
 ) STRICT;
 ";
 
-const MIGRATIONS: &[&str] = &[V1];
+/// A file's base (`sync`): the file as Kumi last read or wrote it, as JSONB, for a three-way merge.
+const V2: &str = "ALTER TABLE imports ADD COLUMN base BLOB;";
+
+const MIGRATIONS: &[&str] = &[V1, V2];
 /// The schema version this build writes.
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
 
@@ -109,4 +112,29 @@ pub(crate) fn migrate(connection: &mut Connection) -> Result<(), StoreError> {
     }
     transaction.commit()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_database_from_the_first_schema_keeps_its_records_and_gets_bases() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(V1).unwrap();
+        connection.pragma_update(None, "user_version", 1).unwrap();
+        connection
+            .execute(
+                "INSERT INTO imports (source, kind, size, mtime, blake3, rows, imported_at) VALUES ('/memory.json', 'notes', 2, 3, 'h', 4, 5)",
+                [],
+            )
+            .unwrap();
+        migrate(&mut connection).unwrap();
+        assert_eq!(connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION as i64);
+        assert_eq!(
+            crate::imports::record_of(&connection, "/memory.json").unwrap(),
+            Some(crate::imports::Record { blake3: "h".into(), base: None }),
+            "read in before bases: the next change is read in as the first time was"
+        );
+    }
 }
