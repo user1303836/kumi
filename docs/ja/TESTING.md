@@ -109,10 +109,10 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 | | `Rust / Lint`（Ubuntu） | `cargo fmt --check`、ドキュメントテスト、サンプルのビルド、Clippy（参考扱い。ただし await をまたいで保持される `RefCell` の借用はジョブを失敗させます） |
 | | `Python Remote Script / ubuntu-24.04`、`macos-15`、`windows-2025`（Python 3.11） | Remote Script のテストを実行し、パッケージをコンパイルします |
 | | `Live extension`（Ubuntu、Node 24） | コミットされたビルドに対する、拡張機能のテスト |
-| | `Release scripts`（Ubuntu） | この変更の空白のチェック、続いてパッケージングのテスト |
+| | `Release scripts`（Ubuntu） | この変更の空白のチェック、続いてパッケージングのテストとリリーススクリプトのテスト |
 | | `Required CI` | 上記がすべてパスした場合にだけパスします |
 | **Willington files** | `Willington files`（Ubuntu） | `vendor/willington/` を変えられるのは、このリポジトリの `willington/` ブランチから出たリポジトリ所有者のプルリクエストだけで、そのプルリクエストはほかに何も変えません。`main` にあるこのチェックが、プルリクエストのコードではなくファイルの一覧を読んで実行されます |
-| **Installer** | `Native bundle / <target>`（6 つ）、`Aggregate native and existing-installer releases`、続いて `Install / <system>`（6 つ）と `Existing installer transition / <system>`（3 つ） | macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドル（Mac のバンドルには、Kumi が Live のメニューを使うためのヘルパー（ユニバーサル、アドホック署名）が入り、Intel 向けは Apple Silicon でクロスビルドします）、続いて既存のインストールが更新に使う互換リリースをビルドし、ローカルで配信します。各システムで：プロデューサーと同じ方法でインストールし（Windows では Windows PowerShell 5.1）、バージョン、`doctor`、ブリッジとその解析ワーカーを確認し、修復として再インストールし、使い捨ての Remote Scripts フォルダーに `kumi bridge --yes` を実行し、`kumi update`、`kumi update --rollback`、`kumi uninstall` を実行します。移行のジョブは、Kumi 1.7.5 と新しいバンドルで移行テストを実行します。`v*` タグでは、続いて `publish` がバンドルをリリースに添付します。 |
+| **Installer** | `Native bundle / <target>`（6 つ）、`Aggregate native and existing-installer releases`、続いて `Install / <system>`（6 つ）と `Existing installer transition / <system>`（3 つ） | macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドル（Mac のバンドルには、Kumi が Live のメニューを使うためのヘルパー（ユニバーサル、アドホック署名）が入り、Intel 向けは Apple Silicon でクロスビルドします）、続いて既存のインストールが更新に使う互換リリースをビルドし、ローカルで配信します。各システムで：プロデューサーと同じ方法でインストールし（Windows では Windows PowerShell 5.1）、バージョン、`doctor`、ブリッジとその解析ワーカーを確認し、修復として再インストールし、使い捨ての Remote Scripts フォルダーに `kumi bridge --yes` を実行し、`kumi update`、`kumi update --rollback`、`kumi uninstall` を実行します。移行のジョブは、Kumi 1.7.5 と新しいバンドルで移行テストを実行します。`v*` タグのプッシュでは、続いて `publish` がバンドルをリリースに添付し、ノートが書かれていればリリースを公開します（ノートは `scripts/release.py` が書きます）。 |
 
 プルリクエストでは、実行される範囲が狭くなります：
 

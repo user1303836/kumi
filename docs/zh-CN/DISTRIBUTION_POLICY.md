@@ -12,7 +12,7 @@ Kumi 及其桥接如何送到用户手中，这能证明什么、不能证明什
 | 桥接（`@ableton-mcp/mcp-server`） | 包含在每个 Kumi 发行包中：既有原生桥接 tarball，也有已解包的桥接包 | `kumi bridge`，它通过桥接的生命周期进行安装（[安装桥接](DELIVERY.md)） |
 | 单独的桥接 | 没有自己的发布版本。用 `python3 scripts/build-native-release.py --bridge-only` 构建（[构建选项](DEVELOPER_GUIDE.md#发布)） | 生命周期 CLI（[安装桥接](DELIVERY.md#独立桥接)） |
 
-安装脚本从 `main` 分支读取；它们安装的发行包来自最新的已发布版本（或 `KUMI_VERSION` 指定的版本）。在维护者发布之前，发布版本只是草稿，只有已发布的版本才是“latest”。不会向 npm 发布任何内容：每个包都是 `private: true`，所以 `npm publish` 会拒绝。
+安装脚本从 `main` 分支读取；它们安装的发行包来自最新的已发布版本（或 `KUMI_VERSION` 指定的版本）。在其标签的 Installer 运行通过并发布它之前，发布版本只是草稿（手动推送的标签要等维护者撰写说明并发布），只有已发布的版本才是“latest”。不会向 npm 发布任何内容：每个包都是 `private: true`，所以 `npm publish` 会拒绝。
 
 ## 只证明完整性，不证明身份
 

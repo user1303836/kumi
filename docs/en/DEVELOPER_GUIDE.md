@@ -262,24 +262,43 @@ its subject with the new version ("Bridge 1.0.71: …"), and adds a
 extension changed, rebuild and commit its bundle. Work goes on a branch and
 reaches `main` by pull request.
 
-**A Kumi release:**
+**A Kumi release** is one command, from any checkout, with `gh` signed in as a
+repository admin. Run it right after a pull request merges:
 
-1. On the branch, one commit titled "Kumi X.Y.Z: the changelog, READMEs and
-   versions" sets the version in the root `package.json`,
-   `crates/kumi-runtime/src/version.rs`, the `kumi`, `kumi-common` and
-   `kumi-runtime` Cargo manifests and `Cargo.lock` (the packaging tests hold
-   these equal); the Status line of the three READMEs; the ships-with
-   line under "Bridge versions" in the three `KUMI_CHANGES.md`; and the
-   `CHANGELOG.md`'s `## Unreleased` becomes `## X.Y.Z — date`, with a line
-   that says which bridge it ships with.
-2. Merge the pull request with a merge commit titled "Kumi X.Y.Z (#PR)".
-3. Tag the merge commit `vX.Y.Z` and push the tag. The Installer workflow builds
-   native bundles for Intel and ARM on macOS, Linux and Windows, tests installs
-   and migration, and attaches the per-target bundles/manifests plus the
-   compatibility `kumi.tar.gz`, `kumi-release.json` and `SHA256SUMS` to a draft
-   release "Kumi X.Y.Z".
-4. Write the release notes and publish the release. Only then do the installers,
-   `kumi update` and the update check see it.
+```sh
+python3 scripts/release.py          # dry run: the version, the CHANGELOG entry, the notes and the checks
+python3 scripts/release.py --go     # the release
+```
+
+- **What ships** comes from `main` since the last tag: each merged pull
+  request's `Changelog:` lines, as written ("none" adds nothing). A line goes
+  under the bridge's heading when its pull request changes the bridge and none
+  of Kumi's crates or installers. In a pull request that changes both, write
+  `Changelog (bridge):` for a line about the bridge. The dry run shows where
+  each line goes.
+- **The bridge** gets a new version when a pull request changes what Live
+  loads: `crates/ableton-mcp-server`, `remote-script`, `protocol`,
+  `apps/live-extension` or `vendor/willington` (tests and Markdown aside).
+- **The version** is the next patch; `--minor` or `--version X.Y.Z` choose
+  another.
+- **With `--go`** it commits "Kumi X.Y.Z: the changelog, READMEs and versions"
+  on `release/vX.Y.Z`: the version in the root `package.json`,
+  `crates/kumi-runtime/src/version.rs`, the `kumi`, `kumi-common` and
+  `kumi-runtime` Cargo manifests and `Cargo.lock` (the packaging tests hold
+  these equal), and the bridge's when it changed; the Status line of the three
+  READMEs; the ships-with line under "Bridge versions" in the three
+  `KUMI_CHANGES.md`; and a `## X.Y.Z — date` entry in `CHANGELOG.md`. It opens
+  the pull request "Kumi X.Y.Z", merges it with the admin bypass as
+  "Kumi X.Y.Z (#PR)" without waiting for its CI, tags the merge commit
+  `vX.Y.Z`, pushes the tag and creates the draft release with its notes
+  (`--summary` opens them with a sentence).
+- **The tag's Installer run** builds native bundles for Intel and ARM on macOS,
+  Linux and Windows, tests installs and migration, attaches the per-target
+  bundles/manifests plus the compatibility `kumi.tar.gz`, `kumi-release.json`
+  and `SHA256SUMS`, and publishes the release. Only then do the installers,
+  `kumi update` and the update check see it. A tag pushed by hand gets a draft
+  with notes to come, which stays a draft until someone writes them and
+  publishes it.
 
 **Local native release staging**, from a clean commit:
 

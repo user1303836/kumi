@@ -16,9 +16,10 @@ what the bridge's package may contain. The steps for cutting a release are in
 
 The installer scripts are read from the `main` branch; the bundle they install
 comes from the latest published release (or the one `KUMI_VERSION` names). A
-release is a draft until the maintainer publishes it, and only a published
-release is "latest". Nothing is published to npm: every package is
-`private: true`, so `npm publish` refuses.
+release is a draft until its tag's Installer run passes and publishes it (a tag
+pushed by hand waits for the maintainer to write its notes and publish it), and
+only a published release is "latest". Nothing is published to npm: every
+package is `private: true`, so `npm publish` refuses.
 
 ## Integrity, not identity
 

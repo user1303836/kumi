@@ -145,12 +145,18 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 **提交**的标题用通俗的英文，说明对制作人来说改变了什么（“Kumi: talk to it while it works”）。桥接或 Remote Script 的修改要提升 `crates/ableton-mcp-server/Cargo.toml` 和 `Cargo.lock` 中的版本，标题以新版本开头（“Bridge 1.0.71: …”），并在 `CHANGELOG.md` 的 `## Unreleased` 下添加一个 `### Bridge x.y.z` 块。如果扩展变了，重新构建并提交它的包。工作在分支上进行，通过拉取请求合并到 `main`。
 
-**一次 Kumi 发布：**
+**一次 Kumi 发布**只需一条命令，可在任意源码副本中运行，`gh` 需以仓库管理员身份登录。在拉取请求合并后立即运行：
 
-1. 在分支上，用一个标题为 “Kumi X.Y.Z: the changelog, READMEs and versions” 的提交完成以下改动：在根目录的 `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common` 和 `kumi-runtime` 的 Cargo 清单以及 `Cargo.lock` 中设置版本（打包测试会确保这些相等）；更新三个 README 中当前状态（Status）的那一行；更新三个 `KUMI_CHANGES.md` 中“桥接版本”（Bridge versions）下说明随附哪个桥接的那一行；并把 `CHANGELOG.md` 的 `## Unreleased` 改为 `## X.Y.Z — date`，加上一行说明它随附哪个桥接。
-2. 用标题为 “Kumi X.Y.Z (#PR)” 的合并提交合并该拉取请求。
-3. 给合并提交打上标签 `vX.Y.Z` 并推送该标签。Installer 工作流会为 macOS、Linux 和 Windows 的 Intel 与 ARM 构建原生发行包，测试安装和迁移，并把各平台的发行包和清单，以及兼容用的 `kumi.tar.gz`、`kumi-release.json` 和 `SHA256SUMS` 附加到名为 “Kumi X.Y.Z” 的草稿发布中。
-4. 撰写发布说明并发布该版本。只有在此之后，安装程序、`kumi update` 和更新检查才能看到它。
+```sh
+python3 scripts/release.py          # 试运行：显示版本、CHANGELOG 条目、发布说明和各项检查
+python3 scripts/release.py --go     # 正式发布
+```
+
+- **发布内容**读取自上一个标签以来的 `main`：每个已合并拉取请求的 `Changelog:` 行，按原文使用（“none” 不添加任何内容）。如果拉取请求修改了桥接，而没有修改 Kumi 的 crate 或安装程序，它的行会放在桥接的标题下；同时修改两者的拉取请求，请把关于桥接的行写成 `Changelog (bridge):`。试运行会显示每一行放在哪里。
+- **桥接**在拉取请求修改了 Live 加载的内容时获得新版本：`crates/ableton-mcp-server`、`remote-script`、`protocol`、`apps/live-extension` 或 `vendor/willington`（测试和 Markdown 除外）。
+- **版本**是下一个补丁版本；`--minor` 或 `--version X.Y.Z` 可以选择其他版本。
+- **加上 `--go`**，它会在 `release/vX.Y.Z` 上提交 “Kumi X.Y.Z: the changelog, READMEs and versions”：根目录的 `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common` 和 `kumi-runtime` 的 Cargo 清单以及 `Cargo.lock` 中的版本（打包测试会确保这些相等），桥接变化时还有桥接的版本；三个 README 中当前状态（Status）的那一行；三个 `KUMI_CHANGES.md` 中“桥接版本”（Bridge versions）下说明随附哪个桥接的那一行；以及 `CHANGELOG.md` 中的 `## X.Y.Z — date` 条目。然后它打开拉取请求 “Kumi X.Y.Z”，不等其 CI，用管理员绕过将其合并为 “Kumi X.Y.Z (#PR)”，给合并提交打上标签 `vX.Y.Z` 并推送，再创建带发布说明的草稿发布（`--summary` 可以在说明开头加一句话）。
+- **标签触发的 Installer 运行**会为 macOS、Linux 和 Windows 的 Intel 与 ARM 构建原生发行包，测试安装和迁移，附加各平台的发行包和清单以及兼容用的 `kumi.tar.gz`、`kumi-release.json` 和 `SHA256SUMS`，然后发布该版本。只有在此之后，安装程序、`kumi update` 和更新检查才能看到它。手动推送的标签会得到一个说明“待补充”的草稿，在有人撰写说明并发布之前，它一直是草稿。
 
 **在本地准备原生发布**，需从一个干净的提交开始：
 

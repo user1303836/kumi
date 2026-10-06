@@ -302,6 +302,8 @@ jobs:
           python-version: "3.13"
       - name: Native release packaging (and every packaged document's links)
         run: python3 -m unittest discover -s scripts/tests -p test_native_release.py
+      - name: The release script's edits
+        run: python3 -m unittest discover -s scripts/tests -p test_release.py
 
   required:
     name: Required CI

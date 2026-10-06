@@ -145,12 +145,18 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 **コミット**の件名は、プロデューサーにとって何が変わったかを平易な英語で書きます（"Kumi: talk to it while it works"）。ブリッジまたは Remote Script の変更では、`crates/ableton-mcp-server/Cargo.toml` と `Cargo.lock` のバージョンを上げ、件名を新しいバージョンで始め（"Bridge 1.0.71: …"）、`CHANGELOG.md` の `## Unreleased` の下に `### Bridge x.y.z` ブロックを追加します。拡張機能が変わったら、そのバンドルを再ビルドしてコミットします。作業はブランチで行い、プルリクエストで `main` に入れます。
 
-**Kumi のリリース：**
+**Kumi のリリース**は、`gh` にリポジトリの管理者としてサインインした状態で、どのチェックアウトからでも実行できる一つのコマンドです。プルリクエストがマージされたらすぐに実行します：
 
-1. ブランチ上で、"Kumi X.Y.Z: the changelog, READMEs and versions" という件名のコミットを一つ作り、次のものを更新します。ルートの `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common`、`kumi-runtime` の Cargo マニフェスト、`Cargo.lock` のバージョン（パッケージングのテストがこれらが等しいことを確認します）。3 つの README の Status（現状）の行。3 つの `KUMI_CHANGES.md` の「Bridge versions」（ブリッジのバージョン）の下にある、同梱するブリッジの行。そして `CHANGELOG.md` の `## Unreleased` を `## X.Y.Z — date` にし、どのブリッジを同梱するかを書いた行を加えます。
-2. プルリクエストを "Kumi X.Y.Z (#PR)" という件名のマージコミットでマージします。
-3. マージコミットに `vX.Y.Z` のタグを付けてプッシュします。Installer ワークフローが macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドルをビルドし、インストールと移行をテストし、ターゲットごとのバンドルとマニフェスト、そして互換用の `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS` を下書きのリリース "Kumi X.Y.Z" に添付します。
-4. リリースノートを書いてリリースを公開します。そうして初めて、インストーラー、`kumi update`、更新確認がそのリリースを認識します。
+```sh
+python3 scripts/release.py          # ドライラン：バージョン、CHANGELOG の項目、リリースノート、チェックを表示
+python3 scripts/release.py --go     # リリース
+```
+
+- **出荷するもの**は、前回のタグ以降の `main` から読み取ります。マージされた各プルリクエストの `Changelog:` の行を、書かれたとおりに使います（"none" は何も加えません）。プルリクエストがブリッジを変え、Kumi のクレートやインストーラーを変えていない場合、その行はブリッジの見出しの下に入ります。両方を変えるプルリクエストでは、ブリッジについての行を `Changelog (bridge):` と書きます。ドライランは各行の入る場所を表示します。
+- **ブリッジ**は、プルリクエストが Live の読み込むもの（`crates/ableton-mcp-server`、`remote-script`、`protocol`、`apps/live-extension`、`vendor/willington`。テストと Markdown は除く）を変えたときに新しいバージョンになります。
+- **バージョン**は次のパッチです。`--minor` か `--version X.Y.Z` で別のものを選べます。
+- **`--go` を付けると**、`release/vX.Y.Z` に "Kumi X.Y.Z: the changelog, READMEs and versions" をコミットします。ルートの `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common`、`kumi-runtime` の Cargo マニフェスト、`Cargo.lock` のバージョン（パッケージングのテストがこれらが等しいことを確認します）と、変わった場合はブリッジのバージョン、3 つの README の Status の行、3 つの `KUMI_CHANGES.md` の「Bridge versions」の下にある同梱するブリッジの行、`CHANGELOG.md` の `## X.Y.Z — date` の項目です。続いてプルリクエスト "Kumi X.Y.Z" を開き、その CI を待たずに管理者のバイパスで "Kumi X.Y.Z (#PR)" としてマージし、マージコミットに `vX.Y.Z` のタグを付けてプッシュし、リリースノート付きの下書きのリリースを作ります（`--summary` でノートの冒頭に一文を加えられます）。
+- **タグの Installer の実行**が、macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドルをビルドし、インストールと移行をテストし、ターゲットごとのバンドルとマニフェスト、互換用の `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS` を添付して、リリースを公開します。そうして初めて、インストーラー、`kumi update`、更新確認がそのリリースを認識します。手でプッシュしたタグには「ノートは後で」の下書きができ、だれかがノートを書いて公開するまで下書きのままです。
 
 **ネイティブリリースのローカルでの準備**（コミット済みの変更がない状態で）：
 

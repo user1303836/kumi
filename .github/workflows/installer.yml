@@ -373,3 +373,27 @@ jobs:
         run: |
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "Kumi ${TAG#v}" --notes "Release notes to come."
           gh release upload "$TAG" release/*.tar.gz release/*.json release/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+      # scripts/release.py writes the notes into the draft when it pushes the tag. With them there, the release is
+      # published now, every install and migration having passed; a tag pushed by hand, with notes to come, stays a
+      # draft for whoever writes them.
+      - name: Publish the release when its notes are written
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" != true ]]; then
+            echo "$TAG is already published."
+            exit 0
+          fi
+          body="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
+          if [[ -z "${body//[[:space:]]/}" || "$body" == "Release notes to come." ]]; then
+            echo "$TAG has no notes yet, so it stays a draft."
+            exit 0
+          fi
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+          # Latest is the highest version published, so an older tag's build that finishes later doesn't take it back.
+          tags="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 100 --json tagName --jq '.[].tagName')"
+          latest="$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' <<<"$tags" | sort -V | tail -n 1)"
+          gh release edit "$latest" --repo "$GITHUB_REPOSITORY" --latest
+          echo "Published $TAG; the latest release is $latest."
