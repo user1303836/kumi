@@ -129,13 +129,20 @@ pub fn forget(connection: &Connection, scope: &Scope, label: &str, now: i64) -> 
 }
 
 /// Read in a note an earlier Kumi kept in a file. Its id comes from its scope, label and words, so the
-/// same note is read in once and one forgotten here stays forgotten; a note in use with that label and
-/// those words (one written back for an older Kumi) is the same note. A label another note in use has
-/// gets the next free one. The id of the note that holds it, and whether it was added.
+/// same note is read in once, one forgotten here stays forgotten, and one set aside here comes back in
+/// use (kept again with the same words); a note in use with that label and those words (one written
+/// back for an older Kumi) is the same note. A label another note in use has gets the next free one. The
+/// id of the note that holds it, and whether it was added or came back.
 pub fn import(connection: &Connection, scope: &Scope, note: &Note) -> Result<(String, bool), StoreError> {
     let id = content_id(&["note", scope.kind(), scope.id(), &note.label, &note.text]);
-    if imports::known_or_forgotten(connection, "notes", &id)? {
+    if imports::forgotten(connection, &id)? {
         return Ok((id, false));
+    }
+    if let Some((_, archived)) = NotesIn(scope).get(connection, &id)? {
+        if archived {
+            NotesIn(scope).overwrite(connection, &id, note)?;
+        }
+        return Ok((id, archived));
     }
     let same: Option<String> = connection
         .prepare_cached(
@@ -200,6 +207,11 @@ impl Table for NotesIn<'_> {
     }
     fn hash(&self, row: &Note) -> String {
         hash(row)
+    }
+    fn changed_after_forget_is_new(&self) -> bool {
+        // An older Kumi labels a new note with the number after the highest, so a note kept after the
+        // newest was forgotten takes its label: a new note is never dropped.
+        true
     }
     fn get(&self, c: &Connection, id: &str) -> Result<Option<(Note, bool)>, StoreError> {
         Ok(c.prepare_cached(

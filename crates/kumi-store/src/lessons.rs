@@ -137,13 +137,20 @@ pub fn forget(connection: &Connection, label: &str, now: i64) -> Result<bool, St
     Ok(true)
 }
 
-/// Read in a lesson an earlier Kumi kept in a file, once: its id comes from its label and time, and a
-/// lesson in use with its label (written back for an older Kumi) is the same lesson. The id of the
-/// lesson that holds it, and whether it was added.
+/// Read in a lesson an earlier Kumi kept in a file, once: its id comes from its label and time, one
+/// forgotten here stays forgotten and one set aside here comes back in use, and a lesson in use with its
+/// label (written back for an older Kumi) is the same lesson. The id of the lesson that holds it, and
+/// whether it was added or came back.
 pub fn import(connection: &Connection, l: &Lesson) -> Result<(String, bool), StoreError> {
     let id = content_id(&["lesson", &l.label, &l.at.to_string()]);
-    if imports::known_or_forgotten(connection, "lessons", &id)? {
+    if imports::forgotten(connection, &id)? {
         return Ok((id, false));
+    }
+    if let Some((_, archived)) = Lessons.get(connection, &id)? {
+        if archived {
+            Lessons.overwrite(connection, &id, l)?;
+        }
+        return Ok((id, archived));
     }
     if let Some(same) = Lessons.in_use(connection, &l.label)? {
         return Ok((same, false));

@@ -33,7 +33,7 @@ fn clean(value: Option<&Value>) -> String {
         .chars()
         .map(|c| if c <= '\u{1f}' || ('\u{7f}'..='\u{9f}').contains(&c) || c == '\u{feff}' { ' ' } else { c })
         .collect();
-    string::head(&text.split_whitespace().collect::<Vec<_>>().join(" "), 300)
+    string::trim(&string::head(&text.split_whitespace().collect::<Vec<_>>().join(" "), 300)).to_string()
 }
 /// The gap tool, logging to Kumi's database when there is one, otherwise to `file`.
 pub fn gap_tools(file: impl Into<PathBuf>, store: Option<StoreClient>) -> Vec<Rc<dyn KernelTool>> {

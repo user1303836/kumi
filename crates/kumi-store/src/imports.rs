@@ -25,19 +25,19 @@ pub fn read(path: &Path, kind: &str) -> Result<Option<(Source, Vec<u8>)>, StoreE
     };
     let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok();
     let mtime = modified.and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or(0);
-    let source = Source {
-        path: path.to_string_lossy().into_owned(),
-        kind: kind.into(),
-        size: bytes.len() as i64,
-        mtime,
-        blake3: blake3::hash(&bytes).to_hex().to_string(),
-    };
+    let source =
+        Source { path: path.to_string_lossy().into_owned(), kind: kind.into(), size: bytes.len() as i64, mtime, blake3: hash(&bytes) };
     Ok(Some((source, bytes)))
+}
+
+/// A file's contents' hash, as its record keeps it.
+pub fn hash(bytes: &[u8]) -> String {
+    blake3::hash(bytes).to_hex().to_string()
 }
 
 /// What the database last read of a file (or wrote to it): the hash of its contents, and its base when
 /// Kumi keeps one.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Record {
     pub blake3: String,
     pub base: Option<Vec<BaseRow>>,
@@ -68,6 +68,11 @@ pub fn record(connection: &Connection, source: &Source, rows: usize, base: Optio
         )?
         .execute(params![source.path, source.kind, source.size, source.mtime, source.blake3, rows as i64, now, base])?;
     Ok(())
+}
+
+/// Whether the row with this id was forgotten (so an import leaves it out).
+pub(crate) fn forgotten(connection: &Connection, id: &str) -> Result<bool, StoreError> {
+    Ok(connection.prepare_cached("SELECT EXISTS (SELECT 1 FROM forgotten WHERE id = ?1)")?.query_row(params![id], |row| row.get(0))?)
 }
 
 /// Whether a row with this id is in the database, or was forgotten (so an import leaves it out).
@@ -112,7 +117,7 @@ mod tests {
         assert_eq!(record_of(&db, &source.path).unwrap(), None);
         record(&db, &source, 0, None, 1).unwrap();
         assert_eq!(record_of(&db, &source.path).unwrap(), Some(Record { blake3: source.blake3.clone(), base: None }));
-        let base = [BaseRow { label: "p1".into(), id: "01ABC".into(), hash: "h".into() }];
+        let base = [BaseRow { label: "p1".into(), id: "01ABC".into(), hash: "h".into(), at: None, used: None, undone: None }];
         record(&db, &source, 0, Some(&base), 2).unwrap();
         assert_eq!(record_of(&db, &source.path).unwrap().unwrap().base.as_deref(), Some(&base[..]));
     }

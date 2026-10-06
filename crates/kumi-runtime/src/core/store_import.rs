@@ -2,16 +2,15 @@
 //! and kept in step with those files while an older Kumi may still use them. Each notes, techniques or
 //! lessons file has a base, the file as Kumi last read or wrote it, so what changes in a file since is
 //! brought in by a three-way merge (`kumi_store::sync`). Before a rollback, what the database keeps is
-//! written back to the files for the older Kumi (`write_back`). Reading in never writes the files.
+//! written back to the files for the older Kumi (`write_back`), after bringing in what changed in them.
+//! Reading in never writes the files.
 
 use super::{
-    contracts::{MemoryScope, MemoryStore},
     errors::RuntimeError,
-    memory::{create_memory_store, parse_notes, MemoryStoreOptions},
-    playbook::{create_playbook_store, parse_lessons, PlaybookStore},
-    store_client::StoreClient,
+    memory::{notes_file, parse_notes},
+    playbook::{lessons_file, parse_lessons},
     store_rows::{lesson_of, lesson_row, note_of, note_row, technique_of, technique_row},
-    techniques::{create_technique_store, parse_techniques, TechniqueStore},
+    techniques::{parse_techniques, techniques_file},
 };
 use kumi_store::{
     gaps,
@@ -19,7 +18,10 @@ use kumi_store::{
     lessons, notes, techniques as stored, Connection, Kept, Scope, Store, StoreError,
 };
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::{
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 /// Where the files are: each path as the producer's settings name it (`KUMI_MEMORY_FILE` and the rest).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,12 +34,14 @@ pub struct JsonFiles {
 }
 
 /// What reading in did: files new to the database or changed since, the rows read in from files it
-/// hadn't read before, and what changed in files it had.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// hadn't read before, what changed in files it had, and the files it left as they are because they
+/// aren't whole.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Imported {
     pub files: usize,
     pub rows: usize,
     pub brought_in: BroughtIn,
+    pub not_whole: Vec<PathBuf>,
 }
 impl std::ops::AddAssign for Imported {
     fn add_assign(&mut self, other: Imported) {
@@ -46,6 +50,19 @@ impl std::ops::AddAssign for Imported {
         self.brought_in.notes += other.brought_in.notes;
         self.brought_in.techniques += other.brought_in.techniques;
         self.brought_in.lessons += other.brought_in.lessons;
+        self.not_whole.extend(other.not_whole);
+    }
+}
+impl Imported {
+    /// What Kumi says about it, once each: what came in from the older Kumi, and each file left as it is.
+    pub fn sentences(&self) -> Vec<String> {
+        let left = self.not_whole.iter().map(|path| {
+            format!(
+                "Kumi left {} as it is: it isn't a whole file Kumi can read. Fix or remove it and Kumi reads it next time.",
+                path.display()
+            )
+        });
+        self.brought_in.sentence().into_iter().chain(left).collect()
     }
 }
 
@@ -57,12 +74,14 @@ pub struct BroughtIn {
     pub lessons: Kept,
 }
 impl BroughtIn {
-    /// The one line Kumi says at startup when there was anything: "Brought in changes made with the
-    /// older Kumi: 2 notes edited, 1 note removed, 1 technique added."
+    /// The one line Kumi says when there was anything: "Brought in changes made with the older Kumi: 2
+    /// notes edited, 1 note removed, 1 technique edited in both and kept twice."
     pub fn sentence(&self) -> Option<String> {
         let mut parts = vec![];
         for (kept, one) in [(self.notes, "note"), (self.techniques, "technique"), (self.lessons, "lesson")] {
-            for (count, what) in [(kept.added, "added"), (kept.changed, "edited"), (kept.archived, "removed")] {
+            for (count, what) in
+                [(kept.added, "added"), (kept.changed, "edited"), (kept.archived, "removed"), (kept.both, "edited in both and kept twice")]
+            {
                 if count > 0 {
                     parts.push(format!("{count} {one}{} {what}", if count == 1 { "" } else { "s" }));
                 }
@@ -87,20 +106,29 @@ enum Kind {
     Lessons,
     Gaps,
 }
+impl Kind {
+    fn name(&self) -> &'static str {
+        match self {
+            Kind::Notes(_) => "notes",
+            Kind::Techniques => "techniques",
+            Kind::Lessons => "lessons",
+            Kind::Gaps => "gaps",
+        }
+    }
+}
+/// A file as it was read.
+enum Read {
+    Whole(Source, Rows),
+    /// A notes, techniques or lessons file that isn't whole (cut short, or not version 1), left as it
+    /// is until it is: read as empty, it would set aside everything it had held.
+    NotWhole(PathBuf),
+}
 
-/// The file at `path` as it is now, read and parsed; None when there's no such file, or when it isn't a
-/// whole notes, techniques or lessons file (one being written by hand, say), which then waits until it
-/// is: read as empty, it would set aside everything it had held.
-fn read_file(path: &Path, kind: &Kind) -> Result<Option<(Source, Rows)>, StoreError> {
-    let name = match kind {
-        Kind::Notes(_) => "notes",
-        Kind::Techniques => "techniques",
-        Kind::Lessons => "lessons",
-        Kind::Gaps => "gaps",
-    };
-    let Some((source, bytes)) = imports::read(path, name)? else { return Ok(None) };
-    if !matches!(kind, Kind::Gaps) && !whole(&bytes, name) {
-        return Ok(None);
+/// The file at `path` as it is now, read and parsed; None when there's no such file.
+fn read_file(path: &Path, kind: &Kind) -> Result<Option<Read>, StoreError> {
+    let Some((source, bytes)) = imports::read(path, kind.name())? else { return Ok(None) };
+    if !matches!(kind, Kind::Gaps) && !whole(&bytes, kind.name()) {
+        return Ok(Some(Read::NotWhole(path.to_path_buf())));
     }
     let rows = match kind {
         Kind::Notes(scope) => {
@@ -111,7 +139,7 @@ fn read_file(path: &Path, kind: &Kind) -> Result<Option<(Source, Rows)>, StoreEr
         Kind::Lessons => Rows::Lessons(parse_lessons(&bytes).iter().map(lesson_row).collect()),
         Kind::Gaps => Rows::Gaps(parse_gaps(&String::from_utf8_lossy(&bytes))),
     };
-    Ok(Some((source, rows)))
+    Ok(Some(Read::Whole(source, rows)))
 }
 
 /// Whether `bytes` are a whole file of version 1 with its list under `key`.
@@ -139,15 +167,19 @@ fn every_file(files: &JsonFiles) -> Vec<(PathBuf, Kind)> {
 /// have, never one forgotten there, and deletes nothing. A file changed since it was read (or written
 /// back) brings in what changed in it since its base (`kumi_store::sync::merge`). Each file goes in a
 /// transaction of its own, which first checks the file hasn't been read as it is now (another Kumi may
-/// have just done it), so a change comes in once. Blocking (it reads the files and waits for the
-/// writes), so it runs on a blocking thread before the first read. Every file is read before any is
-/// written, so a file that can't be read leaves the database as it was.
+/// have just done it) and is still as it was read, so a change comes in once and never against a newer
+/// base. Blocking (it reads the files and waits for the writes), so it runs on a blocking thread. Every
+/// file is read before any is written, so a file that can't be read leaves the database as it was.
 pub fn import_json(store: &Store, files: &JsonFiles, now: i64) -> Result<Imported, StoreError> {
     let mut read = vec![];
-    for (path, kind) in every_file(files) {
-        read.extend(read_file(&path, &kind)?);
-    }
     let mut imported = Imported::default();
+    for (path, kind) in every_file(files) {
+        match read_file(&path, &kind)? {
+            Some(Read::Whole(source, rows)) => read.push((source, rows)),
+            Some(Read::NotWhole(path)) => imported.not_whole.push(path),
+            None => {}
+        }
+    }
     for (source, rows) in read {
         imported += store.write_wait(move |c| sync(c, &source, &rows, now))?;
     }
@@ -158,6 +190,10 @@ pub fn import_json(store: &Store, files: &JsonFiles, now: i64) -> Result<Importe
 fn sync(c: &Connection, source: &Source, rows: &Rows, now: i64) -> Result<Imported, StoreError> {
     let record = imports::record_of(c, &source.path)?;
     if record.as_ref().is_some_and(|record| record.blake3 == source.blake3) {
+        return Ok(Imported::default());
+    }
+    // Changed again since it was read: the next look brings it in as it is then.
+    if imports::read(Path::new(&source.path), &source.kind)?.map(|(now, _)| now.blake3).as_ref() != Some(&source.blake3) {
         return Ok(Imported::default());
     }
     let base = record.and_then(|record| record.base);
@@ -223,19 +259,35 @@ pub(crate) fn parse_gaps(text: &str) -> Vec<gaps::Gap> {
         .collect()
 }
 
-/// Before a rollback: the notes, techniques and lessons the database has in use, written to the files an
-/// older Kumi reads, in its format (each file written whole, then renamed into place), and each file's
-/// base recorded, so what the older Kumi then changes comes back in. Every Set with notes, or with a
-/// notes file, gets its list, an empty one too, so a note forgotten since the update doesn't come back
-/// there. Nothing to do without a database.
-pub async fn write_back(db: PathBuf, files: JsonFiles, now: i64) -> Result<(), RuntimeError> {
+/// Files a write-back left as they were, each with why.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WrittenBack {
+    pub left: Vec<(PathBuf, String)>,
+}
+const NOT_WHOLE: &str = "it isn't a whole file Kumi can read";
+const CHANGED: &str = "another Kumi changed it just now, so what's new there comes in at your next update";
+
+/// Before a rollback: first what an older Kumi changed in the files since they were read is brought in
+/// (nothing is written if that fails); then the notes, techniques and lessons the database has in use
+/// are written to the files the older Kumi reads, in its format, each whole and renamed into place only
+/// if it's still as it was read, and each file's base is recorded, so what the older Kumi then changes
+/// comes back in. Every Set with notes, or with a notes file, gets its list, an empty one too, so a note
+/// forgotten since the update doesn't come back there. A file that isn't whole, or that changes on the
+/// way, is left as it is. Nothing to do without a database.
+pub async fn write_back(db: PathBuf, files: JsonFiles, now: i64) -> Result<WrittenBack, RuntimeError> {
     if !db.exists() {
-        return Ok(());
+        return Ok(WrittenBack::default());
     }
-    let failed = |why: StoreError| RuntimeError::plain(why.to_string());
-    let joined = |why: tokio::task::JoinError| RuntimeError::plain(why.to_string());
-    let store = tokio::task::spawn_blocking(move || Store::open(&db)).await.map_err(joined)?.map_err(failed)?;
-    let client = StoreClient::new(store);
+    tokio::task::spawn_blocking(move || write_back_now(&db, &files, now))
+        .await
+        .map_err(|why| RuntimeError::plain(why.to_string()))?
+        .map_err(|why| RuntimeError::plain(why.to_string()))
+}
+
+fn write_back_now(db: &Path, files: &JsonFiles, now: i64) -> Result<WrittenBack, StoreError> {
+    let store = Store::open(db)?;
+    let imported = import_json(&store, files, now)?;
+    let mut left: Vec<(PathBuf, String)> = imported.not_whole.iter().map(|path| (path.clone(), NOT_WHOLE.into())).collect();
     let mut with_files: Vec<String> = std::fs::read_dir(&files.projects)
         .map(|entries| {
             entries
@@ -245,55 +297,142 @@ pub async fn write_back(db: PathBuf, files: JsonFiles, now: i64) -> Result<(), R
                 .collect()
         })
         .unwrap_or_default();
-    let (producer, sets, kept_techniques, kept_lessons) = client
-        .read(move |c| {
-            let mut projects: Vec<String> = c
-                .prepare("SELECT DISTINCT scope_id FROM notes WHERE scope_kind = 'project'")?
-                .query_map([], |row| row.get(0))?
-                .collect::<Result<_, _>>()?;
-            projects.append(&mut with_files);
-            projects.sort();
-            projects.dedup();
-            let sets = projects
-                .into_iter()
-                .filter(|project| project_id(project))
-                .map(|project| Ok((project.clone(), notes::in_use(c, &Scope::Project(project))?)))
-                .collect::<Result<Vec<_>, StoreError>>()?;
-            Ok((notes::in_use(c, &Scope::Global)?, sets, stored::in_use(c)?, lessons::in_use(c)?))
-        })
-        .await
-        .map_err(failed)?;
-    let memory = create_memory_store(MemoryStoreOptions { projects_dir: files.projects.clone(), producer_file: files.memory.clone() });
-    memory.save(MemoryScope::Producer, None, &producer.into_iter().map(note_of).collect::<Vec<_>>()).await?;
-    let mut written = vec![(files.memory.clone(), Kind::Notes(Scope::Global))];
+    let (producer, sets, kept_techniques, kept_lessons) = store.read(move |c| {
+        let mut projects: Vec<String> = c
+            .prepare("SELECT DISTINCT scope_id FROM notes WHERE scope_kind = 'project'")?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        projects.append(&mut with_files);
+        projects.sort();
+        projects.dedup();
+        let sets = projects
+            .into_iter()
+            .filter(|project| project_id(project))
+            .map(|project| Ok((project.clone(), notes::in_use(c, &Scope::Project(project))?)))
+            .collect::<Result<Vec<_>, StoreError>>()?;
+        Ok((notes::in_use(c, &Scope::Global)?, sets, stored::in_use(c)?, lessons::in_use(c)?))
+    })?;
+    let mut targets =
+        vec![(files.memory.clone(), Kind::Notes(Scope::Global), notes_file(&producer.into_iter().map(note_of).collect::<Vec<_>>()))];
     for (project, rows) in sets {
-        memory.save(MemoryScope::Set, Some(&project), &rows.into_iter().map(note_of).collect::<Vec<_>>()).await?;
-        written.push((files.projects.join(&project).join("memory.json"), Kind::Notes(Scope::Project(project))));
+        let text = notes_file(&rows.into_iter().map(note_of).collect::<Vec<_>>());
+        targets.push((files.projects.join(&project).join("memory.json"), Kind::Notes(Scope::Project(project)), text));
     }
-    create_technique_store(files.techniques.clone()).save(&kept_techniques.into_iter().map(technique_of).collect::<Vec<_>>()).await?;
-    written.push((files.techniques.clone(), Kind::Techniques));
-    create_playbook_store(files.playbook.clone()).save(&kept_lessons.into_iter().map(lesson_of).collect::<Vec<_>>()).await?;
-    written.push((files.playbook.clone(), Kind::Lessons));
+    targets.push((
+        files.techniques.clone(),
+        Kind::Techniques,
+        techniques_file(&kept_techniques.into_iter().map(technique_of).collect::<Vec<_>>()),
+    ));
+    targets.push((files.playbook.clone(), Kind::Lessons, lessons_file(&kept_lessons.into_iter().map(lesson_of).collect::<Vec<_>>())));
+    let paths: Vec<String> = targets.iter().map(|(path, ..)| path.to_string_lossy().into_owned()).collect();
+    let records = store.read(move |c| {
+        paths.iter().map(|path| Ok(imports::record_of(c, path)?.map(|record| record.blake3))).collect::<Result<Vec<_>, StoreError>>()
+    })?;
+    let mut written = vec![];
+    for ((path, kind, text), merged) in targets.into_iter().zip(records) {
+        if left.iter().any(|(skipped, _)| *skipped == path) {
+            continue;
+        }
+        // The file as the import just read it, or no file: anything else changed since.
+        let now_there = imports::read(&path, kind.name())?.map(|(source, _)| source.blake3);
+        if now_there.is_some() && now_there != merged {
+            left.push((path, CHANGED.into()));
+            continue;
+        }
+        if !write_file(&path, &text, now_there.as_deref()).map_err(|why| StoreError::Io(format!("{}: {why}", path.display())))? {
+            left.push((path, CHANGED.into()));
+            continue;
+        }
+        written.push((path, kind));
+    }
     // What each file holds now is its base: each of its rows is the row in use with its label.
-    let read = tokio::task::spawn_blocking(move || {
-        written.iter().map(|(path, kind)| read_file(path, kind)).collect::<Result<Vec<_>, StoreError>>()
-    })
-    .await
-    .map_err(joined)?
-    .map_err(failed)?;
-    client
-        .write(move |c| {
-            for (source, rows) in read.iter().flatten() {
-                let base = match rows {
-                    Rows::Notes(scope, rows) => notes::base_of(c, scope, rows)?,
-                    Rows::Techniques(rows) => stored::base_of(c, rows)?,
-                    Rows::Lessons(rows) => lessons::base_of(c, rows)?,
-                    Rows::Gaps(_) => continue,
-                };
-                imports::record(c, source, 0, Some(&base), now)?;
-            }
-            Ok(())
-        })
-        .await
-        .map_err(failed)
+    let mut read_back = vec![];
+    for (path, kind) in &written {
+        if let Some(Read::Whole(source, rows)) = read_file(path, kind)? {
+            read_back.push((source, rows));
+        }
+    }
+    store.write_wait(move |c| {
+        for (source, rows) in &read_back {
+            let base = match rows {
+                Rows::Notes(scope, rows) => notes::base_of(c, scope, rows)?,
+                Rows::Techniques(rows) => stored::base_of(c, rows)?,
+                Rows::Lessons(rows) => lessons::base_of(c, rows)?,
+                Rows::Gaps(_) => continue,
+            };
+            imports::record(c, source, 0, Some(&base), now)?;
+        }
+        Ok(())
+    })?;
+    Ok(WrittenBack { left })
+}
+
+/// Write `text` to `path` whole: a temporary file beside it (only the producer's), renamed into place
+/// only while the file is still as it was read (`expected`, its blake3, or None for no file). Whether it
+/// was written.
+fn write_file(path: &Path, text: &str, expected: Option<&str>) -> std::io::Result<bool> {
+    let folder = path.parent().filter(|folder| !folder.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(folder)?;
+    let temporary = folder.join(format!(".kumi-{}", uuid::Uuid::new_v4()));
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let written = (|| {
+        let mut file = options.open(&temporary)?;
+        file.write_all(text.as_bytes())?;
+        file.flush()?;
+        drop(file);
+        let there = match std::fs::read(path) {
+            Ok(bytes) => Some(imports::hash(&bytes)),
+            Err(why) if why.kind() == std::io::ErrorKind::NotFound => None,
+            Err(why) => return Err(why),
+        };
+        if there.as_deref() != expected {
+            return Ok(false);
+        }
+        std::fs::rename(&temporary, path)?;
+        Ok(true)
+    })();
+    if !matches!(written, Ok(true)) {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    written
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_file_read_before_a_newer_version_came_in_waits_for_its_next_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = JsonFiles {
+            memory: dir.path().join("memory.json"),
+            projects: dir.path().join("projects"),
+            techniques: dir.path().join("techniques.json"),
+            playbook: dir.path().join("playbook.json"),
+            gaps: dir.path().join("gaps.jsonl"),
+        };
+        let write = |notes: &str| std::fs::write(&files.memory, format!(r#"{{"version":1,"notes":[{notes}]}}"#)).unwrap();
+        write(r#"{"id":"p1","text":"Likes short reverbs","at":100}"#);
+        let store = Store::open(dir.path().join("kumi.db")).unwrap();
+        import_json(&store, &files, 1).unwrap();
+        // One Kumi reads the file an older Kumi just changed...
+        write(r#"{"id":"p1","text":"Likes short reverbs on drums","at":200}"#);
+        let Some(Read::Whole(source, rows)) = read_file(&files.memory, &Kind::Notes(Scope::Global)).unwrap() else {
+            panic!("a whole file")
+        };
+        // ...which changes it again, and another Kumi brings that in first.
+        write(r#"{"id":"p1","text":"Likes short reverbs on drums","at":200},{"id":"p2","text":"Works at 140","at":300}"#);
+        import_json(&store, &files, 2).unwrap();
+        // The first one's older read changes nothing: p2 isn't set aside.
+        assert_eq!(store.write_wait(move |c| sync(c, &source, &rows, 3)).unwrap(), Imported::default());
+        let texts: Vec<String> = store.read(|c| notes::in_use(c, &Scope::Global)).unwrap().into_iter().map(|n| n.text).collect();
+        assert_eq!(texts, ["Likes short reverbs on drums", "Works at 140"]);
+    }
 }
