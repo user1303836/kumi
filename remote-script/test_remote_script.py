@@ -724,7 +724,7 @@ class ControlSurfaceTests(unittest.TestCase):
         self.assertEqual(registry["protocol"], "ableton-live/v1")
         canonical = json.dumps(registry, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         self.assertEqual(digest, hashlib.sha256(canonical).hexdigest())
-        self.assertEqual(digest, "ec05dd401ec098adb77da1c185aff1857be2bd87859afe9dda4bfeb14e04aa57")
+        self.assertEqual(digest, "f626dafa686101c714ca610f4c47689f9297b19c838349e3bd7ef46614de4fa8")
         self.assertIn("audio.capture.start", [item["id"] for item in registry["operations"]])
         self.assertIn("device.parameter.set", [item["id"] for item in registry["operations"]])
         ids = [item["id"] for item in registry["operations"]]
@@ -2159,6 +2159,33 @@ class ControlSurfaceTests(unittest.TestCase):
         self.assertEqual(mapper.get(track_ref)["name"], "Drums")
         self.assertFalse(hasattr(mapper, "set"))
 
+    def test_note_edits_reach_an_arrangement_clip_fenced_by_its_track(self):
+        song = FakeSong(); track = song.tracks[0]
+        clip = FakeClip(8.0); clip.name = "Verse"; clip.start_time = 16.0; clip.select_all_notes = lambda: None; track.arrangement_clips = [clip]
+        mapper = LiveObjectMapper(song)
+        row = mapper._arrangement_clip_items([0], notes=True)[0]
+        authority = {"expectedObjectIdentity": row["objectIdentity"], "expectedTrackRef": row["trackRef"], "expectedTrackIdentity": mapper._capture_object_identity(track)}
+        note = {"pitch": 60, "start": 1, "duration": 0.5, "velocity": 100, "channel": 1}
+        added = mapper.invoke("note.add", {"ref": row["ref"], "note": note, "expectedClipAuthority": authority, "expectedNotesRevision": row["notesRevision"]})
+        self.assertEqual([(n["pitch"], n["start"]) for n in mapper._read_notes(clip)], [(60, 1.0)]); self.assertIn("noteId", added)
+        revision = mapper._arrangement_clip_items([0], notes=True)[0]["notesRevision"]
+        # A Session clip's slot and scene, another track's identity, or a missing key: the clip isn't the one previewed.
+        slot = {**authority, "expectedSlotRef": "x", "expectedSlotIdentity": "x", "expectedSceneRef": "x", "expectedSceneIdentity": "x"}
+        for wrong in (slot, {**authority, "expectedTrackIdentity": "live:other"}, {k: v for k, v in authority.items() if k != "expectedTrackRef"}):
+            with self.assertRaises(ValueError):
+                mapper.invoke("note.add", {"ref": row["ref"], "note": {**note, "pitch": 62}, "expectedClipAuthority": wrong, "expectedNotesRevision": revision})
+        self.assertEqual(len(mapper._read_notes(clip)), 1, "nothing was added by a refused edit")
+        # Every note operation fences the same way: a select, then a delete, on the Arrangement clip.
+        self.assertEqual(mapper.invoke("note.select", {"ref": row["ref"], "all": True, "expectedClipAuthority": authority})["selected"], 1)
+        mapper.invoke("note.delete", {"ref": row["ref"], "noteIds": [added["noteId"]], "expectedClipAuthority": authority, "expectedNotesRevision": revision})
+        self.assertEqual(mapper._read_notes(clip), [])
+        # A Session clip still needs its slot and scene.
+        created = mapper.invoke("clip.create", self.clip_creation_args(mapper, mapper.discover("track")["items"][0]["ref"], 0, kind="midi", name="Loop", length=4))
+        session = self.note_authority(mapper, created["ref"])
+        bare = {k: v for k, v in session["expectedClipAuthority"].items() if k in authority}
+        with self.assertRaisesRegex(ValueError, "note clip hierarchy identity changed"):
+            mapper.invoke("note.add", {"ref": created["ref"], "note": note, "expectedClipAuthority": bare, "expectedNotesRevision": session["expectedNotesRevision"]})
+
     def test_mapper_discovery_and_midi_lifecycle_use_fake_live_objects(self):
         mapper = LiveObjectMapper(FakeSong())
         status = mapper.status()
@@ -2719,6 +2746,59 @@ class ControlSurfaceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "failed after Live changed the clips where it was to land; Live's undo puts them back"):
             mapper.invoke("arrangement.clip.create", args)
         self.assertEqual(len(track.arrangement_clips), 2, "nothing Kumi didn't make is deleted")
+
+    @staticmethod
+    def arrangement_copy(mapper, row, position, target=None, keep=True):
+        args = {"ref": row["ref"], "position": position, "keepSource": keep, "expectedObjectIdentity": row["objectIdentity"], "expectedAuthorityRevision": mapper._arrangement_clip_authority_revision(row["ref"]), "expectedContentFingerprint": mapper._mapped_fingerprint(row["ref"])}
+        if target is not None: args.update(targetTrackRef=target["ref"], expectedTargetTrackIdentity=target["objectIdentity"])
+        return mapper.invoke("arrangement.clip.move", args)
+
+    def test_a_copy_keeps_its_source_and_replaces_what_is_in_its_place(self):
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Verse", 0.0, 8.0, [0.0, 2.0]), ("Fill", 20.0, 4.0), ("Hook", 22.0, 6.0), splits=True)
+        mapper = LiveObjectMapper(song); verse = next(row for row in mapper._arrangement_clip_items([0]) if row["name"] == "Verse")
+        made = self.arrangement_copy(mapper, verse, 16.0)
+        spans = sorted((clip.name, clip.start_time, clip.end_time) for clip in track.arrangement_clips)
+        # The source stays; Fill, inside the copy's place, goes; Hook, crossing its right edge, is cut there.
+        self.assertEqual(spans, [("Hook", 24.0, 28.0), ("Verse", 0.0, 8.0), ("Verse", 16.0, 24.0)])
+        self.assertEqual(made["start"], 16.0); self.assertEqual(track.copies, [16.0], "copied straight to its cleared place")
+        copy = next(clip for clip in track.arrangement_clips if clip.start_time == 16.0)
+        self.assertEqual([note["start_time"] for note in copy.notes], [0.0, 2.0])
+        # A copy onto the clip's own place would replace it with itself.
+        verse = next(row for row in mapper._arrangement_clip_items([0]) if row["name"] == "Verse" and row["start"] == 0.0)
+        with self.assertRaisesRegex(ValueError, "would land on the clip itself"): self.arrangement_copy(mapper, verse, 0.0)
+
+    def test_a_copy_over_its_own_clip_is_made_in_a_holding_area_first(self):
+        """Live crashes copying onto a clip, the clip's own included: the copy waits past the end of the Set while its
+        place is cleared (cutting the source where the copy lands, as Live does), then moves in."""
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Verse", 0.0, 8.0, [0.0, 6.0]), splits=True)
+        mapper = LiveObjectMapper(song); verse = mapper._arrangement_clip_items([0])[0]
+        self.arrangement_copy(mapper, verse, 4.0)
+        self.assertEqual([(clip.name, clip.start_time, clip.end_time) for clip in track.arrangement_clips], [("Verse", 0.0, 4.0), ("Verse", 4.0, 12.0)])
+        self.assertEqual([[note["start_time"] for note in clip.notes] for clip in track.arrangement_clips], [[0.0], [0.0, 6.0]], "the copy is the whole clip")
+        self.assertEqual(track.copies, [16.0, 4.0], "never onto a clip: to the holding area, then into place")
+
+    def test_a_clip_moves_or_copies_to_another_track_of_its_kind(self):
+        song, bass = self.arrangement_track_that_crashes_on_overlap(("Bass", 0.0, 4.0, [0.0, 1.0]))
+        _, keys = self.arrangement_track_that_crashes_on_overlap(("Old", 8.0, 2.0), ("Long", 6.0, 0.5))
+        song.tracks.append(keys); mapper = LiveObjectMapper(song); target = mapper.snapshot()["tracks"][1]
+        row = mapper._arrangement_clip_items([0])[0]
+        moved = self.arrangement_copy(mapper, row, 8.0, target, keep=False)
+        self.assertEqual(bass.arrangement_clips, [], "moved: gone from its track")
+        self.assertEqual(sorted((clip.name, clip.start_time) for clip in keys.arrangement_clips), [("Bass", 8.0), ("Long", 6.0)], "Old, in its place, went")
+        self.assertTrue(moved["ref"].startswith(f"{mapper.refs.epoch}:arrangement_clip:1:"))
+        # And copied back, the copy kept where it is.
+        source = self.arrangement_copy(mapper, next(r for r in mapper._arrangement_clip_items([1]) if r["name"] == "Bass"), 0.0, mapper.snapshot()["tracks"][0])
+        self.assertEqual(([clip.name for clip in bass.arrangement_clips], len(keys.arrangement_clips)), (["Bass"], 2))
+        self.assertTrue(source["ref"].startswith(f"{mapper.refs.epoch}:arrangement_clip:0:"))
+        # Live's reasons for a track that can't hold the clip, and a track that changed since the preview.
+        row = mapper._arrangement_clip_items([0])[0]
+        keys.has_midi_input = False
+        with self.assertRaisesRegex(ValueError, "that's an audio track .Live: .MIDI clips can only be created on MIDI tracks"): self.arrangement_copy(mapper, row, 32.0, mapper.snapshot()["tracks"][1])
+        keys.has_midi_input = True; keys.is_frozen = True
+        with self.assertRaisesRegex(ValueError, "frozen track"): self.arrangement_copy(mapper, row, 32.0, mapper.snapshot()["tracks"][1])
+        keys.is_frozen = False; stale = {**mapper.snapshot()["tracks"][1], "objectIdentity": "live:other"}
+        with self.assertRaisesRegex(ValueError, "target track changed since preview"): self.arrangement_copy(mapper, row, 32.0, stale)
+        self.assertEqual((len(bass.arrangement_clips), len(keys.arrangement_clips)), (1, 2), "nothing changed by a refusal")
 
     @staticmethod
     def arrangement_track_that_crashes_on_overlap(*clips, audio=False, splits=False):
@@ -5658,7 +5738,7 @@ class SpecializedDeviceTests(unittest.TestCase):
         cell = FakeDevice(); cell.name = "Cell"; cell.class_name = "DrumCellDevice"; cell.gain = -6.0
         eq = FakeDevice(); eq.name = "EQ8"; eq.class_name = "Eq8Device"; eq.edit_mode = 0; eq.global_mode = 1; eq.oversample = False
         eq.view = type("Eq8View", (), {"selected_band": 2})()
-        meld = FakeDevice(); meld.name = "Meld"; meld.class_name = "MeldDevice"; meld.selected_engine = 0; meld.unison_voices = 1; meld.mono_poly = False; meld.poly_voices = 8
+        meld = FakeDevice(); meld.name = "Meld"; meld.class_name = "MeldDevice"; meld.selected_engine = 0; meld.unison_voices = 1; meld.mono_poly = False; meld.poly_voices = 5
         song.tracks[0].devices = [cell, eq, meld]
         mapper = LiveObjectMapper(song)
         rows = mapper.snapshot()["tracks"][0]["devices"]
@@ -5668,9 +5748,14 @@ class SpecializedDeviceTests(unittest.TestCase):
         eq_state = mapper._specialized_state(eq, [("editMode", "edit_mode"), ("globalMode", "global_mode"), ("oversample", "oversample"), ("selectedBand", "view.selected_band")])
         result = mapper.invoke("eq8.set", {"ref": rows[1]["ref"], "editMode": 1, "oversample": True, "selectedBand": 4, "expectedObjectIdentity": rows[1]["objectIdentity"], "expectedStateRevision": hashlib.sha256(mapper._bounded_canonical(eq_state).encode()).hexdigest()})
         self.assertTrue(result["changed"]); self.assertEqual((eq.edit_mode, eq.oversample, eq.view.selected_band), (1, True, 4))
-        meld_state = mapper._specialized_state(meld, [("engine", "selected_engine"), ("unison", "unison_voices"), ("monoPoly", "mono_poly"), ("polyphony", "poly_voices")])
-        result = mapper.invoke("meld.set", {"ref": rows[2]["ref"], "engine": 1, "unison": 4, "monoPoly": True, "polyphony": 16, "expectedObjectIdentity": rows[2]["objectIdentity"], "expectedStateRevision": hashlib.sha256(mapper._bounded_canonical(meld_state).encode()).hexdigest()})
-        self.assertTrue(result["changed"]); self.assertEqual((meld.selected_engine, meld.unison_voices, meld.mono_poly, meld.poly_voices), (1, 4, True, 16))
+        def meld_fence():
+            meld_state = mapper._specialized_state(meld, [("engine", "selected_engine"), ("unison", "unison_voices"), ("monoPoly", "mono_poly"), ("polyphony", "poly_voices")])
+            return {"ref": rows[2]["ref"], "expectedObjectIdentity": rows[2]["objectIdentity"], "expectedStateRevision": hashlib.sha256(mapper._bounded_canonical(meld_state).encode()).hexdigest()}
+        # Meld's voices are places in Live's menus: unison 0 is off, polyphony 6 is twelve voices.
+        result = mapper.invoke("meld.set", {**meld_fence(), "engine": 1, "unison": 0, "monoPoly": True, "polyphony": 6})
+        self.assertTrue(result["changed"]); self.assertEqual((meld.selected_engine, meld.unison_voices, meld.mono_poly, meld.poly_voices), (1, 0, True, 6))
+        with self.assertRaisesRegex(ValueError, "unison is invalid"): mapper.invoke("meld.set", {**meld_fence(), "unison": 4})
+        with self.assertRaisesRegex(ValueError, "polyphony is invalid"): mapper.invoke("meld.set", {**meld_fence(), "polyphony": 7})
 
     def test_hybrid_reverb_ir_and_time_shaping(self):
         song = FakeSong()
@@ -7992,6 +8077,25 @@ class SetDataTests(unittest.TestCase):
         # Compare-and-set: only while the key holds what was read.
         with self.assertRaisesRegex(ValueError, "changed since it was read"): bridge.mapper.invoke("data.set", {"ref": set_ref, "key": "kumi.notes", "value": "x", "expectedValue": "chorus"})
         self.assertEqual(mutate_through(bridge, "data.set", {"ref": set_ref, "key": "kumi.notes", "value": None, "expectedValue": "verse at bar 9"}, "data-key-0003"), {"ref": set_ref, "key": "kumi.notes", "value": None, "prior": "verse at bar 9"})
+
+    def test_entries_save_many_keys_in_one_call_all_or_none(self):
+        song = FakeDataSong(); bridge = immediate_bridge(song); snapshot = bridge.mapper.snapshot()
+        refs = [snapshot["tracks"][0]["ref"], snapshot["tracks"][1]["ref"]]
+        entries = [{"ref": refs[0], "key": "kumi.track", "value": "t-1"}, {"ref": refs[1], "key": "kumi.track", "value": "t-2"}]
+        result = mutate_through(bridge, "data.set", {"entries": entries}, "data-batch-0001")
+        self.assertEqual(result, {"entries": [{**entry, "prior": None} for entry in entries]})
+        self.assertEqual([track.data for track in song.tracks], [{"kumi.track": "t-1"}, {"kumi.track": "t-2"}])
+        # One entry whose key changed since it was read: none is written.
+        changed = [{**entries[0], "value": "t-9", "expectedValue": "t-1"}, {**entries[1], "value": "t-8", "expectedValue": "other"}]
+        with self.assertRaisesRegex(ValueError, "changed since it was read"): bridge.mapper.invoke("data.set", {"entries": changed})
+        self.assertEqual([track.data for track in song.tracks], [{"kumi.track": "t-1"}, {"kumi.track": "t-2"}])
+        # One that Live doesn't keep: the ones written before it are put back.
+        refusing = song.tracks[1]; refusing.set_data = lambda key, value: None
+        with self.assertRaisesRegex(ValueError, "not confirmed"): bridge.mapper.invoke("data.set", {"entries": [{**entries[0], "value": "t-5"}, {**entries[1], "value": "t-6"}]})
+        self.assertEqual(song.tracks[0].data, {"kumi.track": "t-1"}, "the first entry was put back")
+        # One form or the other, each key once, within bounds.
+        for invalid in ({"entries": entries, "ref": refs[0]}, {"entries": []}, {"entries": [entries[0], entries[0]]}, {"entries": [{**entries[0], "key": "other"}]}):
+            with self.assertRaises(ValueError): bridge.mapper.invoke("data.set", invalid)
 
     def test_what_isnt_text_or_isnt_there_is_refused_and_an_unconfirmed_write_goes_back(self):
         song = FakeDataSong(); mapper = LiveObjectMapper(song); snapshot = mapper.snapshot(); set_ref = snapshot["set"]["ref"]

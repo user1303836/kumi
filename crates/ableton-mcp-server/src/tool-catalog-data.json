@@ -10176,7 +10176,7 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 64,
-            "description": "Drift: how many voices, one of the counts the device row's drift.voiceCountList names (the row's voiceCount is that count's place in the list); its first count only through run_python for now."
+            "description": "Drift: how many voices, one of the counts the device row's drift.voiceCountList names (the row's voiceCount is that count's place in the list)."
           },
           "voiceMode": {
             "type": "integer",
@@ -10312,18 +10312,18 @@
           },
           "unison": {
             "type": "integer",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 3,
-            "description": "Meld's unison voices: 1 two, 2 three, 3 four; 0 off only through run_python for now."
+            "description": "Meld's unison voices: 0 off, 1 two, 2 three, 3 four."
           },
           "monoPoly": {
             "type": "boolean"
           },
           "polyphony": {
             "type": "integer",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 6,
-            "description": "Meld's voices: 1 three, 2 four, 3 five, 4 six, 5 eight, 6 twelve; 0 two only through run_python for now."
+            "description": "Meld's voices: 0 two, 1 three, 2 four, 3 five, 4 six, 5 eight, 6 twelve."
           },
           "presetIndex": {
             "type": "integer",

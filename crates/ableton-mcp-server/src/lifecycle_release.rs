@@ -46,7 +46,39 @@ fn roles_valid(manifest: &Value) -> bool {
             roles.get(name).and_then(Value::as_str) == release_role(name, legacy, native) && release_role(name, legacy, native).is_some()
         })
 }
+/// A release this bridge installs, upgrades to or repairs: one built with this bridge's own registry.
 pub fn verify_release_package(package_root: &Path, allow_dirty: bool) -> Result<ReleaseEvidence, LiveError> {
+    let evidence = verify_package(package_root, allow_dirty)?;
+    if evidence.manifest["protocol"]["registryHash"] != registry_digest() {
+        return Err(fail("release and runtime registry hashes disagree"));
+    }
+    Ok(evidence)
+}
+/// A generation kept to go back to, or the one installed: it runs its own bridge, so it carries the registry its
+/// manifest names, which an older release's differs from this bridge's.
+pub fn verify_retained_package(package_root: &Path, allow_dirty: bool) -> Result<ReleaseEvidence, LiveError> {
+    let evidence = verify_package(package_root, allow_dirty)?;
+    let names: Vec<&String> = evidence.manifest["files"]
+        .as_object()
+        .map(|files| files.keys().filter(|name| name.rsplit('/').next() == Some("ableton-live-v1.operations.json")).collect())
+        .unwrap_or_default();
+    // A release without its registry file can't show its own: it's held to this bridge's, as any release was before.
+    if names.is_empty() {
+        if evidence.manifest["protocol"]["registryHash"] != registry_digest() {
+            return Err(fail("release and runtime registry hashes disagree"));
+        }
+        return Ok(evidence);
+    }
+    for name in names {
+        let text = String::from_utf8(read(&package_root.join(name))?).map_err(|_| fail("the retained release's registry isn't text"))?;
+        let hash = crate::registry::registry_text_hash(&text).map_err(|error| fail(error.0))?;
+        if json!(hash) != evidence.manifest["protocol"]["registryHash"] {
+            return Err(fail("the retained release's registry and its manifest disagree"));
+        }
+    }
+    Ok(evidence)
+}
+fn verify_package(package_root: &Path, allow_dirty: bool) -> Result<ReleaseEvidence, LiveError> {
     validate_absolute_path(package_root, "package root")?;
     assert_no_linked_ancestors(package_root)?;
     let manifest_path = package_root.join("release-manifest.json");
@@ -177,9 +209,6 @@ pub fn verify_release_package(package_root: &Path, allow_dirty: bool) -> Result<
         if file_digest(&package_root.join(name))? != digest.as_str().unwrap() {
             return Err(fail(format!("release payload hash mismatch: {name}")));
         }
-    }
-    if manifest["protocol"]["registryHash"] != registry_digest() {
-        return Err(fail("release and runtime registry hashes disagree"));
     }
     Ok(ReleaseEvidence { manifest, manifest_sha256 })
 }

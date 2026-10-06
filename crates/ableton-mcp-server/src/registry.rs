@@ -215,6 +215,13 @@ fn canonical(value: &Value) -> Result<String, RegistryError> {
     canonical_json(value, &REGISTRY_CANONICAL_LIMITS).map_err(|_| RegistryError("registry is too deeply nested".into()))
 }
 
+/// SHA-256 hex of a registry file's canonical JSON, as its release manifest names it: one a retained release
+/// carries, which needn't be this code's.
+pub fn registry_text_hash(text: &str) -> Result<String, RegistryError> {
+    let value: Value = serde_json::from_str(text).map_err(|error| RegistryError(error.to_string()))?;
+    Ok(sha256_hex(&canonical(&value)?))
+}
+
 /// SHA-256 of a text, as lowercase hex.
 pub fn sha256_hex(text: &str) -> String {
     hex::encode(Sha256::digest(text.as_bytes()))

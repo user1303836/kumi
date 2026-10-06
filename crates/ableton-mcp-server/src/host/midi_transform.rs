@@ -254,7 +254,7 @@ None,
 &[]).await?}
 ;
 
-            let clip=self.note_clip(&snapshot,params["clipRef"].as_str().unwrap())?;
+            let clip=self.note_clip(&snapshot, None,params["clipRef"].as_str().unwrap()).await?;
             if clip.notes.iter().any(|n|!n["id"].is_number()){return Err(LiveError::error("stable note identity is unavailable for this clip"));}
             let(resolved,
 mut assumptions)=if ["chord-progression",
@@ -487,8 +487,13 @@ else{
 
             if scope == "in-place" {
                 if !reconciliation {
-                    let current =
-                        self.note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, reference)?;
+                    let current = self
+                        .note_clip(
+                            &self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?,
+                            Some(&context),
+                            reference,
+                        )
+                        .await?;
 
                     if full_fence(&t["clipRef"], &current.notes, &current.notes_revision, &current.authority, &json!({}))
                         != full_fence(
@@ -520,8 +525,9 @@ else{
                 )
                 .await?;
 
-                let verified =
-                    self.note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, reference)?;
+                let verified = self
+                    .note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, Some(&context), reference)
+                    .await?;
                 if note_digest(&verified.notes, true)? != payload["expectedResultIdentity"] {
                     return Err(LiveError::error("MIDI transform postcondition was not confirmed"));
                 }
@@ -550,7 +556,7 @@ else{
                 .await?;
 
             if !reconciliation {
-                let current = self.note_clip(&snapshot, reference)?;
+                let current = self.note_clip(&snapshot, Some(&context), reference).await?;
                 let value = serde_json::to_value(&snapshot).unwrap();
                 let track = value["tracks"].as_array().into_iter().flatten().find(|r| r["ref"] == target["trackRef"]);
                 let slot = track.and_then(|r| r["clipSlots"].as_array()).into_iter().flatten().find(|r| r["ref"] == target["slotRef"]);
@@ -631,7 +637,8 @@ else{
                 return Err(LiveError::error("transform duplicate identity changed since creation"));
             }
 
-            let duplicate = self.note_clip(&self.views.view_for(Some(&context), &refs, None, &[]).await?, reference)?;
+            let duplicate =
+                self.note_clip(&self.views.view_for(Some(&context), &refs, None, &[]).await?, Some(&context), reference).await?;
             if record.borrow()["payload"]["duplicateInitial"].is_null() {
                 record.borrow_mut()["payload"]["duplicateInitial"] = json!(duplicate.notes);
             }
@@ -646,7 +653,7 @@ else{
             let plan = build_note_plan(&note_diff(&initial, &transformed)?);
             self.execute_note_plan(Some(&record), adapter.as_ref(), &context, reference, &plan, &initial, false, None).await?;
             let verified_snapshot = self.views.view_for(Some(&context), &refs, None, &[]).await?;
-            let verified = self.note_clip(&verified_snapshot, reference)?;
+            let verified = self.note_clip(&verified_snapshot, Some(&context), reference).await?;
 
             if note_digest(&verified.notes, false)? != payload["expectedResultContent"] {
                 return Err(LiveError::error("duplicate transform postcondition was not confirmed"));
@@ -741,8 +748,13 @@ else{
             } else {
                 let identity = t["payload"]["authority"].get("expectedObjectIdentity");
                 if !reconciliation {
-                    let current =
-                        self.note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, reference)?;
+                    let current = self
+                        .note_clip(
+                            &self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?,
+                            Some(&context),
+                            reference,
+                        )
+                        .await?;
                     if let Some(moved) = self.undo_target_moved(
                         id,
                         &record.borrow(),
@@ -798,8 +810,9 @@ else{
                 )
                 .await?;
 
-                let verified =
-                    self.note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, reference)?;
+                let verified = self
+                    .note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, Some(&context), reference)
+                    .await?;
                 if note_digest(&verified.notes, true)? != note_digest(prior, true)? {
                     return Err(LiveError::error("MIDI-transform undo did not restore exact prior notes"));
                 }

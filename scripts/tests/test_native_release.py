@@ -145,7 +145,7 @@ class NativeRelease(unittest.TestCase):
             self.assertNotIn("release-manifest.json", manifest["files"])
             self.assertGreaterEqual(len(manifest["files"]), 10)
             # The canonical JSON hash of the protocol registry.
-            self.assertEqual(manifest["protocol"]["registryHash"], "ec05dd401ec098adb77da1c185aff1857be2bd87859afe9dda4bfeb14e04aa57")
+            self.assertEqual(manifest["protocol"]["registryHash"], "f626dafa686101c714ca610f4c47689f9297b19c838349e3bd7ef46614de4fa8")
             self.assertEqual(manifest["distribution"], {"channel": "local-native-tarball", "published": False,
                 "signed": False, "notarized": False, "integrityIsIdentityProof": False})
             for name, digest in manifest["files"].items():

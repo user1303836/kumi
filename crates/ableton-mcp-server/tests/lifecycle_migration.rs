@@ -109,8 +109,11 @@ fn files(root: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
     walk(root, root, &mut out);
     out
 }
+/// The native bridge's version past Kumi 1.7.5's Node one: a registry change comes with a newer bridge, so the
+/// native generation that replaces 1.7.5's carries another registry than it, and going back crosses that change.
+const NEWER: &str = "1.0.74";
 #[tokio::test(flavor = "current_thread")]
-async fn actual_node_install_migrates_at_same_version_and_rolls_back_exactly() {
+async fn actual_node_install_upgrades_to_native_and_rolls_back_across_a_registry_change() {
     for custom in [false, true] {
         let folder = tempfile::tempdir().unwrap();
         let root = folder.path().canonicalize().unwrap();
@@ -123,11 +126,12 @@ async fn actual_node_install_migrates_at_same_version_and_rolls_back_exactly() {
         let before_remote = files(remote);
         let unrelated = old.state_directory.join("user-history.json");
         fs::write(&unrelated, "owned user history").unwrap();
-        let upgrade = native_upgrade(&root, &old, "1.0.73");
+        let upgrade = native_upgrade(&root, &old, NEWER);
         let result = run_lifecycle(&upgrade).await.unwrap();
         assert_eq!(result["state"], "completed");
         let migrated = receipt(&old);
-        assert_eq!(migrated["packageVersion"], prior["packageVersion"]);
+        assert_eq!(migrated["packageVersion"], NEWER);
+        assert_ne!(migrated["registryHash"], prior["registryHash"], "the native generation's registry isn't 1.7.5's");
         assert_eq!(migrated["generation"], 2);
         assert_eq!(migrated["previous"]["artifactSha256"], prior["artifactSha256"]);
         assert_eq!(migrated["config"]["bridge"], prior["config"]["bridge"]);
@@ -179,7 +183,7 @@ async fn source_install_migration_failures_restore_every_owned_file_and_refuse_d
         let before_config = fs::read(config).unwrap();
         let before_secret = fs::read(secret).unwrap();
         let before_remote = files(remote);
-        let mut upgrade = native_upgrade(&root, &old, "1.0.73");
+        let mut upgrade = native_upgrade(&root, &old, NEWER);
         upgrade.fault_at = Some(point.into());
         assert!(run_lifecycle(&upgrade).await.unwrap_err().message().contains("injected lifecycle failure"));
         assert_eq!(receipt(&old), prior);
@@ -195,7 +199,12 @@ async fn source_install_migration_failures_restore_every_owned_file_and_refuse_d
     let folder = tempfile::tempdir().unwrap();
     let root = folder.path().canonicalize().unwrap();
     let (old, prior) = old_install(&root, false);
-    let mut upgrade = native_upgrade(&root, &old, "1.0.73");
+    // The same version keeps the same protocol: Kumi 1.7.5's Node generation at its own version, under another
+    // registry, is refused, as a downgrade is.
+    let same = native_upgrade(&root, &old, prior["packageVersion"].as_str().unwrap());
+    assert!(run_lifecycle(&same).await.unwrap_err().message().contains("strictly newer"));
+    assert_eq!(receipt(&old), prior);
+    let mut upgrade = native_upgrade(&root, &old, NEWER);
     upgrade.confirm_live_stopped = false;
     assert!(run_lifecycle(&upgrade).await.unwrap_err().message().contains("confirm-live-stopped"));
     assert_eq!(receipt(&old), prior);
@@ -203,18 +212,9 @@ async fn source_install_migration_failures_restore_every_owned_file_and_refuse_d
     let downgrade = native_upgrade(&root, &old, "1.0.72");
     assert!(run_lifecycle(&downgrade).await.unwrap_err().message().contains("strictly newer"));
     assert_eq!(receipt(&old), prior);
-    let legacy_entry = old.package_root.join("dist/src/cli.js");
-    let original = fs::read(&legacy_entry).unwrap();
-    fs::write(&legacy_entry, "changed installed package").unwrap();
-    assert!(run_lifecycle(&upgrade).await.is_err());
-    assert_eq!(receipt(&old), prior);
-    fs::write(&legacy_entry, original).unwrap();
-    let mut forged = prior.clone();
-    forged["releaseManifestSha256"] = json!("0".repeat(64));
-    write(old.state_directory.join("install-receipt.json"), &forged);
-    let failure = run_lifecycle(&upgrade).await.unwrap_err();
-    assert!(failure.message().contains("strictly newer"), "{failure}");
-    assert_eq!(receipt(&old), forged);
+    // A same-version migration also needs the exact verified Node generation (an installed package unchanged, its
+    // receipt not forged); with a registry change it's refused before those, as above, and 1.7.5's own installer
+    // refuses a package carrying another registry, so they can't be shown with its real generation any more.
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -237,7 +237,7 @@ async fn migrated_activation_uses_preserved_port_secret_and_authenticated_discov
         )
     }
     tokio::task::LocalSet::new().run_until(async{
-  let folder=tempfile::tempdir().unwrap();let root=folder.path().canonicalize().unwrap();let(old,prior)=old_install(&root,true);let upgrade=native_upgrade(&root,&old,"1.0.73");run_lifecycle(&upgrade).await.unwrap();
+  let folder=tempfile::tempdir().unwrap();let root=folder.path().canonicalize().unwrap();let(old,prior)=old_install(&root,true);let upgrade=native_upgrade(&root,&old,NEWER);run_lifecycle(&upgrade).await.unwrap();
   let secret=read_secret_file(Path::new(prior["secretPath"].as_str().unwrap())).unwrap();let port=prior["config"]["bridge"]["port"].as_u64().unwrap()as u16;
   for provenance in ["fake-live","real-live"] {
    // The last round's listener may still be letting go of the port.

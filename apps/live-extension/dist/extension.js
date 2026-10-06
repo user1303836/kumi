@@ -34,9 +34,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// ../../../Users/user1303836/Development/kumi/vendor/ableton-extensions-sdk-1.0.0-beta.1/package 3/dist/index.cjs
+// vendor/ableton-extensions-sdk-1.0.0-beta.1/package 3/dist/index.cjs
 var require_dist = __commonJS({
-  "../../../Users/user1303836/Development/kumi/vendor/ableton-extensions-sdk-1.0.0-beta.1/package 3/dist/index.cjs"(exports2) {
+  "vendor/ableton-extensions-sdk-1.0.0-beta.1/package 3/dist/index.cjs"(exports2) {
     Object.defineProperty(exports2, Symbol.toStringTag, { value: "Module" });
     var DataModelObject3 = class DataModelObject4 {
       /** @internal */
@@ -2073,6 +2073,19 @@ var ableton_live_v1_operations_default = {
             minLength: 64,
             maxLength: 64,
             pattern: "^[0-9a-f]{64}$"
+          },
+          keepSource: {
+            type: "boolean"
+          },
+          targetTrackRef: {
+            type: "string",
+            minLength: 1,
+            maxLength: 256
+          },
+          expectedTargetTrackIdentity: {
+            type: "string",
+            minLength: 1,
+            maxLength: 256
           }
         },
         required: [
@@ -5637,13 +5650,49 @@ var ableton_live_v1_operations_default = {
               "null"
             ],
             maxLength: 1048576
+          },
+          entries: {
+            type: "array",
+            minItems: 1,
+            maxItems: 1024,
+            items: {
+              type: "object",
+              properties: {
+                ref: {
+                  type: "string",
+                  minLength: 1,
+                  maxLength: 256
+                },
+                key: {
+                  type: "string",
+                  minLength: 1,
+                  maxLength: 256
+                },
+                value: {
+                  type: [
+                    "string",
+                    "null"
+                  ],
+                  maxLength: 1048576
+                },
+                expectedValue: {
+                  type: [
+                    "string",
+                    "null"
+                  ],
+                  maxLength: 1048576
+                }
+              },
+              required: [
+                "ref",
+                "key",
+                "value"
+              ],
+              additionalProperties: false
+            }
           }
         },
-        required: [
-          "ref",
-          "key",
-          "value"
-        ],
+        required: [],
         additionalProperties: false
       },
       result: {
@@ -5671,14 +5720,49 @@ var ableton_live_v1_operations_default = {
               "null"
             ],
             maxLength: 1048576
+          },
+          entries: {
+            type: "array",
+            minItems: 1,
+            maxItems: 1024,
+            items: {
+              type: "object",
+              properties: {
+                ref: {
+                  type: "string",
+                  minLength: 1,
+                  maxLength: 256
+                },
+                key: {
+                  type: "string",
+                  maxLength: 256
+                },
+                value: {
+                  type: [
+                    "string",
+                    "null"
+                  ],
+                  maxLength: 1048576
+                },
+                prior: {
+                  type: [
+                    "string",
+                    "null"
+                  ],
+                  maxLength: 1048576
+                }
+              },
+              required: [
+                "ref",
+                "key",
+                "value",
+                "prior"
+              ],
+              additionalProperties: false
+            }
           }
         },
-        required: [
-          "ref",
-          "key",
-          "value",
-          "prior"
-        ],
+        required: [],
         additionalProperties: false
       }
     },
@@ -7205,7 +7289,7 @@ var ableton_live_v1_operations_default = {
           },
           voiceCount: {
             type: "integer",
-            minimum: 1,
+            minimum: 0,
             maximum: 64
           },
           voiceMode: {
@@ -8714,16 +8798,16 @@ var ableton_live_v1_operations_default = {
           },
           unison: {
             type: "integer",
-            minimum: 1,
-            maximum: 16
+            minimum: 0,
+            maximum: 3
           },
           monoPoly: {
             type: "boolean"
           },
           polyphony: {
             type: "integer",
-            minimum: 1,
-            maximum: 64
+            minimum: 0,
+            maximum: 6
           },
           expectedObjectIdentity: {
             type: "string",
@@ -9072,11 +9156,7 @@ var ableton_live_v1_operations_default = {
             required: [
               "expectedObjectIdentity",
               "expectedTrackRef",
-              "expectedTrackIdentity",
-              "expectedSlotRef",
-              "expectedSlotIdentity",
-              "expectedSceneRef",
-              "expectedSceneIdentity"
+              "expectedTrackIdentity"
             ],
             additionalProperties: false
           },
@@ -9230,11 +9310,7 @@ var ableton_live_v1_operations_default = {
             required: [
               "expectedObjectIdentity",
               "expectedTrackRef",
-              "expectedTrackIdentity",
-              "expectedSlotRef",
-              "expectedSlotIdentity",
-              "expectedSceneRef",
-              "expectedSceneIdentity"
+              "expectedTrackIdentity"
             ],
             additionalProperties: false
           },
@@ -9349,11 +9425,7 @@ var ableton_live_v1_operations_default = {
             required: [
               "expectedObjectIdentity",
               "expectedTrackRef",
-              "expectedTrackIdentity",
-              "expectedSlotRef",
-              "expectedSlotIdentity",
-              "expectedSceneRef",
-              "expectedSceneIdentity"
+              "expectedTrackIdentity"
             ],
             additionalProperties: false
           },
@@ -9460,11 +9532,7 @@ var ableton_live_v1_operations_default = {
             required: [
               "expectedObjectIdentity",
               "expectedTrackRef",
-              "expectedTrackIdentity",
-              "expectedSlotRef",
-              "expectedSlotIdentity",
-              "expectedSceneRef",
-              "expectedSceneIdentity"
+              "expectedTrackIdentity"
             ],
             additionalProperties: false
           },
@@ -9570,11 +9638,7 @@ var ableton_live_v1_operations_default = {
             required: [
               "expectedObjectIdentity",
               "expectedTrackRef",
-              "expectedTrackIdentity",
-              "expectedSlotRef",
-              "expectedSlotIdentity",
-              "expectedSceneRef",
-              "expectedSceneIdentity"
+              "expectedTrackIdentity"
             ],
             additionalProperties: false
           },
@@ -9683,11 +9747,7 @@ var ableton_live_v1_operations_default = {
             required: [
               "expectedObjectIdentity",
               "expectedTrackRef",
-              "expectedTrackIdentity",
-              "expectedSlotRef",
-              "expectedSlotIdentity",
-              "expectedSceneRef",
-              "expectedSceneIdentity"
+              "expectedTrackIdentity"
             ],
             additionalProperties: false
           },
@@ -9893,11 +9953,7 @@ var ableton_live_v1_operations_default = {
             required: [
               "expectedObjectIdentity",
               "expectedTrackRef",
-              "expectedTrackIdentity",
-              "expectedSlotRef",
-              "expectedSlotIdentity",
-              "expectedSceneRef",
-              "expectedSceneIdentity"
+              "expectedTrackIdentity"
             ],
             additionalProperties: false
           }
@@ -10031,11 +10087,7 @@ var ableton_live_v1_operations_default = {
             required: [
               "expectedObjectIdentity",
               "expectedTrackRef",
-              "expectedTrackIdentity",
-              "expectedSlotRef",
-              "expectedSlotIdentity",
-              "expectedSceneRef",
-              "expectedSceneIdentity"
+              "expectedTrackIdentity"
             ],
             additionalProperties: false
           },
