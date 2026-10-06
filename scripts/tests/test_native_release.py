@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import stat
+import sys
 import tomllib
 from pathlib import Path
 import tarfile
@@ -420,6 +421,17 @@ class NativeRelease(unittest.TestCase):
         # A license gh can't fetch fails the update rather than becoming its error page.
         with self.assertRaisesRegex(RuntimeError, "LICENSE\\?ref=.*HTTP 404"):
             vendor.fetch(7, self.bundle_run(runtime, root=("LICENSE",)))
+
+    def test_the_update_script_says_why_it_stops_in_one_line(self):
+        for error in (ValueError("run 7 isn't a successful Bundle run"), RuntimeError("gh api x failed: Not Found (HTTP 404)")):
+            with self.subTest(error=error), patch.object(vendor, "fetch", side_effect=error), \
+                    patch.object(sys, "argv", ["vendor-willington.py", "--run", "7"]):
+                with self.assertRaises(SystemExit) as stopped:
+                    vendor.main()
+                self.assertEqual(stopped.exception.code, str(error))
+        # A tree without an update has nothing to check against.
+        with self.assertRaisesRegex(ValueError, "has no release.json with a version to check against"):
+            vendor.check({}, root=self.root)
 
     def test_a_refused_update_leaves_vendor_willington_as_it_was(self):
         folder, files = self.vendor_willington()

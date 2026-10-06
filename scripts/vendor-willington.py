@@ -145,7 +145,10 @@ def vendor(bundle: bytes, licenses: dict[str, bytes], commit: str, version: str 
 def check(fetched: dict, root: Path = ROOT) -> list[str]:
     """The files that differ between root's vendor/willington and the fetched run's, with its release.json's version."""
     folder = root / release.WILLINGTON
-    version = json.loads((folder / "release.json").read_text(encoding="utf-8"))["version"]
+    try:
+        version = json.loads((folder / "release.json").read_text(encoding="utf-8"))["version"]
+    except (OSError, ValueError, KeyError, TypeError):
+        raise ValueError(f"{release.WILLINGTON} has no release.json with a version to check against") from None
     with tempfile.TemporaryDirectory(prefix="kumi-willington-check-") as temp:
         staged = Path(temp) / "willington"
         stage(fetched["bundle"], fetched["licenses"], fetched["commit"], version, staged)
@@ -163,14 +166,18 @@ def main() -> None:
     args = parser.parse_args()
     if args.check and args.version:
         parser.error("--version goes with --run: --check takes the version from release.json")
-    fetched = fetch(args.run or args.check)
-    if args.check:
-        differences = check(fetched)
-        if differences:
-            sys.exit(f"{release.WILLINGTON} differs from Bundle run {args.check}: {', '.join(differences)}")
-        print(f"{release.WILLINGTON} is exactly Bundle run {args.check}'s files, from Willington {fetched['commit']}.")
-        return
-    files = vendor(fetched["bundle"], fetched["licenses"], fetched["commit"], args.version)
+    # A refusal or a failed gh call says why in one line; anything else is a bug and keeps its traceback.
+    try:
+        fetched = fetch(args.run or args.check)
+        if args.check:
+            differences = check(fetched)
+            if differences:
+                sys.exit(f"{release.WILLINGTON} differs from Bundle run {args.check}: {', '.join(differences)}")
+            print(f"{release.WILLINGTON} is exactly Bundle run {args.check}'s files, from Willington {fetched['commit']}.")
+            return
+        files = vendor(fetched["bundle"], fetched["licenses"], fetched["commit"], args.version)
+    except (OSError, ValueError, RuntimeError, zipfile.BadZipFile) as error:
+        sys.exit(str(error))
     natives = ", ".join(f"{sum(name.endswith(suffix) for name in files)} for {platform}"
                         for platform, suffix in release.WILLINGTON_NATIVES.items())
     print(f"{release.WILLINGTON}: {len(files)} files, native libraries {natives}")
