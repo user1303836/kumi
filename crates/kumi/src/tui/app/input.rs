@@ -416,6 +416,19 @@ impl TuiApp {
             self.notice(HELP, NoticeTone::Info);
             return Ok(());
         }
+        if command == "/changelog" {
+            self.clear_editor();
+            let since = self.0.state.borrow().news_since.clone();
+            match crate::whats_new::changelog(kumi_runtime::KUMI_VERSION, since.as_deref()) {
+                Some(news) => {
+                    let footer = Some(format!("Every release: {}", crate::whats_new::history_link()));
+                    self.0.state.borrow_mut().transcript.add(Entry::News { title: news.title, items: news.items, footer });
+                    self.0.scheduler.request();
+                }
+                None => self.notice("Kumi's changelog has no notes for this version.", NoticeTone::Info),
+            }
+            return Ok(());
+        }
         if command == "/voice" && self.0.voice.is_some() {
             self.clear_editor();
             self.open_voice(None);
@@ -935,7 +948,7 @@ pub(super) struct Command {
     pub about: &'static str,
 }
 
-pub(super) const HELP: &str = "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, and /conversations goes back to an earlier one · /reconnect connects to Live again, keeping the conversation · /copy copies the last answer; to select text yourself, hold Shift while dragging (Option in iTerm2) · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one; /willington turns Willington's bindings (macro mapping and more) on or off; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your Sets), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands";
+pub(super) const HELP: &str = "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, and /conversations goes back to an earlier one · /reconnect connects to Live again, keeping the conversation · /copy copies the last answer; to select text yourself, hold Shift while dragging (Option in iTerm2) · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one; /willington turns Willington's bindings (macro mapping and more) on or off; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your Sets), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi, and /changelog says what's new in it · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands";
 pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/new", about: "Forget this conversation and start fresh" },
     Command { name: "/btw", about: "Ask something on the side, without interrupting Kumi" },
@@ -959,6 +972,7 @@ pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/logout", about: "Sign out of a provider" },
     Command { name: "/status", about: "What Kumi is connected to" },
     Command { name: "/update", about: "Get the newest Kumi" },
+    Command { name: "/changelog", about: "What's new in Kumi" },
     Command { name: "/help", about: "Keys and commands" },
     Command { name: "/quit", about: "Close Kumi" },
 ];

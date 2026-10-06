@@ -80,6 +80,8 @@ pub struct TuiOptions {
     pub connect_live: Option<ConnectLive>,
     /// /willington, where Kumi's bridge can carry Willington.
     pub willington: Option<WillingtonControl>,
+    /// What's new since the producer last opened Kumi, shown once as it starts.
+    pub whats_new: Option<crate::whats_new::News>,
 }
 /// Live's part of first-run setup: the setup shows it when Kumi's bridge isn't in Live yet, or is older
 /// than Kumi's.
@@ -112,6 +114,7 @@ impl TuiOptions {
             voice: None,
             connect_live: None,
             willington: None,
+            whats_new: None,
         }
     }
 }
@@ -184,6 +187,10 @@ struct State {
     told_library: bool,
     /// Willington's bindings are off in the bridge that carries them, and the producer has yet to be told.
     willington_off: bool,
+    /// What's new, shown as Kumi started: a conversation carried on at the start comes above it.
+    news: Option<EntryRef>,
+    /// The version that news is since, where /changelog starts.
+    news_since: Option<String>,
     changes: Vec<ChangeRecord>,
     last_change: Option<(String, f64)>,
     last_action: Option<LastAction>,
@@ -264,6 +271,8 @@ impl State {
             library: None,
             told_library: false,
             willington_off: false,
+            news: None,
+            news_since: None,
             changes: vec![],
             last_change: None,
             last_action: None,
@@ -643,6 +652,11 @@ impl Terminal for TuiApp {
         if let Some(notice) = &self.0.options.startup_notice {
             self.notice(notice, NoticeTone::Info);
         }
+        if let Some(news) = self.0.options.whats_new.clone() {
+            let mut state = self.0.state.borrow_mut();
+            state.news_since = news.since.clone();
+            state.news = Some(state.transcript.add(news_entry(news)));
+        }
         // Said on the welcome screen, which a notice would replace; a conversation carried on says it below.
         self.0.state.borrow_mut().willington_off = self.0.options.willington.as_ref().is_some_and(|w| (w.on)() == Some(false));
         self.0.state.borrow_mut().library = self.0.options.controller.library();
@@ -736,4 +750,10 @@ fn end_steps(entry: &EntryRef) {
             }
         }
     }
+}
+
+/// What's new as a transcript entry: shown to the producer, never to the model.
+pub(super) fn news_entry(news: crate::whats_new::News) -> Entry {
+    let footer = crate::whats_new::more_line(&news);
+    Entry::News { title: news.title, items: news.items, footer }
 }

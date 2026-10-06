@@ -137,7 +137,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 **Kumi のリリース：**
 
-1. ブランチ上で、"Kumi X.Y.Z: the changelog, READMEs and versions" という件名のコミットを一つ作り、次のものを更新します。ルートの `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common`、`kumi-runtime` の Cargo マニフェスト、`Cargo.lock` のバージョン（パッケージングのテストがこれらが等しいことを確認します）。3 つの README の Status（現状）の行。3 つの `KUMI_CHANGES.md` の「Bridge versions」（ブリッジのバージョン）の下にある、同梱するブリッジの行。そして `CHANGELOG.md` の `## Unreleased` を `## X.Y.Z — date` にし、どのブリッジを同梱するかを書いた行を加えます。
+1. ブランチ上で、"Kumi X.Y.Z: the changelog, READMEs and versions" という件名のコミットを一つ作り、次のものを更新します。ルートの `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common`、`kumi-runtime` の Cargo マニフェスト、`Cargo.lock` のバージョン（パッケージングのテストがこれらが等しいことを確認します）。3 つの README の Status（現状）の行。3 つの `KUMI_CHANGES.md` の「Bridge versions」（ブリッジのバージョン）の下にある、同梱するブリッジの行。そして `CHANGELOG.md` の `## Unreleased` を `## X.Y.Z — date` にし、どのブリッジを同梱するかを書いた行を加えます。Kumi は変更履歴を組み込んでおり、アップデート後に初めて起動したとき、リリースのリスト項目を **What's new** として表示します（新しいリリースから最大 5 件。残りは `/changelog`）。同梱ブリッジやテスト環境の行のような段落は表示されません。そのため、プロデューサーが気づく変更はそれぞれリスト項目にし、重要なものを先に書きます。
 2. プルリクエストを "Kumi X.Y.Z (#PR)" という件名のマージコミットでマージします。
 3. マージコミットに `vX.Y.Z` のタグを付けてプッシュします。Installer ワークフローが macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドルをビルドし、インストールと移行をテストし、ターゲットごとのバンドルとマニフェスト、そして互換用の `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS` を下書きのリリース "Kumi X.Y.Z" に添付します。
 4. リリースノートを書いてリリースを公開します。そうして初めて、インストーラー、`kumi update`、更新確認がそのリリースを認識します。

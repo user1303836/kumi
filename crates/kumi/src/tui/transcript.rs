@@ -170,6 +170,12 @@ pub enum Entry {
     Web {
         lines: Vec<WebLine>,
     },
+    /// What's new in Kumi: a heading, a few notes and where the rest are. The producer's only.
+    News {
+        title: String,
+        items: Vec<String>,
+        footer: Option<String>,
+    },
 }
 #[derive(Clone, Debug)]
 pub struct Band {
@@ -354,6 +360,26 @@ pub fn entry_rows(entry: &Entry, width: i32, now: f64) -> Vec<Row> {
                 row(spans)
             })
             .collect(),
+        Entry::News { title, items, footer } => {
+            let mut rows = wrapped(
+                &[
+                    span("── ", palette::RULE),
+                    span(title, palette::TEXT),
+                    span(format!(" {}", "─".repeat((inner - text_width(title) - 4).max(2) as usize)), palette::RULE),
+                ],
+                inner,
+            );
+            for item in items {
+                rows.extend(wrap(&[span(item, palette::DIM)], (inner - 2).max(1)).into_iter().enumerate().map(|(index, mut spans)| {
+                    spans.insert(0, span(if index == 0 { "· " } else { "  " }, palette::FAINT));
+                    row(spans)
+                }));
+            }
+            if let Some(footer) = footer {
+                rows.extend(wrapped(&[span(footer, palette::FAINT)], inner));
+            }
+            rows
+        }
         Entry::Divider { text } => wrapped(
             &[
                 span("── ", palette::RULE),

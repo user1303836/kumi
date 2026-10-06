@@ -225,6 +225,13 @@ pub(super) async fn run_session(
     };
     let settings_file = load_settings_file(&io.env)?;
     let settings = read_settings(&settings_file);
+    // What's new since this home's Kumi last started. A home an earlier Kumi used (an update kept the app
+    // before it, or Kumi's database is there) is updated, not new, the first time it has no version noted.
+    let whats_new = {
+        let home = std::path::Path::new(&settings_file).parent().unwrap_or(std::path::Path::new("."));
+        let earlier = home.join("app.previous").exists() || home.join("kumi.db").exists();
+        crate::whats_new::at_start(&settings_file, KUMI_VERSION, earlier, settings.whats_new != Some(false))
+    };
     let projects_dir = load_projects_dir(&io.env)?;
     let tools_dir = load_tools_dir(&io.env)?;
     let library = create_library(LibraryOptions {
@@ -547,6 +554,7 @@ pub(super) async fn run_session(
         let mut options = TuiOptions::new(session, io.input.clone(), io.out.clone(), mode);
         options.models = Some(models);
         options.startup_notice = if connect_why.is_some() { None } else { notice };
+        options.whats_new = whats_new;
         options.connect_live = live_possible.then(|| ConnectLive {
             why: connect_why,
             bridge: bundled.clone().unwrap_or_default(),
@@ -588,6 +596,7 @@ pub(super) async fn run_session(
     } else {
         let mut options = TerminalOptions::new(session, io.input.clone(), io.out.clone(), models, mode);
         options.startup_notice = notice;
+        options.whats_new = whats_new;
         options.secrets = secrets.clone();
         options.history = Some(history);
         options.updates = Some(updates);

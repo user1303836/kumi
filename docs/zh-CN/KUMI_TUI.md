@@ -17,6 +17,8 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 
 欢迎界面会显示自你上次使用以来工程中发生的变化；有更新的 Kumi 时也会显示；第一次时还会说明 Kumi 正在后台学习你的素材库。
 
+更新后第一次打开 Kumi 时，对话开头会显示 **What's new**（新功能）：从 Kumi 的更新日志中取最新的最多五条，其余的用 `/changelog` 查看。如果有从上次接着的对话，新功能会显示在它下面。全新安装时不显示，模型也看不到这些内容。在 `~/.kumi/settings.json` 中写入 `"whatsNew": false` 即可关闭。
+
 **设置**会在还有步骤未完成时最先出现：登录、Live 中 Kumi 的桥接（缺失，或比 Kumi 自带的旧），然后是 Control Surface。它列出这三步，已完成的以薄荷绿显示并注明所选内容，并询问当前这一步需要什么；Kumi 等待时（等浏览器、安装或 Live），字标下方的薄荷绿波形会动起来。↑↓ 和 Enter 用于选择，Esc 把这一步留到以后，之后的会话在同一窗口中显示。已经设置好的 Kumi 会直接进入会话。
 
 宽度不足 100 列时，Live 窗格会折叠为输入框上方的两行条带（先是你所在的位置和 Kumi 正在做的事，然后是最近一次修改及其撤销）。窗口小于 24×8 时，Kumi 会请你把窗口调大。
@@ -69,6 +71,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | `/status` | Kumi 连接到了什么、当前模型、学习素材库的进度，以及使用 API 密钥时本次会话用掉的 token |
 | `/voice` | 说话功能：开始或停止、“停止后直接发送”、你说的语言和麦克风 |
 | `/update` | 获取最新的 Kumi：它会先询问，然后关闭、更新，再以同一段对话重新打开 |
+| `/changelog` | Kumi 的新功能：自你更新前的版本以来的全部条目（没有则显示最近三个版本），以及完整历史所在的位置 |
 | `/help` | 按键和命令，以一条说明的形式显示在对话中 |
 | `/quit` | 关闭 Kumi |
 
@@ -116,7 +119,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 
 ## 纯文本模式
 
-设置 `KUMI_UI=plain`，或者输入或输出经过管道时，Kumi 会改用逐行显示的纯文本界面，适合屏幕阅读器和日志。它支持 `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new`、`/conversations [n]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/willington`、`/update` 和 `/quit`，但没有 `/btw`、`/goal` 或 `/copy`。请在 shell 中用 `kumi login` 登录。Ctrl-C 停止回答，空闲时则退出。
+设置 `KUMI_UI=plain`，或者输入或输出经过管道时，Kumi 会改用逐行显示的纯文本界面，适合屏幕阅读器和日志。它支持 `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new`、`/conversations [n]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/willington`、`/update`、`/changelog` 和 `/quit`，但没有 `/btw`、`/goal` 或 `/copy`。请在 shell 中用 `kumi login` 登录。Ctrl-C 停止回答，空闲时则退出。
 
 ## 终端
 

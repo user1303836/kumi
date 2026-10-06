@@ -17,4 +17,5 @@ pub mod text;
 pub mod tui;
 pub mod update;
 pub mod voice;
+pub mod whats_new;
 pub mod willington;

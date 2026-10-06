@@ -164,6 +164,9 @@ pub struct Settings {
     pub panel_tab: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub update_check: Option<bool>,
+    /// false: no "What's new" as Kumi first starts after an update (`/changelog` still shows it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub whats_new: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub library_folders: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -221,6 +224,7 @@ pub fn read_settings(file: &str) -> Settings {
         fast: (value["fast"] == true).then_some(true),
         panel_tab: value["panelTab"].as_str().filter(|s| TAB.is_match(s)).map(str::to_string),
         update_check: (value["updateCheck"] == false).then_some(false),
+        whats_new: (value["whatsNew"] == false).then_some(false),
         library_folders: value["libraryFolders"]
             .as_array()
             .into_iter()
@@ -250,6 +254,9 @@ pub fn write_settings(file: &str, next: &Value) -> Result<(), RuntimeError> {
     }
     if kept("updateCheck") == Some(&Value::Bool(false)) {
         settings.insert("updateCheck".into(), json!(false));
+    }
+    if kept("whatsNew") == Some(&Value::Bool(false)) {
+        settings.insert("whatsNew".into(), json!(false));
     }
     if let Some(value) = kept("libraryFolders").filter(|v| v.as_array().is_some_and(|v| !v.is_empty())) {
         settings.insert("libraryFolders".into(), value.clone());

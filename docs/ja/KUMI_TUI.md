@@ -17,6 +17,8 @@ Kumi はターミナルウィンドウ全体を使い、Kumi が閉じたとき�
 
 ウェルカム画面には、前回から Set で変わったこと、新しい Kumi が出ていればそのこと、そして初回には Kumi がライブラリーをバックグラウンドで学習していることが表示されます。
 
+アップデート後に初めて Kumi を開くと、会話の最初に **What's new**（新機能）が表示されます。Kumi の変更履歴から新しい順に最大 5 件で、残りは `/changelog` で見られます。前回から続く会話がある場合は、その下に表示されます。新規インストールでは表示されず、モデルに送られることもありません。`~/.kumi/settings.json` に `"whatsNew": false` を書くと表示しなくなります。
+
 **セットアップ**は、まだ済んでいないステップがあるときに最初に表示されます：サインイン、Live の中の Kumi のブリッジ（ないとき、または Kumi のものより古いとき）、そして Control Surface です。3 つのステップを並べ、済んだものは選んだ内容とともにミントで示し、いまのステップに必要なことを尋ねます。ワードマークの下のミントの波形は、Kumi が待っている間（ブラウザ、インストール、Live）だけ動きます。↑↓ と Enter で選び、Esc でそのステップを後回しにします。続くセッションは同じウィンドウに表示されます。セットアップ済みの Kumi は、すぐにセッションから始まります。
 
 幅が 100 列未満になると、Live のペインは入力欄の上の 2 行の帯にたたまれます（いまいる場所と Kumi がしていること、次に最後の変更とその undo）。24×8 より小さいと、Kumi はウィンドウを大きくするよう求めます。
@@ -69,6 +71,7 @@ Kumi はターミナルウィンドウ全体を使い、Kumi が閉じたとき�
 | `/status` | Kumi の接続先、モデル、ライブラリーの学習の進み具合、API キーの場合はこのセッションで使ったトークン数 |
 | `/voice` | 話しかける機能：開始と停止、「止めたら送る」、話す言語、マイク |
 | `/update` | 最新の Kumi を取得する：確認してから閉じ、更新し、同じ会話で再び開く |
+| `/changelog` | Kumi の新機能：アップデート前のバージョン以降のすべての項目（なければ最新の 3 リリース）と、全履歴の場所を表示する |
 | `/help` | キーとコマンドを、会話の中のメモとして表示する |
 | `/quit` | Kumi を閉じる |
 
@@ -116,7 +119,7 @@ Kumi はターミナルウィンドウ全体を使い、Kumi が閉じたとき�
 
 ## プレーンモード
 
-`KUMI_UI=plain`、またはパイプを通した入力や出力では、代わりに一行ずつのプレーンなインターフェースになり、スクリーンリーダーやログに向いています。使えるのは `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new`、`/conversations [n]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/willington`、`/update`、`/quit` で、`/btw`、`/goal`、`/copy` はありません。サインインはシェルから `kumi login` で行います。Ctrl-C は答えを止め、Kumi が何もしていないときは終了します。
+`KUMI_UI=plain`、またはパイプを通した入力や出力では、代わりに一行ずつのプレーンなインターフェースになり、スクリーンリーダーやログに向いています。使えるのは `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new`、`/conversations [n]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/willington`、`/update`、`/changelog`、`/quit` で、`/btw`、`/goal`、`/copy` はありません。サインインはシェルから `kumi login` で行います。Ctrl-C は答えを止め、Kumi が何もしていないときは終了します。
 
 ## ターミナル
 

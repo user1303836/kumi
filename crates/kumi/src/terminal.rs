@@ -51,6 +51,8 @@ pub struct TerminalOptions {
     pub updates: Option<UpdateControl>,
     /// /willington, where Kumi's bridge can carry Willington.
     pub willington: Option<WillingtonControl>,
+    /// What's new since the producer last opened Kumi, said once as it starts.
+    pub whats_new: Option<crate::whats_new::News>,
 }
 impl TerminalOptions {
     pub fn new(
@@ -72,11 +74,12 @@ impl TerminalOptions {
             history: None,
             updates: None,
             willington: None,
+            whats_new: None,
         }
     }
 }
 fn help() -> String {
-    format!("/help · /status · /undo · /stop · /refresh · /reconnect (connect to Live again, keeping the conversation) · /new (forget this conversation and start fresh) · /conversations [number] (list this Set's, or go back to one) · /model [provider/model] · /effort [level|default] · /logout <provider> · /memory · /forget <id> · /note <id> <new words> · /pin <id> · /unpin <id> · /recipes · /willington (Willington's bindings on or off) · /update (get the newest Kumi) · /quit | Ctrl-C: cancel work; idle: exit. EOF exits. Sign in with: {} login <provider>.",*KUMI)
+    format!("/help · /status · /undo · /stop · /refresh · /reconnect (connect to Live again, keeping the conversation) · /new (forget this conversation and start fresh) · /conversations [number] (list this Set's, or go back to one) · /model [provider/model] · /effort [level|default] · /logout <provider> · /memory · /forget <id> · /note <id> <new words> · /pin <id> · /unpin <id> · /recipes · /willington (Willington's bindings on or off) · /update (get the newest Kumi) · /changelog (what's new in it) · /quit | Ctrl-C: cancel work; idle: exit. EOF exits. Sign in with: {} login <provider>.",*KUMI)
 }
 fn head(text: &str, limit: usize) -> String {
     String::from_utf16_lossy(&text.encode_utf16().take(limit).collect::<Vec<_>>())
@@ -311,6 +314,16 @@ impl PlainTerminal {
         }
         .boxed_local()
     }
+    /// What's new, a line each: the heading, the notes, then `footer`.
+    fn news(&self, news: &crate::whats_new::News, footer: Option<String>) {
+        self.notice(&format!("[new] {}:", news.title));
+        for item in &news.items {
+            self.notice(&format!("[new] · {item}"));
+        }
+        if let Some(footer) = footer {
+            self.notice(&format!("[new] {footer}"));
+        }
+    }
     fn notice(&self, message: &str) {
         let mut state = self.0.state.borrow_mut();
         if state.output_failed {
@@ -504,6 +517,14 @@ impl PlainTerminal {
         }
         if command == "/help" {
             self.notice(&help());
+            return Ok(());
+        }
+        if command == "/changelog" {
+            let since = self.0.options.whats_new.as_ref().and_then(|news| news.since.clone());
+            match crate::whats_new::changelog(kumi_runtime::KUMI_VERSION, since.as_deref()) {
+                Some(news) => self.news(&news, Some(format!("Every release: {}", crate::whats_new::history_link()))),
+                None => self.notice("[new] Kumi's changelog has no notes for this version."),
+            }
             return Ok(());
         }
         if command == "/update" {
@@ -722,6 +743,9 @@ impl Terminal for PlainTerminal {
         self.notice("Each Set's conversations are kept: its latest continues next time, and /conversations goes back to earlier ones. /help for commands.");
         if let Some(notice) = self.0.options.startup_notice.as_ref().filter(|s| !s.is_empty()) {
             self.notice(notice);
+        }
+        if let Some(news) = &self.0.options.whats_new {
+            self.news(news, crate::whats_new::more_line(news));
         }
         if self.0.options.willington.as_ref().is_some_and(|w| (w.on)() == Some(false)) {
             self.notice(&format!("[willington] {}", crate::willington::OFF_AT_START));

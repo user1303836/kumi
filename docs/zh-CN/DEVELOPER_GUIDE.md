@@ -137,7 +137,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 **一次 Kumi 发布：**
 
-1. 在分支上，用一个标题为 “Kumi X.Y.Z: the changelog, READMEs and versions” 的提交完成以下改动：在根目录的 `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common` 和 `kumi-runtime` 的 Cargo 清单以及 `Cargo.lock` 中设置版本（打包测试会确保这些相等）；更新三个 README 中当前状态（Status）的那一行；更新三个 `KUMI_CHANGES.md` 中“桥接版本”（Bridge versions）下说明随附哪个桥接的那一行；并把 `CHANGELOG.md` 的 `## Unreleased` 改为 `## X.Y.Z — date`，加上一行说明它随附哪个桥接。
+1. 在分支上，用一个标题为 “Kumi X.Y.Z: the changelog, READMEs and versions” 的提交完成以下改动：在根目录的 `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common` 和 `kumi-runtime` 的 Cargo 清单以及 `Cargo.lock` 中设置版本（打包测试会确保这些相等）；更新三个 README 中当前状态（Status）的那一行；更新三个 `KUMI_CHANGES.md` 中“桥接版本”（Bridge versions）下说明随附哪个桥接的那一行；并把 `CHANGELOG.md` 的 `## Unreleased` 改为 `## X.Y.Z — date`，加上一行说明它随附哪个桥接。Kumi 内置了更新日志，更新后第一次启动时，会把各版本的列表条目显示为 **What's new**（从最新版本开始，最多五条；其余用 `/changelog` 查看）。随附桥接、测试环境之类的段落不会显示。因此，制作人能察觉到的每项改动都应写成一个列表条目，最重要的放在前面。
 2. 用标题为 “Kumi X.Y.Z (#PR)” 的合并提交合并该拉取请求。
 3. 给合并提交打上标签 `vX.Y.Z` 并推送该标签。Installer 工作流会为 macOS、Linux 和 Windows 的 Intel 与 ARM 构建原生发行包，测试安装和迁移，并把各平台的发行包和清单，以及兼容用的 `kumi.tar.gz`、`kumi-release.json` 和 `SHA256SUMS` 附加到名为 “Kumi X.Y.Z” 的草稿发布中。
 4. 撰写发布说明并发布该版本。只有在此之后，安装程序、`kumi update` 和更新检查才能看到它。

@@ -889,3 +889,27 @@ case!(a_provider_wait_shows_why_and_counts_down_until_the_model_answers, async {
     assert!(!has(&h.screen(), "carrying on"), "the next words end it");
     h.close().await;
 });
+case!(whats_new_shows_once_as_kumi_starts_below_a_conversation_carried_on_and_changelog_has_the_rest, async {
+    let news = kumi::whats_new::News {
+        title: "What's new in Kumi 1.8.12, since 1.8.10".into(),
+        items: (1..=5).map(|n| format!("1.8.12 · Note number {n} about something Kumi does better now.")).collect(),
+        more: 3,
+        since: Some("1.8.10".into()),
+    };
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |o| o.whats_new = Some(news));
+    h.start().await;
+    h.connect();
+    h.has("What's new in Kumi 1.8.12, since 1.8.10");
+    h.has("· 1.8.12 · Note number 1 about something Kumi does better now.");
+    h.has("and 3 more since 1.8.10: /changelog");
+    // A conversation carried on at the start goes above it, so the notes stay in view.
+    h.emit(json!({"type":"resumed","savedAt":kumi_common::time::now_ms()-3600000,"lines":[{"role":"user","text":"make the bass wider"},{"role":"assistant","text":"Widened it to 140%."}],"changes":[]}));
+    let lines = h.screen();
+    let widened = lines.iter().position(|s| s.contains("Widened it to 140%.")).unwrap();
+    let title = lines.iter().position(|s| s.contains("What's new in Kumi 1.8.12")).unwrap();
+    assert!(widened < title, "{lines:#?}");
+    // /changelog shows the notes from the real changelog, with where the rest are.
+    h.type_text("/changelog\r").await;
+    h.has("Every release: https://github.com/user1303836/kumi/blob/main/CHANGELOG.md");
+    h.close().await;
+});

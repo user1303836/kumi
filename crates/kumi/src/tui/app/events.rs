@@ -135,7 +135,11 @@ impl TuiApp {
             }
             "resumed" => {
                 let when = since(n("savedAt"), now_ms_f64());
-                let at_start = self.0.state.borrow().transcript.is_empty();
+                // What's new, shown as Kumi started, doesn't count: the conversation goes above it.
+                let at_start = {
+                    let state = self.0.state.borrow();
+                    state.transcript.is_empty() || state.news.is_some()
+                };
                 if value["chosen"] == true {
                     self.0.state.borrow_mut().transcript.add(Entry::Divider { text: format!("Back to your conversation from {when}") });
                 } else if value["unreadable"] == true {
@@ -187,6 +191,12 @@ impl TuiApp {
                         earlier.drain(..earlier.len() - 500);
                     }
                     state.changes = earlier;
+                }
+                // What's new goes below a conversation carried on at the start, where it's seen.
+                if let Some(news) = state.news.take() {
+                    let entry = news.borrow().clone();
+                    state.transcript.remove(&news);
+                    state.transcript.add(entry);
                 }
                 // Carried on at the start, the conversation takes the welcome screen's place, and its word on Willington.
                 let tell = at_start && state.willington_off;

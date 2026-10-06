@@ -245,7 +245,12 @@ reaches `main` by pull request.
    these equal); the Status line of the three READMEs; the ships-with
    line under "Bridge versions" in the three `KUMI_CHANGES.md`; and the
    `CHANGELOG.md`'s `## Unreleased` becomes `## X.Y.Z — date`, with a line
-   that says which bridge it ships with.
+   that says which bridge it ships with. Kumi builds the changelog in and shows
+   a release's list items as **What's new** the first time it starts after an
+   update (five at most, newest release first; `/changelog` has the rest).
+   Paragraphs, such as the ships-with and tested-with lines, aren't shown. So
+   each change a producer would notice goes in a list item, the ones that matter
+   most first.
 2. Merge the pull request with a merge commit titled "Kumi X.Y.Z (#PR)".
 3. Tag the merge commit `vX.Y.Z` and push the tag. The Installer workflow builds
    native bundles for Intel and ARM on macOS, Linux and Windows, tests installs

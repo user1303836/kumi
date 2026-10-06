@@ -41,6 +41,12 @@ The welcome screen shows what changed in the Set since you were last here, a
 newer Kumi when there is one, and, the first time, that Kumi is learning your
 library in the background.
 
+The first time Kumi opens after an update, the conversation starts with **What's
+new**: up to five of the newest notes from Kumi's changelog, and `/changelog` for
+the rest. A conversation carried on from last time goes above them. A fresh
+install shows none, and the model never sees them. `"whatsNew": false` in
+`~/.kumi/settings.json` turns them off.
+
 **Setup** comes first when a step is missing: signing in, Kumi's bridge in Live
 (missing, or older than Kumi's), and then the Control Surface. It lists the three
 steps, done ones in mint with what was chosen, and asks what the current one
@@ -104,6 +110,7 @@ message, not a command.
 | `/status` | What Kumi is connected to, the model, how far it has got learning your library, and on an API key the tokens this session used |
 | `/voice` | Talking instead of typing: start or stop, "Send when you stop", the language you speak and the microphone |
 | `/update` | Get the newest Kumi: it asks, closes, updates and opens again with the same conversation |
+| `/changelog` | What's new in Kumi: every note since the version you updated from, or the latest three releases, and where the whole history is |
 | `/help` | The keys and commands, as a note in the conversation |
 | `/quit` | Close Kumi |
 
@@ -163,7 +170,7 @@ instead, which suits screen readers and logs. It has `/help`, `/status`,
 `/undo`, `/stop`, `/refresh`, `/reconnect`, `/new`, `/conversations [n]`,
 `/model [provider/model]`, `/effort [level|default]`, `/fast`, `/logout <provider>`,
 `/memory`, `/forget <id>`, `/note <id> <new words>`, `/pin <id>`, `/unpin <id>`,
-`/recipes`, `/willington`, `/update` and `/quit`, but no `/btw`,
+`/recipes`, `/willington`, `/update`, `/changelog` and `/quit`, but no `/btw`,
 `/goal` or `/copy`. Sign in from a shell with `kumi login`. Ctrl-C stops the
 answer, or quits when idle.
 
