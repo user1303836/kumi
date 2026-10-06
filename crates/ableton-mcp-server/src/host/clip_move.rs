@@ -40,25 +40,53 @@ fn arrangement_span(clip: &Value) -> Option<(f64, f64)> {
     let span = (clip["start"].as_f64()?, helpers::arrangement_clip_end(clip));
     span.1.is_finite().then_some(span)
 }
-/// The refusal for moving an Arrangement clip onto another clip of its track, which isn't done yet: Live
-/// crashes when an Arrangement clip is copied onto a span a clip already holds, and a move is a copy.
-fn arrangement_move_blocker(snapshot: &Value, moving: &Value, track: &Value, position: f64) -> Option<String> {
-    let (start, end) = arrangement_span(moving)?;
+/// The clips a move of an Arrangement clip to `position` replaces, as dropping it there in Live does: each
+/// one's name and span, the part replaced (`from`–`to`; all of it when `whole`), and whether it's audio.
+/// Live crashes when an Arrangement clip is copied onto a span a clip already holds, so these are cleared
+/// before the clip lands.
+fn in_new_place(snapshot: &Value, moving: &Value, track: &Value, position: f64) -> Vec<Value> {
+    let Some((start, end)) = arrangement_span(moving) else { return vec![] };
     let target_end = position + (end - start);
     let clips = snapshot["arrangement"]["clips"].as_array().into_iter().flatten();
-    clips.filter(|clip| clip["trackRef"] == track["ref"] && clip["ref"] != moving["ref"]).find_map(|clip| {
-        let (other_start, other_end) = arrangement_span(clip)?;
-        (other_start < target_end - 1e-6 && other_end > position + 1e-6).then(|| {
-            let name: String = clip["name"].as_str().unwrap_or("").chars().take(60).collect();
-            let beat = kumi_common::js::number::to_string;
-            format!(
-                "Kumi can't move a clip onto another clip yet: \"{name}\" (beats {} to {}) is in the way at beat {}; clear that span first (clear_range) or pick a free spot",
-                beat(other_start),
-                beat(other_end),
-                beat(position)
-            )
+    clips
+        .filter(|clip| clip["trackRef"] == track["ref"] && clip["ref"] != moving["ref"])
+        .filter_map(|clip| {
+            let (other_start, other_end) = arrangement_span(clip)?;
+            (other_start < target_end - 1e-6 && other_end > position + 1e-6).then(|| {
+                json!({
+                    "name": clip["name"].as_str().unwrap_or("").chars().take(60).collect::<String>(),
+                    "start": other_start,
+                    "end": other_end,
+                    "from": other_start.max(position),
+                    "to": other_end.min(target_end),
+                    "whole": other_start >= position - 1e-6 && other_end <= target_end + 1e-6,
+                    // Live's own rows call every Arrangement clip "midi" (its clips all offer note calls); `isAudio`
+                    // is what tells.
+                    "audio": clip["isAudio"] == true || clip["kind"] == "audio",
+                    "looping": clip["looping"] == true
+                })
+            })
         })
-    })
+        .collect()
+}
+/// A clip a move replaces, as its refusal names it: "Vox" (beats 0 to 8).
+fn named(clip: &Value) -> String {
+    let beat = |v: &Value| kumi_common::js::number::to_string(v.as_f64().unwrap_or(f64::NAN));
+    format!("\"{}\" (beats {} to {})", clip["name"].as_str().unwrap_or(""), beat(&clip["start"]), beat(&clip["end"]))
+}
+
+/// A failure after Kumi's Live extension cut into what a move replaces: what was cut, first, and the way back.
+/// The cut stays until undone, so it never reads as nothing changed.
+fn after_cuts(error: LiveError, cut: &[&Value]) -> LiveError {
+    if cut.is_empty() {
+        return error;
+    }
+    let beat = |v: &Value| kumi_common::js::number::to_string(v.as_f64().unwrap_or(f64::NAN));
+    let what =
+        cut.iter().map(|c| format!("{} at beats {} to {}", named(c), beat(&c["from"]), beat(&c["to"]))).collect::<Vec<_>>().join(" and ");
+    let reason = error.message().strip_prefix("request failed: ").unwrap_or(error.message()).replace("; nothing changed", "");
+    let back = if cut.len() == 1 { "Live's own undo puts it back in one step" } else { "Live's own undo puts them back, one step per cut" };
+    LiveError::error(format!("Kumi cut {what} with its Live extension, then couldn't finish the move; {back}. Why: {reason}"))
 }
 
 impl McpHost {
@@ -86,6 +114,7 @@ impl McpHost {
             let reference = params["clipRef"].as_str().unwrap();
             let row = self.clip_row(&snapshot, reference)?;
             let mut payload = json!({});
+            let mut replaces = vec![];
             let fence;
             if row.arrangement {
                 if !status.has_operation("arrangement.clip.move") {
@@ -94,10 +123,27 @@ impl McpHost {
                 if !params["position"].as_f64().is_some_and(|n| n.is_finite() && n >= 0.0) {
                     return Ok(error(id, -32602, "position is required for an Arrangement clip move", None));
                 }
+                let position = params["position"].as_f64().unwrap();
                 if let (Some(track), None) = (&row.track, &row.take_lane) {
-                    let value = serde_json::to_value(&snapshot).unwrap();
-                    if let Some(reason) = arrangement_move_blocker(&value, &row.clip, track, params["position"].as_f64().unwrap()) {
-                        return Err(LiveError::error(reason));
+                    replaces = in_new_place(&serde_json::to_value(&snapshot).unwrap(), &row.clip, track, position);
+                    // The Remote Script cuts MIDI clips itself, looped ones too (Live keeps a loop's phase in its
+                    // start marker); an audio clip crossing the new place is cut by Kumi's Live extension first,
+                    // over the part that's replaced (one crossing both edges is split, keeping both ends).
+                    let cuts: Vec<&Value> = replaces.iter().filter(|r| r["audio"] == true && r["whole"] != true).collect();
+                    let beat = |v: &Value| kumi_common::js::number::to_string(v.as_f64().unwrap_or(f64::NAN));
+                    if let Some(cut) = cuts.first() {
+                        if !status.has_operation("clip.clear-range") {
+                            return Err(LiveError::error(format!(
+                                "{} crosses beats {} to {} of the clip's new place, and Kumi's Live extension cuts audio clips; without it, delete it first (delete_clip) or pick a free spot",
+                                named(cut),
+                                beat(&cut["from"]),
+                                beat(&cut["to"])
+                            )));
+                        }
+                        payload["clearFirst"] = json!(cuts
+                            .iter()
+                            .map(|r| json!({"trackRef":track["ref"],"fromBeat":r["from"],"toBeat":r["to"],"expectedName":track["name"]}))
+                            .collect::<Vec<_>>());
                     }
                 }
 
@@ -181,7 +227,7 @@ impl McpHost {
 
                 fence = target_fence(&authority, &fingerprint, &track, &target, &scene);
             }
-            let t = json!({
+            let mut t = json!({
             "id":tempo::transaction_id("clipmove"),
             "epoch":status.epoch,
             "kind":"move",
@@ -191,20 +237,31 @@ impl McpHost {
             "expiresAt":kumi_common::time::now_ms_f64()+TRANSACTION_TTL_MS,
             "state":"previewed"}
             );
+            if !replaces.is_empty() {
+                // What the preview showed in the new place, which the apply checks again before cutting anything.
+                t["replaces"] = json!(replaces);
+            }
 
             self.retain_bounded_transaction(&self.clip_lifecycle_transactions, t.clone(), "clip move")?;
-            Ok(success_text(
-                id,
-                &json!({
-                "transactionId":t["id"],
-                "epoch":t["epoch"],
-                "clipRef":params["clipRef"],
-                "payload":payload,
-                "impact":"moves-clip",
-                "confirmation":"apply",
-                "expiresAt":t["expiresAt"]}
-                ),
-            ))
+            let mut body = json!({
+            "transactionId":t["id"],
+            "epoch":t["epoch"],
+            "clipRef":params["clipRef"],
+            "payload":payload,
+            "impact":"moves-clip",
+            "confirmation":"apply",
+            "expiresAt":t["expiresAt"]});
+            if !replaces.is_empty() {
+                for r in &mut replaces {
+                    let r = r.as_object_mut().unwrap();
+                    r.remove("audio");
+                    r.remove("looping");
+                }
+                body["impact"] = json!("moves-clip-replacing");
+                body["replaces"] = json!(replaces);
+                body["kept"] = json!("Kumi can't bring back what the move replaces; Live's undo can.");
+            }
+            Ok(success_text(id, &body))
         }
         .await;
         result.unwrap_or_else(|e| adapter_tool_error(id, &e, "Clip-move preview requires fresh authoritative state."))
@@ -255,13 +312,30 @@ impl McpHost {
 
             if payload.get("position").is_some() {
                 let row = if let Some(s) = &snapshot { Some(self.clip_row(s, t["clipRef"].as_str().unwrap())?) } else { None };
-                if let Some(row) = &row {
+                if let (Some(row), Some(snapshot)) = (&row, &snapshot) {
                     if !row.arrangement
                         || arrangement_move_fence(&t["clipRef"], &row.clip, &capture_object_fingerprint(&row.clip)?) != t["fence"]
                     {
                         return Ok(transaction_error(
                             id,
                             "Arrangement clip identity, position, or content changed since preview; preview again",
+                        ));
+                    }
+                    // The move replaces only what the preview showed: a clip dropped or dragged into the new place
+                    // since would be cut or removed unnamed. Checked before anything is cut.
+                    let now = match (&row.track, &row.take_lane) {
+                        (Some(track), None) => in_new_place(
+                            &serde_json::to_value(snapshot).unwrap(),
+                            &row.clip,
+                            track,
+                            payload["position"].as_f64().unwrap_or(f64::NAN),
+                        ),
+                        _ => vec![],
+                    };
+                    if json!(now) != t.get("replaces").cloned().unwrap_or_else(|| json!([])) {
+                        return Ok(transaction_error(
+                            id,
+                            "What's in the clip's new place changed since preview, so Kumi cut and moved nothing; preview again",
                         ));
                     }
                 }
@@ -271,21 +345,61 @@ impl McpHost {
                     t["state"] = json!("applying");
                     t["applyKey"] = params["idempotencyKey"].clone();
                 }
+                let mut args = json!({
+                "ref":t["clipRef"],
+                "position":payload["position"],
+                "expectedObjectIdentity":payload["expectedObjectIdentity"],
+                "expectedAuthorityRevision":payload["expectedAuthorityRevision"],
+                "expectedContentFingerprint":payload["expectedContentFingerprint"]});
+                // The audio clips Kumi's Live extension cuts, in the order it cuts them, as the preview named them.
+                let cutting: Vec<&Value> =
+                    t["replaces"].as_array().into_iter().flatten().filter(|r| r["audio"] == true && r["whole"] != true).collect();
+                let mut cut = 0;
+                if reconciliation && t["moveArgs"].is_object() {
+                    args = t["moveArgs"].clone();
+                    cut = cutting.len();
+                } else if let Some(cuts) = payload["clearFirst"].as_array().filter(|cuts| !cuts.is_empty()) {
+                    // Kumi's Live extension cuts the audio clips crossing the new place's edges, each over the part
+                    // replaced. That can renumber the track's clips, so the clip to move is found again by its
+                    // identity, with fresh authority.
+                    let found = async {
+                        for each in cuts {
+                            adapter.invoke_async(&LiveInvocation::new("clip.clear-range", each.clone()), Some(&context)).await?;
+                            cut += 1;
+                        }
+                        let fresh = self.views.view_for(Some(&context), &[cuts[0]["trackRef"].clone()], None, &[]).await?;
+                        let value = serde_json::to_value(&fresh).unwrap();
+                        let moving = value["arrangement"]["clips"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .find(|c| c["objectIdentity"] == payload["expectedObjectIdentity"]);
+                        let Some((moving, reference)) = moving.and_then(|c| Some((c, c["ref"].as_str()?))) else {
+                            return Err(LiveError::error("the clip wasn't found again"));
+                        };
+                        // A split before the clip renumbers it in Live, and its ref is part of its content's
+                        // fingerprint: nothing else of it may have changed, and the move checks the fresh one.
+                        let unnumbered = |clip: &Value| {
+                            let mut clip = clip.clone();
+                            clip.as_object_mut().map(|c| c.remove("ref"));
+                            capture_object_fingerprint(&clip)
+                        };
+                        if row.as_ref().is_some_and(|row| unnumbered(&row.clip).ok() != unnumbered(moving).ok()) {
+                            return Err(LiveError::error("the clip changed while Kumi cut its new place"));
+                        }
+                        Ok((reference.to_owned(), self.arrangement_clip_authority(&fresh, reference)?, capture_object_fingerprint(moving)?))
+                    }
+                    .await;
+                    let (reference, authority, fingerprint) = found.map_err(|e| after_cuts(e, &cutting[..cut.min(cutting.len())]))?;
+                    args["ref"] = json!(reference);
+                    args["expectedContentFingerprint"] = json!(fingerprint);
+                    merge(&mut args, &authority);
+                    record.borrow_mut()["moveArgs"] = args.clone();
+                }
                 let result = adapter
-                    .invoke_async(
-                        &LiveInvocation::new(
-                            "arrangement.clip.move",
-                            json!({
-                            "ref":t["clipRef"],
-                            "position":payload["position"],
-                            "expectedObjectIdentity":payload["expectedObjectIdentity"],
-                            "expectedAuthorityRevision":payload["expectedAuthorityRevision"],
-                            "expectedContentFingerprint":payload["expectedContentFingerprint"]}
-                            ),
-                        ),
-                        Some(&context),
-                    )
-                    .await?;
+                    .invoke_async(&LiveInvocation::new("arrangement.clip.move", args), Some(&context))
+                    .await
+                    .map_err(|e| after_cuts(e, &cutting[..cut.min(cutting.len())]))?;
 
                 if result.is_null() {
                     return Err(LiveError::type_error("Cannot read properties of null (reading 'ref')"));
@@ -456,6 +570,16 @@ impl McpHost {
                         || capture_object_fingerprint(&current.clip)? != t["created"]["fingerprint"]
                     {
                         return Err(LiveError::error("Arrangement clip identity, position, or content changed after apply; undo refused"));
+                    }
+                    // Moving back would replace what's in the clip's old place now; an undo never does.
+                    let prior = payload["priorPosition"].as_f64().unwrap_or(f64::NAN);
+                    if let Some(there) = current.track.as_ref().and_then(|track| {
+                        in_new_place(&serde_json::to_value(&snapshot).unwrap(), &current.clip, track, prior).into_iter().next()
+                    }) {
+                        return Err(LiveError::error(format!(
+                            "{} is in the clip's old place now, so Kumi left the clip where it is; undo refused",
+                            named(&there)
+                        )));
                     }
 
                     let mut args = json!({

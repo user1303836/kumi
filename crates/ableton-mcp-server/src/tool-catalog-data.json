@@ -5479,7 +5479,7 @@
     },
     {
       "name": "live_data_preview",
-      "description": "Preview saving text inside the Set (it's saved with the Set), or with one track (trackRef), under one of Kumi's own keys (they start with kumi.); null clears it. Shows what's there now; undo puts it back. With entries, more tracks' text under the same key in one apply: every place, this trackRef's included, names what was read there (expectedValue, expectedIdentity); the tracks are checked to be the ones read before any is written, and each write leaves a track whose text changed since.",
+      "description": "Preview saving text inside the Set (it's saved with the Set), or with one track (trackRef), under one of Kumi's own keys (they start with kumi.); null clears it. Shows what's there now; undo puts it back. With entries, more tracks' text under the same key in one apply: every place, this trackRef's included, names what was read there (expectedValue, expectedIdentity), as text of at most 256 characters; the tracks are checked to be the ones read before any is written, and each write leaves a track whose text changed since.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -5506,7 +5506,7 @@
               "string",
               "null"
             ],
-            "maxLength": 1048576
+            "maxLength": 256
           },
           "expectedIdentity": {
             "type": "string",
@@ -5530,14 +5530,14 @@
                     "string",
                     "null"
                   ],
-                  "maxLength": 1048576
+                  "maxLength": 256
                 },
                 "expectedValue": {
                   "type": [
                     "string",
                     "null"
                   ],
-                  "maxLength": 1048576
+                  "maxLength": 256
                 },
                 "expectedIdentity": {
                   "type": "string",
@@ -10111,47 +10111,56 @@
           "oscillator1WavetableCategory": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 100000
+            "maximum": 100000,
+            "description": "Wavetable oscillator 1: a place in the device row's wavetable.categories, 0 first."
           },
           "oscillator1WavetableIndex": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 100000
+            "maximum": 100000,
+            "description": "Wavetable oscillator 1: a place in the device row's wavetable.oscillator1Wavetables (its category's wavetables), 0 first."
           },
           "oscillator2WavetableCategory": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 100000
+            "maximum": 100000,
+            "description": "Wavetable oscillator 2: a place in the device row's wavetable.categories, 0 first."
           },
           "oscillator2WavetableIndex": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 100000
+            "maximum": 100000,
+            "description": "Wavetable oscillator 2: a place in the device row's wavetable.oscillator2Wavetables (its category's wavetables), 0 first."
           },
           "oscillator1EffectMode": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 100000
+            "maximum": 3,
+            "description": "Wavetable oscillator 1's effect: 0 None, 1 FM, 2 Classic, 3 Modern."
           },
           "oscillator2EffectMode": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 100000
+            "maximum": 3,
+            "description": "Wavetable oscillator 2's effect: 0 None, 1 FM, 2 Classic, 3 Modern."
           },
           "filterRouting": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 100000
+            "maximum": 2,
+            "description": "Wavetable's filter routing: 0 Serial, 1 Parallel, 2 Split."
           },
           "unisonMode": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 100000
+            "maximum": 6,
+            "description": "Wavetable's unison mode: 0 None, 1 Classic, 2 Shimmer, 3 Noise, 4 Phase Sync, 5 Position Spread, 6 Random Note."
           },
           "unisonVoiceCount": {
             "type": "integer",
-            "minimum": 0,
-            "maximum": 100000
+            "minimum": 2,
+            "maximum": 8,
+            "description": "Wavetable's unison voices, 2 to 8."
           },
           "deviceRef": {
             "type": "string",
@@ -10166,72 +10175,86 @@
           "voiceCount": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 64
+            "maximum": 64,
+            "description": "Drift: how many voices, one of the counts the device row's drift.voiceCountList names (the row's voiceCount is that count's place in the list); its first count only through run_python for now."
           },
           "voiceMode": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 8
+            "maximum": 8,
+            "description": "Drift: a place in the device row's drift.voiceModeList, 0 first."
           },
           "modFilterSource1": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 1000
+            "maximum": 1000,
+            "description": "Drift: a place in the device row's drift.modFilterSourceList, 0 first."
           },
           "modFilterSource2": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 1000
+            "maximum": 1000,
+            "description": "Drift: a place in the device row's drift.modFilterSourceList, 0 first."
           },
           "modLfoSource": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 1000
+            "maximum": 1000,
+            "description": "Drift: a place in the device row's drift.modLfoSourceList, 0 first."
           },
           "modPitchSource1": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 1000
+            "maximum": 1000,
+            "description": "Drift: a place in the device row's drift.modPitchSourceList, 0 first."
           },
           "modPitchSource2": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 1000
+            "maximum": 1000,
+            "description": "Drift: a place in the device row's drift.modPitchSourceList, 0 first."
           },
           "modShapeSource": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 1000
+            "maximum": 1000,
+            "description": "Drift: a place in the device row's drift.modShapeSourceList, 0 first."
           },
           "modSource1": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 1000
+            "maximum": 1000,
+            "description": "Drift: a place in the device row's drift.modSources, 0 first."
           },
           "modSource2": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 1000
+            "maximum": 1000,
+            "description": "Drift: a place in the device row's drift.modSources, 0 first."
           },
           "modSource3": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 1000
+            "maximum": 1000,
+            "description": "Drift: a place in the device row's drift.modSources, 0 first."
           },
           "modTarget1": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 1000
+            "maximum": 1000,
+            "description": "Drift: a place in the device row's drift.modTargets, 0 first."
           },
           "modTarget2": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 1000
+            "maximum": 1000,
+            "description": "Drift: a place in the device row's drift.modTargets, 0 first."
           },
           "modTarget3": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 1000
+            "maximum": 1000,
+            "description": "Drift: a place in the device row's drift.modTargets, 0 first."
           },
           "gain": {
             "type": "number",
@@ -10290,7 +10313,8 @@
           "unison": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 16
+            "maximum": 3,
+            "description": "Meld's unison voices: 1 two, 2 three, 3 four; 0 off only through run_python for now."
           },
           "monoPoly": {
             "type": "boolean"
@@ -10298,7 +10322,8 @@
           "polyphony": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 64
+            "maximum": 6,
+            "description": "Meld's voices: 1 three, 2 four, 3 five, 4 six, 5 eight, 6 twelve; 0 two only through run_python for now."
           },
           "presetIndex": {
             "type": "integer",

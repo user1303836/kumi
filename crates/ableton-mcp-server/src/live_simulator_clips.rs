@@ -15,6 +15,42 @@ fn push_arrangement(state: &mut Value, clip: &Value, track: &str) {
     }
     state["arrangementClips"].as_array_mut().unwrap().push(json!({"clip":clip,"trackRef":track}));
 }
+/// The first of `names` no Arrangement clip has as its `field` (its ref or identity): Live never holds two
+/// clips with the same one.
+pub(super) fn untaken(rows: &[&Value], field: &str, names: impl IntoIterator<Item = String>) -> String {
+    names.into_iter().find(|name| !rows.iter().any(|row| row["clip"][field] == name.as_str())).unwrap()
+}
+/// A ref and identity for the clip Live makes when it cuts one in two, starting at `start`: a ref by its
+/// position, as a new clip's, and an identity numbered past every Arrangement clip's, so no clip has either
+/// (and no event sequence is taken for them).
+pub(super) fn split_names<'a>(rows: impl Iterator<Item = &'a Value>, track: &str, start: f64) -> (String, String) {
+    let rows: Vec<&Value> = rows.collect();
+    let position = kumi_common::js::number::to_string(start);
+    let reference = untaken(
+        &rows,
+        "ref",
+        std::iter::once(format!("arrangement-clip:{track}:{position}"))
+            .chain((2..).map(|n| format!("arrangement-clip:{track}:{position}-{n}"))),
+    );
+    let past = rows.iter().filter_map(|row| row["clip"]["objectIdentity"].as_str()?.rsplit(':').next()?.parse::<u64>().ok()).max();
+    (reference, format!("simulator:arrangement-clip:{}", past.unwrap_or(0) + 1))
+}
+/// Cuts a clip's start to `to` as Live does: the same notes, its start marker moved on by the cut (round its
+/// loop when it loops), so what's left plays as it did there.
+pub(super) fn cut_start(clip: &mut Value, to: f64) {
+    let start = clip["start"].as_f64().unwrap_or(0.);
+    let end = clip["endTime"].as_f64().unwrap_or(start + clip["length"].as_f64().unwrap_or(0.));
+    let mut marker = clip["startMarker"].as_f64().unwrap_or(0.) + (to - start);
+    if let (Some(true), Some(from), Some(until)) = (clip["looping"].as_bool(), clip["loopStart"].as_f64(), clip["loopEnd"].as_f64()) {
+        if until > from && marker >= until {
+            marker = from + (marker - from).rem_euclid(until - from);
+        }
+    }
+    clip["startMarker"] = marker.into();
+    clip["start"] = to.into();
+    clip["length"] = (end - to).into();
+    clip["endTime"] = end.into();
+}
 impl DeterministicLiveSimulator {
     fn arrangement_clip_fingerprint(&self, reference: &str) -> String {
         let snapshot = self.snapshot_value();
@@ -101,6 +137,45 @@ impl DeterministicLiveSimulator {
                 } else {
                     let position =
                         ranged_number(args.get("position").unwrap_or(&Value::Null), 0., f64::INFINITY, false, "position is invalid")?;
+                    // Like dropping a clip in Live, and as the Remote Script does: a clip in the new place goes,
+                    // one crossing its edges is cut there, and one it lands in the middle of keeps both ends.
+                    let moving = state["arrangementClips"][index.unwrap()].clone();
+                    let (from, to) = (position, position + moving["clip"]["length"].as_f64().unwrap_or(0.));
+                    let mut rows = Vec::new();
+                    for row in array(&state["arrangementClips"]).to_vec() {
+                        let start = row["clip"]["start"].as_f64().unwrap_or(0.);
+                        let end = row["clip"]["endTime"].as_f64().unwrap_or(start + row["clip"]["length"].as_f64().unwrap_or(0.));
+                        if row["trackRef"] != moving["trackRef"]
+                            || row["clip"]["ref"] == reference
+                            || start >= to - 1e-6
+                            || end <= from + 1e-6
+                        {
+                            rows.push(row);
+                            continue;
+                        }
+                        if start < from - 1e-6 {
+                            let mut head = row.clone();
+                            head["clip"]["length"] = (from - start).into();
+                            head["clip"]["endTime"] = from.into();
+                            rows.push(head);
+                        }
+                        if end > to + 1e-6 {
+                            let mut tail = row.clone();
+                            if start < from - 1e-6 {
+                                let (name, identity) = split_names(
+                                    array(&state["arrangementClips"]).iter().chain(&rows),
+                                    row["trackRef"].as_str().unwrap_or(""),
+                                    to,
+                                );
+                                tail["clip"]["ref"] = name.into();
+                                tail["clip"]["objectIdentity"] = identity.into();
+                            }
+                            cut_start(&mut tail["clip"], to);
+                            rows.push(tail);
+                        }
+                    }
+                    let index = rows.iter().position(|r| r["clip"]["ref"] == reference);
+                    state["arrangementClips"] = Value::Array(rows);
                     state["arrangementClips"][index.unwrap()]["clip"]["start"] = position.into();
                     let identity = state["arrangementClips"][index.unwrap()]["clip"]["objectIdentity"].clone();
                     drop(state);

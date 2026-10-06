@@ -51,10 +51,12 @@ impl McpHost {
     /// Text under one key on several tracks at once (Kumi's own ids for them). Each place names what was read
     /// there (its text and the track's identity); the apply checks them, so the preview reads nothing itself.
     async fn live_data_batch_preview_async(&self, id: &Value, p: &Value) -> Value {
+        // Short text in a batch: it's for ids, and a thousand places of 1 MiB each would be too much.
+        let short = |value: &Value| value.is_null() || value.as_str().is_some_and(|s| utf16_len(s) <= 256);
         let place = |entry: &Value| {
             is_non_empty_string(&entry["trackRef"], 256)
-                && entry.get("value").is_some_and(text_or_null)
-                && entry.get("expectedValue").is_some_and(text_or_null)
+                && entry.get("value").is_some_and(short)
+                && entry.get("expectedValue").is_some_and(short)
                 && is_non_empty_string(&entry["expectedIdentity"], 256)
         };
         let entries = p.get("entries").map(|v| v.as_array().filter(|a| (1..=1023).contains(&a.len())));
@@ -63,7 +65,7 @@ impl McpHost {
                 e.is_none_or(|e| !e.iter().all(|e| has_only(e, &["trackRef", "value", "expectedValue", "expectedIdentity"]) && place(e)))
             })
         {
-            return error(id, -32602, "each place needs trackRef, value, expectedValue (what was read there, or null) and expectedIdentity, and entries 1 to 1023 of them", None);
+            return error(id, -32602, "each place needs trackRef, value and expectedValue (what was read there, or null; text of at most 256 characters in a batch) and expectedIdentity, and entries 1 to 1023 of them", None);
         }
         let more: Vec<&Value> = entries.flatten().into_iter().flatten().collect();
         let mut places: Vec<&Value> = std::iter::once(&p["trackRef"]).chain(more.iter().map(|e| &e["trackRef"])).collect();

@@ -5,6 +5,15 @@ use ableton_mcp_server::{
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
+/// Live never holds two Arrangement clips with one ref or identity, so the simulator mustn't either.
+fn clips_are_unique(state: &Value, label: &str) {
+    for field in ["ref", "objectIdentity"] {
+        let mut seen = std::collections::HashSet::new();
+        for row in state["arrangementClips"].as_array().into_iter().flatten() {
+            assert!(seen.insert(row["clip"][field].to_string()), "{label}: two Arrangement clips with {field} {}", row["clip"][field]);
+        }
+    }
+}
 fn canonical(value: Value) -> String {
     canonical_json(&value, &UNBOUNDED_CANONICAL_LIMITS).unwrap()
 }
@@ -116,6 +125,7 @@ fn native_simulator_matches_typescript_state_results_events_and_authority_errors
             "{} state",
             scenario["name"]
         );
+        clips_are_unique(&serde_json::to_value(live.snapshot().unwrap()).unwrap(), scenario["name"].as_str().unwrap());
         assert_eq!(
             canonical(serde_json::to_value(events.borrow().clone()).unwrap()),
             canonical(scenario["events"].clone()),

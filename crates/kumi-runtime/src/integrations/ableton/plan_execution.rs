@@ -351,7 +351,10 @@ impl Plan {
                     on_start();
                 }
             }
-            if !state.copy_checked && (index >= 2 || js_string(item.get("tool")).starts_with("delete_")) {
+            let tool = js_string(item.get("tool"));
+            // Before a step that can lose the producer's material: a delete, a cleared range, or a move,
+            // which replaces what's in its new place.
+            if !state.copy_checked && (index >= 2 || tool.starts_with("delete_") || ["clear_range", "move_clip"].contains(&tool.as_str())) {
                 state.copy_checked = true;
                 state.copy = self.mutations.keep_copy(self.signal.clone()).await?;
             }

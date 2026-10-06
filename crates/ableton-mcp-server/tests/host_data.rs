@@ -384,4 +384,8 @@ async fn several_tracks_take_text_in_one_apply_each_track_checked_first() {
     let mut unread = batch(Value::Null, "simulator:track:track-2");
     unread["entries"][0].as_object_mut().unwrap().remove("expectedIdentity");
     assert!(host.live_data_preview_async(&json!(1), &unread).await.to_string().contains("-32602"));
+    // A batch is for ids: its text is short.
+    let mut long = batch(Value::Null, "simulator:track:track-2");
+    long["entries"][0]["value"] = json!("x".repeat(257));
+    assert!(host.live_data_preview_async(&json!(1), &long).await.to_string().contains("at most 256 characters in a batch"));
 }
