@@ -384,11 +384,31 @@ impl ChangeKind {
                 out
             }
             "add_arrangement_clip" => {
-                let mut out = json!({"action":"create","kind":"midi","trackRef":fallback(input.get("trackRef")),"position":fallback(input.get("position")),"length":fallback(input.get("length"))});
+                // An audio file as a clip when a sample is given; an empty MIDI clip otherwise.
+                let mut out = if input.contains_key("sample") {
+                    let found = match sample_for(input.get("sample"), context).await? {
+                        Ok(found) => found,
+                        Err(why) => return Ok(Err(why)),
+                    };
+                    json!({"action":"create","kind":"audio","trackRef":fallback(input.get("trackRef")),"position":fallback(input.get("position")),"filePath":found.path})
+                } else if finite(input.get("length")).is_some() {
+                    json!({"action":"create","kind":"midi","trackRef":fallback(input.get("trackRef")),"position":fallback(input.get("position")),"length":fallback(input.get("length"))})
+                } else {
+                    return Ok(Err("Say how long the MIDI clip is (length, in beats), or give a sample for an audio clip.".into()));
+                };
                 if let Some(name) = input.get("name").filter(|v| v.is_string()) {
                     out["name"] = name.clone();
                 }
                 out
+            }
+            "set_audio_clip" => {
+                // Live's API has no clip fades (12.4.15b5): the bridge would take them and change nothing.
+                if input.contains_key("fadeInLength") || input.contains_key("fadeOutLength") {
+                    return Ok(Err(
+                        "Live's API has no clip fades, so Kumi can't set them: leave fadeInLength and fadeOutLength out.".into()
+                    ));
+                }
+                Value::Object(input.clone())
             }
             "switch_device" => {
                 json!({"action":"enable","deviceRef":fallback(input.get("deviceRef")),"enabled":input.get("enabled")==Some(&Value::Bool(true))})
@@ -512,6 +532,12 @@ impl ChangeKind {
                 }
             }
             schema["properties"] = Value::Object(properties);
+        } else if self.tool == "set_audio_clip" {
+            // Live's API has no clip fades (12.4.15b5): the bridge's fields for them change nothing.
+            if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+                properties.shift_remove("fadeInLength");
+                properties.shift_remove("fadeOutLength");
+            }
         }
         schema.as_object().unwrap().clone()
     }

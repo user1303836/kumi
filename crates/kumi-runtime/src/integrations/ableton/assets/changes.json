@@ -471,8 +471,9 @@
       "preview": "live_audio_clip_preview",
       "apply": "live_audio_clip_apply",
       "family": "clip",
-      "description": "Change an audio clip: gain (Live's clip gain control, 0–1; discover the clip first and move from its current value), pitchCoarse (semitones, ±48) and pitchFine (cents, ±50), loopStart and loopEnd, warping on or off and warpMode (0 Beats, 1 Tones, 2 Texture, 3 Re-Pitch, 4 Complex, 6 Complex Pro), fadeInLength and fadeOutLength. clipRef comes from discovery.",
+      "description": "Change an audio clip: gain (Live's clip gain control, 0–1; discover the clip first and move from its current value), pitchCoarse (semitones, ±48) and pitchFine (cents, ±50), loopStart and loopEnd, warping on or off and warpMode (0 Beats, 1 Tones, 2 Texture, 3 Re-Pitch, 4 Complex, 6 Complex Pro). Live's API has no clip fades. clipRef comes from discovery.",
       "methods": [
+        "prepare",
         "summarize"
       ]
     },
@@ -514,14 +515,13 @@
       "preview": "live_arrangement_clip_preview",
       "apply": "live_arrangement_clip_apply",
       "family": "clip",
-      "description": "Put an empty MIDI clip in the Arrangement: trackRef (a MIDI track), position and length in beats, and a name. Live can't write notes into it afterwards; for a clip with notes, write it in Session view and duplicate_clip it to the Arrangement.",
+      "description": "Put a clip in the Arrangement at position (beats from the Set's start): an empty MIDI clip (trackRef, a MIDI track; length in beats; a name), or an audio file as a clip (sample, its path, as find_sounds gives it; trackRef, an audio track). For a MIDI clip with notes, write_arrangement_clip writes them in one go.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "trackRef",
-          "position",
-          "length"
+          "position"
         ],
         "properties": {
           "trackRef": {
@@ -537,6 +537,12 @@
             "type": "number",
             "exclusiveMinimum": 0,
             "maximum": 4096
+          },
+          "sample": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "An audio file's path, for an audio clip"
           },
           "name": {
             "type": "string",

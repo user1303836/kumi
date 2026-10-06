@@ -680,6 +680,9 @@ impl Observer {
             set.insert("name".into(), json!(name));
             set.insert("tempo".into(), row.get("tempo").cloned().unwrap_or(Value::Null));
             set.insert("timeSignature".into(), json!(format!("{}/{}", to_string(numerator), to_string(denominator))));
+            if let Some(scale) = scale(row) {
+                set.insert("scale".into(), json!(scale));
+            }
 
             for key in ["playing", "position", "loop"] {
                 set.insert(key.into(), row.get(key).cloned().unwrap_or(Value::Null));
@@ -933,6 +936,19 @@ fn text(value: Option<&Value>) -> String {
 fn objects(page: &JsonObject) -> Result<Vec<JsonObject>, ObservationError> {
     page.get("items").and_then(Value::as_array).into_iter().flatten().map(context::object).collect()
 }
+/// The Set's scale as the model reads it ("D Dorian"), when it says something: with Scale Mode on, or a scale other than
+/// Live's default (C Major) with it off.
+fn scale(row: &JsonObject) -> Option<String> {
+    const ROOTS: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    let scale = row.get("scale")?.as_object()?;
+    let root = ROOTS.get(usize::try_from(scale.get("rootNote")?.as_u64()?).ok()?)?;
+    let name = scale.get("scaleName")?.as_str().filter(|name| !name.is_empty())?;
+    match scale.get("scaleMode").and_then(Value::as_bool) {
+        Some(true) => Some(format!("{root} {name}")),
+        _ if (*root, name) != ("C", "Major") => Some(format!("{root} {name} (Scale Mode off)")),
+        _ => None,
+    }
+}
 fn cursor(page: &JsonObject) -> Option<&str> {
     page.get("nextCursor").and_then(Value::as_str).filter(|s| !s.is_empty())
 }
@@ -1056,4 +1072,22 @@ fn add_devices(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_sets_scale_is_named_when_it_says_something() {
+        let row = |root: u64, name: &str, mode: Value| object(json!({"scale":{"rootNote":root,"scaleName":name,"scaleMode":mode}}));
+        assert_eq!(scale(&row(2, "Dorian", json!(true))).as_deref(), Some("D Dorian"));
+        assert_eq!(scale(&row(9, "Minor", json!(false))).as_deref(), Some("A Minor (Scale Mode off)"));
+        assert_eq!(scale(&row(0, "Major", json!(true))).as_deref(), Some("C Major"));
+        // Live's default, with Scale Mode off, says nothing; nor does a row without a scale.
+        assert_eq!(scale(&row(0, "Major", json!(false))), None);
+        assert_eq!(scale(&row(0, "Major", Value::Null)), None);
+        assert_eq!(scale(&JsonObject::new()), None);
+        assert_eq!(scale(&row(12, "Major", json!(true))), None);
+    }
 }

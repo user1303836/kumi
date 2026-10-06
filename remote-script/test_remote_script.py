@@ -4248,6 +4248,33 @@ class SongTransportLinkTests(unittest.TestCase):
         self.assertEqual(result["clipTriggerQuantization"], {"name": "grid_sixteenth", "value": 5})
         validate_operation_payload("song.read", "result", result)
 
+    def test_the_set_row_names_the_sets_scale(self):
+        song, mapper = self._mapper_with_song_state()
+        self.assertNotIn("scale", mapper.snapshot()["set"])
+        song.root_note, song.scale_name, song.scale_mode = 2, "Dorian", True
+        snapshot = mapper.snapshot()
+        self.assertEqual(snapshot["set"]["scale"], {"rootNote": 2, "scaleName": "Dorian", "scaleMode": True})
+        validate_operation_payload("snapshot", "result", snapshot)
+        self.assertEqual(mapper.discover("set", 1, None, None)["items"][0]["scale"]["rootNote"], 2)
+        song.scale_mode = "on"; self.assertIsNone(mapper.snapshot()["set"]["scale"]["scaleMode"])
+
+    def test_an_arrangement_clips_envelopes_read_as_unavailable(self):
+        """Live gives no envelope for an Arrangement clip, even one that has some (12.4.15b5): the read says it isn't
+        available, and whether the clip has envelopes at all."""
+        class RideClip(FakeClip):
+            def __init__(self):
+                super().__init__(4.0); self.start_time = 0.0; self.has_envelopes = True
+            def automation_envelope(self, _parameter): return None
+        song = FakeSong(); song.tracks[0].arrangement_clips = [RideClip()]
+        mapper = LiveObjectMapper(song); snapshot = mapper.snapshot()
+        track_ref = snapshot["tracks"][0]["ref"]; parameter_ref = snapshot["tracks"][0]["devices"][0]["parameters"][0]["ref"]
+        clip_ref = mapper.discover("arrangement_clip", 10, None, track_ref)["items"][0]["ref"]
+        read = mapper.invoke("arrangement.automation.read", {"clipRef": clip_ref, "parameterRef": parameter_ref})
+        self.assertEqual(read, {"available": False, "exists": True, "points": []})
+        validate_operation_payload("arrangement.automation.read", "result", read)
+        song.tracks[0].arrangement_clips[0].has_envelopes = False
+        self.assertEqual(mapper.invoke("arrangement.automation.read", {"clipRef": clip_ref, "parameterRef": parameter_ref})["exists"], False)
+
     def test_song_set_writes_playback_settings_with_exact_rollback(self):
         song, mapper = self._mapper_with_song_state()
         song.midi_recording_quantization = 0

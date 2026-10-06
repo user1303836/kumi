@@ -2277,6 +2277,10 @@ class LiveObjectMapper:
             loop_row["length"] = float(loop_length)
         if loop_row:
             set_row["loop"] = loop_row
+        # The Set's scale (Live 12): its root (0 is C), its name, and whether Scale Mode is on.
+        root, scale_name, scale_mode = (self._read_attr(self.song, name) for name in ("root_note", "scale_name", "scale_mode"))
+        if isinstance(root, int) and not isinstance(root, bool) and 0 <= root <= 11 and isinstance(scale_name, str) and scale_name:
+            set_row["scale"] = {"rootNote": int(root), "scaleName": scale_name[:64], "scaleMode": scale_mode if isinstance(scale_mode, bool) else None}
         view = getattr(self.song, "view", None)
         if view is not None and (hasattr(view, "mod_mapping_device") or hasattr(view, "mod_mapping_parameter")):
             set_row.update(self._mod_mapping_refs(view))
@@ -6475,8 +6479,11 @@ class LiveObjectMapper:
             raise ValueError("Arrangement automation envelopes are unavailable on this Live shape")
         parameter = self._resolve_parameter(parameter_ref)
         envelope = reader(parameter)
-        points = self._envelope_points(envelope) if envelope is not None else []
-        return {"available": True, "exists": envelope is not None, "points": points}
+        if envelope is None:
+            # Live gives no envelope for an Arrangement clip, even one that has them (12.4: has_envelopes is true and
+            # automation_envelope still None), nor the track's lanes: not available, and whether the clip has any.
+            return {"available": False, "exists": self._read_attr(clip, "has_envelopes") is True, "points": []}
+        return {"available": True, "exists": True, "points": self._envelope_points(envelope)}
 
     def _take_lane_read(self, args: dict[str, Any]) -> dict[str, Any]:
         track_ref = args.get("trackRef")

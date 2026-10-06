@@ -216,9 +216,6 @@ pub(super) fn more(
                     index_name(n, &["Beats", "Tones", "Texture", "Re-Pitch", "Complex", "REX", "Complex Pro"]).unwrap_or("warp")
                 ));
             }
-            if finite(field("fadeInLength")).is_some() || finite(field("fadeOutLength")).is_some() {
-                parts.push("fades".into());
-            }
             if finite(field("loopStart")).is_some() || finite(field("loopEnd")).is_some() {
                 parts.push("loop".into());
             }
@@ -284,10 +281,15 @@ pub(super) fn more(
             let known = known(track, coalesce(payload.get("trackRef"), input.get("trackRef")));
             let at = finite(coalesce(payload.get("position"), input.get("position")));
             let length = finite(coalesce(payload.get("length"), input.get("length")));
+            // An audio clip goes by its file's name until it's given one.
+            let file = coalesce(payload.get("filePath"), input.get("sample"))
+                .and_then(Value::as_str)
+                .and_then(|path| std::path::Path::new(path).file_stem()?.to_str().map(|stem| json!(stem)));
             with_track(
                 format!(
-                    "New Arrangement clip {}{}{}{}",
-                    quoted(coalesce(payload.get("name"), input.get("name")), ""),
+                    "New Arrangement {}clip {}{}{}{}",
+                    if file.is_some() { "audio " } else { "" },
+                    quoted(coalesce(payload.get("name"), input.get("name")).or(file.as_ref()), ""),
                     on(&known),
                     at.map(|n| format!(" at {}", bars(n))).unwrap_or_default(),
                     length.map(|n| format!(" ({})", span(n))).unwrap_or_default()

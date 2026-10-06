@@ -148,3 +148,13 @@ fn a_move_that_replaced_clips_says_what_and_kumi_keeps_it() {
         json!([{"trackRef":"1:track:0","fromBeat":12,"toBeat":14},{"trackRef":"1:track:0","fromBeat":16,"toBeat":17}]);
     assert!(kind.replaced(cut_first.as_object().unwrap()).unwrap().ends_with("in 3 steps (the move, then each cut)."));
 }
+
+#[test]
+fn set_audio_clip_offers_no_fades_live_cant_set() {
+    // Live's API has no clip fades: the model isn't offered the bridge's fields for them, and they're refused if given.
+    let kind = CHANGES.iter().find(|kind| kind.tool == "set_audio_clip").unwrap();
+    let host = json!({"type":"object","properties":{"clipRef":{"type":"string"},"gain":{"type":"number"},"fadeInLength":{"type":"number"},"fadeOutLength":{"type":"number"}}});
+    let schema = kind.schema(host.as_object().unwrap());
+    assert_eq!(schema["properties"].as_object().unwrap().keys().collect::<Vec<_>>(), ["clipRef", "gain"]);
+    assert!(kind.has("prepare") && !kind.description.contains("fadeInLength"));
+}
