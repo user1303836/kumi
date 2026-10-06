@@ -424,3 +424,42 @@ async fn an_arrangement_clips_notes_are_edited_fenced_by_its_track() {
     assert_eq!(refused["result"]["isError"], true, "{refused}");
     assert_eq!(pitch(), json!(48));
 }
+#[tokio::test]
+async fn a_split_arrangement_clips_notes_are_edited_up_to_its_own_end() {
+    // The right half of an 8-beat clip split at beat 4: start marker 4, end marker 8, so Live's length is 4, but its
+    // notes are in its own time, at 4 to 8.
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    {
+        let mut s = sim.state.borrow_mut();
+        let mut clip = s["tracks"][0]["clips"][0].clone();
+        clip["ref"] = json!("arrangement-clip:track-1:4");
+        clip["objectIdentity"] = json!("simulator:arrangement-clip:0");
+        clip["name"] = json!("Verse B");
+        clip["start"] = json!(20);
+        clip["length"] = json!(4);
+        clip["looping"] = json!(false);
+        clip["startMarker"] = json!(4);
+        clip["endMarker"] = json!(8);
+        clip["notes"][0]["start"] = json!(5);
+        s["arrangementClips"].as_array_mut().unwrap().push(json!({"trackRef":"track:track-1","clip":clip}));
+    }
+    let host = McpHost::new(sim.clone(), McpHostOptions::default()).unwrap();
+    let preview = |patch: Value| {
+        let host = &host;
+        async move { host.live_note_edit_preview_async(&json!(1), &json!({"clipRef":"arrangement-clip:track-1:4","notes":[patch]}), "update").await }
+    };
+    // A velocity-only patch, and a move to the clip's own end, both preview.
+    for patch in [json!({"id":1,"velocity":90}), json!({"id":1,"start":7.75})] {
+        let reply = preview(patch).await;
+        assert!(reply["result"]["content"][0]["text"].as_str().is_some_and(|t| t.contains("transactionId")), "{reply}");
+    }
+    // Past it: refused, naming the clip's span.
+    let reply = preview(json!({"id":1,"start":7.9})).await;
+    assert_eq!(reply["error"]["message"], json!("note patch runs past the clip: \"Verse B\" holds notes from beat 0 to 8 in its own time"), "{reply}");
+    // An audio clip takes no notes, and the refusal says so.
+    sim.state.borrow_mut()["arrangementClips"][0]["clip"]["kind"] = json!("audio");
+    let reply = preview(json!({"id":1,"velocity":90})).await;
+    let text = reply["result"]["content"][0]["text"].as_str().unwrap_or_default();
+    assert!(text.contains(r#"\"Verse B\" is an audio clip; notes are only in MIDI clips"#), "{reply}");
+}
+

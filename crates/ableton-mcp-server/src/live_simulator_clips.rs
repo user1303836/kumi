@@ -156,6 +156,8 @@ impl DeterministicLiveSimulator {
                     let elsewhere = keep || target != moving["trackRef"];
                     let (from, to) = (position, position + moving["clip"]["length"].as_f64().unwrap_or(0.));
                     let mut rows = Vec::new();
+                    // What was in the new place before anything was cut, as the Remote Script says it.
+                    let mut cleared = Vec::new();
                     for row in array(&state["arrangementClips"]).to_vec() {
                         let start = row["clip"]["start"].as_f64().unwrap_or(0.);
                         let end = row["clip"]["endTime"].as_f64().unwrap_or(start + row["clip"]["length"].as_f64().unwrap_or(0.));
@@ -167,6 +169,8 @@ impl DeterministicLiveSimulator {
                             rows.push(row);
                             continue;
                         }
+                        let name: String = row["clip"]["name"].as_str().unwrap_or("").chars().take(60).collect();
+                        cleared.push(json!({"name":name,"start":start,"end":end}));
                         if start < from - 1e-6 {
                             let mut head = row.clone();
                             head["clip"]["length"] = (from - start).into();
@@ -212,7 +216,7 @@ impl DeterministicLiveSimulator {
                         drop(state);
                         self.emit(LiveEventType::Object, Some(name.as_str().into()), json!({"operation":operation}));
                         return Ok(
-                            json!({"ref":name,"objectIdentity":identity,"start":position,"createdFingerprint":self.arrangement_clip_fingerprint(&name)}),
+                            json!({"ref":name,"objectIdentity":identity,"start":position,"createdFingerprint":self.arrangement_clip_fingerprint(&name),"cleared":cleared}),
                         );
                     }
                     let index = rows.iter().position(|r| r["clip"]["ref"] == reference);
@@ -222,7 +226,7 @@ impl DeterministicLiveSimulator {
                     drop(state);
                     self.emit(LiveEventType::Object, Some(reference.into()), json!({"operation":operation}));
                     Ok(
-                        json!({"ref":reference,"objectIdentity":identity,"start":position,"createdFingerprint":self.arrangement_clip_fingerprint(reference)}),
+                        json!({"ref":reference,"objectIdentity":identity,"start":position,"createdFingerprint":self.arrangement_clip_fingerprint(reference),"cleared":cleared}),
                     )
                 }
             }

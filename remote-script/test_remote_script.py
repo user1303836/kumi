@@ -724,7 +724,7 @@ class ControlSurfaceTests(unittest.TestCase):
         self.assertEqual(registry["protocol"], "ableton-live/v1")
         canonical = json.dumps(registry, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         self.assertEqual(digest, hashlib.sha256(canonical).hexdigest())
-        self.assertEqual(digest, "f626dafa686101c714ca610f4c47689f9297b19c838349e3bd7ef46614de4fa8")
+        self.assertEqual(digest, "48a3f3dfc08cbae1842e61163959f7c3361df2dbb43b780434a56d23b7c50d08")
         self.assertIn("audio.capture.start", [item["id"] for item in registry["operations"]])
         self.assertIn("device.parameter.set", [item["id"] for item in registry["operations"]])
         ids = [item["id"] for item in registry["operations"]]
@@ -2186,6 +2186,22 @@ class ControlSurfaceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "note clip hierarchy identity changed"):
             mapper.invoke("note.add", {"ref": created["ref"], "note": note, "expectedClipAuthority": bare, "expectedNotesRevision": session["expectedNotesRevision"]})
 
+    def test_a_split_arrangement_clip_takes_notes_up_to_its_own_end(self):
+        # The right half of an 8-beat clip split at beat 4: start marker 4, end marker 8, so Live's length is 4, but
+        # its notes are in its own time, from 0 to 8.
+        song = FakeSong(); track = song.tracks[0]
+        clip = FakeClip(4.0); clip.name = "Verse B"; clip.start_time = 20.0; clip.looping = False; clip.start_marker = 4.0; clip.end_marker = 8.0; clip.loop_end = 8.0
+        clip.select_all_notes = lambda: None; track.arrangement_clips = [clip]
+        mapper = LiveObjectMapper(song)
+        row = mapper._arrangement_clip_items([0], notes=True)[0]
+        authority = {"expectedObjectIdentity": row["objectIdentity"], "expectedTrackRef": row["trackRef"], "expectedTrackIdentity": mapper._capture_object_identity(track)}
+        added = mapper.invoke("note.add", {"ref": row["ref"], "note": {"pitch": 60, "start": 6, "duration": 1, "velocity": 100, "channel": 1}, "expectedClipAuthority": authority, "expectedNotesRevision": row["notesRevision"]})
+        self.assertIn("noteId", added); self.assertEqual([(n["pitch"], n["start"]) for n in mapper._read_notes(clip)], [(60, 6.0)])
+        revision = mapper._arrangement_clip_items([0], notes=True)[0]["notesRevision"]
+        with self.assertRaisesRegex(ValueError, '^note runs past the clip: "Verse B" holds notes from beat 0 to 8 in its own time$'):
+            mapper.invoke("note.add", {"ref": row["ref"], "note": {"pitch": 62, "start": 7.5, "duration": 1, "velocity": 100, "channel": 1}, "expectedClipAuthority": authority, "expectedNotesRevision": revision})
+        self.assertEqual(len(mapper._read_notes(clip)), 1)
+
     def test_mapper_discovery_and_midi_lifecycle_use_fake_live_objects(self):
         mapper = LiveObjectMapper(FakeSong())
         status = mapper.status()
@@ -2761,6 +2777,9 @@ class ControlSurfaceTests(unittest.TestCase):
         # The source stays; Fill, inside the copy's place, goes; Hook, crossing its right edge, is cut there.
         self.assertEqual(spans, [("Hook", 24.0, 28.0), ("Verse", 0.0, 8.0), ("Verse", 16.0, 24.0)])
         self.assertEqual(made["start"], 16.0); self.assertEqual(track.copies, [16.0], "copied straight to its cleared place")
+        # What was in the way, as Live had it before anything was cut: the host holds it to what the preview named.
+        self.assertEqual(made["cleared"], [{"name": "Fill", "start": 20.0, "end": 24.0}, {"name": "Hook", "start": 22.0, "end": 28.0}])
+        validate_operation_payload("arrangement.clip.move", "result", made)
         copy = next(clip for clip in track.arrangement_clips if clip.start_time == 16.0)
         self.assertEqual([note["start_time"] for note in copy.notes], [0.0, 2.0])
         # A copy onto the clip's own place would replace it with itself.
@@ -6250,6 +6269,16 @@ class NoteModificationTests(unittest.TestCase):
         result = mapper.invoke("note.update", request); validate_operation_payload("note.update", "result", result)
         return result
 
+    def test_a_split_clips_notes_are_edited_in_its_own_time(self):
+        # A split's right half (start marker 4, end marker 8, Live's length 4): its notes sit at 4 to 8.
+        clip = FakeNoteClip(4.0, [FakeMidiNote(1, 60, 5.0, 1.0, 100.0)]); clip.name = "Verse B"; clip.looping = False; clip.start_marker = 4.0; clip.end_marker = 8.0
+        mapper, reference = self.clip_mapper(clip)
+        self.assertEqual(self.update(mapper, reference, [{"id": 1, "velocity": 90}]), {"updated": 1})
+        self.assertEqual(self.update(mapper, reference, [{"id": 1, "start": 7.0}]), {"updated": 1})
+        with self.assertRaisesRegex(ValueError, '^note patch runs past the clip: "Verse B" holds notes from beat 0 to 8 in its own time$'):
+            self.update(mapper, reference, [{"id": 1, "start": 7.5}])
+        self.assertEqual((clip.stored[1].start_time, clip.stored[1].velocity), (7.0, 90.0))
+
     def test_note_update_hands_lives_own_note_vector_back(self):
         clip = FakeNoteClip(4.0, [FakeMidiNote(1, 60, 0.0, 1.0, 100.0), FakeMidiNote(2, 64, 1.0, 1.0, 80.0, probability=0.5)])
         mapper, reference = self.clip_mapper(clip)
@@ -8080,19 +8109,35 @@ class SetDataTests(unittest.TestCase):
 
     def test_entries_save_many_keys_in_one_call_all_or_none(self):
         song = FakeDataSong(); bridge = immediate_bridge(song); snapshot = bridge.mapper.snapshot()
-        refs = [snapshot["tracks"][0]["ref"], snapshot["tracks"][1]["ref"]]
-        entries = [{"ref": refs[0], "key": "kumi.track", "value": "t-1"}, {"ref": refs[1], "key": "kumi.track", "value": "t-2"}]
+        refs = [snapshot["tracks"][0]["ref"], snapshot["tracks"][1]["ref"]]; identities = [snapshot["tracks"][0]["objectIdentity"], snapshot["tracks"][1]["objectIdentity"]]
+        entries = [{"ref": refs[0], "key": "kumi.track", "value": "t-1", "expectedObjectIdentity": identities[0]}, {"ref": refs[1], "key": "kumi.track", "value": "t-2", "expectedObjectIdentity": identities[1]}]
         result = mutate_through(bridge, "data.set", {"entries": entries}, "data-batch-0001")
-        self.assertEqual(result, {"entries": [{**entry, "prior": None} for entry in entries]})
+        self.assertEqual(result, {"entries": [{"ref": entry["ref"], "key": entry["key"], "value": entry["value"], "prior": None} for entry in entries]})
         self.assertEqual([track.data for track in song.tracks], [{"kumi.track": "t-1"}, {"kumi.track": "t-2"}])
         # One entry whose key changed since it was read: none is written.
         changed = [{**entries[0], "value": "t-9", "expectedValue": "t-1"}, {**entries[1], "value": "t-8", "expectedValue": "other"}]
         with self.assertRaisesRegex(ValueError, "changed since it was read"): bridge.mapper.invoke("data.set", {"entries": changed})
         self.assertEqual([track.data for track in song.tracks], [{"kumi.track": "t-1"}, {"kumi.track": "t-2"}])
+        # A ref names a place: one that holds another track than was read there (one added or removed since) is
+        # refused before any is written, and every entry names what it read.
+        swapped = [{**entries[0], "value": "t-9"}, {**entries[1], "value": "t-8", "expectedObjectIdentity": identities[0]}]
+        with self.assertRaisesRegex(ValueError, "isn't the one that was read"): bridge.mapper.invoke("data.set", {"entries": swapped})
+        unread = [entries[0], {key: value for key, value in entries[1].items() if key != "expectedObjectIdentity"}]
+        with self.assertRaisesRegex(ValueError, "each entry names the identity"): bridge.mapper.invoke("data.set", {"entries": unread})
+        self.assertEqual([track.data for track in song.tracks], [{"kumi.track": "t-1"}, {"kumi.track": "t-2"}])
+        # The single form is held to it too, when it names it.
+        with self.assertRaisesRegex(ValueError, "isn't the one that was read"): bridge.mapper.invoke("data.set", {**entries[0], "value": "t-7", "expectedObjectIdentity": identities[1]})
+        self.assertEqual(song.tracks[0].data, {"kumi.track": "t-1"})
+        # One track twice, however its ref is written: "…:track:01" is "…:track:1".
+        spelled = refs[1].rsplit(":", 1)[0] + ":0" + refs[1].rsplit(":", 1)[1]
+        with self.assertRaisesRegex(ValueError, "same key of the same object twice"): bridge.mapper.invoke("data.set", {"entries": [entries[1], {**entries[1], "ref": spelled}]})
         # One that Live doesn't keep: the ones written before it are put back.
         refusing = song.tracks[1]; refusing.set_data = lambda key, value: None
         with self.assertRaisesRegex(ValueError, "not confirmed"): bridge.mapper.invoke("data.set", {"entries": [{**entries[0], "value": "t-5"}, {**entries[1], "value": "t-6"}]})
         self.assertEqual(song.tracks[0].data, {"kumi.track": "t-1"}, "the first entry was put back")
+        # One that won't go back either: every one is tried, and those that stayed changed are named.
+        first = song.tracks[0]; first.set_data = lambda key, value: first.data.__setitem__(key, value) if value != "t-1" else None
+        with self.assertRaisesRegex(ValueError, f"exact rollback failed for {refs[0]}$"): bridge.mapper.invoke("data.set", {"entries": [{**entries[0], "value": "t-5"}, {**entries[1], "value": "t-6"}]})
         # One form or the other, each key once, within bounds.
         for invalid in ({"entries": entries, "ref": refs[0]}, {"entries": []}, {"entries": [entries[0], entries[0]]}, {"entries": [{**entries[0], "key": "other"}]}):
             with self.assertRaises(ValueError): bridge.mapper.invoke("data.set", invalid)

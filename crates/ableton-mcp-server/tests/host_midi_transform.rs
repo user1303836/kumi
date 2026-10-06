@@ -418,3 +418,36 @@ async fn midi_transform_apply_and_exact_key_undo_match_source() {
         same(&adapter.sim.state.borrow(), &row["state"], &format!("{label} state"));
     }
 }
+#[tokio::test]
+async fn an_arrangement_clips_notes_transform_in_place_and_never_into_a_copy() {
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    {
+        let mut s = sim.state.borrow_mut();
+        let mut clip = s["tracks"][0]["clips"][0].clone();
+        clip["ref"] = json!("arrangement-clip:track-1:4");
+        clip["objectIdentity"] = json!("simulator:arrangement-clip:0");
+        clip["name"] = json!("Verse");
+        clip["start"] = json!(16);
+        s["arrangementClips"].as_array_mut().unwrap().push(json!({"trackRef":"track:track-1","clip":clip}));
+    }
+    let host = McpHost::new(sim.clone(), McpHostOptions::default()).unwrap();
+    let preview = |args: Value| {
+        let host = &host;
+        async move {
+            let mut args = args;
+            args["clipRef"] = json!("arrangement-clip:track-1:4");
+            let reply = host.live_midi_transform_preview_async(&json!(1), &args).await.unwrap();
+            reply["result"]["content"][0]["text"].as_str().unwrap_or_default().to_owned()
+        }
+    };
+    // In place: a transpose previews.
+    let text = preview(json!({"transform":"transpose","params":{"semitones":2},"scope":"in-place"})).await;
+    assert!(text.contains("transactionId"), "{text}");
+    // Into a copy: refused at preview, saying what works, rather than failing at apply.
+    let text = preview(json!({"transform":"transpose","params":{"semitones":2},"scope":"duplicate","target":{"trackRef":"track:track-1","sceneIndex":1}})).await;
+    assert!(text.contains(r#"\"Verse\" is an Arrangement clip: its notes change in place (scope in-place)"#), "{text}");
+    // A generative transform writes into a copy by default: refused, saying to run it on a Session clip.
+    let text = preview(json!({"transform":"repeat","params":{"times":2}})).await;
+    assert!(text.contains("a generative transform (repeat) writes into a copy in a Session slot") && text.contains("run it on a Session clip"), "{text}");
+}
+

@@ -3,6 +3,7 @@
 //! them (`js::string`), cancellation in the shape of `AbortSignal` (`abort`), and clocks (`time`).
 
 pub mod abort;
+pub mod bridge;
 pub mod js;
 pub mod time;
 

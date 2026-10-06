@@ -525,10 +525,20 @@ async fn launcher_handoff_skips_probes_and_rollback_restores_legacy_app_without_
 async fn rollback_to_legacy_requires_closed_live_and_retained_legacy_bridge_generation() {
     for scenario in ["open", "missing", "refused", "ok"] {
         let dir = tempfile::tempdir().unwrap();
-        let env = env(dir.path());
-        let home = Path::new(&env["KUMI_HOME"]);
+        let mut env = env(dir.path());
+        // Live's extensions: this version's copy is in Live; the retained bridge carries its own.
+        let extensions = dir.path().join("Ableton/Extensions");
+        env.insert("KUMI_LIVE_EXTENSIONS_DIR".into(), extensions.display().to_string());
+        let home = Path::new(&env["KUMI_HOME"]).to_path_buf();
+        let home = home.as_path();
         let native = home.join("bridge/native/package");
         let old = home.join("bridge/legacy/package");
+        for (folder, version, code) in
+            [(extensions.join("kumi.kumi"), "1.8.10", "// this version's"), (old.join("live-extension"), "1.0.0", "// the earlier bridge's")]
+        {
+            put(folder.join("manifest.json"), json!({"name":"kumi","version":version}).to_string());
+            put(folder.join("dist/extension.js"), code);
+        }
         let state = home.join("bridge/state");
         let config = state.join("bridge-config.json");
         let secret = state.join("bridge.secret");
@@ -579,11 +589,14 @@ async fn rollback_to_legacy_requires_closed_live_and_retained_legacy_bridge_gene
             assert_eq!(calls.len(), 1);
             assert_eq!(&calls[0].1[..2], ["lifecycle", "rollback"]);
             assert!(calls[0].1.contains(&"--confirm-live-stopped".into()));
+            // Live's extension went back with the bridge: the earlier bridge checks it carries its own registry.
+            assert_eq!(fs::read_to_string(extensions.join("kumi.kumi/dist/extension.js")).unwrap(), "// the earlier bridge's");
         } else {
             assert!(result.is_err());
             assert!(home.join("app").join(executable_name("kumi")).is_file());
             assert!(home.join("app.previous/apps/kumi/bin/kumi.mjs").is_file());
             assert_eq!(calls.borrow().len(), usize::from(scenario == "refused"));
+            assert_eq!(fs::read_to_string(extensions.join("kumi.kumi/dist/extension.js")).unwrap(), "// this version's");
         }
     }
 }

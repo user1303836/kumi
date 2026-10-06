@@ -33,15 +33,18 @@ impl McpHost {
             let status=self.fresh_status(Some(&LiveOperationContext::with_deadline(self.deadline(reads::AUDITION_DEADLINE_MS)))).await?;
             if !status.has_operation("data.get")||!status.has_operation("data.set"){return Err(LiveError::error("data saved in the Set is unavailable on this Live shape"));}
             let context=LiveOperationContext::with_deadline(self.deadline(reads::AUDITION_DEADLINE_MS));
-            let owner=if let Some(reference)=p.get("trackRef"){reference.clone()}else{
+            let (owner,set_identity)=if let Some(reference)=p.get("trackRef"){(reference.clone(),None)}else{
                 let snapshot=self.views.view(Some(&context),LiveViewScope::Indices(vec![]),Some(&[LiveSnapshotPart::Set])).await?;
-                json!(snapshot.set.ok_or_else(||LiveError::type_error("Cannot read properties of undefined (reading 'ref')"))?.ref_)
+                let set=snapshot.set.ok_or_else(||LiveError::type_error("Cannot read properties of undefined (reading 'ref')"))?;
+                (json!(set.ref_),set.object_identity.filter(|s|is_non_empty_string(&json!(s),256)))
             };
             let identity=if let Some(reference)=p["trackRef"].as_str(){self.track_one_async(Some(&context),reference,&["ref","objectIdentity"]).await?.and_then(|r|r.get("objectIdentity").cloned())}else{None};
             if p.get("trackRef").is_some()&&!identity.as_ref().is_some_and(|v|is_non_empty_string(v,256)){return Err(LiveError::error("track reference is stale or invalid"));}
             let read=self.async_adapter().invoke_async(&LiveInvocation::new("data.get",json!({"ref":owner,"key":p["key"]})),Some(&context)).await?;
             if read.is_null(){return Err(LiveError::type_error("Cannot read properties of null (reading 'value')"));}
-            let current=if read["value"].is_string(){read["value"].clone()}else{Value::Null};let payload=json!({"ref":owner,"key":p["key"],"value":p["value"],"expectedValue":current});
+            let current=if read["value"].is_string(){read["value"].clone()}else{Value::Null};let mut payload=json!({"ref":owner,"key":p["key"],"value":p["value"],"expectedValue":current});
+            // Live writes by place: the apply holds it to the object read there.
+            if let Some(read_there)=identity.clone().filter(|v|is_non_empty_string(v,256)).or(set_identity.map(Value::String)){payload["expectedObjectIdentity"]=read_there;}
             let mut t=json!({"id":tempo::transaction_id("data"),"epoch":status.epoch,"kind":"data-set","fence":js_json::stringify(&json!({"ref":owner,"key":p["key"],"value":current})),"payload":payload,"prior":{"value":current},"expiresAt":now_ms_f64()+TRANSACTION_TTL_MS,"state":"previewed"});if let Some(identity)=identity.filter(|v|is_non_empty_string(v,256)){t["targetIdentity"]=identity;}
             self.retain_bounded_transaction(&self.clip_lifecycle_transactions,t.clone(),"saved text")?;
             Ok(success_text(id,&json!({"transactionId":t["id"],"epoch":t["epoch"],"ref":owner,"key":p["key"],"prior":current,"proposed":p["value"],"impact":"saves-text-in-the-set","confirmation":"apply","expiresAt":t["expiresAt"]})))
@@ -107,6 +110,7 @@ impl McpHost {
         context: &LiveOperationContext,
     ) -> Result<Value, LiveError> {
         let payload = &t["payload"];
+        let reconciliation = t["state"] == "uncertain";
         let places: Vec<&Value> = std::iter::once(payload).chain(payload["entries"].as_array().into_iter().flatten()).collect();
         let found = futures::future::join_all(
             places.iter().map(|place| self.track_one_async(Some(context), place["ref"].as_str().unwrap_or(""), &["ref", "objectIdentity"])),
@@ -122,11 +126,11 @@ impl McpHost {
         }
         record.borrow_mut()["state"] = json!("applying");
         record.borrow_mut()["applyKey"] = p["idempotencyKey"].clone();
-        // One call: Live saves them all or none, so a track whose text changed since it was read leaves every
-        // track as it was.
+        // One call: Live saves them all or none, so a track whose text changed since it was read, or a place that
+        // holds another track now, leaves every track as it was.
         let entries: Vec<Value> = places
             .iter()
-            .map(|place| json!({"ref":place["ref"],"key":payload["key"],"value":place["value"],"expectedValue":place["expectedValue"]}))
+            .map(|place| json!({"ref":place["ref"],"key":payload["key"],"value":place["value"],"expectedValue":place["expectedValue"],"expectedObjectIdentity":place["expectedIdentity"]}))
             .collect();
         let written = match self
             .async_adapter()
@@ -134,12 +138,31 @@ impl McpHost {
             .await
         {
             Ok(written) => written,
-            // Refused before anything was written: the transaction is as it was.
-            Err(error) if error.message().contains("changed since it was read") => {
-                record.borrow_mut()["state"] = json!("previewed");
-                return Ok(transaction_error(id, "A track's text changed since it was read, so nothing was saved; read the tracks again"));
+            Err(error) => {
+                let changed = error.message().contains("changed since it was read");
+                let moved = error.message().contains("isn't the one that was read");
+                // Refused before anything was written: the transaction is as it was.
+                if (changed || moved) && !reconciliation {
+                    record.borrow_mut()["state"] = json!("previewed");
+                    return Ok(transaction_error(
+                        id,
+                        if moved {
+                            "A track named isn't the one that was read any more, so nothing was saved; read the tracks again"
+                        } else {
+                            "A track's text changed since it was read, so nothing was saved; read the tracks again"
+                        },
+                    ));
+                }
+                // A retry of a try that may have saved everything: Kumi's own write changed the text, so what the
+                // tracks hold now says whether it did.
+                if changed && reconciliation && self.data_saved(&places, &payload["key"], context).await? {
+                    let saved: Vec<Value> =
+                        places.iter().map(|place| json!({"ref":place["ref"],"value":place["value"],"prior":place["expectedValue"]})).collect();
+                    record.borrow_mut()["state"] = json!("applied");
+                    return Ok(success_text(id, &json!({"transactionId":t["id"],"state":"applied","key":payload["key"],"saved":saved,"idempotent":true})));
+                }
+                return Err(error);
             }
-            Err(error) => return Err(error),
         };
         let saved: Vec<Value> = places
             .iter()
@@ -179,7 +202,21 @@ impl McpHost {
             let context=self.transaction_context(p,signal,reads::AUDITION_DEADLINE_MS);
             if t["batch"]==true{return self.apply_data_batch(id,&t,&record,p,&context).await;}
             record.borrow_mut()["state"]=json!("applying");record.borrow_mut()["applyKey"]=p["idempotencyKey"].clone();
-            let result=self.async_adapter().invoke_async(&LiveInvocation::new("data.set",t["payload"].clone()),Some(&context)).await?;
+            let result=match self.async_adapter().invoke_async(&LiveInvocation::new("data.set",t["payload"].clone()),Some(&context)).await{
+                Ok(result)=>result,
+                Err(error)=>{
+                    let changed=error.message().contains("changed since it was read");let moved=error.message().contains("isn't the one that was read");
+                    if (changed||moved)&&!reconciliation{
+                        record.borrow_mut()["state"]=json!("previewed");
+                        return Ok(transaction_error(id,if moved{"The track isn't the one that was read any more, so nothing was saved; preview again from a fresh track reference"}else{"The text changed since it was read, so nothing was saved; read it again"}));
+                    }
+                    if changed&&reconciliation&&self.data_saved(&[&t["payload"]],&t["payload"]["key"],&context).await?{
+                        record.borrow_mut()["state"]=json!("applied");
+                        return Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","key":t["payload"]["key"],"value":t["payload"]["value"],"prior":t["prior"]["value"],"idempotent":true})));
+                    }
+                    return Err(error);
+                }
+            };
             if result.is_null(){return Err(LiveError::type_error("Cannot read properties of null (reading 'value')"));}
             if result.get("value")!=Some(&t["payload"]["value"]){return Err(LiveError::error("the saved text wasn't confirmed"));}
             record.borrow_mut()["state"]=json!("applied");Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","key":t["payload"]["key"],"value":result["value"],"prior":result["prior"],"idempotent":false})))
@@ -235,7 +272,13 @@ impl McpHost {
                 .invoke_async(
                     &LiveInvocation::new(
                         "data.set",
-                        json!({"ref":t["payload"]["ref"],"key":t["payload"]["key"],"value":prior,"expectedValue":t["payload"]["value"]}),
+                        {
+                            let mut back = json!({"ref":t["payload"]["ref"],"key":t["payload"]["key"],"value":prior,"expectedValue":t["payload"]["value"]});
+                            if let Some(identity) = t["payload"].get("expectedObjectIdentity") {
+                                back["expectedObjectIdentity"] = identity.clone();
+                            }
+                            back
+                        },
                     ),
                     Some(&context),
                 )
@@ -257,6 +300,18 @@ impl McpHost {
             record.borrow_mut()["state"] = json!("uncertain");
             adapter_tool_error(id, &e, "Whether the text went back is uncertain: read it again.")
         })
+    }
+}
+impl McpHost {
+    /// Whether each place holds the text Kumi meant to save there now (read one by one).
+    async fn data_saved(&self, places: &[&Value], key: &Value, context: &LiveOperationContext) -> Result<bool, LiveError> {
+        for place in places {
+            let read = self.async_adapter().invoke_async(&LiveInvocation::new("data.get", json!({"ref":place["ref"],"key":key})), Some(context)).await?;
+            if read.get("value").unwrap_or(&Value::Null) != &place["value"] {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 }
 /// Text of at most 1 MiB, or null.

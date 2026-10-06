@@ -2120,6 +2120,35 @@ var ableton_live_v1_operations_default = {
             minLength: 64,
             maxLength: 64,
             pattern: "^[0-9a-f]{64}$"
+          },
+          cleared: {
+            type: "array",
+            maxItems: 4096,
+            items: {
+              type: "object",
+              properties: {
+                name: {
+                  type: "string",
+                  maxLength: 256
+                },
+                start: {
+                  type: "number",
+                  minimum: 0,
+                  maximum: 1e9
+                },
+                end: {
+                  type: "number",
+                  minimum: 0,
+                  maximum: 1e9
+                }
+              },
+              required: [
+                "name",
+                "start",
+                "end"
+              ],
+              additionalProperties: false
+            }
           }
         },
         required: [
@@ -5651,6 +5680,11 @@ var ableton_live_v1_operations_default = {
             ],
             maxLength: 1048576
           },
+          expectedObjectIdentity: {
+            type: "string",
+            minLength: 1,
+            maxLength: 256
+          },
           entries: {
             type: "array",
             minItems: 1,
@@ -5681,12 +5715,18 @@ var ableton_live_v1_operations_default = {
                     "null"
                   ],
                   maxLength: 1048576
+                },
+                expectedObjectIdentity: {
+                  type: "string",
+                  minLength: 1,
+                  maxLength: 256
                 }
               },
               required: [
                 "ref",
                 "key",
-                "value"
+                "value",
+                "expectedObjectIdentity"
               ],
               additionalProperties: false
             }

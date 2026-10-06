@@ -3767,6 +3767,15 @@ impl DeterministicLiveSimulator {
                     for key in ["name", "kind", "start", "length"] {
                         row[key] = clip[key].clone();
                     }
+                    // A MIDI clip's loop and markers, where it has them, as the Remote Script gives them: its notes are
+                    // in its own time, which a split or left-trimmed clip's run past its length in.
+                    if clip["kind"] == "midi" {
+                        for key in ["looping", "loopStart", "loopEnd", "startMarker", "endMarker"] {
+                            if let Some(v) = clip.get(key).filter(|v| !v.is_null()) {
+                                row[key] = v.clone();
+                            }
+                        }
+                    }
                     // Asked for, the notes and their revision, as the Remote Script reads them; else how many.
                     if request.fields.as_ref().is_some_and(|fields| fields.iter().any(|f| f == "notes" || f == "notesRevision")) {
                         row["notes"] = clip["notes"].clone();

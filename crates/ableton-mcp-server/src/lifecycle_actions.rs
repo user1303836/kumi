@@ -146,6 +146,9 @@ fn upgrade(
     // The first native distribution keeps the bridge protocol/package version. A runtime
     // migration at that version is allowed only from the exact verified Node generation;
     // ordinary native upgrades and all downgrades retain the semantic-version fence.
+    // No real install takes this branch any more: every shipped Node generation carries the
+    // registry before this bridge's (ec05dd40…), which the last check refuses. It goes with
+    // the Node removal; until then it stays fenced, never loosened.
     let runtime_migration = if order == std::cmp::Ordering::Equal
         && evidence.manifest["package"]["version"] == receipt["packageVersion"]
         && evidence.manifest["schema"] == "ableton-mcp-native-release/v1"

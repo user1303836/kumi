@@ -52,6 +52,8 @@ struct Adapter {
     fault: RefCell<String>,
     fired: Cell<bool>,
     after_invoke: Cell<bool>,
+    /// A track put in the second track's place just before the next write (after the host's own check).
+    shift_before_write: Cell<bool>,
 }
 impl Adapter {
     fn new() -> Self {
@@ -62,6 +64,7 @@ impl Adapter {
             fault: Default::default(),
             fired: Cell::new(false),
             after_invoke: Cell::new(false),
+            shift_before_write: Cell::new(false),
         }
     }
     fn reset(&self, fault: &str) {
@@ -88,6 +91,9 @@ impl Adapter {
             if let Some(v) = self.cache.borrow().get(&key) {
                 return Ok(v.clone());
             }
+        }
+        if i.operation == "data.set" && self.shift_before_write.replace(false) {
+            self.sim.state.borrow_mut()["tracks"][1]["objectIdentity"] = json!("simulator:track:other");
         }
         let fault = self.fault.borrow().clone();
         if !self.fired.get() && ["before", "cancel", "refusal"].iter().any(|s| fault.ends_with(s)) {
@@ -360,6 +366,10 @@ async fn several_tracks_take_text_in_one_apply_each_track_checked_first() {
     let writes: Vec<Value> = adapter.calls.borrow().iter().filter(|c| c["invocation"]["operation"] == "data.set").cloned().collect();
     assert_eq!(writes.len(), 1, "both tracks' text in one call to Live: {writes:?}");
     assert_eq!(writes[0]["invocation"]["args"]["entries"].as_array().map(Vec::len), Some(2), "{writes:?}");
+    // Each place names the track read there: Live writes by place.
+    let identities: Vec<&Value> =
+        writes[0]["invocation"]["args"]["entries"].as_array().unwrap().iter().map(|e| &e["expectedObjectIdentity"]).collect();
+    assert_eq!(identities, [&json!("simulator:track:track-1"), &json!("simulator:track:track-2")]);
     let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     let undo = host
         .undo_data_async(&json!(3), &json!({"transactionId":body["transactionId"],"confirmation":"undo","idempotencyKey":"undo-key"}), None)
@@ -389,4 +399,60 @@ async fn several_tracks_take_text_in_one_apply_each_track_checked_first() {
     let mut long = batch(Value::Null, "simulator:track:track-2");
     long["entries"][0]["value"] = json!("x".repeat(257));
     assert!(host.live_data_preview_async(&json!(1), &long).await.to_string().contains("at most 256 characters in a batch"));
+}
+#[tokio::test]
+async fn a_track_moved_in_after_the_check_gets_nothing_and_a_retry_learns_what_was_saved() {
+    let setup = || {
+        let adapter = Rc::new(Adapter::new());
+        {
+            let mut state = adapter.sim.state.borrow_mut();
+            let mut bass = state["tracks"][0].clone();
+            bass["ref"] = json!("track:track-2");
+            bass["objectIdentity"] = json!("simulator:track:track-2");
+            state["tracks"].as_array_mut().unwrap().push(bass);
+        }
+        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+        (adapter, host)
+    };
+    let batch = json!({"key":"kumi.track","value":"01J00000000000000000000001","trackRef":"track:track-1","expectedValue":null,
+        "expectedIdentity":"simulator:track:track-1","entries":[{"trackRef":"track:track-2","value":"01J00000000000000000000002",
+        "expectedValue":null,"expectedIdentity":"simulator:track:track-2"}]});
+    let saved = |adapter: &Adapter, track: &str| {
+        adapter.sim.invoke(&LiveInvocation::new("data.get", json!({"ref":track,"key":"kumi.track"}))).unwrap()["value"].clone()
+    };
+    let state = |host: &McpHost, preview: &Value| {
+        let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        host.transaction_record(body["transactionId"].as_str().unwrap()).unwrap().borrow()["state"].clone()
+    };
+    // Another track lands in the second place between the host's check and the write: Live refuses the whole batch.
+    let (adapter, host) = setup();
+    let preview = host.live_data_preview_async(&json!(1), &batch).await;
+    adapter.shift_before_write.set(true);
+    let applied = apply_batch(&host, &preview, "batch-key").await;
+    assert!(applied.to_string().contains("isn't the one that was read any more, so nothing was saved"), "{applied}");
+    assert_eq!((saved(&adapter, "track:track-1"), saved(&adapter, "track:track-2")), (Value::Null, Value::Null));
+    assert_eq!(state(&host, &preview), "previewed");
+    // An apply that saved everything but never said so: its retry (the same key) finds the text there.
+    let (adapter, host) = setup();
+    let preview = host.live_data_preview_async(&json!(1), &batch).await;
+    adapter.reset("apply-after");
+    let first = apply_batch(&host, &preview, "batch-key").await;
+    assert_eq!(state(&host, &preview), "uncertain", "{first}");
+    // Live's replay of that key is gone (as after a lost answer it never recorded), so it checks the text afresh.
+    adapter.cache.borrow_mut().clear();
+    let retried = apply_batch(&host, &preview, "batch-key").await;
+    assert!(retried.to_string().contains(r#"\"state\":\"applied\""#) && retried.to_string().contains(r#"\"idempotent\":true"#), "{retried}");
+    assert_eq!(state(&host, &preview), "applied");
+    // The same, but the text was changed again before the retry: whether Kumi's write held isn't known, so it stays
+    // uncertain rather than saying nothing was saved.
+    let (adapter, host) = setup();
+    let preview = host.live_data_preview_async(&json!(1), &batch).await;
+    adapter.reset("apply-after");
+    apply_batch(&host, &preview, "batch-key").await;
+    adapter.reset("");
+    adapter.cache.borrow_mut().clear();
+    adapter.sim.invoke(&LiveInvocation::new("data.set", json!({"ref":"track:track-2","key":"kumi.track","value":"manual"}))).unwrap();
+    let retried = apply_batch(&host, &preview, "batch-key").await;
+    assert!(!retried.to_string().contains("nothing was saved"), "{retried}");
+    assert_eq!(state(&host, &preview), "uncertain");
 }

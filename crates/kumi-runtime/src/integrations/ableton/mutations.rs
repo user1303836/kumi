@@ -245,6 +245,11 @@ impl Mutations {
                 }
             }
         }
+        // A move or copy that cut something its preview didn't name (a clip put in its new place in between): the
+        // bridge says so, and Kumi's undo can't put that back.
+        if kind.tool == "move_clip" && result.get("replacesUnknown") == Some(&json!(true)) {
+            preview.insert("replacesUnknown".into(), json!(true));
+        }
         let final_summary = kind.summarize(&preview, &args, &known, Some(&result));
         let applied = result.get("state").and_then(Value::as_str) == Some("applied");
         let permanent = if applied { kind.permanent(&args).or_else(|| kind.replaced(&preview)).filter(|s| !s.is_empty()) } else { None };

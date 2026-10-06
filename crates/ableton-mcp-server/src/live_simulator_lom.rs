@@ -38,6 +38,19 @@ fn numeric(value: &Value) -> f64 {
         _ => f64::NAN,
     }
 }
+/// A data write's place holds the object read there (`expectedObjectIdentity`, when named): Live writes by place.
+fn read_there(state: &Value, owner: &str, args: &Map<String, Value>) -> Result<(), LiveError> {
+    let Some(expected) = args.get("expectedObjectIdentity") else { return Ok(()) };
+    let found = if state["set"]["ref"] == owner {
+        &state["set"]["objectIdentity"]
+    } else {
+        array(&state["tracks"]).iter().find(|t| t["ref"] == owner).map(|t| &t["objectIdentity"]).unwrap_or(&Value::Null)
+    };
+    if found != expected {
+        return Err(LiveError::error("what's at that ref isn't the one that was read (a track was added, removed or moved since)"));
+    }
+    Ok(())
+}
 impl DeterministicLiveSimulator {
     pub(super) fn invoke_lom(&self, operation: &str, args: &Map<String, Value>) -> Result<Value, LiveError> {
         match operation {
@@ -53,6 +66,10 @@ impl DeterministicLiveSimulator {
                         if state["set"]["ref"] != owner && !array(&state["tracks"]).iter().any(|t| t["ref"] == owner) {
                             return Err(LiveError::error("track reference is stale or invalid"));
                         }
+                        if !entry.get("expectedObjectIdentity").is_some_and(Value::is_string) {
+                            return Err(LiveError::error("data arguments are invalid: each entry names the identity of what was read there"));
+                        }
+                        read_there(&state, owner, entry)?;
                         let key = text(entry, "key")?;
                         if !key.starts_with("kumi.") {
                             return Err(LiveError::error("Kumi writes only its own keys (kumi.…); other keys are read-only"));
@@ -96,6 +113,7 @@ impl DeterministicLiveSimulator {
                     .get("value")
                     .filter(|v| v.is_null() || v.is_string())
                     .ok_or_else(|| LiveError::type_error("value must be text of at most 1 MiB, or null"))?;
+                read_there(&state, owner, args)?;
                 if args.get("expectedValue").is_some_and(|v| v != &prior) {
                     return Err(LiveError::error("the data under that key changed since it was read"));
                 }

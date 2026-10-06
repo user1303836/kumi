@@ -3446,8 +3446,8 @@ class LiveObjectMapper:
             target = by_id.get(patch["id"])
             if target is None:
                 raise ValueError("note id is not present in the clip")
-            prior = before_by_id.get(patch["id"]); final_start = float(patch.get("start", prior["start"] if prior else -1)); final_duration = float(patch.get("duration", prior["duration"] if prior else -1)); clip_length = self._read_attr(clip, "length")
-            if prior is None or not isinstance(clip_length, (int, float)) or final_start + final_duration > float(clip_length): raise ValueError("note patch exceeds the exact clip length")
+            prior = before_by_id.get(patch["id"]); final_start = float(patch.get("start", prior["start"] if prior else -1)); final_duration = float(patch.get("duration", prior["duration"] if prior else -1)); clip_end = self._note_time_end(clip)
+            if prior is None or clip_end is None or final_start + final_duration > clip_end: raise ValueError(f"note patch runs past the clip: {self._note_span(clip)}")
             seen.add(patch["id"])
             targets.append((target, patch))
         expected_by_id = {note_id: dict(row) for note_id, row in before_by_id.items()}; field_attributes = {"pitch": "pitch", "start": "start_time", "duration": "duration", "velocity": "velocity", "mute": "mute", "probability": "probability", "velocityDeviation": "velocity_deviation", "releaseVelocity": "release_velocity"}
@@ -4464,32 +4464,43 @@ class LiveObjectMapper:
         entries = args["entries"]
         if set(args) != {"entries"} or not isinstance(entries, list) or not 1 <= len(entries) <= 1024 or not all(isinstance(entry, dict) for entry in entries):
             raise ValueError("data arguments are invalid: give one key (ref, key, value) or entries, not both")
-        plans = [self._data_plan(entry) for entry in entries]
-        if len({(plan[0], plan[1]) for plan in plans}) != len(plans): raise ValueError("entries name the same key of the same object twice")
+        plans = [self._data_plan(entry, identified=True) for entry in entries]
+        # The same object twice, however its ref is written ("…:track:03" and "…:track:3" name one track).
+        if len({(self._capture_object_identity(plan[3]), plan[1]) for plan in plans}) != len(plans): raise ValueError("entries name the same key of the same object twice")
         written: list[tuple[Any, ...]] = []; results = []
         try:
             for plan in plans:
                 results.append(self._data_write(plan)); written.append(plan)
         except BaseException as error:
-            for _, key, _, owner, writer, prior in reversed(written):
+            # Every one written is put back, then the ones that didn't go back are named, so only they need reading.
+            unrestored = []
+            for reference, key, _, owner, writer, prior in reversed(written):
                 try:
                     writer(key, prior); restored = self._stored_text(owner, key)
                 except BaseException: restored = error
-                if restored != prior: raise ValueError("data change failed and exact rollback failed") from error
+                if restored != prior: unrestored.append(str(reference))
+            if unrestored: raise ValueError(f"data change failed and exact rollback failed for {', '.join(reversed(unrestored))}") from error
             raise
         return {"entries": results}
 
-    def _data_plan(self, args: dict[str, Any]) -> tuple[Any, ...]:
-        """One data write, checked: (ref, key, value, owner, writer, prior), refused if its key isn't Kumi's or
-        holds something other than expectedValue."""
+    def _data_plan(self, args: dict[str, Any], identified: bool = False) -> tuple[Any, ...]:
+        """One data write, checked: (ref, key, value, owner, writer, prior), refused if its key isn't Kumi's, if
+        what's at its ref isn't the object read there (expectedObjectIdentity: a ref names a place, so a track
+        added or removed since shifts it; each of entries names one), or if it holds something other than
+        expectedValue."""
         key = args.get("key")
-        if set(args) - {"ref", "key", "value", "expectedValue"} or not isinstance(key, str) or not 1 <= len(key) <= 256 or "value" not in args: raise ValueError("data arguments are invalid")
+        if set(args) - {"ref", "key", "value", "expectedValue", "expectedObjectIdentity"} or not isinstance(key, str) or not 1 <= len(key) <= 256 or "value" not in args: raise ValueError("data arguments are invalid")
+        expected_identity = args.get("expectedObjectIdentity")
+        if (expected_identity is None and identified) or (expected_identity is not None and (not isinstance(expected_identity, str) or not 1 <= len(expected_identity) <= 256)):
+            raise ValueError("data arguments are invalid: each entry names the identity of what was read there")
         # Kumi writes only its own keys: other control surfaces keep their data in the same Set.
         if not key.startswith("kumi."): raise ValueError("Kumi writes only its own keys (kumi.…); other keys are read-only")
         for field in ("value", "expectedValue"):
             item = args.get(field)
             if item is not None and (not isinstance(item, str) or len(item) > self.MAX_DATA_TEXT): raise ValueError(f"{field} must be text of at most 1 MiB, or null")
         owner = self._data_store(args.get("ref")); writer = getattr(owner, "set_data", None)
+        if expected_identity is not None and not hmac.compare_digest(self._capture_object_identity(owner), expected_identity):
+            raise ValueError("what's at that ref isn't the one that was read (a track was added, removed or moved since)")
         if not callable(writer): raise ValueError("data saved in the Set is unavailable on this Live shape")
         prior = self._stored_text(owner, key)
         if "expectedValue" in args and prior != args["expectedValue"]: raise ValueError("the data under that key changed since it was read")
@@ -5525,8 +5536,9 @@ class LiveObjectMapper:
         if _same_number(target, start):
             # A move to where the clip already is changes nothing: the clip, as it is.
             row = self._arrangement_clip_row(owner, clip, track_index, source_index)
-            return {"ref": row["ref"], "objectIdentity": expected_identity, "start": start, "createdFingerprint": hashlib.sha256(self._bounded_canonical(_without_fields(row, _VOLATILE_CLIP_FIELDS)).encode("utf-8")).hexdigest()}
+            return {"ref": row["ref"], "objectIdentity": expected_identity, "start": start, "createdFingerprint": hashlib.sha256(self._bounded_canonical(_without_fields(row, _VOLATILE_CLIP_FIELDS)).encode("utf-8")).hexdigest(), "cleared": []}
         in_the_way = [(clips[index], other_start, other_end) for index, (other_start, other_end) in enumerate(spans) if index != source_index and other_start < target_end - 1e-6 and other_end > target + 1e-6]
+        in_the_way_rows = self._in_the_way_rows(in_the_way)
         for other, other_start, other_end in in_the_way:
             if other_start >= target - 1e-6 and other_end <= target_end + 1e-6: continue
             # Cutting into an audio clip takes the Live extension (the host does it first). A looped MIDI clip
@@ -5555,7 +5567,7 @@ class LiveObjectMapper:
             if not cleared: raise
             reason = (str(error) if isinstance(error, (ValueError, TimeoutError)) and str(error) else f"{type(error).__name__}: {error}".rstrip(": ")).replace(UNRUN_SUFFIX, "")
             raise ValueError(f"Kumi cut {', '.join(cleared)} to clear the clip's new place, then couldn't move the clip; Live's own undo puts it back ({reason})") from error
-        return {"ref": projected_row["ref"], "objectIdentity": created_identity, "start": float(getattr(created, "start_time", position)), "createdFingerprint": fingerprint}
+        return {"ref": projected_row["ref"], "objectIdentity": created_identity, "start": float(getattr(created, "start_time", position)), "createdFingerprint": fingerprint, "cleared": in_the_way_rows}
 
     def _arrangement_target(self, args: dict[str, Any], clip: Any) -> tuple[Any, int]:
         """The track a clip is copied or moved to, exactly as previewed, and one Live puts that clip on."""
@@ -5583,6 +5595,7 @@ class LiveObjectMapper:
         if over_itself and self._read_attr(clip, "is_audio_clip") is True: raise ValueError(f"Kumi can't copy an audio clip onto its own span yet: pick a spot clear of beats {start:g} to {end:g}{UNRUN_SUFFIX}")
         clips = self._items(self._read_attr(target, "arrangement_clips") or [])
         in_the_way = [(item, item_start, item_end) for item, (item_start, item_end) in zip(clips, (self._arrangement_span(item) for item in clips)) if item_start < target_end - 1e-6 and item_end > position + 1e-6]
+        in_the_way_rows = self._in_the_way_rows(in_the_way)
         for other, other_start, other_end in in_the_way:
             if other_start >= position - 1e-6 and other_end <= target_end + 1e-6: continue
             if self._read_attr(other, "is_audio_clip") is True: raise ValueError(f"Kumi can't cut into an audio clip here yet: \"{str(getattr(other, 'name', ''))[:60]}\" (beats {other_start:g} to {other_end:g}) crosses the span from beat {position:g} to {target_end:g}; clear that span first (clear_range) or pick a free spot{UNRUN_SUFFIX}")
@@ -5618,7 +5631,7 @@ class LiveObjectMapper:
             if not cleared: raise
             reason = (str(error) if isinstance(error, (ValueError, TimeoutError)) and str(error) else f"{type(error).__name__}: {error}".rstrip(": ")).replace(UNRUN_SUFFIX, "")
             raise ValueError(f"Kumi cut {', '.join(cleared)} to clear the clip's new place, then couldn't {'copy' if keep_source else 'move'} the clip; Live's own undo puts it back ({reason})") from error
-        return {"ref": projected_row["ref"], "objectIdentity": created_identity, "start": float(getattr(created, "start_time", position)), "createdFingerprint": created_fingerprint}
+        return {"ref": projected_row["ref"], "objectIdentity": created_identity, "start": float(getattr(created, "start_time", position)), "createdFingerprint": created_fingerprint, "cleared": in_the_way_rows}
 
     def _arrangement_span(self, clip: Any) -> tuple[float, float]:
         """Where an Arrangement clip sits, in beats: its start and its right edge (end_time; start plus
@@ -5683,6 +5696,11 @@ class LiveObjectMapper:
         while a place is made for it."""
         song_end = self._read_attr(self.song, "song_length"); song_end = float(song_end) if isinstance(song_end, (int, float)) and not isinstance(song_end, bool) and math.isfinite(float(song_end)) else 0.0
         return float(math.ceil(max([song_end, *beats] + [self._arrangement_span(item)[1] for item in self._items(self._read_attr(owner, "arrangement_clips") or [])]))) + 4.0
+
+    def _in_the_way_rows(self, in_the_way: list[tuple[Any, float, float]]) -> list[dict[str, Any]]:
+        """What a move or copy finds in its new place, as Live had it just before anything was cut (name and span):
+        the host holds it to what the preview named, since a clip dropped there in between would be cut unnamed."""
+        return [{"name": str(getattr(other, "name", ""))[:60], "start": float(other_start), "end": float(other_end)} for other, other_start, other_end in in_the_way]
 
     def _arrangement_clear(self, owner: Any, in_the_way: list[tuple[Any, float, float]], start: float, end: float, keep: tuple[Any, str], checkpoint: tuple[dict[str, Any], dict[str, int]]) -> list[str]:
         """Clear [start, end) of a track for a clip to land there, as dropping a clip in Live does: a clip
@@ -11839,6 +11857,18 @@ class LiveObjectMapper:
         self.song.record_mode = action == "start"
         return {"recording": action == "start"}
 
+    def _note_time_end(self, clip: Any) -> float | None:
+        """Where a MIDI clip's notes can be, in its own time: up to the later of its loop end and end marker. (Live's
+        length is end minus start, which the notes of a split or left-trimmed clip, its start marker past 0, run past.)"""
+        ends = [self._read_attr(clip, name) for name in ("length", "loop_end", "end_marker")]
+        ends = [float(value) for value in ends if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))]
+        return max(ends) if ends else None
+
+    def _note_span(self, clip: Any) -> str:
+        """A clip's own-time span, as a refusal names it: '"Verse B" holds notes from beat 0 to 8 in its own time'."""
+        end = self._note_time_end(clip)
+        return f'"{getattr(clip, "name", "")}" holds notes from beat 0 to {"?" if end is None else f"{end:g}"} in its own time'
+
     def _validated_note(self, clip: Any, value: Any) -> dict[str, Any]:
         if not isinstance(value, dict) or not hasattr(clip, "add_new_notes"):
             raise ValueError("note is invalid")
@@ -11849,9 +11879,10 @@ class LiveObjectMapper:
                 or not isinstance(note.get("start"), (int, float)) or isinstance(note["start"], bool)
                 or not isinstance(note.get("duration"), (int, float)) or isinstance(note["duration"], bool)
                 or not math.isfinite(float(note["start"])) or not math.isfinite(float(note["duration"]))
-                or float(note["start"]) < 0 or float(note["duration"]) <= 0
-                or float(note["start"]) + float(note["duration"]) > float(getattr(clip, "length", 0))):
+                or float(note["start"]) < 0 or float(note["duration"]) <= 0):
             raise ValueError("note is invalid")
+        if float(note["start"]) + float(note["duration"]) > (self._note_time_end(clip) or 0.0):
+            raise ValueError(f"note runs past the clip: {self._note_span(clip)}")
         probability = note.get("probability")
         if probability is not None and (not isinstance(probability, (int, float)) or isinstance(probability, bool) or not 0 <= float(probability) <= 1):
             raise ValueError("note probability is invalid")

@@ -362,9 +362,12 @@ fn data_set_takes_one_key_or_entries_alone() {
     // The registry's dialect has no oneOf: the host holds data.set to one form or the other.
     use ableton_mcp_server::registry::{validate_live_operation_request, validate_live_operation_result};
     let one = json!({"ref":"live:1:track:0","key":"kumi.track","value":"id"});
-    let entries = json!({"entries":[{"ref":"live:1:track:0","key":"kumi.track","value":"id"}]});
+    let entries = json!({"entries":[{"ref":"live:1:track:0","key":"kumi.track","value":"id","expectedObjectIdentity":"live:1"}]});
     assert!(validate_live_operation_request("data.set", &one).is_ok());
     assert!(validate_live_operation_request("data.set", &entries).is_ok());
+    // Each entry names the object read at its place: a ref names a place.
+    let unnamed = json!({"entries":[{"ref":"live:1:track:0","key":"kumi.track","value":"id"}]});
+    assert!(validate_live_operation_request("data.set", &unnamed).is_err());
     for neither_or_both in [json!({}), json!({"ref":"live:1:track:0","key":"kumi.track","value":"id","entries":entries["entries"]})] {
         let refused = validate_live_operation_request("data.set", &neither_or_both).unwrap_err();
         assert!(refused.0.contains("takes one key (ref, key, value) or entries alone"), "{}", refused.0);

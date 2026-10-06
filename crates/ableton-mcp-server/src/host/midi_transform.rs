@@ -273,7 +273,7 @@ vec![])}
 outcome)=match transform_notes(&clip.notes,
 kind,
 &resolved,
-clip.length){
+clip.end){
 Ok(v)=>v,
 Err(e)=>return Ok(error(id,
 -32602,
@@ -302,6 +302,13 @@ return Ok(transaction_error(id,
 "Large transforms default to duplicate scope; pass scope=in-place explicitly to edit the source clip"));
 }
 
+            // A copy goes to a Session slot, which an Arrangement clip can't be copied into: its notes change in place.
+            if effective=="duplicate"&&clip.arrangement{
+return Ok(transaction_error(id,&if generative{
+format!("\"{}\" is an Arrangement clip, and a generative transform ({kind}) writes into a copy in a Session slot, which an Arrangement clip can't be copied to: run it on a Session clip, or use a transform that changes notes in place (scope in-place)",clip.name)}
+else{
+format!("\"{}\" is an Arrangement clip: its notes change in place (scope in-place); duplicate scope copies into a Session slot, which an Arrangement clip can't be copied to",clip.name)}));
+}
             if effective=="duplicate"&&!params["target"].is_object(){
 return Ok(error(id,
 -32602,
@@ -378,7 +385,7 @@ return Err(LiveError::error("target slot or scene identity is invalid"));
 false)?,
 "expectedResultIdentity":note_digest(&notes,
 true)?,
-"clipLength":clip.length}
+"clipLength":clip.end}
 ,
 "prior":{
 "notes":clip.notes}

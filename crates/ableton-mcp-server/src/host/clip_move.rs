@@ -95,15 +95,34 @@ fn arrangement_target_fence(fence: String, target: Option<&Value>) -> String {
         None => fence,
     }
 }
+/// Whether what Live found in a move's new place just before cutting (`cleared`) is what the preview named
+/// (`replaces`): a clip dropped there in between would have been cut unnamed, which Kumi's undo can't put back. An
+/// audio clip crossing an edge isn't in the way by then: Kumi's Live extension cut it first.
+fn cleared_as_named(cleared: &Value, replaces: Option<&Value>) -> bool {
+    let Some(cleared) = cleared.as_array() else { return false };
+    let key = |row: &Value| {
+        (row["name"].as_str().unwrap_or("").to_owned(), row["start"].as_f64().unwrap_or(f64::NAN), row["end"].as_f64().unwrap_or(f64::NAN))
+    };
+    let mut found: Vec<_> = cleared.iter().map(key).collect();
+    let expected: Vec<_> =
+        replaces.and_then(Value::as_array).into_iter().flatten().filter(|r| !(r["audio"] == true && r["whole"] != true)).map(key).collect();
+    for (name, start, end) in &expected {
+        match found.iter().position(|f| f.0 == *name && (f.1 - start).abs() <= 1e-6 && (f.2 - end).abs() <= 1e-6) {
+            Some(at) => drop(found.remove(at)),
+            None => return false,
+        }
+    }
+    found.is_empty()
+}
 /// A clip a move replaces, as its refusal names it: "Vox" (beats 0 to 8).
 fn named(clip: &Value) -> String {
     let beat = |v: &Value| kumi_common::js::number::to_string(v.as_f64().unwrap_or(f64::NAN));
     format!("\"{}\" (beats {} to {})", clip["name"].as_str().unwrap_or(""), beat(&clip["start"]), beat(&clip["end"]))
 }
 
-/// A failure after Kumi's Live extension cut into what a move replaces: what was cut, first, and the way back.
-/// The cut stays until undone, so it never reads as nothing changed.
-fn after_cuts(error: LiveError, cut: &[&Value]) -> LiveError {
+/// A failure after Kumi's Live extension cut into what a move (or a copy) replaces: what was cut, first, and the way
+/// back. The cut stays until undone, so it never reads as nothing changed.
+fn after_cuts(error: LiveError, cut: &[&Value], copy: bool) -> LiveError {
     if cut.is_empty() {
         return error;
     }
@@ -112,7 +131,8 @@ fn after_cuts(error: LiveError, cut: &[&Value]) -> LiveError {
         cut.iter().map(|c| format!("{} at beats {} to {}", named(c), beat(&c["from"]), beat(&c["to"]))).collect::<Vec<_>>().join(" and ");
     let reason = error.message().strip_prefix("request failed: ").unwrap_or(error.message()).replace("; nothing changed", "");
     let back = if cut.len() == 1 { "Live's own undo puts it back in one step" } else { "Live's own undo puts them back, one step per cut" };
-    LiveError::error(format!("Kumi cut {what} with its Live extension, then couldn't finish the move; {back}. Why: {reason}"))
+    let change = if copy { "copy" } else { "move" };
+    LiveError::error(format!("Kumi cut {what} with its Live extension, then couldn't finish the {change}; {back}. Why: {reason}"))
 }
 
 impl McpHost {
@@ -492,7 +512,7 @@ impl McpHost {
                         Ok((reference.to_owned(), self.arrangement_clip_authority(&fresh, reference)?, capture_object_fingerprint(moving)?))
                     }
                     .await;
-                    let (reference, authority, fingerprint) = found.map_err(|e| after_cuts(e, &cutting[..cut.min(cutting.len())]))?;
+                    let (reference, authority, fingerprint) = found.map_err(|e| after_cuts(e, &cutting[..cut.min(cutting.len())], t["payload"]["keepSource"] == true))?;
                     args["ref"] = json!(reference);
                     args["expectedContentFingerprint"] = json!(fingerprint);
                     merge(&mut args, &authority);
@@ -501,7 +521,7 @@ impl McpHost {
                 let result = adapter
                     .invoke_async(&LiveInvocation::new("arrangement.clip.move", args), Some(&context))
                     .await
-                    .map_err(|e| after_cuts(e, &cutting[..cut.min(cutting.len())]))?;
+                    .map_err(|e| after_cuts(e, &cutting[..cut.min(cutting.len())], t["payload"]["keepSource"] == true))?;
 
                 if result.is_null() {
                     return Err(LiveError::type_error("Cannot read properties of null (reading 'ref')"));
@@ -534,6 +554,9 @@ impl McpHost {
                 let mut created = result.clone();
                 created["fingerprint"] = result["createdFingerprint"].clone();
                 record.borrow_mut()["created"] = created;
+                if !cleared_as_named(&result["cleared"], t.get("replaces")) {
+                    record.borrow_mut()["replacesUnknown"] = json!(true);
+                }
             } else {
                 let duplicate = &payload["duplicate"];
                 if let Some(snapshot) = &snapshot {
@@ -604,10 +627,11 @@ impl McpHost {
                 t["applyKey"] = params["idempotencyKey"].clone();
                 t["state"] = json!("applied");
             }
-            Ok(success_text(
-                id,
-                &json!({"transactionId":t["id"],"state":"applied","created":record.borrow()["created"],"idempotent":false}),
-            ))
+            let mut applied = json!({"transactionId":t["id"],"state":"applied","created":record.borrow()["created"],"idempotent":false});
+            if record.borrow()["replacesUnknown"] == true {
+                applied["replacesUnknown"] = json!(true);
+            }
+            Ok(success_text(id, &applied))
         }
         .await;
         Some(result.unwrap_or_else(|e| {
@@ -653,6 +677,15 @@ impl McpHost {
 
             if reconciliation {
                 self.replay_undo_recovery(&record, adapter.as_ref(), &context).await?;
+            }
+            if t["replacesUnknown"] == true {
+                // Refused before anything is done: the transaction stays as applied.
+                let change = if t["payload"]["keepSource"] == true { "copy" } else { "move" };
+                return Ok(reason_error(
+                    id,
+                    &format!("the {change} cut something where it landed that its preview didn't name (a clip put there in between), which Kumi can't put back; Live's own undo can"),
+                    "Nothing changed. Undo it in Live (Cmd-Z, or live_song_undo): Live takes back what came after it first.",
+                ));
             }
             record.borrow_mut()["state"] = json!("undoing");
             let payload = record.borrow()["payload"].clone();

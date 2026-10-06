@@ -293,8 +293,7 @@ struct RemoteInner {
 #[derive(Clone)]
 pub struct RemoteScriptLiveAdapter(Rc<RemoteInner>);
 /// What the bridge says when Live runs another version of Kumi's Remote Script than this bridge's.
-pub const ANOTHER_BRIDGE: &str =
-    "Live is running another version of Kumi's bridge than the one installed (Live loads it when it starts): restart Live";
+pub use kumi_common::bridge::ANOTHER_BRIDGE;
 impl RemoteScriptLiveAdapter {
     pub async fn connect(endpoint: RemoteScriptEndpoint) -> Result<Self, LiveError> {
         endpoint.validate()?;

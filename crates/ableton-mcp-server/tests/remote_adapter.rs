@@ -263,7 +263,7 @@ async fn authenticated_hello_and_registry_negotiation() {
             .await;
             let refused = RemoteScriptLiveAdapter::connect(older.endpoint.clone()).await.err().unwrap();
             assert_eq!(refused.message(), ableton_mcp_server::bridge::remote_adapter::ANOTHER_BRIDGE);
-            assert!(refused.message().ends_with("restart Live"));
+            assert!(refused.message().contains("restart Live"));
             for change in [
                 json!({"epoch":-1,"capabilities":[42]}),
                 json!({"capabilities":["session.write"]}),
