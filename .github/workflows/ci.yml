@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # A merge queue's run of a pull request on top of main checks it as the pull request's own run does.
+  # Nothing triggers it until the repository has a merge queue.
+  merge_group:
   schedule:
     # Every test on every platform each night, besides each push to main.
     - cron: "17 6 * * *"
@@ -36,7 +39,14 @@ jobs:
         shell: bash
         run: |
           # A pull request that changes only documentation skips the builds; main and the nightly run build everything.
-          if [[ "${{ github.event_name }}" != "pull_request" ]] || git diff --name-only "origin/${GITHUB_BASE_REF}...HEAD" | grep -v -E '^(docs/|LICENSE)|\.md$' | grep -q .; then
+          case "${{ github.event_name }}" in
+            pull_request) base="origin/${GITHUB_BASE_REF}" ;;
+            merge_group) base="${{ github.event.merge_group.base_sha }}" ;;
+            *) base= ;;
+          esac
+          # Read whole, then searched: grep -q can close a pipe early, and git, still writing, fails under pipefail.
+          if [[ -n "$base" ]]; then changed="$(git diff --name-only "$base...HEAD")"; fi
+          if [[ -z "$base" ]] || grep -q -v -E '^$|^(docs/|LICENSE)|\.md$' <<<"$changed"; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
             echo "code=false" >> "$GITHUB_OUTPUT"
@@ -158,7 +168,7 @@ jobs:
           # A pull request runs what differs by platform, beside every test on Linux: installing, launching and
           # updating; the terminal and stdin; Hands; paths, files and child processes; and a few smoke tests.
           # main and the nightly run take every test.
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.event_name }}" == "merge_group" ]]; then
             tests="install cli_binary cli update bridge_setup doctor live_extension report login config history library stdin_handoff terminal tui voice_input"
             tests+=" hands_transport mcp auth system disk samples project_runtime library_files library_learn library_state_plan voice video local_servers session agent"
             tests+=" lifecycle lifecycle_migration lifecycle_release delivery delivery_cli extension_launcher extension_channel stdio fixture_paths project host_probes analysis_runner sqlite_reader tool_catalog"
@@ -189,7 +199,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        # A pull request's run on macOS waited longest for a runner, for under a minute's work; main and the nightly
+        # run it there too.
+        os: ${{ fromJSON((github.event_name == 'pull_request' || github.event_name == 'merge_group') && '["ubuntu-24.04", "windows-2025"]' || '["ubuntu-24.04", "macos-15", "windows-2025"]') }}
     defaults:
       run:
         shell: bash
@@ -237,11 +249,11 @@ jobs:
       - name: Check committed whitespace in this change
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            git diff --check "origin/${GITHUB_BASE_REF}...HEAD"
-          else
-            git diff-tree --check --no-commit-id -r HEAD
-          fi
+          case "${{ github.event_name }}" in
+            pull_request) git diff --check "origin/${GITHUB_BASE_REF}...HEAD" ;;
+            merge_group) git diff --check "${{ github.event.merge_group.base_sha }}...HEAD" ;;
+            *) git diff-tree --check --no-commit-id -r HEAD ;;
+          esac
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
         with:
           python-version: "3.13"

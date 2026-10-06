@@ -3,7 +3,7 @@
 // The application and every normal launch after the handoff run the native binary.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -55,7 +55,11 @@ try {
       rmSync(archive, { force: true });
     }
   }
-  const result = spawnSync(executable, process.argv.slice(2), { stdio: 'inherit', env: { ...process.env, KUMI_LEGACY_HANDOFF: '1' } });
+  // An older Kumi's update or rollback ends with exactly `kumi bridge`, run from Kumi's own folder. Only
+  // that one is an update's last step (KUMI_BRIDGE_AFTER), not a kumi bridge the producer runs.
+  const sameFolder = (a, b) => { try { return realpathSync.native(a) === realpathSync.native(b); } catch { return false; } };
+  const updateStep = process.argv.length === 3 && process.argv[2] === 'bridge' && Boolean(process.env.KUMI_HOME) && sameFolder(process.cwd(), process.env.KUMI_HOME);
+  const result = spawnSync(executable, process.argv.slice(2), { stdio: 'inherit', env: { ...process.env, KUMI_LEGACY_HANDOFF: '1', ...(updateStep && { KUMI_BRIDGE_AFTER: '1' }) } });
   if (result.error) throw result.error;
   if (result.signal) process.kill(process.pid, result.signal);
   else process.exitCode = result.status ?? 1;
