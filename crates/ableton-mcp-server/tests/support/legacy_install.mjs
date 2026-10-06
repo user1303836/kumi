@@ -8,6 +8,7 @@ const dist=path.join(input.bundle,'apps/mcp-server/dist/src');
 let source=fs.readFileSync(new URL('./legacy_lifecycle_fixture.mjs',import.meta.url),'utf8');
 for(const name of ['delivery','live','lifecycle'])source=source.replaceAll(`"../src/${name}.js"`,JSON.stringify(pathToFileURL(path.join(dist,`${name}.js`)).href));
 source=source.replace('new URL("../../../../LICENSE.md", import.meta.url)',JSON.stringify(path.join(root,'LICENSE.md')));
+source=source.replace('new URL("../../../../protocol/ableton-live-v1.operations.json", import.meta.url)',JSON.stringify(path.join(input.bundle,'protocol/ableton-live-v1.operations.json')));
 source+=`
 const input=${JSON.stringify(input)};
 const packageRoot=fixturePackage(input.root,input.version,'actual-node-install');

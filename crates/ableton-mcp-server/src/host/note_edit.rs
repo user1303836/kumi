@@ -13,7 +13,25 @@ pub(super) struct NoteClip {
     pub notes: Vec<Value>,
     pub notes_revision: String,
     pub authority: Value,
-    pub length: f64,
+    /// Where its notes can be, in its own time: up to the later of its loop end and end marker. (Live's length is
+    /// end minus start, which the notes of a split or left-trimmed clip, its start marker past 0, run past.)
+    pub end: f64,
+    pub name: String,
+    /// It's in the Arrangement (not a Session slot).
+    pub arrangement: bool,
+}
+/// A MIDI clip's own-time end (see `NoteClip::end`), from its row: its length where the row has no loop or markers.
+fn own_time_end(clip: &Value) -> Option<f64> {
+    let length = finite(&clip["length"])?;
+    Some(["loopEnd", "endMarker"].iter().filter_map(|key| finite(&clip[*key])).fold(length, f64::max))
+}
+/// Why an audio clip takes no note edit.
+fn audio_clip(name: &Value) -> LiveError {
+    LiveError::error(format!("\"{}\" is an audio clip; notes are only in MIDI clips", name.as_str().unwrap_or_default()))
+}
+/// Why a note can't go where it was asked to: the clip's own-time span, as read_notes' JSON gives its notes.
+pub(super) fn past_the_clip(clip: &NoteClip) -> String {
+    format!("\"{}\" holds notes from beat 0 to {} in its own time", clip.name, helpers::js_string(&json!(clip.end)).unwrap_or_default())
 }
 fn key(note: &Value) -> String {
     note.get("id").map(js_json::stringify).unwrap_or_else(|| "$undefined".into())
@@ -66,20 +84,66 @@ fn fence(notes: &[Value], content: bool) -> String {
     js_json::stringify(&Value::Array(rows.into_iter().map(|(_, row)| row).collect()))
 }
 impl McpHost {
-    pub(super) fn note_clip(&self, snapshot: &LiveSnapshot, reference: &str) -> Result<NoteClip, LiveError> {
+    /// The clip a note edit names, with its notes and their revision, fenced as the Remote Script fences it: a Session
+    /// clip by its track, slot and scene, from the view's track row; an Arrangement clip by its track, read on its own
+    /// with its notes (a view lists Arrangement clips without them), under that track.
+    pub(super) async fn note_clip(
+        &self,
+        snapshot: &LiveSnapshot,
+        context: Option<&LiveOperationContext>,
+        reference: &str,
+    ) -> Result<NoteClip, LiveError> {
+        let value = serde_json::to_value(snapshot).unwrap();
+        if let Some(row) = value["arrangement"]["clips"].as_array().into_iter().flatten().find(|clip| clip["ref"] == reference) {
+            let track =
+                value["tracks"].as_array().into_iter().flatten().find(|track| track["ref"] == row["trackRef"]).cloned().unwrap_or_default();
+            if row["isAudio"] == true || row["kind"] == "audio" {
+                return Err(audio_clip(&row["name"]));
+            }
+            let fields = ["ref", "objectIdentity", "kind", "name", "length", "loopEnd", "endMarker", "notes", "notesRevision"];
+            let clip = match track["ref"].as_str() {
+                Some(parent) if is_non_empty_string(&track["objectIdentity"], 256) => {
+                    self.discover_one_async(context, LiveDiscoveryKind::ArrangementClip, reference, Some(&fields), Some(parent)).await?
+                }
+                _ => None,
+            };
+            let clip = clip.filter(|clip| {
+                clip["kind"] == "midi"
+                    && clip["notes"].is_array()
+                    && is_non_empty_string(&clip["notesRevision"], 64)
+                    && own_time_end(clip).is_some()
+                    && is_non_empty_string(&clip["objectIdentity"], 256)
+            });
+            if let Some(clip) = clip {
+                return Ok(NoteClip {
+                    notes: clip["notes"].as_array().unwrap().clone(),
+                    notes_revision: clip["notesRevision"].as_str().unwrap().into(),
+                    authority: json!({"expectedObjectIdentity":clip["objectIdentity"],"expectedTrackRef":track["ref"],"expectedTrackIdentity":track["objectIdentity"]}),
+                    end: own_time_end(&clip).unwrap(),
+                    name: clip["name"].as_str().or(row["name"].as_str()).unwrap_or_default().into(),
+                    arrangement: true,
+                });
+            }
+            return Err(LiveError::error("MIDI clip reference lacks exact identity or notes revision"));
+        }
         for track in snapshot.tracks.as_deref().unwrap_or(&[]) {
             if let Some(clip) = track.clips.iter().find(|clip| clip.ref_.0 == reference) {
                 let clip = serde_json::to_value(clip).unwrap();
+                if clip["kind"] == "audio" {
+                    return Err(audio_clip(&clip["name"]));
+                }
                 if clip["kind"] == "midi"
                     && clip["notes"].is_array()
                     && is_non_empty_string(&clip["notesRevision"], 64)
-                    && finite(&clip["length"]).is_some()
+                    && own_time_end(&clip).is_some()
                 {
                     return Ok(NoteClip {
                         notes: clip["notes"].as_array().unwrap().clone(),
                         notes_revision: clip["notesRevision"].as_str().unwrap().into(),
                         authority: self.clip_authority(snapshot, reference)?,
-                        length: clip["length"].as_f64().unwrap(),
+                        end: own_time_end(&clip).unwrap(),
+                        name: clip["name"].as_str().unwrap_or_default().into(),
+                        arrangement: false,
                     });
                 }
             }
@@ -112,7 +176,7 @@ impl McpHost {
                 return Err(LiveError::error(format!("{operation} is unavailable")));
             }
             let snapshot = self.views.view_for(None, &[params["clipRef"].clone()], None, &[]).await?;
-            let clip = self.note_clip(&snapshot, params["clipRef"].as_str().unwrap())?;
+            let clip = self.note_clip(&snapshot, None, params["clipRef"].as_str().unwrap()).await?;
             let fence = note_fence(&clip.notes);
             let present: HashSet<_> = clip.notes.iter().filter(|n| n["id"].is_number()).map(key).collect();
             let mut note_ids = vec![];
@@ -186,9 +250,9 @@ impl McpHost {
                     if !note["start"]
                         .as_f64()
                         .zip(note["duration"].as_f64())
-                        .is_some_and(|(start, duration)| start >= 0.0 && duration > 0.0 && start + duration <= clip.length)
+                        .is_some_and(|(start, duration)| start >= 0.0 && duration > 0.0 && start + duration <= clip.end)
                     {
-                        return Ok(error(id, -32602, "note patch exceeds the exact clip length", None));
+                        return Ok(error(id, -32602, &format!("note patch runs past the clip: {}", past_the_clip(&clip)), None));
                     }
                 }
             } else {
@@ -267,7 +331,7 @@ impl McpHost {
             let reference = t["clipRef"].as_str().unwrap();
             if !reconciliation {
                 let snapshot = self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?;
-                let current = self.note_clip(&snapshot, reference)?;
+                let current = self.note_clip(&snapshot, Some(&context), reference).await?;
                 if note_fence(&current.notes) != t["fence"]
                     || current.notes_revision != t["notesRevision"]
                     || js_json::stringify(&current.authority) != js_json::stringify(&t["authority"])
@@ -300,7 +364,9 @@ impl McpHost {
                 return Err(LiveError::error("Live did not confirm the complete note edit"));
             }
 
-            let applied = self.note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, reference)?;
+            let applied = self
+                .note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, Some(&context), reference)
+                .await?;
             let applied_fence = note_fence(&applied.notes);
             record.borrow_mut()["appliedFence"] = json!(applied_fence);
             if applied_fence != t["expectedAppliedFence"] {
@@ -357,7 +423,9 @@ impl McpHost {
             if reconciliation {
                 self.replay_undo_recovery(record, adapter.as_ref(), &context).await?;
             }
-            let current = self.note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, reference)?;
+            let current = self
+                .note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, Some(&context), reference)
+                .await?;
             let prior_notes = t["priorNotes"].as_array().unwrap();
             if apply_recovery {
                 if js_json::stringify(&current.authority) != js_json::stringify(&t["authority"]) {
@@ -395,8 +463,9 @@ impl McpHost {
                     .await?;
                 }
 
-                let verified =
-                    self.note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, reference)?;
+                let verified = self
+                    .note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, Some(&context), reference)
+                    .await?;
                 if note_content_fence(&verified.notes) != expected {
                     return Err(LiveError::error("uncertain note deletion recovery did not restore exact prior content"));
                 }
@@ -457,8 +526,9 @@ impl McpHost {
                 )
                 .await?;
 
-                let verified =
-                    self.note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, reference)?;
+                let verified = self
+                    .note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, Some(&context), reference)
+                    .await?;
                 if note_fence(&verified.notes) != t["fence"] {
                     return Err(LiveError::error("note update undo did not restore exact prior notes"));
                 }
@@ -505,7 +575,9 @@ impl McpHost {
                 return Err(LiveError::error("note delete undo did not re-add the complete batch"));
             }
 
-            let verified = self.note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, reference)?;
+            let verified = self
+                .note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, Some(&context), reference)
+                .await?;
             if note_content_fence(&verified.notes) != expected {
                 return Err(LiveError::error("note delete undo content verification failed"));
             }

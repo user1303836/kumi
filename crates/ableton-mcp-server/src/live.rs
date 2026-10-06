@@ -3451,6 +3451,16 @@ fn clip_path(state: &Value, reference: &str) -> Result<String, LiveError> {
         .filter(|path| state.pointer(path).is_some_and(|value| value.get("notes").is_some()))
         .ok_or_else(|| LiveError::error(format!("unknown clip reference: {reference}")))
 }
+/// The clip a note operation names: a Session clip, or an Arrangement clip (in the Arrangement's own list).
+pub(super) fn note_clip_path(state: &Value, reference: &str) -> Result<String, LiveError> {
+    clip_path(state, reference).or_else(|error| {
+        array(&state["arrangementClips"])
+            .iter()
+            .position(|row| row["clip"]["ref"] == reference && row["clip"].get("notes").is_some())
+            .map(|index| format!("/arrangementClips/{index}/clip"))
+            .ok_or(error)
+    })
+}
 fn all_device_rows(state: &Value) -> Vec<Value> {
     fn visit(devices: &Value, depth: usize, rows: &mut Vec<Value>) {
         for device in array(devices) {
@@ -3757,7 +3767,22 @@ impl DeterministicLiveSimulator {
                     for key in ["name", "kind", "start", "length"] {
                         row[key] = clip[key].clone();
                     }
-                    row["notes"] = array(&clip["notes"]).len().into();
+                    // A MIDI clip's loop and markers, where it has them, as the Remote Script gives them: its notes are
+                    // in its own time, which a split or left-trimmed clip's run past its length in.
+                    if clip["kind"] == "midi" {
+                        for key in ["looping", "loopStart", "loopEnd", "startMarker", "endMarker"] {
+                            if let Some(v) = clip.get(key).filter(|v| !v.is_null()) {
+                                row[key] = v.clone();
+                            }
+                        }
+                    }
+                    // Asked for, the notes and their revision, as the Remote Script reads them; else how many.
+                    if request.fields.as_ref().is_some_and(|fields| fields.iter().any(|f| f == "notes" || f == "notesRevision")) {
+                        row["notes"] = clip["notes"].clone();
+                        row["notesRevision"] = clip["notesRevision"].clone();
+                    } else {
+                        row["notes"] = array(&clip["notes"]).len().into();
+                    }
                     row
                 })
                 .collect(),
@@ -3983,7 +4008,7 @@ impl DeterministicLiveSimulator {
     }
     pub fn add_note(&self, reference: &LiveRef, note: &Note) -> Result<Value, LiveError> {
         let mut state = self.state.borrow_mut();
-        let path = clip_path(&state, reference)?;
+        let path = note_clip_path(&state, reference)?;
         let clip = state.pointer_mut(&path).unwrap();
         Self::validate_note_for_clip(clip, note)?;
         let id = self.next_note_id.get();
@@ -4057,14 +4082,27 @@ impl DeterministicLiveSimulator {
         }
         Err(LiveError::error("clip hierarchy identity is unavailable"))
     }
+    /// A note operation's clip authority, as the Remote Script's: a Session clip by its track, slot and scene; an
+    /// Arrangement clip by its track.
+    pub(super) fn note_clip_authority(state: &Value, reference: &str) -> Result<Value, LiveError> {
+        if let Some(row) = array(&state["arrangementClips"]).iter().find(|row| row["clip"]["ref"] == reference) {
+            let track = array(&state["tracks"]).iter().find(|track| track["ref"] == row["trackRef"]);
+            if let Some(track) = track.filter(|track| track["objectIdentity"].is_string() && row["clip"]["objectIdentity"].is_string()) {
+                return Ok(
+                    serde_json::json!({"expectedObjectIdentity":row["clip"]["objectIdentity"],"expectedTrackRef":track["ref"],"expectedTrackIdentity":track["objectIdentity"]}),
+                );
+            }
+        }
+        Self::session_clip_authority(state, reference)
+    }
     fn assert_note_authority(&self, args: &Map<String, Value>, reference: &str) -> Result<(), LiveError> {
         let state = self.state.borrow();
-        let path = clip_path(&state, reference)?;
+        let path = note_clip_path(&state, reference)?;
         let clip = state.pointer(&path).unwrap();
         if !args.contains_key("expectedClipAuthority") {
             return Err(LiveError::error("unsupported simulator authority value"));
         }
-        if args.get("expectedClipAuthority") != Some(&Self::session_clip_authority(&state, reference)?)
+        if args.get("expectedClipAuthority") != Some(&Self::note_clip_authority(&state, reference)?)
             || args.get("expectedNotesRevision") != clip.get("notesRevision")
         {
             return Err(LiveError::error("clip identity or notes changed since preview"));
@@ -4892,7 +4930,7 @@ impl DeterministicLiveSimulator {
                 let notes: Vec<Note> = from_live_json(Value::Array(input.clone()))?;
                 {
                     let state = self.state.borrow();
-                    let path = clip_path(&state, reference)?;
+                    let path = note_clip_path(&state, reference)?;
                     for note in &notes {
                         Self::validate_note_for_clip(state.pointer(&path).unwrap(), note)?;
                     }
@@ -4902,7 +4940,7 @@ impl DeterministicLiveSimulator {
                     ids.push(self.add_note(&reference.into(), note)?["noteId"].clone());
                 }
                 let state = self.state.borrow();
-                let path = clip_path(&state, reference)?;
+                let path = note_clip_path(&state, reference)?;
                 Ok(json!({"added":ids.len(),"noteIds":ids,"notesRevision":state.pointer(&path).unwrap()["notesRevision"]}))
             }
             "note.update" => {
@@ -4924,7 +4962,7 @@ impl DeterministicLiveSimulator {
                     }
                 }
                 let mut state = self.state.borrow_mut();
-                let path = clip_path(&state, reference)?;
+                let path = note_clip_path(&state, reference)?;
                 let clip = state.pointer_mut(&path).unwrap();
                 for id in &seen {
                     if !array(&clip["notes"]).iter().any(|note| note["id"].as_i64() == Some(*id)) {
@@ -4964,7 +5002,7 @@ impl DeterministicLiveSimulator {
                     }
                 }
                 let mut state = self.state.borrow_mut();
-                let path = clip_path(&state, reference)?;
+                let path = note_clip_path(&state, reference)?;
                 let clip = state.pointer_mut(&path).unwrap();
                 for id in ids {
                     if !array(&clip["notes"]).iter().any(|note| &note["id"] == id) {

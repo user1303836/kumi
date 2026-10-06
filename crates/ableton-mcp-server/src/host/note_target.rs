@@ -101,7 +101,7 @@ impl McpHost {
             }
 
             let snapshot = self.views.view_for(None, &[params["clipRef"].clone()], None, &[]).await?;
-            let clip = self.note_clip(&snapshot, params["clipRef"].as_str().unwrap())?;
+            let clip = self.note_clip(&snapshot, None, params["clipRef"].as_str().unwrap()).await?;
 
             let present: HashSet<_> =
                 clip.notes.iter().filter_map(|n| n.get("id")).filter(|v| v.is_number()).map(|v| key(Some(v))).collect();
@@ -278,8 +278,8 @@ let before_count=prior.len();
 let current=self.note_clip(&self.views.view_for(Some(&context),
 &[t["clipRef"].clone()],
 None,
-&[]).await?,
-reference)?;
+&[]).await?, Some(&context),
+reference).await?;
 if fence(&t["clipRef"],
 &current)!=t["fence"]{
 return Ok(transaction_error(id,
@@ -296,7 +296,7 @@ row["applyKey"]=params["idempotencyKey"].clone();
 
             let mut args=t["payload"].clone();args.as_object_mut().unwrap().remove("action");
             let result=adapter.invoke_async(&LiveInvocation::new(operation(action),args),Some(&context)).await?;
-            let verified=self.note_clip(&self.views.view_for(Some(&context),&[t["clipRef"].clone()],None,&[]).await?,reference)?;
+            let verified=self.note_clip(&self.views.view_for(Some(&context),&[t["clipRef"].clone()],None,&[]).await?, Some(&context),reference).await?;
             match action{
                 "duplicate"=>{
                     let count=t["payload"]["noteIds"].as_array().unwrap().len();
@@ -416,7 +416,9 @@ return Err(LiveError::error("quantization changed the note identity set"));
                 self.replay_undo_recovery(&record, adapter.as_ref(), &context).await?;
             }
 
-            let current = self.note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, reference)?;
+            let current = self
+                .note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, Some(&context), reference)
+                .await?;
             if let Some(moved) = self.undo_target_moved(
                 id,
                 &record.borrow(),
@@ -462,8 +464,13 @@ return Err(LiveError::error("quantization changed the note identity set"));
                         return Err(LiveError::error("note duplication undo did not delete the exact created batch"));
                     }
 
-                    let verified =
-                        self.note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, reference)?;
+                    let verified = self
+                        .note_clip(
+                            &self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?,
+                            Some(&context),
+                            reference,
+                        )
+                        .await?;
                     if note_content_fence(&verified.notes) != note_content_fence(prior) {
                         return Err(LiveError::error("note duplication undo did not restore exact prior content"));
                     }
@@ -502,8 +509,13 @@ return Err(LiveError::error("quantization changed the note identity set"));
                             }
                         }
 
-                        let verified =
-                            self.note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, reference)?;
+                        let verified = self
+                            .note_clip(
+                                &self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?,
+                                Some(&context),
+                                reference,
+                            )
+                            .await?;
                         if note_content_fence(&verified.notes) != note_content_fence(prior) {
                             return Err(LiveError::error("note range undo did not restore exact prior content"));
                         }
@@ -532,8 +544,13 @@ return Err(LiveError::error("quantization changed the note identity set"));
                     )
                     .await?;
 
-                    let verified =
-                        self.note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, reference)?;
+                    let verified = self
+                        .note_clip(
+                            &self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?,
+                            Some(&context),
+                            reference,
+                        )
+                        .await?;
                     if note_fence(&verified.notes) != note_fence(prior) {
                         return Err(LiveError::error("quantization undo did not restore exact prior notes"));
                     }

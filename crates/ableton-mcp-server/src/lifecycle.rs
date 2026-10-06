@@ -7,7 +7,7 @@ mod fs;
 mod release;
 pub use fs::assert_no_linked_ancestors;
 use fs::*;
-pub use release::{verify_artifact_binding, verify_release_package, ReleaseEvidence};
+pub use release::{verify_artifact_binding, verify_release_package, verify_retained_package, ReleaseEvidence};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 #[path = "lifecycle_actions.rs"]
@@ -144,7 +144,8 @@ fn next_generation(receipt: &Value) -> Value {
     json!((receipt["generation"].as_f64().unwrap_or(0.) + 1.) as u64)
 }
 fn package_valid(receipt: &Value, allow_dirty: bool) -> bool {
-    verify_release_package(p(&receipt["packageRoot"]), allow_dirty).is_ok_and(|e| {
+    // The installed generation runs its own bridge: after a rollback, an older one with its own registry.
+    verify_retained_package(p(&receipt["packageRoot"]), allow_dirty).is_ok_and(|e| {
         json!(e.manifest_sha256) == receipt["releaseManifestSha256"] && e.manifest["protocol"]["registryHash"] == receipt["registryHash"]
     })
 }

@@ -9,7 +9,7 @@ fn number(args: &Map<String, Value>, key: &str, min: f64, max: f64) -> Result<f6
     ranged_number(args.get(key).unwrap_or(&Value::Null), min, max, false, &format!("{key} is invalid"))
 }
 fn note_authority(state: &Value, reference: &str, args: &Map<String, Value>) -> Result<(), LiveError> {
-    let current = DeterministicLiveSimulator::session_clip_authority(state, reference)?;
+    let current = DeterministicLiveSimulator::note_clip_authority(state, reference)?;
     let expected = args.get("expectedClipAuthority").ok_or_else(|| LiveError::error("unsupported simulator authority value"))?;
     if simulator_revision(&current) != simulator_revision(expected) {
         Err(LiveError::error("note clip hierarchy identity changed since preview"))
@@ -38,9 +38,64 @@ fn numeric(value: &Value) -> f64 {
         _ => f64::NAN,
     }
 }
+/// A data write's place holds the object read there (`expectedObjectIdentity`, when named): Live writes by place.
+fn read_there(state: &Value, owner: &str, args: &Map<String, Value>) -> Result<(), LiveError> {
+    let Some(expected) = args.get("expectedObjectIdentity") else { return Ok(()) };
+    let found = if state["set"]["ref"] == owner {
+        &state["set"]["objectIdentity"]
+    } else {
+        array(&state["tracks"]).iter().find(|t| t["ref"] == owner).map(|t| &t["objectIdentity"]).unwrap_or(&Value::Null)
+    };
+    if found != expected {
+        return Err(LiveError::error("what's at that ref isn't the one that was read (a track was added, removed or moved since)"));
+    }
+    Ok(())
+}
 impl DeterministicLiveSimulator {
     pub(super) fn invoke_lom(&self, operation: &str, args: &Map<String, Value>) -> Result<Value, LiveError> {
         match operation {
+            "data.set" if args.get("entries").is_some() => {
+                // Entries, all or none, as the Remote Script saves them: every one checked before any is written.
+                let entries: Vec<Map<String, Value>> =
+                    args["entries"].as_array().into_iter().flatten().filter_map(|entry| entry.as_object().cloned()).collect();
+                let mut prior = Vec::new();
+                {
+                    let state = self.state.borrow();
+                    for entry in &entries {
+                        let owner = text(entry, "ref")?;
+                        if state["set"]["ref"] != owner && !array(&state["tracks"]).iter().any(|t| t["ref"] == owner) {
+                            return Err(LiveError::error("track reference is stale or invalid"));
+                        }
+                        if !entry.get("expectedObjectIdentity").is_some_and(Value::is_string) {
+                            return Err(LiveError::error(
+                                "data arguments are invalid: each entry names the identity of what was read there",
+                            ));
+                        }
+                        read_there(&state, owner, entry)?;
+                        let key = text(entry, "key")?;
+                        if !key.starts_with("kumi.") {
+                            return Err(LiveError::error("Kumi writes only its own keys (kumi.…); other keys are read-only"));
+                        }
+                        let held =
+                            self.stored_data.borrow().get(&format!("{owner}\0{key}")).cloned().map(Value::String).unwrap_or(Value::Null);
+                        if entry.get("expectedValue").is_some_and(|v| v != &held) {
+                            return Err(LiveError::error("the data under that key changed since it was read"));
+                        }
+                        prior.push(held);
+                    }
+                }
+                let mut saved = Vec::new();
+                for (entry, prior) in entries.iter().zip(prior) {
+                    let (owner, key) = (text(entry, "ref")?, text(entry, "key")?);
+                    let slot = format!("{owner}\0{key}");
+                    match entry.get("value").and_then(Value::as_str) {
+                        Some(v) => self.stored_data.borrow_mut().insert(slot, v.into()),
+                        None => self.stored_data.borrow_mut().remove(&slot),
+                    };
+                    saved.push(json!({"ref":owner,"key":key,"value":entry.get("value"),"prior":prior}));
+                }
+                Ok(json!({"entries":saved}))
+            }
             "data.get" | "data.set" => {
                 let owner = text(args, "ref")?;
                 let state = self.state.borrow();
@@ -60,6 +115,7 @@ impl DeterministicLiveSimulator {
                     .get("value")
                     .filter(|v| v.is_null() || v.is_string())
                     .ok_or_else(|| LiveError::type_error("value must be text of at most 1 MiB, or null"))?;
+                read_there(&state, owner, args)?;
                 if args.get("expectedValue").is_some_and(|v| v != &prior) {
                     return Err(LiveError::error("the data under that key changed since it was read"));
                 }
@@ -73,7 +129,7 @@ impl DeterministicLiveSimulator {
             "note.select" | "note.delete-range" => {
                 let reference = text(args, "ref")?;
                 let mut state = self.state.borrow_mut();
-                let path = clip_path(&state, reference)?;
+                let path = note_clip_path(&state, reference)?;
                 note_authority(&state, reference, args)?;
                 let clip = state.pointer_mut(&path).unwrap();
                 if operation == "note.select" {

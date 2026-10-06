@@ -269,9 +269,17 @@ pub(super) fn more(
             // An Arrangement move replaces what's in its new place, as dropping a clip in Live does.
             let replacing = replacing(preview);
             let title = if let Some(at) = at {
+                // An Arrangement copy (keepSource), and another track, named when the clip goes to one.
+                let copied = duplicate || input.get("keepSource") == Some(&json!(true));
+                let arrangement = input.get("clipRef").and_then(Value::as_str).is_some_and(|clip| clip.contains(":arrangement_clip:"));
+                let elsewhere = if duplicate || !arrangement {
+                    String::new()
+                } else {
+                    target.as_ref().map(|t| format!(" on {}", t.name)).unwrap_or_default()
+                };
                 format!(
-                    "{} {what} to {}{}{replacing}",
-                    if duplicate { "Copied" } else { "Moved" },
+                    "{} {what} to {}{}{elsewhere}{replacing}",
+                    if copied { "Copied" } else { "Moved" },
                     if duplicate { "the Arrangement at " } else { "" },
                     bars(at)
                 )

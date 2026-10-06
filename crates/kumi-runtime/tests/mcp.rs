@@ -274,6 +274,18 @@ local_test!(oversized_protocol_frame_closes_transport_and_invalidates_old_descri
     tools.close().await.unwrap();
 });
 
+local_test!(a_bridge_that_cant_start_says_why_in_its_own_words, {
+    // The bridge's last word ("mcp-host: …") is what the producer reads, not "check the built bridge…": Live left
+    // running through an update needs a restart, not another update.
+    let failure = connect_mcp(options("fatal", 2000)).await.err().unwrap().to_string();
+    assert_eq!(
+        failure,
+        "Kumi's bridge didn't start: Live is running another version of Kumi's bridge than the one installed (Live loads it when it starts): restart Live"
+    );
+    // Anything else on its stderr stays unread, as before.
+    assert!(!failure.contains("noise"));
+});
+
 local_test!(failed_startup_closes_the_owned_child_already_aborted_startup_creates_none, {
     let dir = tempfile::tempdir().unwrap();
     let pid_file = dir.path().join("pid");
