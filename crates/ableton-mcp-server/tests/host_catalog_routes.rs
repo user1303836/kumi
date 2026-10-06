@@ -1,4 +1,6 @@
 //! Every catalog entry crosses the public protocol boundary, including capability gates and sync refusals.
+#[path = "../../../tests/support/chunks.rs"]
+mod chunks;
 use ableton_mcp_server::{
     host::{helpers::canonical_mutation_identity, McpHost, McpHostOptions},
     live::*,
@@ -119,15 +121,34 @@ fn difference(a: &Value, b: &Value, path: &str) -> Option<String> {
         b.to_string().chars().take(400).collect::<String>()
     ))
 }
-#[tokio::test(flavor = "current_thread")]
-async fn every_catalog_tool_matches_source_at_the_public_boundary() {
-    tokio::task::LocalSet::new()
+fn oracle() -> Value {
+    serde_json::from_str(include_str!("fixtures/host-catalog-routes-oracle.json")).unwrap()
+}
+#[test]
+fn source_oracle_covers_the_complete_current_catalog() {
+    assert_eq!(
+        json!(TOOL_CATALOG.iter().map(|t| &t.name).collect::<Vec<_>>()),
+        oracle()["tools"],
+        "source oracle must cover the complete current catalog"
+    );
+}
+/// The oracle's cases, every tool's, in 16 tests that nextest runs side by side.
+mod every_catalog_tool_matches_source_at_the_public_boundary {
+    crate::chunks::chunked!(super::check_cases; part_00 = 0, part_01 = 1, part_02 = 2, part_03 = 3, part_04 = 4, part_05 = 5,
+        part_06 = 6, part_07 = 7, part_08 = 8, part_09 = 9, part_10 = 10, part_11 = 11, part_12 = 12, part_13 = 13, part_14 = 14,
+        part_15 = 15);
+}
+/// The oracle's cases at index `chunk`, `chunk + chunks`, …
+fn check_cases(chunk: usize, chunks: usize) {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(tokio::task::LocalSet::new()
         .run_until(async {
-            let oracle: Value = serde_json::from_str(include_str!("fixtures/host-catalog-routes-oracle.json")).unwrap();
-            assert_eq!(json!(TOOL_CATALOG.iter().map(|t|&t.name).collect::<Vec<_>>()), oracle["tools"], "source oracle must cover the complete current catalog");
+            let oracle = oracle();
             let status: LiveStatus = serde_json::from_value(oracle["fullStatus"].clone()).unwrap();
             let mut failures = vec![];
-            for (index, case) in oracle["cases"].as_array().unwrap().iter().enumerate() {
+            let mut checked = 0;
+            for (index, case) in oracle["cases"].as_array().unwrap().iter().enumerate().skip(chunk).step_by(chunks) {
+                checked += 1;
                 let sim = Rc::new(DeterministicLiveSimulator::new());
                 let adapter: Rc<dyn AsyncLiveAdapter> = if case["mode"] == "available" {
                     Rc::new(Advertised { sim: sim.clone(), status: status.clone() })
@@ -164,11 +185,10 @@ async fn every_catalog_tool_matches_source_at_the_public_boundary() {
             }
             assert!(
                 failures.is_empty(),
-                "{} discrepancies across {} source cases:\n{}",
+                "{} discrepancies across {checked} of {} source cases (part {chunk} of {chunks}):\n{}",
                 failures.len(),
                 oracle["cases"].as_array().unwrap().len(),
                 failures.join("\n")
             );
-        })
-        .await;
+        }));
 }
