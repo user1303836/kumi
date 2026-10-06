@@ -50,6 +50,9 @@ fn isolated(case: &str, run: impl FnOnce(File)) {
         let mut process = Process(Some(child));
         let status = wait(process.0.as_mut().unwrap(), Duration::from_secs(60));
         let output = process.0.take().unwrap().wait_with_output().unwrap();
+        for line in String::from_utf8_lossy(&output.stderr).lines().filter(|line| line.contains("[slow wait]")) {
+            eprintln!("{case}: {line}");
+        }
         assert!(
             status.success(),
             "{case}: {status}\nstdout: {}\nstderr: {}",
@@ -106,15 +109,69 @@ fn mode(console: &File) -> u32 {
     mode
 }
 
+/// The console's input queue, as it is.
+fn queued(console: &File) -> Vec<INPUT_RECORD> {
+    let mut count = 0;
+    assert_ne!(unsafe { GetNumberOfConsoleInputEvents(console.as_raw_handle(), &mut count) }, 0);
+    let mut records = vec![INPUT_RECORD::default(); count as usize];
+    let mut read = 0;
+    if count > 0 {
+        // SAFETY: records has room for count initialized records.
+        assert_ne!(unsafe { PeekConsoleInputW(console.as_raw_handle(), records.as_mut_ptr(), count, &mut read) }, 0);
+    }
+    records.truncate(read as usize);
+    records
+}
+
+/// A queued record, briefly, for a failure message.
+fn describe(records: &[INPUT_RECORD]) -> String {
+    let each = records.iter().map(|record| match u32::from(record.EventType) {
+        KEY_EVENT => {
+            // SAFETY: KEY_EVENT selects this union member.
+            let key = unsafe { record.Event.KeyEvent };
+            let unit = unsafe { key.uChar.UnicodeChar };
+            format!(
+                "key {:?}x{}{} vk{} scan{:#x}",
+                char::from_u32(u32::from(unit)).unwrap_or('?'),
+                key.wRepeatCount,
+                if key.bKeyDown == 0 { " up" } else { "" },
+                key.wVirtualKeyCode,
+                key.wVirtualScanCode
+            )
+        }
+        FOCUS_EVENT => "focus".into(),
+        MENU_EVENT => "menu".into(),
+        WINDOW_BUFFER_SIZE_EVENT => "size".into(),
+        MOUSE_EVENT => "mouse".into(),
+        other => format!("event {other}"),
+    });
+    each.collect::<Vec<_>>().join(", ")
+}
+
 fn queue_empty(console: &File) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let started = Instant::now();
+    let deadline = started + Duration::from_secs(10);
     loop {
-        let mut count = 0;
-        assert_ne!(unsafe { GetNumberOfConsoleInputEvents(console.as_raw_handle(), &mut count) }, 0);
-        if count == 0 {
+        let records = queued(console);
+        if records.is_empty() {
+            if started.elapsed() > Duration::from_secs(1) {
+                eprintln!("[slow wait] the reader took the console records in {:?}", started.elapsed());
+            }
             return;
         }
-        assert!(Instant::now() < deadline, "reader did not consume the prepared console records ({count} remain)");
+        if Instant::now() >= deadline {
+            // Evidence for #204: does one more input event make a waiting read take what's queued?
+            let mut focus = INPUT_RECORD { EventType: FOCUS_EVENT as u16, ..INPUT_RECORD::default() };
+            focus.Event.FocusEvent = FOCUS_EVENT_RECORD { bSetFocus: 1 };
+            write_records(console, &[focus]);
+            std::thread::sleep(Duration::from_secs(2));
+            panic!(
+                "reader did not consume the prepared console records ({} remain): [{}]; 2 s after one more (focus) event: [{}]",
+                records.len(),
+                describe(&records),
+                describe(&queued(console))
+            );
+        }
         // Sleep, not yield: on Windows a yield hands the processor only to a thread ready on the same one,
         // so seven tests spinning at once could starve the reader they wait for.
         std::thread::sleep(Duration::from_millis(2));
