@@ -3,11 +3,12 @@
 //! Remote Script, which the bridge reads again within a second of it changing, Live running.
 
 use crate::config::remote_scripts_dir;
-use ableton_mcp_server::delivery::{write_owner_file, REMOTE_SCRIPT_PACKAGE, WILLINGTON_CONFIG, WILLINGTON_FOLDER, WILLINGTON_RECEIPT};
+use ableton_mcp_server::delivery::{write_owner_file, REMOTE_SCRIPT_PACKAGE, WILLINGTON_CONFIG, WILLINGTON_FOLDER};
 use futures::future::{FutureExt, LocalBoxFuture};
 use kumi_common::time::now_ms_f64;
 use kumi_runtime::{integrations::ableton::willington::WillingtonSwitch, system::Env};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::{
     cell::RefCell,
     path::{Path, PathBuf},
@@ -72,14 +73,26 @@ impl Willington {
         let entry = std::fs::metadata(self.switch_file()).ok()?;
         Some((entry.modified().ok()?, entry.len()))
     }
-    /// Whether a passing Follow Action self-test sits beside the WillingtonBindings the bridge loads: one
-    /// installed beside the bridge comes first on Python's path, then the bridge's own copy. The bridge checks
-    /// the receipt against the library itself; without one, Follow Action edits stay off.
+    /// Whether a passing Follow Action self-test sits beside the WillingtonBindings the bridge loads (one
+    /// installed beside the bridge comes first on Python's path, then the bridge's own copy), for a library in
+    /// that folder. The bridge turns Follow Action edits on only when the receipt names the very library it
+    /// selects for the Live that's open, which Kumi can't know; a receipt for none of them, kept from a library
+    /// since replaced, would load Follow Actions for nothing.
     fn follow_receipt(&self) -> bool {
         let beside = self.scripts().join("WillingtonBindings");
-        let receipt =
-            if beside.join("__init__.py").is_file() { beside.join("self-test.json") } else { self.bridge.join(WILLINGTON_RECEIPT) };
-        read_json(&receipt).is_some_and(|value| value["status"] == "passed")
+        let bindings =
+            if beside.join("__init__.py").is_file() { beside } else { self.bridge.join(WILLINGTON_FOLDER).join("WillingtonBindings") };
+        let Some(receipt) = read_json(&bindings.join("self-test.json")) else { return false };
+        // The bridge compares the digest exactly, as Python's lowercase hex.
+        let digest = receipt["library_sha256"]
+            .as_str()
+            .filter(|digest| digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+        receipt["status"] == "passed"
+            && digest.is_some_and(|digest| {
+                libraries(&bindings, 3)
+                    .iter()
+                    .any(|library| std::fs::read(library).is_ok_and(|bytes| hex::encode(Sha256::digest(bytes)) == digest))
+            })
     }
     /// On writes the switch, owner-only (the bridge reads no other kind); off removes it. Follow Actions come
     /// on only with a self-test receipt that can turn their edits on, since Live can't unload their bindings.
@@ -104,6 +117,27 @@ impl Willington {
 }
 fn read_json(path: &Path) -> Option<Value> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+/// Willington's native libraries in a folder and up to `depth` folders below it (`build/<profile-id>/…`).
+fn libraries(folder: &Path, depth: usize) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(folder) else { return vec![] };
+    entries
+        .flatten()
+        .flat_map(|entry| {
+            let path = entry.path();
+            if path.is_dir() {
+                if depth > 0 {
+                    libraries(&path, depth - 1)
+                } else {
+                    vec![]
+                }
+            } else if path.is_file() && path.extension().is_some_and(|extension| extension == "dylib" || extension == "pyd") {
+                vec![path]
+            } else {
+                vec![]
+            }
+        })
+        .collect()
 }
 
 /// /willington for the app: whether the bindings are on (None while the bridge in Live doesn't carry

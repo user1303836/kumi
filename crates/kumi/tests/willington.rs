@@ -3,6 +3,7 @@ use ableton_mcp_server::delivery::{secret_permissions, SecretPermissions};
 use kumi::willington::{Willington, WillingtonControl, TURNED_OFF, TURNED_OFF_FOLLOW_STAYS, TURNED_ON, TURNED_ON_WITH_FOLLOW};
 use kumi_runtime::integrations::ableton::willington::WillingtonSwitch;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     fs,
@@ -77,21 +78,39 @@ async fn follow_actions_come_on_with_a_passing_self_test_for_the_bindings_the_br
     let control = WillingtonControl::new(scripts_env(scripts));
     let switch = scripts.join("AbletonMcpBridge/willington.json");
     let follow = || serde_json::from_slice::<Value>(&fs::read(&switch).unwrap()).unwrap()["followActions"].clone();
+    let receipt = |status: &str, digest: &str| format!(r#"{{"status": "{status}", "library_sha256": "{digest}"}}"#);
+    // The bridge's copy, with a library for one Live build, as Willington's matrix lays it out.
+    let library = b"Follow Actions library, b5";
+    let digest = hex::encode(Sha256::digest(library));
+    let bindings = scripts.join("AbletonMcpBridge/willington/WillingtonBindings");
+    put(&bindings.join("build/live-12.4.15b5-arm64/libwillington.dylib"), std::str::from_utf8(library).unwrap());
     // A receipt that didn't pass is no receipt.
-    let receipt = scripts.join("AbletonMcpBridge/willington/WillingtonBindings/self-test.json");
-    put(&receipt, r#"{"status": "failed"}"#);
+    put(&bindings.join("self-test.json"), &receipt("failed", &digest));
     assert_eq!((control.set)(true).await.unwrap(), TURNED_ON);
     assert_eq!(follow(), false);
-    put(&receipt, r#"{"status": "passed", "library_sha256": "0"}"#);
+    // Passed, but for a library that isn't there (one an update replaced since), or with no digest the bridge
+    // could match: the bridge would leave Follow Action edits off, so their bindings aren't loaded.
+    let replaced = hex::encode(Sha256::digest(b"Follow Actions library, an older build"));
+    for stale in [replaced.as_str(), "0", &digest.to_uppercase()] {
+        put(&bindings.join("self-test.json"), &receipt("passed", stale));
+        assert_eq!((control.set)(true).await.unwrap(), TURNED_ON, "{stale}");
+        assert_eq!(follow(), false, "{stale}");
+    }
+    put(&bindings.join("self-test.json"), &receipt("passed", &digest));
     assert_eq!((control.set)(true).await.unwrap(), TURNED_ON_WITH_FOLLOW);
     assert_eq!(follow(), true);
     // Turned off, Live keeps Follow Actions' bindings until it restarts: the producer is told.
     assert_eq!((control.set)(false).await.unwrap(), TURNED_OFF_FOLLOW_STAYS);
-    // WillingtonBindings installed beside the bridge comes first on Python's path: its receipt is the one.
-    put(&scripts.join("WillingtonBindings/__init__.py"), "");
+    // WillingtonBindings installed beside the bridge comes first on Python's path: its receipt and its library.
+    let beside = scripts.join("WillingtonBindings");
+    put(&beside.join("__init__.py"), "");
     assert_eq!((control.set)(true).await.unwrap(), TURNED_ON);
     assert_eq!(follow(), false);
-    put(&scripts.join("WillingtonBindings/self-test.json"), r#"{"status": "passed"}"#);
+    put(&beside.join("self-test.json"), &receipt("passed", &digest));
+    assert_eq!((control.set)(true).await.unwrap(), TURNED_ON, "the receipt names a library only the bridge's copy has");
+    let windows = b"Follow Actions library, Windows b5";
+    put(&beside.join("willington_bindings.pyd"), std::str::from_utf8(windows).unwrap());
+    put(&beside.join("self-test.json"), &receipt("passed", &hex::encode(Sha256::digest(windows))));
     assert_eq!((control.set)(true).await.unwrap(), TURNED_ON_WITH_FOLLOW);
     assert_eq!((control.set)(false).await.unwrap(), TURNED_OFF_FOLLOW_STAYS);
 }
