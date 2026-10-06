@@ -134,9 +134,9 @@ impl McpHost {
                         && helpers::arrangement_clip_end(clip) > start + 1e-6
                 }) {
                     let beat = |v: f64| kumi_common::js::number::to_string(v);
+                    let name = other["name"].as_str().filter(|name| !name.is_empty()).map_or("a clip with no name".into(), |name| format!("\u{201c}{name}\u{201d}"));
                     return Err(LiveError::error(format!(
-                        "Kumi can't place a copy over other clips yet: \u{201c}{}\u{201d} is at beats {} to {}. Clear that span first or pick a free spot",
-                        other["name"].as_str().unwrap_or(""),
+                        "Kumi can't place a copy over other clips yet: {name} is at beats {} to {}. Clear that span first or pick a free spot",
                         beat(other["start"].as_f64().unwrap_or(f64::NAN)),
                         beat(helpers::arrangement_clip_end(other))
                     )));

@@ -385,6 +385,11 @@ async fn a_copy_into_the_arrangement_never_lands_on_another_clip() {
             "{position}: {refused}"
         );
     }
+    // A clip with no name is called that.
+    sim.state.borrow_mut()["arrangementClips"][0]["clip"]["name"] = json!("");
+    let refused = preview(12.0).await;
+    assert!(refused.to_string().contains("yet: a clip with no name is at beats 12 to 16"), "{refused}");
+    sim.state.borrow_mut()["arrangementClips"][0]["clip"]["name"] = json!("Chorus");
     // Next to it, either side, is free.
     for position in [8.0, 16.0] {
         let shown = preview(position).await;
