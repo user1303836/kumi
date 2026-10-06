@@ -3,6 +3,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import secrets
 import struct
 import subprocess
@@ -2234,9 +2235,28 @@ class ControlSurfaceTests(unittest.TestCase):
                         else: self.notes.append(dict(self.notes[-1]))
                 song = FakeSong(); clip = BadClip(4); song.tracks[0].clip_slots[0].clip = clip
                 mapper = LiveObjectMapper(song); ref = mapper.snapshot()["tracks"][0]["clips"][0]["ref"]
-                with self.assertRaisesRegex(ValueError, "exact complete expected state"):
+                said = {"duration": ": Live lengthened pitch 36 at beat 0 to end at beat 0.36", "pitch": ": Live didn't keep pitch 36 at beat 0; Live added pitch 37 at beat 0", "extra": ": Live added pitch 36 at beat 0", "duplicate": ""}[corruption]
+                with self.assertRaisesRegex(ValueError, "^note batch did not produce the exact complete expected state" + re.escape(said) + "$"):
                     mapper.invoke("note.add-batch", {"ref": ref, "notes": [{"pitch": 36, "start": 0, "duration": 0.35, "velocity": 100, "channel": 1}], **self.note_authority(mapper, ref)})
                 self.assertEqual(clip.notes, [])
+
+    def test_note_batch_says_how_live_changed_it(self):
+        class LiveClip(FakeClip):
+            """As Live does: a note that runs into the same pitch's next note ends where that one starts."""
+            def add_new_notes(self, notes):
+                super().add_new_notes(notes)
+                ordered = sorted(self.notes, key=lambda note: (note["pitch"], note["start_time"]))
+                for first, after in zip(ordered, ordered[1:]):
+                    if first["pitch"] == after["pitch"] and first["start_time"] + first["duration"] > after["start_time"]: first["duration"] = after["start_time"] - first["start_time"]
+        song = FakeSong(); clip = LiveClip(8); song.tracks[0].clip_slots[0].clip = clip
+        mapper = LiveObjectMapper(song); ref = mapper.snapshot()["tracks"][0]["clips"][0]["ref"]
+        notes = [{"pitch": 29, "start": 0, "duration": 2.1, "velocity": 110, "channel": 1}, {"pitch": 29, "start": 2, "duration": 0.75, "velocity": 100, "channel": 1}, {"pitch": 32, "start": 3, "duration": 1.1, "velocity": 105, "channel": 1}]
+        with self.assertRaises(ValueError) as refused:
+            mapper.invoke("note.add-batch", {"ref": ref, "notes": notes, **self.note_authority(mapper, ref)})
+        self.assertEqual(str(refused.exception), "note batch did not produce the exact complete expected state: Live shortened pitch 29 at beat 0 to end at beat 2, where the next 29 starts; notes of one pitch can't overlap")
+        self.assertLessEqual(len(str(refused.exception)), 200); self.assertEqual(clip.notes, [])
+        result = mapper.invoke("note.add-batch", {"ref": ref, "notes": [{**notes[0], "duration": 2}, *notes[1:]], **self.note_authority(mapper, ref)})
+        self.assertEqual(result["added"], 3)
 
     def test_midi_reads_cover_exact_clip_length_and_refuse_unbounded_or_replacing_fallbacks(self):
         class LegacyClip:
