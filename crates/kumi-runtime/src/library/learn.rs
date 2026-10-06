@@ -451,8 +451,10 @@ async fn gone<T: LogEntry>(
         })
         .cloned()
         .collect();
-    for path in &lost {
-        known.shift_remove(path);
+    // In one pass: removing them one at a time moves every entry after each.
+    if !lost.is_empty() {
+        let lost: HashSet<&String> = lost.iter().collect();
+        known.retain(|path, _| !lost.contains(path));
     }
     log.append(&lost.into_iter().map(Entry::gone).collect::<Vec<_>>()).await.map_err(io_error)
 }

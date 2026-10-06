@@ -4,6 +4,7 @@
 //! saying so; now and then the log is written afresh with only what stands. A reader keeps its place
 //! and reads only what was added since.
 
+use std::collections::HashMap;
 use std::io::{self, SeekFrom};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
@@ -246,22 +247,36 @@ fn truthy(value: &Value) -> bool {
     }
 }
 
-/// Apply a log's lines to `entries`; a line cut off by a crash is left out.
+/// Apply a log's lines to `entries`; a line cut off by a crash is left out. A path's last line decides: gone, it
+/// leaves; learned, it goes to the end, so the entries come out as applying the lines one by one leaves them. The map
+/// is gone through once for all the lines (removing one entry at a time moves every entry after it).
 fn apply_lines<T: LogEntry>(text: &str, entries: &mut IndexMap<String, T>) {
-    for line in text.split('\n') {
+    // Each path's last line, numbered; None is gone.
+    let mut last: HashMap<String, (usize, Option<T>)> = HashMap::new();
+    for (number, line) in text.split('\n').enumerate() {
         if line.is_empty() {
             continue;
         }
         let Ok(value) = serde_json::from_str::<Value>(line) else { continue };
         let Some(path) = value.get("path").and_then(Value::as_str).map(str::to_string) else { continue };
-        if value.get("gone").is_some_and(truthy) {
-            entries.shift_remove(&path);
+        let entry = if value.get("gone").is_some_and(truthy) {
+            None
         } else {
             // TS: kept a line as parsed; one that isn't an entry of this kind is left out here.
             let Ok(entry) = serde_json::from_value::<T>(value) else { continue };
-            entries.shift_remove(&path);
-            entries.insert(path, entry);
-        }
+            Some(entry)
+        };
+        last.insert(path, (number, entry));
+    }
+    if last.keys().any(|path| entries.contains_key(path)) {
+        entries.retain(|path, _| !last.contains_key(path));
+    }
+    let mut learned: Vec<(usize, String, T)> =
+        last.into_iter().filter_map(|(path, (number, entry))| entry.map(|entry| (number, path, entry))).collect();
+    learned.sort_unstable_by_key(|(number, _, _)| *number);
+    entries.reserve(learned.len());
+    for (_, path, entry) in learned {
+        entries.insert(path, entry);
     }
 }
 
@@ -470,6 +485,61 @@ mod tests {
         assert_eq!(newer.load().await.len(), 1);
         assert_eq!(reader.refresh().await.unwrap(), Refreshed { changed: true, reloaded: true });
         assert!(reader.entries.is_empty());
+    }
+
+    /// What applying a log's lines one at a time leaves.
+    fn apply_one_by_one(text: &str, entries: &mut IndexMap<String, Sound>) {
+        for line in text.split('\n') {
+            let Ok(value) = serde_json::from_str::<Value>(line) else { continue };
+            let Some(path) = value.get("path").and_then(Value::as_str).map(str::to_string) else { continue };
+            if value.get("gone").is_some_and(truthy) {
+                entries.shift_remove(&path);
+            } else if let Ok(entry) = serde_json::from_value::<Sound>(value) {
+                entries.shift_remove(&path);
+                entries.insert(path, entry);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn lines_applied_together_leave_what_applying_them_one_by_one_does() {
+        use rand::{Rng, SeedableRng};
+        let mut random = rand::rngs::StdRng::seed_from_u64(245);
+        for round in 0..200 {
+            let paths = random.random_range(1..40);
+            let mut text = String::new();
+            for number in 0..random.random_range(0..120) {
+                let path = format!("/s/{}.wav", random.random_range(0..paths));
+                let line = match random.random_range(0..10) {
+                    0..=4 => stringify(&serde_json::to_value(sound(&path, &format!("c{number}"))).unwrap()),
+                    5..=7 => stringify(&serde_json::to_value(Entry::gone(&path)).unwrap()),
+                    // Not a sound: left out, so it neither replaces nor removes.
+                    8 => format!("{{\"path\":\"{path}\",\"size\":\"big\"}}"),
+                    _ => format!("{{\"path\":\"{path}\",\"size\":1"),
+                };
+                text.push_str(&line);
+                text.push('\n');
+            }
+            let mut before = IndexMap::new();
+            for index in 0..random.random_range(0..20) {
+                before.insert(format!("/s/{index}.wav"), sound(&format!("/s/{index}.wav"), "old"));
+            }
+            let mut expected = before.clone();
+            apply_one_by_one(&text, &mut expected);
+            let mut whole = before.clone();
+            apply_lines(&text, &mut whole);
+            assert_eq!(whole.iter().collect::<Vec<_>>(), expected.iter().collect::<Vec<_>>(), "round {round}");
+            // A reader's chunks, split anywhere between lines, leave the same.
+            let mut chunked = before.clone();
+            let mut at = 0;
+            while at < text.len() {
+                let from = (at + random.random_range(1..400)).min(text.len() - 1);
+                let end = text[from..].find('\n').map(|found| from + found).unwrap_or(text.len() - 1);
+                apply_lines(&text[at..=end], &mut chunked);
+                at = end + 1;
+            }
+            assert_eq!(chunked.iter().collect::<Vec<_>>(), expected.iter().collect::<Vec<_>>(), "round {round}, chunked");
+        }
     }
 
     #[tokio::test]
