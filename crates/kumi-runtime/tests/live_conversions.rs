@@ -349,13 +349,23 @@ async fn a_failed_read_or_a_producers_track_doesnt_mislead_the_wait() {
             )
             .await;
             assert_eq!(landed(&run), json!(["2-Melody to MIDI"]));
-            // A Live in another language names it otherwise: the new MIDI track right after the clip's is Live's.
+            // A MIDI track the producer inserts right after the clip's (Cmd-Shift-T with it selected) before Live's lands:
+            // an unnamed neighbour waits a few seconds, and Live's, named, lands meanwhile.
+            let run = convert_with(
+                Setup { answer: vox(), lands_after: Some(10), stranger: Some((1, "2-MIDI", "midi")), ..Default::default() },
+                melody("7:clip:1:0"),
+            )
+            .await;
+            assert_eq!(landed(&run), json!(["2-Melody to MIDI"]));
+            // A Live in another language names it otherwise: the new MIDI track right after the clip's is Live's, once
+            // it's stayed there a few seconds (from the 4th read, about 1.2 s, to past 6 s).
             let run = convert_with(
                 Setup { answer: vox(), lands_after: Some(3), new_name: Some("2-Melodie zu MIDI"), ..Default::default() },
                 melody("7:clip:1:0"),
             )
             .await;
             assert_eq!(landed(&run), json!(["2-Melodie zu MIDI"]));
+            assert!(run.reads >= 20, "taken after a few seconds, not at once: {} reads", run.reads);
         })
         .await;
 }

@@ -21,8 +21,8 @@ const CONVERSIONS: [(&str, &str, &str); 3] = [
 /// before Kumi stops waiting for the new track.
 const FRONT_AFTER: Duration = Duration::from_secs(12);
 const GIVE_UP_AFTER: Duration = Duration::from_secs(120);
-/// How long a new MIDI track that isn't named as Live names a conversion's is waited past before it's taken for it,
-/// when the clip's track isn't known.
+/// How long a new MIDI track that isn't named as Live names a conversion's stays before it's taken for it: Live's in
+/// another language, or a producer's.
 const UNNAMED_AFTER: Duration = Duration::from_secs(5);
 /// When the reads of the tracks slow down, from every 300 ms to every second.
 const SLOWER_AFTER: Duration = Duration::from_secs(10);
@@ -167,9 +167,10 @@ impl CommandTools {
             .collect())
     }
     /// The track Live's conversion lands, told by identity among the tracks that weren't there before:
-    /// - one named for the conversion, as Live names it ("4-Melody to MIDI");
-    /// - else, knowing the clip's track (`source`), a MIDI track right after it, where Live puts it (a Live in another
-    ///   language names it otherwise);
+    /// - one named for the conversion, as Live names it ("4-Melody to MIDI"), at once;
+    /// - else, knowing the clip's track (`source`), the MIDI track right after it, where Live puts it, once it's been
+    ///   there a few seconds: a Live in another language names its track otherwise, and a producer's new track lands
+    ///   there too (Cmd-Shift-T with the clip's track selected);
     /// - else, not knowing it, a MIDI track that's been there a few seconds.
     ///
     /// A read that fails is tried again, never taken as the conversion failing (Live is converting all the same).
@@ -192,20 +193,25 @@ impl CommandTools {
                 if let Some((_, name, _)) = now.iter().find(|(identity, name, _)| is_new(identity) && name.contains(title)) {
                     return Ok(Some(name.clone()));
                 }
-                let next_to = |source: &str| now.iter().position(|(identity, _, _)| identity == source).and_then(|at| now.get(at + 1));
-                match source {
-                    Some(source) => {
-                        if let Some((_, name, _)) = next_to(source).filter(|(identity, _, midi)| *midi && is_new(identity)) {
+                let unnamed = match source {
+                    Some(source) => now
+                        .iter()
+                        .position(|(identity, _, _)| identity == source)
+                        .and_then(|at| now.get(at + 1))
+                        .filter(|(identity, _, midi)| *midi && is_new(identity)),
+                    None => now.iter().find(|(identity, _, midi)| *midi && is_new(identity)),
+                };
+                // The same unnamed track for a few seconds, by its identity.
+                match unnamed {
+                    Some((identity, name, _)) => {
+                        if unnamed_since.as_ref().is_none_or(|(seen, _)| seen != identity) {
+                            unnamed_since = Some((identity.clone(), Instant::now()));
+                        }
+                        if unnamed_since.as_ref().is_some_and(|(_, since)| since.elapsed() >= UNNAMED_AFTER) {
                             return Ok(Some(name.clone()));
                         }
                     }
-                    None => {
-                        if let Some((_, name, _)) = now.iter().find(|(identity, _, midi)| *midi && is_new(identity)) {
-                            if unnamed_since.get_or_insert_with(Instant::now).elapsed() >= UNNAMED_AFTER {
-                                return Ok(Some(name.clone()));
-                            }
-                        }
-                    }
+                    None => unnamed_since = None,
                 }
             }
             if !fronted && started.elapsed() >= FRONT_AFTER {
