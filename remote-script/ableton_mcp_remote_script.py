@@ -57,9 +57,11 @@ def _wire_keys(value: dict[Any, Any]) -> list[Any]:
 
 
 # Each object's key list, laid out for the wire once: its keys in the bridge's order, each with its text and
-# colon. A big read is thousands of rows of a few shapes (a parameter's, a device's), so most are reused.
+# colon. A big read is thousands of rows of a few shapes (a parameter's, a device's), so most are reused. Only
+# a row's few keys are kept, and only so many lists: an object keyed by names or refs (a Python answer's) isn't.
 _WIRE_LAYOUTS: dict[tuple[Any, ...], tuple[tuple[Any, str], ...]] = {}
-_WIRE_LAYOUTS_KEPT = 1024
+_WIRE_LAYOUTS_KEPT = 512
+_WIRE_LAYOUT_KEYS = 64
 
 
 def _wire_layout(value: dict[Any, Any]) -> tuple[tuple[Any, str], ...]:
@@ -68,7 +70,7 @@ def _wire_layout(value: dict[Any, Any]) -> tuple[tuple[Any, str], ...]:
     if layout is None:
         layout = tuple((key, (_encode_string(key) if type(key) is str else json.dumps(key, ensure_ascii=False)) + ":") for key in _wire_keys(value))
         # Only string keys are kept: 1 and True are equal keys with different texts.
-        if len(_WIRE_LAYOUTS) < _WIRE_LAYOUTS_KEPT and all(type(key) is str for key in keys): _WIRE_LAYOUTS[keys] = layout
+        if len(keys) <= _WIRE_LAYOUT_KEYS and len(_WIRE_LAYOUTS) < _WIRE_LAYOUTS_KEPT and all(type(key) is str for key in keys): _WIRE_LAYOUTS[keys] = layout
     return layout
 
 

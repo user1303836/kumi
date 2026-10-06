@@ -3417,7 +3417,11 @@ class RealtimePlaneTests(unittest.TestCase):
             self.assertEqual(outcome(AuthenticatedRemoteScript._canonical, value), outcome(plain, value), repr(value)[:80])
 
     def test_the_key_layouts_kept_for_wire_text_are_bounded(self):
+        # Kept: a row's few keys, up to a count. An object keyed by names (a Python answer's) is written, not kept.
         remote_module._WIRE_LAYOUTS.clear()
+        named = {f"name {n}": n for n in range(remote_module._WIRE_LAYOUT_KEYS + 1)}
+        self.assertEqual(json.loads(AuthenticatedRemoteScript._canonical(named)), named)
+        self.assertEqual(len(remote_module._WIRE_LAYOUTS), 0)
         for n in range(remote_module._WIRE_LAYOUTS_KEPT + 50):
             self.assertEqual(AuthenticatedRemoteScript._canonical({f"k{n}": n, "a": 1}), f'{{"a":1,"k{n}":{n}}}')
         self.assertEqual(len(remote_module._WIRE_LAYOUTS), remote_module._WIRE_LAYOUTS_KEPT)
