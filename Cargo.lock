@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "ableton-mcp-server"
-version = "1.0.83"
+version = "1.0.84"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1062,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "kumi"
-version = "1.8.10"
+version = "1.8.11"
 dependencies = [
  "ableton-mcp-server",
  "async-trait",
@@ -1097,7 +1097,7 @@ dependencies = [
 
 [[package]]
 name = "kumi-common"
-version = "1.8.10"
+version = "1.8.11"
 dependencies = [
  "icu_collator",
  "icu_locale_core",
@@ -1110,7 +1110,7 @@ dependencies = [
 
 [[package]]
 name = "kumi-runtime"
-version = "1.8.10"
+version = "1.8.11"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
