@@ -55,7 +55,7 @@ pub async fn build(plan: &Plan, material: &Material, host: &dyn ArrangeHost, sig
                     let made = host
                         .change(
                             "add_tracks_and_scenes",
-                            json!({"scenes":[{"name":"Kumi parts"}]}).as_object().unwrap().clone(),
+                            json!({"tracks":[],"scenes":[{"name":"Kumi parts"}]}).as_object().unwrap().clone(),
                             signal.clone(),
                         )
                         .await?;
