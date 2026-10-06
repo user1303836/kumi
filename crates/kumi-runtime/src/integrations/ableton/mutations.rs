@@ -448,6 +448,16 @@ impl Mutations {
                 reply.insert("note".into(),json!("Devices on the tracks involved moved along their chains: discover them (and their parameters) again before using earlier references."));
             }
         }
+        // A device file of the producer's or Kumi's, loaded from the User Library: what hides its face, which the
+        // model can't see in Live (#179).
+        if kind.tool == "load_device" && record.state == ChangeState::Applied {
+            if let Some(item) = args.get("itemId").and_then(Value::as_str) {
+                let library = self.options.user_library.clone().unwrap_or_else(|| super::samples::user_library(None, None));
+                if let Some(note) = crate::devices::face::face_note(std::path::Path::new(&library), item) {
+                    reply.insert("face".into(), json!(note));
+                }
+            }
+        }
         let mut full = reply.clone();
         full.insert("live".into(), connection.references.borrow_mut().shorten(&json!(result)));
         let text = stringify(&json!(full));

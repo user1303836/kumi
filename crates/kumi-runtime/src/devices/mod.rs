@@ -1,4 +1,5 @@
 pub mod amxd;
+pub mod face;
 pub mod gen;
 pub mod harness;
 pub mod harness_child;

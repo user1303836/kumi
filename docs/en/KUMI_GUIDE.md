@@ -459,6 +459,11 @@ and Output knobs; instruments play 8 notes at once, or up to 32. Both end in
 Kumi's output stage, which keeps their output safe (no NaN, denormals or DC,
 held under +6 dBFS). Kumi listens to what it made and fixes what it hears.
 
+A face styled beyond the knobs (panels, words, colours) is drawn by Max, which
+Kumi can't see. When a device from your User Library loads, Kumi reads its face
+and is told what a panel hides there (a backdrop listed before the rest covers
+them), so it doesn't describe a design you won't see.
+
 It needs Max for Live (Live Suite, or Standard with the add-on).
 
 ## Looking things up
