@@ -1920,7 +1920,11 @@ async fn words_beside_a_reaction_alone_get_another_model_call() {
             |_, n| {
                 if n == 1 {
                     Scripted::Parts(
-                        [text("Making it darker now."), vec![call("reaction", "{\"quote\":\"too bright\",\"lean\":\"less\"}"), tool_calls()]].concat(),
+                        [
+                            text("Making it darker now."),
+                            vec![call("reaction", "{\"quote\":\"too bright\",\"lean\":\"less\"}"), tool_calls()],
+                        ]
+                        .concat(),
                     )
                 } else {
                     answer("Darker: the filter is down 2 kHz.")
