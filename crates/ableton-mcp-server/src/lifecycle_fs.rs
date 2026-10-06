@@ -418,9 +418,12 @@ pub(super) fn verify_files(root: &Path, expected: &Value) -> Result<Value, LiveE
     let mut required = expected.as_object().cloned().unwrap_or_default();
     required.entry("__pycache__").or_insert_with(|| sha256(b"").into());
     let mut current = if root.exists() { hash_regular_tree(root)? } else { serde_json::Map::new() };
-    // The producer's Willington switch (/willington) comes and goes after an install: it isn't drift.
+    // The producer's files (Willington's switch, which /willington writes and removes, and its self-test
+    // receipt) come and go after an install: they aren't drift.
     for files in [&mut required, &mut current] {
-        files.remove(crate::delivery::WILLINGTON_CONFIG);
+        for name in crate::delivery::PRODUCER_FILES {
+            files.remove(name);
+        }
     }
     let missing = required.keys().filter(|name| !current.contains_key(*name)).cloned().collect::<Vec<_>>();
     let changed =

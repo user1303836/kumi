@@ -32,6 +32,12 @@ pub const OPERATION_REGISTRY_ASSET: &str = "ableton-live-v1.operations.json";
 pub const WILLINGTON_FOLDER: &str = "willington";
 /// The producer's switch for Willington, beside the Remote Script: absent, Willington stays off.
 pub const WILLINGTON_CONFIG: &str = "willington.json";
+/// Willington's Follow Action self-test receipt for the bridge's own copy: the bridge turns Follow Action
+/// edits on only with a passing one for the library it loads.
+pub const WILLINGTON_RECEIPT: &str = "willington/WillingtonBindings/self-test.json";
+/// The producer's files in an installed Remote Script, not the release's: they come and go after an install
+/// without counting as drift, and an install carries them over.
+pub const PRODUCER_FILES: [&str; 2] = [WILLINGTON_CONFIG, WILLINGTON_RECEIPT];
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerCommand {
     pub command: String,
@@ -517,13 +523,16 @@ fn temporary_directory(parent: &Path, prefix: &str) -> Result<PathBuf, LiveError
 /// Validate before staging, reject linked destinations, and retain the original if replacement fails.
 pub fn write_config(path: &Path, config: &impl Serialize, force: bool) -> Result<(), LiveError> {
     let config = parse_any(&serde_json::to_value(config)?)?;
-    replace_owner_file(path, kumi_common::js::json::file_text(&serde_json::to_value(config)?).as_bytes(), force)
+    let bytes = kumi_common::js::json::file_text(&serde_json::to_value(config)?);
+    replace_owner_file(path, path.parent().unwrap_or(Path::new(".")), bytes.as_bytes(), force)
 }
-/// An owner-only file, put in place whole (an existing one is replaced) the way `write_config` puts a configuration.
-pub fn write_owner_file(path: &Path, bytes: &[u8]) -> Result<(), LiveError> {
-    replace_owner_file(path, bytes, true)
+/// An owner-only file, put in place whole (an existing one is replaced) the way `write_config` puts a
+/// configuration. It's staged in `staging`, a folder on the same volume: outside the installed Remote Script,
+/// whose files are checked, so a write cut short leaves nothing there.
+pub fn write_owner_file(path: &Path, staging: &Path, bytes: &[u8]) -> Result<(), LiveError> {
+    replace_owner_file(path, staging, bytes, true)
 }
-fn replace_owner_file(path: &Path, bytes: &[u8], force: bool) -> Result<(), LiveError> {
+fn replace_owner_file(path: &Path, staging: &Path, bytes: &[u8], force: bool) -> Result<(), LiveError> {
     let mut exists = false;
     match fs::symlink_metadata(path) {
         Ok(destination) => {
@@ -545,7 +554,7 @@ fn replace_owner_file(path: &Path, bytes: &[u8], force: bool) -> Result<(), Live
     if !parent.exists() {
         return Err(fail(format!("configuration directory does not exist: {}", parent.display())));
     }
-    let directory = temporary_directory(parent, ".ableton-mcp-")?;
+    let directory = temporary_directory(staging, ".ableton-mcp-")?;
     let staged = directory.join("config.json");
     let backup = directory.join("previous.json");
     let mut backed_up = false;

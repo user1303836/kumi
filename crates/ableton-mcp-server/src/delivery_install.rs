@@ -156,6 +156,17 @@ pub fn install_remote_script(
             // A copy on Windows takes the folder's permissions, and the bridge reads only an owner-only file.
             secure_windows_file(&destination)?;
         }
+        // Willington's self-test receipt stays with the bridge's copy of Willington, unless this release ships
+        // its own. The bridge checks it against the library it loads, so a receipt for an older one does nothing.
+        let receipt = destination_directory.join(WILLINGTON_RECEIPT);
+        let staged_receipt = staged_package.join(WILLINGTON_RECEIPT);
+        if receipt.exists() && staged_receipt.parent().is_some_and(Path::is_dir) && !staged_receipt.exists() {
+            let entry = lstat(&receipt)?;
+            if entry.is_file() && !entry.file_type().is_symlink() && entry.len() <= 1024 * 1024 {
+                copy(&receipt, &staged_receipt)?;
+                chmod(&staged_receipt, 0o644)?;
+            }
+        }
         // The native bridge carries the registry it was built against. This same text
         // feeds the authenticated wire validator; a caller's working directory cannot replace it.
         write_new(&staged_package.join(OPERATION_REGISTRY_ASSET), crate::registry::LIVE_REGISTRY_TEXT.as_bytes(), 0o644)?;

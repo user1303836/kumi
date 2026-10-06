@@ -295,6 +295,29 @@ fn script_install_carries_willington_runtime_files_with_cache_blockers() {
         .starts_with(".ableton-mcp-install")));
 }
 #[test]
+fn script_install_keeps_willingtons_self_test_receipt_unless_the_release_ships_one() {
+    let folder = tempfile::tempdir().unwrap();
+    let source = install_source(folder.path());
+    let willington = source.parent().unwrap().join(REMOTE_SCRIPT_PACKAGE).join(WILLINGTON_FOLDER);
+    std::fs::create_dir_all(willington.join("WillingtonBindings")).unwrap();
+    std::fs::write(willington.join("WillingtonBindings/__init__.py"), "def install(): pass\n").unwrap();
+    let destination = folder.path().join(REMOTE_SCRIPT_PACKAGE);
+    install_remote_script(&source, &destination, &InstallOptions::default()).unwrap();
+    let force = InstallOptions { force: true, ..Default::default() };
+    let receipt = destination.join(WILLINGTON_RECEIPT);
+    std::fs::write(&receipt, "the producer's receipt").unwrap();
+    install_remote_script(&source, &destination, &force).unwrap();
+    assert_eq!(std::fs::read_to_string(&receipt).unwrap(), "the producer's receipt");
+    // A release that ships a receipt brings its own.
+    std::fs::write(willington.join("WillingtonBindings/self-test.json"), "the release's receipt").unwrap();
+    install_remote_script(&source, &destination, &force).unwrap();
+    assert_eq!(std::fs::read_to_string(&receipt).unwrap(), "the release's receipt");
+    // Without Willington in the release, there's no copy for a receipt to stay with.
+    std::fs::remove_dir_all(&willington).unwrap();
+    install_remote_script(&source, &destination, &force).unwrap();
+    assert!(!destination.join(WILLINGTON_FOLDER).exists());
+}
+#[test]
 fn script_install_keeps_the_willington_switch_owner_only() {
     let folder = tempfile::tempdir().unwrap();
     let source = install_source(folder.path());
@@ -302,10 +325,14 @@ fn script_install_keeps_the_willington_switch_owner_only() {
     install_remote_script(&source, &destination, &InstallOptions::default()).unwrap();
     let switch = destination.join(WILLINGTON_CONFIG);
     let on = br#"{"version":1,"followActions":true,"deviceTools":true,"rackZones":true,"enableWrites":true}"#;
-    write_owner_file(&switch, on).unwrap();
+    // Staged where it's told, outside the installed package: with nowhere to stage, nothing is written.
+    let elsewhere = folder.path().join("missing staging folder");
+    assert!(write_owner_file(&switch, &elsewhere, on).unwrap_err().message().contains("missing staging folder"));
+    assert!(!switch.exists());
+    write_owner_file(&switch, folder.path(), on).unwrap();
     assert_eq!(secret_permissions(&switch), SecretPermissions::OwnerOnly);
     // Replaced whole, still owner-only.
-    write_owner_file(&switch, on).unwrap();
+    write_owner_file(&switch, folder.path(), on).unwrap();
     assert_eq!(std::fs::read(&switch).unwrap(), on);
     install_remote_script(&source, &destination, &InstallOptions { force: true, ..Default::default() }).unwrap();
     assert_eq!(std::fs::read(&switch).unwrap(), on);
