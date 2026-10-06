@@ -885,7 +885,9 @@ async fn a_rollback_with_live_closed_puts_back_the_earlier_kumis_bridge_and_its_
     assert!(!done.said.contains("up to date"), "{}", done.said);
     // The installed bridge's own rollback: it checks the kept generation against that one's registry.
     assert_eq!(done.ran.len(), 1);
-    assert!(done.ran[0][0].ends_with(&format!("1.0.85/package/{}", executable_name("ableton-mcp-server"))));
+    // By path components: on Windows the command's separators are backslashes.
+    let installed = Path::new("1.0.85").join("package").join(executable_name("ableton-mcp-server"));
+    assert!(Path::new(&done.ran[0][0]).ends_with(&installed), "{:?}", done.ran[0]);
     assert_eq!(&done.ran[0][1..3], ["lifecycle", "rollback"]);
     assert!(done.ran[0].contains(&"--confirm-live-stopped".into()));
     assert_eq!(version_of(home.join("app")), "1.8.11");
