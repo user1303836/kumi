@@ -120,7 +120,11 @@ pub fn face_note(user_library: &Path, item_id: &str) -> Option<String> {
     let relative = item_id.strip_prefix("user_library/")?;
     // A Browser id for a second item at one path ends "#2" (#183): the file is the path's.
     let relative = relative.rsplit_once('#').filter(|(_, n)| n.chars().all(|c| c.is_ascii_digit())).map_or(relative, |(path, _)| path);
-    if !relative.to_lowercase().ends_with(".amxd") || relative.split('/').any(|part| part.is_empty() || part == "..") {
+    // Only a path inside the library: no part that climbs out, and none Windows reads as more than one part
+    // (`..\x`) or as a drive (`C:`).
+    if !relative.to_lowercase().ends_with(".amxd")
+        || relative.split('/').any(|part| part.is_empty() || part == ".." || part.contains(['\\', ':']))
+    {
         return None;
     }
     let file = relative.split('/').fold(user_library.to_path_buf(), |path, part| path.join(part));
@@ -213,6 +217,8 @@ mod tests {
         assert_eq!(face_note(library.path(), "user_library/Kumi/PANIC VHS.amxd#2"), Some(note), "a repeat's id is the same file");
         assert_eq!(face_note(library.path(), "audio_effects/Reverb"), None);
         assert_eq!(face_note(library.path(), "user_library/Kumi/../secret.amxd"), None);
+        assert_eq!(face_note(library.path(), "user_library/Kumi/..\\..\\secret.amxd"), None, "Windows' separator");
+        assert_eq!(face_note(library.path(), "user_library/C:/secret.amxd"), None, "a drive");
         assert_eq!(face_note(library.path(), "user_library/Kumi/Missing.amxd"), None);
     }
 }
