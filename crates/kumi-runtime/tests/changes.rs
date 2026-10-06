@@ -143,4 +143,8 @@ fn a_move_that_replaced_clips_says_what_and_kumi_keeps_it() {
     let mut cut_first = preview.clone();
     cut_first["payload"] = json!({"clearFirst":[{"trackRef":"1:track:0","fromBeat":12,"toBeat":14}]});
     assert!(kind.replaced(cut_first.as_object().unwrap()).unwrap().ends_with("in two steps (the move, then the cut)."));
+    // A move between two audio clips cuts each: Live's undo takes the move and both cuts.
+    cut_first["payload"]["clearFirst"] =
+        json!([{"trackRef":"1:track:0","fromBeat":12,"toBeat":14},{"trackRef":"1:track:0","fromBeat":16,"toBeat":17}]);
+    assert!(kind.replaced(cut_first.as_object().unwrap()).unwrap().ends_with("in 3 steps (the move, then each cut)."));
 }

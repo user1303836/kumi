@@ -99,6 +99,13 @@ impl Adapter {
             }
         }
         let fault = self.fault.borrow().clone();
+        if let Some((operation, nth)) = fault.strip_prefix("refuse:").and_then(|f| f.rsplit_once(':')) {
+            // "refuse:<operation>:<n>": the nth call of that operation is refused, as the Remote Script refuses.
+            let calls = self.calls.borrow().iter().filter(|c| c["invocation"]["operation"] == operation).count();
+            if i.operation == operation && calls.to_string() == nth {
+                return Err(LiveError::MutationNotDispatched(format!("request failed: {operation} refused; nothing changed")));
+            }
+        }
         if !self.fired.get() && ["before", "cancel", "refusal"].iter().any(|s| fault.ends_with(s)) {
             self.fired.set(true);
             return Err(if fault.ends_with("refusal") {
@@ -471,10 +478,17 @@ async fn an_audio_clip_crossing_the_new_place_is_cut_by_the_live_extension_first
     );
     assert_eq!(body(&applied)["state"], "applied", "{applied}");
     assert_eq!(layout(&adapter.sim), [("Vox".to_string(), 10.0, 12.0), ("Kick Pattern".into(), 12.0, 16.0), ("Vox".into(), 16.0, 18.0)]);
+    let far_end =
+        adapter.sim.state.borrow()["arrangementClips"].as_array().unwrap().iter().find(|r| r["clip"]["start"] == 16.0).cloned().unwrap();
+    assert_eq!(far_end["clip"]["startMarker"], 6.0, "Live starts the far end where the cut ended, 6 beats in");
     // Over its end, without the extension: refused.
     let (_adapter, host) = audio(true);
     let (without, _) = move_clip(&host, 16.0).await;
-    assert!(without.to_string().contains("Kumi can't cut into an audio clip without its Live extension yet"), "{without}");
+    assert_eq!(
+        body(&without)["reason"],
+        "\"Vox\" (beats 10 to 18) crosses beats 16 to 18 of the clip's new place, and Kumi's Live extension cuts audio clips; without it, delete it first (delete_clip) or pick a free spot",
+        "{without}"
+    );
     // Over its end, with it: cut there.
     let (adapter, host) = audio(false);
     let (preview, applied) = move_clip(&host, 16.0).await;
@@ -508,4 +522,68 @@ async fn a_looped_clip_is_cut_like_any_other() {
             ("Fill".into(), 21.0, 23.0)
         ]
     );
+}
+#[tokio::test]
+async fn an_apply_refuses_when_what_is_in_the_new_place_changed_since_the_preview() {
+    // A clip dropped into the new place after the preview, or one dragged further into it, would be cut or
+    // removed without being named, so the apply refuses before anything is cut: for MIDI (the Remote
+    // Script cuts) and for audio (Kumi's Live extension cuts first).
+    for (audio, change) in [(false, "dropped"), (true, "dropped"), (false, "dragged")] {
+        let adapter = Rc::new(Adapter::new());
+        setup(&adapter.sim, if audio { "arrangement-audio" } else { "arrangement-midi" });
+        arrangement_clip(&adapter.sim, "Vox", 10.0, 4.0, audio);
+        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+        let preview = host.live_clip_move_preview_async(&json!(1), &json!({"clipRef":"arrangement-clip:track-1:4","position":12.0})).await;
+        let shown = body(&preview);
+        assert_eq!(shown["replaces"], json!([{"name":"Vox","start":10,"end":14,"from":12,"to":14,"whole":false}]), "{preview}");
+        if change == "dropped" {
+            arrangement_clip(&adapter.sim, "Breath", 15.0, 0.5, audio);
+        } else {
+            adapter.sim.state.borrow_mut()["arrangementClips"][1]["clip"]["length"] = json!(5);
+        }
+        let before = layout(&adapter.sim);
+        let args = json!({"transactionId":shown["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+        let applied = host.live_clip_move_apply_async(&json!(2), &args, None).await.unwrap();
+        assert_eq!(
+            body(&applied)["reason"],
+            "What's in the clip's new place changed since preview, so Kumi cut and moved nothing; preview again",
+            "{change}, audio {audio}: {applied}"
+        );
+        assert_eq!(layout(&adapter.sim), before, "{change}, audio {audio}: nothing cut or moved");
+        assert!(!adapter.calls.borrow().iter().any(|c| c["method"] == "invoke"), "{change}, audio {audio}: nothing sent to Live");
+    }
+}
+#[tokio::test]
+async fn a_move_that_fails_after_the_extension_cut_says_what_was_cut() {
+    // Between two audio clips, Kumi's Live extension cuts each first. What it cut stays cut until undone, so a
+    // failure after it names what, says how to put it back, and never says nothing changed: the move refused
+    // after both cuts, and the second cut refused after the first.
+    let failed = |fault: &'static str| async move {
+        let adapter = Rc::new(Adapter::new());
+        setup(&adapter.sim, "arrangement-audio");
+        arrangement_clip(&adapter.sim, "Vox", 10.0, 4.0, true);
+        arrangement_clip(&adapter.sim, "Pad", 15.0, 5.0, true);
+        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+        adapter.reset(fault);
+        let (preview, applied) = move_clip(&host, 13.0).await;
+        assert_eq!(body(&preview)["payload"]["clearFirst"].as_array().map(Vec::len), Some(2), "{preview}");
+        (adapter, body(&applied))
+    };
+    let (adapter, applied) = failed("refuse:arrangement.clip.move:1").await;
+    assert_eq!(
+        applied["reason"],
+        "Kumi cut \"Vox\" (beats 10 to 14) at beats 13 to 14 and \"Pad\" (beats 15 to 20) at beats 15 to 17 with its Live extension, then the move failed; Live's own undo puts them back, one step per cut. Why: arrangement.clip.move refused"
+    );
+    assert_eq!(applied["remediation"], "Clip move is uncertain; perform fresh discovery before retrying.");
+    assert_eq!(layout(&adapter.sim), [("Kick Pattern".to_string(), 4.0, 8.0), ("Vox".into(), 10.0, 13.0), ("Pad".into(), 17.0, 20.0)]);
+    let (adapter, applied) = failed("refuse:clip.clear-range:2").await;
+    assert_eq!(
+        applied["reason"],
+        "Kumi cut \"Vox\" (beats 10 to 14) at beats 13 to 14 with its Live extension, then the move failed; Live's own undo puts it back in one step. Why: clip.clear-range refused"
+    );
+    assert_eq!(layout(&adapter.sim), [("Kick Pattern".to_string(), 4.0, 8.0), ("Vox".into(), 10.0, 13.0), ("Pad".into(), 15.0, 20.0)]);
+    // Without a failure, the move lands between what's left of both.
+    let (adapter, applied) = failed("").await;
+    assert_eq!(applied["state"], "applied", "{applied}");
+    assert_eq!(layout(&adapter.sim), [("Vox".to_string(), 10.0, 13.0), ("Kick Pattern".into(), 13.0, 17.0), ("Pad".into(), 17.0, 20.0)]);
 }

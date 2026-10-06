@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    simulator_clips::{cut_start, split_names, untaken},
+    *,
+};
 use serde_json::json;
 fn named(args: &Map<String, Value>, actual: &str, what: &str) -> Result<(), LiveError> {
     if let Some(expected) = args.get("expectedName").and_then(Value::as_str) {
@@ -148,7 +151,11 @@ impl DeterministicLiveSimulator {
                     if unsupported {
                         return Err(LiveError::error("unsupported simulator authority value"));
                     }
-                    let mut clip = json!({"ref":format!("arrangement-clip:{reference}:{sequence}"),"objectIdentity":format!("simulator:arrangement-clip:{sequence}"),"name":args.get("name").and_then(Value::as_str).unwrap_or(""),"kind":"midi","start":start,"length":length,"notes":notes,"notesRevision":simulator_revision(&json!(notes)),"warp":false,"takes":[],"automation":[]});
+                    // Numbered by the event sequence, skipping any number a clip already has.
+                    let rows: Vec<&Value> = array(&state["arrangementClips"]).iter().collect();
+                    let name = untaken(&rows, "ref", (sequence..).map(|n| format!("arrangement-clip:{reference}:{n}")));
+                    let identity = untaken(&rows, "objectIdentity", (sequence..).map(|n| format!("simulator:arrangement-clip:{n}")));
+                    let mut clip = json!({"ref":name,"objectIdentity":identity,"name":args.get("name").and_then(Value::as_str).unwrap_or(""),"kind":"midi","start":start,"length":length,"notes":notes,"notesRevision":simulator_revision(&json!(notes)),"warp":false,"takes":[],"automation":[]});
                     if let Some(looping) = args.get("looping").filter(|v| v.is_boolean()) {
                         clip["looping"] = looping.clone();
                     }
@@ -192,13 +199,11 @@ impl DeterministicLiveSimulator {
                     if start < to && end > from {
                         if start < from && end > to {
                             // A clip crossing both edges is split: its far end stays, a clip of its own.
-                            let sequence = self.next_sequence();
+                            let (name, identity) = split_names(array(&state["arrangementClips"]).iter().chain(&rests), &reference, to);
                             let mut rest = row.clone();
-                            rest["clip"]["ref"] = json!(format!("arrangement-clip:{reference}:{sequence}"));
-                            rest["clip"]["objectIdentity"] = json!(format!("simulator:arrangement-clip:{sequence}"));
-                            rest["clip"]["start"] = to.into();
-                            rest["clip"]["length"] = (end - to).into();
-                            rest["clip"]["endTime"] = end.into();
+                            rest["clip"]["ref"] = name.into();
+                            rest["clip"]["objectIdentity"] = identity.into();
+                            cut_start(&mut rest["clip"], to);
                             rests.push(rest);
                         }
                         let clip = &mut row["clip"];
@@ -206,9 +211,7 @@ impl DeterministicLiveSimulator {
                             clip["length"] = length.min(from - start).into();
                             clip["endTime"] = from.into();
                         } else {
-                            clip["length"] = length.min(end - to).into();
-                            clip["start"] = to.into();
-                            clip["endTime"] = end.into();
+                            cut_start(clip, to);
                         }
                     }
                 }

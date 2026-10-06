@@ -2680,6 +2680,17 @@ class ControlSurfaceTests(unittest.TestCase):
         self.arrangement_move(mapper, mapper.snapshot()["arrangement"]["clips"][1], 17.0)
         self.assertEqual([(clip.name, clip.start_time) for clip in track.arrangement_clips], [("Groove", 0.0), ("Groove", 10.0), ("Hook", 17.0)], "a looped clip inside the new place goes")
 
+    def test_a_move_that_fails_after_a_cut_says_what_was_cut_and_never_that_nothing_changed(self):
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Intro", 0.0, 4.0), ("Hook", 20.0, 8.0)); copy = track.duplicate_clip_to_arrangement
+        def refuse_the_copy(source, position):
+            if position == 3.0: raise RuntimeError("Live refused the copy")
+            copy(source, position)
+        track.duplicate_clip_to_arrangement = refuse_the_copy
+        mapper = LiveObjectMapper(song)
+        with self.assertRaises(ValueError) as failure: self.arrangement_move(mapper, mapper.snapshot()["arrangement"]["clips"][1], 3.0)
+        self.assertEqual(str(failure.exception), "Kumi cut \"Intro\" to clear the clip's new place, then couldn't move the clip; Live's own undo puts it back (RuntimeError: Live refused the copy)")
+        self.assertEqual([(clip.name, clip.start_time, clip.end_time) for clip in track.arrangement_clips], [("Intro", 0.0, 3.0), ("Hook", 20.0, 28.0)], "what was cut stays cut until undone")
+
     def test_a_parked_clip_that_cant_be_copied_into_place_goes_back_where_it_was(self):
         song, track = self.arrangement_track_that_crashes_on_overlap(("Loop", 4.0, 8.0)); copy = track.duplicate_clip_to_arrangement
         def refuse_the_target(source, position):

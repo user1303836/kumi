@@ -582,12 +582,14 @@ impl ChangeKind {
         if self.tool != "move_clip" || !preview.get("replaces").and_then(Value::as_array).is_some_and(|r| !r.is_empty()) {
             return None;
         }
-        // An audio clip is cut by Kumi's Live extension first, which is a step of its own in Live's undo.
-        let cut_first = preview.get("payload").and_then(|p| p.get("clearFirst")).and_then(Value::as_array).is_some_and(|c| !c.is_empty());
-        Some(if cut_first {
-            "Kumi can't bring back what the move replaced; Live's own undo can, in two steps (the move, then the cut).".into()
-        } else {
-            "Kumi can't bring back what the move replaced; Live's own undo can.".into()
+        // Kumi's Live extension cuts an audio clip first, and each cut is a step of its own in Live's undo.
+        let cuts = preview.get("payload").and_then(|p| p.get("clearFirst")).and_then(Value::as_array).map_or(0, Vec::len);
+        Some(match cuts {
+            0 => "Kumi can't bring back what the move replaced; Live's own undo can.".into(),
+            1 => "Kumi can't bring back what the move replaced; Live's own undo can, in two steps (the move, then the cut).".into(),
+            n => {
+                format!("Kumi can't bring back what the move replaced; Live's own undo can, in {} steps (the move, then each cut).", n + 1)
+            }
         })
     }
 }
