@@ -102,6 +102,16 @@ pub fn parse(text: &str, frame: &Frame) -> Result<Vec<Note>, NotationError> {
     notes.sort_by(order);
     Ok(notes)
 }
+/// Whether a text names a lane for a drum rather than a pitch, which the track's Drum Rack pads should answer.
+pub fn names_drums(text: &str) -> bool {
+    text.lines().filter_map(|line| line.split_whitespace().next()).any(|first| {
+        !first.starts_with('#')
+            && !matches!(first, "copy" | "key")
+            && !looks_like_setting(first)
+            && !first.contains('|')
+            && pitch::parse(first).is_none()
+    })
+}
 /// Notes in time order, then by pitch.
 pub(super) fn order(a: &Note, b: &Note) -> Ordering {
     a.start.total_cmp(&b.start).then(a.pitch.cmp(&b.pitch)).then(a.duration.total_cmp(&b.duration))

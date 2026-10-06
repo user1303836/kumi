@@ -419,6 +419,7 @@ impl KernelTool for LiveTool {
         }
         match self.name.as_str() {
             "find_sounds" => owner.find_sounds(input, signal).await,
+            "read_notes" => Ok(super::notes::read_notes(&input, &owner.connection, owner.observer.tempo.get(), signal).await),
             "make_changes" => owner.mutations.make_changes(input, signal).await,
             "watch_me" => owner.watch.execute(input, signal).await,
             "arrange" => arrange::arrange(input, &owner.mutations.arrange_host(), owner.combined(signal)).await,
@@ -457,10 +458,25 @@ impl ObservationHost for Ableton {
             .list()
             .iter()
             .map(|t| {
-                self.tool(&t.name, t.description.as_deref().unwrap_or("Read current Live state"), object(&json!(t.input_schema)).unwrap())
+                let mut schema = object(&json!(t.input_schema)).unwrap();
+                if t.name == "live_discover" {
+                    // Notes are read with read_notes, as notation: discovery doesn't offer them.
+                    if let Some(kinds) = schema
+                        .get_mut("properties")
+                        .and_then(|p| p.get_mut("kind"))
+                        .and_then(|k| k.get_mut("enum"))
+                        .and_then(Value::as_array_mut)
+                    {
+                        kinds.retain(|kind| kind != "note");
+                    }
+                }
+                self.tool(&t.name, t.description.as_deref().unwrap_or("Read current Live state"), schema)
             })
             .collect();
         offered.push(self.static_tool("find_sounds"));
+        if tools.has("live_discover") {
+            offered.push(self.static_tool("read_notes"));
+        }
         if tools.has("live_browser_inspect") && tools.has("live_browser_load_preview") {
             let owner = self.weak.upgrade().unwrap();
             offered.push(device_tool(DeviceToolOptions {

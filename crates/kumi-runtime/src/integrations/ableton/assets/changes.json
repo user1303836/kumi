@@ -48,7 +48,7 @@
       "preview": "live_midi_clip_preview",
       "apply": "live_midi_clip_apply",
       "family": "clip",
-      "description": "Write a new MIDI clip into an empty Session slot. trackRef is a MIDI track from discovery in this turn; sceneIndex 0 is the first scene; length and every note's start and duration are in beats from the clip start (a 4/4 bar is 4 beats); pitch 60 is middle C (C3 in Live); velocity is 1–127.",
+      "description": "Write a new MIDI clip into an empty Session slot. trackRef is a MIDI track from discovery in this turn; sceneIndex 0 is the first scene; length and every note's start and duration are in beats from the clip start (a 4/4 bar is 4 beats); pitch 60 is middle C (C3 in Live); velocity is 1–127. Or give notation (Kumi's notation, in the clip's own bars) instead of notes, and leave length out to take whole bars.",
       "methods": [
         "produces",
         "summarize"
@@ -973,7 +973,7 @@
       "preview": "live_arrangement_midi_clip_preview",
       "apply": "live_arrangement_midi_clip_apply",
       "family": "clip",
-      "description": "Write a new MIDI clip with its notes straight into the Arrangement: trackRef (a MIDI track from discovery), start and length in beats from the Set's start, notes (pitch, start and duration in beats from the clip's start, velocity), name and looping optional. Several at once: clips, a list of those. No recording, no copying from the Session.",
+      "description": "Write a new MIDI clip with its notes straight into the Arrangement: trackRef (a MIDI track from discovery), start and length in beats from the Set's start, notes (pitch, start and duration in beats from the clip's start, velocity), name and looping optional. Or give notation (Kumi's notation, in song time: bars and beats of the Set) instead of notes, and leave start and length out: the clip spans the bars its notes are in. Several at once: clips, a list of those. No recording, no copying from the Session.",
       "methods": [
         "summarize"
       ]

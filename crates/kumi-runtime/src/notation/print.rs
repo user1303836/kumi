@@ -30,10 +30,13 @@ pub fn print(notes: &[Note], frame: &Frame) -> Printed {
 }
 /// Whether a text reads back as the notes. Times may differ by float noise; nothing else may.
 fn reads_back(text: &str, notes: &[Note], frame: &Frame) -> bool {
-    let Ok(mut read) = parse(text, &Frame { length: None, ..frame.clone() }) else { return false };
+    parse(text, &Frame { length: None, ..frame.clone() }).is_ok_and(|read| same(&read, notes))
+}
+/// Whether two lists hold the same notes, in any order: times to float noise, the rest exactly.
+fn same(read: &[Note], notes: &[Note]) -> bool {
     // By pitch first: float noise mustn't swap two pitches that start together.
     let by_pitch = |a: &Note, b: &Note| a.pitch.cmp(&b.pitch).then(a.start.total_cmp(&b.start)).then(a.duration.total_cmp(&b.duration));
-    let mut notes = notes.to_vec();
+    let (mut read, mut notes) = (read.to_vec(), notes.to_vec());
     notes.sort_by(by_pitch);
     read.sort_by(by_pitch);
     let close = |a: f64, b: f64| (a - b).abs() < EPSILON;
@@ -49,24 +52,65 @@ fn reads_back(text: &str, notes: &[Note], frame: &Frame) -> bool {
         })
 }
 
+/// Sequences first, a phrase the bars repeat written once with a copy after it, then the drums that fit lanes (after
+/// the copy, so it doesn't lay them again).
 fn compact(notes: &[Note], frame: &Frame) -> String {
     let mut lines = vec![];
     let mut state = State::default();
     let mut rest = notes.to_vec();
+    let mut lanes = vec![];
     if frame.drums {
         let mut pitches: Vec<u8> = notes.iter().map(|note| note.pitch).collect();
         pitches.sort_unstable();
         pitches.dedup();
         for pitch in pitches {
             let hits: Vec<Note> = rest.iter().filter(|note| note.pitch == pitch).cloned().collect();
-            if let Some(line) = lane(&hits, frame, &mut state, &mut lines) {
-                lines.push(line);
+            if let Some(line) = lane(&hits, frame) {
+                lanes.push((hits[0].clone(), line));
                 rest.retain(|note| note.pitch != pitch);
             }
         }
     }
-    sequences(&rest, frame, &mut state, &mut lines);
+    let (phrase, copy) = repeat(&rest, frame);
+    sequences(&phrase, frame, &mut state, &mut lines);
+    lines.extend(copy);
+    for (first, line) in lanes {
+        lane_settings(&first, &mut state, &mut lines);
+        lines.push(line);
+    }
     lines.join("\n")
+}
+/// When the notes repeat a phrase of whole bars from their first bar to their last: the phrase's notes, and the copy
+/// that lays it again over the rest. Otherwise all of the notes, and no copy.
+fn repeat(notes: &[Note], frame: &Frame) -> (Vec<Note>, Option<String>) {
+    let time = |note: &Note| frame.origin + note.start;
+    let (Some(first), Some(last)) =
+        (notes.first().map(|note| frame.bar_of(time(note))), notes.iter().map(|note| frame.bar_of(time(note))).max())
+    else {
+        return (notes.to_vec(), None);
+    };
+    let span = last - first + 1;
+    let (from, end) = (frame.bar_start(first), frame.bar_start(last + 1));
+    for period in 1..=span / 2 {
+        let head_end = frame.bar_start(first + period);
+        let (head, rest): (Vec<Note>, Vec<Note>) = notes.iter().cloned().partition(|note| time(note) < head_end - EPSILON);
+        let mut tiled = vec![];
+        let mut base = head_end;
+        while base < end - EPSILON {
+            for note in &head {
+                let at = time(note) - from + base;
+                if at < end - EPSILON {
+                    tiled.push(Note { start: at - frame.origin, ..note.clone() });
+                }
+            }
+            base += period as f64 * frame.bar();
+        }
+        if same(&tiled, &rest) {
+            let bars = |a: u32, b: u32| if a == b { a.to_string() } else { format!("{a}-{b}") };
+            return (head, Some(format!("copy {} {}", bars(first, first + period - 1), bars(first + period, last))));
+        }
+    }
+    (notes.to_vec(), None)
 }
 /// One note to a line, with the settings it needs: what a print falls back on.
 fn plain(notes: &[Note], frame: &Frame) -> String {
@@ -84,49 +128,71 @@ fn plain(notes: &[Note], frame: &Frame) -> String {
     lines.join("\n")
 }
 
-/// Sequences, a line to a bar: items one after another, a position where they jump, settings where they change.
+/// Sequences, a line to a bar: items one after another, a position where they jump. The line's most common length is
+/// set on it and other lengths go on their items; velocities and probabilities are set where they change.
 fn sequences(notes: &[Note], frame: &Frame, state: &mut State, lines: &mut Vec<String>) {
-    let mut line: Vec<String> = vec![];
-    let (mut bar, mut cursor) = (None, None::<f64>);
+    // Items: notes at one time that share a length and their settings (a chord), the rest on their own.
+    let mut items: Vec<(f64, Vec<&Note>)> = vec![];
     let mut index = 0;
     while index < notes.len() {
         let start = notes[index].start;
         let onset: Vec<&Note> = notes[index..].iter().take_while(|note| note.start == start).collect();
         index += onset.len();
-        let time = frame.origin + start;
-        // Notes that share a length and their settings make one item (a chord); the rest are items of their own.
-        let mut items: Vec<Vec<&Note>> = vec![];
+        let mut grouped: Vec<Vec<&Note>> = vec![];
         for note in onset {
-            match items.iter_mut().find(|item| alike(item[0], note)) {
+            match grouped.iter_mut().find(|item| alike(item[0], note)) {
                 Some(item) => item.push(note),
-                None => items.push(vec![note]),
+                None => grouped.push(vec![note]),
             }
         }
-        for notes in items {
-            if bar != Some(frame.bar_of(time)) {
-                if !line.is_empty() {
-                    lines.push(line.join(" "));
-                    line.clear();
-                }
-                (bar, cursor) = (Some(frame.bar_of(time)), None);
-            }
-            // Rests (in the length set so far) or a position, then the item's settings, then the item.
+        items.extend(grouped.into_iter().map(|item| (frame.origin + start, item)));
+    }
+    let mut at = 0;
+    while at < items.len() {
+        let bar = frame.bar_of(items[at].0);
+        let end = items[at..].iter().position(|(time, _)| frame.bar_of(*time) != bar).map_or(items.len(), |count| at + count);
+        let length = most_common(items[at..end].iter().map(|(_, item)| item[0].duration));
+        let (mut line, mut cursor) = (vec![], None::<f64>);
+        for (index, (time, item)) in items[at..end].iter().enumerate() {
             match cursor.map(|cursor| time - cursor) {
                 Some(gap) if gap.abs() < EPSILON => {}
                 Some(gap) if gap > 0. && (1..=3).any(|rests| (gap - rests as f64 * state.length).abs() < EPSILON) => {
-                    let rests = (gap / state.length).round() as usize;
-                    line.extend(std::iter::repeat_n(".".to_owned(), rests));
+                    line.extend(std::iter::repeat_n(".".to_owned(), (gap / state.length).round() as usize));
                 }
-                _ => line.push(frame.position(time)),
+                _ => line.push(frame.position(*time)),
             }
-            settings(notes[0], state, &mut line);
-            line.push(item(&notes));
-            cursor = Some(time + state.length);
+            if index == 0 && (length - state.length).abs() >= EPSILON {
+                let text = format!("l{}", time::length(length));
+                let _ = setting(state, &text);
+                line.push(text);
+            }
+            voice_settings(item[0], state, &mut line);
+            let duration = item[0].duration;
+            if (duration - state.length).abs() < EPSILON {
+                line.push(self::item(item));
+                cursor = Some(time + state.length);
+            } else {
+                // A length of its own: the parser takes the literal's, as written.
+                let literal = time::length(duration);
+                let own = time::parse_length(&literal).unwrap_or(duration);
+                line.push(format!("{}{}", self::item(item), if literal.starts_with('/') { literal } else { format!(":{literal}") }));
+                cursor = Some(time + own);
+            }
+        }
+        lines.push(line.join(" "));
+        at = end;
+    }
+}
+/// The length most items have (the first of the most common, on a tie).
+fn most_common(lengths: impl Iterator<Item = f64>) -> f64 {
+    let mut counted: Vec<(f64, usize)> = vec![];
+    for length in lengths {
+        match counted.iter_mut().find(|(seen, _)| (seen - length).abs() < EPSILON) {
+            Some((_, count)) => *count += 1,
+            None => counted.push((length, 1)),
         }
     }
-    if !line.is_empty() {
-        lines.push(line.join(" "));
-    }
+    counted.iter().fold((0., 0), |best, (length, count)| if *count > best.1 { (*length, *count) } else { best }).0
 }
 /// Whether two notes at one time can share an item: the same length and settings.
 fn alike(a: &Note, b: &Note) -> bool {
@@ -139,6 +205,12 @@ fn item(notes: &[&Note]) -> String {
         [note] => named(note),
         _ => format!("[{}]", notes.iter().map(named).collect::<Vec<_>>().join(" ")),
     }
+}
+/// A note's velocity and probability, where they aren't set already.
+fn voice_settings(note: &Note, state: &mut State, line: &mut Vec<String>) {
+    // The length is the sequence's business: the probe has the one already set.
+    let probe = Note { duration: state.length, ..note.clone() };
+    settings(&probe, state, line);
 }
 /// The settings a note needs that aren't set already, added to the line (and kept, as the parser will).
 fn settings(note: &Note, state: &mut State, line: &mut Vec<String>) {
@@ -162,16 +234,16 @@ fn settings(note: &Note, state: &mut State, line: &mut Vec<String>) {
     }
 }
 
-/// A lane for one pitch's notes, when they fit one exactly; settings it needs go on a line of their own first.
-fn lane(hits: &[Note], frame: &Frame, state: &mut State, lines: &mut Vec<String>) -> Option<String> {
+/// A lane for one pitch's notes, when they fit one exactly (the shortest of the grids they fit).
+fn lane(hits: &[Note], frame: &Frame) -> Option<String> {
     let first = hits.first()?;
     if hits.iter().any(|hit| hit.mute || hit.probability != first.probability || hit.velocity_deviation != first.velocity_deviation) {
         return None;
     }
-    let line = ["/16", "/8", "/16t", "/8t", "/32", "/32t", "/4", "/64"]
-        .iter()
-        .filter_map(|step| fit(hits, step, frame))
-        .min_by_key(|line| line.len())?;
+    ["/16", "/8", "/16t", "/8t", "/32", "/32t", "/4", "/64"].iter().filter_map(|step| fit(hits, step, frame)).min_by_key(|line| line.len())
+}
+/// The settings a lane's hits need (probability, velocity deviation), on a line of their own before it.
+fn lane_settings(first: &Note, state: &mut State, lines: &mut Vec<String>) {
     let mut needed = vec![];
     if first.probability != state.probability {
         needed.push(format!("p{}", time::decimal(first.probability)));
@@ -187,7 +259,6 @@ fn lane(hits: &[Note], frame: &Frame, state: &mut State, lines: &mut Vec<String>
     if !needed.is_empty() {
         lines.push(needed.join(" "));
     }
-    Some(line)
 }
 /// What one step of a lane holds.
 #[derive(Clone, Copy, PartialEq)]
@@ -349,7 +420,7 @@ mod tests {
         let frame = Frame::default();
         let notes = parse("l/8 1|1 C3 D3 E3 . G3/4 [C3 E3 G3]\nv80 2|1 C3:3/8 2|3.25 D3", &frame).unwrap();
         let printed = print(&notes, &frame);
-        assert_eq!(printed.text, "1|1 l/8 C3 D3 E3 . l/4 G3 l/8 [C3 E3 G3]\n2|1 v80 l/4. C3 2|3.25 l/8 D3");
+        assert_eq!(printed.text, "1|1 l/8 C3 D3 E3 . G3/4 [C3 E3 G3]\n2|1 l/4. v80 C3 2|3.25 D3/8");
         assert_eq!(parse(&printed.text, &frame).unwrap(), notes);
     }
 

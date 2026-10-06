@@ -154,5 +154,5 @@ fn a_loop_on_the_grid_prints_short() {
     // A melody in song time, in 6/8, from bar 9.
     let six = Frame { origin: 24., numerator: 6, denominator: 8, ..Frame::default() };
     let melody = parse("l/8 9|1 C3 D3 E3 l/4. G3 10|1 [C3 E3 G3]", &six).unwrap();
-    assert_eq!(round_trip(&melody, &six), "9|1 l/8 C3 D3 E3 l/4. G3\n10|1 [C3 E3 G3]");
+    assert_eq!(round_trip(&melody, &six), "9|1 l/8 C3 D3 E3 G3/4.\n10|1 l/4. [C3 E3 G3]");
 }

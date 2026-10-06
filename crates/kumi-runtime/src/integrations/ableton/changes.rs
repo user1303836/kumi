@@ -491,6 +491,23 @@ impl ChangeKind {
                     index.insert("description".into(), json!("Position, 0 is first. Leave it out to add after the last one."));
                 }
             }
+        } else if self.tool == "write_midi_clip" || self.tool == "write_arrangement_clip" {
+            // Notes in Kumi's notation instead, with the length (and an Arrangement clip's start) taken from them.
+            let notation = json!({"type":"string","minLength":1,"maxLength":1_000_000,"description":"The notes in Kumi's notation (see the instructions), instead of notes"});
+            let relax = |object: &mut JsonObject| {
+                if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
+                    properties.insert("notation".into(), notation.clone());
+                }
+                if let Some(required) = object.get_mut("required").and_then(Value::as_array_mut) {
+                    required.retain(|field| !matches!(field.as_str(), Some("notes" | "length" | "start")));
+                }
+            };
+            if let Some(object) = schema.as_object_mut() {
+                relax(object);
+            }
+            if let Some(items) = schema.pointer_mut("/properties/clips/items").and_then(Value::as_object_mut) {
+                relax(items);
+            }
         } else if self.tool == "set_device_parameter" {
             let name = json!({"type":"string","minLength":1,"maxLength":128,"description":"The parameter's name on the device, as Live shows it; instead of parameterRef"});
             let value = json!({"anyOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":48}],"description":"A number in the parameter's range, or the value as the device shows it (\"800 Hz\", \"-6 dB\", \"35 %\", \"1.2 s\", \"Saw\")"});

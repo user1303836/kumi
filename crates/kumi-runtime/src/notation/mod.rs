@@ -29,7 +29,7 @@ mod print;
 mod time;
 
 pub use harmony::{chord, Key};
-pub use parse::parse;
+pub use parse::{names_drums, parse};
 pub use pitch::{drum_pitch, name as pitch_name, parse as parse_pitch};
 pub use print::{print, Printed};
 pub use time::{Frame, TICKS};

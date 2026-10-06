@@ -81,6 +81,11 @@ impl Mutations {
             return Err(observation("That's 5000 changes in one answer; carry on in the next one"));
         }
         connection.references.borrow().require_fresh_references(&input)?;
+        // Notes written in Kumi's notation become the notes Live takes; a mistake in it comes back as the change's error.
+        let input = match super::notes::expand(&kind.tool, input, connection, self.observer.tempo.get(), &signal).await {
+            Ok(input) => input,
+            Err(text) => return Ok(ChangeOutcome::error(text)),
+        };
         if kind.family == ChangeFamily::Parameter && self.parameters.fast_on() {
             return Ok(self.parameters.fast_parameters(kind, &input, signal).await?);
         }
