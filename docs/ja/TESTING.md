@@ -100,7 +100,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
 ## CI
 
-プルリクエストのたびに、また `main` へのプッシュのたびに、二つのワークフローが実行されます：
+プルリクエストのたびに次のワークフローが実行され、最初の二つは `main` へのプッシュのたびにも実行されます：
 
 | ワークフロー | ジョブ | 実行内容 |
 | --- | --- | --- |
@@ -109,6 +109,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 | | `Live extension`（Ubuntu、Node 24） | コミットされたビルドに対する、拡張機能のテスト |
 | | `Release scripts`（Ubuntu） | この変更の空白のチェック、続いてパッケージングのテスト |
 | | `Required CI` | 上記がすべてパスした場合にだけパスします |
+| **Willington files** | `Willington files`（Ubuntu） | `vendor/willington/` を変えるのは Willington の同期だけで、そのプルリクエストはほかに何も変えません。`main` にあるこのチェックが、プルリクエストのコードではなくファイルの一覧を読んで実行されます |
 | **Installer** | `Build Kumi's Mac helper`、`Native bundle / <target>`（6 つ）、`Aggregate native and existing-installer releases`、続いて `Install / <system>`（6 つ）と `Existing installer transition / <system>`（3 つ） | Mac で Kumi が Live のメニューを使うためのヘルパー（ユニバーサル、アドホック署名）、macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドル、続いて既存のインストールが更新に使う互換リリースをビルドし、ローカルで配信します。各システムで：プロデューサーと同じ方法でインストールし（Windows では Windows PowerShell 5.1）、バージョン、`doctor`、ブリッジとその解析ワーカーを確認し、修復として再インストールし、使い捨ての Remote Scripts フォルダーに `kumi bridge --yes` を実行し、`kumi update`、`kumi update --rollback`、`kumi uninstall` を実行します。移行のジョブは、Kumi 1.7.5 と新しいバンドルで移行テストを実行します。`v*` タグでは、続いて `publish` がバンドルをリリースに添付します。 |
 
 プルリクエストでは、実行される範囲が狭くなります：
@@ -118,7 +119,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
 `main` へのプッシュとタグではすべてが実行され、CI は毎晩すべてを実行します。
 
-`main` にマージするには、`Required CI` がパスする必要があります。Installer は必須ではありません。残りのルールは[リリースと配布](DISTRIBUTION_POLICY.md#マージゲート)にあります。
+`main` にマージするには、`Required CI` と `Willington files` がパスする必要があります。Installer は必須ではありません。残りのルールは[リリースと配布](DISTRIBUTION_POLICY.md#マージゲート)にあります。
 
 ## パスが意味すること
 

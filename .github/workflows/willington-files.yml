@@ -1,0 +1,75 @@
+name: Willington files
+
+# Only Willington's sync changes vendor/willington/, and its pull requests change nothing else. Those files
+# ship to every producer, and their native libraries can't be reviewed, so who sends them is the check.
+# The sync is a GitHub App that pushes the branch willington-sync. Its login (`<app>[bot]`) goes in the
+# WILLINGTON_SYNC_APP repository variable once it exists; until then, nothing may change the folder.
+on:
+  # The base branch's copy of this workflow runs, never the pull request's, so a pull request can't change
+  # the check it's held to. It reads the pull request's metadata only, never its code. `edited` covers a
+  # pull request moved onto main from another branch.
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: Willington files
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Only Willington's sync changes vendor/willington, and nothing else
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          SYNC_APP: ${{ vars.WILLINGTON_SYNC_APP }}
+        run: |
+          set -euo pipefail
+          # One row per changed file: its path, and its old one when it moved (moving a file in or out counts).
+          rows="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[] | [.filename, .previous_filename // ""] | @tsv')"
+          # The API lists at most 3,000 files: a pull request it can't list whole can't pass.
+          if (( $(grep -c '' <<<"$rows") >= 3000 )); then
+            echo "::error::This pull request changes too many files to check against vendor/willington/."
+            exit 1
+          fi
+          paths="$(tr '\t' '\n' <<<"$rows" | grep -v '^$' || true)"
+          vendor="$(grep -E '^vendor/willington(/|$)' <<<"$paths" || true)"
+          other="$(grep -v -E '^vendor/willington(/|$)' <<<"$paths" || true)"
+          sync=false
+          if [[ -n "$SYNC_APP" && "$AUTHOR" == "$SYNC_APP" && "$AUTHOR_TYPE" == "Bot" && "$BRANCH" == "willington-sync" && "$HEAD_REPO" == "$GITHUB_REPOSITORY" ]]; then
+            sync=true
+          fi
+          if $sync && [[ -n "$other" ]]; then
+            echo "Willington's sync changes vendor/willington/ only. This pull request also changes:"
+            sed 's/^/  /' <<<"$other"
+            echo "::error::Willington's sync pull request changes files outside vendor/willington/."
+            exit 1
+          fi
+          if ! $sync && [[ -n "$vendor" ]]; then
+            if [[ -z "$SYNC_APP" ]]; then
+              echo "Only Willington's sync changes vendor/willington/, and it isn't set up yet: the WILLINGTON_SYNC_APP repository variable is empty."
+            else
+              echo "Only Willington's sync ($SYNC_APP, from willington-sync in $GITHUB_REPOSITORY) changes vendor/willington/."
+              echo "This pull request is from $AUTHOR, on $HEAD_REPO:$BRANCH, and changes:"
+            fi
+            sed 's/^/  /' <<<"$vendor"
+            echo "::error::Only Willington's sync changes vendor/willington/."
+            exit 1
+          fi
+          if $sync; then
+            echo "Willington's sync, changing vendor/willington/ only."
+          else
+            echo "Nothing in vendor/willington/ changes."
+          fi

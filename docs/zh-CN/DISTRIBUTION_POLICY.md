@@ -40,12 +40,16 @@ Kumi 及其桥接如何送到用户手中，这能证明什么、不能证明什
 
 ## 合并门禁
 
-`main` 分支有一套规则集：
+仓库有两套规则集：
 
-- 修改通过拉取请求进入；不要求批准性审查；
-- 一项必需的检查 `Required CI`，必须在分支与 `main` 保持同步的状态下通过；
-- `main` 不能被删除或强制推送；
-- 仓库管理员角色可以对拉取请求绕过这些规则。
+- **`main`：**
+  - 修改通过拉取请求进入；不要求批准性审查；
+  - 两项必需的检查 `Required CI` 和 `Willington files`，必须在分支与 `main` 保持同步的状态下通过；
+  - `main` 不能被删除或强制推送；
+  - 仓库管理员角色可以对拉取请求绕过这些规则。
+- **`Release tags`：** 只有仓库管理员角色可以创建、移动或删除 `v*` 标签。推送标签会运行 Installer，由它发布版本。
+
+`Willington files` 只允许 Willington 的同步修改 `vendor/willington/`，并且它的拉取请求不修改其他任何内容。同步是一个 GitHub App，它的登录名（`<app>[bot]`）放在仓库变量 `WILLINGTON_SYNC_APP` 中，它推送的分支是 `willington-sync`。在这个变量设置之前，任何人都不能修改这个文件夹。
 
 Installer 工作流不是必需的检查，但在标签上，它的 `publish` 作业只有在发行包已在 macOS、Linux 和 Windows 上安装成功之后才会运行。[测试](TESTING.md#ci)介绍了每个作业。
 

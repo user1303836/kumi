@@ -139,7 +139,7 @@ agree; keep them in step by hand.
 
 ## CI
 
-Two workflows run on every pull request and every push to `main`:
+These workflows run on every pull request, and the first two on every push to `main` too:
 
 | Workflow | Jobs | What runs |
 | --- | --- | --- |
@@ -148,6 +148,7 @@ Two workflows run on every pull request and every push to `main`:
 | | `Live extension` (Ubuntu, Node 24) | The extension's tests, against its committed build |
 | | `Release scripts` (Ubuntu) | The whitespace check of the change, then the packaging tests |
 | | `Required CI` | Passes only when all of the above passed |
+| **Willington files** | `Willington files` (Ubuntu) | Only Willington's sync changes `vendor/willington/`, and its pull requests change nothing else. `main`'s copy of the check runs, reading the pull request's file list, never its code |
 | **Installer** | `Build Kumi's Mac helper`, `Native bundle / <target>` (six), `Aggregate native and existing-installer releases`, then `Install / <system>` (six) and `Existing installer transition / <system>` (three) | Builds the helper Kumi uses Live's menus with on a Mac (universal, ad hoc signed), a native bundle for Intel and ARM on macOS, Linux and Windows, then the compatibility release that existing installations update from, and serves them locally. On each system: installs as producers do (Windows PowerShell 5.1 on Windows), checks the version, `doctor`, the bridge and its analysis worker, installs again as a repair, runs `kumi bridge --yes` into a scratch Remote Scripts folder, `kumi update`, `kumi update --rollback` and `kumi uninstall`. The transition jobs run the migration tests with Kumi 1.7.5 and the new bundles. On a `v*` tag, `publish` then attaches the bundle to the release. |
 
 On a pull request, less runs:
@@ -161,7 +162,7 @@ On a pull request, less runs:
 
 Each push to `main` and each tag run everything, and CI runs in full each night.
 
-To merge into `main`, `Required CI` must pass. The Installer isn't required.
+To merge into `main`, `Required CI` and `Willington files` must pass. The Installer isn't required.
 [Releases and distribution](DISTRIBUTION_POLICY.md#merge-gate) has the rest of
 the rules.
 

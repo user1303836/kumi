@@ -70,13 +70,22 @@ earlier.
 
 ## Merge gate
 
-The `main` branch has one ruleset:
+The repository has two rulesets:
 
-- changes arrive by pull request; no approving review is required;
-- one required check, `Required CI`, which must pass on the branch as it is
-  up to date with `main`;
-- `main` can't be deleted or force-pushed;
-- the repository admin role can bypass these rules for pull requests.
+- **`main`:**
+  - changes arrive by pull request; no approving review is required;
+  - two required checks, `Required CI` and `Willington files`, which must pass
+    on the branch as it is up to date with `main`;
+  - `main` can't be deleted or force-pushed;
+  - the repository admin role can bypass these rules for pull requests.
+- **`Release tags`:** only the repository admin role creates, moves or deletes
+  `v*` tags. A tag push runs the Installer, which publishes the release.
+
+`Willington files` lets only Willington's sync change `vendor/willington/`, and
+its pull requests change nothing else. The sync is a GitHub App, whose login
+(`<app>[bot]`) goes in the `WILLINGTON_SYNC_APP` repository variable, and it
+pushes the branch `willington-sync`. Until the variable is set, nothing may
+change the folder.
 
 The Installer workflow isn't a required check, but on a tag its `publish` job
 runs only after the bundle has installed on macOS, Linux and Windows.
