@@ -1,0 +1,18 @@
+{
+  "platform": "macos",
+  "architecture": "arm64",
+  "version": "12.4.15b5 (2026-09-24_415b783fcc)",
+  "executable": "/Applications/Ableton Live 12 Beta.app/Contents/MacOS/Live",
+  "source_sha256": "4beb1ec0c228ef3a0f2798eff8844d1fcdaa81647afc46b8a0e2abbfd3375751",
+  "arm64_sha256": "a8028f10b06d2381afb387ae17b37c127ccf930d84111ea429b9eba0ff8a4725",
+  "native_source_sha256": "c2eb750760c83994810c50dcc400d86170e05ace9f5ec2c101e0988b73864de0",
+  "profile_id": "live-12.4.15b5-arm64",
+  "profile_sha256": "1f398d21814e41a83867fad0195689656e6cdc4b320366aaa9927d72fdf0f779",
+  "validation_status": "validated",
+  "runtime_notes": [
+    "The downloaded b5 app failed codesign verification and its bundled Max failed to initialize in the isolated translocated launch. No security protection was bypassed.",
+    "Max tests passed after explicit user approval to select the existing b4 Max runtime. Bundled Max preference was restored afterward.",
+    "Stopped-transport property and transaction tests do not verify musical scheduling or arbitrary Sets."
+  ],
+  "library_sha256": "3260c80fa68faa98dae3ba2481fc6016ff35de1b9943b237da8c63f866fd6783"
+}

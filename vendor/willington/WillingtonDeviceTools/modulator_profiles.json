@@ -1,0 +1,805 @@
+{
+  "LFO": {
+    "parameters": [
+      [
+        "Device On",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Depth",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Rate",
+        0.0,
+        40.0,
+        false
+      ],
+      [
+        "Hold",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Jitter",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Offset",
+        -100.0,
+        100.0,
+        false
+      ],
+      [
+        "Phase",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Re-Trigger",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Shape",
+        0.0,
+        8.0,
+        true
+      ],
+      [
+        "Smooth",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Steps",
+        0.0,
+        24.0,
+        true
+      ],
+      [
+        "Rate",
+        0.0,
+        23.0,
+        true
+      ],
+      [
+        "Time Mode",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Wave Shape",
+        -100.0,
+        100.0,
+        false
+      ],
+      [
+        "x10",
+        0.0,
+        1.0,
+        true
+      ]
+    ],
+    "slots": [
+      "obj-7.1::obj-16::obj-130",
+      "obj-23::obj-1.1::obj-16::obj-130",
+      "obj-23::obj-3.1::obj-16::obj-130",
+      "obj-23::obj-4.1::obj-16::obj-130",
+      "obj-23::obj-5.1::obj-16::obj-130",
+      "obj-23::obj-6.1::obj-16::obj-130",
+      "obj-23::obj-8.1::obj-16::obj-130",
+      "obj-23::obj-9.1::obj-16::obj-130"
+    ]
+  },
+  "Envelope Follower": {
+    "parameters": [
+      [
+        "Device On",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Delay",
+        0.0,
+        500.0,
+        false
+      ],
+      [
+        "Delay",
+        0.0,
+        6.0,
+        true
+      ],
+      [
+        "Fall",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Gain",
+        -70.0,
+        30.0,
+        false
+      ],
+      [
+        "Mix",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Rise",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "External SC",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Delay Mode",
+        0.0,
+        1.0,
+        true
+      ]
+    ],
+    "slots": [
+      "obj-1.1::obj-16::obj-130",
+      "obj-27::obj-1.1::obj-16::obj-130",
+      "obj-27::obj-3.1::obj-16::obj-130",
+      "obj-27::obj-4.1::obj-16::obj-130",
+      "obj-27::obj-5.1::obj-16::obj-130",
+      "obj-27::obj-6.1::obj-16::obj-130",
+      "obj-27::obj-8.1::obj-16::obj-130",
+      "obj-27::obj-9.1::obj-16::obj-130"
+    ]
+  },
+  "Shaper": {
+    "parameters": [
+      [
+        "Device On",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Depth",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Rate",
+        0.009999999776482582,
+        10.0,
+        false
+      ],
+      [
+        "GridSize",
+        1.0,
+        16.0,
+        false
+      ],
+      [
+        "Jitter",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Manual",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Trigger",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Offset",
+        -100.0,
+        100.0,
+        false
+      ],
+      [
+        "Phase",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Re-Trigger",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Smooth",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Rate",
+        0.0,
+        23.0,
+        true
+      ],
+      [
+        "Snap",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Time Mode",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Trigger Mode",
+        0.0,
+        2.0,
+        true
+      ]
+    ],
+    "slots": [
+      "obj-28.1::obj-16::obj-130",
+      "obj-62::obj-1.1::obj-16::obj-130",
+      "obj-62::obj-3.1::obj-16::obj-130",
+      "obj-62::obj-4.1::obj-16::obj-130",
+      "obj-62::obj-5.1::obj-16::obj-130",
+      "obj-62::obj-6.1::obj-16::obj-130",
+      "obj-62::obj-8.1::obj-16::obj-130",
+      "obj-62::obj-9.1::obj-16::obj-130"
+    ]
+  },
+  "Expression Control": {
+    "parameters": [
+      [
+        "Device On",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Curve A",
+        -1.0,
+        1.0,
+        false
+      ],
+      [
+        "Curve A",
+        -1.0,
+        1.0,
+        false
+      ],
+      [
+        "Curve A",
+        -1.0,
+        1.0,
+        false
+      ],
+      [
+        "Curve A",
+        -1.0,
+        1.0,
+        false
+      ],
+      [
+        "Curve A",
+        -1.0,
+        1.0,
+        false
+      ],
+      [
+        "Curve B",
+        -1.0,
+        1.0,
+        false
+      ],
+      [
+        "Curve B",
+        -1.0,
+        1.0,
+        false
+      ],
+      [
+        "Curve B",
+        -1.0,
+        1.0,
+        false
+      ],
+      [
+        "Curve B",
+        -1.0,
+        1.0,
+        false
+      ],
+      [
+        "Curve B",
+        -1.0,
+        1.0,
+        false
+      ],
+      [
+        "Link",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Link",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Link",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Link",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Link",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Max",
+        0.0,
+        127.0,
+        false
+      ],
+      [
+        "Max",
+        0.0,
+        127.0,
+        false
+      ],
+      [
+        "Max",
+        0.0,
+        127.0,
+        false
+      ],
+      [
+        "Max",
+        0.0,
+        127.0,
+        false
+      ],
+      [
+        "Max",
+        0.0,
+        127.0,
+        false
+      ],
+      [
+        "Min",
+        0.0,
+        127.0,
+        false
+      ],
+      [
+        "Min",
+        0.0,
+        127.0,
+        false
+      ],
+      [
+        "Min",
+        0.0,
+        127.0,
+        false
+      ],
+      [
+        "Min",
+        0.0,
+        127.0,
+        false
+      ],
+      [
+        "Min",
+        0.0,
+        127.0,
+        false
+      ],
+      [
+        "Curve Type",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Curve Type",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Curve Type",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Curve Type",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Curve Type",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Steps",
+        1.0,
+        32.0,
+        false
+      ],
+      [
+        "Steps",
+        1.0,
+        32.0,
+        false
+      ],
+      [
+        "Steps",
+        1.0,
+        32.0,
+        false
+      ],
+      [
+        "Steps",
+        1.0,
+        32.0,
+        false
+      ],
+      [
+        "Steps",
+        1.0,
+        32.0,
+        false
+      ],
+      [
+        "Mid X",
+        1.0,
+        126.0,
+        false
+      ],
+      [
+        "Mid X",
+        1.0,
+        126.0,
+        false
+      ],
+      [
+        "Mid X",
+        1.0,
+        126.0,
+        false
+      ],
+      [
+        "Mid X",
+        1.0,
+        126.0,
+        false
+      ],
+      [
+        "Mid X",
+        1.0,
+        126.0,
+        false
+      ],
+      [
+        "Mid Y",
+        1.0,
+        126.0,
+        false
+      ],
+      [
+        "Mid Y",
+        1.0,
+        126.0,
+        false
+      ],
+      [
+        "Mid Y",
+        1.0,
+        126.0,
+        false
+      ],
+      [
+        "Mid Y",
+        1.0,
+        126.0,
+        false
+      ],
+      [
+        "Mid Y",
+        1.0,
+        126.0,
+        false
+      ],
+      [
+        "Mod Amount",
+        -100.0,
+        100.0,
+        false
+      ],
+      [
+        "Mod Amount",
+        -100.0,
+        100.0,
+        false
+      ],
+      [
+        "Mod Amount",
+        -100.0,
+        100.0,
+        false
+      ],
+      [
+        "Mod Amount",
+        -100.0,
+        100.0,
+        false
+      ],
+      [
+        "Mod Amount",
+        -100.0,
+        100.0,
+        false
+      ],
+      [
+        "Random Amt",
+        1.0,
+        100.0,
+        false
+      ],
+      [
+        "Random Amt",
+        1.0,
+        100.0,
+        false
+      ],
+      [
+        "Random Amt",
+        1.0,
+        100.0,
+        false
+      ],
+      [
+        "Random Amt",
+        1.0,
+        100.0,
+        false
+      ],
+      [
+        "Random Amt",
+        1.0,
+        100.0,
+        false
+      ],
+      [
+        "Range Max",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Range Max",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Range Max",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Range Max",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Range Max",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Range Min",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Range Min",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Range Min",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Range Min",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Range Min",
+        0.0,
+        100.0,
+        false
+      ],
+      [
+        "Fall",
+        0.0,
+        1000.0,
+        false
+      ],
+      [
+        "Fall",
+        0.0,
+        1000.0,
+        false
+      ],
+      [
+        "Fall",
+        0.0,
+        1000.0,
+        false
+      ],
+      [
+        "Fall",
+        0.0,
+        1000.0,
+        false
+      ],
+      [
+        "Fall",
+        0.0,
+        1000.0,
+        false
+      ],
+      [
+        "Rise",
+        0.0,
+        1000.0,
+        false
+      ],
+      [
+        "Rise",
+        0.0,
+        1000.0,
+        false
+      ],
+      [
+        "Rise",
+        0.0,
+        1000.0,
+        false
+      ],
+      [
+        "Rise",
+        0.0,
+        1000.0,
+        false
+      ],
+      [
+        "Rise",
+        0.0,
+        1000.0,
+        false
+      ],
+      [
+        "Smooth Type",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Smooth Type",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Smooth Type",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Smooth Type",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Smooth Type",
+        0.0,
+        1.0,
+        true
+      ],
+      [
+        "Source 1",
+        0.0,
+        9.0,
+        true
+      ],
+      [
+        "Source 2",
+        0.0,
+        9.0,
+        true
+      ],
+      [
+        "Source 3",
+        0.0,
+        9.0,
+        true
+      ],
+      [
+        "Source 4",
+        0.0,
+        9.0,
+        true
+      ],
+      [
+        "Source 5",
+        0.0,
+        9.0,
+        true
+      ]
+    ],
+    "slots": [
+      "obj-25.1::obj-16::obj-130",
+      "obj-44.1::obj-16::obj-130",
+      "obj-48.1::obj-16::obj-130",
+      "obj-54.1::obj-16::obj-130",
+      "obj-61.1::obj-16::obj-130"
+    ]
+  }
+}
