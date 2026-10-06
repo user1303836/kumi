@@ -189,3 +189,15 @@ fn a_new_arrangement_clip_says_what_it_replaced() {
     assert!(!kind.summarize(clear.as_object().unwrap(), input.as_object().unwrap(), &|_| None, None).title.contains("replacing"));
     assert_eq!(kind.replaced(clear.as_object().unwrap()), None);
 }
+
+#[test]
+fn a_new_clip_whose_cut_kumi_couldnt_tell_leaves_its_undo_to_live() {
+    // A read of the track's clips that failed, or clips cut past what the read before explains: Kumi's own undo, which
+    // deletes the new clip, wouldn't bring back what was cut, so it's left to Live's.
+    let kind = CHANGES.iter().find(|kind| kind.tool == "add_arrangement_clip").unwrap();
+    let unknown = json!({"payload":{"trackRef":"1:track:0","position":0,"length":4},"replaces":[],"replacesUnknown":true});
+    assert_eq!(
+        kind.replaced(unknown.as_object().unwrap()).as_deref(),
+        Some("Kumi couldn't tell what the new clip cut where it landed, so it leaves taking it back to Live's own undo.")
+    );
+}

@@ -643,6 +643,11 @@ impl ChangeKind {
     /// Why Kumi can't take back part of an applied change, from its preview: an Arrangement move or new clip that
     /// replaced what was in its place.
     pub fn replaced(&self, preview: &JsonObject) -> Option<String> {
+        if self.tool == "add_arrangement_clip" && preview.get("replacesUnknown") == Some(&json!(true)) {
+            return Some(
+                "Kumi couldn't tell what the new clip cut where it landed, so it leaves taking it back to Live's own undo.".into(),
+            );
+        }
         if !matches!(self.tool.as_str(), "move_clip" | "add_arrangement_clip")
             || !preview.get("replaces").and_then(Value::as_array).is_some_and(|r| !r.is_empty())
         {

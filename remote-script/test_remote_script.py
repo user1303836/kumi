@@ -2687,6 +2687,39 @@ class ControlSurfaceTests(unittest.TestCase):
             mapper.invoke("arrangement.clip.create", args)
         self.assertEqual(sorted((clip.name, clip.start_time) for clip in track.arrangement_clips), [("Hook", 20.0), ("Pad", 0.0), ("Stray", 40.0)])
 
+    def test_a_create_accepts_only_what_live_leaves_of_a_split_clip(self):
+        """A clip Live splits around a new one leaves exactly its two remainders; a far end anywhere else isn't Live's
+        doing, so the create fails, removes only its own clip, and leaves the stray part for Live's undo."""
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Pad", 16.0, 16.0))
+        def create_midi_clip(start, length):
+            pad = track.arrangement_clips[0]; old_end = pad.end_time
+            pad.end_time = start; pad.length = start - pad.start_time
+            stray = FakeClip(2.0); stray.name = "Pad"; stray.start_time = start + length + 1.0; stray.end_time = old_end  # a beat short of Live's remainder
+            made = FakeClip(length); made.start_time = start; made.end_time = start + length
+            track.arrangement_clips.extend([made, stray]); track.arrangement_clips.sort(key=lambda item: item.start_time); return made
+        track.create_midi_clip = create_midi_clip
+        mapper = LiveObjectMapper(song); track_row = mapper.snapshot()["tracks"][0]
+        args = {"trackRef": track_row["ref"], "expectedTrackIdentity": track_row["objectIdentity"], "expectedCollectionRevision": mapper._arrangement_collection_revision(track, 0),
+                "position": 24.0, "length": 4.0, "name": "Fill"}
+        with self.assertRaisesRegex(ValueError, "Kumi removed its clip, and Live's undo puts back what was cut"):
+            mapper.invoke("arrangement.clip.create", args)
+        self.assertEqual([(clip.start_time, clip.end_time) for clip in track.arrangement_clips], [(16.0, 24.0), (29.0, 32.0)])
+
+    def test_a_create_whose_creator_raises_doesnt_claim_to_have_removed_a_clip(self):
+        """A creator that raises after Live made the clip hands Kumi nothing to remove: the error says Live's undo puts
+        things back, not that Kumi removed its clip."""
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Pad", 0.0, 8.0))
+        def create_midi_clip(start, length):
+            made = FakeClip(length); made.start_time = start; made.end_time = start + length; track.arrangement_clips.append(made)
+            raise RuntimeError("Live raised after making the clip")
+        track.create_midi_clip = create_midi_clip
+        mapper = LiveObjectMapper(song); track_row = mapper.snapshot()["tracks"][0]
+        args = {"trackRef": track_row["ref"], "expectedTrackIdentity": track_row["objectIdentity"], "expectedCollectionRevision": mapper._arrangement_collection_revision(track, 0),
+                "position": 16.0, "length": 4.0, "name": "Fill"}
+        with self.assertRaisesRegex(ValueError, "failed after Live changed the clips where it was to land; Live's undo puts them back"):
+            mapper.invoke("arrangement.clip.create", args)
+        self.assertEqual(len(track.arrangement_clips), 2, "nothing Kumi didn't make is deleted")
+
     @staticmethod
     def arrangement_track_that_crashes_on_overlap(*clips, audio=False, splits=False):
         """A track whose Arrangement copy fails where Live crashes, onto a span a clip already holds, and

@@ -5533,22 +5533,25 @@ class LiveObjectMapper:
 
     def _laid_over(self, track: Any, before: dict[str, tuple[float, float]], created: Any, start: float, end: float) -> int:
         """Check what a new Arrangement clip did to its track, as Live lays one over the clips it lands on (12.4.15b5):
-        the new clip on [start, end); a clip clear of that span untouched; a clip under it cut back to outside the span,
-        or gone; and at most one clip Live split around it, whose far end is a clip of its own. Anything else raises.
-        `before` is each earlier clip's span by identity. Returns the new clip's index."""
+        the new clip on [start, end); a clip clear of that span untouched; a clip under it cut back to exactly what's
+        left of it outside the span (before it, or after it), or gone; and at most one clip Live split around it, whose
+        other remainder is a clip of its own. Anything else raises. `before` is each earlier clip's span by identity.
+        Returns the new clip's index."""
         created_identity = self._capture_object_identity(created); index = None; far_ends = 0
         for position, candidate in enumerate(self._items(self._read_attr(track, "arrangement_clips") or [])):
             identity = self._capture_object_identity(candidate); left, right = self._arrangement_span(candidate)
             if identity == created_identity:
                 index = position; continue
-            outside = right <= start + 1e-6 or left >= end - 1e-6
+            def remainder(old_left: float, old_right: float) -> bool:
+                # What Live leaves of a clip under the new one: the part before it, or the part after it, exactly.
+                return (old_left < start - 1e-6 and _same_number(left, old_left) and _same_number(right, start)) or (old_right > end + 1e-6 and _same_number(left, end) and _same_number(right, old_right))
             if identity in before:
                 old_left, old_right = before[identity]
                 if old_right <= start + 1e-6 or old_left >= end - 1e-6:
                     if not (_same_number(left, old_left) and _same_number(right, old_right)): raise ValueError("arrangement clip creation changed a clip outside its span")
-                elif not (outside and left >= old_left - 1e-6 and right <= old_right + 1e-6):
+                elif not remainder(old_left, old_right):
                     raise ValueError("arrangement clip creation cut a clip other than as Live lays one over")
-            elif outside and any(old_left < start - 1e-6 and old_right > end + 1e-6 and left >= old_left - 1e-6 and right <= old_right + 1e-6 for old_left, old_right in before.values()):
+            elif any(old_left < start - 1e-6 and old_right > end + 1e-6 and remainder(old_left, old_right) for old_left, old_right in before.values()):
                 far_ends += 1
             else:
                 raise ValueError("arrangement clip creation produced a clip it didn't ask for")
@@ -5568,6 +5571,9 @@ class LiveObjectMapper:
         if not cleaned: raise ValueError(f"{what} failed and Kumi couldn't remove the clip it made; Live's undo takes it back") from error
         now = {self._capture_object_identity(item): self._arrangement_span(item) for item in self._items(self._read_attr(track, "arrangement_clips") or [])}
         if set(now) != set(before) or any(not (_same_number(now[key][0], before[key][0]) and _same_number(now[key][1], before[key][1])) for key in before):
+            if created is None:
+                # Live didn't hand back a clip, so Kumi has none to remove: whatever changed is Live's undo's to put back.
+                raise ValueError(f"{what} failed after Live changed the clips where it was to land; Live's undo puts them back") from error
             raise ValueError(f"{what} failed after Live cut the clips it landed on; Kumi removed its clip, and Live's undo puts back what was cut") from error
 
     def _arrangement_parking(self, owner: Any, *beats: float) -> float:
