@@ -112,7 +112,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 | | `Release scripts`（Ubuntu） | 检查本次修改的空白字符，然后运行打包测试和发布脚本的测试 |
 | | `Required CI` | 只有以上全部通过时才通过 |
 | **Willington files** | `Willington files`（Ubuntu） | 只有仓库所有者从本仓库 `willington/` 分支发出的拉取请求才能修改 `vendor/willington/`，而这样的拉取请求不修改其他任何内容。运行的是 `main` 上的这项检查，它读取拉取请求的文件列表，从不读取其代码 |
-| **Installer** | `Native bundle / <target>`（六个）、`Aggregate native and existing-installer releases`，然后是 `Install / <system>`（六个）和 `Existing installer transition / <system>`（三个） | 为 macOS、Linux 和 Windows 的 Intel 与 ARM 构建原生发行包（Mac 发行包带有 Kumi 在 Mac 上使用 Live 菜单的辅助程序，通用、临时签名；Intel 的发行包在 Apple Silicon 上交叉构建），再构建现有安装用来更新的兼容版本，并在本地提供它们。在每个系统上：像制作人那样安装（在 Windows 上使用 Windows PowerShell 5.1），检查版本、`doctor`、桥接及其分析工作进程，再次安装作为修复，运行 `kumi bridge --yes` 安装到一个临时的 Remote Scripts 文件夹，运行 `kumi update`、`kumi update --rollback` 和 `kumi uninstall`。过渡作业用 Kumi 1.7.5 和新的发行包运行迁移测试。推送 `v*` 标签时，`publish` 随后把发行包附加到发布版本上，并在说明已写好时发布该版本（说明由 `scripts/release.py` 撰写）。 |
+| **Installer** | `Native bundle / <target>`（六个）、`Aggregate native and existing-installer releases`，然后是 `Install / <system>`（六个）和 `Existing installer transition / <system>`（三个） | 为 macOS、Linux 和 Windows 的 Intel 与 ARM 构建原生发行包（Mac 发行包带有 Kumi 在 Mac 上使用 Live 菜单的辅助程序，通用、临时签名；Intel 的发行包在 Apple Silicon 上交叉构建），再构建现有安装用来更新的兼容版本，并在本地提供它们。在每个系统上：像制作人那样安装（在 Windows 上使用 Windows PowerShell 5.1），检查版本、`doctor`、桥接及其分析工作进程，再次安装作为修复，运行 `kumi bridge --yes` 安装到一个临时的 Remote Scripts 文件夹，运行 `kumi update`、`kumi update --rollback` 和 `kumi uninstall`。过渡作业用 Kumi 1.7.5 和新的发行包运行迁移测试。推送 `v*` 标签时，`publish` 随后把发行包附加到发布版本上，并在说明由 `scripts/release.py` 撰写时发布该版本。 |
 
 在拉取请求上，运行的内容更少：
 

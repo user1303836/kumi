@@ -14,9 +14,10 @@ What ships is read from main since the last release tag:
 - Each pull request's "Changelog:" lines, verbatim. "none" adds nothing. A line goes under the bridge's heading
   when its pull request changes the bridge and nothing of Kumi's (crates/kumi*, install.sh, install.ps1), or
   when it's written "Changelog (bridge):"; "Changelog (kumi):" keeps it under Kumi's.
-- The bridge gets a new version when a pull request changes what Live loads: the bridge host, the Remote Script,
-  the protocol, the Live extension or Willington's files (their tests and Markdown aside). --bridge and
-  --no-bridge decide instead.
+- The bridge gets a new version when a pull request changes what Live loads: the bridge host, the code it shares
+  with Kumi (kumi-common), the Remote Script, the protocol, the Live extension or Willington's files (their tests
+  and Markdown aside). A dependency change can change the host too: the dry run says so, and --bridge gives the
+  bridge a new version then. --no-bridge keeps it.
 The version goes up by a patch, by a minor with --minor, or is given with --version.
 """
 from __future__ import annotations
@@ -32,16 +33,20 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-# A change under these, besides tests and Markdown, is a new bridge for Live to load.
-BRIDGE = ("crates/ableton-mcp-server/", "remote-script/", "protocol/", "apps/live-extension/", "vendor/willington/")
+# A change under these, besides tests and Markdown, is a new bridge for Live to load. The host links kumi-common.
+BRIDGE = ("crates/ableton-mcp-server/", "crates/kumi-common/", "remote-script/", "protocol/", "apps/live-extension/",
+          "vendor/willington/")
 KUMI = ("crates/kumi/", "crates/kumi-runtime/", "crates/kumi-common/", "crates/kumi-store/", "install.sh", "install.ps1")
 CRATES = ("kumi", "kumi-common", "kumi-runtime")
 # The CHANGELOG's dates are New York's, as its earlier entries are.
 TIMEZONE = "America/New_York"
 WIDTH = 102
 LINE = re.compile(r"^Changelog(?:\s*\((?P<where>kumi|bridge)\))?:\s*(?P<text>.+?)\s*$", re.M | re.I)
+# The notes end with this, unrendered: the tag build publishes only a draft whose notes carry it.
+MARKER = "<!-- kumi:release-notes -->"
 NUMBER = r"\d+\.\d+(?:\.\d+)?"  # the oldest ships-with entries say "1.5"
 # The ships-with line in each KUMI_CHANGES.md: the pattern of its first entry, that entry with a longer range, the
 # range's dash, and a new first entry in front of the old one.
@@ -67,6 +72,7 @@ class Change:
     paths: list[str]
     lines: list[tuple[str, str]]  # (kumi | bridge, text)
     written: bool  # the body has a Changelog line, "none" included
+    wrapped: list[str]  # Changelog lines whose sentence seems to go on past the line break
 
 
 @dataclass
@@ -114,11 +120,15 @@ def ships_bridge(path: str) -> bool:
 
 
 def classify(number: int, body: str, paths: list[str]) -> Change:
-    found = [(m["where"], m["text"]) for m in LINE.finditer(body or "")]
+    rows = (body or "").replace("\r\n", "\n").split("\n")
+    found = [(i, m) for i, row in enumerate(rows) if (m := LINE.match(row))]
     bridge_only = any(ships_bridge(path) for path in paths) and not any(path.startswith(KUMI) for path in paths)
-    lines = [((where or ("bridge" if bridge_only else "kumi")).lower(), text)
-             for where, text in found if not re.match(r"none\b", text, re.I)]
-    return Change(number, paths, lines, bool(found))
+    lines = [((m["where"] or ("bridge" if bridge_only else "kumi")).lower(), m["text"])
+             for _, m in found if not re.match(r"none\b", m["text"], re.I)]
+    # Only a Changelog line's own row is read, so a sentence the body wraps onto the next row would be cut.
+    wrapped = [m["text"] for i, m in found if i + 1 < len(rows) and rows[i + 1].strip()
+               and not re.match(r"\s*(Changelog\b|[-*>#|`<🤖]|\d+\.\s)", rows[i + 1], re.I)]
+    return Change(number, paths, lines, bool(found), wrapped)
 
 
 def replace_once(path: Path, old: str, new: str) -> None:
@@ -199,7 +209,7 @@ def notes(plan: Plan, tested: str, summary: str | None) -> str:
     parts.append(f"Update with `/update` inside Kumi or `kumi update` in your terminal.{restart}"
                  " `kumi update --rollback` goes back to your previous version.")
     parts.append(" ".join(tested.split()))
-    return "\n\n".join(parts) + "\n"
+    return "\n\n".join(parts) + "\n\n" + MARKER + "\n"
 
 
 def apply(root: Path, plan: Plan) -> None:
@@ -244,6 +254,30 @@ def checks(work: Path, olds: list[str]) -> list[str]:
     left = subprocess.run(["git", "grep", "-n", "-I", "-E", rf"(^|[^0-9.])({versions})([^0-9]|$)", "--", ".",
                            ":!CHANGELOG.md", ":!docs/*/KUMI_CHANGES.md"], cwd=work, text=True, capture_output=True)
     return [line[:160] for line in left.stdout.splitlines()]
+
+
+def bridge_graph(lock_text: str) -> set[tuple[str, str]]:
+    """Every (name, version) the bridge host's build reaches in a Cargo.lock, less its own crates (whose code BRIDGE
+    covers): a change here changes the bridge without a file under BRIDGE changing. Test-only dependencies count
+    too, so a difference is for a look rather than a new version by itself."""
+    by_name: dict[str, list[dict]] = {}
+    for package in tomllib.loads(lock_text)["package"]:
+        by_name.setdefault(package["name"], []).append(package)
+
+    def resolve(dependency: str) -> dict | None:
+        name, *version = dependency.split(" ")
+        found = [package for package in by_name.get(name, []) if not version or package["version"] == version[0]]
+        return found[0] if found else None
+
+    seen: set[tuple[str, str]] = set()
+    stack = [by_name["ableton-mcp-server"][0]]
+    while stack:
+        package = stack.pop()
+        key = (package["name"], package["version"])
+        if key not in seen:
+            seen.add(key)
+            stack += [found for found in map(resolve, package.get("dependencies", [])) if found]
+    return {key for key in seen if key[0] not in ("ableton-mcp-server", "kumi-common")}
 
 
 def pull_requests(tag: str, head: str, repo: str) -> list[Change]:
@@ -312,6 +346,7 @@ def publish(args: argparse.Namespace, repo: str, plan: Plan, changes: list[Chang
     if args.co_author:
         message += f"\n\nCo-Authored-By: {args.co_author}"
     run(["git", "commit", "--quiet", "-m", message], work)
+    commit = run(["git", "rev-parse", "HEAD"], work)
     run(["git", "push", "--quiet", "-u", args.remote, branch], work)
     body = scratch / "pr-body.md"
     body.write_text(pr_body(plan, changes, head, left), encoding="utf-8")
@@ -319,26 +354,47 @@ def publish(args: argparse.Namespace, repo: str, plan: Plan, changes: list[Chang
                "--body-file", str(body)], work)
     number = url.rstrip("/").rsplit("/", 1)[1]
     print(f"pull request: {url}")
+    abandon = f"Close it with `gh pr close {number} --delete-branch`, then run release.py again."
     if args.no_merge:
         print(f"Stopped before merging. Merge #{number} as \"Kumi {plan.new} (#{number})\", then tag it v{plan.new}.")
         return
     # What came into main meanwhile isn't in the CHANGELOG: the release is cut again from the new main instead.
     run(["git", "fetch", "--quiet", args.remote, "main"])
     if run(["git", "rev-parse", f"{args.remote}/main"]) != head:
-        raise Refused(f"main moved since {head[:8]}, so #{number} isn't merged. Close it, delete {branch} and run again")
-    run(["gh", "pr", "merge", number, "--repo", repo, "--merge", "--admin", "--subject", f"Kumi {plan.new} (#{number})",
-         "--body", ""])
+        raise Refused(f"main moved since {head[:8]}, so #{number} isn't merged. {abandon}")
+    try:
+        run(["gh", "pr", "merge", number, "--repo", repo, "--merge", "--admin", "--match-head-commit", commit,
+             "--subject", f"Kumi {plan.new} (#{number})", "--body", ""])
+    except Refused as refused:
+        raise Refused(f"{refused}\n#{number} isn't merged. {abandon}")
     merged = json.loads(run(["gh", "pr", "view", number, "--repo", repo, "--json", "mergeCommit"]))["mergeCommit"]["oid"]
     run(["git", "fetch", "--quiet", args.remote, "main"])
-    run(["git", "tag", f"v{plan.new}", merged])
-    run(["git", "push", "--quiet", args.remote, f"v{plan.new}"])
-    notes_file = scratch / "notes.md"
+    notes_file = Path(tempfile.gettempdir()) / f"kumi-{plan.new}-release-notes.md"
     notes_file.write_text(release_notes, encoding="utf-8")
+    finish = (f"`git tag v{plan.new} {merged[:8]}`, `git push {args.remote} v{plan.new}` and `gh release create "
+              f"v{plan.new} --draft --title \"Kumi {plan.new}\" --notes-file {notes_file} --verify-tag`")
+    # A pull request can still land between the check above and the merge (auto-merge is on): it would ship in the
+    # tag without its changelog line, and a bridge change in it without a new bridge version.
+    parent = run(["git", "rev-parse", f"{merged}^1"])
+    if parent != head:
+        came = run(["git", "log", "--first-parent", "--format=%s", f"{head}..{parent}"]).splitlines()
+        raise Refused(f"main moved while #{number} merged, so {merged[:8]} isn't tagged: {'; '.join(came)} came in, "
+                      f"and would ship in v{plan.new} without their changelog lines (or a bridge version, if they "
+                      f"change the bridge). To finish, add their lines to {notes_file}, then {finish}")
+    try:
+        run(["git", "tag", f"v{plan.new}", merged])
+        run(["git", "push", "--quiet", args.remote, f"v{plan.new}"])
+    except Refused as refused:
+        raise Refused(f"{refused}\n#{number} is merged as {merged[:8]}. Finish with {finish}")
     try:
         run(["gh", "release", "create", f"v{plan.new}", "--repo", repo, "--draft", "--title", f"Kumi {plan.new}",
              "--notes-file", str(notes_file), "--verify-tag"])
     except Refused:  # the tag build made the draft first, with notes to come
-        run(["gh", "release", "edit", f"v{plan.new}", "--repo", repo, "--notes-file", str(notes_file)])
+        try:
+            run(["gh", "release", "edit", f"v{plan.new}", "--repo", repo, "--notes-file", str(notes_file)])
+        except Refused as refused:
+            raise Refused(f"{refused}\nv{plan.new} is pushed but its draft has no notes, so the tag build won't "
+                          f"publish it. Finish with `gh release edit v{plan.new} --notes-file {notes_file}`")
     print(f"Kumi {plan.new}: #{number} merged as {merged[:8]}, tagged v{plan.new}, its draft written. The tag build "
           f"publishes it once every install passes: https://github.com/{repo}/actions/workflows/installer.yml")
 
@@ -362,11 +418,23 @@ def release(args: argparse.Namespace) -> None:
     for change in changes:
         if not change.written:
             print(f"note: #{change.number} has no Changelog: line, so nothing of it is listed", file=sys.stderr)
+        for text in change.wrapped:
+            print(f"LOOK: #{change.number}'s Changelog line seems to go on past its line break, and only its first row "
+                  f"is read: {text[:70]!r}. Put it on one row in the pull request's body.", file=sys.stderr)
         for kind, text in change.lines:
             heading = f"Bridge {plan.new_bridge}" if kind == "bridge" and not plan.same_bridge else "Kumi"
             print(f"#{change.number} → {heading}: {text[:100]}")
     if not plan.kumi and not plan.bridges:
         raise Refused(f"no pull request since {tag} has a changelog line, so there's nothing to release")
+    before, after = (bridge_graph(run(["git", "show", f"{ref}:Cargo.lock"])) for ref in (tag, head))
+    if before != after:
+        moved = [f"+ {name} {version}" for name, version in sorted(after - before)]
+        moved += [f"- {name} {version}" for name, version in sorted(before - after)]
+        advice = "it gets a new version anyway" if not plan.same_bridge else "if the host's build uses them, cut with --bridge"
+        print(f"LOOK: the bridge host's dependencies changed since {tag} ({advice}):\n  " + "\n  ".join(moved), file=sys.stderr)
+    if args.go:  # admin before anything is pushed: the merge goes through the admin bypass, and tags are admin-only
+        if run(["gh", "api", f"repos/{repo}", "--jq", ".permissions.admin"]) != "true":
+            raise Refused(f"gh isn't signed in as an admin of {repo}, which the merge and the tag need")
 
     scratch = Path(tempfile.mkdtemp(prefix=f"kumi-release-{plan.new}-"))
     work = scratch / "worktree"

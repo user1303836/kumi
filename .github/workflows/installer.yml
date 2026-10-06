@@ -366,34 +366,44 @@ jobs:
         with:
           name: kumi-release
           path: release
+      # A published release keeps its assets: a re-run builds new, non-identical binaries, which mustn't replace the
+      # ones producers have checked against SHA256SUMS.
       - name: Upload to the release (a draft one is made if there's none yet)
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "Kumi ${TAG#v}" --notes "Release notes to come."
+          set -euo pipefail
+          if ! draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "Kumi ${TAG#v}" --notes "Release notes to come."
+            draft=true
+          fi
+          if [[ "$draft" != true ]]; then
+            echo "$TAG is already published, so its assets stay as they are."
+            exit 0
+          fi
           gh release upload "$TAG" release/*.tar.gz release/*.json release/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
-      # scripts/release.py writes the notes into the draft when it pushes the tag. With them there, the release is
-      # published now, every install and migration having passed; a tag pushed by hand, with notes to come, stays a
-      # draft for whoever writes them.
-      - name: Publish the release when its notes are written
+      # scripts/release.py writes the notes into the draft, marked as its own, when it pushes the tag. Such a draft is
+      # published now, every install and migration having passed. Any other draft (notes to come, or written by hand)
+      # stays a draft for whoever finishes it.
+      - name: Publish the release when scripts/release.py wrote its notes
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if [[ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" != true ]]; then
-            echo "$TAG is already published."
-            exit 0
+          if [[ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" == true ]]; then
+            body="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
+            if [[ "$body" != *"<!-- kumi:release-notes -->"* ]]; then
+              echo "$TAG's notes aren't scripts/release.py's, so it stays a draft."
+              exit 0
+            fi
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+            echo "Published $TAG."
           fi
-          body="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
-          if [[ -z "${body//[[:space:]]/}" || "$body" == "Release notes to come." ]]; then
-            echo "$TAG has no notes yet, so it stays a draft."
-            exit 0
-          fi
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
           # Latest is the highest version published, so an older tag's build that finishes later doesn't take it back.
+          # Set on every run, so a re-run finishes what a failed one left.
           tags="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 100 --json tagName --jq '.[].tagName')"
           latest="$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' <<<"$tags" | sort -V | tail -n 1)"
           gh release edit "$latest" --repo "$GITHUB_REPOSITORY" --latest
-          echo "Published $TAG; the latest release is $latest."
+          echo "The latest release is $latest."

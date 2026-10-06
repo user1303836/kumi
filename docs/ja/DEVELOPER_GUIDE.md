@@ -153,10 +153,10 @@ python3 scripts/release.py --go     # リリース
 ```
 
 - **出荷するもの**は、前回のタグ以降の `main` から読み取ります。マージされた各プルリクエストの `Changelog:` の行を、書かれたとおりに使います（"none" は何も加えません）。プルリクエストがブリッジを変え、Kumi のクレートやインストーラーを変えていない場合、その行はブリッジの見出しの下に入ります。両方を変えるプルリクエストでは、ブリッジについての行を `Changelog (bridge):` と書きます。ドライランは各行の入る場所を表示します。
-- **ブリッジ**は、プルリクエストが Live の読み込むもの（`crates/ableton-mcp-server`、`remote-script`、`protocol`、`apps/live-extension`、`vendor/willington`。テストと Markdown は除く）を変えたときに新しいバージョンになります。
+- **ブリッジ**は、プルリクエストが Live の読み込むもの（`crates/ableton-mcp-server`、ホストがリンクする `crates/kumi-common`、`remote-script`、`protocol`、`apps/live-extension`、`vendor/willington`。テストと Markdown は除く）を変えたときに新しいバージョンになります。`Cargo.lock` にあるホストの依存関係が変わるとドライランがそう伝えるので、そのときは `--bridge` でブリッジを新しいバージョンにします。
 - **バージョン**は次のパッチです。`--minor` か `--version X.Y.Z` で別のものを選べます。
 - **`--go` を付けると**、`release/vX.Y.Z` に "Kumi X.Y.Z: the changelog, READMEs and versions" をコミットします。ルートの `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common`、`kumi-runtime` の Cargo マニフェスト、`Cargo.lock` のバージョン（パッケージングのテストがこれらが等しいことを確認します）と、変わった場合はブリッジのバージョン、3 つの README の Status の行、3 つの `KUMI_CHANGES.md` の「Bridge versions」の下にある同梱するブリッジの行、`CHANGELOG.md` の `## X.Y.Z — date` の項目です。続いてプルリクエスト "Kumi X.Y.Z" を開き、その CI を待たずに管理者のバイパスで "Kumi X.Y.Z (#PR)" としてマージし、マージコミットに `vX.Y.Z` のタグを付けてプッシュし、リリースノート付きの下書きのリリースを作ります（`--summary` でノートの冒頭に一文を加えられます）。
-- **タグの Installer の実行**が、macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドルをビルドし、インストールと移行をテストし、ターゲットごとのバンドルとマニフェスト、互換用の `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS` を添付して、リリースを公開します。そうして初めて、インストーラー、`kumi update`、更新確認がそのリリースを認識します。手でプッシュしたタグには「ノートは後で」の下書きができ、だれかがノートを書いて公開するまで下書きのままです。
+- **タグの Installer の実行**が、macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドルをビルドし、インストールと移行をテストし、ターゲットごとのバンドルとマニフェスト、互換用の `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS` を添付し、`release.py` がノートを書いた場合（ノートの最後に `<!-- kumi:release-notes -->` があります）はリリースを公開します。そうして初めて、インストーラー、`kumi update`、更新確認がそのリリースを認識します。手でプッシュした「ノートは後で」のタグなど、ほかの下書きは、だれかが公開するまで下書きのままです。
 
 **ネイティブリリースのローカルでの準備**（コミット済みの変更がない状態で）：
 

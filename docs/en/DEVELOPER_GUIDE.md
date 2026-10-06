@@ -277,8 +277,10 @@ python3 scripts/release.py --go     # the release
   `Changelog (bridge):` for a line about the bridge. The dry run shows where
   each line goes.
 - **The bridge** gets a new version when a pull request changes what Live
-  loads: `crates/ableton-mcp-server`, `remote-script`, `protocol`,
-  `apps/live-extension` or `vendor/willington` (tests and Markdown aside).
+  loads: `crates/ableton-mcp-server`, `crates/kumi-common` (the host links it),
+  `remote-script`, `protocol`, `apps/live-extension` or `vendor/willington`
+  (tests and Markdown aside). When the host's dependencies in `Cargo.lock`
+  change, the dry run says so; `--bridge` gives the bridge a new version then.
 - **The version** is the next patch; `--minor` or `--version X.Y.Z` choose
   another.
 - **With `--go`** it commits "Kumi X.Y.Z: the changelog, READMEs and versions"
@@ -295,9 +297,10 @@ python3 scripts/release.py --go     # the release
 - **The tag's Installer run** builds native bundles for Intel and ARM on macOS,
   Linux and Windows, tests installs and migration, attaches the per-target
   bundles/manifests plus the compatibility `kumi.tar.gz`, `kumi-release.json`
-  and `SHA256SUMS`, and publishes the release. Only then do the installers,
-  `kumi update` and the update check see it. A tag pushed by hand gets a draft
-  with notes to come, which stays a draft until someone writes them and
+  and `SHA256SUMS`, and publishes the release when `release.py` wrote its
+  notes (they end with `<!-- kumi:release-notes -->`). Only then do the
+  installers, `kumi update` and the update check see it. Any other draft, such
+  as a tag pushed by hand with notes to come, stays a draft until someone
   publishes it.
 
 **Local native release staging**, from a clean commit:

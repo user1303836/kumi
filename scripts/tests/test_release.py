@@ -46,7 +46,8 @@ class Versions(unittest.TestCase):
 
 class Sorting(unittest.TestCase):
     def test_what_live_loads_is_the_bridge(self):
-        for path in ("crates/ableton-mcp-server/src/host/clip.rs", "remote-script/AbletonMcpBridge/__init__.py",
+        for path in ("crates/ableton-mcp-server/src/host/clip.rs", "crates/kumi-common/src/lib.rs",
+                     "remote-script/AbletonMcpBridge/__init__.py",
                      "protocol/ableton-live-v1.operations.json", "apps/live-extension/src/extension.ts",
                      "vendor/willington/release.json"):
             self.assertTrue(release.ships_bridge(path), path)
@@ -65,6 +66,59 @@ class Sorting(unittest.TestCase):
         quiet = release.classify(4, "Changelog: none (CI and developer docs).", [".github/workflows/ci.yml"])
         self.assertEqual((quiet.lines, quiet.written), ([], True))
         self.assertFalse(release.classify(5, "Bumps a test dependency.", ["crates/kumi-runtime/tests/support/package.json"]).written)
+        # kumi-common is the bridge's too, but its lines stay Kumi's.
+        self.assertEqual(release.classify(6, "Changelog: Shared thing.", ["crates/kumi-common/src/lib.rs"]).lines,
+                         [("kumi", "Shared thing.")])
+
+    def test_a_wrapped_changelog_line_is_flagged(self):
+        wrapped = release.classify(7, "Changelog: Kumi does a thing that the author\r\nwrapped onto a second row.\n", [])
+        self.assertEqual((wrapped.lines, wrapped.wrapped), ([("kumi", "Kumi does a thing that the author")], ["Kumi does a thing that the author"]))
+        for body in ("Changelog: One row.\n\nMore about it.", "Changelog: One row.\n- a list item", "Changelog: One row.\n🤖 Generated"):
+            self.assertEqual(release.classify(8, body, []).wrapped, [], body)
+
+
+class BridgeGraph(unittest.TestCase):
+    LOCK = """version = 4
+
+[[package]]
+name = "ableton-mcp-server"
+version = "1.0.86"
+dependencies = ["kumi-common", "serde 1.0.1"]
+
+[[package]]
+name = "kumi-common"
+version = "1.9.4"
+dependencies = ["itoa"]
+
+[[package]]
+name = "kumi-runtime"
+version = "1.9.4"
+dependencies = ["kumi-common", "tokio"]
+
+[[package]]
+name = "serde"
+version = "1.0.1"
+
+[[package]]
+name = "itoa"
+version = "1.0.15"
+
+[[package]]
+name = "tokio"
+version = "1.47.0"
+"""
+
+    def test_what_the_host_reaches(self):
+        self.assertEqual(release.bridge_graph(self.LOCK), {("serde", "1.0.1"), ("itoa", "1.0.15")})
+        runtime_only = self.LOCK.replace('version = "1.47.0"', 'version = "1.48.0"')
+        self.assertEqual(release.bridge_graph(runtime_only), release.bridge_graph(self.LOCK))
+        host = self.LOCK.replace('version = "1.0.15"', 'version = "1.0.16"')
+        self.assertEqual(release.bridge_graph(host) - release.bridge_graph(self.LOCK), {("itoa", "1.0.16")})
+
+    def test_this_checkouts_lock(self):
+        graph = release.bridge_graph((ROOT / "Cargo.lock").read_text(encoding="utf-8"))
+        self.assertTrue(graph)
+        self.assertFalse({name for name, _ in graph} & {"ableton-mcp-server", "kumi-common", "kumi", "kumi-runtime"})
 
 
 class Edits(unittest.TestCase):
@@ -137,7 +191,8 @@ class Notes(unittest.TestCase):
         self.assertTrue(text.startswith("Kumi 1.9.3. Ships with bridge **1.0.85**, as 1.9.2 did, so Live needs no restart.\n"))
         self.assertIn("\n\n- Kumi does X.\n\n", text)
         self.assertNotIn("needs Live to restart", text)
-        self.assertTrue(text.endswith("Tested with Live 12.4 on macOS. On Windows, installing and updating are tested.\n"))
+        self.assertTrue(text.endswith("Tested with Live 12.4 on macOS. On Windows, installing and updating are tested.\n\n"
+                                      + release.MARKER + "\n"))
         moved = release.Plan("1.9.2", "1.9.3", "1.0.85", "1.0.86", "2026-10-07", [], ["The bridge does Y."])
         text = release.notes(moved, tested, "Kumi 1.9.3 does Y.")
         self.assertTrue(text.startswith("Kumi 1.9.3 does Y. Ships with bridge **1.0.86**, which Live loads when it restarts.\n"))
