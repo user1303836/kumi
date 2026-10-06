@@ -81,17 +81,26 @@ jobs:
           echo "KUMI_LEGACY_APP=$("$python" scripts/fetch-legacy-release.py "$RUNNER_TEMP/kumi-1.7.5")" >> "$GITHUB_ENV"
       # The video tests skip without ffmpeg. This is the build Kumi itself fetches on Linux (BtbN's newest
       # numbered LGPL one), at 8.1 or later, which asks for a stream in pieces (-request_size) as YouTube wants.
+      # It's read from the release tagged latest, not releases/latest: each day's dated build (about 13:07Z) is
+      # releases/latest until BtbN makes latest again from it about 20 minutes later, and its names have no
+      # "-latest-". While latest is made again (deleted, then uploaded anew), the newest dated build serves.
       - name: ffmpeg, for the video tests
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          release=repos/BtbN/FFmpeg-Builds/releases/latest
-          asset="$(gh api "$release" --jq '.assets[].name' | grep -E '^ffmpeg-n[0-9]+\.[0-9]+-latest-linux64-lgpl-[0-9]+\.[0-9]+\.tar\.xz$' | sort -V | tail -1)"
-          from="https://github.com/BtbN/FFmpeg-Builds/releases/download/$(gh api "$release" --jq .tag_name)"
           cd "$RUNNER_TEMP"
-          curl -fsSL --retry 3 -o "$asset" "$from/$asset"
-          curl -fsSL --retry 3 "$from/checksums.sha256" | grep -F "  $asset" | sha256sum -c -
+          # The tagged release's newest numbered build, into $asset, checked against that release's checksums.
+          # A function tested with || runs without set -e, hence its own || return and &&.
+          fetch() {
+            local from="https://github.com/BtbN/FFmpeg-Builds/releases/download/$1" names
+            names="$(gh api "repos/BtbN/FFmpeg-Builds/releases/tags/$1" --jq '.assets[].name')" || return
+            asset="$(grep -E '^ffmpeg-n[0-9]+\.[0-9.]+(-latest|-[0-9]+-g[0-9a-f]+)?-linux64-lgpl-[0-9]+\.[0-9]+\.tar\.xz$' <<<"$names" | sort -V | tail -1)" || return
+            curl -fsSL --retry 3 -o "$asset" "$from/$asset" &&
+              curl -fsSL --retry 3 "$from/checksums.sha256" | grep -F "  $asset" | sha256sum -c -
+          }
+          newest_dated() { gh api 'repos/BtbN/FFmpeg-Builds/releases?per_page=10' --jq '[.[].tag_name | select(startswith("autobuild-"))] | max'; }
+          fetch latest || fetch "$(newest_dated)"
           tar -xJf "$asset"
           bin="$RUNNER_TEMP/${asset%.tar.xz}/bin"
           # Read whole, then searched: a pipe into grep -q can close early, and ffmpeg, still writing, fails under pipefail.
