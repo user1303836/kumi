@@ -162,30 +162,6 @@ jobs:
         env:
           RUST_TEST_NOCAPTURE: '1'
         run: ./scripts/test-isolated.ps1 --test stdin_handoff --test windows_console_control --test windows_stdin --test windows_tty --no-fail-fast
-      # Temporary (#204): the console tests again and again, under cargo test and nextest, for evidence.
-      - name: Console tests, 20 times each way (temporary, #204)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        shell: pwsh
-        env:
-          RUST_TEST_NOCAPTURE: '1'
-        run: |
-          $ErrorActionPreference = 'Continue'
-          foreach ($way in 'cargo test', 'nextest') {
-            $env:KUMI_NEXTEST = if ($way -eq 'nextest') { '1' } else { '' }
-            [string[]]$extra = @('--no-fail-fast')
-            $failed = 0
-            for ($i = 1; $i -le 20; $i++) {
-              $out = (& ./scripts/test-isolated.ps1 --test windows_stdin --test windows_tty --test windows_console_control @extra 2>&1 | Out-String)
-              $code = $LASTEXITCODE
-              if ($code -ne 0) { $failed++ }
-              foreach ($line in ($out -split "`n")) {
-                if ($line -match 'panicked at|queued keys|FAIL \[|\.\.\. FAILED|Summary \[|^test result') { Write-Host "[$way $i] $($line.Trim())" }
-              }
-              if ($code -ne 0) { ($out -split "`n" | Select-Object -Last 8) | ForEach-Object { Write-Host "[$way $i tail] $_" } }
-            }
-            Write-Host "== ${way}: $failed of 20 runs failed"
-          }
       - name: Choose the tests
         shell: bash
         run: |
