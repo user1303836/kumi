@@ -52,6 +52,10 @@ pub static BRIDGE_TOOLS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock:
             "live_project_backup_preview",
             "live_project_backup_apply",
             "live_run_python",
+            // A saved Set's project id, kept inside the Set (`project::PROJECT_KEY`).
+            "live_data_read",
+            "live_data_preview",
+            "live_data_apply",
         ])
         .filter(|name| seen.insert((*name).to_owned()))
         .map(str::to_owned)

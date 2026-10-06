@@ -135,7 +135,7 @@ async fn fresh_starts_preserve_history_latest_twenty_remain_unsaved_moves_and_le
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn saved_set_baselines_are_private_hashed_and_bad_or_oversized_files_are_ignored() {
+async fn saved_set_baselines_are_private_kept_by_project_and_bad_or_oversized_files_are_ignored() {
     let dir = tempfile::tempdir().unwrap();
     let store = create_project_store(dir.path());
     let baseline = Baseline {
@@ -146,10 +146,20 @@ async fn saved_set_baselines_are_private_hashed_and_bad_or_oversized_files_are_i
         artifact_id: ORACLE["fixture"]["before"][0]["artifact"]["id"].as_str().unwrap().into(),
         pages: pages(&ORACLE["fixture"]["before"]),
     };
-    store.save(&baseline).await.unwrap();
-    assert_eq!(store.load(&baseline.path).await.unwrap(), Some(baseline.clone()));
-    assert!(store.load("/Music/Other.als").await.unwrap().is_none());
-    let folder = dir.path().join(project_id_of(&baseline.path));
+    let project = project_id_of(&baseline.path);
+    store.save(&project, &baseline).await.unwrap();
+    assert_eq!(store.load(&project).await.unwrap(), Some(baseline.clone()));
+    assert!(store.load(&project_id_of("/Music/Other.als")).await.unwrap().is_none());
+    assert!(
+        store.load("../elsewhere").await.unwrap().is_none() && store.save("../elsewhere", &baseline).await.is_err(),
+        "a project id only"
+    );
+    // Moved, the Set still finds it: it's kept by project, not by path.
+    let moved = Baseline { path: "/Music/Moved/Night Drive.als".into(), ..baseline.clone() };
+    store.save(&project, &moved).await.unwrap();
+    assert_eq!(store.load(&project).await.unwrap().map(|kept| kept.path), Some(moved.path.clone()));
+    store.save(&project, &baseline).await.unwrap();
+    let folder = dir.path().join(&project);
     let file = folder.join("last-seen.json");
     #[cfg(unix)]
     {
@@ -158,10 +168,10 @@ async fn saved_set_baselines_are_private_hashed_and_bad_or_oversized_files_are_i
         assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     }
     std::fs::write(&file, "{broken").unwrap();
-    assert!(store.load(&baseline.path).await.unwrap().is_none());
+    assert!(store.load(&project).await.unwrap().is_none());
     let mut big = baseline.clone();
     big.pages = vec![json!({"text":"x".repeat(8*1024*1024)}).as_object().unwrap().clone()];
-    store.save(&big).await.unwrap();
+    store.save(&project, &big).await.unwrap();
     assert_eq!(std::fs::read_to_string(file).unwrap(), "{broken");
 }
 
@@ -181,4 +191,41 @@ async fn a_picture_the_producer_added_is_named_not_kept_in_a_saved_conversation(
         kept.checkpoint.messages[0]["content"][1],
         json!({"type":"text","text":"[The producer showed synth.png here; pictures aren't kept with saved conversations.]"})
     );
+}
+
+#[test]
+fn a_sets_project_is_kept_inside_it_through_versions_and_moves_and_never_in_a_template() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = |p: &std::path::Path| p.to_string_lossy().into_owned();
+    let song = dir.path().join("Night Drive Project");
+    std::fs::create_dir_all(song.join("Ableton Project Info")).unwrap();
+    let first = song.join("Night Drive.als");
+    std::fs::write(&first, "").unwrap();
+    let version = song.join("Night Drive v2.als");
+    let kept = "0123456789abcdef0123456789abcdef";
+    // None kept: the id the path gave before, now kept in the Set.
+    assert_eq!(decide_project(None, &path(&first), None), (project_id_of(&path(&first)), true));
+    assert_eq!(decide_project(Some("not an id"), &path(&first), None), (project_id_of(&path(&first)), true));
+    // Kept: at the same path, or first seen here.
+    assert_eq!(decide_project(Some(kept), &path(&first), Some(&path(&first))), (kept.into(), false));
+    assert_eq!(decide_project(Some(kept), &path(&first), None), (kept.into(), false));
+    // Saved as a version in the same Project folder: the same song. Moved: its last place is gone.
+    assert_eq!(decide_project(Some(kept), &path(&version), Some(&path(&first))), (kept.into(), false));
+    assert_eq!(decide_project(Some(kept), &path(&version), Some("/gone/Night Drive.als")), (kept.into(), false));
+    // Copied into another Project folder while the first is still there: a new song.
+    let other = dir.path().join("Other Project");
+    std::fs::create_dir_all(other.join("Ableton Project Info")).unwrap();
+    let copy = other.join("Night Drive.als");
+    assert_eq!(decide_project(Some(kept), &path(&copy), Some(&path(&first))), (project_id_of(&path(&copy)), true));
+    // A template never gets an id; a song started from one that had one is a song of its own.
+    let templates = dir.path().join("User Library").join("Templates");
+    std::fs::create_dir_all(&templates).unwrap();
+    let template = templates.join("Footwork.als");
+    std::fs::write(&template, "").unwrap();
+    assert_eq!(decide_project(None, &path(&template), None), (project_id_of(&path(&template)), false));
+    assert_eq!(decide_project(Some(kept), &path(&first), Some(&path(&template))), (project_id_of(&path(&first)), true));
+    assert!(template_location("/Users/p/Library/Preferences/Ableton/Live 12.4.15b5/BaseFiles/DefaultLiveSet.als"));
+    assert!(template_location("/Applications/Ableton Live 12 Beta.app/Contents/App-Resources/Templates/Basic.als"));
+    assert!(template_location(r"C:\Users\p\Documents\Ableton\User Library\Templates\Footwork.als") || !cfg!(windows));
+    assert!(!template_location(&path(&first)));
 }

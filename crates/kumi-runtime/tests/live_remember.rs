@@ -25,7 +25,13 @@ struct Fixture {
     owner: RefCell<Weak<Remember>>,
 }
 fn current() -> Rc<CurrentProject> {
-    Rc::new(CurrentProject { identity: "song".into(), name: "Set".into(), path: Some("/saved.als".into()) })
+    // The test store takes the Set's path as its project, so what it records reads as before.
+    Rc::new(CurrentProject {
+        identity: "song".into(),
+        name: "Set".into(),
+        path: Some("/saved.als".into()),
+        project: Some("/saved.als".into()),
+    })
 }
 #[async_trait(?Send)]
 impl McpEndpoint for Fixture {
@@ -79,14 +85,14 @@ impl McpEndpoint for Fixture {
 }
 #[async_trait(?Send)]
 impl ProjectStore for Fixture {
-    async fn load(&self, path: &str) -> Result<Option<Baseline>, RuntimeError> {
-        self.storage.borrow_mut().push(json!({"op":"load","path":path}));
+    async fn load(&self, project: &str) -> Result<Option<Baseline>, RuntimeError> {
+        self.storage.borrow_mut().push(json!({"op":"load","path":project}));
         if self.config["loadError"] == true {
             return Err(RuntimeError::plain("load failed"));
         }
         Ok(self.config.get("baseline").map(|v| serde_json::from_value(v.clone()).unwrap()))
     }
-    async fn save(&self, baseline: &Baseline) -> Result<(), RuntimeError> {
+    async fn save(&self, _project: &str, baseline: &Baseline) -> Result<(), RuntimeError> {
         self.storage.borrow_mut().push(json!({"op":"save","value":baseline}));
         if self.config["saveError"] == true {
             Err(RuntimeError::plain("save failed"))
@@ -151,6 +157,7 @@ async fn saved_set_memory_export_queue_and_catch_up_match_source() {
                         identity: p["identity"].as_str().unwrap().into(),
                         name: p["name"].as_str().unwrap().into(),
                         path: p["path"].as_str().map(str::to_owned),
+                        project: p["path"].as_str().map(str::to_owned),
                     })),
                 };
                 let result: Result<Value, RuntimeError> = match case["operation"].as_str().unwrap() {

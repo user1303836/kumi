@@ -216,9 +216,11 @@ async fn replay() {
         let history = integration.history.clone();
         let remember = history.remember.clone();
         if let Some(project) = config.get("project") {
+            let path = project["path"].as_str().map(|s| s.replace("<fixture>", &root));
             *remember.current.borrow_mut() = Some(Rc::new(CurrentProject {
                 identity: project["identity"].as_str().unwrap().into(),
-                path: project["path"].as_str().map(|s| s.replace("<fixture>", &root)),
+                project: path.as_deref().map(kumi_runtime::integrations::ableton::project::project_id_of),
+                path,
                 name: project["name"].as_str().unwrap().into(),
             }));
         }

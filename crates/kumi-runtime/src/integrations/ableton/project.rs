@@ -41,15 +41,59 @@ pub struct Baseline {
 }
 #[async_trait(?Send)]
 pub trait ProjectStore {
-    async fn load(&self, path: &str) -> Result<Option<Baseline>, RuntimeError>;
-    async fn save(&self, baseline: &Baseline) -> Result<(), RuntimeError>;
+    /// The Set's baseline, kept under its project's id: wherever the Set is now (a moved Set still has it).
+    async fn load(&self, project: &str) -> Result<Option<Baseline>, RuntimeError>;
+    async fn save(&self, project: &str, baseline: &Baseline) -> Result<(), RuntimeError>;
 }
 const MAX_BASELINE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CONVERSATION_BYTES: usize = 256 * 1024;
 const MAX_KEPT_CHANGES: usize = 100;
 const MAX_KEPT: usize = 20;
+/// The project id a Set's path gave before Kumi kept one inside the Set (and still gives a Set in a
+/// templates folder, which never gets one).
 pub fn project_id_of(path: &str) -> String {
     hex::encode(Sha256::digest(path.as_bytes()))[..32].to_owned()
+}
+/// The key a Set keeps its project's id under (`Song.set_data`), with the Set: Save As and moving the
+/// folder keep it.
+pub const PROJECT_KEY: &str = "kumi.project";
+/// Whether `id` is a project id: 32 lowercase hex digits.
+pub fn project_id(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+/// Whether a Set at `path` is a template, or Live's own default Set: new songs start from these, so one
+/// never gets a project id of its own, or every song made from it would share it.
+pub fn template_location(path: &str) -> bool {
+    let parts: Vec<String> = Path::new(path).components().map(|part| part.as_os_str().to_string_lossy().to_lowercase()).collect();
+    let has = |name: &str| parts.iter().any(|part| part == name);
+    parts.windows(2).any(|pair| pair[0] == "user library" && pair[1] == "templates")
+        || (has("ableton") && has("preferences"))
+        || (has("templates") && parts.iter().any(|part| part.ends_with(".app") || part == "resources"))
+}
+/// The Live Project folder a Set is in: the nearest folder above it with an "Ableton Project Info".
+pub fn project_folder(path: &str) -> Option<PathBuf> {
+    Path::new(path).ancestors().skip(1).find(|folder| folder.join("Ableton Project Info").is_dir()).map(Path::to_path_buf)
+}
+/// A Set's project, from the id kept inside it (`kept`), where it is (`path`), and where its project was
+/// last seen (`last`): the id, and whether to keep it inside the Set.
+/// - None kept (or not an id): the id its path gave before, so what Kumi kept carries over.
+/// - Kept, and its project last seen at another path that's still there: a copy. In the same Live
+///   Project folder it's a version of the same song; elsewhere, or copied from a template, it's a new
+///   song, with the id its own path gives (the same each time, should keeping it in the Set fail).
+/// - Kept otherwise (the same path, a move, or a project first seen here): the same project.
+///
+/// A Set in a templates folder keeps the id its path gives, and nothing is ever written into it.
+pub fn decide_project(kept: Option<&str>, path: &str, last: Option<&str>) -> (String, bool) {
+    if template_location(path) {
+        return (project_id_of(path), false);
+    }
+    let Some(kept) = kept.filter(|id| project_id(id)) else { return (project_id_of(path), true) };
+    match last.filter(|last| *last != path && Path::new(last).exists()) {
+        Some(last) if template_location(last) || project_folder(last).is_none() || project_folder(last) != project_folder(path) => {
+            (project_id_of(path), true)
+        }
+        _ => (kept.to_string(), false),
+    }
 }
 fn error(e: impl std::fmt::Display) -> RuntimeError {
     RuntimeError::plain(e.to_string())
@@ -94,20 +138,26 @@ pub fn create_project_store(directory: impl Into<PathBuf>) -> Rc<FileProjectStor
 }
 #[async_trait(?Send)]
 impl ProjectStore for FileProjectStore {
-    async fn load(&self, path: &str) -> Result<Option<Baseline>, RuntimeError> {
-        let Ok(bytes) = tokio::fs::read(self.directory.join(project_id_of(path)).join("last-seen.json")).await else { return Ok(None) };
+    async fn load(&self, project: &str) -> Result<Option<Baseline>, RuntimeError> {
+        if !project_id(project) {
+            return Ok(None);
+        }
+        let Ok(bytes) = tokio::fs::read(self.directory.join(project).join("last-seen.json")).await else { return Ok(None) };
         if bytes.len() > MAX_BASELINE_BYTES {
             return Ok(None);
         }
         let Ok(value) = serde_json::from_slice::<Baseline>(&bytes) else { return Ok(None) };
-        Ok((value.version == 1 && value.path == path && !value.pages.is_empty()).then_some(value))
+        Ok((value.version == 1 && !value.pages.is_empty()).then_some(value))
     }
-    async fn save(&self, baseline: &Baseline) -> Result<(), RuntimeError> {
+    async fn save(&self, project: &str, baseline: &Baseline) -> Result<(), RuntimeError> {
+        if !project_id(project) {
+            return Err(error("invalid project id"));
+        }
         let text = stringify(&serde_json::to_value(baseline).map_err(error)?);
         if text.len() > MAX_BASELINE_BYTES {
             return Ok(());
         }
-        write_privately(&self.directory.join(project_id_of(&baseline.path)), "last-seen.json", &text).await
+        write_privately(&self.directory.join(project), "last-seen.json", &text).await
     }
 }
 pub fn new_conversation_id(at: i64) -> String {

@@ -6,7 +6,6 @@ use super::{
     inference::no_access,
     more_changes::set_meter,
     pins::pin_context,
-    project::project_id_of,
     remember::{CurrentProject, Remember},
     views::{self, ViewHost},
 };
@@ -324,9 +323,17 @@ impl Observer {
             };
             connection.assert_lease(lease, &signal)?;
 
+            // The saved Set's project: decided once for a Set at a path, from the id kept inside it.
+            let known_project = project.as_ref().filter(|p| p.identity == identity && p.path == path).and_then(|p| p.project.clone());
+            let project_id = match (&path, known_project) {
+                (Some(_), Some(known)) => Some(known),
+                (Some(path), None) => Some(self.remember.project_of(path, signal.clone()).await),
+                (None, _) => None,
+            };
+            connection.assert_lease(lease, &signal)?;
             *self.remember.current.borrow_mut() =
-                Some(Rc::new(CurrentProject { identity: identity.clone(), name: name.clone(), path: path.clone() }));
-            let project_ref = path.as_ref().map(|path| ProjectRef { id: project_id_of(path), name: name.clone() });
+                Some(Rc::new(CurrentProject { identity: identity.clone(), name: name.clone(), path: path.clone(), project: project_id.clone() }));
+            let project_ref = project_id.map(|id| ProjectRef { id, name: name.clone() });
             *self.previous.borrow_mut() =
                 Some(Previous { key: key.clone(), identity: identity.clone(), path: path.clone(), project: project_ref.clone() });
 
