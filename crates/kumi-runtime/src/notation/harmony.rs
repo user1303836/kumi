@@ -120,10 +120,11 @@ fn roman(text: &str, key: Option<&Key>) -> Result<(i32, String), String> {
         Some(b'#') => (1, &text[1..]),
         _ => (0, text),
     };
-    let lower = rest.to_lowercase();
+    // Compared byte for byte, ignoring ASCII case: a numeral is ASCII, so where it ends is a character's edge (a
+    // lowercase copy can be longer: "İ" lowers to "i̇").
     let (degree, numeral) = NUMERALS
         .iter()
-        .find(|numeral| lower.starts_with(**numeral))
+        .find(|numeral| rest.as_bytes().get(..numeral.len()).is_some_and(|start| start.eq_ignore_ascii_case(numeral.as_bytes())))
         .map(|numeral| (["i", "ii", "iii", "iv", "v", "vi", "vii"].iter().position(|n| n == numeral).unwrap(), numeral.len()))
         .ok_or_else(|| format!("“{text}” isn't a chord symbol or a roman numeral"))?;
     let (written, suffix) = rest.split_at(numeral);
@@ -185,5 +186,15 @@ mod tests {
         assert!(chord("Iv", Some(&dorian)).unwrap_err().contains("mixes cases"));
         assert_eq!(Key::parse("A harmonic minor").map(|key| key.steps[6]), Some(11));
         assert_eq!(Key::parse("C bebop"), None);
+    }
+
+    #[test]
+    fn a_numeral_is_matched_on_the_text_as_written() {
+        // "İ" lowers to "i\u{307}": matching the lowercase copy found "i" and cut "İ" in half.
+        let key = Key::parse("C").unwrap();
+        for text in ["\u{130}", "\u{130}V", "b\u{130}", "\u{130}7"] {
+            assert!(chord(text, Some(&key)).unwrap_err().contains("isn't a chord symbol or a roman numeral"), "{text}");
+        }
+        assert_eq!(chord("vi", Some(&key)), Ok(vec![57, 60, 64]), "A minor");
     }
 }
