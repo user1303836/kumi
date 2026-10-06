@@ -204,28 +204,100 @@ fn a_sets_project_is_kept_inside_it_through_versions_and_moves_and_never_in_a_te
     let version = song.join("Night Drive v2.als");
     let kept = "0123456789abcdef0123456789abcdef";
     // None kept: the id the path gave before, now kept in the Set.
-    assert_eq!(decide_project(None, &path(&first), None), (project_id_of(&path(&first)), true));
-    assert_eq!(decide_project(Some("not an id"), &path(&first), None), (project_id_of(&path(&first)), true));
+    assert_eq!(decide_project(None, &path(&first), None, false), (project_id_of(&path(&first)), true));
+    assert_eq!(decide_project(Some("not an id"), &path(&first), None, false), (project_id_of(&path(&first)), true));
     // Kept: at the same path, or first seen here.
-    assert_eq!(decide_project(Some(kept), &path(&first), Some(&path(&first))), (kept.into(), false));
-    assert_eq!(decide_project(Some(kept), &path(&first), None), (kept.into(), false));
+    assert_eq!(decide_project(Some(kept), &path(&first), Some(&path(&first)), false), (kept.into(), false));
+    assert_eq!(decide_project(Some(kept), &path(&first), None, false), (kept.into(), false));
     // Saved as a version in the same Project folder: the same song. Moved: its last place is gone.
-    assert_eq!(decide_project(Some(kept), &path(&version), Some(&path(&first))), (kept.into(), false));
-    assert_eq!(decide_project(Some(kept), &path(&version), Some("/gone/Night Drive.als")), (kept.into(), false));
+    assert_eq!(decide_project(Some(kept), &path(&version), Some(&path(&first)), false), (kept.into(), false));
+    assert_eq!(decide_project(Some(kept), &path(&version), Some("/gone/Night Drive.als"), false), (kept.into(), false));
     // Copied into another Project folder while the first is still there: a new song.
     let other = dir.path().join("Other Project");
     std::fs::create_dir_all(other.join("Ableton Project Info")).unwrap();
     let copy = other.join("Night Drive.als");
-    assert_eq!(decide_project(Some(kept), &path(&copy), Some(&path(&first))), (project_id_of(&path(&copy)), true));
+    assert_eq!(decide_project(Some(kept), &path(&copy), Some(&path(&first)), false), (project_id_of(&path(&copy)), true));
     // A template never gets an id; a song started from one that had one is a song of its own.
     let templates = dir.path().join("User Library").join("Templates");
     std::fs::create_dir_all(&templates).unwrap();
     let template = templates.join("Footwork.als");
     std::fs::write(&template, "").unwrap();
-    assert_eq!(decide_project(None, &path(&template), None), (project_id_of(&path(&template)), false));
-    assert_eq!(decide_project(Some(kept), &path(&first), Some(&path(&template))), (project_id_of(&path(&first)), true));
+    assert_eq!(decide_project(None, &path(&template), None, false), (project_id_of(&path(&template)), false));
+    assert_eq!(decide_project(Some(kept), &path(&first), Some(&path(&template)), false), (project_id_of(&path(&first)), true));
     assert!(template_location("/Users/p/Library/Preferences/Ableton/Live 12.4.15b5/BaseFiles/DefaultLiveSet.als"));
     assert!(template_location("/Applications/Ableton Live 12 Beta.app/Contents/App-Resources/Templates/Basic.als"));
     assert!(template_location(r"C:\Users\p\Documents\Ableton\User Library\Templates\Footwork.als") || !cfg!(windows));
+    assert!(
+        template_location(r"C:\Users\p\AppData\Roaming\Ableton\Live 12.4.15\Preferences\BaseFiles\DefaultLiveSet.als") || !cfg!(windows)
+    );
     assert!(!template_location(&path(&first)));
+    assert!(!template_location("/Users/p/Music/Ableton/Preferences/Night Drive Project/Night Drive.als"), "a folder of the producer's own");
+    // A song of its own here (saved for the first time, or seen here before under its path's id): the id its
+    // path gives, whatever it came with, even when the Set that id came from has moved.
+    assert_eq!(decide_project(Some(kept), &path(&copy), Some("/gone/Night Drive.als"), true), (project_id_of(&path(&copy)), true));
+    let mine = project_id_of(&path(&copy));
+    assert_eq!(decide_project(Some(&mine), &path(&copy), None, true), (mine.clone(), false));
+    // The same file reached another way (through a symlink, or after a case-only rename) is the same Set, not a
+    // copy.
+    #[cfg(unix)]
+    {
+        let linked = dir.path().join("Linked Project");
+        std::os::unix::fs::symlink(&song, &linked).unwrap();
+        assert_eq!(decide_project(Some(kept), &path(&linked.join("Night Drive.als")), Some(&path(&first)), false), (kept.into(), false));
+        std::fs::write(&version, "").unwrap();
+        assert_eq!(
+            decide_project(Some(kept), &path(&linked.join("Night Drive v2.als")), Some(&path(&first)), false),
+            (kept.into(), false),
+            "a version, through a link to its Project folder"
+        );
+    }
+    // Where the disk ignores case (as a Mac's does by default), the old spelling still finds the Set.
+    let respelled = dir.path().join("night drive project");
+    std::fs::rename(&song, &respelled).unwrap();
+    assert_eq!(decide_project(Some(kept), &path(&respelled.join("Night Drive.als")), Some(&path(&first)), false), (kept.into(), false));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn each_version_of_a_song_keeps_its_own_baseline_and_a_moved_set_finds_the_latest() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_project_store(dir.path().join("projects"));
+    let song = dir.path().join("Night Drive Project");
+    std::fs::create_dir_all(&song).unwrap();
+    let set = |name: &str, saved_at: i64| {
+        let file = song.join(name);
+        std::fs::write(&file, "").unwrap();
+        Baseline {
+            version: 1,
+            path: file.to_string_lossy().into_owned(),
+            name: name.into(),
+            saved_at,
+            artifact_id: "a".into(),
+            pages: vec![json!({"records":[]}).as_object().unwrap().clone()],
+        }
+    };
+    let project = "0123456789abcdef0123456789abcdef";
+    let (first, second) = (set("Night Drive.als", 1), set("Night Drive v2.als", 2));
+    store.save(project, &first).await.unwrap();
+    store.save(project, &second).await.unwrap();
+    // Opening the first again after working in the second compares it with its own last look.
+    assert_eq!(store.load_set(project, &first.path).await.unwrap(), Some(first.clone()));
+    assert_eq!(store.load_set(project, &second.path).await.unwrap(), Some(second.clone()));
+    assert_eq!(store.load(project).await.unwrap().map(|latest| latest.path), Some(second.path.clone()), "the latest");
+    // A version never seen here starts fresh.
+    let third = set("Night Drive v3.als", 3);
+    assert_eq!(store.load_set(project, &third.path).await.unwrap(), None);
+    // Saving the first again makes it the latest, and the second keeps its own.
+    store.save(project, &Baseline { saved_at: 4, ..first.clone() }).await.unwrap();
+    assert_eq!(store.load_set(project, &second.path).await.unwrap(), Some(second.clone()));
+    assert_eq!(store.load(project).await.unwrap().map(|latest| latest.saved_at), Some(4));
+    // Moved: its last place is gone, so the Set in its new place finds the project's latest.
+    std::fs::remove_file(&first.path).unwrap();
+    let moved = dir.path().join("Moved").join("Night Drive.als").to_string_lossy().into_owned();
+    assert_eq!(store.load_set(project, &moved).await.unwrap().map(|latest| latest.saved_at), Some(4));
+    // A song with many versions keeps a bounded number of them.
+    for n in 0..25 {
+        store.save(project, &set(&format!("Night Drive take {n}.als"), 10 + n)).await.unwrap();
+    }
+    let kept = std::fs::read_dir(dir.path().join("projects").join(project).join("sets")).unwrap().filter_map(Result::ok);
+    assert_eq!(kept.filter(|entry| entry.file_name().to_string_lossy().ends_with(".json")).count(), 20);
 }

@@ -327,7 +327,7 @@ impl Observer {
             let known_project = project.as_ref().filter(|p| p.identity == identity && p.path == path).and_then(|p| p.project.clone());
             let project_id = match (&path, known_project) {
                 (Some(_), Some(known)) => Some(known),
-                (Some(path), None) => Some(self.remember.project_of(path, signal.clone()).await),
+                (Some(path), None) => Some(self.remember.project_of(&identity, path, signal.clone()).await),
                 (None, _) => None,
             };
             connection.assert_lease(lease, &signal)?;

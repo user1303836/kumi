@@ -41,14 +41,23 @@ pub struct Baseline {
 }
 #[async_trait(?Send)]
 pub trait ProjectStore {
-    /// The Set's baseline, kept under its project's id: wherever the Set is now (a moved Set still has it).
+    /// The project's latest baseline, of whichever of its Sets was seen last, wherever that Set was then (a
+    /// moved Set finds it here).
     async fn load(&self, project: &str) -> Result<Option<Baseline>, RuntimeError>;
+    /// The baseline to compare the Set at `path` with: the last one saved for that Set (each version of a
+    /// song keeps its own), or the project's latest when that Set moved here. A version first seen here has
+    /// none.
+    async fn load_set(&self, project: &str, path: &str) -> Result<Option<Baseline>, RuntimeError> {
+        Ok(self.load(project).await?.filter(|latest| moved_to(&latest.path, path)))
+    }
     async fn save(&self, project: &str, baseline: &Baseline) -> Result<(), RuntimeError>;
 }
 const MAX_BASELINE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CONVERSATION_BYTES: usize = 256 * 1024;
 const MAX_KEPT_CHANGES: usize = 100;
 const MAX_KEPT: usize = 20;
+/// The most other Sets of one song (versions saved beside it) a project keeps a baseline for.
+const MAX_SETS: usize = 20;
 /// The project id a Set's path gave before Kumi kept one inside the Set (and still gives a Set in a
 /// templates folder, which never gets one).
 pub fn project_id_of(path: &str) -> String {
@@ -66,31 +75,62 @@ pub fn project_id(id: &str) -> bool {
 pub fn template_location(path: &str) -> bool {
     let parts: Vec<String> = Path::new(path).components().map(|part| part.as_os_str().to_string_lossy().to_lowercase()).collect();
     let has = |name: &str| parts.iter().any(|part| part == name);
-    parts.windows(2).any(|pair| pair[0] == "user library" && pair[1] == "templates")
-        || (has("ableton") && has("preferences"))
+    let in_row = |names: &[&str]| parts.windows(names.len()).any(|row| row.iter().zip(names).all(|(part, name)| part == name));
+    in_row(&["user library", "templates"])
+        // Live's own settings, where its default Set is kept: ~/Library/Preferences/Ableton on a Mac,
+        // %APPDATA%\Ableton on Windows.
+        || in_row(&["library", "preferences", "ableton"])
+        || in_row(&["appdata", "roaming", "ableton"])
         || (has("templates") && parts.iter().any(|part| part.ends_with(".app") || part == "resources"))
 }
 /// The Live Project folder a Set is in: the nearest folder above it with an "Ableton Project Info".
 pub fn project_folder(path: &str) -> Option<PathBuf> {
     Path::new(path).ancestors().skip(1).find(|folder| folder.join("Ableton Project Info").is_dir()).map(Path::to_path_buf)
 }
-/// A Set's project, from the id kept inside it (`kept`), where it is (`path`), and where its project was
-/// last seen (`last`): the id, and whether to keep it inside the Set.
+/// Whether two paths name the same file or folder: a case-only rename, or a symlink, is the same one.
+pub fn same_file(a: impl AsRef<Path>, b: impl AsRef<Path>) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        matches!((std::fs::metadata(a), std::fs::metadata(b)), (Ok(a), Ok(b)) if (a.dev(), a.ino()) == (b.dev(), b.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)
+    }
+}
+/// Whether the Set seen at `last` is the one at `path` now: the same file, or moved from there.
+pub fn moved_to(last: &str, path: &str) -> bool {
+    last == path || !Path::new(last).exists() || same_file(last, path)
+}
+/// A Set's project, from the id kept inside it (`kept`), where it is (`path`), where its project was last
+/// seen (`last`), and whether it's a song of its own here (`own`: first saved from an unsaved Set, or seen
+/// here before under the id its path gives): the id, and whether to keep it inside the Set.
 /// - None kept (or not an id): the id its path gave before, so what Kumi kept carries over.
-/// - Kept, and its project last seen at another path that's still there: a copy. In the same Live
-///   Project folder it's a version of the same song; elsewhere, or copied from a template, it's a new
-///   song, with the id its own path gives (the same each time, should keeping it in the Set fail).
-/// - Kept otherwise (the same path, a move, or a project first seen here): the same project.
+/// - A song of its own: the id its path gives, whatever id it came with (from a template, or a copy whose id
+///   never reached its file), so it never turns into another song when that one moves.
+/// - Kept, and its project last seen in another file that's still there: a copy. In the same Live Project
+///   folder it's a version of the same song; elsewhere, or copied from a template, it's a new song, with the
+///   id its own path gives (the same each time, should keeping it in the Set fail).
+/// - Kept otherwise (the same file, a move, or a project first seen here): the same project.
 ///
 /// A Set in a templates folder keeps the id its path gives, and nothing is ever written into it.
-pub fn decide_project(kept: Option<&str>, path: &str, last: Option<&str>) -> (String, bool) {
+pub fn decide_project(kept: Option<&str>, path: &str, last: Option<&str>, own: bool) -> (String, bool) {
+    let mine = project_id_of(path);
     if template_location(path) {
-        return (project_id_of(path), false);
+        return (mine, false);
     }
-    let Some(kept) = kept.filter(|id| project_id(id)) else { return (project_id_of(path), true) };
-    match last.filter(|last| *last != path && Path::new(last).exists()) {
-        Some(last) if template_location(last) || project_folder(last).is_none() || project_folder(last) != project_folder(path) => {
-            (project_id_of(path), true)
+    let Some(kept) = kept.filter(|id| project_id(id)) else { return (mine, true) };
+    if own {
+        let keep = kept != mine;
+        return (mine, keep);
+    }
+    match last.filter(|last| *last != path && Path::new(last).exists() && !same_file(last, path)) {
+        Some(last)
+            if template_location(last)
+                || !matches!((project_folder(last), project_folder(path)), (Some(a), Some(b)) if same_file(&a, &b)) =>
+        {
+            (mine, true)
         }
         _ => (kept.to_string(), false),
     }
@@ -136,18 +176,44 @@ pub struct FileProjectStore {
 pub fn create_project_store(directory: impl Into<PathBuf>) -> Rc<FileProjectStore> {
     Rc::new(FileProjectStore { directory: directory.into() })
 }
+async fn read_baseline(file: &Path) -> Option<Baseline> {
+    let bytes = tokio::fs::read(file).await.ok()?;
+    if bytes.len() > MAX_BASELINE_BYTES {
+        return None;
+    }
+    let value = serde_json::from_slice::<Baseline>(&bytes).ok()?;
+    (value.version == 1 && !value.pages.is_empty()).then_some(value)
+}
+/// The Set path in a baseline file: its key `path`, which comes before the pages.
+static BASELINE_PATH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"[{,]"path":("(?:[^"\\]|\\.)*")"#).unwrap());
+/// Where the Set of a baseline file was, read from its start (the pages after it can be megabytes).
+async fn baseline_path(file: &Path) -> Option<String> {
+    let file = tokio::fs::File::open(file).await.ok()?;
+    let mut start = Vec::with_capacity(16 * 1024);
+    file.take(16 * 1024).read_to_end(&mut start).await.ok()?;
+    let text = String::from_utf8_lossy(&start);
+    serde_json::from_str::<String>(BASELINE_PATH.captures(&text)?.get(1)?.as_str()).ok()
+}
+/// A project's folder keeps the baseline of the Set seen last in `last-seen.json`, and the last baseline of
+/// each other Set of the song that's still there (a version saved beside it) in `sets/`, by its path.
 #[async_trait(?Send)]
 impl ProjectStore for FileProjectStore {
     async fn load(&self, project: &str) -> Result<Option<Baseline>, RuntimeError> {
         if !project_id(project) {
             return Ok(None);
         }
-        let Ok(bytes) = tokio::fs::read(self.directory.join(project).join("last-seen.json")).await else { return Ok(None) };
-        if bytes.len() > MAX_BASELINE_BYTES {
+        Ok(read_baseline(&self.directory.join(project).join("last-seen.json")).await)
+    }
+    async fn load_set(&self, project: &str, path: &str) -> Result<Option<Baseline>, RuntimeError> {
+        if !project_id(project) {
             return Ok(None);
         }
-        let Ok(value) = serde_json::from_slice::<Baseline>(&bytes) else { return Ok(None) };
-        Ok((value.version == 1 && !value.pages.is_empty()).then_some(value))
+        let folder = self.directory.join(project);
+        if baseline_path(&folder.join("last-seen.json")).await.is_some_and(|last| moved_to(&last, path)) {
+            return Ok(read_baseline(&folder.join("last-seen.json")).await);
+        }
+        let file = folder.join("sets").join(format!("{}.json", project_id_of(path)));
+        Ok(read_baseline(&file).await.filter(|baseline| baseline.path == path))
     }
     async fn save(&self, project: &str, baseline: &Baseline) -> Result<(), RuntimeError> {
         if !project_id(project) {
@@ -157,7 +223,33 @@ impl ProjectStore for FileProjectStore {
         if text.len() > MAX_BASELINE_BYTES {
             return Ok(());
         }
-        write_privately(&self.directory.join(project), "last-seen.json", &text).await
+        let folder = self.directory.join(project);
+        let sets = folder.join("sets");
+        // Another Set of the song seen before, and still there, keeps its baseline under its own path; one
+        // that moved here leaves nothing behind.
+        if let Some(before) = baseline_path(&folder.join("last-seen.json")).await {
+            if !moved_to(&before, &baseline.path) {
+                write_privately(&sets, ".keep", "").await?;
+                tokio::fs::rename(folder.join("last-seen.json"), sets.join(format!("{}.json", project_id_of(&before))))
+                    .await
+                    .map_err(error)?;
+                let mut kept = vec![];
+                if let Ok(mut dir) = tokio::fs::read_dir(&sets).await {
+                    while let Ok(Some(entry)) = dir.next_entry().await {
+                        if entry.file_name().to_str().is_some_and(|name| name.ends_with(".json")) {
+                            kept.push((modified_ms(&entry.path()).await, entry.path()));
+                        }
+                    }
+                }
+                kept.sort_by(|a, b| b.0.total_cmp(&a.0));
+                for (_, file) in kept.into_iter().skip(MAX_SETS) {
+                    remove(file).await?;
+                }
+            }
+        }
+        write_privately(&folder, "last-seen.json", &text).await?;
+        // This Set's own baseline is the latest now.
+        remove(sets.join(format!("{}.json", project_id_of(&baseline.path)))).await
     }
 }
 pub fn new_conversation_id(at: i64) -> String {

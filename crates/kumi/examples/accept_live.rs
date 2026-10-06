@@ -204,6 +204,9 @@ impl ProjectStore for TimedStore {
     async fn load(&self, project: &str) -> Result<Option<Baseline>, RuntimeError> {
         self.store.load(project).await
     }
+    async fn load_set(&self, project: &str, path: &str) -> Result<Option<Baseline>, RuntimeError> {
+        self.store.load_set(project, path).await
+    }
     async fn save(&self, project: &str, baseline: &Baseline) -> Result<(), RuntimeError> {
         if self.exported.get().is_none() {
             let bytes = byte_length(&json!(baseline.pages));

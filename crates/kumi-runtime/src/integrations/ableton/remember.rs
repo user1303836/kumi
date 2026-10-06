@@ -153,10 +153,12 @@ impl Remember {
             tokio::select! {biased;_=stop.cancelled()=>{},_=tokio::time::sleep(Duration::from_millis(delay))=>{if let Some(this)=weak.upgrade(){let _=this.save_now(None);}}}
         });
     }
-    /// The project of the saved Set at `path` (`project::decide_project`), from the id kept inside it,
-    /// which is kept there when it's new. Read once for a Set. Without the bridge's Set data it's the id
-    /// the path gives, as before.
-    pub async fn project_of(&self, path: &str, signal: Signal) -> String {
+    /// The project of the saved Set `identity` at `path` (`project::decide_project`), from the id kept inside
+    /// it, which is kept there when it's new. A Set saved for the first time (unsaved until now) is a new song,
+    /// whatever id its template gave it. Read once for a Set. Without the bridge's Set data it's the id the
+    /// path gives, as before.
+    pub async fn project_of(&self, identity: &str, path: &str, signal: Signal) -> String {
+        let first_save = self.current().is_some_and(|set| set.identity == identity && set.path.is_none());
         let connection = &self.connection;
         if connection.ensure_catalog(signal.clone()).await.is_err() || !connection.has("live_data_read") {
             return project::project_id_of(path);
@@ -167,11 +169,16 @@ impl Remember {
         else {
             return project::project_id_of(path);
         };
-        let last = match (kept.as_deref().filter(|id| project::project_id(id)), &self.store) {
-            (Some(id), Some(store)) => store.load(id).await.ok().flatten().map(|baseline| baseline.path),
-            _ => None,
-        };
-        let (id, keep) = project::decide_project(kept.as_deref(), path, last.as_deref());
+        let (mut last, mut seen_here) = (None, false);
+        if let (Some(id), Some(store)) = (kept.as_deref().filter(|id| project::project_id(id)), &self.store) {
+            last = store.load(id).await.ok().flatten().map(|baseline| baseline.path);
+            // Seen here before as a song of its own (a copy whose id never reached its file): it stays one,
+            // wherever the Set its id came from is now.
+            let mine = project::project_id_of(path);
+            seen_here = id != mine
+                && store.load_set(&mine, path).await.ok().flatten().is_some_and(|b| b.path == path || project::same_file(&b.path, path));
+        }
+        let (id, keep) = project::decide_project(kept.as_deref(), path, last.as_deref(), first_save || seen_here);
         if keep && connection.has("live_data_preview") && connection.has("live_data_apply") {
             let kept: Result<(), RuntimeError> = async {
                 let preview = payload(
@@ -220,7 +227,9 @@ impl Remember {
         let _ = self.enqueue(move|this|async move{
    let connection=&this.connection;let signal=abort::any([connection.lifetime.clone(),abort::timeout(60_000)]);connection.ensure_catalog(signal.clone()).await.map_err(RuntimeError::from)?;
    if !["live_project_info","live_project_snapshot_export","live_project_snapshot_diff"].iter().all(|name|connection.has(name)){return Ok(())}if !this.current().is_some_and(|p|p.identity==identity){return Ok(())}
-   let pages=this.export_pages(signal.clone()).await?;let baseline=store.load(&project).await?;
+   let pages=this.export_pages(signal.clone()).await?;
+   // This Set's own baseline, or, when it moved here, the project's latest: a version first seen here starts fresh.
+   let baseline=store.load_set(&project,&path).await?;
    if let Some(baseline)=baseline.filter(|_|this.current().is_some_and(|p|p.identity==identity)){
     let mut described=Some(DescribedDiff{lines:Vec::new(),more:0});
     if baseline.artifact_id!=artifact_of(&pages)?{
