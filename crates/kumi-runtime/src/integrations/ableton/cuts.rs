@@ -76,6 +76,8 @@ pub async fn before(
             };
             (Some(track), read, true)
         }
+        // A copy, or a move to another track, lands where the clip's own track isn't: not yet.
+        "move_clip" if args.contains_key("keepSource") || args.contains_key("targetTrackRef") => return None,
         "move_clip" => {
             // What an Arrangement move replaces, as its preview names it: the span from the first to the last of them
             // holds just them, the moving clip aside.
