@@ -231,15 +231,17 @@ def apply(root: Path, plan: Plan) -> None:
     path.write_text(changelog(path.read_text(encoding="utf-8"), plan), encoding="utf-8")
 
 
-def checks(work: Path, old: str) -> list[str]:
-    """Refuses unless the lockfile, the whitespace and the packaging tests agree; returns any old version left."""
+def checks(work: Path, olds: list[str]) -> list[str]:
+    """Refuses unless the lockfile, the whitespace and the packaging tests agree; lists where the old versions are
+    left (other crates and packages share numbers, and tests pin versions of their own, so that's for a look)."""
     try:
         run(["cargo", "metadata", "--locked", "--offline", "--format-version", "1"], work)
     except Refused:  # crates not fetched here yet
         run(["cargo", "metadata", "--locked", "--format-version", "1"], work)
     run(["git", "diff", "--check"], work)
     run([sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_native_release.py"], work)
-    left = subprocess.run(["git", "grep", "-n", "-I", "-E", rf"(^|[^0-9.]){re.escape(old)}([^0-9]|$)", "--", ".",
+    versions = "|".join(re.escape(old) for old in olds)
+    left = subprocess.run(["git", "grep", "-n", "-I", "-E", rf"(^|[^0-9.])({versions})([^0-9]|$)", "--", ".",
                            ":!CHANGELOG.md", ":!docs/*/KUMI_CHANGES.md"], cwd=work, text=True, capture_output=True)
     return [line[:160] for line in left.stdout.splitlines()]
 
@@ -279,7 +281,9 @@ def pr_body(plan: Plan, changes: list[Change], head: str, left: list[str]) -> st
         "- The README status lines and the KUMI_CHANGES ships-with line, in en, ja and zh-CN.",
         "", f"### Checks (on main {head[:8]} with this commit)",
         "- `cargo metadata --locked`: the lockfile agrees. `git diff --check` is clean. `test_native_release.py`: OK.",
-        f"- \"{plan.old}\" left outside CHANGELOG and KUMI_CHANGES: " + ("none." if not left else ""),
+        f"- \"{plan.old}\"" + ("" if plan.same_bridge else f" or \"{plan.bridge}\"")
+        + " left outside CHANGELOG and KUMI_CHANGES (other crates, packages and test fixtures share numbers): "
+        + ("none." if not left else ""),
         *[f"  - `{line}`" for line in left[:12]],
         "", "Merged with the admin bypass without waiting for this pull request's CI: the tag build checks the same "
         "commit on six platforms, and main's CI runs on it. Cut by `scripts/release.py`.",
@@ -370,7 +374,7 @@ def release(args: argparse.Namespace) -> None:
     run(["git", "worktree", "add", "--quiet", *(["-b", branch] if args.go else ["--detach"]), str(work), head])
     try:
         apply(work, plan)
-        left = checks(work, plan.old)
+        left = checks(work, [plan.old] + ([] if plan.same_bridge else [plan.bridge]))
         changelog_text = (work / "CHANGELOG.md").read_text(encoding="utf-8")
         release_notes = notes(plan, tested_paragraph(changelog_text, plan.new), args.summary)
         bridge = f"{plan.bridge} (unchanged)" if plan.same_bridge else f"{plan.bridge} → {plan.new_bridge}"
@@ -378,7 +382,8 @@ def release(args: argparse.Namespace) -> None:
               + " ".join(f"#{change.number}" for change in changes))
         print("\n" + entry_of(changelog_text, plan.new).rstrip())
         print("\n--- release notes\n" + release_notes)
-        print(f"--- {plan.old} left outside CHANGELOG and KUMI_CHANGES: " + ("none" if not left else "\n" + "\n".join(left)))
+        olds = plan.old if plan.same_bridge else f"{plan.old} or {plan.bridge}"
+        print(f"--- {olds} left outside CHANGELOG and KUMI_CHANGES (for a look): " + ("none" if not left else "\n" + "\n".join(left)))
         run(["git", "add", "-A"], work)
         files = run(["git", "diff", "--cached", "--name-only"], work).splitlines()
         expected = 13 if plan.same_bridge else 14
