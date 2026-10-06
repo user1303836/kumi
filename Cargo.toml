@@ -56,6 +56,8 @@ unicode-normalization = "0.1"
 unicode-width = "0.2"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
+# A Set's history keeps its objects compressed (libzstd compiled in, BSD).
+zstd = { version = "0.13", default-features = false }
 
 # Line tables are enough for a panic's backtrace; full debug info multiplies the build folder's size.
 [profile.dev]

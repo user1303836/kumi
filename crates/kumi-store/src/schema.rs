@@ -99,16 +99,22 @@ pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
 /// Bring the database up to `SCHEMA_VERSION`, in one transaction that waits its turn, so two Kumis
 /// opening a new database at once migrate it once. A newer database is left as it is.
 pub(crate) fn migrate(connection: &mut Connection) -> Result<(), StoreError> {
+    migrate_with(connection, MIGRATIONS)
+}
+
+/// Bring a database up to date with its own migrations (kumi.db's, or a Set's history's), the same way.
+pub(crate) fn migrate_with(connection: &mut Connection, migrations: &[&str]) -> Result<(), StoreError> {
+    let known = migrations.len();
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let found = transaction.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))?.max(0) as usize;
-    if found > SCHEMA_VERSION {
-        return Err(StoreError::Newer { found, known: SCHEMA_VERSION });
+    if found > known {
+        return Err(StoreError::Newer { found, known });
     }
-    for migration in &MIGRATIONS[found..] {
+    for migration in &migrations[found..] {
         transaction.execute_batch(migration)?;
     }
-    if found < SCHEMA_VERSION {
-        transaction.pragma_update(None, "user_version", SCHEMA_VERSION as i64)?;
+    if found < known {
+        transaction.pragma_update(None, "user_version", known as i64)?;
     }
     transaction.commit()?;
     Ok(())
