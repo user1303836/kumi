@@ -37,6 +37,8 @@ fn device(name: &str) -> Device {
 /// A Live whose tracks hold devices, as discovery lists them; `events` is whether it offers Live's events.
 struct Live {
     events: bool,
+    /// Whether it answers a subscription with an error.
+    refuses: Cell<bool>,
     tracks: RefCell<Vec<(String, Vec<Device>)>>,
     selected: Cell<usize>,
     calls: RefCell<Vec<(String, JsonObject)>>,
@@ -47,6 +49,7 @@ impl Live {
         let rack = Device { name: "Rack".into(), chains: vec![("Low".into(), vec![device("Operator")])] };
         Rc::new(Self {
             events,
+            refuses: Cell::new(false),
             tracks: RefCell::new(vec![
                 ("Bass".into(), vec![rack, device("EQ Eight")]),
                 ("Drums".into(), vec![device("Compressor")]),
@@ -93,6 +96,9 @@ impl Live {
             .filter(|(_, args)| args.get("kind") == Some(&json!("device")) && args.get("parent") == Some(&json!(parent)))
             .count()
     }
+    fn subscriptions(&self) -> usize {
+        self.calls.borrow().iter().filter(|(name, _)| name == "live_subscribe").count()
+    }
     fn structure_changed(&self) {
         let listener = self.listener.borrow().clone().unwrap();
         listener(json!({"type":"structure","what":"tracks"}).as_object().unwrap().clone());
@@ -133,6 +139,10 @@ impl McpEndpoint for Live {
                 json!({"connected":true,"adapter":"remote-script","provenance":"fake-live","epoch":7,"environment":{"liveVersion":"12.0"}}),
             ),
             ("live_song_state", _) => reply(json!({"signatureNumerator":4,"signatureDenominator":4,"sessionRecord":false,"swingAmount":0})),
+            ("live_subscribe", _) if self.refuses.get() => {
+                serde_json::from_value(json!({"content":[{"type":"text","text":"Live isn't ready to tell of changes"}],"isError":true}))
+                    .unwrap()
+            }
             ("live_subscribe", _) => reply(json!({"subscribed":args["types"]})),
             ("live_discover", Some("set")) => page(
                 "set",
@@ -198,6 +208,8 @@ impl ObservationHost for Live {
 
 struct Session {
     live: Rc<Live>,
+    /// The session's clock, in seconds after noon.
+    clock: Rc<Cell<i64>>,
     connection: Rc<LiveConnection>,
     remember: Rc<Remember>,
     observer: Observer,
@@ -210,13 +222,18 @@ async fn session(events: bool) -> Session {
         let endpoint: Rc<dyn McpEndpoint> = endpoint.clone();
         async move { Ok(endpoint) }.boxed_local()
     }));
-    options.now = Some(Rc::new(|| chrono::DateTime::parse_from_rfc3339("2026-10-06T12:00:00Z").unwrap().with_timezone(&chrono::Utc)));
+    let clock = Rc::new(Cell::new(0));
+    let now = clock.clone();
+    options.now = Some(Rc::new(move || {
+        chrono::DateTime::parse_from_rfc3339("2026-10-06T12:00:00Z").unwrap().with_timezone(&chrono::Utc)
+            + chrono::Duration::seconds(now.get())
+    }));
     options.reconnect_interval_ms = Some(3600000);
     let connection = LiveConnection::new(options);
     connection.start(Signal::new()).await.unwrap();
     let remember = Remember::new(connection.clone(), None, None);
     let observer = Observer::new(connection.clone(), remember.clone());
-    Session { live, connection, remember, observer }
+    Session { live, clock, connection, remember, observer }
 }
 impl Session {
     /// One turn's look at the Set: the tracks as its context shows them (with their devices), and its timing.
@@ -331,13 +348,17 @@ async fn kumis_own_device_changes_are_read_again_before_and_after_and_anything_e
             session.turn().await;
             let observer = &session.observer;
             // A change naming a device on the pad, and one loading a device onto the drums.
-            assert_eq!(observer.device_tracks(json!({"deviceRef":"7:device:2:0","value":0.5}).as_object().unwrap(), false), ["7:track:2"]);
-            assert!(observer.device_tracks(json!({"trackRef":"7:track:1"}).as_object().unwrap(), false).is_empty());
-            assert_eq!(observer.device_tracks(json!({"trackRef":"7:track:1"}).as_object().unwrap(), true), ["7:track:1"]);
+            let named = |input: Value, tracks_too| observer.devices_named(input.as_object().unwrap(), tracks_too);
+            assert_eq!(
+                named(json!({"deviceRef":"7:device:2:0","value":0.5}), false),
+                (vec!["7:track:2".into()], vec!["7:device:2:0".into()])
+            );
+            assert_eq!(named(json!({"trackRef":"7:track:1"}), false), (vec![], vec![]));
+            assert_eq!(named(json!({"trackRef":"7:track:1"}), true), (vec!["7:track:1".into()], vec![]));
             // Before a change acts on the pad's devices they're read again, once a turn.
             let pad = vec!["7:track:2".to_owned()];
-            observer.refresh_devices(&pad, Signal::new()).await;
-            observer.refresh_devices(&pad, Signal::new()).await;
+            observer.refresh_devices(&pad, &[], Signal::new()).await.unwrap();
+            observer.refresh_devices(&pad, &[], Signal::new()).await.unwrap();
             assert_eq!(session.live.parent_reads("7:track:2"), 1);
             // Kumi renames the pad's device: the next turn reads the pad again and shows it.
             session.live.rename(2, 0, "Gain");
@@ -363,8 +384,73 @@ async fn without_lives_events_every_turn_reads_the_devices_whole() {
             }
             assert_eq!(session.live.whole_reads(), 3);
             // Nothing kept, so a change reads nothing more first.
-            session.observer.refresh_devices(&["7:track:2".to_owned()], Signal::new()).await;
+            session.observer.refresh_devices(&["7:track:2".to_owned()], &["7:device:2:0".to_owned()], Signal::new()).await.unwrap();
             assert_eq!(session.live.parent_reads("7:track:2"), 0);
+            session.close().await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_kept_devices_serve_for_a_minute_after_a_whole_read_then_are_read_whole_again() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let session = session(true).await;
+            session.turn().await;
+            session.clock.set(59);
+            assert_eq!((session.turn().await.1.set_reused, session.live.whole_reads()), (Some(true), 1));
+            // A quiet stretch: Live tells of no rack edited, so older devices are read whole again.
+            session.clock.set(61);
+            assert_eq!((session.turn().await.1.set_reused, session.live.whole_reads()), (Some(false), 2));
+            session.clock.set(100);
+            assert_eq!(session.turn().await.1.set_reused, Some(true), "a minute from the new read");
+            session.close().await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_change_naming_a_device_that_isnt_the_one_the_turn_showed_is_refused() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let session = session(true).await;
+            session.turn().await;
+            let (observer, live) = (&session.observer, &session.live);
+            let check = |track: &str, named: &str| {
+                let (track, named) = (vec![track.to_owned()], vec![named.to_owned()]);
+                async move { observer.refresh_devices(&track, &named, Signal::new()).await }
+            };
+            // The pad's Utility swapped for Echo in place, with no word from Live: its ref now names Echo.
+            live.rename(2, 0, "Echo");
+            let refused = check("7:track:2", "7:device:2:0").await.unwrap_err();
+            assert!(refused.starts_with("Utility is now Echo") && refused.contains("nothing was changed"), "{refused}");
+            // A device just as the turn showed it is fine.
+            assert_eq!(check("7:track:0", "7:device:0:1").await, Ok(()));
+            // On the next turn, a chain renamed or a device gone isn't.
+            session.turn().await;
+            live.tracks.borrow_mut()[0].1[0].chains[0].0 = "Mid".into();
+            assert!(check("7:track:0", "7:chain:0:0:0").await.unwrap_err().starts_with("Low is now Mid"));
+            live.tracks.borrow_mut()[1].1.clear();
+            assert!(check("7:track:1", "7:device:1:0").await.unwrap_err().starts_with("Compressor isn't on the track any more"));
+            session.close().await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_subscription_live_refuses_is_asked_again_and_nothing_is_reused_meanwhile() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let session = session(true).await;
+            session.live.refuses.set(true);
+            for _ in 0..3 {
+                assert_eq!(session.turn().await.1.set_reused, Some(false));
+            }
+            assert_eq!((session.live.whole_reads(), session.live.subscriptions()), (3, 3), "asked again each turn");
+            // Once Live takes it, the devices are kept.
+            session.live.refuses.set(false);
+            session.turn().await;
+            assert_eq!(session.turn().await.1.set_reused, Some(true));
             session.close().await;
         })
         .await;

@@ -136,8 +136,9 @@ pub struct LiveConnection {
     pub structure_events: Cell<u64>,
     /// Endpoints attached so far: Live's events between two of them reach no one.
     pub attachments: Cell<u64>,
-    /// Whether the endpoint attached passes Live's events on.
+    /// Whether the endpoint attached passes Live's events on, and whether Live took the subscription.
     listening: Cell<bool>,
+    hearing: Cell<bool>,
     lost_epoch: Cell<Option<f64>>,
     looking: Cell<bool>,
     watcher: RefCell<Option<Signal>>,
@@ -177,6 +178,7 @@ impl LiveConnection {
             structure_events: Cell::new(0),
             attachments: Cell::new(0),
             listening: Cell::new(false),
+            hearing: Cell::new(false),
             lost_epoch: Cell::new(None),
             looking: Cell::new(false),
             watcher: RefCell::new(None),
@@ -231,9 +233,9 @@ impl LiveConnection {
             Ok(())
         }
     }
-    /// Whether Live's events reach Kumi now: subscribed, through an endpoint that passes them on.
+    /// Whether Live's events reach Kumi now: Live took the subscription, through an endpoint that passes them on.
     pub fn hears_live(&self) -> bool {
-        self.subscribed.get() && self.listening.get()
+        self.hearing.get() && self.listening.get()
     }
     pub fn register_rows(&self, kind: &str, rows: &[JsonObject], args: &JsonObject, next: Option<&str>) -> Result<(), ReadError> {
         let result = self.references.borrow_mut().register_rows(kind, rows, args, next);
@@ -330,6 +332,7 @@ impl LiveConnection {
             }));
         }
         self.subscribed.set(false);
+        self.hearing.set(false);
         self.attachments.set(self.attachments.get() + 1);
         self.listening.set(endpoint.has_on_live_event());
         if endpoint.has_on_live_event() {
@@ -549,15 +552,19 @@ impl LiveConnection {
             if !self.transport_events.get() {
                 result = Some(self.call("live_subscribe", views::object(json!({"types":["selection","structure"]})), signal).await?);
             }
-            if result.as_ref().is_some_and(|r| r.is_error != Some(true)) {
+            let heard = result.as_ref().is_some_and(|r| r.is_error != Some(true));
+            if heard {
                 if let Some(focus) = self.focus.borrow().as_ref() {
                     focus.slow();
                 }
             }
-            Ok::<_, RuntimeError>(())
+            Ok::<_, RuntimeError>(heard)
         }
         .await;
-        if result.is_err() {
+        // Heard only once Live said yes. A refusal, or a call that failed, is asked again on the next turn.
+        let heard = matches!(result, Ok(true));
+        self.hearing.set(heard);
+        if !heard {
             self.subscribed.set(false);
             self.transport_events.set(false);
         }
