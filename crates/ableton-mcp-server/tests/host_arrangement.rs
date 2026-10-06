@@ -55,6 +55,9 @@ struct Adapter {
     fired: Cell<bool>,
     read_fail: Cell<bool>,
     compensate_fail: Cell<bool>,
+    /// Live's locator refs are positional (`{epoch}:locator:{index}`, in time order): adding or deleting one renumbers
+    /// those after it.
+    positional: Cell<bool>,
 }
 impl Adapter {
     fn new() -> Self {
@@ -68,7 +71,27 @@ impl Adapter {
             fired: Cell::new(false),
             read_fail: Cell::new(false),
             compensate_fail: Cell::new(false),
+            positional: Cell::new(false),
         }
+    }
+    /// Renumbers the locators by place, as Live does, and gives `made` (a created locator's result) its ref and
+    /// fingerprint there.
+    fn renumber(&self, made: Option<&mut Value>) {
+        use ableton_mcp_server::registry::{canonical_json, sha256_hex, UNBOUNDED_CANONICAL_LIMITS};
+        let hash = |value: &Value| sha256_hex(&canonical_json(value, &UNBOUNDED_CANONICAL_LIMITS).unwrap());
+        let mut state = self.sim.state.borrow_mut();
+        let locators = state["arrangement"]["locators"].as_array_mut().unwrap();
+        locators.sort_by(|a, b| a["position"].as_f64().unwrap().total_cmp(&b["position"].as_f64().unwrap()));
+        for (index, locator) in locators.iter_mut().enumerate() {
+            locator["ref"] = json!(format!("locator:at-{index}"));
+        }
+        if let Some(made) = made {
+            let row = locators.iter().find(|row| row["objectIdentity"] == made["objectIdentity"]).unwrap();
+            made["ref"] = row["ref"].clone();
+            made["createdFingerprint"] = json!(hash(row));
+        }
+        let revision = hash(&state["arrangement"]["locators"]);
+        state["arrangement"]["locatorRevision"] = json!(revision);
     }
     fn reset(&self, fault: &str) {
         *self.fault.borrow_mut() = fault.into();
@@ -132,6 +155,9 @@ impl Adapter {
             });
         }
         let mut result = if trigger && fault == "no-effect" { json!({"ok":true}) } else { self.sim.invoke(i)? };
+        if self.positional.get() && ["locator.add", "locator.delete"].contains(&i.operation.as_str()) {
+            self.renumber((i.operation == "locator.add").then_some(&mut result));
+        }
         if c.is_some() && !(trigger && fault == "no-effect") {
             self.cache.borrow_mut().insert(key, result.clone());
         }
@@ -259,6 +285,45 @@ async fn arrangement_section_validation_matches_source() {
             .unwrap()
             .unwrap_or_else(|e| json!({"error":e.message()}));
         same(&clean(got), &row["result"], &format!("row {index} {row}"));
+    }
+}
+#[tokio::test]
+async fn a_section_before_another_locator_is_undone_and_compensated_by_identity() {
+    // "Outro" sits after the section, so each locator the section adds or deletes renumbers it.
+    for scenario in ["undo", "compensate"] {
+        let adapter = Rc::new(Adapter::new());
+        adapter.positional.set(true);
+        let revision = adapter.sim.state.borrow()["arrangement"]["locatorRevision"].clone();
+        adapter
+            .sim
+            .invoke(&LiveInvocation::new("locator.add", json!({"name":"Outro","position":64,"expectedCollectionRevision":revision})))
+            .unwrap();
+        adapter.renumber(None);
+        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+        let params = json!({"start":16,"end":32,"startName":"Verse","endName":"End Verse"});
+        let preview = host.live_arrangement_preview_async(&json!(1), &params).await;
+        let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        let record = host.transaction_record(body["transactionId"].as_str().unwrap()).unwrap();
+        let apply = json!({"transactionId":body["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+        if scenario == "compensate" {
+            // Live makes "End Verse" but names it wrongly: both are taken back.
+            adapter.fault_step.set(2);
+            adapter.reset("wrong-name");
+            host.live_arrangement_apply_async(&json!(2), &apply, None).await;
+            assert_eq!(record.borrow()["state"], "undone", "{}", record.borrow());
+        } else {
+            host.live_arrangement_apply_async(&json!(2), &apply, None).await;
+            assert_eq!(record.borrow()["state"], "applied");
+            let undo = json!({"transactionId":body["transactionId"],"confirmation":"undo","idempotencyKey":"undo-key"});
+            let result = host
+                .with_undo_watch(&json!(3), &undo, async { Ok(host.undo_arrangement_async(&json!(3), &undo, None).await) })
+                .await
+                .unwrap();
+            assert_eq!(record.borrow()["state"], "undone", "{result}");
+        }
+        let left: Vec<_> =
+            adapter.sim.state.borrow()["arrangement"]["locators"].as_array().unwrap().iter().map(|l| l["name"].clone()).collect();
+        assert_eq!(left, [json!("Intro"), json!("Outro")], "{scenario}");
     }
 }
 #[tokio::test]

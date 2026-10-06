@@ -42,6 +42,16 @@ fn exact_locator(a: &Value, b: &Value) -> bool {
         && a["name"] == b["name"]
         && a["position"].as_f64() == b["position"].as_f64()
 }
+/// The locator a transaction made, wherever it is now. Live's locator refs are positional
+/// (`{epoch}:locator:{index}`): one added or deleted before it moves it to another ref, and the next takes a
+/// deleted one's ref, so only its identity finds it.
+fn owned_locator<'a>(rows: &'a [Value], created: &Value) -> Option<&'a Value> {
+    rows.iter().find(|row| row["objectIdentity"] == created["objectIdentity"])
+}
+/// Whether an owned locator still has the name and place it was made with, at whichever ref it has now.
+fn unchanged_locator(row: &Value, created: &Value) -> bool {
+    row["name"] == created["name"] && row["position"].as_f64() == created["position"].as_f64()
+}
 impl McpHost {
     pub async fn dispatch_arrangement_tool(&self, call: &ToolCall, signal: Option<&Signal>) -> Option<Result<Value, LiveError>> {
         let args = call.arguments.as_ref().unwrap_or(&Value::Null);
@@ -278,15 +288,22 @@ impl McpHost {
             if step.is_null() {
                 let snapshot = self.arrangement_view(Some(context)).await?;
                 let rows = locators(&snapshot)?;
-                let Some(row) = rows.iter().find(|r| r["ref"] == locator["ref"]) else { continue };
-                if row["objectIdentity"] != locator["objectIdentity"]
-                    || !truthy(&locator["fingerprint"])
-                    || capture_object_fingerprint(row)? != locator["fingerprint"]
-                {
+                let Some(row) = owned_locator(&rows, locator) else {
+                    // Not there by its identity: gone, or another locator took its ref. Unless the row at its ref is
+                    // the one made, under another identity than Live returned: that one can't be taken back safely.
+                    let at_ref = rows.iter().find(|r| r["ref"] == locator["ref"]).map(capture_object_fingerprint).transpose()?;
+                    if at_ref.is_some_and(|fingerprint| locator["fingerprint"] == fingerprint) {
+                        return Err(LiveError::error("transaction-owned locator changed before compensation"));
+                    }
+                    continue;
+                };
+                // Its fingerprint covers the ref it was made at: a shift to another ref isn't a change.
+                let mut made = row.clone();
+                made["ref"] = locator["ref"].clone();
+                if !truthy(&locator["fingerprint"]) || capture_object_fingerprint(&made)? != locator["fingerprint"] {
                     return Err(LiveError::error("transaction-owned locator changed before compensation"));
                 }
-                step =
-                    json!({"args":self.locator_delete_args(&snapshot,&locator["ref"],Some(&locator["objectIdentity"]))?,"completed":false});
+                step = json!({"args":self.locator_delete_args(&snapshot,&row["ref"],Some(&locator["objectIdentity"]))?,"completed":false});
                 let mut r = record.borrow_mut();
                 let steps = r["compensationSteps"].as_array_mut().unwrap();
                 if steps.len() <= index {
@@ -300,7 +317,7 @@ impl McpHost {
             }
         }
         let after = locators(&self.arrangement_view(Some(context)).await?)?;
-        if created.iter().any(|c| after.iter().any(|r| r["ref"] == c["ref"])) {
+        if created.iter().any(|c| owned_locator(&after, c).is_some()) {
             return Err(LiveError::error("Arrangement compensation left transaction-owned locators"));
         }
         Ok(())
@@ -473,15 +490,17 @@ impl McpHost {
             }
             let current = locators(&self.adapter.snapshot()?)?;
             let created = t["created"].as_array().unwrap();
-            if !created.iter().all(|c| current.iter().any(|r| exact_locator(r, c))) {
+            if !created.iter().all(|c| owned_locator(&current, c).is_some_and(|r| unchanged_locator(r, c))) {
                 return Ok(transaction_error(id, "Arrangement locator identity or content changed after apply; undo refused"));
             }
             let undone = (|| {
                 for c in created.iter().rev() {
                     let snapshot = self.adapter.snapshot()?;
+                    let rows = locators(&snapshot)?;
+                    let reference = owned_locator(&rows, c).map_or(&c["ref"], |row| &row["ref"]);
                     self.adapter.invoke(&LiveInvocation::new(
                         "locator.delete",
-                        self.locator_delete_args(&snapshot, &c["ref"], Some(&c["objectIdentity"]))?,
+                        self.locator_delete_args(&snapshot, reference, Some(&c["objectIdentity"]))?,
                     ))?;
                 }
                 Ok(())
@@ -526,7 +545,7 @@ impl McpHost {
             let current = locators(&self.arrangement_view(Some(&context)).await?)?;
             let created = t["created"].as_array().unwrap();
             for c in created {
-                if current.iter().find(|r| r["ref"] == c["ref"]).is_some_and(|r| !exact_locator(r, c)) {
+                if owned_locator(&current, c).is_some_and(|r| !unchanged_locator(r, c)) {
                     return Ok(transaction_error(id, "Arrangement locator identity or content changed after apply; undo refused"));
                 }
             }
@@ -534,20 +553,19 @@ impl McpHost {
                 record.borrow_mut()["state"] = json!("undoing");
                 for c in created.iter().rev() {
                     let snapshot = self.arrangement_view(Some(&context)).await?;
-                    if !locators(&snapshot)?.iter().any(|r| r["ref"] == c["ref"]) {
-                        continue;
-                    }
+                    let rows = locators(&snapshot)?;
+                    let Some(row) = owned_locator(&rows, c) else { continue };
                     self.invoke_undo_recovery(
                         &record,
                         &*adapter,
                         "locator.delete",
-                        &self.locator_delete_args(&snapshot, &c["ref"], Some(&c["objectIdentity"]))?,
+                        &self.locator_delete_args(&snapshot, &row["ref"], Some(&c["objectIdentity"]))?,
                         &context,
                     )
                     .await?;
                 }
                 let current = locators(&self.arrangement_view(Some(&context)).await?)?;
-                if created.iter().any(|c| current.iter().any(|r| r["ref"] == c["ref"])) {
+                if created.iter().any(|c| owned_locator(&current, c).is_some()) {
                     return Err(LiveError::error("Arrangement undo left transaction-owned locators"));
                 }
                 Ok(())
