@@ -716,7 +716,7 @@ class ControlSurfaceTests(unittest.TestCase):
         self.assertEqual(registry["protocol"], "ableton-live/v1")
         canonical = json.dumps(registry, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         self.assertEqual(digest, hashlib.sha256(canonical).hexdigest())
-        self.assertEqual(digest, "ec05dd401ec098adb77da1c185aff1857be2bd87859afe9dda4bfeb14e04aa57")
+        self.assertEqual(digest, "db3eeaa1b2a06f6b699d8387646887dade7be485f6376de6d85c90d1ede3c0dd")
         self.assertIn("audio.capture.start", [item["id"] for item in registry["operations"]])
         self.assertIn("device.parameter.set", [item["id"] for item in registry["operations"]])
         ids = [item["id"] for item in registry["operations"]]
@@ -5431,7 +5431,7 @@ class SpecializedDeviceTests(unittest.TestCase):
         cell = FakeDevice(); cell.name = "Cell"; cell.class_name = "DrumCellDevice"; cell.gain = -6.0
         eq = FakeDevice(); eq.name = "EQ8"; eq.class_name = "Eq8Device"; eq.edit_mode = 0; eq.global_mode = 1; eq.oversample = False
         eq.view = type("Eq8View", (), {"selected_band": 2})()
-        meld = FakeDevice(); meld.name = "Meld"; meld.class_name = "MeldDevice"; meld.selected_engine = 0; meld.unison_voices = 1; meld.mono_poly = False; meld.poly_voices = 8
+        meld = FakeDevice(); meld.name = "Meld"; meld.class_name = "MeldDevice"; meld.selected_engine = 0; meld.unison_voices = 1; meld.mono_poly = False; meld.poly_voices = 5
         song.tracks[0].devices = [cell, eq, meld]
         mapper = LiveObjectMapper(song)
         rows = mapper.snapshot()["tracks"][0]["devices"]
@@ -5441,9 +5441,14 @@ class SpecializedDeviceTests(unittest.TestCase):
         eq_state = mapper._specialized_state(eq, [("editMode", "edit_mode"), ("globalMode", "global_mode"), ("oversample", "oversample"), ("selectedBand", "view.selected_band")])
         result = mapper.invoke("eq8.set", {"ref": rows[1]["ref"], "editMode": 1, "oversample": True, "selectedBand": 4, "expectedObjectIdentity": rows[1]["objectIdentity"], "expectedStateRevision": hashlib.sha256(mapper._bounded_canonical(eq_state).encode()).hexdigest()})
         self.assertTrue(result["changed"]); self.assertEqual((eq.edit_mode, eq.oversample, eq.view.selected_band), (1, True, 4))
-        meld_state = mapper._specialized_state(meld, [("engine", "selected_engine"), ("unison", "unison_voices"), ("monoPoly", "mono_poly"), ("polyphony", "poly_voices")])
-        result = mapper.invoke("meld.set", {"ref": rows[2]["ref"], "engine": 1, "unison": 4, "monoPoly": True, "polyphony": 16, "expectedObjectIdentity": rows[2]["objectIdentity"], "expectedStateRevision": hashlib.sha256(mapper._bounded_canonical(meld_state).encode()).hexdigest()})
-        self.assertTrue(result["changed"]); self.assertEqual((meld.selected_engine, meld.unison_voices, meld.mono_poly, meld.poly_voices), (1, 4, True, 16))
+        def meld_fence():
+            meld_state = mapper._specialized_state(meld, [("engine", "selected_engine"), ("unison", "unison_voices"), ("monoPoly", "mono_poly"), ("polyphony", "poly_voices")])
+            return {"ref": rows[2]["ref"], "expectedObjectIdentity": rows[2]["objectIdentity"], "expectedStateRevision": hashlib.sha256(mapper._bounded_canonical(meld_state).encode()).hexdigest()}
+        # Meld's voices are places in Live's menus: unison 0 is off, polyphony 6 is twelve voices.
+        result = mapper.invoke("meld.set", {**meld_fence(), "engine": 1, "unison": 0, "monoPoly": True, "polyphony": 6})
+        self.assertTrue(result["changed"]); self.assertEqual((meld.selected_engine, meld.unison_voices, meld.mono_poly, meld.poly_voices), (1, 0, True, 6))
+        with self.assertRaisesRegex(ValueError, "unison is invalid"): mapper.invoke("meld.set", {**meld_fence(), "unison": 4})
+        with self.assertRaisesRegex(ValueError, "polyphony is invalid"): mapper.invoke("meld.set", {**meld_fence(), "polyphony": 7})
 
     def test_hybrid_reverb_ir_and_time_shaping(self):
         song = FakeSong()

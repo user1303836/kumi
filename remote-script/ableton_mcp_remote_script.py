@@ -8843,11 +8843,13 @@ class LiveObjectMapper:
         return {"changed": True, "revision": revision}
 
     def _meld_set(self, args: dict[str, Any]) -> dict[str, Any]:
+        # Live takes Meld's voices as places in its menus: unison 0 off, 1 two, 2 three, 3 four; polyphony
+        # 0 two, 1 three, 2 four, 3 five, 4 six, 5 eight, 6 twelve.
         return self._specialized_set(str(args.get("ref")), args, {
             "engine": ("selected_engine", lambda value: isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 4),
-            "unison": ("unison_voices", lambda value: isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 16),
+            "unison": ("unison_voices", lambda value: isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 3),
             "monoPoly": ("mono_poly", lambda value: isinstance(value, bool)),
-            "polyphony": ("poly_voices", lambda value: isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 64),
+            "polyphony": ("poly_voices", lambda value: isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 6),
         }, "meld")
 
     def _plugin_set(self, args: dict[str, Any]) -> dict[str, Any]:

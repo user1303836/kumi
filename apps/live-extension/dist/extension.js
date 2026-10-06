@@ -7205,7 +7205,7 @@ var ableton_live_v1_operations_default = {
           },
           voiceCount: {
             type: "integer",
-            minimum: 1,
+            minimum: 0,
             maximum: 64
           },
           voiceMode: {
@@ -8714,16 +8714,16 @@ var ableton_live_v1_operations_default = {
           },
           unison: {
             type: "integer",
-            minimum: 1,
-            maximum: 16
+            minimum: 0,
+            maximum: 3
           },
           monoPoly: {
             type: "boolean"
           },
           polyphony: {
             type: "integer",
-            minimum: 1,
-            maximum: 64
+            minimum: 0,
+            maximum: 6
           },
           expectedObjectIdentity: {
             type: "string",
