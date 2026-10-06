@@ -1,0 +1,19 @@
+[package]
+name = "kumi-store"
+version = "0.1.0"
+description = "Kumi's database: what it keeps between sessions, in SQLite, written by one thread and read beside it."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+blake3.workspace = true
+rand.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
