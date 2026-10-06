@@ -13488,12 +13488,13 @@ class AbletonMcpBridge:
                 if time.perf_counter() >= deadline: break
             # Frames are taken by offset, searching only bytes not searched before, and the buffer is
             # compacted once: a frame arriving in many pieces is scanned once, not once per piece.
-            frames = 0; start = 0; search = connection.scanned
-            while not connection.auth.invalid and frames < MAX_FRAMES_PER_PUMP and (frames == 0 or time.perf_counter() < deadline):
+            frames = 0; lines = 0; start = 0; search = connection.scanned
+            # Every line counts toward the deadline, a blank one too: a flood of newlines can't hold Live's thread.
+            while not connection.auth.invalid and frames < MAX_FRAMES_PER_PUMP and (lines == 0 or time.perf_counter() < deadline):
                 newline = inbound.find(b"\n", search)
                 if newline < 0:
                     search = len(inbound); break
-                line = bytes(inbound[start:newline]); start = search = newline + 1
+                line = bytes(inbound[start:newline]); start = search = newline + 1; lines += 1
                 if not line: continue
                 frames += 1; began = time.perf_counter(); request = None
                 try: request = json.loads(line.decode("utf-8")); response = connection.auth.dispatch(request)

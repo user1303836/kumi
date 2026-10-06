@@ -7159,6 +7159,13 @@ class HostileLineTests(_BridgeSocketFixture, unittest.TestCase):
         self.assertEqual(len(self.bridge._connections), 1, "the connection that failed is closed")
         client.sendall(self.frame(channel, 1)); self.assertTrue(self.read_lines(client, 1)[0]["ok"])
 
+    def test_blank_lines_count_toward_the_ticks_budget(self):
+        client, channel = self.connect(); connection = self.bridge._connections[0]
+        client.sendall(b"\n" * 200_000 + self.frame(channel, 1)); time.sleep(0.05)
+        self.bridge._pump(0.0)
+        self.assertGreater(len(connection.inbound), 100_000, "a spent budget stops after the first line, blank or not")
+        self.assertTrue(self.read_lines(client, 1)[0]["ok"], "the request after them is answered over the next ticks")
+
 
 def rich_song(links=True, playing=True, tracks=6):
     """A Set with something of everything: MIDI and audio clips, a group, a rack with a nested device,
