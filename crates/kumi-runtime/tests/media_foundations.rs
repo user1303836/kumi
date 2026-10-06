@@ -272,7 +272,8 @@ fn kumi_fetches_the_build_each_computer_has() {
 }
 #[test]
 fn ffmpegs_build_for_this_computer_is_the_newest_numbered_lgpl_one() {
-    let names = [
+    // The release tagged latest names a build by its branch; a dated release, by the commit it's built from.
+    let latest = [
         "ffmpeg-master-latest-win64-lgpl.zip",
         "ffmpeg-n8.1-latest-win64-lgpl-8.1.zip",
         "ffmpeg-n9.0-latest-win64-lgpl-9.0.zip",
@@ -281,17 +282,30 @@ fn ffmpegs_build_for_this_computer_is_the_newest_numbered_lgpl_one() {
         "ffmpeg-n10.0-latest-linux64-lgpl-10.0.tar.xz",
         "ffmpeg-n9.0-latest-linuxarm64-lgpl-9.0.tar.xz",
         "ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip",
-    ]
-    .map(str::to_string);
-    for (platform, arch, expected) in [
-        ("win32", "x64", Some(names[2].clone())),
-        ("win32", "arm64", Some(names[4].clone())),
-        ("linux", "x64", Some(names[5].clone())),
-        ("linux", "arm64", Some(names[6].clone())),
-        ("darwin", "arm64", None),
-        ("win32", "ia32", None),
-    ] {
-        assert_eq!(ffmpeg_asset(&names, platform, arch), expected);
+    ];
+    let dated = [
+        "ffmpeg-N-127222-g151814650f-win64-lgpl.zip",
+        "ffmpeg-n8.1.3-14-g330caae0c1-win64-lgpl-8.1.zip",
+        "ffmpeg-n9.0.2-22-g46d8f462ee-win64-lgpl-9.0.zip",
+        "ffmpeg-n9.0.2-22-g46d8f462ee-win64-gpl-9.0.zip",
+        "ffmpeg-n9.0.2-22-g46d8f462ee-winarm64-lgpl-9.0.zip",
+        "ffmpeg-n9.0.2-22-g46d8f462ee-linux64-lgpl-9.0.tar.xz",
+        "ffmpeg-n9.0.2-22-g46d8f462ee-linuxarm64-lgpl-9.0.tar.xz",
+        "ffmpeg-n9.0.2-22-g46d8f462ee-win64-lgpl-shared-9.0.zip",
+        "ffmpeg-n8.1.3-14-g330caae0c1-linux64-lgpl-8.1.tar.xz",
+        "ffmpeg-N-127222-g151814650f-linux64-lgpl.tar.xz",
+    ];
+    for names in [latest.map(str::to_string).to_vec(), dated.map(str::to_string).to_vec()] {
+        for (platform, arch, expected) in [
+            ("win32", "x64", Some(names[2].clone())),
+            ("win32", "arm64", Some(names[4].clone())),
+            ("linux", "x64", Some(names[5].clone())),
+            ("linux", "arm64", Some(names[6].clone())),
+            ("darwin", "arm64", None),
+            ("win32", "ia32", None),
+        ] {
+            assert_eq!(ffmpeg_asset(&names, platform, arch), expected);
+        }
     }
 }
 fn model_download(oid: String) -> Download {
@@ -445,21 +459,27 @@ async fn wavetables_shapes_as_harmonics_keyframes_morphing_cycles_cut_from_a_sou
     assert_eq!(cut.len(), 8);
     assert!(cut.iter().all(|f| f.len() == FRAME));
 }
-#[tokio::test]
-async fn off_a_mac_ffmpeg_is_fetched_once_checked_against_its_release_checksum_and_only_the_program_kept() {
-    let root = tempfile::tempdir().unwrap();
-    let build = root.path().join("build/ffmpeg-n9.0-latest-linux64-lgpl-9.0");
+/// A build's archive as BtbN packs it: one folder, named like the archive, with the programs in its bin.
+fn ffmpeg_archive(root: &Path, folder: &str) -> Vec<u8> {
+    let build = root.join("build").join(folder);
     std::fs::create_dir_all(build.join("bin")).unwrap();
     std::fs::write(build.join("bin/ffmpeg"), "#!/bin/sh\necho ffmpeg version fixture\n").unwrap();
     std::fs::write(build.join("bin/ffprobe"), "x").unwrap();
     std::fs::write(build.join("LICENSE.txt"), "LGPL").unwrap();
-    let archive = root.path().join("build.tar.gz");
+    let archive = root.join("build.tar.gz");
     assert!(std::process::Command::new(kumi_runtime::system::system_program_default(kumi_runtime::system::SystemProgram::Tar))
-        .args(["-czf", archive.to_str().unwrap(), "-C", root.path().join("build").to_str().unwrap(), "ffmpeg-n9.0-latest-linux64-lgpl-9.0"])
+        .args(["-czf", archive.to_str().unwrap(), "-C", root.join("build").to_str().unwrap(), folder])
         .status()
         .unwrap()
         .success());
-    let data = std::fs::read(archive).unwrap();
+    std::fs::read(archive).unwrap()
+}
+const FFMPEG_LATEST: &str = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest";
+const FFMPEG_RELEASES: &str = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases?per_page=10";
+#[tokio::test]
+async fn off_a_mac_ffmpeg_is_fetched_once_checked_against_its_release_checksum_and_only_the_program_kept() {
+    let root = tempfile::tempdir().unwrap();
+    let data = ffmpeg_archive(root.path(), "ffmpeg-n9.0-latest-linux64-lgpl-9.0");
     let sha = format!("sha256:{}", hex::encode(Sha256::digest(&data)));
     let asked = Arc::new(Mutex::new(Vec::new()));
     let said = Arc::new(Mutex::new(Vec::new()));
@@ -515,6 +535,97 @@ async fn off_a_mac_ffmpeg_is_fetched_once_checked_against_its_release_checksum_a
         .to_string()
         .contains("Kumi needs ffmpeg for this, and would fetch it. Only 150 MB is free on the disk Kumi keeps its programs on"));
     assert_eq!(asked.lock().unwrap().len(), before + 1);
+}
+#[tokio::test]
+async fn while_btbn_makes_its_release_tagged_latest_again_ffmpeg_comes_from_its_newest_dated_release() {
+    let root = tempfile::tempdir().unwrap();
+    let name = "ffmpeg-n9.0.2-22-g46d8f462ee-linux64-lgpl-9.0.tar.xz";
+    let data = ffmpeg_archive(root.path(), name.trim_end_matches(".tar.xz"));
+    let digest = format!("sha256:{}", hex::encode(Sha256::digest(&data)));
+    let address = |tag: &str| format!("https://github.com/BtbN/FFmpeg-Builds/releases/download/{tag}/{name}");
+    let release = |tag: &str| serde_json::json!({"tag_name":tag,"assets":[{"name":name,"size":137_903_428,"digest":digest,"browser_download_url":address(tag)}]});
+    // Not newest first, as GitHub's list can be: the largest tag is the newest.
+    let releases = serde_json::to_vec(&serde_json::json!([
+        release("autobuild-2026-10-05-13-07"),
+        release("autobuild-2026-10-06-13-06"),
+        release("autobuild-2026-10-04-20-51")
+    ]))
+    .unwrap();
+    let newest = address("autobuild-2026-10-06-13-06");
+    // The release tagged latest gone (deleted, not yet uploaded anew), or listing no build for this computer.
+    type Answer = fn() -> Result<Vec<u8>, VideoFailure>;
+    let gone: Answer = || Err(VideoFailure::video("Downloading latest failed (404)."));
+    let unlisted: Answer = || Ok(serde_json::to_vec(&serde_json::json!({"tag_name":"latest","assets":[]})).unwrap());
+    for (case, latest) in [("gone", gone), ("listing no build", unlisted)] {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let download: Download = {
+            let (asked, releases, data, newest) = (asked.clone(), releases.clone(), data.clone(), newest.clone());
+            Arc::new(move |url: String, _| {
+                asked.lock().unwrap().push(url.clone());
+                let answer = match url.as_str() {
+                    FFMPEG_LATEST => latest(),
+                    FFMPEG_RELEASES => Ok(releases.clone()),
+                    _ if url == newest => Ok(data.clone()),
+                    _ => Err(VideoFailure::video(format!("{url} isn't one Kumi should ask for."))),
+                };
+                async move { answer }.boxed()
+            })
+        };
+        let tools = root.path().join(case);
+        let options = FfmpegOptions {
+            env: Some(HashMap::new()),
+            tools_dir: Some(tools.to_string_lossy().into_owned()),
+            platform: Some("linux".into()),
+            arch: Some("x64".into()),
+            download: Some(download),
+            on_fetch: Some(Arc::new(|_| {})),
+            free: Some(Arc::new(|_| async { Some(1e12) }.boxed())),
+            ..Default::default()
+        };
+        assert_eq!(find_ffmpeg(options).await.unwrap(), Some(tools.join("ffmpeg").join("ffmpeg").to_string_lossy().into_owned()), "{case}");
+        assert_eq!(*asked.lock().unwrap(), [FFMPEG_LATEST, FFMPEG_RELEASES, newest.as_str()], "{case}");
+    }
+}
+#[tokio::test]
+async fn when_github_lists_no_ffmpeg_builds_kumi_says_so_in_plain_words_and_a_mac_never_asks() {
+    let root = tempfile::tempdir().unwrap();
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let silent: Download = {
+        let asked = asked.clone();
+        Arc::new(move |url: String, _| {
+            asked.lock().unwrap().push(url);
+            async { Err(VideoFailure::other("error sending request")) }.boxed()
+        })
+    };
+    let options = |platform: &str, arch: &str, download: &Download| FfmpegOptions {
+        env: Some(HashMap::new()),
+        tools_dir: Some(root.path().to_string_lossy().into_owned()),
+        platform: Some(platform.into()),
+        arch: Some(arch.into()),
+        download: Some(download.clone()),
+        ..Default::default()
+    };
+    assert_eq!(
+        find_ffmpeg(options("linux", "x64", &silent)).await.unwrap_err().to_string(),
+        "Kumi couldn't get the list of ffmpeg's builds from GitHub to fetch it. Try again in a few minutes, or install it with your package manager."
+    );
+    assert_eq!(*asked.lock().unwrap(), [FFMPEG_LATEST, FFMPEG_RELEASES]);
+    assert!(find_ffmpeg(options("win32", "x64", &silent))
+        .await
+        .unwrap_err()
+        .to_string()
+        .ends_with("Try again in a few minutes, or install it: winget install ffmpeg."));
+    // Listed, but with no build for this computer: there's none, and nothing's wrong.
+    let empty: Download = Arc::new(|url: String, _| {
+        let listed = if url == FFMPEG_LATEST { serde_json::json!({"tag_name":"latest","assets":[]}) } else { serde_json::json!([]) };
+        async move { Ok(serde_json::to_vec(&listed).unwrap()) }.boxed()
+    });
+    assert_eq!(find_ffmpeg(options("linux", "x64", &empty)).await.unwrap(), None);
+    asked.lock().unwrap().clear();
+    for (platform, arch) in [("darwin", "arm64"), ("darwin", "x64"), ("win32", "ia32")] {
+        assert_eq!(find_ffmpeg(options(platform, arch, &silent)).await.unwrap(), None, "{platform} {arch}");
+    }
+    assert!(asked.lock().unwrap().is_empty());
 }
 #[test]
 fn kumi_ears_passes_the_sound_through_records_four_channels_and_every_patch_cord_joins_real_inlets_and_outlets() {

@@ -138,21 +138,39 @@ impl DeterministicLiveSimulator {
                     let position =
                         ranged_number(args.get("position").unwrap_or(&Value::Null), 0., f64::INFINITY, false, "position is invalid")?;
                     // Like dropping a clip in Live, and as the Remote Script does: a clip in the new place goes,
-                    // one crossing its edges is cut there, and one it lands in the middle of keeps both ends.
+                    // one crossing its edges is cut there, and one it lands in the middle of keeps both ends. A copy
+                    // (keepSource) or a move to another track lands a new clip there; a copy on its own track cuts
+                    // its own clip where it lands.
                     let moving = state["arrangementClips"][index.unwrap()].clone();
+                    let keep = args.get("keepSource") == Some(&json!(true));
+                    let target = match args.get("targetTrackRef").and_then(Value::as_str) {
+                        Some(target) => {
+                            let identity = array(&state["tracks"]).iter().find(|t| t["ref"] == target).map(|t| t["objectIdentity"].clone());
+                            if identity.as_ref() != args.get("expectedTargetTrackIdentity") {
+                                return Err(LiveError::error("the target track changed since preview; move refused"));
+                            }
+                            json!(target)
+                        }
+                        None => moving["trackRef"].clone(),
+                    };
+                    let elsewhere = keep || target != moving["trackRef"];
                     let (from, to) = (position, position + moving["clip"]["length"].as_f64().unwrap_or(0.));
                     let mut rows = Vec::new();
+                    // What was in the new place before anything was cut, as the Remote Script says it.
+                    let mut cleared = Vec::new();
                     for row in array(&state["arrangementClips"]).to_vec() {
                         let start = row["clip"]["start"].as_f64().unwrap_or(0.);
                         let end = row["clip"]["endTime"].as_f64().unwrap_or(start + row["clip"]["length"].as_f64().unwrap_or(0.));
-                        if row["trackRef"] != moving["trackRef"]
-                            || row["clip"]["ref"] == reference
+                        if row["trackRef"] != target
+                            || (!elsewhere && row["clip"]["ref"] == reference)
                             || start >= to - 1e-6
                             || end <= from + 1e-6
                         {
                             rows.push(row);
                             continue;
                         }
+                        let name: String = row["clip"]["name"].as_str().unwrap_or("").chars().take(60).collect();
+                        cleared.push(json!({"name":name,"start":start,"end":end}));
                         if start < from - 1e-6 {
                             let mut head = row.clone();
                             head["clip"]["length"] = (from - start).into();
@@ -174,6 +192,33 @@ impl DeterministicLiveSimulator {
                             rows.push(tail);
                         }
                     }
+                    if elsewhere {
+                        let (name, identity) =
+                            split_names(array(&state["arrangementClips"]).iter().chain(&rows), target.as_str().unwrap_or(""), position);
+                        let mut copy = moving.clone();
+                        copy["trackRef"] = target.clone();
+                        for (key, value) in [("ref", json!(name)), ("objectIdentity", json!(identity)), ("start", json!(position))] {
+                            copy["clip"][key] = value;
+                        }
+                        for key in ["trackRef", "parentRef"] {
+                            if copy["clip"].get(key).is_some() {
+                                copy["clip"][key] = target.clone();
+                            }
+                        }
+                        if copy["clip"].get("endTime").is_some() {
+                            copy["clip"]["endTime"] = to.into();
+                        }
+                        if !keep {
+                            rows.retain(|r| r["clip"]["ref"] != reference);
+                        }
+                        rows.push(copy);
+                        state["arrangementClips"] = Value::Array(rows);
+                        drop(state);
+                        self.emit(LiveEventType::Object, Some(name.as_str().into()), json!({"operation":operation}));
+                        return Ok(
+                            json!({"ref":name,"objectIdentity":identity,"start":position,"createdFingerprint":self.arrangement_clip_fingerprint(&name),"cleared":cleared}),
+                        );
+                    }
                     let index = rows.iter().position(|r| r["clip"]["ref"] == reference);
                     state["arrangementClips"] = Value::Array(rows);
                     state["arrangementClips"][index.unwrap()]["clip"]["start"] = position.into();
@@ -181,7 +226,7 @@ impl DeterministicLiveSimulator {
                     drop(state);
                     self.emit(LiveEventType::Object, Some(reference.into()), json!({"operation":operation}));
                     Ok(
-                        json!({"ref":reference,"objectIdentity":identity,"start":position,"createdFingerprint":self.arrangement_clip_fingerprint(reference)}),
+                        json!({"ref":reference,"objectIdentity":identity,"start":position,"createdFingerprint":self.arrangement_clip_fingerprint(reference),"cleared":cleared}),
                     )
                 }
             }

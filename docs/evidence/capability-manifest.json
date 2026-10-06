@@ -1,6 +1,6 @@
 {
   "schema": "ableton-mcp-capability-manifest/v1",
-  "registryHash": "ec05dd401ec098adb77da1c185aff1857be2bd87859afe9dda4bfeb14e04aa57",
+  "registryHash": "48a3f3dfc08cbae1842e61163959f7c3361df2dbb43b780434a56d23b7c50d08",
   "operationCount": 195,
   "coverageRules": [
     "Covered means reachable end to end from MCP through the negotiated bridge with a verified response.",

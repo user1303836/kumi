@@ -246,11 +246,28 @@ pub(super) struct BridgeRollback {
     command: String,
     args: Vec<String>,
     run: Run,
+    /// The retained generation the rollback restores.
+    previous: String,
 }
 impl BridgeRollback {
     pub(super) async fn apply(&self) -> Result<(), RuntimeError> {
         let result = (self.run)(self.command.clone(), self.args.clone(), None).await;
         crate::bridge_setup::lifecycle_answer(result).map(|_| ()).map_err(RuntimeError::plain)
+    }
+    /// Put the restored generation's Live extension in Live, in place of this bridge's: each bridge checks that its
+    /// extension carries its own registry. What to tell the producer, if anything.
+    pub(super) fn place_extension(&self, env: &Env) -> Option<String> {
+        let folder = crate::live_extension::live_extensions_dir(env, kumi_runtime::system::platform())?;
+        let again = format!("run {} bridge once to put it back", *KUMI);
+        let Some(source) = crate::live_extension::extension_source(&self.previous) else {
+            return crate::live_extension::installed_extension(&folder)
+                .map(|_| format!("Kumi's extension in Live is this version's, which that bridge won't use: {again}."));
+        };
+        Some(match crate::live_extension::install_extension(&source, &folder) {
+            Ok(placed) if placed.changed => "Kumi's extension in Live went back with it.".into(),
+            Ok(_) => return None,
+            Err(e) => format!("Couldn't put back the Live extension that goes with that bridge ({e}): {again}."),
+        })
     }
 }
 pub(super) async fn prepare_legacy_rollback(io: &InstalledIo, home: &str) -> Result<Option<BridgeRollback>, RuntimeError> {
@@ -300,5 +317,5 @@ pub(super) async fn prepare_legacy_rollback(io: &InstalledIo, home: &str) -> Res
         "--apply".into(),
         "--confirm-live-stopped".into(),
     ];
-    Ok(Some(BridgeRollback { command: server.command.unwrap(), args, run }))
+    Ok(Some(BridgeRollback { command: server.command.unwrap(), args, run, previous: previous.unwrap().into() }))
 }

@@ -587,7 +587,11 @@ pub async fn rollback_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
     if Path::new(&join(&app, &executable_name("kumi"))).exists() {
         Ok(bridge_after(&io, &home, &app).await)
     } else {
-        // The receipt-bound bridge rollback above restored the legacy command/config as well.
+        // The receipt-bound bridge rollback above restored the legacy command/config as well; Live's extension goes
+        // back with it.
+        if let Some(said) = bridge_rollback.as_ref().and_then(|rollback| rollback.place_extension(&io.env)) {
+            say(said);
+        }
         Ok(0)
     }
 }
