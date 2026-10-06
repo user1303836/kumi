@@ -393,7 +393,9 @@ async fn a_take_lane_is_created_on_a_track_and_only_lives_undo_removes_it() {
             None,
         )
         .await;
-    assert!(kumi_common::js::json::stringify(&undone).contains("Live's own undo takes it back"), "{undone}");
+    let said = kumi_common::js::json::stringify(&undone);
+    assert!(said.contains("Live's own undo takes it back") && said.contains("Undo it in Live (Cmd-Z, or live_song_undo)"), "{undone}");
+    assert!(!said.contains("Preview the change again"), "a lane isn't previewed again to undo it: {undone}");
     // A track that isn't there, and a bad name, are refused before Live is asked.
     for args in
         [json!({"action":"create-lane","trackRef":"track:nope"}), json!({"action":"create-lane","trackRef":"track:track-1","name":""})]

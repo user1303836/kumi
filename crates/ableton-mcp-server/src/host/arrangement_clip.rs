@@ -447,7 +447,11 @@ impl McpHost {
     pub async fn undo_arrangement_clip_async(&self, id: &Value, params: &Value, signal: Option<&Signal>) -> Value {
         let record = params["transactionId"].as_str().and_then(|id| self.clip_lifecycle_transactions.get(id));
         if record.as_ref().is_some_and(|r| r.borrow()["kind"] == "take-lane-create") {
-            return transaction_error(id, "Live's API deletes no take lane; Live's own undo takes it back");
+            return reason_error(
+                id,
+                "Live's API deletes no take lane; Live's own undo takes it back",
+                "Nothing changed. Undo it in Live (Cmd-Z, or live_song_undo): Live takes back what came after the lane first.",
+            );
         }
         if record.as_ref().is_some_and(|r| r.borrow()["kind"] == "arrangement-take-lane-create") {
             return transaction_error(id, "The public LOM exposes no take-lane clip deletion; undo is unavailable for this transaction");
