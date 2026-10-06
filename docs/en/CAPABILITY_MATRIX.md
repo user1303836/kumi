@@ -93,7 +93,7 @@ of reach of both Live's Python API and the Extensions SDK, or out of scope:
 | Exporting the mix or stems; freezing and flattening | Offline render of an audio track's own clips; recording through Resampling |
 | Creating group tracks | — |
 | Editing Arrangement automation | Reading it; envelopes in Session clips |
-| Mapping a macro or modulator to a parameter | Wavetable's and Drift's modulation matrices; macro mapping through Willington |
+| Mapping a macro or modulator to a parameter | Wavetable's and Drift's modulation matrices; macro and modulator mapping through Willington |
 | Follow Actions | Through Willington |
 | Comp editing, deleting or auditioning take lanes | Reading lanes and comps, renaming lanes, audio into a lane |
 | Per-note MPE (pressure, slide, per-note tuning) | Probability, velocity deviation, release velocity, mute |

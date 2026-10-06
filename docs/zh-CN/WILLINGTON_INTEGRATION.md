@@ -10,6 +10,7 @@ Willington 是一组原生提供程序（provider），能触及 Live 的 Python
 | --- | --- | --- | --- |
 | `set_clip_follow_actions` | `live_follow_actions_preview/apply` | Session 片段的全部十个跟随动作字段 | WillingtonBindings |
 | `edit_rack_mapping` | `live_willington_device_preview/apply` | `macro-name`、`variation-name`、`macro-mapping` | WillingtonDeviceTools |
+| `run_python` | `live_run_python` | 把 Live 的 LFO、Shaper、Envelope Follower（各 8 个目标）和 Expression Control（5 个）映射到参数（Willington 的 `map_modulation`） | WillingtonDeviceTools |
 | `edit_rack_mapping` | `live_willington_device_preview/apply` | `selector-zone`、`key-zone`、`velocity-zone` | WillingtonRackZones |
 
 桥接只提供那些提供程序已加载且启用了写入的编辑类型：`live_willington_device_preview` 只列出这些 `kind` 值。每次编辑都需要走带处于停止状态。
@@ -20,7 +21,7 @@ Willington 是一组原生提供程序（provider），能触及 Live 的 Python
 
 在 Kumi 中输入 `/willington`。它会在 `Remote Scripts/AbletonMcpBridge` 中、桥接的 `__init__.py` 旁边写入 `willington.json`，开启 DeviceTools 和 RackZones 及其编辑；桥接会在一秒内加载它们，Live 照常运行。有通过的[自检](#跟随动作自检)时，跟随动作也会开启：它的编辑需要自检，而 Live 无法卸载它的绑定。再次输入 `/willington` 会删除这个文件：桥接会卸载 DeviceTools 和 RackZones，并关闭跟随动作写入；跟随动作的绑定会保留到 Live 重启，Kumi 会说明这一点。绑定处于关闭状态时，Kumi 会在启动时告诉你。
 
-Kumi 也会告诉它的模型。绑定关闭时，遇到需要这些编辑的请求，会附上一句：`/willington` 可以开启它们；绑定开启时，Kumi 会自己映射宏，而不是请你在 Live 中映射。
+Kumi 也会告诉它的模型。绑定关闭时，遇到需要这些编辑的请求，会附上一句：`/willington` 可以开启它们；绑定开启时，Kumi 会自己映射宏，并通过 `run_python` 映射 Live 的调制器，而不是请你在 Live 中映射。
 
 覆盖哪些 Live 构建版本，取决于你所用的 Willington 版本；对 Kumi 自带的副本，桥接文件夹里的 `willington/release.json` 写明了这个版本。Willington 经过验证的绑定：macOS ARM64 上 Live 12.4.15b4 和 b5 的跟随动作和 DeviceTools，macOS ARM64 上 b5 的 RackZones，以及 Windows x64 上 Live 12.4.15b5 的全部三者。不支持 Intel macOS。每个提供程序会根据正在运行的 Live 进程的操作系统、架构、版本和可执行文件哈希选择绑定，原生库还会检查正在运行的可执行文件本身（macOS 上是 Mach-O UUID，Windows 上是 CodeView GUID）。
 
@@ -142,6 +143,6 @@ Willington 有用于以下操作的原生方法，但在能够安全撤销之前
 
 - **覆盖一个变体**：需要读取并恢复完整的已存储宏值和启用掩码，而不仅仅是变体的名称。
 - **直接替换 Drum Sampler 的采样**：需要当前采样的身份和路径，并恢复替换所改变的内容。通过 Browser 加载预设和采样是可以的。
-- **映射调制器**：原生修改要稍后才会稳定下来，与 Live 的线程不同步。它首先需要稳定状态检查、对源和目标的确切所有权、取消以及恢复。
+- **作为可撤销修改的调制器映射**：原生修改要稍后才会稳定下来，与 Live 的线程不同步。它首先需要稳定状态检查、对源和目标的确切所有权、取消以及恢复。在此之前，Kumi 通过 `run_python` 映射调制器，不留 HISTORY 记录：清空槽位（`map_modulation(slot, None)`）可以撤回一个映射，Live 的撤销对它是否有效尚未验证。
 
 存在原生方法，并不足以构成一个可撤销的操作：不要只添加一个运行时描述符或一个协议条目就提供它。

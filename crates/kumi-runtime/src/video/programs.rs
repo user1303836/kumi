@@ -667,9 +667,9 @@ fn program_defaults() -> ProgramDefaults {
     PROGRAM_DEFAULTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
 }
 
-/// The ffmpeg build for this computer among a release's files: the newest numbered LGPL one; a Mac has none.
-pub fn ffmpeg_asset(names: &[String], platform: &str, arch: &str) -> Option<String> {
-    let target = match platform {
+/// This computer's name in BtbN's builds' names; a Mac has none.
+fn ffmpeg_target(platform: &str, arch: &str) -> Option<&'static str> {
+    match platform {
         "win32" => match arch {
             "arm64" => Some("winarm64"),
             "x64" => Some("win64"),
@@ -681,8 +681,17 @@ pub fn ffmpeg_asset(names: &[String], platform: &str, arch: &str) -> Option<Stri
             _ => None,
         },
         _ => None,
-    }?;
-    let pattern = Regex::new(&format!(r"^ffmpeg-n([0-9]+)\.([0-9]+)-latest-{target}-lgpl-[0-9]+\.[0-9]+\.(zip|tar\.xz)$")).unwrap();
+    }
+}
+
+/// The ffmpeg build for this computer among a release's files: the newest numbered LGPL one; a Mac has none.
+/// The release tagged latest names it ffmpeg-n9.0-latest-…, a dated release ffmpeg-n9.0.2-22-g46d8f462ee-….
+pub fn ffmpeg_asset(names: &[String], platform: &str, arch: &str) -> Option<String> {
+    let target = ffmpeg_target(platform, arch)?;
+    let pattern = Regex::new(&format!(
+        r"^ffmpeg-n([0-9]+)\.([0-9]+)(?:\.[0-9]+)*(?:-latest|-[0-9]+-g[0-9a-f]+)?-{target}-lgpl-[0-9]+\.[0-9]+\.(zip|tar\.xz)$"
+    ))
+    .unwrap();
     let mut versions: Vec<(&String, f64, f64)> = names
         .iter()
         .filter_map(|name| {
@@ -696,7 +705,11 @@ pub fn ffmpeg_asset(names: &[String], platform: &str, arch: &str) -> Option<Stri
     versions.first().map(|(name, _, _)| (*name).clone())
 }
 
-const FFMPEG_RELEASE: &str = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest";
+/// BtbN's release tagged latest, and its newest releases. Not GitHub's latest release: that's each day's
+/// dated build (from about 13:07Z) until BtbN makes the release tagged latest again from it, about 20
+/// minutes later, deleting it and uploading it anew; meanwhile there's no release tagged latest.
+const FFMPEG_LATEST: &str = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest";
+const FFMPEG_RELEASES: &str = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases?per_page=10";
 
 #[derive(Clone, Default)]
 pub struct FfmpegOptions {
@@ -734,6 +747,79 @@ fn string_of(value: &Value, key: &str) -> Option<String> {
 }
 
 static DIGEST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^sha256:([0-9a-f]{64})$").unwrap());
+
+/// An ffmpeg build as its release lists it.
+struct FfmpegBuild {
+    name: String,
+    url: String,
+    size: Option<f64>,
+    /// Its SHA-256, hex.
+    sha256: String,
+}
+
+/// A release's build for this computer, when it lists one with its SHA-256.
+fn ffmpeg_build(release: &Value, platform: &str, arch: &str) -> Option<FfmpegBuild> {
+    let assets: Vec<&Value> = release
+        .get("assets")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| string_of(item, "browser_download_url").is_some_and(|url| url.starts_with("https://github.com/")))
+                .collect()
+        })
+        .unwrap_or_default();
+    let names: Vec<String> = assets.iter().map(|item| string_of(item, "name").unwrap_or_default()).collect();
+    let name = ffmpeg_asset(&names, platform, arch)?;
+    let published = assets.iter().find(|item| string_of(item, "name").as_ref() == Some(&name))?;
+    let sha256 = string_of(published, "digest").and_then(|digest| DIGEST.captures(&digest).map(|found| found[1].to_string()))?;
+    Some(FfmpegBuild {
+        url: string_of(published, "browser_download_url")?,
+        size: published.get("size").and_then(Value::as_f64),
+        sha256,
+        name,
+    })
+}
+
+/// The build to fetch: the release tagged latest's or, when that has none (while BtbN makes it again), the
+/// newest dated release's. None when GitHub lists no build for this computer; Err when it lists nothing.
+async fn ffmpeg_release_build(options: &FfmpegOptions, platform: &str, arch: &str) -> Result<Option<FfmpegBuild>, VideoFailure> {
+    let mut listed = false;
+    for url in [FFMPEG_LATEST, FFMPEG_RELEASES] {
+        let read = match fetch_bytes(&options.download, url, &options.signal).await {
+            Ok(bytes) => serde_json::from_str::<Value>(&decode_text(&bytes)).ok(),
+            Err(_) => None,
+        };
+        let Some(read) = read else {
+            if let Some(signal) = &options.signal {
+                signal.check()?;
+            }
+            continue;
+        };
+        listed = true;
+        let release = if url == FFMPEG_LATEST {
+            Some(&read)
+        } else {
+            // Tagged autobuild-2026-10-06-13-06 and so on: the largest tag is the newest.
+            read.as_array().and_then(|releases| {
+                releases
+                    .iter()
+                    .filter(|release| string_of(release, "tag_name").is_some_and(|tag| tag.starts_with("autobuild-")))
+                    .max_by_key(|release| string_of(release, "tag_name"))
+            })
+        };
+        if let Some(build) = release.and_then(|release| ffmpeg_build(release, platform, arch)) {
+            return Ok(Some(build));
+        }
+    }
+    if listed {
+        return Ok(None);
+    }
+    let yourself = if platform == "win32" { "install it: winget install ffmpeg" } else { "install it with your package manager" };
+    Err(VideoFailure::video(format!(
+        "Kumi couldn't get the list of ffmpeg's builds from GitHub to fetch it. Try again in a few minutes, or {yourself}."
+    )))
+}
 
 /// ffmpeg: KUMI_FFMPEG, one on the PATH, where Homebrew and the usual installers put it, or the copy
 /// Kumi fetched; failing those, on Windows and Linux, a release build is fetched into `tools_dir`
@@ -775,40 +861,14 @@ pub async fn find_ffmpeg(options: FfmpegOptions) -> Result<Option<String>, Video
     if options.installed_only {
         return Ok(None);
     }
-    let release: Value = match fetch_bytes(&options.download, FFMPEG_RELEASE, &options.signal).await {
-        Ok(bytes) => match serde_json::from_str(&decode_text(&bytes)) {
-            Ok(release) => release,
-            Err(_) => {
-                if let Some(signal) = &options.signal {
-                    signal.check()?;
-                }
-                return Ok(None);
-            }
-        },
-        Err(_) => {
-            if let Some(signal) = &options.signal {
-                signal.check()?;
-            }
-            return Ok(None);
-        }
+    let arch = options.arch.as_deref().unwrap_or(node_arch());
+    // BtbN has no build for a Mac (its ffmpeg is Homebrew's), so GitHub isn't asked.
+    if ffmpeg_target(&platform_name, arch).is_none() {
+        return Ok(None);
+    }
+    let Some(FfmpegBuild { name: asset, url, size, sha256: expected }) = ffmpeg_release_build(&options, &platform_name, arch).await? else {
+        return Ok(None);
     };
-    let assets: Vec<&Value> = release
-        .get("assets")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter(|item| string_of(item, "browser_download_url").is_some_and(|url| url.starts_with("https://github.com/")))
-                .collect()
-        })
-        .unwrap_or_default();
-    let names: Vec<String> = assets.iter().map(|item| string_of(item, "name").unwrap_or_default()).collect();
-    let asset = ffmpeg_asset(&names, &platform_name, options.arch.as_deref().unwrap_or(node_arch()));
-    let published = asset.as_ref().and_then(|asset| assets.iter().find(|item| string_of(item, "name").as_ref() == Some(asset)));
-    let expected =
-        published.and_then(|item| string_of(item, "digest")).and_then(|digest| DIGEST.captures(&digest).map(|found| found[1].to_string()));
-    let (Some(asset), Some(published), Some(expected)) = (asset, published, expected) else { return Ok(None) };
-    let size = published.get("size").and_then(Value::as_f64);
     // The archive, and the program unpacked from it, side by side for a moment.
     let full = low_disk_for(&tools_dir, 2.0 * size.unwrap_or(200.0 * MB) + 100.0 * MB, "Kumi keeps its programs on", &options.free).await;
     if let Some(full) = full {
@@ -821,7 +881,6 @@ pub async fn find_ffmpeg(options: FfmpegOptions) -> Result<Option<String>, Video
             to_string(round(size.unwrap_or(0.0) / 1e6))
         ));
     }
-    let url = string_of(published, "browser_download_url").expect("a GitHub address");
     let archive =
         join(&tools_dir, &[&format!(".ffmpeg-{}{}", uuid::Uuid::new_v4(), if asset.ends_with(".zip") { ".zip" } else { ".tar.xz" })]);
     let unpacked = join(&tools_dir, &[&format!(".ffmpeg-{}", uuid::Uuid::new_v4())]);

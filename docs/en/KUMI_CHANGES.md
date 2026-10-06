@@ -229,8 +229,9 @@ rack's chains stacked, with the new device lit:
 Live doesn't let scripts map a macro or a modulator to a parameter, set a
 macro's range or name a macro. Kumi says so and you do it in Live (Map, then
 click the parameter). With [Willington](WILLINGTON_INTEGRATION.md)'s bindings on
-(`/willington`), Kumi can name macros and map them; modulators still can't be
-mapped.
+(`/willington`), Kumi can name macros and map them, and map Live's LFO, Shaper,
+Envelope Follower and Expression Control modulators to parameters (through
+`run_python`).
 
 ## Samples and drum kits
 
@@ -355,6 +356,6 @@ stops there and says to update; `kumi update` or `kumi bridge` does it.
 The Willington tools appear whenever the bridge offers them: with Willington's
 bindings on (`/willington`) and a Live build they cover.
 
-Each Kumi release ships with a bridge: Kumi 1.9.0 with bridge 1.0.85, 1.8.11 with 1.0.84, 1.8.10 with 1.0.83, 1.8.9 with 1.0.82, 1.8.7 to 1.8.8 with 1.0.81, 1.8.6 with 1.0.80, 1.8.5 with 1.0.79, 1.8.4 with 1.0.78, 1.8.3 with 1.0.77, 1.8.2 with 1.0.76, 1.7.5 to 1.8.1 with 1.0.74, 1.7.0 to 1.7.4 with 1.0.73, 1.6.1 with 1.0.72, 1.6.0 with 1.0.71, 1.5 with
+Each Kumi release ships with a bridge: Kumi 1.9.4 to 1.9.5 with bridge 1.0.86, 1.9.0 to 1.9.3 with 1.0.85, 1.8.11 with 1.0.84, 1.8.10 with 1.0.83, 1.8.9 with 1.0.82, 1.8.7 to 1.8.8 with 1.0.81, 1.8.6 with 1.0.80, 1.8.5 with 1.0.79, 1.8.4 with 1.0.78, 1.8.3 with 1.0.77, 1.8.2 with 1.0.76, 1.7.5 to 1.8.1 with 1.0.74, 1.7.0 to 1.7.4 with 1.0.73, 1.6.1 with 1.0.72, 1.6.0 with 1.0.71, 1.5 with
 1.0.70, 1.4 with 1.0.69, 1.3 with 1.0.68, 1.2 with 1.0.66, 1.1 with 1.0.53 and
 1.0 with 1.0.52.

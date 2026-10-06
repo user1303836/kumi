@@ -12,7 +12,7 @@ Kumi 及其桥接如何送到用户手中，这能证明什么、不能证明什
 | 桥接（`@ableton-mcp/mcp-server`） | 包含在每个 Kumi 发行包中：既有原生桥接 tarball，也有已解包的桥接包 | `kumi bridge`，它通过桥接的生命周期进行安装（[安装桥接](DELIVERY.md)） |
 | 单独的桥接 | 没有自己的发布版本。用 `python3 scripts/build-native-release.py --bridge-only` 构建（[构建选项](DEVELOPER_GUIDE.md#发布)） | 生命周期 CLI（[安装桥接](DELIVERY.md#独立桥接)） |
 
-安装脚本从 `main` 分支读取；它们安装的发行包来自最新的已发布版本（或 `KUMI_VERSION` 指定的版本）。在维护者发布之前，发布版本只是草稿，只有已发布的版本才是“latest”。不会向 npm 发布任何内容：每个包都是 `private: true`，所以 `npm publish` 会拒绝。
+安装脚本从 `main` 分支读取；它们安装的发行包来自最新的已发布版本（或 `KUMI_VERSION` 指定的版本）。在其标签的 Installer 运行通过并发布它之前，发布版本只是草稿（手动推送的标签要等维护者撰写说明并发布），只有已发布的版本才是“latest”。不会向 npm 发布任何内容：每个包都是 `private: true`，所以 `npm publish` 会拒绝。
 
 ## 只证明完整性，不证明身份
 
@@ -44,18 +44,14 @@ Kumi 及其桥接如何送到用户手中，这能证明什么、不能证明什
 
 - **`main`：**
   - 修改通过拉取请求进入；不要求批准性审查；
-  - 两项必需的检查 `Required CI` 和 `Willington files`，必须在分支与 `main` 保持同步的状态下通过；
+  - 两项必需的检查 `Required CI` 和 `Willington files`；分支不必与 `main` 保持同步，因为每次合并后 `main` 上的 CI 会发现两个互相破坏的修改；
+  - 已开启自动合并：设置为自动合并的拉取请求会在检查通过后自行合并；
   - `main` 不能被删除或强制推送；
   - 仓库管理员角色可以对拉取请求绕过这些规则。
 - **`Release tags`：** 只有仓库管理员角色可以创建、移动或删除 `v*` 标签。推送标签会运行 Installer，由它发布版本。
-- **`Willington sync branch`：** 只有 Willington 的同步可以创建、推送或删除分支 `willington-sync`，所以它的拉取请求只包含同步的提交。管理员也不行：由同步让这个拉取请求与 `main` 保持同步，否则由管理员借助 `main` 的绕过规则来合并。只有同步会修改 `vendor/willington/`，所以不会产生冲突。
+- **`Willington branches`：** 只有仓库管理员角色可以创建、推送或删除 `willington/*` 分支，Willington 的更新从这些分支发出。
 
-`Willington files` 只允许 Willington 的同步修改 `vendor/willington/`，并且它的拉取请求不修改其他任何内容。同步是一个推送分支 `willington-sync` 的 GitHub App。这个 App 创建之后：
-
-1. 把它的登录名（`<app>[bot]`）放进仓库变量 `WILLINGTON_SYNC_APP`；
-2. 把这个 App 加入 `Willington sync branch` 规则集的绕过列表，作为唯一的一项。
-
-在此之前，任何人都不能修改 `vendor/willington/`，也不能推送 `willington-sync`。
+`Willington files` 只允许仓库所有者从本仓库 `willington/` 分支发出的拉取请求修改 `vendor/willington/`，并且这样的拉取请求不修改其他任何内容。这些文件会发到每位制作人手中，而它们的原生库无法审查，所以检查的是由谁发送。[开发者指南](DEVELOPER_GUIDE.md#willington-的文件)介绍了更新的步骤。
 
 Installer 工作流不是必需的检查，但在标签上，它的 `publish` 作业只有在发行包已在 macOS、Linux 和 Windows 上安装成功之后才会运行。[测试](TESTING.md#ci)介绍了每个作业。
 

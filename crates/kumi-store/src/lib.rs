@@ -1,5 +1,5 @@
 //! Kumi's database, `~/.kumi/kumi.db`: what Kumi keeps between sessions (notes, techniques, lessons,
-//! gaps), in SQLite.
+//! gaps, and what the producer did in answer to Kumi), in SQLite.
 //!
 //! One thread writes, committing what's queued together; reads run beside it on their own
 //! connections. Kumi's runtime is a single thread, so nothing here is called from it directly: writes
@@ -7,10 +7,12 @@
 //! throughout; the async side lives in the runtime.
 
 pub mod gaps;
+pub mod history;
 pub mod ids;
 pub mod imports;
 pub mod lessons;
 pub mod notes;
+pub mod observations;
 mod reader;
 mod schema;
 pub mod sync;
@@ -89,7 +91,14 @@ impl Store {
     /// Open the database at `path`, making it (and its folder) if needed, and bring its schema up to
     /// date. Another Kumi may have it open too. A database from a newer Kumi isn't opened.
     pub fn open(path: impl AsRef<Path>) -> Result<Store, StoreError> {
-        let path = path.as_ref().to_path_buf();
+        Store::open_with(path.as_ref(), |connection| schema::migrate(connection))
+    }
+    /// Open a Set's history (`history`) the same way: its own file, with its own schema.
+    pub fn open_history(path: impl AsRef<Path>) -> Result<Store, StoreError> {
+        Store::open_with(path.as_ref(), |connection| schema::migrate_with(connection, history::MIGRATIONS))
+    }
+    fn open_with(path: &Path, migrate: impl FnOnce(&mut Connection) -> Result<(), StoreError>) -> Result<Store, StoreError> {
+        let path = path.to_path_buf();
         prepare_file(&path)?;
         let mut connection = Connection::open(&path)?;
         connection.busy_timeout(BUSY_TIMEOUT)?;
@@ -100,7 +109,7 @@ impl Store {
         }
         // An app crash never loses a commit with NORMAL; only a power cut can lose the last few.
         connection.execute_batch("PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA temp_store = MEMORY;")?;
-        schema::migrate(&mut connection)?;
+        migrate(&mut connection)?;
         let readers = Readers::open(&path, READERS)?;
         Ok(Store(Arc::new(Inner { writer: Writer::start(connection)?, readers, path })))
     }

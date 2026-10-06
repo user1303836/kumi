@@ -143,28 +143,37 @@ These workflows run on every pull request, and the first two on every push to `m
 
 | Workflow | Jobs | What runs |
 | --- | --- | --- |
-| **CI** | `Rust / Linux`, `Rust / macOS`, `Rust / Windows` | `cargo fmt --check`, the build of every target, every test through the isolated runner with the official SDKs installed (on Windows, the console input tests first), Clippy (advisory, except a `RefCell` borrow held across an await, which fails the Linux job) and `git diff --check` |
+| **CI** | `Rust / Linux (1/3)`, `(2/3)`, `(3/3)`, `Rust / macOS`, `Rust / Windows (1/2)`, `(2/2)` | Every test through the isolated runner with the official SDKs installed, which nextest shares out by hash: a third on each Linux runner, half on each Windows runner. macOS also checks every target compiles; Linux runs `git diff --check` after its tests |
+| | `Rust / Windows checks` | The console input tests, then a check that every target compiles |
+| | `Rust / Lint` (Ubuntu) | `cargo fmt --check`, the documentation tests, the examples' build and Clippy (advisory, except a `RefCell` borrow held across an await, which fails the job) |
 | | `Python Remote Script / ubuntu-24.04`, `macos-15`, `windows-2025` (Python 3.11) | The Remote Script's tests; compiles the package |
 | | `Live extension` (Ubuntu, Node 24) | The extension's tests, against its committed build |
-| | `Release scripts` (Ubuntu) | The whitespace check of the change, then the packaging tests |
+| | `Release scripts` (Ubuntu) | The whitespace check of the change, then the packaging tests and the release script's tests |
 | | `Required CI` | Passes only when all of the above passed |
-| **Willington files** | `Willington files` (Ubuntu) | Only Willington's sync changes `vendor/willington/`, and its pull requests change nothing else. `main`'s copy of the check runs, reading the pull request's file list, never its code |
-| **Installer** | `Build Kumi's Mac helper`, `Native bundle / <target>` (six), `Aggregate native and existing-installer releases`, then `Install / <system>` (six) and `Existing installer transition / <system>` (three) | Builds the helper Kumi uses Live's menus with on a Mac (universal, ad hoc signed), a native bundle for Intel and ARM on macOS, Linux and Windows, then the compatibility release that existing installations update from, and serves them locally. On each system: installs as producers do (Windows PowerShell 5.1 on Windows), checks the version, `doctor`, the bridge and its analysis worker, installs again as a repair, runs `kumi bridge --yes` into a scratch Remote Scripts folder, `kumi update`, `kumi update --rollback` and `kumi uninstall`. The transition jobs run the migration tests with Kumi 1.7.5 and the new bundles. On a `v*` tag, `publish` then attaches the bundle to the release. |
+| **Willington files** | `Willington files` (Ubuntu) | Only the repository owner's pull requests, from a `willington/` branch in this repository, change `vendor/willington/`, and such a pull request changes nothing else. `main`'s copy of the check runs, reading the pull request's file list, never its code |
+| **Installer** | `Native bundle / <target>` (six), `Aggregate native and existing-installer releases`, then `Install / <system>` (six) and `Existing installer transition / <system>` (three) | Builds a native bundle for Intel and ARM on macOS, Linux and Windows (each Mac bundle with the helper Kumi uses Live's menus with, universal and ad hoc signed; the Intel one cross-built on Apple Silicon), then the compatibility release that existing installations update from, and serves them locally. On each system: installs as producers do (Windows PowerShell 5.1 on Windows), checks the version, `doctor`, the bridge and its analysis worker, installs again as a repair, runs `kumi bridge --yes` into a scratch Remote Scripts folder, `kumi update`, `kumi update --rollback` and `kumi uninstall`. The transition jobs run the migration tests with Kumi 1.7.5 and the new bundles. On a `v*` tag's push, `publish` then attaches the bundle to the release, and publishes it when `scripts/release.py` wrote its notes. |
 
 On a pull request, less runs:
 
 - `Rust / macOS` and `Rust / Windows` run the tests that differ by platform,
   and `Python Remote Script` skips macOS.
+- Rust's build caches are saved from `main` only: a pull request restores
+  `main`'s and saves none.
 - The Installer builds and installs all six only for a change to installing,
-  updating, releasing or a dependency. A change to the bridge or a version
-  number builds, installs and checks Linux's; any other change builds Linux's
-  bundle only.
+  updating, releasing, Willington's files or a dependency. A change to the
+  bridge or a version number builds, installs and checks Linux's; any other
+  change builds Linux's bundle only.
 - A change to how Kumi stores what it keeps (`crates/kumi-store`, settings and
   sign-ins, memory, techniques, playbook, gaps, an older Kumi's files) also gets
   Linux's install and update check, which updates and rolls back over existing
   data.
+- The Installer's bundles, on pull requests and pushes to `main`, build with
+  the `ci-release` profile, which skips the release profile's whole-program
+  optimization. Tags build with `release`.
 
 Each push to `main` and each tag run everything, and CI runs in full each night.
+Each night the Installer also builds all six bundles with the `release` profile,
+which keeps that profile's build cache warm for the next tag.
 
 To merge into `main`, `Required CI` and `Willington files` must pass. The Installer isn't required.
 [Releases and distribution](DISTRIBUTION_POLICY.md#merge-gate) has the rest of

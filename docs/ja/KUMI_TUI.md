@@ -40,7 +40,7 @@ Kumi はターミナルウィンドウ全体を使い、Kumi が閉じたとき�
 | `kumi bridge [--yes] [--allow-dirty]` | Live を閉じた状態で：ブリッジを Live に入れる、または最新にする。`--yes` は Live が閉じていることを確認済みとする。`--allow-dirty` は、コミットされていない変更があるチェックアウトでもそのブリッジをインストールできるようにする |
 | `kumi doctor` | Node、サインイン、このコンピューター上のモデルサーバー、ブリッジ、Live、拡張機能、ライブラリー、ビデオ用プログラム、話しかける機能、Live のメニュー、ターミナルを確認し、実行すべきことを伝える |
 | `kumi library [--rebuild]` | Kumi があなたのサウンド、プリセット、Set をどこまで学習したか。`--rebuild` ですべて学習し直す |
-| `kumi update [--check \| --rollback]` | 最新の Kumi を取得する（ブリッジが古ければブリッジも）。`--check` は確認だけ、`--rollback` は一つ前に戻す（インストールした Kumi のみ） |
+| `kumi update [--check \| --rollback]` | 最新の Kumi を取得する（ブリッジが古ければブリッジも）。`--check` は確認だけ、`--rollback` は一つ前に戻す（Live が閉じていればそのブリッジも。インストールした Kumi のみ） |
 | `kumi report` | 問題が起きたときに送る `~/kumi-report-<date and time>.txt` を書き出す |
 | `kumi uninstall [--all] [--yes]` | インストールした Kumi を削除する。`--all` は会話、メモ、レシピ、サインインも削除する。`--yes` は最初の質問を省く |
 | `kumi --version`（または `-v`）、`kumi --help` | バージョン、ヘルプ |

@@ -1,0 +1,34 @@
+{
+  "platform": "windows",
+  "architecture": "x86_64",
+  "version": "12.4.15b5 (2026-09-24_415b783fcc)",
+  "executable": "C:\\ProgramData\\Ableton\\Live 12 Beta\\Program\\Ableton Live 12 Beta.exe",
+  "source_sha256": "53cbb2f8651ca84c7790fd0f56e198b1df6df998b54850c1958cbf0bab6191cc",
+  "uuid": "9ac1390f-7827-435b-8864-65f41a5e9c44",
+  "pdb_age": 1,
+  "module": "Ableton Live 12 Beta.exe",
+  "native_source_sha256": "04b713e82938ac5203dbf837afa4e8043de8a89753c8153d1668b122b658fffe",
+  "profile_id": "live-12.4.15b5-windows-x86_64",
+  "profile_sha256": "a273cc607e7f5d4f416e8c758cde41010c86eb4d688ee8cc94678d3d03a6fa61",
+  "validation_status": "validated",
+  "runtime_notes": [
+    "Validated in a running Live process through Kumi live_run_python; see the evidence README for harness deviations.",
+    "Device Tools was validated from the device-tools candidate profile with byte-identical addresses; Max LiveAPI calls, persistence and Kumi transactions are not claimed.",
+    "Stopped-transport property and transaction tests do not verify musical scheduling or arbitrary Sets."
+  ],
+  "library_sha256": "60df6039940626e736bcd6c9c8ca2e0db1a043fb04f4adb952ee044bc5dc1f5b",
+  "shared_source_sha256": "b8063d27d55e346cfe43f18a88a704498130bbf21d18ebd9be52565ec6d96087",
+  "python_imports": [
+    "PyBytes_AsStringAndSize",
+    "PyBytes_FromString",
+    "PyBytes_FromStringAndSize",
+    "PyErr_SetString",
+    "PyExc_RuntimeError",
+    "PyExc_ValueError",
+    "PyModule_Create2",
+    "PyUnicode_DecodeUTF8",
+    "_PyArg_ParseTuple_SizeT",
+    "_Py_BuildValue_SizeT",
+    "_Py_NoneStruct"
+  ]
+}

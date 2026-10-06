@@ -93,7 +93,7 @@ Kumi 把一个请求规划成一组修改，并一次性执行。每项修改都
 
 **在 Live 中运行 Python。** 对于其他工具够不着的地方，Kumi 可以用 Live 自己的 API 在 Live 内运行 Python。脚本所做的修改在 Live 的撤销中算一步，但不会在 HISTORY 中留下条目；用 Live 的撤销即可撤回。
 
-**Live 不允许脚本做的事：** 把宏旋钮或调制器映射到参数（Willington 可以映射宏旋钮：`/willington`），以及编辑编曲视图的自动化通道。Kumi 会如实说明，并建议变通的办法。保存、导出、冻结、并轨和编组则通过 [Live 自己的命令](#live-自己的命令)完成。
+**Live 不允许脚本做的事：** 把宏旋钮或调制器映射到参数（Willington 两者都能映射：`/willington`），以及编辑编曲视图的自动化通道。Kumi 会如实说明，并建议变通的办法。保存、导出、冻结、并轨和编组则通过 [Live 自己的命令](#live-自己的命令)完成。
 
 [Kumi 如何修改你的工程](KUMI_CHANGES.md)列出了 Kumi 能做的所有修改。
 
@@ -260,6 +260,8 @@ kumi uninstall           # 卸载 Kumi；加上 --all 会同时删除你的对�
 ```
 
 `update` 会获取最新版本，按其校验和验证，并先启动一次以确认它能运行，然后才把它放到位；之前的版本会保留，供 `--rollback` 使用。如果 Live 中的桥接较旧且 Live 已关闭，它接着会运行 `kumi bridge`；如果 Live 正开着，它会告诉你退出 Live 再运行 `kumi bridge`。在仓库的副本中，`update` 改为把检出向前推进（`git merge --ff-only`，有本地修改时拒绝执行），并用 Cargo 构建工作区。在 Kumi 中，`/update` 会先询问你，然后关闭 Kumi、更新，再用同一个对话重新打开它。
+
+`--rollback` 会回到上一个 Kumi；如果 Live 已关闭，也会一并恢复它的桥接。在终端中，Kumi 会询问是否等你先退出 Live（Kumi 从不自行关闭 Live）。否则较新的桥接会保留，它同样能与之前的 Kumi 配合使用；要把桥接也恢复，请退出 Live，然后运行两次 `kumi update --rollback`。
 
 从当前的 1.7.5 安装版（自带 Node 24）升级时，关闭 Live，运行 `kumi update`，再照常打开 Kumi。原生应用首次启动时会迁移桥接，即使新旧桥接都为 1.0.74。设置、登录信息、对话和素材库仍在 `~/.kumi` 或已有的 `KUMI_HOME` 中，无需重新登录或移动数据。
 

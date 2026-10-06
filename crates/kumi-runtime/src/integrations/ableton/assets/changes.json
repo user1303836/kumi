@@ -505,7 +505,7 @@
       "preview": "live_clip_move_preview",
       "apply": "live_clip_move_apply",
       "family": "clip",
-      "description": "Move a clip: an Arrangement clip to a new position (beats), on its own track or another of its kind (targetTrackRef), replacing what's there as dropping it in Live does (the preview names it; Live's own undo brings it back); keepSource: true copies it there instead, leaving it where it is. Or a Session clip to another slot (targetTrackRef and targetSceneIndex, both needed; the clip's own track to keep it on its track).",
+      "description": "Move a clip: an Arrangement clip to a new position (beats), on its own track or another of its kind (targetTrackRef), replacing what's there as dropping it in Live does (the preview names it; Kumi's undo brings it back, except after a copy or a move to another track, which Live's own undo takes back, and never per-note expression or follow actions, which Live doesn't give Kumi); keepSource: true copies it there instead, leaving it where it is. Or a Session clip to another slot (targetTrackRef and targetSceneIndex, both needed; the clip's own track to keep it on its track).",
       "methods": [
         "summarize"
       ]
@@ -965,7 +965,7 @@
       "preview": "live_clip_delete_preview",
       "apply": "live_clip_delete_apply",
       "family": "clip",
-      "description": "Delete a clip, in the Session or the Arrangement (clipRef from discovery). Kumi can't bring it back (Live's own undo can).",
+      "description": "Delete a clip, in the Session or the Arrangement (clipRef from discovery). Kumi's undo brings it back (its answer names anything it won't; never per-note expression or follow actions, which Live doesn't give Kumi).",
       "methods": [
         "permanent",
         "summarize"
@@ -1026,7 +1026,7 @@
       "preview": "live_clip_clear_range_preview",
       "apply": "live_clip_clear_range_apply",
       "family": "clip",
-      "description": "Clear a stretch of the Arrangement on one track: the clips inside it go, and clips crossing its edges are cut there (trackRef, fromBeat, toBeat). Kumi can't bring them back (Live's own undo can).",
+      "description": "Clear a stretch of the Arrangement on one track: the clips inside it go, and clips crossing its edges are cut there (trackRef, fromBeat, toBeat). Kumi's undo puts them back (its answer names anything it won't; never per-note expression or follow actions, which Live doesn't give Kumi).",
       "methods": [
         "permanent",
         "summarize"

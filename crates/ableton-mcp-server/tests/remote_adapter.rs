@@ -154,8 +154,25 @@ impl Server {
         endpoint.timeout_ms = Some(500.0);
         Self { endpoint, seen, stop }
     }
+    /// The adapter, or what kept it from connecting, within 5 s of the harness's own. The endpoint's timeout, which
+    /// the tests test (as short as 100 ms), also bounds each try's handshake (TCP, hello, status), and a loaded runner
+    /// can stall a try past it: a try that ran out of time is tried again, a moment later.
+    async fn try_connect(&self) -> Result<RemoteScriptLiveAdapter, LiveError> {
+        let deadline = now_ms() + 5000;
+        loop {
+            match RemoteScriptLiveAdapter::connect(self.endpoint.clone()).await {
+                Err(error)
+                    if now_ms() < deadline
+                        && ["connection timed out", "dispatch timeout"].iter().any(|late| error.message().contains(late)) =>
+                {
+                    tokio::time::sleep(Duration::from_millis(50)).await
+                }
+                connected => return connected,
+            }
+        }
+    }
     async fn connect(&self) -> RemoteScriptLiveAdapter {
-        RemoteScriptLiveAdapter::connect(self.endpoint.clone()).await.unwrap()
+        self.try_connect().await.unwrap()
     }
 }
 fn context(transaction: &str) -> LiveOperationContext {
@@ -257,7 +274,7 @@ async fn authenticated_hello_and_registry_negotiation() {
                 |_, s| s,
             )
             .await;
-            assert!(RemoteScriptLiveAdapter::connect(forged.endpoint.clone()).await.err().unwrap().message().contains("authentication"));
+            assert!(forged.try_connect().await.err().unwrap().message().contains("authentication"));
             // A Remote Script of another bridge version (Live left running through an update): restart Live, which
             // loads the one installed. Its hello says so, and so would its status.
             let older = Server::configured(
@@ -274,7 +291,7 @@ async fn authenticated_hello_and_registry_negotiation() {
                 |_, s| s,
             )
             .await;
-            let refused = RemoteScriptLiveAdapter::connect(older.endpoint.clone()).await.err().unwrap();
+            let refused = older.try_connect().await.err().unwrap();
             assert_eq!(refused.message(), ableton_mcp_server::bridge::remote_adapter::ANOTHER_BRIDGE);
             assert!(refused.message().contains("restart Live"));
             for change in [
@@ -293,7 +310,7 @@ async fn authenticated_hello_and_registry_negotiation() {
                     },
                 )
                 .await;
-                assert!(RemoteScriptLiveAdapter::connect(peer.endpoint.clone()).await.is_err());
+                assert!(peer.try_connect().await.is_err());
             }
             let peer = Server::configured(
                 vec!["locator.add", "locator.delete"],

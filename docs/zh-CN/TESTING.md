@@ -104,21 +104,25 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
 | 工作流 | 作业 | 运行内容 |
 | --- | --- | --- |
-| **CI** | `Rust / Linux`、`Rust / macOS`、`Rust / Windows` | `cargo fmt --check`、构建所有目标、在装好官方 SDK 的情况下通过隔离运行器运行全部测试（在 Windows 上先运行控制台输入测试）、Clippy（仅供参考，但跨 await 持有 `RefCell` 借用会使 Linux 任务失败）和 `git diff --check` |
+| **CI** | `Rust / Linux (1/3)`、`(2/3)`、`(3/3)`、`Rust / macOS`、`Rust / Windows (1/2)`、`(2/2)` | 在装好官方 SDK 的情况下通过隔离运行器运行全部测试，由 nextest 按哈希分配到各运行器：Linux 每个运行器三分之一，Windows 每个一半。macOS 还检查所有目标都能编译；Linux 在测试之后运行 `git diff --check` |
+| | `Rust / Windows checks` | 控制台输入测试，然后检查所有目标都能编译 |
+| | `Rust / Lint`（Ubuntu） | `cargo fmt --check`、文档测试、示例的构建和 Clippy（仅供参考，但跨 await 持有 `RefCell` 借用会使该任务失败） |
 | | `Python Remote Script / ubuntu-24.04`、`macos-15`、`windows-2025`（Python 3.11） | Remote Script 的测试；编译该包 |
 | | `Live extension`（Ubuntu，Node 24） | 针对已提交的构建运行扩展的测试 |
-| | `Release scripts`（Ubuntu） | 检查本次修改的空白字符，然后运行打包测试 |
+| | `Release scripts`（Ubuntu） | 检查本次修改的空白字符，然后运行打包测试和发布脚本的测试 |
 | | `Required CI` | 只有以上全部通过时才通过 |
-| **Willington files** | `Willington files`（Ubuntu） | 只有 Willington 的同步才能修改 `vendor/willington/`，而它的拉取请求不修改其他任何内容。运行的是 `main` 上的这项检查，它读取拉取请求的文件列表，从不读取其代码 |
-| **Installer** | `Build Kumi's Mac helper`、`Native bundle / <target>`（六个）、`Aggregate native and existing-installer releases`，然后是 `Install / <system>`（六个）和 `Existing installer transition / <system>`（三个） | 构建 Kumi 在 Mac 上使用 Live 菜单的辅助程序（通用、临时签名），为 macOS、Linux 和 Windows 的 Intel 与 ARM 构建原生发行包，再构建现有安装用来更新的兼容版本，并在本地提供它们。在每个系统上：像制作人那样安装（在 Windows 上使用 Windows PowerShell 5.1），检查版本、`doctor`、桥接及其分析工作进程，再次安装作为修复，运行 `kumi bridge --yes` 安装到一个临时的 Remote Scripts 文件夹，运行 `kumi update`、`kumi update --rollback` 和 `kumi uninstall`。过渡作业用 Kumi 1.7.5 和新的发行包运行迁移测试。在 `v*` 标签上，`publish` 随后把发行包附加到发布版本上。 |
+| **Willington files** | `Willington files`（Ubuntu） | 只有仓库所有者从本仓库 `willington/` 分支发出的拉取请求才能修改 `vendor/willington/`，而这样的拉取请求不修改其他任何内容。运行的是 `main` 上的这项检查，它读取拉取请求的文件列表，从不读取其代码 |
+| **Installer** | `Native bundle / <target>`（六个）、`Aggregate native and existing-installer releases`，然后是 `Install / <system>`（六个）和 `Existing installer transition / <system>`（三个） | 为 macOS、Linux 和 Windows 的 Intel 与 ARM 构建原生发行包（Mac 发行包带有 Kumi 在 Mac 上使用 Live 菜单的辅助程序，通用、临时签名；Intel 的发行包在 Apple Silicon 上交叉构建），再构建现有安装用来更新的兼容版本，并在本地提供它们。在每个系统上：像制作人那样安装（在 Windows 上使用 Windows PowerShell 5.1），检查版本、`doctor`、桥接及其分析工作进程，再次安装作为修复，运行 `kumi bridge --yes` 安装到一个临时的 Remote Scripts 文件夹，运行 `kumi update`、`kumi update --rollback` 和 `kumi uninstall`。过渡作业用 Kumi 1.7.5 和新的发行包运行迁移测试。推送 `v*` 标签时，`publish` 随后把发行包附加到发布版本上，并在说明由 `scripts/release.py` 撰写时发布该版本。 |
 
 在拉取请求上，运行的内容更少：
 
 - `Rust / macOS` 和 `Rust / Windows` 运行因平台而异的测试，`Python Remote Script` 跳过 macOS。
-- 只有修改安装、更新、发布或依赖项的变更，Installer 才会构建并安装全部六个。修改桥接或版本号的变更会构建、安装并检查 Linux 的发行包；其他变更只构建 Linux 的发行包。
+- Rust 的构建缓存只从 `main` 保存：拉取请求恢复 `main` 的缓存，不保存任何缓存。
+- 只有修改安装、更新、发布、Willington 的文件或依赖项的变更，Installer 才会构建并安装全部六个。修改桥接或版本号的变更会构建、安装并检查 Linux 的发行包；其他变更只构建 Linux 的发行包。
 - 修改 Kumi 保存其所保留内容的方式（`crates/kumi-store`、设置和登录信息、记忆、技巧、playbook、gaps、旧版 Kumi 的文件）的变更，也会运行 Linux 的安装与更新检查，在已有数据上进行更新和回滚。
+- 在拉取请求和推送到 `main` 时，Installer 的发行包用 `ci-release` 配置构建，它省去 release 配置的全程序优化。标签用 `release` 构建。
 
-每次推送到 `main` 和每个标签都会运行全部内容，CI 每晚也会完整运行一次。
+每次推送到 `main` 和每个标签都会运行全部内容，CI 每晚也会完整运行一次。Installer 每晚还会用 `release` 配置构建全部六个发行包，从而为下一个标签保持该配置的构建缓存。
 
 要合并到 `main`，`Required CI` 和 `Willington files` 必须通过。Installer 不是必需的。其余规则见[发布与分发](DISTRIBUTION_POLICY.md#合并门禁)。
 

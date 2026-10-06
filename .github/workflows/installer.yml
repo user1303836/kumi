@@ -3,12 +3,20 @@ name: Installer
 # Builds the bundle the installer downloads, then installs it the way producers do, on macOS, Linux and
 # Windows (Windows PowerShell 5.1, the one every Windows has), from a local copy of the release. On a
 # version tag it also attaches the bundle to that tag's GitHub release.
+#
+# Pull requests and pushes to main build with the quicker ci-release profile: those bundles are installed and
+# checked, never published. Tags build with the release profile, and so does a nightly run of main, which keeps
+# the release profile's cache warm for the next tag (a tag's own cache can't be read by later tags).
 
 on:
   push:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  schedule:
+    - cron: "47 5 * * *"
+  # Warms the release profile's cache by hand, as the nightly run does.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -36,18 +44,22 @@ jobs:
       - id: plan
         shell: bash
         run: |
-          # Tags, main and pull requests that change installing, updating or releasing build all six platforms,
-          # install each and check the update from the JavaScript release. A pull request that changes the
-          # bridge, a version number or how Kumi stores what it keeps (the store, settings and sign-ins, memory,
-          # techniques, playbook, gaps, an older Kumi's files), which the update and rollback must carry over,
-          # does that on Linux. Any other builds Linux's bundle only; main installs and checks it once merged.
+          # Tags, main and pull requests that change installing, updating, releasing or Willington's files build all
+          # six platforms, install each and check the update from the JavaScript release. A pull request that changes
+          # the bridge, a version number or how Kumi stores what it keeps (the store, settings and sign-ins, memory,
+          # techniques, playbook, gaps, an older Kumi's files), which the update and rollback must carry over, does
+          # that on Linux. Any other builds Linux's bundle only; main installs and checks it once merged.
           full=true
           checks=true
+          # The nightly run only builds, to keep the release profile's cache warm. A run started by hand also installs.
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            checks=false
+          fi
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             base="origin/${GITHUB_BASE_REF}"
             # Read whole, then searched: grep -q can close a pipe early, and git, still writing, fails under pipefail.
             changed="$(git diff --name-only "$base...HEAD")"
-            installing="$(grep -E '^(install\.(sh|ps1)|scripts/|\.github/workflows/installer\.yml|crates/kumi/src/(install|update|bridge_setup|cli/)|crates/ableton-mcp-server/src/(lifecycle|delivery|migrate|setup|install_remote_script|platform))' <<<"$changed" \
+            installing="$(grep -E '^(install\.(sh|ps1)|scripts/|vendor/willington/|\.github/workflows/installer\.yml|crates/kumi/src/(install|update|bridge_setup|cli/)|crates/ableton-mcp-server/src/(lifecycle|delivery|migrate|setup|install_remote_script|platform))' <<<"$changed" \
               | grep -v -E '^scripts/test-isolated\.' || true)"
             # Cargo's changed lines less version numbers (a bridge or release bump): what's left is a dependency.
             dependencies="$(git diff -U0 "$base...HEAD" -- Cargo.toml Cargo.lock 'crates/*/Cargo.toml' \
@@ -62,7 +74,9 @@ jobs:
           echo "full=$full" >> "$GITHUB_OUTPUT"
           echo "checks=$checks" >> "$GITHUB_OUTPUT"
           if $full; then
-            echo 'targets=[{"os":"macos-15","target":"aarch64-apple-darwin"},{"os":"macos-15-intel","target":"x86_64-apple-darwin"},{"os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"},{"os":"ubuntu-22.04-arm","target":"aarch64-unknown-linux-gnu"},{"os":"windows-2025","target":"x86_64-pc-windows-msvc"},{"os":"windows-11-arm","target":"aarch64-pc-windows-msvc"}]' >> "$GITHUB_OUTPUT"
+            # The Intel Mac bundle is built on an Apple Silicon Mac, a cross build: the Intel runners take about twice
+            # as long. The Intel Mac install below still runs on Intel.
+            echo 'targets=[{"os":"macos-15","target":"aarch64-apple-darwin"},{"os":"macos-15","target":"x86_64-apple-darwin"},{"os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"},{"os":"ubuntu-22.04-arm","target":"aarch64-unknown-linux-gnu"},{"os":"windows-2025","target":"x86_64-pc-windows-msvc"},{"os":"windows-11-arm","target":"aarch64-pc-windows-msvc"}]' >> "$GITHUB_OUTPUT"
             echo 'installs=[{"os":"macos-15","label":"macOS-arm64"},{"os":"macos-15-intel","label":"macOS-x64"},{"os":"ubuntu-22.04","label":"Linux-x64"},{"os":"ubuntu-22.04-arm","label":"Linux-arm64"},{"os":"windows-2025","label":"Windows-x64"},{"os":"windows-11-arm","label":"Windows-arm64"}]' >> "$GITHUB_OUTPUT"
             echo 'migrations=["macos-15","ubuntu-24.04","windows-2025"]' >> "$GITHUB_OUTPUT"
           else
@@ -71,30 +85,9 @@ jobs:
             echo 'migrations=["ubuntu-24.04"]' >> "$GITHUB_OUTPUT"
           fi
 
-  hands:
-    name: Build Kumi's Mac helper
-    needs: plan
-    if: needs.plan.outputs.full == 'true'
-    runs-on: macos-15
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.13'
-      - run: python3 scripts/build-hands.py
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: kumi-hands
-          path: target/hands/
-          if-no-files-found: error
-          retention-days: 7
-
   native:
     name: Native bundle / ${{ matrix.target }}
-    needs: [plan, hands]
-    # Only the Mac bundles need the helper, so a Linux-only build goes ahead without it.
-    if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.hands.result == 'success' || needs.hands.result == 'skipped') }}
+    needs: plan
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -104,6 +97,8 @@ jobs:
     env:
       CARGO_INCREMENTAL: 0
       MACOSX_DEPLOYMENT_TARGET: '13.0'
+      # What's published (tags) and the nightly cache warm-up build with release; the rest with ci-release.
+      PROFILE: ${{ (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'release' || 'ci-release' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -112,17 +107,31 @@ jobs:
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
           targets: ${{ matrix.target }}
+      # Saved from main only: pull requests and tags restore main's (ci-release from its pushes, release from its
+      # nightly run).
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
-          key: release-${{ matrix.target }}
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        if: needs.hands.result == 'success'
-        with:
-          name: kumi-hands
-          path: target/hands
+          key: ${{ env.PROFILE }}-${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Only the Mac bundles carry the helper Kumi uses Live's menus with; each Mac job builds it (universal, under
+      # a minute) instead of waiting for a job of its own.
+      - name: Build Kumi's Mac helper
+        if: runner.os == 'macOS'
+        run: python3 scripts/build-hands.py
       - name: Build and bind the release artifacts
         shell: bash
-        run: python3 scripts/build-native-release.py --target '${{ matrix.target }}' --out release
+        run: python3 scripts/build-native-release.py --target '${{ matrix.target }}' --profile "$PROFILE" --out release
+      - name: Each Mac binary is built for its target's architecture
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          want=arm64
+          if [[ '${{ matrix.target }}' == x86_64-* ]]; then want=x86_64; fi
+          for name in kumi ableton-mcp-server ableton-mcp-analysis-worker kumi-harness kumi-library-measure kumi-library-learner; do
+            archs="$(lipo -archs "target/${{ matrix.target }}/$PROFILE/$name")"
+            echo "$name: $archs"
+            test "$archs" = "$want"
+          done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-${{ matrix.target }}
@@ -346,7 +355,8 @@ jobs:
 
   publish:
     name: Attach the bundle to the release
-    if: startsWith(github.ref, 'refs/tags/v')
+    # A tag's push only: a run started by hand on a tag must not upload new binaries over a published release.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [bundle, install, migration]
     runs-on: ubuntu-24.04
     permissions:
@@ -356,10 +366,44 @@ jobs:
         with:
           name: kumi-release
           path: release
+      # A published release keeps its assets: a re-run builds new, non-identical binaries, which mustn't replace the
+      # ones producers have checked against SHA256SUMS.
       - name: Upload to the release (a draft one is made if there's none yet)
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "Kumi ${TAG#v}" --notes "Release notes to come."
+          set -euo pipefail
+          if ! draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "Kumi ${TAG#v}" --notes "Release notes to come."
+            draft=true
+          fi
+          if [[ "$draft" != true ]]; then
+            echo "$TAG is already published, so its assets stay as they are."
+            exit 0
+          fi
           gh release upload "$TAG" release/*.tar.gz release/*.json release/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+      # scripts/release.py writes the notes into the draft, marked as its own, when it pushes the tag. Such a draft is
+      # published now, every install and migration having passed. Any other draft (notes to come, or written by hand)
+      # stays a draft for whoever finishes it.
+      - name: Publish the release when scripts/release.py wrote its notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" == true ]]; then
+            body="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
+            if [[ "$body" != *"<!-- kumi:release-notes -->"* ]]; then
+              echo "$TAG's notes aren't scripts/release.py's, so it stays a draft."
+              exit 0
+            fi
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+            echo "Published $TAG."
+          fi
+          # Latest is the highest version published, so an older tag's build that finishes later doesn't take it back.
+          # Set on every run, so a re-run finishes what a failed one left.
+          tags="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 100 --json tagName --jq '.[].tagName')"
+          latest="$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' <<<"$tags" | sort -V | tail -n 1)"
+          gh release edit "$latest" --repo "$GITHUB_REPOSITORY" --latest
+          echo "The latest release is $latest."

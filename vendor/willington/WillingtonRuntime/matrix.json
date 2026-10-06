@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "profiles": [
+    {
+      "id": "live-12.4.15b4-arm64",
+      "platform": "macos",
+      "architecture": "arm64",
+      "version": "12.4.15b4 (2026-09-17_a0ac16f342)",
+      "source_sha256": "c28cadd0077ff2025bc3fc9d7859dc34755620a16bbb12a415651fc19e8dbebf",
+      "status": "validated",
+      "components": [
+        "WillingtonBindings",
+        "WillingtonDeviceTools"
+      ]
+    },
+    {
+      "id": "live-12.4.15b5-arm64",
+      "platform": "macos",
+      "architecture": "arm64",
+      "version": "12.4.15b5 (2026-09-24_415b783fcc)",
+      "source_sha256": "4beb1ec0c228ef3a0f2798eff8844d1fcdaa81647afc46b8a0e2abbfd3375751",
+      "status": "validated",
+      "components": [
+        "WillingtonBindings",
+        "WillingtonDeviceTools",
+        "WillingtonRackZones"
+      ]
+    },
+    {
+      "id": "live-12.4.15b5-device-tools-windows-x86_64",
+      "platform": "windows",
+      "architecture": "x86_64",
+      "version": "12.4.15b5 (2026-09-24_415b783fcc)",
+      "source_sha256": "53cbb2f8651ca84c7790fd0f56e198b1df6df998b54850c1958cbf0bab6191cc",
+      "status": "candidate",
+      "components": [
+        "WillingtonDeviceTools"
+      ]
+    },
+    {
+      "id": "live-12.4.15b5-rack-zones-arm64",
+      "platform": "macos",
+      "architecture": "arm64",
+      "version": "12.4.15b5 (2026-09-24_415b783fcc)",
+      "source_sha256": "4beb1ec0c228ef3a0f2798eff8844d1fcdaa81647afc46b8a0e2abbfd3375751",
+      "status": "candidate",
+      "components": [
+        "WillingtonBindings",
+        "WillingtonDeviceTools",
+        "WillingtonRackZones"
+      ]
+    },
+    {
+      "id": "live-12.4.15b5-windows-x86_64",
+      "platform": "windows",
+      "architecture": "x86_64",
+      "version": "12.4.15b5 (2026-09-24_415b783fcc)",
+      "source_sha256": "53cbb2f8651ca84c7790fd0f56e198b1df6df998b54850c1958cbf0bab6191cc",
+      "status": "validated",
+      "components": [
+        "WillingtonBindings",
+        "WillingtonDeviceTools",
+        "WillingtonRackZones"
+      ]
+    }
+  ]
+}

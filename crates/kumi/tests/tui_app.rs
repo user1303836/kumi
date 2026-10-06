@@ -856,6 +856,8 @@ case!(a_question_with_numbered_options_answers_by_number_and_free_text_still_wor
     assert!(!h.calls().iter().any(|c| c == "submit:Reese"), "a number picks; it doesn't send");
     h.type_text("\r").await;
     h.wait_for_call("submit:Reese").await;
+    // The producer's pick, with the question and its options, to learn their taste from.
+    assert!(h.calls().iter().any(|c| c == "picked:answer:1 of 3:Which bass should duck under the kick?"), "{:?}", h.calls());
     assert!(!has(&h.screen(), "Your answer"), "answering closes the choices");
     ask(&h);
     h.type_text("2 dB quieter, keep both").await;
@@ -869,6 +871,32 @@ case!(a_question_with_numbered_options_answers_by_number_and_free_text_still_wor
     h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
     h.emit(json!({"type":"state","state":"idle"}));
     assert!(!has(&h.screen(), "Your answer"), "a list that isn't a question offers nothing");
+    h.close().await;
+});
+case!(only_a_choice_the_producer_made_is_a_pick, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    let ask = |h: &Harness| {
+        h.emit(json!({"type":"state","state":"running"}));
+        h.emit(json!({"type":"text","text":"Which pad?\n\n1. Warm\n2. Glassy"}));
+        h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+        h.emit(json!({"type":"state","state":"idle"}));
+    };
+    let picks = |h: &Harness| h.calls().into_iter().filter(|c| c.starts_with("picked:")).collect::<Vec<_>>();
+    // Enter on the first option, untouched, sends it but says nothing of taste.
+    h.type_text("make a pad\r").await;
+    ask(&h);
+    h.has("Your answer");
+    h.type_text("\r").await;
+    h.wait_for_call("submit:Warm").await;
+    assert!(picks(&h).is_empty(), "{:?}", picks(&h));
+    // Moving to an option is a choice.
+    ask(&h);
+    h.has("Your answer");
+    h.type_text("\x1b[B\r").await;
+    h.wait_for_call("submit:Glassy").await;
+    assert_eq!(picks(&h), ["picked:answer:1 of 2:Which pad?"]);
     h.close().await;
 });
 case!(a_provider_wait_shows_why_and_counts_down_until_the_model_answers, async {

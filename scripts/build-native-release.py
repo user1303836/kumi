@@ -29,7 +29,7 @@ DOCUMENTS = [("crates/ableton-mcp-server/README.md", "README.md")] + [(f"docs/en
 EXCLUSIONS = ["tests", "verification-scripts", "source-maps", "credentials", "configuration", "local-state", "logs",
               "backups", "captured-media", "generated-evidence", "dependency-trees", "protected-local-material"]
 MIT_SHA256 = "f6a4bf820a492313c9d4e100e16bd474cd5cf06c0fba27c1035238acb4af75cb"
-# Willington's runtime files, as its sync puts them in vendor/willington with a release.json naming each
+# Willington's runtime files, as an update puts them in vendor/willington with a release.json naming each
 # file's SHA-256. Only these may ship: its C++ sources, headers and debug files stay in its own repository.
 WILLINGTON = "vendor/willington"
 WILLINGTON_SCHEMA = "kumi-willington-vendor/v1"
@@ -175,7 +175,7 @@ def willington_files(folder: Path) -> dict[str, str] | None:
         raise ValueError(f"{WILLINGTON}/release.json has an invalid commit")
     if not isinstance(listed, dict) or not listed:
         raise ValueError(f"{WILLINGTON}/release.json lists no files")
-    # Checked here, on the sync's pull request, rather than when a release is built on the system that can't.
+    # Checked here, on the update's pull request, rather than when a release is built on the system that can't.
     unportable = sorted(name for name in listed if not portable(name))
     if unportable:
         raise ValueError(f"{WILLINGTON}/release.json names files some systems can't hold: {', '.join(unportable)}")
@@ -355,17 +355,22 @@ def main() -> None:
     parser.add_argument("--out", type=Path, help="output folder (release/native/<target>)")
     parser.add_argument("--binaries-dir", type=Path, help="already built binaries; skips cargo build")
     parser.add_argument("--bridge-only", action="store_true", help="build only the receipt-bound bridge artifact")
+    parser.add_argument("--profile", default="release",
+                        help="Cargo profile: release (the default, what's published) or ci-release (CI's quicker build)")
     args = parser.parse_args()
     target = args.target or re.search(r"^host: (.+)$", run(["rustc", "-vV"]), re.M)[1]
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", target):
         raise ValueError("invalid Rust target triple")
     source = source_evidence(ROOT)
-    command = ["cargo", "build", "--locked", "--release", "--target", target]
+    if not re.fullmatch(r"[a-z][a-z0-9-]*", args.profile):
+        raise ValueError("invalid Cargo profile name")
+    profile = ["--release"] if args.profile == "release" else ["--profile", args.profile]
+    command = ["cargo", "build", "--locked", *profile, "--target", target]
     command += ["-p", "ableton-mcp-server", "--bin", "ableton-mcp-server", "--bin", "ableton-mcp-analysis-worker"] if args.bridge_only else ["--workspace", "--bins"]
     recipe = " ".join(command)
     if args.binaries_dir is None:
         subprocess.run(command, cwd=ROOT, check=True)
-        binaries = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / target / "release"
+        binaries = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / target / args.profile
     else:
         binaries = args.binaries_dir.resolve()
         recipe = "prebuilt binaries supplied with --binaries-dir; expected build: " + recipe

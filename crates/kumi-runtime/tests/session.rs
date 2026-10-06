@@ -899,8 +899,37 @@ local_test!(willington_instructions_follow_the_switch_each_time_the_kernel_is_ma
     h.session.refresh().await.unwrap();
     let instructions = h.record.created.borrow().last().unwrap().instructions.clone();
     assert!(instructions.contains("none fit the Live that's open") && !instructions.contains("/willington"));
+    // On, with Willington's mapping and Python in Live offered: the next kernel says modulators map, and how,
+    // rather than that they can't (a tutorial's LFOs were rebuilt with automation when it said so).
+    {
+        let tools = &mut h.observation.borrow_mut().tools;
+        tools.push(Rc::new(Offered("edit_rack_mapping")));
+        tools.push(Rc::new(Offered("run_python")));
+    }
+    h.session.reconfigure().await.unwrap();
+    h.session.refresh().await.unwrap();
+    let instructions = h.record.created.borrow().last().unwrap().instructions.clone();
+    assert!(instructions.contains("map_modulation(slot, parameter)") && !instructions.contains("can't be mapped"), "{instructions}");
     h.session.close().await.unwrap();
 });
+
+/// A tool the integration offers, by name only: what the instructions say depends on which are offered.
+struct Offered(&'static str);
+#[async_trait(?Send)]
+impl KernelTool for Offered {
+    fn name(&self) -> &str {
+        self.0
+    }
+    fn description(&self) -> &str {
+        "Offered."
+    }
+    fn input_schema(&self) -> JsonObject {
+        JsonObject::new()
+    }
+    async fn execute(&self, _: JsonObject, _: Signal) -> Result<ToolResult, RuntimeError> {
+        panic!("only offered")
+    }
+}
 
 #[derive(Clone)]
 struct Plan {
@@ -1870,5 +1899,84 @@ local_test!(live_closing_mid_request_says_it_may_have_crashed_and_warns_before_s
     settle().await;
     assert!(h.notice("Your last request stopped when Live closed, which it may have caused: check the Set before you send it again"));
     assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Resend { text } if text == "record the mix")));
+    h.session.close().await.unwrap();
+});
+/// Kumi's undo tool, as the integration offers it: it answers with the change it undid.
+struct UndoTool;
+#[async_trait(?Send)]
+impl KernelTool for UndoTool {
+    fn name(&self) -> &str {
+        "undo_change"
+    }
+    fn description(&self) -> &str {
+        "Undo one of your changes."
+    }
+    fn input_schema(&self) -> JsonObject {
+        json!({"type":"object"}).as_object().unwrap().clone()
+    }
+    async fn execute(&self, input: JsonObject, _: Signal) -> Result<ToolResult, RuntimeError> {
+        Ok(ToolResult { text: json!({"undone":"Tempo 120 → 124 BPM","change":input["change"]}).to_string(), ..Default::default() })
+    }
+}
+local_test!(the_producers_reactions_are_kept_in_kumis_database_and_kumis_own_steps_are_not, {
+    use kumi_runtime::core::{store_client::StoreClient, store_import::JsonFiles};
+    use kumi_store::observations::{self, Kind};
+    let dir = tempfile::tempdir().unwrap();
+    let files = JsonFiles {
+        memory: dir.path().join("memory.json"),
+        projects: dir.path().join("projects"),
+        techniques: dir.path().join("techniques.json"),
+        playbook: dir.path().join("playbook.json"),
+        gaps: dir.path().join("gaps.jsonl"),
+    };
+    let (client, _) = StoreClient::open(dir.path().join("kumi.db"), files, 1).await.unwrap();
+    let tools = Rc::new(RefCell::new(Vec::<Rc<dyn KernelTool>>::new()));
+    let session = Rc::new(RefCell::new(None::<Session>));
+    let turns = Rc::new(Cell::new(0));
+    let (use_tools, active, count) = (tools.clone(), session.clone(), turns.clone());
+    let run: Run = Rc::new(move |_, signal, _| {
+        let tools = use_tools.borrow().clone();
+        let session = active.borrow().clone().unwrap();
+        count.set(count.get() + 1);
+        let turn = count.get();
+        async move {
+            let tool = |name: &str| tools.iter().find(|tool| tool.name() == name).unwrap().clone();
+            let input = |value: Value| value.as_object().unwrap().clone();
+            if turn == 1 {
+                // Kumi takes its own change back in the turn that made it: not the producer's.
+                session.watch(WatchEvent::Change(change("c1", "applied", 1)));
+                tool("undo_change").execute(input(json!({"change":"c1"})), signal.clone()).await?;
+                session.watch(WatchEvent::Change(change("c2", "applied", 2)));
+            } else {
+                let noted = tool("reaction").execute(input(json!({"quote":"too wet","lean":"less","change":"c2"})), signal.clone()).await?;
+                assert_eq!((noted.is_error, noted.reply.as_deref()), (false, Some("")), "noted quietly: without final, the turn goes on");
+                tool("undo_change").execute(input(json!({"change":"c2"})), signal).await?;
+            }
+            Ok(complete())
+        }
+        .boxed_local()
+    });
+    let h = harness(Some(run), |o| {
+        o.store = Some(client.clone());
+        let factory = o.kernel_factory.clone();
+        o.kernel_factory = Rc::new(move |options| {
+            *tools.borrow_mut() = options.tools.clone();
+            factory(options)
+        });
+    });
+    *session.borrow_mut() = Some(h.session.clone());
+    h.observation.borrow_mut().tools.push(Rc::new(UndoTool));
+    h.session.start().await.unwrap();
+    h.session.submit("make it wetter", None).await.unwrap();
+    h.session.submit("too wet, undo that", None).await.unwrap();
+    h.session.picked(Picked::Answer { question: "Which pad?".into(), options: vec!["Warm".into(), "Glassy".into()], index: 0 });
+    client.store().write_wait(|_| Ok(())).unwrap();
+    let mut rows = client.store().read(|c| observations::recent(c, 10)).unwrap();
+    rows.reverse();
+    assert_eq!(rows.iter().map(|row| row.kind).collect::<Vec<_>>(), [Kind::Words, Kind::Undo, Kind::Pick]);
+    assert_eq!(rows[0].facts, json!({"quote":"too wet","lean":"less"}));
+    assert_eq!(rows[0].subject["change"], "c2");
+    assert_eq!((rows[1].subject["change"].clone(), rows[1].facts["by"].clone(), rows[1].weight), (json!("c2"), json!("asked"), Some(-0.5)));
+    assert_eq!(rows[2].context["requests"], json!(["make it wetter", "too wet, undo that"]));
     h.session.close().await.unwrap();
 });

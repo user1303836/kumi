@@ -226,7 +226,7 @@ inside Live with Live's own API. A script's changes are one step in Live's
 undo, but they get no HISTORY entry; Live's undo takes them back.
 
 **What Live doesn't let scripts do:** map a macro or a modulator to a parameter
-(Willington can map macros: `/willington`), or edit the Arrangement's automation lanes. Kumi
+(Willington can map both: `/willington`), or edit the Arrangement's automation lanes. Kumi
 says so and suggests a way round. Saving, exporting, freezing, bouncing and
 grouping go through [Live's own commands](#lives-own-commands).
 
@@ -602,6 +602,11 @@ copy of the repository, `update` moves the checkout forward instead
 (`git merge --ff-only`, refusing local changes) and builds the workspace with Cargo.
 Inside Kumi, `/update` asks first, then closes Kumi, updates it and opens it
 again with the same conversation.
+
+`--rollback` goes back to the Kumi before, and puts back its bridge too when Live is closed; in a
+terminal, it offers to wait while you quit Live (Kumi never quits Live itself). Otherwise the newer
+bridge stays, which works with the earlier Kumi: to put back its bridge as well, quit Live and run
+`kumi update --rollback` twice.
 
 For the current 1.7.5 installer (bundled Node 24):
 

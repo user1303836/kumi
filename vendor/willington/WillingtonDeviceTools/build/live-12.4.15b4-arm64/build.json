@@ -1,0 +1,14 @@
+{
+  "platform": "macos",
+  "architecture": "arm64",
+  "version": "12.4.15b4 (2026-09-17_a0ac16f342)",
+  "executable": "/Applications/Ableton Live 12 Beta.app/Contents/MacOS/Live",
+  "source_sha256": "c28cadd0077ff2025bc3fc9d7859dc34755620a16bbb12a415651fc19e8dbebf",
+  "arm64_sha256": "bcbbb6033f554e4553e8f0de085f1cb36a2644db241d8172d0984c7bf6bac7ec",
+  "native_source_sha256": "4ae7c94f0a51e0aba7eacedaeccf851257208ce39ebc4c5920dad4f97b17eb6d",
+  "profile_id": "live-12.4.15b4-arm64",
+  "profile_sha256": "7c277b4e95b3e6c876fd1fec2249360a3c2921c7366abd01e6a8887be2cde44e",
+  "validation_status": "validated",
+  "runtime_notes": [],
+  "library_sha256": "e766342fdf2e7315366ab88d0a4a22b694d460f5f97b550535421383d37c1ef8"
+}

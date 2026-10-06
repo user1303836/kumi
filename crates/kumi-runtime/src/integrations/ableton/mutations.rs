@@ -186,6 +186,8 @@ impl Mutations {
         if let (Some(under), Some(start), Some(length)) = (&under, beats(args.get("position")), beats(args.get("length"))) {
             preview.insert("replaces".into(), json!(laid_over(under, start, start + length)));
         }
+        // What the change will cut or delete, read first, so Kumi's undo can make it again (history v0).
+        let cutting = super::cuts::before(history, kind, &args, &preview, under.as_deref(), &signal).await;
         let summary = kind.summarize(&preview, &args, &known, None);
         signal.check()?;
         history.changes_this_turn.set(history.changes_this_turn.get() + 1);
@@ -215,7 +217,7 @@ impl Mutations {
             history.remember(new_record(kind, summary, ChangeState::Unsure, connection.now().timestamp_millis()), transaction.into(), None);
             return Ok(ChangeOutcome::error(format!("Live couldn't confirm this change: {text}")));
         }
-        let result = match context::payload(&applied) {
+        let mut result = match context::payload(&applied) {
             Ok(value) => value,
             Err(_) => {
                 history.remember(
@@ -252,7 +254,28 @@ impl Mutations {
         }
         let final_summary = kind.summarize(&preview, &args, &known, Some(&result));
         let applied = result.get("state").and_then(Value::as_str) == Some("applied");
-        let permanent = if applied { kind.permanent(&args).or_else(|| kind.replaced(&preview)).filter(|s| !s.is_empty()) } else { None };
+        // What Live left of what it cut, read now: with it, Kumi's undo makes the clips again, so the change isn't
+        // Live's alone to take back. A cut past what the read before explains leaves it to Live.
+        let kept = match cutting.filter(|_| applied && preview.get("replacesUnknown") != Some(&json!(true))) {
+            Some(cutting) => {
+                let made = match kind.tool.as_str() {
+                    "add_arrangement_clip" => result.get("result"),
+                    "move_clip" => result.get("created"),
+                    _ => None,
+                };
+                let made_ref = made.and_then(|m| Some((m.get("ref")?.as_str()?, m.get("objectIdentity")?.as_str()?)));
+                let span = (kind.tool == "add_arrangement_clip")
+                    .then(|| Some((beats(made?.get("start"))?, beats(made?.get("start"))? + beats(made?.get("length"))?)))
+                    .flatten();
+                cutting.after(history, made_ref, span, &signal).await
+            }
+            None => None,
+        };
+        let permanent = if applied && kept.is_none() {
+            kind.permanent(&args).or_else(|| kind.replaced(&preview)).filter(|s| !s.is_empty())
+        } else {
+            None
+        };
         let mut record = new_record(
             kind,
             final_summary.clone(),
@@ -283,6 +306,17 @@ impl Mutations {
             })
         });
         history.remember(record.clone(), transaction.into(), restore);
+        if let Some((mut material, clips)) = kept {
+            let view = json!({"change":record.id,"tool":kind.tool,"track":material.track,"remnants":material.remnants});
+            let remember = &history.remember;
+            let objects =
+                remember.history.keep(remember.store.as_ref(), remember.current().as_deref(), &clips, &record.title, view, record.at);
+            material.clips = super::cuts::kept(&clips, &objects);
+            // The bridge's answer says only Live's undo brings this back. With what Kumi kept, its own undo does, and
+            // what that won't bring back is said now.
+            result.insert("kept".into(), json!(kumi_undo_words(&material.names(), &clips)));
+            history.attach_material(&record.id, material);
+        }
         if kind.tool == "set_tempo" && record.state == ChangeState::Applied {
             if let Some(tempo) = args.get("tempo").and_then(Value::as_f64) {
                 self.observer.tempo.set(Some(tempo));
@@ -520,6 +554,22 @@ fn observation(message: &str) -> ReadError {
 }
 fn object(value: Value) -> JsonObject {
     value.as_object().cloned().unwrap_or_default()
+}
+
+/// What Kumi's undo of a change brings back, as the change's answer says it: by name, and what of them it won't.
+fn kumi_undo_words(names: &str, clips: &[super::snapshots::Captured]) -> String {
+    let short: Vec<String> = clips
+        .iter()
+        .filter(|clip| !clip.short_of().is_empty())
+        .map(|clip| format!("\u{201c}{}\u{201d} without {}", clip.name(), super::snapshots::join(&clip.short_of())))
+        .collect();
+    if short.is_empty() {
+        return format!("Kumi's undo brings back {names}.");
+    }
+    format!(
+        "Kumi's undo brings back {names}, {} (Live doesn't give Kumi those). Live's own undo (Cmd-Z in Live), right away, brings back all of it.",
+        short.join("; ")
+    )
 }
 
 #[cfg(test)]

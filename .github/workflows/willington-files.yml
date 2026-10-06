@@ -1,10 +1,10 @@
 name: Willington files
 
-# Only Willington's sync changes vendor/willington/, and its pull requests change nothing else. Those files
-# ship to every producer, and their native libraries can't be reviewed, so who sends them is the check.
-# The sync is a GitHub App that pushes the branch willington-sync, which only it can push (the "Willington
-# sync branch" ruleset), so a pull request it opened holds only its commits. Its login (`<app>[bot]`) goes in
-# the WILLINGTON_SYNC_APP repository variable once it exists; until then, nothing may change the folder.
+# Willington's runtime files in vendor/willington/ ship to every producer, and their native libraries can't be
+# reviewed, so who sends them is the check. Only the repository owner's pull requests, from a willington/ branch
+# in this repository, change the folder, and such a pull request changes nothing else. Only admins push those
+# branches (the "Willington branches" ruleset). An update comes from a Bundle run on Willington's main, by
+# scripts/vendor-willington.py (see docs/en/DEVELOPER_GUIDE.md).
 on:
   # The base branch's copy of this workflow runs, never the pull request's, so a pull request can't change
   # the check it's held to. It reads the pull request's metadata only, never its code. `edited` covers a
@@ -26,16 +26,16 @@ jobs:
     permissions:
       pull-requests: read
     steps:
-      - name: Only Willington's sync changes vendor/willington, and nothing else
+      - name: Only the owner's pull requests change vendor/willington, and change nothing else
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           AUTHOR: ${{ github.event.pull_request.user.login }}
           AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
-          BRANCH: ${{ github.event.pull_request.head.ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          SYNC_APP: ${{ vars.WILLINGTON_SYNC_APP }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
           # One row per changed file: its path, and its old one when it moved (moving a file in or out counts).
@@ -48,29 +48,23 @@ jobs:
           paths="$(tr '\t' '\n' <<<"$rows" | grep -v '^$' || true)"
           vendor="$(grep -E '^vendor/willington(/|$)' <<<"$paths" || true)"
           other="$(grep -v -E '^vendor/willington(/|$)' <<<"$paths" || true)"
-          sync=false
-          if [[ -n "$SYNC_APP" && "$AUTHOR" == "$SYNC_APP" && "$AUTHOR_TYPE" == "Bot" && "$BRANCH" == "willington-sync" && "$HEAD_REPO" == "$GITHUB_REPOSITORY" ]]; then
-            sync=true
-          fi
-          if $sync && [[ -n "$other" ]]; then
-            echo "Willington's sync changes vendor/willington/ only. This pull request also changes:"
-            sed 's/^/  /' <<<"$other"
-            echo "::error::Willington's sync pull request changes files outside vendor/willington/."
-            exit 1
-          fi
-          if ! $sync && [[ -n "$vendor" ]]; then
-            if [[ -z "$SYNC_APP" ]]; then
-              echo "Only Willington's sync changes vendor/willington/, and it isn't set up yet: the WILLINGTON_SYNC_APP repository variable is empty."
-            else
-              echo "Only Willington's sync ($SYNC_APP, from willington-sync in $GITHUB_REPOSITORY) changes vendor/willington/."
-              echo "This pull request is from $AUTHOR, on $HEAD_REPO:$BRANCH, and changes:"
-            fi
-            sed 's/^/  /' <<<"$vendor"
-            echo "::error::Only Willington's sync changes vendor/willington/."
-            exit 1
-          fi
-          if $sync; then
-            echo "Willington's sync, changing vendor/willington/ only."
-          else
+          if [[ -z "$vendor" ]]; then
             echo "Nothing in vendor/willington/ changes."
+            exit 0
           fi
+          # A fork's branch is pushed by whoever owns the fork. Here, only admins push willington/ branches, so the
+          # commits are the owner's too, not just the pull request.
+          if [[ "$AUTHOR" != "$OWNER" || "$AUTHOR_TYPE" != "User" || "$HEAD_REPO" != "$GITHUB_REPOSITORY" || "$BRANCH" != willington/* ]]; then
+            echo "Only $OWNER's pull requests, from a willington/ branch in $GITHUB_REPOSITORY, change vendor/willington/."
+            echo "This pull request is from $AUTHOR, on ${HEAD_REPO:-a deleted repository}:$BRANCH, and changes:"
+            sed 's/^/  /' <<<"$vendor"
+            echo "::error::Only $OWNER's pull requests change vendor/willington/."
+            exit 1
+          fi
+          if [[ -n "$other" ]]; then
+            echo "A Willington update changes vendor/willington/ only. This pull request also changes:"
+            sed 's/^/  /' <<<"$other"
+            echo "::error::A pull request that changes vendor/willington/ changes nothing else."
+            exit 1
+          fi
+          echo "A Willington update from $OWNER, changing vendor/willington/ only."

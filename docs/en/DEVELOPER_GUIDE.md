@@ -192,10 +192,10 @@ bundle against its checksum. Measurements of how Live runs the extension are in
 ## Willington's files
 
 [Willington](WILLINGTON_INTEGRATION.md)'s repository is private: Kumi carries
-only its runtime files, in `vendor/willington/`, which Willington's sync changes
-by pull request and nothing else does. Beside them are Willington's license
-notice (`LICENSE` or `LICENSE.md`; Kumi's MIT license doesn't cover these files)
-and `release.json`:
+only its runtime files, in `vendor/willington/`, which change only by a
+Willington update (below). Beside them are Willington's license notice
+(`LICENSE` or `LICENSE.md`; Kumi's MIT license doesn't cover these files) and
+`release.json`:
 
 ```json
 {"schema": "kumi-willington-vendor/v1", "version": "0.4.0", "commit": "<Willington's 40-character commit>",
@@ -226,6 +226,32 @@ an install carries them over. The bridge puts the folder on Python's path only
 once `willington.json` turns Willington on, after any copy installed beside the
 bridge.
 
+**Updating Willington.** Willington's Bundle workflow builds its native
+libraries on each platform they're for and keeps the matrix bundle as each
+run's artifact. An update takes a run from a push to Willington's `main`:
+
+1. Find the run: `gh run list -R xonedsp/willington -w Bundle -b main -e push -s success`.
+2. On a branch from `main` named `willington/<anything>`, run
+   `python3 scripts/vendor-willington.py --run <run>`. It checks that the run
+   is a successful Bundle run on a push to Willington's `main` and that its
+   commit is on `main`, that the artifact matches the digest GitHub recorded and
+   the bundle its SHA-256, and fetches Willington's license at that commit. It
+   replaces the folder only once the new one passes the release check, then
+   prints the commit, the run and the artifact's digest.
+3. Open a pull request that changes nothing else, with what it printed.
+   `Willington files` passes only the repository owner's pull requests from a
+   `willington/` branch in this repository, and the Installer builds and
+   installs all six platforms.
+
+A reviewer checks an update with
+`python3 scripts/vendor-willington.py --check <run>`, which rebuilds the folder
+from the run and compares it file by file.
+
+CI builds the libraries, so their hashes can differ from the ones validated in
+Live. Check an update in Live before the release that ships it, and run the
+[Follow Action self-test](WILLINGTON_INTEGRATION.md#follow-action-self-test)
+for its library.
+
 ## Releasing
 
 **Commits** have plain-English subjects that say what changed for the producer
@@ -236,29 +262,52 @@ its subject with the new version ("Bridge 1.0.71: …"), and adds a
 extension changed, rebuild and commit its bundle. Work goes on a branch and
 reaches `main` by pull request.
 
-**A Kumi release:**
+**A Kumi release** is one command, from any checkout, with `gh` signed in as a
+repository admin. Run it right after a pull request merges:
 
-1. On the branch, one commit titled "Kumi X.Y.Z: the changelog, READMEs and
-   versions" sets the version in the root `package.json`,
-   `crates/kumi-runtime/src/version.rs`, the `kumi`, `kumi-common` and
-   `kumi-runtime` Cargo manifests and `Cargo.lock` (the packaging tests hold
-   these equal); the Status line of the three READMEs; the ships-with
-   line under "Bridge versions" in the three `KUMI_CHANGES.md`; and the
-   `CHANGELOG.md`'s `## Unreleased` becomes `## X.Y.Z — date`, with a line
-   that says which bridge it ships with. Kumi builds the changelog in and shows
-   a release's list items as **What's new** the first time it starts after an
-   update (five at most, newest release first; `/changelog` has the rest).
-   Paragraphs, such as the ships-with and tested-with lines, aren't shown. So
-   each change a producer would notice goes in a list item, the ones that matter
-   most first.
-2. Merge the pull request with a merge commit titled "Kumi X.Y.Z (#PR)".
-3. Tag the merge commit `vX.Y.Z` and push the tag. The Installer workflow builds
-   native bundles for Intel and ARM on macOS, Linux and Windows, tests installs
-   and migration, and attaches the per-target bundles/manifests plus the
-   compatibility `kumi.tar.gz`, `kumi-release.json` and `SHA256SUMS` to a draft
-   release "Kumi X.Y.Z".
-4. Write the release notes and publish the release. Only then do the installers,
-   `kumi update` and the update check see it.
+```sh
+python3 scripts/release.py          # dry run: the version, the CHANGELOG entry, the notes and the checks
+python3 scripts/release.py --go     # the release
+```
+
+- **What ships** comes from `main` since the last tag: each merged pull
+  request's `Changelog:` lines, as written ("none" adds nothing). A line goes
+  under the bridge's heading when its pull request changes the bridge and none
+  of Kumi's crates or installers. In a pull request that changes both, write
+  `Changelog (bridge):` for a line about the bridge. The dry run shows where
+  each line goes.
+- **What's new:** Kumi builds `CHANGELOG.md` in and shows a release's list
+  items as **What's new** the first time it starts after an update (five at
+  most, newest release first; `/changelog` has the rest). Paragraphs, such as
+  the ships-with and tested-with lines, aren't shown, so each `Changelog:` line
+  is one item a producer reads there: say what they'll notice, the ones that
+  matter most first.
+- **The bridge** gets a new version when a pull request changes what Live
+  loads: `crates/ableton-mcp-server`, `crates/kumi-common` (the host links it),
+  `remote-script`, `protocol`, `apps/live-extension` or `vendor/willington`
+  (tests and Markdown aside). When the host's dependencies in `Cargo.lock`
+  change, the dry run says so; `--bridge` gives the bridge a new version then.
+- **The version** is the next patch; `--minor` or `--version X.Y.Z` choose
+  another.
+- **With `--go`** it commits "Kumi X.Y.Z: the changelog, READMEs and versions"
+  on `release/vX.Y.Z`: the version in the root `package.json`,
+  `crates/kumi-runtime/src/version.rs`, the `kumi`, `kumi-common` and
+  `kumi-runtime` Cargo manifests and `Cargo.lock` (the packaging tests hold
+  these equal), and the bridge's when it changed; the Status line of the three
+  READMEs; the ships-with line under "Bridge versions" in the three
+  `KUMI_CHANGES.md`; and a `## X.Y.Z — date` entry in `CHANGELOG.md`. It opens
+  the pull request "Kumi X.Y.Z", merges it with the admin bypass as
+  "Kumi X.Y.Z (#PR)" without waiting for its CI, tags the merge commit
+  `vX.Y.Z`, pushes the tag and creates the draft release with its notes
+  (`--summary` opens them with a sentence).
+- **The tag's Installer run** builds native bundles for Intel and ARM on macOS,
+  Linux and Windows, tests installs and migration, attaches the per-target
+  bundles/manifests plus the compatibility `kumi.tar.gz`, `kumi-release.json`
+  and `SHA256SUMS`, and publishes the release when `release.py` wrote its
+  notes (they end with `<!-- kumi:release-notes -->`). Only then do the
+  installers, `kumi update` and the update check see it. Any other draft, such
+  as a tag pushed by hand with notes to come, stays a draft until someone
+  publishes it.
 
 **Local native release staging**, from a clean commit:
 
@@ -268,11 +317,15 @@ MACOSX_DEPLOYMENT_TARGET=13.0 python3 scripts/build-native-release.py --target a
 python3 -m unittest discover -s scripts/tests -p test_native_release.py
 ```
 
-Use the host's Rust target triple. The builder runs a locked release build and
-binds the bridge artifact to the commit, Cargo lockfile, build recipe and exact
-file hashes. Mac bundles need the current helper in `target/hands/`; other
-builders take it from the Mac job. The server and analysis worker must be
-shipped together. The `--binaries-dir` override packages existing binaries and
+Use the host's Rust target triple; on an Apple Silicon Mac,
+`--target x86_64-apple-darwin` cross-builds the Intel bundle. The builder runs a
+locked release build and binds the bridge artifact to the commit, Cargo
+lockfile, build recipe and exact file hashes. `--profile ci-release`, which CI
+uses on pull requests and `main`, skips the release profile's whole-program
+optimization to build faster; a published bundle always uses the default
+`release`. Mac bundles need the current helper in `target/hands/`; other
+bundles don't carry it. The server and analysis worker must be shipped
+together. The `--binaries-dir` override packages existing binaries and
 does not establish that they were built with release optimizations.
 
 The aggregation step retains the manifest consumed by existing Node 24

@@ -120,7 +120,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 ## Willington のファイル
 
-[Willington](WILLINGTON_INTEGRATION.md) のリポジトリは非公開です。Kumi が収めているのはそのランタイムファイルだけで、`vendor/willington/` にあります。このフォルダーを変えるのは、Willington の同期によるプルリクエストだけです。ファイルの隣には、Willington のライセンス表示（`LICENSE` または `LICENSE.md`。Kumi の MIT ライセンスはこれらのファイルには及びません）と `release.json` があります。
+[Willington](WILLINGTON_INTEGRATION.md) のリポジトリは非公開です。Kumi が収めているのはそのランタイムファイルだけで、`vendor/willington/` にあります。このフォルダーが変わるのは、Willington の更新（後述）のときだけです。ファイルの隣には、Willington のライセンス表示（`LICENSE` または `LICENSE.md`。Kumi の MIT ライセンスはこれらのファイルには及びません）と `release.json` があります。
 
 ```json
 {"schema": "kumi-willington-vendor/v1", "version": "0.4.0", "commit": "<Willington の 40 文字のコミット>",
@@ -131,16 +131,33 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 リリースは、これらのファイルをブリッジの Remote Script の中、`AbletonMcpBridge/willington/` に置きます。ネイティブライブラリは自分のプラットフォームのもの（Windows では `.pyd`、macOS では `.dylib`）だけで、合計 16 MiB までです。Linux のバンドルには入りません。ブリッジのインストールはそのフォルダーも一緒にコピーし、Python ファイルの隣に `__pycache__` のブロッカーを置くので、インストールされたツリーはインストールのレシートが記録したとおりに保たれます。インストールされたブリッジのうち 2 つのファイルは、リリースのものではなくプロデューサーのものです。`willington.json` と、Follow Action のセルフテストのレシート `willington/WillingtonBindings/self-test.json` です。これらはブリッジのインストールの確認に影響せず、インストールのときに引き継がれます。ブリッジがこのフォルダーを Python のパスに加えるのは、`willington.json` が Willington をオンにしたときだけで、ブリッジの隣にインストールされたコピーより後になります。
 
+**Willington の更新。** Willington の Bundle ワークフローは、ネイティブライブラリをそれぞれの対象プラットフォームでビルドし、マトリックスバンドルを各実行のアーティファクトとして残します。更新には、Willington の `main` へのプッシュで実行されたものを使います。
+
+1. 実行を見つけます：`gh run list -R xonedsp/willington -w Bundle -b main -e push -s success`。
+2. `main` から作った `willington/<任意の名前>` という名前のブランチで、`python3 scripts/vendor-willington.py --run <run>` を実行します。実行が Willington の `main` へのプッシュで成功した Bundle の実行で、そのコミットが `main` にあること、アーティファクトが GitHub の記録したダイジェストと、バンドルがその SHA-256 と一致することを確認し、そのコミットの Willington のライセンスを取得します。新しいフォルダーがリリースの確認をパスしたときだけフォルダーを置き換え、コミット、実行、アーティファクトのダイジェストを表示します。
+3. ほかに何も変えないプルリクエストを、表示された内容を書いて開きます。`Willington files` がパスするのは、このリポジトリの `willington/` ブランチから出たリポジトリ所有者のプルリクエストだけで、Installer は 6 つのプラットフォームすべてでビルドとインストールを行います。
+
+レビューする人は `python3 scripts/vendor-willington.py --check <run>` で更新を確認できます。実行からフォルダーを作り直し、ファイルごとに比べます。
+
+ライブラリは CI がビルドするので、ハッシュが Live で検証されたものと違うことがあります。更新は、それを出荷するリリースの前に Live で確認し、そのライブラリについて [Follow Action のセルフテスト](WILLINGTON_INTEGRATION.md#follow-action-のセルフテスト)を実行してください。
+
 ## リリース
 
 **コミット**の件名は、プロデューサーにとって何が変わったかを平易な英語で書きます（"Kumi: talk to it while it works"）。ブリッジまたは Remote Script の変更では、`crates/ableton-mcp-server/Cargo.toml` と `Cargo.lock` のバージョンを上げ、件名を新しいバージョンで始め（"Bridge 1.0.71: …"）、`CHANGELOG.md` の `## Unreleased` の下に `### Bridge x.y.z` ブロックを追加します。拡張機能が変わったら、そのバンドルを再ビルドしてコミットします。作業はブランチで行い、プルリクエストで `main` に入れます。
 
-**Kumi のリリース：**
+**Kumi のリリース**は、`gh` にリポジトリの管理者としてサインインした状態で、どのチェックアウトからでも実行できる一つのコマンドです。プルリクエストがマージされたらすぐに実行します：
 
-1. ブランチ上で、"Kumi X.Y.Z: the changelog, READMEs and versions" という件名のコミットを一つ作り、次のものを更新します。ルートの `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common`、`kumi-runtime` の Cargo マニフェスト、`Cargo.lock` のバージョン（パッケージングのテストがこれらが等しいことを確認します）。3 つの README の Status（現状）の行。3 つの `KUMI_CHANGES.md` の「Bridge versions」（ブリッジのバージョン）の下にある、同梱するブリッジの行。そして `CHANGELOG.md` の `## Unreleased` を `## X.Y.Z — date` にし、どのブリッジを同梱するかを書いた行を加えます。Kumi は変更履歴を組み込んでおり、アップデート後に初めて起動したとき、リリースのリスト項目を **What's new** として表示します（新しいリリースから最大 5 件。残りは `/changelog`）。同梱ブリッジやテスト環境の行のような段落は表示されません。そのため、プロデューサーが気づく変更はそれぞれリスト項目にし、重要なものを先に書きます。
-2. プルリクエストを "Kumi X.Y.Z (#PR)" という件名のマージコミットでマージします。
-3. マージコミットに `vX.Y.Z` のタグを付けてプッシュします。Installer ワークフローが macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドルをビルドし、インストールと移行をテストし、ターゲットごとのバンドルとマニフェスト、そして互換用の `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS` を下書きのリリース "Kumi X.Y.Z" に添付します。
-4. リリースノートを書いてリリースを公開します。そうして初めて、インストーラー、`kumi update`、更新確認がそのリリースを認識します。
+```sh
+python3 scripts/release.py          # ドライラン：バージョン、CHANGELOG の項目、リリースノート、チェックを表示
+python3 scripts/release.py --go     # リリース
+```
+
+- **出荷するもの**は、前回のタグ以降の `main` から読み取ります。マージされた各プルリクエストの `Changelog:` の行を、書かれたとおりに使います（"none" は何も加えません）。プルリクエストがブリッジを変え、Kumi のクレートやインストーラーを変えていない場合、その行はブリッジの見出しの下に入ります。両方を変えるプルリクエストでは、ブリッジについての行を `Changelog (bridge):` と書きます。ドライランは各行の入る場所を表示します。
+- **What's new**：Kumi は `CHANGELOG.md` を組み込み、アップデート後に初めて起動したとき、リリースのリスト項目を **What's new** として表示します（最大 5 件、新しいリリースから。残りは `/changelog`）。段落（同梱ブリッジやテスト環境の行など）は表示されないので、`Changelog:` の各行がそこで読まれる一つの項目になります。プロデューサーが気づくことを、重要なものから書きます。
+- **ブリッジ**は、プルリクエストが Live の読み込むもの（`crates/ableton-mcp-server`、ホストがリンクする `crates/kumi-common`、`remote-script`、`protocol`、`apps/live-extension`、`vendor/willington`。テストと Markdown は除く）を変えたときに新しいバージョンになります。`Cargo.lock` にあるホストの依存関係が変わるとドライランがそう伝えるので、そのときは `--bridge` でブリッジを新しいバージョンにします。
+- **バージョン**は次のパッチです。`--minor` か `--version X.Y.Z` で別のものを選べます。
+- **`--go` を付けると**、`release/vX.Y.Z` に "Kumi X.Y.Z: the changelog, READMEs and versions" をコミットします。ルートの `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common`、`kumi-runtime` の Cargo マニフェスト、`Cargo.lock` のバージョン（パッケージングのテストがこれらが等しいことを確認します）と、変わった場合はブリッジのバージョン、3 つの README の Status の行、3 つの `KUMI_CHANGES.md` の「Bridge versions」の下にある同梱するブリッジの行、`CHANGELOG.md` の `## X.Y.Z — date` の項目です。続いてプルリクエスト "Kumi X.Y.Z" を開き、その CI を待たずに管理者のバイパスで "Kumi X.Y.Z (#PR)" としてマージし、マージコミットに `vX.Y.Z` のタグを付けてプッシュし、リリースノート付きの下書きのリリースを作ります（`--summary` でノートの冒頭に一文を加えられます）。
+- **タグの Installer の実行**が、macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドルをビルドし、インストールと移行をテストし、ターゲットごとのバンドルとマニフェスト、互換用の `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS` を添付し、`release.py` がノートを書いた場合（ノートの最後に `<!-- kumi:release-notes -->` があります）はリリースを公開します。そうして初めて、インストーラー、`kumi update`、更新確認がそのリリースを認識します。手でプッシュした「ノートは後で」のタグなど、ほかの下書きは、だれかが公開するまで下書きのままです。
 
 **ネイティブリリースのローカルでの準備**（コミット済みの変更がない状態で）：
 
@@ -150,7 +167,7 @@ MACOSX_DEPLOYMENT_TARGET=13.0 python3 scripts/build-native-release.py --target a
 python3 -m unittest discover -s scripts/tests -p test_native_release.py
 ```
 
-ホストの Rust のターゲットトリプルを使ってください。ビルダーはロックしたリリースビルドを実行し、ブリッジのアーティファクトを、コミット、Cargo のロックファイル、ビルドレシピ、正確なファイルハッシュに結び付けます。Mac のバンドルには `target/hands/` にある最新のヘルパーが必要で、ほかのビルダーは Mac のジョブからそれを受け取ります。サーバーと解析ワーカーは必ず一緒に配布します。`--binaries-dir` は既存のバイナリをパッケージするだけで、それがリリース用の最適化でビルドされたことは保証しません。
+ホストの Rust のターゲットトリプルを使ってください。Apple Silicon の Mac では、`--target x86_64-apple-darwin` で Intel 向けのバンドルをクロスビルドできます。ビルダーはロックしたリリースビルドを実行し、ブリッジのアーティファクトを、コミット、Cargo のロックファイル、ビルドレシピ、正確なファイルハッシュに結び付けます。CI がプルリクエストと `main` で使う `--profile ci-release` は、ビルドを速くするために、リリースプロファイルのプログラム全体の最適化を省きます。公開するバンドルは常に既定の `release` を使います。Mac のバンドルには `target/hands/` にある最新のヘルパーが必要で、ほかのバンドルはそれを含みません。サーバーと解析ワーカーは必ず一緒に配布します。`--binaries-dir` は既存のバイナリをパッケージするだけで、それがリリース用の最適化でビルドされたことは保証しません。
 
 集約の手順では、既存の Node 24 インストールが読むマニフェストを保ちます：
 
