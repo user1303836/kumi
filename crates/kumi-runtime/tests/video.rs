@@ -361,15 +361,17 @@ async fn moments_shown_again_in_one_answer_are_said_so_and_past_three_times_not_
     assert!(first.text.contains("Note what you read from them as you go"));
     let second = look(same.clone()).await;
     assert_eq!(second.images.len(), 2);
-    assert!(second.text.contains("Each of these moments was shown in this answer before (1 time)"), "{}", second.text);
+    assert!(second.text.contains("2 of these were shown in this answer before"), "{}", second.text);
     look(same.clone()).await;
     let fourth = look(same.clone()).await;
     assert!(fourth.images.is_empty(), "{}", fourth.text);
     assert!(!fourth.is_error);
     assert!(fourth.text.contains("Kumi showed each of these moments 3 times in this answer already"), "{}", fourth.text);
-    // One new moment among them: shown.
+    // One new moment among them: only it is shown, and the worn ones are named.
     let mixed = look(json!({"url":video,"look_at":["0:02","0:05"],"zoom":"bottom"})).await;
-    assert_eq!(mixed.images.len(), 2, "{}", mixed.text);
+    assert_eq!(mixed.images.len(), 1, "{}", mixed.text);
+    assert!(mixed.images[0].caption.as_deref().unwrap().starts_with("Frame at 0:05"), "{:?}", mixed.images[0].caption);
+    assert!(mixed.text.contains("1 of the 2 were shown 3 times in this answer already, so they're left out (0:02)"), "{}", mixed.text);
     // The next answer starts afresh.
     answer.set(2);
     let next = look(same).await;

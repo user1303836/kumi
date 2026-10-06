@@ -166,27 +166,38 @@ impl VideoTool {
             *seen = Seen { answer, ..Seen::default() };
         }
         let looks = seen.videos.entry(watched.url.clone()).or_default();
-        let before = watched.frames.iter().map(|frame| looks.moments.get(&moment(frame)).copied().unwrap_or(0)).min().unwrap_or(0);
+        let shown = |frame: &WatchedFrame| looks.moments.get(&moment(frame)).copied().unwrap_or(0);
         let total = watched.frames.len();
-        let note = if before >= REPEATS {
-            watched.frames.clear();
+        // A moment shown REPEATS times isn't shown again; the others in the same look are.
+        let worn: Vec<String> = watched.frames.iter().filter(|frame| shown(frame) >= REPEATS).map(|frame| format_time(frame.at)).collect();
+        watched.frames.retain(|frame| shown(frame) < REPEATS);
+        let again = watched.frames.iter().filter(|frame| shown(frame) > 0).count();
+        let note = if watched.frames.is_empty() {
             Some(format!(
-                "Kumi showed each of these moments {before} times in this answer already, so it doesn't show them again. Answer with what you read from them, and say which settings you couldn't read."
+                "Kumi showed each of these moments {REPEATS} times in this answer already, so it doesn't show them again. Answer with what you read from them, and say which settings you couldn't read."
             ))
         } else if looks.pictures >= PER_VIDEO {
+            let held = watched.frames.len();
             watched.frames.clear();
             Some(format!(
-                "This answer was shown {} pictures of this video, the most Kumi shows of one video in an answer, so these {total} aren't shown. Finish with what you read, or ask the producer which moments matter.",
+                "This answer was shown {} pictures of this video, the most Kumi shows of one video in an answer, so these {held} aren't shown. Finish with what you read, or ask the producer which moments matter.",
                 looks.pictures
             ))
         } else {
+            let fresh = watched.frames.len();
             watched.frames.truncate(PER_VIDEO - looks.pictures);
-            let held = total - watched.frames.len();
+            let held = fresh - watched.frames.len();
             let mut notes = vec![];
-            if before > 0 {
+            if !worn.is_empty() {
                 notes.push(format!(
-                    "Each of these moments was shown in this answer before ({before} {}): keep what you read from pictures in your own words, since asking again only puts away others.",
-                    if before == 1 { "time" } else { "times" }
+                    "{} of the {total} were shown {REPEATS} times in this answer already, so they're left out ({}): use what you read from them.",
+                    worn.len(),
+                    worn.join(", ")
+                ));
+            }
+            if again > 0 {
+                notes.push(format!(
+                    "{again} of these were shown in this answer before: keep what you read from pictures in your own words, since asking again only puts away others."
                 ));
             }
             if held > 0 {
