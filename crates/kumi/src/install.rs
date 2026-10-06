@@ -551,25 +551,16 @@ pub async fn rollback_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
         .and_then(|v| v.get("version").and_then(Value::as_str).map(str::to_string))
         .unwrap_or("the one before".into());
-    // A Node Kumi needs its own bridge back. A native one runs with a newer bridge too, which goes back with it when
-    // it can; what to say about the bridge then replaces checking it again.
-    let (mut bridge_rollback, mut said) = if legacy {
+    // A Node Kumi can't run without its own bridge: that goes back first, and forward again if the swap fails. A
+    // native one runs with a newer bridge too, so its own goes back after the swap, when it can.
+    let (bridge_rollback, earlier) = if legacy {
         (migration::prepare_legacy_rollback(&io, &home).await?, None)
     } else {
-        let earlier = migration::earlier_bridge(&io, &home, &previous, &version).await;
-        (earlier.rollback, earlier.said)
+        (None, Some(migration::earlier_bridge(&io, &home, &previous, &version).await))
     };
     write_launcher(&home).map_err(error)?;
-    let applied = match &bridge_rollback {
-        Some(rollback) => rollback.apply().await,
-        None => Ok(()),
-    };
-    if let Err(reason) = applied {
-        if legacy {
-            return Err(reason);
-        }
-        said = Some(format!("The bridge couldn't go back ({}): the one in Live stays, and works with {version}.", reason.message()));
-        bridge_rollback = None;
+    if let Some(rollback) = &bridge_rollback {
+        rollback.apply().await?;
     }
     let switched = async {
         remove(&hold)?;
@@ -600,10 +591,26 @@ pub async fn rollback_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
     }
     say(format!("Kumi is back to {version}. {} update --rollback again returns to {KUMI_VERSION}.", *KUMI));
     if Path::new(&join(&app, &executable_name("kumi"))).exists() {
-        let Some(said) = said else { return Ok(bridge_after(&io, &home, &app).await) };
-        say(said);
-        if let Some(placed) = bridge_rollback.as_ref().and_then(|rollback| rollback.place_extension(&io.env)) {
-            say(placed);
+        let Some(migration::EarlierBridge { rollback, said: Some(said) }) = earlier else {
+            return Ok(bridge_after(&io, &home, &app).await);
+        };
+        let Some(rollback) = rollback else {
+            say(said);
+            return Ok(0);
+        };
+        // This process is still the newer Kumi: the swap only renamed its folder, which nothing from here on reads
+        // (on Windows too, where the running executable stays in use). The bridge's own rollback and the kept
+        // extension come from the bridge's folders.
+        match rollback.apply().await {
+            Ok(()) => {
+                say(said);
+                if let Some(placed) = rollback.place_extension(&io.env) {
+                    say(placed);
+                }
+            }
+            Err(reason) => {
+                say(format!("The bridge couldn't go back ({}): the one in Live stays, and works with {version}.", reason.message()))
+            }
         }
         Ok(0)
     } else {

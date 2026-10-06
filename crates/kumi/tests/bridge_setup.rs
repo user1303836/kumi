@@ -619,6 +619,18 @@ async fn after_an_app_rollback_live_open_a_no_or_a_refused_rollback_changes_noth
     io.confirm = Some(Rc::new(|_| async { false }.boxed_local()));
     assert_eq!(setup_bridge(io).await.unwrap(), 1);
     assert!(w.out.0.borrow().contains("Nothing was changed. To put back 1.0.34, quit Live, then run:"));
+    // Closed at the first look, open again once the question is answered.
+    let mut io = w.io();
+    io.yes = false;
+    io.confirm = Some(Rc::new(|_| async { true }.boxed_local()));
+    let looks = Rc::new(Cell::new(0));
+    io.live_running = Some(Rc::new(move || {
+        looks.set(looks.get() + 1);
+        let open = looks.get() > 1;
+        async move { open }.boxed_local()
+    }));
+    assert_eq!(setup_bridge(io).await.unwrap(), 1);
+    assert!(w.out.0.borrow().contains("Live is open again, so nothing was changed."));
     assert!(w.calls.borrow().is_empty());
     w.answers.borrow_mut().push_back(Ran {
         code: 1,

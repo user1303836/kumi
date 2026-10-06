@@ -691,6 +691,14 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
             say(&format!("Nothing was changed. To put back {bundled}, quit Live, then run: {} bridge", *KUMI));
             return Ok(1);
         }
+        // Live may have opened while the question waited: the switch runs with it closed.
+        if live_open(&io, run.clone()).await {
+            if after_update {
+                return later("to put back its own, save your work, quit Live");
+            }
+            say(&format!("Live is open again, so nothing was changed. Save your work, quit Live, then run this again: {} bridge", *KUMI));
+            return Ok(1);
+        }
         let rollback = BridgeRollback::new(
             command,
             package,

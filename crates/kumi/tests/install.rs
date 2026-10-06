@@ -922,28 +922,38 @@ async fn a_rollback_with_live_open_keeps_the_newer_bridge_unless_the_producer_cl
     assert_eq!(extension_in_live(dir.path()), "// 1.0.84's");
 }
 #[tokio::test]
-async fn a_failed_app_swap_after_the_bridge_went_back_puts_the_newer_bridge_back() {
+async fn a_failed_app_swap_changes_nothing_and_leaves_the_bridge_alone() {
     let dir = tempfile::tempdir().unwrap();
     let (env, home) = native_rollback(dir.path(), Some("1.0.84"));
-    // The earlier app goes missing while the bridge goes back, so the swap fails; it returns with the next command.
+    let (mut io, out) = io(&env);
+    // The earlier app goes missing just before the swap (here, as Kumi looks for Live), so the swap fails.
     let (previous, aside) = (home.join("app.previous"), home.join("app.previous.aside"));
-    let on_run: Rc<dyn Fn(usize) -> Option<Ran>> = Rc::new(move |n| {
-        match n {
-            1 => fs::rename(&previous, &aside).unwrap(),
-            2 => fs::rename(&aside, &previous).unwrap(),
-            _ => {}
+    io.live_running = Some(Rc::new({
+        let (previous, aside) = (previous.clone(), aside.clone());
+        move || {
+            if previous.exists() {
+                fs::rename(&previous, &aside).unwrap();
+            }
+            async { false }.boxed_local()
         }
-        None
-    });
-    let done = roll_back(&env, 0, None, calls(), on_run).await;
-    assert_eq!(done.code, 1, "{}", done.said);
-    assert!(done.said.contains("Couldn't switch back"), "{}", done.said);
-    assert!(!done.said.contains("restoring its bridge also failed"), "{}", done.said);
-    // The bridge went back, then forward again: a rollback again restores the generation it left.
-    assert_eq!(done.ran.len(), 2);
-    assert!(done.ran.iter().all(|args| args[1..3] == ["lifecycle", "rollback"]));
+    }));
+    let ran = calls();
+    io.run = Some(Rc::new({
+        let ran = ran.clone();
+        move |command, args, _| {
+            ran.borrow_mut().push([vec![command], args].concat());
+            async { Ran { code: 0, stdout: json!({"state":"completed"}).to_string(), stderr: String::new() } }.boxed_local()
+        }
+    }));
+    assert_eq!(rollback_installed(io).await.unwrap(), 1);
+    let said = out.0.borrow().clone();
+    assert!(said.contains("Couldn't switch back"), "{said}");
+    // The bridge goes back only after the app has: nothing ran, and the newer Kumi is where it was.
+    assert!(ran.borrow().is_empty());
     assert_eq!(version_of(home.join("app")), KUMI_VERSION);
-    assert_eq!(version_of(home.join("app.previous")), "1.8.11");
+    assert!(!previous.exists());
+    assert_eq!(version_of(&aside), "1.8.11");
+    assert_eq!(extension_in_live(dir.path()), "// 1.0.85's");
 }
 #[tokio::test]
 async fn a_rollback_without_the_earlier_kumis_bridge_kept_keeps_the_newer_one() {
