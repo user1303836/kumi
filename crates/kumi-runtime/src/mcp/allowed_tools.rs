@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use tokio::sync::oneshot;
 
 use super::client::{McpEndpoint, MAX_BRIDGE_MESSAGE_BYTES};
-use super::types::{CallToolResult, Tool};
+use super::types::{CallToolResult, ContentBlock, Tool};
 use crate::core::{contracts::JsonObject, errors::RuntimeError, timing};
 
 /// Tools the model may call directly: reads.
@@ -264,6 +264,10 @@ impl AllowedTools {
                 result = retried;
             }
         }
+        // The answer's size, as its text carries it (the bridge sends the same as structured content beside it).
+        timing::live_bytes(
+            result.content.iter().map(|block| if let ContentBlock::Text { text, .. } = block { text.len() } else { 0 }).sum(),
+        );
         signal.check()?;
         if !options.host && (!self.is_valid() || invalidation != self.state.borrow().invalidation) {
             return Err(RuntimeError::plain("MCP catalog changed during the call; result discarded"));

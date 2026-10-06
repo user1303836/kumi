@@ -417,7 +417,10 @@ impl KernelTool for LiveTool {
             let out = owner.mutations.act(kind, input, signal, false).await;
             return Ok(ToolResult { text: out.text, is_error: out.is_error, ..Default::default() });
         }
-        match self.name.as_str() {
+        // What may change any device without Live telling (Python run in Live, a command, a plug-in, an undo): the
+        // next turn reads them all.
+        let unseen = matches!(self.name.as_str(), "run_python" | "live_command" | "plugin" | "undo_change" | "undo_in_live");
+        let result = match self.name.as_str() {
             "find_sounds" => owner.find_sounds(input, signal).await,
             "read_notes" => Ok(super::notes::read_notes(&input, &owner.connection, owner.observer.tempo.get(), signal).await),
             "make_changes" => owner.mutations.make_changes(input, signal).await,
@@ -439,7 +442,11 @@ impl KernelTool for LiveTool {
             "live_command" => owner.commands.live_command(&input, signal).await,
             "plugin" => owner.commands.plugin_tool(&input, signal).await,
             _ => Ok(owner.connection.invoke(&self.name, input, signal).await),
+        };
+        if unseen {
+            owner.observer.forget_devices();
         }
+        result
     }
 }
 #[async_trait(?Send)]

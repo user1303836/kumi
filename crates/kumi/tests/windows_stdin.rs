@@ -106,15 +106,62 @@ fn mode(console: &File) -> u32 {
     mode
 }
 
-fn queue_empty(console: &File) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+/// The console's input queue, as it is.
+fn queued(console: &File) -> Vec<INPUT_RECORD> {
+    let mut count = 0;
+    assert_ne!(unsafe { GetNumberOfConsoleInputEvents(console.as_raw_handle(), &mut count) }, 0);
+    let mut records = vec![INPUT_RECORD::default(); count as usize];
+    let mut read = 0;
+    if count > 0 {
+        // SAFETY: records has room for count initialized records.
+        assert_ne!(unsafe { PeekConsoleInputW(console.as_raw_handle(), records.as_mut_ptr(), count, &mut read) }, 0);
+    }
+    records.truncate(read as usize);
+    records
+}
+
+/// A queued record, briefly, for a failure message.
+fn describe(records: &[INPUT_RECORD]) -> String {
+    let each = records.iter().map(|record| match u32::from(record.EventType) {
+        KEY_EVENT => {
+            // SAFETY: KEY_EVENT selects this union member.
+            let key = unsafe { record.Event.KeyEvent };
+            let unit = unsafe { key.uChar.UnicodeChar };
+            format!(
+                "key {:?}x{}{} vk{} scan{:#x}",
+                char::from_u32(u32::from(unit)).unwrap_or('?'),
+                key.wRepeatCount,
+                if key.bKeyDown == 0 { " up" } else { "" },
+                key.wVirtualKeyCode,
+                key.wVirtualScanCode
+            )
+        }
+        FOCUS_EVENT => "focus".into(),
+        MENU_EVENT => "menu".into(),
+        WINDOW_BUFFER_SIZE_EVENT => "size".into(),
+        MOUSE_EVENT => "mouse".into(),
+        other => format!("event {other}"),
+    });
+    each.collect::<Vec<_>>().join(", ")
+}
+
+/// Whether a queued record is a key. The console adds focus events of its own whenever another console window
+/// comes or goes (each test opens its own), and only a pending read takes them: while the parent is paused they
+/// stay queued, and they aren't the test's input.
+fn is_key(record: &INPUT_RECORD) -> bool {
+    u32::from(record.EventType) == KEY_EVENT
+}
+
+/// Waits until the reader has taken every key queued for it: a cooked read takes them into its line, a raw read
+/// takes them out. Events the console adds don't count (see `is_key`); a queue that holds only those is done.
+fn keys_taken(console: &File) {
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        let mut count = 0;
-        assert_ne!(unsafe { GetNumberOfConsoleInputEvents(console.as_raw_handle(), &mut count) }, 0);
-        if count == 0 {
+        let records = queued(console);
+        if !records.iter().any(is_key) {
             return;
         }
-        assert!(Instant::now() < deadline, "reader did not consume the prepared console records ({count} remain)");
+        assert!(Instant::now() < deadline, "the reader didn't take the queued keys in 30 s: [{}]", describe(&records));
         // Sleep, not yield: on Windows a yield hands the processor only to a thread ready on the same one,
         // so seven tests spinning at once could starve the reader they wait for.
         std::thread::sleep(Duration::from_millis(2));
@@ -188,7 +235,7 @@ fn child_reads(console: &File, text: &str) {
     child.stderr.take().unwrap().read_to_string(&mut errors).unwrap();
     assert!(status.success(), "child read failed: {status}\n{rest}\n{errors}");
     process.0.take();
-    queue_empty(console);
+    keys_taken(console);
 }
 
 #[test]
@@ -228,7 +275,7 @@ fn raw_console_preserves_vt_unicode_repeats_and_queued_parent_input() {
                 let mut release = key(b'x' as u16, 1);
                 release.Event.KeyEvent.bKeyDown = 0;
                 write_records(&console, &[focus, release]);
-                queue_empty(&console);
+                keys_taken(&console);
                 tokio::task::yield_now().await;
                 assert!(!ended.get(), "non-text records must not emit EOF");
                 // The host expands VT input into text events. WriteConsoleInputW
@@ -251,10 +298,12 @@ fn raw_console_preserves_vt_unicode_repeats_and_queued_parent_input() {
                 let expected = format!("{prefix}😀");
                 let mut records: Vec<_> = prefix.encode_utf16().map(|unit| key(unit, 1)).collect();
                 records.extend([key(0xd83d, 1), key(0xde00, 1)]);
+                // Focus events the console added meanwhile would move the 128-record boundary; nothing reads now,
+                // so clear them first.
+                assert_ne!(unsafe { FlushConsoleInputBuffer(console.as_raw_handle()) }, 0);
                 write_records(&console, &records);
-                let mut queued = 0;
-                assert_ne!(unsafe { GetNumberOfConsoleInputEvents(console.as_raw_handle(), &mut queued) }, 0);
-                assert_eq!(queued, 129, "the high surrogate must be record128 and its low surrogate record129");
+                let keys = queued(&console).iter().filter(|record| is_key(record)).count();
+                assert_eq!(keys, 129, "the high surrogate must be record128 and its low surrogate record129");
                 // Pause in the first callback, even if it contains only the ASCII
                 // prefix. Waiting for the full expected length would hide a pair
                 // split across callbacks and leave its second half for the child.
@@ -269,7 +318,7 @@ fn raw_console_preserves_vt_unicode_repeats_and_queued_parent_input() {
                     write_text(&console, "p");
                     // No LocalSet poll until after pause: the native reader has
                     // queued genuine parent input, which must survive the handoff.
-                    queue_empty(&console);
+                    keys_taken(&console);
                     input.pause();
                     input.set_raw_mode(false).unwrap();
                     child_reads(&console, &format!("buffered-child-{round}"));
@@ -305,7 +354,7 @@ fn cooked_console_pause_preserves_os_editing_and_partial_text() {
                     let _repeated_resume = receive(&input, 2, false);
                     assert_eq!(mode(&console), original & !ENABLE_VIRTUAL_TERMINAL_INPUT);
                     write_text(&console, "ab\u{8}C");
-                    queue_empty(&console);
+                    keys_taken(&console);
                     input.pause();
                     assert_eq!(mode(&console), original, "pause restores the exact inherited flags");
                     child_reads(&console, &format!("cooked-child-{round}"));
@@ -319,7 +368,7 @@ fn cooked_console_pause_preserves_os_editing_and_partial_text() {
                 assert_ne!(unsafe { SetConsoleMode(console.as_raw_handle(), original) }, 0);
                 let _waiting = receive(&input, 11, false);
                 write_text(&console, "mode-parent");
-                queue_empty(&console);
+                keys_taken(&console);
                 input.set_raw_mode(true).unwrap();
                 assert_eq!(mode(&console), ENABLE_VIRTUAL_TERMINAL_INPUT);
                 input.pause();
@@ -332,7 +381,7 @@ fn cooked_console_pause_preserves_os_editing_and_partial_text() {
                 input.resume(Rc::new(|_| panic!("unexpected parent input")));
                 assert_eq!(mode(&console), original & !ENABLE_VIRTUAL_TERMINAL_INPUT);
                 write_text(&console, "drop-parent");
-                queue_empty(&console);
+                keys_taken(&console);
                 drop(input);
                 assert_eq!(mode(&console), original, "Drop restores inherited cooked VT mode");
                 child_reads(&console, "drop-child");
@@ -361,7 +410,7 @@ fn cooked_console_eof_is_once_and_leaves_no_cancellation_input() {
                 }));
                 input.resume(Rc::new(|_| panic!("Ctrl+Z at the start of a cooked line must be EOF")));
                 write_text(&console, "\u{1a}\r");
-                queue_empty(&console);
+                keys_taken(&console);
                 input.pause();
                 child_reads(&console, "eof-child");
                 input.resume(Rc::new(|_| panic!("data after EOF")));
@@ -393,7 +442,7 @@ fn natural_newline_racing_pause_never_reaches_the_child() {
                     let _waiting = receive(&input, 8, false);
                     assert_eq!(mode(&console), original & !ENABLE_VIRTUAL_TERMINAL_INPUT);
                     write_text(&console, "parent");
-                    queue_empty(&console);
+                    keys_taken(&console);
                     // Enqueue the real Return first, then race its completion
                     // publication. Any synthetic Return belongs solely to the parent.
                     write_text(&console, "\r");
@@ -424,7 +473,7 @@ fn cooked_pause_finishes_buffered_line_tails_before_child_handoff() {
                         let expected = if newline { format!("{text}\r\n") } else { text.clone() };
                         let _waiting = receive(&input, expected.len(), false);
                         write_text(&console, &text);
-                        queue_empty(&console);
+                        keys_taken(&console);
                         if newline {
                             write_text(&console, "\r");
                         }

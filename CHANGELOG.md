@@ -3,6 +3,24 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.8.5 — 2026-10-06
+
+Ships with bridge 1.0.79, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+
+- On a big Set, each turn's look at Live is about three times faster and reads a seventh of the data:
+  Kumi keeps the Set's devices while Live tells of no change.
+- Kumi keeps a model of the open Set in memory, the base for finding tracks by name and for history
+  (nothing changes on screen yet).
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.79
+
+- Groundwork for following tracks: each track of a Set gets an id of Kumi's, saved with the Set; no
+  feature uses them yet.
+
 ## 1.8.4 — 2026-10-06
 
 Ships with bridge 1.0.78, which Live loads when it restarts. After updating, Kumi offers to quit Live

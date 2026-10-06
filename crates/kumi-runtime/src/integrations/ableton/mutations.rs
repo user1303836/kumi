@@ -46,13 +46,29 @@ impl Mutations {
         )
     }
     pub async fn change(&self, kind: &ChangeKind, named: JsonObject, original: Signal, settled: bool) -> ChangeOutcome {
-        match self.try_change(kind, named, original, settled).await {
+        // A change acting on a track's devices reads them again first, so what Kumi holds of them is current where it
+        // acts, and is refused if a device it names isn't the one this turn showed. One that changes the devices
+        // themselves (or renames one) has them read again on the next turn too, since Live tells of no device renamed.
+        let acts = matches!(kind.family, ChangeFamily::Device | ChangeFamily::Parameter) || kind.tool == "set_chain_mixer";
+        let changes = matches!(kind.family, ChangeFamily::Device | ChangeFamily::Rename);
+        let (tracks, devices) =
+            if acts || changes { self.observer.devices_named(&named, kind.family == ChangeFamily::Device) } else { (vec![], vec![]) };
+        if acts {
+            if let Err(text) = self.observer.refresh_devices(&tracks, &devices, original.clone()).await {
+                return ChangeOutcome::error(text);
+            }
+        }
+        let outcome = match self.try_change(kind, named, original, settled).await {
             Ok(result) => result,
             Err(ReadError::Observation(error)) => ChangeOutcome::error(error.0),
             Err(ReadError::Other(_)) => {
                 ChangeOutcome::error("The change failed before anything happened in Live; discover again, then retry.")
             }
+        };
+        if changes {
+            self.observer.devices_changed(&tracks);
         }
+        outcome
     }
     async fn try_change(&self, kind: &ChangeKind, named: JsonObject, original: Signal, settled: bool) -> Result<ChangeOutcome, ReadError> {
         let history = &self.parameters.history;

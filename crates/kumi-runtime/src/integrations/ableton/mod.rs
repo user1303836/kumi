@@ -37,6 +37,7 @@ pub mod plan_stream;
 pub mod plugin_tool;
 pub mod project;
 pub mod samples;
+pub mod set_model;
 pub mod track_ids;
 pub mod willington;
 

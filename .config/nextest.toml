@@ -1,9 +1,3 @@
-# Windows' console tests are left to CI's serial "Windows input regressions" step, which runs all three
-# with cargo test on every Windows run. Under nextest's process per test, windows_stdin's racing-pause test
-# leaves a console record unread now and then, even alone. They're Windows-only, so nothing else changes.
-[profile.default]
-default-filter = "not (binary(windows_stdin) | binary(windows_tty) | binary(windows_console_control))"
-
 # nextest runs many test binaries at once. Tests that hold work to a time bound run alone, so the
 # tests beside them can't make them late.
 [[profile.default.overrides]]
