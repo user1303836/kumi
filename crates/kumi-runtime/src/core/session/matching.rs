@@ -160,6 +160,10 @@ impl Session {
             }
             s.matching = run.clone();
         }
+        // A match run goes on by itself: its words aren't a reaction.
+        if let Some(taste) = &self.0.taste {
+            taste.turn_started(&text, run.is_none());
+        }
         let brief = if run.is_some() && !carried {
             playbook_brief(&self.playbook_serial(|s| async move { s.list().await }.boxed_local()).await.unwrap_or_default(), &text, 5)
         } else {

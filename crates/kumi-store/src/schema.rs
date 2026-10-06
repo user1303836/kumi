@@ -92,7 +92,26 @@ CREATE TABLE forgotten (
 /// A file's base (`sync`): the file as Kumi last read or wrote it, as JSONB, for a three-way merge.
 const V2: &str = "ALTER TABLE imports ADD COLUMN base BLOB;";
 
-const MIGRATIONS: &[&str] = &[V1, V2];
+/// What the producer did in answer to Kumi (`observations`), to learn their taste from later: rows are
+/// only ever added.
+const V3: &str = "
+CREATE TABLE observations (
+  id TEXT PRIMARY KEY,
+  at INTEGER NOT NULL,
+  session TEXT NOT NULL,
+  project TEXT,
+  kind TEXT NOT NULL CHECK (kind IN ('words', 'pick', 'technique_offer', 'undo', 'edit_after', 'reuse')),
+  weight REAL,
+  heard INTEGER CHECK (heard IN (0, 1)),
+  subject BLOB NOT NULL,
+  facts BLOB NOT NULL,
+  context BLOB NOT NULL
+) STRICT;
+CREATE INDEX observations_project ON observations (project, at);
+CREATE INDEX observations_at ON observations (at);
+";
+
+const MIGRATIONS: &[&str] = &[V1, V2, V3];
 /// The schema version this build writes.
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
 
@@ -136,5 +155,23 @@ mod tests {
             Some(crate::imports::Record { blake3: "h".into(), base: None }),
             "read in before bases: the next change is read in as the first time was"
         );
+    }
+
+    #[test]
+    fn a_database_from_before_observations_keeps_its_notes_and_gets_the_table() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(V1).unwrap();
+        connection.execute_batch(V2).unwrap();
+        connection.pragma_update(None, "user_version", 2).unwrap();
+        connection
+            .execute(
+                "INSERT INTO notes (id, scope_kind, label, text, created_at, updated_at) VALUES ('n1', 'global', 'p1', 'Likes dry drums', 1, 1)",
+                [],
+            )
+            .unwrap();
+        migrate(&mut connection).unwrap();
+        assert_eq!(connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION as i64);
+        assert_eq!(connection.query_row("SELECT text FROM notes", [], |row| row.get::<_, String>(0)).unwrap(), "Likes dry drums");
+        assert_eq!(connection.query_row("SELECT count(*) FROM observations", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
     }
 }
