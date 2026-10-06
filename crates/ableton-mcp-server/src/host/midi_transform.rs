@@ -52,6 +52,15 @@ fn transform_notes(notes: &[Value], kind: &str, params: &Value, length: f64) -> 
 
     Ok((outcome.notes.iter().map(|n| serde_json::to_value(n).unwrap()).collect(), serde_json::to_value(outcome).unwrap()))
 }
+/// Why a transform of an Arrangement clip can't write into a copy: a copy goes to a Session slot, which an Arrangement
+/// clip can't be copied to, so its notes change in place.
+fn arrangement_refusal(name: &str, kind: &str, generative: bool) -> String {
+    if generative {
+        format!("\"{name}\" is an Arrangement clip, and a generative transform ({kind}) writes into a copy in a Session slot, which an Arrangement clip can't be copied to: run it on a Session clip, or use a transform that changes notes in place (scope in-place)")
+    } else {
+        format!("\"{name}\" is an Arrangement clip: its notes change in place (scope in-place); duplicate scope copies into a Session slot, which an Arrangement clip can't be copied to")
+    }
+}
 fn note_diff(before: &[Value], after: &[Value]) -> Result<Value, LiveError> {
     let before: Vec<Note> = serde_json::from_value(json!(before)).map_err(|e| LiveError::error(e.to_string()))?;
     let after: Vec<Note> = serde_json::from_value(json!(after)).map_err(|e| LiveError::error(e.to_string()))?;
@@ -227,18 +236,6 @@ return Err(LiveError::error(format!("{operation} is unavailable")));
 }
 
             let scope=params.get("scope");
-            if scope==Some(&json!("in-place"))&&generative&&probe["deleteRecreatePreservesExpression"]!=true{
-return Ok(transaction_error(id,
-"Generative transforms delete and recreate notes, which cannot preserve per-note expression the canonical schema does not expose; use duplicate scope so the source clip is preserved"));
-}
-
-            if scope==Some(&json!("duplicate"))&&!params["target"].is_object(){
-return Ok(error(id,
--32602,
-"duplicate scope requires an exact target {trackRef, sceneIndex} naming an empty Session slot",
-None));
-}
-
             let snapshot=if kind=="drum-pattern"&&params["params"].get("mapping").is_none(){
 self.views.whole_set(None,
 Some(audition::TRACK_CONTENT_PARTS)).await?}
@@ -255,6 +252,21 @@ None,
 ;
 
             let clip=self.note_clip(&snapshot, None,params["clipRef"].as_str().unwrap()).await?;
+            // An Arrangement clip's notes change in place: a generative transform (whatever its scope) and a copy are
+            // refused first, so the model isn't sent toward a copy or a Session slot before this.
+            if clip.arrangement&&(generative||scope==Some(&json!("duplicate"))){
+return Ok(transaction_error(id,&arrangement_refusal(&clip.name,kind,generative)));
+}
+            if scope==Some(&json!("in-place"))&&generative&&probe["deleteRecreatePreservesExpression"]!=true{
+return Ok(transaction_error(id,
+"Generative transforms delete and recreate notes, which cannot preserve per-note expression the canonical schema does not expose; use duplicate scope so the source clip is preserved"));
+}
+            if scope==Some(&json!("duplicate"))&&!params["target"].is_object(){
+return Ok(error(id,
+-32602,
+"duplicate scope requires an exact target {trackRef, sceneIndex} naming an empty Session slot",
+None));
+}
             if clip.notes.iter().any(|n|!n["id"].is_number()){return Err(LiveError::error("stable note identity is unavailable for this clip"));}
             let(resolved,
 mut assumptions)=if ["chord-progression",
@@ -302,12 +314,9 @@ return Ok(transaction_error(id,
 "Large transforms default to duplicate scope; pass scope=in-place explicitly to edit the source clip"));
 }
 
-            // A copy goes to a Session slot, which an Arrangement clip can't be copied into: its notes change in place.
+            // A large transform's copy (its default) goes to a Session slot too.
             if effective=="duplicate"&&clip.arrangement{
-return Ok(transaction_error(id,&if generative{
-format!("\"{}\" is an Arrangement clip, and a generative transform ({kind}) writes into a copy in a Session slot, which an Arrangement clip can't be copied to: run it on a Session clip, or use a transform that changes notes in place (scope in-place)",clip.name)}
-else{
-format!("\"{}\" is an Arrangement clip: its notes change in place (scope in-place); duplicate scope copies into a Session slot, which an Arrangement clip can't be copied to",clip.name)}));
+return Ok(transaction_error(id,&arrangement_refusal(&clip.name,kind,generative)));
 }
             if effective=="duplicate"&&!params["target"].is_object(){
 return Ok(error(id,
