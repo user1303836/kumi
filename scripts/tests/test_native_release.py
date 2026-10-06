@@ -2,6 +2,7 @@
 import gzip
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -16,12 +17,11 @@ from unittest.mock import patch
 import warnings
 import zipfile
 
-SPEC = importlib.util.spec_from_file_location("native_release", Path(__file__).parents[1] / "build-native-release.py")
-release = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(release)
 VENDOR_SPEC = importlib.util.spec_from_file_location("vendor_willington", Path(__file__).parents[1] / "vendor-willington.py")
 vendor = importlib.util.module_from_spec(VENDOR_SPEC)
 VENDOR_SPEC.loader.exec_module(vendor)
+# The release script as the update script loaded it: one module, so a patch on it reaches both.
+release = vendor.release
 # Windows files carry no exec bits, so a bundle built there marks only .exe files executable.
 EXEC_BITS = os.name != "nt"
 
@@ -324,9 +324,9 @@ class NativeRelease(unittest.TestCase):
         release.willington_files(release.ROOT / release.WILLINGTON)
 
     def willington_bundle(self, files, links=()):
-        """A Bundle run's Willington-matrix.zip holding these files, named exactly as given; links are symlinks."""
-        path = self.root / "Willington-matrix.zip"
-        with zipfile.ZipFile(path, "w") as archive, warnings.catch_warnings():
+        """A Willington-matrix.zip holding these files, named exactly as given; links are symlinks."""
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive, warnings.catch_warnings():
             warnings.simplefilter("ignore")  # a name twice
             for name, content in [*files.items(), *((name, b"target") for name in links)]:
                 info = zipfile.ZipInfo("placeholder")
@@ -334,53 +334,121 @@ class NativeRelease(unittest.TestCase):
                 if name in links:
                     info.external_attr = (stat.S_IFLNK | 0o777) << 16
                 archive.writestr(info, content)
-        return path
+        return buffer.getvalue()
 
-    def test_an_update_puts_the_bundle_and_license_in_vendor_willington_with_its_release_json(self):
-        folder, files = self.vendor_willington()
-        runtime = {name: content for name, content in files.items() if name != "LICENSE"}
-        license = self.root / "LICENSE.md"
-        license.write_bytes(b"Willington license fixture\n")
-        listed = vendor.vendor(self.willington_bundle(runtime), license, "d" * 40, root=self.root)
+    def bundle_run(self, files, run=None, compare="behind", artifacts=None, sidecar=None, root=("LICENSE.md", "README.md")):
+        """GitHub's API, through gh, for Bundle run 7 of these files on a push to Willington's main; the arguments
+        change its answers. A path it doesn't know fails as an HTTP error does."""
+        repository, commit = vendor.REPOSITORY, "c" * 40
+        bundle = self.willington_bundle(files)
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("Willington-matrix.zip", bundle)
+            archive.writestr("Willington-matrix.zip.sha256", sidecar or hashlib.sha256(bundle).hexdigest() + "  Willington-matrix.zip\n")
+        digest = "sha256:" + hashlib.sha256(buffer.getvalue()).hexdigest()
+        answers = {
+            f"repos/{repository}/actions/runs/7": {"event": "push", "head_branch": "main", "path": vendor.WORKFLOW, "status": "completed",
+                "conclusion": "success", "head_repository": {"full_name": repository}, "repository": {"full_name": repository},
+                "head_sha": commit, "html_url": f"https://github.com/{repository}/actions/runs/7", **(run or {})},
+            f"repos/{repository}/compare/main...{commit}": {"status": compare},
+            f"repos/{repository}/actions/runs/7/artifacts?per_page=100": {"artifacts": artifacts if artifacts is not None else [
+                {"id": 9, "name": "Willington-matrix", "digest": digest, "expired": False},
+                {"id": 8, "name": "windows-artifacts", "digest": "sha256:" + "0" * 64, "expired": False}]},
+            f"repos/{repository}/actions/artifacts/9/zip": buffer.getvalue(),
+            f"repos/{repository}/contents?ref={commit}": [{"name": name, "type": "file"} for name in root],
+            f"repos/{repository}/contents/LICENSE.md?ref={commit}": b"Willington license fixture\n",
+        }
+        def api(path, *headers):
+            if path not in answers:
+                raise RuntimeError(f"gh api {path} failed: Not Found (HTTP 404)")
+            answer = answers[path]
+            return answer if isinstance(answer, bytes) else json.dumps(answer).encode()
+        return api
+
+    def runtime_files(self):
+        _, files = self.vendor_willington()
+        return {name: content for name, content in files.items() if name != "LICENSE"}
+
+    def test_an_update_puts_a_bundle_runs_files_and_license_in_vendor_willington(self):
+        folder = self.root / release.WILLINGTON
+        runtime = self.runtime_files()
+        fetched = vendor.fetch(7, self.bundle_run(runtime))
+        self.assertEqual((fetched["commit"], fetched["artifact"]), ("c" * 40, 9))
+        self.assertEqual(fetched["licenses"], {"LICENSE.md": b"Willington license fixture\n"})
+        listed = vendor.vendor(fetched["bundle"], fetched["licenses"], fetched["commit"], root=self.root)
         self.assertEqual(set(listed), {*runtime, "LICENSE.md"})
         self.assertEqual(release.willington_files(folder), listed)
         self.assertEqual(json.loads((folder / "release.json").read_text(encoding="utf-8")),
-                         {"schema": release.WILLINGTON_SCHEMA, "version": "d" * 12, "commit": "d" * 40, "files": listed})
+                         {"schema": release.WILLINGTON_SCHEMA, "version": "c" * 12, "commit": "c" * 40, "files": listed})
         # The earlier update's files go, its LICENSE among them, and nothing staged is left beside the folder.
         self.assertFalse((folder / "LICENSE").exists())
         self.assertEqual([path.name for path in folder.parent.iterdir()], ["willington"])
-        vendor.vendor(self.willington_bundle(runtime), license, "e" * 40, "0.5.0", root=self.root)
+        # A reviewer's check rebuilds the folder from the run and finds each changed file.
+        self.assertEqual(vendor.check(fetched, root=self.root), [])
+        (folder / "WillingtonRuntime/matrix.json").write_bytes(b'{"changed": true}\n')
+        (folder / "WillingtonRuntime/extra.py").write_bytes(b"")
+        self.assertEqual(vendor.check(fetched, root=self.root), ["WillingtonRuntime/extra.py", "WillingtonRuntime/matrix.json"])
+        vendor.vendor(fetched["bundle"], fetched["licenses"], fetched["commit"], "0.5.0", root=self.root)
         self.assertEqual(json.loads((folder / "release.json").read_text(encoding="utf-8"))["version"], "0.5.0")
+        self.assertEqual(vendor.check(fetched, root=self.root), [])
+        self.assertEqual(vendor.check({**fetched, "commit": "e" * 40}, root=self.root), ["release.json"])
+
+    def test_only_a_successful_bundle_run_on_a_push_to_willingtons_main_is_taken(self):
+        runtime = self.runtime_files()
+        listed = {"id": 9, "name": "Willington-matrix", "digest": "sha256:" + "0" * 64, "expired": False}
+        for changes, refused in [
+                ({"run": {"event": "pull_request"}}, "event 'pull_request'"),
+                ({"run": {"event": "workflow_dispatch"}}, "event 'workflow_dispatch'"),
+                ({"run": {"head_branch": "ci/bundle"}}, "head_branch 'ci/bundle'"),
+                # A fork's branch called main.
+                ({"run": {"head_repository": {"full_name": "someone/willington"}}}, "head_repository 'someone/willington'"),
+                ({"run": {"path": ".github/workflows/verify.yml"}}, "path"),
+                ({"run": {"status": "in_progress", "conclusion": None}}, "status 'in_progress', conclusion None"),
+                ({"run": {"conclusion": "failure"}}, "conclusion 'failure'"),
+                ({"run": {"head_sha": "main"}}, "names no commit"),
+                ({"compare": "ahead"}, "isn't on xonedsp/willington's main \\(ahead\\)"),
+                ({"compare": "diverged"}, "isn't on"),
+                ({"artifacts": []}, "0 Willington-matrix artifacts"),
+                ({"artifacts": [listed, {**listed, "id": 10}]}, "2 Willington-matrix artifacts"),
+                ({"artifacts": [{**listed, "expired": True}]}, "expired: rerun it"),
+                ({"artifacts": [listed]}, "not the sha256:0+ GitHub recorded"),
+                ({"sidecar": "0" * 64 + "  Willington-matrix.zip\n"}, "doesn't match its .sha256"),
+                ({"root": ("README.md",)}, "has no LICENSE or LICENSE.md")]:
+            with self.subTest(changes=changes):
+                with self.assertRaisesRegex(ValueError, refused):
+                    vendor.fetch(7, self.bundle_run(runtime, **changes))
+        # A license gh can't fetch fails the update rather than becoming its error page.
+        with self.assertRaisesRegex(RuntimeError, "LICENSE\\?ref=.*HTTP 404"):
+            vendor.fetch(7, self.bundle_run(runtime, root=("LICENSE",)))
 
     def test_a_refused_update_leaves_vendor_willington_as_it_was(self):
         folder, files = self.vendor_willington()
         before = release.inventory(folder)
         runtime = {name: content for name, content in files.items() if name != "LICENSE"}
-        license = self.root / "LICENSE.md"
-        license.write_bytes(b"Willington license fixture\n")
+        licenses = {"LICENSE.md": b"Willington license fixture\n"}
         for extra, refused in [({"../outside.py": b""}, "can't go in"), ({"/absolute.py": b""}, "can't go in"),
                                ({"WillingtonRuntime/../../outside.py": b""}, "can't go in"),
                                ({"WillingtonRuntime\\x.py": b""}, "can't go in"), ({"release.json": b"{}"}, "can't go in"),
-                               ({"LICENSE": b"another notice\n"}, "can't go in"),
-                               ({"NOTICE.md": b"fixture"}, "isn't one of Willington's runtime files"),
+                               ({"LICENSE": b"another notice\n"}, "can't go in"), ({"NOTICE.md": b"fixture"}, "can't go in"),
+                               ({"willingtonruntime/x.py": b""}, "can't go in"),
+                               ({"WillingtonRuntime/Matrix.json": b"{}\n"}, "differ only in case"),
                                ({"WillingtonDeviceTools/native_windows.cpp": b"fixture"}, "isn't one of Willington's runtime files")]:
             with self.subTest(extra=extra):
                 with self.assertRaisesRegex(ValueError, refused):
-                    vendor.vendor(self.willington_bundle({**runtime, **extra}), license, "d" * 40, root=self.root)
+                    vendor.vendor(self.willington_bundle({**runtime, **extra}), licenses, "d" * 40, root=self.root)
                 self.assertEqual(release.inventory(folder), before)
         with self.assertRaisesRegex(ValueError, "can't go in"):
-            vendor.vendor(self.willington_bundle(runtime, links=["WillingtonRuntime/link.py"]), license, "d" * 40, root=self.root)
-        bundle = self.willington_bundle(runtime)
+            vendor.vendor(self.willington_bundle(runtime, links=["WillingtonRuntime/link.py"]), licenses, "d" * 40, root=self.root)
+        bundle = io.BytesIO(self.willington_bundle(runtime))
         with zipfile.ZipFile(bundle, "a") as archive, warnings.catch_warnings():
             warnings.simplefilter("ignore")
             archive.writestr("WillingtonRuntime/matrix.json", b'{"second": true}\n')
         with self.assertRaisesRegex(ValueError, "twice"):
-            vendor.vendor(bundle, license, "d" * 40, root=self.root)
+            vendor.vendor(bundle.getvalue(), licenses, "d" * 40, root=self.root)
         with self.assertRaisesRegex(ValueError, "invalid commit"):
-            vendor.vendor(self.willington_bundle(runtime), license, "main", root=self.root)
-        (self.root / "COPYING").write_bytes(b"Willington license fixture\n")
+            vendor.vendor(self.willington_bundle(runtime), licenses, "main", root=self.root)
         with self.assertRaisesRegex(ValueError, "license notice"):
-            vendor.vendor(self.willington_bundle(runtime), self.root / "COPYING", "d" * 40, root=self.root)
+            vendor.vendor(self.willington_bundle(runtime), {"COPYING": b"Willington license fixture\n"}, "d" * 40, root=self.root)
         self.assertEqual(release.inventory(folder), before)
         self.assertEqual([path.name for path in folder.parent.iterdir()], ["willington"])
 

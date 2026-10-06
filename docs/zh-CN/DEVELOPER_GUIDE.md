@@ -131,19 +131,13 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 发布会把这些文件放在桥接的 Remote Script 中，即 `AbletonMcpBridge/willington/`，原生库只带本平台的（Windows 上是 `.pyd`，macOS 上是 `.dylib`），总共最多 16 MiB；Linux 的安装包不带。桥接安装时会一并复制这个文件夹，并在 Python 文件旁边放一个 `__pycache__` 阻挡文件，使安装后的文件树保持安装回执所记录的样子。已安装的桥接中有两个文件属于制作人而不属于发布：`willington.json` 和跟随动作自检回执 `willington/WillingtonBindings/self-test.json`。它们不影响桥接的安装检查，安装时也会保留下来。只有当 `willington.json` 开启 Willington 后，桥接才会把这个文件夹加入 Python 的路径，并且排在安装在桥接旁边的副本之后。
 
-**更新 Willington。** Willington 的 Bundle 工作流在每个目标平台上构建它的原生库，并把矩阵发行包保留为每次运行的产物。更新使用 Willington `main` 上一次运行的发行包：
+**更新 Willington。** Willington 的 Bundle 工作流在每个目标平台上构建它的原生库，并把矩阵发行包保留为每次运行的产物。更新使用推送到 Willington `main` 时的一次运行：
 
-1. 找到这次运行和它构建的提交：先运行 `gh run list -R xonedsp/willington -w Bundle -b main -s success`，再运行 `gh run view <run> -R xonedsp/willington --json headSha`。
-2. 下载它的发行包并校验，再取得那个提交上的许可声明：
+1. 找到这次运行：`gh run list -R xonedsp/willington -w Bundle -b main -e push -s success`。
+2. 在从 `main` 创建、名为 `willington/<任意名称>` 的分支上，运行 `python3 scripts/vendor-willington.py --run <run>`。它会检查这次运行是推送到 Willington `main` 后成功的 Bundle 运行，并且它的提交在 `main` 上；检查产物与 GitHub 记录的摘要一致、发行包与它的 SHA-256 一致；再取得那个提交上 Willington 的许可声明。只有新文件夹通过发布检查后，它才会替换原来的文件夹，然后打印提交、运行和产物的摘要。
+3. 打开一个不修改其他任何内容的拉取请求，写上它打印的内容。`Willington files` 只让仓库所有者从本仓库 `willington/` 分支发出的拉取请求通过，Installer 会在全部六个平台上构建并安装。
 
-   ```sh
-   gh run download <run> -R xonedsp/willington -n Willington-matrix -D <dir>
-   (cd <dir> && shasum -a 256 -c Willington-matrix.zip.sha256)
-   gh api "repos/xonedsp/willington/contents/LICENSE.md?ref=<commit>" -H "Accept: application/vnd.github.raw" > <dir>/LICENSE.md
-   ```
-
-3. 在从 `main` 创建的分支上运行 `python3 scripts/vendor-willington.py <dir>/Willington-matrix.zip --license <dir>/LICENSE.md --commit <commit>`。只有新文件夹通过发布检查后，它才会替换原来的文件夹。
-4. 打开一个不修改其他任何内容的拉取请求，写明 Willington 的提交和运行。`Willington files` 只让仓库所有者从本仓库分支发出的拉取请求通过，Installer 会在全部六个平台上构建并安装。
+审查者用 `python3 scripts/vendor-willington.py --check <run>` 检查一次更新：它从这次运行重新构建文件夹，并逐个文件比较。
 
 这些库由 CI 构建，所以它们的哈希可能与在 Live 中验证过的不同。在发布这次更新的版本之前，请先在 Live 中检查它，并为它的库运行[跟随动作自检](WILLINGTON_INTEGRATION.md#跟随动作自检)。
 

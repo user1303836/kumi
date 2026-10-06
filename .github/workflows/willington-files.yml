@@ -1,9 +1,10 @@
 name: Willington files
 
 # Willington's runtime files in vendor/willington/ ship to every producer, and their native libraries can't be
-# reviewed, so who sends them is the check. Only the repository owner's pull requests, from a branch in this
-# repository, change the folder, and such a pull request changes nothing else. An update comes from a Bundle run
-# on Willington's main, by scripts/vendor-willington.py (see docs/en/DEVELOPER_GUIDE.md).
+# reviewed, so who sends them is the check. Only the repository owner's pull requests, from a willington/ branch
+# in this repository, change the folder, and such a pull request changes nothing else. Only admins push those
+# branches (the "Willington branches" ruleset). An update comes from a Bundle run on Willington's main, by
+# scripts/vendor-willington.py (see docs/en/DEVELOPER_GUIDE.md).
 on:
   # The base branch's copy of this workflow runs, never the pull request's, so a pull request can't change
   # the check it's held to. It reads the pull request's metadata only, never its code. `edited` covers a
@@ -33,6 +34,7 @@ jobs:
           AUTHOR: ${{ github.event.pull_request.user.login }}
           AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
           OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
@@ -50,10 +52,11 @@ jobs:
             echo "Nothing in vendor/willington/ changes."
             exit 0
           fi
-          # A fork's branch is pushed by whoever owns the fork; a branch here only by this repository's writers.
-          if [[ "$AUTHOR" != "$OWNER" || "$AUTHOR_TYPE" != "User" || "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]]; then
-            echo "Only $OWNER's pull requests, from a branch in $GITHUB_REPOSITORY, change vendor/willington/."
-            echo "This pull request is from $AUTHOR, on ${HEAD_REPO:-a deleted repository}, and changes:"
+          # A fork's branch is pushed by whoever owns the fork. Here, only admins push willington/ branches, so the
+          # commits are the owner's too, not just the pull request.
+          if [[ "$AUTHOR" != "$OWNER" || "$AUTHOR_TYPE" != "User" || "$HEAD_REPO" != "$GITHUB_REPOSITORY" || "$BRANCH" != willington/* ]]; then
+            echo "Only $OWNER's pull requests, from a willington/ branch in $GITHUB_REPOSITORY, change vendor/willington/."
+            echo "This pull request is from $AUTHOR, on ${HEAD_REPO:-a deleted repository}:$BRANCH, and changes:"
             sed 's/^/  /' <<<"$vendor"
             echo "::error::Only $OWNER's pull requests change vendor/willington/."
             exit 1

@@ -131,19 +131,13 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 リリースは、これらのファイルをブリッジの Remote Script の中、`AbletonMcpBridge/willington/` に置きます。ネイティブライブラリは自分のプラットフォームのもの（Windows では `.pyd`、macOS では `.dylib`）だけで、合計 16 MiB までです。Linux のバンドルには入りません。ブリッジのインストールはそのフォルダーも一緒にコピーし、Python ファイルの隣に `__pycache__` のブロッカーを置くので、インストールされたツリーはインストールのレシートが記録したとおりに保たれます。インストールされたブリッジのうち 2 つのファイルは、リリースのものではなくプロデューサーのものです。`willington.json` と、Follow Action のセルフテストのレシート `willington/WillingtonBindings/self-test.json` です。これらはブリッジのインストールの確認に影響せず、インストールのときに引き継がれます。ブリッジがこのフォルダーを Python のパスに加えるのは、`willington.json` が Willington をオンにしたときだけで、ブリッジの隣にインストールされたコピーより後になります。
 
-**Willington の更新。** Willington の Bundle ワークフローは、ネイティブライブラリをそれぞれの対象プラットフォームでビルドし、マトリックスバンドルを各実行のアーティファクトとして残します。更新には、Willington の `main` で実行されたもののバンドルを使います。
+**Willington の更新。** Willington の Bundle ワークフローは、ネイティブライブラリをそれぞれの対象プラットフォームでビルドし、マトリックスバンドルを各実行のアーティファクトとして残します。更新には、Willington の `main` へのプッシュで実行されたものを使います。
 
-1. 実行と、それがビルドしたコミットを見つけます。`gh run list -R xonedsp/willington -w Bundle -b main -s success` のあと、`gh run view <run> -R xonedsp/willington --json headSha` を実行します。
-2. バンドルをダウンロードして確認し、そのコミットのライセンスを取得します。
+1. 実行を見つけます：`gh run list -R xonedsp/willington -w Bundle -b main -e push -s success`。
+2. `main` から作った `willington/<任意の名前>` という名前のブランチで、`python3 scripts/vendor-willington.py --run <run>` を実行します。実行が Willington の `main` へのプッシュで成功した Bundle の実行で、そのコミットが `main` にあること、アーティファクトが GitHub の記録したダイジェストと、バンドルがその SHA-256 と一致することを確認し、そのコミットの Willington のライセンスを取得します。新しいフォルダーがリリースの確認をパスしたときだけフォルダーを置き換え、コミット、実行、アーティファクトのダイジェストを表示します。
+3. ほかに何も変えないプルリクエストを、表示された内容を書いて開きます。`Willington files` がパスするのは、このリポジトリの `willington/` ブランチから出たリポジトリ所有者のプルリクエストだけで、Installer は 6 つのプラットフォームすべてでビルドとインストールを行います。
 
-   ```sh
-   gh run download <run> -R xonedsp/willington -n Willington-matrix -D <dir>
-   (cd <dir> && shasum -a 256 -c Willington-matrix.zip.sha256)
-   gh api "repos/xonedsp/willington/contents/LICENSE.md?ref=<commit>" -H "Accept: application/vnd.github.raw" > <dir>/LICENSE.md
-   ```
-
-3. `main` から作ったブランチで `python3 scripts/vendor-willington.py <dir>/Willington-matrix.zip --license <dir>/LICENSE.md --commit <commit>` を実行します。新しいフォルダーがリリースの確認をパスしたときだけ、フォルダーを置き換えます。
-4. ほかに何も変えないプルリクエストを、Willington のコミットと実行を書いて開きます。`Willington files` がパスするのは、このリポジトリのブランチから出たリポジトリ所有者のプルリクエストだけで、Installer は 6 つのプラットフォームすべてでビルドとインストールを行います。
+レビューする人は `python3 scripts/vendor-willington.py --check <run>` で更新を確認できます。実行からフォルダーを作り直し、ファイルごとに比べます。
 
 ライブラリは CI がビルドするので、ハッシュが Live で検証されたものと違うことがあります。更新は、それを出荷するリリースの前に Live で確認し、そのライブラリについて [Follow Action のセルフテスト](WILLINGTON_INTEGRATION.md#follow-action-のセルフテスト)を実行してください。
 

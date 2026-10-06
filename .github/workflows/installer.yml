@@ -36,11 +36,11 @@ jobs:
       - id: plan
         shell: bash
         run: |
-          # Tags, main and pull requests that change installing, updating, releasing or Willington's files build
-          # all six platforms, install each and check the update from the JavaScript release. A pull request that changes the
-          # bridge, a version number or how Kumi stores what it keeps (the store, settings and sign-ins, memory,
-          # techniques, playbook, gaps, an older Kumi's files), which the update and rollback must carry over,
-          # does that on Linux. Any other builds Linux's bundle only; main installs and checks it once merged.
+          # Tags, main and pull requests that change installing, updating, releasing or Willington's files build all
+          # six platforms, install each and check the update from the JavaScript release. A pull request that changes
+          # the bridge, a version number or how Kumi stores what it keeps (the store, settings and sign-ins, memory,
+          # techniques, playbook, gaps, an older Kumi's files), which the update and rollback must carry over, does
+          # that on Linux. Any other builds Linux's bundle only; main installs and checks it once merged.
           full=true
           checks=true
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then

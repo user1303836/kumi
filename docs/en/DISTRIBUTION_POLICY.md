@@ -70,7 +70,7 @@ earlier.
 
 ## Merge gate
 
-The repository has two rulesets:
+The repository has three rulesets:
 
 - **`main`:**
   - changes arrive by pull request; no approving review is required;
@@ -80,10 +80,12 @@ The repository has two rulesets:
   - the repository admin role can bypass these rules for pull requests.
 - **`Release tags`:** only the repository admin role creates, moves or deletes
   `v*` tags. A tag push runs the Installer, which publishes the release.
+- **`Willington branches`:** only the repository admin role creates, pushes to
+  or deletes `willington/*` branches, which Willington updates come from.
 
 `Willington files` lets only the repository owner's pull requests, from a
-branch in this repository, change `vendor/willington/`, and such a pull request
-changes nothing else. Those files ship to every producer, and their native
+`willington/` branch in this repository, change `vendor/willington/`, and such
+a pull request changes nothing else. Those files ship to every producer, and their native
 libraries can't be reviewed, so who sends them is the check. The
 [developer guide](DEVELOPER_GUIDE.md#willingtons-files) describes an update.
 

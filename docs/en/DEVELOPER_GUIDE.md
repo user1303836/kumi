@@ -228,26 +228,24 @@ bridge.
 
 **Updating Willington.** Willington's Bundle workflow builds its native
 libraries on each platform they're for and keeps the matrix bundle as each
-run's artifact. An update takes the bundle of a run on Willington's `main`:
+run's artifact. An update takes a run from a push to Willington's `main`:
 
-1. Find the run and the commit it built:
-   `gh run list -R xonedsp/willington -w Bundle -b main -s success`, then
-   `gh run view <run> -R xonedsp/willington --json headSha`.
-2. Download its bundle, check it, and fetch the license at that commit:
+1. Find the run: `gh run list -R xonedsp/willington -w Bundle -b main -e push -s success`.
+2. On a branch from `main` named `willington/<anything>`, run
+   `python3 scripts/vendor-willington.py --run <run>`. It checks that the run
+   is a successful Bundle run on a push to Willington's `main` and that its
+   commit is on `main`, that the artifact matches the digest GitHub recorded and
+   the bundle its SHA-256, and fetches Willington's license at that commit. It
+   replaces the folder only once the new one passes the release check, then
+   prints the commit, the run and the artifact's digest.
+3. Open a pull request that changes nothing else, with what it printed.
+   `Willington files` passes only the repository owner's pull requests from a
+   `willington/` branch in this repository, and the Installer builds and
+   installs all six platforms.
 
-   ```sh
-   gh run download <run> -R xonedsp/willington -n Willington-matrix -D <dir>
-   (cd <dir> && shasum -a 256 -c Willington-matrix.zip.sha256)
-   gh api "repos/xonedsp/willington/contents/LICENSE.md?ref=<commit>" -H "Accept: application/vnd.github.raw" > <dir>/LICENSE.md
-   ```
-
-3. On a branch from `main`, run
-   `python3 scripts/vendor-willington.py <dir>/Willington-matrix.zip --license <dir>/LICENSE.md --commit <commit>`.
-   It replaces the folder only once the new one passes the release check.
-4. Open a pull request that changes nothing else, naming the Willington commit
-   and run. `Willington files` passes only the repository owner's pull requests
-   from a branch in this repository, and the Installer builds and installs all
-   six platforms.
+A reviewer checks an update with
+`python3 scripts/vendor-willington.py --check <run>`, which rebuilds the folder
+from the run and compares it file by file.
 
 CI builds the libraries, so their hashes can differ from the ones validated in
 Live. Check an update in Live before the release that ships it, and run the
