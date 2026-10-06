@@ -3,6 +3,46 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.8.4 — 2026-10-06
+
+Ships with bridge 1.0.78, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+
+- Your notes, techniques and lessons now live in a database, `~/.kumi/kumi.db`, brought in from the
+  files earlier versions kept. Nothing is deleted to make room any more: past the limit, the oldest is
+  set aside (pinned notes stay). What you forget stays forgotten.
+- Rolling back keeps what you taught Kumi since the update, and what the older Kumi changes comes back
+  at your next update.
+- With an older Kumi still open after an update, what it keeps reaches the new one a turn later. On
+  macOS and Linux, the update says to restart Kumi windows opened before it.
+- A saved Set keeps what Kumi knows about it (notes, conversations, what changed while it was closed)
+  when it's moved or saved as a version, once it has been saved with this Kumi; a copy in another
+  Project folder starts fresh.
+- On Windows, an install, repair or update that can't replace Kumi's folder leaves the Kumi you had
+  working, and says what to close: a Kumi window, or an antivirus scan.
+- Right after first-run setup restarts Live, Kumi waits for it instead of briefly saying it couldn't
+  reach Live. While Live is starting, Kumi says it's waiting, and says how to make Live answer only
+  when Live isn't open or hasn't answered in 15 seconds.
+- For a Willington installed beside the bridge, `/willington` turns its bindings on and off with Live
+  running (Follow Actions only with a passing self-test for the library there). An update keeps
+  `willington.json` owner-only on Windows, and turning Willington on or off no longer stops
+  `kumi update`.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.78
+
+- An Arrangement clip Kumi writes is confirmed once Live shows it with its notes (about 0.1 s), instead
+  of sometimes being reported as missing. When Live changes a batch of notes, for example shortening
+  overlapping notes of one pitch, Kumi is told which notes and why.
+- Moving an Arrangement clip onto other clips replaces what's there, as dropping it in Live does, and
+  Kumi says what it replaced; an audio clip needs Kumi's Live extension for this. Audio clips read as
+  audio clips everywhere in Kumi; before, Live's own report made them look like MIDI clips.
+- Drift's voices are set by their number. Drift, Meld and Wavetable settings out of range are refused
+  with the choices that work, instead of failing or being clamped in Live. Drift's 4 voices and Meld's
+  off and two voices say to use `run_python` for now.
+
 ## 1.8.3 — 2026-10-05
 
 Ships with bridge 1.0.77, which Live loads when it restarts. After updating, Kumi offers to quit Live
