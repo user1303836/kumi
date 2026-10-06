@@ -125,3 +125,26 @@ fn all_change_summaries_match_complete_source_outputs() {
         assert_eq!(actual, case["value"], "{case}");
     }
 }
+#[test]
+fn a_move_that_replaced_clips_says_what_and_kumi_keeps_it() {
+    let kind = CHANGES.iter().find(|k| k.tool == "move_clip").unwrap();
+    let preview = json!({"replaces":[
+        {"name":"Chorus","start":12,"end":16,"from":12,"to":14,"whole":false},
+        {"name":"Fill","start":9,"end":10,"from":9,"to":10,"whole":true}
+    ]});
+    let input = json!({"clipRef":"1:arrangement_clip:0:0","position":8});
+    let summary = kind.summarize(preview.as_object().unwrap(), input.as_object().unwrap(), &|_| None, None);
+    assert_eq!(summary.title, "Moved a clip to bar 3, replacing bar 4 to bar 4 beat 3 of “Chorus”, “Fill”");
+    assert_eq!(
+        kind.replaced(preview.as_object().unwrap()).as_deref(),
+        Some("Kumi can't bring back what the move replaced; Live's own undo can.")
+    );
+    assert_eq!(kind.replaced(json!({}).as_object().unwrap()), None, "a move that replaced nothing undoes in Kumi");
+    let mut cut_first = preview.clone();
+    cut_first["payload"] = json!({"clearFirst":[{"trackRef":"1:track:0","fromBeat":12,"toBeat":14}]});
+    assert!(kind.replaced(cut_first.as_object().unwrap()).unwrap().ends_with("in two steps (the move, then the cut)."));
+    // A move between two audio clips cuts each: Live's undo takes the move and both cuts.
+    cut_first["payload"]["clearFirst"] =
+        json!([{"trackRef":"1:track:0","fromBeat":12,"toBeat":14},{"trackRef":"1:track:0","fromBeat":16,"toBeat":17}]);
+    assert!(kind.replaced(cut_first.as_object().unwrap()).unwrap().ends_with("in 3 steps (the move, then each cut)."));
+}

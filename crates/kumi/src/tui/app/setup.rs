@@ -466,6 +466,8 @@ impl TuiApp {
                 if !self.wait_closed(&live, asked).await {
                     return self.leave_live(&live, held, asked).await;
                 }
+                // The Live Kumi was connected to has gone: Control Surface waits for the one that opens next.
+                self.0.state.borrow_mut().connection = ConnectionState::Disconnected;
             }
             let said = why.clone();
             self.setup_show(move |s| {

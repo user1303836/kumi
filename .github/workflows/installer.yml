@@ -232,6 +232,11 @@ jobs:
           test -f "$KUMI_HOME/settings-marker"   # the producer's own files stay
           test "$(marked)" = 0
 
+      - name: A Kumi stays in place when Windows holds its folder (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tests/install_swap.ps1
+
       - name: Install, use, update and remove (Windows PowerShell 5.1)
         if: runner.os == 'Windows'
         shell: powershell
