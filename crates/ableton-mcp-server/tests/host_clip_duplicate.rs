@@ -396,4 +396,3 @@ async fn a_copy_into_the_arrangement_never_lands_on_another_clip() {
         assert!(shown["result"]["content"][0]["text"].as_str().is_some_and(|t| t.contains("transactionId")), "{position}: {shown}");
     }
 }
-
