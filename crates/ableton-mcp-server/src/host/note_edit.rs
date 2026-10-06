@@ -100,8 +100,7 @@ impl McpHost {
             if row["isAudio"] == true || row["kind"] == "audio" {
                 return Err(audio_clip(&row["name"]));
             }
-            let fields =
-                ["ref", "objectIdentity", "kind", "name", "length", "loopEnd", "endMarker", "notes", "notesRevision"];
+            let fields = ["ref", "objectIdentity", "kind", "name", "length", "loopEnd", "endMarker", "notes", "notesRevision"];
             let clip = match track["ref"].as_str() {
                 Some(parent) if is_non_empty_string(&track["objectIdentity"], 256) => {
                     self.discover_one_async(context, LiveDiscoveryKind::ArrangementClip, reference, Some(&fields), Some(parent)).await?

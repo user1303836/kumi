@@ -132,38 +132,40 @@ impl McpHost {
             .iter()
             .map(|place| json!({"ref":place["ref"],"key":payload["key"],"value":place["value"],"expectedValue":place["expectedValue"],"expectedObjectIdentity":place["expectedIdentity"]}))
             .collect();
-        let written = match self
-            .async_adapter()
-            .invoke_async(&LiveInvocation::new("data.set", json!({"entries":entries})), Some(context))
-            .await
-        {
-            Ok(written) => written,
-            Err(error) => {
-                let changed = error.message().contains("changed since it was read");
-                let moved = error.message().contains("isn't the one that was read");
-                // Refused before anything was written: the transaction is as it was.
-                if (changed || moved) && !reconciliation {
-                    record.borrow_mut()["state"] = json!("previewed");
-                    return Ok(transaction_error(
-                        id,
-                        if moved {
-                            "A track named isn't the one that was read any more, so nothing was saved; read the tracks again"
-                        } else {
-                            "A track's text changed since it was read, so nothing was saved; read the tracks again"
-                        },
-                    ));
+        let written =
+            match self.async_adapter().invoke_async(&LiveInvocation::new("data.set", json!({"entries":entries})), Some(context)).await {
+                Ok(written) => written,
+                Err(error) => {
+                    let changed = error.message().contains("changed since it was read");
+                    let moved = error.message().contains("isn't the one that was read");
+                    // Refused before anything was written: the transaction is as it was.
+                    if (changed || moved) && !reconciliation {
+                        record.borrow_mut()["state"] = json!("previewed");
+                        return Ok(transaction_error(
+                            id,
+                            if moved {
+                                "A track named isn't the one that was read any more, so nothing was saved; read the tracks again"
+                            } else {
+                                "A track's text changed since it was read, so nothing was saved; read the tracks again"
+                            },
+                        ));
+                    }
+                    // A retry of a try that may have saved everything: Kumi's own write changed the text, so what the
+                    // tracks hold now says whether it did.
+                    if changed && reconciliation && self.data_saved(&places, &payload["key"], context).await? {
+                        let saved: Vec<Value> = places
+                            .iter()
+                            .map(|place| json!({"ref":place["ref"],"value":place["value"],"prior":place["expectedValue"]}))
+                            .collect();
+                        record.borrow_mut()["state"] = json!("applied");
+                        return Ok(success_text(
+                            id,
+                            &json!({"transactionId":t["id"],"state":"applied","key":payload["key"],"saved":saved,"idempotent":true}),
+                        ));
+                    }
+                    return Err(error);
                 }
-                // A retry of a try that may have saved everything: Kumi's own write changed the text, so what the
-                // tracks hold now says whether it did.
-                if changed && reconciliation && self.data_saved(&places, &payload["key"], context).await? {
-                    let saved: Vec<Value> =
-                        places.iter().map(|place| json!({"ref":place["ref"],"value":place["value"],"prior":place["expectedValue"]})).collect();
-                    record.borrow_mut()["state"] = json!("applied");
-                    return Ok(success_text(id, &json!({"transactionId":t["id"],"state":"applied","key":payload["key"],"saved":saved,"idempotent":true})));
-                }
-                return Err(error);
-            }
-        };
+            };
         let saved: Vec<Value> = places
             .iter()
             .zip(written["entries"].as_array().into_iter().flatten())
@@ -306,7 +308,10 @@ impl McpHost {
     /// Whether each place holds the text Kumi meant to save there now (read one by one).
     async fn data_saved(&self, places: &[&Value], key: &Value, context: &LiveOperationContext) -> Result<bool, LiveError> {
         for place in places {
-            let read = self.async_adapter().invoke_async(&LiveInvocation::new("data.get", json!({"ref":place["ref"],"key":key})), Some(context)).await?;
+            let read = self
+                .async_adapter()
+                .invoke_async(&LiveInvocation::new("data.get", json!({"ref":place["ref"],"key":key})), Some(context))
+                .await?;
             if read.get("value").unwrap_or(&Value::Null) != &place["value"] {
                 return Ok(false);
             }

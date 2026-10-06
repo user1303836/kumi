@@ -533,9 +533,10 @@ async fn rollback_to_legacy_requires_closed_live_and_retained_legacy_bridge_gene
         let home = home.as_path();
         let native = home.join("bridge/native/package");
         let old = home.join("bridge/legacy/package");
-        for (folder, version, code) in
-            [(extensions.join("kumi.kumi"), "1.8.10", "// this version's"), (old.join("live-extension"), "1.0.0", "// the earlier bridge's")]
-        {
+        for (folder, version, code) in [
+            (extensions.join("kumi.kumi"), "1.8.10", "// this version's"),
+            (old.join("live-extension"), "1.0.0", "// the earlier bridge's"),
+        ] {
             put(folder.join("manifest.json"), json!({"name":"kumi","version":version}).to_string());
             put(folder.join("dist/extension.js"), code);
         }

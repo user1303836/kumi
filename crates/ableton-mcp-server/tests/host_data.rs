@@ -441,7 +441,10 @@ async fn a_track_moved_in_after_the_check_gets_nothing_and_a_retry_learns_what_w
     // Live's replay of that key is gone (as after a lost answer it never recorded), so it checks the text afresh.
     adapter.cache.borrow_mut().clear();
     let retried = apply_batch(&host, &preview, "batch-key").await;
-    assert!(retried.to_string().contains(r#"\"state\":\"applied\""#) && retried.to_string().contains(r#"\"idempotent\":true"#), "{retried}");
+    assert!(
+        retried.to_string().contains(r#"\"state\":\"applied\""#) && retried.to_string().contains(r#"\"idempotent\":true"#),
+        "{retried}"
+    );
     assert_eq!(state(&host, &preview), "applied");
     // The same, but the text was changed again before the retry: whether Kumi's write held isn't known, so it stays
     // uncertain rather than saying nothing was saved.

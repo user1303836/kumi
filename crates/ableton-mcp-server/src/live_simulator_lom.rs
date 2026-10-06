@@ -67,7 +67,9 @@ impl DeterministicLiveSimulator {
                             return Err(LiveError::error("track reference is stale or invalid"));
                         }
                         if !entry.get("expectedObjectIdentity").is_some_and(Value::is_string) {
-                            return Err(LiveError::error("data arguments are invalid: each entry names the identity of what was read there"));
+                            return Err(LiveError::error(
+                                "data arguments are invalid: each entry names the identity of what was read there",
+                            ));
                         }
                         read_there(&state, owner, entry)?;
                         let key = text(entry, "key")?;

@@ -807,7 +807,8 @@ async fn a_clip_put_in_the_new_place_in_between_leaves_the_undo_to_live() {
     {
         let mut s = adapter.sim.state.borrow_mut();
         let mut bass = s["tracks"][0].clone();
-        for (key, value) in [("ref", json!("track:track-2")), ("objectIdentity", json!("simulator:track:track-2")), ("name", json!("Bass"))] {
+        for (key, value) in [("ref", json!("track:track-2")), ("objectIdentity", json!("simulator:track:track-2")), ("name", json!("Bass"))]
+        {
             bass[key] = value;
         }
         for key in ["clips", "clipSlots", "takeLanes", "devices"] {

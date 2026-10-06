@@ -444,10 +444,15 @@ async fn an_arrangement_clips_notes_transform_in_place_and_never_into_a_copy() {
     let text = preview(json!({"transform":"transpose","params":{"semitones":2},"scope":"in-place"})).await;
     assert!(text.contains("transactionId"), "{text}");
     // Into a copy: refused at preview, saying what works, rather than failing at apply.
-    let text = preview(json!({"transform":"transpose","params":{"semitones":2},"scope":"duplicate","target":{"trackRef":"track:track-1","sceneIndex":1}})).await;
+    let text = preview(
+        json!({"transform":"transpose","params":{"semitones":2},"scope":"duplicate","target":{"trackRef":"track:track-1","sceneIndex":1}}),
+    )
+    .await;
     assert!(text.contains(r#"\"Verse\" is an Arrangement clip: its notes change in place (scope in-place)"#), "{text}");
     // A generative transform writes into a copy by default: refused, saying to run it on a Session clip.
     let text = preview(json!({"transform":"repeat","params":{"times":2}})).await;
-    assert!(text.contains("a generative transform (repeat) writes into a copy in a Session slot") && text.contains("run it on a Session clip"), "{text}");
+    assert!(
+        text.contains("a generative transform (repeat) writes into a copy in a Session slot") && text.contains("run it on a Session clip"),
+        "{text}"
+    );
 }
-

@@ -446,7 +446,9 @@ async fn a_split_arrangement_clips_notes_are_edited_up_to_its_own_end() {
     let host = McpHost::new(sim.clone(), McpHostOptions::default()).unwrap();
     let preview = |patch: Value| {
         let host = &host;
-        async move { host.live_note_edit_preview_async(&json!(1), &json!({"clipRef":"arrangement-clip:track-1:4","notes":[patch]}), "update").await }
+        async move {
+            host.live_note_edit_preview_async(&json!(1), &json!({"clipRef":"arrangement-clip:track-1:4","notes":[patch]}), "update").await
+        }
     };
     // A velocity-only patch, and a move to the clip's own end, both preview.
     for patch in [json!({"id":1,"velocity":90}), json!({"id":1,"start":7.75})] {
@@ -455,11 +457,14 @@ async fn a_split_arrangement_clips_notes_are_edited_up_to_its_own_end() {
     }
     // Past it: refused, naming the clip's span.
     let reply = preview(json!({"id":1,"start":7.9})).await;
-    assert_eq!(reply["error"]["message"], json!("note patch runs past the clip: \"Verse B\" holds notes from beat 0 to 8 in its own time"), "{reply}");
+    assert_eq!(
+        reply["error"]["message"],
+        json!("note patch runs past the clip: \"Verse B\" holds notes from beat 0 to 8 in its own time"),
+        "{reply}"
+    );
     // An audio clip takes no notes, and the refusal says so.
     sim.state.borrow_mut()["arrangementClips"][0]["clip"]["kind"] = json!("audio");
     let reply = preview(json!({"id":1,"velocity":90})).await;
     let text = reply["result"]["content"][0]["text"].as_str().unwrap_or_default();
     assert!(text.contains(r#"\"Verse B\" is an audio clip; notes are only in MIDI clips"#), "{reply}");
 }
-

@@ -604,7 +604,10 @@ pub async fn doctor_checks(io: &DoctorIo) -> Result<Vec<Check>, RuntimeError> {
         if !live.started && live.said.as_deref().is_some_and(|said| said.contains(kumi_common::bridge::ANOTHER_BRIDGE)) {
             checks.push(Check::fix(
                 "Live is running another version of Kumi's bridge",
-                Some(format!("Restart Live: it loads its bridge when it starts. If it still says this, quit Live and run {} bridge. Then: {} doctor", *KUMI, *KUMI)),
+                Some(format!(
+                    "Restart Live: it loads its bridge when it starts. If it still says this, quit Live and run {} bridge. Then: {} doctor",
+                    *KUMI, *KUMI
+                )),
             ))
         } else if !live.started {
             let current = server

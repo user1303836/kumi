@@ -512,7 +512,8 @@ impl McpHost {
                         Ok((reference.to_owned(), self.arrangement_clip_authority(&fresh, reference)?, capture_object_fingerprint(moving)?))
                     }
                     .await;
-                    let (reference, authority, fingerprint) = found.map_err(|e| after_cuts(e, &cutting[..cut.min(cutting.len())], t["payload"]["keepSource"] == true))?;
+                    let (reference, authority, fingerprint) =
+                        found.map_err(|e| after_cuts(e, &cutting[..cut.min(cutting.len())], t["payload"]["keepSource"] == true))?;
                     args["ref"] = json!(reference);
                     args["expectedContentFingerprint"] = json!(fingerprint);
                     merge(&mut args, &authority);
