@@ -114,6 +114,8 @@ async fn the_switch_is_read_again_only_when_its_file_changes_and_is_just_on_whil
     let earlier = SystemTime::now() - Duration::from_secs(60);
     set_time(earlier);
     assert_eq!(willington.switch(), WillingtonSwitch::On);
+    // A new time: read again, and kept.
+    assert_eq!((control.on)(), Some(true));
     // The same size and time, though changed: the menu, which asks every frame, keeps what it read.
     let text = fs::read_to_string(&switch).unwrap();
     let off = text.replace("\"enableWrites\": true", "\"enableWrites\": 0   ");
