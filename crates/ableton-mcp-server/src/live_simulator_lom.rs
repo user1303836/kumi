@@ -9,7 +9,7 @@ fn number(args: &Map<String, Value>, key: &str, min: f64, max: f64) -> Result<f6
     ranged_number(args.get(key).unwrap_or(&Value::Null), min, max, false, &format!("{key} is invalid"))
 }
 fn note_authority(state: &Value, reference: &str, args: &Map<String, Value>) -> Result<(), LiveError> {
-    let current = DeterministicLiveSimulator::session_clip_authority(state, reference)?;
+    let current = DeterministicLiveSimulator::note_clip_authority(state, reference)?;
     let expected = args.get("expectedClipAuthority").ok_or_else(|| LiveError::error("unsupported simulator authority value"))?;
     if simulator_revision(&current) != simulator_revision(expected) {
         Err(LiveError::error("note clip hierarchy identity changed since preview"))
@@ -109,7 +109,7 @@ impl DeterministicLiveSimulator {
             "note.select" | "note.delete-range" => {
                 let reference = text(args, "ref")?;
                 let mut state = self.state.borrow_mut();
-                let path = clip_path(&state, reference)?;
+                let path = note_clip_path(&state, reference)?;
                 note_authority(&state, reference, args)?;
                 let clip = state.pointer_mut(&path).unwrap();
                 if operation == "note.select" {
