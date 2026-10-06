@@ -250,3 +250,40 @@ case!(live_binding_passes_callbacks_and_stores_to_native_session, async {
     assert!(called.get());
     assert!(f.err.0.borrow().is_empty());
 });
+case!(a_database_that_cant_open_leaves_notes_in_their_files_and_says_so, async {
+    let f = Fixture::new(false);
+    f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"libraryFolders":[]}));
+    let memory = f.folder.path().join("memory.json");
+    std::fs::write(
+        &memory,
+        r#"{"version":1,"notes":[{"id":"p1","text":"Mixes on headphones","at":1000},{"id":"p2","text":"Likes short reverbs","at":2000}]}"#,
+    )
+    .unwrap();
+    // Not a database this Kumi can open.
+    let database = f.folder.path().join("kumi.db");
+    std::fs::write(&database, "not a database").unwrap();
+    let task = tokio::task::spawn_local(run(f.io(&["--inference-only"]), unused_factory()));
+    f.input.wait_ready().await;
+    f.wait_output("Your notes, techniques and lessons stay in their files this time").await;
+    // Kumi refuses commands while it gets ready: ask until it answers.
+    let answered = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while !f.output().contains("[memory] About you") {
+            f.input.write("/memory\n");
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    })
+    .await;
+    assert!(answered.is_ok(), "{}", f.output());
+    f.wait_output("[memory] About you: p1 Mixes on headphones · p2 Likes short reverbs").await;
+    f.input.write("/forget p1\n");
+    f.wait_output("[memory] Forgot: Mixes on headphones").await;
+    f.input.write("/memory\n");
+    f.wait_output("[memory] About you: p2 Likes short reverbs").await;
+    f.input.write("/quit\n");
+    f.input.end();
+    assert_eq!(tokio::time::timeout(std::time::Duration::from_secs(10), task).await.unwrap().unwrap(), 0);
+    let kept: Value = serde_json::from_slice(&std::fs::read(&memory).unwrap()).unwrap();
+    assert_eq!(kept["notes"].as_array().unwrap().len(), 1, "the file was written");
+    assert_eq!(std::fs::read(&database).unwrap(), b"not a database", "and not the database");
+    assert!(!f.folder.path().join("kumi.db-wal").exists());
+});

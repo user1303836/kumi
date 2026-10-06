@@ -83,7 +83,7 @@ Kumi 读取打开的工程，并做出你要求的修改。每项修改都以平
 | `set_chain`、`set_chain_mixer` | 机架链的静音、独奏或颜色；其音量、声像或开关 |
 | `delete_device`、`delete_clip`、`delete_scene`、`delete_track`、`delete_locator` | 删除操作，全部为 kept：Live 的撤销可以恢复它们 |
 | `clear_range` | 清除编曲视图中一条轨道上的一段，切开位于两端边缘的片段（需要扩展；kept） |
-| `set_clip_follow_actions`、`edit_rack_mapping` | 仅在使用 [Willington](WILLINGTON_INTEGRATION.md) 时：Follow Actions；宏名称、映射、变体名称和链区域 |
+| `set_clip_follow_actions`、`edit_rack_mapping` | 仅在 [Willington](WILLINGTON_INTEGRATION.md) 的绑定开启时（`/willington`）：Follow Actions；宏名称、映射、变体名称和链区域 |
 | `live_command` | Live 自己的、其脚本接口没有的命令：编组、冻结、平铺、并轨、合并、转换为 MIDI、分离音轨、切片、保存、导出（[指南](KUMI_GUIDE.md#live-自己的命令)；保留：用 Live 的撤销撤回） |
 
 `make_changes` 可以在计划中运行以上任意工具，`undo_change` 撤销其中一项。
@@ -132,7 +132,7 @@ Kumi 从不依赖 Live 的当前选择来把设备放进链中。原生设备按
 ╰ Operator   … → Chorus-Ensemble
 ```
 
-Live 不允许脚本把宏或调制器映射到参数、设置宏的范围或给宏命名。Kumi 会说明这一点，由你在 Live 中操作（点 Map，再点击参数）。使用 [Willington](WILLINGTON_INTEGRATION.md) 时，Kumi 可以为宏命名并映射它们；调制器仍然无法映射。
+Live 不允许脚本把宏或调制器映射到参数、设置宏的范围或给宏命名。Kumi 会说明这一点，由你在 Live 中操作（点 Map，再点击参数）。[Willington](WILLINGTON_INTEGRATION.md) 的绑定开启时（`/willington`），Kumi 可以为宏命名并映射它们；调制器仍然无法映射。
 
 ## 采样与鼓组
 
@@ -202,6 +202,6 @@ Kumi 在连接时读取桥接的版本，不会提供桥接版本过旧而无法
 | 1.0.68 | `run_python` |
 | 1.0.73 | 通过 Kumi Ears 聆听轨道、返回轨道或混音（更早的桥接会先录音再聆听） |
 
-只要桥接提供 Willington 工具，它们就会出现，而桥接只在设置好该提供方后才会提供。
+只要桥接提供 Willington 工具，它们就会出现：也就是 Willington 的绑定开启（`/willington`）且 Live 构建版本受其覆盖时。
 
 每个 Kumi 版本都附带一个桥接：Kumi 1.8.3 附带桥接 1.0.77，1.8.2 附带 1.0.76，1.7.5 至 1.8.1 附带 1.0.74，1.7.0 至 1.7.4 附带 1.0.73，1.6.1 附带 1.0.72，1.6.0 附带 1.0.71，1.5 附带 1.0.70，1.4 附带 1.0.69，1.3 附带 1.0.68，1.2 附带 1.0.66，1.1 附带 1.0.53，1.0 附带 1.0.52。

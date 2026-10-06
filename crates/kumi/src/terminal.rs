@@ -12,6 +12,7 @@ use crate::{
         width::{cell_width, graphemes},
     },
     update::UpdateControl,
+    willington::WillingtonControl,
 };
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_common::{
@@ -48,6 +49,8 @@ pub struct TerminalOptions {
     pub close_timeout_ms: Option<u64>,
     pub history: Option<Rc<RefCell<InputHistory>>>,
     pub updates: Option<UpdateControl>,
+    /// /willington, where Kumi's bridge can carry Willington.
+    pub willington: Option<WillingtonControl>,
 }
 impl TerminalOptions {
     pub fn new(
@@ -68,11 +71,12 @@ impl TerminalOptions {
             close_timeout_ms: None,
             history: None,
             updates: None,
+            willington: None,
         }
     }
 }
 fn help() -> String {
-    format!("/help · /status · /undo · /stop · /refresh · /reconnect (connect to Live again, keeping the conversation) · /new (forget this conversation and start fresh) · /conversations [number] (list this Set's, or go back to one) · /model [provider/model] · /effort [level|default] · /logout <provider> · /memory · /forget <id> · /note <id> <new words> · /pin <id> · /unpin <id> · /recipes · /update (get the newest Kumi) · /quit | Ctrl-C: cancel work; idle: exit. EOF exits. Sign in with: {} login <provider>.",*KUMI)
+    format!("/help · /status · /undo · /stop · /refresh · /reconnect (connect to Live again, keeping the conversation) · /new (forget this conversation and start fresh) · /conversations [number] (list this Set's, or go back to one) · /model [provider/model] · /effort [level|default] · /logout <provider> · /memory · /forget <id> · /note <id> <new words> · /pin <id> · /unpin <id> · /recipes · /willington (Willington's bindings on or off) · /update (get the newest Kumi) · /quit | Ctrl-C: cancel work; idle: exit. EOF exits. Sign in with: {} login <provider>.",*KUMI)
 }
 fn head(text: &str, limit: usize) -> String {
     String::from_utf16_lossy(&text.encode_utf16().take(limit).collect::<Vec<_>>())
@@ -597,6 +601,7 @@ impl PlainTerminal {
  "/note"=>{let usage="[memory] Use: /note <id> <new words>, with an id from /memory.";let words=argument.and_then(|id|command.split_once(id)).map(|(_,words)|words.trim()).unwrap_or("");match argument.filter(|_|!words.is_empty()&&controller.has_change_note()){Some(id)=>match controller.change_note(id,NoteChange::Text(words.into())).await{Ok(Some(_))=>self.notice(&format!("[memory] Changed note {id}.")),Ok(None)=>self.notice(usage),Err(error)=>self.notice(&format!("[memory] {}",error.message()))},None=>self.notice(usage)}},
  "/pin"|"/unpin"=>{let pin=verb=="/pin";let usage=format!("[memory] Use: {verb} <id>, with a note's id from /memory.");match argument.filter(|_|controller.has_change_note()){Some(id)=>match controller.change_note(id,NoteChange::Pinned(pin)).await?{Some(_)=>self.notice(&if pin{format!("[memory] Pinned {id}: Kumi keeps it even when its memory is full.")}else{format!("[memory] Unpinned {id}.")}),None=>self.notice(&usage)},None=>self.notice(&usage)}},
  "/forget"=>{let invalid="[memory] Use: /forget <id>, with an id from /memory.";if argument.is_some_and(|a|a.starts_with('u'))&&controller.has_forget_taste(){if self.0.state.borrow().taste.is_empty(){let taste=controller.taste().await?;self.0.state.borrow_mut().taste=taste;}let n=number::parse(&argument.unwrap()[1..]).unwrap_or(f64::NAN)-1.;let line=if n>=0.&&n.fract()==0.{self.0.state.borrow().taste.get(n as usize).cloned()}else{None};if let Some(line)=line{if controller.forget_taste(&line.id).await?{self.notice(&format!("[memory] Forgot, from your Sets: {}",line.line));}else{self.notice(invalid);}}else{self.notice(invalid);}}else if argument.is_some_and(|a|a.starts_with('t'))&&controller.has_forget_technique(){if !controller.forget_technique(argument.unwrap()).await?{self.notice(invalid);}}else if let Some(argument)=argument{if controller.forget(argument).await?.is_none(){self.notice(invalid);}}else{self.notice(invalid);}},
+ "/willington"=>{match self.0.options.willington.clone().and_then(|w|(w.on)().map(|on|(w,on))){Some((willington,on))=>match (willington.set)(!on).await{Ok(said)=>{self.notice(&format!("[willington] {said}"));controller.reconfigure().await?;},Err(error)=>self.notice(&format!("[willington] Kumi couldn't turn Willington's bindings {}: {error}",if on{"off"}else{"on"})),},None=>self.notice("Unknown command. Use /help."),}},
  "/login"=>self.notice(&format!("[login] Sign in from a shell: {} login <provider> (openai-codex, anthropic, openai, opencode). The full-screen app signs in here.",*KUMI)),
  "/logout"=>{if let Some(provider)=argument.and_then(ProviderId::parse){self.notice(&if models.sign_out(provider).await?{format!("[logout] Signed out of {}.",provider.as_str())}else{format!("[logout] There was no sign-in for {} to remove.",provider.as_str())});}else{self.notice(&format!("[logout] Use: /logout <provider> ({}).",PROVIDERS.map(|p|p.as_str()).join(", ")));}},
  _=>{if command=="/undo"{if let Some(change)=controller.undo(None).await?{self.notice(&if enum_name(change.state)=="undone"{format!("[undo] Undid: {}",change.title)}else{string::trim(&format!("[undo] Kept: {}. {}",change.title,change.note.unwrap_or_default())).into()});}}else if command=="/refresh"{controller.refresh().await?;}else if command=="/reconnect"&&controller.has_reconnect(){controller.reconnect().await?;}else if command=="/new"{self.notice("── New conversation. Kumi won't use what's above ──");controller.new_conversation().await?;}else if command.starts_with('/'){self.notice("Unknown command. Use /help.");}else{self.0.state.borrow_mut().answering=true;let result=controller.submit(input,None).await;self.0.state.borrow_mut().answering=false;result?;}}
@@ -717,6 +722,9 @@ impl Terminal for PlainTerminal {
         self.notice("Each Set's conversations are kept: its latest continues next time, and /conversations goes back to earlier ones. /help for commands.");
         if let Some(notice) = self.0.options.startup_notice.as_ref().filter(|s| !s.is_empty()) {
             self.notice(notice);
+        }
+        if self.0.options.willington.as_ref().is_some_and(|w| (w.on)() == Some(false)) {
+            self.notice(&format!("[willington] {}", crate::willington::OFF_AT_START));
         }
         let weak = Rc::downgrade(&self.0);
         active.resume(Rc::new(move |bytes| {

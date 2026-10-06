@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 async fn note_gap_logs_missing_capabilities_privately_and_bounded_and_never_a_secret() {
     let directory = tempfile::tempdir().unwrap();
     let file = directory.path().join("gaps.jsonl");
-    let tools = gap_tools(&file);
+    let tools = gap_tools(&file, None);
     let tool = &tools[0];
     assert_eq!(tool.name(), GAP_TOOL);
     let result = tool

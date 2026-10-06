@@ -70,6 +70,10 @@ pub fn bind(root: &Path) -> (PathBuf, String) {
     (path, hash)
 }
 pub fn package(parent: &Path, version: &str, policy: &str) -> (PathBuf, PathBuf, String) {
+    package_with(parent, version, policy, &[])
+}
+/// A release package with more files in it, by their path in the package.
+pub fn package_with(parent: &Path, version: &str, policy: &str, extra: &[(&str, &[u8])]) -> (PathBuf, PathBuf, String) {
     let root = parent.join(format!("candidate {version} ü {policy}"));
     let legacy = policy == "legacy";
     let native = policy == "native";
@@ -112,6 +116,9 @@ pub fn package(parent: &Path, version: &str, policy: &str) -> (PathBuf, PathBuf,
     for i in 0..9 {
         files.insert(format!("release-docs/doc-{i}.md"), format!("# {version} {i}\n").into_bytes());
     }
+    for (name, bytes) in extra {
+        files.insert(name.to_string(), bytes.to_vec());
+    }
     for (name, bytes) in &files {
         let path = root.join(name);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -130,11 +137,16 @@ pub fn package(parent: &Path, version: &str, policy: &str) -> (PathBuf, PathBuf,
 pub struct Fixture {
     pub folder: tempfile::TempDir,
     pub options: LifecycleOptions,
+    /// More files in every release package this fixture makes.
+    pub extra: Vec<(&'static str, &'static [u8])>,
 }
 impl Fixture {
     pub fn new() -> Self {
+        Self::with_files(&[])
+    }
+    pub fn with_files(extra: &[(&'static str, &'static [u8])]) -> Self {
         let folder = tempfile::tempdir().unwrap();
-        let (root, artifact, hash) = package(folder.path(), "1.0.0", "native");
+        let (root, artifact, hash) = package_with(folder.path(), "1.0.0", "native", extra);
         let remote = folder.path().join("Live Remote Scripts ü");
         fs::create_dir(&remote).unwrap();
         let port = free_port();
@@ -160,6 +172,7 @@ impl Fixture {
                 ..Default::default()
             },
             folder,
+            extra: extra.to_vec(),
         }
     }
     pub fn action(&self, action: &str) -> LifecycleOptions {
@@ -175,7 +188,7 @@ impl Fixture {
         self.options.remote_scripts_directory.join(REMOTE_SCRIPT_PACKAGE)
     }
     pub fn upgrade(&self, version: &str) -> LifecycleOptions {
-        let (root, artifact, hash) = package(self.folder.path(), version, "native");
+        let (root, artifact, hash) = package_with(self.folder.path(), version, "native", &self.extra);
         LifecycleOptions {
             action: "upgrade".into(),
             package_root: root,

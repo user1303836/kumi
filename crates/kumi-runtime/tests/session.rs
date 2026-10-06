@@ -878,6 +878,30 @@ local_test!(memory_instructions_tools_and_forgetting, {
     h.session.close().await.unwrap();
 });
 
+local_test!(willington_instructions_follow_the_switch_each_time_the_kernel_is_made, {
+    use kumi_runtime::integrations::ableton::willington::WillingtonSwitch;
+    let switch = Rc::new(Cell::new(WillingtonSwitch::Off));
+    let read = switch.clone();
+    let h = harness(None, move |o| o.willington = Some(Rc::new(move || Some(read.get()))));
+    // Kumi can change the Set (make_changes): the instructions say what the bindings would add.
+    h.observation.borrow_mut().tools = vec![Rc::new(Plan { received: Rc::new(RefCell::new(vec![])) })];
+    h.session.start().await.unwrap();
+    assert!(h.record.created.borrow()[0].instructions.contains("/willington turns the bindings on"));
+    // Turned on a moment ago, before the bridge offers their tools: nothing said about them yet.
+    switch.set(WillingtonSwitch::JustOn);
+    h.session.reconfigure().await.unwrap();
+    h.session.refresh().await.unwrap();
+    let instructions = h.record.created.borrow().last().unwrap().instructions.clone();
+    assert!(!instructions.contains("Willington"), "{instructions}");
+    // On for a while, for a Live they have no bindings for: the next kernel says so, without pointing at /willington.
+    switch.set(WillingtonSwitch::On);
+    h.session.reconfigure().await.unwrap();
+    h.session.refresh().await.unwrap();
+    let instructions = h.record.created.borrow().last().unwrap().instructions.clone();
+    assert!(instructions.contains("none fit the Live that's open") && !instructions.contains("/willington"));
+    h.session.close().await.unwrap();
+});
+
 #[derive(Clone)]
 struct Plan {
     received: Rc<RefCell<Vec<JsonObject>>>,
@@ -1763,4 +1787,40 @@ local_test!(a_side_question_asked_during_an_answer_isnt_part_of_its_timing, {
     let line: Value = serde_json::from_str(std::fs::read_to_string(&file).unwrap().trim()).unwrap();
     assert_eq!([&line["modelCalls"], &line["sentBytes"], &line["model"]], [&json!(1), &json!(1000), &json!("openai/gpt-test")]);
     h.session.close().await.unwrap();
+});
+local_test!(a_turn_brings_in_what_an_older_kumi_changed_beside_it_and_never_waits_for_it, {
+    use kumi_runtime::core::{file_sync::FileSync, store_client::StoreClient, store_import::JsonFiles};
+    let dir = tempfile::tempdir().unwrap();
+    let files = JsonFiles {
+        memory: dir.path().join("memory.json"),
+        projects: dir.path().join("projects"),
+        techniques: dir.path().join("techniques.json"),
+        playbook: dir.path().join("playbook.json"),
+        gaps: dir.path().join("gaps.jsonl"),
+    };
+    std::fs::write(&files.memory, r#"{"version":1,"notes":[{"id":"p1","text":"Likes short reverbs","at":100}]}"#).unwrap();
+    let db = dir.path().join("kumi.db");
+    let (client, _) = StoreClient::open(db.clone(), files.clone(), 1).await.unwrap();
+    let h = harness(None, |options| options.files = Some(FileSync::new(client, files.clone(), &[])));
+    h.session.start().await.unwrap();
+    // An older Kumi open beside this one keeps a note, while another Kumi holds the database's write lock.
+    std::fs::write(
+        &files.memory,
+        r#"{"version":1,"notes":[{"id":"p1","text":"Likes short reverbs","at":100},{"id":"p2","text":"Works at 140","at":200}]}"#,
+    )
+    .unwrap();
+    let other = kumi_store::Connection::open(&db).unwrap();
+    other.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let began = std::time::Instant::now();
+    h.session.submit("hello", None).await.unwrap();
+    assert!(began.elapsed() < Duration::from_secs(2), "the turn didn't wait for the look: {:?}", began.elapsed());
+    assert!(!h.notice("Brought in"));
+    other.execute_batch("ROLLBACK").unwrap();
+    let said = tokio::time::timeout(Duration::from_secs(10), async {
+        while !h.notice("Brought in changes made with the older Kumi: 1 note added.") {
+            delay(10).await;
+        }
+    })
+    .await;
+    assert!(said.is_ok(), "{:?}", h.events.borrow());
 });

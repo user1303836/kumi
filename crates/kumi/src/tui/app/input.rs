@@ -367,6 +367,7 @@ impl TuiApp {
                         "/update" => self.0.options.updates.is_some(),
                         "/btw" => c.has_aside(),
                         "/voice" => self.0.voice.is_some(),
+                        "/willington" => self.willington().is_some(),
                         _ => true,
                     }
             })
@@ -651,6 +652,23 @@ impl TuiApp {
             self.copy_last_answer();
             return Ok(());
         }
+        if let Some((willington, on)) = self.willington().filter(|_| command == "/willington") {
+            self.clear_editor();
+            match (willington.set)(!on).await {
+                Ok(said) => {
+                    self.0.state.borrow_mut().willington_off = on;
+                    self.notice(said, NoticeTone::Info);
+                    // The bridge picks the switch up within a second; the model, from the next message.
+                    controller.reconfigure().await?;
+                }
+                Err(error) => self.notice(
+                    &format!("Kumi couldn't turn Willington's bindings {}: {error}", if on { "off" } else { "on" }),
+                    NoticeTone::Warn,
+                ),
+            }
+            self.0.scheduler.request();
+            return Ok(());
+        }
         self.clear_editor();
         self.0.state.borrow_mut().scroll = 0;
         let result = if command == "/refresh" {
@@ -706,6 +724,12 @@ impl TuiApp {
     }
     fn clear_editor(&self) {
         self.0.state.borrow_mut().editor.clear();
+    }
+    /// /willington, with whether the bindings are on, while the bridge in Live carries Willington.
+    fn willington(&self) -> Option<(crate::willington::WillingtonControl, bool)> {
+        let willington = self.0.options.willington.clone()?;
+        let on = (willington.on)()?;
+        Some((willington, on))
     }
     /// Files that go with the next message; the same file twice is added once.
     pub(super) fn add_attachments(&self, files: Vec<Attachment>) {
@@ -911,7 +935,7 @@ pub(super) struct Command {
     pub about: &'static str,
 }
 
-pub(super) const HELP: &str = "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, and /conversations goes back to an earlier one · /reconnect connects to Live again, keeping the conversation · /copy copies the last answer; to select text yourself, hold Shift while dragging (Option in iTerm2) · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your Sets), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands";
+pub(super) const HELP: &str = "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, and /conversations goes back to an earlier one · /reconnect connects to Live again, keeping the conversation · /copy copies the last answer; to select text yourself, hold Shift while dragging (Option in iTerm2) · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one; /willington turns Willington's bindings (macro mapping and more) on or off; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your Sets), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands";
 pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/new", about: "Forget this conversation and start fresh" },
     Command { name: "/btw", about: "Ask something on the side, without interrupting Kumi" },
@@ -925,6 +949,7 @@ pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/model", about: "Choose the model Kumi talks to" },
     Command { name: "/effort", about: "How hard the model thinks" },
     Command { name: "/fast", about: "The model's faster tier, when its provider offers one" },
+    Command { name: "/willington", about: "Willington's bindings in Live: macro mapping, zones" },
     Command { name: "/login", about: "Sign in to a provider" },
     Command { name: "/goal", about: "Go after a sound until Kumi gets there" },
     Command { name: "/memory", about: "What Kumi remembers" },

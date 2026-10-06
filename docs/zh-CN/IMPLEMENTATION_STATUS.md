@@ -45,7 +45,7 @@
 - 有些修改无法通过 Kumi 撤销，只能用 Live 自己的撤销；见 [Live 安全](LIVE_SAFETY.md)。
 - 在 Windows 上，Kumi 的扩展尚未测试，并且从 1.6.0 或更早版本运行 `kumi update` 可能因 tar 错误而失败；见 [Windows](SUPPORT_MATRIX.md#windows)。
 - 到目前为止的真实 Live 测试都在 Live 12.4.15 beta 上进行，主要是在 Apple 芯片的 Mac 上。Live 12.0 至 12.3、Intel Mac 和屏幕阅读器都未经测试。
-- Willington 编辑需要 Willington 有绑定的 Live 构建版本：macOS ARM64 上的 Live 12.4.15b4 和 b5（机架链区域仅限 b5）；见 [Willington 集成](WILLINGTON_INTEGRATION.md)。
+- Willington 编辑在 `/willington` 开启之前一直关闭，并且需要 Willington 有绑定的 Live 构建版本：macOS ARM64 上的 Live 12.4.15b4 和 b5（机架链区域仅限 b5），以及 Windows x64 上的 Live 12.4.15b5。在 Windows 上，这些绑定已通过 Live 中的 Python 测试，但还没有通过 Kumi 自己的编辑测试；见 [Willington](WILLINGTON_INTEGRATION.md)。
 - Kumi 和桥接都没有签名；见[发布与分发](DISTRIBUTION_POLICY.md)。
 
 ## 待完成的工作

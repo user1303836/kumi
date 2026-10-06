@@ -116,6 +116,7 @@ macro_rules! location {
 }
 location!(load_auth_file, "KUMI_AUTH_FILE", "auth.json");
 location!(load_settings_file, "KUMI_SETTINGS_FILE", "settings.json");
+location!(load_db_file, "KUMI_DB_FILE", "kumi.db");
 location!(load_memory_file, "KUMI_MEMORY_FILE", "memory.json");
 location!(load_techniques_file, "KUMI_TECHNIQUES_FILE", "techniques.json");
 location!(load_restore_file, "KUMI_RESTORE_FILE", "audition-restore.json");
@@ -129,6 +130,17 @@ location!(load_tools_dir, "KUMI_TOOLS_DIR", "tools");
 location!(load_input_history_file, "KUMI_INPUT_HISTORY_FILE", "input-history");
 location!(load_projects_dir, "KUMI_PROJECTS_DIR", "projects");
 location!(load_library_dir, "KUMI_LIBRARY_DIR", "library");
+/// The files Kumi kept notes, techniques, lessons and gaps in before its database, where the producer's
+/// settings put them.
+pub fn json_files(env: &Env) -> Result<kumi_runtime::core::store_import::JsonFiles, RuntimeError> {
+    Ok(kumi_runtime::core::store_import::JsonFiles {
+        memory: load_memory_file(env)?.into(),
+        projects: load_projects_dir(env)?.into(),
+        techniques: load_techniques_file(env)?.into(),
+        playbook: load_playbook_file(env)?.into(),
+        gaps: load_gaps_file(env)?.into(),
+    })
+}
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct VoiceSettings {
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -1,3 +1,5 @@
+#[path = "../../../tests/support/chunks.rs"]
+mod chunks;
 use ableton_mcp_server::{live::LiveStatus, tool_catalog::*};
 use kumi_common::js::json::stringify;
 use serde_json::{json, Value};
@@ -19,13 +21,19 @@ fn catalog_has_one_rule_and_class_for_each_unique_tool() {
     }
 }
 
-#[test]
-fn exact_visibility_and_descriptors_match_typescript_for_every_capability_operation_and_profile() {
+/// The oracle's cases in 12 tests that nextest runs side by side.
+mod exact_visibility_and_descriptors_match_typescript_for_every_capability_operation_and_profile {
+    crate::chunks::chunked!(super::check_visibility_cases; part_00 = 0, part_01 = 1, part_02 = 2, part_03 = 3, part_04 = 4,
+        part_05 = 5, part_06 = 6, part_07 = 7, part_08 = 8, part_09 = 9, part_10 = 10, part_11 = 11);
+}
+
+/// The oracle's cases at index `chunk`, `chunk + chunks`, …
+fn check_visibility_cases(chunk: usize, chunks: usize) {
     let fixture = oracle();
     let statuses: Vec<LiveStatus> = serde_json::from_value(fixture["statuses"].clone()).unwrap();
     let policies: Vec<ToolPolicySpec> = serde_json::from_value(fixture["policies"].clone()).unwrap();
     assert!(fixture["cases"].as_array().unwrap().len() > 2000);
-    for case in fixture["cases"].as_array().unwrap() {
+    for case in fixture["cases"].as_array().unwrap().iter().skip(chunk).step_by(chunks) {
         let status = &statuses[case["status"].as_u64().unwrap() as usize];
         let policy = &policies[case["policy"].as_u64().unwrap() as usize];
         let rows: Vec<_> = resolve_tool_visibility(status, policy)

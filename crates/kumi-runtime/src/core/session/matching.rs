@@ -57,10 +57,7 @@ impl Session {
         let this = self.clone();
         let work = self.playbook_serial(move |store| {
             async move {
-                let mut lessons = store.list().await?;
-                lessons.retain(|l| l.id != lesson.id);
-                lessons.push(lesson.clone());
-                store.save(&lessons).await?;
+                store.put(&lesson).await?;
                 this.emit(SessionEvent::Lesson {
                     action: if replacing.is_some() { LessonAction::Updated } else { LessonAction::Learned },
                     id: lesson.id.clone(),
@@ -88,17 +85,7 @@ impl Session {
         } else {
             return;
         };
-        let work = self.playbook_serial(move |store| {
-            async move {
-                let mut lessons = store.list().await?;
-                if let Some(lesson) = lessons.iter_mut().find(|l| l.id == id) {
-                    lesson.reaction = Some(reaction);
-                    store.save(&lessons).await?;
-                }
-                Ok(())
-            }
-            .boxed_local()
-        });
+        let work = self.playbook_serial(move |store| async move { store.react(&id, reaction).await }.boxed_local());
         tokio::task::spawn_local(work);
     }
     pub(super) async fn ask(
