@@ -4760,7 +4760,9 @@ class LiveObjectMapper:
     def _rename(self, operation: str, args: dict[str, Any]) -> dict[str, Any]:
         reference, name, expected_name, expected_identity = args.get("ref"), args.get("name"), args.get("expectedName"), args.get("expectedObjectIdentity")
         kind = operation.split(".", 1)[0]
-        if not isinstance(reference, str) or f":{kind}:" not in reference or not isinstance(name, str) or not 1 <= len(name) <= 256 or not isinstance(expected_name, str) or not isinstance(expected_identity, str):
+        # clip.rename names a Session clip (…:clip:T:S) or an Arrangement clip (…:arrangement_clip:T:C).
+        markers = (":clip:", ":arrangement_clip:") if kind == "clip" else (f":{kind}:",)
+        if not isinstance(reference, str) or not any(marker in reference for marker in markers) or not isinstance(name, str) or not 1 <= len(name) <= 256 or not isinstance(expected_name, str) or not isinstance(expected_identity, str):
             raise ValueError("rename authority is invalid")
         current_identity = self._positional_identity(reference)
         if current_identity is None or not hmac.compare_digest(current_identity, expected_identity):

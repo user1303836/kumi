@@ -2199,6 +2199,19 @@ class ControlSurfaceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "note clip hierarchy identity changed"):
             mapper.invoke("note.add", {"ref": created["ref"], "note": note, "expectedClipAuthority": bare, "expectedNotesRevision": session["expectedNotesRevision"]})
 
+    def test_an_arrangement_clip_is_renamed_as_a_session_clip_is(self):
+        song = FakeSong(); track = song.tracks[0]
+        clip = FakeClip(8.0); clip.name = "Verse"; clip.start_time = 16.0; track.arrangement_clips = [clip]
+        mapper = LiveObjectMapper(song)
+        def rename(name, expected):
+            row = mapper._arrangement_clip_items([0])[0]
+            return mapper.invoke("clip.rename", {"ref": row["ref"], "name": name, "expectedName": expected, "expectedObjectIdentity": row["objectIdentity"], "expectedAuthorityRevision": mapper._rename_authority_revision("clip", row["ref"])})
+        renamed = rename("Chorus", "Verse"); validate_operation_payload("clip.rename", "result", renamed)
+        self.assertEqual((renamed["name"], clip.name), ("Chorus", "Chorus"))
+        self.assertEqual(rename("Verse", "Chorus")["name"], "Verse", "and back, as its undo does")
+        with self.assertRaisesRegex(ValueError, "rename target changed since preview"): rename("Bridge", "Chorus")
+        self.assertEqual(clip.name, "Verse")
+
     def test_a_split_arrangement_clip_takes_notes_up_to_its_own_end(self):
         # The right half of an 8-beat clip split at beat 4: start marker 4, end marker 8, so Live's length is 4, but
         # its notes are in its own time, from 0 to 8.
