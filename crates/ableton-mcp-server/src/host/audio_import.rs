@@ -83,9 +83,24 @@ impl McpHost {
                         return Err(LiveError::error("take-lane audio import is unavailable"));
                     }
                     let snapshot = self.views.view_for(None, &[params["takeLaneRef"].clone()], None, &[]).await?;
-                    let (_, lane) = self.take_lane_row(&snapshot, params["takeLaneRef"].as_str().unwrap())?;
+                    let (lane_track, lane) = self.take_lane_row(&snapshot, params["takeLaneRef"].as_str().unwrap())?;
                     if !is_non_empty_string(&lane["objectIdentity"], 256) {
                         return Err(LiveError::error("take-lane identity is not authoritative"));
+                    }
+                    // A file's length in beats shows only once Live places it, and Live lays it over what's in the
+                    // lane (cutting it, which its API can't put back): so only past the lane's last clip.
+                    let under = arrangement_clip::lane_clips_from(&lane, params["position"].as_f64().unwrap());
+                    let refused = arrangement_clip::lane_track_refuses(&lane_track, true).or_else(|| {
+                        (!under.is_empty()).then(|| {
+                            format!(
+                                "{} Kumi puts an audio file in a take lane only past its last clip, since the file's length shows only once Live places it.",
+                                arrangement_clip::lane_taken(&lane, &under)
+                            )
+                        })
+                    });
+                    if let Some(why) = refused {
+                        self.release_staged_import_file(&json!(staging));
+                        return Ok(reason_error(id, &why, arrangement_clip::NOTHING_CHANGED));
                     }
                     let mut payload = fields(params, &["takeLaneRef", "position", "name"]);
                     payload["filePath"] = json!(staging);
@@ -309,7 +324,7 @@ impl McpHost {
         let record = params["transactionId"].as_str().and_then(|id| self.clip_lifecycle_transactions.get(id));
         let t = record.as_ref().map(|t| t.borrow().clone()).unwrap_or(Value::Null);
         if t["kind"] == "session-audio-create" && t["payload"].get("takeLaneRef").is_some() {
-            return transaction_error(id, "The public LOM exposes no take-lane clip deletion; undo is unavailable for this transaction");
+            return reason_error(id, arrangement_clip::LANE_CLIP_UNDO, arrangement_clip::LIVE_UNDOES_IT);
         }
         if t["kind"] != "session-audio-create" {
             return transaction_error(id, "Only an applied Session audio import has automatic undo authority");

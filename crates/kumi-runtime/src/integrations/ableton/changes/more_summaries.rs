@@ -303,11 +303,21 @@ pub(super) fn more(
                 .and_then(Value::as_str)
                 .and_then(|path| std::path::Path::new(path).file_stem()?.to_str().map(|stem| json!(stem)));
             let length = finite(coalesce(payload.get("length"), input.get("length"))).filter(|_| file.is_none());
+            // A clip in a take lane: the lane by its name, as the bridge's preview gives it.
+            let lane = coalesce(payload.get("takeLaneRef"), input.get("takeLaneRef")).map(|_| {
+                let name = quoted(preview.get("takeLane").and_then(|lane| lane.get("name")), "");
+                if name.is_empty() {
+                    " in a take lane".to_owned()
+                } else {
+                    format!(" in take lane {name}")
+                }
+            });
             with_track(
                 format!(
-                    "New Arrangement {}clip {}{}{}{}{}",
+                    "New Arrangement {}clip {}{}{}{}{}{}",
                     if file.is_some() { "audio " } else { "" },
                     quoted(coalesce(payload.get("name"), input.get("name")).or(file.as_ref()), ""),
+                    lane.unwrap_or_default(),
                     on(&known),
                     at.map(|n| format!(" at {}", bars(n))).unwrap_or_default(),
                     length.map(|n| format!(" ({})", span(n))).unwrap_or_default(),

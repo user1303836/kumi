@@ -542,7 +542,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 256,
-            "description": "A take lane on the track (add_take_lane gives one), for a MIDI clip in it"
+            "description": "A take lane on the track (add_take_lane gives one), for a MIDI clip in it: the clip needs a name, and a span no clip in the lane is in (Live's API can't put back a lane clip it cuts)"
           },
           "sample": {
             "type": "string",
@@ -872,7 +872,7 @@
       "preview": "live_audio_import_preview",
       "apply": "live_audio_import_apply",
       "family": "clip",
-      "description": "Put an audio file into the Set as a clip: into an empty Session slot (trackRef, an audio track, and sceneIndex) or into an Arrangement take lane (takeLaneRef, position in beats). sample is the path of an audio file on this computer (one find_sounds returned, a recording, the producer's own).",
+      "description": "Put an audio file into the Set as a clip: into an empty Session slot (trackRef, an audio track, and sceneIndex) or into an Arrangement take lane (takeLaneRef, position in beats, past the lane's last clip: Live would cut a take the file lands on, and its API can't put one back). sample is the path of an audio file on this computer (one find_sounds returned, a recording, the producer's own).",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

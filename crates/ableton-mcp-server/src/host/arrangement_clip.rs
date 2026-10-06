@@ -6,6 +6,13 @@ use kumi_common::{
     js::json as js_json,
 };
 use sha2::{Digest, Sha256};
+/// Kumi's undo of a clip in a take lane, refused: Live's API can't delete one.
+pub(super) const LANE_CLIP_UNDO: &str = "Live's API deletes no clip in a take lane; Live's own undo takes it back";
+/// What to do after a refused preview: nothing reached Live.
+pub(super) const NOTHING_CHANGED: &str = "Nothing changed in Live: fix what the reason says (or take another route) and preview again.";
+/// What to do instead of Kumi's undo of a take lane, or of a clip in one.
+pub(super) const LIVE_UNDOES_IT: &str =
+    "Nothing changed. Undo it in Live (Cmd-Z, or live_song_undo): Live takes back what came after it first.";
 fn nonnegative(value: &Value) -> bool {
     value.as_f64().is_some_and(|n| n.is_finite() && n >= 0.0)
 }
@@ -36,6 +43,71 @@ fn lane_siblings(lane: &Value) -> Value {
             row
         })
         .collect::<Vec<_>>())
+}
+/// Why a track can't have a take lane, if it can't (Live 12.4.15b5 says "This track does not support take lanes").
+fn no_lanes(track: &Value) -> Option<&'static str> {
+    match track["kind"].as_str() {
+        Some("return" | "main") => {
+            Some("Live's return and main tracks have no take lanes (Live: “This track does not support take lanes”).")
+        }
+        Some("group") => Some("A group track holds no clips, so it has no take lanes: use one of the tracks in it."),
+        _ => None,
+    }
+}
+/// Where a clip in a take lane sits, in beats: its start and its right edge (endTime; start plus length without it).
+fn lane_span(clip: &Value) -> Option<(f64, f64)> {
+    let start = clip["start"].as_f64()?;
+    Some((start, clip["endTime"].as_f64().or_else(|| Some(start + clip["length"].as_f64()?))?))
+}
+fn beats(value: f64) -> String {
+    kumi_common::js::number::to_string((value * 1000.0).round() / 1000.0)
+}
+/// The clips in a take lane that [start, end) lands on, each by name and span. Live lays a new lane clip over them
+/// as it does on the main lane (12.4.15b5: inside one splits it, over an edge trims it, over all of it removes it), and
+/// its API can't delete or move a lane clip, so neither Kumi's undo nor anything else could put them back.
+fn lane_clips_under(lane: &Value, start: f64, end: f64) -> Vec<String> {
+    lane["clips"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|clip| {
+            let (from, to) = lane_span(clip)?;
+            (from < end - 1e-6 && to > start + 1e-6)
+                .then(|| format!("“{}” (beats {}–{})", clip["name"].as_str().unwrap_or(""), beats(from), beats(to)))
+        })
+        .collect()
+}
+/// The clips in a take lane that end past `start`: what an audio file placed there might land on, its length unknown.
+pub(super) fn lane_clips_from(lane: &Value, start: f64) -> Vec<String> {
+    lane_clips_under(lane, start, f64::INFINITY)
+}
+/// What Kumi says for a clip it would lay over others in a take lane.
+pub(super) fn lane_taken(lane: &Value, under: &[String]) -> String {
+    format!(
+        "{} {} in take lane “{}”: Live would cut {}, and its API can't put a clip in a lane back. Choose a free span in the lane, or another lane.",
+        under.join(", "),
+        if under.len() == 1 { "is there" } else { "are there" },
+        lane["name"].as_str().unwrap_or(""),
+        if under.len() == 1 { "it" } else { "them" }
+    )
+}
+/// Why a lane's track can't take this clip, as Live has it, if it can't: a clip of the other kind, or a frozen track.
+pub(super) fn lane_track_refuses(track: &Value, audio: bool) -> Option<String> {
+    if track["isFrozen"] == json!(true) {
+        return Some(format!(
+            "“{}” is frozen, and Live puts no clips on a frozen track (Live: “Clips cannot be created on frozen tracks”): unfreeze it first.",
+            track["name"].as_str().unwrap_or("")
+        ));
+    }
+    match (track["mediaKind"].as_str(), audio) {
+        (Some("audio"), false) => {
+            Some("A MIDI clip can't go in an audio track's take lane (Live: “MIDI clips can only be created on MIDI tracks”).".into())
+        }
+        (Some("midi"), true) => {
+            Some("An audio file can't go in a MIDI track's take lane (Live: “Audio clips can only be created on audio tracks”).".into())
+        }
+        _ => None,
+    }
 }
 impl McpHost {
     pub async fn dispatch_arrangement_clip_tool(
@@ -74,6 +146,9 @@ impl McpHost {
         if take_lane && (create_kind != "midi" || !is_non_empty_string(&params["takeLaneRef"], 256)) {
             return error(id, -32602, "takeLaneRef requires kind=midi", None);
         }
+        if take_lane && params.get("trackRef").is_some_and(|track| !is_non_empty_string(track, 256)) {
+            return error(id, -32602, "trackRef, given with takeLaneRef, is the lane's track", None);
+        }
 
         let result = async {
             let status = self.fresh_status(Some(&LiveOperationContext::with_deadline(self.deadline(reads::AUDITION_DEADLINE_MS)))).await?;
@@ -97,9 +172,24 @@ impl McpHost {
                 if !nonnegative(&params["position"]) || !positive(&params["length"]) || !is_non_empty_string(&params["name"], 256) {
                     return Ok(error(id, -32602, "position, length, and name are required for a take-lane clip create", None));
                 }
-                let (_, lane) = self.take_lane_row(&snapshot, params["takeLaneRef"].as_str().unwrap())?;
+                let (lane_track, lane) = self.take_lane_row(&snapshot, params["takeLaneRef"].as_str().unwrap())?;
                 if !is_non_empty_string(&lane["objectIdentity"], 256) {
                     return Err(LiveError::error("take-lane identity is not authoritative"));
+                }
+                if params.get("trackRef").is_some_and(|track| *track != lane_track["ref"]) {
+                    let owner = lane_track["name"].as_str().unwrap_or("");
+                    return Err(LiveError::error(format!(
+                        "Take lane “{}” is on “{owner}”, not on that track: give “{owner}”'s trackRef, or a lane of that track's.",
+                        lane["name"].as_str().unwrap_or("")
+                    )));
+                }
+                if let Some(why) = lane_track_refuses(&lane_track, false) {
+                    return Err(LiveError::error(why));
+                }
+                let start = params["position"].as_f64().unwrap();
+                let under = lane_clips_under(&lane, start, start + params["length"].as_f64().unwrap());
+                if !under.is_empty() {
+                    return Err(LiveError::error(lane_taken(&lane, &under)));
                 }
                 let siblings = lane_siblings(&lane);
                 if siblings.as_array().unwrap().iter().any(|r| r.get("objectIdentity").is_none()) {
@@ -137,6 +227,7 @@ impl McpHost {
                     "action":"create",
                     "kind":"take-lane",
                     "payload":payload,
+                    "takeLane":{"ref":params["takeLaneRef"],"name":lane["name"]},
                     "impact":"creates-take-lane-clip-no-undo",
                     "confirmation":"apply",
                     "expiresAt":t["expiresAt"]}
@@ -234,11 +325,11 @@ impl McpHost {
             }
             let snapshot = self.views.view_for(None, &[params["trackRef"].clone()], None, &[]).await?;
             let value = serde_json::to_value(&snapshot).unwrap();
-            let track = value["tracks"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .find(|r| r["ref"] == params["trackRef"])
+            let track = value["tracks"].as_array().into_iter().flatten().find(|r| r["ref"] == params["trackRef"]);
+            if let Some(why) = track.and_then(no_lanes) {
+                return Err(LiveError::error(why));
+            }
+            let track = track
                 .filter(|r| is_non_empty_string(&r["objectIdentity"], 256))
                 .ok_or_else(|| LiveError::error("track identity is not authoritative"))?;
             let lanes = track_lanes(track);
@@ -447,14 +538,10 @@ impl McpHost {
     pub async fn undo_arrangement_clip_async(&self, id: &Value, params: &Value, signal: Option<&Signal>) -> Value {
         let record = params["transactionId"].as_str().and_then(|id| self.clip_lifecycle_transactions.get(id));
         if record.as_ref().is_some_and(|r| r.borrow()["kind"] == "take-lane-create") {
-            return reason_error(
-                id,
-                "Live's API deletes no take lane; Live's own undo takes it back",
-                "Nothing changed. Undo it in Live (Cmd-Z, or live_song_undo): Live takes back what came after the lane first.",
-            );
+            return reason_error(id, "Live's API deletes no take lane; Live's own undo takes it back", LIVE_UNDOES_IT);
         }
         if record.as_ref().is_some_and(|r| r.borrow()["kind"] == "arrangement-take-lane-create") {
-            return transaction_error(id, "The public LOM exposes no take-lane clip deletion; undo is unavailable for this transaction");
+            return reason_error(id, LANE_CLIP_UNDO, LIVE_UNDOES_IT);
         }
 
         let Some(record) =
@@ -520,5 +607,34 @@ impl McpHost {
             record.borrow_mut()["state"] = json!("uncertain");
             adapter_tool_error(id, &e, "Arrangement clip undo is uncertain; inspect the exact created clip.")
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn an_audio_file_goes_in_a_take_lane_only_past_its_last_clip() {
+        let lane = json!({"name":"Comp","clips":[{"name":"Take","start":4.0,"endTime":36.0},{"name":"Short","start":40.0,"length":2.0}]});
+        // Before a take (the file would run into it), inside one, or past one but before the next: refused.
+        for position in [0.0, 8.0, 38.0] {
+            assert!(!lane_clips_from(&lane, position).is_empty(), "{position}");
+        }
+        assert_eq!(lane_clips_from(&lane, 8.0), ["“Take” (beats 4–36)", "“Short” (beats 40–42)"]);
+        // Past the last one's right edge: free.
+        assert!(lane_clips_from(&lane, 42.0).is_empty());
+        assert_eq!(
+            lane_taken(&lane, &lane_clips_from(&lane, 38.0)),
+            "“Short” (beats 40–42) is there in take lane “Comp”: Live would cut it, and its API can't put a clip in a lane back. Choose a free span in the lane, or another lane."
+        );
+    }
+    #[test]
+    fn a_lane_takes_only_its_own_kind_of_clip_and_none_on_a_frozen_track() {
+        let refused = |track: Value, audio: bool| lane_track_refuses(&track, audio).unwrap_or_default();
+        assert!(refused(json!({"mediaKind":"midi"}), true).starts_with("An audio file can't go in a MIDI track's take lane"));
+        assert!(refused(json!({"mediaKind":"audio"}), false).starts_with("A MIDI clip can't go in an audio track's take lane"));
+        assert!(refused(json!({"mediaKind":"audio","isFrozen":true,"name":"Vox"}), true).starts_with("“Vox” is frozen"));
+        assert!(lane_track_refuses(&json!({"mediaKind":"audio","isFrozen":false}), true).is_none());
+        assert!(lane_track_refuses(&json!({"mediaKind":"midi"}), false).is_none());
     }
 }

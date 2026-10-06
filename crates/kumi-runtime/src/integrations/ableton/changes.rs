@@ -385,6 +385,9 @@ impl ChangeKind {
             }
             "add_arrangement_clip" => {
                 // An audio file as a clip when a sample is given; an empty MIDI clip otherwise.
+                if input.contains_key("sample") && input.contains_key("takeLaneRef") {
+                    return Ok(Err("For an audio file in a take lane, use import_audio with its takeLaneRef.".into()));
+                }
                 let mut out = if input.contains_key("sample") {
                     let found = match sample_for(input.get("sample"), context).await? {
                         Ok(found) => found,
@@ -611,6 +614,9 @@ impl ChangeKind {
             },
             "edit_clip" => "Live gives Kumi no way to take this back; use Live's own undo if you need to.",
             "add_take_lane" => "Live's API can't delete a take lane; Live's own undo takes it back.",
+            "add_arrangement_clip" | "import_audio" if input.contains_key("takeLaneRef") => {
+                "Live's API can't delete a clip in a take lane; Live's own undo takes it back."
+            }
             "edit_notes" if action == Some("select") => "Selecting notes changes no notes: there's nothing to undo.",
             "change_structure" if action == Some("delete-return") => {
                 "Live gives Kumi no way to bring a deleted return track back; use Live's own undo if you need to."

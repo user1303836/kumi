@@ -150,8 +150,10 @@ impl Mutations {
         let (transaction, confirmation) = (transaction.to_owned(), confirmation.to_owned());
         let known = |reference: &Value| reference.as_str().and_then(|r| connection.references.borrow().known.get(r).cloned());
         // A new Arrangement clip is laid over the clips it lands on, as Live does: they're read first, to say which (an
-        // audio clip's own length shows once it's made).
-        let under = if kind.tool == "add_arrangement_clip" { self.arrangement_clips_of(&args, &signal).await } else { None };
+        // audio clip's own length shows once it's made). A clip in a take lane lands on none: the bridge refuses a span
+        // a clip in the lane is in.
+        let main_lane = kind.tool == "add_arrangement_clip" && !args.contains_key("takeLaneRef");
+        let under = if main_lane { self.arrangement_clips_of(&args, &signal).await } else { None };
         if let (Some(under), Some(start), Some(length)) = (&under, beats(args.get("position")), beats(args.get("length"))) {
             preview.insert("replaces".into(), json!(laid_over(under, start, start + length)));
         }
@@ -195,7 +197,7 @@ impl Mutations {
                 return Ok(ChangeOutcome::error("Kumi couldn't read Live's answer to this change, so it can't confirm whether it happened. Tell the producer to check Live; discover again before more changes."));
             }
         };
-        if kind.tool == "add_arrangement_clip" {
+        if main_lane {
             // Whether Kumi's own undo can take the new clip back hangs on what it cut: the track's clips are read again
             // and compared with the read before. A read that fails, or a clip cut past what that read explains, leaves
             // the undo to Live's (deleting the new clip wouldn't bring back what it cut).
