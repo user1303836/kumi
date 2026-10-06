@@ -83,7 +83,7 @@ Kumi は開いている Set を読み、頼まれた変更を行います。変�
 | `set_chain`, `set_chain_mixer` | ラックチェーンのミュート、ソロ、色。そのボリューム、パン、オン/オフ |
 | `delete_device`, `delete_clip`, `delete_scene`, `delete_track`, `delete_locator` | 削除。すべて kept：Live の取り消しで元に戻せる |
 | `clear_range` | アレンジメントで一つのトラックの範囲をクリアし、端にかかるクリップを切る（拡張機能が必要。kept） |
-| `set_clip_follow_actions`, `edit_rack_mapping` | [Willington](WILLINGTON_INTEGRATION.md) がある場合のみ：Follow Actions。マクロの名前、マッピング、バリエーションの名前、チェーンのゾーン |
+| `set_clip_follow_actions`, `edit_rack_mapping` | [Willington](WILLINGTON_INTEGRATION.md) のバインディングがオンのときのみ（`/willington`）：Follow Actions。マクロの名前、マッピング、バリエーションの名前、チェーンのゾーン |
 | `live_command` | Live のスクリプトにない Live 自身のコマンド：グループ化、フリーズ、フラット化、バウンス、統合、MIDI への変換、ステム分離、スライス、保存、書き出し（[ガイド](KUMI_GUIDE.md#live-自身のコマンド)。保持：Live の取り消しで戻せます） |
 
 `make_changes` はこれらのどれでもプランの中で実行し、`undo_change` は一つを取り消します。
@@ -132,7 +132,7 @@ NOW では、読み込んだデバイスの行き先を表示します。トラ�
 ╰ Operator   … → Chorus-Ensemble
 ```
 
-Live では、スクリプトからマクロやモジュレーターをパラメータにマッピングすること、マクロの範囲を設定すること、マクロに名前を付けることができません。Kumi はそのことを伝え、あなたが Live で行います（Map を押してから、パラメータをクリック）。[Willington](WILLINGTON_INTEGRATION.md) があれば、Kumi はマクロに名前を付けてマッピングできますが、モジュレーターは引き続きマッピングできません。
+Live では、スクリプトからマクロやモジュレーターをパラメータにマッピングすること、マクロの範囲を設定すること、マクロに名前を付けることができません。Kumi はそのことを伝え、あなたが Live で行います（Map を押してから、パラメータをクリック）。[Willington](WILLINGTON_INTEGRATION.md) のバインディングがオン（`/willington`）なら、Kumi はマクロに名前を付けてマッピングできますが、モジュレーターは引き続きマッピングできません。
 
 ## サンプルとドラムキット
 
@@ -202,6 +202,6 @@ Kumi は接続時にブリッジのバージョンを読み、ブリッジが古
 | 1.0.68 | `run_python` |
 | 1.0.73 | Kumi Ears でトラック、リターン、ミックスを聴く（それより古いブリッジでは録音して聴きます） |
 
-Willington のツールは、ブリッジが提供すればいつでも現れます。ブリッジが提供するのは、プロバイダーが設定されている場合だけです。
+Willington のツールは、ブリッジが提供すればいつでも現れます。ブリッジが提供するのは、Willington のバインディングがオン（`/willington`）で、それが対応する Live ビルドのときです。
 
 Kumi の各リリースにはブリッジが付属します：Kumi 1.8.3 にはブリッジ 1.0.77、1.8.2 には 1.0.76、1.7.5〜1.8.1 には 1.0.74、1.7.0〜1.7.4 には 1.0.73、1.6.1 には 1.0.72、1.6.0 には 1.0.71、1.5 には 1.0.70、1.4 には 1.0.69、1.3 には 1.0.68、1.2 には 1.0.66、1.1 には 1.0.53、1.0 には 1.0.52 です。

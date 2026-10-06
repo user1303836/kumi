@@ -57,7 +57,7 @@ Kumi 会在你的 User Library 中找到 Live 的 Remote Scripts 文件夹，包
 
 桥接安装好并在 Live 中选中后，`kumi` 会找到并连接它；无需任何配置。没有桥接时，Kumi 照样启动，在不连接 Live 的情况下聊天（**No Live access**），并提出连接。`kumi --bridge-config <absolute path>` 使用你自己的桥接配置；`kumi --inference-only` 在不连接 Live 的情况下聊天。
 
-**可选：Willington。** 装上单独安装的 Willington provider 后，Kumi 还可以编辑 Follow Actions、映射机架的宏旋钮以及设置链区域（chain zone）。它有适用于 macOS ARM64 上 Live 12.4.15b4 和 b5 的绑定（链区域仅限 b5）；请见[可选的 Willington 集成](WILLINGTON_INTEGRATION.md)。
+**Willington。** 从带有 Willington 文件的版本起，Kumi 的桥接会带上它的原生绑定；在此之前，你可以自己安装 Willington。无论哪种方式，在你用 `/willington` 开启之前它们一直是关闭的。开启后，Kumi 还可以映射机架的宏旋钮、设置链区域（chain zone），并在自检通过时编辑 Follow Actions。Willington 有绑定的 Live 版本：macOS ARM64 上的 Live 12.4.15b4 和 b5（链区域仅限 b5），以及 Windows x64 上的 Live 12.4.15b5；请见 [Willington](WILLINGTON_INTEGRATION.md)。
 
 ## 使用 Kumi
 
@@ -93,7 +93,7 @@ Kumi 把一个请求规划成一组修改，并一次性执行。每项修改都
 
 **在 Live 中运行 Python。** 对于其他工具够不着的地方，Kumi 可以用 Live 自己的 API 在 Live 内运行 Python。脚本所做的修改在 Live 的撤销中算一步，但不会在 HISTORY 中留下条目；用 Live 的撤销即可撤回。
 
-**Live 不允许脚本做的事：** 把宏旋钮或调制器映射到参数（Willington 可以映射宏旋钮），以及编辑编曲视图的自动化通道。Kumi 会如实说明，并建议变通的办法。保存、导出、冻结、并轨和编组则通过 [Live 自己的命令](#live-自己的命令)完成。
+**Live 不允许脚本做的事：** 把宏旋钮或调制器映射到参数（Willington 可以映射宏旋钮：`/willington`），以及编辑编曲视图的自动化通道。Kumi 会如实说明，并建议变通的办法。保存、导出、冻结、并轨和编组则通过 [Live 自己的命令](#live-自己的命令)完成。
 
 [Kumi 如何修改你的工程](KUMI_CHANGES.md)列出了 Kumi 能做的所有修改。
 

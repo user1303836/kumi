@@ -265,6 +265,24 @@ case!(an_open_live_is_restarted_only_when_asked_and_esc_puts_setup_off, async {
     h.close().await;
 });
 
+case!(after_kumi_restarts_live_the_control_surface_waits_for_the_live_that_opens, async {
+    // #167: the session was connected to the Live Kumi restarts. That connection went with it, so the
+    // Control Surface step waits for the Live that opens next rather than calling it connected at once.
+    let live = FakeLive::new(true);
+    let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |_| {});
+    h.start().await;
+    h.connect();
+    h.wait_for("Restart Live now").await;
+    h.type_text("\r").await;
+    h.wait_for("waiting for Live").await;
+    support::delay(400).await;
+    h.has("Control Surface     waiting for Live");
+    assert!(!support::has(&h.screen(), "Live 12.4 · connected"), "{}", h.screen().join("\n"));
+    h.connect();
+    h.wait_for("Control Surface     Live 12.4 · connected").await;
+    h.close().await;
+});
+
 case!(an_install_that_fails_says_why_and_can_be_tried_again, async {
     let live = FakeLive::new(false);
     live.installs.borrow_mut().push(Err("Kumi couldn't find Live's User Library. Open Live once so it makes one.".into()));

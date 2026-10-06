@@ -66,9 +66,11 @@ bridge, the version given is the one in the commit that added it.
   earlier can fail on a tar error; see [Windows](SUPPORT_MATRIX.md#windows).
 - Real-Live testing so far is on Live 12.4.15 beta, mostly on Apple silicon
   Macs. Live 12.0 to 12.3, Intel Macs and screen readers are untested.
-- The Willington edits need a Live build Willington has bindings for: macOS
-  ARM64 Live 12.4.15b4 and b5, with rack chain zones on b5 only; see
-  [Willington integration](WILLINGTON_INTEGRATION.md).
+- The Willington edits are off until `/willington` turns them on, and need a
+  Live build Willington has bindings for: macOS ARM64 Live 12.4.15b4 and b5
+  (rack chain zones on b5 only) and Windows x64 Live 12.4.15b5. On Windows, the
+  bindings were tested through Python in Live, not yet through Kumi's own edits;
+  see [Willington](WILLINGTON_INTEGRATION.md).
 - Kumi and the bridge are unsigned; see [releases and distribution](DISTRIBUTION_POLICY.md).
 
 ## Open work

@@ -446,7 +446,7 @@ Live が接続している間、ブリッジは 10 秒ごとに拡張機能を�
 
 ### Willington のツール
 
-別途インストールする Willington プロバイダーがあるときだけ表示されます。[Willington](WILLINGTON_INTEGRATION.md)を参照してください。
+Willington のバインディングがオン（`/willington`）で、それが対応する Live ビルドのときだけ表示されます。[Willington](WILLINGTON_INTEGRATION.md)を参照してください。
 
 | ツール | クラス | 内容 |
 | --- | --- | --- |
