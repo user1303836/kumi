@@ -56,6 +56,8 @@ struct Adapter {
     fault: RefCell<String>,
     fired: Cell<bool>,
     after_invoke: Cell<bool>,
+    /// Live's device refs are positional (`{track}:{index}`): once one is deleted, the next device takes its ref.
+    positional: Cell<bool>,
 }
 impl Adapter {
     fn new() -> Self {
@@ -66,6 +68,7 @@ impl Adapter {
             fault: Default::default(),
             fired: Cell::new(false),
             after_invoke: Cell::new(false),
+            positional: Cell::new(false),
         }
     }
     fn reset(&self, fault: &str) {
@@ -113,6 +116,11 @@ impl Adapter {
         } else {
             self.sim.invoke(i)?
         };
+        if self.positional.get() && i.operation == "device.delete" {
+            if let Some(next) = self.sim.state.borrow_mut()["tracks"][0]["devices"].get_mut(0) {
+                next["ref"] = i.args["ref"].clone();
+            }
+        }
         if c.is_some() && !no_effect {
             self.cache.borrow_mut().insert(key, result.clone());
         }
@@ -226,6 +234,36 @@ async fn deletion_validation_matches_source() {
             _ => host.live_deletion_apply_async(&json!(1), &row["args"], kind, None).await.unwrap(),
         };
         same(&clean(result), &row["result"], &format!("{i} {row}"));
+    }
+}
+#[tokio::test]
+async fn deleting_a_device_with_one_after_it_is_confirmed_by_identity() {
+    let data = fixture();
+    // The read after the delete failing first leaves it uncertain, for a retry with the same key to settle.
+    for fault in ["", "apply-read"] {
+        let adapter = Rc::new(Adapter::new());
+        *adapter.sim.state.borrow_mut() = data["seeds"]["device"].clone();
+        let next = json!({"ref":"device:eq-1","parentRef":"track:track-1","name":"EQ Eight","kind":"audio-effect","parameters":[],"objectIdentity":"simulator:device:eq-1","enabled":true});
+        adapter.sim.state.borrow_mut()["tracks"][0]["devices"].as_array_mut().unwrap().push(next);
+        adapter.positional.set(true);
+        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+        let preview = host.live_device_delete_preview_async(&json!(1), &json!({"ref":"device:utility-1"})).await;
+        let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        let record = host.transaction_record(body["transactionId"].as_str().unwrap()).unwrap();
+        adapter.reset(fault);
+        let apply = json!({"transactionId":body["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+        let first = host.live_device_delete_apply_async(&json!(2), &apply, None).await.unwrap();
+        if fault.is_empty() {
+            // EQ Eight has the deleted device's ref now; Utility is gone by its identity.
+            assert_eq!(record.borrow()["state"], "applied", "{first}");
+        } else {
+            assert_eq!(record.borrow()["state"], "uncertain", "{first}");
+            host.live_device_delete_apply_async(&json!(3), &apply, None).await.unwrap();
+            assert_eq!(record.borrow()["state"], "applied", "the retry settles it");
+        }
+        let left: Vec<_> =
+            adapter.sim.state.borrow()["tracks"][0]["devices"].as_array().unwrap().iter().map(|d| d["name"].clone()).collect();
+        assert_eq!(left, [json!("EQ Eight")], "{fault}");
     }
 }
 #[tokio::test]
