@@ -494,6 +494,13 @@ class FakeClip:
     def remove_notes_by_id(self, ids): self.notes = [note for note in self.notes if note.get("note_id") not in set(ids)]
 
 
+class DeletedClip(FakeClip):
+    """A clip Live has deleted: anything read from it raises, as Live's own clip does."""
+    def __getattribute__(self, attribute):
+        if attribute.startswith("__"): return object.__getattribute__(self, attribute)
+        raise TypeError("Python argument types in\n    None.None(Clip)\ndid not match C++ signature:\n    None(TPyHandle<AClip>)")
+
+
 class FakeSlot:
     def __init__(self):
         self.clip = None
@@ -2578,6 +2585,16 @@ class ControlSurfaceTests(unittest.TestCase):
             mapper.invoke("arrangement.clip.move", move_args)
         self.assertEqual(len(track.arrangement_clips), before); self.assertIn(source_object, track.arrangement_clips)
 
+    def test_an_audio_clip_reads_as_audio_though_it_offers_note_calls_as_lives_own_do(self):
+        # Every clip of Live's offers note calls, audio ones too: is_audio_clip tells, in every row a clip is in.
+        song = FakeSong(); track = song.tracks[0]
+        arrangement = FakeClip(8.0); arrangement.name = "Vox"; arrangement.start_time = 0.0; arrangement.is_audio_clip = True; track.arrangement_clips = [arrangement]
+        session = FakeClip(4.0); session.name = "Loop"; session.is_audio_clip = True; track.clip_slots[0].clip = session
+        lane = FakeTakeLane(); lane.create_audio_clip("/tmp/take.wav", 0.0); lane.create_midi_clip(8.0, 4.0); track.take_lanes = [lane]
+        mapper = LiveObjectMapper(song); snapshot = mapper.snapshot(); row = snapshot["arrangement"]["clips"][0]
+        self.assertEqual((row["kind"], mapper.get(row["ref"])["kind"], snapshot["tracks"][0]["clips"][0]["kind"]), ("audio", "audio", "audio"))
+        self.assertEqual([clip["kind"] for clip in mapper._take_lane_rows(track, 0)[0]["clips"]], ["audio", "midi"])
+
     def test_arrangement_move_fingerprint_is_the_clip_content_not_its_playback(self):
         # The host fingerprints clips without playback state; a moved clip that plays must still match.
         song = FakeSong(); track = song.tracks[0]
@@ -2624,7 +2641,10 @@ class ControlSurfaceTests(unittest.TestCase):
                 else: track.arrangement_clips.remove(other); continue
                 other.length = other.end_time - other.start_time
             return place(FakeClip(length), start, end)
-        track.duplicate_clip_to_arrangement = duplicate_to_arrangement; track.delete_clip = lambda candidate: track.arrangement_clips.remove(candidate)
+        def delete_clip(candidate):
+            # Live raises on anything read from a clip once it's deleted (Boost.Python's ArgumentError, a TypeError).
+            track.arrangement_clips.remove(candidate); candidate.__class__ = DeletedClip
+        track.duplicate_clip_to_arrangement = duplicate_to_arrangement; track.delete_clip = delete_clip
         if not audio: track.create_midi_clip = create_midi_clip
         return song, track
 

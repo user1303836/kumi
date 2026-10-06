@@ -60,7 +60,9 @@ fn in_new_place(snapshot: &Value, moving: &Value, track: &Value, position: f64) 
                     "from": other_start.max(position),
                     "to": other_end.min(target_end),
                     "whole": other_start >= position - 1e-6 && other_end <= target_end + 1e-6,
-                    "audio": clip["kind"] == "audio",
+                    // Live's own rows call every Arrangement clip "midi" (its clips all offer note calls); `isAudio`
+                    // is what tells.
+                    "audio": clip["isAudio"] == true || clip["kind"] == "audio",
                     "looping": clip["looping"] == true
                 })
             })
@@ -84,7 +86,7 @@ fn after_cuts(error: LiveError, cut: &[&Value]) -> LiveError {
         cut.iter().map(|c| format!("{} at beats {} to {}", named(c), beat(&c["from"]), beat(&c["to"]))).collect::<Vec<_>>().join(" and ");
     let reason = error.message().strip_prefix("request failed: ").unwrap_or(error.message()).replace("; nothing changed", "");
     let back = if cut.len() == 1 { "Live's own undo puts it back in one step" } else { "Live's own undo puts them back, one step per cut" };
-    LiveError::error(format!("Kumi cut {what} with its Live extension, then the move failed; {back}. Why: {reason}"))
+    LiveError::error(format!("Kumi cut {what} with its Live extension, then couldn't finish the move; {back}. Why: {reason}"))
 }
 
 impl McpHost {
@@ -372,14 +374,25 @@ impl McpHost {
                             .into_iter()
                             .flatten()
                             .find(|c| c["objectIdentity"] == payload["expectedObjectIdentity"]);
-                        let Some(reference) = moving.and_then(|c| c["ref"].as_str()) else {
+                        let Some((moving, reference)) = moving.and_then(|c| Some((c, c["ref"].as_str()?))) else {
                             return Err(LiveError::error("the clip wasn't found again"));
                         };
-                        Ok((reference.to_owned(), self.arrangement_clip_authority(&fresh, reference)?))
+                        // A split before the clip renumbers it in Live, and its ref is part of its content's
+                        // fingerprint: nothing else of it may have changed, and the move checks the fresh one.
+                        let unnumbered = |clip: &Value| {
+                            let mut clip = clip.clone();
+                            clip.as_object_mut().map(|c| c.remove("ref"));
+                            capture_object_fingerprint(&clip)
+                        };
+                        if row.as_ref().is_some_and(|row| unnumbered(&row.clip).ok() != unnumbered(moving).ok()) {
+                            return Err(LiveError::error("the clip changed while Kumi cut its new place"));
+                        }
+                        Ok((reference.to_owned(), self.arrangement_clip_authority(&fresh, reference)?, capture_object_fingerprint(moving)?))
                     }
                     .await;
-                    let (reference, authority) = found.map_err(|e| after_cuts(e, &cutting[..cut.min(cutting.len())]))?;
+                    let (reference, authority, fingerprint) = found.map_err(|e| after_cuts(e, &cutting[..cut.min(cutting.len())]))?;
                     args["ref"] = json!(reference);
+                    args["expectedContentFingerprint"] = json!(fingerprint);
                     merge(&mut args, &authority);
                     record.borrow_mut()["moveArgs"] = args.clone();
                 }

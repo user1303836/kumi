@@ -118,6 +118,20 @@ impl Adapter {
                 })
             });
         }
+        if fault == "renumber" && i.operation == "arrangement.clip.move" {
+            // As the Remote Script checks it: the clip's content fingerprint, its ref included.
+            let snapshot = serde_json::to_value(self.sim.snapshot()?).unwrap();
+            let row = snapshot["arrangement"]["clips"].as_array().unwrap().iter().find(|c| c["ref"] == i.args["ref"]).cloned();
+            let fingerprint = row.map(|row| {
+                use sha2::Digest;
+                hex::encode(sha2::Sha256::digest(canonical_mutation_identity(&without_playback_state(&row)).unwrap().as_bytes()))
+            });
+            if i.args.get("expectedContentFingerprint").and_then(Value::as_str) != fingerprint.as_deref() {
+                return Err(LiveError::MutationNotDispatched(
+                    "request failed: Arrangement clip content changed; move refused; nothing changed".into(),
+                ));
+            }
+        }
         let no_effect = !self.fired.get() && fault.ends_with("no-effect");
         let mut result = if no_effect {
             self.fired.set(true);
@@ -127,6 +141,15 @@ impl Adapter {
         };
         if c.is_some() && !no_effect {
             self.cache.borrow_mut().insert(key, result.clone());
+        }
+        if fault == "renumber" && i.operation == "clip.clear-range" {
+            // Live renumbers a track's clips after a split: the clip to move gets another ref.
+            let mut state = self.sim.state.borrow_mut();
+            for row in state["arrangementClips"].as_array_mut().unwrap() {
+                if row["clip"]["objectIdentity"] == "simulator:arrangement-clip:0" {
+                    row["clip"]["ref"] = json!("arrangement-clip:track-1:renumbered");
+                }
+            }
         }
         self.after_invoke.set(true);
         if !self.fired.get() && fault.ends_with("after") {
@@ -489,6 +512,16 @@ async fn an_audio_clip_crossing_the_new_place_is_cut_by_the_live_extension_first
         "\"Vox\" (beats 10 to 18) crosses beats 16 to 18 of the clip's new place, and Kumi's Live extension cuts audio clips; without it, delete it first (delete_clip) or pick a free spot",
         "{without}"
     );
+    // As Live itself shows an audio clip (a "midi" kind, `isAudio` true): still cut by the extension first.
+    let (adapter, host) = audio(false);
+    {
+        let mut state = adapter.sim.state.borrow_mut();
+        let vox = &mut state["arrangementClips"].as_array_mut().unwrap().last_mut().unwrap()["clip"];
+        vox["kind"] = json!("midi");
+        vox["isAudio"] = json!(true);
+    }
+    let (preview, _) = move_clip(&host, 16.0).await;
+    assert_eq!(body(&preview)["payload"]["clearFirst"].as_array().map(Vec::len), Some(1), "{preview}");
     // Over its end, with it: cut there.
     let (adapter, host) = audio(false);
     let (preview, applied) = move_clip(&host, 16.0).await;
@@ -572,18 +605,32 @@ async fn a_move_that_fails_after_the_extension_cut_says_what_was_cut() {
     let (adapter, applied) = failed("refuse:arrangement.clip.move:1").await;
     assert_eq!(
         applied["reason"],
-        "Kumi cut \"Vox\" (beats 10 to 14) at beats 13 to 14 and \"Pad\" (beats 15 to 20) at beats 15 to 17 with its Live extension, then the move failed; Live's own undo puts them back, one step per cut. Why: arrangement.clip.move refused"
+        "Kumi cut \"Vox\" (beats 10 to 14) at beats 13 to 14 and \"Pad\" (beats 15 to 20) at beats 15 to 17 with its Live extension, then couldn't finish the move; Live's own undo puts them back, one step per cut. Why: arrangement.clip.move refused"
     );
     assert_eq!(applied["remediation"], "Clip move is uncertain; perform fresh discovery before retrying.");
     assert_eq!(layout(&adapter.sim), [("Kick Pattern".to_string(), 4.0, 8.0), ("Vox".into(), 10.0, 13.0), ("Pad".into(), 17.0, 20.0)]);
     let (adapter, applied) = failed("refuse:clip.clear-range:2").await;
     assert_eq!(
         applied["reason"],
-        "Kumi cut \"Vox\" (beats 10 to 14) at beats 13 to 14 with its Live extension, then the move failed; Live's own undo puts it back in one step. Why: clip.clear-range refused"
+        "Kumi cut \"Vox\" (beats 10 to 14) at beats 13 to 14 with its Live extension, then couldn't finish the move; Live's own undo puts it back in one step. Why: clip.clear-range refused"
     );
     assert_eq!(layout(&adapter.sim), [("Kick Pattern".to_string(), 4.0, 8.0), ("Vox".into(), 10.0, 13.0), ("Pad".into(), 15.0, 20.0)]);
     // Without a failure, the move lands between what's left of both.
     let (adapter, applied) = failed("").await;
     assert_eq!(applied["state"], "applied", "{applied}");
     assert_eq!(layout(&adapter.sim), [("Vox".to_string(), 10.0, 13.0), ("Kick Pattern".into(), 13.0, 17.0), ("Pad".into(), 17.0, 20.0)]);
+}
+#[tokio::test]
+async fn a_split_before_the_clip_to_move_renumbers_it_and_it_still_moves() {
+    // Live renumbers a track's clips after a split, and a clip's ref is part of its content's fingerprint, so
+    // the move checks the one the clip has after the cut (nothing else of it may have changed).
+    let adapter = Rc::new(Adapter::new());
+    setup(&adapter.sim, "arrangement-audio");
+    arrangement_clip(&adapter.sim, "Vox", 10.0, 8.0, true);
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    adapter.reset("renumber");
+    let (preview, applied) = move_clip(&host, 12.0).await;
+    assert_eq!(body(&preview)["payload"]["clearFirst"].as_array().map(Vec::len), Some(1), "{preview}");
+    assert_eq!(body(&applied)["state"], "applied", "{applied}");
+    assert_eq!(layout(&adapter.sim), [("Vox".to_string(), 10.0, 12.0), ("Kick Pattern".into(), 12.0, 16.0), ("Vox".into(), 16.0, 18.0)]);
 }

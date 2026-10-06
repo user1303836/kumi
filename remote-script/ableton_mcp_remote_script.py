@@ -1673,7 +1673,7 @@ class LiveObjectMapper:
         if not isinstance(length, (int, float)) or isinstance(length, bool) or not math.isfinite(float(length)) or float(length) < 0: raise ValueError("clip content length is unavailable")
         notes = [{key: value for key, value in note.items() if key != "id"} for note in self._read_notes(clip)]; notes.sort(key=self._bounded_canonical)
         if len(self._items(self._read_attr(clip, "warp_markers") or [])) > MAX_DISCOVERY_COLLECTION_LENGTH: raise ValueError("complete warp-marker content exceeds its authoritative move bound")
-        row = {"name": str(self._read_attr(clip, "name") or ""), "length": float(length), "kind": "midi" if callable(getattr(clip, "add_new_notes", None)) else "audio", "notes": notes, "audio": self._audio_fields(clip)}
+        row = {"name": str(self._read_attr(clip, "name") or ""), "length": float(length), "kind": self._clip_kind(clip), "notes": notes, "audio": self._audio_fields(clip)}
         return hashlib.sha256(self._bounded_canonical(row).encode("utf-8")).hexdigest()
 
     def _arrangement_identities(self, track_indices: list[int]) -> list[dict[str, Any]]:
@@ -1711,9 +1711,16 @@ class LiveObjectMapper:
         rows = self._read_notes(clip)
         return {"notes": rows, "notesRevision": hashlib.sha256(self._bounded_canonical(rows).encode("utf-8")).hexdigest(), "noteCount": len(rows) if self._read_attr(clip, "is_audio_clip") is not True else None}
 
+    def _clip_kind(self, clip: Any) -> str:
+        """A clip's kind. Every clip of Live's offers note calls, audio ones too, so Live's `is_audio_clip` tells;
+        a clip without it is told by its note calls."""
+        audio = self._read_attr(clip, "is_audio_clip")
+        if isinstance(audio, bool): return "audio" if audio else "midi"
+        return "midi" if callable(getattr(clip, "add_new_notes", None)) else "audio"
+
     def _arrangement_clip_row(self, track: Any, clip: Any, track_index: int, clip_index: int, notes: bool = False) -> dict[str, Any]:
         track_ref = self.refs.put("track", track, str(track_index)); reference = self.refs.put("arrangement_clip", clip, f"{track_index}:{clip_index}")
-        row = {"ref": reference, "objectIdentity": self._capture_object_identity(clip), "parentRef": track_ref, "trackRef": track_ref, "name": str(getattr(clip, "name", "")), "kind": "midi" if hasattr(clip, "add_new_notes") else "audio", "start": float(getattr(clip, "start_time", getattr(clip, "start", 0.0)) or 0.0), "length": float(getattr(clip, "length", 0.0) or 0.0), **self._arrangement_notes(clip, notes), **self._audio_fields(clip)}
+        row = {"ref": reference, "objectIdentity": self._capture_object_identity(clip), "parentRef": track_ref, "trackRef": track_ref, "name": str(getattr(clip, "name", "")), "kind": self._clip_kind(clip), "start": float(getattr(clip, "start_time", getattr(clip, "start", 0.0)) or 0.0), "length": float(getattr(clip, "length", 0.0) or 0.0), **self._arrangement_notes(clip, notes), **self._audio_fields(clip)}
         for key, value in self._clip_state_fields(clip).items():
             if value is not None or key not in row: row[key] = value
         return row
@@ -1741,7 +1748,7 @@ class LiveObjectMapper:
                     "parentRef": self.refs.put("set", self.song, "song"),
                     "trackRef": None,
                     "name": str(getattr(clip, "name", "")),
-                    "kind": "midi" if hasattr(clip, "add_new_notes") else "audio",
+                    "kind": self._clip_kind(clip),
                     "start": float(getattr(clip, "start_time", getattr(clip, "start", 0.0)) or 0.0),
                     "length": float(getattr(clip, "length", 0.0) or 0.0),
                     **self._arrangement_notes(clip, notes),
@@ -2311,7 +2318,7 @@ class LiveObjectMapper:
     def _session_clip_row(self, slot_ref: str, index: int, slot_index: int, clip: Any, notes: bool = True) -> dict[str, Any]:
         """A Session clip's row; without notes, it leaves out notes and notesRevision (reading them is its cost)."""
         clip_ref = self.refs.put("clip", clip, f"{index}:{slot_index}")
-        clip_row: dict[str, Any] = {"ref": clip_ref, "parentRef": slot_ref, "objectIdentity": self._capture_object_identity(clip), "name": str(getattr(clip, "name", "")), "kind": "midi" if hasattr(clip, "add_new_notes") else "audio", "start": slot_index * 4, "length": float(getattr(clip, "length", 0.0))}
+        clip_row: dict[str, Any] = {"ref": clip_ref, "parentRef": slot_ref, "objectIdentity": self._capture_object_identity(clip), "name": str(getattr(clip, "name", "")), "kind": self._clip_kind(clip), "start": slot_index * 4, "length": float(getattr(clip, "length", 0.0))}
         if notes:
             rows = self._read_notes(clip); clip_row["notes"] = rows; clip_row["notesRevision"] = hashlib.sha256(self._bounded_canonical(rows).encode("utf-8")).hexdigest()
         clip_row.update(self._audio_fields(clip))
@@ -5053,7 +5060,7 @@ class LiveObjectMapper:
             for clip_index, clip in enumerate(clips):
                 reference = self.refs.put("take_lane_clip", clip, f"{track_index}:{lane_index}:{clip_index}")
                 notes = self._read_notes(clip)
-                row = {"ref": reference, "objectIdentity": self._capture_object_identity(clip), "parentRef": self.refs.put("take_lane", lane, f"{track_index}:{lane_index}"), "takeLaneRef": self.refs.put("take_lane", lane, f"{track_index}:{lane_index}"), "name": str(getattr(clip, "name", "")), "kind": "midi" if hasattr(clip, "add_new_notes") else "audio", "start": float(getattr(clip, "start_time", getattr(clip, "start", 0.0)) or 0.0), "length": float(getattr(clip, "length", 0.0) or 0.0), "notes": notes, "notesRevision": hashlib.sha256(self._bounded_canonical(notes).encode("utf-8")).hexdigest(), **self._audio_fields(clip)}
+                row = {"ref": reference, "objectIdentity": self._capture_object_identity(clip), "parentRef": self.refs.put("take_lane", lane, f"{track_index}:{lane_index}"), "takeLaneRef": self.refs.put("take_lane", lane, f"{track_index}:{lane_index}"), "name": str(getattr(clip, "name", "")), "kind": self._clip_kind(clip), "start": float(getattr(clip, "start_time", getattr(clip, "start", 0.0)) or 0.0), "length": float(getattr(clip, "length", 0.0) or 0.0), "notes": notes, "notesRevision": hashlib.sha256(self._bounded_canonical(notes).encode("utf-8")).hexdigest(), **self._audio_fields(clip)}
                 for key, value in self._clip_state_fields(clip).items():
                     if value is not None or key not in row: row[key] = value
                 if row.get("isTakeLaneClip") is None: row["isTakeLaneClip"] = True
@@ -5531,13 +5538,15 @@ class LiveObjectMapper:
         cut: list[str] = []
         try:
             for other, other_start, other_end in in_the_way:
+                # Named first: Live raises on anything read from a clip once it's deleted.
+                name = f"\"{str(getattr(other, 'name', ''))[:60]}\""
                 if other_start >= start - 1e-6 and other_end <= end + 1e-6:
                     identity = self._capture_object_identity(other); owner.delete_clip(other)
                     if any(self._capture_object_identity(item) == identity for item in self._items(self._read_attr(owner, "arrangement_clips") or [])): raise ValueError("Live didn't delete the clip in the way")
                 elif other_start < start - 1e-6 and other_end > end + 1e-6: self._arrangement_split_around(owner, other, start, end, checkpoint)
                 elif other_start < start - 1e-6: self._arrangement_cut(owner, start, other_end)
                 else: self._arrangement_cut(owner, other_start, end)
-                cut.append(f"\"{str(getattr(other, 'name', ''))[:60]}\"")
+                cut.append(name)
             if self._arrangement_holds(owner, start, end, keep): raise ValueError("the span still holds a clip")
         except BaseException as error:
             if not cut: raise
