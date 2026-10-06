@@ -1,3 +1,5 @@
+#[path = "../../../tests/support/chunks.rs"]
+mod chunks;
 #[path = "../../../tests/support/fixture_paths.rs"]
 mod fixture_paths;
 use async_trait::async_trait;
@@ -27,7 +29,7 @@ use kumi_runtime::{
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
-    path::Path,
+    path::{Path, PathBuf},
     rc::Rc,
 };
 struct Fixture {
@@ -115,8 +117,12 @@ fn canonical(value: &Value) -> Value {
         other => other.clone(),
     }
 }
+thread_local! {
+    /// The folder this thread's renders go to, which the oracle calls $EARS.
+    static EARS: RefCell<PathBuf> = RefCell::new(PathBuf::new());
+}
 fn normalized(value: &Value) -> String {
-    let root = std::env::temp_dir().join("kumi-ears").join("connecti");
+    let root = EARS.with(|ears| ears.borrow().clone());
     let value = fixture_paths::map_strings(value, &|text| fixture_paths::normalize_root(text, root.to_str().unwrap(), "$EARS"));
     let mut text = stringify(&canonical(&value));
     for (pattern, replace) in [
@@ -169,18 +175,30 @@ fn wav(folder: &Path, kind: &str) {
     }
     std::fs::write(folder.join(format!("{kind}.wav")), bytes).unwrap();
 }
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn source_audition_goal_passes_and_failure_cleanup_match() {
-    tokio::task::LocalSet::new().run_until(replay()).await;
+/// The oracle's cases in 16 tests that nextest runs side by side.
+mod source_audition_goal_passes_and_failure_cleanup_match {
+    crate::chunks::chunked!(super::replay_cases; part_00 = 0, part_01 = 1, part_02 = 2, part_03 = 3, part_04 = 4, part_05 = 5,
+        part_06 = 6, part_07 = 7, part_08 = 8, part_09 = 9, part_10 = 10, part_11 = 11, part_12 = 12, part_13 = 13, part_14 = 14,
+        part_15 = 15);
 }
-async fn replay() {
+/// The oracle's cases at index `chunk`, `chunk + chunks`, …, on a runtime whose clock starts paused.
+fn replay_cases(chunk: usize, chunks: usize) {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().start_paused(true).build().unwrap();
+    runtime.block_on(tokio::task::LocalSet::new().run_until(replay(chunk, chunks)));
+}
+async fn replay(chunk: usize, chunks: usize) {
+    // Rendering keeps its renders in kumi-ears/<the generation's first 8 characters> in the temporary folder, and
+    // closing removes that folder. Each chunk has a generation of its own, so chunks running side by side keep theirs.
+    // No result in the oracle carries the generation.
+    let generation = format!("chunk-{chunk:02}");
+    EARS.with(|ears| *ears.borrow_mut() = std::env::temp_dir().join("kumi-ears").join(&generation));
     let folder = tempfile::tempdir().unwrap();
     for kind in ["square", "noise", "silence"] {
         wav(folder.path(), kind);
     }
     let source: Value = serde_json::from_str(include_str!("support/rendering-oracle.json")).unwrap();
     let fixture = fixture_paths::map_strings(&source, &|text| text.replace("$AUDIO", folder.path().to_str().unwrap()));
-    for (case_index, case) in fixture["cases"].as_array().unwrap().iter().enumerate() {
+    for (case_index, case) in fixture["cases"].as_array().unwrap().iter().enumerate().skip(chunk).step_by(chunks) {
         if std::env::var("KUMI_RENDERING_CASE").is_ok_and(|label| case["label"].as_str() != Some(&label)) {
             continue;
         }
@@ -205,7 +223,7 @@ async fn replay() {
             async move { Ok(out) }.boxed_local()
         }));
         options.now = Some(Rc::new(|| chrono::DateTime::from_timestamp_millis(0).unwrap()));
-        options.generation = Some("connection".into());
+        options.generation = Some(generation.clone());
         options.change_timeout_ms = Some(2000);
         options.fast = Some(false);
         options.ears = Some(EarsSetup::Disabled);
