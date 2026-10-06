@@ -297,6 +297,12 @@ async fn which_track_keeps_a_shared_id_is_kept_with_the_project_so_a_restart_kee
             let tracks = live.tracks.borrow().clone();
             assert_eq!(tracks[1].2.as_deref(), Some(A), "the original, seen with it before");
             assert!(tracks[0].2.as_deref().is_some_and(|id| track_id(id) && id != A), "the copy, a new one");
+            // The copy deleted: its id isn't kept any more, since only the tracks just read can share one later.
+            let copy = live.tracks.borrow_mut().remove(0).2.unwrap();
+            live.tracks.borrow_mut()[0].0 = "1:track:0".into();
+            TrackIds::default().pass(&connection, project, keepers(), true, 0, Signal::new()).await.unwrap();
+            let kept = store.load_track_keepers(project).await.unwrap();
+            assert!(!kept.contains_key(&copy) && kept.get(A).map(String::as_str) == Some("live:1") && kept.len() == 2, "{kept:?}");
         })
         .await;
 }

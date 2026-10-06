@@ -96,7 +96,7 @@ struct Scope {
     /// Tracks (by ref, at that revision) that couldn't take an id: a pass isn't due for them again until the
     /// track list changes.
     stuck: HashSet<String>,
-    /// Each id, and the identity of the track that keeps it.
+    /// Each id the tracks last read hold, and the identity of the track that keeps it.
     known: HashMap<String, String>,
     /// Whether `known` was read in from the project.
     loaded: bool,
@@ -214,18 +214,22 @@ impl TrackIds {
             kept.revision = revision;
             kept.structure = structure;
             kept.stuck = stuck;
-            // A track due a new id doesn't keep the one it holds, even unwritten: a copy left with its original's
-            // id never takes it over.
+            // Who keeps each id, of the tracks just read: the only ones a later shared id can involve. A track due a
+            // new id doesn't keep the one it holds, even unwritten: a copy left with its original's id never takes
+            // it over.
             let given: HashMap<&str, &str> = writes.iter().map(|w| (w.identity.as_str(), w.id.as_str())).collect();
-            let mut changed = false;
-            for track in &seen {
-                let id = if written { given.get(track.identity.as_str()).copied() } else { None }
-                    .or_else(|| track.id.as_deref().filter(|id| track_id(id) && !given.contains_key(track.identity.as_str())));
-                if let Some(id) = id {
-                    changed |= kept.known.insert(id.into(), track.identity.clone()).as_ref() != Some(&track.identity);
-                }
-            }
-            changed.then(|| kept.known.clone())
+            let known: HashMap<String, String> = seen
+                .iter()
+                .filter_map(|track| {
+                    let id = if written { given.get(track.identity.as_str()).copied() } else { None }
+                        .or_else(|| track.id.as_deref().filter(|id| track_id(id) && !given.contains_key(track.identity.as_str())))?;
+                    Some((id.to_owned(), track.identity.clone()))
+                })
+                .collect();
+            (known != kept.known).then(|| {
+                kept.known = known;
+                kept.known.clone()
+            })
         };
         if let (Some(keepers), Some(known)) = (keepers, changed) {
             let _ = keepers.store.save_track_keepers(&keepers.project, &known).await;
