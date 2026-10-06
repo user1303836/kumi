@@ -1872,7 +1872,7 @@ local_test!(the_producers_reactions_are_kept_in_kumis_database_and_kumis_own_ste
                 session.watch(WatchEvent::Change(change("c2", "applied", 2)));
             } else {
                 let noted = tool("reaction").execute(input(json!({"quote":"too wet","lean":"less","change":"c2"})), signal.clone()).await?;
-                assert_eq!((noted.is_error, noted.reply.as_deref()), (false, Some("")), "noted quietly");
+                assert_eq!((noted.is_error, noted.reply.as_deref()), (false, None), "noted, without ending the turn");
                 tool("undo_change").execute(input(json!({"change":"c2"})), signal).await?;
             }
             Ok(complete())
