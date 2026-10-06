@@ -1,6 +1,6 @@
 [package]
 name = "kumi"
-version = "1.9.0"
+version = "1.9.1"
 description = "Kumi, a studio partner for Ableton Live: the command and the terminal app."
 edition.workspace = true
 license.workspace = true

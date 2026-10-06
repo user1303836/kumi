@@ -1,14 +1,20 @@
 //! Video watching, with complete-result caption and moment oracles.
+use futures::FutureExt;
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_runtime::video::{
     captions::{said_around, TranscriptOptions},
     moments::MomentOptions,
-    programs::{run, FfmpegOptions, RunOptions},
+    programs::{run, Download, FfmpegOptions, RunOptions},
     speech::{cues_from_whisper, speech_model_for},
     *,
 };
 use serde_json::{json, Value};
-use std::{cell::RefCell, path::Path, rc::Rc};
+use std::{
+    cell::RefCell,
+    path::Path,
+    rc::Rc,
+    sync::{Arc, Mutex},
+};
 #[test]
 fn times_read_as_a_producer_writes_them_and_are_said_back_the_same_way() {
     for (input, expected) in
@@ -147,6 +153,63 @@ fn watch_options(folder: &Path, sub: &str) -> WatchOptions {
         tools_dir: folder.join("tools").to_string_lossy().into(),
         ..Default::default()
     }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn offline_a_saved_transcript_still_answers_and_its_note_says_why_ffmpeg_couldnt_be_fetched() {
+    let folder = tempfile::tempdir().unwrap();
+    let key = "youtube-saved000001";
+    let saved = folder.path().join("videos").join(key);
+    std::fs::create_dir_all(&saved).unwrap();
+    let meta = VideoMeta {
+        version: 1,
+        key: key.into(),
+        url: "https://www.youtube.com/watch?v=saved000001".into(),
+        title: "A saved tutorial".into(),
+        channel: None,
+        duration: Some(12.0),
+        chapters: Vec::new(),
+        words: Some(Words { language: "en".into(), source: kumi_runtime::core::contracts::WordsSource::Captions }),
+    };
+    std::fs::write(saved.join("meta.json"), serde_json::to_vec(&meta).unwrap()).unwrap();
+    let cues = [Cue { start: 1.0, end: 3.0, text: "load Operator and set the coarse to 1".into() }];
+    std::fs::write(saved.join("cues.json"), serde_json::to_vec(&cues).unwrap()).unwrap();
+    // Linux without ffmpeg, and GitHub out of reach.
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let unreachable: Download = {
+        let asked = asked.clone();
+        Arc::new(move |url, _| {
+            asked.lock().unwrap().push(url);
+            async { Err(VideoFailure::other("error sending request")) }.boxed()
+        })
+    };
+    let options = WatchOptions {
+        env: Some(Default::default()),
+        ffmpeg: FfmpegOptions {
+            tools_dir: Some(folder.path().join("tools").to_string_lossy().into()),
+            platform: Some("linux".into()),
+            arch: Some("x64".into()),
+            download: Some(unreachable),
+            ..Default::default()
+        },
+        ..watch_options(folder.path(), "videos")
+    };
+    let note = "Frames and the video's sound need ffmpeg; this is the transcript alone. Kumi couldn't get the list of ffmpeg's builds from GitHub to fetch it. Try again in a few minutes, or install it with your package manager.";
+    let watched =
+        watch_video(WatchRequest { url: "https://youtu.be/saved000001".into(), ..Default::default() }, options.clone()).await.unwrap();
+    assert_eq!(watched.meta.title, "A saved tutorial");
+    assert_eq!(watched.lines.iter().map(|line| line.text.as_str()).collect::<Vec<_>>(), ["load Operator and set the coarse to 1"]);
+    assert!(watched.frames.is_empty());
+    assert_eq!(watched.notes, [note]);
+    assert_eq!(asked.lock().unwrap().len(), 2);
+    // A video file with captions beside it, watched for the first time: ffmpeg is asked for once, not again for the frames.
+    asked.lock().unwrap().clear();
+    let video = folder.path().join("clip.mp4");
+    std::fs::write(&video, "not read without ffmpeg").unwrap();
+    std::fs::write(folder.path().join("clip.srt"), "1\n00:00:01,000 --> 00:00:03,000\nthen a Saturator\n").unwrap();
+    let watched = watch_video(WatchRequest { url: video.to_string_lossy().into(), ..Default::default() }, options).await.unwrap();
+    assert_eq!(watched.lines.iter().map(|line| line.text.as_str()).collect::<Vec<_>>(), ["then a Saturator"]);
+    assert_eq!(watched.notes, [note]);
+    assert_eq!(asked.lock().unwrap().len(), 2);
 }
 #[tokio::test(flavor = "current_thread")]
 async fn video_files_have_captions_frames_closeups_sound_and_are_kept() {
