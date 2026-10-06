@@ -2595,10 +2595,11 @@ class ControlSurfaceTests(unittest.TestCase):
         self.assertEqual(moved["createdFingerprint"], mapper._mapped_fingerprint(moved["ref"]), "playback moving on doesn't change the moved clip's fingerprint")
 
     @staticmethod
-    def arrangement_track_that_crashes_on_overlap(*clips, audio=False):
+    def arrangement_track_that_crashes_on_overlap(*clips, audio=False, splits=False):
         """A track whose Arrangement copy fails where Live crashes, onto a span a clip already holds, and
-        whose new MIDI clip cuts what it's laid over the way Live does. Each clip is (name, start, length)
-        and optionally its notes' starts."""
+        whose new MIDI clip cuts what it's laid over the way Live does: an older Live drops the rest of a
+        clip a new one lands in the middle of, Live 12.4.15 (`splits`) keeps it as a clip of its own. Each
+        clip is (name, start, length) and optionally its notes' starts."""
         song = FakeSong(); track = song.tracks[0]; track.arrangement_clips = []; track.copies = []
         def place(clip, start, end):
             clip.start_time = start; clip.end_time = end; clip.length = end - start; clip.is_audio_clip = audio
@@ -2611,9 +2612,13 @@ class ControlSurfaceTests(unittest.TestCase):
             track.copies.append(position); place(created, position, position + source.length)
         def create_midi_clip(start, length):
             # Live cuts a clip a new one is laid over: at the new clip's start (one it lands in the middle
-            # of loses its rest), or from the left with the rest in place; one inside it goes.
+            # of loses its rest, or with `splits` keeps it), or from the left with the rest in place; one
+            # inside it goes.
             end = start + length
             for other in [item for item in track.arrangement_clips if item.start_time < end and item.end_time > start]:
+                if splits and other.start_time < start and other.end_time > end:
+                    shift = end - other.start_time; rest = FakeClip(other.end_time - end); rest.name = other.name
+                    rest.notes = [dict(note, start_time=note["start_time"] - shift) for note in other.notes if note["start_time"] >= shift]; place(rest, end, other.end_time)
                 if other.start_time < start: other.notes = [note for note in other.notes if other.start_time + note["start_time"] < start]; other.end_time = start
                 elif other.end_time > end: shift = end - other.start_time; other.notes = [dict(note, start_time=note["start_time"] - shift) for note in other.notes if note["start_time"] >= shift]; other.start_time = end
                 else: track.arrangement_clips.remove(other); continue
@@ -2649,10 +2654,13 @@ class ControlSurfaceTests(unittest.TestCase):
         self.assertEqual((track.copies, moved["start"]), ([3.0], 3.0))
 
     def test_a_move_into_the_middle_of_a_clip_keeps_both_its_ends(self):
-        song, track = self.arrangement_track_that_crashes_on_overlap(("Pad", 0.0, 16.0, [0.0, 4.0, 8.0, 12.0]), ("Hook", 20.0, 4.0)); song.song_length = 32.0
-        mapper = LiveObjectMapper(song); self.arrangement_move(mapper, mapper.snapshot()["arrangement"]["clips"][1], 6.0)
-        self.assertEqual(self.arrangement_layout(track), [("Pad", 0.0, 6.0, [0.0, 4.0]), ("Hook", 6.0, 10.0, [6.0]), ("Pad", 10.0, 16.0, [12.0])])
-        self.assertEqual(track.copies, [36.0, 10.0, 6.0], "the far end goes by way of a copy parked past the end of the Set")
+        for splits, copies in ((True, [36.0, 6.0]), (False, [36.0, 10.0, 6.0])):
+            song, track = self.arrangement_track_that_crashes_on_overlap(("Pad", 0.0, 16.0, [0.0, 4.0, 8.0, 12.0]), ("Hook", 20.0, 4.0), splits=splits); song.song_length = 32.0
+            mapper = LiveObjectMapper(song); self.arrangement_move(mapper, mapper.snapshot()["arrangement"]["clips"][1], 6.0)
+            self.assertEqual(self.arrangement_layout(track), [("Pad", 0.0, 6.0, [0.0, 4.0]), ("Hook", 6.0, 10.0, [6.0]), ("Pad", 10.0, 16.0, [12.0])], f"splits={splits}")
+            # A copy waits past the end of the Set: Live 12.4.15 keeps the far end, so it goes; an older Live
+            # drops it, so it comes back from the copy.
+            self.assertEqual(track.copies, copies, f"splits={splits}")
 
     def test_an_audio_clip_crossing_the_new_place_is_refused_and_one_inside_it_goes(self):
         song, track = self.arrangement_track_that_crashes_on_overlap(("Vox", 0.0, 8.0), ("Breath", 10.0, 1.0), ("Take", 20.0, 4.0), audio=True)
@@ -2662,14 +2670,15 @@ class ControlSurfaceTests(unittest.TestCase):
         self.arrangement_move(mapper, take, 9.0)
         self.assertEqual([(clip.name, clip.start_time) for clip in track.arrangement_clips], [("Vox", 0.0), ("Take", 9.0)], "a clip inside the new place goes")
 
-    def test_a_looped_clip_is_cut_into_only_by_clear_range_for_now_and_one_inside_goes(self):
-        song, track = self.arrangement_track_that_crashes_on_overlap(("Groove", 0.0, 16.0), ("Fill", 18.0, 2.0), ("Hook", 24.0, 4.0))
+    def test_a_looped_clip_is_cut_like_any_other_and_one_inside_goes(self):
+        # New MIDI clips are looped in Live; cutting one keeps its loop's phase in its start marker.
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Groove", 0.0, 16.0), ("Fill", 18.0, 2.0), ("Hook", 24.0, 4.0), splits=True)
         for clip in track.arrangement_clips[:2]: clip.looping = True
         mapper = LiveObjectMapper(song); hook = mapper.snapshot()["arrangement"]["clips"][2]
-        with self.assertRaisesRegex(ValueError, r"^Kumi can't cut into a looped clip here yet: \"Groove\" \(beats 0 to 16\) crosses the span from beat 6 to 10; .*; nothing changed$"): self.arrangement_move(mapper, hook, 6.0)
-        self.assertEqual((track.copies, len(track.arrangement_clips)), ([], 3))
-        self.arrangement_move(mapper, hook, 17.0)
-        self.assertEqual([(clip.name, clip.start_time) for clip in track.arrangement_clips], [("Groove", 0.0), ("Hook", 17.0)], "a looped clip inside the new place goes")
+        self.arrangement_move(mapper, hook, 6.0)
+        self.assertEqual([(clip.name, clip.start_time, clip.end_time) for clip in track.arrangement_clips], [("Groove", 0.0, 6.0), ("Hook", 6.0, 10.0), ("Groove", 10.0, 16.0), ("Fill", 18.0, 20.0)])
+        self.arrangement_move(mapper, mapper.snapshot()["arrangement"]["clips"][1], 17.0)
+        self.assertEqual([(clip.name, clip.start_time) for clip in track.arrangement_clips], [("Groove", 0.0), ("Groove", 10.0), ("Hook", 17.0)], "a looped clip inside the new place goes")
 
     def test_a_parked_clip_that_cant_be_copied_into_place_goes_back_where_it_was(self):
         song, track = self.arrangement_track_that_crashes_on_overlap(("Loop", 4.0, 8.0)); copy = track.duplicate_clip_to_arrangement

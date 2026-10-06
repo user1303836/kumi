@@ -173,6 +173,7 @@ impl DeterministicLiveSimulator {
                 let mut all = array(&state["arrangementClips"]).to_vec();
                 let mut removed = Vec::new();
                 let mut indexes = Vec::new();
+                let mut rests = Vec::new();
                 let mut before = 0;
                 for (index, row) in all.iter_mut().enumerate() {
                     if row["trackRef"] != reference {
@@ -189,6 +190,18 @@ impl DeterministicLiveSimulator {
                         continue;
                     }
                     if start < to && end > from {
+                        if start < from && end > to {
+                            // A clip crossing both edges is split: its far end stays, a clip of its own.
+                            let sequence = self.next_sequence();
+                            let mut rest = row.clone();
+                            rest["clip"]["ref"] = json!(format!("arrangement-clip:{reference}:{sequence}"));
+                            rest["clip"]["objectIdentity"] = json!(format!("simulator:arrangement-clip:{sequence}"));
+                            rest["clip"]["start"] = to.into();
+                            rest["clip"]["length"] = (end - to).into();
+                            rest["clip"]["endTime"] = end.into();
+                            rests.push(rest);
+                        }
+                        let clip = &mut row["clip"];
                         if start < from {
                             clip["length"] = length.min(from - start).into();
                             clip["endTime"] = from.into();
@@ -199,11 +212,13 @@ impl DeterministicLiveSimulator {
                         }
                     }
                 }
-                state["arrangementClips"] =
-                    Value::Array(all.into_iter().enumerate().filter(|(i, _)| !indexes.contains(i)).map(|(_, row)| row).collect());
+                let split = rests.len();
+                state["arrangementClips"] = Value::Array(
+                    all.into_iter().enumerate().filter(|(i, _)| !indexes.contains(i)).map(|(_, row)| row).chain(rests).collect(),
+                );
                 drop(state);
                 self.emit(LiveEventType::Object, Some(reference.clone().into()), json!({"operation":operation}));
-                Ok(json!({"trackRef":reference,"clipsBefore":before,"clipsAfter":before-removed.len(),"removed":removed}))
+                Ok(json!({"trackRef":reference,"clipsBefore":before,"clipsAfter":before-removed.len()+split,"removed":removed}))
             }
             "device.duplicate" => {
                 let mut state = self.state.borrow_mut();

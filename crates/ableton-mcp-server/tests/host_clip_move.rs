@@ -453,18 +453,30 @@ async fn an_arrangement_move_replaces_what_is_in_its_new_place() {
 }
 #[tokio::test]
 async fn an_audio_clip_crossing_the_new_place_is_cut_by_the_live_extension_first() {
-    let adapter = Rc::new(Adapter::new());
-    setup(&adapter.sim, "arrangement-audio");
-    arrangement_clip(&adapter.sim, "Vox", 10.0, 8.0, true);
-    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
-    let (middle, _) = move_clip(&host, 12.0).await;
-    let refused = middle.to_string();
-    assert!(refused.contains("Kumi can't move a clip into the middle of an audio clip yet"), "{refused}");
-    assert!(refused.contains("Vox") && refused.contains("(beats 10 to 18) holds beats 12 to 16; pick a free spot"), "{refused}");
-    adapter.no_extension.set(true);
+    let audio = |no_extension: bool| {
+        let adapter = Rc::new(Adapter::new());
+        setup(&adapter.sim, "arrangement-audio");
+        arrangement_clip(&adapter.sim, "Vox", 10.0, 8.0, true);
+        adapter.no_extension.set(no_extension);
+        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+        (adapter, host)
+    };
+    // Into its middle: the extension splits it, and both ends stay.
+    let (adapter, host) = audio(false);
+    let (preview, applied) = move_clip(&host, 12.0).await;
+    assert_eq!(
+        body(&preview)["payload"]["clearFirst"],
+        json!([{"trackRef":"track:track-1","fromBeat":12,"toBeat":16,"expectedName":"Drums"}]),
+        "{preview}"
+    );
+    assert_eq!(body(&applied)["state"], "applied", "{applied}");
+    assert_eq!(layout(&adapter.sim), [("Vox".to_string(), 10.0, 12.0), ("Kick Pattern".into(), 12.0, 16.0), ("Vox".into(), 16.0, 18.0)]);
+    // Over its end, without the extension: refused.
+    let (_adapter, host) = audio(true);
     let (without, _) = move_clip(&host, 16.0).await;
     assert!(without.to_string().contains("Kumi can't cut into an audio clip without its Live extension yet"), "{without}");
-    adapter.no_extension.set(false);
+    // Over its end, with it: cut there.
+    let (adapter, host) = audio(false);
     let (preview, applied) = move_clip(&host, 16.0).await;
     assert_eq!(
         body(&preview)["payload"]["clearFirst"],
@@ -475,7 +487,8 @@ async fn an_audio_clip_crossing_the_new_place_is_cut_by_the_live_extension_first
     assert_eq!(layout(&adapter.sim), [("Vox".to_string(), 10.0, 16.0), ("Kick Pattern".into(), 16.0, 20.0)]);
 }
 #[tokio::test]
-async fn cutting_into_a_looped_clip_waits_until_live_has_been_probed() {
+async fn a_looped_clip_is_cut_like_any_other() {
+    // New MIDI clips are looped in Live, and cutting one keeps its loop's phase in its start marker.
     let adapter = Rc::new(Adapter::new());
     setup(&adapter.sim, "arrangement-midi");
     arrangement_clip(&adapter.sim, "Groove", 10.0, 8.0, false);
@@ -484,9 +497,15 @@ async fn cutting_into_a_looped_clip_waits_until_live_has_been_probed() {
         adapter.sim.state.borrow_mut()["arrangementClips"][row]["clip"]["looping"] = json!(true);
     }
     let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
-    let (refused, _) = move_clip(&host, 12.0).await;
-    let refused = refused.to_string();
-    assert!(refused.contains("Kumi can't cut into a looped clip here yet") && refused.contains("crosses beats 12 to 16"), "{refused}");
-    let (whole, applied) = move_clip(&host, 20.0).await;
-    assert_eq!(body(&applied)["state"], "applied", "a looped clip inside the new place just goes: {whole}");
+    let (preview, applied) = move_clip(&host, 12.0).await;
+    assert_eq!(body(&applied)["state"], "applied", "{preview}");
+    assert_eq!(
+        layout(&adapter.sim),
+        [
+            ("Groove".to_string(), 10.0, 12.0),
+            ("Kick Pattern".into(), 12.0, 16.0),
+            ("Groove".into(), 16.0, 18.0),
+            ("Fill".into(), 21.0, 23.0)
+        ]
+    );
 }

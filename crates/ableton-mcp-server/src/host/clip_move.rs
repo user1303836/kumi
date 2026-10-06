@@ -110,27 +110,11 @@ impl McpHost {
                 let position = params["position"].as_f64().unwrap();
                 if let (Some(track), None) = (&row.track, &row.take_lane) {
                     replaces = in_new_place(&serde_json::to_value(&snapshot).unwrap(), &row.clip, track, position);
-                    // The Remote Script cuts MIDI clips itself; an audio clip crossing an edge of the new place
-                    // is cut by Kumi's Live extension first, each over the part that's replaced.
+                    // The Remote Script cuts MIDI clips itself, looped ones too (Live keeps a loop's phase in its
+                    // start marker); an audio clip crossing the new place is cut by Kumi's Live extension first,
+                    // over the part that's replaced (one crossing both edges is split, keeping both ends).
                     let cuts: Vec<&Value> = replaces.iter().filter(|r| r["audio"] == true && r["whole"] != true).collect();
                     let beat = |v: &Value| kumi_common::js::number::to_string(v.as_f64().unwrap_or(f64::NAN));
-                    if let Some(across) = cuts.iter().find(|r| r["from"] != r["start"] && r["to"] != r["end"]) {
-                        return Err(LiveError::error(format!(
-                            "Kumi can't move a clip into the middle of an audio clip yet: {} holds beats {} to {}; pick a free spot, or clear that span first (clear_range)",
-                            named(across),
-                            beat(&across["from"]),
-                            beat(&across["to"])
-                        )));
-                    }
-                    // How Live trims a looped clip from the left isn't known yet.
-                    if let Some(looped) = replaces.iter().find(|r| r["audio"] != true && r["looping"] == true && r["whole"] != true) {
-                        return Err(LiveError::error(format!(
-                            "Kumi can't cut into a looped clip here yet: {} crosses beats {} to {}; clear that span first (clear_range) or pick a free spot",
-                            named(looped),
-                            beat(&looped["from"]),
-                            beat(&looped["to"])
-                        )));
-                    }
                     if let Some(cut) = cuts.first() {
                         if !status.has_operation("clip.clear-range") {
                             return Err(LiveError::error(format!(

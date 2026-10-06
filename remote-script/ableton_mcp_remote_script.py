@@ -5476,10 +5476,9 @@ class LiveObjectMapper:
         in_the_way = [(clips[index], other_start, other_end) for index, (other_start, other_end) in enumerate(spans) if index != source_index and other_start < target_end - 1e-6 and other_end > target + 1e-6]
         for other, other_start, other_end in in_the_way:
             if other_start >= target - 1e-6 and other_end <= target_end + 1e-6: continue
-            # Cutting into an audio clip takes the Live extension (the host does it first); how Live trims
-            # a looped clip from the left isn't known yet.
-            kind = "an audio clip" if self._read_attr(other, "is_audio_clip") is True else "a looped clip" if self._read_attr(other, "looping") is True else None
-            if kind: raise ValueError(f"Kumi can't cut into {kind} here yet: \"{str(getattr(other, 'name', ''))[:60]}\" (beats {other_start:g} to {other_end:g}) crosses the span from beat {target:g} to {target_end:g}; clear that span first (clear_range) or pick a free spot{UNRUN_SUFFIX}")
+            # Cutting into an audio clip takes the Live extension (the host does it first). A looped MIDI clip
+            # is cut like any other: Live keeps its loop's phase in its start marker.
+            if self._read_attr(other, "is_audio_clip") is True: raise ValueError(f"Kumi can't cut into an audio clip here yet: \"{str(getattr(other, 'name', ''))[:60]}\" (beats {other_start:g} to {other_end:g}) crosses the span from beat {target:g} to {target_end:g}; clear that span first (clear_range) or pick a free spot{UNRUN_SUFFIX}")
         checkpoint = self.refs.checkpoint()
         if in_the_way:
             self._arrangement_clear(owner, in_the_way, target, target_end, (clip, expected_identity), checkpoint)
@@ -5538,9 +5537,9 @@ class LiveObjectMapper:
             raise ValueError(f"Kumi cut {', '.join(cut)} to clear the clip's new place, then couldn't finish; Live's own undo puts it back") from error
 
     def _arrangement_cut(self, owner: Any, start: float, end: float) -> None:
-        """Cut away what a MIDI track holds in [start, end), where a clip crosses into it from one side:
-        Live cuts a clip that a new clip is laid over, so a temporary clip goes over the span and is
-        deleted again. (Over the middle of a clip it would drop the clip's rest too.)"""
+        """Cut away what a MIDI track holds in [start, end): Live cuts a clip that a new clip is laid over, so
+        a temporary clip goes over the span and is deleted again. Over the middle of a clip, Live 12.4.15
+        keeps both its ends; an older Live drops the far end (`_arrangement_split_around` handles both)."""
         creator = getattr(owner, "create_midi_clip", None)
         if not callable(creator): raise ValueError("Live doesn't offer cutting clips on this track")
         before = {self._capture_object_identity(item) for item in self._items(self._read_attr(owner, "arrangement_clips") or [])}
@@ -5551,12 +5550,18 @@ class LiveObjectMapper:
         if self._arrangement_holds(owner, start, end): raise ValueError("the span still holds a clip after cutting it")
 
     def _arrangement_split_around(self, owner: Any, clip: Any, start: float, end: float, checkpoint: tuple[dict[str, Any], dict[str, int]]) -> None:
-        """Take [start, end) out of the middle of a MIDI clip and keep both its ends. A temporary clip there
-        would make Live drop the clip's rest, so the far end goes by way of a parked copy: the copy's head is
-        cut away up to `end` and what is left comes back to `end`; the original is cut at `start`."""
+        """Take [start, end) out of the middle of a MIDI clip and keep both its ends. A copy of the clip waits
+        past the end of the Set first; then [start, end) is cut. Live 12.4.15 keeps the clip's far end (from
+        `end`, its start marker moved), and the copy goes. An older Live drops it, so it comes back from the
+        copy: the copy's head is cut away up to `end` and what is left comes back to `end`."""
         clip_start, clip_end = self._arrangement_span(clip); parking = self._arrangement_parking(owner, clip_end)
-        self._arrangement_copy(owner, clip, parking, self._clip_content_fingerprint(clip))
-        self._arrangement_cut(owner, start, clip_end)
+        spare, spare_identity, _ = self._arrangement_copy(owner, clip, parking, self._clip_content_fingerprint(clip))
+        self._arrangement_cut(owner, start, end)
+        clips = self._items(self._read_attr(owner, "arrangement_clips") or [])
+        if any(not self._capture_same_object(item, spare, spare_identity) and all(abs(edge - expected) <= 1e-6 for edge, expected in zip(self._arrangement_span(item), (end, clip_end))) for item in clips):
+            owner.delete_clip(spare)
+            if any(self._capture_same_object(item, spare, spare_identity) for item in self._items(self._read_attr(owner, "arrangement_clips") or [])): raise ValueError("Live didn't delete the spare copy of the clip it split")
+            return
         head_end = parking + (end - clip_start); self._arrangement_cut(owner, parking, head_end)
         clips = self._items(self._read_attr(owner, "arrangement_clips") or []); rest = [(index, item) for index, item in enumerate(clips) if abs(self._arrangement_span(item)[0] - head_end) <= 1e-6]
         if len(rest) != 1: raise ValueError("Kumi lost track of the clip's far end while splitting it")
