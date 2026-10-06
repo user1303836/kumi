@@ -1,1 +1,4 @@
 * text=auto eol=lf
+# Willington's files are checked byte for byte against the SHA-256 its release.json gives each: no
+# line-ending conversion, and no whitespace checks on lines Kumi can't change.
+vendor/willington/** -text -whitespace

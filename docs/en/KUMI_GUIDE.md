@@ -134,10 +134,13 @@ Live (**No Live access**) and offers to connect. `kumi --bridge-config
 <absolute path>` uses a bridge configuration of your own; `kumi
 --inference-only` chats without Live.
 
-**Optional: Willington.** With the separately installed Willington provider,
-Kumi can also edit Follow Actions, map rack macros and set chain zones. It has
-bindings for Live 12.4.15b4 and b5 on macOS ARM64 (chain zones on b5 only); see
-[Optional Willington integration](WILLINGTON_INTEGRATION.md).
+**Willington.** Willington's native bindings come in Kumi's bridge from the
+release that carries their files; until then, you can install Willington
+yourself. Either way they're off until you turn them on with `/willington`.
+Then Kumi can also map rack macros, set
+chain zones and, with a passing self-test, edit Follow Actions, on the Live versions Willington has
+bindings for: Live 12.4.15b4 and b5 on macOS ARM64 (chain zones on b5 only) and
+Live 12.4.15b5 on Windows x64. See [Willington](WILLINGTON_INTEGRATION.md).
 
 ## Working with Kumi
 
@@ -223,7 +226,7 @@ inside Live with Live's own API. A script's changes are one step in Live's
 undo, but they get no HISTORY entry; Live's undo takes them back.
 
 **What Live doesn't let scripts do:** map a macro or a modulator to a parameter
-(Willington can map macros), or edit the Arrangement's automation lanes. Kumi
+(Willington can map macros: `/willington`), or edit the Arrangement's automation lanes. Kumi
 says so and suggests a way round. Saving, exporting, freezing, bouncing and
 grouping go through [Live's own commands](#lives-own-commands).
 

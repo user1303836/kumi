@@ -60,18 +60,44 @@
     } catch { }
   }
   function Sha([string]$File) { (Get-FileHash -Algorithm SHA256 -LiteralPath $File).Hash.ToLowerInvariant() }
+  # A folder holds a Kumi when the launcher can start it: native, or an earlier Node one.
+  function HasKumi([string]$Folder) {
+    (Test-Path -LiteralPath (Join-Path $Folder 'kumi.exe')) -or (Test-Path -LiteralPath (Join-Path $Folder 'apps\kumi\bin\kumi.mjs'))
+  }
+  # Puts the Kumi that was there back in its place, unless the place already holds one: it can be empty,
+  # or hold part of a move. Tries for a few seconds; says whether the place holds a Kumi.
+  function PutBack([string]$Target, [string]$Previous) {
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+      if (HasKumi $Target) { return $true }
+      if (-not (HasKumi $Previous)) { return $false }
+      try {
+        if (Test-Path -LiteralPath $Target) { Remove-Item -LiteralPath $Target -Recurse -Force }
+        Rename-Item -LiteralPath $Previous -NewName (Split-Path $Target -Leaf)
+      } catch { Start-Sleep -Seconds 1 }
+    }
+    HasKumi $Target
+  }
   function Swap([string]$Fresh, [string]$Target) {
-    # Antivirus can hold new files for a moment: try a few times before giving up.
+    # Antivirus can hold new files for a moment, and a Kumi window holds its own: try a few times before
+    # giving up, and whenever the new one can't go in, the one that was there stays usable.
     $previous = "$Target.previous"
-    if (Test-Path -LiteralPath $previous) { Remove-Item -LiteralPath $previous -Recurse -Force }
+    # A run that gave up earlier can leave the only whole Kumi in app.previous: it goes back first, and
+    # it's never what gets cleared. Clearing the one before waits out a busy folder like the rest.
+    if (-not (HasKumi $Target)) { [void](PutBack $Target $previous) }
     for ($attempt = 1; $attempt -le 5; $attempt++) {
       try {
+        if ((Test-Path -LiteralPath $previous) -and ((HasKumi $Target) -or -not (HasKumi $previous))) { Remove-Item -LiteralPath $previous -Recurse -Force }
         if (Test-Path -LiteralPath $Target) { Rename-Item -LiteralPath $Target -NewName (Split-Path $previous -Leaf) }
         Move-Item -LiteralPath $Fresh -Destination $Target
         return
       } catch {
-        if ((Test-Path -LiteralPath $previous) -and -not (Test-Path -LiteralPath $Target)) { Rename-Item -LiteralPath $previous -NewName (Split-Path $Target -Leaf) }
-        if ($attempt -eq 5) { Fail "Windows kept $Target busy. Close every Kumi window (and anything open in that folder), then run this again." }
+        # A move that went through before its error counts.
+        if (-not (Test-Path -LiteralPath $Fresh) -and (HasKumi $Target)) { return }
+        $kept = PutBack $Target $previous
+        if ($attempt -eq 5) {
+          $still = if ($kept) { ' The Kumi you had still works.' } else { '' }
+          Fail "Windows kept $Target busy: a Kumi window, or an antivirus scan of the new files. Close every Kumi window, give the scan a minute, then run this again.$still"
+        }
         Start-Sleep -Seconds 2
       }
     }

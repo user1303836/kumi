@@ -118,6 +118,19 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 `apps/live-extension` は TypeScript で書かれ、esbuild でバンドルされ、独自の `package.json` を持ちます。Live の Extensions SDK に対してビルドしますが、この SDK のライセンスは再配布を禁じているため、リポジトリには含まれていません。リポジトリのルートの `vendor/ableton-extensions-sdk-1.0.0-beta.1/` にコピーを置いてください（ビルドはその中の `package 3/dist/index.cjs` を読みます）。`apps/live-extension` で `npm ci` を実行してから `npm run build` を実行すると、`dist/extension.js` とその `.sha256` が書き出されるので、両方をコミットします。`npm run typecheck` にも SDK が必要です。SDK がない場合、ビルドは止まり、コミット済みのバンドルがそのまま残ります。`npm test` はバンドルをそのチェックサムと照合します。Live が拡張機能をどう実行するかの測定結果は[エビデンス](../evidence/live-extension.md)にあります。
 
+## Willington のファイル
+
+[Willington](WILLINGTON_INTEGRATION.md) のリポジトリは非公開です。Kumi が収めているのはそのランタイムファイルだけで、`vendor/willington/` にあります。このフォルダーを変えるのは、Willington の同期によるプルリクエストだけです。ファイルの隣には、Willington のライセンス表示（`LICENSE` または `LICENSE.md`。Kumi の MIT ライセンスはこれらのファイルには及びません）と `release.json` があります。
+
+```json
+{"schema": "kumi-willington-vendor/v1", "version": "0.4.0", "commit": "<Willington の 40 文字のコミット>",
+ "files": {"WillingtonRuntime/__init__.py": "<SHA-256>", "LICENSE": "<SHA-256>"}}
+```
+
+`files` には、自分自身を除くフォルダー内のすべてのファイルが、どのプラットフォームのチェックアウトでも扱える名前で並びます。使えるのは ASCII の英字、数字、`.`、`_`、`-` だけで、Windows のデバイス名や末尾のドットは使えず、大文字と小文字だけが違う 2 つの名前も使えません。`scripts/build-native-release.py` は、`release.json` に載っていないファイル、SHA-256 が違うファイル、Willington のランタイムファイルではないファイルがフォルダーにあると、リリースを拒否します。認められるのは `WillingtonRuntime`、`WillingtonBindings`、`WillingtonDeviceTools`、`WillingtonRackZones` の中の `.py`、`.json`、`.md`、`.pyd`、`.dylib` だけなので、ソース、ヘッダー、デバッグファイル、バイトコードのキャッシュが出荷されることはありません。`test_native_release.py` は CI でリポジトリのフォルダーに同じ確認を行い、`.gitattributes` はフォルダーをバイト単位でそのまま保ち、空白のチェックからも外します。
+
+リリースは、これらのファイルをブリッジの Remote Script の中、`AbletonMcpBridge/willington/` に置きます。ネイティブライブラリは自分のプラットフォームのもの（Windows では `.pyd`、macOS では `.dylib`）だけで、合計 16 MiB までです。Linux のバンドルには入りません。ブリッジのインストールはそのフォルダーも一緒にコピーし、Python ファイルの隣に `__pycache__` のブロッカーを置くので、インストールされたツリーはインストールのレシートが記録したとおりに保たれます。インストールされたブリッジのうち 2 つのファイルは、リリースのものではなくプロデューサーのものです。`willington.json` と、Follow Action のセルフテストのレシート `willington/WillingtonBindings/self-test.json` です。これらはブリッジのインストールの確認に影響せず、インストールのときに引き継がれます。ブリッジがこのフォルダーを Python のパスに加えるのは、`willington.json` が Willington をオンにしたときだけで、ブリッジの隣にインストールされたコピーより後になります。
+
 ## リリース
 
 **コミット**の件名は、プロデューサーにとって何が変わったかを平易な英語で書きます（"Kumi: talk to it while it works"）。ブリッジまたは Remote Script の変更では、`crates/ableton-mcp-server/Cargo.toml` と `Cargo.lock` のバージョンを上げ、件名を新しいバージョンで始め（"Bridge 1.0.71: …"）、`CHANGELOG.md` の `## Unreleased` の下に `### Bridge x.y.z` ブロックを追加します。拡張機能が変わったら、そのバンドルを再ビルドしてコミットします。作業はブランチで行い、プルリクエストで `main` に入れます。

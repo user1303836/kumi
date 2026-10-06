@@ -7,6 +7,7 @@ use kumi::{
     terminal::{create_terminal, PlainTerminal, Terminal, TerminalOptions},
     tui::tty::TtyOutput,
     update::UpdateControl,
+    willington::WillingtonControl,
 };
 use kumi_common::abort::Signal;
 use kumi_runtime::core::{contracts::*, errors::RuntimeError};
@@ -265,6 +266,16 @@ struct Fixture {
 }
 impl Fixture {
     fn new(tty: bool, hold: bool, notice: Option<&str>, updates: Option<UpdateControl>, models: Option<Rc<FakeModels>>) -> Self {
+        Self::with(tty, hold, notice, updates, models, |_| {})
+    }
+    fn with(
+        tty: bool,
+        hold: bool,
+        notice: Option<&str>,
+        updates: Option<UpdateControl>,
+        models: Option<Rc<FakeModels>>,
+        configure: impl FnOnce(&mut TerminalOptions),
+    ) -> Self {
         let input = Rc::new(Input { tty, ..Default::default() });
         let out = Rc::new(Out { tty, ..Default::default() });
         let control = Rc::new(Control::default());
@@ -275,6 +286,7 @@ impl Fixture {
         options.updates = updates;
         options.secrets = vec!["private-token".into()];
         options.close_timeout_ms = Some(25);
+        configure(&mut options);
         let terminal = create_terminal(options);
         let emit = terminal.clone();
         *control.emit.borrow_mut() = Some(Rc::new(move |event| emit.handle_event(event)));
@@ -489,6 +501,50 @@ async fn update_check_offer_and_request_close() {
             assert_eq!(f.quit().await, 0);
             assert_eq!(requested.get(), 1);
             assert!(f.text().contains("Updating to Kumi 1.1.0: Kumi closes, updates and opens again."));
+        })
+        .await;
+}
+#[tokio::test]
+async fn willington_is_said_off_at_the_start_and_switched_by_its_command() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let on = Rc::new(Cell::new(false));
+            let willington = WillingtonControl {
+                on: {
+                    let on = on.clone();
+                    Rc::new(move || Some(on.get()))
+                },
+                set: {
+                    let on = on.clone();
+                    Rc::new(move |value| {
+                        on.set(value);
+                        let said = if value { kumi::willington::TURNED_ON } else { kumi::willington::TURNED_OFF };
+                        async move { Ok(said) }.boxed_local()
+                    })
+                },
+            };
+            let f = Fixture::with(false, false, None, None, None, |o| o.willington = Some(willington));
+            flush().await;
+            assert!(f.text().contains("[willington] Willington bindings are OFF currently, type /willington to toggle them on"));
+            f.input.write("/willington\n");
+            flush().await;
+            assert!(on.get());
+            assert!(f.text().contains("[willington] Willington bindings are ON: Kumi can map rack macros"));
+            f.input.write("/willington\n/help\n");
+            flush().await;
+            assert!(!on.get());
+            let text = f.text();
+            assert!(text.contains("[willington] Willington bindings are OFF. /willington turns them on again."), "{text}");
+            assert!(text.contains("/willington (Willington's bindings on or off)"), "{text}");
+            f.quit().await;
+            // Without Willington in the bridge: nothing at the start, and no such command.
+            let f = Fixture::new(false, false, None, None, None);
+            flush().await;
+            f.input.write("/willington\n");
+            flush().await;
+            assert!(!f.text().contains("[willington]"));
+            assert!(f.text().contains("Unknown command. Use /help."));
+            f.quit().await;
         })
         .await;
 }
