@@ -94,6 +94,7 @@ message, not a command.
 | `/copy` | Copy Kumi's last answer to the clipboard |
 | `/model`, `/effort` | Choose the model (from each provider's own list, then the model servers on your computer: Ollama, LM Studio and those in settings.json; type to filter) and how hard it thinks; from your next message |
 | `/fast` | Turn on the model's faster tier when its provider lists one (ChatGPT's "Fast": quicker answers, more of your usage); `/fast` again turns it off. Shown as "· fast" beside the model |
+| `/willington` | Turn [Willington](WILLINGTON_INTEGRATION.md)'s bindings on (mapping rack macros, naming macros and variations, rack chain zones, and Follow Actions with a passing self-test) or off; off until you turn them on, which Kumi says when it starts. There while the bridge in Live carries Willington |
 | `/login`, `/logout` | Sign in (ChatGPT in the browser, or an API key shown only as dots) or out |
 | `/goal <what to reach>` | Go after a sound until Kumi gets there. `/goal` alone picks up a paused goal; `/goal stop` (or `/goal end`) ends it |
 | `/memory` | Everything Kumi keeps: notes about you and this Set, what it learned from your Sets, techniques, recipes and lessons; choose one to forget it (a note to change its words or pin it, a recipe to run or forget) |
@@ -162,7 +163,7 @@ instead, which suits screen readers and logs. It has `/help`, `/status`,
 `/undo`, `/stop`, `/refresh`, `/reconnect`, `/new`, `/conversations [n]`,
 `/model [provider/model]`, `/effort [level|default]`, `/fast`, `/logout <provider>`,
 `/memory`, `/forget <id>`, `/note <id> <new words>`, `/pin <id>`, `/unpin <id>`,
-`/recipes`, `/update` and `/quit`, but no `/btw`,
+`/recipes`, `/willington`, `/update` and `/quit`, but no `/btw`,
 `/goal` or `/copy`. Sign in from a shell with `kumi login`. Ctrl-C stops the
 answer, or quits when idle.
 

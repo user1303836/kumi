@@ -7,7 +7,11 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
+    time::Duration,
 };
+fn array(v: &Value) -> Vec<Value> {
+    v.as_array().cloned().unwrap_or_default()
+}
 fn fixture() -> Value {
     serde_json::from_str(include_str!("fixtures/host-arrangement-midi-oracle.json")).unwrap()
 }
@@ -61,6 +65,9 @@ struct Adapter {
     fault: RefCell<String>,
     fired: Cell<bool>,
     after_invoke: Cell<bool>,
+    /// "apply-late" and "apply-unfilled": when the clip was made, the clips there before it, and how long
+    /// Live shows the new clip unnamed, then without its notes.
+    late: RefCell<Option<(tokio::time::Instant, Vec<Value>, Duration, Duration)>>,
 }
 impl Adapter {
     fn new() -> Self {
@@ -71,6 +78,7 @@ impl Adapter {
             fault: Default::default(),
             fired: Cell::new(false),
             after_invoke: Cell::new(false),
+            late: Default::default(),
         }
     }
     fn reset(&self, fault: &str) {
@@ -123,6 +131,19 @@ impl Adapter {
             }
             return Err(LiveError::error(if fault == "apply-partial" { "step 2 failed (refused)" } else { "injected operation failure" }));
         }
+        if ["apply-late", "apply-unfilled"].contains(&fault.as_str())
+            && i.operation == "arrangement.midi-clip.create"
+            && self.late.borrow().is_none()
+        {
+            let before =
+                array(&self.sim.state.borrow()["arrangementClips"]).iter().map(|row| row["clip"]["objectIdentity"].clone()).collect();
+            let result = self.sim.invoke(i)?;
+            let (unnamed, empty) = if fault == "apply-late" { (60, 120) } else { (u64::MAX, u64::MAX) };
+            *self.late.borrow_mut() =
+                Some((tokio::time::Instant::now(), before, Duration::from_millis(unnamed), Duration::from_millis(empty)));
+            self.after_invoke.set(true);
+            return Ok(result);
+        }
         let no_effect = !self.fired.get() && fault.ends_with("no-effect");
         let result = if no_effect {
             self.fired.set(true);
@@ -147,6 +168,28 @@ impl Adapter {
             return Err(LiveError::error("injected authoritative read failure"));
         }
         Ok(())
+    }
+}
+impl Adapter {
+    /// As real Live shows a clip Kumi's extension made: unnamed at first, then without its notes, then whole.
+    fn as_live_shows(&self, r: &LiveDiscoveryRequest, result: &mut LiveDiscoveryResult) {
+        let Some((at, before, unnamed, empty)) = self.late.borrow().clone() else { return };
+        let state = self.sim.state.borrow();
+        let made = |identity: &Value| !before.contains(identity);
+        match r.kind {
+            LiveDiscoveryKind::ArrangementClip if at.elapsed() < unnamed => {
+                for item in result.items.iter_mut().filter(|item| made(&item["objectIdentity"])) {
+                    item.insert("name".into(), json!(""));
+                }
+            }
+            LiveDiscoveryKind::Note if at.elapsed() < empty => {
+                let parent = array(&state["arrangementClips"]).into_iter().find(|row| r.parent.as_deref() == row["clip"]["ref"].as_str());
+                if parent.is_some_and(|row| made(&row["clip"]["objectIdentity"])) {
+                    result.items.clear();
+                }
+            }
+            _ => {}
+        }
     }
 }
 impl LiveAdapter for Adapter {
@@ -179,7 +222,9 @@ impl AsyncLiveAdapter for Adapter {
     async fn discover_async(&self, r: &LiveDiscoveryRequest, c: Option<&LiveOperationContext>) -> Result<LiveDiscoveryResult, LiveError> {
         self.calls.borrow_mut().push(clean(json!({"method":"discover","request":r,"context":context(c)})));
         self.read_fault()?;
-        self.sim.discover_async(r, c).await
+        let mut result = self.sim.discover_async(r, c).await?;
+        self.as_live_shows(r, &mut result);
+        Ok(result)
     }
     async fn get_async(&self, r: &LiveRef, c: Option<&LiveOperationContext>) -> Result<Option<Value>, LiveError> {
         self.calls.borrow_mut().push(clean(json!({"method":"get","reference":r,"context":context(c)})));
@@ -282,7 +327,8 @@ async fn perform(
     results.push(clean(result));
     states.push(clean(record.borrow().clone()));
 }
-#[tokio::test]
+// Paused time: an apply that waits for Live to show its clips waits the same on every run.
+#[tokio::test(start_paused = true)]
 async fn arrangement_midi_partial_recovery_and_clear_flows_match_source() {
     let data = fixture();
     for row in data["workflows"].as_array().unwrap() {
@@ -389,4 +435,89 @@ async fn arrangement_midi_partial_recovery_and_clear_flows_match_source() {
         same(&adapter.sim.state.borrow(), &row["state"], &format!("{label} state"));
         clips_are_unique(&adapter.sim.state.borrow(), &label);
     }
+}
+
+/// Live shows a clip Kumi's extension made a moment late (#166): the apply looks again until Live shows it
+/// whole, and the clip's fence has its notes, so undoing it isn't refused as changed since.
+#[tokio::test(start_paused = true)]
+async fn an_apply_waits_for_live_to_show_its_clip_whole() {
+    let data = fixture();
+    let adapter = Rc::new(Adapter::new());
+    *adapter.sim.state.borrow_mut() = data["seeds"]["single"].clone();
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let mut args = data["variants"]["single"].clone();
+    args["name"] = json!("Reese");
+    let preview = host.live_arrangement_midi_clip_preview_async(&json!(1), &args).await;
+    let txid = serde_json::from_str::<Value>(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap()["transactionId"].clone();
+    adapter.reset("apply-late");
+    let began = tokio::time::Instant::now();
+    let applied = host
+        .live_arrangement_midi_clip_apply_async(
+            &json!(2),
+            &json!({"transactionId":txid,"confirmation":"apply","idempotencyKey":"late-apply"}),
+            None,
+        )
+        .await
+        .unwrap();
+    let applied = clean(applied);
+    assert_eq!(applied["result"]["content"][0]["text"]["state"], "applied", "{applied}");
+    assert!(began.elapsed() >= Duration::from_millis(120), "it waited until Live showed the clip whole");
+    let undo = json!({"transactionId":txid,"confirmation":"undo","idempotencyKey":"undo-late"});
+    let undone = clean(
+        host.with_undo_watch(&json!(3), &undo, async { Ok(host.undo_arrangement_midi_async(&json!(3), &undo, None).await) }).await.unwrap(),
+    );
+    assert_eq!(undone["result"]["content"][0]["text"]["state"], "undone", "{undone}");
+}
+/// When Live still doesn't show the clip whole after half a second, the apply says what Live shows there.
+#[tokio::test(start_paused = true)]
+async fn an_apply_that_cant_find_its_clip_says_what_live_shows() {
+    let data = fixture();
+    let adapter = Rc::new(Adapter::new());
+    *adapter.sim.state.borrow_mut() = data["seeds"]["single"].clone();
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let mut args = data["variants"]["single"].clone();
+    args["name"] = json!("Reese");
+    let preview = host.live_arrangement_midi_clip_preview_async(&json!(1), &args).await;
+    let txid = serde_json::from_str::<Value>(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap()["transactionId"].clone();
+    adapter.reset("apply-unfilled");
+    let began = tokio::time::Instant::now();
+    let applied = host
+        .live_arrangement_midi_clip_apply_async(
+            &json!(2),
+            &json!({"transactionId":txid,"confirmation":"apply","idempotencyKey":"unfilled"}),
+            None,
+        )
+        .await
+        .unwrap();
+    let applied = clean(applied);
+    assert_eq!(began.elapsed(), Duration::from_millis(500), "it waited half a second");
+    assert_eq!(
+        applied["result"]["content"][0]["text"]["reason"],
+        "Live made the clips, but the Arrangement doesn't show them where they were asked; Live shows an unnamed clip at beat 8, 4 beats long, with 0 of 1 notes"
+    );
+}
+/// A cancelled apply stops waiting for Live at once and goes on with what it last found.
+#[tokio::test(start_paused = true)]
+async fn a_cancelled_apply_stops_waiting_for_live() {
+    let data = fixture();
+    let adapter = Rc::new(Adapter::new());
+    *adapter.sim.state.borrow_mut() = data["seeds"]["single"].clone();
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let preview = host.live_arrangement_midi_clip_preview_async(&json!(1), &data["variants"]["single"]).await;
+    let txid = serde_json::from_str::<Value>(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap()["transactionId"].clone();
+    adapter.reset("apply-unfilled");
+    let signal = kumi_common::abort::Signal::new();
+    let began = tokio::time::Instant::now();
+    let args = json!({"transactionId":txid,"confirmation":"apply","idempotencyKey":"cancelled"});
+    let cancel = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        signal.cancel();
+    };
+    let id = json!(2);
+    let (applied, ()) = tokio::join!(host.live_arrangement_midi_clip_apply_async(&id, &args, Some(&signal)), cancel);
+    assert_eq!(began.elapsed(), Duration::from_millis(100), "it stopped waiting when cancelled");
+    let applied = clean(applied.unwrap());
+    let text = &applied["result"]["content"][0]["text"];
+    assert_eq!(text["state"], "applied", "{applied}");
+    assert_eq!(text["partial"]["reason"], "Live shows 0 of the 1 notes asked for in the clip at beat 8", "{applied}");
 }

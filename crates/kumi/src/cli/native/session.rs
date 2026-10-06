@@ -6,6 +6,7 @@ use crate::{
     terminal::{create_terminal, Terminal, TerminalOptions},
     tui::app::{create_tui, ConnectLive, LiveSetup, PanelTab, TuiOptions},
     voice::{create_voice_control, VoiceControlOptions},
+    willington::{Willington, WillingtonControl},
 };
 use async_trait::async_trait;
 use kumi_runtime::{
@@ -442,6 +443,10 @@ pub(super) async fn run_session(
     options.watch = Some(VideoDirectories { videos_dir: load_videos_dir(&io.env)?, tools_dir: tools_dir.clone() });
     options.web = true;
     options.library = Some(library.clone());
+    options.willington = Some({
+        let env = io.env.clone();
+        Rc::new(move || Willington::find(&env).map(|willington| willington.switch()))
+    });
     let session: Rc<dyn SessionController> = Rc::new(create_session(options)?);
     *controller.borrow_mut() = Some(Rc::downgrade(&session));
     let (fetch_tx, mut fetch_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -534,6 +539,7 @@ pub(super) async fn run_session(
         options.history = Some(history);
         options.open_browser = Some(Rc::new(login::open_browser));
         options.updates = Some(updates);
+        options.willington = Some(WillingtonControl::new(io.env.clone()));
         options.voice = Some(Rc::new(create_voice_control(VoiceControlOptions {
             env: Some(io.env.clone()),
             tools_dir,
@@ -562,6 +568,7 @@ pub(super) async fn run_session(
         options.secrets = secrets.clone();
         options.history = Some(history);
         options.updates = Some(updates);
+        options.willington = Some(WillingtonControl::new(io.env.clone()));
         Rc::new(create_terminal(options))
     };
     *terminal.borrow_mut() = Some(Rc::downgrade(&ui));

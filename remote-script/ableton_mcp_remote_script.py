@@ -11699,6 +11699,39 @@ class LiveObjectMapper:
             raise ValueError("note mute is invalid")
         return note
 
+    @staticmethod
+    def _note_batch_difference(notes: list[dict[str, Any]], note_ids: list[int | None], extra: dict[int, dict[str, Any]], prior_unchanged: bool) -> str:
+        """The batch's failure, saying how the notes Live kept differ from it: a note Live shortened (with
+        the usual cause, the same pitch's next note starting there), dropped, lengthened or added. The
+        whole message, hint included, stays within the 200 characters a failure keeps."""
+        def beat(value: Any) -> str: return f"{float(value):g}"
+        extra = dict(extra); said = []
+        for note, note_id in zip(notes, note_ids):
+            if note_id is not None: continue
+            pitch, start = note["pitch"], float(note["start"])
+            row_id = next((row_id for row_id, row in extra.items() if row.get("pitch") == pitch and _same_number(row.get("start"), start)), None)
+            if row_id is None:
+                said.append(f"Live didn't keep pitch {pitch} at beat {beat(start)}"); continue
+            row = extra.pop(row_id); end = start + float(row.get("duration") or 0)
+            if _same_number(row.get("duration"), note["duration"]):
+                said.append(f"Live changed pitch {pitch} at beat {beat(start)}")
+            elif float(row.get("duration") or 0) < float(note["duration"]):
+                cut = any(other is not note and other["pitch"] == pitch and _same_number(float(other["start"]), end) for other in notes)
+                said.append(f"Live shortened pitch {pitch} at beat {beat(start)} to end at beat {beat(end)}" + (f", where the next {pitch} starts" if cut else ""))
+            else:
+                said.append(f"Live lengthened pitch {pitch} at beat {beat(start)} to end at beat {beat(end)}")
+        said += [f"Live added pitch {row.get('pitch')} at beat {beat(row.get('start') or 0)}" for row in extra.values()]
+        if not prior_unchanged: said.append("notes already in the clip changed")
+        text = "note batch did not produce the exact complete expected state"
+        if not said: return text
+        hint = "; notes of one pitch can't overlap" if any(", where the next" in item for item in said) else ""
+        room = 200 - len(hint) - len("; and 99 more")
+        text += ": " + said[0]
+        for index, item in enumerate(said[1:], 1):
+            if len(text) + 2 + len(item) > room: text += f"; and {len(said) - index} more"; break
+            text += "; " + item
+        return text + hint
+
     def _note_add_batch(self, args: dict[str, Any]) -> dict[str, Any]:
         clip = self._guard_note_clip(args)
         values = args.get("notes")
@@ -11755,7 +11788,7 @@ class LiveObjectMapper:
             prior_unchanged = sorted(prior_after, key=lambda row: row["id"]) == sorted(prior_rows, key=lambda row: row["id"])
             if (len(after_rows) != len(prior_rows) + len(notes) or any(not isinstance(note_id, int) or isinstance(note_id, bool) for note_id in after_ids)
                     or len(set(after_ids)) != len(after_ids) or any(note_id is None for note_id in note_ids) or unmatched or not prior_unchanged):
-                raise ValueError("note batch did not produce the exact complete expected state")
+                raise ValueError(self._note_batch_difference(notes, note_ids, unmatched, prior_unchanged))
             notes_revision = hashlib.sha256(self._bounded_canonical(after_rows).encode("utf-8")).hexdigest()
             return {"added": len(notes), "noteIds": note_ids, "notesRevision": notes_revision}
         except BaseException as error:
