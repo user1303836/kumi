@@ -209,4 +209,9 @@ async fn the_gap_log_comes_from_kumis_database_with_what_an_older_kumi_logged_si
     let older = gaps.find("Grouping tracks").expect(gaps);
     let newer = gaps.find("Freezing a track").expect(gaps);
     assert!(older < newer, "oldest first: {gaps}");
+    assert_eq!(
+        kumi_runtime::core::gaps::logged_gaps(&kumi.join("kumi.db"), &dir.path().join("none")).unwrap().len(),
+        1,
+        "and the report read the file's gap without writing it to the database"
+    );
 }

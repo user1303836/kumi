@@ -1154,6 +1154,7 @@ dependencies = [
  "blake3",
  "rand 0.9.5",
  "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",

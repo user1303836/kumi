@@ -81,9 +81,14 @@ pub trait PlaybookStore {
         Ok(())
     }
 }
+/// A lessons file as the store writes it: the newest the playbook keeps.
+pub(crate) fn lessons_file(lessons: &[Lesson]) -> String {
+    json::file_text(&json!({"version":1,"lessons":&lessons[lessons.len().saturating_sub(MAX_LESSONS)..]}))
+}
 fn text(value: &str, max: usize) -> String {
     let cleaned: String = value.chars().map(|c| if c <= '\u{1f}' || c == '<' || c == '>' { ' ' } else { c }).collect();
-    string::head(string::trim(&cleaned), max)
+    // Trimmed again after the cut, so cleaning what was cleaned changes nothing.
+    string::trim(&string::head(string::trim(&cleaned), max)).to_string()
 }
 fn score(value: &Value) -> Option<f64> {
     value.as_f64().filter(|v| v.is_finite()).map(|v| round(v).clamp(0.0, 100.0))
@@ -165,11 +170,7 @@ impl PlaybookStore for FilePlaybookStore {
             #[cfg(unix)]
             options.mode(0o600);
             let mut handle = options.open(&temporary).await?;
-            handle
-                .write_all(
-                    json::file_text(&json!({"version":1,"lessons":&lessons[lessons.len().saturating_sub(MAX_LESSONS)..]})).as_bytes(),
-                )
-                .await?;
+            handle.write_all(lessons_file(lessons).as_bytes()).await?;
             handle.flush().await?;
             drop(handle);
             tokio::fs::rename(&temporary, &self.file).await

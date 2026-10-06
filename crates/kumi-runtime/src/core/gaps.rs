@@ -4,6 +4,7 @@ use super::{
     errors::RuntimeError,
     memory::suspect_note,
     store_client::StoreClient,
+    store_import::parse_gaps,
 };
 use crate::version::KUMI_VERSION;
 use async_trait::async_trait;
@@ -15,6 +16,7 @@ use kumi_common::{
 use kumi_store::gaps;
 use serde_json::{json, Value};
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -31,7 +33,7 @@ fn clean(value: Option<&Value>) -> String {
         .chars()
         .map(|c| if c <= '\u{1f}' || ('\u{7f}'..='\u{9f}').contains(&c) || c == '\u{feff}' { ' ' } else { c })
         .collect();
-    string::head(&text.split_whitespace().collect::<Vec<_>>().join(" "), 300)
+    string::trim(&string::head(&text.split_whitespace().collect::<Vec<_>>().join(" "), 300)).to_string()
 }
 /// The gap tool, logging to Kumi's database when there is one, otherwise to `file`.
 pub fn gap_tools(file: impl Into<PathBuf>, store: Option<StoreClient>) -> Vec<Rc<dyn KernelTool>> {
@@ -109,9 +111,16 @@ impl KernelTool for GapTool {
     }
 }
 
-/// The gaps Kumi's database has logged, oldest first, each as the gap log writes it (one JSON line).
-pub async fn gap_lines(store: &StoreClient) -> Result<Vec<String>, RuntimeError> {
-    let logged = store.read(gaps::all).await.map_err(|e| RuntimeError::plain(e.to_string()))?;
+/// The gap log as `kumi report` shows it, written nowhere: the gaps Kumi's database at `db` has logged,
+/// with any an older Kumi logged in `file` that it hasn't read in yet, oldest first, each as the gap
+/// log writes it (one JSON line). Blocking.
+pub fn logged_gaps(db: &Path, file: &Path) -> Result<Vec<String>, kumi_store::StoreError> {
+    let mut logged = kumi_store::read_only(db, gaps::all)?;
+    if let Ok(text) = std::fs::read_to_string(file) {
+        let known: HashSet<(i64, String)> = logged.iter().map(|gap| (gap.at, gap.missing.clone())).collect();
+        logged.extend(parse_gaps(&text).into_iter().filter(|gap| !known.contains(&(gap.at, gap.missing.clone()))));
+        logged.sort_by_key(|gap| gap.at);
+    }
     Ok(logged
         .into_iter()
         .map(|gap| {

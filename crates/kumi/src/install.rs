@@ -4,7 +4,7 @@ pub use crate::config::kumi_dir as kumi_home;
 pub use crate::update::newer as newer_version;
 use crate::{
     bridge_setup::{ask_yes_no, bridge_version, default_run, executable_dir, executable_name, is_live_running, AsyncBool, Confirm, Run},
-    config::{find_bridge_config, remote_scripts_dir},
+    config::{find_bridge_config, json_files, load_db_file, remote_scripts_dir},
     doctor::read_bridge_server,
     input::TerminalInput,
     live_extension::{extension_data_dir, live_extensions_dir, remove_extension, remove_former_extension, KUMI_EXTENSION_ID},
@@ -19,7 +19,7 @@ use kumi_common::{
 };
 use kumi_runtime::{
     ai::http::{default_fetch, Fetch, FetchInit},
-    core::errors::RuntimeError,
+    core::{errors::RuntimeError, store_import::write_back},
     ears::device::EARS_NAME,
     library::sources::{basename, dirname, join, resolve},
     system::{self, Env, SystemProgram},
@@ -392,8 +392,17 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
         return Ok(code);
     }
     say(format!("Kumi is now {} ({} update --rollback goes back to {KUMI_VERSION}).", manifest.kumi, *KUMI));
+    if let Some(open) = still_open() {
+        say(open);
+    }
     Ok(bridge_after(&io, &home, &app).await)
 }
+/// After an update: Kumi windows already open still run this Kumi (Windows can't update while one is
+/// open). What they keep reaches the new Kumi at its next turn; what it keeps reaches them once restarted.
+pub fn still_open() -> Option<String> {
+    (!cfg!(windows)).then(|| format!("Kumi windows opened before the update keep running {KUMI_VERSION} until you restart them."))
+}
+
 pub async fn rollback_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
     let say = |s: String| io.out.write(&format!("{s}\n"));
     let home = kumi_home(&io.env);
@@ -403,6 +412,29 @@ pub async fn rollback_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
     if !migration::has_app(&previous) {
         say("There's no earlier Kumi to go back to.".into());
         return Ok(1);
+    }
+    // The older Kumi reads notes, techniques and lessons from files: what the database keeps is written
+    // back for it first. If that fails, the rollback still goes ahead.
+    let written = match (load_db_file(&io.env), json_files(&io.env)) {
+        (Ok(db), Ok(files)) => write_back(db.into(), files, kumi_common::time::now_ms()).await,
+        (Err(why), _) | (_, Err(why)) => Err(why),
+    };
+    match written {
+        Ok(written) => {
+            for (file, why) in written.left {
+                say(format!("Left {} as it was: {why}.", file.display()));
+            }
+        }
+        Err(why) => say(format!(
+            "The older Kumi won't see the notes, techniques or lessons kept since the update ({}); they stay in Kumi's database for when you update again.",
+            why.message()
+        )),
+    }
+    // Windows can't roll back while a Kumi window is open; elsewhere one keeps running this Kumi.
+    if !cfg!(windows) {
+        say(format!(
+            "Kumi windows still open keep running {KUMI_VERSION} until you close them; what they keep from now on stays in Kumi's database for your next update."
+        ));
     }
     let legacy = !Path::new(&join(&previous, &executable_name("kumi"))).is_file();
     let bridge_rollback = if legacy { migration::prepare_legacy_rollback(&io, &home).await? } else { None };
