@@ -57,7 +57,7 @@ pub enum FastRevert {
         applied: f64,
     },
 }
-fn with_args(marker: &str, args: &Value, body: &str) -> String {
+pub(super) fn with_args(marker: &str, args: &Value, body: &str) -> String {
     format!("# kumi:{marker}\nimport json\nARGS = json.loads({})\n{body}", stringify(&Value::String(stringify(args))))
 }
 pub fn find_script(items: &Value) -> String {

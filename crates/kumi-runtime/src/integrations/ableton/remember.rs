@@ -43,6 +43,8 @@ pub struct Remember {
     timer: RefCell<Option<Signal>>,
     /// Kumi's own ids for the Set's tracks, kept whole in the background.
     pub track_ids: super::track_ids::TrackIds,
+    /// What Kumi keeps of clips its changes cut or delete, for its undo, and in the Set's history.
+    pub history: super::snapshots::SetHistory,
 }
 impl Remember {
     pub fn new(connection: Rc<LiveConnection>, store: Option<Rc<dyn ProjectStore>>, on_catch_up: Option<Rc<dyn Fn(CatchUp)>>) -> Rc<Self> {
@@ -56,6 +58,7 @@ impl Remember {
             saving: RefCell::new(async {}.boxed_local().shared()),
             timer: RefCell::new(None),
             track_ids: Default::default(),
+            history: Default::default(),
         })
     }
     pub fn current(&self) -> Option<Rc<CurrentProject>> {

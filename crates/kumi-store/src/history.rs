@@ -109,7 +109,8 @@ pub fn object(connection: &Connection, hash: &str) -> Result<Option<(String, Val
         .query_row("SELECT kind, raw_len, z FROM objects WHERE hash = ?1", [hash], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
         .optional()?;
     let Some((kind, raw_len, z)) = row else { return Ok(None) };
-    let capacity = usize::try_from(raw_len).ok().filter(|len| *len <= MAX_RAW).ok_or_else(|| StoreError::Io("an object is too big".into()))?;
+    let capacity =
+        usize::try_from(raw_len).ok().filter(|len| *len <= MAX_RAW).ok_or_else(|| StoreError::Io("an object is too big".into()))?;
     let raw = zstd::bulk::decompress(&z, capacity).map_err(|error| StoreError::Io(error.to_string()))?;
     let value = serde_json::from_slice(&raw).map_err(|error| StoreError::Io(error.to_string()))?;
     Ok(Some((kind, value)))

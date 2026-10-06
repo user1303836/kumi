@@ -60,6 +60,11 @@ pub trait ProjectStore {
     async fn save_track_keepers(&self, _project: &str, _keepers: &HashMap<String, String>) -> Result<(), RuntimeError> {
         Ok(())
     }
+    /// Where the project keeps its history (`history.db`, what Kumi's undo puts back and, later, its snapshots), if it
+    /// keeps one.
+    fn history_path(&self, _project: &str) -> Option<PathBuf> {
+        None
+    }
 }
 const MAX_BASELINE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CONVERSATION_BYTES: usize = 256 * 1024;
@@ -283,6 +288,9 @@ impl ProjectStore for FileProjectStore {
             .take(MAX_KEEPERS)
             .filter_map(|(id, identity)| Some((id.clone(), identity.as_str()?.to_owned())))
             .collect())
+    }
+    fn history_path(&self, project: &str) -> Option<PathBuf> {
+        project_id(project).then(|| self.directory.join(project).join("history.db"))
     }
     async fn save_track_keepers(&self, project: &str, keepers: &HashMap<String, String>) -> Result<(), RuntimeError> {
         if !project_id(project) {

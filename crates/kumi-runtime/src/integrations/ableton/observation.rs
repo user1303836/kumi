@@ -605,6 +605,8 @@ impl Observer {
             connection.assert_lease(lease, &signal)?;
             *self.remember.current.borrow_mut() =
                 Some(Rc::new(CurrentProject { identity: identity.clone(), name: name.clone(), path: path.clone(), project: project_id.clone(), unsaved }));
+            // What an unsaved Set kept is written to its history once it has a project id.
+            self.remember.history.identified(self.remember.store.as_ref(), self.remember.current().as_deref());
             // The tracks' own ids, made whole in the background when their list changed or one is missing or
             // shared: within the project (or the unsaved Set), and never written into a template.
             let scope = project_id.clone().unwrap_or_else(|| format!("unsaved:{identity}"));

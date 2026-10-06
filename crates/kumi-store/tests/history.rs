@@ -17,7 +17,9 @@ fn a_sets_history_opens_in_its_own_file_with_its_own_schema() {
     assert_eq!(store.read(|c| Ok(c.query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0))?)).unwrap(), "wal");
     for table in ["objects", "ops", "snapshots", "refs"] {
         let found: i64 = store
-            .read(move |c| Ok(c.query_row("SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = ?1", [table], |row| row.get(0))?))
+            .read(move |c| {
+                Ok(c.query_row("SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = ?1", [table], |row| row.get(0))?)
+            })
             .unwrap();
         assert_eq!(found, 1, "{table}");
     }

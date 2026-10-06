@@ -9,6 +9,7 @@ pub mod command_tools;
 mod concurrent;
 pub mod connection;
 pub mod context;
+pub mod cuts;
 pub mod display;
 pub mod execution_services;
 pub mod fast;
@@ -38,6 +39,7 @@ pub mod plugin_tool;
 pub mod project;
 pub mod samples;
 pub mod set_model;
+pub mod snapshots;
 pub mod track_ids;
 pub mod willington;
 
