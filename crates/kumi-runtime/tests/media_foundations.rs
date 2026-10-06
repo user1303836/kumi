@@ -607,7 +607,7 @@ async fn when_github_lists_no_ffmpeg_builds_kumi_says_so_in_plain_words_and_a_ma
     };
     assert_eq!(
         find_ffmpeg(options("linux", "x64", &silent)).await.unwrap_err().to_string(),
-        "Kumi needs ffmpeg for this, and would fetch it, but couldn't get the list of its builds from GitHub. Try again in a few minutes, or install it with your package manager."
+        "Kumi couldn't get the list of ffmpeg's builds from GitHub to fetch it. Try again in a few minutes, or install it with your package manager."
     );
     assert_eq!(*asked.lock().unwrap(), [FFMPEG_LATEST, FFMPEG_RELEASES]);
     assert!(find_ffmpeg(options("win32", "x64", &silent))

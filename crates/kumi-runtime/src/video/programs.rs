@@ -817,7 +817,7 @@ async fn ffmpeg_release_build(options: &FfmpegOptions, platform: &str, arch: &st
     }
     let yourself = if platform == "win32" { "install it: winget install ffmpeg" } else { "install it with your package manager" };
     Err(VideoFailure::video(format!(
-        "Kumi needs ffmpeg for this, and would fetch it, but couldn't get the list of its builds from GitHub. Try again in a few minutes, or {yourself}."
+        "Kumi couldn't get the list of ffmpeg's builds from GitHub to fetch it. Try again in a few minutes, or {yourself}."
     )))
 }
 

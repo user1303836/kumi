@@ -63,6 +63,8 @@ pub struct WatchOptions {
     pub signal: Option<Signal>,
     pub on_fetch: Option<programs::OnFetch>,
     pub on_progress: Option<Rc<dyn Fn(&str)>>,
+    /// How ffmpeg is found and fetched (for tests: the network and the computer); env and signal are the watch's.
+    pub ffmpeg: FfmpegOptions,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SoundSpan {
@@ -569,6 +571,25 @@ async fn slow_stream(ffmpeg: &str, input: &Input, notes: &mut Vec<String>, signa
     Ok(" · slowly: this ffmpeg is older than 8.1")
 }
 
+/// ffmpeg for a watch, or None. A video's words don't need it, so a fetch that fails (GitHub out of reach,
+/// say) leaves its reason in `unfetched` for the notes, and isn't tried again in the same watch; only a stop
+/// ends the watch.
+async fn watching_ffmpeg(options: &WatchOptions, unfetched: &mut Option<String>) -> Result<Option<String>, VideoFailure> {
+    if unfetched.is_some() {
+        return Ok(None);
+    }
+    match find_ffmpeg(FfmpegOptions { env: options.env.clone(), signal: options.signal.clone(), ..options.ffmpeg.clone() }).await {
+        Err(error) if !error.is_aborted() => {
+            if let Some(signal) = &options.signal {
+                signal.check()?;
+            }
+            *unfetched = Some(error.message());
+            Ok(None)
+        }
+        found => found,
+    }
+}
+
 /// Watch a video's words, selected frames, close-ups and a requested stretch of its sound.
 pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result<Watched, VideoFailure> {
     use crate::core::contracts::WordsSource;
@@ -618,9 +639,11 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
     let mut watcher = Watcher { options: &options, address: address.clone(), file: file.clone(), ytdlp: None, info: None, sources: None };
     let mut notes = Vec::new();
     let mut refused = false;
+    // Why there's no ffmpeg, when fetching it failed.
+    let mut unfetched = None;
     if meta.is_none() || cues.is_none() {
         if let Some(file) = &file {
-            let ffmpeg = find_ffmpeg(FfmpegOptions { env: options.env.clone(), signal: signal.clone(), ..Default::default() }).await?;
+            let ffmpeg = watching_ffmpeg(&options, &mut unfetched).await?;
             let duration = if let Some(ffmpeg) = ffmpeg { duration_of(&ffmpeg, file, signal.clone()).await } else { None };
             let path = Path::new(file);
             let stem = path.file_stem().unwrap_or_default().to_string_lossy();
@@ -713,7 +736,7 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
     let end = meta.duration.unwrap_or_else(|| cues.iter().map(|c| c.end).fold(0.0, f64::max));
     let from = request.from.unwrap_or(0.0).min(end).max(0.0);
     let to = request.to.unwrap_or(end).min(if end != 0.0 { end } else { f64::INFINITY }).max(from);
-    let ffmpeg = find_ffmpeg(FfmpegOptions { env: options.env.clone(), signal: signal.clone(), ..Default::default() }).await?;
+    let ffmpeg = watching_ffmpeg(&options, &mut unfetched).await?;
     if cues.is_empty() && meta.words.is_none() {
         let whisper = if ffmpeg.is_some() { find_whisper(&watcher.programs()).await.unwrap_or(None) } else { None };
         let why = if refused {
@@ -724,7 +747,10 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
             "it has no captions"
         };
         if ffmpeg.is_none() {
-            notes.push(format!("There's no transcript: {why}, and transcribing its speech needs ffmpeg ({}).", ffmpeg_hint()));
+            notes.push(match &unfetched {
+                Some(unfetched) => format!("There's no transcript: {why}, and transcribing its speech needs ffmpeg. {unfetched}"),
+                None => format!("There's no transcript: {why}, and transcribing its speech needs ffmpeg ({}).", ffmpeg_hint()),
+            });
         } else if whisper.is_none() {
             notes.push(format!(
                 "There's no transcript: {why}, and Kumi transcribes speech with whisper.cpp ({}). The frames show what it does.",
@@ -903,7 +929,10 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
     let mut sound = None;
     let listen = request.listen.filter(|span| span.to > span.from);
     if (!shots.is_empty() || listen.is_some()) && ffmpeg.is_none() {
-        notes.push(format!("Frames and the video's sound need ffmpeg ({}); this is the transcript alone.", ffmpeg_hint()));
+        notes.push(match &unfetched {
+            Some(unfetched) => format!("Frames and the video's sound need ffmpeg; this is the transcript alone. {unfetched}"),
+            None => format!("Frames and the video's sound need ffmpeg ({}); this is the transcript alone.", ffmpeg_hint()),
+        });
     } else if let Some(ffmpeg) = ffmpeg {
         let frame_path = |time, region: Option<Region>| {
             join(
