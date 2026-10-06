@@ -191,7 +191,7 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 256,
-        "description": "The clip it works on: its clipRef from this turn (a Session clip), or \"selected\" for the one the producer selected in Live"
+        "description": "The clip it works on: its clipRef from this turn (a Session clip; for converting to MIDI, an audio clip in Session or Arrangement), or \"selected\" for the one the producer selected in Live"
       },
       "menu": {
         "type": "array",
