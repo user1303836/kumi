@@ -111,6 +111,13 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 | | `Required CI` | 只有以上全部通过时才通过 |
 | **Installer** | `Build Kumi's Mac helper`、`Native bundle / <target>`（六个）、`Aggregate native and existing-installer releases`，然后是 `Install / <system>`（六个）和 `Existing installer transition / <system>`（三个） | 构建 Kumi 在 Mac 上使用 Live 菜单的辅助程序（通用、临时签名），为 macOS、Linux 和 Windows 的 Intel 与 ARM 构建原生发行包，再构建现有安装用来更新的兼容版本，并在本地提供它们。在每个系统上：像制作人那样安装（在 Windows 上使用 Windows PowerShell 5.1），检查版本、`doctor`、桥接及其分析工作进程，再次安装作为修复，运行 `kumi bridge --yes` 安装到一个临时的 Remote Scripts 文件夹，运行 `kumi update`、`kumi update --rollback` 和 `kumi uninstall`。过渡作业用 Kumi 1.7.5 和新的发行包运行迁移测试。在 `v*` 标签上，`publish` 随后把发行包附加到发布版本上。 |
 
+在拉取请求上，运行的内容更少：
+
+- `Rust / macOS` 和 `Rust / Windows` 运行因平台而异的测试，`Python Remote Script` 跳过 macOS。
+- 只有修改安装、更新、发布或依赖项的变更，Installer 才会构建并安装全部六个。修改桥接或版本号的变更会构建、安装并检查 Linux 的发行包；其他变更只构建 Linux 的发行包。
+
+每次推送到 `main` 和每个标签都会运行全部内容，CI 每晚也会完整运行一次。
+
 要合并到 `main`，`Required CI` 必须通过。Installer 不是必需的。其余规则见[发布与分发](DISTRIBUTION_POLICY.md#合并门禁)。
 
 ## 通过意味着什么

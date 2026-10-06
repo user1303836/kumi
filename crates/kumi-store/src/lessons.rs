@@ -1,0 +1,109 @@
+//! Lessons from matching sounds: what was matched, what won, the scores, the moves that helped.
+
+use crate::{ids::new_id, params, Connection, StoreError};
+use serde_json::Value;
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Lesson {
+    pub label: String,
+    pub matched: String,
+    pub winner: String,
+    pub from: f64,
+    pub to: f64,
+    /// The moves that improved it, as JSON (kept as JSONB: their shape may still change).
+    pub moves: Value,
+    /// `liked` or `disliked`, when the producer said.
+    pub reaction: Option<String>,
+    pub at: i64,
+}
+
+/// The lessons in use, oldest first.
+pub fn in_use(connection: &Connection) -> Result<Vec<Lesson>, StoreError> {
+    let mut statement = connection.prepare_cached(
+        "SELECT label, matched, winner, from_score, to_score, json(moves), reaction, created_at FROM lessons
+         WHERE archived_at IS NULL ORDER BY created_at, label",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            Lesson {
+                label: row.get(0)?,
+                matched: row.get(1)?,
+                winner: row.get(2)?,
+                from: row.get(3)?,
+                to: row.get(4)?,
+                moves: Value::Null,
+                reaction: row.get(6)?,
+                at: row.get(7)?,
+            },
+            row.get::<_, String>(5)?,
+        ))
+    })?;
+    rows.map(|found| {
+        let (mut lesson, moves) = found?;
+        lesson.moves = serde_json::from_str(&moves).map_err(|error| StoreError::Sqlite(error.to_string()))?;
+        Ok(lesson)
+    })
+    .collect()
+}
+
+/// The lessons in use become `lessons`: new ones are added, known ones updated, and one in use that
+/// isn't among them is set aside (archived), never deleted.
+pub fn keep(connection: &Connection, lessons: &[Lesson], now: i64) -> Result<(), StoreError> {
+    let mut known: HashMap<String, String> = HashMap::new();
+    {
+        let mut statement = connection.prepare_cached("SELECT label, id FROM lessons WHERE archived_at IS NULL")?;
+        for found in statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))? {
+            let (label, id) = found?;
+            known.insert(label, id);
+        }
+    }
+    for l in lessons {
+        let moves = serde_json::to_string(&l.moves).map_err(|error| StoreError::Sqlite(error.to_string()))?;
+        match known.remove(&l.label) {
+            Some(id) => connection
+                .prepare_cached(
+                    "UPDATE lessons SET matched = ?2, winner = ?3, from_score = ?4, to_score = ?5, moves = jsonb(?6), reaction = ?7,
+                     created_at = ?8 WHERE id = ?1",
+                )?
+                .execute(params![id, l.matched, l.winner, l.from, l.to, moves, l.reaction, l.at])?,
+            None => connection
+                .prepare_cached(
+                    "INSERT INTO lessons (id, label, matched, winner, from_score, to_score, moves, reaction, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, jsonb(?7), ?8, ?9)",
+                )?
+                .execute(params![new_id(), l.label, l.matched, l.winner, l.from, l.to, moves, l.reaction, l.at])?,
+        };
+    }
+    for id in known.into_values() {
+        connection.prepare_cached("UPDATE lessons SET archived_at = ?2 WHERE id = ?1")?.execute(params![id, now])?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn lessons_round_trip_with_their_moves_and_a_dropped_one_is_set_aside() {
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::schema::migrate(&mut db).unwrap();
+        let lesson = |label: &str, at| Lesson {
+            label: label.into(),
+            matched: "the reference pad".into(),
+            winner: "Wavetable".into(),
+            from: 41.0,
+            to: 77.0,
+            moves: json!([{"label":"brighter","score":63},{"label":"slower attack","score":77}]),
+            reaction: Some("liked".into()),
+            at,
+        };
+        keep(&db, &[lesson("l0a1b2c3d", 1), lesson("l4e5f6a7b", 2)], 3).unwrap();
+        assert_eq!(in_use(&db).unwrap(), [lesson("l0a1b2c3d", 1), lesson("l4e5f6a7b", 2)]);
+        keep(&db, &[lesson("l4e5f6a7b", 2)], 4).unwrap();
+        assert_eq!(in_use(&db).unwrap(), [lesson("l4e5f6a7b", 2)]);
+        assert_eq!(db.query_row("SELECT count(*) FROM lessons", [], |row| row.get::<_, i64>(0)).unwrap(), 2, "set aside, not deleted");
+    }
+}
