@@ -53,17 +53,25 @@ jobs:
           fi
 
   rust-linux:
-    name: Rust / Linux
+    # Every test, a third on each of three runners: the tests already keep a runner's every core busy, so more
+    # runners are what makes them faster. Each runner builds them all, from the cache.
+    name: Rust / Linux (${{ matrix.part }}/3)
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-        with:
-          components: rustfmt, clippy
+      # Saved from main only. A pull request restores main's; caches saved from pull requests (about 300 MB a job)
+      # pushed main's out of the repository's 10 GB.
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
         with:
           tool: nextest
@@ -108,11 +116,27 @@ jobs:
           grep -q -- -request_size <<<"$help"
           "$bin/ffmpeg" -version | sed -n 1p
           echo "$bin" >> "$GITHUB_PATH"
-      - run: cargo fmt --all --check
-      - name: Every test, in a home of their own (no test reaches this machine's Live folders or ~/.kumi)
+      - name: A third of the tests, in a home of their own (no test reaches this machine's Live folders or ~/.kumi)
         env:
           KUMI_NEXTEST: "1"
-        run: sh scripts/test-isolated.sh --no-fail-fast
+        run: sh scripts/test-isolated.sh --no-fail-fast --partition hash:${{ matrix.part }}/3
+      - run: git diff --check
+
+  rust-lint:
+    name: Rust / Lint
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo fmt --all --check
       - name: Documentation tests and examples
         run: |
           cargo test --workspace --locked --doc
@@ -124,7 +148,6 @@ jobs:
       - name: Clippy (advisory while the port is under way)
         continue-on-error: true
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: git diff --check
 
   rust-platforms:
     name: Rust / ${{ matrix.label }}
@@ -136,7 +159,11 @@ jobs:
       matrix:
         include:
           - { os: macos-15, label: macOS }
-          - { os: windows-2025, label: Windows }
+          # Windows runs its tests on two runners, half on each, beside a third that runs the console input tests
+          # and checks every test and example compiles.
+          - { os: windows-2025, label: Windows checks, checks: true }
+          - { os: windows-2025, label: Windows (1/2), part: 1 }
+          - { os: windows-2025, label: Windows (2/2), part: 2 }
     timeout-minutes: 45
     env:
       # Rust's own linker: Microsoft's is a large part of linking two hundred test binaries.
@@ -149,7 +176,12 @@ jobs:
         run: Set-MpPreference -DisableRealtimeMonitoring $true
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      # Saved from main only (see Rust / Linux). The checks runner builds other things than the test runners, so it
+      # keeps a cache of its own.
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+        with:
+          key: ${{ matrix.checks && 'checks' || '' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
         with:
           tool: nextest
@@ -166,12 +198,13 @@ jobs:
           python="$(command -v python3 || command -v python)"
           echo "KUMI_LEGACY_APP=$("$python" scripts/fetch-legacy-release.py "$RUNNER_TEMP/kumi-1.7.5")" >> "$GITHUB_ENV"
       - name: Windows input regressions
-        if: runner.os == 'Windows'
+        if: matrix.checks
         shell: pwsh
         env:
           RUST_TEST_NOCAPTURE: '1'
         run: ./scripts/test-isolated.ps1 --test stdin_handoff --test windows_console_control --test windows_stdin --test windows_tty --no-fail-fast
       - name: Choose the tests
+        if: ${{ !matrix.checks }}
         shell: bash
         run: |
           # A pull request runs what differs by platform, beside every test on Linux: installing, launching and
@@ -180,25 +213,26 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.event_name }}" == "merge_group" ]]; then
             tests="install cli_binary cli update bridge_setup doctor live_extension report login config history library stdin_handoff terminal tui voice_input"
             tests+=" hands_transport mcp auth system disk samples project_runtime library_files library_learn library_state_plan voice video local_servers session agent"
-            tests+=" lifecycle lifecycle_migration lifecycle_release delivery delivery_cli extension_launcher extension_channel stdio fixture_paths project host_probes analysis_runner sqlite_reader tool_catalog"
+            tests+=" lifecycle lifecycle_migration lifecycle_release delivery delivery_cli extension_launcher extension_channel stdio fixture_paths project host_probes analysis_runner sqlite_reader"
             tests+=" native_connected remote_adapter loopback ai_transport store willington"
             echo "KUMI_TESTS=$(printf -- '--test %s ' $tests)" >> "$GITHUB_ENV"
           fi
       - name: Every test and example compiles here (checked, not linked), beside the tests that run
+        if: runner.os != 'Windows' || matrix.checks
         run: cargo check --workspace --all-targets --locked
       - name: Tests, in a home of their own
         if: runner.os != 'Windows'
         env:
           KUMI_NEXTEST: "1"
         run: sh scripts/test-isolated.sh --no-fail-fast $KUMI_TESTS
-      - name: Tests, in a home of their own (Windows)
-        if: runner.os == 'Windows'
+      - name: Half the tests, in a home of their own (Windows)
+        if: runner.os == 'Windows' && !matrix.checks
         shell: pwsh
         env:
           KUMI_NEXTEST: "1"
         run: |
           $tests = if ($env:KUMI_TESTS) { $env:KUMI_TESTS.Trim() -split ' +' } else { @() }
-          ./scripts/test-isolated.ps1 --no-fail-fast @tests
+          ./scripts/test-isolated.ps1 --no-fail-fast --partition 'hash:${{ matrix.part }}/2' @tests
 
   remote-script:
     name: Python Remote Script / ${{ matrix.os }}
@@ -272,7 +306,7 @@ jobs:
   required:
     name: Required CI
     if: always()
-    needs: [changes, rust-linux, rust-platforms, remote-script, live-extension, scripts]
+    needs: [changes, rust-linux, rust-lint, rust-platforms, remote-script, live-extension, scripts]
     runs-on: ubuntu-24.04
     steps:
       - name: Require every job above (the builds may skip a documentation-only change)
@@ -283,6 +317,7 @@ jobs:
           test "${{ needs.scripts.result }}" = "success"
           ok() { [[ "$1" == "success" || ( "$1" == "skipped" && "${{ needs.changes.outputs.code }}" == "false" ) ]]; }
           ok "${{ needs.rust-linux.result }}"
+          ok "${{ needs.rust-lint.result }}"
           ok "${{ needs.rust-platforms.result }}"
           ok "${{ needs.remote-script.result }}"
           ok "${{ needs.live-extension.result }}"

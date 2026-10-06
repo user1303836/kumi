@@ -104,7 +104,9 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
 | 工作流 | 作业 | 运行内容 |
 | --- | --- | --- |
-| **CI** | `Rust / Linux`、`Rust / macOS`、`Rust / Windows` | `cargo fmt --check`、构建所有目标、在装好官方 SDK 的情况下通过隔离运行器运行全部测试（在 Windows 上先运行控制台输入测试）、Clippy（仅供参考，但跨 await 持有 `RefCell` 借用会使 Linux 任务失败）和 `git diff --check` |
+| **CI** | `Rust / Linux (1/3)`、`(2/3)`、`(3/3)`、`Rust / macOS`、`Rust / Windows (1/2)`、`(2/2)` | 在装好官方 SDK 的情况下通过隔离运行器运行全部测试，由 nextest 按哈希分配到各运行器：Linux 每个运行器三分之一，Windows 每个一半。macOS 还检查所有目标都能编译；Linux 在测试之后运行 `git diff --check` |
+| | `Rust / Windows checks` | 控制台输入测试，然后检查所有目标都能编译 |
+| | `Rust / Lint`（Ubuntu） | `cargo fmt --check`、文档测试、示例的构建和 Clippy（仅供参考，但跨 await 持有 `RefCell` 借用会使该任务失败） |
 | | `Python Remote Script / ubuntu-24.04`、`macos-15`、`windows-2025`（Python 3.11） | Remote Script 的测试；编译该包 |
 | | `Live extension`（Ubuntu，Node 24） | 针对已提交的构建运行扩展的测试 |
 | | `Release scripts`（Ubuntu） | 检查本次修改的空白字符，然后运行打包测试 |
@@ -115,6 +117,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 在拉取请求上，运行的内容更少：
 
 - `Rust / macOS` 和 `Rust / Windows` 运行因平台而异的测试，`Python Remote Script` 跳过 macOS。
+- Rust 的构建缓存只从 `main` 保存：拉取请求恢复 `main` 的缓存，不保存任何缓存。
 - 只有修改安装、更新、发布、Willington 的文件或依赖项的变更，Installer 才会构建并安装全部六个。修改桥接或版本号的变更会构建、安装并检查 Linux 的发行包；其他变更只构建 Linux 的发行包。
 - 修改 Kumi 保存其所保留内容的方式（`crates/kumi-store`、设置和登录信息、记忆、技巧、playbook、gaps、旧版 Kumi 的文件）的变更，也会运行 Linux 的安装与更新检查，在已有数据上进行更新和回滚。
 

@@ -104,7 +104,9 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
 | ワークフロー | ジョブ | 実行内容 |
 | --- | --- | --- |
-| **CI** | `Rust / Linux`、`Rust / macOS`、`Rust / Windows` | `cargo fmt --check`、すべてのターゲットのビルド、公式 SDK をインストールした状態での分離ランナーによる全テスト（Windows では先にコンソール入力のテスト）、Clippy（参考扱い。ただし await をまたいで保持される `RefCell` の借用は Linux ジョブを失敗させます）、`git diff --check` |
+| **CI** | `Rust / Linux (1/3)`、`(2/3)`、`(3/3)`、`Rust / macOS`、`Rust / Windows (1/2)`、`(2/2)` | 公式 SDK をインストールした状態での分離ランナーによる全テスト。nextest がハッシュでランナーに振り分けます（Linux では各ランナーに 3 分の 1、Windows では半分ずつ）。macOS ではすべてのターゲットがコンパイルできることも確認し、Linux ではテストの後に `git diff --check` を実行します |
+| | `Rust / Windows checks` | コンソール入力のテスト、続いてすべてのターゲットがコンパイルできることの確認 |
+| | `Rust / Lint`（Ubuntu） | `cargo fmt --check`、ドキュメントテスト、サンプルのビルド、Clippy（参考扱い。ただし await をまたいで保持される `RefCell` の借用はジョブを失敗させます） |
 | | `Python Remote Script / ubuntu-24.04`、`macos-15`、`windows-2025`（Python 3.11） | Remote Script のテストを実行し、パッケージをコンパイルします |
 | | `Live extension`（Ubuntu、Node 24） | コミットされたビルドに対する、拡張機能のテスト |
 | | `Release scripts`（Ubuntu） | この変更の空白のチェック、続いてパッケージングのテスト |
@@ -115,6 +117,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 プルリクエストでは、実行される範囲が狭くなります：
 
 - `Rust / macOS` と `Rust / Windows` はプラットフォームによって異なるテストを実行し、`Python Remote Script` は macOS を省きます。
+- Rust のビルドキャッシュは `main` からだけ保存されます。プルリクエストは `main` のものを復元し、何も保存しません。
 - Installer が 6 つすべてをビルドしてインストールするのは、インストール、更新、リリース、Willington のファイル、または依存関係を変える変更の場合だけです。ブリッジやバージョン番号を変える変更では Linux のものをビルド、インストール、確認し、それ以外の変更では Linux のバンドルをビルドするだけです。
 - Kumi が保持するものの保存方法（`crates/kumi-store`、設定とサインイン、メモリー、テクニック、プレイブック、ギャップ、以前の Kumi のファイル）を変える変更にも、既存のデータを残したまま更新とロールバックを行う、Linux のインストールと更新の確認が付きます。
 

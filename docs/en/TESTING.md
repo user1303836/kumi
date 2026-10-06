@@ -143,7 +143,9 @@ These workflows run on every pull request, and the first two on every push to `m
 
 | Workflow | Jobs | What runs |
 | --- | --- | --- |
-| **CI** | `Rust / Linux`, `Rust / macOS`, `Rust / Windows` | `cargo fmt --check`, the build of every target, every test through the isolated runner with the official SDKs installed (on Windows, the console input tests first), Clippy (advisory, except a `RefCell` borrow held across an await, which fails the Linux job) and `git diff --check` |
+| **CI** | `Rust / Linux (1/3)`, `(2/3)`, `(3/3)`, `Rust / macOS`, `Rust / Windows (1/2)`, `(2/2)` | Every test through the isolated runner with the official SDKs installed, which nextest shares out by hash: a third on each Linux runner, half on each Windows runner. macOS also checks every target compiles; Linux runs `git diff --check` after its tests |
+| | `Rust / Windows checks` | The console input tests, then a check that every target compiles |
+| | `Rust / Lint` (Ubuntu) | `cargo fmt --check`, the documentation tests, the examples' build and Clippy (advisory, except a `RefCell` borrow held across an await, which fails the job) |
 | | `Python Remote Script / ubuntu-24.04`, `macos-15`, `windows-2025` (Python 3.11) | The Remote Script's tests; compiles the package |
 | | `Live extension` (Ubuntu, Node 24) | The extension's tests, against its committed build |
 | | `Release scripts` (Ubuntu) | The whitespace check of the change, then the packaging tests |
@@ -155,6 +157,8 @@ On a pull request, less runs:
 
 - `Rust / macOS` and `Rust / Windows` run the tests that differ by platform,
   and `Python Remote Script` skips macOS.
+- Rust's build caches are saved from `main` only: a pull request restores
+  `main`'s and saves none.
 - The Installer builds and installs all six only for a change to installing,
   updating, releasing, Willington's files or a dependency. A change to the
   bridge or a version number builds, installs and checks Linux's; any other

@@ -74,8 +74,11 @@ The repository has three rulesets:
 
 - **`main`:**
   - changes arrive by pull request; no approving review is required;
-  - two required checks, `Required CI` and `Willington files`, which must pass
-    on the branch as it is up to date with `main`;
+  - two required checks, `Required CI` and `Willington files`; the branch
+    needn't be up to date with `main`, since `main`'s CI after each merge catches
+    two changes that break each other;
+  - auto-merge is on: a pull request set to merge itself does so once the checks
+    pass;
   - `main` can't be deleted or force-pushed;
   - the repository admin role can bypass these rules for pull requests.
 - **`Release tags`:** only the repository admin role creates, moves or deletes
