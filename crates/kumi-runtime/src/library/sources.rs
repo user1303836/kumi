@@ -67,6 +67,17 @@ fn is_separator(c: char) -> bool {
     c == '/' || (cfg!(windows) && c == '\\')
 }
 
+/// What of `path` is inside `folder` ("Kicks/808.wav"), when it's there. A root (`/`, `Z:\`, `\\NAS\Samples\`)
+/// already ends with its separator, so it isn't added twice.
+pub fn below<'a>(path: &'a str, folder: &str) -> Option<&'a str> {
+    let rest = path.strip_prefix(folder)?;
+    if folder.ends_with(is_separator) {
+        Some(rest)
+    } else {
+        rest.strip_prefix(SEP)
+    }
+}
+
 fn is_device_root(c: char) -> bool {
     c.is_ascii_alphabetic()
 }
@@ -647,10 +658,10 @@ pub fn library_sources(options: &SourceOptions) -> Vec<Source> {
         if !is_folder(&source.path) {
             continue;
         }
-        if unique.iter().any(|kept| kept.path == source.path || source.path.starts_with(&format!("{}{SEP}", kept.path))) {
+        if unique.iter().any(|kept| kept.path == source.path || below(&source.path, &kept.path).is_some()) {
             continue;
         }
-        unique.retain(|kept| !kept.path.starts_with(&format!("{}{SEP}", source.path)));
+        unique.retain(|kept| below(&kept.path, &source.path).is_none());
         unique.push(source);
     }
     unique

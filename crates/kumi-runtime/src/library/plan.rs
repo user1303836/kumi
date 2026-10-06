@@ -1,6 +1,6 @@
 use super::{
     learn::{plugin_preset_folders, set_folders, LearnPlan},
-    sources::{current_platform, homedir, join, library_sources, recent_sets, SourceKind, SourceOptions, SEP},
+    sources::{below, current_platform, homedir, join, library_sources, recent_sets, SourceKind, SourceOptions},
     store::read_json,
 };
 use indexmap::IndexSet;
@@ -76,7 +76,7 @@ pub async fn plan_learning(options: PlanOptions) -> LearnPlan {
     let others: Vec<_> = sources
         .iter()
         .filter(|s| matches!(s.kind, SourceKind::Pack | SourceKind::Core | SourceKind::Splice))
-        .map(|s| format!("{}{SEP}", s.path))
+        .map(|s| s.path.clone())
         .collect();
     let find_sets = options.find_sets != Some(false);
     let recent: Vec<_> = if find_sets {
@@ -85,7 +85,7 @@ pub async fn plan_learning(options: PlanOptions) -> LearnPlan {
             .chain(kumi_sets(options.projects_dir.as_deref()).await)
             .collect::<IndexSet<_>>()
             .into_iter()
-            .filter(|path| !others.iter().any(|folder| path.starts_with(folder)))
+            .filter(|path| !others.iter().any(|folder| below(path, folder).is_some()))
             .collect()
     } else {
         vec![]

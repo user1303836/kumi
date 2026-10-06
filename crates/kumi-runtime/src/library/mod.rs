@@ -36,8 +36,8 @@ pub use manual::MANUAL_TOOL;
 use measure_worker::{measure_reference, worker_binary, MeasureJob};
 use plan::{plan_learning, remembered_file, remembered_folders, PlanOptions};
 use search::SoundIndex;
+use sources::{below, resolve, SourceOptions};
 pub use sources::{library_sources, Source};
-use sources::{resolve, SourceOptions, SEP};
 use state::{acquire_lock, write_state};
 pub use state::{read_state, LibraryState};
 use std::{
@@ -602,7 +602,7 @@ impl LibraryAccess for Library {
                 let sources = library.sources();
                 let added: Vec<_> = folders
                     .into_iter()
-                    .filter(|f| !known.contains(f) && !sources.iter().any(|s| *f == s.path || f.starts_with(&format!("{}{SEP}", s.path))))
+                    .filter(|f| !known.contains(f) && !sources.iter().any(|s| *f == s.path || below(f, &s.path).is_some()))
                     .collect();
                 if added.is_empty() {
                     return;

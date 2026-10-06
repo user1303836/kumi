@@ -5,7 +5,7 @@ use super::{
     features::{VECTOR_GROUPS, VECTOR_LENGTH},
     learn::{extension, PresetEntry, SetEntry, SoundEntry},
     sets::{SetSummary, SetTrack},
-    sources::{basename, Source, SEP},
+    sources::{basename, below, Source},
     store::unpack_vector,
     taste::{colour_name, track_role},
 };
@@ -238,7 +238,7 @@ struct Prepared {
     vector: Vec<f32>,
 }
 fn prepared(entry: &SoundEntry, source: &Source) -> Prepared {
-    let relative = &entry.path[source.path.len() + 1..];
+    let relative = below(&entry.path, &source.path).unwrap_or(&entry.path);
     let mut folders: Vec<_> = relative.split(['\\', '/']).map(str::to_owned).collect();
     folders.pop();
     let name = basename(&entry.path);
@@ -270,7 +270,7 @@ impl SoundIndex {
         let rows: Vec<_> = entries
             .into_iter()
             .filter_map(|entry| {
-                roots.iter().find(|root| entry.path.starts_with(&format!("{}{SEP}", root.path))).map(|source| {
+                roots.iter().find(|root| below(&entry.path, &root.path).is_some()).map(|source| {
                     let prepared = prepared(&entry, source);
                     (entry, prepared)
                 })
@@ -336,7 +336,7 @@ impl SoundIndex {
         let mut rows = vec![];
         let mut count = 0;
         for entry in entries {
-            if let Some(root) = roots.iter().find(|s| entry.path.starts_with(&format!("{}{SEP}", s.path))) {
+            if let Some(root) = roots.iter().find(|s| below(&entry.path, &s.path).is_some()) {
                 rows.push((prepared(&entry, root), entry, root.path.clone()));
             }
             count += 1;
@@ -355,12 +355,10 @@ impl SoundIndex {
                     if present.contains(root.as_str()) {
                         Some((entry, made))
                     } else {
-                        roots.iter().find(|s| present.contains(s.path.as_str()) && entry.path.starts_with(&format!("{}{SEP}", s.path))).map(
-                            |s| {
-                                let made = prepared(&entry, s);
-                                (entry, made)
-                            },
-                        )
+                        roots.iter().find(|s| present.contains(s.path.as_str()) && below(&entry.path, &s.path).is_some()).map(|s| {
+                            let made = prepared(&entry, s);
+                            (entry, made)
+                        })
                     }
                 })
                 .collect(),
@@ -373,7 +371,7 @@ impl SoundIndex {
         self.has_vector.iter().filter(|flag| **flag).count()
     }
     pub fn holds(&self, folder: &str) -> bool {
-        self.entries.iter().any(|e| e.path.starts_with(&format!("{folder}{SEP}")))
+        self.entries.iter().any(|e| below(&e.path, folder).is_some())
     }
     pub fn vector_of(&self, path: &str, size: Option<u64>) -> Option<&SoundEntry> {
         self.entries.iter().find(|e| e.path == path && size.is_none_or(|s| e.size == s))
@@ -388,7 +386,7 @@ impl SoundIndex {
         let classes: Vec<_> = naming.iter().map(|word| class_for_word(word)).collect();
         let key = query.key.as_ref().filter(|s| !s.is_empty()).map(|s| parse_key(s).unwrap_or_else(|| s.clone()));
         let relative = key.as_deref().and_then(relative_key);
-        let folders = query.folders.as_ref().map(|folders| folders.iter().map(|f| format!("{f}{SEP}")).collect::<Vec<_>>());
+        let folders = query.folders.as_ref();
         let like = query.like.as_ref().map(|like| self.normalized(&like.vector));
         let spread = (2. * self.weights.iter().map(|w| *w as f64 * *w as f64).sum::<f64>()).sqrt();
         let (mut rows, mut scores, mut closeness) = (vec![], vec![], HashMap::new());
@@ -397,7 +395,7 @@ impl SoundIndex {
                 || (!query.classes.is_empty() && entry.r#class.is_none_or(|c| !query.classes.contains(&c)))
                 || query.min_seconds.is_some_and(|min| entry.seconds.is_none_or(|s| s < min))
                 || query.max_seconds.is_some_and(|max| entry.seconds.is_none_or(|s| s > max))
-                || folders.as_ref().is_some_and(|f| !f.iter().any(|f| entry.path.starts_with(f)))
+                || folders.is_some_and(|f| !f.iter().any(|f| below(&entry.path, f).is_some()))
             {
                 continue;
             }

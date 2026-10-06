@@ -58,6 +58,40 @@ async fn rankings_explanations_float32_similarity_and_rows_match_typescript() {
     assert_eq!(result.hits.iter().map(|h| &h.entry.path).collect::<std::collections::HashSet<_>>().len(), 8);
 }
 #[test]
+fn a_place_at_a_drive_or_share_root_holds_its_sounds() {
+    use kumi_runtime::library::sources::below;
+    assert_eq!(below("/Drums/Kicks/808.wav", "/"), Some("Drums/Kicks/808.wav"));
+    assert_eq!(below("/Samples/808.wav", "/Samples"), Some("808.wav"));
+    assert_eq!(below("/Samples Extra/808.wav", "/Samples"), None);
+    assert_eq!(below("/Samples", "/Samples"), None);
+    if cfg!(windows) {
+        assert_eq!(below("Z:\\Drums\\808.wav", "Z:\\"), Some("Drums\\808.wav"));
+        assert_eq!(below("\\\\NAS\\Samples\\Drums\\808.wav", "\\\\NAS\\Samples\\"), Some("Drums\\808.wav"));
+        assert_eq!(below("Z:\\Drums\\808.wav", "Z:\\Drums"), Some("808.wav"));
+    }
+    // A place at the root of the disk: its sounds are found, said where they are, and kept to a folder asked for.
+    let sound = |path: &str| SoundEntry {
+        file: Entry { path: path.into(), size: 1000, mtime: 1, gone: None },
+        kind: Some(SoundKind::OneShot),
+        r#class: Some(SoundClass::Kick),
+        class_from: Some(ClassFrom::Name),
+        ..Default::default()
+    };
+    let index = SoundIndex::new(
+        [sound("/Drums/Kicks/808 kick.wav"), sound("/Loops/kick loop.wav")],
+        &[Source { path: "/".into(), label: "Disk".into(), kind: SourceKind::Place }],
+    );
+    assert_eq!(index.size(), 2);
+    assert!(index.holds("/Drums"));
+    let found = index.search(&SoundQuery { words: vec!["808".into()], limit: 5, ..Default::default() });
+    assert_eq!(
+        found.hits.iter().map(|hit| (hit.name.as_str(), hit.r#where.as_str())).collect::<Vec<_>>(),
+        [("808 kick", "Disk / Drums / Kicks")]
+    );
+    let kept = index.search(&SoundQuery { folders: Some(vec!["/Loops".into()]), limit: 5, ..Default::default() });
+    assert_eq!(kept.hits.iter().map(|hit| hit.name.as_str()).collect::<Vec<_>>(), ["kick loop"]);
+}
+#[test]
 fn fifty_thousand_sounds_search_with_bounded_latency() {
     let root = tempfile::tempdir().unwrap();
     let mut seed = 1_u32;

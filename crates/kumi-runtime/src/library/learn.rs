@@ -159,7 +159,7 @@ use super::{
     measure_worker::{MeasureJob, MeasurePool},
     presets::{plugin_preset_facts, read_live_preset, read_max_device, PresetFacts, PRESET_EXTENSIONS},
     sets::read_set,
-    sources::{basename, browser_path, dirname, join, SourceKind, SEP},
+    sources::{basename, below, browser_path, dirname, join, SourceKind},
     store::{pack_vector, write_json},
     taste::build_taste,
 };
@@ -446,7 +446,7 @@ async fn gone<T: LogEntry>(
         .keys()
         .filter(|path| {
             !present.contains(path)
-                && (roots.iter().any(|root| path.starts_with(&format!("{root}{SEP}")))
+                && (roots.iter().any(|root| below(path, root).is_some())
                     || (outside && ((!Path::new(path).exists() && Path::new(&dirname(&dirname(path))).exists()) || backup_set(path))))
         })
         .cloned()
@@ -507,7 +507,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
     }
     let source_paths = sources.iter().map(|s| s.path.clone()).collect();
     for path in &plan.set_folders {
-        if sources.iter().any(|s| *path == s.path || path.starts_with(&format!("{}{SEP}", s.path))) {
+        if sources.iter().any(|s| *path == s.path || below(path, &s.path).is_some()) {
             continue;
         }
         let source = Source { path: path.clone(), label: basename(path), kind: SourceKind::Folder };
