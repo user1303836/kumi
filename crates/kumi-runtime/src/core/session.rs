@@ -561,11 +561,13 @@ impl Session {
     /// so when anything came in. The turn never waits for it.
     fn look_at_files(&self) {
         let Some(files) = self.0.options.files.clone() else { return };
-        let this = self.clone();
+        let (this, turn) = (self.clone(), timing::current());
         tokio::task::spawn_local(async move {
             let began = Instant::now();
             let looked = files.look().await;
-            timing::files(began.elapsed().as_millis() as u64);
+            if let Some(turn) = turn {
+                turn.files(began.elapsed().as_millis() as u64);
+            }
             if let Some(message) = looked.ok().flatten().and_then(|imported| imported.brought_in.sentence()) {
                 this.notice(message);
             }

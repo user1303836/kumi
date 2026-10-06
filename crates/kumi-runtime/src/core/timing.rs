@@ -209,9 +209,17 @@ pub fn sent(bytes: usize) {
     with(|timing| timing.sent_bytes += bytes as u64);
 }
 
-/// The turn's look at an older Kumi's files took this long, beside it.
-pub fn files(ms: u64) {
-    with(|timing| timing.files_ms = Some(ms));
+/// The turn being timed, for work it starts beside it that may end after it does.
+pub fn current() -> Option<Turn> {
+    ACTIVE.with(|active| active.borrow().clone()).map(Turn)
+}
+pub struct Turn(Rc<RefCell<TurnTiming>>);
+impl Turn {
+    /// The turn's look at an older Kumi's files took this long, beside it. It counts for this turn only:
+    /// once the turn's line is written, for nothing.
+    pub fn files(&self, ms: u64) {
+        self.0.borrow_mut().files_ms = Some(ms);
+    }
 }
 
 /// The log line for a finished turn; `stop` is how it ended (a `StopReason`, or "error").
@@ -378,12 +386,18 @@ mod tests {
     }
 
     #[test]
-    fn a_turns_look_at_an_older_kumis_files_shows_as_its_own_time() {
+    fn a_turns_look_at_an_older_kumis_files_shows_as_its_own_time_on_that_turn_only() {
         let recorder = begin();
-        files(3);
+        current().unwrap().files(3);
         let line = line(&recorder.finish(), 2000, json!("completed"), None);
         assert_eq!((&line["filesMs"], &line["ms"]), (&json!(3), &json!(2000)));
-        assert!(super::line(&begin().finish(), 10, json!("completed"), None).get("filesMs").is_none(), "no look, no field");
+        // A look that ends after its turn has: not the next turn's.
+        let short = begin();
+        let looking = current().unwrap();
+        let first = super::line(&short.finish(), 10, json!("completed"), None);
+        let next = begin();
+        looking.files(5);
+        assert!(first.get("filesMs").is_none() && super::line(&next.finish(), 10, json!("completed"), None).get("filesMs").is_none());
     }
 
     #[tokio::test]
