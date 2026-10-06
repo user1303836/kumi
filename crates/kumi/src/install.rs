@@ -392,8 +392,17 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
         return Ok(code);
     }
     say(format!("Kumi is now {} ({} update --rollback goes back to {KUMI_VERSION}).", manifest.kumi, *KUMI));
+    if let Some(open) = still_open() {
+        say(open);
+    }
     Ok(bridge_after(&io, &home, &app).await)
 }
+/// After an update: Kumi windows already open still run this Kumi (Windows can't update while one is
+/// open). What they keep reaches the new Kumi at its next turn; what it keeps reaches them once restarted.
+pub fn still_open() -> Option<String> {
+    (!cfg!(windows)).then(|| format!("Kumi windows opened before the update keep running {KUMI_VERSION} until you restart them."))
+}
+
 pub async fn rollback_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
     let say = |s: String| io.out.write(&format!("{s}\n"));
     let home = kumi_home(&io.env);

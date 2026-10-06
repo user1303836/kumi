@@ -225,6 +225,7 @@ async fn update_moves_forward_rebuilds_native_and_updates_bridge_only_when_live_
         ["git merge --ff-only origin/main", "cargo build --release --locked --workspace --bins"]
     );
     assert!(out.0.borrow().contains("Kumi is now 1.0.1."));
+    assert_eq!(out.0.borrow().contains("Kumi windows opened before the update keep running"), !cfg!(windows));
     assert!(out.0.borrow().contains("The bridge in Live is 1.0.35; this Kumi's is 1.0.40."));
     assert_eq!(*bridged.borrow(), c.repo);
     let out = Rc::new(Out::default());

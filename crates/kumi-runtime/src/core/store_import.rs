@@ -168,6 +168,11 @@ fn every_file(files: &JsonFiles) -> Vec<(PathBuf, Kind)> {
     every
 }
 
+/// Every file Kumi reads in, as `every_file` lists them.
+pub(crate) fn every_path(files: &JsonFiles) -> Vec<PathBuf> {
+    every_file(files).into_iter().map(|(path, _)| path).collect()
+}
+
 /// Read the files into the database. A file read for the first time adds the rows the database doesn't
 /// have, never one forgotten there, and deletes nothing. A file changed since it was read (or written
 /// back) brings in what changed in it since its base (`kumi_store::sync::merge`). Each file goes in a
