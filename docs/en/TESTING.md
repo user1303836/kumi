@@ -167,9 +167,9 @@ On a pull request, less runs:
   the `ci-release` profile, which skips the release profile's whole-program
   optimization. Tags build with `release`.
 
-Each push to `main` and each tag run everything. CI runs in full each night, and
-so does the Installer, with the `release` profile: that keeps the profile's
-build cache warm for the next tag.
+Each push to `main` and each tag run everything, and CI runs in full each night.
+Each night the Installer also builds all six bundles with the `release` profile,
+which keeps that profile's build cache warm for the next tag.
 
 To merge into `main`, `Required CI` and `Willington files` must pass. The Installer isn't required.
 [Releases and distribution](DISTRIBUTION_POLICY.md#merge-gate) has the rest of

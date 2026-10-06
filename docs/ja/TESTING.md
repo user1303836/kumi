@@ -119,7 +119,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 - Kumi が保持するものの保存方法（`crates/kumi-store`、設定とサインイン、メモリー、テクニック、プレイブック、ギャップ、以前の Kumi のファイル）を変える変更にも、既存のデータを残したまま更新とロールバックを行う、Linux のインストールと更新の確認が付きます。
 - プルリクエストと `main` へのプッシュでは、Installer のバンドルを `ci-release` プロファイルでビルドします。これはリリースプロファイルのプログラム全体の最適化を省きます。タグは `release` でビルドします。
 
-`main` へのプッシュとタグではすべてが実行されます。CI は毎晩すべてを実行し、Installer も `release` プロファイルで毎晩すべてを実行して、次のタグのためにそのプロファイルのビルドキャッシュを温めておきます。
+`main` へのプッシュとタグではすべてが実行され、CI は毎晩すべてを実行します。Installer も毎晩 `release` プロファイルで 6 つのバンドルをすべてビルドし、次のタグのためにそのプロファイルのビルドキャッシュを温めておきます。
 
 `main` にマージするには、`Required CI` と `Willington files` がパスする必要があります。Installer は必須ではありません。残りのルールは[リリースと配布](DISTRIBUTION_POLICY.md#マージゲート)にあります。
 

@@ -51,6 +51,10 @@ jobs:
           # that on Linux. Any other builds Linux's bundle only; main installs and checks it once merged.
           full=true
           checks=true
+          # The nightly run only builds, to keep the release profile's cache warm. A run started by hand also installs.
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            checks=false
+          fi
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             base="origin/${GITHUB_BASE_REF}"
             # Read whole, then searched: grep -q can close a pipe early, and git, still writing, fails under pipefail.
@@ -117,6 +121,17 @@ jobs:
       - name: Build and bind the release artifacts
         shell: bash
         run: python3 scripts/build-native-release.py --target '${{ matrix.target }}' --profile "$PROFILE" --out release
+      - name: Each Mac binary is built for its target's architecture
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          want=arm64
+          if [[ '${{ matrix.target }}' == x86_64-* ]]; then want=x86_64; fi
+          for name in kumi ableton-mcp-server ableton-mcp-analysis-worker kumi-harness kumi-library-measure kumi-library-learner; do
+            archs="$(lipo -archs "target/${{ matrix.target }}/$PROFILE/$name")"
+            echo "$name: $archs"
+            test "$archs" = "$want"
+          done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-${{ matrix.target }}
@@ -340,7 +355,8 @@ jobs:
 
   publish:
     name: Attach the bundle to the release
-    if: startsWith(github.ref, 'refs/tags/v')
+    # A tag's push only: a run started by hand on a tag must not upload new binaries over a published release.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [bundle, install, migration]
     runs-on: ubuntu-24.04
     permissions:

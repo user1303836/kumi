@@ -119,7 +119,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 - 修改 Kumi 保存其所保留内容的方式（`crates/kumi-store`、设置和登录信息、记忆、技巧、playbook、gaps、旧版 Kumi 的文件）的变更，也会运行 Linux 的安装与更新检查，在已有数据上进行更新和回滚。
 - 在拉取请求和推送到 `main` 时，Installer 的发行包用 `ci-release` 配置构建，它省去 release 配置的全程序优化。标签用 `release` 构建。
 
-每次推送到 `main` 和每个标签都会运行全部内容。CI 每晚完整运行一次，Installer 也是，并使用 `release` 配置，从而为下一个标签保持该配置的构建缓存。
+每次推送到 `main` 和每个标签都会运行全部内容，CI 每晚也会完整运行一次。Installer 每晚还会用 `release` 配置构建全部六个发行包，从而为下一个标签保持该配置的构建缓存。
 
 要合并到 `main`，`Required CI` 和 `Willington files` 必须通过。Installer 不是必需的。其余规则见[发布与分发](DISTRIBUTION_POLICY.md#合并门禁)。
 
