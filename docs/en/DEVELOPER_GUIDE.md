@@ -192,10 +192,10 @@ bundle against its checksum. Measurements of how Live runs the extension are in
 ## Willington's files
 
 [Willington](WILLINGTON_INTEGRATION.md)'s repository is private: Kumi carries
-only its runtime files, in `vendor/willington/`, which Willington's sync changes
-by pull request and nothing else does. Beside them are Willington's license
-notice (`LICENSE` or `LICENSE.md`; Kumi's MIT license doesn't cover these files)
-and `release.json`:
+only its runtime files, in `vendor/willington/`, which change only by a
+Willington update (below). Beside them are Willington's license notice
+(`LICENSE` or `LICENSE.md`; Kumi's MIT license doesn't cover these files) and
+`release.json`:
 
 ```json
 {"schema": "kumi-willington-vendor/v1", "version": "0.4.0", "commit": "<Willington's 40-character commit>",
@@ -225,6 +225,34 @@ the release's: `willington.json` and the Follow Action self-test receipt,
 an install carries them over. The bridge puts the folder on Python's path only
 once `willington.json` turns Willington on, after any copy installed beside the
 bridge.
+
+**Updating Willington.** Willington's Bundle workflow builds its native
+libraries on each platform they're for and keeps the matrix bundle as each
+run's artifact. An update takes the bundle of a run on Willington's `main`:
+
+1. Find the run and the commit it built:
+   `gh run list -R xonedsp/willington -w Bundle -b main -s success`, then
+   `gh run view <run> -R xonedsp/willington --json headSha`.
+2. Download its bundle, check it, and fetch the license at that commit:
+
+   ```sh
+   gh run download <run> -R xonedsp/willington -n Willington-matrix -D <dir>
+   (cd <dir> && shasum -a 256 -c Willington-matrix.zip.sha256)
+   gh api "repos/xonedsp/willington/contents/LICENSE.md?ref=<commit>" -H "Accept: application/vnd.github.raw" > <dir>/LICENSE.md
+   ```
+
+3. On a branch from `main`, run
+   `python3 scripts/vendor-willington.py <dir>/Willington-matrix.zip --license <dir>/LICENSE.md --commit <commit>`.
+   It replaces the folder only once the new one passes the release check.
+4. Open a pull request that changes nothing else, naming the Willington commit
+   and run. `Willington files` passes only the repository owner's pull requests
+   from a branch in this repository, and the Installer builds and installs all
+   six platforms.
+
+CI builds the libraries, so their hashes can differ from the ones validated in
+Live. Check an update in Live before the release that ships it, and run the
+[Follow Action self-test](WILLINGTON_INTEGRATION.md#follow-action-self-test)
+for its library.
 
 ## Releasing
 

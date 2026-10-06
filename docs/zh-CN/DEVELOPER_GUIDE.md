@@ -120,7 +120,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 ## Willington 的文件
 
-[Willington](WILLINGTON_INTEGRATION.md) 的仓库是私有的：Kumi 只带有它的运行时文件，放在 `vendor/willington/` 中，只有 Willington 的同步会通过拉取请求修改这个文件夹。文件旁边还有 Willington 的许可声明（`LICENSE` 或 `LICENSE.md`；Kumi 的 MIT 许可证不涵盖这些文件）和 `release.json`：
+[Willington](WILLINGTON_INTEGRATION.md) 的仓库是私有的：Kumi 只带有它的运行时文件，放在 `vendor/willington/` 中，这个文件夹只在 Willington 更新（见下文）时改变。文件旁边还有 Willington 的许可声明（`LICENSE` 或 `LICENSE.md`；Kumi 的 MIT 许可证不涵盖这些文件）和 `release.json`：
 
 ```json
 {"schema": "kumi-willington-vendor/v1", "version": "0.4.0", "commit": "<Willington 的 40 位提交>",
@@ -130,6 +130,22 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 `files` 列出文件夹中除它自身以外的每个文件，文件名须是每个平台的检出都能容纳的：只用 ASCII 字母、数字、`.`、`_` 和 `-`，不能是 Windows 设备名或以点结尾，也不能有两个只差大小写的名字。当文件夹里有 `release.json` 没有列出的文件、SHA-256 不符的文件，或者不是 Willington 运行时文件的文件时，`scripts/build-native-release.py` 会拒绝发布：只有 `WillingtonRuntime`、`WillingtonBindings`、`WillingtonDeviceTools` 和 `WillingtonRackZones` 中的 `.py`、`.json`、`.md`、`.pyd` 和 `.dylib` 文件才符合，所以源代码、头文件、调试文件和字节码缓存永远不会被发布。`test_native_release.py` 在 CI 中对仓库里的这个文件夹做同样的检查，`.gitattributes` 让这个文件夹逐字节保持原样，并且不做空白检查。
 
 发布会把这些文件放在桥接的 Remote Script 中，即 `AbletonMcpBridge/willington/`，原生库只带本平台的（Windows 上是 `.pyd`，macOS 上是 `.dylib`），总共最多 16 MiB；Linux 的安装包不带。桥接安装时会一并复制这个文件夹，并在 Python 文件旁边放一个 `__pycache__` 阻挡文件，使安装后的文件树保持安装回执所记录的样子。已安装的桥接中有两个文件属于制作人而不属于发布：`willington.json` 和跟随动作自检回执 `willington/WillingtonBindings/self-test.json`。它们不影响桥接的安装检查，安装时也会保留下来。只有当 `willington.json` 开启 Willington 后，桥接才会把这个文件夹加入 Python 的路径，并且排在安装在桥接旁边的副本之后。
+
+**更新 Willington。** Willington 的 Bundle 工作流在每个目标平台上构建它的原生库，并把矩阵发行包保留为每次运行的产物。更新使用 Willington `main` 上一次运行的发行包：
+
+1. 找到这次运行和它构建的提交：先运行 `gh run list -R xonedsp/willington -w Bundle -b main -s success`，再运行 `gh run view <run> -R xonedsp/willington --json headSha`。
+2. 下载它的发行包并校验，再取得那个提交上的许可声明：
+
+   ```sh
+   gh run download <run> -R xonedsp/willington -n Willington-matrix -D <dir>
+   (cd <dir> && shasum -a 256 -c Willington-matrix.zip.sha256)
+   gh api "repos/xonedsp/willington/contents/LICENSE.md?ref=<commit>" -H "Accept: application/vnd.github.raw" > <dir>/LICENSE.md
+   ```
+
+3. 在从 `main` 创建的分支上运行 `python3 scripts/vendor-willington.py <dir>/Willington-matrix.zip --license <dir>/LICENSE.md --commit <commit>`。只有新文件夹通过发布检查后，它才会替换原来的文件夹。
+4. 打开一个不修改其他任何内容的拉取请求，写明 Willington 的提交和运行。`Willington files` 只让仓库所有者从本仓库分支发出的拉取请求通过，Installer 会在全部六个平台上构建并安装。
+
+这些库由 CI 构建，所以它们的哈希可能与在 Live 中验证过的不同。在发布这次更新的版本之前，请先在 Live 中检查它，并为它的库运行[跟随动作自检](WILLINGTON_INTEGRATION.md#跟随动作自检)。
 
 ## 发布
 

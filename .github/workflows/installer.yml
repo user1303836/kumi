@@ -36,8 +36,8 @@ jobs:
       - id: plan
         shell: bash
         run: |
-          # Tags, main and pull requests that change installing, updating or releasing build all six platforms,
-          # install each and check the update from the JavaScript release. A pull request that changes the
+          # Tags, main and pull requests that change installing, updating, releasing or Willington's files build
+          # all six platforms, install each and check the update from the JavaScript release. A pull request that changes the
           # bridge, a version number or how Kumi stores what it keeps (the store, settings and sign-ins, memory,
           # techniques, playbook, gaps, an older Kumi's files), which the update and rollback must carry over,
           # does that on Linux. Any other builds Linux's bundle only; main installs and checks it once merged.
@@ -47,7 +47,7 @@ jobs:
             base="origin/${GITHUB_BASE_REF}"
             # Read whole, then searched: grep -q can close a pipe early, and git, still writing, fails under pipefail.
             changed="$(git diff --name-only "$base...HEAD")"
-            installing="$(grep -E '^(install\.(sh|ps1)|scripts/|\.github/workflows/installer\.yml|crates/kumi/src/(install|update|bridge_setup|cli/)|crates/ableton-mcp-server/src/(lifecycle|delivery|migrate|setup|install_remote_script|platform))' <<<"$changed" \
+            installing="$(grep -E '^(install\.(sh|ps1)|scripts/|vendor/willington/|\.github/workflows/installer\.yml|crates/kumi/src/(install|update|bridge_setup|cli/)|crates/ableton-mcp-server/src/(lifecycle|delivery|migrate|setup|install_remote_script|platform))' <<<"$changed" \
               | grep -v -E '^scripts/test-isolated\.' || true)"
             # Cargo's changed lines less version numbers (a bridge or release bump): what's left is a dependency.
             dependencies="$(git diff -U0 "$base...HEAD" -- Cargo.toml Cargo.lock 'crates/*/Cargo.toml' \
