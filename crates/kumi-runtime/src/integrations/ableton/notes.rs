@@ -268,6 +268,8 @@ async fn read_clip(connection: &LiveConnection, clip: &str, json: bool, tempo: O
         pads: pads.clone(),
     };
     let mut result = JsonObject::new();
+    // Where a looped clip starts in its loop, when the bridge doesn't say (it's placed from the loop's start).
+    let mut guessed = None;
     let (shown, frame) = if session {
         result.insert("time".into(), json!(format!("the clip's own time, in {numerator}/{denominator}")));
         (notes, frame(0., row.get("length").and_then(Value::as_f64)))
@@ -284,7 +286,8 @@ async fn read_clip(connection: &LiveConnection, clip: &str, json: bool, tempo: O
                     time += ", looping: each pass is shown";
                 }
                 if assumed {
-                    time += " (from its loop's start: this bridge doesn't say where in its loop it starts)";
+                    guessed =
+                        Some("this bridge doesn't say where in its loop the clip starts, so it's placed from the loop's start".to_owned());
                 }
                 result.insert("time".into(), json!(time));
                 if unheard > 0 {
@@ -315,13 +318,14 @@ async fn read_clip(connection: &LiveConnection, clip: &str, json: bool, tempo: O
         }
     };
     let printed = notation::print(&shown, &frame);
-    let mut left_out: Vec<String> = printed.left_out.iter().map(|why| why.to_string()).collect();
+    let mut left_out: Vec<String> = printed.left_out.iter().map(|why| format!("{why} (format \"json\" has them)")).collect();
     left_out.extend(partial);
+    left_out.extend(guessed);
     result.insert("name".into(), name);
     result.insert("notes".into(), json!(shown.len()));
     result.insert("exact".into(), json!(left_out.is_empty()));
     if !left_out.is_empty() {
-        result.insert("leftOut".into(), json!(format!("{}: format \"json\" gives every field", left_out.join("; "))));
+        result.insert("leftOut".into(), json!(left_out.join("; ")));
     }
     result.insert("notation".into(), json!(printed.text));
     Ok(result)

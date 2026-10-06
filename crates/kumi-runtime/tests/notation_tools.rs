@@ -218,7 +218,7 @@ async fn read_notes_prints_each_clip_in_its_own_frame() {
             assert_eq!(clips["clips"][1]["notation"], json!("9|1 l/4. v110 C1 9|3 v90 G1/8"));
             assert_eq!(clips["clips"][1]["time"], json!("song time in 4/4: the clip plays from 9|1 to 11|1"));
             assert_eq!(clips["clips"][1]["exact"], json!(false));
-            assert_eq!(clips["clips"][1]["leftOut"], json!("release velocities aren't written: format \"json\" gives every field"));
+            assert_eq!(clips["clips"][1]["leftOut"], json!("release velocities aren't written (format \"json\" has them)"));
             assert!(clips["clips"][2]["error"].as_str().unwrap().contains("audio clip"));
             // Live's own rows, for exact edits, with where the clip plays them.
             let read =
@@ -265,13 +265,15 @@ async fn an_arrangement_clip_prints_what_it_plays_where_it_plays_it() {
             let pass = |at: f64| [(62, at, 1.), (64, at + 1.5, 0.5), (60, at + 2., 1.)];
             assert_eq!(heard(looped, 64.), [pass(64.), pass(68.), pass(72.)].concat());
             assert!(looped["unheard"].as_str().unwrap().starts_with("1 of its notes"));
-            // Without the start marker, the loop is taken to start at its start, and that's said.
+            // Without the start marker, the loop is taken to start at its start: not exact, and it says why.
             let old = &clips["clips"][2];
-            assert!(old["time"]
-                .as_str()
-                .unwrap()
-                .ends_with("(from its loop's start: this bridge doesn't say where in its loop it starts)"));
+            assert_eq!(old["exact"], json!(false));
+            assert_eq!(
+                old["leftOut"],
+                json!("this bridge doesn't say where in its loop the clip starts, so it's placed from the loop's start")
+            );
             assert_eq!(heard(old, 80.), [(60, 80., 1.), (60, 84., 1.)]);
+            assert_eq!((clips["clips"][0]["exact"].clone(), clips["clips"][1]["exact"].clone()), (json!(true), json!(true)));
             // Live's own split: the right half plays on from the clip's ninth beat, where the whole clip did.
             let right = &clips["clips"][3];
             assert_eq!(heard(right, 40.), [(60, 40., 0.25), (60, 44., 0.25)]);
