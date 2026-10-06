@@ -7,7 +7,7 @@ use kumi_runtime::{
     core::{contracts::JsonObject, errors::RuntimeError},
     integrations::ableton::{
         connection::{ConnectionOptions, LiveConnection},
-        more_changes::set_meter,
+        more_changes::{set_meter, set_scale},
         notes::{expand, read_notes},
     },
     mcp::{
@@ -297,6 +297,28 @@ async fn read_notes_says_what_it_leaves_out() {
             let clips: Value = serde_json::from_str(&read.text).unwrap();
             assert_eq!(clips["clips"].as_array().unwrap().len(), 16);
             assert_eq!(clips["more"], json!("16 clips at a time: ask again for the other 1"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn roman_numerals_start_in_the_sets_scale() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (_, connection) = connection().await;
+            let signal = Signal::new();
+            let write = |text: &str| object(json!({"trackRef":"7:track:1","sceneIndex":0,"notation":text}));
+            // The Set in D Dorian: IV is G major, with no key line.
+            set_scale(Some("D Dorian".into()));
+            let written = expand("write_midi_clip", write("1|1 {IV}/1"), &connection, None, &signal).await.unwrap();
+            let pitches: Vec<_> = written["notes"].as_array().unwrap().iter().map(|note| note["pitch"].as_u64().unwrap()).collect();
+            assert_eq!(pitches, [55, 59, 62]);
+            // A scale numerals can't be read in (a pentatonic), or none: a key line is needed, as before.
+            for scale in [Some("A Minor Pentatonic".to_owned()), None] {
+                set_scale(scale);
+                let error = expand("write_midi_clip", write("1|1 {IV}"), &connection, None, &signal).await.unwrap_err();
+                assert!(error.contains("needs a key"), "{error}");
+            }
         })
         .await;
 }

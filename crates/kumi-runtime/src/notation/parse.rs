@@ -55,7 +55,7 @@ enum Fill {
 
 /// The notes a text writes, in the clip's own time and in order.
 pub fn parse(text: &str, frame: &Frame) -> Result<Vec<Note>, NotationError> {
-    let mut state = State::default();
+    let mut state = State { key: frame.key, ..State::default() };
     let mut written: Vec<Written> = vec![];
     for (index, line) in text.lines().enumerate() {
         let number = index + 1;
@@ -632,6 +632,16 @@ mod tests {
         assert!((notes("hat 1|2 x -24t")[0].1 - (1. - 24. / 960.)).abs() < 1e-12);
         assert!(error("hat 1|2 x -24").contains("“-24” could be a shift or a pattern: write -24t"));
         assert!((notes("hat 1|2 x -12")[0].1 - (1. - 12. / 960.)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn roman_numerals_start_in_the_frames_key_until_a_key_line() {
+        let frame = Frame { key: Key::parse("D dorian"), ..Frame::default() };
+        let pitches = |text: &str| parse(text, &frame).unwrap().into_iter().map(|note| note.pitch).collect::<Vec<_>>();
+        // IV in D Dorian is G major, the root from F2 to E3.
+        assert_eq!(pitches("1|1 {IV}"), [55, 59, 62]);
+        // A key line names another: IV in C major is F major.
+        assert_eq!(pitches("key C major\n1|1 {IV}"), [53, 57, 60]);
     }
 
     #[test]

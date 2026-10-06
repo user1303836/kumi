@@ -1,6 +1,8 @@
 //! Time in the notation: positions as `bar|beat` in a frame's meter, and lengths as note values or beats. Both are
 //! exact on the grid of 960 ticks to a quarter note, and decimals off it.
 
+use super::harmony::Key;
+
 /// Ticks to a quarter note: fine enough for 1/128 notes, triplets and quintuplets alike.
 pub const TICKS: f64 = 960.;
 /// How close two times are to count as one (float noise, far below anything audible).
@@ -23,10 +25,12 @@ pub struct Frame {
     pub pads: Vec<(String, u8)>,
     /// Whether the notes are drums (a Drum Rack track): a print writes them as lanes where they fit.
     pub drums: bool,
+    /// The key roman numerals are read in until a `key` line names another: the Set's scale, when it has one.
+    pub key: Option<Key>,
 }
 impl Default for Frame {
     fn default() -> Self {
-        Self { origin: 0., numerator: 4, denominator: 4, tempo: 120., length: None, pads: vec![], drums: false }
+        Self { origin: 0., numerator: 4, denominator: 4, tempo: 120., length: None, pads: vec![], drums: false, key: None }
     }
 }
 impl Frame {

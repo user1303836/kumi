@@ -4,7 +4,7 @@ use super::{
     context::{self, ObservationError, FIELDS, INSTRUCTIONS},
     fold::fold_tracks,
     inference::no_access,
-    more_changes::set_meter,
+    more_changes::{set_meter, set_scale},
     pins::pin_context,
     project,
     remember::{CurrentProject, Remember},
@@ -680,8 +680,10 @@ impl Observer {
             set.insert("name".into(), json!(name));
             set.insert("tempo".into(), row.get("tempo").cloned().unwrap_or(Value::Null));
             set.insert("timeSignature".into(), json!(format!("{}/{}", to_string(numerator), to_string(denominator))));
-            if let Some(scale) = scale(row) {
-                set.insert("scale".into(), json!(scale));
+            let scale = scale(row);
+            set_scale(scale.as_ref().map(|(name, _)| name.clone()));
+            if let Some((name, on)) = scale {
+                set.insert("scale".into(), json!(if on { name } else { format!("{name} (Scale Mode off)") }));
             }
 
             for key in ["playing", "position", "loop"] {
@@ -936,18 +938,15 @@ fn text(value: Option<&Value>) -> String {
 fn objects(page: &JsonObject) -> Result<Vec<JsonObject>, ObservationError> {
     page.get("items").and_then(Value::as_array).into_iter().flatten().map(context::object).collect()
 }
-/// The Set's scale as the model reads it ("D Dorian"), when it says something: with Scale Mode on, or a scale other than
+/// The Set's scale ("D Dorian") when it says something, and whether Scale Mode is on: with it on, or a scale other than
 /// Live's default (C Major) with it off.
-fn scale(row: &JsonObject) -> Option<String> {
+fn scale(row: &JsonObject) -> Option<(String, bool)> {
     const ROOTS: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     let scale = row.get("scale")?.as_object()?;
     let root = ROOTS.get(usize::try_from(scale.get("rootNote")?.as_u64()?).ok()?)?;
     let name = scale.get("scaleName")?.as_str().filter(|name| !name.is_empty())?;
-    match scale.get("scaleMode").and_then(Value::as_bool) {
-        Some(true) => Some(format!("{root} {name}")),
-        _ if (*root, name) != ("C", "Major") => Some(format!("{root} {name} (Scale Mode off)")),
-        _ => None,
-    }
+    let on = scale.get("scaleMode").and_then(Value::as_bool) == Some(true);
+    (on || (*root, name) != ("C", "Major")).then(|| (format!("{root} {name}"), on))
 }
 fn cursor(page: &JsonObject) -> Option<&str> {
     page.get("nextCursor").and_then(Value::as_str).filter(|s| !s.is_empty())
@@ -1081,9 +1080,9 @@ mod tests {
     #[test]
     fn the_sets_scale_is_named_when_it_says_something() {
         let row = |root: u64, name: &str, mode: Value| object(json!({"scale":{"rootNote":root,"scaleName":name,"scaleMode":mode}}));
-        assert_eq!(scale(&row(2, "Dorian", json!(true))).as_deref(), Some("D Dorian"));
-        assert_eq!(scale(&row(9, "Minor", json!(false))).as_deref(), Some("A Minor (Scale Mode off)"));
-        assert_eq!(scale(&row(0, "Major", json!(true))).as_deref(), Some("C Major"));
+        assert_eq!(scale(&row(2, "Dorian", json!(true))), Some(("D Dorian".into(), true)));
+        assert_eq!(scale(&row(9, "Minor", json!(false))), Some(("A Minor".into(), false)));
+        assert_eq!(scale(&row(0, "Major", json!(true))), Some(("C Major".into(), true)));
         // Live's default, with Scale Mode off, says nothing; nor does a row without a scale.
         assert_eq!(scale(&row(0, "Major", json!(false))), None);
         assert_eq!(scale(&row(0, "Major", Value::Null)), None);
