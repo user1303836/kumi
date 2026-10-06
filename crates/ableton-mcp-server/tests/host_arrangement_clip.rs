@@ -478,6 +478,26 @@ async fn a_clip_in_a_take_lane_lands_only_where_the_lane_is_free_on_its_own_unfr
         assert_eq!(beside["impact"], json!("creates-take-lane-clip-no-undo"), "{beside}");
         assert_eq!(beside["takeLane"], json!({"ref":"take-lane:track-1:0","name":"Take 1"}));
     }
+    // A clip stretched into the span between preview and apply keeps its identity, so the lane's fence holds: the
+    // apply checks the span again.
+    let free = preview(lane_clip(12.0, 4.0, "take-lane:track-1:0", "track:track-1")).await;
+    sim.state.borrow_mut()["tracks"][0]["takeLanes"][0]["clips"][0]["length"] = json!(10);
+    let applied = host
+        .live_arrangement_clip_apply_async(
+            &json!(2),
+            &json!({"transactionId":free["transactionId"],"confirmation":"apply","idempotencyKey":"lane-stretch-0001"}),
+            None,
+        )
+        .await
+        .unwrap();
+    let applied: Value = serde_json::from_str(applied["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert!(applied["reason"].as_str().unwrap_or_default().starts_with("“Take” (beats 4–14) is there in take lane “Take 1”"), "{applied}");
+    sim.state.borrow_mut()["tracks"][0]["takeLanes"][0]["clips"][0]["length"] = json!(8);
+    // A clip with no name is called that.
+    sim.state.borrow_mut()["tracks"][0]["takeLanes"][0]["clips"][0]["name"] = json!("");
+    let unnamed = preview(lane_clip(6.0, 2.0, "take-lane:track-1:0", "track:track-1")).await;
+    assert!(unnamed["reason"].as_str().unwrap_or_default().starts_with("A clip with no name (beats 4–12) is there"), "{unnamed}");
+    sim.state.borrow_mut()["tracks"][0]["takeLanes"][0]["clips"][0]["name"] = json!("Take");
     // Another track's lane, an audio track's lane, a frozen track's lane.
     let elsewhere = preview(lane_clip(20.0, 4.0, "take-lane:track-2:0", "track:track-1")).await;
     assert_eq!(

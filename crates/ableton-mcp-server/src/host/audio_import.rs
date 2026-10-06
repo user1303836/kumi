@@ -90,14 +90,8 @@ impl McpHost {
                     // A file's length in beats shows only once Live places it, and Live lays it over what's in the
                     // lane (cutting it, which its API can't put back): so only past the lane's last clip.
                     let under = arrangement_clip::lane_clips_from(&lane, params["position"].as_f64().unwrap());
-                    let refused = arrangement_clip::lane_track_refuses(&lane_track, true).or_else(|| {
-                        (!under.is_empty()).then(|| {
-                            format!(
-                                "{} Kumi puts an audio file in a take lane only past its last clip, since the file's length shows only once Live places it.",
-                                arrangement_clip::lane_taken(&lane, &under)
-                            )
-                        })
-                    });
+                    let refused = arrangement_clip::lane_track_refuses(&lane_track, true)
+                        .or_else(|| (!under.is_empty()).then(|| arrangement_clip::lane_audio_taken(&lane, &under)));
                     if let Some(why) = refused {
                         self.release_staged_import_file(&json!(staging));
                         return Ok(reason_error(id, &why, arrangement_clip::NOTHING_CHANGED));
@@ -230,6 +224,12 @@ impl McpHost {
                 if t["fence"] != lane_fence(&payload["takeLaneRef"], &lane) {
                     self.release_staged_import_for(&t);
                     return Ok(transaction_error(id, "take lane or its clips changed since preview; preview again"));
+                }
+                // A clip stretched past where the file goes keeps its identity: the lane is checked again.
+                let under = arrangement_clip::lane_clips_from(&lane, payload["position"].as_f64().unwrap_or(0.0));
+                if !under.is_empty() {
+                    self.release_staged_import_for(&t);
+                    return Ok(reason_error(id, &arrangement_clip::lane_audio_taken(&lane, &under), arrangement_clip::NOTHING_CHANGED));
                 }
             }
             if !reconcile && !lane {

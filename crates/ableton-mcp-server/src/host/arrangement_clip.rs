@@ -72,8 +72,9 @@ fn lane_clips_under(lane: &Value, start: f64, end: f64) -> Vec<String> {
         .flatten()
         .filter_map(|clip| {
             let (from, to) = lane_span(clip)?;
-            (from < end - 1e-6 && to > start + 1e-6)
-                .then(|| format!("“{}” (beats {}–{})", clip["name"].as_str().unwrap_or(""), beats(from), beats(to)))
+            let name =
+                clip["name"].as_str().filter(|name| !name.is_empty()).map_or("a clip with no name".into(), |name| format!("“{name}”"));
+            (from < end - 1e-6 && to > start + 1e-6).then(|| format!("{name} (beats {}–{})", beats(from), beats(to)))
         })
         .collect()
 }
@@ -83,12 +84,21 @@ pub(super) fn lane_clips_from(lane: &Value, start: f64) -> Vec<String> {
 }
 /// What Kumi says for a clip it would lay over others in a take lane.
 pub(super) fn lane_taken(lane: &Value, under: &[String]) -> String {
+    let named = under.join(", ");
+    let mut first = named.chars();
     format!(
         "{} {} in take lane “{}”: Live would cut {}, and its API can't put a clip in a lane back. Choose a free span in the lane, or another lane.",
-        under.join(", "),
+        first.next().map(|c| c.to_uppercase().chain(first).collect::<String>()).unwrap_or_default(),
         if under.len() == 1 { "is there" } else { "are there" },
         lane["name"].as_str().unwrap_or(""),
         if under.len() == 1 { "it" } else { "them" }
+    )
+}
+/// What Kumi says for an audio file it would place over others in a take lane, or before one.
+pub(super) fn lane_audio_taken(lane: &Value, under: &[String]) -> String {
+    format!(
+        "{} Kumi puts an audio file in a take lane only past its last clip, since the file's length shows only once Live places it.",
+        lane_taken(lane, under)
     )
 }
 /// Why a lane's track can't take this clip, as Live has it, if it can't: a clip of the other kind, or a frozen track.
@@ -455,6 +465,13 @@ impl McpHost {
                 )) != t["fence"]
                 {
                     return Ok(transaction_error(id, "take lane or its clips changed since preview; preview again"));
+                }
+                // The fence holds the lane's clips by identity, and a clip stretched into the span meanwhile keeps
+                // its own, so the span is checked again where it lands.
+                let start = payload["position"].as_f64().unwrap_or(0.0);
+                let under = lane_clips_under(&lane, start, start + payload["length"].as_f64().unwrap_or(0.0));
+                if !under.is_empty() {
+                    return Ok(reason_error(id, &lane_taken(&lane, &under), NOTHING_CHANGED));
                 }
             }
 
