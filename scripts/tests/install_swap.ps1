@@ -14,7 +14,7 @@ foreach ($name in 'Fail', 'HasKumi', 'PutBack', 'Swap') {
 }
 
 # Stand-ins, found before the cmdlets. Each scenario says how many times a step fails.
-$script:moveFails = 0; $script:halfMoves = $false; $script:movedThenFailed = $false; $script:putBackFails = 0
+$script:moveFails = 0; $script:halfMoves = $false; $script:movedThenFailed = $false; $script:putBackFails = 0; $script:clearFails = 0
 $script:said = ''
 function Start-Sleep { }
 function Write-Host { param([Parameter(Position = 0)]$Object, [switch]$NoNewline, $ForegroundColor) $script:said += "$Object" }
@@ -29,6 +29,13 @@ function Move-Item([string]$LiteralPath, [string]$Destination) {
   }
   Microsoft.PowerShell.Management\Move-Item -LiteralPath $LiteralPath -Destination $Destination
   if ($script:movedThenFailed) { throw 'Access to the path is denied.' }
+}
+function Remove-Item([string]$LiteralPath, [switch]$Recurse, [switch]$Force) {
+  if ($LiteralPath.EndsWith('.previous') -and $script:clearFails -gt 0) {
+    $script:clearFails--
+    throw 'The process cannot access the file because it is being used by another process.'
+  }
+  Microsoft.PowerShell.Management\Remove-Item -LiteralPath $LiteralPath -Recurse:$Recurse -Force:$Force
 }
 function Rename-Item([string]$LiteralPath, [string]$NewName) {
   if ($LiteralPath.EndsWith('.previous') -and $script:putBackFails -gt 0) {
@@ -102,8 +109,21 @@ $h = NewHome; $script:movedThenFailed = $true
 Check 'a move that went through before its error counts' (((Run $h) -eq 'in') -and (Holds $h 'new'))
 $script:movedThenFailed = $false
 
+$h = NewHome
+New-Item -ItemType Directory -Force -Path (Join-Path $h 'app.previous') | Out-Null
+Set-Content -LiteralPath (Join-Path $h 'app.previous\kumi.exe') -Value 'older'
+$script:clearFails = 2
+Check 'a busy app.previous is cleared once it lets go, and the new Kumi goes in' (((Run $h) -eq 'in') -and (Holds $h 'new') -and (Holds $h 'old' 'app.previous'))
+
+$h = NewHome
+New-Item -ItemType Directory -Force -Path (Join-Path $h 'app.previous') | Out-Null
+Set-Content -LiteralPath (Join-Path $h 'app.previous\kumi.exe') -Value 'older'
+$script:clearFails = 1000
+Check "... and one that stays busy gives up in words, and the Kumi still works" (((Run $h) -eq 'gave up') -and (Holds $h 'old') -and ($script:said -match 'still works'))
+$script:clearFails = 0
+
 # Windows itself: a Kumi window holds its kumi.exe while the installer runs again.
-Remove-Item -Path Function:\Move-Item, Function:\Rename-Item
+Microsoft.PowerShell.Management\Remove-Item -Path Function:\Move-Item, Function:\Rename-Item, Function:\Remove-Item
 $h = NewHome
 $held = [IO.File]::Open((Join-Path $h 'app\kumi.exe'), 'Open', 'Read', 'None')
 try { $outcome = Run $h } finally { $held.Dispose() }

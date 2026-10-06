@@ -82,11 +82,11 @@
     # giving up, and whenever the new one can't go in, the one that was there stays usable.
     $previous = "$Target.previous"
     # A run that gave up earlier can leave the only whole Kumi in app.previous: it goes back first, and
-    # it's never what gets cleared.
+    # it's never what gets cleared. Clearing the one before waits out a busy folder like the rest.
     if (-not (HasKumi $Target)) { [void](PutBack $Target $previous) }
-    if ((Test-Path -LiteralPath $previous) -and ((HasKumi $Target) -or -not (HasKumi $previous))) { Remove-Item -LiteralPath $previous -Recurse -Force }
     for ($attempt = 1; $attempt -le 5; $attempt++) {
       try {
+        if ((Test-Path -LiteralPath $previous) -and ((HasKumi $Target) -or -not (HasKumi $previous))) { Remove-Item -LiteralPath $previous -Recurse -Force }
         if (Test-Path -LiteralPath $Target) { Rename-Item -LiteralPath $Target -NewName (Split-Path $previous -Leaf) }
         Move-Item -LiteralPath $Fresh -Destination $Target
         return
