@@ -158,6 +158,10 @@ On a pull request, less runs:
   updating, releasing or a dependency. A change to the bridge or a version
   number builds, installs and checks Linux's; any other change builds Linux's
   bundle only.
+- A change to how Kumi stores what it keeps (`crates/kumi-store`, settings and
+  sign-ins, memory, techniques, playbook, gaps, an older Kumi's files) also gets
+  Linux's install and update check, which updates and rolls back over existing
+  data.
 
 Each push to `main` and each tag run everything, and CI runs in full each night.
 
