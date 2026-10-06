@@ -115,6 +115,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
 - `Rust / macOS` 和 `Rust / Windows` 运行因平台而异的测试，`Python Remote Script` 跳过 macOS。
 - 只有修改安装、更新、发布或依赖项的变更，Installer 才会构建并安装全部六个。修改桥接或版本号的变更会构建、安装并检查 Linux 的发行包；其他变更只构建 Linux 的发行包。
+- 修改 Kumi 保存其所保留内容的方式（`crates/kumi-store`、记忆、技巧、playbook、gaps）的变更，也会运行 Linux 的安装与更新检查，在已有数据上进行更新和回滚。
 
 每次推送到 `main` 和每个标签都会运行全部内容，CI 每晚也会完整运行一次。
 

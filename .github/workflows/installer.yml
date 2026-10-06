@@ -38,8 +38,9 @@ jobs:
         run: |
           # Tags, main and pull requests that change installing, updating or releasing build all six platforms,
           # install each and check the update from the JavaScript release. A pull request that changes the
-          # bridge or a version number does that on Linux. Any other builds Linux's bundle only; main installs
-          # and checks it once merged.
+          # bridge, a version number or how Kumi stores what it keeps (the store, memory, techniques, playbook,
+          # gaps), which the update and rollback must carry over, does that on Linux. Any other builds Linux's
+          # bundle only; main installs and checks it once merged.
           full=true
           checks=true
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
@@ -53,7 +54,7 @@ jobs:
               | grep -E '^[-+]' | grep -v -E '^(---|\+\+\+) |^[-+]version = "[^"]*"$' || true)"
             if [[ -z "$installing" && -z "$dependencies" ]]; then
               full=false
-              if ! grep -q -E '^(remote-script/|Cargo\.(toml|lock)$|crates/[^/]+/Cargo\.toml$)' <<<"$changed"; then
+              if ! grep -q -E '^(remote-script/|Cargo\.(toml|lock)$|crates/[^/]+/Cargo\.toml$|crates/kumi-store/|crates/kumi-runtime/src/core/(memory|techniques|playbook|gaps|store_[a-z_]+)\.rs$)' <<<"$changed"; then
                 checks=false
               fi
             fi
