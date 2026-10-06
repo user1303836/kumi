@@ -58,10 +58,13 @@ def _wire_keys(value: dict[Any, Any]) -> list[Any]:
 
 # Each object's key list, laid out for the wire once: its keys in the bridge's order, each with its text and
 # colon. A big read is thousands of rows of a few shapes (a parameter's, a device's), so most are reused. Only
-# a row's few keys are kept, and only so many lists: an object keyed by names or refs (a Python answer's) isn't.
+# a row's few, short keys are kept (a real Set's widest row has 37 keys and 488 characters of them), so an
+# object keyed by names or refs (a Python answer's) isn't. Once that many lists are kept, they're all let go:
+# one-off lists can't keep the rows' out for good, and a row's comes back on its next sighting.
 _WIRE_LAYOUTS: dict[tuple[Any, ...], tuple[tuple[Any, str], ...]] = {}
 _WIRE_LAYOUTS_KEPT = 512
 _WIRE_LAYOUT_KEYS = 64
+_WIRE_LAYOUT_TEXT = 1024
 
 
 def _wire_layout(value: dict[Any, Any]) -> tuple[tuple[Any, str], ...]:
@@ -70,7 +73,9 @@ def _wire_layout(value: dict[Any, Any]) -> tuple[tuple[Any, str], ...]:
     if layout is None:
         layout = tuple((key, (_encode_string(key) if type(key) is str else json.dumps(key, ensure_ascii=False)) + ":") for key in _wire_keys(value))
         # Only string keys are kept: 1 and True are equal keys with different texts.
-        if len(keys) <= _WIRE_LAYOUT_KEYS and len(_WIRE_LAYOUTS) < _WIRE_LAYOUTS_KEPT and all(type(key) is str for key in keys): _WIRE_LAYOUTS[keys] = layout
+        if len(keys) <= _WIRE_LAYOUT_KEYS and all(type(key) is str for key in keys) and sum(len(prefix) for _, prefix in layout) <= _WIRE_LAYOUT_TEXT:
+            if len(_WIRE_LAYOUTS) >= _WIRE_LAYOUTS_KEPT: _WIRE_LAYOUTS.clear()
+            _WIRE_LAYOUTS[keys] = layout
     return layout
 
 
@@ -1957,7 +1962,8 @@ class LiveObjectMapper:
         enabled = read(parameter, "is_enabled", "enabled"); automatable = read(parameter, "is_automatable", "automatable")
         default = read(parameter, "default_value"); original_name = read(parameter, "original_name"); state = read(parameter, "state")
         # Live raises for a continuous parameter's value_items ("Only quantized parameters have value
-        # items"), and a raise costs Live's thread more than the rest of the row.
+        # items"), and a raise costs Live's thread more than the rest of the row. Its valueItems is null by
+        # design, as the raise made it before; the host reads null as no items.
         quantized = read(parameter, "is_quantized")
         items = None if quantized is False else read(parameter, "value_items")
         return {

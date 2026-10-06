@@ -3417,15 +3417,22 @@ class RealtimePlaneTests(unittest.TestCase):
             self.assertEqual(outcome(AuthenticatedRemoteScript._canonical, value), outcome(plain, value), repr(value)[:80])
 
     def test_the_key_layouts_kept_for_wire_text_are_bounded(self):
-        # Kept: a row's few keys, up to a count. An object keyed by names (a Python answer's) is written, not kept.
-        remote_module._WIRE_LAYOUTS.clear()
+        # Kept: a row's few, short keys, up to a count. An object keyed by names (a Python answer's) is written,
+        # not kept; one-off lists filling the count are let go, so a row's is kept again on its next sighting.
+        layouts = remote_module._WIRE_LAYOUTS; layouts.clear()
         named = {f"name {n}": n for n in range(remote_module._WIRE_LAYOUT_KEYS + 1)}
-        self.assertEqual(json.loads(AuthenticatedRemoteScript._canonical(named)), named)
-        self.assertEqual(len(remote_module._WIRE_LAYOUTS), 0)
+        long_named = {"a long name " * 90: 1, "another": 2}
+        for value in (named, long_named):
+            self.assertEqual(json.loads(AuthenticatedRemoteScript._canonical(value)), value)
+        self.assertEqual(len(layouts), 0)
+        row = {"ref": "r", "value": 0.5}
+        AuthenticatedRemoteScript._canonical(row); self.assertIn(tuple(row), layouts)
         for n in range(remote_module._WIRE_LAYOUTS_KEPT + 50):
             self.assertEqual(AuthenticatedRemoteScript._canonical({f"k{n}": n, "a": 1}), f'{{"a":1,"k{n}":{n}}}')
-        self.assertEqual(len(remote_module._WIRE_LAYOUTS), remote_module._WIRE_LAYOUTS_KEPT)
-        self.assertEqual(AuthenticatedRemoteScript._canonical({"k1": 1, "a": 1}), '{"a":1,"k1":1}', "a kept layout")
+            self.assertLessEqual(len(layouts), remote_module._WIRE_LAYOUTS_KEPT)
+        self.assertNotIn(tuple(row), layouts, "let go with the rest")
+        self.assertEqual(AuthenticatedRemoteScript._canonical(row), '{"ref":"r","value":0.5}')
+        self.assertIn(tuple(row), layouts, "kept again on its next sighting")
 
     def test_a_parameter_row_reads_each_of_lives_attributes_once(self):
         # #174: a big rack's whole read is thousands of rows on Live's thread. A continuous parameter's
