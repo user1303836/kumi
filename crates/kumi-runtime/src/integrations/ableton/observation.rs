@@ -225,7 +225,7 @@ impl Observer {
             let mut more_tracks = false;
             // What the tracks read says about their ids: the list's revision, and whether one is missing or shared.
             let mut track_revision: Option<String> = None;
-            let mut track_gaps = false;
+            let mut track_gaps: Vec<String> = vec![];
             let mut more_devices = false;
 
             let tracks_result: Result<(), ReadError> = (|| {
@@ -347,11 +347,14 @@ impl Observer {
             // shared: within the project (or the unsaved Set), and never written into a template.
             let scope = project_id.clone().unwrap_or_else(|| format!("unsaved:{identity}"));
             let writable = path.as_deref().is_none_or(|path| !project::template_location(path));
-            if self.remember.track_ids.due(&scope, track_revision.as_deref(), track_gaps && writable) {
+            let structure = connection.structure_events.get();
+            let gaps = if writable { track_gaps } else { vec![] };
+            if self.remember.track_ids.due(&scope, track_revision.as_deref(), &gaps, structure) {
                 let remember = self.remember.clone();
                 let lifetime = connection.lifetime.clone();
+                let keepers = project_id.clone().zip(self.remember.store.clone()).map(|(project, store)| track_ids::Keepers { project, store });
                 tokio::task::spawn_local(async move {
-                    let _ = remember.track_ids.pass(&remember.connection, &scope, writable, lifetime).await;
+                    let _ = remember.track_ids.pass(&remember.connection, &scope, keepers, writable, structure, lifetime).await;
                 });
             }
             let project_ref = project_id.map(|id| ProjectRef { id, name: name.clone() });

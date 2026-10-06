@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     rc::Rc,
     sync::LazyLock,
@@ -51,6 +52,14 @@ pub trait ProjectStore {
         Ok(self.load(project).await?.filter(|latest| moved_to(&latest.path, path)))
     }
     async fn save(&self, project: &str, baseline: &Baseline) -> Result<(), RuntimeError>;
+    /// Which track keeps each of Kumi's track ids in the project (id → the track's identity in Live), so a
+    /// copy's id is told from its original's after a restart and by every Kumi alike.
+    async fn load_track_keepers(&self, _project: &str) -> Result<HashMap<String, String>, RuntimeError> {
+        Ok(HashMap::new())
+    }
+    async fn save_track_keepers(&self, _project: &str, _keepers: &HashMap<String, String>) -> Result<(), RuntimeError> {
+        Ok(())
+    }
 }
 const MAX_BASELINE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CONVERSATION_BYTES: usize = 256 * 1024;
@@ -58,6 +67,8 @@ const MAX_KEPT_CHANGES: usize = 100;
 const MAX_KEPT: usize = 20;
 /// The most other Sets of one song (versions saved beside it) a project keeps a baseline for.
 const MAX_SETS: usize = 20;
+/// The most track ids a project keeps the keeper of.
+const MAX_KEEPERS: usize = 10_000;
 /// The project id a Set's path gave before Kumi kept one inside the Set (and still gives a Set in a
 /// templates folder, which never gets one).
 pub fn project_id_of(path: &str) -> String {
@@ -258,6 +269,28 @@ impl ProjectStore for FileProjectStore {
         write_privately(&folder, "last-seen.json", &text).await?;
         // This Set's own baseline is the latest now.
         remove(sets.join(format!("{}.json", project_id_of(&baseline.path)))).await
+    }
+    async fn load_track_keepers(&self, project: &str) -> Result<HashMap<String, String>, RuntimeError> {
+        if !project_id(project) {
+            return Ok(HashMap::new());
+        }
+        let Ok(bytes) = tokio::fs::read(self.directory.join(project).join("track-ids.json")).await else { return Ok(HashMap::new()) };
+        let kept: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        Ok(kept["keepers"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .take(MAX_KEEPERS)
+            .filter_map(|(id, identity)| Some((id.clone(), identity.as_str()?.to_owned())))
+            .collect())
+    }
+    async fn save_track_keepers(&self, project: &str, keepers: &HashMap<String, String>) -> Result<(), RuntimeError> {
+        if !project_id(project) {
+            return Err(error("invalid project id"));
+        }
+        let kept: serde_json::Map<String, Value> =
+            keepers.iter().take(MAX_KEEPERS).map(|(id, identity)| (id.clone(), json!(identity))).collect();
+        write_privately(&self.directory.join(project), "track-ids.json", &stringify(&json!({"version":1,"keepers":kept}))).await
     }
 }
 pub fn new_conversation_id(at: i64) -> String {

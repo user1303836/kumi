@@ -5479,7 +5479,7 @@
     },
     {
       "name": "live_data_preview",
-      "description": "Preview saving text inside the Set (it's saved with the Set), or with one track (trackRef), under one of Kumi's own keys (they start with kumi.); null clears it. Shows what's there now; undo puts it back. With entries, more tracks' text under the same key in one apply: every place, this trackRef's included, names what was read there (expectedValue, expectedIdentity); the tracks are checked to be the ones read before any is written, and each write leaves a track whose text changed since.",
+      "description": "Preview saving text inside the Set (it's saved with the Set), or with one track (trackRef), under one of Kumi's own keys (they start with kumi.); null clears it. Shows what's there now; undo puts it back. With entries, more tracks' text under the same key in one apply: every place, this trackRef's included, names what was read there (expectedValue, expectedIdentity), as text of at most 256 characters; the tracks are checked to be the ones read before any is written, and each write leaves a track whose text changed since.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -5506,7 +5506,7 @@
               "string",
               "null"
             ],
-            "maxLength": 1048576
+            "maxLength": 256
           },
           "expectedIdentity": {
             "type": "string",
@@ -5530,14 +5530,14 @@
                     "string",
                     "null"
                   ],
-                  "maxLength": 1048576
+                  "maxLength": 256
                 },
                 "expectedValue": {
                   "type": [
                     "string",
                     "null"
                   ],
-                  "maxLength": 1048576
+                  "maxLength": 256
                 },
                 "expectedIdentity": {
                   "type": "string",

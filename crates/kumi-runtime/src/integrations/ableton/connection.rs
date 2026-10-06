@@ -132,6 +132,8 @@ pub struct LiveConnection {
     pub set: RefCell<Option<String>>,
     pub last_epoch: Cell<Option<f64>>,
     pub reconnected: Cell<bool>,
+    /// How many structure changes Live has told of (tracks, returns or scenes added, removed or moved).
+    pub structure_events: Cell<u64>,
     lost_epoch: Cell<Option<f64>>,
     looking: Cell<bool>,
     watcher: RefCell<Option<Signal>>,
@@ -168,6 +170,7 @@ impl LiveConnection {
             set: RefCell::new(None),
             last_epoch: Cell::new(None),
             reconnected: Cell::new(false),
+            structure_events: Cell::new(0),
             lost_epoch: Cell::new(None),
             looking: Cell::new(false),
             watcher: RefCell::new(None),
@@ -647,6 +650,9 @@ impl LiveConnection {
         }
     }
     fn live_event(&self, event: JsonObject) {
+        if event.get("type").and_then(Value::as_str) == Some("structure") {
+            self.structure_events.set(self.structure_events.get() + 1);
+        }
         if matches!(event.get("type").and_then(Value::as_str), Some("selection" | "structure")) {
             if let Some(focus) = self.focus.borrow().as_ref() {
                 focus.poke();
