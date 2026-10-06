@@ -1,7 +1,7 @@
 //! Live's own conversions to MIDI (melody, harmony, drums) through its API, Live.Conversions, rather than its menus:
 //! any audio clip, Session or Arrangement, with no Accessibility access, on Windows too. Live converts in the
-//! background and lands a new MIDI track next to the clip's, so Kumi waits for that track, saying so, and brings Live
-//! forward when it hangs back (a conversion asked of Live in the background waits for its window, 12.4.15b5).
+//! background and lands a new MIDI track right after the clip's, so Kumi waits for that track, saying so, and brings
+//! Live forward when it hangs back (a fallback: 12.4.15b5 converted in the background every time it was probed).
 use super::{args, delay, CommandError, CommandTools};
 use crate::core::contracts::{ChangeRecord, JsonObject, ToolResult};
 use crate::integrations::ableton::views::ViewHost;
@@ -21,8 +21,13 @@ const CONVERSIONS: [(&str, &str, &str); 3] = [
 /// before Kumi stops waiting for the new track.
 const FRONT_AFTER: Duration = Duration::from_secs(12);
 const GIVE_UP_AFTER: Duration = Duration::from_secs(120);
-/// How long a new track that isn't where or as Live names a conversion's is waited past before it's taken for it.
+/// How long a new MIDI track that isn't named as Live names a conversion's is waited past before it's taken for it,
+/// when the clip's track isn't known.
 const UNNAMED_AFTER: Duration = Duration::from_secs(5);
+/// When the reads of the tracks slow down, from every 300 ms to every second.
+const SLOWER_AFTER: Duration = Duration::from_secs(10);
+/// What the script prints just before it asks Live to convert: past it, Live may be converting whatever the answer says.
+const ASKED: &str = "kumi: asked Live to convert";
 
 /// The conversion a `live_command` command names, if it's one: its API type and its name.
 pub(super) fn conversion(command: &str) -> Option<(&'static str, &'static str)> {
@@ -47,6 +52,7 @@ if conversions is None or not hasattr(conversions, "audio_to_midi_clip"):
 if not conversions.is_convertible_to_midi(song, clip):
     raise ValueError("Live says it can't convert that clip to MIDI")
 result = {{"name": clip.name, "track": bridge._capture_object_identity(track) if track is not None else None}}
+print("{ASKED}")
 conversions.audio_to_midi_clip(song, clip, conversions.AudioToMidiType.{kind})
 "#,
         given = if given { "True" } else { "False" }
@@ -66,47 +72,62 @@ impl CommandTools {
                 "{title} works on an audio clip: give clip (its clipRef from this turn, Session or Arrangement, or \"selected\" for the one selected in Live)."
             ))));
         };
+        // A bridge without Python: the menus do it.
+        if !self.connection.has("live_run_python") {
+            return Ok(None);
+        }
         let given = clip != "selected";
         let mut call = args(json!({"code":script(kind, given),"mode":"exec","timeoutMs":10000}));
         if given {
             call.insert("ref".into(), json!(self.lengthen(clip, "clipRef")));
         }
         let before = self.track_identities(signal).await?;
-        let ran = self.connection.call("live_run_python", call, signal.clone()).await.map_err(|e| CommandError::Other(e.to_string()))?;
-        let body = (ran.is_error != Some(true)).then(|| super::payload(&ran).ok()).flatten();
-        let Some(body) = body.clone().filter(|body| body.get("ok") == Some(&Value::Bool(true))) else {
-            let why = body
-                .as_ref()
-                .and_then(|body| body.get("error"))
-                .and_then(|error| error.get("message"))
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .unwrap_or_else(|| super::result_text(&ran));
+        let ran = match self.connection.call("live_run_python", call, signal.clone()).await {
+            Ok(ran) => ran,
+            Err(error) => {
+                // Live may have taken the call and started converting before its answer was lost.
+                let unsure = self.unsure(title, &error.to_string());
+                if signal.is_cancelled() {
+                    return Err(CommandError::Other("Operation cancelled".into()));
+                }
+                return Ok(Some(unsure));
+            }
+        };
+        let reply = if ran.is_error == Some(true) { None } else { super::payload(&ran).ok() };
+        let Some(body) = reply.as_ref().filter(|body| body.get("ok") == Some(&Value::Bool(true))) else {
+            let error = reply.as_ref().and_then(|body| body.get("error"));
+            let why =
+                error.and_then(|error| error.get("message")).and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| reason(&ran));
             // No API, or no Python in Live to call it with: the menus do it.
-            if ["no conversions API", "Python module is unavailable", "python.run is unavailable"].iter().any(|said| why.contains(said)) {
+            if ["no conversions API", "Python execution is unavailable", "Python module is unavailable"]
+                .iter()
+                .any(|said| why.contains(said))
+            {
                 return Ok(None);
             }
-            if ["stale", "reference is invalid", "unknown reference"].iter().any(|said| why.contains(said)) {
+            let asked = reply.as_ref().and_then(|body| body.get("stdout")).and_then(Value::as_str).is_some_and(|out| out.contains(ASKED));
+            // The bridge's own words for a ref it no longer holds (a KeyError before the script runs).
+            let gone = ["stale", "reference is invalid", "unknown reference"].iter().any(|said| why.contains(said))
+                || error.and_then(|error| error.get("type")) == Some(&json!("KeyError"));
+            if gone && !asked {
                 return Ok(Some(ToolResult::error("That clip isn't in Live any more: discover it again, then ask again.")));
             }
-            return Ok(Some(ToolResult::error(format!("Live didn't start {title}: {}", kumi_common::js::string::head(&why, 300)))));
+            let why = kumi_common::js::string::head(&why, 300);
+            // The script stopped before asking Live (its checks, or Live refusing the clip): nothing started.
+            if reply.is_some() && !asked {
+                return Ok(Some(ToolResult::error(format!("Live didn't start {title}: {why}"))));
+            }
+            // Past asking Live, or the bridge failing on the way: Live may be converting all the same.
+            return Ok(Some(self.unsure(title, &why)));
         };
         let name = body.get("result").and_then(|r| r.get("name")).and_then(Value::as_str).unwrap_or("").to_owned();
         let source = body.get("result").and_then(|r| r.get("track")).and_then(Value::as_str).map(str::to_owned);
         self.tell(format!("{title}: converting “{name}”"));
         let landed = self.new_track(&before, source.as_deref(), title, signal).await;
-        {
-            // Once Live is converting, a track may land next to the clip's whatever happens here: the tracks after it
-            // move along, so references retire on every way out.
-            let mut refs = self.connection.references.borrow_mut();
-            refs.invalidate();
-            refs.clear_names();
-        }
-        self.connection.lease.set(self.connection.lease.get() + 1);
+        // Once Live is converting, a track may land next to the clip's whatever happens here.
+        self.retire_references();
         let Some(landed) = landed? else {
-            return Ok(Some(ToolResult::error(format!(
-                "Live hasn't finished {title} on “{name}” after two minutes; its new track may still land. Look for it in Live, then discover again."
-            ))));
+            return Ok(Some(may_still_land(title, format!("Kumi hasn't seen {title} on “{name}” land after two minutes"))));
         };
         let done = format!("{title}: new track “{landed}”");
         self.tell(&done);
@@ -119,24 +140,46 @@ impl CommandTools {
             "note": "Tracks after the new one moved along: discover again before using earlier track references."
         })))))
     }
-    /// The Set's tracks, each by its identity, with its name.
-    async fn track_identities(&self, signal: &Signal) -> Result<Vec<(String, String)>, CommandError> {
-        let rows = self.connection.rows("track", args(json!({"fields":["name","objectIdentity"]})), signal.clone()).await?;
+    /// Live's answer lost, or failing once the script had asked Live to convert: Live may be converting all the same,
+    /// so the turn's references retire and it isn't said as a failure.
+    fn unsure(&self, title: &str, why: &str) -> ToolResult {
+        self.retire_references();
+        may_still_land(title, format!("Kumi lost Live's answer to {title} ({why})"))
+    }
+    /// A new track moves the ones after it along: the turn's references retire.
+    fn retire_references(&self) {
+        let mut refs = self.connection.references.borrow_mut();
+        refs.invalidate();
+        refs.clear_names();
+        drop(refs);
+        self.connection.lease.set(self.connection.lease.get() + 1);
+    }
+    /// The Set's tracks, each by its identity, with its name and whether it's a MIDI track.
+    async fn track_identities(&self, signal: &Signal) -> Result<Vec<(String, String, bool)>, CommandError> {
+        let rows = self.connection.rows("track", args(json!({"fields":["name","objectIdentity","mediaKind"]})), signal.clone()).await?;
         Ok(rows
             .iter()
             .filter_map(|row| {
-                Some((row.get("objectIdentity")?.as_str()?.to_owned(), row.get("name").and_then(Value::as_str).unwrap_or("").to_owned()))
+                Some((
+                    row.get("objectIdentity")?.as_str()?.to_owned(),
+                    row.get("name").and_then(Value::as_str).unwrap_or("").to_owned(),
+                    row.get("mediaKind").and_then(Value::as_str) == Some("midi"),
+                ))
             })
             .collect())
     }
-    /// The track Live's conversion lands, told by identity: a new one right after the clip's track (`source`), where
-    /// Live puts it; else one named for the conversion; else, after a few seconds, any new one (a Live in another
-    /// language names it otherwise). A track the producer adds meanwhile isn't taken for it. A read that fails is
-    /// tried again, never taken as the conversion failing (Live is converting all the same). None after two minutes;
-    /// Live is brought forward on the way, in case it waits for its window.
+    /// The track Live's conversion lands, told by identity among the tracks that weren't there before:
+    /// - one named for the conversion, as Live names it ("4-Melody to MIDI");
+    /// - else, knowing the clip's track (`source`), a MIDI track right after it, where Live puts it (a Live in another
+    ///   language names it otherwise);
+    /// - else, not knowing it, a MIDI track that's been there a few seconds.
+    ///
+    /// A read that fails is tried again, never taken as the conversion failing (Live is converting all the same).
+    /// None after two minutes; Live is brought forward on the way, in case it waits for its window. Reads come every
+    /// 300 ms, then every second after the first ten.
     async fn new_track(
         &self,
-        before: &[(String, String)],
+        before: &[(String, String, bool)],
         source: Option<&str>,
         title: &str,
         signal: &Signal,
@@ -145,24 +188,25 @@ impl CommandTools {
         let mut fronted = false;
         let mut unnamed_since = None;
         loop {
-            delay(300, signal).await?;
+            delay(if started.elapsed() < SLOWER_AFTER { 300 } else { 1000 }, signal).await?;
             if let Ok(now) = self.track_identities(signal).await {
-                let is_new = |identity: &str| !before.iter().any(|(known, _)| known == identity);
-                let after_source = source
-                    .and_then(|source| now.iter().position(|(identity, _)| identity == source))
-                    .and_then(|at| now.get(at + 1))
-                    .filter(|(identity, _)| is_new(identity));
-                if let Some((_, name)) = after_source {
+                let is_new = |identity: &str| !before.iter().any(|(known, _, _)| known == identity);
+                if let Some((_, name, _)) = now.iter().find(|(identity, name, _)| is_new(identity) && name.contains(title)) {
                     return Ok(Some(name.clone()));
                 }
-                let new: Vec<&String> = now.iter().filter(|(identity, _)| is_new(identity)).map(|(_, name)| name).collect();
-                if let Some(name) = new.iter().find(|name| name.contains(title)) {
-                    return Ok(Some((*name).clone()));
-                }
-                if let Some(name) = new.first() {
-                    let since = *unnamed_since.get_or_insert_with(Instant::now);
-                    if since.elapsed() >= UNNAMED_AFTER {
-                        return Ok(Some((*name).clone()));
+                let next_to = |source: &str| now.iter().position(|(identity, _, _)| identity == source).and_then(|at| now.get(at + 1));
+                match source {
+                    Some(source) => {
+                        if let Some((_, name, _)) = next_to(source).filter(|(identity, _, midi)| *midi && is_new(identity)) {
+                            return Ok(Some(name.clone()));
+                        }
+                    }
+                    None => {
+                        if let Some((_, name, _)) = now.iter().find(|(identity, _, midi)| *midi && is_new(identity)) {
+                            if unnamed_since.get_or_insert_with(Instant::now).elapsed() >= UNNAMED_AFTER {
+                                return Ok(Some(name.clone()));
+                            }
+                        }
                     }
                 }
             }
@@ -183,6 +227,21 @@ impl CommandTools {
             }
         }
     }
+}
+
+/// The reason in a bridge error ({"reason", "remediation"}), or its whole text.
+fn reason(result: &crate::mcp::types::CallToolResult) -> String {
+    let text = super::result_text(result);
+    serde_json::from_str::<Value>(&text).ok().and_then(|error| Some(error.get("reason")?.as_str()?.to_owned())).unwrap_or(text)
+}
+
+/// What Kumi says when it can't tell whether a conversion's new track will land: Live may still be converting, so it
+/// isn't a failure, and asking again could make a second track.
+fn may_still_land(title: &str, what: String) -> ToolResult {
+    ToolResult::text(stringify(&json!({
+        "converting": title,
+        "note": format!("{what}, and Live may still be converting. Don't ask again (that could make a second track): look in Live for its new MIDI track in a moment, then discover again.")
+    })))
 }
 
 /// Bring Live's window forward: the Live that's open, by its app (macOS); false where Kumi can't.
