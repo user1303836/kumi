@@ -57,7 +57,7 @@ Kumi 会在你的 User Library 中找到 Live 的 Remote Scripts 文件夹，包
 
 桥接安装好并在 Live 中选中后，`kumi` 会找到并连接它；无需任何配置。没有桥接时，Kumi 照样启动，在不连接 Live 的情况下聊天（**No Live access**），并提出连接。`kumi --bridge-config <absolute path>` 使用你自己的桥接配置；`kumi --inference-only` 在不连接 Live 的情况下聊天。
 
-**Willington。** Kumi 的桥接带有 Willington 的原生绑定，在你用 `/willington` 开启之前一直是关闭的。开启后，Kumi 还可以映射机架的宏旋钮、设置链区域（chain zone），并在自检通过时编辑 Follow Actions。Willington 有绑定的 Live 版本：macOS ARM64 上的 Live 12.4.15b4 和 b5（链区域仅限 b5），以及 Windows x64 上的 Live 12.4.15b5；请见 [Willington](WILLINGTON_INTEGRATION.md)。
+**Willington。** 从带有 Willington 文件的版本起，Kumi 的桥接会带上它的原生绑定；在此之前，你可以自己安装 Willington。无论哪种方式，在你用 `/willington` 开启之前它们一直是关闭的。开启后，Kumi 还可以映射机架的宏旋钮、设置链区域（chain zone），并在自检通过时编辑 Follow Actions。Willington 有绑定的 Live 版本：macOS ARM64 上的 Live 12.4.15b4 和 b5（链区域仅限 b5），以及 Windows x64 上的 Live 12.4.15b5；请见 [Willington](WILLINGTON_INTEGRATION.md)。
 
 ## 使用 Kumi
 

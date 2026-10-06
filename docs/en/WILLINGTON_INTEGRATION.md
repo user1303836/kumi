@@ -4,8 +4,10 @@ English · [简体中文](../zh-CN/WILLINGTON_INTEGRATION.md) · [日本語](../
 
 Willington is a set of native providers that reach parts of Live its Python API
 doesn't: Session clip Follow Actions, rack macro mappings and names, and rack
-chain zones. Kumi's bridge carries Willington's runtime files inside its Remote
-Script, off until you turn them on with `/willington`. Each provider selects
+chain zones. From the release that carries Willington's runtime files, Kumi's
+bridge has them inside its Remote Script; until then, [install Willington
+yourself](#installing-willington-yourself). Either way they're off until you
+turn them on with `/willington`. Each provider selects
 bindings for the exact Live build it's connected to; on any other build its
 tools simply don't appear, and the rest of Kumi works as before.
 
@@ -42,8 +44,8 @@ Kumi tells its model too. With the bindings off, a request that needs one of
 their edits gets a sentence saying that `/willington` turns them on; with them
 on, Kumi maps macros itself instead of asking you to map them in Live.
 
-Which Live builds they cover depends on the Willington release Kumi carries,
-named in `willington/release.json` in the bridge's folder. Willington's
+Which Live builds they cover depends on the Willington release you have; for
+Kumi's copy, `willington/release.json` in the bridge's folder names it. Willington's
 validated bindings: Follow Actions and DeviceTools for macOS ARM64 Live
 12.4.15b4 and b5, Rack Zones for macOS ARM64 b5, and all three for Windows x64
 Live 12.4.15b5. Intel macOS isn't covered. Each provider selects bindings using
@@ -96,7 +98,8 @@ bridge is the plain bridge.
 
 ## Installing Willington yourself
 
-For a Willington build Kumi doesn't carry yet (for a new Live version, say),
+Before a release carries Willington, or for a build it doesn't carry yet (for a
+new Live version, say),
 install Willington's multi-version bundle into Live's Remote Scripts folder,
 beside AbletonMcpBridge: the required `WillingtonRuntime` with the providers you
 want, `WillingtonBindings` (Follow Actions), `WillingtonDeviceTools` (macros and

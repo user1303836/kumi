@@ -2,7 +2,7 @@
 
 [English](../en/WILLINGTON_INTEGRATION.md) · [简体中文](../zh-CN/WILLINGTON_INTEGRATION.md) · 日本語
 
-Willington は、Live の Python API では届かない部分に手が届くネイティブプロバイダーのセットです。Session クリップの Follow Action、ラックのマクロのマッピングと名前、ラックのチェーンのゾーンです。Kumi のブリッジは Willington のランタイムファイルを Remote Script の中に収めていて、`/willington` でオンにするまではオフです。各プロバイダーは、接続している Live のビルドそのものに合うバインディングを選びます。それ以外のビルドではツールが表示されないだけで、Kumi のほかの部分はこれまでどおり動作します。
+Willington は、Live の Python API では届かない部分に手が届くネイティブプロバイダーのセットです。Session クリップの Follow Action、ラックのマクロのマッピングと名前、ラックのチェーンのゾーンです。Willington のランタイムファイルを収めたリリースからは、Kumi のブリッジがそれを Remote Script の中に持っています。それまでは[自分でインストール](#willington-を自分でインストールする)してください。どちらの場合も、`/willington` でオンにするまではオフです。各プロバイダーは、接続している Live のビルドそのものに合うバインディングを選びます。それ以外のビルドではツールが表示されないだけで、Kumi のほかの部分はこれまでどおり動作します。
 
 ## 追加されるもの
 
@@ -22,7 +22,7 @@ Kumi で `/willington` と入力します。`Remote Scripts/AbletonMcpBridge` �
 
 Kumi はモデルにも伝えます。バインディングがオフのときにその編集が必要な依頼があると、`/willington` でオンになることを一言添えます。オンのときは、Live で自分でマッピングするよう頼む代わりに、Kumi がマクロをマッピングします。
 
-どの Live ビルドに対応するかは、Kumi が収めている Willington のリリースによって決まり、ブリッジのフォルダーの `willington/release.json` に書かれています。Willington の検証済みのバインディング：macOS ARM64 の Live 12.4.15b4 と b5 用の Follow Action と DeviceTools、macOS ARM64 の b5 用の RackZones、そして Windows x64 の Live 12.4.15b5 用の 3 つすべてです。Intel macOS には対応していません。各プロバイダーは、動いている Live プロセスの OS、アーキテクチャ、バージョン、実行ファイルのハッシュからバインディングを選び、ネイティブライブラリは動いている実行ファイルそのもの（macOS では Mach-O の UUID、Windows では CodeView の GUID）も確認します。
+どの Live ビルドに対応するかは、手元の Willington のリリースによって決まります。Kumi のコピーなら、ブリッジのフォルダーの `willington/release.json` に書かれています。Willington の検証済みのバインディング：macOS ARM64 の Live 12.4.15b4 と b5 用の Follow Action と DeviceTools、macOS ARM64 の b5 用の RackZones、そして Windows x64 の Live 12.4.15b5 用の 3 つすべてです。Intel macOS には対応していません。各プロバイダーは、動いている Live プロセスの OS、アーキテクチャ、バージョン、実行ファイルのハッシュからバインディングを選び、ネイティブライブラリは動いている実行ファイルそのもの（macOS では Mach-O の UUID、Windows では CodeView の GUID）も確認します。
 
 Follow Action を編集するには、選ばれたライブラリのセルフテストに合格していることも必要です。WillingtonBindings のフォルダーに、`"status": "passed"` と、そのライブラリの SHA-256 に等しい `library_sha256` を持つ `self-test.json` が必要です。これがないと Follow Action の編集だけがオフのままで、マクロ、名前、ゾーンの編集は動作します。
 
@@ -52,7 +52,7 @@ Remote Script が止まると、Follow Action の書き込みをオフにし、D
 
 ## Willington を自分でインストールする
 
-Kumi がまだ収めていない Willington のビルド（たとえば新しい Live のバージョン用）を使うには、Willington のマルチバージョンのバンドルを Live の Remote Scripts フォルダーの AbletonMcpBridge の隣にインストールします。必須の `WillingtonRuntime` と、使いたいプロバイダー、`WillingtonBindings`（Follow Action）、`WillingtonDeviceTools`（マクロとバリエーション。`get_macro_mapping` と `get_selected_variation_name` を提供している必要があります）、`WillingtonRackZones`（ゾーン）です。手作業でコピーするときは、ランタイム、`build/<profile-id>/` フォルダー、マニフェストをそのまま残してください。そこにインストールしたプロバイダーは、Kumi 自身のコピーより優先されます。Live でスタンドアロンの Willington コントロールサーフェスをすべてオフにし、Live を再起動します。ブリッジはプロバイダーをほかの持ち主と共有しません。それから `/willington` でオンにします。
+Willington を収めたリリースより前や、まだ収めていないビルド（たとえば新しい Live のバージョン用）を使うには、Willington のマルチバージョンのバンドルを Live の Remote Scripts フォルダーの AbletonMcpBridge の隣にインストールします。必須の `WillingtonRuntime` と、使いたいプロバイダー、`WillingtonBindings`（Follow Action）、`WillingtonDeviceTools`（マクロとバリエーション。`get_macro_mapping` と `get_selected_variation_name` を提供している必要があります）、`WillingtonRackZones`（ゾーン）です。手作業でコピーするときは、ランタイム、`build/<profile-id>/` フォルダー、マニフェストをそのまま残してください。そこにインストールしたプロバイダーは、Kumi 自身のコピーより優先されます。Live でスタンドアロンの Willington コントロールサーフェスをすべてオフにし、Live を再起動します。ブリッジはプロバイダーをほかの持ち主と共有しません。それから `/willington` でオンにします。
 
 ## Follow Action のセルフテスト
 

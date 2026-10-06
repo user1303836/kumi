@@ -2,7 +2,7 @@
 
 [English](../en/WILLINGTON_INTEGRATION.md) · 简体中文 · [日本語](../ja/WILLINGTON_INTEGRATION.md)
 
-Willington 是一组原生提供程序（provider），能触及 Live 的 Python API 触及不到的部分：Session 片段的跟随动作（Follow Actions）、机架宏的映射与名称，以及机架链的区域。Kumi 的桥接把 Willington 的运行时文件放在它的 Remote Script 里，在你用 `/willington` 开启之前一直是关闭的。每个提供程序都会为所连接的那个确切的 Live 构建版本选择绑定；在其他构建版本上，这些工具只是不会出现，Kumi 的其余部分照常工作。
+Willington 是一组原生提供程序（provider），能触及 Live 的 Python API 触及不到的部分：Session 片段的跟随动作（Follow Actions）、机架宏的映射与名称，以及机架链的区域。从带有 Willington 运行时文件的版本起，Kumi 的桥接会把它们放在自己的 Remote Script 里；在此之前，请[自己安装 Willington](#自己安装-willington)。无论哪种方式，在你用 `/willington` 开启之前它们一直是关闭的。每个提供程序都会为所连接的那个确切的 Live 构建版本选择绑定；在其他构建版本上，这些工具只是不会出现，Kumi 的其余部分照常工作。
 
 ## 它增加了什么
 
@@ -22,7 +22,7 @@ Willington 是一组原生提供程序（provider），能触及 Live 的 Python
 
 Kumi 也会告诉它的模型。绑定关闭时，遇到需要这些编辑的请求，会附上一句：`/willington` 可以开启它们；绑定开启时，Kumi 会自己映射宏，而不是请你在 Live 中映射。
 
-覆盖哪些 Live 构建版本，取决于 Kumi 所带的 Willington 版本，写在桥接文件夹里的 `willington/release.json` 中。Willington 经过验证的绑定：macOS ARM64 上 Live 12.4.15b4 和 b5 的跟随动作和 DeviceTools，macOS ARM64 上 b5 的 RackZones，以及 Windows x64 上 Live 12.4.15b5 的全部三者。不支持 Intel macOS。每个提供程序会根据正在运行的 Live 进程的操作系统、架构、版本和可执行文件哈希选择绑定，原生库还会检查正在运行的可执行文件本身（macOS 上是 Mach-O UUID，Windows 上是 CodeView GUID）。
+覆盖哪些 Live 构建版本，取决于你所用的 Willington 版本；对 Kumi 自带的副本，桥接文件夹里的 `willington/release.json` 写明了这个版本。Willington 经过验证的绑定：macOS ARM64 上 Live 12.4.15b4 和 b5 的跟随动作和 DeviceTools，macOS ARM64 上 b5 的 RackZones，以及 Windows x64 上 Live 12.4.15b5 的全部三者。不支持 Intel macOS。每个提供程序会根据正在运行的 Live 进程的操作系统、架构、版本和可执行文件哈希选择绑定，原生库还会检查正在运行的可执行文件本身（macOS 上是 Mach-O UUID，Windows 上是 CodeView GUID）。
 
 跟随动作编辑还需要所选的库通过一次自检：WillingtonBindings 文件夹中要有 `self-test.json`，其中 `"status": "passed"`，并且 `library_sha256` 等于该库的 SHA-256。没有它，只有跟随动作编辑保持关闭；宏、名称和区域编辑仍然可用。
 
@@ -52,7 +52,7 @@ Remote Script 停止时，会关闭跟随动作写入，并卸载 DeviceTools �
 
 ## 自己安装 Willington
 
-要使用 Kumi 尚未带上的 Willington 构建版本（例如为新的 Live 版本），请把 Willington 的多版本包安装到 Live 的 Remote Scripts 文件夹中，与 AbletonMcpBridge 并列：必需的 `WillingtonRuntime`，以及你需要的提供程序 `WillingtonBindings`（跟随动作）、`WillingtonDeviceTools`（宏和变体；它必须提供 `get_macro_mapping` 和 `get_selected_variation_name`）和 `WillingtonRackZones`（区域）。手动复制时，必须保留运行时、`build/<profile-id>/` 目录和清单文件。安装在那里的提供程序优先于 Kumi 自己的副本。在 Live 中关闭任何独立的 Willington 控制界面，然后重启 Live：桥接不会与其他所有者共享这些提供程序。然后用 `/willington` 开启它们。
+在版本带上 Willington 之前，或要使用尚未带上的 Willington 构建版本（例如为新的 Live 版本）时，请把 Willington 的多版本包安装到 Live 的 Remote Scripts 文件夹中，与 AbletonMcpBridge 并列：必需的 `WillingtonRuntime`，以及你需要的提供程序 `WillingtonBindings`（跟随动作）、`WillingtonDeviceTools`（宏和变体；它必须提供 `get_macro_mapping` 和 `get_selected_variation_name`）和 `WillingtonRackZones`（区域）。手动复制时，必须保留运行时、`build/<profile-id>/` 目录和清单文件。安装在那里的提供程序优先于 Kumi 自己的副本。在 Live 中关闭任何独立的 Willington 控制界面，然后重启 Live：桥接不会与其他所有者共享这些提供程序。然后用 `/willington` 开启它们。
 
 ## 跟随动作自检
 

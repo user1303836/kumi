@@ -12,7 +12,7 @@
 | --- | --- |
 | Remote Script | `AbletonMcpBridge`，在 Live 内部，通过 Live 的 Python API 工作 |
 | 扩展 | Kumi 的 Live 扩展，运行在 Live 的 Extension Host 中（Live 12.4 或更高） |
-| Willington | Kumi 的桥接带有的原生绑定，在 `/willington` 开启之前一直关闭，适用于它覆盖的 Live 构建版本：macOS ARM64 上的 12.4.15b4 和 b5，Windows x64 上的 12.4.15b5（[Willington](WILLINGTON_INTEGRATION.md)） |
+| Willington | 原生绑定：从带有 Willington 文件的版本起放在 Kumi 的桥接中，在此之前可以自己安装；在 `/willington` 开启之前一直关闭，适用于它覆盖的 Live 构建版本：macOS ARM64 上的 12.4.15b4 和 b5，Windows x64 上的 12.4.15b5（[Willington](WILLINGTON_INTEGRATION.md)） |
 | 桥接 | 桥接进程本身，不经过 Live |
 
 只有当所连接的 Live 具备某个工具所需的操作（桥接在连接时得知这一点），并且部署策略允许时，才会提供该工具（见[用户指南](USER_GUIDE.md)）。
