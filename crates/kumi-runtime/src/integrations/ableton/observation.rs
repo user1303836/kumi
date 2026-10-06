@@ -938,15 +938,15 @@ fn text(value: Option<&Value>) -> String {
 fn objects(page: &JsonObject) -> Result<Vec<JsonObject>, ObservationError> {
     page.get("items").and_then(Value::as_array).into_iter().flatten().map(context::object).collect()
 }
-/// The Set's scale ("D Dorian") when it says something, and whether Scale Mode is on: with it on, or a scale other than
-/// Live's default (C Major) with it off.
+/// The Set's scale ("D Dorian") when it says something, and whether Scale Mode is on. Live's default, C Major, says
+/// nothing either way: a fresh Set can have Scale Mode on with it (Live 12.4.15), so it isn't a producer's choice.
 fn scale(row: &JsonObject) -> Option<(String, bool)> {
     const ROOTS: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     let scale = row.get("scale")?.as_object()?;
     let root = ROOTS.get(usize::try_from(scale.get("rootNote")?.as_u64()?).ok()?)?;
     let name = scale.get("scaleName")?.as_str().filter(|name| !name.is_empty())?;
     let on = scale.get("scaleMode").and_then(Value::as_bool) == Some(true);
-    (on || (*root, name) != ("C", "Major")).then(|| (format!("{root} {name}"), on))
+    ((*root, name) != ("C", "Major")).then(|| (format!("{root} {name}"), on))
 }
 fn cursor(page: &JsonObject) -> Option<&str> {
     page.get("nextCursor").and_then(Value::as_str).filter(|s| !s.is_empty())
@@ -1082,8 +1082,8 @@ mod tests {
         let row = |root: u64, name: &str, mode: Value| object(json!({"scale":{"rootNote":root,"scaleName":name,"scaleMode":mode}}));
         assert_eq!(scale(&row(2, "Dorian", json!(true))), Some(("D Dorian".into(), true)));
         assert_eq!(scale(&row(9, "Minor", json!(false))), Some(("A Minor".into(), false)));
-        assert_eq!(scale(&row(0, "Major", json!(true))), Some(("C Major".into(), true)));
-        // Live's default, with Scale Mode off, says nothing; nor does a row without a scale.
+        // Live's default says nothing, Scale Mode on or off (a fresh Set can have it on); nor does a row without a scale.
+        assert_eq!(scale(&row(0, "Major", json!(true))), None);
         assert_eq!(scale(&row(0, "Major", json!(false))), None);
         assert_eq!(scale(&row(0, "Major", Value::Null)), None);
         assert_eq!(scale(&JsonObject::new()), None);
