@@ -117,7 +117,7 @@ impl McpHost {
         let mut assumptions = vec![];
         if ["chord-progression", "bassline"].contains(&kind) && resolved.get("root").is_none() && resolved.get("scale").is_none() {
             let tokens = if kind == "chord-progression" {
-                resolved.get("numerals").filter(|v| !v.is_null()).unwrap_or(&resolved["symbols"])
+                ["chords", "numerals"].iter().find_map(|name| resolved.get(*name).filter(|v| !v.is_null())).unwrap_or(&resolved["symbols"])
             } else {
                 &resolved["chords"]
             };
