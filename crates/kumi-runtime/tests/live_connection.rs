@@ -339,3 +339,39 @@ async fn connection_start_close_disconnection_and_reconnection_match_source() {
         })
         .await;
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn losing_live_while_it_still_runs_is_another_set_opening_and_kumis_own_when_it_asked() {
+    // #188: opening another Set reloads Live's Remote Script, so Kumi loses Live for a moment; that was
+    // said as "Live closed", and the request that asked for the Set was cancelled.
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for (running, asked, cause) in [(false, false, "live"), (true, false, "set"), (true, true, "askedset"), (false, true, "live")] {
+                let states = Rc::new(RefCell::new(Vec::<Value>::new()));
+                let out = states.clone();
+                let mut options = ConnectionOptions::new(Rc::new(move |state, cause| out.borrow_mut().push(json!([state, cause]))));
+                options.live_running = Some(Rc::new(move || async move { running }.boxed_local()));
+                options.reconnect_interval_ms = Some(3600000);
+                let connection = LiveConnection::new(options);
+                if asked {
+                    connection.expect_set_change(60_000);
+                }
+                connection.lose_live();
+                for _ in 0..8 {
+                    tokio::task::yield_now().await;
+                }
+                assert_eq!(*states.borrow(), [json!(["disconnected", cause])], "running {running}, asked {asked}");
+                connection.close().await.unwrap();
+            }
+            // Without a way to tell, Live is lost as before, at once.
+            let states = Rc::new(RefCell::new(Vec::<Value>::new()));
+            let out = states.clone();
+            let mut options = ConnectionOptions::new(Rc::new(move |state, cause| out.borrow_mut().push(json!([state, cause]))));
+            options.reconnect_interval_ms = Some(3600000);
+            let connection = LiveConnection::new(options);
+            connection.lose_live();
+            assert_eq!(*states.borrow(), [json!(["disconnected", "live"])]);
+            connection.close().await.unwrap();
+        })
+        .await;
+}

@@ -47,6 +47,8 @@ pub struct AbletonOptions {
     pub ears: Option<EarsSetup>,
     pub hands: Option<HandsSetup>,
     pub fast: Option<bool>,
+    /// Whether Live's process is running, to tell Live closing from Live opening another Set.
+    pub live_running: Option<super::connection::LiveRunning>,
 }
 impl AbletonOptions {
     pub fn new(on_connection: ConnectionListener) -> Self {
@@ -75,6 +77,7 @@ impl AbletonOptions {
             ears: None,
             hands: None,
             fast: None,
+            live_running: None,
         }
     }
     pub fn connection_options(&self) -> ConnectionOptions {
@@ -89,6 +92,7 @@ impl AbletonOptions {
         options.on_transport = self.on_transport.clone();
         options.focus_interval_ms = self.focus_interval_ms;
         options.reconnect_interval_ms = self.reconnect_interval_ms;
+        options.live_running = self.live_running.clone();
         options
     }
 }

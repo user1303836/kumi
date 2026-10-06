@@ -223,6 +223,10 @@ struct State {
     away: bool,
     missing: Option<Signal>,
     interrupted: Option<String>,
+    /// Why Live went away, for what Kumi says when it's back.
+    away_cause: Option<DisconnectCause>,
+    /// Live closed while a request was running in it: maybe a crash that request caused (#195).
+    closed_mid_request: bool,
     place: Option<String>,
     conversation_id: String,
     conversation_first: Option<String>,
@@ -531,6 +535,8 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                 away: false,
                 missing: None,
                 interrupted: None,
+                away_cause: None,
+                closed_mid_request: false,
                 place: None,
                 conversation_id: new_conversation_id(now()),
                 conversation_first: None,
@@ -665,47 +671,63 @@ impl Session {
         };
         self.emit(SessionEvent::Connection { state: next });
         if lost {
-            let (active, missing) = {
+            let (active, missing, working) = {
                 let mut s = self.0.state.borrow_mut();
                 s.observation = None;
                 s.away = true;
-                if let Some(input) = s.active.as_ref().filter(|op| op.is_turn).and_then(|op| op.input.clone()).filter(|s| !s.is_empty()) {
-                    s.interrupted = Some(input);
+                s.away_cause = cause;
+                let working = s.active.as_ref().is_some_and(|op| op.is_turn);
+                // A request about the Set Live left isn't offered again in the next one.
+                if !matches!(cause, Some(DisconnectCause::Set | DisconnectCause::AskedSet)) {
+                    if let Some(input) = s.active.as_ref().filter(|op| op.is_turn).and_then(|op| op.input.clone()).filter(|s| !s.is_empty())
+                    {
+                        s.interrupted = Some(input);
+                    }
                 }
+                s.closed_mid_request = working && cause == Some(DisconnectCause::Live);
                 if let Some(old) = s.missing.take() {
                     old.cancel();
                 }
                 let signal = Signal::new();
                 s.missing = Some(signal.clone());
-                (s.active.clone(), signal)
+                (s.active.clone(), signal, working)
             };
             self.notice(match cause {
+                Some(DisconnectCause::Live) if working => "Live closed while Kumi was working in it. If it crashed, your unsaved changes may be lost: Live offers to recover them when it opens. Kumi picks up when Live is back.",
                 Some(DisconnectCause::Live) => "Live closed. Kumi will pick up where you left off when it's back.",
                 Some(DisconnectCause::Bridge) => "Kumi's link to Live dropped. It's reconnecting, and will pick up where you left off.",
+                Some(DisconnectCause::AskedSet) => "Live is opening the Set; Kumi carries on once it's open.",
+                Some(DisconnectCause::Set) if working => "Live is opening another Set, so Kumi stopped what it was doing: nothing it was doing lands in the other Set. It picks up once the Set is open.",
+                Some(DisconnectCause::Set) => "Live is opening another Set; Kumi picks up once it's open.",
                 None => "Kumi lost touch with Live. It will pick up where you left off when Live is back.",
             });
-            if let Some(op) = active {
+            // The request that asked for another Set carries on in it (#188).
+            if let Some(op) = active.filter(|_| cause != Some(DisconnectCause::AskedSet)) {
                 op.signal.cancel();
             }
+            // A big Set takes a while to open.
+            let opening = matches!(cause, Some(DisconnectCause::Set | DisconnectCause::AskedSet));
+            let after = self.0.options.missing_after_ms.unwrap_or(30_000) * if opening { 4 } else { 1 };
             let this = self.clone();
             tokio::task::spawn_local(async move {
-                tokio::select! { _ = missing.cancelled() => {}, _ = tokio::time::sleep(Duration::from_millis(this.0.options.missing_after_ms.unwrap_or(30_000))) => {
+                tokio::select! { _ = missing.cancelled() => {}, _ = tokio::time::sleep(Duration::from_millis(after)) => {
                     if this.0.state.borrow().away { this.notice(STILL_MISSING); }
                 } }
             });
         } else if back {
-            let (again, refresh) = {
+            let (again, refresh, cause, crashed) = {
                 let mut s = self.0.state.borrow_mut();
                 s.away = false;
                 if let Some(m) = s.missing.take() {
                     m.cancel();
                 }
-                (s.interrupted.take(), s.active.is_none() && s.started)
+                (s.interrupted.take(), s.active.is_none() && s.started, s.away_cause.take(), std::mem::take(&mut s.closed_mid_request))
             };
-            self.notice(if again.is_some() {
-                "Live is back. Your last request was stopped; press enter to send it again."
-            } else {
-                "Live is back."
+            self.notice(match (again.is_some(), cause) {
+                (_, Some(DisconnectCause::Set | DisconnectCause::AskedSet)) => "Live has the other Set open.",
+                (true, _) if crashed => "Live is back. Your last request stopped when Live closed, which it may have caused: check the Set before you send it again (enter sends it).",
+                (true, _) => "Live is back. Your last request was stopped; press enter to send it again.",
+                (false, _) => "Live is back.",
             });
             if let Some(text) = again {
                 self.emit(SessionEvent::Resend { text });

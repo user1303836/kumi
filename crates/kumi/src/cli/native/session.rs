@@ -329,6 +329,9 @@ pub(super) async fn run_session(
             options.restore_file = Some(restore_file.clone());
             options.project_store = Some(project_store.clone());
             options.user_library = user_library.clone();
+            // With Live still running, losing it means it's opening another Set, not that it closed (#188).
+            options.live_running =
+                Some(Rc::new(|| async { bridge_setup::is_live_running(bridge_setup::default_run()).await }.boxed_local()));
             options.on_focus = Some({
                 let emit = emit.clone();
                 Rc::new(move |focus| emit(SessionEvent::Focus { focus }))

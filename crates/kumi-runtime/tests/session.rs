@@ -1824,3 +1824,51 @@ local_test!(a_turn_brings_in_what_an_older_kumi_changed_beside_it_and_never_wait
     .await;
     assert!(said.is_ok(), "{:?}", h.events.borrow());
 });
+local_test!(a_set_kumi_asked_for_keeps_the_request_and_one_opened_by_hand_stops_it_without_offering_it_again, {
+    // #188: "start a new Set and build X" was cancelled by the switch it asked for, and called "Live closed".
+    let h = harness(Some(hang_once()), |_| {});
+    h.session.start().await.unwrap();
+    let running = spawned(&h.session, "make a new set and add a track");
+    settle().await;
+    h.connection(ConnectionState::Disconnected, Some(DisconnectCause::AskedSet));
+    settle().await;
+    assert!(h.notice("Live is opening the Set; Kumi carries on once it's open."));
+    assert!(!running.is_finished(), "the request carries on");
+    h.connection(ConnectionState::Connected, None);
+    settle().await;
+    assert!(h.notice("Live has the other Set open."));
+    assert!(!h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Resend { .. })));
+    running.abort();
+    h.session.close().await.unwrap();
+
+    // Opened by hand while Kumi worked: the request stops (nothing lands in the other Set), and isn't
+    // offered again there.
+    let h = harness(Some(hang_once()), |_| {});
+    h.session.start().await.unwrap();
+    let running = spawned(&h.session, "widen the pads");
+    settle().await;
+    h.connection(ConnectionState::Disconnected, Some(DisconnectCause::Set));
+    running.await.unwrap().unwrap();
+    assert!(h.notice("Live is opening another Set, so Kumi stopped what it was doing"));
+    h.connection(ConnectionState::Connected, None);
+    settle().await;
+    assert!(h.notice("Live has the other Set open."));
+    assert!(!h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Resend { .. })));
+    h.session.close().await.unwrap();
+});
+local_test!(live_closing_mid_request_says_it_may_have_crashed_and_warns_before_sending_it_again, {
+    // #195: Live crashed under a script Kumi ran, and Kumi said "Live closed", then offered the request
+    // again as if nothing happened.
+    let h = harness(Some(hang_once()), |_| {});
+    h.session.start().await.unwrap();
+    let running = spawned(&h.session, "record the mix");
+    settle().await;
+    h.connection(ConnectionState::Disconnected, Some(DisconnectCause::Live));
+    running.await.unwrap().unwrap();
+    assert!(h.notice("Live closed while Kumi was working in it. If it crashed, your unsaved changes may be lost"));
+    h.connection(ConnectionState::Connected, None);
+    settle().await;
+    assert!(h.notice("Your last request stopped when Live closed, which it may have caused: check the Set before you send it again"));
+    assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Resend { text } if text == "record the mix")));
+    h.session.close().await.unwrap();
+});
