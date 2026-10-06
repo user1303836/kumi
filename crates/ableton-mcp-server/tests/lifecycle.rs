@@ -156,6 +156,46 @@ async fn repair_compensation_restores_original_drift_and_legacy_cache_blocker() 
     assert_eq!(fs::metadata(blocker).unwrap().len(), 0);
 }
 #[tokio::test(flavor = "current_thread")]
+async fn the_willington_switch_is_not_drift_and_upgrades_keep_it_owner_only() {
+    let f = Fixture::new();
+    run_lifecycle(&f.options).await.unwrap();
+    // /willington writes the switch after an install, and removes it again: neither is drift.
+    let switch = f.remote().join(WILLINGTON_CONFIG);
+    let on = br#"{"version":1,"followActions":true,"deviceTools":true,"rackZones":true,"enableWrites":true}"#;
+    write_owner_file(&switch, &f.options.remote_scripts_directory, on).unwrap();
+    let bytes = fs::read(&switch).unwrap();
+    assert_eq!(run_lifecycle(&f.action("status")).await.unwrap()["verification"]["installationIntegrityValid"], true);
+    run_lifecycle(&f.upgrade("1.1.0")).await.unwrap();
+    assert_eq!(fs::read(&switch).unwrap(), bytes);
+    assert_eq!(secret_permissions(&switch), SecretPermissions::OwnerOnly);
+    fs::remove_file(&switch).unwrap();
+    assert_eq!(run_lifecycle(&f.action("status")).await.unwrap()["verification"]["installationIntegrityValid"], true);
+}
+async fn integrity(f: &Fixture) -> Value {
+    run_lifecycle(&f.action("status")).await.unwrap()["verification"]["installationIntegrityValid"].clone()
+}
+#[tokio::test(flavor = "current_thread")]
+async fn willingtons_self_test_receipt_is_not_drift_and_upgrades_keep_it_but_other_new_files_are() {
+    let bindings = "remote-script/AbletonMcpBridge/willington/WillingtonBindings/__init__.py";
+    let f = Fixture::with_files(&[(bindings, b"def install(): pass\n")]);
+    run_lifecycle(&f.options).await.unwrap();
+    // The receipt for the bridge's copy of Willington, put beside it after the install, isn't drift.
+    let receipt = f.remote().join(WILLINGTON_RECEIPT);
+    fs::write(&receipt, br#"{"status": "passed", "library_sha256": "0"}"#).unwrap();
+    assert_eq!(integrity(&f).await, true);
+    // An upgrade keeps it with the new generation's copy.
+    run_lifecycle(&f.upgrade("1.1.0")).await.unwrap();
+    assert_eq!(fs::read(&receipt).unwrap(), br#"{"status": "passed", "library_sha256": "0"}"#);
+    assert_eq!(integrity(&f).await, true);
+    // Only these names are the producer's: any other new file in the bridge's copy is drift.
+    let other = receipt.with_file_name("status.json");
+    fs::write(&other, b"{}").unwrap();
+    assert_eq!(integrity(&f).await, false);
+    fs::remove_file(&other).unwrap();
+    fs::remove_file(&receipt).unwrap();
+    assert_eq!(integrity(&f).await, true);
+}
+#[tokio::test(flavor = "current_thread")]
 async fn upgrades_retain_generation_and_rollback_compensates_configuration_exactly() {
     let f = Fixture::new();
     run_lifecycle(&f.options).await.unwrap();

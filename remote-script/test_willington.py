@@ -1,5 +1,6 @@
 import hashlib
 import json
+import sys
 import tempfile
 import types
 import unittest
@@ -552,6 +553,55 @@ class ProviderTests(unittest.TestCase):
                 if label == 'follow': self.assertIs(fixture.live._willington_native_library, fixture.follow)
                 else: self.assertTrue(getattr(fixture, label).patches)
                 self.assertTrue(any('already installed' in line for line in fixture.logs))
+
+
+class SwitchTests(unittest.TestCase):
+    """Kumi's /willington writes or removes willington.json while Live runs."""
+
+    def surface(self, fixture):
+        surface = object.__new__(wrapper.AbletonMcpBridge)
+        surface._bridge = types.SimpleNamespace(mapper=fixture.mapper)
+        surface._willington = None
+        surface.log_message = fixture.logs.append
+        return surface
+
+    def test_kumis_bundled_copy_is_found_after_any_installed_beside_the_package(self):
+        with _provider_fixture({'deviceTools': True, 'enableWrites': True}) as fixture, patch.object(sys, 'path', list(sys.path)):
+            bundled = str(fixture.root / 'willington')
+            fixture.construct().close()
+            self.assertNotIn(bundled, sys.path)
+            (fixture.root / 'willington').mkdir()
+            for _ in range(2):
+                fixture.construct().close()
+            self.assertEqual(sys.path[-1], bundled)
+            self.assertEqual(sys.path.count(bundled), 1)
+
+    def test_a_changed_switch_reloads_the_provider_without_restarting_live(self):
+        with _provider_fixture() as fixture:
+            surface = self.surface(fixture)
+            clock = [100.0]
+            with patch.object(wrapper.time, 'monotonic', lambda: clock[0]):
+                surface._keep_willington()
+                self.assertFalse(fixture.mapper.willington_device_writes)
+                fixture.write_config({'version': 1, 'followActions': False, 'deviceTools': True, 'enableWrites': True})
+                surface._keep_willington()
+                self.assertFalse(fixture.mapper.willington_device_writes, 'it looks once a second, not every tick')
+                clock[0] += 1.5
+                surface._keep_willington()
+                self.assertTrue(fixture.mapper.willington_device_writes)
+                self.assertEqual(fixture.calls, [('devices', 'install'), ('devices', True)])
+                clock[0] += 1.5
+                surface._keep_willington()
+                self.assertEqual(fixture.calls.count(('devices', 'install')), 1, 'an unchanged switch keeps its provider')
+                fixture.path.unlink()
+                clock[0] += 1.5
+                surface._keep_willington()
+                self.assertFalse(fixture.mapper.willington_device_writes)
+                self.assertEqual(fixture.calls[-1], ('devices', 'uninstall'))
+                self.assertFalse(fixture.devices.patches)
+                self.assertIn('Willington extensions off: willington.json was removed', fixture.logs)
+                self.assertIsNone(getattr(fixture.live, '_kumi_willington_owner', None))
+            surface._willington.close()
 
 
 class ReviewRegressions(unittest.TestCase):

@@ -36,6 +36,7 @@ pub mod plan_stream;
 pub mod plugin_tool;
 pub mod project;
 pub mod samples;
+pub mod willington;
 
 /// The host-authorized bridge surface, ordered as in the source integration.
 pub static BRIDGE_TOOLS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {

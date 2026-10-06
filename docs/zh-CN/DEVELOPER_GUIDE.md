@@ -118,6 +118,19 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 `apps/live-extension` 使用 TypeScript 编写，用 esbuild 打包，有自己的 `package.json`。它基于 Live 的 Extensions SDK 构建，而这个 SDK 的许可证禁止再分发，所以它不在仓库中：请把一份副本放到仓库根目录的 `vendor/ableton-extensions-sdk-1.0.0-beta.1/`（构建会读取其中的 `package 3/dist/index.cjs`）。在 `apps/live-extension` 中运行 `npm ci`，然后运行 `npm run build`，它会写出 `dist/extension.js` 及其 `.sha256`；两者都要提交。`npm run typecheck` 同样需要 SDK。没有 SDK 时，构建会停止，已提交的包保持不变；`npm test` 会根据校验和检查这个包。关于 Live 如何运行该扩展的测量数据，见[证据](../evidence/live-extension.md)。
 
+## Willington 的文件
+
+[Willington](WILLINGTON_INTEGRATION.md) 的仓库是私有的：Kumi 只带有它的运行时文件，放在 `vendor/willington/` 中，只有 Willington 的同步会通过拉取请求修改这个文件夹。文件旁边还有 Willington 的许可声明（`LICENSE` 或 `LICENSE.md`；Kumi 的 MIT 许可证不涵盖这些文件）和 `release.json`：
+
+```json
+{"schema": "kumi-willington-vendor/v1", "version": "0.4.0", "commit": "<Willington 的 40 位提交>",
+ "files": {"WillingtonRuntime/__init__.py": "<SHA-256>", "LICENSE": "<SHA-256>"}}
+```
+
+`files` 列出文件夹中除它自身以外的每个文件，文件名须是每个平台的检出都能容纳的：只用 ASCII 字母、数字、`.`、`_` 和 `-`，不能是 Windows 设备名或以点结尾，也不能有两个只差大小写的名字。当文件夹里有 `release.json` 没有列出的文件、SHA-256 不符的文件，或者不是 Willington 运行时文件的文件时，`scripts/build-native-release.py` 会拒绝发布：只有 `WillingtonRuntime`、`WillingtonBindings`、`WillingtonDeviceTools` 和 `WillingtonRackZones` 中的 `.py`、`.json`、`.md`、`.pyd` 和 `.dylib` 文件才符合，所以源代码、头文件、调试文件和字节码缓存永远不会被发布。`test_native_release.py` 在 CI 中对仓库里的这个文件夹做同样的检查，`.gitattributes` 让这个文件夹逐字节保持原样，并且不做空白检查。
+
+发布会把这些文件放在桥接的 Remote Script 中，即 `AbletonMcpBridge/willington/`，原生库只带本平台的（Windows 上是 `.pyd`，macOS 上是 `.dylib`），总共最多 16 MiB；Linux 的安装包不带。桥接安装时会一并复制这个文件夹，并在 Python 文件旁边放一个 `__pycache__` 阻挡文件，使安装后的文件树保持安装回执所记录的样子。已安装的桥接中有两个文件属于制作人而不属于发布：`willington.json` 和跟随动作自检回执 `willington/WillingtonBindings/self-test.json`。它们不影响桥接的安装检查，安装时也会保留下来。只有当 `willington.json` 开启 Willington 后，桥接才会把这个文件夹加入 Python 的路径，并且排在安装在桥接旁边的副本之后。
+
 ## 发布
 
 **提交**的标题用通俗的英文，说明对制作人来说改变了什么（“Kumi: talk to it while it works”）。桥接或 Remote Script 的修改要提升 `crates/ableton-mcp-server/Cargo.toml` 和 `Cargo.lock` 中的版本，标题以新版本开头（“Bridge 1.0.71: …”），并在 `CHANGELOG.md` 的 `## Unreleased` 下添加一个 `### Bridge x.y.z` 块。如果扩展变了，重新构建并提交它的包。工作在分支上进行，通过拉取请求合并到 `main`。

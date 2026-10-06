@@ -272,6 +272,9 @@ impl TuiApp {
         if let Some(line) = library_line(state.library.as_ref()) {
             add(line, st::FAINT);
         }
+        if state.willington_off {
+            add(crate::willington::OFF_AT_START.into(), st::FAINT);
+        }
         if let Some(newer) = &state.newer {
             add(String::new(), st::TEXT);
             add(format!("Kumi {newer} is out · /update gets it"), st::ACCENT);

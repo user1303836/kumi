@@ -12,7 +12,7 @@
 | --- | --- |
 | Remote Script | `AbletonMcpBridge`。Live の中で、Live の Python API を通じて動作します |
 | 拡張機能 | Kumi の Live 拡張機能。Live の Extension Host で動作します（Live 12.4 以降） |
-| Willington | オプションのネイティブプロバイダー。バインディングのある Live ビルド用です：macOS ARM64 の 12.4.15b4 と b5（[Willington 連携](WILLINGTON_INTEGRATION.md)） |
+| Willington | ネイティブバインディング。Willington のファイルを収めたリリースからは Kumi のブリッジに入っていて、それまでは自分でインストールします。`/willington` でオンにするまではオフで、対応する Live ビルド用です：macOS ARM64 の 12.4.15b4 と b5、Windows x64 の 12.4.15b5（[Willington](WILLINGTON_INTEGRATION.md)） |
 | ブリッジ | ブリッジのプロセスそのもの。Live を使いません |
 
 ツールが提供されるのは、接続先の Live にそのツールに必要な操作があり（ブリッジは接続時にそれを知ります）、かつデプロイメントポリシーがそれを許可している場合だけです（[ユーザーガイド](USER_GUIDE.md)を参照）。

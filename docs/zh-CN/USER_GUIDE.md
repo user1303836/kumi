@@ -446,7 +446,7 @@ Live 连接期间，桥接每 10 秒寻找一次扩展。扩展一旦应答，�
 
 ### Willington 工具
 
-只有安装了单独提供的 Willington 提供方时才会列出；见 [Willington](WILLINGTON_INTEGRATION.md)。
+只有在 Willington 的绑定开启（`/willington`）且 Live 构建版本受其覆盖时才会列出；见 [Willington](WILLINGTON_INTEGRATION.md)。
 
 | 工具 | 类别 | 作用 |
 | --- | --- | --- |
