@@ -43,12 +43,18 @@ use std::{
     time::Duration,
 };
 
+mod conversions;
+
 pub type CommandAction = Rc<dyn Fn(String, JsonObject, Signal) -> LocalBoxFuture<'static, Result<ToolResult, RuntimeError>>>;
+/// Bringing Live's window forward: true when it came.
+pub type FrontLive = Rc<dyn Fn() -> LocalBoxFuture<'static, bool>>;
 #[derive(Default)]
 pub struct CommandToolsOptions {
     pub hands: Option<HandsSetup>,
     pub user_library: Option<String>,
     pub on_action: Option<Rc<dyn Fn(ActionEvent)>>,
+    /// How Live's window is brought forward (the Live that's open, by its app, when left out).
+    pub front_live: Option<FrontLive>,
 }
 type HandsReady = Shared<LocalBoxFuture<'static, Option<Rc<dyn Hands>>>>;
 pub struct CommandTools {
@@ -225,6 +231,23 @@ impl CommandTools {
         let signal = abort::any([original_signal, self.connection.lifetime.clone()]);
         if !self.available() {
             return Ok(ToolResult::error(NO_CURRENT_LIVE));
+        }
+        // Live's conversions to MIDI go through its API where it has one: no menus, any clip, on any computer.
+        if let Some(conversion) = input.get("command").and_then(Value::as_str).and_then(conversions::conversion) {
+            if self.connection.has("live_run_python") {
+                match self.convert(input, conversion, &signal).await {
+                    Ok(Some(result)) => return Ok(result),
+                    Ok(None) => {}
+                    Err(error) => {
+                        signal.check()?;
+                        return Ok(ToolResult::error(match error {
+                            CommandError::Hands(e) => e.to_string(),
+                            CommandError::Observation(e) => e.to_string(),
+                            CommandError::Other(e) => format!("Kumi couldn't convert it: {}", head(&e, 200)),
+                        }));
+                    }
+                }
+            }
         }
         let Some(hands) = self.hands_ready().await else {
             return Ok(ToolResult::error(if cfg!(target_os = "macos") {
