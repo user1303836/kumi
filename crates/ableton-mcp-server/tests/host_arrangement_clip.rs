@@ -349,3 +349,175 @@ async fn arrangement_clip_apply_and_exact_key_undo_match_source() {
         same(&adapter.sim.state.borrow(), &row["state"], &format!("{label} state"));
     }
 }
+
+#[tokio::test]
+async fn a_take_lane_is_created_on_a_track_and_only_lives_undo_removes_it() {
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    let host = McpHost::new(sim, McpHostOptions::default()).unwrap();
+    let text = |reply: Value| -> Value { serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+    let preview = host
+        .dispatch_arrangement_clip_tool(
+            &ToolCall {
+                id: json!(1),
+                name: "live_arrangement_clip_preview".into(),
+                arguments: Some(json!({"action":"create-lane","trackRef":"track:track-1","name":"Comp"})),
+                asynchronous: true,
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let preview = text(preview);
+    assert_eq!((preview["action"].clone(), preview["impact"].clone()), (json!("create-lane"), json!("creates-take-lane-live-undo-only")));
+    assert_eq!(preview["payload"]["name"], json!("Comp"));
+    let transaction = preview["transactionId"].clone();
+    let applied = host
+        .live_arrangement_clip_apply_async(
+            &json!(2),
+            &json!({"transactionId":transaction,"confirmation":"apply","idempotencyKey":"lane-apply-0001"}),
+            None,
+        )
+        .await
+        .unwrap();
+    let applied = text(applied);
+    assert_eq!(applied["state"], json!("applied"));
+    assert_eq!(applied["result"]["name"], json!("Comp"));
+    assert!(applied["result"]["ref"].as_str().unwrap().starts_with("take-lane:"));
+    // Live's API deletes no take lane: Kumi's undo says Live's own undo takes it back.
+    let undone = host
+        .undo_arrangement_clip_async(
+            &json!(3),
+            &json!({"transactionId":transaction,"confirmation":"undo","idempotencyKey":"lane-undo-0001"}),
+            None,
+        )
+        .await;
+    let said = kumi_common::js::json::stringify(&undone);
+    assert!(said.contains("Live's own undo takes it back") && said.contains("Undo it in Live (Cmd-Z, or live_song_undo)"), "{undone}");
+    assert!(!said.contains("Preview the change again"), "a lane isn't previewed again to undo it: {undone}");
+    // A track that isn't there, and a bad name, are refused before Live is asked.
+    for args in
+        [json!({"action":"create-lane","trackRef":"track:nope"}), json!({"action":"create-lane","trackRef":"track:track-1","name":""})]
+    {
+        let reply = host
+            .dispatch_arrangement_clip_tool(
+                &ToolCall { id: json!(4), name: "live_arrangement_clip_preview".into(), arguments: Some(args), asynchronous: true },
+                None,
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(reply.get("error").is_some() || reply["result"]["isError"] == true, "{reply}");
+    }
+}
+
+/// A clip in a take lane lands only where the lane is free, on the lane's own MIDI track, unfrozen: Live lays it over
+/// what's in the lane (12.4.15b5: inside one splits it, over an edge trims it), and its API can't put a lane clip back.
+#[tokio::test]
+async fn a_clip_in_a_take_lane_lands_only_where_the_lane_is_free_on_its_own_unfrozen_midi_track() {
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    {
+        let mut state = sim.state.borrow_mut();
+        state["tracks"][0]["takeLanes"][0]["clips"] = json!([{
+            "ref":"take-lane-clip:take-lane:track-1:0:4","objectIdentity":"simulator:take-lane-clip:take","name":"Take","kind":"midi",
+            "start":4,"length":8,"notes":[],"isTakeLaneClip":true
+        }]);
+        let mut bass = state["tracks"][0].clone();
+        bass["ref"] = json!("track:track-2");
+        bass["objectIdentity"] = json!("simulator:track:track-2");
+        bass["name"] = json!("Bass");
+        bass["mediaKind"] = json!("audio");
+        bass["takeLanes"] = json!([{"ref":"take-lane:track-2:0","objectIdentity":"simulator:take-lane:track-2:0","parentRef":"track:track-2","trackRef":"track:track-2","name":"Comp","index":0,"clips":[]}]);
+        let mut fx = state["tracks"][0].clone();
+        fx["ref"] = json!("track:return-1");
+        fx["objectIdentity"] = json!("simulator:track:return-1");
+        fx["name"] = json!("A-Reverb");
+        fx["kind"] = json!("return");
+        fx["takeLanes"] = json!([]);
+        let mut group = fx.clone();
+        group["ref"] = json!("track:group-1");
+        group["objectIdentity"] = json!("simulator:track:group-1");
+        group["name"] = json!("Group");
+        group["kind"] = json!("group");
+        for track in [bass, fx, group] {
+            state["tracks"].as_array_mut().unwrap().push(track);
+        }
+    }
+    let host = McpHost::new(sim.clone(), McpHostOptions::default()).unwrap();
+    let preview = |arguments: Value| {
+        let host = &host;
+        async move {
+            let reply = host
+                .dispatch_arrangement_clip_tool(
+                    &ToolCall {
+                        id: json!(1),
+                        name: "live_arrangement_clip_preview".into(),
+                        arguments: Some(arguments),
+                        asynchronous: true,
+                    },
+                    None,
+                )
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            serde_json::from_str::<Value>(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+        }
+    };
+    let lane_clip = |position: f64, length: f64, lane: &str, track: &str| json!({"action":"create","takeLaneRef":lane,"trackRef":track,"position":position,"length":length,"name":"New"});
+    // Over "Take" (beats 4–12): refused, naming it.
+    let over = preview(lane_clip(6.0, 2.0, "take-lane:track-1:0", "track:track-1")).await;
+    let reason = over["reason"].as_str().unwrap_or_default();
+    assert!(reason.starts_with("“Take” (beats 4–12) is there in take lane “Take 1”: Live would cut it"), "{over}");
+    assert_eq!(over["remediation"], json!("Nothing changed in Live: fix what the reason says (or take another route) and preview again."));
+    // Beside it, touching either edge: a preview, naming the lane.
+    for (position, length) in [(12.0, 4.0), (0.0, 4.0)] {
+        let beside = preview(lane_clip(position, length, "take-lane:track-1:0", "track:track-1")).await;
+        assert_eq!(beside["impact"], json!("creates-take-lane-clip-no-undo"), "{beside}");
+        assert_eq!(beside["takeLane"], json!({"ref":"take-lane:track-1:0","name":"Take 1"}));
+    }
+    // A clip stretched into the span between preview and apply keeps its identity, so the lane's fence holds: the
+    // apply checks the span again.
+    let free = preview(lane_clip(12.0, 4.0, "take-lane:track-1:0", "track:track-1")).await;
+    sim.state.borrow_mut()["tracks"][0]["takeLanes"][0]["clips"][0]["length"] = json!(10);
+    let applied = host
+        .live_arrangement_clip_apply_async(
+            &json!(2),
+            &json!({"transactionId":free["transactionId"],"confirmation":"apply","idempotencyKey":"lane-stretch-0001"}),
+            None,
+        )
+        .await
+        .unwrap();
+    let applied: Value = serde_json::from_str(applied["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert!(applied["reason"].as_str().unwrap_or_default().starts_with("“Take” (beats 4–14) is there in take lane “Take 1”"), "{applied}");
+    sim.state.borrow_mut()["tracks"][0]["takeLanes"][0]["clips"][0]["length"] = json!(8);
+    // A clip with no name is called that.
+    sim.state.borrow_mut()["tracks"][0]["takeLanes"][0]["clips"][0]["name"] = json!("");
+    let unnamed = preview(lane_clip(6.0, 2.0, "take-lane:track-1:0", "track:track-1")).await;
+    assert!(unnamed["reason"].as_str().unwrap_or_default().starts_with("A clip with no name (beats 4–12) is there"), "{unnamed}");
+    sim.state.borrow_mut()["tracks"][0]["takeLanes"][0]["clips"][0]["name"] = json!("Take");
+    // Another track's lane, an audio track's lane, a frozen track's lane.
+    let elsewhere = preview(lane_clip(20.0, 4.0, "take-lane:track-2:0", "track:track-1")).await;
+    assert_eq!(
+        elsewhere["reason"],
+        json!("Take lane “Comp” is on “Bass”, not on that track: give “Bass”'s trackRef, or a lane of that track's.")
+    );
+    let audio = preview(lane_clip(20.0, 4.0, "take-lane:track-2:0", "track:track-2")).await;
+    assert!(audio["reason"].as_str().unwrap_or_default().starts_with("A MIDI clip can't go in an audio track's take lane"), "{audio}");
+    sim.state.borrow_mut()["tracks"][0]["isFrozen"] = json!(true);
+    let frozen = preview(lane_clip(20.0, 4.0, "take-lane:track-1:0", "track:track-1")).await;
+    assert!(
+        frozen["reason"].as_str().unwrap_or_default().starts_with("“Drums” is frozen, and Live puts no clips on a frozen track"),
+        "{frozen}"
+    );
+    // Tracks with no take lanes say why.
+    let returned = preview(json!({"action":"create-lane","trackRef":"track:return-1"})).await;
+    assert!(returned["reason"].as_str().unwrap_or_default().starts_with("Live's return and main tracks have no take lanes"), "{returned}");
+    let grouped = preview(json!({"action":"create-lane","trackRef":"track:group-1"})).await;
+    assert!(
+        grouped["reason"].as_str().unwrap_or_default().starts_with("A group track holds no clips, so it has no take lanes"),
+        "{grouped}"
+    );
+}

@@ -118,6 +118,7 @@ impl Ableton {
                     }),
                     user_library: options.user_library.clone(),
                     on_action: options.on_action.clone(),
+                    front_live: None,
                 },
                 Rc::new(move |name, args, signal| {
                     let action = action.clone();
