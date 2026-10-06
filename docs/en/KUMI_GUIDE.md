@@ -226,7 +226,7 @@ inside Live with Live's own API. A script's changes are one step in Live's
 undo, but they get no HISTORY entry; Live's undo takes them back.
 
 **What Live doesn't let scripts do:** map a macro or a modulator to a parameter
-(Willington can map macros: `/willington`), or edit the Arrangement's automation lanes. Kumi
+(Willington can map both: `/willington`), or edit the Arrangement's automation lanes. Kumi
 says so and suggests a way round. Saving, exporting, freezing, bouncing and
 grouping go through [Live's own commands](#lives-own-commands).
 

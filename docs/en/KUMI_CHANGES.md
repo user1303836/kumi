@@ -229,8 +229,9 @@ rack's chains stacked, with the new device lit:
 Live doesn't let scripts map a macro or a modulator to a parameter, set a
 macro's range or name a macro. Kumi says so and you do it in Live (Map, then
 click the parameter). With [Willington](WILLINGTON_INTEGRATION.md)'s bindings on
-(`/willington`), Kumi can name macros and map them; modulators still can't be
-mapped.
+(`/willington`), Kumi can name macros and map them, and map Live's LFO, Shaper,
+Envelope Follower and Expression Control modulators to parameters (through
+`run_python`).
 
 ## Samples and drum kits
 

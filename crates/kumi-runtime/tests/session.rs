@@ -899,8 +899,37 @@ local_test!(willington_instructions_follow_the_switch_each_time_the_kernel_is_ma
     h.session.refresh().await.unwrap();
     let instructions = h.record.created.borrow().last().unwrap().instructions.clone();
     assert!(instructions.contains("none fit the Live that's open") && !instructions.contains("/willington"));
+    // On, with Willington's mapping and Python in Live offered: the next kernel says modulators map, and how,
+    // rather than that they can't (a tutorial's LFOs were rebuilt with automation when it said so).
+    {
+        let tools = &mut h.observation.borrow_mut().tools;
+        tools.push(Rc::new(Offered("edit_rack_mapping")));
+        tools.push(Rc::new(Offered("run_python")));
+    }
+    h.session.reconfigure().await.unwrap();
+    h.session.refresh().await.unwrap();
+    let instructions = h.record.created.borrow().last().unwrap().instructions.clone();
+    assert!(instructions.contains("map_modulation(slot, parameter)") && !instructions.contains("can't be mapped"), "{instructions}");
     h.session.close().await.unwrap();
 });
+
+/// A tool the integration offers, by name only: what the instructions say depends on which are offered.
+struct Offered(&'static str);
+#[async_trait(?Send)]
+impl KernelTool for Offered {
+    fn name(&self) -> &str {
+        self.0
+    }
+    fn description(&self) -> &str {
+        "Offered."
+    }
+    fn input_schema(&self) -> JsonObject {
+        JsonObject::new()
+    }
+    async fn execute(&self, _: JsonObject, _: Signal) -> Result<ToolResult, RuntimeError> {
+        panic!("only offered")
+    }
+}
 
 #[derive(Clone)]
 struct Plan {

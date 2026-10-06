@@ -132,7 +132,7 @@ NOW では、読み込んだデバイスの行き先を表示します。トラ�
 ╰ Operator   … → Chorus-Ensemble
 ```
 
-Live では、スクリプトからマクロやモジュレーターをパラメータにマッピングすること、マクロの範囲を設定すること、マクロに名前を付けることができません。Kumi はそのことを伝え、あなたが Live で行います（Map を押してから、パラメータをクリック）。[Willington](WILLINGTON_INTEGRATION.md) のバインディングがオン（`/willington`）なら、Kumi はマクロに名前を付けてマッピングできますが、モジュレーターは引き続きマッピングできません。
+Live では、スクリプトからマクロやモジュレーターをパラメータにマッピングすること、マクロの範囲を設定すること、マクロに名前を付けることができません。Kumi はそのことを伝え、あなたが Live で行います（Map を押してから、パラメータをクリック）。[Willington](WILLINGTON_INTEGRATION.md) のバインディングがオン（`/willington`）なら、Kumi はマクロに名前を付けてマッピングでき、Live の LFO、Shaper、Envelope Follower、Expression Control の各モジュレーターも（`run_python` で）パラメータにマッピングできます。
 
 ## サンプルとドラムキット
 

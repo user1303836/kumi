@@ -132,7 +132,7 @@ Kumi 从不依赖 Live 的当前选择来把设备放进链中。原生设备按
 ╰ Operator   … → Chorus-Ensemble
 ```
 
-Live 不允许脚本把宏或调制器映射到参数、设置宏的范围或给宏命名。Kumi 会说明这一点，由你在 Live 中操作（点 Map，再点击参数）。[Willington](WILLINGTON_INTEGRATION.md) 的绑定开启时（`/willington`），Kumi 可以为宏命名并映射它们；调制器仍然无法映射。
+Live 不允许脚本把宏或调制器映射到参数、设置宏的范围或给宏命名。Kumi 会说明这一点，由你在 Live 中操作（点 Map，再点击参数）。[Willington](WILLINGTON_INTEGRATION.md) 的绑定开启时（`/willington`），Kumi 可以为宏命名并映射它们，还可以（通过 `run_python`）把 Live 的 LFO、Shaper、Envelope Follower 和 Expression Control 调制器映射到参数。
 
 ## 采样与鼓组
 
