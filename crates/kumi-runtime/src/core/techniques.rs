@@ -76,6 +76,36 @@ pub struct TechniqueDraft {
 pub trait TechniqueStore {
     async fn list(&self) -> Result<Vec<Technique>, RuntimeError>;
     async fn save(&self, techniques: &[Technique]) -> Result<(), RuntimeError>;
+    /// Keep a drafted technique: refining the one it replaces (or that has its name), or added with the
+    /// next id, the least worth keeping making room when the list is full. The technique as kept, and
+    /// whether it refined one.
+    async fn keep(&self, draft: TechniqueDraft, request: Option<String>, at: f64) -> Result<(Technique, bool), RuntimeError> {
+        let mut list = self.list().await?;
+        let (kept, refined, _) = keep_in(&mut list, draft, request, at);
+        self.save(&list).await?;
+        Ok((kept, refined))
+    }
+    /// A build that used it went in (`undone` false), or the producer undid one.
+    async fn record(&self, id: &str, undone: bool, at: f64) -> Result<(), RuntimeError> {
+        let mut list = self.list().await?;
+        let Some(found) = list.iter_mut().find(|t| t.id == id) else { return Ok(()) };
+        if undone {
+            found.used = (found.used - 1.0).max(0.0);
+            found.undone += 1.0;
+        } else {
+            found.used += 1.0;
+            found.last_used = Some(at);
+        }
+        self.save(&list).await
+    }
+    /// Forget a technique the producer no longer wants: the technique, if there was one.
+    async fn forget(&self, id: &str) -> Result<Option<Technique>, RuntimeError> {
+        let mut list = self.list().await?;
+        let Some(index) = list.iter().position(|t| t.id == id) else { return Ok(None) };
+        let found = list.remove(index);
+        self.save(&list).await?;
+        Ok(Some(found))
+    }
 }
 pub const MAX_TECHNIQUES: usize = 40;
 /// The most of the producer's request a technique keeps.
@@ -96,7 +126,8 @@ fn clean(value: &Value, max: usize) -> String {
         .chars()
         .map(|c| if matches!(c, '\x00'..='\x09' | '\x0b'..='\x1f' | '\u{7f}'..='\u{9f}') { ' ' } else { c })
         .collect();
-    string::head(string::trim(&SPACES.replace_all(&raw, " ")), max)
+    // Trimmed again after the cut, so cleaning what was cleaned changes nothing.
+    string::trim(&string::head(string::trim(&SPACES.replace_all(&raw, " ")), max)).to_string()
 }
 /// The producer's request as a technique keeps it: one line, cut short, and nothing that reads as orders.
 fn request_of(text: &str) -> Option<String> {
@@ -168,8 +199,7 @@ impl TechniqueStore for FileTechniqueStore {
             #[cfg(unix)]
             options.mode(0o600);
             let mut file = options.open(&temporary).await?;
-            let data = json!({"version":1,"techniques":&techniques[techniques.len().saturating_sub(MAX_TECHNIQUES)..]});
-            file.write_all(json::file_text(&data).as_bytes()).await?;
+            file.write_all(techniques_file(techniques).as_bytes()).await?;
             file.flush().await?;
             drop(file);
             tokio::fs::rename(&temporary, &self.file).await
@@ -182,6 +212,30 @@ impl TechniqueStore for FileTechniqueStore {
         Ok(())
     }
 }
+/// A techniques file as the store writes it: the newest the list keeps.
+pub(crate) fn techniques_file(techniques: &[Technique]) -> String {
+    json::file_text(&json!({"version":1,"techniques":&techniques[techniques.len().saturating_sub(MAX_TECHNIQUES)..]}))
+}
+fn technique_from(raw: &Value) -> Option<Technique> {
+    let body = check_technique(raw).ok()?;
+    let id = raw["id"].as_str().filter(|id| ID.is_match(id))?.to_owned();
+    let at = raw["at"].as_f64()?;
+    Some(Technique {
+        body,
+        id,
+        at,
+        used: raw["used"].as_f64().unwrap_or(0.0),
+        updated: raw["updated"].as_f64(),
+        last_used: raw["lastUsed"].as_f64(),
+        request: raw["request"].as_str().and_then(request_of),
+        undone: raw["undone"].as_f64().unwrap_or(0.0),
+    })
+}
+/// A technique read back from anywhere but one just made, as a file's would be read: what doesn't check
+/// out as a technique is left out.
+pub(crate) fn checked_technique(t: Technique) -> Option<Technique> {
+    technique_from(&serde_json::to_value(&t).ok()?)
+}
 /// The techniques a techniques file holds, as the store keeps them: what doesn't check out as a
 /// technique is left out, and a full file keeps its newest.
 pub fn parse_techniques(bytes: &[u8]) -> Vec<Technique> {
@@ -189,31 +243,74 @@ pub fn parse_techniques(bytes: &[u8]) -> Vec<Technique> {
     if value["version"].as_f64() != Some(1.0) {
         return vec![];
     }
-    let mut list: Vec<_> = value["techniques"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|raw| {
-            let body = check_technique(raw).ok()?;
-            let id = raw["id"].as_str().filter(|id| ID.is_match(id))?.to_owned();
-            let at = raw["at"].as_f64()?;
-            Some(Technique {
-                body,
-                id,
-                at,
-                used: raw["used"].as_f64().unwrap_or(0.0),
-                updated: raw["updated"].as_f64(),
-                last_used: raw["lastUsed"].as_f64(),
-                request: raw["request"].as_str().and_then(request_of),
-                undone: raw["undone"].as_f64().unwrap_or(0.0),
-            })
-        })
-        .collect();
+    let mut list: Vec<_> = value["techniques"].as_array().into_iter().flatten().filter_map(technique_from).collect();
     if list.len() > MAX_TECHNIQUES {
         list.drain(..list.len() - MAX_TECHNIQUES);
     }
     list
 }
+/// How a drafted technique is kept in `list`: refining the one it replaces (or that has its name), or
+/// added with the next id, the least worth keeping making room when the list is full. The technique as
+/// kept, whether it refined one, and the one that made room.
+pub(crate) fn keep_in(
+    list: &mut Vec<Technique>,
+    draft: TechniqueDraft,
+    request: Option<String>,
+    at: f64,
+) -> (Technique, bool, Option<Technique>) {
+    let mut evicted = None;
+    let index = draft
+        .replaces
+        .as_ref()
+        .filter(|s| !s.is_empty())
+        .and_then(|id| list.iter().position(|t| &t.id == id))
+        .or_else(|| list.iter().position(|t| t.body.name.to_lowercase() == draft.body.name.to_lowercase()));
+    let kept = if let Some(index) = index {
+        let old = &mut list[index];
+        old.body.name = draft.body.name;
+        old.body.fits = draft.body.fits;
+        old.body.idea = draft.body.idea;
+        if draft.body.settings.is_some() {
+            old.body.settings = draft.body.settings
+        }
+        if draft.body.substitutes.is_some() {
+            old.body.substitutes = draft.body.substitutes
+        }
+        if draft.body.recipe.is_some() {
+            old.body.recipe = draft.body.recipe
+        }
+        if draft.body.source.is_some() {
+            old.body.source = draft.body.source
+        }
+        // A refinement keeps the request the technique came from.
+        if old.request.is_none() {
+            old.request = request
+        }
+        old.updated = Some(at);
+        old.clone()
+    } else {
+        let id =
+            format!("t{}", 1 + list.iter().filter_map(|t| t.id.strip_prefix('t').and_then(|n| n.parse::<u64>().ok())).max().unwrap_or(0));
+        let kept = Technique { body: draft.body, id, at, used: 0.0, updated: None, last_used: None, request, undone: 0.0 };
+        if list.len() >= MAX_TECHNIQUES {
+            // The fewest uses that stuck go first (undone ones count against it), then the longest unused.
+            let worth = |t: &Technique| t.used - t.undone;
+            let least = list
+                .iter()
+                .enumerate()
+                .min_by(|(ia, a), (ib, b)| {
+                    worth(a).total_cmp(&worth(b)).then(a.last_used.unwrap_or(a.at).total_cmp(&b.last_used.unwrap_or(b.at))).then(ia.cmp(ib))
+                })
+                .map(|(i, _)| i)
+                .unwrap();
+            evicted = Some(list.remove(least));
+        }
+        list.push(kept.clone());
+        kept
+    };
+    (kept, index.is_some(), evicted)
+}
+
 pub fn technique_instructions(techniques: &[Technique]) -> String {
     if techniques.is_empty() {
         return String::new();
@@ -558,73 +655,9 @@ impl TechniqueService {
         let this = self.clone();
         self.queue.run(
             async move {
-                let mut list = this.store.list().await?;
-                let index = draft
-                    .replaces
-                    .as_ref()
-                    .filter(|s| !s.is_empty())
-                    .and_then(|id| list.iter().position(|t| &t.id == id))
-                    .or_else(|| list.iter().position(|t| t.body.name.to_lowercase() == draft.body.name.to_lowercase()));
-                let kept = if let Some(index) = index {
-                    let old = &mut list[index];
-                    old.body.name = draft.body.name;
-                    old.body.fits = draft.body.fits;
-                    old.body.idea = draft.body.idea;
-                    if draft.body.settings.is_some() {
-                        old.body.settings = draft.body.settings
-                    }
-                    if draft.body.substitutes.is_some() {
-                        old.body.substitutes = draft.body.substitutes
-                    }
-                    if draft.body.recipe.is_some() {
-                        old.body.recipe = draft.body.recipe
-                    }
-                    if draft.body.source.is_some() {
-                        old.body.source = draft.body.source
-                    }
-                    // A refinement keeps the request the technique came from.
-                    if old.request.is_none() {
-                        old.request = request
-                    }
-                    old.updated = Some(now_ms() as f64);
-                    old.clone()
-                } else {
-                    let id = format!(
-                        "t{}",
-                        1 + list.iter().filter_map(|t| t.id.strip_prefix('t').and_then(|n| n.parse::<u64>().ok())).max().unwrap_or(0)
-                    );
-                    let kept = Technique {
-                        body: draft.body,
-                        id,
-                        at: now_ms() as f64,
-                        used: 0.0,
-                        updated: None,
-                        last_used: None,
-                        request,
-                        undone: 0.0,
-                    };
-                    if list.len() >= MAX_TECHNIQUES {
-                        // The fewest uses that stuck go first (undone ones count against it), then the longest unused.
-                        let worth = |t: &Technique| t.used - t.undone;
-                        let least = list
-                            .iter()
-                            .enumerate()
-                            .min_by(|(ia, a), (ib, b)| {
-                                worth(a)
-                                    .total_cmp(&worth(b))
-                                    .then(a.last_used.unwrap_or(a.at).total_cmp(&b.last_used.unwrap_or(b.at)))
-                                    .then(ia.cmp(ib))
-                            })
-                            .map(|(i, _)| i)
-                            .unwrap();
-                        list.remove(least);
-                    }
-                    list.push(kept.clone());
-                    kept
-                };
-                this.store.save(&list).await?;
+                let (kept, refined) = this.store.keep(draft, request, now_ms() as f64).await?;
                 (this.on_event)(TechniqueEvent {
-                    action: if index.is_some() { TechniqueAction::Updated } else { TechniqueAction::Kept },
+                    action: if refined { TechniqueAction::Updated } else { TechniqueAction::Kept },
                     technique: summary(&kept),
                 });
                 Ok(())
@@ -634,27 +667,18 @@ impl TechniqueService {
     }
     /// A build that used it went in: it counts, and it's the latest one used.
     fn used(self: &Rc<Self>, id: String) -> LocalBoxFuture<'static, ()> {
-        self.update(id, |t| {
-            t.used += 1.0;
-            t.last_used = Some(now_ms() as f64);
-        })
+        self.record(id, false)
     }
     /// The producer undid a build that used it: the use is taken back and counts against it when the list
     /// is full and something has to make room.
     fn undone(self: &Rc<Self>, id: String) -> LocalBoxFuture<'static, ()> {
-        self.update(id, |t| {
-            t.used = (t.used - 1.0).max(0.0);
-            t.undone += 1.0;
-        })
+        self.record(id, true)
     }
-    fn update(self: &Rc<Self>, id: String, change: impl FnOnce(&mut Technique) + 'static) -> LocalBoxFuture<'static, ()> {
+    fn record(self: &Rc<Self>, id: String, undone: bool) -> LocalBoxFuture<'static, ()> {
         let this = self.clone();
         self.queue.run(
             async move {
-                let Ok(mut list) = this.store.list().await else { return };
-                let Some(found) = list.iter_mut().find(|t| t.id == id) else { return };
-                change(found);
-                let _ = this.store.save(&list).await;
+                let _ = this.store.record(&id, undone, now_ms() as f64).await;
             }
             .boxed_local(),
         )
@@ -663,10 +687,7 @@ impl TechniqueService {
         let this = self.clone();
         self.queue.run(
             async move {
-                let mut list = this.store.list().await?;
-                let Some(index) = list.iter().position(|t| t.id == id) else { return Ok(None) };
-                let found = list.remove(index);
-                this.store.save(&list).await?;
+                let Some(found) = this.store.forget(&id).await? else { return Ok(None) };
                 (this.on_event)(TechniqueEvent { action: TechniqueAction::Forgot, technique: summary(&found) });
                 Ok(Some(found))
             }

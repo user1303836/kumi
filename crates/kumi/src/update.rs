@@ -222,6 +222,9 @@ pub async fn run_update(io: UpdateIo) -> i32 {
     let version = read_version(&join(&repo, "package.json")).unwrap_or(KUMI_VERSION.into());
     let bundled = read_cargo_version(&join(&repo, "crates/ableton-mcp-server/Cargo.toml"));
     say(if behind > 0. { format!("Kumi is now {version}.") } else { format!("Kumi is up to date ({version}).") });
+    if let Some(open) = (behind > 0.).then(crate::install::still_open).flatten() {
+        say(open);
+    }
     let bridge = older_bridge(&io.env, bundled.as_deref());
     if find_bridge_config(&io.env).is_none() {
         say(format!("To connect Live, quit Live, then run: {} bridge", *KUMI));

@@ -25,7 +25,7 @@ pub fn add(connection: &Connection, gap: &Gap) -> Result<(), StoreError> {
 /// The gaps noted, oldest first.
 pub fn all(connection: &Connection) -> Result<Vec<Gap>, StoreError> {
     let mut statement =
-        connection.prepare_cached("SELECT kumi_version, missing, asked, workaround, created_at FROM gaps ORDER BY created_at, id")?;
+        connection.prepare_cached("SELECT kumi_version, missing, asked, workaround, created_at FROM gaps ORDER BY created_at, rowid")?;
     let rows = statement.query_map([], |row| {
         Ok(Gap { kumi_version: row.get(0)?, missing: row.get(1)?, asked: row.get(2)?, workaround: row.get(3)?, at: row.get(4)? })
     })?;

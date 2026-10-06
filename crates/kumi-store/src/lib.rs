@@ -13,11 +13,13 @@ pub mod lessons;
 pub mod notes;
 mod reader;
 mod schema;
+pub mod sync;
 pub mod techniques;
 mod writer;
 
 pub use rusqlite::{params, Connection, OptionalExtension};
 pub use schema::SCHEMA_VERSION;
+pub use sync::{BaseRow, Kept};
 
 use reader::Readers;
 use std::{
@@ -132,6 +134,20 @@ impl Store {
     pub fn read<T>(&self, job: impl FnOnce(&Connection) -> Result<T, StoreError>) -> Result<T, StoreError> {
         self.0.readers.read(job)
     }
+}
+
+/// Read the database at `path` as it is, writing nothing (no migration, no writer, a `query_only`
+/// connection) and never waiting on another Kumi's write: for `kumi report`. A database from a newer
+/// Kumi isn't read.
+pub fn read_only<T>(path: impl AsRef<Path>, job: impl FnOnce(&Connection) -> Result<T, StoreError>) -> Result<T, StoreError> {
+    let connection =
+        Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+    connection.pragma_update(None, "query_only", true)?;
+    let found = connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))?.max(0) as usize;
+    if found > SCHEMA_VERSION {
+        return Err(StoreError::Newer { found, known: SCHEMA_VERSION });
+    }
+    job(&connection)
 }
 
 /// The database's folder (only the producer's) and file (only theirs): SQLite gives the WAL files the

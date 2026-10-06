@@ -1,5 +1,5 @@
 use kumi_runtime::core::store_import::{import_json, Imported, JsonFiles};
-use kumi_store::{gaps, lessons, notes, techniques, Scope, Store};
+use kumi_store::{gaps, lessons, notes, techniques, Kept, Scope, Store};
 use serde_json::json;
 use std::{path::Path, sync::Arc, time::SystemTime};
 
@@ -65,7 +65,7 @@ fn what_earlier_kumis_kept_in_files_is_read_in_once_and_the_files_are_left_as_th
     let (folder, files) = home();
     let before = fingerprint(&files);
     let store = Store::open(folder.path().join("kumi.db")).unwrap();
-    assert_eq!(import_json(&store, &files, 9000).unwrap(), Imported { files: 5, rows: 8 });
+    assert_eq!(import_json(&store, &files, 9000).unwrap(), Imported { files: 5, rows: 8, ..Imported::default() });
     assert_eq!(fingerprint(&files), before, "the files are never written");
 
     assert_eq!(
@@ -90,7 +90,7 @@ fn what_earlier_kumis_kept_in_files_is_read_in_once_and_the_files_are_left_as_th
 }
 
 #[test]
-fn a_file_an_older_kumi_changed_adds_what_it_added_and_never_brings_back_a_forgotten_note() {
+fn a_file_an_older_kumi_changed_brings_in_its_edits_and_new_notes_and_never_a_forgotten_one() {
     let (folder, files) = home();
     let store = Store::open(folder.path().join("kumi.db")).unwrap();
     import_json(&store, &files, 9000).unwrap();
@@ -103,17 +103,13 @@ fn a_file_an_older_kumi_changed_adds_what_it_added_and_never_brings_back_a_forgo
         {"id":"p2","text":"Names drum tracks in capitals, always","at":9200,"pinned":true},
         {"id":"p3","text":"Works at 140","at":9300}]}),
     );
-    assert_eq!(import_json(&store, &files, 9400).unwrap(), Imported { files: 1, rows: 2 });
-    let now = labels_and_texts(&store, Scope::Global);
-    let texts: Vec<&str> = now.iter().map(|(_, text)| text.as_str()).collect();
-    assert_eq!(texts.len(), 3, "{now:?}");
-    for text in ["Names drum tracks in capitals", "Names drum tracks in capitals, always", "Works at 140"] {
-        assert!(texts.contains(&text), "{text} is kept: {now:?}");
-    }
-    assert!(!texts.contains(&"Likes short reverbs on drums"), "a forgotten note stays forgotten");
-    let mut labels: Vec<&str> = now.iter().map(|(label, _)| label.as_str()).collect();
-    labels.dedup();
-    assert_eq!(labels.len(), 3, "no two notes share a label: {now:?}");
+    let imported = import_json(&store, &files, 9400).unwrap();
+    assert_eq!((imported.files, imported.brought_in.notes), (1, Kept { added: 1, changed: 1, archived: 0, both: 0 }));
+    assert_eq!(
+        labels_and_texts(&store, Scope::Global),
+        [("p2".into(), "Names drum tracks in capitals, always".into()), ("p3".into(), "Works at 140".into())],
+        "p2 reworded in its place, p3 added, and p1, forgotten here, stays forgotten"
+    );
 }
 
 #[test]
@@ -136,7 +132,7 @@ fn a_note_written_back_for_an_older_kumi_is_the_same_note_when_read_in_again() {
         .map(|n| json!({"id":n.label,"text":n.text,"at":n.at,"pinned":n.pinned}))
         .collect();
     write(&files.memory, &json!({"version":1,"notes":written}));
-    assert_eq!(import_json(&store, &files, 9600).unwrap(), Imported { files: 1, rows: 0 });
+    assert_eq!(import_json(&store, &files, 9600).unwrap(), Imported { files: 1, ..Imported::default() });
     assert_eq!(labels_and_texts(&store, Scope::Global).len(), 3);
 }
 

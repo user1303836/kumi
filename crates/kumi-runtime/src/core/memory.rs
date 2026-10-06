@@ -1,7 +1,7 @@
 //! Notes kept between conversations, in the producer's words, about the producer and each saved Set.
 
 use super::{
-    contracts::{JsonObject, KernelTool, Memory, MemoryEvent, MemoryNote, MemoryScope, MemoryStore, NoteChange, ToolResult},
+    contracts::{JsonObject, KernelTool, Memory, MemoryEvent, MemoryNote, MemoryScope, MemoryStore, NoteChange, Remembering, ToolResult},
     errors::RuntimeError,
 };
 use async_trait::async_trait;
@@ -41,7 +41,8 @@ static SUSPECT: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 
 fn clean(text: &str) -> String {
     let controls: String = text.chars().map(|c| if c <= '\u{1f}' || ('\u{7f}'..='\u{9f}').contains(&c) { ' ' } else { c }).collect();
-    string::head(SPACE.replace_all(&controls, " ").trim(), MAX_NOTE)
+    // Trimmed again after the cut, so cleaning what was cleaned changes nothing.
+    string::head(SPACE.replace_all(&controls, " ").trim(), MAX_NOTE).trim().to_string()
 }
 pub fn suspect_note(text: &str) -> bool {
     SUSPECT.iter().any(|pattern| pattern.is_match(text))
@@ -51,7 +52,7 @@ fn droppable(notes: &[MemoryNote]) -> Option<usize> {
     notes.iter().enumerate().filter(|(_, n)| !n.pinned).min_by_key(|(_, n)| n.at).map(|(i, _)| i)
 }
 /// At most MAX_NOTES, dropping the oldest unpinned notes first.
-fn fit(notes: &mut Vec<MemoryNote>) {
+pub(crate) fn fit(notes: &mut Vec<MemoryNote>) {
     while notes.len() > MAX_NOTES {
         let index = droppable(notes).unwrap_or(0);
         notes.remove(index);
@@ -95,22 +96,79 @@ pub fn parse_notes(bytes: &[u8], prefix: char) -> Vec<MemoryNote> {
     let Some(notes) = value["notes"].as_array() else {
         return vec![];
     };
-    let mut found: Vec<_> = notes
-        .iter()
-        .filter_map(|raw| {
-            let id = raw["id"].as_str()?;
-            let digits = id.strip_prefix(prefix)?;
-            if digits.is_empty() || digits.len() > 4 || !digits.bytes().all(|b| b.is_ascii_digit()) {
-                return None;
-            }
-            let text = clean(raw["text"].as_str()?);
-            let at = raw["at"].as_i64()?;
-            let pinned = raw["pinned"] == true;
-            (!text.is_empty() && !suspect_note(&text)).then(|| MemoryNote { id: id.into(), text, at, pinned })
-        })
-        .collect();
+    let mut found: Vec<_> = notes.iter().filter_map(|raw| note_from(raw, prefix)).collect();
     fit(&mut found);
     found
+}
+fn note_from(raw: &Value, prefix: char) -> Option<MemoryNote> {
+    let id = raw["id"].as_str()?;
+    let digits = id.strip_prefix(prefix)?;
+    if digits.is_empty() || digits.len() > 4 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let text = clean(raw["text"].as_str()?);
+    let at = raw["at"].as_i64()?;
+    let pinned = raw["pinned"] == true;
+    (!text.is_empty() && !suspect_note(&text)).then(|| MemoryNote { id: id.into(), text, at, pinned })
+}
+/// A note read back from anywhere but a note just made, as a file's would be read: what doesn't read as
+/// a note (a bad id, no words, words that read as instructions or a secret) is left out.
+pub(crate) fn checked_note(note: MemoryNote, scope: MemoryScope) -> Option<MemoryNote> {
+    note_from(&serde_json::to_value(&note).ok()?, prefix(scope))
+}
+pub(crate) fn prefix(scope: MemoryScope) -> char {
+    if scope == MemoryScope::Set {
+        's'
+    } else {
+        'p'
+    }
+}
+/// How a note is kept among `notes`: in place of the one it replaces (keeping its pin), or added with
+/// the next id, the oldest unpinned making room when the list is full. The list as it is after.
+pub(crate) fn remember_in(notes: &mut Vec<MemoryNote>, scope: MemoryScope, text: &str, replaces: Option<&str>, at: i64) -> Remembering {
+    let replaces = replaces.filter(|s| !s.is_empty());
+    let replacing = match replaces {
+        Some(id) => match notes.iter().position(|n| n.id == id) {
+            Some(index) => Some(index),
+            None => return Remembering::NoSuchNote,
+        },
+        None => None,
+    };
+    let oldest = if replacing.is_none() && notes.len() >= MAX_NOTES {
+        match droppable(notes) {
+            Some(oldest) => Some(oldest),
+            None => return Remembering::AllPinned,
+        }
+    } else {
+        None
+    };
+    let note = MemoryNote {
+        id: replacing.map(|i| notes[i].id.clone()).unwrap_or_else(|| next_id(notes, prefix(scope))),
+        text: text.into(),
+        at,
+        pinned: replacing.is_some_and(|i| notes[i].pinned),
+    };
+    let replaced = replacing.or(oldest).map(|i| notes.remove(i));
+    notes.push(note.clone());
+    Remembering::Kept { note, replaced }
+}
+/// A memory file as the store writes it: `notes`, fitted to the most a scope keeps.
+pub(crate) fn notes_file(notes: &[MemoryNote]) -> String {
+    let mut notes = notes.to_vec();
+    fit(&mut notes);
+    json::file_text(&json!({"version": 1, "notes": notes}))
+}
+/// Notes kept while a Set was unsaved, added to its notes now that it's saved, while there's room.
+pub(crate) fn add_in(notes: &mut Vec<MemoryNote>, scope: MemoryScope, texts: &[String], at: i64) -> Vec<MemoryNote> {
+    let mut added = vec![];
+    for text in texts {
+        if notes.len() < MAX_NOTES {
+            let note = MemoryNote { id: next_id(notes, prefix(scope)), text: text.clone(), at, pinned: false };
+            notes.push(note.clone());
+            added.push(note);
+        }
+    }
+    added
 }
 #[async_trait(?Send)]
 impl MemoryStore for FileMemoryStore {
@@ -124,8 +182,7 @@ impl MemoryStore for FileMemoryStore {
     }
     async fn save(&self, scope: MemoryScope, project: Option<&str>, notes: &[MemoryNote]) -> Result<(), RuntimeError> {
         let file = self.file_of(scope, project)?;
-        let mut notes = notes.to_vec();
-        fit(&mut notes);
+        let text = notes_file(notes);
         let folder = file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
         let mut builder = tokio::fs::DirBuilder::new();
         builder.recursive(true);
@@ -139,7 +196,7 @@ impl MemoryStore for FileMemoryStore {
             #[cfg(unix)]
             options.mode(0o600);
             let mut handle = options.open(&temporary).await?;
-            handle.write_all(json::file_text(&json!({"version": 1, "notes": notes})).as_bytes()).await?;
+            handle.write_all(text.as_bytes()).await?;
             handle.flush().await?;
             drop(handle);
             tokio::fs::rename(&temporary, file).await
@@ -237,43 +294,22 @@ impl State {
             (self.options.on_event)(MemoryEvent::Remembered { scope, note, pending: Some(true), replaced: None });
             return Ok(quiet(json!({"kept": "once the Set is saved"})));
         }
-        let memory = self.options.store.load(project.as_deref()).await?;
-        let mut notes = if scope == MemoryScope::Set { memory.set } else { memory.producer };
-        let replacing = replaces.filter(|s| !s.is_empty()).and_then(|id| notes.iter().position(|n| n.id == id));
-        if let Some(id) = replaces.filter(|s| !s.is_empty()) {
-            if replacing.is_none() {
-                return Ok(ToolResult::error(format!(
-                    "There's no note {} about {}; leave replaces out to add one.",
-                    string::head(id, 16),
-                    if scope == MemoryScope::Set { "this Set" } else { "the producer" }
-                )));
+        match self.options.store.remember(scope, project.as_deref(), &text, replaces, now_ms()).await? {
+            Remembering::Kept { note, replaced } => {
+                let result = quiet(json!({"kept": note.id}));
+                (self.options.on_event)(MemoryEvent::Remembered { scope, note, replaced, pending: None });
+                Ok(result)
             }
+            Remembering::NoSuchNote => Ok(ToolResult::error(format!(
+                "There's no note {} about {}; leave replaces out to add one.",
+                string::head(replaces.unwrap_or(""), 16),
+                if scope == MemoryScope::Set { "this Set" } else { "the producer" }
+            ))),
+            Remembering::AllPinned => Ok(ToolResult::error(format!(
+                "The producer pinned all {MAX_NOTES} notes about {}, so none can make room. Pass replaces with the id of one this updates, or ask them to unpin or forget one in /memory.",
+                if scope == MemoryScope::Set { "this Set" } else { "them" }
+            ))),
         }
-        let oldest = if replacing.is_none() && notes.len() >= MAX_NOTES {
-            let Some(oldest) = droppable(&notes) else {
-                return Ok(ToolResult::error(format!(
-                    "The producer pinned all {MAX_NOTES} notes about {}, so none can make room. Pass replaces with the id of one this updates, or ask them to unpin or forget one in /memory.",
-                    if scope == MemoryScope::Set { "this Set" } else { "them" }
-                )));
-            };
-            Some(oldest)
-        } else {
-            None
-        };
-        let note = MemoryNote {
-            id: replacing
-                .map(|i| notes[i].id.clone())
-                .unwrap_or_else(|| next_id(&notes, if scope == MemoryScope::Set { 's' } else { 'p' })),
-            text,
-            at: now_ms(),
-            pinned: replacing.is_some_and(|i| notes[i].pinned),
-        };
-        let replaced = replacing.or(oldest).map(|i| notes.remove(i));
-        notes.push(note.clone());
-        self.options.store.save(scope, project.as_deref(), &notes).await?;
-        let result = quiet(json!({"kept": note.id}));
-        (self.options.on_event)(MemoryEvent::Remembered { scope, note, replaced, pending: None });
-        Ok(result)
     }
     async fn forget(&self, id: &str) -> Result<Option<MemoryNote>, RuntimeError> {
         let scope = if id.starts_with('p') { MemoryScope::Producer } else { MemoryScope::Set };
@@ -296,13 +332,9 @@ impl State {
             (self.options.on_event)(MemoryEvent::Forgot { scope, note: note.clone() });
             return Ok(Some(note));
         }
-        let memory = self.options.store.load(project.as_deref()).await?;
-        let mut notes = if scope == MemoryScope::Set { memory.set } else { memory.producer };
-        let Some(index) = notes.iter().position(|n| n.id == id) else {
+        let Some(note) = self.options.store.forget(scope, project.as_deref(), id).await? else {
             return Ok(None);
         };
-        let note = notes.remove(index);
-        self.options.store.save(scope, project.as_deref(), &notes).await?;
         (self.options.on_event)(MemoryEvent::Forgot { scope, note: note.clone() });
         Ok(Some(note))
     }
@@ -320,12 +352,7 @@ impl MemoryTools {
         if scope == MemoryScope::Set && project.is_none() {
             return Ok(None);
         }
-        let memory = self.state.options.store.load(project.as_deref()).await?;
-        let mut notes = if scope == MemoryScope::Set { memory.set } else { memory.producer };
-        let Some(note) = notes.iter_mut().find(|n| n.id == id) else {
-            return Ok(None);
-        };
-        match change {
+        let change = match change {
             NoteChange::Text(text) => {
                 let text = clean(&text);
                 if text.is_empty() {
@@ -334,14 +361,11 @@ impl MemoryTools {
                 if suspect_note(&text) {
                     return Err(RuntimeError::plain("That reads as instructions or a secret, so Kumi won't keep it as a note."));
                 }
-                note.text = text;
-                note.at = now_ms();
+                NoteChange::Text(text)
             }
-            NoteChange::Pinned(pinned) => note.pinned = pinned,
-        }
-        let note = note.clone();
-        self.state.options.store.save(scope, project.as_deref(), &notes).await?;
-        Ok(Some(note))
+            pinned => pinned,
+        };
+        self.state.options.store.change(scope, project.as_deref(), id, change, now_ms()).await
     }
     pub async fn flush(&self) -> Result<(), RuntimeError> {
         let Some(project) = (self.state.options.project)() else {
@@ -353,13 +377,7 @@ impl MemoryTools {
             return Ok(());
         }
         let _serial = self.state.serial.lock().await;
-        let mut notes = self.state.options.store.load(Some(&project)).await?.set;
-        for text in texts {
-            if notes.len() < MAX_NOTES {
-                notes.push(MemoryNote { id: next_id(&notes, 's'), text, at: now_ms(), pinned: false });
-            }
-        }
-        self.state.options.store.save(MemoryScope::Set, Some(&project), &notes).await
+        self.state.options.store.add(MemoryScope::Set, Some(&project), &texts, now_ms()).await
     }
 }
 struct NoteTool {
