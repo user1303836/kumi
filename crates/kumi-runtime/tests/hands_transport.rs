@@ -10,7 +10,7 @@ fn embedded_helpers_keep_their_hashes() {
     assert_eq!(HANDS_VERSION, 2);
     for (source, expected) in [
         (mac::MAC_SOURCE, "16045380d38220f9dfd1a6dd318dac9b655fc41758f2531efc46ab97f82a7ba3"),
-        (windows::WINDOWS_SOURCE, "2049777001cf9014ca8cf8038e6a23f01008ca11592c81949d1f4040037c9cf5"),
+        (windows::WINDOWS_SOURCE, "355ee9c9143d57eb6fe0b3bbf2b792b0de168a9aa52fb2489fc8139fc84b2c9f"),
     ] {
         assert_eq!(hex::encode(Sha256::digest(source)), expected);
     }
@@ -82,7 +82,8 @@ async fn helpers_are_reused_and_each_operation_has_source_fields_and_results() {
             open: true,
             title: Some("Export".into()),
             words: Some(vec!["Choose a file".into()]),
-            buttons: Some(vec!["Cancel".into(), "Export".into()])
+            buttons: Some(vec!["Cancel".into(), "Export".into()]),
+            file: None
         }
     );
     assert!(hands.answer("Cancel", None).await.unwrap().ok);
@@ -156,11 +157,13 @@ async fn native_mac_helper_compiles_and_answers_without_requesting_access() {
 }
 
 /// A stand-in for Live on Windows: a window with a Win32 menu bar (which Live's UI Automation tree leaves
-/// out, #192), a Yes / No / Cancel prompt and a Save dialog, both owned by it (#187, #189). It says what
-/// happened on its stdout.
+/// out, #192), a Yes / No / Cancel prompt, and Windows' own Save and Open dialogs, all owned by it (#187,
+/// #189). It says what happened on its stdout.
 #[cfg(windows)]
 const STAND_IN: &str = r#"
 Add-Type -AssemblyName System.Windows.Forms
+# Windows' file dialogs stop at a home without its usual folders (a test's own home): they're made there.
+foreach ($name in 'Desktop', 'Documents', 'Downloads', 'Music', 'Pictures', 'Videos') { New-Item -ItemType Directory -Force (Join-Path $env:USERPROFILE $name) | Out-Null }
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'Kumi hands test'
 $form.Width = 420; $form.Height = 200
@@ -171,7 +174,9 @@ $new = $file.MenuItems.Add('&New Live Set')
 $new.Shortcut = [System.Windows.Forms.Shortcut]::CtrlN
 $new.add_Click({ $choice = [System.Windows.Forms.MessageBox]::Show($form, 'Save changes to "Test" before closing?', 'Ableton Live', 'YesNoCancel'); Say "answered $choice" })
 $saveAs = $file.MenuItems.Add('Save Live Set &As...')
-$saveAs.add_Click({ $dialog = New-Object System.Windows.Forms.SaveFileDialog; $dialog.Title = 'Save Live Set As'; if ($dialog.ShowDialog($form) -eq 'OK') { Say "saved $($dialog.FileName)" } else { Say 'save cancelled' } })
+$saveAs.add_Click({ $dialog = New-Object System.Windows.Forms.SaveFileDialog; $dialog.Title = 'Save Live Set As'; $dialog.InitialDirectory = $PSScriptRoot; if ($dialog.ShowDialog($form) -eq 'OK') { Say "saved $($dialog.FileName)" } else { Say 'save cancelled' } })
+$open = $file.MenuItems.Add('&Open Live Set...')
+$open.add_Click({ $dialog = New-Object System.Windows.Forms.OpenFileDialog; $dialog.Title = 'Open Live Set'; $dialog.InitialDirectory = $PSScriptRoot; if ($dialog.ShowDialog($form) -eq 'OK') { Say "opened $($dialog.FileName)" } else { Say 'open cancelled' } })
 $file.MenuItems.Add('-') | Out-Null
 $file.MenuItems.Add('E&xit') | Out-Null
 $edit = $menu.MenuItems.Add('&Edit')
@@ -235,7 +240,7 @@ async fn on_windows_the_helper_uses_the_win32_menu_finds_the_owned_dialog_and_fi
     assert_eq!(next(&mut said).await.as_deref(), Some("group"));
     let freeze = hands.menu(&["Edit".into(), "Freeze Track".into()], MenuOptions::default()).await.unwrap();
     assert_eq!(freeze.error.as_deref(), Some("disabled"));
-    assert!(hands.dialog(None).await.unwrap() == Dialog { open: false, title: None, words: None, buttons: None });
+    assert!(hands.dialog(None).await.unwrap() == Dialog { open: false, title: None, words: None, buttons: None, file: None });
 
     // An item that opens a modal prompt answers at once, and the prompt is the dialog: its own words and
     // buttons, not the main window's. "Don't Save" is Windows' No.
@@ -260,12 +265,58 @@ async fn on_windows_the_helper_uses_the_win32_menu_finds_the_owned_dialog_and_fi
     assert_eq!(answered.fields["pressed"], "No");
     assert_eq!(next(&mut said).await.as_deref(), Some("answered No"));
 
-    // A Save dialog filled with a path and saved.
+    // A Save dialog filled with a path and saved. It says it's a Save dialog.
+    async fn opened(hands: &dyn Hands, until: impl Fn(&Dialog) -> bool) -> Dialog {
+        let mut dialog = hands.dialog(None).await.unwrap();
+        for _ in 0..30 {
+            if until(&dialog) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            dialog = hands.dialog(None).await.unwrap();
+        }
+        dialog
+    }
+    // Windows' dialogs answer with a folder's long name, where a temporary folder can come as an 8.3 short
+    // name (RUNNER~1 on CI).
+    let long = folder.path().canonicalize().unwrap().to_string_lossy().into_owned();
+    let place = std::path::PathBuf::from(long.strip_prefix(r"\\?\").unwrap_or(&long));
     assert!(hands.menu(&["File".into(), "Save Live Set As".into()], MenuOptions::default()).await.unwrap().ok);
-    let path = folder.path().join("CHAOS 02.als");
-    let saved = hands.file(&path.to_string_lossy(), None).await.unwrap();
+    let saving = opened(&*hands, |d| d.file.is_some()).await;
+    assert_eq!(saving.file.as_deref(), Some("save"), "{saving:?}");
+    let path = place.join("CHAOS 02.als");
+    let saved = hands.file(&path.to_string_lossy(), "save", None).await.unwrap();
     assert!(saved.ok, "{saved:?}");
     assert_eq!(next(&mut said).await, Some(format!("saved {}", path.display())));
+
+    // An Open dialog, whatever Windows' language: a path meant for a Save dialog doesn't go into it, and the
+    // one to open does (#189).
+    let song = place.join("Song B.als");
+    std::fs::write(&song, b"the producer's song").unwrap();
+    assert!(hands.menu(&["File".into(), "Open Live Set".into()], MenuOptions::default()).await.unwrap().ok);
+    let opening = opened(&*hands, |d| d.file.is_some()).await;
+    assert_eq!(opening.file.as_deref(), Some("open"), "{opening:?}");
+    let refused = hands.file(&song.to_string_lossy(), "save", None).await.unwrap();
+    assert_eq!((refused.ok, refused.error.as_deref()), (false, Some("other-dialog")), "{refused:?}");
+    let taken = hands.file(&song.to_string_lossy(), "open", None).await.unwrap();
+    assert!(taken.ok, "{taken:?}");
+    assert_eq!(next(&mut said).await, Some(format!("opened {}", song.display())));
+
+    // Saving over that file: Windows asks whether to replace it. Neither Save nor OK is its Yes; No keeps
+    // the file, and the Save dialog is still there to cancel.
+    assert!(hands.menu(&["File".into(), "Save Live Set As".into()], MenuOptions::default()).await.unwrap().ok);
+    assert_eq!(opened(&*hands, |d| d.file.is_some()).await.file.as_deref(), Some("save"));
+    assert!(hands.file(&song.to_string_lossy(), "save", None).await.unwrap().ok);
+    let replace = opened(&*hands, |d| d.open && d.file.is_none()).await;
+    assert!(replace.open && replace.file.is_none(), "{replace:?}");
+    for not_yes in ["Save", "OK"] {
+        assert_eq!(hands.answer(not_yes, None).await.unwrap().error.as_deref(), Some("no-button"), "{not_yes} on {replace:?}");
+    }
+    assert!(hands.answer("No", None).await.unwrap().ok);
+    assert_eq!(opened(&*hands, |d| d.file.is_some()).await.file.as_deref(), Some("save"));
+    assert!(hands.answer("Cancel", None).await.unwrap().ok);
+    assert_eq!(next(&mut said).await.as_deref(), Some("save cancelled"));
+    assert_eq!(std::fs::read(&song).unwrap(), b"the producer's song");
 
     // Keys land in the window when it can be brought to the front (a locked or busy desktop can refuse).
     let keys = hands.keys(&["ctrl+g".into()], KeysOptions::default()).await.unwrap();

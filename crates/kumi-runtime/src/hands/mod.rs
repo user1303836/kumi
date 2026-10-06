@@ -97,6 +97,9 @@ pub struct Dialog {
     pub words: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub buttons: Option<Vec<String>>,
+    /// "save" or "open" for Windows' Save and Open dialogs, which Kumi can fill (#189).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Window {
@@ -113,9 +116,10 @@ pub trait Hands {
     async fn dialog(&self, signal: Option<Signal>) -> Result<Dialog, HandsError>;
     async fn answer(&self, button: &str, signal: Option<Signal>) -> Result<HandsReply, HandsError>;
     async fn windows(&self, signal: Option<Signal>) -> Result<Vec<Window>, HandsError>;
-    /// Fill the Save or Open dialog Live has open with `path`, and press its default button (Windows).
-    async fn file(&self, path: &str, signal: Option<Signal>) -> Result<HandsReply, HandsError> {
-        let _ = (path, signal);
+    /// Fill the dialog Live has open with `path` and press its default button, only when it's the `kind`
+    /// ("save" or "open") of dialog asked for (Windows).
+    async fn file(&self, path: &str, kind: &str, signal: Option<Signal>) -> Result<HandsReply, HandsError> {
+        let _ = (path, kind, signal);
         Err(HandsError::new("Kumi can't fill Live's file dialogs here.", HandsErrorKind::Unavailable))
     }
     fn close(&self);
@@ -362,13 +366,14 @@ impl Hands for Persistent {
             title: reply.fields.get("title").and_then(Value::as_str).map(str::to_string),
             words: reply.fields.get("words").and_then(|v| serde_json::from_value(v.clone()).ok()),
             buttons: reply.fields.get("buttons").and_then(|v| serde_json::from_value(v.clone()).ok()),
+            file: reply.fields.get("file").and_then(Value::as_str).map(str::to_string),
         })
     }
     async fn answer(&self, button: &str, signal: Option<Signal>) -> Result<HandsReply, HandsError> {
         Self::checked(self.ask("answer", json!({"button":button}), signal).await?)
     }
-    async fn file(&self, path: &str, signal: Option<Signal>) -> Result<HandsReply, HandsError> {
-        Self::checked(self.ask("file", json!({"path":path}), signal).await?)
+    async fn file(&self, path: &str, kind: &str, signal: Option<Signal>) -> Result<HandsReply, HandsError> {
+        Self::checked(self.ask("file", json!({"path":path,"kind":kind}), signal).await?)
     }
     async fn windows(&self, signal: Option<Signal>) -> Result<Vec<Window>, HandsError> {
         let reply = Self::checked(self.ask("windows", json!({}), signal).await?)?;

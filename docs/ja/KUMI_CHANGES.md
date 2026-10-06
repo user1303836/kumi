@@ -84,7 +84,7 @@ Kumi は開いている Set を読み、頼まれた変更を行います。変�
 | `delete_device`, `delete_clip`, `delete_scene`, `delete_track`, `delete_locator` | 削除。すべて kept：Live の取り消しで元に戻せる |
 | `clear_range` | アレンジメントで一つのトラックの範囲をクリアし、端にかかるクリップを切る（拡張機能が必要。kept） |
 | `set_clip_follow_actions`, `edit_rack_mapping` | [Willington](WILLINGTON_INTEGRATION.md) のバインディングがオンのときのみ（`/willington`）：Follow Actions。マクロの名前、マッピング、バリエーションの名前、チェーンのゾーン |
-| `live_command` | Live のスクリプトにない Live 自身のコマンド：グループ化、フリーズ、フラット化、バウンス、統合、MIDI への変換、ステム分離、スライス、保存、名前を付けて保存、新しい Set、Set を開く、書き出し（[ガイド](KUMI_GUIDE.md#live-自身のコマンド)。保持：Live の取り消しで戻せます） |
+| `live_command` | Live のスクリプトにない Live 自身のコマンド：グループ化、フリーズ、フラット化、バウンス、統合、MIDI への変換、ステム分離、スライス、保存、名前を付けて保存（Windows）、新しい Set、Set を開く（Windows）、書き出し（[ガイド](KUMI_GUIDE.md#live-自身のコマンド)。保持：Live の取り消しで戻せます） |
 
 `make_changes` はこれらのどれでもプランの中で実行し、`undo_change` は一つを取り消します。
 

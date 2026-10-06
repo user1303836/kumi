@@ -257,11 +257,14 @@ Place); consolidating; converting audio to MIDI (melody, harmony, drums);
 separating stems; slicing to a MIDI track; saving the Set, or collecting all and
 saving; exporting audio or a MIDI clip.
 
-Kumi also works with Set files through Live's File menu: it saves the Set under
-a name and folder you give (Save Live Set As), starts a new Set, or opens one by
-its file. When the open Set has unsaved changes, Live asks first; Kumi saves or
-discards them as you said, and asks you when you didn't. Live drops Kumi for a
-moment while a Set opens, and the request that asked for it carries on in the
+Kumi also works with Set files through Live's File menu: it starts a new Set,
+and on Windows it also saves the Set under a name and folder you give (Save Live
+Set As) or opens one by its file. On a Mac Kumi can't fill in Live's Save and
+Open dialogs yet, so it asks you to do those two in Live. When the open Set has
+unsaved changes, Live asks first; Kumi saves or discards them as you said, and
+asks you when you didn't. If a file is already where a Set is to be saved, Live
+asks before replacing it, and Kumi leaves that answer to you. Live drops Kumi for
+a moment while a Set opens, and the request that asked for it carries on in the
 new Set. Kumi never writes `.als` files itself.
 
 - Kumi selects what the command works on, presses it, and says what changed.

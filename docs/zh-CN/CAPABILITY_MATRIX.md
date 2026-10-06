@@ -62,7 +62,7 @@
 
 | 不提供 | 替代方案 |
 | --- | --- |
-| 通过 Live 的脚本保存、打开或导出工程；Collect All and Save | 改为通过 Live 自己的菜单：保存、另存为、新建工程、打开工程、Collect All and Save、导出。已保存工程的经验证备份；把单个文件导入项目。 |
+| 通过 Live 的脚本保存、打开或导出工程；Collect All and Save | 改为通过 Live 自己的菜单：保存、新建工程、Collect All and Save、导出；另存为和打开工程限 Windows。已保存工程的经验证备份；把单个文件导入项目。 |
 | 导出混音或分轨（stems）；冻结和合并（flatten） | 对音频轨道自身片段的离线渲染；通过 Resampling 录音 |
 | 创建编组轨道 | — |
 | 编辑编曲视图中的自动化 | 读取它；Session 片段中的包络 |

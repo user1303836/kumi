@@ -89,7 +89,7 @@ of reach of both Live's Python API and the Extensions SDK, or out of scope:
 
 | Not offered | What there is instead |
 | --- | --- |
-| Saving, opening or exporting the Set; Collect All and Save (through Live's scripting) | Through Live's own menus instead: save, save as, new Set, open a Set, Collect All and Save, export. A verified backup of the saved Set; importing a single file into the project. |
+| Saving, opening or exporting the Set; Collect All and Save (through Live's scripting) | Through Live's own menus instead: save, new Set, Collect All and Save, export; save as and open a Set on Windows. A verified backup of the saved Set; importing a single file into the project. |
 | Exporting the mix or stems; freezing and flattening | Offline render of an audio track's own clips; recording through Resampling |
 | Creating group tracks | — |
 | Editing Arrangement automation | Reading it; envelopes in Session clips |

@@ -167,7 +167,7 @@
       "dialog": true
     }
   },
-  "description": "Use Live's own commands, through its menus and keys, for what your other tools can't do: group or ungroup tracks, freeze, unfreeze or flatten a track, bounce a track or clip to audio without playing it (bounce_to_new_track, bounce_track_in_place), consolidate, convert an audio clip to MIDI (melody, harmony, drums), separate stems, slice to a MIDI track, save the Set (or collect all and save), save it as a new file (save_as with path), start a new Set (new_set) or open one (open_set with path), export audio or a MIDI clip. new_set and open_set replace the open Set: say what happens to its unsaved changes with save_current (ask the producer when they didn't say), and references from before are gone once it's open. Never make or edit .als files yourself: Live calls a Set it didn't write corrupt. Give the command and what it works on (track, tracks side by side, or clip): Kumi selects it in Live, presses the command, and says what changed. For anything else Live's menus or keys do, give menu (the item's titles, [\"Create\", \"Insert Silence\"]) or keys ([\"cmd+e\"]). When Live opens a dialog, its words and buttons come back: answer presses one. Live comes to the front for a moment. Prefer your other tools whenever one does the job.",
+  "description": "Use Live's own commands, through its menus and keys, for what your other tools can't do: group or ungroup tracks, freeze, unfreeze or flatten a track, bounce a track or clip to audio without playing it (bounce_to_new_track, bounce_track_in_place), consolidate, convert an audio clip to MIDI (melody, harmony, drums), separate stems, slice to a MIDI track, save the Set (or collect all and save), save it as a new file (save_as with path), start a new Set (new_set) or open one (open_set with path), export audio or a MIDI clip. new_set and open_set replace the open Set: say what happens to its unsaved changes with save_current (ask the producer when they didn't say), and references from before are gone once it's open. Kumi fills Live's Save and Open dialogs on Windows only: on a Mac, ask the producer to save as or open a Set in Live. When a file is already at path, Live asks before replacing it: ask the producer, never answer it yourself. Never make or edit .als files yourself: Live calls a Set it didn't write corrupt. Give the command and what it works on (track, tracks side by side, or clip): Kumi selects it in Live, presses the command, and says what changed. For anything else Live's menus or keys do, give menu (the item's titles, [\"Create\", \"Insert Silence\"]) or keys ([\"cmd+e\"]). When Live opens a dialog, its words and buttons come back: answer presses one. Live comes to the front for a moment. Prefer your other tools whenever one does the job.",
   "schema": {
     "type": "object",
     "additionalProperties": false,
@@ -226,7 +226,7 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 1024,
-        "description": "The Set's file, a full path: where save_as saves it (its folder must exist; .als is added), which Set open_set opens, or where save puts a Set never saved"
+        "description": "The Set's file, a full path (Windows): where save_as saves it (its folder must exist; .als is added), which Set open_set opens, or where save puts a Set never saved"
       },
       "save_current": {
         "type": "string",

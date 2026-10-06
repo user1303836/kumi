@@ -90,12 +90,12 @@ impl Hands for Fixture {
     async fn windows(&self, _: Option<Signal>) -> Result<Vec<Window>, HandsError> {
         unreachable!()
     }
-    async fn file(&self, path: &str, _: Option<Signal>) -> Result<HandsReply, HandsError> {
+    async fn file(&self, path: &str, kind: &str, _: Option<Signal>) -> Result<HandsReply, HandsError> {
         // As Live does once its Save dialog is filled: the Set is written there.
-        if self.config["writes"] != false {
+        if self.config["writes"] != false && kind == "save" {
             std::fs::write(path, b"Set").unwrap();
         }
-        Ok(serde_json::from_value(self.hand("file", vec![json!(path)])?).unwrap())
+        Ok(serde_json::from_value(self.hand("file", vec![json!(path), json!(kind)])?).unwrap())
     }
     fn close(&self) {}
 }
@@ -358,6 +358,12 @@ fn normalize_paths(value: &mut Value, library: &str) {
 /// CommandTools over a Fixture, for one case's config: what live_command answers, the hands calls it made,
 /// and the connection (to play Live dropping Kumi while a Set opens).
 async fn set_file_harness(config: Value) -> (CommandTools, Rc<Fixture>, Rc<LiveConnection>) {
+    set_file_harness_with(config, |_| {}).await
+}
+async fn set_file_harness_with(
+    config: Value,
+    adjust: impl FnOnce(&mut ConnectionOptions),
+) -> (CommandTools, Rc<Fixture>, Rc<LiveConnection>) {
     let endpoint = Rc::new(Fixture {
         config,
         changed: Cell::new(false),
@@ -372,6 +378,7 @@ async fn set_file_harness(config: Value) -> (CommandTools, Rc<Fixture>, Rc<LiveC
         async move { Ok(ep) }.boxed_local()
     }));
     options.generation = Some("connection".into());
+    adjust(&mut options);
     let connection = LiveConnection::new(options);
     connection.start(Signal::new()).await.unwrap();
     connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
@@ -406,17 +413,35 @@ async fn a_set_is_saved_as_a_file_started_new_or_opened_through_lives_file_menu(
         .run_until(async {
             let folder = tempfile::tempdir().unwrap();
             let menus: Value = serde_json::from_str(FILE_MENU).unwrap();
-            let saving = json!({"open":true,"title":"Save Live Set As","words":[],"buttons":["Save","Cancel"]});
+            let saving = json!({"open":true,"title":"Save Live Set As","words":[],"buttons":["Save","Cancel"],"file":"save"});
 
-            // Save as: the Save dialog is filled and the Set is written there, .als added.
-            let (commands, hands, _) = set_file_harness(json!({"hands":{"menus":[menus],"dialog":[saving,{"open":false}]}})).await;
-            let path = folder.path().join("CHAOS 02");
-            let result = commands.live_command(&json!({"command":"save_as","path":path}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
-            assert!(!result.is_error, "{}", result.text);
-            let saved: Value = serde_json::from_str(&result.text).unwrap();
-            assert_eq!(saved["pressed"], "File › Save Live Set As");
-            assert_eq!(saved["saved"], folder.path().join("CHAOS 02.als").display().to_string());
-            assert!(hands.hands_calls.borrow().iter().any(|c| c[0] == "file" && c[1] == folder.path().join("CHAOS 02.als").display().to_string()));
+            if cfg!(target_os = "macos") {
+                // On a Mac, Kumi's hands can't fill Live's file dialogs yet: nothing is pressed.
+                let (commands, hands, _) = set_file_harness(json!({"hands":{"menus":[menus]}})).await;
+                let song = folder.path().join("Song.als");
+                std::fs::write(&song, b"Set").unwrap();
+                for input in [
+                    json!({"command":"save_as","path":folder.path().join("CHAOS 02")}),
+                    json!({"command":"open_set","path":song}),
+                    json!({"command":"save","path":folder.path().join("CHAOS 02")}),
+                ] {
+                    let result = commands.live_command(input.as_object().unwrap(), Signal::new()).await.unwrap();
+                    assert!(result.is_error && result.text.starts_with("On a Mac, Kumi can't fill in Live's Save and Open dialogs yet"), "{input}: {}", result.text);
+                }
+                assert!(!hands.hands_calls.borrow().iter().any(|c| c[0] == "menu"));
+            } else {
+                // Save as: the Save dialog is filled and the Set is written there, .als added.
+                let (commands, hands, _) = set_file_harness(json!({"hands":{"menus":[menus],"dialog":[saving,{"open":false}]}})).await;
+                let path = folder.path().join("CHAOS 02");
+                let result = commands.live_command(&json!({"command":"save_as","path":path}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+                assert!(!result.is_error, "{}", result.text);
+                let saved: Value = serde_json::from_str(&result.text).unwrap();
+                assert_eq!(saved["pressed"], "File › Save Live Set As");
+                assert_eq!(saved["saved"], folder.path().join("CHAOS 02.als").display().to_string());
+                assert!(hands.hands_calls.borrow().iter().any(|c| {
+                    c[0] == "file" && c[1] == folder.path().join("CHAOS 02.als").display().to_string() && c[2] == "save"
+                }));
+            }
 
             // A new Set with unsaved changes: Live's prompt is answered as asked (No discards them on Windows),
             // and the answer comes once Live is back with the new Set.
@@ -446,7 +471,7 @@ async fn a_set_is_saved_as_a_file_started_new_or_opened_through_lives_file_menu(
             let result = commands.live_command(&json!({"command":"new_set"}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
             let asked: Value = serde_json::from_str(&result.text).unwrap();
             assert_eq!(asked["dialog"]["buttons"], json!(["Yes", "No", "Cancel"]));
-            assert!(asked["next"].as_str().unwrap().contains("ask the producer"));
+            assert!(asked["next"].as_str().unwrap().starts_with("Live asks whether to save the open Set first: answer Cancel, ask the producer"));
             assert!(!hands.hands_calls.borrow().iter().any(|c| c[0] == "answer"));
 
             // Paths that can't work are refused before anything is pressed.
@@ -461,6 +486,97 @@ async fn a_set_is_saved_as_a_file_started_new_or_opened_through_lives_file_menu(
                 assert!(result.is_error && result.text.contains(said), "{input}: {}", result.text);
             }
             assert!(!hands.hands_calls.borrow().iter().any(|c| c[0] == "menu"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_path_goes_only_into_the_dialog_it_is_for_and_replacing_a_file_is_the_producers_call() {
+    // On a Mac these are refused before anything is pressed (the test above).
+    if cfg!(target_os = "macos") {
+        return;
+    }
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let menus: Value = serde_json::from_str(FILE_MENU).unwrap();
+            let song = folder.path().join("Song B.als");
+            std::fs::write(&song, b"the producer's song").unwrap();
+            let prompt = json!({"open":true,"title":"Ableton Live","words":["Save changes to \"Untitled\" before closing?"],"buttons":["Yes","No","Cancel"]});
+            let saving = json!({"open":true,"title":"Save Live Set As","words":[],"buttons":["Save","Cancel"],"file":"save"});
+            let opening = json!({"open":true,"title":"Open Live Set","words":[],"buttons":["Open","Cancel"],"file":"open"});
+            let calls = |hands: &Fixture, method: &str| hands.hands_calls.borrow().iter().filter(|c| c[0] == method).cloned().collect::<Vec<_>>();
+
+            // The open Set was never saved and the producer said to keep it: Live's Save dialog for it comes
+            // up before the Open dialog. The path of the Set to open never goes into it, where Save would
+            // write "Untitled" over song B.
+            let (commands, hands, _) = set_file_harness(json!({"writes":false,"hands":{"menus":[menus],"dialog":[prompt,saving],"answer":[{"ok":true,"pressed":"Yes"}]}})).await;
+            let result = commands
+                .live_command(&json!({"command":"open_set","path":song,"save_current":"yes"}).as_object().unwrap().clone(), Signal::new())
+                .await
+                .unwrap();
+            let said: Value = serde_json::from_str(&result.text).unwrap();
+            assert!(said["next"].as_str().unwrap().contains("never saved"), "{}", result.text);
+            assert_eq!(calls(&hands, "answer"), vec![json!(["answer", "Yes"])]);
+            assert!(calls(&hands, "file").is_empty(), "{:?}", hands.hands_calls.borrow());
+            assert_eq!(std::fs::read(&song).unwrap(), b"the producer's song");
+
+            // The Open dialog takes it, as the dialog to open with.
+            let (commands, hands, connection) = set_file_harness(json!({"writes":false,"hands":{"menus":[menus],"dialog":[opening,{"open":false}]}})).await;
+            let switching = connection.clone();
+            let watched = hands.clone();
+            tokio::task::spawn_local(async move {
+                while !watched.hands_calls.borrow().iter().any(|c| c[0] == "file") {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+                switching.lost.set(true);
+                tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
+                switching.lost.set(false);
+            });
+            let result = commands.live_command(&json!({"command":"open_set","path":song}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert!(!result.is_error, "{}", result.text);
+            assert_eq!(serde_json::from_str::<Value>(&result.text).unwrap()["openedSet"], song.display().to_string());
+            assert_eq!(calls(&hands, "file"), vec![json!(["file", song.display().to_string(), "open"])]);
+
+            // A Mac's prompt has its own buttons: discarding is Don't Save there.
+            let mac = json!({"open":true,"title":"","words":["Do you want to save the changes to \"Untitled\" before closing?"],"buttons":["Save","Don’t Save","Cancel"]});
+            let (commands, hands, _) = set_file_harness(json!({"hands":{"menus":[menus],"dialog":[mac,{"open":false}]}})).await;
+            let _ = commands.live_command(&json!({"command":"new_set","save_current":"no"}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert_eq!(calls(&hands, "answer"), vec![json!(["answer", "Don’t Save"])]);
+
+            // Saving over a file that's there: Windows asks, and that's the producer's to answer.
+            let replace = json!({"open":true,"title":"Confirm Save As","words":["Song B.als already exists.","Do you want to replace it?"],"buttons":["Yes","No"]});
+            let (commands, hands, _) = set_file_harness(json!({"writes":false,"hands":{"menus":[menus],"dialog":[saving,replace]}})).await;
+            let result = commands.live_command(&json!({"command":"save_as","path":song}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            let said: Value = serde_json::from_str(&result.text).unwrap();
+            assert!(said["next"].as_str().unwrap().starts_with(&format!("A file is already at {}: ask the producer.", song.display())), "{}", result.text);
+            assert!(calls(&hands, "answer").is_empty());
+            assert_eq!(std::fs::read(&song).unwrap(), b"the producer's song");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_switch_cancelled_at_lives_prompt_is_no_longer_expected() {
+    // Round 7: the 120 s expectation outlived a cancel, so a Set the producer opened by hand right after
+    // counted as Kumi's and the request carried on into it (#188).
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let menus: Value = serde_json::from_str(FILE_MENU).unwrap();
+            let prompt = json!({"open":true,"title":"Ableton Live","words":["Save changes to \"Untitled\" before closing?"],"buttons":["Yes","No","Cancel"]});
+            let causes = Rc::new(RefCell::new(vec![]));
+            let seen = causes.clone();
+            let (commands, _, connection) = set_file_harness_with(json!({"hands":{"menus":[menus],"dialog":[prompt]}}), move |options| {
+                options.on_connection = Rc::new(move |_, cause| seen.borrow_mut().push(cause));
+                options.live_running = Some(Rc::new(|| async { true }.boxed_local()));
+            })
+            .await;
+            let result =
+                commands.live_command(&json!({"command":"new_set","save_current":"cancel"}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert_eq!(serde_json::from_str::<Value>(&result.text).unwrap()["cancelled"], true, "{}", result.text);
+            connection.lose_live();
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            assert_eq!(causes.borrow().last(), Some(&Some(DisconnectCause::Set)), "a Set opened by hand, not one Kumi asked for");
         })
         .await;
 }

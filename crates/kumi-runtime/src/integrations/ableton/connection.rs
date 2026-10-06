@@ -422,6 +422,11 @@ impl LiveConnection {
     pub fn expect_set_change(&self, for_ms: i64) {
         self.expect_set_until.set(Utc::now().timestamp_millis() + for_ms);
     }
+    /// A switch Kumi asked for that didn't happen (cancelled, refused, timed out) or is over: the next one is
+    /// the producer's (#188).
+    pub fn forget_set_change(&self) {
+        self.expect_set_until.set(0);
+    }
     /// Live is back after being lost (or was never lost).
     pub fn is_back(&self) -> bool {
         !self.lost.get() && self.available.get()

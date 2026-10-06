@@ -38,7 +38,10 @@ public static class KumiInput {
   [DllImport("user32.dll")] public static extern IntPtr GetLastActivePopup(IntPtr hwnd);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int max);
 
+  // 40 bytes in a 64-bit process, 28 in a 32-bit one, which this layout doesn't make: its keys are refused.
+  static readonly bool InputFits = Marshal.SizeOf(typeof(INPUT)) == (IntPtr.Size == 8 ? 40 : 28);
   public static bool Key(ushort vk, bool up) {
+    if (!InputFits) return false;
     var input = new INPUT { type = 1 };
     input.u.ki = new KEYBDINPUT { wVk = vk, dwFlags = up ? 2u : 0u };
     return SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT))) == 1;
@@ -103,7 +106,8 @@ public static class KumiInput {
   public static bool Choose(IntPtr window, uint id) { return PostMessage(window, 0x111, (IntPtr)id, IntPtr.Zero); }
 
   // The dialog Live has open: a modal one disables the main window, and is its last active popup; otherwise
-  // a visible window of Live's process the main window owns (#187).
+  // a standard dialog (#32770) of Live's process that the main window owns (#187). Any other owned window is
+  // a palette or a plugin's editor, never a dialog to read, fill or answer.
   public static IntPtr Dialog(IntPtr main, uint pid) {
     if (main == IntPtr.Zero) return IntPtr.Zero;
     if (!IsWindowEnabled(main)) {
@@ -114,17 +118,30 @@ public static class KumiInput {
     EnumWindows((hwnd, unused) => {
       uint owner;
       GetWindowThreadProcessId(hwnd, out owner);
-      if (owner == pid && hwnd != main && IsWindowVisible(hwnd) && GetWindow(hwnd, 4) == main && IsWindowEnabled(hwnd)) { found = hwnd; return false; }
+      if (owner == pid && hwnd != main && IsWindowVisible(hwnd) && GetWindow(hwnd, 4) == main && IsWindowEnabled(hwnd) && ClassOf(hwnd) == "#32770") { found = hwnd; return false; }
       return true;
     }, IntPtr.Zero);
-    if (found != IntPtr.Zero && IsWindowEnabled(main)) {
-      // An owned window beside a main window that still takes input is a palette, not a dialog, unless it's a
-      // standard one (#32770): Live's own prompts disable the main window.
-      var name = new StringBuilder(256);
-      GetClassName(found, name, name.Capacity);
-      if (name.ToString() != "#32770") return IntPtr.Zero;
-    }
     return found;
+  }
+  static string ClassOf(IntPtr hwnd) { var name = new StringBuilder(256); GetClassName(hwnd, name, name.Capacity); return name.ToString(); }
+
+  // Windows' Save and Open dialogs, told apart by their file name box whatever the language (#189): Save's
+  // is an edit box with id 1001, Open's one with id 1148 (in a combo box). "pending" while one is still
+  // putting its controls up; "" for any other dialog, an older style one included, which Kumi doesn't fill.
+  public static string FileKind(IntPtr dialog) {
+    bool modern = false; string kind = "";
+    EnumChildWindows(dialog, (hwnd, unused) => {
+      var name = ClassOf(hwnd);
+      if (name == "DUIViewWndClassName") modern = true;
+      if (name == "Edit" && IsWindowVisible(hwnd)) {
+        int id = GetDlgCtrlID(hwnd);
+        if (id == 1001 && kind == "") kind = "save";
+        else if (id == 1148 && kind == "") kind = "open";
+      }
+      return true;
+    }, IntPtr.Zero);
+    if (!modern) return "";
+    return kind == "" ? "pending" : kind;
   }
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder text, int max);
   [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr parent, Visit visit, IntPtr lParam);
@@ -157,7 +174,7 @@ public static class KumiInput {
   public static bool SetText(IntPtr hwnd, string text) { IntPtr result; return SendMessageTimeout(hwnd, 0x000C, IntPtr.Zero, text, 0x2, 1000, out result) != IntPtr.Zero; }
 }
 "@
-$version = 3
+$version = 4
 $auto = [System.Windows.Automation.AutomationElement]
 $tree = [System.Windows.Automation.TreeScope]
 $types = [System.Windows.Automation.ControlType]
@@ -214,11 +231,19 @@ function DialogOf($process) {
 # A custom dialog's buttons as UI Automation sees them; a standard one's are read from Win32 (Parts).
 function Buttons($element) { @($element.FindAll($tree::Descendants, (New-Object System.Windows.Automation.PropertyCondition($auto::ControlTypeProperty, $types::Button)))) }
 function Parts($dialog, $kind) { @([KumiInput]::Parts($dialog.hwnd) | Where-Object { $_.kind -eq $kind }) }
-# Windows says Yes / No / Cancel where macOS says Save / Don't Save / Cancel: either is taken (#187).
-$aliases = @{ "don't save" = @('no', 'discard'); 'dont save' = @('no', 'discard'); 'discard' = @('no', "don't save"); 'save' = @('yes'); 'yes' = @('save'); 'no' = @("don't save", 'discard'); 'ok' = @('yes'); 'cancel' = @() }
+# Windows says Yes / No / Cancel where macOS says Save / Don't Save / Cancel: on Live's save-changes prompt
+# either is taken (#187). Only there: Save or OK on Windows' "already exists, replace it?" isn't its Yes.
+$aliases = @{ "don't save" = @('no', 'discard'); 'dont save' = @('no', 'discard'); 'discard' = @('no', "don't save"); 'save' = @('yes'); 'yes' = @('save'); 'no' = @("don't save", 'discard'); 'cancel' = @() }
+function Words($dialog) {
+  $words = @(Parts $dialog 'words' | ForEach-Object { $_.text })
+  if ($words.Count -eq 0) { $words = @($dialog.element.FindAll($tree::Descendants, (New-Object System.Windows.Automation.PropertyCondition($auto::ControlTypeProperty, $types::Text))) | ForEach-Object { $_.Current.Name } | Where-Object { $_ }) }
+  return $words
+}
+function SavesChanges($dialog) { return ((Words $dialog) -join ' ') -match '(?i)save changes|before closing' }
 # The button a name stands for, as a Win32 part or a UI Automation element, or $null.
 function ButtonNamed($dialog, $name) {
-  $wanted = @(Norm $name) + @($aliases[(Norm $name)])
+  $wanted = @(Norm $name)
+  if ($aliases.ContainsKey((Norm $name)) -and (SavesChanges $dialog)) { $wanted += @($aliases[(Norm $name)]) }
   $parts = Parts $dialog 'button'
   $all = Buttons $dialog.element
   foreach ($one in $wanted) {
@@ -371,15 +396,19 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         $dialog = DialogOf $process
         if (-not $dialog) { Done @{ ok = $true; open = $false }; break }
         # A dialog just opened fills in its words and buttons a moment later.
-        for ($look = 0; $look -lt 10; $look++) {
+        for ($look = 0; $look -lt 30; $look++) {
           $buttons = @(Parts $dialog 'button' | ForEach-Object { $_.text } | Where-Object { $_ })
-          $words = @(Parts $dialog 'words' | ForEach-Object { $_.text })
+          $words = @(Words $dialog)
           if ($buttons.Count -eq 0) { $buttons = @(Buttons $dialog.element | ForEach-Object { $_.Current.Name } | Where-Object { $_ }) }
-          if ($words.Count -eq 0) { $words = @($dialog.element.FindAll($tree::Descendants, (New-Object System.Windows.Automation.PropertyCondition($auto::ControlTypeProperty, $types::Text))) | ForEach-Object { $_.Current.Name } | Where-Object { $_ }) }
-          if ($buttons.Count -gt 0) { break }
+          $kind = [KumiInput]::FileKind($dialog.hwnd)
+          # A Save or Open dialog builds its file name box after its buttons: it's waited for.
+          if ($kind -ne 'pending' -and ($buttons.Count -gt 0 -or $look -ge 9)) { break }
           Start-Sleep -Milliseconds 100
         }
-        Done @{ ok = $true; open = $true; title = [KumiInput]::Text($dialog.hwnd); words = $words; buttons = $buttons }
+        $read = @{ ok = $true; open = $true; title = [KumiInput]::Text($dialog.hwnd); words = $words; buttons = $buttons }
+        # A Save or an Open dialog says which, so a path goes only where it's meant to (#189).
+        if ($kind -eq 'save' -or $kind -eq 'open') { $read.file = $kind }
+        Done $read
       }
       'answer' {
         $dialog = DialogOf $process
@@ -390,24 +419,25 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         if (PressButton $dialog $button) { Done @{ ok = $true; pressed = $button.name } } else { Done @{ ok = $false; error = 'press-failed' } }
       }
       'file' {
-        # A Save or Open dialog: its file name box filled with the path, then its default button (#189).
+        # Windows' Save or Open dialog: its file name box filled with the path, then its default button (#189).
+        # Only the kind asked for: a path to open never goes into a Save dialog, where Save would write over it.
         $dialog = DialogOf $process
         for ($look = 0; $look -lt 40 -and -not $dialog; $look++) { Start-Sleep -Milliseconds 100; $dialog = DialogOf $process }
         if (-not $dialog) { Done @{ ok = $false; error = 'no-dialog' }; break }
         $title = [KumiInput]::Text($dialog.hwnd)
-        # The file name box is control 1001 in Windows' Save and Open dialogs; its default button is 1 (Save, Open).
         # Its controls come a moment after the dialog itself.
-        for ($look = 0; $look -lt 30; $look++) {
-          $edits = @(Parts $dialog 'edit')
-          $box = $edits | Where-Object { $_.id -eq 1001 } | Select-Object -First 1
-          if ($box -and (Parts $dialog 'button' | Where-Object { $_.id -eq 1 })) { break }
-          Start-Sleep -Milliseconds 100
+        $kind = [KumiInput]::FileKind($dialog.hwnd)
+        for ($look = 0; $look -lt 30 -and $kind -eq 'pending'; $look++) { Start-Sleep -Milliseconds 100; $kind = [KumiInput]::FileKind($dialog.hwnd) }
+        if ($kind -ne 'save' -and $kind -ne 'open') { Done @{ ok = $false; error = 'no-file-name'; title = $title }; break }
+        if ($kind -ne [string]$request.kind) { Done @{ ok = $false; error = 'other-dialog'; file = $kind; title = $title }; break }
+        $box = Parts $dialog 'edit' | Where-Object { $_.id -eq $(if ($kind -eq 'save') { 1001 } else { 1148 }) } | Select-Object -First 1
+        $default = $null
+        for ($look = 0; $look -lt 30 -and -not $default; $look++) {
+          $default = Parts $dialog 'button' | Where-Object { $_.id -eq 1 } | Select-Object -First 1
+          if (-not $default) { Start-Sleep -Milliseconds 100 }
         }
-        if (-not $box) { $box = $edits | Select-Object -First 1 }
-        if (-not $box) { Done @{ ok = $false; error = 'no-file-name'; title = $title }; break }
-        if (-not [KumiInput]::SetText($box.hwnd, [string]$request.path)) { Done @{ ok = $false; error = 'no-file-name'; title = $title }; break }
+        if (-not $box -or -not [KumiInput]::SetText($box.hwnd, [string]$request.path)) { Done @{ ok = $false; error = 'no-file-name'; title = $title }; break }
         Start-Sleep -Milliseconds 100
-        $default = Parts $dialog 'button' | Where-Object { $_.id -eq 1 } | Select-Object -First 1
         if (-not $default) { Done @{ ok = $false; error = 'no-default-button'; title = $title }; break }
         if ([KumiInput]::Click($dialog.hwnd, $default)) { Done @{ ok = $true; title = $title; pressed = $default.text } } else { Done @{ ok = $false; error = 'press-failed' } }
       }
