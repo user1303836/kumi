@@ -354,6 +354,19 @@ class RemoteScriptTests(unittest.TestCase):
         surface._drain()
         self.assertEqual(surface._bridge.calls, 0)
 
+    def test_a_tick_that_fails_still_schedules_the_next_drain(self):
+        surface = object.__new__(__import__("AbletonMcpBridge").AbletonMcpBridge)
+        surface._disconnected = False; surface._keep_willington = lambda: None
+        scheduled = []; surface.schedule_message = lambda delay, callback: scheduled.append(callback)
+
+        class Bridge:
+            def update_display(self):
+                raise RuntimeError("boom")
+
+        surface._bridge = Bridge()
+        with self.assertRaises(RuntimeError): surface._drain()
+        self.assertEqual(scheduled, [surface._drain])
+
     def test_authentication_and_replay_protection(self):
         remote = AuthenticatedRemoteScript("0123456789abcdef0123456789abcdef", lambda method, request: fake_status_result())
         unsigned = remote.bound({"version": PROTOCOL, "id": "one", "method": "status", "nonce": "0000000000000001", "sequence": 1})
@@ -7119,6 +7132,32 @@ class LargeFrameTransportTests(_BridgeSocketFixture, unittest.TestCase):
         self.assertTrue(response["ok"]); self.assertEqual(len(response["result"]["tracks"]), 300)
         connection = self.bridge._connections[0]
         self.assertEqual((connection.pending_outbound(), len(connection.outbound), connection.sent), (0, 0, 0))
+
+
+class HostileLineTests(_BridgeSocketFixture, unittest.TestCase):
+    """Any local process can write to the bridge's port, with no secret: nothing it sends stops the tick."""
+
+    def test_a_method_that_isnt_a_string_is_refused_and_the_tick_goes_on(self):
+        hostile, _ = self.connect(); client, channel = self.connect()
+        hostile.sendall(b'{"method":[]}\n{"method":{}}\n')
+        refused = self.read_lines(hostile, 2)
+        self.assertEqual([(line["ok"], line["error"]) for line in refused], [(False, "invalid request")] * 2)
+        # Others are still served, and so is Live's queued work.
+        client.sendall(self.frame(channel, 1)); self.assertTrue(self.read_lines(client, 1)[0]["ok"])
+        ran = []
+        worker = threading.Thread(target=lambda: ran.append(self.bridge.queue.submit(lambda: "ran", deadline_ms=int(time.time() * 1000) + 5000)))
+        worker.start(); deadline = time.monotonic() + 5
+        while not ran and time.monotonic() < deadline: self.bridge.update_display(); time.sleep(0.001)
+        worker.join(timeout=5); self.assertEqual(ran, ["ran"])
+
+    def test_an_unexpected_failure_closes_that_connection_alone(self):
+        failing, failing_channel = self.connect(); client, channel = self.connect()
+        def fail(request): raise RuntimeError("boom")
+        with patch.object(remote_module, "_changes_live", fail):
+            failing.sendall(self.frame(failing_channel, 1)); deadline = time.monotonic() + 5
+            while len(self.bridge._connections) > 1 and time.monotonic() < deadline: self.bridge.update_display()
+        self.assertEqual(len(self.bridge._connections), 1, "the connection that failed is closed")
+        client.sendall(self.frame(channel, 1)); self.assertTrue(self.read_lines(client, 1)[0]["ok"])
 
 
 def rich_song(links=True, playing=True, tracks=6):

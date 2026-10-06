@@ -521,9 +521,12 @@ class AbletonMcpBridge(_ControlSurface):
     def _drain(self) -> None:
         if self._disconnected:
             return
-        self._keep_willington()
-        self._bridge.update_display()
-        self._schedule_next()
+        try:
+            self._keep_willington()
+            self._bridge.update_display()
+        finally:
+            # A tick that fails once doesn't end the drain: the next one is scheduled whatever happened.
+            self._schedule_next()
 
     def update_display(self) -> None:
         self._keep_willington()

@@ -13266,6 +13266,8 @@ def _changes_live(request: Any) -> bool:
     """Whether a request is a step of a change to the Set (its time isn't held to the reads' budget)."""
     if not isinstance(request, dict): return False
     method = request.get("method")
+    # Any line reaches here, signed or not: a method that's a list or an object can't be looked up in a set.
+    if not isinstance(method, str): return False
     if method == "invoke": return _mutation_authority_required(str(request.get("operation", "")))
     return method in {"preflight", "prepare", "mutate"}
 MAX_OUTBOUND_BYTES = 4 * MAX_WIRE_BYTES
@@ -13510,6 +13512,11 @@ class AbletonMcpBridge:
             if connection.sent >= len(outbound): outbound.clear(); connection.sent = 0
             elif connection.sent > len(outbound) // 2: del outbound[:connection.sent]; connection.sent = 0
         except OSError:
+            self._close(connection); return frames
+        except Exception:
+            # Whatever one connection sent can't stop the tick (and the queued Live work after it): it's closed,
+            # with what it left unread, instead of failing again on every tick.
+            _debug_trace("bridge-service-failure")
             self._close(connection); return frames
         finished = connection.auth.invalid or not connection.has_complete_frame()
         if (connection.closing and finished and not connection.pending_outbound()) or connection.pending_outbound() > MAX_OUTBOUND_BYTES:
