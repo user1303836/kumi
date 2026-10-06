@@ -285,9 +285,17 @@ impl LiveConnection {
             Ok::<_, RuntimeError>(())
         }
         .await;
-        if result.is_err() {
+        if let Err(error) = result {
             (self.options.on_connection)(ConnectionState::Error, None);
-            return Err(KumiError::new(FailureKind::Live,format!("Kumi couldn't start its bridge to Live. After updating Kumi, Live's part needs updating too: quit Live, then run {} bridge. Otherwise: {} doctor",*KUMI,*KUMI)).into());
+            // The bridge's own words when it gave them (Live still running the bridge it loaded before an update:
+            // restart Live, not another update); otherwise the usual way back after an update.
+            let said = error.to_string();
+            let message = if said.starts_with("Kumi's bridge didn't start: ") {
+                said
+            } else {
+                format!("Kumi couldn't start its bridge to Live. After updating Kumi, Live's part needs updating too: quit Live, then run {} bridge. Otherwise: {} doctor",*KUMI,*KUMI)
+            };
+            return Err(KumiError::new(FailureKind::Live, message).into());
         }
         Ok(())
     }
