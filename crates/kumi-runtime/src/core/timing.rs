@@ -40,6 +40,9 @@ pub struct TurnTiming {
     pub live_requests: u32,
     /// Request bodies sent to the model.
     pub sent_bytes: u64,
+    /// The look at the files an older Kumi may be writing that the turn started (`FileSync`): its own
+    /// time, beside the turn's, not part of it.
+    pub files_ms: Option<u64>,
 }
 
 thread_local! {
@@ -206,6 +209,19 @@ pub fn sent(bytes: usize) {
     with(|timing| timing.sent_bytes += bytes as u64);
 }
 
+/// The turn being timed, for work it starts beside it that may end after it does.
+pub fn current() -> Option<Turn> {
+    ACTIVE.with(|active| active.borrow().clone()).map(Turn)
+}
+pub struct Turn(Rc<RefCell<TurnTiming>>);
+impl Turn {
+    /// The turn's look at an older Kumi's files took this long, beside it. It counts for this turn only:
+    /// once the turn's line is written, for nothing.
+    pub fn files(&self, ms: u64) {
+        self.0.borrow_mut().files_ms = Some(ms);
+    }
+}
+
 /// The log line for a finished turn; `stop` is how it ended (a `StopReason`, or "error").
 pub fn line(timing: &TurnTiming, elapsed_ms: u64, stop: Value, usage: Option<&Usage>) -> Value {
     let mut line = json!({
@@ -236,6 +252,9 @@ pub fn line(timing: &TurnTiming, elapsed_ms: u64, stop: Value, usage: Option<&Us
     if !slowest.is_empty() {
         line["slowTools"] =
             json!(slowest.into_iter().take(3).map(|(tool, (calls, ms))| json!({"tool":tool,"calls":calls,"ms":ms})).collect::<Vec<_>>());
+    }
+    if let Some(ms) = timing.files_ms {
+        line["filesMs"] = json!(ms);
     }
     if let Some(usage) = usage {
         line["inputTokens"] = json!(usage.input_tokens);
@@ -364,6 +383,21 @@ mod tests {
         assert_eq!((&left["effort"], left.get("tier")), (&json!("default"), None));
         let quiet = super::line(&begin().finish(), 10, json!("completed"), None);
         assert!(quiet.get("effort").is_none() && quiet.get("slowTools").is_none(), "no model call, no effort: {quiet}");
+    }
+
+    #[test]
+    fn a_turns_look_at_an_older_kumis_files_shows_as_its_own_time_on_that_turn_only() {
+        let recorder = begin();
+        current().unwrap().files(3);
+        let line = line(&recorder.finish(), 2000, json!("completed"), None);
+        assert_eq!((&line["filesMs"], &line["ms"]), (&json!(3), &json!(2000)));
+        // A look that ends after its turn has: not the next turn's.
+        let short = begin();
+        let looking = current().unwrap();
+        let first = super::line(&short.finish(), 10, json!("completed"), None);
+        let next = begin();
+        looking.files(5);
+        assert!(first.get("filesMs").is_none() && super::line(&next.finish(), 10, json!("completed"), None).get("filesMs").is_none());
     }
 
     #[tokio::test]

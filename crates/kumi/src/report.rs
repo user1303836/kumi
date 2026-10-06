@@ -1,6 +1,6 @@
 //! `kumi report`, with native runtime version information.
 use crate::{
-    config::{load_auth_file, load_gaps_file, load_projects_dir, load_settings_file, load_timings_file},
+    config::{load_auth_file, load_db_file, load_gaps_file, load_projects_dir, load_settings_file, load_timings_file},
     doctor::{doctor_checks, format_doctor, Check, DoctorIo},
     spinner::step,
     tui::style::os_release,
@@ -14,7 +14,7 @@ use kumi_common::js::{
 };
 use kumi_runtime::{
     auth::store::{open_credential_store, CredentialStore},
-    core::errors::RuntimeError,
+    core::{errors::RuntimeError, gaps::logged_gaps},
     library::sources::join,
     system::{self, Env},
     KUMI_VERSION,
@@ -442,8 +442,17 @@ async fn compose(io: &ReportIo, redact: &dyn Fn(&str) -> String, home: &str, now
             "none kept yet".into()
         },
     );
-    let gaps = match load_gaps_file(env) {
-        Ok(file) => read(&file).await.unwrap_or_default(),
+    // Kumi's database holds the gap log once Kumi has used it, read without writing anything, with what
+    // an older Kumi logged in the file since.
+    let logged = match (load_db_file(env), load_gaps_file(env)) {
+        (Ok(db), Ok(file)) if std::path::Path::new(&db).is_file() => {
+            tokio::task::spawn_blocking(move || logged_gaps(db.as_ref(), file.as_ref())).await.ok().and_then(Result::ok)
+        }
+        _ => None,
+    };
+    let gaps = match (&logged, load_gaps_file(env)) {
+        (Some(lines), _) => lines.join("\n"),
+        (None, Ok(file)) => read(&file).await.unwrap_or_default(),
         _ => String::new(),
     };
     let gaps: Vec<_> = trim(&gaps).split('\n').filter(|s| !s.is_empty()).collect();
