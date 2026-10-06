@@ -263,7 +263,9 @@ Set As) or opens one by its file. On a Mac Kumi can't fill in Live's Save and
 Open dialogs yet, so it asks you to do those two in Live. When the open Set has
 unsaved changes, Live asks first; Kumi saves or discards them as you said, and
 asks you when you didn't. If a file is already where a Set is to be saved, Live
-asks before replacing it, and Kumi leaves that answer to you. Live drops Kumi for
+asks before replacing it, and Kumi leaves that answer to you. Live keeps a Set in
+a project folder: saved under a new name in a folder that isn't a project, it
+makes "<name> Project" there, and Kumi says where the Set went. Live drops Kumi for
 a moment while a Set opens, and the request that asked for it carries on in the
 new Set. Kumi never writes `.als` files itself.
 

@@ -70,6 +70,31 @@ impl Drop for ExpectedSwitch<'_> {
         self.0.forget_set_change();
     }
 }
+/// Live's progress windows (Freeze…, Bounce…) offer only Cancel: they close on their own, with nothing to
+/// answer. Read through Win32 since #187, their Cancel shows, and a wait that stopped at any button stopped at
+/// them.
+fn in_progress(dialog: &hands::Dialog) -> bool {
+    dialog.open && dialog.buttons.as_ref().is_some_and(|buttons| buttons.len() == 1 && button_title(&buttons[0]) == "cancel")
+}
+/// Where Live may put a Set saved as `path`, each with when it was last written: there in a project folder
+/// (one with "Ableton Project Info"), else in a new project folder beside it, "<name> Project", or
+/// "<name>-1 Project" and on when that one exists (seen in Live 12.4). Read before the save and after: the
+/// one whose time changed is where it went, whatever the clocks (Windows stamps files from a coarser one).
+fn set_places(path: &std::path::Path) -> Vec<(PathBuf, Option<std::time::SystemTime>)> {
+    let (Some(folder), Some(name), Some(file)) = (path.parent(), path.file_stem(), path.file_name()) else { return vec![] };
+    let name = name.to_string_lossy();
+    std::iter::once(path.to_path_buf())
+        .chain(
+            std::iter::once(format!("{name} Project"))
+                .chain((1..=20).map(|n| format!("{name}-{n} Project")))
+                .map(|project| folder.join(project).join(file)),
+        )
+        .map(|place| {
+            let written = std::fs::metadata(&place).and_then(|m| m.modified()).ok();
+            (place, written)
+        })
+        .collect()
+}
 /// A dialog button's title as compared: no & marks, straight apostrophes, no trailing dots, lower case.
 fn button_title(title: &str) -> String {
     title.replace('&', "").replace('\u{2019}', "'").trim().trim_end_matches(['.', '\u{2026}']).to_lowercase()
@@ -560,7 +585,7 @@ impl CommandTools {
                     break;
                 }
                 let open = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
-                if open.open && open.buttons.as_ref().is_some_and(|b| !b.is_empty()) {
+                if open.open && open.buttons.as_ref().is_some_and(|b| !b.is_empty()) && !in_progress(&open) {
                     break;
                 }
                 delay(100, signal).await?;
@@ -572,7 +597,7 @@ impl CommandTools {
             delay(150, signal).await?;
             for _ in 0..1200 {
                 let open = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
-                if !open.open || open.buttons.as_ref().is_some_and(|b| !b.is_empty()) {
+                if !open.open || (open.buttons.as_ref().is_some_and(|b| !b.is_empty()) && !in_progress(&open)) {
                     break;
                 }
                 delay(100, signal).await?;
@@ -585,7 +610,7 @@ impl CommandTools {
         for _ in 0..if asks { 6 } else { 2 } {
             delay(if asks { 250 } else { 150 }, signal).await?;
             let open = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
-            if open.open && open.buttons.as_ref().is_some_and(|b| !b.is_empty()) {
+            if open.open && open.buttons.as_ref().is_some_and(|b| !b.is_empty()) && !in_progress(&open) {
                 dialog = Some(open);
                 break;
             }
@@ -707,7 +732,8 @@ impl CommandTools {
         // is where the open Set, never saved, is saved first).
         let wanted = if name == "open_set" { "open" } else { "save" };
         let existed = path.as_ref().is_some_and(|p| p.is_file());
-        let before = path.as_ref().and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+        // Where the Set may be written, read before anything is pressed.
+        let places = path.as_deref().map(set_places).unwrap_or_default();
         let reply = hands
             .menu(&item.path, MenuOptions { signal: Some(signal.clone()), titles: command.titles.clone(), ..Default::default() })
             .await?;
@@ -720,11 +746,20 @@ impl CommandTools {
         }
         let pressed = item.path.join(" › ");
         let mut out = args(json!({"pressed":pressed}));
-        let (mut filled, mut away, mut quiet) = (false, false, 0);
+        let (mut filled, mut away, mut quiet, mut blank) = (false, false, 0, 0);
         let rounds = if switching { SET_OPENING_MS / 250 } else { 120 };
-        for _ in 0..rounds {
+        for round in 0..rounds {
             delay(250, signal).await?;
             if switching {
+                // Live's Remote Script goes quiet while another Set loads. Without a focus feed to notice (plain
+                // lines, a script), the bridge is asked each second, as the feed would.
+                if !away && !self.connection.lost.get() && round % 4 == 3 {
+                    if let Ok(status) = self.connection.read_status(abort::timeout(1500)).await {
+                        if status.get("connected") == Some(&Value::Bool(false)) {
+                            self.connection.lose_live();
+                        }
+                    }
+                }
                 away |= self.connection.lost.get();
                 if away && self.connection.is_back() {
                     let opened = path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "a new Set".into());
@@ -741,6 +776,20 @@ impl CommandTools {
                 }
             }
             let dialog = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
+            // A dialog read before its controls are up (Live's Save dialog can take a second or two): looked at
+            // again, for up to 5 s.
+            if dialog.open
+                && dialog.file.is_none()
+                && dialog.buttons.as_ref().is_none_or(Vec::is_empty)
+                && dialog.words.as_ref().is_none_or(Vec::is_empty)
+                && blank < 20
+            {
+                blank += 1;
+                continue;
+            }
+            if dialog.open && in_progress(&dialog) {
+                continue;
+            }
             if dialog.open {
                 quiet = 0;
                 let words = dialog.words.clone().unwrap_or_default().join(" ").to_lowercase();
@@ -789,7 +838,9 @@ impl CommandTools {
                 // no answer for.
                 let saving = dialog.file.as_deref() == Some("save")
                     || (dialog.file.is_none() && dialog.title.as_deref().is_some_and(|t| t.to_lowercase().contains("save")));
-                let unsaved = !filled && saving && (name == "open_set" || path.is_none());
+                // Opening a Set, any Save dialog is for the open one, never saved: Live asks for it after its Open
+                // dialog took the path and Yes answered its prompt (Live 12.4's order).
+                let unsaved = saving && (name == "open_set" || (path.is_none() && !filled));
                 // Windows asks before a save writes over a file: that's the producer's to decide. Its prompt is
                 // known by its words, or as a Yes / No question once the path given was already a file.
                 let yes_no = dialog
@@ -813,17 +864,28 @@ impl CommandTools {
             if switching {
                 continue;
             }
-            // Saved: the file is written (or rewritten), or a Set saved before saves where it is.
-            let written = path.as_ref().is_some_and(|p| {
-                std::fs::metadata(p).and_then(|m| m.modified()).ok().is_some_and(|at| before.is_none_or(|before| at > before))
+            // Saved: the file is written (or rewritten), in a project folder Live made when that's where it went,
+            // or a Set saved before saves where it is.
+            let written = path.as_deref().and_then(|p| {
+                set_places(p)
+                    .into_iter()
+                    .zip(&places)
+                    .find(|((_, now), (_, then))| now.is_some() && now != then)
+                    .map(|((place, _), _)| place)
             });
             quiet += 1;
             // A Set saved before is saved where it is, without a dialog: path is for one never saved.
             let in_place = name == "save" && !filled && quiet >= 8;
-            if written || in_place {
-                let saved = path.as_ref().filter(|_| !in_place).map(|p| p.display().to_string()).unwrap_or_else(|| "where it is".into());
+            if written.is_some() || in_place {
+                let saved = written.as_ref().filter(|_| !in_place).map(|p| p.display().to_string()).unwrap_or_else(|| "where it is".into());
                 self.tell(format!("{} {saved}", command.done));
                 out.insert("saved".into(), json!(saved));
+                if written.as_ref().zip(path.as_ref()).is_some_and(|(written, asked)| written != asked) {
+                    out.insert(
+                        "note".into(),
+                        json!("Live keeps a Set in a project folder: it made one beside the path given, and saved the Set in it."),
+                    );
+                }
                 if in_place {
                     out.insert(
                         "note".into(),

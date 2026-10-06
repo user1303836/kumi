@@ -91,9 +91,17 @@ impl Hands for Fixture {
         unreachable!()
     }
     async fn file(&self, path: &str, kind: &str, _: Option<Signal>) -> Result<HandsReply, HandsError> {
-        // As Live does once its Save dialog is filled: the Set is written there.
+        // As Live does once its Save dialog is filled: the Set is written there, or, in a folder that isn't a
+        // project, in a project folder Live makes beside it ("<name> Project", seen in Live 12.4).
         if self.config["writes"] != false && kind == "save" {
-            std::fs::write(path, b"Set").unwrap();
+            let path = std::path::Path::new(path);
+            if self.config["project"] == true {
+                let project = path.parent().unwrap().join(format!("{} Project", path.file_stem().unwrap().to_string_lossy()));
+                std::fs::create_dir_all(&project).unwrap();
+                std::fs::write(project.join(path.file_name().unwrap()), b"Set").unwrap();
+            } else {
+                std::fs::write(path, b"Set").unwrap();
+            }
         }
         Ok(serde_json::from_value(self.hand("file", vec![json!(path), json!(kind)])?).unwrap())
     }
@@ -115,6 +123,17 @@ impl McpEndpoint for Fixture {
         self.calls.borrow_mut().push(json!({"name":name,"args":args}));
         if let Some(error) = self.config["throwRead"].as_str() {
             return Err(RuntimeError::plain(error));
+        }
+        // Live's status, as configured in turn (the last one again after).
+        if name == "live_status" {
+            if let Some(all) = self.config["status"].as_array() {
+                let mut counts = self.counts.borrow_mut();
+                let count = counts.entry("live_status".into()).or_default();
+                let status = all.get(*count).or_else(|| all.last()).cloned().unwrap();
+                *count += 1;
+                return Ok(wrap(status));
+            }
+            return Ok(wrap(json!({"connected":true,"adapter":"remote-script","epoch":7})));
         }
         if name == "live_device_read" {
             return Ok(self
@@ -552,6 +571,65 @@ async fn a_path_goes_only_into_the_dialog_it_is_for_and_replacing_a_file_is_the_
             assert!(said["next"].as_str().unwrap().starts_with(&format!("A file is already at {}: ask the producer.", song.display())), "{}", result.text);
             assert!(calls(&hands, "answer").is_empty());
             assert_eq!(std::fs::read(&song).unwrap(), b"the producer's song");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn lives_own_dialogs_order_folders_and_progress_and_a_switch_seen_through_the_bridge() {
+    // What Live 12.4 on Windows did when it was tried (#189, round 7).
+    if cfg!(target_os = "macos") {
+        return;
+    }
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let menus: Value = serde_json::from_str(FILE_MENU).unwrap();
+            let song = folder.path().join("Song B.als");
+            std::fs::write(&song, b"the producer's song").unwrap();
+            let prompt = json!({"open":true,"title":"","words":["Save changes to \"Untitled\" before closing?"],"buttons":["Yes","No","Cancel"]});
+            let saving = json!({"open":true,"title":"Save Live Set As:","words":["File name:","Save as type:"],"buttons":["Save","Cancel"],"file":"save"});
+            let opening = json!({"open":true,"title":"Open Live Set","words":[],"buttons":["Open","Cancel"],"file":"open"});
+            let calls = |hands: &Fixture, method: &str| hands.hands_calls.borrow().iter().filter(|c| c[0] == method).cloned().collect::<Vec<_>>();
+
+            // Live's own order opening a Set over a never-saved one: its Open dialog takes the path, then it asks to
+            // save, and Yes brings the Save dialog for the open Set. Nothing is typed there.
+            let (commands, hands, _) =
+                set_file_harness(json!({"writes":false,"hands":{"menus":[menus],"dialog":[opening,prompt,saving],"answer":[{"ok":true,"pressed":"Yes"}]}})).await;
+            let result = commands
+                .live_command(&json!({"command":"open_set","path":song,"save_current":"yes"}).as_object().unwrap().clone(), Signal::new())
+                .await
+                .unwrap();
+            let said: Value = serde_json::from_str(&result.text).unwrap();
+            assert!(said["next"].as_str().unwrap().contains("never saved"), "{}", result.text);
+            assert_eq!(calls(&hands, "file"), vec![json!(["file", song.display().to_string(), "open"])]);
+
+            // Save as into a folder that isn't a project: Live makes "<name> Project" there, and says where it went.
+            let (commands, _, _) = set_file_harness(json!({"project":true,"hands":{"menus":[menus],"dialog":[saving,{"open":false}]}})).await;
+            let result =
+                commands.live_command(&json!({"command":"save_as","path":folder.path().join("Probe")}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            let saved: Value = serde_json::from_str(&result.text).unwrap();
+            assert_eq!(saved["saved"], folder.path().join("Probe Project").join("Probe.als").display().to_string(), "{}", result.text);
+            assert!(saved["note"].as_str().unwrap().contains("project folder"), "{}", result.text);
+
+            // A dialog read before its controls are up is read again; a progress window is waited out.
+            let blank = json!({"open":true,"title":"","words":[],"buttons":[]});
+            let progress = json!({"open":true,"title":"Saving...","words":[],"buttons":["Cancel"]});
+            let (commands, hands, _) = set_file_harness(json!({"hands":{"menus":[menus],"dialog":[blank,saving,progress,{"open":false}]}})).await;
+            let result =
+                commands.live_command(&json!({"command":"save_as","path":folder.path().join("Two")}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert_eq!(serde_json::from_str::<Value>(&result.text).unwrap()["saved"], folder.path().join("Two.als").display().to_string(), "{}", result.text);
+            assert_eq!(calls(&hands, "file").len(), 1);
+
+            // No focus feed watching (plain lines, a script): the switch is seen through the bridge's own status.
+            let (commands, _, _) = set_file_harness(json!({
+                "status":[{"connected":false,"adapter":"remote-script","epoch":7},{"connected":true,"adapter":"remote-script","epoch":8}],
+                "hands":{"menus":[menus],"dialog":[prompt,{"open":false}],"answer":[{"ok":true,"pressed":"No"}]}
+            }))
+            .await;
+            let result =
+                commands.live_command(&json!({"command":"new_set","save_current":"no"}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert_eq!(serde_json::from_str::<Value>(&result.text).unwrap()["opened"], "a new Set", "{}", result.text);
         })
         .await;
 }
