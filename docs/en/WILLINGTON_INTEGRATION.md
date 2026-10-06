@@ -29,11 +29,14 @@ work with any bridge.
 ## Turning it on and off
 
 Type `/willington` in Kumi. It writes `willington.json` beside the bridge's
-`__init__.py`, in `Remote Scripts/AbletonMcpBridge`, turning every provider on
-with its edits, and the bridge loads them within a second, Live running.
-`/willington` again removes the file: the bridge uninstalls DeviceTools and
-RackZones and turns Follow Action writes off. While the bindings are off, Kumi
-says so when it starts.
+`__init__.py`, in `Remote Scripts/AbletonMcpBridge`, turning DeviceTools and
+RackZones on with their edits, and the bridge loads them within a second, Live
+running. Follow Actions come on too when a passing
+[self-test](#follow-action-self-test) is there: their edits need one, and Live
+can't unload their bindings. `/willington` again removes the file: the bridge
+uninstalls DeviceTools and RackZones and turns Follow Action writes off; Follow
+Actions' bindings stay until Live restarts, which Kumi says. While the bindings
+are off, Kumi says so when it starts.
 
 Kumi tells its model too. With the bindings off, a request that needs one of
 their edits gets a sentence saying that `/willington` turns them on; with them
@@ -72,10 +75,11 @@ when it starts again or loads the providers again after `/willington`.
 
 `/willington` writes this file; you can also write it yourself. It must be a
 regular file, owner-only and at most 4 KiB, with the keys below (`rackZones` is
-optional). `/willington` writes:
+optional). `/willington` writes this, with `followActions` true when a passing
+self-test is there:
 
 ```json
-{"version": 1, "followActions": true, "deviceTools": true, "rackZones": true, "enableWrites": true}
+{"version": 1, "followActions": false, "deviceTools": true, "rackZones": true, "enableWrites": true}
 ```
 
 | Key | Meaning |
@@ -144,7 +148,10 @@ current Set, so use a disposable Set.
    `command-error.json` if the command fails. The hash must match the selected
    `build/<profile-id>/libwillington.dylib` (or root library for a legacy install);
    `shasum -a 256 '/full/path/to/libwillington.dylib'` prints that digest. Keep
-   the receipt in the installed Bindings folder.
+   the receipt in the installed Bindings folder. For Kumi's own copy, with
+   nothing installed beside the bridge, put a receipt for the same library in
+   `AbletonMcpBridge/willington/WillingtonBindings/`: Kumi updates keep it, and
+   it doesn't count against the bridge's installation check.
 5. Set the standalone `WillingtonBindings` Control Surface to None, quit Live,
    and restart before enabling `AbletonMcpBridge` again. Discard the disposable
    Set. Do not select standalone Willington surfaces alongside Kumi: both would

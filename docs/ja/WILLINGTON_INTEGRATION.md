@@ -18,7 +18,7 @@ Willington は、Live の Python API では届かない部分に手が届くネ�
 
 ## オンとオフ
 
-Kumi で `/willington` と入力します。`Remote Scripts/AbletonMcpBridge` の中、ブリッジの `__init__.py` の隣に `willington.json` を書き込み、すべてのプロバイダーを編集つきでオンにします。ブリッジは Live を動かしたまま、1 秒以内にそれらを読み込みます。もう一度 `/willington` と入力するとファイルを削除し、ブリッジは DeviceTools と RackZones をアンインストールして、Follow Action の書き込みをオフにします。バインディングがオフのあいだは、Kumi が起動時にそう伝えます。
+Kumi で `/willington` と入力します。`Remote Scripts/AbletonMcpBridge` の中、ブリッジの `__init__.py` の隣に `willington.json` を書き込み、DeviceTools と RackZones を編集つきでオンにします。ブリッジは Live を動かしたまま、1 秒以内にそれらを読み込みます。合格した[セルフテスト](#follow-action-のセルフテスト)があれば、Follow Action もオンになります。その編集にはセルフテストが必要で、Live はそのバインディングを取り外せないためです。もう一度 `/willington` と入力するとファイルを削除し、ブリッジは DeviceTools と RackZones をアンインストールして、Follow Action の書き込みをオフにします。Follow Action のバインディングは Live を再起動するまで残り、Kumi はそう伝えます。バインディングがオフのあいだは、Kumi が起動時にそう伝えます。
 
 Kumi はモデルにも伝えます。バインディングがオフのときにその編集が必要な依頼があると、`/willington` でオンになることを一言添えます。オンのときは、Live で自分でマッピングするよう頼む代わりに、Kumi がマクロをマッピングします。
 
@@ -34,10 +34,10 @@ Remote Script が止まると、Follow Action の書き込みをオフにし、D
 
 ### willington.json
 
-`/willington` がこのファイルを書き込みますが、自分で書くこともできます。通常のファイルで、オーナー専用、4 KiB 以下で、次のキーを持つ必要があります（`rackZones` は省略可）。`/willington` が書き込む内容：
+`/willington` がこのファイルを書き込みますが、自分で書くこともできます。通常のファイルで、オーナー専用、4 KiB 以下で、次のキーを持つ必要があります（`rackZones` は省略可）。`/willington` が書き込む内容（合格したセルフテストがあれば `followActions` は true）：
 
 ```json
-{"version": 1, "followActions": true, "deviceTools": true, "rackZones": true, "enableWrites": true}
+{"version": 1, "followActions": false, "deviceTools": true, "rackZones": true, "enableWrites": true}
 ```
 
 | キー | 意味 |
@@ -77,7 +77,7 @@ Live のビルドを切り替えたときや、選ばれた Follow のライブ�
    PYTEST
    ```
 
-4. 新しい `self-test.json` が `"status": "passed"` と `library_sha256` を持って完了するのを待ちます。実行中や失敗の報告では、書き込みは有効になりません。コマンドが失敗したら `command-error.json` を確認してください。ハッシュは、選ばれた `build/<profile-id>/libwillington.dylib`（従来のインストールではルートのライブラリ）と一致する必要があります。`shasum -a 256 '/full/path/to/libwillington.dylib'` でそのダイジェストを表示できます。レシートは、インストールした Bindings のフォルダーに残しておいてください。
+4. 新しい `self-test.json` が `"status": "passed"` と `library_sha256` を持って完了するのを待ちます。実行中や失敗の報告では、書き込みは有効になりません。コマンドが失敗したら `command-error.json` を確認してください。ハッシュは、選ばれた `build/<profile-id>/libwillington.dylib`（従来のインストールではルートのライブラリ）と一致する必要があります。`shasum -a 256 '/full/path/to/libwillington.dylib'` でそのダイジェストを表示できます。レシートは、インストールした Bindings のフォルダーに残しておいてください。ブリッジの隣に何もインストールせず Kumi 自身のコピーを使うときは、同じライブラリのレシートを `AbletonMcpBridge/willington/WillingtonBindings/` に置いてください。Kumi を更新しても残り、ブリッジのインストールの確認にも影響しません。
 5. スタンドアロンの `WillingtonBindings` コントロールサーフェスを None にし、Live を終了して再起動してから、`AbletonMcpBridge` を再び有効にします。使い捨ての Set は破棄します。スタンドアロンの Willington サーフェスを Kumi と一緒に選ばないでください。両方がネイティブのバインディングを持とうとします。Kumi は、`enableWrites: true` で Follow の書き込みを有効にする前に、自分が選んだライブラリに対してレシートを確認し直します。
 
 ## Follow Action

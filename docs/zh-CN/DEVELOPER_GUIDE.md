@@ -127,9 +127,9 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
  "files": {"WillingtonRuntime/__init__.py": "<SHA-256>", "LICENSE": "<SHA-256>"}}
 ```
 
-`files` 列出文件夹中除它自身以外的每个文件。当文件夹里有 `release.json` 没有列出的文件、SHA-256 不符的文件，或者不是 Willington 运行时文件的文件时，`scripts/build-native-release.py` 会拒绝发布：只有 `WillingtonRuntime`、`WillingtonBindings`、`WillingtonDeviceTools` 和 `WillingtonRackZones` 中的 `.py`、`.json`、`.md`、`.pyd` 和 `.dylib` 文件才符合，所以源代码、头文件、调试文件和字节码缓存永远不会被发布。`test_native_release.py` 在 CI 中对仓库里的这个文件夹做同样的检查，`.gitattributes` 让这个文件夹逐字节保持原样。
+`files` 列出文件夹中除它自身以外的每个文件，文件名须是每个平台的检出都能容纳的：只用 ASCII 字母、数字、`.`、`_` 和 `-`，不能是 Windows 设备名或以点结尾，也不能有两个只差大小写的名字。当文件夹里有 `release.json` 没有列出的文件、SHA-256 不符的文件，或者不是 Willington 运行时文件的文件时，`scripts/build-native-release.py` 会拒绝发布：只有 `WillingtonRuntime`、`WillingtonBindings`、`WillingtonDeviceTools` 和 `WillingtonRackZones` 中的 `.py`、`.json`、`.md`、`.pyd` 和 `.dylib` 文件才符合，所以源代码、头文件、调试文件和字节码缓存永远不会被发布。`test_native_release.py` 在 CI 中对仓库里的这个文件夹做同样的检查，`.gitattributes` 让这个文件夹逐字节保持原样，并且不做空白检查。
 
-发布会把这些文件放在桥接的 Remote Script 中，即 `AbletonMcpBridge/willington/`。桥接安装时会一并复制这个文件夹，并在 Python 文件旁边放一个 `__pycache__` 阻挡文件，使安装后的文件树保持安装回执所记录的样子。只有当 `willington.json` 开启 Willington 后，桥接才会把这个文件夹加入 Python 的路径，并且排在安装在桥接旁边的副本之后。
+发布会把这些文件放在桥接的 Remote Script 中，即 `AbletonMcpBridge/willington/`，原生库只带本平台的（Windows 上是 `.pyd`，macOS 上是 `.dylib`），总共最多 16 MiB；Linux 的安装包不带。桥接安装时会一并复制这个文件夹，并在 Python 文件旁边放一个 `__pycache__` 阻挡文件，使安装后的文件树保持安装回执所记录的样子。已安装的桥接中有两个文件属于制作人而不属于发布：`willington.json` 和跟随动作自检回执 `willington/WillingtonBindings/self-test.json`。它们不影响桥接的安装检查，安装时也会保留下来。只有当 `willington.json` 开启 Willington 后，桥接才会把这个文件夹加入 Python 的路径，并且排在安装在桥接旁边的副本之后。
 
 ## 发布
 

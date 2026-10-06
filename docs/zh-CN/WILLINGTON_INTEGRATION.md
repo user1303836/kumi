@@ -18,7 +18,7 @@ Willington 是一组原生提供程序（provider），能触及 Live 的 Python
 
 ## 开启与关闭
 
-在 Kumi 中输入 `/willington`。它会在 `Remote Scripts/AbletonMcpBridge` 中、桥接的 `__init__.py` 旁边写入 `willington.json`，开启每个提供程序及其编辑；桥接会在一秒内加载它们，Live 照常运行。再次输入 `/willington` 会删除这个文件：桥接会卸载 DeviceTools 和 RackZones，并关闭跟随动作写入。绑定处于关闭状态时，Kumi 会在启动时告诉你。
+在 Kumi 中输入 `/willington`。它会在 `Remote Scripts/AbletonMcpBridge` 中、桥接的 `__init__.py` 旁边写入 `willington.json`，开启 DeviceTools 和 RackZones 及其编辑；桥接会在一秒内加载它们，Live 照常运行。有通过的[自检](#跟随动作自检)时，跟随动作也会开启：它的编辑需要自检，而 Live 无法卸载它的绑定。再次输入 `/willington` 会删除这个文件：桥接会卸载 DeviceTools 和 RackZones，并关闭跟随动作写入；跟随动作的绑定会保留到 Live 重启，Kumi 会说明这一点。绑定处于关闭状态时，Kumi 会在启动时告诉你。
 
 Kumi 也会告诉它的模型。绑定关闭时，遇到需要这些编辑的请求，会附上一句：`/willington` 可以开启它们；绑定开启时，Kumi 会自己映射宏，而不是请你在 Live 中映射。
 
@@ -34,10 +34,10 @@ Remote Script 停止时，会关闭跟随动作写入，并卸载 DeviceTools �
 
 ### willington.json
 
-`/willington` 会写入这个文件；你也可以自己写。它必须是普通文件、仅所有者可访问、最多 4 KiB，并包含以下这些键（`rackZones` 可选）。`/willington` 写入的内容：
+`/willington` 会写入这个文件；你也可以自己写。它必须是普通文件、仅所有者可访问、最多 4 KiB，并包含以下这些键（`rackZones` 可选）。`/willington` 写入的内容（有通过的自检时 `followActions` 为 true）：
 
 ```json
-{"version": 1, "followActions": true, "deviceTools": true, "rackZones": true, "enableWrites": true}
+{"version": 1, "followActions": false, "deviceTools": true, "rackZones": true, "enableWrites": true}
 ```
 
 | 键 | 含义 |
@@ -77,7 +77,7 @@ Remote Script 停止时，会关闭跟随动作写入，并卸载 DeviceTools �
    PYTEST
    ```
 
-4. 等待新的 `self-test.json` 完成，并包含 `"status": "passed"` 和 `library_sha256`。正在运行或失败的报告不会启用写入。如果命令失败，请查看 `command-error.json`。哈希必须与所选的 `build/<profile-id>/libwillington.dylib`（旧版安装则为根目录下的库）一致；`shasum -a 256 '/full/path/to/libwillington.dylib'` 会打印出这个摘要。把回执保留在已安装的 Bindings 文件夹中。
+4. 等待新的 `self-test.json` 完成，并包含 `"status": "passed"` 和 `library_sha256`。正在运行或失败的报告不会启用写入。如果命令失败，请查看 `command-error.json`。哈希必须与所选的 `build/<profile-id>/libwillington.dylib`（旧版安装则为根目录下的库）一致；`shasum -a 256 '/full/path/to/libwillington.dylib'` 会打印出这个摘要。把回执保留在已安装的 Bindings 文件夹中。如果桥接旁边没有安装任何副本、使用的是 Kumi 自带的副本，请把同一个库的回执放在 `AbletonMcpBridge/willington/WillingtonBindings/` 中：Kumi 更新时会保留它，它也不影响桥接的安装检查。
 5. 把独立的 `WillingtonBindings` 控制界面设为 None，退出 Live，并在再次启用 `AbletonMcpBridge` 之前重启 Live。丢弃这个一次性工程。不要在使用 Kumi 的同时选择独立的 Willington 控制界面：两者都会试图拥有原生绑定。在用 `enableWrites: true` 启用跟随动作写入之前，Kumi 会针对它所选的库重新检查回执。
 
 ## 跟随动作

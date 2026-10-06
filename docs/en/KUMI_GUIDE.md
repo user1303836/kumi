@@ -135,8 +135,8 @@ Live (**No Live access**) and offers to connect. `kumi --bridge-config
 --inference-only` chats without Live.
 
 **Willington.** Kumi's bridge carries Willington's native bindings, off until
-you turn them on with `/willington`. Then Kumi can also edit Follow Actions,
-map rack macros and set chain zones, on the Live versions Willington has
+you turn them on with `/willington`. Then Kumi can also map rack macros, set
+chain zones and, with a passing self-test, edit Follow Actions, on the Live versions Willington has
 bindings for: Live 12.4.15b4 and b5 on macOS ARM64 (chain zones on b5 only) and
 Live 12.4.15b5 on Windows x64. See [Willington](WILLINGTON_INTEGRATION.md).
 

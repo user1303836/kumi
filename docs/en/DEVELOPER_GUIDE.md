@@ -202,21 +202,29 @@ and `release.json`:
  "files": {"WillingtonRuntime/__init__.py": "<SHA-256>", "LICENSE": "<SHA-256>"}}
 ```
 
-`files` lists every file in the folder but itself. `scripts/build-native-release.py`
-refuses a release when the folder holds a file `release.json` doesn't list, one
-whose SHA-256 differs, or one that isn't a Willington runtime file: only `.py`,
-`.json`, `.md`, `.pyd` and `.dylib` files inside `WillingtonRuntime`,
-`WillingtonBindings`, `WillingtonDeviceTools` and `WillingtonRackZones` qualify,
-so sources, headers, debug files and bytecode caches never ship.
-`test_native_release.py` runs the same check on the repository's folder in CI,
-and `.gitattributes` keeps the folder byte for byte.
+`files` lists every file in the folder but itself, by names every platform's
+checkout can hold: ASCII letters, digits, `.`, `_` and `-`, no Windows device
+names or trailing dots, and no two names that differ only in case.
+`scripts/build-native-release.py` refuses a release when the folder holds a file
+`release.json` doesn't list, one whose SHA-256 differs, or one that isn't a
+Willington runtime file: only `.py`, `.json`, `.md`, `.pyd` and `.dylib` files
+inside `WillingtonRuntime`, `WillingtonBindings`, `WillingtonDeviceTools` and
+`WillingtonRackZones` qualify, so sources, headers, debug files and bytecode
+caches never ship. `test_native_release.py` runs the same check on the
+repository's folder in CI, and `.gitattributes` keeps the folder byte for byte
+and out of whitespace checks.
 
 A release stages the files inside the bridge's Remote Script, at
-`AbletonMcpBridge/willington/`. The bridge's install copies that folder with it,
-with a `__pycache__` blocker beside the Python files so the installed tree stays
-as the install receipt records it. The bridge puts the folder on Python's path
-only once `willington.json` turns Willington on, after any copy installed beside
-the bridge.
+`AbletonMcpBridge/willington/`, with only its own platform's native libraries
+(`.pyd` on Windows, `.dylib` on macOS), at most 16 MiB; a Linux bundle carries
+none. The bridge's install copies that folder with it, with a `__pycache__`
+blocker beside the Python files so the installed tree stays as the install
+receipt records it. Two files in the installed bridge are the producer's, not
+the release's: `willington.json` and the Follow Action self-test receipt,
+`willington/WillingtonBindings/self-test.json`. They don't count as drift, and
+an install carries them over. The bridge puts the folder on Python's path only
+once `willington.json` turns Willington on, after any copy installed beside the
+bridge.
 
 ## Releasing
 

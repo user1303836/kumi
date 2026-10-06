@@ -57,7 +57,7 @@ Kumi は User Library の中から Live の Remote Scripts フォルダーを見
 
 ブリッジをインストールして Live で選べば、`kumi` がそれを見つけて接続します。設定することは何もありません。ブリッジがなくても Kumi は起動し、Live なしでチャットし（**No Live access**）、接続を提案します。`kumi --bridge-config <absolute path>` は自分で用意したブリッジ設定を使い、`kumi --inference-only` は Live なしでチャットします。
 
-**Willington。** Kumi のブリッジには Willington のネイティブバインディングが入っていて、`/willington` でオンにするまではオフです。オンにすると、Kumi は Follow Actions の編集、ラックのマクロのマッピング、チェーンゾーンの設定もできます。Willington のバインディングがある Live のバージョンは、macOS ARM64 の Live 12.4.15b4 と b5（チェーンのゾーンは b5 のみ）と、Windows x64 の Live 12.4.15b5 です。[Willington](WILLINGTON_INTEGRATION.md)を参照してください。
+**Willington。** Kumi のブリッジには Willington のネイティブバインディングが入っていて、`/willington` でオンにするまではオフです。オンにすると、Kumi はラックのマクロのマッピングとチェーンゾーンの設定もでき、セルフテストが合格していれば Follow Actions も編集できます。Willington のバインディングがある Live のバージョンは、macOS ARM64 の Live 12.4.15b4 と b5（チェーンのゾーンは b5 のみ）と、Windows x64 の Live 12.4.15b5 です。[Willington](WILLINGTON_INTEGRATION.md)を参照してください。
 
 ## Kumi との作業
 

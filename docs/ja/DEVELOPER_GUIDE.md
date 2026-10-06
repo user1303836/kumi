@@ -127,9 +127,9 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
  "files": {"WillingtonRuntime/__init__.py": "<SHA-256>", "LICENSE": "<SHA-256>"}}
 ```
 
-`files` には、自分自身を除くフォルダー内のすべてのファイルが並びます。`scripts/build-native-release.py` は、`release.json` に載っていないファイル、SHA-256 が違うファイル、Willington のランタイムファイルではないファイルがフォルダーにあると、リリースを拒否します。認められるのは `WillingtonRuntime`、`WillingtonBindings`、`WillingtonDeviceTools`、`WillingtonRackZones` の中の `.py`、`.json`、`.md`、`.pyd`、`.dylib` だけなので、ソース、ヘッダー、デバッグファイル、バイトコードのキャッシュが出荷されることはありません。`test_native_release.py` は CI でリポジトリのフォルダーに同じ確認を行い、`.gitattributes` はフォルダーをバイト単位でそのまま保ちます。
+`files` には、自分自身を除くフォルダー内のすべてのファイルが、どのプラットフォームのチェックアウトでも扱える名前で並びます。使えるのは ASCII の英字、数字、`.`、`_`、`-` だけで、Windows のデバイス名や末尾のドットは使えず、大文字と小文字だけが違う 2 つの名前も使えません。`scripts/build-native-release.py` は、`release.json` に載っていないファイル、SHA-256 が違うファイル、Willington のランタイムファイルではないファイルがフォルダーにあると、リリースを拒否します。認められるのは `WillingtonRuntime`、`WillingtonBindings`、`WillingtonDeviceTools`、`WillingtonRackZones` の中の `.py`、`.json`、`.md`、`.pyd`、`.dylib` だけなので、ソース、ヘッダー、デバッグファイル、バイトコードのキャッシュが出荷されることはありません。`test_native_release.py` は CI でリポジトリのフォルダーに同じ確認を行い、`.gitattributes` はフォルダーをバイト単位でそのまま保ち、空白のチェックからも外します。
 
-リリースは、これらのファイルをブリッジの Remote Script の中、`AbletonMcpBridge/willington/` に置きます。ブリッジのインストールはそのフォルダーも一緒にコピーし、Python ファイルの隣に `__pycache__` のブロッカーを置くので、インストールされたツリーはインストールのレシートが記録したとおりに保たれます。ブリッジがこのフォルダーを Python のパスに加えるのは、`willington.json` が Willington をオンにしたときだけで、ブリッジの隣にインストールされたコピーより後になります。
+リリースは、これらのファイルをブリッジの Remote Script の中、`AbletonMcpBridge/willington/` に置きます。ネイティブライブラリは自分のプラットフォームのもの（Windows では `.pyd`、macOS では `.dylib`）だけで、合計 16 MiB までです。Linux のバンドルには入りません。ブリッジのインストールはそのフォルダーも一緒にコピーし、Python ファイルの隣に `__pycache__` のブロッカーを置くので、インストールされたツリーはインストールのレシートが記録したとおりに保たれます。インストールされたブリッジのうち 2 つのファイルは、リリースのものではなくプロデューサーのものです。`willington.json` と、Follow Action のセルフテストのレシート `willington/WillingtonBindings/self-test.json` です。これらはブリッジのインストールの確認に影響せず、インストールのときに引き継がれます。ブリッジがこのフォルダーを Python のパスに加えるのは、`willington.json` が Willington をオンにしたときだけで、ブリッジの隣にインストールされたコピーより後になります。
 
 ## リリース
 
