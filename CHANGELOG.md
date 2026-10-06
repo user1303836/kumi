@@ -3,6 +3,27 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.8.7 — 2026-10-06
+
+Ships with bridge 1.0.81, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+
+- Kumi sees the Set's scale ("D Dorian"; a fresh Set's "C Major (Live's default)") and writes chords
+  in it: with Scale Mode on, `{IV}` in a D Dorian Set is G major. Live's default never sets the key.
+- Kumi places audio files in the Arrangement. A new clip, audio or MIDI, laid over others replaces
+  what's under it, as a drop in Live does, and Kumi says what it replaced; Live's own undo brings it
+  back.
+- Kumi no longer offers clip fades, which Live 12.4 has no way to set.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.81
+
+- The Set's scale reaches Kumi: its root, name and Scale Mode.
+- A new MIDI clip created inside another no longer loses that clip's far end and its notes.
+- Reading automation on an Arrangement clip finds its rides; before, it said there were none.
+
 ## 1.8.6 — 2026-10-06
 
 Ships with bridge 1.0.80, which Live loads when it restarts. After updating, Kumi offers to quit Live
