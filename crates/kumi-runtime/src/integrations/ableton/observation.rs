@@ -6,7 +6,9 @@ use super::{
     inference::no_access,
     more_changes::set_meter,
     pins::pin_context,
+    project,
     remember::{CurrentProject, Remember},
+    track_ids,
     views::{self, ViewHost},
 };
 use crate::core::{contracts::*, errors::RuntimeError};
@@ -115,6 +117,9 @@ impl Observer {
             let set_args = context::discovery_args(&object(json!({"kind":"set","fields":fields})))?;
 
             let mut fields = vec!["name", "kind", "mediaKind", "groupTrackRef"];
+            if self.remember.track_ids.reported(connection.epoch.get()) {
+                fields.push("kumiTrack");
+            }
             if self.last_track_count.get() <= MIXER_TRACKS {
                 fields.push("mixer");
             }
@@ -218,6 +223,9 @@ impl Observer {
 
             let mut track_list = None;
             let mut more_tracks = false;
+            // What the tracks read says about their ids: the list's revision, and the tracks whose id is missing or shared.
+            let mut track_revision: Option<String> = None;
+            let mut track_gaps: Vec<String> = vec![];
             let mut more_devices = false;
 
             let tracks_result: Result<(), ReadError> = (|| {
@@ -227,6 +235,8 @@ impl Observer {
                 }
                 let page = context::discovery_payload(&read, "track", epoch)?;
                 let rows = objects(&page)?;
+                track_revision = page.get("revision").and_then(Value::as_str).map(str::to_owned);
+                track_gaps = track_ids::gaps(&rows);
                 connection.register_rows("track", &rows, &track_args, cursor(&page))?;
 
                 let mut shown = rows.iter().map(|row| track_row(connection, row)).collect::<Result<Vec<_>, _>>()?;
@@ -333,6 +343,20 @@ impl Observer {
             connection.assert_lease(lease, &signal)?;
             *self.remember.current.borrow_mut() =
                 Some(Rc::new(CurrentProject { identity: identity.clone(), name: name.clone(), path: path.clone(), project: project_id.clone(), unsaved }));
+            // The tracks' own ids, made whole in the background when their list changed or one is missing or
+            // shared: within the project (or the unsaved Set), and never written into a template.
+            let scope = project_id.clone().unwrap_or_else(|| format!("unsaved:{identity}"));
+            let writable = path.as_deref().is_none_or(|path| !project::template_location(path));
+            let structure = connection.structure_events.get();
+            let gaps = if writable { track_gaps } else { vec![] };
+            if self.remember.track_ids.due(&scope, track_revision.as_deref(), &gaps, structure) {
+                let remember = self.remember.clone();
+                let lifetime = connection.lifetime.clone();
+                let keepers = project_id.clone().zip(self.remember.store.clone()).map(|(project, store)| track_ids::Keepers { project, store });
+                tokio::task::spawn_local(async move {
+                    let _ = remember.track_ids.pass(&remember.connection, &scope, keepers, writable, structure, lifetime).await;
+                });
+            }
             let project_ref = project_id.map(|id| ProjectRef { id, name: name.clone() });
             *self.previous.borrow_mut() =
                 Some(Previous { key: key.clone(), identity: identity.clone(), path: path.clone(), project: project_ref.clone() });

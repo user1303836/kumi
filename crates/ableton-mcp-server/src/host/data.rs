@@ -15,16 +15,19 @@ impl McpHost {
         }))
     }
     pub async fn live_data_preview_async(&self, id: &Value, p: &Value) -> Value {
-        if !has_only(p, &["key", "value", "trackRef"])
+        if !has_only(p, &["key", "value", "trackRef", "expectedValue", "expectedIdentity", "entries"])
             || !is_non_empty_string(&p["key"], 256)
             || p.get("value").is_none()
-            || (!p["value"].is_null() && !p["value"].as_str().is_some_and(|s| utf16_len(s) <= 1_048_576))
+            || !text_or_null(&p["value"])
             || p.get("trackRef").is_some_and(|v| !is_non_empty_string(v, 256))
         {
             return error(id, -32602, "key and value (text of at most 1 MiB, or null to clear it) are required", None);
         }
         if !p["key"].as_str().unwrap().starts_with("kumi.") {
             return error(id, -32602, "Kumi writes only its own keys: start the key with kumi. (other keys are read-only)", None);
+        }
+        if p.get("entries").is_some() || p.get("expectedValue").is_some() || p.get("expectedIdentity").is_some() {
+            return self.live_data_batch_preview_async(id, p).await;
         }
         let result=async{
             let status=self.fresh_status(Some(&LiveOperationContext::with_deadline(self.deadline(reads::AUDITION_DEADLINE_MS)))).await?;
@@ -44,6 +47,103 @@ impl McpHost {
             Ok(success_text(id,&json!({"transactionId":t["id"],"epoch":t["epoch"],"ref":owner,"key":p["key"],"prior":current,"proposed":p["value"],"impact":"saves-text-in-the-set","confirmation":"apply","expiresAt":t["expiresAt"]})))
         }.await;
         result.unwrap_or_else(|e| adapter_tool_error(id, &e, "Nothing was saved; preview again from a fresh track reference."))
+    }
+    /// Text under one key on several tracks at once (Kumi's own ids for them). Each place names what was read
+    /// there (its text and the track's identity); the apply checks them, so the preview reads nothing itself.
+    async fn live_data_batch_preview_async(&self, id: &Value, p: &Value) -> Value {
+        // Short text in a batch: it's for ids, and a thousand places of 1 MiB each would be too much.
+        let short = |value: &Value| value.is_null() || value.as_str().is_some_and(|s| utf16_len(s) <= 256);
+        let place = |entry: &Value| {
+            is_non_empty_string(&entry["trackRef"], 256)
+                && entry.get("value").is_some_and(short)
+                && entry.get("expectedValue").is_some_and(short)
+                && is_non_empty_string(&entry["expectedIdentity"], 256)
+        };
+        let entries = p.get("entries").map(|v| v.as_array().filter(|a| (1..=1023).contains(&a.len())));
+        if !place(p)
+            || entries.is_some_and(|e| {
+                e.is_none_or(|e| !e.iter().all(|e| has_only(e, &["trackRef", "value", "expectedValue", "expectedIdentity"]) && place(e)))
+            })
+        {
+            return error(id, -32602, "each place needs trackRef, value and expectedValue (what was read there, or null; text of at most 256 characters in a batch) and expectedIdentity, and entries 1 to 1023 of them", None);
+        }
+        let more: Vec<&Value> = entries.flatten().into_iter().flatten().collect();
+        let mut places: Vec<&Value> = std::iter::once(&p["trackRef"]).chain(more.iter().map(|e| &e["trackRef"])).collect();
+        places.sort_by_key(|r| r.as_str().unwrap_or(""));
+        if places.windows(2).any(|w| w[0] == w[1]) {
+            return error(id, -32602, "each track can be named only once", None);
+        }
+        let result = async {
+            let status = self.fresh_status(Some(&LiveOperationContext::with_deadline(self.deadline(reads::AUDITION_DEADLINE_MS)))).await?;
+            if !status.has_operation("data.set") {
+                return Err(LiveError::error("data saved in the Set is unavailable on this Live shape"));
+            }
+            let mut payload = json!({"ref":p["trackRef"],"key":p["key"],"value":p["value"],"expectedValue":p["expectedValue"],"expectedIdentity":p["expectedIdentity"]});
+            if !more.is_empty() {
+                payload["entries"] = more
+                    .iter()
+                    .map(|e| json!({"ref":e["trackRef"],"value":e["value"],"expectedValue":e["expectedValue"],"expectedIdentity":e["expectedIdentity"]}))
+                    .collect();
+            }
+            let t = json!({"id":tempo::transaction_id("data"),"epoch":status.epoch,"kind":"data-set","batch":true,"payload":payload,"expiresAt":now_ms_f64()+TRANSACTION_TTL_MS,"state":"previewed"});
+            self.retain_bounded_transaction(&self.clip_lifecycle_transactions, t.clone(), "saved text")?;
+            Ok(success_text(
+                id,
+                &json!({"transactionId":t["id"],"epoch":t["epoch"],"key":p["key"],"places":more.len()+1,"impact":"saves-text-on-tracks","confirmation":"apply","expiresAt":t["expiresAt"]}),
+            ))
+        }
+        .await;
+        result.unwrap_or_else(|e| adapter_tool_error(id, &e, "Nothing was saved; preview again from a fresh read of the tracks."))
+    }
+    /// A batch, applied: every track named is checked to be the one read (together, one read each) before
+    /// any text is written, then each track's text is written, all sent at once so Live takes them in one
+    /// tick. Each write still checks what the track holds, so one that changed since is left as it is, and the
+    /// apply says how many were saved.
+    async fn apply_data_batch(
+        &self,
+        id: &Value,
+        t: &Value,
+        record: &Rc<RefCell<Value>>,
+        p: &Value,
+        context: &LiveOperationContext,
+    ) -> Result<Value, LiveError> {
+        let payload = &t["payload"];
+        let places: Vec<&Value> = std::iter::once(payload).chain(payload["entries"].as_array().into_iter().flatten()).collect();
+        let found = futures::future::join_all(
+            places.iter().map(|place| self.track_one_async(Some(context), place["ref"].as_str().unwrap_or(""), &["ref", "objectIdentity"])),
+        )
+        .await;
+        for (place, found) in places.iter().zip(found) {
+            if found?.as_ref().and_then(|row| row.get("objectIdentity")) != Some(&place["expectedIdentity"]) {
+                return Ok(transaction_error(
+                    id,
+                    "A track named isn't the one that was read any more, so nothing was saved; read the tracks again",
+                ));
+            }
+        }
+        record.borrow_mut()["state"] = json!("applying");
+        record.borrow_mut()["applyKey"] = p["idempotencyKey"].clone();
+        let writes = futures::future::join_all(places.iter().map(|place| {
+            let args = json!({"ref":place["ref"],"key":payload["key"],"value":place["value"],"expectedValue":place["expectedValue"]});
+            async move { self.async_adapter().invoke_async(&LiveInvocation::new("data.set", args), Some(context)).await }
+        }))
+        .await;
+        let saved: Vec<Value> = places
+            .iter()
+            .zip(&writes)
+            .filter_map(|(place, write)| {
+                write
+                    .as_ref()
+                    .ok()
+                    .filter(|r| r["value"] == place["value"])
+                    .map(|r| json!({"ref":place["ref"],"value":r["value"],"prior":r["prior"]}))
+            })
+            .collect();
+        if saved.len() != places.len() {
+            return Err(LiveError::error(format!("The text was saved on {} of {} tracks; read them again", saved.len(), places.len())));
+        }
+        record.borrow_mut()["state"] = json!("applied");
+        Ok(success_text(id, &json!({"transactionId":t["id"],"state":"applied","key":payload["key"],"saved":saved,"idempotent":false})))
     }
     pub async fn live_data_apply_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Option<Value> {
         if !valid_transaction_params(p, "apply") {
@@ -68,7 +168,9 @@ impl McpHost {
         }
         let result=async{
             let status=self.require_connected(None)?;if json!(status.epoch)!=t["epoch"]{return Ok(transaction_error(id,"Live connection epoch changed; preview again"));}
-            let context=self.transaction_context(p,signal,reads::AUDITION_DEADLINE_MS);record.borrow_mut()["state"]=json!("applying");record.borrow_mut()["applyKey"]=p["idempotencyKey"].clone();
+            let context=self.transaction_context(p,signal,reads::AUDITION_DEADLINE_MS);
+            if t["batch"]==true{return self.apply_data_batch(id,&t,&record,p,&context).await;}
+            record.borrow_mut()["state"]=json!("applying");record.borrow_mut()["applyKey"]=p["idempotencyKey"].clone();
             let result=self.async_adapter().invoke_async(&LiveInvocation::new("data.set",t["payload"].clone()),Some(&context)).await?;
             if result.is_null(){return Err(LiveError::type_error("Cannot read properties of null (reading 'value')"));}
             if result.get("value")!=Some(&t["payload"]["value"]){return Err(LiveError::error("the saved text wasn't confirmed"));}
@@ -88,6 +190,9 @@ impl McpHost {
             return transaction_error(id, "Unknown or expired saved-text transaction");
         };
         let t = record.borrow().clone();
+        if t["batch"] == true {
+            return transaction_error(id, "Text saved on several tracks at once (Kumi's own ids for them) isn't taken back");
+        }
         if t["state"] == "undone" && t["undoKey"] == p["idempotencyKey"] {
             return success_text(id, &json!({"transactionId":t["id"],"state":"undone","idempotent":true}));
         }
@@ -145,4 +250,8 @@ impl McpHost {
             adapter_tool_error(id, &e, "Whether the text went back is uncertain: read it again.")
         })
     }
+}
+/// Text of at most 1 MiB, or null.
+fn text_or_null(value: &Value) -> bool {
+    value.is_null() || value.as_str().is_some_and(|s| utf16_len(s) <= 1_048_576)
 }

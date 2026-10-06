@@ -36,6 +36,7 @@ pub mod plan_stream;
 pub mod plugin_tool;
 pub mod project;
 pub mod samples;
+pub mod track_ids;
 pub mod willington;
 
 /// The host-authorized bridge surface, ordered as in the source integration.

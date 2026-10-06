@@ -2128,7 +2128,7 @@ class LiveObjectMapper:
     # What a light track row carries, each the value its whole row has: identity, name, kind and
     # cheap scalar state read from the track itself. Nothing below the track (clip slots, clips,
     # notes, devices, parameters, take lanes, mixer, routing) is walked; those are empty or null.
-    _LIGHT_TRACK_FIELDS = frozenset({"ref", "parentRef", "objectIdentity", "name", "kind", "mediaKind", "armed", "monitoringState", "playingSlotIndex", "firedSlotIndex", "groupTrackRef", "colorIndex", "color", "isVisible", "isFrozen", "foldState"})
+    _LIGHT_TRACK_FIELDS = frozenset({"ref", "parentRef", "objectIdentity", "name", "kind", "mediaKind", "armed", "monitoringState", "playingSlotIndex", "firedSlotIndex", "groupTrackRef", "colorIndex", "color", "isVisible", "isFrozen", "foldState", "kumiTrack"})
 
     @classmethod
     def _snapshot_arguments(cls, args: Any) -> dict[str, Any]:
@@ -2381,6 +2381,7 @@ class LiveObjectMapper:
             "ref": track_ref, "parentRef": self.refs.put("set", self.song, "song"), "objectIdentity": self._capture_object_identity(track),
             "name": str(getattr(track, "name", f"Track {index + 1}")), "kind": track_kind,
             "mediaKind": "midi" if bool(self._read_attr(track, "has_midi_input")) else "audio",
+            "kumiTrack": self._track_id(track),
             "armed": armed_value if isinstance(armed_value, bool) else None,
             "monitoringState": self._monitoring_state(self._read_attr(track, "current_monitoring_state", "monitoring")),
             "playingSlotIndex": self._slot_index(self._read_attr(track, "playing_slot_index")),
@@ -2405,6 +2406,7 @@ class LiveObjectMapper:
             "ref": self.refs.put("track", track, str(index)), "parentRef": self.refs.put("set", self.song, "song"), "objectIdentity": self._capture_object_identity(track),
             "name": str(getattr(track, "name", f"Track {index + 1}")), "kind": track_kind,
             "mediaKind": "midi" if bool(self._read_attr(track, "has_midi_input")) else "audio",
+            "kumiTrack": self._track_id(track),
             "light": True,
             "armed": armed_value if isinstance(armed_value, bool) else None,
             "monitoringState": self._monitoring_state(self._read_attr(track, "current_monitoring_state", "monitoring")),
@@ -4422,6 +4424,13 @@ class LiveObjectMapper:
         """What keeps data saved inside the Set under a ref: the Song (the Set's ref) or a track."""
         if isinstance(reference, str) and reference == self.refs.put("set", self.song, "song"): return self.song
         return self._positional_track(reference)[0]
+
+    def _track_id(self, track: Any) -> str | None:
+        """The id Kumi keeps on a track ("kumi.track" in its Track data, which a duplicate of the track carries
+        too): short text, else None (none kept, or Live keeps no data on it)."""
+        try: value = getattr(track, "get_data")("kumi.track", None)
+        except Exception: return None
+        return value if isinstance(value, str) and 0 < len(value) <= 64 else None
 
     def _stored_text(self, owner: Any, key: str) -> str | None:
         reader = getattr(owner, "get_data", None)

@@ -7897,6 +7897,21 @@ class SetDataTests(unittest.TestCase):
         self.assertTrue(mapper._operation_supported("data.set")); self.assertFalse(LiveObjectMapper(FakeSong())._operation_supported("data.get"))
 
 
+class TrackIdTests(unittest.TestCase):
+    """Kumi's own id for a track ("kumi.track" in its Track data), reported on its rows."""
+
+    def test_a_track_row_says_the_id_kumi_keeps_on_it_and_a_light_row_does_too(self):
+        song = FakeDataSong(); song.tracks[1].data["kumi.track"] = "01J9ZQ3V6M8K2D7X4N5P0R1S2T"; song.tracks.append(FakeTrack())
+        mapper = LiveObjectMapper(song); snapshot = mapper.snapshot()
+        self.assertEqual([track["kumiTrack"] for track in snapshot["tracks"]], [None, "01J9ZQ3V6M8K2D7X4N5P0R1S2T", None], "none kept, kept, a track without data")
+        whole = []; build = mapper._whole_track_row
+        mapper._whole_track_row = lambda index: whole.append(index) or build(index)
+        page = mapper.discover("track", requested_fields=["name", "kumiTrack"])
+        self.assertEqual(([item["kumiTrack"] for item in page["items"]], whole), ([None, "01J9ZQ3V6M8K2D7X4N5P0R1S2T", None], []), "read with the light rows, no track read whole")
+        song.tracks[0].data["kumi.track"] = "x" * 65
+        self.assertIsNone(mapper.snapshot()["tracks"][0]["kumiTrack"], "not an id Kumi keeps")
+
+
 class FakeSelectableNoteClip(FakeNoteClip):
     """Live 12's note selection and region deletion on top of FakeNoteClip."""
 

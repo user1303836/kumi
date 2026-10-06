@@ -41,6 +41,8 @@ pub struct Remember {
     on_catch_up: Option<Rc<dyn Fn(CatchUp)>>,
     saving: RefCell<Saving>,
     timer: RefCell<Option<Signal>>,
+    /// Kumi's own ids for the Set's tracks, kept whole in the background.
+    pub track_ids: super::track_ids::TrackIds,
 }
 impl Remember {
     pub fn new(connection: Rc<LiveConnection>, store: Option<Rc<dyn ProjectStore>>, on_catch_up: Option<Rc<dyn Fn(CatchUp)>>) -> Rc<Self> {
@@ -53,6 +55,7 @@ impl Remember {
             on_catch_up,
             saving: RefCell::new(async {}.boxed_local().shared()),
             timer: RefCell::new(None),
+            track_ids: Default::default(),
         })
     }
     pub fn current(&self) -> Option<Rc<CurrentProject>> {
