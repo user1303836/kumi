@@ -110,6 +110,11 @@ pub fn picture_size(data: &[u8], kind: &str) -> Option<PictureSize> {
     }
     None
 }
+/// The first word of `text`, trimmed as JavaScript trims, cut at JavaScript's white space as `text.split(/\s+/)[0]`
+/// cuts it: U+0085, which Rust counts as white space and JavaScript doesn't, stays in the word.
+fn first_word(text: &str) -> &str {
+    text.split(|c: char| trim(c.encode_utf8(&mut [0; 4])).is_empty()).next().unwrap_or(text)
+}
 pub fn max_patch_summary(root: &Value) -> Option<String> {
     let top = root.get("patcher")?;
     if !top["boxes"].is_array() {
@@ -141,7 +146,7 @@ pub fn max_patch_summary(root: &Value) -> Option<String> {
                     code.push((at.into(), c.into()));
                 }
             } else if kind == "newobj" && !text.is_empty() {
-                *objects.entry(text.split_whitespace().next().unwrap().into()).or_default() += 1;
+                *objects.entry(first_word(text).into()).or_default() += 1;
             }
             let value = &b["saved_attribute_attributes"]["valueof"];
             if let Some(name) = value["parameter_longname"].as_str().filter(|_| kind.starts_with("live.")) {
@@ -167,7 +172,7 @@ pub fn max_patch_summary(root: &Value) -> Option<String> {
                 ));
             }
             if b["patcher"].is_object() {
-                let at = if text.is_empty() { at.into() } else { format!("{at} › {}", text.split_whitespace().next().unwrap()) };
+                let at = if text.is_empty() { at.into() } else { format!("{at} › {}", first_word(text)) };
                 walk(&b["patcher"], &at, depth + 1, controls, code, objects);
             }
         }

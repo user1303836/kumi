@@ -422,6 +422,18 @@ async fn addresses_carrying_keys_or_tokens_are_not_read_or_sent_to_readers() {
         .contains("carries what looks like a key or token, so Kumi won't read it"));
 }
 #[test]
+fn a_max_box_whose_text_is_a_next_line_character_is_counted_as_it_is() {
+    // JavaScript's trim keeps U+0085, which Rust's own white space includes: its first word is the character itself.
+    let patch = json!({"patcher":{"boxes":[
+        {"box":{"maxclass":"newobj","text":"\u{85}"}},
+        {"box":{"maxclass":"newobj","text":"\u{85}","patcher":{"boxes":[{"box":{"maxclass":"codebox","code":"out1 = in1;"}}]}}}
+    ]}});
+    assert_eq!(
+        kumi_runtime::web::read::max_patch_summary(&patch).unwrap(),
+        "Made of: \u{85} \u{d7}2.\n\nCode 1 of 1, a codebox in the patch \u{203a} \u{85}:\n```\nout1 = in1;\n```"
+    );
+}
+#[test]
 fn picture_headers_and_exa_text_handle_the_sources_formats() {
     use kumi_runtime::web::{
         exa::parse_exa_results,
