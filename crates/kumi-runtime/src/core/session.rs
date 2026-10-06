@@ -3,6 +3,7 @@
 use super::{
     contracts::*,
     errors::{FailureKind, KumiError, RuntimeError},
+    file_sync::FileSync,
     gaps::{gap_tools, GAP_GUIDANCE},
     memory::{memory_instructions, memory_tools, MemoryTools, MemoryToolsOptions},
     recall::{recall_tool, RecallOptions},
@@ -87,6 +88,8 @@ pub struct SessionOptions {
     /// Kumi's database, when it opened: notes, techniques and lessons come through their stores (set
     /// beside this), and gaps go here instead of the file.
     pub store: Option<StoreClient>,
+    /// The files an older Kumi may be writing while this one runs, looked at once a turn, beside it.
+    pub files: Option<FileSync>,
     /// Where each turn's timing goes (`timings.jsonl`); none keeps no log.
     pub timings: Option<String>,
     pub library: Option<Rc<Library>>,
@@ -120,6 +123,7 @@ impl SessionOptions {
             techniques: None,
             gaps: None,
             store: None,
+            files: None,
             timings: None,
             library: None,
             matching: true,
@@ -552,6 +556,20 @@ impl Session {
     }
     fn notice(&self, message: impl Into<String>) {
         self.emit(SessionEvent::Notice { message: message.into() });
+    }
+    /// Bring in, beside the turn just begun, what an older Kumi changed in its files (`FileSync`), and say
+    /// so when anything came in. The turn never waits for it.
+    fn look_at_files(&self) {
+        let Some(files) = self.0.options.files.clone() else { return };
+        let this = self.clone();
+        tokio::task::spawn_local(async move {
+            let began = Instant::now();
+            let looked = files.look().await;
+            timing::files(began.elapsed().as_millis() as u64);
+            if let Some(message) = looked.ok().flatten().and_then(|imported| imported.brought_in.sentence()) {
+                this.notice(message);
+            }
+        });
     }
     fn error(&self, message: impl Into<String>) {
         self.emit(SessionEvent::Error { message: message.into(), kind: None, provider: None });
@@ -1112,6 +1130,9 @@ impl Session {
     async fn drive(&self, op: Rc<Operation>, initial_phase: Phase, work: Work, limit_ms: u64) -> Result<(), RuntimeError> {
         let began = Instant::now();
         let recorder = op.is_turn.then(timing::begin);
+        if op.is_turn {
+            self.look_at_files();
+        }
         let mut ended: Option<(Value, Option<Usage>)> = None;
         let settled = Rc::new(Cell::new(false));
         let mark = settled.clone();

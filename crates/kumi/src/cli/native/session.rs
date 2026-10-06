@@ -12,6 +12,7 @@ use kumi_runtime::{
     auth::store::{open_credential_store, Credential, CredentialStore},
     core::{
         contracts::*,
+        file_sync::FileSync,
         memory::MemoryStoreOptions,
         session::VideoDirectories,
         store_backed::{SqliteMemoryStore, SqlitePlaybookStore, SqliteTechniqueStore},
@@ -400,7 +401,8 @@ pub(super) async fn run_session(
     }
     // Kumi's database keeps notes, techniques, lessons and gaps, with what earlier Kumis kept in files
     // read in. When it can't open, they stay in their files this time, as before, and Kumi says so once.
-    let database = StoreClient::open(load_db_file(&io.env)?.into(), json_files(&io.env)?, kumi_common::time::now_ms()).await;
+    let files = json_files(&io.env)?;
+    let database = StoreClient::open(load_db_file(&io.env)?.into(), files.clone(), kumi_common::time::now_ms()).await;
     let database_notice = match &database {
         Ok((_, Ok(imported))) => imported.brought_in.sentence(),
         Ok((_, Err(why))) => {
@@ -426,6 +428,8 @@ pub(super) async fn run_session(
         Some(client) => Rc::new(SqlitePlaybookStore::new(client.clone())) as Rc<dyn PlaybookStore>,
         None => create_playbook_store(load_playbook_file(&io.env)?),
     });
+    // An older Kumi open beside this one writes the files: what it changes comes in a turn later.
+    options.files = database.as_ref().map(|client| FileSync::new(client.clone(), files));
     options.store = database;
     options.goals = Some(create_goal_store(load_goals_dir(&io.env)?));
     options.gaps = Some(load_gaps_file(&io.env)?);

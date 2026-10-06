@@ -40,6 +40,9 @@ pub struct TurnTiming {
     pub live_requests: u32,
     /// Request bodies sent to the model.
     pub sent_bytes: u64,
+    /// The look at the files an older Kumi may be writing that the turn started (`FileSync`): its own
+    /// time, beside the turn's, not part of it.
+    pub files_ms: Option<u64>,
 }
 
 thread_local! {
@@ -206,6 +209,11 @@ pub fn sent(bytes: usize) {
     with(|timing| timing.sent_bytes += bytes as u64);
 }
 
+/// The turn's look at an older Kumi's files took this long, beside it.
+pub fn files(ms: u64) {
+    with(|timing| timing.files_ms = Some(ms));
+}
+
 /// The log line for a finished turn; `stop` is how it ended (a `StopReason`, or "error").
 pub fn line(timing: &TurnTiming, elapsed_ms: u64, stop: Value, usage: Option<&Usage>) -> Value {
     let mut line = json!({
@@ -236,6 +244,9 @@ pub fn line(timing: &TurnTiming, elapsed_ms: u64, stop: Value, usage: Option<&Us
     if !slowest.is_empty() {
         line["slowTools"] =
             json!(slowest.into_iter().take(3).map(|(tool, (calls, ms))| json!({"tool":tool,"calls":calls,"ms":ms})).collect::<Vec<_>>());
+    }
+    if let Some(ms) = timing.files_ms {
+        line["filesMs"] = json!(ms);
     }
     if let Some(usage) = usage {
         line["inputTokens"] = json!(usage.input_tokens);
@@ -364,6 +375,15 @@ mod tests {
         assert_eq!((&left["effort"], left.get("tier")), (&json!("default"), None));
         let quiet = super::line(&begin().finish(), 10, json!("completed"), None);
         assert!(quiet.get("effort").is_none() && quiet.get("slowTools").is_none(), "no model call, no effort: {quiet}");
+    }
+
+    #[test]
+    fn a_turns_look_at_an_older_kumis_files_shows_as_its_own_time() {
+        let recorder = begin();
+        files(3);
+        let line = line(&recorder.finish(), 2000, json!("completed"), None);
+        assert_eq!((&line["filesMs"], &line["ms"]), (&json!(3), &json!(2000)));
+        assert!(super::line(&begin().finish(), 10, json!("completed"), None).get("filesMs").is_none(), "no look, no field");
     }
 
     #[tokio::test]

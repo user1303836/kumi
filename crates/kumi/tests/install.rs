@@ -185,6 +185,7 @@ async fn checked_executable_update_swap_and_rollback() {
     }));
     assert_eq!(update_installed(updated).await.unwrap(), 0, "{}", out.0.borrow());
     assert!(out.0.borrow().contains("Kumi is now 99.0.0"));
+    assert_eq!(out.0.borrow().contains(&format!("Kumi windows opened before the update keep running {KUMI_VERSION}")), !cfg!(windows));
     assert!(calls.borrow().iter().any(|(cmd, _)| cmd == &system::system_program_default(SystemProgram::Tar)));
     assert!(calls.borrow().iter().any(|(cmd, args)| cmd.ends_with(&executable_name("kumi")) && args == &["--version"]));
     assert_eq!(

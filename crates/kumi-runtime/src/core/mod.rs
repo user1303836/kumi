@@ -2,6 +2,7 @@ pub mod contracts;
 pub mod disk;
 pub mod errors;
 pub mod evolve;
+pub mod file_sync;
 pub mod gaps;
 pub mod goal;
 pub mod match_run;
