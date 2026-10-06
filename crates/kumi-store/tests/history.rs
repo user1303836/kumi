@@ -15,7 +15,7 @@ fn a_sets_history_opens_in_its_own_file_with_its_own_schema() {
     let store = Store::open_history(&path).unwrap();
     assert_eq!(count(&store, "PRAGMA user_version") as usize, HISTORY_SCHEMA_VERSION);
     assert_eq!(store.read(|c| Ok(c.query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0))?)).unwrap(), "wal");
-    for table in ["objects", "ops", "snapshots", "refs"] {
+    for table in ["objects", "ops"] {
         let found: i64 = store
             .read(move |c| {
                 Ok(c.query_row("SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = ?1", [table], |row| row.get(0))?)

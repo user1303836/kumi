@@ -28,6 +28,9 @@ use std::{
     rc::Rc,
 };
 
+/// The most each call of Kumi's undo of a cut waits for Live.
+const RESTORE_MS: u64 = 30_000;
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Restore {
     #[serde(rename = "ref")]
@@ -489,6 +492,8 @@ impl History {
     }
     /// Undo a change that cut or deleted clips. What it cut is checked first, so nothing changes when it can't come
     /// back. Then, inside one Live undo step, the change's own undo (when it has one) and the clips made again whole.
+    /// Live is asked on the connection's lifetime and a time limit, not the turn's, so an Esc doesn't stop it halfway.
+    /// If Live stops partway anyway, the step is taken back when what the track holds shows it's Live's last.
     async fn undo_material(
         &self,
         entry: &Rc<RefCell<Applied>>,
@@ -496,52 +501,144 @@ impl History {
         material: Material,
         undo_key: &str,
         discard: bool,
-        signal: Signal,
+        _signal: Signal,
     ) -> Result<UndoResult, RuntimeError> {
         let names = material.names();
-        let left = |why: &str| {
-            format!(
-                "Kumi can't bring back {names} ({why}), so it left the change as it is; Live's own undo (Cmd-Z in Live) can take it back."
-            )
-        };
-        let leaves: Option<Vec<Rc<Value>>> = material.clips.iter().map(|clip| self.remember.history.leaf(&clip.object)).collect();
-        let Some(leaves) = leaves else {
-            let note = left("Kumi no longer holds them this session");
-            return Ok(UndoResult::with(self.update(entry, ChangeState::Kept, Some(note.clone())), note, true));
-        };
+        let remember = &self.remember;
+        let mut leaves = vec![];
+        for clip in &material.clips {
+            match remember.history.kept_leaf(&clip.object, remember.store.as_ref(), remember.current().as_deref()).await {
+                Some(leaf) => leaves.push(leaf),
+                None => return Ok(self.left(entry, &names, "Kumi no longer has them")),
+            }
+        }
         if !super::cuts::can_snapshot(&self.connection) {
-            return Ok(UndoResult::error("Kumi can't reach Live right now, so it can't undo."));
+            return Ok(UndoResult::error(format!(
+                "Kumi can't run its Python in this Live, so it can't bring back {names}; Live's own undo (Cmd-Z in Live) can take the change back."
+            )));
         }
-        if let Err(why) = snapshots::restore(self, &material, &leaves, true, signal.clone()).await {
-            let note = left(&why);
-            return Ok(UndoResult::with(self.update(entry, ChangeState::Kept, Some(note.clone())), note, true));
+        let bound = || abort::any([self.connection.lifetime.clone(), abort::timeout(RESTORE_MS)]);
+        if let Err(why) = snapshots::check(self, &material, &leaves, bound()).await {
+            return Ok(self.refused(entry, &names, &why));
         }
-        let step = self.open_undo_step(signal.clone()).await;
+        // What the track holds before: a rollback is only ever made back to it.
+        let before = snapshots::state(self, &material, bound()).await;
+        let Some(step) = self.open_undo_step(bound()).await else {
+            return Ok(UndoResult::error(format!(
+                "Kumi couldn't open one Live undo step to bring back {names}, so it left the change as it is: try again, or Live's own undo (Cmd-Z in Live) can take it back."
+            )));
+        };
         let outcome = async {
             if material.host_undo {
                 if let Some(stopped) = self.bridge_undo(entry, snapshot, undo_key, discard).await? {
-                    return Ok(stopped);
+                    return Ok(Err(stopped));
                 }
             }
-            Ok(match snapshots::restore(self, &material, &leaves, false, signal).await {
-                Ok(restored) => {
-                    let record = self.update(entry, ChangeState::Undone, None);
-                    let mut text = json!({"undone":record.title,"change":record.id,"broughtBack":names});
-                    if let Some(short) = restored.short_of() {
-                        text["notExactly"] = json!(format!("{short}: Live doesn't let Kumi set these back exactly"));
-                    }
-                    UndoResult::with(record, stringify(&text), false)
-                }
-                Err(why) => {
-                    let note = format!("Kumi took the change back, but couldn't make {names} again ({why}). In Live, Cmd-Z takes this undo back, and Cmd-Z again the change itself, with what it cut.");
-                    UndoResult::with(self.update(entry, ChangeState::Undone, Some(note.clone())), note, true)
-                }
-            })
+            Ok::<_, RuntimeError>(Ok(snapshots::restore(self, &material, &leaves, bound()).await))
         }
         .await;
-        self.close_undo_step(step).await;
+        self.close_undo_step(Some(step)).await;
         self.remember.schedule_save(20_000);
-        outcome
+        Ok(match outcome? {
+            // The change's own undo didn't happen, and nothing else did: its record says why.
+            Err(stopped) => stopped,
+            Ok(Ok(restored)) => {
+                let record = self.update(entry, ChangeState::Undone, None);
+                let mut text = json!({"undone":record.title,"change":record.id,"broughtBack":names});
+                if let Some(short) = restored.short_of() {
+                    text["notExactly"] = json!(format!(
+                        "{short}: Live doesn't give Kumi those, or take them back. Cmd-Z in Live twice, right away, takes this undo back and then the change, bringing all of it back."
+                    ));
+                }
+                UndoResult::with(record, stringify(&text), false)
+            }
+            Ok(Err(snapshots::Stopped::Nothing(why))) if !material.host_undo => self.refused(entry, &names, &why),
+            Ok(Err(stopped)) => self.roll_back(entry, &material, &names, before, stopped, bound).await,
+        })
+    }
+    /// Kumi can't bring the clips back: the change stays, Live's undo's to take back.
+    fn left(&self, entry: &Rc<RefCell<Applied>>, names: &str, why: &str) -> UndoResult {
+        let note =
+            format!("Kumi can't bring back {names}: {why}. It left the change as it is; Live's own undo (Cmd-Z in Live) can take it back.");
+        UndoResult::with(self.update(entry, ChangeState::Kept, Some(note.clone())), note, true)
+    }
+    /// A restore's checks refused, so nothing changed. What the producer can clear (a clip in the way, a file moved, a
+    /// frozen track) leaves the change for Kumi's undo once they have; anything else leaves it to Live's.
+    fn refused(&self, entry: &Rc<RefCell<Applied>>, names: &str, why: &str) -> UndoResult {
+        let fix = if why.contains("'s place now") {
+            why.find('\u{201d}').map(|end| format!("Move or delete {}, then undo again.", &why[..end + '\u{201d}'.len_utf8()]))
+        } else if why.contains("'s slot now") {
+            Some("Move or delete the clip in its slot, then undo again.".to_owned())
+        } else if why.contains("audio file isn't there any more") {
+            why.rfind(" (").map(|at| format!("Put the file back at {}, then undo again.", why[at + 2..].trim_end_matches(')')))
+        } else if why.ends_with(" is frozen") {
+            Some(format!("Unfreeze {}, then undo again.", why.trim_end_matches(" is frozen")))
+        } else {
+            None
+        };
+        match fix {
+            Some(fix) => {
+                let record = entry.borrow().record.clone();
+                UndoResult::with(record, format!("Kumi can't bring back {names} yet: {why}. {fix}"), true)
+            }
+            None => self.left(entry, names, why),
+        }
+    }
+    /// Kumi's undo stopped partway. Its step is closed by now, so one Live undo takes all of it back, but only if what
+    /// the track holds shows Kumi's step changed it, which makes it Live's last. And it has to be back as it was before
+    /// after that. Otherwise Kumi doesn't touch Live's undo, and says what the producer can do.
+    async fn roll_back(
+        &self,
+        entry: &Rc<RefCell<Applied>>,
+        material: &Material,
+        names: &str,
+        before: Option<Value>,
+        stopped: snapshots::Stopped,
+        bound: impl Fn() -> Signal,
+    ) -> UndoResult {
+        let why = match stopped {
+            snapshots::Stopped::Nothing(why) | snapshots::Stopped::Partway(why, _) => why,
+        };
+        let now = snapshots::state(self, material, bound()).await;
+        if let (Some(before), Some(now)) = (&before, &now) {
+            if before == now && !material.host_undo {
+                let record = entry.borrow().record.clone();
+                return UndoResult::with(
+                    record,
+                    format!("Kumi couldn't bring back {names} ({why}); nothing changed. Undo again, or Live's own undo (Cmd-Z in Live) can take it back."),
+                    true,
+                );
+            }
+            if before != now && self.live_undo_once(bound()).await {
+                if snapshots::state(self, material, bound()).await.as_ref() == Some(before) {
+                    if material.host_undo {
+                        // The change's own undo went with it, and the bridge counts it done: only Live's undo is left.
+                        let note = format!("Kumi's undo didn't finish ({why}), so it took back what it did: the change is as it was, and Live's own undo (Cmd-Z in Live) can take it back.");
+                        return UndoResult::with(self.update(entry, ChangeState::Kept, Some(note.clone())), note, true);
+                    }
+                    let record = entry.borrow().record.clone();
+                    return UndoResult::with(
+                        record,
+                        format!("Kumi's undo didn't finish ({why}), so it took back what it did: the change is as it was. Undo again, or Live's own undo (Cmd-Z in Live) can take it back."),
+                        true,
+                    );
+                }
+                let note = format!("Kumi's undo didn't finish ({why}), and taking it back didn't leave things as they were: check Live, where Cmd-Z and Shift-Cmd-Z step through it.");
+                return UndoResult::with(self.update(entry, ChangeState::Unsure, Some(note.clone())), note, true);
+            }
+        }
+        let note = format!("Kumi's undo didn't finish ({why}). Cmd-Z in Live once puts back what it changed.");
+        UndoResult::with(self.update(entry, ChangeState::Unsure, Some(note.clone())), note, true)
+    }
+    /// Live's own undo, once: whether Live did one.
+    async fn live_undo_once(&self, signal: Signal) -> bool {
+        let args = object(json!({"confirmation":"undo-in-live","idempotencyKey":uuid::Uuid::new_v4().to_string()}));
+        match self.connection.call("live_song_undo", args, signal).await {
+            Ok(result) if result.is_error != Some(true) => {
+                context::payload(&result).ok().is_some_and(|done| done.get("done") == Some(&json!(true)))
+            }
+            _ => false,
+        }
     }
     /// One Live undo step around what follows, when the bridge offers it: its id, to close it by.
     async fn open_undo_step(&self, signal: Signal) -> Option<String> {

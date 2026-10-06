@@ -1,6 +1,8 @@
-//! Kumi's snapshot script (history v0) run as Live's Python runs it, against a fake Live (support/snapshot-live.py):
-//! clips a change deleted or cut come back whole, a big clip's notes come in more calls, and nothing changes when a
-//! check fails.
+//! Kumi's snapshot script (history v0) run as Live's Python runs it, against a fake Live that behaves as probes of
+//! Live 12.4.15b5 found (support/snapshot-live.py): clips a change deleted or cut come back whole; an audio clip comes
+//! back at its length without cutting its neighbours; a Session clip's automation, groove and follow actions come
+//! back; what Live won't put back is named; places are checked by track and scene; a big clip's notes come in more
+//! calls, the last checking them all; nothing changes when a check fails, and a failure says how far it got.
 use serde_json::{json, Value};
 use std::{
     io::Write,
@@ -16,7 +18,7 @@ fn clips_are_captured_and_made_again_in_a_fake_live() {
     let output = child.wait_with_output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let scenarios: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(scenarios.len(), 5, "{scenarios:?}");
+    assert_eq!(scenarios.len(), 11, "{scenarios:?}");
     for scenario in &scenarios {
         assert_eq!(scenario["problems"], json!([]), "{}", scenario["scenario"]);
     }

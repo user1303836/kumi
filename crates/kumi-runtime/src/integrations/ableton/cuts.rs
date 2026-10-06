@@ -76,8 +76,15 @@ pub async fn before(
             };
             (Some(track), read, true)
         }
-        // A copy, or a move to another track, lands where the clip's own track isn't: not yet.
-        "move_clip" if args.contains_key("keepSource") || args.contains_key("targetTrackRef") => return None,
+        // A copy, or a move to another track, lands where the clip's own track isn't: not yet. The preview's payload
+        // says which it is (a false keepSource, a null targetTrackRef or the clip's own track are neither).
+        "move_clip"
+            if preview.get("payload").is_some_and(|payload| {
+                payload.get("keepSource") == Some(&json!(true)) || payload.get("targetTrackRef").is_some_and(|track| !track.is_null())
+            }) =>
+        {
+            return None
+        }
         "move_clip" => {
             // What an Arrangement move replaces, as its preview names it: the span from the first to the last of them
             // holds just them, the moving clip aside.
@@ -90,7 +97,8 @@ pub async fn before(
         }
         _ => return None,
     };
-    let clips = capture(history, read, signal.clone()).await.filter(|clips| !clips.is_empty())?;
+    // A clip too big to make again in one call to Live (its notes aside) stays Live's to undo.
+    let clips = capture(history, read, signal.clone()).await.filter(|clips| !clips.is_empty() && clips.iter().all(Captured::fits))?;
     Some(Cut { anchor, clips, host_undo })
 }
 
@@ -109,7 +117,8 @@ impl Cut {
             // Only what the new clip reached.
             self.clips.retain(|clip| clip.span().is_some_and(|(from, to)| from < end - 1e-6 && to > start + 1e-6));
         }
-        let track = self.clips.first()?.track.clone();
+        let first = self.clips.first()?;
+        let (track, track_name, track_id) = (first.track.clone(), first.track_name.clone(), first.track_id.clone());
         let anchor = self.anchor.clone().or_else(|| made.map(|(reference, _)| reference.to_owned()));
         let remnants = match anchor {
             // A deletion leaves nothing of the clip.
@@ -127,6 +136,8 @@ impl Cut {
         };
         let material = Material {
             track,
+            track_name,
+            track_id,
             clips: vec![],
             remnants,
             leaving: made.map(|(_, identity)| vec![identity.to_owned()]).unwrap_or_default(),
@@ -141,6 +152,11 @@ pub fn kept(clips: &[Captured], objects: &[String]) -> Vec<KeptClip> {
     clips
         .iter()
         .zip(objects)
-        .map(|(clip, object)| KeptClip { place: clip.place.clone(), object: object.clone(), name: clip.name() })
+        .map(|(clip, object)| KeptClip {
+            place: clip.place.clone(),
+            object: object.clone(),
+            name: clip.name(),
+            notes_hash: clip.notes_hash.clone(),
+        })
         .collect()
 }

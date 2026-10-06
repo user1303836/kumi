@@ -2,15 +2,17 @@
 //!
 //! - **Objects** are what Kumi keeps of the Set: a clip's notes and settings now, later a device's parameters and
 //!   the snapshots that tie them together. Each is its canonical JSON (keys sorted), addressed by blake3 over its
-//!   kind, encoding version and that JSON, stored zstd-compressed, and never rewritten: a new encoding takes a new
-//!   version, so the same content always has the same address.
+//!   kind, encoding version and that JSON, stored deflate-compressed (zlib), and never rewritten: a new encoding takes
+//!   a new version, so the same content always has the same address.
 //! - **Ops** say what happened (a change that cut clips, later a snapshot or a restore), with a JSONB view of what
 //!   it holds.
-//! - **Snapshots** and **refs** (the Set's state at a point, and named pointers to them) come with checkpoints.
+//! - Snapshots and refs (the Set's state at a point, and named pointers to them) come with checkpoints, as a
+//!   migration of their own.
 
 use crate::{ids, StoreError};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
+use std::io::{Read, Write};
 
 const V1: &str = "
 CREATE TABLE objects (
@@ -29,29 +31,14 @@ CREATE TABLE ops (
   view BLOB NOT NULL
 ) STRICT;
 CREATE INDEX ops_at ON ops (at);
-
-CREATE TABLE snapshots (
-  id TEXT PRIMARY KEY,
-  root TEXT NOT NULL,
-  parent TEXT,
-  parent2 TEXT,
-  op TEXT NOT NULL,
-  at INTEGER NOT NULL,
-  label TEXT
-) STRICT;
-
-CREATE TABLE refs (
-  name TEXT PRIMARY KEY,
-  snapshot TEXT NOT NULL
-) STRICT;
 ";
 
 /// history.db's schema, as forward-only migrations (see `schema`).
 pub(crate) const MIGRATIONS: &[&str] = &[V1];
 /// The schema version this build writes.
 pub const HISTORY_SCHEMA_VERSION: usize = MIGRATIONS.len();
-/// zstd's level: fast, and small enough for notes (storage.md measured level 3).
-const LEVEL: i32 = 3;
+/// deflate's level: Kumi's leaves are a few KB of repetitive JSON, which the default level shrinks well.
+const LEVEL: flate2::Compression = flate2::Compression::new(6);
 /// The most an object decompresses to: a clip of 100k notes is well under it.
 const MAX_RAW: usize = 64 * 1024 * 1024;
 
@@ -97,7 +84,9 @@ pub fn put_objects(connection: &Connection, objects: &[Object]) -> Result<usize,
     let mut statement = connection.prepare_cached("INSERT OR IGNORE INTO objects (hash, kind, raw_len, z) VALUES (?1, ?2, ?3, ?4)")?;
     let mut added = 0;
     for object in objects {
-        let z = zstd::bulk::compress(object.raw.as_bytes(), LEVEL).map_err(|error| StoreError::Io(error.to_string()))?;
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), LEVEL);
+        encoder.write_all(object.raw.as_bytes()).map_err(|error| StoreError::Io(error.to_string()))?;
+        let z = encoder.finish().map_err(|error| StoreError::Io(error.to_string()))?;
         added += statement.execute(params![object.hash, object.kind, object.raw.len() as i64, z])?;
     }
     Ok(added)
@@ -111,7 +100,14 @@ pub fn object(connection: &Connection, hash: &str) -> Result<Option<(String, Val
     let Some((kind, raw_len, z)) = row else { return Ok(None) };
     let capacity =
         usize::try_from(raw_len).ok().filter(|len| *len <= MAX_RAW).ok_or_else(|| StoreError::Io("an object is too big".into()))?;
-    let raw = zstd::bulk::decompress(&z, capacity).map_err(|error| StoreError::Io(error.to_string()))?;
+    let mut raw = Vec::with_capacity(capacity);
+    flate2::read::ZlibDecoder::new(z.as_slice())
+        .take(capacity as u64 + 1)
+        .read_to_end(&mut raw)
+        .map_err(|error| StoreError::Io(error.to_string()))?;
+    if raw.len() != capacity {
+        return Err(StoreError::Io("an object isn't the size it was kept at".into()));
+    }
     let value = serde_json::from_slice(&raw).map_err(|error| StoreError::Io(error.to_string()))?;
     Ok(Some((kind, value)))
 }

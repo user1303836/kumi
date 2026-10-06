@@ -217,7 +217,7 @@ impl Mutations {
             history.remember(new_record(kind, summary, ChangeState::Unsure, connection.now().timestamp_millis()), transaction.into(), None);
             return Ok(ChangeOutcome::error(format!("Live couldn't confirm this change: {text}")));
         }
-        let result = match context::payload(&applied) {
+        let mut result = match context::payload(&applied) {
             Ok(value) => value,
             Err(_) => {
                 history.remember(
@@ -312,6 +312,9 @@ impl Mutations {
             let objects =
                 remember.history.keep(remember.store.as_ref(), remember.current().as_deref(), &clips, &record.title, view, record.at);
             material.clips = super::cuts::kept(&clips, &objects);
+            // The bridge's answer says only Live's undo brings this back. With what Kumi kept, its own undo does, and
+            // what that won't bring back is said now.
+            result.insert("kept".into(), json!(kumi_undo_words(&material.names(), &clips)));
             history.attach_material(&record.id, material);
         }
         if kind.tool == "set_tempo" && record.state == ChangeState::Applied {
@@ -551,6 +554,22 @@ fn observation(message: &str) -> ReadError {
 }
 fn object(value: Value) -> JsonObject {
     value.as_object().cloned().unwrap_or_default()
+}
+
+/// What Kumi's undo of a change brings back, as the change's answer says it: by name, and what of them it won't.
+fn kumi_undo_words(names: &str, clips: &[super::snapshots::Captured]) -> String {
+    let short: Vec<String> = clips
+        .iter()
+        .filter(|clip| !clip.short_of().is_empty())
+        .map(|clip| format!("\u{201c}{}\u{201d} without {}", clip.name(), super::snapshots::join(&clip.short_of())))
+        .collect();
+    if short.is_empty() {
+        return format!("Kumi's undo brings back {names}.");
+    }
+    format!(
+        "Kumi's undo brings back {names}, {} (Live doesn't give Kumi those). Live's own undo (Cmd-Z in Live), right away, brings back all of it.",
+        short.join("; ")
+    )
 }
 
 #[cfg(test)]
