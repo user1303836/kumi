@@ -66,14 +66,27 @@ fn words(text: &str) -> Vec<String> {
         .collect()
 }
 pub fn track_role(track: &SetTrack) -> Option<Role> {
-    let named = words(&track.name);
-    for (role, list) in &DATA.role_words {
-        if named.iter().any(|word| list.contains(word)) {
-            return Some(*role);
-        }
-    }
-    let instrument = track.devices.iter().find(|d| matches!(d.role, DeviceRole::Instrument | DeviceRole::Rack));
-    instrument.filter(|d| matches!(d.name.as_str(), "Drum Rack" | "Impulse" | "Drum Sampler")).map(|_| Role::Drums)
+    named_role(&track.name).or_else(|| {
+        let instrument = track.devices.iter().find(|d| matches!(d.role, DeviceRole::Instrument | DeviceRole::Rack));
+        instrument.filter(|d| drums(&d.name)).map(|_| Role::Drums)
+    })
+}
+/// The role a track plays, from its name's words, or a drum device on it: as `track_role` finds it, for a track as
+/// the Set model has it (devices by name, or by Live's class when renamed).
+pub fn role_of(name: &str, devices: &[&str]) -> Option<Role> {
+    let drum_classes = ["DrumGroupDevice", "InstrumentImpulse", "DrumCell"];
+    named_role(name).or_else(|| devices.iter().any(|device| drums(device) || drum_classes.contains(device)).then_some(Role::Drums))
+}
+/// The words of a track's name, as roles are found by.
+pub fn name_words(name: &str) -> Vec<String> {
+    words(name)
+}
+fn named_role(name: &str) -> Option<Role> {
+    let named = words(name);
+    DATA.role_words.iter().find(|(_, list)| named.iter().any(|word| list.contains(word))).map(|(role, _)| *role)
+}
+fn drums(device: &str) -> bool {
+    matches!(device, "Drum Rack" | "Impulse" | "Drum Sampler")
 }
 pub fn colour_name(index: f64) -> Option<String> {
     if !index.is_finite() || index.fract() != 0. || index < 0. {

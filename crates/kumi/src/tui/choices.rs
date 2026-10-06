@@ -8,10 +8,10 @@ use regex::Regex;
 /// Longest option offered as a one-key answer (UTF-16 units); past it, the list is prose, not options.
 const LONGEST: usize = 100;
 
-/// An answer's options: a question ("?" or Japanese and Chinese "？"), then a numbered list (2 to 9
-/// short items, "1." or "1)", or "1．" and "1、" with no space needed, in order) with nothing after it.
+/// An answer's question and options: a question ("?" or Japanese and Chinese "？"), then a numbered list (2
+/// to 9 short items, "1." or "1)", or "1．" and "1、" with no space needed, in order) with nothing after it.
 /// None when the answer doesn't end that way.
-pub fn choices(answer: &str) -> Option<Vec<String>> {
+pub fn choices(answer: &str) -> Option<(String, Vec<String>)> {
     static ITEM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([1-9])(?:[.)]\s+|[．、]\s*)(\S.*)$").unwrap());
     let mut items = Vec::new();
     let mut question = None;
@@ -27,8 +27,9 @@ pub fn choices(answer: &str) -> Option<Vec<String>> {
     items.reverse();
     let numbered = items.iter().enumerate().all(|(index, (n, _))| *n == index + 1);
     let short = items.iter().all(|(_, text)| !text.is_empty() && utf16_len(text) <= LONGEST);
-    (question?.contains(['?', '？']) && (2..=9).contains(&items.len()) && numbered && short)
-        .then(|| items.into_iter().map(|(_, text)| text).collect())
+    let question = question?;
+    (question.contains(['?', '？']) && (2..=9).contains(&items.len()) && numbered && short)
+        .then(|| (plain(question), items.into_iter().map(|(_, text)| text).collect()))
 }
 
 /// An option without its Markdown emphasis.
@@ -44,14 +45,17 @@ mod tests {
     fn a_question_ending_on_a_short_numbered_list_offers_its_options() {
         assert_eq!(
             choices("I found two basses.\n\nWhich one should get the sidechain?\n\n1. **Sub Bass**\n2) `Reese`\n"),
-            Some(vec!["Sub Bass".to_string(), "Reese".to_string()])
+            Some(("Which one should get the sidechain?".to_string(), vec!["Sub Bass".to_string(), "Reese".to_string()]))
         );
-        assert_eq!(choices("Which track?\n1. Bass\n\n2. Lead\n\n3. A new track").map(|c| c.len()), Some(3));
+        assert_eq!(choices("Which track?\n1. Bass\n\n2. Lead\n\n3. A new track").map(|(_, c)| c.len()), Some(3));
         assert_eq!(
-            choices("どちらのベースにサイドチェインをかけますか？\n1．サブベース\n2．リース"),
+            choices("どちらのベースにサイドチェインをかけますか？\n1．サブベース\n2．リース").map(|(_, c)| c),
             Some(vec!["サブベース".to_string(), "リース".to_string()])
         );
-        assert_eq!(choices("要给哪一条贝斯加侧链？\n1、低音\n2、Reese"), Some(vec!["低音".to_string(), "Reese".to_string()]));
+        assert_eq!(
+            choices("要给哪一条贝斯加侧链？\n1、低音\n2、Reese").map(|(_, c)| c),
+            Some(vec!["低音".to_string(), "Reese".to_string()])
+        );
     }
 
     #[test]

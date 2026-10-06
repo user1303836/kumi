@@ -291,6 +291,12 @@ impl SessionController for Control {
         self.call(format!("answer-technique:{}", if keep { "yes" } else { "no" }));
         Ok(self.get("technique-waiting").unwrap_or(true))
     }
+    fn picked(&self, pick: Picked) {
+        self.call(match pick {
+            Picked::Answer { question, options, index } => format!("picked:answer:{index} of {}:{question}", options.len()),
+            Picked::Technique { name, keep } => format!("picked:technique:{name}:{}", if keep { "yes" } else { "no" }),
+        });
+    }
     fn has_taste(&self) -> bool {
         self.enabled("taste")
     }

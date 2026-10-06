@@ -257,6 +257,8 @@ kumi uninstall           # 卸载 Kumi；加上 --all 会同时删除你的对�
 
 `update` 会获取最新版本，按其校验和验证，并先启动一次以确认它能运行，然后才把它放到位；之前的版本会保留，供 `--rollback` 使用。如果 Live 中的桥接较旧且 Live 已关闭，它接着会运行 `kumi bridge`；如果 Live 正开着，它会告诉你退出 Live 再运行 `kumi bridge`。在仓库的副本中，`update` 改为把检出向前推进（`git merge --ff-only`，有本地修改时拒绝执行），并用 Cargo 构建工作区。在 Kumi 中，`/update` 会先询问你，然后关闭 Kumi、更新，再用同一个对话重新打开它。
 
+`--rollback` 会回到上一个 Kumi；如果 Live 已关闭，也会一并恢复它的桥接。在终端中，Kumi 会询问是否等你先退出 Live（Kumi 从不自行关闭 Live）。否则较新的桥接会保留，它同样能与之前的 Kumi 配合使用；要把桥接也恢复，请退出 Live，然后运行两次 `kumi update --rollback`。
+
 从当前的 1.7.5 安装版（自带 Node 24）升级时，关闭 Live，运行 `kumi update`，再照常打开 Kumi。原生应用首次启动时会迁移桥接，即使新旧桥接都为 1.0.74。设置、登录信息、对话和素材库仍在 `~/.kumi` 或已有的 `KUMI_HOME` 中，无需重新登录或移动数据。
 
 上一版应用及其 Node 会保留供回滚。在 Windows 上，原生版首次启动时会替换旧启动器，之后的启动不再经过 Node；普通更新不需要额外操作。`kumi update --rollback` 会一起恢复 JavaScript 应用及其桥接配置和密钥；必须先关闭 Live，并保留桥接的上一代文件。再回滚一次就会返回原生应用。Kumi 从不自行关闭 Live。

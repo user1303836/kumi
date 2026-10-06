@@ -392,6 +392,17 @@ pub trait Integration {
         let _ = (id, signal);
         Err(absent())
     }
+    /// The open Set's fingerprint, for what Kumi logs of the producer's reactions: its name, tempo, meter and scale,
+    /// the roles its tracks play, its devices and the words in its track names. None before Kumi has read the Set.
+    fn fingerprint(&self) -> Option<Value> {
+        None
+    }
+    /// The first time at or after `since` (ms) that Live was heard playing (the producer's playing, not Kumi's own
+    /// silent renders), for whether they heard one of Kumi's changes. None when it hasn't played since.
+    fn first_heard(&self, since: i64) -> Option<i64> {
+        let _ = since;
+        None
+    }
     fn has_audio_file(&self) -> bool {
         false
     }
@@ -1118,6 +1129,15 @@ pub struct ActionEvent {
     pub recording: Option<bool>,
 }
 
+/// What the producer picked with a key among the options Kumi offered.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Picked {
+    /// One of the options Kumi's answer ended on: the question, the options, and the one picked (from 0).
+    Answer { question: String, options: Vec<String>, index: usize },
+    /// Whether to keep the technique Kumi offered after an answer.
+    Technique { name: String, keep: bool },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", rename_all_fields = "camelCase")]
 pub enum SessionEvent {
@@ -1827,6 +1847,11 @@ pub trait SessionController {
     async fn answer_technique(&self, keep: bool) -> Result<bool, RuntimeError> {
         let _ = keep;
         Ok(false)
+    }
+    /// The producer picked one of the options Kumi offered, with a key: one an answer ended on, or keeping a
+    /// technique. Never a default taken with Enter, or Esc. Kept to learn their taste from.
+    fn picked(&self, pick: Picked) {
+        let _ = pick;
     }
     fn has_goal(&self) -> bool {
         false

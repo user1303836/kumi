@@ -546,16 +546,22 @@ pub async fn rollback_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
         ));
     }
     let legacy = !Path::new(&join(&previous, &executable_name("kumi"))).is_file();
-    let bridge_rollback = if legacy { migration::prepare_legacy_rollback(&io, &home).await? } else { None };
-    write_launcher(&home).map_err(error)?;
-    if let Some(rollback) = &bridge_rollback {
-        rollback.apply().await?;
-    }
     let version = fs::read(join(&previous, "package.json"))
         .ok()
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
         .and_then(|v| v.get("version").and_then(Value::as_str).map(str::to_string))
         .unwrap_or("the one before".into());
+    // A Node Kumi can't run without its own bridge: that goes back first, and forward again if the swap fails. A
+    // native one runs with a newer bridge too, so its own goes back after the swap, when it can.
+    let (bridge_rollback, earlier) = if legacy {
+        (migration::prepare_legacy_rollback(&io, &home).await?, None)
+    } else {
+        (None, Some(migration::earlier_bridge(&io, &home, &previous, &version).await))
+    };
+    write_launcher(&home).map_err(error)?;
+    if let Some(rollback) = &bridge_rollback {
+        rollback.apply().await?;
+    }
     let switched = async {
         remove(&hold)?;
         rename(&app, &hold).await?;
@@ -585,7 +591,44 @@ pub async fn rollback_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
     }
     say(format!("Kumi is back to {version}. {} update --rollback again returns to {KUMI_VERSION}.", *KUMI));
     if Path::new(&join(&app, &executable_name("kumi"))).exists() {
-        Ok(bridge_after(&io, &home, &app).await)
+        let Some(migration::EarlierBridge { rollback, said: Some(said), later }) = earlier else {
+            return Ok(bridge_after(&io, &home, &app).await);
+        };
+        let Some(rollback) = rollback else {
+            say(said);
+            return Ok(0);
+        };
+        // This process is still the newer Kumi: the swap only renamed its folder, which nothing from here on reads
+        // (on Windows too, where the running executable stays in use). The bridge's own rollback and the kept
+        // extension come from the bridge's folders, which the swap doesn't move.
+        // Live may have opened while the folders moved (a rename can wait on a held folder): the switch runs with
+        // it closed, or not at all.
+        if live_open(&io, io.run.clone().unwrap_or_else(default_run)).await {
+            say(later.unwrap_or_default());
+            return Ok(0);
+        }
+        match step(io.out.clone(), &io.env, "Putting back the bridge…", rollback.apply(), true).await {
+            Ok(()) => {
+                say(said);
+                if let Some(placed) = rollback.place_extension(&io.env) {
+                    say(placed);
+                }
+                Ok(0)
+            }
+            // The lifecycle couldn't put its own changes back: the bridge is neither one nor the other.
+            Err(reason) if reason.message().contains("compensation was incomplete") => {
+                say(format!("The bridge's rollback stopped partway ({}). {} doctor says how to repair it.", reason.message(), *KUMI));
+                Ok(1)
+            }
+            Err(reason) => {
+                say(format!(
+                    "The bridge couldn't go back ({}): the one in Live stays, and works with {version}. To try again, quit Live, then run {} update --rollback twice.",
+                    reason.message(),
+                    *KUMI
+                ));
+                Ok(0)
+            }
+        }
     } else {
         // The receipt-bound bridge rollback above restored the legacy command/config as well; Live's extension goes
         // back with it.

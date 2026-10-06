@@ -9,7 +9,7 @@ use crate::{
 };
 use base64::Engine;
 use kumi_runtime::{
-    core::errors::FailureKind,
+    core::{contracts::Picked, errors::FailureKind},
     integrations::ableton::project::since,
     providers::{
         models::{ApiKeyCheck, ModelInfo, ServiceTier},
@@ -867,14 +867,25 @@ impl TuiApp {
     }
     /// Kumi's answer asked the producer to pick: its options, picked by number (or ↑↓) and sent with
     /// Enter. Other typing goes to the input box, so a free answer still works.
-    pub(super) fn open_answers(&self, choices: Vec<String>) {
+    pub(super) fn open_answers(&self, (question, choices): (String, Vec<String>)) {
         let items = choices.iter().enumerate().map(|(at, choice)| PickerItem::new(format!("{}. {choice}", at + 1), choice)).collect();
         let options = PickerOptions { answers: true, ..Default::default() };
-        self.pick(Picker::with_options("Your answer", items, options), |app, item| async move {
-            app.close_panel();
-            let Some(words) = item.value else { return Ok(()) };
-            app.0.state.borrow_mut().editor.set(&words);
-            app.submit().await
+        let offered = Rc::new((question, choices));
+        self.pick(Picker::with_options("Your answer", items, options), move |app, item| {
+            let offered = offered.clone();
+            async move {
+                app.close_panel();
+                let Some(words) = item.value else { return Ok(()) };
+                // A choice the producer made, not the default Enter takes, is a pick to learn from.
+                if item.chosen {
+                    if let Some(index) = offered.1.iter().position(|choice| *choice == words) {
+                        let (question, options) = (offered.0.clone(), offered.1.clone());
+                        app.0.options.controller.picked(Picked::Answer { question, options, index });
+                    }
+                }
+                app.0.state.borrow_mut().editor.set(&words);
+                app.submit().await
+            }
         });
     }
     /// After an answer, whether to keep the technique from what Kumi built: 1 keeps it, 2 doesn't. Like
@@ -904,14 +915,22 @@ impl TuiApp {
         let mut picker = Picker::with_options(title, items, PickerOptions { answers: true, ..Default::default() });
         // A bare Enter is a no: only 1 (or moving to it) keeps it.
         picker.select(Some("no"));
-        let picker = self.pick(picker, |app, item| async move {
-            app.0.state.borrow_mut().offer = None;
-            app.close_panel();
-            let keep = item.value.as_deref() == Some("yes");
-            if !app.0.options.controller.answer_technique(keep).await? && keep {
-                app.notice("That technique isn't waiting any more: its build was undone or its tracks deleted.", NoticeTone::Info);
+        let name = name.to_owned();
+        let picker = self.pick(picker, move |app, item| {
+            let name = name.clone();
+            async move {
+                app.0.state.borrow_mut().offer = None;
+                app.close_panel();
+                let keep = item.value.as_deref() == Some("yes");
+                // 1 or 2 is the producer's answer; a bare Enter (no) is the default.
+                if item.chosen {
+                    app.0.options.controller.picked(Picked::Technique { name, keep });
+                }
+                if !app.0.options.controller.answer_technique(keep).await? && keep {
+                    app.notice("That technique isn't waiting any more: its build was undone or its tracks deleted.", NoticeTone::Info);
+                }
+                Ok(())
             }
-            Ok(())
         });
         self.0.state.borrow_mut().offer = Some(picker);
         true
@@ -980,7 +999,10 @@ impl TuiApp {
                     "down" | "tab" => picker.borrow_mut().r#move(1),
                     "backspace" => picker.borrow_mut().erase(),
                     "enter" => {
-                        let item = picker.borrow().selected().cloned();
+                        let item = {
+                            let picker = picker.borrow();
+                            picker.selected().cloned().map(|item| PickerItem { chosen: picker.chosen, ..item })
+                        };
                         if let Some(item) = item {
                             let choose = choose.clone();
                             self.task(move |app| async move {
@@ -1037,6 +1059,7 @@ impl TuiApp {
                         let mut picker = picker.borrow_mut();
                         picker.select(Some(&value));
                         picker.typed = text.clone();
+                        picker.chosen = true;
                         return;
                     }
                     let typed = std::mem::take(&mut picker.borrow_mut().typed);

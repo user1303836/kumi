@@ -136,6 +136,9 @@ impl Session {
         if let Some(l) = &self.0.learned {
             l.drafts.turn_started(text.as_deref().unwrap_or_default(), false);
         }
+        if let Some(taste) = &self.0.taste {
+            taste.turn_started("", false);
+        }
         let budget = self.0.options.goal_budget.unwrap_or(GOAL_BUDGET);
         op.extend(budget.ms + 15 * 60_000);
         op.steady.set(true);

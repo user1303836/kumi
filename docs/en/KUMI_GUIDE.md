@@ -583,6 +583,11 @@ copy of the repository, `update` moves the checkout forward instead
 Inside Kumi, `/update` asks first, then closes Kumi, updates it and opens it
 again with the same conversation.
 
+`--rollback` goes back to the Kumi before, and puts back its bridge too when Live is closed; in a
+terminal, it offers to wait while you quit Live (Kumi never quits Live itself). Otherwise the newer
+bridge stays, which works with the earlier Kumi: to put back its bridge as well, quit Live and run
+`kumi update --rollback` twice.
+
 For the current 1.7.5 installer (bundled Node 24):
 
 1. Close Live and run `kumi update` (or `/update` inside Kumi).

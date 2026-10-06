@@ -49,7 +49,7 @@ impl Rendering {
             })
             .collect();
         let mut beats = request.beats.unwrap_or(8.);
-        self.rendering.set(true);
+        self.begin_rendering();
         let mut rig = None;
         let rendered: Result<(), RuntimeError> = async {
             self.tell(
@@ -85,7 +85,7 @@ impl Rendering {
             self.close_rig(rig).await;
             notes.extend(rig.notes.clone());
         }
-        self.rendering.set(false);
+        self.end_rendering();
         let listen: Result<AuditionResult, RuntimeError> = async {
             let reference = match request.reference.as_deref().filter(|s| !s.is_empty()) {
                 Some(named) => Some(self.heard_reference(named, request, signal.clone()).await?),
@@ -250,7 +250,7 @@ impl Rendering {
             request.tracks.iter().map(|track| AuditionCandidate { track: track.clone(), mix: None, label: None, clip: None }).collect()
         };
         self.tell(format!("Listening quietly from {}", bars(from)), Some(true));
-        self.rendering.set(true);
+        self.begin_rendering();
         let mut rig = None;
         let result: Result<Vec<HeardTake>, RuntimeError> = async {
             rig = Some(self.open_rig(&candidates, Some(from), Some(beats), signal.clone()).await?);
@@ -274,7 +274,7 @@ impl Rendering {
         if let Some(rig) = rig.as_mut() {
             self.close_rig(rig).await;
         }
-        self.rendering.set(false);
+        self.end_rendering();
         self.tell("Listened", Some(false));
         match result {
             Err(error) => {
