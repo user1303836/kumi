@@ -751,6 +751,65 @@ case!(history_scroll_mouse_keyboard_and_badges, async {
     h.has("└ FX Saturator");
     h.close().await;
 });
+fn willington(on: bool) -> (kumi::willington::WillingtonControl, Rc<RefCell<Vec<bool>>>) {
+    let on = Rc::new(Cell::new(on));
+    let switched = Rc::new(RefCell::new(Vec::new()));
+    let control = kumi::willington::WillingtonControl {
+        on: {
+            let on = on.clone();
+            Rc::new(move || Some(on.get()))
+        },
+        set: {
+            let switched = switched.clone();
+            Rc::new(move |value| {
+                on.set(value);
+                switched.borrow_mut().push(value);
+                let said = if value { kumi::willington::TURNED_ON } else { kumi::willington::TURNED_OFF };
+                async move { Ok(said) }.boxed_local()
+            })
+        },
+    };
+    (control, switched)
+}
+case!(willington_off_is_said_at_the_start_and_its_command_switches_it, async {
+    let (control, switched) = willington(false);
+    let c = Rc::new(Control::default());
+    let h = Harness::with(160, 40, c.clone(), move |o| o.willington = Some(control));
+    h.start().await;
+    // On the welcome screen, which stays.
+    h.has("Willington bindings are OFF currently, type /willington to toggle them on");
+    h.has("Ask anything about production.");
+    h.type_text("/will").await;
+    h.has("Willington's bindings in Live");
+    h.type_text("ington\r").await;
+    h.has("Willington bindings are ON: Kumi can map rack macros");
+    assert!(!has(&h.screen(), "Willington bindings are OFF currently"));
+    h.type_text("/willington\r").await;
+    h.has("Willington bindings are OFF. /willington turns them on again.");
+    assert_eq!(*switched.borrow(), [true, false]);
+    assert_eq!(c.calls.borrow().iter().filter(|call| *call == "reconfigure").count(), 2);
+    h.close().await;
+    // A conversation carried on at the start replaces the welcome screen: it's said below that instead.
+    let (control, _) = willington(false);
+    let h = Harness::with(160, 40, Rc::new(Control::default()), move |o| o.willington = Some(control));
+    h.start().await;
+    h.emit(
+        json!({"type":"resumed","savedAt":kumi_common::time::now_ms()-2*3600000,"lines":[{"role":"user","text":"make the bass wider"}]}),
+    );
+    h.has("Willington bindings are OFF currently, type /willington to toggle them on");
+    h.close().await;
+    // On, or without Willington in the bridge: nothing at the start, and no command without it.
+    let (control, _) = willington(true);
+    let h = Harness::with(160, 40, Rc::new(Control::default()), move |o| o.willington = Some(control));
+    h.start().await;
+    assert!(!has(&h.screen(), "Willington bindings"));
+    h.close().await;
+    let h = Harness::with(160, 40, Rc::new(Control::default()), |_| {});
+    h.start().await;
+    h.type_text("/willington\r").await;
+    h.has("There's no /willington command.");
+    h.close().await;
+});
 case!(fast_turns_on_the_tier_the_model_offers_and_shows_it_beside_the_model, async {
     let m = FakeModels::catalog();
     let h = model_harness(m.clone(), 120);

@@ -544,8 +544,8 @@ Listed while the bridge is connected to Kumi's Live extension (see
 
 ### Willington tools
 
-Listed only with the separately installed Willington provider; see
-[Willington](WILLINGTON_INTEGRATION.md).
+Listed only while Willington's bindings are on (`/willington`), for a Live build
+they cover; see [Willington](WILLINGTON_INTEGRATION.md).
 
 | Tool | Class | What it does |
 | --- | --- | --- |

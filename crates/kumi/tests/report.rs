@@ -5,7 +5,11 @@ use kumi::{
     report::*,
     tui::tty::TtyOutput,
 };
-use kumi_runtime::system::Env;
+use kumi_common::abort;
+use kumi_runtime::{
+    core::{gaps::gap_tools, store_client::StoreClient},
+    system::Env,
+};
 use serde_json::{json, Value};
 use std::{cell::RefCell, fs, rc::Rc};
 #[derive(Default)]
@@ -23,6 +27,18 @@ impl TtyOutput for Out {
     fn write(&self, s: &str) {
         self.0.borrow_mut().push_str(s)
     }
+}
+/// The doctor, with what it would look for on this computer answered.
+fn doctor(out: Rc<Out>, env: Env) -> DoctorIo {
+    let mut doctor = DoctorIo::new(out, env);
+    doctor.terminal = Some(TerminalInfo::default());
+    doctor.video_programs = Some(Rc::new(|| async { Ok(VideoPrograms::default()) }.boxed_local()));
+    doctor.hands = Some(Rc::new(|| async { Ok(None) }.boxed_local()));
+    doctor.model_servers = Some(Rc::new(|| async { Ok(vec![]) }.boxed_local()));
+    doctor.voice = Some(Rc::new(|| {
+        async { Ok(serde_json::from_value(json!({"model":{"name":"ggml-small.en-q5_1.bin"},"fetches":true})).unwrap()) }.boxed_local()
+    }));
+    doctor
 }
 #[test]
 fn redaction_removes_keys_tokens_long_values_paths_and_account_names() {
@@ -88,6 +104,7 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
     )
     .unwrap();
     let env = Env::from([
+        ("KUMI_HOME".into(), kumi.display().to_string()),
         ("KUMI_AUTH_FILE".into(), kumi.join("auth.json").display().to_string()),
         ("KUMI_SETTINGS_FILE".into(), kumi.join("settings.json").display().to_string()),
         ("KUMI_PROJECTS_DIR".into(), projects.display().to_string()),
@@ -98,15 +115,7 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
         ("TERM_PROGRAM".into(), "ghostty".into()),
     ]);
     let out = Rc::new(Out::default());
-    let mut doctor = DoctorIo::new(out.clone(), env);
-    doctor.terminal = Some(TerminalInfo::default());
-    doctor.video_programs = Some(Rc::new(|| async { Ok(VideoPrograms::default()) }.boxed_local()));
-    doctor.hands = Some(Rc::new(|| async { Ok(None) }.boxed_local()));
-    doctor.model_servers = Some(Rc::new(|| async { Ok(vec![]) }.boxed_local()));
-    doctor.voice = Some(Rc::new(|| {
-        async { Ok(serde_json::from_value(json!({"model":{"name":"ggml-small.en-q5_1.bin"},"fetches":true})).unwrap()) }.boxed_local()
-    }));
-    let mut io = ReportIo::new(doctor);
+    let mut io = ReportIo::new(doctor(out.clone(), env));
     io.home = Some(home.clone());
     io.folder = Some(home.clone());
     io.user = Some("fixtureuser".into());
@@ -165,4 +174,44 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
     ] {
         assert!(!text.contains(absent), "{absent}")
     }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn the_gap_log_comes_from_kumis_database_with_what_an_older_kumi_logged_since() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().display().to_string();
+    let kumi = dir.path().join(".kumi");
+    fs::create_dir_all(&kumi).unwrap();
+    let env = Env::from([
+        ("KUMI_HOME".into(), kumi.display().to_string()),
+        ("KUMI_REMOTE_SCRIPTS_DIR".into(), dir.path().join("none").display().to_string()),
+    ]);
+    // Kumi logged a gap in its database...
+    let (database, _) = StoreClient::open(kumi.join("kumi.db"), kumi::config::json_files(&env).unwrap(), 1).await.unwrap();
+    gap_tools(kumi.join("gaps.jsonl"), Some(database))[0]
+        .execute(json!({"missing":"Freezing a track","asked":"Freeze the Bass"}).as_object().unwrap().clone(), abort::never())
+        .await
+        .unwrap();
+    // ...and an older Kumi, rolled back to, one in its file.
+    fs::write(
+        kumi.join("gaps.jsonl"),
+        format!("{}\n", json!({"at":"2026-10-01T09:30:00.000Z","kumi":"1.8.1","missing":"Grouping tracks"})),
+    )
+    .unwrap();
+    let mut io = ReportIo::new(doctor(Rc::new(Out::default()), env));
+    io.home = Some(home.clone());
+    io.folder = Some(home);
+    io.user = Some("fixtureuser".into());
+    io.now = Some(Rc::new(|| "2026-10-05T20:00:00Z".parse().unwrap()));
+    io.live_logs = Some(Rc::new(|| async { Ok(vec![]) }.boxed_local()));
+    assert_eq!(write_report(io).await.unwrap(), 0);
+    let text = fs::read_to_string(dir.path().join("kumi-report-2026-10-05T20-00-00.txt")).unwrap();
+    let gaps = text.split("## What Kumi couldn't do (gap log)").nth(1).unwrap().split("\n## ").next().unwrap();
+    let older = gaps.find("Grouping tracks").expect(gaps);
+    let newer = gaps.find("Freezing a track").expect(gaps);
+    assert!(older < newer, "oldest first: {gaps}");
+    assert_eq!(
+        kumi_runtime::core::gaps::logged_gaps(&kumi.join("kumi.db"), &dir.path().join("none")).unwrap().len(),
+        1,
+        "and the report read the file's gap without writing it to the database"
+    );
 }

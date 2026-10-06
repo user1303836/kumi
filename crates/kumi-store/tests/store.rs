@@ -1,4 +1,4 @@
-use kumi_store::{gaps, notes, params, Connection, Scope, Store, StoreError, SCHEMA_VERSION};
+use kumi_store::{gaps, notes, params, read_only, Connection, Scope, Store, StoreError, SCHEMA_VERSION};
 use std::{
     path::Path,
     sync::{Arc, Barrier},
@@ -39,6 +39,20 @@ fn a_database_from_a_newer_kumi_is_left_alone() {
     drop(Store::open(&path).unwrap());
     Connection::open(&path).unwrap().pragma_update(None, "user_version", SCHEMA_VERSION as i64 + 1).unwrap();
     assert_eq!(Store::open(&path).err(), Some(StoreError::Newer { found: SCHEMA_VERSION + 1, known: SCHEMA_VERSION }));
+}
+
+#[test]
+fn a_read_only_look_writes_nothing_and_leaves_a_newer_database_alone() {
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("kumi.db");
+    let store = Store::open(&path).unwrap();
+    store.write_wait(|c| gaps::add(c, &gap("freezing a track", 1))).unwrap();
+    drop(store);
+    assert_eq!(read_only(&path, gaps::all).unwrap().len(), 1);
+    assert!(read_only(&path, |c| Ok(c.execute("DELETE FROM gaps", [])?)).is_err(), "it can't write");
+    assert_eq!(read_only(&path, gaps::all).unwrap().len(), 1);
+    Connection::open(&path).unwrap().pragma_update(None, "user_version", SCHEMA_VERSION as i64 + 1).unwrap();
+    assert_eq!(read_only(&path, gaps::all).err(), Some(StoreError::Newer { found: SCHEMA_VERSION + 1, known: SCHEMA_VERSION }));
 }
 
 #[test]

@@ -29,6 +29,18 @@ DOCUMENTS = [("crates/ableton-mcp-server/README.md", "README.md")] + [(f"docs/en
 EXCLUSIONS = ["tests", "verification-scripts", "source-maps", "credentials", "configuration", "local-state", "logs",
               "backups", "captured-media", "generated-evidence", "dependency-trees", "protected-local-material"]
 MIT_SHA256 = "f6a4bf820a492313c9d4e100e16bd474cd5cf06c0fba27c1035238acb4af75cb"
+# Willington's runtime files, as its sync puts them in vendor/willington with a release.json naming each
+# file's SHA-256. Only these may ship: its C++ sources, headers and debug files stay in its own repository.
+WILLINGTON = "vendor/willington"
+WILLINGTON_SCHEMA = "kumi-willington-vendor/v1"
+WILLINGTON_COMPONENTS = ("WillingtonRuntime", "WillingtonBindings", "WillingtonDeviceTools", "WillingtonRackZones")
+WILLINGTON_SUFFIXES = (".py", ".json", ".md", ".pyd", ".dylib")
+WILLINGTON_LICENSES = ("LICENSE", "LICENSE.md")
+WILLINGTON_MAX_BYTES = 16 * 1024 * 1024
+# The native libraries for each platform Live runs on: a bundle carries only its own platform's.
+WILLINGTON_NATIVES = {"windows": ".pyd", "macos": ".dylib"}
+# Names Windows keeps for devices, with or without an extension.
+WINDOWS_DEVICE = re.compile(r"(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?", re.I)
 
 def digest(path: Path) -> str:
     with path.open("rb") as file:
@@ -127,13 +139,88 @@ def transform_document(text: str, root: Path, source: str, revision: str) -> str
     text = re.sub(r"(\b(?:href|src)\s*=\s*)([\"'])([^\"']+)\2", html, text, flags=re.I)
     return re.sub(r"^(\s*\[[^\]]+\]:\s*)(<[^>]+>|\S+)(.*)$", markdown, text, flags=re.M)
 
-def stage_assets(root: Path, package: Path, revision: str) -> str:
+def portable(name: str) -> bool:
+    """A path every platform's checkout can hold: plain ASCII segments, none a Windows device name or ending
+    in a dot."""
+    return all(re.fullmatch(r"[A-Za-z0-9._-]+", part) and not part.endswith(".") and not WINDOWS_DEVICE.fullmatch(part)
+               for part in name.split("/"))
+
+def willington_platform(target: str) -> str | None:
+    """The platform a Rust target's bundle puts the bridge in Live on; None where Live doesn't run."""
+    return "windows" if "-windows-" in target else "macos" if target.endswith("-apple-darwin") else None
+
+def willington_for(files: dict[str, str], platform: str) -> list[str]:
+    """What a bundle for the platform carries: every file but other platforms' native libraries."""
+    others = tuple(suffix for name, suffix in WILLINGTON_NATIVES.items() if name != platform)
+    return [name for name in files if not name.endswith(others)]
+
+def willington_files(folder: Path) -> dict[str, str] | None:
+    """The vendored Willington files and their SHA-256, each checked against release.json; None when there are none.
+
+    Any file release.json doesn't list, or that it lists but isn't one of Willington's runtime files (a
+    source, a header, a debug file), refuses the release.
+    """
+    if not folder.exists():
+        return None
+    manifest_path = folder / "release.json"
+    if folder.is_symlink() or not folder.is_dir() or manifest_path.is_symlink() or not manifest_path.is_file():
+        raise ValueError(f"{WILLINGTON} must be a folder with its release.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict) or set(manifest) != {"schema", "version", "commit", "files"} or manifest["schema"] != WILLINGTON_SCHEMA:
+        raise ValueError(f"{WILLINGTON}/release.json isn't a {WILLINGTON_SCHEMA} manifest")
+    version, commit, listed = manifest["version"], manifest["commit"], manifest["files"]
+    if not isinstance(version, str) or not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.+-]{0,63}", version):
+        raise ValueError(f"{WILLINGTON}/release.json has an invalid version")
+    if not isinstance(commit, str) or not re.fullmatch("[a-f0-9]{40}", commit):
+        raise ValueError(f"{WILLINGTON}/release.json has an invalid commit")
+    if not isinstance(listed, dict) or not listed:
+        raise ValueError(f"{WILLINGTON}/release.json lists no files")
+    # Checked here, on the sync's pull request, rather than when a release is built on the system that can't.
+    unportable = sorted(name for name in listed if not portable(name))
+    if unportable:
+        raise ValueError(f"{WILLINGTON}/release.json names files some systems can't hold: {', '.join(unportable)}")
+    if len({name.lower() for name in listed}) != len(listed):
+        raise ValueError(f"{WILLINGTON}/release.json names files that differ only in case")
+    present = inventory(folder)
+    del present["release.json"]
+    if set(present) != set(listed):
+        raise ValueError(f"{WILLINGTON} differs from its release.json: {', '.join(sorted(set(present) ^ set(listed)))}")
+    for name, expected in listed.items():
+        parts = name.split("/")
+        runtime = parts[0] in WILLINGTON_COMPONENTS and len(parts) > 1 and name.endswith(WILLINGTON_SUFFIXES) and "__pycache__" not in parts
+        if not runtime and name not in WILLINGTON_LICENSES:
+            raise ValueError(f"{WILLINGTON}/{name} isn't one of Willington's runtime files")
+        if present[name] != expected:
+            raise ValueError(f"{WILLINGTON}/{name} doesn't match its SHA-256 in release.json")
+    for required in ("WillingtonRuntime/__init__.py", "WillingtonRuntime/matrix.json"):
+        if required not in present:
+            raise ValueError(f"{WILLINGTON} is missing {required}")
+    if not any(name in present for name in WILLINGTON_LICENSES):
+        raise ValueError(f"{WILLINGTON} needs Willington's license notice: Kumi's MIT license doesn't cover these files")
+    for platform in WILLINGTON_NATIVES:
+        if sum((folder / name).stat().st_size for name in willington_for(present, platform)) > WILLINGTON_MAX_BYTES:
+            raise ValueError(f"{WILLINGTON} is larger than {WILLINGTON_MAX_BYTES // (1024 * 1024)} MiB for {platform}")
+    return present
+
+def stage_willington(root: Path, remote: Path, target: str) -> None:
+    """Willington's vendored files for the target's platform, inside AbletonMcpBridge: only the bridge loads
+    them from there, and Live doesn't list a folder inside another as a Control Surface. Where Live doesn't
+    run, nothing. release.json stays Willington's own, naming every platform's files."""
+    folder = root / WILLINGTON
+    files = willington_files(folder)
+    platform = willington_platform(target)
+    if files is not None and platform is not None:
+        for name in (*willington_for(files, platform), "release.json"):
+            copy(folder / name, remote / "willington" / name)
+
+def stage_assets(root: Path, package: Path, revision: str, target: str) -> str:
     remote = package / "remote-script" / "AbletonMcpBridge"
     for source, dest in [("remote-script/README.md", "remote-script/README.md"),
                          ("remote-script/AbletonMcpBridge/__init__.py", "remote-script/AbletonMcpBridge/__init__.py"),
                          ("remote-script/ableton_mcp_remote_script.py", "remote-script/AbletonMcpBridge/ableton_mcp_remote_script.py"),
                          ("protocol/ableton-live-v1.operations.json", "remote-script/AbletonMcpBridge/ableton-live-v1.operations.json")]:
         copy(root / source, package / dest)
+    stage_willington(root, remote, target)
     registry = json.loads((remote / "ableton-live-v1.operations.json").read_text())
     canonical = json.dumps(registry, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     registry_hash = hashlib.sha256(canonical.encode()).hexdigest()
@@ -171,7 +258,7 @@ def stage_bridge(root: Path, package: Path, binary: Path, target: str, source: d
     json_write(package / "package.json", {"name": "@ableton-mcp/mcp-server", "version": metadata["version"],
                "private": True, "license": "MIT", "runtime": "rust-native", "target": target,
                "bin": {command: command + extension for command in BRIDGE_BINARIES}})
-    registry_hash = stage_assets(root, package, source["commit"])
+    registry_hash = stage_assets(root, package, source["commit"], target)
     files = inventory(package)
     manifest = {"schema": SCHEMA, "package": {"name": "@ableton-mcp/mcp-server", "version": metadata["version"], "license": "MIT", "private": True},
         "source": source, "build": {"runtime": "rust-native", "target": target, "builder": builder, "recipe": recipe},
