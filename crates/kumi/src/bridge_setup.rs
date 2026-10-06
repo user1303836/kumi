@@ -438,6 +438,96 @@ pub(crate) fn owner_paths(config: &str, package: &str, home: &str) -> Option<(St
     }
     None
 }
+/// The native generation an installed bridge's receipt keeps to go back to.
+pub(crate) struct Kept {
+    pub(crate) root: String,
+    pub(crate) version: String,
+    /// The SHA-256 of the artifact it was installed from, as the receipt has it.
+    pub(crate) artifact_sha256: Option<String>,
+}
+impl Kept {
+    /// Whether it's a Kumi's own bridge: its version and, when the Kumi's bundle lists one, its artifact.
+    pub(crate) fn is(&self, version: &str, artifact_sha256: Option<&str>) -> bool {
+        self.version == version && artifact_sha256.is_none_or(|sha| self.artifact_sha256.as_deref() == Some(sha))
+    }
+}
+/// The generation the receipt in the owner's `state` keeps, when it's a native one.
+pub(crate) fn kept_generation(state: &str) -> Option<Kept> {
+    let receipt: Value = serde_json::from_slice(&fs::read(join(state, "install-receipt.json")).ok()?).ok()?;
+    let root = receipt["previous"]["packageRoot"].as_str().filter(|path| Path::new(path).is_absolute())?;
+    let manifest: Value = serde_json::from_slice(&fs::read(join(root, "release-manifest.json")).ok()?).ok()?;
+    if manifest["schema"] != "ableton-mcp-native-release/v1" {
+        return None;
+    }
+    let artifact_sha256 = receipt["previous"]["artifactSha256"].as_str().map(str::to_string);
+    Some(Kept { root: root.into(), version: bridge_version(root)?, artifact_sha256 })
+}
+/// The SHA-256 a Kumi's bundled bridge lists for its artifact, in `<bridge>/prepared.json`.
+pub(crate) fn prepared_sha256(dir: &str) -> Option<String> {
+    let manifest: Value = serde_json::from_slice(&fs::read(join(dir, "prepared.json")).ok()?).ok()?;
+    manifest.get("sha256")?.as_str().map(str::to_string)
+}
+/// The installed bridge's own rollback to the generation its receipt keeps (`lifecycle rollback`), and that
+/// generation's Live extension put back after it. Applied again, it goes forward to the one it left.
+pub(crate) struct BridgeRollback {
+    command: String,
+    args: Vec<String>,
+    run: Run,
+    /// The retained generation the rollback restores.
+    previous: String,
+}
+impl BridgeRollback {
+    /// The installed bridge (`command`, in `package`) going back to `previous`, with its owner's state, secret and
+    /// Remote Scripts folder.
+    pub(crate) fn new(
+        command: String,
+        package: String,
+        owner: (String, String, String),
+        config: String,
+        previous: String,
+        run: Run,
+    ) -> Self {
+        let (state, secret, scripts) = owner;
+        let args = [
+            "lifecycle",
+            "rollback",
+            "--package-root",
+            package.as_str(),
+            "--state-dir",
+            state.as_str(),
+            "--config",
+            config.as_str(),
+            "--secret",
+            secret.as_str(),
+            "--remote-scripts-dir",
+            scripts.as_str(),
+            "--apply",
+            "--confirm-live-stopped",
+        ]
+        .map(str::to_string)
+        .into();
+        Self { command, args, run, previous }
+    }
+    pub(crate) async fn apply(&self) -> Result<(), RuntimeError> {
+        let result = (self.run)(self.command.clone(), self.args.clone(), None).await;
+        lifecycle_answer(result).map(|_| ()).map_err(RuntimeError::plain)
+    }
+    /// Put the restored generation's Live extension in Live, in place of this bridge's: each bridge checks that its
+    /// extension carries its own registry. What to tell the producer, if anything.
+    pub(crate) fn place_extension(&self, env: &Env) -> Option<String> {
+        let folder = live_extensions_dir(env, system::platform())?;
+        let again = format!("run {} bridge once to put it back", *KUMI);
+        let Some(source) = extension_source(&self.previous) else {
+            return crate::live_extension::installed_extension(&folder)
+                .map(|_| format!("Kumi's extension in Live is this version's, which that bridge won't use: {again}."));
+        };
+        Some(match install_extension(&source, &folder) {
+            Ok(placed) if placed.changed => "Kumi's extension in Live went back with it.".into(),
+            Ok(_) => return None,
+            Err(e) => format!("Couldn't put back the Live extension that goes with that bridge ({e}): {again}."),
+        })
+    }
+}
 /// Whether every file of the Remote Script in a bridge package (`<package>/remote-script/AbletonMcpBridge`)
 /// is, byte for byte, in the installed one (`<scripts>/AbletonMcpBridge`). Files the install adds
 /// (manifest, bridge reference) don't count: Live runs what it loaded, which these files are.
@@ -577,6 +667,97 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
         place_extension(&io, &roots, live_open(&io, run).await);
         place_ears(io.out.as_ref(), &scripts).await;
         return Ok(0);
+    }
+    // An app rollback can leave a newer Kumi's bridge in Live: it serves this Kumi too, and the lifecycle never
+    // updates to an older bridge. Its own rollback puts this Kumi's back when that's the generation it kept.
+    if let Some(newer) =
+        installed.as_ref().filter(|s| s.native()).and_then(|s| s.version.clone()).filter(|v| crate::update::newer(v, &bundled))
+    {
+        let package = installed.as_ref().and_then(|s| s.package_root());
+        let prepared = io.prepared.clone().unwrap_or_else(|| join(&executable_dir(), "bridge"));
+        let kept =
+            secret.as_ref().and_then(|_| kept_generation(&state)).filter(|kept| kept.is(&bundled, prepared_sha256(&prepared).as_deref()));
+        let (Some(config), Some(command), Some(package), Some(secret), Some(kept)) =
+            (config.clone(), installed.as_ref().and_then(|s| s.command.clone()), package.clone(), secret.clone(), kept)
+        else {
+            say(&format!("The bridge in Live is {newer}, from a newer Kumi. It works with this one, so it stays."));
+            place_extension(&io, &package.into_iter().collect::<Vec<_>>(), live_open(&io, run).await);
+            place_ears(io.out.as_ref(), &scripts).await;
+            return Ok(0);
+        };
+        let kept = kept.root;
+        say(&format!("The bridge in Live is {newer}, from a newer Kumi. It works with this one; this Kumi's own, {bundled}, is kept and can go back."));
+        let after_update = io.env.get("KUMI_BRIDGE_AFTER").is_some_and(|value| value == "1");
+        let later = |what: &str| {
+            say(&format!("The bridge {newer} stays for now: {what}, then run: {} bridge", *KUMI));
+            Ok(0)
+        };
+        if live_open(&io, run.clone()).await {
+            if after_update {
+                return later("to put back its own, save your work, quit Live");
+            }
+            say(&format!("Live is open. To put back {bundled}, save your work, quit Live, then run this again: {} bridge", *KUMI));
+            return Ok(1);
+        }
+        if !io.yes
+            && !(if let Some(confirm) = &io.confirm {
+                confirm("Is Live closed, with your work saved?".into()).await
+            } else {
+                ask_yes_no(io.input.clone(), io.out.clone(), "Is Live closed, with your work saved?").await
+            })
+        {
+            if after_update {
+                return later("to put back its own, quit Live");
+            }
+            say(&format!("Nothing was changed. To put back {bundled}, quit Live, then run: {} bridge", *KUMI));
+            return Ok(1);
+        }
+        // Live may have opened while the question waited: the switch runs with it closed.
+        if live_open(&io, run.clone()).await {
+            if after_update {
+                return later("to put back its own, save your work, quit Live");
+            }
+            say(&format!("Live is open again, so nothing was changed. Save your work, quit Live, then run this again: {} bridge", *KUMI));
+            return Ok(1);
+        }
+        let rollback = BridgeRollback::new(
+            command,
+            package,
+            (state.clone(), secret.clone(), scripts.clone()),
+            config.clone(),
+            kept.clone(),
+            run.clone(),
+        );
+        if let Err(reason) =
+            step(io.out.clone(), &io.env, "Putting back Live's Remote Script and the bridge…", rollback.apply(), true).await
+        {
+            say(&format!("The bridge's rollback stopped, and put back what was there: {}", reason.message()));
+            return Ok(1);
+        }
+        say(&format!("Done: the Ableton bridge {bundled} is back ({}).", tilde(&scripts)));
+        if let Some(said) = rollback.place_extension(&io.env) {
+            say(&said);
+        }
+        place_ears(io.out.as_ref(), &scripts).await;
+        say("");
+        say("Now open Live. Kumi connects on its own.");
+        let activate = || {
+            let args = [
+                "lifecycle",
+                "activate",
+                "--remote-scripts-dir",
+                scripts.as_str(),
+                "--state-dir",
+                state.as_str(),
+                "--package-root",
+                kept.as_str(),
+            ];
+            let mut args: Vec<String> = args.map(str::to_string).into();
+            args.extend(["--config".into(), config.clone(), "--secret".into(), secret.clone()]);
+            run(join(&kept, &executable_name("ableton-mcp-server")), args, None)
+        };
+        let connected = format!("Live is connected through this Kumi's bridge again. Run: {}", *KUMI_START);
+        return Ok(wait_for_live(&io, config.clone(), &activate, &connected).await);
     }
     say(&if config.is_some() {
         format!(
@@ -763,11 +944,23 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
     } else {
         "Now open Live, and in Settings → Link, Tempo & MIDI choose AbletonMcpBridge as a Control Surface. Kumi connects on its own."
     });
+    let config_path = find_bridge_config(&io.env).unwrap_or_else(|| join(&state, "bridge-config.json"));
+    let activate = || lifecycle("activate", vec![]);
+    Ok(wait_for_live(&io, config_path, &activate, &format!("Live is connected through the new bridge. Run: {}", *KUMI_START)).await)
+}
+
+/// After a bridge went in place: wait for Live to load it, and record the connection (`activate`).
+async fn wait_for_live(
+    io: &BridgeSetupIo,
+    config_path: String,
+    activate: &dyn Fn() -> LocalBoxFuture<'static, Ran>,
+    connected_line: &str,
+) -> i32 {
+    let say = |line: &str| io.out.write(&format!("{line}\n"));
     let wait_ms = io.wait_ms.unwrap_or(600000);
     if wait_ms == 0 {
-        return Ok(0);
+        return 0;
     }
-    let config_path = find_bridge_config(&io.env).unwrap_or_else(|| join(&state, "bridge-config.json"));
     let stop = StopOnKey::new(io.input.clone());
     let waiting = spin(io.out.clone(), &io.env, "Waiting for Live… (Enter or Ctrl-C stops waiting; nothing else depends on it)", true);
     let mut connected = false;
@@ -782,7 +975,7 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
             remote_script_answers(&config_path).await
         };
         if answers {
-            connected = lifecycle_answer(lifecycle("activate", vec![]).await).is_ok_and(|v| activated(&v))
+            connected = lifecycle_answer(activate().await).is_ok_and(|v| activated(&v))
         }
         if attempt < attempts - 1 && !stop.signal.is_cancelled() && !connected {
             let sleep = async {
@@ -799,8 +992,8 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
     let stopped = stop.signal.is_cancelled();
     drop(stop);
     if connected {
-        say(&format!("Live is connected through the new bridge. Run: {}", *KUMI_START));
-        return Ok(0);
+        say(connected_line);
+        return 0;
     }
     say(&if stopped {
         format!(
@@ -810,5 +1003,5 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
     } else {
         format!("Live didn't connect yet; Kumi will connect when it does. If it doesn't, run: {} doctor", *KUMI)
     });
-    Ok(0)
+    0
 }

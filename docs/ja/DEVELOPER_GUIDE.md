@@ -120,7 +120,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 ## Willington のファイル
 
-[Willington](WILLINGTON_INTEGRATION.md) のリポジトリは非公開です。Kumi が収めているのはそのランタイムファイルだけで、`vendor/willington/` にあります。このフォルダーを変えるのは、Willington の同期によるプルリクエストだけです。ファイルの隣には、Willington のライセンス表示（`LICENSE` または `LICENSE.md`。Kumi の MIT ライセンスはこれらのファイルには及びません）と `release.json` があります。
+[Willington](WILLINGTON_INTEGRATION.md) のリポジトリは非公開です。Kumi が収めているのはそのランタイムファイルだけで、`vendor/willington/` にあります。このフォルダーが変わるのは、Willington の更新（後述）のときだけです。ファイルの隣には、Willington のライセンス表示（`LICENSE` または `LICENSE.md`。Kumi の MIT ライセンスはこれらのファイルには及びません）と `release.json` があります。
 
 ```json
 {"schema": "kumi-willington-vendor/v1", "version": "0.4.0", "commit": "<Willington の 40 文字のコミット>",
@@ -130,6 +130,16 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 `files` には、自分自身を除くフォルダー内のすべてのファイルが、どのプラットフォームのチェックアウトでも扱える名前で並びます。使えるのは ASCII の英字、数字、`.`、`_`、`-` だけで、Windows のデバイス名や末尾のドットは使えず、大文字と小文字だけが違う 2 つの名前も使えません。`scripts/build-native-release.py` は、`release.json` に載っていないファイル、SHA-256 が違うファイル、Willington のランタイムファイルではないファイルがフォルダーにあると、リリースを拒否します。認められるのは `WillingtonRuntime`、`WillingtonBindings`、`WillingtonDeviceTools`、`WillingtonRackZones` の中の `.py`、`.json`、`.md`、`.pyd`、`.dylib` だけなので、ソース、ヘッダー、デバッグファイル、バイトコードのキャッシュが出荷されることはありません。`test_native_release.py` は CI でリポジトリのフォルダーに同じ確認を行い、`.gitattributes` はフォルダーをバイト単位でそのまま保ち、空白のチェックからも外します。
 
 リリースは、これらのファイルをブリッジの Remote Script の中、`AbletonMcpBridge/willington/` に置きます。ネイティブライブラリは自分のプラットフォームのもの（Windows では `.pyd`、macOS では `.dylib`）だけで、合計 16 MiB までです。Linux のバンドルには入りません。ブリッジのインストールはそのフォルダーも一緒にコピーし、Python ファイルの隣に `__pycache__` のブロッカーを置くので、インストールされたツリーはインストールのレシートが記録したとおりに保たれます。インストールされたブリッジのうち 2 つのファイルは、リリースのものではなくプロデューサーのものです。`willington.json` と、Follow Action のセルフテストのレシート `willington/WillingtonBindings/self-test.json` です。これらはブリッジのインストールの確認に影響せず、インストールのときに引き継がれます。ブリッジがこのフォルダーを Python のパスに加えるのは、`willington.json` が Willington をオンにしたときだけで、ブリッジの隣にインストールされたコピーより後になります。
+
+**Willington の更新。** Willington の Bundle ワークフローは、ネイティブライブラリをそれぞれの対象プラットフォームでビルドし、マトリックスバンドルを各実行のアーティファクトとして残します。更新には、Willington の `main` へのプッシュで実行されたものを使います。
+
+1. 実行を見つけます：`gh run list -R xonedsp/willington -w Bundle -b main -e push -s success`。
+2. `main` から作った `willington/<任意の名前>` という名前のブランチで、`python3 scripts/vendor-willington.py --run <run>` を実行します。実行が Willington の `main` へのプッシュで成功した Bundle の実行で、そのコミットが `main` にあること、アーティファクトが GitHub の記録したダイジェストと、バンドルがその SHA-256 と一致することを確認し、そのコミットの Willington のライセンスを取得します。新しいフォルダーがリリースの確認をパスしたときだけフォルダーを置き換え、コミット、実行、アーティファクトのダイジェストを表示します。
+3. ほかに何も変えないプルリクエストを、表示された内容を書いて開きます。`Willington files` がパスするのは、このリポジトリの `willington/` ブランチから出たリポジトリ所有者のプルリクエストだけで、Installer は 6 つのプラットフォームすべてでビルドとインストールを行います。
+
+レビューする人は `python3 scripts/vendor-willington.py --check <run>` で更新を確認できます。実行からフォルダーを作り直し、ファイルごとに比べます。
+
+ライブラリは CI がビルドするので、ハッシュが Live で検証されたものと違うことがあります。更新は、それを出荷するリリースの前に Live で確認し、そのライブラリについて [Follow Action のセルフテスト](WILLINGTON_INTEGRATION.md#follow-action-のセルフテスト)を実行してください。
 
 ## リリース
 

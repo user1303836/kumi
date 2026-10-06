@@ -80,23 +80,14 @@ The repository has three rulesets:
   - the repository admin role can bypass these rules for pull requests.
 - **`Release tags`:** only the repository admin role creates, moves or deletes
   `v*` tags. A tag push runs the Installer, which publishes the release.
-- **`Willington sync branch`:** only Willington's sync creates, pushes to or
-  deletes the branch `willington-sync`, so its pull request holds only the
-  sync's commits. Admins can't either: the sync keeps that pull request up to
-  date with `main`, or an admin merges it with the `main` bypass. Only the sync
-  changes `vendor/willington/`, so it can't conflict.
+- **`Willington branches`:** only the repository admin role creates, pushes to
+  or deletes `willington/*` branches, which Willington updates come from.
 
-`Willington files` lets only Willington's sync change `vendor/willington/`, and
-its pull requests change nothing else. The sync is a GitHub App that pushes the
-branch `willington-sync`. Once the App exists:
-
-1. its login (`<app>[bot]`) goes in the `WILLINGTON_SYNC_APP` repository
-   variable;
-2. the App goes on the `Willington sync branch` ruleset's bypass list, as its
-   only entry.
-
-Until then, nothing may change `vendor/willington/`, and nobody can push
-`willington-sync`.
+`Willington files` lets only the repository owner's pull requests, from a
+`willington/` branch in this repository, change `vendor/willington/`, and such
+a pull request changes nothing else. Those files ship to every producer, and their native
+libraries can't be reviewed, so who sends them is the check. The
+[developer guide](DEVELOPER_GUIDE.md#willingtons-files) describes an update.
 
 The Installer workflow isn't a required check, but on a tag its `publish` job
 runs only after the bundle has installed on macOS, Linux and Windows.

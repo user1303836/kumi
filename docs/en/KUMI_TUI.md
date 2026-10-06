@@ -71,7 +71,7 @@ Run these as `kumi <command>`; from a copy of the repository, as
 | `kumi bridge [--yes] [--allow-dirty]` | With Live closed: put the bridge into Live, or bring it up to date. `--yes` confirms Live is closed; `--allow-dirty` lets a checkout with uncommitted changes install its bridge |
 | `kumi doctor` | Check Node, sign-in, the model servers on your computer, the bridge, Live, the extension, your library, video programs, talking, Live's menus and the terminal; says what to run |
 | `kumi library [--rebuild]` | How far Kumi has got learning your sounds, presets and Sets; `--rebuild` learns them all again |
-| `kumi update [--check \| --rollback]` | Get the newest Kumi (and the bridge when it's older); `--check` only asks; `--rollback` goes back to the one before (an installed Kumi only) |
+| `kumi update [--check \| --rollback]` | Get the newest Kumi (and the bridge when it's older); `--check` only asks; `--rollback` goes back to the one before, with its bridge when Live is closed (an installed Kumi only) |
 | `kumi report` | Write `~/kumi-report-<date and time>.txt` to send when something goes wrong |
 | `kumi uninstall [--all] [--yes]` | Remove an installed Kumi; `--all` also removes conversations, notes, recipes and sign-ins; `--yes` skips the first question |
 | `kumi --version` (or `-v`), `kumi --help` | Version; help |

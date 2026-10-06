@@ -148,7 +148,7 @@ These workflows run on every pull request, and the first two on every push to `m
 | | `Live extension` (Ubuntu, Node 24) | The extension's tests, against its committed build |
 | | `Release scripts` (Ubuntu) | The whitespace check of the change, then the packaging tests |
 | | `Required CI` | Passes only when all of the above passed |
-| **Willington files** | `Willington files` (Ubuntu) | Only Willington's sync changes `vendor/willington/`, and its pull requests change nothing else. `main`'s copy of the check runs, reading the pull request's file list, never its code |
+| **Willington files** | `Willington files` (Ubuntu) | Only the repository owner's pull requests, from a `willington/` branch in this repository, change `vendor/willington/`, and such a pull request changes nothing else. `main`'s copy of the check runs, reading the pull request's file list, never its code |
 | **Installer** | `Build Kumi's Mac helper`, `Native bundle / <target>` (six), `Aggregate native and existing-installer releases`, then `Install / <system>` (six) and `Existing installer transition / <system>` (three) | Builds the helper Kumi uses Live's menus with on a Mac (universal, ad hoc signed), a native bundle for Intel and ARM on macOS, Linux and Windows, then the compatibility release that existing installations update from, and serves them locally. On each system: installs as producers do (Windows PowerShell 5.1 on Windows), checks the version, `doctor`, the bridge and its analysis worker, installs again as a repair, runs `kumi bridge --yes` into a scratch Remote Scripts folder, `kumi update`, `kumi update --rollback` and `kumi uninstall`. The transition jobs run the migration tests with Kumi 1.7.5 and the new bundles. On a `v*` tag, `publish` then attaches the bundle to the release. |
 
 On a pull request, less runs:
@@ -156,9 +156,9 @@ On a pull request, less runs:
 - `Rust / macOS` and `Rust / Windows` run the tests that differ by platform,
   and `Python Remote Script` skips macOS.
 - The Installer builds and installs all six only for a change to installing,
-  updating, releasing or a dependency. A change to the bridge or a version
-  number builds, installs and checks Linux's; any other change builds Linux's
-  bundle only.
+  updating, releasing, Willington's files or a dependency. A change to the
+  bridge or a version number builds, installs and checks Linux's; any other
+  change builds Linux's bundle only.
 - A change to how Kumi stores what it keeps (`crates/kumi-store`, settings and
   sign-ins, memory, techniques, playbook, gaps, an older Kumi's files) also gets
   Linux's install and update check, which updates and rolls back over existing

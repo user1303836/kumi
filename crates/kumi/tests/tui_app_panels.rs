@@ -584,6 +584,8 @@ case!(a_technique_offered_after_an_answer_is_answered_by_number, async {
     assert!(answers(&h).is_empty(), "a number picks; enter answers");
     h.type_text("\r").await;
     h.wait_for_call("answer-technique:yes").await;
+    let picks = |h: &Harness| h.calls().into_iter().filter(|c| c.starts_with("picked:")).collect::<Vec<_>>();
+    assert_eq!(picks(&h), ["picked:technique:Liquid bubbles:yes"], "a number is the producer's answer");
     assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"), "answering closes the offer");
     // Enter alone, or Esc, is a no.
     for (key, why) in [("\r", "a bare enter"), ("\x1b", "esc")] {
@@ -595,6 +597,7 @@ case!(a_technique_offered_after_an_answer_is_answered_by_number, async {
         h.wait_for_calls("answer-technique:", before + 1).await;
         assert_eq!(answers(&h).last().map(String::as_str), Some("answer-technique:no"), "{why}");
         assert!(!has(&h.screen(), "Keep “Liquid bubbles” as a technique?"), "{why}");
+        assert_eq!(picks(&h).len(), 1, "{why} is the default, not a pick");
     }
     // Typing on goes to the input box and answers nothing.
     let answered = answers(&h).len();

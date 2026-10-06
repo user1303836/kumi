@@ -192,10 +192,10 @@ bundle against its checksum. Measurements of how Live runs the extension are in
 ## Willington's files
 
 [Willington](WILLINGTON_INTEGRATION.md)'s repository is private: Kumi carries
-only its runtime files, in `vendor/willington/`, which Willington's sync changes
-by pull request and nothing else does. Beside them are Willington's license
-notice (`LICENSE` or `LICENSE.md`; Kumi's MIT license doesn't cover these files)
-and `release.json`:
+only its runtime files, in `vendor/willington/`, which change only by a
+Willington update (below). Beside them are Willington's license notice
+(`LICENSE` or `LICENSE.md`; Kumi's MIT license doesn't cover these files) and
+`release.json`:
 
 ```json
 {"schema": "kumi-willington-vendor/v1", "version": "0.4.0", "commit": "<Willington's 40-character commit>",
@@ -225,6 +225,32 @@ the release's: `willington.json` and the Follow Action self-test receipt,
 an install carries them over. The bridge puts the folder on Python's path only
 once `willington.json` turns Willington on, after any copy installed beside the
 bridge.
+
+**Updating Willington.** Willington's Bundle workflow builds its native
+libraries on each platform they're for and keeps the matrix bundle as each
+run's artifact. An update takes a run from a push to Willington's `main`:
+
+1. Find the run: `gh run list -R xonedsp/willington -w Bundle -b main -e push -s success`.
+2. On a branch from `main` named `willington/<anything>`, run
+   `python3 scripts/vendor-willington.py --run <run>`. It checks that the run
+   is a successful Bundle run on a push to Willington's `main` and that its
+   commit is on `main`, that the artifact matches the digest GitHub recorded and
+   the bundle its SHA-256, and fetches Willington's license at that commit. It
+   replaces the folder only once the new one passes the release check, then
+   prints the commit, the run and the artifact's digest.
+3. Open a pull request that changes nothing else, with what it printed.
+   `Willington files` passes only the repository owner's pull requests from a
+   `willington/` branch in this repository, and the Installer builds and
+   installs all six platforms.
+
+A reviewer checks an update with
+`python3 scripts/vendor-willington.py --check <run>`, which rebuilds the folder
+from the run and compares it file by file.
+
+CI builds the libraries, so their hashes can differ from the ones validated in
+Live. Check an update in Live before the release that ships it, and run the
+[Follow Action self-test](WILLINGTON_INTEGRATION.md#follow-action-self-test)
+for its library.
 
 ## Releasing
 

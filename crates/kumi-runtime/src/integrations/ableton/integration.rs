@@ -611,6 +611,12 @@ impl Integration for Ableton {
         };
         closing.await
     }
+    fn fingerprint(&self) -> Option<Value> {
+        self.observer.fingerprint()
+    }
+    fn first_heard(&self, since: i64) -> Option<i64> {
+        self.connection.first_heard(since)
+    }
     fn has_undo(&self) -> bool {
         true
     }

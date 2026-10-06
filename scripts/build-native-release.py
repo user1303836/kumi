@@ -29,7 +29,7 @@ DOCUMENTS = [("crates/ableton-mcp-server/README.md", "README.md")] + [(f"docs/en
 EXCLUSIONS = ["tests", "verification-scripts", "source-maps", "credentials", "configuration", "local-state", "logs",
               "backups", "captured-media", "generated-evidence", "dependency-trees", "protected-local-material"]
 MIT_SHA256 = "f6a4bf820a492313c9d4e100e16bd474cd5cf06c0fba27c1035238acb4af75cb"
-# Willington's runtime files, as its sync puts them in vendor/willington with a release.json naming each
+# Willington's runtime files, as an update puts them in vendor/willington with a release.json naming each
 # file's SHA-256. Only these may ship: its C++ sources, headers and debug files stay in its own repository.
 WILLINGTON = "vendor/willington"
 WILLINGTON_SCHEMA = "kumi-willington-vendor/v1"
@@ -175,7 +175,7 @@ def willington_files(folder: Path) -> dict[str, str] | None:
         raise ValueError(f"{WILLINGTON}/release.json has an invalid commit")
     if not isinstance(listed, dict) or not listed:
         raise ValueError(f"{WILLINGTON}/release.json lists no files")
-    # Checked here, on the sync's pull request, rather than when a release is built on the system that can't.
+    # Checked here, on the update's pull request, rather than when a release is built on the system that can't.
     unportable = sorted(name for name in listed if not portable(name))
     if unportable:
         raise ValueError(f"{WILLINGTON}/release.json names files some systems can't hold: {', '.join(unportable)}")
