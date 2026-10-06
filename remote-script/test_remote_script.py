@@ -3231,6 +3231,31 @@ class RealtimePlaneTests(unittest.TestCase):
             self.assertEqual(_js_number(value), text)
         self.assertEqual(AuthenticatedRemoteScript._canonical({"value": 0.00005, "whole": 3.0}), '{"value":0.00005,"whole":3}')
 
+    def test_wire_text_matches_the_vectors_the_bridge_checks_too(self):
+        # The bridge's test reads the same file. Float32 ties (Drift's "Pulsating Pad" LP Freq,
+        # Bohlen-Pierce's first step) once failed its MAC check (#177); emoji beside fullwidth or
+        # Japanese keys sorted differently here (#201). The text is JavaScript's, made with Node.
+        vectors = json.loads((Path(__file__).resolve().parent.parent / "protocol" / "wire-canonical-vectors.json").read_text(encoding="utf-8"))
+        for case in vectors["numbers"]:
+            value = struct.unpack(">d", bytes.fromhex(case["bits"]))[0]
+            self.assertEqual(AuthenticatedRemoteScript._canonical(value), case["text"], case)
+            negated = case["text"][1:] if case["text"].startswith("-") else "-" + case["text"]
+            self.assertEqual(AuthenticatedRemoteScript._canonical(-value), negated, case)
+        for case in vectors["objects"]:
+            self.assertEqual(AuthenticatedRemoteScript._canonical(case["value"]), case["text"], case)
+        self.assertEqual(AuthenticatedRemoteScript._canonical({"💀 KICK": 1, "ＢＡＳＳ": 2}), '{"💀 KICK":1,"ＢＡＳＳ":2}')
+
+    def test_a_string_is_bounded_in_utf16_units_as_the_bridge_bounds_it(self):
+        # Emoji are two units each there: a string Python counted as fitting was refused there.
+        limit = remote_module.MAX_WIRE_STRING_LENGTH
+        AuthenticatedRemoteScript._canonical("a" * limit)
+        AuthenticatedRemoteScript._canonical("😀" * (limit // 2))
+        for text in ["a" * (limit + 1), "😀" * (limit // 2 + 1)]:
+            with self.assertRaisesRegex(ValueError, "wire string is too large"):
+                AuthenticatedRemoteScript._canonical(text)
+            with self.assertRaisesRegex(ValueError, "wire string is too large"):
+                AuthenticatedRemoteScript._canonical_general(text, 0)
+
     def test_racks_nested_three_deep_still_snapshot_and_sign(self):
         # A device in a rack in a rack's chain, and one more: once past the wire's depth, no snapshot could be sent.
         song = FakeSong(); leaf = FakeDevice(); leaf.parameters[0].value_items = ["Off", "On"]; device = leaf

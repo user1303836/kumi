@@ -27,6 +27,19 @@ fn signed(mut value: Value) -> Value {
     value["mac"] = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes()).into();
     value
 }
+#[test]
+fn canonical_text_matches_the_vectors_the_remote_script_checks_too() {
+    // What the Remote Script signs and this checks has to be the same text. Float32 ties once failed
+    // here (#177), and emoji beside fullwidth or Japanese keys sorted differently there (#201).
+    let vectors: Value = serde_json::from_str(include_str!("../../../protocol/wire-canonical-vectors.json")).unwrap();
+    for case in vectors["numbers"].as_array().unwrap() {
+        let value = Value::from(f64::from_bits(u64::from_str_radix(case["bits"].as_str().unwrap(), 16).unwrap()));
+        assert_eq!(canonical_json(&value, &WIRE_CANONICAL_LIMITS).unwrap(), case["text"].as_str().unwrap(), "{case}");
+    }
+    for case in vectors["objects"].as_array().unwrap() {
+        assert_eq!(canonical_json(&case["value"], &WIRE_CANONICAL_LIMITS).unwrap(), case["text"].as_str().unwrap(), "{case}");
+    }
+}
 fn response(id: &str, result: Value, ok: bool, epoch: &str) -> Value {
     let mut value = json!({"version":"ableton-loopback/v1","id":id,"ok":ok,"bridgeEpoch":epoch,"connectionChallenge":CHALLENGE});
     value[if ok { "result" } else { "error" }] = result;

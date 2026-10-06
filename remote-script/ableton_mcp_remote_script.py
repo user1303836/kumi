@@ -46,6 +46,23 @@ _DIAGNOSTIC_EVENTS = {"dispatch-failure", "result-contract-failure", "capture-ti
 _encode_string = json.encoder.encode_basestring
 
 
+def _wire_keys(value: dict[Any, Any]) -> list[Any]:
+    """An object's keys in the bridge's order: JavaScript's, by UTF-16 code units. That is Python's
+    code-point order except where a character above U+FFFF (an emoji) meets one in U+E000-U+FFFF
+    (fullwidth letters, halfwidth katakana, the variation selector in "❤️"): "💀 KICK" sorts before
+    "ＢＡＳＳ" there and after it here, and a frame signed in the wrong order is refused (#201)."""
+    if all(type(key) is str and key.isascii() for key in value):
+        return sorted(value)
+    return sorted(value, key=lambda key: (key if type(key) is str else str(key)).encode("utf-16-be", "surrogatepass"))
+
+
+def _too_long_for_wire(text: str) -> bool:
+    """Whether the bridge refuses a string this long. It counts UTF-16 code units, so an emoji counts two."""
+    if len(text) * 2 <= MAX_WIRE_STRING_LENGTH or text.isascii():
+        return len(text) > MAX_WIRE_STRING_LENGTH
+    return len(text.encode("utf-16-le", "surrogatepass")) // 2 > MAX_WIRE_STRING_LENGTH
+
+
 def _js_number(value: float) -> str:
     """A float as JavaScript writes it (Number::toString), so both ends of the wire sign the
     same text: Python writes 0.0000022 as "2.2e-06", JavaScript as "0.0000022". The digits are
@@ -697,13 +714,13 @@ class AuthenticatedRemoteScript:
             raise ValueError("wire payload is too deeply nested")
         kind = type(value)
         if kind is str:
-            if len(value) > MAX_WIRE_STRING_LENGTH:
+            if _too_long_for_wire(value):
                 raise ValueError("wire string is too large")
             return _encode_string(value)
         if kind is dict:
             if len(value) > MAX_WIRE_OBJECT_PROPERTIES:
                 raise ValueError("wire object is too large")
-            return "{" + ",".join((_encode_string(key) if type(key) is str else json.dumps(key, ensure_ascii=False)) + ":" + cls._canonical(value[key], depth + 1) for key in sorted(value)) + "}"
+            return "{" + ",".join((_encode_string(key) if type(key) is str else json.dumps(key, ensure_ascii=False)) + ":" + cls._canonical(value[key], depth + 1) for key in _wire_keys(value)) + "}"
         if kind is list:
             if len(value) > MAX_WIRE_ARRAY_LENGTH:
                 raise ValueError("wire array is too large")
@@ -724,7 +741,7 @@ class AuthenticatedRemoteScript:
     @classmethod
     def _canonical_general(cls, value: Any, depth: int) -> str:
         if value is None or isinstance(value, (str, bool)):
-            if isinstance(value, str) and len(value) > MAX_WIRE_STRING_LENGTH:
+            if isinstance(value, str) and _too_long_for_wire(value):
                 raise ValueError("wire string is too large")
             return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
         if isinstance(value, int):
@@ -744,7 +761,7 @@ class AuthenticatedRemoteScript:
         if isinstance(value, dict):
             if len(value) > MAX_WIRE_OBJECT_PROPERTIES:
                 raise ValueError("wire object is too large")
-            return "{" + ",".join(json.dumps(key, ensure_ascii=False) + ":" + cls._canonical(value[key], depth + 1) for key in sorted(value)) + "}"
+            return "{" + ",".join(json.dumps(key, ensure_ascii=False) + ":" + cls._canonical(value[key], depth + 1) for key in _wire_keys(value)) + "}"
         raise TypeError("unsupported wire value")
 
     @classmethod

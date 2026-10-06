@@ -246,16 +246,9 @@ pub mod number {
             return if value > 0.0 { "Infinity".into() } else { "-Infinity".into() };
         }
         let negative = value < 0.0;
-        let magnitude = value.abs();
-        // Rust's `{:e}` is the shortest round-tripping representation: "d.ddddde±x".
-        let formatted = format!("{magnitude:e}");
-        let (mantissa, exponent) = formatted.split_once('e').expect("exponent form");
-        let exponent: i32 = exponent.parse().expect("exponent");
-        let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
-        let digits = digits.trim_end_matches('0');
-        let digits = if digits.is_empty() { "0" } else { digits };
+        let (digits, n) = shortest(value.abs());
+        let digits = digits.as_str();
         let k = digits.len() as i32;
-        let n = exponent + 1;
         let mut out = String::new();
         if negative {
             out.push('-');
@@ -288,6 +281,72 @@ pub mod number {
             out.push_str(&e.abs().to_string());
         }
         out
+    }
+
+    /// `magnitude`'s digits as Number::toString picks them, with where the point goes (the value is
+    /// 0.<digits> × 10^n): the fewest digits that read back as the value; of two such, the closer;
+    /// of two as close, the even one (ECMA-262's note to Number::toString, which V8 and Python's
+    /// `repr` follow). Rust's `{:e}` gives the fewest digits but rounds such a tie up: Live's float32
+    /// 0.169849395751953125 is "0.16984939575195313" there and "0.16984939575195312" in Python, and
+    /// the bridge signs Python's text (#177).
+    fn shortest(magnitude: f64) -> (String, i32) {
+        let (digits, exponent) = digits_of(&format!("{magnitude:e}"));
+        let k = digits.len();
+        // Two candidates of k digits can both read back only from 16 digits on: a double's gap is at
+        // most 2.2e-16 of its value, and 15-digit candidates are 1e-15 of it apart or more. A tie also
+        // needs the exact value to be one digit longer, ending in 5.
+        if k < 16 {
+            return (digits, exponent + 1);
+        }
+        let (longer, at) = digits_of(&format!("{magnitude:.k$e}"));
+        if longer.len() != k + 1 || !longer.ends_with('5') {
+            return (digits, exponent + 1);
+        }
+        // Exactly halfway only if nothing follows that 5: a double's exact decimal ends within 767
+        // significant digits.
+        let exact = format!("{magnitude:.800e}");
+        let exact = exact.split_once('e').map_or("", |(mantissa, _)| mantissa);
+        if exact.bytes().filter(|b| *b != b'.').skip(k + 1).any(|b| b != b'0') {
+            return (digits, exponent + 1);
+        }
+        let mut even: Vec<u8> = longer.as_bytes()[..k].to_vec();
+        let mut point = at + 1;
+        if (even[k - 1] - b'0') % 2 == 1 {
+            // The candidate above: one more in the last place, carried.
+            let mut index = k;
+            loop {
+                if index == 0 {
+                    even.insert(0, b'1');
+                    even.pop();
+                    point += 1;
+                    break;
+                }
+                index -= 1;
+                if even[index] == b'9' {
+                    even[index] = b'0';
+                } else {
+                    even[index] += 1;
+                    break;
+                }
+            }
+        }
+        let even = String::from_utf8(even).expect("digits");
+        let even = even.trim_end_matches('0');
+        // It has to read back as the value too, which a tie's other candidate may not at a power of 2.
+        let reads_back = format!("{}.{}e{}", &even[..1], &even[1..], point - 1).parse::<f64>().ok() == Some(magnitude);
+        if reads_back && even.len() == k {
+            (even.to_string(), point)
+        } else {
+            (digits, exponent + 1)
+        }
+    }
+
+    /// "d.dddde±x" (Rust's exponent form) as its digits, trailing zeros dropped, and x.
+    fn digits_of(formatted: &str) -> (String, i32) {
+        let (mantissa, exponent) = formatted.split_once('e').expect("exponent form");
+        let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
+        let digits = digits.trim_end_matches('0');
+        (if digits.is_empty() { "0".into() } else { digits.into() }, exponent.parse().expect("exponent"))
     }
 
     /// `Number(text)` for the common case: a finite decimal, or None (NaN) when it isn't one.
@@ -506,8 +565,23 @@ mod tests {
             (-0.0, "0"),
             (1234.5e-10, "1.2345e-7"),
             (9007199254740993.0, "9007199254740992"),
+            // Live's float32 values exactly halfway between two 17-digit forms: the even one, as V8
+            // and Python's repr write them (#177). Operator's Be Attack at 0.80 ms, Drift's "Pulsating
+            // Pad" LP Freq, Bohlen-Pierce's first step.
+            (0.169849395751953125, "0.16984939575195312"),
+            (0.57492828369140625, "0.5749282836914062"),
+            (0.72263336181640625, "0.7226333618164062"),
+            (f32::from_bits(0x3f2f5480) as f64, "0.6848831176757812"),
+            (146.30422973632812, "146.30422973632812"),
+            (-0.169849395751953125, "-0.16984939575195312"),
         ] {
             assert_eq!(number::to_string(value), expected, "{value}");
+        }
+        // The vectors the bridge and the Remote Script check too, with JavaScript's text (made with Node).
+        let vectors: serde_json::Value = serde_json::from_str(include_str!("../../../protocol/wire-canonical-vectors.json")).unwrap();
+        for case in vectors["numbers"].as_array().unwrap() {
+            let value = f64::from_bits(u64::from_str_radix(case["bits"].as_str().unwrap(), 16).unwrap());
+            assert_eq!(number::to_string(value), case["text"].as_str().unwrap(), "{case}");
         }
     }
 
