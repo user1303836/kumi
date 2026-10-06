@@ -121,7 +121,7 @@ pub(super) async fn probe_live(config: String, factory: AbletonFactory) -> docto
 /// How the watch for Live paces itself: a look at Live's port every `look_ms`, and while it answers
 /// but the session isn't connected, a reconnect at once and then every `retry_ms`, at most `tries`
 /// times until it stops answering (then the count starts again). It ends after `looks`. A Live that's
-/// open but not answering yet gets `hold_ms` before Kumi says it can't reach it.
+/// open but not answering yet gets `hold_ms` before Kumi says how to make it answer.
 struct Pace {
     look_ms: u64,
     retry_ms: u64,
@@ -129,7 +129,9 @@ struct Pace {
     looks: u32,
     hold_ms: u64,
 }
-const PACE: Pace = Pace { look_ms: 2_000, retry_ms: 20_000, tries: 10, looks: 1_800, hold_ms: 30_000 };
+const PACE: Pace = Pace { look_ms: 2_000, retry_ms: 20_000, tries: 10, looks: 1_800, hold_ms: 15_000 };
+/// What Kumi says while an open Live hasn't answered yet.
+const LIVE_STARTING: &str = "Live is open; Kumi connects once it answers.";
 /// What Kumi says when its bridge can't reach Live.
 const NO_LIVE: &str = "Kumi's bridge couldn't reach Live, so this is chat without Live. Open Live and choose AbletonMcpBridge as a Control Surface (Settings → Link, Tempo & MIDI); if Live is showing a dialog, answer it. Kumi connects by itself once Live answers.";
 
@@ -139,8 +141,8 @@ const NO_LIVE: &str = "Kumi's bridge couldn't reach Live, so this is chat withou
 /// after an hour, or when the session has gone.
 ///
 /// A Live that isn't open is told at once. One that's open is most likely still starting (first-run
-/// setup has just opened it, say), so Kumi says it can't reach it only if it hasn't connected within
-/// `hold_ms`; and says it's connected only when it said otherwise first.
+/// setup has just opened it, say), so Kumi says it's waiting for it, and how to make it answer only if
+/// it hasn't connected within `hold_ms` (AbletonMcpBridge not chosen as a Control Surface, say).
 async fn connect_when_live_answers<F, A, O, B>(
     answers: F,
     live_open: O,
@@ -156,9 +158,7 @@ async fn connect_when_live_answers<F, A, O, B>(
 {
     let began = std::time::Instant::now();
     let mut said = !live_open().await;
-    if said {
-        emit(SessionEvent::Notice { message: NO_LIVE.into() });
-    }
+    emit(SessionEvent::Notice { message: if said { NO_LIVE } else { LIVE_STARTING }.into() });
     let mut tries = 0;
     let mut next: Option<std::time::Instant> = Some(std::time::Instant::now());
     for _ in 0..pace.looks {
@@ -176,9 +176,7 @@ async fn connect_when_live_answers<F, A, O, B>(
                 // A turn under way makes this fail; it's tried again later.
                 if session.has_reconnect() && session.reconnect().await.is_ok() && session.status().connection == ConnectionState::Connected
                 {
-                    if said {
-                        emit(SessionEvent::Notice { message: "Live answered, so Kumi is connected to it now.".into() });
-                    }
+                    emit(SessionEvent::Notice { message: "Live answered, so Kumi is connected to it now.".into() });
                     break;
                 }
                 next = Some(std::time::Instant::now() + std::time::Duration::from_millis(pace.retry_ms));
@@ -779,13 +777,13 @@ mod watch_tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn an_open_live_that_is_still_starting_isnt_called_unreachable() {
-        // First-run setup has just opened Live: it connects within the hold, and nothing was wrong to say.
+        // First-run setup has just opened Live: Kumi says it's waiting, and it connects within the hold.
         let (reconnects, notices, watching) = watch(1, true, true, 60_000).await;
         assert_eq!((reconnects, watching), (1, false));
-        assert!(notices.is_empty(), "{notices:?}");
-        // An open Live that doesn't answer is a real failure once the hold is over: said once.
+        assert_eq!(notices, [LIVE_STARTING, "Live answered, so Kumi is connected to it now."]);
+        // An open Live that doesn't answer (AbletonMcpBridge not chosen, say): how to fix it, once the hold is over.
         let (_, notices, _) = watch(1, false, true, 20).await;
-        assert_eq!(notices, [NO_LIVE]);
+        assert_eq!(notices, [LIVE_STARTING, NO_LIVE]);
         // A Live that isn't open is said at once.
         let (_, notices, _) = watch(1, false, false, 60_000).await;
         assert_eq!(notices, [NO_LIVE]);
