@@ -12,6 +12,7 @@ pub mod integrations;
 pub mod kernel;
 pub mod library;
 pub mod mcp;
+pub mod notation;
 pub mod plugins;
 pub mod providers;
 pub mod system;

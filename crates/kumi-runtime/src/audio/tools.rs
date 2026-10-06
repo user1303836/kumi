@@ -77,8 +77,18 @@ pub fn transcription(notes: &[HeardNote], tempo: Option<f64>) -> JsonObject {
     out.insert("note".into(),json!(format!("Monophonic: the strongest line. Write it with write_midi_clip at these starts as they are{} (rounding them to the grid moves the rhythm away from the reference's), unpitched hits as a drum or percussive voice; then audition it against the reference.",tempo.map_or_else(String::new,|t|format!(", with the Set at {} BPM",to_string(t))))));
     out
 }
+/// A pitch by Live's name (C3 is 60), as the producer sees notes in Live. The library keeps its own names.
+fn live_name(hz: f64) -> String {
+    let midi = (69. + 12. * (hz / 440.).log2()).round().clamp(0., 127.);
+    crate::notation::pitch_name(midi as u8)
+}
 fn trim_sound(analysis: &Analysis, tempo: Option<f64>) -> Value {
     let mut result = serde_json::to_value(analysis).unwrap();
+    if let Some(pitch) = analysis.sound.as_ref().and_then(|sound| sound.pitch.as_ref()) {
+        if let Some(note) = result.pointer_mut("/sound/pitch/note") {
+            *note = json!(live_name(pitch.hz));
+        }
+    }
     let object = result.as_object_mut().unwrap();
     object.shift_remove("timeline");
     object.shift_remove("notes");
@@ -283,7 +293,7 @@ async fn heard_together(takes: &[HeardTake], focus: Option<String>, on_event: On
 pub fn summary(analysis: &Analysis) -> String {
     let mut parts = Vec::new();
     if let Some(sound) = &analysis.sound {
-        parts.push(sound.pitch.as_ref().map_or_else(|| "unpitched".into(), |p| p.note.clone()));
+        parts.push(sound.pitch.as_ref().map_or_else(|| "unpitched".into(), |p| live_name(p.hz)));
         if let Some(h) = &sound.harmonics {
             parts.push(h.shape.split(" (").next().unwrap_or(&h.shape).into());
         }

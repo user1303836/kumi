@@ -316,6 +316,10 @@ impl LibraryTool {
         if let Some(like) = like {
             response["like"] = json!(like.name);
         }
+        // The library's notes call 60 C4 and Live's call it C3: said, so the two aren't mixed.
+        if rows.iter().any(|row| row.get("note").is_some()) {
+            response["octaves"] = json!("a sound's note calls MIDI 60 C4, where Live, listen and the notation call it C3");
+        }
         if !uncovered.is_empty() {
             response["note"] = json!(format!(
                 "Kumi hasn't learned {} yet; it's learning {} now, so ask again in a while.",

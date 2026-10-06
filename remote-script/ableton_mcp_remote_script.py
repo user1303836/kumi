@@ -5794,7 +5794,8 @@ class LiveObjectMapper:
             "looping": looping if isinstance(looping, bool) else None,
         }
         if self._read_attr(clip, "is_audio_clip") is not True:
-            for name, key in (("loop_start", "loopStart"), ("loop_end", "loopEnd")):
+            # A MIDI clip's markers too: where an Arrangement clip starts in its loop places its notes in song time.
+            for name, key in (("loop_start", "loopStart"), ("loop_end", "loopEnd"), ("start_marker", "startMarker"), ("end_marker", "endMarker")):
                 value = self._read_attr(clip, name)
                 fields[key] = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) else None
         def optional_bool(name: str) -> bool | None:

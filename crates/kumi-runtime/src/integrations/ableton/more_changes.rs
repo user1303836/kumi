@@ -2,10 +2,16 @@
 use kumi_common::js::number::{parse, to_fixed, to_string};
 use std::cell::Cell;
 thread_local! {static BEATS_PER_BAR:Cell<f64>=const{Cell::new(4.0)};}
+thread_local! {static METER:Cell<(u32, u32)>=const{Cell::new((4, 4))};}
 pub fn set_meter(numerator: f64, denominator: f64) {
     if numerator > 0.0 && denominator > 0.0 {
         BEATS_PER_BAR.set(numerator * 4.0 / denominator);
+        METER.set((numerator as u32, denominator as u32));
     }
+}
+/// The Set's time signature, as the last look at it read it.
+pub fn meter() -> (u32, u32) {
+    METER.get()
 }
 fn trim(value: f64) -> String {
     to_string(parse(&to_fixed(value, 2)).unwrap_or(f64::NAN))
