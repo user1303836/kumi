@@ -201,15 +201,15 @@ struct TimedStore {
 }
 #[async_trait(?Send)]
 impl ProjectStore for TimedStore {
-    async fn load(&self, path: &str) -> Result<Option<Baseline>, RuntimeError> {
-        self.store.load(path).await
+    async fn load(&self, project: &str) -> Result<Option<Baseline>, RuntimeError> {
+        self.store.load(project).await
     }
-    async fn save(&self, baseline: &Baseline) -> Result<(), RuntimeError> {
+    async fn save(&self, project: &str, baseline: &Baseline) -> Result<(), RuntimeError> {
         if self.exported.get().is_none() {
             let bytes = byte_length(&json!(baseline.pages));
             self.exported.set(Some(Exported { ms: perf_now() - self.looked.get(), pages: baseline.pages.len(), bytes }));
         }
-        self.store.save(baseline).await
+        self.store.save(project, baseline).await
     }
 }
 
