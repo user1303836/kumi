@@ -5479,7 +5479,7 @@
     },
     {
       "name": "live_data_preview",
-      "description": "Preview saving text inside the Set (it's saved with the Set), or with one track (trackRef), under one of Kumi's own keys (they start with kumi.); null clears it. Shows what's there now; undo puts it back.",
+      "description": "Preview saving text inside the Set (it's saved with the Set), or with one track (trackRef), under one of Kumi's own keys (they start with kumi.); null clears it. Shows what's there now; undo puts it back. With entries, more tracks' text under the same key in one apply: every place, this trackRef's included, names what was read there (expectedValue, expectedIdentity); the tracks are checked to be the ones read before any is written, and each write leaves a track whose text changed since.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -5500,6 +5500,59 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 256
+          },
+          "expectedValue": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 1048576
+          },
+          "expectedIdentity": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "entries": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1023,
+            "items": {
+              "type": "object",
+              "properties": {
+                "trackRef": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 1048576
+                },
+                "expectedValue": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 1048576
+                },
+                "expectedIdentity": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "trackRef",
+                "value",
+                "expectedValue",
+                "expectedIdentity"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [

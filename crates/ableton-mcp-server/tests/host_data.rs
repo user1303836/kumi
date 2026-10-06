@@ -318,3 +318,70 @@ async fn saved_text_apply_and_exact_undo_match_source() {
         );
     }
 }
+async fn apply_batch(host: &McpHost, preview: &Value, key: &str) -> Value {
+    let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let args = json!({"transactionId":body["transactionId"],"confirmation":"apply","idempotencyKey":key});
+    host.live_data_apply_async(&json!(2), &args, None).await.unwrap()
+}
+#[tokio::test]
+async fn several_tracks_take_text_in_one_apply_each_track_checked_first() {
+    // Kumi's own ids for many tracks at once: every track checked to be the one read before any is written,
+    // then each one's text, sent together.
+    let setup = || {
+        let adapter = Rc::new(Adapter::new());
+        {
+            let mut state = adapter.sim.state.borrow_mut();
+            let mut bass = state["tracks"][0].clone();
+            bass["ref"] = json!("track:track-2");
+            bass["objectIdentity"] = json!("simulator:track:track-2");
+            bass["name"] = json!("Bass");
+            state["tracks"].as_array_mut().unwrap().push(bass);
+        }
+        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+        (adapter, host)
+    };
+    let batch = |second_value: Value, second_identity: &str| {
+        json!({"key":"kumi.track","value":"01J00000000000000000000001","trackRef":"track:track-1","expectedValue":null,
+            "expectedIdentity":"simulator:track:track-1","entries":[{"trackRef":"track:track-2","value":"01J00000000000000000000002",
+            "expectedValue":second_value,"expectedIdentity":second_identity}]})
+    };
+    let saved = |adapter: &Adapter, track: &str| {
+        adapter.sim.invoke(&LiveInvocation::new("data.get", json!({"ref":track,"key":"kumi.track"}))).unwrap()["value"].clone()
+    };
+    // Both tracks, in one call to Live.
+    let (adapter, host) = setup();
+    let preview = host.live_data_preview_async(&json!(1), &batch(Value::Null, "simulator:track:track-2")).await;
+    let applied = apply_batch(&host, &preview, "batch-key").await;
+    assert!(applied.to_string().contains(r#"\"state\":\"applied\""#), "{applied}");
+    assert_eq!(
+        (saved(&adapter, "track:track-1"), saved(&adapter, "track:track-2")),
+        (json!("01J00000000000000000000001"), json!("01J00000000000000000000002"))
+    );
+    let writes = adapter.calls.borrow().iter().filter(|c| c["invocation"]["operation"] == "data.set").count();
+    assert_eq!(writes, 2, "each track's text, in one apply");
+    let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let undo = host
+        .undo_data_async(&json!(3), &json!({"transactionId":body["transactionId"],"confirmation":"undo","idempotencyKey":"undo-key"}), None)
+        .await;
+    assert!(undo.to_string().contains("isn't taken back"), "{undo}");
+    // Another track there now: nothing is written.
+    let (adapter, host) = setup();
+    let preview = host.live_data_preview_async(&json!(1), &batch(Value::Null, "simulator:track:other")).await;
+    let applied = apply_batch(&host, &preview, "batch-key").await;
+    assert!(applied.to_string().contains("nothing was saved"), "{applied}");
+    assert_eq!((saved(&adapter, "track:track-1"), saved(&adapter, "track:track-2")), (Value::Null, Value::Null));
+    // Text that changed on one track since it was read: that track is left as it is, and the apply says so.
+    let (adapter, host) = setup();
+    let preview = host.live_data_preview_async(&json!(1), &batch(json!("01J0000000000000000000000X"), "simulator:track:track-2")).await;
+    let applied = apply_batch(&host, &preview, "batch-key").await;
+    assert!(applied.to_string().contains("saved on 1 of 2 tracks"), "{applied}");
+    assert_eq!((saved(&adapter, "track:track-1"), saved(&adapter, "track:track-2")), (json!("01J00000000000000000000001"), Value::Null));
+    // A track named twice, or a place without what was read there, is refused before anything is asked of Live.
+    let (_, host) = setup();
+    let mut twice = batch(Value::Null, "simulator:track:track-2");
+    twice["entries"][0]["trackRef"] = json!("track:track-1");
+    assert!(host.live_data_preview_async(&json!(1), &twice).await.to_string().contains("only once"));
+    let mut unread = batch(Value::Null, "simulator:track:track-2");
+    unread["entries"][0].as_object_mut().unwrap().remove("expectedIdentity");
+    assert!(host.live_data_preview_async(&json!(1), &unread).await.to_string().contains("-32602"));
+}
