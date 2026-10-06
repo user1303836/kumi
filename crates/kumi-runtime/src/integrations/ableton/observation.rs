@@ -8,12 +8,13 @@ use super::{
     pins::pin_context,
     project,
     remember::{CurrentProject, Remember},
-    set_model::SetModel,
+    set_model::{DeviceNode, SetModel},
     track_ids,
     views::{self, ViewHost},
 };
 use crate::{
     core::{contracts::*, errors::RuntimeError, timing},
+    library::taste,
     mcp::types::CallToolResult,
 };
 use async_trait::async_trait;
@@ -30,7 +31,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     future::Future,
     rc::Rc,
     sync::LazyLock,
@@ -112,6 +113,8 @@ pub struct Observer {
     model: RefCell<Rc<SetModel>>,
     /// The Set's devices kept between turns.
     devices: Rc<RefCell<Devices>>,
+    /// The Set's name, tempo, meter and scale as the last observation read them, for its fingerprint.
+    song: RefCell<Option<Value>>,
 }
 impl Observer {
     pub fn new(connection: Rc<LiveConnection>, remember: Rc<Remember>) -> Self {
@@ -124,11 +127,16 @@ impl Observer {
             previous: RefCell::new(None),
             model: RefCell::new(Rc::new(SetModel::default())),
             devices: Rc::new(RefCell::new(Devices::default())),
+            song: RefCell::new(None),
         }
     }
     /// The Set as the last observation read it: its tracks and their devices, found by id or name.
     pub fn model(&self) -> Rc<SetModel> {
         self.model.borrow().clone()
+    }
+    /// The Set's fingerprint, as Kumi logs it with the producer's reactions (`fingerprint_of`).
+    pub fn fingerprint(&self) -> Option<Value> {
+        Some(fingerprint_of(self.song.borrow().clone()?, &self.model()))
     }
     /// The tracks weren't read this turn: what the model holds may be out of date.
     fn model_stale(&self) {
@@ -693,6 +701,7 @@ impl Observer {
                 set.insert("recording".into(),json!({"session":song.get("sessionRecord")==Some(&Value::Bool(true)),"arrangement":row.get("recording").cloned().unwrap_or(Value::Null)}));
                 set.insert("swing".into(), song.get("swingAmount").cloned().unwrap_or(Value::Null));
             }
+            *self.song.borrow_mut() = Some(json!({"name":set.get("name"),"tempo":set.get("tempo"),"meter":set.get("timeSignature"),"scale":set.get("scale")}));
             context.insert("set".into(), Value::Object(set));
 
             if let Some(shown) = shown {
@@ -1080,8 +1089,81 @@ fn add_devices(
     Ok(())
 }
 
+/// A Set's fingerprint, as Kumi logs it with the producer's reactions: its name, tempo, meter and scale (`song`), how
+/// many tracks play each role, a digest of the kinds of devices on them, and the words in their names.
+pub fn fingerprint_of(mut song: Value, model: &SetModel) -> Value {
+    fn walk(devices: &[DeviceNode], kinds: &mut BTreeSet<String>, names: &mut Vec<String>) {
+        for device in devices {
+            kinds.insert(device.class.clone().unwrap_or_else(|| device.name.clone()));
+            names.push(device.name.clone());
+            names.extend(device.class.clone());
+            for chain in &device.chains {
+                walk(&chain.devices, kinds, names);
+            }
+        }
+    }
+    let (mut roles, mut kinds, mut tokens) = (BTreeMap::<&str, usize>::new(), BTreeSet::new(), Vec::<String>::new());
+    for track in &model.tracks {
+        let mut names = vec![];
+        walk(&track.devices, &mut kinds, &mut names);
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        if let Some(role) = taste::role_of(&track.name, &names) {
+            *roles.entry(role.as_str()).or_default() += 1;
+        }
+        for word in taste::name_words(&track.name) {
+            if word.chars().any(|c| c.is_ascii_alphabetic()) && !tokens.contains(&word) && tokens.len() < 32 {
+                tokens.push(word);
+            }
+        }
+    }
+    let kinds: Vec<String> = kinds.into_iter().collect();
+    song["roles"] = json!(roles);
+    song["devices"] = json!(hex::encode(<sha2::Sha256 as sha2::Digest>::digest(kinds.join("\n").as_bytes()))[..16]);
+    song["tokens"] = json!(tokens);
+    song
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_sets_fingerprint_counts_roles_and_names_its_devices_and_words() {
+        use super::super::set_model::{ChainNode, TrackNode};
+        let device = |name: &str, class: Option<&str>| DeviceNode {
+            reference: "d".into(),
+            name: name.into(),
+            class: class.map(Into::into),
+            chains: vec![],
+        };
+        let track = |name: &str, devices: Vec<DeviceNode>| TrackNode {
+            id: None,
+            reference: "t".into(),
+            index: 0,
+            name: name.into(),
+            kind: None,
+            media: None,
+            group: None,
+            devices,
+            hash: String::new(),
+            generation: 0,
+        };
+        let mut rack = device("Kit", Some("DrumGroupDevice"));
+        rack.chains =
+            vec![ChainNode { reference: "c".into(), name: "Kick".into(), devices: vec![device("Simpler", Some("OriginalSimpler"))] }];
+        let mut model = SetModel::default();
+        model.tracks = vec![track("1 Beat", vec![rack]), track("Sub Bass", vec![device("Operator", None)]), track("Bass Fx", vec![])];
+        let print = fingerprint_of(json!({"name":"Night Drive","tempo":172.0,"meter":"4/4","scale":null}), &model);
+        assert_eq!(print["roles"], json!({"bass":2,"drums":1}));
+        assert_eq!(print["tokens"], json!(["beat", "sub", "bass", "fx"]));
+        assert_eq!(print["name"], "Night Drive");
+        // The device kinds as a digest: the same kinds give the same one, whatever their names.
+        let mut again = SetModel::default();
+        again.tracks = vec![track(
+            "Drums",
+            vec![device("Operator", None), device("My Kit", Some("DrumGroupDevice")), device("Simpler", Some("OriginalSimpler"))],
+        )];
+        assert_eq!(fingerprint_of(json!({}), &again)["devices"], print["devices"]);
+    }
+
     use super::*;
 
     #[test]

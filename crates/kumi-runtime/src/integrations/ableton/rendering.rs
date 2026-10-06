@@ -72,6 +72,11 @@ pub struct Rendering {
     best_steps: RefCell<Vec<String>>,
 }
 impl Rendering {
+    /// Kumi plays the Set for itself, Main down, or stops: what Live plays then isn't heard by the producer.
+    pub(super) fn set_rendering(&self, on: bool) {
+        self.rendering.set(on);
+        self.history.connection.rendering.set(on);
+    }
     pub fn new(
         history: Rc<History>,
         observer: Rc<Observer>,

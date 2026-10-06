@@ -32,12 +32,23 @@ use kumi_common::{
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     panic::{catch_unwind, AssertUnwindSafe},
     rc::{Rc, Weak},
     time::Duration,
 };
 use tokio::time::sleep;
+
+/// How many changes of Live's playing a connection keeps.
+const HEARD_KEPT: usize = 512;
+
+/// The first time at or after `since` in `heard` (each change of playing, oldest first) that Live played.
+pub fn first_heard(heard: &VecDeque<(i64, bool)>, since: i64) -> Option<i64> {
+    if heard.iter().rev().find(|(at, _)| *at <= since).is_some_and(|(_, playing)| *playing) {
+        return Some(since);
+    }
+    heard.iter().find(|(at, playing)| *at > since && *playing).map(|(at, _)| *at)
+}
 
 pub const NO_CURRENT_LIVE:&str="Kumi has no current view of Live: it disconnected, or the Set changed. Kumi reconnects on its own when Live is back; tell the producer, and don't describe earlier readings as current.";
 pub type Connect = Rc<dyn Fn(Signal) -> LocalBoxFuture<'static, Result<Rc<dyn McpEndpoint>, RuntimeError>>>;
@@ -152,6 +163,10 @@ pub struct LiveConnection {
     bar_beats: Cell<Option<f64>>,
     transport_reads: Cell<u64>,
     last_transport: RefCell<String>,
+    /// When Live was heard playing: each time that changed (ms, and whether it was), newest last.
+    heard: RefCell<VecDeque<(i64, bool)>>,
+    /// Kumi is playing the Set for itself, Main down (a silent render): playing then isn't heard.
+    pub rendering: Cell<bool>,
 }
 impl LiveConnection {
     pub fn new(options: ConnectionOptions) -> Rc<Self> {
@@ -192,6 +207,8 @@ impl LiveConnection {
             bar_beats: Cell::new(None),
             transport_reads: Cell::new(0),
             last_transport: RefCell::new(String::new()),
+            heard: RefCell::new(VecDeque::new()),
+            rendering: Cell::new(false),
         })
     }
     pub fn now(&self) -> DateTime<Utc> {
@@ -587,6 +604,20 @@ impl LiveConnection {
             }));
         }
     }
+    /// Whether Live is heard playing now, kept when that changes.
+    fn note_heard(&self, playing: bool) {
+        let mut heard = self.heard.borrow_mut();
+        if heard.back().map(|(_, was)| *was) != Some(playing) {
+            heard.push_back((kumi_common::time::now_ms(), playing));
+            while heard.len() > HEARD_KEPT {
+                heard.pop_front();
+            }
+        }
+    }
+    /// The first time at or after `since` that Live was heard playing: at once when it was playing then.
+    pub fn first_heard(&self, since: i64) -> Option<i64> {
+        first_heard(&self.heard.borrow(), since)
+    }
     fn report_transport(&self, transport: Option<LiveTransport>) {
         let key = transport
             .as_ref()
@@ -647,6 +678,7 @@ impl LiveConnection {
             let row = if read.is_error == Some(true) { None } else { views::rows(&context::payload(&read)?).first().cloned() };
             if let Some(row) = row.filter(|_| !self.closed.get()) {
                 playing = row.get("playing") == Some(&Value::Bool(true));
+                self.note_heard(playing && !self.rendering.get());
                 self.report_transport(Some(LiveTransport {
                     playing,
                     at,
@@ -883,5 +915,24 @@ fn number(value: Option<&Value>) -> f64 {
             kumi_common::js::number::parse(&v.iter().map(array_text).collect::<Vec<_>>().join(",")).unwrap_or(f64::NAN)
         }
         _ => f64::NAN,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_change_is_heard_when_live_plays_after_it_or_was_playing_then() {
+        let heard = VecDeque::from([(1_000, true), (5_000, false), (9_000, true), (12_000, false)]);
+        // Made while it played: heard at once.
+        assert_eq!(first_heard(&heard, 2_000), Some(2_000));
+        // Made while stopped: heard when it played next.
+        assert_eq!(first_heard(&heard, 6_000), Some(9_000));
+        // Never played since.
+        assert_eq!(first_heard(&heard, 13_000), None);
+        // Before anything was read.
+        assert_eq!(first_heard(&heard, 500), Some(1_000));
+        assert_eq!(first_heard(&VecDeque::new(), 500), None);
     }
 }

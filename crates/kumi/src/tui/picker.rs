@@ -23,6 +23,8 @@ pub struct PickerItem {
     /// Shown but not choosable (a list still loading).
     pub inert: bool,
     pub value: Option<String>,
+    /// On the item Enter sends: the producer moved to it or typed its number, rather than taking the default.
+    pub chosen: bool,
 }
 
 impl PickerItem {
@@ -52,6 +54,8 @@ pub struct Picker {
     /// In answers to Kumi's question: the number typed to pick one, carried into the input box when
     /// the producer types on ("2 dB quieter").
     pub typed: String,
+    /// The producer moved the selection or typed a number: what Enter sends is their choice, not the default.
+    pub chosen: bool,
     items: Vec<PickerItem>,
     index: usize,
 }
@@ -62,7 +66,8 @@ impl Picker {
     }
 
     pub fn with_options(title: impl Into<String>, items: Vec<PickerItem>, options: PickerOptions) -> Picker {
-        let mut picker = Picker { title: title.into(), options, filter: String::new(), typed: String::new(), items, index: 0 };
+        let mut picker =
+            Picker { title: title.into(), options, filter: String::new(), typed: String::new(), chosen: false, items, index: 0 };
         picker.index = picker.choosable().iter().position(|item| item.note.as_deref() == Some("current")).unwrap_or(0);
         picker
     }
@@ -135,6 +140,7 @@ impl Picker {
 
     pub fn r#move(&mut self, delta: i32) {
         self.typed.clear();
+        self.chosen = true;
         let count = self.choosable().len() as i64;
         if count > 0 {
             self.index = (self.index as i64 + delta as i64 + count).rem_euclid(count) as usize;

@@ -443,7 +443,7 @@ impl GoalRig for Goal {
             }
         }
         .await;
-        r.rendering.set(false);
+        r.set_rendering(false);
         let files = result?;
         let heard_from = now_ms();
         let tempo = r.observer.tempo.get().unwrap_or(f64::NAN);

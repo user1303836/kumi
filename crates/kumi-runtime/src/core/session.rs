@@ -9,6 +9,7 @@ use super::{
     recall::{recall_tool, RecallOptions},
     recipes::{recipe_instructions, recipe_tools, RecipeStore, RecipeToolsOptions, RUN_RECIPE_TOOL},
     store_client::StoreClient,
+    taste_log::{TasteLog, UndoneBy, Whereabouts},
     techniques::{
         technique_instructions, technique_tools, TechniqueStore, TechniqueTools, TechniqueToolsOptions, PLAN_TECHNIQUE, TECHNIQUE_GUIDANCE,
     },
@@ -256,6 +257,8 @@ struct Inner {
     listening: Vec<Rc<dyn KernelTool>>,
     browsing: Vec<Rc<dyn KernelTool>>,
     gaps: Vec<Rc<dyn KernelTool>>,
+    /// What the producer does in answer to Kumi, logged to Kumi's database (only when it's open).
+    taste: Option<Rc<TasteLog>>,
     timings: Option<String>,
     shelf: Vec<Rc<dyn KernelTool>>,
     unlisten_library: RefCell<Option<Box<dyn FnOnce()>>>,
@@ -459,6 +462,23 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             vec![]
         };
         let gaps = options.gaps.as_ref().map(|file| gap_tools(file, options.store.clone())).unwrap_or_default();
+        let taste = options.store.clone().map(|store| {
+            let place = weak.clone();
+            let hear = weak.clone();
+            let integration = |inner: &Inner| inner.state.borrow().integration.clone();
+            TasteLog::new(
+                store,
+                Rc::new(move || {
+                    let Some(inner) = place.upgrade() else { return Whereabouts::default() };
+                    let (session, project) = {
+                        let s = inner.state.borrow();
+                        (s.conversation_id.clone(), s.project.clone())
+                    };
+                    Whereabouts { session, project, set: integration(&inner).and_then(|i| i.fingerprint()) }
+                }),
+                Rc::new(move |since| hear.upgrade().and_then(|inner| integration(&inner)).and_then(|i| i.first_heard(since))),
+            )
+        });
         let shelf = options
             .library
             .as_ref()
@@ -498,6 +518,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             watching,
             browsing,
             gaps,
+            taste,
             timings,
             shelf,
             unlisten_library: RefCell::new(unlisten_library),
@@ -793,7 +814,7 @@ impl Session {
                 .tools
                 .iter()
                 .filter(|tool| self.0.shelf.is_empty() || tool.name() != FIND_SOUNDS_TOOL)
-                .map(|tool| self.with_technique(tool.clone()))
+                .map(|tool| self.with_taste(self.with_technique(tool.clone())))
                 .collect();
             if let Some(notes) = &self.0.notes {
                 tools.extend(notes.tools.clone());
@@ -808,6 +829,9 @@ impl Session {
                 tools.extend(learned.tools.clone());
             }
             tools.extend(self.0.gaps.clone());
+            if let Some(taste) = &self.0.taste {
+                tools.push(taste.tool());
+            }
             let conversation = self.0.state.borrow().conversation_id.clone();
             let value = (self.0.options.kernel_factory)(KernelOptions {
                 instructions: if extra.is_empty() {
@@ -1283,6 +1307,13 @@ impl Session {
         }
         result
     }
+    /// Kumi's undo tool, watched for the producer's undos it makes.
+    fn with_taste(&self, tool: Rc<dyn KernelTool>) -> Rc<dyn KernelTool> {
+        match &self.0.taste {
+            Some(taste) if tool.name() == "undo_change" => taste.watch_undo(tool),
+            _ => tool,
+        }
+    }
     fn with_technique(&self, tool: Rc<dyn KernelTool>) -> Rc<dyn KernelTool> {
         match &self.0.learned {
             Some(learned) if tool.name() == "make_changes" => Rc::new(TechniquePlan {
@@ -1619,6 +1650,9 @@ impl SessionController for Session {
                 c
             }
         };
+        if let Some(taste) = &self.0.taste {
+            taste.change(&change);
+        }
         if let Some(l) = &self.0.learned {
             l.drafts.change(change.clone());
         }
@@ -1671,6 +1705,11 @@ impl SessionController for Session {
         )?
         .await?;
         let result = outcome.borrow_mut().take();
+        if let (Some(taste), Some(record)) = (&self.0.taste, &result) {
+            if record.state == ChangeState::Undone {
+                taste.undone(&record.id, UndoneBy::Producer);
+            }
+        }
         Ok(result)
     }
     fn has_library(&self) -> bool {
@@ -1847,6 +1886,11 @@ impl SessionController for Session {
         match &self.0.learned {
             Some(l) => l.drafts.answer(keep).await,
             None => Ok(false),
+        }
+    }
+    fn picked(&self, pick: Picked) {
+        if let Some(taste) = &self.0.taste {
+            taste.picked(&pick);
         }
     }
     fn has_goal(&self) -> bool {
