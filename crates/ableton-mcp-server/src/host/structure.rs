@@ -67,31 +67,51 @@ fn delete_operation(item: &Value) -> &'static str {
         "scene.delete"
     }
 }
-/// How many reads past the first a new track or scene gets to settle, and how far apart.
+const CHANGED_BEFORE_COMPENSATION: &str = "transaction-owned Session structure changed before compensation";
+/// How many reads past the first a new track gets to settle, and how far apart.
 const SETTLE_READS: usize = 8;
 const SETTLE_MS: u64 = 100;
 
-/// Whether a track or scene this transaction made holds nothing a producer added since: the name it
-/// was given, and no clips (Session or Arrangement) on it, or in its slots for a scene. Live goes on
-/// setting a new track up after making it, its routing and a default track's devices with their saved
-/// values, so its fingerprint can differ without anyone touching it (#203). A rename or a clip still
-/// keeps it from cleanup.
+/// A track's devices as a shape: each device's class, in order, with its chains' devices (racks, a Drum
+/// Rack's pads), and nothing of their values or names. Live's late setup of a new track (a default track's
+/// saved values, its routing) leaves it as it was; a device added, removed or swapped doesn't.
+fn device_shape(row: &Value) -> Result<String, LiveError> {
+    fn devices(list: &Value) -> Value {
+        Value::Array(
+            list.as_array()
+                .into_iter()
+                .flatten()
+                .map(|device| {
+                    let chains = |key: &str| -> Vec<Value> {
+                        device[key]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .map(|chain| if chain["devices"].is_array() { devices(&chain["devices"]) } else { devices(&chain["chains"]) })
+                            .collect()
+                    };
+                    json!([device["className"].as_str().unwrap_or(""), chains("chains"), chains("drumPads")])
+                })
+                .collect(),
+        )
+    }
+    capture_object_fingerprint(&devices(&row["devices"]))
+}
+
+/// Whether a track this transaction made holds nothing a producer added since: the name it was given,
+/// no clips (Session or Arrangement) on it, and the device shape it settled with. Live goes on setting a
+/// new track up after making it, its routing and a default track's devices with their saved values, so
+/// its fingerprint can differ without anyone touching it (#203). A rename, a clip or a device added or
+/// taken away still keeps it from cleanup. A scene isn't set up late: its fingerprint must match.
 fn untouched_since_made(snapshot: &LiveSnapshot, item: &Value) -> bool {
-    let kind = item["kind"].as_str().unwrap_or("");
-    let Some(row) = rows(snapshot, kind).into_iter().find(|r| r["ref"] == item["ref"]) else { return false };
+    let Some(row) = rows(snapshot, "track").into_iter().find(|r| item["kind"] == "track" && r["ref"] == item["ref"]) else {
+        return false;
+    };
     if row["objectIdentity"] != item["objectIdentity"] || item.get("name").is_some_and(|name| row["name"] != *name) {
         return false;
     }
-    if kind == "scene" {
-        let index = row["index"].as_f64();
-        return rows(snapshot, "track").iter().all(|track| {
-            track["clipSlots"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|slot| slot["sceneIndex"].as_f64() == index)
-                .all(|slot| slot["clipRef"].is_null())
-        });
+    if !item["shape"].is_string() || device_shape(&row).ok().as_deref() != item["shape"].as_str() {
+        return false;
     }
     let clips = row["clips"].as_array().is_some_and(|clips| !clips.is_empty())
         || row["clipSlots"].as_array().into_iter().flatten().any(|slot| !slot["clipRef"].is_null());
@@ -103,6 +123,18 @@ fn untouched_since_made(snapshot: &LiveSnapshot, item: &Value) -> bool {
             .any(|clip| clip.get("trackRef") == Some(&item["ref"]) || clip.get("parentRef") == Some(&item["ref"]))
     });
     !clips && !arranged
+}
+
+/// What an apply made, as the model gets it: each track's device shape stays in the transaction, for
+/// cleanup to check.
+fn reported(created: &Value) -> Value {
+    let mut created = created.clone();
+    for item in created.as_array_mut().into_iter().flatten() {
+        if let Some(item) = item.as_object_mut() {
+            item.remove("shape");
+        }
+    }
+    created
 }
 
 /// What a failed apply left in Live, by ref and name as `snapshot` has it, for the model to clean up.
@@ -174,23 +206,36 @@ impl McpHost {
     /// be gone by the first read. When the first read differs from it, the track is read again until two
     /// reads in a row agree, still the one made, with the name asked for (#203); a track still changing
     /// after that keeps the latest read.
-    async fn settled_structure(&self, context: &LiveOperationContext, owned: &Value, name: &Value) -> Result<String, LiveError> {
+    /// A scene isn't set up late, so its first read must match as it was made, as before.
+    async fn settled_structure(
+        &self,
+        context: &LiveOperationContext,
+        owned: &Value,
+        name: &Value,
+    ) -> Result<(String, Option<String>), LiveError> {
         let kind = owned["kind"].as_str().unwrap();
-        let mut previous: Option<String> = None;
+        let mut previous: Option<(String, Option<String>)> = None;
         for attempt in 0..=SETTLE_READS {
             if attempt > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(SETTLE_MS)).await;
             }
             let observed = self.structure_owned_view(Some(context), std::slice::from_ref(owned)).await?;
             let row = rows(&observed, kind).into_iter().find(|r| r["ref"] == owned["ref"]);
-            if row.as_ref().is_none_or(|row| row["objectIdentity"] != owned["objectIdentity"] || row["name"] != *name) {
+            let Some(row) = row.filter(|row| row["objectIdentity"] == owned["objectIdentity"] && row["name"] == *name) else {
                 return Err(LiveError::error("created Session structure changed after atomic creation"));
-            }
+            };
             let fingerprint = self.session_structure_created_fingerprint(&observed, kind, &owned["ref"])?;
-            if (attempt == 0 && json!(fingerprint) == owned["fingerprint"]) || previous.as_ref() == Some(&fingerprint) {
-                return Ok(fingerprint);
+            if kind != "track" {
+                if json!(fingerprint) != owned["fingerprint"] {
+                    return Err(LiveError::error("created Session structure changed after atomic creation"));
+                }
+                return Ok((fingerprint, None));
             }
-            previous = Some(fingerprint);
+            let settled = (fingerprint, Some(device_shape(&row)?));
+            if (attempt == 0 && json!(settled.0) == owned["fingerprint"]) || previous.as_ref() == Some(&settled) {
+                return Ok(settled);
+            }
+            previous = Some(settled);
         }
         Ok(previous.unwrap())
     }
@@ -305,7 +350,10 @@ impl McpHost {
             .ok_or_else(|| transaction_error(id, "Unknown or expired Session-structure transaction"))?;
         let t = record.borrow();
         if t["state"] == "applied" && t["applyKey"] == params["idempotencyKey"] {
-            return Err(success_text(id, &json!({"transactionId":t["id"],"state":"applied","created":t["created"],"idempotent":true})));
+            return Err(success_text(
+                id,
+                &json!({"transactionId":t["id"],"state":"applied","created":reported(&t["created"]),"idempotent":true}),
+            ));
         }
         let reconciliation = asynchronous && t["state"] == "uncertain" && t["applyKey"] == params["idempotencyKey"];
         if (t["state"] != "previewed" && !reconciliation)
@@ -429,7 +477,7 @@ impl McpHost {
                     != item["fingerprint"]
                     && !untouched_since_made(&snapshot, item)
                 {
-                    return Err(LiveError::error("transaction-owned Session structure changed before compensation"));
+                    return Err(LiveError::error(CHANGED_BEFORE_COMPENSATION));
                 }
                 step = json!({"operation":delete_operation(item),"args":{"ref":item["ref"],"expectedStructureRevision":self.structure_revision(&snapshot),"expectedObjectIdentity":item["objectIdentity"]},"completed":false});
                 let mut r = record.borrow_mut();
@@ -461,9 +509,9 @@ impl McpHost {
         };
         let t = record.borrow().clone();
         let result=async{if reconciliation{self.fresh_status(Some(&LiveOperationContext::with_deadline(self.deadline(reads::AUDITION_DEADLINE_MS)))).await?;}let status=self.require_connected(Some("session.structure"))?;if json!(status.epoch)!=t["epoch"]{return Ok(transaction_error(id,"Live connection epoch changed; preview again"));}let adapter=self.async_adapter();let context=||self.transaction_context(params,signal,STRUCTURE_STEP_DEADLINE_MS);if reconciliation&&t["recoveryMode"]=="compensate"{return Ok(match self.compensate_structure_async(&record,&*adapter,&context()).await{Ok(())=>{record.borrow_mut()["state"]=json!("undone");success_text(id,&json!({"transactionId":t["id"],"state":"compensated","residuals":[],"idempotent":false}))},Err(e)=>{record.borrow_mut()["state"]=json!("uncertain");adapter_tool_error(id,&e,"Session-structure compensation remains uncertain; inspect authoritative structure.")}});}let current=self.structure_view(Some(&context())).await?;if !reconciliation&&self.structure_revision(&current)!=t["revision"]{return Ok(transaction_error(id,"Session structure changed since preview"));}let mut created=t["created"].as_array().cloned().unwrap_or_default();let mut dispatch_ambiguous=false;{let mut r=record.borrow_mut();if r["recoverySteps"].is_null(){r["recoverySteps"]=json!([]);}r["recoveryMode"]=json!("apply");r["state"]=json!("applying");r["applyKey"]=params["idempotencyKey"].clone();}
- let dispatched=async{for(index,item)in t["proposed"].as_array().unwrap().iter().enumerate(){let mut step=record.borrow()["recoverySteps"].get(index).cloned().unwrap_or(Value::Null);if step.is_null(){step=json!({"operation":create_operation(item),"args":create_args(item,self.structure_revision(&self.structure_view(Some(&context())).await?))});let mut r=record.borrow_mut();let steps=r["recoverySteps"].as_array_mut().unwrap();if steps.len()<=index{steps.resize(index+1,Value::Null);}steps[index]=step.clone();}let mut result=step["result"].clone();if !arrangement::truthy(&result){dispatch_ambiguous=true;result=adapter.invoke_async(&LiveInvocation::new(step["operation"].as_str().unwrap(),step["args"].clone()),Some(&context())).await?;dispatch_ambiguous=false;}if !arrangement::truthy(&result["ref"])||!result["objectIdentity"].is_string()||!is_non_empty_string(&result["createdFingerprint"],64){return Err(LiveError::error(format!("Live did not return atomic created {} ownership evidence",item["kind"].as_str().unwrap())));}let mut held=json!({"ref":result["ref"],"objectIdentity":result["objectIdentity"]});if let Some(name)=result.get("name"){held["name"]=name.clone();}held["index"]=result.get("index").filter(|v|!v.is_null()).unwrap_or(&item["index"]).clone();held["createdFingerprint"]=result["createdFingerprint"].clone();record.borrow_mut()["recoverySteps"][index]["result"]=held;if !created.iter().any(|i|i["ref"]==result["ref"]){created.push(created_item(item,&result));}record.borrow_mut()["created"]=json!(created);let at=created.iter().position(|i|i["ref"]==result["ref"]).unwrap();let settled=self.settled_structure(&context(),&created[at],&item["name"]).await?;if json!(settled)!=created[at]["fingerprint"]{created[at]["fingerprint"]=json!(settled);record.borrow_mut()["recoverySteps"][index]["result"]["createdFingerprint"]=json!(settled);record.borrow_mut()["created"]=json!(created);}if result["name"]!=item["name"]{return Err(LiveError::error(format!("Live did not confirm created {}",item["kind"].as_str().unwrap())));}}
+ let dispatched=async{for(index,item)in t["proposed"].as_array().unwrap().iter().enumerate(){let mut step=record.borrow()["recoverySteps"].get(index).cloned().unwrap_or(Value::Null);if step.is_null(){step=json!({"operation":create_operation(item),"args":create_args(item,self.structure_revision(&self.structure_view(Some(&context())).await?))});let mut r=record.borrow_mut();let steps=r["recoverySteps"].as_array_mut().unwrap();if steps.len()<=index{steps.resize(index+1,Value::Null);}steps[index]=step.clone();}let mut result=step["result"].clone();if !arrangement::truthy(&result){dispatch_ambiguous=true;result=adapter.invoke_async(&LiveInvocation::new(step["operation"].as_str().unwrap(),step["args"].clone()),Some(&context())).await?;dispatch_ambiguous=false;}if !arrangement::truthy(&result["ref"])||!result["objectIdentity"].is_string()||!is_non_empty_string(&result["createdFingerprint"],64){return Err(LiveError::error(format!("Live did not return atomic created {} ownership evidence",item["kind"].as_str().unwrap())));}let mut held=json!({"ref":result["ref"],"objectIdentity":result["objectIdentity"]});if let Some(name)=result.get("name"){held["name"]=name.clone();}held["index"]=result.get("index").filter(|v|!v.is_null()).unwrap_or(&item["index"]).clone();held["createdFingerprint"]=result["createdFingerprint"].clone();record.borrow_mut()["recoverySteps"][index]["result"]=held;if !created.iter().any(|i|i["ref"]==result["ref"]){created.push(created_item(item,&result));}record.borrow_mut()["created"]=json!(created);let at=created.iter().position(|i|i["ref"]==result["ref"]).unwrap();let(settled,shape)=self.settled_structure(&context(),&created[at],&item["name"]).await?;if json!(settled)!=created[at]["fingerprint"]{created[at]["fingerprint"]=json!(settled);record.borrow_mut()["recoverySteps"][index]["result"]["createdFingerprint"]=json!(settled);}if let Some(shape)=shape{created[at]["shape"]=json!(shape);}record.borrow_mut()["created"]=json!(created);if result["name"]!=item["name"]{return Err(LiveError::error(format!("Live did not confirm created {}",item["kind"].as_str().unwrap())));}}
  if !self.confirm_structure_created(&self.structure_owned_view(Some(&context()),&created).await?,&created)?{return Err(LiveError::error("Live did not confirm unchanged atomically owned Session structure"));}Ok(())}.await;
- if let Err(cause)=dispatched{record.borrow_mut()["created"]=json!(created);if dispatch_ambiguous{record.borrow_mut()["recoveryMode"]=json!("apply");return Err(cause);}match self.compensate_structure_async(&record,&*adapter,&context()).await{Ok(())=>record.borrow_mut()["state"]=json!("undone"),Err(failure)=>{{let mut r=record.borrow_mut();r["state"]=json!("uncertain");r["recoveryMode"]=json!("compensate");}let left=match self.structure_view(Some(&context())).await{Ok(view)=>left_in_live(&view,&created),Err(_)=>"read Live to see".into()};return Err(LiveError::error(format!("Session-structure apply compensation failed; retry the exact key to reconcile cleanup. The apply failed ({}), then its cleanup ({}); left in Live: {left}",cause.message(),failure.message())));}}return Err(cause);}{let mut r=record.borrow_mut();r["created"]=json!(created);r["applyKey"]=params["idempotencyKey"].clone();r["state"]=json!("applied");}Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","created":created,"epoch":t["epoch"],"idempotent":false})))
+ if let Err(cause)=dispatched{record.borrow_mut()["created"]=json!(created);if dispatch_ambiguous{record.borrow_mut()["recoveryMode"]=json!("apply");return Err(cause);}match self.compensate_structure_async(&record,&*adapter,&context()).await{Ok(())=>record.borrow_mut()["state"]=json!("undone"),Err(failure)=>{{let mut r=record.borrow_mut();r["state"]=json!("uncertain");r["recoveryMode"]=json!("compensate");}let left=match self.structure_view(Some(&context())).await{Ok(view)=>left_in_live(&view,&created),Err(_)=>"read Live to see".into()};return Err(LiveError::error(if failure.message()==CHANGED_BEFORE_COMPENSATION{format!("Session-structure apply failed ({}). Something it made was changed in Live since (a new name, a clip or a device), so Kumi stopped cleaning up. Left in Live: {left}. A retry won't remove them; ask the producer before deleting any of them.",cause.message())}else{format!("Session-structure apply compensation failed; retry the exact key to reconcile cleanup. The apply failed ({}), then its cleanup ({}); left in Live: {left}",cause.message(),failure.message())}));}}return Err(cause);}{let mut r=record.borrow_mut();r["created"]=json!(created);r["applyKey"]=params["idempotencyKey"].clone();r["state"]=json!("applied");}Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","created":reported(&json!(created)),"epoch":t["epoch"],"idempotent":false})))
  }.await;
         result.unwrap_or_else(|e| {
             if record.borrow()["state"] == "applying" {

@@ -59,7 +59,7 @@ struct Adapter {
     settle_reads: Cell<usize>,
     settling: RefCell<Vec<(Value, usize)>>,
     /// What the first read after the injected fault finds changed on the first track made: "value" (Live's
-    /// late setup) or "clip" (the producer put one there).
+    /// late setup), or a "clip" or "device" the producer put there.
     after_fault: RefCell<Option<&'static str>>,
     first_created: RefCell<Value>,
 }
@@ -236,17 +236,22 @@ impl AsyncLiveAdapter for Adapter {
             }
             if self.fired.get() {
                 let change = self.after_fault.borrow_mut().take();
-                let clip =
-                    state["tracks"].as_array().unwrap().iter().find(|row| row["ref"] == "track:track-1").unwrap()["clips"][0].clone();
+                let drums = state["tracks"].as_array().unwrap().iter().find(|row| row["ref"] == "track:track-1").unwrap().clone();
                 let first = self.first_created.borrow().clone();
                 if let Some(row) = state["tracks"].as_array_mut().unwrap().iter_mut().find(|row| row["ref"] == first) {
                     match change {
                         Some("value") => row["volume"] = json!(0.25),
                         Some("clip") => {
-                            let mut clip = clip;
+                            let mut clip = drums["clips"][0].clone();
                             clip["ref"] = json!("clip:producers");
                             clip["objectIdentity"] = json!("simulator:clip:producers");
                             row["clips"] = json!([clip]);
+                        }
+                        Some("device") => {
+                            let mut device = drums["devices"][0].clone();
+                            device["ref"] = json!("device:producers");
+                            device["parentRef"] = row["ref"].clone();
+                            row["devices"].as_array_mut().unwrap().push(device);
                         }
                         _ => {}
                     }
@@ -478,22 +483,27 @@ async fn a_failed_apply_still_removes_a_track_live_changed_and_says_both_causes_
         adapter.calls.borrow()
     );
     assert_eq!(host.transaction_record(txid.as_str().unwrap()).unwrap().borrow()["state"], "undone");
-    // A clip put on the track made first keeps it: the error says why the apply failed, why the cleanup
-    // did, and what's left in Live.
-    let adapter = failed("clip");
-    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
-    let txid = preview(&host, json!([{"name":"CAP A","kind":"audio"},{"name":"CAP B","kind":"audio"}])).await;
-    let applied = host
-        .live_session_structure_apply_async(
-            &json!(2),
-            &json!({"transactionId":txid,"confirmation":"apply","idempotencyKey":"apply-key"}),
-            None,
-        )
-        .await;
-    let reason = body(&applied)["reason"].as_str().unwrap().to_string();
-    assert!(reason.starts_with("Session-structure apply compensation failed; retry the exact key to reconcile cleanup."), "{reason}");
-    assert!(reason.contains("The apply failed (Live did not confirm created track)"), "{reason}");
-    assert!(reason.contains("then its cleanup (transaction-owned Session structure changed before compensation)"), "{reason}");
-    assert!(reason.ends_with("left in Live: track:track-2 \"CAP A\""), "only CAP A is left: {reason}");
-    assert_eq!(track_count(&adapter), track_count(&Adapter::new()) + 1, "CAP A stays, with the producer's clip");
+    // A clip or a device put on the track made first keeps it. The error says why the apply failed, that a
+    // retry won't remove what's left, and what's left in Live.
+    for change in ["clip", "device"] {
+        let adapter = failed(change);
+        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+        let txid = preview(&host, json!([{"name":"CAP A","kind":"audio"},{"name":"CAP B","kind":"audio"}])).await;
+        let applied = host
+            .live_session_structure_apply_async(
+                &json!(2),
+                &json!({"transactionId":txid,"confirmation":"apply","idempotencyKey":"apply-key"}),
+                None,
+            )
+            .await;
+        let reason = body(&applied)["reason"].as_str().unwrap().to_string();
+        assert!(reason.starts_with("Session-structure apply failed (Live did not confirm created track)."), "{change}: {reason}");
+        assert!(
+            reason.contains("changed in Live since (a new name, a clip or a device), so Kumi stopped cleaning up."),
+            "{change}: {reason}"
+        );
+        assert!(reason.contains("Left in Live: track:track-2 \"CAP A\"."), "only CAP A is left: {reason}");
+        assert!(reason.contains("A retry won't remove them; ask the producer before deleting any of them."), "{reason}");
+        assert_eq!(track_count(&adapter), track_count(&Adapter::new()) + 1, "{change}: CAP A stays, with the producer's {change}");
+    }
 }

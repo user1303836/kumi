@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 const FIELDS: &[&str] = &["inputType", "inputSubRouting", "outputType", "outputSubRouting", "arm", "monitoring"];
 /// Live 12.4 crashes, losing unsaved work, when a track's input is set to Main, the main output (#195);
 /// Live 11 called it Master. "Resampling" records what Main plays.
-const INPUT_FROM_MAIN: &str = "Live crashes when a track's input is set to Main (Live 12.4: unsaved work is lost), so nothing changed. To record the mix, set inputType to \"Resampling\", which is what Main plays.";
+const INPUT_FROM_MAIN: &str = "Live crashes when a track's input is set to Main (Live 12.4: unsaved work is lost), so nothing changed. To record the mix, set inputType to \"Resampling\", which is what Main plays. A track the producer named Main or Master can't be told from it by name: rename that track to take it as an input.";
 fn tracks(snapshot: &Value) -> impl Iterator<Item = &Value> {
     snapshot["tracks"].as_array().into_iter().flatten()
 }

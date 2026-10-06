@@ -431,6 +431,8 @@ impl LiveConnection {
             return;
         }
         self.lost_epoch.set(self.last_epoch.get());
+        // Live closing until the probe says otherwise: a Live back before it answers is said as such.
+        self.lost_cause.set(Some(DisconnectCause::Live));
         self.invalidate();
         Self::stop_timer(&self.transport_timer);
         self.report_transport(None);

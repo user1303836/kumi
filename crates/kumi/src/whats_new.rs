@@ -133,11 +133,21 @@ fn read_seen(file: &Path) -> Option<String> {
     value["seen"].as_str().filter(|seen| parse_version(seen).is_some()).map(str::to_string)
 }
 
-fn write_seen(file: &Path, version: &str) {
-    if let Some(folder) = file.parent() {
-        let _ = std::fs::create_dir_all(folder);
+/// Writes the version through a file beside it, renamed into place, so a crash or a second window starting
+/// at once can't leave half a file (which reads as none, and would show the notes again). False when it
+/// couldn't be written: then nothing is shown, so the notes can't come back at every start.
+fn write_seen(file: &Path, version: &str) -> bool {
+    let Some(folder) = file.parent() else { return false };
+    if std::fs::create_dir_all(folder).is_err() {
+        return false;
     }
-    let _ = std::fs::write(file, format!("{}\n", stringify(&json!({"seen": version}))));
+    let temporary = folder.join(format!("{SEEN_FILE}.{}.tmp", std::process::id()));
+    let written = std::fs::write(&temporary, format!("{}\n", stringify(&json!({"seen": version})))).is_ok()
+        && std::fs::rename(&temporary, file).is_ok();
+    if !written {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    written
 }
 
 /// What to show as Kumi `current` starts, recording it as seen. `earlier`: this home has been used by a
@@ -155,11 +165,7 @@ pub fn at_start_from(all: &[Release], settings_file: &str, current: &str, earlie
         Some(seen) => parse_version(current) > parse_version(seen),
         None => true,
     };
-    if !newer {
-        return None;
-    }
-    write_seen(&file, current);
-    if !on {
+    if !newer || !write_seen(&file, current) || !on {
         return None;
     }
     let (releases, since) = match seen {
@@ -258,6 +264,11 @@ mod tests {
         let news = at_start_from(&all, &settings, "1.8.10", true, true).unwrap();
         assert_eq!(news.title, "What's new in Kumi 1.8.10");
         assert_eq!(news.items[0], "Kumi sees the Set's scale (D Dorian), see the guide.");
+        // Where the version can't be kept, nothing shows: the notes would come back at every start.
+        let stuck = tempfile::tempdir().unwrap();
+        let settings = stuck.path().join("settings.json").to_string_lossy().into_owned();
+        std::fs::create_dir_all(seen_file(&settings)).unwrap();
+        assert_eq!(at_start_from(&all, &settings, "1.8.11", true, true), None);
         // Turned off: recorded, not shown.
         let off = tempfile::tempdir().unwrap();
         let settings = off.path().join("settings.json").to_string_lossy().into_owned();

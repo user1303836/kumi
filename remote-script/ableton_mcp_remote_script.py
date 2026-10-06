@@ -284,7 +284,7 @@ _LEGACY_NOTE_CALLS = ("remove_notes", "replace_selected_notes")
 _CRASHING_INPUTS = frozenset({"Main", "Master"})
 INPUT_FROM_MAIN = ("Live crashes when a track's input is set to Main (Live 12.4: unsaved work is lost), so nothing ran. "
                    "To record the mix, set the input to \"Resampling\", which is what Main plays. A script that sets an output to Main "
-                   "and an input to something else can do them in two scripts.")
+                   "and an input to something else can do them in two scripts; a track named Main or Master needs another name to be an input.")
 
 
 def _sets_input_from_main(code: Any) -> bool:
