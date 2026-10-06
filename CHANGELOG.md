@@ -3,6 +3,32 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.8.11 — 2026-10-06
+
+Ships with bridge 1.0.84, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.84
+
+- Copying a Session clip into the Arrangement over another clip is refused, naming it, instead of
+  losing part of that clip.
+
+## 1.8.10 — 2026-10-06
+
+Ships with bridge 1.0.83, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.83
+
+- Adding a warp marker works on Live 12.4, where it failed before, and a delete that fails puts its
+  marker back exactly.
+
 ## 1.8.9 — 2026-10-06
 
 Ships with bridge 1.0.82, which Live loads when it restarts. After updating, Kumi offers to quit Live
