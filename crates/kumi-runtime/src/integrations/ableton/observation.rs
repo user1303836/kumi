@@ -223,7 +223,7 @@ impl Observer {
 
             let mut track_list = None;
             let mut more_tracks = false;
-            // What the tracks read says about their ids: the list's revision, and whether one is missing or shared.
+            // What the tracks read says about their ids: the list's revision, and the tracks whose id is missing or shared.
             let mut track_revision: Option<String> = None;
             let mut track_gaps: Vec<String> = vec![];
             let mut more_devices = false;
