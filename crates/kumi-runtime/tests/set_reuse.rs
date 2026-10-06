@@ -455,3 +455,22 @@ async fn a_subscription_live_refuses_is_asked_again_and_nothing_is_reused_meanwh
         })
         .await;
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_device_ref_from_an_earlier_turn_is_checked_as_that_turn_showed_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let session = session(true).await;
+            session.live.selected.set(0);
+            session.turn().await;
+            // The drums' Compressor is deleted (Live tells of it): the next turn reads every device, and shows none there.
+            session.live.tracks.borrow_mut()[1].1.clear();
+            session.live.structure_changed();
+            session.turn().await;
+            // A change still naming the Compressor's ref from the turn before is refused, not sent to Live.
+            let refused = session.observer.refresh_devices(&["7:track:1".to_owned()], &["7:device:1:0".to_owned()], Signal::new()).await;
+            assert!(refused.unwrap_err().starts_with("Compressor isn't on the track any more"));
+            session.close().await;
+        })
+        .await;
+}

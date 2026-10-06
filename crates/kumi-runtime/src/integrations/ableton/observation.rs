@@ -74,8 +74,10 @@ struct Devices {
     refreshing: bool,
     /// How many rows the last backstop read found changed from the kept ones, for the next turn's timing.
     drift: Option<u32>,
-    /// What this turn showed of each device and chain, by ref: a change is checked against it.
+    /// What the turns have shown of each device and chain, by ref, the latest over the earlier (a ref from an earlier
+    /// turn is checked as it was shown then): a change is checked against it. For one Set in one epoch.
     shown: HashMap<String, Shown>,
+    shown_in: Option<(f64, String)>,
 }
 /// A device's (or a chain's) name and class (a chain has none), as rows show it.
 type Shown = (String, Option<String>);
@@ -517,7 +519,13 @@ impl Observer {
                     },
                 });
                 timing::set_devices(reused, devices.drift.take());
-                devices.shown = devices.kept.as_ref().map(|kept| shown(&kept.rows)).unwrap_or_default();
+                // Without kept devices nothing is checked, and what a turn showed meanwhile isn't recorded: start over.
+                let seen = devices.kept.as_ref().map(|kept| shown(&kept.rows));
+                if seen.is_none() || devices.shown_in.as_ref() != Some(&(epoch, identity.clone())) {
+                    devices.shown.clear();
+                    devices.shown_in = Some((epoch, identity.clone()));
+                }
+                devices.shown.extend(seen.unwrap_or_default());
                 let due = !devices.refreshing && devices.kept.as_ref().is_some_and(|kept| kept.reused >= REUSES);
                 devices.refreshing |= due;
                 due
