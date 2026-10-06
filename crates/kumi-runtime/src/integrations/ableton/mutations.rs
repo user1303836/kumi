@@ -1,7 +1,7 @@
 //! Preview/apply changes and retire the references whose positions they moved.
 use super::{
     change_context::{PreparationContext, SampleBank},
-    changes::{new_record, ChangeKind},
+    changes::{laid_over, new_record, ChangeKind},
     connection::{ReadError, NO_CURRENT_LIVE},
     context::{self, ObservationError},
     history::{uncertain, Restore},
@@ -138,7 +138,7 @@ impl Mutations {
             };
             return Ok(ChangeOutcome::error(format!("{text}{}", more.map(|s| format!(" {s}")).unwrap_or_default())));
         }
-        let preview = context::payload(&previewed)?;
+        let mut preview = context::payload(&previewed)?;
         if let Some(given) = preview.get("epoch") {
             connection.assert_epoch(Some(given), epoch)?;
         }
@@ -147,7 +147,14 @@ impl Mutations {
         let (Some(transaction), Some(confirmation)) = (transaction, confirmation) else {
             return Err(observation("The bridge's preview was malformed; nothing was changed"));
         };
+        let (transaction, confirmation) = (transaction.to_owned(), confirmation.to_owned());
         let known = |reference: &Value| reference.as_str().and_then(|r| connection.references.borrow().known.get(r).cloned());
+        // A new Arrangement clip is laid over the clips it lands on, as Live does: they're read first, to say which (an
+        // audio clip's own length shows once it's made).
+        let under = if kind.tool == "add_arrangement_clip" { self.arrangement_clips_of(&args, &signal).await } else { None };
+        if let (Some(under), Some(start), Some(length)) = (&under, beats(args.get("position")), beats(args.get("length"))) {
+            preview.insert("replaces".into(), json!(laid_over(under, start, start + length)));
+        }
         let summary = kind.summarize(&preview, &args, &known, None);
         signal.check()?;
         history.changes_this_turn.set(history.changes_this_turn.get() + 1);
@@ -188,6 +195,12 @@ impl Mutations {
                 return Ok(ChangeOutcome::error("Kumi couldn't read Live's answer to this change, so it can't confirm whether it happened. Tell the producer to check Live; discover again before more changes."));
             }
         };
+        if let Some(under) = &under {
+            let made = result.get("result");
+            if let (Some(start), Some(length)) = (beats(made.and_then(|m| m.get("start"))), beats(made.and_then(|m| m.get("length")))) {
+                preview.insert("replaces".into(), json!(laid_over(under, start, start + length)));
+            }
+        }
         let final_summary = kind.summarize(&preview, &args, &known, Some(&result));
         let applied = result.get("state").and_then(Value::as_str) == Some("applied");
         let permanent = if applied { kind.permanent(&args).or_else(|| kind.replaced(&preview)).filter(|s| !s.is_empty()) } else { None };
@@ -391,6 +404,12 @@ impl Mutations {
         }
         Ok(out)
     }
+    /// The Arrangement clips on the track a change names (name and span), or None when they can't be read.
+    async fn arrangement_clips_of(&self, args: &JsonObject, signal: &Signal) -> Option<Vec<JsonObject>> {
+        let track = args.get("trackRef").and_then(Value::as_str)?;
+        let read = object(json!({"parent":track,"fields":["name","start","endTime","length"]}));
+        self.parameters.history.connection.rows("arrangement-clip", read, signal.clone()).await.ok()
+    }
     async fn devices_of(&self, tracks: &[f64], signal: Signal) -> Result<Option<JsonObject>, RuntimeError> {
         let connection = &self.parameters.history.connection;
         let Some(epoch) = connection.epoch.get() else { return Ok(None) };
@@ -424,6 +443,10 @@ impl Mutations {
         }
         Ok(Some(now))
     }
+}
+/// A finite number of beats, if the value is one.
+fn beats(value: Option<&Value>) -> Option<f64> {
+    value.and_then(Value::as_f64).filter(|n| n.is_finite())
 }
 pub fn track_index_of(reference: &str) -> Option<f64> {
     static MATCH: LazyLock<Regex> = LazyLock::new(|| {

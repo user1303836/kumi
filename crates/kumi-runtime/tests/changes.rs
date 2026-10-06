@@ -158,3 +158,34 @@ fn set_audio_clip_offers_no_fades_live_cant_set() {
     assert_eq!(schema["properties"].as_object().unwrap().keys().collect::<Vec<_>>(), ["clipRef", "gain"]);
     assert!(kind.has("prepare") && !kind.description.contains("fadeInLength"));
 }
+
+#[test]
+fn a_new_arrangement_clip_says_what_it_replaced() {
+    // Live lays a new clip over the clips it lands on, as a drop does: the summary names each, with the bars it cut.
+    kumi_runtime::integrations::ableton::more_changes::set_meter(4.0, 4.0);
+    let kind = CHANGES.iter().find(|kind| kind.tool == "add_arrangement_clip").unwrap();
+    let clips: Vec<_> = [("Hats", 16.0, 24.0), ("Fill", 26.0, 28.0), ("Hook", 40.0, 44.0)]
+        .iter()
+        .map(|(name, start, end)| json!({"name":name,"start":start,"endTime":end}).as_object().unwrap().clone())
+        .collect();
+    let replaces = laid_over(&clips, 20.0, 28.0);
+    assert_eq!(replaces.len(), 2, "Hook is clear of it");
+    let preview = json!({"payload":{"trackRef":"1:track:0","position":20,"length":8},"replaces":replaces});
+    let input = json!({"trackRef":"1:track:0","position":20,"length":8,"name":"Keys"});
+    let summary = kind.summarize(preview.as_object().unwrap(), input.as_object().unwrap(), &|_| None, None);
+    assert_eq!(summary.title, "New Arrangement clip “Keys” at bar 6 (2 bars), replacing bar 6 to bar 7 of “Hats”, “Fill”");
+    assert_eq!(
+        kind.replaced(preview.as_object().unwrap()).as_deref(),
+        Some("Kumi can't bring back what the new clip replaced; Live's own undo can.")
+    );
+    // An audio clip: its file's length, known once it's made, sets what it covers.
+    let preview =
+        json!({"payload":{"trackRef":"1:track:0","position":20,"filePath":"/samples/Vox.wav"},"replaces":laid_over(&clips, 20.0, 52.0)});
+    let input = json!({"trackRef":"1:track:0","position":20,"sample":"/samples/Vox.wav"});
+    let summary = kind.summarize(preview.as_object().unwrap(), input.as_object().unwrap(), &|_| None, None);
+    assert_eq!(summary.title, "New Arrangement audio clip “Vox” at bar 6, replacing bar 6 to bar 7 of “Hats”, “Fill”, “Hook”");
+    // Nothing under it: nothing said, and Kumi's undo takes it back.
+    let clear = json!({"payload":{"trackRef":"1:track:0","position":0,"length":4},"replaces":[]});
+    assert!(!kind.summarize(clear.as_object().unwrap(), input.as_object().unwrap(), &|_| None, None).title.contains("replacing"));
+    assert_eq!(kind.replaced(clear.as_object().unwrap()), None);
+}

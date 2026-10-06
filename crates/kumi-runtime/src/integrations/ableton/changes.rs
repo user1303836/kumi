@@ -618,12 +618,38 @@ impl ChangeKind {
         Some(why.into())
     }
 }
+/// The clips a new Arrangement clip on [start, end) lands on, as Live lays it over them (cutting them, as a drop does):
+/// each one's name and span, the part it replaces (`from`–`to`), and whether all of it goes. The summary names them.
+pub fn laid_over(clips: &[JsonObject], start: f64, end: f64) -> Vec<Value> {
+    clips
+        .iter()
+        .filter_map(|clip| {
+            let other_start = clip.get("start").and_then(Value::as_f64)?;
+            let other_end = clip.get("endTime").and_then(Value::as_f64).or_else(|| Some(other_start + clip.get("length")?.as_f64()?))?;
+            (other_start < end - 1e-6 && other_end > start + 1e-6).then(|| {
+                json!({
+                    "name": clip.get("name").and_then(Value::as_str).unwrap_or(""),
+                    "start": other_start,
+                    "end": other_end,
+                    "from": other_start.max(start),
+                    "to": other_end.min(end),
+                    "whole": other_start >= start - 1e-6 && other_end <= end + 1e-6
+                })
+            })
+        })
+        .collect()
+}
 impl ChangeKind {
-    /// Why Kumi can't take back part of an applied change, from its preview: an Arrangement move that
-    /// replaced what was in its new place.
+    /// Why Kumi can't take back part of an applied change, from its preview: an Arrangement move or new clip that
+    /// replaced what was in its place.
     pub fn replaced(&self, preview: &JsonObject) -> Option<String> {
-        if self.tool != "move_clip" || !preview.get("replaces").and_then(Value::as_array).is_some_and(|r| !r.is_empty()) {
+        if !matches!(self.tool.as_str(), "move_clip" | "add_arrangement_clip")
+            || !preview.get("replaces").and_then(Value::as_array).is_some_and(|r| !r.is_empty())
+        {
             return None;
+        }
+        if self.tool == "add_arrangement_clip" {
+            return Some("Kumi can't bring back what the new clip replaced; Live's own undo can.".into());
         }
         // Kumi's Live extension cuts an audio clip first, and each cut is a step of its own in Live's undo.
         let cuts = preview.get("payload").and_then(|p| p.get("clearFirst")).and_then(Value::as_array).map_or(0, Vec::len);

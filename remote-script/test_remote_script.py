@@ -2640,6 +2640,53 @@ class ControlSurfaceTests(unittest.TestCase):
         track.arrangement_clips[0].playing_position = 0.5
         self.assertEqual(moved["createdFingerprint"], mapper._mapped_fingerprint(moved["ref"]), "playback moving on doesn't change the moved clip's fingerprint")
 
+    def test_an_arrangement_create_inside_a_clip_keeps_the_far_end_live_splits_off(self):
+        """Live 12.4.15 splits a clip a new one is created inside of, keeping its far end as a clip of its own. The
+        create takes that as done; it used to see a clip it hadn't asked for, fail, and delete the far end with its notes."""
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Pad", 16.0, 16.0, [0.0, 4.0, 8.0, 12.0]), splits=True)
+        mapper = LiveObjectMapper(song); track_row = mapper.snapshot()["tracks"][0]
+        created = mapper.invoke("arrangement.clip.create", {"trackRef": track_row["ref"], "expectedTrackIdentity": track_row["objectIdentity"],
+                                                            "expectedCollectionRevision": mapper._arrangement_collection_revision(track, 0),
+                                                            "position": 24.0, "length": 4.0, "name": "Fill"})
+        self.assertEqual((created["start"], created["length"], created["name"]), (24.0, 4.0, "Fill"))
+        validate_operation_payload("arrangement.clip.create", "result", created)
+        clips = [(clip.name, clip.start_time, clip.end_time, sorted(note["start_time"] for note in clip.notes)) for clip in track.arrangement_clips]
+        # The Pad's head (its notes at 0 and 4), the new clip, and the Pad's far end with its last note (12 beats in, now 0).
+        self.assertEqual(clips, [("Pad", 16.0, 24.0, [0.0, 4.0]), ("Fill", 24.0, 28.0, []), ("Pad", 28.0, 32.0, [0.0])])
+
+    def test_an_arrangement_audio_create_lays_over_and_cuts_as_live_does(self):
+        """An audio file's clip cuts the clip it starts inside of, as Live 12.4.15b5 does; the create takes that as done."""
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Vox", 16.0, 32.0), audio=True)
+        def create_audio_clip(file_path, position):
+            for other in [item for item in track.arrangement_clips if item.start_time < position + 32.0 and item.end_time > position]:
+                if other.start_time < position: other.end_time = position; other.length = position - other.start_time
+                else: track.arrangement_clips.remove(other)
+            clip = FakeClip(32.0); clip.file_path = file_path; clip.is_audio_clip = True; clip.start_time = position; clip.end_time = position + 32.0
+            track.arrangement_clips.append(clip); track.arrangement_clips.sort(key=lambda item: item.start_time); return clip
+        track.create_audio_clip = create_audio_clip
+        mapper = LiveObjectMapper(song); track_row = mapper.snapshot()["tracks"][0]
+        created = mapper.invoke("arrangement.audio-clip.create", {"trackRef": track_row["ref"], "expectedTrackIdentity": track_row["objectIdentity"],
+                                                                  "expectedCollectionRevision": mapper._arrangement_collection_revision(track, 0),
+                                                                  "filePath": "/tmp/take.wav", "position": 24.0})
+        self.assertEqual((created["start"], created["length"]), (24.0, 32.0))
+        self.assertEqual([(clip.start_time, clip.end_time) for clip in track.arrangement_clips], [(16.0, 24.0), (24.0, 56.0)])
+
+    def test_a_create_that_goes_wrong_removes_only_its_own_clip(self):
+        """A create that leaves something it didn't ask for removes the clip Kumi made and nothing else: a clip it didn't
+        make is never deleted, and what Live cut is left for Live's undo, as the error says."""
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Pad", 0.0, 8.0), ("Hook", 20.0, 4.0))
+        laid = track.create_midi_clip
+        def create_midi_clip(start, length):
+            stray = FakeClip(2.0); stray.name = "Stray"; stray.start_time = 40.0; stray.end_time = 42.0; track.arrangement_clips.append(stray)
+            return laid(start, length)
+        track.create_midi_clip = create_midi_clip
+        mapper = LiveObjectMapper(song); track_row = mapper.snapshot()["tracks"][0]
+        args = {"trackRef": track_row["ref"], "expectedTrackIdentity": track_row["objectIdentity"], "expectedCollectionRevision": mapper._arrangement_collection_revision(track, 0),
+                "position": 4.0, "length": 8.0, "name": "New"}
+        with self.assertRaisesRegex(ValueError, "Kumi removed its clip, and Live's undo puts back what was cut"):
+            mapper.invoke("arrangement.clip.create", args)
+        self.assertEqual(sorted((clip.name, clip.start_time) for clip in track.arrangement_clips), [("Hook", 20.0), ("Pad", 0.0), ("Stray", 40.0)])
+
     @staticmethod
     def arrangement_track_that_crashes_on_overlap(*clips, audio=False, splits=False):
         """A track whose Arrangement copy fails where Live crashes, onto a span a clip already holds, and
@@ -3623,34 +3670,6 @@ class ViewLocatorClipExpansionTests(unittest.TestCase):
             mapper.invoke("arrangement.audio-clip.create", dict(broken_args, filePath=""))
 
 
-    def test_arrangement_creates_refuse_a_place_another_clip_holds(self):
-        """Live lays a new clip over the clips it lands on and cuts them (12.4.15b5): a create that would is refused,
-        naming the clip, and nothing is made. An audio file's clip is measured where nothing is first."""
-        song = FakeSong(); track = song.tracks[0]
-        held = FakeClip(8.0); held.name = "Verse"; held.start_time = 16.0; track.arrangement_clips = [held]
-        def create_audio_clip(file_path, position):
-            clip = FakeClip(8.0); clip.start_time = position; clip.file_path = file_path; track.arrangement_clips.append(clip); return clip
-        def create_midi_clip(position, length):
-            clip = FakeClip(length); clip.start_time = position; track.arrangement_clips.append(clip); return clip
-        track.create_audio_clip = create_audio_clip; track.create_midi_clip = create_midi_clip
-        track.delete_clip = lambda candidate: track.arrangement_clips.remove(candidate)
-        mapper = LiveObjectMapper(song); track_row = mapper.snapshot()["tracks"][0]
-        def args(**more):
-            return {"trackRef": track_row["ref"], "expectedTrackIdentity": track_row["objectIdentity"], "expectedCollectionRevision": mapper._arrangement_collection_revision(track, 0), **more}
-        refused = "“Verse” is there \\(beats 16 to 24\\): Kumi doesn't lay a clip over another"
-        # An audio clip starting inside it, and an 8-beat one running into it from beat 10.
-        for position in (20.0, 10.0):
-            with self.assertRaisesRegex(ValueError, refused):
-                mapper.invoke("arrangement.audio-clip.create", args(filePath="/tmp/demo.wav", position=position))
-        with self.assertRaisesRegex(ValueError, refused):
-            mapper.invoke("arrangement.clip.create", args(position=12.0, length=8.0, name="Chorus"))
-        self.assertEqual([(clip.name, clip.start_time) for clip in track.arrangement_clips], [("Verse", 16.0)])
-        # Beside it, both are made.
-        self.assertEqual(mapper.invoke("arrangement.audio-clip.create", args(filePath="/tmp/demo.wav", position=24.0))["start"], 24.0)
-        self.assertEqual(mapper.invoke("arrangement.clip.create", args(position=4.0, length=8.0, name="Intro"))["start"], 4.0)
-        self.assertEqual(sorted(clip.start_time for clip in track.arrangement_clips), [4.0, 16.0, 24.0])
-
-
 class FakeWarpMarker:
     def __init__(self, beat, sample): self.beat_time = beat; self.sample_time = sample
 
@@ -4305,7 +4324,8 @@ class SongTransportLinkTests(unittest.TestCase):
         def read(): return mapper.invoke("arrangement.automation.read", {"clipRef": clip_ref, "parameterRef": parameter_ref})
         # No ride for this parameter on the clip yet; then one.
         self.assertEqual(read(), {"available": True, "exists": False, "points": []})
-        ride.automation_envelopes = [Envelope(ride, song.tracks[0].devices[0].parameters[0])]
+        # An entry whose parameter Live won't give is skipped.
+        ride.automation_envelopes = [Envelope(ride, None), Envelope(ride, song.tracks[0].devices[0].parameters[0])]
         self.assertEqual(read(), {"available": True, "exists": True, "points": [{"time": 0.0, "value": 0.2}, {"time": 2.0, "value": 0.6}]})
         validate_operation_payload("arrangement.automation.read", "result", read())
         # A Live without the list can't say.

@@ -32,6 +32,22 @@ fn clip_name(track: &Option<KnownTrack>, audio: bool) -> String {
     let kind = if audio { "audio clip" } else { "clip" };
     track.as_ref().map(|t| format!("{} {kind}", t.name)).unwrap_or_else(|| if audio { "Audio clip" } else { "Clip" }.into())
 }
+/// What an Arrangement clip replaced where it landed, as dropping one in Live does: ", replacing bar 5 to bar 6 of
+/// “Hats”, “Fill”" (a clip it covers whole goes by its name).
+fn replacing(preview: &JsonObject) -> String {
+    let replaced: Vec<String> = array(preview.get("replaces"))
+        .iter()
+        .map(|r| match (r.get("whole") == Some(&json!(true)), finite(r.get("from")), finite(r.get("to"))) {
+            (false, Some(from), Some(to)) => format!("{} to {} of {}", bars(from), bars(to), quoted(r.get("name"), "a clip")),
+            _ => quoted(r.get("name"), "a clip"),
+        })
+        .collect();
+    if replaced.is_empty() {
+        String::new()
+    } else {
+        format!(", replacing {}", replaced.join(", "))
+    }
+}
 fn on(track: &Option<KnownTrack>) -> String {
     track.as_ref().map(|t| format!(" on {}", t.name)).unwrap_or_default()
 }
@@ -251,14 +267,7 @@ pub(super) fn more(
             let known = owner(if duplicate { coalesce(preview.get("source"), input.get("clipRef")) } else { input.get("clipRef") }, track);
             let what = known.as_ref().map(|t| format!("the {} clip", t.name)).unwrap_or_else(|| "a clip".into());
             // An Arrangement move replaces what's in its new place, as dropping a clip in Live does.
-            let replaced: Vec<String> = array(preview.get("replaces"))
-                .iter()
-                .map(|r| match (r.get("whole") == Some(&json!(true)), finite(r.get("from")), finite(r.get("to"))) {
-                    (false, Some(from), Some(to)) => format!("{} to {} of {}", bars(from), bars(to), quoted(r.get("name"), "a clip")),
-                    _ => quoted(r.get("name"), "a clip"),
-                })
-                .collect();
-            let replacing = if replaced.is_empty() { String::new() } else { format!(", replacing {}", replaced.join(", ")) };
+            let replacing = replacing(preview);
             let title = if let Some(at) = at {
                 format!(
                     "{} {what} to {}{}{replacing}",
@@ -287,12 +296,14 @@ pub(super) fn more(
             let length = finite(coalesce(payload.get("length"), input.get("length"))).filter(|_| file.is_none());
             with_track(
                 format!(
-                    "New Arrangement {}clip {}{}{}{}",
+                    "New Arrangement {}clip {}{}{}{}{}",
                     if file.is_some() { "audio " } else { "" },
                     quoted(coalesce(payload.get("name"), input.get("name")).or(file.as_ref()), ""),
                     on(&known),
                     at.map(|n| format!(" at {}", bars(n))).unwrap_or_default(),
-                    length.map(|n| format!(" ({})", span(n))).unwrap_or_default()
+                    length.map(|n| format!(" ({})", span(n))).unwrap_or_default(),
+                    // Laid over the clips it lands on, as Live does: each one named, with the bars it cut.
+                    replacing(preview)
                 )
                 .replacen("  ", " ", 1),
                 known,
