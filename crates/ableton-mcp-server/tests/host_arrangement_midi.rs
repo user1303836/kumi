@@ -15,6 +15,15 @@ fn array(v: &Value) -> Vec<Value> {
 fn fixture() -> Value {
     serde_json::from_str(include_str!("fixtures/host-arrangement-midi-oracle.json")).unwrap()
 }
+/// Live never holds two Arrangement clips with one ref or identity, so the simulator mustn't either.
+fn clips_are_unique(state: &Value, label: &str) {
+    for field in ["ref", "objectIdentity"] {
+        let mut seen = std::collections::HashSet::new();
+        for row in state["arrangementClips"].as_array().into_iter().flatten() {
+            assert!(seen.insert(row["clip"][field].to_string()), "{label}: two Arrangement clips with {field} {}", row["clip"][field]);
+        }
+    }
+}
 fn same(a: &Value, b: &Value, label: &str) {
     assert_eq!(canonical_mutation_identity(a).unwrap(), canonical_mutation_identity(b).unwrap(), "{label}");
 }
@@ -424,6 +433,7 @@ async fn arrangement_midi_partial_recovery_and_clear_flows_match_source() {
         same(&json!(states), &row["states"], &format!("{label} states"));
         same(&json!(*adapter.calls.borrow()), &row["calls"], &format!("{label} calls"));
         same(&adapter.sim.state.borrow(), &row["state"], &format!("{label} state"));
+        clips_are_unique(&adapter.sim.state.borrow(), &label);
     }
 }
 

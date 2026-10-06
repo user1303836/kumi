@@ -495,6 +495,13 @@ class FakeClip:
     def remove_notes_by_id(self, ids): self.notes = [note for note in self.notes if note.get("note_id") not in set(ids)]
 
 
+class DeletedClip(FakeClip):
+    """A clip Live has deleted: anything read from it raises, as Live's own clip does."""
+    def __getattribute__(self, attribute):
+        if attribute.startswith("__"): return object.__getattribute__(self, attribute)
+        raise TypeError("Python argument types in\n    None.None(Clip)\ndid not match C++ signature:\n    None(TPyHandle<AClip>)")
+
+
 class FakeSlot:
     def __init__(self):
         self.clip = None
@@ -2607,6 +2614,16 @@ class ControlSurfaceTests(unittest.TestCase):
             mapper.invoke("arrangement.clip.move", move_args)
         self.assertEqual(len(track.arrangement_clips), before); self.assertIn(source_object, track.arrangement_clips)
 
+    def test_an_audio_clip_reads_as_audio_though_it_offers_note_calls_as_lives_own_do(self):
+        # Every clip of Live's offers note calls, audio ones too: is_audio_clip tells, in every row a clip is in.
+        song = FakeSong(); track = song.tracks[0]
+        arrangement = FakeClip(8.0); arrangement.name = "Vox"; arrangement.start_time = 0.0; arrangement.is_audio_clip = True; track.arrangement_clips = [arrangement]
+        session = FakeClip(4.0); session.name = "Loop"; session.is_audio_clip = True; track.clip_slots[0].clip = session
+        lane = FakeTakeLane(); lane.create_audio_clip("/tmp/take.wav", 0.0); lane.create_midi_clip(8.0, 4.0); track.take_lanes = [lane]
+        mapper = LiveObjectMapper(song); snapshot = mapper.snapshot(); row = snapshot["arrangement"]["clips"][0]
+        self.assertEqual((row["kind"], mapper.get(row["ref"])["kind"], snapshot["tracks"][0]["clips"][0]["kind"]), ("audio", "audio", "audio"))
+        self.assertEqual([clip["kind"] for clip in mapper._take_lane_rows(track, 0)[0]["clips"]], ["audio", "midi"])
+
     def test_arrangement_move_fingerprint_is_the_clip_content_not_its_playback(self):
         # The host fingerprints clips without playback state; a moved clip that plays must still match.
         song = FakeSong(); track = song.tracks[0]
@@ -2624,22 +2641,49 @@ class ControlSurfaceTests(unittest.TestCase):
         self.assertEqual(moved["createdFingerprint"], mapper._mapped_fingerprint(moved["ref"]), "playback moving on doesn't change the moved clip's fingerprint")
 
     @staticmethod
-    def arrangement_track_that_crashes_on_overlap(*clips):
-        """A track whose Arrangement copy fails where Live crashes: onto a span a clip already holds."""
+    def arrangement_track_that_crashes_on_overlap(*clips, audio=False, splits=False):
+        """A track whose Arrangement copy fails where Live crashes, onto a span a clip already holds, and
+        whose new MIDI clip cuts what it's laid over the way Live does: an older Live drops the rest of a
+        clip a new one lands in the middle of, Live 12.4.15 (`splits`) keeps it as a clip of its own. Each
+        clip is (name, start, length) and optionally its notes' starts."""
         song = FakeSong(); track = song.tracks[0]; track.arrangement_clips = []; track.copies = []
-        for name, start, length in clips:
-            clip = FakeClip(length); clip.name = name; clip.start_time = start; clip.end_time = start + length; clip.add_new_notes([{"pitch": 60, "start_time": 0.0, "duration": 1.0, "velocity": 100}]); track.arrangement_clips.append(clip)
+        def place(clip, start, end):
+            clip.start_time = start; clip.end_time = end; clip.length = end - start; clip.is_audio_clip = audio
+            track.arrangement_clips.append(clip); track.arrangement_clips.sort(key=lambda item: item.start_time); return clip
+        for name, start, length, *notes in clips:
+            clip = FakeClip(length); clip.name = name; clip.add_new_notes([{"pitch": 60, "start_time": note, "duration": 0.5, "velocity": 100} for note in (notes[0] if notes else [0.0])]); place(clip, start, start + length)
         def duplicate_to_arrangement(source, position):
-            span = source.end_time - source.start_time
-            if any(other.start_time < position + span and other.end_time > position for other in track.arrangement_clips): raise RuntimeError("Live crashed: an Arrangement clip copied onto a clip")
-            created = FakeClip(source.length); created.name = source.name; created.start_time = position; created.end_time = position + span; created.notes = [dict(note) for note in source.notes]
-            track.copies.append(position); track.arrangement_clips.append(created); track.arrangement_clips.sort(key=lambda clip: clip.start_time)
-        track.duplicate_clip_to_arrangement = duplicate_to_arrangement; track.delete_clip = lambda candidate: track.arrangement_clips.remove(candidate)
+            if any(other.start_time < position + source.length and other.end_time > position for other in track.arrangement_clips): raise RuntimeError("Live crashed: an Arrangement clip copied onto a clip")
+            created = FakeClip(source.length); created.name = source.name; created.notes = [dict(note) for note in source.notes]
+            track.copies.append(position); place(created, position, position + source.length)
+        def create_midi_clip(start, length):
+            # Live cuts a clip a new one is laid over: at the new clip's start (one it lands in the middle
+            # of loses its rest, or with `splits` keeps it), or from the left with the rest in place; one
+            # inside it goes.
+            end = start + length
+            for other in [item for item in track.arrangement_clips if item.start_time < end and item.end_time > start]:
+                if splits and other.start_time < start and other.end_time > end:
+                    shift = end - other.start_time; rest = FakeClip(other.end_time - end); rest.name = other.name
+                    rest.notes = [dict(note, start_time=note["start_time"] - shift) for note in other.notes if note["start_time"] >= shift]; place(rest, end, other.end_time)
+                if other.start_time < start: other.notes = [note for note in other.notes if other.start_time + note["start_time"] < start]; other.end_time = start
+                elif other.end_time > end: shift = end - other.start_time; other.notes = [dict(note, start_time=note["start_time"] - shift) for note in other.notes if note["start_time"] >= shift]; other.start_time = end
+                else: track.arrangement_clips.remove(other); continue
+                other.length = other.end_time - other.start_time
+            return place(FakeClip(length), start, end)
+        def delete_clip(candidate):
+            # Live raises on anything read from a clip once it's deleted (Boost.Python's ArgumentError, a TypeError).
+            track.arrangement_clips.remove(candidate); candidate.__class__ = DeletedClip
+        track.duplicate_clip_to_arrangement = duplicate_to_arrangement; track.delete_clip = delete_clip
+        if not audio: track.create_midi_clip = create_midi_clip
         return song, track
 
     @staticmethod
     def arrangement_move(mapper, row, position):
         return mapper.invoke("arrangement.clip.move", {"ref": row["ref"], "position": position, "expectedObjectIdentity": row["objectIdentity"], "expectedAuthorityRevision": mapper._arrangement_clip_authority_revision(row["ref"]), "expectedContentFingerprint": mapper._mapped_fingerprint(row["ref"])})
+
+    @staticmethod
+    def arrangement_layout(track):
+        return [(clip.name, clip.start_time, clip.end_time, [clip.start_time + note["start_time"] for note in clip.notes]) for clip in track.arrangement_clips]
 
     def test_a_move_by_less_than_the_clips_length_parks_it_past_the_end_of_the_set_first(self):
         song, track = self.arrangement_track_that_crashes_on_overlap(("Loop", 4.0, 8.0)); song.song_length = 64.0
@@ -2652,12 +2696,49 @@ class ControlSurfaceTests(unittest.TestCase):
         row = mapper.snapshot()["arrangement"]["clips"][0]; stay = self.arrangement_move(mapper, row, 4.0)
         self.assertEqual((track.copies[4:], stay["objectIdentity"], stay["createdFingerprint"]), ([], row["objectIdentity"], mapper._mapped_fingerprint(row["ref"])), "a move to where it is copies nothing")
 
-    def test_a_move_onto_another_clip_is_refused_before_anything_is_copied(self):
-        song, track = self.arrangement_track_that_crashes_on_overlap(("Verse", 0.0, 4.0), ("Chorus", 8.0, 4.0))
-        mapper = LiveObjectMapper(song); row = mapper.snapshot()["arrangement"]["clips"][0]
-        with self.assertRaisesRegex(ValueError, r"^Kumi can't move a clip onto another clip yet: \"Chorus\" \(beats 8 to 12\) is in the way at beat 6; clear that span first \(clear_range\) or pick a free spot; nothing changed$"): self.arrangement_move(mapper, row, 6.0)
-        self.assertEqual((track.copies, [(clip.name, clip.start_time) for clip in track.arrangement_clips]), ([], [("Verse", 0.0), ("Chorus", 8.0)]))
-        self.assertEqual(self.arrangement_move(mapper, row, 4.0)["start"], 4.0, "right up against it is fine")
+    def test_a_move_replaces_what_is_in_its_new_place_as_dropping_a_clip_in_live_does(self):
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Intro", 0.0, 4.0), ("Fill", 6.0, 2.0), ("Verse", 9.0, 4.0, [0.0, 3.0]), ("Hook", 20.0, 8.0))
+        mapper = LiveObjectMapper(song); moved = self.arrangement_move(mapper, mapper.snapshot()["arrangement"]["clips"][3], 3.0)
+        self.assertEqual(self.arrangement_layout(track), [("Intro", 0.0, 3.0, [0.0]), ("Hook", 3.0, 11.0, [3.0]), ("Verse", 11.0, 13.0, [12.0])], "cut at the new place's edges, the clip inside it gone, what's left in place")
+        self.assertEqual((track.copies, moved["start"]), ([3.0], 3.0))
+
+    def test_a_move_into_the_middle_of_a_clip_keeps_both_its_ends(self):
+        for splits, copies in ((True, [36.0, 6.0]), (False, [36.0, 10.0, 6.0])):
+            song, track = self.arrangement_track_that_crashes_on_overlap(("Pad", 0.0, 16.0, [0.0, 4.0, 8.0, 12.0]), ("Hook", 20.0, 4.0), splits=splits); song.song_length = 32.0
+            mapper = LiveObjectMapper(song); self.arrangement_move(mapper, mapper.snapshot()["arrangement"]["clips"][1], 6.0)
+            self.assertEqual(self.arrangement_layout(track), [("Pad", 0.0, 6.0, [0.0, 4.0]), ("Hook", 6.0, 10.0, [6.0]), ("Pad", 10.0, 16.0, [12.0])], f"splits={splits}")
+            # A copy waits past the end of the Set: Live 12.4.15 keeps the far end, so it goes; an older Live
+            # drops it, so it comes back from the copy.
+            self.assertEqual(track.copies, copies, f"splits={splits}")
+
+    def test_an_audio_clip_crossing_the_new_place_is_refused_and_one_inside_it_goes(self):
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Vox", 0.0, 8.0), ("Breath", 10.0, 1.0), ("Take", 20.0, 4.0), audio=True)
+        mapper = LiveObjectMapper(song); take = mapper.snapshot()["arrangement"]["clips"][2]
+        with self.assertRaisesRegex(ValueError, r"^Kumi can't cut into an audio clip here yet: \"Vox\" \(beats 0 to 8\) crosses the span from beat 6 to 10; clear that span first \(clear_range\) or pick a free spot; nothing changed$"): self.arrangement_move(mapper, take, 6.0)
+        self.assertEqual((track.copies, len(track.arrangement_clips)), ([], 3))
+        self.arrangement_move(mapper, take, 9.0)
+        self.assertEqual([(clip.name, clip.start_time) for clip in track.arrangement_clips], [("Vox", 0.0), ("Take", 9.0)], "a clip inside the new place goes")
+
+    def test_a_looped_clip_is_cut_like_any_other_and_one_inside_goes(self):
+        # New MIDI clips are looped in Live; cutting one keeps its loop's phase in its start marker.
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Groove", 0.0, 16.0), ("Fill", 18.0, 2.0), ("Hook", 24.0, 4.0), splits=True)
+        for clip in track.arrangement_clips[:2]: clip.looping = True
+        mapper = LiveObjectMapper(song); hook = mapper.snapshot()["arrangement"]["clips"][2]
+        self.arrangement_move(mapper, hook, 6.0)
+        self.assertEqual([(clip.name, clip.start_time, clip.end_time) for clip in track.arrangement_clips], [("Groove", 0.0, 6.0), ("Hook", 6.0, 10.0), ("Groove", 10.0, 16.0), ("Fill", 18.0, 20.0)])
+        self.arrangement_move(mapper, mapper.snapshot()["arrangement"]["clips"][1], 17.0)
+        self.assertEqual([(clip.name, clip.start_time) for clip in track.arrangement_clips], [("Groove", 0.0), ("Groove", 10.0), ("Hook", 17.0)], "a looped clip inside the new place goes")
+
+    def test_a_move_that_fails_after_a_cut_says_what_was_cut_and_never_that_nothing_changed(self):
+        song, track = self.arrangement_track_that_crashes_on_overlap(("Intro", 0.0, 4.0), ("Hook", 20.0, 8.0)); copy = track.duplicate_clip_to_arrangement
+        def refuse_the_copy(source, position):
+            if position == 3.0: raise RuntimeError("Live refused the copy")
+            copy(source, position)
+        track.duplicate_clip_to_arrangement = refuse_the_copy
+        mapper = LiveObjectMapper(song)
+        with self.assertRaises(ValueError) as failure: self.arrangement_move(mapper, mapper.snapshot()["arrangement"]["clips"][1], 3.0)
+        self.assertEqual(str(failure.exception), "Kumi cut \"Intro\" to clear the clip's new place, then couldn't move the clip; Live's own undo puts it back (RuntimeError: Live refused the copy)")
+        self.assertEqual([(clip.name, clip.start_time, clip.end_time) for clip in track.arrangement_clips], [("Intro", 0.0, 3.0), ("Hook", 20.0, 28.0)], "what was cut stays cut until undone")
 
     def test_a_parked_clip_that_cant_be_copied_into_place_goes_back_where_it_was(self):
         song, track = self.arrangement_track_that_crashes_on_overlap(("Loop", 4.0, 8.0)); copy = track.duplicate_clip_to_arrangement

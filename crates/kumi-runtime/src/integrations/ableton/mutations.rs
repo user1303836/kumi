@@ -169,7 +169,7 @@ impl Mutations {
         };
         let final_summary = kind.summarize(&preview, &args, &known, Some(&result));
         let applied = result.get("state").and_then(Value::as_str) == Some("applied");
-        let permanent = if applied { kind.permanent(&args).filter(|s| !s.is_empty()) } else { None };
+        let permanent = if applied { kind.permanent(&args).or_else(|| kind.replaced(&preview)).filter(|s| !s.is_empty()) } else { None };
         let mut record = new_record(
             kind,
             final_summary.clone(),

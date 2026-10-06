@@ -504,7 +504,7 @@
       "preview": "live_clip_move_preview",
       "apply": "live_clip_move_apply",
       "family": "clip",
-      "description": "Move a clip: an Arrangement clip to a new position (beats), or a Session clip to another slot (targetTrackRef and targetSceneIndex, both needed; the clip's own track to keep it on its track).",
+      "description": "Move a clip: an Arrangement clip to a new position (beats), replacing what's there as dropping it in Live does (the preview names it; Live's own undo brings it back), or a Session clip to another slot (targetTrackRef and targetSceneIndex, both needed; the clip's own track to keep it on its track).",
       "methods": [
         "summarize"
       ]

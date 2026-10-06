@@ -201,9 +201,48 @@ async fn bridge_after(io: &InstalledIo, home: &str, app: &str) -> i32 {
         .stderr(Stdio::inherit());
     command.status().await.ok().and_then(|s| s.code()).unwrap_or(1)
 }
+/// What a swap does to Kumi's folders. The tests stand in for Windows holding one.
+trait Folders {
+    fn rename(&self, from: &str, to: &str) -> std::io::Result<()>;
+    fn remove(&self, path: &str) -> std::io::Result<()>;
+    /// A move waits for a busy folder.
+    fn waiting(&self) {}
+}
+/// Folders that say, once, when a move first has to wait: holding a folder can keep an update waiting a minute.
+struct Saying<'a, F: Folders, S: Fn()> {
+    folders: &'a F,
+    say: S,
+    said: std::cell::Cell<bool>,
+}
+impl<F: Folders, S: Fn()> Folders for Saying<'_, F, S> {
+    fn rename(&self, from: &str, to: &str) -> std::io::Result<()> {
+        self.folders.rename(from, to)
+    }
+    fn remove(&self, path: &str) -> std::io::Result<()> {
+        self.folders.remove(path)
+    }
+    fn waiting(&self) {
+        if !self.said.replace(true) {
+            (self.say)()
+        }
+    }
+}
+struct Disk;
+impl Folders for Disk {
+    fn rename(&self, from: &str, to: &str) -> std::io::Result<()> {
+        fs::rename(from, to)
+    }
+    fn remove(&self, path: &str) -> std::io::Result<()> {
+        remove(path)
+    }
+}
 async fn rename(from: &str, to: &str) -> std::io::Result<()> {
+    rename_in(&Disk, from, to).await
+}
+/// Renames, waiting out a folder held for a moment (a Kumi window, an antivirus scan) for 5 s.
+async fn rename_in(folders: &impl Folders, from: &str, to: &str) -> std::io::Result<()> {
     for attempt in 0..=20 {
-        match fs::rename(from, to) {
+        match folders.rename(from, to) {
             Ok(()) => return Ok(()),
             Err(e)
                 if attempt < 20
@@ -214,6 +253,7 @@ async fn rename(from: &str, to: &str) -> std::io::Result<()> {
                             matches!(e.raw_os_error(), Some(1 | 16))
                         })) =>
             {
+                folders.waiting();
                 tokio::time::sleep(Duration::from_millis(250)).await
             }
             Err(e) => return Err(e),
@@ -229,32 +269,94 @@ pub fn remove(path: &str) -> std::io::Result<()> {
         Err(e) => Err(e),
     }
 }
+/// Puts the Kumi that was there (in `previous`) back in `app`, unless `app` already holds a whole one: `app` can
+/// be missing, or hold part of a move, which is cleared first. Waits out a busy folder a few times over; says
+/// whether `app` holds a whole Kumi.
+async fn put_back(folders: &impl Folders, app: &str, previous: &str) -> bool {
+    for attempt in 0..3 {
+        if migration::has_app(app) {
+            return true;
+        }
+        if !migration::has_app(previous) {
+            return false;
+        }
+        if (folders.remove(app).is_err() || rename_in(folders, previous, app).await.is_err()) && attempt < 2 {
+            tokio::time::sleep(Duration::from_secs(1)).await
+        }
+    }
+    migration::has_app(app)
+}
+/// Puts the new Kumi (`fresh`) in `app`, and the one that was there in `previous`, where a rollback finds it.
+/// Whenever the new one can't go in, `app` gets the one that was there back, and `previous` the one before it.
+/// An update that gave up earlier can leave the only whole Kumi in `previous` (or the one before it in
+/// `previous.old`): it goes back first, and neither is cleared while it holds the only whole Kumi.
 pub async fn swap_in(fresh: &str, app: &str, previous: &str) -> std::io::Result<()> {
+    swap_in_with(&Disk, fresh, app, previous).await
+}
+async fn swap_in_with(folders: &impl Folders, fresh: &str, app: &str, previous: &str) -> std::io::Result<()> {
     let older = format!("{previous}.old");
-    remove(&older)?;
-    if Path::new(previous).exists() {
-        rename(previous, &older).await?
+    settle(folders, app, previous, &older).await;
+    if migration::has_app(app) || migration::has_app(previous) || !migration::has_app(&older) {
+        folders.remove(&older)?;
     }
     let swapped = async {
-        if Path::new(app).exists() {
-            rename(app, previous).await?
-        }
-        if let Err(error) = rename(fresh, app).await {
-            if Path::new(previous).exists() && !Path::new(app).exists() {
-                rename(previous, app).await?
+        if migration::has_app(app) {
+            // The one before waits aside until the new one is in: a failed update still leaves it to roll back to.
+            if Path::new(previous).exists() {
+                rename_in(folders, previous, &older).await?
             }
-            return Err(error);
+            rename_in(folders, app, previous).await?
+        } else {
+            // No whole Kumi in app (none yet, or one couldn't go back): the new one replaces what's there, and
+            // app.previous stays as it is.
+            folders.remove(app)?
         }
-        Ok(())
+        match rename_in(folders, fresh, app).await {
+            // A move that went through before its error counts.
+            Err(_) if !Path::new(fresh).exists() && migration::has_app(app) => Ok(()),
+            moved => moved,
+        }
     }
     .await;
     if let Err(error) = swapped {
-        if Path::new(&older).exists() && !Path::new(previous).exists() {
-            rename(&older, previous).await?
+        put_back(folders, app, previous).await;
+        if !Path::new(previous).exists() && migration::has_app(&older) {
+            let _ = rename_in(folders, &older, previous).await;
         }
         return Err(error);
     }
-    remove(&older)
+    // What was in app.previous before is no longer needed; a later swap clears it if this can't.
+    let _ = folders.remove(&older);
+    Ok(())
+}
+/// After an update that gave up: `app` gets a whole Kumi back from `previous`, or from the one before it in
+/// `older`, and `previous` gets the one before back if it's gone.
+async fn settle(folders: &impl Folders, app: &str, previous: &str, older: &str) {
+    if !put_back(folders, app, previous).await {
+        put_back(folders, app, older).await;
+    }
+    if !Path::new(previous).exists() && migration::has_app(older) {
+        let _ = rename_in(folders, older, previous).await;
+    }
+}
+/// Puts things back as they were after an update that gave up, before anything else: a later run starts
+/// from a whole Kumi in app wherever one is left.
+async fn settle_installed(home: &str) {
+    let previous = join(home, "app.previous");
+    settle(&Disk, &join(home, "app"), &previous, &format!("{previous}.old")).await
+}
+/// What to say when the new Kumi couldn't go in; `kept` says whether the one that was there still works.
+fn swap_failed(windows: bool, kept: bool) -> String {
+    let what = "Windows kept Kumi's folder busy: a Kumi window, or an antivirus scan of the new files.";
+    let installer = "run the installer again (github.com/user1303836/kumi)";
+    match (windows, kept) {
+        (true, true) => format!("{what} The Kumi you had still works: close every Kumi window, give the scan a minute, then run update again."),
+        (true, false) => format!(
+            "{what} The Kumi you had couldn't go back in place yet, so kumi won't start: close every Kumi window, give the scan a minute, then {installer}."
+        ),
+        (false, true) => "Couldn't put the new Kumi in place, so this one stays.".into(),
+        (false, false) => format!("Couldn't put the new Kumi in place, and the one you had couldn't go back, so kumi won't start: {installer}."),
+    }
 }
 struct Cleanup(Vec<String>);
 impl Cleanup {
@@ -297,6 +399,7 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
     let say = |s: String| io.out.write(&format!("{s}\n"));
     let home = kumi_home(&io.env);
     let app = join(&home, "app");
+    settle_installed(&home).await;
     let run = io.run.clone().unwrap_or_else(default_run);
     let fetch = io.fetcher.clone().unwrap_or_else(default_fetch);
     let asked = step(io.out.clone(), &io.env, "Looking for a newer Kumi…", ask_release(&io.env, Some(fetch.clone())), true).await;
@@ -365,15 +468,19 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
                     return Ok(Some("The new Kumi didn't start, so this one stays. Try again, or run the installer again.".into()));
                 }
                 write_launcher(&home).map_err(error)?;
-                if swap_in(&fresh, &app, &join(&home, "app.previous")).await.is_err() {
-                    return Ok(Some(
-                        if cfg!(windows) {
-                            "Windows kept Kumi's folder busy; close every Kumi window, then run update again."
-                        } else {
-                            "Couldn't put the new Kumi in place, so this one stays."
-                        }
-                        .into(),
-                    ));
+                // Printed above the spinner, which draws its line again below.
+                let spinning = crate::spinner::spins(io.out.as_ref(), &io.env);
+                let say = || {
+                    let line = if cfg!(windows) {
+                        "Windows is holding Kumi's folder (a Kumi window, or an antivirus scan); waiting…"
+                    } else {
+                        "Kumi's folder is busy; waiting…"
+                    };
+                    io.out.write(&if spinning { format!("\r\u{1b}[2K{line}\n") } else { format!("{line}\n") })
+                };
+                let folders = Saying { folders: &Disk, say, said: Default::default() };
+                if swap_in_with(&folders, &fresh, &app, &join(&home, "app.previous")).await.is_err() {
+                    return Ok(Some(swap_failed(cfg!(windows), migration::has_app(&app))));
                 }
                 Ok(None)
             },
@@ -410,6 +517,7 @@ pub async fn rollback_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
     let app = join(&home, "app");
     let previous = join(&home, "app.previous");
     let hold = join(&home, "app.rollback");
+    settle_installed(&home).await;
     if !migration::has_app(&previous) {
         say("There's no earlier Kumi to go back to.".into());
         return Ok(1);
@@ -751,4 +859,231 @@ pub async fn newer_release(cache_file: &str, env: &Env, now: Option<f64>, fetche
         let _ = file.write_all(stringify(&json!({"checkedAt":now,"latest":manifest.kumi})).as_bytes());
     }
     newer_version(&manifest.kumi, KUMI_VERSION).then_some(manifest.kumi)
+}
+
+#[cfg(test)]
+mod swap_tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+
+    /// What a move does once it's let through.
+    #[derive(Clone, Copy)]
+    enum Then {
+        Moves,
+        /// Leaves part of the folder behind and fails, as a move between disks can.
+        LeavesPart,
+        /// Goes through, then reports an error anyway.
+        MovesButFails,
+    }
+    /// The disk, failing moves the ways Windows can: busy for some tries (or every one) while a Kumi window or an
+    /// antivirus scan holds a folder, then what the move does once it's let through.
+    #[derive(Default)]
+    struct Windows(RefCell<Vec<(&'static str, &'static str, usize, Then)>>);
+    impl Windows {
+        fn holds(self, from: &'static str, to: &'static str, tries: usize, then: Then) -> Self {
+            self.0.borrow_mut().push((from, to, tries, then));
+            self
+        }
+    }
+    fn name(path: &str) -> String {
+        Path::new(path).file_name().unwrap().to_string_lossy().into()
+    }
+    impl Folders for Windows {
+        fn rename(&self, from: &str, to: &str) -> std::io::Result<()> {
+            let mut rules = self.0.borrow_mut();
+            let Some(rule) = rules.iter_mut().find(|rule| rule.0 == name(from) && rule.1 == name(to)) else {
+                return fs::rename(from, to);
+            };
+            if rule.2 > 0 {
+                rule.2 -= 1;
+                return Err(std::io::ErrorKind::PermissionDenied.into());
+            }
+            match rule.3 {
+                Then::Moves => fs::rename(from, to),
+                Then::LeavesPart => {
+                    fs::create_dir_all(to)?;
+                    fs::write(Path::new(to).join("part"), "")?;
+                    Err(std::io::Error::other("the move stopped part of the way"))
+                }
+                Then::MovesButFails => {
+                    fs::rename(from, to)?;
+                    Err(std::io::Error::other("reported after the move"))
+                }
+            }
+        }
+        fn remove(&self, path: &str) -> std::io::Result<()> {
+            remove(path)
+        }
+    }
+    const ALWAYS: usize = usize::MAX;
+
+    struct Home(tempfile::TempDir);
+    impl Home {
+        fn new() -> Self {
+            Home(tempfile::tempdir().unwrap())
+        }
+        fn path(&self, folder: &str) -> String {
+            self.0.path().join(folder).to_string_lossy().into()
+        }
+        /// A whole native Kumi of `version` in `folder`.
+        fn kumi(&self, folder: &str, version: &str) -> &Self {
+            let folder = PathBuf::from(self.path(folder));
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(folder.join(executable_name("kumi")), version).unwrap();
+            self
+        }
+        /// The version of the whole Kumi in `folder`: a native one's, or "node" for an earlier Node Kumi.
+        fn version(&self, folder: &str) -> Option<String> {
+            let folder = self.path(folder);
+            if !migration::has_app(&folder) {
+                return None;
+            }
+            Some(fs::read_to_string(join(&folder, &executable_name("kumi"))).unwrap_or_else(|_| "node".into()))
+        }
+        async fn swap(&self, windows: &Windows) -> std::io::Result<()> {
+            swap_in_with(windows, &self.path("app.new"), &self.path("app"), &self.path("app.previous")).await
+        }
+    }
+    /// app holds 1.2, app.previous 1.1 to roll back to, and 1.3 waits in app.new.
+    fn updating() -> Home {
+        let home = Home::new();
+        home.kumi("app", "1.2").kumi("app.previous", "1.1").kumi("app.new", "1.3");
+        home
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_folder_busy_for_a_moment_is_waited_out() {
+        let home = updating();
+        home.swap(&Windows::default().holds("app.new", "app", 5, Then::Moves)).await.unwrap();
+        assert_eq!(home.version("app").as_deref(), Some("1.3"));
+        assert_eq!(home.version("app.previous").as_deref(), Some("1.2"));
+        assert!(!Path::new(&home.path("app.previous.old")).exists());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_new_kumi_that_cant_go_in_leaves_the_kumi_that_was_there_and_the_one_before() {
+        let home = updating();
+        assert!(home.swap(&Windows::default().holds("app.new", "app", ALWAYS, Then::Moves)).await.is_err());
+        assert_eq!(home.version("app").as_deref(), Some("1.2"));
+        assert_eq!(home.version("app.previous").as_deref(), Some("1.1"));
+        assert!(!Path::new(&home.path("app.previous.old")).exists());
+        // The caller clears app.new; the next update goes through.
+        home.swap(&Windows::default()).await.unwrap();
+        assert_eq!(home.version("app").as_deref(), Some("1.3"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn part_of_a_move_is_cleared_and_the_kumi_that_was_there_goes_back() {
+        let home = updating();
+        assert!(home.swap(&Windows::default().holds("app.new", "app", 0, Then::LeavesPart)).await.is_err());
+        assert_eq!(home.version("app").as_deref(), Some("1.2"));
+        assert!(!Path::new(&home.path("app")).join("part").exists());
+        assert_eq!(home.version("app.previous").as_deref(), Some("1.1"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_put_back_busy_past_its_first_wait_is_tried_again() {
+        let home = updating();
+        // Each rename waits out 21 tries; the put-back's first goes by, its second goes through.
+        let windows = Windows::default().holds("app.new", "app", ALWAYS, Then::Moves).holds("app.previous", "app", 25, Then::Moves);
+        assert!(home.swap(&windows).await.is_err());
+        assert_eq!(home.version("app").as_deref(), Some("1.2"));
+        assert_eq!(home.version("app.previous").as_deref(), Some("1.1"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_earlier_node_kumi_is_a_whole_kumi_too() {
+        let home = Home::new();
+        home.kumi("app.new", "1.3");
+        put_file(&home.path("app/apps/kumi/bin/kumi.mjs"));
+        assert!(home.swap(&Windows::default().holds("app.new", "app", ALWAYS, Then::Moves)).await.is_err());
+        assert_eq!(home.version("app").as_deref(), Some("node"));
+        home.swap(&Windows::default()).await.unwrap();
+        assert_eq!(home.version("app").as_deref(), Some("1.3"));
+        assert_eq!(home.version("app.previous").as_deref(), Some("node"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_first_install_has_nothing_to_keep() {
+        let home = Home::new();
+        home.kumi("app.new", "1.3");
+        home.swap(&Windows::default()).await.unwrap();
+        assert_eq!(home.version("app").as_deref(), Some("1.3"));
+        assert!(!Path::new(&home.path("app.previous")).exists());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_run_after_one_that_gave_up_puts_the_kumi_back_first() {
+        // An update that gave up with app emptied: 1.2 in app.previous, and 1.1 aside in app.previous.old.
+        let home = Home::new();
+        home.kumi("app.previous", "1.2").kumi("app.previous.old", "1.1");
+        settle_installed(home.0.path().to_str().unwrap()).await;
+        assert_eq!(home.version("app").as_deref(), Some("1.2"));
+        assert_eq!(home.version("app.previous").as_deref(), Some("1.1"));
+        home.kumi("app.new", "1.3");
+        home.swap(&Windows::default()).await.unwrap();
+        assert_eq!(home.version("app").as_deref(), Some("1.3"));
+        assert_eq!(home.version("app.previous").as_deref(), Some("1.2"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_run_after_one_that_gave_up_keeps_app_previous_while_its_put_back_stays_busy() {
+        let home = Home::new();
+        home.kumi("app.previous", "1.2").kumi("app.new", "1.3");
+        home.swap(&Windows::default().holds("app.previous", "app", ALWAYS, Then::Moves)).await.unwrap();
+        assert_eq!(home.version("app").as_deref(), Some("1.3"));
+        assert_eq!(home.version("app.previous").as_deref(), Some("1.2"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_move_that_went_through_before_its_error_counts() {
+        let home = updating();
+        home.swap(&Windows::default().holds("app.new", "app", 0, Then::MovesButFails)).await.unwrap();
+        assert_eq!(home.version("app").as_deref(), Some("1.3"));
+        assert_eq!(home.version("app.previous").as_deref(), Some("1.2"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn when_nothing_can_go_back_app_previous_keeps_the_kumi_that_was_there() {
+        let home = updating();
+        let windows = Windows::default().holds("app.new", "app", ALWAYS, Then::Moves).holds("app.previous", "app", ALWAYS, Then::Moves);
+        assert!(home.swap(&windows).await.is_err());
+        assert_eq!(home.version("app"), None);
+        assert_eq!(home.version("app.previous").as_deref(), Some("1.2"));
+        assert_eq!(home.version("app.previous.old").as_deref(), Some("1.1"));
+        // Once Windows lets go, the next run puts 1.2 back before anything else, and 1.1 beside it.
+        settle_installed(home.0.path().to_str().unwrap()).await;
+        assert_eq!(home.version("app").as_deref(), Some("1.2"));
+        assert_eq!(home.version("app.previous").as_deref(), Some("1.1"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_wait_for_a_busy_folder_is_said_once() {
+        let home = updating();
+        let said = std::cell::Cell::new(0);
+        let windows = Windows::default().holds("app.new", "app", ALWAYS, Then::Moves);
+        let folders = Saying { folders: &windows, say: || said.set(said.get() + 1), said: Default::default() };
+        assert!(swap_in_with(&folders, &home.path("app.new"), &home.path("app"), &home.path("app.previous")).await.is_err());
+        assert_eq!(said.get(), 1);
+        let quiet = updating();
+        let folders = Saying { folders: &Windows::default(), say: || said.set(said.get() + 1), said: Default::default() };
+        swap_in_with(&folders, &quiet.path("app.new"), &quiet.path("app"), &quiet.path("app.previous")).await.unwrap();
+        assert_eq!(said.get(), 1, "a swap that never waits says nothing");
+    }
+
+    #[test]
+    fn a_failed_update_says_what_holds_the_folder_and_whether_the_kumi_you_had_works() {
+        let kept = swap_failed(true, true);
+        assert!(kept.contains("a Kumi window, or an antivirus scan") && kept.contains("still works") && kept.contains("run update again"));
+        let gone = swap_failed(true, false);
+        assert!(gone.contains("a Kumi window, or an antivirus scan") && !gone.contains("still works") && gone.contains("installer again"));
+        assert_eq!(swap_failed(false, true), "Couldn't put the new Kumi in place, so this one stays.");
+        assert!(swap_failed(false, false).contains("installer again"));
+    }
+
+    fn put_file(path: &str) {
+        fs::create_dir_all(Path::new(path).parent().unwrap()).unwrap();
+        fs::write(path, "").unwrap();
+    }
 }

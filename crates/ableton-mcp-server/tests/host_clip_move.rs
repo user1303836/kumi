@@ -52,6 +52,7 @@ struct Adapter {
     fault: RefCell<String>,
     fired: Cell<bool>,
     after_invoke: Cell<bool>,
+    no_extension: Cell<bool>,
 }
 impl Adapter {
     fn new() -> Self {
@@ -62,7 +63,15 @@ impl Adapter {
             fault: Default::default(),
             fired: Cell::new(false),
             after_invoke: Cell::new(false),
+            no_extension: Cell::new(false),
         }
+    }
+    fn status_now(&self) -> Result<LiveStatus, LiveError> {
+        let mut status = self.sim.status()?;
+        if self.no_extension.get() {
+            status.operations.iter_mut().for_each(|operations| operations.retain(|operation| operation != "clip.clear-range"));
+        }
+        Ok(status)
     }
     fn reset(&self, fault: &str) {
         *self.fault.borrow_mut() = fault.into();
@@ -90,6 +99,13 @@ impl Adapter {
             }
         }
         let fault = self.fault.borrow().clone();
+        if let Some((operation, nth)) = fault.strip_prefix("refuse:").and_then(|f| f.rsplit_once(':')) {
+            // "refuse:<operation>:<n>": the nth call of that operation is refused, as the Remote Script refuses.
+            let calls = self.calls.borrow().iter().filter(|c| c["invocation"]["operation"] == operation).count();
+            if i.operation == operation && calls.to_string() == nth {
+                return Err(LiveError::MutationNotDispatched(format!("request failed: {operation} refused; nothing changed")));
+            }
+        }
         if !self.fired.get() && ["before", "cancel", "refusal"].iter().any(|s| fault.ends_with(s)) {
             self.fired.set(true);
             return Err(if fault.ends_with("refusal") {
@@ -102,6 +118,20 @@ impl Adapter {
                 })
             });
         }
+        if fault == "renumber" && i.operation == "arrangement.clip.move" {
+            // As the Remote Script checks it: the clip's content fingerprint, its ref included.
+            let snapshot = serde_json::to_value(self.sim.snapshot()?).unwrap();
+            let row = snapshot["arrangement"]["clips"].as_array().unwrap().iter().find(|c| c["ref"] == i.args["ref"]).cloned();
+            let fingerprint = row.map(|row| {
+                use sha2::Digest;
+                hex::encode(sha2::Sha256::digest(canonical_mutation_identity(&without_playback_state(&row)).unwrap().as_bytes()))
+            });
+            if i.args.get("expectedContentFingerprint").and_then(Value::as_str) != fingerprint.as_deref() {
+                return Err(LiveError::MutationNotDispatched(
+                    "request failed: Arrangement clip content changed; move refused; nothing changed".into(),
+                ));
+            }
+        }
         let no_effect = !self.fired.get() && fault.ends_with("no-effect");
         let mut result = if no_effect {
             self.fired.set(true);
@@ -111,6 +141,15 @@ impl Adapter {
         };
         if c.is_some() && !no_effect {
             self.cache.borrow_mut().insert(key, result.clone());
+        }
+        if fault == "renumber" && i.operation == "clip.clear-range" {
+            // Live renumbers a track's clips after a split: the clip to move gets another ref.
+            let mut state = self.sim.state.borrow_mut();
+            for row in state["arrangementClips"].as_array_mut().unwrap() {
+                if row["clip"]["objectIdentity"] == "simulator:arrangement-clip:0" {
+                    row["clip"]["ref"] = json!("arrangement-clip:track-1:renumbered");
+                }
+            }
         }
         self.after_invoke.set(true);
         if !self.fired.get() && fault.ends_with("after") {
@@ -136,7 +175,7 @@ impl Adapter {
 }
 impl LiveAdapter for Adapter {
     fn status(&self) -> Result<LiveStatus, LiveError> {
-        self.sim.status()
+        self.status_now()
     }
     fn snapshot(&self) -> Result<LiveSnapshot, LiveError> {
         self.sim.snapshot()
@@ -185,7 +224,7 @@ impl AsyncLiveAdapter for Adapter {
     }
     async fn refresh_status_async(&self, c: Option<&LiveOperationContext>) -> Result<LiveStatus, LiveError> {
         self.calls.borrow_mut().push(clean(json!({"method":"status","context":context(c)})));
-        self.sim.status()
+        self.status_now()
     }
 }
 
@@ -375,32 +414,223 @@ async fn clip_move_apply_and_exact_key_undo_match_source() {
         same(&adapter.sim.state.borrow(), &row["state"], &format!("{label} state"));
     }
 }
-#[tokio::test]
-async fn an_arrangement_move_onto_another_clip_is_refused_at_preview() {
-    // Live crashes when an Arrangement clip is copied onto a span a clip holds, and a move is a copy.
-    let sim = Rc::new(DeterministicLiveSimulator::new());
-    setup(&sim, "arrangement-midi");
-    {
-        let mut s = sim.state.borrow_mut();
-        let mut chorus = s["arrangementClips"][0]["clip"].clone();
-        chorus["ref"] = json!("arrangement-clip:track-1:12");
-        chorus["objectIdentity"] = json!("simulator:arrangement-clip:1");
-        chorus["name"] = json!("Chorus");
-        chorus["start"] = json!(12);
-        s["arrangementClips"].as_array_mut().unwrap().push(json!({"trackRef":"track:track-1","clip":chorus}));
+/// Another clip on track 1's Arrangement: `name` from `start`, `length` beats long.
+fn arrangement_clip(sim: &DeterministicLiveSimulator, name: &str, start: f64, length: f64, audio: bool) {
+    let mut s = sim.state.borrow_mut();
+    let mut clip = s["arrangementClips"][0]["clip"].clone();
+    clip["ref"] = json!(format!("arrangement-clip:track-1:{name}"));
+    clip["objectIdentity"] = json!(format!("simulator:arrangement-clip:{name}"));
+    clip["name"] = json!(name);
+    clip["start"] = json!(start);
+    clip["length"] = json!(length);
+    clip["looping"] = json!(false);
+    if audio {
+        clip["kind"] = json!("audio");
+        clip["notes"] = json!([]);
     }
-    let host = McpHost::new(sim, McpHostOptions::default()).unwrap();
-    let refused =
-        host.live_clip_move_preview_async(&json!(1), &json!({"clipRef":"arrangement-clip:track-1:4","position":10})).await.to_string();
-    assert!(refused.contains("Kumi can't move a clip onto another clip yet") && refused.contains("Chorus"), "{refused}");
-    assert!(
-        refused.contains("(beats 12 to 16) is in the way at beat 10; clear that span first (clear_range) or pick a free spot"),
-        "{refused}"
+    s["arrangementClips"].as_array_mut().unwrap().push(json!({"trackRef":"track:track-1","clip":clip}));
+}
+/// Track 1's Arrangement clips as (name, start, end), in time order.
+fn layout(sim: &DeterministicLiveSimulator) -> Vec<(String, f64, f64)> {
+    let s = sim.state.borrow();
+    let mut rows: Vec<_> = s["arrangementClips"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| {
+            let start = r["clip"]["start"].as_f64().unwrap();
+            (r["clip"]["name"].as_str().unwrap().to_string(), start, start + r["clip"]["length"].as_f64().unwrap())
+        })
+        .collect();
+    rows.sort_by(|a, b| a.1.total_cmp(&b.1));
+    rows
+}
+fn body(response: &Value) -> Value {
+    response["result"]["content"][0]["text"].as_str().and_then(|text| serde_json::from_str(text).ok()).unwrap_or(Value::Null)
+}
+async fn move_clip(host: &McpHost, position: f64) -> (Value, Value) {
+    let preview = host.live_clip_move_preview_async(&json!(1), &json!({"clipRef":"arrangement-clip:track-1:4","position":position})).await;
+    let shown = body(&preview);
+    if shown["transactionId"].is_null() {
+        return (preview, Value::Null);
+    }
+    let args = json!({"transactionId":shown["transactionId"],"confirmation":"apply","idempotencyKey":format!("apply-{position}")});
+    let applied = host.live_clip_move_apply_async(&json!(2), &args, None).await.unwrap_or(Value::Null);
+    (preview, applied)
+}
+#[tokio::test]
+async fn an_arrangement_move_replaces_what_is_in_its_new_place() {
+    // As dropping a clip in Live does. Live crashes when an Arrangement clip is copied onto a span a clip
+    // holds, and a move is a copy, so what's there is cleared first.
+    let adapter = Rc::new(Adapter::new());
+    setup(&adapter.sim, "arrangement-midi");
+    arrangement_clip(&adapter.sim, "Chorus", 12.0, 4.0, false);
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let (preview, applied) = move_clip(&host, 10.0).await;
+    let shown = body(&preview);
+    assert_eq!(shown["impact"], "moves-clip-replacing", "{preview}");
+    assert_eq!(shown["replaces"], json!([{"name":"Chorus","start":12,"end":16,"from":12,"to":14,"whole":false}]));
+    assert_eq!(body(&applied)["state"], "applied", "{applied}");
+    let kick = "Kick Pattern".to_string();
+    assert_eq!(layout(&adapter.sim), [(kick.clone(), 10.0, 14.0), ("Chorus".into(), 14.0, 16.0)]);
+    // An undo would replace whatever is in the clip's old place now, so it leaves the clip where it is.
+    arrangement_clip(&adapter.sim, "Fill", 4.0, 4.0, false);
+    let txid = body(&preview)["transactionId"].clone();
+    let undo =
+        host.undo_clip_move_async(&json!(3), &json!({"transactionId":txid,"confirmation":"undo","idempotencyKey":"undo-key"}), None).await;
+    assert!(undo.to_string().contains("(beats 4 to 8) is in the clip's old place now, so Kumi left the clip where it is"), "{undo}");
+    assert_eq!(layout(&adapter.sim)[1], (kick, 10.0, 14.0));
+}
+#[tokio::test]
+async fn an_audio_clip_crossing_the_new_place_is_cut_by_the_live_extension_first() {
+    let audio = |no_extension: bool| {
+        let adapter = Rc::new(Adapter::new());
+        setup(&adapter.sim, "arrangement-audio");
+        arrangement_clip(&adapter.sim, "Vox", 10.0, 8.0, true);
+        adapter.no_extension.set(no_extension);
+        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+        (adapter, host)
+    };
+    // Into its middle: the extension splits it, and both ends stay.
+    let (adapter, host) = audio(false);
+    let (preview, applied) = move_clip(&host, 12.0).await;
+    assert_eq!(
+        body(&preview)["payload"]["clearFirst"],
+        json!([{"trackRef":"track:track-1","fromBeat":12,"toBeat":16,"expectedName":"Drums"}]),
+        "{preview}"
     );
-    assert!(refused.contains("Nothing changed in Live"), "{refused}");
-    let beside = host.live_clip_move_preview_async(&json!(2), &json!({"clipRef":"arrangement-clip:track-1:4","position":8})).await;
-    assert!(
-        beside["result"]["content"][0]["text"].as_str().is_some_and(|text| text.contains("transactionId")),
-        "right up against it is fine: {beside}"
+    assert_eq!(body(&applied)["state"], "applied", "{applied}");
+    assert_eq!(layout(&adapter.sim), [("Vox".to_string(), 10.0, 12.0), ("Kick Pattern".into(), 12.0, 16.0), ("Vox".into(), 16.0, 18.0)]);
+    let far_end =
+        adapter.sim.state.borrow()["arrangementClips"].as_array().unwrap().iter().find(|r| r["clip"]["start"] == 16.0).cloned().unwrap();
+    assert_eq!(far_end["clip"]["startMarker"], 6.0, "Live starts the far end where the cut ended, 6 beats in");
+    // Over its end, without the extension: refused.
+    let (_adapter, host) = audio(true);
+    let (without, _) = move_clip(&host, 16.0).await;
+    assert_eq!(
+        body(&without)["reason"],
+        "\"Vox\" (beats 10 to 18) crosses beats 16 to 18 of the clip's new place, and Kumi's Live extension cuts audio clips; without it, delete it first (delete_clip) or pick a free spot",
+        "{without}"
     );
+    // As Live itself shows an audio clip (a "midi" kind, `isAudio` true): still cut by the extension first.
+    let (adapter, host) = audio(false);
+    {
+        let mut state = adapter.sim.state.borrow_mut();
+        let vox = &mut state["arrangementClips"].as_array_mut().unwrap().last_mut().unwrap()["clip"];
+        vox["kind"] = json!("midi");
+        vox["isAudio"] = json!(true);
+    }
+    let (preview, _) = move_clip(&host, 16.0).await;
+    assert_eq!(body(&preview)["payload"]["clearFirst"].as_array().map(Vec::len), Some(1), "{preview}");
+    // Over its end, with it: cut there.
+    let (adapter, host) = audio(false);
+    let (preview, applied) = move_clip(&host, 16.0).await;
+    assert_eq!(
+        body(&preview)["payload"]["clearFirst"],
+        json!([{"trackRef":"track:track-1","fromBeat":16,"toBeat":18,"expectedName":"Drums"}]),
+        "{preview}"
+    );
+    assert_eq!(body(&applied)["state"], "applied", "{applied}");
+    assert_eq!(layout(&adapter.sim), [("Vox".to_string(), 10.0, 16.0), ("Kick Pattern".into(), 16.0, 20.0)]);
+}
+#[tokio::test]
+async fn a_looped_clip_is_cut_like_any_other() {
+    // New MIDI clips are looped in Live, and cutting one keeps its loop's phase in its start marker.
+    let adapter = Rc::new(Adapter::new());
+    setup(&adapter.sim, "arrangement-midi");
+    arrangement_clip(&adapter.sim, "Groove", 10.0, 8.0, false);
+    arrangement_clip(&adapter.sim, "Fill", 21.0, 2.0, false);
+    for row in [1, 2] {
+        adapter.sim.state.borrow_mut()["arrangementClips"][row]["clip"]["looping"] = json!(true);
+    }
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let (preview, applied) = move_clip(&host, 12.0).await;
+    assert_eq!(body(&applied)["state"], "applied", "{preview}");
+    assert_eq!(
+        layout(&adapter.sim),
+        [
+            ("Groove".to_string(), 10.0, 12.0),
+            ("Kick Pattern".into(), 12.0, 16.0),
+            ("Groove".into(), 16.0, 18.0),
+            ("Fill".into(), 21.0, 23.0)
+        ]
+    );
+}
+#[tokio::test]
+async fn an_apply_refuses_when_what_is_in_the_new_place_changed_since_the_preview() {
+    // A clip dropped into the new place after the preview, or one dragged further into it, would be cut or
+    // removed without being named, so the apply refuses before anything is cut: for MIDI (the Remote
+    // Script cuts) and for audio (Kumi's Live extension cuts first).
+    for (audio, change) in [(false, "dropped"), (true, "dropped"), (false, "dragged")] {
+        let adapter = Rc::new(Adapter::new());
+        setup(&adapter.sim, if audio { "arrangement-audio" } else { "arrangement-midi" });
+        arrangement_clip(&adapter.sim, "Vox", 10.0, 4.0, audio);
+        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+        let preview = host.live_clip_move_preview_async(&json!(1), &json!({"clipRef":"arrangement-clip:track-1:4","position":12.0})).await;
+        let shown = body(&preview);
+        assert_eq!(shown["replaces"], json!([{"name":"Vox","start":10,"end":14,"from":12,"to":14,"whole":false}]), "{preview}");
+        if change == "dropped" {
+            arrangement_clip(&adapter.sim, "Breath", 15.0, 0.5, audio);
+        } else {
+            adapter.sim.state.borrow_mut()["arrangementClips"][1]["clip"]["length"] = json!(5);
+        }
+        let before = layout(&adapter.sim);
+        let args = json!({"transactionId":shown["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+        let applied = host.live_clip_move_apply_async(&json!(2), &args, None).await.unwrap();
+        assert_eq!(
+            body(&applied)["reason"],
+            "What's in the clip's new place changed since preview, so Kumi cut and moved nothing; preview again",
+            "{change}, audio {audio}: {applied}"
+        );
+        assert_eq!(layout(&adapter.sim), before, "{change}, audio {audio}: nothing cut or moved");
+        assert!(!adapter.calls.borrow().iter().any(|c| c["method"] == "invoke"), "{change}, audio {audio}: nothing sent to Live");
+    }
+}
+#[tokio::test]
+async fn a_move_that_fails_after_the_extension_cut_says_what_was_cut() {
+    // Between two audio clips, Kumi's Live extension cuts each first. What it cut stays cut until undone, so a
+    // failure after it names what, says how to put it back, and never says nothing changed: the move refused
+    // after both cuts, and the second cut refused after the first.
+    let failed = |fault: &'static str| async move {
+        let adapter = Rc::new(Adapter::new());
+        setup(&adapter.sim, "arrangement-audio");
+        arrangement_clip(&adapter.sim, "Vox", 10.0, 4.0, true);
+        arrangement_clip(&adapter.sim, "Pad", 15.0, 5.0, true);
+        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+        adapter.reset(fault);
+        let (preview, applied) = move_clip(&host, 13.0).await;
+        assert_eq!(body(&preview)["payload"]["clearFirst"].as_array().map(Vec::len), Some(2), "{preview}");
+        (adapter, body(&applied))
+    };
+    let (adapter, applied) = failed("refuse:arrangement.clip.move:1").await;
+    assert_eq!(
+        applied["reason"],
+        "Kumi cut \"Vox\" (beats 10 to 14) at beats 13 to 14 and \"Pad\" (beats 15 to 20) at beats 15 to 17 with its Live extension, then couldn't finish the move; Live's own undo puts them back, one step per cut. Why: arrangement.clip.move refused"
+    );
+    assert_eq!(applied["remediation"], "Clip move is uncertain; perform fresh discovery before retrying.");
+    assert_eq!(layout(&adapter.sim), [("Kick Pattern".to_string(), 4.0, 8.0), ("Vox".into(), 10.0, 13.0), ("Pad".into(), 17.0, 20.0)]);
+    let (adapter, applied) = failed("refuse:clip.clear-range:2").await;
+    assert_eq!(
+        applied["reason"],
+        "Kumi cut \"Vox\" (beats 10 to 14) at beats 13 to 14 with its Live extension, then couldn't finish the move; Live's own undo puts it back in one step. Why: clip.clear-range refused"
+    );
+    assert_eq!(layout(&adapter.sim), [("Kick Pattern".to_string(), 4.0, 8.0), ("Vox".into(), 10.0, 13.0), ("Pad".into(), 15.0, 20.0)]);
+    // Without a failure, the move lands between what's left of both.
+    let (adapter, applied) = failed("").await;
+    assert_eq!(applied["state"], "applied", "{applied}");
+    assert_eq!(layout(&adapter.sim), [("Vox".to_string(), 10.0, 13.0), ("Kick Pattern".into(), 13.0, 17.0), ("Pad".into(), 17.0, 20.0)]);
+}
+#[tokio::test]
+async fn a_split_before_the_clip_to_move_renumbers_it_and_it_still_moves() {
+    // Live renumbers a track's clips after a split, and a clip's ref is part of its content's fingerprint, so
+    // the move checks the one the clip has after the cut (nothing else of it may have changed).
+    let adapter = Rc::new(Adapter::new());
+    setup(&adapter.sim, "arrangement-audio");
+    arrangement_clip(&adapter.sim, "Vox", 10.0, 8.0, true);
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    adapter.reset("renumber");
+    let (preview, applied) = move_clip(&host, 12.0).await;
+    assert_eq!(body(&preview)["payload"]["clearFirst"].as_array().map(Vec::len), Some(1), "{preview}");
+    assert_eq!(body(&applied)["state"], "applied", "{applied}");
+    assert_eq!(layout(&adapter.sim), [("Vox".to_string(), 10.0, 12.0), ("Kick Pattern".into(), 12.0, 16.0), ("Vox".into(), 16.0, 18.0)]);
 }

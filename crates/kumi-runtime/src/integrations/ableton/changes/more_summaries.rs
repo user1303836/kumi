@@ -253,9 +253,18 @@ pub(super) fn more(
             let target = known(track, coalesce(dest.get("targetTrackRef"), input.get("targetTrackRef")));
             let known = owner(if duplicate { coalesce(preview.get("source"), input.get("clipRef")) } else { input.get("clipRef") }, track);
             let what = known.as_ref().map(|t| format!("the {} clip", t.name)).unwrap_or_else(|| "a clip".into());
+            // An Arrangement move replaces what's in its new place, as dropping a clip in Live does.
+            let replaced: Vec<String> = array(preview.get("replaces"))
+                .iter()
+                .map(|r| match (r.get("whole") == Some(&json!(true)), finite(r.get("from")), finite(r.get("to"))) {
+                    (false, Some(from), Some(to)) => format!("{} to {} of {}", bars(from), bars(to), quoted(r.get("name"), "a clip")),
+                    _ => quoted(r.get("name"), "a clip"),
+                })
+                .collect();
+            let replacing = if replaced.is_empty() { String::new() } else { format!(", replacing {}", replaced.join(", ")) };
             let title = if let Some(at) = at {
                 format!(
-                    "{} {what} to {}{}",
+                    "{} {what} to {}{}{replacing}",
                     if duplicate { "Copied" } else { "Moved" },
                     if duplicate { "the Arrangement at " } else { "" },
                     bars(at)
