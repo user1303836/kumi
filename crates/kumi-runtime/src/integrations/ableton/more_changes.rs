@@ -14,7 +14,8 @@ pub fn meter() -> (u32, u32) {
     METER.get()
 }
 thread_local! {static SCALE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };}
-/// The Set's scale ("D Dorian"), as the last look at it read it, when it has one worth naming (not Live's default).
+/// The key roman numerals start in ("D Dorian"): the Set's scale as the last look read it, when the producer chose it
+/// and Scale Mode is on.
 pub fn set_scale(scale: Option<String>) {
     SCALE.with_borrow_mut(|kept| *kept = scale);
 }

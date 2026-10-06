@@ -681,9 +681,9 @@ impl Observer {
             set.insert("tempo".into(), row.get("tempo").cloned().unwrap_or(Value::Null));
             set.insert("timeSignature".into(), json!(format!("{}/{}", to_string(numerator), to_string(denominator))));
             let scale = scale(row);
-            set_scale(scale.as_ref().map(|(name, _)| name.clone()));
-            if let Some((name, on)) = scale {
-                set.insert("scale".into(), json!(if on { name } else { format!("{name} (Scale Mode off)") }));
+            set_scale(scale.as_ref().and_then(|(_, key)| key.clone()));
+            if let Some((shown, _)) = scale {
+                set.insert("scale".into(), json!(shown));
             }
 
             for key in ["playing", "position", "loop"] {
@@ -938,15 +938,22 @@ fn text(value: Option<&Value>) -> String {
 fn objects(page: &JsonObject) -> Result<Vec<JsonObject>, ObservationError> {
     page.get("items").and_then(Value::as_array).into_iter().flatten().map(context::object).collect()
 }
-/// The Set's scale ("D Dorian") when it says something, and whether Scale Mode is on. Live's default, C Major, says
-/// nothing either way: a fresh Set can have Scale Mode on with it (Live 12.4.15), so it isn't a producer's choice.
-fn scale(row: &JsonObject) -> Option<(String, bool)> {
+/// The Set's scale as the observation shows it, and the key roman numerals start in: only a scale the producer chose,
+/// with Scale Mode on. Live's default, C Major, shows only with Scale Mode on and never starts them: a fresh Set can
+/// have Scale Mode on with it (Live 12.4.15). A Scale Mode Live doesn't say goes unsaid.
+fn scale(row: &JsonObject) -> Option<(String, Option<String>)> {
     const ROOTS: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     let scale = row.get("scale")?.as_object()?;
     let root = ROOTS.get(usize::try_from(scale.get("rootNote")?.as_u64()?).ok()?)?;
     let name = scale.get("scaleName")?.as_str().filter(|name| !name.is_empty())?;
-    let on = scale.get("scaleMode").and_then(Value::as_bool) == Some(true);
-    ((*root, name) != ("C", "Major")).then(|| (format!("{root} {name}"), on))
+    let named = format!("{root} {name}");
+    match (scale.get("scaleMode").and_then(Value::as_bool), (*root, name) == ("C", "Major")) {
+        (Some(true), true) => Some((format!("{named} (Live's default)"), None)),
+        (Some(true), false) => Some((named.clone(), Some(named))),
+        (Some(false), false) => Some((format!("{named} (Scale Mode off)"), None)),
+        (None, false) => Some((named, None)),
+        (_, true) => None,
+    }
 }
 fn cursor(page: &JsonObject) -> Option<&str> {
     page.get("nextCursor").and_then(Value::as_str).filter(|s| !s.is_empty())
@@ -1080,10 +1087,13 @@ mod tests {
     #[test]
     fn the_sets_scale_is_named_when_it_says_something() {
         let row = |root: u64, name: &str, mode: Value| object(json!({"scale":{"rootNote":root,"scaleName":name,"scaleMode":mode}}));
-        assert_eq!(scale(&row(2, "Dorian", json!(true))), Some(("D Dorian".into(), true)));
-        assert_eq!(scale(&row(9, "Minor", json!(false))), Some(("A Minor".into(), false)));
-        // Live's default says nothing, Scale Mode on or off (a fresh Set can have it on); nor does a row without a scale.
-        assert_eq!(scale(&row(0, "Major", json!(true))), None);
+        // A chosen scale with Scale Mode on is shown and starts the numerals; off, or unsaid, it's only shown.
+        assert_eq!(scale(&row(2, "Dorian", json!(true))), Some(("D Dorian".into(), Some("D Dorian".into()))));
+        assert_eq!(scale(&row(9, "Minor", json!(false))), Some(("A Minor (Scale Mode off)".into(), None)));
+        assert_eq!(scale(&row(9, "Minor", Value::Null)), Some(("A Minor".into(), None)));
+        // Live's default is shown with Scale Mode on (a fresh Set can have it on) but never starts the numerals; off, or
+        // unsaid, it says nothing, nor does a row without a scale.
+        assert_eq!(scale(&row(0, "Major", json!(true))), Some(("C Major (Live's default)".into(), None)));
         assert_eq!(scale(&row(0, "Major", json!(false))), None);
         assert_eq!(scale(&row(0, "Major", Value::Null)), None);
         assert_eq!(scale(&JsonObject::new()), None);

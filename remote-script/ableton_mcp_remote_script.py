@@ -5417,6 +5417,9 @@ class LiveObjectMapper:
             raise ValueError("length is invalid")
         if not isinstance(name, str) or not 1 <= len(name) <= 256:
             raise ValueError("name is invalid")
+        in_the_way = self._clip_in_the_way(track, float(position), float(position) + float(length))
+        if in_the_way is not None:
+            raise ValueError(f"{in_the_way}: Kumi doesn't lay a clip over another; clear that range first (clear_range), or pick another place")
         creator = getattr(track, "create_midi_clip", None)
         if not callable(creator):
             raise ValueError("arrangement clip creation is unavailable")
@@ -5536,6 +5539,16 @@ class LiveObjectMapper:
     def _arrangement_holds(self, owner: Any, start: float, end: float, keep: tuple[Any, str] | None = None) -> bool:
         """Whether a clip of this track (other than `keep`, a clip and its identity) holds part of [start, end)."""
         return any(other_start < end - 1e-6 and other_end > start + 1e-6 for other_start, other_end in (self._arrangement_span(item) for item in self._items(self._read_attr(owner, "arrangement_clips") or []) if keep is None or not self._capture_same_object(item, keep[0], keep[1])))
+
+    def _clip_in_the_way(self, track: Any, start: float, end: float) -> str | None:
+        """The first clip of this track holding part of [start, end), said for the producer; None when the span is free.
+        Live lays a new clip over the ones it lands on and cuts them, as dropping one does (12.4.15b5)."""
+        for item in self._items(self._read_attr(track, "arrangement_clips") or []):
+            other_start, other_end = self._arrangement_span(item)
+            if other_start < end - 1e-6 and other_end > start + 1e-6:
+                name = str(self._read_attr(item, "name") or "")
+                return f"{'“' + name + '”' if name else 'a clip'} is there (beats {other_start:g} to {other_end:g})"
+        return None
 
     def _arrangement_parking(self, owner: Any, *beats: float) -> float:
         """A beat past the end of the Set, of every clip on this track and of `beats`, where a clip can wait
@@ -6049,6 +6062,21 @@ class LiveObjectMapper:
         creator = getattr(track, "create_audio_clip", None)
         if not callable(creator):
             raise ValueError("arrangement audio clip creation is unavailable")
+        # How long the file's clip is shows only once it's made: made first past every clip, measured and deleted, so
+        # it's never laid over another clip (Live would cut that one).
+        start = float(position); in_the_way = self._clip_in_the_way(track, start, start + 1e-3)
+        if in_the_way is None:
+            deleter = getattr(track, "delete_clip", None)
+            if not callable(deleter): raise ValueError("arrangement audio clip creation is unavailable")
+            identities = [self._capture_object_identity(item) for item in self._items(self._read_attr(track, "arrangement_clips") or [])]
+            spot = self._arrangement_parking(track, start); measured = creator(file_path, spot)
+            if measured is None: raise ValueError("arrangement audio clip creation did not produce a clip")
+            measured_start, measured_end = self._arrangement_span(measured); deleter(measured)
+            if [self._capture_object_identity(item) for item in self._items(self._read_attr(track, "arrangement_clips") or [])] != identities:
+                raise ValueError("arrangement audio clip could not be measured: the track's clips changed")
+            in_the_way = self._clip_in_the_way(track, start, start + (measured_end - measured_start))
+        if in_the_way is not None:
+            raise ValueError(f"{in_the_way}: Kumi doesn't lay a clip over another; clear that range first (clear_range), or pick another place")
         before_clips = self._items(self._read_attr(track, "arrangement_clips") or []); before_identity_order = [self._capture_object_identity(item) for item in before_clips]; before_identities = set(before_identity_order); checkpoint = self.refs.checkpoint()
         try:
             clip = creator(file_path, float(position)); clips = self._items(self._read_attr(track, "arrangement_clips") or []); created_rows = [(index, candidate) for index, candidate in enumerate(clips) if self._capture_object_identity(candidate) not in before_identities]
@@ -6481,9 +6509,15 @@ class LiveObjectMapper:
         parameter = self._resolve_parameter(parameter_ref)
         envelope = reader(parameter)
         if envelope is None:
-            # Live gives no envelope for an Arrangement clip, even one that has them (12.4: has_envelopes is true and
-            # automation_envelope still None), nor the track's lanes: not available, and whether the clip has any.
-            return {"available": False, "exists": self._read_attr(clip, "has_envelopes") is True, "points": []}
+            # Live gives no envelope for an Arrangement clip by its parameter, even one it has (12.4.15b5), but lists
+            # the clip's own in automation_envelopes, each with its parameter. (The track's lanes it gives neither way.)
+            listed = self._read_attr(clip, "automation_envelopes")
+            if listed is None:
+                return {"available": False, "exists": False, "points": []}
+            identity = self._capture_object_identity(parameter)
+            envelope = next((candidate for candidate in self._items(listed) if self._capture_object_identity(self._read_attr(candidate, "parameter")) == identity), None)
+        if envelope is None:
+            return {"available": True, "exists": False, "points": []}
         return {"available": True, "exists": True, "points": self._envelope_points(envelope)}
 
     def _take_lane_read(self, args: dict[str, Any]) -> dict[str, Any]:

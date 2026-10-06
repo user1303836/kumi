@@ -280,11 +280,11 @@ pub(super) fn more(
             let payload = record(preview.get("payload"));
             let known = known(track, coalesce(payload.get("trackRef"), input.get("trackRef")));
             let at = finite(coalesce(payload.get("position"), input.get("position")));
-            let length = finite(coalesce(payload.get("length"), input.get("length")));
-            // An audio clip goes by its file's name until it's given one.
+            // An audio clip goes by its file's name until it's given one, and is as long as the file.
             let file = coalesce(payload.get("filePath"), input.get("sample"))
                 .and_then(Value::as_str)
                 .and_then(|path| std::path::Path::new(path).file_stem()?.to_str().map(|stem| json!(stem)));
+            let length = finite(coalesce(payload.get("length"), input.get("length"))).filter(|_| file.is_none());
             with_track(
                 format!(
                     "New Arrangement {}clip {}{}{}{}",

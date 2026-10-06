@@ -3615,12 +3615,40 @@ class ViewLocatorClipExpansionTests(unittest.TestCase):
         def broken_creator(file_path, position):
             clip = FakeClip(4.0); clip.start_time = position; clip.file_path = ""; track.arrangement_clips.append(clip); return clip
         track.create_audio_clip = broken_creator
-        broken_args = dict(args, expectedCollectionRevision=mapper._arrangement_collection_revision(track, 0))
+        broken_args = dict(args, position=16.0, expectedCollectionRevision=mapper._arrangement_collection_revision(track, 0))
         with self.assertRaisesRegex(ValueError, "file path was not confirmed"):
             mapper.invoke("arrangement.audio-clip.create", broken_args)
         self.assertEqual(len(track.arrangement_clips), 1)
         with self.assertRaisesRegex(ValueError, "filePath is invalid"):
             mapper.invoke("arrangement.audio-clip.create", dict(broken_args, filePath=""))
+
+
+    def test_arrangement_creates_refuse_a_place_another_clip_holds(self):
+        """Live lays a new clip over the clips it lands on and cuts them (12.4.15b5): a create that would is refused,
+        naming the clip, and nothing is made. An audio file's clip is measured where nothing is first."""
+        song = FakeSong(); track = song.tracks[0]
+        held = FakeClip(8.0); held.name = "Verse"; held.start_time = 16.0; track.arrangement_clips = [held]
+        def create_audio_clip(file_path, position):
+            clip = FakeClip(8.0); clip.start_time = position; clip.file_path = file_path; track.arrangement_clips.append(clip); return clip
+        def create_midi_clip(position, length):
+            clip = FakeClip(length); clip.start_time = position; track.arrangement_clips.append(clip); return clip
+        track.create_audio_clip = create_audio_clip; track.create_midi_clip = create_midi_clip
+        track.delete_clip = lambda candidate: track.arrangement_clips.remove(candidate)
+        mapper = LiveObjectMapper(song); track_row = mapper.snapshot()["tracks"][0]
+        def args(**more):
+            return {"trackRef": track_row["ref"], "expectedTrackIdentity": track_row["objectIdentity"], "expectedCollectionRevision": mapper._arrangement_collection_revision(track, 0), **more}
+        refused = "“Verse” is there \\(beats 16 to 24\\): Kumi doesn't lay a clip over another"
+        # An audio clip starting inside it, and an 8-beat one running into it from beat 10.
+        for position in (20.0, 10.0):
+            with self.assertRaisesRegex(ValueError, refused):
+                mapper.invoke("arrangement.audio-clip.create", args(filePath="/tmp/demo.wav", position=position))
+        with self.assertRaisesRegex(ValueError, refused):
+            mapper.invoke("arrangement.clip.create", args(position=12.0, length=8.0, name="Chorus"))
+        self.assertEqual([(clip.name, clip.start_time) for clip in track.arrangement_clips], [("Verse", 16.0)])
+        # Beside it, both are made.
+        self.assertEqual(mapper.invoke("arrangement.audio-clip.create", args(filePath="/tmp/demo.wav", position=24.0))["start"], 24.0)
+        self.assertEqual(mapper.invoke("arrangement.clip.create", args(position=4.0, length=8.0, name="Intro"))["start"], 4.0)
+        self.assertEqual(sorted(clip.start_time for clip in track.arrangement_clips), [4.0, 16.0, 24.0])
 
 
 class FakeWarpMarker:
@@ -4258,22 +4286,31 @@ class SongTransportLinkTests(unittest.TestCase):
         self.assertEqual(mapper.discover("set", 1, None, None)["items"][0]["scale"]["rootNote"], 2)
         song.scale_mode = "on"; self.assertIsNone(mapper.snapshot()["set"]["scale"]["scaleMode"])
 
-    def test_an_arrangement_clips_envelopes_read_as_unavailable(self):
-        """Live gives no envelope for an Arrangement clip, even one that has some (12.4.15b5): the read says it isn't
-        available, and whether the clip has envelopes at all."""
+    def test_an_arrangement_clips_envelopes_are_read_from_its_list(self):
+        """Live gives no envelope for an Arrangement clip by its parameter, even one it has (12.4.15b5), but lists the
+        clip's own with their parameters: the read finds the parameter's there."""
+        class Event:
+            def __init__(self, time, value): self.time = time; self.value = value
+        class Envelope:
+            def __init__(self, clip, parameter): self.canonical_parent = clip; self.parameter = parameter; self.events = [Event(0.0, 0.2), Event(2.0, 0.6)]
+            def events_in_range(self, start, end): return [event for event in self.events if start <= event.time < end]
         class RideClip(FakeClip):
             def __init__(self):
-                super().__init__(4.0); self.start_time = 0.0; self.has_envelopes = True
+                super().__init__(4.0); self.start_time = 0.0; self.has_envelopes = True; self.automation_envelopes = []
             def automation_envelope(self, _parameter): return None
-        song = FakeSong(); song.tracks[0].arrangement_clips = [RideClip()]
+        song = FakeSong(); ride = RideClip(); song.tracks[0].arrangement_clips = [ride]
         mapper = LiveObjectMapper(song); snapshot = mapper.snapshot()
         track_ref = snapshot["tracks"][0]["ref"]; parameter_ref = snapshot["tracks"][0]["devices"][0]["parameters"][0]["ref"]
         clip_ref = mapper.discover("arrangement_clip", 10, None, track_ref)["items"][0]["ref"]
-        read = mapper.invoke("arrangement.automation.read", {"clipRef": clip_ref, "parameterRef": parameter_ref})
-        self.assertEqual(read, {"available": False, "exists": True, "points": []})
-        validate_operation_payload("arrangement.automation.read", "result", read)
-        song.tracks[0].arrangement_clips[0].has_envelopes = False
-        self.assertEqual(mapper.invoke("arrangement.automation.read", {"clipRef": clip_ref, "parameterRef": parameter_ref})["exists"], False)
+        def read(): return mapper.invoke("arrangement.automation.read", {"clipRef": clip_ref, "parameterRef": parameter_ref})
+        # No ride for this parameter on the clip yet; then one.
+        self.assertEqual(read(), {"available": True, "exists": False, "points": []})
+        ride.automation_envelopes = [Envelope(ride, song.tracks[0].devices[0].parameters[0])]
+        self.assertEqual(read(), {"available": True, "exists": True, "points": [{"time": 0.0, "value": 0.2}, {"time": 2.0, "value": 0.6}]})
+        validate_operation_payload("arrangement.automation.read", "result", read())
+        # A Live without the list can't say.
+        del ride.automation_envelopes
+        self.assertEqual(read(), {"available": False, "exists": False, "points": []})
 
     def test_song_set_writes_playback_settings_with_exact_rollback(self):
         song, mapper = self._mapper_with_song_state()
