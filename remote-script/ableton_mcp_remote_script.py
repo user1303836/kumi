@@ -11606,9 +11606,9 @@ class LiveObjectMapper:
 
     @staticmethod
     def _note_batch_difference(notes: list[dict[str, Any]], note_ids: list[int | None], extra: dict[int, dict[str, Any]], prior_unchanged: bool) -> str:
-        """How the notes Live kept differ from the batch, in a few words for the client: a note Live
-        shortened (with the usual cause, the same pitch's next note starting there), dropped, lengthened or
-        added. Short enough to survive the 200 characters a failure keeps."""
+        """The batch's failure, saying how the notes Live kept differ from it: a note Live shortened (with
+        the usual cause, the same pitch's next note starting there), dropped, lengthened or added. The
+        whole message, hint included, stays within the 200 characters a failure keeps."""
         def beat(value: Any) -> str: return f"{float(value):g}"
         extra = dict(extra); said = []
         for note, note_id in zip(notes, note_ids):
@@ -11627,12 +11627,15 @@ class LiveObjectMapper:
                 said.append(f"Live lengthened pitch {pitch} at beat {beat(start)} to end at beat {beat(end)}")
         said += [f"Live added pitch {row.get('pitch')} at beat {beat(row.get('start') or 0)}" for row in extra.values()]
         if not prior_unchanged: said.append("notes already in the clip changed")
-        if not said: return ""
-        text = ": " + said[0]
+        text = "note batch did not produce the exact complete expected state"
+        if not said: return text
+        hint = "; notes of one pitch can't overlap" if any(", where the next" in item for item in said) else ""
+        room = 200 - len(hint) - len("; and 99 more")
+        text += ": " + said[0]
         for index, item in enumerate(said[1:], 1):
-            if len(text) + len(item) > 100: text += f"; and {len(said) - index} more"; break
+            if len(text) + 2 + len(item) > room: text += f"; and {len(said) - index} more"; break
             text += "; " + item
-        return text + ("; notes of one pitch can't overlap" if any(", where the next" in item for item in said) else "")
+        return text + hint
 
     def _note_add_batch(self, args: dict[str, Any]) -> dict[str, Any]:
         clip = self._guard_note_clip(args)
@@ -11690,7 +11693,7 @@ class LiveObjectMapper:
             prior_unchanged = sorted(prior_after, key=lambda row: row["id"]) == sorted(prior_rows, key=lambda row: row["id"])
             if (len(after_rows) != len(prior_rows) + len(notes) or any(not isinstance(note_id, int) or isinstance(note_id, bool) for note_id in after_ids)
                     or len(set(after_ids)) != len(after_ids) or any(note_id is None for note_id in note_ids) or unmatched or not prior_unchanged):
-                raise ValueError("note batch did not produce the exact complete expected state" + self._note_batch_difference(notes, note_ids, unmatched, prior_unchanged))
+                raise ValueError(self._note_batch_difference(notes, note_ids, unmatched, prior_unchanged))
             notes_revision = hashlib.sha256(self._bounded_canonical(after_rows).encode("utf-8")).hexdigest()
             return {"added": len(notes), "noteIds": note_ids, "notesRevision": notes_revision}
         except BaseException as error:

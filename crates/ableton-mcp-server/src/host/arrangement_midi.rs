@@ -158,6 +158,7 @@ impl McpHost {
     /// The clips the transaction made, each with its notes, once Live shows them whole. Live shows what
     /// Kumi's extension made a moment after the extension answers (about 0.1 s on a recent Mac), so this
     /// looks again every 25 ms, for up to half a second, until every clip is there with all its notes.
+    /// A cancelled apply stops waiting and goes on with what the last look found.
     async fn landed_arrangement_midi_clips(
         &self,
         t: &Value,
@@ -178,10 +179,17 @@ impl McpHost {
                 .iter()
                 .zip(clips)
                 .all(|(notes, clip)| notes.as_ref().is_some_and(|notes| notes.len() == clip["notes"].as_array().map_or(0, Vec::len)));
-            if landed || began.elapsed() >= LANDING_WAIT {
+            let signal = context.signal.as_ref();
+            if landed || began.elapsed() >= LANDING_WAIT || signal.is_some_and(Signal::is_cancelled) {
                 return Ok((made, notes));
             }
-            tokio::time::sleep(LANDING_LOOK).await;
+            match signal {
+                Some(signal) => tokio::select! {
+                    _ = tokio::time::sleep(LANDING_LOOK) => {}
+                    _ = signal.cancelled() => {}
+                },
+                None => tokio::time::sleep(LANDING_LOOK).await,
+            }
         }
     }
     /// What Live shows where the transaction asked for its clips, when it can't find them: each new clip

@@ -2257,6 +2257,15 @@ class ControlSurfaceTests(unittest.TestCase):
         self.assertLessEqual(len(str(refused.exception)), 200); self.assertEqual(clip.notes, [])
         result = mapper.invoke("note.add-batch", {"ref": ref, "notes": [{**notes[0], "duration": 2}, *notes[1:]], **self.note_authority(mapper, ref)})
         self.assertEqual(result["added"], 3)
+        # However many notes Live changed, and however long their beats, the hint survives the 200-character cut.
+        many = [{"pitch": 100 + index % 20, "start": 1000.123456 + index * 2, "duration": 2.5, "velocity": 100, "channel": 1} for index in range(30)]
+        many += [{**note, "start": note["start"] + 2} for note in many]
+        message = LiveObjectMapper._note_batch_difference(many, [None] * len(many), {}, True)
+        self.assertLessEqual(len(message), 200); self.assertTrue(message.endswith("more"), message)
+        overlapping = [{"pitch": 127, "start": 1234.56789, "duration": 3, "velocity": 100, "channel": 1}, {"pitch": 127, "start": 1236.56789, "duration": 3, "velocity": 100, "channel": 1}] * 10
+        rows = {index: {"pitch": 127, "start": note["start"], "duration": 2} for index, note in enumerate(overlapping)}
+        message = LiveObjectMapper._note_batch_difference(overlapping, [None] * len(overlapping), rows, True)
+        self.assertLessEqual(len(message), 200); self.assertTrue(message.endswith("; notes of one pitch can't overlap"), message)
 
     def test_midi_reads_cover_exact_clip_length_and_refuse_unbounded_or_replacing_fallbacks(self):
         class LegacyClip:

@@ -486,3 +486,28 @@ async fn an_apply_that_cant_find_its_clip_says_what_live_shows() {
         "Live made the clips, but the Arrangement doesn't show them where they were asked; Live shows an unnamed clip at beat 8, 4 beats long, with 0 of 1 notes"
     );
 }
+/// A cancelled apply stops waiting for Live at once and goes on with what it last found.
+#[tokio::test(start_paused = true)]
+async fn a_cancelled_apply_stops_waiting_for_live() {
+    let data = fixture();
+    let adapter = Rc::new(Adapter::new());
+    *adapter.sim.state.borrow_mut() = data["seeds"]["single"].clone();
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let preview = host.live_arrangement_midi_clip_preview_async(&json!(1), &data["variants"]["single"]).await;
+    let txid = serde_json::from_str::<Value>(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap()["transactionId"].clone();
+    adapter.reset("apply-unfilled");
+    let signal = kumi_common::abort::Signal::new();
+    let began = tokio::time::Instant::now();
+    let args = json!({"transactionId":txid,"confirmation":"apply","idempotencyKey":"cancelled"});
+    let cancel = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        signal.cancel();
+    };
+    let id = json!(2);
+    let (applied, ()) = tokio::join!(host.live_arrangement_midi_clip_apply_async(&id, &args, Some(&signal)), cancel);
+    assert_eq!(began.elapsed(), Duration::from_millis(100), "it stopped waiting when cancelled");
+    let applied = clean(applied.unwrap());
+    let text = &applied["result"]["content"][0]["text"];
+    assert_eq!(text["state"], "applied", "{applied}");
+    assert_eq!(text["partial"]["reason"], "Live shows 0 of the 1 notes asked for in the clip at beat 8", "{applied}");
+}
