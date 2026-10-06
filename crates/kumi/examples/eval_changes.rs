@@ -7,7 +7,7 @@
 //! cargo run --release -p kumi --example eval_changes [-- <part of a case name>]
 use ableton_mcp_server::{delivery::PACKAGE_VERSION, tool_catalog::TOOL_CATALOG};
 use async_trait::async_trait;
-use futures::FutureExt;
+use futures::{FutureExt, StreamExt};
 use kumi::config::{load_inference_config, safe_error};
 use kumi_common::{
     abort::Signal,
@@ -21,7 +21,7 @@ use kumi_common::{
 use kumi_runtime::{
     ai::{
         error::LanguageModelError,
-        types::{CallOptions, FunctionTool, StreamParts},
+        types::{CallOptions, FunctionTool, StreamPart, StreamParts},
     },
     core::{
         contracts::{ActionEvent, ChangeFamily, ChangeState, MemoryEvent, MemoryScope, TechniqueAction, WatchEvent},
@@ -48,7 +48,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     io::Write,
     path::Path,
     process::Command,
@@ -318,9 +318,16 @@ struct SetState {
     worked: bool,
     devices: Vec<Rc<Device>>,
     parameters: Vec<Rc<Parameter>>,
+    /// Session clips by ref (5:clip:track:scene): name, length in beats and notes, as Live keeps them.
+    clips: BTreeMap<String, (String, f64, Vec<Value>)>,
 }
 
 impl SetState {
+    /// A clip's notes, when the slot has a clip.
+    fn clip_notes(&self, reference: &str) -> Option<&Vec<Value>> {
+        self.clips.get(reference).map(|(_, _, notes)| notes)
+    }
+
     fn tempo_is(&self, bpm: f64) -> bool {
         self.tempo.as_f64() == Some(bpm)
     }
@@ -377,16 +384,31 @@ impl SetState {
                 .flat_map(|index| {
                     [0, 1].map(|scene| {
                         let slot = format!("5:clip_slot:{index}:{scene}");
-                        let clip = if scene == 0 && index < 3 { json!(format!("5:clip:{index}:0")) } else { Value::Null };
+                        let clip = format!("5:clip:{index}:{scene}");
+                        let clip = if self.clips.contains_key(&clip) { json!(clip) } else { Value::Null };
                         json!({"ref": slot, "parentRef": track_ref(index), "sceneIndex": scene, "clipRef": clip})
                     })
                 })
                 .collect(),
-            "session-clip" => (0..3)
-                .map(|index| {
-                    let (clip, slot) = (format!("5:clip:{index}:0"), format!("5:clip_slot:{index}:0"));
-                    let name = format!("{} loop", js_string(self.tracks[index].borrow().get("name")));
-                    json!({"ref": clip, "parentRef": slot, "name": name, "length": 16, "isAudio": false})
+            "session-clip" => self
+                .clips
+                .iter()
+                .map(|(clip, (name, length, _))| {
+                    let slot = clip.replacen(":clip:", ":clip_slot:", 1);
+                    json!({"ref": clip, "parentRef": slot, "name": name, "length": length, "isAudio": false, "signatureNumerator": 4, "signatureDenominator": 4})
+                })
+                .collect(),
+            "note" => self
+                .clips
+                .iter()
+                .flat_map(|(clip, (_, _, notes))| {
+                    notes.iter().enumerate().map(move |(index, note)| {
+                        let mut row = note.as_object().cloned().unwrap_or_default();
+                        row.insert("ref".into(), json!(format!("{clip}:note:{index}")));
+                        row.insert("parentRef".into(), json!(clip));
+                        row.insert("id".into(), json!(index + 1));
+                        Value::Object(row)
+                    })
                 })
                 .collect(),
             "routing-choice" => ["Ext. In", "Resampling"]
@@ -522,6 +544,19 @@ impl Watched {
 type Undo = Box<dyn FnOnce(&mut SetState)>;
 
 /// A small Set behind the bridge's own tool shapes; previews, applies and undo behave like the bridge's.
+/// The Session loops the Set starts with: a kick, a bass line (D1, F1, A1, C2, two beats each) and a chord a bar.
+fn loops() -> BTreeMap<String, (String, f64, Vec<Value>)> {
+    let note = |pitch: u8, start: f64, duration: f64| json!({"pitch": pitch, "start": start, "duration": duration, "velocity": 100, "mute": false, "probability": 1.0, "velocityDeviation": 0.0, "releaseVelocity": 64});
+    let kick = (0..16).map(|beat| note(36, beat as f64, 0.25)).collect();
+    let bass = [38, 41, 45, 48].iter().enumerate().map(|(at, pitch)| note(*pitch, at as f64 * 4., 2.)).collect();
+    let keys = (0..4).flat_map(|bar| [62, 65, 69].map(|pitch| note(pitch, bar as f64 * 4., 4.))).collect();
+    BTreeMap::from([
+        ("5:clip:0:0".to_owned(), ("Kick loop".to_owned(), 16., kick)),
+        ("5:clip:1:0".to_owned(), ("Bass loop".to_owned(), 16., bass)),
+        ("5:clip:2:0".to_owned(), ("Keys loop".to_owned(), 16., keys)),
+    ])
+}
+
 struct SyntheticBridge {
     state: RefCell<SetState>,
     /// Every call Kumi made, in order, with its arguments.
@@ -548,6 +583,7 @@ impl SyntheticBridge {
                 worked: false,
                 devices: vec![operator],
                 parameters,
+                clips: loops(),
             }),
             requests: RefCell::new(vec![]),
             pending: RefCell::new(HashMap::new()),
@@ -682,6 +718,19 @@ impl SyntheticBridge {
                     "confirmation": "apply"
                 }))
             }
+            "live_midi_clip_preview" => {
+                let Some(track) = state.track_at(&js_string(args.get("trackRef"))) else { return refusal("Unknown track reference") };
+                let clip = format!("{}:{}", js_string(args.get("trackRef")).replacen(":track:", ":clip:", 1), arg("sceneIndex"));
+                if track.borrow().get("kind").and_then(Value::as_str) != Some("midi") || state.clips.contains_key(&clip) {
+                    return refusal("That slot isn't an empty slot on a MIDI track");
+                }
+                hold();
+                let count = args.get("notes").and_then(Value::as_array).map_or(0, Vec::len);
+                wrap(json!({
+                    "transactionId": id, "epoch": 5, "trackRef": arg("trackRef"), "sceneIndex": arg("sceneIndex"), "name": arg("name"),
+                    "length": arg("length"), "noteCount": count, "confirmation": "apply"
+                }))
+            }
             "live_object_rename_preview" => {
                 let track =
                     state.track_at(&js_string(args.get("ref"))).filter(|_| args.get("kind").and_then(Value::as_str) == Some("track"));
@@ -759,6 +808,19 @@ impl SyntheticBridge {
                     .borrow_mut()
                     .extend(input.iter().filter(|(key, _)| *key != "trackRef").map(|(key, value)| (key.clone(), value.clone())));
                 done.insert(id.clone(), Box::new(move |_| track.borrow_mut().extend(before)));
+            }
+            "live_midi_clip_preview" => {
+                let clip = format!(
+                    "{}:{}",
+                    js_string(input.get("trackRef")).replacen(":track:", ":clip:", 1),
+                    input.get("sceneIndex").cloned().unwrap_or(Value::Null)
+                );
+                let notes = input.get("notes").and_then(Value::as_array).cloned().unwrap_or_default();
+                let length = input.get("length").and_then(Value::as_f64).unwrap_or(4.);
+                state.clips.insert(clip.clone(), (js_string(input.get("name")), length, notes.clone()));
+                let undone = clip.clone();
+                done.insert(id.clone(), Box::new(move |state| drop(state.clips.remove(&undone))));
+                return wrap(json!({"transactionId": id, "state": "applied", "clipRef": clip, "notes": notes}));
             }
             "live_object_rename_preview" => {
                 let track = state.track_at(&js_string(input.get("ref"))).ok_or_else(|| RuntimeError::plain("Unknown track reference"))?;
@@ -952,13 +1014,26 @@ fn bridge_tools() -> Result<ListToolsResult, RuntimeError> {
 struct Counting {
     model: Rc<dyn LanguageModel>,
     calls: Cell<usize>,
+    /// Tokens over every call: in (cache reads among them) and out, as the provider counted them.
+    tokens: Rc<Cell<(f64, f64, f64)>>,
 }
 
 #[async_trait(?Send)]
 impl LanguageModel for Counting {
     async fn do_stream(&self, options: CallOptions) -> Result<StreamParts, LanguageModelError> {
         self.calls.set(self.calls.get() + 1);
-        self.model.do_stream(options).await
+        let parts = self.model.do_stream(options).await?;
+        let tokens = self.tokens.clone();
+        Ok(Box::pin(parts.inspect(move |part| {
+            if let StreamPart::Finish { usage, .. } = part {
+                let (input, cached, output) = tokens.get();
+                tokens.set((
+                    input + usage.input_tokens.total.unwrap_or(0.),
+                    cached + usage.input_tokens.cache_read.unwrap_or(0.),
+                    output + usage.output_tokens.total.unwrap_or(0.),
+                ));
+            }
+        })))
     }
 }
 
@@ -971,7 +1046,7 @@ struct Counted {
 
 impl Counted {
     fn new(binding: ModelBinding) -> Self {
-        let counting = Rc::new(Counting { model: binding.model.clone(), calls: Cell::new(0) });
+        let counting = Rc::new(Counting { model: binding.model.clone(), calls: Cell::new(0), tokens: Rc::new(Cell::new((0., 0., 0.))) });
         Self { binding: Rc::new(binding), counting }
     }
 
@@ -1126,6 +1201,29 @@ fn every_case() -> Vec<Case> {
                 })
         }),
         said("resample", &["Resample the Bass: bounce 4 bars of it to audio on a new track."], resampled),
+        // Notes: a beat written from a brief (in Kumi's notation or as notes), and a part read back by name.
+        said(
+            "write a beat",
+            &["On the Kick track, write a new 4-bar clip in the empty slot of the second scene: a four-on-the-floor kick, a clap on 2 and 4, and closed hats on the off-beats."],
+            |run| {
+                let Some(notes) = run.state.clip_notes("5:clip:0:1") else { return false };
+                let starts = |pitch: u64| -> Vec<f64> {
+                    let mut starts: Vec<f64> = notes.iter().filter(|n| n["pitch"] == pitch).filter_map(|n| n["start"].as_f64()).collect();
+                    starts.sort_by(f64::total_cmp);
+                    starts
+                };
+                let mut pitches: Vec<u64> = notes.iter().filter_map(|n| n["pitch"].as_u64()).collect();
+                pitches.sort_unstable();
+                pitches.dedup();
+                let on = |beats: Vec<f64>| pitches.iter().any(|pitch| *pitch != 36 && starts(*pitch) == beats);
+                starts(36) == (0..16).map(f64::from).collect::<Vec<_>>()
+                    && on((0..8).map(|at| 1. + 2. * at as f64).collect())
+                    && on((0..16).map(|at| at as f64 + 0.5).collect())
+            },
+        ),
+        said("read a part", &["Which notes does the Bass loop play? Name them, in order."], |run| {
+            run.tools.iter().any(|tool| tool == "read_notes") && ["D1", "F1", "A1", "C2"].iter().all(|name| run.last.contains(name))
+        }),
         // Listening: a comparison with a reference, said in the producer's terms.
         Case {
             audio: true,
@@ -1855,6 +1953,8 @@ async fn run() -> Result<i32, RuntimeError> {
         to_fixed(model_seconds, 0),
         if calls > 0 { format!(" ({} s a call)", to_fixed(model_seconds / calls as f64, 1)) } else { String::new() }
     );
+    let (input, cached, output) = model.counting.tokens.get();
+    println!("Tokens: {} in ({} of them cache reads), {} out.", to_string(input), to_string(cached), to_string(output));
     Ok(if passed == results.len() { 0 } else { 1 })
 }
 
