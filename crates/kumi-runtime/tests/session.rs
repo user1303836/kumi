@@ -1788,3 +1788,39 @@ local_test!(a_side_question_asked_during_an_answer_isnt_part_of_its_timing, {
     assert_eq!([&line["modelCalls"], &line["sentBytes"], &line["model"]], [&json!(1), &json!(1000), &json!("openai/gpt-test")]);
     h.session.close().await.unwrap();
 });
+local_test!(a_turn_brings_in_what_an_older_kumi_changed_beside_it_and_never_waits_for_it, {
+    use kumi_runtime::core::{file_sync::FileSync, store_client::StoreClient, store_import::JsonFiles};
+    let dir = tempfile::tempdir().unwrap();
+    let files = JsonFiles {
+        memory: dir.path().join("memory.json"),
+        projects: dir.path().join("projects"),
+        techniques: dir.path().join("techniques.json"),
+        playbook: dir.path().join("playbook.json"),
+        gaps: dir.path().join("gaps.jsonl"),
+    };
+    std::fs::write(&files.memory, r#"{"version":1,"notes":[{"id":"p1","text":"Likes short reverbs","at":100}]}"#).unwrap();
+    let db = dir.path().join("kumi.db");
+    let (client, _) = StoreClient::open(db.clone(), files.clone(), 1).await.unwrap();
+    let h = harness(None, |options| options.files = Some(FileSync::new(client, files.clone(), &[])));
+    h.session.start().await.unwrap();
+    // An older Kumi open beside this one keeps a note, while another Kumi holds the database's write lock.
+    std::fs::write(
+        &files.memory,
+        r#"{"version":1,"notes":[{"id":"p1","text":"Likes short reverbs","at":100},{"id":"p2","text":"Works at 140","at":200}]}"#,
+    )
+    .unwrap();
+    let other = kumi_store::Connection::open(&db).unwrap();
+    other.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let began = std::time::Instant::now();
+    h.session.submit("hello", None).await.unwrap();
+    assert!(began.elapsed() < Duration::from_secs(2), "the turn didn't wait for the look: {:?}", began.elapsed());
+    assert!(!h.notice("Brought in"));
+    other.execute_batch("ROLLBACK").unwrap();
+    let said = tokio::time::timeout(Duration::from_secs(10), async {
+        while !h.notice("Brought in changes made with the older Kumi: 1 note added.") {
+            delay(10).await;
+        }
+    })
+    .await;
+    assert!(said.is_ok(), "{:?}", h.events.borrow());
+});

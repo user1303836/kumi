@@ -476,11 +476,7 @@ impl Session {
             let this = self.clone();
             let work = self.playbook_serial(move |store| {
                 async move {
-                    let mut lessons = store.list().await?;
-                    let existed = lessons.iter().any(|l| l.id == lesson.id);
-                    lessons.retain(|l| l.id != lesson.id);
-                    lessons.push(lesson.clone());
-                    store.save(&lessons).await?;
+                    let existed = store.put(&lesson).await?;
                     this.emit(SessionEvent::Lesson {
                         action: if existed { LessonAction::Updated } else { LessonAction::Learned },
                         id: lesson.id.clone(),

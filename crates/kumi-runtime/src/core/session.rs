@@ -3,10 +3,12 @@
 use super::{
     contracts::*,
     errors::{FailureKind, KumiError, RuntimeError},
+    file_sync::FileSync,
     gaps::{gap_tools, GAP_GUIDANCE},
     memory::{memory_instructions, memory_tools, MemoryTools, MemoryToolsOptions},
     recall::{recall_tool, RecallOptions},
     recipes::{recipe_instructions, recipe_tools, RecipeStore, RecipeToolsOptions, RUN_RECIPE_TOOL},
+    store_client::StoreClient,
     techniques::{
         technique_instructions, technique_tools, TechniqueStore, TechniqueTools, TechniqueToolsOptions, PLAN_TECHNIQUE, TECHNIQUE_GUIDANCE,
     },
@@ -86,6 +88,11 @@ pub struct SessionOptions {
     pub web_client: Option<Rc<dyn WebClient>>,
     pub techniques: Option<Rc<dyn TechniqueStore>>,
     pub gaps: Option<String>,
+    /// Kumi's database, when it opened: notes, techniques and lessons come through their stores (set
+    /// beside this), and gaps go here instead of the file.
+    pub store: Option<StoreClient>,
+    /// The files an older Kumi may be writing while this one runs, looked at once a turn, beside it.
+    pub files: Option<FileSync>,
     /// Where each turn's timing goes (`timings.jsonl`); none keeps no log.
     pub timings: Option<String>,
     pub library: Option<Rc<Library>>,
@@ -121,6 +128,8 @@ impl SessionOptions {
             web_client: None,
             techniques: None,
             gaps: None,
+            store: None,
+            files: None,
             timings: None,
             library: None,
             matching: true,
@@ -449,7 +458,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
         } else {
             vec![]
         };
-        let gaps = options.gaps.as_ref().map(gap_tools).unwrap_or_default();
+        let gaps = options.gaps.as_ref().map(|file| gap_tools(file, options.store.clone())).unwrap_or_default();
         let shelf = options
             .library
             .as_ref()
@@ -554,6 +563,22 @@ impl Session {
     }
     fn notice(&self, message: impl Into<String>) {
         self.emit(SessionEvent::Notice { message: message.into() });
+    }
+    /// Bring in, beside the turn just begun, what an older Kumi changed in its files (`FileSync`), and say
+    /// so when anything came in. The turn never waits for it.
+    fn look_at_files(&self) {
+        let Some(files) = self.0.options.files.clone() else { return };
+        let (this, turn) = (self.clone(), timing::current());
+        tokio::task::spawn_local(async move {
+            let began = Instant::now();
+            let looked = files.look().await;
+            if let Some(turn) = turn {
+                turn.files(began.elapsed().as_millis() as u64);
+            }
+            for message in looked.ok().flatten().map(|imported| imported.sentences()).unwrap_or_default() {
+                this.notice(message);
+            }
+        });
     }
     fn error(&self, message: impl Into<String>) {
         self.emit(SessionEvent::Error { message: message.into(), kind: None, provider: None });
@@ -1118,6 +1143,9 @@ impl Session {
     async fn drive(&self, op: Rc<Operation>, initial_phase: Phase, work: Work, limit_ms: u64) -> Result<(), RuntimeError> {
         let began = Instant::now();
         let recorder = op.is_turn.then(timing::begin);
+        if op.is_turn {
+            self.look_at_files();
+        }
         let mut ended: Option<(Value, Option<Usage>)> = None;
         let settled = Rc::new(Cell::new(false));
         let mark = settled.clone();
@@ -1887,12 +1915,9 @@ impl SessionController for Session {
         Ok(self
             .playbook_serial(move |store| {
                 async move {
-                    let mut lessons = store.list().await?;
-                    let Some(at) = lessons.iter().position(|l| l.id == id) else {
+                    let Some(gone) = store.forget(&id).await? else {
                         return Ok(false);
                     };
-                    let gone = lessons.remove(at);
-                    store.save(&lessons).await?;
                     this.emit(SessionEvent::Lesson { action: LessonAction::Forgot, id, line: super::playbook::lesson_line(&gone) });
                     Ok(true)
                 }
