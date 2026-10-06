@@ -6,11 +6,12 @@
 //! Reading in never writes the files.
 
 use super::{
+    contracts::MemoryNote,
     errors::RuntimeError,
     memory::{notes_file, parse_notes},
-    playbook::{lessons_file, parse_lessons},
+    playbook::{lessons_file, parse_lessons, Lesson},
     store_rows::{lesson_of, lesson_row, note_of, note_row, technique_of, technique_row},
-    techniques::{parse_techniques, techniques_file},
+    techniques::{parse_techniques, techniques_file, Technique},
 };
 use kumi_store::{
     gaps,
@@ -130,16 +131,20 @@ fn read_file(path: &Path, kind: &Kind) -> Result<Option<Read>, StoreError> {
     if !matches!(kind, Kind::Gaps) && !whole(&bytes, kind.name()) {
         return Ok(Some(Read::NotWhole(path.to_path_buf())));
     }
-    let rows = match kind {
+    Ok(Some(Read::Whole(source, rows_of(kind, &bytes))))
+}
+
+/// The rows `bytes` hold, as a file of this kind.
+fn rows_of(kind: &Kind, bytes: &[u8]) -> Rows {
+    match kind {
         Kind::Notes(scope) => {
             let prefix = if *scope == Scope::Global { 'p' } else { 's' };
-            Rows::Notes(scope.clone(), parse_notes(&bytes, prefix).iter().map(note_row).collect())
+            Rows::Notes(scope.clone(), parse_notes(bytes, prefix).iter().map(note_row).collect())
         }
-        Kind::Techniques => Rows::Techniques(parse_techniques(&bytes).iter().map(technique_row).collect()),
-        Kind::Lessons => Rows::Lessons(parse_lessons(&bytes).iter().map(lesson_row).collect()),
-        Kind::Gaps => Rows::Gaps(parse_gaps(&String::from_utf8_lossy(&bytes))),
-    };
-    Ok(Some(Read::Whole(source, rows)))
+        Kind::Techniques => Rows::Techniques(parse_techniques(bytes).iter().map(technique_row).collect()),
+        Kind::Lessons => Rows::Lessons(parse_lessons(bytes).iter().map(lesson_row).collect()),
+        Kind::Gaps => Rows::Gaps(parse_gaps(&String::from_utf8_lossy(bytes))),
+    }
 }
 
 /// Whether `bytes` are a whole file of version 1 with its list under `key`.
@@ -259,6 +264,52 @@ pub(crate) fn parse_gaps(text: &str) -> Vec<gaps::Gap> {
         .collect()
 }
 
+/// What a write-back puts in one file, as the older Kumi's stores keep it.
+enum Contents {
+    Notes(Vec<MemoryNote>),
+    Techniques(Vec<Technique>),
+    Lessons(Vec<Lesson>),
+}
+impl Contents {
+    /// What a file of this kind holds, read as its store reads it.
+    fn read(kind: &Kind, bytes: &[u8]) -> Contents {
+        match kind {
+            Kind::Notes(scope) => Contents::Notes(parse_notes(bytes, if *scope == Scope::Global { 'p' } else { 's' })),
+            Kind::Techniques => Contents::Techniques(parse_techniques(bytes)),
+            Kind::Lessons | Kind::Gaps => Contents::Lessons(parse_lessons(bytes)),
+        }
+    }
+    fn is_empty(&self) -> bool {
+        match self {
+            Contents::Notes(rows) => rows.is_empty(),
+            Contents::Techniques(rows) => rows.is_empty(),
+            Contents::Lessons(rows) => rows.is_empty(),
+        }
+    }
+    /// The file as the store writes it.
+    fn text(&self) -> String {
+        match self {
+            Contents::Notes(rows) => notes_file(rows),
+            Contents::Techniques(rows) => techniques_file(rows),
+            Contents::Lessons(rows) => lessons_file(rows),
+        }
+    }
+    /// The same rows in label order, written as the store writes them: two files that say the same in
+    /// another order or format compare equal.
+    fn canonical(&self) -> String {
+        match self {
+            Contents::Notes(rows) => notes_file(&sorted(rows, |row| row.id.clone())),
+            Contents::Techniques(rows) => techniques_file(&sorted(rows, |row| row.id.clone())),
+            Contents::Lessons(rows) => lessons_file(&sorted(rows, |row| row.id.clone())),
+        }
+    }
+}
+fn sorted<T: Clone>(rows: &[T], label: impl Fn(&T) -> String) -> Vec<T> {
+    let mut rows = rows.to_vec();
+    rows.sort_by_key(label);
+    rows
+}
+
 /// Files a write-back left as they were, each with why.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WrittenBack {
@@ -272,8 +323,9 @@ const CHANGED: &str = "another Kumi changed it just now, so what's new there com
 /// are written to the files the older Kumi reads, in its format, each whole and renamed into place only
 /// if it's still as it was read, and each file's base is recorded, so what the older Kumi then changes
 /// comes back in. Every Set with notes, or with a notes file, gets its list, an empty one too, so a note
-/// forgotten since the update doesn't come back there. A file that isn't whole, or that changes on the
-/// way, is left as it is. Nothing to do without a database.
+/// forgotten since the update doesn't come back there. A file that already says what the database keeps
+/// is left as it is, byte for byte, and no file is made to hold nothing. A file that isn't whole, or that
+/// changes on the way, is left as it is. Nothing to do without a database.
 pub async fn write_back(db: PathBuf, files: JsonFiles, now: i64) -> Result<WrittenBack, RuntimeError> {
     if !db.exists() {
         return Ok(WrittenBack::default());
@@ -313,57 +365,85 @@ fn write_back_now(db: &Path, files: &JsonFiles, now: i64) -> Result<WrittenBack,
         Ok((notes::in_use(c, &Scope::Global)?, sets, stored::in_use(c)?, lessons::in_use(c)?))
     })?;
     let mut targets =
-        vec![(files.memory.clone(), Kind::Notes(Scope::Global), notes_file(&producer.into_iter().map(note_of).collect::<Vec<_>>()))];
+        vec![(files.memory.clone(), Kind::Notes(Scope::Global), Contents::Notes(producer.into_iter().map(note_of).collect()))];
     for (project, rows) in sets {
-        let text = notes_file(&rows.into_iter().map(note_of).collect::<Vec<_>>());
-        targets.push((files.projects.join(&project).join("memory.json"), Kind::Notes(Scope::Project(project)), text));
+        targets.push((
+            files.projects.join(&project).join("memory.json"),
+            Kind::Notes(Scope::Project(project)),
+            Contents::Notes(rows.into_iter().map(note_of).collect()),
+        ));
     }
     targets.push((
         files.techniques.clone(),
         Kind::Techniques,
-        techniques_file(&kept_techniques.into_iter().map(technique_of).collect::<Vec<_>>()),
+        Contents::Techniques(kept_techniques.into_iter().map(technique_of).collect()),
     ));
-    targets.push((files.playbook.clone(), Kind::Lessons, lessons_file(&kept_lessons.into_iter().map(lesson_of).collect::<Vec<_>>())));
+    targets.push((files.playbook.clone(), Kind::Lessons, Contents::Lessons(kept_lessons.into_iter().map(lesson_of).collect())));
     let paths: Vec<String> = targets.iter().map(|(path, ..)| path.to_string_lossy().into_owned()).collect();
     let records = store.read(move |c| {
         paths.iter().map(|path| Ok(imports::record_of(c, path)?.map(|record| record.blake3))).collect::<Result<Vec<_>, StoreError>>()
     })?;
-    let mut written = vec![];
-    for ((path, kind, text), merged) in targets.into_iter().zip(records) {
+    for ((path, kind, contents), merged) in targets.into_iter().zip(records) {
         if left.iter().any(|(skipped, _)| *skipped == path) {
             continue;
         }
-        // The file as the import just read it, or no file: anything else changed since.
-        let now_there = imports::read(&path, kind.name())?.map(|(source, _)| source.blake3);
-        if now_there.is_some() && now_there != merged {
-            left.push((path, CHANGED.into()));
-            continue;
+        let there = match imports::read(&path, kind.name()) {
+            Ok(there) => there,
+            Err(why) => {
+                left.push((path, format!("Kumi couldn't read it ({why})")));
+                continue;
+            }
+        };
+        match &there {
+            // Nothing to write, and no file to write over.
+            None if contents.is_empty() => continue,
+            // Already says what the database keeps (in its own order and format): it stays as it is,
+            // byte for byte, with the base the import just recorded.
+            Some((_, bytes)) if Contents::read(&kind, bytes).canonical() == contents.canonical() => continue,
+            // Not as the import just read it: changed since.
+            Some((source, _)) if Some(&source.blake3) != merged.as_ref() => {
+                left.push((path, CHANGED.into()));
+                continue;
+            }
+            _ => {}
         }
-        if !write_file(&path, &text, now_there.as_deref()).map_err(|why| StoreError::Io(format!("{}: {why}", path.display())))? {
-            left.push((path, CHANGED.into()));
-            continue;
+        let expected = there.map(|(source, _)| source.blake3);
+        let text = contents.text();
+        match write_file(&path, &text, expected.as_deref()) {
+            Ok(true) => {}
+            Ok(false) => {
+                left.push((path, CHANGED.into()));
+                continue;
+            }
+            Err(why) => {
+                left.push((path, format!("Kumi couldn't write it ({why})")));
+                continue;
+            }
         }
-        written.push((path, kind));
-    }
-    // What each file holds now is its base: each of its rows is the row in use with its label.
-    let mut read_back = vec![];
-    for (path, kind) in &written {
-        if let Some(Read::Whole(source, rows)) = read_file(path, kind)? {
-            read_back.push((source, rows));
-        }
-    }
-    store.write_wait(move |c| {
-        for (source, rows) in &read_back {
-            let base = match rows {
+        // Its base is what was written, recorded before the next file: a stop partway leaves every file
+        // written with its own base, and a change an older Kumi makes now is a change against it.
+        let source = Source {
+            path: path.to_string_lossy().into_owned(),
+            kind: kind.name().into(),
+            size: text.len() as i64,
+            mtime: std::fs::metadata(&path)
+                .and_then(|meta| meta.modified())
+                .ok()
+                .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |at| at.as_millis() as i64),
+            blake3: imports::hash(text.as_bytes()),
+        };
+        let rows = rows_of(&kind, text.as_bytes());
+        store.write_wait(move |c| {
+            let base = match &rows {
                 Rows::Notes(scope, rows) => notes::base_of(c, scope, rows)?,
                 Rows::Techniques(rows) => stored::base_of(c, rows)?,
                 Rows::Lessons(rows) => lessons::base_of(c, rows)?,
-                Rows::Gaps(_) => continue,
+                Rows::Gaps(_) => return Ok(()),
             };
-            imports::record(c, source, 0, Some(&base), now)?;
-        }
-        Ok(())
-    })?;
+            imports::record(c, &source, 0, Some(&base), now)
+        })?;
+    }
     Ok(WrittenBack { left })
 }
 

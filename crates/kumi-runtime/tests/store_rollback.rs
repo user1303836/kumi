@@ -4,7 +4,6 @@
 use kumi_runtime::core::{
     contracts::MemoryStore,
     memory::{create_memory_store, parse_notes, MemoryStoreOptions, MAX_NOTES},
-    playbook::parse_lessons,
     store_backed::SqliteMemoryStore,
     store_client::StoreClient,
     store_import::{import_json, write_back, BroughtIn, Imported, JsonFiles, WrittenBack},
@@ -102,7 +101,7 @@ async fn a_rollback_writes_back_what_the_database_keeps_in_the_older_kumis_forma
     let older = create_memory_store(MemoryStoreOptions { projects_dir: files.projects.clone(), producer_file: files.memory.clone() });
     assert_eq!(older.load(Some(SET)).await.unwrap().set.len(), 1, "the older Kumi's own store reads it");
     assert_eq!(parse_techniques(&std::fs::read(&files.techniques).unwrap()).iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["t1"]);
-    assert!(parse_lessons(&std::fs::read(&files.playbook).unwrap()).is_empty());
+    assert!(!files.playbook.exists(), "no lessons, no file made for them");
 
     // Upgrading again with the files as they were written back changes nothing.
     let store = Store::open(dir.path().join("kumi.db")).unwrap();
@@ -485,4 +484,75 @@ fn lessons_an_older_kumi_changed_come_in_too() {
         kept.iter().map(|l| (l.label.as_str(), l.reaction.as_deref())).collect::<Vec<_>>(),
         [("la0000001", Some("liked")), ("la0000003", None)]
     );
+}
+
+#[tokio::test]
+async fn a_write_back_leaves_a_file_that_already_says_it_byte_for_byte() {
+    let dir = tempfile::tempdir().unwrap();
+    let files = files(dir.path());
+    // As an older Kumi wrote it: compact.
+    let compact = r#"{"version":1,"notes":[{"id":"p1","text":"Keep the kick dry","at":1700000000000}]}"#;
+    std::fs::write(&files.memory, compact).unwrap();
+    let modified = std::fs::metadata(&files.memory).unwrap().modified().unwrap();
+    drop(StoreClient::open(dir.path().join("kumi.db"), files.clone(), 1).await.unwrap());
+    assert_eq!(write_back(dir.path().join("kumi.db"), files.clone(), 2).await.unwrap(), WrittenBack::default());
+    assert_eq!(std::fs::read_to_string(&files.memory).unwrap(), compact);
+    assert_eq!(std::fs::metadata(&files.memory).unwrap().modified().unwrap(), modified);
+    assert!(!files.techniques.exists() && !files.playbook.exists(), "nothing to write, no file made");
+    // Once the database keeps something else, the file is written.
+    let store = Store::open(dir.path().join("kumi.db")).unwrap();
+    store.write_wait(|c| notes::insert(c, &Scope::Global, &note("p2", "Works at 140", 1800000000000))).unwrap();
+    drop(store);
+    write_back(dir.path().join("kumi.db"), files.clone(), 3).await.unwrap();
+    let written: Vec<String> = parse_notes(&std::fs::read(&files.memory).unwrap(), 'p').into_iter().map(|n| n.text).collect();
+    assert_eq!(written, ["Keep the kick dry", "Works at 140"]);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_file_that_cant_be_written_is_named_and_the_others_are_written_back_with_their_bases() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let mut files = files(dir.path());
+    let locked = dir.path().join("locked");
+    std::fs::create_dir(&locked).unwrap();
+    files.playbook = locked.join("playbook.json");
+    std::fs::write(&files.playbook, r#"{"version":1,"lessons":[]}"#).unwrap();
+    std::fs::write(&files.memory, r#"{"version":1,"notes":[{"id":"p1","text":"Likes short reverbs","at":100}]}"#).unwrap();
+    let store = Store::open(dir.path().join("kumi.db")).unwrap();
+    import_json(&store, &files, 1).unwrap();
+    store
+        .write_wait(|c| {
+            notes::insert(c, &Scope::Global, &note("p2", "Works at 140", 200))?;
+            let lesson = lessons::Lesson {
+                label: "la0000001".into(),
+                matched: "the reference pad".into(),
+                winner: "Wavetable".into(),
+                from: 41.0,
+                to: 77.0,
+                moves: json!([]),
+                reaction: None,
+                at: 300,
+            };
+            lessons::put(c, &lesson, 60, 300)?;
+            Ok(())
+        })
+        .unwrap();
+    drop(store);
+    // The lessons file's folder can't be written.
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::write(locked.join("probe"), "").is_ok() {
+        return; // Running as a user every folder lets write.
+    }
+    let written = write_back(dir.path().join("kumi.db"), files.clone(), 400).await.unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(written.left.iter().map(|(file, _)| file.clone()).collect::<Vec<_>>(), [files.playbook.clone()]);
+    assert!(written.left[0].1.starts_with("Kumi couldn't write it"), "{:?}", written.left);
+    let texts_in_file: Vec<String> = parse_notes(&std::fs::read(&files.memory).unwrap(), 'p').into_iter().map(|n| n.text).collect();
+    assert_eq!(texts_in_file, ["Likes short reverbs", "Works at 140"], "the notes are written back all the same");
+    // Each file written has its base: nothing comes in twice. The lessons file, never written, still
+    // has its own, so the database's lesson isn't taken for one the older Kumi forgot.
+    let store = Store::open(dir.path().join("kumi.db")).unwrap();
+    assert_eq!(import_json(&store, &files, 500).unwrap(), Imported::default());
+    assert_eq!(store.read(lessons::in_use).unwrap().len(), 1);
 }
