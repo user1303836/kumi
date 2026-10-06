@@ -45,6 +45,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   return { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value };
 });
 if (mode === "stderr") process.stderr.write("must-not-be-retained-secret".repeat(20_000));
+// The bridge's own last word when it can't start, as the real one says it (its CLI's "mcp-host: …").
+if (mode === "fatal") { process.stderr.write("noise before it\nmcp-host: Live is running another version of Kumi's bridge than the one installed (Live loads it when it starts): restart Live\n"); process.exit(1); }
 if (mode === "stubborn") { setInterval(() => {}, 1000); process.on("SIGTERM", () => {}); }
 if (mode === "no-init") {
   writeFileSync(process.argv[3], String(process.pid));

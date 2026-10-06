@@ -215,6 +215,13 @@ fn canonical(value: &Value) -> Result<String, RegistryError> {
     canonical_json(value, &REGISTRY_CANONICAL_LIMITS).map_err(|_| RegistryError("registry is too deeply nested".into()))
 }
 
+/// SHA-256 hex of a registry file's canonical JSON, as its release manifest names it: one a retained release
+/// carries, which needn't be this code's.
+pub fn registry_text_hash(text: &str) -> Result<String, RegistryError> {
+    let value: Value = serde_json::from_str(text).map_err(|error| RegistryError(error.to_string()))?;
+    Ok(sha256_hex(&canonical(&value)?))
+}
+
 /// SHA-256 of a text, as lowercase hex.
 pub fn sha256_hex(text: &str) -> String {
     hex::encode(Sha256::digest(text.as_bytes()))
@@ -596,14 +603,30 @@ pub fn validate_registry_value(schema: &Map<String, Value>, value: &Value, path:
 pub fn validate_live_operation_request_in(registry: &LiveRegistry, operation_id: &str, value: &Value) -> Result<(), RegistryError> {
     let operation =
         registry.operation(operation_id).ok_or_else(|| RegistryError(format!("operation is not in canonical registry: {operation_id}")))?;
-    validate_registry_value(&operation.request, value, &format!("{operation_id}.request"))
+    validate_registry_value(&operation.request, value, &format!("{operation_id}.request"))?;
+    one_form(operation_id, value, &format!("{operation_id}.request"), &["ref", "key", "value"])
 }
 
 /// `validateLiveOperationResult` against a given registry.
 pub fn validate_live_operation_result_in(registry: &LiveRegistry, operation_id: &str, value: &Value) -> Result<(), RegistryError> {
     let operation =
         registry.operation(operation_id).ok_or_else(|| RegistryError(format!("operation is not in canonical registry: {operation_id}")))?;
-    validate_registry_value(&operation.result, value, &format!("{operation_id}.result"))
+    validate_registry_value(&operation.result, value, &format!("{operation_id}.result"))?;
+    one_form(operation_id, value, &format!("{operation_id}.result"), &["ref", "key", "value", "prior"])
+}
+
+/// What the registry's dialect can't say, having no `oneOf`: data.set takes one key (`single`, all of them) or
+/// `entries` alone, never both and never neither.
+fn one_form(operation_id: &str, value: &Value, path: &str, single: &[&str]) -> Result<(), RegistryError> {
+    if operation_id != "data.set" {
+        return Ok(());
+    }
+    let Some(object) = value.as_object() else { return Ok(()) };
+    let batch = object.contains_key("entries");
+    if batch && object.len() == 1 || !batch && single.iter().all(|key| object.contains_key(*key)) {
+        return Ok(());
+    }
+    Err(RegistryError(format!("{path} takes one key ({}) or entries alone", single.join(", "))))
 }
 
 /// A request's arguments against the embedded registry.

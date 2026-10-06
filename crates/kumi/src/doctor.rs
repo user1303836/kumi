@@ -91,6 +91,9 @@ pub struct LiveProbe {
     pub set: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub real_live: Option<bool>,
+    /// Why the bridge didn't start, in Kumi's words.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub said: Option<String>,
 }
 #[derive(Debug, Clone, Default)]
 pub struct TerminalInfo {
@@ -598,7 +601,15 @@ pub async fn doctor_checks(io: &DoctorIo) -> Result<Vec<Check>, RuntimeError> {
             checks.push(Check::note("The bridge configuration names no Node for other MCP apps", Some(later)))
         }
         let live = if let Some(probe) = &io.probe_live { probe(config.clone()).await.unwrap_or_default() } else { LiveProbe::default() };
-        if !live.started {
+        if !live.started && live.said.as_deref().is_some_and(|said| said.contains(kumi_common::bridge::ANOTHER_BRIDGE)) {
+            checks.push(Check::fix(
+                "Live is running another version of Kumi's bridge",
+                Some(format!(
+                    "Restart Live: it loads its bridge when it starts. If it still says this, quit Live and run {} bridge. Then: {} doctor",
+                    *KUMI, *KUMI
+                )),
+            ))
+        } else if !live.started {
             let current = server
                 .version
                 .as_ref()

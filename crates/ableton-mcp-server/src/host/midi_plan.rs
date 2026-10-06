@@ -134,7 +134,9 @@ impl McpHost {
             if recorded.as_ref().is_some_and(|r| r.borrow()["completed"] == true) {
                 continue;
             }
-            let fresh = self.note_clip(&self.views.view_for(Some(context), &[json!(reference)], None, &[]).await?, reference)?;
+            let fresh = self
+                .note_clip(&self.views.view_for(Some(context), &[json!(reference)], None, &[]).await?, Some(context), reference)
+                .await?;
             if let Some(identity) = clip_identity {
                 if let Some(moved) =
                     Self::moved_target("clip", &json!(reference), fresh.authority.get("expectedObjectIdentity"), Some(&json!(identity)))?

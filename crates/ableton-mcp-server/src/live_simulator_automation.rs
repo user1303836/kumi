@@ -116,9 +116,9 @@ impl DeterministicLiveSimulator {
             "note.read-by-id" | "note.read-selected" | "note.duplicate" | "note.quantize" => {
                 let reference = string_arg(args, "ref")?;
                 let mut state = self.state.borrow_mut();
-                let path = clip_path(&state, reference)?;
+                let path = note_clip_path(&state, reference)?;
                 if operation == "note.duplicate" || operation == "note.quantize" {
-                    let authority = Self::session_clip_authority(&state, reference)?;
+                    let authority = Self::note_clip_authority(&state, reference)?;
                     let expected =
                         args.get("expectedClipAuthority").ok_or_else(|| LiveError::error("unsupported simulator authority value"))?;
                     if simulator_revision(&authority) != simulator_revision(expected) {

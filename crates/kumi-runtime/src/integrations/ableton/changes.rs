@@ -668,6 +668,9 @@ impl ChangeKind {
                 "Kumi couldn't tell what the new clip cut where it landed, so it leaves taking it back to Live's own undo.".into(),
             );
         }
+        if self.tool == "move_clip" && preview.get("replacesUnknown") == Some(&json!(true)) {
+            return Some("The clip cut something where it landed that wasn't named before (put there in between), so Kumi leaves taking it back to Live's own undo.".into());
+        }
         if !matches!(self.tool.as_str(), "move_clip" | "add_arrangement_clip")
             || !preview.get("replaces").and_then(Value::as_array).is_some_and(|r| !r.is_empty())
         {
