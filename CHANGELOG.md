@@ -3,6 +3,16 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.8.8 — 2026-10-06
+
+Ships with bridge 1.0.81, as 1.8.7 did.
+
+- Converting audio to MIDI works on any audio clip, Session or Arrangement, without Live's menus, and
+  names the new track.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.8.7 — 2026-10-06
 
 Ships with bridge 1.0.81, which Live loads when it restarts. After updating, Kumi offers to quit Live

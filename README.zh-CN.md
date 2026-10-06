@@ -57,7 +57,7 @@ irm https://raw.githubusercontent.com/user1303836/kumi/main/install.ps1 | iex
 
 ## 当前状态
 
-Kumi 1.8.7 已在 macOS 的 Ableton Live 12.4（测试版）中验证。
+Kumi 1.8.8 已在 macOS 的 Ableton Live 12.4（测试版）中验证。
 在 Windows 上，安装和升级已经过验证，但与 Live 一起使用还是新的。
 出问题时请发送 `kumi report`。接下来将支持 Renoise 和 Reaper。
 
