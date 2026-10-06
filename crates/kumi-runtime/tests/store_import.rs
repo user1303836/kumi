@@ -104,7 +104,7 @@ fn a_file_an_older_kumi_changed_brings_in_its_edits_and_new_notes_and_never_a_fo
         {"id":"p3","text":"Works at 140","at":9300}]}),
     );
     let imported = import_json(&store, &files, 9400).unwrap();
-    assert_eq!((imported.files, imported.brought_in.notes), (1, Kept { added: 1, changed: 1, archived: 0 }));
+    assert_eq!((imported.files, imported.brought_in.notes), (1, Kept { added: 1, changed: 1, archived: 0, both: 0 }));
     assert_eq!(
         labels_and_texts(&store, Scope::Global),
         [("p2".into(), "Names drum tracks in capitals, always".into()), ("p3".into(), "Works at 140".into())],

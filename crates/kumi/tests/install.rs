@@ -201,6 +201,7 @@ async fn checked_executable_update_swap_and_rollback() {
     let (rollback, out) = io(&env);
     assert_eq!(rollback_installed(rollback).await.unwrap(), 0);
     assert!(!out.0.borrow().contains("won't see"), "{}", out.0.borrow());
+    assert_eq!(out.0.borrow().contains(&format!("Kumi windows still open keep running {KUMI_VERSION}")), !cfg!(windows));
     let written: Value = serde_json::from_slice(&fs::read(home.join("memory.json")).unwrap()).unwrap();
     assert_eq!(written["notes"][0]["text"], "Mixes on headphones");
     assert_eq!(serde_json::from_slice::<Value>(&fs::read(home.join("app/package.json")).unwrap()).unwrap()["version"], KUMI_VERSION);
@@ -210,6 +211,18 @@ async fn checked_executable_update_swap_and_rollback() {
     same.fetcher = Some(serve(good));
     assert_eq!(update_installed(same).await.unwrap(), 0);
     assert!(out.0.borrow().contains("up to date"));
+    // A write-back that can't run doesn't stop a rollback.
+    for leftover in ["kumi.db", "kumi.db-wal", "kumi.db-shm"] {
+        let _ = fs::remove_file(home.join(leftover));
+    }
+    fs::write(home.join("kumi.db"), "not a database").unwrap();
+    let (rollback, out) = io(&env);
+    assert_eq!(rollback_installed(rollback).await.unwrap(), 0);
+    assert!(
+        out.0.borrow().contains("The older Kumi won't see the notes, techniques or lessons kept since the update"),
+        "{}",
+        out.0.borrow()
+    );
 }
 #[tokio::test]
 async fn failed_unpack_or_probe_preserves_current_app() {

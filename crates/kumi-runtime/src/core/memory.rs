@@ -41,7 +41,8 @@ static SUSPECT: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 
 fn clean(text: &str) -> String {
     let controls: String = text.chars().map(|c| if c <= '\u{1f}' || ('\u{7f}'..='\u{9f}').contains(&c) { ' ' } else { c }).collect();
-    string::head(SPACE.replace_all(&controls, " ").trim(), MAX_NOTE)
+    // Trimmed again after the cut, so cleaning what was cleaned changes nothing.
+    string::head(SPACE.replace_all(&controls, " ").trim(), MAX_NOTE).trim().to_string()
 }
 pub fn suspect_note(text: &str) -> bool {
     SUSPECT.iter().any(|pattern| pattern.is_match(text))
@@ -151,6 +152,12 @@ pub(crate) fn remember_in(notes: &mut Vec<MemoryNote>, scope: MemoryScope, text:
     notes.push(note.clone());
     Remembering::Kept { note, replaced }
 }
+/// A memory file as the store writes it: `notes`, fitted to the most a scope keeps.
+pub(crate) fn notes_file(notes: &[MemoryNote]) -> String {
+    let mut notes = notes.to_vec();
+    fit(&mut notes);
+    json::file_text(&json!({"version": 1, "notes": notes}))
+}
 /// Notes kept while a Set was unsaved, added to its notes now that it's saved, while there's room.
 pub(crate) fn add_in(notes: &mut Vec<MemoryNote>, scope: MemoryScope, texts: &[String], at: i64) -> Vec<MemoryNote> {
     let mut added = vec![];
@@ -175,8 +182,7 @@ impl MemoryStore for FileMemoryStore {
     }
     async fn save(&self, scope: MemoryScope, project: Option<&str>, notes: &[MemoryNote]) -> Result<(), RuntimeError> {
         let file = self.file_of(scope, project)?;
-        let mut notes = notes.to_vec();
-        fit(&mut notes);
+        let text = notes_file(notes);
         let folder = file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
         let mut builder = tokio::fs::DirBuilder::new();
         builder.recursive(true);
@@ -190,7 +196,7 @@ impl MemoryStore for FileMemoryStore {
             #[cfg(unix)]
             options.mode(0o600);
             let mut handle = options.open(&temporary).await?;
-            handle.write_all(json::file_text(&json!({"version": 1, "notes": notes})).as_bytes()).await?;
+            handle.write_all(text.as_bytes()).await?;
             handle.flush().await?;
             drop(handle);
             tokio::fs::rename(&temporary, file).await

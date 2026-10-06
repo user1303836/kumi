@@ -126,7 +126,8 @@ fn clean(value: &Value, max: usize) -> String {
         .chars()
         .map(|c| if matches!(c, '\x00'..='\x09' | '\x0b'..='\x1f' | '\u{7f}'..='\u{9f}') { ' ' } else { c })
         .collect();
-    string::head(string::trim(&SPACES.replace_all(&raw, " ")), max)
+    // Trimmed again after the cut, so cleaning what was cleaned changes nothing.
+    string::trim(&string::head(string::trim(&SPACES.replace_all(&raw, " ")), max)).to_string()
 }
 /// The producer's request as a technique keeps it: one line, cut short, and nothing that reads as orders.
 fn request_of(text: &str) -> Option<String> {
@@ -198,8 +199,7 @@ impl TechniqueStore for FileTechniqueStore {
             #[cfg(unix)]
             options.mode(0o600);
             let mut file = options.open(&temporary).await?;
-            let data = json!({"version":1,"techniques":&techniques[techniques.len().saturating_sub(MAX_TECHNIQUES)..]});
-            file.write_all(json::file_text(&data).as_bytes()).await?;
+            file.write_all(techniques_file(techniques).as_bytes()).await?;
             file.flush().await?;
             drop(file);
             tokio::fs::rename(&temporary, &self.file).await
@@ -211,6 +211,10 @@ impl TechniqueStore for FileTechniqueStore {
         }
         Ok(())
     }
+}
+/// A techniques file as the store writes it: the newest the list keeps.
+pub(crate) fn techniques_file(techniques: &[Technique]) -> String {
+    json::file_text(&json!({"version":1,"techniques":&techniques[techniques.len().saturating_sub(MAX_TECHNIQUES)..]}))
 }
 fn technique_from(raw: &Value) -> Option<Technique> {
     let body = check_technique(raw).ok()?;

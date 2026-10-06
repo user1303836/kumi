@@ -419,10 +419,21 @@ pub async fn rollback_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
         (Ok(db), Ok(files)) => write_back(db.into(), files, kumi_common::time::now_ms()).await,
         (Err(why), _) | (_, Err(why)) => Err(why),
     };
-    if let Err(why) = written {
-        say(format!(
+    match written {
+        Ok(written) => {
+            for (file, why) in written.left {
+                say(format!("Left {} as it was: {why}.", file.display()));
+            }
+        }
+        Err(why) => say(format!(
             "The older Kumi won't see the notes, techniques or lessons kept since the update ({}); they stay in Kumi's database for when you update again.",
             why.message()
+        )),
+    }
+    // Windows can't roll back while a Kumi window is open; elsewhere one keeps running this Kumi.
+    if !cfg!(windows) {
+        say(format!(
+            "Kumi windows still open keep running {KUMI_VERSION} until you close them; what they keep from now on stays in Kumi's database for your next update."
         ));
     }
     let legacy = !Path::new(&join(&previous, &executable_name("kumi"))).is_file();

@@ -404,7 +404,7 @@ pub(super) async fn run_session(
     let files = json_files(&io.env)?;
     let database = StoreClient::open(load_db_file(&io.env)?.into(), files.clone(), kumi_common::time::now_ms()).await;
     let database_notice = match &database {
-        Ok((_, Ok(imported))) => imported.brought_in.sentence(),
+        Ok((_, Ok(imported))) => Some(imported.sentences().join(" ")).filter(|said| !said.is_empty()),
         Ok((_, Err(why))) => {
             Some(format!("Kumi couldn't read in the notes and techniques kept in files this time ({why}); it tries again next start."))
         }

@@ -222,13 +222,21 @@ pub fn forget(connection: &Connection, label: &str, now: i64) -> Result<bool, St
 }
 
 /// Read in a technique an earlier Kumi kept in a file. Its id comes from its label and when it was
-/// kept, so it's read in once and one forgotten here stays forgotten; one in use with that label, name
-/// and idea (written back for an older Kumi) is the same technique. A label another technique in use
-/// has gets the next free one. The id of the technique that holds it, and whether it was added.
+/// kept, so it's read in once, one forgotten here stays forgotten, and one set aside here comes back in
+/// use; one in use with that label, name and idea (written back for an older Kumi) is the same
+/// technique. A label another technique in use has gets the next free one. The id of the technique that
+/// holds it, and whether it was added or came back.
 pub fn import(connection: &Connection, t: &Technique) -> Result<(String, bool), StoreError> {
     let id = content_id(&["technique", &t.label, &t.at.to_string()]);
-    if imports::known_or_forgotten(connection, "techniques", &id)? {
+    if imports::forgotten(connection, &id)? {
         return Ok((id, false));
+    }
+    if let Some((_, archived)) = Techniques.get(connection, &id)? {
+        if archived {
+            Techniques.overwrite(connection, &id, t)?;
+            Techniques.count(connection, &id, t, None)?;
+        }
+        return Ok((id, archived));
     }
     let same: Option<String> = connection
         .prepare_cached("SELECT id FROM techniques WHERE label = ?1 AND name = ?2 AND idea = ?3 AND archived_at IS NULL")?
@@ -312,6 +320,14 @@ impl Table for Techniques {
     fn hash(&self, row: &Technique) -> String {
         hash(row)
     }
+    fn base(&self, t: &Technique, id: String) -> BaseRow {
+        BaseRow { label: t.label.clone(), id, hash: hash(t), at: Some(t.at), used: Some(t.used), undone: Some(t.undone) }
+    }
+    fn same(&self, before: &BaseRow, t: &Technique) -> bool {
+        // An older Kumi labels a new technique with the number after the highest, so one kept after the
+        // newest was forgotten takes its label: when it was kept tells them apart.
+        before.at.is_none_or(|at| at == t.at)
+    }
     fn get(&self, c: &Connection, id: &str) -> Result<Option<(Technique, bool)>, StoreError> {
         Ok(c.prepare_cached(&format!("SELECT {COLUMNS}, archived_at IS NOT NULL FROM techniques WHERE id = ?1"))?
             .query_row(params![id], |found| Ok((row(found)?, found.get(15)?)))
@@ -364,13 +380,21 @@ impl Table for Techniques {
     fn archive(&self, c: &Connection, id: &str, now: i64) -> Result<bool, StoreError> {
         Ok(c.prepare_cached("UPDATE techniques SET archived_at = ?2 WHERE id = ?1 AND archived_at IS NULL")?.execute(params![id, now])? > 0)
     }
-    fn count(&self, c: &Connection, id: &str, t: &Technique) -> Result<(), StoreError> {
-        c.prepare_cached(
+    fn count(&self, c: &Connection, id: &str, t: &Technique, before: Option<&BaseRow>) -> Result<(), StoreError> {
+        // Uses and undos the file counted since the base are added to the database's; with no base, the
+        // larger count stands. The last use is the later one.
+        let since = before.and_then(|before| Some((t.used - before.used?, t.undone - before.undone?)));
+        let sql = if since.is_some() {
+            "UPDATE techniques SET used = max(used + ?2, 0), undone = max(undone + ?3, 0),
+             last_used_at = CASE WHEN ?4 IS NULL THEN last_used_at WHEN last_used_at IS NULL THEN ?4 ELSE max(last_used_at, ?4) END
+             WHERE id = ?1"
+        } else {
             "UPDATE techniques SET used = max(used, ?2), undone = max(undone, ?3),
              last_used_at = CASE WHEN ?4 IS NULL THEN last_used_at WHEN last_used_at IS NULL THEN ?4 ELSE max(last_used_at, ?4) END
-             WHERE id = ?1",
-        )?
-        .execute(params![id, t.used, t.undone, t.last_used])?;
+             WHERE id = ?1"
+        };
+        let (used, undone) = since.unwrap_or((t.used, t.undone));
+        c.prepare_cached(sql)?.execute(params![id, used, undone, t.last_used])?;
         Ok(())
     }
 }
