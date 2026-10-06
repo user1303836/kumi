@@ -537,6 +537,8 @@ impl Observer {
             if lease != connection.lease.get() {
                 return RuntimeError::plain("Observation changed; late refresh discarded");
             }
+            // The Set wasn't read through (Live switching Sets, say): the model may still hold the old one.
+            self.model_stale();
             connection.discard_reads();
             connection.epoch.set(None);
             match error {
