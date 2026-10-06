@@ -3,6 +3,22 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.8.6 — 2026-10-06
+
+Ships with bridge 1.0.80, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+
+- Kumi writes and reads notes in a compact notation (bars and beats, drum lanes, chords): a 16-bar
+  beat takes 132 tokens instead of 5,600, so parts come faster.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.80
+
+- MIDI clip rows include the clip's start and end markers, so Kumi reads an Arrangement clip as it
+  plays.
+
 ## 1.8.5 — 2026-10-06
 
 Ships with bridge 1.0.79, which Live loads when it restarts. After updating, Kumi offers to quit Live
