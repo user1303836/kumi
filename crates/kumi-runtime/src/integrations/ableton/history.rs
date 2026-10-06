@@ -568,12 +568,15 @@ impl History {
         if why.contains("again at its length") {
             // Its clips were made aside and deleted: Live's history keeps that empty step of Kumi's.
             let note = format!(
-                "Kumi can't bring back {names}: {why}. It left the change as it is; Live's own undo can take it back: press Cmd-Z in Live twice (Kumi's try left an empty step first)."
+                "Kumi can't bring back {names}: {why}. It left the change as it is; Live's own undo (Cmd-Z in Live) can take it back, one press later than before: Kumi's try left an empty step on top of Live's undo history."
             );
             return UndoResult::with(self.update(entry, ChangeState::Kept, Some(note.clone())), note, true);
         }
         let fix = if why.contains("isn't the track it was") {
-            Some(format!("Name it \u{201c}{}\u{201d} again, then undo again.", material.track_name))
+            Some(format!(
+                "If it's \u{201c}{0}\u{201d} renamed, name it \u{201c}{0}\u{201d} again, then undo again; if another track took its place, Live's own undo (Cmd-Z in Live) can take the change back.",
+                material.track_name
+            ))
         } else if why.contains("'s place now") {
             why.find('\u{201d}').map(|end| format!("Move or delete {}, then undo again.", &why[..end + '\u{201d}'.len_utf8()]))
         } else if why.contains("'s slot now") {

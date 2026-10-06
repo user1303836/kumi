@@ -706,7 +706,7 @@ async fn a_clip_live_cant_make_at_its_length_leaves_the_change_to_lives_undo() {
             assert!(is_error);
             assert_eq!(
                 text,
-                "Kumi can't bring back \u{201c}Verse\u{201d}: Live can't make \u{201c}Verse\u{201d} again at its length: the clip is longer than its file. It left the change as it is; Live's own undo can take it back: press Cmd-Z in Live twice (Kumi's try left an empty step first)."
+                "Kumi can't bring back \u{201c}Verse\u{201d}: Live can't make \u{201c}Verse\u{201d} again at its length: the clip is longer than its file. It left the change as it is; Live's own undo (Cmd-Z in Live) can take it back, one press later than before: Kumi's try left an empty step on top of Live's undo history."
             );
             assert_eq!(two.state(), ChangeState::Kept);
             assert!(!two.calls().contains(&"live_song_undo".to_owned()), "Kumi's empty step stays in Live's history");
@@ -726,7 +726,7 @@ async fn a_renamed_track_says_how_to_clear_it() {
             let (text, _) = live.undo().await;
             assert_eq!(
                 text,
-                "Kumi can't bring back \u{201c}Verse\u{201d} yet: \u{201c}Pad\u{201d} isn't the track it was (renamed, or another in its place). Name it \u{201c}Keys\u{201d} again, then undo again."
+                "Kumi can't bring back \u{201c}Verse\u{201d} yet: \u{201c}Pad\u{201d} isn't the track it was (renamed, or another in its place). If it's \u{201c}Keys\u{201d} renamed, name it \u{201c}Keys\u{201d} again, then undo again; if another track took its place, Live's own undo (Cmd-Z in Live) can take the change back."
             );
             assert_eq!(live.state(), ChangeState::Applied);
         })

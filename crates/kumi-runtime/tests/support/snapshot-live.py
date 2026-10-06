@@ -79,9 +79,20 @@ class Groove:
         self._live_ptr = pointer(); self.name = name
 
 FILE_BEATS = {}
+# How much an Arrangement audio clip of a file grows when it's unwarped (Live re-derives its span from its seconds).
+FILE_STRETCH = {}
 
 class Clip:
     groove = None
+    @property
+    def warping(self):
+        return self._warping
+    @warping.setter
+    def warping(self, on):
+        was = getattr(self, "_warping", None)
+        self._warping = on
+        if was and not on and self.is_arrangement_clip:
+            self.end_time = self.start_time + (self.end_time - self.start_time) * FILE_STRETCH.get(self.file_path, 1.0)
     def __init__(self, parent, arrangement, audio, length, start=0.0, file_path=None):
         self._live_ptr = pointer(); self.canonical_parent = parent
         self.is_arrangement_clip, self.is_audio_clip, self.is_midi_clip = arrangement, audio, not audio
@@ -521,6 +532,39 @@ def scenario_a_clip_longer_than_its_file_is_refused_before_anything_changes(fail
     refused(restore_args(whole, remnants=[{"identity": r["identity"], "hash": r["hash"], "name": "Loop"} for r in pieces]), "cleared")
     if spans(vox) != [("Loop", 0.0, 8.0), ("Loop", 16.0, 32.0)]:
         fail("the pieces: %r" % spans(vox))
+    os.unlink(sample)
+
+def scenario_a_stand_in_that_grows_when_settled_is_taken_away_whole(fail):
+    # An unwarped clip whose file grows by half when unwarped (0 to 48), cut by "Next" at 4 (its far end stays, 36 to
+    # 48): the throwaway splits its stand-in instead of cutting it.
+    vox = Track("Vox", midi=False); song = make_song(vox)
+    sample = audio_file(32.0); FILE_STRETCH[sample] = 1.5
+    take = audio_clip(vox, "Take", sample, 0.0); take.warping = False
+    audio_clip(vox, "Next", sample, 4.0)
+    kept = run(song, {"r:take": take}, {"op": "capture", "clips": ["r:take"]})["clips"]
+    vox.delete_clip(take)
+    try:
+        run(song, {}, restore_args(kept)); fail("made, or left pieces")
+    except ValueError as error:
+        if "Live can't make “Take” again at its length" not in str(error): fail("refused: %s" % error)
+    if spans(vox) != [("Next", 4.0, 36.0), ("Take", 36.0, 48.0)]:
+        fail("something left: %r" % spans(vox))
+    os.unlink(sample)
+
+def scenario_stand_ins_not_yet_placed_go_when_a_later_step_fails(fail):
+    vox = Track("Vox", midi=False); song = make_song(vox)
+    sample = audio_file(32.0)
+    a = audio_clip(vox, "A", sample, 0.0); audio_clip(vox, "N", sample, 4.0)
+    b = audio_clip(vox, "B", sample, 40.0); audio_clip(vox, "M", sample, 44.0)
+    kept = run(song, {"r:a": a, "r:b": b}, {"op": "capture", "clips": ["r:a", "r:b"]})["clips"]
+    vox.delete_clip(a); vox.delete_clip(b)
+    # Both stand-ins made and cut (two clips each), then Live refuses putting the first in its place.
+    vox.broken_after = vox.made + 4
+    done = run(song, {}, restore_args(kept))
+    if "Live refused" not in done.get("error", "") or done["made"]:
+        fail("how far it got: %r" % done)
+    if spans(vox) != [("N", 4.0, 36.0), ("M", 44.0, 76.0)]:
+        fail("a stand-in left: %r" % spans(vox))
     os.unlink(sample)
 
 def scenario_a_session_clip_goes_back_to_its_scene(fail):

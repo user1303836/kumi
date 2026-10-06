@@ -240,17 +240,31 @@ def make_aside(track, where, kept, aside):
     """An Arrangement audio clip, made past the track's last clip and cut to its length, to be put in its place later.
     Live makes one at its file's length, laid over whatever is there, and setting its markers doesn't shorten it: so a
     throwaway clip laid over its tail cuts it, and is deleted. One Live can't make that long (a loop drawn out past its
-    file, a warp stretched past Live's own) raises. Each one made is added to `aside`."""
+    file, a warp stretched past Live's own), or a stand-in the throwaway splits rather than cuts (one that grew when it
+    settled, unwarped say), raises with everything it made deleted. Each one made is added to `aside`."""
     length = float(where["end"]) - float(where["start"])
     far = max([float(clip.end_time) for clip in track.arrangement_clips] + [float(where["end"])]) + 4.0
-    stand = made_by(track, lambda: track.create_audio_clip(kept["file"], far), kept["name"])
-    aside.append(stand)
-    settle(stand, kept)
-    if stand.end_time - stand.start_time > length + 1e-6:
-        track.delete_clip(made_by(track, lambda: track.create_audio_clip(kept["file"], far + length), kept["name"]))
+    before = {identity(clip) for clip in track.arrangement_clips}
+    def made_since():
+        return [clip for clip in track.arrangement_clips if identity(clip) not in before]
+    try:
+        stand = made_by(track, lambda: track.create_audio_clip(kept["file"], far), kept["name"])
         settle(stand, kept)
-    if abs(stand.end_time - stand.start_time - length) > 1e-6:
-        raise ValueError("Live can't make %s again at its length: the clip is longer than its file" % quoted(kept["name"]))
+        if stand.end_time - stand.start_time > length + 1e-6:
+            track.create_audio_clip(kept["file"], far + length)
+            extra = [clip for clip in made_since() if identity(clip) != identity(stand)]
+            for clip in extra:
+                track.delete_clip(clip)
+            if len(extra) != 1:
+                raise ValueError("Live can't make %s again at its length" % quoted(kept["name"]))
+            settle(stand, kept)
+        if abs(stand.end_time - stand.start_time - length) > 1e-6:
+            raise ValueError("Live can't make %s again at its length: the clip is longer than its file" % quoted(kept["name"]))
+    except Exception:
+        for clip in made_since():
+            attempt(lambda clip=clip: track.delete_clip(clip))
+        raise
+    aside.append(stand)
     return stand
 
 def put_in_place(track, stand, where, kept):

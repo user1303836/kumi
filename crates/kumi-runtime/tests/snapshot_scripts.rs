@@ -18,7 +18,7 @@ fn clips_are_captured_and_made_again_in_a_fake_live() {
     let output = child.wait_with_output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let scenarios: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(scenarios.len(), 13, "{scenarios:?}");
+    assert_eq!(scenarios.len(), 15, "{scenarios:?}");
     for scenario in &scenarios {
         assert_eq!(scenario["problems"], json!([]), "{}", scenario["scenario"]);
     }
