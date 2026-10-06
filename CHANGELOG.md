@@ -3,6 +3,16 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.9.1 — 2026-10-06
+
+Ships with bridge 1.0.85, as 1.9.0 did.
+
+- On Windows and Linux, Kumi fetches ffmpeg in the 20 minutes after BtbN's daily build too. When it
+  can't fetch ffmpeg, watching a video still gives the transcript, and says why there are no frames.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.9.0 — 2026-10-06
 
 Ships with bridge 1.0.85, which Live loads when it restarts. After updating, Kumi offers to quit Live
