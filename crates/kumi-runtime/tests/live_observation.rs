@@ -147,6 +147,7 @@ fn observation(value: Observation) -> Value {
 async fn observation_context_dispatches_and_authority_match_source() {
     tokio::task::LocalSet::new().run_until(async{
         let fixture:Value=serde_json::from_str(include_str!("support/observation-oracle.json")).unwrap();
+        let(named_turns,whole_turns)=(std::cell::Cell::new(0),std::cell::Cell::new(0));
         for original in fixture["cases"].as_array().unwrap(){
             let mut case=original.clone();case["responses"]=json!(case["responses"].as_array().unwrap().iter().map(|id|fixture["values"][id.as_u64().unwrap() as usize].clone()).collect::<Vec<_>>());
             let endpoint=Rc::new(Fixture{case:case.clone(),config:RefCell::new(json!({})),calls:RefCell::new(Vec::new()),disconnects:RefCell::new(Vec::new()),owner:RefCell::new(Weak::new()),changes:RefCell::new(IndexMap::new())});
@@ -161,12 +162,18 @@ async fn observation_context_dispatches_and_authority_match_source() {
                 for change in config["changes"].as_array().into_iter().flatten(){let record:ChangeRecord=serde_json::from_value(change["record"].clone()).unwrap();endpoint.changes.borrow_mut().insert(record.id.clone(),ObservedChange{record,within:change["within"].as_str().is_some_and(|s|!s.is_empty())});}
                 let signal=Signal::new();if config["abort"]==true{signal.cancel();}
                 let hints=config.get("hints").map(|h|ObserveHints{pinned:h.get("pinned").map(|v|serde_json::from_value(v.clone()).unwrap()),continuing:h["continuing"].as_bool()});
-                let value=match observer.observe(endpoint.as_ref(),signal,hints).await{Ok(v)=>observation(v),Err(RuntimeError::Aborted)=>json!({"error":"cancelled"}),Err(e)=>json!({"error":e.to_string()})};
+                let value=match observer.observe(endpoint.as_ref(),signal,hints).await{Ok(v)=>{
+                    // The Set model is built from the same rows: the tracks the observation names, in order (a row
+                    // without a ref can't be found again, so the model leaves it out).
+                    if let Some(names)=&v.tracks{let model=observer.model();let mut named=names.iter();assert!(model.tracks.iter().all(|t|named.any(|n|*n==t.name)),"{} turn {index}: the Set model {:?} against {names:?}",case["label"],model.tracks.iter().map(|t|&t.name).collect::<Vec<_>>());named_turns.set(named_turns.get()+1);if model.tracks.len()==names.len(){whole_turns.set(whole_turns.get()+1);}}
+                    observation(v)
+                },Err(RuntimeError::Aborted)=>json!({"error":"cancelled"}),Err(e)=>json!({"error":e.to_string()})};
                 let state={let book=connection.references.borrow();json!({"epoch":connection.epoch.get(),"lease":connection.lease.get(),"lastTrackCount":observer.last_track_count.get(),"currentTempo":observer.tempo.get(),"beatsPerBar":observer.beats_per_bar.get(),"refs":book.refs.iter().collect::<Vec<_>>(),"cursors":book.cursors.iter().collect::<Vec<_>>(),"known":book.known.iter().collect::<Vec<_>>()})};
                 let label=format!("{} turn {index}",case["label"]);eq(&value,&case["results"][index]["value"],&label);eq(&state,&case["results"][index]["state"],&format!("{label} state"));
             }
             remember.cancel_timer();connection.close().await.unwrap();
             eq(&json!(*endpoint.calls.borrow()),&case["calls"],&format!("{} all dispatches",case["label"]));eq(&json!(*states.borrow()),&case["states"],&format!("{} connection states",case["label"]));
         }
+        assert!(named_turns.get()>10&&whole_turns.get()+3>=named_turns.get(),"the Set model has every track in all but the malformed turns: {} of {}",whole_turns.get(),named_turns.get());
     }).await;
 }
