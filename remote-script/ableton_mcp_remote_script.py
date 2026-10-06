@@ -2277,6 +2277,10 @@ class LiveObjectMapper:
             loop_row["length"] = float(loop_length)
         if loop_row:
             set_row["loop"] = loop_row
+        # The Set's scale (Live 12): its root (0 is C), its name, and whether Scale Mode is on.
+        root, scale_name, scale_mode = (self._read_attr(self.song, name) for name in ("root_note", "scale_name", "scale_mode"))
+        if isinstance(root, int) and not isinstance(root, bool) and 0 <= root <= 11 and isinstance(scale_name, str) and scale_name:
+            set_row["scale"] = {"rootNote": int(root), "scaleName": scale_name[:64], "scaleMode": scale_mode if isinstance(scale_mode, bool) else None}
         view = getattr(self.song, "view", None)
         if view is not None and (hasattr(view, "mod_mapping_device") or hasattr(view, "mod_mapping_parameter")):
             set_row.update(self._mod_mapping_refs(view))
@@ -5416,27 +5420,21 @@ class LiveObjectMapper:
         creator = getattr(track, "create_midi_clip", None)
         if not callable(creator):
             raise ValueError("arrangement clip creation is unavailable")
-        before_clips = self._items(self._read_attr(track, "arrangement_clips") or []); before_identity_order = [self._capture_object_identity(item) for item in before_clips]; before_identities = set(before_identity_order); checkpoint = self.refs.checkpoint()
+        # Live lays the new clip over the clips it lands on and cuts them, as dropping one does; the change's summary
+        # says what it replaced.
+        before = {self._capture_object_identity(item): self._arrangement_span(item) for item in self._items(self._read_attr(track, "arrangement_clips") or [])}; checkpoint = self.refs.checkpoint(); clip = None
         try:
-            clip = creator(float(position), float(length)); clips = self._items(self._read_attr(track, "arrangement_clips") or []); created_rows = [(index, candidate) for index, candidate in enumerate(clips) if self._capture_object_identity(candidate) not in before_identities]
-            if clip is None or len(clips) != len(before_clips) + 1 or len(created_rows) != 1: raise ValueError("arrangement clip creation did not produce one identity-distinct clip")
-            clip_index, created = created_rows[0]; created_identity = self._capture_object_identity(created); expected_identity_order = list(before_identity_order); expected_identity_order.insert(clip_index, created_identity)
-            if [self._capture_object_identity(candidate) for candidate in clips] != expected_identity_order: raise ValueError("arrangement clip creation reordered pre-existing clips")
-            if not self._capture_same_object(created, clip, self._capture_object_identity(clip)): raise ValueError("arrangement clip creator returned a different object")
+            clip = creator(float(position), float(length))
+            if clip is None: raise ValueError("arrangement clip creation did not produce its clip")
+            clip_index = self._laid_over(track, before, clip, float(position), float(position) + float(length))
+            created = self._items(self._read_attr(track, "arrangement_clips") or [])[clip_index]
             if hasattr(created, "name"): created.name = name
             actual_start = self._read_attr(created, "start_time"); actual_length = self._read_attr(created, "length")
             if str(getattr(created, "name", "")) != name or not isinstance(actual_start, (int, float)) or not isinstance(actual_length, (int, float)) or not _same_number(actual_start, position) or not _same_number(actual_length, length): raise ValueError("arrangement clip requested name, position, or length was not confirmed")
             created_ref = self.refs.put("arrangement_clip", created, f"{track_index}:{clip_index}"); created_identity = self._capture_object_identity(created); fingerprint = self._mapped_fingerprint(created_ref)
             return {"ref": created_ref, "objectIdentity": created_identity, "name": str(getattr(created, "name", "")), "start": float(getattr(created, "start_time", position)), "length": float(getattr(created, "length", length)), "createdFingerprint": fingerprint}
         except BaseException as error:
-            rollback_failed = False; deleter = getattr(track, "delete_clip", None); current = self._items(self._read_attr(track, "arrangement_clips") or []); owned = [candidate for candidate in current if self._capture_object_identity(candidate) not in before_identities]
-            if owned and not callable(deleter): rollback_failed = True
-            if callable(deleter):
-                for candidate in owned:
-                    try: deleter(candidate)
-                    except BaseException: pass
-            if [self._capture_object_identity(item) for item in self._items(self._read_attr(track, "arrangement_clips") or [])] != before_identity_order: rollback_failed = True
-            if rollback_failed: raise ValueError("arrangement clip creation failed and exact cleanup failed") from error
+            self._laid_over_cleanup(track, before, clip, error, "arrangement clip creation")
             self.refs.restore(checkpoint); raise
 
     def _arrangement_clip_delete(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -5532,6 +5530,51 @@ class LiveObjectMapper:
     def _arrangement_holds(self, owner: Any, start: float, end: float, keep: tuple[Any, str] | None = None) -> bool:
         """Whether a clip of this track (other than `keep`, a clip and its identity) holds part of [start, end)."""
         return any(other_start < end - 1e-6 and other_end > start + 1e-6 for other_start, other_end in (self._arrangement_span(item) for item in self._items(self._read_attr(owner, "arrangement_clips") or []) if keep is None or not self._capture_same_object(item, keep[0], keep[1])))
+
+    def _laid_over(self, track: Any, before: dict[str, tuple[float, float]], created: Any, start: float, end: float) -> int:
+        """Check what a new Arrangement clip did to its track, as Live lays one over the clips it lands on (12.4.15b5):
+        the new clip on [start, end); a clip clear of that span untouched; a clip under it cut back to exactly what's
+        left of it outside the span (before it, or after it), or gone; and at most one clip Live split around it, whose
+        other remainder is a clip of its own. Anything else raises. `before` is each earlier clip's span by identity.
+        Returns the new clip's index."""
+        created_identity = self._capture_object_identity(created); index = None; far_ends = 0
+        for position, candidate in enumerate(self._items(self._read_attr(track, "arrangement_clips") or [])):
+            identity = self._capture_object_identity(candidate); left, right = self._arrangement_span(candidate)
+            if identity == created_identity:
+                index = position; continue
+            def remainder(old_left: float, old_right: float) -> bool:
+                # What Live leaves of a clip under the new one: the part before it, or the part after it, exactly.
+                return (old_left < start - 1e-6 and _same_number(left, old_left) and _same_number(right, start)) or (old_right > end + 1e-6 and _same_number(left, end) and _same_number(right, old_right))
+            if identity in before:
+                old_left, old_right = before[identity]
+                if old_right <= start + 1e-6 or old_left >= end - 1e-6:
+                    if not (_same_number(left, old_left) and _same_number(right, old_right)): raise ValueError("arrangement clip creation changed a clip outside its span")
+                elif not remainder(old_left, old_right):
+                    raise ValueError("arrangement clip creation cut a clip other than as Live lays one over")
+            elif any(old_left < start - 1e-6 and old_right > end + 1e-6 and remainder(old_left, old_right) for old_left, old_right in before.values()):
+                far_ends += 1
+            else:
+                raise ValueError("arrangement clip creation produced a clip it didn't ask for")
+        if index is None: raise ValueError("arrangement clip creation did not produce its clip")
+        if far_ends > 1: raise ValueError("arrangement clip creation split more than one clip")
+        return index
+
+    def _laid_over_cleanup(self, track: Any, before: dict[str, tuple[float, float]], created: Any, error: BaseException, what: str) -> None:
+        """After a failed create: delete the clip Kumi made, and only that one (never a clip Live cut, or the far end of
+        one it split). What Live cut stays cut until Live's undo puts it back, and the error says so."""
+        deleter = getattr(track, "delete_clip", None); identity = self._capture_object_identity(created) if created is not None else None
+        mine = [candidate for candidate in self._items(self._read_attr(track, "arrangement_clips") or []) if identity is not None and self._capture_object_identity(candidate) == identity]
+        cleaned = not mine or callable(deleter)
+        for candidate in mine if callable(deleter) else []:
+            try: deleter(candidate)
+            except BaseException: cleaned = False
+        if not cleaned: raise ValueError(f"{what} failed and Kumi couldn't remove the clip it made; Live's undo takes it back") from error
+        now = {self._capture_object_identity(item): self._arrangement_span(item) for item in self._items(self._read_attr(track, "arrangement_clips") or [])}
+        if set(now) != set(before) or any(not (_same_number(now[key][0], before[key][0]) and _same_number(now[key][1], before[key][1])) for key in before):
+            if created is None:
+                # Live didn't hand back a clip, so Kumi has none to remove: whatever changed is Live's undo's to put back.
+                raise ValueError(f"{what} failed after Live changed the clips where it was to land; Live's undo puts them back") from error
+            raise ValueError(f"{what} failed after Live cut the clips it landed on; Kumi removed its clip, and Live's undo puts back what was cut") from error
 
     def _arrangement_parking(self, owner: Any, *beats: float) -> float:
         """A beat past the end of the Set, of every clip on this track and of `beats`, where a clip can wait
@@ -6045,13 +6088,15 @@ class LiveObjectMapper:
         creator = getattr(track, "create_audio_clip", None)
         if not callable(creator):
             raise ValueError("arrangement audio clip creation is unavailable")
-        before_clips = self._items(self._read_attr(track, "arrangement_clips") or []); before_identity_order = [self._capture_object_identity(item) for item in before_clips]; before_identities = set(before_identity_order); checkpoint = self.refs.checkpoint()
+        # Live lays the new clip over the clips it lands on and cuts them, as dropping one does; the change's summary
+        # says what it replaced.
+        before = {self._capture_object_identity(item): self._arrangement_span(item) for item in self._items(self._read_attr(track, "arrangement_clips") or [])}; checkpoint = self.refs.checkpoint(); clip = None
         try:
-            clip = creator(file_path, float(position)); clips = self._items(self._read_attr(track, "arrangement_clips") or []); created_rows = [(index, candidate) for index, candidate in enumerate(clips) if self._capture_object_identity(candidate) not in before_identities]
-            if clip is None or len(clips) != len(before_clips) + 1 or len(created_rows) != 1: raise ValueError("arrangement audio clip creation did not produce one identity-distinct clip")
-            clip_index, created = created_rows[0]; created_identity = self._capture_object_identity(created); expected_identity_order = list(before_identity_order); expected_identity_order.insert(clip_index, created_identity)
-            if [self._capture_object_identity(candidate) for candidate in clips] != expected_identity_order: raise ValueError("arrangement audio clip creation reordered pre-existing clips")
-            if not self._capture_same_object(created, clip, self._capture_object_identity(clip)): raise ValueError("arrangement audio clip creator returned a different object")
+            clip = creator(file_path, float(position))
+            if clip is None: raise ValueError("arrangement audio clip creation did not produce its clip")
+            clip_start, clip_end = self._arrangement_span(clip)
+            clip_index = self._laid_over(track, before, clip, clip_start, clip_end)
+            created = self._items(self._read_attr(track, "arrangement_clips") or [])[clip_index]
             if name is not None and hasattr(created, "name"): created.name = name
             actual_start = self._read_attr(created, "start_time"); actual_length = self._read_attr(created, "length"); actual_path = self._read_attr(created, "file_path")
             if name is not None and str(getattr(created, "name", "")) != name: raise ValueError("arrangement audio clip requested name was not confirmed")
@@ -6061,14 +6106,7 @@ class LiveObjectMapper:
             created_ref = self.refs.put("arrangement_clip", created, f"{track_index}:{clip_index}"); created_identity = self._capture_object_identity(created); fingerprint = self._mapped_fingerprint(created_ref)
             return {"ref": created_ref, "objectIdentity": created_identity, "name": str(getattr(created, "name", "")), "start": float(actual_start), "length": float(actual_length), "filePath": actual_path, "createdFingerprint": fingerprint}
         except BaseException as error:
-            rollback_failed = False; deleter = getattr(track, "delete_clip", None); current = self._items(self._read_attr(track, "arrangement_clips") or []); owned = [candidate for candidate in current if self._capture_object_identity(candidate) not in before_identities]
-            if owned and not callable(deleter): rollback_failed = True
-            if callable(deleter):
-                for candidate in owned:
-                    try: deleter(candidate)
-                    except BaseException: pass
-            if [self._capture_object_identity(item) for item in self._items(self._read_attr(track, "arrangement_clips") or [])] != before_identity_order: rollback_failed = True
-            if rollback_failed: raise ValueError("arrangement audio clip creation failed and exact cleanup failed") from error
+            self._laid_over_cleanup(track, before, clip, error, "arrangement audio clip creation")
             self.refs.restore(checkpoint); raise
 
     def _clip_authority_digest(self, reference: str) -> str:
@@ -6476,8 +6514,22 @@ class LiveObjectMapper:
             raise ValueError("Arrangement automation envelopes are unavailable on this Live shape")
         parameter = self._resolve_parameter(parameter_ref)
         envelope = reader(parameter)
-        points = self._envelope_points(envelope) if envelope is not None else []
-        return {"available": True, "exists": envelope is not None, "points": points}
+        if envelope is None:
+            # Live gives no envelope for an Arrangement clip by its parameter, even one it has (12.4.15b5), but lists
+            # the clip's own in automation_envelopes, each with its parameter. (The track's lanes it gives neither way.)
+            listed = self._read_attr(clip, "automation_envelopes")
+            if listed is None:
+                return {"available": False, "exists": False, "points": []}
+            identity = self._capture_object_identity(parameter)
+            def names_it(candidate: Any) -> bool:
+                # An entry whose parameter Live won't give is skipped, not the read failed.
+                owner = self._read_attr(candidate, "parameter")
+                try: return owner is not None and self._capture_object_identity(owner) == identity
+                except BaseException: return False
+            envelope = next((candidate for candidate in self._items(listed) if names_it(candidate)), None)
+        if envelope is None:
+            return {"available": True, "exists": False, "points": []}
+        return {"available": True, "exists": True, "points": self._envelope_points(envelope)}
 
     def _take_lane_read(self, args: dict[str, Any]) -> dict[str, Any]:
         track_ref = args.get("trackRef")

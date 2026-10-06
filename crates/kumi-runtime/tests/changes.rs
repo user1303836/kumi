@@ -148,3 +148,56 @@ fn a_move_that_replaced_clips_says_what_and_kumi_keeps_it() {
         json!([{"trackRef":"1:track:0","fromBeat":12,"toBeat":14},{"trackRef":"1:track:0","fromBeat":16,"toBeat":17}]);
     assert!(kind.replaced(cut_first.as_object().unwrap()).unwrap().ends_with("in 3 steps (the move, then each cut)."));
 }
+
+#[test]
+fn set_audio_clip_offers_no_fades_live_cant_set() {
+    // Live's API has no clip fades: the model isn't offered the bridge's fields for them, and they're refused if given.
+    let kind = CHANGES.iter().find(|kind| kind.tool == "set_audio_clip").unwrap();
+    let host = json!({"type":"object","properties":{"clipRef":{"type":"string"},"gain":{"type":"number"},"fadeInLength":{"type":"number"},"fadeOutLength":{"type":"number"}}});
+    let schema = kind.schema(host.as_object().unwrap());
+    assert_eq!(schema["properties"].as_object().unwrap().keys().collect::<Vec<_>>(), ["clipRef", "gain"]);
+    assert!(kind.has("prepare") && !kind.description.contains("fadeInLength"));
+}
+
+#[test]
+fn a_new_arrangement_clip_says_what_it_replaced() {
+    // Live lays a new clip over the clips it lands on, as a drop does: the summary names each, with the bars it cut.
+    kumi_runtime::integrations::ableton::more_changes::set_meter(4.0, 4.0);
+    let kind = CHANGES.iter().find(|kind| kind.tool == "add_arrangement_clip").unwrap();
+    let clips: Vec<_> = [("Hats", 16.0, 24.0), ("Fill", 26.0, 28.0), ("Hook", 40.0, 44.0)]
+        .iter()
+        .map(|(name, start, end)| json!({"name":name,"start":start,"endTime":end}).as_object().unwrap().clone())
+        .collect();
+    let replaces = laid_over(&clips, 20.0, 28.0);
+    assert_eq!(replaces.len(), 2, "Hook is clear of it");
+    let preview = json!({"payload":{"trackRef":"1:track:0","position":20,"length":8},"replaces":replaces});
+    let input = json!({"trackRef":"1:track:0","position":20,"length":8,"name":"Keys"});
+    let summary = kind.summarize(preview.as_object().unwrap(), input.as_object().unwrap(), &|_| None, None);
+    assert_eq!(summary.title, "New Arrangement clip “Keys” at bar 6 (2 bars), replacing bar 6 to bar 7 of “Hats”, “Fill”");
+    assert_eq!(
+        kind.replaced(preview.as_object().unwrap()).as_deref(),
+        Some("Kumi can't bring back what the new clip replaced; Live's own undo can.")
+    );
+    // An audio clip: its file's length, known once it's made, sets what it covers.
+    let preview =
+        json!({"payload":{"trackRef":"1:track:0","position":20,"filePath":"/samples/Vox.wav"},"replaces":laid_over(&clips, 20.0, 52.0)});
+    let input = json!({"trackRef":"1:track:0","position":20,"sample":"/samples/Vox.wav"});
+    let summary = kind.summarize(preview.as_object().unwrap(), input.as_object().unwrap(), &|_| None, None);
+    assert_eq!(summary.title, "New Arrangement audio clip “Vox” at bar 6, replacing bar 6 to bar 7 of “Hats”, “Fill”, “Hook”");
+    // Nothing under it: nothing said, and Kumi's undo takes it back.
+    let clear = json!({"payload":{"trackRef":"1:track:0","position":0,"length":4},"replaces":[]});
+    assert!(!kind.summarize(clear.as_object().unwrap(), input.as_object().unwrap(), &|_| None, None).title.contains("replacing"));
+    assert_eq!(kind.replaced(clear.as_object().unwrap()), None);
+}
+
+#[test]
+fn a_new_clip_whose_cut_kumi_couldnt_tell_leaves_its_undo_to_live() {
+    // A read of the track's clips that failed, or clips cut past what the read before explains: Kumi's own undo, which
+    // deletes the new clip, wouldn't bring back what was cut, so it's left to Live's.
+    let kind = CHANGES.iter().find(|kind| kind.tool == "add_arrangement_clip").unwrap();
+    let unknown = json!({"payload":{"trackRef":"1:track:0","position":0,"length":4},"replaces":[],"replacesUnknown":true});
+    assert_eq!(
+        kind.replaced(unknown.as_object().unwrap()).as_deref(),
+        Some("Kumi couldn't tell what the new clip cut where it landed, so it leaves taking it back to Live's own undo.")
+    );
+}

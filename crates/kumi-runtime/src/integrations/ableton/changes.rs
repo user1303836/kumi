@@ -384,11 +384,31 @@ impl ChangeKind {
                 out
             }
             "add_arrangement_clip" => {
-                let mut out = json!({"action":"create","kind":"midi","trackRef":fallback(input.get("trackRef")),"position":fallback(input.get("position")),"length":fallback(input.get("length"))});
+                // An audio file as a clip when a sample is given; an empty MIDI clip otherwise.
+                let mut out = if input.contains_key("sample") {
+                    let found = match sample_for(input.get("sample"), context).await? {
+                        Ok(found) => found,
+                        Err(why) => return Ok(Err(why)),
+                    };
+                    json!({"action":"create","kind":"audio","trackRef":fallback(input.get("trackRef")),"position":fallback(input.get("position")),"filePath":found.path})
+                } else if finite(input.get("length")).is_some() {
+                    json!({"action":"create","kind":"midi","trackRef":fallback(input.get("trackRef")),"position":fallback(input.get("position")),"length":fallback(input.get("length"))})
+                } else {
+                    return Ok(Err("Say how long the MIDI clip is (length, in beats), or give a sample for an audio clip.".into()));
+                };
                 if let Some(name) = input.get("name").filter(|v| v.is_string()) {
                     out["name"] = name.clone();
                 }
                 out
+            }
+            "set_audio_clip" => {
+                // Live's API has no clip fades (12.4.15b5): the bridge would take them and change nothing.
+                if input.contains_key("fadeInLength") || input.contains_key("fadeOutLength") {
+                    return Ok(Err(
+                        "Live's API has no clip fades, so Kumi can't set them: leave fadeInLength and fadeOutLength out.".into()
+                    ));
+                }
+                Value::Object(input.clone())
             }
             "switch_device" => {
                 json!({"action":"enable","deviceRef":fallback(input.get("deviceRef")),"enabled":input.get("enabled")==Some(&Value::Bool(true))})
@@ -529,6 +549,12 @@ impl ChangeKind {
                 }
             }
             schema["properties"] = Value::Object(properties);
+        } else if self.tool == "set_audio_clip" {
+            // Live's API has no clip fades (12.4.15b5): the bridge's fields for them change nothing.
+            if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+                properties.shift_remove("fadeInLength");
+                properties.shift_remove("fadeOutLength");
+            }
         }
         schema.as_object().unwrap().clone()
     }
@@ -592,12 +618,43 @@ impl ChangeKind {
         Some(why.into())
     }
 }
+/// The clips a new Arrangement clip on [start, end) lands on, as Live lays it over them (cutting them, as a drop does):
+/// each one's name and span, the part it replaces (`from`–`to`), and whether all of it goes. The summary names them.
+pub fn laid_over(clips: &[JsonObject], start: f64, end: f64) -> Vec<Value> {
+    clips
+        .iter()
+        .filter_map(|clip| {
+            let other_start = clip.get("start").and_then(Value::as_f64)?;
+            let other_end = clip.get("endTime").and_then(Value::as_f64).or_else(|| Some(other_start + clip.get("length")?.as_f64()?))?;
+            (other_start < end - 1e-6 && other_end > start + 1e-6).then(|| {
+                json!({
+                    "name": clip.get("name").and_then(Value::as_str).unwrap_or(""),
+                    "start": other_start,
+                    "end": other_end,
+                    "from": other_start.max(start),
+                    "to": other_end.min(end),
+                    "whole": other_start >= start - 1e-6 && other_end <= end + 1e-6
+                })
+            })
+        })
+        .collect()
+}
 impl ChangeKind {
-    /// Why Kumi can't take back part of an applied change, from its preview: an Arrangement move that
-    /// replaced what was in its new place.
+    /// Why Kumi can't take back part of an applied change, from its preview: an Arrangement move or new clip that
+    /// replaced what was in its place.
     pub fn replaced(&self, preview: &JsonObject) -> Option<String> {
-        if self.tool != "move_clip" || !preview.get("replaces").and_then(Value::as_array).is_some_and(|r| !r.is_empty()) {
+        if self.tool == "add_arrangement_clip" && preview.get("replacesUnknown") == Some(&json!(true)) {
+            return Some(
+                "Kumi couldn't tell what the new clip cut where it landed, so it leaves taking it back to Live's own undo.".into(),
+            );
+        }
+        if !matches!(self.tool.as_str(), "move_clip" | "add_arrangement_clip")
+            || !preview.get("replaces").and_then(Value::as_array).is_some_and(|r| !r.is_empty())
+        {
             return None;
+        }
+        if self.tool == "add_arrangement_clip" {
+            return Some("Kumi can't bring back what the new clip replaced; Live's own undo can.".into());
         }
         // Kumi's Live extension cuts an audio clip first, and each cut is a step of its own in Live's undo.
         let cuts = preview.get("payload").and_then(|p| p.get("clearFirst")).and_then(Value::as_array).map_or(0, Vec::len);

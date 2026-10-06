@@ -64,8 +64,8 @@ fn notation_of(input: &mut JsonObject) -> Result<Option<String>, String> {
         Some(_) => Err("notation is text: the notes in Kumi's notation".into()),
     }
 }
-/// The frame a write's notation is read in: the Set's meter and tempo, the clip's length when given, and the track's
-/// Drum Rack pads when lanes are named for drums.
+/// The frame a write's notation is read in: the Set's meter, tempo and scale (the key roman numerals start in), the
+/// clip's length when given, and the track's Drum Rack pads when lanes are named for drums.
 async fn frame(origin: f64, input: &JsonObject, tempo: Option<f64>, connection: &LiveConnection, text: &str, signal: &Signal) -> Frame {
     let (numerator, denominator) = more_changes::meter();
     let track = input.get("trackRef").and_then(Value::as_str);
@@ -81,6 +81,7 @@ async fn frame(origin: f64, input: &JsonObject, tempo: Option<f64>, connection: 
         length: input.get("length").and_then(Value::as_f64),
         pads,
         drums: false,
+        key: more_changes::scale().as_deref().and_then(notation::Key::parse),
     }
 }
 /// An Arrangement clip's notation, in song time: the clip starts where `start` says, or at the bar of its first note.
@@ -266,6 +267,7 @@ async fn read_clip(connection: &LiveConnection, clip: &str, json: bool, tempo: O
         length,
         drums: !pads.is_empty(),
         pads: pads.clone(),
+        key: None,
     };
     let mut result = JsonObject::new();
     // Where a looped clip starts in its loop, when the bridge doesn't say (it's placed from the loop's start).

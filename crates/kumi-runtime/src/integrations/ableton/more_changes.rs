@@ -13,6 +13,15 @@ pub fn set_meter(numerator: f64, denominator: f64) {
 pub fn meter() -> (u32, u32) {
     METER.get()
 }
+thread_local! {static SCALE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };}
+/// The key roman numerals start in ("D Dorian"): the Set's scale as the last look read it, when the producer chose it
+/// and Scale Mode is on.
+pub fn set_scale(scale: Option<String>) {
+    SCALE.with_borrow_mut(|kept| *kept = scale);
+}
+pub fn scale() -> Option<String> {
+    SCALE.with_borrow(Clone::clone)
+}
 fn trim(value: f64) -> String {
     to_string(parse(&to_fixed(value, 2)).unwrap_or(f64::NAN))
 }
