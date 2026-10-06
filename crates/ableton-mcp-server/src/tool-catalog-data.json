@@ -1682,14 +1682,15 @@
     },
     {
       "name": "live_arrangement_clip_preview",
-      "description": "Read-only preflight for creating one Arrangement clip (MIDI, or an audio clip imported from a file path) with exact fencing. Arbitrary deletion is unavailable; transaction-owned cleanup uses live_undo.",
+      "description": "Read-only preflight for creating one Arrangement clip (MIDI, or an audio clip imported from a file path; a MIDI clip in a take lane with takeLaneRef) or, with action create-lane, a new take lane on a track (trackRef, an optional name), with exact fencing. Arbitrary deletion is unavailable; transaction-owned cleanup uses live_undo, and a take lane only Live's own undo removes.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "action": {
             "type": "string",
             "enum": [
-              "create"
+              "create",
+              "create-lane"
             ]
           },
           "kind": {
@@ -1723,6 +1724,11 @@
             "maxLength": 1024
           },
           "clipRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "takeLaneRef": {
             "type": "string",
             "minLength": 1,
             "maxLength": 256

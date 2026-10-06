@@ -392,10 +392,22 @@ impl ChangeKind {
                     };
                     json!({"action":"create","kind":"audio","trackRef":fallback(input.get("trackRef")),"position":fallback(input.get("position")),"filePath":found.path})
                 } else if finite(input.get("length")).is_some() {
-                    json!({"action":"create","kind":"midi","trackRef":fallback(input.get("trackRef")),"position":fallback(input.get("position")),"length":fallback(input.get("length"))})
+                    let mut out = json!({"action":"create","kind":"midi","trackRef":fallback(input.get("trackRef")),"position":fallback(input.get("position")),"length":fallback(input.get("length"))});
+                    // A MIDI clip in one of the track's take lanes.
+                    if let Some(lane) = input.get("takeLaneRef").filter(|v| v.is_string()) {
+                        out["takeLaneRef"] = lane.clone();
+                    }
+                    out
                 } else {
                     return Ok(Err("Say how long the MIDI clip is (length, in beats), or give a sample for an audio clip.".into()));
                 };
+                if let Some(name) = input.get("name").filter(|v| v.is_string()) {
+                    out["name"] = name.clone();
+                }
+                out
+            }
+            "add_take_lane" => {
+                let mut out = json!({"action":"create-lane","trackRef":fallback(input.get("trackRef"))});
                 if let Some(name) = input.get("name").filter(|v| v.is_string()) {
                     out["name"] = name.clone();
                 }
@@ -570,6 +582,7 @@ impl ChangeKind {
             ),
             "write_midi_clip" => (applied.get("clipRef").and_then(Value::as_str), "session-clip"),
             "load_sample" => (record(applied.get("result")).get("ref").and_then(Value::as_str), "device"),
+            "add_take_lane" => (record(applied.get("result")).get("ref").and_then(Value::as_str), "take-lane"),
             "load_device" => (
                 applied
                     .get("deviceRef")
@@ -597,6 +610,7 @@ impl ChangeKind {
                 _ => return None,
             },
             "edit_clip" => "Live gives Kumi no way to take this back; use Live's own undo if you need to.",
+            "add_take_lane" => "Live's API can't delete a take lane; Live's own undo takes it back.",
             "edit_notes" if action == Some("select") => "Selecting notes changes no notes: there's nothing to undo.",
             "change_structure" if action == Some("delete-return") => {
                 "Live gives Kumi no way to bring a deleted return track back; use Live's own undo if you need to."

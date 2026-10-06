@@ -285,6 +285,15 @@ pub(super) fn more(
             };
             with_track(title, target.or(known))
         }
+        "add_take_lane" => {
+            let payload = record(preview.get("payload"));
+            let known = known(track, coalesce(payload.get("trackRef"), input.get("trackRef")));
+            with_track(
+                format!("New take lane {}{}", quoted(coalesce(payload.get("name"), input.get("name")), ""), on(&known))
+                    .replacen("  ", " ", 1),
+                known,
+            )
+        }
         "add_arrangement_clip" => {
             let payload = record(preview.get("payload"));
             let known = known(track, coalesce(payload.get("trackRef"), input.get("trackRef")));

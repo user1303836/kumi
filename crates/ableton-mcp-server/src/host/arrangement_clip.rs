@@ -12,6 +12,15 @@ fn nonnegative(value: &Value) -> bool {
 fn positive(value: &Value) -> bool {
     value.as_f64().is_some_and(|n| n.is_finite() && n > 0.0)
 }
+/// A track's take lanes as Live's Remote Script hashes them for a lane create: each one's ref, identity and name.
+fn track_lanes(track: &Value) -> Value {
+    json!(track["takeLanes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|lane| json!({"ref":lane["ref"],"objectIdentity":lane["objectIdentity"],"name":lane["name"].as_str().unwrap_or("")}))
+        .collect::<Vec<_>>())
+}
 fn lane_siblings(lane: &Value) -> Value {
     json!(lane["clips"]
         .as_array()
@@ -43,6 +52,9 @@ impl McpHost {
     }
 
     pub async fn live_arrangement_clip_preview_async(&self, id: &Value, params: &Value) -> Value {
+        if params.is_object() && params["action"] == "create-lane" {
+            return self.take_lane_create_preview_async(id, params).await;
+        }
         if params.is_object() && params["action"] == "delete" {
             return transaction_error(
                 id,
@@ -204,6 +216,68 @@ impl McpHost {
         .await;
         result.unwrap_or_else(|e| adapter_tool_error(id, &e, "Arrangement-clip preview requires fresh authoritative state."))
     }
+    /// A new take lane on a track (Live 12's comping lanes): read-only preview, fenced on the track and its lanes.
+    async fn take_lane_create_preview_async(&self, id: &Value, params: &Value) -> Value {
+        if !has_only(params, &["action", "trackRef", "name"])
+            || !is_non_empty_string(&params["trackRef"], 256)
+            || params.get("name").is_some_and(|name| !is_non_empty_string(name, 256))
+        {
+            return error(id, -32602, "trackRef is required for a take lane, and its name, if given, is 1 to 256 characters", None);
+        }
+        let result = async {
+            let status = self.fresh_status(Some(&LiveOperationContext::with_deadline(self.deadline(reads::AUDITION_DEADLINE_MS)))).await?;
+            if !status.connected || !status.capabilities.iter().any(|c| c.as_str() == "session.read") {
+                return Err(LiveError::error("session read capability is unavailable"));
+            }
+            if !status.has_operation("take-lane.create") {
+                return Err(LiveError::error("take-lane.create is unavailable"));
+            }
+            let snapshot = self.views.view_for(None, &[params["trackRef"].clone()], None, &[]).await?;
+            let value = serde_json::to_value(&snapshot).unwrap();
+            let track = value["tracks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|r| r["ref"] == params["trackRef"])
+                .filter(|r| is_non_empty_string(&r["objectIdentity"], 256))
+                .ok_or_else(|| LiveError::error("track identity is not authoritative"))?;
+            let lanes = track_lanes(track);
+            let mut payload = json!({
+                "trackRef":params["trackRef"],
+                "expectedTrackIdentity":track["objectIdentity"],
+                "expectedTakeLaneCollectionRevision":hex::encode(Sha256::digest(canonical_mutation_identity(&lanes)?))
+            });
+            if let Some(name) = params.get("name") {
+                payload["name"] = name.clone();
+            }
+            let fence = js_json::stringify(&json!({"trackRef":params["trackRef"],"trackIdentity":track["objectIdentity"],"lanes":lanes}));
+            let t = json!({
+                "id":tempo::transaction_id("arrclip"),
+                "epoch":status.epoch,
+                "kind":"take-lane-create",
+                "fence":fence,
+                "payload":payload,
+                "expiresAt":kumi_common::time::now_ms_f64()+TRANSACTION_TTL_MS,
+                "state":"previewed"
+            });
+            self.retain_bounded_transaction(&self.clip_lifecycle_transactions, t.clone(), "arrangement clip")?;
+            Ok(success_text(
+                id,
+                &json!({
+                    "transactionId":t["id"],
+                    "epoch":t["epoch"],
+                    "action":"create-lane",
+                    "payload":payload,
+                    // Live's API deletes no take lane: only Live's own undo takes it back.
+                    "impact":"creates-take-lane-live-undo-only",
+                    "confirmation":"apply",
+                    "expiresAt":t["expiresAt"]
+                }),
+            ))
+        }
+        .await;
+        result.unwrap_or_else(|e| adapter_tool_error(id, &e, "Take-lane preview requires fresh authoritative state."))
+    }
     pub async fn live_arrangement_clip_apply_async(&self, id: &Value, params: &Value, signal: Option<&Signal>) -> Option<Value> {
         if !valid_transaction_params(params, "apply") {
             return Some(error(id, -32602, "transactionId, confirmation=apply, and idempotencyKey are required", None));
@@ -214,7 +288,13 @@ impl McpHost {
         let t = record.borrow().clone();
         if !matches!(
             t["kind"].as_str(),
-            Some("arrangement-create" | "arrangement-delete" | "arrangement-audio-create" | "arrangement-take-lane-create")
+            Some(
+                "arrangement-create"
+                    | "arrangement-delete"
+                    | "arrangement-audio-create"
+                    | "arrangement-take-lane-create"
+                    | "take-lane-create"
+            )
         ) || (t["state"] == "previewed" && t["expiresAt"].as_f64().is_some_and(|n| n <= kumi_common::time::now_ms_f64()))
         {
             return Some(transaction_error(id, "Unknown or expired arrangement-clip transaction"));
@@ -250,7 +330,24 @@ impl McpHost {
             let context = self.transaction_context(params, signal, reads::AUDITION_DEADLINE_MS);
             let payload = &t["payload"];
 
-            if !reconciliation && t["kind"] != "arrangement-take-lane-create" {
+            if !reconciliation && t["kind"] == "take-lane-create" {
+                let snapshot = self.views.view_for(Some(&context), &[payload["trackRef"].clone()], None, &[]).await?;
+                let value = serde_json::to_value(&snapshot).unwrap();
+                let track = value["tracks"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|r| r["ref"] == payload["trackRef"])
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                if js_json::stringify(
+                    &json!({"trackRef":payload["trackRef"],"trackIdentity":track["objectIdentity"],"lanes":track_lanes(&track)}),
+                ) != t["fence"]
+                {
+                    return Ok(transaction_error(id, "the track or its take lanes changed since preview; preview again"));
+                }
+            }
+            if !reconciliation && !matches!(t["kind"].as_str(), Some("arrangement-take-lane-create" | "take-lane-create")) {
                 let snapshot = self.views.view_for(Some(&context), &[payload["trackRef"].clone()], None, &[]).await?;
                 if self.arrangement_fence(&snapshot, &[payload["trackRef"].clone()])? != t["fence"] {
                     return Ok(transaction_error(id, "Arrangement changed since preview; preview again"));
@@ -274,6 +371,7 @@ impl McpHost {
                 "arrangement-create" => "arrangement.clip.create",
                 "arrangement-audio-create" => "arrangement.audio-clip.create",
                 "arrangement-take-lane-create" => "take-lane.clip.create",
+                "take-lane-create" => "take-lane.create",
                 _ => "arrangement.clip.delete",
             };
             {
@@ -295,7 +393,16 @@ impl McpHost {
             }
 
             record.borrow_mut()["created"] = result.clone();
-            if creates {
+            if t["kind"] == "take-lane-create" {
+                // The new lane, read back where Live put it.
+                let snapshot = self.views.view_for(Some(&context), &[payload["trackRef"].clone()], None, &[]).await?;
+                let (_, lane) = self.take_lane_row(&snapshot, result["ref"].as_str().unwrap())?;
+                if lane["objectIdentity"] != result["objectIdentity"] {
+                    return Err(LiveError::error("created take lane identity was not confirmed"));
+                }
+                result["fingerprint"] = result["createdFingerprint"].clone();
+                record.borrow_mut()["created"] = result.clone();
+            } else if creates {
                 let created_clip = self.clip_row(
                     &self
                         .views
@@ -339,6 +446,9 @@ impl McpHost {
     }
     pub async fn undo_arrangement_clip_async(&self, id: &Value, params: &Value, signal: Option<&Signal>) -> Value {
         let record = params["transactionId"].as_str().and_then(|id| self.clip_lifecycle_transactions.get(id));
+        if record.as_ref().is_some_and(|r| r.borrow()["kind"] == "take-lane-create") {
+            return transaction_error(id, "Live's API deletes no take lane; Live's own undo takes it back");
+        }
         if record.as_ref().is_some_and(|r| r.borrow()["kind"] == "arrangement-take-lane-create") {
             return transaction_error(id, "The public LOM exposes no take-lane clip deletion; undo is unavailable for this transaction");
         }

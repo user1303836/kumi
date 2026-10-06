@@ -349,3 +349,64 @@ async fn arrangement_clip_apply_and_exact_key_undo_match_source() {
         same(&adapter.sim.state.borrow(), &row["state"], &format!("{label} state"));
     }
 }
+
+#[tokio::test]
+async fn a_take_lane_is_created_on_a_track_and_only_lives_undo_removes_it() {
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    let host = McpHost::new(sim, McpHostOptions::default()).unwrap();
+    let text = |reply: Value| -> Value { serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+    let preview = host
+        .dispatch_arrangement_clip_tool(
+            &ToolCall {
+                id: json!(1),
+                name: "live_arrangement_clip_preview".into(),
+                arguments: Some(json!({"action":"create-lane","trackRef":"track:track-1","name":"Comp"})),
+                asynchronous: true,
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let preview = text(preview);
+    assert_eq!((preview["action"].clone(), preview["impact"].clone()), (json!("create-lane"), json!("creates-take-lane-live-undo-only")));
+    assert_eq!(preview["payload"]["name"], json!("Comp"));
+    let transaction = preview["transactionId"].clone();
+    let applied = host
+        .live_arrangement_clip_apply_async(
+            &json!(2),
+            &json!({"transactionId":transaction,"confirmation":"apply","idempotencyKey":"lane-apply-0001"}),
+            None,
+        )
+        .await
+        .unwrap();
+    let applied = text(applied);
+    assert_eq!(applied["state"], json!("applied"));
+    assert_eq!(applied["result"]["name"], json!("Comp"));
+    assert!(applied["result"]["ref"].as_str().unwrap().starts_with("take-lane:"));
+    // Live's API deletes no take lane: Kumi's undo says Live's own undo takes it back.
+    let undone = host
+        .undo_arrangement_clip_async(
+            &json!(3),
+            &json!({"transactionId":transaction,"confirmation":"undo","idempotencyKey":"lane-undo-0001"}),
+            None,
+        )
+        .await;
+    assert!(kumi_common::js::json::stringify(&undone).contains("Live's own undo takes it back"), "{undone}");
+    // A track that isn't there, and a bad name, are refused before Live is asked.
+    for args in
+        [json!({"action":"create-lane","trackRef":"track:nope"}), json!({"action":"create-lane","trackRef":"track:track-1","name":""})]
+    {
+        let reply = host
+            .dispatch_arrangement_clip_tool(
+                &ToolCall { id: json!(4), name: "live_arrangement_clip_preview".into(), arguments: Some(args), asynchronous: true },
+                None,
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(reply.get("error").is_some() || reply["result"]["isError"] == true, "{reply}");
+    }
+}
