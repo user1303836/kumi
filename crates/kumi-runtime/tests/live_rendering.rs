@@ -189,7 +189,9 @@ fn replay_cases(chunk: usize, chunks: usize) {
 async fn replay(chunk: usize, chunks: usize) {
     // Rendering keeps its renders in kumi-ears/<the generation's first 8 characters> in the temporary folder, and
     // closing removes that folder. Each chunk has a generation of its own, so chunks running side by side keep theirs.
-    // No result in the oracle carries the generation.
+    // No result in the oracle carries the generation. Past chunk-99 it would run to 9 characters, and chunk-100 would
+    // share chunk-10's folder.
+    assert!(chunks <= 100, "each of at most 100 chunks has a render folder of its own");
     let generation = format!("chunk-{chunk:02}");
     EARS.with(|ears| *ears.borrow_mut() = std::env::temp_dir().join("kumi-ears").join(&generation));
     let folder = tempfile::tempdir().unwrap();
