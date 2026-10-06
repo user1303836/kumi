@@ -1,6 +1,6 @@
 [package]
 name = "kumi-common"
-version = "1.8.4"
+version = "1.8.5"
 description = "What Kumi's crates share: JavaScript-compatible JSON and strings, cancellation, time."
 edition.workspace = true
 license.workspace = true

@@ -1,7 +1,8 @@
 //! Where each turn's time went: its model calls (time to first part and in all) with their reasoning
-//! effort and service tier, its tools (and the slowest of them), its Live requests and the bytes it sent. One line per
-//! turn in a local log (`timings.jsonl`), which `kumi report` shows, so every change to Kumi can be
-//! measured before and after, and a slow answer says what it waited on.
+//! effort and service tier, its tools (and the slowest of them), its Live requests and the bytes of their answers,
+//! the bytes it sent, and whether its look at the Set reused what it read before. One line per turn in a local log
+//! (`timings.jsonl`), which `kumi report` shows, so every change to Kumi can be measured before and after, and a
+//! slow answer says what it waited on.
 //!
 //! A turn runs on the session's one thread, and one turn runs at a time, so the turn being timed is
 //! a thread-local the kernel, the model client and the Live client add to as they go.
@@ -38,6 +39,13 @@ pub struct TurnTiming {
     pub by_tool: BTreeMap<String, (u32, u64)>,
     /// Requests to Live's bridge, FOCUS's own reads while the turn ran left out.
     pub live_requests: u32,
+    /// The bytes of Live's answers to them.
+    pub live_bytes: u64,
+    /// Whether the turn's look at the Set reused the devices it read before (Live told of no change since).
+    pub set_reused: Option<bool>,
+    /// How many device rows the last whole read beside the turns found changed from those kept: what Live's
+    /// events missed.
+    pub set_drift: Option<u32>,
     /// Request bodies sent to the model.
     pub sent_bytes: u64,
     /// The look at the files an older Kumi may be writing that the turn started (`FileSync`): its own
@@ -199,6 +207,19 @@ pub fn live_request() {
     with(|timing| timing.live_requests += 1);
 }
 
+pub fn live_bytes(bytes: usize) {
+    with(|timing| timing.live_bytes += bytes as u64);
+}
+
+/// The turn's look at the Set: whether it reused the devices read before, and the drift the last whole read beside
+/// the turns found, if one ended since.
+pub fn set_devices(reused: bool, drift: Option<u32>) {
+    with(|timing| {
+        timing.set_reused = Some(reused);
+        timing.set_drift = drift.or(timing.set_drift);
+    });
+}
+
 /// Work done while a turn runs but not for it (FOCUS's and the transport clock's reads of Live, a
 /// side question): its model calls, bytes and Live requests aren't the turn's.
 pub async fn background<F: std::future::Future>(work: F) -> F::Output {
@@ -237,6 +258,15 @@ pub fn line(timing: &TurnTiming, elapsed_ms: u64, stop: Value, usage: Option<&Us
         "liveRequests": timing.live_requests,
         "sentBytes": timing.sent_bytes,
     });
+    if timing.live_bytes > 0 {
+        line["liveBytes"] = json!(timing.live_bytes);
+    }
+    if let Some(reused) = timing.set_reused {
+        line["setReused"] = json!(reused);
+    }
+    if let Some(drift) = timing.set_drift {
+        line["setDrift"] = json!(drift);
+    }
     if let Some(model) = &timing.model {
         line["model"] = json!(model);
     }

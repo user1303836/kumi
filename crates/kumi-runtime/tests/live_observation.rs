@@ -147,6 +147,7 @@ fn observation(value: Observation) -> Value {
 async fn observation_context_dispatches_and_authority_match_source() {
     tokio::task::LocalSet::new().run_until(async{
         let fixture:Value=serde_json::from_str(include_str!("support/observation-oracle.json")).unwrap();
+        let(named_turns,whole_turns)=(std::cell::Cell::new(0),std::cell::Cell::new(0));
         for original in fixture["cases"].as_array().unwrap(){
             let mut case=original.clone();case["responses"]=json!(case["responses"].as_array().unwrap().iter().map(|id|fixture["values"][id.as_u64().unwrap() as usize].clone()).collect::<Vec<_>>());
             let endpoint=Rc::new(Fixture{case:case.clone(),config:RefCell::new(json!({})),calls:RefCell::new(Vec::new()),disconnects:RefCell::new(Vec::new()),owner:RefCell::new(Weak::new()),changes:RefCell::new(IndexMap::new())});
@@ -161,12 +162,129 @@ async fn observation_context_dispatches_and_authority_match_source() {
                 for change in config["changes"].as_array().into_iter().flatten(){let record:ChangeRecord=serde_json::from_value(change["record"].clone()).unwrap();endpoint.changes.borrow_mut().insert(record.id.clone(),ObservedChange{record,within:change["within"].as_str().is_some_and(|s|!s.is_empty())});}
                 let signal=Signal::new();if config["abort"]==true{signal.cancel();}
                 let hints=config.get("hints").map(|h|ObserveHints{pinned:h.get("pinned").map(|v|serde_json::from_value(v.clone()).unwrap()),continuing:h["continuing"].as_bool()});
-                let value=match observer.observe(endpoint.as_ref(),signal,hints).await{Ok(v)=>observation(v),Err(RuntimeError::Aborted)=>json!({"error":"cancelled"}),Err(e)=>json!({"error":e.to_string()})};
+                let value=match observer.observe(endpoint.as_ref(),signal,hints).await{Ok(v)=>{
+                    // The Set model is built from the same rows: the tracks the observation names, in order (a row
+                    // without a ref can't be found again, so the model leaves it out).
+                    if let Some(names)=&v.tracks{let model=observer.model();let mut named=names.iter();assert!(model.tracks.iter().all(|t|named.any(|n|*n==t.name)),"{} turn {index}: the Set model {:?} against {names:?}",case["label"],model.tracks.iter().map(|t|&t.name).collect::<Vec<_>>());named_turns.set(named_turns.get()+1);if model.tracks.len()==names.len(){whole_turns.set(whole_turns.get()+1);}}
+                    // A turn that read no whole track list leaves the model marked as out of date.
+                    if v.tracks.is_none(){assert!(!observer.model().complete,"{} turn {index}: the Set model is marked incomplete",case["label"]);}
+                    observation(v)
+                },Err(RuntimeError::Aborted)=>json!({"error":"cancelled"}),Err(e)=>{
+                    // A turn that failed part way (and wasn't overtaken by a newer one) leaves the model marked as out of date.
+                    let message=e.to_string();if !message.contains("late refresh discarded"){assert!(!observer.model().complete,"{} turn {index}: {message}",case["label"]);}
+                    json!({"error":message})
+                }};
                 let state={let book=connection.references.borrow();json!({"epoch":connection.epoch.get(),"lease":connection.lease.get(),"lastTrackCount":observer.last_track_count.get(),"currentTempo":observer.tempo.get(),"beatsPerBar":observer.beats_per_bar.get(),"refs":book.refs.iter().collect::<Vec<_>>(),"cursors":book.cursors.iter().collect::<Vec<_>>(),"known":book.known.iter().collect::<Vec<_>>()})};
                 let label=format!("{} turn {index}",case["label"]);eq(&value,&case["results"][index]["value"],&label);eq(&state,&case["results"][index]["state"],&format!("{label} state"));
             }
             remember.cancel_timer();connection.close().await.unwrap();
             eq(&json!(*endpoint.calls.borrow()),&case["calls"],&format!("{} all dispatches",case["label"]));eq(&json!(*states.borrow()),&case["states"],&format!("{} connection states",case["label"]));
         }
+        assert!(named_turns.get()>10&&whole_turns.get()+3>=named_turns.get(),"the Set model has every track in all but the malformed turns: {} of {}",whole_turns.get(),named_turns.get());
     }).await;
+}
+
+/// Answers each call with the oracle's reply for its tool and kind, in any order. With `sets` above 1, the Set read
+/// returns that many Sets, as it can while Live switches Sets.
+struct Replies {
+    replies: std::collections::HashMap<String, Value>,
+    sets: Cell<usize>,
+}
+#[async_trait(?Send)]
+impl McpEndpoint for Replies {
+    fn pid(&self) -> Option<u32> {
+        None
+    }
+    fn server_info(&self) -> Option<Implementation> {
+        Some(serde_json::from_value(json!({"name":"fixture","version":"1.0.73"})).unwrap())
+    }
+    async fn list(&self, _: Option<&str>, signal: Signal) -> Result<ListToolsResult, RuntimeError> {
+        signal.check()?;
+        let names = ["live_status", "live_discover", "live_song_state"];
+        Ok(serde_json::from_value(
+            json!({"tools":names.iter().map(|name|json!({"name":name,"inputSchema":{"type":"object"}})).collect::<Vec<_>>()}),
+        )
+        .unwrap())
+    }
+    async fn call(&self, name: &str, args: JsonObject, signal: Signal) -> Result<CallToolResult, RuntimeError> {
+        signal.check()?;
+        let key = format!("{name}:{}", args.get("kind").and_then(Value::as_str).unwrap_or(""));
+        let mut reply = self.replies.get(&key).cloned().ok_or_else(|| RuntimeError::plain(format!("no reply for {key}")))?;
+        if key == "live_discover:set" && self.sets.get() > 1 {
+            let mut body = reply["structuredContent"].clone();
+            let mut other = body["items"][0].clone();
+            other["ref"] = json!("7:set:1");
+            other["objectIdentity"] = json!("another song");
+            body["items"].as_array_mut().unwrap().push(other);
+            reply = json!({"content":[{"type":"text","text":stringify(&body)}],"structuredContent":body});
+        }
+        Ok(serde_json::from_value(reply).unwrap())
+    }
+    fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn stderr_status(&self) -> StderrStatus {
+        StderrStatus { bytes: 0, truncated: false }
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+#[async_trait(?Send)]
+impl ObservationHost for Replies {
+    fn reset_turn(&self, _: bool) {}
+    fn changes(&self) -> Vec<ObservedChange> {
+        Vec::new()
+    }
+    fn definitions(&self) -> Vec<Rc<dyn KernelTool>> {
+        Vec::new()
+    }
+    async fn restore_after_crash(&self, _: &str, _: Option<&str>, _: Signal) -> Result<Option<String>, RuntimeError> {
+        Ok(None)
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_turn_that_fails_part_way_leaves_the_set_model_marked_out_of_date() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let fixture: Value = serde_json::from_str(include_str!("support/observation-oracle.json")).unwrap();
+            let case = fixture["cases"].as_array().unwrap().iter().find(|case| case["label"] == "time-signature").unwrap();
+            let replies = case["calls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(case["responses"].as_array().unwrap())
+                .map(|(call, id)| {
+                    let key = format!("{}:{}", call["name"].as_str().unwrap(), call["args"]["kind"].as_str().unwrap_or(""));
+                    (key, fixture["values"][id.as_u64().unwrap() as usize]["reply"].clone())
+                })
+                .collect();
+            let endpoint = Rc::new(Replies { replies, sets: Cell::new(1) });
+            let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
+            let out = endpoint.clone();
+            options.connect = Some(Rc::new(move |_| {
+                let endpoint: Rc<dyn McpEndpoint> = out.clone();
+                async move { Ok(endpoint) }.boxed_local()
+            }));
+            options.reconnect_interval_ms = Some(3600000);
+            let connection = LiveConnection::new(options);
+            connection.start(Signal::new()).await.unwrap();
+            let remember = Remember::new(connection.clone(), None, None);
+            let observer = Observer::new(connection.clone(), remember.clone());
+            observer.observe(endpoint.as_ref(), Signal::new(), None).await.unwrap();
+            assert!(observer.model().complete && observer.model().tracks.len() == 3);
+            // Live switching Sets: the Set read returns two, so the turn fails, and the model no longer claims to be
+            // the whole of the Set it last read.
+            endpoint.sets.set(2);
+            let Err(error) = observer.observe(endpoint.as_ref(), Signal::new(), None).await else { panic!("two Sets read as one") };
+            let error = error.to_string();
+            assert!(error.contains("one authoritative Set") && !observer.model().complete, "{error}");
+            remember.cancel_timer();
+            connection.close().await.unwrap();
+        })
+        .await;
 }
