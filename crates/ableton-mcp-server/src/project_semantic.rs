@@ -668,12 +668,42 @@ pub fn create_semantic_project_snapshot(snapshot: &Value, options: &CreateSemant
         let data = json!({"kind":track["kind"],"mixer":mixer,"routing":routing,"armed":safe_scalar(&track["armed"]),"monitoring":safe_scalar(&track["monitoringState"]),"clipCount":array(&track["clips"]).len(),"deviceCount":array(&track["devices"]).len(),"structureHash":hash,"groupSnapshotId":if truthy(&track["groupTrackRef"]){coordinate(&track["groupTrackRef"])}else{Value::Null}});
         rows.push(create_record("track", index, Some(name), data, json!({"trackKind":track["kind"],"structureHash":hash}))?);
     }
+    // Each track's first slot for each scene index, and its first clip for each ref, found once for every scene below
+    // (the same ones the searches they replace would find: numbers compare as numbers, as js_equal does).
+    fn number_key(number: f64) -> u64 {
+        (if number == 0. { 0f64 } else { number }).to_bits()
+    }
+    let lookups: Vec<(HashMap<u64, &Value>, HashMap<&str, &Value>)> = tracks
+        .iter()
+        .map(|track| {
+            let mut slots = HashMap::new();
+            for slot in array(&track["clipSlots"]) {
+                if let Some(index) = slot["sceneIndex"].as_f64() {
+                    slots.entry(number_key(index)).or_insert(slot);
+                }
+            }
+            let mut clips = HashMap::new();
+            for clip in array(&track["clips"]) {
+                if let Some(reference) = clip["ref"].as_str() {
+                    clips.entry(reference).or_insert(clip);
+                }
+            }
+            (slots, clips)
+        })
+        .collect();
     for (index, scene) in scenes.iter().enumerate() {
         let mut contents = vec![];
-        for track in tracks {
-            let slot = array(&track["clipSlots"]).iter().find(|slot| js_equal(&slot["sceneIndex"], &scene["index"]));
+        for (track, (slots, clips)) in tracks.iter().zip(&lookups) {
+            let slot = match scene["index"].as_f64() {
+                Some(index) => slots.get(&number_key(index)).copied(),
+                None => array(&track["clipSlots"]).iter().find(|slot| js_equal(&slot["sceneIndex"], &scene["index"])),
+            };
             if let Some(slot) = slot.filter(|s| truthy(&s["clipRef"])) {
-                if let Some(clip) = array(&track["clips"]).iter().find(|c| c["ref"] == slot["clipRef"]) {
+                let clip = match slot["clipRef"].as_str() {
+                    Some(reference) => clips.get(reference).copied(),
+                    None => array(&track["clips"]).iter().find(|c| c["ref"] == slot["clipRef"]),
+                };
+                if let Some(clip) = clip {
                     contents.push(json!({"kind":clip["kind"],"content":note_content(&clip["notes"])?["hash"],"length":clip["length"]}));
                 }
             }
