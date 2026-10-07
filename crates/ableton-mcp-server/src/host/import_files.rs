@@ -473,15 +473,26 @@ impl McpHost {
         Ok(path_text(&staging))
     }
     pub(super) async fn verify_staged_import_file(&self, path: &str, expected: &Value) -> Result<(), LiveError> {
+        // A file that's gone is named without its path, which a reason can't carry.
+        let removed = |e: &std::io::Error| {
+            (e.kind() == std::io::ErrorKind::NotFound).then(|| LiveError::error("staged audio file was removed since preview"))
+        };
+        if let Err(e) = fs::symlink_metadata(path) {
+            if let Some(removed) = removed(&e) {
+                return Err(removed);
+            }
+        }
         let canonical = canonical(Path::new(path))?;
         if !canonical.starts_with(&format!("{}{}", self.import_files.root()?, std::path::MAIN_SEPARATOR)) {
             return Err(LiveError::error("staged import path escapes the transaction staging root"));
         }
-        let stat = fs::metadata(&canonical).map_err(|e| io_error(&e, "stat", &[Path::new(&canonical)]))?;
+        let stat = fs::metadata(&canonical).map_err(|e| removed(&e).unwrap_or_else(|| io_error(&e, "stat", &[Path::new(&canonical)])))?;
         if !stat.is_file() || Some(stat.len() as f64) != expected["size"].as_f64() {
             return Err(LiveError::error("staged audio file changed since preview"));
         }
-        let mut file = tokio::fs::File::open(&canonical).await.map_err(|e| io_error(&e, "open", &[Path::new(&canonical)]))?;
+        let mut file = tokio::fs::File::open(&canonical)
+            .await
+            .map_err(|e| removed(&e).unwrap_or_else(|| io_error(&e, "open", &[Path::new(&canonical)])))?;
         if expected["sha256"] != hash_file(&mut file).await? {
             return Err(LiveError::error("staged audio file changed since preview"));
         }

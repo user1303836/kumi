@@ -102,6 +102,7 @@ impl McpHost {
             if signal.as_ref().is_some_and(Signal::is_cancelled) {
                 return Ok(None);
             }
+            owner.forget_live_failure();
             let args = call.arguments.as_ref().unwrap_or(&Value::Null);
             match call.name.as_str() {
                 "live_change" => return owner.live_change(&call.id, args, signal.as_ref()).await,

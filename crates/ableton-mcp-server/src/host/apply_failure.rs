@@ -85,10 +85,15 @@ impl AsyncLiveAdapter for FailureNotingAdapter {
     }
 }
 impl McpHost {
+    /// Forgets the noted failure, so the slot holds only the Live calls of the tool call starting now.
+    pub(super) fn forget_live_failure(&self) {
+        self.last_live_failure.borrow_mut().take();
+    }
     /// What a failed apply answers. Its transaction turns `uncertain` only from `applying`, the state each apply sets
     /// right before its first send. A failure before that changed nothing in Live. Only one that came from a Live call
-    /// (a read that failed) may pass on a retry, so only that one is told the change can be applied again.
-    /// `uncertain` is the remediation once something may have changed.
+    /// of this tool call's own (a read that failed) may pass on a retry, so only that one is told the change can be
+    /// applied again; the apply's refusal of what it read is told to fix that and preview again. `uncertain` is the
+    /// remediation once something may have changed.
     pub(super) fn apply_failed(&self, id: &Value, record: &RefCell<Value>, cause: &LiveError, uncertain: &str) -> Value {
         let state = record.borrow()["state"].clone();
         if state == "applying" {
@@ -100,8 +105,34 @@ impl McpHost {
         } else if read_failed {
             "Nothing changed in Live; this change can be applied again."
         } else {
-            "Nothing changed in Live."
+            PREVIEW_AGAIN
         };
         adapter_tool_error(id, cause, remediation)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn remediation(reply: &Value) -> Value {
+        serde_json::from_str::<Value>(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap()["remediation"].clone()
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn only_a_live_call_that_failed_in_the_same_tool_call_is_offered_a_retry() {
+        let host = Rc::new(McpHost::new(Rc::new(DeterministicLiveSimulator::new()), McpHostOptions::default()).unwrap());
+        let unknown = LiveInvocation::new("no.such.operation", json!({}));
+        let failed = host.adapter.invoke_async(&unknown, None).await.unwrap_err();
+        let previewed = RefCell::new(json!({"state":"previewed"}));
+        // The apply stopped on its own Live call: trying again may pass.
+        let reply = host.apply_failed(&json!(1), &previewed, &failed, "uncertain");
+        assert_eq!(remediation(&reply), "Nothing changed in Live; this change can be applied again.", "{reply}");
+        // The same words, but the call that failed was an earlier tool call's (as when the Remote Script refused an undo
+        // in the words of a later refusal of the host's own): only a new preview helps.
+        let _ = host.adapter.invoke_async(&unknown, None).await;
+        let status = ToolCall { id: json!(2), name: "live_status".into(), arguments: Some(json!({})), asynchronous: true };
+        let _ = host.dispatch_tool(status, None).await;
+        let reply = host.apply_failed(&json!(3), &previewed, &failed, "uncertain");
+        assert_eq!(remediation(&reply), PREVIEW_AGAIN, "{reply}");
+        assert_eq!(previewed.borrow()["state"], "previewed");
     }
 }

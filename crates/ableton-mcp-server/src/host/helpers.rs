@@ -102,12 +102,10 @@ pub fn transaction_error(id: &Value, message: &str) -> Value {
 pub fn recovery_finalize_error(id: &Value, reason: &str) -> Value {
     reason_error(id, reason, "Reconcile or manually recover the exact transaction, prove all audible work stopped, then submit the explicit finalization evidence.")
 }
+/// The next step after a refusal that changed nothing in Live and that trying again won't pass.
+pub const PREVIEW_AGAIN: &str = "Nothing changed in Live: fix what the reason says (or take another route) and preview again.";
 pub fn adapter_tool_error(id: &Value, cause: &LiveError, remediation: &str) -> Value {
-    let next = if remediation.ends_with("preview requires fresh authoritative state.") {
-        "Nothing changed in Live: fix what the reason says (or take another route) and preview again."
-    } else {
-        remediation
-    };
+    let next = if remediation.ends_with("preview requires fresh authoritative state.") { PREVIEW_AGAIN } else { remediation };
     reason_error(id, &adapter_reason(cause.message()), next)
 }
 pub fn adapter_reason(raw: &str) -> String {
