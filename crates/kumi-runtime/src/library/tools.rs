@@ -185,6 +185,11 @@ impl LibraryTool {
             return Ok(ToolResult::error("Name folders by their full path, such as ~/Samples or /Users/me/Music/Drums."));
         }
         let folders: Vec<_> = named.into_iter().flatten().collect();
+        // As the disk spells them, as the library's places are: a folder named in another case is the same one.
+        let asked = folders.clone();
+        let folders = tokio::task::spawn_blocking(move || asked.iter().map(|folder| super::sources::on_disk(folder)).collect::<Vec<_>>())
+            .await
+            .unwrap_or(folders);
         let words = strings(input.get("words"));
         let limit = limit_of(input.get("limit"), 20, 50);
         let random = input.get("random").and_then(Value::as_bool) == Some(true);

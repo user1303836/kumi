@@ -3,7 +3,8 @@
 //! the producer named. Only folders that exist; a folder inside another counts once.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::ffi::OsString;
+use std::path::{Component, Path, PathBuf, Prefix};
 use std::sync::LazyLock;
 use std::time::UNIX_EPOCH;
 
@@ -65,6 +66,39 @@ pub const SEP: char = if cfg!(windows) { '\\' } else { '/' };
 
 fn is_separator(c: char) -> bool {
     c == '/' || (cfg!(windows) && c == '\\')
+}
+
+/// `path` as the disk spells it, when it's there in another case (Windows and a Mac's usual volumes don't tell case
+/// apart): one folder typed two ways is one place, and its sounds come once. Links aren't followed, and a path that
+/// isn't there is left as it is: on a volume that tells case apart, another case is another folder.
+pub fn on_disk(path: &str) -> String {
+    let given = Path::new(path);
+    if !given.is_absolute() || !given.exists() {
+        return path.to_string();
+    }
+    let mut spelled = PathBuf::new();
+    for part in given.components() {
+        match part {
+            Component::Prefix(prefix) => match prefix.kind() {
+                Prefix::Disk(letter) => spelled.push(format!("{}:", letter.to_ascii_uppercase() as char)),
+                _ => spelled.push(part.as_os_str()),
+            },
+            Component::Normal(name) => {
+                let names: Vec<OsString> = std::fs::read_dir(&spelled)
+                    .map(|entries| entries.flatten().map(|entry| entry.file_name()).collect())
+                    .unwrap_or_default();
+                let lower = name.to_string_lossy().to_lowercase();
+                let found = if names.iter().any(|other| other == name) {
+                    name.to_os_string()
+                } else {
+                    names.into_iter().find(|other| other.to_string_lossy().to_lowercase() == lower).unwrap_or_else(|| name.to_os_string())
+                };
+                spelled.push(found);
+            }
+            other => spelled.push(other.as_os_str()),
+        }
+    }
+    spelled.to_string_lossy().into_owned()
 }
 
 /// What of `path` is inside `folder` ("Kicks/808.wav"), when it's there. A root (`/`, `Z:\`, `\\NAS\Samples\`)
@@ -602,7 +636,7 @@ pub fn library_sources(options: &SourceOptions) -> Vec<Source> {
     let mut found: Vec<Source> = Vec::new();
     let add = |found: &mut Vec<Source>, path: Option<&str>, label: &str, kind: SourceKind| {
         if let Some(path) = path.filter(|path| !path.is_empty() && is_absolute(path)) {
-            found.push(Source { path: resolve(path), label: label.to_string(), kind });
+            found.push(Source { path: on_disk(&resolve(path)), label: label.to_string(), kind });
         }
     };
     let preferences = live_preference_folders(options).into_iter().next();

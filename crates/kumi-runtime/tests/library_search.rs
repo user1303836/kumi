@@ -93,6 +93,29 @@ fn a_place_at_a_drive_or_share_root_holds_its_sounds() {
     assert_eq!(kept.hits.iter().map(|hit| hit.name.as_str()).collect::<Vec<_>>(), ["kick loop"]);
 }
 #[test]
+fn a_folder_named_in_another_case_is_one_place() {
+    use kumi_runtime::library::sources::{library_sources, on_disk, SourceOptions};
+    let root = tempfile::tempdir().unwrap();
+    let real = root.path().join("Music").join("Samples");
+    std::fs::create_dir_all(&real).unwrap();
+    let real = real.to_string_lossy().into_owned();
+    let asked = root.path().join("music").join("SAMPLES").to_string_lossy().into_owned();
+    // A volume that doesn't tell case apart (Windows, a Mac's usual ones): spelled as the disk has it. One that does:
+    // another case is another folder, left as asked.
+    let folds = std::path::Path::new(&asked).exists();
+    assert_eq!(on_disk(&asked), if folds { real.clone() } else { asked.clone() });
+    let place = |name: &str| root.path().join(name).to_string_lossy().into_owned();
+    let options = SourceOptions {
+        home: Some(place("home")),
+        env: Some(Default::default()),
+        folders: Some(vec![asked, real.clone()]),
+        applications: Some(place("apps")),
+        program_data: Some(place("data")),
+        ..Default::default()
+    };
+    assert_eq!(library_sources(&options).into_iter().map(|source| source.path).collect::<Vec<_>>(), [real]);
+}
+#[test]
 fn fifty_thousand_sounds_search_with_bounded_latency() {
     let root = tempfile::tempdir().unwrap();
     let mut seed = 1_u32;
