@@ -529,22 +529,17 @@ else{
                     row["state"] = json!("applying");
                     row["applyKey"] = params["idempotencyKey"].clone();
                 }
-                self.execute_note_plan(
-                    Some(&record),
-                    adapter.as_ref(),
-                    &context,
-                    reference,
-                    &build_note_plan(diff),
-                    t["prior"]["notes"].as_array().unwrap(),
-                    true,
-                    None,
-                )
-                .await?;
+                let plan = build_note_plan(diff);
+                let prior = t["prior"]["notes"].as_array().unwrap();
+                self.execute_note_plan(Some(&record), adapter.as_ref(), &context, reference, &plan, prior, true, None).await?;
 
                 let verified = self
                     .note_clip(&self.views.view_for(Some(&context), &[t["clipRef"].clone()], None, &[]).await?, Some(&context), reference)
                     .await?;
-                if note_digest(&verified.notes, true)? != payload["expectedResultIdentity"] {
+                // Exactly as previewed, or so at the precision Live keeps notes (it reads 0.7 back as 0.699999988).
+                if note_digest(&verified.notes, true)? != payload["expectedResultIdentity"]
+                    && live_note_digest(&verified.notes, true)? != note_plan_result_digest(prior, &plan, true)?
+                {
                     return Err(LiveError::error("MIDI transform postcondition was not confirmed"));
                 }
 
@@ -671,7 +666,11 @@ else{
             let verified_snapshot = self.views.view_for(Some(&context), &refs, None, &[]).await?;
             let verified = self.note_clip(&verified_snapshot, Some(&context), reference).await?;
 
-            if note_digest(&verified.notes, false)? != payload["expectedResultContent"] {
+            // Exactly as previewed, or the previewed result held at the precision Live keeps notes.
+            if note_digest(&verified.notes, false)? != payload["expectedResultContent"]
+                && (note_digest(&transformed, false)? != payload["expectedResultContent"]
+                    || live_note_digest(&verified.notes, false)? != note_plan_result_digest(&initial, &plan, false)?)
+            {
                 return Err(LiveError::error("duplicate transform postcondition was not confirmed"));
             }
 
@@ -783,10 +782,13 @@ else{
                     }
 
                     let ids: HashSet<_> = current.notes.iter().map(|n| js_json::stringify(&n["id"])).collect();
-                    if ids.len() != prior.len()
-                        || prior.iter().any(|n| !ids.contains(&js_json::stringify(&n["id"])))
-                        || note_digest(&current.notes, true)? != t["payload"]["expectedResultIdentity"]
-                    {
+                    // As the transform left them, at the precision Live keeps notes.
+                    let as_applied = || -> Result<bool, LiveError> {
+                        Ok(note_digest(&current.notes, true)? == t["payload"]["expectedResultIdentity"]
+                            || live_note_digest(&current.notes, true)?
+                                == note_plan_result_digest(prior, &build_note_plan(&t["payload"]["diff"]), true)?)
+                    };
+                    if ids.len() != prior.len() || prior.iter().any(|n| !ids.contains(&js_json::stringify(&n["id"]))) || !as_applied()? {
                         return Ok(transaction_error(id, "notes changed after apply; undo refused"));
                     }
                 }

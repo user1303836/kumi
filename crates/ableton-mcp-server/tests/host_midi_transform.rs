@@ -418,6 +418,93 @@ async fn midi_transform_apply_and_exact_key_undo_match_source() {
         same(&adapter.sim.state.borrow(), &row["state"], &format!("{label} state"));
     }
 }
+/// The simulator keeping notes as Live does: every fractional field as a 32-bit float.
+struct Float32Notes(Rc<DeterministicLiveSimulator>);
+impl LiveAdapter for Float32Notes {
+    fn status(&self) -> Result<LiveStatus, LiveError> {
+        self.0.status()
+    }
+    fn snapshot(&self) -> Result<LiveSnapshot, LiveError> {
+        self.0.snapshot()
+    }
+    fn get(&self, r: &LiveRef) -> Result<Option<Value>, LiveError> {
+        self.0.get(r)
+    }
+    fn invoke(&self, i: &LiveInvocation) -> Result<Value, LiveError> {
+        self.0.invoke(i)
+    }
+    fn subscribe(&self, l: LiveListener) -> Result<Unsubscribe, LiveError> {
+        self.0.subscribe(l)
+    }
+    fn reconnect(&self) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect()
+    }
+}
+#[async_trait::async_trait(?Send)]
+impl AsyncLiveAdapter for Float32Notes {
+    async fn snapshot_async(&self, c: Option<&LiveOperationContext>, r: Option<&LiveSnapshotRequest>) -> Result<LiveSnapshot, LiveError> {
+        self.0.snapshot_async(c, r).await
+    }
+    async fn discover_async(&self, r: &LiveDiscoveryRequest, c: Option<&LiveOperationContext>) -> Result<LiveDiscoveryResult, LiveError> {
+        self.0.discover_async(r, c).await
+    }
+    async fn get_async(&self, r: &LiveRef, c: Option<&LiveOperationContext>) -> Result<Option<Value>, LiveError> {
+        self.0.get_async(r, c).await
+    }
+    async fn invoke_async(&self, i: &LiveInvocation, c: Option<&LiveOperationContext>) -> Result<Value, LiveError> {
+        let result = self.0.invoke_async(i, c).await;
+        let mut state = self.0.state.borrow_mut();
+        for note in state["tracks"][0]["clips"].as_array_mut().unwrap().iter_mut().flat_map(|clip| clip["notes"].as_array_mut().unwrap()) {
+            for field in ["start", "duration", "velocity", "probability", "velocityDeviation", "releaseVelocity"] {
+                if let Some(n) = note[field].as_f64() {
+                    note[field] = json!(n as f32 as f64);
+                }
+            }
+        }
+        result
+    }
+    async fn reconnect_async(&self, c: Option<&LiveOperationContext>) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect_async(c).await
+    }
+    async fn close(&self) -> Result<(), LiveError> {
+        Ok(())
+    }
+}
+#[tokio::test]
+async fn a_transform_over_more_than_one_chunk_of_notes_finishes_on_values_live_keeps_as_float32() {
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    setup(&sim, "in-place");
+    // 600 notes: the plan updates them in two chunks of up to 512, and humanized timing isn't a 32-bit float.
+    let notes: Vec<_> = (0..600)
+        .map(|i| json!({"pitch":36 + i % 12,"start":i as f64 * 0.25,"duration":0.25,"velocity":100,"channel":1,"id":i + 1}))
+        .collect();
+    input(&sim, &json!({"notes":notes,"clipLength":160}));
+    let host = McpHost::new(Rc::new(Float32Notes(sim.clone())), McpHostOptions::default()).unwrap();
+    let text = |reply: &Value| -> Value { serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+    let args =
+        json!({"clipRef":"clip:clip-1","transform":"humanize-timing","params":{"maxOffset":0.05,"seed":"chunks"},"scope":"in-place"});
+    let preview = text(&host.live_midi_transform_preview_async(&json!(1), &args).await.unwrap());
+    assert!(preview["diff"]["update"].as_u64().unwrap() > 512, "{preview}");
+    let id = preview["transactionId"].clone();
+    let applied = host
+        .live_midi_transform_apply_async(
+            &json!(2),
+            &json!({"transactionId":id,"confirmation":"apply","idempotencyKey":"chunks-apply"}),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(text(&applied)["state"], "applied", "{applied}");
+    let starts =
+        || sim.state.borrow()["tracks"][0]["clips"][0]["notes"].as_array().unwrap().iter().map(|n| n["start"].clone()).collect::<Vec<_>>();
+    let moved = starts().iter().enumerate().filter(|(i, start)| start.as_f64() != Some(*i as f64 * 0.25)).count();
+    assert!(moved > 512, "both chunks were written: {moved} notes moved");
+    let undone = host
+        .undo_midi_transform_async(&json!(3), &json!({"transactionId":id,"confirmation":"undo","idempotencyKey":"chunks-undo"}), None)
+        .await;
+    assert_eq!(text(&undone)["state"], "undone", "{undone}");
+    assert_eq!(starts(), (0..600).map(|i| json!(i as f64 * 0.25)).collect::<Vec<_>>());
+}
 #[tokio::test]
 async fn an_arrangement_clips_notes_transform_in_place_and_never_into_a_copy() {
     let sim = Rc::new(DeterministicLiveSimulator::new());

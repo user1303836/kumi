@@ -371,6 +371,86 @@ async fn integer_note_id_written_as_decimal_keeps_js_number_semantics() {
     assert_eq!(body["updated"], 1);
 }
 
+/// The simulator keeping notes as Live does: every fractional field as a 32-bit float (a probability of 0.7 reads
+/// back 0.699999988).
+struct Float32Notes(Rc<DeterministicLiveSimulator>);
+impl Float32Notes {
+    fn settle(&self) {
+        let mut state = self.0.state.borrow_mut();
+        for clip in state["tracks"].as_array_mut().unwrap().iter_mut().flat_map(|track| track["clips"].as_array_mut().unwrap()) {
+            for note in clip["notes"].as_array_mut().into_iter().flatten() {
+                for field in ["start", "duration", "velocity", "probability", "velocityDeviation", "releaseVelocity"] {
+                    if let Some(n) = note[field].as_f64() {
+                        note[field] = json!(n as f32 as f64);
+                    }
+                }
+            }
+        }
+    }
+}
+impl LiveAdapter for Float32Notes {
+    fn status(&self) -> Result<LiveStatus, LiveError> {
+        self.0.status()
+    }
+    fn snapshot(&self) -> Result<LiveSnapshot, LiveError> {
+        self.0.snapshot()
+    }
+    fn get(&self, r: &LiveRef) -> Result<Option<Value>, LiveError> {
+        self.0.get(r)
+    }
+    fn invoke(&self, i: &LiveInvocation) -> Result<Value, LiveError> {
+        self.0.invoke(i)
+    }
+    fn subscribe(&self, l: LiveListener) -> Result<Unsubscribe, LiveError> {
+        self.0.subscribe(l)
+    }
+    fn reconnect(&self) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect()
+    }
+}
+#[async_trait::async_trait(?Send)]
+impl AsyncLiveAdapter for Float32Notes {
+    async fn snapshot_async(&self, c: Option<&LiveOperationContext>, r: Option<&LiveSnapshotRequest>) -> Result<LiveSnapshot, LiveError> {
+        self.0.snapshot_async(c, r).await
+    }
+    async fn discover_async(&self, r: &LiveDiscoveryRequest, c: Option<&LiveOperationContext>) -> Result<LiveDiscoveryResult, LiveError> {
+        self.0.discover_async(r, c).await
+    }
+    async fn get_async(&self, r: &LiveRef, c: Option<&LiveOperationContext>) -> Result<Option<Value>, LiveError> {
+        self.0.get_async(r, c).await
+    }
+    async fn invoke_async(&self, i: &LiveInvocation, c: Option<&LiveOperationContext>) -> Result<Value, LiveError> {
+        let result = self.0.invoke_async(i, c).await;
+        self.settle();
+        result
+    }
+    async fn reconnect_async(&self, c: Option<&LiveOperationContext>) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect_async(c).await
+    }
+    async fn close(&self) -> Result<(), LiveError> {
+        Ok(())
+    }
+}
+#[tokio::test]
+async fn a_note_edit_to_values_live_keeps_as_float32_is_confirmed_and_undone() {
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    let host = McpHost::new(Rc::new(Float32Notes(sim.clone())), McpHostOptions::default()).unwrap();
+    let text = |reply: &Value| -> Value { serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+    let note = || sim.state.borrow()["tracks"][0]["clips"][0]["notes"][0].clone();
+    let before = note();
+    // A probability of 0.7 and a triplet start: Live keeps both as the nearest 32-bit float.
+    let args = json!({"clipRef":"clip:clip-1","notes":[{"id":1,"probability":0.7,"start":1.0 / 3.0}]});
+    let preview = text(&host.live_note_edit_preview_async(&json!(1), &args, "update").await);
+    let id = preview["transactionId"].clone();
+    let apply = json!({"transactionId":id,"confirmation":"apply","idempotencyKey":"float32-apply"});
+    let applied = host.live_note_edit_apply_async(&json!(2), &apply, "update", None).await.unwrap();
+    assert_eq!(text(&applied)["state"], "applied", "{applied}");
+    assert_eq!((note()["probability"].clone(), note()["start"].clone()), (json!(0.7f32 as f64), json!((1.0f64 / 3.0) as f32 as f64)));
+    let undo = json!({"transactionId":id,"confirmation":"undo","idempotencyKey":"float32-undo"});
+    let undone = host.undo_note_edit_async(&json!(3), &undo, None).await;
+    assert_eq!(text(&undone)["state"], "undone", "{undone}");
+    same(&note(), &before, "the note as it was");
+}
 #[tokio::test]
 async fn an_arrangement_clips_notes_are_edited_fenced_by_its_track() {
     // An Arrangement clip has no slot or scene: its notes are read on their own, and it's fenced by its track.

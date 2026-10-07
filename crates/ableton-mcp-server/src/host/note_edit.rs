@@ -74,6 +74,61 @@ pub(super) fn normalized_note(note: &Value, content: bool, include_id: bool, inc
 pub(super) fn note_fence(notes: &[Value]) -> String {
     fence(notes, false)
 }
+/// Live keeps a note's numbers as 32-bit floats (a probability of 0.7 reads back 0.699999988), so notes Live read
+/// back are compared with the ones asked for at that precision: each fractional field through f32, on both sides.
+pub(super) fn live_precision(notes: &[Value]) -> Vec<Value> {
+    notes
+        .iter()
+        .map(|note| {
+            let mut note = note.clone();
+            if let Some(fields) = note.as_object_mut() {
+                for field in ["start", "duration", "velocity", "probability", "velocityDeviation", "releaseVelocity"] {
+                    if let Some(value) = fields.get_mut(field) {
+                        if let Some(number) = value.as_f64() {
+                            let rounded = f64::from(number as f32);
+                            if rounded.is_finite() && rounded != number {
+                                *value = json!(rounded);
+                            }
+                        }
+                    }
+                }
+            }
+            note
+        })
+        .collect()
+}
+/// The clip's notes once `patches` are made, each over the note with its id (the first, should two share one), and
+/// where each patched note is. None when a patch's note isn't there.
+fn patched(notes: &[Value], patches: &[Value]) -> Option<(Vec<Value>, Vec<usize>)> {
+    let mut patched = notes.to_vec();
+    let mut at = HashMap::new();
+    for (index, note) in patched.iter().enumerate() {
+        at.entry(key(note)).or_insert(index);
+    }
+    let mut places = Vec::with_capacity(patches.len());
+    for patch in patches {
+        let index = *at.get(&key(patch))?;
+        for (field, value) in patch.as_object()? {
+            patched[index][field] = value.clone();
+        }
+        places.push(index);
+    }
+    Some((patched, places))
+}
+/// Whether the notes Live holds after an edit are the ones it asked for, at the precision Live keeps them.
+fn applied_as_asked(t: &Value, applied: &[Value]) -> bool {
+    let prior = t["priorAllNotes"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+    let expected = if t["kind"] == "update" {
+        match patched(prior, t["patches"].as_array().map(Vec::as_slice).unwrap_or(&[])) {
+            Some((notes, _)) => notes,
+            None => return false,
+        }
+    } else {
+        let deleted: HashSet<_> = t["noteIds"].as_array().into_iter().flatten().map(js_json::stringify).collect();
+        prior.iter().filter(|note| !deleted.contains(&key(note))).cloned().collect()
+    };
+    note_fence(&live_precision(applied)) == note_fence(&live_precision(&expected))
+}
 pub(super) fn note_content_fence(notes: &[Value]) -> String {
     fence(notes, true)
 }
@@ -200,7 +255,9 @@ impl McpHost {
                                 "pitch" => integer(value) && value.as_f64().unwrap() <= 127.0,
                                 "start" => finite(value).is_some_and(|n| n >= 0.0),
                                 "duration" => finite(value).is_some_and(|n| n > 0.0),
-                                "velocity" | "releaseVelocity" => finite(value).is_some_and(|n| (0.0..=127.0).contains(&n)),
+                                // Live's notes play at 1 to 127, as every other note edit takes them.
+                                "velocity" => finite(value).is_some_and(|n| (1.0..=127.0).contains(&n)),
+                                "releaseVelocity" => finite(value).is_some_and(|n| (0.0..=127.0).contains(&n)),
                                 "mute" => value.is_boolean(),
                                 "probability" => finite(value).is_some_and(|n| (0.0..=1.0).contains(&n)),
                                 "velocityDeviation" => finite(value).is_some_and(|n| n.abs() <= 127.0),
@@ -240,13 +297,12 @@ impl McpHost {
             let prior_notes: Vec<_> = clip.notes.iter().filter(|note| selected_ids.contains(&key(note))).cloned().collect();
             let mut expected_notes = clip.notes.clone();
             if let Some(patches) = &patches {
-                for patch in patches {
-                    let Some(note) = expected_notes.iter_mut().find(|note| key(note) == key(patch)) else {
-                        return Err(LiveError::error("note patch target disappeared"));
-                    };
-                    for (field, value) in patch.as_object().unwrap() {
-                        note[field] = value.clone();
-                    }
+                let Some((notes, places)) = patched(&clip.notes, patches) else {
+                    return Err(LiveError::error("note patch target disappeared"));
+                };
+                expected_notes = notes;
+                for &place in &places {
+                    let note = &expected_notes[place];
                     if !note["start"]
                         .as_f64()
                         .zip(note["duration"].as_f64())
@@ -369,7 +425,7 @@ impl McpHost {
                 .await?;
             let applied_fence = note_fence(&applied.notes);
             record.borrow_mut()["appliedFence"] = json!(applied_fence);
-            if applied_fence != t["expectedAppliedFence"] {
+            if applied_fence != t["expectedAppliedFence"] && !applied_as_asked(&t, &applied.notes) {
                 return Err(LiveError::error("Live note edit changed, clamped, or omitted unexpected note state"));
             }
 
