@@ -290,7 +290,8 @@ impl Observer {
             let set_args = context::discovery_args(&object(json!({"kind":"set","fields":fields})))?;
 
             let mut fields = vec!["name", "kind", "mediaKind", "groupTrackRef"];
-            if self.remember.track_ids.reported(connection.epoch.get()) {
+            // The last look's epoch: this look cleared `epoch` (invalidate) and reads its own only below.
+            if self.remember.track_ids.reported(connection.last_epoch.get()) {
                 fields.push("kumiTrack");
             }
             if self.last_track_count.get() <= MIXER_TRACKS {

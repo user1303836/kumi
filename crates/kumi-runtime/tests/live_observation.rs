@@ -189,6 +189,8 @@ async fn observation_context_dispatches_and_authority_match_source() {
 struct Replies {
     replies: std::collections::HashMap<String, Value>,
     sets: Cell<usize>,
+    /// Each call, as (tool, args).
+    calls: RefCell<Vec<(String, JsonObject)>>,
 }
 #[async_trait(?Send)]
 impl McpEndpoint for Replies {
@@ -208,6 +210,7 @@ impl McpEndpoint for Replies {
     }
     async fn call(&self, name: &str, args: JsonObject, signal: Signal) -> Result<CallToolResult, RuntimeError> {
         signal.check()?;
+        self.calls.borrow_mut().push((name.into(), args.clone()));
         let key = format!("{name}:{}", args.get("kind").and_then(Value::as_str).unwrap_or(""));
         let mut reply = self.replies.get(&key).cloned().ok_or_else(|| RuntimeError::plain(format!("no reply for {key}")))?;
         if key == "live_discover:set" && self.sets.get() > 1 {
@@ -263,7 +266,7 @@ async fn a_turn_that_fails_part_way_leaves_the_set_model_marked_out_of_date() {
                     (key, fixture["values"][id.as_u64().unwrap() as usize]["reply"].clone())
                 })
                 .collect();
-            let endpoint = Rc::new(Replies { replies, sets: Cell::new(1) });
+            let endpoint = Rc::new(Replies { replies, sets: Cell::new(1), calls: RefCell::new(vec![]) });
             let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
             let out = endpoint.clone();
             options.connect = Some(Rc::new(move |_| {
@@ -283,6 +286,59 @@ async fn a_turn_that_fails_part_way_leaves_the_set_model_marked_out_of_date() {
             let Err(error) = observer.observe(endpoint.as_ref(), Signal::new(), None).await else { panic!("two Sets read as one") };
             let error = error.to_string();
             assert!(error.contains("one authoritative Set") && !observer.model().complete, "{error}");
+            remember.cancel_timer();
+            connection.close().await.unwrap();
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn once_live_reports_track_ids_the_next_look_reads_them_with_the_tracks() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let fixture: Value = serde_json::from_str(include_str!("support/observation-oracle.json")).unwrap();
+            let case = fixture["cases"].as_array().unwrap().iter().find(|case| case["label"] == "time-signature").unwrap();
+            let mut replies: std::collections::HashMap<String, Value> = case["calls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(case["responses"].as_array().unwrap())
+                .map(|(call, id)| {
+                    let key = format!("{}:{}", call["name"].as_str().unwrap(), call["args"]["kind"].as_str().unwrap_or(""));
+                    (key, fixture["values"][id.as_u64().unwrap() as usize]["reply"].clone())
+                })
+                .collect();
+            // Live says Main's id when asked: it reports track ids.
+            let main = json!({"epoch":7,"kind":"main-track","revision":"r","truncated":false,"items":[{"ref":"7:main_track:0","kumiTrack":"01JMAIN0000000000000000000"}]});
+            replies.insert("live_discover:main-track".into(), json!({"content":[{"type":"text","text":stringify(&main)}],"structuredContent":main}));
+            let endpoint = Rc::new(Replies { replies, sets: Cell::new(1), calls: RefCell::new(vec![]) });
+            let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
+            let out = endpoint.clone();
+            options.connect = Some(Rc::new(move |_| {
+                let endpoint: Rc<dyn McpEndpoint> = out.clone();
+                async move { Ok(endpoint) }.boxed_local()
+            }));
+            options.reconnect_interval_ms = Some(3600000);
+            let connection = LiveConnection::new(options);
+            connection.start(Signal::new()).await.unwrap();
+            let remember = Remember::new(connection.clone(), None, None);
+            let observer = Observer::new(connection.clone(), remember.clone());
+            observer.observe(endpoint.as_ref(), Signal::new(), None).await.unwrap();
+            // The background pass asks once whether Live reports ids.
+            for _ in 0..200 {
+                if endpoint.calls.borrow().iter().any(|(_, args)| args.get("kind") == Some(&json!("main-track"))) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            for _ in 0..20 {
+                tokio::task::yield_now().await;
+            }
+            endpoint.calls.borrow_mut().clear();
+            observer.observe(endpoint.as_ref(), Signal::new(), None).await.unwrap();
+            let tracks = endpoint.calls.borrow().iter().find(|(name, args)| name == "live_discover" && args.get("kind") == Some(&json!("track"))).cloned();
+            let fields = tracks.expect("the look read the tracks").1["fields"].clone();
+            assert!(fields.as_array().unwrap().contains(&json!("kumiTrack")), "{fields}");
             remember.cancel_timer();
             connection.close().await.unwrap();
         })
