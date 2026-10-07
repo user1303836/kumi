@@ -181,7 +181,10 @@ impl McpHost {
             || t["kind"] != "session-audio-create"
             || (t["state"] == "previewed" && t["expiresAt"].as_f64().is_some_and(|n| n <= kumi_common::time::now_ms_f64()))
         {
-            self.release_staged_import_for(&t);
+            // Only an expired import of its own: another kind's id names files that may be in use.
+            if t["kind"] == "session-audio-create" {
+                self.release_staged_import_for(&t);
+            }
             return Some(transaction_error(id, "Unknown or expired audio-import transaction"));
         }
         let record = record.unwrap();
@@ -200,13 +203,18 @@ impl McpHost {
                 self.fresh_status(Some(&LiveOperationContext::with_deadline(self.deadline(AUDITION_DEADLINE_MS)))).await?;
             }
             let status = self.require_connected(Some("session.read"))?;
+            // A reconcile's first apply may have made the clip from the staged file: it stays.
             if json!(status.epoch) != t["epoch"] {
-                self.release_staged_import_for(&t);
+                if !reconcile {
+                    self.release_staged_import_for(&t);
+                }
                 return Ok(transaction_error(id, "Live connection epoch changed; preview again"));
             }
             let file = &t["prior"]["file"];
             if !truthy(file) {
-                self.release_staged_import_for(&t);
+                if !reconcile {
+                    self.release_staged_import_for(&t);
+                }
                 return Ok(transaction_error(id, "audio import file authority is missing; preview again"));
             }
             let payload = &t["payload"];

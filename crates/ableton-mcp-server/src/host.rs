@@ -212,7 +212,7 @@ impl McpHost {
         let clip_lifecycle_transactions = BoundedTransactionMap::new(
             retention.clone(),
             Some(Rc::new(move |value| {
-                cleanup_imports.release_for(&value.borrow());
+                cleanup_imports.release_unused(&value.borrow());
                 Ok(())
             })),
         );

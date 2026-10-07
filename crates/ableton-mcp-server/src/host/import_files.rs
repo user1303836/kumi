@@ -251,6 +251,16 @@ impl ImportFiles {
             let _ = fs::remove_dir(folder);
         }
     }
+    /// `release_for`, when nothing in Live can be using the files: the change was never applied, or it was undone.
+    /// An applied or uncertain one's sample is what its clip, Simpler or pad plays, now or once the Set is opened
+    /// again, so it stays; a Drum Sampler preset is needed only while Live loads it, and goes either way.
+    pub(super) fn release_unused(&self, transaction: &Value) {
+        if matches!(transaction["state"].as_str(), Some("previewed" | "undone")) {
+            self.release_for(transaction)
+        } else if transaction["kind"] == "drum-pad" {
+            self.release_presets(transaction)
+        }
+    }
     pub(super) fn release_for(&self, transaction: &Value) {
         let kind = transaction["kind"].as_str();
         let payload = &transaction["payload"];
@@ -435,5 +445,106 @@ impl McpHost {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::live::DeterministicLiveSimulator;
+    struct Rig {
+        _folder: tempfile::TempDir,
+        host: McpHost,
+        root: String,
+        presets: PathBuf,
+    }
+    fn rig() -> Rig {
+        let folder = tempfile::tempdir().unwrap();
+        let library = folder.path().join("User Library");
+        fs::create_dir_all(library.join("Kumi")).unwrap();
+        let options = McpHostOptions {
+            import_staging_dir: Some(folder.path().join("staging").to_string_lossy().into_owned()),
+            user_library_dir: Some(library.to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+        let host = McpHost::new(Rc::new(DeterministicLiveSimulator::new()), options).unwrap();
+        let root = host.import_files.root().unwrap();
+        let presets = host.import_files.preset_root().unwrap();
+        Rig { _folder: folder, host, root, presets }
+    }
+    impl Rig {
+        /// A staged sample, where staging leaves one (a folder of its own under the root).
+        fn staged(&self, name: &str) -> String {
+            let folder = Path::new(&self.root).join(format!("copy-{name}"));
+            fs::create_dir(&folder).unwrap();
+            let path = folder.join(format!("{name}.wav"));
+            fs::write(&path, b"RIFF").unwrap();
+            path_text(&path)
+        }
+        fn preset(&self, name: &str) -> String {
+            let path = self.presets.join(format!("{name}.adv"));
+            fs::write(&path, b"<Ableton/>").unwrap();
+            path_text(&path)
+        }
+        fn keep(&self, id: &str, mut transaction: Value) {
+            transaction["id"] = json!(id);
+            self.host.clip_lifecycle_transactions.insert(id, transaction).unwrap();
+        }
+    }
+    fn exists(path: &str) -> bool {
+        Path::new(path).exists()
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_sample_live_may_play_stays_when_its_transaction_goes() {
+        let rig = rig();
+        // Released after it applied: the clip plays the file, now and when the Set opens again.
+        let applied = rig.staged("applied");
+        rig.keep("audioimport_applied", json!({"kind":"session-audio-create","state":"applied","payload":{"filePath":applied}}));
+        let reply = rig.host.live_transaction_release(&json!(1), &json!({"transactionIds":["audioimport_applied"]}));
+        assert!(reply.to_string().contains(r#"\"released\":1"#), "{reply}");
+        assert!(exists(&applied));
+        // Uncertain: the first apply may have used it. Its Drum Sampler preset was needed only to load it.
+        let (sample, preset) = (rig.staged("pad"), rig.preset("pad"));
+        rig.keep("drumpad_uncertain", json!({"kind":"drum-pad","state":"uncertain","payload":{"samplePath":sample,"presetPath":preset}}));
+        rig.host.clip_lifecycle_transactions.delete("drumpad_uncertain");
+        assert!(exists(&sample) && !exists(&preset));
+        // Never applied, or undone: nothing plays it, so it goes, with its folder.
+        for (state, name) in [("previewed", "previewed"), ("undone", "undone")] {
+            let path = rig.staged(name);
+            rig.keep(name, json!({"kind":"simpler","state":state,"payload":{"filePath":path}}));
+            rig.host.clip_lifecycle_transactions.delete(name);
+            assert!(!exists(&path) && !Path::new(&path).parent().unwrap().exists(), "{state}");
+        }
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_apply_given_another_kinds_id_leaves_that_ones_files() {
+        let rig = rig();
+        let sample = rig.staged("pad");
+        rig.keep("drumpad_applied", json!({"kind":"drum-pad","state":"applied","payload":{"samplePath":sample}}));
+        let params = json!({"transactionId":"drumpad_applied","confirmation":"apply","idempotencyKey":"apply-key-0001"});
+        let reply = rig.host.live_audio_import_apply_async(&json!(1), &params, None).await.unwrap();
+        assert!(reply.to_string().contains("Unknown or expired audio-import transaction"), "{reply}");
+        let reply = rig.host.live_simpler_apply_async(&json!(1), &params, None).await.unwrap();
+        assert!(reply.to_string().contains("Unknown or expired simpler transaction"), "{reply}");
+        assert!(exists(&sample));
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_reconcile_after_a_new_epoch_keeps_the_file_the_first_apply_may_have_used() {
+        let rig = rig();
+        for (kind, id) in [("session-audio-create", "audioimport_uncertain"), ("simpler", "simpler_uncertain")] {
+            let path = rig.staged(id);
+            rig.keep(
+                id,
+                json!({"kind":kind,"state":"uncertain","applyKey":"apply-key-0001","epoch":999_999,"payload":{"filePath":path},"prior":{"file":{"size":4}}}),
+            );
+            let params = json!({"transactionId":id,"confirmation":"apply","idempotencyKey":"apply-key-0001"});
+            let reply = if kind == "simpler" {
+                rig.host.live_simpler_apply_async(&json!(1), &params, None).await
+            } else {
+                rig.host.live_audio_import_apply_async(&json!(1), &params, None).await
+            };
+            assert!(reply.unwrap().to_string().contains("epoch changed"), "{kind}");
+            assert!(exists(&path), "{kind}");
+        }
     }
 }
