@@ -104,6 +104,8 @@ pub async fn pages(host: &dyn ViewHost, args: JsonObject, signal: Signal) -> Res
     }
     Ok(wrapped(body))
 }
+/// The most notes a clip's view draws.
+const CLIP_VIEW_NOTES: usize = 512;
 static TRACK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9]+:track:[0-9]+$").unwrap());
 static SLOT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9]+:clip_slot:[0-9]+:[0-9]+$").unwrap());
 fn readable(host: &dyn ViewHost) -> bool {
@@ -354,10 +356,11 @@ pub async fn clip_view(host: &dyn ViewHost, slot_ref: &str, signal: Signal) -> R
         let mut notes = Vec::new();
         let mut next = None;
         for _ in 0..10_000 {
-            if notes.len() >= 1_000_000 {
+            // The view draws the first CLIP_VIEW_NOTES: no more are asked for.
+            if notes.len() >= CLIP_VIEW_NOTES {
                 break;
             }
-            let mut args = object(json!({"kind":"note","parent":clip_ref,"limit":host.page_limit()}));
+            let mut args = object(json!({"kind":"note","parent":clip_ref,"limit":host.page_limit().min(CLIP_VIEW_NOTES - notes.len())}));
             if let Some(next) = next {
                 args.insert("cursor".into(), json!(next));
             }
@@ -372,12 +375,13 @@ pub async fn clip_view(host: &dyn ViewHost, slot_ref: &str, signal: Signal) -> R
                 break;
             }
         }
-        let mut selected = Vec::new();
+        // The selected notes' ids (as their bits: ids are whole numbers), looked up once for each note drawn.
+        let mut selected = std::collections::HashSet::new();
         if host.has("live_note_read") {
             if let Ok(read) = host.call("live_note_read", object(json!({"clipRef":clip_ref,"selected":true})), signal.clone()).await {
                 if read.is_error != Some(true) {
                     if let Some(notes) = payload(&read)?.get("notes").and_then(Value::as_array) {
-                        selected = notes.iter().filter_map(|n| n.get("id").and_then(Value::as_f64)).collect();
+                        selected = notes.iter().filter_map(|n| n.get("id").and_then(Value::as_f64)).map(f64::to_bits).collect();
                     }
                 }
             }
@@ -388,7 +392,7 @@ pub async fn clip_view(host: &dyn ViewHost, slot_ref: &str, signal: Signal) -> R
             length,
             notes: notes
                 .iter()
-                .take(512)
+                .take(CLIP_VIEW_NOTES)
                 .filter_map(|note| {
                     Some(ClipViewNote {
                         note: ClipNote {
@@ -397,7 +401,7 @@ pub async fn clip_view(host: &dyn ViewHost, slot_ref: &str, signal: Signal) -> R
                             duration: note.get("duration")?.as_f64()?,
                             velocity: note.get("velocity").and_then(Value::as_f64).unwrap_or(100.),
                         },
-                        selected: note.get("id").and_then(Value::as_f64).filter(|id| selected.contains(id)).map(|_| true),
+                        selected: note.get("id").and_then(Value::as_f64).filter(|id| selected.contains(&id.to_bits())).map(|_| true),
                     })
                 })
                 .collect(),

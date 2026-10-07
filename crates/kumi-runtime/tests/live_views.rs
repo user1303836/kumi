@@ -96,3 +96,48 @@ async fn paged_collections_and_all_focus_views_match_source_results_and_dispatch
         eq(&json!(*host.calls.borrow()), &case["calls"], &format!("{} dispatches", case["label"]));
     }
 }
+/// A clip of many notes, served a page at a time (as many as each read asks for); keeps the limits asked for.
+struct ManyNotes {
+    version: Option<&'static str>,
+    notes: usize,
+    limits: RefCell<Vec<u64>>,
+}
+#[async_trait(?Send)]
+impl ViewHost for ManyNotes {
+    fn available(&self) -> bool {
+        true
+    }
+    fn has(&self, _name: &str) -> bool {
+        true
+    }
+    fn version(&self) -> Option<String> {
+        self.version.map(str::to_owned)
+    }
+    async fn call(&self, name: &str, args: JsonObject, _signal: Signal) -> Result<CallToolResult, RuntimeError> {
+        let body = match (name, args.get("kind").and_then(Value::as_str)) {
+            ("live_discover", Some("session-clip")) => json!({"items":[{"name":"Long","length":512}]}),
+            ("live_discover", Some("note")) => {
+                let limit = args["limit"].as_u64().unwrap();
+                self.limits.borrow_mut().push(limit);
+                let from: usize = args.get("cursor").and_then(Value::as_str).map_or(0, |c| c.parse().unwrap());
+                let to = (from + limit as usize).min(self.notes);
+                let items: Vec<Value> =
+                    (from..to).map(|i| json!({"id":i,"pitch":60,"start":i as f64 / 4.,"duration":0.25,"velocity":100})).collect();
+                json!({"items":items,"nextCursor":if to < self.notes { json!(to.to_string()) } else { Value::Null }})
+            }
+            ("live_note_read", _) => json!({"notes":[{"id":3},{"id":600}]}),
+            other => panic!("unexpected call {other:?}"),
+        };
+        Ok(serde_json::from_value(json!({"content":[{"type":"text","text":stringify(&body)}],"structuredContent":body})).unwrap())
+    }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_clip_view_reads_only_the_notes_it_draws() {
+    for (version, limits) in [(None, vec![512]), (Some("1.0.50"), vec![100, 100, 100, 100, 100, 12])] {
+        let host = ManyNotes { version, notes: 2_000, limits: RefCell::default() };
+        let view = views::clip_view(&host, "7:clip_slot:0:0", Signal::new()).await.unwrap().unwrap();
+        assert_eq!(view.notes.len(), 512, "the view draws the first 512 notes ({version:?})");
+        assert_eq!((view.notes[3].selected, view.notes[4].selected), (Some(true), None), "a selected note drawn is marked ({version:?})");
+        assert_eq!(*host.limits.borrow(), limits, "only the 512 notes drawn are asked for, not all 2,000 ({version:?})");
+    }
+}
