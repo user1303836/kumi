@@ -368,13 +368,17 @@ impl Drop for Cleanup {
         }
     }
 }
-async fn download(url: &str, file: &str, fetch: Rc<dyn Fetch>, cancel: Option<abort::Signal>) -> Result<(), RuntimeError> {
+/// Downloads `url` into `file` as it arrives, and gives what it got's SHA-256: the bundle is never held whole, nor
+/// read back to check it.
+async fn download(url: &str, file: &str, fetch: Rc<dyn Fetch>, cancel: Option<abort::Signal>) -> Result<String, RuntimeError> {
+    use tokio::io::AsyncWriteExt;
     let signal = abort::any(std::iter::once(abort::timeout(600000)).chain(cancel));
     let response = fetch.fetch(url, FetchInit { signal: Some(signal.clone()), ..Default::default() }).await.map_err(error)?;
     if !response.ok() {
         return Err(RuntimeError::plain(format!("the download failed ({})", response.status)));
     }
-    let mut bytes = vec![];
+    let mut out = tokio::fs::File::create(file).await.map_err(error)?;
+    let mut digest = Sha256::new();
     if let Some(mut body) = response.body {
         loop {
             // The body's chunks race the signal too: a stalled connection stops when it fires.
@@ -383,10 +387,14 @@ async fn download(url: &str, file: &str, fetch: Rc<dyn Fetch>, cancel: Option<ab
                 _ = signal.cancelled() => return Err(RuntimeError::plain("the download was stopped")),
             };
             let Some(chunk) = chunk else { break };
-            bytes.extend(chunk.map_err(error)?);
+            let chunk = chunk.map_err(error)?;
+            digest.update(&chunk);
+            out.write_all(&chunk).await.map_err(error)?;
         }
     }
-    fs::write(file, bytes).map_err(error)
+    // A tokio file finishes its last write in the background: wait for it, so a full disk is the download's error.
+    out.flush().await.map_err(error)?;
+    Ok(hex::encode(digest.finalize()))
 }
 pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
     let say = |s: String| io.out.write(&format!("{s}\n"));
@@ -431,8 +439,7 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
             say("The download was stopped, so nothing was changed.".into());
             return Ok(1);
         }
-        downloaded?;
-        if hex::encode(Sha256::digest(fs::read(&bundle).map_err(error)?)) != manifest.sha256 {
+        if downloaded? != manifest.sha256 {
             say("The download didn't match its checksum, so nothing was changed. Try again in a moment.".into());
             return Ok(1);
         }
