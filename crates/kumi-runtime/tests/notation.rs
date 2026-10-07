@@ -153,12 +153,13 @@ fn drum_patterns_print_as_lanes_and_read_back() {
 
 #[test]
 fn a_long_drum_clip_that_never_repeats_prints_in_a_moment() {
-    // 256 bars of four drums on irregular sixteenths: each lane's period is found in one pass, not one per length.
+    // 512 bars of four drums on irregular sixteenths: each lane's period is found in one pass, not one per length (a
+    // debug build took 20 s for half as many bars that way). The budget is wide for a loaded runner.
     let frame = Frame { drums: true, ..Frame::default() };
     let mut rng = StdRng::seed_from_u64(29);
     let mut notes = vec![];
     for pitch in [36, 38, 42, 46] {
-        for step in 0..256 * 16 {
+        for step in 0..512 * 16 {
             if rng.random_bool(0.3) {
                 notes.push(Note::new(pitch, step as f64 * 0.25, 0.25, 100.));
             }
@@ -167,8 +168,18 @@ fn a_long_drum_clip_that_never_repeats_prints_in_a_moment() {
     let start = std::time::Instant::now();
     let text = round_trip(&notes, &frame);
     assert_eq!(text.lines().count(), 4, "a lane for each drum");
-    let budget = if cfg!(debug_assertions) { 5_000 } else { 1_000 };
+    let budget = if cfg!(debug_assertions) { 20_000 } else { 5_000 };
     assert!(start.elapsed().as_millis() < budget, "took {} ms", start.elapsed().as_millis());
+}
+
+#[test]
+fn a_lane_with_more_velocities_than_three_is_a_sequence() {
+    // A lane holds three velocities at most: a fourth is refused as it appears, and the notes read back all the same.
+    let frame = Frame { drums: true, ..Frame::default() };
+    let velocity = |step: usize| 1. + ((step * 37) % 12_601) as f64 / 100.;
+    let notes: Vec<Note> = (0..4096).map(|step| Note::new(36, step as f64 * 0.25, 0.25, velocity(step))).collect();
+    let text = round_trip(&notes, &frame);
+    assert!(!text.lines().any(|line| line.starts_with("kick")), "no lane: {}", &text[..200]);
 }
 
 #[test]

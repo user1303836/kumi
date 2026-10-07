@@ -415,7 +415,13 @@ fn classes(pattern: &[Step], defaults: &[(char, f64); 3]) -> Option<Vec<(char, f
     let mut ratchet = None;
     for step in pattern {
         match step {
-            Step::Hit(velocity) if !velocities.contains(velocity) => velocities.push(*velocity),
+            Step::Hit(velocity) if !velocities.contains(velocity) => {
+                velocities.push(*velocity);
+                // A fourth never fits: refused as it appears, not after a long lane's every velocity was gathered.
+                if velocities.len() > 3 {
+                    return None;
+                }
+            }
             Step::Ratchet(_, velocity) => match ratchet {
                 Some(other) if other != *velocity => return None,
                 _ => ratchet = Some(*velocity),
