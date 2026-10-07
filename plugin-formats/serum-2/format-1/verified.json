@@ -1,6 +1,91 @@
 {
   "plugin": "serum-2",
   "format": "format-1",
-  "reads": [],
+  "reads": [
+    {
+      "version": "2.1.5",
+      "files": [
+        "preset",
+        "processor",
+        "controller"
+      ],
+      "checked": "2026-10-07",
+      "how": "Serum 2.1.5's init patch saved as a preset, and the state Live 12.4 saved for the same unedited patch (the fixtures): both decode, re-encode byte for byte, round-trip and fit structure.json, and the state's processor and controller trees merged equal the preset's 175 sections. Also every saved state of 2.1.5 in the machine's Sets."
+    },
+    {
+      "version": "2.0.11",
+      "files": [
+        "preset"
+      ],
+      "checked": "2026-10-07",
+      "how": "presets this version wrote, among the 905 on the machine: each decodes, its hash matches, its body re-encodes byte for byte and it round-trips"
+    },
+    {
+      "version": "2.0.12",
+      "files": [
+        "preset"
+      ],
+      "checked": "2026-10-07",
+      "how": "presets this version wrote, among the 905 on the machine: each decodes, its hash matches, its body re-encodes byte for byte and it round-trips"
+    },
+    {
+      "version": "2.0.13",
+      "files": [
+        "preset"
+      ],
+      "checked": "2026-10-07",
+      "how": "presets this version wrote, among the 905 on the machine: each decodes, its hash matches, its body re-encodes byte for byte and it round-trips"
+    },
+    {
+      "version": "2.0.14",
+      "files": [
+        "preset"
+      ],
+      "checked": "2026-10-07",
+      "how": "presets this version wrote, among the 905 on the machine: each decodes, its hash matches, its body re-encodes byte for byte and it round-trips"
+    },
+    {
+      "version": "2.0.15",
+      "files": [
+        "preset"
+      ],
+      "checked": "2026-10-07",
+      "how": "presets this version wrote, among the 905 on the machine: each decodes, its hash matches, its body re-encodes byte for byte and it round-trips"
+    },
+    {
+      "version": "2.0.20",
+      "files": [
+        "preset"
+      ],
+      "checked": "2026-10-07",
+      "how": "presets this version wrote, among the 905 on the machine: each decodes, its hash matches, its body re-encodes byte for byte and it round-trips"
+    },
+    {
+      "version": "2.0.22",
+      "files": [
+        "preset"
+      ],
+      "checked": "2026-10-07",
+      "how": "presets this version wrote, among the 905 on the machine: each decodes, its hash matches, its body re-encodes byte for byte and it round-trips"
+    },
+    {
+      "version": "2.0.24",
+      "files": [
+        "preset"
+      ],
+      "checked": "2026-10-07",
+      "how": "presets this version wrote, among the 905 on the machine: each decodes, its hash matches, its body re-encodes byte for byte and it round-trips"
+    },
+    {
+      "version": "2.0.19",
+      "files": [
+        "preset",
+        "processor",
+        "controller"
+      ],
+      "checked": "2026-10-07",
+      "how": "a preset and the states saved in the machine's Sets by this version: each decodes, its hash matches, it re-encodes byte for byte and round-trips"
+    }
+  ],
   "writes": []
 }

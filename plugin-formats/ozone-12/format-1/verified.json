@@ -1,6 +1,16 @@
 {
   "plugin": "ozone-12",
   "format": "format-1",
-  "reads": [],
+  "reads": [
+    {
+      "version": "12.1.0",
+      "files": [
+        "preset",
+        "state"
+      ],
+      "checked": "2026-10-07",
+      "how": "Ozone 12.1.0's init patch saved as presets of the main plug-in and the Maximizer, and the states Live 12.4 saved for them (and for the main plug-in with Exciter added): all decode, the presets round-trip, and every file fits structure.json. Also the 679 factory presets it ships (written by Ozone 8 to 12) and the states in the machine's Sets."
+    }
+  ],
   "writes": []
 }

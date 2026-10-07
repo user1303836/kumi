@@ -15,6 +15,7 @@ pub mod structure;
 pub mod survey;
 pub mod tree;
 pub mod vital;
+pub mod vstpreset;
 pub mod xml;
 
 /// Bytes a reader can't make sense of, and why.

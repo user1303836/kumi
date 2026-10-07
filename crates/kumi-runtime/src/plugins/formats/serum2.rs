@@ -18,7 +18,7 @@ use std::io::Read;
 use md5::{Digest, Md5};
 use serde_json::Value as Json;
 
-use super::cbor::{self, Value};
+use super::cbor::{self, Head, Length, Value};
 use super::{FormatError, MAX_DECODED_BYTES};
 
 pub const MAGIC: &[u8] = b"XferJson\0";
@@ -180,6 +180,37 @@ impl SerumState {
     /// The preset name the controller half remembers.
     pub fn preset_name(&self) -> Option<String> {
         self.controller.as_ref()?.header_json().ok()?.get("presetName").and_then(Json::as_str).map(str::to_string)
+    }
+
+    /// The two halves as one tree, the way a preset holds them: every section of either half, and for a
+    /// section in both, the controller's entries with the processor's laid over them. For a patch saved
+    /// unedited this gives the preset's tree section for section (checked on Serum 2.1.5's init patch); the
+    /// preset adds `fileType`, and the state keeps its own `component`, `presetHasBeenEdited`,
+    /// `selectedPresetPath`, `modMatrixLocked` and `scalarCurvesLocked`.
+    pub fn merged(&self) -> Value {
+        let mut sections: Vec<(Value, Value)> = Vec::new();
+        let halves = self.controller.iter().map(|c| &c.body).chain([&self.processor.body]);
+        for half in halves {
+            let Value::Map(entries, _) = half else { continue };
+            for (key, value) in entries {
+                match sections.iter_mut().find(|(k, _)| k == key) {
+                    Some((_, Value::Map(existing, _))) if matches!(value, Value::Map(..)) => {
+                        let Value::Map(over, _) = value else { unreachable!() };
+                        for (inner_key, inner) in over {
+                            match existing.iter_mut().find(|(k, _)| k == inner_key) {
+                                Some((_, slot)) => *slot = inner.clone(),
+                                None => existing.push((inner_key.clone(), inner.clone())),
+                            }
+                        }
+                    }
+                    Some((_, slot)) => *slot = value.clone(),
+                    None => sections.push((key.clone(), value.clone())),
+                }
+            }
+        }
+        sections.sort_by(|(a, _), (b, _)| a.as_str().cmp(&b.as_str()));
+        let length = Length::Definite(Head::shortest(sections.len() as u64));
+        Value::Map(sections, length)
     }
 }
 

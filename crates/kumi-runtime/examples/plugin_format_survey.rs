@@ -1,7 +1,7 @@
 //! Survey a plug-in's preset and state format across the files a machine has, and fold what it finds into
 //! the plug-in's structure.json. It decodes every preset under the folders given (factory ones included,
-//! read where they lie) and every state of that plug-in in Live Sets (.als) and device presets (.adv), and
-//! checks each round trip. Only counts, types, ranges and option-like values leave the machine.
+//! read where they lie) and every state of that plug-in in Live Sets (.als), device presets (.adv) and VST3
+//! presets (.vstpreset), and checks each round trip. Only counts, types, ranges and option-like values leave the machine.
 //!
 //! cargo run -p kumi-runtime --example plugin_format_survey -- <serum-2|vital|ozone-12> <report.json>
 //!     [--structure plugin-formats/<plug-in>/format-1/structure.json] <file or folder>...
@@ -9,12 +9,13 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use kumi_runtime::plugins::formats::live_set::{self, PluginFormat as Host};
+use kumi_runtime::plugins::formats::live_set::{self, PluginFormat as Host, PluginState};
 use kumi_runtime::plugins::formats::ozone12::{OzonePreset, OzoneState};
 use kumi_runtime::plugins::formats::serum2::{SerumPreset, XferFile};
-use kumi_runtime::plugins::formats::structure::{builtin, merge_survey};
+use kumi_runtime::plugins::formats::structure::{builtin, merge_survey, to_text};
 use kumi_runtime::plugins::formats::survey::Survey;
 use kumi_runtime::plugins::formats::vital::VitalPreset;
+use kumi_runtime::plugins::formats::vstpreset::{vst2_chunk, VstPreset};
 use kumi_runtime::plugins::formats::{cbor, FormatError};
 use serde_json::{json, Value};
 
@@ -59,7 +60,19 @@ fn main() {
     files.sort();
     let mut survey = Survey::new(format.structure.paths);
     let mut tally = Tally::default();
+    let wanted: Vec<String> = format
+        .info
+        .presets
+        .extensions
+        .iter()
+        .map(|e| e.trim_start_matches('.').to_ascii_lowercase())
+        .chain(["als".into(), "adv".into(), "vstpreset".into()])
+        .collect();
     for file in &files {
+        let extension = file.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+        if !wanted.contains(&extension) {
+            continue;
+        }
         let bytes = match std::fs::read(file) {
             Ok(bytes) => bytes,
             Err(error) => {
@@ -67,9 +80,8 @@ fn main() {
                 continue;
             }
         };
-        let extension = file.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
         let result = match extension.as_str() {
-            "als" | "adv" => states(plugin, &bytes, &mut survey, &mut tally),
+            "als" | "adv" | "vstpreset" => states(plugin, &extension, &bytes, &mut survey, &mut tally),
             _ => preset(plugin, &extension, &bytes, &mut survey, &mut tally),
         };
         match result {
@@ -102,13 +114,17 @@ fn main() {
         let mut structure: Value =
             serde_json::from_str(&std::fs::read_to_string(&path).expect("read structure.json")).expect("structure.json is JSON");
         merge_survey(&mut structure, &report, summary);
-        std::fs::write(&path, serde_json::to_string_pretty(&structure).unwrap() + "\n").expect("write structure.json");
+        std::fs::write(&path, to_text(&structure)).expect("write structure.json");
         eprintln!("merged into {}", path.display());
     }
 }
 
+/// Files under a path. Live's Backup folders (older copies of Sets) and code folders are skipped.
 fn walk(path: &Path, files: &mut Vec<PathBuf>) {
     if path.is_dir() {
+        if path.file_name().is_some_and(|name| name == "Backup" || name == "node_modules" || name == ".git") {
+            return;
+        }
         if let Ok(entries) = std::fs::read_dir(path) {
             for entry in entries.flatten() {
                 walk(&entry.path(), files);
@@ -197,14 +213,25 @@ fn serum_checks(file: &XferFile, decoded: &[u8], tag: &str, tally: &mut Tally) -
     Ok(())
 }
 
-fn states(plugin: &str, bytes: &[u8], survey: &mut Survey, tally: &mut Tally) -> Result<(), FormatError> {
+/// The plug-in's states in a Live Set or device preset (.als, .adv) or a VST3 preset (.vstpreset).
+fn states(plugin: &str, extension: &str, bytes: &[u8], survey: &mut Survey, tally: &mut Tally) -> Result<(), FormatError> {
     let format = builtin(plugin).expect("checked in main");
-    for state in live_set::read(bytes)? {
-        if !format.has_id(&state.id) {
-            continue;
-        }
-        match (plugin, state.format) {
-            ("serum-2", Host::Vst3) => {
+    let found = if extension == "vstpreset" {
+        let preset = VstPreset::read(bytes)?;
+        vec![PluginState {
+            format: Host::Vst3,
+            name: String::new(),
+            id: preset.class_id.clone(),
+            processor: preset.component().unwrap_or_default().to_vec(),
+            controller: preset.controller().unwrap_or_default().to_vec(),
+            chunk_type: None,
+        }]
+    } else {
+        live_set::read(bytes)?
+    };
+    for state in found.iter().filter(|state| format.has_id(&state.id)) {
+        match plugin {
+            "serum-2" => {
                 for (tag, half) in [("processor", &state.processor), ("controller", &state.controller)] {
                     if half.is_empty() {
                         continue;
@@ -220,22 +247,19 @@ fn states(plugin: &str, bytes: &[u8], survey: &mut Survey, tally: &mut Tally) ->
                     Tally::count(&mut tally.files, tag);
                 }
             }
-            ("vital", Host::Vst2) => {
-                let preset = VitalPreset::read_state(&state.processor)?;
-                Tally::count(
-                    &mut tally.versions,
-                    format!("state {} chunk {}", preset.synth_version().unwrap_or("?"), state.chunk_type.as_deref().unwrap_or("?")),
-                );
-                Tally::count(
-                    &mut tally.checks,
-                    if state.processor.last() == Some(&0) { "state ends with NUL" } else { "state has no closing NUL" },
-                );
+            "vital" => {
+                // The VST3 build wraps the VST2 chunk; the VST2 build hands it over as is.
+                let wrapped = vst2_chunk(&state.processor)?;
+                let chunk = wrapped.as_ref().map_or(state.processor.as_slice(), |found| found.data);
+                let preset = VitalPreset::read_state(chunk)?;
+                let host = if wrapped.is_some() { "VST3" } else { "VST2" };
+                Tally::count(&mut tally.versions, format!("state {} {host}", preset.synth_version().unwrap_or("?")));
                 survey.add(&preset.to_node(), "state");
                 Tally::count(&mut tally.files, "state");
             }
-            ("ozone-12", Host::Vst3) => {
+            "ozone-12" => {
                 let read = OzoneState::read(&state.processor)?;
-                Tally::count(&mut tally.versions, format!("state {} header version {}", state.name, read.version));
+                Tally::count(&mut tally.versions, format!("state header version {}", read.version));
                 Tally::count(
                     &mut tally.checks,
                     if state.controller.is_empty() { "controller state empty" } else { "controller state present" },

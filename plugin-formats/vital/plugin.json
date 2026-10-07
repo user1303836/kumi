@@ -4,22 +4,46 @@
   "vendor": "Vital Audio",
   "kind": "instrument",
   "ids": {
+    "vst3": [
+      {
+        "id": "56535456697461766974616C00000000",
+        "name": "Vital",
+        "status": "verified"
+      }
+    ],
     "vst2": [
-      { "id": "1449751649", "name": "Vital", "status": "verified" }
+      {
+        "id": "1449751649",
+        "name": "Vital",
+        "status": "verified",
+        "parameters": 772
+      }
     ]
   },
   "presets": {
-    "extensions": [".vital"],
+    "extensions": [
+      ".vital"
+    ],
     "windows": [
-      { "path": "~/Documents/Vital", "holds": "Vital's data folder, unless data_directory in %APPDATA%/vital/Vital.config moves it: User/Presets, User/Wavetables, User/Samples, User/LFOs, and a folder per installed pack with its own Presets", "status": "guessed" }
+      {
+        "path": "~/Documents/Vital",
+        "holds": "Vital's data folder, unless data_directory in %APPDATA%/vital/Vital.config moves it: User/Presets, User/Wavetables, User/Samples, User/LFOs, and a folder per installed pack with its own Presets",
+        "status": "guessed"
+      }
     ],
     "mac": [
-      { "path": "~/Music/Vital", "holds": "Vital's data folder, laid out as on Windows", "status": "guessed" }
+      {
+        "path": "~/Music/Vital",
+        "holds": "Vital's data folder, laid out as on Windows",
+        "status": "guessed"
+      }
     ]
   },
-  "formats": ["format-1"],
+  "formats": [
+    "format-1"
+  ],
   "notes": [
-    "The VST2 unique ID is 'Vita' (1449751649). Only the VST2 build was installed where this was checked, so the VST3, AU and CLAP IDs are still to find.",
+    "The VST2 unique ID is 'Vita' (1449751649). The VST3 class ID spells VSTVitavital, the ID the VST3 build of a VST2 plug-in gets, and its state wraps the VST2 chunk. No AU or CLAP build was installed where this was checked.",
     "The folders come from Vital's published source (the open build calls its folder Vial) and #200; the machine this was checked on had no data folder, since Vital ran offline and never downloaded its factory content.",
     "Vital's README forbids redistributing its presets: fixtures here are made from its init patch."
   ]

@@ -8,107 +8,128 @@
       {
         "id": "5653545A424F5A4F7A6F6E6500000000",
         "name": "Ozone 12",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 873
       },
       {
         "id": "5653545A4242414F7A6F6E652050726F",
         "name": "Ozone 12 Bass Control",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 19
       },
       {
         "id": "5653545A42434C4F7A6F6E652050726F",
         "name": "Ozone 12 Clarity",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 18
       },
       {
         "id": "5653545A42595A4F7A6F6E652050726F",
         "name": "Ozone 12 Dynamic EQ",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 166
       },
       {
         "id": "5653545A42445A4F7A6F6E652050726F",
         "name": "Ozone 12 Dynamics",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 118
       },
       {
         "id": "5653545A425A554F7A6F6E652050726F",
         "name": "Ozone 12 Equalizer",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 107
       },
       {
         "id": "5653545A425A584F7A6F6E652050726F",
         "name": "Ozone 12 Exciter",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 38
       },
       {
         "id": "5653545A42495A4F7A6F6E652050726F",
         "name": "Ozone 12 Imager",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 25
       },
       {
         "id": "5653545A424F494F7A6F6E652050726F",
         "name": "Ozone 12 Impact",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 24
       },
       {
         "id": "5653545A425A4C4F7A6F6E652050726F",
         "name": "Ozone 12 Low End Focus",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 14
       },
       {
         "id": "5653545A425A524F7A6F6E652050726F",
         "name": "Ozone 12 Master Rebalance",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 9
       },
       {
         "id": "5653545A425A484F7A6F6E652050726F",
         "name": "Ozone 12 Match EQ",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 14
       },
       {
         "id": "5653545A425A4D4F7A6F6E652050726F",
         "name": "Ozone 12 Maximizer",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 20
       },
       {
         "id": "5653545A425A534F7A6F6E652050726F",
         "name": "Ozone 12 Spectral Shaper",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 20
       },
       {
         "id": "5653545A424F534F7A6F6E652050726F",
         "name": "Ozone 12 Stabilizer",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 27
       },
       {
         "id": "5653545A4253514F7A6F6E652050726F",
         "name": "Ozone 12 Stem EQ",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 176
       },
       {
         "id": "5653545A42554C4F7A6F6E652050726F",
         "name": "Ozone 12 Unlimiter",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 12
       },
       {
         "id": "5653545A425A434F7A6F6E652050726F",
         "name": "Ozone 12 Vintage Compressor",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 34
       },
       {
         "id": "5653545A425A514F7A6F6E652050726F",
         "name": "Ozone 12 Vintage EQ",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 38
       },
       {
         "id": "5653545A425A564F7A6F6E652050726F",
         "name": "Ozone 12 Vintage Limiter",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 13
       },
       {
         "id": "5653545A425A544F7A6F6E652050726F",
         "name": "Ozone 12 Vintage Tape",
-        "status": "verified"
+        "status": "verified",
+        "parameters": 14
       }
     ]
   },

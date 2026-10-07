@@ -1,0 +1,11 @@
+<?xml version="1.0" standalone="yes" ?>
+<OzoneMaximizer PresetVer="6" PluginVer="120100" PluginBuild="1440" LastModified="1791395252">
+    <Global Enabled="1">
+        <ExtraBytes ElementID="ElementChain" Data="AAkAAABNYXhpbWl6ZXI=" />
+        <ExtraBytes ElementID="Global" Data="" />
+    </Global>
+    <Maximizer Enabled="1">
+        <ExtraBytes ElementID="Maximizer" Data="" />
+    </Maximizer>
+    <Meters Enabled="1" />
+</OzoneMaximizer>

@@ -29,6 +29,9 @@ pub struct PluginId {
     /// The name hosts show for it.
     pub name: String,
     pub status: Status,
+    /// How many parameters it lists to a host (Live's get_parameter_names), when counted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -92,6 +95,7 @@ pub struct FileKind {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Field {
+    /// Its kind ("float", "text", "map" …), or kinds joined by "|" when it takes more than one ("map|text").
     #[serde(rename = "type")]
     pub kind: String,
     /// The kinds of file it appears in.
@@ -106,6 +110,9 @@ pub struct Field {
     /// The range the plug-in allows, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub range: Option<[f64; 2]>,
+    /// Its value when the file leaves it out (Serum and Ozone write only what differs from it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
     /// An option list's values, each with its meaning ("" while unknown).
@@ -120,6 +127,9 @@ pub struct Field {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParameterLink {
     pub field: String,
+    /// The numbers that fill the field path's "{n}"s, in order ([1] for "Env{n}/…" is Env1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub at: Vec<u32>,
     pub status: Status,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
@@ -216,6 +226,25 @@ impl Structure {
         self.parameters.get(name).map(|link| (link, self.fields.get(&link.field)))
     }
 
+    /// Where a linked parameter's value sits in a tree: its field's path with each "{n}" filled from `at`
+    /// ("Env{n}/plainParams/kParamAttack" at [0] is "Env0/plainParams/kParamAttack"). Only for structures
+    /// whose paths number sections that way.
+    pub fn location(link: &ParameterLink) -> String {
+        let mut numbers = link.at.iter();
+        let mut out = String::new();
+        let mut rest = link.field.as_str();
+        while let Some(i) = rest.find("{n}") {
+            out.push_str(&rest[..i]);
+            match numbers.next() {
+                Some(n) => out.push_str(&n.to_string()),
+                None => out.push_str("{n}"),
+            }
+            rest = &rest[i + 3..];
+        }
+        out.push_str(rest);
+        out
+    }
+
     /// Every path in the tree the structure doesn't list, and every one listed as another type. An int where a
     /// float is listed is fine (encoders write whole floats as ints), and so is null for an optional value.
     pub fn check(&self, tree: &Node) -> Check {
@@ -230,7 +259,8 @@ impl Structure {
                 }
                 Some(field) => {
                     let found = node.kind();
-                    let fits = field.kind == found || (field.kind == "float" && found == "int") || found == "null" || field.kind == "any";
+                    let kinds = || field.kind.split('|');
+                    let fits = found == "null" || kinds().any(|kind| kind == found || kind == "any" || (kind == "float" && found == "int"));
                     if !fits {
                         check.mismatched.insert(path.to_string(), (field.kind.clone(), found.to_string()));
                     }
@@ -318,7 +348,13 @@ pub fn merge_survey(structure: &mut Value, report: &SurveyReport, survey: Value)
     for (path, found) in &report.fields {
         let entry = fields.entry(path.clone()).or_insert_with(|| json!({"status": "guessed"}));
         let object = entry.as_object_mut().expect("a field is an object");
-        object.insert("type".into(), json!(found.kind));
+        // A field seen as more than one kind ("default" or a map of knobs) lists them all: "map|text".
+        let kind = if found.kinds.len() > 1 {
+            found.kinds.keys().filter(|kind| *kind != "null").cloned().collect::<Vec<_>>().join("|")
+        } else {
+            found.kind.clone()
+        };
+        object.insert("type".into(), json!(kind));
         let mut seen_in: BTreeSet<String> =
             object.get("in").and_then(Value::as_array).into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect();
         seen_in.extend(found.seen_in.iter().cloned());
@@ -343,9 +379,36 @@ pub fn merge_survey(structure: &mut Value, report: &SurveyReport, survey: Value)
     }
 }
 
+/// A structure file's text: two-space JSON, but each field and parameter link on one line, so the file stays
+/// short and a change to one field is a one-line diff.
+pub fn to_text(structure: &Value) -> String {
+    let Value::Object(top) = structure else { return serde_json::to_string_pretty(structure).unwrap_or_default() };
+    let mut out = String::from("{\n");
+    for (i, (key, value)) in top.iter().enumerate() {
+        let comma = if i + 1 < top.len() { "," } else { "" };
+        let one_line_entries = matches!(key.as_str(), "fields" | "parameters");
+        match value {
+            Value::Object(entries) if one_line_entries && !entries.is_empty() => {
+                out.push_str(&format!("  {}: {{\n", Value::String(key.clone())));
+                for (j, (name, entry)) in entries.iter().enumerate() {
+                    let entry_comma = if j + 1 < entries.len() { "," } else { "" };
+                    out.push_str(&format!("    {}: {}{entry_comma}\n", Value::String(name.clone()), entry));
+                }
+                out.push_str(&format!("  }}{comma}\n"));
+            }
+            _ => {
+                let text = serde_json::to_string_pretty(value).unwrap_or_default().replace('\n', "\n  ");
+                out.push_str(&format!("  {}: {text}{comma}\n", Value::String(key.clone())));
+            }
+        }
+    }
+    out.push_str("}\n");
+    out
+}
+
 /// A field's keys in a fixed order, so diffs stay small.
 fn order_field(field: Value) -> Value {
-    const ORDER: [&str; 10] = ["type", "in", "files", "seen", "range", "unit", "options", "about", "status", "note"];
+    const ORDER: [&str; 11] = ["type", "in", "files", "seen", "range", "default", "unit", "options", "about", "status", "note"];
     let Value::Object(mut object) = field else { return field };
     let mut ordered = serde_json::Map::new();
     for key in ORDER {
@@ -383,6 +446,16 @@ mod tests {
         assert_eq!(readings[0].field.and_then(|f| f.unit.as_deref()), Some("%"));
         assert!(readings[2].field.is_none());
         assert_eq!(structure.parameter("A Level").unwrap().1.unwrap().status, Status::Verified);
+        let link = ParameterLink { field: "Osc{n}/Unit{n}/level".into(), at: vec![2, 0], status: Status::Guessed, note: None };
+        assert_eq!(Structure::location(&link), "Osc2/Unit0/level");
+    }
+
+    #[test]
+    fn writes_fields_one_per_line() {
+        let structure = json!({"plugin": "x", "files": {"preset": {"layers": ["a"]}}, "fields": {"a": {"type": "int", "status": "guessed"}, "b": {"type": "text", "status": "guessed"}}, "parameters": {}});
+        let text = to_text(&structure);
+        assert!(text.contains("\n    \"a\": {\"type\":\"int\",\"status\":\"guessed\"},\n"), "{text}");
+        assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), structure);
     }
 
     #[test]

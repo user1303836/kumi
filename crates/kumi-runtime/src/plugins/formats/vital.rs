@@ -5,7 +5,9 @@
 //! the eight `lfos` (points, powers, smoothing) and the `sample` (base64 16-bit PCM).
 //!
 //! The state a host saves is that same JSON with the tuning added under `tuning`, written as a string with a
-//! closing NUL. The format is read from Vital's published source (GPL-3.0); none of its code is here.
+//! closing NUL; the plug-in framework (JUCE) may add its own data after the NUL. The VST3 build wraps that
+//! chunk as its VST2 build's: see `vstpreset::vst2_chunk`. The format is read from Vital's published source
+//! (GPL-3.0); none of its code is here.
 
 use base64::Engine;
 use serde_json::{Map, Value};
@@ -26,9 +28,10 @@ impl VitalPreset {
         check(json)
     }
 
-    /// The state a host saved: the same JSON, a NUL after it, maybe a tuning inside.
+    /// The state a host saved (the VST2 chunk): the same JSON with a tuning inside, up to its NUL. What
+    /// follows the NUL is the framework's, not Vital's.
     pub fn read_state(bytes: &[u8]) -> Result<VitalPreset, FormatError> {
-        let end = bytes.iter().rposition(|b| *b != 0).map_or(0, |i| i + 1);
+        let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
         let json: Value =
             serde_json::from_slice(&bytes[..end]).map_err(|error| FormatError::new(format!("Vital state isn't JSON: {error}")))?;
         check(json)
@@ -160,6 +163,7 @@ mod tests {
         state["tuning"] = json!({"mapping_name": "", "scale": [0.0, 1.0]});
         let mut bytes = serde_json::to_vec(&state).unwrap();
         bytes.push(0);
+        bytes.extend_from_slice(b"\0\0\0\0\0\0\0\0JUCEPrivateData");
         let read = VitalPreset::read_state(&bytes).unwrap();
         assert!(read.tuning().is_some());
         assert!(VitalPreset::read(&bytes).is_err(), "a preset file has no NUL");

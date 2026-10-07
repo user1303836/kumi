@@ -230,6 +230,8 @@ fn typed_node(value: &Value) -> Node {
         (Some("Base64"), Some(Value::String(data))) => {
             Node::Bytes(base64::engine::general_purpose::STANDARD.decode(data).map_or(0, |b| b.len()))
         }
+        // Its own type decides: a Float written as 0 is still a float.
+        (Some("Float"), Some(inner)) if inner.is_number() => Node::Float(inner.as_f64().unwrap_or(f64::NAN)),
         (Some(_), Some(inner)) => Node::from(inner),
         _ => match value {
             Value::Object(map) => Node::Map(map.iter().map(|(k, v)| (k.clone(), typed_node(v))).collect()),

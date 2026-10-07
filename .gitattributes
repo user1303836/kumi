@@ -2,3 +2,6 @@
 # Willington's files are checked byte for byte against the SHA-256 its release.json gives each: no
 # line-ending conversion, and no whitespace checks on lines Kumi can't change.
 vendor/willington/** -text -whitespace
+# Plug-in format fixtures are the bytes a plug-in or host wrote, read back exactly by the tests: no
+# line-ending conversion, and no whitespace checks.
+plugin-formats/*/format-*/fixtures/** -text -whitespace

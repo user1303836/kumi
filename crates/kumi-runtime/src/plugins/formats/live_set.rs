@@ -11,7 +11,7 @@ use std::io::Read;
 use flate2::read::MultiGzDecoder;
 
 use super::xml::{self, Element};
-use super::{FormatError, MAX_DECODED_BYTES};
+use super::FormatError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginFormat {
@@ -34,35 +34,54 @@ pub struct PluginState {
     pub chunk_type: Option<String>,
 }
 
-/// Every plug-in state in a Set or device preset, gzip'd or not, in the order Live wrote them.
+/// The most XML a Set may decode to here; Live's largest Sets run to a few hundred megabytes.
+const MAX_SET_BYTES: u64 = 1 << 30;
+
+/// Every plug-in state in a Set or device preset, gzip'd or not, in the order Live wrote them. Only each
+/// plug-in's own element is parsed, so a large Set costs one pass over its text.
 pub fn read(bytes: &[u8]) -> Result<Vec<PluginState>, FormatError> {
     let text = if bytes.starts_with(&[0x1f, 0x8b]) {
         let mut text = String::new();
         MultiGzDecoder::new(bytes)
-            .take(MAX_DECODED_BYTES as u64 * 4)
+            .take(MAX_SET_BYTES + 1)
             .read_to_string(&mut text)
             .map_err(|error| FormatError::new(format!("Live file isn't gzip'd UTF-8: {error}")))?;
         text
     } else {
         String::from_utf8(bytes.to_vec()).map_err(|_| FormatError::new("Live file isn't UTF-8"))?
     };
-    let document = xml::parse(&text)?;
+    if text.len() as u64 > MAX_SET_BYTES {
+        return Err(FormatError::new("Live file decodes to more than 1 GB"));
+    }
     let mut states = Vec::new();
-    collect(&document.root, &mut states)?;
+    let mut at = 0;
+    while let Some((start, tag)) = next_plugin(&text, at) {
+        let close = format!("</{tag}>");
+        let len = text[start..].find(&close).ok_or_else(|| FormatError::new(format!("<{tag}> isn't closed")))? + close.len();
+        let element = xml::parse(&text[start..start + len])?.root;
+        states.push(if tag == "Vst3PluginInfo" { vst3(&element)? } else { vst2(&element)? });
+        at = start + len;
+    }
     Ok(states)
 }
 
-fn collect(element: &Element, states: &mut Vec<PluginState>) -> Result<(), FormatError> {
-    match element.name.as_str() {
-        "Vst3PluginInfo" => states.push(vst3(element)?),
-        "VstPluginInfo" => states.push(vst2(element)?),
-        _ => {
-            for child in &element.children {
-                collect(child, states)?;
+/// Where the next plug-in's element starts at or after `from`, and its tag.
+fn next_plugin(text: &str, from: usize) -> Option<(usize, &'static str)> {
+    ["Vst3PluginInfo", "VstPluginInfo"]
+        .into_iter()
+        .filter_map(|tag| {
+            let open = format!("<{tag}");
+            let mut search = from;
+            while let Some(i) = text[search..].find(&open) {
+                let start = search + i;
+                match text[start + open.len()..].chars().next() {
+                    Some(c) if c.is_whitespace() || c == '>' || c == '/' => return Some((start, tag)),
+                    _ => search = start + open.len(),
+                }
             }
-        }
-    }
-    Ok(())
+            None
+        })
+        .min_by_key(|(start, _)| *start)
 }
 
 fn value<'a>(element: &'a Element, child: &str) -> Option<&'a str> {

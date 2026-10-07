@@ -1,6 +1,16 @@
 {
   "plugin": "vital",
   "format": "format-1",
-  "reads": [],
+  "reads": [
+    {
+      "version": "1.0.7",
+      "files": [
+        "preset",
+        "state"
+      ],
+      "checked": "2026-10-07",
+      "how": "the format read from Vital's published source; then Vital 1.0.7's init patch exported as a .vital and the state Live 12.4 saved for it from the VST3 build: both decode and fit structure.json, the preset round-trips, and the state's settings equal the preset's (776 of 776), with a tuning added"
+    }
+  ],
   "writes": []
 }
