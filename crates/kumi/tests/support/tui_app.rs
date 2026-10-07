@@ -269,7 +269,11 @@ impl SessionController for Control {
     }
     async fn forget_recipe(&self, name: &str) -> Result<bool, RuntimeError> {
         self.call(format!("forget-recipe:{name}"));
-        Ok(true)
+        // A store that can't be written, when a test says so.
+        match self.get::<String>("forget-fails") {
+            Some(reason) => Err(RuntimeError::plain(reason)),
+            None => Ok(true),
+        }
     }
     fn has_techniques(&self) -> bool {
         self.enabled("techniques")

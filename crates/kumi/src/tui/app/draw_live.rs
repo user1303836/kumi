@@ -457,7 +457,8 @@ impl TuiApp {
                     let entry = entry.clone();
                     app.task(move |app| async move {
                         let forget = entry.borrow().forget.clone();
-                        let gone = forget().await.unwrap_or(false);
+                        // A forget that failed is said as it failed (by the task), and the row still offers it.
+                        let gone = forget().await?;
                         if !gone && !entry.borrow().forgotten {
                             entry.borrow_mut().forgotten = true;
                             app.notice("That was already gone.", NoticeTone::Info);

@@ -561,6 +561,27 @@ case!(memory_rows_forget_and_use, async {
     h.has("◆ Using your technique: Parallel drum crush");
     h.close().await;
 });
+case!(a_forget_that_fails_says_so_and_can_be_tried_again, async {
+    let c = Rc::new(Control::default());
+    *c.memory.borrow_mut() = Some(serde_json::from_value(json!({"producer":[],"set":[],"saved":true})).unwrap());
+    c.set("recipes", json!([]));
+    c.set("forget-fails", json!("recipes.json is in use by another program"));
+    let h = Harness::with(120, 36, c, |_| {});
+    h.start().await;
+    h.connect();
+    h.emit(json!({"type":"recipe","action":"saved","name":"Drum bus","steps":3}));
+    h.has("↻ Saved a recipe: Drum bus (3 steps)");
+    let lines = h.screen();
+    let row = strip(&lines) + 1;
+    assert!(lines[row].contains("↻ Drum bus") && lines[row].contains("forget"));
+    h.type_text(&click(&lines, row, "forget")).await;
+    assert!(h.calls().contains(&"forget-recipe:Drum bus".into()));
+    h.has("recipes.json is in use by another program");
+    assert!(!has(&h.screen(), "That was already gone."));
+    // Still Kumi's to forget: the row offers it again.
+    assert!(h.screen()[row].contains("forget") && !h.screen()[row].contains("forgotten"), "{}", h.screen()[row]);
+    h.close().await;
+});
 case!(a_technique_offered_after_an_answer_is_answered_by_number, async {
     let c = Rc::new(Control::default());
     c.set("techniques", json!([]));
