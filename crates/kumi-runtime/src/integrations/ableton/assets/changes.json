@@ -1062,7 +1062,7 @@
       "preview": "live_device_io_preview",
       "apply": "live_device_io_apply",
       "family": "device",
-      "description": "Feed a device from another track: a compressor's (or gate's, or auto filter's) sidechain, with action sidechain, deviceRef, and routingType and routingChannel exactly as Live names them (discover the device to see its choices); action routing for a device's own audio or MIDI input. The classic: the kick ducking the bass.",
+      "description": "Feed a device from another track: a compressor's (or gate's, or auto filter's) sidechain, with action sidechain, deviceRef and routingType (the source track) exactly as Live names it (discover the device to see its choices); action routing for a device's own audio or MIDI input, which also takes routingChannel. The classic: the kick ducking the bass.",
       "methods": [
         "summarize"
       ]
