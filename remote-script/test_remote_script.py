@@ -4865,6 +4865,20 @@ class SongTransportLinkTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unavailable on this song"):
             plain.invoke("song.set", {**authority(plain), "swingAmount": 0.5})
 
+    def test_a_nudge_lets_go_of_lives_nudge_button_after_a_click(self):
+        song, mapper = self._mapper_with_song_state(); song.nudge_up = False; song.nudge_down = False
+        set_row = mapper.snapshot()["set"]
+        request = {"setRef": set_row["ref"], "expectedObjectIdentity": set_row["objectIdentity"], "expectedRevision": str(mapper._playback()["revision"]), "action": "nudge-up"}
+        clock = lambda seconds: patch("ableton_mcp_remote_script.time.time", return_value=seconds)
+        with clock(1000.0): mapper.invoke("transport.action", request)
+        self.assertTrue(song.nudge_up, "pressed")
+        with clock(1000.0): mapper.fire_button_tick()
+        self.assertTrue(song.nudge_up, "held for a click's worth")
+        with clock(1001.0): mapper.fire_button_tick()
+        self.assertFalse(song.nudge_up, "then let go on a display tick, as a click on Live's button is")
+        mapper.invoke("transport.action", {**request, "action": "nudge-down", "expectedRevision": str(mapper._playback()["revision"])}); self.assertTrue(song.nudge_down)
+        mapper._release_fire_buttons(); self.assertFalse(song.nudge_down, "a reconnect or shutdown lets go of it too")
+
     def test_transport_action_dispatches_and_fences(self):
         song, mapper = self._mapper_with_song_state()
         calls = []

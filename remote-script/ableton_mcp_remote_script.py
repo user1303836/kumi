@@ -4472,6 +4472,8 @@ class LiveObjectMapper:
 
     # How long a fire button stays pressed unless its connection presses it again.
     FIRE_BUTTON_HOLD_MS = 30000
+    # How long a nudge holds Live's Nudge button: a click's worth, let go on the display tick after it.
+    NUDGE_HOLD_MS = 100
 
     def _fire_button_target(self, reference: Any) -> Any:
         """The clip, slot or scene a fire-button ref names at its place now, reading only that."""
@@ -4526,9 +4528,13 @@ class LiveObjectMapper:
             if owner is not None and hold.get("owner") is not owner: continue
             if expired_only and now < hold["expiresAt"]: continue
             held.pop(reference, None); released += 1
-            setter = getattr(hold["target"], "set_fire_button_state", None)
-            if callable(setter):
-                try: setter(False)
+            # A hold says how it's let go (a Nudge button); a fire button by its state.
+            release = hold.get("release")
+            if release is None:
+                setter = getattr(hold["target"], "set_fire_button_state", None)
+                release = (lambda setter=setter: setter(False)) if callable(setter) else None
+            if callable(release):
+                try: release()
                 except BaseException: pass
         return released
 
@@ -7374,11 +7380,15 @@ class LiveObjectMapper:
             method, call_args = getattr(song, "scrub_by", None), (float(beat),)
         elif action == "tap-tempo": method, call_args = getattr(song, "tap_tempo", None), ()
         elif action == "nudge-up" or action == "nudge-down":
-            # nudge_up/nudge_down are momentary settable properties, not callables.
+            # nudge_up/nudge_down are Live's Nudge buttons, momentary states rather than callables: pressed, then let
+            # go after a click's worth by the fire buttons' hold, or Live plays nudged until someone clicks.
             attribute = "nudge_up" if action == "nudge-up" else "nudge_down"
             if self._read_attr(song, attribute) is None: raise ValueError(f"transport action {action} is unavailable on this Live shape")
             try: setattr(song, attribute, True)
             except BaseException as error: raise ValueError(f"transport action {action} is unavailable on this Live shape") from error
+            held = getattr(self, "_held_fire_buttons", None)
+            if held is None: held = self._held_fire_buttons = {}
+            held[f"song:{attribute}"] = {"target": song, "owner": None, "expiresAt": int(time.time() * 1000) + self.NUDGE_HOLD_MS, "release": lambda: setattr(song, attribute, False)}
             return {"done": True, "revision": str(self._playback()["revision"])}
         elif action == "stop-all-clips": method, call_args = getattr(song, "stop_all_clips", None), ()
         elif action == "back-to-arrangement":
