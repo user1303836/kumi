@@ -467,7 +467,7 @@ fn room(written: &[Written], adding: usize, line: usize, column: usize) -> Resul
     })
 }
 /// A count with its thousands marked: 100,000.
-fn thousands(count: usize) -> String {
+pub fn thousands(count: usize) -> String {
     let digits = count.to_string();
     let mut text = String::new();
     for (index, digit) in digits.chars().enumerate() {

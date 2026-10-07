@@ -209,19 +209,29 @@ async fn a_sessions_history_keeps_at_most_its_cap_however_changes_come_in() {
             history
                 .quietly(Some(&mut ids), async {
                     for n in 0..MAX_ENTRIES + 100 {
-                        history.remember(record(n), String::new(), None);
+                        history.remember(record(n), format!("t{n}"), None);
                     }
                 })
                 .await;
             assert_eq!(history.entries.borrow().len(), MAX_ENTRIES);
             assert!(history.entries.borrow().get("c0").is_none(), "the oldest go first");
-            history.grouped("Built the arrangement", &ids, &[]);
+            let group = history.grouped("Built the arrangement", &ids, &[]).unwrap();
             assert_eq!(history.entries.borrow().len(), MAX_ENTRIES);
-            // One by one past the cap: each brings it back down.
-            for n in 0..3 {
-                history.remember(record(MAX_ENTRIES + 100 + n), String::new(), None);
+            // The group made room for its own record before choosing its members, so none of them went for it.
+            let members = history.entries.borrow()[&group].borrow().members.clone().unwrap();
+            assert_eq!(members.len(), MAX_ENTRIES - 1);
+            assert!(members.iter().all(|id| history.entries.borrow().contains_key(id)), "each member is kept");
+            // One by one past the cap: each brings it back down, the group's first members going.
+            for n in MAX_ENTRIES + 100..MAX_ENTRIES + 103 {
+                history.remember(record(n), format!("t{n}"), None);
             }
             assert_eq!(history.entries.borrow().len(), MAX_ENTRIES);
+            // The group's undo takes back the members Kumi keeps, and says only Live's own undo has the first steps.
+            let undone = history.undo(&group, Signal::new(), false).await.unwrap();
+            assert_eq!(
+                (undone.text.as_str(), undone.is_error),
+                ("Kumi took back 19,996 of its 20,100 changes; the first 104 are past the 20,000 changes Kumi keeps, so only Live's own undo (Cmd-Z in Live) can take them back.", true)
+            );
             connection.close().await.unwrap();
         })
         .await;

@@ -12,6 +12,7 @@ use super::{
 use crate::{
     core::{contracts::*, errors::RuntimeError},
     mcp::types::{CallToolResult, ContentBlock},
+    notation::thousands,
 };
 use futures::{future::LocalBoxFuture, FutureExt};
 use indexmap::{IndexMap, IndexSet};
@@ -63,11 +64,26 @@ pub struct Applied {
     /// What the change cut or deleted, which Kumi's undo makes again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<Material>,
+    /// A group's first steps that were past the most changes Kumi keeps when it was recorded: only Live's own undo
+    /// takes them back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trimmed: Option<usize>,
 }
 impl Applied {
     pub fn new(record: ChangeRecord, transaction_id: String, restore: Option<Restore>) -> Self {
         let permanent = (record.state == ChangeState::Kept).then_some(true);
-        Self { record, transaction_id, restore, permanent, undo_key: None, members: None, within: None, revert: None, material: None }
+        Self {
+            record,
+            transaction_id,
+            restore,
+            permanent,
+            undo_key: None,
+            members: None,
+            within: None,
+            revert: None,
+            material: None,
+            trimmed: None,
+        }
     }
 }
 #[derive(Clone, Serialize)]
@@ -143,17 +159,18 @@ impl History {
     pub fn is_quiet(&self) -> bool {
         self.quiet.borrow().is_some()
     }
-    /// At most MAX_ENTRIES changes are kept, the oldest going first, however they came in (quiet ones, groups).
-    fn keep_within_cap(&self) {
+    /// At most `most` changes are kept, the oldest going first, however they came in (quiet ones, groups). The
+    /// history keeps MAX_ENTRIES.
+    fn keep_within(&self, most: usize) {
         let mut entries = self.entries.borrow_mut();
-        let over = entries.len().saturating_sub(MAX_ENTRIES);
+        let over = entries.len().saturating_sub(most);
         if over > 0 {
             entries.drain(..over);
         }
     }
     pub fn remember(&self, record: ChangeRecord, transaction_id: String, restore: Option<Restore>) {
         self.entries.borrow_mut().insert(record.id.clone(), Rc::new(RefCell::new(Applied::new(record.clone(), transaction_id, restore))));
-        self.keep_within_cap();
+        self.keep_within(MAX_ENTRIES);
         if let Some(quiet) = self.quiet.borrow_mut().as_mut() {
             quiet.push(record.id.clone());
             return;
@@ -231,17 +248,16 @@ impl History {
         }
     }
     pub fn grouped(&self, title: &str, ids: &[String], apart: &[String]) -> Option<String> {
-        let members: Vec<_> = ids
-            .iter()
-            .filter(|id| {
-                !apart.contains(id)
-                    && self.entries.borrow().get(*id).is_some_and(|entry| {
-                        matches!(entry.borrow().record.state, ChangeState::Applied | ChangeState::Unsure | ChangeState::Kept)
-                    })
-            })
-            .cloned()
-            .collect();
-        let gone: Vec<_> = ids.iter().filter(|id| !members.contains(id)).collect();
+        let standing = |id: &String| {
+            !apart.contains(id)
+                && self.entries.borrow().get(id).is_some_and(|entry| {
+                    matches!(entry.borrow().record.state, ChangeState::Applied | ChangeState::Unsure | ChangeState::Kept)
+                })
+        };
+        // The build's first steps that are already past the most changes Kumi keeps (the oldest go first).
+        let mut trimmed = ids.iter().filter(|id| !apart.contains(id)).take_while(|id| !self.entries.borrow().contains_key(*id)).count();
+        let members: Vec<_> = ids.iter().filter(|id| standing(id)).cloned().collect();
+        let gone: Vec<_> = ids.iter().filter(|id| !standing(id)).collect();
         let released: Vec<_> = gone
             .iter()
             .filter_map(|id| self.entries.borrow().get(*id).cloned())
@@ -254,6 +270,11 @@ impl History {
         for id in gone {
             self.entries.borrow_mut().shift_remove(id);
         }
+        // Room for the group's own record before its members are chosen, so keeping to the cap can't drop one of them.
+        self.keep_within(MAX_ENTRIES - 1);
+        let count = members.len();
+        let members: Vec<_> = members.into_iter().filter(|id| self.entries.borrow().contains_key(id)).collect();
+        trimmed += count - members.len();
         if members.is_empty() {
             return None;
         }
@@ -263,8 +284,8 @@ impl History {
         }
         let mut entry = Applied::new(record.clone(), String::new(), None);
         entry.members = Some(members);
+        entry.trimmed = (trimmed > 0).then_some(trimmed);
         self.entries.borrow_mut().insert(record.id.clone(), Rc::new(RefCell::new(entry)));
-        self.keep_within_cap();
         self.emit(&record);
         self.remember.schedule_save(20_000);
         Some(record.id)
@@ -408,25 +429,45 @@ impl History {
             let undo_key = entry.borrow_mut().undo_key.get_or_insert_with(|| uuid::Uuid::new_v4().to_string()).clone();
             if let Some(members) = snapshot.members {
                 let mut hidden = Vec::new();
+                let standing =
+                    |id: &String| self.entries.borrow().get(id).is_some_and(|entry| entry.borrow().record.state != ChangeState::Undone);
                 self.quietly(Some(&mut hidden), async {
                     for id in members.iter().rev() {
-                        if self.entries.borrow().get(id).is_none_or(|entry| entry.borrow().record.state != ChangeState::Undone) {
+                        if standing(id) {
                             let _ = self.undo(id, signal.clone(), false).await;
                         }
                     }
                 })
                 .await;
-                let left = members
-                    .iter()
-                    .filter(|id| self.entries.borrow().get(*id).is_none_or(|entry| entry.borrow().record.state != ChangeState::Undone))
-                    .count();
-                if left == 0 {
+                // Its first steps past the most changes Kumi keeps, when it was recorded or since (the oldest go first).
+                let past = snapshot.trimmed.unwrap_or(0) + members.iter().filter(|id| !self.entries.borrow().contains_key(*id)).count();
+                let left = members.iter().filter(|id| standing(id)).count();
+                if left == 0 && past == 0 {
                     return Ok(self.undone(&entry));
                 }
+                let total = members.len() + snapshot.trimmed.unwrap_or(0);
+                let them = |count: usize| if count == 1 { "it" } else { "them" };
+                let mut why = Vec::new();
+                if left > 0 {
+                    why.push(if past == 0 {
+                        "the rest changed in Live since, so Kumi left them".to_owned()
+                    } else {
+                        format!("{} changed in Live since, so Kumi left {}", thousands(left), them(left))
+                    });
+                }
+                if past > 0 {
+                    why.push(format!(
+                        "{} past the {} changes Kumi keeps, so only Live's own undo (Cmd-Z in Live) can take {} back",
+                        if past == 1 { "the first is".to_owned() } else { format!("the first {} are", thousands(past)) },
+                        thousands(MAX_ENTRIES),
+                        them(past)
+                    ));
+                }
                 let note = format!(
-                    "Kumi took back {} of its {} changes; the rest changed in Live since, so Kumi left them.",
-                    members.len() - left,
-                    members.len()
+                    "Kumi took back {} of its {} changes; {}.",
+                    thousands(total - past - left),
+                    thousands(total),
+                    why.join(", and ")
                 );
                 return Ok(UndoResult::with(self.update(&entry, ChangeState::Kept, Some(note.clone())), note, true));
             }
