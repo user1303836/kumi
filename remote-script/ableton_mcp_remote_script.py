@@ -7734,7 +7734,7 @@ class LiveObjectMapper:
         track = tracks[index]
         if not isinstance(args.get("expectedObjectIdentity"), str) or not hmac.compare_digest(self._capture_object_identity(track), args["expectedObjectIdentity"]): raise ValueError("track identity changed since preview")
         # Live copies a group with every track inside it: more than this change can confirm or take back as one.
-        if self._track_kind(track) == "group": raise ValueError("a group track can't be duplicated: Live copies every track inside it too")
+        if self._track_kind(track) == "group": raise ValueError(f"a group track can't be duplicated: Live copies every track inside it too{UNRUN_SUFFIX}")
         duplicator = getattr(self.song, "duplicate_track", None)
         if not callable(duplicator): raise ValueError("track duplication is unavailable")
         before = len(tracks)
@@ -11384,8 +11384,8 @@ class LiveObjectMapper:
         # Live replaces a track's instrument with a new one, which cleanup couldn't bring back: nor does an item
         # that may be an instrument (Kumi can't tell what a plug-in is) load onto a track that has one.
         if device_type in (1, None) and any(self._read_attr(device, "type") == 1 for device in before_devices):
-            if device_type is None: raise ValueError("this track already has an instrument, and Kumi can't tell whether this item is one too, which Live would replace it with: load it onto a new track, or delete the instrument first")
-            raise ValueError("this track already has an instrument, which Live would replace: delete it first (then load this), or load onto a new track or into an Instrument Rack")
+            if device_type is None: raise ValueError(f"this track already has an instrument, and Kumi can't tell whether this item is one too, which Live would replace it with: load it onto a new track, or delete the instrument first{UNRUN_SUFFIX}")
+            raise ValueError(f"this track already has an instrument, which Live would replace: delete it first (then load this), or load onto a new track or into an Instrument Rack{UNRUN_SUFFIX}")
         # The new device goes after the last one, not wherever the producer last clicked.
         track_view = self._read_attr(track, "view"); previous_device = self._read_attr(track_view, "selected_device") if track_view is not None else None
         before_identities = [self._capture_object_identity(prior) for prior in before_devices]
