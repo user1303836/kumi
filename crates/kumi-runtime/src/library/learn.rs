@@ -351,7 +351,8 @@ async fn walk(
             if !found.seen.insert(full.clone()) {
                 continue;
             }
-            let info = match tokio::fs::metadata(&full).await {
+            // The listing's own: a regular file (file_type said so), so the same as by path, one round trip fewer on a NAS.
+            let info = match entry.metadata().await {
                 Ok(info) => info,
                 Err(error) => {
                     complete &= error.kind() == io::ErrorKind::NotFound;
