@@ -190,7 +190,24 @@ pub fn owner_only_new_file(path: &Path) -> Result<std::fs::File, RuntimeError> {
         use std::os::windows::fs::OpenOptionsExt;
         again.share_mode(0);
     }
-    again.open(path).map_err(|error| refused(format!("another program has it open: {error}")))
+    // A scanner may hold a new file for a moment: tried a few times before it's refused.
+    let mut tries = 0;
+    loop {
+        match again.open(path) {
+            Ok(file) => return Ok(file),
+            Err(_) if tries < 5 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(error) => return Err(refused(format!("another program has it open: {error}"))),
+        }
+    }
+}
+/// Why a credential file written before Kumi made them owner-only couldn't be made so, said once (`secure_once`).
+static UNPROTECTED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// What the producer should hear, once, when an older credential file couldn't be made readable only by them.
+pub fn unprotected_notice() -> Option<String> {
+    UNPROTECTED.lock().ok().and_then(|mut said| said.take())
 }
 /// Whether this process looks at the credential file at `path` for the first time (`secure_once`).
 fn first_look(path: &Path) -> bool {
@@ -274,12 +291,26 @@ impl FileCredentialStore {
             return;
         }
         let path = self.path.clone();
-        let _ = tokio::task::spawn_blocking(move || {
-            if !windows_owner_only(&path) {
-                let _ = make_owner_only(&path);
+        let failed = tokio::task::spawn_blocking(move || {
+            if windows_owner_only(&path) {
+                return None;
             }
+            make_owner_only(&path).err().map(|why| {
+                let folder = path.parent().unwrap_or(Path::new(".")).display().to_string();
+                format!(
+                    "Kumi couldn't make {} readable only by you ({why}); keep it in your user folder (unset KUMI_HOME or KUMI_AUTH_FILE), or give {folder}'s permissions to you alone.",
+                    path.display()
+                )
+            })
         })
-        .await;
+        .await
+        .ok()
+        .flatten();
+        // Told once, at the next start notice: refusing the read would only lock the producer out of credentials that
+        // are readable already.
+        if let (Some(said), Ok(mut unprotected)) = (failed, UNPROTECTED.lock()) {
+            *unprotected = Some(said);
+        }
     }
     pub async fn update_with<F, Fut>(&self, provider: &str, change: F) -> Result<Option<Credential>, RuntimeError>
     where

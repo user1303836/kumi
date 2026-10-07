@@ -106,7 +106,8 @@ async fn on_windows_the_credential_file_is_owner_only_wherever_kumi_home_puts_it
     // it, byte for byte as it was.
     let older = temp.path().join("older").join("auth.json");
     std::fs::create_dir_all(older.parent().unwrap()).unwrap();
-    let bytes = std::fs::read(&path).unwrap();
+    // Compact, unlike the file Kumi writes, so a rewrite would show.
+    let bytes = serde_json::to_vec(&serde_json::from_slice::<serde_json::Value>(&std::fs::read(&path).unwrap()).unwrap()).unwrap();
     std::fs::write(&older, &bytes).unwrap();
     assert!(!windows_owner_only(&older));
     assert_eq!(open_credential_store(&older).list().await.unwrap().len(), 2);

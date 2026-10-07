@@ -535,6 +535,11 @@ pub(super) async fn run_session(
         (Some(bridge), Some(database)) => Some(format!("{bridge} {database}")),
         (bridge, database) => bridge.or(database),
     };
+    // An older credential file that couldn't be made readable only by the producer (Windows), said once.
+    let notice = match (notice, kumi_runtime::auth::store::unprotected_notice()) {
+        (Some(notice), Some(credentials)) => Some(format!("{notice} {credentials}")),
+        (notice, credentials) => notice.or(credentials),
+    };
     // In the app, first-run setup puts the bridge in place instead, with Live restarting around it.
     let connect_why = if bridge_missing {
         Some("The Ableton bridge isn't in Live yet, so Kumi can't see your Set.".to_string())
