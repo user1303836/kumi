@@ -99,15 +99,31 @@ pub struct UndoResult {
     pub record: Option<ChangeRecord>,
     pub text: String,
     pub is_error: bool,
+    /// Kumi's refs were retired with it (a restructure's undo Live didn't confirm). The model is told so with the
+    /// undo (`for_model`); the producer reads `text` as it is (a render's cleanup notice, /undo).
+    #[serde(skip)]
+    pub retired: bool,
 }
 impl UndoResult {
     fn error(text: impl Into<String>) -> Self {
-        Self { record: None, text: text.into(), is_error: true }
+        Self { record: None, text: text.into(), is_error: true, retired: false }
     }
     fn with(record: ChangeRecord, text: impl Into<String>, is_error: bool) -> Self {
-        Self { record: Some(record), text: text.into(), is_error }
+        Self { record: Some(record), text: text.into(), is_error, retired: false }
+    }
+    /// The undo's text as the model reads it: with what to do about Kumi's refs when they were retired with it.
+    pub fn for_model(&self) -> String {
+        if !self.retired {
+            return self.text.clone();
+        }
+        let text = self.text.trim_end();
+        let stop = if text.ends_with(['.', '!', '?']) { "" } else { "." };
+        format!("{text}{stop} {REFS_RETIRED}")
     }
 }
+/// Said to the model after a restructure's undo Live didn't confirm.
+const REFS_RETIRED: &str =
+    "Live may have taken the tracks or scenes back, so Kumi's references are retired: discover again before using any.";
 /// The Remote Script's python.run error type for a failure after the code ran (its result, the deadline after it,
 /// its undo step): Live may have changed.
 pub const PYTHON_RAN: &str = "RanResultUnavailable";
@@ -570,9 +586,7 @@ impl History {
             if let Some(mut stopped) = self.bridge_undo(&entry, &snapshot, &undo_key, discard).await? {
                 if snapshot.shift.is_some() && stopped.record.as_ref().is_some_and(|record| record.state == ChangeState::Unsure) {
                     self.unknown_shift();
-                    stopped.text.push_str(
-                        " Live may have taken the tracks or scenes back, so Kumi's references are retired: discover again before using any.",
-                    );
+                    stopped.retired = true;
                 }
                 return Ok(stopped);
             }

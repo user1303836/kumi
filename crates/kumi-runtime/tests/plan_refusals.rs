@@ -580,7 +580,10 @@ async fn an_undo_of_a_track_add_live_doesnt_confirm_retires_the_refs_that_follow
             let add = reply["done"][0]["change"].as_str().unwrap().to_owned();
             bridge.undo.borrow_mut().push("pending");
             let undone = integration.history.undo(&add, Signal::new(), false).await.unwrap();
-            assert!(undone.is_error && undone.text.contains("discover again"), "{}", undone.text);
+            // The model is told to discover again; the producer's text (a render's cleanup notice, /undo) isn't.
+            assert!(undone.is_error && undone.retired, "{}", undone.text);
+            assert!(!undone.text.contains("discover again"), "{}", undone.text);
+            assert!(undone.for_model().ends_with("discover again before using any."), "{}", undone.for_model());
             let book = integration.connection.references.borrow();
             assert!(book.refs.is_empty());
             assert_eq!(book.lengthen(&json!({"ref":names[5]}))["ref"], json!(names[5]), "a retired name names nothing");

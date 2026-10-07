@@ -443,7 +443,7 @@ impl KernelTool for LiveTool {
                 } else {
                     None
                 };
-                Ok(ToolResult { text: outcome.text, is_error: outcome.is_error, reply, ..Default::default() })
+                Ok(ToolResult { text: outcome.for_model(), is_error: outcome.is_error, reply, ..Default::default() })
             }
             "audition" => owner.audition_tool(input, signal).await,
             "render" => owner.render_tool(input, signal).await,
