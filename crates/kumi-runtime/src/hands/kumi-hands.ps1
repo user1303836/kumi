@@ -179,7 +179,13 @@ $auto = [System.Windows.Automation.AutomationElement]
 $tree = [System.Windows.Automation.TreeScope]
 $types = [System.Windows.Automation.ControlType]
 
-function Emit($object) { [Console]::Out.WriteLine(($object | ConvertTo-Json -Compress -Depth 8)); [Console]::Out.Flush() }
+# Answers in ASCII, past it as \u escapes: Windows PowerShell writes in the console's code page, and Kumi reads UTF-8.
+# Requests come the same way. This file stays ASCII too: without a BOM, Windows PowerShell reads it in that code page.
+function Emit($object) {
+  $json = $object | ConvertTo-Json -Compress -Depth 8
+  [Console]::Out.WriteLine([regex]::Replace($json, '[^\u0000-\u007F]', { param($found) '\u{0:x4}' -f [int][char]$found.Value }))
+  [Console]::Out.Flush()
+}
 function LiveProcess {
   # A test points the helper at a window of its own.
   if ($env:KUMI_HANDS_PID) { return Get-Process -Id ([int]$env:KUMI_HANDS_PID) -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1 }
@@ -188,7 +194,7 @@ function LiveProcess {
 function LiveWindow($process) { $auto::FromHandle($process.MainWindowHandle) }
 function Kids($element) { $element.FindAll($tree::Children, [System.Windows.Automation.Condition]::TrueCondition) }
 # A title as Live may say it: "Freeze Track" and "Freeze Tracks" (it changes with the selection) are one.
-function Norm($text) { return (([string]$text) -replace '&', '' -replace '(\.\.\.|…)$', '' -replace '\b(Track|Clip|Scene)s\b', '$1').Trim().ToLower() }
+function Norm($text) { return (([string]$text) -replace '&', '' -replace '(\.\.\.|\u2026)$', '' -replace '\b(Track|Clip|Scene)s\b', '$1').Trim().ToLower() }
 function Named($element, $name) {
   $all = @(Kids $element)
   $wanted = Norm $name

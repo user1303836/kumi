@@ -267,7 +267,9 @@ pub fn persistent(command: String, args: Vec<String>, timeout_ms: Option<u64>) -
     tokio::spawn(async move {
         let mut child: Option<tokio::process::Child> = None;
         let mut input: Option<tokio::process::ChildStdin> = None;
-        let mut lines: Option<tokio::io::Lines<BufReader<tokio::process::ChildStdout>>> = None;
+        let mut out: Option<BufReader<tokio::process::ChildStdout>> = None;
+        // The answer being read: read_until keeps what it has read in it when another branch goes first.
+        let mut line: Vec<u8> = Vec::new();
         let mut errors: Option<tokio::process::ChildStderr> = None;
         let mut discard = [0u8; 8192];
         loop {
@@ -276,20 +278,36 @@ pub fn persistent(command: String, args: Vec<String>, timeout_ms: Option<u64>) -
                     Some(Request::Ask(text))=>{
                         if child.is_none(){
                             let mut launch=tokio::process::Command::new(&command);launch.args(&args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);#[cfg(windows)]launch.creation_flags(0x0800_0000);
-                            match launch.spawn(){Ok(mut started)=>{input=started.stdin.take();lines=started.stdout.take().map(|s|BufReader::new(s).lines());errors=started.stderr.take();child=Some(started);},Err(_)=>{settle(&responses,"helper-failed");continue;}}
+                            match launch.spawn(){Ok(mut started)=>{input=started.stdin.take();out=started.stdout.take().map(BufReader::new);line.clear();errors=started.stderr.take();child=Some(started);},Err(_)=>{settle(&responses,"helper-failed");continue;}}
                         }
                         if let Some(stdin)=&mut input{if stdin.write_all(text.as_bytes()).await.is_err(){settle(&responses,"helper-failed");}}
                     },
-                    Some(Request::Close)=>{input=None;lines=None;errors=None;if let Some(mut process)=child.take(){#[cfg(unix)]if let Some(pid)=process.id(){unsafe{libc::kill(pid as i32,libc::SIGTERM);}}#[cfg(not(unix))]let _=process.start_kill();tokio::spawn(async move{let _=process.wait().await;});}settle(&responses,"helper-ended");},
+                    Some(Request::Close)=>{input=None;out=None;line.clear();errors=None;if let Some(mut process)=child.take(){#[cfg(unix)]if let Some(pid)=process.id(){unsafe{libc::kill(pid as i32,libc::SIGTERM);}}#[cfg(not(unix))]let _=process.start_kill();tokio::spawn(async move{let _=process.wait().await;});}settle(&responses,"helper-ended");},
                     None=>{if let Some(mut process)=child.take(){let _=process.start_kill();let _=process.wait().await;}settle(&responses,"helper-ended");break;}
                 },
-                line=async{match &mut lines{Some(lines)=>lines.next_line().await,None=>std::future::pending().await}}=>match line{Ok(Some(text))=>{if let Ok(value)=serde_json::from_str::<Value>(&text){if let Some(id)=value.get("id").and_then(Value::as_f64).filter(|v|v.is_finite()&&*v>=0.0&&v.fract()==0.0){if let Ok(reply)=serde_json::from_value::<HandsReply>(value){if let Some(answer)=responses.lock().unwrap().remove(&(id as u64)){let _=answer.send(reply);}}}}},_=>lines=None},
+                // Read whatever a console's code page made of a line: one that isn't UTF-8 isn't an answer, and the next still is.
+                read=async{match &mut out{Some(out)=>out.read_until(b'\n',&mut line).await,None=>std::future::pending().await}}=>match read{Ok(read)if read>0=>{if let Ok(value)=serde_json::from_str::<Value>(&String::from_utf8_lossy(&line)){if let Some(id)=value.get("id").and_then(Value::as_f64).filter(|v|v.is_finite()&&*v>=0.0&&v.fract()==0.0){if let Ok(reply)=serde_json::from_value::<HandsReply>(value){if let Some(answer)=responses.lock().unwrap().remove(&(id as u64)){let _=answer.send(reply);}}}}line.clear();},_=>{out=None;line.clear();}},
                 read=async{match &mut errors{Some(stderr)=>stderr.read(&mut discard).await,None=>std::future::pending().await}}=>if !matches!(read,Ok(n)if n>0){errors=None;},
-                status=async{match &mut child{Some(child)=>child.wait().await,None=>std::future::pending().await}}=>{settle(&responses,if status.is_ok(){"helper-ended"}else{"helper-failed"});child=None;input=None;lines=None;errors=None;}
+                status=async{match &mut child{Some(child)=>child.wait().await,None=>std::future::pending().await}}=>{settle(&responses,if status.is_ok(){"helper-ended"}else{"helper-failed"});child=None;input=None;out=None;line.clear();errors=None;}
             }
         }
     });
     Rc::new(Persistent { send, waiting, next: AtomicU64::new(1), timeout_ms: timeout_ms.unwrap_or(4000) })
+}
+/// JSON with each character past ASCII as a \u escape: Windows PowerShell reads its input in the console's code page.
+fn ascii(json: &str) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(json.len());
+    for c in json.chars() {
+        if c.is_ascii() {
+            out.push(c);
+        } else {
+            for unit in c.encode_utf16(&mut [0; 2]) {
+                let _ = write!(out, "\\u{unit:04x}");
+            }
+        }
+    }
+    out
 }
 struct Pending {
     waiting: Waiting,
@@ -311,7 +329,7 @@ impl Persistent {
             request.as_object_mut().unwrap().extend(fields.clone());
         }
         self.send
-            .send(Request::Ask(format!("{}\n", stringify(&request))))
+            .send(Request::Ask(format!("{}\n", ascii(&stringify(&request)))))
             .map_err(|_| HandsError::new("Kumi's hands couldn't start.", HandsErrorKind::Unavailable))?;
         tokio::select! {reply=receive=>reply.map_err(|_|HandsError::new("Kumi's hands couldn't start.",HandsErrorKind::Unavailable)),_=tokio::time::sleep(Duration::from_millis(self.timeout_ms))=>Err(HandsError::failed("Live didn't answer in time; is a dialog open in Live?")),_=async{if let Some(signal)=signal{signal.cancelled().await;}else{std::future::pending::<()>().await;}}=>Err(HandsError::failed("Stopped"))}
     }

@@ -10,10 +10,12 @@ fn embedded_helpers_keep_their_hashes() {
     assert_eq!(HANDS_VERSION, 2);
     for (source, expected) in [
         (mac::MAC_SOURCE, "16045380d38220f9dfd1a6dd318dac9b655fc41758f2531efc46ab97f82a7ba3"),
-        (windows::WINDOWS_SOURCE, "355ee9c9143d57eb6fe0b3bbf2b792b0de168a9aa52fb2489fc8139fc84b2c9f"),
+        (windows::WINDOWS_SOURCE, "9a2ae5669637716e9c438b0179cc82eed45128410f1baddef118c0e5bce4d1e1"),
     ] {
         assert_eq!(hex::encode(Sha256::digest(source)), expected);
     }
+    // Windows PowerShell reads a script without a BOM in the console's code page: anything past ASCII is misread.
+    assert!(windows::WINDOWS_SOURCE.is_ascii());
 }
 #[cfg(unix)]
 fn script(folder: &Path, name: &str, text: &str) -> String {
@@ -40,6 +42,7 @@ while IFS= read -r line; do
  *'"button":"untrusted"'*) printf '{"id":%s,"ok":false,"error":"untrusted"}\n' "$id";;
  *'"button":"no-live"'*) printf '{"id":%s,"ok":false,"error":"no-live"}\n' "$id";;
  *'"button":"disabled"'*) printf '{"id":%s,"ok":false,"error":"disabled"}\n' "$id";;
+ *'"button":"latin1"'*) printf 'Caf\351 menu\n{"id":%s,"ok":true,"after":true}\n' "$id";;
  *'"button":"exit"'*) exit 0;;
  *'"op":"dialog"'*) printf '{"id":%s,"ok":true,"open":true,"title":"Export","words":["Choose a file"],"buttons":["Cancel","Export"]}\n' "$id";;
  *'"op":"windows"'*) printf '{"id":%s,"ok":true,"windows":[{"title":"Live","subrole":"AXStandardWindow"}]}\n' "$id";;
@@ -118,6 +121,29 @@ async fn requests_correlate_out_of_order_and_errors_timeout_and_cancellation_do_
         hands.keys(&["hang".into()], KeysOptions { signal: Some(kumi_common::abort::timeout(10)), gap_ms: None }).await.unwrap_err();
     assert_eq!(error.message, "Stopped");
     assert_eq!(hands.menus(None).await.unwrap().len(), 1);
+    hands.close();
+}
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn names_past_ascii_go_to_the_helper_as_escapes() {
+    let folder = tempfile::tempdir().unwrap();
+    let hands = persistent(helper(folder.path()), vec![], Some(1000));
+    // As the helper reads them, whatever its code page: ASCII.
+    let tracks = hands.tracks(&[Track { name: "Caf\u{e9} \u{65e5}\u{672c} \u{1f3b9}".into(), nth: None }], None).await.unwrap();
+    assert_eq!(tracks.fields["request"]["tracks"][0]["name"], "Caf\u{e9} \u{65e5}\u{672c} \u{1f3b9}");
+    let sent = std::fs::read(folder.path().join("requests")).unwrap();
+    assert!(sent.is_ascii(), "{}", String::from_utf8_lossy(&sent));
+    assert!(String::from_utf8_lossy(&sent).contains(r"Caf\u00e9 \u65e5\u672c \ud83c\udfb9"));
+    hands.close();
+}
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn a_line_that_isnt_utf8_doesnt_stop_the_answers() {
+    let folder = tempfile::tempdir().unwrap();
+    let hands = persistent(helper(folder.path()), vec![], Some(1000));
+    // A line in a console's code page (Latin-1) before the answer: the answer still comes, and so do the next ones.
+    assert_eq!(hands.answer("latin1", None).await.unwrap().fields["after"], true);
+    assert!(hands.trusted(false).await.unwrap());
     hands.close();
 }
 #[cfg(unix)]
