@@ -27,15 +27,22 @@ impl Element {
     /// The tree surveys read: attributes as "@name", children by their tag (repeats become a list).
     pub fn to_node(&self) -> Node {
         let mut entries: Vec<(String, Node)> = self.attributes.iter().map(|(k, v)| (format!("@{k}"), Node::Text(v.clone()))).collect();
+        // Where each child tag's entry is, so a repeat finds it without a search: linear in the children.
+        let mut by_tag: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for child in &self.children {
             let node = child.to_node();
-            match entries.iter_mut().find(|(key, _)| *key == child.name) {
-                Some((_, Node::List(items))) => items.push(node),
-                Some((_, existing)) => {
-                    let first = std::mem::replace(existing, Node::Null);
-                    *existing = Node::List(vec![first, node]);
+            match by_tag.get(child.name.as_str()) {
+                Some(&at) => match &mut entries[at].1 {
+                    Node::List(items) => items.push(node),
+                    existing => {
+                        let first = std::mem::replace(existing, Node::Null);
+                        *existing = Node::List(vec![first, node]);
+                    }
+                },
+                None => {
+                    by_tag.insert(&child.name, entries.len());
+                    entries.push((child.name.clone(), node));
                 }
-                None => entries.push((child.name.clone(), node)),
             }
         }
         if !self.text.is_empty() {

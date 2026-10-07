@@ -55,33 +55,54 @@ pub fn read(bytes: &[u8]) -> Result<Vec<PluginState>, FormatError> {
     }
     let mut states = Vec::new();
     let mut at = 0;
-    while let Some((start, tag)) = next_plugin(&text, at) {
+    // Each tag's next element, kept until it's read: a tag is searched again only after its own element is
+    // used, so the text is passed over once per tag, not once per plug-in. None: not looked for since;
+    // Some(None): there are no more.
+    let mut next: [Option<Option<usize>>; 2] = [None, None];
+    loop {
+        for (slot, tag) in next.iter_mut().zip(TAGS) {
+            if slot.is_none() {
+                *slot = Some(find_tag(&text, tag, at));
+            }
+        }
+        let Some((which, start)) =
+            next.iter().enumerate().filter_map(|(i, found)| found.flatten().map(|start| (i, start))).min_by_key(|(_, start)| *start)
+        else {
+            break;
+        };
+        let tag = TAGS[which];
         let close = format!("</{tag}>");
         let len = text[start..].find(&close).ok_or_else(|| FormatError::new(format!("<{tag}> isn't closed")))? + close.len();
         let element = xml::parse(&text[start..start + len])?.root;
-        states.push(if tag == "Vst3PluginInfo" { vst3(&element)? } else { vst2(&element)? });
+        states.push(if which == 0 { vst3(&element)? } else { vst2(&element)? });
         at = start + len;
+        next[which] = None;
+        // A plug-in's element doesn't hold another's, but if one did, the other tag's find would now lie
+        // behind `at`: look for it again.
+        for found in &mut next {
+            if found.is_some_and(|found| found.is_some_and(|start| start < at)) {
+                *found = None;
+            }
+        }
     }
     Ok(states)
 }
 
-/// Where the next plug-in's element starts at or after `from`, and its tag.
-fn next_plugin(text: &str, from: usize) -> Option<(usize, &'static str)> {
-    ["Vst3PluginInfo", "VstPluginInfo"]
-        .into_iter()
-        .filter_map(|tag| {
-            let open = format!("<{tag}");
-            let mut search = from;
-            while let Some(i) = text[search..].find(&open) {
-                let start = search + i;
-                match text[start + open.len()..].chars().next() {
-                    Some(c) if c.is_whitespace() || c == '>' || c == '/' => return Some((start, tag)),
-                    _ => search = start + open.len(),
-                }
-            }
-            None
-        })
-        .min_by_key(|(start, _)| *start)
+/// The two plug-in elements Live writes, VST3 first.
+const TAGS: [&str; 2] = ["Vst3PluginInfo", "VstPluginInfo"];
+
+/// Where the next element with this tag starts at or after `from`.
+fn find_tag(text: &str, tag: &str, from: usize) -> Option<usize> {
+    let open = format!("<{tag}");
+    let mut search = from;
+    while let Some(i) = text[search..].find(&open) {
+        let start = search + i;
+        match text[start + open.len()..].chars().next() {
+            Some(c) if c.is_whitespace() || c == '>' || c == '/' => return Some(start),
+            _ => search = start + open.len(),
+        }
+    }
+    None
 }
 
 fn value<'a>(element: &'a Element, child: &str) -> Option<&'a str> {
@@ -153,6 +174,11 @@ mod tests {
     <PlugName Value="Vital" /><UniqueId Value="1449751649" />
     <Preset><VstPreset Id="2"><Type Value="1178747752" /><Buffer>7B7D00</Buffer></VstPreset></Preset>
   </VstPluginInfo></PluginDesc></PluginDevice>
+  <PluginDevice Id="2"><PluginDesc><Vst3PluginInfo Id="0">
+    <Name Value="Ozone 12" />
+    <Uid><Fields.0 Value="1448301658" /><Fields.1 Value="1112496719" /><Fields.2 Value="2054123109" /><Fields.3 Value="0" /></Uid>
+  </Vst3PluginInfo></PluginDesc></PluginDevice>
+  <Vst3PluginInfoLike />
 </Devices></DeviceChain></MidiTrack></Tracks></LiveSet></Ableton>"#;
 
     #[test]
@@ -161,7 +187,11 @@ mod tests {
         gz.write_all(SET.as_bytes()).unwrap();
         let states = read(&gz.finish().unwrap()).unwrap();
         assert_eq!(states, read(SET.as_bytes()).unwrap());
-        assert_eq!(states.len(), 2);
+        // In the order written: a VST3, a VST2, then a VST3 found after the VST2 was read; a longer tag that
+        // only starts like one isn't a plug-in.
+        assert_eq!(states.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Serum 2", "Vital", "Ozone 12"]);
+        assert_eq!(states[2].id, "5653545A424F5A4F7A6F6E6500000000");
+        assert!(states[2].processor.is_empty());
         assert_eq!(states[0].format, PluginFormat::Vst3);
         assert_eq!(states[0].name, "Serum 2");
         assert_eq!(states[0].id, "56534558667350736572756D20320000");

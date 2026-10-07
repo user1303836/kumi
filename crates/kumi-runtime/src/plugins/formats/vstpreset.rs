@@ -122,7 +122,7 @@ pub fn vst2_chunk(state: &[u8]) -> Result<Option<Vst2Chunk<'_>>, FormatError> {
     if state.get(bank..bank + 4) != Some(b"CcnK".as_slice()) {
         return Err(fail("no fxb bank after the VstW header"));
     }
-    let kind: [u8; 4] = state[bank + 8..bank + 12].try_into().unwrap();
+    let kind: [u8; 4] = state.get(bank + 8..bank + 12).ok_or_else(|| fail("cut off"))?.try_into().unwrap();
     let plugin: [u8; 4] = state.get(bank + 16..bank + 20).ok_or_else(|| fail("cut off"))?.try_into().unwrap();
     let plugin_version = be(bank + 20)?;
     // A bank's header: magic, size, kind, version, ID, version, program count, current program, 124 reserved
@@ -174,6 +174,11 @@ mod tests {
         let found = vst2_chunk(&state).unwrap().unwrap();
         assert_eq!((&found.plugin, found.plugin_version, &found.kind, found.data), (b"Vita", 0x0001_0007, b"FBCh", chunk.as_slice()));
         assert_eq!(vst2_chunk(b"XferJson").unwrap(), None);
-        assert!(vst2_chunk(&state[..state.len() - 1]).is_err());
+        // Cut anywhere, from inside the VstW header through the chunk's end, it's refused, never a panic.
+        for len in 0..state.len() {
+            let cut = vst2_chunk(&state[..len]);
+            assert!(if len < 4 { cut == Ok(None) } else { cut.is_err() }, "cut at {len}: {cut:?}");
+        }
+        assert!(vst2_chunk(&state[..20]).is_err(), "VstW, its three words, CcnK and nothing after");
     }
 }
