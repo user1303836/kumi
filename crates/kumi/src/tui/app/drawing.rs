@@ -313,7 +313,7 @@ impl TuiApp {
         if perf_now() - at >= CHANGE_FLASH_MS {
             return None;
         }
-        state.changes.iter().find(|c| &c.id == id).cloned()
+        state.records.changes().iter().find(|c| &c.id == id).cloned()
     }
     pub(super) fn now_line(&self) -> NowLine {
         let turn = self.0.options.controller.status().state;
@@ -330,7 +330,7 @@ impl TuiApp {
             .last_change
             .as_ref()
             .filter(|(_, at)| now - at < CHANGE_FLASH_MS)
-            .and_then(|(id, _)| state.changes.iter().find(|c| &c.id == id));
+            .and_then(|(id, _)| state.records.changes().iter().find(|c| &c.id == id));
         let action = state.last_action.as_ref().filter(|a| now - a.at < CHANGE_FLASH_MS);
         if turn == TurnState::Running {
             // A steady dot: NOW's glyph already shows Kumi is at work.

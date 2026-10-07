@@ -184,15 +184,15 @@ impl TuiApp {
                 let mut earlier: Vec<ChangeRecord> = array(&value["changes"])
                     .iter()
                     .map(|c| serde_json::from_value(c.clone()).unwrap())
-                    .filter(|c: &ChangeRecord| !state.changes.iter().any(|known| known.id == c.id))
+                    .filter(|c: &ChangeRecord| !state.records.changes().iter().any(|known| known.id == c.id))
                     .collect();
                 if !earlier.is_empty() {
-                    earlier.append(&mut state.changes);
+                    let changes = state.records.changes_mut();
+                    earlier.append(changes);
                     if earlier.len() > 500 {
                         earlier.drain(..earlier.len() - 500);
                     }
-                    state.changes = earlier;
-                    state.history_revision += 1;
+                    *changes = earlier;
                 }
                 // What's new goes below a conversation carried on at the start, where it's seen.
                 if let Some(news) = state.news.take() {
@@ -226,18 +226,18 @@ impl TuiApp {
                 let change: ChangeRecord = serde_json::from_value(value["change"].clone()).unwrap();
                 let (new, refresh) = {
                     let mut state = self.0.state.borrow_mut();
-                    state.history_revision += 1;
-                    if let Some(index) = state.changes.iter().position(|c| c.id == change.id) {
-                        state.changes[index] = change;
+                    if let Some(index) = state.records.changes().iter().position(|c| c.id == change.id) {
+                        state.records.changes_mut()[index] = change;
                         (false, false)
                     } else {
                         let refresh = change.track.as_ref().is_some_and(|t| {
                             !t.name.is_empty() && state.focus.as_ref().and_then(|f| f.track.as_ref()).is_some_and(|f| f.name == t.name)
                         });
                         state.last_change = Some((change.id.clone(), perf_now()));
-                        state.changes.push(change);
-                        if state.changes.len() > 500 {
-                            state.changes.remove(0);
+                        let changes = state.records.changes_mut();
+                        changes.push(change);
+                        if changes.len() > 500 {
+                            changes.remove(0);
                         }
                         if state.current.is_some() {
                             state.turn_changes += 1;
@@ -782,22 +782,20 @@ impl TuiApp {
     ) {
         let title = self.clean_line(title, 200);
         let mut state = self.0.state.borrow_mut();
-        state.history_revision += 1;
-        if let Some(index) = state.kept.iter().position(|e| e.borrow().key == key) {
-            state.kept.remove(index);
+        let kept = state.records.kept_mut();
+        if let Some(index) = kept.iter().position(|e| e.borrow().key == key) {
+            kept.remove(index);
         }
-        state.kept.push(Rc::new(RefCell::new(Kept { key, what, title, forgotten: false, forget })));
-        if state.kept.len() > 50 {
-            state.kept.remove(0);
+        kept.push(Rc::new(RefCell::new(Kept { key, what, title, forgotten: false, forget })));
+        if kept.len() > 50 {
+            kept.remove(0);
         }
     }
     fn forgotten(&self, key: &str) {
         let mut state = self.0.state.borrow_mut();
-        state.history_revision += 1;
-        for entry in &state.kept {
-            if entry.borrow().key == key {
-                entry.borrow_mut().forgotten = true;
-            }
+        let entries: Vec<_> = state.records.kept().iter().filter(|entry| entry.borrow().key == key).cloned().collect();
+        for entry in entries {
+            state.records.set_forgotten(&entry);
         }
     }
     pub(super) fn hold(&self, raw: String, when: &'static str) {

@@ -729,6 +729,23 @@ case!(reconnect_refused_undo_and_narrow_undo, async {
     assert!(h.calls().contains(&"undo:c3".into()));
     h.close().await;
 });
+case!(after_reconnecting_history_says_kumi_cant_undo_what_it_could, async {
+    let c = Rc::new(Control::default());
+    c.set("reconnect", json!(true));
+    let h = Harness::with(120, 36, c, |_| {});
+    h.start().await;
+    h.connect();
+    h.emit(json!({"type":"change","change":{"id":"c8","family":"tempo","title":"Tempo 120 → 128 BPM","state":"applied","at":1}}));
+    let lines = h.screen();
+    let history = lines.iter().position(|s| s.contains("HISTORY")).unwrap();
+    let row = lines[history + 1].clone();
+    assert!(row.contains("Tempo 120 → 128 BPM") && row.trim_end().ends_with("undo") && !row.contains("no undo"), "{row}");
+    // Reconnecting changes the records in place: HISTORY's own row says so, not only NOW.
+    h.type_text("/reconnect\r").await;
+    let row = h.screen()[history + 1].clone();
+    assert!(row.contains("Tempo 120 → 128 BPM") && row.contains("no undo"), "{row}");
+    h.close().await;
+});
 case!(a_picker_over_the_dock_takes_the_clicks_on_what_it_hides, async {
     let h = Harness::new(80, 24);
     h.start().await;

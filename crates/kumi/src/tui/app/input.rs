@@ -702,7 +702,7 @@ impl TuiApp {
             self.0.state.borrow_mut().activity = "connecting to Live".into();
             let result = controller.reconnect().await;
             if result.is_ok() {
-                for change in &mut self.0.state.borrow_mut().changes {
+                for change in self.0.state.borrow_mut().records.changes_mut() {
                     if matches!(change.state, ChangeState::Applied | ChangeState::Unsure) {
                         change.state = ChangeState::Expired;
                         change.note = Some("Kumi reconnected to Live since, so it can't undo this; Live's own undo still can.".into());
@@ -897,7 +897,7 @@ impl TuiApp {
             self.notice("Kumi is still working. Press esc to stop it first, then undo.", NoticeTone::Info);
             return;
         }
-        if id.is_none() && !self.0.state.borrow().changes.iter().any(|c| c.state == ChangeState::Applied) {
+        if id.is_none() && !self.0.state.borrow().records.changes().iter().any(|c| c.state == ChangeState::Applied) {
             self.notice("There's nothing of Kumi's to undo.", NoticeTone::Info);
             return;
         }

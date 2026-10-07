@@ -7,6 +7,7 @@ mod events;
 mod input;
 mod live;
 mod panels;
+mod records;
 mod setup;
 pub use setup::{waveform, LiveSetup, WAVE_WIDTH};
 
@@ -191,15 +192,14 @@ struct State {
     news: Option<EntryRef>,
     /// The version that news is since, where /changelog starts.
     news_since: Option<String>,
-    changes: Vec<ChangeRecord>,
-    /// Bumped whenever `changes` or `kept` change: HISTORY's rows are made again only then, or at a new width.
-    history_revision: u64,
+    /// Kumi's changes and what it kept, which HISTORY shows: changed only through its methods, which say so.
+    records: records::Records,
+    /// HISTORY's rows, made again when the records change or at another width.
     history_rows: Option<(u64, i32, Rc<[TabRow]>)>,
     last_change: Option<(String, f64)>,
     last_action: Option<LastAction>,
     goal: Option<Value>,
     matching: Option<Value>,
-    kept: Vec<Rc<RefCell<Kept>>>,
     watching: bool,
     undoing: bool,
     hits: Vec<Hit>,
@@ -279,14 +279,12 @@ impl State {
             willington_off: false,
             news: None,
             news_since: None,
-            changes: vec![],
-            history_revision: 0,
+            records: Default::default(),
             history_rows: None,
             last_change: None,
             last_action: None,
             goal: None,
             matching: None,
-            kept: vec![],
             watching: false,
             undoing: false,
             hits: vec![],
@@ -382,7 +380,7 @@ impl Tab for AppTab {
     }
     fn badge(&self) -> Option<i64> {
         self.app.upgrade().and_then(|a| {
-            let n = a.state.borrow().changes.len();
+            let n = a.state.borrow().records.changes().len();
             (self.id == "history" && n > 0).then_some(n as i64)
         })
     }

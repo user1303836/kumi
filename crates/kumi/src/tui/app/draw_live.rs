@@ -418,7 +418,7 @@ impl TuiApp {
             screen.put(at, area.y, "●", &dot);
             screen.put(at + 1, area.y, &right, &st::DIM);
         }
-        let last = self.0.state.borrow().changes.last().cloned();
+        let last = self.0.state.borrow().records.changes().last().cloned();
         if area.height > 1 {
             if let Some(last) = last.filter(|c| !self.busy() && c.state == ChangeState::Applied) {
                 let at = area.width - 6;
@@ -445,16 +445,16 @@ impl TuiApp {
         let revision = {
             let state = self.0.state.borrow();
             if let Some((made, at, rows)) = &state.history_rows {
-                if *made == state.history_revision && *at == width {
+                if *made == state.records.revision() && *at == width {
                     return rows.clone();
                 }
             }
-            state.history_revision
+            state.records.revision()
         };
         let mut rows = vec![];
         let (state_kept, changes) = {
             let state = self.0.state.borrow();
-            (state.kept.clone(), state.changes.clone())
+            (state.records.kept().to_vec(), state.records.changes().to_vec())
         };
         let kept = state_kept.iter().rev().take(3);
         for entry in kept {
@@ -470,8 +470,7 @@ impl TuiApp {
                         // A forget that failed is said as it failed (by the task), and the row still offers it.
                         let gone = forget().await?;
                         if !gone && !entry.borrow().forgotten {
-                            entry.borrow_mut().forgotten = true;
-                            app.0.state.borrow_mut().history_revision += 1;
+                            app.0.state.borrow_mut().records.set_forgotten(&entry);
                             app.notice("That was already gone.", NoticeTone::Info);
                         }
                         app.0.scheduler.request();
