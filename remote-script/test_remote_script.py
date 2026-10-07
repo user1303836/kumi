@@ -9727,6 +9727,29 @@ class ReadBudgetTests(unittest.TestCase):
             self.assertEqual([spent.room(), spent.room()], [True, False])
             self.assertEqual([roomy.room(), roomy.room(), roomy.room()], [True, True, True])
 
+    def test_a_filter_only_whole_rows_have_builds_a_pages_worth_of_them(self):
+        song, mapper = self.set(tracks=12)
+        for index, track in enumerate(song.tracks): track.is_grouped = index % 3 == 0
+        fields = ["name", "isGrouped"]; unbudgeted = mapper.discover("track", 100, None, None, {"isGrouped": True}, fields)["items"]
+        mapper.read_budget_seconds = 0; built = []; whole = mapper._whole_track_row
+        mapper._whole_track_row = lambda index: built.append(index) or whole(index)
+        first = mapper.discover("track", 100, None, None, {"isGrouped": True}, fields, budgeted=True)
+        self.assertEqual((len(built), first["truncated"]), (1, True), "a spent budget builds one whole row a page")
+        items, pages = read_all(mapper, "track", fields=fields, filters={"isGrouped": True})
+        self.assertEqual(items, unbudgeted); self.assertEqual([item["name"] for item in items], ["Track 1", "Track 4", "Track 7", "Track 10"])
+        self.assertEqual(pages, 12)
+
+    def test_arrangement_clips_under_a_parent_that_isnt_a_track_are_none_without_building_any(self):
+        song, mapper = self.set(); snapshot = mapper.snapshot(); built = []; row = mapper._arrangement_clip_row
+        mapper._arrangement_clip_row = lambda *args: built.append(True) or row(*args)
+        for parent in (snapshot["set"]["ref"], snapshot["scenes"][0]["ref"]):
+            self.assertEqual(mapper.discover("arrangement_clip", 10, None, parent)["items"], [])
+        self.assertEqual(built, [], "no clip row is built to be thrown away")
+        # Where Live lists the Arrangement's clips on the Song, the Set is their parent, and they're listed under it.
+        clip = song.tracks[0].arrangement_clips[0]; song.tracks[0].arrangement_clips = []; song.arrangement_clips = [clip]
+        listed = mapper.discover("arrangement_clip", 10, None, snapshot["set"]["ref"])["items"]
+        self.assertEqual([(item["parentRef"], item["objectIdentity"]) for item in listed], [(snapshot["set"]["ref"], mapper._capture_object_identity(clip))])
+
     def test_a_snapshot_window_ends_and_a_focus_goes_light_when_the_budget_is_spent(self):
         song, mapper = self.set(); mapper.read_budget_seconds = 0
         window = {"tracks": {"from": 0, "count": 3}}

@@ -3046,7 +3046,8 @@ class LiveObjectMapper:
                 members = [(index, track, track_kind) for index, (track, track_kind) in enumerate(self._track_entries()) if track_kind in wanted]
             identity_fields = ("ref", "objectIdentity", "name", "kind")
             if filters and any(key not in self._LIGHT_TRACK_FIELDS for key in filters):
-                # A filter on what only a whole row has: whole rows it is.
+                # A filter on what only a whole row has: whole rows it is, a page's worth at a time when budgeted.
+                if budgeted: return self._filtered_track_page(kind, members, limit, cursor, filters, requested_fields, traversal_budget, deadline)
                 items = [row for index, _, _ in members for row in [self._whole_track_row(index)] if row is not None]
             else:
                 items = [self._light_track_row(track, track_kind, index) for index, track, track_kind in members]; light = True
@@ -3113,7 +3114,10 @@ class LiveObjectMapper:
         elif kind == "arrangement_clip":
             track_index = self._ref_track_index(parent)
             with_notes = bool({"notes", "notesRevision"} & (set(requested_fields or []) | set(filters or {})))
-            items = self._arrangement_clip_items([track_index], with_notes) if track_index is not None else self._arrangement_clip_items(None, with_notes)
+            if track_index is not None: items = self._arrangement_clip_items([track_index], with_notes)
+            # Off a track only the Song's own Arrangement clips (where Live lists them there) have a parent, the Set.
+            elif parent == self.refs.put("set", self.song, "song") and self._items(getattr(self.song, "arrangement_clips", [])): items = self._arrangement_clip_items(None, with_notes)
+            else: items = []
         elif kind == "locator": items = self._locator_items()
         elif kind == "session_playback": items = [self._playback()]
         elif kind == "selection": items = [self._selection_item()]
@@ -3237,6 +3241,24 @@ class LiveObjectMapper:
             if not full: track_index += 1; offset = 0
         more = track_index < len(entries) and emitted < traversal_budget
         return self._page_result("device", page, revision, self._walk_cursor(revision, track_index, offset, emitted) if more else None, requested_fields)
+
+    def _filtered_track_page(self, kind: str, members: list[tuple[int, Any, Any]], limit: int, cursor: str | None, filters: dict[str, Any], requested_fields: list[str] | None, traversal_budget: int, deadline: "_ReadBudget | None") -> dict[str, Any]:
+        """Tracks filtered on what only a whole row has, a page at a time: a page builds whole rows from where
+        the last stopped until `limit` match or the budget runs out (at least one row each page), reading only
+        the tracks it looks at. The cursor, and the list's revision, are bound to the tracks listed (their
+        identities, in order) and the filters, as a Set-wide device page's are."""
+        basis = {"tracks": [self._capture_object_identity(track) for _, track, _ in members], "filters": filters}
+        revision = f"{self.refs.epoch}:{kind}:tracks:{len(members)}:{hashlib.sha256(json.dumps(basis, sort_keys=True, default=str, separators=(',', ':')).encode('utf-8')).hexdigest()[:16]}"
+        position, emitted = self._walk_position(cursor, revision, 2) if cursor is not None else (0, 0)
+        if not 0 <= position <= len(members): raise ValueError("invalid discovery cursor")
+        page: list[dict[str, Any]] = []
+        while position < len(members) and len(page) < limit and emitted < traversal_budget:
+            if deadline is not None and not deadline.room(): break
+            index = members[position][0]; position += 1
+            row = self._whole_track_row(index)
+            if row is not None and all(row.get(key) == value for key, value in filters.items()): page.append(row); emitted += 1
+        more = position < len(members) and emitted < traversal_budget
+        return self._page_result(kind, page, revision, self._walk_cursor(revision, position, emitted) if more else None, requested_fields)
 
     def _indexed_page(self, kind: str, parent: str, owner: Any, limit: int, cursor: str | None, filters: dict[str, Any] | None, requested_fields: list[str] | None, traversal_budget: int, deadline: "_ReadBudget | None") -> dict[str, Any]:
         """A clip's notes or a device's parameters, a page at a time by their index: a page reads the
