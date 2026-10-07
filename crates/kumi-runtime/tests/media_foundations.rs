@@ -1225,39 +1225,42 @@ async fn a_long_compressed_file_is_converted_only_as_far_as_its_read() {
         eprintln!("ffmpeg makes the test file; unavailable");
         return;
     };
-    // Ogg: ffmpeg converts it everywhere (a Mac's afconvert, which copies whole, can't).
+    // Ogg: ffmpeg converts it everywhere (a Mac's afconvert, which copies whole, can't). M4A: a Mac's afconvert reads it
+    // too, and a read with a reach still goes to ffmpeg first.
     let root = tempfile::tempdir().unwrap();
-    let file = root.path().join("long.ogg");
-    let made = run(
-        &ffmpeg,
-        &["-v", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=40", "-c:a", "libvorbis", "-y", &file.to_string_lossy()],
-        RunOptions::default(),
-    )
-    .await;
-    if made.is_err() {
-        eprintln!("this ffmpeg has no Vorbis encoder; unavailable");
-        return;
+    for (name, codec) in [("long.ogg", "libvorbis"), ("long.m4a", "aac")] {
+        let file = root.path().join(name);
+        let made = run(
+            &ffmpeg,
+            &["-v", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=40", "-c:a", codec, "-y", &file.to_string_lossy()],
+            RunOptions::default(),
+        )
+        .await;
+        if made.is_err() {
+            eprintln!("this ffmpeg has no {codec} encoder; {name} unavailable");
+            continue;
+        }
+        // Read for its first 10 s: the copy holds those (and a little), and the file is still 40 s long.
+        let cut = prepare_audio_to(&file, None, Some(10.0)).await.unwrap();
+        assert!((cut.seconds.unwrap() - 40.0).abs() < 0.1, "{name}: {:?}", cut.seconds);
+        let copy = open_audio(&cut.path, None).await.unwrap();
+        assert!((copy.frames as f64 / copy.sample_rate - 10.0).abs() < 0.1, "{name}: {}", copy.frames as f64 / copy.sample_rate);
+        cut.cleanup().await;
+        let mut source = open_audio_to(&file, None, Some(10.0)).await.unwrap();
+        assert!((source.frames as f64 / source.sample_rate - 40.0).abs() < 0.1, "{name}");
+        let mut read = 0;
+        while let Some(block) = source.read(65536).await.unwrap() {
+            read += block[0].len();
+        }
+        assert!((read as f64 / source.sample_rate - 10.0).abs() < 0.1, "{name}: reads end where the copy does");
+        source.close().await.unwrap();
+        // Read further than it goes: copied whole, as before.
+        let whole = prepare_audio_to(&file, None, Some(60.0)).await.unwrap();
+        assert_eq!(whole.seconds, None, "{name}");
+        let copy = open_audio(&whole.path, None).await.unwrap();
+        assert!((copy.frames as f64 / copy.sample_rate - 40.0).abs() < 0.1, "{name}");
+        whole.cleanup().await;
     }
-    // Read for its first 10 s: the copy holds those (and a little), and the file is still 40 s long.
-    let cut = prepare_audio_to(&file, None, Some(10.0)).await.unwrap();
-    assert!((cut.seconds.unwrap() - 40.0).abs() < 0.1, "{:?}", cut.seconds);
-    let copy = open_audio(&cut.path, None).await.unwrap();
-    assert!((copy.frames as f64 / copy.sample_rate - 10.0).abs() < 0.1, "{}", copy.frames as f64 / copy.sample_rate);
-    cut.cleanup().await;
-    let mut source = open_audio_to(&file, None, Some(10.0)).await.unwrap();
-    assert!((source.frames as f64 / source.sample_rate - 40.0).abs() < 0.1);
-    let mut read = 0;
-    while let Some(block) = source.read(65536).await.unwrap() {
-        read += block[0].len();
-    }
-    assert!((read as f64 / source.sample_rate - 10.0).abs() < 0.1, "reads end where the copy does");
-    source.close().await.unwrap();
-    // Read further than it goes: copied whole, as before.
-    let whole = prepare_audio_to(&file, None, Some(60.0)).await.unwrap();
-    assert_eq!(whole.seconds, None);
-    let copy = open_audio(&whole.path, None).await.unwrap();
-    assert!((copy.frames as f64 / copy.sample_rate - 40.0).abs() < 0.1);
-    whole.cleanup().await;
 }
 #[test]
 fn a_near_silent_float_sound_has_an_envelope() {

@@ -83,7 +83,7 @@ pub async fn prepare_audio(path: impl AsRef<Path>, signal: Option<Signal>) -> Re
     prepare_audio_to(path, signal, None).await
 }
 /// As prepare_audio, converting no further than `until` seconds in, the farthest anything will read: a 2-hour mix
-/// isn't written out whole (2.5 GB of it) for its first twelve minutes, and its length is still known.
+/// isn't written out whole (2.5 GB of it) for its first twelve minutes, and the length it's read as is kept.
 pub async fn prepare_audio_to(path: impl AsRef<Path>, signal: Option<Signal>, until: Option<f64>) -> Result<PreparedAudio, AudioError> {
     let path = path.as_ref();
     let extension = extension(path);
@@ -115,7 +115,8 @@ fn extension(path: &Path) -> String {
 pub async fn open_audio(path: impl AsRef<Path>, signal: Option<Signal>) -> Result<AudioSource, AudioError> {
     open_audio_to(path, signal, None).await
 }
-/// As open_audio, reading no further than `until` seconds in (see prepare_audio_to); `frames` is still the whole file's.
+/// As open_audio, reading no further than `until` seconds in (see prepare_audio_to); `frames` is still the whole file's
+/// when its length is read (a length that can't be read leaves the copy's).
 pub async fn open_audio_to(path: impl AsRef<Path>, signal: Option<Signal>, until: Option<f64>) -> Result<AudioSource, AudioError> {
     let prepared = prepare_audio_to(path, signal, until).await?;
     let handle = File::open(&prepared.path).await.map_err(|e| {
@@ -145,39 +146,32 @@ async fn convert(input: &Path, output: &Path, signal: Option<Signal>, until: Opt
     };
     let input_s = input.to_string_lossy();
     let output_s = output.to_string_lossy();
-    // How long it is (ffprobe, or what ffmpeg says of it, decoding nothing): to copy no further than `until`, and to ask
-    // room for what will be written. Not known, it's copied whole without asking, as it always was.
+    // How long it is (ffprobe, or what ffmpeg says of it, decoding nothing): to ask room for what will be written, and to
+    // keep the file's length when the copy stops short of it. A reading can be wrong, so where ffmpeg stops isn't up to it.
     let length = match until {
         Some(_) => crate::video::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await,
         None => None,
     };
-    let cut = cut_at(until, length);
-    let cut_text = cut.map(|cut| to_fixed(cut, 3));
+    let until_text = until.map(|until| to_fixed(until, 3));
     let folder = output.parent().map(|folder| folder.to_string_lossy().into_owned()).unwrap_or_default();
-    // Each converter, and how many seconds of the file it writes (when that's known): afconvert copies whole.
-    let mut attempts = Vec::new();
-    if mac {
-        attempts.push(("afconvert", vec!["-f", "WAVE", "-d", "LEF32", &input_s, &output_s], length));
-    }
-    let mut args = vec!["-v", "error", "-nostdin", "-y", "-i", &input_s, "-vn"];
-    if let Some(cut) = &cut_text {
-        args.extend(["-t", cut]);
-    }
-    args.extend(["-acodec", "pcm_f32le", "-f", "wav", &output_s]);
-    attempts.push((&ffmpeg, args, cut.or(length)));
     let mut no_room = None;
-    for (command, args, writes) in attempts {
+    for Attempt { command, args, writes } in attempts(mac, &ffmpeg, &input_s, &output_s, until.zip(until_text.as_deref()), length) {
         if let Some(s) = &signal {
             s.check()?;
         }
-        if let Some(seconds) = writes {
-            if let Some(full) = crate::core::disk::low_disk(&folder, seconds * BYTES_A_SECOND, "Kumi reads audio on").await {
-                no_room = Some(full);
-                continue;
+        match writes {
+            Some(seconds) => {
+                if let Some(full) = crate::core::disk::low_disk(&folder, seconds * BYTES_A_SECOND, "Kumi reads audio on").await {
+                    no_room = Some(full);
+                    continue;
+                }
             }
+            // How much it would write isn't known: not tried once another had no room.
+            None if no_room.is_some() => continue,
+            None => {}
         }
         match run(command, &args, RunOptions { signal: signal.clone(), timeout_ms: Some(120_000), max_buffer: Some(1024 * 1024) }).await {
-            Ok(_) => return Ok(if command == "afconvert" { None } else { cut.and(length) }),
+            Ok(_) => return Ok(if command == "afconvert" { None } else { length_past(until, length) }),
             Err(e) => {
                 if signal.as_ref().is_some_and(Signal::is_cancelled) {
                     return Err(e.into());
@@ -192,9 +186,44 @@ async fn convert(input: &Path, output: &Path, signal: Option<Signal>, until: Opt
 }
 /// f32 at up to 48 kHz stereo: a copy's size a second.
 const BYTES_A_SECOND: f64 = 384_000.0;
-/// Where the copy stops: `until`, when the file goes on past it.
-fn cut_at(until: Option<f64>, length: Option<f64>) -> Option<f64> {
-    until.zip(length).filter(|(until, length)| until < length).map(|(until, _)| until)
+/// A converter to try: its command and arguments, and how many seconds of the file it writes, when that's known.
+struct Attempt<'a> {
+    command: &'a str,
+    args: Vec<&'a str>,
+    writes: Option<f64>,
+}
+/// The converters, in the order they're tried. ffmpeg stops at `until` (its text beside it) whatever the length read says,
+/// since a reading can fall short (an MP3's estimate); a Mac's afconvert can't stop, and copies whole. So a read with a
+/// reach tries ffmpeg first, and a whole read afconvert, as always.
+fn attempts<'a>(
+    mac: bool,
+    ffmpeg: &'a str,
+    input: &'a str,
+    output: &'a str,
+    until: Option<(f64, &'a str)>,
+    length: Option<f64>,
+) -> Vec<Attempt<'a>> {
+    let mut args = vec!["-v", "error", "-nostdin", "-y", "-i", input, "-vn"];
+    if let Some((_, until)) = until {
+        args.extend(["-t", until]);
+    }
+    args.extend(["-acodec", "pcm_f32le", "-f", "wav", output]);
+    // No further than the reach, nor than the file's length when it's read as shorter.
+    let writes = until.map(|(until, _)| length.map_or(until, |length| until.min(length)));
+    let by_ffmpeg = Attempt { command: ffmpeg, args, writes };
+    if !mac {
+        return vec![by_ffmpeg];
+    }
+    let by_afconvert = Attempt { command: "afconvert", args: vec!["-f", "WAVE", "-d", "LEF32", input, output], writes: length };
+    if until.is_some() {
+        vec![by_ffmpeg, by_afconvert]
+    } else {
+        vec![by_afconvert, by_ffmpeg]
+    }
+}
+/// The file's length, kept when the copy stops short of it: when it's read as longer than `until`.
+fn length_past(until: Option<f64>, length: Option<f64>) -> Option<f64> {
+    until.zip(length).filter(|(until, length)| until < length).map(|(_, length)| length)
 }
 /// Sample frames are read a block at a time; seeking never changes the audio.
 pub struct AudioSource {
@@ -465,15 +494,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_copy_asks_room_for_what_it_will_hold() {
+    fn a_copy_asks_room_for_what_it_will_hold_and_stops_at_the_reach_whatever_the_length_read() {
+        // Each converter tried, in order: where it stops (`-t`), and the seconds it's asked room for.
+        let plan = |mac, until: Option<f64>, length| {
+            let text = until.map(|until| to_fixed(until, 3));
+            attempts(mac, "ffmpeg", "in.mp3", "out.wav", until.zip(text.as_deref()), length)
+                .into_iter()
+                .map(|tried| {
+                    let stop = tried.args.iter().position(|arg| *arg == "-t").map(|at| tried.args[at + 1].to_string());
+                    (tried.command.to_string(), stop, tried.writes)
+                })
+                .collect::<Vec<_>>()
+        };
+        let at = |seconds: &str| Some(seconds.to_string());
         // A one-shot measured (a reach of 31 s): half a second's copy, 192 kB, not 31 s's.
-        assert_eq!(cut_at(Some(31.0), Some(0.5)).or(Some(0.5)).map(|seconds| seconds * BYTES_A_SECOND), Some(192_000.0));
+        assert_eq!(plan(false, Some(31.0), Some(0.5)), [("ffmpeg".to_string(), at("31.000"), Some(0.5))]);
+        assert_eq!(0.5 * BYTES_A_SECOND, 192_000.0);
         // A 3-minute song's form (901 s): its 3 minutes.
-        assert_eq!(cut_at(Some(901.0), Some(180.0)).or(Some(180.0)), Some(180.0));
-        // A 10-minute mix measured: cut at 31 s.
-        assert_eq!(cut_at(Some(31.0), Some(600.0)), Some(31.0));
-        // A length not known: no cut (copied whole, without asking room, as before).
-        assert_eq!(cut_at(Some(31.0), None), None);
+        assert_eq!(plan(false, Some(901.0), Some(180.0)), [("ffmpeg".to_string(), at("901.000"), Some(180.0))]);
+        // A 10-minute mix measured: cut at 31 s, and its length is kept.
+        assert_eq!(plan(false, Some(31.0), Some(600.0)), [("ffmpeg".to_string(), at("31.000"), Some(31.0))]);
+        assert_eq!(length_past(Some(31.0), Some(600.0)), Some(600.0));
+        // A length read short (an MP3's estimate of its first frames) or not read: the copy still stops at the reach.
+        assert_eq!(plan(false, Some(31.0), Some(20.0)), [("ffmpeg".to_string(), at("31.000"), Some(20.0))]);
+        assert_eq!(length_past(Some(31.0), Some(20.0)), None);
+        assert_eq!(plan(false, Some(31.0), None), [("ffmpeg".to_string(), at("31.000"), Some(31.0))]);
+        assert_eq!(length_past(Some(31.0), None), None);
+        // A Mac's afconvert copies whole: with a reach it's tried after ffmpeg, asked room for the whole length read (or,
+        // not known, not tried once ffmpeg had no room).
+        assert_eq!(
+            plan(true, Some(31.0), Some(600.0)),
+            [("ffmpeg".to_string(), at("31.000"), Some(31.0)), ("afconvert".to_string(), None, Some(600.0))]
+        );
+        assert_eq!(plan(true, Some(31.0), None), [("ffmpeg".to_string(), at("31.000"), Some(31.0)), ("afconvert".to_string(), None, None)]);
+        // Read whole: afconvert first on a Mac, as always, and no room asked.
+        assert_eq!(plan(true, None, None), [("afconvert".to_string(), None, None), ("ffmpeg".to_string(), None, None)]);
+        assert_eq!(plan(false, None, None), [("ffmpeg".to_string(), None, None)]);
         assert!(AudioError::no_room("Only 5 MB is free.").is_no_room());
         assert!(!AudioError("That file is too short to be audio.".into()).is_no_room());
     }

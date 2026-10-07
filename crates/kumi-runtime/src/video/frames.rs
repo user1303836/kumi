@@ -262,8 +262,28 @@ pub async fn duration_of(ffmpeg: &str, file: &str, signal: Option<Signal>) -> Op
     )
     .await
     .ok()?;
-    static DURATION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"Duration: ([0-9]+):([0-9]{2}):([0-9]{2}(?:\.[0-9]+)?)").unwrap());
-    let found = DURATION.captures(&output.stderr)?;
+    duration_in(&output.stderr)
+}
+/// The length ffmpeg prints for the file it opens: its own `Duration:` line, not a tag's text in the `Metadata:` above it.
+fn duration_in(said: &str) -> Option<f64> {
+    static DURATION: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?m)^\s+Duration: ([0-9]+):([0-9]{2}):([0-9]{2}(?:\.[0-9]+)?)").unwrap());
+    let found = DURATION.captures(said)?;
     let seconds = found[1].parse::<f64>().ok()? * 3600.0 + found[2].parse::<f64>().ok()? * 60.0 + found[3].parse::<f64>().ok()?;
     Some(seconds).filter(|n| n.is_finite() && *n > 0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_files_length_is_its_own_duration_line_not_a_tag_that_says_one() {
+        let said = "Input #0, mp3, from 'mix.mp3':\n  Metadata:\n    comment         : Duration: 00:00:01.00\n    title           : Mix\n  Duration: 00:03:00.05, start: 0.025057, bitrate: 128 kb/s\n  Stream #0:0: Audio: mp3, 44100 Hz, stereo, fltp, 128 kb/s\n";
+        assert_eq!(duration_in(said), Some(180.05));
+        // A tag's text on a line of its own (a value with a line break) is still below its key's indent.
+        let wrapped = "  Metadata:\n    comment         : one\n                    : Duration: 00:00:01.00\n  Duration: 01:00:00.00, start: 0.000000\n";
+        assert_eq!(duration_in(wrapped), Some(3600.0));
+        assert_eq!(duration_in("  Duration: N/A, start: 0.000000, bitrate: N/A\n"), None);
+    }
 }
