@@ -5553,6 +5553,9 @@ impl DeterministicLiveSimulator {
                     }
                     Some("force-link-beat-time") => {
                         let beat = finite("beatTime", "beatTime is required for force-link-beat-time")?;
+                        if beat < 0.0 {
+                            return Err(LiveError::error("beatTime is before the start of the Set, where Live's playhead can't go"));
+                        }
                         state["playback"]["transport"]["position"] = beat.into();
                         state["set"]["position"] = beat.into();
                     }

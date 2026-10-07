@@ -5170,13 +5170,38 @@ class SongTransportLinkTests(unittest.TestCase):
         result = mapper.invoke("transport.action", {**fences(), "action": "scrub", "beatTime": 0.5})
         self.assertTrue(result["done"]); self.assertEqual(calls[-1], ("scrub", 0.5))
         with self.assertRaisesRegex(ValueError, "distance is required"): mapper.invoke("transport.action", {**fences(), "action": "scrub"})
-        result = mapper.invoke("transport.action", {**fences(), "action": "force-link-beat-time", "beatTime": 8.0})
-        self.assertTrue(result["done"]); self.assertEqual(calls[-1], ("link", 8.0), "a shape whose call takes the beat gets it")
-        # Live's Song.force_link_beat_time() takes nothing: it's called so.
-        song.force_link_beat_time = lambda: calls.append(("link", song.current_song_time)); song.current_song_time = 0.0
-        self.assertTrue(mapper.invoke("transport.action", {**fences(), "action": "force-link-beat-time", "beatTime": 8.0})["done"])
-        self.assertEqual((song.current_song_time, calls[-1]), (8.0, ("link", 8.0)), "Live goes to the beat first, then Link follows it, with no argument")
-        with self.assertRaisesRegex(ValueError, "beatTime is required"): mapper.invoke("transport.action", {**fences(), "action": "force-link-beat-time"})
+        # Live moves the playhead on its next tick (Live 12.4.15): a write waits for tick().
+        class NextTick(type(song)):
+            @property
+            def current_song_time(self): return self.__dict__.get("_at", 0.0)
+            @current_song_time.setter
+            def current_song_time(self, value): self.__dict__["_moving_to"] = float(value)
+            def tick(self): self.__dict__["_at"] = self.__dict__.pop("_moving_to", self.current_song_time)
+        song.__class__ = NextTick; song.is_playing = False
+        def link(**beat): return mapper.invoke("transport.action", {**fences(), "action": "force-link-beat-time", **beat})
+        def links(): return [call for call in calls if isinstance(call, tuple) and call[0] == "link"]
+        # Stopped: the playhead is moved and the call asks to be retried (the host does, once per tick). Called at once,
+        # Link would jump to where the playhead was.
+        with self.assertRaisesRegex(ValueError, "^playhead is moving; retry shortly$"): link(beatTime=8.0)
+        self.assertEqual(links(), [], "Link isn't forced before Live is at the beat")
+        song.tick()
+        self.assertTrue(link(beatTime=8.0)["done"]); self.assertEqual(calls[-1], ("link", 8.0), "a shape whose call takes the beat gets it")
+        # Live's Song.force_link_beat_time() takes nothing: it's called so, once Live is at the beat.
+        song.force_link_beat_time = lambda: calls.append(("link", song.current_song_time))
+        with self.assertRaisesRegex(ValueError, "retry shortly"): link(beatTime=16.0)
+        song.tick(); self.assertTrue(link(beatTime=16.0)["done"]); self.assertEqual(calls[-1], ("link", 16.0))
+        # Playing, the playhead goes on from the beat once it's there: up to half a second's worth past it is there (a
+        # beat at 120 BPM), and Link follows Live where it is. Further on, it's moved again.
+        song.is_playing = True; song.tempo = 120.0
+        with self.assertRaisesRegex(ValueError, "retry shortly"): link(beatTime=32.0)
+        song.tick(); song.__dict__["_at"] += 0.4
+        self.assertTrue(link(beatTime=32.0)["done"]); self.assertEqual(calls[-1], ("link", 32.4))
+        song.__dict__["_at"] = 33.5; count = len(links())
+        with self.assertRaisesRegex(ValueError, "retry shortly"): link(beatTime=32.0)
+        self.assertEqual(len(links()), count); song.tick(); self.assertEqual(song.current_song_time, 32.0)
+        song.is_playing = False
+        with self.assertRaisesRegex(ValueError, "before the start"): link(beatTime=-1.0)
+        with self.assertRaisesRegex(ValueError, "beatTime is required"): link()
         stale = fences(); stale["expectedRevision"] = "stale"
         with self.assertRaisesRegex(ValueError, "changed since preview"): mapper.invoke("transport.action", {**stale, "action": "start"})
         with self.assertRaisesRegex(ValueError, "invalid"): mapper.invoke("transport.action", {**fences(), "action": "detonate"})

@@ -7556,9 +7556,25 @@ class LiveObjectMapper:
             if not isinstance(beat, (int, float)) or isinstance(beat, bool) or not math.isfinite(float(beat)): raise ValueError("beatTime is required for force-link-beat-time")
             if not callable(method): raise ValueError(f"transport action {action} is unavailable on this Live shape")
             # Live's Song.force_link_beat_time() takes nothing: it moves Link's timeline to Live's own beat time. So Live
-            # goes to the beat first (the host's contract, and the simulator's), and Link follows. A shape whose call
-            # wants the beat (Boost refuses a call it can't match with a TypeError, before it runs) is given it too.
-            song.current_song_time = float(beat)
+            # goes to the beat first (the host's contract, and the simulator's), and Link follows. Live moves the
+            # playhead only on its next tick, so called at once Link would jump to where the playhead was: when it's
+            # elsewhere, it's moved and the call asks to be retried (the host does, once per tick). Playing, the
+            # playhead goes on from the beat once it's there, so up to half a second's worth past it counts (a retry
+            # comes about a tick after the move), and Link follows Live where it is. A beat before the start is
+            # refused: Live's playhead can't go there. A shape whose call wants the beat (Boost refuses a call it
+            # can't match with a TypeError, before it runs) is given it too.
+            if float(beat) < 0: raise ValueError("beatTime is before the start of the Set, where Live's playhead can't go")
+            current = self._read_attr(song, "current_song_time"); tempo = self._read_attr(song, "tempo")
+            playing = self._read_attr(song, "is_playing") is True
+            late = float(tempo) / 120.0 if playing and isinstance(tempo, (int, float)) and not isinstance(tempo, bool) and math.isfinite(float(tempo)) and tempo > 0 else 0.0
+            there = isinstance(current, (int, float)) and not isinstance(current, bool) and math.isfinite(float(current)) and (_same_number(current, beat) or float(beat) <= float(current) < float(beat) + late)
+            if not there:
+                try: song.current_song_time = float(beat)
+                except RuntimeError as error:
+                    past = self._past_end(float(beat))
+                    if past is not None: raise past from error
+                    raise
+                raise ValueError(PLAYHEAD_PENDING)
             try: method()
             except TypeError: method(float(beat))
             return {"done": True, "revision": str(self._playback()["revision"])}
