@@ -13,9 +13,9 @@ struct Context {
 }
 #[async_trait(?Send)]
 impl ChangeContext for Context {
-    async fn sample(&self, path: &str) -> Option<SampleFile> {
+    async fn sample(&self, path: &str) -> Result<Result<SampleFile, NoSample>, RuntimeError> {
         self.calls.borrow_mut().push(json!(["sample", path]));
-        path.starts_with("/samples/").then(|| SampleFile { path: path.into(), folder: "/samples".into() })
+        Ok(path.starts_with("/samples/").then(|| SampleFile { path: path.into(), folder: "/samples".into() }).ok_or(NoSample::NotThere))
     }
     async fn parameters(&self, device: &str) -> Result<Vec<ParameterRange>, RuntimeError> {
         self.calls.borrow_mut().push(json!(["parameters", device]));
@@ -25,10 +25,11 @@ impl ChangeContext for Context {
         self.calls.borrow_mut().push(json!(["ranges", device]));
         Ok(self.parameters.clone())
     }
-    async fn pick(&self, selector: SampleSelector) -> Result<Option<SampleFile>, RuntimeError> {
+    async fn pick(&self, selector: SampleSelector) -> Result<Result<SampleFile, NoSample>, RuntimeError> {
         self.calls.borrow_mut().push(json!(["pick", selector]));
         Ok((!selector.words.iter().any(|w| w == "missing"))
-            .then(|| SampleFile { path: "/samples/Picked.wav".into(), folder: "/samples".into() }))
+            .then(|| SampleFile { path: "/samples/Picked.wav".into(), folder: "/samples".into() })
+            .ok_or(NoSample::NotThere))
     }
     fn has_value_for(&self) -> bool {
         self.display

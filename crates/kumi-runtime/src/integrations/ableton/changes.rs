@@ -30,6 +30,16 @@ pub struct SampleSelector {
     pub folders: Vec<String>,
     pub random: bool,
 }
+/// Why a sample gives no file to import.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoSample {
+    /// No audio file there, on this computer or in Live's Places; for a pick, none matches.
+    NotThere,
+    /// It's in one of Live's Places on a network share, and Kumi couldn't copy it here from there.
+    ShareUnread,
+    /// It's in one of Live's Places on a network share, and it's empty or bigger than an import takes.
+    OutOfBounds,
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParameterRange {
     #[serde(rename = "ref")]
@@ -46,10 +56,13 @@ pub struct ParameterRange {
 }
 #[async_trait(?Send)]
 pub trait ChangeContext {
-    async fn sample(&self, path: &str) -> Option<SampleFile>;
+    async fn sample(&self, path: &str) -> Result<Result<SampleFile, NoSample>, RuntimeError>;
     async fn parameters(&self, device_ref: &str) -> Result<Vec<ParameterRange>, RuntimeError>;
     async fn ranges(&self, device_ref: &str) -> Result<Vec<ParameterRange>, RuntimeError>;
-    async fn pick(&self, selector: SampleSelector) -> Result<Option<SampleFile>, RuntimeError>;
+    async fn pick(&self, selector: SampleSelector) -> Result<Result<SampleFile, NoSample>, RuntimeError>;
+    /// Keeps a sample's file for as long as a Set may play it from where it is: an Arrangement clip opens its file
+    /// in place, where Live's other imports play the bridge's own copy.
+    async fn keep(&self, _file: &SampleFile) {}
     fn has_value_for(&self) -> bool {
         false
     }
@@ -158,12 +171,24 @@ fn numeric(value: &Value) -> Value {
         .map(|n| json!(n))
         .unwrap_or_else(|| value.clone())
 }
+/// What to tell the model about a sample with no file: `not_there` when there's no such sound.
+fn no_sample(why: NoSample, not_there: &str) -> String {
+    match why {
+        NoSample::NotThere => not_there.into(),
+        NoSample::ShareUnread => "That sound is in one of Live's Places on a network share, and Kumi couldn't copy it here from \
+                                  there: check the share is on and connected, then try again."
+            .into(),
+        NoSample::OutOfBounds => {
+            "That sound, in one of Live's Places on a network share, is empty or over 512 MiB, more than Kumi imports.".into()
+        }
+    }
+}
 async fn sample_for(value: Option<&Value>, context: &dyn ChangeContext) -> Result<Result<SampleFile, String>, RuntimeError> {
     Ok(match value{
-        Some(Value::String(path))=>context.sample(path).await.ok_or_else(||"Give the path of an audio file on this computer (one find_sounds returned, a recording, the producer's own), or {\"random\": true, \"words\": [...]} for Kumi to pick one.".into()),
+        Some(Value::String(path))=>context.sample(path).await?.map_err(|why|no_sample(why,"Give the path of an audio file on this computer (one find_sounds returned, a recording, the producer's own), or {\"random\": true, \"words\": [...]} for Kumi to pick one.")),
         Some(Value::Object(selector))=>{
             let strings=|key:&str|array(selector.get(key)).iter().filter_map(Value::as_str).map(str::to_owned).collect();
-            context.pick(SampleSelector{words:strings("words"),folders:strings("folders"),random:selector.get("random")==Some(&Value::Bool(true))}).await?.ok_or_else(||"No sample matches that; try other words or folders.".into())
+            context.pick(SampleSelector{words:strings("words"),folders:strings("folders"),random:selector.get("random")==Some(&Value::Bool(true))}).await?.map_err(|why|no_sample(why,"No sample matches that; try other words or folders."))
         },_=>Err("Give the sample as the path of an audio file (one find_sounds returned, or any on this computer), or {\"random\": true, \"words\": [...]} .".replace("} .","}."))
     })
 }
@@ -393,6 +418,7 @@ impl ChangeKind {
                         Ok(found) => found,
                         Err(why) => return Ok(Err(why)),
                     };
+                    context.keep(&found).await;
                     json!({"action":"create","kind":"audio","trackRef":fallback(input.get("trackRef")),"position":fallback(input.get("position")),"filePath":found.path})
                 } else if finite(input.get("length")).is_some() {
                     let mut out = json!({"action":"create","kind":"midi","trackRef":fallback(input.get("trackRef")),"position":fallback(input.get("position")),"length":fallback(input.get("length"))});
@@ -446,11 +472,12 @@ impl ChangeKind {
             }
             "replace_sample" | "import_audio" => {
                 let found = match input.get("sample").and_then(Value::as_str) {
-                    Some(sample) => context.sample(sample).await,
-                    None => None,
+                    Some(sample) => context.sample(sample).await?,
+                    None => Err(NoSample::NotThere),
                 };
-                let Some(found) = found else {
-                    return Ok(Err("Give the path of an audio file on this computer (absolute, or from ~).".into()));
+                let found = match found {
+                    Ok(found) => found,
+                    Err(why) => return Ok(Err(no_sample(why, "Give the path of an audio file on this computer (absolute, or from ~)."))),
                 };
                 let mut out = if self.tool == "replace_sample" {
                     json!({"deviceRef":fallback(input.get("deviceRef"))})

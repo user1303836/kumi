@@ -1,8 +1,13 @@
 #[path = "../../../tests/support/fixture_paths.rs"]
 mod fixture_paths;
 use kumi_common::{abort::Signal, js::string::locale_compare_numeric_base};
-use kumi_runtime::{integrations::ableton::samples::*, library::sources::join};
+use kumi_runtime::{
+    integrations::ableton::{change_context::SampleBank, changes::NoSample, samples::*},
+    library::sources::join,
+    RuntimeError,
+};
 use serde_json::Value;
+use std::path::{Path, PathBuf};
 fn oracle() -> Value {
     serde_json::from_str(include_str!("support/samples-oracle.json")).unwrap()
 }
@@ -16,51 +21,94 @@ fn wav_aiff_partial_odd_streamed_and_malformed_headers_match_source() {
         }
     }
 }
+/// A local folder spelled as a share or device path that reads as that folder: "//" before it off Windows, and on
+/// Windows "\\?\" (its canonical spelling), which is refused like a share. A real share of a local folder needs SMB.
+fn as_share(folder: &Path) -> PathBuf {
+    if cfg!(windows) {
+        folder.canonicalize().unwrap()
+    } else {
+        PathBuf::from(format!("/{}", folder.display()))
+    }
+}
+fn text(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
 #[tokio::test(flavor = "current_thread")]
 async fn a_sample_named_on_a_network_share_is_never_looked_at() {
-    use kumi_runtime::integrations::ableton::change_context::SampleBank;
     let folder = tempfile::tempdir().unwrap();
-    let root = folder.path().canonicalize().unwrap().to_string_lossy().into_owned();
-    std::fs::write(format!("{root}/kick.wav"), b"RIFF").unwrap();
+    let kick = folder.path().join("kick.wav");
+    std::fs::write(&kick, b"RIFF").unwrap();
     let bank = SampleBank::default();
     *bank.places.borrow_mut() = Some(vec![]);
-    assert!(bank.sample(&format!("{root}/kick.wav")).await.is_some());
-    // "//" before a local path is that same path off Windows: only the refusal keeps it out there.
-    for path in [
-        format!("/{root}/kick.wav"),
-        r"\\host\share\kick.wav".into(),
-        r"/\host\share\kick.wav".into(),
-        r"\??\UNC\host\share\kick.wav".into(),
-    ] {
-        assert!(bank.sample(&path).await.is_none(), "{path}");
+    let signal = Signal::new();
+    assert!(bank.sample(&text(&kick), &signal).await.unwrap().is_ok());
+    // The first is that same file: only the refusal keeps it out.
+    for path in
+        [text(&as_share(&kick)), r"\\host\share\kick.wav".into(), r"/\host\share\kick.wav".into(), r"\??\UNC\host\share\kick.wav".into()]
+    {
+        assert_eq!(bank.sample(&path, &signal).await.unwrap(), Err(NoSample::NotThere), "{path}");
     }
 }
 #[tokio::test(flavor = "current_thread")]
 async fn a_sound_in_one_of_lives_places_on_a_share_is_copied_here_first() {
-    use kumi_runtime::integrations::ableton::change_context::SampleBank;
     let folder = tempfile::tempdir().unwrap();
-    let root = folder.path().canonicalize().unwrap().to_string_lossy().into_owned();
     for (path, bytes) in [("Place/Kicks/kick.wav", &b"RIFF one"[..]), ("Other/snare.wav", b"RIFF")] {
-        std::fs::create_dir_all(std::path::Path::new(&format!("{root}/{path}")).parent().unwrap()).unwrap();
-        std::fs::write(format!("{root}/{path}"), bytes).unwrap();
+        let path = folder.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, bytes).unwrap();
     }
+    let share = as_share(folder.path());
     let bank = SampleBank::default();
-    // A Place on a share: "//" before a local folder spells a share, and off Windows it reads as that folder.
-    *bank.places.borrow_mut() = Some(vec![format!("/{root}/Place")]);
-    let cache = format!("{root}/cache");
-    *bank.cache.borrow_mut() = Some(cache.clone().into());
-    let shared = format!("/{root}/Place/Kicks/kick.wav");
-    let copied = bank.sample(&shared).await.unwrap();
-    assert!(copied.path.starts_with(&format!("{cache}/")) && copied.path.ends_with("kick.wav"), "{copied:?}");
-    assert_eq!(std::path::Path::new(&copied.path).parent().unwrap().to_string_lossy(), copied.folder);
+    *bank.places.borrow_mut() = Some(vec![text(&share.join("Place"))]);
+    let cache = folder.path().join("cache");
+    *bank.cache.borrow_mut() = Some(cache.clone());
+    let signal = Signal::new();
+    let shared = text(&share.join("Place").join("Kicks").join("kick.wav"));
+    let copied = bank.sample(&shared, &signal).await.unwrap().unwrap();
+    assert!(Path::new(&copied.path).starts_with(&cache) && copied.path.ends_with("kick.wav"), "{copied:?}");
+    assert_eq!(text(Path::new(&copied.path).parent().unwrap()), copied.folder);
     assert_eq!(std::fs::read(&copied.path).unwrap(), b"RIFF one");
-    // The same file again: the copy is kept. Changed at the Place: copied again.
-    assert_eq!(bank.sample(&shared).await.unwrap(), copied);
-    std::fs::write(format!("{root}/Place/Kicks/kick.wav"), b"RIFF two!").unwrap();
-    assert_eq!(std::fs::read(&bank.sample(&shared).await.unwrap().path).unwrap(), b"RIFF two!");
-    // Another share isn't opened, and nothing of it is copied.
-    assert!(bank.sample(&format!("/{root}/Other/snare.wav")).await.is_none());
-    assert_eq!(std::fs::read_dir(&cache).unwrap().count(), 1);
+    // The same file again: the copy is kept. Changed at the Place: copied again, beside the first.
+    assert_eq!(bank.sample(&shared, &signal).await.unwrap().unwrap(), copied);
+    std::fs::write(folder.path().join("Place/Kicks/kick.wav"), b"RIFF two!").unwrap();
+    let changed = bank.sample(&shared, &signal).await.unwrap().unwrap();
+    assert_ne!(changed.folder, copied.folder);
+    assert_eq!(std::fs::read(&changed.path).unwrap(), b"RIFF two!");
+    assert_eq!(std::fs::read(&copied.path).unwrap(), b"RIFF one");
+    // Another share isn't opened, nor the Place's share outside it, and nothing of them is copied.
+    for path in [share.join("Other").join("snare.wav"), share.join("Place").join("..").join("Other").join("snare.wav")] {
+        assert_eq!(bank.sample(&text(&path), &signal).await.unwrap(), Err(NoSample::NotThere), "{path:?}");
+    }
+    assert_eq!(std::fs::read_dir(&cache).unwrap().count(), 2);
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_share_sound_kumi_cant_copy_says_why_and_copies_nothing() {
+    let folder = tempfile::tempdir().unwrap();
+    let place = folder.path().join("Place");
+    std::fs::create_dir(&place).unwrap();
+    std::fs::write(place.join("empty.wav"), b"").unwrap();
+    // Bigger than an import takes (sparse, so it takes no room).
+    std::fs::File::create(place.join("huge.wav")).unwrap().set_len(512 * 1024 * 1024 + 1).unwrap();
+    std::fs::write(place.join("kick.wav"), b"RIFF").unwrap();
+    let share = as_share(folder.path());
+    let bank = SampleBank::default();
+    // "Gone" is a Place Live names on a share that's off.
+    *bank.places.borrow_mut() = Some(vec![text(&share.join("Place")), text(&share.join("Gone"))]);
+    let cache = folder.path().join("cache");
+    *bank.cache.borrow_mut() = Some(cache.clone());
+    let signal = Signal::new();
+    for (path, why) in [
+        (share.join("Gone").join("kick.wav"), NoSample::ShareUnread),
+        (share.join("Place").join("missing.wav"), NoSample::NotThere),
+        (share.join("Place").join("empty.wav"), NoSample::OutOfBounds),
+        (share.join("Place").join("huge.wav"), NoSample::OutOfBounds),
+    ] {
+        assert_eq!(bank.sample(&text(&path), &signal).await.unwrap(), Err(why), "{path:?}");
+    }
+    // A stopped change copies nothing either.
+    signal.cancel();
+    assert!(matches!(bank.sample(&text(&share.join("Place").join("kick.wav")), &signal).await, Err(RuntimeError::Aborted)));
+    assert!(!cache.exists());
 }
 #[test]
 fn natural_sample_name_sort_matches_source_numeric_and_base_collation() {
