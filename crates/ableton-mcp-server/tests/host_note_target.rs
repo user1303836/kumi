@@ -261,6 +261,24 @@ async fn note_target_validation_matches_source() {
         same(&clean(got), &row["result"], &format!("{index} {row}"));
     }
 }
+#[tokio::test]
+async fn a_quantize_is_not_undone_over_a_later_edit_to_its_notes() {
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    setup(&sim, "session-midi");
+    let host = McpHost::new(sim.clone(), McpHostOptions::default()).unwrap();
+    let text = |reply: Value| serde_json::from_str::<Value>(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let preview = text(host.live_note_target_preview_async(&json!(1), &params("quantize")).await);
+    let id = preview["transactionId"].clone();
+    let apply = json!({"transactionId":id,"confirmation":"apply","idempotencyKey":"quantize-apply"});
+    let applied = text(host.live_note_target_apply_async(&json!(2), &apply, None).await.unwrap());
+    assert_eq!(applied["state"], "applied", "{applied}");
+    // The producer changes a quantized note afterwards: the same notes, so only their content shows it.
+    sim.state.borrow_mut()["tracks"][0]["clips"][0]["notes"][0]["velocity"] = json!(60);
+    let undo = json!({"transactionId":id,"confirmation":"undo","idempotencyKey":"quantize-undo"});
+    let undone = text(host.undo_note_target_async(&json!(3), &undo, None).await);
+    assert_eq!(undone["reason"], "notes changed after apply; undo refused", "{undone}");
+    assert_eq!(sim.state.borrow()["tracks"][0]["clips"][0]["notes"][0]["velocity"], json!(60), "the producer's edit stays");
+}
 async fn perform(
     host: &McpHost,
     action: &str,

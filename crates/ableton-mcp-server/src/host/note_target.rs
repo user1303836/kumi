@@ -14,6 +14,9 @@ fn operation(action: &str) -> &'static str {
     }
 }
 
+/// The grids Live quantizes to, in beats: 1/4, 1/8, 1/8T, 1/16, 1/16T and 1/32 notes. Live refuses any other.
+const QUANTIZE_GRIDS: [f64; 6] = [1.0, 0.5, 1.0 / 3.0, 0.25, 1.0 / 6.0, 0.125];
+
 fn key(value: Option<&Value>) -> String {
     value.map(js_json::stringify).unwrap_or_else(|| "$undefined".into())
 }
@@ -169,6 +172,16 @@ impl McpHost {
                         || !params["amount"].as_f64().is_some_and(|n| n.is_finite() && (0.0..=1.0).contains(&n))
                     {
                         return Ok(error(id, -32602, "grid and amount are required for quantization", None));
+                    }
+                    // Within 0.1% of one, as Live takes it (1/3 written as 0.3333 is the 1/8 triplet).
+                    let grid = params["grid"].as_f64().unwrap();
+                    if !QUANTIZE_GRIDS.iter().any(|beats| (grid - beats).abs() <= 1e-3 * beats) {
+                        return Ok(error(
+                            id,
+                            -32602,
+                            "grid must be one Live quantizes to: 1, 0.5, 1/3, 0.25, 1/6 or 0.125 beats (1/4, 1/8, 1/8T, 1/16, 1/16T or 1/32 notes)",
+                            None,
+                        ));
                     }
 
                     payload["grid"] = params["grid"].clone();
@@ -356,6 +369,8 @@ let prior_ids=ids(prior);
 if verified.notes.iter().any(|n|!prior_ids.contains(&key(n.get("id")))){
 return Err(LiveError::error("quantization changed the note identity set"));
 }
+// What its undo checks before putting the notes back.
+record.borrow_mut()["appliedFence"]=json!(note_fence(&verified.notes));
 }
 
             }
@@ -523,7 +538,10 @@ return Err(LiveError::error("quantization changed the note identity set"));
                 }
                 _ => {
                     let current_ids = ids(&current.notes);
-                    if current_ids.len() != prior.len() || prior.iter().any(|n| !current_ids.contains(&key(n.get("id")))) {
+                    // Every field goes back to before the quantize, so a later edit (the same notes, moved or
+                    // changed) refuses it, as every other note undo does.
+                    let edited = !reconciliation && t["appliedFence"].as_str().is_some_and(|fence| note_fence(&current.notes) != fence);
+                    if current_ids.len() != prior.len() || prior.iter().any(|n| !current_ids.contains(&key(n.get("id")))) || edited {
                         return Ok(transaction_error(id, "notes changed after apply; undo refused"));
                     }
 
