@@ -2603,7 +2603,8 @@ class LiveObjectMapper:
             for index in track_indices:
                 track, track_kind = track_entries[index]
                 if focus is None or index in focus:
-                    if budget is not None and not budget.room():
+                    # Only a track window or a focus can end on the budget: without either, every row is whole.
+                    if budget is not None and (track_window is not None or focus is not None) and not budget.room():
                         # The budget is spent: a window ends here; a focus goes on with light rows.
                         if focus is None: window_cut = True; break
                         focus_cut = True; track_rows.append(self._light_track_row(track, track_kind, index)); continue

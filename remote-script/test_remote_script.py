@@ -9764,6 +9764,12 @@ class ReadBudgetTests(unittest.TestCase):
         listed = mapper.discover("arrangement_clip", 10, None, snapshot["set"]["ref"])["items"]
         self.assertEqual([(item["parentRef"], item["objectIdentity"]) for item in listed], [(snapshot["set"]["ref"], mapper._capture_object_identity(clip))])
 
+    def test_a_budgeted_snapshot_without_a_track_window_or_focus_is_whole(self):
+        song, mapper = self.set(); mapper.read_budget_seconds = 0
+        for args in ({"parts": ["tracks", "playback"]}, {"scenes": {"from": 0, "count": 1}}):
+            rows = mapper.snapshot(args, budgeted=True)["tracks"]
+            self.assertEqual([row.get("light") for row in rows], [None, None, None], args)
+
     def test_a_snapshot_window_ends_and_a_focus_goes_light_when_the_budget_is_spent(self):
         song, mapper = self.set(); mapper.read_budget_seconds = 0
         window = {"tracks": {"from": 0, "count": 3}}
