@@ -17,6 +17,18 @@ fn embedded_helpers_keep_their_hashes() {
     // Windows PowerShell reads a script without a BOM in the console's code page: anything past ASCII is misread.
     assert!(windows::WINDOWS_SOURCE.is_ascii());
 }
+#[tokio::test(flavor = "current_thread")]
+async fn the_windows_script_is_written_whole_and_a_cut_off_one_is_written_again() {
+    let folder = tempfile::tempdir().unwrap();
+    let hands = folder.path().join("hands");
+    let script = windows_script(&hands).await.unwrap();
+    assert_eq!(std::fs::read_to_string(&script).unwrap(), windows::WINDOWS_SOURCE);
+    // What a write cut short left under its name.
+    std::fs::write(&script, &windows::WINDOWS_SOURCE[..100]).unwrap();
+    assert_eq!(windows_script(&hands).await.unwrap(), script);
+    assert_eq!(std::fs::read_to_string(&script).unwrap(), windows::WINDOWS_SOURCE);
+    assert_eq!(std::fs::read_dir(&hands).unwrap().count(), 1, "no temporary file left");
+}
 #[cfg(unix)]
 fn script(folder: &Path, name: &str, text: &str) -> String {
     use std::os::unix::fs::PermissionsExt;

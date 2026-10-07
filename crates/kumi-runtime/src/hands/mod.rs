@@ -219,18 +219,33 @@ async fn remove(path: &Path) -> Result<(), std::io::Error> {
         r => r,
     }
 }
+/// The Windows helper's script in `folder`, named by its hash. It's written whole, a temporary file renamed into
+/// place, and written again when what's there isn't it (a write cut short before this one).
+pub async fn windows_script(folder: &Path) -> Result<PathBuf, std::io::Error> {
+    let script = folder.join(format!("kumi-hands-{}.ps1", digest(windows::WINDOWS_SOURCE)));
+    if tokio::fs::read(&script).await.is_ok_and(|text| text == windows::WINDOWS_SOURCE.as_bytes()) {
+        return Ok(script);
+    }
+    tokio::fs::create_dir_all(folder).await?;
+    let temporary = folder.join(format!(".kumi-hands-{}.ps1", uuid::Uuid::new_v4()));
+    let written = async {
+        tokio::fs::write(&temporary, windows::WINDOWS_SOURCE).await?;
+        tokio::fs::rename(&temporary, &script).await
+    }
+    .await;
+    if let Err(error) = written {
+        let _ = tokio::fs::remove_file(&temporary).await;
+        return Err(error);
+    }
+    Ok(script)
+}
 pub async fn open_hands(options: OpenHandsOptions) -> Result<Option<Rc<dyn Hands>>, HandsError> {
     match system::platform() {
         "darwin" => Ok(mac_helper(MacHelperOptions { on_build: options.on_build, build: options.build })
             .await?
             .map(|helper| persistent(helper, Vec::new(), options.timeout_ms))),
         "win32" => {
-            let folder = tools_dir().join("hands");
-            let script = folder.join(format!("kumi-hands-{}.ps1", digest(windows::WINDOWS_SOURCE)));
-            if !script.exists() {
-                tokio::fs::create_dir_all(folder).await?;
-                tokio::fs::write(&script, windows::WINDOWS_SOURCE).await?;
-            }
+            let script = windows_script(&tools_dir().join("hands")).await?;
             Ok(Some(persistent(
                 "powershell.exe".into(),
                 ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script.to_str().unwrap()]
