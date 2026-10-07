@@ -125,6 +125,92 @@ impl AsyncLiveAdapter for Replay {
     }
 }
 
+/// The simulator, with device rows as the Remote Script sends them: a rack's view state in its `view`, never a
+/// `rackView`.
+struct RemoteShape(DeterministicLiveSimulator);
+fn remote_rows(value: &mut Value) {
+    match value {
+        Value::Object(row) => {
+            if let Some(Value::Object(rack)) = row.remove("rackView") {
+                let view = row.entry("view").or_insert_with(|| json!({}));
+                view.as_object_mut().unwrap().extend(rack);
+            }
+            row.values_mut().for_each(remote_rows);
+        }
+        Value::Array(items) => items.iter_mut().for_each(remote_rows),
+        _ => {}
+    }
+}
+impl LiveAdapter for RemoteShape {
+    fn status(&self) -> Result<LiveStatus, LiveError> {
+        self.0.status()
+    }
+    fn snapshot(&self) -> Result<LiveSnapshot, LiveError> {
+        self.0.snapshot()
+    }
+    fn get(&self, r: &LiveRef) -> Result<Option<Value>, LiveError> {
+        self.0.get(r)
+    }
+    fn invoke(&self, i: &LiveInvocation) -> Result<Value, LiveError> {
+        self.0.invoke(i)
+    }
+    fn subscribe(&self, l: LiveListener) -> Result<Unsubscribe, LiveError> {
+        self.0.subscribe(l)
+    }
+    fn reconnect(&self) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect()
+    }
+}
+#[async_trait::async_trait(?Send)]
+impl AsyncLiveAdapter for RemoteShape {
+    async fn snapshot_async(&self, c: Option<&LiveOperationContext>, r: Option<&LiveSnapshotRequest>) -> Result<LiveSnapshot, LiveError> {
+        let mut rows = serde_json::to_value(self.0.snapshot_async(c, r).await?).unwrap();
+        remote_rows(&mut rows);
+        Ok(serde_json::from_value(rows).unwrap())
+    }
+    async fn discover_async(&self, r: &LiveDiscoveryRequest, c: Option<&LiveOperationContext>) -> Result<LiveDiscoveryResult, LiveError> {
+        self.0.discover_async(r, c).await
+    }
+    async fn get_async(&self, r: &LiveRef, _: Option<&LiveOperationContext>) -> Result<Option<Value>, LiveError> {
+        self.0.get(r)
+    }
+    async fn invoke_async(&self, i: &LiveInvocation, _: Option<&LiveOperationContext>) -> Result<Value, LiveError> {
+        self.0.invoke(i)
+    }
+    async fn reconnect_async(&self, _: Option<&LiveOperationContext>) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect()
+    }
+    async fn close(&self) -> Result<(), LiveError> {
+        Ok(())
+    }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_rack_view_is_read_where_the_remote_script_sends_it() {
+    let live = Rc::new(RemoteShape(DeterministicLiveSimulator::new()));
+    let rack = json!({"ref":"device:rack-1","parentRef":"track:track-1","objectIdentity":"simulator:device:rack-1","name":"Drum Rack","kind":"rack","className":"DrumGroupDevice","canHaveChains":true,"canHaveDrumPads":false,"parameters":[],"chains":[],"view":{"isCollapsed":false},"rackView":{"selectedChainRef":null,"selectedPadIndex":36,"padScrollPosition":3,"showChainDevices":false}});
+    live.0.state.borrow_mut()["tracks"][0]["devices"] = json!([rack]);
+    let host = McpHost::new(live.clone(), McpHostOptions::default()).unwrap();
+    let call = |name: &str, arguments: Value| ToolCall { id: json!(1), name: name.into(), arguments: Some(arguments), asynchronous: true };
+    let text = |result: Value| -> Value { serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+    let preview =
+        host.dispatch_rack_tool(&call("live_rack_view_preview", json!({"rackRef":"device:rack-1","showChainDevices":true})), None).await;
+    let preview = text(preview.unwrap().unwrap().unwrap());
+    // What the view shows now, read from the rack's `view`.
+    assert_eq!(
+        preview["prior"],
+        json!({"selectedChainRef":null,"selectedPadIndex":36,"padScrollPosition":3,"showChainDevices":false}),
+        "{preview}"
+    );
+    let apply = json!({"transactionId":preview["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+    let applied = text(host.dispatch_rack_tool(&call("live_rack_view_apply", apply), None).await.unwrap().unwrap().unwrap());
+    assert_eq!(applied["state"], "applied", "{applied}");
+    assert_eq!(live.0.state.borrow()["tracks"][0]["devices"][0]["rackView"]["showChainDevices"], true);
+    let undo = json!({"transactionId":preview["transactionId"],"confirmation":"undo","idempotencyKey":"undo-key"});
+    let undone = text(host.undo_rack_async(&json!(2), &undo, None).await);
+    assert_eq!(undone["state"], "undone", "{undone}");
+    assert_eq!(live.0.state.borrow()["tracks"][0]["devices"][0]["rackView"]["showChainDevices"], false);
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn racks_and_views_match_source_workflows() {
     tokio::task::LocalSet::new()
