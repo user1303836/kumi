@@ -187,6 +187,39 @@ async fn native_measurement_pool_learns_reuses_processes_and_replaces_lost_or_ti
     assert_eq!([progress.sounds.known, progress.presets.known, progress.sets.known], [7, 4, 2]);
     assert_eq!(progress.failed, 0);
 }
+#[cfg(unix)]
+#[tokio::test]
+async fn a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let worker = root.path().join("worker");
+    // A worker that converts as the real one does, then hangs: a child at work, a copy in its temporary folder.
+    put(
+        &worker,
+        format!(
+            "#!/bin/sh\nmkdir \"$TMPDIR/kumi-audio-1\" && : > \"$TMPDIR/kumi-audio-1/converted.wav\"\nprintf '%s' \"$TMPDIR\" > '{0}/temp'\nsleep 30 &\nprintf '%s' $! > '{0}/child'\nwait\n",
+            root.path().display()
+        ),
+    );
+    std::fs::set_permissions(&worker, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let pool = MeasurePool::with_worker(1, worker, Duration::from_millis(1000));
+    let job = MeasureJob { id: 0, path: "/x.mp3".into(), relative: "x.mp3".into(), size: 1, mtime: 1, start: None, seconds: None };
+    assert_eq!(pool.run(0, job).await.error.as_deref(), Some("it took too long to read"));
+    let temp = std::fs::read_to_string(root.path().join("temp")).unwrap();
+    assert!(!std::path::Path::new(&temp).exists(), "{temp} is still there");
+    let child: libc::pid_t = std::fs::read_to_string(root.path().join("child")).unwrap().parse().unwrap();
+    // Gone once whoever took it in has reaped it.
+    let mut ended = false;
+    for _ in 0..50 {
+        if unsafe { libc::kill(child, 0) } != 0 {
+            ended = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(ended, "the worker's child is still running");
+    pool.close().await;
+}
 #[test]
 fn only_newest_version_of_each_project_contributes_to_taste() {
     use kumi_runtime::library::{learn::SetEntry, sets::SetSummary};

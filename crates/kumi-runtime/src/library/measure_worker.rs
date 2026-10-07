@@ -67,18 +67,100 @@ pub fn worker_binary(name: &str, variable: &str) -> PathBuf {
         })
         .unwrap_or_else(|| filename.into())
 }
+/// A Job Object holding a worker, and so what it starts: ended together.
+#[cfg(windows)]
+struct Job(*mut std::ffi::c_void);
+#[cfg(windows)]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn CreateJobObjectW(attributes: *const std::ffi::c_void, name: *const u16) -> *mut std::ffi::c_void;
+    fn AssignProcessToJobObject(job: *mut std::ffi::c_void, process: *mut std::ffi::c_void) -> i32;
+    fn TerminateJobObject(job: *mut std::ffi::c_void, code: u32) -> i32;
+    fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+}
+#[cfg(windows)]
+impl Job {
+    fn holding(child: &Child) -> Option<Job> {
+        let process = child.raw_handle()?;
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job.is_null() {
+                return None;
+            }
+            if AssignProcessToJobObject(job, process) == 0 {
+                CloseHandle(job);
+                return None;
+            }
+            Some(Job(job))
+        }
+    }
+    fn end(&self) {
+        unsafe { TerminateJobObject(self.0, 1) };
+    }
+}
+#[cfg(windows)]
+impl Drop for Job {
+    fn drop(&mut self) {
+        unsafe { CloseHandle(self.0) };
+    }
+}
+// A kernel handle: any thread may use it.
+#[cfg(windows)]
+unsafe impl Send for Job {}
+#[cfg(windows)]
+unsafe impl Sync for Job {}
 struct Worker {
     child: Child,
     input: ChildStdin,
     lines: Lines<BufReader<ChildStdout>>,
+    /// The worker's temporary folder (its converted copies): removed once it has stopped.
+    temp: PathBuf,
+    #[cfg(windows)]
+    job: Option<Job>,
+    stopped: bool,
 }
 impl Worker {
     fn spawn(binary: &std::path::Path) -> io::Result<Self> {
-        let mut child =
-            Command::new(binary).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit()).kill_on_drop(true).spawn()?;
+        let temp = std::env::temp_dir().join(format!("kumi-measure-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&temp)?;
+        let mut command = Command::new(binary);
+        command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit()).kill_on_drop(true);
+        command.env("TMPDIR", &temp).env("TMP", &temp).env("TEMP", &temp);
+        // A group of its own, so what it starts (ffmpeg, afconvert) ends with it.
+        #[cfg(unix)]
+        command.process_group(0);
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&temp);
+                return Err(error);
+            }
+        };
+        #[cfg(windows)]
+        let job = Job::holding(&child);
         let input = child.stdin.take().unwrap();
         let lines = BufReader::new(child.stdout.take().unwrap()).lines();
-        Ok(Self { child, input, lines })
+        Ok(Self {
+            child,
+            input,
+            lines,
+            temp,
+            #[cfg(windows)]
+            job,
+            stopped: false,
+        })
+    }
+    /// End the worker and everything it started. Before it's waited for, its group (or job) is still its own.
+    fn end_all(&mut self) {
+        #[cfg(unix)]
+        if let Some(pid) = self.child.id() {
+            unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL) };
+        }
+        #[cfg(windows)]
+        if let Some(job) = &self.job {
+            job.end();
+        }
+        let _ = self.child.start_kill();
     }
     async fn run(&mut self, job: &MeasureJob) -> io::Result<SoundEntry> {
         self.input.write_all(format!("{}\n", stringify(&serde_json::to_value(job)?)).as_bytes()).await?;
@@ -92,8 +174,18 @@ impl Worker {
         Err(io::Error::new(io::ErrorKind::UnexpectedEof, "measurement worker exited"))
     }
     async fn stop(&mut self) {
-        let _ = self.child.start_kill();
+        self.end_all();
         let _ = self.child.wait().await;
+        self.stopped = true;
+        let _ = tokio::fs::remove_dir_all(&self.temp).await;
+    }
+}
+impl Drop for Worker {
+    fn drop(&mut self) {
+        if !self.stopped {
+            self.end_all();
+            let _ = std::fs::remove_dir_all(&self.temp);
+        }
     }
 }
 pub struct MeasurePool {
