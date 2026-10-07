@@ -17,7 +17,8 @@ pub struct Thumb {
     pub height: usize,
     pub rgb: Vec<u8>,
 }
-pub const THUMB_WIDTH: usize = 32;
+/// A frame's thumbnail's longer side.
+pub const THUMB_SIZE: usize = 32;
 pub const REGIONS: [(&str, &str); 9] = [
     ("top", "iw:ih*0.4:0:0"),
     ("bottom", "iw:ih*0.4:0:ih*0.6"),
@@ -148,9 +149,23 @@ pub async fn frame_at(
         })
         .await?;
     }
-    Ok(Frame { jpeg: tokio::fs::read(path).await?, thumb: thumb_of(ffmpeg, path, signal).await? })
+    let jpeg = tokio::fs::read(path).await?;
+    // The picture is what the model sees: a thumbnail that can't be made leaves a whole frame without one (the app
+    // draws none for it), unless the watch was stopped.
+    let thumb = match thumb_of(ffmpeg, path, signal.clone()).await {
+        Ok(thumb) => thumb,
+        Err(_)
+            if jpeg.starts_with(&[0xff, 0xd8]) && jpeg.ends_with(&[0xff, 0xd9]) && !signal.as_ref().is_some_and(Signal::is_cancelled) =>
+        {
+            Thumb { width: 0, height: 0, rgb: vec![] }
+        }
+        Err(error) => return Err(error),
+    };
+    Ok(Frame { jpeg, thumb })
 }
 pub async fn thumb_of(ffmpeg: &str, jpeg: &str, signal: Option<Signal>) -> Result<Thumb, VideoFailure> {
+    // The longer side THUMB_SIZE and the other even, as before: a portrait frame's, or a side close-up's, is that high.
+    let scale = format!("scale='if(gte(iw,ih),{THUMB_SIZE},-2)':'if(gte(iw,ih),-2,{THUMB_SIZE})'");
     let output = run(
         ffmpeg,
         &[
@@ -161,7 +176,7 @@ pub async fn thumb_of(ffmpeg: &str, jpeg: &str, signal: Option<Signal>) -> Resul
             "-i",
             jpeg,
             "-vf",
-            "scale=32:-2",
+            &scale,
             "-frames:v",
             "1",
             "-f",
@@ -180,7 +195,7 @@ pub async fn thumb_of(ffmpeg: &str, jpeg: &str, signal: Option<Signal>) -> Resul
     let width = header[1].parse::<usize>().unwrap_or(0);
     let height = header[2].parse::<usize>().unwrap_or(0);
     let start = header[0].chars().count();
-    if width != THUMB_WIDTH || !(2..=THUMB_WIDTH).contains(&height) || data.len() - start != width * height * 3 {
+    if width.max(height) != THUMB_SIZE || width.min(height) < 2 || data.len() - start != width * height * 3 {
         return Err(VideoFailure::other("the frame's thumbnail came out wrong"));
     }
     Ok(Thumb { width, height, rgb: data[start..].to_vec() })

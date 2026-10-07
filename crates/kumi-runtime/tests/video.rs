@@ -114,7 +114,11 @@ fn whisper_output_becomes_timed_lines_without_music_or_silence() {
     assert_eq!(speech_model_for(Some("de")), "ggml-small-q5_1.bin");
 }
 async fn test_video(folder: &Path, name: &str, captions: bool) -> Option<String> {
+    test_video_sized(folder, name, captions, "640x360").await
+}
+async fn test_video_sized(folder: &Path, name: &str, captions: bool, size: &str) -> Option<String> {
     let ffmpeg = find_ffmpeg(FfmpegOptions { installed_only: true, ..Default::default() }).await.unwrap()?;
+    let picture = format!("testsrc2=size={size}:rate=10:duration=12");
     let file = folder.join(format!("{name}.mp4")).to_string_lossy().into_owned();
     run(
         &ffmpeg,
@@ -125,7 +129,7 @@ async fn test_video(folder: &Path, name: &str, captions: bool) -> Option<String>
             "-f",
             "lavfi",
             "-i",
-            "testsrc2=size=640x360:rate=10:duration=12",
+            &picture,
             "-f",
             "lavfi",
             "-i",
@@ -210,6 +214,32 @@ async fn offline_a_saved_transcript_still_answers_and_its_note_says_why_ffmpeg_c
     assert_eq!(watched.lines.iter().map(|line| line.text.as_str()).collect::<Vec<_>>(), ["then a Saturator"]);
     assert_eq!(watched.notes, [note]);
     assert_eq!(asked.lock().unwrap().len(), 2);
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_portrait_video_and_side_closeups_have_frames_and_thumbnails() {
+    let folder = tempfile::tempdir().unwrap();
+    let Some(short) = test_video_sized(folder.path(), "short", false, "360x640").await else {
+        eprintln!("ffmpeg makes the test video; unavailable");
+        return;
+    };
+    let options = watch_options(folder.path(), "videos");
+    // A Short: its thumbnails are 32 high, as a landscape frame's are 32 wide.
+    let watched = watch_video(WatchRequest { url: short, frames: Some(2.0), ..Default::default() }, options.clone()).await.unwrap();
+    assert_eq!(watched.frames.len(), 2, "{:?}", watched.notes);
+    for frame in &watched.frames {
+        assert_eq!(&frame.jpeg[..2], [0xff, 0xd8]);
+        assert_eq!((frame.thumb.width, frame.thumb.height, frame.thumb.rgb.len()), (18, 32, 18 * 32 * 3));
+    }
+    // A left or right close-up of a landscape video is taller than wide too.
+    let video = test_video(folder.path(), "tutorial", false).await.unwrap();
+    let left = watch_video(
+        WatchRequest { url: video, look_at: Some(vec![7.0]), zoom: Some(Region::Left), frames: Some(0.0), ..Default::default() },
+        options,
+    )
+    .await
+    .unwrap();
+    assert_eq!(left.frames.len(), 1, "{:?}", left.notes);
+    assert_eq!((left.frames[0].thumb.width, left.frames[0].thumb.height), (28, 32));
 }
 #[tokio::test(flavor = "current_thread")]
 async fn video_files_have_captions_frames_closeups_sound_and_are_kept() {
@@ -573,6 +603,20 @@ async fn a_stream_its_site_wants_in_pieces_is_asked_for_in_pieces() {
     assert_eq!(&frame.jpeg[..2], [0xff, 0xd8]);
     let sound = sound_between(&ffmpeg, &pieces, 2.0, 4.0, &path("pieces.wav"), None, false).await.unwrap();
     assert!(std::fs::metadata(sound).unwrap().len() > 44_100 * 2 * 2);
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_frame_whose_thumbnail_cant_be_made_keeps_its_picture() {
+    use kumi_runtime::video::frames::frame_at;
+    let folder = tempfile::tempdir().unwrap();
+    // Frames already taken, and an ffmpeg that can't make their thumbnails.
+    let ffmpeg = fake(folder.path(), "ffmpeg", "exit 1", "exit /b 1");
+    let path = |name: &str| folder.path().join(name).to_string_lossy().into_owned();
+    std::fs::write(path("whole.jpg"), [0xff, 0xd8, 0xff, 0xe0, 0, 0, 0xff, 0xd9]).unwrap();
+    let frame = frame_at(&ffmpeg, None, 7.0, &path("whole.jpg"), None, None).await.unwrap();
+    assert_eq!((frame.jpeg.len(), frame.thumb.width, frame.thumb.height), (8, 0, 0));
+    // A picture cut off isn't one to show.
+    std::fs::write(path("cut.jpg"), [0xff, 0xd8, 0xff, 0xe0]).unwrap();
+    assert!(frame_at(&ffmpeg, None, 7.0, &path("cut.jpg"), None, None).await.is_err());
 }
 
 /// A program in `folder`: a shell script, or on Windows a batch file, so the tests that use one run
