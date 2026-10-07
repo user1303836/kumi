@@ -862,6 +862,8 @@ struct State {
     annotations: Vec<Value>,
     has_function: bool,
     failed: bool,
+    /// The response said it was done (completed, incomplete or failed), or the stream sent an error.
+    ended: bool,
     finish: FinishReason,
     usage: Option<Value>,
     response_id: Value,
@@ -953,6 +955,9 @@ impl State {
             self.error(LanguageModelError::other(format!("Invalid OpenAI response data: {}", stringify(&value))));
             return;
         }
+        if matches!(value["type"].as_str(), Some("response.completed" | "response.incomplete" | "response.failed" | "error")) {
+            self.ended = true;
+        }
         let index = value["output_index"].as_u64().unwrap_or(0);
         let item = &value["item"];
         match value["type"].as_str(){
@@ -1017,6 +1022,13 @@ impl State {
         }
         field(&mut metadata, "serviceTier", self.service.clone());
         field(&mut metadata, "reasoningContext", self.context.clone());
+        if !self.ended && !self.failed {
+            // The stream closed before the response said it was done: its text is cut short and a call it was
+            // writing is lost. The answer broke off, as a dropped connection does, so it can be tried again.
+            let mut broke = ApiCallError::new("The response stream ended before the response was done.", "", None, Some(200));
+            broke.is_retryable = true;
+            self.pending.push_back(StreamPart::Error { error: broke.into() });
+        }
         self.pending.push_back(StreamPart::Finish {
             usage: usage(self.usage.as_ref()),
             finish_reason: self.finish.clone(),
@@ -1046,6 +1058,7 @@ fn convert_stream(
         annotations: vec![],
         has_function: false,
         failed: false,
+        ended: false,
         finish: FinishReason { unified: FinishReasonUnified::Other, raw: None },
         usage: None,
         response_id: Value::Null,

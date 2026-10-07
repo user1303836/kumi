@@ -7,8 +7,9 @@ use kumi_runtime::ai::{
     anthropic::{anthropic, AnthropicSettings},
     error::LanguageModelError,
     http::{post_json, Fetch, FetchInit, Headers, HttpFetch, Response},
+    openai_responses::{openai_responses, ResponsesSettings},
     sse::{json_stream, safe_json, Event, SseParser},
-    types::CallOptions,
+    types::{CallOptions, StreamPart},
 };
 use serde_json::json;
 use std::rc::Rc;
@@ -134,4 +135,42 @@ async fn an_anthropic_answer_whose_body_breaks_before_its_first_event_keeps_its_
     // The kernel retries it, as it does any body that breaks off after the headers.
     let error = error.api_call().expect("the failed call as it came, not a bare message");
     assert_eq!((error.status_code, error.is_retryable, error.cause.as_deref()), (Some(200), true, Some("terminated")));
+}
+struct Events(String);
+#[async_trait(?Send)]
+impl Fetch for Events {
+    async fn fetch(&self, _: &str, _: FetchInit) -> Result<Response, LanguageModelError> {
+        Ok(Response::text_response(200, self.0.clone()))
+    }
+}
+#[tokio::test]
+async fn a_responses_stream_that_closes_before_it_says_it_is_done_broke_off() {
+    let events = |last: Option<serde_json::Value>| {
+        let mut events = vec![
+            json!({"type":"response.created","response":{"id":"r1","created_at":10,"model":"gpt-6-sol"}}),
+            json!({"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"m1"}}),
+            json!({"type":"response.output_text.delta","item_id":"m1","delta":"Half an ans"}),
+        ];
+        events.extend(last);
+        events.iter().map(|event| format!("data: {event}\n\n")).collect::<String>() + "data: [DONE]\n\n"
+    };
+    let parts = |events: String| async move {
+        let model = openai_responses(ResponsesSettings {
+            model: "gpt-6-sol".into(),
+            base_url: "http://fixture/v1".into(),
+            api_key: "fixture-key".into(),
+            headers: Default::default(),
+            fetch: Rc::new(Events(events)),
+        });
+        model.do_stream(CallOptions::default()).await.unwrap().collect::<Vec<_>>().await
+    };
+    // No response.completed: the text is cut short, so the answer broke off and can be tried again.
+    let cut = parts(events(None)).await;
+    let errors: Vec<_> =
+        cut.iter().filter_map(|part| if let StreamPart::Error { error } = part { error.api_call() } else { None }).collect();
+    assert_eq!(errors.iter().map(|e| (e.status_code, e.is_retryable)).collect::<Vec<_>>(), [(Some(200), true)], "{cut:?}");
+    assert!(matches!(cut.last(), Some(StreamPart::Finish { .. })));
+    // Done, it finishes as before.
+    let done = parts(events(Some(json!({"type":"response.completed","response":{"usage":{"input_tokens":2,"output_tokens":3}}})))).await;
+    assert!(!done.iter().any(|part| matches!(part, StreamPart::Error { .. })), "{done:?}");
 }
