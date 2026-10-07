@@ -179,7 +179,25 @@ pub fn live_mutation_available(status: &LiveStatus) -> bool {
     ];
     status.capabilities.iter().any(|c| CAPABILITIES.contains(&c.as_str())) && OPERATIONS.iter().any(|op| status.has_operation(op))
 }
+/// What a status offers, read once for a whole catalog rather than once per entry.
+struct Offered<'a> {
+    capabilities: HashSet<&'a str>,
+    operations: HashSet<&'a str>,
+    mutation: bool,
+}
+impl<'a> Offered<'a> {
+    fn of(status: &'a LiveStatus) -> Self {
+        Self {
+            capabilities: status.capabilities.iter().map(|c| c.as_str()).collect(),
+            operations: status.operations.iter().flatten().map(String::as_str).collect(),
+            mutation: live_mutation_available(status),
+        }
+    }
+}
 pub fn tool_executable(entry: &ToolCatalogEntry, status: &LiveStatus) -> bool {
+    executable(entry, status, &Offered::of(status))
+}
+fn executable(entry: &ToolCatalogEntry, status: &LiveStatus, offered: &Offered) -> bool {
     let p = &entry.prereq;
     if p.always == Some(true) {
         return true;
@@ -190,8 +208,7 @@ pub fn tool_executable(entry: &ToolCatalogEntry, status: &LiveStatus) -> bool {
     if p.provenance.as_deref().is_some_and(|required| status.provenance.as_ref().map(|p| p.as_str()) != Some(required)) {
         return false;
     }
-    let capabilities: HashSet<_> = status.capabilities.iter().map(|c| c.as_str()).collect();
-    let operations: HashSet<_> = status.operations.iter().flatten().map(String::as_str).collect();
+    let (capabilities, operations) = (&offered.capabilities, &offered.operations);
     if p.capabilities_all.as_ref().is_some_and(|values| !values.iter().all(|v| capabilities.contains(v.as_str())))
         || p.capabilities_any.as_ref().is_some_and(|values| !values.iter().any(|v| capabilities.contains(v.as_str())))
         || p.operations_all.as_ref().is_some_and(|values| !values.iter().all(|v| operations.contains(v.as_str())))
@@ -199,7 +216,7 @@ pub fn tool_executable(entry: &ToolCatalogEntry, status: &LiveStatus) -> bool {
     {
         return false;
     }
-    p.mutation_available != Some(true) || live_mutation_available(status)
+    p.mutation_available != Some(true) || offered.mutation
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolPolicySpec {
@@ -304,10 +321,11 @@ pub struct ToolVisibilityRow {
     pub visible: bool,
 }
 pub fn resolve_tool_visibility(status: &LiveStatus, policy: &ToolPolicySpec) -> Result<Vec<ToolVisibilityRow>, ToolPolicyError> {
+    let offered = Offered::of(status);
     TOOL_CATALOG
         .iter()
         .map(|entry| {
-            let executable = tool_executable(entry, status);
+            let executable = executable(entry, status, &offered);
             let policy_allowed = tool_allowed_by_policy(entry, policy)?;
             Ok(ToolVisibilityRow { entry, executable, policy_allowed, visible: executable && policy_allowed })
         })

@@ -351,7 +351,7 @@ fn safe_adapter_status(adapter: &dyn AsyncLiveAdapter) -> LiveStatus {
         let capabilities: HashSet<_> = status.capabilities.iter().collect();
         let operations_valid = status.operations.as_ref().is_none_or(|operations| {
             let unique: HashSet<_> = operations.iter().collect();
-            unique.len() == operations.len() && operations.iter().all(|operation| live_registry_operations().contains(operation))
+            unique.len() == operations.len() && operations.iter().all(|operation| crate::registry::is_live_registry_operation(operation))
         });
         let hash_valid = status
             .registry_hash

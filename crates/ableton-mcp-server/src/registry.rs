@@ -239,6 +239,12 @@ static REGISTRY_HASH: LazyLock<String> =
     LazyLock::new(|| live_registry_hash_of(load_live_registry()).unwrap_or_else(|error| panic!("{error}")));
 static REGISTRY_OPERATIONS: LazyLock<Vec<String>> =
     LazyLock::new(|| load_live_registry().operations.iter().map(|operation| operation.id.clone()).collect());
+static REGISTRY_OPERATION_IDS: LazyLock<std::collections::HashSet<&'static str>> =
+    LazyLock::new(|| REGISTRY_OPERATIONS.iter().map(String::as_str).collect());
+/// Whether `id` is one of the embedded registry's operations (a set lookup, not a search of the list).
+pub fn is_live_registry_operation(id: &str) -> bool {
+    REGISTRY_OPERATION_IDS.contains(id)
+}
 
 /// The registry, parsed and validated once.
 pub fn load_live_registry() -> &'static LiveRegistry {
