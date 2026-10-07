@@ -11291,11 +11291,12 @@ class LiveObjectMapper:
         needle = query.strip().lower() if isinstance(query, str) else ""
         items: list[dict[str, Any]] = []; seen_ids: set[str] = set(); traversal_count = 0
 
-        def walk(node: Any, path: str, depth: int) -> None:
+        def walk(node: Any, path: str, depth: int, children: list[Any] | None = None) -> None:
             nonlocal traversal_count
             if len(items) >= limit or depth > 6:
                 return
-            children = self._items(self._read_attr(node, "children") or [])
+            # A folder's children are read once: by its parent, to tell a folder from an item, then handed down.
+            children = self._items(self._read_attr(node, "children") or []) if children is None else children
             if len(children) > MAX_DISCOVERY_COLLECTION_LENGTH: raise ValueError("browser child collection exceeds its traversal bound")
             for child in children:
                 traversal_count += 1
@@ -11306,7 +11307,8 @@ class LiveObjectMapper:
                 if len(name) > 256 or len(child_path) > 256: continue
                 explicit_device = self._read_attr(child, "is_device"); is_loadable = self._read_attr(child, "is_loadable") is True
                 is_device = explicit_device is True or (explicit_device is None and category_name in self._DEVICE_BROWSER_CATEGORIES and is_loadable)
-                if not self._items(self._read_attr(child, "children") or []) or is_device:
+                grandchildren = self._items(self._read_attr(child, "children") or [])
+                if not grandchildren or is_device:
                     if not needle or needle in name.lower() or needle in child_path.lower():
                         # Live lists one thing twice under one path when it comes from two files (Core Library
                         # and a Pack, two library versions): the second is "<path>#2", and so on (#183).
@@ -11315,7 +11317,7 @@ class LiveObjectMapper:
                         if len(item_id) <= 256 and item_id not in seen_ids:
                             seen_ids.add(item_id); items.append({"id": item_id, "objectIdentity": self._browser_item_identity(item_id, child), "name": name, "category": category_name, "path": child_path, "isDevice": is_device})
                 if not is_device:
-                    walk(child, child_path, depth + 1)
+                    walk(child, child_path, depth + 1, grandchildren)
 
         repeats: dict[str, int] = {}
         categories = [category] if category else [name for name in self._BROWSER_SEARCH_ORDER if name in self._BROWSER_CATEGORIES]

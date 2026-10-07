@@ -1497,6 +1497,19 @@ class ControlSurfaceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "mapping failed without a residual device"): mapper.invoke("browser.load", {"itemId": item["id"], "trackRef": row["ref"], "expectedName": item["name"], "expectedItemIdentity": item["objectIdentity"], **authority})
         self.assertEqual(len(track.devices), 0); self.assertEqual(mapper.refs.checkpoint(), registry_before)
 
+    def test_browser_search_reads_each_folders_children_once(self):
+        reads = []
+        class Item:
+            def __init__(self, name, children=()): self.name = name; self._children = list(children); self.is_loadable = not children; self.is_device = not children
+            @property
+            def children(self): reads.append(self.name); return self._children
+        class Browser:
+            instruments = Item("instruments", [Item("Synths", [Item("Drift"), Item("Wavetable")]), Item("Keys", [Item("Electric")])])
+        mapper = LiveObjectMapper(FakeSong()); mapper._browser = lambda: Browser()
+        names = [item["name"] for item in mapper.invoke("browser.search", {"category": "instruments", "limit": 10})["items"]]
+        self.assertEqual(names, ["Drift", "Wavetable", "Electric"])
+        self.assertEqual(sorted(name for name in set(reads) if reads.count(name) > 1), [], "no folder's children read twice")
+
     def test_real_live_browser_load_returns_hidden_cleanup_ownership_shape(self):
         class Item:
             def __init__(self, name, children=None): self.name = name; self.children = children or []; self.is_loadable = not bool(children); self.is_device = not bool(children)
