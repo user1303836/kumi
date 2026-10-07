@@ -311,6 +311,74 @@ async fn call(host: &Rc<McpHost>, tool: &str, id: usize, args: &Value, signal: O
         _ => panic!("unknown tool {tool}"),
     }
 }
+/// The simulator, keeping a clip's velocity amount and loop points as Live does: float32.
+struct Float32(DeterministicLiveSimulator);
+impl Float32 {
+    fn stored(&self) {
+        let mut state = self.0.state.borrow_mut();
+        let clip = &mut state["tracks"][0]["clips"][0];
+        for field in ["velocityAmount", "loopStart", "loopEnd"] {
+            if let Some(value) = clip[field].as_f64() {
+                clip[field] = json!(value as f32 as f64);
+            }
+        }
+    }
+}
+impl LiveAdapter for Float32 {
+    fn status(&self) -> Result<LiveStatus, LiveError> {
+        self.0.status()
+    }
+    fn snapshot(&self) -> Result<LiveSnapshot, LiveError> {
+        self.0.snapshot()
+    }
+    fn get(&self, r: &LiveRef) -> Result<Option<Value>, LiveError> {
+        self.0.get(r)
+    }
+    fn invoke(&self, i: &LiveInvocation) -> Result<Value, LiveError> {
+        let result = self.0.invoke(i);
+        self.stored();
+        result
+    }
+    fn subscribe(&self, l: LiveListener) -> Result<Unsubscribe, LiveError> {
+        self.0.subscribe(l)
+    }
+    fn reconnect(&self) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect()
+    }
+}
+#[async_trait::async_trait(?Send)]
+impl AsyncLiveAdapter for Float32 {
+    async fn snapshot_async(&self, c: Option<&LiveOperationContext>, r: Option<&LiveSnapshotRequest>) -> Result<LiveSnapshot, LiveError> {
+        self.0.snapshot_async(c, r).await
+    }
+    async fn discover_async(&self, r: &LiveDiscoveryRequest, c: Option<&LiveOperationContext>) -> Result<LiveDiscoveryResult, LiveError> {
+        self.0.discover_async(r, c).await
+    }
+    async fn get_async(&self, r: &LiveRef, _: Option<&LiveOperationContext>) -> Result<Option<Value>, LiveError> {
+        self.0.get(r)
+    }
+    async fn invoke_async(&self, i: &LiveInvocation, _: Option<&LiveOperationContext>) -> Result<Value, LiveError> {
+        self.invoke(i)
+    }
+    async fn reconnect_async(&self, _: Option<&LiveOperationContext>) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect()
+    }
+    async fn close(&self) -> Result<(), LiveError> {
+        Ok(())
+    }
+}
+#[tokio::test]
+async fn a_velocity_amount_live_keeps_as_float32_is_confirmed() {
+    let live = Rc::new(Float32(DeterministicLiveSimulator::new()));
+    let host = McpHost::new(live.clone(), McpHostOptions::default()).unwrap();
+    let text = |result: Value| -> Value { serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+    let preview = text(host.live_clip_properties_preview_async(&json!(1), &json!({"clipRef":"clip:clip-1","velocityAmount":0.3})).await);
+    let apply = json!({"transactionId":preview["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+    let applied = text(host.live_clip_properties_apply_async(&json!(2), &apply, None).await.unwrap());
+    // Live reads 0.3 back as 0.30000001192092896.
+    assert_eq!(applied["state"], "applied", "{preview} {applied}");
+    assert_eq!(live.0.state.borrow()["tracks"][0]["clips"][0]["velocityAmount"], json!(0.3_f32 as f64));
+}
 #[tokio::test]
 async fn clip_properties_validation_matches_source() {
     tokio::task::LocalSet::new()

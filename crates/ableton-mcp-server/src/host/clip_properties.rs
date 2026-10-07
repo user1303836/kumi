@@ -211,7 +211,7 @@ impl McpHost {
             let verified = self.clip_row(&snapshot, reference)?.clip;
             for field in FIELDS {
                 if let Some(expected) = t["payload"].get(*field) {
-                    if !scalar_same(verified.get(*field), Some(expected)) {
+                    if !same_live_value(verified.get(*field), Some(expected)) {
                         return Err(LiveError::error("clip postcondition was not confirmed"));
                     }
                 }
@@ -286,7 +286,7 @@ impl McpHost {
                 } else if field == "groove" {
                     js_json::stringify(&row.clip["groove"]) == js_json::stringify(value)
                 } else {
-                    scalar_same(row.clip.get(field), Some(value))
+                    same_live_value(row.clip.get(field), Some(value))
                 };
                 if !same {
                     return Ok(transaction_error(
@@ -324,7 +324,7 @@ impl McpHost {
                 if if field == "groove" {
                     js_json::stringify(&restored["groove"]) != js_json::stringify(value)
                 } else {
-                    !scalar_same(restored.get(field), Some(value))
+                    !same_live_value(restored.get(field), Some(value))
                 } {
                     return Err(LiveError::error("Clip exact prior state was not restored"));
                 }

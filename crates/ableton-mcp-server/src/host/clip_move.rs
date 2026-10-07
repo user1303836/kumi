@@ -24,11 +24,9 @@ fn merge(target: &mut Value, source: &Value) {
         }
     }
 }
+/// Equal as Live keeps it: a number within Live's float32 rounding.
 fn number_equal(a: &Value, b: &Value) -> bool {
-    match (a.as_f64(), b.as_f64()) {
-        (Some(a), Some(b)) => a == b,
-        _ => a == b,
-    }
+    same_live_value(Some(a), Some(b))
 }
 fn exact_created(result: &Value) -> bool {
     is_non_empty_string(&result["ref"], 256)
