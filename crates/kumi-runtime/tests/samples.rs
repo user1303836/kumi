@@ -17,6 +17,24 @@ fn wav_aiff_partial_odd_streamed_and_malformed_headers_match_source() {
     }
 }
 #[test]
+fn a_sample_named_on_a_network_share_is_never_looked_at() {
+    use kumi_runtime::integrations::ableton::change_context::SampleBank;
+    let folder = tempfile::tempdir().unwrap();
+    let root = folder.path().canonicalize().unwrap().to_string_lossy().into_owned();
+    std::fs::write(format!("{root}/kick.wav"), b"RIFF").unwrap();
+    let bank = SampleBank::default();
+    assert!(bank.sample(&format!("{root}/kick.wav")).is_some());
+    // "//" before a local path is that same path off Windows: only the refusal keeps it out there.
+    for path in [
+        format!("/{root}/kick.wav"),
+        r"\\host\share\kick.wav".into(),
+        r"/\host\share\kick.wav".into(),
+        r"\??\UNC\host\share\kick.wav".into(),
+    ] {
+        assert!(bank.sample(&path).is_none(), "{path}");
+    }
+}
+#[test]
 fn natural_sample_name_sort_matches_source_numeric_and_base_collation() {
     let data = oracle();
     let names = data["collation"]["names"].as_array().unwrap();

@@ -146,6 +146,46 @@ async fn project_host_matches_source_validation_and_adapter_dispatch() {
         equal(&json!(*adapter.calls.borrow()), &row["calls"], &format!("dispatch {i}"));
     }
 }
+#[tokio::test(flavor = "current_thread")]
+async fn files_on_a_network_share_are_refused_before_anything_opens_them() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let root = folder.path().canonicalize().unwrap().to_string_lossy().into_owned();
+            std::fs::write(format!("{root}/kick.wav"), b"RIFF\x04\x00\x00\x00WAVE").unwrap();
+            std::fs::write(format!("{root}/Song.als"), b"not gzip").unwrap();
+            let host = pinned_host(adapter(json!({})));
+            // "//" before a local path is that same path off Windows: only the refusal keeps it out there.
+            let shares =
+                [format!("/{root}"), r"\\host\share".into(), r"/\host\share".into(), r"\/host\share".into(), r"\??\UNC\host\share".into()];
+            let said = |reply: &Value| reply.to_string();
+            for share in &shares {
+                for (file, folder) in [
+                    (format!("{share}/kick.wav"), share.clone()),
+                    (format!("{share}/kick.wav"), root.clone()),
+                    (format!("{root}/kick.wav"), share.clone()),
+                ] {
+                    for (tool, args) in [
+                        (
+                            "live_audio_import_preview",
+                            json!({"filePath":file,"allowedRoot":folder,"trackRef":"track:track-1","sceneIndex":0}),
+                        ),
+                        ("live_project_import", json!({"filePath":file,"allowedRoot":folder})),
+                    ] {
+                        let call = ToolCall { id: json!(1), name: tool.into(), arguments: Some(args), asynchronous: true };
+                        let reply = host.dispatch_audio_import_tool(&call, None).await.unwrap().unwrap().unwrap();
+                        assert!(said(&reply).contains("network share"), "{tool} {file} in {folder}: {reply}");
+                    }
+                }
+                let set = format!("{share}/Song.als");
+                for (path, folder) in [(set.clone(), share.clone()), (set, root.clone()), (format!("{root}/Song.als"), share.clone())] {
+                    let reply = call(&host, "als_read", json!({"path":path,"allowedRoot":folder})).await;
+                    assert!(said(&reply).contains("network share"), "als_read {path} in {folder}: {reply}");
+                }
+            }
+        })
+        .await;
+}
 fn substitute(value: &Value, root: &str) -> Value {
     match value {
         Value::String(s) => json!(s.replace("ROOT", root)),

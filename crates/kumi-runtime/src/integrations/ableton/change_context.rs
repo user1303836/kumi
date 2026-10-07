@@ -22,6 +22,10 @@ impl SampleBank {
             return Some(SampleFile { path: sample.path.clone(), folder: sample.folder.clone() });
         }
         let full = if path.starts_with("~/") || path.starts_with("~\\") { format!("{}{}", homedir(), &path[1..]) } else { path.into() };
+        // A share named by the model isn't looked at: opening it sends Windows' credentials to its host.
+        if kumi_common::path::network_or_device(&full) {
+            return None;
+        }
         let path = Path::new(&full);
         if !path.is_absolute()
             || !path

@@ -382,7 +382,7 @@ impl McpHost {
         {
             return error(id, -32602, "filePath and allowedRoot (the folder it must be in) are required", None);
         }
-        if ["filePath", "allowedRoot"].iter().any(|k| params[*k].as_str().is_some_and(|s| s.starts_with("\\\\") || s.starts_with("//"))) {
+        if ["filePath", "allowedRoot"].iter().any(|k| params[*k].as_str().is_some_and(kumi_common::path::network_or_device)) {
             return error(id, -32602, "files on a network share aren't imported: copy the file onto this computer first", None);
         }
         let mut staged = None;

@@ -45,6 +45,10 @@ fn file_authority(path: &Value, root: &Value) -> Result<(PathBuf, PathBuf), Live
     }
     let path = path.as_str().unwrap();
     let root = root.as_str().unwrap();
+    // Before anything touches either path: opening a share sends Windows' credentials to its host.
+    if kumi_common::path::network_or_device(path) || kumi_common::path::network_or_device(root) {
+        return Err(LiveError::error("Sets on a network share aren't read: copy the Set onto this computer first"));
+    }
     let bytes = path.as_bytes();
     if !path.starts_with('/') && !(bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':') {
         return Err(LiveError::error("path must be an absolute path"));
