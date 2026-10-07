@@ -345,6 +345,9 @@ _CRASHING_INPUTS = frozenset({"Main", "Master"})
 INPUT_FROM_MAIN = ("Live crashes when a track's input is set to Main (Live 12.4: unsaved work is lost), so nothing ran. "
                    "To record the mix, set the input to \"Resampling\", which is what Main plays. A script that sets an output to Main "
                    "and an input to something else can do them in two scripts; a track named Main or Master needs another name to be an input.")
+# python.run's error type for a failure after the code ran (its result, the deadline after it, its undo step):
+# Live may have changed, which Kumi records as unconfirmed rather than "nothing changed".
+PYTHON_RAN = "RanResultUnavailable"
 
 
 def _sets_input_from_main(code: Any) -> bool:
@@ -10035,6 +10038,13 @@ class LiveObjectMapper:
             seconds, samples = float(value), convert("seconds_to_sample_time", value); beats = convert("sample_to_beat_time", samples) if samples is not None else None
         return {"beats": beats, "samples": samples, "seconds": seconds}
 
+    @classmethod
+    def _python_ran_error(cls, error: BaseException) -> dict[str, str]:
+        """A python.run failure after the code ran: its type says so (PYTHON_RAN), and its message that Live may
+        have changed."""
+        shaped = cls._python_error(error)
+        return {**shaped, "type": PYTHON_RAN, "message": f"The code ran, so Live may have changed, but then {shaped['type']}: {shaped['message']}"[:MAX_WIRE_STRING_LENGTH]}
+
     @staticmethod
     def _python_error(error: BaseException) -> dict[str, str]:
         """Even an exception whose __str__ fails must stay data on the Live thread."""
@@ -10113,8 +10123,11 @@ class LiveObjectMapper:
         Tracing interrupts Python bytecode; a native call is checked when it returns."""
         output = io.StringIO()
         previous_stdout, previous_trace = sys.stdout, sys.gettrace()
-        opened = None
+        opened = None; ran = False
         response = {"ok": False, "result": None, "stdout": "", "error": None}
+        # A failure once the code has run (its result, the deadline after it, its undo step, its output) says
+        # so: Live may have changed, and the caller mustn't take it for a refusal.
+        failure = lambda error: self._python_ran_error(error) if ran else self._python_error(error)
         try:
             mode, code, timeout = args.get("mode", "exec"), args.get("code"), args.get("timeoutMs", 5000)
             if set(args) - {"mode", "code", "ref", "timeoutMs"} or mode not in {"eval", "exec"} or not isinstance(code, str) or not 1 <= len(code) <= 65536 or not isinstance(timeout, int) or isinstance(timeout, bool) or not 1 <= timeout <= 30000:
@@ -10153,6 +10166,7 @@ class LiveObjectMapper:
                 else:
                     exec(compiled, env, env)
                     value = env.get("result")
+                ran = True
                 response["result"] = self._python_json(value, live, application)
                 self._bounded_canonical(response["result"])
                 trace(None, "return", None)
@@ -10160,17 +10174,17 @@ class LiveObjectMapper:
             finally:
                 sys.settrace(previous_trace)
         except BaseException as error:
-            response.update(ok=False, result=None, error=self._python_error(error))
+            response.update(ok=False, result=None, error=failure(error))
         finally:
             sys.settrace(previous_trace)
             sys.stdout = previous_stdout
             if opened is not None:
                 try: self._undo_step_operation("undo.step.end", {"stepId": opened["stepId"]})
                 except BaseException as error:
-                    response.update(ok=False, result=None, error=self._python_error(error))
+                    response.update(ok=False, result=None, error=failure(error))
             try: response["stdout"] = output.getvalue()[:MAX_WIRE_STRING_LENGTH]
             except BaseException as error:
-                response.update(ok=False, result=None, error=self._python_error(error))
+                response.update(ok=False, result=None, error=failure(error))
         return response
 
     def _application_message(self, args: dict[str, Any]) -> dict[str, Any]:

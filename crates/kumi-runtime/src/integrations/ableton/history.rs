@@ -82,6 +82,9 @@ impl UndoResult {
         Self { record: Some(record), text: text.into(), is_error }
     }
 }
+/// The Remote Script's python.run error type for a failure after the code ran (its result, the deadline after it,
+/// its undo step): Live may have changed.
+pub const PYTHON_RAN: &str = "RanResultUnavailable";
 pub enum FastResult {
     Result(Value),
     Error { error: String, sent: bool },
@@ -272,7 +275,9 @@ impl History {
             let error = context::object(body.get("error").filter(|v| !v.is_null()).unwrap_or(&json!({})))?;
             let message =
                 error.get("message").filter(|v| !v.is_null()).map(|v| js_string(Some(v))).unwrap_or_else(|| "Live refused it".into());
-            return Ok(FastResult::Error { error: head(&message, 600), sent: false });
+            // The code ran and only its answer failed (or its undo step): Live may have changed.
+            let sent = error.get("type").and_then(Value::as_str) == Some(PYTHON_RAN);
+            return Ok(FastResult::Error { error: head(&message, 600), sent });
         }
         Ok(FastResult::Result(body.get("result").cloned().unwrap_or(Value::Null)))
     }

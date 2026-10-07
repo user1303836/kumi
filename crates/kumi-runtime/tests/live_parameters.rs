@@ -9,7 +9,7 @@ use kumi_runtime::{
     integrations::ableton::{
         changes::CHANGES,
         connection::{ConnectionOptions, LiveConnection},
-        history::History,
+        history::{FastResult, History, PYTHON_RAN},
         parameters::Parameters,
         remember::Remember,
     },
@@ -87,6 +87,35 @@ fn normalized(value: &Value) -> String {
 fn eq(actual: &Value, expected: &Value, label: &str) {
     // The checkout command changes with the runtime; installed users still invoke `kumi`.
     assert_eq!(normalized(actual), normalized(expected).replace("npm run kumi --", &kumi_runtime::command::KUMI), "{label}")
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_python_failure_after_the_code_ran_counts_as_sent() {
+    // Live may have changed once the code ran; a refusal before it ran changed nothing.
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for (kind, sent) in [(PYTHON_RAN, true), ("ValueError", false)] {
+                let answer = json!({"ok":false,"result":null,"stdout":"","error":{"type":kind,"message":"broken","traceback":""}});
+                let case = json!({"label":kind,"config":{},"calls":[{"name":"live_run_python","args":{"code":"x = 1","mode":"exec","timeoutMs":10000}}],
+                    "responses":[{"reply":{"content":[{"type":"text","text":stringify(&answer)}]}}]});
+                let endpoint = Rc::new(Fixture { case, calls: RefCell::new(Vec::new()), original: RefCell::new(Signal::new()) });
+                let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
+                let out = endpoint.clone();
+                options.connect = Some(Rc::new(move |_| {
+                    let endpoint: Rc<dyn McpEndpoint> = out.clone();
+                    async move { Ok(endpoint) }.boxed_local()
+                }));
+                let connection = LiveConnection::new(options);
+                connection.start(Signal::new()).await.unwrap();
+                connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
+                let history = History::new(connection.clone(), Remember::new(connection.clone(), None, None), None, None);
+                match history.run_fast("x = 1".into(), Signal::new()).await.unwrap() {
+                    FastResult::Error { sent: got, .. } => assert_eq!(got, sent, "{kind}"),
+                    FastResult::Result(_) => panic!("{kind}: taken as done"),
+                }
+                connection.close().await.unwrap();
+            }
+        })
+        .await;
 }
 #[tokio::test(flavor = "current_thread")]
 async fn parameter_lookup_display_cache_and_atomic_changes_match_source() {

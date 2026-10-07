@@ -8052,6 +8052,20 @@ class PythonRunTests(unittest.TestCase):
         syntax = self.run_python("result =")
         self.assertEqual(syntax["error"]["type"], "SyntaxError")
 
+    def test_a_failure_after_the_code_ran_says_it_ran(self):
+        # Live changed, so a result too big for the wire, or an undo step Live won't close, mustn't read as a refusal.
+        result = self.run_python("song.tempo = 127\nresult = 'x' * 1048577")
+        self.assertEqual((result["ok"], result["error"]["type"], self.song.tempo), (False, remote_module.PYTHON_RAN, 127))
+        self.assertTrue(result["error"]["message"].startswith("The code ran, so Live may have changed, but then "), result["error"]["message"])
+        end = self.mapper._undo_step_operation
+        def refusing_end(operation, args, *rest):
+            if operation == "undo.step.end": raise RuntimeError("Live kept the step open")
+            return end(operation, args, *rest)
+        with patch.object(self.mapper, "_undo_step_operation", refusing_end): kept = self.run_python("song.tempo = 128")
+        self.assertEqual((kept["ok"], kept["error"]["type"], self.song.tempo), (False, remote_module.PYTHON_RAN, 128))
+        # Refused before it ran: as before.
+        self.assertEqual(self.run_python("result =")["error"]["type"], "SyntaxError")
+
     def test_timeout_interrupts_a_loop_and_cleans_up(self):
         started = time.perf_counter()
         result = self.run_python("print('started')\nwhile True: pass", timeoutMs=10)
