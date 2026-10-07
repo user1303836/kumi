@@ -152,12 +152,14 @@ async fn files_on_a_network_share_are_refused_before_anything_opens_them() {
         .run_until(async {
             let folder = tempfile::tempdir().unwrap();
             let root = folder.path().canonicalize().unwrap().to_string_lossy().into_owned();
+            // Windows canonicalizes to a \\?\ device path, which is refused itself and takes no "/" joins.
+            let root = root.strip_prefix(r"\\?\").unwrap_or(&root).to_owned();
             std::fs::write(format!("{root}/kick.wav"), b"RIFF\x04\x00\x00\x00WAVE").unwrap();
             std::fs::write(format!("{root}/Song.als"), b"not gzip").unwrap();
             let host = pinned_host(adapter(json!({})));
-            // "//" before a local path is that same path off Windows: only the refusal keeps it out there.
-            let shares =
-                [format!("/{root}"), r"\\host\share".into(), r"/\host\share".into(), r"\/host\share".into(), r"\??\UNC\host\share".into()];
+            // "//" before a local path is that same path off Windows, as "\\?\" is on it: only the refusal keeps it out there.
+            let local = if cfg!(windows) { format!(r"\\?\{root}") } else { format!("/{root}") };
+            let shares = [local, r"\\host\share".into(), r"/\host\share".into(), r"\/host\share".into(), r"\??\UNC\host\share".into()];
             let said = |reply: &Value| reply.to_string();
             for share in &shares {
                 for (file, folder) in [
