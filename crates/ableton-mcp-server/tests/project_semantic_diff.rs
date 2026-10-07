@@ -32,6 +32,24 @@ fn source_diff_workflows() {
     }
 }
 #[test]
+fn a_rename_to_a_name_with_a_spaced_slash_is_diffed_both_ways() {
+    // "Kick / Snare" isn't a path: the exporter keeps it, so a diff that carries it passes the same test.
+    let mut d = serde_json::Deserializer::from_str(include_str!("support/project_semantic_oracle.json"));
+    d.disable_recursion_limit();
+    let cases = Value::deserialize(&mut d).unwrap();
+    let options: CreateSemanticProjectOptions = serde_json::from_value(cases["cases"][0]["options"].clone()).unwrap();
+    let snapshot = cases["cases"][0]["snapshot"].clone();
+    let mut renamed = snapshot.clone();
+    renamed["tracks"][0]["name"] = json!("Kick / Snare");
+    let before = create_semantic_project_snapshot(&snapshot, &options).unwrap();
+    let after = create_semantic_project_snapshot(&renamed, &options).unwrap();
+    for (from, to) in [(&before, &after), (&after, &before)] {
+        let diff = diff_semantic_project_snapshots(from, to).unwrap();
+        assert_eq!(diff["summary"]["changed"], true);
+        assert!(canonical_semantic_json(&diff).unwrap().contains("Kick / Snare"), "{diff}");
+    }
+}
+#[test]
 fn source_diff_paging_and_validation() {
     let f = fixture();
     let diff = &f["cases"].as_array().unwrap().iter().find(|r| r["label"] == "many changes").unwrap()["result"]["ok"];

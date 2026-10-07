@@ -248,7 +248,9 @@ pub(crate) const JS_SPACE: &str = r"[\t\n\x0b\x0c\r \u{00a0}\u{1680}\u{2000}-\u{
 fn regex(pattern: &str) -> Regex {
     Regex::new(&pattern.replace(r"\s", JS_SPACE).replace(r"\S", &format!("[^{0}]", &JS_SPACE[1..JS_SPACE.len() - 1]))).unwrap()
 }
-fn absolute_path(value: &str) -> bool {
+/// A name that reads as an absolute or network path: the exporter keeps anything else as it is, and a diff of its
+/// artifacts audits with the same test.
+pub(crate) fn absolute_path(value: &str) -> bool {
     static PATH: LazyLock<Regex> = LazyLock::new(|| {
         regex(
             r#"(?i)^\s*[\\/]|(?:^|[\t\n\x0b\x0c\r \u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}"'(=])(?:[A-Za-z]:[\\/]|\\\\)|["'(=]\s*/|\s/\S|[A-Za-z][A-Za-z0-9+.-]*:[\\/]{1,2}"#,

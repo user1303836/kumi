@@ -512,14 +512,10 @@ fn audit_diff_output(diff: &Value) -> Result<(), ProjectError> {
             return Err(fail("semantic diff exceeds audit depth"));
         }
         if let Some(s) = value.as_str() {
-            static PATH: LazyLock<Regex> = LazyLock::new(|| {
-                regex(
-                    r#"(?i)(?:^|[\t\n\x0b\x0c\r \u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}"'(=])(?:/(?:[^/]|$)|[A-Za-z]:[\\/]|\\\\|file://)"#,
-                )
-            });
             static AUTH: LazyLock<Regex> =
                 LazyLock::new(|| regex(r"(?i)(?:reusable[-_ ]?(?:token|secret|confirmation)|bearer\s+[A-Za-z0-9._-]{8,})"));
-            if key != "path" && PATH.is_match(s) {
+            // The exporter's own test: a name such as "Kick / Snare" is kept there, so it isn't a path here.
+            if key != "path" && semantic::absolute_path(s) {
                 return Err(fail("semantic diff contains an absolute or network path"));
             }
             if AUTH.is_match(s) {
