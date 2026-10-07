@@ -257,6 +257,11 @@ async fn replay(chunk: usize, chunks: usize) {
         }
         let restore = folder.path().join("restore.json");
         let _ = std::fs::remove_file(&restore);
+        let _ = std::fs::remove_dir(&restore);
+        // A journal that can't be written (as on a full disk): a folder stands in its place.
+        if config["restoreBlocked"] == true {
+            std::fs::create_dir(&restore).unwrap();
+        }
         options.restore_file = Some(restore.to_string_lossy().into_owned());
         if let Some(pending) = config.get("pending") {
             std::fs::write(&restore, stringify(pending)).unwrap();

@@ -107,7 +107,10 @@ pub fn restore_store(file: impl Into<PathBuf>) -> RestoreStore {
     RestoreStore { file: file.into() }
 }
 impl RestoreStore {
-    pub fn save(&self, value: &impl Serialize) {
+    /// Whether the journal was kept. It's written beside itself and renamed into place, so a failed write (a full
+    /// disk) leaves the one before whole, never a truncated one.
+    pub fn save(&self, value: &impl Serialize) -> bool {
+        let temporary = PathBuf::from(format!("{}.{}.tmp", self.file.display(), std::process::id()));
         let write = || -> Result<(), Box<dyn std::error::Error>> {
             if let Some(parent) = self.file.parent() {
                 if !parent.as_os_str().is_empty() {
@@ -121,11 +124,18 @@ impl RestoreStore {
                 use std::os::unix::fs::OpenOptionsExt;
                 options.mode(0o600);
             }
-            let mut file = options.open(&self.file)?;
+            let mut file = options.open(&temporary)?;
             file.write_all(file_text(&serde_json::to_value(value)?).as_bytes())?;
+            file.sync_all()?;
+            drop(file);
+            fs::rename(&temporary, &self.file)?;
             Ok(())
         };
-        let _ = write();
+        let kept = write().is_ok();
+        if !kept {
+            let _ = fs::remove_file(&temporary);
+        }
+        kept
     }
     pub fn load(&self) -> Option<JsonObject> {
         let bytes = fs::read(&self.file).ok()?;

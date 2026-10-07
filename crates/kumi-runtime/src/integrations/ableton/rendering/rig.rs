@@ -260,16 +260,16 @@ impl Rendering {
         }
         Ok((reference, prior))
     }
-    pub(super) fn save_main(&self, rig: &Rig, volume: f64, scratch: bool) {
-        if let Some(restore) = &self.restore {
-            restore.save(&MainRestore {
-                set: self.connection().set.borrow().clone().unwrap_or_default(),
-                path: self.history.remember.current().and_then(|p| p.path.clone()),
-                volume,
-                at: self.connection().now().timestamp_millis() as f64,
-                scratch: scratch.then(|| rig.sources.iter().map(|s| s.scratch.clone()).collect()),
-            });
-        }
+    /// Notes Main's level to put back after a crash: whether it's noted (or there's no journal to keep).
+    pub(super) fn save_main(&self, rig: &Rig, volume: f64, scratch: bool) -> bool {
+        let Some(restore) = &self.restore else { return true };
+        restore.save(&MainRestore {
+            set: self.connection().set.borrow().clone().unwrap_or_default(),
+            path: self.history.remember.current().and_then(|p| p.path.clone()),
+            volume,
+            at: self.connection().now().timestamp_millis() as f64,
+            scratch: scratch.then(|| rig.sources.iter().map(|s| s.scratch.clone()).collect()),
+        })
     }
     pub(super) fn clear_restore(&self) {
         if let Some(restore) = &self.restore {

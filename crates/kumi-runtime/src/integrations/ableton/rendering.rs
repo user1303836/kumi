@@ -257,6 +257,8 @@ impl Rendering {
 fn object(value: Value) -> JsonObject {
     value.as_object().cloned().unwrap_or_default()
 }
+/// Why a render didn't start: Main's level couldn't be noted to put back after a crash.
+const MAIN_UNNOTED: &str = "Kumi couldn't note Main's level to put back after a crash (is the disk full?), so it left Main as it is and didn't render. Free some space, then try again.";
 fn observation(message: impl Into<String>) -> RuntimeError {
     RuntimeError::Observation(message.into())
 }

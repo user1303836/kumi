@@ -77,8 +77,15 @@ fn crash_restore_journal_is_private_validated_and_best_effort() {
     let store = restore_store(&file);
     assert!(store.load().is_none());
     let record = json!({"set":"opaque","volume":0.75,"at":100,"scratch":["one","two"],"extra":"kept"});
-    store.save(&record);
+    assert!(store.save(&record));
     assert_eq!(Value::Object(store.load().unwrap()), record);
+    // A write that can't finish (here its file beside the journal can't be made) says so, and leaves the journal
+    // before it whole, with nothing beside it.
+    let beside = std::path::PathBuf::from(format!("{}.{}.tmp", file.display(), std::process::id()));
+    std::fs::create_dir(&beside).unwrap();
+    assert!(!store.save(&json!({"set":"other","volume":0.1,"at":200})));
+    assert_eq!(Value::Object(store.load().unwrap()), record);
+    std::fs::remove_dir(&beside).unwrap();
     assert_eq!(std::fs::read_to_string(&file).unwrap(), kumi_common::js::json::file_text(&record));
     #[cfg(unix)]
     {
@@ -98,7 +105,8 @@ fn crash_restore_journal_is_private_validated_and_best_effort() {
     store.clear();
     assert!(!file.exists());
     let invalid = restore_store(root.path());
-    invalid.save(&record);
+    assert!(!invalid.save(&record));
     invalid.clear();
     assert!(root.path().exists());
+    assert!(!std::path::PathBuf::from(format!("{}.{}.tmp", root.path().display(), std::process::id())).exists());
 }

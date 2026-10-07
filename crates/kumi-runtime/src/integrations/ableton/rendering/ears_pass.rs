@@ -19,7 +19,10 @@ impl Rendering {
             .history
             .quietly(None, async {
                 if rig.hold.as_ref().and_then(|hold| hold.main.as_ref()).is_none() {
-                    self.save_main(rig, prior, false);
+                    // Main goes quiet only once its level is noted for after a crash.
+                    if !self.save_main(rig, prior, false) {
+                        return Err(observation(MAIN_UNNOTED));
+                    }
                     self.step("set_mixer", json!({"trackRef":main_ref,"volume":0}), signal.clone()).await?;
                     if let Some(hold) = &mut rig.hold {
                         hold.main = Some((main_ref, prior));
