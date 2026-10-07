@@ -74,9 +74,48 @@ struct Job(*mut std::ffi::c_void);
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn CreateJobObjectW(attributes: *const std::ffi::c_void, name: *const u16) -> *mut std::ffi::c_void;
+    fn SetInformationJobObject(job: *mut std::ffi::c_void, class: u32, information: *const std::ffi::c_void, length: u32) -> i32;
+    fn QueryInformationJobObject(
+        job: *mut std::ffi::c_void,
+        class: u32,
+        information: *mut std::ffi::c_void,
+        length: u32,
+        returned: *mut u32,
+    ) -> i32;
     fn AssignProcessToJobObject(job: *mut std::ffi::c_void, process: *mut std::ffi::c_void) -> i32;
     fn TerminateJobObject(job: *mut std::ffi::c_void, code: u32) -> i32;
     fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+}
+/// JOBOBJECT_EXTENDED_LIMIT_INFORMATION, for JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Default)]
+struct JobLimits {
+    per_process_user_time: i64,
+    per_job_user_time: i64,
+    flags: u32,
+    minimum_working_set: usize,
+    maximum_working_set: usize,
+    active_process_limit: u32,
+    affinity: usize,
+    priority_class: u32,
+    scheduling_class: u32,
+    io: [u64; 6],
+    process_memory: usize,
+    job_memory: usize,
+    peak_process_memory: usize,
+    peak_job_memory: usize,
+}
+/// JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, for how many of the job's processes are still running.
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Default)]
+struct JobAccounting {
+    times: [i64; 4],
+    page_faults: u32,
+    total: u32,
+    active: u32,
+    terminated: u32,
 }
 #[cfg(windows)]
 impl Job {
@@ -87,6 +126,9 @@ impl Job {
             if job.is_null() {
                 return None;
             }
+            // Closing the job ends what's in it, so a Kumi that crashes leaves no worker or ffmpeg behind either.
+            let limits = JobLimits { flags: 0x2000, ..Default::default() };
+            SetInformationJobObject(job, 9, &limits as *const JobLimits as *const _, std::mem::size_of::<JobLimits>() as u32);
             if AssignProcessToJobObject(job, process) == 0 {
                 CloseHandle(job);
                 return None;
@@ -96,6 +138,24 @@ impl Job {
     }
     fn end(&self) {
         unsafe { TerminateJobObject(self.0, 1) };
+    }
+    /// How many of its processes are still running: they end a moment after the job is told to end.
+    fn running(&self) -> u32 {
+        let mut accounting = JobAccounting::default();
+        let read = unsafe {
+            QueryInformationJobObject(
+                self.0,
+                1,
+                &mut accounting as *mut JobAccounting as *mut _,
+                std::mem::size_of::<JobAccounting>() as u32,
+                std::ptr::null_mut(),
+            )
+        };
+        if read == 0 {
+            0
+        } else {
+            accounting.active
+        }
     }
 }
 #[cfg(windows)]
@@ -121,7 +181,7 @@ struct Worker {
 }
 impl Worker {
     fn spawn(binary: &std::path::Path) -> io::Result<Self> {
-        let temp = std::env::temp_dir().join(format!("kumi-measure-{}", uuid::Uuid::new_v4()));
+        let temp = std::env::temp_dir().join(format!("kumi-measure-{}-{}", std::process::id(), uuid::Uuid::new_v4()));
         std::fs::create_dir(&temp)?;
         let mut command = Command::new(binary);
         command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit()).kill_on_drop(true);
@@ -176,8 +236,18 @@ impl Worker {
     async fn stop(&mut self) {
         self.end_all();
         let _ = self.child.wait().await;
+        // The worker has ended; what it started may hold its files a moment longer.
+        #[cfg(windows)]
+        if let Some(job) = &self.job {
+            for _ in 0..50 {
+                if job.running() == 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
         self.stopped = true;
-        let _ = tokio::fs::remove_dir_all(&self.temp).await;
+        remove_folder(&self.temp).await;
     }
 }
 impl Drop for Worker {
@@ -185,6 +255,46 @@ impl Drop for Worker {
         if !self.stopped {
             self.end_all();
             let _ = std::fs::remove_dir_all(&self.temp);
+        }
+    }
+}
+/// A stopped worker's folder, removed. On Windows a file in it can stay held a moment after its process has ended (an
+/// antivirus scan, say), so it's tried again for about a second.
+async fn remove_folder(folder: &std::path::Path) {
+    for attempt in 0..10 {
+        match tokio::fs::remove_dir_all(folder).await {
+            Err(error) if cfg!(windows) && error.kind() != io::ErrorKind::NotFound && attempt < 9 => {
+                tokio::time::sleep(Duration::from_millis(100)).await
+            }
+            _ => return,
+        }
+    }
+}
+/// Workers' folders another Kumi left (it crashed, or Windows held a file past every try): each is named for the
+/// process that made it, and goes once that process has ended, or its pid has gone to a process started after it.
+fn sweep_left_folders() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(pid) = name.to_str().and_then(|name| name.strip_prefix("kumi-measure-")).and_then(|rest| rest.split('-').next()) else {
+            continue;
+        };
+        let Ok(pid) = pid.parse::<u32>() else { continue };
+        if pid == std::process::id() {
+            continue;
+        }
+        let made = entry
+            .metadata()
+            .ok()
+            .and_then(|meta| meta.created().or_else(|_| meta.modified()).ok())
+            .map(|time| time.duration_since(std::time::UNIX_EPOCH).map(|since| since.as_millis() as i64).unwrap_or(0));
+        let gone = match kumi_common::process::started_at_ms(pid) {
+            // A second's slack for how finely a system keeps start times.
+            Some(started) => made.is_some_and(|made| started > made + 1000),
+            None => !super::state::alive(pid as f64),
+        };
+        if gone {
+            let _ = std::fs::remove_dir_all(entry.path());
         }
     }
 }
@@ -199,6 +309,9 @@ impl MeasurePool {
         Self::with_worker(size, worker_binary("kumi-library-measure", "KUMI_LIBRARY_MEASURE_BIN"), Duration::from_millis(90000))
     }
     pub fn with_worker(size: usize, binary: PathBuf, timeout: Duration) -> Self {
+        if size > 0 {
+            sweep_left_folders();
+        }
         Self { slots: (0..size).map(|_| Mutex::new(None)).collect(), timeout, binary, next: Cell::new(0) }
     }
     pub async fn run(&self, slot: usize, mut job: MeasureJob) -> SoundEntry {

@@ -220,6 +220,57 @@ async fn a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it(
     assert!(ended, "the worker's child is still running");
     pool.close().await;
 }
+#[cfg(unix)]
+#[test]
+fn a_new_pool_sweeps_the_folders_left_by_a_kumi_thats_gone() {
+    let temp = std::env::temp_dir();
+    let mut ended = std::process::Command::new("true").spawn().unwrap();
+    let gone = ended.id();
+    ended.wait().unwrap();
+    let folder = |pid: u32| temp.join(format!("kumi-measure-{pid}-{}", uuid::Uuid::new_v4()));
+    // A crashed Kumi's (its process has ended), one of a process older than its folder (pid 1), and this one's.
+    let (left, older, mine) = (folder(gone), folder(1), folder(std::process::id()));
+    for kept in [&left, &older, &mine] {
+        put(&kept.join("kumi-audio-1/converted.wav"), "a copy");
+    }
+    let pool = MeasurePool::with_worker(1, "/nowhere".into(), Duration::from_secs(1));
+    let (left_there, older_there, mine_there) = (left.exists(), older.exists(), mine.exists());
+    for kept in [&older, &mine] {
+        let _ = std::fs::remove_dir_all(kept);
+    }
+    assert_eq!((left_there, older_there, mine_there), (false, true, true));
+    drop(pool);
+}
+#[cfg(windows)]
+#[tokio::test]
+async fn a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it_on_windows() {
+    let root = tempfile::tempdir().unwrap();
+    let worker = root.path().join("worker.cmd");
+    // A worker that converts as the real one does, then hangs: a child holding its copy open, shared with no one.
+    put(
+        &worker,
+        format!(
+            concat!(
+                "@echo off\r\n",
+                "mkdir \"%TMP%\\kumi-audio-1\"\r\n",
+                "(echo %TMP%)>\"{0}\\temp\"\r\n",
+                "start \"\" /b powershell -NoProfile -NonInteractive -Command \"$held = [IO.File]::Open($env:TMP + '\\kumi-audio-1\\converted.wav', 'OpenOrCreate', 'ReadWrite', 'None'); Set-Content -LiteralPath '{0}\\child' -Value $PID; Start-Sleep -Seconds 60\"\r\n",
+                ":wait\r\n",
+                "if not exist \"{0}\\child\" (ping -n 2 127.0.0.1 >nul & goto wait)\r\n",
+                "ping -n 60 127.0.0.1 >nul\r\n"
+            ),
+            root.path().display()
+        ),
+    );
+    let pool = MeasurePool::with_worker(1, worker, Duration::from_secs(12));
+    let job = MeasureJob { id: 0, path: "C:\\x.mp3".into(), relative: "x.mp3".into(), size: 1, mtime: 1, start: None, seconds: None };
+    assert_eq!(pool.run(0, job).await.error.as_deref(), Some("it took too long to read"));
+    let child: u32 = std::fs::read_to_string(root.path().join("child")).expect("the child held the copy").trim().parse().unwrap();
+    let temp = std::fs::read_to_string(root.path().join("temp")).unwrap();
+    assert!(!std::path::Path::new(temp.trim()).exists(), "{temp} is still there");
+    assert!(!kumi_runtime::library::state::alive(child as f64), "the worker's child is still running");
+    pool.close().await;
+}
 #[test]
 fn only_newest_version_of_each_project_contributes_to_taste() {
     use kumi_runtime::library::{learn::SetEntry, sets::SetSummary};
