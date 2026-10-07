@@ -2038,6 +2038,41 @@ local_test!(a_set_kumi_asked_for_keeps_the_request_and_one_opened_by_hand_stops_
     assert!(!h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Resend { .. })));
     h.session.close().await.unwrap();
 });
+local_test!(a_busy_live_keeps_the_request_and_one_that_comes_back_with_another_set_stops_it, {
+    // #256: Live too slow to answer (a big Set's changes, its own undo of a big step) was taken for another Set
+    // opening, and the producer's request was cancelled, "stop loading" among them.
+    let h = harness(Some(hang_once()), |_| {});
+    h.session.start().await.unwrap();
+    let running = spawned(&h.session, "stop loading");
+    settle().await;
+    h.connection(ConnectionState::Disconnected, Some(DisconnectCause::Busy));
+    settle().await;
+    assert!(h.notice("Live is busy and answering slowly, so Kumi is waiting for it"));
+    assert!(!h.notice("Live is opening another Set"));
+    assert!(!running.is_finished(), "the request carries on");
+    h.connection(ConnectionState::Connected, None);
+    settle().await;
+    assert!(h.notice("Live is answering again."));
+    assert!(!running.is_finished(), "still carrying on");
+    assert!(!h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Resend { .. })));
+    running.abort();
+    h.session.close().await.unwrap();
+
+    // Taken for busy, but Live comes back with another Set: then the request stops after all, since nothing it
+    // does belongs in that Set.
+    let h = harness(Some(hang_once()), |_| {});
+    h.session.start().await.unwrap();
+    let running = spawned(&h.session, "widen the pads");
+    settle().await;
+    h.connection(ConnectionState::Disconnected, Some(DisconnectCause::Busy));
+    settle().await;
+    assert!(!running.is_finished());
+    h.connection(ConnectionState::Connected, Some(DisconnectCause::Set));
+    running.await.unwrap().unwrap();
+    assert!(h.notice("Live opened another Set while it was busy, so Kumi stopped what it was doing"));
+    assert!(h.notice("Live has the other Set open."));
+    h.session.close().await.unwrap();
+});
 local_test!(live_closing_mid_request_says_it_may_have_crashed_and_warns_before_sending_it_again, {
     // #195: Live crashed under a script Kumi ran, and Kumi said "Live closed", then offered the request
     // again as if nothing happened.

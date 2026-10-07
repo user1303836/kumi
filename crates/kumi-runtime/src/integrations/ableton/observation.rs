@@ -288,12 +288,26 @@ impl Observer {
             previous.as_ref().filter(|p| p.path.is_some()).and_then(|p| p.project.clone()),
         )
     }
+    /// The look at the Set a turn starts with. One that fails because Live is only busy (a big Set's changes, a job
+    /// running in it) waits for Live to answer and looks once more, rather than failing the request (#256).
     pub async fn observe(
         &self,
         host: &dyn ObservationHost,
         original: Signal,
         hints: Option<ObserveHints>,
     ) -> Result<Observation, RuntimeError> {
+        match self.look(host, original.clone(), hints.clone()).await {
+            Err(error) if !original.is_cancelled() && !matches!(error, RuntimeError::Aborted) => {
+                if self.connection.waited_for_busy_live(&original, 30_000).await {
+                    self.look(host, original, hints).await
+                } else {
+                    Err(error)
+                }
+            }
+            result => result,
+        }
+    }
+    async fn look(&self, host: &dyn ObservationHost, original: Signal, hints: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
         let connection = &self.connection;
         let signal = abort::any([original, connection.lifetime.clone()]);
         signal.check()?;

@@ -463,8 +463,9 @@ impl LiveConnection {
             self.live_gone(DisconnectCause::Live);
             return;
         };
-        // Live still running means its Remote Script went away while it opens another Set (#188): ask
-        // before saying what happened. A reconnection in the meantime has said so already.
+        // Live still running means its Remote Script went away while it opens another Set (#188), unless the
+        // Remote Script is still listening: then Live is only busy, too slow to answer (#256). Ask before saying
+        // what happened. A reconnection in the meantime has said so already.
         let weak = self.weak.clone();
         tokio::task::spawn_local(async move {
             let running = running().await;
@@ -472,13 +473,19 @@ impl LiveConnection {
             if !this.lost.get() || this.closed.get() {
                 return;
             }
-            this.live_gone(if !running {
+            let cause = if !running {
                 DisconnectCause::Live
             } else if Utc::now().timestamp_millis() <= this.expect_set_until.get() {
                 DisconnectCause::AskedSet
+            } else if this.remote_script_listening().await {
+                DisconnectCause::Busy
             } else {
                 DisconnectCause::Set
-            });
+            };
+            if !this.lost.get() || this.closed.get() {
+                return;
+            }
+            this.live_gone(cause);
         });
     }
     fn live_gone(&self, cause: DisconnectCause) {
@@ -499,6 +506,24 @@ impl LiveConnection {
                 tokio::select! {biased;_=stop.cancelled()=>break,_=sleep(Duration::from_millis(interval))=>{let Some(this)=weak.upgrade() else{break};tokio::task::spawn_local(async move{this.look_for_live().await;});}}
             }
         });
+    }
+    /// After a read Live didn't answer in time: whether Live is only busy (its Remote Script still listening), and
+    /// if so, waits up to `for_ms` for it to answer again. True once it does (#256).
+    pub async fn waited_for_busy_live(&self, signal: &Signal, for_ms: u64) -> bool {
+        if self.closed.get() || !self.remote_script_listening().await {
+            return false;
+        }
+        let until = std::time::Instant::now() + Duration::from_millis(for_ms);
+        while std::time::Instant::now() < until && !signal.is_cancelled() && !self.closed.get() {
+            let asked = abort::any([signal.clone(), self.lifetime.clone(), abort::timeout(6_000)]);
+            if let Ok(status) = self.read_status(asked).await {
+                if status.get("connected") == Some(&Value::Bool(true)) {
+                    return true;
+                }
+            }
+            tokio::select! { _ = signal.cancelled() => return false, _ = sleep(Duration::from_millis(1_000)) => {} }
+        }
+        false
     }
     async fn remote_script_listening(&self) -> bool {
         let Some(path) = &self.options.bridge_config else { return false };
@@ -561,7 +586,13 @@ impl LiveConnection {
     }
     fn back(&self, restarted: bool, fresh_bridge: bool) {
         Self::stop_timer(&self.watcher);
-        let cause = self.lost_cause.take();
+        // A Live taken for busy that comes back with another Set did open one: said as such, so the request that
+        // carried on through it stops there (#188).
+        let busy = self.lost_cause.get() == Some(DisconnectCause::Busy);
+        let cause = match self.lost_cause.take() {
+            Some(DisconnectCause::Busy) if restarted => Some(DisconnectCause::Set),
+            cause => cause,
+        };
         if let Some(retire) = &self.options.on_retire {
             if restarted && matches!(cause, Some(DisconnectCause::Set | DisconnectCause::AskedSet)) {
                 retire("Live opened another Set since, so Kumi can't undo this; it's in the earlier Set if that was saved.");
@@ -573,7 +604,12 @@ impl LiveConnection {
         }
         self.lost.set(false);
         self.reconnected.set(true);
-        (self.options.on_connection)(ConnectionState::Connected, None);
+        // Busy, and the same Live and Set now: the request that waited has Live's view again (its references were
+        // given up with it, so it discovers again), rather than none until the producer's next message.
+        if busy && !restarted && !fresh_bridge {
+            self.epoch.set(self.lost_epoch.get());
+        }
+        (self.options.on_connection)(ConnectionState::Connected, (busy && restarted).then_some(DisconnectCause::Set));
     }
     pub fn notify_connected(&self) {
         (self.options.on_connection)(ConnectionState::Connected, None);

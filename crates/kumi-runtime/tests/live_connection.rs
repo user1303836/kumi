@@ -375,3 +375,38 @@ async fn losing_live_while_it_still_runs_is_another_set_opening_and_kumis_own_wh
         })
         .await;
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn losing_live_while_it_runs_and_its_remote_script_still_listens_is_live_busy() {
+    // #256: Live too busy to answer in time was taken for another Set opening, and the request was cancelled. A Set
+    // opening reloads the Remote Script, which stops listening meanwhile; a busy Live's keeps listening.
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let folder = tempfile::tempdir().unwrap();
+            let config = folder.path().join("bridge-config.json");
+            std::fs::write(&config, json!({"version":2,"bridge":{"host":"127.0.0.1","port":port}}).to_string()).unwrap();
+            for (listening, cause) in [(true, "busy"), (false, "set")] {
+                let states = Rc::new(RefCell::new(Vec::<Value>::new()));
+                let out = states.clone();
+                let mut options = ConnectionOptions::new(Rc::new(move |state, cause| out.borrow_mut().push(json!([state, cause]))));
+                options.live_running = Some(Rc::new(|| async { true }.boxed_local()));
+                options.reconnect_interval_ms = Some(3600000);
+                options.bridge_config = listening.then(|| config.to_string_lossy().into_owned());
+                let connection = LiveConnection::new(options);
+                connection.lose_live();
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    while states.borrow().is_empty() {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .unwrap();
+                assert_eq!(*states.borrow(), [json!(["disconnected", cause])], "listening {listening}");
+                connection.close().await.unwrap();
+            }
+            drop(listener);
+        })
+        .await;
+}

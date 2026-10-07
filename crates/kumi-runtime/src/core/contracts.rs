@@ -264,6 +264,9 @@ pub enum ConnectionState {
 /// Why Live is disconnected: it went away (closed or crashed), Kumi's bridge to it dropped, or Live is
 /// still running and opening another Set, which Kumi asked for (`AskedSet`) or not (`Set`). A Set
 /// opening reloads Live's Remote Script, so Kumi loses Live for a moment however it happens (#188).
+/// `Busy`: Live is running and its Remote Script still listening, only too slow to answer (a big Set's
+/// changes, Live's own undo of a big step, a job left running in it): the request carries on once it
+/// answers (#256).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DisconnectCause {
@@ -271,6 +274,7 @@ pub enum DisconnectCause {
     Bridge,
     Set,
     AskedSet,
+    Busy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

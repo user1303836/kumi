@@ -1,7 +1,7 @@
 //! Preview/apply changes and retire the references whose positions they moved.
 use super::{
     change_context::{PreparationContext, SampleBank},
-    changes::{laid_over, new_record, ChangeKind},
+    changes::{laid_over, new_record, ChangeKind, CHANGES},
     connection::{ReadError, NO_CURRENT_LIVE},
     context::{self, ObservationError},
     history::{uncertain, Restore},
@@ -92,19 +92,46 @@ impl Mutations {
                 return ChangeOutcome::error(text);
             }
         }
-        // What fails here is Live's connection or the Set itself (gone, switched, unreadable), not this one change: a
-        // plan stops on it, where it goes on past a change Live refused.
-        let outcome = match self.try_change(kind, named, original, settled).await {
+        let mut outcome = self.attempt(kind, named.clone(), original.clone(), settled).await;
+        // Refused because what it fenced moved between its preview and its apply, nothing changed: a track or device
+        // Live was still setting up (a default track's devices arriving, a Simpler taking its sample, #203). Asked
+        // again once it's had a moment, it's previewed afresh (#259).
+        if outcome.is_error && !outcome.stops && transient(&outcome.text) {
+            tokio::select! { _ = original.cancelled() => {}, _ = tokio::time::sleep(std::time::Duration::from_millis(SETTLE_MS)) => {} }
+            if !original.is_cancelled() {
+                if acts {
+                    self.observer.devices_changed(&tracks);
+                    if let Err(text) = self.observer.refresh_devices(&tracks, &devices, original.clone()).await {
+                        return ChangeOutcome::error(text);
+                    }
+                }
+                outcome = self.attempt(kind, named.clone(), original.clone(), true).await;
+            }
+        }
+        // An audio clip's loop points are set_audio_clip's, which set_clip is refused for: asked there instead (#259).
+        if kind.tool == "set_clip" && outcome.is_error && !outcome.stops && outcome.text.contains("audio clip loop editing uses") {
+            if let (Some(audio), Some(loop_points)) = (CHANGES.iter().find(|k| k.tool == "set_audio_clip"), audio_loop_points(&named)) {
+                outcome = self.attempt(audio, loop_points, original.clone(), settled).await;
+            }
+        }
+        if changes {
+            self.observer.devices_changed(&tracks);
+        }
+        if outcome.is_error {
+            outcome.text = in_kumi_words(&outcome.text);
+        }
+        outcome
+    }
+    /// One try of a change. What fails here is Live's connection or the Set itself (gone, switched, unreadable), not
+    /// this one change: a plan stops on it, where it goes on past a change Live refused.
+    async fn attempt(&self, kind: &ChangeKind, named: JsonObject, original: Signal, settled: bool) -> ChangeOutcome {
+        match self.try_change(kind, named, original, settled).await {
             Ok(result) => result,
             Err(ReadError::Observation(error)) => ChangeOutcome::stop(error.0),
             Err(ReadError::Other(_)) => {
                 ChangeOutcome::stop("The change failed before anything happened in Live; discover again, then retry.")
             }
-        };
-        if changes {
-            self.observer.devices_changed(&tracks);
         }
-        outcome
     }
     async fn try_change(&self, kind: &ChangeKind, named: JsonObject, original: Signal, settled: bool) -> Result<ChangeOutcome, ReadError> {
         let history = &self.parameters.history;
@@ -146,11 +173,16 @@ impl Mutations {
         }
         // Notes written in Kumi's notation become the notes Live takes; its mistakes come back as the change's error, and
         // the clips of a several-clip write that have none are written (#257).
-        let super::notes::Expanded { input, fixed: read_for_itself, unwritten } =
+        let super::notes::Expanded { input: mut input, fixed: read_for_itself, unwritten } =
             match super::notes::expand(&kind.tool, input, connection, self.observer.tempo.get(), &signal).await {
                 Ok(expanded) => expanded,
                 Err(text) => return Ok(ChangeOutcome::error(text)),
             };
+        // Live's compressor sidechain is fed by a track (routingType) and Kumi sets nothing more there, so a channel
+        // given with it is left out rather than the change refused (#259).
+        let channel_left = (kind.tool == "set_sidechain" && input.get("action").and_then(Value::as_str) == Some("sidechain"))
+            .then(|| input.remove("routingChannel"))
+            .flatten();
         if kind.tool == super::modulation::MAP_MODULATOR {
             return self.map_modulator(kind, &input, signal).await;
         }
@@ -218,7 +250,7 @@ impl Mutations {
             .call(
                 &kind.apply,
                 object(json!({"transactionId":transaction,"confirmation":confirmation,"idempotencyKey":uuid::Uuid::new_v4().to_string()})),
-                history.change_signal(),
+                history.change_signal_for(items_of(&args)),
             )
             .await
         {
@@ -490,6 +522,15 @@ impl Mutations {
         if !read_for_itself.is_empty() {
             reply.insert("notation".into(), json!(read_for_itself));
         }
+        if let Some(channel) = channel_left {
+            reply.insert(
+                "channel".into(),
+                json!(format!(
+                    "The sidechain takes the source track; Kumi doesn't set its channel, so it's Live's own choice, not {}.",
+                    stringify(&channel)
+                )),
+            );
+        }
         if !unwritten.is_empty() {
             reply.insert("missed".into(), json!(unwritten));
             reply.insert(
@@ -585,6 +626,51 @@ fn cut(before: &[JsonObject], after: &[JsonObject]) -> bool {
         identity.is_none() || !after.iter().any(|other| other.get("objectIdentity") == identity && span(other) == span(clip))
     })
 }
+/// How long a refused change waits for Live to finish setting up what it fenced before it's asked again.
+const SETTLE_MS: u64 = 600;
+/// A refusal because what the change fenced moved between its preview and its apply, which a fresh preview a moment
+/// later may not meet: Live still setting up a track or device it just made.
+fn transient(text: &str) -> bool {
+    ["changed since preview", "did not confirm the exact requested", "hierarchy is stale"].iter().any(|said| text.contains(said))
+}
+/// set_clip's loop points for an audio clip, as set_audio_clip takes them, when that's all it changes (an audio clip's
+/// looping itself isn't Kumi's to switch).
+fn audio_loop_points(named: &JsonObject) -> Option<JsonObject> {
+    let points = ["loopStart", "loopEnd"];
+    let only =
+        named.keys().all(|key| key == "clipRef" || points.contains(&key.as_str()) || (key == "looping" && named[key] == json!(true)));
+    (only && points.iter().any(|key| named.contains_key(*key))).then(|| {
+        named.iter().filter(|(key, _)| *key == "clipRef" || points.contains(&key.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect()
+    })
+}
+/// A refusal in the model's words: the bridge's own tools it names (live_audio_clip_preview) are Kumi's tools that
+/// make those changes (set_audio_clip), where one does, since the model can't call the bridge's (#259).
+fn in_kumi_words(text: &str) -> String {
+    static TOOLS: LazyLock<Vec<(String, String)>> = LazyLock::new(|| {
+        let mut by_bridge: IndexMap<String, IndexSet<String>> = IndexMap::new();
+        for kind in CHANGES.iter().filter(|kind| kind.internal != Some(true)) {
+            for bridge in [&kind.preview, &kind.apply] {
+                by_bridge.entry(bridge.clone()).or_default().insert(kind.tool.clone());
+            }
+        }
+        by_bridge.into_iter().filter(|(_, tools)| tools.len() == 1).map(|(bridge, tools)| (bridge, tools[0].clone())).collect()
+    });
+    static NAMED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\blive_[a-z_]+_(?:preview|apply)\b").unwrap());
+    NAMED
+        .replace_all(text, |found: &regex::Captures| {
+            TOOLS.iter().find(|(bridge, _)| bridge == &found[0]).map_or_else(|| found[0].to_owned(), |(_, tool)| tool.clone())
+        })
+        .into_owned()
+}
+/// How many things a change makes or sets at once (tracks and scenes, pads, clips, values), for its time in Live.
+fn items_of(args: &JsonObject) -> usize {
+    ["tracks", "scenes", "pads", "clips", "values", "chains"]
+        .iter()
+        .filter_map(|key| args.get(*key).and_then(Value::as_array))
+        .map(Vec::len)
+        .sum::<usize>()
+        .max(1)
+}
 /// A finite number of beats, if the value is one.
 fn beats(value: Option<&Value>) -> Option<f64> {
     value.and_then(Value::as_f64).filter(|n| n.is_finite())
@@ -676,5 +762,36 @@ mod tests {
         assert!(cut(&before, &[clip("a", 0., 8.)]));
         // A clip read without its identity can't be told: taken as cut.
         assert!(cut(&[object(json!({"start":0.,"endTime":8.}))], &[clip("a", 0., 8.)]));
+    }
+
+    #[test]
+    fn a_refusal_is_in_the_models_words_and_a_fence_that_moved_is_asked_again() {
+        // The bridge's own tool, which the model can't call, is the Kumi tool that makes that change (#259).
+        assert_eq!(in_kumi_words("audio clip loop editing uses live_audio_clip_preview"), "audio clip loop editing uses set_audio_clip");
+        // One several of Kumi's tools share is left as it is, and so are the tools the model has.
+        assert_eq!(in_kumi_words("use live_device_preview"), "use live_device_preview");
+        assert_eq!(in_kumi_words("read it with live_discover"), "read it with live_discover");
+        // What moved between preview and apply is asked again; a refusal on its own merits isn't.
+        assert!(transient("device insertion did not confirm the exact requested name, index, and siblings"));
+        assert!(transient("simpler sample state changed since preview"));
+        assert!(!transient("a note at 9|1 ends after the clip"));
+        // An audio clip's loop points go to set_audio_clip when they're all set_clip was asked; looping off, or another
+        // setting, can't go with them.
+        let points = |value: Value| audio_loop_points(&object(value));
+        assert_eq!(
+            points(json!({"clipRef":"c","looping":true,"loopStart":0,"loopEnd":4})),
+            Some(object(json!({"clipRef":"c","loopStart":0,"loopEnd":4})))
+        );
+        assert_eq!(points(json!({"clipRef":"c","loopEnd":4,"muted":true})), None);
+        assert_eq!(points(json!({"clipRef":"c","looping":false,"loopEnd":4})), None);
+        assert_eq!(points(json!({"clipRef":"c","looping":true})), None);
+    }
+
+    #[test]
+    fn a_change_of_many_things_gets_time_for_each() {
+        let items = |value: Value| items_of(&object(value));
+        assert_eq!(items(json!({"tracks":[{}, {}], "scenes":[{}]})), 3);
+        assert_eq!(items(json!({"pads":(0..16).map(|n| json!({"note":n})).collect::<Vec<_>>()})), 16);
+        assert_eq!(items(json!({"tempo":124})), 1);
     }
 }

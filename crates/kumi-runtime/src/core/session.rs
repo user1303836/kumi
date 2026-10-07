@@ -702,8 +702,9 @@ impl Session {
                 s.away = true;
                 s.away_cause = cause;
                 let working = s.active.as_ref().is_some_and(|op| op.is_turn);
-                // A request about the Set Live left isn't offered again in the next one.
-                if !matches!(cause, Some(DisconnectCause::Set | DisconnectCause::AskedSet)) {
+                // A request about the Set Live left isn't offered again in the next one, nor one that carries on
+                // through a busy Live.
+                if !matches!(cause, Some(DisconnectCause::Set | DisconnectCause::AskedSet | DisconnectCause::Busy)) {
                     if let Some(input) = s.active.as_ref().filter(|op| op.is_turn).and_then(|op| op.input.clone()).filter(|s| !s.is_empty())
                     {
                         s.interrupted = Some(input);
@@ -724,10 +725,13 @@ impl Session {
                 Some(DisconnectCause::AskedSet) => "Live is opening the Set; Kumi carries on once it's open.",
                 Some(DisconnectCause::Set) if working => "Live is opening another Set, so Kumi stopped what it was doing: nothing it was doing lands in the other Set. It picks up once the Set is open.",
                 Some(DisconnectCause::Set) => "Live is opening another Set; Kumi picks up once it's open.",
+                Some(DisconnectCause::Busy) if working => "Live is busy and answering slowly, so Kumi is waiting for it: your request carries on once it answers.",
+                Some(DisconnectCause::Busy) => "Live is busy and answering slowly; Kumi carries on once it answers.",
                 None => "Kumi lost touch with Live. It will pick up where you left off when Live is back.",
             });
-            // The request that asked for another Set carries on in it (#188).
-            if let Some(op) = active.filter(|_| cause != Some(DisconnectCause::AskedSet)) {
+            // The request that asked for another Set carries on in it (#188), and so does one Live is only slow for
+            // (#256).
+            if let Some(op) = active.filter(|_| !matches!(cause, Some(DisconnectCause::AskedSet | DisconnectCause::Busy))) {
                 op.signal.cancel();
             }
             // A big Set takes a while to open.
@@ -740,16 +744,32 @@ impl Session {
                 } }
             });
         } else if back {
-            let (again, refresh, cause, crashed) = {
+            let (again, refresh, away, crashed, active) = {
                 let mut s = self.0.state.borrow_mut();
                 s.away = false;
                 if let Some(m) = s.missing.take() {
                     m.cancel();
                 }
-                (s.interrupted.take(), s.active.is_none() && s.started, s.away_cause.take(), std::mem::take(&mut s.closed_mid_request))
+                (
+                    s.interrupted.take(),
+                    s.active.is_none() && s.started,
+                    s.away_cause.take(),
+                    std::mem::take(&mut s.closed_mid_request),
+                    s.active.clone(),
+                )
             };
+            // Taken for busy, Live came back with another Set: the request that waited stops, as for a Set opened
+            // by hand, since nothing it does belongs in this one (#188, #256).
+            let cause = cause.or(away);
+            if away == Some(DisconnectCause::Busy) && cause == Some(DisconnectCause::Set) {
+                if let Some(op) = active.filter(|op| op.is_turn) {
+                    op.signal.cancel();
+                    self.notice("Live opened another Set while it was busy, so Kumi stopped what it was doing: nothing it was doing lands in the other Set.");
+                }
+            }
             self.notice(match (again.is_some(), cause) {
                 (_, Some(DisconnectCause::Set | DisconnectCause::AskedSet)) => "Live has the other Set open.",
+                (_, Some(DisconnectCause::Busy)) => "Live is answering again.",
                 (true, _) if crashed => "Live is back. Your last request stopped when Live closed, which it may have caused: check the Set before you send it again (enter sends it).",
                 (true, _) => "Live is back. Your last request was stopped; press enter to send it again.",
                 (false, _) => "Live is back.",

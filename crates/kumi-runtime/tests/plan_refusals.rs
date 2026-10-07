@@ -26,6 +26,9 @@ struct Bridge {
     refuse: Vec<&'static str>,
     /// What Live's Python answers, in turn.
     python: RefCell<Vec<Value>>,
+    /// Refusals a preview gives once, by a text its arguments hold: the first such preview is refused with the
+    /// message, as when Live is still setting up what the change fences.
+    once: RefCell<Vec<(&'static str, &'static str)>>,
     calls: RefCell<Vec<(String, JsonObject)>>,
     /// Each preview's arguments, by its transaction.
     previews: RefCell<Vec<JsonObject>>,
@@ -60,6 +63,12 @@ impl McpEndpoint for Bridge {
             "live_browser_load_preview",
             "live_browser_load_apply",
             "live_run_python",
+            "live_clip_properties_preview",
+            "live_clip_properties_apply",
+            "live_audio_clip_preview",
+            "live_audio_clip_apply",
+            "live_device_io_preview",
+            "live_device_io_apply",
         ];
         Ok(serde_json::from_value(
             json!({"tools":names.iter().map(|name|json!({"name":name,"inputSchema":{"type":"object"}})).collect::<Vec<_>>()}),
@@ -82,6 +91,13 @@ impl McpEndpoint for Bridge {
         }
         if name.ends_with("_preview") {
             let text = stringify(&Value::Object(args.clone()));
+            let refused_once = {
+                let mut once = self.once.borrow_mut();
+                once.iter().position(|(held, _)| text.contains(held)).map(|at| once.remove(at).1)
+            };
+            if let Some(message) = refused_once {
+                return Ok(serde_json::from_value(json!({"content":[{"type":"text","text":message}],"isError":true})).unwrap());
+            }
             if self.refuse.iter().any(|refused| text.contains(refused)) {
                 return Ok(serde_json::from_value(json!({"content":[{"type":"text","text":"Live refused this"}],"isError":true})).unwrap());
             }
@@ -140,6 +156,7 @@ async fn kumi(refuse: Vec<&'static str>) -> (Rc<Ableton>, Rc<Bridge>, Vec<String
     let bridge = Rc::new(Bridge {
         refuse,
         python: RefCell::new(vec![]),
+        once: RefCell::new(vec![]),
         calls: RefCell::new(vec![]),
         previews: RefCell::new(vec![]),
         next: Cell::new(0),
@@ -295,6 +312,65 @@ async fn a_plan_loads_a_modulator_and_maps_it_in_one_go_and_kumis_undo_empties_t
             assert!(!undone.is_error, "{}", undone.text);
             let code = bridge.previewed("live_run_python").last().unwrap()["code"].as_str().unwrap().to_owned();
             assert!(code.starts_with("# kumi:fast-revert") && code.contains(r#"\"kind\":\"modulation\""#) && code.contains(r#"\"applied\":4242"#), "{code}");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_refusal_from_a_fence_that_moved_is_asked_again_and_an_audio_clips_loop_goes_to_set_audio_clip() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (integration, bridge, names) = kumi(vec![]).await;
+            // Live still setting up the track a step loads onto: its fence moved, and asked again a moment later the
+            // load goes through, with no refusal for the model to deal with (#259).
+            bridge
+                .once
+                .borrow_mut()
+                .push(("instruments/Drift", "device insertion did not confirm the exact requested name, index, and siblings"));
+            // An audio clip's loop points are set_audio_clip's: set_clip is refused for them, and Kumi asks there instead.
+            bridge.once.borrow_mut().push(("7:clip:2:0", "audio clip loop editing uses live_audio_clip_preview"));
+            integration.connection.references.borrow_mut().refs.insert("7:clip:2:0".into(), "session-clip".into());
+            let (result, reply) = plan(
+                &integration,
+                json!([
+                    {"tool":"load_device","input":{"trackRef":names[1],"itemId":"instruments/Drift"}},
+                    {"tool":"set_clip","input":{"clipRef":"7:clip:2:0","looping":true,"loopStart":0,"loopEnd":8}}
+                ]),
+            )
+            .await;
+            assert!(!result.is_error, "{}", result.text);
+            assert_eq!(reply["done"].as_array().unwrap().len(), 2);
+            assert_eq!(bridge.previewed("live_browser_load_preview").len(), 2, "asked again once");
+            assert_eq!(
+                bridge.previewed("live_audio_clip_preview"),
+                [json!({"clipRef":"7:clip:2:0","loopStart":0,"loopEnd":8}).as_object().unwrap().clone()]
+            );
+            // Refused for good, a refusal names Kumi's tool, not the bridge's.
+            bridge.once.borrow_mut().push(("7:clip:2:0", "audio clip loop editing uses live_audio_clip_preview"));
+            let (_, reply) = plan(&integration, json!([{"tool":"set_clip","input":{"clipRef":"7:clip:2:0","looping":false}}])).await;
+            let error = reply["refused"][0]["error"].as_str().unwrap();
+            assert!(error.contains("uses set_audio_clip") && !error.contains("live_audio_clip_preview"), "{error}");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_sidechains_channel_is_left_to_live_rather_than_refused() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // The bridge's sidechain takes the source track only: a channel given with it used to refuse the change
+            // (#259); now the track is set and the answer says the channel is Live's.
+            let (integration, bridge, _) = kumi(vec![]).await;
+            integration.connection.references.borrow_mut().refs.insert("7:device:1:0".into(), "device".into());
+            let (result, reply) = plan(
+                &integration,
+                json!([{"tool":"set_sidechain","input":{"action":"sidechain","deviceRef":"7:device:1:0","routingType":"1-Kick","routingChannel":"Post FX"}}]),
+            )
+            .await;
+            assert!(!result.is_error, "{}", result.text);
+            let previewed = &bridge.previewed("live_device_io_preview")[0];
+            assert!(!previewed.contains_key("routingChannel") && previewed["routingType"] == "1-Kick");
+            assert!(reply["done"][0]["channel"].as_str().unwrap().contains("Kumi doesn't set its channel"), "{reply}");
         })
         .await;
 }

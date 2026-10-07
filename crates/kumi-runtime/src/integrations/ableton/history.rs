@@ -122,6 +122,13 @@ impl History {
     pub fn change_signal(&self) -> Signal {
         abort::any([self.connection.lifetime.clone(), abort::timeout(self.timeout_ms)])
     }
+    /// A change's time in Live, sized to the change: a change of many tracks, scenes, pads or clips takes Live a while
+    /// for each, and each costs more in a big Set (64 tracks took 28 s, and were called unconfirmed at a flat 30 s,
+    /// #260). The bridge bounds each of Live's steps itself, so this only needs to outlast them; at most ten minutes.
+    pub fn change_signal_for(&self, items: usize) -> Signal {
+        let more = items.saturating_sub(8) as u64 * (self.timeout_ms / 15);
+        abort::any([self.connection.lifetime.clone(), abort::timeout((self.timeout_ms + more).min(600_000.max(self.timeout_ms)))])
+    }
     pub fn new(
         connection: Rc<LiveConnection>,
         remember: Rc<Remember>,
@@ -315,6 +322,8 @@ impl History {
     }
     pub fn undo<'a>(&'a self, target: &'a str, signal: Signal, discard: bool) -> LocalBoxFuture<'a, Result<UndoResult, RuntimeError>> {
         async move {
+            // The latest change, confirmed or not: one Live didn't confirm (64 tracks added past the time limit) is the
+            // one the producer means, and undoing the one before it instead took back the wrong change (#260).
             let entry = if target == "last" {
                 self.entries
                     .borrow()
@@ -322,7 +331,8 @@ impl History {
                     .rev()
                     .find(|entry| {
                         let entry = entry.borrow();
-                        entry.record.state == ChangeState::Applied && entry.within.as_ref().is_none_or(|s| s.is_empty())
+                        matches!(entry.record.state, ChangeState::Applied | ChangeState::Unsure)
+                            && entry.within.as_ref().is_none_or(|s| s.is_empty())
                     })
                     .cloned()
             } else {

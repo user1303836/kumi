@@ -629,6 +629,12 @@ impl Plan {
             if let Some(lines) = reply.get("lines").filter(|v| v.is_array()) {
                 done.insert("lines".into(), lines.clone());
             }
+            // What Kumi read for itself in the step's notation, or left to Live (a sidechain's channel): the model says it.
+            for key in ["notation", "channel"] {
+                if let Some(said) = reply.get(key) {
+                    done.insert(key.into(), said.clone());
+                }
+            }
             state.done.push(json!(done));
             index += 1;
         }
