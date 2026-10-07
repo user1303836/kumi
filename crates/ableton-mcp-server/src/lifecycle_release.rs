@@ -206,7 +206,8 @@ fn verify_package(package_root: &Path, allow_dirty: bool) -> Result<ReleaseEvide
         if name.contains("..") || name.starts_with('/') || !valid_hash(digest) {
             return Err(fail("release manifest contains an unsafe file entry"));
         }
-        if file_digest(&package_root.join(name))? != digest.as_str().unwrap() {
+        // The inventory above read and hashed every file already.
+        if current_files.get(name) != Some(digest) {
             return Err(fail(format!("release payload hash mismatch: {name}")));
         }
     }
