@@ -35,6 +35,36 @@ fn all_transform_families_match_typescript_outcomes_errors_digests_and_diffs() {
 }
 
 #[test]
+fn legato_reaches_the_next_onset_as_the_scan_it_replaces_did() {
+    // Repeated starts, starts a hair apart (inside and outside 1e-9) and a long clip: each note's new duration is
+    // what scanning every onset gave.
+    let mut notes = vec![];
+    for i in 0..3000u32 {
+        let start = (i / 3) as f64 * 0.25
+            + if i % 7 == 0 {
+                5e-10
+            } else if i % 11 == 0 {
+                2e-9
+            } else {
+                0.0
+            };
+        notes.push(Note::new(60.0 + (i % 12) as f64, start, 0.1, 100.0, 1.0));
+    }
+    let spec = MidiTransformSpec { r#type: "legato".into(), params: serde_json::json!({"gap":0.01}).as_object().unwrap().clone() };
+    let result = apply_midi_transform(&notes, &spec, Some(1000.0)).unwrap();
+    let mut onsets: Vec<f64> = vec![];
+    for note in &notes {
+        if !onsets.contains(&note.start) {
+            onsets.push(note.start);
+        }
+    }
+    onsets.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    for (before, after) in notes.iter().zip(&result.notes) {
+        let reach = onsets.iter().copied().find(|onset| *onset > before.start + 1e-9).unwrap_or(1000.0) - 0.01;
+        assert_eq!(after.duration, (reach - before.start).max(1.0 / 1024.0), "{}", before.start);
+    }
+}
+#[test]
 fn stochastic_transforms_without_a_seed_draw_one_from_the_request() {
     let notes = vec![Note::new(60.0, 0.0, 1.0, 100.0, 1.0), Note::new(64.0, 1.0, 1.0, 100.0, 1.0)];
     for (kind, params) in [

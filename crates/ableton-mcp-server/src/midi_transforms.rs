@@ -528,17 +528,19 @@ fn humanize_timing(notes: &[Note], params: &Params, clip_length: Option<f64>) ->
 
 fn legato(notes: &[Note], params: &Params, clip_length: Option<f64>) -> Outcome {
     let gap = finite_param(params, "gap", 0.0, 1.0, Some(0.0))?;
+    // In start order equal onsets are neighbours, so each is kept once by looking at the last; the next onset after a
+    // note is then a binary search, not a scan for each note.
     let ordered = stable_note_order(notes);
     let mut onsets: Vec<f64> = Vec::new();
     for note in &ordered {
-        if !onsets.contains(&note.start) {
+        if onsets.last() != Some(&note.start) {
             onsets.push(note.start);
         }
     }
     onsets.sort_by(|a, b| cmp_f64(*a, *b));
     let mut result = notes.to_vec();
     for note in &mut result {
-        let next_onset = onsets.iter().copied().find(|onset| *onset > note.start + 1e-9);
+        let next_onset = onsets.get(onsets.partition_point(|onset| *onset <= note.start + 1e-9)).copied();
         let reach = next_onset.or(clip_length).unwrap_or(note.start + note.duration) - gap;
         note.duration = (reach - note.start).max(1.0 / 1024.0);
     }
