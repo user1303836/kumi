@@ -1,17 +1,18 @@
 //! What the model is told about Willington: the native bindings Kumi's bridge can carry, off until the
 //! producer turns them on with /willington. With them on, the macro mapping the instructions otherwise
-//! rule out is a tool (assets/changes.json). Live's modulators map with map_modulator, through the
-//! map_modulation their devices have in Live 12.4 (and that Willington's DeviceTools gives them).
+//! rule out is a tool (assets/changes.json), and so is mapping Live's modulators (map_modulator), with
+//! the map_modulation that Willington's DeviceTools gives their devices.
 
 /// Offered while Kumi is connected to Live with changes it can make.
 const CHANGES_TOOL: &str = "make_changes";
 /// Willington's macro mapping, macro and variation names and chain zones.
 const MAPPING_TOOL: &str = "edit_rack_mapping";
-/// Python in Live, which map_modulator runs through: a modulator's device has map_modulation there.
+/// Python in Live, which map_modulator runs through: Willington's DeviceTools give a modulator's device
+/// map_modulation there.
 const PYTHON_TOOL: &str = "run_python";
 
 const OFF: &str = "Willington's bindings are off. Turned on, they let Kumi map a rack's parameters to its macros with their ranges, name macros and variations, and set rack chain zones (edit_rack_mapping), on the Live versions Willington supports; once Willington's Follow Action self-test has passed, they also set Session clips' Follow Actions (set_clip_follow_actions). When a request needs one of those, say in a sentence that /willington turns the bindings on (for Follow Actions, after the self-test), then carry on as Live allows without them.";
-const OFF_MODULATORS: &str = "Willington's bindings are off. Turned on, they let Kumi map a rack's parameters to its macros with their ranges, name macros and variations, set rack chain zones (edit_rack_mapping), and map Live's LFO, Shaper, Envelope Follower and Expression Control modulators to parameters (map_modulator) on the Live versions Willington supports that lack it; once Willington's Follow Action self-test has passed, they also set Session clips' Follow Actions (set_clip_follow_actions). When a request needs one of those, say in a sentence that /willington turns the bindings on (for Follow Actions, after the self-test), then carry on as Live allows without them.";
+const OFF_MODULATORS: &str = "Willington's bindings are off. Turned on, they let Kumi map a rack's parameters to its macros with their ranges, name macros and variations, set rack chain zones (edit_rack_mapping), and map Live's LFO, Shaper, Envelope Follower and Expression Control modulators to parameters (map_modulator), on the Live versions Willington supports; once Willington's Follow Action self-test has passed, they also set Session clips' Follow Actions (set_clip_follow_actions). When a request needs one of those, say in a sentence that /willington turns the bindings on (for Follow Actions, after the self-test), then carry on as Live allows without them.";
 const ON: &str = "Willington's bindings are on, so the macro mapping Live otherwise doesn't allow is here: edit_rack_mapping maps a parameter in a rack to one of its macros with the mapping's range, and names macros and variations. Map macros with it, playback stopped, rather than asking the producer to; modulators still can't be mapped.";
 const ON_MODULATORS: &str = "Willington's bindings are on, so the mappings Live otherwise doesn't allow are here, whatever the Racks instructions say. edit_rack_mapping maps a parameter in a rack to one of its macros with the mapping's range, and names macros and variations: map macros with it, playback stopped, rather than asking the producer to. Modulators (LFO, Shaper, Envelope Follower, Expression Control) map with map_modulator: when what you build has mapped modulators, such as a tutorial's LFOs on a rack's parameters, load and map them in the same plan, not with automation or by asking the producer.";
 const UNSUPPORTED: &str = "Willington's bindings are on, but none fit the Live that's open: they're made for exact Live versions. Its mappings aren't here, so go on as Live allows without them.";

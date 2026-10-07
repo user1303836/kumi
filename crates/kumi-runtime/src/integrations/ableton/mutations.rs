@@ -145,13 +145,13 @@ impl Mutations {
         }
         connection.ensure_catalog(signal.clone()).await?;
         connection.assert_lease(lease, &signal)?;
-        if !connection.has(&kind.preview) || !connection.has(&kind.apply) {
+        if !kind.available(|tool| connection.has(tool)) {
             connection.guard_epoch(signal.clone(), connection.epoch.get().unwrap(), lease).await?;
             connection.tools().unwrap().refresh(signal.clone()).await?;
             connection.assert_lease(lease, &signal)?;
         }
         // Refusals of this change alone: a plan goes on past them.
-        if !connection.has(&kind.preview) || !connection.has(&kind.apply) {
+        if !kind.available(|tool| connection.has(tool)) {
             return Ok(ChangeOutcome::error(
                 kind.unavailable.as_deref().unwrap_or("That change isn't available for the open Set right now"),
             ));
@@ -173,7 +173,7 @@ impl Mutations {
         }
         // Notes written in Kumi's notation become the notes Live takes; its mistakes come back as the change's error, and
         // the clips of a several-clip write that have none are written (#257).
-        let super::notes::Expanded { input: mut input, fixed: read_for_itself, unwritten } =
+        let super::notes::Expanded { mut input, fixed: read_for_itself, unwritten } =
             match super::notes::expand(&kind.tool, input, connection, self.observer.tempo.get(), &signal).await {
                 Ok(expanded) => expanded,
                 Err(text) => return Ok(ChangeOutcome::error(text)),
@@ -391,8 +391,10 @@ impl Mutations {
                 }
             }
         }
-        // Whether the refs past a restructure followed what they named (or were all retired).
+        // Whether the refs past a restructure followed what they named (or were all retired), and whether every
+        // track's sends were renumbered with the returns.
         let mut followed = false;
+        let mut sends = false;
         if kind.restructures == Some(true) {
             let created: Vec<_> = result
                 .get("created")
@@ -403,12 +405,18 @@ impl Mutations {
                 .collect();
             let shift = restructure_shift(&kind.tool, &args, &preview, &result, &created);
             followed = shift.is_some();
+            sends = shift.as_ref().is_some_and(|shift| shift.sends);
             let mut book = connection.references.borrow_mut();
             book.cursors.clear();
             match &shift {
                 // The refs past the change follow what they named, so a plan's later steps (deleting the next track,
-                // setting a device on a track after the new one) still find theirs (#261, #253).
-                Some(shift) => book.shift(shift),
+                // setting a device on a track after the new one) still find theirs (#261, #253). So do the ones
+                // HISTORY's undo names.
+                Some(shift) => {
+                    book.shift(shift);
+                    book.mark_moved(history.shifted(shift));
+                    history.restructured(&record.id, shift);
+                }
                 None => {
                     book.refs.clear();
                     book.known.clear();
@@ -431,6 +439,7 @@ impl Mutations {
                 if let Some(reference) = row.get("ref").and_then(Value::as_str).filter(|s| utf16_len(s) <= 256) {
                     if let Some(kind) = row.get("kind").and_then(Value::as_str).filter(|s| matches!(*s, "track" | "scene")) {
                         book.refs.insert(reference.into(), kind.into());
+                        book.registered(reference);
                         if kind == "track" {
                             if let Some(name) = row.get("name").and_then(Value::as_str) {
                                 book.known.insert(reference.into(), TrackChip { name: head(name, 256), color: None });
@@ -477,6 +486,7 @@ impl Mutations {
                     book.unname(&produced.reference);
                 }
                 book.refs.insert(produced.reference.clone(), produced.kind.clone());
+                book.registered(&produced.reference);
             }
         }
         let mut reply = object(json!({"changed":record.title,"change":record.id,"state":record.state}));
@@ -489,7 +499,9 @@ impl Mutations {
         if kind.restructures == Some(true) {
             reply.insert(
                 "note".into(),
-                json!(if followed {
+                json!(if followed && sends {
+                    "Tracks after this moved (returns and Main among them), and Kumi moved their references with them: references from earlier in this answer still name the same tracks, scenes, clips and devices, but every track's sends were renumbered with the returns, so earlier send references are retired; read a track's mixer again for them. The new ones in live.created are current."
+                } else if followed {
                     "Tracks and scenes after this moved (returns and Main among them), and Kumi moved their references with them: references from earlier in this answer still name the same tracks, scenes, clips and devices (not what was deleted), and the new ones in live.created are current."
                 } else {
                     "Track and scene positions moved; discover again before using earlier references (the new ones in live.created are current)."
@@ -656,11 +668,17 @@ fn in_kumi_words(text: &str) -> String {
         by_bridge.into_iter().filter(|(_, tools)| tools.len() == 1).map(|(bridge, tools)| (bridge, tools[0].clone())).collect()
     });
     static NAMED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\blive_[a-z_]+_(?:preview|apply)\b").unwrap());
-    NAMED
+    let said = NAMED
         .replace_all(text, |found: &regex::Captures| {
             TOOLS.iter().find(|(bridge, _)| bridge == &found[0]).map_or_else(|| found[0].to_owned(), |(_, tool)| tool.clone())
         })
-        .into_owned()
+        .into_owned();
+    // Live gives scripts only the 16 pads a Drum Rack shows (#259): the model can pick one of those in its next plan
+    // rather than try the same note again.
+    if said.contains("isn't among the rack's visible pads") && !said.contains("drumPads") {
+        return format!("{said}. Kumi can reach only the 16 pads the rack shows in Live, the notes in its drumPads (C1 to D#2, 36 to 51, unless it's scrolled): use one of those, or ask the producer to scroll the rack's pads to this note in Live first.");
+    }
+    said
 }
 /// How many things a change makes or sets at once (tracks and scenes, pads, clips, values), for its time in Live.
 fn items_of(args: &JsonObject) -> usize {
@@ -771,6 +789,13 @@ mod tests {
         // One several of Kumi's tools share is left as it is, and so are the tools the model has.
         assert_eq!(in_kumi_words("use live_device_preview"), "use live_device_preview");
         assert_eq!(in_kumi_words("read it with live_discover"), "read it with live_discover");
+        // A pad Live doesn't show says which ones Kumi can reach.
+        let pad = in_kumi_words("drum pad note 70 isn't among the rack's visible pads");
+        assert!(
+            pad.starts_with("drum pad note 70 isn't among the rack's visible pads. Kumi can reach only the 16 pads")
+                && pad.contains("drumPads"),
+            "{pad}"
+        );
         // What moved between preview and apply is asked again; a refusal on its own merits isn't.
         assert!(transient("device insertion did not confirm the exact requested name, index, and siblings"));
         assert!(transient("simpler sample state changed since preview"));

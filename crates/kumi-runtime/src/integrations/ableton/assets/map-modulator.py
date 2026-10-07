@@ -11,9 +11,11 @@ def described(p):
     return {'name': str(p.name), 'device': str(getattr(device, 'name', '') or ''), 'identity': getattr(p, '_live_ptr', None)}
 modulator = get(ARGS['device'], 'the modulator')
 name = str(getattr(modulator, 'name', '') or 'That device')
-# Live 12.4's LFO, Shaper, Envelope Follower and Expression Control (Max devices) have these.
+# Willington's DeviceTools give Live's LFO, Shaper, Envelope Follower and Expression Control (Max devices) these.
 if not callable(getattr(modulator, 'map_modulation', None)) or not callable(getattr(modulator, 'get_modulation_target', None)):
-    raise ValueError(name + " isn't a modulator Kumi can map: an LFO, Shaper, Envelope Follower or Expression Control, in Live 12.4 or later")
+    if str(getattr(modulator, 'class_name', '')).startswith('MxDevice'):
+        raise ValueError(name + " can't be mapped here: Live's modulators map through Willington's DeviceTools, which this Live hasn't loaded")
+    raise ValueError(name + " isn't a modulator Kumi can map: an LFO, Shaper, Envelope Follower or Expression Control")
 slot = int(ARGS['slot'])
 if ARGS.get('clear'):
     target = None

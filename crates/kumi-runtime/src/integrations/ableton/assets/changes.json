@@ -36,7 +36,7 @@
       "apply": "live_session_structure_apply",
       "family": "structure",
       "restructures": true,
-      "description": "Add new MIDI or audio tracks and named scenes. New ones go after the last track or scene unless you give an index (0 is first). Earlier track and scene references are out of date afterwards; discover again before using them.",
+      "description": "Add new MIDI or audio tracks and named scenes. New ones go after the last track or scene unless you give an index (0 is first). References from earlier in this answer still name the same tracks and scenes afterwards; the answer says when they don't.",
       "methods": [
         "produces",
         "schema",
@@ -651,7 +651,7 @@
       "apply": "live_track_structure_apply",
       "family": "structure",
       "restructures": true,
-      "description": "Add a return track (create-return, with a name), delete one (delete-return, ref; Live gives Kumi no undo for this), or duplicate a track or scene (duplicate-track, duplicate-scene, ref). Track and scene references are out of date afterwards; discover again.",
+      "description": "Add a return track (create-return, with a name), delete one (delete-return, ref; Live gives Kumi no undo for this), or duplicate a track or scene (duplicate-track, duplicate-scene, ref). References from earlier in this answer still name the same tracks and scenes afterwards, except sends once a return is deleted; the answer says when they don't.",
       "methods": [
         "permanent",
         "summarize"
@@ -1072,7 +1072,7 @@
       "preview": "live_native_editing_preview",
       "apply": "live_native_editing_apply",
       "family": "structure",
-      "description": "Group contiguous top-level trackRefs with playback stopped. Earlier track references expire; discover again. This has no Kumi HISTORY inverse.",
+      "description": "Group contiguous top-level trackRefs with playback stopped. References from earlier in this answer still name the same tracks afterwards; the answer says when they don't. This has no Kumi HISTORY inverse.",
       "methods": [
         "prepare",
         "schema",
@@ -1131,11 +1131,12 @@
     },
     {
       "tool": "map_modulator",
-      "preview": "live_run_python",
-      "apply": "live_run_python",
+      "preview": "live_willington_device_preview",
+      "apply": "live_willington_device_apply",
+      "needs": ["live_run_python"],
       "family": "device",
       "since": "1.0.68",
-      "description": "Map one of a modulator's slots to a parameter, as its Map button does (Live 12.4 or later). deviceRef is an LFO, Shaper or Envelope Follower (8 slots) or an Expression Control (5, one per source): load_device them from modulators/LFO, modulators/Shaper, modulators/Envelope Follower and modulators/Expression Control, so a plan loads and maps them in one go. slot counts from 0 (0 when left out). The parameter is parameterRef, or targetRef (its device, an @name too) with parameter, its name as the device shows it (\"Filter Freq\"). clear: true empties the slot. Kumi's undo empties a slot it filled.",
+      "description": "Map one of a modulator's slots to a parameter, as its Map button does, with the map_modulation Willington's DeviceTools give Live's modulators. deviceRef is an LFO, Shaper or Envelope Follower (8 slots) or an Expression Control (5, one per source): load_device them from modulators/LFO, modulators/Shaper, modulators/Envelope Follower and modulators/Expression Control, so a plan loads and maps them in one go. slot counts from 0 (0 when left out). The parameter is parameterRef, or targetRef (its device, an @name too) with parameter, its name as the device shows it (\"Filter Freq\"). clear: true empties the slot. Kumi's undo empties a slot it filled.",
       "methods": [
         "summarize"
       ],

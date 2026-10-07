@@ -8510,6 +8510,65 @@ class PythonRunTests(unittest.TestCase):
         self.assertEqual(result["stdout"], str(threading.get_ident()) + "\n")
 
 
+class KumiMovedRefTests(unittest.TestCase):
+    """Kumi's own Python gets Live's objects by ref string. After a restructure, Kumi moves its refs to their new
+    places, but the registry keeps whatever was last read at each place under its string until that place is read
+    again, as the bridge does before it acts there. Kumi's scripts have the places read again first
+    (crates/kumi-runtime/src/integrations/ableton/assets/moved-places.py)."""
+
+    ASSETS = Path(__file__).resolve().parent.parent / "crates" / "kumi-runtime" / "src" / "integrations" / "ableton" / "assets"
+
+    def setUp(self):
+        self.song = FakeUndoSong(); self.song.tracks = []
+        for index in range(6):
+            track = FakeTrack(); track.name = f"Track {index}"
+            device = FakeDevice(); device.name = f"EQ {index}"
+            gain = FakeParameter(); gain.is_quantized = False; gain.str_for_value = lambda value: f"{value:.2f} dB"
+            device.parameters = [gain]; track.devices = [device]
+            self.song.tracks.append(track)
+        self.mapper = LiveObjectMapper(self.song)
+        live = types.SimpleNamespace(Application=types.SimpleNamespace(get_application=lambda: types.SimpleNamespace()), Track=types.SimpleNamespace(Track=FakeTrack), DeviceParameter=types.SimpleNamespace(DeviceParameter=FakeParameter), Device=types.SimpleNamespace(Device=FakeDevice))
+        self.live_patch = patch.dict(sys.modules, {"Live": live}); self.live_patch.start(); self.addCleanup(self.live_patch.stop)
+
+    def kumi_script(self, marker, args, places=None):
+        """As Kumi's fast::with_args writes it, with LiveConnection::python's places read again after the marker line."""
+        again = "" if places is None else "PLACES = " + json.dumps(places) + "\n" + (self.ASSETS / "moved-places.py").read_text(encoding="utf-8")
+        return f"# kumi:{marker}\n" + again + "import json\nARGS = json.loads(" + json.dumps(json.dumps(args)) + ")\n" + (self.ASSETS / f"{marker}.py").read_text(encoding="utf-8")
+
+    def gains(self):
+        return [(track.devices[0].name, track.devices[0].parameters[0].value) for track in self.song.tracks]
+
+    def test_a_ref_a_delete_moved_sets_what_is_at_its_place_once_live_reads_the_place_again(self):
+        self.mapper.snapshot(); epoch = self.mapper.refs.epoch
+        # Track 3 is deleted: old track 5's EQ is at track 4 now, and Kumi's ref for its Gain moved with it.
+        self.song.delete_track(3)
+        moved = f"{epoch}:parameter:{epoch}:device:4:0:0"
+        # Read as it stands, the string still holds old track 4's Gain (at track 3 now): the wrong one.
+        result = self.mapper.invoke("python.run", {"code": self.kumi_script("fast-set", [{"ref": moved, "value": 0.25}])})
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(self.gains()[3], ("EQ 4", 0.25))
+        self.song.tracks[3].devices[0].parameters[0].value = 0.5
+        # With track 4 read again first, in the same run, it's old track 5's.
+        result = self.mapper.invoke("python.run", {"code": self.kumi_script("fast-set", [{"ref": moved, "value": 0.75}], places=[f"{epoch}:track:4"])})
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(self.gains(), [("EQ 0", 0.5), ("EQ 1", 0.5), ("EQ 2", 0.5), ("EQ 4", 0.5), ("EQ 5", 0.75)])
+        # And Kumi's undo, which names the same place, puts that one back.
+        revert = [{"ref": moved, "name": "Gain", "prior": 0.5, "applied": 0.75}]
+        result = self.mapper.invoke("python.run", {"code": self.kumi_script("fast-revert", revert, places=[f"{epoch}:track:4"])})
+        self.assertEqual((result["ok"], result["result"]), (True, {"back": 1, "moved": [], "gone": []}))
+        self.assertEqual(self.gains()[4], ("EQ 5", 0.5))
+
+    def test_a_remote_script_that_cant_read_a_place_again_refuses_before_anything_changes(self):
+        self.mapper.snapshot(); epoch = self.mapper.refs.epoch
+        self.song.delete_track(3); self.mapper._refresh = None
+        moved = f"{epoch}:parameter:{epoch}:device:4:0:0"
+        result = self.mapper.invoke("python.run", {"code": self.kumi_script("fast-set", [{"ref": moved, "value": 0.75}], places=[f"{epoch}:track:4"])})
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["type"], "LookupError")
+        self.assertIn("discover again", result["error"]["message"])
+        self.assertEqual([value for _, value in self.gains()], [0.5] * 5)
+
+
 class LiveUndoTests(unittest.TestCase):
     """WS3.2/WS3.4: one Live undo step around a plan, never left open; Live's own undo and redo."""
 

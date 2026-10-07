@@ -352,9 +352,8 @@ impl Plan {
         tracks
     }
     async fn run(&self) -> Result<Option<Stop>, RuntimeError> {
-        let mut state = State::default();
         // What earlier plans in this answer made: a plan resending refused steps uses their @names.
-        state.made = self.mutations.names.borrow().clone();
+        let mut state = State { made: self.mutations.names.borrow().clone(), ..Default::default() };
         let mut outcome = self.steps(&mut state).await;
         // A plan with refused steps didn't finish either: what it started playing or recording may have had its stop
         // among them.
@@ -428,7 +427,8 @@ impl Plan {
             let item = row(&raw);
             let step = index + 1;
             if let Some(on) = self.hangs_on(&item, state) {
-                state.held_back(step, &item, on);
+                let tracks = self.tracks_in(item.get("input").unwrap_or(&Value::Null), &state.made);
+                state.held_back(step, &item, on, tracks);
                 index += 1;
                 continue;
             }
@@ -499,7 +499,7 @@ impl Plan {
                 };
                 let outcome = self.mutations.change(batch.kind(), batch.input(&inputs), self.signal.clone(), confirmed).await;
                 let reply = serde_json::from_str::<Value>(&outcome.text).map(|v| row(&v)).unwrap_or_default();
-                if outcome.is_error && outcome.missed.unwrap_or(0) == 0 {
+                if outcome.stops || (outcome.is_error && outcome.missed.unwrap_or(0) == 0) {
                     let error = format!("{} {step}–{}, as one change: {}", batch.what, step + run - 1, outcome.text);
                     if outcome.stops {
                         return Ok(stop(error));
@@ -604,7 +604,7 @@ impl Plan {
             }
             let outcome = self.mutations.change(kind.unwrap(), input.clone(), self.signal.clone(), confirmed).await;
             let reply = serde_json::from_str::<Value>(&outcome.text).map(|v| row(&v)).unwrap_or_default();
-            if outcome.is_error && outcome.missed.unwrap_or(0) == 0 {
+            if outcome.stops || (outcome.is_error && outcome.missed.unwrap_or(0) == 0) {
                 let text = reply.get("changed").and_then(Value::as_str).map(|s| format!("{s}: {}", outcome.text)).unwrap_or(outcome.text);
                 if outcome.stops {
                     return Ok(stop(text));
@@ -725,15 +725,23 @@ impl Plan {
     }
 }
 impl State {
-    /// A step held back because it needed a refused one: what it would have made holds back its own dependents.
-    fn held_back(&mut self, step: usize, item: &JsonObject, on: usize) {
+    /// A step held back because it needed a refused one holds back what a refused step would: what uses its `@name`,
+    /// the later steps on its tracks, the restructures after one, the transport after one (a `wait` after a held-back
+    /// `fire_scene` would wait in silence).
+    fn held_back(&mut self, step: usize, item: &JsonObject, on: usize, tracks: Vec<String>) {
         self.dependents.push(json!({"step":step,"tool":item.get("tool").cloned().unwrap_or(Value::Null),"after":on}));
         if let Some(name) = item.get("as").and_then(Value::as_str) {
             self.blocked.names.insert(format!("@{name}"), on);
         }
+        for track in tracks {
+            self.blocked.tracks.entry(track).or_insert(on);
+        }
         let tool = item.get("tool").and_then(Value::as_str).unwrap_or_default();
         if structural(tool) {
             self.blocked.structure.get_or_insert(on);
+        }
+        if TRANSPORT.contains(&tool) {
+            self.blocked.transport.get_or_insert(on);
         }
     }
 }

@@ -119,6 +119,9 @@ pub struct ChangeKind {
     pub since: Option<String>,
     #[serde(skip_serializing)]
     pub methods: Vec<String>,
+    /// Bridge tools the change runs through besides its preview and apply (map_modulator's Python).
+    #[serde(default, skip_serializing)]
+    pub needs: Vec<String>,
 }
 static DATA: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("assets/changes.json")).unwrap());
 pub static CHANGES: LazyLock<Vec<ChangeKind>> = LazyLock::new(|| serde_json::from_value(DATA["kinds"].clone()).unwrap());
@@ -335,6 +338,10 @@ impl ChangeKind {
     }
     pub fn has(&self, method: &str) -> bool {
         self.methods.iter().any(|m| m == method)
+    }
+    /// Whether a bridge with these tools can make the change: its preview, its apply and what else it needs.
+    pub fn available(&self, has: impl Fn(&str) -> bool) -> bool {
+        has(&self.preview) && has(&self.apply) && self.needs.iter().all(|tool| has(tool))
     }
     pub async fn prepare(&self, input: &JsonObject, context: &dyn ChangeContext) -> Result<Result<JsonObject, String>, RuntimeError> {
         if let Some(kind) = self.native_kind() {

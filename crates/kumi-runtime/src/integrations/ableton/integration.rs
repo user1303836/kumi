@@ -89,6 +89,12 @@ impl Ableton {
             let remember = Remember::new(connection.clone(), options.project_store.clone(), options.on_catch_up.clone());
             let history = Rc::new(History::new(connection.clone(), remember.clone(), options.change_timeout_ms, options.on_change.clone()));
             let observer = Rc::new(Observer::new(connection.clone(), remember.clone()));
+            let shown = Rc::downgrade(&observer);
+            *history.on_shift.borrow_mut() = Some(Rc::new(move |shift| {
+                if let Some(observer) = shown.upgrade() {
+                    observer.shifted(shift);
+                }
+            }));
             let parameters = Rc::new(Parameters::new(history.clone(), options.fast));
             let mutations = Rc::new(Mutations::new(parameters, observer.clone(), options.clone()));
             let step = mutations.clone();
@@ -443,7 +449,9 @@ impl KernelTool for LiveTool {
             "live_command" => {
                 let finishing = input.get("final") == Some(&json!(true));
                 match owner.commands.live_command(&input, signal.clone()).await {
-                    Ok(result) => Ok(finished_command(owner.look_in_opened_set(result, signal).await, finishing)),
+                    // An answer that ends here has no use for a look at the Set it opened: the next request takes its own.
+                    Ok(result) if finishing => Ok(finished_command(result, true)),
+                    Ok(result) => Ok(finished_command(owner.look_in_opened_set(result, signal).await, false)),
                     other => other,
                 }
             }
@@ -584,8 +592,7 @@ impl ObservationHost for Ableton {
         for kind in CHANGES.iter().filter(|k| {
             k.internal != Some(true)
                 && self.mutations.supported(k.since.as_deref())
-                && ((k.always == Some(true) && k.input_schema.is_some() && tools.has("live_undo"))
-                    || (tools.has(&k.preview) && tools.has(&k.apply)))
+                && ((k.always == Some(true) && k.input_schema.is_some() && tools.has("live_undo")) || k.available(|tool| tools.has(tool)))
         }) {
             let preview = tools.tool(&kind.preview).map(|t| object(&json!(t.input_schema)).unwrap());
             let schema = if kind.fallback_schema == Some(true) {

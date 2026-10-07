@@ -971,9 +971,59 @@ impl ViewHost for LiveConnection {
     }
     async fn call(&self, name: &str, args: JsonObject, signal: Signal) -> Result<CallToolResult, RuntimeError> {
         let tools = self.tools().ok_or_else(|| RuntimeError::plain(NO_CURRENT_LIVE))?;
+        if name == "live_run_python" {
+            return self.python(&tools, args, signal).await;
+        }
         tools.call(name, args, signal, CallOptions { host: true }).await
     }
 }
+impl LiveConnection {
+    /// Python run in Live, with the places it names that a restructure moved read again first (`References::moved`).
+    /// Python gets Live's objects by ref string from Live's registry, with no read of the place as the bridge's
+    /// changes have, so a ref a restructure moved would name what used to be at its new place. Kumi's own scripts
+    /// read them again first thing in the same run; other code (run_python's, or a script given a `ref`, which Live
+    /// gets before the code runs) has a run of its own first, which changes nothing.
+    async fn python(&self, tools: &AllowedTools, mut args: JsonObject, signal: Signal) -> Result<CallToolResult, RuntimeError> {
+        let code = args.get("code").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let named = args.get("ref").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let places = self.references.borrow().moved_places(&[&code, &named]);
+        if places.is_empty() {
+            return tools.call("live_run_python", args, signal, CallOptions { host: true }).await;
+        }
+        let again = format!("PLACES = {}\n{}", stringify(&json!(places)), MOVED_PLACES);
+        let ran = |result: &CallToolResult| {
+            result.is_error != Some(true) && context::payload(result).is_ok_and(|body| body.get("ok") == Some(&json!(true)))
+        };
+        let inline = code.starts_with("# kumi:")
+            && args.get("mode").and_then(Value::as_str) != Some("eval")
+            && self.references.borrow().moved_places(&[&named]).is_empty()
+            && code.len() + again.len() < 65_000;
+        if inline {
+            let (first, rest) = code.split_once('\n').unwrap_or((&code, ""));
+            args.insert("code".into(), json!(format!("{first}\n{again}{rest}")));
+            let result = tools.call("live_run_python", args, signal, CallOptions { host: true }).await?;
+            if ran(&result) {
+                self.references.borrow_mut().read_again(&places);
+            }
+            return Ok(result);
+        }
+        let first = tools
+            .call(
+                "live_run_python",
+                context::object(&json!({"code":format!("# kumi:moved-places\n{again}"),"mode":"exec","timeoutMs":10000}))?,
+                signal.clone(),
+                CallOptions { host: true },
+            )
+            .await?;
+        if !ran(&first) {
+            return Ok(first);
+        }
+        self.references.borrow_mut().read_again(&places);
+        tools.call("live_run_python", args, signal, CallOptions { host: true }).await
+    }
+}
+/// Has Live read again the places a Python run names, before the run (`LiveConnection::python`).
+const MOVED_PLACES: &str = include_str!("assets/moved-places.py");
 fn result_size(result: &CallToolResult) -> usize {
     stringify(&serde_json::to_value(result).unwrap()).len()
 }

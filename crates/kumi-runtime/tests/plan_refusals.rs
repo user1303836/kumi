@@ -8,7 +8,7 @@ use kumi_runtime::{
         contracts::{JsonObject, ToolResult},
         errors::RuntimeError,
     },
-    integrations::ableton::{integration::Ableton, options::AbletonOptions},
+    integrations::ableton::{integration::Ableton, observation::ObservationHost, options::AbletonOptions},
     mcp::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, Implementation, ListToolsResult},
@@ -69,6 +69,13 @@ impl McpEndpoint for Bridge {
             "live_audio_clip_apply",
             "live_device_io_preview",
             "live_device_io_apply",
+            "live_device_parameter_preview",
+            "live_device_parameter_apply",
+            "live_willington_device_preview",
+            "live_willington_device_apply",
+            "live_arrangement_midi_clip_preview",
+            "live_arrangement_midi_clip_apply",
+            "live_undo",
         ];
         Ok(serde_json::from_value(
             json!({"tools":names.iter().map(|name|json!({"name":name,"inputSchema":{"type":"object"}})).collect::<Vec<_>>()}),
@@ -88,6 +95,9 @@ impl McpEndpoint for Bridge {
         }
         if name == "live_run_python" {
             return Ok(reply(self.python.borrow_mut().remove(0)));
+        }
+        if name == "live_undo" {
+            return Ok(reply(json!({"state":"undone"})));
         }
         if name.ends_with("_preview") {
             let text = stringify(&Value::Object(args.clone()));
@@ -129,6 +139,8 @@ impl McpEndpoint for Bridge {
                     .collect();
                 json!({"state":"applied","created":made})
             }
+            // Live doesn't confirm a clip write here: it may or may not have made it.
+            "live_arrangement_midi_clip_apply" => json!({"state":"pending"}),
             _ => json!({"state":"applied"}),
         }))
     }
@@ -283,6 +295,45 @@ async fn a_refused_track_add_holds_back_what_uses_it_and_the_restructures_after_
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn a_held_back_step_holds_back_the_launches_and_waits_and_track_steps_a_refused_one_would() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // The Drop scene isn't made, so neither is the copy of the bass clip into it, nor its launch. The minute's
+            // wait after the launch would wait in silence, so it's held back too, and so is the bass's volume, on the
+            // track the held-back copy would have changed. The tempo, on neither, is set.
+            let (integration, bridge, names) = kumi(vec!["\"Drop\""]).await;
+            integration.connection.references.borrow_mut().refs.insert("7:clip:1:0".into(), "session-clip".into());
+            let (result, reply) = plan(
+                &integration,
+                json!([
+                    {"tool":"add_tracks_and_scenes","as":"drop","input":{"scenes":[{"name":"Drop","index":2}]}},
+                    {"tool":"duplicate_clip","input":{"clipRef":"7:clip:1:0","targetSceneRef":"@drop"}},
+                    {"tool":"fire_scene","input":{"sceneRef":"@drop"}},
+                    {"tool":"wait","input":{"seconds":60}},
+                    {"tool":"set_mixer","input":{"trackRef":names[1],"volume":0.8}},
+                    {"tool":"set_tempo","input":{"tempo":124}}
+                ]),
+            )
+            .await;
+            assert!(result.is_error, "{}", result.text);
+            assert_eq!(reply["refused"][0]["step"], 1);
+            assert_eq!(
+                reply["heldBack"],
+                json!([
+                    {"step":2,"tool":"duplicate_clip","after":1},
+                    {"step":3,"tool":"fire_scene","after":1},
+                    {"step":4,"tool":"wait","after":1},
+                    {"step":5,"tool":"set_mixer","after":1}
+                ])
+            );
+            let done: Vec<_> = reply["done"].as_array().unwrap().iter().map(|row| row["step"].as_u64().unwrap()).collect();
+            assert_eq!(done, [6]);
+            assert!(bridge.previewed("live_mixer_preview").is_empty());
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn a_plan_loads_a_modulator_and_maps_it_in_one_go_and_kumis_undo_empties_the_slot() {
     tokio::task::LocalSet::new()
         .run_until(async {
@@ -371,6 +422,142 @@ async fn a_sidechains_channel_is_left_to_live_rather_than_refused() {
             let previewed = &bridge.previewed("live_device_io_preview")[0];
             assert!(!previewed.contains_key("routingChannel") && previewed["routingType"] == "1-Kick");
             assert!(reply["done"][0]["channel"].as_str().unwrap().contains("Kumi doesn't set its channel"), "{reply}");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn kumis_python_has_live_read_a_moved_refs_place_again_before_it_uses_the_ref() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Live's registry keeps objects by ref string. Once track 3 is deleted, old track 5's EQ is at
+            // "7:device:4:0", but Live still holds old track 4's under that string until track 4 is read again. The
+            // bridge reads a place again before it changes anything there; Kumi's Python gets objects by string, so it
+            // has Live read the place again first, or it would set what used to be there.
+            let (integration, bridge, names) = kumi(vec![]).await;
+            for (reference, kind) in [("7:device:5:0", "device"), ("7:parameter:7:device:5:0:2", "parameter")] {
+                integration.connection.references.borrow_mut().refs.insert(reference.into(), kind.into());
+            }
+            let set = |value: f64| {
+                json!({"ok":true,"stdout":"","error":null,"result":{"device":"EQ Eight","track":null,"items":[{"name":"1 Gain A","prior":0.5,"priorDisplay":"0.0 dB","min":0,"max":1,"applied":value,"value":value,"display":"1.0 dB"}]}})
+            };
+            let ran = |result: Value| json!({"ok":true,"stdout":"","error":null,"result":result});
+            *bridge.python.borrow_mut() =
+                vec![set(0.6), set(0.7), set(0.8), ran(json!({"back":1,"moved":[],"gone":[]})), ran(Value::Null), ran(json!("Main"))];
+            let gain = |track: usize, value: f64| {
+                json!([{"tool":"set_device_parameter","input":{"deviceRef":format!("7:device:{track}:0"),"parameterRef":format!("7:parameter:7:device:{track}:0:2"),"value":value}}])
+            };
+            let (result, reply) = plan(&integration, gain(5, 0.6)).await;
+            assert!(!result.is_error, "{}", result.text);
+            let first = reply["done"][0]["change"].as_str().unwrap().to_owned();
+            let (result, _) = plan(&integration, json!([{"tool":"delete_track","input":{"trackRef":names[3]}}])).await;
+            assert!(!result.is_error, "{}", result.text);
+            // The EQ followed its track to 4: the first set there reads track 4 again first thing, in the same run;
+            // the next doesn't need to.
+            for value in [0.7, 0.8] {
+                let (result, _) = plan(&integration, gain(4, value)).await;
+                assert!(!result.is_error, "{}", result.text);
+            }
+            let python = || -> Vec<String> {
+                bridge.previewed("live_run_python").iter().map(|args| args["code"].as_str().unwrap().to_owned()).collect()
+            };
+            assert!(!python()[0].contains("PLACES"), "nothing had moved yet");
+            assert!(python()[1].starts_with("# kumi:fast-set\nPLACES = [\"7:track:4\"]\n"), "{}", python()[1]);
+            assert!(python()[1].contains("bridge._refresh(*PLACES)\nimport json\nARGS = json.loads("));
+            assert!(!python()[2].contains("PLACES"), "track 4 was read again");
+            // Another delete moves it to 3. Kumi's undo of the first set names the EQ where both deletes moved it, and
+            // has that place read again first.
+            let (result, _) = plan(&integration, json!([{"tool":"delete_track","input":{"trackRef":names[0]}}])).await;
+            assert!(!result.is_error, "{}", result.text);
+            let undone = integration.history.undo(&first, Signal::new(), false).await.unwrap();
+            assert!(!undone.is_error, "{}", undone.text);
+            let revert = python().pop().unwrap();
+            assert!(revert.starts_with("# kumi:fast-revert
+PLACES = [\"7:track:3\"]
+"), "{revert}");
+            assert!(revert.contains(r#"\"ref\":\"7:parameter:7:device:3:0:2\""#), "{revert}");
+            // run_python's own code (or a ref Live gets before any code runs) has a run of its own first, which
+            // changes nothing. Main was at 8; two deletes moved it to 6.
+            let python_tool = integration.definitions().into_iter().find(|tool| tool.name() == "run_python").unwrap();
+            let input = json!({"code":"result = obj.name","ref":"7:track:6"}).as_object().unwrap().clone();
+            let run = python_tool.execute(input, Signal::new()).await.unwrap();
+            assert!(!run.is_error, "{}", run.text);
+            let calls = bridge.previewed("live_run_python");
+            assert!(calls[4]["code"].as_str().unwrap().starts_with("# kumi:moved-places
+PLACES = [\"7:track:6\"]
+"), "{}", calls[4]["code"]);
+            assert_eq!((&calls[5]["code"], &calls[5]["ref"]), (&json!("result = obj.name"), &json!("7:track:6")));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn kumis_undo_of_a_track_add_moves_the_refs_that_followed_it_back() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // A track made at 3 moves what was at 3 and after it up one, and Kumi's refs go with them. Kumi's undo
+            // deletes it again, and they go back with it: the names, the refs, and those HISTORY's undo names.
+            let (integration, bridge, names) = kumi(vec![]).await;
+            for (reference, kind) in [("7:device:5:0", "device"), ("7:parameter:7:device:5:0:2", "parameter")] {
+                integration.connection.references.borrow_mut().refs.insert(reference.into(), kind.into());
+            }
+            *bridge.python.borrow_mut() = vec![
+                json!({"ok":true,"stdout":"","error":null,"result":{"device":"EQ Eight","track":null,"items":[{"name":"1 Gain A","prior":0.5,"priorDisplay":"0.0 dB","min":0,"max":1,"applied":0.6,"value":0.6,"display":"1.0 dB"}]}}),
+                json!({"ok":true,"stdout":"","error":null,"result":{"back":1,"moved":[],"gone":[]}}),
+            ];
+            let set = json!([{"tool":"set_device_parameter","input":{"deviceRef":"7:device:5:0","parameterRef":"7:parameter:7:device:5:0:2","value":0.6}}]);
+            let (_, reply) = plan(&integration, set).await;
+            let first = reply["done"][0]["change"].as_str().unwrap().to_owned();
+            let (result, reply) = plan(&integration, json!([{"tool":"add_tracks_and_scenes","input":{"tracks":[{"name":"Pad","index":3}]}}])).await;
+            assert!(!result.is_error, "{}", result.text);
+            let add = reply["done"][0]["change"].as_str().unwrap().to_owned();
+            let lengthen = |name: &String| integration.connection.references.borrow().lengthen(&json!({"ref":name}))["ref"].clone();
+            assert_eq!((lengthen(&names[3]), lengthen(&names[5])), (json!("7:track:4"), json!("7:track:6")));
+            // Another track made first moves everything again, the Pad to 4 among them.
+            let (result, _) = plan(&integration, json!([{"tool":"add_tracks_and_scenes","input":{"tracks":[{"name":"Lead","index":0}]}}])).await;
+            assert!(!result.is_error, "{}", result.text);
+            let undone = integration.history.undo(&add, Signal::new(), false).await.unwrap();
+            assert!(!undone.is_error, "{}", undone.text);
+            // The Pad's undo deleted it at 4, where it was by then: what was after it is back one place, what was before
+            // it isn't.
+            let now: Vec<Value> = [2, 3, 5].iter().map(|at| lengthen(&names[*at])).collect();
+            assert_eq!(now, [json!("7:track:3"), json!("7:track:4"), json!("7:track:6")]);
+            assert!(integration.connection.references.borrow().refs.contains_key("7:device:6:0"));
+            // The first set's undo names the EQ where it is now, and has that place read again first.
+            let undone = integration.history.undo(&first, Signal::new(), false).await.unwrap();
+            assert!(!undone.is_error, "{}", undone.text);
+            let revert = bridge.previewed("live_run_python").pop().unwrap()["code"].as_str().unwrap().to_owned();
+            assert!(revert.starts_with("# kumi:fast-revert
+PLACES = [\"7:track:6\"]
+"), "{revert}");
+            assert!(revert.contains(r#"\"ref\":\"7:parameter:7:device:6:0:2\""#), "{revert}");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_change_live_may_have_made_stops_the_plan_though_some_of_it_was_only_missed() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Two clips, one with a mistake in its notation: that one is missed, and the other is sent. Live doesn't
+            // confirm the write, so it may have made it: the plan stops there instead of going on as though only the
+            // notation had missed.
+            let (integration, bridge, names) = kumi(vec![]).await;
+            let (result, reply) = plan(
+                &integration,
+                json!([
+                    {"tool":"write_arrangement_clip","input":{"clips":[
+                        {"trackRef":names[1],"start":0,"length":4,"notation":"1|1 C3 D3"},
+                        {"trackRef":names[1],"start":4,"length":4,"notation":"2|1 C3 Q3"}
+                    ]}},
+                    {"tool":"set_tempo","input":{"tempo":124}}
+                ]),
+            )
+            .await;
+            assert!(result.is_error, "{}", result.text);
+            assert_eq!(bridge.previewed("live_arrangement_midi_clip_apply").len(), 1, "{reply}");
+            assert!(bridge.previewed("live_tempo_preview").is_empty(), "the plan stopped: {reply}");
+            assert!(reply["done"].as_array().is_none_or(|done| done.is_empty()), "{reply}");
         })
         .await;
 }

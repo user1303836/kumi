@@ -158,9 +158,10 @@ impl ArrangeHost for ArrangementSession {
     }
     fn offers(&self, tool: &str) -> bool {
         let connection = &self.mutations.parameters.history.connection;
-        CHANGES.iter().find(|kind| kind.tool == tool).is_some_and(|kind| {
-            self.mutations.supported(kind.since.as_deref()) && connection.has(&kind.preview) && connection.has(&kind.apply)
-        })
+        CHANGES
+            .iter()
+            .find(|kind| kind.tool == tool)
+            .is_some_and(|kind| self.mutations.supported(kind.since.as_deref()) && kind.available(|tool| connection.has(tool)))
     }
     async fn change(&self, tool: &str, input: JsonObject, signal: Signal) -> Result<Made, RuntimeError> {
         let kind = CHANGES.iter().find(|kind| kind.tool == tool).ok_or_else(|| RuntimeError::plain("Unknown Live change"))?;
