@@ -897,6 +897,59 @@ async fn speech_that_couldnt_be_taken_leaves_a_note_and_the_frames() {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
+async fn a_video_has_its_duration_from_an_ffmpeg_without_ffprobe() {
+    let folder = tempfile::tempdir().unwrap();
+    let Some(video) = test_video(folder.path(), "alone", true).await else {
+        eprintln!("ffmpeg makes the test video; unavailable");
+        return;
+    };
+    let real = find_ffmpeg(FfmpegOptions { installed_only: true, ..Default::default() }).await.unwrap().unwrap();
+    // As Kumi keeps its own: ffmpeg alone, no ffprobe beside it.
+    let tools = folder.path().join("own");
+    std::fs::create_dir_all(&tools).unwrap();
+    let mut env = kumi_runtime::system::process_env();
+    env.insert("KUMI_FFMPEG".into(), program(&tools, "ffmpeg", &format!("exec '{real}' \"$@\"")));
+    let mut options = watch_options(folder.path(), "videos");
+    options.env = Some(env);
+    let watched = watch_video(WatchRequest { url: video, frames: Some(2.0), ..Default::default() }, options).await.unwrap();
+    assert!((watched.duration.unwrap_or(0.0) - 12.0).abs() < 0.5, "{:?}", watched.duration);
+    assert_eq!(watched.frames.len(), 2, "{:?}", watched.notes);
+}
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn a_video_without_a_duration_is_as_long_as_its_transcribed_words() {
+    let folder = tempfile::tempdir().unwrap();
+    let Some(video) = test_video(folder.path(), "unknown", false).await else {
+        eprintln!("ffmpeg makes the test video; unavailable");
+        return;
+    };
+    let real = find_ffmpeg(FfmpegOptions { installed_only: true, ..Default::default() }).await.unwrap().unwrap();
+    // An ffmpeg that can't say how long anything is, and no ffprobe: the transcript says it.
+    let tools = folder.path().join("blind");
+    std::fs::create_dir_all(&tools).unwrap();
+    let ffmpeg =
+        program(&tools, "ffmpeg", &format!("for arg in \"$@\"; do if [ \"$arg\" = null ]; then exit 1; fi; done\nexec '{real}' \"$@\""));
+    let whisper = program(
+        folder.path(),
+        "whisper",
+        r#"while [ "$#" -gt 0 ]; do if [ "$1" = '-of' ]; then shift; out="$1"; fi; shift; done
+printf '%s' '{"transcription":[{"offsets":{"from":1000,"to":3000},"text":" load Operator "},{"offsets":{"from":6000,"to":8000},"text":" then a Saturator "}]}' > "$out.json""#,
+    );
+    std::fs::write(folder.path().join("model.bin"), "").unwrap();
+    let mut env = kumi_runtime::system::process_env();
+    env.insert("KUMI_FFMPEG".into(), ffmpeg);
+    env.insert("KUMI_WHISPER".into(), whisper);
+    env.insert("KUMI_WHISPER_MODEL".into(), folder.path().join("model.bin").to_string_lossy().into());
+    let mut options = watch_options(folder.path(), "videos");
+    options.env = Some(env);
+    let watched = watch_video(WatchRequest { url: video, frames: Some(3.0), ..Default::default() }, options).await.unwrap();
+    assert_eq!(watched.duration, None);
+    assert_eq!(watched.lines.len(), 2, "{:?}", watched.notes);
+    assert_eq!(watched.frames.len(), 3, "{:?}", watched.notes);
+    assert!(watched.frames.iter().all(|frame| frame.at <= 8.0), "{:?}", watched.frames.iter().map(|f| f.at).collect::<Vec<_>>());
+}
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
 async fn speech_process_receives_options_reports_progress_and_cleans_up_after_success_timeout_and_abort() {
     use kumi_runtime::video::speech::{transcribe, TranscribeOptions};
     use std::os::unix::fs::PermissionsExt;

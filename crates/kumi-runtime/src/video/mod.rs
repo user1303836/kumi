@@ -590,6 +590,13 @@ async fn watching_ffmpeg(options: &WatchOptions, unfetched: &mut Option<String>)
     }
 }
 
+/// Where a video ends, and the stretch of it asked for: without its duration, as far as its words go.
+fn stretch(duration: Option<f64>, cues: &[Cue], from: Option<f64>, to: Option<f64>) -> (f64, f64, f64) {
+    let end = duration.unwrap_or_else(|| cues.iter().map(|c| c.end).fold(0.0, f64::max));
+    let from = from.unwrap_or(0.0).min(end).max(0.0);
+    let to = to.unwrap_or(end).min(if end != 0.0 { end } else { f64::INFINITY }).max(from);
+    (end, from, to)
+}
 /// Watch a video's words, selected frames, close-ups and a requested stretch of its sound.
 pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result<Watched, VideoFailure> {
     use crate::core::contracts::WordsSource;
@@ -733,9 +740,7 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
     let mut cues = cues.unwrap();
     let folder = join(&options.videos_dir, &meta.key);
     mkdir(&folder).await?;
-    let end = meta.duration.unwrap_or_else(|| cues.iter().map(|c| c.end).fold(0.0, f64::max));
-    let from = request.from.unwrap_or(0.0).min(end).max(0.0);
-    let to = request.to.unwrap_or(end).min(if end != 0.0 { end } else { f64::INFINITY }).max(from);
+    let (mut end, mut from, mut to) = stretch(meta.duration, &cues, request.from, request.to);
     let ffmpeg = watching_ffmpeg(&options, &mut unfetched).await?;
     if cues.is_empty() && meta.words.is_none() {
         let whisper = if ffmpeg.is_some() { find_whisper(&watcher.programs()).await.unwrap_or(None) } else { None };
@@ -859,6 +864,10 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
         } else {
             notes.push(format!("There's no transcript: {why}, and Kumi couldn't find the video's sound to transcribe."));
         }
+    }
+    // Words transcribed just now say how long a video without a duration is.
+    if meta.duration.is_none() {
+        (end, from, to) = stretch(None, &cues, request.from, request.to);
     }
     if meta.words.is_some() || cues.is_empty() {
         let empty = Vec::new();

@@ -245,12 +245,25 @@ pub async fn duration_of(ffmpeg: &str, file: &str, signal: Option<Signal>) -> Op
             .to_string_lossy()
             .into_owned()
     };
-    let output = run(
+    let probed = run(
         &probe,
         &["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file],
+        RunOptions { timeout_ms: Some(20_000), signal: signal.clone(), ..Default::default() },
+    )
+    .await;
+    if let Ok(output) = probed {
+        return output.stdout_text().trim().parse::<f64>().ok().filter(|n| n.is_finite() && *n > 0.0);
+    }
+    // Kumi's own ffmpeg comes without ffprobe: what ffmpeg says of the file it opens, then (it reads nothing past that).
+    let output = run(
+        ffmpeg,
+        &["-hide_banner", "-nostdin", "-i", file, "-t", "0", "-f", "null", "-"],
         RunOptions { timeout_ms: Some(20_000), signal, ..Default::default() },
     )
     .await
     .ok()?;
-    output.stdout_text().trim().parse::<f64>().ok().filter(|n| n.is_finite() && *n > 0.0)
+    static DURATION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"Duration: ([0-9]+):([0-9]{2}):([0-9]{2}(?:\.[0-9]+)?)").unwrap());
+    let found = DURATION.captures(&output.stderr)?;
+    let seconds = found[1].parse::<f64>().ok()? * 3600.0 + found[2].parse::<f64>().ok()? * 60.0 + found[3].parse::<f64>().ok()?;
+    Some(seconds).filter(|n| n.is_finite() && *n > 0.0)
 }
