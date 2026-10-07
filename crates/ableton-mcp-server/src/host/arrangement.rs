@@ -460,11 +460,7 @@ impl McpHost {
                 id,
                 &record,
                 &e,
-                if undone {
-                    "Nothing changed in Live."
-                } else {
-                    "Arrangement apply uncertain; read authoritative locators before retrying."
-                },
+                if undone { PREVIEW_AGAIN } else { "Arrangement apply uncertain; read authoritative locators before retrying." },
             )
         })
     }

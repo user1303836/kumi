@@ -140,7 +140,7 @@ pub struct McpHost {
     analysis_runner: crate::analysis_runner::AnalysisRunner,
     adapter: Rc<dyn AsyncLiveAdapter>,
     /// The last adapter call that failed (see `apply_failure`).
-    last_live_failure: Rc<RefCell<Option<String>>>,
+    last_live_failure: Rc<RefCell<Option<apply_failure::NotedFailure>>>,
     views: Rc<LiveViews>,
     initialized: Cell<bool>,
     initialized_notification: Cell<bool>,

@@ -159,7 +159,7 @@ impl McpHost {
         Some(result.unwrap_or_else(|cause| {
             if nothing_changed(&cause) && !reconciliation {
                 record.borrow_mut()["state"] = json!("undone");
-                adapter_tool_error(id, &cause, "Nothing changed in Live.")
+                adapter_tool_error(id, &cause, PREVIEW_AGAIN)
             } else {
                 record.borrow_mut()["state"] = json!("uncertain");
                 adapter_tool_error(id, &cause, "Transport state is uncertain; perform fresh discovery before retrying.")

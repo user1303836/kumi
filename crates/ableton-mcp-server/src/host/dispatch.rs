@@ -98,7 +98,7 @@ impl McpHost {
         signal: Option<Signal>,
     ) -> LocalBoxFuture<'static, Result<Option<Value>, LiveError>> {
         let owner = self.clone();
-        async move {
+        apply_failure::as_tool_call(async move {
             if signal.as_ref().is_some_and(Signal::is_cancelled) {
                 return Ok(None);
             }
@@ -202,7 +202,7 @@ impl McpHost {
                 .with_undo_watch(&call.id, args, boxed_operation(|| owner.undo_dispatch_async(&call.id, args, signal.as_ref())))
                 .await
                 .map(Some)
-        }
+        })
         .boxed_local()
     }
     async fn live_change(self: &Rc<Self>, id: &Value, params: &Value, signal: Option<&Signal>) -> Result<Option<Value>, LiveError> {

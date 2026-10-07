@@ -1,17 +1,33 @@
 //! What a failed apply says about trying again.
 use super::*;
 
+tokio::task_local! {
+    /// The tool call running, numbered by dispatch_tool: a Live call that fails is noted as that call's.
+    static TOOL_CALL: u64;
+}
+/// The tool call this runs in, if it runs in one.
+fn running_call() -> Option<u64> {
+    TOOL_CALL.try_with(|call| *call).ok()
+}
+/// Runs `call` as a tool call of its own: the Live failures noted while it runs are its own, not another call's.
+pub(super) fn as_tool_call<F: std::future::Future>(call: F) -> impl std::future::Future<Output = F::Output> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    TOOL_CALL.scope(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed), call)
+}
+/// A Live call that failed: the tool call it ran in, and what it said.
+pub(super) type NotedFailure = (Option<u64>, String);
+
 /// The host's adapter: it passes every call through and notes the last one that failed. An apply that stopped
 /// before sending anything can then tell a Live read that failed, which a retry may pass, from its own refusal of
 /// what it read (a staged file changed, a drum pad without identity), which every retry meets again.
 pub(super) struct FailureNotingAdapter {
     pub(super) adapter: Rc<dyn AsyncLiveAdapter>,
-    pub(super) last_failure: Rc<RefCell<Option<String>>>,
+    pub(super) last_failure: Rc<RefCell<Option<NotedFailure>>>,
 }
 impl FailureNotingAdapter {
     fn note<T>(&self, result: Result<T, LiveError>) -> Result<T, LiveError> {
         if let Err(error) = &result {
-            *self.last_failure.borrow_mut() = Some(error.message().to_owned());
+            *self.last_failure.borrow_mut() = Some((running_call(), error.message().to_owned()));
         }
         result
     }
@@ -91,15 +107,16 @@ impl McpHost {
     }
     /// What a failed apply answers. Its transaction turns `uncertain` only from `applying`, the state each apply sets
     /// right before its first send. A failure before that changed nothing in Live. Only one that came from a Live call
-    /// of this tool call's own (a read that failed) may pass on a retry, so only that one is told the change can be
-    /// applied again; the apply's refusal of what it read is told to fix that and preview again. `uncertain` is the
-    /// remediation once something may have changed.
+    /// of this tool call's own (a read that failed, noted in this call and not in another running beside it) may pass
+    /// on a retry, so only that one is told the change can be applied again; the apply's refusal of what it read is
+    /// told to fix that and preview again. `uncertain` is the remediation once something may have changed.
     pub(super) fn apply_failed(&self, id: &Value, record: &RefCell<Value>, cause: &LiveError, uncertain: &str) -> Value {
         let state = record.borrow()["state"].clone();
         if state == "applying" {
             record.borrow_mut()["state"] = json!("uncertain");
         }
-        let read_failed = self.last_live_failure.borrow_mut().take().is_some_and(|failure| failure == cause.message());
+        let read_failed =
+            self.last_live_failure.borrow_mut().take().is_some_and(|(call, failure)| call == running_call() && failure == cause.message());
         let remediation = if state != "previewed" {
             uncertain
         } else if read_failed {
@@ -133,6 +150,17 @@ mod tests {
         let _ = host.dispatch_tool(status, None).await;
         let reply = host.apply_failed(&json!(3), &previewed, &failed, "uncertain");
         assert_eq!(remediation(&reply), PREVIEW_AGAIN, "{reply}");
+        // Calls run beside each other: another call's Live failure, noted in the same words while this apply ran, isn't
+        // this apply's to retry. Its own, in the same call, still is.
+        let _ = as_tool_call(host.adapter.invoke_async(&unknown, None)).await;
+        let reply = as_tool_call(async { host.apply_failed(&json!(4), &previewed, &failed, "uncertain") }).await;
+        assert_eq!(remediation(&reply), PREVIEW_AGAIN, "{reply}");
+        let reply = as_tool_call(async {
+            let _ = host.adapter.invoke_async(&unknown, None).await;
+            host.apply_failed(&json!(5), &previewed, &failed, "uncertain")
+        })
+        .await;
+        assert_eq!(remediation(&reply), "Nothing changed in Live; this change can be applied again.", "{reply}");
         assert_eq!(previewed.borrow()["state"], "previewed");
     }
 }
