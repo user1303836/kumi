@@ -332,10 +332,7 @@ impl Rendering {
                 .zip(&after)
                 .zip(&run.checklist.items)
                 .map(|(((whole, before), after), item)| match (whole, before, after) {
-                    (Some(whole), Some(before), Some(after)) => {
-                        let moved = whole + (after - before);
-                        Some(if item.quantity == Quantity::Clipped { moved.max(0.) } else { moved })
-                    }
+                    (Some(whole), Some(before), Some(after)) => Some(item.quantity.moved(*whole, *before, *after)),
                     (_, _, after) => *after,
                 })
                 .collect();
@@ -431,9 +428,11 @@ impl Rendering {
                         let run = guard.as_mut().unwrap();
                         run.listens += 1;
                         let now = run.checklist.read(&again.main, again.focus.as_ref());
-                        for ((whole, before), after) in predicted.iter_mut().zip(&excerpt_values).zip(&now) {
+                        for (((whole, before), after), item) in
+                            predicted.iter_mut().zip(&excerpt_values).zip(&now).zip(&run.checklist.items)
+                        {
                             if let (Some(whole), Some(before), Some(after)) = (whole.as_mut(), before, after) {
-                                *whole += after - before;
+                                *whole = item.quantity.moved(*whole, *before, *after);
                             }
                         }
                         excerpt_values = now;
@@ -717,15 +716,25 @@ impl Rendering {
             }
         };
         let heard_main = measure(main.file.clone(), main.start).await?;
-        let (heard_focus, focus_file) = match focus_name.and_then(|name| files.get(&name).cloned()) {
+        let (heard_focus, focus_file) = match focus_name.clone().and_then(|name| files.get(&name).cloned()) {
             Some(render) => {
-                let heard = measure(render.file.clone(), render.start).await?;
+                // Heard before its fader: as the mix hears it, at the fader's level (so turning it up reads as up).
+                let fader = self.fader_of(focus_name.as_deref().unwrap_or(""), signal.clone()).await.unwrap_or(0.);
+                let heard = measure(render.file.clone(), render.start).await?.gained(fader);
                 (Some(heard), Some((self.keep_file(&PathBuf::from(&render.file)).await, render.start)))
             }
             None => (None, None),
         };
         let file = self.keep_file(&PathBuf::from(&main.file)).await;
         Ok(Ok(JudgeHeard { main: heard_main, focus: heard_focus, file, start: main.start, focus_file }))
+    }
+
+    /// A track's fader, dB (0 when Kumi can't read it).
+    async fn fader_of(&self, track: &str, signal: Signal) -> Option<f64> {
+        let tracks = self.rows("track", json!({"fields":["name","mixer"]}), signal).await.ok()?;
+        let row = tracks.iter().find(|row| row.get("name").and_then(Value::as_str) == Some(track))?;
+        let volume = row.get("mixer")?.get("volume")?.as_f64()?;
+        (volume > 0.).then(|| 20. * (volume / 0.85).log10() * if volume > 0.85 { 0.3 } else { 1. }).filter(|db| db.is_finite())
     }
 
     /// A track's name, from its ref or its name.

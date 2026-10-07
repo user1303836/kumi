@@ -17,6 +17,8 @@ pub struct Homing {
     /// Every setting heard: (knob, measured), where it started first when that was known.
     pub probes: Vec<(f64, f64)>,
     known: bool,
+    /// Probes that made something else audibly worse: never the answer, and the knob doesn't go that far again.
+    pub hurt: Vec<f64>,
     pub most: usize,
 }
 
@@ -40,7 +42,19 @@ impl Homing {
             first,
             probes: measured.map(|measured| vec![(first, measured)]).unwrap_or_default(),
             known: measured.is_some(),
+            hurt: vec![],
             most,
+        }
+    }
+    /// A probe that made something else worse: the knob stays on this side of it from now on.
+    pub fn hurt(&mut self, knob: f64, measured: f64) {
+        self.probes.push((knob, measured));
+        self.hurt.push(knob);
+        let margin = (self.high - self.low) * 1e-3;
+        if knob > self.first {
+            self.high = self.high.min(knob - margin);
+        } else {
+            self.low = self.low.max(knob + margin);
         }
     }
     pub fn met(&self, measured: f64) -> bool {
@@ -56,7 +70,7 @@ impl Homing {
     /// Why it stops now, if it does.
     pub fn done(&self) -> Option<Homed> {
         let last = self.probes.last()?;
-        if self.met(last.1) {
+        if self.met(last.1) && !self.hurt.contains(&last.0) {
             return Some(Homed::Met);
         }
         if self.listens() >= self.most {
@@ -105,9 +119,10 @@ impl Homing {
         }
         Ok(wanted)
     }
-    /// The setting that met it, closest to the aim (or, with none, the closest), and what it measured.
+    /// The setting that met it, closest to the aim (or, with none, the closest), and what it measured; never one that
+    /// made something else worse.
     pub fn best(&self) -> Option<(f64, f64)> {
         let distance = |p: &(f64, f64)| (if self.met(p.1) { 0. } else { 1e6 }) + (p.1 - self.aim).abs();
-        self.probes.iter().min_by(|a, b| distance(a).total_cmp(&distance(b))).copied()
+        self.probes.iter().filter(|p| !self.hurt.contains(&p.0)).min_by(|a, b| distance(a).total_cmp(&distance(b))).copied()
     }
 }

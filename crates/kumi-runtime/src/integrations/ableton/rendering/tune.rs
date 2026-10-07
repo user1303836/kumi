@@ -366,7 +366,7 @@ impl Rendering {
         let Some(scale) = knob.scale.clone() else {
             return Ok(Err(format!("{} is a switch or a list, not a knob to home in on.", knob.name)));
         };
-        let (aim, met, unit, label, start, before, checklist, changed) = {
+        let (aim, met, unit, label, start, before, checklist, changed, whole_all, before_all) = {
             let run = self.judge.borrow();
             let run = run.as_ref().unwrap();
             let item = &run.checklist.items[index];
@@ -378,13 +378,22 @@ impl Rendering {
                 Target::Between { low, high } => ((low + high) / 2., (low + (high - low) * 0.1, high - (high - low) * 0.1)),
                 Target::NoHigher | Target::NoLower => return Ok(Err(format!("{} is a guard, not something to home in on.", item.label))),
             };
-            let before = run
-                .excerpts
-                .iter()
-                .find(|excerpt| excerpt.window == window && excerpt.state == run.state)
-                .map(|excerpt| excerpt.values[index]);
+            let excerpt = run.excerpts.iter().find(|excerpt| excerpt.window == window && excerpt.state == run.state);
+            let before = excerpt.and_then(|excerpt| excerpt.values[index]);
+            let before_all = excerpt.map(|excerpt| excerpt.values.clone()).unwrap_or_default();
             let changed = !self.applied_since(&run.checkpoint).is_empty();
-            (aim, met, item.unit.clone(), item.label.clone(), run.whole[index], before.flatten(), run.checklist.clone(), changed)
+            (
+                aim,
+                met,
+                item.unit.clone(),
+                item.label.clone(),
+                run.whole[index],
+                before,
+                run.checklist.clone(),
+                changed,
+                run.whole.clone(),
+                before_all,
+            )
         };
         let (Some(start), Some(before)) = (start, before) else {
             return Ok(Err(format!("Kumi hasn't measured {label} yet; judge the run again first.")));
@@ -413,14 +422,28 @@ impl Rendering {
                 Ok(heard) => heard,
                 Err(why) => return Ok(Err(why)),
             };
-            let measured = {
+            let values = {
                 let mut guard = self.judge.borrow_mut();
-                let run = guard.as_mut().unwrap();
-                run.listens += 1;
-                checklist.read(&heard.main, heard.focus.as_ref())[index]
+                guard.as_mut().unwrap().listens += 1;
+                checklist.read(&heard.main, heard.focus.as_ref())
             };
-            let Some(measured) = measured else { break Homed::Stuck };
-            homing.heard(at, start + (measured - before));
+            let Some(measured) = values[index] else { break Homed::Stuck };
+            let reached = checklist.items[index].quantity.moved(start, before, measured);
+            // A probe that makes anything else audibly worse is too far, however close it gets.
+            let predicted: Vec<Option<f64>> = checklist
+                .items
+                .iter()
+                .enumerate()
+                .map(|(at, item)| match (whole_all.get(at).copied().flatten(), before_all.get(at).copied().flatten(), values[at]) {
+                    (Some(whole), Some(was), Some(now)) => Some(item.quantity.moved(whole, was, now)),
+                    (_, _, now) => now,
+                })
+                .collect();
+            if checklist.verdict(Some(index), &whole_all, &predicted).hurt.is_empty() {
+                homing.heard(at, reached);
+            } else {
+                homing.hurt(at, reached);
+            }
             heard_at.push((at, heard));
         };
         let (best, reached) = homing.best().unwrap_or((x0, start));

@@ -181,6 +181,15 @@ fn masking_is_a_target_to_mask_ratio_against_the_rest() {
     let buried = detect::masking(&target, &heard(&buried_mix, &buried_mix), "the vocal");
     assert!(buried.as_ref().is_some_and(|p| p.kind == ProblemKind::Masking && p.excess > 0.), "{buried:?}");
     assert!(detect::masking(&target, &heard(&clear_mix, &clear_mix), "the vocal").is_none());
+    // The vocal is heard before its fader: at the fader's level, turning it up in the mix reads as less buried.
+    let at = |db: f64| {
+        let gain = 10f64.powf(db / 20.);
+        let up: Vec<f64> = vocal.iter().map(|s| s * gain).collect();
+        let mix = mixed(&[&up, &hiss_like]);
+        detect::masking(&heard(&vocal, &vocal).gained(db), &heard(&mix, &mix), "the vocal").map_or(0., |p| p.excess)
+    };
+    let (down, up) = (at(-6.), at(6.));
+    assert!(down > up, "{down}% buried 6 dB down, {up}% 6 dB up");
 }
 
 #[test]
@@ -414,4 +423,23 @@ fn a_small_cma_es_finds_knobs_that_interact_in_a_few_generations() {
     }
     let (best, found) = search.best.clone().unwrap();
     assert!(found < start / 100. && found < 1e-3, "{found} at {best:?} from {start}");
+}
+
+#[test]
+fn homing_stops_short_of_a_setting_that_makes_something_else_worse() {
+    use kumi_runtime::listening::home::{Homed, Homing};
+    // More gain closes the gap, but past +4 dB it hurts something else: the answer stays under it.
+    let mut homing = Homing::new(-9., (-9.4, -8.6), (0., 24.), 0., Some(-14.), 4);
+    let mut stop = None;
+    while stop.is_none() {
+        match homing.next(Some(1.)) {
+            Ok(at) if at > 4. => homing.hurt(at, -14. + at),
+            Ok(at) => homing.heard(at, -14. + at),
+            Err(why) => stop = Some(why),
+        }
+    }
+    let (gain, reached) = homing.best().unwrap();
+    assert!(gain <= 4. && reached < -9.4, "{gain} → {reached}");
+    assert!(matches!(stop, Some(Homed::Spent | Homed::Stuck)), "{stop:?}");
+    assert!(homing.hurt.iter().all(|at| *at > 4.));
 }

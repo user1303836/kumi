@@ -12,7 +12,7 @@ use kumi_common::{
 };
 use kumi_runtime::{
     core::{
-        contracts::{ActionEvent, KernelEvent, WatchEvent},
+        contracts::{ActionEvent, KernelEvent, KernelTool, ToolResult, WatchEvent},
         memory::MemoryStoreOptions,
     },
     create_ableton_integration, create_agent_kernel, create_memory_store, create_recipe_store, create_session,
@@ -67,6 +67,30 @@ fn connect_to(bridge: PathBuf, config: String) -> Connect {
         })
         .boxed_local()
     })
+}
+
+/// A tool that prints its failures (the model sees them; the log should too).
+struct Logged(Rc<dyn KernelTool>);
+#[async_trait::async_trait(?Send)]
+impl KernelTool for Logged {
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+    fn description(&self) -> &str {
+        self.0.description()
+    }
+    fn input_schema(&self) -> kumi_runtime::core::contracts::JsonObject {
+        self.0.input_schema()
+    }
+    async fn execute(&self, input: kumi_runtime::core::contracts::JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
+        let result = self.0.execute(input, signal).await;
+        match &result {
+            Ok(done) if done.is_error => println!("  ✗ {}: {}", self.0.name(), head(&done.text, 400)),
+            Err(error) => println!("  ✗ {}: {}", self.0.name(), head(&error.to_string(), 400)),
+            _ => {}
+        }
+        result
+    }
 }
 
 /// A fresh binding of the same model for each kernel.
@@ -131,7 +155,8 @@ async fn run() -> Result<i32, RuntimeError> {
             let made = create_agent_kernel(AgentKernelOptions {
                 conversation: None,
                 instructions: options.instructions,
-                tools: options.tools,
+                // Logged tools can't stream, so a plan runs once it's written.
+                tools: options.tools.into_iter().map(|tool| Rc::new(Logged(tool)) as Rc<dyn KernelTool>).collect(),
                 signal: options.signal,
                 checkpoint: options.checkpoint,
                 binding: rebind(&binding),

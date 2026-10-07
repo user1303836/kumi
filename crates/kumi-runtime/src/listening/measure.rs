@@ -104,6 +104,25 @@ pub struct Heard {
     pub frames: Frames,
 }
 
+impl Heard {
+    /// The same sound `db` louder (or quieter), as a fader after it would make it: its frames scaled (the measures
+    /// stay as heard). A track heard before its fader, as the mix hears it.
+    pub fn gained(mut self, db: f64) -> Heard {
+        let (power, db) = (10f32.powf(db as f32 / 10.), db as f32);
+        for bands in self.frames.mid.iter_mut().chain(self.frames.side.iter_mut()) {
+            bands.iter_mut().for_each(|value| *value *= power);
+        }
+        for row in self.frames.fine.iter_mut() {
+            row.iter_mut().for_each(|value| *value += db);
+        }
+        self.frames.level.iter_mut().for_each(|value| *value += db);
+        for (_, level) in self.frames.bass.iter_mut().flatten() {
+            *level += db;
+        }
+        self
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MeasureOptions {
     pub start: Option<f64>,

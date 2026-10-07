@@ -159,6 +159,18 @@ pub enum Quantity {
     },
 }
 
+impl Quantity {
+    /// A value the whole stretch is predicted at, from what the excerpt moved: counts and found problems (how far a
+    /// peak stands out, how much of the time a part is buried) don't go below nothing.
+    pub fn moved(&self, whole: f64, before: f64, after: f64) -> f64 {
+        let moved = whole + (after - before);
+        match self {
+            Quantity::Clipped | Quantity::Problem { .. } => moved.max(0.),
+            _ => moved,
+        }
+    }
+}
+
 /// Where an item should be.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
@@ -333,13 +345,18 @@ impl Checklist {
                         // where it stops sticking out, not flattened. A found peak asks for 3 dB less (a fix you hear)
                         // or the limit, whichever is higher: music has peaks, and a checklist nobody can finish
                         // helps nobody.
+                        // Measured as the checklist reads it (over all the loud frames, not only the ones it flared
+                        // in): one already under its limit that way isn't worth a round.
                         let limit: f64 = if steady { 6. } else { 3. };
-                        Some((
-                            Quantity::Problem { problem: problem.kind, low, high, steady, focus: None },
-                            Target::AtMost { value: round1(limit.max(problem.excess - 3.)) },
-                            1.,
-                            "dB",
-                        ))
+                        let now = region_excess(heard, low, high, steady);
+                        (now > limit).then(|| {
+                            (
+                                Quantity::Problem { problem: problem.kind, low, high, steady, focus: None },
+                                Target::AtMost { value: round1(limit.max(now - 3.)) },
+                                1.,
+                                "dB",
+                            )
+                        })
                     }
                     ProblemKind::StereoLows if !items.iter().any(|item| item.id == "low width") => {
                         Some((Quantity::LowWidth, Target::AtMost { value: -20. }, 2., "dB"))
@@ -399,7 +416,9 @@ impl Checklist {
             items.push(item("distortion", "Distortion at peaks", Role::Guard, "dB", Quantity::Distortion, Target::NoHigher, 1.));
         }
         if !items.iter().any(|item| item.quantity == Quantity::Clipped) {
-            items.push(item("clipping", "Clipped samples", Role::Guard, "", Quantity::Clipped, Target::AtMost { value: 0. }, 1.));
+            // A step is a twentieth of what clips now: a few samples either way between listens isn't a change.
+            let step = (heard.measures.clipped as f64 * 0.05).max(1.).round();
+            items.push(item("clipping", "Clipped samples", Role::Guard, "", Quantity::Clipped, Target::AtMost { value: 0. }, step));
         }
         Self { items }
     }
