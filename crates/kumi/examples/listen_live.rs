@@ -3,7 +3,7 @@
 //! (Drift playing a note on every beat, through the Arrangement), listens to it and to the mix at each tempo,
 //! then takes it all back with Kumi's undo. No model and no sign-in. Run it on a disposable Set:
 //!   cargo build --release -p ableton-mcp-server --bins
-//!   KUMI_TIMING=1 cargo run --release -p kumi --example listen_live -- --set "<Set name>" [--bars 8] [--song-bars 96]
+//!   KUMI_TIMING=1 cargo run --release -p kumi --example listen_live -- --set "<Set name>" [--bars 8] [--song-bars 96] [--tempos 90,128]
 use futures::FutureExt;
 use kumi::config::find_bridge_config;
 use kumi_common::{
@@ -43,6 +43,9 @@ fn main() {
     };
     let bars = value("--bars").and_then(|bars| bars.parse::<f64>().ok()).unwrap_or(8.0);
     let song_bars = value("--song-bars").and_then(|bars| bars.parse::<f64>().ok()).unwrap_or(96.0);
+    let tempos: Vec<f64> = value("--tempos")
+        .map(|tempos| tempos.split(',').filter_map(|tempo| tempo.trim().parse().ok()).collect())
+        .unwrap_or_else(|| TEMPOS.to_vec());
     let env: Env = std::env::vars().collect();
     let Some(bridge_config) = find_bridge_config(&env) else {
         eprintln!("The Ableton bridge isn't installed; run Kumi's bridge setup first.");
@@ -58,7 +61,7 @@ fn main() {
     }
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");
     let local = tokio::task::LocalSet::new();
-    std::process::exit(local.block_on(&runtime, listen_live(wanted, bars, song_bars, bridge_config, bridge)));
+    std::process::exit(local.block_on(&runtime, listen_live(wanted, bars, song_bars, tempos, bridge_config, bridge)));
 }
 
 fn bridge_program() -> PathBuf {
@@ -91,7 +94,7 @@ struct Run {
     passed: RefCell<Vec<bool>>,
 }
 
-async fn listen_live(wanted: String, bars: f64, song_bars: f64, bridge_config: String, bridge: PathBuf) -> i32 {
+async fn listen_live(wanted: String, bars: f64, song_bars: f64, tempos: Vec<f64>, bridge_config: String, bridge: PathBuf) -> i32 {
     let records = Rc::new(RefCell::new(Vec::<ChangeRecord>::new()));
     let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
     options.bridge_config = Some(bridge_config.clone());
@@ -109,7 +112,7 @@ async fn listen_live(wanted: String, bars: f64, song_bars: f64, bridge_config: S
     options.change_timeout_ms = Some(30_000);
     let run =
         Run { integration: create_ableton_integration(options), observation: RefCell::new(None), records, passed: RefCell::new(vec![]) };
-    let code = match run.check(&wanted, bars, song_bars).await {
+    let code = match run.check(&wanted, bars, song_bars, &tempos).await {
         Ok(()) => {
             let passed = run.passed.borrow();
             let good = passed.iter().filter(|ok| **ok).count();
@@ -163,7 +166,7 @@ impl Run {
             .unwrap_or_default()
     }
 
-    async fn check(&self, wanted: &str, bars: f64, song_bars: f64) -> Result<(), RuntimeError> {
+    async fn check(&self, wanted: &str, bars: f64, song_bars: f64, tempos: &[f64]) -> Result<(), RuntimeError> {
         self.integration.start(signal()).await?;
         let observation = self.observe().await?;
         let context: Value = serde_json::from_str(&observation.context).unwrap_or(Value::Null);
@@ -202,7 +205,7 @@ impl Run {
             self.call("duplicate_clip", json!({"clipRef": clip, "arrangementPosition": copy * 16})).await.map_err(RuntimeError::plain)?;
         }
         println!("\nQuiet listens of {} bars from bar 2, the track and the mix", to_string(bars));
-        for tempo in TEMPOS {
+        for &tempo in tempos {
             self.call("set_tempo", json!({"tempo": tempo})).await.map_err(RuntimeError::plain)?;
             for mix in [false, true] {
                 let request = HearRequest {

@@ -238,9 +238,7 @@ impl Rendering {
         }
         let looped = set.and_then(|set| set.get("loop")).filter(|v| v["enabled"] == true && v["length"].as_f64().is_some_and(|v| v > 0.));
         let whole = if request.whole == Some(true) {
-            let song = self.connection().call("live_song_state", JsonObject::new(), signal.clone()).await;
-            let end = song.ok().and_then(|song| super::super::context::payload(&song).ok()?.get("songLength")?.as_f64());
-            let Some(end) = end.filter(|end| *end > 0.) else {
+            let Some(end) = self.song_end(signal.clone()).await else {
                 return Ok(Err("Kumi couldn't tell where the song ends; give from_beat and beats.".into()));
             };
             Some(end)
@@ -320,6 +318,25 @@ impl Rendering {
                 Ok(Ok(takes))
             }
         }
+    }
+    /// Where the song ends, in beats: its last Arrangement clip's end (Live's own song end often runs on, 58 bars in a
+    /// new Set), else Live's song end.
+    pub(super) async fn song_end(&self, signal: Signal) -> Option<f64> {
+        if self.connection().has("live_run_python") {
+            let read = self
+                .connection()
+                .call("live_run_python", object(json!({"code":SONG_END_SCRIPT,"mode":"exec","timeoutMs":5000})), signal.clone())
+                .await;
+            let end = read.ok().filter(|read| read.is_error != Some(true)).and_then(|read| {
+                let done = super::super::context::payload(&read).ok()?;
+                (done.get("ok") == Some(&Value::Bool(true))).then(|| done.get("result")?.get("end")?.as_f64()).flatten()
+            });
+            if let Some(end) = end.filter(|end| *end > 0.) {
+                return Some(end);
+            }
+        }
+        let song = self.connection().call("live_song_state", JsonObject::new(), signal).await.ok()?;
+        super::super::context::payload(&song).ok()?.get("songLength")?.as_f64().filter(|end| *end > 0.)
     }
     async fn hear_as_it_plays(
         self: &Rc<Self>,
@@ -437,6 +454,8 @@ impl Rendering {
 fn round_number(value: f64) -> f64 {
     round(value)
 }
+/// The end of the last clip in the Arrangement, in beats.
+const SONG_END_SCRIPT: &str = "end = 0.0\nfor track in list(song.tracks):\n    for clip in list(getattr(track, 'arrangement_clips', None) or []):\n        end = max(end, float(clip.end_time))\nresult = {'end': end}\n";
 /// The longest stretch one listen hears, in seconds.
 const LONGEST_LISTEN: f64 = 3600.;
 fn clock(seconds: f64) -> String {

@@ -7,7 +7,9 @@ use std::path::Path;
 
 pub const EARS_VERSION: u32 = 3;
 pub const EARS_NAME: &str = "Kumi Ears";
-pub const EARS_ITEM: &str = "user_library/Kumi/Kumi Ears";
+/// In a folder named for its kind: Live's Browser item says nothing else, and an item that might be an instrument
+/// doesn't load onto a track that has one (Live would replace it), so on a MIDI track it would never go.
+pub const EARS_ITEM: &str = "user_library/Kumi/Audio Effects/Kumi Ears";
 pub const KUMI_PORTS: [u16; 5] = [47290, 47291, 47292, 47293, 47294];
 pub const DEVICE_PORT_BASE: u16 = 47300;
 pub const DEVICE_PORTS: u16 = 600;
@@ -35,9 +37,17 @@ pub struct InstalledEars {
     pub file: String,
     pub written: bool,
 }
-/// Write the device only when missing or different, so an untouched file keeps its modification time.
+/// Write the device only when missing or different, so an untouched file keeps its modification time. The copy an
+/// older Kumi kept straight in the Kumi folder goes.
 pub async fn install_ears(user_library: impl AsRef<Path>) -> std::io::Result<InstalledEars> {
-    let folder = user_library.as_ref().join("Kumi");
+    let older = user_library.as_ref().join("Kumi").join(format!("{EARS_NAME}.amxd"));
+    if let Ok(bytes) = tokio::fs::read(&older).await {
+        let ours = crate::devices::amxd::decode_amxd(&bytes).is_some_and(|device| device.patcher.to_string().contains("---kumiears"));
+        if ours {
+            let _ = tokio::fs::remove_file(&older).await;
+        }
+    }
+    let folder = user_library.as_ref().join("Kumi").join("Audio Effects");
     let file = folder.join(format!("{EARS_NAME}.amxd"));
     let bytes = ears_file();
     if tokio::fs::read(&file).await.is_ok_and(|current| current == bytes) {

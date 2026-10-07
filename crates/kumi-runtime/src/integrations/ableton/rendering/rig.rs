@@ -18,7 +18,7 @@ pub(super) struct Held {
     pub recording: bool,
     pub rearm: Vec<String>,
 }
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Window {
     pub from: f64,
     pub beats: f64,
@@ -144,6 +144,9 @@ impl Rendering {
                 rig.ears=Some(RigEars{link,taps:IndexMap::new()});
                 if let Err(error)=self.place_taps(&mut rig,signal.clone()).await {
                     signal.check()?;
+                    if std::env::var("KUMI_TIMING").is_ok_and(|s| !s.is_empty()) {
+                        eprintln!("[ears] not placed{}: {}", if error.silent { " (the device didn't start)" } else { "" }, error.error);
+                    }
                     // Quiet steps have not been copied out until this scope ends; removeTaps needs them now.
                     // The history's current quiet list is retained as well, matching source nested undo bookkeeping.
                     self.remove_taps(&mut rig).await;

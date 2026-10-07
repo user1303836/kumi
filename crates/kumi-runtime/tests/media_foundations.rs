@@ -773,15 +773,21 @@ fn kumi_ears_passes_the_sound_through_records_four_channels_and_every_patch_cord
         assert!(cord("obj-code", 5 + index as u64, &format!("obj-send-{index}"), 0));
     }
     assert_eq!(kumi_runtime::devices::amxd::decode_amxd(&ears_file()).unwrap().kind, kumi_runtime::devices::amxd::DeviceType::AudioEffect);
-    assert_eq!(EARS_ITEM, "user_library/Kumi/Kumi Ears");
+    assert_eq!(EARS_ITEM, "user_library/Kumi/Audio Effects/Kumi Ears");
 }
 #[tokio::test]
-async fn the_device_goes_into_the_user_librarys_kumi_folder_once_and_again_only_when_it_differs() {
+async fn the_device_goes_into_the_user_librarys_kumi_audio_effects_folder_once_and_again_only_when_it_differs() {
     use kumi_runtime::ears::device::*;
     let library = tempfile::tempdir().unwrap();
+    // An older Kumi's copy, straight in the Kumi folder, goes; another device there stays.
+    let older = library.path().join("Kumi");
+    std::fs::create_dir_all(&older).unwrap();
+    std::fs::write(older.join("Kumi Ears.amxd"), ears_file()).unwrap();
+    std::fs::write(older.join("Other.amxd"), b"someone else's").unwrap();
     let first = install_ears(library.path()).await.unwrap();
     assert!(first.written);
-    assert_eq!(first.file, library.path().join("Kumi").join("Kumi Ears.amxd").to_string_lossy());
+    assert_eq!(first.file, library.path().join("Kumi").join("Audio Effects").join("Kumi Ears.amxd").to_string_lossy());
+    assert!(!older.join("Kumi Ears.amxd").exists() && older.join("Other.amxd").exists());
     assert!(!install_ears(library.path()).await.unwrap().written);
     std::fs::write(&first.file, "changed").unwrap();
     assert!(install_ears(library.path()).await.unwrap().written);
