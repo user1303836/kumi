@@ -328,9 +328,12 @@ impl Checklist {
                     ProblemKind::Harshness | ProblemKind::Resonance => {
                         let [low, high] = problem.hz.unwrap_or([0., 0.]);
                         let steady = problem.steady.unwrap_or(true);
+                        // A steady peak in a whole mix may be the music's own (a held note, a drone): taken down to
+                        // where it stops sticking out, not flattened.
+                        let limit = if steady { 6. } else { 3. };
                         Some((
                             Quantity::Problem { problem: problem.kind, low, high, steady, focus: None },
-                            Target::AtMost { value: 3. },
+                            Target::AtMost { value: limit },
                             1.,
                             "dB",
                         ))
@@ -350,17 +353,18 @@ impl Checklist {
                     }
                     ProblemKind::Masking => {
                         let [low, high] = problem.hz.unwrap_or([0., 0.]);
+                        // The share of the time it plays that it's buried, in percent.
                         Some((
                             Quantity::Problem { problem: problem.kind, low, high, steady: true, focus: goal.focus.clone() },
-                            Target::AtMost { value: 0. },
-                            1.,
-                            "dB",
+                            Target::AtMost { value: 10. },
+                            5.,
+                            "%",
                         ))
                     }
                     _ => None,
                 };
                 if let Some((quantity, target, jnd, unit)) = added {
-                    let mut added = item(&problem.id, &capital(&problem.what), Role::Problem, unit, quantity, target, jnd);
+                    let mut added = item(&problem.id, &capital(&problem.id), Role::Problem, unit, quantity, target, jnd);
                     added.fix = Some(problem.fix.clone());
                     items.push(added);
                 }
@@ -407,13 +411,29 @@ impl Checklist {
         let mut hurt = vec![];
         let mut improved = false;
         let mut total = (0., 0.);
+        // Bringing peaks or loudness to a target squeezes dynamics by about as much as it moves them: punch may drop
+        // that far (and pumping rise half as far) before it counts against the change, no further.
+        let allowance = target
+            .filter(|index| {
+                matches!(
+                    self.items[*index].quantity,
+                    Quantity::TruePeak | Quantity::Integrated | Quantity::Plr | Quantity::Psr | Quantity::Range
+                )
+            })
+            .and_then(|index| Some((after[index]? - before[index]?).abs()))
+            .unwrap_or(0.);
         for (index, item) in self.items.iter().enumerate() {
             let (b, a) = (before[index], after[index]);
             let (gap_before, gap_after) = (item.gap(b), item.gap(a));
+            let slack = match item.quantity {
+                Quantity::Crest => allowance,
+                Quantity::Pumping => allowance / 2.,
+                _ => 0.,
+            };
             let change = match (item.target, b, a) {
-                (Target::NoHigher, Some(b), Some(a)) if a - b > item.jnd => Change::Worse,
-                (Target::NoLower, Some(b), Some(a)) if b - a > item.jnd => Change::Worse,
-                (Target::NoHigher | Target::NoLower, Some(b), Some(a)) if (a - b).abs() <= item.jnd => Change::Same,
+                (Target::NoHigher, Some(b), Some(a)) if a - b > item.jnd + slack => Change::Worse,
+                (Target::NoLower, Some(b), Some(a)) if b - a > item.jnd + slack => Change::Worse,
+                (Target::NoHigher | Target::NoLower, Some(b), Some(a)) if (a - b).abs() <= item.jnd + slack => Change::Same,
                 (Target::NoHigher, Some(b), Some(a)) => {
                     if a < b {
                         Change::Better

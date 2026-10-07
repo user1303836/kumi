@@ -2,6 +2,7 @@
 use super::*;
 use crate::core::{
     evolve::{Evolution, NewSlot, TrialHow, EVOLVE},
+    loop_run::{loop_setup, wants_loop, LoopRun, LOOP_BUDGET, LOOP_HINT},
     match_run::{starts_match, MatchBudget, MatchDecision, MatchRun, MatchState, MatchStop, KEEP_GOING, MATCH_BUDGET},
     playbook::{lesson_from, lesson_line, playbook_brief, PlaybookStore, Reaction},
     techniques::{waiting_note, NEGATIVE, POSITIVE},
@@ -125,6 +126,22 @@ impl Session {
         pinned: Option<PinnedNode>,
         pictures: Vec<Picture>,
     ) -> Result<Option<TurnResult>, RuntimeError> {
+        // A /loop that matches a sound to a reference is the knob search: candidates built once, then knob settings
+        // tried by the hundred, the model coming back for structural leaps. /loop on its own picks a paused one up.
+        let searching = self.0.state.borrow().integration.as_ref().is_some_and(|i| i.has_goal());
+        if let Some(request) = text.strip_prefix("/loop").filter(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace)).map(trim)
+        {
+            if request.is_empty() || matches!(request.to_lowercase().as_str(), "resume" | "carry on" | "continue") {
+                if searching && self.goal_paused_here().await {
+                    return self.run_goal(op, None).await;
+                }
+                self.notice("Nothing to pick up here. Say what to reach: /loop and the goal, such as /loop master this to -9 LUFS with the vocal cutting through.");
+                return Ok(None);
+            }
+            if searching && starts_match(request) {
+                return self.run_goal(op, Some(request.to_owned())).await;
+            }
+        }
         let snapshot = self.observe(&op, pinned, false).await?;
         self.assert_current(&op)?;
         let note = match &self.0.learned {
@@ -153,13 +170,29 @@ impl Session {
         } else {
             None
         };
+        // The loop: an explicit /loop, or a request that calls for it (the model judging a change starts one too).
+        let explicit = text
+            .strip_prefix("/loop")
+            .filter(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+            .map(|rest| trim(rest).to_owned());
+        let looping = (run.is_none() && explicit.is_some())
+            .then(|| Rc::new(RefCell::new(LoopRun::new(explicit.clone().unwrap_or_else(|| text.clone()), LOOP_BUDGET))));
+        // A request the judge can measure gets a hint to work in judged rounds; the model decides, and its own judge
+        // call starts the loop.
+        let note = if run.is_none() && explicit.is_none() && wants_loop(&text) { format!("{note}{LOOP_HINT}") } else { note };
         {
             let mut s = self.0.state.borrow_mut();
             if run.is_none() {
                 s.last_run = None;
             }
             s.matching = run.clone();
+            s.looping = looping;
+            s.turn_request = Some(explicit.clone().unwrap_or_else(|| text.clone()));
         }
+        let text = match &explicit {
+            Some(request) => loop_setup(request),
+            None => text,
+        };
         // A match run goes on by itself: its words aren't a reaction.
         if let Some(taste) = &self.0.taste {
             taste.turn_started(&text, run.is_none());
@@ -188,7 +221,13 @@ impl Session {
             result => result?,
         };
         let Some(run) = run else {
-            return Ok(Some(result));
+            let looping = self.0.state.borrow().looping.clone();
+            let Some(looping) = looping else {
+                return Ok(Some(result));
+            };
+            let result = self.run_loop(&op, &looping, result).await;
+            self.0.state.borrow_mut().looping = None;
+            return result.map(Some);
         };
         let result = self.run_match(&op, &run, result, budget).await;
         {

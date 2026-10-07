@@ -251,6 +251,13 @@ impl SessionController for Control {
         self.call("stop-goal");
         Ok(true)
     }
+    fn has_stop_loop(&self) -> bool {
+        self.enabled("goal")
+    }
+    async fn stop_loop(&self) -> Result<bool, RuntimeError> {
+        self.call("stop-loop");
+        Ok(true)
+    }
     fn has_recipes(&self) -> bool {
         self.enabled("recipes")
     }

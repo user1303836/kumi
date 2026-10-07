@@ -5,6 +5,7 @@
 //!
 //! Any OpenAI-compatible chat endpoint that takes audio serves: OpenAI's own audio models with an API key, or a model
 //! on this computer (a llama.cpp server with Qwen3-Omni, say) named in `KUMI_LISTENER` as `<base url>#<model>`.
+//! `KUMI_LISTENER=off` leaves the meters alone.
 
 use crate::audio::decode::open_audio;
 use async_trait::async_trait;
@@ -199,6 +200,10 @@ pub fn parse_answer(text: &str) -> Option<Answer> {
     serde_json::from_str(&text[start..=end]).ok()
 }
 
+/// `KUMI_LISTENER=off`: no listening model, the meters alone (no audio leaves the computer).
+pub fn listening_off(env: &std::collections::HashMap<String, String>) -> bool {
+    env.get("KUMI_LISTENER").is_some_and(|value| matches!(value.trim().to_lowercase().as_str(), "off" | "none" | "0" | "false"))
+}
 /// A listener named in `KUMI_LISTENER` (`<base url>#<model>`, its key in `KUMI_LISTENER_KEY` when it needs one).
 pub fn listener_from_env(env: &std::collections::HashMap<String, String>) -> Option<ChatListener> {
     let named = env.get("KUMI_LISTENER").filter(|value| !value.trim().is_empty())?;

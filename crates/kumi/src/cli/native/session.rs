@@ -20,7 +20,7 @@ use kumi_runtime::{
         store_client::StoreClient,
     },
     library::{create_library, LibraryOptions},
-    listening::listener::{listener_from_env, openai_listener, Listener},
+    listening::listener::{listener_from_env, listening_off, openai_listener, Listener},
     providers::{api_key_for, ProviderId},
     video::programs::{configure_programs, ProgramDefaults},
     *,
@@ -409,6 +409,9 @@ pub(super) async fn run_session(
                 Rc::new(move |signal| {
                     let (store, env) = (store.clone(), env.clone());
                     async move {
+                        if listening_off(&env) {
+                            return None;
+                        }
                         if let Some(listener) = listener_from_env(&env) {
                             return Some(Rc::new(listener) as Rc<dyn Listener>);
                         }
@@ -518,7 +521,9 @@ pub(super) async fn run_session(
     // An older Kumi open beside this one writes the files: what it changes comes in a turn later.
     options.files = database.as_ref().map(|client| FileSync::new(client.clone(), files, &named));
     options.store = database;
-    options.goals = Some(create_goal_store(load_goals_dir(&io.env)?));
+    let goals = load_goals_dir(&io.env)?;
+    options.objectives = Some(create_objective_store(goals.clone()));
+    options.goals = Some(create_goal_store(goals));
     options.gaps = Some(load_gaps_file(&io.env)?);
     options.timings = Some(load_timings_file(&io.env)?);
     options.watch = Some(VideoDirectories { videos_dir: load_videos_dir(&io.env)?, tools_dir: tools_dir.clone() });

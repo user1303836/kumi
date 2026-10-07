@@ -51,6 +51,9 @@ pub struct Measures {
     pub psr: Option<f64>,
     /// Samples at or past full scale.
     pub clipped: usize,
+    /// When the highest true peak came, in seconds from the start of what was measured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peak_at: Option<f64>,
     /// Each third-octave's share of the whole, dB (level-independent).
     pub balance: Vec<f64>,
     /// Each third-octave's side share: 0 is mono, 0.5 as much side as mid.
@@ -700,6 +703,13 @@ impl Meter {
             plr: integrated.map(|integrated| round1(true_peak - integrated)),
             psr: psr.map(round1),
             clipped: self.clipped,
+            peak_at: self
+                .block_peaks
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.total_cmp(b.1))
+                .filter(|(_, peak)| **peak > 0.)
+                .map(|(at, _)| round1(at as f64 * self.block as f64 / rate)),
             balance,
             width,
             tilt: round2(tilt),

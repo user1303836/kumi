@@ -375,6 +375,39 @@ case!(recipes_run_and_fill_blanks, async {
     h.has("↻ Saved a recipe: Vocal chain (4 steps)");
     h.close().await;
 });
+case!(a_goal_and_its_loop_show_where_they_are_and_each_judged_round, async {
+    let c = Rc::new(Control::default());
+    c.set("goal", json!(true));
+    let h = Harness::with(140, 40, c, |_| {});
+    h.start().await;
+    h.connect();
+    h.type_text("/goal master this to -9 LUFS\r").await;
+    assert!(h.calls().contains(&"goal:master this to -9 LUFS".into()));
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"objective","objective":"master this to -9 LUFS","state":"running","turns":1,"turnBudget":12,"elapsedMs":65000,"budgetMs":3600000,"verdict":"continue","reason":"not met yet, by the model's own check","next":"raise the limiter","measured":false}));
+    for s in [
+        "working · turn 1 of 12 · 1:05 of 1:00:00",
+        "checked: not met yet, by the model's own",
+        "next: raise the limiter",
+        "goal · turn 2/12",
+    ] {
+        h.has(s)
+    }
+    // The loop inside it: where it is, and each round in the transcript.
+    h.emit(json!({"type":"loop","state":"running","request":"master this to -9 LUFS","rounds":1,"kept":1,"reverted":0,"listens":3,"elapsedMs":30000,"roundsLeft":15,"next":"True peak"}));
+    h.has("loop · round 1 · 1 kept");
+    h.emit(json!({"type":"judged","round":2,"kind":"judged","heard":"the mix, bars 49–57","target":"True peak","change":"Limiter ceiling -1 → -3.5 dB","rows":[],"kept":false,"why":"it hurt punch (crest)","met":false,"listens":4,"elapsedMs":42000}));
+    for s in ["Round 2 · true peak", "change: Limiter ceiling -1 → -3.5 dB", "reverted: it hurt punch (crest)", "4 listens · 0:42"] {
+        h.has(s)
+    }
+    h.emit(json!({"type":"loop","state":"done","request":"master this to -9 LUFS","rounds":2,"kept":1,"reverted":1,"listens":5,"elapsedMs":61000,"roundsLeft":14,"stop":"met"}));
+    h.has("Loop: 2 rounds · 1 kept · 1 taken back · 5 listens · 1:01 · every item within tolerance");
+    h.emit(json!({"type":"objective","objective":"master this to -9 LUFS","state":"done","turns":2,"turnBudget":12,"elapsedMs":90000,"budgetMs":3600000,"verdict":"complete","reason":"the judge's checklist is met","measured":true}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.has("met · turn 2 of 12");
+    h.has("measured: the judge's checklist is met");
+    h.close().await;
+});
 case!(goal_dashboard_and_aside_panel, async {
     let c = Rc::new(Control::default());
     c.set("goal", json!(true));
@@ -399,6 +432,8 @@ case!(goal_dashboard_and_aside_panel, async {
     assert!(regex::Regex::new("▁.*█").unwrap().is_match(&h.screen().join("\n")));
     h.type_text("/goal stop\r").await;
     assert!(h.calls().contains(&"stop-goal".into()));
+    h.type_text("/loop stop\r").await;
+    assert!(h.calls().contains(&"stop-loop".into()));
     h.emit(json!({"type":"goal","state":"done","goal":"make my pad sound like ~/ref.wav","generation":13,"rendered":39,"trend":[58,81],"first":58,"best":{"label":"Collision","score":81},"elapsedMs":200000,"candidates":3,"bestTrack":"Kumi · Goal best","why":"stopped"}));
     h.emit(json!({"type":"state","state":"idle"}));
     h.has("done · stopped · gen 13");

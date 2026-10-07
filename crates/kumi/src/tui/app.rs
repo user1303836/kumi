@@ -200,6 +200,10 @@ struct State {
     last_action: Option<LastAction>,
     goal: Option<Value>,
     matching: Option<Value>,
+    /// The loop under way: its status, and when it started.
+    looping: Option<Value>,
+    /// The /goal objective's latest status (and, while it runs, when it started).
+    objective: Option<Value>,
     watching: bool,
     undoing: bool,
     hits: Vec<Hit>,
@@ -285,6 +289,8 @@ impl State {
             last_action: None,
             goal: None,
             matching: None,
+            looping: None,
+            objective: None,
             watching: false,
             undoing: false,
             hits: vec![],

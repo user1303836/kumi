@@ -48,7 +48,7 @@ fn candidates(e: &Evolution, clips: bool) -> Vec<AuditionCandidate> {
         .map(|s| AuditionCandidate { track: s.name.clone(), label: Some(s.label.clone()), clip: clips.then(|| "first".into()), mix: None })
         .collect()
 }
-/// A goal run's hold on the session's goal flags: from its first moment a /goal stop stops this run (not an older
+/// A goal run's hold on the session's goal flags: from its first moment a /loop stop stops this run (not an older
 /// paused goal), and however the run ends, the flags go with it (unless a newer run holds them by then).
 struct GoalHold {
     session: Session,
@@ -79,6 +79,17 @@ impl Session {
     /// The goal kept in memory for `place`, if the last one run or stopped was there.
     fn goal_kept(&self, place: &str) -> Option<GoalState> {
         self.0.state.borrow().goal_state.as_ref().filter(|(at, _)| at == place).map(|(_, state)| state.clone())
+    }
+    /// Whether this Set has a paused knob search to pick up.
+    pub(super) async fn goal_paused_here(&self) -> bool {
+        let place = self.goal_where();
+        if let Some(kept) = self.goal_kept(&place) {
+            return kept.status == GoalRun::Paused;
+        }
+        match &self.0.options.goals {
+            Some(store) => store.load(&place).await.ok().flatten().is_some_and(|kept| kept.status == GoalRun::Paused),
+            None => false,
+        }
     }
     /// Saves a goal under the place it belongs to, named when it began: a Set opened since doesn't take it.
     fn persist_goal(&self, place: &str, state: &GoalState) {
@@ -148,7 +159,7 @@ impl Session {
         if text.is_none() && state.is_none() {
             return Err(KumiError::new(
                 FailureKind::Request,
-                "There's no goal to pick up. Say what to reach, such as: /goal make my pad sound like ~/ref.wav",
+                "There's no search to pick up. Say what to reach, such as: /loop make my pad sound like ~/ref.wav",
             )
             .into());
         }
@@ -156,7 +167,7 @@ impl Session {
             return Err(KumiError::new(
                 FailureKind::Request,
                 format!(
-                    "That goal is done ({}). Start another with /goal and what to reach.",
+                    "That search is done ({}). Start another with /loop and what to reach.",
                     state.as_ref().unwrap().why.as_deref().unwrap_or("finished")
                 ),
             )
@@ -212,7 +223,7 @@ impl Session {
                     status.clone()
                 };
                 self.emit(status.into());
-                self.notice("A goal searches toward something: with no reference, Kumi did this as a regular request. To search, give /goal a reference too (an audio file, a clip in the Set, or a video).");
+                self.notice("A sound-match search needs something to reach: with no reference, Kumi did this as a regular request. To search, give /loop a reference too (an audio file, a clip in the Set, or a video).");
                 return Ok(Some(TurnResult { stop_reason: StopReason::Completed, usage: Some(usage) }));
             }
             let heard = heard.unwrap();
@@ -257,7 +268,7 @@ impl Session {
         let opened = integration.goal(&request, op.signal.clone()).await;
         let mut rig = match opened {
             Ok(Ok(rig)) => rig,
-            // Stopped (/goal stop) while its search was set up: the goal ends there, done.
+            // Stopped (/loop stop) while its search was set up: the goal ends there, done.
             _ if self.0.state.borrow().goal_stopped => {
                 state.status = GoalRun::Done;
                 state.why = Some("stopped".into());
@@ -375,7 +386,7 @@ impl Session {
 
                     if closing.iter().any(|s| s.contains("Main may still be silent")) {
                         state.status = GoalRun::Paused;
-                        state.why = Some("Main couldn't be put back; set it in Live, then /goal carries on".into());
+                        state.why = Some("Main couldn't be put back; set it in Live, then /loop carries on".into());
                         break;
                     }
                     let best = leader.as_ref().and_then(|l| l.score.map(|score| Best { label: l.label.clone(), score: round(score) }));
@@ -504,7 +515,7 @@ impl Session {
                     if state.status == GoalRun::Done { " (say if you want it on one of your tracks)" } else { "" }
                 ))
                 .unwrap_or_default(),
-            if state.status == GoalRun::Paused { " · /goal carries on" } else { "" },
+            if state.status == GoalRun::Paused { " · /loop carries on" } else { "" },
             if notes.is_empty() { String::new() } else { format!(" {}", notes.join(" ")) }
         ));
         let reference = self.0.state.borrow().goal_reference.clone();

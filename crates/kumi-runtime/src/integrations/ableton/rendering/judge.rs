@@ -70,6 +70,7 @@ pub struct JudgeRun {
     span: Window,
     /// The span's own capture (its file and where the part starts), to cut excerpts from before anything changes.
     span_file: (PathBuf, f64),
+    span_focus: Option<(PathBuf, f64)>,
     loudness: Vec<Option<f64>>,
     problems: Vec<Problem>,
     first: Vec<Option<f64>>,
@@ -160,7 +161,17 @@ impl Rendering {
                 Window { from, beats: beats.unwrap_or(end - from).max(self.observer.beats_per_bar.get()) }
             }
         };
-        let heard = match self.judge_hear(request.track.as_deref(), goal.focus.as_deref(), span, signal.clone()).await? {
+        // Tracks by name, so the log says "Vocal Main", not a ref.
+        let mut goal = goal.clone();
+        if let Some(named) = goal.focus.clone() {
+            goal.focus = Some(self.track_name(&named, signal.clone()).await.unwrap_or(named));
+        }
+        let track = match &request.track {
+            Some(named) => Some(self.track_name(named, signal.clone()).await.unwrap_or_else(|| named.clone())),
+            None => None,
+        };
+        let goal = &goal;
+        let heard = match self.judge_hear(track.as_deref(), goal.focus.as_deref(), span, signal.clone()).await? {
             Ok(heard) => heard,
             Err(why) => return Ok(Err(why)),
         };
@@ -190,10 +201,11 @@ impl Rendering {
         let whole = checklist.read(&heard.main, heard.focus.as_ref());
         let mut run = JudgeRun {
             checklist,
-            track: request.track.clone(),
+            track,
             focus: goal.focus.clone(),
             span,
             span_file: (heard.file.clone(), heard.start),
+            span_focus: heard.focus_file.clone(),
             loudness: heard.main.measures.short_term.clone(),
             problems: problems.clone(),
             first: whole.clone(),
@@ -324,43 +336,66 @@ impl Rendering {
             };
             let mut predicted = predicted;
             let mut excerpt_values = after.clone();
+            let (mut file, mut start, mut loudness) = (heard.file.clone(), heard.start, heard.main.measures.integrated);
             if let Some(gain) = gain {
                 match self.rebalance(gain, signal.clone()).await {
-                    Ok((label, limited)) => {
-                        let run = self.judge.borrow();
-                        let items = &run.as_ref().unwrap().checklist.items;
-                        for values in [&mut predicted, &mut excerpt_values] {
-                            for (value, item) in values.iter_mut().zip(items) {
-                                let shifts = item.quantity == Quantity::Integrated || (item.quantity == Quantity::TruePeak && !limited);
-                                if let (Some(value), true) = (value.as_mut(), shifts) {
-                                    *value += gain;
+                    Ok((label, _)) => {
+                        // What the gain really did (a limiter after it holds peaks and eats some of it), heard again
+                        // rather than assumed; the whole moves by what the excerpt moved.
+                        let (track, focus) = {
+                            let run = self.judge.borrow();
+                            let run = run.as_ref().unwrap();
+                            (run.track.clone(), run.focus.clone())
+                        };
+                        match self.judge_hear(track.as_deref(), focus.as_deref(), window, signal.clone()).await? {
+                            Ok(again) => {
+                                let mut guard = self.judge.borrow_mut();
+                                let run = guard.as_mut().unwrap();
+                                run.listens += 1;
+                                let now = run.checklist.read(&again.main, again.focus.as_ref());
+                                for ((whole, before), after) in predicted.iter_mut().zip(&excerpt_values).zip(&now) {
+                                    if let (Some(whole), Some(before), Some(after)) = (whole.as_mut(), before, after) {
+                                        *whole += after - before;
+                                    }
                                 }
+                                excerpt_values = now;
+                                (file, start, loudness) = (again.file.clone(), again.start, again.main.measures.integrated);
                             }
+                            Err(why) => rebalanced = Some(format!("couldn't hear the rebalance: {why}")),
                         }
-                        rebalanced = Some(format!("{label} {}{} dB", if gain > 0. { "+" } else { "" }, to_string(gain)));
+                        if rebalanced.is_none() {
+                            rebalanced = Some(format!("{label} {}{} dB", if gain > 0. { "+" } else { "" }, to_string(gain)));
+                        }
                     }
                     Err(why) => rebalanced = Some(format!("loudness is {} dB off; {why}", to_string(-gain))),
                 }
             }
-            let file = self.keep_file(&heard.file).await;
+            let file = self.keep_file(&file).await;
             let mut guard = self.judge.borrow_mut();
             let run = guard.as_mut().unwrap();
             run.whole = predicted;
             run.state += 1;
             let state = run.state;
             run.excerpts.retain(|excerpt| excerpt.state == state);
-            run.excerpts.push(Excerpt {
-                window,
-                state,
-                values: excerpt_values,
-                file,
-                start: heard.start,
-                loudness: heard.main.measures.integrated,
-            });
+            run.excerpts.push(Excerpt { window, state, values: excerpt_values, file, start, loudness });
         } else {
-            // Kumi's undo takes the round's changes back, newest first.
-            for id in changes.iter().rev().map(|(id, _)| id) {
-                let _ = self.history.undo(id, signal.clone(), false).await;
+            // Kumi's undo takes the round's changes back, newest first; what Live wouldn't take back is said.
+            let mut kept_anyway = vec![];
+            for (id, title) in changes.iter().rev() {
+                match self.history.undo(id, signal.clone(), false).await {
+                    Ok(undone) if !undone.is_error => {}
+                    Ok(undone) => kept_anyway.push(format!("{title} ({})", head(&undone.text, 120))),
+                    Err(error) => kept_anyway.push(format!("{title} ({})", head(&error.to_string(), 120))),
+                }
+            }
+            if changes.is_empty() {
+                verdict.why.push_str("; nothing in HISTORY to take back (change it back yourself if you changed it another way)");
+            } else if !kept_anyway.is_empty() {
+                verdict.why.push_str(&format!("; Live wouldn't take back {}: undo it yourself", kept_anyway.join(", ")));
+            } else {
+                verdict
+                    .why
+                    .push_str(&format!("; taken back: {}", changes.iter().map(|(_, title)| title.as_str()).collect::<Vec<_>>().join(", ")));
             }
         }
         let ids = self.applied_ids();
@@ -563,12 +598,29 @@ impl Rendering {
             }
         };
         let heard_main = measure(main.file.clone(), main.start).await?;
-        let heard_focus = match focus_name.and_then(|name| files.get(&name).cloned()) {
-            Some(render) => Some(measure(render.file, render.start).await?),
-            None => None,
+        let (heard_focus, focus_file) = match focus_name.and_then(|name| files.get(&name).cloned()) {
+            Some(render) => {
+                let heard = measure(render.file.clone(), render.start).await?;
+                (Some(heard), Some((self.keep_file(&PathBuf::from(&render.file)).await, render.start)))
+            }
+            None => (None, None),
         };
         let file = self.keep_file(&PathBuf::from(&main.file)).await;
-        Ok(Ok(JudgeHeard { main: heard_main, focus: heard_focus, file, start: main.start }))
+        Ok(Ok(JudgeHeard { main: heard_main, focus: heard_focus, file, start: main.start, focus_file }))
+    }
+
+    /// A track's name, from its ref or its name.
+    async fn track_name(&self, named: &str, signal: Signal) -> Option<String> {
+        let long = self.connection().references.borrow().lengthen(&json!({"trackRef":named}));
+        let long = long["trackRef"].as_str().unwrap_or(named).to_owned();
+        let tracks = self.rows("track", json!({"fields":["name"]}), signal).await.ok()?;
+        tracks
+            .iter()
+            .find(|row| {
+                let reference = row.get("ref").and_then(Value::as_str);
+                reference == Some(named) || reference == Some(long.as_str()) || row.get("name").and_then(Value::as_str) == Some(named)
+            })
+            .and_then(|row| row.get("name").and_then(Value::as_str).map(str::to_owned))
     }
 
     /// Copies a capture into the judge's own folder, out of the listening folder's pruning.
@@ -616,26 +668,31 @@ impl Rendering {
         Window { from, beats: length }
     }
 
-    /// An excerpt of the span's own capture, measured: what it sounded like before anything changed.
+    /// An excerpt of the span's own capture (and the focus element's), measured: what it sounded like before anything
+    /// changed.
     async fn cut_excerpt(&self, run: &JudgeRun, window: Window, signal: Signal) -> Result<Excerpt, RuntimeError> {
         let tempo = self.observer.tempo.get().unwrap_or(120.);
-        let (file, start) = &run.span_file;
-        let offset = start + (window.from - run.span.from) * 60. / tempo;
-        let heard = measure_file(
-            &file.to_string_lossy(),
-            MeasureOptions { start: Some(offset), seconds: Some(window.beats * 60. / tempo), signal: Some(signal) },
-        )
-        .await
-        .map_err(|error| RuntimeError::plain(error.to_string()))?;
-        // The focus element isn't kept from the span's listen: masking is judged on the whole, not excerpts.
-        let values = run.checklist.read(&heard, None);
-        let values = values
-            .into_iter()
-            .zip(&run.checklist.items)
-            .zip(&run.whole)
-            .map(|((value, item), whole)| if matches!(item.quantity, Quantity::Problem { focus: Some(_), .. }) { *whole } else { value })
-            .collect();
-        Ok(Excerpt { window, state: run.state, values, file: file.clone(), start: offset, loudness: heard.measures.integrated })
+        let seconds = window.beats * 60. / tempo;
+        let into = (window.from - run.span.from) * 60. / tempo;
+        let cut = |file: PathBuf, start: f64| {
+            let signal = signal.clone();
+            async move {
+                measure_file(
+                    &file.to_string_lossy(),
+                    MeasureOptions { start: Some(start + into), seconds: Some(seconds), signal: Some(signal) },
+                )
+                .await
+                .map_err(|error| RuntimeError::plain(error.to_string()))
+            }
+        };
+        let (file, start) = run.span_file.clone();
+        let heard = cut(file.clone(), start).await?;
+        let focus = match run.span_focus.clone() {
+            Some((file, start)) => Some(cut(file, start).await?),
+            None => None,
+        };
+        let values = run.checklist.read(&heard, focus.as_ref());
+        Ok(Excerpt { window, state: run.state, values, file, start: start + into, loudness: heard.measures.integrated })
     }
 
     fn describe(&self, window: Window, run: &JudgeRun) -> String {
@@ -767,6 +824,8 @@ impl Rendering {
 struct JudgeHeard {
     main: Heard,
     focus: Option<Heard>,
+    /// The focus element's own capture and where its part starts, to cut excerpts from.
+    focus_file: Option<(PathBuf, f64)>,
     file: PathBuf,
     start: f64,
 }

@@ -50,7 +50,9 @@ use tokio::{
 };
 
 mod goals;
+mod looping;
 mod matching;
+mod objective;
 use super::goal::{GoalBudget, GoalState, GoalStatus, GoalStore};
 use super::{
     match_run::{MatchBudget, MatchRun},
@@ -103,6 +105,9 @@ pub struct SessionOptions {
     pub goal_random: Option<Rc<dyn Fn() -> f64>>,
     pub goals: Option<Rc<dyn GoalStore>>,
     pub goal_budget: Option<GoalBudget>,
+    /// Where /goal keeps its objective, per Set, so it survives a restart.
+    pub objectives: Option<Rc<dyn super::goal_mode::ObjectiveStore>>,
+    pub objective_budget: Option<super::goal_mode::ObjectiveBudget>,
     /// How Willington's bindings stand, None while Kumi's bridge in Live doesn't carry them: asked each time
     /// the model's session is made, since /willington switches them while Kumi runs.
     pub willington: Option<Rc<dyn Fn() -> Option<WillingtonSwitch>>>,
@@ -139,6 +144,8 @@ impl SessionOptions {
             goal_random: None,
             goals: None,
             goal_budget: None,
+            objectives: None,
+            objective_budget: None,
             willington: None,
         }
     }
@@ -215,6 +222,16 @@ struct State {
     goal_reference: Option<String>,
     /// The judge's last round this session: what /goal and the loop check after a turn.
     judged_last: Option<crate::listening::round::Round>,
+    /// The loop running this turn (an explicit /loop, a request that calls for it, or the model's own judged run).
+    looping: Option<Rc<RefCell<super::loop_run::LoopRun>>>,
+    /// The request of the turn running now, for a loop the model starts by judging.
+    turn_request: Option<String>,
+    /// The /goal objective for a place (the Set it belongs to), and the operation pursuing it.
+    objective: Option<(String, super::goal_mode::Objective)>,
+    objective_op: Option<Rc<Operation>>,
+    objective_stopped: bool,
+    /// Changes applied this session, to tell a goal's turn that changed something from one that didn't.
+    applied: u64,
     state: TurnState,
     connection: ConnectionState,
     observation: Option<String>,
@@ -548,6 +565,12 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                 goal_stopped: false,
                 goal_reference: None,
                 judged_last: None,
+                looping: None,
+                turn_request: None,
+                objective: None,
+                objective_op: None,
+                objective_stopped: false,
+                applied: 0,
                 state: TurnState::Idle,
                 connection: ConnectionState::Disconnected,
                 observation: None,
@@ -1718,11 +1741,21 @@ impl SessionController for Session {
             }
             WatchEvent::Action(_) => return,
             WatchEvent::Judged(round) => {
-                self.0.state.borrow_mut().judged_last = Some(round);
+                let mut s = self.0.state.borrow_mut();
+                // The model judging a change in a turn of its own starts the loop: Kumi judged the request needs it.
+                if s.looping.is_none() && s.active.is_some() && s.matching.is_none() {
+                    let request = s.turn_request.clone().unwrap_or_default();
+                    s.looping = Some(Rc::new(RefCell::new(super::loop_run::LoopRun::new(request, super::loop_run::LOOP_BUDGET))));
+                }
+                if let Some(run) = &s.looping {
+                    run.borrow_mut().judged(round.clone());
+                }
+                s.judged_last = Some(round);
                 return;
             }
             WatchEvent::Change(c) => {
                 if c.state == ChangeState::Applied {
+                    self.0.state.borrow_mut().applied += 1;
                     let run = self.0.state.borrow().matching.clone();
                     if let Some(run) = run {
                         run.borrow_mut().changed();
@@ -1978,9 +2011,9 @@ impl SessionController for Session {
         true
     }
     async fn goal(&self, text: Option<&str>) -> Result<(), RuntimeError> {
-        let goal = text.map(trim).filter(|s| !s.is_empty()).map(str::to_owned);
+        let words = text.map(trim).filter(|s| !s.is_empty()).map(str::to_owned);
         {
-            let mut s = self.0.state.borrow_mut();
+            let s = self.0.state.borrow();
             if s.state == TurnState::Closed {
                 return Err(RuntimeError::plain("Session is closed"));
             }
@@ -1990,26 +2023,51 @@ impl SessionController for Session {
             if !s.started {
                 return Err(RuntimeError::plain("Session is not started"));
             }
-            if goal.as_ref().is_some_and(|s| s.len() > 4096) {
-                return Err(RuntimeError::plain("Say the goal in at most 4 KiB"));
-            }
-            s.turns += 1;
-            s.interrupted = None;
         }
-        let input = goal.as_ref().map(|s| format!("/goal {s}")).unwrap_or("/goal".into());
-        self.perform(
-            true,
-            Phase::Refresh,
-            Box::new(move |this, op| async move { this.run_goal(op, goal).await }.boxed_local()),
-            None,
-            Some(input),
-        )?
-        .await
+        if words.as_ref().is_some_and(|s| s.len() > 4096) {
+            return Err(RuntimeError::plain("Say the goal in at most 4 KiB"));
+        }
+        match self.objective_command(words).await? {
+            objective::GoalCommand::Show(Some(objective)) => {
+                self.emit_objective(&objective, objective.elapsed_ms);
+                Ok(())
+            }
+            objective::GoalCommand::Show(None) => {
+                self.notice("No goal yet: /goal and what to reach, such as /goal master this to -9 LUFS with the vocal cutting through.");
+                Ok(())
+            }
+            objective::GoalCommand::Run(objective, fresh) => {
+                {
+                    let mut s = self.0.state.borrow_mut();
+                    s.turns += 1;
+                    s.interrupted = None;
+                }
+                let input = format!("/goal {}", objective.objective);
+                self.perform(
+                    true,
+                    Phase::Refresh,
+                    Box::new(move |this, op| async move { this.run_objective(op, objective, fresh).await }.boxed_local()),
+                    None,
+                    Some(input),
+                )?
+                .await
+            }
+        }
     }
     fn has_stop_goal(&self) -> bool {
         true
     }
     async fn stop_goal(&self) -> Result<bool, RuntimeError> {
+        // The objective first; with none, a sound-match search stops the same way.
+        if self.stop_objective().await? {
+            return Ok(true);
+        }
+        self.stop_goal_inner().await
+    }
+    fn has_stop_loop(&self) -> bool {
+        true
+    }
+    async fn stop_loop(&self) -> Result<bool, RuntimeError> {
         self.stop_goal_inner().await
     }
     fn has_goal_status(&self) -> bool {

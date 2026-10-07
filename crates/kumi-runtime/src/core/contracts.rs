@@ -1235,10 +1235,14 @@ pub enum SessionEvent {
     },
     Match(MatchStatus),
     Goal(GoalStatus),
+    /// A /goal objective's status: where it is, turns and time against its budget, and the last check.
+    Objective(super::goal_mode::ObjectiveStatus),
     Heard(HeardEvent),
     Auditioned(AuditionEvent),
     /// A round of a judged run: its target, change, numbers before and after, keep or revert, and what's next.
     Judged(crate::listening::round::Round),
+    /// Where the loop is: rounds, kept and taken back, listens, time, the next target.
+    Loop(super::loop_run::LoopStatus),
     Watched(WatchedEvent),
     Web(WebEvent),
     Library(LibraryEvent),
@@ -1900,6 +1904,13 @@ pub trait SessionController {
         false
     }
     async fn stop_goal(&self) -> Result<bool, RuntimeError> {
+        Ok(false)
+    }
+    fn has_stop_loop(&self) -> bool {
+        false
+    }
+    /// /loop stop: ends a sound-match search, running or paused, keeping its best (a judged loop ends as Esc ends it).
+    async fn stop_loop(&self) -> Result<bool, RuntimeError> {
         Ok(false)
     }
     fn has_goal_status(&self) -> bool {

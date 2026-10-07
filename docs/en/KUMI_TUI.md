@@ -29,8 +29,9 @@ closes, crashes or is stopped.
 - **Tabs** (bottom right): **HISTORY** lists the latest three things Kumi kept
   (each with **forget**), then every change, newest first, each with **undo**,
   or **kept** / **no undo** / **check Live** when it can't be undone. **GOAL**
-  shows a `/goal` ("No goal yet" until there is one): the target, the best
-  score with its trend, the leading candidate, and the time.
+  shows the `/goal` ("No goal yet" until there is one): the goal, its turns and
+  time against the budget, the last check and what's next; for a sound-match
+  `/loop`, the best score with its trend, the leading candidate, and the time.
 - **Input box** (bottom left): messages waiting to be sent show above it, a
   pinned device as a chip, and the files that go with your next message (name,
   kind, size and ×). Empty, it says "ctrl+t to talk". While Kumi listens,
@@ -102,7 +103,8 @@ message, not a command.
 | `/fast` | Turn on the model's faster tier when its provider lists one (ChatGPT's "Fast": quicker answers, more of your usage); `/fast` again turns it off. Shown as "· fast" beside the model |
 | `/willington` | Turn [Willington](WILLINGTON_INTEGRATION.md) on or off. Rack bindings are requested on supported builds; clip Follow Actions and native editing also require passing exact-library self-tests. Native editing is b5 macOS ARM64 only. Off until enabled; available when the bridge carries Willington. |
 | `/login`, `/logout` | Sign in (ChatGPT in the browser, or an API key shown only as dots) or out |
-| `/goal <what to reach>` | Go after a sound until Kumi gets there. `/goal` alone picks up a paused goal; `/goal stop` (or `/goal end`) ends it |
+| `/loop <what to reach>` | Work in judged rounds until it's met: one change, heard before and after, kept only if nothing else got worse, then the next target. A sound to match ("make my pad sound like ~/ref.wav") runs the knob search instead: `/loop` alone picks a paused one up, `/loop stop` ends it |
+| `/goal <what to reach>` | Keep at one goal across turns, checked after each (by the judge's numbers when measured), until it's met, blocked or out of budget. `/goal` shows it; `/goal resume`, `/goal edit <words>`, `/goal pause` (or Esc), `/goal clear` |
 | `/memory` | Everything Kumi keeps: notes about you and this Set, what it learned from your Sets, techniques, recipes and lessons; choose one to forget it (a note to change its words or pin it, a recipe to run or forget) |
 | `/note <id> <new words>` | Change a note's words without the model; a note's "Change the words" in `/memory` starts it for you |
 | `/recipes` | Your recipes: run one or forget it. One with blanks starts a `/recipe` line for you to finish, with what's pinned filled in |
@@ -171,7 +173,7 @@ instead, which suits screen readers and logs. It has `/help`, `/status`,
 `/model [provider/model]`, `/effort [level|default]`, `/fast`, `/logout <provider>`,
 `/memory`, `/forget <id>`, `/note <id> <new words>`, `/pin <id>`, `/unpin <id>`,
 `/recipes`, `/willington`, `/update`, `/changelog` and `/quit`, but no `/btw`,
-`/goal` or `/copy`. Sign in from a shell with `kumi login`. Ctrl-C stops the
+`/goal`, `/loop` or `/copy`. Sign in from a shell with `kumi login`. Ctrl-C stops the
 answer, or quits when idle.
 
 ## Terminals

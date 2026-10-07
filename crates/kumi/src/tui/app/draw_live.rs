@@ -572,7 +572,51 @@ impl TuiApp {
         self.0.state.borrow_mut().history_rows = Some((revision, width, rows.clone()));
         rows
     }
+    /// The /goal objective: what it is, where it stands against its budget, the last check and what's next.
+    fn objective_rows(&self, objective: &Value, width: i32) -> Vec<TabRow> {
+        let clean = |v: &Value, max| self.clean(&v.as_str().unwrap_or("").replace('\n', " "), max);
+        let running = objective["state"] == "running";
+        let elapsed =
+            if running { perf_now() - objective["since"].as_f64().unwrap_or(0.) } else { objective["elapsedMs"].as_f64().unwrap_or(0.) };
+        let mut rows = vec![];
+        let mut line = |parts: Vec<super::super::wrap::Span>| {
+            rows.extend(wrap(&parts, width).into_iter().map(|spans| TabRow { spans, ..Default::default() }))
+        };
+        line(vec![sp(clean(&objective["objective"], 300), st::TEXT)]);
+        let state = match (objective["state"].as_str().unwrap_or(""), objective["verdict"].as_str().unwrap_or("")) {
+            ("running", _) => "working".to_string(),
+            ("done", "complete") => "met".into(),
+            ("done", _) => "stopped".into(),
+            (_, "blocked") => "blocked · /goal resume once it's dealt with".into(),
+            (_, "budget") => "out of budget · /goal resume carries on".into(),
+            (_, "stuck") => "stuck · /goal edit, or resume".into(),
+            _ => "paused · /goal resume carries on".into(),
+        };
+        line(vec![sp(
+            format!(
+                "{state} · turn {} of {} · {} of {}",
+                num(&objective["turns"]),
+                num(&objective["turnBudget"]),
+                helpers::clock_of(elapsed),
+                helpers::clock_of(objective["budgetMs"].as_f64().unwrap_or(0.))
+            ),
+            st::DIM,
+        )]);
+        let reason = clean(&objective["reason"], 300);
+        if !reason.is_empty() {
+            let by = if objective["measured"] == true { "measured" } else { "checked" };
+            line(vec![sp(format!("{by}: "), st::DIM), sp(reason, if objective["verdict"] == "complete" { st::ACCENT } else { st::TEXT })]);
+        }
+        let next = clean(&objective["next"], 300);
+        if !next.is_empty() {
+            line(vec![sp("next: ", st::DIM), sp(next, st::TEXT)]);
+        }
+        rows
+    }
     pub(super) fn goal_rows(&self, width: i32) -> Vec<TabRow> {
+        if let Some(objective) = self.0.state.borrow().objective.clone() {
+            return self.objective_rows(&objective, width);
+        }
         let Some(goal) = self.0.state.borrow().goal.clone() else {
             return vec![];
         };
@@ -589,7 +633,7 @@ impl TuiApp {
             "starting" => "setting up".into(),
             "running" => "searching".into(),
             "paused" => {
-                format!("paused{} · /goal carries on", if !why.is_empty() && why != "paused" { format!(" · {why}") } else { String::new() })
+                format!("paused{} · /loop carries on", if !why.is_empty() && why != "paused" { format!(" · {why}") } else { String::new() })
             }
             _ => format!("done{}", if !why.is_empty() { format!(" · {why}") } else { String::new() }),
         };

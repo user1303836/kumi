@@ -609,10 +609,31 @@ impl TuiApp {
             self.hold(raw, when);
             return Ok(());
         }
-        if matches!(command, "/goal stop" | "/goal end") && controller.has_stop_goal() {
+        if command == "/goal pause" {
+            self.clear_editor();
+            if self.busy() {
+                self.cancel();
+            } else {
+                self.notice("There's no goal running to pause.", NoticeTone::Info);
+            }
+            return Ok(());
+        }
+        if matches!(command, "/goal stop" | "/goal end" | "/goal clear") && controller.has_stop_goal() {
             self.clear_editor();
             if !controller.stop_goal().await? {
                 self.notice("There's no goal to stop.", NoticeTone::Info);
+            }
+            return Ok(());
+        }
+        // A loop ends as Esc ends it; a sound-match search ends for good (paused ones too) and keeps its best.
+        if command == "/loop stop" {
+            self.clear_editor();
+            if !(controller.has_stop_loop() && controller.stop_loop().await?) {
+                if self.busy() {
+                    self.cancel();
+                } else {
+                    self.notice("There's no loop to stop.", NoticeTone::Info);
+                }
             }
             return Ok(());
         }
@@ -653,6 +674,13 @@ impl TuiApp {
                 }
             }
             self.0.scheduler.request();
+            return Ok(());
+        }
+        // /loop goes to the session as a request: it runs it in judged rounds until the goal is met (on its own, it
+        // picks a paused sound-match search back up).
+        if command == "/loop" || command.starts_with("/loop ") {
+            self.clear_editor();
+            self.send(&raw).await;
             return Ok(());
         }
         if command == "/undo" {
@@ -964,7 +992,8 @@ pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/fast", about: "The model's faster tier, when its provider offers one" },
     Command { name: "/willington", about: "Willington's bindings in Live: macro mapping, zones" },
     Command { name: "/login", about: "Sign in to a provider" },
-    Command { name: "/goal", about: "Go after a sound until Kumi gets there" },
+    Command { name: "/loop", about: "Listen, judge and adjust in rounds until the goal is met: /loop <what>, then stop" },
+    Command { name: "/goal", about: "Keep at one goal until it's met: /goal <what>, then resume, edit, pause, clear" },
     Command { name: "/memory", about: "What Kumi remembers" },
     Command { name: "/note", about: "Change a note's words: /note <id> <new words>" },
     Command { name: "/recipes", about: "Your saved ways of working" },

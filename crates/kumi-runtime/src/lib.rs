@@ -41,6 +41,7 @@ pub use core::contracts::{
 pub use core::errors::{FailureKind, KumiError, RuntimeError};
 pub use core::gaps::{gap_tools, GAP_GUIDANCE, GAP_TOOL};
 pub use core::goal::{create_goal_store, GoalBudget, GoalState, GoalStatus, GoalStore, GOAL_BUDGET};
+pub use core::goal_mode::{create_objective_store, Objective, ObjectiveBudget, ObjectiveStatus, ObjectiveStore, OBJECTIVE_BUDGET};
 pub use core::match_run::{starts_match, MatchBudget, MatchRun, MatchStatus, MatchStop, MATCH_BUDGET};
 pub use core::memory::{create_memory_store, memory_instructions, FORGET_TOOL, MAX_NOTE, MAX_NOTES, REMEMBER_TOOL};
 pub use core::playbook::{create_playbook_store, lesson_line, playbook_brief, Lesson, PlaybookStore};

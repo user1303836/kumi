@@ -204,12 +204,18 @@ fn a_change_stays_only_when_its_target_improves_and_nothing_else_gets_audibly_wo
     let verdict = checklist.verdict(Some(loudness), &before, &louder);
     assert!(verdict.kept, "{verdict:?}");
     assert_eq!(verdict.rows[loudness].change, Change::Better);
-    // Louder, but the punch went with it: taken back, and the verdict says why.
+    // Louder, but the punch went with it, further than the loudness moved: taken back, and the verdict says why.
     let punch = at("punch");
     let mut squashed = louder.clone();
-    squashed[punch] = squashed[punch].map(|v| v - 3.);
+    squashed[punch] = squashed[punch].map(|v| v - 4.5);
     let verdict = checklist.verdict(Some(loudness), &before, &squashed);
     assert!(!verdict.kept && verdict.hurt == ["punch"] && verdict.why.contains("punch"), "{verdict:?}");
+    // Bringing loudness up 3 dB may cost punch about as much: a 2 dB drop is allowed then, a 5 dB one isn't.
+    let mut pressed = louder.clone();
+    pressed[punch] = pressed[punch].map(|v| v - 2.);
+    assert!(checklist.verdict(Some(loudness), &before, &pressed).kept);
+    pressed[punch] = pressed[punch].map(|v| v - 3.);
+    assert!(!checklist.verdict(Some(loudness), &before, &pressed).kept);
     // A change that didn't move its target isn't kept either.
     assert!(!checklist.verdict(Some(loudness), &before, &before).kept);
     // After a kept change that left loudness off target, rebalancing brings it back.

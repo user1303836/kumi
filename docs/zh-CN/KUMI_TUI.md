@@ -12,7 +12,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 - **对话**（左侧）：你的消息、Kumi 的回答及其步骤，用平常的话描述（“looked at your Set”），每条都附有耗时。正在进行的步骤按类型显示动画（搜索、阅读、构建设备、修改、聆听、播放）；同一步骤做了多次会折叠成一行（“read a page ×3”）。Kumi 听到的内容显示为一个小频谱，它记住的内容单独占一行：✎ 笔记，◆ 技巧，↻ 配方，✦ 从匹配中得到的经验。
 - **FOCUS**（右上）：你在 Live 中所处的位置，随你的选择变化而更新：轨道的设备树（含机架链）、以小型钢琴卷帘显示的片段音符，或 Session 视图、编曲视图的条带。你指向的设备（点击它，或在 Live 中使用 **Ask Kumi about this**）会被固定，用于你接下来的消息。
 - **NOW**（右侧中部）：Kumi 正在做的事，随进行实时绘出：某个值修改前后的样子、新片段的音符、色块、落入设备链的设备、“▶ Playing from the start marker”。
-- **标签页**（右下）：**HISTORY** 先列出 Kumi 最近记住的三项内容（各带 **forget**），然后是每项修改，最新的在前，各带 **undo**；无法撤销时则显示 **kept** / **no undo** / **check Live**。**GOAL** 显示 `/goal`（设定之前显示“No goal yet”）：目标、最佳得分及其趋势、领先的候选方案，以及用时。
+- **标签页**（右下）：**HISTORY** 先列出 Kumi 最近记住的三项内容（各带 **forget**），然后是每项修改，最新的在前，各带 **undo**；无法撤销时则显示 **kept** / **no undo** / **check Live**。**GOAL** 显示 `/goal`（设定之前显示“No goal yet”）：目标、回合数和用时与预算的对比、最后一次检查以及下一步；匹配声音的 `/loop` 则显示最佳得分及其趋势、领先的候选方案，以及用时。
 - **输入框**（左下）：等待发送的消息显示在它上方，被固定的设备显示为一个小标签，随下一条消息发送的文件则显示名称、类型、大小和 ×。为空时显示 “ctrl+t to talk”。Kumi 聆听时，它的底行会显示一个闪烁的薄荷绿 `●`、时间和电平表，右侧是可用的按键；不用红色，因为在 Live 中红色表示录音。
 
 欢迎界面会显示自你上次使用以来工程中发生的变化；有更新的 Kumi 时也会显示；第一次时还会说明 Kumi 正在后台学习你的素材库。
@@ -63,7 +63,8 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | `/fast` | 当提供方在列表中提供时，开启模型的更快档位（ChatGPT 的“Fast”：回答更快，用量也更多）；再次输入 `/fast` 关闭。模型名旁会显示“· fast” |
 | `/willington` | 开启或关闭 [Willington](WILLINGTON_INTEGRATION.md)。在支持的构建上请求机架绑定；片段 Follow Actions 和原生编辑还要求通过匹配实际库的自测。原生编辑仅支持 b5 macOS ARM64。启用前保持关闭；桥接包含 Willington 时可用。 |
 | `/login`、`/logout` | 登录（在浏览器中用 ChatGPT 登录，或输入只显示为圆点的 API 密钥）或退出登录 |
-| `/goal <what to reach>` | 追求一种声音，直到 Kumi 做到为止。只输入 `/goal` 会继续已暂停的目标；`/goal stop`（或 `/goal end`）结束它 |
+| `/loop <what to reach>` | 按判定的轮次工作直到达成：一次修改，听修改前后，只有其他方面没变差才保留，然后下一个目标。要匹配某个声音（“让我的 pad 听起来像 ~/ref.wav”）时改为旋钮搜索：单独输入 `/loop` 继续已暂停的搜索，`/loop stop` 结束它 |
+| `/goal <what to reach>` | 跨多个回合坚持一个目标，每个回合后检查（测量过时看判定的数值），直到达成、受阻或用完预算。`/goal` 显示它；`/goal resume`、`/goal edit <words>`、`/goal pause`（或 Esc）、`/goal clear` |
 | `/memory` | Kumi 记住的一切：关于你和本工程的笔记、从你的工程中学到的东西、技巧、配方和经验；选择一项即可让它忘掉（笔记还可以修改文字或置顶，配方可以运行或忘掉） |
 | `/note <id> <new words>` | 不经模型修改一条笔记的文字；在 `/memory` 中选择笔记的 “Change the words” 会替你开头 |
 | `/recipes` | 你的配方：运行或忘掉一个。有空位的配方会写好一行 `/recipe`，填上已固定的对象，由你补完 |
@@ -119,7 +120,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 
 ## 纯文本模式
 
-设置 `KUMI_UI=plain`，或者输入或输出经过管道时，Kumi 会改用逐行显示的纯文本界面，适合屏幕阅读器和日志。它支持 `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new`、`/conversations [n]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/willington`、`/update`、`/changelog` 和 `/quit`，但没有 `/btw`、`/goal` 或 `/copy`。请在 shell 中用 `kumi login` 登录。Ctrl-C 停止回答，空闲时则退出。
+设置 `KUMI_UI=plain`，或者输入或输出经过管道时，Kumi 会改用逐行显示的纯文本界面，适合屏幕阅读器和日志。它支持 `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new`、`/conversations [n]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/willington`、`/update`、`/changelog` 和 `/quit`，但没有 `/btw`、`/goal`、`/loop` 或 `/copy`。请在 shell 中用 `kumi login` 登录。Ctrl-C 停止回答，空闲时则退出。
 
 ## 终端
 

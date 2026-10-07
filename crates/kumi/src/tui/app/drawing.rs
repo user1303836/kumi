@@ -349,6 +349,22 @@ impl TuiApp {
                     num(&goal["generation"]),
                     helpers::clock_of(now - goal["since"].as_f64().unwrap_or(0.))
                 )
+            } else if let Some(goal) = state.objective.as_ref().filter(|g| g["state"] == "running" && state.looping.is_none()) {
+                format!(
+                    "goal · turn {}/{} · {}",
+                    num(&goal["turns"]).parse::<f64>().map(|t| t + 1.).map(|t| t.to_string()).unwrap_or_else(|_| "1".into()),
+                    num(&goal["turnBudget"]),
+                    helpers::clock_of(now - goal["since"].as_f64().unwrap_or(0.))
+                )
+            } else if let Some(looping) = &state.looping {
+                format!(
+                    "loop · round {} · {} kept · {} back{} · {}",
+                    num(&looping["rounds"]),
+                    num(&looping["kept"]),
+                    num(&looping["reverted"]),
+                    looping["next"].as_str().map(|next| format!(" · next: {}", next.to_lowercase())).unwrap_or_default(),
+                    helpers::clock_of(now - looping["since"].as_f64().unwrap_or(0.))
+                )
             } else if let Some(matching) = &state.matching {
                 format!(
                     "matching · {}{}",

@@ -493,6 +493,41 @@ impl TuiApp {
                     );
                 }
             }
+            "objective" => {
+                let mut status = value.clone();
+                status["since"] = json!(perf_now() - n("elapsedMs"));
+                self.0.state.borrow_mut().objective = Some(status);
+                self.0.tabs.show("goal");
+            }
+            "loop" => {
+                self.0.state.borrow_mut().looping = if get("state") == "running" {
+                    let mut status = value.clone();
+                    status["since"] = json!(perf_now() - n("elapsedMs"));
+                    Some(status)
+                } else {
+                    None
+                };
+                if get("state") == "done" && n("rounds") > 0. {
+                    let why = match value["stop"].as_str().unwrap_or("") {
+                        "met" => "every item within tolerance",
+                        "stalled" => "changes stopped helping",
+                        "budget" => "its budget spent",
+                        "ended" => "ended",
+                        _ => "nothing more judged",
+                    };
+                    self.notice(
+                        &format!(
+                            "Loop: {} rounds · {} kept · {} taken back · {} listens · {} · {why}",
+                            n("rounds"),
+                            n("kept"),
+                            n("reverted"),
+                            n("listens"),
+                            helpers::clock_of(n("elapsedMs"))
+                        ),
+                        NoticeTone::Info,
+                    );
+                }
+            }
             "judged" => {
                 if let SessionEvent::Judged(round) = &event {
                     let lines = round.lines().iter().map(|line| self.clean_line(line, 400)).collect();

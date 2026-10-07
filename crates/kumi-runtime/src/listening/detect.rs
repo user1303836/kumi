@@ -185,7 +185,7 @@ pub fn harshness(heard: &Heard) -> Vec<Problem> {
                 ),
             )
         } else {
-            let q = (hz / (high - low).max(1.)).clamp(1., 12.);
+            let q = peak_q(frames, &frames_hit, first, bin - 1);
             (
                 if harsh { ProblemKind::Harshness } else { ProblemKind::Resonance },
                 format!(
@@ -211,6 +211,36 @@ pub fn harshness(heard: &Heard) -> Vec<Problem> {
     }
     problems.sort_by(|a, b| b.excess.total_cmp(&a.excess));
     problems
+}
+
+/// A steady peak's Q, from its width where it stands 3 dB less over its neighborhood than at its tip: the cut that
+/// takes it down has to be about that narrow, or it lowers the neighborhood with it and the peak still stands out.
+fn peak_q(frames: &Frames, hit: &[(usize, f64)], first: usize, last: usize) -> f64 {
+    let from = first.saturating_sub(3);
+    let to = (last + 4).min(FINE_BINS);
+    let mut sums = vec![0f64; to - from];
+    for &(frame, _) in hit {
+        let fine = &frames.fine[frame];
+        for bin in from..to {
+            let (low, high) = (bin.saturating_sub(6), (bin + 7).min(FINE_BINS));
+            let local = 10. * (fine[low..high].iter().map(|db| 10f64.powf(*db as f64 / 10.)).sum::<f64>() / (high - low) as f64).log10();
+            sums[bin - from] += fine[bin] as f64 - local;
+        }
+    }
+    let curve: Vec<f64> = sums.iter().map(|sum| sum / hit.len().max(1) as f64).collect();
+    let Some((tip, &top)) = curve.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)) else { return 4. };
+    let mut left = tip;
+    while left > 0 && curve[left - 1] > top - 3. {
+        left -= 1;
+    }
+    let mut right = tip;
+    while right + 1 < curve.len() && curve[right + 1] > top - 3. {
+        right += 1;
+    }
+    // Twelfths of an octave: the width between the bins' outer edges.
+    let octaves = (right - left + 1) as f64 / 12.;
+    let ratio = 2f64.powf(octaves);
+    (ratio.sqrt() / (ratio - 1.)).clamp(2., 12.)
 }
 
 /// The low end: stereo below 120 Hz, rumble under 30 Hz, a DC offset, one bass note louder than the rest.
@@ -321,9 +351,14 @@ pub fn peaks(heard: &Heard, ceiling: Option<f64>) -> Vec<Problem> {
         problems.push(Problem {
             kind: ProblemKind::Overs,
             id: "true peak".into(),
-            what: format!("true peaks reach {} dBTP, over the {} dBTP ceiling", measures.true_peak, ceiling),
+            what: format!(
+                "true peaks reach {} dBTP{}, over the {} dBTP ceiling",
+                measures.true_peak,
+                measures.peak_at.map(|at| format!(" (the highest at {})", clock(at))).unwrap_or_default(),
+                ceiling
+            ),
             hz: None,
-            at: vec![],
+            at: measures.peak_at.map(|at| vec![[at, at + 0.1]]).unwrap_or_default(),
             excess: round1(measures.true_peak - ceiling),
             steady: None,
             fix: format!("a true-peak limiter at the end with its ceiling at {ceiling} dBTP"),
@@ -359,8 +394,10 @@ fn spread(maskee: f64, masker: f64) -> f64 {
 const MASK_OFFSET: f64 = 6.;
 
 /// Masking as a target-to-mask ratio: the target element's band energy against the masking threshold the rest of the
-/// mix builds (the mix's bands less the target's, spread over the critical bands), frame by frame. Where the bands that
-/// carry most of the target fall under the threshold, the target is buried there.
+/// mix builds (the mix's bands less the target's, spread over the critical bands), frame by frame. The bands that
+/// carry the target are weighed as the ear hears them (a vocal's presence region over its low fundamentals, which the
+/// rest of a mix always covers); where most of that falls under the threshold, the target is buried. The problem's
+/// amount is how much of the time the target plays it's buried there, in percent.
 pub fn masking(target: &Heard, mix: &Heard, name: &str) -> Option<Problem> {
     let (t, m) = (&target.frames, &mix.frames);
     let count = t.mid.len().min(m.mid.len());
@@ -370,6 +407,7 @@ pub fn masking(target: &Heard, mix: &Heard, name: &str) -> Option<Problem> {
     let spreads: Vec<Vec<f64>> = (0..31)
         .map(|maskee| (0..31).map(|masker| 10f64.powf((spread(THIRDS[maskee], THIRDS[masker]) - MASK_OFFSET) / 10.)).collect())
         .collect();
+    let hearing: Vec<f64> = THIRDS.iter().map(|hz| 10f64.powf(a_weighting(*hz) / 10.)).collect();
     let target_levels: Vec<f64> = (0..count)
         .map(|frame| 10. * (t.mid[frame].iter().zip(&t.side[frame]).map(|(a, b)| (*a + *b) as f64).sum::<f64>() + 1e-20).log10())
         .collect();
@@ -389,18 +427,19 @@ pub fn masking(target: &Heard, mix: &Heard, name: &str) -> Option<Problem> {
         let power = |frames: &Frames, band: usize| (frames.mid[frame][band] + frames.side[frame][band]) as f64;
         let target_bands: Vec<f64> = (0..31).map(|band| power(t, band)).collect();
         let others: Vec<f64> = (0..31).map(|band| (power(m, band) - target_bands[band]).max(0.)).collect();
-        let strongest = target_bands.iter().copied().fold(0., f64::max);
+        let weighed: Vec<f64> = (0..31).map(|band| target_bands[band] * hearing[band]).collect();
+        let strongest = weighed.iter().copied().fold(0., f64::max);
         let (mut carried, mut lost, mut worst) = (0., 0., 0f64);
         for band in 0..31 {
-            // The target's bands that carry it: within 15 dB of its strongest.
-            if target_bands[band] < strongest * 10f64.powf(-1.5) {
+            // The target's bands that carry it, as the ear weighs them: within 15 dB of its strongest.
+            if weighed[band] < strongest * 10f64.powf(-1.5) {
                 continue;
             }
             let threshold: f64 = (0..31).map(|masker| others[masker] * spreads[band][masker]).sum();
             let ratio = 10. * ((target_bands[band] + 1e-20) / (threshold + 1e-20)).log10();
-            carried += target_bands[band];
+            carried += weighed[band];
             if ratio < 0. {
-                lost += target_bands[band];
+                lost += weighed[band];
                 masked_bands[band] += 1;
                 worst = worst.min(ratio);
             }
@@ -415,21 +454,21 @@ pub fn masking(target: &Heard, mix: &Heard, name: &str) -> Option<Problem> {
         return None;
     }
     deficits.sort_by(f64::total_cmp);
-    let excess = round1(percentile(&deficits, 0.5));
+    let deficit = round1(percentile(&deficits, 0.5));
     // The bands most often masked, as one range.
     let most = masked_bands.iter().copied().max().unwrap_or(0);
     let bands: Vec<usize> = (0..31).filter(|band| masked_bands[*band] * 2 >= most && most > 0).collect();
     let (low, high) = (band_edges(*bands.first()?).0, band_edges(*bands.last()?).1);
-    let at: Vec<[f64; 2]> = spans(t, &buried, 4).into_iter().take(5).map(|span| span.0).collect();
+    // Moments under half a second apart are one.
+    let at: Vec<[f64; 2]> = spans(t, &buried, (0.5 / t.hop) as usize).into_iter().take(5).map(|span| span.0).collect();
     Some(Problem {
         kind: ProblemKind::Masking,
         id: format!("masking {name}"),
         what: format!(
-            "{name} is buried under the rest {} of the time it plays, {}–{} (target-to-mask {} dB){}",
+            "{name} is buried under the rest {} of the time it plays, {}–{} (target-to-mask −{deficit} dB){}",
             percent(share),
             hertz(low),
             hertz(high),
-            -excess,
             if at.is_empty() {
                 String::new()
             } else {
@@ -438,7 +477,7 @@ pub fn masking(target: &Heard, mix: &Heard, name: &str) -> Option<Problem> {
         ),
         hz: Some([round0(low), round0(high)]),
         at,
-        excess,
+        excess: (share * 100.).round(),
         steady: Some(share >= 0.5),
         fix: format!(
             "a dip of the others at {}–{} only while {name} plays (a dynamic EQ or multiband keyed from {name}), or {name} up there",

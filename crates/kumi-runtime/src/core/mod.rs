@@ -5,6 +5,8 @@ pub mod evolve;
 pub mod file_sync;
 pub mod gaps;
 pub mod goal;
+pub mod goal_mode;
+pub mod loop_run;
 pub mod match_run;
 pub mod memory;
 pub mod playbook;

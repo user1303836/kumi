@@ -42,7 +42,8 @@ Kumi opens once it's installed and walks you through signing in and connecting t
 
 - **Changes almost anything in the Set:** tempo, scale and groove; the mixer, routing and sidechains; tracks, scenes and clips; notes and MIDI transforms; devices, racks and their parameters.
 - **Listens:** loudness, tonal balance, width, tempo and key of a mix, a sample or its own bounce, and how your mix compares with a reference.
-- **Matches a reference:** builds several takes on a sound, scores each against the reference and refines the best. `/goal` keeps at it until it gets there.
+- **Judges its own changes:** hears before and after at the same loudness, and keeps a change only if its target improved and nothing else got worse. `/loop` works in rounds until a goal is met; `/goal` keeps at one across turns.
+- **Matches a reference:** builds several takes on a sound, scores each against the reference and refines the best. `/loop` keeps at it until it gets there.
 - **Watches tutorials** from YouTube or a file, then builds what they show on a new track.
 - **Plays, records and resamples**, to let you hear what it built or to check its work.
 - **Takes full control of Live:** deletes what you ask for, writes MIDI straight into the Arrangement, renders offline, runs Python inside Live for what its other tools can't reach, and answers for what you right-click in Live ("Ask Kumi about this"). Big Sets of hundreds of tracks stay quick.
