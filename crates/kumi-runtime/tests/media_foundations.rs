@@ -1196,6 +1196,15 @@ async fn a_songs_form_sections_where_whats_played_and_how_it_sounds_change_in_ba
     let heard: serde_json::Value = serde_json::from_str(&heard.text).unwrap();
     assert_eq!(heard["form"]["summary"], form.summary);
 }
+#[test]
+fn a_near_silent_float_sound_has_an_envelope() {
+    use kumi_runtime::audio::analyze::analyze_sound;
+    // Every level under the 1e-9 floor, quiet and then silent: no peak to start from.
+    let mono: Vec<f32> = (0..9600).map(|i| if i < 4800 { 5e-10 } else { 0.0 }).collect();
+    let heard = analyze_sound(&mono, 48000.0, None);
+    assert_eq!(heard.envelope.length_ms, 95.0);
+    assert!(heard.pitch.is_none());
+}
 #[tokio::test]
 async fn a_form_asked_for_in_bars_of_no_beats_or_at_a_tempo_past_the_schema_is_still_heard() {
     use kumi_runtime::audio::structure::{hear_form, FormOptions};

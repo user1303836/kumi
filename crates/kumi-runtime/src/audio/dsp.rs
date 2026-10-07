@@ -190,6 +190,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_percentile_puts_nan_last() {
+        assert_eq!(percentile(&[3.0, f64::NAN, 1.0, 2.0], 0.5), 2.5);
+        assert_eq!(percentile(&[0.5, 0.25], 1.0), 0.5);
+    }
+
+    #[test]
     fn contiguous_true_peak_taps_match_the_reference_ring_at_every_position() {
         let mut peak = TruePeak::new();
         let mut history = [0.0; 12];
@@ -265,7 +271,8 @@ pub fn percentile(values: &[f64], p: f64) -> f64 {
         return f64::NAN;
     }
     let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    // A total order: NaN (a float file's) goes last instead of making the sort's order inconsistent.
+    sorted.sort_by(f64::total_cmp);
     let at = ((sorted.len() - 1) as f64 * p).clamp(0.0, (sorted.len() - 1) as f64);
     let low = at.floor() as usize;
     let high = at.ceil() as usize;

@@ -803,7 +803,9 @@ fn amplitude_envelope(mono: &[f32], rate: f64) -> (Envelope, usize) {
     let attack_end = levels.iter().enumerate().position(|(i, v)| i as i64 >= start && *v >= peak * 0.9).map_or(-1, |i| i as i64);
     let end = levels.len() as i64 - 1 - levels.iter().rev().position(|v| *v > peak * 0.01).map_or(-1, |i| i as i64);
     let from = if peak_at < 0 { (levels.len() as i64 + peak_at).max(0) as usize } else { peak_at as usize };
-    let after = &levels[from.min(levels.len())..((end + 1).max(0) as usize).min(levels.len())];
+    // As JavaScript's slice: a start past the end is nothing (near-silent audio, all of it under the 1e-9 floor).
+    let to = ((end + 1).max(0) as usize).min(levels.len());
+    let after = &levels[from.min(to)..to];
     let sustain = if after.len() > 8 {
         percentile(&after[(after.len() as f64 * 0.4).floor() as usize..(after.len() as f64 * 0.8).floor() as usize], 0.5)
     } else {
