@@ -4365,6 +4365,9 @@ class AudioWarpNoteExpansionTests(unittest.TestCase):
         self.assertEqual([note["pitch"] for note in read["notes"]], [60]); validate_operation_payload("note.read-by-id", "result", read)
         selected = mapper.invoke("note.read-selected", {"ref": row["ref"]})
         self.assertTrue(selected["available"]); self.assertEqual(len(selected["notes"]), 1)
+        # Live 11's call carries each note's id; the old one's tuples don't, so it's the second choice.
+        clip.get_selected_notes = lambda: [(60, 0.0, 0.25, 100, False)]; clip.get_selected_notes_extended = lambda: [clip.notes[0]]
+        self.assertEqual([note["id"] for note in mapper.invoke("note.read-selected", {"ref": row["ref"]})["notes"]], [clip.notes[0]["note_id"]])
         def note_fences():
             return {"ref": row["ref"], "expectedClipAuthority": mapper._session_clip_authority(row["ref"]), "expectedNotesRevision": hashlib.sha256(mapper._bounded_canonical(mapper._read_notes(clip)).encode()).hexdigest()}
         duplicated = mapper.invoke("note.duplicate", {**note_fences(), "noteIds": [1]})

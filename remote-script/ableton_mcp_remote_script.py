@@ -1453,7 +1453,7 @@ class LiveObjectMapper:
         if operation == "note.read-by-id":
             return self._offers("clip", "get_notes_by_id")
         if operation == "note.read-selected":
-            return self._offers("clip", "get_selected_notes")
+            return self._offers_any("clip", "get_selected_notes_extended", "get_selected_notes")
         if operation == "note.duplicate":
             return self._offers("clip", "duplicate_notes_by_id")
         if operation == "note.quantize":
@@ -6829,7 +6829,9 @@ class LiveObjectMapper:
         reference = args.get("ref")
         if not isinstance(reference, str) or set(args) - {"ref"}: raise ValueError("note read arguments are invalid")
         clip = self.refs.get(reference)
-        reader = getattr(clip, "get_selected_notes", None)
+        # Live 11's call gives each note its id; the old one gives tuples without ids, which nothing can act on.
+        reader = getattr(clip, "get_selected_notes_extended", None)
+        if not callable(reader): reader = getattr(clip, "get_selected_notes", None)
         if not callable(reader): return {"available": False, "notes": [], "notesRevision": hashlib.sha256(self._bounded_canonical(self._read_notes(clip)).encode("utf-8")).hexdigest()}
         try: raw = list(reader())
         except BaseException as error: raise ValueError("selected note read failed") from error
