@@ -330,6 +330,29 @@ async fn whole_event_output_matches_typescript_reference() {
         .await;
 }
 #[tokio::test]
+async fn changes_whose_undo_ends_together_are_said_in_two_lines_not_one_each() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let f = Fixture::new(false, false, None, None, None);
+            flush().await;
+            f.out.text.borrow_mut().clear();
+            // Live opened another Set: every change in the one before loses its undo at once (#254).
+            let reason = "Live opened another Set.";
+            for (index, title) in ["Tempo 120 → 124 BPM", "Added 64 tracks", "Renamed Bass", "Loaded Operator", "Muted Drums"].iter().enumerate() {
+                f.emit(json!({"type":"change","change":{"id":format!("c{index}"),"family":"tempo","title":title,"state":"expired","at":index,"note":reason}}));
+            }
+            flush().await;
+            assert_eq!(
+                f.text(),
+                "[change] No undo anymore: Tempo 120 → 124 BPM. Live opened another Set.
+[change] No undo anymore for 4 more changes: Added 64 tracks; Renamed Bass; Loaded Operator; and 1 more. Live opened another Set.
+"
+            );
+            f.quit().await;
+        })
+        .await;
+}
+#[tokio::test]
 async fn pipe_submission_starts_a_fresh_assistant_prefix() {
     tokio::task::LocalSet::new()
         .run_until(async {

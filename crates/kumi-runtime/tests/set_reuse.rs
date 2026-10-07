@@ -5,13 +5,15 @@ use futures::FutureExt;
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_runtime::{
     core::{
-        contracts::{JsonObject, KernelTool},
+        contracts::{Integration, JsonObject, KernelTool, ToolResult},
         errors::RuntimeError,
         timing,
     },
     integrations::ableton::{
         connection::{ConnectionOptions, LiveConnection},
+        integration::Ableton,
         observation::{ObservationHost, ObservedChange, Observer},
+        options::AbletonOptions,
         references::Shift,
         remember::Remember,
     },
@@ -471,6 +473,39 @@ async fn a_track_added_where_main_was_isnt_held_to_mains_devices_and_kumis_own_d
             observer.devices_changed(&["7:track:2".to_owned()]);
             assert_eq!(check("7:track:2", "7:device:2:0").await, Ok(()));
             session.close().await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_set_the_request_opened_is_read_at_once_so_the_request_carries_on_in_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Kumi's own new_set or open_set has just landed (#254): the command's answer comes back with a look at the
+            // Set, and Live's tools work again in the same request.
+            let live = Live::new(true);
+            let endpoint = live.clone();
+            let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
+            options.connect = Some(Rc::new(move |_| {
+                let endpoint: Rc<dyn McpEndpoint> = endpoint.clone();
+                async move { Ok(endpoint) }.boxed_local()
+            }));
+            let integration = Ableton::new(options);
+            let connection = integration.connection.clone();
+            connection.start(Signal::new()).await.unwrap();
+            connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
+            connection.available.set(true);
+            assert_eq!(connection.epoch.get(), None, "no view of the new Set yet");
+            let opened = ToolResult::text(stringify(&json!({"pressed":"File › New Live Set","opened":"a new Set"})));
+            let answer: Value = serde_json::from_str(&integration.look_in_opened_set(opened, Signal::new()).await.text).unwrap();
+            assert_eq!(connection.epoch.get(), Some(7.), "the look set the view");
+            assert_eq!(answer["now"]["set"]["name"], "Set");
+            assert_eq!(names(&answer["now"]["tracks"]), ["Rack", "Operator", "EQ Eight", "Compressor", "Utility"]);
+            assert!(answer["note"].as_str().unwrap().starts_with("Live has the Set open and Kumi read it"));
+            // Any other answer is left as it was.
+            let saved = ToolResult::text(stringify(&json!({"pressed":"File › Save Live Set","saved":"where it is"})));
+            assert!(!integration.look_in_opened_set(saved, Signal::new()).await.text.contains("now"));
+            integration.close().await.unwrap();
         })
         .await;
 }

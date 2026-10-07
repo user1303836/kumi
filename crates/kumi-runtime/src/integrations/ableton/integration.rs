@@ -440,7 +440,13 @@ impl KernelTool for LiveTool {
             "render" => owner.render_tool(input, signal).await,
             "undo_in_live" => owner.live_undo(input, signal).await,
             "run_python" => owner.run_python(input, signal).await,
-            "live_command" => owner.commands.live_command(&input, signal).await,
+            "live_command" => {
+                let finishing = input.get("final") == Some(&json!(true));
+                match owner.commands.live_command(&input, signal.clone()).await {
+                    Ok(result) => Ok(finished_command(owner.look_in_opened_set(result, signal).await, finishing)),
+                    other => other,
+                }
+            }
             "plugin" => owner.commands.plugin_tool(&input, signal).await,
             _ => Ok(owner.connection.invoke(&self.name, input, signal).await),
         };
@@ -449,6 +455,76 @@ impl KernelTool for LiveTool {
         }
         result
     }
+}
+impl Ableton {
+    /// After Live opened the Set this request asked for (new_set, open_set): a look at it now, as a turn's start
+    /// takes, so the request carries on in it with current references. Every Live tool used to be refused until the
+    /// producer's next message, so "start a new Set and save it as …" took two requests (#254). The look comes back
+    /// with the command's answer; while Live is still loading the Set, it's tried again for a few seconds.
+    pub async fn look_in_opened_set(&self, mut result: ToolResult, signal: Signal) -> ToolResult {
+        let Ok(Value::Object(mut answer)) = serde_json::from_str::<Value>(&result.text) else { return result };
+        if result.is_error || !(answer.contains_key("opened") || answer.contains_key("openedSet")) {
+            return result;
+        }
+        for attempt in 0..6 {
+            if attempt > 0 {
+                tokio::select! { _ = signal.cancelled() => return result, _ = tokio::time::sleep(std::time::Duration::from_millis(1000)) => {} }
+            }
+            let Ok(observation) = self.observer.observe(self, signal.clone(), None).await else { continue };
+            let Ok(context) = serde_json::from_str::<JsonObject>(&observation.context) else { continue };
+            if observation.revision.as_deref() == Some("no-live") || !context.contains_key("set") {
+                continue;
+            }
+            let mut now: JsonObject = ["set", "tracks", "folded", "moreTracks", "moreDevices"]
+                .iter()
+                .filter_map(|key| Some(((*key).into(), context.get(*key)?.clone())))
+                .collect();
+            // A big Set's tracks don't fit beside a command's answer: discovery reads them.
+            if stringify(&Value::Object(now.clone())).len() > 24 * 1024 {
+                now.retain(|key, _| key == "set");
+                now.insert("tracks".into(), json!("More than fit here: discover them"));
+            }
+            answer.insert("now".into(), Value::Object(now));
+            answer.insert(
+                "note".into(),
+                json!("Live has the Set open and Kumi read it: now is the Set as it is, with current references. Carry on in it."),
+            );
+            result.text = stringify(&Value::Object(answer));
+            return result;
+        }
+        result
+    }
+}
+/// A command that finishes the request on its own (a save, a new or opened Set), said by Kumi when the model gave
+/// final: true, so no model call follows only to say "Saved." (#254). A dialog or question left to answer isn't
+/// finished.
+fn finished_command(mut result: ToolResult, finishing: bool) -> ToolResult {
+    if !finishing || result.is_error {
+        return result;
+    }
+    let Ok(answer) = serde_json::from_str::<JsonObject>(&result.text) else { return result };
+    if answer.contains_key("dialog") || answer.contains_key("next") || answer.get("cancelled") == Some(&json!(true)) {
+        return result;
+    }
+    let file =
+        |path: &str| std::path::Path::new(path).file_name().map_or_else(|| path.to_owned(), |name| name.to_string_lossy().into_owned());
+    let said = if let Some(saved) = answer.get("saved").and_then(Value::as_str) {
+        if saved == "where it is" {
+            "Saved the Set.".to_owned()
+        } else {
+            format!("Saved the Set as {}.", file(saved))
+        }
+    } else if let Some(opened) = answer.get("openedSet").and_then(Value::as_str) {
+        format!("Opened {}.", file(opened))
+    } else if answer.contains_key("opened") {
+        "Opened a new Set.".to_owned()
+    } else if let Some(pressed) = answer.get("pressed").and_then(Value::as_str) {
+        format!("Done in Live: {pressed}.")
+    } else {
+        return result;
+    };
+    result.reply = Some(said);
+    result
 }
 #[async_trait(?Send)]
 impl ObservationHost for Ableton {
@@ -681,5 +757,29 @@ impl Integration for Ableton {
     }
     async fn hear(&self, request: &HearRequest, signal: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         self.rendering.hear_in_set(request, signal).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_command_that_finishes_the_request_is_said_by_kumi_when_final() {
+        let said = |text: Value, finishing: bool| finished_command(ToolResult::text(stringify(&text)), finishing).reply;
+        assert_eq!(
+            said(json!({"pressed":"File › Save Live Set As…","saved":"C:/Music/SPEED HUGE Project/SPEED HUGE.als"}), true).as_deref(),
+            Some("Saved the Set as SPEED HUGE.als.")
+        );
+        assert_eq!(said(json!({"pressed":"File › Save Live Set","saved":"where it is"}), true).as_deref(), Some("Saved the Set."));
+        assert_eq!(said(json!({"pressed":"File › New Live Set","opened":"a new Set"}), true).as_deref(), Some("Opened a new Set."));
+        assert_eq!(
+            said(json!({"pressed":"File › Open Live Set…","openedSet":"C:/Music/Night.als"}), true).as_deref(),
+            Some("Opened Night.als.")
+        );
+        // Without final, or with a dialog or question left to answer, the model is called as before.
+        assert_eq!(said(json!({"pressed":"File › Save Live Set","saved":"where it is"}), false), None);
+        assert_eq!(said(json!({"pressed":"File › New Live Set","dialog":{"open":true},"next":"Answer it"}), true), None);
+        assert_eq!(finished_command(ToolResult::error("Live has it greyed out"), true).reply, None);
     }
 }

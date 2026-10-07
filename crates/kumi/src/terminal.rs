@@ -259,6 +259,9 @@ struct State {
     pipe_buffer: String,
     after_cr: bool,
     was_raw: bool,
+    /// Changes whose undo just ended for one reason (Live opened another Set): the first is said as it comes, the
+    /// rest of them in one line after it, not one each (#254). The reason, and the titles after the first.
+    expired: Option<(String, Vec<String>)>,
 }
 struct Inner {
     options: TerminalOptions,
@@ -293,6 +296,7 @@ pub fn create_terminal(options: TerminalOptions) -> PlainTerminal {
             pipe_buffer: String::new(),
             after_cr: false,
             was_raw: false,
+            expired: None,
         }),
         parser: RefCell::new(None),
         keys: RefCell::new(None),
@@ -881,7 +885,43 @@ impl Terminal for PlainTerminal {
                     "applied" => Some(format!("[change] {title} (/undo takes it back)")),
                     "unsure" => Some(format!("[change] Check Live: {title}. {}", c["note"].as_str().unwrap_or("Live didn't confirm it."))),
                     "kept" => Some(string::trim(&format!("[change] Kept: {title}. {note}")).into()),
-                    "expired" => Some(string::trim(&format!("[change] No undo anymore: {title}. {note}")).into()),
+                    // Those that end together for one reason (all of a Set's, when Live opens another): the first as it
+                    // comes, the rest in one line after it.
+                    "expired" => {
+                        let (first, earlier) = {
+                            let mut state = self.0.state.borrow_mut();
+                            match state.expired.as_mut() {
+                                Some((reason, rest)) if reason == note => {
+                                    rest.push(title.to_owned());
+                                    (false, None)
+                                }
+                                _ => (true, state.expired.replace((note.to_owned(), vec![]))),
+                            }
+                        };
+                        if let Some(line) = earlier.and_then(|(reason, rest)| expired_rest(&reason, &rest)) {
+                            self.notice(&line);
+                        }
+                        if first {
+                            let this = self.clone();
+                            let reason = note.to_owned();
+                            tokio::task::spawn_local(async move {
+                                tokio::task::yield_now().await;
+                                let ended = {
+                                    let mut state = this.0.state.borrow_mut();
+                                    match state.expired.as_ref() {
+                                        Some((current, _)) if *current == reason => state.expired.take(),
+                                        _ => None,
+                                    }
+                                };
+                                if let Some(line) = ended.and_then(|(reason, rest)| expired_rest(&reason, &rest)) {
+                                    this.notice(&line);
+                                }
+                            });
+                            Some(string::trim(&format!("[change] No undo anymore: {title}. {note}")).into())
+                        } else {
+                            None
+                        }
+                    }
                     "heard" => Some(format!("[heard] {title}{}", c.get("score").map(|n| format!(" · {}%", num(n))).unwrap_or_default())),
                     _ => None,
                 };
@@ -1174,4 +1214,24 @@ fn num(value: &Value) -> String {
 }
 fn array(value: &Value) -> &[Value] {
     value.as_array().map(Vec::as_slice).unwrap_or_default()
+}
+
+/// The line for the changes whose undo ended for one reason after the first, which was said already: how many,
+/// with the first few by title.
+fn expired_rest(reason: &str, rest: &[String]) -> Option<String> {
+    if rest.is_empty() {
+        return None;
+    }
+    let shown: Vec<&str> = rest.iter().take(3).map(String::as_str).collect();
+    let more = rest.len() - shown.len();
+    Some(
+        string::trim(&format!(
+            "[change] No undo anymore for {} more {}: {}{}. {reason}",
+            rest.len(),
+            if rest.len() == 1 { "change" } else { "changes" },
+            shown.join("; "),
+            if more > 0 { format!("; and {more} more") } else { String::new() }
+        ))
+        .into(),
+    )
 }
