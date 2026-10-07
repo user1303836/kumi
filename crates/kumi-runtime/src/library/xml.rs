@@ -30,6 +30,8 @@ pub enum XmlError {
     Aborted(#[from] Aborted),
     #[error("That file is larger than Kumi reads.")]
     TooLarge,
+    #[error("That file has a tag that never ends.")]
+    TagTooLong,
 }
 
 /// JavaScript's `\s`: its white space and line terminators.
@@ -232,6 +234,9 @@ pub struct ScanOptions {
 }
 
 const CHUNK: usize = 256 * 1024;
+/// The most of one unfinished tag kept between pieces: Live's tags are short (long data is text between them), so
+/// one this long is a damaged or hostile file's, and reading it again with each piece would cost the square of it.
+const MAX_TAG: usize = 8 * 1024 * 1024;
 
 /// Every tag of a gzipped (or plain) XML file, in order, as the file streams in. `maxBytes` bounds the
 /// XML read, so a damaged or hostile file can't fill memory; `stop()` ends the read early.
@@ -284,6 +289,9 @@ pub async fn scan_xml_file<H: TagHandler + ?Sized>(path: &Path, handler: &mut H,
         let used = scan_tags(&text, handler);
         text.drain(..used);
         pending = text;
+        if pending.len() > MAX_TAG {
+            return Err(XmlError::TagTooLong);
+        }
         if handler.stop() {
             break;
         }

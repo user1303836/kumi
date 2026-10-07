@@ -114,6 +114,11 @@ async fn streamed_files_limit_size_stop_cancel_and_keep_split_utf8() {
         scan_xml_file(&path, &mut Handler::default(), ScanOptions { signal: Some(signal), max_bytes: None }).await,
         Err(XmlError::Aborted(_))
     ));
+    // A tag that never ends is read no further than 8 MiB of it (each piece read it again from its start).
+    std::fs::write(&path, format!("<A/><B Value=\"{}", "x".repeat(9 * 1024 * 1024))).unwrap();
+    let mut handler = Handler::default();
+    assert!(matches!(scan_xml_file(&path, &mut handler, ScanOptions::default()).await, Err(XmlError::TagTooLong)));
+    assert_eq!(handler.seen, vec!["A:", "/A"]);
     let text = format!("<First/>{}<Last/>", " ".repeat(700000));
     std::fs::write(&path, &text).unwrap();
     let mut handler = Handler { stop: true, ..Default::default() };
