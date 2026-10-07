@@ -79,11 +79,14 @@ impl FileMemoryStore {
         let project = project.filter(|p| PROJECT_ID.is_match(p)).ok_or_else(|| RuntimeError::plain("invalid project id"))?;
         Ok(self.options.projects_dir.join(project).join("memory.json"))
     }
-    async fn read(file: &Path, prefix: char) -> Vec<MemoryNote> {
-        let Ok(bytes) = tokio::fs::read(file).await else {
-            return vec![];
-        };
-        parse_notes(&bytes, prefix)
+    /// The notes in a file; none when there's no file. A file that couldn't be read is an error, so a change isn't
+    /// saved over notes it never saw.
+    async fn read(file: &Path, prefix: char) -> Result<Vec<MemoryNote>, RuntimeError> {
+        match tokio::fs::read(file).await {
+            Ok(bytes) => Ok(parse_notes(&bytes, prefix)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
+            Err(error) => Err(RuntimeError::plain(error.to_string())),
+        }
     }
 }
 /// The notes a memory file holds (ids `p…` about the producer, `s…` about a Set), as the store keeps
@@ -175,9 +178,9 @@ pub(crate) fn add_in(notes: &mut Vec<MemoryNote>, scope: MemoryScope, texts: &[S
 #[async_trait(?Send)]
 impl MemoryStore for FileMemoryStore {
     async fn load(&self, project: Option<&str>) -> Result<Memory, RuntimeError> {
-        let producer = Self::read(&self.options.producer_file, 'p').await;
+        let producer = Self::read(&self.options.producer_file, 'p').await?;
         let set = match project.filter(|p| PROJECT_ID.is_match(p)) {
-            Some(project) => Self::read(&self.file_of(MemoryScope::Set, Some(project))?, 's').await,
+            Some(project) => Self::read(&self.file_of(MemoryScope::Set, Some(project))?, 's').await?,
             None => vec![],
         };
         Ok(Memory { producer, set })

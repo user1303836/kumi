@@ -196,6 +196,46 @@ async fn a_file_that_cant_be_read_in_leaves_the_database_in_use_and_comes_in_nex
     assert_eq!(SqliteTechniqueStore::new(client).list().await.unwrap().len(), 1);
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn a_file_store_that_cant_read_its_file_changes_nothing_rather_than_saving_over_it() {
+    use std::os::unix::fs::PermissionsExt;
+    // A file another program holds open reads as an error, not as no entries: the change that followed saved its one
+    // entry over every note, technique or lesson the file held.
+    let dir = tempfile::tempdir().unwrap();
+    let files = ["memory.json", "techniques.json", "lessons.json"].map(|name| dir.path().join(name));
+    let memory = create_memory_store(MemoryStoreOptions { projects_dir: dir.path().join("projects"), producer_file: files[0].clone() });
+    let techniques = create_technique_store(&files[1]);
+    let playbook = create_playbook_store(&files[2]);
+    let lesson = |id: &str| Lesson {
+        id: id.into(),
+        at: 3000.0,
+        matched: "the reference pad".into(),
+        winner: "Wavetable".into(),
+        from: 41.0,
+        to: 77.0,
+        moves: vec![],
+        reaction: None,
+    };
+    remember(memory.as_ref(), "Mixes on headphones", None, 1000).await;
+    techniques.keep(draft("Reese", "Two detuned saws"), None, 1000.0).await.unwrap();
+    playbook.put(&lesson("l0a1b2c3d")).await.unwrap();
+    let mode = |mode: u32| files.iter().for_each(|file| std::fs::set_permissions(file, std::fs::Permissions::from_mode(mode)).unwrap());
+    mode(0o000);
+    if std::fs::read(&files[0]).is_ok() {
+        mode(0o600);
+        return; // Run as root: the files can't be made unreadable.
+    }
+    assert!(memory.remember(MemoryScope::Producer, None, "Likes short reverbs", None, 2000).await.is_err());
+    assert!(techniques.keep(draft("Air pad", "A slow pad"), None, 2000.0).await.is_err());
+    assert!(playbook.put(&lesson("l11111111")).await.is_err());
+    mode(0o600);
+    let notes = memory.load(None).await.unwrap().producer;
+    assert_eq!(notes.iter().map(|n| n.text.as_str()).collect::<Vec<_>>(), ["Mixes on headphones"]);
+    assert_eq!(techniques.list().await.unwrap().iter().map(|t| t.body.name.as_str()).collect::<Vec<_>>(), ["Reese"]);
+    assert_eq!(playbook.list().await.unwrap(), [lesson("l0a1b2c3d")]);
+}
+
 #[tokio::test]
 async fn two_kumis_at_once_keep_every_note_and_every_use_and_share_no_id() {
     let dir = tempfile::tempdir().unwrap();

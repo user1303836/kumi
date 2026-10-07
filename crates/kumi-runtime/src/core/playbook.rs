@@ -151,10 +151,13 @@ pub fn create_playbook_store(file: impl Into<PathBuf>) -> Rc<FilePlaybookStore> 
 #[async_trait(?Send)]
 impl PlaybookStore for FilePlaybookStore {
     async fn list(&self) -> Result<Vec<Lesson>, RuntimeError> {
-        let Ok(data) = tokio::fs::read(&self.file).await else {
-            return Ok(vec![]);
-        };
-        Ok(parse_lessons(&data))
+        // Only a missing file is an empty list: a file that couldn't be read mustn't be saved over as though it held
+        // nothing.
+        match tokio::fs::read(&self.file).await {
+            Ok(data) => Ok(parse_lessons(&data)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
+            Err(error) => Err(RuntimeError::plain(error.to_string())),
+        }
     }
     async fn save(&self, lessons: &[Lesson]) -> Result<(), RuntimeError> {
         let folder = self.file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));

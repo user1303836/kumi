@@ -184,8 +184,13 @@ pub fn create_technique_store(file: impl Into<PathBuf>) -> Rc<FileTechniqueStore
 #[async_trait(?Send)]
 impl TechniqueStore for FileTechniqueStore {
     async fn list(&self) -> Result<Vec<Technique>, RuntimeError> {
-        let Ok(bytes) = tokio::fs::read(&self.file).await else { return Ok(vec![]) };
-        Ok(parse_techniques(&bytes))
+        // Only a missing file is an empty list: a file that couldn't be read (another program has it open) mustn't be
+        // saved over as though it held nothing.
+        match tokio::fs::read(&self.file).await {
+            Ok(bytes) => Ok(parse_techniques(&bytes)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
+            Err(error) => Err(RuntimeError::plain(error.to_string())),
+        }
     }
     async fn save(&self, techniques: &[Technique]) -> Result<(), RuntimeError> {
         let parent = self.file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
