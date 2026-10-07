@@ -2253,6 +2253,16 @@ class ControlSurfaceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "rename target changed since preview"): rename("Bridge", "Chorus")
         self.assertEqual(clip.name, "Verse")
 
+    def test_refreshing_two_refs_on_one_track_reads_it_once(self):
+        song = FakeSong(); song.tracks[0].clip_slots.append(FakeSlot()); song.tracks[0].clip_slots[0].clip = FakeClip(4.0); song.tracks[0].clip_slots[1].clip = FakeClip(4.0)
+        clip = FakeClip(8.0); clip.start_time = 0.0; song.tracks[0].arrangement_clips = [clip, FakeClip(4.0)]; song.tracks[0].arrangement_clips[1].start_time = 8.0
+        mapper = LiveObjectMapper(song); snapshot = mapper.snapshot(); clips = snapshot["tracks"][0]["clips"]; arranged = snapshot["arrangement"]["clips"]
+        rows = []; whole = mapper._whole_track_row; items = mapper._arrangement_clip_items
+        mapper._whole_track_row = lambda index: rows.append(index) or whole(index)
+        mapper._arrangement_clip_items = lambda *args: rows.append(("arrangement", args)) or items(*args)
+        mapper._refresh(clips[0]["ref"], clips[1]["ref"], arranged[0]["ref"], arranged[1]["ref"])
+        self.assertEqual(rows, [0, ("arrangement", ([0],))])
+
     def test_a_split_arrangement_clip_takes_notes_up_to_its_own_end(self):
         # The right half of an 8-beat clip split at beat 4: start marker 4, end marker 8, so Live's length is 4, but
         # its notes are in its own time, from 0 to 8.

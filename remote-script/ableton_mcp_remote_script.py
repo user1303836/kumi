@@ -2524,15 +2524,19 @@ class LiveObjectMapper:
         """Re-register the objects at these refs' positions, as a snapshot would, reading only their
         tracks: a ref names a position, and the object there now is what a mutation fences and acts on."""
         scenes: list[Any] | None = None
+        # Each track's row once, however many of the refs sit on it (and its Arrangement clips once; all of them cover any).
+        built: set[int] = set(); arranged: set[int | None] = set()
         for reference in references:
             index = self._ref_track_index(reference)
             parts = reference.split(":") if isinstance(reference, str) else []
             if len(parts) >= 3 and parts[1] == "arrangement_clip":
                 # A track's row doesn't list its Arrangement clips; they're read (and registered) apart.
+                if index in arranged or None in arranged: continue
+                arranged.add(index)
                 self._arrangement_clip_items() if index is None else self._arrangement_clip_items([index])
                 continue
             if index is not None:
-                self._whole_track_row(index)
+                if index not in built: built.add(index); self._whole_track_row(index)
                 continue
             if len(parts) == 3 and parts[0] == str(self.refs.epoch) and parts[1] == "scene" and parts[2].isdigit():
                 scenes = scenes if scenes is not None else self._items(getattr(self.song, "scenes", []))
