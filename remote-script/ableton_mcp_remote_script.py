@@ -4154,7 +4154,10 @@ class LiveObjectMapper:
                 if (ownership_token is not None and ownership_token != token) or not hmac.compare_digest(self._ownership_fingerprint(args["ref"]), row["fingerprint"]): raise ValueError("transaction-owned move lacks exact cleanup-authority consumption")
                 consumed_move_ownership = token
         creation_rollback: tuple[str, tuple[dict[str, Any], dict[str, int]], dict[str, dict[str, Any]]] | None = None
-        if enforce_ownership and operation in _TRANSACTION_CREATIONS: creation_rollback = (self._creation_topology(self._creation_scope(operation, args)), self.refs.checkpoint(), {token: dict(row) for token, row in self._owned_cleanup_tokens.items()})
+        # What a creation puts back if its ownership can't be attached. The topology is the state before it (its cleanup is
+        # checked against that), scoped to the tracks it names. The ledger is copied shallow: during a creation rows are only
+        # added (attachment) or taken out (retired as moved), never changed in place, so its rows can be shared.
+        if enforce_ownership and operation in _TRANSACTION_CREATIONS: creation_rollback = (self._creation_topology(self._creation_scope(operation, args)), self.refs.checkpoint(), dict(self._owned_cleanup_tokens))
         owned_content = None
         if enforce_ownership and operation in _OWNED_CONTENT_MUTATIONS and isinstance(args.get("ref"), str):
             matches = [row for row in self._owned_cleanup_tokens.values() if row.get("transactionId") == transaction_id and row.get("ref") == args["ref"] and row.get("deleted") is not True]

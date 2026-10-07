@@ -2485,6 +2485,16 @@ class ControlSurfaceTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "token attachment failure"): mapper.invoke("clip.create", self.clip_creation_args(mapper, track_ref, 0, kind="midi", name="Unattached", length=4), "attachment-failure-transaction")
         self.assertIsNone(song.tracks[0].clip_slots[0].clip); self.assertEqual(mapper.refs.checkpoint(), checkpoint); self.assertEqual(mapper._owned_cleanup_tokens, {})
 
+    def test_a_failed_attachment_puts_the_ledger_back_without_copying_its_rows(self):
+        # The ledger lasts the session (up to a million rows): a creation keeps it as it was by its mapping, not a copy of every row.
+        song = FakeSong(); mapper = LiveObjectMapper(song, provenance="real-live"); track_ref = mapper.snapshot()["tracks"][0]["ref"]
+        rows = {f"kept-{index}": {"transactionId": "earlier", "ref": f"{mapper.refs.epoch}:clip:9:{index}", "objectIdentity": f"live:{index}", "fingerprint": "0" * 64} for index in range(1000)}
+        mapper._owned_cleanup_tokens.update(rows)
+        mapper._attach_cleanup_ownership = lambda *_args: (_ for _ in ()).throw(RuntimeError("injected token attachment failure"))
+        with self.assertRaisesRegex(RuntimeError, "token attachment failure"): mapper.invoke("clip.create", self.clip_creation_args(mapper, track_ref, 0, kind="midi", name="Unattached", length=4), "attachment-failure-transaction")
+        self.assertIsNone(song.tracks[0].clip_slots[0].clip)
+        self.assertEqual(set(mapper._owned_cleanup_tokens), set(rows)); self.assertTrue(all(mapper._owned_cleanup_tokens[token] is row for token, row in rows.items()))
+
     def test_mapper_rejects_unsafe_clip_and_note_mutations(self):
         mapper = LiveObjectMapper(FakeSong())
         track = mapper.discover("track")["items"][0]["ref"]
