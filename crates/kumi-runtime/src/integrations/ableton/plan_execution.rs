@@ -220,9 +220,13 @@ impl Plan {
         self.notify.notify_waiters();
     }
     pub async fn abandon(&self) {
+        self.set_aside();
+        let _ = self.pending().await;
+    }
+    /// Start nothing more (without waiting for what's under way).
+    fn set_aside(&self) {
         self.abandoned.set(true);
         self.notify.notify_waiters();
-        let _ = self.pending().await;
     }
     fn pending(&self) -> Settled {
         self.settled.borrow().as_ref().unwrap().clone()
@@ -345,6 +349,10 @@ impl Plan {
                         }
                     }
                 }
+            }
+            // Set aside while it waited on Live (the catalog above): nothing starts after that.
+            if self.abandoned.get() {
+                return Ok(None);
             }
             if !self.started.replace(true) {
                 if let Some(on_start) = &self.on_start {
@@ -648,6 +656,13 @@ struct StreamingPlan {
     received: Rc<RefCell<Vec<Value>>>,
     take: Rc<dyn Fn(Value)>,
     scanner: RefCell<StepScanner<Box<dyn FnMut(Value)>>>,
+}
+/// A plan dropped unfinished (its reply set aside) starts nothing more: its task would otherwise wait for steps that
+/// never come, or start one it already had. After `finish` the plan has settled, so this changes nothing.
+impl Drop for StreamingPlan {
+    fn drop(&mut self) {
+        self.plan.set_aside();
+    }
 }
 #[async_trait(?Send)]
 impl StreamingCall for StreamingPlan {

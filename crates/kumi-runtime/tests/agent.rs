@@ -1843,6 +1843,35 @@ async fn a_reply_that_breaks_off_after_its_plan_began_isnt_asked_for_again_one_t
     .await
 }
 
+#[tokio::test]
+async fn an_answer_that_breaks_off_with_a_plan_not_yet_begun_sets_it_aside_before_carrying_on() {
+    local(async {
+        let (plan, early, executed) = streaming_tool();
+        let seen = early.clone();
+        let set_aside = Rc::new(Cell::new(None));
+        let noted = set_aside.clone();
+        let h = harness(
+            move |_, n| {
+                if n == 1 {
+                    // Words shown, then a plan begun with no whole step yet, then the stream breaks off.
+                    Scripted::Parts([text("Making the bass"), plan_parts(false), vec![StreamPart::Error { error: broke_off() }]].concat())
+                } else {
+                    noted.set(Some(seen.borrow()[0].abandoned.get()));
+                    answer(" with a Reese.")
+                }
+            },
+            Options { tools: vec![plan], ..Options::default() },
+        );
+        assert_eq!(h.kernel.run("make a bass", signal(), ignore()).await.unwrap().stop_reason, StopReason::Completed);
+        assert_eq!(h.count(), 2, "it carried on");
+        assert_eq!(set_aside.get(), Some(true), "the broken reply's plan was set aside before the next request");
+        assert!(early.borrow()[0].finished.borrow().is_none(), "and never finished");
+        assert_eq!(executed.get(), 0);
+        h.kernel.close().await;
+    })
+    .await
+}
+
 /// An answer's stream that broke off after the response began (it keeps its 200).
 fn broke_off() -> LanguageModelError {
     let mut error = ApiCallError::new("the stream ended early", "u", Some(json!({})), Some(200));

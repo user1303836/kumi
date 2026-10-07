@@ -608,7 +608,7 @@ async fn turn(inner: Rc<Inner>, first: Message, signal: Signal, emit: KernelEmit
                 Err(StepError::Model(error)) if !carried_on && turn.can_carry_on(&error) => {
                     carried_on = true;
                     (turn.deliver)(KernelEvent::Retry { reason: retry_reason(&error, &inner.binding.id), wait_ms: 0 });
-                    turn.carry_on();
+                    turn.carry_on().await;
                     continue;
                 }
                 Err(error) => return Err(error),
@@ -767,9 +767,12 @@ impl Turn {
     }
 
     /// The next request carries on: the words shown so far stay as the model's, with a note to go on
-    /// from where they stopped.
-    fn carry_on(&self) {
-        self.early.borrow_mut().clear();
+    /// from where they stopped. A call the broken reply began (none had started work, or it couldn't carry on) is
+    /// set aside first, so nothing of it starts while the next reply is written; that reply asks again if it
+    /// still wants it.
+    async fn carry_on(&self) {
+        let begun: Vec<Rc<Early>> = self.early.borrow_mut().drain().map(|(_, entry)| entry).collect();
+        join_all(begun.iter().map(|entry| entry.call.abandon())).await;
         let shown = self.shown.borrow().clone();
         let mut messages = self.messages.borrow_mut();
         if !trim(&shown).is_empty() {
