@@ -76,6 +76,74 @@ fn sqlite_honors_reserved_page_bytes_and_refuses_unsupported_text_encodings() {
     }
 }
 
+fn varint(mut value: u64) -> Vec<u8> {
+    let mut groups = vec![(value & 0x7f) as u8];
+    value >>= 7;
+    while value > 0 {
+        groups.push((value & 0x7f) as u8 | 0x80);
+        value >>= 7;
+    }
+    groups.reverse();
+    groups
+}
+/// A database of `page_size` pages: the schema (table t, root page 2), a table leaf holding `cells`, then `rest`.
+fn built(page_size: usize, cells: &[Vec<u8>], rest: &[Vec<u8>]) -> Vec<u8> {
+    let count = 2 + rest.len();
+    let mut bytes = vec![0u8; page_size * count];
+    bytes[0..16].copy_from_slice(b"SQLite format 3\0");
+    write_u16(&mut bytes, 16, if page_size == 65536 { 1 } else { page_size as u16 });
+    bytes[18] = 1;
+    bytes[19] = 1;
+    write_u32(&mut bytes, 28, count as u32);
+    write_u32(&mut bytes, 56, 1);
+    let leaf = |bytes: &mut Vec<u8>, base: usize, header: usize, cells: &[Vec<u8>]| {
+        bytes[base + header] = 0x0d;
+        write_u16(bytes, base + header + 3, cells.len() as u16);
+        let mut end = page_size;
+        for (index, cell) in cells.iter().enumerate() {
+            end -= cell.len();
+            bytes[base + end..base + end + cell.len()].copy_from_slice(cell);
+            write_u16(bytes, base + header + 8 + index * 2, end as u16);
+        }
+        write_u16(bytes, base + header + 5, end as u16);
+    };
+    let sql = "CREATE TABLE t(v)";
+    let schema = [&[6, 23, 15, 15, 1, 13 + sql.len() as u8 * 2][..], b"tablett", &[2], sql.as_bytes()].concat();
+    leaf(&mut bytes, 0, 100, &[[&[schema.len() as u8, 1][..], &schema].concat()]);
+    leaf(&mut bytes, page_size, 0, cells);
+    for (index, page) in rest.iter().enumerate() {
+        bytes[page_size * (2 + index)..][..page.len()].copy_from_slice(page);
+    }
+    bytes
+}
+#[test]
+fn sqlite_refuses_cells_that_share_an_overflow_chain_and_records_past_the_column_limit() {
+    // 600-byte blobs on 512-byte pages: each keeps its first bytes in the cell and the rest on one overflow page.
+    let (usable, length) = (512usize, 600usize);
+    let (max_local, min_local) = (usable - 35, ((usable - 12) * 32) / 255 - 23);
+    let k = min_local + (length - min_local) % (usable - 4);
+    let local = if k <= max_local { k } else { min_local };
+    let payload = |byte: u8| [&[3][..], &varint(2 * 597 + 12), &[byte; 597]].concat();
+    let cell = |row: u8, overflow: u32| {
+        [varint(length as u64), vec![row], payload(row)[..local].to_vec(), overflow.to_be_bytes().to_vec()].concat()
+    };
+    let overflow = |row: u8| [&[0u8; 4][..], &payload(row)[local..]].concat();
+    // Each its own chain: two rows.
+    let separate = SqliteReader::new(built(512, &[cell(1, 3), cell(2, 4)], &[overflow(1), overflow(2)])).unwrap();
+    let rows = separate.scan_table("t", DEFAULT_SCAN_MAX_ROWS).unwrap();
+    assert_eq!(
+        rows.iter().map(|row| row.row[0].clone()).collect::<Vec<_>>(),
+        [SqliteValue::Blob(vec![1; 597]), SqliteValue::Blob(vec![2; 597])]
+    );
+    // One chain for both: every cell could repeat a 64 MB chain, so it's malformed.
+    let error = scan_error(built(512, &[cell(1, 3), cell(1, 3)], &[overflow(1)]));
+    assert!(error.contains("overflow chain is malformed"), "{error}");
+    // A record naming 40,000 columns (SQLite allows 32,767).
+    let header = [varint(40_003), vec![0; 40_000]].concat();
+    assert_eq!(header.len(), 40_003);
+    let error = scan_error(built(65536, &[[varint(header.len() as u64), vec![1], header].concat()], &[]));
+    assert!(error.contains("more columns than SQLite allows"), "{error}");
+}
 #[test]
 fn sqlite_rejects_repeated_b_tree_pages_and_cross_page_cell_pointers() {
     let mut cycle = database(9, &[], &[1], 0);

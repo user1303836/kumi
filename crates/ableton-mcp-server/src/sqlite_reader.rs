@@ -81,6 +81,8 @@ const MAX_PAGES: u32 = 1_000_000;
 const MAX_CELLS_PER_PAGE: usize = 500;
 const MAX_BTREE_DEPTH: usize = 64;
 const MAX_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
+/// SQLite's own hard limit on a table's columns: a record header naming more is malformed.
+const MAX_COLUMNS: usize = 32_767;
 const MAX_ROWS: usize = 1_000_000;
 /// `scanTable`'s default row bound.
 pub const DEFAULT_SCAN_MAX_ROWS: usize = 100_000;
@@ -214,8 +216,9 @@ impl SqliteReader {
         Ok((page as usize - 1) * self.page_size)
     }
 
-    /// Parse one b-tree cell's record payload, following the overflow chain.
-    fn read_cell_payload(&self, page: i64, cell_offset: usize) -> Result<(Vec<u8>, i64), SqliteError> {
+    /// Parse one b-tree cell's record payload, following the overflow chain. `pages` holds every page this walk has
+    /// used, b-tree and overflow alike: a page is any one cell's overflow at most, so cells can't share one chain.
+    fn read_cell_payload(&self, page: i64, cell_offset: usize, pages: &mut HashSet<i64>) -> Result<(Vec<u8>, i64), SqliteError> {
         let base = self.page_offset(page)?;
         let usable = self.usable_size;
         let page_bytes = &self.pages[base..base + usable];
@@ -254,12 +257,10 @@ impl SqliteReader {
                 return Err(fail("sqlite overflow pointer overruns its page"));
             }
             let mut overflow_page = be_u32(&self.pages, base + cursor + local) as i64;
-            let mut seen: HashSet<i64> = HashSet::from([page]);
             while remaining > 0 {
-                if overflow_page == 0 || seen.contains(&overflow_page) {
+                if overflow_page == 0 || !pages.insert(overflow_page) {
                     return Err(fail("sqlite overflow chain is malformed"));
                 }
-                seen.insert(overflow_page);
                 let overflow_base = self.page_offset(overflow_page)?;
                 let next = be_u32(&self.pages, overflow_base) as i64;
                 let take = remaining.min(usable - 4);
@@ -284,6 +285,9 @@ impl SqliteReader {
         let mut serial_types: Vec<u64> = Vec::new();
         let mut cursor = header_length.bytes;
         while cursor < header_end {
+            if serial_types.len() == MAX_COLUMNS {
+                return Err(fail("sqlite record names more columns than SQLite allows"));
+            }
             let serial = read_varint(payload, cursor)?;
             cursor += serial.bytes;
             serial_types.push(serial.value);
@@ -423,7 +427,7 @@ impl SqliteReader {
                     return Err(fail(format!("sqlite table scan exceeds its {max_rows}-row bound")));
                 }
                 let cell_offset = cell_at(index, &mut seen_cells)?;
-                let (payload, row_id) = self.read_cell_payload(page, cell_offset)?;
+                let (payload, row_id) = self.read_cell_payload(page, cell_offset, &mut walk.seen_pages)?;
                 visit(self.decode_record(&payload)?, row_id)?;
                 walk.visited += 1;
             }
