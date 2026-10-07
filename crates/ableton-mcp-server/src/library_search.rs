@@ -22,6 +22,7 @@ use std::sync::LazyLock;
 use base64::Engine;
 use kumi_common::js::json::stringify;
 use kumi_common::js::number::is_safe_integer;
+use kumi_common::js::string::utf16_len;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -507,6 +508,8 @@ struct TagIndex {
 
 /// Deeper than any real tag tree: a keyword more than this many levels below the root has no path.
 const MAX_TAG_DEPTH: usize = 512;
+/// The longest path the index keeps, in UTF-16 units.
+const MAX_TAG_PATH: usize = 512;
 /// A keyword's path below the keywords root ("Drums|Kick"), walked up its parents without recursion. Each id's answer
 /// (its path and depth) is kept in `known` for the whole vocabulary, so a shared ancestor is walked once. None for a
 /// chain that never reaches the root (a missing or zero parent, or a loop) or reaches it past MAX_TAG_DEPTH levels.
@@ -547,9 +550,14 @@ fn tag_path(
         at = parent;
     };
     for (id, row) in pending.into_iter().rev() {
-        path = path
-            .filter(|(_, depth)| *depth < MAX_TAG_DEPTH)
-            .map(|(parent, depth)| (if parent.is_empty() { row.name.clone() } else { format!("{parent}|{}", row.name) }, depth + 1));
+        path = path.filter(|(_, depth)| *depth < MAX_TAG_DEPTH).and_then(|(parent, depth)| {
+            // Longer than the index keeps, and every path below it is longer still: none, so `known` never holds a
+            // long path (measured before it's made, so a long name isn't copied only to be dropped).
+            let name = utf16_len(&row.name);
+            let length = if parent.is_empty() { name } else { utf16_len(&parent) + 1 + name };
+            (length <= MAX_TAG_PATH)
+                .then(|| (if parent.is_empty() { row.name.clone() } else { format!("{parent}|{}", row.name) }, depth + 1))
+        });
         known.insert(id, path.clone());
     }
     path.map(|(path, _)| path)
@@ -572,8 +580,8 @@ fn build_tag_index(reader: &SqliteReader, files: &[FileRow]) -> Result<TagIndex,
         }
         let path = tag_path(&by_id, keyword_root, row.file_id, &mut known);
         if let Some(path) = path {
-            let length = kumi_common::js::string::utf16_len(&path);
-            if length > 0 && length <= 512 {
+            let length = utf16_len(&path);
+            if length > 0 && length <= MAX_TAG_PATH {
                 match tag_file_index.get(&row.file_id) {
                     Some(index) => tag_files[*index].1 = path,
                     None => {
@@ -959,19 +967,27 @@ mod tests {
     }
     #[test]
     fn a_tag_path_walks_its_parents_without_recursion_and_the_same_way_in_any_order() {
-        // The keywords root, "Drums|Kick", then 100,000 levels below Kick (id k is k - 1 levels down), and a loop.
+        // The keywords root, "Drums|Kick", then 100,000 levels of "x" below Kick (id k's path is "Drums|Kick" and k - 3
+        // "|x"), a chain of 600 empty names below the root (ids 400,001 on), whose path never grows, and a loop.
         let mut rows = vec![row(1, None, "<keywords>"), row(2, Some(1), "Drums"), row(3, Some(2), "Kick")];
         rows.extend((4..100_004).map(|id| row(id, Some(id - 1), "x")));
+        rows.extend((400_001..400_601).map(|id| row(id, Some(if id == 400_001 { 1 } else { id - 1 }), "")));
         rows.extend([row(200_000, Some(200_001), "a"), row(200_001, Some(200_000), "b"), row(300_000, Some(0), "orphan")]);
         let by_id: HashMap<i64, &FileRow> = rows.iter().map(|row| (row.file_id, row)).collect();
-        let depth = |path: Option<String>| path.map(|path| path.split('|').count());
-        for order in [[3, 100_003, 513, 514, 600, 200_000, 300_000], [600, 514, 513, 300_000, 200_000, 100_003, 3]] {
+        let length = |path: Option<String>| path.map(|path| utf16_len(&path));
+        for order in
+            [[3, 100_003, 254, 255, 400_512, 400_513, 200_000, 300_000], [400_513, 400_512, 255, 254, 300_000, 200_000, 100_003, 3]]
+        {
             let mut known = HashMap::new();
             let answers: HashMap<i64, Option<usize>> =
-                order.iter().map(|id| (*id, depth(tag_path(&by_id, Some(1), *id, &mut known)))).collect();
+                order.iter().map(|id| (*id, length(tag_path(&by_id, Some(1), *id, &mut known)))).collect();
             assert_eq!(tag_path(&by_id, Some(1), 3, &mut known).as_deref(), Some("Drums|Kick"));
-            // 512 levels have a path; 513 and deeper (100,002 here, which the recursion overflowed the stack on) don't.
-            assert_eq!((answers[&513], answers[&514], answers[&600], answers[&100_003]), (Some(512), None, None, None), "{order:?}");
+            // A path of 512 units is kept; one longer, and every keyword below it (100,002 levels down here, which the
+            // recursion overflowed the stack on), has none, and none is kept in `known`.
+            assert_eq!((answers[&254], answers[&255], answers[&100_003]), (Some(512), None, None), "{order:?}");
+            assert!(known.values().flatten().all(|(path, _)| utf16_len(path) <= MAX_TAG_PATH));
+            // Depth still bounds a path that doesn't grow: 512 levels have one, 513 don't.
+            assert_eq!((answers[&400_512], answers[&400_513]), (Some(0), None), "{order:?}");
             assert_eq!((answers[&200_000], answers[&300_000]), (None, None), "{order:?}");
         }
     }
