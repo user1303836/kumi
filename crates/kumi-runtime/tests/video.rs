@@ -277,6 +277,32 @@ async fn a_private_address_isnt_given_to_yt_dlp() {
     assert!(!folder.path().join("asked").exists(), "yt-dlp wasn't run");
 }
 #[tokio::test(flavor = "current_thread")]
+async fn pieces_a_fetch_stopped_dead_left_go_before_the_next_fetch() {
+    let folder = tempfile::tempdir().unwrap();
+    let tools = folder.path().join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    // Half an archive a Kumi stopped dead left two hours ago, and one another Kumi is fetching now.
+    let left = tools.join(".ffmpeg-0b1d.tar.xz");
+    std::fs::write(&left, "half an archive").unwrap();
+    let two_hours = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+    std::fs::File::options().write(true).open(&left).unwrap().set_modified(two_hours).unwrap();
+    let fetching = tools.join(".ffmpeg-77.tar.xz");
+    std::fs::write(&fetching, "a fetch under way").unwrap();
+    let unreachable: Download = Arc::new(|_, _| async { Err(VideoFailure::other("error sending request")) }.boxed());
+    let found = find_ffmpeg(FfmpegOptions {
+        env: Some(Default::default()),
+        tools_dir: Some(tools.to_string_lossy().into()),
+        platform: Some("linux".into()),
+        arch: Some("x64".into()),
+        download: Some(unreachable),
+        ..Default::default()
+    })
+    .await;
+    assert!(found.is_err());
+    assert!(!left.exists(), "the stale piece is gone");
+    assert!(fetching.exists(), "the fetch under way keeps its own");
+}
+#[tokio::test(flavor = "current_thread")]
 async fn video_files_have_captions_frames_closeups_sound_and_are_kept() {
     let folder = tempfile::tempdir().unwrap();
     let Some(video) = test_video(folder.path(), "tutorial", true).await else {
