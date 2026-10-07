@@ -99,7 +99,7 @@ impl DeterministicLiveSimulator {
                     let name = bounded_text(args.get("name").unwrap_or(&Value::Null), 256, "arrangement clip bounds are invalid")?;
                     (length, name, None)
                 };
-                let mut clip = json!({"ref":format!("arrangement-clip:{reference}:{}",kumi_common::js::number::to_string(position)),"objectIdentity":format!("simulator:arrangement-clip:{}",self.sequence.get()+1),"name":name,"kind":if audio{"audio"}else{"midi"},"start":position,"length":length,"notes":[],"notesRevision":simulator_revision(&json!([])),"warp":audio,"takes":[],"automation":[]});
+                let mut clip = json!({"ref":super::simulator_devices::unique_ref(&state["arrangementClips"],format!("arrangement-clip:{reference}:{}",kumi_common::js::number::to_string(position))),"objectIdentity":format!("simulator:arrangement-clip:{}",self.sequence.get()+1),"name":name,"kind":if audio{"audio"}else{"midi"},"start":position,"length":length,"notes":[],"notesRevision":simulator_revision(&json!([])),"warp":audio,"takes":[],"automation":[]});
                 if let Some(file) = &file {
                     clip["filePath"] = file.clone().into();
                     clip["isAudio"] = true.into();
@@ -222,6 +222,11 @@ impl DeterministicLiveSimulator {
                     let index = rows.iter().position(|r| r["clip"]["ref"] == reference);
                     state["arrangementClips"] = Value::Array(rows);
                     state["arrangementClips"][index.unwrap()]["clip"]["start"] = position.into();
+                    // A clip that says where it ends ends a move later too.
+                    let moved = &mut state["arrangementClips"][index.unwrap()]["clip"];
+                    if moved.get("endTime").is_some() {
+                        moved["endTime"] = (position + moved["length"].as_f64().unwrap_or(0.)).into();
+                    }
                     let identity = state["arrangementClips"][index.unwrap()]["clip"]["objectIdentity"].clone();
                     drop(state);
                     self.emit(LiveEventType::Object, Some(reference.into()), json!({"operation":operation}));
@@ -275,7 +280,11 @@ impl DeterministicLiveSimulator {
                         false,
                         "arrangement position is invalid",
                     )?;
-                    clip["ref"] = format!("arrangement-clip:{track_ref}:{}", kumi_common::js::number::to_string(position)).into();
+                    clip["ref"] = super::simulator_devices::unique_ref(
+                        &state["arrangementClips"],
+                        format!("arrangement-clip:{track_ref}:{}", kumi_common::js::number::to_string(position)),
+                    )
+                    .into();
                     clip["objectIdentity"] = format!("simulator:arrangement-clip:{}", self.sequence.get() + 1).into();
                     clip["start"] = position.into();
                     push_arrangement(&mut state, &clip, &track_ref);

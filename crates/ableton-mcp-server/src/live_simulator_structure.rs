@@ -195,6 +195,12 @@ impl DeterministicLiveSimulator {
                         scene["index"] = i.into();
                     }
                     for track in state["tracks"].as_array_mut().unwrap() {
+                        // As Live: the scenes after the copy move down one, and their slots with them.
+                        for later in track["clipSlots"].as_array_mut().into_iter().flatten() {
+                            if let Some(scene) = later["sceneIndex"].as_u64().filter(|scene| *scene > index as u64) {
+                                later["sceneIndex"] = (scene + 1).into();
+                            }
+                        }
                         let slot = array(&track["clipSlots"]).iter().find(|s| s["sceneIndex"].as_u64() == Some(index as u64));
                         let clip = slot
                             .and_then(|s| s["clipRef"].as_str())

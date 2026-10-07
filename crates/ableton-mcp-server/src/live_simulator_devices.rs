@@ -45,6 +45,15 @@ pub(super) fn chain_path(state: &Value, reference: &Value) -> Option<String> {
     }
     None
 }
+/// `wanted`, or `wanted` with a suffix when a row in `rows` has it already: a ref built from a position can repeat
+/// one a device or clip kept after the others moved.
+pub(super) fn unique_ref(rows: &Value, wanted: String) -> String {
+    let taken = |candidate: &str| array(rows).iter().any(|row| row["ref"] == candidate || row["clip"]["ref"] == candidate);
+    if !taken(&wanted) {
+        return wanted;
+    }
+    (2..).map(|n| format!("{wanted}-{n}")).find(|candidate| !taken(candidate)).unwrap()
+}
 fn device_fingerprint(device: &Value) -> Result<String, LiveError> {
     Ok(simulator_revision(&owned_device_fingerprint_row(device)))
 }
@@ -70,7 +79,7 @@ impl DeterministicLiveSimulator {
                     }
                     let index = array(&chain["devices"]).len();
                     let reference = chain["ref"].as_str().unwrap().to_string();
-                    let device = json!({"ref":format!("device:{reference}:{index}"),"parentRef":reference,"name":name,"kind":if name.to_lowercase().contains("rack"){"rack"}else{"device"},"className":name,"parameters":[],"objectIdentity":format!("simulator:device:{}:{reference}:{index}",self.sequence.get()+1),"enabled":true});
+                    let device = json!({"ref":unique_ref(&chain["devices"], format!("device:{reference}:{index}")),"parentRef":reference,"name":name,"kind":if name.to_lowercase().contains("rack"){"rack"}else{"device"},"className":name,"parameters":[],"objectIdentity":format!("simulator:device:{}:{reference}:{index}",self.sequence.get()+1),"enabled":true});
                     chain["devices"].as_array_mut().unwrap().push(device.clone());
                     drop(state);
                     self.emit(LiveEventType::Object, Some(reference.into()), json!({"operation":operation,"device":device}));
@@ -101,7 +110,7 @@ impl DeterministicLiveSimulator {
                     device["drumPads"]=Value::Array((0..16).map(|i|json!({"ref":format!("drum_pad:{}:{i}",device["ref"].as_str().unwrap()),"parentRef":device["ref"],"index":i,"name":format!("Pad {}",i+1),"mute":false,"chains":[],"note":36+i,"solo":false,"objectIdentity":format!("{identity}:pad:{i}")})).collect());
                 }
                 let position = if index < 0 || index as usize > count { count } else { index as usize };
-                device["ref"] = format!("device:{reference}:{position}").into();
+                device["ref"] = unique_ref(&track["devices"], format!("device:{reference}:{position}")).into();
                 if let Some(sample) = args.get("samplePath").filter(|v| v.is_string()) {
                     device["samplePath"] = sample.clone();
                 }
@@ -310,5 +319,18 @@ impl DeterministicLiveSimulator {
             }
             _ => unreachable!("device dispatcher routes only implemented operations"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn a_new_ref_never_repeats_one_a_row_kept() {
+        // Device 0 was deleted: the one left kept ref 1, and the next insert's position is 1 again.
+        let rows = json!([{"ref":"device:chain:1"},{"clip":{"ref":"arrangement-clip:track:8"}}]);
+        assert_eq!(unique_ref(&rows, "device:chain:0".into()), "device:chain:0");
+        assert_eq!(unique_ref(&rows, "device:chain:1".into()), "device:chain:1-2");
+        assert_eq!(unique_ref(&rows, "arrangement-clip:track:8".into()), "arrangement-clip:track:8-2");
     }
 }

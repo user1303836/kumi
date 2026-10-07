@@ -160,6 +160,8 @@ impl DeterministicLiveSimulator {
                         id += 1.;
                         clip["notes"].as_array_mut().unwrap().push(source);
                     }
+                    // Ids a later add hands out come after these.
+                    self.next_note_id.set(self.next_note_id.get().max(id as i64));
                     Some(count)
                 } else {
                     let grid = ranged_number(
