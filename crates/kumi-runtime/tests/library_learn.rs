@@ -239,8 +239,11 @@ fn a_new_pool_sweeps_the_folders_left_by_a_kumi_thats_gone() {
     let folder = |pid: u32| temp.join(format!("kumi-measure-{pid}-{}", uuid::Uuid::new_v4()));
     // A crashed Kumi's (its process has ended), one of a process older than its folder (pid 1), and this one's.
     let (left, older, mine) = (folder(gone), folder(1), folder(std::process::id()));
-    // Made in one step: another test's pool, starting meanwhile, may sweep it first, which is what's checked anyway.
-    std::fs::create_dir(&left).unwrap();
+    // Made whole under a name sweeps skip, then named in one step: another test's pool, starting meanwhile, may sweep
+    // it first, which is what's checked anyway.
+    let staging = temp.join(format!("kumi-staging-{}", uuid::Uuid::new_v4()));
+    put(&staging.join("kumi-audio-1/converted.wav"), "a copy");
+    std::fs::rename(&staging, &left).unwrap();
     // One named before folders said their maker (a uuid alone, its first part all digits) is left too.
     let unsaid = temp.join("kumi-measure-12345678-abcd-4ef0-8123-456789abcdef");
     std::fs::create_dir(&unsaid).unwrap();
