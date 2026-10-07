@@ -631,7 +631,10 @@ fn analyze_pcm_internal(
     let normalized_source = sample_kind == AnalysisSampleKind::NormalizedSource;
     for i in 0..sample_count {
         let sample = input.samples[i];
-        finite(sample, &format!("samples[{i}]"))?;
+        // The label is built only for the sample that isn't finite, not for each of up to ten million.
+        if !sample.is_finite() {
+            finite(sample, &format!("samples[{i}]"))?;
+        }
         if sample < -amplitude_limit || sample > amplitude_limit {
             return Err(RangeError(if amplitude_limit == 1.0 {
                 format!("samples[{i}] must be normalized between -1 and 1")
