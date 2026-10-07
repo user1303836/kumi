@@ -16,6 +16,54 @@ pub struct StreamingText {
     state: State,
     pending: String,
     secrets: Vec<String>,
+    /// Each secret as a pattern: its UTF-16 units and their KMP prefix function.
+    patterns: Vec<Pattern>,
+}
+
+#[derive(Clone, Debug)]
+struct Pattern {
+    units: Vec<u16>,
+    prefix: Vec<usize>,
+}
+
+impl Pattern {
+    fn new(secret: &str) -> Pattern {
+        let units: Vec<u16> = secret.encode_utf16().collect();
+        let mut prefix = vec![0; units.len()];
+        let mut k = 0;
+        for i in 1..units.len() {
+            while k > 0 && units[i] != units[k] {
+                k = prefix[k - 1];
+            }
+            if units[i] == units[k] {
+                k += 1;
+            }
+            prefix[i] = k;
+        }
+        Pattern { units, prefix }
+    }
+
+    /// How much of the secret's start, short of all of it, `text` (UTF-16) ends with, never half a character: in one
+    /// pass over its last units, not a prefix built and compared for each length.
+    fn held(&self, text: &[u16]) -> usize {
+        let units = &self.units;
+        if units.len() < 2 {
+            return 0;
+        }
+        let mut held = 0;
+        for &unit in &text[text.len().saturating_sub(units.len() - 1)..] {
+            while held > 0 && (held == units.len() || unit != units[held]) {
+                held = self.prefix[held - 1];
+            }
+            if unit == units[held] {
+                held += 1;
+            }
+        }
+        while held > 0 && (0xd800..=0xdbff).contains(&units[held - 1]) {
+            held = self.prefix[held - 1];
+        }
+        held
+    }
 }
 
 fn is_invisible(character: char) -> bool {
@@ -30,11 +78,17 @@ impl Default for StreamingText {
 
 impl StreamingText {
     pub fn new(secrets: &[String]) -> StreamingText {
-        StreamingText { state: State::Text, pending: String::new(), secrets: secrets.to_vec() }
+        StreamingText {
+            state: State::Text,
+            pending: String::new(),
+            secrets: secrets.to_vec(),
+            patterns: secrets.iter().map(|secret| Pattern::new(secret)).collect(),
+        }
     }
 
     /// A key saved while the app is running joins its existing streaming redactions.
     pub fn add_secret(&mut self, secret: String) {
+        self.patterns.push(Pattern::new(&secret));
         self.secrets.push(secret);
     }
 
@@ -106,21 +160,10 @@ impl StreamingText {
                 self.pending = self.pending.replace(secret.as_str(), "[redacted]");
             }
         }
-        let mut retain = 0;
-        let pending_length = js::string::utf16_len(&self.pending);
-        for secret in &self.secrets {
-            let mut length = (js::string::utf16_len(secret).saturating_sub(1)).min(pending_length);
-            while length > retain {
-                if String::from_utf16(&secret.encode_utf16().take(length).collect::<Vec<_>>())
-                    .ok()
-                    .is_some_and(|prefix| self.pending.ends_with(&prefix))
-                {
-                    retain = length;
-                    break;
-                }
-                length -= 1;
-            }
-        }
+        // What may be a secret's start, held back until the next chunk says.
+        let units: Vec<u16> = self.pending.encode_utf16().collect();
+        let pending_length = units.len();
+        let retain = self.patterns.iter().map(|pattern| pattern.held(&units)).max().unwrap_or(0);
         let visible = js::string::slice(&self.pending, 0, Some((pending_length - retain) as i64));
         self.pending = if retain > 0 { js::string::slice(&self.pending, -(retain as i64), None) } else { String::new() };
         visible
@@ -239,6 +282,44 @@ pub fn library_line(status: Option<&LibraryStatus>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The rule `held` keeps, as it was first written: each length from the longest down, built and compared.
+    fn held_by_search(text: &str, secret: &str) -> usize {
+        let mut length = (js::string::utf16_len(secret).saturating_sub(1)).min(js::string::utf16_len(text));
+        while length > 0 {
+            if String::from_utf16(&secret.encode_utf16().take(length).collect::<Vec<_>>())
+                .ok()
+                .is_some_and(|prefix| text.ends_with(&prefix))
+            {
+                return length;
+            }
+            length -= 1;
+        }
+        0
+    }
+
+    #[test]
+    fn a_secrets_start_at_the_end_is_found_in_one_pass_as_the_search_found_it() {
+        // Repeats, accents and surrogate pairs (🎹 is two units), so starts overlap and can end mid-character.
+        let pieces = ["a", "b", "ab", "aa", "é", "🎹", "🎹a", "a🎹"];
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for _ in 0..5000 {
+            let mut make = |count: u64| (0..next() % count).map(|_| pieces[(next() % pieces.len() as u64) as usize]).collect::<String>();
+            let (secret, text) = (make(8), make(10));
+            let units: Vec<u16> = text.encode_utf16().collect();
+            assert_eq!(Pattern::new(&secret).held(&units), held_by_search(&text, &secret), "{text:?} ends with a start of {secret:?}");
+        }
+        // A long token: a near miss everywhere is still one pass.
+        let token = format!("{}b", "a".repeat(4095));
+        let text = "a".repeat(100_000);
+        assert_eq!(Pattern::new(&token).held(&text.encode_utf16().collect::<Vec<_>>()), 4095);
+    }
 
     #[test]
     fn counts_group_thousands_as_en_us_does() {
