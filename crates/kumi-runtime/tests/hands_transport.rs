@@ -10,7 +10,7 @@ fn embedded_helpers_keep_their_hashes() {
     assert_eq!(HANDS_VERSION, 2);
     for (source, expected) in [
         (mac::MAC_SOURCE, "16045380d38220f9dfd1a6dd318dac9b655fc41758f2531efc46ab97f82a7ba3"),
-        (windows::WINDOWS_SOURCE, "9a2ae5669637716e9c438b0179cc82eed45128410f1baddef118c0e5bce4d1e1"),
+        (windows::WINDOWS_SOURCE, "799ce14a0e66fadf1d34fd7c355a826525b9b647c63170a2c233ec07e35441ab"),
     ] {
         assert_eq!(hex::encode(Sha256::digest(source)), expected);
     }
@@ -214,6 +214,13 @@ $freeze.Enabled = $false
 $create = $menu.MenuItems.Add('&Create')
 $create.MenuItems.Add('Insert &MIDI Track') | Out-Null
 $form.Menu = $menu
+# Live's track headers as UI Automation reads them, with two tracks whose names differ only in case.
+$headers = New-Object System.Windows.Forms.ListBox
+$headers.AccessibleName = 'Track Headers'
+$headers.SelectionMode = 'MultiExtended'
+[void]$headers.Items.Add('BASS')
+[void]$headers.Items.Add('Bass')
+$form.Controls.Add($headers)
 $form.add_Shown({ Say "ready $PID" })
 [System.Windows.Forms.Application]::Run($form)
 "#;
@@ -266,6 +273,13 @@ async fn on_windows_the_helper_uses_the_win32_menu_finds_the_owned_dialog_and_fi
     assert_eq!(next(&mut said).await.as_deref(), Some("group"));
     let freeze = hands.menu(&["Edit".into(), "Freeze Track".into()], MenuOptions::default()).await.unwrap();
     assert_eq!(freeze.error.as_deref(), Some("disabled"));
+
+    // A track is picked by its name exactly, as Kumi counts nth: "Bass" isn't "BASS", and "bass" is neither.
+    let picked = hands.tracks(&[Track { name: "Bass".into(), nth: Some(0.0) }], None).await.unwrap();
+    assert!(picked.ok, "{picked:?}");
+    assert_eq!(picked.fields["selected"], json!(["Bass"]));
+    let picked = hands.tracks(&[Track { name: "bass".into(), nth: Some(0.0) }], None).await.unwrap();
+    assert_eq!((picked.ok, &picked.fields["missing"]), (false, &json!(["bass"])), "{picked:?}");
     assert!(hands.dialog(None).await.unwrap() == Dialog { open: false, title: None, words: None, buttons: None, file: None });
 
     // An item that opens a modal prompt answers at once, and the prompt is the dialog: its own words and

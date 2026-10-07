@@ -324,8 +324,10 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         foreach ($entry in @($request.tracks)) {
           $nth = if ($null -ne $entry.nth) { [int]$entry.nth } else { 0 }
           $whole = @(); $stated = @()
+          # Exactly, as Kumi counts nth: -eq ignores case, and two tracks can differ only in it.
           for ($i = 0; $i -lt $labels.Count; $i++) {
-            if ($labels[$i] -eq $entry.name) { $whole += $i } elseif ($labels[$i].StartsWith("$($entry.name), ")) { $stated += $i }
+            if ([string]::Equals($labels[$i], [string]$entry.name, [StringComparison]::Ordinal)) { $whole += $i }
+            elseif ($labels[$i].StartsWith("$($entry.name), ", [StringComparison]::Ordinal)) { $stated += $i }
           }
           $found = if ($whole.Count -gt $nth) { $whole } else { @($whole + $stated | Sort-Object) }
           if ($found.Count -gt $nth) { $picked += $rows[$found[$nth]] } else { $missing += $entry.name }
