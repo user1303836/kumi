@@ -2671,6 +2671,10 @@ struct ViewAssembly {
     tracks: Vec<Track>,
     clips: Vec<Map<String, Value>>,
     held: Vec<ArrangementClipEntry>,
+    /// The refs of `clips` (as JSON text; None for a clip without one) and of `held`: each page's clips are checked
+    /// against these, not against every clip kept so far.
+    clip_refs: HashSet<Option<String>>,
+    held_refs: HashSet<LiveRef>,
 }
 
 enum FillResult {
@@ -2681,18 +2685,24 @@ enum FillResult {
 
 impl ViewAssembly {
     fn new(first: &LiveSnapshot) -> Self {
-        let mut assembly = Self { tracks: first.tracks().to_vec(), clips: Vec::new(), held: Vec::new() };
+        let mut assembly = Self {
+            tracks: first.tracks().to_vec(),
+            clips: Vec::new(),
+            held: Vec::new(),
+            clip_refs: HashSet::new(),
+            held_refs: HashSet::new(),
+        };
         assembly.keep(first);
         assembly
     }
     fn keep(&mut self, snapshot: &LiveSnapshot) {
         for clip in snapshot.arrangement.as_ref().and_then(|a| a.clips.as_ref()).into_iter().flatten() {
-            if !self.clips.iter().any(|known| known.get("ref") == clip.get("ref")) {
+            if self.clip_refs.insert(clip.get("ref").map(Value::to_string)) {
                 self.clips.push(clip.clone());
             }
         }
         for item in snapshot.arrangement_clips.iter().flatten() {
-            if !self.held.iter().any(|known| known.clip.ref_ == item.clip.ref_) {
+            if self.held_refs.insert(item.clip.ref_.clone()) {
                 self.held.push(item.clone());
             }
         }

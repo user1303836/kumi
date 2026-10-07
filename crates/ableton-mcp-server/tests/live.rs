@@ -189,6 +189,21 @@ async fn views_read_the_tracks_an_operation_names_whole_find_references_and_page
     assert_eq!(*adapter.requests.borrow(), vec![LiveSnapshotRequest::focused(vec![19])]);
 }
 #[tokio::test]
+async fn a_paged_whole_set_read_keeps_each_arrangement_clip_once() {
+    let adapter = Recording::new(WHOLE_SET_PAGE_TRACKS + 4);
+    // Every page carries the Set's Arrangement clips: the assembled read keeps one of each (one without a ref too).
+    let clips: Vec<_> = (0..3)
+        .map(|i| json!({"ref":format!("7:arrangement_clip:{i}:0"),"trackRef":format!("track:extra-{i}"),"name":format!("Clip {i}")}))
+        .chain([json!({"trackRef":"track:extra-2","name":"No ref"})])
+        .map(|clip| clip.as_object().unwrap().clone())
+        .collect();
+    adapter.state.borrow_mut().arrangement =
+        Some(Arrangement { length: None, locator_revision: None, locators: vec![], clips: Some(clips.clone()), extra: Default::default() });
+    let whole = views(&adapter).whole_set(None, None).await.unwrap();
+    assert_eq!(adapter.requests.borrow().len(), 2, "two pages");
+    assert_eq!(whole.arrangement.unwrap().clips.unwrap(), clips);
+}
+#[tokio::test]
 async fn whole_set_read_accepts_old_adapters_and_retries_tracks_that_move_between_pages() {
     let adapter = Recording::new(18);
     adapter.ignore.set(true);
