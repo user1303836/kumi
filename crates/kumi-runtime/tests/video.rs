@@ -265,7 +265,9 @@ async fn captions_beside_a_video_are_read_in_windows_1252_and_utf_16_too() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_private_address_isnt_given_to_yt_dlp() {
     let folder = tempfile::tempdir().unwrap();
-    let ytdlp = fake(folder.path(), "yt-dlp", "echo asked >> \"$(dirname \"$0\")/asked\"\nexit 1", "echo asked>>\"%~dp0asked\"\nexit /b 1");
+    // A yt-dlp that writes down what it's given.
+    let ytdlp =
+        fake(folder.path(), "yt-dlp", "printf '%s\\n' \"$@\" >> \"$(dirname \"$0\")/asked\"\nexit 1", "echo %*>>\"%~dp0asked\"\nexit /b 1");
     let mut env = kumi_runtime::system::process_env();
     env.insert("KUMI_YTDLP".into(), ytdlp);
     let mut options = watch_options(folder.path(), "videos");
@@ -275,6 +277,11 @@ async fn a_private_address_isnt_given_to_yt_dlp() {
         assert!(error.to_string().contains("only public web addresses"), "{address}: {error}");
     }
     assert!(!folder.path().join("asked").exists(), "yt-dlp wasn't run");
+    // The URL standard's host here is public.invalid, and Python's (yt-dlp's) is 127.0.0.1: yt-dlp is given the
+    // address as Kumi read it, so it asks the host Kumi checked.
+    let _ = watch_video(WatchRequest { url: "http://public.invalid\\@127.0.0.1:8080/".into(), ..Default::default() }, options).await;
+    let given = std::fs::read_to_string(folder.path().join("asked")).unwrap();
+    assert!(given.contains("http://public.invalid/@127.0.0.1:8080/") && !given.contains("\\@"), "{given}");
 }
 #[tokio::test(flavor = "current_thread")]
 async fn pieces_a_fetch_stopped_dead_left_go_before_the_next_fetch() {
@@ -837,6 +844,46 @@ async fn a_youtube_stream_is_asked_for_in_its_pieces_and_an_older_ffmpeg_says_so
             assert!(progress.contains(&line), "{line} in {progress:?}");
         }
     }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn ffmpeg_reads_a_stream_at_the_host_kumi_checked() {
+    let folder = tempfile::tempdir().unwrap();
+    let tools = folder.path().join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    // A stream address whose host is public.invalid to the URL standard, and 127.0.0.1 to ffmpeg's own reading.
+    let page = json!({
+        "id": "bkslash0001",
+        "extractor_key": "Youtube",
+        "title": "Backslash",
+        "duration": 300,
+        "webpage_url": "https://www.youtube.com/watch?v=bkslash0001",
+        "formats": [{"format_id": "1", "url": "https://public.invalid\\@127.0.0.1:8124/videoplayback", "protocol": "https", "ext": "mp4",
+            "vcodec": "avc1.4d401f", "acodec": "none", "height": 720}]
+    });
+    std::fs::write(tools.join("page.json"), page.to_string()).unwrap();
+    let ytdlp = fake(
+        &tools,
+        "yt-dlp",
+        "if [ \"$1\" = --version ]; then echo 2025.01.01; exit 0; fi\ncat \"$(dirname \"$0\")/page.json\"",
+        "if \"%~1\"==\"--version\" (\n  echo 2025.01.01\n  exit /b 0\n)\ntype \"%~dp0page.json\"",
+    );
+    let mut env = kumi_runtime::system::process_env();
+    env.insert("KUMI_FFMPEG".into(), refused_ffmpeg(&tools));
+    env.insert("KUMI_YTDLP".into(), ytdlp);
+    env.insert("KUMI_WHISPER".into(), tools.join("no-whisper").to_string_lossy().into());
+    let mut options = watch_options(&tools, "videos");
+    options.env = Some(env);
+    let watched =
+        watch_video(WatchRequest { url: "https://youtu.be/bkslash0001".into(), look_at: Some(vec![10.0]), ..Default::default() }, options)
+            .await
+            .unwrap();
+    assert!(watched.frames.is_empty());
+    let takes = lines_in(&tools, "takes");
+    assert!(
+        !takes.is_empty()
+            && takes.iter().all(|take| take.contains("https://public.invalid/@127.0.0.1:8124/videoplayback") && !take.contains("\\@")),
+        "{takes:?}"
+    );
 }
 #[tokio::test(flavor = "current_thread")]
 async fn a_program_that_stalls_is_said_to_have_timed_out() {

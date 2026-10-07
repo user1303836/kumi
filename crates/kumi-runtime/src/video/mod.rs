@@ -288,7 +288,9 @@ fn streams(info: &Value) -> Sources {
         .collect();
     let input = |f: Option<&&Value>| {
         f.map(|f| Input {
-            url: f["url"].as_str().unwrap().into(),
+            // As Kumi read it when it checked it public: ffmpeg reads the same host (its own reading takes a
+            // `\@` the URL standard doesn't).
+            url: url::Url::parse(f["url"].as_str().unwrap()).map(String::from).unwrap_or_default(),
             headers: f["http_headers"]
                 .as_object()
                 .map(|o| o.iter().filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.into()))).collect()),
@@ -645,9 +647,11 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
             .into();
     }
     let remote = address.to_ascii_lowercase().starts_with("http://") || address.to_ascii_lowercase().starts_with("https://");
-    // yt-dlp reads it from this computer: a public address only, as for the streams and captions it gives back.
+    // yt-dlp reads it from this computer: a public address only, as for the streams and captions it gives back. And
+    // given as Kumi read it, so yt-dlp reads the host Kumi checked: in `http://public.example\@127.0.0.1/` the URL
+    // standard's host is public.example, and Python's (yt-dlp's) is 127.0.0.1.
     if remote {
-        crate::web::net::checked_url(&address, None).map_err(|error| VideoFailure::video(error.to_string()))?;
+        address = crate::web::net::checked_url(&address, None).map_err(|error| VideoFailure::video(error.to_string()))?.to_string();
     }
     let file = if remote {
         None
