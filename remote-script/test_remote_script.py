@@ -394,6 +394,21 @@ class RemoteScriptTests(unittest.TestCase):
                     keep(log)
                     self.assertEqual(set(package._ACL_VERDICTS), {fresh, package._acl_key(log)})
 
+    @unittest.skipUnless(sys.platform == "win32", "runs Windows PowerShell's ACL check itself")
+    def test_one_powershell_run_judges_each_file_by_its_own_acl(self):
+        # Unmocked: a file secured by the bridge's own script (delivery_acl.rs, as its setup runs it), one left with the
+        # rules it inherits and one that isn't there, in one run, each verdict at its own place.
+        package = __import__("AbletonMcpBridge")
+        source = (Path(__file__).resolve().parent.parent / "crates" / "ableton-mcp-server" / "src" / "delivery_acl.rs").read_text(encoding="utf-8")
+        target, secure, checks = (re.search(rf'const {name}\s*:\s*&str\s*=\s*"([^"\\]*)";', source).group(1) for name in ("WINDOWS_ACL_TARGET", "SECURE_FILE", "WINDOWS_ACL_CHECKS"))
+        with tempfile.TemporaryDirectory() as directory:
+            owner_only, inherited, missing = Path(directory, "secret"), Path(directory, "inherited"), Path(directory, "missing")
+            owner_only.write_text("x", encoding="utf-8"); inherited.write_text("x", encoding="utf-8")
+            environment = dict(os.environ); environment["ABLETON_MCP_ACL_PATH"] = base64.b64encode(str(owner_only).encode("utf-8")).decode("ascii")
+            subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", f"$ErrorActionPreference='Stop';{target}{secure}{checks}"], check=True, env=environment)
+            self.assertEqual(package._windows_acl_owner_only_all([owner_only, inherited]), [True, False])
+            self.assertEqual(package._windows_acl_owner_only_all([inherited, missing, owner_only]), [False, False, True])
+
     def surface_with_timer(self, serve=None):
         """A Control Surface whose Live has a timer (Live.Base.Timer), the timers it made, its bridge."""
         package = __import__("AbletonMcpBridge"); made = []
