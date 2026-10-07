@@ -109,6 +109,7 @@ impl McpHost {
                 row["state"] = json!("applying");
                 row["applyKey"] = p["idempotencyKey"].clone()
             }
+            self.mark_staged_in_use(&t);
             let result = adapter.invoke_async(&LiveInvocation::new("simpler.replace-sample", t["payload"].clone()), Some(&context)).await?;
             if result.is_null() {
                 return Err(LiveError::type_error("Cannot read properties of null (reading 'changed')"));

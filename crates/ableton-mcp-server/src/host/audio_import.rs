@@ -270,6 +270,7 @@ impl McpHost {
                 t["state"] = json!("applying");
                 t["applyKey"] = params["idempotencyKey"].clone();
             }
+            self.mark_staged_in_use(&t);
             let result = adapter
                 .invoke_async(
                     &LiveInvocation::new(if lane { "take-lane.audio-clip.create" } else { "session.audio-clip.create" }, payload.clone()),

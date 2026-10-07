@@ -12,6 +12,64 @@ use std::{
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 const MAX_BYTES: u64 = 512 * 1024 * 1024;
+/// How old a staging folder that never went to Live gets before it's swept: well past a preview's 10 minutes.
+const PREVIEW_LIFE: std::time::Duration = std::time::Duration::from_secs(3600);
+/// Beside the staging root: an empty file named after each staging folder whose change went to Live. From then on a
+/// Set may play its file, so only an undo takes it away; a folder not named here is a preview's.
+fn ledger(root: &str) -> PathBuf {
+    PathBuf::from(format!("{root}.in-use"))
+}
+/// A staging folder and what's in it, made writable first (staged files are read-only).
+fn remove_folder(folder: &Path) {
+    for entry in fs::read_dir(folder).into_iter().flatten().flatten() {
+        let _ = chmod(&entry.path(), 0o600);
+        let _ = fs::remove_file(entry.path());
+    }
+    let _ = fs::remove_dir(folder);
+}
+/// Once per process, when the staging root is first used: previews nothing will apply any more (another bridge's are
+/// younger than PREVIEW_LIFE) are taken away. The first time there's no ledger, every folder there is kept: bridges
+/// before this one kept none, and a Set may play any of their files.
+fn sweep(root: &str) {
+    let ledger = ledger(root);
+    let folders: Vec<_> = fs::read_dir(root).into_iter().flatten().flatten().filter(|entry| entry.path().is_dir()).collect();
+    if !ledger.exists() {
+        if mkdir(&ledger, true, 0o700).is_ok() {
+            for folder in &folders {
+                let _ = fs::File::create(ledger.join(folder.file_name()));
+            }
+        }
+        return;
+    }
+    let marked: HashSet<_> = fs::read_dir(&ledger).into_iter().flatten().flatten().map(|entry| entry.file_name()).collect();
+    for folder in &folders {
+        let old =
+            folder.metadata().and_then(|meta| meta.modified()).ok().and_then(|at| at.elapsed().ok()).is_some_and(|age| age > PREVIEW_LIFE);
+        if old && !marked.contains(&folder.file_name()) {
+            remove_folder(&folder.path());
+        }
+    }
+    for name in marked {
+        if !Path::new(root).join(&name).exists() {
+            let _ = fs::remove_file(ledger.join(name));
+        }
+    }
+}
+/// The staged files a transaction names.
+fn staged(transaction: &Value) -> Vec<&Value> {
+    let payload = &transaction["payload"];
+    let mut paths = vec![];
+    match transaction["kind"].as_str() {
+        Some("session-audio-create" | "simpler") => paths.push(&payload["filePath"]),
+        Some("device") => paths.push(&payload["samplePath"]),
+        Some("drum-pad") => {
+            paths.push(&payload["samplePath"]);
+            paths.extend(payload["pads"].as_array().into_iter().flatten().filter(|pad| pad.is_object()).map(|pad| &pad["samplePath"]));
+        }
+        _ => {}
+    }
+    paths
+}
 pub(super) struct ImportFiles {
     configured: Option<String>,
     root: RefCell<Option<String>>,
@@ -174,7 +232,24 @@ impl ImportFiles {
         chmod(&root, 0o700)?;
         let root = canonical(&root)?;
         *self.root.borrow_mut() = Some(root.clone());
+        sweep(&root);
         Ok(root)
+    }
+    /// Its staging folders are named in the ledger: the change is going to Live, which may keep playing the files.
+    pub(super) fn mark_in_use(&self, transaction: &Value) {
+        let Some(root) = self.root.borrow().clone() else { return };
+        for path in staged(transaction).into_iter().filter_map(Value::as_str) {
+            let Some(name) = Path::new(path)
+                .parent()
+                .filter(|folder| folder.starts_with(&root) && *folder != Path::new(&root))
+                .and_then(Path::file_name)
+            else {
+                continue;
+            };
+            if mkdir(&ledger(&root), true, 0o700).is_ok() {
+                let _ = fs::File::create(ledger(&root).join(name));
+            }
+        }
     }
     fn preset_root(&self) -> Result<PathBuf, LiveError> {
         let library = self
@@ -244,6 +319,9 @@ impl ImportFiles {
         if let Some(folder) = path.parent().filter(|p| *p != Path::new(root) && p.starts_with(root)) {
             let _ = fs::remove_file(format!("{}.asd", path.display()));
             let _ = fs::remove_dir(folder);
+            if let Some(name) = folder.file_name() {
+                let _ = fs::remove_file(ledger(root).join(name));
+            }
         }
     }
     /// `release_for`, when nothing in Live can be using the files: the change was never applied, or it was undone.
@@ -257,18 +335,10 @@ impl ImportFiles {
         }
     }
     pub(super) fn release_for(&self, transaction: &Value) {
-        let kind = transaction["kind"].as_str();
-        let payload = &transaction["payload"];
-        if matches!(kind, Some("session-audio-create" | "simpler")) {
-            self.release(&payload["filePath"])
+        for path in staged(transaction) {
+            self.release(path)
         }
-        if matches!(kind, Some("device" | "drum-pad")) {
-            self.release(&payload["samplePath"])
-        }
-        if kind == Some("drum-pad") {
-            for pad in payload["pads"].as_array().into_iter().flatten().filter(|v| v.is_object()) {
-                self.release(&pad["samplePath"])
-            }
+        if transaction["kind"] == "drum-pad" {
             self.release_presets(transaction)
         }
     }
@@ -411,6 +481,9 @@ impl McpHost {
     pub(super) fn release_staged_import_for(&self, transaction: &Value) {
         self.import_files.release_for(transaction)
     }
+    pub(super) fn mark_staged_in_use(&self, transaction: &Value) {
+        self.import_files.mark_in_use(transaction)
+    }
     pub(super) fn write_drum_sampler_preset(&self, path: &str, name: &str) -> Result<Value, LiveError> {
         self.import_files.write_preset(path, name)
     }
@@ -524,6 +597,49 @@ mod tests {
             rig.host.clip_lifecycle_transactions.delete(name);
             assert!(!exists(&path) && !Path::new(&path).parent().unwrap().exists(), "{state}");
         }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn previews_nothing_applied_are_swept_and_what_went_to_live_stays() {
+        let folder = tempfile::tempdir().unwrap();
+        fs::create_dir(folder.path().join("staging")).unwrap();
+        let root = path_text(&folder.path().join("staging").canonicalize().unwrap());
+        let made = |name: &str, hours: u64| {
+            let made = Path::new(&root).join(name);
+            fs::create_dir(&made).unwrap();
+            fs::write(made.join("kick.wav"), b"RIFF").unwrap();
+            chmod(&made.join("kick.wav"), 0o444).unwrap();
+            let at = std::time::SystemTime::now() - std::time::Duration::from_secs(hours * 3600);
+            fs::File::open(&made).unwrap().set_modified(at).unwrap();
+        };
+        let exists = |name: &str| Path::new(&root).join(name).exists();
+        // No ledger yet: what's there is an older bridge's, maybe played by a Set, so it stays and is noted.
+        made("older-bridge", 5);
+        sweep(&root);
+        assert!(exists("older-bridge") && ledger(&root).join("older-bridge").exists());
+        // From then on an old preview goes; a young one (maybe another bridge's) and one that went to Live stay.
+        made("old-preview", 2);
+        made("young-preview", 0);
+        made("applied", 2);
+        fs::File::create(ledger(&root).join("applied")).unwrap();
+        fs::File::create(ledger(&root).join("gone")).unwrap();
+        sweep(&root);
+        assert!(!exists("old-preview"));
+        assert!(exists("young-preview") && exists("applied") && exists("older-bridge"));
+        // A mark whose folder is gone goes too.
+        assert!(!ledger(&root).join("gone").exists());
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_change_going_to_live_marks_its_staging_folder_until_its_release() {
+        let rig = rig();
+        let path = rig.staged("pad");
+        let transaction = json!({"kind":"simpler","state":"applying","payload":{"filePath":path}});
+        rig.host.mark_staged_in_use(&transaction);
+        let name = Path::new(&path).parent().unwrap().file_name().unwrap().to_owned();
+        assert!(ledger(&rig.root).join(&name).exists());
+        // An undo releases it at once (as it did before): the folder and its mark go.
+        rig.host.release_staged_import_for(&transaction);
+        assert!(!exists(&path) && !ledger(&rig.root).join(&name).exists());
     }
     #[tokio::test(flavor = "current_thread")]
     async fn a_copy_that_fails_its_check_leaves_nothing_staged() {

@@ -73,6 +73,7 @@ impl McpHost {
                 row["state"] = json!("applying");
                 row["applyKey"] = p["idempotencyKey"].clone()
             }
+            self.mark_staged_in_use(&t);
             let mut args = payload.clone();
             args.as_object_mut().unwrap().remove("action");
             match action {
