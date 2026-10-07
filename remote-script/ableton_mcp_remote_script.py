@@ -3080,6 +3080,14 @@ class LiveObjectMapper:
             # holds); a clip's notes only when the requested fields or filters name them.
             wanted = set(requested_fields or []) | set(filters or {})
             items = self._slot_discovery(kind, parent, requested_fields is None or bool({"notes", "notesRevision"} & wanted))
+            if {"envelopesRevision", "envelopesPresent"} & wanted:
+                # Only when asked: a clear's fence, over every parameter its track's clear would clear.
+                for row in items:
+                    if f":clip:" not in row["ref"]: continue
+                    _, slot, track_index, _ = self._clip_location(row["ref"])
+                    presence = self._envelope_presence(getattr(slot, "clip", None), self._items(getattr(self.song, "tracks", []))[track_index])
+                    row["envelopesRevision"] = hashlib.sha256(self._bounded_canonical(presence).encode("utf-8")).hexdigest()
+                    row["envelopesPresent"] = sum(1 for present in presence if present)
             if self._follow_action_ready() and set(self._FOLLOW_FIELDS) & wanted:
                 for row in items:
                     clip = self._note_parent(row["ref"])
@@ -6652,19 +6660,12 @@ class LiveObjectMapper:
         revision = self.refs.touch(reference)
         return {"changed": True, "revision": revision}
 
-    def _automation_envelope_clear(self, args: dict[str, Any]) -> dict[str, Any]:
-        reference = args.get("clipRef")
-        if not isinstance(reference, str) or set(args) - {"clipRef", "expectedAuthorityDigest", "expectedEnvelopesRevision"}:
-            raise ValueError("envelope clear arguments are invalid")
-        if not hmac.compare_digest(self._clip_authority_digest(reference), str(args.get("expectedAuthorityDigest"))):
-            raise ValueError("clip hierarchy changed since preview")
-        _, slot, track_index, _ = self._clip_location(reference)
-        clip = getattr(slot, "clip", None)
-        if clip is None: raise ValueError("envelope clear requires a Session clip")
-        clearer = getattr(clip, "clear_all_envelopes", None)
+    def _envelope_presence(self, clip: Any, track: Any) -> list[bool]:
+        """Whether the Session clip has an envelope for each parameter clear_all_envelopes clears, in a fixed order:
+        every device's on its track (in racks' chains and every drum pad's, shown or not), then the mixer's volume,
+        pan, cue and sends. A clear fences on its digest, and discovery reports that digest when asked for it."""
         reader = getattr(clip, "automation_envelope", None)
-        if not callable(clearer) or not callable(reader): raise ValueError("envelope clear is unavailable")
-        track = self._items(getattr(self.song, "tracks", []))[track_index]
+        if not callable(reader): raise ValueError("envelope clear is unavailable")
         def walk(device: Any) -> list[Any]:
             collected = list(self._items(getattr(device, "parameters", [])))
             for chain in self._items(self._read_attr(device, "chains") or []):
@@ -6678,12 +6679,25 @@ class LiveObjectMapper:
         if mixer is not None:
             parameters.extend(param for param in (self._read_attr(mixer, "volume"), self._read_attr(mixer, "panning"), self._read_attr(mixer, "cue_volume")) if param is not None)
             parameters.extend(self._items(self._read_attr(mixer, "sends") or []))
-        def presence() -> list[bool]:
-            rows = []
-            for parameter in parameters:
-                try: rows.append(reader(parameter) is not None)
-                except BaseException: rows.append(False)
-            return rows
+        rows = []
+        for parameter in parameters:
+            try: rows.append(reader(parameter) is not None)
+            except BaseException: rows.append(False)
+        return rows
+
+    def _automation_envelope_clear(self, args: dict[str, Any]) -> dict[str, Any]:
+        reference = args.get("clipRef")
+        if not isinstance(reference, str) or set(args) - {"clipRef", "expectedAuthorityDigest", "expectedEnvelopesRevision"}:
+            raise ValueError("envelope clear arguments are invalid")
+        if not hmac.compare_digest(self._clip_authority_digest(reference), str(args.get("expectedAuthorityDigest"))):
+            raise ValueError("clip hierarchy changed since preview")
+        _, slot, track_index, _ = self._clip_location(reference)
+        clip = getattr(slot, "clip", None)
+        if clip is None: raise ValueError("envelope clear requires a Session clip")
+        clearer = getattr(clip, "clear_all_envelopes", None)
+        if not callable(clearer) or not callable(getattr(clip, "automation_envelope", None)): raise ValueError("envelope clear is unavailable")
+        track = self._items(getattr(self.song, "tracks", []))[track_index]
+        presence = lambda: self._envelope_presence(clip, track)
         before = presence()
         if not hmac.compare_digest(hashlib.sha256(self._bounded_canonical(before).encode("utf-8")).hexdigest(), str(args.get("expectedEnvelopesRevision"))):
             raise ValueError("clip envelope collection changed since preview")

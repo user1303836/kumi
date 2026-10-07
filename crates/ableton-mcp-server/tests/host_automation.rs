@@ -420,6 +420,72 @@ async fn perform(
     results.push(clean(result));
     states.push(clean(record.borrow().clone()));
 }
+/// The simulator, with clip rows as the Remote Script sends them: whether a clip has envelopes (`hasEnvelopes`), never
+/// which parameters they're on.
+struct RemoteShape(DeterministicLiveSimulator);
+impl LiveAdapter for RemoteShape {
+    fn status(&self) -> Result<LiveStatus, LiveError> {
+        self.0.status()
+    }
+    fn snapshot(&self) -> Result<LiveSnapshot, LiveError> {
+        self.0.snapshot()
+    }
+    fn get(&self, r: &LiveRef) -> Result<Option<Value>, LiveError> {
+        self.0.get(r)
+    }
+    fn invoke(&self, i: &LiveInvocation) -> Result<Value, LiveError> {
+        self.0.invoke(i)
+    }
+    fn subscribe(&self, l: LiveListener) -> Result<Unsubscribe, LiveError> {
+        self.0.subscribe(l)
+    }
+    fn reconnect(&self) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect()
+    }
+}
+#[async_trait::async_trait(?Send)]
+impl AsyncLiveAdapter for RemoteShape {
+    async fn snapshot_async(&self, c: Option<&LiveOperationContext>, r: Option<&LiveSnapshotRequest>) -> Result<LiveSnapshot, LiveError> {
+        let mut rows = serde_json::to_value(self.0.snapshot_async(c, r).await?).unwrap();
+        for track in rows["tracks"].as_array_mut().into_iter().flatten() {
+            for clip in track["clips"].as_array_mut().into_iter().flatten() {
+                let has = clip["envelopes"].as_object().is_some_and(|envelopes| !envelopes.is_empty());
+                clip.as_object_mut().unwrap().remove("envelopes");
+                clip["hasEnvelopes"] = json!(has);
+            }
+        }
+        Ok(serde_json::from_value(rows).unwrap())
+    }
+    async fn discover_async(&self, r: &LiveDiscoveryRequest, c: Option<&LiveOperationContext>) -> Result<LiveDiscoveryResult, LiveError> {
+        self.0.discover_async(r, c).await
+    }
+    async fn get_async(&self, r: &LiveRef, _: Option<&LiveOperationContext>) -> Result<Option<Value>, LiveError> {
+        self.0.get(r)
+    }
+    async fn invoke_async(&self, i: &LiveInvocation, _: Option<&LiveOperationContext>) -> Result<Value, LiveError> {
+        self.0.invoke(i)
+    }
+    async fn reconnect_async(&self, _: Option<&LiveOperationContext>) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect()
+    }
+    async fn close(&self) -> Result<(), LiveError> {
+        Ok(())
+    }
+}
+#[tokio::test]
+async fn clearing_envelopes_fences_on_what_live_reports_not_the_snapshot() {
+    let live = Rc::new(RemoteShape(DeterministicLiveSimulator::new()));
+    setup(&live.0, "clear-existing");
+    let host = McpHost::new(live.clone(), McpHostOptions::default()).unwrap();
+    let text = |result: Value| -> Value { serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+    let preview = text(host.live_automation_preview_async(&json!(1), &json!({"action":"clear-envelopes","clipRef":"clip:clip-1"})).await);
+    // The snapshot's rows say only that the clip has envelopes; Live says which, and the preview counts them.
+    assert_eq!(preview["envelopes"], 1, "{preview}");
+    let apply = json!({"transactionId":preview["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+    let applied = text(host.live_automation_apply_async(&json!(2), &apply, None).await.unwrap());
+    assert_eq!((applied["state"].clone(), applied["cleared"].clone()), (json!("applied"), json!(1)), "{applied}");
+    assert_eq!(live.0.state.borrow()["tracks"][0]["clips"][0]["envelopes"], json!({}));
+}
 #[tokio::test]
 async fn automation_apply_and_exact_key_undo_match_source() {
     for row in fixture()["workflows"].as_array().unwrap() {

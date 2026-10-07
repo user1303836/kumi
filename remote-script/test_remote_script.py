@@ -4249,9 +4249,13 @@ class AudioWarpNoteExpansionTests(unittest.TestCase):
         clip.clear_all_envelopes = lambda: clip._envelopes.clear()
         song.tracks[0].clip_slots[0].clip = clip; parameter = song.tracks[0].devices[0].parameters[0]
         clip._envelopes[id(parameter)] = envelope
-        mapper = LiveObjectMapper(song); row = mapper.snapshot()["tracks"][0]["clips"][0]
+        mapper = LiveObjectMapper(song); track = mapper.snapshot()["tracks"][0]; row = track["clips"][0]
         revision = hashlib.sha256(mapper._bounded_canonical([True]).encode()).hexdigest()
-        result = mapper.invoke("automation.envelope.clear", {"clipRef": row["ref"], "expectedAuthorityDigest": mapper._clip_authority_digest(row["ref"]), "expectedEnvelopesRevision": revision})
+        # The host's fence comes from Live, over the same parameters the clear walks.
+        slot = next(item for item in track["clipSlots"] if item["clipRef"] == row["ref"])
+        found = mapper.discover("session_clip", parent=slot["ref"], filters={"ref": row["ref"]}, requested_fields=["envelopesRevision", "envelopesPresent"])["items"]
+        self.assertEqual([(item["envelopesRevision"], item["envelopesPresent"]) for item in found], [(revision, 1)])
+        result = mapper.invoke("automation.envelope.clear", {"clipRef": row["ref"], "expectedAuthorityDigest": mapper._clip_authority_digest(row["ref"]), "expectedEnvelopesRevision": found[0]["envelopesRevision"]})
         self.assertEqual(result["cleared"], 1); validate_operation_payload("automation.envelope.clear", "result", result)
         self.assertEqual(clip._envelopes, {})
         with self.assertRaisesRegex(ValueError, "collection changed since preview"):

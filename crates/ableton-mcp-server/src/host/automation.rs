@@ -56,45 +56,32 @@ fn exact_content(a: &Value, b: &Value) -> Result<bool, LiveError> {
 }
 
 impl McpHost {
-    pub(super) fn envelope_presence_revision(&self, snapshot: &LiveSnapshot, reference: &str) -> Result<Value, LiveError> {
+    /// Whether the clip has an envelope for each parameter its track's clear would clear, as Live reports it: the
+    /// digest a clear fences on, and how many there are. Live walks every drum pad's chains, which a snapshot's rows
+    /// don't all list, and a snapshot doesn't say which parameters have envelopes.
+    pub(super) async fn envelope_presence(
+        &self,
+        context: Option<&LiveOperationContext>,
+        snapshot: &LiveSnapshot,
+        reference: &str,
+    ) -> Result<Value, LiveError> {
         let located = self.clip_row(snapshot, reference)?;
-        let track = located.track.ok_or_else(|| LiveError::error("envelope clear requires a Session clip"))?;
-        fn walk(devices: &Value, parameters: &mut Vec<Value>) {
-            for device in devices.as_array().into_iter().flatten() {
-                parameters.extend(device["parameters"].as_array().into_iter().flatten().cloned());
-                for chain in device["chains"].as_array().into_iter().flatten() {
-                    walk(&chain["devices"], parameters);
-                }
-                for pad in device["drumPads"].as_array().into_iter().flatten() {
-                    for chain in pad["chains"].as_array().into_iter().flatten() {
-                        walk(&chain["devices"], parameters);
-                    }
-                }
-            }
+        let track =
+            located.track.filter(|_| !located.arrangement).ok_or_else(|| LiveError::error("envelope clear requires a Session clip"))?;
+        let slot = track["clipSlots"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|slot| slot["clipRef"] == reference)
+            .and_then(|slot| slot["ref"].as_str());
+        let row = self
+            .discover_one_async(context, LiveDiscoveryKind::SessionClip, reference, Some(&["envelopesRevision", "envelopesPresent"]), slot)
+            .await?
+            .ok_or_else(|| LiveError::error("envelope clear requires a Session clip"))?;
+        if !is_non_empty_string(&row["envelopesRevision"], 64) || !row["envelopesPresent"].is_u64() {
+            return Err(LiveError::error("envelope presence is unavailable"));
         }
-        let mut parameters = vec![];
-        walk(&track["devices"], &mut parameters);
-        let mixer = &track["mixer"];
-        if arrangement::truthy(mixer) {
-            for reference in [mixer.get("volumeRef"), mixer.get("panRef"), mixer.get("cueRef")]
-                .into_iter()
-                .flatten()
-                .chain(mixer["sendRefs"].as_array().into_iter().flatten())
-            {
-                if reference.is_string() {
-                    parameters.push(json!({
-                    "ref":reference}
-                    ));
-                }
-            }
-        }
-        let envelopes = &located.clip["envelopes"];
-        let presence: Vec<_> =
-            parameters.iter().map(|parameter| parameter["ref"].as_str().is_some_and(|r| envelopes.get(r).is_some())).collect();
-        Ok(json!({
-        "revision":hash(&json!(presence))?,
-        "cleared":presence.iter().filter(|v|**v).count()}
-        ))
+        Ok(json!({"revision":row["envelopesRevision"],"cleared":row["envelopesPresent"]}))
     }
 
     pub(super) fn automation_authority_digest(
@@ -175,7 +162,7 @@ impl McpHost {
                 }
                 let snapshot = self.views.view_for(None, &[params["clipRef"].clone()], None, &[]).await?;
                 let authority = self.clip_authority_digest(&snapshot, clip_ref)?;
-                let presence = self.envelope_presence_revision(&snapshot, clip_ref)?;
+                let presence = self.envelope_presence(None, &snapshot, clip_ref).await?;
                 let t = json!({
                 "id":tempo::transaction_id("automation"),
                 "epoch":status.epoch,
@@ -356,7 +343,7 @@ impl McpHost {
                 if !reconciliation {
                     let snapshot = self.views.view_for(Some(&context), &[payload["clipRef"].clone()], None, &[]).await?;
                     let authority = self.clip_authority_digest(&snapshot, clip_ref)?;
-                    let presence = self.envelope_presence_revision(&snapshot, clip_ref)?;
+                    let presence = self.envelope_presence(Some(&context), &snapshot, clip_ref).await?;
                     if js_json::stringify(&json!({
                     "clipRef":payload["clipRef"],
                     "presence":presence["revision"],
@@ -380,10 +367,8 @@ impl McpHost {
                         Some(&context),
                     )
                     .await?;
-                let after = self.envelope_presence_revision(
-                    &self.views.view_for(Some(&context), &[payload["clipRef"].clone()], None, &[]).await?,
-                    clip_ref,
-                )?;
+                let snapshot = self.views.view_for(Some(&context), &[payload["clipRef"].clone()], None, &[]).await?;
+                let after = self.envelope_presence(Some(&context), &snapshot, clip_ref).await?;
                 if !clip_properties::scalar_same(tuning::field(&cleared, "cleared")?, t["prior"].get("cleared"))
                     || after["cleared"].as_f64() != Some(0.0)
                     || cleared["envelopesRevision"] != after["revision"]

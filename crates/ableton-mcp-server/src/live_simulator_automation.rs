@@ -302,6 +302,21 @@ fn device_parameter_refs(devices: &Value, refs: &mut Vec<Value>) {
         }
     }
 }
+/// Whether a Session clip has an envelope for each parameter its track's clear clears, in the Remote Script's
+/// order: its devices' (chains and drum pads included), then the mixer's volume, pan, cue and sends.
+pub(super) fn envelope_presence(track: &Value, clip: &Value) -> Vec<bool> {
+    let mut refs = Vec::new();
+    device_parameter_refs(&track["devices"], &mut refs);
+    if !track["mixer"].is_null() {
+        for key in ["volumeRef", "panRef", "cueRef"] {
+            if track["mixer"][key].as_str().is_some_and(|s| !s.is_empty()) {
+                refs.push(track["mixer"][key].clone());
+            }
+        }
+        refs.extend(array(&track["mixer"]["sendRefs"]).iter().filter(|r| r.as_str().is_some_and(|s| !s.is_empty())).cloned());
+    }
+    refs.iter().map(|r| r.as_str().is_some_and(|r| clip["envelopes"].get(r).is_some())).collect()
+}
 impl DeterministicLiveSimulator {
     pub(super) fn clear_envelopes(&self, args: &Map<String, Value>) -> Result<Value, LiveError> {
         let reference = string_arg(args, "clipRef")?;
@@ -319,26 +334,15 @@ impl DeterministicLiveSimulator {
             .iter()
             .find(|t| array(&t["clips"]).iter().any(|c| c["ref"] == reference))
             .ok_or_else(|| LiveError::error("envelope clear requires a Session clip"))?;
-        let mut refs = Vec::new();
-        device_parameter_refs(&track["devices"], &mut refs);
-        if !track["mixer"].is_null() {
-            for key in ["volumeRef", "panRef", "cueRef"] {
-                if track["mixer"][key].as_str().is_some_and(|s| !s.is_empty()) {
-                    refs.push(track["mixer"][key].clone());
-                }
-            }
-            refs.extend(array(&track["mixer"]["sendRefs"]).iter().filter(|r| r.as_str().is_some_and(|s| !s.is_empty())).cloned());
-        }
-        let clip = state.pointer_mut(&path).unwrap();
-        let presence = refs.iter().map(|r| r.as_str().is_some_and(|r| clip["envelopes"].get(r).is_some())).collect::<Vec<_>>();
+        let presence = envelope_presence(track, state.pointer(&path).unwrap());
         if args.get("expectedEnvelopesRevision") != Some(&json!(simulator_revision(&json!(presence)))) {
             return Err(LiveError::error("clip envelope collection changed since preview"));
         }
         let cleared = presence.iter().filter(|p| **p).count();
-        clip["envelopes"] = json!({});
+        state.pointer_mut(&path).unwrap()["envelopes"] = json!({});
         drop(state);
         self.emit(LiveEventType::Object, Some(reference.into()), json!({"operation":"automation.envelope.clear"}));
-        Ok(json!({"cleared":cleared,"envelopesRevision":simulator_revision(&json!(vec![false;refs.len()]))}))
+        Ok(json!({"cleared":cleared,"envelopesRevision":simulator_revision(&json!(vec![false;presence.len()]))}))
     }
     pub(super) fn invoke_gap_automation(&self, operation: &str, args: &Map<String, Value>) -> Result<Value, LiveError> {
         let reference = string_arg(args, "clipRef").map_err(|_| LiveError::type_error("clipRef is invalid"))?;

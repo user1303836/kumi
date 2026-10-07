@@ -3756,7 +3756,27 @@ impl DeterministicLiveSimulator {
             LiveDiscoveryKind::Set => vec![state["set"].clone()],
             LiveDiscoveryKind::Track => array(&state["tracks"]).to_vec(),
             LiveDiscoveryKind::Scene => array(&state["scenes"]).to_vec(),
-            LiveDiscoveryKind::SessionClip => array(&state["tracks"]).iter().flat_map(|t| array(&t["clips"]).iter().cloned()).collect(),
+            LiveDiscoveryKind::SessionClip => {
+                // A clear's fence, only when asked for, as the Remote Script reports it.
+                let presence = request
+                    .fields
+                    .as_ref()
+                    .is_some_and(|fields| fields.iter().any(|f| f == "envelopesRevision" || f == "envelopesPresent"));
+                array(&state["tracks"])
+                    .iter()
+                    .flat_map(|t| {
+                        array(&t["clips"]).iter().map(move |clip| {
+                            let mut row = clip.clone();
+                            if presence {
+                                let found = simulator_automation::envelope_presence(t, clip);
+                                row["envelopesRevision"] = simulator_revision(&serde_json::json!(found)).into();
+                                row["envelopesPresent"] = found.iter().filter(|p| **p).count().into();
+                            }
+                            row
+                        })
+                    })
+                    .collect()
+            }
             LiveDiscoveryKind::ArrangementClip => array(&state["arrangementClips"])
                 .iter()
                 .filter(|item| parent.is_none_or(|p| item["trackRef"] == p))
