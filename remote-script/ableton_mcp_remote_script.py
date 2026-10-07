@@ -12936,6 +12936,17 @@ class _RealtimeAuthorityChanged(ValueError):
     pass
 
 
+def _bind_alone(sock: socket.socket, stream: bool) -> None:
+    """Make a socket the only one on its port (set before it binds). Windows' SO_REUSEADDR lets a second socket bind
+    a port already taken, so two Lives (or the surface in two slots) could both listen and Kumi drive the wrong one;
+    a plain bind there refuses a taken port and rebinds past TIME_WAIT already, so nothing is set (as CPython's
+    create_server does; SO_EXCLUSIVEADDRUSE would keep the port from Live's next start while its connections close).
+    Elsewhere a listener keeps SO_REUSEADDR (it rebinds while the last one's connections close), and a datagram
+    socket sets nothing."""
+    if os.name != "nt" and stream:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+
 # Windows' code for a datagram larger than the receive buffer (its errno and winerror alike).
 _WSAEMSGSIZE = 10040
 
@@ -12980,6 +12991,7 @@ class _RealtimePlane:
             family = socket.AF_INET6 if ":" in host else socket.AF_INET
             self._socket = socket.socket(family, socket.SOCK_DGRAM)
             try:
+                _bind_alone(self._socket, stream=False)
                 self._socket.bind((host, port))
                 self._socket.settimeout(0.2)
                 self._thread = threading.Thread(target=self._recv_loop, name="AbletonMcpRealtime", daemon=True)
@@ -13678,7 +13690,7 @@ class AbletonMcpBridge:
         self._bridge_epoch = secrets.token_urlsafe(24)
         self.auth = AuthenticatedRemoteScript(secret, self._dispatch, self._bridge_epoch, "internal-bridge-channel")
         self._server = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM)
-        self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        _bind_alone(self._server, stream=True)
         self._server.bind((host, port))
         self._server.listen(MAX_BRIDGE_CONNECTIONS)
         self._server.setblocking(False)

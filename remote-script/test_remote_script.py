@@ -3426,6 +3426,16 @@ class RealtimePlaneTests(unittest.TestCase):
         plane._socket = Socket(); plane._recv_loop()
         self.assertEqual((plane._socket.reads, plane.dropped_invalid), (3, 2), "both dropped as invalid, and the datagram after the oversized one read")
 
+    def test_a_port_is_bound_alone_on_windows_too(self):
+        # Windows' SO_REUSEADDR lets a second socket take a bound port: there nothing is set, and a plain bind refuses one taken.
+        class Socket:
+            def __init__(self): self.options = []
+            def setsockopt(self, level, name, value): self.options.append(name)
+        for system, stream, expected in (("posix", True, [remote_module.socket.SO_REUSEADDR]), ("posix", False, []), ("nt", True, []), ("nt", False, [])):
+            sock = Socket()
+            with patch.object(remote_module.os, "name", system): remote_module._bind_alone(sock, stream)
+            self.assertEqual(sock.options, expected, (system, stream))
+
     def test_other_socket_errors_still_end_the_ingress(self):
         from ableton_mcp_remote_script import _RealtimePlane
         plane = _RealtimePlane(types.SimpleNamespace(), "127.0.0.1", 0); reads = []
