@@ -314,28 +314,27 @@ impl MeasurePool {
         }
         Self { slots: (0..size).map(|_| Mutex::new(None)).collect(), timeout, binary, next: Cell::new(0) }
     }
-    pub async fn run(&self, slot: usize, mut job: MeasureJob) -> SoundEntry {
+    /// A file measured, or what's wrong with it. Err when no worker could start (the binary missing for a moment
+    /// during an update, an antivirus holding it): that says nothing about the file, so it isn't recorded.
+    pub async fn run(&self, slot: usize, mut job: MeasureJob) -> io::Result<SoundEntry> {
         if self.slots.is_empty() {
-            return job.measure().await;
+            return Ok(job.measure().await);
         }
         job.id = self.next.get();
         self.next.set(job.id.wrapping_add(1));
         let mut held = self.slots[slot % self.slots.len()].lock().await;
         if held.is_none() {
-            match Worker::spawn(&self.binary) {
-                Ok(worker) => *held = Some(worker),
-                Err(_) => return job.failed("Kumi couldn't read it"),
-            }
+            *held = Some(Worker::spawn(&self.binary)?);
         }
         let worker = held.as_mut().unwrap();
         let result = tokio::time::timeout(self.timeout, worker.run(&job)).await;
         match result {
-            Ok(Ok(entry)) => entry,
+            Ok(Ok(entry)) => Ok(entry),
             result => {
                 let why = if result.is_err() { "it took too long to read" } else { "Kumi couldn't read it" };
                 worker.stop().await;
                 *held = None;
-                job.failed(why)
+                Ok(job.failed(why))
             }
         }
     }

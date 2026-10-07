@@ -161,7 +161,7 @@ async fn native_measurement_pool_learns_reuses_processes_and_replaces_lost_or_ti
     };
     let pool = MeasurePool::with_worker(1, env!("CARGO_BIN_EXE_kumi-library-measure").into(), Duration::from_secs(10));
     for _ in 0..2 {
-        let entry = pool.run(0, job.clone()).await;
+        let entry = pool.run(0, job.clone()).await.unwrap();
         assert!(entry.error.is_none(), "{:?}", entry.error);
         assert!(entry.vector.is_some());
     }
@@ -177,7 +177,7 @@ async fn native_measurement_pool_learns_reuses_processes_and_replaces_lost_or_ti
             std::fs::set_permissions(&worker, std::fs::Permissions::from_mode(0o700)).unwrap();
             let pool = MeasurePool::with_worker(1, worker, Duration::from_millis(timeout));
             for _ in 0..2 {
-                assert_eq!(pool.run(0, job.clone()).await.error.as_deref(), Some(why));
+                assert_eq!(pool.run(0, job.clone()).await.unwrap().error.as_deref(), Some(why));
             }
             pool.close().await;
         }
@@ -186,6 +186,15 @@ async fn native_measurement_pool_learns_reuses_processes_and_replaces_lost_or_ti
     let progress = learn(LearnOptions::new(studio.plan(2), Signal::new())).await.unwrap();
     assert_eq!([progress.sounds.known, progress.presets.known, progress.sets.known], [7, 4, 2]);
     assert_eq!(progress.failed, 0);
+}
+#[tokio::test]
+async fn a_worker_that_cant_start_says_nothing_about_the_file() {
+    let root = tempfile::tempdir().unwrap();
+    // The binary gone for a moment (an update, an antivirus): no entry, so the file isn't kept as unreadable.
+    let pool = MeasurePool::with_worker(1, root.path().join("missing-worker"), Duration::from_secs(1));
+    let job = MeasureJob { id: 0, path: "/x.wav".into(), relative: "x.wav".into(), size: 1, mtime: 1, start: None, seconds: None };
+    assert!(pool.run(0, job).await.is_err());
+    pool.close().await;
 }
 #[cfg(unix)]
 #[tokio::test]
@@ -204,7 +213,7 @@ async fn a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it(
     std::fs::set_permissions(&worker, std::fs::Permissions::from_mode(0o700)).unwrap();
     let pool = MeasurePool::with_worker(1, worker, Duration::from_millis(1000));
     let job = MeasureJob { id: 0, path: "/x.mp3".into(), relative: "x.mp3".into(), size: 1, mtime: 1, start: None, seconds: None };
-    assert_eq!(pool.run(0, job).await.error.as_deref(), Some("it took too long to read"));
+    assert_eq!(pool.run(0, job).await.unwrap().error.as_deref(), Some("it took too long to read"));
     let temp = std::fs::read_to_string(root.path().join("temp")).unwrap();
     assert!(!std::path::Path::new(&temp).exists(), "{temp} is still there");
     let child: libc::pid_t = std::fs::read_to_string(root.path().join("child")).unwrap().parse().unwrap();
@@ -264,7 +273,7 @@ async fn a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it_
     );
     let pool = MeasurePool::with_worker(1, worker, Duration::from_secs(12));
     let job = MeasureJob { id: 0, path: "C:\\x.mp3".into(), relative: "x.mp3".into(), size: 1, mtime: 1, start: None, seconds: None };
-    assert_eq!(pool.run(0, job).await.error.as_deref(), Some("it took too long to read"));
+    assert_eq!(pool.run(0, job).await.unwrap().error.as_deref(), Some("it took too long to read"));
     let child: u32 = std::fs::read_to_string(root.path().join("child")).expect("the child held the copy").trim().parse().unwrap();
     let temp = std::fs::read_to_string(root.path().join("temp")).unwrap();
     assert!(!std::path::Path::new(temp.trim()).exists(), "{temp} is still there");

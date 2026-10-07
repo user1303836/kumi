@@ -664,20 +664,19 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
                 let Some(file) = todo.get(next.get()) else { break };
                 next.set(next.get() + 1);
                 progress.value.borrow_mut().at = Some(file.source.label.clone());
+                let job = MeasureJob {
+                    id: 0,
+                    path: file.file.path.clone(),
+                    relative: file.relative.clone(),
+                    size: file.file.size,
+                    mtime: file.file.mtime,
+                    start: None,
+                    seconds: None,
+                };
                 let entry = pool
-                    .run(
-                        slot,
-                        MeasureJob {
-                            id: 0,
-                            path: file.file.path.clone(),
-                            relative: file.relative.clone(),
-                            size: file.file.size,
-                            mtime: file.file.mtime,
-                            start: None,
-                            seconds: None,
-                        },
-                    )
-                    .await;
+                    .run(slot, job)
+                    .await
+                    .map_err(|error| RuntimeError::plain(format!("Kumi couldn't start its measuring ({error}); it will try again")))?;
                 options.signal.check()?;
                 if entry.error.is_some() && entry.r#class.is_none() && entry.kind.is_none() {
                     progress.value.borrow_mut().failed += 1;
