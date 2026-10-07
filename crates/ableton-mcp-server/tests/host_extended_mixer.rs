@@ -125,6 +125,100 @@ impl AsyncLiveAdapter for Replay {
     }
 }
 
+/// The simulator's Utility as a device with an audio input and a sidechain, its rows shaped as the Remote Script's are
+/// when `live_rows` (a device without either: deviceIo with no routing types, a null sidechainRoutingType).
+fn routing_host(live_rows: bool) -> (Rc<DeterministicLiveSimulator>, McpHost) {
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    {
+        let mut state = sim.state.borrow_mut();
+        let utility = &mut state["tracks"][0]["devices"][0];
+        if live_rows {
+            utility["deviceIo"] =
+                json!({"availableRoutingTypes":[],"routingType":null,"routingChannel":null,"defaultExternalRoutingChannelIsNone":null});
+            utility["sidechainRoutingType"] = Value::Null;
+        } else {
+            utility["deviceIo"] = json!({"routingType":"Ext. In","routingChannel":"1"});
+            utility["sidechainRoutingType"] = json!("None");
+        }
+    }
+    let host = McpHost::new(sim.clone(), McpHostOptions::default()).unwrap();
+    (sim, host)
+}
+async fn routing_call(host: &McpHost, name: &str, arguments: Value) -> Value {
+    let call = ToolCall { id: json!(1), name: name.into(), arguments: Some(arguments), asynchronous: true };
+    let reply = if name == "undo" {
+        host.undo_extended_mixer_async(&call.id, call.arguments.as_ref().unwrap(), None).await
+    } else {
+        host.dispatch_extended_mixer_tool(&call, None).await.unwrap().unwrap().unwrap()
+    };
+    reply["result"]["content"][0]["text"]
+        .as_str()
+        .map(|text| serde_json::from_str(text).unwrap())
+        .unwrap_or_else(|| json!({"error":reply["error"]["message"]}))
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_routing_type_set_alone_is_undone_and_a_sidechain_channel_is_refused_at_preview() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (sim, host) = routing_host(false);
+            // A type alone: Live leaves the channel to itself, and undo checks only what the change set.
+            let preview = routing_call(
+                &host,
+                "live_device_io_preview",
+                json!({"action":"routing","deviceRef":"device:utility-1","routingType":"Main"}),
+            )
+            .await;
+            let id = preview["transactionId"].clone();
+            let applied = routing_call(
+                &host,
+                "live_device_io_apply",
+                json!({"transactionId":id,"confirmation":"apply","idempotencyKey":"device-io-apply"}),
+            )
+            .await;
+            assert_eq!(applied["state"], "applied", "{applied}");
+            let undone =
+                routing_call(&host, "undo", json!({"transactionId":id,"confirmation":"undo","idempotencyKey":"device-io-undo"})).await;
+            assert_eq!(undone["state"], "undone", "{undone}");
+            assert_eq!(sim.state.borrow()["tracks"][0]["devices"][0]["deviceIo"], json!({"routingType":"Ext. In","routingChannel":"1"}));
+            // Live's sidechain operation sets the source only: a channel is refused before anything is staged.
+            let refused = routing_call(
+                &host,
+                "live_device_io_preview",
+                json!({"action":"sidechain","deviceRef":"device:utility-1","routingType":"Ext. In","routingChannel":"Post FX"}),
+            )
+            .await;
+            assert_eq!(
+                refused,
+                json!({"error":"routingChannel goes with action routing; a sidechain takes routingType only (Live keeps its channel)"})
+            );
+        })
+        .await
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_device_without_inputs_or_a_sidechain_is_refused_at_preview_as_live_shows_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (_, host) = routing_host(true);
+            let routing = routing_call(
+                &host,
+                "live_device_io_preview",
+                json!({"action":"routing","deviceRef":"device:utility-1","routingType":"Main"}),
+            )
+            .await;
+            assert_eq!(routing["reason"], "device IO is unavailable on this exact device", "{routing}");
+            let sidechain = routing_call(
+                &host,
+                "live_device_io_preview",
+                json!({"action":"sidechain","deviceRef":"device:utility-1","routingType":"Ext. In"}),
+            )
+            .await;
+            assert_eq!(sidechain["reason"], "sidechain routing is unavailable on this exact device", "{sidechain}");
+        })
+        .await
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn extended_mixers_and_device_routing_match_source_workflows() {
     tokio::task::LocalSet::new()

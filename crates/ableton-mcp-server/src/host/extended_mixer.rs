@@ -180,6 +180,16 @@ impl McpHost {
             if p["action"] == "routing" && p.get("routingChannel").is_some_and(|v| !is_non_empty_string(v, 128)) {
                 return error(id, -32602, "routingChannel is invalid", None);
             }
+            // Live's sidechain operation sets the source (its routing type) only: a channel sent with it would be
+            // refused at apply, after the preview said yes.
+            if p["action"] == "sidechain" && p.get("routingChannel").is_some() {
+                return error(
+                    id,
+                    -32602,
+                    "routingChannel goes with action routing; a sidechain takes routingType only (Live keeps its channel)",
+                    None,
+                );
+            }
         } else {
             let mut allowed = vec![f.reference()];
             allowed.extend_from_slice(f.fields());
@@ -222,8 +232,12 @@ impl McpHost {
             if f!=Family::Io && (!truthy(mixer)||!is_non_empty_string(&mixer["mixerIdentity"],256)){return Err(LiveError::error(if f==Family::Chain{"chain mixer identity is not authoritative"}else{"mixer identity is not authoritative"}))}
             if f==Family::Chain && proposed["sends"].as_array().is_some_and(|a|a.len()>mixer["sends"].as_array().map_or(0,Vec::len)){return Ok(error(id,-32602,"chain has fewer sends than proposed",None))}
             if f==Family::Io {
-                if p["action"]=="routing"&&!truthy(&object["deviceIo"]){return Ok(transaction_error(id,"device IO is unavailable on this exact device"))}
-                if p["action"]=="sidechain"&&object.get("sidechainRoutingType").is_none(){return Ok(transaction_error(id,"sidechain routing is unavailable on this exact device"))}
+                // Live's rows always carry both: deviceIo with no routing types and a null type for a device without
+                // inputs, and a null sidechainRoutingType for one without a sidechain.
+                let io=&object["deviceIo"];
+                let inputs=io.is_object()&&(!io["routingType"].is_null()||io["availableRoutingTypes"].as_array().is_some_and(|types|!types.is_empty()));
+                if p["action"]=="routing"&&!inputs{return Ok(transaction_error(id,"device IO is unavailable on this exact device"))}
+                if p["action"]=="sidechain"&&object.get("sidechainRoutingType").is_none_or(Value::is_null){return Ok(transaction_error(id,"sidechain routing is unavailable on this exact device"))}
             }
             let state=state(f,&object,p);
             let prior=if f==Family::Io{state.clone()}else{Value::Object(proposed.as_object().unwrap().keys().map(|k|(k.clone(),mixer[k].clone())).collect())};
@@ -330,7 +344,7 @@ impl McpHost {
             } else {
                 for field in f.fields() {
                     if let Some(value) = t["payload"].get(*field) {
-                        if !same_live_value(object["mixer"].get(*field), Some(value)) {
+                        if !same_mixer_value(field, object["mixer"].get(*field), Some(value)) {
                             return Err(LiveError::error(format!("{} postcondition was not confirmed", f.noun())));
                         }
                     }
@@ -407,9 +421,15 @@ impl McpHost {
             let current = state(f, &object, &t["payload"]);
             if !reconcile {
                 if f == Family::Io {
-                    for (field, value) in current.as_object().unwrap() {
-                        if t["payload"].get(field) != Some(value) {
-                            return Ok(transaction_error(id, "device routing changed after apply; undo refused"));
+                    // The fields the change set, as apply checks them: a type set alone leaves the channel to Live.
+                    for field in f.fields() {
+                        if *field == "routingChannel" && t["payload"]["action"] != "routing" {
+                            continue;
+                        }
+                        if let Some(expected) = t["payload"].get(*field) {
+                            if current.get(*field) != Some(expected) {
+                                return Ok(transaction_error(id, "device routing changed after apply; undo refused"));
+                            }
                         }
                     }
                 } else {
@@ -417,7 +437,7 @@ impl McpHost {
                         if ["ref", "expectedObjectIdentity", "expectedMixerIdentity", "expectedStateRevision"].contains(&field.as_str()) {
                             continue;
                         }
-                        if !same_live_value(mixer.get(field), Some(value)) {
+                        if !same_mixer_value(field, mixer.get(field), Some(value)) {
                             return Ok(transaction_error(id, &format!("{} changed after apply; undo refused", f.noun())));
                         }
                     }
@@ -429,7 +449,13 @@ impl McpHost {
                 extend(
                     &mut args,
                     &Value::Object(
-                        t["prior"].as_object().unwrap().iter().filter(|(_, v)| !v.is_null()).map(|(k, v)| (k.clone(), v.clone())).collect(),
+                        t["prior"]
+                            .as_object()
+                            .unwrap()
+                            .iter()
+                            .filter(|(_, v)| !v.is_null())
+                            .map(|(k, v)| (k.clone(), named_mixer_part(k, v, &t["payload"][k])))
+                            .collect(),
                     ),
                 )
             }
