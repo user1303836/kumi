@@ -75,11 +75,18 @@ async fn a_sound_in_one_of_lives_places_on_a_share_is_copied_here_first() {
     assert_ne!(changed.folder, copied.folder);
     assert_eq!(std::fs::read(&changed.path).unwrap(), b"RIFF two!");
     assert_eq!(std::fs::read(&copied.path).unwrap(), b"RIFF one");
+    // Spelled in another case: the same sound on Windows, where names are read in any case.
+    let folded = bank.sample(&shared.to_ascii_lowercase(), &signal).await.unwrap();
+    if cfg!(windows) {
+        assert_eq!(std::fs::read(folded.unwrap().path).unwrap(), b"RIFF two!");
+    } else {
+        assert_eq!(folded, Err(NoSample::NotThere));
+    }
     // Another share isn't opened, nor the Place's share outside it, and nothing of them is copied.
     for path in [share.join("Other").join("snare.wav"), share.join("Place").join("..").join("Other").join("snare.wav")] {
         assert_eq!(bank.sample(&text(&path), &signal).await.unwrap(), Err(NoSample::NotThere), "{path:?}");
     }
-    assert_eq!(std::fs::read_dir(&cache).unwrap().count(), 2);
+    assert_eq!(std::fs::read_dir(&cache).unwrap().count(), if cfg!(windows) { 3 } else { 2 });
 }
 #[tokio::test(flavor = "current_thread")]
 async fn a_share_sound_kumi_cant_copy_says_why_and_copies_nothing() {

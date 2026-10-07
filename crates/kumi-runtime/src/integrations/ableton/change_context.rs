@@ -85,6 +85,15 @@ fn kumi_cache() -> PathBuf {
         .join("cache")
         .join("places")
 }
+/// Whether `path` is inside `place`: on Windows in any ASCII case, as its file systems and shares read names (ASCII
+/// only, so no other folding widens it).
+fn inside(path: &str, place: &str) -> bool {
+    if cfg!(windows) {
+        below(&path.to_ascii_lowercase(), &place.to_ascii_lowercase()).is_some()
+    } else {
+        below(path, place).is_some()
+    }
+}
 /// A path part that climbs (".", "..", or one Windows may take for one): it would leave a Place on its share.
 fn climbs(path: &str) -> bool {
     path.split(['/', '\\']).any(|part| !part.is_empty() && part.chars().all(|c| c == '.' || c == ' '))
@@ -186,14 +195,17 @@ impl SampleBank {
         if climbs(&file.path) {
             return Ok(Err(NoSample::NotThere));
         }
-        let places = self.places().await;
-        let Some(place) = places.readable.iter().find(|place| below(&file.path, place).is_some()) else {
+        // Reading them can wait out a share that's off: a stop doesn't, and the read finishes on its own.
+        let places = tokio::select! {
+            biased;
+            () = signal.cancelled() => return Err(RuntimeError::Aborted),
+            places = self.places() => places,
+        };
+        let Some(place) = places.readable.iter().find(|place| inside(&file.path, place)) else {
             // A Place Live names that it can't read now is a share that's off: that, rather than a wrong path.
-            let lower = file.path.to_lowercase();
-            let off = places.named.iter().any(|place| below(&lower, &place.to_lowercase()).is_some());
+            let off = places.named.iter().any(|place| inside(&file.path, place));
             return Ok(Err(if off { NoSample::ShareUnread } else { NoSample::NotThere }));
         };
-        signal.check()?;
         let (from, place, cache) =
             (PathBuf::from(&file.path), PathBuf::from(place), self.cache.borrow().clone().unwrap_or_else(kumi_cache));
         let stop = signal.clone();
