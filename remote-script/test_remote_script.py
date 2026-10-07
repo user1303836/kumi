@@ -5066,8 +5066,9 @@ class SongTransportLinkTests(unittest.TestCase):
         result = mapper.invoke("transport.action", {**fences(), "action": "force-link-beat-time", "beatTime": 8.0})
         self.assertTrue(result["done"]); self.assertEqual(calls[-1], ("link", 8.0), "a shape whose call takes the beat gets it")
         # Live's Song.force_link_beat_time() takes nothing: it's called so.
-        song.force_link_beat_time = lambda: calls.append("link")
-        self.assertTrue(mapper.invoke("transport.action", {**fences(), "action": "force-link-beat-time", "beatTime": 8.0})["done"]); self.assertEqual(calls[-1], "link")
+        song.force_link_beat_time = lambda: calls.append(("link", song.current_song_time)); song.current_song_time = 0.0
+        self.assertTrue(mapper.invoke("transport.action", {**fences(), "action": "force-link-beat-time", "beatTime": 8.0})["done"])
+        self.assertEqual((song.current_song_time, calls[-1]), (8.0, ("link", 8.0)), "Live goes to the beat first, then Link follows it, with no argument")
         with self.assertRaisesRegex(ValueError, "beatTime is required"): mapper.invoke("transport.action", {**fences(), "action": "force-link-beat-time"})
         stale = fences(); stale["expectedRevision"] = "stale"
         with self.assertRaisesRegex(ValueError, "changed since preview"): mapper.invoke("transport.action", {**stale, "action": "start"})

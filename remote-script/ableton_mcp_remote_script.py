@@ -7554,8 +7554,10 @@ class LiveObjectMapper:
             beat = args.get("beatTime")
             if not isinstance(beat, (int, float)) or isinstance(beat, bool) or not math.isfinite(float(beat)): raise ValueError("beatTime is required for force-link-beat-time")
             if not callable(method): raise ValueError(f"transport action {action} is unavailable on this Live shape")
-            # Live's Song.force_link_beat_time() takes nothing: it moves Link's timeline to Live's own beat time. A shape
-            # whose call wants the beat (Boost refuses a call it can't match with a TypeError, before it runs) is given it.
+            # Live's Song.force_link_beat_time() takes nothing: it moves Link's timeline to Live's own beat time. So Live
+            # goes to the beat first (the host's contract, and the simulator's), and Link follows. A shape whose call
+            # wants the beat (Boost refuses a call it can't match with a TypeError, before it runs) is given it too.
+            song.current_song_time = float(beat)
             try: method()
             except TypeError: method(float(beat))
             return {"done": True, "revision": str(self._playback()["revision"])}
