@@ -577,10 +577,16 @@ mod tests {
                 options.timeout_ms = Some(500.0);
                 let channel = ExtensionChannel::new(options);
                 assert!(channel.connect().await.unwrap(), "{}", channel.reason());
-                // Far more than the socket's buffers hold: it's still going out when the request gives up.
+                // Far more than the socket's buffers hold: one is still going out when its request gives up.
+                // Windows takes a whole send while its buffer is under quota, and one more past it, so it can take three.
                 let request = json!({"method":"status","pad":"x".repeat(64 << 20)});
-                let error = channel.request(request, "status", None).await.unwrap_err();
-                assert!(error.to_string().contains("in time"), "{error}");
+                for _ in 0..4 {
+                    let error = channel.request(request.clone(), "status", None).await.unwrap_err();
+                    assert!(error.to_string().contains("in time"), "{error}");
+                    if channel.0.writer.borrow().is_none() {
+                        break;
+                    }
+                }
                 assert!(channel.0.writer.borrow().is_none(), "the connection with half a frame in it stayed open");
                 assert!(channel.request(json!({"method":"status"}), "status", None).await.unwrap_err().to_string().contains("isn't connected"));
             })
