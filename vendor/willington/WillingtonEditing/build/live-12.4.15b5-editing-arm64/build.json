@@ -1,0 +1,18 @@
+{
+  "platform": "macos",
+  "architecture": "arm64",
+  "version": "12.4.15b5 (2026-09-24_415b783fcc)",
+  "executable": "/Applications/Ableton Live 12 Beta.app/Contents/MacOS/Live",
+  "source_sha256": "4beb1ec0c228ef3a0f2798eff8844d1fcdaa81647afc46b8a0e2abbfd3375751",
+  "arm64_sha256": "a8028f10b06d2381afb387ae17b37c127ccf930d84111ea429b9eba0ff8a4725",
+  "native_source_sha256": "abcb0bcb325e4d08f997e81f2d60a91b5234da67c70e05475abf95622a268c95",
+  "profile_id": "live-12.4.15b5-editing-arm64",
+  "profile_sha256": "c70b3484c5ee1765ada97c445c9367e5a017342545ef15f3e2d72e59344be60e",
+  "validation_status": "validated",
+  "runtime_notes": [
+    "Validated experimental native editing on Live 12.4.15b5 macOS ARM64 within the documented fixture coverage.",
+    "Writes disabled by default. Global Follow Actions require explicit inverse restoration; Arrangement snapshots are owner/session-bound with a 128-owner FIFO cache.",
+    "No Windows port or scene/global observer API. Pending UI transform refusal was controller-tested; active UI gestures and exhaustive routing combinations remain outside coverage."
+  ],
+  "library_sha256": "21c4799d9de5f07ade1869da067896b6067a8258dd06ea1f00c9d82265c7fe01"
+}

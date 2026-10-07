@@ -1,5 +1,5 @@
 {
-  "commit": "6cedf7261312725e9a3ef31f158978f6c091d47d",
+  "commit": "cf021fa151bda8e97995bd0042d0f23881d8fd27",
   "files": {
     "LICENSE.md": "688520f8ed532d45346076e8619b1e4a0c7aad6e8368db5e1661751eabf0c4ef",
     "WillingtonBindings/README.md": "d6b4a4dad3cf25a2785f6706bbdac625ec7dcd3d654f153de9c7231416a12cb6",
@@ -22,6 +22,11 @@
     "WillingtonDeviceTools/build/live-12.4.15b5-windows-x86_64/willington_devices.pyd": "60df6039940626e736bcd6c9c8ca2e0db1a043fb04f4adb952ee044bc5dc1f5b",
     "WillingtonDeviceTools/modulator_profiles.json": "cb78b6f7f71907173292d39cfa234a1b7597522c100385a4d71cf4c088ecb63e",
     "WillingtonDeviceTools/modulators.py": "97ecff1984b9a65c71e957ddea828c9c040534cba83513df9c57cd70c005cd25",
+    "WillingtonEditing/README.md": "0b265b1ca7eefd66dd76e9fb4b5ed78a6f3d57fa13ac9fdd953bafde0f13d4ba",
+    "WillingtonEditing/__init__.py": "bbc772d27e77be5011d2b1e604706f503d5a7b7f1ccd7e081a92feba563b0872",
+    "WillingtonEditing/api.py": "90ba1ce280d11ef3916ee71740395d2d349e3e8fdea81e0db868823b2a3eedea",
+    "WillingtonEditing/build/live-12.4.15b5-editing-arm64/build.json": "04daeb5557737da5ad2eefb58a9811eb4626be70b3ed6a65aadd0bb48638e980",
+    "WillingtonEditing/build/live-12.4.15b5-editing-arm64/libwillington_editing.dylib": "21c4799d9de5f07ade1869da067896b6067a8258dd06ea1f00c9d82265c7fe01",
     "WillingtonRackZones/README.md": "6934c97e50ac3c41af2cab0eb47964c33c3ef0288b36929f6b935bd8570563bf",
     "WillingtonRackZones/__init__.py": "21c8b1a4324f1194ac0a085eb243a0995b97ee1abd44a1137f08f22b2f034f5c",
     "WillingtonRackZones/api.py": "c4041955ae6c05ec6bf92a767f58b4d5e3862a58e65739000868da8116245e4a",
@@ -29,9 +34,9 @@
     "WillingtonRackZones/build/live-12.4.15b5-arm64/libwillington_zones.dylib": "a501e059999f826b04eca411b9ae76ce8ef5757e66efab7a200586826bbf5426",
     "WillingtonRackZones/build/live-12.4.15b5-windows-x86_64/build.json": "ccf90d707e7c9d5211efee574cd5d53530535a6de687a1a475b15c344de2103b",
     "WillingtonRackZones/build/live-12.4.15b5-windows-x86_64/willington_zones.pyd": "8670726e1251288edddd77ac7526bc2805f24c198bc56005e7122ce8be75dce3",
-    "WillingtonRuntime/__init__.py": "4ed1b2959ee731cebd2adaf8a904f43be753d08e0f800c8c7c044364136986e2",
-    "WillingtonRuntime/matrix.json": "4e95651e9afb9de7a24f9279992f420399a6b301eca6c290071b575adf9a69f0"
+    "WillingtonRuntime/__init__.py": "92f2e29cee3dd19d0ff34823bbe737d8ee632b4cdc897e19c589cbd72a5c42f7",
+    "WillingtonRuntime/matrix.json": "b722c50de0a4e7d478725a414e19c7512bc11311a4b605ee6dca52e4c46b3175"
   },
   "schema": "kumi-willington-vendor/v1",
-  "version": "6cedf7261312"
+  "version": "cf021fa151bd"
 }

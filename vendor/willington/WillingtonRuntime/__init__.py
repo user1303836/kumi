@@ -11,6 +11,7 @@ LIBRARIES = {
     'WillingtonBindings': 'libwillington.dylib',
     'WillingtonDeviceTools': 'libwillington_devices.dylib',
     'WillingtonRackZones': 'libwillington_zones.dylib',
+    'WillingtonEditing': 'libwillington_editing.dylib',
 }
 # Live on Windows embeds Python without ctypes; adapters there are extension modules.
 WINDOWS_LIBRARIES = {

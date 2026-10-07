@@ -38,6 +38,17 @@
       ]
     },
     {
+      "id": "live-12.4.15b5-editing-arm64",
+      "platform": "macos",
+      "architecture": "arm64",
+      "version": "12.4.15b5 (2026-09-24_415b783fcc)",
+      "source_sha256": "4beb1ec0c228ef3a0f2798eff8844d1fcdaa81647afc46b8a0e2abbfd3375751",
+      "status": "validated",
+      "components": [
+        "WillingtonEditing"
+      ]
+    },
+    {
       "id": "live-12.4.15b5-rack-zones-arm64",
       "platform": "macos",
       "architecture": "arm64",
