@@ -186,7 +186,10 @@ impl McpHost {
         }
         .await;
         Some(result.unwrap_or_else(|e| {
-            record.borrow_mut()["state"] = json!("uncertain");
+            // Nothing was sent before applying: it stays as it was, to try again.
+            if record.borrow()["state"] == "applying" {
+                record.borrow_mut()["state"] = json!("uncertain");
+            }
             adapter_tool_error(id, &e, "Device state is uncertain; perform fresh discovery before retrying.")
         }))
     }

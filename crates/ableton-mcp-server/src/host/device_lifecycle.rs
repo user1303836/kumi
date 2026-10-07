@@ -275,7 +275,10 @@ impl McpHost {
             Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","deviceRef":loaded["deviceRef"],"placement":self.device_placement(&snapshot,&created)?,"idempotent":false})))
         }.await;
         Some(result.unwrap_or_else(|e| {
-            record.borrow_mut()["state"] = json!("uncertain");
+            // Nothing was sent before applying: it stays as it was, to try again.
+            if record.borrow()["state"] == "applying" {
+                record.borrow_mut()["state"] = json!("uncertain");
+            }
             adapter_tool_error(id, &e, "Browser load is uncertain; perform fresh discovery before retrying.")
         }))
     }
