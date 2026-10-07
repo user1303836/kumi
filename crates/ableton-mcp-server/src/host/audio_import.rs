@@ -265,12 +265,17 @@ impl McpHost {
                     return Ok(transaction_error(id, "Session slot became occupied since preview; preview again"));
                 }
             }
+            if let Err(error) = self.keep_staged(&t) {
+                return Ok(transaction_error(
+                    id,
+                    &format!("the staged sample couldn't be kept for the Set ({}); nothing was sent to Live", error.message()),
+                ));
+            }
             {
                 let mut t = record.borrow_mut();
                 t["state"] = json!("applying");
                 t["applyKey"] = params["idempotencyKey"].clone();
             }
-            self.mark_staged_in_use(&t);
             let result = adapter
                 .invoke_async(
                     &LiveInvocation::new(if lane { "take-lane.audio-clip.create" } else { "session.audio-clip.create" }, payload.clone()),

@@ -68,12 +68,17 @@ impl McpHost {
                     self.verify_staged_import_file(pad["samplePath"].as_str().unwrap_or(""), file).await?;
                 }
             }
+            if let Err(error) = self.keep_staged(&t) {
+                return Ok(transaction_error(
+                    id,
+                    &format!("the staged sample couldn't be kept for the Set ({}); nothing was sent to Live", error.message()),
+                ));
+            }
             {
                 let mut row = record.borrow_mut();
                 row["state"] = json!("applying");
                 row["applyKey"] = p["idempotencyKey"].clone()
             }
-            self.mark_staged_in_use(&t);
             let mut args = payload.clone();
             args.as_object_mut().unwrap().remove("action");
             match action {

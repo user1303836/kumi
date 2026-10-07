@@ -12,12 +12,17 @@ use std::{
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 const MAX_BYTES: u64 = 512 * 1024 * 1024;
-/// How old a staging folder that never went to Live gets before it's swept: well past a preview's 10 minutes.
+/// How old a preview's mark gets before its staging folder is swept: well past a preview's 10 minutes.
 const PREVIEW_LIFE: std::time::Duration = std::time::Duration::from_secs(3600);
-/// Beside the staging root: an empty file named after each staging folder whose change went to Live. From then on a
-/// Set may play its file, so only an undo takes it away; a folder not named here is a preview's.
-fn ledger(root: &str) -> PathBuf {
-    PathBuf::from(format!("{root}.in-use"))
+/// Beside the staging root: an empty file named after each staging folder a preview made, until its change goes to
+/// Live. Only a folder marked here for over PREVIEW_LIFE is swept. One with no mark is never touched: an applied
+/// change's (a Set may play its file), an older bridge's, or one whose mark couldn't be written.
+fn previews(root: &str) -> PathBuf {
+    PathBuf::from(format!("{root}.previews"))
+}
+/// Whether `name` is one staging gives a folder (16 characters of URL-safe base64), so a mark can't name anything else.
+fn staging_name(name: &std::ffi::OsStr) -> bool {
+    name.to_str().is_some_and(|name| name.len() == 16 && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
 }
 /// A staging folder and what's in it, made writable first (staged files are read-only).
 fn remove_folder(folder: &Path) {
@@ -28,30 +33,18 @@ fn remove_folder(folder: &Path) {
     let _ = fs::remove_dir(folder);
 }
 /// Once per process, when the staging root is first used: previews nothing will apply any more (another bridge's are
-/// younger than PREVIEW_LIFE) are taken away. The first time there's no ledger, every folder there is kept: bridges
-/// before this one kept none, and a Set may play any of their files.
+/// younger than PREVIEW_LIFE) are taken away, with their marks.
 fn sweep(root: &str) {
-    let ledger = ledger(root);
-    let folders: Vec<_> = fs::read_dir(root).into_iter().flatten().flatten().filter(|entry| entry.path().is_dir()).collect();
-    if !ledger.exists() {
-        if mkdir(&ledger, true, 0o700).is_ok() {
-            for folder in &folders {
-                let _ = fs::File::create(ledger.join(folder.file_name()));
-            }
-        }
-        return;
-    }
-    let marked: HashSet<_> = fs::read_dir(&ledger).into_iter().flatten().flatten().map(|entry| entry.file_name()).collect();
-    for folder in &folders {
+    for mark in fs::read_dir(previews(root)).into_iter().flatten().flatten() {
         let old =
-            folder.metadata().and_then(|meta| meta.modified()).ok().and_then(|at| at.elapsed().ok()).is_some_and(|age| age > PREVIEW_LIFE);
-        if old && !marked.contains(&folder.file_name()) {
-            remove_folder(&folder.path());
+            mark.metadata().and_then(|meta| meta.modified()).ok().and_then(|at| at.elapsed().ok()).is_some_and(|age| age > PREVIEW_LIFE);
+        if !old || !staging_name(&mark.file_name()) {
+            continue;
         }
-    }
-    for name in marked {
-        if !Path::new(root).join(&name).exists() {
-            let _ = fs::remove_file(ledger.join(name));
+        let folder = Path::new(root).join(mark.file_name());
+        remove_folder(&folder);
+        if !folder.exists() {
+            let _ = fs::remove_file(mark.path());
         }
     }
 }
@@ -235,9 +228,21 @@ impl ImportFiles {
         sweep(&root);
         Ok(root)
     }
-    /// Its staging folders are named in the ledger: the change is going to Live, which may keep playing the files.
-    pub(super) fn mark_in_use(&self, transaction: &Value) {
+    /// Marks a staging folder as a preview's: swept once it's old, unless its change goes to Live first. A mark that
+    /// can't be written leaves the folder for good.
+    fn mark_preview(&self, folder: &Path) {
         let Some(root) = self.root.borrow().clone() else { return };
+        if let Some(name) = folder.file_name() {
+            if mkdir(&previews(&root), true, 0o700).is_ok() {
+                let _ = fs::File::create(previews(&root).join(name));
+            }
+        }
+    }
+    /// Its staging folders' preview marks go before the change goes to Live: from then on a Set may play the files,
+    /// and only a release (never applied, or undone) takes them away. An error when a mark is still there, so the
+    /// change isn't sent.
+    pub(super) fn keep(&self, transaction: &Value) -> Result<(), LiveError> {
+        let Some(root) = self.root.borrow().clone() else { return Ok(()) };
         for path in staged(transaction).into_iter().filter_map(Value::as_str) {
             let Some(name) = Path::new(path)
                 .parent()
@@ -246,10 +251,13 @@ impl ImportFiles {
             else {
                 continue;
             };
-            if mkdir(&ledger(&root), true, 0o700).is_ok() {
-                let _ = fs::File::create(ledger(&root).join(name));
+            let mark = previews(&root).join(name);
+            match fs::remove_file(&mark) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(io_error(&e, "unlink", &[&mark])),
+                _ => {}
             }
         }
+        Ok(())
     }
     fn preset_root(&self) -> Result<PathBuf, LiveError> {
         let library = self
@@ -320,7 +328,7 @@ impl ImportFiles {
             let _ = fs::remove_file(format!("{}.asd", path.display()));
             let _ = fs::remove_dir(folder);
             if let Some(name) = folder.file_name() {
-                let _ = fs::remove_file(ledger(root).join(name));
+                let _ = fs::remove_file(previews(root).join(name));
             }
         }
     }
@@ -407,8 +415,16 @@ impl McpHost {
         if !header_matches(&extension, &header(&mut source).await?) {
             return Err(LiveError::error("audio file content no longer matches the declared format"));
         }
-        let folder = Path::new(&self.import_files.root()?).join(URL_SAFE_NO_PAD.encode(random(12)));
+        let root = self.import_files.root()?;
+        let folder = Path::new(&root).join(URL_SAFE_NO_PAD.encode(random(12)));
         mkdir(&folder, false, 0o700)?;
+        self.import_files.mark_preview(&folder);
+        let unstage = |folder: &Path| {
+            let _ = fs::remove_dir(folder);
+            if let Some(name) = folder.file_name() {
+                let _ = fs::remove_file(previews(&root).join(name));
+            }
+        };
         let staging = folder.join(Path::new(path).file_name().unwrap_or_default());
         let mut options = tokio::fs::OpenOptions::new();
         options.write(true).create_new(true);
@@ -417,7 +433,7 @@ impl McpHost {
         let mut output = match options.open(&staging).await {
             Ok(file) => file,
             Err(e) => {
-                let _ = fs::remove_dir(&folder);
+                unstage(&folder);
                 return Err(io_error(&e, "open", &[&staging]));
             }
         };
@@ -451,7 +467,7 @@ impl McpHost {
         drop(output);
         if let Err(error) = copied.and_then(|()| chmod(&staging, 0o444)) {
             let _ = fs::remove_file(&staging);
-            let _ = fs::remove_dir(&folder);
+            unstage(&folder);
             return Err(error);
         }
         Ok(path_text(&staging))
@@ -481,8 +497,9 @@ impl McpHost {
     pub(super) fn release_staged_import_for(&self, transaction: &Value) {
         self.import_files.release_for(transaction)
     }
-    pub(super) fn mark_staged_in_use(&self, transaction: &Value) {
-        self.import_files.mark_in_use(transaction)
+    /// Keeps a change's staged files for good as it goes to Live (`ImportFiles::keep`).
+    pub(super) fn keep_staged(&self, transaction: &Value) -> Result<(), LiveError> {
+        self.import_files.keep(transaction)
     }
     pub(super) fn write_drum_sampler_preset(&self, path: &str, name: &str) -> Result<Value, LiveError> {
         self.import_files.write_preset(path, name)
@@ -600,46 +617,74 @@ mod tests {
     }
     #[cfg(unix)]
     #[test]
-    fn previews_nothing_applied_are_swept_and_what_went_to_live_stays() {
+    fn only_old_previews_are_swept_and_a_folder_with_no_mark_is_never_touched() {
         let folder = tempfile::tempdir().unwrap();
         fs::create_dir(folder.path().join("staging")).unwrap();
         let root = path_text(&folder.path().join("staging").canonicalize().unwrap());
+        let hours_ago = |hours: u64| std::time::SystemTime::now() - std::time::Duration::from_secs(hours * 3600);
         let made = |name: &str, hours: u64| {
             let made = Path::new(&root).join(name);
             fs::create_dir(&made).unwrap();
             fs::write(made.join("kick.wav"), b"RIFF").unwrap();
             chmod(&made.join("kick.wav"), 0o444).unwrap();
-            let at = std::time::SystemTime::now() - std::time::Duration::from_secs(hours * 3600);
-            fs::File::open(&made).unwrap().set_modified(at).unwrap();
+            fs::File::open(&made).unwrap().set_modified(hours_ago(hours)).unwrap();
+        };
+        let mark = |name: &str, hours: u64| {
+            fs::create_dir_all(previews(&root)).unwrap();
+            fs::File::create(previews(&root).join(name)).unwrap().set_modified(hours_ago(hours)).unwrap();
         };
         let exists = |name: &str| Path::new(&root).join(name).exists();
-        // No ledger yet: what's there is an older bridge's, maybe played by a Set, so it stays and is noted.
-        made("older-bridge", 5);
+        // A bridge of this version used the root first. Then a bridge before it, sharing the root during an update or
+        // after a rollback, imported a sample a Set plays: it marks nothing.
         sweep(&root);
-        assert!(exists("older-bridge") && ledger(&root).join("older-bridge").exists());
-        // From then on an old preview goes; a young one (maybe another bridge's) and one that went to Live stay.
-        made("old-preview", 2);
-        made("young-preview", 0);
-        made("applied", 2);
-        fs::File::create(ledger(&root).join("applied")).unwrap();
-        fs::File::create(ledger(&root).join("gone")).unwrap();
+        made("olderBridge00000", 5);
+        // Unmarked too, however old: an applied import of this version's (its mark went as it went to Live).
+        made("appliedImport000", 5);
+        // Marked: a preview, swept once it's old. Another bridge's may still be applied while it's young.
+        made("oldPreview000000", 2);
+        mark("oldPreview000000", 2);
+        made("youngPreview0000", 2);
+        mark("youngPreview0000", 0);
+        // A mark whose folder is gone, and one naming no staging folder.
+        mark("releasedPreview0", 2);
+        made("not-a-staging-folder", 5);
+        mark("not-a-staging-folder", 2);
         sweep(&root);
-        assert!(!exists("old-preview"));
-        assert!(exists("young-preview") && exists("applied") && exists("older-bridge"));
-        // A mark whose folder is gone goes too.
-        assert!(!ledger(&root).join("gone").exists());
+        assert!(exists("olderBridge00000") && exists("appliedImport000") && exists("youngPreview0000"));
+        assert!(!exists("oldPreview000000") && !previews(&root).join("oldPreview000000").exists());
+        assert!(previews(&root).join("youngPreview0000").exists());
+        assert!(!previews(&root).join("releasedPreview0").exists());
+        assert!(exists("not-a-staging-folder"));
     }
     #[tokio::test(flavor = "current_thread")]
-    async fn a_change_going_to_live_marks_its_staging_folder_until_its_release() {
+    async fn a_preview_is_marked_until_its_change_goes_to_live() {
         let rig = rig();
-        let path = rig.staged("pad");
-        let transaction = json!({"kind":"simpler","state":"applying","payload":{"filePath":path}});
-        rig.host.mark_staged_in_use(&transaction);
-        let name = Path::new(&path).parent().unwrap().file_name().unwrap().to_owned();
-        assert!(ledger(&rig.root).join(&name).exists());
-        // An undo releases it at once (as it did before): the folder and its mark go.
+        let folder = Path::new(&rig.root).parent().unwrap().join("Samples");
+        fs::create_dir(&folder).unwrap();
+        let mut wav = b"RIFF\x24\x00\x00\x00WAVEfmt ".to_vec();
+        wav.resize(64, 0);
+        fs::write(folder.join("kick.wav"), &wav).unwrap();
+        let source = path_text(&folder.join("kick.wav"));
+        let authority = rig.host.audio_import_file_authority(&json!(source), &json!(path_text(&folder))).await.unwrap();
+        let staged = rig.host.stage_verified_import_file(&source, &authority).await.unwrap();
+        let name = Path::new(&staged).parent().unwrap().file_name().unwrap().to_owned();
+        assert!(previews(&rig.root).join(&name).exists());
+        // Going to Live: the mark goes, and the folder stays for good.
+        let transaction = json!({"kind":"simpler","state":"previewed","payload":{"filePath":staged}});
+        rig.host.keep_staged(&transaction).unwrap();
+        assert!(!previews(&rig.root).join(&name).exists() && exists(&staged));
+        // An undo still releases it at once, as it did before.
         rig.host.release_staged_import_for(&transaction);
-        assert!(!exists(&path) && !ledger(&rig.root).join(&name).exists());
+        assert!(!exists(&staged));
+        // A mark that can't be taken away keeps the change from going to Live.
+        #[cfg(unix)]
+        if unsafe { libc::getuid() } != 0 {
+            let staged = rig.host.stage_verified_import_file(&source, &authority).await.unwrap();
+            chmod(&previews(&rig.root), 0o500).unwrap();
+            let kept = rig.host.keep_staged(&json!({"kind":"simpler","payload":{"filePath":staged}}));
+            chmod(&previews(&rig.root), 0o700).unwrap();
+            assert!(kept.is_err());
+        }
     }
     #[tokio::test(flavor = "current_thread")]
     async fn a_copy_that_fails_its_check_leaves_nothing_staged() {
@@ -658,6 +703,7 @@ mod tests {
         let error = rig.host.stage_verified_import_file(&path, &authority).await.unwrap_err();
         assert!(error.message().contains("changed since preview"), "{}", error.message());
         assert_eq!(fs::read_dir(&rig.root).unwrap().count(), 0);
+        assert_eq!(fs::read_dir(previews(&rig.root)).unwrap().count(), 0);
         // Unchanged, it's staged once.
         wav[63] = 0;
         fs::write(&source, &wav).unwrap();

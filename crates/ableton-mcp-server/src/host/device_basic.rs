@@ -150,9 +150,14 @@ impl McpHost {
             };
             let mut args = t["payload"].clone();
             args.as_object_mut().unwrap().remove("action");
+            if let Err(error) = self.keep_staged(&t) {
+                return Ok(transaction_error(
+                    id,
+                    &format!("the staged sample couldn't be kept for the Set ({}); nothing was sent to Live", error.message()),
+                ));
+            }
             record.borrow_mut()["state"] = json!("applying");
             record.borrow_mut()["applyKey"] = p["idempotencyKey"].clone();
-            self.mark_staged_in_use(&t);
             let mut result = adapter.invoke_async(&LiveInvocation::new(operation, args), Some(&context)).await?;
             if (action == "insert" || action == "move") && result.is_null() {
                 return Err(LiveError::type_error("Cannot read properties of null (reading 'ref')"));

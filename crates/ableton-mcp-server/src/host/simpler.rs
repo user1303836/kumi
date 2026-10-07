@@ -104,12 +104,17 @@ impl McpHost {
                     return Ok(transaction_error(id, "device identity or sample state changed since preview; preview again"));
                 }
             }
+            if let Err(error) = self.keep_staged(&t) {
+                return Ok(transaction_error(
+                    id,
+                    &format!("the staged sample couldn't be kept for the Set ({}); nothing was sent to Live", error.message()),
+                ));
+            }
             {
                 let mut row = record.borrow_mut();
                 row["state"] = json!("applying");
                 row["applyKey"] = p["idempotencyKey"].clone()
             }
-            self.mark_staged_in_use(&t);
             let result = adapter.invoke_async(&LiveInvocation::new("simpler.replace-sample", t["payload"].clone()), Some(&context)).await?;
             if result.is_null() {
                 return Err(LiveError::type_error("Cannot read properties of null (reading 'changed')"));
