@@ -1196,6 +1196,28 @@ async fn a_songs_form_sections_where_whats_played_and_how_it_sounds_change_in_ba
     let heard: serde_json::Value = serde_json::from_str(&heard.text).unwrap();
     assert_eq!(heard["form"]["summary"], form.summary);
 }
+#[tokio::test(flavor = "current_thread")]
+async fn a_big_wavetable_is_made_while_kumi_keeps_running() {
+    use kumi_runtime::audio::wavetable::{build_wavetable, Keyframe, WavetableSpec};
+    let keyframe = Keyframe { harmonics: Some(vec![1.0; 1023]), ..Default::default() };
+    let spec = WavetableSpec { keyframes: Some(vec![keyframe; 2]), count: Some(16.0), from_audio: None };
+    // Kumi's thread draws the screen and answers the model meanwhile: here, a tick each millisecond.
+    let (done, ticks) = (std::cell::Cell::new(false), std::cell::Cell::new(0));
+    let build = async {
+        let frames = build_wavetable(&spec).await;
+        done.set(true);
+        frames
+    };
+    let ticker = async {
+        while !done.get() {
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            ticks.set(ticks.get() + 1);
+        }
+    };
+    let (frames, ()) = tokio::join!(build, ticker);
+    assert_eq!(frames.unwrap().len(), 16);
+    assert!(ticks.get() >= 3, "{} ticks while it was made", ticks.get());
+}
 #[test]
 fn a_near_silent_float_sound_has_an_envelope() {
     use kumi_runtime::audio::analyze::analyze_sound;

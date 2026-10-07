@@ -265,9 +265,11 @@ pub async fn build_wavetable(spec: &WavetableSpec) -> Result<Vec<Vec<f32>>, Audi
     if let Some(audio) = &spec.from_audio {
         frames_from_audio(&audio.file, spec.count.unwrap_or(64.0), audio.start, audio.seconds).await
     } else {
-        frames_from_keyframes(
-            spec.keyframes.as_deref().unwrap_or(&[Keyframe { shape: Some(Shape::Saw), ..Default::default() }]),
-            spec.count,
-        )
+        // Up to 256 frames of 1,023 sines over 2,048 samples each: off Kumi's thread, which keeps drawing meanwhile.
+        let keyframes = spec.keyframes.clone().unwrap_or_else(|| vec![Keyframe { shape: Some(Shape::Saw), ..Default::default() }]);
+        let count = spec.count;
+        tokio::task::spawn_blocking(move || frames_from_keyframes(&keyframes, count))
+            .await
+            .map_err(|error| AudioError(error.to_string()))?
     }
 }
