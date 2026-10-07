@@ -4926,45 +4926,58 @@ class LiveObjectMapper:
         """A display tick passed: a kept structure revision ages (see STRUCTURE_HOLD_TICKS)."""
         self._display_ticks = getattr(self, "_display_ticks", 0) + 1
 
-    def _owned_row_exists(self, row: dict[str, Any]) -> bool:
-        """Whether a transaction-owned object is still in the Set, wherever it is now. One that's
-        gone (the producer deleted it by hand, Live replaced it) holds no position: its own cleanup
-        would be refused anyway, and it mustn't block every later track or scene until Live restarts."""
-        kind = str(row.get("ref", "")).split(":")[1:2]; identity = str(row.get("objectIdentity"))
-        same = lambda value: value is not None and hmac.compare_digest(self._capture_object_identity(value), identity)
-        try:
-            tracks = self._all_track_objects()
-            if kind == ["track"]: return any(same(track) for track in tracks)
-            if kind == ["scene"]: return any(same(scene) for scene in self._items(getattr(self.song, "scenes", [])))
-            if kind == ["clip"]: return any(same(self._read_attr(slot, "clip")) for track in tracks for slot in self._items(self._read_attr(track, "clip_slots") or []))
-            if kind == ["device"]:
-                pending = [device for track in tracks for device in self._items(self._read_attr(track, "devices") or [])]
-                for at, device in enumerate(pending):
-                    if at > MAX_TRAVERSAL: return True
-                    if same(device): return True
-                    for chain in self._items(self._read_attr(device, "chains") or []): pending.extend(self._items(self._read_attr(chain, "devices") or []))
-                    for pad in self._items(self._read_attr(device, "drum_pads") or []):
-                        for chain in self._items(self._read_attr(pad, "chains") or []): pending.extend(self._items(self._read_attr(chain, "devices") or []))
-                return False
-            return True
-        except BaseException:
-            return True
+    def _owned_presence(self) -> Callable[[dict[str, Any]], bool]:
+        """Whether a transaction-owned object is still in the Set, wherever it is now. One that's gone (the
+        producer deleted it by hand, Live replaced it) holds no position: its own cleanup would be refused
+        anyway, and it mustn't block every later track or scene until Live restarts. Each kind's identities
+        are read once, for every row asked about; what can't be read, or lies past the traversal bound, counts
+        as there."""
+        read: dict[str, tuple[set[str], bool] | None] = {}
+        def identities(kind: str) -> tuple[set[str], bool] | None:
+            """(identities, complete), None when they can't be read."""
+            if kind in read: return read[kind]
+            try:
+                tracks = self._all_track_objects(); complete = True
+                if kind == "track": objects = list(tracks)
+                elif kind == "scene": objects = self._items(getattr(self.song, "scenes", []))
+                elif kind == "clip": objects = [self._read_attr(slot, "clip") for track in tracks for slot in self._items(self._read_attr(track, "clip_slots") or [])]
+                else:
+                    # Every device tree, breadth first, up to the traversal bound.
+                    objects = [device for track in tracks for device in self._items(self._read_attr(track, "devices") or [])]; at = 0
+                    while at < len(objects):
+                        if at > MAX_TRAVERSAL: del objects[at:]; complete = False; break
+                        device = objects[at]; at += 1
+                        for chain in self._items(self._read_attr(device, "chains") or []): objects.extend(self._items(self._read_attr(chain, "devices") or []))
+                        for pad in self._items(self._read_attr(device, "drum_pads") or []):
+                            for chain in self._items(self._read_attr(pad, "chains") or []): objects.extend(self._items(self._read_attr(chain, "devices") or []))
+                read[kind] = ({self._capture_object_identity(item) for item in objects if item is not None}, complete)
+            except BaseException:
+                read[kind] = None
+            return read[kind]
+        def present(row: dict[str, Any]) -> bool:
+            kind = str(row.get("ref", "")).split(":")[1:2]
+            if kind not in (["track"], ["scene"], ["clip"], ["device"]): return True
+            known = identities(kind[0])
+            return known is None or not known[1] or str(row.get("objectIdentity")) in known[0]
+        return present
 
     def _owned_positions(self, axis: str, index: int, strict: bool = False, exclude_token: str | None = None) -> list[tuple[str, dict[str, Any]]]:
         """The transaction-owned objects whose positional reference sits at or after (strict: after)
-        index on the track or scene axis, so a change there moves them."""
+        index on the track or scene axis, so a change there moves them: by their refs first, and only
+        those are looked for in the Set."""
         found = []
         for token, row in self._owned_cleanup_tokens.items():
             if token == exclude_token or row.get("deleted") is True: continue
             reference = str(row.get("ref", "")); parts = reference.split(":")
             if len(parts) < 3 or parts[0] != str(self.refs.epoch): continue
-            if not self._owned_row_exists(row): continue
             kind, path = parts[1], parts[2:]; position: int | None = None
             if axis == "track" and kind in {"track", "clip", "arrangement_clip", "device"} and path and path[0].isdigit(): position = int(path[0])
             if axis == "scene" and kind == "scene" and path and path[0].isdigit(): position = int(path[0])
             if axis == "scene" and kind == "clip" and len(path) >= 2 and path[1].isdigit(): position = int(path[1])
             if position is not None and (position > index if strict else position >= index): found.append((token, row))
-        return found
+        if not found: return []
+        present = self._owned_presence()
+        return [(token, row) for token, row in found if present(row)]
 
     def _owned_positional_conflict(self, axis: str, index: int, strict: bool = False, exclude_token: str | None = None) -> bool:
         return bool(self._owned_positions(axis, index, strict, exclude_token))

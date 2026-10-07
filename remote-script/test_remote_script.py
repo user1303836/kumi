@@ -1853,6 +1853,16 @@ class ControlSurfaceTests(unittest.TestCase):
         kept = song.tracks[0].devices[0]; mapper._owned_cleanup_tokens["kept"] = {"transactionId": "t", "ref": f"{mapper.refs.epoch}:device:0:0", "objectIdentity": mapper._capture_object_identity(kept), "fingerprint": "0" * 64}
         self.assertTrue(mapper._owned_positional_conflict("track", 0))
 
+    def test_owned_positions_look_for_only_the_objects_at_or_after_the_place(self):
+        # Ownership tokens last the session: those before the place aren't looked for, and the Set's identities are read once.
+        song = FakeSong(); song.tracks = [FakeTrack() for _ in range(100)]; mapper = LiveObjectMapper(song, provenance="real-live")
+        for position, track in enumerate(song.tracks):
+            mapper._owned_cleanup_tokens[f"token-{position}"] = {"transactionId": "t", "ref": f"{mapper.refs.epoch}:track:{position}", "objectIdentity": mapper._capture_object_identity(track), "fingerprint": "0" * 64}
+        made = []; identity = mapper._capture_object_identity
+        mapper._capture_object_identity = lambda value: made.append(True) or identity(value)
+        self.assertEqual([token for token, _ in mapper._owned_positions("track", 90)], [f"token-{position}" for position in range(90, 100)])
+        self.assertLess(len(made), 150, "each track's identity read about once, not once per token")
+
     def test_scene_capture_before_an_owned_scene_retires_its_ownership_instead_of_refusing(self):
         mapper = LiveObjectMapper(FakeSong()); transaction = "owned-scene-shift-transaction"; owned = mapper.invoke("scene.create", {"name": "Owned later", "index": 1, "expectedStructureRevision": mapper._structure_revision()}, transaction); mapper.song.capture_and_insert_scene = lambda: mapper.song.scenes.insert(0, FakeScene("Captured before"))
         captured = mapper.invoke("scene.capture", {"expectedStateRevision": mapper._capture_authority_revision()}, "capture-other-transaction")
