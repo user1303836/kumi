@@ -9952,6 +9952,18 @@ class ReadBudgetTests(unittest.TestCase):
         self.assertEqual(items, unbudgeted); self.assertEqual([item["name"] for item in items], ["Track 1", "Track 4", "Track 7", "Track 10"])
         self.assertEqual(pages, 12)
 
+    def test_a_whole_row_filter_under_a_parent_lists_only_the_sets_tracks(self):
+        # A track's parent is the Set: under another parent the list is empty, paged by the budget or not.
+        song, mapper = self.set(tracks=6)
+        for index, track in enumerate(song.tracks): track.is_grouped = index % 2 == 0
+        snapshot = mapper.snapshot(); set_ref, scene_ref = snapshot["set"]["ref"], snapshot["scenes"][0]["ref"]; fields = ["name", "isGrouped"]
+        for parent in (set_ref, scene_ref):
+            unpaged = mapper.discover("track", 100, None, parent, {"isGrouped": True}, fields)["items"]
+            paged, _ = read_all(mapper, "track", parent=parent, fields=fields, filters={"isGrouped": True})
+            self.assertEqual(paged, unpaged, parent)
+        self.assertEqual(len(unpaged), 0, "nothing under a scene"); self.assertEqual(len(paged), 0)
+        self.assertEqual([item["parentRef"] for item in read_all(mapper, "track", parent=set_ref, fields=fields, filters={"isGrouped": True})[0]], [set_ref] * 3)
+
     def test_arrangement_clips_under_a_parent_that_isnt_a_track_are_none_without_building_any(self):
         song, mapper = self.set(); snapshot = mapper.snapshot(); built = []; row = mapper._arrangement_clip_row
         mapper._arrangement_clip_row = lambda *args: built.append(True) or row(*args)

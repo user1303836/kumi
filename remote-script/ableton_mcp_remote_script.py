@@ -3097,7 +3097,7 @@ class LiveObjectMapper:
             identity_fields = ("ref", "objectIdentity", "name", "kind")
             if filters and any(key not in self._LIGHT_TRACK_FIELDS for key in filters):
                 # A filter on what only a whole row has: whole rows it is, a page's worth at a time when budgeted.
-                if budgeted: return self._filtered_track_page(kind, members, limit, cursor, filters, requested_fields, traversal_budget, deadline)
+                if budgeted: return self._filtered_track_page(kind, members, parent, limit, cursor, filters, requested_fields, traversal_budget, deadline)
                 items = [row for index, _, _ in members for row in [self._whole_track_row(index)] if row is not None]
             else:
                 items = [self._light_track_row(track, track_kind, index) for index, track, track_kind in members]; light = True
@@ -3292,11 +3292,13 @@ class LiveObjectMapper:
         more = track_index < len(entries) and emitted < traversal_budget
         return self._page_result("device", page, revision, self._walk_cursor(revision, track_index, offset, emitted) if more else None, requested_fields)
 
-    def _filtered_track_page(self, kind: str, members: list[tuple[int, Any, Any]], limit: int, cursor: str | None, filters: dict[str, Any], requested_fields: list[str] | None, traversal_budget: int, deadline: "_ReadBudget | None") -> dict[str, Any]:
+    def _filtered_track_page(self, kind: str, members: list[tuple[int, Any, Any]], parent: str | None, limit: int, cursor: str | None, filters: dict[str, Any], requested_fields: list[str] | None, traversal_budget: int, deadline: "_ReadBudget | None") -> dict[str, Any]:
         """Tracks filtered on what only a whole row has, a page at a time: a page builds whole rows from where
         the last stopped until `limit` match or the budget runs out (at least one row each page), reading only
         the tracks it looks at. The cursor, and the list's revision, are bound to the tracks listed (their
-        identities, in order) and the filters, as a Set-wide device page's are."""
+        identities, in order) and the filters, as a Set-wide device page's are. A track's parent is the Set, so
+        under any other parent the list is empty, as the unpaged list's parent filter leaves it."""
+        if parent is not None and parent != self.refs.put("set", self.song, "song"): members = []
         basis = {"tracks": [self._capture_object_identity(track) for _, track, _ in members], "filters": filters}
         revision = f"{self.refs.epoch}:{kind}:tracks:{len(members)}:{hashlib.sha256(json.dumps(basis, sort_keys=True, default=str, separators=(',', ':')).encode('utf-8')).hexdigest()[:16]}"
         position, emitted = self._walk_position(cursor, revision, 2) if cursor is not None else (0, 0)
