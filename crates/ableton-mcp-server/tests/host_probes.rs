@@ -219,12 +219,21 @@ async fn a_library_search_queries_its_database_off_the_bridges_thread() {
     });
     for mode in ["files", "tags", "plugins"] {
         let args = json!({"database":db,"pluginsDatabase":plugins,"allowlistRoot":root,"mode":mode,"limit":2});
-        // The first reads the database; the next has only its query left to run.
-        for _ in 0..2 {
+        // The first reads the database; the next have only their query left to run. A blocking thread can finish one
+        // this small before the search first waits for it, which then goes on without yielding, so it's asked up to
+        // 50 times: a query on the bridge's thread never lets the ticker run in any of them.
+        let page = host.live_library_search_async(&json!(1), &args).await.unwrap();
+        assert_ne!(page["result"]["isError"], true, "{page}");
+        let mut asked = 0;
+        loop {
             let before = ticks.load(Ordering::Relaxed);
             let page = host.live_library_search_async(&json!(1), &args).await.unwrap();
             assert_ne!(page["result"]["isError"], true, "{page}");
-            assert!(ticks.load(Ordering::Relaxed) > before, "{mode}: the bridge's thread ran nothing else meanwhile");
+            asked += 1;
+            if ticks.load(Ordering::Relaxed) > before {
+                break;
+            }
+            assert!(asked < 50, "{mode}: the bridge's thread ran nothing else while any of {asked} queries ran");
         }
     }
     ticking.abort();
