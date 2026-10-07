@@ -1218,6 +1218,47 @@ async fn a_big_wavetable_is_made_while_kumi_keeps_running() {
     assert_eq!(frames.unwrap().len(), 16);
     assert!(ticks.get() >= 3, "{} ticks while it was made", ticks.get());
 }
+#[tokio::test]
+async fn a_long_compressed_file_is_converted_only_as_far_as_its_read() {
+    use kumi_runtime::audio::decode::{open_audio, open_audio_to, prepare_audio_to};
+    let Some(ffmpeg) = find_ffmpeg(FfmpegOptions { installed_only: true, ..Default::default() }).await.unwrap() else {
+        eprintln!("ffmpeg makes the test file; unavailable");
+        return;
+    };
+    // Ogg: ffmpeg converts it everywhere (a Mac's afconvert, which copies whole, can't).
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("long.ogg");
+    let made = run(
+        &ffmpeg,
+        &["-v", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=40", "-c:a", "libvorbis", "-y", &file.to_string_lossy()],
+        RunOptions::default(),
+    )
+    .await;
+    if made.is_err() {
+        eprintln!("this ffmpeg has no Vorbis encoder; unavailable");
+        return;
+    }
+    // Read for its first 10 s: the copy holds those (and a little), and the file is still 40 s long.
+    let cut = prepare_audio_to(&file, None, Some(10.0)).await.unwrap();
+    assert!((cut.seconds.unwrap() - 40.0).abs() < 0.1, "{:?}", cut.seconds);
+    let copy = open_audio(&cut.path, None).await.unwrap();
+    assert!((copy.frames as f64 / copy.sample_rate - 10.0).abs() < 0.1, "{}", copy.frames as f64 / copy.sample_rate);
+    cut.cleanup().await;
+    let mut source = open_audio_to(&file, None, Some(10.0)).await.unwrap();
+    assert!((source.frames as f64 / source.sample_rate - 40.0).abs() < 0.1);
+    let mut read = 0;
+    while let Some(block) = source.read(65536).await.unwrap() {
+        read += block[0].len();
+    }
+    assert!((read as f64 / source.sample_rate - 10.0).abs() < 0.1, "reads end where the copy does");
+    source.close().await.unwrap();
+    // Read further than it goes: copied whole, as before.
+    let whole = prepare_audio_to(&file, None, Some(60.0)).await.unwrap();
+    assert_eq!(whole.seconds, None);
+    let copy = open_audio(&whole.path, None).await.unwrap();
+    assert!((copy.frames as f64 / copy.sample_rate - 40.0).abs() < 0.1);
+    whole.cleanup().await;
+}
 #[test]
 fn a_near_silent_float_sound_has_an_envelope() {
     use kumi_runtime::audio::analyze::analyze_sound;

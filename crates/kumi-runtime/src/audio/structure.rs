@@ -2,7 +2,7 @@
 
 use super::{
     analyze::{onset_peaks, onset_strength},
-    decode::{open_audio, AudioError},
+    decode::{open_audio_to, AudioError},
     dsp::{clock, db, fft, percentile, round, window, Biquad, Window},
 };
 use kumi_common::{
@@ -51,7 +51,8 @@ pub struct FormOptions {
     pub signal: Option<Signal>,
 }
 pub async fn hear_form(path: &str, options: FormOptions) -> Result<Form, AudioError> {
-    let mut source = open_audio(path, options.signal.clone()).await?;
+    // The form hears the first 900 s at most.
+    let mut source = open_audio_to(path, options.signal.clone(), Some(901.0)).await?;
     let result = async {
         let rate = source.sample_rate;
         if !(8000.0..=384000.0).contains(&rate) {

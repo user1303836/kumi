@@ -1,7 +1,10 @@
 //! Reading audio files as blocks of samples, without loading a whole song into memory.
 
 use crate::video::programs::{find_ffmpeg, run, FfmpegOptions, RunOptions, VideoFailure};
-use kumi_common::abort::{Signal, SignalExt};
+use kumi_common::{
+    abort::{Signal, SignalExt},
+    js::number::to_fixed,
+};
 use std::path::{Path, PathBuf};
 use tokio::{
     fs::File,
@@ -47,6 +50,8 @@ struct Layout {
 pub struct PreparedAudio {
     pub path: PathBuf,
     pub format: Option<String>,
+    /// The file's length in seconds when its converted copy stops short of it.
+    pub seconds: Option<f64>,
     folder: Option<PathBuf>,
 }
 impl PreparedAudio {
@@ -64,6 +69,11 @@ impl Drop for PreparedAudio {
     }
 }
 pub async fn prepare_audio(path: impl AsRef<Path>, signal: Option<Signal>) -> Result<PreparedAudio, AudioError> {
+    prepare_audio_to(path, signal, None).await
+}
+/// As prepare_audio, converting no further than `until` seconds in, the farthest anything will read: a 2-hour mix
+/// isn't written out whole (2.5 GB of it) for its first twelve minutes, and its length is still known.
+pub async fn prepare_audio_to(path: impl AsRef<Path>, signal: Option<Signal>, until: Option<f64>) -> Result<PreparedAudio, AudioError> {
     let path = path.as_ref();
     let extension = extension(path);
     if !AUDIO_EXTENSIONS.contains(&extension.as_str()) {
@@ -73,14 +83,18 @@ pub async fn prepare_audio(path: impl AsRef<Path>, signal: Option<Signal>) -> Re
         )));
     }
     if [".wav", ".wave", ".aif", ".aiff", ".aifc"].contains(&extension.as_str()) {
-        return Ok(PreparedAudio { path: path.into(), format: None, folder: None });
+        return Ok(PreparedAudio { path: path.into(), format: None, seconds: None, folder: None });
     }
     let folder = std::env::temp_dir().join(format!("kumi-audio-{}", uuid::Uuid::new_v4()));
     tokio::fs::create_dir(&folder).await?;
-    let prepared = PreparedAudio { path: folder.join("converted.wav"), format: Some(extension[1..].into()), folder: Some(folder) };
-    if let Err(error) = convert(path, &prepared.path, signal).await {
-        prepared.cleanup().await;
-        return Err(error);
+    let mut prepared =
+        PreparedAudio { path: folder.join("converted.wav"), format: Some(extension[1..].into()), seconds: None, folder: Some(folder) };
+    match convert(path, &prepared.path, signal, until).await {
+        Ok(seconds) => prepared.seconds = seconds,
+        Err(error) => {
+            prepared.cleanup().await;
+            return Err(error);
+        }
     }
     Ok(prepared)
 }
@@ -88,7 +102,11 @@ fn extension(path: &Path) -> String {
     path.extension().map(|v| format!(".{}", v.to_string_lossy().to_lowercase())).unwrap_or_default()
 }
 pub async fn open_audio(path: impl AsRef<Path>, signal: Option<Signal>) -> Result<AudioSource, AudioError> {
-    let prepared = prepare_audio(path, signal).await?;
+    open_audio_to(path, signal, None).await
+}
+/// As open_audio, reading no further than `until` seconds in (see prepare_audio_to); `frames` is still the whole file's.
+pub async fn open_audio_to(path: impl AsRef<Path>, signal: Option<Signal>, until: Option<f64>) -> Result<AudioSource, AudioError> {
+    let prepared = prepare_audio_to(path, signal, until).await?;
     let handle = File::open(&prepared.path).await.map_err(|e| {
         AudioError(if e.kind() == std::io::ErrorKind::NotFound { "There's no file there." } else { "Kumi couldn't open that file." }.into())
     })?;
@@ -96,10 +114,14 @@ pub async fn open_audio(path: impl AsRef<Path>, signal: Option<Signal>) -> Resul
     if let Some(format) = &prepared.format {
         source.format = format.clone();
     }
+    if let Some(seconds) = prepared.seconds {
+        source.as_long_as(seconds);
+    }
     source.prepared = Some(prepared);
     Ok(source)
 }
-async fn convert(input: &Path, output: &Path, signal: Option<Signal>) -> Result<(), AudioError> {
+/// The copy converted, and the file's length when the copy stops short of it (`until`).
+async fn convert(input: &Path, output: &Path, signal: Option<Signal>, until: Option<f64>) -> Result<Option<f64>, AudioError> {
     let mac = cfg!(target_os = "macos");
     let ffmpeg = if mac {
         "ffmpeg".into()
@@ -112,17 +134,48 @@ async fn convert(input: &Path, output: &Path, signal: Option<Signal>) -> Result<
     };
     let input_s = input.to_string_lossy();
     let output_s = output.to_string_lossy();
+    // f32 at up to 48 kHz stereo is 384 kB a second: room for what ffmpeg will write, when it stops at `until`.
+    if let Some(until) = until {
+        let folder = output.parent().map(|folder| folder.to_string_lossy().into_owned()).unwrap_or_default();
+        if let Some(full) =
+            crate::core::disk::low_disk(&folder, until * 384_000.0 + 64.0 * crate::core::disk::MB, "Kumi reads audio on").await
+        {
+            return Err(AudioError(format!("Kumi reads that file by converting it first. {full}")));
+        }
+    }
+    let cut = until.map(|until| to_fixed(until, 3));
     let mut attempts = Vec::new();
     if mac {
         attempts.push(("afconvert", vec!["-f", "WAVE", "-d", "LEF32", &input_s, &output_s]));
     }
-    attempts.push((&ffmpeg, vec!["-v", "error", "-nostdin", "-y", "-i", &input_s, "-vn", "-acodec", "pcm_f32le", "-f", "wav", &output_s]));
+    // ffmpeg says the file's own length beside the copy (at info, without progress lines).
+    let mut args = vec!["-hide_banner", "-v", "info", "-nostats", "-nostdin", "-y", "-i", &input_s, "-vn"];
+    if let Some(cut) = &cut {
+        args.extend(["-t", cut]);
+    }
+    args.extend(["-acodec", "pcm_f32le", "-f", "wav", &output_s]);
+    attempts.push((&ffmpeg, args));
     for (command, args) in attempts {
         if let Some(s) = &signal {
             s.check()?;
         }
         match run(command, &args, RunOptions { signal: signal.clone(), timeout_ms: Some(120_000), max_buffer: Some(1024 * 1024) }).await {
-            Ok(_) => return Ok(()),
+            Ok(ran) => {
+                // afconvert (a Mac's) always copies whole.
+                let (Some(until), true) = (until, command != "afconvert") else { return Ok(None) };
+                static DURATION: std::sync::LazyLock<regex::Regex> =
+                    std::sync::LazyLock::new(|| regex::Regex::new(r"Duration: ([0-9]+):([0-9]{2}):([0-9]{2}(?:\.[0-9]+)?)").unwrap());
+                let length = DURATION.captures(&ran.stderr).and_then(|found| {
+                    Some(found[1].parse::<f64>().ok()? * 3600.0 + found[2].parse::<f64>().ok()? * 60.0 + found[3].parse::<f64>().ok()?)
+                });
+                match length {
+                    // Cut short: the length is the file's. Not cut: the copy's own, exactly as before.
+                    Some(length) if length > until => return Ok(Some(length)),
+                    Some(_) => return Ok(None),
+                    // A file that doesn't say how long it is, read whole as before.
+                    None => return Box::pin(convert(input, output, signal.clone(), None)).await,
+                }
+            }
             Err(e) => {
                 if signal.as_ref().is_some_and(Signal::is_cancelled) {
                     return Err(e.into());
@@ -147,8 +200,12 @@ impl AudioSource {
     pub fn seek(&mut self, to: f64) {
         self.frame = to.floor().max(0.0).min(self.frames as f64) as usize;
     }
+    /// The file's own length, when what's open is a copy that stops short of it: reads still end where the copy does.
+    pub fn as_long_as(&mut self, seconds: f64) {
+        self.frames = self.frames.max((seconds * self.sample_rate).round() as usize);
+    }
     pub async fn read(&mut self, count: usize) -> Result<Option<Vec<Vec<f32>>>, AudioError> {
-        let frames = count.min(self.frames.saturating_sub(self.frame));
+        let frames = count.min(self.layout.frames.saturating_sub(self.frame));
         if frames == 0 {
             return Ok(None);
         }

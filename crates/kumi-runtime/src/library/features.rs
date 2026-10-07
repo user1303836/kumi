@@ -2,7 +2,7 @@
 use super::classify::{Heard, HeardKey, Pitch};
 use crate::audio::{
     analyze::{estimate_key, estimate_tempo, track_pitch, Key, Tempo},
-    decode::{open_audio, AudioError},
+    decode::{open_audio_to, AudioError},
     dsp::{db_amplitude, fft, k_weighting, percentile, window, Window},
 };
 use kumi_common::{
@@ -395,7 +395,8 @@ pub struct MeasureOptions {
 }
 /// Measures at most 30 seconds, decoding non-PCM formats through the same audio source as listening.
 pub async fn measure_sound(path: &str, options: MeasureOptions) -> Result<SoundFeatures, AudioError> {
-    let mut source = open_audio(path, options.signal.clone()).await?;
+    let reach = options.start.unwrap_or(0.).max(0.) + options.seconds.unwrap_or(MAX_SECONDS).clamp(0., MAX_SECONDS) + 1.;
+    let mut source = open_audio_to(path, options.signal.clone(), Some(reach)).await?;
     let result = async {
         let total = source.frames as f64 / source.sample_rate;
         let start_frame = (options.start.unwrap_or(0.) * source.sample_rate).floor().min(source.frames as f64).max(0.) as usize;

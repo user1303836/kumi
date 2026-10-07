@@ -21,8 +21,10 @@ pub async fn hear(path: &str, options: AnalyzeOptions) -> Result<Analysis, Audio
     if let Some(signal) = &options.signal {
         signal.check()?;
     }
-    let prepared = decode::prepare_audio(path, options.signal.clone()).await?;
-    let result = worker::in_worker(prepared.path.to_string_lossy().into_owned(), options, path.into(), prepared.format.clone()).await;
+    let prepared = decode::prepare_audio_to(path, options.signal.clone(), Some(analyze::reach(&options))).await?;
+    let result =
+        worker::in_worker(prepared.path.to_string_lossy().into_owned(), options, path.into(), prepared.format.clone(), prepared.seconds)
+            .await;
     prepared.cleanup().await;
     result
 }
