@@ -24,6 +24,10 @@
 //! - **A key** names the tonic and mode that roman numerals use: `key D dorian`.
 //!
 //! A text's notes end by the clip's end (the bridge writes notes inside a clip), and it writes at most [`MOST`].
+//!
+//! A read reports every mistake it finds, not just the first, and reads a few slips for itself, saying so: a pitch
+//! without its octave (the octave of the pitch before it), a length that's a bare note value (`l1`, `l8.`), and notes
+//! at or past the clip's end (left out) or running past it (cut there).
 mod harmony;
 mod parse;
 mod pitch;
@@ -31,7 +35,8 @@ mod print;
 mod time;
 
 pub use harmony::{chord, Key};
-pub use parse::{names_drums, parse, thousands, MOST};
+pub(crate) use parse::past_the_end;
+pub use parse::{errors_text, names_drums, parse, read, thousands, Reading, MOST};
 pub use pitch::{drum_pitch, name as pitch_name, parse as parse_pitch};
 pub use print::{print, Printed};
 pub use time::{Frame, TICKS};

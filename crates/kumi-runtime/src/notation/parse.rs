@@ -25,6 +25,8 @@ struct Token<'a> {
     text: &'a str,
     column: usize,
 }
+/// The most mistakes one read reports: enough to fix a text in one go, few enough to read.
+const ERRORS: usize = 12;
 /// What stays set from line to line.
 pub(super) struct State {
     pub velocity: f64,
@@ -32,11 +34,21 @@ pub(super) struct State {
     pub probability: f64,
     pub length: f64,
     pub key: Option<Key>,
+    /// The octave of the last pitch named with one, which a pitch named without one takes.
+    pub octave: Option<i32>,
+    /// What Kumi read for itself, to say with the notes (`Reading::fixed`).
+    pub fixed: Vec<String>,
 }
 impl Default for State {
     fn default() -> Self {
-        Self { velocity: 100., deviation: 0., probability: 1., length: LENGTH, key: None }
+        Self { velocity: 100., deviation: 0., probability: 1., length: LENGTH, key: None, octave: None, fixed: vec![] }
     }
+}
+/// What a text writes, read as forgivingly as is safe: the notes, and the slips Kumi read for itself, each said.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reading {
+    pub notes: Vec<Note>,
+    pub fixed: Vec<String>,
 }
 /// A note in the text's time, and where it was written.
 #[derive(Clone)]
@@ -53,57 +65,133 @@ enum Fill {
     End,
 }
 
-/// The notes a text writes, in the clip's own time and in order.
+/// The notes a text writes, in the clip's own time and in order; its first mistake when it has one (`read` has them all).
 pub fn parse(text: &str, frame: &Frame) -> Result<Vec<Note>, NotationError> {
+    read(text, frame).map(|reading| reading.notes).map_err(|mut errors| errors.swap_remove(0))
+}
+/// The notes a text writes, and what Kumi read for itself in it; or every mistake in it (up to a dozen), so one fix
+/// mends them all, where the first used to come back alone and cost a rewrite each (#257).
+///
+/// Kumi reads for itself, and says so: a pitch without its octave takes the octave of the pitch named before it (`D`
+/// after `C3` is D3); a length written as a bare note value (`l1`, `l8.`) is that value (`l/1`, `l/8.`); and a note
+/// at or past the clip's end is left out, and one running past it is cut there (Live keeps notes past a clip's end;
+/// the bridge writes them only inside it).
+pub fn read(text: &str, frame: &Frame) -> Result<Reading, Vec<NotationError>> {
     let mut state = State { key: frame.key, ..State::default() };
     let mut written: Vec<Written> = vec![];
+    let mut errors = vec![];
     for (index, line) in text.lines().enumerate() {
         let number = index + 1;
-        let tokens = tokens(line, number)?;
-        let Some(first) = tokens.first() else { continue };
-        let at = |token: &Token, message: String| NotationError { line: number, column: token.column, message };
-        match first.text {
-            "copy" => copy(&tokens, number, frame, &mut written)?,
-            "key" => {
-                let rest = tokens[1..].iter().map(|token| token.text).collect::<Vec<_>>().join(" ");
-                state.key = Some(Key::parse(&rest).ok_or_else(|| {
-                    at(
-                        first,
-                        format!("“key {rest}” isn't a key: a tonic and a mode, like key C major, key D dorian or key A harmonic minor"),
-                    )
-                })?);
+        if let Err(error) = read_line(line, number, frame, &mut state, &mut written) {
+            errors.push(error);
+            // Past the notes a text may write, or a dozen mistakes in, the rest says nothing more.
+            if errors.len() >= ERRORS || written.len() >= MOST {
+                break;
             }
-            text if looks_like_setting(text) || frame.parse_position(text).is_some() => {
-                sequence(&tokens, number, frame, &mut state, &mut written)?
-            }
-            _ => lane(&tokens, number, frame, &mut state, &mut written)?,
         }
     }
     let mut notes = Vec::with_capacity(written.len());
+    let (mut left_out, mut cut) = (vec![], 0);
     for Written { note, line, column } in written {
         let start = note.start - frame.origin;
-        let at = |message: String| NotationError { line, column, message };
         if start < -EPSILON {
-            return Err(at(format!(
-                "a note at {} is before the clip, which starts at {}",
-                frame.position(note.start),
-                frame.position(frame.origin)
-            )));
+            if errors.len() < ERRORS {
+                errors.push(NotationError {
+                    line,
+                    column,
+                    message: format!(
+                        "a note at {} is before the clip, which starts at {}",
+                        frame.position(note.start),
+                        frame.position(frame.origin)
+                    ),
+                });
+            }
+            continue;
         }
-        // The bridge takes a clip's notes only inside it, though Live keeps notes that run past its end.
+        let mut duration = note.duration;
         if let Some(length) = frame.length {
-            if start + note.duration > length + EPSILON {
-                return Err(at(format!(
-                    "a note at {} ends after the clip, which ends at {}: Kumi writes notes inside a clip, so end it by then or make the clip longer",
-                    frame.position(note.start),
-                    frame.position(frame.origin + length)
-                )));
+            if start > length - EPSILON {
+                left_out.push(frame.position(note.start));
+                continue;
+            }
+            if start + duration > length + EPSILON {
+                duration = length - start;
+                cut += 1;
             }
         }
-        notes.push(Note { start: start.max(0.), ..note });
+        notes.push(Note { start: start.max(0.), duration, ..note });
+    }
+    if !errors.is_empty() {
+        return Err(errors);
     }
     notes.sort_by(order);
-    Ok(notes)
+    let mut fixed = state.fixed;
+    if let Some(length) = frame.length {
+        fixed.extend(past_the_end(&left_out, cut, &frame.position(frame.origin + length)));
+    }
+    Ok(Reading { notes, fixed })
+}
+/// What leaving out the notes at or past a clip's end (by where they started) and cutting those that ran past it
+/// says, if anything.
+pub(crate) fn past_the_end(left_out: &[String], cut: usize, end: &str) -> Vec<String> {
+    let mut said = vec![];
+    if !left_out.is_empty() {
+        let mut at: Vec<&str> = left_out.iter().map(String::as_str).collect();
+        at.dedup();
+        let more = at.len().saturating_sub(4);
+        at.truncate(4);
+        said.push(format!(
+            "{} at or past the clip's end ({end}) {} left out: at {}{}",
+            plural(left_out.len(), "note"),
+            if left_out.len() == 1 { "was" } else { "were" },
+            at.join(", "),
+            if more > 0 { format!(" and {more} more places") } else { String::new() }
+        ));
+    }
+    if cut > 0 {
+        said.push(format!(
+            "{} ran past the clip's end ({end}) and {} cut there",
+            plural(cut, "note"),
+            if cut == 1 { "was" } else { "were" }
+        ));
+    }
+    said
+}
+fn plural(count: usize, what: &str) -> String {
+    if count == 1 {
+        format!("1 {what}")
+    } else {
+        format!("{} {what}s", thousands(count))
+    }
+}
+/// One line of a text into the notes written so far.
+fn read_line(line: &str, number: usize, frame: &Frame, state: &mut State, written: &mut Vec<Written>) -> Result<(), NotationError> {
+    let tokens = tokens(line, number)?;
+    let Some(first) = tokens.first() else { return Ok(()) };
+    let at = |token: &Token, message: String| NotationError { line: number, column: token.column, message };
+    match first.text {
+        "copy" => copy(&tokens, number, frame, written),
+        "key" => {
+            let rest = tokens[1..].iter().map(|token| token.text).collect::<Vec<_>>().join(" ");
+            state.key = Some(Key::parse(&rest).ok_or_else(|| {
+                at(first, format!("“key {rest}” isn't a key: a tonic and a mode, like key C major, key D dorian or key A harmonic minor"))
+            })?);
+            Ok(())
+        }
+        text if looks_like_setting(text) || frame.parse_position(text).is_some() => sequence(&tokens, number, frame, state, written),
+        _ => lane(&tokens, number, frame, state, written),
+    }
+}
+/// Every mistake a read found, as the change's error says them: the first in full, then one a line.
+pub fn errors_text(errors: &[NotationError]) -> String {
+    let mut text = errors.first().map(ToString::to_string).unwrap_or_default();
+    for error in errors.iter().skip(1) {
+        text.push_str(&format!("\nline {}, column {}: {}", error.line, error.column, error.message));
+    }
+    if errors.len() >= ERRORS {
+        text.push_str("\n(there may be more after these)");
+    }
+    text
 }
 /// Whether a text names a lane for a drum rather than a pitch, which the track's Drum Rack pads should answer.
 pub fn names_drums(text: &str) -> bool {
@@ -204,8 +292,18 @@ pub(super) fn setting(state: &mut State, text: &str) -> Result<bool, String> {
                 .ok_or_else(|| format!("“{text}” isn't a probability: 0 to 1, like p0.8"))?;
         }
         _ => {
-            state.length = time::parse_length(value)
-                .ok_or_else(|| format!("“{text}” isn't a length: a note value (l/8, l/8., l/8t, l3/8) or beats (l0.37b)"))?;
+            state.length = match time::parse_length(value) {
+                Some(length) => length,
+                // A note value without its slash, as other notations write it (l1 a whole note, l8. a dotted eighth).
+                None => {
+                    let bare = value.starts_with(|c: char| c.is_ascii_digit()) && !value.contains('/');
+                    let length = time::parse_length(&format!("/{value}"))
+                        .filter(|_| bare)
+                        .ok_or_else(|| format!("“{text}” isn't a length: a note value (l/8, l/8., l/8t, l3/8) or beats (l0.37b)"))?;
+                    state.fixed.push(format!("“{text}” was read as l/{value}"));
+                    length
+                }
+            };
         }
     }
     Ok(true)
@@ -302,7 +400,7 @@ fn suffix_of(mut suffix: &str, mut length: f64) -> Result<(f64, bool), String> {
     Ok((length, glide))
 }
 /// The pitches an item plays, each with whether it's muted.
-fn pitches(body: &str, state: &State) -> Result<Vec<(u8, bool)>, String> {
+fn pitches(body: &str, state: &mut State) -> Result<Vec<(u8, bool)>, String> {
     // Parentheses mute what's inside, however deep they go: unwrapped in a loop, as a chord's part can nest them by
     // the thousand.
     let mut inner = body;
@@ -322,9 +420,23 @@ fn pitches(body: &str, state: &State) -> Result<Vec<(u8, bool)>, String> {
     if let Some(inner) = body.strip_prefix('{').and_then(|body| body.strip_suffix('}')) {
         return Ok(harmony::chord(inner.trim(), state.key.as_ref())?.into_iter().map(|pitch| (pitch, false)).collect());
     }
-    pitch::parse(body)
-        .map(|pitch| vec![(pitch, false)])
-        .ok_or_else(|| format!("“{body}” isn't a pitch: write Live's names (C3 is middle C, F#2, Bb1) or a MIDI number (0–127)"))
+    if let Some(pitch) = pitch::parse(body) {
+        if !body.bytes().all(|b| b.is_ascii_digit()) {
+            state.octave = Some(i32::from(pitch) / 12 - 2);
+        }
+        return Ok(vec![(pitch, false)]);
+    }
+    // A pitch named without its octave takes the octave of the one named before it: D after C3 is D3.
+    if let (Some((_, "")), Some(octave)) = (pitch::class(body), state.octave) {
+        if let Some(pitch) = pitch::parse(&format!("{body}{octave}")) {
+            let read = format!("“{body}” has no octave, so it was read as {body}{octave}, the octave of the pitch before it");
+            if !state.fixed.contains(&read) {
+                state.fixed.push(read);
+            }
+            return Ok(vec![(pitch, false)]);
+        }
+    }
+    Err(format!("“{body}” isn't a pitch: write Live's names (C3 is middle C, F#2, Bb1) or a MIDI number (0–127)"))
 }
 
 /// A lane: one drum or pitch, a pattern on a grid.
@@ -624,11 +736,56 @@ mod tests {
         let parsed = parse("5|1 C3 . E3\ncopy 5 6", &frame).unwrap();
         assert_eq!(parsed.iter().map(|n| (n.pitch, n.start)).collect::<Vec<_>>(), [(60, 0.), (64, 2.), (60, 4.), (64, 6.)]);
         assert!(parse("1|1 C3", &frame).unwrap_err().to_string().contains("before the clip, which starts at 5|1"));
-        // Kumi's bridge writes notes inside a clip, and the error says so.
-        assert!(parse("6|4 C3/2", &frame)
-            .unwrap_err()
-            .to_string()
-            .contains("ends after the clip, which ends at 7|1: Kumi writes notes inside a clip"));
+        // Kumi's bridge writes notes inside a clip: one running past its end is cut there, one starting at it is left
+        // out, and the read says so.
+        let past = read("6|4 C3/2 D3", &frame).unwrap();
+        assert_eq!(past.notes.iter().map(|n| (n.pitch, n.start, n.duration)).collect::<Vec<_>>(), [(60, 7., 1.)]);
+        assert_eq!(
+            past.fixed,
+            ["1 note at or past the clip's end (7|1) was left out: at 7|2", "1 note ran past the clip's end (7|1) and was cut there"]
+        );
+    }
+
+    #[test]
+    fn a_read_reports_every_mistake_and_reads_the_obvious_slips_for_itself() {
+        // Every line's mistake, each with its place (#257), so one fix mends them all.
+        let errors = read(
+            "1|1 C3 Q3
+2|1 E3
+3|1 H2 G3
+v200 4|1 C3",
+            &Frame::default(),
+        )
+        .unwrap_err();
+        assert_eq!(errors.iter().map(|e| (e.line, e.column)).collect::<Vec<_>>(), [(1, 8), (3, 5), (4, 1)]);
+        let text = errors_text(&errors);
+        assert!(text.starts_with("Notation line 1, column 8: “Q3” isn't a pitch"), "{text}");
+        assert!(
+            text.contains(
+                "
+line 3, column 5: “H2” isn't a pitch"
+            ) && text.contains(
+                "
+line 4, column 1: “v200” isn't a velocity"
+            )
+        );
+        // A pitch without its octave takes the one named before it, in a sequence or a chord; with none before, it's
+        // still a mistake.
+        let octaves = read("1|1 C3 D E [G2 B D3] F", &Frame::default()).unwrap();
+        assert_eq!(octaves.notes.iter().map(|n| n.pitch).collect::<Vec<_>>(), [60, 62, 64, 55, 59, 62, 65]);
+        assert_eq!(octaves.fixed.len(), 4, "said once a name: {:?}", octaves.fixed);
+        assert!(octaves.fixed[0].starts_with("“D” has no octave, so it was read as D3"));
+        assert!(read("1|1 D E3", &Frame::default()).is_err());
+        // A length that's a bare note value is that value: l1 a whole note, l8. a dotted eighth; l3 is no note value.
+        let lengths = read(
+            "l1 1|1 C3
+l8. 2|1 D3",
+            &Frame::default(),
+        )
+        .unwrap();
+        assert_eq!(lengths.notes.iter().map(|n| n.duration).collect::<Vec<_>>(), [4., 0.75]);
+        assert_eq!(lengths.fixed, ["“l1” was read as l/1", "“l8.” was read as l/8."]);
+        assert!(read("l3 1|1 C3", &Frame::default()).unwrap_err()[0].message.contains("isn't a length"));
     }
 
     #[test]

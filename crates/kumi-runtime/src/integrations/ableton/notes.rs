@@ -21,39 +21,72 @@ const ARRANGEMENT_FIELDS: [&str; 9] = ["name", "start", "endTime", "length", "is
 /// The most clips one `read_notes` reads.
 const CLIPS: usize = 16;
 
+/// A write tool's input with its notation read: the notes Live takes, and what Kumi read for itself in it.
+#[derive(Debug)]
+pub struct Expanded {
+    pub input: JsonObject,
+    /// What Kumi read for itself in the notation (a pitch's octave, a note past the clip's end), said with the change.
+    pub fixed: Vec<String>,
+    /// The clips of a several-clip write whose notation has mistakes, by their place in `clips`, each with them: the
+    /// rest are written, so a fix resends one clip rather than all of them (#257).
+    pub unwritten: Vec<Value>,
+}
 /// A write tool's input with its `notation` turned into `notes` (and the clip's length, and an Arrangement clip's
-/// start, filled in when left out).
+/// start, filled in when left out). A mistake comes back with every other the text has, so one fix mends them all.
 pub async fn expand(
     tool: &str,
     mut input: JsonObject,
     connection: &LiveConnection,
     tempo: Option<f64>,
     signal: &Signal,
-) -> Result<JsonObject, String> {
+) -> Result<Expanded, String> {
+    let (mut fixed, mut unwritten) = (vec![], vec![]);
     match tool {
         "write_midi_clip" => {
             if let Some(text) = notation_of(&mut input)? {
                 let frame = frame(0., &input, tempo, connection, &text, signal).await;
-                let notes = notation::parse(&text, &frame).map_err(|error| error.to_string())?;
-                fill(&mut input, &notes, &frame);
+                let reading = notation::read(&text, &frame).map_err(|errors| notation::errors_text(&errors))?;
+                fill(&mut input, &reading.notes, &frame);
+                fixed = reading.fixed;
             }
         }
         "write_arrangement_clip" => {
             if let Some(text) = notation_of(&mut input)? {
-                arrangement(&mut input, &text, tempo, connection, signal).await?;
+                fixed = arrangement(&mut input, &text, tempo, connection, signal).await?;
             }
             if let Some(clips) = input.get_mut("clips").and_then(Value::as_array_mut) {
-                for (index, clip) in clips.iter_mut().enumerate() {
-                    let Some(clip) = clip.as_object_mut() else { continue };
-                    if let Some(text) = notation_of(clip).map_err(|error| format!("clips[{index}]: {error}"))? {
-                        arrangement(clip, &text, tempo, connection, signal).await.map_err(|error| format!("clips[{index}]: {error}"))?;
+                let mut kept = Vec::with_capacity(clips.len());
+                for (index, mut clip) in std::mem::take(clips).into_iter().enumerate() {
+                    let read = match clip.as_object_mut() {
+                        Some(row) => match notation_of(row) {
+                            Ok(Some(text)) => arrangement(row, &text, tempo, connection, signal).await,
+                            Ok(None) => Ok(vec![]),
+                            Err(error) => Err(error),
+                        },
+                        None => Ok(vec![]),
+                    };
+                    match read {
+                        Ok(read) => {
+                            fixed.extend(read.into_iter().map(|said| format!("clips[{index}]: {said}")));
+                            kept.push(clip);
+                        }
+                        Err(error) => unwritten.push(json!({"clip":index,"error":error})),
                     }
                 }
+                // None to write: the whole write is refused, with every clip's mistakes.
+                if kept.is_empty() && !unwritten.is_empty() {
+                    let all: Vec<String> = unwritten
+                        .iter()
+                        .map(|clip| format!("clips[{}]: {}", clip["clip"], clip["error"].as_str().unwrap_or_default()))
+                        .collect();
+                    return Err(all.join("\n"));
+                }
+                *clips = kept;
             }
         }
         _ => {}
     }
-    Ok(input)
+    Ok(Expanded { input, fixed, unwritten })
 }
 /// The notation an input gives (taken out of it), if any.
 fn notation_of(input: &mut JsonObject) -> Result<Option<String>, String> {
@@ -85,19 +118,21 @@ async fn frame(origin: f64, input: &JsonObject, tempo: Option<f64>, connection: 
     }
 }
 /// An Arrangement clip's notation, in song time: the clip starts where `start` says, or at the bar of its first note.
+/// What Kumi read for itself comes back.
 async fn arrangement(
     clip: &mut JsonObject,
     text: &str,
     tempo: Option<f64>,
     connection: &LiveConnection,
     signal: &Signal,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     let given = clip.get("start").and_then(Value::as_f64);
     let mut frame = frame(given.unwrap_or(0.), clip, tempo, connection, text, signal).await;
     if given.is_none() {
         frame.length = None;
     }
-    let mut notes = notation::parse(text, &frame).map_err(|error| error.to_string())?;
+    let reading = notation::read(text, &frame).map_err(|errors| notation::errors_text(&errors))?;
+    let (mut notes, mut fixed) = (reading.notes, reading.fixed);
     if given.is_none() {
         let start = notes.first().map_or(0., |note| frame.bar_start(frame.bar_of(note.start)));
         for note in &mut notes {
@@ -105,18 +140,25 @@ async fn arrangement(
         }
         frame.origin = start;
         clip.insert("start".into(), json!(start));
+        // The clip's length was given without its start: notes past its end are left out, or cut there.
         if let Some(length) = clip.get("length").and_then(Value::as_f64) {
-            if let Some(note) = notes.iter().find(|note| note.start + note.duration > length + 1e-9) {
-                return Err(format!(
-                    "a note at {} ends after the clip, which ends at {}: Kumi writes notes inside a clip, so end it by then or make the clip longer",
-                    frame.position(start + note.start),
-                    frame.position(start + length)
-                ));
-            }
+            let (mut left_out, mut cut) = (vec![], 0);
+            notes.retain_mut(|note| {
+                if note.start > length - 1e-9 {
+                    left_out.push(frame.position(start + note.start));
+                    return false;
+                }
+                if note.start + note.duration > length + 1e-9 {
+                    note.duration = length - note.start;
+                    cut += 1;
+                }
+                true
+            });
+            fixed.extend(notation::past_the_end(&left_out, cut, &frame.position(start + length)));
         }
     }
     fill(clip, &notes, &frame);
-    Ok(())
+    Ok(fixed)
 }
 /// The notes into the input, Live's way, and the clip's length when left out: whole bars covering them.
 fn fill(input: &mut JsonObject, notes: &[Note], frame: &Frame) {

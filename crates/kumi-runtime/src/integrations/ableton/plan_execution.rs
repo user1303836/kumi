@@ -673,7 +673,9 @@ impl Plan {
                 "parametersOnDevice".into(),
                 Value::Object(state.parameters_on.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
             );
-            reply.insert("missedNote".into(),json!("These parameters weren't set (the rest of the plan was): name them as the device has them (parametersOnDevice), or give values it can take, in one more make_changes."));
+            // Parameters a device didn't have, or clips whose notation had mistakes (#257).
+            let parameters = state.missed.iter().all(|miss| miss.get("deviceRef").is_some_and(|device| !device.is_null()));
+            reply.insert("missedNote".into(),json!(if parameters {"These parameters weren't set (the rest of the plan was): name them as the device has them (parametersOnDevice), or give values it can take, in one more make_changes."} else {"Parts of these steps weren't made (missed says which, and why), and the rest of the plan was: send only those parts, fixed, in one more make_changes."}));
         }
         if let Some(copy) = state.copy.as_ref().filter(|s| !s.is_empty()) {
             reply.insert("copy".into(), json!(copy));

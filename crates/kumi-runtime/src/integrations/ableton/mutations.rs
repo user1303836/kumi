@@ -144,11 +144,13 @@ impl Mutations {
         if let Err(stale) = connection.references.borrow().require_fresh_references(&input) {
             return Ok(ChangeOutcome::error(stale.0));
         }
-        // Notes written in Kumi's notation become the notes Live takes; a mistake in it comes back as the change's error.
-        let input = match super::notes::expand(&kind.tool, input, connection, self.observer.tempo.get(), &signal).await {
-            Ok(input) => input,
-            Err(text) => return Ok(ChangeOutcome::error(text)),
-        };
+        // Notes written in Kumi's notation become the notes Live takes; its mistakes come back as the change's error, and
+        // the clips of a several-clip write that have none are written (#257).
+        let super::notes::Expanded { input, fixed: read_for_itself, unwritten } =
+            match super::notes::expand(&kind.tool, input, connection, self.observer.tempo.get(), &signal).await {
+                Ok(expanded) => expanded,
+                Err(text) => return Ok(ChangeOutcome::error(text)),
+            };
         if kind.family == ChangeFamily::Parameter && self.parameters.fast_on() {
             return Ok(self.parameters.fast_parameters(kind, &input, signal).await?);
         }
@@ -482,13 +484,23 @@ impl Mutations {
                 }
             }
         }
+        if !read_for_itself.is_empty() {
+            reply.insert("notation".into(), json!(read_for_itself));
+        }
+        if !unwritten.is_empty() {
+            reply.insert("missed".into(), json!(unwritten));
+            reply.insert(
+                "missedNote".into(),
+                json!("These clips weren't written, for the mistakes in their notation; the others were. Fix them and write only those."),
+            );
+        }
         let mut full = reply.clone();
         full.insert("live".into(), connection.references.borrow_mut().shorten(&json!(result)));
         let text = stringify(&json!(full));
         Ok(ChangeOutcome {
             text: if text.len() <= 16 * 1024 { text } else { stringify(&json!(reply)) },
             is_error: record.state != ChangeState::Applied && permanent.is_none(),
-            missed: None,
+            missed: (!unwritten.is_empty()).then_some(unwritten.len()),
             stops: record.state == ChangeState::Unsure,
         })
     }
