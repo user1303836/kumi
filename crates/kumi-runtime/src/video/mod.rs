@@ -646,6 +646,8 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
     let mut watcher = Watcher { options: &options, address: address.clone(), file: file.clone(), ytdlp: None, info: None, sources: None };
     let mut notes = Vec::new();
     let mut refused = false;
+    // Captions the video has that didn't come (turned away, or yt-dlp failed): not kept as none, so the next watch asks again.
+    let mut unsure = false;
     // Why there's no ffmpeg, when fetching it failed.
     let mut unfetched = None;
     if meta.is_none() || cues.is_none() {
@@ -696,6 +698,7 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                 let ytdlp = watcher.ytdlp().await?;
                 let (words, track, denied) = captions_for(&info, &address, &ytdlp, &folder, signal.clone()).await?;
                 refused = denied;
+                unsure = words.is_empty() && track.is_some();
                 let captions = if words.is_empty() {
                     None
                 } else {
@@ -869,7 +872,7 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
     if meta.duration.is_none() {
         (end, from, to) = stretch(None, &cues, request.from, request.to);
     }
-    if meta.words.is_some() || cues.is_empty() {
+    if meta.words.is_some() || (cues.is_empty() && !unsure) {
         let empty = Vec::new();
         write_json(&join(&folder, "cues.json"), if meta.words.is_some() { &cues } else { &empty }).await?;
     }

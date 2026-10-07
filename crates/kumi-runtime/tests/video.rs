@@ -897,6 +897,44 @@ async fn speech_that_couldnt_be_taken_leaves_a_note_and_the_frames() {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
+async fn captions_that_didnt_come_are_asked_for_again_next_time() {
+    let folder = tempfile::tempdir().unwrap();
+    let tools = folder.path().join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    // A video with English captions. The first time yt-dlp can't fetch them (turned away); then it can.
+    let page = json!({"id":"captioned01","extractor_key":"Youtube","title":"Captioned","duration":12,
+        "webpage_url":"https://www.youtube.com/watch?v=captioned01","formats":[],
+        "subtitles":{"en":[{"ext":"vtt","url":"http://127.0.0.1:9/captions.vtt"}]}});
+    std::fs::write(tools.join("page.json"), page.to_string()).unwrap();
+    let ytdlp = program(
+        &tools,
+        "yt-dlp",
+        r#"if [ "$1" = --version ]; then echo 2025.01.01; exit 0; fi
+for arg in "$@"; do case "$arg" in --write-subs|--write-auto-subs) subs=1;; esac; done
+if [ -z "$subs" ]; then cat "$(dirname "$0")/page.json"; exit 0; fi
+if [ ! -f "$(dirname "$0")/allowed" ]; then echo 'ERROR: Unable to download video subtitles: HTTP Error 429: Too Many Requests' >&2; exit 1; fi
+while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then shift; out="$1"; fi; shift; done
+printf 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nload Operator\n' > "$(printf '%s' "$out" | sed 's/%(ext)s/vtt/')""#,
+    );
+    let mut env = kumi_runtime::system::process_env();
+    env.insert("KUMI_YTDLP".into(), ytdlp);
+    env.insert("KUMI_FFMPEG".into(), program(&tools, "ffmpeg", "exit 1"));
+    env.insert("KUMI_WHISPER".into(), tools.join("no-whisper").to_string_lossy().into());
+    let mut options = watch_options(folder.path(), "videos");
+    options.env = Some(env);
+    let watch = || {
+        watch_video(WatchRequest { url: "https://youtu.be/captioned01".into(), frames: Some(0.0), ..Default::default() }, options.clone())
+    };
+    assert!(watch().await.unwrap().lines.is_empty());
+    std::fs::write(tools.join("allowed"), "").unwrap();
+    let again = watch().await.unwrap();
+    assert_eq!(again.lines.iter().map(|line| line.text.as_str()).collect::<Vec<_>>(), ["load Operator"], "{:?}", again.notes);
+    // Captions that came are kept: the next watch doesn't ask.
+    std::fs::remove_file(tools.join("allowed")).unwrap();
+    assert_eq!(watch().await.unwrap().lines.len(), 1);
+}
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
 async fn a_video_has_its_duration_from_an_ffmpeg_without_ffprobe() {
     let folder = tempfile::tempdir().unwrap();
     let Some(video) = test_video(folder.path(), "alone", true).await else {
