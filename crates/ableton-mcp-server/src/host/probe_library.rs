@@ -44,7 +44,7 @@ fn allowlisted_file(file: &Value, root: &Value, label: &str) -> Result<PathBuf, 
 /// place by a rename changes): each page of a search, and the next search, read and parse the file (up to 128 MiB)
 /// again only once it changed. At most two are kept (the files and the plug-ins database), each
 /// for two minutes after its last use.
-struct Read {
+pub(super) struct Read {
     path: PathBuf,
     file: FileStamp,
     reader: Arc<SqliteReader>,
@@ -69,17 +69,18 @@ impl FileStamp {
         }
     }
 }
-static READ: Mutex<Vec<Read>> = Mutex::new(Vec::new());
+/// The databases this host's library searches read lately.
+pub(super) type LibraryReads = Arc<Mutex<Vec<Read>>>;
 const KEPT_FOR: Duration = Duration::from_secs(120);
 fn forget_idle(read: &mut Vec<Read>) {
     read.retain(|kept| kept.used.elapsed() < KEPT_FOR);
 }
-async fn read_database(path: &Path) -> Result<Arc<SqliteReader>, LibrarySearchError> {
+async fn read_database(reads: &LibraryReads, path: &Path) -> Result<Arc<SqliteReader>, LibrarySearchError> {
     let unreadable =
         |e: std::io::Error| unavailable(format!("the library database is unreadable ({})", crate::delivery::io_error(&e, "open", &[path])));
     let file = FileStamp::of(&fs::metadata(path).map_err(unreadable)?);
     let cached = {
-        let mut read = READ.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut read = reads.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         forget_idle(&mut read);
         read.iter_mut().find(|kept| kept.path == path && kept.file == file).map(|kept| {
             kept.used = Instant::now();
@@ -100,7 +101,7 @@ async fn read_database(path: &Path) -> Result<Arc<SqliteReader>, LibrarySearchEr
             .await
             .map_err(|e| unavailable(format!("the library database is unreadable ({e})")))??;
             let reader = Arc::new(parsed);
-            let mut read = READ.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut read = reads.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             read.retain(|kept| kept.path != path);
             read.push(Read { path: path.to_path_buf(), file, reader: reader.clone(), used: Instant::now() });
             while read.len() > 2 {
@@ -108,9 +109,10 @@ async fn read_database(path: &Path) -> Result<Arc<SqliteReader>, LibrarySearchEr
             }
             drop(read);
             // Let it go once it's idle, even if no other search comes to notice.
-            tokio::spawn(async {
+            let reads = reads.clone();
+            tokio::spawn(async move {
                 tokio::time::sleep(KEPT_FOR).await;
-                forget_idle(&mut READ.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
+                forget_idle(&mut reads.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
             });
             reader
         }
@@ -123,6 +125,13 @@ async fn read_database(path: &Path) -> Result<Arc<SqliteReader>, LibrarySearchEr
         }
     }
     Ok(reader)
+}
+/// `query` on a blocking thread: scanning, decoding, filtering and sorting a library's tables takes a while, and the
+/// bridge's only thread answers everything else meanwhile.
+async fn off_thread<T: Send + 'static>(
+    query: impl FnOnce() -> Result<T, LibrarySearchError> + Send + 'static,
+) -> Result<T, LibrarySearchError> {
+    tokio::task::spawn_blocking(query).await.map_err(|e| unavailable(format!("the library search failed ({e})")))?
 }
 fn strings(params: &Value, key: &str) -> Option<Vec<String>> {
     params[key].as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect())
@@ -207,21 +216,28 @@ impl McpHost {
                     ));
                 }
                 let path = allowlisted_file(&params["pluginsDatabase"], &params["allowlistRoot"], "plug-in database")?;
-                let reader = read_database(&path).await?;
-                (
-                    assert_supported_plugins_schema(&reader)?,
-                    SUPPORTED_PLUGINS_SCHEMA_VERSIONS,
-                    serde_json::to_value(query_library_plugins(&reader, &query)?).unwrap(),
-                )
+                let reader = read_database(&self.library_reads, &path).await?;
+                off_thread(move || {
+                    Ok((
+                        assert_supported_plugins_schema(&reader)?,
+                        SUPPORTED_PLUGINS_SCHEMA_VERSIONS,
+                        serde_json::to_value(query_library_plugins(&reader, &query)?).unwrap(),
+                    ))
+                })
+                .await?
             } else {
-                let reader = read_database(&database).await?;
-                let version = assert_supported_files_schema(&reader)?;
-                let page = if mode == "tags" {
-                    serde_json::to_value(query_library_tag_vocabulary(&reader, &query)?).unwrap()
-                } else {
-                    serde_json::to_value(query_library_files(&reader, &query)?).unwrap()
-                };
-                (version, SUPPORTED_FILES_SCHEMA_VERSIONS, page)
+                let reader = read_database(&self.library_reads, &database).await?;
+                let tags = mode == "tags";
+                off_thread(move || {
+                    let version = assert_supported_files_schema(&reader)?;
+                    let page = if tags {
+                        serde_json::to_value(query_library_tag_vocabulary(&reader, &query)?).unwrap()
+                    } else {
+                        serde_json::to_value(query_library_files(&reader, &query)?).unwrap()
+                    };
+                    Ok((version, SUPPORTED_FILES_SCHEMA_VERSIONS, page))
+                })
+                .await?
             };
             let mut out = json!({"schema":LIBRARY_SEARCH_SCHEMA,"mode":mode,"databaseVersion":version,"supportedVersions":supported,"items":page["items"],"paging":page["paging"],"unavailable":{"similarity":"audio-similarity queries are unavailable in this build: the fe_values record schema is not enumerated (presence is noted, semantics are never guessed)","duplicates":"duplicate-sample queries are unavailable in this build: no duplicate-identity evidence is enumerated"},"privacy":{"note":"the database path, allowlist root, and raw filesystem paths are redacted from results; usage counts are opaque numbers; only module basenames are reported for plug-ins","redacted":["database","allowlistRoot","pluginsDatabase","plugin_modules.path"]},"provenance":{"bindingEvidence":"shape-probed first-hand on Live 12.4.5 (files database version 12300, macOS platform 2; plug-ins database version 1); unofficial undocumented schema, version-specific; results are discovery evidence and loadability still requires live_browser_inspect","supportedFilesVersions":SUPPORTED_FILES_SCHEMA_VERSIONS,"supportedPluginsVersions":SUPPORTED_PLUGINS_SCHEMA_VERSIONS}});
             if mode == "files" {

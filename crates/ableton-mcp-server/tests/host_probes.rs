@@ -196,6 +196,40 @@ async fn a_library_database_is_read_once_until_it_changes() {
     assert!(changed.to_string().contains("unreadable"), "{changed}");
 }
 #[tokio::test(flavor = "current_thread")]
+async fn a_library_search_queries_its_database_off_the_bridges_thread() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let root = tempfile::tempdir().unwrap();
+    let root = fixture_paths::native_path(&root.path().canonicalize().unwrap());
+    let (db, plugins) = (root.join("files.db"), root.join("plugins.db"));
+    std::fs::write(&db, library_fixtures::files_db()).unwrap();
+    std::fs::write(&plugins, library_fixtures::plugins_db()).unwrap();
+    let host = McpHost::default();
+    let ticks = Arc::new(AtomicUsize::new(0));
+    let ticking = tokio::spawn({
+        let ticks = ticks.clone();
+        async move {
+            loop {
+                ticks.fetch_add(1, Ordering::Relaxed);
+                tokio::task::yield_now().await;
+            }
+        }
+    });
+    for mode in ["files", "tags", "plugins"] {
+        let args = json!({"database":db,"pluginsDatabase":plugins,"allowlistRoot":root,"mode":mode,"limit":2});
+        // The first reads the database; the next has only its query left to run.
+        for _ in 0..2 {
+            let before = ticks.load(Ordering::Relaxed);
+            let page = host.live_library_search_async(&json!(1), &args).await.unwrap();
+            assert_ne!(page["result"]["isError"], true, "{page}");
+            assert!(ticks.load(Ordering::Relaxed) > before, "{mode}: the bridge's thread ran nothing else meanwhile");
+        }
+    }
+    ticking.abort();
+}
+#[tokio::test(flavor = "current_thread")]
 async fn library_host_matches_source_allowlists_wal_queries_and_coercion() {
     let root = tempfile::tempdir().unwrap();
     let root = fixture_paths::native_path(&root.path().canonicalize().unwrap());

@@ -170,6 +170,7 @@ pub struct McpHost {
     options: McpHostOptions,
     import_files: Rc<import_files::ImportFiles>,
     semantic_exports: RefCell<VecDeque<project::SemanticExport>>,
+    library_reads: probe_library::LibraryReads,
 }
 impl Default for McpHost {
     fn default() -> Self {
@@ -260,6 +261,7 @@ impl McpHost {
             options,
             import_files,
             semantic_exports: RefCell::new(VecDeque::new()),
+            library_reads: Default::default(),
         })
     }
     pub fn effective_tool_policy(&self) -> ToolPolicySpec {
