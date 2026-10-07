@@ -116,18 +116,13 @@ async fn header(file: &mut tokio::fs::File) -> Result<Vec<u8>, LiveError> {
     bytes.truncate(n);
     Ok(bytes)
 }
-async fn hash_file(file: &mut tokio::fs::File, bounded: bool) -> Result<String, LiveError> {
+async fn hash_file(file: &mut tokio::fs::File) -> Result<String, LiveError> {
     let mut hash = Sha256::new();
     let mut buffer = vec![0u8; 65536];
-    let mut bytes = 0u64;
     loop {
         let n = file.read(&mut buffer).await.map_err(|e| io_error(&e, "read", &[]))?;
         if n == 0 {
             break;
-        }
-        bytes += n as u64;
-        if bounded && bytes > MAX_BYTES {
-            return Err(LiveError::error("audio file exceeds the import bound"));
         }
         hash.update(&buffer[..n]);
     }
@@ -329,7 +324,7 @@ impl McpHost {
             }
         }
         let mut file = tokio::fs::File::open(&path).await.map_err(|e| io_error(&e, "open", &[Path::new(&path)]))?;
-        let hash = hash_file(&mut file, false).await?;
+        let hash = hash_file(&mut file).await?;
         Ok(json!({"canonicalPath":path,"size":stat.len(),"mtimeMs":mtime_ms(&stat),"sha256":hash}))
     }
     pub(super) async fn stage_verified_import_file(&self, path: &str, expected: &Value) -> Result<String, LiveError> {
@@ -341,12 +336,6 @@ impl McpHost {
         let extension = Path::new(path).extension().map(|s| format!(".{}", s.to_string_lossy().to_lowercase())).unwrap_or_default();
         if !header_matches(&extension, &header(&mut source).await?) {
             return Err(LiveError::error("audio file content no longer matches the declared format"));
-        }
-        source.seek(std::io::SeekFrom::Start(0)).await.map_err(|e| io_error(&e, "read", &[]))?;
-        let hash = hash_file(&mut source, true).await?;
-        let after = source.metadata().await.map_err(|e| io_error(&e, "fstat", &[]))?;
-        if !same_file(&before, &after) || expected["sha256"] != hash {
-            return Err(LiveError::error("audio file changed since preview"));
         }
         let folder = Path::new(&self.import_files.root()?).join(URL_SAFE_NO_PAD.encode(random(12)));
         mkdir(&folder, false, 0o700)?;
@@ -362,23 +351,39 @@ impl McpHost {
                 return Err(io_error(&e, "open", &[&staging]));
             }
         };
-        source.seek(std::io::SeekFrom::Start(0)).await.map_err(|e| io_error(&e, "read", &[]))?;
-        let mut hash = Sha256::new();
-        let mut buffer = vec![0u8; 65536];
-        loop {
-            let n = source.read(&mut buffer).await.map_err(|e| io_error(&e, "read", &[]))?;
-            if n == 0 {
-                break;
+        // One pass: the copy is hashed as it's written, and must match the preview's hash with the source still the
+        // same file. A copy that fails partway is taken away with its folder.
+        let copied = async {
+            source.seek(std::io::SeekFrom::Start(0)).await.map_err(|e| io_error(&e, "read", &[]))?;
+            let mut hash = Sha256::new();
+            let mut buffer = vec![0u8; 65536];
+            let mut bytes = 0u64;
+            loop {
+                let n = source.read(&mut buffer).await.map_err(|e| io_error(&e, "read", &[]))?;
+                if n == 0 {
+                    break;
+                }
+                bytes += n as u64;
+                if bytes > MAX_BYTES {
+                    return Err(LiveError::error("audio file exceeds the import bound"));
+                }
+                hash.update(&buffer[..n]);
+                output.write_all(&buffer[..n]).await.map_err(|e| io_error(&e, "write", &[]))?;
             }
-            hash.update(&buffer[..n]);
-            output.write_all(&buffer[..n]).await.map_err(|e| io_error(&e, "write", &[]))?;
+            output.flush().await.map_err(|e| io_error(&e, "write", &[]))?;
+            let after = source.metadata().await.map_err(|e| io_error(&e, "fstat", &[]))?;
+            if !same_file(&before, &after) || expected["sha256"] != hex::encode(hash.finalize()) {
+                return Err(LiveError::error("audio file changed since preview"));
+            }
+            Ok(())
         }
-        output.flush().await.map_err(|e| io_error(&e, "write", &[]))?;
+        .await;
         drop(output);
-        if expected["sha256"] != hex::encode(hash.finalize()) {
-            return Err(LiveError::error("audio file changed since preview"));
+        if let Err(error) = copied.and_then(|()| chmod(&staging, 0o444)) {
+            let _ = fs::remove_file(&staging);
+            let _ = fs::remove_dir(&folder);
+            return Err(error);
         }
-        chmod(&staging, 0o444)?;
         Ok(path_text(&staging))
     }
     pub(super) async fn verify_staged_import_file(&self, path: &str, expected: &Value) -> Result<(), LiveError> {
@@ -391,10 +396,14 @@ impl McpHost {
             return Err(LiveError::error("staged audio file changed since preview"));
         }
         let mut file = tokio::fs::File::open(&canonical).await.map_err(|e| io_error(&e, "open", &[Path::new(&canonical)]))?;
-        if expected["sha256"] != hash_file(&mut file, false).await? {
+        if expected["sha256"] != hash_file(&mut file).await? {
             return Err(LiveError::error("staged audio file changed since preview"));
         }
         Ok(())
+    }
+    /// The staging root, made and checked (owner-only) before anything is staged in it.
+    pub(super) fn import_staging_root(&self) -> Result<String, LiveError> {
+        self.import_files.root()
     }
     pub(super) fn release_staged_import_file(&self, path: &Value) {
         self.import_files.release(path)
@@ -515,6 +524,30 @@ mod tests {
             rig.host.clip_lifecycle_transactions.delete(name);
             assert!(!exists(&path) && !Path::new(&path).parent().unwrap().exists(), "{state}");
         }
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_copy_that_fails_its_check_leaves_nothing_staged() {
+        let rig = rig();
+        let folder = Path::new(&rig.root).parent().unwrap().join("Samples");
+        fs::create_dir(&folder).unwrap();
+        let source = folder.join("kick.wav");
+        let mut wav = b"RIFF\x24\x00\x00\x00WAVEfmt ".to_vec();
+        wav.resize(64, 0);
+        fs::write(&source, &wav).unwrap();
+        let path = path_text(&source);
+        let authority = rig.host.audio_import_file_authority(&json!(path), &json!(path_text(&folder))).await.unwrap();
+        // The same size and header, other bytes: only the hash taken while copying sees it.
+        wav[63] = 1;
+        fs::write(&source, &wav).unwrap();
+        let error = rig.host.stage_verified_import_file(&path, &authority).await.unwrap_err();
+        assert!(error.message().contains("changed since preview"), "{}", error.message());
+        assert_eq!(fs::read_dir(&rig.root).unwrap().count(), 0);
+        // Unchanged, it's staged once.
+        wav[63] = 0;
+        fs::write(&source, &wav).unwrap();
+        let staged = rig.host.stage_verified_import_file(&path, &authority).await.unwrap();
+        assert_eq!(fs::read(&staged).unwrap(), wav);
+        assert_eq!(fs::read_dir(&rig.root).unwrap().count(), 1);
     }
     #[tokio::test(flavor = "current_thread")]
     async fn an_apply_given_another_kinds_id_leaves_that_ones_files() {
