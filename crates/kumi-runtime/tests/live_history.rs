@@ -199,8 +199,10 @@ async fn a_sessions_history_keeps_at_most_its_cap_however_changes_come_in() {
             let remember = Remember::new(connection.clone(), None, None);
             let history = History::new(connection.clone(), remember, Some(50), None);
             let record = |n: usize| {
-                serde_json::from_value::<ChangeRecord>(json!({"id":format!("c{n}"),"family":"clip","title":"Made a clip","state":"applied","at":0}))
-                    .unwrap()
+                serde_json::from_value::<ChangeRecord>(
+                    json!({"id":format!("c{n}"),"family":"clip","title":"Made a clip","state":"applied","at":0}),
+                )
+                .unwrap()
             };
             // An Arrangement build: more changes than the cap, quietly, then one group of them.
             let mut ids = Vec::new();
