@@ -227,8 +227,8 @@ impl Structure {
     }
 
     /// Where a linked parameter's value sits in a tree: its field's path with each "{n}" filled from `at`
-    /// ("Env{n}/plainParams/kParamAttack" at [0] is "Env0/plainParams/kParamAttack"). Only for structures
-    /// whose paths number sections that way.
+    /// ("Env{n}/plainParams/kParamAttack" at [0] is "Env0/plainParams/kParamAttack"; Vital's
+    /// "settings/osc_{n}_level" at [1] is "settings/osc_1_level").
     pub fn location(link: &ParameterLink) -> String {
         let mut numbers = link.at.iter();
         let mut out = String::new();
@@ -259,8 +259,8 @@ impl Structure {
                 }
                 Some(field) => {
                     let found = node.kind();
-                    let kinds = || field.kind.split('|');
-                    let fits = found == "null" || kinds().any(|kind| kind == found || kind == "any" || (kind == "float" && found == "int"));
+                    let fits = found == "null"
+                        || field.kind.split('|').any(|kind| kind == found || kind == "any" || (kind == "float" && found == "int"));
                     if !fits {
                         check.mismatched.insert(path.to_string(), (field.kind.clone(), found.to_string()));
                     }

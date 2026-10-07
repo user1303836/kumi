@@ -57,7 +57,7 @@ new fields arrive as guessed.
 ```sh
 cargo run -p kumi-runtime --example plugin_format_survey -- serum-2 report.json \
   --structure plugin-formats/serum-2/format-1/structure.json \
-  "~/Documents/Xfer/Serum 2 Presets/Presets" "~/Music/Ableton/Projects"
+  "$HOME/Documents/Xfer/Serum 2 Presets/Presets" "$HOME/Music/Ableton/Projects" plugin-formats/serum-2/format-1/fixtures
 ```
 
 Rerun it when a plug-in updates and look at what moved.
