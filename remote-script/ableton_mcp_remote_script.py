@@ -2424,6 +2424,10 @@ class LiveObjectMapper:
         if isinstance(root, int) and not isinstance(root, bool) and 0 <= root <= 11 and isinstance(scale_name, str) and scale_name:
             set_row["scale"] = {"rootNote": int(root), "scaleName": scale_name[:64], "scaleMode": scale_mode if isinstance(scale_mode, bool) else None}
         view = getattr(self.song, "view", None)
+        # Song.View.draw_mode: what a draw-mode change (song.view.set) fences on.
+        draw_mode = self._read_attr(view, "draw_mode") if view is not None else None
+        if isinstance(draw_mode, bool):
+            set_row["drawMode"] = draw_mode
         if view is not None and (hasattr(view, "mod_mapping_device") or hasattr(view, "mod_mapping_parameter")):
             set_row.update(self._mod_mapping_refs(view))
         return set_row

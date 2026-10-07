@@ -5286,7 +5286,9 @@ class SelectionViewExpansionTests(unittest.TestCase):
         device.view = type("DeviceView", (), {"is_collapsed": False})()
         mapper = LiveObjectMapper(song)
         self.assertTrue(mapper._operation_supported("song.view.set"))
-        draw_revision = hashlib.sha256(mapper._bounded_canonical({"drawMode": False}).encode()).hexdigest()
+        # The host fences on the draw mode the Set's row shows.
+        draw_mode = mapper.snapshot()["set"]["drawMode"]; self.assertIs(draw_mode, False)
+        draw_revision = hashlib.sha256(mapper._bounded_canonical({"drawMode": draw_mode}).encode()).hexdigest()
         result = mapper.invoke("song.view.set", {"drawMode": True, "expectedStateRevision": draw_revision})
         self.assertTrue(result["changed"]); validate_operation_payload("song.view.set", "result", result); self.assertTrue(song.view.draw_mode)
         self.assertTrue(mapper._operation_supported("clip.view.set"))

@@ -22,8 +22,16 @@ fn selection_fields(value: &Value) -> Value {
             .collect(),
     )
 }
+/// Live's draw mode as a read has it: the Remote Script sends it in the Set's row, the simulator as `view.drawMode`.
+fn draw_mode(snapshot: &Value) -> &Value {
+    if snapshot["set"].get("drawMode").is_some() {
+        &snapshot["set"]["drawMode"]
+    } else {
+        &snapshot["view"]["drawMode"]
+    }
+}
 fn fence(proposed: &Value, snapshot: &Value) -> Result<String, LiveError> {
-    Ok(js_json::stringify(&json!({"proposed":proposed,"selectionRevision":revision(snapshot)?,"drawMode":snapshot["view"]["drawMode"]})))
+    Ok(js_json::stringify(&json!({"proposed":proposed,"selectionRevision":revision(snapshot)?,"drawMode":draw_mode(snapshot)})))
 }
 impl McpHost {
     async fn selection_view(&self, context: Option<&LiveOperationContext>) -> Result<Value, LiveError> {
@@ -76,7 +84,7 @@ impl McpHost {
             let mut prior =
                 Value::Object(proposed.as_object().unwrap().keys().map(|f| (f.clone(), snapshot["selection"][f].clone())).collect());
             if p.get("drawMode").is_some() {
-                prior["drawMode"] = snapshot["view"]["drawMode"].clone();
+                prior["drawMode"] = draw_mode(&snapshot).clone();
             }
             let fence = fence(&proposed, &snapshot)?;
             if let Some(v) = p.get("drawMode") {
@@ -177,7 +185,7 @@ impl McpHost {
                     return Err(LiveError::error("selection postcondition was not confirmed"));
                 }
             }
-            if payload.get("drawMode").is_some() && !scalar_same(verified["view"].get("drawMode"), payload.get("drawMode")) {
+            if payload.get("drawMode").is_some() && !scalar_same(Some(draw_mode(&verified)), payload.get("drawMode")) {
                 return Err(LiveError::error("draw-mode postcondition was not confirmed"));
             }
             record.borrow_mut()["applyKey"] = p["idempotencyKey"].clone();
@@ -228,25 +236,33 @@ impl McpHost {
                         return Ok(transaction_error(id, "selection changed after apply; undo refused"));
                     }
                 }
-                if payload.get("drawMode").is_some() && !scalar_same(snapshot["view"].get("drawMode"), payload.get("drawMode")) {
+                if payload.get("drawMode").is_some() && !scalar_same(Some(draw_mode(&snapshot)), payload.get("drawMode")) {
                     return Ok(transaction_error(id, "draw mode changed after apply; undo refused"));
                 }
             }
             record.borrow_mut()["state"] = json!("undoing");
             let mut args = t["prior"].clone();
             args.as_object_mut().unwrap().remove("drawMode");
-            args["expectedStateRevision"] = json!(revision(&snapshot)?);
-            let result = self.invoke_undo_recovery(&record, adapter.as_ref(), "selection.set", &args, &context).await?;
-            confirmed(&result, "changed", "selection restoration was not confirmed")?;
+            // A draw-mode change alone has no selection to put back (and selection.set refuses one with no fields).
+            if !args.as_object().unwrap().is_empty() {
+                args["expectedStateRevision"] = json!(revision(&snapshot)?);
+                let result = self.invoke_undo_recovery(&record, adapter.as_ref(), "selection.set", &args, &context).await?;
+                confirmed(&result, "changed", "selection restoration was not confirmed")?;
+            }
             if payload.get("drawMode").is_some() {
                 let snapshot = self.selection_view(Some(&context)).await?;
                 let mut args = json!({});
                 if let Some(v) = t["prior"].get("drawMode") {
                     args["drawMode"] = v.clone();
                 }
-                args["expectedStateRevision"] = json!(digest(&json!({"drawMode":snapshot["view"]["drawMode"]}))?);
+                args["expectedStateRevision"] = json!(digest(&json!({"drawMode":draw_mode(&snapshot)}))?);
                 let result = self.invoke_undo_recovery(&record, adapter.as_ref(), "song.view.set", &args, &context).await?;
                 confirmed(&result, "changed", "draw-mode restoration was not confirmed")?;
+                // Read back, as the apply does.
+                let verified = self.selection_view(Some(&context)).await?;
+                if !scalar_same(Some(draw_mode(&verified)), t["prior"].get("drawMode")) {
+                    return Err(LiveError::error("draw-mode restoration was not confirmed"));
+                }
             }
             record.borrow_mut()["state"] = json!("undone");
             Ok(success_text(id, &json!({"transactionId":t["id"],"state":"undone","idempotent":false})))

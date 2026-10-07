@@ -347,6 +347,72 @@ async fn selection_validation_matches_source() {
         })
         .await;
 }
+/// The simulator, with reads shaped as the Remote Script sends them: Live's draw mode in the Set's row, no `view`.
+struct RemoteShape(DeterministicLiveSimulator);
+impl LiveAdapter for RemoteShape {
+    fn status(&self) -> Result<LiveStatus, LiveError> {
+        self.0.status()
+    }
+    fn snapshot(&self) -> Result<LiveSnapshot, LiveError> {
+        self.0.snapshot()
+    }
+    fn get(&self, r: &LiveRef) -> Result<Option<Value>, LiveError> {
+        self.0.get(r)
+    }
+    fn invoke(&self, i: &LiveInvocation) -> Result<Value, LiveError> {
+        self.0.invoke(i)
+    }
+    fn subscribe(&self, l: LiveListener) -> Result<Unsubscribe, LiveError> {
+        self.0.subscribe(l)
+    }
+    fn reconnect(&self) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect()
+    }
+}
+#[async_trait::async_trait(?Send)]
+impl AsyncLiveAdapter for RemoteShape {
+    async fn snapshot_async(&self, c: Option<&LiveOperationContext>, r: Option<&LiveSnapshotRequest>) -> Result<LiveSnapshot, LiveError> {
+        let mut rows = serde_json::to_value(self.0.snapshot_async(c, r).await?).unwrap();
+        if let Some(view) = rows.as_object_mut().unwrap().remove("view") {
+            if rows["set"].is_object() {
+                rows["set"]["drawMode"] = view["drawMode"].clone();
+            }
+        }
+        Ok(serde_json::from_value(rows).unwrap())
+    }
+    async fn discover_async(&self, r: &LiveDiscoveryRequest, c: Option<&LiveOperationContext>) -> Result<LiveDiscoveryResult, LiveError> {
+        self.0.discover_async(r, c).await
+    }
+    async fn get_async(&self, r: &LiveRef, _: Option<&LiveOperationContext>) -> Result<Option<Value>, LiveError> {
+        self.0.get(r)
+    }
+    async fn invoke_async(&self, i: &LiveInvocation, _: Option<&LiveOperationContext>) -> Result<Value, LiveError> {
+        self.0.invoke(i)
+    }
+    async fn reconnect_async(&self, _: Option<&LiveOperationContext>) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect()
+    }
+    async fn close(&self) -> Result<(), LiveError> {
+        Ok(())
+    }
+}
+#[tokio::test]
+async fn draw_mode_is_read_from_the_set_row_and_undone_on_its_own() {
+    let live = Rc::new(RemoteShape(DeterministicLiveSimulator::new()));
+    let host = McpHost::new(live.clone(), McpHostOptions::default()).unwrap();
+    let text = |result: Value| -> Value { serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+    let preview = text(host.live_selection_preview_async(&json!(1), &json!({"drawMode":true})).await);
+    assert_eq!(preview["prior"], json!({"drawMode":false}), "{preview}");
+    let apply = json!({"transactionId":preview["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+    let applied = text(host.live_selection_apply_async(&json!(2), &apply, None).await.unwrap());
+    assert_eq!(applied["state"], "applied", "{applied}");
+    assert_eq!(live.0.state.borrow()["view"]["drawMode"], true);
+    // Only the draw mode goes back: there's no selection to put back.
+    let undo = json!({"transactionId":preview["transactionId"],"confirmation":"undo","idempotencyKey":"undo-key"});
+    let undone = text(host.undo_selection_async(&json!(3), &undo, None).await);
+    assert_eq!(undone["state"], "undone", "{undone}");
+    assert_eq!(live.0.state.borrow()["view"]["drawMode"], false);
+}
 #[tokio::test]
 async fn selection_workflows_match_source() {
     tokio::task::LocalSet::new()
