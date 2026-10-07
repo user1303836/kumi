@@ -387,6 +387,25 @@ async fn stale_dead_locks_are_reclaimed_but_live_or_malformed_locks_remain() {
     write(&path, &json!({"pid":pid}));
     assert_eq!(run_lifecycle(&f.action("repair")).await.unwrap()["state"], "completed");
     assert!(!path.exists());
+    // A live process holds the pid: its own lock (taken after it started) stays, but a lock taken before it started
+    // was left by a process that's gone, whose pid it reused.
+    let mut live = if cfg!(windows) {
+        std::process::Command::new("ping").args(["-n", "30", "127.0.0.1"]).stdout(std::process::Stdio::null()).spawn().unwrap()
+    } else {
+        std::process::Command::new("sleep").arg("30").spawn().unwrap()
+    };
+    let now = kumi_common::time::now_ms();
+    write(&path, &json!({"version":1,"pid":live.id(),"startedAt":kumi_common::time::iso_string(now + 5000)}));
+    message(run_lifecycle(&f.action("repair")).await.unwrap_err(), "another lifecycle operation");
+    assert!(path.exists());
+    write(&path, &json!({"version":1,"pid":live.id(),"startedAt":kumi_common::time::iso_string(now - 3_600_000)}));
+    let repaired = run_lifecycle(&f.action("repair")).await;
+    let _ = live.kill();
+    live.wait().unwrap();
+    assert_eq!(repaired.unwrap()["state"], "completed");
+    assert!(!path.exists());
+    let left: Vec<_> = fs::read_dir(&f.options.state_directory).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert!(!left.iter().any(|name| name.to_string_lossy().ends_with(".stale")), "{left:?}");
 }
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]

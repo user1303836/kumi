@@ -152,19 +152,24 @@ pub(super) fn ensure_diagnostics_file(path: &Path) -> Result<bool, LiveError> {
     }
     result
 }
-fn stale_lock(path: &Path) -> bool {
-    let Ok(entry) = lstat(path) else { return false };
+/// The lock's bytes, as read, when its owner is gone: its pid has no process, or the process with that pid started
+/// after the lock was taken (the pid was reused). A lock that can't be read, or names this process, isn't stale.
+fn stale_lock(path: &Path) -> Option<Vec<u8>> {
+    let entry = lstat(path).ok()?;
     if !entry.is_file() || entry.file_type().is_symlink() {
-        return false;
+        return None;
     }
-    let Ok(value) = read(path).and_then(|bytes| serde_json::from_slice::<Value>(&bytes).map_err(Into::into)) else {
-        return false;
+    let bytes = read(path).ok()?;
+    let value: Value = serde_json::from_slice(&bytes).ok()?;
+    let pid = value["pid"].as_f64().filter(|v| v.fract() == 0. && *v > 0. && *v <= i32::MAX as f64 && *v != std::process::id() as f64)?;
+    let reused = || {
+        let Some(taken) = value["startedAt"].as_str().and_then(kumi_common::time::iso_ms) else { return false };
+        // A second's margin for the clocks the two times come from.
+        kumi_common::process::started_at_ms(pid as u32).is_some_and(|started| started > taken + 1000)
     };
-    let Some(pid) =
-        value["pid"].as_f64().filter(|v| v.fract() == 0. && *v > 0. && *v <= i32::MAX as f64 && *v != std::process::id() as f64)
-    else {
-        return false;
-    };
+    (gone(pid as u32) || reused()).then_some(bytes)
+}
+fn gone(pid: u32) -> bool {
     #[cfg(unix)]
     {
         (unsafe { libc::kill(pid as i32, 0) }) == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
@@ -179,7 +184,7 @@ fn stale_lock(path: &Path) -> bool {
             fn CloseHandle(process: *mut std::ffi::c_void) -> i32;
         }
         unsafe {
-            let handle = OpenProcess(0x1000, 0, pid as u32);
+            let handle = OpenProcess(0x1000, 0, pid);
             if handle.is_null() {
                 return GetLastError() == 87;
             }
@@ -195,8 +200,32 @@ fn stale_lock(path: &Path) -> bool {
         false
     }
 }
+/// Breaks a stale lock in one step that can't take a live one: the lock is renamed aside, and deleted only if it's
+/// still the one judged stale. Another process may have broken it and taken the lock since; that lock goes back in
+/// place (unless a newer one is there, which a hard link won't replace).
+fn break_stale(path: &Path, judged: &[u8]) {
+    let aside = path.with_file_name(format!("lifecycle.lock.{}-{}.stale", std::process::id(), uuid::Uuid::new_v4().simple()));
+    if fs::rename(path, &aside).is_err() {
+        return;
+    }
+    if read(&aside).ok().as_deref() == Some(judged) {
+        let _ = fs::remove_file(&aside);
+        return;
+    }
+    match fs::hard_link(&aside, path) {
+        Ok(()) => {
+            let _ = fs::remove_file(&aside);
+        }
+        // A volume without hard links.
+        Err(_) if !path.exists() => {
+            let _ = fs::rename(&aside, path);
+        }
+        Err(_) => {}
+    }
+}
 pub(super) struct LifecycleLock {
     path: PathBuf,
+    bytes: String,
 }
 impl LifecycleLock {
     pub(super) fn take(state: &Path) -> Result<Self, LiveError> {
@@ -211,13 +240,12 @@ impl LifecycleLock {
         let take = || write_new(&path, bytes.as_bytes());
         let refused = || fail("another lifecycle operation owns the state lock; inspect the owner before removing a stale lock");
         if take().is_err() {
-            if !stale_lock(&path) {
-                return Err(refused());
+            if let Some(judged) = stale_lock(&path) {
+                break_stale(&path, &judged);
             }
-            remove(&path, false)?;
             take().map_err(|_| refused())?;
         }
-        let lock = Self { path };
+        let lock = Self { path, bytes };
         chmod(&lock.path, 0o600)?;
         secure_windows_file(&lock.path)?;
         Ok(lock)
@@ -225,7 +253,8 @@ impl LifecycleLock {
 }
 impl Drop for LifecycleLock {
     fn drop(&mut self) {
-        if self.path.exists() {
+        // Only this lock: one another process took after breaking this one as stale stays.
+        if read(&self.path).is_ok_and(|bytes| bytes == self.bytes.as_bytes()) {
             let _ = remove(&self.path, false);
         }
     }
@@ -556,6 +585,28 @@ mod tests {
         assert!(!to.exists());
         assert_eq!(std::fs::read_to_string(from.join("payload")).unwrap(), "original");
         assert!(std::fs::symlink_metadata(from.join("link")).unwrap().file_type().is_symlink());
+    }
+    #[test]
+    fn a_stale_lock_is_broken_only_while_it_is_the_one_judged_and_a_lock_drops_only_itself() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("lifecycle.lock");
+        // Taken again by another process since it was judged: it goes back in place.
+        std::fs::write(&path, b"theirs").unwrap();
+        break_stale(&path, b"judged");
+        assert_eq!(std::fs::read(&path).unwrap(), b"theirs");
+        // Still the one judged: it goes.
+        break_stale(&path, b"theirs");
+        assert!(!path.exists());
+        let left: Vec<_> = std::fs::read_dir(temp.path()).unwrap().collect();
+        assert!(left.is_empty());
+        // A lock whose file another process replaced leaves that one when it drops.
+        let lock = LifecycleLock::take(temp.path()).unwrap();
+        std::fs::write(&path, b"theirs").unwrap();
+        drop(lock);
+        assert_eq!(std::fs::read(&path).unwrap(), b"theirs");
+        std::fs::remove_file(&path).unwrap();
+        drop(LifecycleLock::take(temp.path()).unwrap());
+        assert!(!path.exists());
     }
     #[cfg(windows)]
     #[test]
