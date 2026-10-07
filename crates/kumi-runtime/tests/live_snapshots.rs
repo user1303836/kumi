@@ -530,6 +530,27 @@ async fn an_undo_live_stops_partway_is_left_to_the_producer_when_kumi_cant_tell(
             assert_eq!(text, "Kumi's undo didn't finish (Live took too long). Cmd-Z in Live once puts back what it changed.");
             assert_eq!(one.state(), ChangeState::Unsure);
             assert!(!one.calls().contains(&"live_song_undo".to_owned()));
+            // Read before, but not after a step that says it changed nothing: Kumi can't tell, so it's left alone too.
+            let reads = Rc::new(Cell::new(0));
+            let count = reads.clone();
+            let python: Python = Rc::new(move |args| match args["op"].as_str() {
+                Some("restore") if args["check"] != true => {
+                    Some(json!({"removed":[],"made":[],"partial":[],"error":"TimeoutError: python.run"}))
+                }
+                Some("state") => {
+                    count.set(count.get() + 1);
+                    Some(if count.get() == 1 { held("Fill") } else { json!({"raise":"RuntimeError: can't read"}) })
+                }
+                _ => None,
+            });
+            let unread = live(TOOLS, bridge_reply(python), None).await;
+            unread.change("delete_clip", json!({"clipRef":VERSE})).await;
+            let (text, is_error) = unread.undo().await;
+            assert!(is_error);
+            assert_eq!(text, "Kumi's undo didn't finish (Live took too long). Cmd-Z in Live once puts back what it changed.");
+            assert_eq!(unread.state(), ChangeState::Unsure);
+            assert_eq!(reads.get(), 2, "read before, and once after");
+            assert!(!unread.calls().contains(&"live_song_undo".to_owned()), "Live's undo isn't pressed blind");
             // Live's undo once, but not back as it was: the producer is told to check Live.
             let reads = Rc::new(Cell::new(0));
             let count = reads.clone();

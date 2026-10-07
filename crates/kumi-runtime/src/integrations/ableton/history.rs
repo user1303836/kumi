@@ -620,15 +620,25 @@ impl History {
             snapshots::Stopped::Partway(why, done) => (why, material.host_undo || done.changed()),
         };
         if let Some(before) = &before {
-            if !known && snapshots::state(self, material, bound()).await.as_ref() == Some(before) {
-                let record = entry.borrow().record.clone();
-                return UndoResult::with(
-                    record,
-                    format!("Kumi couldn't bring back {names} ({why}); nothing changed. Undo again, or Live's own undo (Cmd-Z in Live) can take it back."),
-                    true,
-                );
-            }
-            if self.live_undo_once(bound()).await {
+            let unread = if known {
+                false
+            } else {
+                match snapshots::state(self, material, bound()).await {
+                    Some(now) if now == *before => {
+                        let record = entry.borrow().record.clone();
+                        return UndoResult::with(
+                            record,
+                            format!("Kumi couldn't bring back {names} ({why}); nothing changed. Undo again, or Live's own undo (Cmd-Z in Live) can take it back."),
+                            true,
+                        );
+                    }
+                    Some(_) => false,
+                    // Unread, the track can't say whether Kumi's step changed anything: Live's undo might take back
+                    // the producer's own last step instead, so it's left to them.
+                    None => true,
+                }
+            };
+            if !unread && self.live_undo_once(bound()).await {
                 if snapshots::state(self, material, bound()).await.as_ref() == Some(before) {
                     if material.host_undo {
                         // The change's own undo went with it, and the bridge counts it done: only Live's undo is left.
