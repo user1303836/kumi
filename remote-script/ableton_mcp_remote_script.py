@@ -10507,7 +10507,51 @@ class LiveObjectMapper:
             event_class = _Event
         return event_class
 
-    def _restore_envelope_state(self, clip: Any, parameter: Any, existed: bool, points: list[dict[str, Any]], mode: str = "clear-recreate") -> None:
+    # How far a rollback looks for an envelope's events: all of them, wherever they sit in clip time (a loop that
+    # starts past the clip's length, events past a shortened clip's end). The reads' points stop at length + 4.
+    _ENVELOPE_REACH = 1_000_000.0
+
+    def _envelope_capture(self, envelope: Any) -> tuple[list[tuple[Any, list[Any]]], tuple[float, float]]:
+        """Every event an envelope holds, each as Live's own event (its curve with it) and what it was when read
+        (time, value, curve), and the range read: what a rollback puts back, and where."""
+        reader = getattr(envelope, "events_in_range", None)
+        if not callable(reader): raise ValueError("complete automation envelope event enumeration is unavailable")
+        clip = getattr(envelope, "canonical_parent", None)
+        marks = [value for value in (self._read_attr(clip, name) for name in ("length", "loop_start", "loop_end", "start_marker", "end_marker")) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))]
+        # Live's clip markers bound it where the whole of clip time can't be asked for.
+        reaches = ((-self._ENVELOPE_REACH, self._ENVELOPE_REACH), (min([0.0, *marks]), max([0.0, *marks]) + 4.0))
+        for index, (low, high) in enumerate(reaches):
+            try: events = list(reader(low, high))
+            except Exception:
+                if index + 1 < len(reaches): continue
+                raise
+            if len(events) > MAX_WIRE_ARRAY_LENGTH: raise ValueError("automation envelope exceeds its authoritative point bound")
+            return [(event, self._envelope_event_row(event)) for event in events], (low, high)
+        raise ValueError("complete automation envelope event enumeration is unavailable")
+
+    @staticmethod
+    def _envelope_event_row(event: Any) -> list[Any]:
+        """What makes an event: its time, value and curve (Live's control coefficients, None where it has none)."""
+        coefficients = getattr(event, "control_coefficients", None)
+        values = [getattr(coefficients, name, None) for name in ("x1", "y1", "x2", "y2")] if coefficients is not None else []
+        curve = [float(value) for value in values] if values and all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in values) else None
+        return [float(event.time), float(event.value), curve]
+
+    def _envelope_rows_text(self, rows: list[list[Any]]) -> str:
+        return self._bounded_canonical(sorted(rows, key=lambda row: (row[0], row[1], self._bounded_canonical(row[2]))))
+
+    @staticmethod
+    def _envelope_span(*times: float) -> tuple[float, float]:
+        """The range a change touched, a little wider at both ends (Live may hold a time a hair from what was
+        asked): deleting and restoring what was there over it leaves the envelope as it was."""
+        low, high = min(times), max(times)
+        return low - (1e-3 + abs(low) * 1e-6), high + (1e-3 + abs(high) * 1e-6)
+
+    def _restore_envelope_state(self, clip: Any, parameter: Any, existed: bool, prior: list[tuple[Any, list[Any]]], span: tuple[float, float] | None = None) -> None:
+        """Put an envelope back as it was: gone when it didn't exist; else what it holds over span (all of it
+        without one) deleted and the events that were there made again, from Live's own events so their curves
+        come back. Where that isn't exact (Live changed something else too) the envelope is made again whole,
+        the same way. Checked over every event it holds, not only the reads' range."""
         reader = getattr(clip, "automation_envelope", None); clearer = getattr(clip, "clear_envelope", None); creator = getattr(clip, "create_automation_envelope", None)
         if not callable(reader) or not callable(clearer): raise ValueError("automation rollback is unavailable")
         current = reader(parameter)
@@ -10515,25 +10559,28 @@ class LiveObjectMapper:
             if current is not None: clearer(parameter)
             if reader(parameter) is not None: raise ValueError("automation envelope cleanup was not confirmed")
             return
-        if mode == "clear-recreate":
-            if not callable(creator): raise ValueError("automation envelope recreation is unavailable")
-            if current is not None: clearer(parameter)
-            current = creator(parameter)
-        elif mode == "range-reset":
-            if current is None:
-                if not callable(creator): raise ValueError("automation envelope recreation is unavailable")
-                current = creator(parameter)
-            else:
-                delete = getattr(current, "delete_events_in_range", None); clip_length = self._read_attr(clip, "length")
-                if not callable(delete) or not isinstance(clip_length, (int, float)): raise ValueError("automation point reset is unavailable")
-                delete(0.0, float(clip_length) + 4.0)
-        else: raise ValueError("automation rollback mode is invalid")
-        create = getattr(current, "create_event", None)
-        if current is None or not callable(create): raise ValueError("automation point restoration is unavailable")
-        event_class = self._envelope_event_class()
-        for point in points: create(event_class(point["time"], point["value"]))
-        restored = reader(parameter)
-        if restored is None or self._bounded_canonical(self._envelope_points(restored)) != self._bounded_canonical(points): raise ValueError("automation point restoration was not confirmed")
+        event_class = self._envelope_event_class(); expected = self._envelope_rows_text([row for _, row in prior])
+        def put_back(envelope: Any, reach: tuple[float, float] | None) -> None:
+            delete = getattr(envelope, "delete_events_in_range", None); create = getattr(envelope, "create_event", None)
+            if envelope is None or not callable(delete) or not callable(create): raise ValueError("automation point restoration is unavailable")
+            low, high = reach if reach is not None else self._envelope_capture(envelope)[1]
+            delete(low, high)
+            for event, row in prior:
+                # Live's own event while it's still what was read (its curve with it), else one made from what was read.
+                if low <= row[0] < high: create(event if self._envelope_event_row(event) == row else event_class(row[0], row[1]))
+        def exact() -> bool:
+            restored = reader(parameter)
+            return restored is not None and self._envelope_rows_text([row for _, row in self._envelope_capture(restored)[0]]) == expected
+        if current is not None:
+            # In place first, over the span (all of it without one); made again whole if Live won't take that, or it isn't exact.
+            try:
+                put_back(current, span)
+                if exact(): return
+            except Exception: pass
+        if not callable(creator): raise ValueError("automation envelope recreation is unavailable")
+        if current is not None: clearer(parameter)
+        put_back(creator(parameter), None)
+        if not exact(): raise ValueError("automation point restoration was not confirmed")
 
     def _envelope_read(self, args: dict[str, Any]) -> dict[str, Any]:
         _, envelope = self._envelope(str(args["clipRef"]), str(args["parameterRef"]))
@@ -10569,13 +10616,14 @@ class LiveObjectMapper:
     def _envelope_delete(self, args: dict[str, Any]) -> dict[str, Any]:
         self._guard_envelope_mutation(args); clip, envelope = self._envelope(str(args["clipRef"]), str(args["parameterRef"]))
         if envelope is None: raise ValueError("envelope does not exist")
-        parameter = self._resolve_parameter(str(args["parameterRef"])); clearer = getattr(clip, "clear_envelope", None); creator = getattr(clip, "create_automation_envelope", None); prior_points = self._envelope_points(envelope)
+        parameter = self._resolve_parameter(str(args["parameterRef"])); clearer = getattr(clip, "clear_envelope", None); creator = getattr(clip, "create_automation_envelope", None)
         if not callable(clearer) or not callable(creator) or not callable(getattr(envelope, "create_event", None)) or not callable(getattr(envelope, "delete_events_in_range", None)): raise ValueError("envelope deletion cannot guarantee exact restoration")
+        prior_events = self._envelope_capture(envelope)[0]
         try:
             clearer(parameter)
             if getattr(clip, "automation_envelope", lambda _p: None)(parameter) is not None: raise ValueError("envelope deletion was not confirmed")
         except BaseException as error:
-            try: self._restore_envelope_state(clip, parameter, True, prior_points, "range-reset")
+            try: self._restore_envelope_state(clip, parameter, True, prior_events)
             except BaseException as rollback_error: raise ValueError("envelope deletion failed and exact rollback failed") from rollback_error
             raise
         return {"deleted": True}
@@ -10595,6 +10643,7 @@ class LiveObjectMapper:
             event_class = _Event
         events = [event_class(float(point["time"]), float(point["value"])) for point in points]; before_points = self._envelope_points(prior_envelope) if prior_envelope is not None else []; prior_exists = prior_envelope is not None; clearer = getattr(clip, "clear_envelope", None); creator = getattr(clip, "create_automation_envelope", None)
         if not callable(clearer) or not callable(creator) or prior_envelope is not None and not callable(getattr(prior_envelope, "create_event", None)): raise ValueError("automation insertion cannot guarantee exact rollback on this Live shape")
+        prior_events = self._envelope_capture(prior_envelope)[0] if prior_envelope is not None else []
         envelope = prior_envelope
         try:
             if envelope is None:
@@ -10604,7 +10653,8 @@ class LiveObjectMapper:
             after_points = self._envelope_points(envelope); expected_points = before_points + [{"time": float(point["time"]), "value": float(point["value"])} for point in points]; normalize = lambda rows: sorted(rows, key=lambda row: (row["time"], row["value"]))
             if self._bounded_canonical(normalize(after_points)) != self._bounded_canonical(normalize(expected_points)): raise ValueError("envelope point insert did not produce the exact requested state")
         except BaseException as error:
-            try: self._restore_envelope_state(clip, parameter, prior_exists, before_points, "clear-recreate")
+            # Only where this call wrote: the rest of the envelope, its curves and any events past the reads' range, stays as it is.
+            try: self._restore_envelope_state(clip, parameter, prior_exists, prior_events, self._envelope_span(*(float(point["time"]) for point in points)))
             except BaseException as rollback_error: raise ValueError("automation point insertion failed and exact rollback failed") from rollback_error
             raise
         return {"inserted": len(points)}
@@ -10617,11 +10667,12 @@ class LiveObjectMapper:
         if envelope is None or not callable(getattr(envelope, "delete_events_in_range", None)) or not callable(getattr(envelope, "create_event", None)) or not callable(getattr(clip, "clear_envelope", None)) or not callable(getattr(clip, "create_automation_envelope", None)): raise ValueError("envelope point deletion cannot guarantee exact rollback")
         before_points = self._envelope_points(envelope); expected = [point for point in before_points if not float(from_time) <= point["time"] < float(to_time)]
         if len(expected) == len(before_points): raise ValueError("automation delete range contains no authoritative points")
+        prior_events = self._envelope_capture(envelope)[0]
         try:
             envelope.delete_events_in_range(float(from_time), float(to_time)); after_points = self._envelope_points(envelope)
             if self._bounded_canonical(after_points) != self._bounded_canonical(expected): raise ValueError("automation point deletion changed unexpected points")
         except BaseException as error:
-            try: self._restore_envelope_state(clip, parameter, True, before_points)
+            try: self._restore_envelope_state(clip, parameter, True, prior_events, self._envelope_span(float(from_time), float(to_time)))
             except BaseException as rollback_error: raise ValueError("automation point deletion failed and exact rollback failed") from rollback_error
             raise
         return {"deleted": len(before_points) - len(expected)}
@@ -10641,6 +10692,7 @@ class LiveObjectMapper:
         if not float(minimum) <= float(value) <= float(maximum): raise ValueError("the step's value is outside the parameter's range")
         before_points = self._envelope_points(prior_envelope) if prior_envelope is not None else []; prior_exists = prior_envelope is not None
         if not callable(getattr(clip, "clear_envelope", None)) or not callable(getattr(clip, "create_automation_envelope", None)) or prior_exists and not callable(getattr(prior_envelope, "create_event", None)): raise ValueError("automation step insertion cannot guarantee exact rollback on this Live shape")
+        prior_events = self._envelope_capture(prior_envelope)[0] if prior_exists else []
         envelope = prior_envelope
         try:
             if envelope is None: _, envelope = self._envelope(clip_ref, parameter_ref, create=True)
@@ -10653,7 +10705,7 @@ class LiveObjectMapper:
                 if not isinstance(middle, (int, float)) or isinstance(middle, bool) or not math.isfinite(float(middle)) or not _same_number(float(middle), float(value)): raise ValueError("automation step was not confirmed")
             elif prior_exists and self._bounded_canonical(after_points) == self._bounded_canonical(before_points): raise ValueError("automation step was not confirmed")
         except BaseException as error:
-            try: self._restore_envelope_state(clip, parameter, prior_exists, before_points, "clear-recreate")
+            try: self._restore_envelope_state(clip, parameter, prior_exists, prior_events, self._envelope_span(float(start), float(start) + float(length)))
             except BaseException as rollback_error: raise ValueError("automation step insertion failed and exact rollback failed") from rollback_error
             raise
         return {"inserted": 0 if prior_exists and self._bounded_canonical(after_points) == self._bounded_canonical(before_points) else 1}

@@ -8892,6 +8892,56 @@ class AutomationStepTests(unittest.TestCase):
         self.assertEqual(bridge.mapper.invoke("automation.step.insert", step(start=0.0, length=2.0, value=0.4)), {"inserted": 1}); self.assertEqual(clip.envelope.value_at_time(1.0), 0.4)
 
 
+    def curved_clip(self):
+        """A clip looping from beat 8 to 16 (its length 8, so the reads stop at 12), whose envelope holds a curved
+        event at 1, a plain one at 2 and one at 14, past the reads' range."""
+        clip = FakeAutomationClip(()); clip.length, clip.loop_start, clip.loop_end = 8.0, 8.0, 16.0
+        curved = FakeEnvelopeEvent(1.0, 0.3); curved.control_coefficients = types.SimpleNamespace(x1=0.1, y1=0.2, x2=0.3, y2=0.4)
+        clip.envelope.events = [curved, FakeEnvelopeEvent(2.0, 0.4), FakeEnvelopeEvent(14.0, 0.7)]
+        song = FakeSong(); song.tracks[0].clip_slots[0].clip = clip; mapper = LiveObjectMapper(song); snapshot = mapper.snapshot()
+        refs = {"clipRef": snapshot["tracks"][0]["clips"][0]["ref"], "parameterRef": snapshot["tracks"][0]["devices"][0]["parameters"][0]["ref"]}
+        def fence():
+            return {**refs, "expectedAuthorityDigest": mapper._envelope_authority_digest(refs["clipRef"], refs["parameterRef"]), "expectedEnvelopeRevision": mapper.invoke("automation.envelope.read", refs)["revision"]}
+        return clip, mapper, fence, list(clip.envelope.events)
+
+    @staticmethod
+    def held(clip):
+        curve = lambda event: (lambda c: (c.x1, c.y1, c.x2, c.y2) if c is not None else None)(getattr(event, "control_coefficients", None))
+        return [(event.time, event.value, curve(event)) for event in sorted(clip.envelope.events, key=lambda event: event.time)]
+
+    def test_a_failed_insert_takes_back_only_its_own_points(self):
+        clip, mapper, fence, before = self.curved_clip(); held = self.held(clip)
+        create = clip.envelope.create_event
+        def refusing(event):
+            create(event)
+            if event.value == 0.75: raise RuntimeError("injected event failure")
+        clip.envelope.create_event = refusing
+        with self.assertRaisesRegex(RuntimeError, "injected event failure"): mapper.invoke("automation.point.insert", {**fence(), "points": [{"time": 3.0, "value": 0.5}, {"time": 4.0, "value": 0.75}]})
+        self.assertEqual(self.held(clip), held, "the curve and the event past the reads' range are as they were")
+        self.assertEqual([id(event) for event in sorted(clip.envelope.events, key=lambda event: event.time)], [id(event) for event in before], "and untouched: only the inserted points went")
+
+    def test_a_failed_range_delete_puts_back_its_range_whole(self):
+        clip, mapper, fence, before = self.curved_clip(); held = self.held(clip)
+        delete = clip.envelope.delete_events_in_range
+        def deleting_too_much(start, end): delete(start, end + 1.0)  # Live took the curved one's neighbour and the next beat too
+        clip.envelope.delete_events_in_range = deleting_too_much
+        with self.assertRaisesRegex(ValueError, "changed unexpected points"): mapper.invoke("automation.point.delete", {**fence(), "from": 0.5, "to": 1.5})
+        self.assertEqual(self.held(clip), held)
+
+    def test_a_failed_envelope_delete_brings_every_event_back_with_its_curve(self):
+        clip, mapper, fence, before = self.curved_clip(); held = self.held(clip)
+        def failing_clear(_parameter): clip.envelope.events = clip.envelope.events[:1]; raise RuntimeError("injected clear failure")
+        clip.clear_envelope = failing_clear
+        with self.assertRaisesRegex(RuntimeError, "injected clear failure"): mapper.invoke("automation.envelope.delete", fence())
+        self.assertEqual(self.held(clip), held)
+
+    def test_a_step_live_holds_wrong_puts_back_its_span_and_nothing_else(self):
+        clip, mapper, fence, before = self.curved_clip(); held = self.held(clip); clip.envelope.halve_steps = True
+        with self.assertRaisesRegex(ValueError, "^automation step was not confirmed$"): mapper.invoke("automation.step.insert", {**fence(), "start": 4.0, "length": 2.0, "value": 0.8})
+        self.assertEqual(self.held(clip), held)
+        self.assertEqual([id(event) for event in sorted(clip.envelope.events, key=lambda event: event.time)], [id(event) for event in before])
+
+
 def state_revision(state):
     """A fence as the host computes it: sha-256 of the canonical state."""
     return hashlib.sha256(LiveObjectMapper._bounded_canonical(state).encode()).hexdigest()
