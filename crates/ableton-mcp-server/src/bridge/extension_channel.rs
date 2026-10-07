@@ -347,6 +347,10 @@ impl ExtensionChannel {
                     }
                     let count = match read {
                         Ok(0) => {
+                            if let Some(greeting) = channel.0.greeting.take() {
+                                let _ =
+                                    greeting.send(Err(LiveError::error("Kumi's Live extension closed the connection before its hello")));
+                            }
                             channel.disconnected();
                             break;
                         }
@@ -485,13 +489,19 @@ impl ExtensionChannel {
         let (send, mut recv) = oneshot::channel();
         self.0.pending.borrow_mut().insert(id.clone(), Pending { operation: operation.into(), response: send });
         let signal = context.and_then(|c| c.signal.clone()).unwrap_or_default();
+        // 0 before the frame starts going out, 1 while it's written, 2 once it's all out.
+        let written = Cell::new(0u8);
         let exchange = async {
-            tokio::select! {result=async{writer.lock().await.write_all(&encoded).await}=>{result.map_err(|e|LiveError::error(e.to_string()))?;},result=&mut recv=>return result.unwrap_or_else(|_|Err(LiveError::error("the extension channel closed")))}
+            tokio::select! {result=async{let mut writer=writer.lock().await;written.set(1);let result=writer.write_all(&encoded).await;if result.is_ok(){written.set(2)}result}=>{result.map_err(|e|LiveError::error(e.to_string()))?;},result=&mut recv=>return result.unwrap_or_else(|_|Err(LiveError::error("the extension channel closed")))}
             recv.await.unwrap_or_else(|_| Err(LiveError::error("the extension channel closed")))
         };
         let timeout = if timeout.is_finite() && timeout >= 1.0 && timeout <= i32::MAX as f64 { timeout } else { 1.0 };
         let result = tokio::select! {result=exchange=>result,_=signal.cancelled()=>Err(LiveError::error(format!("Kumi stopped waiting for {operation} after sending it; Live may still finish it"))),_=tokio::time::sleep(Duration::from_secs_f64(timeout/1000.0))=>Err(LiveError::error(format!("Kumi's Live extension didn't answer {operation} in time")))};
         self.0.pending.borrow_mut().remove(&id);
+        // Cut off partway through its frame: the rest would run into the next request's, so the connection goes.
+        if written.get() == 1 {
+            self.disconnected();
+        }
         result
     }
     pub async fn invoke(
@@ -523,5 +533,57 @@ fn js_string(value: &Value) -> String {
         Value::Object(_) => "[object Object]".into(),
         Value::Array(items) => items.iter().map(|v| if v.is_null() { String::new() } else { js_string(v) }).collect::<Vec<_>>().join(","),
         v => kumi_common::js::json::stringify(v),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::{
+        io::{AsyncBufReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_frame_cut_off_partway_closes_the_connection() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let secret = "w".repeat(40);
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let port = listener.local_addr().unwrap().port();
+                // An extension that greets and answers status, then stops reading, keeping the connection.
+                let served = secret.clone();
+                tokio::task::spawn_local(async move {
+                    let (socket, _) = listener.accept().await.unwrap();
+                    let (reader, mut writer) = socket.into_split();
+                    let mut lines = tokio::io::BufReader::new(reader).lines();
+                    let (epoch, challenge) = ("epoch-0000000000000001", "challenge-000000000001");
+                    let frame = |fields: Value| {
+                        format!("{}\n", kumi_common::js::json::stringify(&wire::signed(&served, fields, true).unwrap())).into_bytes()
+                    };
+                    let hello = json!({"version":LOOPBACK_PROTOCOL_VERSION,"id":"hello","ok":true,"bridgeEpoch":epoch,"connectionChallenge":challenge,"result":{"protocol":"ableton-live/v1","registryHash":*LIVE_REGISTRY_HASH}});
+                    writer.write_all(&frame(hello)).await.unwrap();
+                    let request: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                    let status = json!({"connected":true,"adapter":"extension","epoch":1,"protocol":"ableton-live/v1","capabilities":[],"registryHash":*LIVE_REGISTRY_HASH,"operations":["status"]});
+                    let answer = json!({"version":LOOPBACK_PROTOCOL_VERSION,"id":request["id"],"ok":true,"bridgeEpoch":epoch,"connectionChallenge":challenge,"result":status});
+                    writer.write_all(&frame(answer)).await.unwrap();
+                    std::future::pending::<()>().await;
+                    drop((lines, writer));
+                });
+                let folder = tempfile::tempdir().unwrap();
+                let endpoint = json!({"host":"127.0.0.1","port":port,"pid":std::process::id(),"registryHash":*LIVE_REGISTRY_HASH});
+                std::fs::write(folder.path().join("endpoint.json"), endpoint.to_string()).unwrap();
+                std::fs::write(folder.path().join("secret"), &secret).unwrap();
+                let mut options = ExtensionChannelOptions::new(folder.path());
+                options.timeout_ms = Some(500.0);
+                let channel = ExtensionChannel::new(options);
+                assert!(channel.connect().await.unwrap(), "{}", channel.reason());
+                // Far more than the socket's buffers hold: it's still going out when the request gives up.
+                let request = json!({"method":"status","pad":"x".repeat(64 << 20)});
+                let error = channel.request(request, "status", None).await.unwrap_err();
+                assert!(error.to_string().contains("in time"), "{error}");
+                assert!(channel.0.writer.borrow().is_none(), "the connection with half a frame in it stayed open");
+                assert!(channel.request(json!({"method":"status"}), "status", None).await.unwrap_err().to_string().contains("isn't connected"));
+            })
+            .await;
     }
 }

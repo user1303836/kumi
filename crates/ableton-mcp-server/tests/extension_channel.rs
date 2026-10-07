@@ -112,6 +112,30 @@ async fn cancelled_extension_render_leaves_channel_usable_and_late_answer_ignore
         })
         .await;
 }
+#[tokio::test]
+async fn an_extension_that_closes_before_its_hello_is_refused_at_once() {
+    LocalSet::new()
+        .run_until(async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            tokio::task::spawn_local(async move {
+                while let Ok((socket, _)) = listener.accept().await {
+                    drop(socket);
+                }
+            });
+            let folder = tempfile::tempdir().unwrap();
+            let endpoint = json!({"host":"127.0.0.1","port":port,"pid":std::process::id(),"registryHash":ableton_mcp_server::registry::live_registry_hash()});
+            std::fs::write(folder.path().join("endpoint.json"), endpoint.to_string()).unwrap();
+            std::fs::write(folder.path().join("secret"), "w".repeat(40)).unwrap();
+            let channel = ExtensionChannel::new(ExtensionChannelOptions::new(folder.path()));
+            let started = std::time::Instant::now();
+            assert!(!channel.connect().await.unwrap());
+            // Not the 5 s the handshake allows a greeting.
+            assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+            assert!(channel.reason().contains("before its hello"), "{}", channel.reason());
+        })
+        .await;
+}
 #[cfg(unix)]
 #[test]
 fn an_endpoint_naming_another_users_process_isnt_kumis() {
