@@ -5548,6 +5548,38 @@ class MixerRoutingExpansionTests(unittest.TestCase):
         self.assertEqual(device_row["sidechainRoutingType"], "None")
         self.assertEqual(device_row["deviceIo"]["routingType"], "Ext. In")
 
+    def test_a_device_input_channel_is_looked_up_under_its_new_type_and_a_failed_change_is_checked_back(self):
+        channels = {"Ext. In": [{"name": "1"}, {"name": "1/2"}], "Bass": [{"name": "Post FX"}, {"name": "Pre FX"}]}
+        class TypedIo:
+            # Live offers a type's own channels, and putting a type in place gives it its first channel.
+            def __init__(self):
+                self.available_routing_types = [{"name": "Ext. In"}, {"name": "Bass"}]
+                self._type, self._channel = self.available_routing_types[0], channels["Ext. In"][1]
+                self.default_external_routing_channel_is_none = True; self.refused = set()
+            available_routing_channels = property(lambda self: channels[self._type["name"]])
+            def _set_type(self, value): self._type, self._channel = value, channels[value["name"]][0]
+            routing_type = property(lambda self: self._type, _set_type)
+            def _set_channel(self, value):
+                if value["name"] in self.refused: raise RuntimeError("Live refused the channel")
+                self._channel = value
+            routing_channel = property(lambda self: self._channel, _set_channel)
+        def change(refused):
+            song = FakeSong(); device = song.tracks[0].devices[0]; io = TypedIo(); io.refused = refused; device.audio_inputs = [io]
+            mapper = LiveObjectMapper(song); row = mapper.snapshot()["tracks"][0]["devices"][0]
+            revision = hashlib.sha256(mapper._bounded_canonical({"routingType": "Ext. In", "routingChannel": "1/2"}).encode()).hexdigest()
+            return io, lambda: mapper.invoke("device-io.set", {"ref": row["ref"], "routingType": "Bass", "routingChannel": "Pre FX", "expectedObjectIdentity": row["objectIdentity"], "expectedStateRevision": revision})
+        # "Pre FX" is one of the new type's channels, not the old one's.
+        io, invoke = change(set())
+        self.assertTrue(invoke()["changed"])
+        self.assertEqual((io.routing_type["name"], io.routing_channel["name"]), ("Bass", "Pre FX"))
+        # Live refuses the channel: the type and then the channel go back, and that's checked.
+        io, invoke = change({"Pre FX"})
+        with self.assertRaisesRegex(RuntimeError, "Live refused the channel"): invoke()
+        self.assertEqual((io.routing_type["name"], io.routing_channel["name"]), ("Ext. In", "1/2"))
+        # The channel it had can't go back either: said so, not left as the type's default.
+        io, invoke = change({"Pre FX", "1/2"})
+        with self.assertRaisesRegex(ValueError, "exact rollback failed"): invoke()
+
 
 class DeviceParameterExpansionTests(unittest.TestCase):
     def test_parameter_rows_expose_metadata_and_device_bank_comparison(self):

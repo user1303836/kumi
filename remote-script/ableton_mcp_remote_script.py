@@ -8427,33 +8427,34 @@ class LiveObjectMapper:
         state_revision = hashlib.sha256(self._bounded_canonical({"routingType": current["routingType"], "routingChannel": current["routingChannel"]}).encode("utf-8")).hexdigest()
         if not isinstance(args.get("expectedStateRevision"), str) or not hmac.compare_digest(state_revision, args["expectedStateRevision"]): raise ValueError("device IO state changed since preview")
         if "routingType" not in args and "routingChannel" not in args: raise ValueError("device IO mutation has no fields")
-        proposals: list[tuple[str, Any, str]] = []
-        if "routingType" in args:
-            wanted = args["routingType"]
-            if not isinstance(wanted, str) or not 1 <= len(wanted) <= 128: raise ValueError("routingType is invalid")
-            available = self._items(self._read_attr(io, "available_routing_types") or [])
-            target = next((item for item in available if self._choice_name(item) == wanted), None)
-            if target is None: raise ValueError("routingType is not an available choice")
-            proposals.append(("routing_type", target, wanted))
-        if "routingChannel" in args:
-            wanted = args["routingChannel"]
-            if not isinstance(wanted, str) or not 1 <= len(wanted) <= 128: raise ValueError("routingChannel is invalid")
-            channels = self._items(self._read_attr(io, "available_routing_channels") or [])
-            target = next((item for item in channels if self._choice_name(item) == wanted), None)
-            if target is None: raise ValueError("routingChannel is not an available choice")
-            proposals.append(("routing_channel", target, wanted))
-        applied: list[tuple[str, Any]] = []
+        for field in ("routingType", "routingChannel"):
+            if field in args and (not isinstance(args[field], str) or not 1 <= len(args[field]) <= 128): raise ValueError(f"{field} is invalid")
+        choice = lambda attribute, wanted: next((item for item in self._items(self._read_attr(io, attribute) or []) if self._choice_name(item) == wanted), None)
+        route_type = choice("available_routing_types", args["routingType"]) if "routingType" in args else None
+        if "routingType" in args and route_type is None: raise ValueError("routingType is not an available choice")
+        # A new type brings its own channels: its channel is looked up once the type is set. Without one, before
+        # anything changes.
+        if "routingChannel" in args and route_type is None and choice("available_routing_channels", args["routingChannel"]) is None: raise ValueError("routingChannel is not an available choice")
+        prior_type, prior_channel = self._read_attr(io, "routing_type"), self._read_attr(io, "routing_channel"); changed = False
         try:
-            for attribute, target, wanted in proposals:
-                prior = self._read_attr(io, attribute)
-                setattr(io, attribute, target)
-                applied.append((attribute, prior))
-                if self._choice_name(self._read_attr(io, attribute)) != wanted: raise ValueError("device IO routing change was not confirmed")
+            if route_type is not None:
+                changed = True; io.routing_type = route_type
+                if self._choice_name(self._read_attr(io, "routing_type")) != args["routingType"]: raise ValueError("device IO routing change was not confirmed")
+            if "routingChannel" in args:
+                channel = choice("available_routing_channels", args["routingChannel"])
+                if channel is None: raise ValueError("routingChannel is not an available choice")
+                changed = True; io.routing_channel = channel
+                if self._choice_name(self._read_attr(io, "routing_channel")) != args["routingChannel"]: raise ValueError("device IO routing change was not confirmed")
         except BaseException as error:
+            if not changed: raise
+            # The type first, then the channel it had (a type puts its own default channel in place).
             rollback_failed = False
-            for attribute, prior in reversed(applied):
-                try: setattr(io, attribute, prior)
-                except BaseException: rollback_failed = True
+            try:
+                if route_type is not None: io.routing_type = prior_type
+                io.routing_channel = prior_channel
+            except BaseException: rollback_failed = True
+            restored = self._device_io_fields(owner)
+            if (restored["routingType"], restored["routingChannel"]) != (current["routingType"], current["routingChannel"]): rollback_failed = True
             if rollback_failed: raise ValueError("device IO routing change failed and exact rollback failed") from error
             raise
         revision = self.refs.touch(reference)
