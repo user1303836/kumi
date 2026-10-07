@@ -297,16 +297,20 @@ impl BatchTransactionManager {
                 }
             })
             .collect();
+        // The step whose invocation this call recorded (a replayed one's was recorded by an earlier call).
+        let mut fresh = None;
         let result = async {
             for (index, item) in applied.iter_mut().enumerate() {
                 if record.step(false, index)["completed"] == true {
                     continue;
                 }
+                fresh = None;
                 self.policy(&record)?;
                 let replayed = record.step(false, index).get("invocation").is_some();
                 if !replayed {
                     let snapshot = self.record_view(context, &record, &[]).await?;
                     record.set_step(false, index, "invocation", self.step_args(&snapshot, &record, index)?);
+                    fresh = Some(index);
                 }
                 self.policy(&record)?;
                 let result = self.checkpoint(&record, false, index, context).await?;
@@ -324,7 +328,7 @@ impl BatchTransactionManager {
         if let Err(cause) = result {
             if not_dispatched(&cause) {
                 let mut steps = record.get("steps");
-                forget_undispatched(&mut steps);
+                forget_undispatched(&mut steps, fresh);
                 record.put("steps", steps);
             }
             let message = cause.message();

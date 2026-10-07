@@ -208,6 +208,8 @@ struct LikeLive {
     sim: Rc<DeterministicLiveSimulator>,
     /// An operation the Remote Script refuses once, before anything changes ("; nothing changed").
     refuse: RefCell<Option<&'static str>>,
+    /// A ref whose next change reaches Live but whose reply is lost (the request times out after dispatch).
+    lose_reply: RefCell<Option<&'static str>>,
     /// Reads check their deadline, as the remote adapter does; the read with this number (from 1) first stalls past it.
     deadlines: Cell<bool>,
     stall_at: Cell<usize>,
@@ -215,7 +217,14 @@ struct LikeLive {
 }
 impl LikeLive {
     fn new(sim: Rc<DeterministicLiveSimulator>) -> Self {
-        let live = LikeLive { sim, refuse: RefCell::new(None), deadlines: Cell::new(false), stall_at: Cell::new(0), reads: Cell::new(0) };
+        let live = LikeLive {
+            sim,
+            refuse: RefCell::new(None),
+            lose_reply: RefCell::new(None),
+            deadlines: Cell::new(false),
+            stall_at: Cell::new(0),
+            reads: Cell::new(0),
+        };
         live.settle();
         live
     }
@@ -320,6 +329,11 @@ impl AsyncLiveAdapter for LikeLive {
             )));
         }
         let mut result = self.sim.invoke(i)?;
+        if self.lose_reply.borrow().is_some_and(|reference| i.args.get("ref").and_then(Value::as_str) == Some(reference)) {
+            self.lose_reply.replace(None);
+            self.settle();
+            return Err(LiveError::error("remote adapter request state uncertain after dispatch timeout"));
+        }
         let made = self.sim.state.borrow()["tracks"].as_array().unwrap().iter().position(|track| track["ref"] == result["ref"]);
         self.settle();
         // A made track's ref and fingerprint as the Remote Script reports them: by its place.
@@ -415,6 +429,36 @@ async fn a_step_refused_before_it_changed_anything_rolls_back_the_steps_before_i
         "{result}"
     );
     assert_eq!(volume(), before);
+}
+#[tokio::test]
+async fn a_replayed_step_refused_on_reconcile_stays_uncertain_for_its_first_dispatch_may_have_changed_live() {
+    let (sim, live) = like_live();
+    let volumes =
+        || sim.state.borrow()["tracks"].as_array().unwrap().iter().map(|track| track["mixer"]["volume"].clone()).collect::<Vec<_>>();
+    let manager = BatchTransactionManager::new(live.clone(), None, None);
+    let preview = manager
+        .preview_async(&json!({"operations":[
+            {"kind":"mixer.set","trackRef":"track:at-0","volume":0.5},
+            {"kind":"mixer.set","trackRef":"track:at-1","volume":0.25},
+            {"kind":"mixer.set","trackRef":"track:at-2","volume":0.75}
+        ]}))
+        .await
+        .unwrap();
+    let id = preview["transactionId"].as_str().unwrap();
+    // The third change reaches Live, and its reply is lost.
+    live.lose_reply.replace(Some("track:at-2"));
+    let lost = manager.apply_async(id, &json!("apply"), "batch-apply-key", None).await.unwrap_err();
+    assert!(lost.message().contains("uncertain"), "{lost}");
+    let applied = volumes();
+    assert_eq!(applied, [json!(0.5), json!(0.25), json!(0.75)]);
+    // Reconciling replays it, and the replay is refused, having run nothing. That says nothing of the first
+    // dispatch, which did change Live: the batch stays uncertain, and nothing is taken back as if it hadn't.
+    live.refuse.replace(Some("mixer.set"));
+    let refused = manager.apply_async(id, &json!("apply"), "batch-apply-key", None).await.unwrap_err();
+    assert!(refused.message().contains("nothing changed"), "{refused}");
+    assert_eq!(volumes(), applied, "no step compensated");
+    let again = manager.apply_async(id, &json!("apply"), "other-apply-key", None).await.unwrap_err();
+    assert_eq!(again.message(), "transaction batch state is uncertain; reconcile with the exact original idempotency key");
 }
 #[tokio::test]
 async fn a_rollback_after_the_apply_ran_out_of_time_has_time_of_its_own() {

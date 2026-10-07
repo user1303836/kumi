@@ -91,14 +91,15 @@ pub fn parameter_holds(parameter: &Value, wanted: &Value) -> bool {
 pub(crate) fn not_dispatched(cause: &LiveError) -> bool {
     matches!(cause, LiveError::MutationNotDispatched(_)) || crate::host::helpers::nothing_changed(cause)
 }
-/// Forget the invocation of every step a not-dispatched refusal stopped before Live acknowledged it, so the failure
-/// is classed by what reached Live: a clean refusal compensates the steps before it.
-pub(crate) fn forget_undispatched(steps: &mut Value) {
-    for step in steps.as_array_mut().into_iter().flatten() {
-        if step["completed"] != true && step["acknowledged"] != true {
-            if let Some(step) = step.as_object_mut() {
-                step.shift_remove("invocation");
-            }
+/// Forget the invocation a not-dispatched refusal stopped, so the failure is classed by what reached Live and a clean
+/// refusal compensates the steps before it: only one this call recorded (`fresh`), and only before Live acknowledged
+/// it. A replayed invocation's refusal proves only that the replay didn't run: the first dispatch, whose reply was
+/// lost, may have changed Live, so that step stays in flight for reconciling.
+pub(crate) fn forget_undispatched(steps: &mut Value, fresh: Option<usize>) {
+    let Some(step) = fresh.and_then(|index| steps.get_mut(index)) else { return };
+    if step["completed"] != true && step["acknowledged"] != true {
+        if let Some(step) = step.as_object_mut() {
+            step.shift_remove("invocation");
         }
     }
 }

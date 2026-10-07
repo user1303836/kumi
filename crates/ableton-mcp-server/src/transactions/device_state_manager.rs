@@ -248,7 +248,9 @@ impl DeviceStateTransactionManager {
                 }
             })
             .collect::<Vec<_>>();
-        let operation=async{for(index,result)in results.iter_mut().enumerate(){let step=record.step(false,index);if step["completed"]==true{continue;}let replayed=step.get("invocation").is_some();let refs=[step["deviceRef"].clone(),step["parameterRef"].clone()];if !replayed{let snapshot=self.view_for(context,&refs).await?;let target=parameter_target(&snapshot,string(&step["deviceRef"]),string(&step["parameterRef"]))?;let authority=parameter_authority(&snapshot,string(&step["parameterRef"]))?;if !same_parameter_value(&target.parameter["value"],&step["priorValue"])||parameter_revision(target.parameter)!=number(&step["priorRevision"])||json!(fingerprint(&authority)?)!=step["authorityDigest"]{return Err(fail(format!("device state step {index} ({}) parameter identity, value, or revision changed since preview",string(&step["path"]))));}record.set_step(false,index,"invocation",json!(LiveInvocation::new("device.parameter.set",self.step_args(&snapshot,&step,&step["proposedValue"],number(&step["priorRevision"]))?)));}
+        // The step whose invocation this call recorded (a replayed one's was recorded by an earlier call).
+        let mut fresh = None;
+        let operation=async{for(index,result)in results.iter_mut().enumerate(){let step=record.step(false,index);if step["completed"]==true{continue;}fresh=None;let replayed=step.get("invocation").is_some();let refs=[step["deviceRef"].clone(),step["parameterRef"].clone()];if !replayed{let snapshot=self.view_for(context,&refs).await?;let target=parameter_target(&snapshot,string(&step["deviceRef"]),string(&step["parameterRef"]))?;let authority=parameter_authority(&snapshot,string(&step["parameterRef"]))?;if !same_parameter_value(&target.parameter["value"],&step["priorValue"])||parameter_revision(target.parameter)!=number(&step["priorRevision"])||json!(fingerprint(&authority)?)!=step["authorityDigest"]{return Err(fail(format!("device state step {index} ({}) parameter identity, value, or revision changed since preview",string(&step["path"]))));}record.set_step(false,index,"invocation",json!(LiveInvocation::new("device.parameter.set",self.step_args(&snapshot,&step,&step["proposedValue"],number(&step["priorRevision"]))?)));fresh=Some(index);}
  self.checkpoint(&record,false,index,context).await?;let snapshot=self.view_for(context,&refs).await?;let verified=parameter_target(&snapshot,string(&step["deviceRef"]),string(&step["parameterRef"]))?;if !parameter_holds(verified.parameter,&step["proposedValue"])||parameter_revision(verified.parameter)<=number(&step["priorRevision"])||json!(fingerprint(&parameter_authority(&snapshot,string(&step["parameterRef"]))?)?)!=step["authorityDigest"]{return Err(fail(format!("device state step {index} ({}) identity or postcondition was not confirmed",string(&step["path"]))));}
  // The whole number Live kept is the change made: undo checks for it.
  if !same_parameter_value(&verified.parameter["value"],&step["proposedValue"]){record.set_step(false,index,"proposedValue",verified.parameter["value"].clone());}
@@ -256,7 +258,7 @@ impl DeviceStateTransactionManager {
         if let Err(cause) = operation {
             if not_dispatched(&cause) {
                 let mut steps = record.get("steps");
-                forget_undispatched(&mut steps);
+                forget_undispatched(&mut steps, fresh);
                 record.put("steps", steps);
             }
             let message = cause.message();
