@@ -26,6 +26,7 @@ pub mod views;
 pub mod watch;
 pub use inference::create_inference_only_integration;
 pub mod live_command;
+pub mod modulation;
 pub mod more_changes;
 pub mod mutations;
 pub mod notes;

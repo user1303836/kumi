@@ -754,6 +754,29 @@ pub(super) fn more(
             let known = owner(input.get("deviceRef"), track);
             with_track(format!("Duplicated {}{}", label(device.get("name")).unwrap_or_else(|| "a device".into()), on(&known)), known)
         }
+        // What Live's map_modulation left in the slot (`applied`, the script's answer), and what it held before.
+        "map_modulator" => {
+            let done = applied.unwrap_or(&empty);
+            let known = owner(input.get("deviceRef"), track);
+            let modulator = label(done.get("modulator")).unwrap_or_else(|| "The modulator".into());
+            let slot =
+                finite(input.get("slot")).filter(|slot| *slot > 0.0).map(|slot| format!("'s slot {}", number::to_string(slot + 1.0)));
+            let target = |row: Option<&Value>| {
+                let row = record(row);
+                let name = label(row.get("name"))?;
+                Some(label(row.get("device")).map(|device| format!("{device}'s {name}")).unwrap_or(name))
+            };
+            let (now, before) = (target(done.get("now")), target(done.get("prior")));
+            let title = match (now, before) {
+                (Some(now), Some(before)) if now != before => {
+                    format!("Mapped {modulator}{} to {now}, in place of {before}", slot.unwrap_or_default())
+                }
+                (Some(now), _) => format!("Mapped {modulator}{} to {now}", slot.unwrap_or_default()),
+                (None, Some(before)) => format!("Unmapped {modulator}{} from {before}", slot.unwrap_or_default()),
+                (None, None) => format!("Left {modulator}{} unmapped", slot.unwrap_or_default()),
+            };
+            with_track(title, known)
+        }
         _ => return None,
     };
     Some(summary)

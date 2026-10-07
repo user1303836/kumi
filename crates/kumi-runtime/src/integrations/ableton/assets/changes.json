@@ -215,7 +215,7 @@
       "preview": "live_browser_load_preview",
       "apply": "live_browser_load_apply",
       "family": "device",
-      "description": "Load an instrument, effect, Max for Live device or preset from Live's Browser onto a track (after its devices) or, with chainRef instead, into a rack's chain (after the chain's devices; a chain can hold a rack too). itemId is the Browser path, such as \"instruments/Drum Rack\", \"instruments/Operator\" or \"audio_effects/Reverb\"; live_browser_search finds others. A track or a chain takes one instrument: to layer instruments, load an Instrument Rack, add a chain for each with edit_rack, and load one into each. trackRef and chainRef come from discovery in this turn or an earlier step.",
+      "description": "Load an instrument, effect, Max for Live device or preset from Live's Browser onto a track (after its devices) or, with chainRef instead, into a rack's chain (after the chain's devices; a chain can hold a rack too). itemId is the Browser path, such as \"instruments/Drum Rack\", \"instruments/Operator\", \"audio_effects/Reverb\" or a modulator, \"modulators/LFO\" (and Shaper, Envelope Follower, Expression Control); live_browser_search finds others. A track or a chain takes one instrument: to layer instruments, load an Instrument Rack, add a chain for each with edit_rack, and load one into each. trackRef and chainRef come from discovery in this turn or an earlier step.",
       "methods": [
         "produces",
         "summarize"
@@ -1128,6 +1128,60 @@
         "schema",
         "summarize"
       ]
+    },
+    {
+      "tool": "map_modulator",
+      "preview": "live_run_python",
+      "apply": "live_run_python",
+      "family": "device",
+      "since": "1.0.68",
+      "description": "Map one of a modulator's slots to a parameter, as its Map button does (Live 12.4 or later). deviceRef is an LFO, Shaper or Envelope Follower (8 slots) or an Expression Control (5, one per source): load_device them from modulators/LFO, modulators/Shaper, modulators/Envelope Follower and modulators/Expression Control, so a plan loads and maps them in one go. slot counts from 0 (0 when left out). The parameter is parameterRef, or targetRef (its device, an @name too) with parameter, its name as the device shows it (\"Filter Freq\"). clear: true empties the slot. Kumi's undo empties a slot it filled.",
+      "methods": [
+        "summarize"
+      ],
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deviceRef"
+        ],
+        "properties": {
+          "deviceRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "The modulator: its reference from discovery, or the @name a step gave it"
+          },
+          "slot": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 7,
+            "description": "Which of its slots, from 0"
+          },
+          "targetRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "The device whose parameter it moves"
+          },
+          "parameter": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "That parameter's name, as the device shows it"
+          },
+          "parameterRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Or the parameter itself, from discovery"
+          },
+          "clear": {
+            "type": "boolean",
+            "description": "true empties the slot"
+          }
+        }
+      }
     }
   ],
   "sampleInput": {

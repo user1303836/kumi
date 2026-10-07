@@ -151,6 +151,9 @@ impl Mutations {
                 Ok(expanded) => expanded,
                 Err(text) => return Ok(ChangeOutcome::error(text)),
             };
+        if kind.tool == super::modulation::MAP_MODULATOR {
+            return self.map_modulator(kind, &input, signal).await;
+        }
         if kind.family == ChangeFamily::Parameter && self.parameters.fast_on() {
             return Ok(self.parameters.fast_parameters(kind, &input, signal).await?);
         }

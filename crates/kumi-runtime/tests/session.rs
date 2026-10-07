@@ -960,7 +960,7 @@ local_test!(willington_instructions_follow_the_switch_each_time_the_kernel_is_ma
     h.session.reconfigure().await.unwrap();
     h.session.refresh().await.unwrap();
     let instructions = h.record.created.borrow().last().unwrap().instructions.clone();
-    assert!(instructions.contains("map_modulation(slot, parameter)") && !instructions.contains("can't be mapped"), "{instructions}");
+    assert!(instructions.contains("map with map_modulator") && !instructions.contains("can't be mapped"), "{instructions}");
     h.session.close().await.unwrap();
 });
 

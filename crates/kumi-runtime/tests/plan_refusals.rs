@@ -24,6 +24,8 @@ use std::{
 /// answers deletes and adds as Live would.
 struct Bridge {
     refuse: Vec<&'static str>,
+    /// What Live's Python answers, in turn.
+    python: RefCell<Vec<Value>>,
     calls: RefCell<Vec<(String, JsonObject)>>,
     /// Each preview's arguments, by its transaction.
     previews: RefCell<Vec<JsonObject>>,
@@ -55,6 +57,9 @@ impl McpEndpoint for Bridge {
             "live_track_delete_apply",
             "live_session_structure_preview",
             "live_session_structure_apply",
+            "live_browser_load_preview",
+            "live_browser_load_apply",
+            "live_run_python",
         ];
         Ok(serde_json::from_value(
             json!({"tools":names.iter().map(|name|json!({"name":name,"inputSchema":{"type":"object"}})).collect::<Vec<_>>()}),
@@ -71,6 +76,9 @@ impl McpEndpoint for Bridge {
         }
         if name == "live_undo_step_end" {
             return Ok(reply(json!({})));
+        }
+        if name == "live_run_python" {
+            return Ok(reply(self.python.borrow_mut().remove(0)));
         }
         if name.ends_with("_preview") {
             let text = stringify(&Value::Object(args.clone()));
@@ -89,6 +97,10 @@ impl McpEndpoint for Bridge {
         let transaction: usize = args["transactionId"].as_str().unwrap()[2..].parse().unwrap();
         let previewed = self.previews.borrow()[transaction].clone();
         Ok(reply(match name {
+            "live_browser_load_apply" => {
+                let loaded = self.calls.borrow().iter().filter(|(name, _)| name == "live_browser_load_apply").count() - 1;
+                json!({"state":"applied","deviceRef":format!("7:device:1:{loaded}"),"placement":{"owner":"track","index":loaded}})
+            }
             "live_track_delete_apply" => {
                 json!({"state":"applied","deleted":previewed["trackRef"],"kept":"Kumi can't bring this back; Live's undo can."})
             }
@@ -125,7 +137,13 @@ impl Bridge {
 }
 /// Kumi with eight tracks (and Main after them) as this turn's look showed them, by their short names.
 async fn kumi(refuse: Vec<&'static str>) -> (Rc<Ableton>, Rc<Bridge>, Vec<String>) {
-    let bridge = Rc::new(Bridge { refuse, calls: RefCell::new(vec![]), previews: RefCell::new(vec![]), next: Cell::new(0) });
+    let bridge = Rc::new(Bridge {
+        refuse,
+        python: RefCell::new(vec![]),
+        calls: RefCell::new(vec![]),
+        previews: RefCell::new(vec![]),
+        next: Cell::new(0),
+    });
     let endpoint = bridge.clone();
     let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
     options.connect = Some(Rc::new(move |_| {
@@ -243,6 +261,40 @@ async fn a_refused_track_add_holds_back_what_uses_it_and_the_restructures_after_
             let done: Vec<_> = reply["done"].as_array().unwrap().iter().map(|row| row["step"].as_u64().unwrap()).collect();
             assert_eq!(done, [4]);
             assert!(bridge.previewed("live_track_delete_preview").is_empty() && bridge.previewed("live_mixer_preview").is_empty());
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_plan_loads_a_modulator_and_maps_it_in_one_go_and_kumis_undo_empties_the_slot() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (integration, bridge, names) = kumi(vec![]).await;
+            // Live's LFO is a Max device: just loaded, it can't map until Max is ready, then it maps (#264).
+            *bridge.python.borrow_mut() = vec![
+                json!({"ok":false,"result":null,"stdout":"","error":{"type":"RuntimeError","message":"Max bridge is not initialized"}}),
+                json!({"ok":true,"stdout":"","error":null,"result":{"modulator":"LFO","slot":0,"prior":null,"now":{"name":"Filter Freq","device":"Operator","identity":4242},"track":null}}),
+                json!({"ok":true,"stdout":"","error":null,"result":{"back":1,"moved":[],"gone":[]}}),
+            ];
+            let (result, reply) = plan(
+                &integration,
+                json!([
+                    {"tool":"load_device","as":"synth","input":{"trackRef":names[1],"itemId":"instruments/Operator"}},
+                    {"tool":"load_device","as":"lfo","input":{"trackRef":names[1],"itemId":"modulators/LFO"}},
+                    {"tool":"map_modulator","input":{"deviceRef":"@lfo","targetRef":"@synth","parameter":"Filter Freq"}}
+                ]),
+            )
+            .await;
+            assert!(!result.is_error, "{}", result.text);
+            assert_eq!(reply["done"][2]["changed"], "Mapped LFO to Operator's Filter Freq");
+            let python: Vec<String> = bridge.previewed("live_run_python").iter().map(|args| args["code"].as_str().unwrap().to_owned()).collect();
+            assert_eq!(python.len(), 2, "tried again once Max was ready");
+            assert!(python[1].starts_with("# kumi:map-modulator") && python[1].contains(r#"\"device\":\"7:device:1:1\""#) && python[1].contains(r#"\"target\":\"7:device:1:0\""#));
+            // Kumi's undo empties the slot it filled, only while it still holds that parameter.
+            let undone = integration.history.undo("last", Signal::new(), false).await.unwrap();
+            assert!(!undone.is_error, "{}", undone.text);
+            let code = bridge.previewed("live_run_python").last().unwrap()["code"].as_str().unwrap().to_owned();
+            assert!(code.starts_with("# kumi:fast-revert") && code.contains(r#"\"kind\":\"modulation\""#) && code.contains(r#"\"applied\":4242"#), "{code}");
         })
         .await;
 }

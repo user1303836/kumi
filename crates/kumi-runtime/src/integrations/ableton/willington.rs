@@ -1,19 +1,19 @@
 //! What the model is told about Willington: the native bindings Kumi's bridge can carry, off until the
 //! producer turns them on with /willington. With them on, the macro mapping the instructions otherwise
-//! rule out is a tool (assets/changes.json), and Live's modulators map through run_python, with the
-//! map_modulation that Willington's DeviceTools gives their devices.
+//! rule out is a tool (assets/changes.json). Live's modulators map with map_modulator, through the
+//! map_modulation their devices have in Live 12.4 (and that Willington's DeviceTools gives them).
 
 /// Offered while Kumi is connected to Live with changes it can make.
 const CHANGES_TOOL: &str = "make_changes";
 /// Willington's macro mapping, macro and variation names and chain zones.
 const MAPPING_TOOL: &str = "edit_rack_mapping";
-/// Python in Live, where a modulator's device has Willington's map_modulation.
+/// Python in Live, which map_modulator runs through: a modulator's device has map_modulation there.
 const PYTHON_TOOL: &str = "run_python";
 
 const OFF: &str = "Willington's bindings are off. Turned on, they let Kumi map a rack's parameters to its macros with their ranges, name macros and variations, and set rack chain zones (edit_rack_mapping), on the Live versions Willington supports; once Willington's Follow Action self-test has passed, they also set Session clips' Follow Actions (set_clip_follow_actions). When a request needs one of those, say in a sentence that /willington turns the bindings on (for Follow Actions, after the self-test), then carry on as Live allows without them.";
-const OFF_MODULATORS: &str = "Willington's bindings are off. Turned on, they let Kumi map a rack's parameters to its macros with their ranges, name macros and variations, set rack chain zones (edit_rack_mapping), and map Live's LFO, Shaper, Envelope Follower and Expression Control modulators to parameters (run_python), on the Live versions Willington supports; once Willington's Follow Action self-test has passed, they also set Session clips' Follow Actions (set_clip_follow_actions). When a request needs one of those, say in a sentence that /willington turns the bindings on (for Follow Actions, after the self-test), then carry on as Live allows without them.";
+const OFF_MODULATORS: &str = "Willington's bindings are off. Turned on, they let Kumi map a rack's parameters to its macros with their ranges, name macros and variations, set rack chain zones (edit_rack_mapping), and map Live's LFO, Shaper, Envelope Follower and Expression Control modulators to parameters (map_modulator) on the Live versions Willington supports that lack it; once Willington's Follow Action self-test has passed, they also set Session clips' Follow Actions (set_clip_follow_actions). When a request needs one of those, say in a sentence that /willington turns the bindings on (for Follow Actions, after the self-test), then carry on as Live allows without them.";
 const ON: &str = "Willington's bindings are on, so the macro mapping Live otherwise doesn't allow is here: edit_rack_mapping maps a parameter in a rack to one of its macros with the mapping's range, and names macros and variations. Map macros with it, playback stopped, rather than asking the producer to; modulators still can't be mapped.";
-const ON_MODULATORS: &str = "Willington's bindings are on, so the mappings Live otherwise doesn't allow are here, whatever the Racks instructions say. edit_rack_mapping maps a parameter in a rack to one of its macros with the mapping's range, and names macros and variations: map macros with it, playback stopped, rather than asking the producer to. Modulators map with run_python: the device of Live's LFO, Shaper or Envelope Follower (slots 0-7, a target each) or Expression Control (slots 0-4, one per source) has map_modulation(slot, parameter) to map a slot to a parameter, get_modulation_target(slot) to read one, and map_modulation(slot, None) to clear one, which is how to take a mapping back (HISTORY has no entry for it, and Live's undo may not take it back). Pass a modulator's ref as ref (obj in the script) and reach the devices around it from obj.canonical_parent, so one run maps several. When what you build has mapped modulators, such as a tutorial's LFOs on a rack's parameters, map them right after the make_changes that loads them, not with automation or by asking the producer. A modulator loaded moments ago may not be ready yet: run again.";
+const ON_MODULATORS: &str = "Willington's bindings are on, so the mappings Live otherwise doesn't allow are here, whatever the Racks instructions say. edit_rack_mapping maps a parameter in a rack to one of its macros with the mapping's range, and names macros and variations: map macros with it, playback stopped, rather than asking the producer to. Modulators (LFO, Shaper, Envelope Follower, Expression Control) map with map_modulator: when what you build has mapped modulators, such as a tutorial's LFOs on a rack's parameters, load and map them in the same plan, not with automation or by asking the producer.";
 const UNSUPPORTED: &str = "Willington's bindings are on, but none fit the Live that's open: they're made for exact Live versions. Its mappings aren't here, so go on as Live allows without them.";
 
 /// Willington's bindings, as their switch stands.
@@ -72,9 +72,9 @@ mod tests {
         // Modulators map through run_python: where it's offered, the model is told how, and that the Racks
         // rule against mapping doesn't hold; without it, that they can't be mapped, and /willington doesn't
         // promise them.
-        assert!(OFF_MODULATORS.contains("modulators to parameters (run_python)") && !OFF.contains("modulator"));
+        assert!(OFF_MODULATORS.contains("modulators to parameters (map_modulator)") && !OFF.contains("modulator"));
         assert!(OFF_MODULATORS.contains("set_clip_follow_actions") && OFF_MODULATORS.contains("/willington"));
-        assert!(ON_MODULATORS.contains("map_modulation(slot, parameter)") && ON_MODULATORS.contains("map_modulation(slot, None)"));
+        assert!(ON_MODULATORS.contains("map with map_modulator") && ON_MODULATORS.contains("in the same plan"));
         assert!(ON_MODULATORS.contains("whatever the Racks instructions say") && !ON_MODULATORS.contains("can't be mapped"));
         assert!(ON.contains("modulators still can't be mapped") && !ON.contains("run_python"));
     }
