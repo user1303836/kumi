@@ -128,7 +128,9 @@ fn ollama_address(host: Option<&String>) -> String {
     if !value.is_empty() {
         static SCHEME: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)^[a-z][a-z0-9+.-]*://").unwrap());
         static PORT: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^[^/]*:\d+(/|$)").unwrap());
-        if let Ok(mut url) = Url::parse(&if SCHEME.is_match(value) { value.into() } else { format!("http://{value}") }) {
+        // Kumi reaches Ollama over http or https only: another scheme (tcp://, unix://) has no origin to name.
+        let parsed = Url::parse(&if SCHEME.is_match(value) { value.into() } else { format!("http://{value}") });
+        if let Some(mut url) = parsed.ok().filter(|url| matches!(url.scheme(), "http" | "https")) {
             if url.host_str() == Some("0.0.0.0") {
                 let _ = url.set_host(Some("127.0.0.1"));
             }

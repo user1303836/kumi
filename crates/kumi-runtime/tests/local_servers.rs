@@ -239,6 +239,9 @@ fn discovery_addresses_and_ids() {
         (Some("https://ollama.example.test"), "https://ollama.example.test"),
         (Some("http://localhost:80"), "http://localhost"),
         (Some("[::]"), "http://[::1]:11434"),
+        // Schemes Kumi can't talk to Ollama over leave it at its default address (their origin was "null").
+        (Some("tcp://studio.local:11434"), "http://127.0.0.1:11434"),
+        (Some("unix:///var/run/ollama.sock"), "http://127.0.0.1:11434"),
     ] {
         assert_eq!(address(host), want);
     }
