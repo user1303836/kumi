@@ -1165,10 +1165,28 @@ fn raw_harmonics(value: &Value) -> Result<Option<Vec<f64>>, CommandError> {
                 return Err(CommandError::Other("Invalid array length".into()));
             }
             let length = if length.is_nan() || length <= 0.0 { 0 } else { length.floor() as usize };
+            // A frame holds FRAME / 2 - 1 harmonics and only those are synthesized: read no more of a spectrum, so a
+            // length in the billions can't ask for gigabytes.
+            let length = length.min(wavetable::FRAME / 2 - 1);
             let values =
                 (0..length).map(|i| value.get(&i.to_string()).filter(|v| !v.is_null()).map(js_number).unwrap_or(0.0)).collect::<Vec<_>>();
             Some(if values.is_empty() { vec![0.0] } else { values })
         }
         _ => None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_spectrum_longer_than_a_frame_holds_reads_what_it_holds() {
+        // Only the first FRAME / 2 - 1 harmonics are synthesized; a length up to u32's range reads just those.
+        let keyframe = raw_keyframe(&json!({"harmonics":{"length":u32::MAX,"0":1,"1022":0.5,"1023":0.25}})).unwrap();
+        let harmonics = keyframe.harmonics.unwrap();
+        assert_eq!((harmonics.len(), harmonics[0], harmonics[1], harmonics[1022]), (1023, 1.0, 0.0, 0.5));
+        assert_eq!(raw_harmonics(&json!({"length":3,"1":2})).unwrap(), Some(vec![0.0, 2.0, 0.0]), "a short one as it is");
+        assert!(matches!(raw_harmonics(&json!({"length":4294967296.0})), Err(CommandError::Other(_))), "past u32's range, refused");
+    }
 }
