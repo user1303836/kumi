@@ -1504,6 +1504,35 @@ class ControlSurfaceTests(unittest.TestCase):
         song = FakeSong(); track = song.tracks[0]; track.devices = []; track.delete_device = lambda index: track.devices.pop(index); song.view = type("View", (), {"selected_track": track})(); mapper = LiveObjectMapper(song, provenance="real-live"); browser = Browser(song); mapper._browser = lambda: browser; item = mapper.invoke("browser.search", {"category": "instruments", "limit": 10})["items"][0]; row = mapper.snapshot()["tracks"][0]; transaction = "browser-owned-transaction"; loaded = mapper.invoke("browser.load", {"itemId": item["id"], "trackRef": row["ref"], "expectedName": item["name"], "expectedItemIdentity": item["objectIdentity"], "expectedTrackIdentity": row["objectIdentity"], "expectedSiblings": [{"ref": device["ref"], "objectIdentity": device["objectIdentity"]} for device in row["devices"]]}, transaction)
         self.assertIn("ownershipToken", loaded); snapshot = mapper.snapshot(); track_row = snapshot["tracks"][0]; device = next(item for item in track_row["devices"] if item["ref"] == loaded["deviceRef"]); siblings = [{"ref": item["ref"], "objectIdentity": item["objectIdentity"]} for item in track_row["devices"]]; deleted = mapper.invoke("device.delete", {"ref": device["ref"], "expectedObjectIdentity": device["objectIdentity"], "expectedOwnerRef": track_row["ref"], "expectedOwnerIdentity": track_row["objectIdentity"], "expectedSiblings": siblings, "expectedTrackRef": track_row["ref"], "expectedTrackIdentity": track_row["objectIdentity"]}, transaction, loaded["ownershipToken"]); self.assertEqual(deleted, {"deleted": device["ref"]}); self.assertEqual(len(track.devices), 0)
 
+    def test_an_instrument_from_any_category_never_replaces_the_tracks(self):
+        class Item:
+            def __init__(self, name, children=None): self.name = name; self.children = children or []; self.is_loadable = not bool(children); self.is_device = not bool(children)
+        class Browser:
+            def __init__(self, song):
+                self.song = song
+                self.max_for_live = Item("max_for_live", [Item("Max Instrument", [Item("Granulator")]), Item("Max Audio Effect", [Item("Convolution Reverb")])])
+                self.plugins = Item("plugins", [Item("VST3", [Item("Serum 2")])])
+                self.user_library = Item("user_library", [Item("Presets", [Item("Audio Effects", [Item("Room.adv")]), Item("Instruments", [Item("Pad.adg")])])])
+            def load_item(self, item):
+                # Like Live: an instrument takes the track's instrument's place; anything else goes at the end.
+                device = FakeDevice(); device.name = item.name; device.type = 2 if item.name in {"Convolution Reverb", "Room.adv"} else 1
+                devices = self.song.view.selected_track.devices; existing = next((index for index, prior in enumerate(devices) if prior.type == 1), None)
+                if device.type == 1 and existing is not None: devices[existing] = device
+                else: devices.append(device)
+        song = FakeSong(); track = song.tracks[0]; synth = FakeDevice(); synth.name = "Drift"; synth.type = 1; track.devices = [synth]
+        track.delete_device = lambda index: track.devices.pop(index); song.view = type("View", (), {"selected_track": track})()
+        mapper = LiveObjectMapper(song, provenance="real-live"); browser = Browser(song); mapper._browser = lambda: browser
+        def load(category, name):
+            item = next(row for row in mapper.invoke("browser.search", {"category": category, "limit": 20})["items"] if row["name"] == name); row = mapper.snapshot()["tracks"][0]
+            return mapper.invoke("browser.load", {"itemId": item["id"], "trackRef": row["ref"], "expectedName": item["name"], "expectedItemIdentity": item["objectIdentity"], "expectedTrackIdentity": row["objectIdentity"], "expectedSiblings": [{"ref": device["ref"], "objectIdentity": device["objectIdentity"]} for device in row["devices"]]}, "instrument-guard-transaction")
+        with self.assertRaisesRegex(ValueError, "already has an instrument, which Live would replace"): load("max_for_live", "Granulator")
+        with self.assertRaisesRegex(ValueError, "already has an instrument, which Live would replace"): load("user_library", "Pad.adg")
+        with self.assertRaisesRegex(ValueError, "can't tell whether this item is one too"): load("plugins", "Serum 2")
+        self.assertEqual([device.name for device in track.devices], ["Drift"], "the producer's instrument is still there")
+        # Effects still load after it, wherever they come from.
+        load("max_for_live", "Convolution Reverb"); load("user_library", "Room.adv")
+        self.assertEqual([device.name for device in track.devices], ["Drift", "Convolution Reverb", "Room.adv"])
+
     def test_a_device_that_settles_after_loading_records_its_settled_state_and_undoes(self):
         class Item:
             def __init__(self, name, children=None): self.name = name; self.children = children or []; self.is_loadable = not bool(children); self.is_device = not bool(children)

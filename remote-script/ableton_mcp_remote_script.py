@@ -11163,8 +11163,10 @@ class LiveObjectMapper:
         if len(track_matches) != 1:
             raise ValueError("browser loading is limited to one exact Set track")
         track_index, track = track_matches[0]
-        # Main and the returns take audio effects only, as in Live itself.
-        if track_index >= len(regular_tracks) and (metadata["category"] in {"instruments", "drums", "sounds", "midi_effects"} or str(metadata.get("deviceType") or "") in {"instrument", "midi_effect"}):
+        # What the item loads as, by the item rather than its Browser category: a Max for Live instrument or a
+        # preset is one too. Main and the returns take audio effects only, as in Live itself.
+        device_type = self._browser_item_type(metadata)
+        if track_index >= len(regular_tracks) and device_type in (1, 4):
             raise ValueError("Main and return tracks take audio effects only")
         if track_ref != f"{self.refs.epoch}:track:{track_index}": raise ValueError("browser target track reference is stale")
         authority = self._top_level_device_authority(track, track_ref)
@@ -11175,8 +11177,11 @@ class LiveObjectMapper:
         if view is None or not hasattr(view, "selected_track"):
             raise ValueError("track-targeted browser loading is unavailable")
         previous_selection = getattr(view, "selected_track", None); previous_identity = self._capture_object_identity(previous_selection) if previous_selection is not None else None; before_devices = self._items(getattr(track, "devices", []))
-        # Live replaces a track's instrument with a new one, which cleanup couldn't bring back.
-        if metadata["category"] in {"instruments", "drums", "sounds"} and any(self._read_attr(device, "type") == 1 for device in before_devices): raise ValueError("this track already has an instrument, which Live would replace: delete it first (then load this), or load onto a new track or into an Instrument Rack")
+        # Live replaces a track's instrument with a new one, which cleanup couldn't bring back: nor does an item
+        # that may be an instrument (Kumi can't tell what a plug-in is) load onto a track that has one.
+        if device_type in (1, None) and any(self._read_attr(device, "type") == 1 for device in before_devices):
+            if device_type is None: raise ValueError("this track already has an instrument, and Kumi can't tell whether this item is one too, which Live would replace it with: load it onto a new track, or delete the instrument first")
+            raise ValueError("this track already has an instrument, which Live would replace: delete it first (then load this), or load onto a new track or into an Instrument Rack")
         # The new device goes after the last one, not wherever the producer last clicked.
         track_view = self._read_attr(track, "view"); previous_device = self._read_attr(track_view, "selected_device") if track_view is not None else None
         before_identities = [self._capture_object_identity(prior) for prior in before_devices]
@@ -11250,6 +11255,21 @@ class LiveObjectMapper:
             if re.search(r"instrument", words, re.I): return ("Simpler", 1)
             if re.search(r"\bmidi\b|expression control", words, re.I): return ("Velocity", 4)
             return ("Utility", 2)
+        return None
+
+    # The folders Live keeps presets in, by the kind of device they hold (User Library/Presets/Audio Effects/…).
+    _PRESET_FOLDER_TYPES = ((re.compile(r"audio effects?", re.I), 2), (re.compile(r"midi effects?", re.I), 4), (re.compile(r"instruments?|drums?|sounds", re.I), 1))
+
+    @classmethod
+    def _browser_item_type(cls, metadata: dict[str, Any]) -> int | None:
+        """Live's device type for what a Browser item loads (1 instrument, 2 audio effect, 4 MIDI effect): by its
+        kind, as a chain's placeholder is chosen, else by the first folder on its path that names one; None when
+        nothing says (a plug-in, a preset outside those folders)."""
+        spec = cls._chain_placeholder(metadata)
+        if spec is not None: return spec[1]
+        for folder in str(metadata.get("path") or "").split("/"):
+            for pattern, device_type in cls._PRESET_FOLDER_TYPES:
+                if pattern.fullmatch(folder.strip()): return device_type
         return None
 
     def _browser_load_into_chain(self, args: dict[str, Any], item: Any, metadata: dict[str, Any], loader: Any) -> dict[str, Any]:
