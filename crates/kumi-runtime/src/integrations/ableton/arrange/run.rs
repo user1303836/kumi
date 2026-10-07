@@ -192,7 +192,9 @@ pub async fn build(plan: &Plan, material: &Material, host: &dyn ArrangeHost, sig
     Ok(built)
 }
 fn clock(seconds: f64) -> String {
-    format!("{}:{:0>2}", to_string((seconds / 60.0).floor()), to_string(round(seconds % 60.0)))
+    // Whole seconds first: 59.6 s is 1:00, not 0:60.
+    let total = round(seconds);
+    format!("{}:{:0>2}", to_string((total / 60.0).floor()), to_string(total % 60.0))
 }
 pub async fn arrange(input: JsonObject, host: &dyn ArrangeHost, signal: Signal) -> Result<ToolResult, RuntimeError> {
     let request = match arrange_request(&input) {
@@ -308,4 +310,15 @@ pub async fn arrange(input: JsonObject, host: &dyn ArrangeHost, signal: Signal) 
     let mut result = ToolResult::text(stringify(&result));
     result.reply = Some(reply.join("\n"));
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_length_rounds_to_whole_seconds_before_it_reads_as_minutes() {
+        assert_eq!(super::clock(59.6), "1:00");
+        assert_eq!(super::clock(119.4), "1:59");
+        assert_eq!(super::clock(0.4), "0:00");
+        assert_eq!(super::clock(125.0), "2:05");
+    }
 }
