@@ -239,7 +239,9 @@ fn a_new_pool_sweeps_the_folders_left_by_a_kumi_thats_gone() {
     let folder = |pid: u32| temp.join(format!("kumi-measure-{pid}-{}", uuid::Uuid::new_v4()));
     // A crashed Kumi's (its process has ended), one of a process older than its folder (pid 1), and this one's.
     let (left, older, mine) = (folder(gone), folder(1), folder(std::process::id()));
-    for kept in [&left, &older, &mine] {
+    // Made in one step: another test's pool, starting meanwhile, may sweep it first, which is what's checked anyway.
+    std::fs::create_dir(&left).unwrap();
+    for kept in [&older, &mine] {
         put(&kept.join("kumi-audio-1/converted.wav"), "a copy");
     }
     let pool = MeasurePool::with_worker(1, "/nowhere".into(), Duration::from_secs(1));
