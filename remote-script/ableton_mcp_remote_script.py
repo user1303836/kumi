@@ -9087,6 +9087,24 @@ class LiveObjectMapper:
             names.append(name if name is not None else re.sub(r" at 0x[0-9A-Fa-f]+", "", str(item))[:128])
         return names
 
+    def _hybrid_reverb_row(self, device: Any) -> dict[str, Any]:
+        """Hybrid Reverb's IR and shaping, as its row shows them: what the host fences a change on."""
+        def number(value: Any) -> float | None:
+            return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) else None
+        def chosen(index: Any, names: list[str] | None) -> str | None:
+            if not isinstance(index, int) or isinstance(index, bool) or names is None or not 0 <= index < len(names): return None
+            return names[index]
+        categories = self._row_choice_names(self._read_attr(device, "ir_category_list")); files = self._row_choice_names(self._read_attr(device, "ir_file_list"))
+        return {
+            "irCategory": chosen(self._read_attr(device, "ir_category_index"), categories),
+            "irFile": chosen(self._read_attr(device, "ir_file_index"), files),
+            "irCategoryList": categories,
+            "irFileList": files,
+            "attack": number(self._read_attr(device, "ir_attack_time")),
+            "decay": number(self._read_attr(device, "ir_decay_time")),
+            "size": number(self._read_attr(device, "ir_size_factor")),
+        }
+
     def _specialized_rows(self, device: Any, device_ref: str) -> dict[str, Any]:
         class_name = str(self._read_attr(device, "class_name") or device.__class__.__name__).lower()
         normalized = class_name.replace("_", "").replace(" ", "")
@@ -9109,10 +9127,6 @@ class LiveObjectMapper:
                     name = self._choice_name(routing) if routing is not None else None
                 names.append(name if name is not None else str(index + 1))
             return names
-        def indexed_name(index: Any, choices: Any) -> str | None:
-            idx = int_or_none(index); names = name_list(choices)
-            if idx is None or names is None or not 0 <= idx < len(names): return None
-            return names[idx]
         if "drift" in class_name:
             # Live names each matrix slot's choices (mod_matrix_source_1_list...); slots of a kind share them.
             sources = name_list(self._read_attr(device, "mod_matrix_source_1_list", "mod_matrix_sources", "mod_sources"))
@@ -9140,15 +9154,7 @@ class LiveObjectMapper:
                 "selectedBand": int_or_none(self._read_attr(view, "selected_band")) if view is not None else None,
             }
         if "hybridreverb" in normalized or self._device_family(device) == "hybrid_reverb":
-            rows["hybridReverb"] = {
-                "irCategory": indexed_name(self._read_attr(device, "ir_category_index"), self._read_attr(device, "ir_category_list")),
-                "irFile": indexed_name(self._read_attr(device, "ir_file_index"), self._read_attr(device, "ir_file_list")),
-                "irCategoryList": name_list(self._read_attr(device, "ir_category_list")),
-                "irFileList": name_list(self._read_attr(device, "ir_file_list")),
-                "attack": float_or_none(self._read_attr(device, "ir_attack_time")),
-                "decay": float_or_none(self._read_attr(device, "ir_decay_time")),
-                "size": float_or_none(self._read_attr(device, "ir_size_factor")),
-            }
+            rows["hybridReverb"] = self._hybrid_reverb_row(device)
         if "meld" in class_name:
             rows["meld"] = {
                 "engine": int_or_none(self._read_attr(device, "selected_engine")),
@@ -9257,55 +9263,62 @@ class LiveObjectMapper:
             "selectedBand": ("view.selected_band", lambda value: isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 8),
         }, "eq8")
 
+    # What a Hybrid Reverb change is fenced on (the host fences on its row's same five), and each shaping
+    # setting's attribute and highest value.
+    _HYBRID_REVERB_STATE = ("irCategory", "irFile", "attack", "decay", "size")
+    _HYBRID_REVERB_SHAPING = {"attack": ("ir_attack_time", 10000), "decay": ("ir_decay_time", 100000), "size": ("ir_size_factor", 10000)}
+
+    def _hybrid_reverb_revision(self, device: Any) -> str:
+        row = self._hybrid_reverb_row(device)
+        return hashlib.sha256(self._bounded_canonical({field: row[field] for field in self._HYBRID_REVERB_STATE}).encode("utf-8")).hexdigest()
+
     def _hybrid_reverb_set(self, args: dict[str, Any]) -> dict[str, Any]:
-        reference = str(args.get("ref"))
+        reference = args.get("ref")
         if not isinstance(reference, str) or not reference.startswith(f"{self.refs.epoch}:device:") or "time" in args: raise ValueError("hybrid-reverb authority is invalid")
         device = self.refs.get(reference)
-        ir_proposals: list[tuple[str, int, int, str]] = []
-        if "irCategory" in args or "irFile" in args:
-            if not isinstance(args.get("expectedObjectIdentity"), str) or not hmac.compare_digest(self._capture_object_identity(device), args["expectedObjectIdentity"]): raise ValueError("device identity changed since preview")
-            for field, list_attr, index_attr, bound in (("irCategory", "ir_category_list", "ir_category_index", 128), ("irFile", "ir_file_list", "ir_file_index", 256)):
+        if not isinstance(args.get("expectedObjectIdentity"), str) or not hmac.compare_digest(self._capture_object_identity(device), args["expectedObjectIdentity"]): raise ValueError("device identity changed since preview")
+        # One state for the whole call, checked before anything is written, whether it changes the IR, its shaping or both.
+        before = self._hybrid_reverb_revision(device)
+        if not isinstance(args.get("expectedStateRevision"), str) or not hmac.compare_digest(before, args["expectedStateRevision"]): raise ValueError("hybrid-reverb state changed since preview")
+        for field, bound in (("irCategory", 128), ("irFile", 256)):
+            if field in args and (not isinstance(args[field], str) or not 1 <= len(args[field]) <= bound): raise ValueError(f"{field} is invalid")
+        shaping: list[tuple[str, Any]] = []
+        for field, (attribute, highest) in self._HYBRID_REVERB_SHAPING.items():
+            if field not in args: continue
+            value = args[field]
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)) or not 0 <= float(value) <= highest: raise ValueError(f"{field} is invalid")
+            if self._read_attr(device, attribute) is None: raise ValueError(f"{attribute} is unavailable on this device")
+            shaping.append((attribute, value))
+        if not shaping and "irCategory" not in args and "irFile" not in args: raise ValueError("hybrid-reverb mutation has no fields")
+        prior = {attribute: self._read_attr(device, attribute) for attribute in ("ir_category_index", "ir_file_index", *(attribute for attribute, _ in shaping))}
+        written: list[str] = []
+        try:
+            # The category first: a file is one of its category's, so the file list is read once the category is set.
+            for field, list_attr, index_attr in (("irCategory", "ir_category_list", "ir_category_index"), ("irFile", "ir_file_list", "ir_file_index")):
                 if field not in args: continue
-                value = args[field]
-                if not isinstance(value, str) or not 1 <= len(value) <= bound: raise ValueError(f"{field} is invalid")
                 # By the names the row shows: Live may list them as plain strings.
                 names = self._row_choice_names(self._read_attr(device, list_attr)) or []
                 if not names: raise ValueError(f"{field} choices are unavailable on this device")
-                if value not in names: raise ValueError(f"{field} is not an available choice")
-                ir_proposals.append((index_attr, names.index(value), self._read_attr(device, index_attr), field))
-        applied: list[tuple[str, int]] = []
-        try:
-            for index_attr, target_index, prior, field in ir_proposals:
-                setattr(device, index_attr, target_index)
-                applied.append((index_attr, prior))
+                if args[field] not in names: raise ValueError(f"{field} is not an available choice")
+                target = names.index(args[field])
+                written.append(index_attr); setattr(device, index_attr, target)
                 observed = self._read_attr(device, index_attr)
-                if not isinstance(observed, int) or isinstance(observed, bool) or observed != target_index: raise ValueError(f"{field} change was not confirmed")
+                if not isinstance(observed, int) or isinstance(observed, bool) or observed != target: raise ValueError(f"{field} change was not confirmed")
+            for attribute, value in shaping:
+                written.append(attribute); setattr(device, attribute, value)
+            for attribute, value in shaping:
+                observed = self._read_attr(device, attribute)
+                if not isinstance(observed, (int, float)) or isinstance(observed, bool) or not _same_number(observed, value): raise ValueError("hybrid-reverb change was not confirmed")
         except BaseException as error:
+            # The shaping back first, then the category before its file: setting a category can move the file.
+            order = [attribute for attribute in reversed(written) if attribute not in ("ir_category_index", "ir_file_index")]
+            order += ["ir_category_index", "ir_file_index"] if "ir_category_index" in written else ["ir_file_index"] if "ir_file_index" in written else []
             rollback_failed = False
-            for index_attr, prior in reversed(applied):
-                try: setattr(device, index_attr, prior)
+            for attribute in order:
+                try: setattr(device, attribute, prior[attribute])
                 except BaseException: rollback_failed = True
-            if rollback_failed: raise ValueError("IR selection change failed and exact rollback failed") from error
+            if rollback_failed or self._hybrid_reverb_revision(device) != before: raise ValueError("hybrid-reverb change failed and exact rollback failed") from error
             raise
-        if any(field in args for field in ("attack", "decay", "size")):
-            try:
-                return self._specialized_set(reference, args, {
-                    "attack": ("ir_attack_time", lambda value: isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) and 0 <= float(value) <= 10000),
-                    "decay": ("ir_decay_time", lambda value: isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) and 0 <= float(value) <= 100000),
-                    "size": ("ir_size_factor", lambda value: isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) and 0 <= float(value) <= 10000),
-                }, "hybrid-reverb")
-            except BaseException as error:
-                # The shaping phase fences independently, but a failure there
-                # must not strand the IR indices already applied above:
-                # restore the exact prior selection so one failed call leaves
-                # the device untouched, like every other specialized family.
-                rollback_failed = False
-                for index_attr, prior in reversed(applied):
-                    try: setattr(device, index_attr, prior)
-                    except BaseException: rollback_failed = True
-                if rollback_failed: raise ValueError("hybrid-reverb shaping change failed and exact IR rollback failed") from error
-                raise
-        if not ir_proposals: raise ValueError("hybrid-reverb mutation has no fields")
         revision = self.refs.touch(reference)
         return {"changed": True, "revision": revision}
 

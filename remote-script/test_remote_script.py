@@ -6116,14 +6116,12 @@ class SpecializedDeviceTests(unittest.TestCase):
         self.assertTrue(mapper._operation_supported("hybrid-reverb.set"))
         row = mapper.snapshot()["tracks"][0]["devices"][0]
         self.assertEqual((row["hybridReverb"]["irCategory"], row["hybridReverb"]["irFile"], row["hybridReverb"]["attack"]), ("Halls", "Hall A", 10.0))
-        identity_args = {"ref": row["ref"], "expectedObjectIdentity": row["objectIdentity"]}
-        result = mapper.invoke("hybrid-reverb.set", {**identity_args, "irCategory": "Plates", "irFile": "Hall B"})
+        result = mapper.invoke("hybrid-reverb.set", {**hybrid_reverb_fence(mapper), "irCategory": "Plates", "irFile": "Hall B"})
         self.assertTrue(result["changed"]); self.assertEqual((device.ir_category_index, device.ir_file_index), (1, 1))
-        with self.assertRaisesRegex(ValueError, "not an available choice"): mapper.invoke("hybrid-reverb.set", {**identity_args, "irCategory": "Bogus"})
-        state = mapper._specialized_state(device, [("attack", "ir_attack_time"), ("decay", "ir_decay_time"), ("size", "ir_size_factor")])
-        result = mapper.invoke("hybrid-reverb.set", {**identity_args, "attack": 25.0, "decay": 2400.0, "expectedStateRevision": hashlib.sha256(mapper._bounded_canonical(state).encode()).hexdigest()})
+        with self.assertRaisesRegex(ValueError, "not an available choice"): mapper.invoke("hybrid-reverb.set", {**hybrid_reverb_fence(mapper), "irCategory": "Bogus"})
+        result = mapper.invoke("hybrid-reverb.set", {**hybrid_reverb_fence(mapper), "attack": 25.0, "decay": 2400.0})
         self.assertTrue(result["changed"]); self.assertEqual((device.ir_attack_time, device.ir_decay_time), (25.0, 2400.0))
-        with self.assertRaisesRegex(ValueError, "authority is invalid"): mapper.invoke("hybrid-reverb.set", {**identity_args, "time": 3000.0})
+        with self.assertRaisesRegex(ValueError, "authority is invalid"): mapper.invoke("hybrid-reverb.set", {**hybrid_reverb_fence(mapper), "time": 3000.0})
 
     def test_hybrid_reverb_takes_ir_names_live_lists_as_plain_strings(self):
         song = FakeSong(); device = FakeDevice(); device.name = "Hybrid"; device.class_name = "HybridReverbDevice"
@@ -6133,8 +6131,40 @@ class SpecializedDeviceTests(unittest.TestCase):
         song.tracks[0].devices = [device]; mapper = LiveObjectMapper(song)
         row = mapper.snapshot()["tracks"][0]["devices"][0]
         self.assertEqual((row["hybridReverb"]["irCategoryList"], row["hybridReverb"]["irFile"]), (["Halls", "Plates"], "Hall A"))
-        result = mapper.invoke("hybrid-reverb.set", {"ref": row["ref"], "expectedObjectIdentity": row["objectIdentity"], "irFile": "Hall B"})
+        result = mapper.invoke("hybrid-reverb.set", {**hybrid_reverb_fence(mapper), "irFile": "Hall B"})
         self.assertTrue(result["changed"]); self.assertEqual(device.ir_file_index, 1)
+
+    def test_hybrid_reverb_is_fenced_on_the_five_settings_its_row_shows(self):
+        song = FakeSong(); device = FakeDevice(); device.name = "Hybrid"; device.class_name = "HybridReverbDevice"
+        device.ir_category_list = [{"name": "Halls"}, {"name": "Plates"}]; device.ir_category_index = 0
+        device.ir_file_list = [{"name": "Hall A"}, {"name": "Hall B"}]; device.ir_file_index = 0
+        device.ir_attack_time = 10.0; device.ir_decay_time = 1200.0; device.ir_size_factor = 50.0
+        song.tracks[0].devices = [device]; mapper = LiveObjectMapper(song)
+        # The host's fence covers all five settings: a shaping change is taken with it.
+        self.assertTrue(mapper.invoke("hybrid-reverb.set", {**hybrid_reverb_fence(mapper), "size": 80.0})["changed"]); self.assertEqual(device.ir_size_factor, 80.0)
+        # The producer picked another IR since the preview: shaping and IR changes alike are refused, and nothing is written.
+        stale = hybrid_reverb_fence(mapper); device.ir_file_index = 1
+        for change in ({"size": 20.0}, {"irCategory": "Plates"}):
+            with self.assertRaisesRegex(ValueError, "state changed since preview"): mapper.invoke("hybrid-reverb.set", {**stale, **change})
+        self.assertEqual((device.ir_category_index, device.ir_file_index, device.ir_size_factor), (0, 1, 80.0))
+
+    def test_hybrid_reverb_finds_a_file_in_the_category_it_sets(self):
+        class Reverb(FakeDevice):
+            FILES = {0: ["Hall A", "Hall B"], 1: ["Plate A", "Plate B"]}
+            ir_file_list = property(lambda self: self.FILES[self.ir_category_index])
+            def __setattr__(self, name, value):
+                super().__setattr__(name, value)
+                # Live starts a newly chosen category at its first file.
+                if name == "ir_category_index": super().__setattr__("ir_file_index", 0)
+        song = FakeSong(); device = Reverb(); device.name = "Hybrid"; device.class_name = "HybridReverbDevice"
+        device.ir_category_list = ["Halls", "Plates"]; device.ir_category_index = 0; device.ir_file_index = 1
+        device.ir_attack_time = 10.0; device.ir_decay_time = 1200.0; device.ir_size_factor = 50.0
+        song.tracks[0].devices = [device]; mapper = LiveObjectMapper(song)
+        with self.assertRaisesRegex(ValueError, "irFile is not an available choice"):
+            mapper.invoke("hybrid-reverb.set", {**hybrid_reverb_fence(mapper), "irCategory": "Plates", "irFile": "Hall B"})
+        self.assertEqual((device.ir_category_index, device.ir_file_index), (0, 1), "the category and its file are put back")
+        self.assertTrue(mapper.invoke("hybrid-reverb.set", {**hybrid_reverb_fence(mapper), "irCategory": "Plates", "irFile": "Plate B"})["changed"])
+        self.assertEqual((device.ir_category_index, device.ir_file_index), (1, 1))
 
     def test_hybrid_reverb_second_phase_failure_rolls_back_applied_ir_indices(self):
         class AttackRefusingDevice(FakeDevice):
@@ -6150,11 +6180,7 @@ class SpecializedDeviceTests(unittest.TestCase):
         device.ir_decay_time = 1200.0; device.ir_size_factor = 50.0
         song = FakeSong(); song.tracks[0].devices = [device]
         mapper = LiveObjectMapper(song)
-        row = mapper.snapshot()["tracks"][0]["devices"][0]
-        specs = [("attack", "ir_attack_time"), ("decay", "ir_decay_time"), ("size", "ir_size_factor")]
-        def fences():
-            state = mapper._specialized_state(device, specs)
-            return {"ref": row["ref"], "expectedObjectIdentity": row["objectIdentity"], "expectedStateRevision": hashlib.sha256(mapper._bounded_canonical(state).encode()).hexdigest()}
+        fences = lambda: hybrid_reverb_fence(mapper)
         combined = mapper.invoke("hybrid-reverb.set", {**fences(), "irCategory": "Plates", "decay": 2400.0})
         self.assertTrue(combined["changed"]); validate_operation_payload("hybrid-reverb.set", "result", combined)
         self.assertEqual((device.ir_category_index, device.ir_decay_time), (1, 2400.0))
@@ -6986,6 +7012,13 @@ class SetScaleCapTests(unittest.TestCase):
         for index in range(5000): mapper._owned_cleanup_tokens[f"filler-token-{index}"] = {"transactionId": "filler", "ref": f"{mapper.refs.epoch + 1}:track:{index}", "objectIdentity": f"filler:{index}", "fingerprint": "0" * 64}
         created = mapper.invoke("track.create", {"name": "Owned past 4096", "kind": "midi", "index": 1, "expectedStructureRevision": mapper._structure_revision()}, "transaction-ledgers")
         self.assertIn("ownershipToken", created)
+
+
+def hybrid_reverb_fence(mapper, track=0, index=0):
+    """What the host fences a Hybrid Reverb change on: the device, and the five settings its row shows."""
+    row = mapper.snapshot()["tracks"][track]["devices"][index]
+    state = {field: row["hybridReverb"][field] for field in ("irCategory", "irFile", "attack", "decay", "size")}
+    return {"ref": row["ref"], "expectedObjectIdentity": row["objectIdentity"], "expectedStateRevision": hashlib.sha256(mapper._bounded_canonical(state).encode()).hexdigest()}
 
 
 class _BridgeSocketFixture:
