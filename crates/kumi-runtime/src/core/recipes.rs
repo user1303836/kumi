@@ -184,6 +184,9 @@ impl RecipeStore for FileRecipeStore {
             file.write_all(json::file_text(&serde_json::to_value(recipe).unwrap()).as_bytes())
                 .await
                 .map_err(|e| RuntimeError::plain(e.to_string()))?;
+            // A tokio file finishes its last write in the background: flushed, a failed write (a full disk) stops the
+            // rename instead of a cut-short file replacing the recipe.
+            file.flush().await.map_err(|e| RuntimeError::plain(e.to_string()))?;
             drop(file);
             tokio::fs::rename(&temporary, self.file(&recipe.name)?).await.map_err(|e| RuntimeError::plain(e.to_string()))
         }
