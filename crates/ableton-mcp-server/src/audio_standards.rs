@@ -528,30 +528,33 @@ fn true_peak_44100(samples: &[f64], channels: usize) -> Vec<Option<f64>> {
     let input_frames = samples.len() / channels;
     let output_frames = number::round(input_frames as f64 * 48_000.0 / 44_100.0) as usize;
     let radius: i64 = 32;
-    (0..channels)
-        .map(|channel| {
-            let mut resampled = vec![0.0f64; output_frames];
-            for (output_frame, slot) in resampled.iter_mut().enumerate() {
-                let position = output_frame as f64 * 44_100.0 / 48_000.0;
-                let center = position.floor() as i64;
-                let mut value = 0.0;
-                let mut normalization = 0.0;
-                for tap in (center - radius + 1)..=(center + radius) {
-                    let distance = position - tap as f64;
-                    let window_position = (distance + radius as f64) / (2.0 * radius as f64);
-                    let window = 0.42 - 0.5 * (2.0 * PI * window_position).cos() + 0.08 * (4.0 * PI * window_position).cos();
-                    let coefficient = sinc(distance) * window;
-                    // Constant edge extension keeps the bounded programme boundary from
-                    // becoming an artificial impulse while retaining a complete kernel.
-                    let source_frame = tap.clamp(0, input_frames as i64 - 1) as usize;
-                    value += coefficient * samples[source_frame * channels + channel];
-                    normalization += coefficient;
-                }
-                *slot = if normalization.abs() > 1e-12 { value / normalization } else { 0.0 };
+    let mut resampled = vec![vec![0.0f64; output_frames]; channels];
+    // An output frame's kernel is the same for every channel: worked out once per frame, it gives the same sums.
+    let mut kernel: Vec<(f64, usize)> = Vec::with_capacity(2 * radius as usize);
+    for output_frame in 0..output_frames {
+        let position = output_frame as f64 * 44_100.0 / 48_000.0;
+        let center = position.floor() as i64;
+        kernel.clear();
+        let mut normalization = 0.0;
+        for tap in (center - radius + 1)..=(center + radius) {
+            let distance = position - tap as f64;
+            let window_position = (distance + radius as f64) / (2.0 * radius as f64);
+            let window = 0.42 - 0.5 * (2.0 * PI * window_position).cos() + 0.08 * (4.0 * PI * window_position).cos();
+            let coefficient = sinc(distance) * window;
+            // Constant edge extension keeps the bounded programme boundary from
+            // becoming an artificial impulse while retaining a complete kernel.
+            kernel.push((coefficient, tap.clamp(0, input_frames as i64 - 1) as usize));
+            normalization += coefficient;
+        }
+        for (channel, output) in resampled.iter_mut().enumerate() {
+            let mut value = 0.0;
+            for (coefficient, source_frame) in &kernel {
+                value += coefficient * samples[source_frame * channels + channel];
             }
-            true_peak_channel_48k(&resampled)
-        })
-        .collect()
+            output[output_frame] = if normalization.abs() > 1e-12 { value / normalization } else { 0.0 };
+        }
+    }
+    resampled.iter().map(|channel| true_peak_channel_48k(channel)).collect()
 }
 
 fn analyze_true_peak(samples: &[f64], sample_rate: f64, channels: usize) -> TruePeak {

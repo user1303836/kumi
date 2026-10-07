@@ -242,21 +242,26 @@ fn resample_validated_pcm(source: &ValidatedSource, target_rate: f64) -> Result<
         return Ok(output);
     }
     let cutoff = (target_rate / source.sample_rate).min(1.0) * 0.94;
+    // An output frame's kernel is the same for every channel: worked out once per frame, it gives the same sums.
+    let mut kernel: Vec<(f64, usize)> = Vec::with_capacity(2 * RESAMPLER_RADIUS as usize);
     for output_frame in 0..output_frames {
         let source_position = output_frame as f64 * source.sample_rate / target_rate;
         let center = source_position.floor() as i64;
+        kernel.clear();
+        let mut normalization = 0.0;
+        for tap in (center - RESAMPLER_RADIUS + 1)..=(center + RESAMPLER_RADIUS) {
+            let distance = source_position - tap as f64;
+            let coefficient = cutoff * sinc(distance * cutoff) * blackman(distance);
+            // A complete kernel with constant edge extension avoids dividing a
+            // truncated near-zero boundary sum and cannot turn normalized short
+            // programmes into unbounded reconstructed peaks.
+            kernel.push((coefficient, tap.clamp(0, input_frames as i64 - 1) as usize));
+            normalization += coefficient;
+        }
         for channel in 0..channels {
             let mut value = 0.0;
-            let mut normalization = 0.0;
-            for tap in (center - RESAMPLER_RADIUS + 1)..=(center + RESAMPLER_RADIUS) {
-                let distance = source_position - tap as f64;
-                let coefficient = cutoff * sinc(distance * cutoff) * blackman(distance);
-                // A complete kernel with constant edge extension avoids dividing a
-                // truncated near-zero boundary sum and cannot turn normalized short
-                // programmes into unbounded reconstructed peaks.
-                let source_frame = tap.clamp(0, input_frames as i64 - 1) as usize;
+            for (coefficient, source_frame) in &kernel {
                 value += coefficient * source.samples[source_frame * channels + channel];
-                normalization += coefficient;
             }
             output[output_frame * channels + channel] = if normalization.abs() > EPSILON { value / normalization } else { 0.0 };
         }
