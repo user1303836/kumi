@@ -112,6 +112,19 @@ async fn cancelled_extension_render_leaves_channel_usable_and_late_answer_ignore
         })
         .await;
 }
+#[cfg(unix)]
+#[test]
+fn an_endpoint_naming_another_users_process_isnt_kumis() {
+    if unsafe { libc::getuid() } == 0 {
+        return;
+    }
+    // pid 1 runs as root: alive, but not this user's.
+    let folder = tempfile::tempdir().unwrap();
+    std::fs::write(folder.path().join("endpoint.json"), json!({"host":"127.0.0.1","port":1,"pid":1}).to_string()).unwrap();
+    assert!(read_extension_endpoint(folder.path()).is_none());
+    std::fs::write(folder.path().join("endpoint.json"), json!({"host":"127.0.0.1","port":1,"pid":std::process::id()}).to_string()).unwrap();
+    assert!(read_extension_endpoint(folder.path()).is_some());
+}
 #[tokio::test]
 async fn extension_discovery_checks_liveness_registry_secret_and_enabled_state() {
     LocalSet::new()

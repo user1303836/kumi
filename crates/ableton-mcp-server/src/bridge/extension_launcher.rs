@@ -32,12 +32,34 @@ fn host_in(directory: &Path) -> Option<ExtensionHostBinary> {
     let module = directory.join("ExtensionHostNodeModule.node");
     (node.exists() && module.exists()).then_some(ExtensionHostBinary { node, module })
 }
+/// `ps` by its path: Kumi starts the bridge with PATH holding only the bridge's own folder.
+fn ps() -> &'static str {
+    if Path::new("/bin/ps").exists() {
+        "/bin/ps"
+    } else {
+        "ps"
+    }
+}
+/// This user's processes only, from `ps -axo uid=,<field>=` lines: another user's Live, host or folders aren't Kumi's.
+#[cfg(unix)]
+fn own_lines(listing: &str) -> String {
+    // SAFETY: getuid has no preconditions.
+    let uid = unsafe { libc::getuid() }.to_string();
+    listing
+        .lines()
+        .filter_map(|line| line.trim_start().split_once(' ').filter(|(owner, _)| *owner == uid).map(|(_, rest)| rest.trim_start()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 fn running_live_app() -> Option<PathBuf> {
     if current_platform() != "darwin" {
         return None;
     }
-    let output = std::process::Command::new("ps").args(["-axo", "comm="]).output().ok()?;
-    String::from_utf8_lossy(&output.stdout)
+    let output = std::process::Command::new(ps()).args(["-axo", "uid=,comm="]).output().ok()?;
+    let listing = String::from_utf8_lossy(&output.stdout);
+    #[cfg(unix)]
+    let listing = own_lines(&listing);
+    listing
         .lines()
         .map(kumi_common::js::string::trim)
         .find(|line| line.ends_with(".app/Contents/MacOS/Live"))
@@ -75,7 +97,11 @@ pub fn find_extension_host(live_app: Option<&Path>) -> Option<ExtensionHostBinar
             }
         }
     } else if cfg!(windows) {
-        let root = PathBuf::from(std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".into())).join("Ableton");
+        // An older Kumi doesn't pass ProgramData on: it's on the system drive, which may not be C:.
+        let program_data = std::env::var("ProgramData")
+            .or_else(|_| std::env::var("SystemDrive").map(|drive| format!("{drive}\\ProgramData")))
+            .unwrap_or_else(|_| "C:\\ProgramData".into());
+        let root = PathBuf::from(program_data).join("Ableton");
         let mut names: Vec<_> =
             std::fs::read_dir(&root).into_iter().flatten().filter_map(Result::ok).map(|entry| entry.file_name()).collect();
         names.sort();
@@ -147,13 +173,14 @@ pub async fn running_extension_hosts() -> ExtensionHosts {
         ]);
         command
     } else {
-        let mut command = Command::new("ps");
-        command.args(["-axo", "command="]);
+        let mut command = Command::new(ps());
+        command.args(["-axo", "uid=,command="]);
         command
     };
     #[cfg(windows)]
     command.creation_flags(0x08000000);
-    command.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
+    // Never the bridge's stdin, which is Kumi's request pipe: Windows PowerShell reads a redirected stdin to its end.
+    command.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
     let Ok(mut child) = command.spawn() else {
         return ExtensionHosts::default();
     };
@@ -173,7 +200,10 @@ pub async fn running_extension_hosts() -> ExtensionHosts {
     if result.is_err() {
         let _ = child.start_kill();
     }
-    parse_extension_hosts(&String::from_utf8_lossy(&output))
+    let listing = String::from_utf8_lossy(&output);
+    #[cfg(unix)]
+    let listing = own_lines(&listing);
+    parse_extension_hosts(&listing)
 }
 #[derive(Clone, Default)]
 pub enum ExtensionScan {
@@ -287,6 +317,28 @@ fn shared(options: &LaunchOptions, path: &Path) -> LaunchOutcome {
     }
     LaunchOutcome::Shared
 }
+/// The bridge's stdin, stdout and stderr made non-inheritable. Kumi made them inheritable pipes, and Windows hands
+/// every inheritable handle to a child: the long-lived Extension Host would keep Kumi's pipes open after the bridge
+/// exits, so Kumi would never see it close. A child given one of them explicitly still gets its own copy.
+#[cfg(windows)]
+fn keep_std_handles_from_children() {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetStdHandle(which: u32) -> *mut std::ffi::c_void;
+        fn SetHandleInformation(handle: *mut std::ffi::c_void, mask: u32, flags: u32) -> i32;
+    }
+    const HANDLE_FLAG_INHERIT: u32 = 1;
+    // STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE.
+    for which in [-10i32 as u32, -11i32 as u32, -12i32 as u32] {
+        // SAFETY: plain handle queries and flag changes on this process's own standard handles.
+        unsafe {
+            let handle = GetStdHandle(which);
+            if !handle.is_null() && handle as isize != -1 {
+                SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
+}
 /// Start only one Extension Host across bridge instances and wait for this process's endpoint.
 pub async fn launch_extension(options: LaunchOptions) -> Result<LaunchOutcome, LiveError> {
     let io = |error: std::io::Error| LiveError::error(error.to_string());
@@ -356,7 +408,10 @@ pub async fn launch_extension(options: LaunchOptions) -> Result<LaunchOutcome, L
         }
     }
     #[cfg(windows)]
-    command.creation_flags(0x00000008 | 0x00000200 | 0x08000000);
+    {
+        command.creation_flags(0x00000008 | 0x00000200 | 0x08000000);
+        keep_std_handles_from_children();
+    }
     let mut child = command.spawn().map_err(io)?;
     let pid = child.id();
     options.log(&format!(
@@ -368,11 +423,10 @@ pub async fn launch_extension(options: LaunchOptions) -> Result<LaunchOutcome, L
         if read_extension_endpoint(&options.storage_directory).is_some_and(|endpoint| endpoint["pid"].as_u64() == pid.map(u64::from)) {
             return Ok(LaunchOutcome::Started);
         }
+        // Stopped by a signal too (no exit code): it's gone, and its pid may be reaped and reused.
         if let Some(status) = child.try_wait().map_err(io)? {
-            if let Some(code) = status.code() {
-                options.log(&format!("extension channel: the Extension Host stopped ({code})"));
-                return Ok(LaunchOutcome::Failed);
-            }
+            options.log(&format!("extension channel: the Extension Host stopped ({status})"));
+            return Ok(LaunchOutcome::Failed);
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -386,4 +440,20 @@ pub async fn launch_extension(options: LaunchOptions) -> Result<LaunchOutcome, L
     #[cfg(not(unix))]
     let _ = child.start_kill();
     Ok(LaunchOutcome::Failed)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    #[test]
+    fn ps_is_named_by_its_path_and_only_this_users_processes_count() {
+        assert_eq!(ps(), "/bin/ps");
+        // SAFETY: getuid has no preconditions.
+        let uid = unsafe { libc::getuid() };
+        let listing = format!(
+            "  {uid} /Applications/Live.app/Contents/MacOS/Live\n  {} /Users/other/Live.app/Contents/MacOS/Live\n{uid}   ExtensionHost/node -e x\n",
+            uid + 1
+        );
+        assert_eq!(own_lines(&listing), "/Applications/Live.app/Contents/MacOS/Live\nExtensionHost/node -e x");
+    }
 }

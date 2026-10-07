@@ -136,6 +136,31 @@ async fn detached_launch_creates_secret_configuration_and_releases_lock() {
 }
 #[cfg(unix)]
 #[tokio::test]
+async fn a_host_stopped_by_a_signal_is_seen_at_once() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let host = root.path().join("ExtensionHost");
+    std::fs::create_dir_all(&host).unwrap();
+    std::fs::write(host.join("ExtensionHostNodeModule.node"), "").unwrap();
+    // Killed, so it has no exit code.
+    std::fs::write(host.join("node"), "#!/bin/sh\nkill -KILL $$\n").unwrap();
+    std::fs::set_permissions(host.join("node"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let logs = Rc::new(RefCell::new(vec![]));
+    let observed = logs.clone();
+    let mut options = LaunchOptions::new(root.path().join("storage"));
+    options.live_app = Some(host);
+    options.extension = find_extension_bundle();
+    options.lock_path = Some(root.path().join("launch.lock"));
+    options.scan = ExtensionScan::Disabled;
+    options.wait_ms = Some(5000.0);
+    options.log = Some(Rc::new(move |line| observed.borrow_mut().push(line.to_string())));
+    let started = std::time::Instant::now();
+    assert_eq!(launch_extension(options).await.unwrap(), LaunchOutcome::Failed);
+    assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+    assert!(logs.borrow().iter().any(|line| line.contains("the Extension Host stopped")), "{:?}", logs.borrow());
+}
+#[cfg(unix)]
+#[tokio::test]
 async fn another_launch_lock_is_waited_for_and_unreachable_host_is_stopped() {
     let root = tempfile::tempdir().unwrap();
     let host = root.path().join("ExtensionHost");

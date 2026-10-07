@@ -49,6 +49,17 @@ impl ExtensionChannelOptions {
     }
 }
 pub fn read_extension_endpoint(storage: &Path) -> Option<ExtensionEndpoint> {
+    // Only this user's folder and endpoint: another user's are never Kumi's to connect to.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        // SAFETY: getuid has no preconditions.
+        let uid = unsafe { libc::getuid() };
+        let owned = |path: &Path| std::fs::symlink_metadata(path).is_ok_and(|meta| meta.uid() == uid);
+        if !owned(storage) || !owned(&storage.join("endpoint.json")) {
+            return None;
+        }
+    }
     let value: Value = serde_json::from_slice(&std::fs::read(storage.join("endpoint.json")).ok()?).ok()?;
     let port = value["port"].as_f64()?;
     let pid = value["pid"].as_f64()?;
@@ -65,10 +76,11 @@ pub fn read_extension_endpoint(storage: &Path) -> Option<ExtensionEndpoint> {
     }
     Some(value)
 }
+/// Whether `pid` runs, as this user (another user's process, EPERM, isn't one Kumi's endpoint can be).
 pub(super) fn process_alive(pid: i32) -> bool {
     #[cfg(unix)]
     {
-        unsafe { libc::kill(pid, 0) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) }
+        unsafe { libc::kill(pid, 0) == 0 }
     }
     #[cfg(windows)]
     {
