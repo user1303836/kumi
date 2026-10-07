@@ -327,6 +327,17 @@ fn streams(info: &Value) -> Sources {
         audio: input(sounds.first().copied().or(combined)),
     }
 }
+/// A sidecar's captions as text: by its BOM (UTF-8 or UTF-16), as UTF-8, or else as Windows-1252, which older
+/// subtitle tools write.
+fn caption_text(bytes: &[u8]) -> String {
+    if let Some((encoding, length)) = encoding_rs::Encoding::for_bom(bytes) {
+        return encoding.decode_without_bom_handling(&bytes[length..]).0.into_owned();
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_owned(),
+        Err(_) => encoding_rs::WINDOWS_1252.decode_without_bom_handling(bytes).0.into_owned(),
+    }
+}
 async fn captions_for(
     info: &Value,
     url: &str,
@@ -670,7 +681,9 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
             for ext in ["srt", "vtt"] {
                 let sidecar = path.with_extension(ext);
                 if sidecar.exists() {
-                    words = parse_captions(&tokio::fs::read_to_string(sidecar).await?, ext);
+                    // One that can't be read is as none beside it.
+                    let Ok(bytes) = tokio::fs::read(&sidecar).await else { continue };
+                    words = parse_captions(&caption_text(&bytes), ext);
                     found.words = Some(Words { language: String::new(), source: WordsSource::Captions });
                     break;
                 }

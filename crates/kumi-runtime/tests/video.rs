@@ -242,6 +242,27 @@ async fn a_portrait_video_and_side_closeups_have_frames_and_thumbnails() {
     assert_eq!((left.frames[0].thumb.width, left.frames[0].thumb.height), (28, 32));
 }
 #[tokio::test(flavor = "current_thread")]
+async fn captions_beside_a_video_are_read_in_windows_1252_and_utf_16_too() {
+    let folder = tempfile::tempdir().unwrap();
+    let Some(video) = test_video(folder.path(), "latin", false).await else {
+        eprintln!("ffmpeg makes the test video; unavailable");
+        return;
+    };
+    let options = watch_options(folder.path(), "videos");
+    // As older subtitle tools write it: Windows-1252, where é is one byte.
+    std::fs::write(folder.path().join("latin.srt"), b"1\n00:00:01,000 --> 00:00:03,000\nCaf\xe9 Saturator\n").unwrap();
+    let watched = watch_video(WatchRequest { url: video.clone(), frames: Some(0.0), ..Default::default() }, options.clone()).await.unwrap();
+    assert_eq!(watched.lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["Caf\u{e9} Saturator"]);
+    let other = test_video(folder.path(), "wide", false).await.unwrap();
+    let utf16: Vec<u8> = [0xff, 0xfe]
+        .into_iter()
+        .chain("1\n00:00:01,000 --> 00:00:03,000\n\u{65e5}\u{672c}\n".encode_utf16().flat_map(u16::to_le_bytes))
+        .collect();
+    std::fs::write(folder.path().join("wide.srt"), utf16).unwrap();
+    let watched = watch_video(WatchRequest { url: other, frames: Some(0.0), ..Default::default() }, options).await.unwrap();
+    assert_eq!(watched.lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["\u{65e5}\u{672c}"]);
+}
+#[tokio::test(flavor = "current_thread")]
 async fn video_files_have_captions_frames_closeups_sound_and_are_kept() {
     let folder = tempfile::tempdir().unwrap();
     let Some(video) = test_video(folder.path(), "tutorial", true).await else {
