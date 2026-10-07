@@ -196,7 +196,7 @@ impl LoopRun {
             })
             .unwrap_or_default();
         LoopDecision::Next(format!(
-            "[Kumi loop] Round {}. {verdict}{next} Budget left: {left} rounds, about {} minutes. Make one change toward it, then judge it.",
+            "[Kumi loop] Round {}. {verdict}{next} Budget left: {left} rounds, about {} minutes. Make one change toward it, then judge it (Kumi asks for done when it's time).",
             last.round,
             to_string(minutes)
         ))
@@ -227,7 +227,7 @@ fn wrap_up(why: &str) -> String {
 
 /// A loop's request as the first turn of an explicit /loop: what the producer asked, and how to work in rounds.
 pub fn loop_setup(request: &str) -> String {
-    format!("[Kumi loop] {request}\n\nWork in rounds. Start a judged run: judge with the goal that fits (loudness and a ceiling for a master, a reference when there's one, focus on the element that must cut through), hearing the mix or the track the request is about. Then make one change toward the next target with Live's devices and judge it with change. Kumi decides when the loop stops.")
+    format!("[Kumi loop] {request}\n\nWork in rounds. Start a judged run: judge with the goal that fits (loudness and a ceiling for a master, a reference when there's one, focus on the element that must cut through), hearing the mix or the track the request is about. Then make one change toward the next target with Live's devices and judge it with change. Kumi decides when the loop stops: don't end the run with done until it asks.")
 }
 
 /// A judged round as the session keeps it with a run's status (for tests and the app).

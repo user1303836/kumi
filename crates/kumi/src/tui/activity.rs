@@ -80,7 +80,7 @@ fn kind_of(tool: &str) -> Option<Activity> {
         | "select"
         | "show" => Activity::Look,
         "make_device" | "arrange" => Activity::Build,
-        "listen" | "audition" => Activity::Listen,
+        "listen" | "audition" | "judge" | "tune" => Activity::Listen,
         "watch_video" => Activity::Watch,
         "play" | "fire_scene" | "launch_clip" | "jump_to_locator" => Activity::Play,
         "record" | "capture_midi" => Activity::Record,

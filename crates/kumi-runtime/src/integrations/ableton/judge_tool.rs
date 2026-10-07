@@ -1,5 +1,5 @@
 //! The judge tool: the model's side of a judged run (a goal in, a round's log out).
-use super::rendering::{GoalRequest, JudgeRequest};
+use super::rendering::{GoalRequest, JudgeRequest, TuneHow, TuneRequest};
 use crate::{
     core::contracts::JsonObject,
     listening::{
@@ -15,6 +15,44 @@ pub const JUDGE_TOOL: &str = "judge";
 static DATA: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("assets/judge.json")).unwrap());
 pub static JUDGE_DESCRIPTION: LazyLock<String> = LazyLock::new(|| DATA["description"].as_str().unwrap().into());
 pub static JUDGE_SCHEMA: LazyLock<JsonObject> = LazyLock::new(|| DATA["schema"].as_object().unwrap().clone());
+
+pub const TUNE_TOOL: &str = "tune";
+static TUNE: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("assets/tune.json")).unwrap());
+pub static TUNE_DESCRIPTION: LazyLock<String> = LazyLock::new(|| TUNE["description"].as_str().unwrap().into());
+pub static TUNE_SCHEMA: LazyLock<JsonObject> = LazyLock::new(|| TUNE["schema"].as_object().unwrap().clone());
+
+/// The tune tool's input as a request, or what's wrong with it.
+pub fn tune_request(input: &JsonObject) -> Result<TuneRequest, String> {
+    let text = |key: &str| input.get(key).and_then(Value::as_str).map(trim).filter(|s| !s.is_empty()).map(str::to_owned);
+    let how =
+        match input.get("how").and_then(Value::as_str) {
+            Some("fit") => TuneHow::Fit,
+            Some("home") => TuneHow::Home,
+            Some("search") => TuneHow::Search,
+            _ => return Err(
+                "how is fit (an EQ calculated from what was measured), home (one knob homed in on) or search (2 to 5 knobs that interact)."
+                    .into(),
+            ),
+        };
+    let device = text("device").ok_or("Name the device to tune (its ref).")?;
+    let knobs: Vec<String> = input
+        .get("knobs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect();
+    if how == TuneHow::Home && knobs.len() != 1 {
+        return Err("home moves one knob: give its name in knobs.".into());
+    }
+    if how == TuneHow::Search && !(2..=5).contains(&knobs.len()) {
+        return Err("search tunes 2 to 5 knobs that interact: give their names in knobs.".into());
+    }
+    Ok(TuneRequest { device, how, target: text("target"), knobs, change: text("change") })
+}
 
 /// The tool's input as a request, or what's wrong with it.
 pub fn judge_request(input: &JsonObject) -> Result<JudgeRequest, String> {

@@ -99,9 +99,29 @@ fn spans(frames: &Frames, hits: &[(usize, f64)], gap: usize) -> Vec<([f64; 2], f
     spans
 }
 
-/// Harshness (2–10 kHz) and resonances (250 Hz up): peaks of the short-term spectrum over its own ±half-octave
-/// average, weighted by the ear's sensitivity; steady ones call for a static cut, ones that come and go for a
-/// dynamic EQ band or a de-esser.
+/// The level a fine bin stands out from: the power mean of its neighbours a quarter of an octave to an octave away on
+/// both sides. The bin's own peak and skirt are left out, so a cut at the peak shows as the peak going down.
+pub fn local_level(power: &[f64], bin: usize) -> f64 {
+    let (mut sum, mut count) = (0., 0);
+    for distance in 3..=12usize {
+        if bin >= distance {
+            sum += power[bin - distance];
+            count += 1;
+        }
+        if bin + distance < power.len() {
+            sum += power[bin + distance];
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return f64::NEG_INFINITY;
+    }
+    10. * (sum / count as f64).max(1e-30).log10()
+}
+
+/// Harshness (2–10 kHz) and resonances (250 Hz up): peaks of the short-term spectrum over their neighbours, weighted
+/// by the ear's sensitivity; steady ones call for a static cut, ones that come and go for a dynamic EQ band or a
+/// de-esser.
 pub fn harshness(heard: &Heard) -> Vec<Problem> {
     let frames = &heard.frames;
     let active = active(frames);
@@ -115,9 +135,7 @@ pub fn harshness(heard: &Heard) -> Vec<Problem> {
         let power: Vec<f64> = fine.iter().map(|db| 10f64.powf(*db as f64 / 10.)).collect();
         let loudest = fine.iter().copied().fold(f32::MIN, f32::max) as f64;
         for bin in 1..FINE_BINS - 1 {
-            let (from, to) = (bin.saturating_sub(6), (bin + 7).min(FINE_BINS));
-            let local = 10. * (power[from..to].iter().sum::<f64>() / (to - from) as f64).log10();
-            let excess = fine[bin] as f64 - local;
+            let excess = fine[bin] as f64 - local_level(&power, bin);
             let peak = fine[bin] >= fine[bin - 1] && fine[bin] >= fine[bin + 1];
             // A peak worth hearing: well over its neighborhood, and not far under the frame's loudest part.
             let weighted = excess + (a_weighting(fine_hz(bin)) - a_weighting(1000.)).min(0.) * 0.5;
@@ -126,18 +144,28 @@ pub fn harshness(heard: &Heard) -> Vec<Problem> {
             }
         }
     }
-    // Neighboring bins with hits are one region.
+    // A problem is a narrow band: the bins around one that stands out often, each standing out at least half as
+    // often, a sixth of an octave each way at most. Music's passing peaks land on every bin now and then; they don't
+    // join up into one wide "problem" no cut could fix.
+    let share = |bin: usize| hits[bin].len() as f64 / active.len() as f64;
+    let mut tops: Vec<usize> = (0..FINE_BINS).filter(|bin| share(*bin) >= 0.03 && hits[*bin].len() >= 3).collect();
+    tops.sort_by(|a, b| share(*b).total_cmp(&share(*a)));
+    let mut taken = vec![false; FINE_BINS];
     let mut problems = vec![];
-    let mut bin = 0;
-    while bin < FINE_BINS {
-        if hits[bin].is_empty() {
-            bin += 1;
+    for top in tops {
+        if taken[top] {
             continue;
         }
-        let first = bin;
-        while bin < FINE_BINS && !hits[bin].is_empty() {
-            bin += 1;
+        let floor = share(top) * 0.5;
+        let (mut first, mut last) = (top, top);
+        while first > 0 && top - (first - 1) <= 2 && !taken[first - 1] && share(first - 1) >= floor {
+            first -= 1;
         }
+        while last + 1 < FINE_BINS && last + 1 - top <= 2 && !taken[last + 1] && share(last + 1) >= floor {
+            last += 1;
+        }
+        taken[first..=last].iter_mut().for_each(|taken| *taken = true);
+        let bin = last + 1;
         let region = first..bin;
         let mut frames_hit: Vec<(usize, f64)> = region.clone().flat_map(|b| hits[b].iter().copied()).collect();
         frames_hit.sort_by_key(|hit| hit.0);
@@ -150,7 +178,7 @@ pub fn harshness(heard: &Heard) -> Vec<Problem> {
             }
         });
         let share = frames_hit.len() as f64 / active.len() as f64;
-        // A region heard in under 3% of the loud frames is noise in the measure.
+        // A band heard in under 3% of the loud frames is noise in the measure.
         if share < 0.03 || frames_hit.len() < 3 {
             continue;
         }
@@ -210,6 +238,8 @@ pub fn harshness(heard: &Heard) -> Vec<Problem> {
         });
     }
     problems.sort_by(|a, b| b.excess.total_cmp(&a.excess));
+    // The few that stand out most: a checklist of every small peak is a checklist nobody finishes.
+    problems.truncate(4);
     problems
 }
 
@@ -221,10 +251,9 @@ fn peak_q(frames: &Frames, hit: &[(usize, f64)], first: usize, last: usize) -> f
     let mut sums = vec![0f64; to - from];
     for &(frame, _) in hit {
         let fine = &frames.fine[frame];
+        let power: Vec<f64> = fine.iter().map(|db| 10f64.powf(*db as f64 / 10.)).collect();
         for bin in from..to {
-            let (low, high) = (bin.saturating_sub(6), (bin + 7).min(FINE_BINS));
-            let local = 10. * (fine[low..high].iter().map(|db| 10f64.powf(*db as f64 / 10.)).sum::<f64>() / (high - low) as f64).log10();
-            sums[bin - from] += fine[bin] as f64 - local;
+            sums[bin - from] += fine[bin] as f64 - local_level(&power, bin);
         }
     }
     let curve: Vec<f64> = sums.iter().map(|sum| sum / hit.len().max(1) as f64).collect();

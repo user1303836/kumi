@@ -6,6 +6,7 @@ mod judge;
 mod listen;
 mod pass;
 mod rig;
+mod tune;
 use super::{
     audition::{restore_store, RestoreStore},
     bridge_version::at_least,
@@ -79,6 +80,7 @@ pub struct Rendering {
     listener: RefCell<Option<Option<Rc<dyn crate::listening::listener::Listener>>>>,
 }
 pub use judge::{GoalRequest, JudgeRequest};
+pub use tune::{TuneHow, TuneRequest};
 impl Rendering {
     /// Kumi starts playing the Set for itself, Main down: what Live plays meanwhile isn't heard by the producer. True
     /// when a render was already running, which nothing changes.

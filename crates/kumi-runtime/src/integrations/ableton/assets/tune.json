@@ -1,0 +1,49 @@
+{
+  "description": "Code picks the numbers for a change you chose, against the judged run's checklist, and Kumi judges the result as a round (kept or taken back, like judge with change). Put the device where the fix belongs first (make_changes), then tune it. how: \"fit\" calculates an EQ Eight's bands from what was measured, with no trial listens: the smallest cut that clears a steady resonance or harshness, or bands that close the balance gaps toward the reference (it uses the EQ's free bands). \"home\" moves one knob where more means more until its target is met, each probe heard on the target's excerpt: a limiter's gain toward a loudness, its ceiling toward a true peak, a de-esser's or dynamic band's threshold until the harsh hits drop, an EQ band's gain until the vocal stops being masked. \"search\" tunes 2–5 knobs that interact (a compressor's attack, release and ratio; a reverb's size, decay and damping) on the run's own track (judge with track): small generations of candidates, each generation heard side by side on scratch copies of the track in one pass. Prefer tune over guessing numbers yourself: it takes fewer listens.",
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "device",
+      "how"
+    ],
+    "properties": {
+      "device": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256,
+        "description": "The device's ref (from discovery or make_changes)"
+      },
+      "how": {
+        "type": "string",
+        "enum": [
+          "fit",
+          "home",
+          "search"
+        ]
+      },
+      "target": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "description": "The checklist item it's for (its id, such as \"loudness\" or \"resonance 1.1 khz\"); the run's next target when left out"
+      },
+      "knobs": {
+        "type": "array",
+        "maxItems": 5,
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "description": "The knobs’ names as the device shows them: one for home (such as \"Gain\" or \"Threshold\"), 2–5 for search"
+      },
+      "change": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 400,
+        "description": "What the change is, in a few words, for the log"
+      }
+    }
+  }
+}

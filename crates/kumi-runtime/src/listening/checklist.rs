@@ -5,6 +5,7 @@
 
 use super::{
     detect::{self, hertz, Problem, ProblemKind},
+    fit::{response, Band, Shape},
     measure::{fine_hz, percentile, Heard, Measures, FINE_BINS},
 };
 use serde::{Deserialize, Serialize};
@@ -329,11 +330,13 @@ impl Checklist {
                         let [low, high] = problem.hz.unwrap_or([0., 0.]);
                         let steady = problem.steady.unwrap_or(true);
                         // A steady peak in a whole mix may be the music's own (a held note, a drone): taken down to
-                        // where it stops sticking out, not flattened.
-                        let limit = if steady { 6. } else { 3. };
+                        // where it stops sticking out, not flattened. A found peak asks for 3 dB less (a fix you hear)
+                        // or the limit, whichever is higher: music has peaks, and a checklist nobody can finish
+                        // helps nobody.
+                        let limit: f64 = if steady { 6. } else { 3. };
                         Some((
                             Quantity::Problem { problem: problem.kind, low, high, steady, focus: None },
-                            Target::AtMost { value: limit },
+                            Target::AtMost { value: round1(limit.max(problem.excess - 3.)) },
                             1.,
                             "dB",
                         ))
@@ -364,11 +367,26 @@ impl Checklist {
                     _ => None,
                 };
                 if let Some((quantity, target, jnd, unit)) = added {
+                    let steady = matches!(
+                        quantity,
+                        Quantity::Problem { problem: ProblemKind::Resonance | ProblemKind::Harshness, steady: true, .. }
+                    );
                     let mut added = item(&problem.id, &capital(&problem.id), Role::Problem, unit, quantity, target, jnd);
-                    added.fix = Some(problem.fix.clone());
+                    added.fix =
+                        Some(if steady { format!("{} (tune with how: fit calculates the cut)", problem.fix) } else { problem.fix.clone() });
                     items.push(added);
                 }
             }
+        }
+        for added in items.iter_mut() {
+            added.fix = added.fix.take().or_else(|| match added.quantity {
+                Quantity::Integrated => Some("the last limiter's gain, homed in (tune with how: home, knobs [\"Gain\"])".into()),
+                Quantity::TruePeak => {
+                    Some("a true-peak limiter last, its ceiling under the target (tune with how: home, knobs [\"Ceiling\"])".into())
+                }
+                Quantity::Region { .. } => Some("an EQ Eight toward the reference's shape (tune with how: fit)".into()),
+                _ => None,
+            });
         }
         // The guards: punch, pumping, distortion and clipping mustn't get audibly worse.
         if heard.measures.crest.is_some() {
@@ -393,15 +411,22 @@ impl Checklist {
 
     /// The biggest gap, the item to work on next; None when every item is within tolerance.
     pub fn next(&self, values: &[Option<f64>]) -> Option<usize> {
-        self.items
+        self.next_skipping(values, &[])
+    }
+
+    /// The biggest gap, passing over `skip` (targets that changes keep failing on) while another is still off.
+    pub fn next_skipping(&self, values: &[Option<f64>], skip: &[usize]) -> Option<usize> {
+        let open: Vec<(usize, f64)> = self
+            .items
             .iter()
             .zip(values)
             .enumerate()
             .filter(|(_, (item, _))| item.role != Role::Guard)
             .map(|(index, (item, value))| (index, item.gap(*value)))
             .filter(|(_, gap)| *gap > 0.)
-            .max_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(index, _)| index)
+            .collect();
+        let fresh = open.iter().filter(|(index, _)| !skip.contains(index)).max_by(|a, b| a.1.total_cmp(&b.1));
+        fresh.or_else(|| open.iter().max_by(|a, b| a.1.total_cmp(&b.1))).map(|(index, _)| *index)
     }
 
     /// Before against after, item by item: whether the target improved and what got audibly worse. Loudness isn't
@@ -425,9 +450,12 @@ impl Checklist {
         for (index, item) in self.items.iter().enumerate() {
             let (b, a) = (before[index], after[index]);
             let (gap_before, gap_after) = (item.gap(b), item.gap(a));
+            // A limiter bringing peaks down flattens them a little too.
+            let peaks = target.is_some_and(|index| self.items[index].quantity == Quantity::TruePeak);
             let slack = match item.quantity {
                 Quantity::Crest => allowance,
                 Quantity::Pumping => allowance / 2.,
+                Quantity::Distortion if peaks => allowance / 2.,
                 _ => 0.,
             };
             let change = match (item.target, b, a) {
@@ -505,19 +533,13 @@ impl Checklist {
 
     /// The gain that brings loudness back to its target (or to where it was, without one), when it's audibly off.
     pub fn rebalance(&self, before: &[Option<f64>], after: &[Option<f64>]) -> Option<f64> {
-        let index = self.items.iter().position(|item| item.quantity == Quantity::Integrated);
-        let gain = match index.map(|index| (&self.items[index], after[index])) {
-            Some((item, Some(now))) => match item.target {
-                Target::Exactly { value, within } if (now - value).abs() > within => Some(value - now),
-                _ => None,
-            },
-            _ => None,
-        };
-        gain.or_else(|| {
+        let index = self.items.iter().position(|item| item.quantity == Quantity::Integrated)?;
+        let now = after[index]?;
+        match self.items[index].target {
+            Target::Exactly { value, within } => ((now - value).abs() > within).then_some(value - now),
             // No loudness asked for: keep it where it was.
-            let (Some(Some(b)), Some(Some(a))) = (index.map(|index| before[index]), index.map(|index| after[index])) else { return None };
-            ((a - b).abs() > 0.5 && index.is_none()).then_some(b - a)
-        })
+            _ => before[index].filter(|was| (now - was).abs() > 0.5).map(|was| was - now),
+        }
         .map(round1)
     }
 }
@@ -586,12 +608,41 @@ fn overlaps(problem: &Problem, low: f64, high: f64) -> bool {
     problem.hz.is_some_and(|[from, to]| from < high && to > low)
 }
 
-/// How far the short-term spectrum stands over its own ±half-octave average between `low` and `high`: the median over
+/// How far the short-term spectrum stands over its neighbours (a quarter to a full octave away) between `low` and `high`: the median over
 /// the loud frames for a steady problem, the 90th percentile for one that comes and goes. Read whether or not it's
 /// still bad enough to be found, so a fix shows as a number going down.
 pub fn region_excess(heard: &Heard, low: f64, high: f64, steady: bool) -> f64 {
+    region_excess_with(heard, low, high, steady, &|_| 0.)
+}
+
+/// `region_excess` as it would read with each frequency moved by `shift` dB (an EQ's curve): what a cut would do,
+/// before it's heard.
+pub fn region_excess_with(heard: &Heard, low: f64, high: f64, steady: bool, shift: &dyn Fn(f64) -> f64) -> f64 {
+    region_excess_in(heard, low, high, steady, 0..heard.frames.fine.len(), shift)
+}
+
+/// Where in what was heard a problem between `low` and `high` stands out most: the start of the `seconds`-long
+/// stretch (moved a bar at a time, `step` seconds) where it reads highest.
+pub fn worst_stretch(heard: &Heard, low: f64, high: f64, steady: bool, seconds: f64, step: f64) -> Option<f64> {
+    let hop = heard.frames.hop;
+    let count = heard.frames.fine.len();
+    let length = (seconds / hop).round() as usize;
+    if hop <= 0. || length == 0 || count <= length {
+        return None;
+    }
+    let stride = ((step / hop).round() as usize).max(1);
+    (0..=count - length)
+        .step_by(stride)
+        .map(|at| (at, region_excess_in(heard, low, high, steady, at..at + length, &|_| 0.)))
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(at, _)| at as f64 * hop)
+}
+
+fn region_excess_in(heard: &Heard, low: f64, high: f64, steady: bool, range: std::ops::Range<usize>, shift: &dyn Fn(f64) -> f64) -> f64 {
+    let moved: Vec<f32> = (0..FINE_BINS).map(|bin| shift(fine_hz(bin)) as f32).collect();
     let frames = &heard.frames;
-    let mut levels: Vec<f64> = frames.level.iter().map(|level| *level as f64).collect();
+    let range = range.start.min(frames.fine.len())..range.end.min(frames.fine.len());
+    let mut levels: Vec<f64> = frames.level[range.clone()].iter().map(|level| *level as f64).collect();
     levels.sort_by(f64::total_cmp);
     if levels.is_empty() {
         return 0.;
@@ -601,18 +652,12 @@ pub fn region_excess(heard: &Heard, low: f64, high: f64, steady: bool) -> f64 {
     if bins.is_empty() {
         return 0.;
     }
-    let mut excesses: Vec<f64> = (0..frames.fine.len())
+    let mut excesses: Vec<f64> = range
         .filter(|frame| frames.level[*frame] as f64 >= loud)
         .map(|frame| {
-            let fine = &frames.fine[frame];
-            bins.iter()
-                .map(|bin| {
-                    let (from, to) = (bin.saturating_sub(6), (bin + 7).min(FINE_BINS));
-                    let local =
-                        10. * (fine[from..to].iter().map(|db| 10f64.powf(*db as f64 / 10.)).sum::<f64>() / (to - from) as f64).log10();
-                    fine[*bin] as f64 - local
-                })
-                .fold(f64::MIN, f64::max)
+            let fine: Vec<f32> = frames.fine[frame].iter().zip(&moved).map(|(db, by)| db + by).collect();
+            let power: Vec<f64> = fine.iter().map(|db| 10f64.powf(*db as f64 / 10.)).collect();
+            bins.iter().map(|bin| fine[*bin] as f64 - detect::local_level(&power, *bin)).fold(f64::MIN, f64::max)
         })
         .collect();
     excesses.sort_by(f64::total_cmp);
@@ -667,4 +712,38 @@ pub fn number(value: f64) -> String {
 }
 fn round1(value: f64) -> f64 {
     (value * 10.).round() / 10.
+}
+
+/// The smallest bell cut that brings a peak between `low` and `high` to `wanted` dB over its neighbours, predicted on
+/// what was heard: every width from `q` out, every depth to 12 dB, the one that changes least of the rest of the
+/// spectrum. With none enough, the deepest the limits allow. The band and the excess it predicts.
+pub fn plan_cut(heard: &Heard, low: f64, high: f64, steady: bool, wanted: f64, q: f64, rate: f64) -> (Band, f64) {
+    let center = (low * high).sqrt();
+    let widths = [q, 0.7, 1., 1.4, 2., 2.8, 4., 5.6, 8.];
+    let mut best: Option<(f64, Band, f64)> = None;
+    let mut deepest: Option<(Band, f64)> = None;
+    for &q in widths.iter().filter(|q| **q > 0.) {
+        for step in 1..=24 {
+            let band = Band { shape: Shape::Bell, hz: center, db: -0.5 * step as f64, q };
+            let predicted = region_excess_with(heard, low, high, steady, &|hz| response(&band, hz, rate));
+            if deepest.as_ref().is_none_or(|(_, excess)| predicted < *excess) {
+                deepest = Some((band, predicted));
+            }
+            if predicted <= wanted {
+                // What else it moves: the mean change over the fine bins, outside the peak's own band.
+                let collateral =
+                    (0..FINE_BINS).map(fine_hz).filter(|hz| *hz < low || *hz > high).map(|hz| response(&band, hz, rate).abs()).sum::<f64>()
+                        / FINE_BINS as f64;
+                let cost = collateral + band.db.abs() * 0.05;
+                if best.as_ref().is_none_or(|(known, _, _)| cost < *known) {
+                    best = Some((cost, band, predicted));
+                }
+                break;
+            }
+        }
+    }
+    match best {
+        Some((_, band, predicted)) => (band, predicted),
+        None => deepest.unwrap_or((Band { shape: Shape::Bell, hz: center, db: 0., q }, region_excess(heard, low, high, steady))),
+    }
 }

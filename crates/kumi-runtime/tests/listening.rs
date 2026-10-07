@@ -276,3 +276,142 @@ async fn the_listening_model_counts_only_what_holds_both_ways() {
     assert_eq!((answer.closer.as_str(), answer.first.len()), ("second", 1));
     let _ = Choice::After;
 }
+
+#[test]
+fn a_cut_at_a_resonance_reads_as_the_resonance_going_down_and_a_planned_cut_lands_near_its_prediction() {
+    use kumi_runtime::listening::{
+        checklist::{plan_cut, region_excess},
+        fit::{filter, Band, Shape},
+    };
+    // A steady 1.1 kHz tone 12 dB over its third-octave in pink noise.
+    let noise = pink(8., -20., 7);
+    let tone = sine(8., 1100., 0.07);
+    let mix = mixed(&[&noise, &tone]);
+    let (low, high) = (1050., 1160.);
+    let before = heard(&mix, &mix);
+    let excess = region_excess(&before, low, high, true);
+    assert!(excess > 8., "{excess}");
+    // A 3 dB cut there, Q 2, is heard as the peak going down by about that much.
+    let cut = |band: &Band| {
+        let mut left: Vec<f32> = mix.iter().map(|s| *s as f32).collect();
+        filter(&mut left, band, RATE);
+        let channel: Vec<f64> = left.iter().map(|s| *s as f64).collect();
+        heard(&channel, &channel)
+    };
+    let after = region_excess(&cut(&Band { shape: Shape::Bell, hz: 1100., db: -3., q: 2. }), low, high, true);
+    assert!(excess - after >= 1.8, "{excess} → {after}");
+    // The planned cut is the smallest that reaches 6 dB, and hearing it agrees with what was predicted.
+    let (band, predicted) = plan_cut(&before, low, high, true, 6., 4., RATE);
+    assert!(band.db < -1. && band.db >= -12. && predicted <= 6., "{band:?} {predicted}");
+    let heard_after = region_excess(&cut(&band), low, high, true);
+    assert!((heard_after - predicted).abs() <= 1., "predicted {predicted}, heard {heard_after}");
+}
+
+#[test]
+fn an_eq_is_fitted_to_a_gap_instead_of_tried() {
+    use kumi_runtime::listening::fit::{fit, total, Band, Shape, MASTER_LIMITS};
+    // The gap two known bands would close: a 4 dB dip at 800 Hz and 2.5 dB more air.
+    let truth = [Band { shape: Shape::Bell, hz: 800., db: -4., q: 1.2 }, Band { shape: Shape::HighShelf, hz: 9000., db: 2.5, q: 0.7 }];
+    let points: Vec<(f64, f64, f64)> =
+        (0..31).map(|i| 25. * 2f64.powf(i as f64 / 3.)).filter(|hz| *hz < 20_000.).map(|hz| (hz, total(&truth, hz, RATE), 1.)).collect();
+    let bands = fit(&points, &MASTER_LIMITS, RATE);
+    assert!(!bands.is_empty() && bands.len() <= MASTER_LIMITS.bands, "{bands:?}");
+    let worst = points.iter().map(|(hz, want, _)| (want - total(&bands, *hz, RATE)).abs()).fold(0., f64::max);
+    assert!(worst <= 1., "{worst} dB off with {bands:?}");
+    // Nothing to fix, nothing fitted.
+    let flat: Vec<(f64, f64, f64)> = points.iter().map(|(hz, _, _)| (*hz, 0.2, 1.)).collect();
+    assert!(fit(&flat, &MASTER_LIMITS, RATE).is_empty());
+}
+
+#[test]
+fn knob_units_come_from_the_text_live_shows() {
+    use kumi_runtime::listening::knobs::{Scale, Unit};
+    // A frequency knob, logarithmic over its raw range, read in octaves.
+    let grid: Vec<(f64, String)> = (0..=64)
+        .map(|i| {
+            let raw = i as f64 / 64.;
+            let hz = 30. * (22_000f64 / 30.).powf(raw);
+            (raw, if hz >= 1000. { format!("{:.2} kHz", hz / 1000.) } else { format!("{hz:.1} Hz") })
+        })
+        .collect();
+    let scale = Scale::read(&grid).unwrap();
+    assert_eq!(scale.unit, Unit::Hz);
+    assert!((scale.shown(scale.raw(1100.)) - 1100.).abs() < 15., "{}", scale.shown(scale.raw(1100.)));
+    assert!((scale.perceptual(2000.) - scale.perceptual(1000.) - 1.).abs() < 1e-9, "an octave is one");
+    assert_eq!(scale.text(1100.), "1100 Hz");
+    // A gain knob with a "-inf dB" end searches from -70 dB, in dB.
+    let gain: Vec<(f64, String)> = (0..=20)
+        .map(|i| (i as f64 / 20., if i == 0 { "-inf dB".into() } else { format!("{:.1} dB", -36. + 42. * i as f64 / 20.) }))
+        .collect();
+    let scale = Scale::read(&gain).unwrap();
+    assert_eq!((scale.unit, scale.range().1), (Unit::Db, 6.));
+    assert!((scale.raw(-3.) - 33. / 42.).abs() < 0.01, "{}", scale.raw(-3.));
+    assert_eq!(scale.step(), 1.);
+    // A switch or a list isn't a scale.
+    let list: Vec<(f64, String)> =
+        ["Low Cut 48", "Low Shelf", "Bell", "High Shelf"].iter().enumerate().map(|(i, s)| (i as f64, s.to_string())).collect();
+    assert!(Scale::read(&list).is_none());
+}
+
+#[test]
+fn homing_in_takes_a_few_listens_and_learns_which_way_the_knob_goes() {
+    use kumi_runtime::listening::home::{Homed, Homing};
+    let run = |measure: &dyn Fn(f64) -> f64, aim: f64, slope: Option<f64>| {
+        let mut homing = Homing::new(aim, (aim - 0.4, aim + 0.4), (0., 24.), 0., Some(measure(0.)), 4);
+        let stop = loop {
+            match homing.next(slope) {
+                Ok(at) => homing.heard(at, measure(at)),
+                Err(why) => break why,
+            }
+        };
+        (stop, homing.listens(), homing.best().unwrap())
+    };
+    // A limiter's gain: loudness rises less than the gain once it limits. -12.4 to -9 LUFS in at most three listens.
+    let limiter = |gain: f64| -12.4 + gain.min(3.) + (gain - 3.).max(0.) * 0.45;
+    let (stop, listens, (gain, loudness)) = run(&limiter, -9., Some(1.));
+    assert_eq!(stop, Homed::Met);
+    assert!(listens <= 3 && (loudness + 9.).abs() <= 0.4, "{listens} listens, {gain} dB → {loudness}");
+    // A threshold that lowers the measure as it rises: no slope known, and it still finds the way.
+    let threshold = |at: f64| 9. - at * 0.5;
+    let (stop, listens, (_, measured)) = run(&threshold, 4., None);
+    assert!(stop == Homed::Met && listens <= 4 && (measured - 4.).abs() <= 0.4, "{stop:?} {listens} {measured}");
+    // Out of reach: it stops at the end of the range with the closest it heard.
+    let weak = |at: f64| -12. + at * 0.05;
+    let (stop, _, (gain, _)) = run(&weak, -6., Some(1.));
+    assert!(matches!(stop, Homed::Stuck | Homed::Spent) && gain == 24., "{stop:?} {gain}");
+    // A ceiling: anything under it meets it. Where the knob is now isn't known (the producer changed things since),
+    // so it's heard first.
+    let ceiling = |at: f64| at + 0.1;
+    let mut homing = Homing::new(-1.3, (-1.7, -1.1), (-12., 0.), -0.3, None, 4);
+    assert_eq!(homing.next(Some(1.)), Ok(-0.3));
+    homing.heard(-0.3, ceiling(-0.3));
+    let at = homing.next(Some(1.)).unwrap();
+    homing.heard(at, ceiling(at));
+    assert_eq!((homing.done(), homing.listens()), (Some(Homed::Met), 2));
+}
+
+#[test]
+fn a_small_cma_es_finds_knobs_that_interact_in_a_few_generations() {
+    use kumi_runtime::listening::cmaes::Cmaes;
+    // Three knobs whose best settings depend on each other (a tilted valley), searched from the middle.
+    let cost = |x: &[f64]| {
+        let (a, b, c) = (x[0] - 0.7, x[1] - 0.25, x[2] - 0.6);
+        (a + b).powi(2) * 4. + (a - b).powi(2) + c * c * 2.
+    };
+    let mut state = 17u64;
+    let random = move || {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (state >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let mut search = Cmaes::new(&[0.5, 0.5, 0.5], 0.25, None, random);
+    assert_eq!(search.lambda, 7);
+    let start = cost(&[0.5, 0.5, 0.5]);
+    for _ in 0..25 {
+        let points = search.ask();
+        assert!(points.iter().all(|point| point.iter().all(|x| (0. ..=1.).contains(x))));
+        let costs: Vec<f64> = points.iter().map(|point| cost(point)).collect();
+        search.tell(&points, &costs);
+    }
+    let (best, found) = search.best.clone().unwrap();
+    assert!(found < start / 100. && found < 1e-3, "{found} at {best:?} from {start}");
+}

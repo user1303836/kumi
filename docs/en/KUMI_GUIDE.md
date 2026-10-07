@@ -341,9 +341,17 @@ trusting them:
   same loudness, and keeps the change only if its target improved and nothing
   else got audibly worse. Otherwise Kumi's own undo takes it back. When a kept
   change moved the level, the last limiter or Utility evens it out.
+- **Code picks the numbers.** Kumi chooses the change; code finds its values,
+  with as few listens as it can: an EQ calculated from what was measured (the
+  smallest cut that clears a resonance, or bands toward a reference's shape),
+  one knob homed in on (a limiter's gain until the loudness is right, a
+  de-esser's threshold), or a few knobs that interact searched in small
+  generations, each heard side by side on scratch copies of the track in one
+  pass. Every added device and every move has to earn its place.
 - **The round log** shows each round in the conversation: what it was after, the
   change, the numbers before → after, kept or taken back and why, and what's
-  next.
+  next, with the listens so far. A target that resists two changes in a row
+  waits while Kumi works on the next one.
 - **A listening model**, when there is one, hears before and after too, and can
   turn down a change it hears as harsh, muddy or distorted; the meters decide
   anything at the dB level. With an OpenAI API key it's OpenAI's newest audio
