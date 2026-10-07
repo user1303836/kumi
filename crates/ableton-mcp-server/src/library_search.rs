@@ -505,20 +505,54 @@ struct TagIndex {
     vocabulary: Vec<LibraryTagEntry>,
 }
 
-fn tag_path(by_id: &HashMap<i64, &FileRow>, keyword_root: Option<i64>, file_id: i64, seen: &mut HashSet<i64>) -> Option<String> {
-    if !seen.insert(file_id) {
-        return None;
+/// Deeper than any real tag tree: a keyword more than this many levels below the root has no path.
+const MAX_TAG_DEPTH: usize = 512;
+/// A keyword's path below the keywords root ("Drums|Kick"), walked up its parents without recursion. Each id's answer
+/// (its path and depth) is kept in `known` for the whole vocabulary, so a shared ancestor is walked once. None for a
+/// chain that never reaches the root (a missing or zero parent, or a loop) or reaches it past MAX_TAG_DEPTH levels.
+fn tag_path(
+    by_id: &HashMap<i64, &FileRow>,
+    keyword_root: Option<i64>,
+    file_id: i64,
+    known: &mut HashMap<i64, Option<(String, usize)>>,
+) -> Option<String> {
+    let mut pending: Vec<(i64, &FileRow)> = Vec::new();
+    let mut walked = HashSet::new();
+    let mut at = file_id;
+    let mut path = loop {
+        if let Some(found) = known.get(&at) {
+            break found.clone();
+        }
+        if !walked.insert(at) {
+            // A loop: none of these reaches the root.
+            break None;
+        }
+        let Some(row) = by_id.get(&at) else {
+            known.insert(at, None);
+            break None;
+        };
+        if keyword_root == Some(row.file_id) {
+            known.insert(at, Some((String::new(), 0)));
+            break Some((String::new(), 0));
+        }
+        let Some(parent) = row.parent_id.filter(|parent| *parent != 0) else {
+            known.insert(at, None);
+            break None;
+        };
+        if pending.len() >= MAX_TAG_DEPTH {
+            // Too deep from here, whatever the nodes above are: nothing is kept, so each gets its own answer.
+            return None;
+        }
+        pending.push((at, row));
+        at = parent;
+    };
+    for (id, row) in pending.into_iter().rev() {
+        path = path
+            .filter(|(_, depth)| *depth < MAX_TAG_DEPTH)
+            .map(|(parent, depth)| (if parent.is_empty() { row.name.clone() } else { format!("{parent}|{}", row.name) }, depth + 1));
+        known.insert(id, path.clone());
     }
-    let row = by_id.get(&file_id)?;
-    if keyword_root == Some(row.file_id) {
-        return Some(String::new());
-    }
-    let parent_id = row.parent_id?;
-    if parent_id == 0 {
-        return None;
-    }
-    let parent_path = tag_path(by_id, keyword_root, parent_id, seen)?;
-    Some(if parent_path.is_empty() { row.name.clone() } else { format!("{parent_path}|{}", row.name) })
+    path.map(|(path, _)| path)
 }
 
 fn leaf_name(path: &str) -> String {
@@ -531,11 +565,12 @@ fn build_tag_index(reader: &SqliteReader, files: &[FileRow]) -> Result<TagIndex,
     // Tag files in first-seen order, as a Map keeps them.
     let mut tag_files: Vec<(i64, String)> = Vec::new();
     let mut tag_file_index: HashMap<i64, usize> = HashMap::new();
+    let mut known = HashMap::new();
     for row in files {
         if fourcc(row.file_type) != "keyw" {
             continue;
         }
-        let path = tag_path(&by_id, keyword_root, row.file_id, &mut HashSet::new());
+        let path = tag_path(&by_id, keyword_root, row.file_id, &mut known);
         if let Some(path) = path {
             let length = kumi_common::js::string::utf16_len(&path);
             if length > 0 && length <= 512 {
@@ -914,4 +949,30 @@ pub fn query_library_tag_vocabulary(
         &format!("tags|{}", query.query.as_deref().unwrap_or("")),
         scanned_rows,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn row(file_id: i64, parent_id: Option<i64>, name: &str) -> FileRow {
+        FileRow { file_id, parent_id, file_type: None, mod_date: None, name: name.into(), use_count: 0, place_id: None, device_id: None }
+    }
+    #[test]
+    fn a_tag_path_walks_its_parents_without_recursion_and_the_same_way_in_any_order() {
+        // The keywords root, "Drums|Kick", then 100,000 levels below Kick (id k is k - 1 levels down), and a loop.
+        let mut rows = vec![row(1, None, "<keywords>"), row(2, Some(1), "Drums"), row(3, Some(2), "Kick")];
+        rows.extend((4..100_004).map(|id| row(id, Some(id - 1), "x")));
+        rows.extend([row(200_000, Some(200_001), "a"), row(200_001, Some(200_000), "b"), row(300_000, Some(0), "orphan")]);
+        let by_id: HashMap<i64, &FileRow> = rows.iter().map(|row| (row.file_id, row)).collect();
+        let depth = |path: Option<String>| path.map(|path| path.split('|').count());
+        for order in [[3, 100_003, 513, 514, 600, 200_000, 300_000], [600, 514, 513, 300_000, 200_000, 100_003, 3]] {
+            let mut known = HashMap::new();
+            let answers: HashMap<i64, Option<usize>> =
+                order.iter().map(|id| (*id, depth(tag_path(&by_id, Some(1), *id, &mut known)))).collect();
+            assert_eq!(tag_path(&by_id, Some(1), 3, &mut known).as_deref(), Some("Drums|Kick"));
+            // 512 levels have a path; 513 and deeper (100,002 here, which the recursion overflowed the stack on) don't.
+            assert_eq!((answers[&513], answers[&514], answers[&600], answers[&100_003]), (Some(512), None, None, None), "{order:?}");
+            assert_eq!((answers[&200_000], answers[&300_000]), (None, None), "{order:?}");
+        }
+    }
 }
