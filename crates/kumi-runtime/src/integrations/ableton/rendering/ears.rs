@@ -6,9 +6,52 @@ use crate::ears::{
     link::{open_ears_link, EarsOptions, Tap},
 };
 use regex::Regex;
+use std::path::Path;
 /// How long a listening device that couldn't be set up is left alone: one wait (up to about 9 s) each
 /// time at most, not one an audition (a match run auditions a dozen times).
 pub(super) const EARS_RETRY_MS: i64 = 10 * 60_000;
+/// A capture's raw file, removed however its read ends: a sibling tap failing, or a stop, drops the read partway.
+pub(super) struct RawFile(pub(super) PathBuf);
+impl Drop for RawFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+/// Who keeps an Ears folder: the next session to set Ears up sweeps a folder whose keeper is gone (a crash).
+const OWNER: &str = "owner.json";
+/// Marks `folder` as this process's, then sweeps its siblings (other sessions' folders) whose keeper isn't running:
+/// one whose process is gone, or another process now has its pid (it started at another time). A folder from
+/// before keepers were written goes once it's a day old.
+pub(super) async fn sweep_ears(folder: &Path) {
+    let pid = std::process::id();
+    // A platform that keeps no process starts can't tell a gone keeper from a running one: nothing is swept.
+    let Some(started) = kumi_common::process::started_at_ms(pid) else { return };
+    let _ = tokio::fs::write(folder.join(OWNER), stringify(&json!({"pid":pid,"started":started}))).await;
+    let Some(parent) = folder.parent() else { return };
+    let Ok(mut entries) = tokio::fs::read_dir(parent).await else { return };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        if path == folder || !entry.file_type().await.is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let gone = match tokio::fs::read(path.join(OWNER)).await {
+            Ok(bytes) => serde_json::from_slice::<Value>(&bytes).ok().is_some_and(|owner| {
+                let (Some(pid), Some(started)) = (owner["pid"].as_u64(), owner["started"].as_i64()) else { return false };
+                !u32::try_from(pid).ok().and_then(kumi_common::process::started_at_ms).is_some_and(|now| (now - started).abs() <= 2_000)
+            }),
+            Err(_) => entry
+                .metadata()
+                .await
+                .ok()
+                .and_then(|meta| meta.modified().ok())
+                .and_then(|at| at.elapsed().ok())
+                .is_some_and(|age| age > std::time::Duration::from_secs(86_400)),
+        };
+        if gone {
+            let _ = tokio::fs::remove_dir_all(&path).await;
+        }
+    }
+}
 pub(super) struct TapError {
     pub error: RuntimeError,
     pub silent: bool,
@@ -51,6 +94,7 @@ impl Rendering {
                     #[cfg(unix)]
                     directory.mode(0o700);
                     directory.create(&this.ears_folder).await.map_err(|e| RuntimeError::plain(e.to_string()))?;
+                    sweep_ears(&this.ears_folder).await;
                     if this.open_ears.is_some() {
                         return Ok(Some(link));
                     }
@@ -176,8 +220,21 @@ impl Rendering {
             let mut directory = tokio::fs::read_dir(&self.ears_folder).await?;
             let mut names = vec![];
             while let Some(entry) = directory.next_entry().await? {
-                if entry.file_name().to_string_lossy().ends_with(".wav") {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.ends_with(".wav") {
                     names.push(entry.path());
+                } else if name.ends_with(".raw")
+                    && entry
+                        .metadata()
+                        .await
+                        .ok()
+                        .and_then(|meta| meta.modified().ok())
+                        .and_then(|at| at.elapsed().ok())
+                        .is_some_and(|age| age > std::time::Duration::from_secs(600))
+                {
+                    // A raw capture outlives its read only when Kumi stopped mid-read; none is still being written
+                    // ten minutes on.
+                    let _ = tokio::fs::remove_file(entry.path()).await;
                 }
             }
             if names.len() <= 96 {
@@ -201,5 +258,45 @@ impl Rendering {
         }
         .await;
         let _ = result;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_crashed_sessions_ears_folder_is_swept_and_a_running_ones_kept() {
+        let parent = tempfile::tempdir().unwrap();
+        let [mine, running, crashed, older] = ["mine", "running", "crashed", "older"].map(|name| parent.path().join(name));
+        for folder in [&mine, &running, &crashed, &older] {
+            std::fs::create_dir_all(folder).unwrap();
+            std::fs::write(folder.join("take.wav"), b"").unwrap();
+        }
+        let pid = std::process::id();
+        let started = kumi_common::process::started_at_ms(pid).unwrap();
+        // Another session in a running process; one whose process is gone (a child that exited, at a start that was
+        // never its); and one from before keepers were written.
+        std::fs::write(running.join(OWNER), stringify(&json!({"pid":pid,"started":started}))).unwrap();
+        let mut child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" })
+            .args(if cfg!(windows) { &["/C", "exit"][..] } else { &[][..] })
+            .spawn()
+            .unwrap();
+        let gone = child.id();
+        child.wait().unwrap();
+        std::fs::write(crashed.join(OWNER), stringify(&json!({"pid":gone,"started":1}))).unwrap();
+        sweep_ears(&mine).await;
+        assert!(mine.join(OWNER).is_file(), "this session's folder says it's its");
+        assert!(running.join("take.wav").is_file());
+        assert!(!crashed.exists());
+        assert!(older.join("take.wav").is_file(), "a keeperless folder goes only once it's a day old");
+    }
+    #[test]
+    fn a_raw_capture_goes_when_its_read_ends() {
+        let folder = tempfile::tempdir().unwrap();
+        let raw = RawFile(folder.path().join("take.raw"));
+        std::fs::write(&raw.0, b"captured").unwrap();
+        let path = raw.0.clone();
+        drop(raw);
+        assert!(!path.exists());
     }
 }
