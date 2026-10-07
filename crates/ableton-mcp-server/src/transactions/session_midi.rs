@@ -2,6 +2,7 @@
 use crate::{
     live::*,
     registry::{canonical_json, UNBOUNDED_CANONICAL_LIMITS},
+    transactions::batch::compensation_context,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use kumi_common::js::json as js_json;
@@ -562,6 +563,7 @@ impl SessionMidiTransactionManager {
         if let Some(result) = self.existing(id, key)? {
             return Ok(result);
         }
+        let started = now_ms();
         let record = self
             .record(id)
             .filter(|record| !record.is("state", "previewed") || number(&record.get("expiresAt")) > now_ms())
@@ -668,7 +670,9 @@ impl SessionMidiTransactionManager {
                 if let Some(reference) = reference {
                     record.put("clipRef", reference);
                     record.put("recoveryMode", "compensate");
-                    if let Err(compensation) = self.compensate_apply(&record, context).await {
+                    let span = context.and_then(|c| c.deadline_ms).map_or(5000.0, |deadline| deadline - started);
+                    let rollback = compensation_context(&context.cloned().unwrap_or_default(), span);
+                    if let Err(compensation) = self.compensate_apply(&record, Some(&rollback)).await {
                         record.put("state", "uncertain");
                         record.put("recoveryMode", "compensate");
                         return Err(fail(format!(

@@ -171,6 +171,23 @@ pub fn same_live_value(observed: Option<&Value>, expected: Option<&Value>) -> bo
         (a, b) => a.map(js_json::stringify) == b.map(js_json::stringify),
     }
 }
+/// A mixer field as Live holds it, compared as `same_live_value` does, but a `sends` list only over the sends it
+/// names: Live sets a shorter list's first sends and leaves the others as they were.
+pub fn same_mixer_value(field: &str, observed: Option<&Value>, expected: Option<&Value>) -> bool {
+    match (field, observed, expected) {
+        ("sends", Some(Value::Array(observed)), Some(Value::Array(expected))) => {
+            observed.len() >= expected.len() && observed.iter().zip(expected).all(|(a, b)| same_live_value(Some(a), Some(b)))
+        }
+        _ => same_live_value(observed, expected),
+    }
+}
+/// The part of a mixer field's value a change named: for `sends`, the first as many sends as `named` lists.
+pub fn named_mixer_part(field: &str, value: &Value, named: &Value) -> Value {
+    match (field, value.as_array(), named.as_array()) {
+        ("sends", Some(value), Some(named)) => Value::Array(value.iter().take(named.len()).cloned().collect()),
+        _ => value.clone(),
+    }
+}
 pub fn same_follow_action_value(field: &str, observed: Option<&Value>, expected: Option<&Value>) -> bool {
     if field == "followActionTime" {
         return same_live_value(observed, expected);

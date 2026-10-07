@@ -178,7 +178,10 @@ impl BatchTransactionManager {
         rand::rng().fill_bytes(&mut random);
         let id = format!("batch_{}", URL_SAFE_NO_PAD.encode(random));
         let expires = now() + BATCH_TRANSACTION_TTL_MS;
-        let record = json!({"transactionId":id,"epoch":status.epoch,"expiresAt":expires,"state":"previewed","operations":operations,"plans":plans,"requiredCapabilities":capabilities,"requiredOperations":required_ops,"steps":plans.iter().map(|_|json!({"completed":false})).collect::<Vec<_>>()});
+        let mut record = json!({"transactionId":id,"epoch":status.epoch,"expiresAt":expires,"state":"previewed","operations":operations,"plans":plans,"requiredCapabilities":capabilities,"requiredOperations":required_ops,"steps":plans.iter().map(|_|json!({"completed":false})).collect::<Vec<_>>()});
+        if operations.iter().any(|operation| operation["kind"] == "track.create") {
+            record["structureIdentity"] = structure_identity(&snapshot).into();
+        }
         self.retain(record)?;
         Ok(
             json!({"transactionId":id,"epoch":status.epoch,"operations":plans,"summary":{"operationCount":plans.len(),"kinds":kinds,"targets":plans.iter().map(|plan|plan["summary"].clone()).collect::<Vec<_>>()},"impact":"applies-sequential-batch-with-guarded-compensation","confirmation":"apply","expiresAt":expires}),
@@ -251,8 +254,10 @@ impl BatchTransactionManager {
         if record.is("state", "applied") && record.is("applyKey", key) {
             return Ok(json!({"transactionId":id,"state":"applied","idempotent":true}));
         }
-        let context = bound_context(id, key, context);
-        let context = Some(&context);
+        let started = now();
+        let bound = bound_context(id, key, context);
+        let span = bound.deadline_ms.unwrap_or(started) - started;
+        let context = Some(&bound);
         self.policy(&record)?;
         let reconciliation = record.is("state", "uncertain") && !record.is("recoveryMode", "undo") && record.is("applyKey", key);
         if record.is("state", "uncertain") && !reconciliation {
@@ -317,6 +322,11 @@ impl BatchTransactionManager {
         }
         .await;
         if let Err(cause) = result {
+            if not_dispatched(&cause) {
+                let mut steps = record.get("steps");
+                forget_undispatched(&mut steps);
+                record.put("steps", steps);
+            }
             let message = cause.message();
             let lower = message.to_ascii_lowercase();
             if array(&record.get("steps")).iter().any(|step| step.get("invocation").is_some() && step["completed"] != true)
@@ -336,7 +346,8 @@ impl BatchTransactionManager {
             };
             record.put("failureReason", failure);
             record.put("recoveryMode", "compensate");
-            return match self.revert(context, &record, "rollback").await {
+            let rollback = compensation_context(&bound, span);
+            return match self.revert(Some(&rollback), &record, "rollback").await {
                 Ok(_) => Ok(self.compensated(&record, key)),
                 Err(compensation) => {
                     record.put("state", "uncertain");

@@ -1,6 +1,13 @@
 use super::{manager::Record, *};
-fn equal(left: &Value, right: &Value) -> bool {
-    kumi_common::js::json::stringify(left) == kumi_common::js::json::stringify(right)
+use crate::host::helpers::{named_mixer_part, same_mixer_value};
+/// Whether `row` holds a step's value for `field`: within float32 precision (Live keeps many values as 32-bit
+/// floats, so a written 0.6 reads back 0.6000000238418579), and a `sends` list over just the sends it names.
+fn holds(row: &Value, field: &str, expected: &Value) -> bool {
+    same_mixer_value(field, row.get(field), Some(expected))
+}
+/// A mixer field's prior value, as much of it as the step changed (a shorter `sends` list set only its first sends).
+fn prior_part(plan: &Value, field: &str) -> Value {
+    named_mixer_part(field, &plan["prior"][field], &plan["proposed"][field])
 }
 fn rename_parts<'a>(snapshot: &'a Value, operation: &Value, plan: &Value) -> (&'a [Value], Value, Value) {
     if operation["kind"] == "track.rename" {
@@ -13,29 +20,32 @@ fn parameter_args(reference: &Value, value: &Value, parameter: &Value, authority
     json!({"ref":reference,"value":value,"expectedRevision":parameter_revision(parameter),"expectedObjectIdentity":authority["parameterIdentity"],"expectedOwnerRef":authority["ownerRef"],"expectedOwnerIdentity":authority["ownerIdentity"],"expectedTrackRef":authority["trackRef"],"expectedTrackIdentity":authority["trackIdentity"],"expectedSiblings":authority["siblings"]})
 }
 impl BatchTransactionManager {
-    fn preview_structure_revision(&self, snapshot: &Value, record: &Record) -> Result<String, LiveError> {
+    /// The Set's structure as the preview saw it, from `snapshot`: the tracks this batch made taken out and its renames
+    /// put back, matched by identity (a track made above another moves that one's ref).
+    fn preview_structure_identity(&self, snapshot: &Value, record: &Record) -> Result<String, LiveError> {
         let mut baseline = snapshot.clone();
         let created = record.get("created");
-        baseline["tracks"].as_array_mut().unwrap().retain(|track| {
-            !array(&created).iter().any(|owned| owned["ref"] == track["ref"] && owned["objectIdentity"] == track["objectIdentity"])
-        });
+        baseline["tracks"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|track| !array(&created).iter().any(|owned| owned["objectIdentity"] == track["objectIdentity"]));
         for (index, operation) in array(&record.get("operations")).iter().enumerate() {
             if record.step(false, index)["completed"] != true || !["track.rename", "scene.rename"].contains(&string(&operation["kind"])) {
                 continue;
             }
             let plan = record.get("plans")[index].clone();
-            let (_, reference, identity) = rename_parts(&baseline, operation, &plan);
+            let (_, _, identity) = rename_parts(&baseline, operation, &plan);
             let collection = if operation["kind"] == "track.rename" { "tracks" } else { "scenes" };
             let row = baseline[collection]
                 .as_array_mut()
                 .unwrap()
                 .iter_mut()
-                .find(|row| row["ref"] == reference)
-                .filter(|row| row["objectIdentity"] == identity && row["name"] == operation["name"])
+                .find(|row| row["objectIdentity"] == identity)
+                .filter(|row| row["name"] == operation["name"])
                 .ok_or_else(|| fail("transaction batch structure changed after an owned rename"))?;
             row["name"] = plan["prior"]["name"].clone();
         }
-        Ok(structure_revision(&baseline))
+        Ok(structure_identity(&baseline))
     }
     pub(super) fn step_args(&self, snapshot: &Value, record: &Record, index: usize) -> Result<Value, LiveError> {
         let operation = record.get("operations")[index].clone();
@@ -100,7 +110,7 @@ impl BatchTransactionManager {
                 if array(&snapshot["tracks"]).iter().chain(array(&snapshot["scenes"])).any(|row| row["name"] == operation["name"]) {
                     return Err(error("track name already exists"));
                 }
-                if self.preview_structure_revision(snapshot, record)? != string(&plan["prior"]["structureRevision"]) {
+                if self.preview_structure_identity(snapshot, record)? != string(&record.get("structureIdentity")) {
                     return Err(error("structure changed since preview"));
                 }
                 let mut args = json!({"name":operation["name"],"kind":operation["trackKind"]});
@@ -135,11 +145,11 @@ impl BatchTransactionManager {
                     let target = mixer_target(snapshot, string(&operation["trackRef"]))?;
                     target.track["objectIdentity"] == plan["target"]["trackIdentity"]
                         && mixer_identity_digest(&target)? == string(&plan["prior"]["authorityDigest"])
-                        && plan["proposed"].as_object().unwrap().iter().all(|(key, value)| equal(&target.mixer[key], value))
+                        && plan["proposed"].as_object().unwrap().iter().all(|(key, value)| holds(target.mixer, key, value))
                 }
                 "device.parameter.set" => {
                     let target = parameter_target(snapshot, string(&operation["deviceRef"]), string(&operation["parameterRef"]))?;
-                    same_parameter_value(&target.parameter["value"], &operation["value"])
+                    parameter_holds(target.parameter, &plan["proposed"]["value"])
                         && parameter_revision(target.parameter) > number(&plan["prior"]["revision"])
                         && fingerprint(&parameter_authority(snapshot, string(&operation["parameterRef"]))?)?
                             == string(&plan["prior"]["authorityDigest"])
@@ -149,7 +159,7 @@ impl BatchTransactionManager {
                     let located = clip_row(snapshot, reference)?;
                     located.clip["objectIdentity"] == plan["target"]["clipIdentity"]
                         && fingerprint(&clip_authority(snapshot, reference)?)? == string(&plan["prior"]["authorityDigest"])
-                        && plan["proposed"].as_object().unwrap().iter().all(|(key, value)| equal(&located.clip[key], value))
+                        && plan["proposed"].as_object().unwrap().iter().all(|(key, value)| holds(located.clip, key, value))
                 }
                 "track.rename" | "scene.rename" => {
                     let (rows, reference, identity) = rename_parts(snapshot, &operation, &plan);
@@ -185,17 +195,23 @@ impl BatchTransactionManager {
                     return Err(error("mixer change was not confirmed"));
                 }
                 let target = mixer_target(&snapshot, string(&operation["trackRef"]))?;
-                if plan["proposed"].as_object().unwrap().iter().any(|(key, value)| !equal(&target.mixer[key], value)) {
+                if plan["proposed"].as_object().unwrap().iter().any(|(key, value)| !holds(target.mixer, key, value)) {
                     return Err(error("mixer postcondition was not confirmed"));
                 }
                 Ok(json!({"index":index,"kind":kind,"trackRef":operation["trackRef"],"applied":plan["proposed"]}))
             }
             "device.parameter.set" => {
                 let target = parameter_target(&snapshot, string(&operation["deviceRef"]), string(&operation["parameterRef"]))?;
-                if !same_parameter_value(&target.parameter["value"], &operation["value"])
+                if !parameter_holds(target.parameter, &operation["value"])
                     || parameter_revision(target.parameter) <= number(&plan["prior"]["revision"])
                 {
                     return Err(error("parameter postcondition was not confirmed"));
+                }
+                // The whole number Live kept is the change made: undo checks for it.
+                if !same_parameter_value(&target.parameter["value"], &operation["value"]) {
+                    let mut plans = record.get("plans");
+                    plans[index]["proposed"]["value"] = target.parameter["value"].clone();
+                    record.put("plans", plans);
                 }
                 Ok(
                     json!({"index":index,"kind":kind,"parameterRef":operation["parameterRef"],"value":target.parameter["value"],"revision":parameter_revision(target.parameter)}),
@@ -206,7 +222,7 @@ impl BatchTransactionManager {
                     return Err(error("clip change was not confirmed"));
                 }
                 let located = clip_row(&snapshot, string(&operation["clipRef"]))?;
-                if plan["proposed"].as_object().unwrap().iter().any(|(key, value)| !equal(&located.clip[key], value)) {
+                if plan["proposed"].as_object().unwrap().iter().any(|(key, value)| !holds(located.clip, key, value)) {
                     return Err(error("clip postcondition was not confirmed"));
                 }
                 Ok(json!({"index":index,"kind":kind,"clipRef":operation["clipRef"],"applied":plan["proposed"]}))
@@ -299,22 +315,18 @@ impl BatchTransactionManager {
                     {
                         return Err(error("mixer target identity changed"));
                     }
-                    if plan["proposed"].as_object().unwrap().iter().any(|(key, value)| !equal(&target.mixer[key], value)) {
+                    if plan["proposed"].as_object().unwrap().iter().any(|(key, value)| !holds(target.mixer, key, value)) {
                         return Err(error("mixer state changed after apply"));
                     }
-                    let fields: Vec<_> = plan["proposed"].as_object().unwrap().keys().map(String::as_str).collect();
-                    invoke(
-                        "mixer.set",
-                        merge(
-                            merge(json!({"ref":operation["trackRef"]}), state_fields(&plan["prior"], &fields)),
-                            mixer_authority(&target)?,
-                        ),
-                    )
+                    let prior = Value::Object(
+                        plan["proposed"].as_object().unwrap().keys().map(|field| (field.clone(), prior_part(&plan, field))).collect(),
+                    );
+                    invoke("mixer.set", merge(merge(json!({"ref":operation["trackRef"]}), prior), mixer_authority(&target)?))
                 }
                 "device.parameter.set" => {
                     let target = parameter_target(&snapshot, string(&operation["deviceRef"]), string(&operation["parameterRef"]))?;
                     let authority = parameter_authority(&snapshot, string(&operation["parameterRef"]))?;
-                    if !same_parameter_value(&target.parameter["value"], &plan["proposed"]["value"])
+                    if !parameter_holds(target.parameter, &plan["proposed"]["value"])
                         || fingerprint(&authority)? != string(&plan["prior"]["authorityDigest"])
                     {
                         return Err(error("parameter value or identity changed after apply"));
@@ -329,7 +341,7 @@ impl BatchTransactionManager {
                     {
                         return Err(error("clip identity changed after apply"));
                     }
-                    if plan["proposed"].as_object().unwrap().iter().any(|(key, value)| !equal(&located.clip[key], value)) {
+                    if plan["proposed"].as_object().unwrap().iter().any(|(key, value)| !holds(located.clip, key, value)) {
                         return Err(error("clip state changed after apply"));
                     }
                     let fields: Vec<_> = plan["proposed"].as_object().unwrap().keys().map(String::as_str).collect();
@@ -391,7 +403,7 @@ impl BatchTransactionManager {
             match kind {
                 "mixer.set" => {
                     let target = mixer_target(&snapshot, string(&operation["trackRef"]))?;
-                    if plan["proposed"].as_object().unwrap().keys().any(|field| !equal(&target.mixer[field], &plan["prior"][field])) {
+                    if plan["proposed"].as_object().unwrap().keys().any(|field| !holds(target.mixer, field, &prior_part(&plan, field))) {
                         return Err(error("mixer prior-state restoration was not confirmed"));
                     }
                 }
@@ -403,7 +415,7 @@ impl BatchTransactionManager {
                 }
                 "clip.set" => {
                     let located = clip_row(&snapshot, string(&operation["clipRef"]))?;
-                    if plan["proposed"].as_object().unwrap().keys().any(|field| !equal(&located.clip[field], &plan["prior"][field])) {
+                    if plan["proposed"].as_object().unwrap().keys().any(|field| !holds(located.clip, field, &plan["prior"][field])) {
                         return Err(error("clip prior-state restoration was not confirmed"));
                     }
                 }
@@ -416,7 +428,8 @@ impl BatchTransactionManager {
                 "track.create" => {
                     let created = record.get("created");
                     let owned = array(&created).iter().find(|owned| number(&owned["stepIndex"]) == index as f64).unwrap();
-                    if array(&snapshot["tracks"]).iter().any(|track| track["ref"] == owned["ref"]) {
+                    // By identity: Live gives refs by place, so the next track takes the deleted one's ref.
+                    if array(&snapshot["tracks"]).iter().any(|track| track["objectIdentity"] == owned["objectIdentity"]) {
                         return Err(error("created-track deletion was not confirmed"));
                     }
                 }
@@ -468,11 +481,9 @@ impl BatchTransactionManager {
             "track.create" => {
                 let created = record.get("created");
                 let owned = array(&created).iter().find(|owned| number(&owned["stepIndex"]) == index as f64);
-                if owned.is_none_or(|owned| {
-                    array(&snapshot["tracks"])
-                        .iter()
-                        .any(|track| track["ref"] == owned["ref"] || track["objectIdentity"] == owned["objectIdentity"])
-                }) {
+                if owned
+                    .is_none_or(|owned| array(&snapshot["tracks"]).iter().any(|track| track["objectIdentity"] == owned["objectIdentity"]))
+                {
                     return Err(fail("transaction batch created-track deletion was not confirmed"));
                 }
                 return Ok(());
@@ -483,7 +494,7 @@ impl BatchTransactionManager {
             return Err(fail("transaction batch prior-state restoration identity or value changed"));
         }
         for field in plan["proposed"].as_object().unwrap().keys() {
-            if canonical(&row.unwrap()[field])? != canonical(&plan["prior"][field])? {
+            if !holds(row.unwrap(), field, &prior_part(&plan, field)) {
                 return Err(fail("transaction batch prior-state restoration identity or value changed"));
             }
         }

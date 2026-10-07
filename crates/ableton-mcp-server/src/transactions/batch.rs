@@ -80,6 +80,36 @@ pub fn same_parameter_value(observed: &Value, expected: &Value) -> bool {
     let (Some(observed), Some(expected)) = (observed.as_f64(), expected.as_f64()) else { return false };
     (observed - expected).abs() <= 1e-6 * 1.0_f64.max(observed.abs()).max(expected.abs())
 }
+/// Whether a parameter holds the value a step asked for: the same (within float32 precision), or the whole number
+/// Live keeps for it on a whole-number range (63.5 asked, 64 kept), as the single-parameter path accepts.
+pub fn parameter_holds(parameter: &Value, wanted: &Value) -> bool {
+    same_parameter_value(&parameter["value"], wanted)
+        || crate::host::helpers::whole_number_live_kept(&parameter["value"], number(wanted), parameter).is_some()
+}
+/// A refusal that says nothing changed (the Remote Script's "; nothing changed", or a request that never left):
+/// the step it stopped has nothing in flight.
+pub(crate) fn not_dispatched(cause: &LiveError) -> bool {
+    matches!(cause, LiveError::MutationNotDispatched(_)) || crate::host::helpers::nothing_changed(cause)
+}
+/// Forget the invocation of every step a not-dispatched refusal stopped before Live acknowledged it, so the failure
+/// is classed by what reached Live: a clean refusal compensates the steps before it.
+pub(crate) fn forget_undispatched(steps: &mut Value) {
+    for step in steps.as_array_mut().into_iter().flatten() {
+        if step["completed"] != true && step["acknowledged"] != true {
+            if let Some(step) = step.as_object_mut() {
+                step.shift_remove("invocation");
+            }
+        }
+    }
+}
+/// What a rollback after a failed apply runs under: the apply's signal and authority, with as long again from now as
+/// the apply had (it may have spent its deadline, and the rollback's first read would fail at once).
+pub(crate) fn compensation_context(context: &LiveOperationContext, span: f64) -> LiveOperationContext {
+    LiveOperationContext {
+        deadline_ms: Some((kumi_common::time::now_ms() as f64 + span.clamp(5000.0, 60000.0)).round()),
+        ..context.clone()
+    }
+}
 pub fn canonical(value: &Value) -> Result<String, LiveError> {
     canonical_json(value, &UNBOUNDED_CANONICAL_LIMITS).map_err(|e| fail(format!("{e:?}")))
 }
@@ -215,6 +245,19 @@ fn state_fields(row: &Value, fields: &[&str]) -> Value {
 }
 fn rename_revision(row: &Value) -> Result<String, LiveError> {
     fingerprint(&json!({"ref":row["ref"],"objectIdentity":row["objectIdentity"],"name":row["name"]}))
+}
+/// The Set's structure as a batch's track creation checks it since its preview: each track's and scene's identity,
+/// name, kind and place, but not its ref. Live gives refs by place, so a track the batch made moves the refs of the
+/// ones after it, and a second creation would otherwise always see a changed Set.
+fn structure_identity(snapshot: &Value) -> String {
+    let tracks: Vec<_> = array(&snapshot["tracks"])
+        .iter()
+        .enumerate()
+        .map(|(index, row)| json!([row["objectIdentity"], row["name"], row["kind"], index]))
+        .collect();
+    let scenes: Vec<_> =
+        array(&snapshot["scenes"]).iter().enumerate().map(|(index, row)| json!([row["objectIdentity"], row["name"], index])).collect();
+    hex::encode(Sha256::digest(kumi_common::js::json::stringify(&json!({"tracks":tracks,"scenes":scenes}))))
 }
 fn structure_revision(snapshot: &Value) -> String {
     let tracks: Vec<_> = array(&snapshot["tracks"])

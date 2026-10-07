@@ -1,5 +1,6 @@
 use super::super::batch::{
-    invoke_checkpoint, parameter_authority, parameter_revision, parameter_target, same_parameter_value, MutationCheckpoint,
+    compensation_context, forget_undispatched, invoke_checkpoint, not_dispatched, parameter_authority, parameter_holds, parameter_revision,
+    parameter_target, same_parameter_value, MutationCheckpoint,
 };
 use super::*;
 use crate::live::{AsyncLiveAdapter, LiveInvocation, LiveOperationContext, LiveSnapshotPart, LiveStatus, LiveViewScope, LiveViews};
@@ -151,8 +152,7 @@ impl DeviceStateTransactionManager {
                 let snapshot = self.view_for(context, &refs).await?;
                 let target = parameter_target(&snapshot, string(&step["deviceRef"]), string(&step["parameterRef"]))?;
                 let authority = parameter_authority(&snapshot, string(&step["parameterRef"]))?;
-                if !same_parameter_value(&target.parameter["value"], &step["proposedValue"])
-                    || json!(fingerprint(&authority)?) != step["authorityDigest"]
+                if !parameter_holds(target.parameter, &step["proposedValue"]) || json!(fingerprint(&authority)?) != step["authorityDigest"]
                 {
                     return Err(fail(format!(
                         "device state {mode} step {index} ({}) parameter value or identity changed after apply",
@@ -207,8 +207,10 @@ impl DeviceStateTransactionManager {
             .record(id)
             .filter(|record| !record.is("state", "previewed") || number(&record.get("expiresAt")) > now())
             .ok_or_else(|| fail("device state preview expired; preview again"))?;
-        let context = bound_context(id, key, context);
-        let context = Some(&context);
+        let started = now();
+        let bound = bound_context(id, key, context);
+        let span = bound.deadline_ms.unwrap_or(started) - started;
+        let context = Some(&bound);
         let reconciliation = record.is("state", "uncertain") && !record.is("recoveryMode", "undo") && record.is("applyKey", key);
         if record.is("state", "uncertain") && !reconciliation {
             return Err(fail("device state is uncertain; reconcile with the exact original idempotency key"));
@@ -247,9 +249,16 @@ impl DeviceStateTransactionManager {
             })
             .collect::<Vec<_>>();
         let operation=async{for(index,result)in results.iter_mut().enumerate(){let step=record.step(false,index);if step["completed"]==true{continue;}let replayed=step.get("invocation").is_some();let refs=[step["deviceRef"].clone(),step["parameterRef"].clone()];if !replayed{let snapshot=self.view_for(context,&refs).await?;let target=parameter_target(&snapshot,string(&step["deviceRef"]),string(&step["parameterRef"]))?;let authority=parameter_authority(&snapshot,string(&step["parameterRef"]))?;if !same_parameter_value(&target.parameter["value"],&step["priorValue"])||parameter_revision(target.parameter)!=number(&step["priorRevision"])||json!(fingerprint(&authority)?)!=step["authorityDigest"]{return Err(fail(format!("device state step {index} ({}) parameter identity, value, or revision changed since preview",string(&step["path"]))));}record.set_step(false,index,"invocation",json!(LiveInvocation::new("device.parameter.set",self.step_args(&snapshot,&step,&step["proposedValue"],number(&step["priorRevision"]))?)));}
- self.checkpoint(&record,false,index,context).await?;let snapshot=self.view_for(context,&refs).await?;let verified=parameter_target(&snapshot,string(&step["deviceRef"]),string(&step["parameterRef"]))?;if !same_parameter_value(&verified.parameter["value"],&step["proposedValue"])||parameter_revision(verified.parameter)<=number(&step["priorRevision"])||json!(fingerprint(&parameter_authority(&snapshot,string(&step["parameterRef"]))?)?)!=step["authorityDigest"]{return Err(fail(format!("device state step {index} ({}) identity or postcondition was not confirmed",string(&step["path"]))));}
+ self.checkpoint(&record,false,index,context).await?;let snapshot=self.view_for(context,&refs).await?;let verified=parameter_target(&snapshot,string(&step["deviceRef"]),string(&step["parameterRef"]))?;if !parameter_holds(verified.parameter,&step["proposedValue"])||parameter_revision(verified.parameter)<=number(&step["priorRevision"])||json!(fingerprint(&parameter_authority(&snapshot,string(&step["parameterRef"]))?)?)!=step["authorityDigest"]{return Err(fail(format!("device state step {index} ({}) identity or postcondition was not confirmed",string(&step["path"]))));}
+ // The whole number Live kept is the change made: undo checks for it.
+ if !same_parameter_value(&verified.parameter["value"],&step["proposedValue"]){record.set_step(false,index,"proposedValue",verified.parameter["value"].clone());}
  let mut value=json!({"index":index,"path":step["path"],"value":verified.parameter["value"],"revision":parameter_revision(verified.parameter)});if replayed{value["replayed"]=true.into();}record.set_step(false,index,"completed",true);record.set_step(false,index,"result",value.clone());*result=value;}Ok::<(),LiveError>(())}.await;
         if let Err(cause) = operation {
+            if not_dispatched(&cause) {
+                let mut steps = record.get("steps");
+                forget_undispatched(&mut steps);
+                record.put("steps", steps);
+            }
             let message = cause.message();
             let lower = message.to_ascii_lowercase();
             if array(&record.get("steps")).iter().any(|step| step.get("invocation").is_some() && step["completed"] != true)
@@ -269,7 +278,8 @@ impl DeviceStateTransactionManager {
                 },
             );
             record.put("recoveryMode", "compensate");
-            return match self.revert(context, &record, "rollback").await {
+            let rollback = compensation_context(&bound, span);
+            return match self.revert(Some(&rollback), &record, "rollback").await {
                 Ok(_) => Ok(self.compensated(&record, key)),
                 Err(error) => {
                     record.put("state", "uncertain");
