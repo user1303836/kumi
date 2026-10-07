@@ -486,6 +486,8 @@ pub fn project_source_evidence(path: &str) -> Result<ProjectSourceEvidence, Proj
         project_local: None,
         resolution,
     };
+    // The Set's own folder, resolved once (and only if a reference needs it), not once per reference.
+    let real_project = std::cell::OnceCell::new();
     let references: Vec<ProjectReference> = collected
         .values
         .iter()
@@ -507,8 +509,9 @@ pub fn project_source_evidence(path: &str) -> Result<ProjectSourceEvidence, Proj
                 let mut project_local = false;
                 if !windows_absolute {
                     if exists {
-                        project_local = match (realpath(&dirname(&source.path)), realpath(&resolved_path)) {
-                            (Ok(real_project), Ok(real_reference)) => {
+                        let real_project = real_project.get_or_init(|| realpath(&dirname(&source.path)).ok()).as_deref();
+                        project_local = match (real_project, realpath(&resolved_path)) {
+                            (Some(real_project), Ok(real_reference)) => {
                                 real_reference == real_project || real_reference.starts_with(&format!("{real_project}{SEP}"))
                             }
                             _ => false,
