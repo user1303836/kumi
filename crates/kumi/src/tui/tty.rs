@@ -189,7 +189,9 @@ impl Tty {
 impl Inner {
     fn restore(&self, sync: bool) {
         // Given back by the crash path and not taken again: what it didn't undo is still Kumi's to undo.
-        if !self.active.swap(false, Ordering::SeqCst) && !self.taken.swap(false, Ordering::SeqCst) {
+        let active = self.active.swap(false, Ordering::SeqCst);
+        let taken = self.taken.swap(false, Ordering::SeqCst);
+        if !active && !taken {
             return;
         }
         let input = &self.options.input;
@@ -199,12 +201,10 @@ impl Inner {
         if let Some(id) = self.emergency.take() {
             unregister(id);
         }
-        // The terminal may already be gone: a failed write is nothing to report.
-        if sync {
-            if output.write_sync(RESTORE).is_none() {
-                output.write(RESTORE);
-            }
-        } else {
+        // The terminal may already be gone: a failed write is nothing to report. Once the crash path wrote it, it isn't
+        // written again: its `?1049l` would put the cursor back where Kumi found it, over the panic's message (the
+        // shell's prompt, or a farewell, would land on it).
+        if active && !(sync && output.write_sync(RESTORE).is_some()) {
             output.write(RESTORE);
         }
         input.pause();
@@ -798,10 +798,15 @@ mod tests {
         assert!(!tty.recover());
         tty.write("frame");
         assert!(terminal.written.borrow().ends_with("frame"));
-        // A second caught panic, then Kumi quits without a frame between: it's given back, and nothing stays registered.
+        // A second caught panic, then Kumi quits without a frame between: it's given back once (by the crash path, not
+        // again on quitting, which would put the cursor back over the message), and nothing stays registered.
+        terminal.written.borrow_mut().clear();
+        terminal.crashed.lock().unwrap().clear();
         let _ = std::thread::spawn(|| std::panic::catch_unwind(|| panic!("another"))).join();
         assert!(!tty.is_active());
+        assert!(terminal.crashed.lock().unwrap().ends_with(RESTORE));
         tty.restore(false);
+        assert!(!terminal.written.borrow().contains(RESTORE), "{:?}", terminal.written.borrow());
         assert!(!terminal.is_raw());
         assert_eq!(emergency_restorers(), registered - 1);
         assert!(!tty.recover());
