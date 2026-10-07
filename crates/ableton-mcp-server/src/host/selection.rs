@@ -83,6 +83,11 @@ impl McpHost {
             payload["expectedStateRevision"] = json!(revision(&snapshot)?);
             let mut prior =
                 Value::Object(proposed.as_object().unwrap().keys().map(|f| (f.clone(), snapshot["selection"][f].clone())).collect());
+            // Live selects a device through its track (Song.View.select_device moves the selected track there), so the
+            // track selected now goes back with it, before the device.
+            if proposed.get("deviceRef").is_some_and(|v| !v.is_null()) && prior.get("trackRef").is_none() {
+                prior["trackRef"] = snapshot["selection"]["trackRef"].clone();
+            }
             if p.get("drawMode").is_some() {
                 prior["drawMode"] = draw_mode(&snapshot).clone();
             }

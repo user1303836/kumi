@@ -396,6 +396,86 @@ impl AsyncLiveAdapter for RemoteShape {
         Ok(())
     }
 }
+/// As Live's Song.View: selecting a device (select_device) moves the selected track to the device's.
+struct SelectsThroughTrack(DeterministicLiveSimulator);
+impl LiveAdapter for SelectsThroughTrack {
+    fn status(&self) -> Result<LiveStatus, LiveError> {
+        self.0.status()
+    }
+    fn snapshot(&self) -> Result<LiveSnapshot, LiveError> {
+        self.0.snapshot()
+    }
+    fn get(&self, r: &LiveRef) -> Result<Option<Value>, LiveError> {
+        self.0.get(r)
+    }
+    fn invoke(&self, i: &LiveInvocation) -> Result<Value, LiveError> {
+        self.0.invoke(i)
+    }
+    fn subscribe(&self, l: LiveListener) -> Result<Unsubscribe, LiveError> {
+        self.0.subscribe(l)
+    }
+    fn reconnect(&self) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect()
+    }
+}
+#[async_trait::async_trait(?Send)]
+impl AsyncLiveAdapter for SelectsThroughTrack {
+    async fn snapshot_async(&self, c: Option<&LiveOperationContext>, r: Option<&LiveSnapshotRequest>) -> Result<LiveSnapshot, LiveError> {
+        self.0.snapshot_async(c, r).await
+    }
+    async fn discover_async(&self, r: &LiveDiscoveryRequest, c: Option<&LiveOperationContext>) -> Result<LiveDiscoveryResult, LiveError> {
+        self.0.discover_async(r, c).await
+    }
+    async fn get_async(&self, r: &LiveRef, _: Option<&LiveOperationContext>) -> Result<Option<Value>, LiveError> {
+        self.0.get(r)
+    }
+    async fn invoke_async(&self, i: &LiveInvocation, _: Option<&LiveOperationContext>) -> Result<Value, LiveError> {
+        let result = self.0.invoke(i)?;
+        if let Some(device) = i.args.get("deviceRef").filter(|v| i.operation == "selection.set" && !v.is_null()) {
+            let mut state = self.0.state.borrow_mut();
+            let owner = state["tracks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|t| t["devices"].as_array().unwrap().iter().any(|d| &d["ref"] == device))
+                .map(|t| t["ref"].clone());
+            state["selection"]["trackRef"] = owner.unwrap();
+        }
+        Ok(result)
+    }
+    async fn reconnect_async(&self, _: Option<&LiveOperationContext>) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect()
+    }
+    async fn close(&self) -> Result<(), LiveError> {
+        Ok(())
+    }
+}
+#[tokio::test]
+async fn selecting_a_device_on_another_track_is_undone_with_its_track() {
+    let live = Rc::new(SelectsThroughTrack(DeterministicLiveSimulator::new()));
+    {
+        let mut state = live.0.state.borrow_mut();
+        let mut other = state["tracks"][0].clone();
+        other["ref"] = json!("track:b");
+        other["objectIdentity"] = json!("simulator:track:b");
+        other["devices"][0]["ref"] = json!("device:b-1");
+        other["devices"][0]["objectIdentity"] = json!("simulator:device:b-1");
+        state["tracks"].as_array_mut().unwrap().push(other);
+        state["selection"]["deviceRef"] = Value::Null;
+    }
+    let host = McpHost::new(live.clone(), McpHostOptions::default()).unwrap();
+    let text = |result: Value| -> Value { serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+    let preview = text(host.live_selection_preview_async(&json!(1), &json!({"deviceRef":"device:b-1"})).await);
+    assert_eq!(preview["prior"], json!({"deviceRef":null,"trackRef":"track:track-1"}), "{preview}");
+    let apply = json!({"transactionId":preview["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+    assert_eq!(text(host.live_selection_apply_async(&json!(2), &apply, None).await.unwrap())["state"], "applied");
+    assert_eq!(live.0.state.borrow()["selection"]["trackRef"], "track:b", "Live moved the selected track to the device's");
+    let undo = json!({"transactionId":preview["transactionId"],"confirmation":"undo","idempotencyKey":"undo-key"});
+    let undone = text(host.undo_selection_async(&json!(3), &undo, None).await);
+    assert_eq!(undone["state"], "undone", "{undone}");
+    let selection = live.0.state.borrow()["selection"].clone();
+    assert_eq!((selection["trackRef"].clone(), selection["deviceRef"].clone()), (json!("track:track-1"), Value::Null));
+}
 #[tokio::test]
 async fn draw_mode_is_read_from_the_set_row_and_undone_on_its_own() {
     let live = Rc::new(RemoteShape(DeterministicLiveSimulator::new()));
