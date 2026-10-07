@@ -265,7 +265,6 @@ pub async fn connect_mcp(options: Options) -> Result<Rc<dyn McpEndpoint>, Runtim
     }
 }
 
-/// `JSON.stringify(message) + "\n"`: one message on the wire.
 /// A request still awaiting its answer when its future goes (an outer timeout, a batch that stopped early): its entry
 /// goes and the server is told, as at the request's own deadline, so the bridge stops working on it. The notice is
 /// queued at once, with no task: the runtime may be ending.
@@ -288,6 +287,7 @@ impl Drop for Abandoned<'_> {
         }
     }
 }
+/// `JSON.stringify(message) + "\n"`: one message on the wire.
 fn line(message: &Value) -> String {
     let mut text = stringify(message);
     text.push('\n');
