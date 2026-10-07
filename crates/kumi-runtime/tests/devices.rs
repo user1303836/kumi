@@ -263,6 +263,11 @@ fn kumi_runs_the_devices_tests_and_its_own_checks_a_working_device_passes_a_brok
     assert_eq!(zero.problems, Vec::<String>::new());
     let broken = check_midi_device(&spec(json!({ "code": "function midi(event) { pass(event) ", "tests": [] })));
     assert!(matches(&broken.problems.join(" "), "the code doesn't run"), "{:?}", broken.problems);
+    // In Kumi's own process too, where nothing else would end it.
+    let flooded = check_midi_device(&spec(
+        json!({ "code": "function midi(event) { for (;;) send({ type: 'cc', controller: 1, value: 1 }); }", "tests": [] }),
+    ));
+    assert!(matches(&flooded.problems.join(" "), "and was stopped there; something sends without end"), "{:?}", flooded.problems);
     // The time a device reads is today's, as in Live: code that acts on the date is checked as it will run there.
     let dated = check_midi_device(&spec(json!({ "code": "function midi(event) { if (Date.now() > 1e12) pass(event); }", "tests": [
         { "name": "passes", "input": [{ "type": "noteon", "pitch": 60, "at": 0 }, { "type": "noteoff", "pitch": 60, "at": 100 }], "expect": [{ "type": "noteon", "pitch": 60 }, { "type": "noteoff", "pitch": 60 }] }] })));
@@ -295,6 +300,25 @@ async fn a_devices_code_is_checked_in_a_process_of_its_own_it_cant_reach_kumi_ca
     .await;
     assert!(matches(&endless.problems.join(" "), "didn't finish within 2 s; something loops forever"), "{:?}", endless.problems);
     assert!(started.elapsed().as_millis() < 5_000);
+    // A loop that sends or says without end is stopped once a run has kept enough, and said so: before, what it sent
+    // and said grew the check's process toward a gigabyte until the deadline.
+    let sending = check_midi_device_isolated(
+        &spec(json!({ "code": "function midi(event) { for (;;) send({ type: 'cc', controller: 1, value: 1 }); }", "tests": [] })),
+        IsolatedOptions::default(),
+    )
+    .await;
+    assert!(
+        matches(&sending.problems.join(" "), r"it sent more than \d+ events for 11 in, and was stopped there; something sends without end"),
+        "{:?}",
+        sending.problems
+    );
+    let saying = check_midi_device_isolated(
+        &spec(json!({ "code": "function midi(event) { for (;;) post('Kumi device: again\\n'); pass(event); }", "tests": [] })),
+        IsolatedOptions::default(),
+    )
+    .await;
+    assert!(matches(&saying.problems.join(" "), "Kumi's check: it threw: again"), "{:?}", saying.problems);
+    assert!(!matches(&saying.problems.join(" "), "didn't finish"), "{:?}", saying.problems);
 }
 
 /// An audio effect a producer might ask for: a saturator with a tone control, its own function first.

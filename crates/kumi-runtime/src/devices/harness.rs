@@ -37,6 +37,8 @@ struct Run {
     /// What was thrown: an error's message, or None when a thrown value had none (TS: `undefined`).
     errors: Vec<Option<String>>,
     pending: usize,
+    /// It sent or said more than a run keeps, and its code was stopped there.
+    full: bool,
 }
 
 /// JavaScript's ToInt32, for its bit operations on numbers.
@@ -134,6 +136,26 @@ struct Shared<'js> {
     errors: Vec<Option<String>>,
     queue: Vec<Entry<'js>>,
     order: u64,
+    /// Set once the device sent or said more than a run keeps: the engine stops its code.
+    full: Rc<Cell<bool>>,
+}
+
+/// What a run keeps of what the device sends and says, in Kumi's own memory, which the engine's limit doesn't cover:
+/// far more than a test (MAX_TEST_EVENTS events) or the flood check (FLOOD) reads. Past either, its code is stopped,
+/// or a loop of sends or posts would grow the check's process toward gigabytes until its deadline.
+const KEPT_BYTES: usize = 192 * FLOOD;
+const KEPT_ERRORS: usize = 256;
+/// The most of one error's words kept.
+const KEPT_WORDS: usize = 2_000;
+
+/// Keeps what the device threw or said, up to KEPT_ERRORS of them, each cut to KEPT_WORDS; past that its code stops.
+fn keep_error(shared: &Rc<RefCell<Shared<'_>>>, message: Option<String>) {
+    let mut state = shared.borrow_mut();
+    if state.errors.len() >= KEPT_ERRORS {
+        state.full.set(true);
+        return;
+    }
+    state.errors.push(message.map(|text| head(&text, KEPT_WORDS)));
 }
 
 /// Max's Task and a Date on Kumi's clock, from the functions Kumi gives it. The frame itself stops code being made
@@ -166,18 +188,29 @@ fn message_of(ctx: &Ctx<'_>, error: JsError) -> Option<String> {
 
 /// Calls the frame's `name` with `inlet` set, keeping what it throws.
 fn call<'js>(ctx: &Ctx<'js>, shared: &Rc<RefCell<Shared<'js>>>, name: &str, inlet: i32, args: impl IntoArgs<'js>) {
+    let full = shared.borrow().full.clone();
+    if full.get() {
+        return;
+    }
     let globals = ctx.globals();
     let result =
         globals.set("inlet", inlet).and_then(|_| globals.get::<_, Function>(name)).and_then(|function| function.call::<_, ()>(args));
     if let Err(error) = result {
         let message = message_of(ctx, error);
-        shared.borrow_mut().errors.push(message);
+        // Stopped at a cap: not something the code threw.
+        if !full.get() {
+            keep_error(shared, message);
+        }
     }
 }
 
 /// Moves the clock to `time`, running every timer due by then in order.
 fn until<'js>(ctx: &Ctx<'js>, shared: &Rc<RefCell<Shared<'js>>>, time: f64) {
+    let full = shared.borrow().full.clone();
     for _guard in 0..100_000 {
+        if full.get() {
+            break;
+        }
         let next = {
             let mut state = shared.borrow_mut();
             let mut best: Option<usize> = None;
@@ -197,7 +230,9 @@ fn until<'js>(ctx: &Ctx<'js>, shared: &Rc<RefCell<Shared<'js>>>, time: f64) {
         if let Err(error) = next.run.call::<_, ()>(()) {
             // TS: a timer that threw past the frame's own guard would have ended the check.
             let message = message_of(ctx, error);
-            shared.borrow_mut().errors.push(message);
+            if !full.get() {
+                keep_error(shared, message);
+            }
         }
     }
     let mut state = shared.borrow_mut();
@@ -251,7 +286,7 @@ pub(crate) fn js_truthy(value: &Value) -> bool {
 fn run(controls: &[Control], code: &str, input: &[MidiEvent], set: Option<&Map<String, Value>>, settle: f64) -> Run {
     match try_run(controls, code, input, set, settle) {
         Ok(run) => run,
-        Err(error) => Run { output: Vec::new(), errors: vec![Some(format!("the code doesn't run: {error}"))], pending: 0 },
+        Err(error) => Run { output: Vec::new(), errors: vec![Some(format!("the code doesn't run: {error}"))], pending: 0, full: false },
     }
 }
 
@@ -264,10 +299,15 @@ fn try_run(controls: &[Control], code: &str, input: &[MidiEvent], set: Option<&M
     // The 2 s the frame and the device's own top level may take to run (TS: the script's `timeout`).
     let deadline: Rc<Cell<Option<Instant>>> = Rc::new(Cell::new(None));
     let timed_out: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+    let full: Rc<Cell<bool>> = Rc::new(Cell::new(false));
     runtime.set_interrupt_handler(Some(Box::new({
         let deadline = deadline.clone();
         let timed_out = timed_out.clone();
+        let full = full.clone();
         move || {
+            if full.get() {
+                return true;
+            }
             if deadline.get().is_some_and(|at| Instant::now() > at) {
                 timed_out.set(true);
                 return true;
@@ -276,7 +316,7 @@ fn try_run(controls: &[Control], code: &str, input: &[MidiEvent], set: Option<&M
         }
     })));
     let context = Context::full(&runtime)?;
-    context.with(|ctx| run_in(ctx, &deadline, &timed_out, controls, code, input, set, settle))
+    context.with(|ctx| run_in(ctx, &deadline, &timed_out, &full, controls, code, input, set, settle))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -284,6 +324,7 @@ fn run_in<'js>(
     ctx: Ctx<'js>,
     deadline: &Rc<Cell<Option<Instant>>>,
     timed_out: &Rc<Cell<bool>>,
+    full: &Rc<Cell<bool>>,
     controls: &[Control],
     code: &str,
     input: &[MidiEvent],
@@ -291,7 +332,7 @@ fn run_in<'js>(
     settle: f64,
 ) -> rquickjs::Result<Run> {
     let shared: Rc<RefCell<Shared<'js>>> =
-        Rc::new(RefCell::new(Shared { clock: 0.0, sent: Vec::new(), errors: Vec::new(), queue: Vec::new(), order: 0 }));
+        Rc::new(RefCell::new(Shared { clock: 0.0, sent: Vec::new(), errors: Vec::new(), queue: Vec::new(), order: 0, full: full.clone() }));
     let globals = ctx.globals();
     globals.set(
         "outlet",
@@ -299,6 +340,10 @@ fn run_in<'js>(
             let shared = shared.clone();
             move |_index: JsValue<'js>, byte: Coerced<f64>| {
                 let mut state = shared.borrow_mut();
+                if state.sent.len() >= KEPT_BYTES {
+                    state.full.set(true);
+                    return;
+                }
                 let at = state.clock;
                 state.sent.push((at, byte.0));
             }
@@ -311,7 +356,7 @@ fn run_in<'js>(
             move |text: Coerced<String>| {
                 if KUMI_DEVICE.is_match(&text.0) {
                     let said = trim(&KUMI_DEVICE_PREFIX.replace(&text.0, "")).to_string();
-                    shared.borrow_mut().errors.push(Some(said));
+                    keep_error(&shared, Some(said));
                 }
             }
         })?,
@@ -355,17 +400,24 @@ fn run_in<'js>(
     let evaluated = ctx.eval_with_options::<(), _>(midi_device_code(controls, code), options);
     deadline.set(None);
     if let Err(error) = evaluated {
+        if full.get() {
+            // Its top level sent or said without end: stopped there, it's checked on what it did.
+            let _ = ctx.catch();
+            let mut state = shared.borrow_mut();
+            return Ok(Run { output: events_of(&state.sent), errors: std::mem::take(&mut state.errors), pending: 0, full: true });
+        }
         // TS: Node's own words for a script stopped at its timeout.
         let message = if timed_out.get() { Some("Script execution timed out after 2000ms".to_string()) } else { message_of(&ctx, error) };
         return Ok(Run {
             output: Vec::new(),
             errors: vec![Some(format!("the code doesn't run: {}", message.unwrap_or_else(|| "undefined".to_string())))],
             pending: 0,
+            full: false,
         });
     }
     for (name, value) in set.into_iter().flatten() {
         let Some((index, control)) = controls.iter().enumerate().find(|(_, control)| control.name() == name) else {
-            shared.borrow_mut().errors.push(Some(format!("the test sets \"{name}\", which isn't one of the controls")));
+            keep_error(&shared, Some(format!("the test sets \"{name}\", which isn't one of the controls")));
             continue;
         };
         globals.set("messagename", format!("c{}", index + 1))?;
@@ -388,6 +440,9 @@ fn run_in<'js>(
         input.iter().enumerate().map(|(index, event)| (index, event.at.unwrap_or(0.0), event)).collect();
     timeline.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
     for &(_, at, event) in &timeline {
+        if full.get() {
+            break;
+        }
         until(&ctx, &shared, at);
         for byte in bytes_of(event) {
             call(&ctx, &shared, "msg_int", 0, (byte,));
@@ -397,7 +452,7 @@ fn run_in<'js>(
     let mut state = shared.borrow_mut();
     let pending = state.queue.len();
     state.queue.clear();
-    Ok(Run { output: events_of(&state.sent), errors: std::mem::take(&mut state.errors), pending })
+    Ok(Run { output: events_of(&state.sent), errors: std::mem::take(&mut state.errors), pending, full: full.get() })
 }
 
 fn describe(event: &MidiEvent) -> String {
@@ -536,7 +591,12 @@ pub fn check_midi_device(spec: &MidiSpec) -> Checked {
     if probe.pending > 0 && !spec.runs_free {
         problems.push("Kumi's check: its timers keep running after every note is released; stop them (cancel) when nothing is held, or give runs_free: true if it's meant to keep sending on its own.".to_string());
     }
-    if probe.output.len() > FLOOD {
+    if probe.full && probe.output.len() > FLOOD {
+        problems.push(format!(
+            "Kumi's check: it sent more than {} events for 11 in, and was stopped there; something sends without end.",
+            probe.output.len()
+        ));
+    } else if probe.output.len() > FLOOD {
         problems.push(format!("Kumi's check: it sent {} events for 11 in, in about 4 s; something sends without end.", probe.output.len()));
     }
     let mut passed = 0;
