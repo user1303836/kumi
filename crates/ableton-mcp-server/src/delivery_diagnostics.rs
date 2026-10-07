@@ -13,9 +13,15 @@ pub fn native_entrypoint(package_root: &Path) -> PathBuf {
     package_root.join(if cfg!(windows) { "ableton-mcp-server.exe" } else { "ableton-mcp-server" })
 }
 pub fn diagnostics(package_root: Option<&Path>, config_path: Option<&Path>) -> DiagnosticReport {
+    report(package_root, config_path).0
+}
+/// The report, with the bridge config and secret it read for the authenticated probe. Each is read once: on Windows
+/// every read checks the secret's ACL in a PowerShell run.
+fn report(package_root: Option<&Path>, config_path: Option<&Path>) -> (DiagnosticReport, Option<(BridgeConfig, String)>) {
     let root = package_root.map(Path::to_path_buf).unwrap_or_else(default_package_root);
     let entrypoint = native_entrypoint(&root);
-    let config_valid = config_path.is_some_and(|path| path.exists() && read_any_config(path).is_ok());
+    let config = config_path.filter(|path| path.exists()).map(read_any_config);
+    let config_valid = matches!(config, Some(Ok(_)));
     let entrypoint_present = entrypoint.is_file();
     let platform_supported = is_supported_platform(None);
     let host_ready = platform_supported && entrypoint_present;
@@ -36,18 +42,16 @@ pub fn diagnostics(package_root: Option<&Path>, config_path: Option<&Path>) -> D
     .unwrap_or(false);
     let mut bridge_configured = false;
     let mut permissions = SecretPermissions::Unavailable;
-    if config_valid {
-        let config = read_any_config(config_path.unwrap());
-        match config {
-            Ok(AnyConfig::Bridge(config)) => match read_secret_file(&config.bridge.secret_file) {
-                Ok(secret) => {
-                    bridge_configured = kumi_common::js::string::utf16_len(&secret) >= 32;
-                    permissions = secret_permissions(&config.bridge.secret_file);
-                }
-                Err(_) => permissions = SecretPermissions::Invalid,
-            },
+    let mut bridge = None;
+    if let Some(Ok(AnyConfig::Bridge(config))) = config {
+        match read_secret_file(&config.bridge.secret_file) {
+            Ok(secret) => {
+                bridge_configured = kumi_common::js::string::utf16_len(&secret) >= 32;
+                // It reads only once its permissions are conclusively owner-only.
+                permissions = SecretPermissions::OwnerOnly;
+                bridge = Some((config, secret));
+            }
             Err(_) => permissions = SecretPermissions::Invalid,
-            _ => {}
         }
     }
     let policy = match crate::tool_catalog::tool_policy_from_env(&std::env::vars().collect()) {
@@ -60,7 +64,7 @@ pub fn diagnostics(package_root: Option<&Path>, config_path: Option<&Path>) -> D
         "aarch64" => "arm64",
         arch => arch,
     };
-    json!({
+    let report = json!({
         "platform":current_platform(),"arch":arch,"runtime":"rust-native","runtimeSupported":true,"compatibilityError":null,
         "platformSupported":platform_supported,"packageRoot":root,
         "entrypoint":{"path":entrypoint,"present":entrypoint_present},
@@ -73,11 +77,12 @@ pub fn diagnostics(package_root: Option<&Path>, config_path: Option<&Path>) -> D
         "external":{"abletonLive":"unavailable","signing":"unavailable","notarization":"unavailable"},"toolPolicy":policy,
         "readiness":{"package":host_ready && package_assets_valid,"configured":bridge_configured,"authenticatedBridge":false,"realLiveOperational":false,"releaseCertified":false},
         "diagnosticErrors":[],"ready":false
-    })
+    });
+    (report, bridge)
 }
 /// Requires a Tokio LocalSet, like the authenticated adapter it probes.
 pub async fn diagnostics_async(package_root: Option<&Path>, config_path: Option<&Path>) -> DiagnosticReport {
-    let mut report = diagnostics(package_root, config_path);
+    let (mut report, bridge) = report(package_root, config_path);
     if report["runtimeSupported"] != true
         || report["platformSupported"] != true
         || report["bridgeConfigured"] != true
@@ -85,11 +90,11 @@ pub async fn diagnostics_async(package_root: Option<&Path>, config_path: Option<
     {
         return report;
     }
+    let Some((config, secret)) = bridge else { return report };
     let probe = async {
-        let AnyConfig::Bridge(config) = read_any_config(config_path.unwrap())? else { return Ok(None); };
         let started = std::time::Instant::now();
         let adapter = RemoteScriptLiveAdapter::connect(RemoteScriptEndpoint {
-            host: config.bridge.host, port: config.bridge.port, secret: read_secret_file(&config.bridge.secret_file)?,
+            host: config.bridge.host, port: config.bridge.port, secret,
             timeout_ms: Some(config.bridge.timeout_ms), mutation_path: None, retire_after: None,
         }).await?;
         let result = async {
