@@ -53,8 +53,8 @@ pub fn audition_request(input: &JsonObject) -> Result<AuditionRequest, String> {
     if from_beat.is_none() && candidates.iter().any(|c| c.clip.is_none()) {
         return Err("Say where the part is: from_beat (and beats) in the Arrangement, or a Session clip for each candidate.".into());
     }
-    if beats.is_some_and(|v| !(v > 0.0 && v <= 64.0)) {
-        return Err("beats is from just above 0 to 64.".into());
+    if beats.is_some_and(|v| !(v > 0.0)) {
+        return Err("beats is more than 0.".into());
     }
     let focus = input.get("focus").and_then(Value::as_str).filter(|s| ["sound", "section"].contains(s)).or(if mix {
         Some("section")

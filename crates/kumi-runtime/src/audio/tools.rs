@@ -171,7 +171,7 @@ impl KernelTool for ListenTool {
             named.extend(tracks.iter().filter_map(Value::as_str).map(str::to_string));
         }
         let mut file = text("file").unwrap_or("").to_string();
-        let (mut from, mut seconds) = (None, None);
+        let (mut from, mut seconds, mut note) = (None, None, None);
         if !named.is_empty() || yes("mix") {
             let Some(hear_set) = &self.options.hear else {
                 return Ok(ToolResult::error("Kumi isn't connected to Live, so it can't hear the Set."));
@@ -188,6 +188,7 @@ impl KernelTool for ListenTool {
                 from_beat: number("from_beat"),
                 beats: number("beats"),
                 seconds: number("seconds"),
+                whole: yes("whole").then_some(true),
             };
             let takes = match hear_set(request, signal.clone()).await? {
                 Ok(takes) => takes,
@@ -202,6 +203,7 @@ impl KernelTool for ListenTool {
             file = take.file.clone();
             from = Some(take.start);
             seconds = take.seconds;
+            note = take.note.clone();
         }
         if file.is_empty() {
             return Ok(ToolResult::error("Name what to hear: a file, an audio clip's clipRef, a track (or tracks), or mix: true."));
@@ -214,7 +216,7 @@ impl KernelTool for ListenTool {
             seconds: if from_set { seconds } else { number("seconds") },
             signal: Some(signal.clone()),
         };
-        let result:Result<ToolResult,ListenError>=async{let path=self.locate(&file,signal.clone()).await?;let mine=hear(&path,common.clone()).await?;let Some(compare_to)=text("compare_to")else{self.event(&mine,None);return Ok(ToolResult::text(stringify(&trim_sound(&mine,tempo))));};let path=self.locate(compare_to,signal.clone()).await?;let reference=hear(&path,AnalyzeOptions{start:number("compare_from_seconds"),transcribe:false,focus:Some(mine.analyzed.focus.clone()),..common}).await?;let comparison=compare(&mine,&reference);self.event(&mine,Some(HeardComparison{reference:reference.file.clone(),summary:summary(&reference),differences:comparison.balance.iter().map(|b|b.difference).collect(),headlines:comparison.headlines.clone()}));let mut mine_value=json!({"loudness":mine.loudness,"tempo":mine.tempo,"key":mine.key});if let Some(notes)=&mine.notes{mine_value["notes"]=Value::Object(transcription(notes,tempo));}Ok(ToolResult::text(stringify(&json!({"comparison":comparison,"mine":mine_value,"reference":{"loudness":reference.loudness,"tempo":reference.tempo,"key":reference.key}}))))}.await;
+        let result:Result<ToolResult,ListenError>=async{let path=self.locate(&file,signal.clone()).await?;let mine=hear(&path,common.clone()).await?;let Some(compare_to)=text("compare_to")else{self.event(&mine,None);let mut heard=trim_sound(&mine,tempo);if let Some(note)=&note{heard["heardShort"]=json!(note);}return Ok(ToolResult::text(stringify(&heard)));};let path=self.locate(compare_to,signal.clone()).await?;let reference=hear(&path,AnalyzeOptions{start:number("compare_from_seconds"),transcribe:false,focus:Some(mine.analyzed.focus.clone()),..common}).await?;let comparison=compare(&mine,&reference);self.event(&mine,Some(HeardComparison{reference:reference.file.clone(),summary:summary(&reference),differences:comparison.balance.iter().map(|b|b.difference).collect(),headlines:comparison.headlines.clone()}));let mut mine_value=json!({"loudness":mine.loudness,"tempo":mine.tempo,"key":mine.key});if let Some(notes)=&mine.notes{mine_value["notes"]=Value::Object(transcription(notes,tempo));}if let Some(note)=&note{mine_value["heardShort"]=json!(note);}Ok(ToolResult::text(stringify(&json!({"comparison":comparison,"mine":mine_value,"reference":{"loudness":reference.loudness,"tempo":reference.tempo,"key":reference.key}}))))}.await;
         match result {
             Ok(result) => Ok(result),
             Err(error) => {
@@ -284,7 +286,7 @@ async fn heard_together(takes: &[HeardTake], focus: Option<String>, on_event: On
         }
     }
     clashes.sort_by(|a, b| b.1.total_cmp(&a.1));
-    let tracks:Vec<_>=heard.iter().map(|(take,a)|json!({"track":take.label,"heard":if take.live{"as it played"}else{"quietly"},"summary":summary(a),"loudness":a.loudness,"balance":a.balance.bands.iter().map(|b|format!("{} {} dB",b.name,to_string(b.db))).collect::<Vec<_>>(),"width":a.balance.bands.iter().map(|b|b.width).collect::<Vec<_>>(),"dynamics":a.dynamics})).collect();
+    let tracks:Vec<_>=heard.iter().map(|(take,a)|{let mut track=json!({"track":take.label,"heard":if take.live{"as it played"}else{"quietly"},"summary":summary(a),"loudness":a.loudness,"balance":a.balance.bands.iter().map(|b|format!("{} {} dB",b.name,to_string(b.db))).collect::<Vec<_>>(),"width":a.balance.bands.iter().map(|b|b.width).collect::<Vec<_>>(),"dynamics":a.dynamics});if let Some(note)=&take.note{track["heardShort"]=json!(note);}track}).collect();
     Ok(ToolResult::text(stringify(
         &json!({"tracks":tracks,"clashes":clashes.into_iter().take(8).map(|c|c.0).collect::<Vec<_>>(),"note":"A clash is two sounds strong in the same band at similar levels: carve one (EQ Eight), sidechain it (a compressor keyed from the other), or move one up or down an octave."}),
     )))

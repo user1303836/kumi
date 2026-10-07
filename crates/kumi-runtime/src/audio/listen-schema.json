@@ -37,8 +37,11 @@
     "beats": {
       "type": "number",
       "exclusiveMinimum": 0,
-      "maximum": 64,
-      "description": "For the Set: how much to hear, in beats"
+      "description": "For the Set: how much to hear, in beats (a long stretch takes about as long as it plays)"
+    },
+    "whole": {
+      "type": "boolean",
+      "description": "For the Set: hear the whole song quietly, from the Arrangement's start to its end, in one listen (it takes about the song's length)"
     },
     "compare_to": {
       "type": "string",
@@ -67,7 +70,7 @@
     "seconds": {
       "type": "number",
       "exclusiveMinimum": 0,
-      "maximum": 720,
+      "maximum": 3600,
       "description": "How long to listen"
     },
     "transcribe": {

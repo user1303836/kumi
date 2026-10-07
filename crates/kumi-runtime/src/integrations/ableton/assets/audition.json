@@ -48,7 +48,6 @@
       "beats": {
         "type": "number",
         "exclusiveMinimum": 0,
-        "maximum": 64,
         "description": "How long to render, in beats; a clip's length when left out, 8 at most by default"
       },
       "reference": {

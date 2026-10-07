@@ -2,6 +2,7 @@ use super::super::{
     audition::silent_render, bridge_version::RENDER_BRIDGE, concurrent::eager_all, connection::NO_CURRENT_LIVE, more_changes::bars,
 };
 use super::ears::RawFile;
+use super::ears_pass::PASS_SECONDS;
 use super::*;
 use crate::{
     audio::{matching::closeness, tools::summary},
@@ -236,15 +237,34 @@ impl Rendering {
             return Ok(Err("Kumi is already listening to something; wait for it.".into()));
         }
         let looped = set.and_then(|set| set.get("loop")).filter(|v| v["enabled"] == true && v["length"].as_f64().is_some_and(|v| v > 0.));
-        let from = request.from_beat.unwrap_or_else(|| {
-            looped
-                .map(|v| v["start"].as_f64().unwrap_or(0.))
-                .unwrap_or_else(|| set.and_then(|set| set.get("position")).and_then(Value::as_f64).unwrap_or(0.))
+        let whole = if request.whole == Some(true) {
+            let song = self.connection().call("live_song_state", JsonObject::new(), signal.clone()).await;
+            let end = song.ok().and_then(|song| super::super::context::payload(&song).ok()?.get("songLength")?.as_f64());
+            let Some(end) = end.filter(|end| *end > 0.) else {
+                return Ok(Err("Kumi couldn't tell where the song ends; give from_beat and beats.".into()));
+            };
+            Some(end)
+        } else {
+            None
+        };
+        let from = if whole.is_some() {
+            0.
+        } else {
+            request.from_beat.unwrap_or_else(|| {
+                looped
+                    .map(|v| v["start"].as_f64().unwrap_or(0.))
+                    .unwrap_or_else(|| set.and_then(|set| set.get("position")).and_then(Value::as_f64).unwrap_or(0.))
+            })
+        };
+        let beats = whole.unwrap_or_else(|| {
+            request.beats.unwrap_or_else(|| looped.and_then(|v| v["length"].as_f64()).unwrap_or(4. * self.observer.beats_per_bar.get()))
         });
-        let beats = request
-            .beats
-            .unwrap_or_else(|| looped.and_then(|v| v["length"].as_f64()).unwrap_or(4. * self.observer.beats_per_bar.get()))
-            .min(64.);
+        if beats * 60. / tempo > LONGEST_LISTEN {
+            return Ok(Err(format!(
+                "That's {} of music; Kumi listens to at most an hour at once, so listen in parts.",
+                clock(beats * 60. / tempo)
+            )));
+        }
         let candidates = if request.mix == Some(true) {
             vec![AuditionCandidate { track: MIX_CANDIDATE.into(), mix: Some(true), label: Some("The whole mix".into()), clip: None }]
         } else {
@@ -267,6 +287,7 @@ impl Rendering {
                         start: found.start,
                         seconds: Some(beats * 60. / tempo),
                         live: false,
+                        note: None,
                     })
                 })
                 .collect())
@@ -277,17 +298,26 @@ impl Rendering {
         }
         self.end_rendering();
         self.tell("Listened", Some(false));
+        let notes = rig.map(|rig| rig.notes).unwrap_or_default();
         match result {
             Err(error) => {
                 signal.check()?;
                 Ok(Err(head(&error.to_string(), 400)))
             }
+            // What the capture held says what went wrong; with nothing to say, the Set may have been silent there.
+            Ok(takes) if takes.is_empty() && !notes.is_empty() => Ok(Err(format!("Nothing came through: {}", notes.join(" ")))),
             Ok(takes) if takes.is_empty() => Ok(Err(format!(
-                "Nothing came through{}. Is something playing there in the Arrangement (its clips at {}, the track not muted)?",
-                rig.filter(|rig| !rig.notes.is_empty()).map(|rig| format!(": {}", rig.notes.join(" "))).unwrap_or_default(),
+                "Nothing came through. Is something playing there in the Arrangement (its clips at {}, the track not muted)?",
                 bars(from)
             ))),
-            Ok(takes) => Ok(Ok(takes)),
+            Ok(mut takes) => {
+                if !notes.is_empty() {
+                    for take in &mut takes {
+                        take.note = Some(notes.join(" "));
+                    }
+                }
+                Ok(Ok(takes))
+            }
         }
     }
     async fn hear_as_it_plays(
@@ -296,7 +326,7 @@ impl Rendering {
         request: &HearRequest,
         signal: Signal,
     ) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
-        let seconds = request.seconds.unwrap_or(8.).clamp(2., 60.);
+        let seconds = request.seconds.unwrap_or(8.).clamp(2., PASS_SECONDS);
         let mut steps = vec![];
         let mut placed = vec![];
         let result: Result<Vec<HeardTake>, RuntimeError> = async {
@@ -363,6 +393,7 @@ impl Rendering {
                             start: 0.,
                             seconds: Some(capture.left.len() as f64 / capture.sample_rate),
                             live: true,
+                            note: None,
                         });
                         Ok(())
                     }
@@ -404,6 +435,12 @@ impl Rendering {
 }
 fn round_number(value: f64) -> f64 {
     round(value)
+}
+/// The longest stretch one listen hears, in seconds.
+const LONGEST_LISTEN: f64 = 3600.;
+fn clock(seconds: f64) -> String {
+    let whole = round(seconds) as i64;
+    format!("{}:{:02}", whole / 60, whole % 60)
 }
 fn plain(error: impl std::fmt::Display) -> RuntimeError {
     RuntimeError::plain(error.to_string())

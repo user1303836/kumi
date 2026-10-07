@@ -255,6 +255,65 @@ fn lives_jump_that_lands_on_a_beat_is_found_by_the_position_the_device_records()
         vec![(500, 12.3), (7500, 40.75)]
     );
 }
+/// A capture as Kumi Ears records it through Max's `plugphasor~` (#252): 64-frame signal vectors, and a vector
+/// that starts less than a frame after a beat (or exactly on it) reads the top of the ramp held through it.
+/// From `beat`, at `tempo` and `rate`, after `stopped` frames; then, from `jump`, the phase moves `by` a beat.
+fn plugphasor(tempo: f64, rate: f64, stopped: usize, beat: f64, frames: usize, jump: Option<(usize, f64)>) -> Vec<u8> {
+    let per_beat = rate * 60.0 / tempo;
+    let mut bytes = Vec::with_capacity((stopped + frames) * 16);
+    let mut held = None;
+    for frame in 0..stopped + frames {
+        let playing = frame >= stopped;
+        let moved = jump.filter(|(at, _)| frame >= *at).map_or(0.0, |(_, by)| by);
+        let now = beat + moved + (frame as f64 - stopped as f64) / per_beat;
+        if frame % 64 == 0 {
+            let into = now.rem_euclid(1.0);
+            held = (playing && frame > stopped && into * per_beat < 1.0).then(|| (2.0 + into) as f32);
+        }
+        let sync = if playing { held.unwrap_or((1.0 + now.rem_euclid(1.0)) as f32) } else { 1.0 };
+        let sound = if playing { (frame % 100) as f32 / 1000.0 } else { 0.0 };
+        // Live's position, as the device polls it: 10 ms behind.
+        let polled = frame.saturating_sub((rate / 100.0) as usize);
+        let position = if polled >= stopped { (beat + (polled - stopped) as f64 / per_beat) as f32 } else { 0.0 };
+        for value in [sound, -sound, sync, position] {
+            bytes.extend(value.to_le_bytes());
+        }
+    }
+    bytes
+}
+#[test]
+fn a_quiet_listen_is_one_stretch_at_every_tempo_even_where_beats_land_on_signal_vectors() {
+    // Live starts on a beat at a vector's edge, so later beats land on edges too: at 44.1 kHz every beat of the first
+    // eight at 128 BPM, every 8th at 126, every 4th at 125; at 48 kHz every 16th at 128.
+    let stopped = 64 * 47;
+    for rate in [44_100.0, 48_000.0] {
+        for tempo in [90.0, 100.0, 120.0, 125.0, 126.0, 128.0, 130.0, 135.0, 140.0, 145.0, 150.0] {
+            let per_beat = rate * 60.0 / tempo;
+            let frames = (per_beat * 40.0) as usize;
+            let read = parse_capture(&plugphasor(tempo, rate, stopped, 3.0, frames, None), 4, rate).unwrap();
+            let stretches = runs(&read, Anchors::default());
+            assert_eq!(stretches.len(), 1, "{tempo} BPM at {rate} Hz: {stretches:?}");
+            let run = &stretches[0];
+            // The first frame, on the beat, reads as stopped (a phase of 0).
+            assert!(run.from <= stopped + 1 && run.to == stopped + frames, "{tempo} BPM at {rate} Hz: {run:?}");
+            assert!((run.samples_per_beat - per_beat).abs() < 0.01, "{tempo} BPM: {} frames a beat", run.samples_per_beat);
+            let at = |beat: f64| frame_at(run, beat).map(|frame| frame as f64);
+            assert!((at(4.0).unwrap() - (stopped as f64 + per_beat)).abs() <= 1.0, "{tempo} BPM: beat 4 at {:?}", at(4.0));
+            assert!(at(4.0 + 36.0 - 1e-3).is_some(), "{tempo} BPM: nine bars from beat 4 are heard whole");
+            // Without Live's position (an older device), the phase alone joins it too.
+            let older = Capture { position: None, ..read.clone() };
+            assert_eq!(runs(&older, Anchors { first: Some(3.0), ..Default::default() }).len(), 1, "{tempo} BPM, three channels");
+        }
+    }
+    // A hold is joined only when the phase after it is where it would be: a jump of half a beat there splits it.
+    // At 126 BPM a beat is 21,000 frames, so beat 11 (8 after the start) starts a vector.
+    let hold = stopped + 21_000 * 8;
+    let read = parse_capture(&plugphasor(126.0, 44_100.0, stopped, 3.0, 21_000 * 12, Some((hold + 64, 0.5))), 4, 44_100.0).unwrap();
+    let older = Capture { position: None, ..read };
+    let split = runs(&older, Anchors { first: Some(3.0), after_jump: Some(11.5) });
+    assert_eq!(split.len(), 2);
+    assert_eq!((split[0].to, split[1].from), (hold + 1, hold + 64));
+}
 #[test]
 fn kumi_fetches_the_build_each_computer_has() {
     for (platform, arch, asset) in [

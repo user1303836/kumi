@@ -109,9 +109,11 @@ pub struct AnalyzeOptions {
     pub signal: Option<Signal>,
     pub transcribe: bool,
 }
+/// The longest stretch one analysis hears, in seconds: an hour.
+pub const LONGEST: f64 = 3600.0;
 /// How far into a file an analysis reads, in seconds (and a second more): no further is converted.
 pub fn reach(options: &AnalyzeOptions) -> f64 {
-    options.start.unwrap_or(0.0).max(0.0) + options.seconds.unwrap_or(720.0).clamp(0.0, 720.0) + 1.0
+    options.start.unwrap_or(0.0).max(0.0) + options.seconds.unwrap_or(LONGEST).clamp(0.0, LONGEST) + 1.0
 }
 pub async fn analyze_file(path: &str, options: AnalyzeOptions) -> Result<Analysis, AudioError> {
     let mut source = open_audio_to(path, options.signal.clone(), Some(reach(&options))).await?;
@@ -127,7 +129,7 @@ pub async fn analyze_source(source: &mut AudioSource, name: &str, options: Analy
     }
     let total = source.frames as f64 / rate;
     let start = options.start.unwrap_or(0.0).max(0.0);
-    let length = options.seconds.unwrap_or(720.0).min(720.0).min(total - start);
+    let length = options.seconds.unwrap_or(LONGEST).min(LONGEST).min(total - start);
     if !(length > 0.02) {
         return Err(AudioError(if start > 0.0 {
             format!("There's no audio in that part of the file: it's {} long.", clock(total))

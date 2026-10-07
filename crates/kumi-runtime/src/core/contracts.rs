@@ -515,6 +515,9 @@ pub struct HearRequest {
     /// How long to hear what's playing now.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seconds: Option<f64>,
+    /// The whole song, from the Arrangement's start to its end, quietly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub whole: Option<bool>,
 }
 
 /// One thing heard: its name, its file, where the part starts in it, and whether it was heard as it played.
@@ -526,6 +529,9 @@ pub struct HeardTake {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seconds: Option<f64>,
     pub live: bool,
+    /// What went short of the request (Live stopped before the part's end, say).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// A goal's candidate chain in Live: its track, what it is, and the knobs a search may move.

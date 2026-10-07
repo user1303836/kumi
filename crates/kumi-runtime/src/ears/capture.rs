@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use kumi_common::js::number::round;
+use kumi_common::js::number::{round, to_string};
 use tokio::io::AsyncWriteExt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,10 +50,15 @@ struct Layout {
 }
 
 fn is_sync(value: f64) -> bool {
-    value == 0.0 || (1.0..=2.000001).contains(&value)
+    value == 0.0 || (1.0..=2.0 + TOP_SLACK).contains(&value)
 }
 /// The shortest stretch worth keeping, in frames.
 const MIN_RUN: usize = 64;
+/// How far past the top of its ramp the beat's phase may read (#252): when a beat lands on the edge of a signal
+/// vector, Max's `plugphasor~` holds the phase at the top (2.0, or a hair over) for the rest of that vector.
+const TOP_SLACK: f64 = 1e-4;
+/// The longest such hold that still joins the stretch on either side: a signal vector, with room for big ones.
+const TOP_HOLD: usize = 1024;
 
 /// A device's raw file, read.
 pub async fn read_capture(file: &Path, channels: usize, sample_rate: f64) -> Result<Capture, CaptureError> {
@@ -160,23 +165,56 @@ pub fn runs(capture: &Capture, anchors: Anchors) -> Vec<Run> {
             // just under 1 (the beat came round). A jump that lands on a beat has some other phase before it.
             || (at(frame) == 1.0 && (at(frame - 1) - 2.0 + step).abs() <= tolerance)
     };
+    let on = |frame: usize| {
+        frame < n && (playing(frame) || (at(frame) == 1.0 && frame > 0 && frame + 1 < n && playing(frame - 1) && playing(frame + 1)))
+    };
+    // Where a stretch goes on past the phase held at the top of its ramp (#252): the frame after the hold, when the
+    // phase there is where it would be had it kept moving from the last frame before the top.
+    let past_hold = |from: usize, frame: usize| -> Option<usize> {
+        let top = at(frame);
+        if !(top >= 2.0 - 2.0 * step && top <= 2.0 + TOP_SLACK) {
+            return None;
+        }
+        let mut first = frame;
+        while first > from && at(first - 1) == top {
+            first -= 1;
+        }
+        let before = first.checked_sub(1).filter(|before| *before >= from && at(*before) < top)?;
+        let mut after = frame + 1;
+        while after < n && at(after) == top && after - first <= TOP_HOLD {
+            after += 1;
+        }
+        if after >= n || after - first > TOP_HOLD || !on(after) {
+            return None;
+        }
+        let elapsed = (after - before) as f64;
+        let expected = (at(before) - 1.0 + elapsed * step).rem_euclid(1.0);
+        let off = (at(after) - 1.0 - expected).rem_euclid(1.0);
+        (off.min(1.0 - off) <= tolerance + elapsed * 2e-7).then_some(after)
+    };
     let mut found: Vec<Run> = Vec::new();
     let mut start: Option<usize> = None;
-    for frame in 0..=n {
-        let on =
-            frame < n && (playing(frame) || (at(frame) == 1.0 && frame > 0 && frame + 1 < n && playing(frame - 1) && playing(frame + 1)));
+    let mut frame = 0;
+    while frame <= n {
+        let on = on(frame);
         let joined = on && start.is_some_and(|start| frame > start) && continues(frame);
         if on && start.is_none() {
             start = Some(frame);
+            frame += 1;
             continue;
         }
         if let Some(from) = start.filter(|_| !on || !joined) {
+            if let Some(after) = (on && frame > from).then(|| past_hold(from, frame)).flatten() {
+                frame = after + 1;
+                continue;
+            }
             // A few frames aren't a stretch: once stopped, the beat holds where it stopped and no frame follows from the last.
             if frame - from >= MIN_RUN {
                 found.push(Run { from, to: frame, beat: 0.0, samples_per_beat: 1.0 / step });
             }
             start = if on { Some(frame) } else { None };
         }
+        frame += 1;
     }
     // How long a beat is, measured where the phase comes round (the step between two samples is too coarse in
     // 32-bit floats: a fraction of a percent, milliseconds over a bar).
@@ -216,9 +254,19 @@ fn beat_length(sync: &[f32], from: usize, to: usize) -> Option<f64> {
         if after >= before {
             continue;
         }
-        // Where the phase reached 1, between the two samples.
-        let rise = after + 1.0 - before;
-        let at = (frame - 1) as f64 + if rise > 0.0 { (2.0 - before) / rise } else { 0.0 };
+        // A phase held at the top (#252) came round where the hold began, between its first frame and the one before.
+        let mut top = frame - 1;
+        while top > from + 1 && sync[top - 1] == sync[top] && frame - top <= TOP_HOLD {
+            top -= 1;
+        }
+        let at = if top < frame - 1 && sync[top - 1] < sync[top] {
+            let (below, held) = (sync[top - 1] as f64, sync[top] as f64);
+            (top - 1) as f64 + if held >= 2.0 { ((2.0 - below) / (held - below)).clamp(0.0, 1.0) } else { 1.0 }
+        } else {
+            // Where the phase reached 1, between the two samples.
+            let rise = after + 1.0 - before;
+            (frame - 1) as f64 + if rise > 0.0 { (2.0 - before) / rise } else { 0.0 }
+        };
         first.get_or_insert(at);
         last = at;
         count += 1;
@@ -249,16 +297,30 @@ fn placed(capture: &Capture, run: &Run) -> Vec<Run> {
         let phase = (sync[frame] as f64 - 1.0).max(0.0);
         samples.push((frame, round(position[frame] as f64 - phase) + phase - (frame - run.from) as f64 / per_beat));
     }
-    // Samples in a row that agree; only those long enough count.
-    let mut groups: Vec<(usize, usize, f64)> = Vec::new();
+    // Samples in a row that agree (each with the one before, so a long stretch never drifts apart); only those long
+    // enough count, and two that agree with a blip between them (a late poll, a held phase) are one.
+    let mut groups: Vec<(usize, usize, f64, f64)> = Vec::new();
     for (index, &(_, first)) in samples.iter().enumerate() {
         match groups.last_mut() {
-            Some(last) if (first - last.2).abs() < 0.02 => last.1 = index + 1,
-            _ => groups.push((index, index + 1, first)),
+            Some(last) if (first - last.3).abs() < 0.02 => {
+                last.1 = index + 1;
+                last.3 = first;
+            }
+            _ => groups.push((index, index + 1, first, first)),
         }
     }
-    let steady: Vec<(usize, usize, f64)> =
-        groups.into_iter().filter(|(from, to, _)| ((to - from) * hop) as f64 >= AGREED * sample_rate).collect();
+    let mut steady: Vec<(usize, usize, f64)> = Vec::new();
+    let mut latest = f64::NAN;
+    for (from, to, first, last) in groups {
+        if (((to - from) * hop) as f64) < AGREED * sample_rate {
+            continue;
+        }
+        match steady.last_mut() {
+            Some(group) if (first - latest).abs() < 0.02 => group.1 = to,
+            _ => steady.push((from, to, first)),
+        }
+        latest = last;
+    }
     let mut found: Vec<Run> = Vec::new();
     let mut from = run.from;
     for (index, group) in steady.iter().enumerate() {
@@ -300,6 +362,86 @@ pub fn frame_at(run: &Run, beat: f64) -> Option<usize> {
     }
 }
 
+/// Why no stretch covers a window: what the capture held instead, to say what really happened.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Missed {
+    /// Live never played while the device recorded.
+    Nothing,
+    /// Live reached the window's start only after it had begun (a jump that came late): a longer lead-in helps.
+    Late { from_beat: f64 },
+    /// Live played over the window's start but stopped or jumped before its end: `run` is what it heard of it.
+    Cut { run: Run, to_beat: f64, pieces: usize, seconds: f64 },
+    /// Live played, but somewhere else.
+    Elsewhere { from_beat: f64, to_beat: f64 },
+    /// The device's recording couldn't be read.
+    Unread(String),
+}
+
+impl Missed {
+    /// Whether playing the window again, from further ahead, can help.
+    pub fn retry(&self) -> bool {
+        matches!(self, Missed::Late { .. } | Missed::Elsewhere { .. })
+    }
+    pub fn describe(&self, from: f64, beats: f64) -> String {
+        let span = format!("beats {}–{}", to_string(from), to_string(from + beats));
+        match self {
+            Missed::Nothing => "Live didn't play while Kumi listened.".into(),
+            Missed::Late { from_beat } => {
+                format!("Live reached {span} late: Kumi heard it only from beat {}.", to_string(round(*from_beat * 100.0) / 100.0))
+            }
+            Missed::Cut { to_beat, pieces, seconds, .. } => format!(
+                "Kumi heard {} s while Live played{}, but only up to beat {} of {span}.",
+                to_string(round(*seconds * 10.0) / 10.0),
+                if *pieces > 1 { format!(", cut into {pieces} pieces") } else { String::new() },
+                to_string(round(*to_beat * 100.0) / 100.0)
+            ),
+            Missed::Elsewhere { from_beat, to_beat } => format!(
+                "Live played beats {}–{} instead of {span}.",
+                to_string(round(*from_beat * 100.0) / 100.0),
+                to_string(round(*to_beat * 100.0) / 100.0)
+            ),
+            Missed::Unread(why) => format!("Kumi couldn't read what it heard of {span}: {why}"),
+        }
+    }
+}
+
+/// The stretch that covers `beats` from `from`, joining pieces that follow one another on Live's beats (no jump
+/// between them, only a few frames apart: a blip in the phase, not in the sound); or why there's none.
+pub fn cover(stretches: &[Run], from: f64, beats: f64, sample_rate: f64) -> Result<Run, Missed> {
+    // A blip in the phase is far shorter than this, in frames; and placed this close, in beats.
+    const GAP: usize = 4096;
+    let mut joined: Vec<Run> = Vec::new();
+    for run in stretches {
+        if let Some(last) = joined.last_mut() {
+            let expected = last.beat + (run.from - last.from) as f64 / last.samples_per_beat;
+            if run.from >= last.to && run.from - last.to <= GAP && (run.beat - expected).abs() < 0.01 {
+                last.to = run.to;
+                continue;
+            }
+        }
+        joined.push(run.clone());
+    }
+    let end = from + beats - 1e-3;
+    if let Some(found) = joined.iter().rev().find(|run| frame_at(run, from).is_some() && frame_at(run, end).is_some()) {
+        return Ok(found.clone());
+    }
+    let reach = |run: &Run| run.beat + (run.to - run.from) as f64 / run.samples_per_beat;
+    if joined.is_empty() {
+        return Err(Missed::Nothing);
+    }
+    if let Some(late) = joined.iter().find(|run| run.beat > from && run.beat < end && frame_at(run, end).is_some()) {
+        return Err(Missed::Late { from_beat: late.beat });
+    }
+    if let Some(cut) = joined.iter().filter(|run| frame_at(run, from).is_some()).max_by(|a, b| reach(a).total_cmp(&reach(b))) {
+        let pieces = stretches.iter().filter(|run| run.beat < end && reach(run) > from).count().max(1);
+        let frames: usize = stretches.iter().map(|run| run.to - run.from).sum();
+        return Err(Missed::Cut { run: cut.clone(), to_beat: reach(cut), pieces, seconds: frames as f64 / sample_rate });
+    }
+    let first = joined.iter().map(|run| run.beat).fold(f64::INFINITY, f64::min);
+    let last = joined.iter().map(reach).fold(f64::NEG_INFINITY, f64::max);
+    Err(Missed::Elsewhere { from_beat: first, to_beat: last })
+}
+
 /// Part of a capture as a 32-bit float stereo WAV (what the ear reads).
 pub async fn write_capture_wav(file: &Path, capture: &Capture, from: f64, to: f64) -> std::io::Result<()> {
     let length = capture.left.len();
@@ -311,10 +453,39 @@ pub async fn write_capture_wav(file: &Path, capture: &Capture, from: f64, to: f6
         data.extend(capture.left[start + frame].to_le_bytes());
         data.extend(capture.right[start + frame].to_le_bytes());
     }
-    let sample_rate = capture.sample_rate as u32;
+    let mut out = private_file(file).await?;
+    out.write_all(&wav_header(data.len(), capture.sample_rate)).await?;
+    out.write_all(&data).await?;
+    out.flush().await
+}
+
+/// Kumi's own stereo 32-bit float WAVs (from [`write_capture_wav`]), one after another as one file.
+pub async fn join_wavs(file: &Path, parts: &[std::path::PathBuf]) -> std::io::Result<()> {
+    use tokio::io::AsyncReadExt;
+    let mut sizes = Vec::with_capacity(parts.len());
+    let mut sample_rate = 0.0;
+    for part in parts {
+        let mut header = [0u8; 44];
+        tokio::fs::File::open(part).await?.read_exact(&mut header).await?;
+        sample_rate = u32::from_le_bytes(header[24..28].try_into().expect("four bytes")) as f64;
+        sizes.push(u32::from_le_bytes(header[40..44].try_into().expect("four bytes")) as usize);
+    }
+    let mut out = private_file(file).await?;
+    out.write_all(&wav_header(sizes.iter().sum(), sample_rate)).await?;
+    for (part, size) in parts.iter().zip(sizes) {
+        let mut input = tokio::fs::File::open(part).await?;
+        let mut header = [0u8; 44];
+        input.read_exact(&mut header).await?;
+        tokio::io::copy(&mut input.take(size as u64), &mut out).await?;
+    }
+    out.flush().await
+}
+
+fn wav_header(data: usize, sample_rate: f64) -> Vec<u8> {
+    let sample_rate = sample_rate as u32;
     let mut header: Vec<u8> = Vec::with_capacity(44);
     header.extend(b"RIFF");
-    header.extend((36 + data.len() as u32).to_le_bytes());
+    header.extend((36 + data as u32).to_le_bytes());
     header.extend(b"WAVE");
     header.extend(b"fmt ");
     header.extend(16u32.to_le_bytes());
@@ -325,17 +496,18 @@ pub async fn write_capture_wav(file: &Path, capture: &Capture, from: f64, to: f6
     header.extend(8u16.to_le_bytes());
     header.extend(32u16.to_le_bytes());
     header.extend(b"data");
-    header.extend((data.len() as u32).to_le_bytes());
+    header.extend((data as u32).to_le_bytes());
+    header
+}
+
+async fn private_file(file: &Path) -> std::io::Result<tokio::fs::File> {
     let mut options = tokio::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
     {
         options.mode(0o600);
     }
-    let mut out = options.open(file).await?;
-    out.write_all(&header).await?;
-    out.write_all(&data).await?;
-    out.flush().await
+    options.open(file).await
 }
 
 /// The loudest sample of a stretch, in dBFS (-Infinity for silence): a quick "was anything there".
