@@ -703,6 +703,25 @@ case!(reconnect_refused_undo_and_narrow_undo, async {
     assert!(h.calls().contains(&"undo:c3".into()));
     h.close().await;
 });
+case!(a_picker_over_the_dock_takes_the_clicks_on_what_it_hides, async {
+    let h = Harness::new(80, 24);
+    h.start().await;
+    h.connect();
+    h.emit(json!({"type":"change","change":{"id":"c4","family":"tempo","title":"Tempo 120 → 128 BPM","state":"applied","at":1}}));
+    let docked = h.screen();
+    let row = docked.iter().position(|s| s.contains("Tempo 120 → 128 BPM") && s.contains("undo")).unwrap();
+    // The answers picker opens over the dock: its lower right is where undo was.
+    h.type_text("which one?\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"Which reverb?\n\n1. Hall\n2. Plate\n3. Spring\n4. Room\n5. None"}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.has("Your answer");
+    assert!(!h.screen()[row].contains("undo"), "the picker covers the dock's undo:\n{}", h.screen().join("\n"));
+    h.type_text(&click(&docked, row, "undo")).await;
+    assert!(!h.calls().iter().any(|c| c.starts_with("undo:")), "a click on the picker undid a change: {:?}", h.calls());
+    h.close().await;
+});
 case!(history_scroll_mouse_keyboard_and_badges, async {
     let h = Harness::new(120, 36);
     h.start().await;

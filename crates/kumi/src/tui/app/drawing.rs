@@ -518,7 +518,9 @@ impl TuiApp {
             return;
         }
         let about = 3 + super::input::COMMANDS.iter().map(|c| c.name.len()).max().unwrap_or(0) as i32 + 2;
-        screen.fill(Rect::new(1, top - 1, width, items.len() as i32 + 1), &st::RAISED);
+        let area = Rect::new(1, top - 1, width, items.len() as i32 + 1);
+        screen.fill(area, &st::RAISED);
+        self.cover(area);
         let selected = self.0.state.borrow().menu_index;
         for (index, item) in items.iter().enumerate() {
             let y = top + index as i32;

@@ -215,7 +215,9 @@ impl TuiApp {
         let gap = i32::from(lines.len() as i32 + 3 <= box_top - 2);
         let height = lines.len() as i32 + gap + 2;
         let top = (box_top - 1 - height).max(1);
-        screen.fill(Rect::new(1, top, width, height.min(box_top - 1 - top)), &st::RAISED);
+        let area = Rect::new(1, top, width, height.min(box_top - 1 - top));
+        screen.fill(area, &st::RAISED);
+        self.cover(area);
         let row_of = |index: usize| top + 1 + index as i32 + if index > 0 { gap } else { 0 };
         for (index, line) in lines.iter().enumerate() {
             let y = row_of(index);
