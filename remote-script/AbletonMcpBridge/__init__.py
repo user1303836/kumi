@@ -415,6 +415,12 @@ class _WillingtonProvider:
                 from WillingtonRuntime import ComponentUnavailableError as unavailable
             except ImportError:
                 unavailable = ()  # Older packages have no typed availability error.
+            try:
+                import WillingtonRuntime as willington_runtime
+            except ImportError:
+                willington_runtime = None
+            if willington_runtime is not None:
+                _keep_willington_identity(willington_runtime)
 
             def install_component(component, module):
                 if component in getattr(Live, "_kumi_willington_unavailable_components", ()):
@@ -502,6 +508,25 @@ class _WillingtonProvider:
 
 
 _WILLINGTON_CHECK_SECONDS = 1.0
+
+
+def _keep_willington_identity(runtime: Any) -> None:
+    """Willington's identity() hashes the whole Live executable (SHA-256) each call, and its components' installs
+    ask for it up to five times a provider, on every /willington switch too, on Live's main thread. What it reads (the
+    running Live's version and executable) can't change while Live runs, so its answer is kept for the life of the
+    process. vendor/willington keeps Willington's own files as they ship; the wrapper is Kumi's."""
+    original = getattr(runtime, "identity", None)
+    if not callable(original) or getattr(original, "_kumi_kept", False):
+        return
+    kept: list[dict[str, Any]] = []
+
+    def identity() -> dict[str, Any]:
+        if not kept:
+            kept.append(original())
+        return dict(kept[0])
+
+    identity._kumi_kept = True  # type: ignore[attr-defined]
+    runtime.identity = identity
 
 
 def _willington_switch() -> tuple[int, int, int] | None:

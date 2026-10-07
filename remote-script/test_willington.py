@@ -485,6 +485,17 @@ class ProviderTests(unittest.TestCase):
                     self.assertFalse(fixture.devices.patches); self.assertFalse(fixture.zones.patches)
                 self.assertEqual(fixture.calls.count((failed_label, 'install')), 2)
 
+    def test_willingtons_identity_is_hashed_once_while_live_runs(self):
+        # identity() SHA-256s the whole Live executable; the components' installs ask for it several times a provider.
+        runtime = types.ModuleType('WillingtonRuntime'); hashed = []
+        runtime.identity = lambda: hashed.append(True) or {'platform': 'macos', 'source_sha256': 'f' * 64}
+        with _provider_fixture({'followActions': True, 'deviceTools': True, 'enableWrites': False}, {'WillingtonRuntime': runtime}) as fixture:
+            fixture.construct(); fixture.construct()
+            first = runtime.identity(); first['platform'] = 'changed'
+            self.assertEqual(runtime.identity()['platform'], 'macos', "each caller gets its own copy")
+            self.assertEqual(len(hashed), 1, "hashed once, however many providers and installs ask")
+        wrapper._keep_willington_identity(types.ModuleType('WillingtonRuntime'))  # a runtime without identity is left alone
+
     def test_legacy_packages_without_typed_runtime_still_install(self):
         for runtime in (None, types.ModuleType('WillingtonRuntime')):
             with self.subTest(runtime=runtime), _provider_fixture({'followActions': True,
