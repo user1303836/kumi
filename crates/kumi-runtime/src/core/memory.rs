@@ -291,9 +291,13 @@ impl State {
             let at = now_ms();
             let note = {
                 let mut pending = self.pending.borrow_mut();
-                if pending.len() < MAX_NOTES {
-                    pending.push(Some(Pending { text: text.clone(), set: self.open_set(), at }));
+                // Only the notes still kept count (one forgotten leaves room); past the most, nothing is said kept.
+                if pending.iter().flatten().count() >= MAX_NOTES {
+                    return Ok(ToolResult::error(format!(
+                        "Kumi keeps at most {MAX_NOTES} notes about a Set until it's saved: save the Set, or forget one of them, then keep this one."
+                    )));
                 }
+                pending.push(Some(Pending { text: text.clone(), set: self.open_set(), at }));
                 MemoryNote { id: format!("s{}", pending.len()), text, at, pinned: false }
             };
             (self.options.on_event)(MemoryEvent::Remembered { scope, note, pending: Some(true), replaced: None });
@@ -377,12 +381,22 @@ impl MemoryTools {
             return Ok(());
         };
         let open = self.state.open_set();
-        let texts: Vec<_> = self.state.pending.borrow_mut().drain(..).flatten().filter(|n| n.set == open).map(|n| n.text).collect();
-        if texts.is_empty() {
+        // What this Set kept while it was unsaved (another Set's go: it isn't the one saved).
+        let kept: Vec<Pending> = self.state.pending.borrow_mut().drain(..).flatten().filter(|n| n.set == open).collect();
+        if kept.is_empty() {
             return Ok(());
         }
         let _serial = self.state.serial.lock().await;
-        self.state.options.store.add(MemoryScope::Set, Some(&project), &texts, now_ms()).await
+        let texts: Vec<_> = kept.iter().map(|n| n.text.clone()).collect();
+        let added = self.state.options.store.add(MemoryScope::Set, Some(&project), &texts, now_ms()).await;
+        if added.is_err() {
+            // Not written (a busy database, say): they wait for the next look, before any kept since.
+            let mut pending = self.state.pending.borrow_mut();
+            let since = std::mem::take(&mut *pending);
+            pending.extend(kept.into_iter().map(Some));
+            pending.extend(since);
+        }
+        added
     }
 }
 struct NoteTool {

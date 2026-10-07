@@ -204,6 +204,32 @@ async fn orders_and_secrets_are_neither_kept_nor_read_back_from_disk() {
     assert!(!f.remember(json!({"note":"Wants the drop to hit harder than the intro","about":"set"})).await.is_error);
 }
 #[tokio::test]
+async fn an_unsaved_sets_notes_wait_out_a_failed_write_and_past_the_most_none_is_said_kept() {
+    let f = Fixture::new(false);
+    for n in 0..MAX_NOTES {
+        f.remember(json!({"note":format!("Note {n}"),"about":"set"})).await;
+    }
+    // Past the most, the note isn't said kept; one forgotten leaves room for one more.
+    let refused = f.remember(json!({"note":"One too many","about":"set"})).await;
+    assert!(refused.is_error, "{}", refused.text);
+    assert!(f.notes.forget("s1").await.unwrap().is_some());
+    let kept = f.remember(json!({"note":"In the room left","about":"set"})).await;
+    assert!(!kept.is_error, "{}", kept.text);
+    assert!(matches!(f.events.borrow().last(), Some(MemoryEvent::Remembered { note, .. }) if note.id == format!("s{}", MAX_NOTES + 1)));
+    // The Set is saved, but its notes can't be written yet (a file stands where its folder goes): they wait.
+    *f.open.borrow_mut() = Some(PROJECT.into());
+    let folder = f.dir.path().join("projects").join(PROJECT);
+    std::fs::create_dir_all(folder.parent().unwrap()).unwrap();
+    std::fs::write(&folder, "in the way").unwrap();
+    assert!(f.notes.flush().await.is_err());
+    std::fs::remove_file(&folder).unwrap();
+    f.notes.flush().await.unwrap();
+    let memory = f.store.load(Some(PROJECT)).await.unwrap();
+    assert_eq!(memory.set.len(), MAX_NOTES);
+    assert!(memory.set.iter().any(|note| note.text == "In the room left"));
+    assert!(!memory.set.iter().any(|note| note.text == "Note 0" || note.text == "One too many"));
+}
+#[tokio::test]
 async fn pending_note_can_be_forgotten_and_is_not_kept_on_save() {
     let f = Fixture::new(false);
     f.remember(json!({"note":"Verse two drops the hats","about":"set"})).await;
