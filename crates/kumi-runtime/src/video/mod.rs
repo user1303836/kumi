@@ -636,6 +636,10 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
             .into();
     }
     let remote = address.to_ascii_lowercase().starts_with("http://") || address.to_ascii_lowercase().starts_with("https://");
+    // yt-dlp reads it from this computer: a public address only, as for the streams and captions it gives back.
+    if remote {
+        crate::web::net::checked_url(&address, None).map_err(|error| VideoFailure::video(error.to_string()))?;
+    }
     let file = if remote {
         None
     } else {

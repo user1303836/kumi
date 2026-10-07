@@ -263,6 +263,20 @@ async fn captions_beside_a_video_are_read_in_windows_1252_and_utf_16_too() {
     assert_eq!(watched.lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["\u{65e5}\u{672c}"]);
 }
 #[tokio::test(flavor = "current_thread")]
+async fn a_private_address_isnt_given_to_yt_dlp() {
+    let folder = tempfile::tempdir().unwrap();
+    let ytdlp = fake(folder.path(), "yt-dlp", "echo asked >> \"$(dirname \"$0\")/asked\"\nexit 1", "echo asked>>\"%~dp0asked\"\nexit /b 1");
+    let mut env = kumi_runtime::system::process_env();
+    env.insert("KUMI_YTDLP".into(), ytdlp);
+    let mut options = watch_options(folder.path(), "videos");
+    options.env = Some(env);
+    for address in ["http://192.168.1.20/tutorial.mp4", "http://localhost:8080/watch?v=x", "http://[::1]/video"] {
+        let error = watch_video(WatchRequest { url: address.into(), ..Default::default() }, options.clone()).await.unwrap_err();
+        assert!(error.to_string().contains("only public web addresses"), "{address}: {error}");
+    }
+    assert!(!folder.path().join("asked").exists(), "yt-dlp wasn't run");
+}
+#[tokio::test(flavor = "current_thread")]
 async fn video_files_have_captions_frames_closeups_sound_and_are_kept() {
     let folder = tempfile::tempdir().unwrap();
     let Some(video) = test_video(folder.path(), "tutorial", true).await else {
