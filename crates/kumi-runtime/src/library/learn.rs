@@ -285,20 +285,36 @@ async fn walk(
     let mut complete = true;
     while let Some((path, depth)) = queue.pop() {
         signal.check()?;
+        // A folder that can't be read (a NAS's hiccup, a placeholder nothing serves now) is skipped, and the walk
+        // isn't whole: what was learned in it stays. One deleted meanwhile is gone.
         let mut entries = match tokio::fs::read_dir(&path).await {
             Ok(entries) => entries,
             Err(_) if depth == 0 => return Ok(false),
-            Err(_) => continue,
+            Err(error) => {
+                complete &= error.kind() == io::ErrorKind::NotFound;
+                continue;
+            }
         };
         let parent = basename(&path).to_lowercase();
-        while let Some(entry) = entries.next_entry().await.map_err(io_error)? {
+        loop {
+            let entry = match entries.next_entry().await {
+                Ok(Some(entry)) => entry,
+                Ok(None) => break,
+                Err(_) => {
+                    complete = false;
+                    break;
+                }
+            };
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.starts_with('.') {
                 continue;
             }
             let full = join(&path, &name);
             let lower = name.to_lowercase();
-            let kind = entry.file_type().await.map_err(io_error)?;
+            let Ok(kind) = entry.file_type().await else {
+                complete = false;
+                continue;
+            };
             if kind.is_dir() {
                 if SKIP.contains(&lower.as_str())
                     || lower == "backup"
@@ -335,7 +351,13 @@ async fn walk(
             if !found.seen.insert(full.clone()) {
                 continue;
             }
-            let Ok(info) = tokio::fs::metadata(&full).await else { continue };
+            let info = match tokio::fs::metadata(&full).await {
+                Ok(info) => info,
+                Err(error) => {
+                    complete &= error.kind() == io::ErrorKind::NotFound;
+                    continue;
+                }
+            };
             if info.len() < 64 {
                 continue;
             }

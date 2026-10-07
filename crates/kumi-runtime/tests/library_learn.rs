@@ -83,6 +83,23 @@ async fn incremental_learning_resumes_after_stop_relearns_changes_and_removes_de
     options.rebuild = true;
     assert_eq!(learn(options).await.unwrap().sounds.todo, 6);
 }
+#[cfg(unix)]
+#[tokio::test]
+async fn a_folder_that_cant_be_read_keeps_what_was_learned_inside_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let studio = Studio::new();
+    learn(LearnOptions::new(studio.plan(0), Signal::new())).await.unwrap();
+    let logs = library_logs(studio.dir.to_str().unwrap());
+    let kicks = studio.user.join("Samples/Kicks");
+    let learned = logs.sounds.load().await;
+    assert!(learned.keys().any(|path| path.starts_with(kicks.to_str().unwrap())));
+    // As a NAS that stops answering, or a placeholder nothing serves now, leaves it.
+    std::fs::set_permissions(&kicks, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let again = learn(LearnOptions::new(studio.plan(0), Signal::new())).await;
+    std::fs::set_permissions(&kicks, std::fs::Permissions::from_mode(0o755)).unwrap();
+    again.unwrap();
+    assert_eq!(logs.sounds.load().await.keys().collect::<Vec<_>>(), learned.keys().collect::<Vec<_>>());
+}
 #[tokio::test]
 async fn discovery_keeps_unavailable_roots_and_skips_links_copies_backups_and_unfinished_depth() {
     use kumi_runtime::library::sources::{Source, SourceKind};
