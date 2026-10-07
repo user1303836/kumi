@@ -125,6 +125,52 @@ impl AsyncLiveAdapter for Replay {
     }
 }
 
+/// The simulator with a second track, "Bass", holding EQ Eight.
+fn two_tracks() -> Rc<DeterministicLiveSimulator> {
+    let live = Rc::new(DeterministicLiveSimulator::new());
+    {
+        let mut state = live.state.borrow_mut();
+        let mut bass = state["tracks"][0].clone();
+        bass["ref"] = json!("track:track-2");
+        bass["objectIdentity"] = json!("simulator:track:track-2");
+        bass["name"] = json!("Bass");
+        bass["devices"] = json!([{"ref":"device:eq-2","parentRef":"track:track-2","objectIdentity":"simulator:device:eq-2","name":"EQ Eight","kind":"audio-effect","parameters":[],"enabled":true}]);
+        bass["clips"] = json!([]);
+        bass["clipSlots"] = json!([]);
+        bass.as_object_mut().unwrap().remove("mixer");
+        state["tracks"].as_array_mut().unwrap().push(bass);
+    }
+    live
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_cross_target_move_refuses_its_own_owner_and_a_target_whose_devices_changed() {
+    let live = two_tracks();
+    let host = McpHost::new(live.clone(), McpHostOptions::default()).unwrap();
+    let text = |result: Value| -> Value { serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+    // Its own track would only reorder it.
+    let own = host
+        .live_device_advanced_preview_async(
+            &json!(1),
+            &json!({"action":"move-cross","ref":"device:utility-1","targetTrackRef":"track:track-1","index":0}),
+        )
+        .await;
+    assert_eq!(own["error"]["code"], -32602, "{own}");
+    // After EQ Eight on Bass; then the producer puts another device first, so index 1 would land before EQ Eight.
+    let preview = text(
+        host.live_device_advanced_preview_async(
+            &json!(2),
+            &json!({"action":"move-cross","ref":"device:utility-1","targetTrackRef":"track:track-2","index":1}),
+        )
+        .await,
+    );
+    live.state.borrow_mut()["tracks"][1]["devices"].as_array_mut().unwrap().insert(0, json!({"ref":"device:comp-2","parentRef":"track:track-2","objectIdentity":"simulator:device:comp-2","name":"Compressor","kind":"audio-effect","parameters":[],"enabled":true}));
+    let apply = json!({"transactionId":preview["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+    let refused = text(host.live_device_advanced_apply_async(&json!(3), &apply, None).await.unwrap());
+    assert!(refused.to_string().contains("changed since the preview"), "{refused}");
+    let names: Vec<_> = live.state.borrow()["tracks"][1]["devices"].as_array().unwrap().iter().map(|d| d["name"].clone()).collect();
+    assert_eq!(names, [json!("Compressor"), json!("EQ Eight")], "nothing moved");
+    assert_eq!(host.transaction_record(preview["transactionId"].as_str().unwrap()).unwrap().borrow()["state"], "previewed");
+}
 #[tokio::test(flavor = "current_thread")]
 async fn re_enabling_an_overridden_parameters_automation_fences_on_its_own_state() {
     let live = Rc::new(DeterministicLiveSimulator::new());

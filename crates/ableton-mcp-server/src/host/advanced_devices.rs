@@ -33,6 +33,18 @@ fn expect_result<'a>(result: &'a Value, field: &str) -> Result<&'a Value, LiveEr
         Ok(&result[field])
     }
 }
+/// A track's or chain's devices by ref and identity: the neighbours a cross-target move's index lands among.
+fn siblings_of(target: &Value) -> Value {
+    Value::Array(
+        target["devices"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|v| v.is_object())
+            .map(|v| fields(v, &["ref", "objectIdentity"]))
+            .collect(),
+    )
+}
 impl McpHost {
     async fn advanced_status(&self) -> Result<LiveStatus, LiveError> {
         let status = self.fresh_status(Some(&LiveOperationContext::with_deadline(self.deadline(AUDITION_DEADLINE_MS)))).await?;
@@ -67,7 +79,7 @@ impl McpHost {
         }
         let result=async{
             let status=self.advanced_status().await?;let snapshot=self.views.view_for(None,&[p["ref"].clone(),p["trackRef"].clone(),p["chainRef"].clone(),p["targetTrackRef"].clone(),p["targetChainRef"].clone()],None,&[]).await?;
-            let mut payload;let mut prior=json!({});let impact;
+            let mut payload;let mut prior=json!({});let impact;let mut target_siblings=Value::Null;
             match p["action"].as_str().unwrap(){
                 "set-bank"=>{
                     if !status.has_operation("device.bank.set"){return Err(LiveError::error("parameter banks are unavailable"))}
@@ -97,10 +109,13 @@ impl McpHost {
                     let row=self.device_row(&snapshot,p["ref"].as_str().unwrap())?;
                     let target=if p.get("targetTrackRef").is_some(){if !is_non_empty_string(&p["targetTrackRef"],256){return Ok(error(id,-32602,"targetTrackRef is invalid",None))}snapshot.tracks.iter().flatten().find(|t|json!(t.ref_)==p["targetTrackRef"]).map(|t|serde_json::to_value(t).unwrap()).unwrap_or(Value::Null)}else{if !is_non_empty_string(&p["targetChainRef"],256){return Ok(error(id,-32602,"targetChainRef is invalid",None))}self.chain_row(&snapshot,p["targetChainRef"].as_str().unwrap())?.chain};
                     if !is_non_empty_string(&target["objectIdentity"],256){return Err(LiveError::error("move target identity is not authoritative"))}if p["index"].as_f64().unwrap()>target["devices"].as_array().map_or(0,Vec::len)as f64{return Ok(error(id,-32602,"index exceeds the exact target sibling collection",None))}
+                    // Its own track or chain would only reorder it, which Live's move can't undo here.
+                    if target["ref"]==json!(row.owner_ref){return Ok(error(id,-32602,"the device is already on that track or chain: move-cross moves a device to another one",None))}
+                    target_siblings=siblings_of(&target);
                     let index=row.siblings.iter().position(|s|s["ref"]==p["ref"]).unwrap_or(0);payload=fields(p,&["action","ref","index","targetTrackRef","targetChainRef"]);payload["expectedObjectIdentity"]=row.device["objectIdentity"].clone();payload["expectedOwnerRef"]=json!(row.owner_ref);payload["expectedOwnerIdentity"]=json!(row.owner_identity);payload["expectedSiblings"]=json!(row.siblings);payload["expectedTrackRef"]=row.track["ref"].clone();payload["expectedTrackIdentity"]=row.track["objectIdentity"].clone();payload["expectedTargetIdentity"]=target["objectIdentity"].clone();payload["priorOwnerRef"]=json!(row.owner_ref);payload["priorIndex"]=json!(index);prior=json!({"ownerRef":row.owner_ref,"ownerIdentity":row.owner_identity,"ownerKind":if row.track["ref"]==row.owner_ref{"track"}else{"chain"},"index":index});impact="moves-device-cross-target";
                 }
             }
-            let t=json!({"id":tempo::transaction_id("devadv"),"epoch":status.epoch,"kind":"device-advanced","fence":js_json::stringify(&json!({"action":p["action"],"payload":payload})),"payload":payload,"prior":prior,"expiresAt":kumi_common::time::now_ms_f64()+TRANSACTION_TTL_MS,"state":"previewed"});self.retain_bounded_transaction(&self.clip_lifecycle_transactions,t.clone(),"device advanced")?;Ok(success_text(id,&json!({"transactionId":t["id"],"epoch":t["epoch"],"action":p["action"],"prior":prior,"impact":impact,"confirmation":"apply","expiresAt":t["expiresAt"]})))
+            let mut t=json!({"id":tempo::transaction_id("devadv"),"epoch":status.epoch,"kind":"device-advanced","fence":js_json::stringify(&json!({"action":p["action"],"payload":payload})),"payload":payload,"prior":prior,"expiresAt":kumi_common::time::now_ms_f64()+TRANSACTION_TTL_MS,"state":"previewed"});if !target_siblings.is_null(){t["targetSiblings"]=target_siblings}self.retain_bounded_transaction(&self.clip_lifecycle_transactions,t.clone(),"device advanced")?;Ok(success_text(id,&json!({"transactionId":t["id"],"epoch":t["epoch"],"action":p["action"],"prior":prior,"impact":impact,"confirmation":"apply","expiresAt":t["expiresAt"]})))
         }.await;
         result.unwrap_or_else(|e| adapter_tool_error(id, &e, "Device-advanced preview requires fresh authoritative state."))
     }
@@ -133,7 +148,10 @@ impl McpHost {
         }
         let result=async{
             if reconcile{self.fresh_status(Some(&LiveOperationContext::with_deadline(self.deadline(AUDITION_DEADLINE_MS)))).await?;}let status=self.require_connected(Some("session.read"))?;if json!(status.epoch)!=t["epoch"]{return Ok(transaction_error(id,"Live connection epoch changed; preview again"))}
-            let adapter=self.async_adapter();let context=self.transaction_context(p,signal,AUDITION_DEADLINE_MS);let action=t["payload"]["action"].as_str().unwrap_or("");{let mut row=record.borrow_mut();row["state"]=json!("applying");row["applyKey"]=p["idempotencyKey"].clone()}
+            let adapter=self.async_adapter();let context=self.transaction_context(p,signal,AUDITION_DEADLINE_MS);let action=t["payload"]["action"].as_str().unwrap_or("");
+            // Where the index puts it: among the devices the preview showed on the target.
+            if t["targetSiblings"].is_array()&&!reconcile{let snapshot=self.views.view_for(Some(&context),&[t["payload"]["targetTrackRef"].clone(),t["payload"]["targetChainRef"].clone()],None,&[]).await?;let target=if t["payload"]["targetTrackRef"].is_string(){snapshot.tracks.iter().flatten().find(|track|json!(track.ref_)==t["payload"]["targetTrackRef"]).map(|track|serde_json::to_value(track).unwrap()).unwrap_or(Value::Null)}else{self.chain_row(&snapshot,t["payload"]["targetChainRef"].as_str().unwrap_or(""))?.chain};if siblings_of(&target)!=t["targetSiblings"]{return Ok(transaction_error(id,"the devices on the target changed since the preview; preview again"))}}
+            {let mut row=record.borrow_mut();row["state"]=json!("applying");row["applyKey"]=p["idempotencyKey"].clone()}
             let args=Value::Object(t["payload"].as_object().unwrap().iter().filter(|(k,_)|!["action","priorOwnerRef","priorIndex"].contains(&k.as_str())).map(|(k,v)|(k.clone(),v.clone())).collect());let operation=match action{"set-bank"=>"device.bank.set","re-enable-automation"=>"parameter.re-enable-automation","save-comparison"=>"device.comparison.save-to-slot","insert-chain"=>"device.insert",_=>"device.move"};let value=adapter.invoke_async(&LiveInvocation::new(operation,args),Some(&context)).await?;
             match action{
                 "set-bank"=>if expect_result(&value,"changed")?!=true{return Err(LiveError::error("device bank selection was not confirmed"))},
