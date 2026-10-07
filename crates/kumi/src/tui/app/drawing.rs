@@ -171,7 +171,7 @@ impl TuiApp {
         let now = perf_now();
         let (rows, next) = {
             let mut state = self.0.state.borrow_mut();
-            let rows = state.transcript.rows(width, now);
+            let rows = state.transcript.layout(width, now);
             let next = state.transcript.change_at(now);
             (rows, next)
         };

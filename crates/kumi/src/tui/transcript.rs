@@ -687,8 +687,27 @@ fn watched_rows(entry: &Entry, width: i32) -> Vec<Row> {
 struct Cache {
     width: i32,
     revision: u64,
-    rows: Vec<Row>,
+    /// Shared with each layout made from it: a frame borrows these, it doesn't copy them.
+    rows: Rc<[Row]>,
     moving: bool,
+}
+/// The transcript laid out at one width: each entry's rows as cached, after an empty row once any came before.
+pub struct Layout {
+    entries: Vec<(bool, Rc<[Row]>)>,
+    total: usize,
+    gap: Row,
+}
+impl Layout {
+    pub fn len(&self) -> usize {
+        self.total
+    }
+    pub fn is_empty(&self) -> bool {
+        self.total == 0
+    }
+    /// Its rows in order, by reference: drawing walks only to the ones on screen, and copies none.
+    pub fn iter(&self) -> impl Iterator<Item = &Row> {
+        self.entries.iter().flat_map(|(gap, rows)| gap.then_some(&self.gap).into_iter().chain(rows.iter()))
+    }
 }
 pub struct EntryState {
     entry: RefCell<Entry>,
@@ -744,8 +763,12 @@ impl Transcript {
             })
             .reduce(f64::min)
     }
+    /// Every row, copied: `layout` is what a frame reads.
     pub fn rows(&mut self, width: i32, now: f64) -> Vec<Row> {
-        let mut all = vec![];
+        self.layout(width, now).iter().cloned().collect()
+    }
+    pub fn layout(&mut self, width: i32, now: f64) -> Layout {
+        let (mut entries, mut total) = (Vec::with_capacity(self.entries.len()), 0);
         for entry in &self.entries {
             let mut moving = false;
             {
@@ -762,14 +785,14 @@ impl Transcript {
             let mut cached = entry.cache.borrow_mut();
             if cached.as_ref().is_none_or(|c| c.width != width || c.revision != revision || moving || c.moving) {
                 self.laid_out += 1;
-                *cached = Some(Cache { width, revision, rows: entry_rows(&entry.borrow(), width, now), moving });
+                *cached = Some(Cache { width, revision, rows: entry_rows(&entry.borrow(), width, now).into(), moving });
             }
-            if !all.is_empty() {
-                all.push(Row::default());
-            }
-            all.extend(cached.as_ref().unwrap().rows.clone());
+            let rows = cached.as_ref().unwrap().rows.clone();
+            let gap = total > 0;
+            total += usize::from(gap) + rows.len();
+            entries.push((gap, rows));
         }
-        all
+        Layout { entries, total, gap: Row::default() }
     }
 }
 

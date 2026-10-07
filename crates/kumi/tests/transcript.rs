@@ -192,3 +192,34 @@ fn transcript_insertion_mutation_and_cached_layouts() {
     assert!(t.is_empty());
     assert!(t.rows(40, 100.).is_empty());
 }
+#[test]
+fn a_frames_layout_borrows_the_cached_rows_with_the_same_gaps() {
+    let mut t = Transcript::default();
+    // An answer that hasn't said anything yet has no rows: what follows it gets no gap before it.
+    let empty = || Entry::Assistant { text: "".into(), status: AnswerStatus::Done, started_at: None, elapsed_ms: None, steps: vec![] };
+    t.add(empty());
+    t.add(Entry::User { text: "a".into() });
+    t.add(empty());
+    t.add(Entry::Notice { text: "c".into(), tone: NoticeTone::Info });
+    assert!(kumi::tui::transcript::entry_rows(&empty(), 40, 0.).is_empty());
+    // The rows as each entry's were once gathered, copied one after another.
+    let mut gathered = vec![];
+    for entry in &t.entries {
+        if !gathered.is_empty() {
+            gathered.push(Row::default());
+        }
+        gathered.extend(kumi::tui::transcript::entry_rows(&entry.borrow(), 40, 0.));
+    }
+    let layout = t.layout(40, 0.);
+    assert_eq!(layout.len(), gathered.len());
+    assert_eq!(
+        layout.iter().map(|row| format!("{row:?}")).collect::<Vec<_>>(),
+        gathered.iter().map(|row| format!("{row:?}")).collect::<Vec<_>>()
+    );
+    // The next frame lays out nothing again and copies nothing: each entry's rows are the cache's own.
+    let laid = t.laid_out;
+    let again = t.layout(40, 0.);
+    assert_eq!(t.laid_out, laid);
+    let shared = layout.iter().zip(again.iter()).filter(|(a, b)| std::ptr::eq(*a, *b)).count();
+    assert_eq!(shared, layout.iter().filter(|row| !row.spans.is_empty()).count());
+}
