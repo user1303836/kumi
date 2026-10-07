@@ -291,6 +291,25 @@ fn alter(s: &mut Value, kind: &str) {
     }
 }
 #[tokio::test]
+async fn a_groove_undo_puts_back_only_what_the_edit_changed() {
+    let live = Rc::new(DeterministicLiveSimulator::new());
+    let host = McpHost::new(live.clone(), McpHostOptions::default()).unwrap();
+    let text = |result: Value| -> Value { serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+    let preview = text(
+        host.live_groove_preview_async(&json!(1), &json!({"action":"edit","grooveRef":"groove:groove-1","quantizationAmount":0.9})).await,
+    );
+    let apply = json!({"transactionId":preview["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+    let applied = text(host.live_groove_apply_async(&json!(2), &apply, None).await.unwrap());
+    assert_eq!(applied["state"], "applied", "{preview} {applied}");
+    // The producer changes the groove's timing since.
+    live.state.borrow_mut()["groovePool"]["grooves"][0]["timingAmount"] = json!(0.8);
+    let undo = json!({"transactionId":preview["transactionId"],"confirmation":"undo","idempotencyKey":"undo-key"});
+    let undone = text(host.undo_groove_async(&json!(3), &undo, None).await);
+    assert_eq!(undone["state"], "undone", "{undone}");
+    let groove = live.state.borrow()["groovePool"]["grooves"][0].clone();
+    assert_eq!((groove["quantizationAmount"].clone(), groove["timingAmount"].clone()), (json!(0.5), json!(0.8)), "{groove}");
+}
+#[tokio::test]
 async fn groove_validation_matches_source() {
     for (index, row) in fixture()["rows"].as_array().unwrap().iter().enumerate() {
         let sim = Rc::new(DeterministicLiveSimulator::new());
