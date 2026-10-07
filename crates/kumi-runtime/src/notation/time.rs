@@ -50,7 +50,7 @@ impl Frame {
     pub fn bar_of(&self, time: f64) -> u32 {
         let bar = (time / self.bar()).floor();
         let bar = if (bar + 1.) * self.bar() - time < EPSILON { bar + 1. } else { bar };
-        bar.max(0.) as u32 + 1
+        (bar.max(0.) as u32).saturating_add(1)
     }
     /// A time as `bar|beat`. The beat is a whole number, a decimal for halves and quarters and anything off the grid
     /// (`3|2.5`, `3|2.0234`), or a whole number and a fraction (`3|1+1/3`).
@@ -60,7 +60,7 @@ impl Frame {
         let beats = within / self.unit();
         let whole = if beats.ceil() - beats < EPSILON { beats.ceil() } else { beats.floor() };
         let rest = (beats - whole).max(0.);
-        let beat = whole as u64 + 1;
+        let beat = (whole as u64).saturating_add(1);
         if rest < EPSILON {
             return format!("{bar}|{beat}");
         }
@@ -172,6 +172,10 @@ mod tests {
         assert_eq!(four.position(recorded), "3|2.0234");
         assert!((four.parse_position(&four.position(recorded)).unwrap() - recorded).abs() < EPSILON);
         assert_eq!(four.parse_position("0|1").or(four.parse_position("1|0")).or(four.parse_position("1")), None);
+        // The last bar a number can name, and times past it, stay there instead of overflowing.
+        let last = four.parse_position(&format!("{}|4", u32::MAX)).unwrap();
+        assert_eq!((four.bar_of(last), four.bar_of(last * 2.)), (u32::MAX, u32::MAX));
+        assert!(four.position(last * 2.).starts_with(&format!("{}|", u32::MAX)));
     }
 
     #[test]

@@ -101,7 +101,8 @@ pub fn parse(text: &str) -> Option<u8> {
     }
     let (class, octave) = class(text)?;
     let octave: i32 = octave.parse().ok()?;
-    let pitch = (octave + 2) * 12 + class;
+    // Checked: an octave in the millions would wrap round into the MIDI range.
+    let pitch = octave.checked_add(2)?.checked_mul(12)?.checked_add(class)?;
     (0..=127).contains(&pitch).then_some(pitch as u8)
 }
 /// A name as lanes match it: lowercase letters and digits only ("Kick 808" is "kick808").
@@ -159,6 +160,10 @@ mod tests {
         }
         assert_eq!((name(60), name(0), name(54)), ("C3".into(), "C-2".into(), "F#2".into()));
         for wrong in ["H3", "c3", "C9", "128", "C", "x"] {
+            assert_eq!(parse(wrong), None, "{wrong}");
+        }
+        // An octave so high its arithmetic overflows isn't a pitch (wrapped round, "C357913942" was 32).
+        for wrong in ["C357913942", "C2147483646", "C-2147483648", "Bb178956970"] {
             assert_eq!(parse(wrong), None, "{wrong}");
         }
     }

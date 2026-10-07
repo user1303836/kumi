@@ -99,7 +99,7 @@ fn repeat(notes: &[Note], frame: &Frame) -> (Vec<Note>, Option<String>) {
         return (notes.to_vec(), None);
     };
     let span = last - first + 1;
-    let (from, end) = (frame.bar_start(first), frame.bar_start(last + 1));
+    let (from, end) = (frame.bar_start(first), frame.bar_start(last.saturating_add(1)));
     for period in 1..=span / 2 {
         let head_end = frame.bar_start(first + period);
         let (head, rest): (Vec<Note>, Vec<Note>) = notes.iter().cloned().partition(|note| time(note) < head_end - EPSILON);
