@@ -102,13 +102,16 @@ async fn on_windows_the_credential_file_is_owner_only_wherever_kumi_home_puts_it
     assert_eq!(std::fs::metadata(&next).unwrap().len(), 0, "nothing written yet");
     assert!(std::fs::File::open(&next).is_err(), "no other handle while it's written");
     drop(file);
-    // A credential file written before Kumi made them owner-only is rewritten so the first time a process reads it.
+    // A credential file written before Kumi made them owner-only is made so where it is, the first time a process reads
+    // it, byte for byte as it was.
     let older = temp.path().join("older").join("auth.json");
     std::fs::create_dir_all(older.parent().unwrap()).unwrap();
-    std::fs::write(&older, std::fs::read(&path).unwrap()).unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    std::fs::write(&older, &bytes).unwrap();
     assert!(!windows_owner_only(&older));
     assert_eq!(open_credential_store(&older).list().await.unwrap().len(), 2);
     assert!(windows_owner_only(&older));
+    assert_eq!(std::fs::read(&older).unwrap(), bytes);
 }
 #[tokio::test]
 async fn credential_store_keeps_api_keys_beside_sign_ins_and_refuses_anything_that_isnt_one_word() {

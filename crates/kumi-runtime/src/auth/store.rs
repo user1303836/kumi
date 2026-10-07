@@ -202,7 +202,7 @@ impl FileCredentialStore {
     async fn read(&self) -> Result<Value, RuntimeError> {
         let text: Result<Result<String, RuntimeError>, std::io::Error> = async {
             // The mode bits are checked here. On Windows each write makes the file owner-only, and one written before
-            // Kumi did is rewritten so once a process (`secure_once`).
+            // Kumi did is made so where it is, once a process (`secure_once`).
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -266,16 +266,20 @@ impl FileCredentialStore {
         }
         result
     }
-    /// Once a process, on Windows: a credential file written before Kumi made them owner-only is rewritten under the
-    /// lock, which makes it so (an API key isn't rewritten otherwise until the next sign-in).
+    /// Once a process, on Windows: a credential file written before Kumi made them owner-only is given the owner-only
+    /// DACL where it is (an API key isn't rewritten otherwise until the next sign-in). Its bytes stay as they are, and
+    /// no lock is needed: a writer's next file is owner-only already, so whichever file this reaches ends up so.
     async fn secure_once(&self) {
         if !cfg!(windows) || !first_look(&self.path) || fs::metadata(&self.path).await.is_err() {
             return;
         }
         let path = self.path.clone();
-        if !tokio::task::spawn_blocking(move || windows_owner_only(&path)).await.unwrap_or(true) {
-            let _ = self.update_with("", |current| async move { Ok(current) }).await;
-        }
+        let _ = tokio::task::spawn_blocking(move || {
+            if !windows_owner_only(&path) {
+                let _ = make_owner_only(&path);
+            }
+        })
+        .await;
     }
     pub async fn update_with<F, Fut>(&self, provider: &str, change: F) -> Result<Option<Credential>, RuntimeError>
     where
