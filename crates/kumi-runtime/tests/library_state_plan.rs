@@ -65,6 +65,9 @@ async fn locks_exclude_other_processes_but_replace_same_process_dead_and_day_old
         assert!(acquire_lock(dir).await.unwrap().is_none());
         put(&lock, serde_json::to_vec(&json!({"pid":child.id(),"at":0})).unwrap());
         acquire_lock(dir).await.unwrap().unwrap().release().await.unwrap();
+        // Taken a minute before that process started: its pid was a learner's that's gone.
+        put(&lock, serde_json::to_vec(&json!({"pid":child.id(),"at":kumi_common::time::now_ms() - 60_000})).unwrap());
+        acquire_lock(dir).await.unwrap().unwrap().release().await.unwrap();
         child.kill().unwrap();
         child.wait().unwrap();
     }

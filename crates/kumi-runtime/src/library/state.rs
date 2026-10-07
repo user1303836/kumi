@@ -77,12 +77,24 @@ pub fn alive(pid: f64) -> bool {
         pid == std::process::id() as f64
     }
 }
+/// Whether the process that wrote a record at `since` (ms) is still running: `pid` alive, and not gone to a process
+/// started after the record (a second's slack for how finely a system keeps start times). Where the system can't say
+/// when it started, alive is enough.
+pub fn still_running(pid: f64, since: f64) -> bool {
+    if !alive(pid) {
+        return false;
+    }
+    match u32::try_from(pid as i64).ok().and_then(kumi_common::process::started_at_ms) {
+        Some(started) => started as f64 <= since + 1000.,
+        None => true,
+    }
+}
 pub async fn read_state(dir: &str) -> Option<LibraryState> {
     let mut state = read_json::<LibraryState>(&Path::new(dir).join("state.json")).await?;
     if state.version != 1 {
         return None;
     }
-    if state.learning.as_ref().is_some_and(|l| !alive(l.pid as f64)) {
+    if state.learning.as_ref().is_some_and(|l| !still_running(l.pid as f64, l.updated_at as f64)) {
         state.learning = None;
     }
     Some(state)
@@ -124,7 +136,8 @@ impl LibraryLock {
         }
     }
 }
-/// A same-process or day-old lock is replaced, exactly as the source learner does.
+/// A same-process or day-old lock is replaced, exactly as the source learner does, and one whose pid has gone to a
+/// process started after it was taken (the learner that took it was killed).
 pub async fn acquire_lock(dir: &str) -> io::Result<Option<LibraryLock>> {
     let mut builder = tokio::fs::DirBuilder::new();
     builder.recursive(true);
@@ -147,7 +160,7 @@ pub async fn acquire_lock(dir: &str) -> io::Result<Option<LibraryLock>> {
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
                 let holder = read_json::<Value>(&file).await.unwrap_or(Value::Null);
                 if let (Some(pid), Some(at)) = (holder["pid"].as_f64(), holder["at"].as_f64()) {
-                    if pid != std::process::id() as f64 && alive(pid) && now_ms() as f64 - at < 86400000. {
+                    if pid != std::process::id() as f64 && still_running(pid, at) && now_ms() as f64 - at < 86400000. {
                         return Ok(None);
                     }
                 }
