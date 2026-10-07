@@ -103,6 +103,35 @@ test("a line that isn't a request object is refused, and the host keeps serving"
   client.close();
 });
 
+test("until its first signed request a connection's lines stay small, and there are only so many", async () => {
+  // Unsigned, a 70 KiB line closes the connection before anything parses it.
+  const stranger = await connect();
+  const closed = new Promise((resolve) => stranger.socket.once("close", resolve));
+  stranger.socket.write(`${"x".repeat(70 * 1024)}\n`);
+  await closed;
+  // Signed in, a big line is read (and here answered as malformed), and the connection carries on.
+  const client = await connect();
+  assert.equal((await client.send({ method: "status" })).ok, true);
+  client.socket.write(`${"x".repeat(200 * 1024)}\n`);
+  await waitFor(() => client.frames.some((frame) => frame.id === "invalid" && frame.error === "malformed request"));
+  assert.equal((await client.send({ method: "status" })).ok, true);
+  client.close();
+  // Connections past the limit are closed at once, without a hello.
+  const sockets = [];
+  let rejected = false;
+  while (!rejected && sockets.length < 20) {
+    const socket = createConnection({ host: endpoint.host, port: endpoint.port });
+    sockets.push(socket);
+    rejected = (await new Promise((resolve) => { socket.once("data", () => resolve("hello")); socket.once("close", () => resolve("closed")); })) === "closed";
+  }
+  assert.ok(rejected && sockets.length <= 17, `${sockets.length} connections, the last ${rejected ? "refused" : "taken"}`);
+  for (const socket of sockets) socket.destroy();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const again = await connect();
+  assert.equal((await again.send({ method: "status" })).ok, true);
+  again.close();
+});
+
 test("an Arrangement MIDI clip goes in with its notes, where the Remote Script can't write them", async () => {
   const client = await connect();
   const result = await client.invoke("arrangement.midi-clip.create", { trackRef: "7:track:0", start: 8, length: 4, name: "Kumi chord", expectedName: "Keys", notes: [{ pitch: 60, start: 0, duration: 2, velocity: 100 }, { pitch: 67, start: 2, duration: 1, mute: true, probability: 0.5 }] });
