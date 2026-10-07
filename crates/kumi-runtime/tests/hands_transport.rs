@@ -229,14 +229,17 @@ $edit.MenuItems.Add($cafe) | Out-Null
 $create = $menu.MenuItems.Add('&Create')
 $create.MenuItems.Add('Insert &MIDI Track') | Out-Null
 $form.Menu = $menu
-# Live's track headers as UI Automation reads them, with two tracks whose names differ only in case.
-$headers = New-Object System.Windows.Forms.ListBox
-$headers.AccessibleName = 'Track Headers'
-$headers.SelectionMode = 'MultiExtended'
-[void]$headers.Items.Add('BASS')
-[void]$headers.Items.Add('Bass')
-[void]$headers.Items.Add($cafe)
-$form.Controls.Add($headers)
+# Live's track headers as UI Automation reads them, with two tracks whose names differ only in case. A WPF list, whose
+# automation name is its own: a WinForms ListBox is a native list box, and UI Automation names those its own way.
+Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, WindowsFormsIntegration
+$headers = New-Object System.Windows.Controls.ListBox
+[System.Windows.Automation.AutomationProperties]::SetName($headers, 'Track Headers')
+$headers.SelectionMode = [System.Windows.Controls.SelectionMode]::Extended
+foreach ($name in @('BASS', 'Bass', $cafe)) { [void]$headers.Items.Add($name) }
+$wpf = New-Object System.Windows.Forms.Integration.ElementHost
+$wpf.Dock = [System.Windows.Forms.DockStyle]::Fill
+$wpf.Child = $headers
+$form.Controls.Add($wpf)
 $form.add_Shown({ Say "ready $PID" })
 [System.Windows.Forms.Application]::Run($form)
 "#;
