@@ -10451,8 +10451,14 @@ class LiveObjectMapper:
             if budget[0] > MAX_TRAVERSAL: raise ValueError("realtime parameter identity traversal exceeded its bound")
         def descriptor(current_ref: str, parameter: Any, owner_ref: str, owner: Any, track_ref: str, track: Any, siblings: list[dict[str, str]]) -> dict[str, Any]:
             return {"ref": current_ref, "parameterIdentity": self._capture_object_identity(parameter), "ownerRef": owner_ref, "ownerIdentity": self._capture_object_identity(owner), "trackRef": track_ref, "trackIdentity": self._capture_object_identity(track), "siblings": siblings}
-        # A ref is positional: only its own track can hold it, so only that track is walked.
+        # A ref is positional: only its own track can hold it, so only that track is walked, and on it only the
+        # devices on the way to the one the ref names (its path) are read past their place.
         own_track = self._ref_track_index(reference)
+        target_path: str | None = None; device_prefix = f"{self.refs.epoch}:device:"; key = reference.partition(":parameter:")[2]
+        if key.startswith(device_prefix):
+            path, _, last = key[len(device_prefix):].rpartition(":")
+            if path.endswith(":macro") and last.isdigit(): target_path = path[:-len(":macro")]
+            elif last.isdigit(): target_path = path
         for track_index, track in ([(own_track, tracks[own_track])] if own_track is not None and own_track < len(tracks) else [] if own_track is not None else enumerate(tracks)):
             if track is None: continue
             track_ref = self.refs.put("track", track, str(track_index)); mixer = self._read_attr(track, "mixer_device")
@@ -10476,12 +10482,14 @@ class LiveObjectMapper:
                 if len(devices) > MAX_DISCOVERY_COLLECTION_LENGTH: raise ValueError("realtime device collection exceeds its bound")
                 for device_index, device in enumerate(devices):
                     consume(); device_path = f"{path}:{device_index}"; device_ref = self.refs.put("device", device, device_path)
-                    parameters: list[tuple[int, Any]] = []; native_parameters = self._items(self._read_attr(device, "parameters") or [])
+                    holds = target_path is None or target_path == device_path; inside = target_path is None or target_path.startswith(f"{device_path}:")
+                    if not holds and not inside: continue
+                    parameters: list[tuple[int, Any]] = []; native_parameters = self._items(self._read_attr(device, "parameters") or []) if holds else []
                     if len(native_parameters) > MAX_DISCOVERY_COLLECTION_LENGTH: raise ValueError("realtime device parameter collection exceeds its complete-state bound")
                     for parameter_index, parameter in enumerate(native_parameters):
                         numeric = (self._read_attr(parameter, "min", "min_value"), self._read_attr(parameter, "max", "max_value"), self._read_attr(parameter, "value"))
                         if all(isinstance(item, (int, float)) and not isinstance(item, bool) and math.isfinite(float(item)) for item in numeric): parameters.append((parameter_index, parameter))
-                    macros = self._rack_macros(device) if self._read_attr(device, "can_have_chains") is True else []
+                    macros = self._rack_macros(device) if holds and self._read_attr(device, "can_have_chains") is True else []
                     if len(parameters) + len(macros) > MAX_DISCOVERY_COLLECTION_LENGTH: raise ValueError("realtime device parameter collection exceeds its bound")
                     parameter_rows = [(self.refs.put("parameter", parameter, f"{device_ref}:{parameter_index}"), parameter) for parameter_index, parameter in parameters]
                     parameter_identities = {self._capture_object_identity(parameter) for _, parameter in parameter_rows}
@@ -10491,6 +10499,7 @@ class LiveObjectMapper:
                     consume(len(siblings))
                     for sibling, (_, parameter) in zip(siblings, parameter_rows):
                         if sibling["ref"] == reference and self._capture_same_object(parameter, target, target_identity): return descriptor(sibling["ref"], parameter, device_ref, device, track_ref, track, siblings)
+                    if not inside: continue
                     chains = self._items(self._read_attr(device, "chains") or []) if self._read_attr(device, "can_have_chains") is True else []
                     if len(chains) > MAX_DISCOVERY_COLLECTION_LENGTH: raise ValueError("realtime device chain collection exceeds its bound")
                     for chain_index, chain in enumerate(chains):

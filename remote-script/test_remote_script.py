@@ -3635,6 +3635,21 @@ class RealtimePlaneTests(unittest.TestCase):
         stuck = Stuck(); del stuck.quantization; stuck.is_quantized = False; mapper.song.tracks[0].devices[0].parameters = [stuck]; row = mapper.snapshot()["tracks"][0]["devices"][0]["parameters"][0]
         with self.assertRaisesRegex(ValueError, "not confirmed"): mapper._set_parameter_value(row["ref"], 0.75)
 
+    def test_a_realtime_packet_reads_only_the_parameters_of_the_device_it_names(self):
+        # Up to 64 packets a second each check their target: the track's other devices aren't read past their place.
+        class CountedParameter(FakeParameter):
+            reads = 0
+            def __getattribute__(self, name):
+                if name == "value": CountedParameter.reads += 1
+                return object.__getattribute__(self, name)
+        song = FakeSong(); track = song.tracks[0]; track.devices = [FakeDevice() for _ in range(10)]
+        for device in track.devices: device.parameters = [CountedParameter() for _ in range(50)]
+        mapper = LiveObjectMapper(song); rows = mapper.snapshot()["tracks"][0]["devices"]; target = rows[9]["parameters"][3]
+        CountedParameter.reads = 0
+        authority = mapper._realtime_parameter_authority(target["ref"])
+        self.assertEqual((authority["ref"], authority["ownerRef"], len(authority["siblings"])), (target["ref"], rows[9]["ref"], 50))
+        self.assertLessEqual(CountedParameter.reads, 60, "the named device's parameters, not every device's")
+
     def test_real_mapper_authority_matches_filtered_bounded_snapshot_siblings(self):
         import socket as _socket
         tcp_probe = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM); tcp_probe.bind(("127.0.0.1", 0)); tcp_port = tcp_probe.getsockname()[1]; tcp_probe.close()
@@ -3674,7 +3689,12 @@ class RealtimePlaneTests(unittest.TestCase):
             self.assertEqual(macro_arm["parameterRefs"], [macro_ref]); bridge._realtime.disarm()
             oversized_rack = FakeDevice(); oversized_rack.can_have_chains = True; oversized_rack.macros = []; oversized_rack.chains = [type("Chain", (), {"devices": []})() for _ in range(257)]
             bridge.mapper.song.tracks[0].devices = [oversized_rack, FakeDevice()]; later_ref = bridge.mapper.snapshot()["tracks"][0]["devices"][1]["parameters"][0]["ref"]
-            with patch.object(remote_module, "MAX_DISCOVERY_COLLECTION_LENGTH", 256), self.assertRaises(ValueError): bridge.mapper._realtime_parameter_authority(later_ref)
+            inner = FakeDevice(); oversized_rack.chains[0].devices = [inner]; epoch = bridge.mapper.refs.epoch
+            inner_ref = bridge.mapper.refs.put("parameter", inner.parameters[0], f"{epoch}:device:0:0:0:0:0")
+            with patch.object(remote_module, "MAX_DISCOVERY_COLLECTION_LENGTH", 256):
+                # A rack beside the target isn't read, so its size can't refuse it; one on the way to the target is read, and does.
+                self.assertEqual(bridge.mapper._realtime_parameter_authority(later_ref)["ref"], later_ref)
+                with self.assertRaisesRegex(ValueError, "chain collection exceeds its bound"): bridge.mapper._realtime_parameter_authority(inner_ref)
         finally:
             bridge.disconnect()
 
