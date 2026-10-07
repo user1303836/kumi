@@ -85,6 +85,10 @@ const MAX_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_COLUMNS: usize = 32_767;
 /// The schema table's columns: type, name, tbl_name, rootpage and sql.
 const SCHEMA_COLUMNS: usize = 5;
+/// The most definitions a scanned table may have. Live's library tables have at most 21, so this leaves room for those
+/// it adds. It isn't the file's to raise: each value a record names is a byte in the file but 32 decoded, so a table
+/// declared with 32,767 columns would let a 128 MiB file decode to about 4 GiB.
+const MAX_SCANNED_COLUMNS: usize = 64;
 const MAX_ROWS: usize = 1_000_000;
 /// `scanTable`'s default row bound.
 pub const DEFAULT_SCAN_MAX_ROWS: usize = 100_000;
@@ -558,6 +562,10 @@ impl SqliteReader {
     /// separately because INTEGER PRIMARY KEY alias columns read as NULL.
     pub fn scan_table(&self, name: &str, max_rows: usize) -> Result<Vec<ScannedRow>, SqliteError> {
         let table = self.tables.get(name).ok_or_else(|| fail(format!("sqlite table is not present: {name}")))?;
+        let values = record_bound(&table.sql);
+        if values > MAX_SCANNED_COLUMNS {
+            return Err(fail(format!("sqlite table {name} has more than the {MAX_SCANNED_COLUMNS} columns a scan reads")));
+        }
         let mut rows: Vec<ScannedRow> = Vec::new();
         self.walk_table_btree(
             table.root_page,
@@ -566,7 +574,7 @@ impl SqliteReader {
                 Ok(())
             },
             max_rows,
-            record_bound(&table.sql),
+            values,
         )?;
         if rows.len() > max_rows {
             return Err(fail(format!("sqlite table {name} exceeds its scan bound")));

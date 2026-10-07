@@ -88,6 +88,10 @@ fn varint(mut value: u64) -> Vec<u8> {
 }
 /// A database of `page_size` pages: the schema (table t, root page 2), a table leaf holding `cells`, then `rest`.
 fn built(page_size: usize, cells: &[Vec<u8>], rest: &[Vec<u8>]) -> Vec<u8> {
+    built_with("CREATE TABLE t(v)", page_size, cells, rest)
+}
+/// As built, with table t created by `sql` (its schema cell on the first page, so up to about `page_size` bytes).
+fn built_with(sql: &str, page_size: usize, cells: &[Vec<u8>], rest: &[Vec<u8>]) -> Vec<u8> {
     let count = 2 + rest.len();
     let mut bytes = vec![0u8; page_size * count];
     bytes[0..16].copy_from_slice(b"SQLite format 3\0");
@@ -107,9 +111,9 @@ fn built(page_size: usize, cells: &[Vec<u8>], rest: &[Vec<u8>]) -> Vec<u8> {
         }
         write_u16(bytes, base + header + 5, end as u16);
     };
-    let sql = "CREATE TABLE t(v)";
-    let schema = [&[6, 23, 15, 15, 1, 13 + sql.len() as u8 * 2][..], b"tablett", &[2], sql.as_bytes()].concat();
-    leaf(&mut bytes, 0, 100, &[[&[schema.len() as u8, 1][..], &schema].concat()]);
+    let types = [&[23, 15, 15, 1][..], &varint(13 + 2 * sql.len() as u64)].concat();
+    let schema = [&[1 + types.len() as u8][..], &types, b"tablett", &[2], sql.as_bytes()].concat();
+    leaf(&mut bytes, 0, 100, &[[varint(schema.len() as u64), vec![1], schema].concat()]);
     leaf(&mut bytes, page_size, 0, cells);
     for (index, page) in rest.iter().enumerate() {
         bytes[page_size * (2 + index)..][..page.len()].copy_from_slice(page);
@@ -155,6 +159,27 @@ fn sqlite_refuses_cells_that_share_an_overflow_chain_and_records_past_their_tabl
     for count in [2, 1_000, 40_000] {
         let error = scan_error(nulls(count));
         assert!(error.contains("more columns than its table has"), "{count}: {error}");
+    }
+}
+#[test]
+fn sqlite_scans_no_table_wider_than_it_reads_whatever_the_file_declares() {
+    // A record of `count` NULLs in a table the file declares with `columns` columns.
+    let table = |columns: usize, count: usize| {
+        let sql = format!("CREATE TABLE t({})", (0..columns).map(|at| format!("c{at}")).collect::<Vec<_>>().join(","));
+        let mut length = count + 1;
+        while varint(length as u64).len() + count != length {
+            length += 1;
+        }
+        let header = [varint(length as u64), vec![0; count]].concat();
+        built_with(&sql, 65536, &[[varint(header.len() as u64), vec![1], header].concat()], &[])
+    };
+    let rows = SqliteReader::new(table(64, 64)).unwrap().scan_table("t", DEFAULT_SCAN_MAX_ROWS).unwrap();
+    assert_eq!(rows[0].row, vec![SqliteValue::Null; 64]);
+    // The file's own declaration can't raise that: each NULL is a byte here and 32 decoded, so 5,000 declared columns
+    // let a record decode 32 times its size (the parent read it), and 32,767 a 128 MiB file about 4 GiB.
+    for (columns, count) in [(65, 1), (5_000, 0), (5_000, 5_000)] {
+        let error = scan_error(table(columns, count));
+        assert!(error.contains("more than the 64 columns a scan reads"), "{columns}, {count}: {error}");
     }
 }
 #[test]
