@@ -320,6 +320,38 @@ fn source<'a>(s: &'a mut Value, kind: &str) -> &'a mut Value {
 }
 
 #[tokio::test]
+async fn a_marker_moved_by_a_fraction_is_undone() {
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    setup(&sim, "session-move");
+    sim.state.borrow_mut()["tracks"][0]["clips"][0]["warpMarkers"]
+        .as_array_mut()
+        .unwrap()
+        .insert(1, json!({"sampleTime":4410,"beatTime":0.1}));
+    let host = McpHost::new(sim.clone(), McpHostOptions::default()).unwrap();
+    let text = |result: Value| -> Value { serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+    let preview = text(
+        host.live_warp_marker_preview_async(&json!(2), &json!({"clipRef":"clip:clip-1","action":"move","beatTime":0.1,"distance":0.2}))
+            .await,
+    );
+    let apply = json!({"transactionId":preview["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+    let applied = text(host.live_warp_marker_apply_async(&json!(3), &apply, None).await.unwrap());
+    assert_eq!(applied["state"], "applied", "{preview} {applied}");
+    // Moved back by -0.2, the marker sits at 0.30000000000000004 - 0.2 = 0.10000000000000003: the same beat.
+    let undo = json!({"transactionId":preview["transactionId"],"confirmation":"undo","idempotencyKey":"undo-key"});
+    let undone = text(host.undo_warp_marker_async(&json!(4), &undo, None).await);
+    assert_eq!(undone["state"], "undone", "{undone}");
+}
+#[tokio::test]
+async fn a_move_by_nothing_is_refused_at_preview() {
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    setup(&sim, "session-move");
+    let host = McpHost::new(sim, McpHostOptions::default()).unwrap();
+    // The Remote Script can never confirm a move that leaves the marker in place.
+    let zero =
+        host.live_warp_marker_preview_async(&json!(1), &json!({"clipRef":"clip:clip-1","action":"move","beatTime":2,"distance":0})).await;
+    assert_eq!(zero["error"]["code"], -32602, "{zero}");
+}
+#[tokio::test]
 async fn warp_marker_validation_matches_source() {
     for (index, row) in fixture()["rows"].as_array().unwrap().iter().enumerate() {
         let sim = Rc::new(DeterministicLiveSimulator::new());

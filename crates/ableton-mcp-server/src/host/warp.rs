@@ -4,9 +4,11 @@ use kumi_common::{
     abort::{Signal, SignalExt},
     js::json as js_json,
 };
+/// The same beat time, within floating point's rounding: an undo moves a marker back by the distance it moved,
+/// and `(b + d) - d` can come back a few ulps from `b`.
 fn same(a: &Value, b: &Value) -> bool {
-    match (a, b) {
-        (Value::Number(a), Value::Number(b)) => a.as_f64() == b.as_f64(),
+    match (a.as_f64(), b.as_f64()) {
+        (Some(a), Some(b)) => (a - b).abs() <= 1e-9 * 1.0_f64.max(a.abs()).max(b.abs()),
         _ => a == b,
     }
 }
@@ -82,6 +84,9 @@ impl McpHost {
         }
         if params["action"] == "move" && !params["distance"].as_f64().is_some_and(f64::is_finite) {
             return error(id, -32602, "distance is required for move", None);
+        }
+        if params["action"] == "move" && params["distance"].as_f64() == Some(0.0) {
+            return error(id, -32602, "distance must move the marker: 0 leaves it where it is", None);
         }
         let result = async {
             let status = self.fresh_status(Some(&LiveOperationContext::with_deadline(self.deadline(reads::AUDITION_DEADLINE_MS)))).await?;
