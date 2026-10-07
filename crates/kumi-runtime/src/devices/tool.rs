@@ -7,10 +7,13 @@ use super::{
     midi::midi_device_patcher,
     spec::{check_spec, Control, DeviceSpec},
 };
-use crate::core::{
-    contracts::{JsonObject, KernelTool, ToolResult},
-    disk::{low_disk, MB},
-    errors::RuntimeError,
+use crate::{
+    core::{
+        contracts::{JsonObject, KernelTool, ToolResult},
+        disk::{low_disk, MB},
+        errors::RuntimeError,
+    },
+    system::windows_device_name,
 };
 use async_trait::async_trait;
 use futures::future::LocalBoxFuture;
@@ -40,14 +43,24 @@ pub fn device_tool(options: DeviceToolOptions) -> Rc<dyn KernelTool> {
     Rc::new(DeviceTool { options })
 }
 
-fn free_name(folder: &Path, name: &str) -> String {
+/// The device's name, numbered past one a file in the folder has. On Windows a name it takes for a device ("Aux",
+/// "Con.Dist") is taken as a file's would be, and its number goes right after that part ("Aux 2", "Con 2.Dist").
+fn free_name(folder: &Path, name: &str, windows: bool) -> String {
+    let (stem, rest) = name.split_at(name.find('.').unwrap_or(name.len()));
+    let numbered = |number: &str| {
+        if windows && windows_device_name(stem) {
+            format!("{stem} {number}{rest}")
+        } else {
+            format!("{name} {number}")
+        }
+    };
     for index in 1..1000 {
-        let candidate = if index == 1 { name.into() } else { format!("{name} {index}") };
-        if !folder.join(format!("{candidate}.amxd")).exists() {
+        let candidate = if index == 1 { name.into() } else { numbered(&index.to_string()) };
+        if !(windows && windows_device_name(&candidate)) && !folder.join(format!("{candidate}.amxd")).exists() {
             return candidate;
         }
     }
-    format!("{name} {}", &Uuid::new_v4().to_string()[..8])
+    numbered(&Uuid::new_v4().to_string()[..8])
 }
 fn describe_control(control: &Control) -> String {
     match control {
@@ -118,7 +131,7 @@ impl KernelTool for DeviceTool {
         #[cfg(unix)]
         builder.mode(0o755);
         builder.create(&folder).await.map_err(io_error)?;
-        let name = free_name(&folder, spec.name());
+        let name = free_name(&folder, spec.name(), crate::system::platform() == "win32");
         let file = folder.join(format!("{name}.amxd"));
         let temporary = folder.join(format!(".{}.amxd", Uuid::new_v4()));
         let patcher = match &spec {
@@ -184,5 +197,21 @@ impl KernelTool for DeviceTool {
         }
         fields.insert("next".into(), json!(next));
         Ok(ToolResult::text(stringify(&result)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::free_name;
+
+    #[test]
+    fn a_name_windows_takes_for_a_device_is_numbered_there() {
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(folder.path().join("Bass.amxd"), b"").unwrap();
+        assert_eq!(free_name(folder.path(), "Bass", false), "Bass 2", "a file's name is taken everywhere");
+        assert_eq!((free_name(folder.path(), "Aux", false), free_name(folder.path(), "Aux", true)), ("Aux".into(), "Aux 2".into()));
+        assert_eq!(free_name(folder.path(), "Con.Dist", true), "Con 2.Dist", "the part before the dot is what Windows reads");
+        assert_eq!(free_name(folder.path(), "LPT1 ", true), "LPT1  2");
+        assert_eq!(free_name(folder.path(), "Console", true), "Console");
     }
 }

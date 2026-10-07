@@ -81,6 +81,15 @@ pub fn slug(name: &str) -> String {
     let normalized: String = name.to_lowercase().nfkd().collect();
     string::head(NON_SLUG.replace_all(&normalized, "-").trim_matches('-'), 64)
 }
+/// A recipe's file name: its slug, and on Windows a "_" after a slug Windows takes for a device ("con.json" would open
+/// the console there). No slug has a "_", so the name can't be another recipe's.
+pub fn recipe_file(key: &str, windows: bool) -> String {
+    if windows && crate::system::windows_device_name(key) {
+        format!("{key}_.json")
+    } else {
+        format!("{key}.json")
+    }
+}
 pub struct FileRecipeStore {
     directory: PathBuf,
 }
@@ -112,7 +121,7 @@ impl FileRecipeStore {
         if key.is_empty() {
             Err(RuntimeError::plain("A recipe needs a name."))
         } else {
-            Ok(self.directory.join(format!("{key}.json")))
+            Ok(self.directory.join(recipe_file(&key, crate::system::platform() == "win32")))
         }
     }
     async fn read(path: &Path) -> Option<Recipe> {

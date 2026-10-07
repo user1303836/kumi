@@ -21,6 +21,20 @@ pub fn platform() -> &'static str {
     }
 }
 
+/// Whether Windows takes a file name for one of its devices: CON, PRN, AUX, NUL, COM0–9 or LPT0–9 (and COM¹–³ and
+/// LPT¹–³) in any case, before the name's first dot and its trailing spaces. It does with an extension too ("aux.json",
+/// "Con .amxd"), so a file by such a name can't be made there.
+pub fn windows_device_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or_default().trim_end_matches(' ').to_ascii_uppercase();
+    if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL") {
+        return true;
+    }
+    let (Some(port), Some(number)) = (stem.get(..3), stem.get(3..)) else {
+        return false;
+    };
+    matches!(port, "COM" | "LPT") && (matches!(number.as_bytes(), [b'0'..=b'9']) || matches!(number, "\u{b9}" | "\u{b2}" | "\u{b3}"))
+}
+
 /// A program Windows comes with that Kumi runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SystemProgram {
