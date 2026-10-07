@@ -8157,12 +8157,28 @@ class LiveObjectMapper:
         if not proposals: raise ValueError("selection mutation has no fields")
         def identity_of(value: Any) -> str | None:
             return None if value is None else self._capture_object_identity(value)
+        # Live's select_device selects a device on its own track's view and leaves the selected track as it is (Live
+        # 12.4.15), while the selected device is the selected track's: so a device on another track brings its track
+        # along, selected first (and put back first on a rollback). A trackRef naming another track can't be both.
+        device = next((value for attribute, value in proposals if attribute == "selected_device"), None)
+        if device is not None:
+            tracks = [*self._items(getattr(self.song, "tracks", [])), *self._items(getattr(self.song, "return_tracks", [])), self._read_attr(self.song, "master_track")]
+            by_identity = {identity_of(track): track for track in tracks if track is not None}
+            owner, candidate = None, device
+            for _ in range(64):
+                candidate = self._read_attr(candidate, "canonical_parent")
+                if candidate is None: break
+                owner = by_identity.get(identity_of(candidate))
+                if owner is not None: break
+            named = next((value for attribute, value in proposals if attribute == "selected_track"), None)
+            if named is not None and owner is not None and identity_of(named) != identity_of(owner): raise ValueError("deviceRef is on another track than trackRef")
+            if named is None and owner is not None: proposals.insert(0, ("selected_track", owner))
         assignments = []
         try:
             for attribute, value in proposals:
                 if attribute == "selected_device":
-                    # Song.View has no selected_device to set: it selects a device through select_device, which can
-                    # move the selected track to the device's, so both are what goes back.
+                    # Song.View has no selected_device to set: it selects a device through select_device, on the
+                    # device's track (selected just before), so that track and its earlier device are what go back.
                     select = getattr(view, "select_device", None)
                     if not callable(select): raise ValueError("device selection is unavailable on this Live shape")
                     prior = (self._read_attr(view, "selected_track"), self._selected_device(view))

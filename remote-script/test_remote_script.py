@@ -5499,11 +5499,12 @@ class SelectionViewExpansionTests(unittest.TestCase):
     def test_selection_set_assigns_song_view_selections(self):
         song = FakeSong()
         track = song.tracks[0]; scene = song.scenes[0]; slot = track.clip_slots[0]; device = track.devices[0]; parameter = device.parameters[0]
-        # As Live 12.4's Song.View: a device is selected through select_device (on its track's view), and a parameter can't be.
+        # As Live 12.4's Song.View: a device is selected through select_device, on its own track's view (the selected
+        # track stays as it is), and a parameter can't be.
         class SongView:
             selected_track = None; selected_scene = None; highlighted_clip_slot = None; detail_clip = None; selected_parameter = None; selected_chain = None
             def select_device(self, chosen):
-                owner = next(candidate for candidate in song.tracks if chosen in candidate.devices); self.selected_track = owner; owner.view.selected_device = chosen
+                owner = next(candidate for candidate in song.tracks if chosen in candidate.devices); owner.view.selected_device = chosen
         song.view = SongView(); track.view = type("TrackView", (), {"selected_device": None})()
         clip = FakeClip(4.0); slot.clip = clip
         mapper = LiveObjectMapper(song)
@@ -5531,6 +5532,31 @@ class SelectionViewExpansionTests(unittest.TestCase):
         self.assertTrue(cleared["changed"]); self.assertIsNone(song.view.detail_clip)
         stale = dict(args, expectedStateRevision="0" * 64)
         with self.assertRaisesRegex(ValueError, "changed since preview"): mapper.invoke("selection.set", stale)
+
+    def test_a_device_on_another_track_is_selected_with_its_track(self):
+        # Live 12.4.15's select_device selects a device on its own track's view and leaves the selected track as it is,
+        # while the selected device is the selected track's: the device's track is selected first.
+        song = FakeSong(); first = song.tracks[0]; second = FakeTrack(); second.name = "Keys"; song.tracks.append(second)
+        for track in (first, second):
+            track.view = type("TrackView", (), {"selected_device": None})()
+            for device in track.devices: device.canonical_parent = track
+        class SongView:
+            selected_track = first; selected_scene = None; highlighted_clip_slot = None; detail_clip = None; selected_parameter = None; selected_chain = None
+            def select_device(self, chosen):
+                owner = next(candidate for candidate in song.tracks if chosen in candidate.devices); owner.view.selected_device = chosen
+        song.view = SongView()
+        mapper = LiveObjectMapper(song); snapshot = mapper.snapshot()
+        first_ref, second_ref = snapshot["tracks"][0]["ref"], snapshot["tracks"][1]["ref"]; device_ref = snapshot["tracks"][1]["devices"][0]["ref"]
+        self.assertTrue(mapper.invoke("selection.set", {"deviceRef": device_ref, "expectedStateRevision": mapper._selection_revision()})["changed"])
+        self.assertIs(song.view.selected_track, second); self.assertIs(second.view.selected_device, second.devices[0])
+        self.assertEqual((mapper.snapshot()["selection"]["trackRef"], mapper.snapshot()["selection"]["deviceRef"]), (second_ref, device_ref))
+        # The host's undo: the earlier track (no device was selected there, so no deviceRef goes back).
+        self.assertTrue(mapper.invoke("selection.set", {"trackRef": first_ref, "expectedStateRevision": mapper._selection_revision()})["changed"])
+        self.assertIs(song.view.selected_track, first)
+        # A trackRef naming another track than the device's can't be both: refused, nothing changed.
+        with self.assertRaisesRegex(ValueError, "deviceRef is on another track than trackRef"):
+            mapper.invoke("selection.set", {"trackRef": first_ref, "deviceRef": device_ref, "expectedStateRevision": mapper._selection_revision()})
+        self.assertIs(song.view.selected_track, first)
 
     def test_the_snapshot_names_the_selection_the_host_fences_selection_changes_on(self):
         # The host previews from the snapshot: its selectionRevision hashes snapshot.selection. The bridge

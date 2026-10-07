@@ -396,7 +396,8 @@ impl AsyncLiveAdapter for RemoteShape {
         Ok(())
     }
 }
-/// As Live's Song.View: selecting a device (select_device) moves the selected track to the device's.
+/// As the bridge on Live 12.4.15: a device on another track is selected with its track (Live's select_device leaves
+/// the selected track as it is, so the bridge selects the device's track first).
 struct SelectsThroughTrack(DeterministicLiveSimulator);
 impl LiveAdapter for SelectsThroughTrack {
     fn status(&self) -> Result<LiveStatus, LiveError> {

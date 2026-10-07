@@ -154,6 +154,19 @@ impl DeterministicLiveSimulator {
             "selection.set" => {
                 let mut state = self.state.borrow_mut();
                 fence(args, &state["selection"], "selection")?;
+                // As the bridge on Live 12.4.15: select_device leaves the selected track as it is, so a device on
+                // another track is selected with its track; a trackRef naming another track can't be both.
+                let device_track = args.get("deviceRef").filter(|v| !v.is_null()).and_then(|device| {
+                    array(&state["tracks"])
+                        .iter()
+                        .find(|t| array(&t["devices"]).iter().any(|d| d.get("ref") == Some(device)))
+                        .map(|t| t["ref"].clone())
+                });
+                if let Some(owner) = &device_track {
+                    if args.get("trackRef").is_some_and(|named| !named.is_null() && named != owner) {
+                        return Err(LiveError::error("deviceRef is on another track than trackRef"));
+                    }
+                }
                 for (key, kind) in [
                     ("trackRef", "track"),
                     ("sceneRef", "scene"),
@@ -187,6 +200,9 @@ impl DeterministicLiveSimulator {
                         }
                         state["selection"][key] = value.clone();
                     }
+                }
+                if let (Some(owner), None) = (device_track, args.get("trackRef").filter(|v| !v.is_null())) {
+                    state["selection"]["trackRef"] = owner;
                 }
                 let revision = simulator_revision(&state["selection"]);
                 drop(state);
