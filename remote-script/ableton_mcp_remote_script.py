@@ -10612,22 +10612,30 @@ class LiveObjectMapper:
             points.append({"time": float(time_value), "value": float(value)})
         return points
 
-    def _envelope_event_class(self) -> Any:
-        try: event_class = getattr(__import__("Live.Envelope", fromlist=["EnvelopeEvent"]), "EnvelopeEvent", None)
-        except Exception: event_class = None
-        if event_class is None:
-            class _Event:
-                def __init__(self, time: float, value: float): self.time = time; self.value = value
-            event_class = _Event
-        return event_class
+    def _envelope_event_types(self) -> tuple[Any, Any]:
+        """Live's EnvelopeEvent and EnvelopeEventControlCoefficients (an event's curve), or stand-ins made the same
+        way where Live has neither. A Live with events but no curve type makes events without curves."""
+        try: envelope = __import__("Live.Envelope", fromlist=["EnvelopeEvent", "EnvelopeEventControlCoefficients"])
+        except Exception: envelope = None
+        event_class = getattr(envelope, "EnvelopeEvent", None)
+        if event_class is not None: return event_class, getattr(envelope, "EnvelopeEventControlCoefficients", None)
+        class _Curve:
+            def __init__(self, x1: float, y1: float, x2: float, y2: float): self.x1, self.y1, self.x2, self.y2 = x1, y1, x2, y2
+        class _Event:
+            def __init__(self, time: float, value: float, control_coefficients: Any = None):
+                self.time = time; self.value = value
+                if control_coefficients is not None: self.control_coefficients = control_coefficients
+        return _Event, _Curve
 
     # How far a rollback looks for an envelope's events: all of them, wherever they sit in clip time (a loop that
     # starts past the clip's length, events past a shortened clip's end). The reads' points stop at length + 4.
     _ENVELOPE_REACH = 1_000_000.0
 
-    def _envelope_capture(self, envelope: Any) -> tuple[list[tuple[Any, list[Any]]], tuple[float, float]]:
-        """Every event an envelope holds, each as Live's own event (its curve with it) and what it was when read
-        (time, value, curve), and the range read: what a rollback puts back, and where."""
+    def _envelope_capture(self, envelope: Any) -> tuple[list[tuple[list[Any], float]], tuple[float, float]]:
+        """Every event an envelope holds, wherever it is in clip time: what it reads as (time, Live's raw value,
+        curve), which is what's checked, and its value in the parameter's own terms, which is what a new event
+        takes (Track Volume reads as linear gain, but takes the fader's value; a step's two are read either side
+        of it, as the history restore does); and the range read."""
         reader = getattr(envelope, "events_in_range", None)
         if not callable(reader): raise ValueError("complete automation envelope event enumeration is unavailable")
         clip = getattr(envelope, "canonical_parent", None)
@@ -10640,12 +10648,20 @@ class LiveObjectMapper:
                 if index + 1 < len(reaches): continue
                 raise
             if len(events) > MAX_WIRE_ARRAY_LENGTH: raise ValueError("automation envelope exceeds its authoritative point bound")
-            return [(event, self._envelope_event_row(event)) for event in events], (low, high)
+            rows = [self._envelope_event_row(event) for event in events]
+            first: dict[float, int] = {}; count: dict[float, int] = {}
+            for at, row in enumerate(rows): first.setdefault(row[0], at); count[row[0]] = count.get(row[0], 0) + 1
+            value_at = getattr(envelope, "value_at_time", None); captured = []
+            for at, row in enumerate(rows):
+                time = row[0]; when = time if count[time] == 1 else time - 1e-6 if first[time] == at else time + 1e-6
+                own = value_at(when) if callable(value_at) else None
+                captured.append((row, float(own) if isinstance(own, (int, float)) and not isinstance(own, bool) and math.isfinite(float(own)) else row[1]))
+            return captured, (low, high)
         raise ValueError("complete automation envelope event enumeration is unavailable")
 
     @staticmethod
     def _envelope_event_row(event: Any) -> list[Any]:
-        """What makes an event: its time, value and curve (Live's control coefficients, None where it has none)."""
+        """What an event reads as: its time, Live's raw value and its curve (control coefficients, None where it has none)."""
         coefficients = getattr(event, "control_coefficients", None)
         values = [getattr(coefficients, name, None) for name in ("x1", "y1", "x2", "y2")] if coefficients is not None else []
         curve = [float(value) for value in values] if values and all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in values) else None
@@ -10661,11 +10677,12 @@ class LiveObjectMapper:
         low, high = min(times), max(times)
         return low - (1e-3 + abs(low) * 1e-6), high + (1e-3 + abs(high) * 1e-6)
 
-    def _restore_envelope_state(self, clip: Any, parameter: Any, existed: bool, prior: list[tuple[Any, list[Any]]], span: tuple[float, float] | None = None) -> None:
+    def _restore_envelope_state(self, clip: Any, parameter: Any, existed: bool, prior: list[tuple[list[Any], float]], span: tuple[float, float] | None = None) -> None:
         """Put an envelope back as it was: gone when it didn't exist; else what it holds over span (all of it
-        without one) deleted and the events that were there made again, from Live's own events so their curves
-        come back. Where that isn't exact (Live changed something else too) the envelope is made again whole,
-        the same way. Checked over every event it holds, not only the reads' range."""
+        without one) deleted and the events that were there made again, each from its value in the parameter's
+        own terms and its curve, as the history restore does. Where that isn't exact (Live changed something
+        else too) the envelope is made again whole, the same way. Checked against what the events read as, over
+        every event it holds, not only the reads' range."""
         reader = getattr(clip, "automation_envelope", None); clearer = getattr(clip, "clear_envelope", None); creator = getattr(clip, "create_automation_envelope", None)
         if not callable(reader) or not callable(clearer): raise ValueError("automation rollback is unavailable")
         current = reader(parameter)
@@ -10673,18 +10690,18 @@ class LiveObjectMapper:
             if current is not None: clearer(parameter)
             if reader(parameter) is not None: raise ValueError("automation envelope cleanup was not confirmed")
             return
-        event_class = self._envelope_event_class(); expected = self._envelope_rows_text([row for _, row in prior])
+        event_class, curve_class = self._envelope_event_types(); expected = self._envelope_rows_text([row for row, _ in prior])
         def put_back(envelope: Any, reach: tuple[float, float] | None) -> None:
             delete = getattr(envelope, "delete_events_in_range", None); create = getattr(envelope, "create_event", None)
             if envelope is None or not callable(delete) or not callable(create): raise ValueError("automation point restoration is unavailable")
             low, high = reach if reach is not None else self._envelope_capture(envelope)[1]
             delete(low, high)
-            for event, row in prior:
-                # Live's own event while it's still what was read (its curve with it), else one made from what was read.
-                if low <= row[0] < high: create(event if self._envelope_event_row(event) == row else event_class(row[0], row[1]))
+            for (time, _, curve), own in prior:
+                # Made again from the parameter's own value, with its curve: what Live reads back is checked below.
+                if low <= time < high: create(event_class(time, own, curve_class(*curve)) if curve is not None and curve_class is not None else event_class(time, own))
         def exact() -> bool:
             restored = reader(parameter)
-            return restored is not None and self._envelope_rows_text([row for _, row in self._envelope_capture(restored)[0]]) == expected
+            return restored is not None and self._envelope_rows_text([row for row, _ in self._envelope_capture(restored)[0]]) == expected
         if current is not None:
             # In place first, over the span (all of it without one); made again whole if Live won't take that, or it isn't exact.
             try:

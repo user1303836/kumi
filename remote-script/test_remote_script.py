@@ -9063,6 +9063,22 @@ class AutomationStepTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "injected clear failure"): mapper.invoke("automation.envelope.delete", fence())
         self.assertEqual(self.held(clip), held)
 
+    def test_a_rollback_makes_events_in_the_parameters_own_terms(self):
+        # Like Track Volume on Live 12.4: events read as linear gain (here the square), but a new event takes the fader's value.
+        class GainEnvelope(FakeStepEnvelope):
+            def create_event(self, event):
+                made = FakeEnvelopeEvent(event.time, event.value ** 2)
+                if getattr(event, "control_coefficients", None) is not None: made.control_coefficients = event.control_coefficients
+                self.events.append(made)
+            def value_at_time(self, time): return FakeStepEnvelope.value_at_time(self, time) ** 0.5
+        clip, mapper, fence, before = self.curved_clip()
+        clip.envelope = GainEnvelope(clip, [FakeEnvelopeEvent(event.time, event.value ** 2) for event in before]); clip.envelope.events[0].control_coefficients = before[0].control_coefficients
+        clip.create_automation_envelope = lambda _parameter: setattr(clip, "envelope", GainEnvelope(clip)) or clip.envelope
+        held = self.held(clip); delete = clip.envelope.delete_events_in_range
+        clip.envelope.delete_events_in_range = lambda start, end: delete(start, end + 1.0)
+        with self.assertRaisesRegex(ValueError, "changed unexpected points"): mapper.invoke("automation.point.delete", {**fence(), "from": 0.5, "to": 1.5})
+        self.assertEqual(self.held(clip), held, "read back as they were, curve included")
+
     def test_a_step_live_holds_wrong_puts_back_its_span_and_nothing_else(self):
         clip, mapper, fence, before = self.curved_clip(); held = self.held(clip); clip.envelope.halve_steps = True
         with self.assertRaisesRegex(ValueError, "^automation step was not confirmed$"): mapper.invoke("automation.step.insert", {**fence(), "start": 4.0, "length": 2.0, "value": 0.8})
