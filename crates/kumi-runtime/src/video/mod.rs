@@ -326,9 +326,18 @@ fn streams(info: &Value) -> Sources {
     }
 }
 /// Captions fetched by Kumi itself: a client that gives up on a server that doesn't answer, and at most
-/// CAPTIONS_MAX read, so a hostile address can neither hold a watch nor fill memory.
+/// CAPTIONS_MAX read, so a hostile address can neither hold a watch nor fill memory. As the web client does, it
+/// refuses a name that resolves to this computer or a private network, and checks each redirect as the first address
+/// was: a public address that sends Kumi to a private one (127.0.0.1, 169.254.169.254) isn't followed.
 static CAPTIONS: LazyLock<reqwest::Client> = LazyLock::new(|| {
-    reqwest::Client::builder()
+    crate::web::net::guarded_http()
+        .redirect(reqwest::redirect::Policy::custom(|hop| {
+            if hop.previous().len() < 10 && public_address(hop.url().as_str()) {
+                hop.follow()
+            } else {
+                hop.stop()
+            }
+        }))
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(30))
         .build()

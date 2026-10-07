@@ -818,15 +818,30 @@ impl WebClient for NetClient {
     }
 }
 
+/// Only public addresses, unless a test allows others.
+fn public_only() -> Allow {
+    Arc::new(|address: &str| !private_address(address))
+}
+
+/// The system's lookup, unless a test gives another.
+fn system_lookup() -> Lookup {
+    Arc::new(|hostname: String| {
+        Box::pin(
+            async move { tokio::net::lookup_host((hostname.as_str(), 0)).await.map(|found| found.map(|address| address.ip()).collect()) },
+        )
+    })
+}
+
+/// A client's beginning for Kumi's other fetches from addresses a page gave (a video's captions): as the web client's,
+/// a name any of whose addresses isn't public is refused, and no proxy stands in between. Redirects are its own to
+/// check, hop by hop.
+pub(crate) fn guarded_http() -> reqwest::ClientBuilder {
+    reqwest::Client::builder().dns_resolver(Arc::new(GuardedLookup { resolve: system_lookup(), allow: public_only() })).no_proxy()
+}
+
 pub fn create_web_client(options: WebClientOptions) -> Rc<dyn WebClient> {
-    let allow: Allow = options.allow.unwrap_or_else(|| Arc::new(|address: &str| !private_address(address)));
-    let resolve: Lookup = options.lookup.unwrap_or_else(|| {
-        Arc::new(|hostname: String| {
-            Box::pin(async move {
-                tokio::net::lookup_host((hostname.as_str(), 0)).await.map(|found| found.map(|address| address.ip()).collect())
-            })
-        })
-    });
+    let allow: Allow = options.allow.unwrap_or_else(public_only);
+    let resolve: Lookup = options.lookup.unwrap_or_else(system_lookup);
     let http = reqwest::Client::builder()
         .dns_resolver(Arc::new(GuardedLookup { resolve, allow: Arc::clone(&allow) }))
         .redirect(reqwest::redirect::Policy::none())
