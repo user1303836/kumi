@@ -7,7 +7,7 @@ use crate::{
     Connection, OptionalExtension, StoreError,
 };
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Lesson {
@@ -170,12 +170,23 @@ fn insert_as(connection: &Connection, id: &str, l: &Lesson) -> Result<(), StoreE
         .execute(params![id, free_label(connection, &l.label)?, l.matched, l.winner, l.from, l.to, moves, l.reaction, l.at])?;
     Ok(())
 }
+/// `label`, or when another lesson in use has it, a new label of the lessons' own form, `l` and 8 hex digits as Kumi
+/// makes them, that none in use has: a numbered one (`l1`) is a label Kumi never shows, and the lessons' file would
+/// be written back every time.
 fn free_label(connection: &Connection, label: &str) -> Result<String, StoreError> {
-    let in_use: Vec<String> = connection
+    let in_use: HashSet<String> = connection
         .prepare_cached("SELECT label FROM lessons WHERE archived_at IS NULL")?
         .query_map([], |row| row.get(0))?
         .collect::<Result<_, _>>()?;
-    Ok(imports::free_label(&in_use, label))
+    if !in_use.contains(label) {
+        return Ok(label.into());
+    }
+    loop {
+        let minted = format!("l{:08x}", rand::random::<u32>());
+        if !in_use.contains(&minted) {
+            return Ok(minted);
+        }
+    }
 }
 
 /// A hash of what a lesson says: everything but when (`sync`).
@@ -273,5 +284,35 @@ mod tests {
         keep(&db, &[lesson("l4e5f6a7b", 2)], 4).unwrap();
         assert_eq!(in_use(&db).unwrap(), [lesson("l4e5f6a7b", 2)]);
         assert_eq!(db.query_row("SELECT count(*) FROM lessons", [], |row| row.get::<_, i64>(0)).unwrap(), 2, "set aside, not deleted");
+    }
+
+    #[test]
+    fn a_lesson_kept_again_under_a_taken_label_gets_a_label_kumi_shows() {
+        // A lesson changed in the file and here since the last merge is kept twice: the second can't have the
+        // first's label, and a numbered one ("l1") isn't one Kumi reads.
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::schema::migrate(&mut db).unwrap();
+        let lesson = Lesson {
+            label: "l0a1b2c3d".into(),
+            matched: "the pad".into(),
+            winner: "Drift".into(),
+            from: 41.0,
+            to: 77.0,
+            moves: json!([]),
+            reaction: None,
+            at: 1,
+        };
+        keep(&db, std::slice::from_ref(&lesson), 2).unwrap();
+        assert_eq!(free_label(&db, "l4e5f6a7b").unwrap(), "l4e5f6a7b", "a free one stays");
+        Lessons.add(&db, &Lesson { winner: "Wavetable".into(), ..lesson.clone() }).unwrap();
+        let labels: Vec<String> = in_use(&db).unwrap().into_iter().map(|l| l.label).collect();
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels[0], "l0a1b2c3d");
+        let minted = &labels[1];
+        assert!(
+            minted.len() == 9 && minted.starts_with('l') && minted[1..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+            "{minted}"
+        );
+        assert_ne!(minted, "l0a1b2c3d");
     }
 }
