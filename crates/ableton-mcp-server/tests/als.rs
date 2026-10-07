@@ -56,6 +56,18 @@ fn source_xml_model_midi_lint_oracle() {
     }
 }
 #[test]
+fn text_split_by_many_comments_parses_in_one_pass() {
+    // 100,000 pieces of one text node: counting the text so far again for each made this about 5e9 steps.
+    let xml = format!("<Ableton><Name>{}</Name></Ableton>", "x<!---->".repeat(100_000));
+    let started = std::time::Instant::now();
+    let root = parse_als_xml(&xml).unwrap();
+    assert!(started.elapsed() < std::time::Duration::from_secs(5), "{:?}", started.elapsed());
+    assert_eq!(root.children[0].text.len(), 100_000);
+    // The bound still holds: past 1 Mi units, the node is refused.
+    let over = format!("<Ableton><Name>{}</Name></Ableton>", "xxxxxxxxxxxxxxxx<!---->".repeat(65_537));
+    assert!(parse_als_xml(&over).unwrap_err().to_string().contains("text node exceeds the bounded size"));
+}
+#[test]
 fn source_privacy_and_canonical_oracle() {
     let fixture = fixture();
     for row in fixture["names"].as_array().unwrap() {
