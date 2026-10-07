@@ -542,13 +542,10 @@ impl GoalRig for Goal {
                     for id in previous.iter().rev() {
                         let discard =
                             r.history.entries.borrow().get(id).is_some_and(|entry| entry.borrow().record.family == ChangeFamily::Structure);
-                        let _ = r.history.undo(id, signal.clone(), discard).await;
+                        r.take_back(id, signal.clone(), discard).await;
                     }
                 })
                 .await;
-            for id in previous {
-                r.history.entries.borrow_mut().shift_remove(&id);
-            }
             let name = "Kumi · Goal best";
             let mut steps = vec![];
             let result: Result<(), RuntimeError> = r

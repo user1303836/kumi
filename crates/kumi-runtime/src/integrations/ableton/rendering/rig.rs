@@ -276,6 +276,27 @@ impl Rendering {
             restore.clear();
         }
     }
+    /// Takes back one of Kumi's own steps (a listening device, an earlier best take) and forgets it. One Live won't
+    /// take back stays in the history, and the producer hears what's left in their Set.
+    pub(super) async fn take_back(&self, id: &str, signal: Signal, discard: bool) {
+        let title = self.history.entries.borrow().get(id).map(|entry| entry.borrow().record.title.clone());
+        match self.history.undo(id, signal, discard).await {
+            Ok(undone) if !undone.is_error => {
+                self.history.entries.borrow_mut().shift_remove(id);
+            }
+            failed => {
+                let why = failed.map(|undone| undone.text).unwrap_or_else(|error| error.to_string());
+                self.tell(
+                    &format!(
+                        "Couldn't take back “{}” ({}); check it in Live.",
+                        title.unwrap_or_else(|| "a step of Kumi's".into()),
+                        kumi_common::js::string::head(&why, 200)
+                    ),
+                    None,
+                );
+            }
+        }
+    }
     pub(super) async fn close_rig(&self, rig: &mut Rig) {
         let cleanup = self.cleanup();
         let scratch: Vec<_> = rig.sources.iter().map(|s| s.scratch.clone()).collect();

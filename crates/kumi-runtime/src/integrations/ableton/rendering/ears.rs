@@ -205,10 +205,12 @@ impl Rendering {
             .cloned()
             .collect();
         for id in loads.iter().rev() {
-            let _ = self.history.undo(id, cleanup.clone(), false).await;
-            self.history.entries.borrow_mut().shift_remove(id);
-            if let Some(at) = rig.steps.iter().position(|step| step == id) {
-                rig.steps.remove(at);
+            // A device Live wouldn't take back stays the rig's: closing it tries again, and says so if it can't.
+            if matches!(self.history.undo(id, cleanup.clone(), false).await, Ok(undone) if !undone.is_error) {
+                self.history.entries.borrow_mut().shift_remove(id);
+                if let Some(at) = rig.steps.iter().position(|step| step == id) {
+                    rig.steps.remove(at);
+                }
             }
         }
         if let Some(ears) = &mut rig.ears {

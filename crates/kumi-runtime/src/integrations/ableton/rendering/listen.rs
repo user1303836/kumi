@@ -384,8 +384,7 @@ impl Rendering {
         self.history
             .quietly(None, async {
                 for id in steps.iter().rev() {
-                    let _ = self.history.undo(id, cleanup.clone(), false).await;
-                    self.history.entries.borrow_mut().shift_remove(id);
+                    self.take_back(id, cleanup.clone(), false).await;
                 }
             })
             .await;
