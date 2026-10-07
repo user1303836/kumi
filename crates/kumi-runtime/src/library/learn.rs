@@ -675,7 +675,12 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
                 };
                 // A stop doesn't wait for the measurement (up to the pool's timeout): the pool ends its worker below.
                 let entry = tokio::select! {
-                    entry = pool.run(slot, job) => entry.map_err(|error| RuntimeError::plain(format!("Kumi couldn't start its measuring ({error}); it will try again")))?,
+                    // No room to convert, or no worker: nothing is kept of the file, and the next run measures it.
+                    entry = pool.run(slot, job) => entry.map_err(|error| RuntimeError::plain(if error.kind() == io::ErrorKind::StorageFull {
+                        error.to_string()
+                    } else {
+                        format!("Kumi couldn't start its measuring ({error}); it will try again")
+                    }))?,
                     _ = options.signal.cancelled() => return Err(RuntimeError::Aborted),
                 };
                 options.signal.check()?;

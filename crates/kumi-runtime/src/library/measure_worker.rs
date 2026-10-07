@@ -29,6 +29,9 @@ pub struct MeasureJob {
 pub struct MeasureReply {
     pub id: u64,
     pub entry: SoundEntry,
+    /// Why measuring can't go on (no room to convert): nothing about this file, so nothing of it is kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop: Option<String>,
 }
 impl MeasureJob {
     pub fn failed(&self, why: &str) -> SoundEntry {
@@ -38,8 +41,10 @@ impl MeasureJob {
             ..Default::default()
         }
     }
-    pub async fn measure(&self) -> SoundEntry {
-        learn_sound(
+    /// The file measured (or what's wrong with it), or Err when measuring can't go on for a reason that isn't the
+    /// file's: no room to convert it.
+    pub async fn measure(&self) -> Result<SoundEntry, String> {
+        match learn_sound(
             &self.path,
             &self.relative,
             self.size,
@@ -47,7 +52,11 @@ impl MeasureJob {
             MeasureOptions { start: self.start, seconds: self.seconds, signal: None },
         )
         .await
-        .unwrap_or_else(|error| self.failed(&error.to_string()))
+        {
+            Ok(entry) => Ok(entry),
+            Err(error) if error.is_no_room() => Err(error.to_string()),
+            Err(error) => Ok(self.failed(&error.to_string())),
+        }
     }
 }
 /// Workers are installed beside the main binary; the override also supports embedders.
@@ -228,7 +237,10 @@ impl Worker {
         while let Some(line) = self.lines.next_line().await? {
             let reply: MeasureReply = serde_json::from_str(&line)?;
             if reply.id == job.id {
-                return Ok(reply.entry);
+                return match reply.stop {
+                    Some(stop) => Err(io::Error::new(io::ErrorKind::StorageFull, stop)),
+                    None => Ok(reply.entry),
+                };
             }
         }
         Err(io::Error::new(io::ErrorKind::UnexpectedEof, "measurement worker exited"))
@@ -320,7 +332,7 @@ impl MeasurePool {
     /// during an update, an antivirus holding it): that says nothing about the file, so it isn't recorded.
     pub async fn run(&self, slot: usize, mut job: MeasureJob) -> io::Result<SoundEntry> {
         if self.slots.is_empty() {
-            return Ok(job.measure().await);
+            return job.measure().await.map_err(|stop| io::Error::new(io::ErrorKind::StorageFull, stop));
         }
         job.id = self.next.get();
         self.next.set(job.id.wrapping_add(1));
@@ -332,6 +344,8 @@ impl MeasurePool {
         let result = tokio::time::timeout(self.timeout, worker.run(&job)).await;
         match result {
             Ok(Ok(entry)) => Ok(entry),
+            // No room to convert: the worker is fine, and nothing is kept of the file.
+            Ok(Err(error)) if error.kind() == io::ErrorKind::StorageFull => Err(error),
             result => {
                 let why = if result.is_err() { "it took too long to read" } else { "Kumi couldn't read it" };
                 worker.stop().await;
@@ -353,7 +367,10 @@ pub async fn main() -> io::Result<()> {
     let mut output = tokio::io::stdout();
     while let Some(line) = lines.next_line().await? {
         let job: MeasureJob = serde_json::from_str(&line)?;
-        let reply = MeasureReply { id: job.id, entry: job.measure().await };
+        let reply = match job.measure().await {
+            Ok(entry) => MeasureReply { id: job.id, entry, stop: None },
+            Err(stop) => MeasureReply { id: job.id, entry: job.failed(&stop), stop: Some(stop) },
+        };
         output.write_all(format!("{}\n", stringify(&serde_json::to_value(reply)?)).as_bytes()).await?;
         output.flush().await?;
     }

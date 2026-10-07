@@ -16,6 +16,17 @@ pub const AUDIO_EXTENSIONS: &[&str] =
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("{0}")]
 pub struct AudioError(pub String);
+/// What a lack of room to convert a file starts with: it says nothing of the file itself.
+const NO_ROOM: &str = "Kumi reads that file by converting it first.";
+impl AudioError {
+    pub fn no_room(full: &str) -> Self {
+        Self(format!("{NO_ROOM} {full}"))
+    }
+    /// There was no room to convert the file: a learner stops rather than record it as the file's.
+    pub fn is_no_room(&self) -> bool {
+        self.0.starts_with(NO_ROOM)
+    }
+}
 impl From<std::io::Error> for AudioError {
     fn from(e: std::io::Error) -> Self {
         Self(e.to_string())
@@ -134,48 +145,39 @@ async fn convert(input: &Path, output: &Path, signal: Option<Signal>, until: Opt
     };
     let input_s = input.to_string_lossy();
     let output_s = output.to_string_lossy();
-    // f32 at up to 48 kHz stereo is 384 kB a second: room for what ffmpeg will write, when it stops at `until`.
-    if let Some(until) = until {
-        let folder = output.parent().map(|folder| folder.to_string_lossy().into_owned()).unwrap_or_default();
-        if let Some(full) =
-            crate::core::disk::low_disk(&folder, until * 384_000.0 + 64.0 * crate::core::disk::MB, "Kumi reads audio on").await
-        {
-            return Err(AudioError(format!("Kumi reads that file by converting it first. {full}")));
-        }
-    }
-    let cut = until.map(|until| to_fixed(until, 3));
+    // How long it is (ffprobe, or what ffmpeg says of it, decoding nothing): to copy no further than `until`, and to ask
+    // room for what will be written. Not known, it's copied whole without asking, as it always was.
+    let length = match until {
+        Some(_) => crate::video::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await,
+        None => None,
+    };
+    let cut = cut_at(until, length);
+    let cut_text = cut.map(|cut| to_fixed(cut, 3));
+    let folder = output.parent().map(|folder| folder.to_string_lossy().into_owned()).unwrap_or_default();
+    // Each converter, and how many seconds of the file it writes (when that's known): afconvert copies whole.
     let mut attempts = Vec::new();
     if mac {
-        attempts.push(("afconvert", vec!["-f", "WAVE", "-d", "LEF32", &input_s, &output_s]));
+        attempts.push(("afconvert", vec!["-f", "WAVE", "-d", "LEF32", &input_s, &output_s], length));
     }
-    // ffmpeg says the file's own length beside the copy (at info, without progress lines).
-    let mut args = vec!["-hide_banner", "-v", "info", "-nostats", "-nostdin", "-y", "-i", &input_s, "-vn"];
-    if let Some(cut) = &cut {
+    let mut args = vec!["-v", "error", "-nostdin", "-y", "-i", &input_s, "-vn"];
+    if let Some(cut) = &cut_text {
         args.extend(["-t", cut]);
     }
     args.extend(["-acodec", "pcm_f32le", "-f", "wav", &output_s]);
-    attempts.push((&ffmpeg, args));
-    for (command, args) in attempts {
+    attempts.push((&ffmpeg, args, cut.or(length)));
+    let mut no_room = None;
+    for (command, args, writes) in attempts {
         if let Some(s) = &signal {
             s.check()?;
         }
-        match run(command, &args, RunOptions { signal: signal.clone(), timeout_ms: Some(120_000), max_buffer: Some(1024 * 1024) }).await {
-            Ok(ran) => {
-                // afconvert (a Mac's) always copies whole.
-                let (Some(until), true) = (until, command != "afconvert") else { return Ok(None) };
-                static DURATION: std::sync::LazyLock<regex::Regex> =
-                    std::sync::LazyLock::new(|| regex::Regex::new(r"Duration: ([0-9]+):([0-9]{2}):([0-9]{2}(?:\.[0-9]+)?)").unwrap());
-                let length = DURATION.captures(&ran.stderr).and_then(|found| {
-                    Some(found[1].parse::<f64>().ok()? * 3600.0 + found[2].parse::<f64>().ok()? * 60.0 + found[3].parse::<f64>().ok()?)
-                });
-                match length {
-                    // Cut short: the length is the file's. Not cut: the copy's own, exactly as before.
-                    Some(length) if length > until => return Ok(Some(length)),
-                    Some(_) => return Ok(None),
-                    // A file that doesn't say how long it is, read whole as before.
-                    None => return Box::pin(convert(input, output, signal.clone(), None)).await,
-                }
+        if let Some(seconds) = writes {
+            if let Some(full) = crate::core::disk::low_disk(&folder, seconds * BYTES_A_SECOND, "Kumi reads audio on").await {
+                no_room = Some(full);
+                continue;
             }
+        }
+        match run(command, &args, RunOptions { signal: signal.clone(), timeout_ms: Some(120_000), max_buffer: Some(1024 * 1024) }).await {
+            Ok(_) => return Ok(if command == "afconvert" { None } else { cut.and(length) }),
             Err(e) => {
                 if signal.as_ref().is_some_and(Signal::is_cancelled) {
                     return Err(e.into());
@@ -183,7 +185,16 @@ async fn convert(input: &Path, output: &Path, signal: Option<Signal>, until: Opt
             }
         }
     }
+    if let Some(full) = no_room {
+        return Err(AudioError::no_room(&full));
+    }
     Err(AudioError(format!("Kumi couldn't decode {} here: it reads WAV and AIFF itself, and other formats with {}ffmpeg. Install ffmpeg, or export the file as WAV.",input.extension().unwrap_or_default().to_string_lossy().to_uppercase(),if mac {"macOS's afconvert or "}else{""})))
+}
+/// f32 at up to 48 kHz stereo: a copy's size a second.
+const BYTES_A_SECOND: f64 = 384_000.0;
+/// Where the copy stops: `until`, when the file goes on past it.
+fn cut_at(until: Option<f64>, length: Option<f64>) -> Option<f64> {
+    until.zip(length).filter(|(until, length)| until < length).map(|(until, _)| until)
 }
 /// Sample frames are read a block at a time; seeking never changes the audio.
 pub struct AudioSource {
@@ -452,6 +463,20 @@ fn deinterleave_i16(buffer: &[u8], frames: usize, channels: usize, decode: impl 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_copy_asks_room_for_what_it_will_hold() {
+        // A one-shot measured (a reach of 31 s): half a second's copy, 192 kB, not 31 s's.
+        assert_eq!(cut_at(Some(31.0), Some(0.5)).or(Some(0.5)).map(|seconds| seconds * BYTES_A_SECOND), Some(192_000.0));
+        // A 3-minute song's form (901 s): its 3 minutes.
+        assert_eq!(cut_at(Some(901.0), Some(180.0)).or(Some(180.0)), Some(180.0));
+        // A 10-minute mix measured: cut at 31 s.
+        assert_eq!(cut_at(Some(31.0), Some(600.0)), Some(31.0));
+        // A length not known: no cut (copied whole, without asking room, as before).
+        assert_eq!(cut_at(Some(31.0), None), None);
+        assert!(AudioError::no_room("Only 5 MB is free.").is_no_room());
+        assert!(!AudioError("That file is too short to be audio.".into()).is_no_room());
+    }
 
     #[test]
     fn every_signed_16_bit_sample_decodes_exactly_with_both_byte_orders_and_channel_layouts() {
