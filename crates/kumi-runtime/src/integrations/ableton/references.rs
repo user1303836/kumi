@@ -59,6 +59,107 @@ fn js_string(value: Option<&Value>) -> String {
 fn ref_key(key: &str) -> bool {
     key == "ref" || key == "parent" || key.ends_with("Ref") || key.ends_with("Refs")
 }
+/// Where a restructure moved the Set's tracks and scenes, so the refs past it follow what they named rather than
+/// being dropped (#261, #253). Refs are positions: a track's index counts the regular and group tracks, then the
+/// returns, then Main, so a track added or deleted moves everything after it, returns and Main among them.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Shift {
+    /// Tracks made, at their places once made.
+    pub tracks_made: Vec<usize>,
+    /// Tracks deleted, at their places before.
+    pub tracks_gone: Vec<usize>,
+    pub scenes_made: Vec<usize>,
+    pub scenes_gone: Vec<usize>,
+    /// Returns were added or deleted: every track's sends are renumbered with them, so their refs are retired.
+    pub sends: bool,
+}
+impl Shift {
+    pub fn is_empty(&self) -> bool {
+        self.tracks_made.is_empty() && self.tracks_gone.is_empty() && self.scenes_made.is_empty() && self.scenes_gone.is_empty()
+    }
+    /// Where the track at `index` before the change is after it, or None for one deleted.
+    pub fn track(&self, index: usize) -> Option<usize> {
+        moved_index(index, &self.tracks_gone, &self.tracks_made)
+    }
+    pub fn scene(&self, index: usize) -> Option<usize> {
+        moved_index(index, &self.scenes_gone, &self.scenes_made)
+    }
+    /// Where a ref points after the change: the same, another place, or nowhere (what it named was deleted).
+    pub fn reference(&self, reference: &str) -> Moved {
+        self.moved(reference, 0)
+    }
+    fn moved(&self, reference: &str, depth: usize) -> Moved {
+        let mut parts: Vec<String> = reference.split(':').map(str::to_owned).collect();
+        if parts.len() < 3 || depth > 8 {
+            return Moved::Same;
+        }
+        // A ref whose path is another ref (a parameter's device, a chain's rack): that one decides.
+        if parts.len() >= 4 && parts[2] == parts[0] && !parts[3].is_empty() && !parts[3].bytes().all(|b| b.is_ascii_digit()) {
+            return match self.moved(&parts[2..].join(":"), depth + 1) {
+                Moved::To(inner) => Moved::To(format!("{}:{}:{inner}", parts[0], parts[1])),
+                other => other,
+            };
+        }
+        // Which parts hold a track's and a scene's index.
+        let (track, scene) = match parts[1].as_str() {
+            "track" | "device" | "chain" | "drum_pad" | "take_lane" | "take_lane_clip" | "routing_choice" | "mixer" => {
+                (Some(if parts[2] == "view" { 3 } else { 2 }), None)
+            }
+            "clip" | "clip_slot" => (Some(2), Some(3)),
+            // One part is a Song-level Arrangement clip, on no track.
+            "arrangement_clip" if parts.len() == 4 => (Some(2), None),
+            "scene" => (None, Some(2)),
+            "parameter" if parts[2] == "mixer" => {
+                if self.sends && parts.get(4).is_some_and(|part| part == "sends") {
+                    return Moved::Gone;
+                }
+                (Some(3), None)
+            }
+            _ => (None, None),
+        };
+        let mut changed = false;
+        for (at, place) in [(track, Shift::track as fn(&Self, usize) -> Option<usize>), (scene, Shift::scene)] {
+            let Some(at) = at else { continue };
+            let Some(index) = parts.get(at).and_then(|part| part.parse::<usize>().ok()) else { continue };
+            match place(self, index) {
+                None => return Moved::Gone,
+                Some(now) if now != index => {
+                    changed = true;
+                    parts[at] = now.to_string();
+                }
+                Some(_) => {}
+            }
+        }
+        if changed {
+            Moved::To(parts.join(":"))
+        } else {
+            Moved::Same
+        }
+    }
+}
+/// What a restructure did to a ref.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Moved {
+    Same,
+    To(String),
+    Gone,
+}
+/// An index after `gone` (places before) are deleted and `made` (places after) are made.
+fn moved_index(index: usize, gone: &[usize], made: &[usize]) -> Option<usize> {
+    if gone.contains(&index) {
+        return None;
+    }
+    let mut at = index - gone.iter().filter(|place| **place < index).count();
+    let mut made = made.to_vec();
+    made.sort_unstable();
+    made.dedup();
+    for place in made {
+        if place <= at {
+            at += 1;
+        }
+    }
+    Some(at)
+}
 impl References {
     /// Retired names never acquire a different object; counters continue across retirement.
     pub fn clear_names(&mut self) {
@@ -77,6 +178,27 @@ impl References {
     }
     pub fn named_references(&self) -> Vec<String> {
         self.short.keys().cloned().collect()
+    }
+    /// After a restructure: every ref past it follows what it named to its new place, short names and all, and those
+    /// to what was deleted are retired. A name keeps naming one object, so a plan's later steps still find theirs.
+    /// Discovery cursors were for the old places, so they go.
+    pub fn shift(&mut self, shift: &Shift) {
+        let to = |reference: &str| match shift.reference(reference) {
+            Moved::Same => Some(reference.to_owned()),
+            Moved::To(now) => Some(now),
+            Moved::Gone => None,
+        };
+        self.refs = std::mem::take(&mut self.refs).into_iter().filter_map(|(reference, kind)| Some((to(&reference)?, kind))).collect();
+        self.known = std::mem::take(&mut self.known).into_iter().filter_map(|(reference, track)| Some((to(&reference)?, track))).collect();
+        let names = std::mem::take(&mut self.short);
+        self.long.clear();
+        for (reference, name) in names {
+            if let Some(reference) = to(&reference) {
+                self.long.insert(name.clone(), reference.clone());
+                self.short.insert(reference, name);
+            }
+        }
+        self.cursors.clear();
     }
     pub fn invalidate(&mut self) {
         self.refs.clear();
@@ -303,5 +425,60 @@ fn same_primitive(a: Option<&Value>, b: Option<&Value>) -> bool {
         (Some(Value::String(a)), Some(Value::String(b))) => a == b,
         (Some(Value::Bool(a)), Some(Value::Bool(b))) => a == b,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_shift_moves_every_ref_past_the_change_and_retires_what_was_deleted() {
+        let to = |shift: &Shift, reference: &str| shift.reference(reference);
+        // Track 5 of 8 deleted (Main at 8): what was after it moves up one, what was before stays.
+        let gone = Shift { tracks_gone: vec![5], ..Default::default() };
+        assert_eq!(to(&gone, "7:track:4"), Moved::Same);
+        assert_eq!(to(&gone, "7:track:5"), Moved::Gone);
+        assert_eq!(to(&gone, "7:track:8"), Moved::To("7:track:7".into()));
+        assert_eq!(to(&gone, "7:device:6:0:1:2"), Moved::To("7:device:5:0:1:2".into()));
+        assert_eq!(to(&gone, "7:clip:6:3"), Moved::To("7:clip:5:3".into()));
+        assert_eq!(to(&gone, "7:clip:5:3:note:0"), Moved::Gone);
+        // A ref built on another follows it: a device's parameter, a chain's volume, a rack's return chain.
+        assert_eq!(to(&gone, "7:parameter:7:device:6:0:12"), Moved::To("7:parameter:7:device:5:0:12".into()));
+        assert_eq!(to(&gone, "7:parameter:7:chain:6:0:1:volume"), Moved::To("7:parameter:7:chain:5:0:1:volume".into()));
+        assert_eq!(to(&gone, "7:parameter:mixer:6:sends:1"), Moved::To("7:parameter:mixer:5:sends:1".into()));
+        assert_eq!(to(&gone, "7:device:view:6"), Moved::To("7:device:view:5".into()));
+        // Scenes, locators and the Set aren't on a track.
+        assert_eq!(to(&gone, "7:scene:6"), Moved::Same);
+        assert_eq!(to(&gone, "7:locator:6"), Moved::Same);
+        // Two tracks made at 2 and 4 (their places once made): the old 2 is now 3, the old 3 is now 5.
+        let made = Shift { tracks_made: vec![4, 2], ..Default::default() };
+        assert_eq!(to(&made, "7:track:1"), Moved::Same);
+        assert_eq!(to(&made, "7:track:2"), Moved::To("7:track:3".into()));
+        assert_eq!(to(&made, "7:track:3"), Moved::To("7:track:5".into()));
+        // A scene made at 1 moves clips in later scenes, on every track.
+        let scene = Shift { scenes_made: vec![1], ..Default::default() };
+        assert_eq!(to(&scene, "7:clip_slot:4:0"), Moved::Same);
+        assert_eq!(to(&scene, "7:clip_slot:4:1"), Moved::To("7:clip_slot:4:2".into()));
+        assert_eq!(to(&scene, "7:scene:3"), Moved::To("7:scene:4".into()));
+        // A return deleted renumbers every track's sends, so they're retired.
+        let returns = Shift { tracks_gone: vec![9], sends: true, ..Default::default() };
+        assert_eq!(to(&returns, "7:parameter:mixer:2:sends:0"), Moved::Gone);
+        assert_eq!(to(&returns, "7:parameter:mixer:2:volume"), Moved::Same);
+    }
+
+    #[test]
+    fn short_names_follow_their_refs_and_a_deleted_ones_name_names_nothing() {
+        let mut book = References::default();
+        for index in 0..4 {
+            book.refs.insert(format!("7:track:{index}"), "track".into());
+        }
+        let names: Vec<String> = (0..4).map(|index| book.short_ref(&format!("7:track:{index}"))).collect();
+        book.shift(&Shift { tracks_gone: vec![1], ..Default::default() });
+        assert_eq!(book.refs.keys().cloned().collect::<Vec<_>>(), ["7:track:0", "7:track:1", "7:track:2"]);
+        assert_eq!(book.lengthen(&json!({"ref":names[2]}))["ref"], "7:track:1");
+        assert_eq!(book.lengthen(&json!({"ref":names[1]}))["ref"], json!(names[1]));
+        // A name keeps its object: the track now at 1 is still called by the old 2's name.
+        assert_eq!(book.short_ref("7:track:1"), names[2]);
     }
 }

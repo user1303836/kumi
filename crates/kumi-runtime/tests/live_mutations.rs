@@ -376,7 +376,7 @@ impl McpEndpoint for NativeGroupFixture {
     }
 }
 #[tokio::test(flavor = "current_thread")]
-async fn native_group_make_changes_records_history_and_retires_shifted_track_names() {
+async fn native_group_make_changes_records_history_and_moves_track_names_into_the_group() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let endpoint = Rc::new(NativeGroupFixture { calls: RefCell::new(vec![]) });
@@ -411,13 +411,11 @@ async fn native_group_make_changes_records_history_and_retires_shifted_track_nam
             assert_eq!(integration.history.entries.borrow().len(), 1);
             let entry = integration.history.entries.borrow().values().next().unwrap().borrow().clone();
             assert_eq!(entry.record.title, "Grouped 2 tracks");
-            assert!(!connection.references.borrow().refs.contains_key("7:track:1"));
-            let mixer = CHANGES.iter().find(|k| k.tool == "set_mixer").unwrap();
-            let refused = integration
-                .mutations
-                .change(mixer, json!({"trackRef":old,"volume":0.7}).as_object().unwrap().clone(), Signal::new(), true)
-                .await;
-            assert!(refused.is_error, "{}", refused.text);
+            // The group track went in at the first one's place, and the grouped tracks moved down one: their refs and
+            // names moved with them (#261), and the new group's ref is current.
+            let book = connection.references.borrow();
+            assert_eq!(book.refs.keys().cloned().collect::<Vec<_>>(), ["7:track:1", "7:track:2", "7:track:0"]);
+            assert_eq!(book.lengthen(&json!({"trackRef":old}))["trackRef"], "7:track:2");
             assert!(!endpoint.calls.borrow().iter().any(|call| call == "live_mixer_preview"));
         })
         .await;

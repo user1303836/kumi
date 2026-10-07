@@ -3,12 +3,12 @@ use super::{
     actions::{ActionSummary, ACTIONS},
     changes::{ChangeKind, CHANGES},
     context::{object, payload},
-    mutations::Mutations,
+    mutations::{track_index_of, Mutations},
     plan_stream::{step_scanner, StepScanner},
     views::ViewHost,
 };
 use crate::core::{
-    contracts::{JsonObject, StreamingCall, ToolResult},
+    contracts::{ChangeFamily, JsonObject, StreamingCall, ToolResult},
     errors::RuntimeError,
 };
 use async_trait::async_trait;
@@ -39,6 +39,7 @@ use tokio::sync::Notify;
 
 const MAX_CHANGES: usize = 5_000;
 const STEP_COUNT: &str = "Give 1 to 5000 steps in all.";
+const REFUSED_NOTE: &str = "Nothing changed for the refused steps. The held-back ones needed one of them (its @name, its track, or the Set's tracks and scenes), so they didn't run; every other step did. Fix what was refused and send only those steps, with the held-back ones, in one more make_changes: the @names this answer made still work there.";
 fn row(value: &Value) -> JsonObject {
     value.as_object().cloned().unwrap_or_default()
 }
@@ -150,6 +151,13 @@ struct State {
     made: IndexMap<String, String>,
     done: Vec<Value>,
     missed: Vec<Value>,
+    /// Steps refused with nothing changed, and the later ones held back with them (#259): the plan went on with the
+    /// rest, so the model resends a few steps, not the whole plan.
+    refused: Vec<Value>,
+    dependents: Vec<Value>,
+    blocked: Blocked,
+    /// What Kumi said of stopping Live's playback or recording after a plan with refused steps.
+    quieted: Option<String>,
     parameters_on: IndexMap<String, Value>,
     copy: Option<String>,
     copy_checked: bool,
@@ -157,6 +165,19 @@ struct State {
     recording: Option<String>,
     undo_step: Option<String>,
 }
+/// What refused steps leave for the steps after them, each with the step it hangs on: the `@names` they'd have made,
+/// the tracks they'd have changed (by the tracks' short names, which follow them through a restructure), and whether
+/// they'd have changed the Set's tracks and scenes or its transport. A later step that needs any of it is held back:
+/// it may have counted on the refused one (a track's clip on its sample, the Sub track added after deleting the 808).
+#[derive(Default)]
+struct Blocked {
+    names: IndexMap<String, usize>,
+    tracks: IndexMap<String, usize>,
+    structure: Option<usize>,
+    transport: Option<usize>,
+}
+/// Actions that start, stop or move what Live plays: a `wait` or a stop after a refused one waits for nothing.
+const TRANSPORT: [&str; 5] = ["play", "fire_scene", "launch_clip", "record", "jump_to_locator"];
 type Settled = Shared<LocalBoxFuture<'static, Result<Option<Stop>, RuntimeError>>>;
 pub struct Plan {
     mutations: Rc<Mutations>,
@@ -245,10 +266,99 @@ impl Plan {
             tokio::select! {_=notified=>{},_=self.signal.cancelled()=>{}}
         }
     }
+    /// The refused step a step hangs on, if it does: it uses an `@name` one would have made, changes a track one would
+    /// have changed, or reshapes the Set's tracks and scenes, or its transport, after one that would have.
+    fn hangs_on(&self, item: &JsonObject, state: &State) -> Option<usize> {
+        let blocked = &state.blocked;
+        let input = item.get("input").cloned().unwrap_or(Value::Null);
+        let mut names = Vec::new();
+        names_in(&input, &mut names, 0);
+        if let Some(on) = names.iter().find_map(|name| blocked.names.get(name)) {
+            return Some(*on);
+        }
+        if let Some(on) = self.tracks_in(&input, &state.made).iter().find_map(|track| blocked.tracks.get(track)) {
+            return Some(*on);
+        }
+        let tool = item.get("tool").and_then(Value::as_str).unwrap_or_default();
+        if let Some(on) = blocked.structure.filter(|_| structural(tool)) {
+            return Some(on);
+        }
+        blocked.transport.filter(|_| tool == "wait" || TRANSPORT.contains(&tool))
+    }
+    /// Steps refused with nothing changed (`run` of them from `at`, a batch as one): reported with why, and what they'd
+    /// have made or changed holds back the later steps that need it. The rest of the plan goes on.
+    fn refuse(&self, state: &mut State, at: usize, run: usize, error: String) {
+        let step = at + 1;
+        let items: Vec<JsonObject> = self.steps.borrow()[at..at + run].iter().map(row).collect();
+        let tool = items[0].get("tool").cloned().unwrap_or(Value::Null);
+        let error = head(&error, 600);
+        state.refused.push(if run > 1 {
+            json!({"steps":format!("{step}–{}", step + run - 1),"tool":tool,"error":error})
+        } else {
+            json!({"step":step,"tool":tool,"error":error})
+        });
+        for item in &items {
+            if let Some(name) = item.get("as").and_then(Value::as_str) {
+                state.blocked.names.insert(format!("@{name}"), step);
+            }
+            for track in self.tracks_in(item.get("input").unwrap_or(&Value::Null), &state.made) {
+                state.blocked.tracks.entry(track).or_insert(step);
+            }
+            let tool = item.get("tool").and_then(Value::as_str).unwrap_or_default();
+            if structural(tool) {
+                state.blocked.structure.get_or_insert(step);
+            }
+            if TRANSPORT.contains(&tool) {
+                state.blocked.transport.get_or_insert(step);
+            }
+        }
+    }
+    /// The tracks a step's refs are on, by the tracks' short names (`@names` read through what the plan made).
+    fn tracks_in(&self, input: &Value, made: &IndexMap<String, String>) -> Vec<String> {
+        fn walk(value: &Value, key: &str, out: &mut Vec<String>, depth: usize) {
+            if depth > 8 {
+                return;
+            }
+            match value {
+                Value::String(text) if key == "ref" || key == "parent" || key.ends_with("Ref") || key.ends_with("Refs") => {
+                    out.push(text.clone())
+                }
+                Value::Array(items) => items.iter().for_each(|item| walk(item, key, out, depth + 1)),
+                Value::Object(row) => row.iter().for_each(|(key, value)| walk(value, key, out, depth + 1)),
+                _ => {}
+            }
+        }
+        let mut references = Vec::new();
+        walk(input, "", &mut references, 0);
+        let mut book = self.mutations.parameters.history.connection.references.borrow_mut();
+        let mut tracks = Vec::new();
+        for reference in references {
+            let reference = match reference.strip_prefix('@') {
+                Some(name) => match made.get(name) {
+                    Some(made) => made.clone(),
+                    None => continue,
+                },
+                None => reference,
+            };
+            let long = book.lengthen(&json!({"ref": reference}))["ref"].as_str().unwrap_or_default().to_owned();
+            let (Some(epoch), Some(index)) = (long.split(':').next().filter(|e| e.parse::<u64>().is_ok()), track_index_of(&long)) else {
+                continue;
+            };
+            let track = book.short_ref(&format!("{epoch}:track:{}", to_string(index)));
+            if !tracks.contains(&track) {
+                tracks.push(track);
+            }
+        }
+        tracks
+    }
     async fn run(&self) -> Result<Option<Stop>, RuntimeError> {
         let mut state = State::default();
+        // What earlier plans in this answer made: a plan resending refused steps uses their @names.
+        state.made = self.mutations.names.borrow().clone();
         let mut outcome = self.steps(&mut state).await;
-        let finished = matches!(outcome, Ok(None)) && !self.abandoned.get();
+        // A plan with refused steps didn't finish either: what it started playing or recording may have had its stop
+        // among them.
+        let finished = matches!(outcome, Ok(None)) && !self.abandoned.get() && state.refused.is_empty();
         if let Some(id) = state.undo_step.take().filter(|s| !s.is_empty()) {
             let connection = &self.mutations.parameters.history.connection;
             let signal = abort::any([connection.lifetime.clone(), abort::timeout(10_000)]);
@@ -256,8 +366,9 @@ impl Plan {
         }
         if !finished {
             if let Some(note) = self.quiet(&state).await {
-                if let Ok(Some(stopped)) = &mut outcome {
-                    stopped.error = head(&format!("{} {note}", stopped.error), 800);
+                match &mut outcome {
+                    Ok(Some(stopped)) => stopped.error = head(&format!("{} {note}", stopped.error), 800),
+                    _ => state.quieted = Some(note),
                 }
             }
         }
@@ -316,6 +427,11 @@ impl Plan {
             };
             let item = row(&raw);
             let step = index + 1;
+            if let Some(on) = self.hangs_on(&item, state) {
+                state.held_back(step, &item, on);
+                index += 1;
+                continue;
+            }
             let stop =
                 |error: String| Some(Stop { step, tool: item.get("tool").cloned().unwrap_or(Value::Null), error: head(&error, 600) });
             let confirmed = !state.done.is_empty();
@@ -375,12 +491,22 @@ impl Plan {
                     .collect();
                 let inputs = match inputs {
                     Ok(v) => v,
-                    Err(error) => return Ok(stop(error)),
+                    Err(error) => {
+                        self.refuse(state, index, run, error);
+                        index += run;
+                        continue;
+                    }
                 };
                 let outcome = self.mutations.change(batch.kind(), batch.input(&inputs), self.signal.clone(), confirmed).await;
                 let reply = serde_json::from_str::<Value>(&outcome.text).map(|v| row(&v)).unwrap_or_default();
                 if outcome.is_error && outcome.missed.unwrap_or(0) == 0 {
-                    return Ok(stop(format!("{} {step}–{}, as one change: {}", batch.what, step + run - 1, outcome.text)));
+                    let error = format!("{} {step}–{}, as one change: {}", batch.what, step + run - 1, outcome.text);
+                    if outcome.stops {
+                        return Ok(stop(error));
+                    }
+                    self.refuse(state, index, run, error);
+                    index += run;
+                    continue;
                 }
                 if outcome.missed.unwrap_or(0) > 0 {
                     record_miss(state, format!("{step}–{}", step + run - 1), inputs[0].get("deviceRef"), &reply);
@@ -403,15 +529,23 @@ impl Plan {
             let kind = CHANGES.iter().find(|k| Some(k.tool.as_str()) == tool && k.internal != Some(true));
             let action = if kind.is_none() { ACTIONS.iter().find(|k| Some(k.tool.as_str()) == tool) } else { None };
             if kind.is_none() && action.is_none() && tool != Some("wait") {
-                return Ok(stop(format!("{} isn't one of Kumi's change tools", head(&js_string(item.get("tool")), 64))));
+                self.refuse(state, index, 1, format!("{} isn't one of Kumi's change tools", head(&js_string(item.get("tool")), 64)));
+                index += 1;
+                continue;
             }
             let since = kind.and_then(|k| k.since.as_deref()).or_else(|| action.and_then(|k| k.since.as_deref()));
             if !self.mutations.supported(since) {
-                return Ok(stop(self.mutations.too_old(since)));
+                self.refuse(state, index, 1, self.mutations.too_old(since));
+                index += 1;
+                continue;
             }
             let input = match resolve(&json!(item.get("input").map(row).unwrap_or_default()), step, &state.made) {
                 Ok(v) => row(&v),
-                Err(error) => return Ok(stop(error)),
+                Err(error) => {
+                    self.refuse(state, index, 1, error);
+                    index += 1;
+                    continue;
+                }
             };
             if tool == Some("wait") {
                 let seconds = input
@@ -425,7 +559,9 @@ impl Plan {
                     })
                     .unwrap_or(f64::NAN);
                 if !(seconds > 0.0 && seconds <= 1800.0) {
-                    return Ok(stop("wait takes seconds (up to 1800) or beats".into()));
+                    self.refuse(state, index, 1, "wait takes seconds (up to 1800) or beats".into());
+                    index += 1;
+                    continue;
                 }
                 // Node's timer floors fractional milliseconds and uses one millisecond for values below one.
                 let milliseconds = (seconds * 1000.0).floor().max(1.0) as u64;
@@ -454,7 +590,13 @@ impl Plan {
                     }
                 }
                 if outcome.is_error {
-                    return Ok(stop(outcome.text));
+                    // Live may have done it: what comes after can't be sure where Live is.
+                    if outcome.maybe == Some(true) {
+                        return Ok(stop(outcome.text));
+                    }
+                    self.refuse(state, index, 1, outcome.text);
+                    index += 1;
+                    continue;
                 }
                 state.done.push(json!({"step":step,"changed":outcome.done.map(|d|d.title),"change":Value::Null}));
                 index += 1;
@@ -464,13 +606,19 @@ impl Plan {
             let reply = serde_json::from_str::<Value>(&outcome.text).map(|v| row(&v)).unwrap_or_default();
             if outcome.is_error && outcome.missed.unwrap_or(0) == 0 {
                 let text = reply.get("changed").and_then(Value::as_str).map(|s| format!("{s}: {}", outcome.text)).unwrap_or(outcome.text);
-                return Ok(stop(text));
+                if outcome.stops {
+                    return Ok(stop(text));
+                }
+                self.refuse(state, index, 1, text);
+                index += 1;
+                continue;
             }
             if outcome.missed.unwrap_or(0) > 0 {
                 record_miss(state, step.to_string(), input.get("deviceRef"), &reply);
             }
             if let (Some(name), Some(reference)) = (item.get("as").and_then(Value::as_str), reply.get("ref").and_then(Value::as_str)) {
                 state.made.insert(name.into(), reference.into());
+                self.mutations.names.borrow_mut().insert(name.into(), reference.into());
             }
             let mut done = row(
                 &json!({"step":step,"changed":reply.get("changed").unwrap_or(&Value::Null),"change":reply.get("change").unwrap_or(&Value::Null)}),
@@ -503,6 +651,16 @@ impl Plan {
             }
         }
         let mut reply = row(&json!({"done":state.done}));
+        if !state.refused.is_empty() {
+            reply.insert("refused".into(), json!(state.refused));
+            if !state.dependents.is_empty() {
+                reply.insert("heldBack".into(), json!(state.dependents));
+            }
+            reply.insert("refusedNote".into(), json!(REFUSED_NOTE));
+            if let Some(note) = &state.quieted {
+                reply.insert("playback".into(), json!(note));
+            }
+        }
         if let Some(stopped) = &stopped {
             reply.insert("stopped".into(), json!(stopped));
             if self.count() > stopped.step {
@@ -522,7 +680,7 @@ impl Plan {
             reply.insert("copyNote".into(),json!("Before this, Kumi kept a copy of the Set as last saved, next to it. Tell the producer in a few words, with the file's name."));
         }
         let text = stringify(&json!(reply));
-        if stopped.is_some() {
+        if stopped.is_some() || !state.refused.is_empty() {
             return Ok(ToolResult::error(text));
         }
         if state.done.is_empty() {
@@ -557,6 +715,36 @@ impl Plan {
         };
         Ok(ToolResult { text, reply, ..Default::default() })
     }
+}
+impl State {
+    /// A step held back because it needed a refused one: what it would have made holds back its own dependents.
+    fn held_back(&mut self, step: usize, item: &JsonObject, on: usize) {
+        self.dependents.push(json!({"step":step,"tool":item.get("tool").cloned().unwrap_or(Value::Null),"after":on}));
+        if let Some(name) = item.get("as").and_then(Value::as_str) {
+            self.blocked.names.insert(format!("@{name}"), on);
+        }
+        let tool = item.get("tool").and_then(Value::as_str).unwrap_or_default();
+        if structural(tool) {
+            self.blocked.structure.get_or_insert(on);
+        }
+    }
+}
+/// The `@names` a step's input uses.
+fn names_in(value: &Value, out: &mut Vec<String>, depth: usize) {
+    static NAMED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^@[A-Za-z][A-Za-z0-9_]{0,31}$").unwrap());
+    if depth > 8 {
+        return;
+    }
+    match value {
+        Value::String(text) if NAMED.is_match(text) => out.push(text.clone()),
+        Value::Array(items) => items.iter().for_each(|item| names_in(item, out, depth + 1)),
+        Value::Object(row) => row.values().for_each(|item| names_in(item, out, depth + 1)),
+        _ => {}
+    }
+}
+/// Whether a tool adds, deletes or moves the Set's tracks or scenes.
+fn structural(tool: &str) -> bool {
+    CHANGES.iter().any(|kind| kind.tool == tool && kind.family == ChangeFamily::Structure)
 }
 fn record_miss(state: &mut State, steps: String, device: Option<&Value>, reply: &JsonObject) {
     state

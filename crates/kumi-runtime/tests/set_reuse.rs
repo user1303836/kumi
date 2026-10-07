@@ -12,6 +12,7 @@ use kumi_runtime::{
     integrations::ableton::{
         connection::{ConnectionOptions, LiveConnection},
         observation::{ObservationHost, ObservedChange, Observer},
+        references::Shift,
         remember::Remember,
     },
     mcp::{
@@ -435,6 +436,40 @@ async fn a_change_naming_a_device_that_isnt_the_one_the_turn_showed_is_refused()
             assert!(check("7:track:0", "7:chain:0:0:0").await.unwrap_err().starts_with("Low is now Mid"));
             live.tracks.borrow_mut()[1].1.clear();
             assert!(check("7:track:1", "7:device:1:0").await.unwrap_err().starts_with("Compressor isn't on the track any more"));
+            session.close().await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_track_added_where_main_was_isnt_held_to_mains_devices_and_kumis_own_device_changes_arent_held_to_the_look() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let session = session(true).await;
+            // Main, after the three tracks, with its Limiter: the look shows it at 7:device:3:0.
+            session.live.tracks.borrow_mut().push(("Main".into(), vec![device("Limiter")]));
+            session.turn().await;
+            let (observer, live) = (&session.observer, &session.live);
+            let check = |track: &str, named: &str| {
+                let (track, named) = (vec![track.to_owned()], vec![named.to_owned()]);
+                async move { observer.refresh_devices(&track, &named, Signal::new()).await }
+            };
+            // One plan adds a track where Main was (Main moves to 4) and loads a Drum Rack on it: the step naming the
+            // Drum Rack isn't checked against Main's Limiter, which the look showed at that place (#253).
+            live.tracks.borrow_mut().insert(3, ("Beat".into(), vec![device("Drum Rack")]));
+            observer.shifted(&Shift { tracks_made: vec![3], ..Default::default() });
+            assert_eq!(check("7:track:3", "7:device:3:0").await, Ok(()));
+            // Main's Limiter moved with its track, and is still checked there.
+            live.tracks.borrow_mut()[4].1[0].name = "Glue".into();
+            assert!(check("7:track:4", "7:device:4:0").await.unwrap_err().starts_with("Limiter is now Glue"));
+            // A refusal lets the next change read the track again: the Limiter is back, so it goes through.
+            live.tracks.borrow_mut()[4].1[0].name = "Limiter".into();
+            assert_eq!(check("7:track:4", "7:device:4:0").await, Ok(()));
+            // Kumi loads a device before the pad's Utility: its own answer told the model what's at 7:device:2:0 now,
+            // so that place isn't held to the Utility the look showed there.
+            live.tracks.borrow_mut()[2].1.insert(0, device("Auto Filter"));
+            observer.devices_changed(&["7:track:2".to_owned()]);
+            assert_eq!(check("7:track:2", "7:device:2:0").await, Ok(()));
             session.close().await;
         })
         .await;

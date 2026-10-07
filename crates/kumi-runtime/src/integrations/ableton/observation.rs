@@ -7,6 +7,7 @@ use super::{
     more_changes::{set_meter, set_scale},
     pins::pin_context,
     project,
+    references::{Moved, Shift},
     remember::{CurrentProject, Remember},
     set_model::{DeviceNode, SetModel},
     track_ids,
@@ -183,31 +184,70 @@ impl Observer {
                 }
             }
         }
-        let devices = self.devices.borrow();
-        let Some(kept) = devices.kept.as_ref() else { return Ok(()) };
-        for reference in named {
-            let Some((name, class)) = devices.shown.get(reference) else { continue };
-            match describe(&kept.rows, reference) {
-                None => {
-                    return Err(format!(
+        let refused = {
+            let devices = self.devices.borrow();
+            let Some(kept) = devices.kept.as_ref() else { return Ok(()) };
+            named.iter().find_map(|reference| {
+                let (name, class) = devices.shown.get(reference)?;
+                match describe(&kept.rows, reference) {
+                    None => Some(format!(
                         "{name} isn't on the track any more (its devices changed since Kumi read them), so nothing was changed; read the track's devices again"
-                    ))
-                }
-                Some((now, now_class)) if now != *name || now_class != *class => {
-                    return Err(format!(
+                    )),
+                    Some((now, now_class)) if now != *name || now_class != *class => Some(format!(
                         "{name} is now {now} (the track's devices changed since Kumi read them), so nothing was changed; read the track's devices again"
-                    ))
+                    )),
+                    Some(_) => None,
                 }
-                Some(_) => {}
+            })
+        };
+        match refused {
+            // The next change on these tracks this turn reads them again, rather than meeting the same read (#253).
+            Some(why) => {
+                let mut devices = self.devices.borrow_mut();
+                for track in tracks {
+                    devices.refreshed.shift_remove(track);
+                }
+                Err(why)
+            }
+            None => Ok(()),
+        }
+    }
+    /// Kumi changed these tracks' devices: the next turn reads them again, since Live tells of no device renamed. In
+    /// this turn the next change on them reads them again too, and isn't held to what the look showed there: Kumi's
+    /// own answer told the model what's there now (a loaded device's ref, devicesNow), and a device it loaded at a
+    /// place the look showed another at is no stale ref (#253).
+    pub fn devices_changed(&self, tracks: &[String]) {
+        let mut devices = self.devices.borrow_mut();
+        for track in tracks {
+            devices.refreshed.shift_remove(track);
+            if let Some(prefixes) = device_prefix(track).zip(chain_prefix(track)) {
+                devices.shown.retain(|reference, _| !reference.starts_with(&prefixes.0) && !reference.starts_with(&prefixes.1));
             }
         }
-        Ok(())
-    }
-    /// Kumi changed these tracks' devices: the next turn reads them again, since Live tells of no device renamed.
-    pub fn devices_changed(&self, tracks: &[String]) {
-        if let Some(kept) = self.devices.borrow_mut().kept.as_mut() {
+        if let Some(kept) = devices.kept.as_mut() {
             kept.changed.extend(tracks.iter().cloned());
         }
+    }
+    /// A restructure moved tracks or scenes: what's kept of the Set's devices, and what the turns showed of them, move
+    /// with them, so a change naming a device past it is checked against that device, not the one that used to be
+    /// at its place (a new track takes Main's place, and Main's Limiter isn't the new track's device, #253).
+    pub fn shifted(&self, shift: &Shift) {
+        let mut devices = self.devices.borrow_mut();
+        let to = |reference: &str| match shift.reference(reference) {
+            Moved::Same => Some(reference.to_owned()),
+            Moved::To(now) => Some(now),
+            Moved::Gone => None,
+        };
+        devices.shown =
+            std::mem::take(&mut devices.shown).into_iter().filter_map(|(reference, shown)| Some((to(&reference)?, shown))).collect();
+        devices.refreshed = std::mem::take(&mut devices.refreshed).iter().filter_map(|track| to(track)).collect();
+        if let Some(kept) = devices.kept.as_mut() {
+            kept.rows = kept.rows.iter().filter_map(|row| shifted_row(row, shift)).collect();
+            kept.track_rows = kept.track_rows.iter().filter_map(|row| shifted_row(row, shift)).collect();
+            kept.changed = kept.changed.iter().filter_map(|track| to(track)).collect();
+        }
+        drop(devices);
+        self.model_stale();
     }
     /// Something may have changed any device (Python run in Live, an undo): the next turn reads them all.
     pub fn forget_devices(&self) {
@@ -834,6 +874,36 @@ fn device_prefix(track: &str) -> Option<String> {
     let mut parts = track.split(':');
     let (epoch, kind, index) = (parts.next()?, parts.next()?, parts.next()?);
     (kind == "track" && parts.next().is_none() && index.parse::<u32>().is_ok()).then(|| format!("{epoch}:device:{index}:"))
+}
+/// The prefix of every chain ref on a track (`7:chain:3:`, from `7:track:3`).
+fn chain_prefix(track: &str) -> Option<String> {
+    device_prefix(track).map(|prefix| prefix.replacen(":device:", ":chain:", 1))
+}
+/// A row read before a restructure, with every ref in it moved by it: none when what the row is was deleted.
+fn shifted_row(row: &JsonObject, shift: &Shift) -> Option<JsonObject> {
+    fn walk(value: &mut Value, key: &str, shift: &Shift, depth: usize) -> bool {
+        if depth > 32 {
+            return true;
+        }
+        match value {
+            Value::String(text) if key == "ref" || key.ends_with("Ref") => match shift.reference(text) {
+                Moved::Same => true,
+                Moved::To(now) => {
+                    *text = now;
+                    true
+                }
+                Moved::Gone => false,
+            },
+            Value::Array(items) => {
+                items.retain_mut(|item| walk(item, key, shift, depth + 1));
+                true
+            }
+            Value::Object(row) => row.iter_mut().all(|(key, value)| walk(value, key, shift, depth + 1)),
+            _ => true,
+        }
+    }
+    let mut row = Value::Object(row.clone());
+    walk(&mut row, "", shift, 0).then(|| row.as_object().cloned().unwrap_or_default())
 }
 /// The Set's device rows with these tracks' read again in place of theirs.
 async fn reread(

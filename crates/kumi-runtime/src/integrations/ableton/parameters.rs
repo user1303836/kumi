@@ -36,10 +36,18 @@ pub struct ChangeOutcome {
     pub is_error: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub missed: Option<usize>,
+    /// Live may have made the change, or Kumi can't read Live to know: a plan stops here. An error without it is a
+    /// refusal, with nothing changed, and the plan goes on with the steps that don't depend on it (#259).
+    #[serde(skip)]
+    pub stops: bool,
 }
 impl ChangeOutcome {
     pub fn error(text: impl Into<String>) -> Self {
-        Self { text: text.into(), is_error: true, missed: None }
+        Self { text: text.into(), is_error: true, missed: None, stops: false }
+    }
+    /// An error after which nothing more should be tried: Live may have changed, or can't be read.
+    pub fn stop(text: impl Into<String>) -> Self {
+        Self { stops: true, ..Self::error(text) }
     }
     pub fn tool_result(self) -> ToolResult {
         ToolResult { text: self.text, is_error: self.is_error, ..Default::default() }
@@ -335,7 +343,7 @@ impl Parameters {
         if targets.is_empty() {
             let mut reply = object(json!({"changed":null}));
             reply.extend(misses);
-            return Ok(ChangeOutcome { text: stringify(&json!(reply)), is_error: true, missed: Some(count) });
+            return Ok(ChangeOutcome { text: stringify(&json!(reply)), is_error: true, missed: Some(count), stops: false });
         }
         signal.check()?;
         self.history.changes_this_turn.set(self.history.changes_this_turn.get() + 1);
@@ -364,7 +372,7 @@ impl Parameters {
                     String::new(),
                     None,
                 );
-                return Ok(ChangeOutcome::error("Live didn't confirm this change, so it may or may not have happened. Tell the producer to check Live; discover again before more changes."));
+                return Ok(ChangeOutcome::stop("Live didn't confirm this change, so it may or may not have happened. Tell the producer to check Live; discover again before more changes."));
             }
         };
         let rows =
@@ -460,7 +468,7 @@ impl Parameters {
         }
         reply.insert("live".into(),json!({"parameters":rows.iter().map(|row|{let mut result=JsonObject::new();for (from,to) in [("name","name"),("value","value"),("display","displayValue")]{if let Some(value)=row.get(from){result.insert(to.into(),value.clone());}}result}).collect::<Vec<_>>()}));
         reply.extend(misses);
-        Ok(ChangeOutcome { text: stringify(&json!(reply)), is_error: false, missed: (count > 0).then_some(count) })
+        Ok(ChangeOutcome { text: stringify(&json!(reply)), is_error: false, missed: (count > 0).then_some(count), stops: false })
     }
 }
 fn object(value: Value) -> JsonObject {

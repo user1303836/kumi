@@ -8,10 +8,11 @@ use super::{
     observation::Observer,
     options::AbletonOptions,
     parameters::{ChangeOutcome, Parameters},
+    references::Shift,
     views::ViewHost,
 };
 use crate::core::{contracts::*, errors::RuntimeError};
-use indexmap::IndexSet;
+use indexmap::{IndexMap, IndexSet};
 use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::{
@@ -30,10 +31,20 @@ pub struct Mutations {
     pub options: Rc<AbletonOptions>,
     pub samples: SampleBank,
     pub(crate) copied: RefCell<HashSet<String>>,
+    /// The `@names` this answer's plans made (each the short ref of what its step made): a later plan in the answer
+    /// uses them, so steps a plan refused are resent alone, not with everything they hang on (#259).
+    pub names: RefCell<IndexMap<String, String>>,
 }
 impl Mutations {
     pub fn new(parameters: Rc<Parameters>, observer: Rc<Observer>, options: Rc<AbletonOptions>) -> Self {
-        Self { parameters, observer, options, samples: SampleBank::default(), copied: RefCell::new(HashSet::new()) }
+        Self {
+            parameters,
+            observer,
+            options,
+            samples: SampleBank::default(),
+            copied: RefCell::new(HashSet::new()),
+            names: RefCell::new(IndexMap::new()),
+        }
     }
     pub fn supported(&self, since: Option<&str>) -> bool {
         since.is_none_or(|since| super::bridge_version::at_least(self.parameters.history.connection.version().as_deref(), since))
@@ -81,11 +92,13 @@ impl Mutations {
                 return ChangeOutcome::error(text);
             }
         }
+        // What fails here is Live's connection or the Set itself (gone, switched, unreadable), not this one change: a
+        // plan stops on it, where it goes on past a change Live refused.
         let outcome = match self.try_change(kind, named, original, settled).await {
             Ok(result) => result,
-            Err(ReadError::Observation(error)) => ChangeOutcome::error(error.0),
+            Err(ReadError::Observation(error)) => ChangeOutcome::stop(error.0),
             Err(ReadError::Other(_)) => {
-                ChangeOutcome::error("The change failed before anything happened in Live; discover again, then retry.")
+                ChangeOutcome::stop("The change failed before anything happened in Live; discover again, then retry.")
             }
         };
         if changes {
@@ -110,14 +123,17 @@ impl Mutations {
             connection.tools().unwrap().refresh(signal.clone()).await?;
             connection.assert_lease(lease, &signal)?;
         }
+        // Refusals of this change alone: a plan goes on past them.
         if !connection.has(&kind.preview) || !connection.has(&kind.apply) {
-            return Err(observation(kind.unavailable.as_deref().unwrap_or("That change isn't available for the open Set right now")));
+            return Ok(ChangeOutcome::error(
+                kind.unavailable.as_deref().unwrap_or("That change isn't available for the open Set right now"),
+            ));
         }
         if !self.supported(kind.since.as_deref()) {
-            return Err(observation(&self.too_old(kind.since.as_deref())));
+            return Ok(ChangeOutcome::error(self.too_old(kind.since.as_deref())));
         }
         if let Some(what) = self.needs_newer_bridge(kind, &input) {
-            return Err(observation(&format!(
+            return Ok(ChangeOutcome::error(format!(
                 "That needs a newer Ableton bridge than this one ({}): {what}. Tell the producer to update it (kumi doctor says how).",
                 connection.version().as_deref().unwrap_or("older")
             )));
@@ -125,7 +141,9 @@ impl Mutations {
         if history.changes_this_turn.get() >= 5_000 {
             return Err(observation("That's 5000 changes in one answer; carry on in the next one"));
         }
-        connection.references.borrow().require_fresh_references(&input)?;
+        if let Err(stale) = connection.references.borrow().require_fresh_references(&input) {
+            return Ok(ChangeOutcome::error(stale.0));
+        }
         // Notes written in Kumi's notation become the notes Live takes; a mistake in it comes back as the change's error.
         let input = match super::notes::expand(&kind.tool, input, connection, self.observer.tempo.get(), &signal).await {
             Ok(input) => input,
@@ -174,7 +192,7 @@ impl Mutations {
         let transaction = preview.get("transactionId").and_then(Value::as_str).filter(|s| !s.is_empty() && utf16_len(s) <= 256);
         let confirmation = preview.get("confirmation").and_then(Value::as_str).filter(|s| !s.is_empty() && utf16_len(s) <= 512);
         let (Some(transaction), Some(confirmation)) = (transaction, confirmation) else {
-            return Err(observation("The bridge's preview was malformed; nothing was changed"));
+            return Ok(ChangeOutcome::error("The bridge's preview was malformed; nothing was changed"));
         };
         let (transaction, confirmation) = (transaction.to_owned(), confirmation.to_owned());
         let known = |reference: &Value| reference.as_str().and_then(|r| connection.references.borrow().known.get(r).cloned());
@@ -206,7 +224,7 @@ impl Mutations {
                     transaction.into(),
                     None,
                 );
-                return Ok(ChangeOutcome::error("Live didn't confirm this change, so it may or may not have happened. Tell the producer to check Live; discover again before more changes."));
+                return Ok(ChangeOutcome::stop("Live didn't confirm this change, so it may or may not have happened. Tell the producer to check Live; discover again before more changes."));
             }
         };
         if applied.is_error == Some(true) {
@@ -215,7 +233,7 @@ impl Mutations {
                 return Ok(ChangeOutcome::error(text));
             }
             history.remember(new_record(kind, summary, ChangeState::Unsure, connection.now().timestamp_millis()), transaction.into(), None);
-            return Ok(ChangeOutcome::error(format!("Live couldn't confirm this change: {text}")));
+            return Ok(ChangeOutcome::stop(format!("Live couldn't confirm this change: {text}")));
         }
         let mut result = match context::payload(&applied) {
             Ok(value) => value,
@@ -225,7 +243,7 @@ impl Mutations {
                     transaction.into(),
                     None,
                 );
-                return Ok(ChangeOutcome::error("Kumi couldn't read Live's answer to this change, so it can't confirm whether it happened. Tell the producer to check Live; discover again before more changes."));
+                return Ok(ChangeOutcome::stop("Kumi couldn't read Live's answer to this change, so it can't confirm whether it happened. Tell the producer to check Live; discover again before more changes."));
             }
         };
         if main_lane {
@@ -336,6 +354,8 @@ impl Mutations {
                 }
             }
         }
+        // Whether the refs past a restructure followed what they named (or were all retired).
+        let mut followed = false;
         if kind.restructures == Some(true) {
             let created: Vec<_> = result
                 .get("created")
@@ -344,35 +364,27 @@ impl Mutations {
                 .flatten()
                 .map(|v| v.as_object().cloned().unwrap_or_default())
                 .collect();
+            let shift = restructure_shift(&kind.tool, &args, &preview, &result, &created);
+            followed = shift.is_some();
             let mut book = connection.references.borrow_mut();
             book.cursors.clear();
-            static TRACK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r":track:([0-9]+)$").unwrap());
-            static SCENE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r":scene:([0-9]+)$").unwrap());
-            let positions = |pattern: &Regex| {
-                created
-                    .iter()
-                    .filter_map(|row| row.get("ref").and_then(Value::as_str))
-                    .filter_map(|reference| pattern.captures(reference).and_then(|m| number::parse(&m[1])))
-                    .collect::<Vec<_>>()
-            };
-            let tracks = positions(&TRACK);
-            let scenes = positions(&SCENE);
-            if kind.tool == "add_tracks_and_scenes" && !created.is_empty() && tracks.len() + scenes.len() == created.len() {
-                let first_track = tracks.into_iter().fold(f64::INFINITY, f64::min);
-                let first_scene = scenes.into_iter().fold(f64::INFINITY, f64::min);
-                let references: IndexSet<_> = book.refs.keys().cloned().chain(book.named_references()).collect();
-                for reference in references {
-                    if track_index_of(&reference).is_some_and(|i| i >= first_track)
-                        || scene_index_of(&reference).is_some_and(|i| i >= first_scene)
-                    {
-                        book.retire(&reference);
-                    }
+            match &shift {
+                // The refs past the change follow what they named, so a plan's later steps (deleting the next track,
+                // setting a device on a track after the new one) still find theirs (#261, #253).
+                Some(shift) => book.shift(shift),
+                None => {
+                    book.refs.clear();
+                    book.known.clear();
+                    book.clear_names();
                 }
-            } else {
-                book.refs.clear();
-                book.known.clear();
-                book.clear_names();
             }
+            drop(book);
+            if let Some(shift) = &shift {
+                self.observer.shifted(shift);
+            } else {
+                self.observer.forget_devices();
+            }
+            let mut book = connection.references.borrow_mut();
             for row in &created {
                 if let Some(reference) = row.get("ref").and_then(Value::as_str) {
                     book.retire(reference);
@@ -438,7 +450,14 @@ impl Mutations {
             reply.insert("lines".into(), json!(lines));
         }
         if kind.restructures == Some(true) {
-            reply.insert("note".into(),json!(if kind.tool=="add_tracks_and_scenes"{"Tracks and scenes after the new ones moved (return tracks among them): discover those again; earlier references still work, and the new ones in live.created are current."}else{"Track and scene positions moved; discover again before using earlier references (the new ones in live.created are current)."}));
+            reply.insert(
+                "note".into(),
+                json!(if followed {
+                    "Tracks and scenes after this moved (returns and Main among them), and Kumi moved their references with them: references from earlier in this answer still name the same tracks, scenes, clips and devices (not what was deleted), and the new ones in live.created are current."
+                } else {
+                    "Track and scene positions moved; discover again before using earlier references (the new ones in live.created are current)."
+                }),
+            );
         }
         if shifted {
             if let Some(devices) = devices_now {
@@ -470,6 +489,7 @@ impl Mutations {
             text: if text.len() <= 16 * 1024 { text } else { stringify(&json!(reply)) },
             is_error: record.state != ChangeState::Applied && permanent.is_none(),
             missed: None,
+            stops: record.state == ChangeState::Unsure,
         })
     }
     async fn append_at_end(&self, kind: &ChangeKind, input: JsonObject, signal: Signal) -> Result<JsonObject, ReadError> {
@@ -554,15 +574,54 @@ fn cut(before: &[JsonObject], after: &[JsonObject]) -> bool {
 fn beats(value: Option<&Value>) -> Option<f64> {
     value.and_then(Value::as_f64).filter(|n| n.is_finite())
 }
+/// What a restructure did to the Set's tracks and scenes, from what it was asked and what Live answered: None when
+/// that can't be told exactly, and every ref is retired instead.
+fn restructure_shift(tool: &str, args: &JsonObject, preview: &JsonObject, result: &JsonObject, created: &[JsonObject]) -> Option<Shift> {
+    static TRACK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9]+:track:([0-9]+)$").unwrap());
+    static SCENE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9]+:scene:([0-9]+)$").unwrap());
+    let index = |reference: Option<&Value>, pattern: &Regex| {
+        reference.and_then(Value::as_str).and_then(|reference| pattern.captures(reference)).and_then(|m| m[1].parse::<usize>().ok())
+    };
+    let mut shift = Shift::default();
+    match tool {
+        "add_tracks_and_scenes" | "group_tracks" => {
+            for row in created {
+                match (index(row.get("ref"), &TRACK), index(row.get("ref"), &SCENE)) {
+                    (Some(track), _) => shift.tracks_made.push(track),
+                    (_, Some(scene)) => shift.scenes_made.push(scene),
+                    _ => return None,
+                }
+            }
+        }
+        "capture_scene" => shift.scenes_made.push(index(result.get("created").and_then(|made| made.get("sceneRef")), &SCENE)?),
+        // A group track takes the tracks in it, which follow it.
+        "delete_track" => {
+            let at = index(args.get("trackRef"), &TRACK)?;
+            let inside = preview.get("track").and_then(|track| track.get("alsoDeletes")).and_then(Value::as_array).map_or(0, Vec::len);
+            shift.tracks_gone = (at..=at + inside).collect();
+        }
+        "delete_scene" => shift.scenes_gone.push(index(args.get("sceneRef"), &SCENE)?),
+        "change_structure" => {
+            let made = result.get("result").and_then(|made| made.get("ref"));
+            match args.get("action").and_then(Value::as_str)? {
+                "create-return" | "duplicate-track" => shift.tracks_made.push(index(made, &TRACK)?),
+                "duplicate-scene" => shift.scenes_made.push(index(made, &SCENE)?),
+                "delete-return" => {
+                    shift.tracks_gone.push(index(args.get("ref"), &TRACK)?);
+                    shift.sends = true;
+                }
+                _ => return None,
+            }
+        }
+        _ => return None,
+    }
+    (!shift.is_empty()).then_some(shift)
+}
 pub fn track_index_of(reference: &str) -> Option<f64> {
     static MATCH: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r":(?:track|clip_slot|clip|arrangement_clip|device|chain|drum_pad|routing_choice|take_lane|mixer):([0-9]+)").unwrap()
     });
     MATCH.captures(reference).and_then(|m| number::parse(&m[1]))
-}
-pub fn scene_index_of(reference: &str) -> Option<f64> {
-    static MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r":scene:([0-9]+)|:(?:clip_slot|clip):[0-9]+:([0-9]+)").unwrap());
-    MATCH.captures(reference).and_then(|m| m.get(1).or_else(|| m.get(2)).and_then(|m| number::parse(m.as_str())))
 }
 fn observation(message: &str) -> ReadError {
     ReadError::Observation(ObservationError(message.into()))

@@ -455,6 +455,7 @@ impl ObservationHost for Ableton {
     fn reset_turn(&self, continuing: bool) {
         self.history.changes_this_turn.set(0);
         self.mutations.samples.picked.borrow_mut().clear();
+        self.mutations.names.borrow_mut().clear();
         self.rendering.reset_turn(continuing);
     }
     fn changes(&self) -> Vec<ObservedChange> {
