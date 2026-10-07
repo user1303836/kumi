@@ -224,7 +224,7 @@ $group.add_Click({ Say 'group' })
 $freeze = $edit.MenuItems.Add('Freeze Track')
 $freeze.Enabled = $false
 # Titles past ASCII, made from ASCII: like Kumi's script, this file has no BOM.
-$cafe = 'Caf' + [char]0x00E9 + ' ' + [char]0x65E5 + [char]0x672C
+$cafe = 'Caf' + [char]0x00E9 + ' ' + [char]0x65E5 + [char]0x672C + ' ' + [char]::ConvertFromUtf32(0x1F3B9)
 $edit.MenuItems.Add($cafe) | Out-Null
 $create = $menu.MenuItems.Add('&Create')
 $create.MenuItems.Add('Insert &MIDI Track') | Out-Null
@@ -283,7 +283,7 @@ async fn on_windows_the_helper_uses_the_win32_menu_finds_the_owned_dialog_and_fi
     assert!(find(&["Create", "Insert MIDI Track"]).is_some());
     assert!(!menus.iter().any(|item| item.path.last().is_some_and(|title| title.is_empty() || title == "-")), "no separators");
     // Past ASCII, whole: the script writes it as \u escapes, whatever the console's code page.
-    assert!(find(&["Edit", "Caf\u{e9} \u{65e5}\u{672c}"]).is_some(), "{menus:?}");
+    assert!(find(&["Edit", "Caf\u{e9} \u{65e5}\u{672c} \u{1f3b9}"]).is_some(), "{menus:?}");
 
     // Chosen without bringing the window to the front.
     let group = hands.menu(&["Edit".into(), "Group".into()], MenuOptions::default()).await.unwrap();
@@ -299,9 +299,9 @@ async fn on_windows_the_helper_uses_the_win32_menu_finds_the_owned_dialog_and_fi
     let picked = hands.tracks(&[Track { name: "bass".into(), nth: Some(0.0) }], None).await.unwrap();
     assert_eq!((picked.ok, &picked.fields["missing"]), (false, &json!(["bass"])), "{picked:?}");
     // A name past ASCII goes to the script as escapes and comes back whole.
-    let picked = hands.tracks(&[Track { name: "Caf\u{e9} \u{65e5}\u{672c}".into(), nth: Some(0.0) }], None).await.unwrap();
+    let picked = hands.tracks(&[Track { name: "Caf\u{e9} \u{65e5}\u{672c} \u{1f3b9}".into(), nth: Some(0.0) }], None).await.unwrap();
     assert!(picked.ok, "{picked:?}");
-    assert_eq!(picked.fields["selected"], json!(["Caf\u{e9} \u{65e5}\u{672c}"]));
+    assert_eq!(picked.fields["selected"], json!(["Caf\u{e9} \u{65e5}\u{672c} \u{1f3b9}"]));
     assert!(hands.dialog(None).await.unwrap() == Dialog { open: false, title: None, words: None, buttons: None, file: None });
 
     // An item that opens a modal prompt answers at once, and the prompt is the dialog: its own words and
