@@ -96,7 +96,7 @@ impl McpHost {
         reference: &str,
         identity: &str,
         context: &LiveOperationContext,
-        expected_fingerprint: Option<&str>,
+        _expected_fingerprint: Option<&str>,
         recovery_record: Option<&TransactionRecord>,
         allow_absent: bool,
         _expected_notes_revision: Option<&str>,
@@ -112,24 +112,24 @@ impl McpHost {
             return Err(LiveError::error("owned clip identity changed before cleanup"));
         };
         let located = self.clip_row(&snapshot, &at)?;
+        // Live's ownership of a made clip (the remote adapter's cleanup token, the Remote Script's ledger row) is keyed
+        // by the ref it was made at, so a delete at any other ref would be refused there: a clip that moved is refused
+        // here, clearly and with nothing sent.
         if at != reference {
-            // A Session clip moves only with its scene, and its row's slot and place move too: what it was made with
-            // can't be checked there.
-            if !located.arrangement {
-                return Err(LiveError::error("the owned clip moved with its scene since it was made"));
-            }
-            // Only its ref moved: it must still be the clip that was made.
-            let mut made = located.clip.clone();
-            made["ref"] = json!(reference);
-            if expected_fingerprint.is_some_and(|expected| capture_object_fingerprint(&made).ok().as_deref() != Some(expected)) {
-                return Err(LiveError::error("owned clip changed since it was made"));
-            }
+            return Err(LiveError::error(if located.arrangement {
+                "the clip moved since it was made (a clip before it was added or removed): delete it in Live"
+            } else {
+                "the clip moved with its scene since it was made (a scene was added or removed above it): delete it in Live"
+            }));
         }
         let operation = if located.arrangement { "arrangement.clip.delete" } else { "clip.delete" };
-        let authority =
-            if located.arrangement { self.arrangement_clip_authority(&snapshot, &at)? } else { self.clip_authority(&snapshot, &at)? };
+        let authority = if located.arrangement {
+            self.arrangement_clip_authority(&snapshot, reference)?
+        } else {
+            self.clip_authority(&snapshot, reference)?
+        };
         let mut args = json!({
-        "ref":at}
+        "ref":reference}
         );
         for (k, v) in authority.as_object().unwrap() {
             args[k] = v.clone();
@@ -470,7 +470,9 @@ impl McpHost {
                 // Scene refs are positional, and so are its slots' and clips' in what it was made with: a scene added
                 // or removed above it leaves nothing to check it against.
                 if found.is_some_and(|scene| Some(scene.ref_.0.as_str()) != reference) {
-                    return Err(LiveError::error("the captured scene moved since it was made (a scene was added or removed above it)"));
+                    return Err(LiveError::error(
+                        "the captured scene moved since it was made (a scene was added or removed above it): delete it in Live",
+                    ));
                 }
                 // Gone by its identity: a retry finds nothing left to delete; a first try still checks what's at its ref.
                 let scene = found.or_else(|| {

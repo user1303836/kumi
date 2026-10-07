@@ -55,6 +55,9 @@ struct Adapter {
     /// Live's Arrangement clip refs are positional (`{track}:{index}`): once one is deleted, the next clip on its track
     /// takes its ref.
     positional: Cell<bool>,
+    /// As the remote adapter keeps it: the refs each transaction's creations returned, the only ones its deletions may
+    /// name.
+    owned: RefCell<Option<HashMap<String, Vec<Value>>>>,
 }
 impl Adapter {
     fn new() -> Self {
@@ -66,6 +69,7 @@ impl Adapter {
             fired: Cell::new(false),
             after_invoke: Cell::new(false),
             positional: Cell::new(false),
+            owned: Default::default(),
         }
     }
     fn reset(&self, fault: &str) {
@@ -106,6 +110,12 @@ impl Adapter {
                 })
             });
         }
+        let transaction = c.and_then(|c| c.transaction_id.clone()).unwrap_or_default();
+        if let Some(owned) = self.owned.borrow().as_ref() {
+            if i.operation == "arrangement.clip.delete" && !owned.get(&transaction).is_some_and(|refs| refs.contains(&i.args["ref"])) {
+                return Err(LiveError::MutationNotDispatched("remote destructive cleanup lacks transaction-owned authority".into()));
+            }
+        }
         let no_effect = !self.fired.get() && fault.ends_with("no-effect");
         let deleted = (self.positional.get() && i.operation == "arrangement.clip.delete").then(|| {
             let state = self.sim.state.borrow();
@@ -132,6 +142,9 @@ impl Adapter {
         }
         if c.is_some() && !no_effect {
             self.cache.borrow_mut().insert(key, result.clone());
+        }
+        if let Some(owned) = self.owned.borrow_mut().as_mut().filter(|_| i.operation == "arrangement.clip.create") {
+            owned.entry(transaction).or_default().push(result["ref"].clone());
         }
         self.after_invoke.set(true);
         if !self.fired.get() && fault.ends_with("after") {
@@ -279,8 +292,10 @@ async fn perform(
     states.push(clean(record.borrow().clone()));
 }
 #[tokio::test]
-async fn undoing_a_clip_that_moved_ref_deletes_it_where_it_is_now() {
+async fn undoing_a_clip_that_moved_ref_is_refused_before_anything_is_sent() {
     let adapter = Rc::new(Adapter::new());
+    // As in Live, a made clip may be deleted only at the ref it was made at.
+    *adapter.owned.borrow_mut() = Some(HashMap::new());
     let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
     let mut made = vec![];
     for (name, position) in [("Earlier", 4), ("New Clip", 8)] {
@@ -299,12 +314,17 @@ async fn undoing_a_clip_that_moved_ref_deletes_it_where_it_is_now() {
         let freed = rows.remove(earlier)["clip"]["ref"].clone();
         rows.iter_mut().find(|r| r["clip"]["name"] == "New Clip").unwrap()["clip"]["ref"] = freed;
     }
+    adapter.calls.borrow_mut().clear();
     let undo = json!({"transactionId":made[1],"confirmation":"undo","idempotencyKey":"undo-key"});
     let result =
         host.with_undo_watch(&json!(3), &undo, async { Ok(host.undo_arrangement_clip_async(&json!(3), &undo, None).await) }).await.unwrap();
+    // Refused clearly, where a delete at its new ref would have met the ownership refusal.
+    let text = result["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("the clip moved since it was made (a clip before it was added or removed): delete it in Live"), "{result}");
+    assert!(!adapter.calls.borrow().iter().any(|call| call["method"] == "invoke"), "{:?}", adapter.calls.borrow());
     let record = host.transaction_record(made[1].as_str().unwrap()).unwrap();
-    assert_eq!(record.borrow()["state"], "undone", "{result}");
-    assert!(adapter.sim.state.borrow()["arrangementClips"].as_array().unwrap().is_empty());
+    assert_eq!(record.borrow()["state"], "applied", "{result}");
+    assert_eq!(adapter.sim.state.borrow()["arrangementClips"].as_array().unwrap().len(), 1);
 }
 #[tokio::test]
 async fn undoing_a_clip_with_another_after_it_is_confirmed_by_identity() {
