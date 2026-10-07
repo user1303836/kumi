@@ -15,6 +15,17 @@ use super::spec::{Control, MidiSpec, NumericControl, Unit};
 
 /// The frame, with __CONTROLS__ and __DEFAULTS__ for the device's controls and __CODE__ for its code.
 const FRAME: &str = r##"// Made by Kumi. The frame (fixed) runs the device's own code, below it.
+// No code is made from strings here, and an error's stack hands out none of the frame's functions or their this: the
+// device's code reaches only what the frame gives it, in Live as in Kumi's check.
+(function () {
+  const refuse = function Function() { throw new EvalError("Code generation from strings disallowed for this context"); };
+  for (const sample of [function () {}, function* () {}, async function () {}, async function* () {}]) {
+    Object.defineProperty(Object.getPrototypeOf(sample), "constructor", { value: refuse, writable: false, configurable: false });
+  }
+  globalThis.eval = refuse;
+  globalThis.Function = refuse;
+  Object.defineProperty(Error, "prepareStackTrace", { value: undefined, writable: false, configurable: false });
+})();
 inlets = 2;
 outlets = 1;
 const CONTROLS = __CONTROLS__;
@@ -52,9 +63,13 @@ function after(ms, fn) {
 function cancel(task) { if (task && timers.has(task)) { task.cancel(); timers.delete(task); } }
 const device = (function () {
   "use strict";
-  // Out of the device's reach: files, the network, and the rest of Max and Live.
+  // Out of the device's reach: files, the network, and the rest of Max and Live (box leads to the patcher, include
+  // reads files, and the rest are Max's own objects).
   const File = undefined, Folder = undefined, XMLHttpRequest = undefined, fetch = undefined, SQLite = undefined, Dict = undefined, Buffer = undefined, Global = undefined,
-    LiveAPI = undefined, messnamed = undefined, max = undefined, patcher = undefined, globalThis = undefined, outlet = undefined, Task = undefined, require = undefined;
+    LiveAPI = undefined, messnamed = undefined, max = undefined, patcher = undefined, globalThis = undefined, outlet = undefined, Task = undefined, require = undefined,
+    box = undefined, include = undefined, jsarguments = undefined, Patcher = undefined, Maxobj = undefined, MaxobjListener = undefined,
+    ParameterListener = undefined, JitterObject = undefined, JitterMatrix = undefined, JitterListener = undefined, PolyBuffer = undefined,
+    Wind = undefined, Image = undefined, Sketch = undefined, MGraphics = undefined, mgraphics = undefined;
   return (function () {
 __CODE__
     return { midi: typeof midi === "function" ? midi : undefined, changed: typeof changed === "function" ? changed : undefined, reset: typeof reset === "function" ? reset : undefined };

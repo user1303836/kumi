@@ -135,8 +135,24 @@ fn a_midi_effects_patch_midiin_the_code_midiout_and_each_control_a_live_paramete
 
 #[test]
 fn the_devices_code_cant_reach_files_the_network_or_max_and_live_the_frame_hides_them_and_the_check_refuses_them() {
-    // Hidden at run time: Max's objects are undefined inside the device's own code.
-    let code = midi_device_code(&[], "function midi(event) { send({ type: 'cc', controller: 1, value: [typeof File, typeof Dict, typeof LiveAPI, typeof outlet, typeof max].every((kind) => kind === 'undefined') ? 1 : 0 }); }");
+    // Hidden at run time: Max's objects are undefined inside the device's own code, and the frame itself (in Live as
+    // here) refuses every way of making code from a string and of reading the frame's functions off a stack.
+    let code = midi_device_code(
+        &[],
+        "function midi(event) {
+          const refused = (attempt) => { try { attempt(); return false; } catch (error) { return true; } };
+          const blocked = [
+            () => (0, eval)('1'),
+            () => Reflect.construct(Function, ['return 1']),
+            () => (function* () {}).constructor('yield 1'),
+            () => (async function () {}).constructor(''),
+            () => post['constr' + 'uctor']('return 1'),
+            () => { Error.prepareStackTrace = () => 1; },
+          ].every(refused);
+          const hidden = [typeof File, typeof Dict, typeof LiveAPI, typeof outlet, typeof max, typeof box, typeof include].every((kind) => kind === 'undefined');
+          send({ type: 'cc', controller: 1, value: blocked && hidden ? 1 : 0 });
+        }",
+    );
     let runtime = Runtime::new().unwrap();
     let context = Context::full(&runtime).unwrap();
     let sent: Vec<f64> = context.with(|ctx| {
@@ -153,7 +169,8 @@ fn the_devices_code_cant_reach_files_the_network_or_max_and_live_the_frame_hides
             )
             .unwrap();
         globals.set("post", Function::new(ctx.clone(), |_args: Rest<JsValue>| {}).unwrap()).unwrap();
-        ctx.eval::<(), _>("class Task {}; class File {}; class Dict {}; class LiveAPI {}; var max = {}; var inlet = 0;").unwrap();
+        ctx.eval::<(), _>("class Task {}; class File {}; class Dict {}; class LiveAPI {}; var max = {}; var box = { patcher: {} }; function include() {} var inlet = 0;")
+            .unwrap();
         let mut options = EvalOptions::default();
         options.strict = false;
         ctx.eval_with_options::<(), _>(code, options).unwrap();
@@ -238,6 +255,10 @@ fn kumi_runs_the_devices_tests_and_its_own_checks_a_working_device_passes_a_brok
     assert_eq!(zero.problems, Vec::<String>::new());
     let broken = check_midi_device(&spec(json!({ "code": "function midi(event) { pass(event) ", "tests": [] })));
     assert!(matches(&broken.problems.join(" "), "the code doesn't run"), "{:?}", broken.problems);
+    // The time a device reads is today's, as in Live: code that acts on the date is checked as it will run there.
+    let dated = check_midi_device(&spec(json!({ "code": "function midi(event) { if (Date.now() > 1e12) pass(event); }", "tests": [
+        { "name": "passes", "input": [{ "type": "noteon", "pitch": 60, "at": 0 }, { "type": "noteoff", "pitch": 60, "at": 100 }], "expect": [{ "type": "noteon", "pitch": 60 }, { "type": "noteoff", "pitch": 60 }] }] })));
+    assert_eq!(dated.problems, Vec::<String>::new());
 }
 
 // ported with devices/tool.rs: "make_device reads its guide on demand, makes a device where Live's Browser sees it, and waits for the Browser"

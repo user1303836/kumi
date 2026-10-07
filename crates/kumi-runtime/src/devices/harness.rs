@@ -136,8 +136,8 @@ struct Shared<'js> {
     order: u64,
 }
 
-/// Max's Task and a Date on Kumi's clock, from the functions Kumi gives it; and code can't be made from strings
-/// (TS: the context's `codeGeneration: { strings: false }`, which V8 refuses with this message).
+/// Max's Task and a Date on Kumi's clock, from the functions Kumi gives it. The frame itself stops code being made
+/// from strings, as it does in Live.
 const PRELUDE: &str = r#"(function (schedule, cancel, clock) {
   const RealDate = Date;
   globalThis.Task = class Task {
@@ -146,12 +146,6 @@ const PRELUDE: &str = r#"(function (schedule, cancel, clock) {
     cancel() { if (this.entry !== undefined) cancel(this.entry); this.entry = undefined; }
   };
   globalThis.Date = class Date extends RealDate { static now() { return clock(); } };
-  const refuse = function Function() { throw new EvalError("Code generation from strings disallowed for this context"); };
-  for (const sample of [function () {}, function* () {}, async function () {}, async function* () {}]) {
-    Object.defineProperty(Object.getPrototypeOf(sample), "constructor", { value: refuse, writable: false, configurable: false });
-  }
-  globalThis.eval = refuse;
-  globalThis.Function = refuse;
 })"#;
 
 static KUMI_DEVICE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^Kumi device:").unwrap());
@@ -343,9 +337,12 @@ fn run_in<'js>(
             shared.borrow_mut().queue.retain(|entry| entry.order as f64 != previous.0);
         }
     })?;
+    // Date.now() reads as it would in Live (today, in ms), moved by Kumi's clock: code that asks the time behaves
+    // here as it will there.
+    let epoch = kumi_common::time::now_ms() as f64;
     let clock = Function::new(ctx.clone(), {
         let shared = shared.clone();
-        move || -> f64 { shared.borrow().clock }
+        move || -> f64 { epoch + shared.borrow().clock }
     })?;
     let prelude: Function = ctx.eval(PRELUDE)?;
     prelude.call::<_, ()>((schedule, cancel, clock))?;
