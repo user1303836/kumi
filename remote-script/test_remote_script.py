@@ -181,6 +181,18 @@ class DiagnosticsSecurityTests(unittest.TestCase):
                 self.assertNotIn(b"x", path.read_bytes())
             finally: bounded.close()
 
+    def test_the_security_check_runs_when_opened_and_then_once_a_minute(self):
+        # On Windows the check is two PowerShell runs: not one for every record.
+        with tempfile.TemporaryDirectory() as directory:
+            path = self._owner_file(directory); checks = []
+            sink = _DiagnosticsSink(str(path), start_writer=False, security_validator=lambda candidate: checks.append(candidate) or _diagnostics_path_safe(candidate) if os.name != "nt" else checks.append(candidate) or True)
+            try:
+                for _ in range(5): sink._write((1, "realtime-packet-failure", "internal-error"))
+                self.assertEqual(len(checks), 1, "once, when the file was opened")
+                sink._validated_at -= remote_module._DIAGNOSTICS_REVALIDATE_SECONDS
+                sink._write((2, "realtime-packet-failure", "internal-error")); self.assertEqual(len(checks), 2, "and again once a minute has passed")
+            finally: sink.close()
+
     def test_path_or_security_drift_and_write_failure_disable_logging_without_touching_replacement(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); path = self._owner_file(directory)
@@ -190,8 +202,9 @@ class DiagnosticsSecurityTests(unittest.TestCase):
             try:
                 if os.name == "nt":
                     # Windows intentionally prevents renaming an open file. Model
-                    # the validator rejecting equivalent DACL/path authority drift.
-                    authority["valid"] = False
+                    # the validator rejecting equivalent DACL/path authority drift,
+                    # once its minute since the last check has passed.
+                    authority["valid"] = False; sink._validated_at = float("-inf")
                 else:
                     moved = root / "moved.log"; path.rename(moved)
                     path.write_bytes(b""); path.chmod(0o600)

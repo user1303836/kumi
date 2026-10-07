@@ -38,6 +38,9 @@ _DIAGNOSTICS_LEGACY_MAX_BYTES = 256 * 1024
 _DIAGNOSTICS_ACCEPTED_MAX_BYTES = frozenset({_DIAGNOSTICS_MAX_BYTES, _DIAGNOSTICS_LEGACY_MAX_BYTES})
 _DIAGNOSTICS_QUEUE_LIMIT = 64
 _DIAGNOSTICS_RECORD_LIMIT = 512
+# How often a diagnostics file's security is checked again once it's open (on Windows two PowerShell runs): every
+# record still checks it's the same file in the same folder, and a change to its ACL is caught within this.
+_DIAGNOSTICS_REVALIDATE_SECONDS = 60.0
 _DIAGNOSTIC_EVENTS = {"dispatch-failure", "result-contract-failure", "capture-tick-failure", "realtime-packet-failure", "bridge-accept-failure"}
 
 
@@ -124,6 +127,7 @@ class _DiagnosticsSink:
         self._max_bytes = max_bytes
         self._security_validator = security_validator
         self._parent_identity: os.stat_result | None = None
+        self._validated_at = float("-inf")
         self._queue: queue.Queue[Any] = queue.Queue(maxsize=_DIAGNOSTICS_QUEUE_LIMIT)
         self._stop = threading.Event()
         self._dropped = 0
@@ -173,6 +177,7 @@ class _DiagnosticsSink:
                 raise ValueError("diagnostics path contains a linked ancestor")
         if self._security_validator is not None and not self._security_validator(self._path):
             raise ValueError("diagnostics security validation failed")
+        self._validated_at = time.monotonic()
         before = os.lstat(self._path)
         if stat.S_ISLNK(before.st_mode) or not self._safe_descriptor(before):
             raise ValueError("unsafe diagnostics destination")
@@ -225,9 +230,12 @@ class _DiagnosticsSink:
             parent_safe = stat.S_ISDIR(parent.st_mode) and not stat.S_ISLNK(parent.st_mode) and not self._reparse_point(parent)
             if os.name != "nt":
                 parent_safe = parent_safe and not (stat.S_IMODE(parent.st_mode) & 0o077) and (not hasattr(os, "getuid") or parent.st_uid == os.getuid())
-            if self._security_validator is not None:
-                parent_safe = parent_safe and self._security_validator(self._path)
-            return parent_safe and os.path.samestat(self._parent_identity, parent) and self._safe_descriptor(opened) and self._safe_descriptor(current) and os.path.samestat(opened, current)
+            same = parent_safe and os.path.samestat(self._parent_identity, parent) and self._safe_descriptor(opened) and self._safe_descriptor(current) and os.path.samestat(opened, current)
+            # The validator ran when the file was opened; it runs again at most once a minute, not for every record.
+            if same and self._security_validator is not None and time.monotonic() - self._validated_at >= _DIAGNOSTICS_REVALIDATE_SECONDS:
+                same = bool(self._security_validator(self._path))
+                if same: self._validated_at = time.monotonic()
+            return same
         except (OSError, ValueError):
             return False
 
