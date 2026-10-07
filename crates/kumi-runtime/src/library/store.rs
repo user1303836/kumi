@@ -226,7 +226,8 @@ impl<T: LogEntry> Log<T> {
         let temporary = folder.join(format!(".{}-{}", self.kind, uuid::Uuid::new_v4()));
         let written = async {
             // A line at a time through a buffer: the log is never held whole in memory (nor its lines, nor their join).
-            let mut file = tokio::io::BufWriter::new(open_private(&temporary, false).await?);
+            // A megabyte of it: a 100 MB log is a hundred writes, not tokio's default's 12,800.
+            let mut file = tokio::io::BufWriter::with_capacity(1 << 20, open_private(&temporary, false).await?);
             file.write_all(stringify(&serde_json::to_value(&header).map_err(as_io)?).as_bytes()).await?;
             file.write_all(b"\n").await?;
             for entry in entries {
@@ -549,6 +550,41 @@ mod tests {
             }
             assert_eq!(chunked.iter().collect::<Vec<_>>(), expected.iter().collect::<Vec<_>>(), "round {round}, chunked");
         }
+    }
+
+    #[tokio::test]
+    async fn a_log_written_afresh_is_its_header_then_a_line_per_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("sounds.jsonl");
+        let log: Log<Sound> = Log::new(&file, "sounds", 1);
+        log.write([sound("/a.wav", "kick"), sound("/b.wav", "hat")].iter()).await.unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+        let (header, rest) = text.split_once('\n').unwrap();
+        let header: Value = serde_json::from_str(header).unwrap();
+        assert_eq!((header["kumiLibrary"].as_str(), header["version"].as_u64()), (Some("sounds"), Some(1)));
+        assert_eq!(
+            rest,
+            "{\"path\":\"/a.wav\",\"size\":10,\"mtime\":20,\"class\":\"kick\"}\n{\"path\":\"/b.wav\",\"size\":10,\"mtime\":20,\"class\":\"hat\"}\n"
+        );
+        log.write(std::iter::empty()).await.unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.ends_with("}\n") && text.matches('\n').count() == 1, "{text}");
+    }
+
+    #[tokio::test]
+    async fn a_line_that_isnt_utf8_reads_lossily_and_its_neighbours_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("sounds.jsonl");
+        let log: Log<Sound> = Log::new(&file, "sounds", 1);
+        log.append(&[sound("/a.wav", "kick")]).await.unwrap();
+        let mut bytes = std::fs::read(&file).unwrap();
+        bytes.extend_from_slice(b"{\"path\":\"/b\xff.wav\",\"size\":10,\"mtime\":20}\n");
+        bytes.extend_from_slice(b"{\"path\":\"/c.wav\",\"size\":10,\"mtime\":20,\"class\":\"hat\"}\n");
+        std::fs::write(&file, bytes).unwrap();
+        let mut reader: LogReader<Sound> = LogReader::new(&file, "sounds", 1);
+        reader.refresh().await.unwrap();
+        assert_eq!(reader.entries.keys().collect::<Vec<_>>(), ["/a.wav", "/b\u{fffd}.wav", "/c.wav"]);
+        assert_eq!(log.load().await.keys().cloned().collect::<Vec<_>>(), ["/a.wav", "/b\u{fffd}.wav", "/c.wav"]);
     }
 
     #[tokio::test]
