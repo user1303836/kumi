@@ -240,7 +240,8 @@ pub fn generate_secret(bytes: Option<f64>) -> Result<String, LiveError> {
     rand::rng().fill_bytes(&mut data);
     Ok(URL_SAFE_NO_PAD.encode(data))
 }
-fn write_new(path: &Path, bytes: &[u8], mode: u32) -> Result<(), LiveError> {
+/// A file that didn't exist, opened to write.
+fn create_new(path: &Path, mode: u32) -> Result<fs::File, LiveError> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -248,9 +249,10 @@ fn write_new(path: &Path, bytes: &[u8], mode: u32) -> Result<(), LiveError> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(mode);
     }
-    let mut file = options.open(path).map_err(|e| io_error(&e, "open", &[path]))?;
-    file.write_all(bytes).map_err(|e| io_error(&e, "write", &[path]))?;
-    Ok(())
+    options.open(path).map_err(|e| io_error(&e, "open", &[path]))
+}
+fn write_new(path: &Path, bytes: &[u8], mode: u32) -> Result<(), LiveError> {
+    create_new(path, mode)?.write_all(bytes).map_err(|e| io_error(&e, "write", &[path]))
 }
 fn chmod(path: &Path, mode: u32) -> Result<(), LiveError> {
     #[cfg(unix)]
@@ -279,9 +281,16 @@ pub fn write_secret_file(path: &Path, secret: Option<&str>) -> Result<(), LiveEr
     if !parent.exists() {
         return Err(fail(format!("secret directory does not exist: {}", parent.display())));
     }
-    write_new(path, format!("{secret}\n").as_bytes(), 0o600)?;
-    chmod(path, 0o600)?;
-    secure_windows_file(path)
+    let mut file = create_new(path, 0o600)?;
+    // The file is this call's from here: one left half-written, or not owner-only, would make every later install
+    // refuse it, so a failure takes it away again.
+    let written = file.write_all(format!("{secret}\n").as_bytes()).map_err(|e| io_error(&e, "write", &[path]));
+    drop(file);
+    let result = written.and_then(|()| chmod(path, 0o600)).and_then(|()| secure_windows_file(path));
+    if result.is_err() {
+        let _ = fs::remove_file(path);
+    }
+    result
 }
 fn js_whitespace(c: char) -> bool {
     matches!(c,'\u{0009}'..='\u{000d}'|'\u{0020}'|'\u{00a0}'|'\u{1680}'|'\u{2000}'..='\u{200a}'|'\u{2028}'|'\u{2029}'|'\u{202f}'|'\u{205f}'|'\u{3000}'|'\u{feff}')
@@ -556,32 +565,17 @@ fn replace_owner_file(path: &Path, staging: &Path, bytes: &[u8], force: bool) ->
     }
     let directory = temporary_directory(staging, ".ableton-mcp-")?;
     let staged = directory.join("config.json");
-    let backup = directory.join("previous.json");
-    let mut backed_up = false;
+    // One rename puts the new file in the old one's place (atomically on both platforms): the old file is never
+    // only a backup that a failed step could lose.
     let result = (|| {
         write_new(&staged, bytes, 0o600)?;
         chmod(&staged, 0o600)?;
         secure_windows_file(&staged)?;
-        if exists && force {
-            rename(path, &backup)?;
-            backed_up = true;
-        }
-        rename(&staged, path)?;
-        if backed_up {
-            remove_file_missing_ok(&backup)?;
-        }
-        Ok(())
+        rename(&staged, path)
     })();
-    if backed_up && !path.exists() {
-        let _ = rename(&backup, path);
-    }
-    remove_file_missing_ok(&staged)?;
-    remove_file_missing_ok(&backup)?;
-    match fs::remove_dir(&directory) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(io_error(&e, "rmdir", &[&directory])),
-    }
+    // Cleanup can't change the outcome: the file is in place, or the old one never moved.
+    let _ = remove_file_missing_ok(&staged);
+    let _ = fs::remove_dir(&directory);
     result
 }
 pub fn migrate_config(input: &Path, output: &Path, force: bool, bridge: Option<&Value>) -> Result<AnyConfig, LiveError> {
