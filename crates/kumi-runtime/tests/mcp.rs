@@ -164,6 +164,14 @@ local_test!(timeouts_and_signal_cancellation_reach_the_mcp_request_and_leave_the
     assert!(tools.call("server_status", object(json!({"action":"delay"})), abort::timeout(20), CallOptions::default()).await.is_err());
     sleep(Duration::from_millis(20)).await;
     assert_eq!(data(&call(&tools, "server_status", json!({})).await.unwrap())["cancelled"], 2);
+    // Dropped before it's answered (an outer timeout), a request is cancelled as at its own deadline.
+    let dropped = tokio::time::timeout(
+        Duration::from_millis(20),
+        tools.call("server_status", object(json!({"action":"delay"})), signal(), CallOptions::default()),
+    );
+    assert!(dropped.await.is_err());
+    sleep(Duration::from_millis(20)).await;
+    assert_eq!(data(&call(&tools, "server_status", json!({})).await.unwrap())["cancelled"], 3);
     tools.close().await.unwrap();
 });
 

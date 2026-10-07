@@ -266,6 +266,28 @@ pub async fn connect_mcp(options: Options) -> Result<Rc<dyn McpEndpoint>, Runtim
 }
 
 /// `JSON.stringify(message) + "\n"`: one message on the wire.
+/// A request still awaiting its answer when its future goes (an outer timeout, a batch that stopped early): its entry
+/// goes and the server is told, as at the request's own deadline, so the bridge stops working on it. The notice is
+/// queued at once, with no task: the runtime may be ending.
+struct Abandoned<'a> {
+    pending: &'a RefCell<HashMap<i64, oneshot::Sender<Result<Payload, McpError>>>>,
+    transport: Rc<Transport>,
+    id: i64,
+}
+impl Drop for Abandoned<'_> {
+    fn drop(&mut self) {
+        // Answered, timed out or cancelled, the request took its entry already.
+        let waiting = self.pending.try_borrow_mut().ok().and_then(|mut pending| pending.remove(&self.id)).is_some();
+        if waiting {
+            let notice = json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": { "requestId": self.id, "reason": "AbortError: This operation was aborted" },
+            });
+            drop(self.transport.send(line(&notice)));
+        }
+    }
+}
 fn line(message: &Value) -> String {
     let mut text = stringify(message);
     text.push('\n');
@@ -714,6 +736,7 @@ impl Endpoint {
         envelope.insert("id".into(), Value::from(message_id));
         let (answer, answered) = oneshot::channel();
         self.pending.borrow_mut().insert(message_id, answer);
+        let _abandoned = Abandoned { pending: &self.pending, transport: transport.clone(), id: message_id };
         let (failed, failure) = oneshot::channel::<String>();
         let send = transport.send(line(&Value::Object(envelope)));
         spawn_local(async move {
