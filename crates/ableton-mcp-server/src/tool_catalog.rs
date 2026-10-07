@@ -219,10 +219,11 @@ pub struct ToolPolicyError(pub String);
 pub fn tool_policy_matches(pattern: &str, name: &str) -> bool {
     pattern.strip_suffix('*').map_or_else(|| pattern == name, |prefix| name.starts_with(prefix))
 }
+/// A tool name, or a prefix ending in its only `*`: an inner `*` (as in `*python*`) would match nothing.
 fn valid_tool_pattern(value: &str) -> bool {
     (1..=128).contains(&value.len())
         && value.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'*')
-        && (!value.contains('*') || value.ends_with('*'))
+        && value.find('*').is_none_or(|at| at + 1 == value.len())
 }
 // The reference uses JavaScript's `in` operator, including these inherited keys.
 const INHERITED_PROFILE_KEYS: &[&str] = &[

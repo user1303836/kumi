@@ -64,6 +64,11 @@ fn policy_validation_and_environment_preserve_reference_errors_defaults_and_unkn
     assert_eq!(policy.deny, ["live_realtime_*", "live_tempo_apply"]);
     let next_line = HashMap::from([("ABLETON_MCP_TOOL_ALLOW".into(), "\u{0085}live_status".into())]);
     assert_eq!(tool_policy_from_env(&next_line).unwrap_err().to_string(), "tool policy allow list is invalid");
+    // A `*` anywhere but at the end would match nothing: `*python*` denied nothing while looking as if it did.
+    for pattern in ["*python*", "*python", "live_*_apply"] {
+        let env = HashMap::from([("ABLETON_MCP_TOOL_DENY".into(), pattern.into())]);
+        assert_eq!(tool_policy_from_env(&env).unwrap_err().to_string(), "tool policy deny list is invalid", "{pattern}");
+    }
     let status: LiveStatus = serde_json::from_value(fixture["statuses"][1].clone()).unwrap();
     let names = |value: Value| {
         resolve_tool_visibility(&status, &parse_tool_policy_spec(Some(&value)).unwrap())
