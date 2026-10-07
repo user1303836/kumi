@@ -5939,7 +5939,7 @@
           "value": 1.6
         }
       ],
-      "hash": "b4b33081115f336292997d54eb100b4e5e5fedfc779bc9b3894a68604863f8ac"
+      "hash": "1371093487758b5d6e2631ca1c784ef647f993397bdb170ba71972e5e83e5ecf"
     },
     {
       "kind": "revert",
@@ -5975,7 +5975,7 @@
           "value": 0.9
         }
       ],
-      "hash": "cd7e447c492d5d0564493fbb16af816139a55d6c90c2ea90ac30461f76ae1b04"
+      "hash": "6f1049abdd1eae64109d43ffb337930fe2ea239db446c35c72ca83f2b95951d7"
     },
     {
       "kind": "set",
@@ -5987,7 +5987,7 @@
           "value": 0.3
         }
       ],
-      "hash": "5b50a68883671a9db03e3a7252e7350919151cb1b952832b20016c06b62afab1"
+      "hash": "c3625c098462cea89af8e4575f9bd86a5e3dfe396a4f4e94ebac5b8ed3bfb65a"
     },
     {
       "kind": "set",
@@ -5997,7 +5997,7 @@
           "value": 1
         }
       ],
-      "hash": "986a59331f79587f70677b568332d16053fdce823c47a14a0bbeae7ef7f0fa41"
+      "hash": "5e23a5ca6411295892f5e2dd450d0e71452224c93db1365d55a6e170589f1224"
     },
     {
       "kind": "find",
@@ -6020,7 +6020,7 @@
           "value": 0.5
         }
       ],
-      "hash": "cace3c138bc7494748c20df92c3f87a3098ac046aa9755bc6d9978a08bc4c636"
+      "hash": "af13b98058498a526802b908fabb72b815643e115422a0f13574507c24f1fb8f"
     },
     {
       "kind": "set",
@@ -6030,7 +6030,7 @@
           "value": 0.5
         }
       ],
-      "hash": "217717d0ebc0a8a9ba81717749c826b49934d51d56f06d427e73850234b96c9d"
+      "hash": "9826f67091af553335b2507050ca59315c5f287cc1f85cfea8b0aaa64d3897c3"
     },
     {
       "kind": "revert",
@@ -6613,6 +6613,7 @@
             "priorDisplay": "0.0 dB",
             "min": 0,
             "max": 1,
+            "applied": 1,
             "value": 1,
             "display": "12.0 dB"
           },
@@ -6622,6 +6623,7 @@
             "priorDisplay": "Analog",
             "min": 0,
             "max": 3,
+            "applied": 2,
             "value": 2,
             "display": "Medium"
           }
