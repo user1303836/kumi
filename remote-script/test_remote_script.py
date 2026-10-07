@@ -1,6 +1,7 @@
 import base64
 import copy
 import hashlib
+import io
 import json
 import os
 import re
@@ -14,7 +15,7 @@ import threading
 import time
 import unittest
 import select as select_module
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest.mock import patch
 
 import ableton_mcp_remote_script as remote_module
@@ -331,6 +332,67 @@ class RemoteScriptTests(unittest.TestCase):
         for code in (0, 1, package._ACL_ANSWERED | 0b1000, 255):
             with patch("AbletonMcpBridge.subprocess.run", lambda args, **kwargs: types.SimpleNamespace(returncode=code)):
                 self.assertEqual(package._windows_acl_owner_only_all([Path("C:/a"), Path("C:/b"), Path("C:/c")]), [False] * 3, code)
+
+    def test_the_owner_checks_batch_never_looks_at_a_share_it_reads_of(self):
+        # Nothing in the reference or config is trusted before their own checks: one another account can write mustn't
+        # have Live contact a host it names (a stat or an ACL read of \\host\share signs in there).
+        package = __import__("AbletonMcpBridge"); asked = []
+        def guarded(function):
+            def call(path, *args, **kwargs):
+                if str(path).replace("\\", "/").startswith(("//", "/??/")): raise AssertionError(f"looked at {path}")
+                return function(path, *args, **kwargs)
+            return call
+        def run(args, **kwargs):
+            asked.append(base64.b64decode(kwargs["env"]["ABLETON_MCP_ACL_PATHS"]).decode("utf-8").split("\n"))
+            return types.SimpleNamespace(returncode=package._ACL_ANSWERED)
+        shares = ["//host/share/x", "\\\\host\\share\\x", "/\\host\\share\\x", "\\\\?\\UNC\\host\\share\\x", "\\\\.\\UNC\\host\\share\\x", "\\??\\UNC\\host\\share\\x"]
+        with tempfile.TemporaryDirectory() as directory, patch("os.stat", guarded(os.stat)), patch("io.open", guarded(io.open)), patch("AbletonMcpBridge.subprocess.run", run), patch.dict(package._ACL_VERDICTS, clear=True):
+            root = Path(directory); config = root / "bridge-config.json"; reference = root / "bridge-reference.json"; secret = root / "secret"; log = root / "logs" / "bridge.log"
+            secret.write_text("x", encoding="utf-8")
+            def write(secret_file, log_file, config_file=config):
+                bridge = {"host": "127.0.0.1", "port": 9765, "secretFile": str(secret_file), "timeoutMs": 5000, "diagnostics": {"path": str(log_file), "maxBytes": remote_module._DIAGNOSTICS_MAX_BYTES}}
+                config.write_text(json.dumps({"version": 2, "server": {"command": "kumi-bridge", "args": []}, "bridge": bridge}), encoding="utf-8")
+                reference.write_text(json.dumps({"config": str(config_file)}), encoding="utf-8")
+            for share in shares:
+                write(share, log); self.assertEqual(package._config_paths(reference), [reference, config, log, log.parent], share)
+                write(secret, log, share); self.assertEqual(package._config_paths(reference), [reference], share)
+            write(secret, "//host/share/logs/bridge.log"); self.assertEqual(package._config_paths(reference), [reference, config, secret])
+            package._prefetch_acl_verdicts(package._config_paths(reference))
+            self.assertEqual(asked, [[str(reference), str(config), str(secret)]])
+        for text in shares + ["C:x", "relative\\x"]:
+            self.assertFalse(package._local_path(PureWindowsPath(text)), text)
+        for text in ("C:\\Users\\me\\Kumi\\secret", "C:/Users/me/Kumi/secret"):
+            self.assertTrue(package._local_path(PureWindowsPath(text)), text)
+        self.assertFalse(package._local_path(PurePosixPath("//host/share/x")))
+        self.assertTrue(package._local_path(PurePosixPath("/Users/me/Kumi/secret")))
+
+    def test_the_owner_checks_batch_stops_at_a_symlink(self):
+        # The checks refuse a symlinked reference, config or secret before asking who owns it: the batch mustn't follow
+        # one first (to a share, say).
+        package = __import__("AbletonMcpBridge")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); config = root / "bridge-config.json"; secret = root / "secret"; log = root / "logs" / "bridge.log"; reference = root / "reference.json"
+            bridge = {"host": "127.0.0.1", "port": 9765, "secretFile": str(root / "secret-link"), "timeoutMs": 5000, "diagnostics": {"path": str(log), "maxBytes": remote_module._DIAGNOSTICS_MAX_BYTES}}
+            config.write_text(json.dumps({"version": 2, "server": {"command": "kumi-bridge", "args": []}, "bridge": bridge}), encoding="utf-8")
+            secret.write_text("x", encoding="utf-8"); reference.write_text(json.dumps({"config": str(config)}), encoding="utf-8")
+            try:
+                (root / "secret-link").symlink_to(secret); (root / "config-link").symlink_to(config); (root / "bridge-reference.json").symlink_to(reference)
+            except OSError:
+                self.skipTest("this account can't make symlinks")
+            self.assertEqual(package._config_paths(root / "bridge-reference.json"), [])
+            self.assertEqual(package._config_paths(reference), [reference, config, log, log.parent])
+            reference.write_text(json.dumps({"config": str(root / "config-link")}), encoding="utf-8")
+            self.assertEqual(package._config_paths(reference), [reference])
+
+    def test_owner_verdicts_past_their_time_go_when_one_is_kept(self):
+        # The diagnostics log's key changes as it grows, and its owner is checked once a minute for as long as Live runs.
+        package = __import__("AbletonMcpBridge"); stale, fresh = ("stale",), ("fresh",)
+        with tempfile.TemporaryDirectory() as directory, patch("AbletonMcpBridge.subprocess.run", lambda args, **kwargs: types.SimpleNamespace(returncode=package._ACL_ANSWERED)):
+            log = Path(directory, "bridge.log"); log.write_text("", encoding="utf-8")
+            for keep in (package._windows_acl_owner_only, lambda path: package._prefetch_acl_verdicts([path])):
+                with patch.dict(package._ACL_VERDICTS, {stale: (True, time.monotonic() - package._ACL_VERDICT_SECONDS), fresh: (True, time.monotonic())}, clear=True):
+                    keep(log)
+                    self.assertEqual(set(package._ACL_VERDICTS), {fresh, package._acl_key(log)})
 
     def surface_with_timer(self, serve=None):
         """A Control Surface whose Live has a timer (Live.Base.Timer), the timers it made, its bridge."""

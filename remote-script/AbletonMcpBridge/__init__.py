@@ -76,16 +76,31 @@ def _mode_owner_only(path: Path) -> bool:
         return False
 
 
+def _local_path(path: Path) -> bool:
+    r"""Whether a path is an absolute one on this machine: not a share's (two leading separators in any mix,
+    \\host\share or //host/share) nor one in a device namespace (\\?\, \\.\ or \??\), where even a stat can reach
+    another host."""
+    return path.is_absolute() and not str(path).replace("/", "\\").startswith(("\\\\", "\\??\\"))
+
+
 def _config_paths(reference: Path) -> list[Path]:
-    """The files _read_config checks the owner of, as far as they can be read now (nothing in them trusted yet): its
-    checks then find their verdicts waiting, one PowerShell run in all on Windows instead of one each."""
-    paths = [reference]
+    """The files _read_config checks the owner of, as far as they can be read now: its checks then find their
+    verdicts waiting, one PowerShell run in all on Windows instead of one each. Nothing in them is trusted until those
+    checks pass, so no symlink is followed (they refuse one anyway) and a path that isn't a _local_path isn't touched
+    at all, left to its own check: a reference or config another account can write mustn't have Live contact a host
+    it names."""
+    looked_at = lambda path: _local_path(path) and not path.is_symlink()
+    paths: list[Path] = []
     try:
-        config = Path(json.loads(reference.read_text(encoding="utf-8"))["config"]); paths.append(config)
+        if not looked_at(reference): return paths
+        paths.append(reference)
+        config = Path(json.loads(reference.read_text(encoding="utf-8"))["config"])
+        if not looked_at(config): return paths
+        paths.append(config)
         value = _normalize_bridge_config(json.loads(config.read_text(encoding="utf-8")))
-        paths.append(Path(value["secretFile"]))
         diagnostics = Path(value["diagnostics"]["path"]) if isinstance(value.get("diagnostics"), dict) else None
-        if diagnostics is not None: paths += [diagnostics, diagnostics.parent]
+        named = [Path(value["secretFile"])] + ([diagnostics, diagnostics.parent] if diagnostics is not None else [])
+        paths += [path for path in named if looked_at(path)]
     except (OSError, UnicodeError, ValueError, KeyError, TypeError):
         pass
     return paths
@@ -189,6 +204,16 @@ def _acl_key(path: Path) -> tuple[Any, ...] | None:
     return (str(path), entry.st_dev, entry.st_ino, entry.st_size, entry.st_mtime_ns, getattr(entry, "st_ctime_ns", None))
 
 
+def _keep_acl_verdict(key: tuple[Any, ...], verdict: bool) -> None:
+    """Keep a verdict, dropping those past their time: a file that grows (the diagnostics log, checked once a minute
+    for as long as Live runs) has a new key at each check. The diagnostics writer's thread keeps verdicts too, hence
+    the copy and the pop."""
+    now = time.monotonic()
+    for held, (_, at) in list(_ACL_VERDICTS.items()):
+        if now - at >= _ACL_VERDICT_SECONDS: _ACL_VERDICTS.pop(held, None)
+    _ACL_VERDICTS[key] = (verdict, now)
+
+
 def _acl_cached(key: tuple[Any, ...] | None) -> bool | None:
     held = _ACL_VERDICTS.get(key) if key is not None else None
     return held[0] if held is not None and time.monotonic() - held[1] < _ACL_VERDICT_SECONDS else None
@@ -205,7 +230,7 @@ def _windows_acl_owner_only(path: Path) -> bool:
         return cached
     verdict = _windows_acl_owner_only_all([path])[0]
     if key is not None:
-        _ACL_VERDICTS[key] = (verdict, time.monotonic())
+        _keep_acl_verdict(key, verdict)
     return verdict
 
 
@@ -221,7 +246,7 @@ def _prefetch_acl_verdicts(paths: list[Path]) -> None:
         batch = wanted[start:start + _ACL_BATCH]
         verdicts = _windows_acl_owner_only_all([path for path, _ in batch])
         for (_, key), verdict in zip(batch, verdicts):
-            _ACL_VERDICTS[key] = (verdict, time.monotonic())
+            _keep_acl_verdict(key, verdict)
 
 
 def _windows_acl_owner_only_all(paths: list[Path]) -> list[bool]:
