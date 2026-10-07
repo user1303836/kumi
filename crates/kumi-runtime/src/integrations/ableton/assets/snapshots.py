@@ -77,9 +77,15 @@ def envelopes(clip):
         kept = []
         for index, event in enumerate(events):
             time = float(event.time)
-            at = time if times.count(time) == 1 else (time - 1e-6 if index == times.index(time) else time + 1e-6)
+            if times.count(time) == 1:
+                value = float(envelope.value_at_time(time))
+            else:
+                # A step's two values are the limits either side of its time, each straight from that side's two
+                # nearest readings: one reading beside it is off by the slope of a ramp running into or out of it.
+                side = -1e-6 if index == times.index(time) else 1e-6
+                value = 2 * float(envelope.value_at_time(time + side)) - float(envelope.value_at_time(time + 2 * side))
             curve = readable(event, "control_coefficients")
-            kept.append([time, float(event.value), float(envelope.value_at_time(at)),
+            kept.append([time, float(event.value), value,
                          [float(getattr(curve, name)) for name in ("x1", "y1", "x2", "y2")] if curve is not None else None])
         rows.append({"parameter": identity(parameter), "name": str(readable(parameter, "name") or ""), "events": kept})
     return rows, whole and (has is not True or len(rows) > 0)

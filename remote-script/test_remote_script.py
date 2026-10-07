@@ -9255,6 +9255,25 @@ class AutomationStepTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "changed unexpected points"): mapper.invoke("automation.point.delete", {**fence(), "from": 0.5, "to": 1.5})
         self.assertEqual(self.held(clip), held, "read back as they were, curve included")
 
+    def test_a_step_beside_a_ramp_comes_back_exact(self):
+        # A ramp runs into a step and on from it: each of the step's values is that side's limit, not a reading beside it.
+        class RampEnvelope(FakeStepEnvelope):
+            def create_event(self, event):
+                made = FakeEnvelopeEvent(event.time, struct.unpack("f", struct.pack("f", event.value))[0])  # Live keeps 32-bit floats
+                if getattr(event, "control_coefficients", None) is not None: made.control_coefficients = event.control_coefficients
+                self.events.append(made)
+            def value_at_time(self, time):
+                ordered = sorted(self.events, key=lambda event: event.time); before = [event for event in ordered if event.time <= time]; after = [event for event in ordered if event.time > time]
+                if not before or not after: return (before or ordered)[-1 if before else 0].value
+                return before[-1].value + (after[0].value - before[-1].value) * (time - before[-1].time) / (after[0].time - before[-1].time)
+        clip, mapper, fence, _ = self.curved_clip()
+        clip.envelope = RampEnvelope(clip, [FakeEnvelopeEvent(time, value) for time, value in ((2.0, 0.0), (3.0, 1.0), (3.0, 0.25), (4.0, 0.75))])
+        clip.create_automation_envelope = lambda _parameter: setattr(clip, "envelope", RampEnvelope(clip)) or clip.envelope
+        held = self.held(clip); delete = clip.envelope.delete_events_in_range
+        clip.envelope.delete_events_in_range = lambda start, end: delete(start, end + 1.0)
+        with self.assertRaisesRegex(ValueError, "changed unexpected points"): mapper.invoke("automation.point.delete", {**fence(), "from": 2.5, "to": 3.5})
+        self.assertEqual(self.held(clip), held, "the step's two values exactly, with the ramps either side")
+
     def test_a_step_live_holds_wrong_puts_back_its_span_and_nothing_else(self):
         clip, mapper, fence, before = self.curved_clip(); held = self.held(clip); clip.envelope.halve_steps = True
         with self.assertRaisesRegex(ValueError, "^automation step was not confirmed$"): mapper.invoke("automation.step.insert", {**fence(), "start": 4.0, "length": 2.0, "value": 0.8})

@@ -10762,10 +10762,16 @@ class LiveObjectMapper:
             first: dict[float, int] = {}; count: dict[float, int] = {}
             for at, row in enumerate(rows): first.setdefault(row[0], at); count[row[0]] = count.get(row[0], 0) + 1
             value_at = getattr(envelope, "value_at_time", None); captured = []
+            number = lambda value: float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) else None
             for at, row in enumerate(rows):
-                time = row[0]; when = time if count[time] == 1 else time - 1e-6 if first[time] == at else time + 1e-6
-                own = value_at(when) if callable(value_at) else None
-                captured.append((row, float(own) if isinstance(own, (int, float)) and not isinstance(own, bool) and math.isfinite(float(own)) else row[1]))
+                time = row[0]; own = None
+                if callable(value_at) and count[time] == 1: own = number(value_at(time))
+                elif callable(value_at):
+                    # A step's two values are the limits either side of its time, each straight from that side's two
+                    # nearest readings: one reading beside it is off by the slope of a ramp running into or out of it.
+                    side = -1e-6 if first[time] == at else 1e-6; near, far = number(value_at(time + side)), number(value_at(time + 2 * side))
+                    own = 2 * near - far if near is not None and far is not None else None
+                captured.append((row, own if own is not None else row[1]))
             return captured, (low, high)
         raise ValueError("complete automation envelope event enumeration is unavailable")
 

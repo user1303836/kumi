@@ -5,12 +5,13 @@
   duplicate copies its whole span;
 - no clip has fade members;
 - envelope events read back in Live's own terms (Track Volume's are a curve of the fader's), while a new event and
-  value_at_time take the parameter's; each event has a curve (control coefficients);
+  value_at_time take the parameter's; each event has a curve (control coefficients), and its value is kept as a 32-bit
+  float, as Live keeps it;
 - a Session clip's slot sits in a scene; a track can be frozen, and carries Kumi's id in its data; grooves come from
   the pool; follow actions only on a Live that has them.
 Each scenario runs the script as Live's Python would (ARGS in front, song, bridge and Live in its namespace, its
 result read back) and says what went wrong, if anything; the printed list is what the test checks."""
-import json, os, tempfile, types
+import json, os, struct, tempfile, types
 
 POINTERS = [1000]
 
@@ -27,6 +28,10 @@ class WarpMarker:
     # Live's order: sample time first.
     def __init__(self, sample_time, beat_time):
         self.sample_time, self.beat_time = sample_time, beat_time
+
+def single(value):
+    """A value as Live keeps an envelope's: a 32-bit float."""
+    return struct.unpack("f", struct.pack("f", float(value)))[0]
 
 class EnvelopeEventControlCoefficients:
     def __init__(self, x1=0.5, y1=0.5, x2=0.5, y2=0.5):
@@ -55,7 +60,7 @@ class Envelope:
         self._live_ptr = pointer(); self.canonical_parent = clip; self.parameter = parameter; self.events = []
     def create_event(self, event):
         if not isinstance(event, EnvelopeEvent): raise TypeError("create_event takes an EnvelopeEvent")
-        self.events.append((float(event.time), float(event.value), event.control_coefficients))
+        self.events.append((float(event.time), single(event.value), event.control_coefficients))
         self.events.sort(key=lambda row: row[0])
     def events_in_range(self, start, end):
         return [types.SimpleNamespace(time=time, value=self.parameter.own(value), control_coefficients=curve)
@@ -71,7 +76,7 @@ class Envelope:
     def insert_step(self, time, length, value):
         held = self.value_at_time(time)
         for row in ((time, held), (time, value), (time + length, value), (time + length, held)):
-            self.events.append((row[0], row[1], EnvelopeEventControlCoefficients()))
+            self.events.append((row[0], single(row[1]), EnvelopeEventControlCoefficients()))
         self.events.sort(key=lambda row: row[0])
 
 class Groove:
@@ -364,6 +369,8 @@ def scenario_a_session_clips_automation_groove_and_follow_actions_come_back(fail
     for time, value, curve in ((0.0, 0.2, None), (1.0, 0.85, EnvelopeEventControlCoefficients(0.2, 0.9, 0.6, 0.1)), (2.5, 0.4, None)):
         volume.create_event(EnvelopeEvent(time, value, curve))
     volume.insert_step(3.0, 0.5, 0.1)
+    # A step inside a ramp: the ramp runs into its first value and on from its second.
+    volume.insert_step(1.5, 0.25, 0.6)
     hook.create_automation_envelope(frequency).create_event(EnvelopeEvent(1.0, 0.3))
     hook.groove = song.groove_pool.grooves[0]
     hook.follow_action_enabled, hook.follow_action_a, hook.follow_action_b, hook.follow_action_chance_a, hook.follow_action_chance_b = True, 3, 4, 70, 30
