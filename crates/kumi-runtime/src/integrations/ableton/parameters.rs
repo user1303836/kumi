@@ -373,7 +373,8 @@ impl Parameters {
         if let Some(name) = result.get("device").and_then(Value::as_str) {
             device_row.insert("name".into(), json!(name));
         }
-        let track = context::object(result.get("track").unwrap_or(&Value::Null))?;
+        // A track Live couldn't say (none, or unreadable once the change was made) leaves the change as it is.
+        let track = result.get("track").and_then(Value::as_object).cloned().unwrap_or_default();
         if let Some(reference) = track.get("ref") {
             device_row.insert("trackRef".into(), reference.clone());
         }

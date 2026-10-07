@@ -14,6 +14,10 @@ def fit(p, v):
     lo, hi = float(p.min), float(p.max)
     v = min(hi, max(lo, float(v)))
     return min(hi, lo + round(v - lo)) if getattr(p, 'is_quantized', False) else v
+def read(what, otherwise):
+    # A read once Live has changed: it may not fail, or the change would read as refused.
+    try: return what()
+    except Exception: return otherwise
 found = []
 for t in ARGS:
     p = find(t)
@@ -27,17 +31,19 @@ try:
         p.value = v
         # What this target's own set left: a later target on the same parameter moves it again, and the undo, last
         # target first, checks each against this.
-        rows[-1]['applied'] = float(p.value)
+        rows[-1]['applied'] = read(lambda: float(p.value), float(v))
         done.append((p, prior))
 except Exception:
     for p, prior in reversed(done):
         try: p.value = prior
         except Exception: pass
     raise
+# Live has changed by now: each read falls back to what is known (what each set left; no display, device or track).
 for (p, v), row in zip(found, rows):
-    row['value'] = float(p.value)
-    row['display'] = str(p.str_for_value(p.value))
-device = found[0][0].canonical_parent
+    row['value'] = read(lambda: float(p.value), row['applied'])
+    shown = read(lambda: str(p.str_for_value(row['value'])), None)
+    if shown is not None: row['display'] = shown
+device = read(lambda: found[0][0].canonical_parent, None)
 track = device
-while track is not None and type(track).__name__ != 'Track': track = getattr(track, 'canonical_parent', None)
-result = {'device': str(getattr(device, 'name', '')), 'track': track, 'items': rows}
+while track is not None and type(track).__name__ != 'Track': track = read(lambda: getattr(track, 'canonical_parent', None), None)
+result = {'device': read(lambda: str(getattr(device, 'name', '')), ''), 'track': track, 'items': rows}
