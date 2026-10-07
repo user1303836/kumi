@@ -156,6 +156,77 @@ async fn repair_compensation_restores_original_drift_and_legacy_cache_blocker() 
     assert_eq!(fs::metadata(blocker).unwrap().len(), 0);
 }
 #[tokio::test(flavor = "current_thread")]
+async fn a_repair_that_fails_before_moving_anything_aside_leaves_the_remote_script_and_config_where_they_were() {
+    let f = Fixture::new();
+    run_lifecycle(&f.options).await.unwrap();
+    fs::write(f.remote().join("user.py"), "custom").unwrap();
+    let switch = f.remote().join(WILLINGTON_CONFIG);
+    write_owner_file(&switch, &f.options.remote_scripts_directory, br#"{"version":1}"#).unwrap();
+    let config = f.options.state_directory.join("bridge-config.json");
+    fs::write(&config, "custom config").unwrap();
+    // Repair can't make its quarantine (a file stands in the folder's place), so its first move never happens.
+    let quarantine = f.options.state_directory.join("quarantine");
+    let _ = fs::remove_dir_all(&quarantine);
+    fs::write(&quarantine, "in the way").unwrap();
+    let error = run_lifecycle(&f.action("repair")).await.unwrap_err();
+    assert!(!error.message().contains("compensation was incomplete"), "{}", error.message());
+    assert_eq!(fs::read_to_string(f.remote().join("user.py")).unwrap(), "custom");
+    assert!(switch.is_file());
+    assert_eq!(fs::read_to_string(&config).unwrap(), "custom config");
+    assert_eq!(read(f.options.state_directory.join("lifecycle-journal.json"))["state"], "failed-rolled-back");
+    // Once the way is clear, repair goes through.
+    fs::remove_file(&quarantine).unwrap();
+    assert_eq!(run_lifecycle(&f.action("repair")).await.unwrap()["verification"]["changed"], true);
+}
+#[tokio::test(flavor = "current_thread")]
+async fn repair_brings_the_producers_willington_files_into_the_reinstalled_remote_script() {
+    let bindings = "remote-script/AbletonMcpBridge/willington/WillingtonBindings/__init__.py";
+    let f = Fixture::with_files(&[(bindings, b"def install(): pass\n")]);
+    run_lifecycle(&f.options).await.unwrap();
+    let switch = f.remote().join(WILLINGTON_CONFIG);
+    let on = br#"{"version":1,"followActions":true,"deviceTools":true,"rackZones":true,"enableWrites":true}"#;
+    write_owner_file(&switch, &f.options.remote_scripts_directory, on).unwrap();
+    let receipt = f.remote().join(WILLINGTON_RECEIPT);
+    fs::write(&receipt, br#"{"status": "passed", "library_sha256": "0"}"#).unwrap();
+    // Drift: repair moves the Remote Script aside and installs it again.
+    fs::write(f.remote().join("user.py"), "custom").unwrap();
+    let result = run_lifecycle(&f.action("repair")).await.unwrap();
+    assert_eq!(result["verification"]["changed"], true);
+    assert!(!f.remote().join("user.py").exists());
+    assert_eq!(fs::read(&switch).unwrap(), on);
+    assert_eq!(secret_permissions(&switch), SecretPermissions::OwnerOnly);
+    assert_eq!(fs::read(&receipt).unwrap(), br#"{"status": "passed", "library_sha256": "0"}"#);
+    assert_eq!(integrity(&f).await, true);
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_failed_upgrade_puts_the_config_back_even_when_the_remote_script_cant_go_back() {
+    let f = Fixture::new();
+    run_lifecycle(&f.options).await.unwrap();
+    let config = fs::read(f.options.state_directory.join("bridge-config.json")).unwrap();
+    let mut upgrade = f.upgrade("1.1.0");
+    upgrade.fault_at = Some("after-remote,compensate-remote".into());
+    let error = run_lifecycle(&upgrade).await.unwrap_err();
+    // Both failures are named, in the words Kumi's installer looks for, and the config still went back.
+    assert!(error.message().contains("injected lifecycle failure at after-remote"), "{}", error.message());
+    assert!(error.message().contains("compensation was incomplete: Remote Script"), "{}", error.message());
+    assert_eq!(fs::read(f.options.state_directory.join("bridge-config.json")).unwrap(), config);
+    let journal = read(f.options.state_directory.join("lifecycle-journal.json"));
+    assert_eq!(journal["state"], "failed-compensation-incomplete");
+    assert_eq!(journal["compensationFailures"].as_array().unwrap().len(), 1);
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_failed_install_takes_back_everything_it_made_even_past_a_step_that_fails() {
+    let f = Fixture::new();
+    let mut install = f.options.clone();
+    install.enable_bridge_diagnostics = true;
+    install.fault_at = Some("after-remote,compensate-remote".into());
+    let error = run_lifecycle(&install).await.unwrap_err();
+    assert!(error.message().contains("compensation was incomplete: Remote Script"), "{}", error.message());
+    for name in ["bridge-config.json", "bridge-diagnostics.log", "bridge.secret"] {
+        assert!(!f.options.state_directory.join(name).exists(), "{name} stayed");
+    }
+}
+#[tokio::test(flavor = "current_thread")]
 async fn the_willington_switch_is_not_drift_and_upgrades_keep_it_owner_only() {
     let f = Fixture::new();
     run_lifecycle(&f.options).await.unwrap();

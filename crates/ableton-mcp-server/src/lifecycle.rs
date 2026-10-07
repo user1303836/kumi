@@ -41,7 +41,8 @@ pub struct LifecycleOptions {
     pub enable_bridge_diagnostics: bool,
     #[serde(default)]
     pub allow_dirty_private_build: bool,
-    /// Deterministic failure injection for compensation tests; never exposed by the CLI.
+    /// Deterministic failure injection for compensation tests (one point, or several separated by commas); never
+    /// exposed by the CLI.
     pub fault_at: Option<String>,
 }
 struct Paths {
@@ -121,7 +122,7 @@ fn complete_steps(result: &mut Value) {
     }
 }
 fn fault(o: &LifecycleOptions, point: &str) -> Result<(), LiveError> {
-    if o.fault_at.as_deref() == Some(point) {
+    if o.fault_at.as_deref().is_some_and(|faults| faults.split(',').any(|fault| fault == point)) {
         Err(fail(format!("injected lifecycle failure at {point}")))
     } else {
         Ok(())

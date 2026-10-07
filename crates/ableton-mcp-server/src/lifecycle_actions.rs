@@ -10,8 +10,24 @@ fn finish(result: &mut Value, next: &Value) {
     result["instructions"] = json!([next["activation"]["remediation"]]);
     complete_steps(result);
 }
-fn journal_failed(paths: &Paths, action: &str, error: &LiveError) {
-    try_write_owner_json(&paths.journal, &json!({"version":1,"action":action,"state":"failed-rolled-back","reason":error.message()}));
+/// Runs every compensation step, in order, even after one fails, and names the ones that failed.
+fn compensate<const N: usize>(steps: [(&str, Result<(), LiveError>); N]) -> Vec<String> {
+    steps.into_iter().filter_map(|(step, result)| result.err().map(|error| format!("{step}: {}", error.message()))).collect()
+}
+/// The action's own error once compensation is complete; otherwise both, saying "compensation was incomplete"
+/// (what Kumi's installer looks for to send the producer to doctor).
+fn compensated(action: &str, error: LiveError, failed: &[String]) -> LiveError {
+    if failed.is_empty() {
+        return error;
+    }
+    fail(format!("{action} failed ({}) and its compensation was incomplete: {}", error.message(), failed.join("; ")))
+}
+fn journal_failed(paths: &Paths, action: &str, error: &LiveError, failed: &[String]) {
+    let state = if failed.is_empty() { "failed-rolled-back" } else { "failed-compensation-incomplete" };
+    try_write_owner_json(
+        &paths.journal,
+        &json!({"version":1,"action":action,"state":state,"reason":error.message(),"compensationFailures":failed}),
+    );
 }
 fn bridge_config(root: &Path, bridge: &Value, path: &Path) -> Result<BridgeConfig, LiveError> {
     config_for_bridge(&native_entrypoint(root), bridge, None, Some(path), true)
@@ -118,18 +134,14 @@ fn install(
         Ok(())
     })();
     if let Err(error) = installed {
-        restore_backup(&paths.remote, backup.as_deref())?;
-        if config_created && paths.config.exists() {
-            remove(&paths.config, false)?;
-        }
-        if diagnostics_created && paths.diagnostics.exists() {
-            remove(&paths.diagnostics, false)?;
-        }
-        if secret_created && paths.secret.exists() {
-            remove(&paths.secret, false)?;
-        }
-        journal_failed(paths, "install", &error);
-        return Err(error);
+        let failed = compensate([
+            ("Remote Script", fault(o, "compensate-remote").and_then(|()| restore_backup(&paths.remote, backup.as_deref()))),
+            ("bridge config", if config_created { remove(&paths.config, false) } else { Ok(()) }),
+            ("diagnostics", if diagnostics_created { remove(&paths.diagnostics, false) } else { Ok(()) }),
+            ("secret", if secret_created { remove(&paths.secret, false) } else { Ok(()) }),
+        ]);
+        journal_failed(paths, "install", &error, &failed);
+        return Err(compensated("install", error, &failed));
     }
     Ok(())
 }
@@ -252,12 +264,16 @@ fn upgrade(
         Ok(())
     })();
     if let Err(error) = operation {
-        if let Some(backup) = &backup {
-            restore_backup(&paths.remote, Some(backup))?;
-        }
-        write_config(&paths.config, &receipt["config"], true)?;
-        journal_failed(paths, "upgrade", &error);
-        return Err(error);
+        let failed = compensate([
+            (
+                "Remote Script",
+                fault(o, "compensate-remote")
+                    .and_then(|()| backup.as_deref().map_or(Ok(()), |backup| restore_backup(&paths.remote, Some(backup)))),
+            ),
+            ("bridge config", write_config(&paths.config, &receipt["config"], true)),
+        ]);
+        journal_failed(paths, "upgrade", &error, &failed);
+        return Err(compensated("upgrade", error, &failed));
     }
     Ok(())
 }
@@ -283,23 +299,26 @@ fn repair(o: &LifecycleOptions, paths: &Paths, receipt: &Value, evidence: &Relea
     if !paths.secret.exists() {
         return Err(fail("managed secret is missing; repair refuses to manufacture new bridge authority"));
     }
+    // What repair moved aside (each set once its move succeeded) or made: its compensation takes back only those.
+    // A step that failed, or never ran, left the original where it was.
+    let (remote_existed, config_existed) = (paths.remote.exists(), paths.config.exists());
     let (mut remote_quarantine, mut config_quarantine, mut diagnostics_quarantine, mut diagnostics_created) = (None, None, None, false);
     let operation = (|| -> Result<(), LiveError> {
-        if paths.remote.exists() {
+        if remote_existed {
             let quarantine = quarantine_path(&o.state_directory, "repair-remote")?;
-            remote_quarantine = Some(quarantine.clone());
             move_remote_folder(&paths.remote, &quarantine)?;
+            remote_quarantine = Some(quarantine);
         }
-        if paths.config.exists() && !config_valid {
+        if config_existed && !config_valid {
             let quarantine = quarantine_path(&o.state_directory, "repair-config")?;
-            config_quarantine = Some(quarantine.clone());
             rename(&paths.config, &quarantine)?;
+            config_quarantine = Some(quarantine);
         }
         if let Some(path) = diagnostics.filter(|_| !diagnostics_valid) {
             if path_entry_exists(path)? {
                 let quarantine = quarantine_path(&o.state_directory, "repair-diagnostics")?;
-                diagnostics_quarantine = Some(quarantine.clone());
                 rename(path, &quarantine)?;
+                diagnostics_quarantine = Some(quarantine);
             }
             diagnostics_created = ensure_diagnostics_file(path)?;
         }
@@ -311,10 +330,15 @@ fn repair(o: &LifecycleOptions, paths: &Paths, receipt: &Value, evidence: &Relea
             }
         }
         write_config(&paths.config, &receipt["config"], paths.config.exists())?;
+        // The producer's files (Willington's switch and self-test receipt) come along from the copy moved aside.
         install_remote_script(
             &source(o),
             &paths.remote,
-            &InstallOptions { config_path: Some(paths.config.clone()), ..Default::default() },
+            &InstallOptions {
+                config_path: Some(paths.config.clone()),
+                producer_files_from: remote_quarantine.clone(),
+                ..Default::default()
+            },
         )?;
         fault(o, "after-repair-install")?;
         assert_package_still_bound(&o.package_root, evidence, o.allow_dirty_private_build)?;
@@ -339,35 +363,44 @@ fn repair(o: &LifecycleOptions, paths: &Paths, receipt: &Value, evidence: &Relea
         Ok(())
     })();
     if let Err(error) = operation {
-        if paths.remote.exists() {
-            remove(&paths.remote, true)?;
-        }
-        if let Some(path) = remote_quarantine.as_ref().filter(|p| p.exists()) {
-            move_remote_folder(path, &paths.remote)?;
-        }
-        if let Some(path) = config_quarantine.as_ref().filter(|p| p.exists()) {
-            if paths.config.exists() {
+        // What's in the Remote Script's place now is repair's only once the original was moved aside, or when there
+        // was none.
+        let remote = || -> Result<(), LiveError> {
+            fault(o, "compensate-remote")?;
+            if remote_quarantine.is_some() || !remote_existed {
+                remove(&paths.remote, true)?;
+            }
+            match &remote_quarantine {
+                Some(path) => move_remote_folder(path, &paths.remote),
+                None => Ok(()),
+            }
+        };
+        let config = || -> Result<(), LiveError> {
+            if config_quarantine.is_some() || !config_existed {
                 remove(&paths.config, false)?;
             }
-            rename(path, &paths.config)?;
-        } else if !config_valid && paths.config.exists() {
-            remove(&paths.config, false)?;
-        }
-        if let Some(path) = diagnostics {
-            if diagnostics_created && path_entry_exists(path)? {
+            match &config_quarantine {
+                Some(path) => rename(path, &paths.config),
+                None => Ok(()),
+            }
+        };
+        let diagnostics_back = || -> Result<(), LiveError> {
+            let Some(path) = diagnostics else { return Ok(()) };
+            if diagnostics_created {
                 remove(path, false)?;
             }
-            if let Some(quarantine) = &diagnostics_quarantine {
-                if path_entry_exists(quarantine)? {
-                    rename(quarantine, path)?;
-                }
+            match &diagnostics_quarantine {
+                Some(quarantine) => rename(quarantine, path),
+                None => Ok(()),
             }
-        }
+        };
+        let failed = compensate([("Remote Script", remote()), ("bridge config", config()), ("diagnostics", diagnostics_back())]);
+        let state = if failed.is_empty() { "failed-rolled-back" } else { "failed-compensation-incomplete" };
         try_write_owner_json(
             &paths.journal,
-            &json!({"version":1,"action":"repair","state":"failed-rolled-back","reason":error.message(),"quarantine":{"remote":remote_quarantine,"config":config_quarantine}}),
+            &json!({"version":1,"action":"repair","state":state,"reason":error.message(),"compensationFailures":failed,"quarantine":{"remote":remote_quarantine,"config":config_quarantine,"diagnostics":diagnostics_quarantine}}),
         );
-        return Err(error);
+        return Err(compensated("repair", error, &failed));
     }
     Ok(())
 }

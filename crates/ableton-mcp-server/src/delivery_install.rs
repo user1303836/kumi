@@ -7,6 +7,9 @@ pub struct InstallOptions {
     pub dry_run: bool,
     pub force: bool,
     pub config_path: Option<PathBuf>,
+    /// The folder the producer's files (Willington's switch and self-test receipt) are carried from, when it isn't
+    /// the destination itself: repair has moved the installed copy into its quarantine by then.
+    pub producer_files_from: Option<PathBuf>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -140,7 +143,8 @@ pub fn install_remote_script(
         if willington_files.exists() {
             copy_runtime_tree(&willington_files, &staged_package.join(WILLINGTON_FOLDER))?;
         }
-        let willington = destination_directory.join(WILLINGTON_CONFIG);
+        let carried = options.producer_files_from.as_deref().unwrap_or(destination_directory);
+        let willington = carried.join(WILLINGTON_CONFIG);
         if willington.exists() {
             let entry = lstat(&willington)?;
             if !entry.is_file() || entry.file_type().is_symlink() || entry.len() > 4096 {
@@ -158,7 +162,7 @@ pub fn install_remote_script(
         }
         // Willington's self-test receipt stays with the bridge's copy of Willington, unless this release ships
         // its own. The bridge checks it against the library it loads, so a receipt for an older one does nothing.
-        let receipt = destination_directory.join(WILLINGTON_RECEIPT);
+        let receipt = carried.join(WILLINGTON_RECEIPT);
         let staged_receipt = staged_package.join(WILLINGTON_RECEIPT);
         if receipt.exists() && staged_receipt.parent().is_some_and(Path::is_dir) && !staged_receipt.exists() {
             let entry = lstat(&receipt)?;
