@@ -117,7 +117,7 @@ fn built(page_size: usize, cells: &[Vec<u8>], rest: &[Vec<u8>]) -> Vec<u8> {
     bytes
 }
 #[test]
-fn sqlite_refuses_cells_that_share_an_overflow_chain_and_records_past_the_column_limit() {
+fn sqlite_refuses_cells_that_share_an_overflow_chain_and_records_past_their_tables_columns() {
     // 600-byte blobs on 512-byte pages: each keeps its first bytes in the cell and the rest on one overflow page.
     let (usable, length) = (512usize, 600usize);
     let (max_local, min_local) = (usable - 35, ((usable - 12) * 32) / 255 - 23);
@@ -138,11 +138,24 @@ fn sqlite_refuses_cells_that_share_an_overflow_chain_and_records_past_the_column
     // One chain for both: every cell could repeat a 64 MB chain, so it's malformed.
     let error = scan_error(built(512, &[cell(1, 3), cell(1, 3)], &[overflow(1)]));
     assert!(error.contains("overflow chain is malformed"), "{error}");
-    // A record naming 40,000 columns (SQLite allows 32,767).
-    let header = [varint(40_003), vec![0; 40_000]].concat();
-    assert_eq!(header.len(), 40_003);
-    let error = scan_error(built(65536, &[[varint(header.len() as u64), vec![1], header].concat()], &[]));
-    assert!(error.contains("more columns than SQLite allows"), "{error}");
+    // Records of NULLs in `t(v)`. Each NULL is a byte here and a whole value decoded, so a record naming more values
+    // than the table's one column is malformed: SQLite never writes one. Fewer is a row from before ADD COLUMN.
+    let nulls = |count: usize| {
+        let mut length = count + 1;
+        while varint(length as u64).len() + count != length {
+            length += 1;
+        }
+        let header = [varint(length as u64), vec![0; count]].concat();
+        built(65536, &[[varint(header.len() as u64), vec![1], header].concat()], &[])
+    };
+    for count in [0, 1] {
+        let rows = SqliteReader::new(nulls(count)).unwrap().scan_table("t", DEFAULT_SCAN_MAX_ROWS).unwrap();
+        assert_eq!(rows[0].row, vec![SqliteValue::Null; count]);
+    }
+    for count in [2, 1_000, 40_000] {
+        let error = scan_error(nulls(count));
+        assert!(error.contains("more columns than its table has"), "{count}: {error}");
+    }
 }
 #[test]
 fn sqlite_rejects_repeated_b_tree_pages_and_cross_page_cell_pointers() {

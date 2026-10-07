@@ -81,8 +81,10 @@ const MAX_PAGES: u32 = 1_000_000;
 const MAX_CELLS_PER_PAGE: usize = 500;
 const MAX_BTREE_DEPTH: usize = 64;
 const MAX_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
-/// SQLite's own hard limit on a table's columns: a record header naming more is malformed.
+/// SQLite's own hard limit on a table's columns.
 const MAX_COLUMNS: usize = 32_767;
+/// The schema table's columns: type, name, tbl_name, rootpage and sql.
+const SCHEMA_COLUMNS: usize = 5;
 const MAX_ROWS: usize = 1_000_000;
 /// `scanTable`'s default row bound.
 pub const DEFAULT_SCAN_MAX_ROWS: usize = 100_000;
@@ -118,6 +120,42 @@ fn to_safe_integer(value: i64) -> Result<i64, SqliteError> {
     Ok(value)
 }
 
+/// The most values a record of the table `sql` creates can hold: its definitions (the columns, and any table
+/// constraints, which only add room), counted outside quotes and comments. SQLite never writes more, and fewer is fine
+/// (a row from before ADD COLUMN). A statement that doesn't read as one gets SQLite's own limit.
+fn record_bound(sql: &str) -> usize {
+    let mut chars = sql.chars().peekable();
+    let (mut definitions, mut depth) = (1, 0usize);
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' | '"' | '`' | '[' => {
+                let end = if c == '[' { ']' } else { c };
+                // A doubled quote inside is two quotes in a row: the scan closes and reopens.
+                if !chars.by_ref().any(|next| next == end) {
+                    break;
+                }
+            }
+            '-' if chars.peek() == Some(&'-') => {
+                chars.by_ref().find(|&next| next == '\n');
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut last = ' ';
+                if !chars.by_ref().any(|next| std::mem::replace(&mut last, next) == '*' && next == '/') {
+                    break;
+                }
+            }
+            '(' => depth += 1,
+            ')' if depth == 1 => return definitions.min(MAX_COLUMNS),
+            ')' if depth == 0 => break,
+            ')' => depth -= 1,
+            ',' if depth == 1 => definitions += 1,
+            _ => {}
+        }
+    }
+    MAX_COLUMNS
+}
+
 fn be_u16(bytes: &[u8], offset: usize) -> u16 {
     u16::from_be_bytes([bytes[offset], bytes[offset + 1]])
 }
@@ -139,6 +177,8 @@ fn is_js_whitespace(c: char) -> bool {
 struct Walk {
     visited: usize,
     seen_pages: HashSet<i64>,
+    /// The most values a record of the table holds (`record_bound`).
+    values: usize,
 }
 
 pub struct SqliteReader {
@@ -276,7 +316,7 @@ impl SqliteReader {
         Ok((payload, to_safe_integer(signed_row_id as i64)?))
     }
 
-    fn decode_record(&self, payload: &[u8]) -> Result<SqliteRow, SqliteError> {
+    fn decode_record(&self, payload: &[u8], values: usize) -> Result<SqliteRow, SqliteError> {
         let header_length = read_varint(payload, 0)?;
         if header_length.value < 1 || header_length.value > payload.len() as u64 {
             return Err(fail("sqlite record header is invalid"));
@@ -285,8 +325,9 @@ impl SqliteReader {
         let mut serial_types: Vec<u64> = Vec::new();
         let mut cursor = header_length.bytes;
         while cursor < header_end {
-            if serial_types.len() == MAX_COLUMNS {
-                return Err(fail("sqlite record names more columns than SQLite allows"));
+            // Each NULL or empty value is a byte here and a whole value decoded: only the table's columns are read.
+            if serial_types.len() == values {
+                return Err(fail("sqlite record names more columns than its table has"));
             }
             let serial = read_varint(payload, cursor)?;
             cursor += serial.bytes;
@@ -370,11 +411,11 @@ impl SqliteReader {
         Ok(row)
     }
 
-    fn walk_table_btree<F>(&self, root_page: i64, mut visit: F, max_rows: usize) -> Result<usize, SqliteError>
+    fn walk_table_btree<F>(&self, root_page: i64, mut visit: F, max_rows: usize, values: usize) -> Result<usize, SqliteError>
     where
         F: FnMut(SqliteRow, i64) -> Result<(), SqliteError>,
     {
-        let mut walk = Walk { visited: 0, seen_pages: HashSet::new() };
+        let mut walk = Walk { visited: 0, seen_pages: HashSet::new(), values };
         self.walk_page(root_page, 0, &mut walk, &mut visit, max_rows)?;
         Ok(walk.visited)
     }
@@ -428,7 +469,7 @@ impl SqliteReader {
                 }
                 let cell_offset = cell_at(index, &mut seen_cells)?;
                 let (payload, row_id) = self.read_cell_payload(page, cell_offset, &mut walk.seen_pages)?;
-                visit(self.decode_record(&payload)?, row_id)?;
+                visit(self.decode_record(&payload, walk.values)?, row_id)?;
                 walk.visited += 1;
             }
         } else {
@@ -464,6 +505,7 @@ impl SqliteReader {
                 Ok(())
             },
             MAX_ROWS,
+            SCHEMA_COLUMNS,
         )?;
         Ok(tables)
     }
@@ -524,10 +566,30 @@ impl SqliteReader {
                 Ok(())
             },
             max_rows,
+            record_bound(&table.sql),
         )?;
         if rows.len() > max_rows {
             return Err(fail(format!("sqlite table {name} exceeds its scan bound")));
         }
         Ok(rows)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_record_holds_at_most_its_tables_definitions() {
+        for (sql, bound) in [
+            ("CREATE TABLE t(v)", 1),
+            ("CREATE TABLE ancestors (file_id INTEGER, ancestor_id INTEGER, UNIQUE (file_id, ancestor_id) ON CONFLICT IGNORE)", 3),
+            ("CREATE TABLE \"a(b)\" (x, y DEFAULT 'it''s, (here', z /* a, b */, -- c, d\n w)", 4),
+            ("CREATE TABLE [t,u] (x, `y,z`)", 2),
+            ("CREATE TABLE t AS SELECT 1", MAX_COLUMNS),
+            ("CREATE TABLE t(x, 'unclosed)", MAX_COLUMNS),
+        ] {
+            assert_eq!(record_bound(sql), bound, "{sql}");
+        }
     }
 }
