@@ -396,6 +396,16 @@ local_test!(reads_sent_together_share_one_reading_of_the_catalog_and_a_change_an
     assert_eq!(endpoint.lists.get(), 2);
     tools.close().await.unwrap();
 });
+local_test!(a_caller_that_gives_up_leaves_the_shared_reading_to_the_others_that_joined_it, {
+    // The first caller's short deadline (a status probe's) ended the reading for everyone who joined it.
+    let endpoint = Rc::new(ChangingEndpoint::default());
+    let tools = AllowedTools::new(endpoint.clone(), HashSet::new());
+    let (hasty, patient) = tokio::join!(tools.refresh(abort::timeout(5)), tools.refresh(signal()));
+    assert!(matches!(hasty, Err(RuntimeError::Aborted)), "{hasty:?}");
+    patient.unwrap();
+    assert!(tools.has("live_status"));
+    tools.close().await.unwrap();
+});
 local_test!(a_discovery_page_the_remote_script_refuses_as_too_big_is_asked_again_at_100_rows_and_from_then_on, {
     let endpoint = Rc::new(ChangingEndpoint { small: true, ..Default::default() });
     let tools = AllowedTools::new(endpoint.clone(), HashSet::from(["live_discover".into()]));

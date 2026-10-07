@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use futures::future::{FutureExt, LocalBoxFuture, Shared};
 use indexmap::IndexMap;
-use kumi_common::abort::{Signal, SignalExt};
+use kumi_common::abort::{Controller, Signal, SignalExt};
 use kumi_common::js::{json::stringify, string::utf16_len};
 use serde_json::{json, Value};
 use tokio::sync::oneshot;
@@ -53,6 +53,9 @@ struct State {
     unlisten: Vec<Box<dyn Fn()>>,
     closing: Option<Pending>,
     reading: Option<Pending>,
+    /// The shared reading's own signal, which only closing the catalog fires: a caller that gives up (a short status
+    /// probe) leaves the reading to the others that joined it.
+    lifetime: Controller,
 }
 
 /// Host-owned authorization boundary; model instructions and annotations confer no authority.
@@ -123,11 +126,12 @@ impl AllowedTools {
         }
         let pending = {
             let mut state = self.state.borrow_mut();
+            let lifetime = state.lifetime.signal.clone();
             state
                 .reading
                 .get_or_insert_with(|| {
                     let this = self.clone();
-                    let signal = signal.clone();
+                    let signal = lifetime;
                     let (send, receive) = oneshot::channel();
                     tokio::task::spawn_local(async move {
                         let mut attempt = 0;
@@ -286,6 +290,7 @@ impl AllowedTools {
         }
         let listeners = {
             let mut state = self.state.borrow_mut();
+            state.lifetime.abort();
             state.closed = true;
             state.valid = false;
             state.catalog.clear();
