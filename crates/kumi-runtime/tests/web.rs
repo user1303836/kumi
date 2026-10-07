@@ -24,6 +24,26 @@ fn a_big_page_reads_in_a_moment() {
     assert!(start.elapsed().as_millis() < budget, "4 MB of HTML took {} ms", start.elapsed().as_millis());
 }
 #[test]
+fn a_page_built_to_blow_up_the_reader_reads_small_and_quick() {
+    let base = "https://example.com/";
+    let start = std::time::Instant::now();
+    // Lists, quotes, links and superscripts 20,000 deep: 32 levels count, and deeper ones read as plain text.
+    let lists = html_to_text(&"<ul><li>x".repeat(20_000), base);
+    assert!(lists.len() < 2_000_000, "{} bytes", lists.len());
+    assert!(lists.ends_with(&format!("\n{}- x", "  ".repeat(31))), "{}", &lists[lists.len() - 80..]);
+    let quotes = html_to_text(&format!("{}x{}", "<blockquote>".repeat(20_000), "</blockquote>".repeat(20_000)), base);
+    assert_eq!(quotes, format!("{}x", "> ".repeat(32)));
+    let links = html_to_text(&"<a href=\"https://x.y/\">x".repeat(20_000), base);
+    assert_eq!(links, "x".repeat(20_000));
+    let scripts = html_to_text(&format!("{}x{}", "<sup>".repeat(20_000), "</sup>".repeat(20_000)), base);
+    assert_eq!(scripts, format!("{}^x{}", "^(".repeat(31), ")".repeat(31)));
+    // A "<" that opens no tag is text: matching it stops at the next "<", not at the end of the page.
+    let unopened = "<a b<a b".repeat(25_000);
+    assert_eq!(html_to_text(&unopened, base), unopened);
+    let budget = if cfg!(debug_assertions) { 10_000 } else { 4_000 };
+    assert!(start.elapsed().as_millis() < budget, "took {} ms", start.elapsed().as_millis());
+}
+#[test]
 fn tags_closed_out_of_order_never_cut_the_text_inside_a_character() {
     // A tag closed out of order rewrites text that a tag still open kept an offset into.
     let base = "https://example.com/";

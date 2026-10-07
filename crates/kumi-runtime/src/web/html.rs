@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
+    ops::{Deref, DerefMut},
     sync::LazyLock,
 };
 use url::Url;
@@ -155,8 +156,9 @@ fn absolute(href: &str, base: &str) -> Option<String> {
     let url = Url::parse(href).or_else(|_| Url::parse(base)?.join(href)).ok()?;
     matches!(url.scheme(), "http" | "https").then(|| url.to_string())
 }
+// Tried at each "<": no "<" in a tag's or an attribute's name, or one that opens no tag would match on to the page's end.
 static TAG: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^<([a-zA-Z][^\s/>]*)((?:\s+[^\s"'>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*(/?)>"#).unwrap()
+    Regex::new(r#"^<([a-zA-Z][^\s/><]*)((?:\s+[^\s"'>/=<]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*(/?)>"#).unwrap()
 });
 static CLOSE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^</([a-zA-Z][^\s/>]*)\s*>").unwrap());
 // Bare lowercase tags need neither regex capture buffers nor a lowercase copy.
@@ -212,16 +214,59 @@ fn level(name: &str) -> Option<usize> {
     let b = name.as_bytes();
     (b.len() == 2 && b[0] == b'h' && (b'1'..=b'6').contains(&b[1])).then(|| (b[1] - b'0') as usize)
 }
+/// How deep lists, quotes, links and super- and subscripts nest before deeper ones read as plain text. No page nests
+/// them this deep, and a page built to can't make every level re-indent or re-cut all that's inside it.
+const NESTING: usize = 32;
+/// Past this much text the rest of a page is left unread: far more than any page Kumi fetches makes, and a page built
+/// to multiply its text can't take more.
+const TEXT_LIMIT: usize = 16 << 20;
+/// What's open, NESTING deep at most: one opening deeper is counted, not kept, so its close ends it (`pop` gives None).
+struct Nested<T> {
+    open: Vec<T>,
+    deeper: usize,
+}
+impl<T> Default for Nested<T> {
+    fn default() -> Self {
+        Self { open: Vec::new(), deeper: 0 }
+    }
+}
+impl<T> Nested<T> {
+    fn push(&mut self, item: T) {
+        if self.open.len() < NESTING {
+            self.open.push(item);
+        } else {
+            self.deeper += 1;
+        }
+    }
+    fn pop(&mut self) -> Option<T> {
+        if self.deeper > 0 {
+            self.deeper -= 1;
+            return None;
+        }
+        self.open.pop()
+    }
+}
+impl<T> Deref for Nested<T> {
+    type Target = Vec<T>;
+    fn deref(&self) -> &Vec<T> {
+        &self.open
+    }
+}
+impl<T> DerefMut for Nested<T> {
+    fn deref_mut(&mut self) -> &mut Vec<T> {
+        &mut self.open
+    }
+}
 #[derive(Default)]
 struct Builder {
     out: String,
     pre: usize,
     fresh: bool,
-    lists: Vec<(bool, i64)>,
-    links: Vec<(Option<String>, usize)>,
-    quotes: Vec<usize>,
+    lists: Nested<(bool, i64)>,
+    links: Nested<(Option<String>, usize)>,
+    quotes: Nested<usize>,
     cells: Vec<usize>,
-    scripts: Vec<(char, usize)>,
+    scripts: Nested<(char, usize)>,
     codes: Vec<usize>,
     heading: bool,
     linked: HashSet<String>,
@@ -555,7 +600,7 @@ pub fn html_to_text(html: &str, base: &str) -> String {
     let mut skipping: Option<(String, usize)> = None;
     let lower = html.to_ascii_lowercase();
     let mut at = 0;
-    while at < html.len() {
+    while at < html.len() && out.out.len() <= TEXT_LIMIT {
         let text_end = html[at..].find('<').map_or(html.len(), |v| at + v);
         if text_end > at {
             if skipping.is_none() {
