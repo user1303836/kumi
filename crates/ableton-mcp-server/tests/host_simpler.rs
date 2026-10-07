@@ -181,6 +181,93 @@ fn staged_files(root: &Path) -> Value {
     values.sort_by_key(|v| serde_json::to_string(v).unwrap());
     json!(values)
 }
+/// The simulator with its Simpler shown as the Remote Script shows one: its file as its sample's `filePath`.
+struct SampleRows(Rc<DeterministicLiveSimulator>);
+fn as_live(snapshot: LiveSnapshot) -> Result<LiveSnapshot, LiveError> {
+    let mut value = serde_json::to_value(snapshot).unwrap();
+    for device in
+        value["tracks"].as_array_mut().into_iter().flatten().flat_map(|track| track["devices"].as_array_mut().into_iter().flatten())
+    {
+        if let Some(path) = device.as_object_mut().and_then(|device| device.remove("samplePath")) {
+            device["sample"] = json!({"filePath":path});
+        }
+    }
+    serde_json::from_value(value).map_err(|e| LiveError::error(e.to_string()))
+}
+impl LiveAdapter for SampleRows {
+    fn status(&self) -> Result<LiveStatus, LiveError> {
+        self.0.status()
+    }
+    fn snapshot(&self) -> Result<LiveSnapshot, LiveError> {
+        as_live(self.0.snapshot()?)
+    }
+    fn get(&self, r: &LiveRef) -> Result<Option<Value>, LiveError> {
+        self.0.get(r)
+    }
+    fn invoke(&self, i: &LiveInvocation) -> Result<Value, LiveError> {
+        self.0.invoke(i)
+    }
+    fn subscribe(&self, l: LiveListener) -> Result<Unsubscribe, LiveError> {
+        self.0.subscribe(l)
+    }
+    fn reconnect(&self) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect()
+    }
+}
+#[async_trait::async_trait(?Send)]
+impl AsyncLiveAdapter for SampleRows {
+    async fn snapshot_async(&self, _: Option<&LiveOperationContext>, _: Option<&LiveSnapshotRequest>) -> Result<LiveSnapshot, LiveError> {
+        as_live(self.0.snapshot()?)
+    }
+    async fn discover_async(&self, _: &LiveDiscoveryRequest, _: Option<&LiveOperationContext>) -> Result<LiveDiscoveryResult, LiveError> {
+        Err(LiveError::error("unused discovery"))
+    }
+    async fn get_async(&self, r: &LiveRef, _: Option<&LiveOperationContext>) -> Result<Option<Value>, LiveError> {
+        self.0.get(r)
+    }
+    async fn invoke_async(&self, i: &LiveInvocation, _: Option<&LiveOperationContext>) -> Result<Value, LiveError> {
+        self.0.invoke(i)
+    }
+    async fn reconnect_async(&self, _: Option<&LiveOperationContext>) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect()
+    }
+    async fn close(&self) -> Result<(), LiveError> {
+        Ok(())
+    }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_simpler_that_holds_a_sample_takes_another_and_gives_it_back() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let root = folder.path().canonicalize().unwrap();
+            #[cfg(windows)]
+            let root = std::path::PathBuf::from(root.to_string_lossy().strip_prefix(r"\\?\").unwrap_or(&root.to_string_lossy()));
+            let stage = root.join("managed");
+            fs::create_dir(&stage).unwrap();
+            fs::write(root.join("snare.wav"), hex::decode("52494646100000005741564566616b652d617564696f2d6279746573").unwrap()).unwrap();
+            let sim = Rc::new(DeterministicLiveSimulator::new());
+            sim.state.borrow_mut()["tracks"][0]["devices"].as_array_mut().unwrap().push(json!({"ref":"device:simpler-1","parentRef":"track:track-1","name":"Simpler","kind":"instrument","className":"OriginalSimpler","objectIdentity":"simulator:device:simpler-1","enabled":true,"parameters":[],"samplePath":"/Samples/kick.wav"}));
+            let options = McpHostOptions { import_staging_dir: Some(stage.to_string_lossy().into_owned()), ..Default::default() };
+            let host = McpHost::new(Rc::new(SampleRows(sim.clone())), options).unwrap();
+            let text = |reply: &Value| serde_json::from_str::<Value>(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+            let sample = || sim.state.borrow()["tracks"][0]["devices"][1]["samplePath"].clone();
+            let args = json!({"deviceRef":"device:simpler-1","filePath":root.join("snare.wav"),"allowedRoot":root});
+            let preview = text(&host.live_simpler_preview_async(&json!(1), &args).await);
+            assert_eq!(preview["currentSample"], "/Samples/kick.wav", "{preview}");
+            let id = preview["transactionId"].clone();
+            let applied = host
+                .live_simpler_apply_async(&json!(2), &json!({"transactionId":id,"confirmation":"apply","idempotencyKey":"simpler-apply-1"}), None)
+                .await
+                .unwrap();
+            assert_eq!(text(&applied)["state"], "applied", "{applied}");
+            assert!(sample().as_str().unwrap().starts_with(stage.to_str().unwrap()), "{}", sample());
+            let undone = host.undo_simpler_async(&json!(3), &json!({"transactionId":id,"confirmation":"undo","idempotencyKey":"simpler-undo-1"}), None).await;
+            assert_eq!(text(&undone)["state"], "undone", "{undone}");
+            assert_eq!(sample(), "/Samples/kick.wav");
+        })
+        .await
+}
 #[tokio::test(flavor = "current_thread")]
 async fn simpler_sample_replacement_preserves_source_file_and_recovery_authority() {
     tokio::task::LocalSet::new()

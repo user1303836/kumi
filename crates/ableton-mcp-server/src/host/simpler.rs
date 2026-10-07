@@ -3,8 +3,15 @@ use super::*;
 use super::{arrangement::truthy, reads::AUDITION_DEADLINE_MS};
 use kumi_common::{abort::Signal, js::json as js_json};
 use sha2::{Digest, Sha256};
+/// The file a Simpler plays: the Remote Script's row has it as its sample's `filePath` (the simulator's as
+/// `samplePath`), and an empty Simpler has none ("", as Live fences it).
 fn path_of(device: &Value) -> Value {
-    device.get("samplePath").filter(|v| !v.is_null()).cloned().unwrap_or(json!(""))
+    device
+        .get("samplePath")
+        .filter(|v| !v.is_null())
+        .or_else(|| device["sample"].get("filePath").filter(|v| !v.is_null()))
+        .cloned()
+        .unwrap_or(json!(""))
 }
 fn revision(path: &Value) -> Result<String, LiveError> {
     Ok(hex::encode(Sha256::digest(canonical_mutation_identity(&json!({"filePath":path}))?)))
