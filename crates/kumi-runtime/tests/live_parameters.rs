@@ -19,7 +19,10 @@ use kumi_runtime::{
     },
 };
 use serde_json::{json, Value};
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 struct Fixture {
     case: Value,
     calls: RefCell<Vec<Value>>,
@@ -144,4 +147,75 @@ async fn parameter_lookup_display_cache_and_atomic_changes_match_source() {
   eq(&json!(*endpoint.calls.borrow()),&case["calls"],&format!("{} all calls",case["label"]));eq(&json!(*events.borrow()),&case["events"],&format!("{} events",case["label"]));connection.close().await.unwrap();
  }
 }).await;
+}
+
+/// Live answering each read of a parameter's units with the next device's, in turn.
+struct Devices {
+    maps: Vec<Value>,
+    reads: Cell<usize>,
+}
+#[async_trait(?Send)]
+impl McpEndpoint for Devices {
+    fn pid(&self) -> Option<u32> {
+        None
+    }
+    fn server_info(&self) -> Option<Implementation> {
+        Some(serde_json::from_value(json!({"name":"fixture","version":"1.0.73"})).unwrap())
+    }
+    async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
+        Ok(serde_json::from_value(json!({"tools":(["live_discover","live_run_python"].iter().map(|name|json!({"name":name,"inputSchema":{"type":"object"}})).collect::<Vec<_>>())})).unwrap())
+    }
+    async fn call(&self, name: &str, _: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
+        assert_eq!(name, "live_run_python");
+        let map = &self.maps[self.reads.get().min(self.maps.len() - 1)];
+        self.reads.set(self.reads.get() + 1);
+        let payload = json!({"ok":true,"result":map});
+        Ok(serde_json::from_value(json!({"content":[{"type":"text","text":stringify(&payload)}],"structuredContent":payload})).unwrap())
+    }
+    fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn stderr_status(&self) -> StderrStatus {
+        StderrStatus { bytes: 0, truncated: false }
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_device_put_in_anothers_place_has_its_parameters_units_read_again() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Drive (0–6 dB) at the first parameter's place, then, after the next look at the Set, a device whose first
+            // parameter reads 0–100 %: the producer swapped it in, so the same positional ref names it.
+            let endpoint = Rc::new(Devices {
+                maps: vec![
+                    json!({"index":0,"name":"Drive","min":0,"max":1,"items":[],"grid":[[0,"0 dB"],[0.5,"3 dB"],[1,"6 dB"]]}),
+                    json!({"index":0,"name":"Dry/Wet","min":0,"max":1,"items":[],"grid":[[0,"0 %"],[0.5,"50 %"],[1,"100 %"]]}),
+                ],
+                reads: Cell::new(0),
+            });
+            let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
+            let out = endpoint.clone();
+            options.connect = Some(Rc::new(move |_| {
+                let endpoint: Rc<dyn McpEndpoint> = out.clone();
+                async move { Ok(endpoint) }.boxed_local()
+            }));
+            let connection = LiveConnection::new(options);
+            connection.start(Signal::new()).await.unwrap();
+            connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
+            let remember = Remember::new(connection.clone(), None, None);
+            let parameters = Parameters::new(Rc::new(History::new(connection.clone(), remember, None, None)), None);
+            assert_eq!(parameters.value_for_text("7:parameter:0", "3 dB", Signal::new()).await.unwrap(), Ok(0.5));
+            assert_eq!(parameters.value_for_text("7:parameter:0", "6 dB", Signal::new()).await.unwrap(), Ok(1.), "read once a look");
+            assert_eq!(endpoint.reads.get(), 1);
+            connection.invalidate();
+            assert_eq!(parameters.value_for_text("7:parameter:0", "50 %", Signal::new()).await.unwrap(), Ok(0.5));
+            assert_eq!(endpoint.reads.get(), 2);
+            connection.close().await.unwrap();
+        })
+        .await;
 }

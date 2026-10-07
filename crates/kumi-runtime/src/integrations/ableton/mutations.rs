@@ -393,7 +393,7 @@ impl Mutations {
         }
         let shifted = matches!(kind.tool.as_str(), "move_device" | "move_device_to" | "delete_device");
         if shifted || kind.restructures == Some(true) {
-            self.parameters.fast_found.borrow_mut().clear();
+            self.parameters.forget();
         }
         let mut devices_now = None;
         if shifted {
