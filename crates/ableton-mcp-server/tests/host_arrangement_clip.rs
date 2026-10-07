@@ -52,6 +52,9 @@ struct Adapter {
     fault: RefCell<String>,
     fired: Cell<bool>,
     after_invoke: Cell<bool>,
+    /// Live's Arrangement clip refs are positional (`{track}:{index}`): once one is deleted, the next clip on its track
+    /// takes its ref.
+    positional: Cell<bool>,
 }
 impl Adapter {
     fn new() -> Self {
@@ -62,6 +65,7 @@ impl Adapter {
             fault: Default::default(),
             fired: Cell::new(false),
             after_invoke: Cell::new(false),
+            positional: Cell::new(false),
         }
     }
     fn reset(&self, fault: &str) {
@@ -103,12 +107,29 @@ impl Adapter {
             });
         }
         let no_effect = !self.fired.get() && fault.ends_with("no-effect");
+        let deleted = (self.positional.get() && i.operation == "arrangement.clip.delete").then(|| {
+            let state = self.sim.state.borrow();
+            let row = state["arrangementClips"].as_array().unwrap().iter().find(|r| r["clip"]["ref"] == i.args["ref"]).cloned();
+            row.map(|row| (row["trackRef"].clone(), row["clip"]["start"].as_f64().unwrap()))
+        });
         let mut result = if no_effect {
             self.fired.set(true);
             json!({"ok":true})
         } else {
             self.sim.invoke(i)?
         };
+        if let Some(Some((track, start))) = deleted {
+            let mut state = self.sim.state.borrow_mut();
+            let next = state["arrangementClips"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .filter(|r| r["trackRef"] == track && r["clip"]["start"].as_f64().unwrap() > start)
+                .min_by(|a, b| a["clip"]["start"].as_f64().unwrap().total_cmp(&b["clip"]["start"].as_f64().unwrap()));
+            if let Some(next) = next {
+                next["clip"]["ref"] = i.args["ref"].clone();
+            }
+        }
         if c.is_some() && !no_effect {
             self.cache.borrow_mut().insert(key, result.clone());
         }
@@ -256,6 +277,45 @@ async fn perform(
     };
     results.push(clean(result));
     states.push(clean(record.borrow().clone()));
+}
+#[tokio::test]
+async fn undoing_a_clip_with_another_after_it_is_confirmed_by_identity() {
+    // The read after the delete failing first leaves the undo uncertain, for a retry with the same key to settle.
+    for fault in ["", "undo-read"] {
+        let adapter = Rc::new(Adapter::new());
+        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+        let mut made = vec![];
+        for (name, position) in [("Later", 16), ("New Clip", 8)] {
+            let args = json!({"action":"create","trackRef":"track:track-1","position":position,"length":4,"name":name});
+            let preview = host.live_arrangement_clip_preview_async(&json!(1), &args).await;
+            let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+            let apply = json!({"transactionId":body["transactionId"],"confirmation":"apply","idempotencyKey":format!("apply-{name}")});
+            host.live_arrangement_clip_apply_async(&json!(2), &apply, None).await.unwrap();
+            made.push(body["transactionId"].clone());
+        }
+        let record = host.transaction_record(made[1].as_str().unwrap()).unwrap();
+        assert_eq!(record.borrow()["state"], "applied");
+        adapter.positional.set(true);
+        adapter.reset(fault);
+        let undo = json!({"transactionId":made[1],"confirmation":"undo","idempotencyKey":"undo-key"});
+        let first = host
+            .with_undo_watch(&json!(3), &undo, async { Ok(host.undo_arrangement_clip_async(&json!(3), &undo, None).await) })
+            .await
+            .unwrap();
+        if fault.is_empty() {
+            // "Later" has the deleted clip's ref now; "New Clip" is gone by its identity.
+            assert_eq!(record.borrow()["state"], "undone", "{first}");
+        } else {
+            assert_eq!(record.borrow()["state"], "uncertain", "{first}");
+            host.with_undo_watch(&json!(4), &undo, async { Ok(host.undo_arrangement_clip_async(&json!(4), &undo, None).await) })
+                .await
+                .unwrap();
+            assert_eq!(record.borrow()["state"], "undone", "the retry settles it");
+        }
+        let left: Vec<_> =
+            adapter.sim.state.borrow()["arrangementClips"].as_array().unwrap().iter().map(|r| r["clip"]["name"].clone()).collect();
+        assert_eq!(left, [json!("Later")], "{fault}");
+    }
 }
 #[tokio::test]
 async fn arrangement_clip_apply_and_exact_key_undo_match_source() {

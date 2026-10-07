@@ -53,6 +53,8 @@ struct Adapter {
     kind: String,
     fired: Cell<bool>,
     after_invoke: Cell<bool>,
+    /// Live's scene refs are positional (`{epoch}:scene:{index}`): once one is deleted, the next scene takes its ref.
+    positional: Cell<bool>,
 }
 impl Adapter {
     fn new(kind: &str) -> Self {
@@ -64,6 +66,7 @@ impl Adapter {
             fault: Default::default(),
             fired: Cell::new(false),
             after_invoke: Cell::new(false),
+            positional: Cell::new(false),
         }
     }
     fn reset(&self, fault: &str) {
@@ -105,12 +108,20 @@ impl Adapter {
             });
         }
         let no_effect = !self.fired.get() && fault.ends_with("no-effect");
+        let deleted = (self.positional.get() && i.operation == "scene.delete")
+            .then(|| self.sim.state.borrow()["scenes"].as_array().unwrap().iter().position(|scene| scene["ref"] == i.args["ref"]))
+            .flatten();
         let mut result = if no_effect {
             self.fired.set(true);
             json!({"ok":true})
         } else {
             self.sim.invoke(i)?
         };
+        if let Some(index) = deleted {
+            if let Some(next) = self.sim.state.borrow_mut()["scenes"].get_mut(index) {
+                next["ref"] = i.args["ref"].clone();
+            }
+        }
         if c.is_some() && !no_effect {
             self.cache.borrow_mut().insert(key, result.clone());
         }
@@ -255,6 +266,73 @@ async fn perform(
     states.push(clean(record.borrow().clone()));
 }
 
+#[tokio::test]
+async fn undoing_a_scene_capture_with_a_scene_after_it_is_confirmed_by_identity() {
+    // The read after the delete failing first leaves the undo uncertain, for a retry with the same key to settle.
+    for fault in ["", "undo-read"] {
+        let adapter = Rc::new(Adapter::new("scene-capture"));
+        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+        let preview = host.live_capture_preview_async(&json!(1), &json!({}), "scene-capture").await;
+        let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        let apply = json!({"transactionId":body["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+        host.live_capture_apply_async(&json!(2), &apply, "scene-capture", None).await.unwrap();
+        let record = host.transaction_record(body["transactionId"].as_str().unwrap()).unwrap();
+        assert_eq!(record.borrow()["state"], "applied");
+        {
+            // The producer adds "Later" after the captured scene.
+            let mut state = adapter.sim.state.borrow_mut();
+            let index = state["scenes"].as_array().unwrap().len();
+            state["scenes"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"ref":"scene:later","objectIdentity":"sim-object:scene:later","name":"Later","index":index}));
+            for track in state["tracks"].as_array_mut().unwrap() {
+                let slot = json!({"ref":format!("clip-slot:{}:later", track["ref"].as_str().unwrap()),"parentRef":track["ref"],"objectIdentity":format!("sim-object:clip-slot:{}:later", track["ref"].as_str().unwrap()),"sceneIndex":index,"clipRef":null,"empty":true});
+                track["clipSlots"].as_array_mut().unwrap().push(slot);
+            }
+        }
+        adapter.positional.set(true);
+        adapter.reset(fault);
+        let undo = json!({"transactionId":body["transactionId"],"confirmation":"undo","idempotencyKey":"undo-key"});
+        let first = host
+            .with_undo_watch(&json!(3), &undo, async { Ok(host.undo_session_capture_async(&json!(3), &undo, None).await) })
+            .await
+            .unwrap();
+        if fault.is_empty() {
+            // "Later" has the captured scene's ref now; the captured scene is gone by its identity.
+            assert_eq!(record.borrow()["state"], "undone", "{first}");
+        } else {
+            assert_eq!(record.borrow()["state"], "uncertain", "{first}");
+            host.with_undo_watch(&json!(4), &undo, async { Ok(host.undo_session_capture_async(&json!(4), &undo, None).await) })
+                .await
+                .unwrap();
+            assert_eq!(record.borrow()["state"], "undone", "the retry settles it");
+        }
+        let names: Vec<_> = adapter.sim.state.borrow()["scenes"].as_array().unwrap().iter().map(|s| s["name"].clone()).collect();
+        assert_eq!(names.last(), Some(&json!("Later")), "{fault}");
+        assert!(!names.contains(&json!("Captured")), "{fault}");
+    }
+}
+#[tokio::test]
+async fn a_capture_retry_after_live_restarts_keeps_its_recovery_marker() {
+    let adapter = Rc::new(Adapter::new("scene-capture"));
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let preview = host.live_capture_preview_async(&json!(1), &json!({}), "scene-capture").await;
+    let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let record = host.transaction_record(body["transactionId"].as_str().unwrap()).unwrap();
+    // Live captured the scene, but its answer never came: the apply is uncertain.
+    adapter.reset("apply-after");
+    let apply = json!({"transactionId":body["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+    host.live_capture_apply_async(&json!(2), &apply, "scene-capture", None).await.unwrap();
+    assert_eq!(record.borrow()["state"], "uncertain");
+    adapter.reset("");
+    adapter.sim.reconnect().unwrap();
+    // The retry can't reconcile across the new epoch, and it leaves the record as the marker, with its key.
+    let retry = host.live_capture_apply_async(&json!(3), &apply, "scene-capture", None).await.unwrap();
+    assert!(retry.to_string().contains("epoch changed"), "{retry}");
+    assert_eq!(record.borrow()["state"], "uncertain");
+    assert_eq!(record.borrow()["applyKey"], "apply-key");
+}
 #[tokio::test]
 async fn session_capture_apply_and_exact_key_undo_match_source() {
     for row in fixture()["workflows"].as_array().unwrap() {
