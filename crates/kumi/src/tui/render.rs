@@ -88,15 +88,26 @@ impl Renderer {
             }
         }
         let same_cursor = previous.is_some_and(|previous| previous.cursor == cursor_key);
-        self.previous = Some(Frame {
-            width: screen.width,
-            height: screen.height,
-            table: Rc::clone(&screen.table),
-            cursor: cursor_key,
-            chars: screen.chars.clone(),
-            widths: screen.widths.clone(),
-            styles: screen.styles.clone(),
-        });
+        // The last frame's cells take this one's in place (each cell's text into its own buffer), not as new copies.
+        match self.previous.as_mut().filter(|_| !full) {
+            Some(previous) => {
+                previous.chars.clone_from(&screen.chars);
+                previous.widths.clone_from(&screen.widths);
+                previous.styles.clone_from(&screen.styles);
+                previous.cursor = cursor_key;
+            }
+            None => {
+                self.previous = Some(Frame {
+                    width: screen.width,
+                    height: screen.height,
+                    table: Rc::clone(&screen.table),
+                    cursor: cursor_key,
+                    chars: screen.chars.clone(),
+                    widths: screen.widths.clone(),
+                    styles: screen.styles.clone(),
+                })
+            }
+        }
         if !full && body.is_empty() && same_cursor {
             return String::new();
         }

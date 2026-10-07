@@ -58,22 +58,24 @@ impl TuiApp {
         }
         let size = self.0.tty.size();
         let (columns, rows) = (size.columns, size.rows);
-        let mut screen = Screen::with_table(columns, rows, self.0.table.clone());
+        let kept = self.0.screen.borrow_mut().take();
+        let mut screen = kept
+            .filter(|kept| kept.width == columns && kept.height == rows && Rc::ptr_eq(&kept.table, &self.0.table))
+            .unwrap_or_else(|| Screen::with_table(columns, rows, self.0.table.clone()));
+        // Every cell painted over: nothing of the last frame stays.
         screen.fill(screen.bounds(), &st::GROUND);
         self.0.state.borrow_mut().hits.clear();
         if columns < 24 || rows < 8 {
             // No pane to keep fresh here, nor during setup or beside the dock below.
             self.keep_tree_fresh(None);
             screen.put(1, 0, &truncate("Make this window bigger for Kumi", columns - 2), &st::DIM);
-            let frame = self.0.renderer.borrow_mut().frame(&screen, None);
-            self.0.tty.write(&frame);
+            self.present(screen, None);
             return;
         }
         if self.setup_active() {
             self.keep_tree_fresh(None);
             let cursor = self.draw_setup(&mut screen, columns, rows).filter(|_| !self.0.state.borrow().closing);
-            let frame = self.0.renderer.borrow_mut().frame(&screen, cursor);
-            self.0.tty.write(&frame);
+            self.present(screen, cursor);
             return;
         }
         let (pane, left) = Self::layout_for(columns);
@@ -116,8 +118,13 @@ impl TuiApp {
         if self.0.state.borrow().closing {
             cursor = None;
         }
+        self.present(screen, cursor);
+    }
+    /// The frame out to the terminal; its screen is kept to draw the next one on.
+    fn present(&self, screen: Screen, cursor: Option<Cursor>) {
         let frame = self.0.renderer.borrow_mut().frame(&screen, cursor);
         self.0.tty.write(&frame);
+        *self.0.screen.borrow_mut() = Some(screen);
     }
     fn status_line(&self) -> (Style, &'static str) {
         let state = self.0.state.borrow();
