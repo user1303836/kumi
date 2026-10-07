@@ -327,6 +327,16 @@ fn streams(info: &Value) -> Sources {
         audio: input(sounds.first().copied().or(combined)),
     }
 }
+/// Captions fetched by Kumi itself: a client that gives up on a server that doesn't answer, and at most
+/// CAPTIONS_MAX read, so a hostile address can neither hold a watch nor fill memory.
+static CAPTIONS: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .expect("an HTTP client")
+});
+const CAPTIONS_MAX: usize = 16 * 1024 * 1024;
 /// A sidecar's captions as text: by its BOM (UTF-8 or UTF-16), as UTF-8, or else as Windows-1252, which older
 /// subtitle tools write.
 fn caption_text(bytes: &[u8]) -> String {
@@ -351,10 +361,20 @@ async fn captions_for(
     if let (Some(address), Some(ext)) = (&track.url, &track.ext) {
         if public_address(address) {
             let fetched = async {
-                let response = reqwest::Client::new().get(address).header("User-Agent", "Mozilla/5.0").send().await?;
+                let mut response = CAPTIONS.get(address).header("User-Agent", "Mozilla/5.0").send().await?;
                 let status = response.status();
-                let body = if status.is_success() { response.text().await? } else { String::new() };
-                Ok::<_, reqwest::Error>((status, body))
+                let mut body = Vec::new();
+                if status.is_success() {
+                    while let Some(piece) = response.chunk().await? {
+                        body.extend_from_slice(&piece);
+                        // More than any captions: none from here (yt-dlp is asked instead).
+                        if body.len() > CAPTIONS_MAX {
+                            body.clear();
+                            break;
+                        }
+                    }
+                }
+                Ok::<_, reqwest::Error>((status, String::from_utf8_lossy(&body).into_owned()))
             };
             let result = tokio::select! {result=fetched=>Some(result),_=async{if let Some(signal)=&signal{signal.cancelled().await;}else{std::future::pending::<()>().await;}}=>None};
             match result {
