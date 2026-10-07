@@ -68,13 +68,13 @@ fn is_separator(c: char) -> bool {
 }
 
 /// What of `path` is inside `folder` ("Kicks/808.wav"), when it's there. A root (`/`, `Z:\`, `\\NAS\Samples\`)
-/// already ends with its separator, so it isn't added twice.
+/// already ends with its separator, so it isn't added twice. On Windows either separator follows a folder.
 pub fn below<'a>(path: &'a str, folder: &str) -> Option<&'a str> {
     let rest = path.strip_prefix(folder)?;
     if folder.ends_with(is_separator) {
         Some(rest)
     } else {
-        rest.strip_prefix(SEP)
+        rest.strip_prefix(is_separator)
     }
 }
 

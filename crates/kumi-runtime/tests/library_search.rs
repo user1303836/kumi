@@ -65,6 +65,7 @@ fn a_place_at_a_drive_or_share_root_holds_its_sounds() {
     assert_eq!(below("/Samples Extra/808.wav", "/Samples"), None);
     assert_eq!(below("/Samples", "/Samples"), None);
     if cfg!(windows) {
+        assert_eq!(below("Z:\\Drums/808.wav", "Z:\\Drums"), Some("808.wav"));
         assert_eq!(below("Z:\\Drums\\808.wav", "Z:\\"), Some("Drums\\808.wav"));
         assert_eq!(below("\\\\NAS\\Samples\\Drums\\808.wav", "\\\\NAS\\Samples\\"), Some("Drums\\808.wav"));
         assert_eq!(below("Z:\\Drums\\808.wav", "Z:\\Drums"), Some("808.wav"));
