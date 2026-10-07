@@ -604,7 +604,11 @@ impl LanguageModel for AnthropicModel {
                 api.is_retryable = error.get("isRetryable").and_then(Value::as_bool).unwrap_or(false);
                 return Err(api.into());
             }
-            return Err(LanguageModelError::other("Expected a normalized Anthropic stream error"));
+            // Any other failure is returned as it came, its retryability and message kept: a body that broke off
+            // after the headers is a retryable failed call (see `post_json`).
+            if let Some(StreamPart::Error { error }) = initial.pop() {
+                return Err(error);
+            }
         }
         Ok(Box::pin(futures::stream::iter(initial).chain(stream)))
     }

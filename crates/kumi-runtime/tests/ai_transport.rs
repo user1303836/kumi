@@ -4,9 +4,11 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use kumi_common::abort::Signal;
 use kumi_runtime::ai::{
+    anthropic::{anthropic, AnthropicSettings},
     error::LanguageModelError,
     http::{post_json, Fetch, FetchInit, Headers, HttpFetch, Response},
     sse::{json_stream, safe_json, Event, SseParser},
+    types::CallOptions,
 };
 use serde_json::json;
 use std::rc::Rc;
@@ -117,4 +119,19 @@ async fn successful_response_read_errors_keep_the_sdk_request_status_and_headers
     assert_eq!(error.cause.as_deref(), Some("terminated"));
     assert_eq!(error.request_body_values, Some(json!({"request":true})));
     assert_eq!(error.response_headers.as_ref().unwrap()["x-fixture"], "yes");
+}
+#[tokio::test]
+async fn an_anthropic_answer_whose_body_breaks_before_its_first_event_keeps_its_retryable_failure() {
+    let model = anthropic(AnthropicSettings {
+        model: "claude-haiku-4-5".into(),
+        base_url: "http://fixture/v1".into(),
+        api_key: Some("fixture-key".into()),
+        auth_token: None,
+        headers: Default::default(),
+        fetch: Rc::new(InterruptedFetch),
+    });
+    let Err(error) = model.do_stream(CallOptions::default()).await else { panic!("the stream broke before its first event") };
+    // The kernel retries it, as it does any body that breaks off after the headers.
+    let error = error.api_call().expect("the failed call as it came, not a bare message");
+    assert_eq!((error.status_code, error.is_retryable, error.cause.as_deref()), (Some(200), true, Some("terminated")));
 }
