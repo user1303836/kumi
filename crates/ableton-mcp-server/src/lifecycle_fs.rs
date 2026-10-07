@@ -253,17 +253,24 @@ pub(super) fn write_owner_json(path: &Path, value: &Value) -> Result<(), LiveErr
                 if backup.exists() {
                     remove(&backup, false)?;
                 }
-                let script="$t=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:MCP_TEMP));$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:MCP_PATH));$b=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:MCP_BACKUP));[IO.File]::Replace($t,$p,$b,$true);[IO.File]::Delete($b)";
+                // Stop: without it a failed Replace ends only its own statement, and the script exits 0. Once the swap
+                // is done the backup's removal is best effort.
+                let script="$ErrorActionPreference='Stop';$t=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:MCP_TEMP));$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:MCP_PATH));$b=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:MCP_BACKUP));[IO.File]::Replace($t,$p,$b,$true);try{[IO.File]::Delete($b)}catch{}";
                 let status = std::process::Command::new(crate::platform::windows_powershell(None))
                     .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
                     .env("MCP_TEMP", base64::engine::general_purpose::STANDARD.encode(temporary.to_string_lossy().as_bytes()))
                     .env("MCP_PATH", base64::engine::general_purpose::STANDARD.encode(path.to_string_lossy().as_bytes()))
                     .env("MCP_BACKUP", base64::engine::general_purpose::STANDARD.encode(backup.to_string_lossy().as_bytes()))
+                    .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .status()
                     .map_err(|e| fail(e.to_string()))?;
                 if !status.success() {
+                    // Replace can fail after it renamed the original to the backup (ERROR_UNABLE_TO_MOVE_REPLACEMENT_2).
+                    if !path.exists() && backup.exists() {
+                        let _ = rename(&backup, path);
+                    }
                     return Err(fail("managed JSON replacement failed"));
                 }
             }
@@ -272,10 +279,13 @@ pub(super) fn write_owner_json(path: &Path, value: &Value) -> Result<(), LiveErr
         } else {
             rename(&temporary, path)?;
         }
-        secure_windows_file(path)
+        // Swapped: the file is the new one, already owner-only (secured before the swap, or keeping the replaced
+        // file's owner-only descriptor), so a failure here can't undo the swap and isn't the write's.
+        let _ = secure_windows_file(path);
+        Ok(())
     })();
     if temporary.exists() {
-        remove(&temporary, false)?;
+        let _ = remove(&temporary, false);
     }
     result
 }
@@ -546,5 +556,22 @@ mod tests {
         assert!(!to.exists());
         assert_eq!(std::fs::read_to_string(from.join("payload")).unwrap(), "original");
         assert!(std::fs::symlink_metadata(from.join("link")).unwrap().file_type().is_symlink());
+    }
+    #[cfg(windows)]
+    #[test]
+    fn a_replacement_windows_refuses_is_reported_and_leaves_the_file_as_it_was() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("install-receipt.json");
+        write_owner_json(&path, &json!({"generation":1})).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        // Open elsewhere without delete sharing (a scanner, a reader), so Replace can't move it aside.
+        let held = std::fs::OpenOptions::new().read(true).share_mode(0x1 | 0x2).open(&path).unwrap();
+        let error = write_owner_json(&path, &json!({"generation":2})).unwrap_err();
+        drop(held);
+        assert!(error.message().contains("managed JSON replacement failed"), "{}", error.message());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let left: Vec<_> = std::fs::read_dir(temp.path()).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+        assert_eq!(left, [std::ffi::OsString::from("install-receipt.json")]);
     }
 }
