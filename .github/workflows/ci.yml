@@ -212,7 +212,7 @@ jobs:
           # main and the nightly run take every test.
           if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.event_name }}" == "merge_group" ]]; then
             tests="install cli_binary cli update bridge_setup doctor live_extension report login config history library stdin_handoff terminal tui voice_input"
-            tests+=" hands_transport mcp auth system disk samples project_runtime library_files library_learn library_state_plan voice video local_servers session agent"
+            tests+=" hands_transport mcp auth system disk samples project_runtime library_files library_learn library_search library_state_plan voice video local_servers session agent"
             tests+=" lifecycle lifecycle_migration lifecycle_release delivery delivery_cli extension_launcher extension_channel stdio fixture_paths project host_probes analysis_runner sqlite_reader"
             tests+=" native_connected remote_adapter loopback ai_transport store willington"
             echo "KUMI_TESTS=$(printf -- '--test %s ' $tests)" >> "$GITHUB_ENV"
