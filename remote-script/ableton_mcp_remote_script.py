@@ -9075,6 +9075,18 @@ class LiveObjectMapper:
         revision = self.refs.touch(reference)
         return {"changed": True, "revision": revision}
 
+    def _row_choice_names(self, value: Any) -> list[str] | None:
+        """A device's choices by name, as its row shows them (and as a setter must match them): a choice's own
+        name, else its text, which is the name itself where Live lists plain strings. An object without a name
+        reads as its type, never its address: a fresh wrapper each read has a new one, and a row that changes on
+        every read can never be confirmed."""
+        if value is None: return None
+        names = []
+        for item in self._items(value):
+            name = self._choice_name(item)
+            names.append(name if name is not None else re.sub(r" at 0x[0-9A-Fa-f]+", "", str(item))[:128])
+        return names
+
     def _specialized_rows(self, device: Any, device_ref: str) -> dict[str, Any]:
         class_name = str(self._read_attr(device, "class_name") or device.__class__.__name__).lower()
         normalized = class_name.replace("_", "").replace(" ", "")
@@ -9085,16 +9097,7 @@ class LiveObjectMapper:
             return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) else None
         def bool_or_none(value: Any) -> bool | None:
             return value if isinstance(value, bool) else None
-        def name_list(value: Any) -> list[str] | None:
-            if value is None: return None
-            items = self._items(value)
-            names = []
-            for item in items:
-                name = self._choice_name(item)
-                # An object without a name reads as its type, never its address: a fresh wrapper each read has a
-                # new one, and a row that changes on every read can never be confirmed.
-                names.append(name if name is not None else re.sub(r" at 0x[0-9A-Fa-f]+", "", str(item))[:128])
-            return names
+        name_list = self._row_choice_names
         def io_list(value: Any) -> list[str] | None:
             """A Max device's audio or MIDI ins and outs, each by where it's routed (its routing type's name), else its number."""
             if value is None: return None
@@ -9265,9 +9268,9 @@ class LiveObjectMapper:
                 if field not in args: continue
                 value = args[field]
                 if not isinstance(value, str) or not 1 <= len(value) <= bound: raise ValueError(f"{field} is invalid")
-                choices = self._items(self._read_attr(device, list_attr) or [])
-                names = [self._choice_name(item) for item in choices]
-                if not choices or any(name is None for name in names): raise ValueError(f"{field} choices are unavailable on this device")
+                # By the names the row shows: Live may list them as plain strings.
+                names = self._row_choice_names(self._read_attr(device, list_attr)) or []
+                if not names: raise ValueError(f"{field} choices are unavailable on this device")
                 if value not in names: raise ValueError(f"{field} is not an available choice")
                 ir_proposals.append((index_attr, names.index(value), self._read_attr(device, index_attr), field))
         applied: list[tuple[str, int]] = []

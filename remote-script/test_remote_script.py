@@ -6125,6 +6125,17 @@ class SpecializedDeviceTests(unittest.TestCase):
         self.assertTrue(result["changed"]); self.assertEqual((device.ir_attack_time, device.ir_decay_time), (25.0, 2400.0))
         with self.assertRaisesRegex(ValueError, "authority is invalid"): mapper.invoke("hybrid-reverb.set", {**identity_args, "time": 3000.0})
 
+    def test_hybrid_reverb_takes_ir_names_live_lists_as_plain_strings(self):
+        song = FakeSong(); device = FakeDevice(); device.name = "Hybrid"; device.class_name = "HybridReverbDevice"
+        device.ir_category_list = ["Halls", "Plates"]; device.ir_category_index = 0
+        device.ir_file_list = ["Hall A", "Hall B"]; device.ir_file_index = 0
+        device.ir_attack_time = 10.0; device.ir_decay_time = 1200.0; device.ir_size_factor = 50.0
+        song.tracks[0].devices = [device]; mapper = LiveObjectMapper(song)
+        row = mapper.snapshot()["tracks"][0]["devices"][0]
+        self.assertEqual((row["hybridReverb"]["irCategoryList"], row["hybridReverb"]["irFile"]), (["Halls", "Plates"], "Hall A"))
+        result = mapper.invoke("hybrid-reverb.set", {"ref": row["ref"], "expectedObjectIdentity": row["objectIdentity"], "irFile": "Hall B"})
+        self.assertTrue(result["changed"]); self.assertEqual(device.ir_file_index, 1)
+
     def test_hybrid_reverb_second_phase_failure_rolls_back_applied_ir_indices(self):
         class AttackRefusingDevice(FakeDevice):
             @property
