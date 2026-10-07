@@ -131,6 +131,14 @@ fn a_midi_effects_patch_midiin_the_code_midiout_and_each_control_a_live_paramete
     assert_eq!(patcher["patcher"]["openinpresentation"], 1);
     assert_eq!(patcher["patcher"]["project"]["amxdtype"], 0x6d6d6d6d);
     assert_eq!(patcher["patcher"]["description"], lowest()["about"]);
+    // Options that read like the frame's placeholders are options: each placeholder is filled once, from the frame.
+    let tricky = spec(
+        json!({ "controls": [{ "name": "Mode", "type": "choice", "options": ["__CODE__", "__DEFAULTS__"], "default": "__CODE__" }], "code": "function midi(event) { pass(event); }", "tests": [] }),
+    );
+    let frame = midi_device_code(&tricky.controls, &tricky.code);
+    assert!(frame.contains(r#"const CONTROLS = [{"id":"c1","name":"Mode","options":["__CODE__","__DEFAULTS__"]}];"#), "{frame}");
+    assert!(frame.contains(r#"const params = {"Mode":"__CODE__"};"#), "{frame}");
+    assert_eq!(check_midi_device(&tricky).problems, Vec::<String>::new());
 }
 
 #[test]

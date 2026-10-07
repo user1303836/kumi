@@ -141,12 +141,13 @@ pub fn midi_device_code(controls: &[Control], code: &str) -> String {
     for control in controls {
         defaults.insert(control.name().to_string(), control.default_value());
     }
-    // Replaced one after the other, and the code last, so nothing in it can be taken for a placeholder.
+    // Each placeholder is filled from the frame itself, in one pass: an option or a name that reads "__CODE__" can't
+    // take a later one's place (which would put the device's code outside its scope).
     let indented = LINE_BREAKS.split(code).map(|line| format!("    {line}")).collect::<Vec<_>>().join("\n");
-    FRAME
-        .replacen("__CONTROLS__", &stringify(&Value::Array(listed)), 1)
-        .replacen("__DEFAULTS__", &stringify(&Value::Object(defaults)), 1)
-        .replacen("__CODE__", &indented, 1)
+    let (head, rest) = FRAME.split_once("__CONTROLS__").expect("the frame's controls");
+    let (middle, rest) = rest.split_once("__DEFAULTS__").expect("the frame's defaults");
+    let (before, tail) = rest.split_once("__CODE__").expect("the frame's code");
+    [head, &stringify(&Value::Array(listed)), middle, &stringify(&Value::Object(defaults)), before, &indented, tail].concat()
 }
 
 /// Live's display style for a unit, from [`unit_style`].
