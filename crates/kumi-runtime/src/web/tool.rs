@@ -16,7 +16,7 @@ use kumi_common::{
     js::{
         json::stringify,
         number::{round, to_string},
-        string::{head, slice, trim, trim_end, utf16_len},
+        string::{head, trim, trim_end, utf16_len},
     },
     time::now_ms_f64,
 };
@@ -41,13 +41,12 @@ fn lines_of(text: &str) -> Vec<String> {
     let mut lines = Vec::new();
     for line in text.split('\n') {
         let line = line.strip_suffix('\r').unwrap_or(line);
-        let length = utf16_len(line);
-        if length <= 2000 {
+        if utf16_len(line) <= 2000 {
             lines.push(line.into());
         } else {
-            for at in (0..length).step_by(2000) {
-                lines.push(slice(line, at as i64, Some((at + 2000) as i64)));
-            }
+            // Encoded once, then cut every 2000 units: a split surrogate becomes U+FFFD, as `slice` gives it.
+            let units: Vec<u16> = line.encode_utf16().collect();
+            lines.extend(units.chunks(2000).map(String::from_utf16_lossy));
         }
     }
     lines
@@ -332,5 +331,23 @@ impl WebTool {
             }
         }
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lines_of;
+    use kumi_common::js::string::slice;
+
+    #[test]
+    fn a_long_line_is_cut_every_2000_units_as_slice_cuts_it() {
+        // A surrogate pair across the first cut: each half becomes U+FFFD, as `slice` gives it.
+        let line = format!("{}\u{1f600}{}", "a".repeat(1999), "b".repeat(4500));
+        let cut: Vec<String> = (0..6501).step_by(2000).map(|at| slice(&line, at, Some(at + 2000))).collect();
+        assert_eq!(lines_of(&format!("x\r\n{line}\nz")), [vec!["x".to_owned()], cut, vec!["z".to_owned()]].concat());
+        // A line of 2M units is encoded once, not once for each of its thousand pieces.
+        let start = std::time::Instant::now();
+        assert_eq!(lines_of(&"\u{e9}".repeat(2_000_000)).len(), 1000);
+        assert!(start.elapsed().as_millis() < 2_000, "{} ms", start.elapsed().as_millis());
     }
 }
