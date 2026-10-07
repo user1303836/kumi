@@ -285,6 +285,22 @@ local_test!(a_bridge_that_exits_while_a_child_holds_its_pipes_is_seen_closed, {
     tools.close().await.unwrap();
 });
 
+#[test]
+fn a_closed_bridge_leaves_no_task_running_for_kumis_exit_to_wait_on() {
+    // Kumi's exit waits two seconds for its tasks: once the bridge has gone and its pipes have ended, nothing the
+    // transport started is left waiting (its exit watcher used to sleep a whole second after every exit).
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let _case = runtime.block_on(MCP_CASE.lock());
+    let local = tokio::task::LocalSet::new();
+    local.block_on(&runtime, async {
+        let (_, tools) = open("normal", 2000).await;
+        tools.refresh(signal()).await.unwrap();
+        tools.close().await.unwrap();
+    });
+    let drained = runtime.block_on(async { tokio::time::timeout(Duration::from_millis(900), local).await.is_ok() });
+    assert!(drained, "a task outlived the bridge");
+}
+
 local_test!(oversized_protocol_frame_closes_transport_and_invalidates_old_descriptors, {
     let (_, tools) = open("normal", 2000).await;
     tools.refresh(signal()).await.unwrap();

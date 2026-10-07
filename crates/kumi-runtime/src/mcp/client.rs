@@ -497,7 +497,11 @@ impl Transport {
         self.one_closed();
         // A process the bridge started may hold its pipes open (on Windows it can inherit them), so their ends may
         // never come: once the bridge is gone, what it wrote gets a moment to be read, then the transport is closed.
-        tokio::time::sleep(EXIT_GRACE).await;
+        // The moment ends as soon as the pipes have: a task left waiting holds up Kumi's own exit.
+        let until = tokio::time::Instant::now() + EXIT_GRACE;
+        while self.closes_needed.get() > 0 && tokio::time::Instant::now() < until {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
         if self.closes_needed.get() > 0 {
             self.closes_needed.set(1);
             self.one_closed();
