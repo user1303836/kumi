@@ -57,7 +57,12 @@ impl DeterministicLiveSimulator {
             if p.get("objectIdentity") != args.get("expectedObjectIdentity") {
                 return Err(LiveError::error("parameter identity changed since preview"));
             }
-            fence(args, &json!({"automationState":"none"}), "parameter automation")?;
+            // As Live: the parameter's own automation state ("none" when it has none).
+            fence(
+                args,
+                &json!({"automationState":p.get("automationState").filter(|v| v.is_string()).cloned().unwrap_or(json!("none"))}),
+                "parameter automation",
+            )?;
             drop(state);
             self.emit(LiveEventType::Object, Some(reference.into()), json!({"operation":operation}));
             return Ok(json!({"done":true}));

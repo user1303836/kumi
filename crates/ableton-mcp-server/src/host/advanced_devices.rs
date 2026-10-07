@@ -79,7 +79,7 @@ impl McpHost {
                 },
                 "re-enable-automation"=>{
                     if !status.has_operation("parameter.re-enable-automation"){return Err(LiveError::error("automation re-enable is unavailable"))}if !is_non_empty_string(&p["ref"],256){return Ok(error(id,-32602,"ref is required",None))}
-                    let row=self.parameter_row(&snapshot,p["ref"].as_str().unwrap())?;payload=fields(p,&["action","ref"]);if let Some(v)=row.get("objectIdentity"){payload["expectedObjectIdentity"]=v.clone()}payload["expectedStateRevision"]=json!(digest(&json!({"automationState":"none"}))?);impact="momentary-no-undo";
+                    let row=self.parameter_row(&snapshot,p["ref"].as_str().unwrap())?;payload=fields(p,&["action","ref"]);if let Some(v)=row.get("objectIdentity"){payload["expectedObjectIdentity"]=v.clone()}payload["expectedStateRevision"]=json!(digest(&json!({"automationState":row.get("automationState").filter(|v|v.is_string()).cloned().unwrap_or(json!("none"))}))?);impact="momentary-no-undo";
                 },
                 "save-comparison"=>{
                     if !status.has_operation("device.comparison.save-to-slot"){return Err(LiveError::error("comparison save is unavailable"))}if !is_non_empty_string(&p["ref"],256){return Ok(error(id,-32602,"ref is required",None))}

@@ -126,6 +126,19 @@ impl AsyncLiveAdapter for Replay {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn re_enabling_an_overridden_parameters_automation_fences_on_its_own_state() {
+    let live = Rc::new(DeterministicLiveSimulator::new());
+    // The producer moved an automated knob: Live's automation state 2, overridden, the case re-enabling is for.
+    live.state.borrow_mut()["tracks"][0]["devices"][0]["parameters"][0]["automationState"] = json!("2");
+    let host = McpHost::new(live.clone(), McpHostOptions::default()).unwrap();
+    let text = |result: Value| -> Value { serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+    let preview =
+        text(host.live_device_advanced_preview_async(&json!(1), &json!({"action":"re-enable-automation","ref":"parameter:gain-1"})).await);
+    let apply = json!({"transactionId":preview["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+    let applied = text(host.live_device_advanced_apply_async(&json!(2), &apply, None).await.unwrap());
+    assert_eq!(applied["state"], "applied", "{preview} {applied}");
+}
+#[tokio::test(flavor = "current_thread")]
 async fn advanced_devices_and_chains_match_source_workflows() {
     tokio::task::LocalSet::new()
         .run_until(async {
