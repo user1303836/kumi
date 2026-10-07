@@ -81,6 +81,8 @@ pub struct Size {
 struct Inner {
     options: TtyOptions,
     active: Arc<AtomicBool>,
+    /// The crash path gave the terminal back: a panic, which Kumi may have caught (a worker's) and lived on.
+    taken: Arc<AtomicBool>,
     was_raw: Cell<bool>,
     parser: InputParser,
     decoder: RefCell<Utf8Decoder>,
@@ -98,6 +100,7 @@ impl Tty {
             inner: Rc::new(Inner {
                 options,
                 active: Arc::new(AtomicBool::new(false)),
+                taken: Arc::new(AtomicBool::new(false)),
                 was_raw: Cell::new(false),
                 parser,
                 decoder: RefCell::new(Utf8Decoder::new()),
@@ -132,7 +135,12 @@ impl Tty {
             }
         }));
         output.watch_resize(Rc::clone(&inner.options.on_resize));
-        let active = Arc::clone(&inner.active);
+        // Taken again by a new start, not by `recover`: the crash path's registration goes with the old one.
+        if let Some(id) = inner.emergency.take() {
+            unregister(id);
+        }
+        inner.taken.store(false, Ordering::SeqCst);
+        let (active, taken) = (Arc::clone(&inner.active), Arc::clone(&inner.taken));
         let writer = output.emergency_writer();
         let raw_mode = input.emergency_raw_mode();
         let was_raw = inner.was_raw.get();
@@ -146,6 +154,7 @@ impl Tty {
             if let Some(raw_mode) = &raw_mode {
                 raw_mode(was_raw);
             }
+            taken.store(true, Ordering::SeqCst);
         }))));
         output.write(&format!("{ENTER}{}", if inner.options.mouse { MOUSE_ON } else { "" }));
         Ok(())
@@ -161,11 +170,26 @@ impl Tty {
     pub fn restore(&self, sync: bool) {
         self.inner.restore(sync);
     }
+
+    /// Takes the terminal again after a panic Kumi caught (a worker's): the crash path gave it back before the
+    /// panic's message was printed, in case the panic ended Kumi, and Kumi lived on. True when it did, so the caller
+    /// draws the whole screen again.
+    pub fn recover(&self) -> bool {
+        let inner = &self.inner;
+        if !inner.taken.swap(false, Ordering::SeqCst) {
+            return false;
+        }
+        let _ = inner.options.input.set_raw_mode(true);
+        inner.active.store(true, Ordering::SeqCst);
+        inner.options.output.write(&format!("{ENTER}{}", if inner.options.mouse { MOUSE_ON } else { "" }));
+        true
+    }
 }
 
 impl Inner {
     fn restore(&self, sync: bool) {
-        if !self.active.swap(false, Ordering::SeqCst) {
+        // Given back by the crash path and not taken again: what it didn't undo is still Kumi's to undo.
+        if !self.active.swap(false, Ordering::SeqCst) && !self.taken.swap(false, Ordering::SeqCst) {
             return;
         }
         let input = &self.options.input;
@@ -696,5 +720,90 @@ mod vt_tests {
         unsafe { GetConsoleMode(handle, &mut after) };
         assert_eq!(after, off);
         unsafe { SetConsoleMode(handle, before) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A terminal whose crash path is seen: raw mode and the crash writes are shared with the hook's thread.
+    struct Crash {
+        raw: Arc<AtomicBool>,
+        crashed: Arc<Mutex<String>>,
+        written: RefCell<String>,
+    }
+    impl TtyInput for Crash {
+        fn is_tty(&self) -> bool {
+            true
+        }
+        fn is_raw(&self) -> bool {
+            self.raw.load(Ordering::SeqCst)
+        }
+        fn set_raw_mode(&self, enabled: bool) -> std::io::Result<()> {
+            self.raw.store(enabled, Ordering::SeqCst);
+            Ok(())
+        }
+        fn resume(&self, _: ByteListener) {}
+        fn pause(&self) {}
+        fn emergency_raw_mode(&self) -> Option<RawModeRestorer> {
+            let raw = Arc::clone(&self.raw);
+            Some(Arc::new(move |enabled| raw.store(enabled, Ordering::SeqCst)))
+        }
+    }
+    impl TtyOutput for Crash {
+        fn is_tty(&self) -> bool {
+            true
+        }
+        fn columns(&self) -> Option<i32> {
+            Some(80)
+        }
+        fn rows(&self) -> Option<i32> {
+            Some(24)
+        }
+        fn write(&self, data: &str) {
+            self.written.borrow_mut().push_str(data);
+        }
+        fn emergency_writer(&self) -> Option<EmergencyWriter> {
+            let crashed = Arc::clone(&self.crashed);
+            Some(Arc::new(move |data| crashed.lock().unwrap().push_str(data)))
+        }
+    }
+
+    // No other test in this binary owns a terminal: the panic here runs every registered restorer in the process.
+    #[test]
+    fn a_panic_kumi_catches_gives_the_terminal_back_then_kumi_takes_it_again() {
+        let terminal = Rc::new(Crash { raw: Arc::new(AtomicBool::new(false)), crashed: Arc::default(), written: RefCell::default() });
+        let tty = Tty::new(TtyOptions {
+            input: terminal.clone(),
+            output: terminal.clone(),
+            on_input: Rc::new(|_| {}),
+            on_resize: Rc::new(|| {}),
+            mouse: true,
+        });
+        assert!(!tty.recover(), "nothing to take back before a crash");
+        tty.start().unwrap();
+        let registered = emergency_restorers();
+        // A worker's panic, caught: the crash path gives the terminal back before its message is printed.
+        let caught = std::thread::spawn(|| std::panic::catch_unwind(|| panic!("a worker's bug")).is_err()).join().unwrap();
+        assert!(caught);
+        assert!(terminal.crashed.lock().unwrap().ends_with(RESTORE));
+        assert!(!terminal.is_raw());
+        assert!(!tty.is_active());
+        // Kumi lived on: its next frame takes the terminal again, once, and draws all of it.
+        terminal.written.borrow_mut().clear();
+        assert!(tty.recover());
+        assert!(terminal.is_raw() && tty.is_active());
+        assert_eq!(*terminal.written.borrow(), format!("{ENTER}{MOUSE_ON}"));
+        assert!(!tty.recover());
+        tty.write("frame");
+        assert!(terminal.written.borrow().ends_with("frame"));
+        // A second caught panic, then Kumi quits without a frame between: it's given back, and nothing stays registered.
+        let _ = std::thread::spawn(|| std::panic::catch_unwind(|| panic!("another"))).join();
+        assert!(!tty.is_active());
+        tty.restore(false);
+        assert!(!terminal.is_raw());
+        assert_eq!(emergency_restorers(), registered - 1);
+        assert!(!tty.recover());
     }
 }
