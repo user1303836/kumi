@@ -123,6 +123,11 @@ async fn write_private(path: &Path, text: &str) -> io::Result<()> {
     file.flush().await
 }
 
+/// A log's bytes as text, in place when they're UTF-8 (a copy, with U+FFFD, only when they aren't).
+fn text_of(bytes: Vec<u8>) -> String {
+    String::from_utf8(bytes).unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
+}
+
 fn as_io(error: serde_json::Error) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error)
 }
@@ -175,7 +180,7 @@ impl<T: LogEntry> Log<T> {
         if !self.is_mine(&header) {
             return IndexMap::new();
         }
-        let text = tokio::fs::read(&self.file).await.map(|bytes| String::from_utf8_lossy(&bytes).into_owned()).unwrap_or_default();
+        let text = tokio::fs::read(&self.file).await.map(text_of).unwrap_or_default();
         let mut entries = IndexMap::new();
         let body = match text.find('\n') {
             Some(at) => &text[at + 1..],
@@ -218,13 +223,17 @@ impl<T: LogEntry> Log<T> {
             generation: uuid::Uuid::new_v4().to_string(),
             created: kumi_common::time::now_ms(),
         };
-        let mut lines = vec![stringify(&serde_json::to_value(&header).map_err(as_io)?)];
-        for entry in entries {
-            lines.push(stringify(&serde_json::to_value(entry).map_err(as_io)?));
-        }
         let temporary = folder.join(format!(".{}-{}", self.kind, uuid::Uuid::new_v4()));
         let written = async {
-            write_private(&temporary, &format!("{}\n", lines.join("\n"))).await?;
+            // A line at a time through a buffer: the log is never held whole in memory (nor its lines, nor their join).
+            let mut file = tokio::io::BufWriter::new(open_private(&temporary, false).await?);
+            file.write_all(stringify(&serde_json::to_value(&header).map_err(as_io)?).as_bytes()).await?;
+            file.write_all(b"\n").await?;
+            for entry in entries {
+                file.write_all(stringify(&serde_json::to_value(entry).map_err(as_io)?).as_bytes()).await?;
+                file.write_all(b"\n").await?;
+            }
+            file.flush().await?;
             replace(&temporary, &self.file).await
         }
         .await;
@@ -338,12 +347,12 @@ impl<T: LogEntry> LogReader<T> {
         let Some(end) = buffer[..filled].iter().rposition(|byte| *byte == b'\n') else {
             return Ok(Refreshed { changed: reloaded, reloaded });
         };
-        let mut text = String::from_utf8_lossy(&buffer[..=end]).into_owned();
-        if self.offset == 0 {
-            text = text[text.find('\n').map(|at| at + 1).unwrap_or(0)..].to_string();
-        }
+        buffer.truncate(end + 1);
+        let text = text_of(buffer);
+        // The header, skipped where it is.
+        let from = if self.offset == 0 { text.find('\n').map(|at| at + 1).unwrap_or(0) } else { 0 };
         self.offset += end as u64 + 1;
-        apply_chunked(&text, &mut self.entries).await;
+        apply_chunked(&text[from..], &mut self.entries).await;
         Ok(Refreshed { changed: true, reloaded })
     }
 }
