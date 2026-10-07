@@ -177,6 +177,10 @@ async fn files_on_a_network_share_are_refused_before_anything_opens_them() {
                         assert!(said(&reply).contains("network share"), "{tool} {file} in {folder}: {reply}");
                     }
                 }
+                // An Arrangement audio clip is made from the file by Live itself.
+                let args = json!({"action":"create","kind":"audio","trackRef":"track:track-1","position":0,"filePath":format!("{share}/kick.wav")});
+                let reply = host.live_arrangement_clip_preview_async(&json!(1), &args).await;
+                assert!(said(&reply).contains("network share"), "live_arrangement_clip {share}: {reply}");
                 let set = format!("{share}/Song.als");
                 for (path, folder) in [(set.clone(), share.clone()), (set, root.clone()), (format!("{root}/Song.als"), share.clone())] {
                     let reply = call(&host, "als_read", json!({"path":path,"allowedRoot":folder})).await;

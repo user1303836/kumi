@@ -152,6 +152,10 @@ impl McpHost {
         if create_kind != "midi" && create_kind != "audio" {
             return error(id, -32602, "kind must be midi or audio", None);
         }
+        // Before Live opens it: a share sends Windows' credentials to its host.
+        if params["filePath"].as_str().is_some_and(kumi_common::path::network_or_device) {
+            return error(id, -32602, "files on a network share aren't imported: copy the file onto this computer first", None);
+        }
         let take_lane = params.get("takeLaneRef").is_some();
         if take_lane && (create_kind != "midi" || !is_non_empty_string(&params["takeLaneRef"], 256)) {
             return error(id, -32602, "takeLaneRef requires kind=midi", None);
