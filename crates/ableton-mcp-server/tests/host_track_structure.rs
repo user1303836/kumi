@@ -224,6 +224,20 @@ async fn track_structure_validation_matches_source() {
         same(&clean(got), &row["result"], &format!("{index} {row}"));
     }
 }
+#[tokio::test]
+async fn a_group_track_isnt_duplicated() {
+    // Live copies a group with every track inside it: refused before anything changes.
+    let data = fixture();
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    *sim.state.borrow_mut() = data["seeds"]["duplicate-track"].clone();
+    sim.state.borrow_mut()["tracks"][0]["kind"] = json!("group");
+    let host = McpHost::new(sim.clone(), McpHostOptions::default()).unwrap();
+    let preview = host.live_track_structure_preview_async(&json!(1), &data["variants"]["duplicate-track"]).await;
+    assert_eq!(preview["result"]["isError"], true, "{preview}");
+    let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["reason"], "Kumi can't duplicate a group track: Live copies every track inside it too");
+    assert_eq!(sim.state.borrow()["tracks"].as_array().unwrap().len(), 1);
+}
 async fn perform(
     host: &McpHost,
     action: &str,

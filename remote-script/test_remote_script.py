@@ -5101,6 +5101,16 @@ class TrackStructureExpansionTests(unittest.TestCase):
         result = mapper.invoke("scene.duplicate", {"ref": scene_row["ref"], "expectedObjectIdentity": scene_row["objectIdentity"], "expectedStructureRevision": mapper._structure_revision()})
         self.assertEqual(result["index"], 1); validate_operation_payload("scene.duplicate", "result", result); self.assertEqual(len(song.scenes), 2)
 
+    def test_a_group_track_isnt_duplicated(self):
+        # Live copies a group with every track inside it, more than one change can confirm or take back.
+        song = FakeSong(); song.tracks = [FakeTrack(), FakeTrack(), FakeTrack()]; group = song.tracks[0]; group.is_foldable = True
+        song.tracks[1].group_track = group; song.tracks[2].group_track = group; calls = []
+        song.duplicate_track = lambda index: calls.append(index)
+        mapper = LiveObjectMapper(song); row = mapper.snapshot()["tracks"][0]
+        with self.assertRaisesRegex(ValueError, "group track can't be duplicated"):
+            mapper.invoke("track.duplicate", {"ref": row["ref"], "expectedObjectIdentity": row["objectIdentity"], "expectedStructureRevision": mapper._structure_revision()})
+        self.assertEqual((calls, len(song.tracks)), ([], 3), "Live was never asked")
+
     def test_track_view_set_and_select_instrument(self):
         song = FakeSong()
         track = song.tracks[0]

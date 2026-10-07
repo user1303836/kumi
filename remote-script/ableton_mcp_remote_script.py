@@ -7613,6 +7613,8 @@ class LiveObjectMapper:
         if not 0 <= index < len(tracks): raise ValueError("track hierarchy changed")
         track = tracks[index]
         if not isinstance(args.get("expectedObjectIdentity"), str) or not hmac.compare_digest(self._capture_object_identity(track), args["expectedObjectIdentity"]): raise ValueError("track identity changed since preview")
+        # Live copies a group with every track inside it: more than this change can confirm or take back as one.
+        if self._track_kind(track) == "group": raise ValueError("a group track can't be duplicated: Live copies every track inside it too")
         duplicator = getattr(self.song, "duplicate_track", None)
         if not callable(duplicator): raise ValueError("track duplication is unavailable")
         before = len(tracks)
