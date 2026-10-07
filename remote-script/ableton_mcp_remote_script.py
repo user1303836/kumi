@@ -2850,6 +2850,9 @@ class LiveObjectMapper:
             except KeyError: found = None
         return self._capture_object_identity(found) if found is not None else None
 
+    # The mixer refs whose key isn't Live's own name for the control (a track row publishes them; both resolvers read them).
+    _MIXER_REF_ATTRIBUTES = {"activator": "track_activator", "panning_left": "left_split_stereo", "panning_right": "right_split_stereo"}
+
     def _parameter_at(self, reference: str) -> Any:
         """The parameter at a parameter ref's place now: a device's (by index), a rack's macro or chain
         selector, or a track's mixer control."""
@@ -2860,7 +2863,7 @@ class LiveObjectMapper:
             if mixer is None: return None
             if parts[2] == "sends" and len(parts) == 4 and parts[3].isdigit():
                 sends = self._items(self._read_attr(mixer, "sends") or []); return sends[int(parts[3])] if int(parts[3]) < len(sends) else None
-            return self._read_attr(mixer, parts[2]) if len(parts) == 3 else None
+            return self._read_attr(mixer, self._MIXER_REF_ATTRIBUTES.get(parts[2], parts[2])) if len(parts) == 3 else None
         device_ref, _, position = key.rpartition(":")
         if device_ref.endswith(":macro"): device_ref, selector = device_ref[:-6], "macro"
         elif position == "chain-selector": selector = "chain-selector"
@@ -10430,7 +10433,7 @@ class LiveObjectMapper:
                 if not 0 <= send_index < len(sends):
                     raise ValueError("send parameter is stale")
                 return sends[send_index]
-            parameter = self._read_attr(mixer, parts[2])
+            parameter = self._read_attr(mixer, self._MIXER_REF_ATTRIBUTES.get(parts[2], parts[2]))
             if parameter is None:
                 raise ValueError("mixer parameter is unavailable")
             return parameter

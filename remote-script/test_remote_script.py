@@ -5492,6 +5492,13 @@ class MixerRoutingExpansionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "is invalid"): mapper.invoke("mixer.extended.set", {**fences(), "crossfader": 2.0})
         with self.assertRaisesRegex(ValueError, "is invalid"): mapper.invoke("mixer.extended.set", {**fences(), "crossfadeAssign": 3})
 
+    def test_the_mixer_refs_a_track_row_publishes_resolve_to_their_controls(self):
+        song, mapper = self._mapper_with_mixer(); mixer = song.tracks[0].mixer_device
+        row = mapper.snapshot()["tracks"][0]["mixer"]
+        for field, control in (("trackActivatorRef", mixer.track_activator), ("crossfaderRef", mixer.crossfader), ("panningLeftRef", mixer.left_split_stereo), ("panningRightRef", mixer.right_split_stereo)):
+            self.assertIs(mapper._resolve_parameter(row[field]), control, field)
+            self.assertIs(mapper._parameter_at(row[field]), control, field)
+
     def test_the_snapshot_mixer_row_carries_the_extended_mixer_authority_the_host_previews(self):
         # The host previews from the snapshot alone: the track mixer row must name the mixer itself and
         # the values it edits (chain mixers already do), or the preview refuses as not authoritative.
