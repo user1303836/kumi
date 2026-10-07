@@ -633,7 +633,10 @@ impl McpHost {
             Ok(success_text(id, &applied))
         }
         .await;
-        Some(result.unwrap_or_else(|e| apply_failed(id, &record, &e, "Clip move is uncertain; perform fresh discovery before retrying.")))
+        Some(
+            result
+                .unwrap_or_else(|e| self.apply_failed(id, &record, &e, "Clip move is uncertain; perform fresh discovery before retrying.")),
+        )
     }
     pub async fn undo_clip_move_async(&self, id: &Value, params: &Value, signal: Option<&Signal>) -> Value {
         let Some(record) = params["transactionId"]

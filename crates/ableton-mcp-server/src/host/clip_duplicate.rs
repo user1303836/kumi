@@ -346,11 +346,9 @@ impl McpHost {
             ))
         }
         .await;
-        Some(
-            result.unwrap_or_else(|e| {
-                apply_failed(id, &record, &e, "Clip duplication is uncertain; perform fresh discovery before retrying.")
-            }),
-        )
+        Some(result.unwrap_or_else(|e| {
+            self.apply_failed(id, &record, &e, "Clip duplication is uncertain; perform fresh discovery before retrying.")
+        }))
     }
     pub async fn undo_clip_duplicate_async(&self, id: &Value, params: &Value, signal: Option<&Signal>) -> Value {
         let Some(record) = params["transactionId"]

@@ -456,7 +456,7 @@ impl McpHost {
         .await;
         result.unwrap_or_else(|e| {
             let undone = record.borrow()["state"] == "undone";
-            apply_failed(
+            self.apply_failed(
                 id,
                 &record,
                 &e,

@@ -102,20 +102,6 @@ pub fn transaction_error(id: &Value, message: &str) -> Value {
 pub fn recovery_finalize_error(id: &Value, reason: &str) -> Value {
     reason_error(id, reason, "Reconcile or manually recover the exact transaction, prove all audible work stopped, then submit the explicit finalization evidence.")
 }
-/// What a failed apply answers. Its transaction turns `uncertain` only from `applying`, the state each apply sets
-/// right before its first send: a failure before that (a read, a refusal) reached nothing in Live, and the
-/// transaction stays as it was, to apply again. `uncertain` is the remediation once something may have changed.
-pub fn apply_failed(id: &Value, record: &std::cell::RefCell<Value>, cause: &LiveError, uncertain: &str) -> Value {
-    let state = record.borrow()["state"].clone();
-    if state == "applying" {
-        record.borrow_mut()["state"] = json!("uncertain");
-    }
-    adapter_tool_error(
-        id,
-        cause,
-        if state == "previewed" { "Nothing changed in Live; this change can be applied again." } else { uncertain },
-    )
-}
 pub fn adapter_tool_error(id: &Value, cause: &LiveError, remediation: &str) -> Value {
     let next = if remediation.ends_with("preview requires fresh authoritative state.") {
         "Nothing changed in Live: fix what the reason says (or take another route) and preview again."

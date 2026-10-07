@@ -446,11 +446,9 @@ impl McpHost {
             ))
         }
         .await;
-        Some(
-            result.unwrap_or_else(|e| {
-                apply_failed(id, &record, &e, "Automation state is uncertain; perform fresh discovery before retrying.")
-            }),
-        )
+        Some(result.unwrap_or_else(|e| {
+            self.apply_failed(id, &record, &e, "Automation state is uncertain; perform fresh discovery before retrying.")
+        }))
     }
 
     async fn automation_guarded(

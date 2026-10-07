@@ -110,7 +110,7 @@ impl McpHost {
         }
         .await;
         Some(result.unwrap_or_else(|e| {
-            apply_failed(id, &record, &e, "Whether the button is down is uncertain: let go of it with pressed: false.")
+            self.apply_failed(id, &record, &e, "Whether the button is down is uncertain: let go of it with pressed: false.")
         }))
     }
     pub fn undo_fire_button(&self, id: &Value) -> Value {

@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 mod advanced_devices;
+mod apply_failure;
 mod arrangement;
 mod arrangement_clip;
 mod arrangement_midi;
@@ -138,6 +139,8 @@ pub struct McpHost {
     song_history_calls: RefCell<VecDeque<(String, Value)>>,
     analysis_runner: crate::analysis_runner::AnalysisRunner,
     adapter: Rc<dyn AsyncLiveAdapter>,
+    /// The last adapter call that failed (see `apply_failure`).
+    last_live_failure: Rc<RefCell<Option<String>>>,
     views: Rc<LiveViews>,
     initialized: Cell<bool>,
     initialized_notification: Cell<bool>,
@@ -183,6 +186,9 @@ impl McpHost {
     }
     pub fn new(adapter: Rc<dyn AsyncLiveAdapter>, options: McpHostOptions) -> Result<Self, LiveError> {
         let policy = Rc::new(RefCell::new(tool_catalog::parse_tool_policy_spec(options.tool_policy.as_ref()).map_err(policy_error)?));
+        let last_live_failure = Rc::new(RefCell::new(None));
+        let adapter: Rc<dyn AsyncLiveAdapter> =
+            Rc::new(apply_failure::FailureNotingAdapter { adapter, last_failure: last_live_failure.clone() });
         let provider = adapter.clone();
         let views = Rc::new(LiveViews::new(move || provider.clone()));
         let policy_for_batch = policy.clone();
@@ -255,6 +261,7 @@ impl McpHost {
             batch_transactions: batch,
             views,
             adapter,
+            last_live_failure,
             retention,
             recovery_finalization_in_flight: Cell::new(false),
             active_async_operations: Cell::new(0),

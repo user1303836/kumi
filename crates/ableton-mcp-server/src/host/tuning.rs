@@ -297,7 +297,9 @@ impl McpHost {
         }
         .await;
         Some(
-            result.unwrap_or_else(|e| apply_failed(id, &record, &e, "Tuning state is uncertain; perform fresh discovery before retrying.")),
+            result.unwrap_or_else(|e| {
+                self.apply_failed(id, &record, &e, "Tuning state is uncertain; perform fresh discovery before retrying.")
+            }),
         )
     }
     pub async fn undo_tuning_async(&self, id: &Value, params: &Value, signal: Option<&Signal>) -> Value {

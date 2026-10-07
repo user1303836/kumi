@@ -334,7 +334,7 @@ impl McpHost {
         }
         .await;
         Some(result.unwrap_or_else(|cause| {
-            apply_failed(id, &record, &cause, "Audio-import state is uncertain; perform fresh discovery before retrying.")
+            self.apply_failed(id, &record, &cause, "Audio-import state is uncertain; perform fresh discovery before retrying.")
         }))
     }
     pub async fn undo_audio_import_async(&self, id: &Value, params: &Value, signal: Option<&Signal>) -> Value {

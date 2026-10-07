@@ -134,6 +134,6 @@ impl McpHost {
             Ok(success_text(id, &json!({"transactionId":t["id"],"state":"applied","stateAfter":dialog_state(&result)?,"idempotent":false})))
         }
         .await;
-        Some(result.unwrap_or_else(|e| apply_failed(id, &record, &e, "Dialog state is uncertain; inspect Live before retrying.")))
+        Some(result.unwrap_or_else(|e| self.apply_failed(id, &record, &e, "Dialog state is uncertain; inspect Live before retrying.")))
     }
 }

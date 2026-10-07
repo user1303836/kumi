@@ -297,7 +297,7 @@ impl McpHost {
             if reconciliation {
                 record.borrow_mut()["state"] = json!("uncertain");
             }
-            apply_failed(
+            self.apply_failed(
                 id,
                 &record,
                 &e,
@@ -464,7 +464,7 @@ impl McpHost {
             Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","removed":removed,"clipsBefore":result["clipsBefore"],"clipsAfter":result["clipsAfter"],"kept":KEPT,"idempotent":false})))
         }.await;
         Some(result.unwrap_or_else(|e| {
-            apply_failed(id, &record, &e, "Whether the range is clear is uncertain: look at the Arrangement before trying again.")
+            self.apply_failed(id, &record, &e, "Whether the range is clear is uncertain: look at the Arrangement before trying again.")
         }))
     }
 }

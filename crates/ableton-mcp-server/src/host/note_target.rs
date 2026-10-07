@@ -377,11 +377,9 @@ record.borrow_mut()["appliedFence"]=json!(note_fence(&verified.notes));
             {let mut row=record.borrow_mut();row["applyKey"]=params["idempotencyKey"].clone();row["state"]=json!("applied");}
             Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","result":result,"idempotent":false})))
         }.await;
-        Some(
-            result.unwrap_or_else(|e| {
-                apply_failed(id, &record, &e, "Note-edit state is uncertain; perform fresh discovery before retrying.")
-            }),
-        )
+        Some(result.unwrap_or_else(|e| {
+            self.apply_failed(id, &record, &e, "Note-edit state is uncertain; perform fresh discovery before retrying.")
+        }))
     }
     pub async fn undo_note_target_async(&self, id: &Value, params: &Value, signal: Option<&Signal>) -> Value {
         let Some(record) = params["transactionId"]

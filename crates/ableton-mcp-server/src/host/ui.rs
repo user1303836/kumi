@@ -159,7 +159,9 @@ impl McpHost {
         }
         .await;
         Some(
-            result.unwrap_or_else(|e| apply_failed(id, &record, &e, "View state is uncertain; check Live's visible view before retrying.")),
+            result.unwrap_or_else(|e| {
+                self.apply_failed(id, &record, &e, "View state is uncertain; check Live's visible view before retrying.")
+            }),
         )
     }
     pub async fn live_locator_jump_preview_async(&self, id: &Value, p: &Value) -> Value {
@@ -302,9 +304,8 @@ impl McpHost {
             Ok(success_text(id, &json!({"transactionId":t["id"],"state":"applied","result":result,"idempotent":false})))
         }
         .await;
-        Some(
-            result
-                .unwrap_or_else(|e| apply_failed(id, &record, &e, "Playhead state is uncertain; perform fresh discovery before retrying.")),
-        )
+        Some(result.unwrap_or_else(|e| {
+            self.apply_failed(id, &record, &e, "Playhead state is uncertain; perform fresh discovery before retrying.")
+        }))
     }
 }

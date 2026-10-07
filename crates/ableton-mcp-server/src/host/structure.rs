@@ -514,7 +514,12 @@ impl McpHost {
  if let Err(cause)=dispatched{record.borrow_mut()["created"]=json!(created);if dispatch_ambiguous{record.borrow_mut()["recoveryMode"]=json!("apply");return Err(cause);}match self.compensate_structure_async(&record,&*adapter,&context()).await{Ok(())=>record.borrow_mut()["state"]=json!("undone"),Err(failure)=>{{let mut r=record.borrow_mut();r["state"]=json!("uncertain");r["recoveryMode"]=json!("compensate");}let left=match self.structure_view(Some(&context())).await{Ok(view)=>left_in_live(&view,&created),Err(_)=>"read Live to see".into()};return Err(LiveError::error(if failure.message()==CHANGED_BEFORE_COMPENSATION{format!("Session-structure apply failed ({}). Something it made was changed in Live since (a new name, a clip or a device), so Kumi stopped cleaning up. Left in Live: {left}. A retry won't remove them; ask the producer before deleting any of them.",cause.message())}else{format!("Session-structure apply compensation failed; retry the exact key to reconcile cleanup. The apply failed ({}), then its cleanup ({}); left in Live: {left}",cause.message(),failure.message())}));}}return Err(cause);}{let mut r=record.borrow_mut();r["created"]=json!(created);r["applyKey"]=params["idempotencyKey"].clone();r["state"]=json!("applied");}Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","created":reported(&json!(created)),"epoch":t["epoch"],"idempotent":false})))
  }.await;
         result.unwrap_or_else(|e| {
-            apply_failed(id, &record, &e, "Session-structure apply is uncertain; read authoritative tracks and scenes before retrying.")
+            self.apply_failed(
+                id,
+                &record,
+                &e,
+                "Session-structure apply is uncertain; read authoritative tracks and scenes before retrying.",
+            )
         })
     }
     pub fn undo_structure(&self, id: &Value, params: &Value) -> Value {

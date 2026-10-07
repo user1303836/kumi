@@ -129,7 +129,7 @@ impl McpHost {
         }
         .await;
         Some(result.unwrap_or_else(|e| {
-            apply_failed(id, &record, &e, "Track-structure state is uncertain; perform fresh discovery before retrying.")
+            self.apply_failed(id, &record, &e, "Track-structure state is uncertain; perform fresh discovery before retrying.")
         }))
     }
     pub async fn undo_track_structure_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {

@@ -306,11 +306,9 @@ impl McpHost {
             Ok(success_text(id, &reply))
         }
         .await;
-        Some(
-            result.unwrap_or_else(|e| {
-                apply_failed(id, &record, &e, "Warp-marker state is uncertain; perform fresh discovery before retrying.")
-            }),
-        )
+        Some(result.unwrap_or_else(|e| {
+            self.apply_failed(id, &record, &e, "Warp-marker state is uncertain; perform fresh discovery before retrying.")
+        }))
     }
 
     pub async fn undo_warp_marker_async(&self, id: &Value, params: &Value, signal: Option<&Signal>) -> Value {

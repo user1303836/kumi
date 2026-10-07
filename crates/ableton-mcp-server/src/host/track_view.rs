@@ -168,11 +168,9 @@ impl McpHost {
             Ok(success_text(id, &json!({"transactionId":t["id"],"state":"applied","idempotent":false})))
         }
         .await;
-        Some(
-            result.unwrap_or_else(|e| {
-                apply_failed(id, &record, &e, "Track-view state is uncertain; perform fresh discovery before retrying.")
-            }),
-        )
+        Some(result.unwrap_or_else(|e| {
+            self.apply_failed(id, &record, &e, "Track-view state is uncertain; perform fresh discovery before retrying.")
+        }))
     }
     pub async fn undo_track_view_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {
         let Some(record) = self.clip_lifecycle_transactions.get(p["transactionId"].as_str().unwrap_or("")) else {

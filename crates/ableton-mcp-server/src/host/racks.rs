@@ -172,7 +172,7 @@ impl McpHost {
    {let mut row=record.borrow_mut();row["applyKey"]=p["idempotencyKey"].clone();row["state"]=json!("applied")}let mut response=json!({"transactionId":t["id"],"state":"applied"});if let Some(v)=result.get("revision"){response["revision"]=v.clone()}if !view{if is_non_empty_string(&result["chainRef"],256){response["chainRef"]=result["chainRef"].clone()}let latest=record.borrow();if latest["created"]["placement"].is_object(){response["placement"]=latest["created"]["placement"].clone()}if let Some(v)=latest["created"].get("visibleMacroCount"){response["visibleMacroCount"]=v.clone()}}response["idempotent"]=json!(false);Ok(success_text(id,&response))
   }.await;
         Some(result.unwrap_or_else(|e| {
-            apply_failed(id, &record, &e, &format!("{} state is uncertain; perform fresh discovery before retrying.", title(view)))
+            self.apply_failed(id, &record, &e, &format!("{} state is uncertain; perform fresh discovery before retrying.", title(view)))
         }))
     }
     pub async fn undo_rack_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {

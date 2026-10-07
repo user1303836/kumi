@@ -121,10 +121,8 @@ impl McpHost {
             if result.is_null(){return Err(LiveError::type_error("Cannot read properties of null (reading 'done')"));}if result["done"]!=true{return Err(LiveError::error(if jumping{"the jump wasn't confirmed"}else{"transport action was not confirmed"}));}
             record.borrow_mut()["applyKey"]=p["idempotencyKey"].clone();record.borrow_mut()["state"]=json!("applied");let mut response=json!({"transactionId":t["id"],"state":"applied"});if !jumping{if let Some(revision)=result.get("revision"){response["revision"]=revision.clone();}}response["idempotent"]=json!(false);Ok(success_text(id,&response))
         }.await;
-        Some(
-            result.unwrap_or_else(|e| {
-                apply_failed(id, &record, &e, "Transport state is uncertain; perform fresh discovery before retrying.")
-            }),
-        )
+        Some(result.unwrap_or_else(|e| {
+            self.apply_failed(id, &record, &e, "Transport state is uncertain; perform fresh discovery before retrying.")
+        }))
     }
 }

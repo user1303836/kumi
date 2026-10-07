@@ -163,7 +163,7 @@ impl McpHost {
             {let mut row=record.borrow_mut();row["applyKey"]=p["idempotencyKey"].clone();row["state"]=json!("applied")}Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","result":record.borrow().get("created").filter(|v|!v.is_null()).cloned().unwrap_or(json!({"done":true})),"idempotent":false})))
         }.await;
         Some(result.unwrap_or_else(|e| {
-            apply_failed(id, &record, &e, "Device-advanced state is uncertain; perform fresh discovery before retrying.")
+            self.apply_failed(id, &record, &e, "Device-advanced state is uncertain; perform fresh discovery before retrying.")
         }))
     }
     pub async fn undo_device_advanced_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {
@@ -310,7 +310,11 @@ impl McpHost {
             Ok(success_text(id, &response))
         }
         .await;
-        Some(result.unwrap_or_else(|e| apply_failed(id, &record, &e, "Chain state is uncertain; perform fresh discovery before retrying.")))
+        Some(
+            result.unwrap_or_else(|e| {
+                self.apply_failed(id, &record, &e, "Chain state is uncertain; perform fresh discovery before retrying.")
+            }),
+        )
     }
     pub async fn undo_chain_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {
         let record = p["transactionId"].as_str().and_then(|id| self.clip_lifecycle_transactions.get(id));

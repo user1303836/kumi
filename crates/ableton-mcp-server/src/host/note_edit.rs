@@ -443,11 +443,9 @@ impl McpHost {
             Ok(success_text(id, &outcome))
         }
         .await;
-        Some(
-            result.unwrap_or_else(|e| {
-                apply_failed(id, &record, &e, "Note-edit state is uncertain; perform fresh discovery before retrying.")
-            }),
-        )
+        Some(result.unwrap_or_else(|e| {
+            self.apply_failed(id, &record, &e, "Note-edit state is uncertain; perform fresh discovery before retrying.")
+        }))
     }
     pub async fn undo_note_edit_async(&self, id: &Value, params: &Value, signal: Option<&Signal>) -> Value {
         let Some(record) = params["transactionId"].as_str().and_then(|id| self.note_edit_transactions.get(id)) else {

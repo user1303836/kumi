@@ -128,7 +128,9 @@ impl McpHost {
         }
         .await;
         Some(
-            result.unwrap_or_else(|e| apply_failed(id, &record, &e, "Device state is uncertain; perform fresh discovery before retrying.")),
+            result.unwrap_or_else(|e| {
+                self.apply_failed(id, &record, &e, "Device state is uncertain; perform fresh discovery before retrying.")
+            }),
         )
     }
     async fn deletion_plan(&self, kind: &str, reference: &str, context: Option<&LiveOperationContext>) -> Result<Plan, LiveError> {
@@ -309,7 +311,7 @@ impl McpHost {
             if reconciliation {
                 record.borrow_mut()["state"] = json!("uncertain");
             }
-            apply_failed(
+            self.apply_failed(
                 id,
                 &record,
                 &e,

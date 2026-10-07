@@ -229,7 +229,12 @@ impl McpHost {
         }
         .await;
         Some(result.unwrap_or_else(|e| {
-            apply_failed(id, &record, &e, &format!("{}-view state is uncertain; perform fresh discovery before retrying.", kind.title()))
+            self.apply_failed(
+                id,
+                &record,
+                &e,
+                &format!("{}-view state is uncertain; perform fresh discovery before retrying.", kind.title()),
+            )
         }))
     }
     pub async fn undo_clip_view_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {

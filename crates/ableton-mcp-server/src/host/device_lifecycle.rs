@@ -275,7 +275,9 @@ impl McpHost {
             Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","deviceRef":loaded["deviceRef"],"placement":self.device_placement(&snapshot,&created)?,"idempotent":false})))
         }.await;
         Some(
-            result.unwrap_or_else(|e| apply_failed(id, &record, &e, "Browser load is uncertain; perform fresh discovery before retrying.")),
+            result.unwrap_or_else(|e| {
+                self.apply_failed(id, &record, &e, "Browser load is uncertain; perform fresh discovery before retrying.")
+            }),
         )
     }
     pub async fn undo_browser_load_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {
