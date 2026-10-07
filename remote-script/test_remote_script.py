@@ -6191,6 +6191,19 @@ class SpecializedDeviceTests(unittest.TestCase):
         result = mapper.invoke("hybrid-reverb.set", {**hybrid_reverb_fence(mapper), "irFile": "Hall B"})
         self.assertTrue(result["changed"]); self.assertEqual(device.ir_file_index, 1)
 
+    def test_hybrid_reverb_refuses_a_name_more_than_one_ir_reads_as(self):
+        class Choice:
+            pass
+        song = FakeSong(); device = FakeDevice(); device.name = "Hybrid"; device.class_name = "HybridReverbDevice"
+        device.ir_category_list = ["Halls"]; device.ir_category_index = 0
+        device.ir_file_list = [Choice(), Choice()]; device.ir_file_index = 0
+        device.ir_attack_time = 10.0; device.ir_decay_time = 1200.0; device.ir_size_factor = 50.0
+        song.tracks[0].devices = [device]; mapper = LiveObjectMapper(song)
+        names = mapper.snapshot()["tracks"][0]["devices"][0]["hybridReverb"]["irFileList"]
+        self.assertEqual(len(set(names)), 1, "nameless choices read as their type, all alike")
+        with self.assertRaisesRegex(ValueError, "irFile names more than one choice"): mapper.invoke("hybrid-reverb.set", {**hybrid_reverb_fence(mapper), "irFile": names[1]})
+        self.assertEqual(device.ir_file_index, 0)
+
     def test_hybrid_reverb_is_fenced_on_the_five_settings_its_row_shows(self):
         song = FakeSong(); device = FakeDevice(); device.name = "Hybrid"; device.class_name = "HybridReverbDevice"
         device.ir_category_list = [{"name": "Halls"}, {"name": "Plates"}]; device.ir_category_index = 0

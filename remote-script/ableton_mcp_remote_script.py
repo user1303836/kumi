@@ -9317,6 +9317,9 @@ class LiveObjectMapper:
                 names = self._row_choice_names(self._read_attr(device, list_attr)) or []
                 if not names: raise ValueError(f"{field} choices are unavailable on this device")
                 if args[field] not in names: raise ValueError(f"{field} is not an available choice")
+                # Choices Live hands out without names all read as their type: a name held more than once can't say
+                # which one is meant, so it's refused rather than taken as the first.
+                if names.count(args[field]) > 1: raise ValueError(f"{field} names more than one choice on this device")
                 target = names.index(args[field])
                 written.append(index_attr); setattr(device, index_attr, target)
                 observed = self._read_attr(device, index_attr)
