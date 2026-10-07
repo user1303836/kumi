@@ -350,6 +350,16 @@ INPUT_FROM_MAIN = ("Live crashes when a track's input is set to Main (Live 12.4:
 PYTHON_RAN = "RanResultUnavailable"
 
 
+def _absolute_file_path(path: Any) -> bool:
+    r"""A file path Live can open as it stands (1 to 1024 characters): POSIX-absolute (/...), from a Windows drive's
+    root (X:\... or X:/...), or on a share (\\server\share\..., where a redirected AppData keeps the bridge's staged
+    files). Not drive-relative (C:foo, from the drive's current folder) nor a device namespace (\\?\, \\.\)."""
+    if not isinstance(path, str) or not 1 <= len(path) <= 1024: return False
+    if path.startswith("/"): return True
+    if len(path) > 2 and "A" <= path[0].upper() <= "Z" and path[1] == ":" and path[2] in "\\/": return True
+    return path.startswith("\\\\") and len(path) > 2 and path[2] not in "\\/?."
+
+
 def _sets_input_from_main(code: Any) -> bool:
     """Whether a compiled script assigns a track's input routing and names Main (or Master) anywhere:
     crude by design, since the choice is usually found by its name. Its functions are included."""
@@ -6634,7 +6644,7 @@ class LiveObjectMapper:
 
     def _session_audio_clip_create(self, args: dict[str, Any]) -> dict[str, Any]:
         file_path = args.get("filePath")
-        if not isinstance(file_path, str) or not 1 <= len(file_path) <= 1024 or not (file_path.startswith("/") or (len(file_path) > 2 and file_path[1] == ":" and file_path[0].isalpha())): raise ValueError("filePath must be an absolute path")
+        if not _absolute_file_path(file_path): raise ValueError("filePath must be an absolute path")
         name = args.get("name")
         if name is not None and (not isinstance(name, str) or not 1 <= len(name) <= 256): raise ValueError("name is invalid")
         track_ref = args.get("trackRef")
@@ -7002,7 +7012,7 @@ class LiveObjectMapper:
         file_path = None; length = None
         if audio:
             file_path = args.get("filePath")
-            if not isinstance(file_path, str) or not 1 <= len(file_path) <= 1024 or not (file_path.startswith("/") or (len(file_path) > 2 and file_path[1] == ":" and file_path[0].isalpha())): raise ValueError("filePath must be an absolute path")
+            if not _absolute_file_path(file_path): raise ValueError("filePath must be an absolute path")
             if name is not None and (not isinstance(name, str) or not 1 <= len(name) <= 256): raise ValueError("name is invalid")
         else:
             length = args.get("length")
@@ -8774,7 +8784,7 @@ class LiveObjectMapper:
         args = {key: value for key, value in args.items() if key != "instrument"}
         reference = args.get("ref"); sample_path = args.get("samplePath"); name = args.get("name")
         if not isinstance(reference, str) or not reference.startswith(f"{self.refs.epoch}:drum_pad:") or set(args) - {"ref", "expectedObjectIdentity", "samplePath", "name"}: raise ValueError("drum pad authority is invalid")
-        if not isinstance(sample_path, str) or not 1 <= len(sample_path) <= 1024 or not (sample_path.startswith("/") or (len(sample_path) > 2 and sample_path[1] == ":" and sample_path[0].isalpha())): raise ValueError("samplePath must be an absolute path")
+        if not _absolute_file_path(sample_path): raise ValueError("samplePath must be an absolute path")
         if name is not None and (not isinstance(name, str) or not 1 <= len(name) <= 256): raise ValueError("drum pad chain name is invalid")
         pad = self.refs.get(reference)
         if not isinstance(args.get("expectedObjectIdentity"), str) or not hmac.compare_digest(self._capture_object_identity(pad), args["expectedObjectIdentity"]): raise ValueError("drum pad identity changed since preview")
@@ -9533,7 +9543,7 @@ class LiveObjectMapper:
     def _simpler_replace_sample(self, args: dict[str, Any]) -> dict[str, Any]:
         reference = str(args.get("ref"))
         file_path = args.get("filePath")
-        if not isinstance(file_path, str) or not 1 <= len(file_path) <= 1024 or not (file_path.startswith("/") or (len(file_path) > 2 and file_path[1] == ":" and file_path[0].isalpha())): raise ValueError("filePath must be an absolute path")
+        if not _absolute_file_path(file_path): raise ValueError("filePath must be an absolute path")
         if not isinstance(reference, str) or not reference.startswith(f"{self.refs.epoch}:device:") or set(args) - {"ref", "filePath", "expectedObjectIdentity", "expectedStateRevision"}: raise ValueError("simpler authority is invalid")
         device = self.refs.get(reference)
         if not isinstance(args.get("expectedObjectIdentity"), str) or not hmac.compare_digest(self._capture_object_identity(device), args["expectedObjectIdentity"]): raise ValueError("device identity changed since preview")
@@ -11027,7 +11037,7 @@ class LiveObjectMapper:
         # A new Simpler can arrive with its sample: loaded before the fingerprint below, so the
         # insert's undo takes both away, and a failed load takes the new device away again.
         sample_path = args.get("samplePath")
-        if sample_path is not None and (not isinstance(sample_path, str) or not 1 <= len(sample_path) <= 1024 or not (sample_path.startswith("/") or (len(sample_path) > 2 and sample_path[1] == ":" and sample_path[0].isalpha()))):
+        if sample_path is not None and not _absolute_file_path(sample_path):
             raise ValueError("samplePath must be an absolute path")
         index = args.get("index")
         if index is not None and (not isinstance(index, int) or isinstance(index, bool) or not -1 <= index <= MAX_COLLECTION_INDEX):
