@@ -4825,17 +4825,19 @@ class SceneSlotExpansionTests(unittest.TestCase):
     def test_scene_fire_selected_is_accepted_before_live_applies_it(self):
         song, scene, slot, mapper = self._mapper_with_scene()
         # Live 12.4 launches the scene on its next tick: nothing reads as queued or playing right after.
-        pending = []
-        def fire_as_selected():
+        pending = []; selected = []
+        def fire():
             pending.append(lambda: (setattr(scene, "is_triggered", True), setattr(song, "is_playing", True)))
-        scene.fire_as_selected = fire_as_selected
+        scene.fire = fire
+        # Live's fire_as_selected launches whichever scene is selected, whatever scene it's called on.
+        scene.fire_as_selected = lambda: selected.append("the selected scene")
         row = mapper.snapshot()["scenes"][0]
         self.assertTrue(mapper._operation_supported("scene.fire-selected"))
         playback = mapper._playback()
         state = hashlib.sha256(mapper._bounded_canonical({"isTriggered": False, "playing": playback["transport"]["playing"]}).encode()).hexdigest()
         result = mapper.invoke("scene.fire-selected", {"ref": row["ref"], "expectedObjectIdentity": row["objectIdentity"], "expectedAuthorityRevision": mapper._scene_collection_revision(), "expectedStateRevision": state})
         self.assertEqual(result, {"fired": True}); validate_operation_payload("scene.fire-selected", "result", result)
-        self.assertEqual(len(pending), 1, "fired once"); pending[0]()
+        self.assertEqual((len(pending), selected), (1, []), "this scene fired, once"); pending[0]()
         self.assertTrue(scene.is_triggered); self.assertTrue(song.is_playing)
 
 

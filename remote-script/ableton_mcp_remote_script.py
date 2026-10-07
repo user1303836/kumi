@@ -1490,7 +1490,7 @@ class LiveObjectMapper:
         if operation == "scene.set":
             return self._offers_any("scene", "color_index", "tempo", method=False)
         if operation == "scene.fire-selected":
-            return self._offers("scene", "fire_as_selected")
+            return self._offers("scene", "fire")
         if operation == "transport.action":
             return any(callable(getattr(song, name, None)) for name in ("start_playing", "continue_playing", "stop_playing", "play_selection", "tap_tempo", "nudge_up", "nudge_down", "re_enable_automation", "force_link_beat_time", "jump_by"))
         if operation == "locator.jump-to":
@@ -7380,8 +7380,10 @@ class LiveObjectMapper:
         playback = self._playback()
         state_revision = hashlib.sha256(self._bounded_canonical({"isTriggered": self._read_attr(scene, "is_triggered"), "playing": playback["transport"]["playing"]}).encode("utf-8")).hexdigest()
         if not isinstance(args.get("expectedStateRevision"), str) or not hmac.compare_digest(state_revision, args["expectedStateRevision"]): raise ValueError("scene fire state changed since preview")
-        fire = getattr(scene, "fire_as_selected", None)
-        if not callable(fire): raise ValueError("scene fire-as-selected is unavailable")
+        # Scene.fire launches this scene. fire_as_selected launches whichever scene is selected (then selects the
+        # next), whatever scene it's called on.
+        fire = getattr(scene, "fire", None)
+        if not callable(fire): raise ValueError("scene fire is unavailable")
         fire()
         # Live 12.4 launches a scene on its next tick, so right after the call it
         # isn't queued or playing yet: that is pending, not refused. The host
