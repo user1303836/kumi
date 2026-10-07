@@ -217,11 +217,9 @@ async fn prune(folder: &str) -> Result<(), VideoFailure> {
         }
     }
     folders.sort_by(|a, b| b.1.cmp(&a.1));
+    // Tidying, not the watch: a file held (a WAV loaded in Live, one being scanned) waits for the next prune.
     for (path, _) in folders.into_iter().skip(24) {
-        match tokio::fs::remove_dir_all(path).await {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
-            _ => {}
-        }
+        let _ = tokio::fs::remove_dir_all(path).await;
     }
     Ok(())
 }
@@ -428,12 +426,8 @@ async fn captions_for(
         Ok(Vec::new())
     }
     .await;
-    let removed = tokio::fs::remove_dir_all(&scratch).await;
-    if let Err(e) = removed {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            return Err(e.into());
-        }
-    }
+    // Tidying: a file left here is removed with the video's folder later.
+    let _ = tokio::fs::remove_dir_all(&scratch).await;
     match result {
         Ok(cues) => Ok((cues, Some(track), false)),
         Err(_) => {
@@ -867,10 +861,8 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                             },
                         )
                         .await;
-                        match tokio::fs::remove_file(&wav).await {
-                            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
-                            _ => {}
-                        }
+                        // Tidying: one still held goes with the video's folder later.
+                        let _ = tokio::fs::remove_file(&wav).await;
                         heard.map(Some)
                     }
                     Err(error) => Err(error),

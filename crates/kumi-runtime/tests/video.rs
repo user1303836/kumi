@@ -956,6 +956,32 @@ printf 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nload Operator\n' > "$(printf '%
 }
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
+async fn a_cached_video_that_cant_be_tidied_away_doesnt_stop_a_watch() {
+    use std::os::unix::fs::PermissionsExt;
+    let folder = tempfile::tempdir().unwrap();
+    let Some(video) = test_video(folder.path(), "tidy", true).await else {
+        eprintln!("ffmpeg makes the test video; unavailable");
+        return;
+    };
+    let options = watch_options(folder.path(), "videos");
+    // 25 watched videos kept, so the oldest goes; a file in it is held (here, its folder can't be written).
+    let videos = std::path::Path::new(&options.videos_dir);
+    for index in 0..25 {
+        let kept = videos.join(format!("file-{index:016}"));
+        std::fs::create_dir_all(kept.join("frames")).unwrap();
+        std::fs::write(kept.join("frames/1.0.jpg"), "jpeg").unwrap();
+        std::fs::write(kept.join("meta.json"), "{}").unwrap();
+        let when = std::time::SystemTime::now() - std::time::Duration::from_secs(1000 - index);
+        std::fs::File::options().write(true).open(kept.join("meta.json")).unwrap().set_modified(when).unwrap();
+    }
+    let held = videos.join("file-0000000000000000/frames");
+    std::fs::set_permissions(&held, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let watched = watch_video(WatchRequest { url: video, frames: Some(0.0), ..Default::default() }, options).await;
+    std::fs::set_permissions(&held, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(watched.unwrap().lines.len(), 2);
+}
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
 async fn a_video_has_its_duration_from_an_ffmpeg_without_ffprobe() {
     let folder = tempfile::tempdir().unwrap();
     let Some(video) = test_video(folder.path(), "alone", true).await else {
