@@ -143,10 +143,42 @@ async fn concurrent_updates_from_separate_processes_stores_serialize_under_the_l
         .write(true)
         .open(&lock)
         .unwrap()
-        .set_times(std::fs::FileTimes::new().set_modified(SystemTime::now() - Duration::from_secs(60)))
+        .set_times(std::fs::FileTimes::new().set_modified(SystemTime::now() - Duration::from_secs(120)))
         .unwrap();
     a.update_with("c", |_| async { Ok(Some(credential("c"))) }).await.unwrap();
     assert!(matches!(a.get("c").await.unwrap(), Some(Credential::Oauth(OAuthCredential { refresh, .. })) if refresh == "c"));
+    // A lock 40 s old may be a refresh still under way (it gives up at 30 s): waited for, not broken.
+    std::fs::write(&lock, "another kumi").unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&lock)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(SystemTime::now() - Duration::from_secs(40)))
+        .unwrap();
+    let released = Rc::new(Cell::new(false));
+    let (waited, ()) = tokio::join!(
+        a.update_with("d", |_| {
+            let released = released.get();
+            async move {
+                assert!(released, "the other Kumi's lock was broken while it held it");
+                Ok(Some(credential("d")))
+            }
+        }),
+        async {
+            sleep(Duration::from_millis(150)).await;
+            released.set(true);
+            std::fs::remove_file(&lock).unwrap();
+        }
+    );
+    waited.unwrap();
+    // A lock broken as stale while its holder ran is the next Kumi's: the first's release leaves it.
+    a.update_with("e", |_| async {
+        std::fs::write(&lock, "the next kumi").unwrap();
+        Ok(Some(credential("e")))
+    })
+    .await
+    .unwrap();
+    assert_eq!(std::fs::read_to_string(&lock).unwrap(), "the next kumi");
 }
 #[test]
 fn account_ids_come_only_from_the_chatgpt_auth_claim() {

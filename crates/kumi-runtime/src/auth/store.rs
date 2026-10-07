@@ -61,7 +61,9 @@ pub trait CredentialStore {
     /// Read-modify-write under an exclusive cross-process lock; None removes the entry.
     async fn update(&self, provider: &str, change: CredentialChange) -> Result<Option<Credential>, RuntimeError>;
 }
-const LOCK_STALE_MS: i64 = 30_000;
+/// How old a lock is before it's taken for one a stopped Kumi left: longer than any hold, as a token refresh inside
+/// one gives up at 30 s (at 30 s a slow refresh's lock was broken, and two processes posted one rotating token).
+const LOCK_STALE_MS: i64 = 60_000;
 const LOCK_WAIT_MS: i64 = 10_000;
 #[derive(Clone)]
 pub struct FileCredentialStore {
@@ -149,6 +151,10 @@ impl FileCredentialStore {
     {
         let lock = PathBuf::from(format!("{}.lock", self.path.display()));
         self.mkdir().await?;
+        // Written in the lock, it says whose the lock is: a release removes only its own.
+        let mut nonce = [0u8; 16];
+        rand::rng().fill_bytes(&mut nonce);
+        let nonce = hex::encode(nonce);
         let deadline = now_ms() + LOCK_WAIT_MS;
         loop {
             let mut options = fs::OpenOptions::new();
@@ -156,8 +162,17 @@ impl FileCredentialStore {
             #[cfg(unix)]
             options.mode(0o600);
             match options.open(&lock).await {
-                Ok(handle) => {
+                Ok(mut handle) => {
+                    let written = async {
+                        handle.write_all(nonce.as_bytes()).await?;
+                        handle.flush().await
+                    }
+                    .await;
                     drop(handle);
+                    if let Err(error) = written {
+                        let _ = fs::remove_file(&lock).await;
+                        return Err(io(error));
+                    }
                     break;
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -184,7 +199,7 @@ impl FileCredentialStore {
                 Err(error) => return Err(io(error)),
             }
         }
-        let mut guard = LockGuard(Some(lock));
+        let mut guard = LockGuard(Some((lock, nonce)));
         let result = async {
             let mut data = self.read().await?;
             let current = data["credentials"]
@@ -207,9 +222,15 @@ impl FileCredentialStore {
             Ok(next)
         }
         .await;
-        if let Some(lock) = guard.0.take() {
-            match fs::remove_file(lock).await {
-                Ok(()) => {}
+        if let Some((lock, nonce)) = guard.0.take() {
+            // Broken as stale while this held it, the lock is another's now: it stays.
+            match fs::read(&lock).await {
+                Ok(held) if held == nonce.as_bytes() => match fs::remove_file(&lock).await {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(io(error)),
+                },
+                Ok(_) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(io(error)),
             }
@@ -217,11 +238,14 @@ impl FileCredentialStore {
         result
     }
 }
-struct LockGuard(Option<PathBuf>);
+/// The lock this holds, and its nonce, removed if it's still this one's when the hold ends early.
+struct LockGuard(Option<(PathBuf, String)>);
 impl Drop for LockGuard {
     fn drop(&mut self) {
-        if let Some(lock) = &self.0 {
-            let _ = std::fs::remove_file(lock);
+        if let Some((lock, nonce)) = &self.0 {
+            if std::fs::read(lock).is_ok_and(|held| held == nonce.as_bytes()) {
+                let _ = std::fs::remove_file(lock);
+            }
         }
     }
 }
