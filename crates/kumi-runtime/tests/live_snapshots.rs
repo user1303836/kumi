@@ -765,6 +765,22 @@ async fn a_clip_live_cant_make_at_its_length_leaves_the_change_to_lives_undo() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn a_missing_audio_file_says_where_to_put_it_back_whatever_its_path_holds() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let python: Python = Rc::new(|args| {
+                (args["check"] == true)
+                    .then(|| json!({"raise":"\u{201c}Verse\u{201d}'s audio file isn't there any more (/Samples/Kick (old) take 2).wav)"}))
+            });
+            let live = live(TOOLS, bridge_reply(python), None).await;
+            live.change("delete_clip", json!({"clipRef":VERSE})).await;
+            let (text, _) = live.undo().await;
+            assert!(text.ends_with("Put the file back at /Samples/Kick (old) take 2).wav, then undo again."), "{text}");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn a_renamed_track_says_how_to_clear_it() {
     tokio::task::LocalSet::new()
         .run_until(async {

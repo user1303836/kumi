@@ -32,6 +32,8 @@ use std::{
 const RESTORE_MS: u64 = 30_000;
 /// The most changes a session's history keeps, the oldest going first.
 pub const MAX_ENTRIES: usize = 20_000;
+/// How Kumi's Live script says a kept audio clip's file is gone, before its path (snapshots.py).
+const MISSING_FILE: &str = "audio file isn't there any more (";
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Restore {
@@ -595,8 +597,10 @@ impl History {
             why.find('\u{201d}').map(|end| format!("Move or delete {}, then undo again.", &why[..end + '\u{201d}'.len_utf8()]))
         } else if why.contains("'s slot now") {
             Some("Move or delete the clip in its slot, then undo again.".to_owned())
-        } else if why.contains("audio file isn't there any more") {
-            why.rfind(" (").map(|at| format!("Put the file back at {}, then undo again.", why[at + 2..].trim_end_matches(')')))
+        } else if let Some(at) = why.find(MISSING_FILE) {
+            // The path is all that follows the fixed words, less their closing parenthesis: it may hold " (" and ")".
+            let file = &why[at + MISSING_FILE.len()..];
+            Some(format!("Put the file back at {}, then undo again.", file.strip_suffix(')').unwrap_or(file)))
         } else if why.ends_with(" is frozen") {
             Some(format!("Unfreeze {}, then undo again.", why.trim_end_matches(" is frozen")))
         } else {
