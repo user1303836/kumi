@@ -76,8 +76,25 @@ def _mode_owner_only(path: Path) -> bool:
         return False
 
 
+def _config_paths(reference: Path) -> list[Path]:
+    """The files _read_config checks the owner of, as far as they can be read now (nothing in them trusted yet): its
+    checks then find their verdicts waiting, one PowerShell run in all on Windows instead of one each."""
+    paths = [reference]
+    try:
+        config = Path(json.loads(reference.read_text(encoding="utf-8"))["config"]); paths.append(config)
+        value = _normalize_bridge_config(json.loads(config.read_text(encoding="utf-8")))
+        paths.append(Path(value["secretFile"]))
+        diagnostics = Path(value["diagnostics"]["path"]) if isinstance(value.get("diagnostics"), dict) else None
+        if diagnostics is not None: paths += [diagnostics, diagnostics.parent]
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError):
+        pass
+    return paths
+
+
 def _read_config() -> dict[str, Any]:
     reference = Path(__file__).with_name("bridge-reference.json")
+    if os.name == "nt":
+        _prefetch_acl_verdicts(_config_paths(reference))
     if reference.is_symlink() or not reference.is_file() or not _owner_controlled(reference) or not _mode_owner_only(reference):
         raise ValueError("bridge configuration reference is missing or unsafe")
     try:
@@ -153,30 +170,86 @@ def _diagnostics_path_safe(path: Path) -> bool:
         return False
 
 
+# Verdicts of the Windows ACL check, by the path and what's on disk there (device, file id, size, times), each for a
+# short while: the Control Surface's start asks about the same few files more than once, and each check of Live's
+# own Python (it has no ctypes) is a PowerShell run on Live's main thread.
+_ACL_VERDICTS: dict[tuple[Any, ...], tuple[bool, float]] = {}
+_ACL_VERDICT_SECONDS = 30.0
+# A batch's answer: this bit set, and bit i for path i that failed. Any other exit (PowerShell failing to start, a
+# script error's 1) fails every path, closed.
+_ACL_ANSWERED = 128
+_ACL_BATCH = 7
+
+
+def _acl_key(path: Path) -> tuple[Any, ...] | None:
+    try:
+        entry = os.stat(path)
+    except (OSError, ValueError, TypeError):
+        return None
+    return (str(path), entry.st_dev, entry.st_ino, entry.st_size, entry.st_mtime_ns, getattr(entry, "st_ctime_ns", None))
+
+
+def _acl_cached(key: tuple[Any, ...] | None) -> bool | None:
+    held = _ACL_VERDICTS.get(key) if key is not None else None
+    return held[0] if held is not None and time.monotonic() - held[1] < _ACL_VERDICT_SECONDS else None
+
+
 def _windows_acl_owner_only(path: Path) -> bool:
     """Require a protected DACL containing exactly one owner FullControl ACE.
 
     Verification uses the Windows security API with explicit exit codes so no
     localized or serialized output is parsed.
     """
+    key = _acl_key(path); cached = _acl_cached(key)
+    if cached is not None:
+        return cached
+    verdict = _windows_acl_owner_only_all([path])[0]
+    if key is not None:
+        _ACL_VERDICTS[key] = (verdict, time.monotonic())
+    return verdict
+
+
+def _prefetch_acl_verdicts(paths: list[Path]) -> None:
+    """Check several files' ACLs in one PowerShell run and keep the verdicts, so the checks after it don't each
+    start one. Best effort: a path that can't be looked at is left for its own check."""
+    wanted = []
+    for path in paths:
+        key = _acl_key(path) if path is not None else None
+        if key is not None and _acl_cached(key) is None and key not in [held for _, held in wanted]:
+            wanted.append((path, key))
+    for start in range(0, len(wanted), _ACL_BATCH):
+        batch = wanted[start:start + _ACL_BATCH]
+        verdicts = _windows_acl_owner_only_all([path for path, _ in batch])
+        for (_, key), verdict in zip(batch, verdicts):
+            _ACL_VERDICTS[key] = (verdict, time.monotonic())
+
+
+def _windows_acl_owner_only_all(paths: list[Path]) -> list[bool]:
+    """The ACL check for up to _ACL_BATCH paths in one PowerShell run, by its exit code (no output is parsed)."""
+    if not 1 <= len(paths) <= _ACL_BATCH:
+        return [False] * len(paths)
     try:
-        encoded = base64.b64encode(str(path).encode("utf-8")).decode("ascii")
+        encoded = base64.b64encode("\n".join(str(path) for path in paths).encode("utf-8")).decode("ascii")
         script = (
-            "$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:ABLETON_MCP_ACL_PATH));"
             "$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User;"
+            "function OwnerOnly($p) {"
             "$c=[System.IO.File]::GetAccessControl($p);"
-            "if ($c.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { exit 2 }"
-            "if (-not $c.AreAccessRulesProtected) { exit 3 }"
-            "$rules=@($c.Access); if ($rules.Count -ne 1) { exit 4 }"
+            "if ($c.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { return $false }"
+            "if (-not $c.AreAccessRulesProtected) { return $false }"
+            "$rules=@($c.Access); if ($rules.Count -ne 1) { return $false }"
             "$rule=$rules[0];"
-            "if ($rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { exit 5 }"
-            "if ($rule.IsInherited) { exit 6 }"
-            "if ($rule.AccessControlType.ToString() -ne 'Allow') { exit 7 }"
-            "if (($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne [System.Security.AccessControl.FileSystemRights]::FullControl) { exit 8 }"
-            "exit 0"
+            "if ($rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { return $false }"
+            "if ($rule.IsInherited) { return $false }"
+            "if ($rule.AccessControlType.ToString() -ne 'Allow') { return $false }"
+            "if (($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne [System.Security.AccessControl.FileSystemRights]::FullControl) { return $false }"
+            "return $true };"
+            "$paths=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:ABLETON_MCP_ACL_PATHS)) -split \"`n\";"
+            f"$mask={_ACL_ANSWERED}; $i=0;"
+            "foreach ($p in $paths) { $ok=$false; try { $ok=(OwnerOnly $p) -eq $true } catch { $ok=$false }; if (-not $ok) { $mask=$mask -bor (1 -shl $i) }; $i++ };"
+            "exit $mask"
         )
         environment = dict(os.environ)
-        environment["ABLETON_MCP_ACL_PATH"] = encoded
+        environment["ABLETON_MCP_ACL_PATHS"] = encoded
         # By its full path: a bare name is looked for in Live's own folder and the working folder first.
         powershell = os.path.join(os.environ.get("SYSTEMROOT") or r"C:\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
         # Live has no console of its own: without this flag each check would open a console window.
@@ -184,9 +257,12 @@ def _windows_acl_owner_only(path: Path) -> bool:
             [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
             capture_output=True, timeout=10, env=environment, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        return result.returncode == 0
+        code = result.returncode
+        if not isinstance(code, int) or code & ~((1 << len(paths)) - 1) != _ACL_ANSWERED:
+            return [False] * len(paths)
+        return [not code & (1 << index) for index in range(len(paths))]
     except (AttributeError, OSError, ValueError, TypeError, subprocess.SubprocessError):
-        return False
+        return [False] * len(paths)
 
 
 def _windows_owner_controlled(path: Path) -> bool | None:

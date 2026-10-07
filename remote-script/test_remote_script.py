@@ -291,11 +291,46 @@ class RemoteScriptTests(unittest.TestCase):
         seen = {}
         def run(args, **kwargs):
             seen["args"], seen["kwargs"] = args, kwargs
-            return types.SimpleNamespace(returncode=0)
+            return types.SimpleNamespace(returncode=package._ACL_ANSWERED)
         with patch("AbletonMcpBridge.subprocess.run", run), patch.dict(os.environ, {"SYSTEMROOT": r"D:\Windows"}):
             self.assertTrue(package._windows_acl_owner_only(Path("C:/Kumi/bridge-reference.json")))
         self.assertEqual(seen["args"][0], os.path.join(r"D:\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"))
         self.assertEqual(seen["kwargs"]["creationflags"], getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+    def test_the_control_surfaces_owner_checks_take_one_powershell_run(self):
+        # Live's own Python on Windows has no ctypes: each owner check is a PowerShell run on Live's main thread.
+        package = __import__("AbletonMcpBridge"); runs = []
+        def run(args, **kwargs):
+            runs.append(kwargs["env"]["ABLETON_MCP_ACL_PATHS"])
+            return types.SimpleNamespace(returncode=package._ACL_ANSWERED | 0b010)  # the second path fails
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [Path(directory, name) for name in ("reference", "config", "secret")]
+            for path in paths: path.write_text("x", encoding="utf-8")
+            with patch("AbletonMcpBridge.subprocess.run", run), patch.dict(package._ACL_VERDICTS, clear=True):
+                package._prefetch_acl_verdicts(paths + [paths[0]])
+                self.assertEqual([package._windows_acl_owner_only(path) for path in paths], [True, False, True])
+                self.assertEqual(len(runs), 1, "the checks after the batch find their verdicts waiting")
+                self.assertEqual(base64.b64decode(runs[0]).decode("utf-8").split("\n"), [str(path) for path in paths])
+                # A file changed since gets a run of its own.
+                paths[0].write_text("changed", encoding="utf-8"); package._windows_acl_owner_only(paths[0])
+                self.assertEqual(len(runs), 2)
+
+    def test_the_owner_checks_are_asked_about_the_configs_files_together(self):
+        package = __import__("AbletonMcpBridge")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); config = root / "bridge-config.json"; secret = root / "secret"; log = root / "logs" / "bridge.log"
+            bridge = {"host": "127.0.0.1", "port": 9765, "secretFile": str(secret), "timeoutMs": 5000, "diagnostics": {"path": str(log), "maxBytes": remote_module._DIAGNOSTICS_MAX_BYTES}}
+            config.write_text(json.dumps({"version": 2, "server": {"command": "kumi-bridge", "args": []}, "bridge": bridge}), encoding="utf-8")
+            reference = root / "bridge-reference.json"; reference.write_text(json.dumps({"config": str(config)}), encoding="utf-8")
+            self.assertEqual(package._config_paths(reference), [reference, config, secret, log, log.parent])
+            reference.write_text("not json", encoding="utf-8")
+            self.assertEqual(package._config_paths(reference), [reference], "what can't be read is left to the checks themselves")
+
+    def test_a_powershell_answer_without_its_marker_fails_every_path(self):
+        package = __import__("AbletonMcpBridge")
+        for code in (0, 1, package._ACL_ANSWERED | 0b1000, 255):
+            with patch("AbletonMcpBridge.subprocess.run", lambda args, **kwargs: types.SimpleNamespace(returncode=code)):
+                self.assertEqual(package._windows_acl_owner_only_all([Path("C:/a"), Path("C:/b"), Path("C:/c")]), [False] * 3, code)
 
     def surface_with_timer(self, serve=None):
         """A Control Surface whose Live has a timer (Live.Base.Timer), the timers it made, its bridge."""
