@@ -357,12 +357,11 @@ impl McpHost {
             Ok(success_text(id, &body))
         }
         .await;
-        Some(result.unwrap_or_else(|e| {
-            if record.borrow()["state"] == "applying" {
-                record.borrow_mut()["state"] = json!("uncertain");
-            }
-            adapter_tool_error(id, &e, "Whether the device changed is uncertain: look at it before trying again.")
-        }))
+        Some(
+            result.unwrap_or_else(|e| {
+                apply_failed(id, &record, &e, "Whether the device changed is uncertain: look at it before trying again.")
+            }),
+        )
     }
     pub async fn undo_device_edit_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {
         let Some(record) = self.clip_lifecycle_transactions.get(p["transactionId"].as_str().unwrap_or("")) else {

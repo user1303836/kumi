@@ -184,10 +184,10 @@ impl McpHost {
             Ok(success_text(id, &response))
         }
         .await;
-        Some(result.unwrap_or_else(|e| {
-            record.borrow_mut()["state"] = json!("uncertain");
-            adapter_tool_error(id, &e, "Drum-pad state is uncertain; perform fresh discovery before retrying.")
-        }))
+        Some(
+            result
+                .unwrap_or_else(|e| apply_failed(id, &record, &e, "Drum-pad state is uncertain; perform fresh discovery before retrying.")),
+        )
     }
     pub async fn undo_drum_pad_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {
         let record = p["transactionId"].as_str().and_then(|id| self.clip_lifecycle_transactions.get(id));

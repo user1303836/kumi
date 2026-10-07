@@ -126,10 +126,10 @@ impl McpHost {
             Ok(success_text(id, &json!({"transactionId":t["id"],"state":"applied","result":result,"idempotent":false})))
         }
         .await;
-        Some(result.unwrap_or_else(|e| {
-            record.borrow_mut()["state"] = json!("uncertain");
-            adapter_tool_error(id, &e, "Simpler state is uncertain; perform fresh discovery before retrying.")
-        }))
+        Some(
+            result
+                .unwrap_or_else(|e| apply_failed(id, &record, &e, "Simpler state is uncertain; perform fresh discovery before retrying.")),
+        )
     }
     pub async fn undo_simpler_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {
         let record = p["transactionId"].as_str().and_then(|id| self.clip_lifecycle_transactions.get(id));

@@ -114,10 +114,7 @@ impl McpHost {
         }
         .await;
         Some(result.unwrap_or_else(|e| {
-            if record.borrow()["state"] == "applying" {
-                record.borrow_mut()["state"] = json!("uncertain");
-            }
-            adapter_tool_error(id, &e, "Whether the device was copied is uncertain: look at its chain before trying again.")
+            apply_failed(id, &record, &e, "Whether the device was copied is uncertain: look at its chain before trying again.")
         }))
     }
     pub async fn undo_device_copy_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {

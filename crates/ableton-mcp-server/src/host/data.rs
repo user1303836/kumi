@@ -224,10 +224,7 @@ impl McpHost {
             record.borrow_mut()["state"]=json!("applied");Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","key":t["payload"]["key"],"value":result["value"],"prior":result["prior"],"idempotent":false})))
         }.await;
         Some(result.unwrap_or_else(|e| {
-            if record.borrow()["state"] == "applying" {
-                record.borrow_mut()["state"] = json!("uncertain");
-            }
-            adapter_tool_error(id, &e, "Whether the text was saved is uncertain: read it again before trying again.")
+            apply_failed(id, &record, &e, "Whether the text was saved is uncertain: read it again before trying again.")
         }))
     }
     pub async fn undo_data_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {

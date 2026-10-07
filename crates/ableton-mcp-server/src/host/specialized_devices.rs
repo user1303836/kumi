@@ -297,8 +297,7 @@ impl McpHost {
         }
         .await;
         Some(result.unwrap_or_else(|e| {
-            record.borrow_mut()["state"] = json!("uncertain");
-            adapter_tool_error(id, &e, "Specialized-device state is uncertain; perform fresh discovery before retrying.")
+            apply_failed(id, &record, &e, "Specialized-device state is uncertain; perform fresh discovery before retrying.")
         }))
     }
     pub async fn undo_specialized_device_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {

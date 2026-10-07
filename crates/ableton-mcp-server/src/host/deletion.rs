@@ -127,10 +127,9 @@ impl McpHost {
             Ok(success_text(id, &json!({"transactionId":t["id"],"state":"applied","kept":KEPT,"idempotent":false})))
         }
         .await;
-        Some(result.unwrap_or_else(|e| {
-            record.borrow_mut()["state"] = json!("uncertain");
-            adapter_tool_error(id, &e, "Device state is uncertain; perform fresh discovery before retrying.")
-        }))
+        Some(
+            result.unwrap_or_else(|e| apply_failed(id, &record, &e, "Device state is uncertain; perform fresh discovery before retrying.")),
+        )
     }
     async fn deletion_plan(&self, kind: &str, reference: &str, context: Option<&LiveOperationContext>) -> Result<Plan, LiveError> {
         if kind == "clip" {
@@ -307,11 +306,12 @@ impl McpHost {
         }
         .await;
         Some(result.unwrap_or_else(|e| {
-            if record.borrow()["state"] == "applying" || reconciliation {
+            if reconciliation {
                 record.borrow_mut()["state"] = json!("uncertain");
             }
-            adapter_tool_error(
+            apply_failed(
                 id,
+                &record,
                 &e,
                 &format!("Whether the {kind} is gone is uncertain; discover it again before retrying with the same key."),
             )

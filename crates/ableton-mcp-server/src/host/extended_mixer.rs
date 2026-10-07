@@ -364,8 +364,7 @@ impl McpHost {
         }
         .await;
         Some(result.unwrap_or_else(|e| {
-            record.borrow_mut()["state"] = json!("uncertain");
-            adapter_tool_error(id, &e, &format!("{} state is uncertain; perform fresh discovery before retrying.", f.title()))
+            apply_failed(id, &record, &e, &format!("{} state is uncertain; perform fresh discovery before retrying.", f.title()))
         }))
     }
     pub async fn undo_extended_mixer_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {

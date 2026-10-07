@@ -455,13 +455,12 @@ impl McpHost {
         }
         .await;
         result.unwrap_or_else(|e| {
-            if record.borrow()["state"] == "applying" {
-                record.borrow_mut()["state"] = json!("uncertain");
-            }
-            adapter_tool_error(
+            let undone = record.borrow()["state"] == "undone";
+            apply_failed(
                 id,
+                &record,
                 &e,
-                if record.borrow()["state"] == "undone" {
+                if undone {
                     "Nothing changed in Live."
                 } else {
                     "Arrangement apply uncertain; read authoritative locators before retrying."

@@ -198,10 +198,11 @@ impl McpHost {
             Ok(success_text(id, &json!({"transactionId":t["id"],"state":"applied","idempotent":false})))
         }
         .await;
-        Some(result.unwrap_or_else(|e| {
-            record.borrow_mut()["state"] = json!("uncertain");
-            adapter_tool_error(id, &e, "Selection state is uncertain; perform fresh discovery before retrying.")
-        }))
+        Some(
+            result.unwrap_or_else(|e| {
+                apply_failed(id, &record, &e, "Selection state is uncertain; perform fresh discovery before retrying.")
+            }),
+        )
     }
     pub async fn undo_selection_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {
         let Some(record) = self.clip_lifecycle_transactions.get(p["transactionId"].as_str().unwrap_or("")) else {

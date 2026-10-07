@@ -274,13 +274,9 @@ impl McpHost {
             record.borrow_mut()["created"]=json!({"deviceRef":loaded["deviceRef"],"objectIdentity":loaded["deviceObjectIdentity"],"fingerprint":fingerprint});record.borrow_mut()["applyKey"]=p["idempotencyKey"].clone();record.borrow_mut()["state"]=json!("applied");
             Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","deviceRef":loaded["deviceRef"],"placement":self.device_placement(&snapshot,&created)?,"idempotent":false})))
         }.await;
-        Some(result.unwrap_or_else(|e| {
-            // Nothing was sent before applying: it stays as it was, to try again.
-            if record.borrow()["state"] == "applying" {
-                record.borrow_mut()["state"] = json!("uncertain");
-            }
-            adapter_tool_error(id, &e, "Browser load is uncertain; perform fresh discovery before retrying.")
-        }))
+        Some(
+            result.unwrap_or_else(|e| apply_failed(id, &record, &e, "Browser load is uncertain; perform fresh discovery before retrying.")),
+        )
     }
     pub async fn undo_browser_load_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {
         let Some(record) =

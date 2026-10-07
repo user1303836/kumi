@@ -552,8 +552,7 @@ impl McpHost {
         }
         .await;
         Some(result.unwrap_or_else(|e| {
-            record.borrow_mut()["state"] = json!("uncertain");
-            adapter_tool_error(id, &e, "Arrangement-clip state is uncertain; perform fresh discovery before retrying.")
+            apply_failed(id, &record, &e, "Arrangement-clip state is uncertain; perform fresh discovery before retrying.")
         }))
     }
     pub async fn undo_arrangement_clip_async(&self, id: &Value, params: &Value, signal: Option<&Signal>) -> Value {

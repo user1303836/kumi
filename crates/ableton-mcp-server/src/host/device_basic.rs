@@ -186,13 +186,9 @@ impl McpHost {
             Ok(success_text(id, &json!({"transactionId":t["id"],"state":"applied","result":result,"idempotent":false})))
         }
         .await;
-        Some(result.unwrap_or_else(|e| {
-            // Nothing was sent before applying: it stays as it was, to try again.
-            if record.borrow()["state"] == "applying" {
-                record.borrow_mut()["state"] = json!("uncertain");
-            }
-            adapter_tool_error(id, &e, "Device state is uncertain; perform fresh discovery before retrying.")
-        }))
+        Some(
+            result.unwrap_or_else(|e| apply_failed(id, &record, &e, "Device state is uncertain; perform fresh discovery before retrying.")),
+        )
     }
     pub async fn undo_device_basic_async(&self, id: &Value, p: &Value, signal: Option<&Signal>) -> Value {
         let Some(record) =

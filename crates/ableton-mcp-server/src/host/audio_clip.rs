@@ -255,10 +255,11 @@ impl McpHost {
             Ok(success_text(id, &value))
         }
         .await;
-        Some(result.unwrap_or_else(|e| {
-            record.borrow_mut()["state"] = json!("uncertain");
-            adapter_tool_error(id, &e, "Audio-clip state is uncertain; perform fresh discovery before retrying.")
-        }))
+        Some(
+            result.unwrap_or_else(|e| {
+                apply_failed(id, &record, &e, "Audio-clip state is uncertain; perform fresh discovery before retrying.")
+            }),
+        )
     }
     pub async fn undo_audio_clip_async(&self, id: &Value, params: &Value, signal: Option<&Signal>) -> Value {
         let Some(record) = params["transactionId"]

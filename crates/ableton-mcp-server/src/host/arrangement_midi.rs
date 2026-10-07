@@ -294,11 +294,12 @@ impl McpHost {
             let mut result=json!({"transactionId":t["id"],"state":"applied","clips":created});if let Some(reason)=partial{result["partial"]=json!({"made":created.len(),"of":clips.len(),"notMade":not_made,"reason":reason});}if reconciliation{result["reconciled"]=json!(true);}result["idempotent"]=json!(false);Ok(success_text(id,&result))
         }.await;
         Some(result.unwrap_or_else(|e| {
-            if record.borrow()["state"] == "applying" || reconciliation {
+            if reconciliation {
                 record.borrow_mut()["state"] = json!("uncertain");
             }
-            adapter_tool_error(
+            apply_failed(
                 id,
+                &record,
                 &e,
                 "Whether the clips are there is uncertain: retry with the same key, which looks for them before making any.",
             )
@@ -463,10 +464,7 @@ impl McpHost {
             Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","removed":removed,"clipsBefore":result["clipsBefore"],"clipsAfter":result["clipsAfter"],"kept":KEPT,"idempotent":false})))
         }.await;
         Some(result.unwrap_or_else(|e| {
-            if record.borrow()["state"] == "applying" {
-                record.borrow_mut()["state"] = json!("uncertain");
-            }
-            adapter_tool_error(id, &e, "Whether the range is clear is uncertain: look at the Arrangement before trying again.")
+            apply_failed(id, &record, &e, "Whether the range is clear is uncertain: look at the Arrangement before trying again.")
         }))
     }
 }

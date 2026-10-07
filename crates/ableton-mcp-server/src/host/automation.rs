@@ -446,13 +446,11 @@ impl McpHost {
             ))
         }
         .await;
-        Some(result.unwrap_or_else(|e| {
-            // Nothing was sent before applying: it stays as it was, to try again.
-            if record.borrow()["state"] == "applying" {
-                record.borrow_mut()["state"] = json!("uncertain");
-            }
-            adapter_tool_error(id, &e, "Automation state is uncertain; perform fresh discovery before retrying.")
-        }))
+        Some(
+            result.unwrap_or_else(|e| {
+                apply_failed(id, &record, &e, "Automation state is uncertain; perform fresh discovery before retrying.")
+            }),
+        )
     }
 
     async fn automation_guarded(

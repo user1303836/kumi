@@ -383,12 +383,9 @@ impl McpHost {
         }
         .await;
         Some(result.unwrap_or_else(|e| {
-            // Nothing was sent before applying: it stays as it was, to try again.
-            if record.borrow()["state"] == "applying" {
-                record.borrow_mut()["state"] = json!("uncertain");
-            }
-            adapter_tool_error(
+            apply_failed(
                 id,
+                &record,
                 &e,
                 if fire {
                     "Scene-fire state is uncertain; inspect Live before retrying."
