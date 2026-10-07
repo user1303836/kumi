@@ -25,6 +25,9 @@ try:
         prior = float(p.value)
         rows.append({'name': str(p.name), 'prior': prior, 'priorDisplay': str(p.str_for_value(prior)), 'min': float(p.min), 'max': float(p.max)})
         p.value = v
+        # What this target's own set left: a later target on the same parameter moves it again, and the undo, last
+        # target first, checks each against this.
+        rows[-1]['applied'] = float(p.value)
         done.append((p, prior))
 except Exception:
     for p, prior in reversed(done):

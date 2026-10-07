@@ -438,10 +438,15 @@ impl Parameters {
             } else {
                 object(json!({"device":target["device"],"index":target["index"]}))
             };
-            for (from, to) in [("name", "name"), ("prior", "prior"), ("value", "applied")] {
+            for (from, to) in [("name", "name"), ("prior", "prior")] {
                 if let Some(value) = row.get(from) {
                     back.insert(to.into(), value.clone());
                 }
+            }
+            // What the target's own set left (two targets can be one parameter: the undo puts each back in turn),
+            // else what Live kept in the end.
+            if let Some(value) = row.get("applied").or_else(|| row.get("value")) {
+                back.insert("applied".into(), value.clone());
             }
             revert.push(Value::Object(back));
         }

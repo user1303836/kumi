@@ -219,3 +219,118 @@ async fn a_device_put_in_anothers_place_has_its_parameters_units_read_again() {
         })
         .await;
 }
+
+/// A fake Live behind the bridge: each run_python runs Kumi's script in Python against one device whose parameters
+/// keep their values (in `state`, a JSON file) from one call to the next.
+struct PythonLive {
+    state: std::path::PathBuf,
+}
+const FAKE_LIVE: &str = r#"
+import json, sys
+STATE = sys.argv[1]
+state = json.load(open(STATE))
+class Param:
+    def __init__(self, i): self.i = i
+    name = property(lambda s: state["params"][s.i]["name"])
+    min = property(lambda s: float(state["params"][s.i]["min"]))
+    max = property(lambda s: float(state["params"][s.i]["max"]))
+    is_enabled = True
+    is_quantized = False
+    def _get(self): return state["params"][self.i]["value"]
+    def _set(self, v): state["params"][self.i]["value"] = float(v)
+    value = property(_get, _set)
+    def str_for_value(self, v): return "%.3f" % v
+    canonical_parent = property(lambda s: Device())
+class Track:
+    name = "Bass"
+class Device:
+    name = "Saturator"
+    canonical_parent = property(lambda s: Track())
+    parameters = property(lambda s: [Param(i) for i in range(len(state["params"]))])
+class Refs:
+    def get(self, ref):
+        if ref == "7:device:0:0": return Device()
+        if ref.startswith("7:parameter:0:0:"): return Param(int(ref.rsplit(":", 1)[1]))
+        raise KeyError(ref)
+class Bridge: refs = Refs()
+space = {"bridge": Bridge()}
+exec(compile(sys.stdin.read(), "kumi", "exec"), space)
+json.dump(state, open(STATE, "w"))
+# The bridge hands a Live object back as its ref.
+print(json.dumps({"ok": True, "result": space.get("result")}, default=lambda thing: {"ref": "7:track:0"}))
+"#;
+#[async_trait(?Send)]
+impl McpEndpoint for PythonLive {
+    fn pid(&self) -> Option<u32> {
+        None
+    }
+    fn server_info(&self) -> Option<Implementation> {
+        Some(serde_json::from_value(json!({"name":"fixture","version":"1.0.73"})).unwrap())
+    }
+    async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
+        Ok(serde_json::from_value(json!({"tools":(["live_discover","live_run_python"].iter().map(|name|json!({"name":name,"inputSchema":{"type":"object"}})).collect::<Vec<_>>())})).unwrap())
+    }
+    async fn call(&self, name: &str, args: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
+        use std::io::Write;
+        assert_eq!(name, "live_run_python");
+        let mut child = std::process::Command::new("python3")
+            .args(["-c", FAKE_LIVE, self.state.to_str().unwrap()])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(args["code"].as_str().unwrap().as_bytes()).unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+        Ok(serde_json::from_value(json!({"content":[{"type":"text","text":stringify(&payload)}],"structuredContent":payload})).unwrap())
+    }
+    fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn stderr_status(&self) -> StderrStatus {
+        StderrStatus { bytes: 0, truncated: false }
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn one_change_that_sets_a_parameter_twice_is_undone_to_its_first_value() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let state = folder.path().join("live.json");
+            std::fs::write(&state, r#"{"params":[{"name":"Drive","value":0.2,"min":0,"max":1}]}"#).unwrap();
+            let value = || serde_json::from_str::<Value>(&std::fs::read_to_string(&state).unwrap()).unwrap()["params"][0]["value"].clone();
+            let endpoint = Rc::new(PythonLive { state: state.clone() });
+            let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
+            let out = endpoint.clone();
+            options.connect = Some(Rc::new(move |_| {
+                let endpoint: Rc<dyn McpEndpoint> = out.clone();
+                async move { Ok(endpoint) }.boxed_local()
+            }));
+            let connection = LiveConnection::new(options);
+            connection.start(Signal::new()).await.unwrap();
+            connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
+            let remember = Remember::new(connection.clone(), None, None);
+            let history = Rc::new(History::new(connection.clone(), remember, None, None));
+            let parameters = Parameters::new(history.clone(), None);
+            // Drive by its ref, then by its name: one parameter, set twice in one change.
+            let kind = CHANGES.iter().find(|k| k.tool == "set_device_parameters").unwrap();
+            let input = json!({"deviceRef":"7:device:0:0","values":[{"parameterRef":"7:parameter:0:0:0","value":0.5},{"parameter":"Drive","value":0.8}]});
+            let outcome = parameters.fast_parameters(kind, input.as_object().unwrap(), Signal::new()).await.unwrap();
+            assert!(!outcome.is_error, "{}", outcome.text);
+            assert_eq!(value(), json!(0.8));
+            let change = serde_json::from_str::<Value>(&outcome.text).unwrap()["change"].as_str().unwrap().to_owned();
+            let undone = history.undo(&change, Signal::new(), false).await.unwrap();
+            assert!(!undone.is_error, "{}", undone.text);
+            assert_eq!(value(), json!(0.2), "back to where it was before the change");
+            connection.close().await.unwrap();
+        })
+        .await;
+}
