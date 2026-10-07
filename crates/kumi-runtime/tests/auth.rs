@@ -70,6 +70,9 @@ async fn credential_store_is_owner_only_atomic_and_removes_entries_on_request() 
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         assert_eq!(std::fs::metadata(path.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
+        let fresh = temp.path().join("nested/fresh.tmp");
+        drop(kumi_runtime::auth::store::owner_only_new_file(&fresh).unwrap());
+        assert_eq!(std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o777, 0o600, "made 0600 before any write");
     }
     assert_eq!(serde_json::from_slice::<Value>(&std::fs::read(&path).unwrap()).unwrap()["version"], 1);
     store.update_with("openai-codex", |_| async { Ok(None) }).await.unwrap();
@@ -92,6 +95,20 @@ async fn on_windows_the_credential_file_is_owner_only_wherever_kumi_home_puts_it
     store.update_with("other", |_| async { Ok(Some(credential("s"))) }).await.unwrap();
     assert!(windows_owner_only(&path), "still, once written again");
     assert_eq!(store.list().await.unwrap().len(), 2);
+    // The next file is owner-only, and open to Kumi alone, before anything is written to it.
+    let next = temp.path().join("kumi-home").join("auth.json.next.tmp");
+    let file = kumi_runtime::auth::store::owner_only_new_file(&next).unwrap();
+    assert!(windows_owner_only(&next));
+    assert_eq!(std::fs::metadata(&next).unwrap().len(), 0, "nothing written yet");
+    assert!(std::fs::File::open(&next).is_err(), "no other handle while it's written");
+    drop(file);
+    // A credential file written before Kumi made them owner-only is rewritten so the first time a process reads it.
+    let older = temp.path().join("older").join("auth.json");
+    std::fs::create_dir_all(older.parent().unwrap()).unwrap();
+    std::fs::write(&older, std::fs::read(&path).unwrap()).unwrap();
+    assert!(!windows_owner_only(&older));
+    assert_eq!(open_credential_store(&older).list().await.unwrap().len(), 2);
+    assert!(windows_owner_only(&older));
 }
 #[tokio::test]
 async fn credential_store_keeps_api_keys_beside_sign_ins_and_refuses_anything_that_isnt_one_word() {

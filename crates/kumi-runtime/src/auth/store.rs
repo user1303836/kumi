@@ -61,9 +61,10 @@ pub trait CredentialStore {
     /// Read-modify-write under an exclusive cross-process lock; None removes the entry.
     async fn update(&self, provider: &str, change: CredentialChange) -> Result<Option<Credential>, RuntimeError>;
 }
-/// How old a lock is before it's taken for one a stopped Kumi left: longer than any hold, as a token refresh inside
-/// one gives up at 30 s (at 30 s a slow refresh's lock was broken, and two processes posted one rotating token).
-const LOCK_STALE_MS: i64 = 60_000;
+/// How old a lock is before it's taken for one a stopped Kumi left: longer than any hold, a token refresh (it gives up
+/// at 30 s) and on Windows the new file's owner-only step (30 s at most) together. At 30 s a slow refresh's lock was
+/// broken, and two processes posted one rotating token.
+const LOCK_STALE_MS: i64 = 90_000;
 const LOCK_WAIT_MS: i64 = 10_000;
 #[derive(Clone)]
 pub struct FileCredentialStore {
@@ -157,11 +158,51 @@ fn make_owner_only(path: &Path) -> Result<(), String> {
 pub fn windows_owner_only(path: &Path) -> bool {
     run_acl(path, &format!("{ACL_TARGET}{ACL_CHECKS}"), 15_000).is_ok()
 }
+/// A new, empty credential file, readable and writable by you alone before anything is written to it, open for
+/// writing. On unix it's made with mode 0600. On Windows it's made, given the owner-only DACL and checked, then opened
+/// again sharing nothing: a handle another program opened before the DACL took would keep its access (Windows checks
+/// at open), so while one is open the file is refused.
+pub fn owner_only_new_file(path: &Path) -> Result<std::fs::File, RuntimeError> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let created = options.open(path).map_err(io)?;
+    if !cfg!(windows) {
+        return Ok(created);
+    }
+    drop(created);
+    let folder = path.parent().unwrap_or(Path::new("."));
+    let refused = |why: String| {
+        auth(format!(
+            "Kumi couldn't keep credentials readable only by you in {} ({why}); keep them in your user folder (unset KUMI_HOME or KUMI_AUTH_FILE), or give that folder's permissions to you alone.",
+            folder.display()
+        ))
+    };
+    make_owner_only(path).map_err(refused)?;
+    let mut again = std::fs::OpenOptions::new();
+    again.write(true).truncate(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        again.share_mode(0);
+    }
+    again.open(path).map_err(|error| refused(format!("another program has it open: {error}")))
+}
+/// Whether this process looks at the credential file at `path` for the first time (`secure_once`).
+fn first_look(path: &Path) -> bool {
+    static SEEN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<PathBuf>>> = std::sync::LazyLock::new(Default::default);
+    SEEN.lock().map(|mut seen| seen.insert(path.to_path_buf())).unwrap_or(false)
+}
 
 impl FileCredentialStore {
     async fn read(&self) -> Result<Value, RuntimeError> {
         let text: Result<Result<String, RuntimeError>, std::io::Error> = async {
-            // Windows profile folders supply the privacy guarantee; POSIX mode bits are checked.
+            // The mode bits are checked here. On Windows each write makes the file owner-only, and one written before
+            // Kumi did is rewritten so once a process (`secure_once`).
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -205,36 +246,36 @@ impl FileCredentialStore {
         let mut random = [0u8; 6];
         rand::rng().fill_bytes(&mut random);
         let temporary = PathBuf::from(format!("{}.{}.{}.tmp", self.path.display(), std::process::id(), hex::encode(random)));
-        let result = async {
-            let mut options = fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            options.mode(0o600);
-            let mut handle = options.open(&temporary).await?;
-            handle.write_all(file_text(data).as_bytes()).await?;
-            handle.sync_all().await?;
-            drop(handle);
-            // Owner-only before it takes the credential file's place (a rename keeps its DACL), on a blocking thread:
-            // PowerShell takes about a second.
-            if cfg!(windows) {
-                let secured = temporary.clone();
-                let made = tokio::task::spawn_blocking(move || make_owner_only(&secured))
-                    .await
-                    .unwrap_or_else(|error| Err(error.to_string()));
-                if let Err(why) = made {
-                    return Ok(Err(auth(format!(
-                        "Kumi couldn't make the credential file {} readable only by you ({why}); keep it in your user folder (unset KUMI_HOME or KUMI_AUTH_FILE), or give that folder's permissions to you alone.",
-                        self.path.display()
-                    ))));
-                }
-            }
-            fs::rename(&temporary, &self.path).await.map(Ok)
-        }
-        .await;
-        if !matches!(result, Ok(Ok(()))) {
+        let (staged, text) = (temporary.clone(), file_text(data));
+        // Owner-only before any credential goes in (on Windows a PowerShell run, about a second): on a blocking thread.
+        let written = tokio::task::spawn_blocking(move || {
+            use std::io::Write;
+            let mut file = owner_only_new_file(&staged)?;
+            file.write_all(text.as_bytes()).map_err(io)?;
+            file.sync_all().map_err(io)
+        })
+        .await
+        .unwrap_or_else(|error| Err(RuntimeError::plain(error.to_string())));
+        // A rename keeps the file's DACL, so auth.json is owner-only from the moment it's there.
+        let result = match written {
+            Ok(()) => fs::rename(&temporary, &self.path).await.map_err(io),
+            Err(error) => Err(error),
+        };
+        if result.is_err() {
             let _ = fs::remove_file(&temporary).await;
         }
-        result.map_err(io)?
+        result
+    }
+    /// Once a process, on Windows: a credential file written before Kumi made them owner-only is rewritten under the
+    /// lock, which makes it so (an API key isn't rewritten otherwise until the next sign-in).
+    async fn secure_once(&self) {
+        if !cfg!(windows) || !first_look(&self.path) || fs::metadata(&self.path).await.is_err() {
+            return;
+        }
+        let path = self.path.clone();
+        if !tokio::task::spawn_blocking(move || windows_owner_only(&path)).await.unwrap_or(true) {
+            let _ = self.update_with("", |current| async move { Ok(current) }).await;
+        }
     }
     pub async fn update_with<F, Fut>(&self, provider: &str, change: F) -> Result<Option<Credential>, RuntimeError>
     where
@@ -347,6 +388,7 @@ impl CredentialStore for FileCredentialStore {
         &self.path
     }
     async fn get(&self, provider: &str) -> Result<Option<Credential>, RuntimeError> {
+        self.secure_once().await;
         self.read().await?["credentials"]
             .get(provider)
             .cloned()
@@ -355,6 +397,7 @@ impl CredentialStore for FileCredentialStore {
             .map_err(|_| auth("Refusing to store a malformed credential."))
     }
     async fn list(&self) -> Result<IndexMap<String, Credential>, RuntimeError> {
+        self.secure_once().await;
         self.read().await?["credentials"]
             .as_object()
             .expect("validated credentials")
