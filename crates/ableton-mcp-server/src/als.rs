@@ -461,20 +461,41 @@ pub struct AlsLintOptions {
 fn resolve(path: impl AsRef<Path>) -> Result<PathBuf, ProjectError> {
     crate::command::resolve(path).map_err(|e| fail(e.message()))
 }
-fn media_exists_without_links(root: &Path, candidate: &Path) -> Option<bool> {
+/// What a path is, its own link not followed: kept for the rest of one lint, whose references share folders.
+#[derive(Clone, Copy)]
+enum Entry {
+    Directory,
+    Other,
+    Link,
+    Missing,
+    Unreadable,
+}
+fn entry(path: &Path, seen: &mut HashMap<PathBuf, Entry>) -> Entry {
+    if let Some(found) = seen.get(path) {
+        return *found;
+    }
+    let found = match std::fs::symlink_metadata(path) {
+        Ok(stats) if stats.is_symlink() => Entry::Link,
+        Ok(stats) if stats.is_dir() => Entry::Directory,
+        Ok(_) => Entry::Other,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Entry::Missing,
+        Err(_) => Entry::Unreadable,
+    };
+    seen.insert(path.to_owned(), found);
+    found
+}
+fn media_exists_without_links(root: &Path, candidate: &Path, seen: &mut HashMap<PathBuf, Entry>) -> Option<bool> {
     let mut current = root.to_owned();
     let components: Vec<_> = candidate.strip_prefix(root).ok()?.components().collect();
     for index in 0..=components.len() {
         if index > 0 {
             current.push(components[index - 1]);
         }
-        match std::fs::symlink_metadata(&current) {
-            Ok(stats) => {
-                if stats.is_symlink() || (index < components.len() && !stats.is_dir()) {
-                    return None;
-                }
-            }
-            Err(e) => return if e.kind() == std::io::ErrorKind::NotFound { Some(false) } else { None },
+        match entry(&current, seen) {
+            Entry::Link | Entry::Unreadable => return None,
+            Entry::Missing => return Some(false),
+            Entry::Other if index < components.len() => return None,
+            Entry::Directory | Entry::Other => {}
         }
     }
     Some(true)
@@ -492,6 +513,7 @@ pub fn lint_als_model(model: &AlsModel, options: &AlsLintOptions) -> Result<Valu
     };
     let last_locator = model.locators.last().map(|l| l.time);
     let media_root = options.allowed_root.as_ref().map(resolve).transpose()?;
+    let mut seen = HashMap::new();
     let mut names: HashMap<&str, usize> = HashMap::new();
     for track in &model.tracks {
         if !track.name.is_empty() {
@@ -566,7 +588,7 @@ pub fn lint_als_model(model: &AlsModel, options: &AlsLintOptions) -> Result<Valu
                     continue;
                 }
                 let candidate = resolve(options.set_directory.as_ref().map(Path::new).unwrap_or(root).join(path))?;
-                if candidate.starts_with(root) && media_exists_without_links(root, &candidate) == Some(false) {
+                if candidate.starts_with(root) && media_exists_without_links(root, &candidate, &mut seen) == Some(false) {
                     push(
                         "error",
                         "missing-sample-reference",
