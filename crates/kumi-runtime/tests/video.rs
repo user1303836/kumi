@@ -988,6 +988,26 @@ printf '%s' '{"transcription":[{"offsets":{"from":1000,"to":3000},"text":" load 
 }
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
+async fn a_speech_model_kumi_cant_get_leaves_a_note_and_the_frames() {
+    let folder = tempfile::tempdir().unwrap();
+    let Some(video) = test_video(folder.path(), "unmodelled", false).await else {
+        eprintln!("ffmpeg makes the test video; unavailable");
+        return;
+    };
+    let mut env = kumi_runtime::system::process_env();
+    env.insert("KUMI_WHISPER".into(), program(folder.path(), "whisper", "exit 1"));
+    env.insert("KUMI_WHISPER_MODEL".into(), folder.path().join("gone.bin").to_string_lossy().into());
+    let mut options = watch_options(folder.path(), "videos");
+    options.env = Some(env);
+    // Offline, or short of disk, as a model that isn't there: the frames still come.
+    let watched = watch_video(WatchRequest { url: video, frames: Some(2.0), ..Default::default() }, options).await.unwrap();
+    assert_eq!(watched.notes.len(), 1, "{:?}", watched.notes);
+    assert!(watched.notes[0].starts_with("Kumi couldn't transcribe the video's speech (KUMI_WHISPER_MODEL names "), "{:?}", watched.notes);
+    assert_eq!(watched.frames.len(), 2);
+    assert_eq!(runs(folder.path(), "whisper"), 0);
+}
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
 async fn speech_process_receives_options_reports_progress_and_cleans_up_after_success_timeout_and_abort() {
     use kumi_runtime::video::speech::{transcribe, TranscribeOptions};
     use std::os::unix::fs::PermissionsExt;

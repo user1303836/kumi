@@ -766,7 +766,17 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
             ));
         } else if let Some(audio) = watcher.streams().await?.audio {
             let language = watcher.info.as_ref().and_then(|info| info["language"].as_str()).unwrap_or("en").to_string();
-            let model = whisper_model(speech_model_for(Some(&language)), &watcher.programs()).await?;
+            let model = match whisper_model(speech_model_for(Some(&language)), &watcher.programs()).await {
+                Ok(model) => Some(model),
+                // Offline, or short of disk: the frames still come, as when transcribing fails.
+                Err(error) => {
+                    if let Some(signal) = &signal {
+                        signal.check()?;
+                    }
+                    notes.push(format!("Kumi couldn't transcribe the video's speech ({}).", head(&error.to_string(), 160)));
+                    None
+                }
+            };
             let whole = end == 0.0 || end <= 5400.0;
             let start = if whole { 0.0 } else { from };
             let stop = if whole {
@@ -778,8 +788,10 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
             } else {
                 to.min(from + 5400.0)
             };
-            let stretch = format!("{}|{}-{}", meta.key, to_fixed(start, 0), to_fixed(stop, 0));
-            let heard = if let Some(why) = unheard(signal.as_ref(), &stretch) {
+            let taken = format!("{}|{}-{}", meta.key, to_fixed(start, 0), to_fixed(stop, 0));
+            let heard = if model.is_none() {
+                Ok(None)
+            } else if let Some(why) = unheard(signal.as_ref(), &taken) {
                 notes.push(format!(
                     "Kumi couldn't transcribe the video's speech earlier in this request ({why}), so it didn't try again; it will on the next request."
                 ));
@@ -805,7 +817,7 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                         let on_progress = options.on_progress.clone();
                         let heard = transcribe(
                             whisper.as_deref().unwrap(),
-                            &model,
+                            model.as_deref().unwrap(),
                             &wav,
                             TranscribeOptions {
                                 language: Some(language.clone()),
@@ -832,7 +844,7 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                 }
                 .inspect_err(|error| {
                     if !error.is_aborted() {
-                        remember_unheard(signal.as_ref(), &stretch, head(&error.to_string(), 160));
+                        remember_unheard(signal.as_ref(), &taken, head(&error.to_string(), 160));
                     }
                 })
             };
