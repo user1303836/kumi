@@ -786,6 +786,32 @@ async fn retries_up_to_three_times_before_any_output_escapes_but_never_after_tex
 }
 
 #[tokio::test]
+async fn a_providers_error_inside_its_stream_is_retried_by_its_own_status() {
+    local(async {
+        let stream_error = |fields: Value| Scripted::Parts(vec![StreamPart::Error { error: LanguageModelError::ProviderStream(fields.as_object().unwrap().clone()) }]);
+        // Anthropic's overloaded_error, as its stream reports it: tried again before anything reaches the producer.
+        let overloaded = json!({"message":"Overloaded","type":"overloaded_error","statusCode":529,"isRetryable":true,"data":{}});
+        let retried = harness(move |_, n| if n == 1 { stream_error(overloaded.clone()) } else { answer("ok") }, Options::default());
+        let (events, emit) = collect();
+        assert_eq!(retried.kernel.run("q", signal(), emit).await.unwrap().stop_reason, StopReason::Completed);
+        assert_eq!(retried.count(), 2);
+        let reasons: Vec<_> =
+            events.borrow().iter().filter_map(|event| if let KernelEvent::Retry { reason, .. } = event { Some(reason.clone()) } else { None }).collect();
+        assert_eq!(reasons, ["test is overloaded (HTTP 529)"]);
+        // OpenAI's response.failed for a request it won't take: not tried again, and its own words said.
+        let refused = json!({"message":"Invalid schema for function 'tempo'","type":"response.failed","code":"invalid_function_parameters","statusCode":400,"isRetryable":false,"data":{}});
+        let turned_down = harness(move |_, _| stream_error(refused.clone()), Options::default());
+        let error = kumi_error(turned_down.kernel.run("q", signal(), ignore()).await.unwrap_err());
+        assert_eq!(turned_down.count(), 1);
+        assert!(error.message.contains("turned the request down (HTTP 400): Invalid schema for function 'tempo'"), "{}", error.message);
+        assert_eq!(error.kind, FailureKind::Request);
+        retried.kernel.close().await;
+        turned_down.kernel.close().await;
+    })
+    .await
+}
+
+#[tokio::test]
 async fn a_throwing_listener_discards_the_turn_without_poisoning_the_next_one() {
     local(async {
         let h = harness(|_, _| answer("x"), Options::default());

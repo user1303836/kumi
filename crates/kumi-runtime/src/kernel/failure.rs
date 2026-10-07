@@ -1,6 +1,8 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use kumi_common::js::json::stringify;
 use kumi_common::js::number::parse as js_number;
 use kumi_common::js::string::{head, trim};
 use regex::Regex;
@@ -13,10 +15,26 @@ const MAX_RETRY_WAIT_MS: f64 = 30_000.0;
 /// How many times a model call is tried again (a busy or overloaded provider usually answers soon).
 pub const MAX_RETRIES: u32 = 3;
 
+/// The failed call an error stands for: its API call's, or one the provider reported inside its stream (Anthropic's
+/// overloaded_error, OpenAI's response.failed), with the status and retryability the provider gave it.
+fn failed_call(error: &LanguageModelError) -> Option<Cow<'_, ApiCallError>> {
+    match error {
+        LanguageModelError::ApiCall(error) => Some(Cow::Borrowed(error)),
+        LanguageModelError::ProviderStream(error) => {
+            let status = error.get("statusCode").and_then(Value::as_u64).and_then(|status| u16::try_from(status).ok());
+            let mut call = ApiCallError::new(error.get("message").and_then(Value::as_str).unwrap_or(""), "", None, status);
+            call.is_retryable = error.get("isRetryable").and_then(Value::as_bool).unwrap_or(false);
+            call.response_body = error.get("data").map(stringify);
+            Some(Cow::Owned(call))
+        }
+        _ => None,
+    }
+}
+
 /// Delay before retry number `attempt` (from 0), or None when the failure is not worth retrying:
 /// what the provider asks for, up to 30 s, or 0.75 s, 2.25 s, 6.75 s when it doesn't say.
 pub fn retry_delay_ms(error: &LanguageModelError, attempt: u32) -> Option<f64> {
-    let error = error.api_call()?;
+    let error = failed_call(error)?;
     if !error.is_retryable {
         return None;
     }
@@ -39,7 +57,7 @@ pub fn retry_delay_ms(error: &LanguageModelError, attempt: u32) -> Option<f64> {
 pub fn retry_reason(error: &LanguageModelError, binding_id: &str) -> String {
     let provider = binding_id.split('/').next().unwrap_or(binding_id);
     let name = PROVIDER_NAMES.get(provider).copied().unwrap_or(provider);
-    match error.api_call().and_then(|error| error.status_code) {
+    match failed_call(error).and_then(|error| error.status_code) {
         // A stream that broke off after the response began keeps its 200.
         Some(200..=299) => format!("{name}'s answer broke off"),
         Some(429) => format!("{name} is busy (HTTP 429)"),
@@ -71,9 +89,9 @@ pub fn describe_failure(error: &LanguageModelError, binding_id: &str) -> KumiErr
     let provider = binding_id.split('/').next().unwrap_or(binding_id);
     let model = binding_id.get(provider.len() + 1..).filter(|rest| !rest.is_empty()).unwrap_or(binding_id);
     let name = PROVIDER_NAMES.get(provider).copied().unwrap_or(provider);
-    if let LanguageModelError::ApiCall(error) = error {
+    if let Some(error) = failed_call(error) {
         let status = error.status_code;
-        let detail = provider_detail(error);
+        let detail = provider_detail(&error);
         let with = |lead: &str| if detail.is_empty() { String::new() } else { format!("{lead}{detail}") };
         return match status {
             Some(401) => KumiError::with_provider(
