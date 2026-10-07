@@ -241,15 +241,18 @@ fn a_new_pool_sweeps_the_folders_left_by_a_kumi_thats_gone() {
     let (left, older, mine) = (folder(gone), folder(1), folder(std::process::id()));
     // Made in one step: another test's pool, starting meanwhile, may sweep it first, which is what's checked anyway.
     std::fs::create_dir(&left).unwrap();
+    // One named before folders said their maker (a uuid alone, its first part all digits) is left too.
+    let unsaid = temp.join("kumi-measure-12345678-abcd-4ef0-8123-456789abcdef");
+    std::fs::create_dir(&unsaid).unwrap();
     for kept in [&older, &mine] {
         put(&kept.join("kumi-audio-1/converted.wav"), "a copy");
     }
     let pool = MeasurePool::with_worker(1, "/nowhere".into(), Duration::from_secs(1));
-    let (left_there, older_there, mine_there) = (left.exists(), older.exists(), mine.exists());
-    for kept in [&older, &mine] {
+    let (left_there, older_there, mine_there, unsaid_there) = (left.exists(), older.exists(), mine.exists(), unsaid.exists());
+    for kept in [&older, &mine, &unsaid] {
         let _ = std::fs::remove_dir_all(kept);
     }
-    assert_eq!((left_there, older_there, mine_there), (false, true, true));
+    assert_eq!((left_there, older_there, mine_there, unsaid_there), (false, true, true, true));
     drop(pool);
 }
 #[cfg(windows)]

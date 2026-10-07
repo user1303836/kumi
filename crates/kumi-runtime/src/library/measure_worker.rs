@@ -276,10 +276,12 @@ fn sweep_left_folders() {
     let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else { return };
     for entry in entries.flatten() {
         let name = entry.file_name();
-        let Some(pid) = name.to_str().and_then(|name| name.strip_prefix("kumi-measure-")).and_then(|rest| rest.split('-').next()) else {
+        let Some((pid, rest)) = name.to_str().and_then(|name| name.strip_prefix("kumi-measure-")).and_then(|rest| rest.split_once('-'))
+        else {
             continue;
         };
-        let Ok(pid) = pid.parse::<u32>() else { continue };
+        // <pid>-<uuid> only: an older folder (a uuid alone) doesn't say who made it, so it's left.
+        let (Ok(pid), Ok(_)) = (pid.parse::<u32>(), uuid::Uuid::parse_str(rest)) else { continue };
         if pid == std::process::id() {
             continue;
         }
