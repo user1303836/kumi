@@ -207,7 +207,8 @@ struct State {
     last_run: Option<Rc<RefCell<MatchRun>>>,
     last_lesson: Option<matching::LastLesson>,
     heard_last: Option<AuditionEvent>,
-    goal_state: Option<GoalState>,
+    /// The last goal this session ran or stopped, with the place (the Set's project) it belongs to.
+    goal_state: Option<(String, GoalState)>,
     goal_status: Option<GoalStatus>,
     goal_op: Option<Rc<Operation>>,
     goal_stopped: bool,

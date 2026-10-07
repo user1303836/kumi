@@ -48,15 +48,43 @@ fn candidates(e: &Evolution, clips: bool) -> Vec<AuditionCandidate> {
         .map(|s| AuditionCandidate { track: s.name.clone(), label: Some(s.label.clone()), clip: clips.then(|| "first".into()), mix: None })
         .collect()
 }
+/// A goal run's hold on the session's goal flags: from its first moment a /goal stop stops this run (not an older
+/// paused goal), and however the run ends, the flags go with it (unless a newer run holds them by then).
+struct GoalHold {
+    session: Session,
+    op: u64,
+}
+impl GoalHold {
+    fn begin(session: &Session, op: &Rc<Operation>) -> Self {
+        let mut s = session.0.state.borrow_mut();
+        s.goal_op = Some(op.clone());
+        s.goal_stopped = false;
+        Self { session: session.clone(), op: op.id }
+    }
+}
+impl Drop for GoalHold {
+    fn drop(&mut self) {
+        if let Ok(mut s) = self.session.0.state.try_borrow_mut() {
+            if s.goal_op.as_ref().is_some_and(|op| op.id == self.op) {
+                s.goal_op = None;
+                s.goal_stopped = false;
+            }
+        }
+    }
+}
 impl Session {
     fn goal_where(&self) -> String {
         self.0.state.borrow().project.clone().unwrap_or(UNSAVED.into())
     }
-    fn persist_goal(&self, state: &GoalState) {
+    /// The goal kept in memory for `place`, if the last one run or stopped was there.
+    fn goal_kept(&self, place: &str) -> Option<GoalState> {
+        self.0.state.borrow().goal_state.as_ref().filter(|(at, _)| at == place).map(|(_, state)| state.clone())
+    }
+    /// Saves a goal under the place it belongs to, named when it began: a Set opened since doesn't take it.
+    fn persist_goal(&self, place: &str, state: &GoalState) {
         if let Some(store) = self.0.options.goals.clone() {
-            let kept = state.clone();
-            let this = self.clone();
-            self.enqueue(async move { store.save(&this.goal_where(), &kept).await });
+            let (place, kept) = (place.to_owned(), state.clone());
+            self.enqueue(async move { store.save(&place, &kept).await });
         }
     }
     fn goal_event(
@@ -104,15 +132,17 @@ impl Session {
         Ok(result)
     }
     pub(super) async fn run_goal(&self, op: Rc<Operation>, text: Option<String>) -> Result<Option<TurnResult>, RuntimeError> {
+        let _hold = GoalHold::begin(self, &op);
         let integration =
             self.0.state.borrow().integration.clone().filter(|i| i.has_goal()).ok_or_else(|| {
                 KumiError::new(FailureKind::Request, "Goals need Live connected, with the Ableton bridge 1.0.49 or later.")
             })?;
-        let mut state =
-            if text.is_some() { None } else { self.0.state.borrow().goal_state.clone().filter(|s| s.status == GoalRun::Paused) };
+        // The Set this goal belongs to: it's picked up from, and saved under, this place.
+        let place = self.goal_where();
+        let mut state = if text.is_some() { None } else { self.goal_kept(&place).filter(|s| s.status == GoalRun::Paused) };
         if text.is_none() && state.is_none() {
             if let Some(store) = &self.0.options.goals {
-                state = store.load(&self.goal_where()).await?;
+                state = store.load(&place).await?;
             }
         }
         if text.is_none() && state.is_none() {
@@ -163,7 +193,11 @@ impl Session {
                 prompt.push_str("\n\n");
                 prompt.push_str(&brief);
             }
-            let mut setup = self.goal_ask(&op, &prompt, &mut usage, &said).await?;
+            let setup = self.goal_ask(&op, &prompt, &mut usage, &said).await;
+            if self.0.state.borrow().goal_stopped {
+                self.goal_said_stopped();
+            }
+            let mut setup = setup?;
             if setup.stop_reason != StopReason::Completed || op.signal.is_cancelled() {
                 setup.usage = Some(usage);
                 return Ok(Some(setup));
@@ -220,15 +254,25 @@ impl Session {
             kept.status = GoalRun::Running;
         }
         let mut state = state.unwrap();
-        self.0.state.borrow_mut().goal_op = Some(op.clone());
-        let mut rig = match integration.goal(&request, op.signal.clone()).await? {
-            Ok(rig) => rig,
-            Err(why) => {
+        let opened = integration.goal(&request, op.signal.clone()).await;
+        let mut rig = match opened {
+            Ok(Ok(rig)) => rig,
+            // Stopped (/goal stop) while its search was set up: the goal ends there, done.
+            _ if self.0.state.borrow().goal_stopped => {
+                state.status = GoalRun::Done;
+                state.why = Some("stopped".into());
+                self.persist_goal(&place, &state);
+                self.goal_event(state.status.into(), Some(&state), None, started, None, &full, screening);
+                self.0.state.borrow_mut().goal_state = Some((place, state));
+                return Ok(Some(TurnResult { stop_reason: StopReason::Cancelled, usage: Some(usage) }));
+            }
+            Ok(Err(why)) => {
                 self.notice(format!("The goal couldn't start its search: {why}"));
                 state.status = GoalRun::Paused;
-                self.persist_goal(&state);
+                self.persist_goal(&place, &state);
                 return Ok(Some(TurnResult { stop_reason: StopReason::Completed, usage: Some(usage) }));
             }
+            Err(error) => return Err(error),
         };
         let mut evolution = self.evolution();
         for slot in rig.slots() {
@@ -245,7 +289,7 @@ impl Session {
         op.linger.set(180_000);
         let searching = async {
             sync(&mut state, &evolution, started);
-            self.persist_goal(&state);
+            self.persist_goal(&place, &state);
             self.goal_event(GoalPhase::Running, Some(&state), None, started, Some(&evolution), &full, screening);
 
             while !op.signal.is_cancelled() {
@@ -313,7 +357,7 @@ impl Session {
                     gaps = found.clone();
                 }
                 sync(&mut state, &evolution, started);
-                self.persist_goal(&state);
+                self.persist_goal(&place, &state);
                 self.goal_event(GoalPhase::Running, Some(&state), None, started, Some(&evolution), &full, screening);
 
                 op.progress(Some(&KernelEvent::ToolEnd { id: String::new(), name: String::new(), is_error: false, elapsed_ms: 0 }));
@@ -387,7 +431,7 @@ impl Session {
                         }
                     }
                     sync(&mut state, &evolution, started);
-                    self.persist_goal(&state);
+                    self.persist_goal(&place, &state);
                     self.goal_event(GoalPhase::Running, Some(&state), None, started, Some(&evolution), &full, screening);
                 }
             }
@@ -428,13 +472,8 @@ impl Session {
             }
         }
         sync(&mut state, &evolution, started);
-        self.persist_goal(&state);
+        self.persist_goal(&place, &state);
         self.goal_event(state.status.into(), Some(&state), None, started, Some(&evolution), &full, screening);
-        {
-            let mut s = self.0.state.borrow_mut();
-            s.goal_op = None;
-            s.goal_stopped = false;
-        }
         let score = leader
             .as_ref()
             .and_then(|l| {
@@ -475,7 +514,7 @@ impl Session {
                 lesson.id = id.clone();
             }
             state.lesson = Some(lesson.id.clone());
-            self.persist_goal(&state);
+            self.persist_goal(&place, &state);
             let this = self.clone();
             let work = self.playbook_serial(move |store| {
                 async move {
@@ -491,7 +530,7 @@ impl Session {
             });
             tokio::task::spawn_local(work);
         }
-        self.0.state.borrow_mut().goal_state = Some(state);
+        self.0.state.borrow_mut().goal_state = Some((place, state));
         Ok(Some(TurnResult {
             stop_reason: if op.signal.is_cancelled() { StopReason::Cancelled } else { StopReason::Completed },
             usage: Some(usage),
@@ -508,8 +547,8 @@ impl Session {
             op.done.clone().await?;
             return Ok(true);
         }
-        let mut kept = self.0.state.borrow().goal_state.clone().filter(|s| s.status == GoalRun::Paused);
         let place = self.goal_where();
+        let mut kept = self.goal_kept(&place).filter(|s| s.status == GoalRun::Paused);
         if kept.is_none() {
             if let Some(store) = &self.0.options.goals {
                 kept = store.load(&place).await?;
@@ -520,10 +559,15 @@ impl Session {
         };
         kept.status = GoalRun::Done;
         kept.why = Some("stopped".into());
-        self.0.state.borrow_mut().goal_state = Some(kept.clone());
+        self.0.state.borrow_mut().goal_state = Some((place.clone(), kept.clone()));
         if let Some(store) = &self.0.options.goals {
             let _ = store.save(&place, &kept).await;
         }
+        self.goal_said_stopped();
+        Ok(true)
+    }
+    /// The goal status shown says the goal stopped.
+    fn goal_said_stopped(&self) {
         let status = {
             let mut s = self.0.state.borrow_mut();
             s.goal_status.as_mut().map(|status| {
@@ -535,6 +579,5 @@ impl Session {
         if let Some(status) = status {
             self.emit(status.into());
         }
-        Ok(true)
     }
 }
