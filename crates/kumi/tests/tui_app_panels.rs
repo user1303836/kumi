@@ -439,8 +439,11 @@ impl kumi::tui::tabs::Tab for Stub {
     fn title(&self) -> &str {
         "STUB"
     }
-    fn rows(&self, _: i32) -> Vec<kumi::tui::tabs::TabRow> {
-        vec![kumi::tui::tabs::TabRow { spans: vec![kumi::tui::wrap::Span::styled("stub row", Default::default())], ..Default::default() }]
+    fn rows(&self, _: i32) -> Rc<[kumi::tui::tabs::TabRow]> {
+        Rc::new([kumi::tui::tabs::TabRow {
+            spans: vec![kumi::tui::wrap::Span::styled("stub row", Default::default())],
+            ..Default::default()
+        }])
     }
 }
 fn strip(lines: &[String]) -> usize {
@@ -557,6 +560,8 @@ case!(memory_rows_forget_and_use, async {
     h.has("◆ Forgot the technique: Neuro from a Reese");
     h.type_text(&click(&h.screen(), row + 2, "forget")).await;
     h.has("That was already gone.");
+    // HISTORY's rows are kept between frames, and made again when what they show changes.
+    assert!(h.screen()[row + 2].contains("forgotten"), "{}", h.screen()[row + 2]);
     h.emit(json!({"type":"technique","action":"used","technique":{"id":"t2","name":"Parallel drum crush","fits":"punchy drums"}}));
     h.has("◆ Using your technique: Parallel drum crush");
     h.close().await;

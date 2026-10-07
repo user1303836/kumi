@@ -440,7 +440,17 @@ impl TuiApp {
             }
         }
     }
-    pub(super) fn history_rows(&self, width: i32) -> Vec<TabRow> {
+    pub(super) fn history_rows(&self, width: i32) -> Rc<[TabRow]> {
+        // Made again only when the changes or what's kept change, or at another width: not every frame.
+        let revision = {
+            let state = self.0.state.borrow();
+            if let Some((made, at, rows)) = &state.history_rows {
+                if *made == state.history_revision && *at == width {
+                    return rows.clone();
+                }
+            }
+            state.history_revision
+        };
         let mut rows = vec![];
         let (state_kept, changes) = {
             let state = self.0.state.borrow();
@@ -461,6 +471,7 @@ impl TuiApp {
                         let gone = forget().await?;
                         if !gone && !entry.borrow().forgotten {
                             entry.borrow_mut().forgotten = true;
+                            app.0.state.borrow_mut().history_revision += 1;
                             app.notice("That was already gone.", NoticeTone::Info);
                         }
                         app.0.scheduler.request();
@@ -558,6 +569,8 @@ impl TuiApp {
                 });
             }
         }
+        let rows: Rc<[TabRow]> = rows.into();
+        self.0.state.borrow_mut().history_rows = Some((revision, width, rows.clone()));
         rows
     }
     pub(super) fn goal_rows(&self, width: i32) -> Vec<TabRow> {

@@ -30,8 +30,8 @@ pub trait Tab {
     fn badge(&self) -> Option<i64> {
         None
     }
-    /// The tab's rows at this width, first row on top.
-    fn rows(&self, width: i32) -> Vec<TabRow>;
+    /// The tab's rows at this width, first row on top: shared, so a tab that keeps them needn't copy them each frame.
+    fn rows(&self, width: i32) -> Rc<[TabRow]>;
     /// What it says when it has no rows.
     fn empty(&self) -> Option<&str> {
         None
@@ -56,7 +56,7 @@ struct State {
     totals: HashMap<String, i32>,
     /// The keyboard's row in the active tab, while the keyboard is in the panel.
     cursor: Option<i32>,
-    last_rows: Vec<TabRow>,
+    last_rows: Rc<[TabRow]>,
     last_height: i32,
 }
 
@@ -88,7 +88,7 @@ impl TabPanel {
                     scrolls: HashMap::new(),
                     totals: HashMap::new(),
                     cursor: None,
-                    last_rows: Vec::new(),
+                    last_rows: Rc::default(),
                     last_height: 1,
                 }),
             }),

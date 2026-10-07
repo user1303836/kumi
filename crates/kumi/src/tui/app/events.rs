@@ -86,6 +86,7 @@ impl TuiApp {
                 } else {
                     let mut state = self.0.state.borrow_mut();
                     state.tree = None;
+                    state.tree_revision += 1;
                     state.tree_key = None;
                     state.tree_cursor = None;
                     state.clip = None;
@@ -191,6 +192,7 @@ impl TuiApp {
                         earlier.drain(..earlier.len() - 500);
                     }
                     state.changes = earlier;
+                    state.history_revision += 1;
                 }
                 // What's new goes below a conversation carried on at the start, where it's seen.
                 if let Some(news) = state.news.take() {
@@ -224,6 +226,7 @@ impl TuiApp {
                 let change: ChangeRecord = serde_json::from_value(value["change"].clone()).unwrap();
                 let (new, refresh) = {
                     let mut state = self.0.state.borrow_mut();
+                    state.history_revision += 1;
                     if let Some(index) = state.changes.iter().position(|c| c.id == change.id) {
                         state.changes[index] = change;
                         (false, false)
@@ -779,6 +782,7 @@ impl TuiApp {
     ) {
         let title = self.clean_line(title, 200);
         let mut state = self.0.state.borrow_mut();
+        state.history_revision += 1;
         if let Some(index) = state.kept.iter().position(|e| e.borrow().key == key) {
             state.kept.remove(index);
         }
@@ -788,7 +792,9 @@ impl TuiApp {
         }
     }
     fn forgotten(&self, key: &str) {
-        for entry in &self.0.state.borrow().kept {
+        let mut state = self.0.state.borrow_mut();
+        state.history_revision += 1;
+        for entry in &state.kept {
             if entry.borrow().key == key {
                 entry.borrow_mut().forgotten = true;
             }

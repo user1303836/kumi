@@ -192,6 +192,9 @@ struct State {
     /// The version that news is since, where /changelog starts.
     news_since: Option<String>,
     changes: Vec<ChangeRecord>,
+    /// Bumped whenever `changes` or `kept` change: HISTORY's rows are made again only then, or at a new width.
+    history_revision: u64,
+    history_rows: Option<(u64, i32, Rc<[TabRow]>)>,
     last_change: Option<(String, f64)>,
     last_action: Option<LastAction>,
     goal: Option<Value>,
@@ -230,6 +233,9 @@ struct State {
     recall: Option<(usize, String)>,
     last_sent: Option<String>,
     tree: Option<DeviceTree>,
+    /// Bumped whenever `tree` is read again: its rows are made again only then, or for another focus.
+    tree_revision: u64,
+    tree_rows: Option<(u64, [Option<String>; 3], Rc<[TreeRow]>)>,
     tree_key: Option<String>,
     tree_reading: bool,
     tree_again: bool,
@@ -274,6 +280,8 @@ impl State {
             news: None,
             news_since: None,
             changes: vec![],
+            history_revision: 0,
+            history_rows: None,
             last_change: None,
             last_action: None,
             goal: None,
@@ -310,6 +318,8 @@ impl State {
             recall: None,
             last_sent: None,
             tree: None,
+            tree_revision: 0,
+            tree_rows: None,
             tree_key: None,
             tree_reading: false,
             tree_again: false,
@@ -376,7 +386,7 @@ impl Tab for AppTab {
             (self.id == "history" && n > 0).then_some(n as i64)
         })
     }
-    fn rows(&self, width: i32) -> Vec<TabRow> {
+    fn rows(&self, width: i32) -> Rc<[TabRow]> {
         self.app
             .upgrade()
             .map(|a| {
@@ -384,7 +394,7 @@ impl Tab for AppTab {
                 if self.id == "history" {
                     app.history_rows(width)
                 } else {
-                    app.goal_rows(width)
+                    app.goal_rows(width).into()
                 }
             })
             .unwrap_or_default()

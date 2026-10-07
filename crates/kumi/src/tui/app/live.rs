@@ -48,6 +48,7 @@ impl TuiApp {
                 if let Ok(Some(tree)) = result {
                     if state.focus.as_ref().and_then(|f| f.track_ref.as_ref()) == Some(&tree.track_ref) {
                         state.tree = Some(tree);
+                        state.tree_revision += 1;
                     }
                 }
                 state.tree_reading = false;
@@ -224,7 +225,7 @@ impl TuiApp {
             && Some(&clip.slot_ref) == focus.slot_ref.as_ref())
         .then(|| clip.clone())
     }
-    pub(super) fn tree_shown(&self) -> Option<Vec<TreeRow>> {
+    pub(super) fn tree_shown(&self) -> Option<Rc<[TreeRow]>> {
         let state = self.0.state.borrow();
         let focus = state.focus.as_ref()?;
         let tree = state.tree.as_ref()?;
@@ -234,14 +235,20 @@ impl TuiApp {
         if (focus.detail != Some(LiveDetail::Device) || state.touched != Some(Touched::Device)) && state.tree_cursor.is_none() {
             return None;
         }
-        let rows = tree_rows(
-            tree,
-            &TreeFocus {
-                device: focus.device.clone().filter(|s| !s.is_empty()),
-                chain: focus.chain.clone().filter(|s| !s.is_empty()),
-                device_ref: focus.device_ref.clone().filter(|s| !s.is_empty()),
-            },
-        );
+        // Laid out again only for a tree read again or another focus in it, not every frame (each row lists its siblings).
+        let key = [&focus.device, &focus.chain, &focus.device_ref].map(|s| s.clone().filter(|s| !s.is_empty()));
+        let revision = state.tree_revision;
+        let cached = state.tree_rows.as_ref().filter(|(made, at, _)| *made == revision && *at == key).map(|(_, _, rows)| rows.clone());
+        let rows = match cached {
+            Some(rows) => rows,
+            None => {
+                let [device, chain, device_ref] = key.clone();
+                let rows: Rc<[TreeRow]> = tree_rows(tree, &TreeFocus { device, chain, device_ref }).into();
+                drop(state);
+                self.0.state.borrow_mut().tree_rows = Some((revision, key, rows.clone()));
+                rows
+            }
+        };
         (!rows.is_empty()).then_some(rows)
     }
     pub(super) fn pin(&self, row: &TreeRow) {
