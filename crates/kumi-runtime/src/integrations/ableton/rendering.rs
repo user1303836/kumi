@@ -2,6 +2,7 @@
 mod ears;
 mod ears_pass;
 mod goal;
+mod judge;
 mod listen;
 mod pass;
 mod rig;
@@ -54,6 +55,7 @@ pub struct Rendering {
     restore: Option<RestoreStore>,
     on_action: Option<Rc<dyn Fn(ActionEvent)>>,
     on_audition: Option<Rc<dyn Fn(AuditionEvent)>>,
+    on_judge: Option<Rc<dyn Fn(crate::listening::round::Round)>>,
     change_timeout_ms: u64,
     user_library: Option<String>,
     ears_disabled: bool,
@@ -70,7 +72,13 @@ pub struct Rendering {
     told_quietly: Cell<bool>,
     reference_cache: RefCell<IndexMap<String, Analysis>>,
     best_steps: RefCell<Vec<String>>,
+    /// The judged run under way (or the last one).
+    judge: RefCell<Option<judge::JudgeRun>>,
+    listener_source: Option<super::options::ListenerSource>,
+    /// The listening model, once looked for (None inside: there's none).
+    listener: RefCell<Option<Option<Rc<dyn crate::listening::listener::Listener>>>>,
 }
+pub use judge::{GoalRequest, JudgeRequest};
 impl Rendering {
     /// Kumi starts playing the Set for itself, Main down: what Live plays meanwhile isn't heard by the producer. True
     /// when a render was already running, which nothing changes.
@@ -102,6 +110,7 @@ impl Rendering {
             restore: options.restore_file.as_ref().map(restore_store),
             on_action: options.on_action.clone(),
             on_audition: options.on_audition.clone(),
+            on_judge: options.on_judge.clone(),
             change_timeout_ms: options.change_timeout_ms.unwrap_or(30_000),
             user_library: options.user_library.clone(),
             ears_disabled: matches!(options.ears, Some(EarsSetup::Disabled)),
@@ -119,6 +128,9 @@ impl Rendering {
             told_quietly: Cell::new(false),
             reference_cache: RefCell::new(IndexMap::new()),
             best_steps: RefCell::new(vec![]),
+            judge: RefCell::new(None),
+            listener_source: options.listener.clone(),
+            listener: RefCell::new(None),
         })
     }
     pub fn round_count(&self) -> usize {

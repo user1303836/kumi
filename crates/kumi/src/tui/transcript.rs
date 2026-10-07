@@ -154,6 +154,12 @@ pub enum Entry {
         takes: Vec<Take>,
         gaps: Vec<String>,
     },
+    /// A round of a judged run: its head line, then what moved, the verdict and what's next.
+    Judged {
+        lines: Vec<String>,
+        kept: Option<bool>,
+        met: bool,
+    },
     Watched {
         title: String,
         channel: Option<String>,
@@ -390,6 +396,20 @@ pub fn entry_rows(entry: &Entry, width: i32, now: f64) -> Vec<Row> {
         ),
         Entry::Heard { file, summary, bands, compared } => heard_rows(file, summary, bands, compared.as_ref(), inner),
         Entry::Auditioned { round, best, previous, takes, gaps } => auditioned_rows(*round, best.as_ref(), *previous, takes, gaps, inner),
+        Entry::Judged { lines, kept, met } => lines
+            .iter()
+            .enumerate()
+            .flat_map(|(index, line)| {
+                let color = match (index, kept, met) {
+                    (0, Some(false), _) => palette::WARN,
+                    (0, _, _) => palette::ACCENT,
+                    (_, _, true) if line.contains("within tolerance") => palette::ACCENT,
+                    _ if line.trim_start().starts_with("reverted") => palette::WARN,
+                    _ => palette::DIM,
+                };
+                wrapped(&[span(line, color)], inner)
+            })
+            .collect(),
         Entry::Watched { .. } => watched_rows(entry, inner),
         Entry::Web { lines } => lines
             .iter()

@@ -44,6 +44,10 @@ pub struct AbletonOptions {
     pub user_library: Option<String>,
     pub restore_file: Option<String>,
     pub on_audition: Option<Rc<dyn Fn(AuditionEvent)>>,
+    /// Each round the judge logs (`judge`): its target, change, numbers before and after, keep or revert, and what's next.
+    pub on_judge: Option<Rc<dyn Fn(crate::listening::round::Round)>>,
+    /// Finds an audio-capable model among the producer's providers to listen beside the meters (asked once).
+    pub listener: Option<ListenerSource>,
     pub ears: Option<EarsSetup>,
     pub hands: Option<HandsSetup>,
     pub fast: Option<bool>,
@@ -74,6 +78,8 @@ impl AbletonOptions {
             user_library: None,
             restore_file: None,
             on_audition: None,
+            on_judge: None,
+            listener: None,
             ears: None,
             hands: None,
             fast: None,
@@ -96,3 +102,8 @@ impl AbletonOptions {
         options
     }
 }
+
+/// Finds the listening model (None: no provider has one).
+pub type ListenerSource = Rc<
+    dyn Fn(kumi_common::abort::Signal) -> futures::future::LocalBoxFuture<'static, Option<Rc<dyn crate::listening::listener::Listener>>>,
+>;

@@ -18,6 +18,7 @@ pub mod fold;
 pub mod history;
 mod inference;
 pub mod integration;
+pub mod judge_tool;
 pub use integration::create_ableton_integration;
 pub mod pins;
 pub mod references;

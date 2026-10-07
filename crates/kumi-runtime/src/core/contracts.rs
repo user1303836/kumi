@@ -1237,6 +1237,8 @@ pub enum SessionEvent {
     Goal(GoalStatus),
     Heard(HeardEvent),
     Auditioned(AuditionEvent),
+    /// A round of a judged run: its target, change, numbers before and after, keep or revert, and what's next.
+    Judged(crate::listening::round::Round),
     Watched(WatchedEvent),
     Web(WebEvent),
     Library(LibraryEvent),
@@ -1658,6 +1660,7 @@ pub enum WatchEvent {
     Change(ChangeRecord),
     Action(ActionEvent),
     Audition(AuditionEvent),
+    Judged(crate::listening::round::Round),
 }
 
 /// What Kumi remembers now: about the producer, and about the open Set when it's saved.

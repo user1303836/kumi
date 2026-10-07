@@ -11,6 +11,7 @@ pub mod hands;
 pub mod integrations;
 pub mod kernel;
 pub mod library;
+pub mod listening;
 pub mod mcp;
 pub mod notation;
 pub mod plugins;

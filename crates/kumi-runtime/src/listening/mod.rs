@@ -1,0 +1,7 @@
+//! The listening loop's ears and judge: what a listen measures, the problems it places in time and frequency, and
+//! a goal as a checklist that decides whether a change stays.
+pub mod checklist;
+pub mod detect;
+pub mod listener;
+pub mod measure;
+pub mod round;

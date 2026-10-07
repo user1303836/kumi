@@ -493,6 +493,12 @@ impl TuiApp {
                     );
                 }
             }
+            "judged" => {
+                if let SessionEvent::Judged(round) = &event {
+                    let lines = round.lines().iter().map(|line| self.clean_line(line, 400)).collect();
+                    self.insert_before(Entry::Judged { lines, kept: round.kept, met: round.met });
+                }
+            }
             "auditioned" => {
                 let mut entry = value.clone();
                 entry["kind"] = json!("auditioned");

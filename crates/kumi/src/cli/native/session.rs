@@ -20,6 +20,8 @@ use kumi_runtime::{
         store_client::StoreClient,
     },
     library::{create_library, LibraryOptions},
+    listening::listener::{listener_from_env, openai_listener, Listener},
+    providers::{api_key_for, ProviderId},
     video::programs::{configure_programs, ProgramDefaults},
     *,
 };
@@ -248,6 +250,7 @@ pub(super) async fn run_session(
         ..Default::default()
     });
     let controller: Rc<RefCell<Option<Weak<dyn SessionController>>>> = Rc::new(RefCell::new(None));
+    let listener_store = store.clone();
     let models = Rc::new(create_model_control(ModelControlOptions {
         store,
         settings_file: settings_file.clone(),
@@ -387,6 +390,32 @@ pub(super) async fn run_session(
                         c.watch(WatchEvent::Audition(event.clone()));
                     }
                     emit(SessionEvent::Auditioned(event));
+                })
+            });
+            options.on_judge = Some({
+                let emit = emit.clone();
+                let controller = controller.clone();
+                Rc::new(move |round| {
+                    let controller = controller.borrow().as_ref().and_then(Weak::upgrade);
+                    if let Some(c) = controller {
+                        c.watch(WatchEvent::Judged(round.clone()));
+                    }
+                    emit(SessionEvent::Judged(round));
+                })
+            });
+            options.listener = Some({
+                let store = listener_store.clone();
+                let env = env.clone();
+                Rc::new(move |signal| {
+                    let (store, env) = (store.clone(), env.clone());
+                    async move {
+                        if let Some(listener) = listener_from_env(&env) {
+                            return Some(Rc::new(listener) as Rc<dyn Listener>);
+                        }
+                        let key = api_key_for(ProviderId::Openai, store.as_ref(), Some(&env)).await.ok().flatten()?.key;
+                        openai_listener(&key, signal).await.map(|listener| Rc::new(listener) as Rc<dyn Listener>)
+                    }
+                    .boxed_local()
                 })
             });
             options.on_catch_up = Some({

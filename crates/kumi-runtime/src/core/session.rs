@@ -213,6 +213,8 @@ struct State {
     goal_op: Option<Rc<Operation>>,
     goal_stopped: bool,
     goal_reference: Option<String>,
+    /// The judge's last round this session: what /goal and the loop check after a turn.
+    judged_last: Option<crate::listening::round::Round>,
     state: TurnState,
     connection: ConnectionState,
     observation: Option<String>,
@@ -545,6 +547,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                 goal_op: None,
                 goal_stopped: false,
                 goal_reference: None,
+                judged_last: None,
                 state: TurnState::Idle,
                 connection: ConnectionState::Disconnected,
                 observation: None,
@@ -1714,6 +1717,10 @@ impl SessionController for Session {
                 return;
             }
             WatchEvent::Action(_) => return,
+            WatchEvent::Judged(round) => {
+                self.0.state.borrow_mut().judged_last = Some(round);
+                return;
+            }
             WatchEvent::Change(c) => {
                 if c.state == ChangeState::Applied {
                     let run = self.0.state.borrow().matching.clone();
