@@ -2001,8 +2001,7 @@ class LiveObjectMapper:
             "enabled": bool(enabled) if isinstance(enabled, bool) else None,
             "canHaveChains": self._read_attr(device, "can_have_chains") if isinstance(self._read_attr(device, "can_have_chains"), bool) else None,
             "canHaveDrumPads": self._read_attr(device, "can_have_drum_pads") if isinstance(self._read_attr(device, "can_have_drum_pads"), bool) else None,
-            "latencySamples": int(self._read_attr(device, "latency_in_samples")) if isinstance(self._read_attr(device, "latency_in_samples"), int) and not isinstance(self._read_attr(device, "latency_in_samples"), bool) else None,
-            "latencyMs": float(self._read_attr(device, "latency_in_ms")) if isinstance(self._read_attr(device, "latency_in_ms"), (int, float)) and not isinstance(self._read_attr(device, "latency_in_ms"), bool) and math.isfinite(float(self._read_attr(device, "latency_in_ms"))) else None,
+            **self._device_latency(device),
             "parameterBank": int(parameter_bank) if isinstance(parameter_bank, int) and not isinstance(parameter_bank, bool) else None,
             **self._specialized_rows(device, device_ref),
             "comparison": {
@@ -7478,6 +7477,30 @@ class LiveObjectMapper:
         if not fields: raise ValueError("SMPTE time shape is unreadable")
         return {"available": True, "loopStart": None, "loopLength": None, "smpte": fields}
 
+    def _track_load(self, track: Any) -> dict[str, Any]:
+        """A track's meters and performance impact, as its row and performance.read give them."""
+        def optional_float(name: str) -> float | None:
+            value = self._read_attr(track, name)
+            return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) else None
+        impact = self._read_attr(track, "performance_impact")
+        return {
+            "inputMeterLeft": optional_float("input_meter_left"),
+            "inputMeterRight": optional_float("input_meter_right"),
+            "inputMeterLevel": optional_float("input_meter_level"),
+            "outputMeterLeft": optional_float("output_meter_left"),
+            "outputMeterRight": optional_float("output_meter_right"),
+            "outputMeterLevel": optional_float("output_meter_level"),
+            "performanceImpact": int(impact) if isinstance(impact, int) and not isinstance(impact, bool) else None,
+        }
+
+    def _device_latency(self, device: Any) -> dict[str, Any]:
+        """A device's latency, as its row and performance.read give it."""
+        samples = self._read_attr(device, "latency_in_samples"); ms = self._read_attr(device, "latency_in_ms")
+        return {
+            "latencySamples": int(samples) if isinstance(samples, int) and not isinstance(samples, bool) else None,
+            "latencyMs": float(ms) if isinstance(ms, (int, float)) and not isinstance(ms, bool) and math.isfinite(float(ms)) else None,
+        }
+
     def _track_state_fields(self, track: Any, track_index: int) -> dict[str, Any]:
         def optional_bool(obj: Any, name: str) -> bool | None:
             value = self._read_attr(obj, name)
@@ -7506,13 +7529,7 @@ class LiveObjectMapper:
             "isGrouped": optional_bool(track, "is_grouped"),
             "backToArranger": optional_bool(track, "back_to_arranger"),
             "mutedViaSolo": optional_bool(track, "muted_via_solo"),
-            "inputMeterLeft": optional_float(track, "input_meter_left"),
-            "inputMeterRight": optional_float(track, "input_meter_right"),
-            "inputMeterLevel": optional_float(track, "input_meter_level"),
-            "outputMeterLeft": optional_float(track, "output_meter_left"),
-            "outputMeterRight": optional_float(track, "output_meter_right"),
-            "outputMeterLevel": optional_float(track, "output_meter_level"),
-            "performanceImpact": int(self._read_attr(track, "performance_impact")) if isinstance(self._read_attr(track, "performance_impact"), int) and not isinstance(self._read_attr(track, "performance_impact"), bool) else None,
+            **self._track_load(track),
             "view": {
                 "selectedDeviceRef": self.refs.put("device", selected_device, f"view:{track_index}") if selected_device is not None else None,
                 "deviceInsertMode": int(device_insert_mode) if isinstance(device_insert_mode, int) and not isinstance(device_insert_mode, bool) else None,
@@ -8225,24 +8242,12 @@ class LiveObjectMapper:
             application = None
         average = self._read_attr(application, "average_process_usage") if application is not None else None
         peak = self._read_attr(application, "peak_process_usage") if application is not None else None
-        snapshot = self.snapshot()
+        # Read from each track and its light device walk, not a whole-Set snapshot: someone asking what uses the
+        # CPU is worried about load already.
         tracks = []
-        for track in snapshot["tracks"]:
-            devices = []
-            def collect(rows: list[dict[str, Any]]) -> None:
-                for row in rows:
-                    devices.append({"ref": row["ref"], "latencySamples": row.get("latencySamples"), "latencyMs": row.get("latencyMs")})
-                    for chain in row.get("chains", []): collect(chain.get("devices", []))
-                    for pad in row.get("drumPads", []):
-                        for chain in pad.get("chains", []): collect(chain.get("devices", []))
-            collect(track.get("devices", []))
-            tracks.append({
-                "ref": track["ref"],
-                "performanceImpact": track.get("performanceImpact"),
-                "inputMeterLeft": track.get("inputMeterLeft"), "inputMeterRight": track.get("inputMeterRight"), "inputMeterLevel": track.get("inputMeterLevel"),
-                "outputMeterLeft": track.get("outputMeterLeft"), "outputMeterRight": track.get("outputMeterRight"), "outputMeterLevel": track.get("outputMeterLevel"),
-                "devices": devices,
-            })
+        for index, track in enumerate(self._all_track_objects()):
+            devices = [{"ref": light["ref"], **self._device_latency(device)} for device, _, _, light in self._light_walk(index)]
+            tracks.append({"ref": self.refs.put("track", track, str(index)), **self._track_load(track), "devices": devices})
         state = {"averageProcessUsage": average, "peakProcessUsage": peak, "tracks": tracks}
         return {**state, "sampledAt": int(time.time() * 1000), "revision": hashlib.sha256(self._bounded_canonical(state).encode("utf-8")).hexdigest()}
 

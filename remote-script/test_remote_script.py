@@ -5374,8 +5374,12 @@ class PerformanceDiagnosticsTests(unittest.TestCase):
         track.input_meter_left = 0.5; track.input_meter_right = 0.4; track.input_meter_level = 0.45
         track.output_meter_left = 0.6; track.output_meter_right = 0.55; track.output_meter_level = 0.58
         mapper = LiveObjectMapper(song); mapper._application = lambda: FakeApp()
-        set_ref = mapper.snapshot()["set"]["ref"]
-        result = mapper.invoke("performance.read", {"setRef": set_ref})
+        snapshot = mapper.snapshot(); set_ref = snapshot["set"]["ref"]
+        # Read from the tracks themselves: no whole-Set snapshot, while the producer worries about load.
+        with patch.object(mapper, "snapshot", side_effect=AssertionError("performance.read built a whole-Set snapshot")):
+            result = mapper.invoke("performance.read", {"setRef": set_ref})
+        self.assertEqual([row["ref"] for row in result["tracks"]], [row["ref"] for row in snapshot["tracks"]])
+        self.assertEqual([[device["ref"] for device in row["devices"]] for row in result["tracks"]], [[device["ref"] for device in row["devices"]] for row in snapshot["tracks"]])
         self.assertEqual((result["averageProcessUsage"], result["peakProcessUsage"]), (0.42, 0.87))
         self.assertIsInstance(result["sampledAt"], int); self.assertEqual(len(result["revision"]), 64)
         row = result["tracks"][0]
