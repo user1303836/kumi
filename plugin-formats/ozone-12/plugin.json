@@ -1,0 +1,140 @@
+{
+  "plugin": "ozone-12",
+  "name": "Ozone 12",
+  "vendor": "iZotope",
+  "kind": "effect",
+  "ids": {
+    "vst3": [
+      {
+        "id": "5653545A424F5A4F7A6F6E6500000000",
+        "name": "Ozone 12",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A4242414F7A6F6E652050726F",
+        "name": "Ozone 12 Bass Control",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A42434C4F7A6F6E652050726F",
+        "name": "Ozone 12 Clarity",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A42595A4F7A6F6E652050726F",
+        "name": "Ozone 12 Dynamic EQ",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A42445A4F7A6F6E652050726F",
+        "name": "Ozone 12 Dynamics",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A425A554F7A6F6E652050726F",
+        "name": "Ozone 12 Equalizer",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A425A584F7A6F6E652050726F",
+        "name": "Ozone 12 Exciter",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A42495A4F7A6F6E652050726F",
+        "name": "Ozone 12 Imager",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A424F494F7A6F6E652050726F",
+        "name": "Ozone 12 Impact",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A425A4C4F7A6F6E652050726F",
+        "name": "Ozone 12 Low End Focus",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A425A524F7A6F6E652050726F",
+        "name": "Ozone 12 Master Rebalance",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A425A484F7A6F6E652050726F",
+        "name": "Ozone 12 Match EQ",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A425A4D4F7A6F6E652050726F",
+        "name": "Ozone 12 Maximizer",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A425A534F7A6F6E652050726F",
+        "name": "Ozone 12 Spectral Shaper",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A424F534F7A6F6E652050726F",
+        "name": "Ozone 12 Stabilizer",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A4253514F7A6F6E652050726F",
+        "name": "Ozone 12 Stem EQ",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A42554C4F7A6F6E652050726F",
+        "name": "Ozone 12 Unlimiter",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A425A434F7A6F6E652050726F",
+        "name": "Ozone 12 Vintage Compressor",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A425A514F7A6F6E652050726F",
+        "name": "Ozone 12 Vintage EQ",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A425A564F7A6F6E652050726F",
+        "name": "Ozone 12 Vintage Limiter",
+        "status": "verified"
+      },
+      {
+        "id": "5653545A425A544F7A6F6E652050726F",
+        "name": "Ozone 12 Vintage Tape",
+        "status": "verified"
+      }
+    ]
+  },
+  "presets": {
+    "extensions": [
+      ".xml"
+    ],
+    "windows": [
+      {
+        "path": "C:/Program Files/iZotope/Ozone 12/Presets",
+        "holds": "factory presets: Global Presets for the main plug-in, and a '<Module> Presets' folder per module",
+        "status": "verified"
+      },
+      {
+        "path": "~/Documents/iZotope/Ozone/User Presets",
+        "holds": "user presets, in the same '<Module> Presets' folders",
+        "status": "verified"
+      }
+    ]
+  },
+  "formats": [
+    "format-1"
+  ],
+  "notes": [
+    "The main plug-in holds every module; each module is also its own plug-in. Their presets share one XML format, so they share this folder.",
+    "Ozone 12 has no wavetables or samples; Match EQ snapshots and the reference tracks it keeps are not in presets.",
+    "No AU, AAX or CLAP builds were checked; only the VST3s were on the Windows machine."
+  ]
+}

@@ -32,6 +32,8 @@ indexmap = "2"
 icu_collator = "2.3"
 icu_locale_core = "2.3"
 libc = "0.2"
+# MD5: the checksum Serum 2 keeps over a preset's compressed body.
+md-5 = "0.10"
 memchr = "2"
 percent-encoding = "2"
 fancy-regex = "0.14"
@@ -39,6 +41,8 @@ rand = "0.9"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "gzip", "brotli", "deflate", "http2"] }
 # SQLite compiled in (FTS5, JSONB): no system library to find on any platform.
+# Zstandard in pure Rust, for Serum 2's preset bodies.
+ruzstd = "0.9"
 rusqlite = { version = "0.40", features = ["bundled"] }
 encoding_rs = "0.8"
 ryu = "1"

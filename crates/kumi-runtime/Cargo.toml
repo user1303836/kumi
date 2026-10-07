@@ -39,12 +39,14 @@ hex.workspace = true
 hmac.workspace = true
 home.workspace = true
 indexmap.workspace = true
+md-5.workspace = true
 memchr.workspace = true
 percent-encoding.workspace = true
 rand.workspace = true
 regex.workspace = true
 fancy-regex.workspace = true
 reqwest.workspace = true
+ruzstd.workspace = true
 # Max for Live device code, run in a sandbox.
 rquickjs = { version = "0.9", features = ["bindgen", "classes", "properties"] }
 serde.workspace = true

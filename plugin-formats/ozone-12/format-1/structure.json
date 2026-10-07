@@ -1,0 +1,30 @@
+{
+  "plugin": "ozone-12",
+  "format": "format-1",
+  "about": "An Ozone preset is XML. Its root names the era and plug-in that wrote it (Ozone9Maximizer, Ozone10, OzoneMS); each module is an element with Enabled, holding Param elements (ElementID, ParamID, Value) and base64 ExtraBytes for what isn't a number. The saved state is different: a 16-byte header and zlib-compressed JSON in which every value is typed. Its DSP State/DSP Elements carries each module's settings under the same ElementIDs and ParamIDs a preset uses, with more besides.",
+  "paths": "exact",
+  "files": {
+    "preset": {
+      "extension": ".xml",
+      "layers": [
+        "XML text with a declaration; the root's PresetVer and PluginVer give the preset format and the Ozone that wrote it (PluginVer 9030 is Ozone 9.3, 120000 Ozone 12)",
+        "a module element per module: Enabled, then Param ElementID ParamID Value, and ExtraBytes ElementID Data (base64)",
+        "the Global element's ExtraBytes \"ElementChain\": the signal chain, each module as a flag byte (0), a u32 LE length and its ElementID"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "u32 LE 0x00688ADE, a constant in every state seen",
+        "u32 LE 4",
+        "u32 LE: the length of everything after the first 12 bytes",
+        "u32 LE: the JSON's length once decoded",
+        "a zlib stream of JSON: every value as {\"Type\": Float, UInt, Bool, String, Base64, Dictionary or Array, \"Value\": …}; Context State (the window, per module), DSP State/DSP Elements (the settings), Major Version and Minor Version",
+        "Live keeps it as hex in the Set's Vst3Preset/ProcessorState; the ControllerState is empty"
+      ],
+      "constants": { "magic": 6851294, "version": 4 }
+    }
+  },
+  "fields": {},
+  "parameters": {}
+}

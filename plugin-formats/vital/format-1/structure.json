@@ -1,0 +1,24 @@
+{
+  "plugin": "vital",
+  "format": "format-1",
+  "about": "A Vital preset is JSON text. settings holds every control by name in the synth's own units, the modulations (source and destination by name), the three oscillators' wavetables (keyframes whose frames are base64 32-bit floats), the eight LFO shapes and the sample (base64 16-bit PCM). Read from Vital's published source; none of its code is in Kumi.",
+  "paths": "underscored-numbers",
+  "files": {
+    "preset": {
+      "extension": ".vital",
+      "layers": [
+        "JSON text, UTF-8, written in one line: author, comments, preset_name, preset_style, macro1 to macro4, synth_version and settings"
+      ],
+      "constants": {}
+    },
+    "state": {
+      "layers": [
+        "the preset's JSON with the tuning added under tuning, written as a string with a closing NUL",
+        "Live keeps a VST2 plug-in's chunk as hex in the Set's VstPreset/Buffer"
+      ],
+      "constants": {}
+    }
+  },
+  "fields": {},
+  "parameters": {}
+}

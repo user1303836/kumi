@@ -1,0 +1,37 @@
+{
+  "plugin": "serum-2",
+  "format": "format-1",
+  "about": "A preset and each half of Serum 2's saved state are one container: a JSON header, then a CBOR tree compressed with Zstandard. The tree is a map of numbered sections (Oscillator0, Env1, FXRack0, ModSlot12 …). A section's plainParams holds only the knobs that differ from their defaults, in Serum's own units, or the text \"default\". Wavetables, samples, multisamples and impulses are named by path relative to Serum's folders, never embedded. The saved state splits the preset's sections between the processor (the sound) and the controller (the window, the preset's name, the defaults each FX unit started from); a preset holds both in one tree.",
+  "paths": "numbered-sections",
+  "files": {
+    "preset": {
+      "extension": ".SerumPreset",
+      "layers": [
+        "\"XferJson\0\" (9 bytes)",
+        "u64 LE: the header's length",
+        "the header: JSON with fileType, presetName, presetAuthor, presetDescription, tags, product, productVersion, version (the format's own number), vendor, url and hash. Older files count a NUL inside the length.",
+        "u32 LE: the body's length once decoded",
+        "u32 LE: the body's encoding, 2 (Zstandard) in every file seen",
+        "the body, Zstandard-compressed, to the end of the file. The header's hash is the MD5 of these bytes.",
+        "decoded: one CBOR map of sections, which repeats the header's fields"
+      ],
+      "constants": { "magic": "XferJson\u0000", "encoding": 2, "fileType": "SerumPreset" }
+    },
+    "processor": {
+      "layers": [
+        "the VST3 processor's state: the same container, its header naming component \"processor\" with no preset name or tags",
+        "Live keeps it as hex in the Set's Vst3Preset/ProcessorState"
+      ],
+      "constants": { "magic": "XferJson\u0000", "encoding": 2, "component": "processor" }
+    },
+    "controller": {
+      "layers": [
+        "the VST3 controller's state: the same container, its header naming component \"controller\" and the preset's name, author and description",
+        "Live keeps it as hex in the Set's Vst3Preset/ControllerState"
+      ],
+      "constants": { "magic": "XferJson\u0000", "encoding": 2, "component": "controller" }
+    }
+  },
+  "fields": {},
+  "parameters": {}
+}

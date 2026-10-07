@@ -1,0 +1,27 @@
+{
+  "plugin": "serum-2",
+  "name": "Serum 2",
+  "vendor": "Xfer Records",
+  "kind": "instrument",
+  "ids": {
+    "vst3": [
+      { "id": "56534558667350736572756D20320000", "name": "Serum 2", "status": "verified" }
+    ]
+  },
+  "presets": {
+    "extensions": [".SerumPreset"],
+    "windows": [
+      { "path": "~/Documents/Xfer/Serum 2 Presets/Presets", "holds": "presets: Factory, User and one folder per installed pack", "status": "verified" },
+      { "path": "~/Documents/Xfer/Serum 2 Presets/Tables", "holds": "wavetables, which presets name by path", "status": "verified" },
+      { "path": "~/Documents/Xfer/Serum 2 Presets/Samples", "holds": "samples, which presets name by path", "status": "verified" },
+      { "path": "~/Documents/Xfer/Serum 2 Presets/Multisamples", "holds": "multisample sets (.sfz and their audio), which presets name by path", "status": "verified" },
+      { "path": "~/Documents/Xfer/Serum 2 Presets/Impulses", "holds": "convolution impulses, which presets name by path", "status": "verified" }
+    ]
+  },
+  "formats": ["format-1"],
+  "notes": [
+    "The VST3 controller class is 56534558667343736572756D20320000 (the bundle's moduleinfo.json).",
+    "Serum 2 FX (VST3 56534558667351736572756D20322066) is the effect build of the same plug-in. Its .SerumFX and .SerumFXRack files, and Xfer's .XferShape, .XferClip and .XferArp, use the same container.",
+    "No AU or CLAP build was on the Windows machine this was checked on, so those IDs and the macOS folders are still to find."
+  ]
+}
