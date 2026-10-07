@@ -587,35 +587,48 @@ pub async fn find_yt_dlp(options: &ProgramOptions) -> Result<String, VideoFailur
 
 mod node_runtime;
 
-type Extras = Shared<BoxFuture<'static, Vec<String>>>;
+type Extras = Shared<BoxFuture<'static, Option<Vec<String>>>>;
 static RUNTIMES: LazyLock<Mutex<HashMap<String, Extras>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
-async fn probe_runtimes(ytdlp: String, signal: Option<Signal>) -> Vec<String> {
-    let Ok(output) = run(&ytdlp, &["--version"], RunOptions { timeout_ms: Some(60_000), signal, max_buffer: None }).await else {
-        return Vec::new();
-    };
+/// None when yt-dlp couldn't be asked its version (it didn't start, failed or took too long).
+async fn probe_runtimes(ytdlp: String) -> Option<Vec<String>> {
+    let output = run(&ytdlp, &["--version"], RunOptions { timeout_ms: Some(60_000), signal: None, max_buffer: None }).await.ok()?;
     let text = output.stdout_text();
     let mut parts = trim(&text).split('.').map(|part| parse(part).unwrap_or(f64::NAN));
     let year = parts.next().unwrap_or(0.0);
     let month = parts.next().unwrap_or(0.0);
     if !(year > 2025.0 || (year == 2025.0 && month >= 11.0)) {
-        return Vec::new();
+        return Some(Vec::new());
     }
     // Preserve the old installed app’s process.execPath before considering a system runtime.
-    match node_runtime::find_node(&process_env(), &home::home_dir().unwrap_or_default(), platform()) {
+    Some(match node_runtime::find_node(&process_env(), &home::home_dir().unwrap_or_default(), platform()) {
         Some(node) => vec!["--js-runtimes".to_string(), format!("node:{node}")],
         None => Vec::new(),
-    }
+    })
 }
 
 /// What yt-dlp is told besides: YouTube's pages need JavaScript run to give their streams, and
-/// yt-dlp (from 2025.11) can run it with Node.
+/// yt-dlp (from 2025.11) can run it with Node. As with ffmpeg_reads_in_pieces, the asking is a task
+/// of its own, which a stopped watch leaves running for the next one, and only an answer is kept.
 pub async fn yt_dlp_extras(ytdlp: &str, signal: Option<Signal>) -> Vec<String> {
-    let extras = {
+    let probe = {
         let mut runtimes = RUNTIMES.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        runtimes.entry(ytdlp.to_string()).or_insert_with(|| probe_runtimes(ytdlp.to_string(), signal).boxed().shared()).clone()
+        runtimes
+            .entry(ytdlp.to_string())
+            .or_insert_with(|| tokio::spawn(probe_runtimes(ytdlp.to_string())).map(|probed| probed.ok().flatten()).boxed().shared())
+            .clone()
     };
-    extras.await
+    match with_signal(&signal, probe.clone()).await {
+        Ok(Some(extras)) => extras,
+        Ok(None) => {
+            let mut runtimes = RUNTIMES.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if runtimes.get(ytdlp).is_some_and(|kept| kept.ptr_eq(&probe)) {
+                runtimes.remove(ytdlp);
+            }
+            Vec::new()
+        }
+        Err(_) => Vec::new(),
+    }
 }
 
 type Pieces = Shared<BoxFuture<'static, Option<bool>>>;

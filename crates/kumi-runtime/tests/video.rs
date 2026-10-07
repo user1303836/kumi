@@ -1104,9 +1104,21 @@ fn youtube_uses_the_retained_installer_runtime_with_a_restricted_path() {
 #[cfg(unix)]
 #[tokio::test]
 async fn youtube_javascript_runtime_child() {
+    use std::os::unix::fs::PermissionsExt;
     let Ok(ytdlp) = std::env::var("KUMI_TEST_YTDLP") else { return };
     let expected = format!("node:{}/node/bin/node", std::env::var("KUMI_HOME").unwrap());
-    assert_eq!(programs::yt_dlp_extras(&ytdlp, None).await, vec!["--js-runtimes".to_string(), expected]);
+    // A yt-dlp that couldn't say its version isn't kept as one without a runtime: it's asked again.
+    let answers = std::fs::read(&ytdlp).unwrap();
+    std::fs::write(&ytdlp, "#!/bin/sh\nexit 1\n").unwrap();
+    assert!(programs::yt_dlp_extras(&ytdlp, None).await.is_empty());
+    std::fs::write(&ytdlp, &answers).unwrap();
+    assert_eq!(programs::yt_dlp_extras(&ytdlp, None).await, vec!["--js-runtimes".to_string(), expected.clone()]);
+    // A watch stopped while yt-dlp is asked leaves the asking to finish for the next one.
+    let slow = format!("{ytdlp} slow");
+    std::fs::write(&slow, "#!/bin/sh\n/bin/sleep 1\nprintf '2025.11.12\\n'\n").unwrap();
+    std::fs::set_permissions(&slow, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(programs::yt_dlp_extras(&slow, Some(kumi_common::abort::timeout(100))).await.is_empty());
+    assert_eq!(programs::yt_dlp_extras(&slow, None).await, vec!["--js-runtimes".to_string(), expected]);
     // The source memoizes each executable probe, including the selected runtime.
     std::fs::remove_file(&ytdlp).unwrap();
     assert_eq!(programs::yt_dlp_extras(&ytdlp, None).await.len(), 2);
