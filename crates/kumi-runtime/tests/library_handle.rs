@@ -90,6 +90,14 @@ async fn full_library_learns_searches_compares_files_describes_sets_and_remember
             library.close().await;
             let reopened = make(&studio, false);
             wait(|| reopened.status().state == LibraryState::Ready).await;
+            // Searches that come together while there's no index wait for one build and share it (#258), where each
+            // used to build its own.
+            let together = futures::future::join_all((0..4).map(|_| reopened.sound_index())).await;
+            let first = together[0].as_ref().unwrap();
+            assert!(
+                together.iter().all(|index| Rc::ptr_eq(first, index.as_ref().unwrap())),
+                "one build serves searches that came together"
+            );
             assert_eq!(reopened.status().sounds, 7);
             assert!(!reopened.taste().await.unwrap().iter().any(|t| t.id == "tempo"));
             reopened.close().await;

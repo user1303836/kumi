@@ -120,6 +120,9 @@ pub struct Library {
     told_timer: RefCell<Option<JoinHandle<()>>>,
     held: RefCell<Option<HeldIndex>>,
     stale: Cell<bool>,
+    /// Held while the sound index is checked and built: a search that comes during a build waits for it and takes
+    /// its index, rather than building its own (#258).
+    building: Mutex<()>,
     source_cache: RefCell<Option<(i64, Vec<Source>)>>,
     remembered: RefCell<Option<Vec<String>>>,
 }
@@ -147,6 +150,7 @@ pub fn create_library(options: LibraryOptions) -> Rc<Library> {
         told_timer: RefCell::new(None),
         held: RefCell::new(None),
         stale: Cell::new(false),
+        building: Mutex::new(()),
         source_cache: RefCell::new(None),
         remembered: RefCell::new(None),
     });
@@ -479,6 +483,9 @@ impl Library {
     }
     pub async fn sound_index(&self) -> Result<Rc<SoundIndex>, RuntimeError> {
         self.remembering().await;
+        // One check and build at a time. The model's first searches come together (a kick, a snare, a hat, a perc),
+        // and each used to find no index and build its own from the whole log: four at once took four times one.
+        let _building = self.building.lock().await;
         let mut reader = self.sounds.lock().await;
         if reader.refresh().await.map_err(io_error)?.changed {
             self.stale.set(true);
