@@ -861,7 +861,8 @@ impl TuiApp {
             Some(a) => f(TuiApp(a), item).boxed_local(),
             None => async { Ok(()) }.boxed_local(),
         });
-        self.0.state.borrow_mut().panel = Some(Rc::new(RefCell::new(Panel::Pick { picker: picker.clone(), choose })));
+        self.0.state.borrow_mut().panel =
+            Some(Rc::new(RefCell::new(Panel::Pick { picker: picker.clone(), choose, choosing: Rc::default() })));
         self.0.scheduler.request();
         picker
     }
@@ -994,19 +995,23 @@ impl TuiApp {
             }
             let mut p = panel.borrow_mut();
             match &mut *p {
-                Panel::Pick { picker, choose } => match name.as_str() {
+                Panel::Pick { picker, choose, choosing } => match name.as_str() {
                     "up" => picker.borrow_mut().r#move(-1),
                     "down" | "tab" => picker.borrow_mut().r#move(1),
                     "backspace" => picker.borrow_mut().erase(),
-                    "enter" => {
+                    // A second Enter before the first choice is made would make it again (an answer sent twice).
+                    "enter" if !choosing.get() => {
                         let item = {
                             let picker = picker.borrow();
                             picker.selected().cloned().map(|item| PickerItem { chosen: picker.chosen, ..item })
                         };
                         if let Some(item) = item {
-                            let choose = choose.clone();
+                            choosing.set(true);
+                            let (choose, choosing) = (choose.clone(), choosing.clone());
                             self.task(move |app| async move {
-                                if let Err(error) = choose(item).await {
+                                let chosen = choose(item).await;
+                                choosing.set(false);
+                                if let Err(error) = chosen {
                                     app.panel_failed(&error);
                                 }
                                 Ok(())

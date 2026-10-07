@@ -926,6 +926,23 @@ case!(a_question_with_numbered_options_answers_by_number_and_free_text_still_wor
     assert!(!has(&h.screen(), "Your answer"), "a list that isn't a question offers nothing");
     h.close().await;
 });
+case!(a_double_enter_on_the_answers_sends_the_answer_once, async {
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.type_text("sidechain the bass\r").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"text","text":"Which bass should duck under the kick?\n\n1. Sub Bass\n2. Reese"}));
+    h.emit(json!({"type":"turn-complete","result":{"stopReason":"completed"},"elapsedMs":900}));
+    h.emit(json!({"type":"state","state":"idle"}));
+    h.has("Your answer");
+    // Both Enters arrive before the first choice is made.
+    h.type_text("2\r\r").await;
+    h.wait_for_call("submit:Reese").await;
+    delay(20).await;
+    assert_eq!(h.calls().iter().filter(|c| *c == "submit:Reese").count(), 1, "{:?}", h.calls());
+    h.close().await;
+});
 case!(only_a_choice_the_producer_made_is_a_pick, async {
     let h = Harness::new(120, 36);
     h.start().await;
