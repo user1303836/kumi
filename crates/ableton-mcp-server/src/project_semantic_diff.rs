@@ -209,6 +209,11 @@ fn components(before: &[&Value], after: &[&Value]) -> Vec<(Vec<usize>, Vec<usize
 pub fn diff_semantic_project_snapshots(before: &Value, after: &Value) -> Result<Value, ProjectError> {
     validate_semantic_project_artifact(before)?;
     validate_semantic_project_artifact(after)?;
+    diff_valid_semantic_project_snapshots(before, after)
+}
+/// `diff_semantic_project_snapshots` for artifacts already validated (`assemble_semantic_project_pages` validates what it
+/// assembles): each is read whole once, not twice.
+pub(crate) fn diff_valid_semantic_project_snapshots(before: &Value, after: &Value) -> Result<Value, ProjectError> {
     if before["schema"] != after["schema"] || before["schema"] != SEMANTIC_PROJECT_SNAPSHOT_SCHEMA {
         return Err(fail("semantic snapshots use incompatible schemas"));
     }
@@ -581,20 +586,30 @@ fn decode_cursor(diff: &Value, cursor: &str) -> Result<f64, ProjectError> {
     }
     Ok(row["offset"].as_f64().unwrap())
 }
-fn make_page(diff: &Value, offset: usize, count: usize) -> Result<Value, ProjectError> {
-    let mut header = diff.clone();
-    header.as_object_mut().unwrap().remove("items");
-    let items = array(&diff["items"]);
-    let complete = offset + count == items.len();
-    header["page"] = json!({"offset":offset,"returned":count,"total":items.len(),"complete":complete});
+/// A page of `count` items from `offset`, without its items: every other field of the diff, copied without the items.
+fn make_frame(diff: &Value, offset: usize, count: usize) -> Result<Value, ProjectError> {
+    let mut header: Value =
+        diff.as_object().unwrap().iter().filter(|(key, _)| *key != "items").map(|(k, v)| (k.clone(), v.clone())).collect();
+    let total = array(&diff["items"]).len();
+    let complete = offset + count == total;
+    header["page"] = json!({"offset":offset,"returned":count,"total":total,"complete":complete});
     if !complete {
         header["page"]["nextCursor"] = json!(encode_cursor(diff, offset + count)?);
     }
-    header["items"] = json!(&items[offset..offset + count]);
+    header["items"] = json!([]);
     Ok(header)
+}
+fn make_page(diff: &Value, offset: usize, count: usize) -> Result<Value, ProjectError> {
+    let mut page = make_frame(diff, offset, count)?;
+    page["items"] = json!(&array(&diff["items"])[offset..offset + count]);
+    Ok(page)
 }
 pub fn page_semantic_project_diff(diff: &Value, options: &SemanticPageOptions) -> Result<Value, ProjectError> {
     audit_diff_output(diff)?;
+    page_audited_semantic_project_diff(diff, options)
+}
+/// `page_semantic_project_diff` for a diff `diff_valid_semantic_project_snapshots` just made, which audited it.
+pub(crate) fn page_audited_semantic_project_diff(diff: &Value, options: &SemanticPageOptions) -> Result<Value, ProjectError> {
     let limit = options.limit.unwrap_or(100.);
     if limit.fract() != 0. || !(1. ..=SEMANTIC_PROJECT_MAX_PAGE_RECORDS as f64).contains(&limit) {
         return Err(fail("semantic diff or page limit is invalid"));
@@ -606,8 +621,10 @@ pub fn page_semantic_project_diff(diff: &Value, options: &SemanticPageOptions) -
     }
     let offset = offset as usize;
     let mut count = (limit as usize).min(total - offset);
+    // The candidates' items measured once, not a whole page built for each count tried.
+    let lengths = semantic::canonical_lengths(&array(&diff["items"])[offset..offset + count])?;
     while count > 0 {
-        if canonical(&make_page(diff, offset, count)?)?.len() <= SEMANTIC_PROJECT_MAX_PAGE_BYTES {
+        if semantic::page_length(&make_frame(diff, offset, count)?, &lengths, offset, offset, count)? <= SEMANTIC_PROJECT_MAX_PAGE_BYTES {
             break;
         }
         count -= 1;
@@ -616,4 +633,26 @@ pub fn page_semantic_project_diff(diff: &Value, options: &SemanticPageOptions) -
         return Err(fail("one semantic diff item exceeds the page byte bound"));
     }
     make_page(diff, offset, count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::project_semantic::{canonical_lengths, page_length};
+    #[test]
+    fn a_diff_page_measured_from_its_frame_and_items_is_as_long_as_its_json() {
+        let before = crate::project_semantic::tests::artifact(3, false);
+        let after = crate::project_semantic::tests::artifact(14, false);
+        let diff = diff_semantic_project_snapshots(&before, &after).unwrap();
+        let items = array(&diff["items"]);
+        assert!(items.len() > 8, "{}", items.len());
+        let lengths = canonical_lengths(items).unwrap();
+        for offset in 0..=items.len() {
+            for count in (0..=(items.len() - offset).min(5)).chain([items.len() - offset]) {
+                let page = make_page(&diff, offset, count).unwrap();
+                let measured = page_length(&make_frame(&diff, offset, count).unwrap(), &lengths, 0, offset, count).unwrap();
+                assert_eq!(measured, canonical(&page).unwrap().len(), "offset {offset}, count {count}");
+            }
+        }
+    }
 }

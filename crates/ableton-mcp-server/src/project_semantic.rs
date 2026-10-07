@@ -1153,19 +1153,46 @@ fn decode_cursor(cursor: &str, artifact: &Value) -> Result<f64, ProjectError> {
 fn header(artifact: &Value) -> Value {
     pick(artifact, &["schema", "artifact", "policy", "provenance", "set", "manifest", "safety"])
 }
-fn make_page(artifact: &Value, offset: usize, count: usize) -> Result<Value, ProjectError> {
-    let records = array(&artifact["records"]);
-    let complete = offset + count == records.len();
+/// A page of `count` records from `offset`, without its records.
+fn make_frame(artifact: &Value, offset: usize, count: usize) -> Result<Value, ProjectError> {
+    let total = array(&artifact["records"]).len();
+    let complete = offset + count == total;
     let mut page = header(artifact);
-    page["page"] = json!({"offset":offset,"returned":count,"total":records.len(),"complete":complete});
+    page["page"] = json!({"offset":offset,"returned":count,"total":total,"complete":complete});
     if !complete {
         page["page"]["nextCursor"] = json!(encode_cursor(&artifact["artifact"]["id"], &artifact["policy"]["profile"], offset + count)?);
     }
-    page["records"] = json!(&records[offset..offset + count]);
+    page["records"] = json!([]);
     Ok(page)
+}
+fn make_page(artifact: &Value, offset: usize, count: usize) -> Result<Value, ProjectError> {
+    let mut page = make_frame(artifact, offset, count)?;
+    page["records"] = json!(&array(&artifact["records"])[offset..offset + count]);
+    Ok(page)
+}
+/// Each row's canonical length where a page holds it (an array two levels in, which the depth bound counts).
+pub(crate) fn canonical_lengths(rows: &[Value]) -> Result<Vec<usize>, ProjectError> {
+    rows.iter()
+        .map(|row| {
+            let mut out = String::new();
+            canonical_visit(row, 2, &mut 0, &mut out)?;
+            Ok(out.len())
+        })
+        .collect()
+}
+/// A page's canonical length, from its frame's and its rows' (`lengths`, from `first` on): the same number as the
+/// page's own JSON, without building it.
+pub(crate) fn page_length(frame: &Value, lengths: &[usize], first: usize, offset: usize, count: usize) -> Result<usize, ProjectError> {
+    let rows = &lengths[offset - first..offset - first + count];
+    Ok(canonical_semantic_json(frame)?.len() + rows.iter().sum::<usize>() + count.saturating_sub(1))
 }
 pub fn page_semantic_project_snapshot(artifact: &Value, options: &SemanticPageOptions) -> Result<Value, ProjectError> {
     validate_semantic_project_artifact(artifact)?;
+    page_valid_semantic_project_snapshot(artifact, options)
+}
+/// `page_semantic_project_snapshot` for an artifact this process made (and so validated) and kept as it was: a page
+/// doesn't validate the whole artifact again.
+pub(crate) fn page_valid_semantic_project_snapshot(artifact: &Value, options: &SemanticPageOptions) -> Result<Value, ProjectError> {
     let limit = options.limit.unwrap_or(100.);
     if limit.fract() != 0. || !(1. ..=SEMANTIC_PROJECT_MAX_PAGE_RECORDS as f64).contains(&limit) {
         return Err(fail("semantic snapshot page limit is invalid"));
@@ -1177,10 +1204,15 @@ pub fn page_semantic_project_snapshot(artifact: &Value, options: &SemanticPageOp
         return Err(fail("semantic snapshot cursor offset is outside the artifact"));
     }
     let offset = offset as usize;
+    // The records' lengths, measured once: every page the plan below lays out, or just this one's.
+    let first = if cursor.is_none() { 0 } else { offset };
+    let records = array(&artifact["records"]);
+    let lengths = canonical_lengths(&records[first..(if cursor.is_none() { total } else { (offset + limit as usize).min(total) })])?;
+    let length = |offset: usize, count: usize| page_length(&make_frame(artifact, offset, count)?, &lengths, first, offset, count);
     let bounded_count = |offset: usize| -> Result<usize, ProjectError> {
         let mut candidate = (limit as usize).min(total - offset);
         while candidate > 0 {
-            if canonical_semantic_json(&make_page(artifact, offset, candidate)?)?.len() <= SEMANTIC_PROJECT_MAX_PAGE_BYTES {
+            if length(offset, candidate)? <= SEMANTIC_PROJECT_MAX_PAGE_BYTES {
                 return Ok(candidate);
             }
             candidate -= 1;
@@ -1196,7 +1228,7 @@ pub fn page_semantic_project_snapshot(artifact: &Value, options: &SemanticPageOp
             if count == 0 {
                 break;
             }
-            bytes += canonical_semantic_json(&make_page(artifact, planned_offset, count)?)?.len() + usize::from(pages > 0);
+            bytes += length(planned_offset, count)? + usize::from(pages > 0);
             planned_offset += count;
             pages += 1;
         }
@@ -1270,4 +1302,75 @@ fn encode_cursor_number(id: &Value, profile: &Value, offset: f64) -> Result<Stri
         json!({"artifactId":id,"profile":profile,"offset":offset,"plan":"assemblable-v1","schema":SEMANTIC_PROJECT_SNAPSHOT_SCHEMA});
     payload["checksum"] = json!(short_digest(&payload)?);
     Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(canonical_semantic_json(&payload)?))
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    /// The case 0 Set from the semantic oracle, with `tracks` copies of its track: names of 1 to 512 units, and with
+    /// `heavy` no clips or devices but 128 sends, so most records are tracks of about 3.5 KB.
+    pub(crate) fn artifact(tracks: usize, heavy: bool) -> Value {
+        let mut d = serde_json::Deserializer::from_str(include_str!("../tests/support/project_semantic_oracle.json"));
+        d.disable_recursion_limit();
+        let fixture = <Value as serde::Deserialize>::deserialize(&mut d).unwrap();
+        let options: CreateSemanticProjectOptions = serde_json::from_value(fixture["cases"][0]["options"].clone()).unwrap();
+        let mut snapshot = fixture["cases"][0]["snapshot"].clone();
+        let track = snapshot["tracks"][0].clone();
+        snapshot["tracks"] = json!((0..tracks)
+            .map(|i| {
+                let mut copy = track.clone();
+                copy["ref"] = json!(format!("track:track-{i}"));
+                copy["objectIdentity"] = json!(format!("simulator:track:track-{i}"));
+                copy["name"] = json!("日".repeat(1 + i * 409 % 512));
+                if heavy {
+                    for key in ["clips", "clipSlots", "devices"] {
+                        copy[key] = json!([]);
+                    }
+                    copy["sends"] = json!(vec![0.123_456_789_012_345_6; 128]);
+                    if copy["mixer"].is_object() {
+                        copy["mixer"]["sends"] = copy["sends"].clone();
+                    }
+                }
+                copy
+            })
+            .collect::<Vec<_>>());
+        create_semantic_project_snapshot(&snapshot, &options).unwrap()
+    }
+    #[test]
+    fn a_page_measured_from_its_frame_and_records_is_as_long_as_its_json() {
+        let artifact = artifact(24, false);
+        let records = array(&artifact["records"]);
+        let lengths = canonical_lengths(records).unwrap();
+        for offset in 0..=records.len() {
+            for count in (0..=(records.len() - offset).min(6)).chain([records.len() - offset]) {
+                let page = make_page(&artifact, offset, count).unwrap();
+                let measured = page_length(&make_frame(&artifact, offset, count).unwrap(), &lengths, 0, offset, count).unwrap();
+                assert_eq!(measured, canonical_semantic_json(&page).unwrap().len(), "offset {offset}, count {count}");
+            }
+        }
+    }
+    #[test]
+    fn pages_still_fill_to_their_byte_bound() {
+        // About 1 MB of records, mostly tracks: pages end on the byte bound before the limit.
+        let artifact = artifact(300, true);
+        let mut options = SemanticPageOptions { limit: Some(200.), cursor: None };
+        let (mut seen, mut full) = (0, 0);
+        loop {
+            let page = page_semantic_project_snapshot(&artifact, &options).unwrap();
+            let bytes = canonical_semantic_json(&page).unwrap().len();
+            assert!(bytes <= SEMANTIC_PROJECT_MAX_PAGE_BYTES);
+            let returned = page["page"]["returned"].as_u64().unwrap() as usize;
+            seen += returned;
+            let Some(next) = page["page"]["nextCursor"].as_str() else { break };
+            // Short of the limit, one more record would not have fitted.
+            if returned < 200 {
+                let more = canonical_semantic_json(&make_page(&artifact, seen - returned, returned + 1).unwrap()).unwrap().len();
+                assert!(more > SEMANTIC_PROJECT_MAX_PAGE_BYTES, "page at {} stopped short", seen - returned);
+                full += 1;
+            }
+            options.cursor = Some(next.to_owned());
+        }
+        assert_eq!(seen, array(&artifact["records"]).len());
+        assert!(full > 0, "no page ended on the byte bound");
+    }
 }
