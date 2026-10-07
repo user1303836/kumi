@@ -126,8 +126,8 @@ pub struct History {
     /// What else follows a restructure Kumi's undo takes back (what the turns showed of the Set's devices).
     pub on_shift: RefCell<Option<OnShift>>,
 }
-/// Told where a restructure Kumi's undo took back moved the Set's tracks and scenes.
-pub type OnShift = Rc<dyn Fn(&Shift)>;
+/// Told where a restructure Kumi's undo took back moved the Set's tracks and scenes, or None when it can't be known.
+pub type OnShift = Rc<dyn Fn(Option<&Shift>)>;
 impl History {
     pub fn change_signal(&self) -> Signal {
         abort::any([self.connection.lifetime.clone(), abort::timeout(self.timeout_ms)])
@@ -173,7 +173,22 @@ impl History {
         drop(book);
         let on_shift = self.on_shift.borrow().clone();
         if let Some(on_shift) = on_shift {
-            on_shift(&back);
+            on_shift(Some(&back));
+        }
+    }
+    /// A restructure's undo Live didn't confirm: whether the tracks and scenes moved back can't be known, so the refs
+    /// that followed it are retired, as after a restructure Kumi can't read exactly, and what the turns showed with
+    /// them.
+    fn unknown_shift(&self) {
+        let mut book = self.connection.references.borrow_mut();
+        book.refs.clear();
+        book.known.clear();
+        book.cursors.clear();
+        book.clear_names();
+        drop(book);
+        let on_shift = self.on_shift.borrow().clone();
+        if let Some(on_shift) = on_shift {
+            on_shift(None);
         }
     }
     pub fn observed(&self) -> Vec<ObservedChange> {
@@ -552,7 +567,13 @@ impl History {
             if snapshot.transaction_id.is_empty() {
                 return Ok(UndoResult::with(snapshot.record, "Kumi can't take this back; Live's own undo (Cmd-Z in Live) can.", true));
             }
-            if let Some(stopped) = self.bridge_undo(&entry, &snapshot, &undo_key, discard).await? {
+            if let Some(mut stopped) = self.bridge_undo(&entry, &snapshot, &undo_key, discard).await? {
+                if snapshot.shift.is_some() && stopped.record.as_ref().is_some_and(|record| record.state == ChangeState::Unsure) {
+                    self.unknown_shift();
+                    stopped.text.push_str(
+                        " Live may have taken the tracks or scenes back, so Kumi's references are retired: discover again before using any.",
+                    );
+                }
                 return Ok(stopped);
             }
             if let Some(shift) = &snapshot.shift {

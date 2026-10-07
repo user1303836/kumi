@@ -92,7 +92,10 @@ impl Ableton {
             let shown = Rc::downgrade(&observer);
             *history.on_shift.borrow_mut() = Some(Rc::new(move |shift| {
                 if let Some(observer) = shown.upgrade() {
-                    observer.shifted(shift);
+                    match shift {
+                        Some(shift) => observer.shifted(shift),
+                        None => observer.forget_devices(),
+                    }
                 }
             }));
             let parameters = Rc::new(Parameters::new(history.clone(), options.fast));

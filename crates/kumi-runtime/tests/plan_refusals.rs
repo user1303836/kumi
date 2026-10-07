@@ -30,6 +30,8 @@ struct Bridge {
     /// message, as when Live is still setting up what the change fences.
     once: RefCell<Vec<(&'static str, &'static str)>>,
     calls: RefCell<Vec<(String, JsonObject)>>,
+    /// What Live's undo answers, last first; "undone" once there's nothing left.
+    undo: RefCell<Vec<&'static str>>,
     /// Each preview's arguments, by its transaction.
     previews: RefCell<Vec<JsonObject>>,
     next: Cell<usize>,
@@ -97,7 +99,7 @@ impl McpEndpoint for Bridge {
             return Ok(reply(self.python.borrow_mut().remove(0)));
         }
         if name == "live_undo" {
-            return Ok(reply(json!({"state":"undone"})));
+            return Ok(reply(json!({"state":self.undo.borrow_mut().pop().unwrap_or("undone")})));
         }
         if name.ends_with("_preview") {
             let text = stringify(&Value::Object(args.clone()));
@@ -170,6 +172,7 @@ async fn kumi(refuse: Vec<&'static str>) -> (Rc<Ableton>, Rc<Bridge>, Vec<String
         python: RefCell::new(vec![]),
         once: RefCell::new(vec![]),
         calls: RefCell::new(vec![]),
+        undo: RefCell::new(vec![]),
         previews: RefCell::new(vec![]),
         next: Cell::new(0),
     });
@@ -396,6 +399,8 @@ async fn a_refusal_from_a_fence_that_moved_is_asked_again_and_an_audio_clips_loo
                 bridge.previewed("live_audio_clip_preview"),
                 [json!({"clipRef":"7:clip:2:0","loopStart":0,"loopEnd":8}).as_object().unwrap().clone()]
             );
+            // set_audio_clip can't switch the clip's looping on, which the step asked for: the answer says so.
+            assert!(reply["done"][1]["looping"].as_str().unwrap().contains("turn Loop on"), "{reply}");
             // Refused for good, a refusal names Kumi's tool, not the bridge's.
             bridge.once.borrow_mut().push(("7:clip:2:0", "audio clip loop editing uses live_audio_clip_preview"));
             let (_, reply) = plan(&integration, json!([{"tool":"set_clip","input":{"clipRef":"7:clip:2:0","looping":false}}])).await;
@@ -558,6 +563,27 @@ async fn a_change_live_may_have_made_stops_the_plan_though_some_of_it_was_only_m
             assert_eq!(bridge.previewed("live_arrangement_midi_clip_apply").len(), 1, "{reply}");
             assert!(bridge.previewed("live_tempo_preview").is_empty(), "the plan stopped: {reply}");
             assert!(reply["done"].as_array().is_none_or(|done| done.is_empty()), "{reply}");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_undo_of_a_track_add_live_doesnt_confirm_retires_the_refs_that_followed_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Live may or may not have deleted the track again, so the refs that moved with the add can't be trusted
+            // either way: they're retired, and the model is told to discover again.
+            let (integration, bridge, names) = kumi(vec![]).await;
+            let (result, reply) =
+                plan(&integration, json!([{"tool":"add_tracks_and_scenes","input":{"tracks":[{"name":"Pad","index":3}]}}])).await;
+            assert!(!result.is_error, "{}", result.text);
+            let add = reply["done"][0]["change"].as_str().unwrap().to_owned();
+            bridge.undo.borrow_mut().push("pending");
+            let undone = integration.history.undo(&add, Signal::new(), false).await.unwrap();
+            assert!(undone.is_error && undone.text.contains("discover again"), "{}", undone.text);
+            let book = integration.connection.references.borrow();
+            assert!(book.refs.is_empty());
+            assert_eq!(book.lengthen(&json!({"ref":names[5]}))["ref"], json!(names[5]), "a retired name names nothing");
         })
         .await;
 }

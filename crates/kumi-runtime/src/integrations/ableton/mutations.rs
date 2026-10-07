@@ -112,6 +112,13 @@ impl Mutations {
         if kind.tool == "set_clip" && outcome.is_error && !outcome.stops && outcome.text.contains("audio clip loop editing uses") {
             if let (Some(audio), Some(loop_points)) = (CHANGES.iter().find(|k| k.tool == "set_audio_clip"), audio_loop_points(&named)) {
                 outcome = self.attempt(audio, loop_points, original.clone(), settled).await;
+                // set_audio_clip sets the points, not an audio clip's looping, and doesn't say whether it loops.
+                if !outcome.is_error && named.get("looping") == Some(&json!(true)) {
+                    if let Ok(Value::Object(mut reply)) = serde_json::from_str::<Value>(&outcome.text) {
+                        reply.insert("looping".into(), json!(LOOPING_NOTE));
+                        outcome.text = stringify(&json!(reply));
+                    }
+                }
             }
         }
         if changes {
@@ -645,6 +652,8 @@ const SETTLE_MS: u64 = 600;
 fn transient(text: &str) -> bool {
     ["changed since preview", "did not confirm the exact requested", "hierarchy is stale"].iter().any(|said| text.contains(said))
 }
+/// What a plan's done row says when set_clip asked an audio clip to loop: set_audio_clip sets only its loop points.
+const LOOPING_NOTE: &str = "The loop points are set, but Kumi can't switch an audio clip's looping: if it isn't looping already, tell the producer to turn Loop on in its Clip View.";
 /// set_clip's loop points for an audio clip, as set_audio_clip takes them, when that's all it changes (an audio clip's
 /// looping itself isn't Kumi's to switch).
 fn audio_loop_points(named: &JsonObject) -> Option<JsonObject> {
