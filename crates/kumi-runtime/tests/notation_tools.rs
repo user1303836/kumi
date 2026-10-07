@@ -160,8 +160,8 @@ async fn notation_becomes_the_notes_live_takes() {
             assert_eq!((written["start"].clone(), written["length"].clone()), (json!(32.0), json!(8.0)));
             assert_eq!(written["notes"], json!([{"pitch":48,"start":2.0,"duration":4.0,"velocity":100}]));
             // Several clips, and drums named by the track's pads.
-            let input = object(json!({"clips":[{"trackRef":"7:track:0","start":0,"length":4,"notation":"kick x... *4
-snare ....x... *2"}]}));
+            let input =
+                object(json!({"clips":[{"trackRef":"7:track:0","start":0,"length":4,"notation":"kick x... *4\nsnare ....x... *2"}]}));
             let written = expand("write_arrangement_clip", input, &connection, Some(120.), &signal).await.unwrap().input;
             let pitches: Vec<_> = written["clips"][0]["notes"].as_array().unwrap().iter().map(|n| n["pitch"].as_u64().unwrap()).collect();
             assert_eq!(pitches, [36, 36, 38, 36, 36, 38]);
@@ -236,6 +236,131 @@ line 2, column 5: “H2” isn't a pitch"
                 .err()
                 .unwrap()
                 .starts_with("clips[0]: Notation line 1"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn read_notes_prints_each_clip_in_its_own_frame() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (_, connection) = connection().await;
+            let read = read_notes(
+                &object(json!({"clipRefs":["7:clip:0:0","7:arrangement_clip:1:0","7:arrangement_clip:2:0"]})),
+                &connection,
+                Some(120.),
+                Signal::new(),
+            )
+            .await;
+            let clips: Value = serde_json::from_str(&read.text).unwrap();
+            // A Session clip on a Drum Rack track: its own time, drums as lanes named by the pads.
+            assert_eq!(clips["clips"][0]["notation"], json!("kick808 x... *4\nsnare ..x. *4"));
+            assert_eq!((clips["clips"][0]["notes"].clone(), clips["clips"][0]["exact"].clone()), (json!(8), json!(true)));
+            // An Arrangement clip at bar 9: song time; a release velocity isn't written, so it isn't exact, and says why.
+            assert_eq!(clips["clips"][1]["notation"], json!("9|1 l/4. v110 C1 9|3 v90 G1/8"));
+            assert_eq!(clips["clips"][1]["time"], json!("song time in 4/4: the clip plays from 9|1 to 11|1"));
+            assert_eq!(clips["clips"][1]["exact"], json!(false));
+            assert_eq!(clips["clips"][1]["leftOut"], json!("release velocities aren't written (format \"json\" has them)"));
+            assert!(clips["clips"][2]["error"].as_str().unwrap().contains("audio clip"));
+            // Live's own rows, for exact edits, with where the clip plays them.
+            let read =
+                read_notes(&object(json!({"clipRef":"7:arrangement_clip:1:1","format":"json"})), &connection, None, Signal::new()).await;
+            let clips: Value = serde_json::from_str(&read.text).unwrap();
+            assert_eq!(clips["clips"][0]["notes"][1]["start"].as_f64(), Some(16.));
+            assert_eq!(clips["clips"][0]["placement"]["startMarker"].as_f64(), Some(16.));
+            assert!(read_notes(&object(json!({})), &connection, None, Signal::new()).await.is_error);
+        })
+        .await;
+}
+
+/// The notes a printed clip reads back as: (pitch, song beat, length).
+fn heard(clip: &Value, origin: f64) -> Vec<(u8, f64, f64)> {
+    let frame = Frame { origin, ..Frame::default() };
+    let mut notes: Vec<_> = parse(clip["notation"].as_str().unwrap(), &frame)
+        .unwrap()
+        .into_iter()
+        .map(|note| (note.pitch, origin + note.start, note.duration))
+        .collect();
+    notes.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+    notes
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_arrangement_clip_prints_what_it_plays_where_it_plays_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (_, connection) = connection().await;
+            let refs = ["7:arrangement_clip:1:1", "7:arrangement_clip:1:2", "7:arrangement_clip:1:3", "7:arrangement_clip:1:4"];
+            let read = read_notes(&object(json!({"clipRefs": refs})), &connection, Some(120.), Signal::new()).await;
+            let clips: Value = serde_json::from_str(&read.text).unwrap();
+            // A split clip: its window, from its start marker; a note past its end is cut there, and the notes outside
+            // the window are counted, not shown.
+            let split = &clips["clips"][0];
+            assert_eq!(split["time"], json!("song time in 4/4: the clip plays from 13|1 to 15|1"));
+            assert_eq!(heard(split, 48.), [(60, 48., 1.), (64, 52., 4.)]);
+            assert!(split["unheard"].as_str().unwrap().starts_with("2 of its notes lie outside what it plays"));
+            assert_eq!(split["exact"], json!(true));
+            // A loop started halfway through: the rest of that pass, then each pass; a note held over the loop's end is
+            // cut there each time, and one before the loop never plays.
+            let looped = &clips["clips"][1];
+            assert_eq!(looped["time"], json!("song time in 4/4: the clip plays from 17|1 to 20|1, looping: each pass is shown"));
+            let pass = |at: f64| [(62, at, 1.), (64, at + 1.5, 0.5), (60, at + 2., 1.)];
+            assert_eq!(heard(looped, 64.), [pass(64.), pass(68.), pass(72.)].concat());
+            assert!(looped["unheard"].as_str().unwrap().starts_with("1 of its notes"));
+            // Without the start marker, the loop is taken to start at its start: not exact, and it says why.
+            let old = &clips["clips"][2];
+            assert_eq!(old["exact"], json!(false));
+            assert_eq!(
+                old["leftOut"],
+                json!("this bridge doesn't say where in its loop the clip starts, so it's placed from the loop's start")
+            );
+            assert_eq!(heard(old, 80.), [(60, 80., 1.), (60, 84., 1.)]);
+            assert_eq!((clips["clips"][0]["exact"].clone(), clips["clips"][1]["exact"].clone()), (json!(true), json!(true)));
+            // Live's own split: the right half plays on from the clip's ninth beat, where the whole clip did.
+            let right = &clips["clips"][3];
+            assert_eq!(heard(right, 40.), [(60, 40., 0.25), (60, 44., 0.25)]);
+            assert!(right["unheard"].as_str().unwrap().starts_with("2 of its notes"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn read_notes_says_what_it_leaves_out() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (_, connection) = connection().await;
+            // A clip read in part isn't exact, and says so.
+            let read = read_notes(&object(json!({"clipRef":"7:clip:0:1"})), &connection, None, Signal::new()).await;
+            let clips: Value = serde_json::from_str(&read.text).unwrap();
+            assert_eq!(clips["clips"][0]["exact"], json!(false));
+            assert!(clips["clips"][0]["leftOut"].as_str().unwrap().starts_with("only its first 8 notes were read"));
+            // Sixteen clips at a time, and the rest said.
+            let read = read_notes(&object(json!({"clipRefs": vec!["7:clip:0:0"; 17]})), &connection, None, Signal::new()).await;
+            let clips: Value = serde_json::from_str(&read.text).unwrap();
+            assert_eq!(clips["clips"].as_array().unwrap().len(), 16);
+            assert_eq!(clips["more"], json!("16 clips at a time: ask again for the other 1"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn roman_numerals_start_in_the_sets_scale() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (_, connection) = connection().await;
+            let signal = Signal::new();
+            let write = |text: &str| object(json!({"trackRef":"7:track:1","sceneIndex":0,"notation":text}));
+            // The Set in D Dorian: IV is G major, with no key line.
+            set_scale(Some("D Dorian".into()));
+            let written = expand("write_midi_clip", write("1|1 {IV}/1"), &connection, None, &signal).await.unwrap().input;
+            let pitches: Vec<_> = written["notes"].as_array().unwrap().iter().map(|note| note["pitch"].as_u64().unwrap()).collect();
+            assert_eq!(pitches, [55, 59, 62]);
+            // A scale numerals can't be read in (a pentatonic), or none: a key line is needed, as before.
+            for scale in [Some("A Minor Pentatonic".to_owned()), None] {
+                set_scale(scale);
+                let error = expand("write_midi_clip", write("1|1 {IV}"), &connection, None, &signal).await.err().unwrap();
+                assert!(error.contains("needs a key"), "{error}");
+            }
         })
         .await;
 }
