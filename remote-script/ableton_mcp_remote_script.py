@@ -778,6 +778,27 @@ def _failure_summary(error: BaseException) -> str:
     return f"request failed: {type(error).__name__}" + (f": {text[:200]}" if text.strip() else "")
 
 
+class _BoundedOutput(io.TextIOBase):
+    """python.run's stdout: what fits on the wire is kept, the rest dropped as it's written, so a printing loop
+    can't fill Live's memory before its timeout. Characters, as the slice it replaces counted them."""
+
+    def __init__(self, limit: int) -> None:
+        super().__init__()
+        self._parts: list[str] = []; self._kept = 0; self._limit = limit
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, text: str) -> int:
+        text = str(text)
+        if self._kept < self._limit:
+            piece = text[:self._limit - self._kept]; self._parts.append(piece); self._kept += len(piece)
+        return len(text)
+
+    def getvalue(self) -> str:
+        return "".join(self._parts)
+
+
 class AuthenticatedRemoteScript:
     def __init__(self, secret: str, operation: Callable[[str, dict[str, Any]], Any], bridge_epoch: str | None = None, connection_challenge: str | None = None):
         if len(secret) < 32:
@@ -10123,7 +10144,7 @@ class LiveObjectMapper:
     def _python_run(self, args: dict[str, Any]) -> dict[str, Any]:
         """Run on the invoke path's Live thread. No transaction undo: Live owns this undo step.
         Tracing interrupts Python bytecode; a native call is checked when it returns."""
-        output = io.StringIO()
+        output = _BoundedOutput(MAX_WIRE_STRING_LENGTH)
         previous_stdout, previous_trace = sys.stdout, sys.gettrace()
         opened = None; ran = False
         response = {"ok": False, "result": None, "stdout": "", "error": None}
@@ -10184,7 +10205,7 @@ class LiveObjectMapper:
                 try: self._undo_step_operation("undo.step.end", {"stepId": opened["stepId"]})
                 except BaseException as error:
                     response.update(ok=False, result=None, error=failure(error))
-            try: response["stdout"] = output.getvalue()[:MAX_WIRE_STRING_LENGTH]
+            try: response["stdout"] = output.getvalue()
             except BaseException as error:
                 response.update(ok=False, result=None, error=failure(error))
         return response

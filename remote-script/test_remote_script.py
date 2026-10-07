@@ -8073,6 +8073,14 @@ class PythonRunTests(unittest.TestCase):
         # Refused before it ran: as before.
         self.assertEqual(self.run_python("result =")["error"]["type"], "SyntaxError")
 
+    def test_printing_past_the_wire_limit_keeps_only_what_fits(self):
+        with patch.object(remote_module, "MAX_WIRE_STRING_LENGTH", 100):
+            result = self.run_python("for _ in range(1000): print('x' * 99)\nresult = 'done'")
+        self.assertEqual((result["ok"], result["result"], result["stdout"]), (True, "done", ("x" * 99 + "\n")[:100]))
+        output = remote_module._BoundedOutput(10)
+        for _ in range(1000): output.write("abcdef")
+        self.assertEqual((output.getvalue(), sum(len(part) for part in output._parts)), ("abcdefabcd", 10), "no more is held than is sent")
+
     def test_timeout_interrupts_a_loop_and_cleans_up(self):
         started = time.perf_counter()
         result = self.run_python("print('started')\nwhile True: pass", timeoutMs=10)
