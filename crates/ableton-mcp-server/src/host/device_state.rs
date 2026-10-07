@@ -97,19 +97,69 @@ pub fn write_device_state_file_atomically(target: &Path, file: &Value, overwrite
     Ok(target_exists)
 }
 /// A first save goes in only if nothing is at the target: a hard link, which fails if something is. A volume without
-/// hard links (FAT32, exFAT, many SMB shares) gets a rename instead, once the target is seen to be still absent.
+/// hard links (FAT32, exFAT, many SMB shares) gets a rename that won't replace a file either, where the platform and
+/// volume have one; otherwise a plain rename, once the target is seen to be still absent.
 fn publish_new(temporary: &Path, target: &Path, link: impl FnOnce(&Path, &Path) -> std::io::Result<()>) -> Result<(), LiveError> {
     let changed = || LiveError::error("device-state snapshot target changed during save; retry");
     match link(temporary, target) {
         Ok(()) => fs::remove_file(temporary).map_err(|e| crate::delivery::io_error(&e, "unlink", &[temporary])),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(changed()),
-        Err(e) => match fs::symlink_metadata(target) {
-            Err(absent) if absent.kind() == std::io::ErrorKind::NotFound => {
-                fs::rename(temporary, target).map_err(|e| crate::delivery::io_error(&e, "rename", &[temporary, target]))
-            }
-            Ok(_) => Err(changed()),
-            Err(_) => Err(crate::delivery::io_error(&e, "link", &[temporary, target])),
+        Err(e) => match rename_no_replace(temporary, target) {
+            Ok(()) => Ok(()),
+            Err(exists) if exists.kind() == std::io::ErrorKind::AlreadyExists => Err(changed()),
+            Err(_) => match fs::symlink_metadata(target) {
+                Err(absent) if absent.kind() == std::io::ErrorKind::NotFound => {
+                    fs::rename(temporary, target).map_err(|e| crate::delivery::io_error(&e, "rename", &[temporary, target]))
+                }
+                Ok(_) => Err(changed()),
+                Err(_) => Err(crate::delivery::io_error(&e, "link", &[temporary, target])),
+            },
         },
+    }
+}
+/// `rename`, refusing to replace a file already at `to` (AlreadyExists): Linux's renameat2 with RENAME_NOREPLACE,
+/// macOS's renamex_np with RENAME_EXCL, Windows's MoveFileExW without MOVEFILE_REPLACE_EXISTING. Unsupported where
+/// the platform or the volume has no such rename.
+fn rename_no_replace(from: &Path, to: &Path) -> std::io::Result<()> {
+    let unsupported = || std::io::Error::from(std::io::ErrorKind::Unsupported);
+    #[cfg(any(target_os = "macos", all(target_os = "linux", target_env = "gnu")))]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let from = std::ffi::CString::new(from.as_os_str().as_bytes())?;
+        let to = std::ffi::CString::new(to.as_os_str().as_bytes())?;
+        // SAFETY: two NUL-terminated paths that outlive the call.
+        #[cfg(target_os = "macos")]
+        let done = unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_EXCL) };
+        // SAFETY: as above, relative to the working directory.
+        #[cfg(target_os = "linux")]
+        let done = unsafe { libc::renameat2(libc::AT_FDCWD, from.as_ptr(), libc::AT_FDCWD, to.as_ptr(), libc::RENAME_NOREPLACE) };
+        if done == 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        // The volume (or the kernel) can't do it.
+        return Err(if matches!(error.raw_os_error(), Some(libc::EINVAL | libc::ENOSYS | libc::ENOTSUP)) { unsupported() } else { error });
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn MoveFileExW(existing: *const u16, new: *const u16, flags: u32) -> i32;
+        }
+        let wide = |path: &Path| path.as_os_str().encode_wide().chain([0]).collect::<Vec<u16>>();
+        let (from, to) = (wide(from), wide(to));
+        // SAFETY: two NUL-terminated wide paths that outlive the call; no flags, so an existing target is refused.
+        if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 0) } != 0 {
+            return Ok(());
+        }
+        let _ = unsupported;
+        return Err(std::io::Error::last_os_error());
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = (from, to);
+        Err(unsupported())
     }
 }
 impl McpHost {
@@ -249,5 +299,23 @@ mod tests {
         let error = publish_new(&temporary, &target, unsupported).unwrap_err();
         assert!(error.message().contains("changed during save"), "{}", error.message());
         assert_eq!(fs::read(&target).unwrap(), b"{}");
+    }
+    #[test]
+    fn the_no_replace_rename_never_replaces_a_file() {
+        let folder = tempfile::tempdir().unwrap();
+        let (from, to) = (folder.path().join("save.tmp"), folder.path().join("Bass.json"));
+        fs::write(&from, b"new").unwrap();
+        fs::write(&to, b"kept").unwrap();
+        match rename_no_replace(&from, &to) {
+            // A platform without one (none of the ones Kumi ships for): publish_new falls back to its check.
+            Err(error) if error.kind() == std::io::ErrorKind::Unsupported => return,
+            Err(error) => assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists, "{error}"),
+            Ok(()) => panic!("replaced the file"),
+        }
+        assert_eq!(fs::read(&to).unwrap(), b"kept");
+        fs::remove_file(&to).unwrap();
+        rename_no_replace(&from, &to).unwrap();
+        assert_eq!(fs::read(&to).unwrap(), b"new");
+        assert!(!from.exists());
     }
 }
