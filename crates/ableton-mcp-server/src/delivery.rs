@@ -5,7 +5,6 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::HashMap,
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -491,22 +490,6 @@ pub fn unsupported_node_message(version: &str) -> Option<String> {
             SUPPORTED_NODE_MAJORS.iter().map(u32::to_string).collect::<Vec<_>>().join(", ")
         )
     })
-}
-/// For migration of legacy Node configurations only; native configurations name their binary directly.
-pub fn stable_node_command(env: &HashMap<String, String>, exec_path: &Path) -> PathBuf {
-    let Ok(running) = fs::canonicalize(exec_path) else {
-        return exec_path.into();
-    };
-    for directory in std::env::split_paths(env.get("PATH").map(String::as_str).unwrap_or_default()) {
-        if !path_is_absolute(&directory) {
-            continue;
-        }
-        let candidate = directory.join(if cfg!(windows) { "node.exe" } else { "node" });
-        if fs::canonicalize(&candidate).is_ok_and(|path| path == running) {
-            return candidate;
-        }
-    }
-    exec_path.into()
 }
 fn remove_file_missing_ok(path: &Path) -> Result<(), LiveError> {
     match fs::remove_file(path) {

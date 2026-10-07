@@ -266,6 +266,18 @@ fn discovery_addresses_and_ids() {
         assert!(parse_local_model_id(id, &servers).is_none(), "{id}");
     }
 }
+/// Windows keeps PATH as "Path": a server's program on it is found all the same.
+#[cfg(windows)]
+#[test]
+fn a_server_program_is_found_on_the_path_as_windows_spells_it() {
+    let folder = std::env::temp_dir().join(format!("kumi-local-path-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("lms.exe"), b"").unwrap();
+    let env = HashMap::from([("Path".to_string(), folder.to_string_lossy().into_owned())]);
+    let found = local_installed(LocalKind::Lmstudio, Some(&env));
+    std::fs::remove_dir_all(&folder).unwrap();
+    assert!(found);
+}
 #[tokio::test]
 async fn ollama_catalog_capabilities_and_probe() {
     let fake = ollama(

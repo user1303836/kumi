@@ -8,6 +8,16 @@ pub fn process_env() -> Env {
     kumi_common::env::vars()
 }
 
+/// A variable of `env` by name, as `platform` reads one: Windows matches a name in any case and keeps PATH as
+/// "Path"; the exact name comes first.
+pub fn env_var<'a>(env: &'a Env, name: &str, platform: &str) -> Option<&'a str> {
+    env.get(name)
+        .or_else(|| {
+            (platform == "win32").then(|| env.iter().find(|(key, _)| key.eq_ignore_ascii_case(name)).map(|(_, value)| value)).flatten()
+        })
+        .map(String::as_str)
+}
+
 /// `process.platform`: "win32", "darwin", "linux", or the system's own name elsewhere.
 pub fn platform() -> &'static str {
     if cfg!(windows) {
