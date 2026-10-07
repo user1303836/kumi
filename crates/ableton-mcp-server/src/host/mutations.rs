@@ -23,17 +23,35 @@ struct FlightCleanup {
     flight: Rc<MutationFlight>,
     identity: String,
     transaction_id: Option<String>,
+    /// The operation came back: its own handler settled the transaction's state.
+    finished: bool,
 }
 impl Drop for FlightCleanup {
+    // This runs while a panic unwinds too, where a second panic aborts: every borrow here is a `try_borrow`.
     fn drop(&mut self) {
         let host = &self.host;
         host.active_async_operations.set(host.active_async_operations.get() - 1);
         self.flight.settled.set(true);
         if let Some(id) = &self.transaction_id {
+            // A panic cut the work short past its handler, which would have made `applying` or `undoing` uncertain:
+            // the transaction is uncertain now, for a same-key retry to reconcile or for finalization.
+            if !self.finished {
+                if let Some(mut record) = host.try_transaction_record(id).as_ref().and_then(|record| record.try_borrow_mut().ok()) {
+                    if retention::ACTIVE_TRANSACTION_STATES.contains(&record["state"].as_str().unwrap_or("")) {
+                        record["state"] = json!("uncertain");
+                    }
+                }
+            }
             retention::clear_in_flight(id);
         }
-        if host.in_flight_mutations.borrow().get(&self.identity).is_some_and(|flight| Rc::ptr_eq(flight, &self.flight)) {
-            host.in_flight_mutations.borrow_mut().remove(&self.identity);
+        let ours = host
+            .in_flight_mutations
+            .try_borrow()
+            .is_ok_and(|flights| flights.get(&self.identity).is_some_and(|flight| Rc::ptr_eq(flight, &self.flight)));
+        if ours {
+            if let Ok(mut flights) = host.in_flight_mutations.try_borrow_mut() {
+                flights.remove(&self.identity);
+            }
         }
     }
 }
@@ -250,11 +268,12 @@ impl McpHost {
                 retention::mark_in_flight(id);
             }
             self.active_async_operations.set(self.active_async_operations.get() + 1);
-            let cleanup = FlightCleanup {
+            let mut cleanup = FlightCleanup {
                 host: self.clone(),
                 flight: flight.clone(),
                 identity: identity.clone(),
                 transaction_id: transaction_id.clone(),
+                finished: false,
             };
             let host = self.clone();
             let mut operation = execute(Some(signal)).boxed_local();
@@ -281,6 +300,7 @@ impl McpHost {
                             .await;
                     }
                 }
+                cleanup.finished = true;
                 drop(cleanup);
                 let _ = send.send(outcome);
             });
@@ -305,6 +325,27 @@ impl McpHost {
     }
     pub fn active_async_operations(&self) -> usize {
         self.active_async_operations.get()
+    }
+    /// A transaction's record from whichever map or manager holds it, without waiting on a borrow.
+    fn try_transaction_record(&self, id: &str) -> Option<retention::TransactionRecord> {
+        [
+            &self.transactions,
+            &self.audio_capture_transactions,
+            &self.arrangement_transactions,
+            &self.session_structure_transactions,
+            &self.device_parameter_transactions,
+            &self.device_parameters_transactions,
+            &self.audition_transactions,
+            &self.transport_transactions,
+            &self.clip_launch_transactions,
+            &self.note_edit_transactions,
+            &self.clip_lifecycle_transactions,
+        ]
+        .iter()
+        .find_map(|map| map.try_get(id))
+        .or_else(|| self.batch_transactions.try_record(id))
+        .or_else(|| self.device_state_transactions.try_record(id))
+        .or_else(|| self.midi_transactions.try_record(id))
     }
     pub fn transaction_record(&self, id: &str) -> Option<retention::TransactionRecord> {
         [

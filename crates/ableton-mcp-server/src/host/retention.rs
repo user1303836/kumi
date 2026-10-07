@@ -166,6 +166,10 @@ impl BoundedTransactionMap {
     pub fn get(&self, key: &str) -> Option<TransactionRecord> {
         self.0.records.borrow().iter().find(|(id, _)| id == key).map(|(_, value)| value.clone())
     }
+    /// `get` without waiting on a borrow: for code that runs while a panic unwinds, where a second panic aborts.
+    pub fn try_get(&self, key: &str) -> Option<TransactionRecord> {
+        self.0.records.try_borrow().ok()?.iter().find(|(id, _)| id == key).map(|(_, value)| value.clone())
+    }
     pub fn contains_key(&self, key: &str) -> bool {
         self.get(key).is_some()
     }

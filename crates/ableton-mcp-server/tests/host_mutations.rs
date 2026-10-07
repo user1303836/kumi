@@ -177,6 +177,74 @@ async fn a_mutation_that_panics_leaves_its_transaction_free_to_try_again() {
 fn args_are_fine() -> bool {
     true
 }
+/// The simulator, with Live's `clip.set` panicking once after it yields: inside the apply's flight.
+struct PanicsOnce(DeterministicLiveSimulator, std::cell::Cell<bool>);
+impl LiveAdapter for PanicsOnce {
+    fn status(&self) -> Result<LiveStatus, LiveError> {
+        self.0.status()
+    }
+    fn snapshot(&self) -> Result<LiveSnapshot, LiveError> {
+        self.0.snapshot()
+    }
+    fn get(&self, r: &LiveRef) -> Result<Option<Value>, LiveError> {
+        self.0.get(r)
+    }
+    fn invoke(&self, i: &LiveInvocation) -> Result<Value, LiveError> {
+        self.0.invoke(i)
+    }
+    fn subscribe(&self, l: LiveListener) -> Result<Unsubscribe, LiveError> {
+        self.0.subscribe(l)
+    }
+    fn reconnect(&self) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect()
+    }
+}
+#[async_trait::async_trait(?Send)]
+impl AsyncLiveAdapter for PanicsOnce {
+    async fn snapshot_async(&self, c: Option<&LiveOperationContext>, r: Option<&LiveSnapshotRequest>) -> Result<LiveSnapshot, LiveError> {
+        self.0.snapshot_async(c, r).await
+    }
+    async fn discover_async(&self, r: &LiveDiscoveryRequest, c: Option<&LiveOperationContext>) -> Result<LiveDiscoveryResult, LiveError> {
+        self.0.discover_async(r, c).await
+    }
+    async fn get_async(&self, r: &LiveRef, _: Option<&LiveOperationContext>) -> Result<Option<Value>, LiveError> {
+        self.0.get(r)
+    }
+    async fn invoke_async(&self, i: &LiveInvocation, _: Option<&LiveOperationContext>) -> Result<Value, LiveError> {
+        if i.operation == "clip.set" && !self.1.replace(true) {
+            tokio::task::yield_now().await;
+            panic!("Live's call panicked");
+        }
+        self.0.invoke(i)
+    }
+    async fn reconnect_async(&self, _: Option<&LiveOperationContext>) -> Result<LiveStatus, LiveError> {
+        self.0.reconnect()
+    }
+    async fn close(&self) -> Result<(), LiveError> {
+        Ok(())
+    }
+}
+#[tokio::test]
+async fn an_apply_that_panics_leaves_its_transaction_uncertain_for_a_same_key_retry() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let host = Rc::new(McpHost::new(Rc::new(PanicsOnce(DeterministicLiveSimulator::new(), Default::default())), McpHostOptions::default()).unwrap());
+            host.handle(&json!({"jsonrpc":"2.0","id":"setup","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}})).unwrap();
+            host.handle(&json!({"jsonrpc":"2.0","method":"notifications/initialized"})).unwrap();
+            let call = |id: i64, name: &str, arguments: Value| json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":arguments}});
+            let text = |reply: Option<Value>| -> Value { serde_json::from_str(reply.unwrap()["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+            let preview = text(host.handle_async(&call(1, "live_clip_properties_preview", json!({"clipRef":"clip:clip-1","velocityAmount":0.5})), None).await.unwrap());
+            let transaction = preview["transactionId"].as_str().unwrap().to_owned();
+            let apply = json!({"transactionId":transaction,"confirmation":"apply","idempotencyKey":"apply-key-1"});
+            host.handle_async(&call(2, "live_clip_properties_apply", apply.clone()), None).await.unwrap();
+            // The panic came after `applying`: the transaction is uncertain, not stuck there.
+            assert_eq!(host.transaction_record(&transaction).unwrap().borrow()["state"], "uncertain");
+            assert_eq!(host.active_async_operations(), 0);
+            let retried = text(host.handle_async(&call(3, "live_clip_properties_apply", apply), None).await.unwrap());
+            assert_eq!(retried["state"], "applied", "{retried}");
+        })
+        .await;
+}
 #[tokio::test]
 async fn shared_mutation_waiters_cancellation_conflicts_and_retirement_match_source() {
     tokio::task::LocalSet::new().run_until(async{

@@ -351,6 +351,10 @@ impl DeviceStateTransactionManager {
             }
         }
     }
+    /// The record itself, without waiting on a borrow: the host marks work a panic cut short through it.
+    pub fn try_record(&self, id: &str) -> Option<Rc<RefCell<Value>>> {
+        self.records.try_borrow().ok()?.iter().find(|(key, _)| key == id).map(|(_, record)| record.0.clone())
+    }
     pub fn is_finalizable(&self, id: &str) -> bool {
         self.record(id).is_some_and(|r| ["uncertain", "applied", "undone"].iter().any(|state| r.is("state", state)))
     }
