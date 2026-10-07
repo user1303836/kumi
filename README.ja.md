@@ -16,9 +16,7 @@
 
 **あなたの作業のしかたを覚える、Ableton Live のためのスタジオプロデューサーエージェント。** やりたいことを普段の言葉で伝えれば、Kumi があなたの Set の中で直接作業します。面倒な作業から、自分ではなかなか時間を取れない作業まで。YouTube のチュートリアルから音を作り直したり、ミックスをリファレンスに合わせたり、言葉で説明した Max for Live デバイスを書いたり、指し示したラックを作り直したりします。変更はすべて HISTORY に表示され、ほとんどの変更には個別の取り消しが付きます。プラン全体は Live の取り消し一回で戻せます（Cmd-Z、Windows では Ctrl-Z）。Kumi は残したテクニックを覚えておくので、セッションを重ねるごとにあなたに合っていきます。ほかの DAW への対応も予定しています。
 
-<p align="center">
-  <img src="docs/assets/kumi-screenshot.png" alt="ビデオチュートリアルから Drift のベースを作り直す Kumi：手順ごとの会話、新しいトラックのデバイスチェーンを表示する FOCUS、変更ごとに取り消しの付いた HISTORY" width="760">
-</p>
+https://github.com/user-attachments/assets/f53fe0be-c9a9-476e-a1d5-efe3dc429526
 
 ## クイックスタート
 

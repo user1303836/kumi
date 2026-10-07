@@ -16,9 +16,7 @@
 
 **为 Ableton Live 打造、会学习你工作方式的录音室制作人代理。** 用平常的话告诉 Kumi 你想要什么，它就直接在你的工程里动手，从繁琐的杂活，到你一直没时间做的事：照着 YouTube 教程重建一个声音、让你的混音贴近参考曲、编写你描述的 Max for Live 设备，或者改造你指着的那个机架。每项修改都会出现在 HISTORY 中，大多数都有各自的撤销；整个计划在 Live 中只算一次撤销（Cmd-Z，Windows 上为 Ctrl-Z）。Kumi 会记住你保留下来的技巧，所以每次使用都更贴合你。对其他 DAW 的支持已在计划中。
 
-<p align="center">
-  <img src="docs/assets/kumi-screenshot.png" alt="Kumi 根据视频教程重建 Drift 贝斯：记录它每一步操作的对话、显示新轨道设备链的 FOCUS，以及每项修改都带撤销的 HISTORY" width="760">
-</p>
+https://github.com/user-attachments/assets/f53fe0be-c9a9-476e-a1d5-efe3dc429526
 
 ## 快速开始
 
