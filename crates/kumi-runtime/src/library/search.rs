@@ -347,7 +347,12 @@ impl SoundIndex {
         if count % 2000 != 0 {
             tokio::task::yield_now().await;
         }
-        let present: HashSet<_> = roots.iter().filter(|s| Path::new(&s.path).exists()).map(|s| s.path.as_str()).collect();
+        // Off Kumi's thread: a sleeping NAS holds each check for the network's timeout.
+        let paths: Vec<String> = roots.iter().map(|s| s.path.clone()).collect();
+        let present: HashSet<String> =
+            tokio::task::spawn_blocking(move || paths.into_iter().filter(|path| Path::new(path).exists()).collect())
+                .await
+                .unwrap_or_default();
         // If a longer source vanished while yielding, the constructor uses the next containing source.
         Self::from_rows(
             rows.into_iter()

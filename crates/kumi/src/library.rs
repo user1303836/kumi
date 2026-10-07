@@ -179,7 +179,7 @@ pub async fn run_library(io: LibraryIo) -> Result<i32, RuntimeError> {
             }
         }
         lines.extend(["".into(), "Where Kumi looks".into()]);
-        let sources = library.sources();
+        let sources = library.sources().await;
         let width = sources.iter().map(|source| source.label.encode_utf16().count()).max().unwrap_or(0).max(12) + 2;
         for source in &sources {
             lines.push(format!("  {}{}{}", source.label, " ".repeat(width - source.label.encode_utf16().count()), tilde(&source.path)));

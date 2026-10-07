@@ -39,7 +39,7 @@ impl LibraryAccess for Access {
     fn remember(&self, folders: Vec<String>) {
         self.remembered.borrow_mut().extend(folders);
     }
-    fn folders(&self) -> Vec<String> {
+    async fn folders(&self) -> Vec<String> {
         vec![self.root.clone()]
     }
     async fn measure(&self, _: String, _: MeasureOptions) -> Result<SoundEntry, RuntimeError> {
