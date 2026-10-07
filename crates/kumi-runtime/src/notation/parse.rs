@@ -303,7 +303,13 @@ fn suffix_of(mut suffix: &str, mut length: f64) -> Result<(f64, bool), String> {
 }
 /// The pitches an item plays, each with whether it's muted.
 fn pitches(body: &str, state: &State) -> Result<Vec<(u8, bool)>, String> {
-    if let Some(inner) = body.strip_prefix('(').and_then(|body| body.strip_suffix(')')) {
+    // Parentheses mute what's inside, however deep they go: unwrapped in a loop, as a chord's part can nest them by
+    // the thousand.
+    let mut inner = body;
+    while let Some(within) = inner.strip_prefix('(').and_then(|inner| inner.strip_suffix(')')) {
+        inner = within;
+    }
+    if inner.len() < body.len() {
         return Ok(pitches(inner, state)?.into_iter().map(|(pitch, _)| (pitch, true)).collect());
     }
     if let Some(inner) = body.strip_prefix('[').and_then(|body| body.strip_suffix(']')) {
@@ -567,6 +573,15 @@ mod tests {
                 (64, 4., 4., false)
             ]
         );
+    }
+
+    #[test]
+    fn a_chords_note_in_parentheses_is_muted_however_deep_they_go() {
+        // Unwrapped in a loop: 100,000 deep ran the stack out before.
+        let deep = format!("1|1 [{}C3{} E3]", "(".repeat(100_000), ")".repeat(100_000));
+        let parsed = parse(&deep, &Frame::default()).unwrap();
+        assert_eq!(parsed.iter().map(|n| (n.pitch, n.mute)).collect::<Vec<_>>(), [(60, true), (64, false)]);
+        assert!(error(&format!("1|1 [{}H3{}]", "(".repeat(1000), ")".repeat(1000))).contains("\u{201c}H3\u{201d} isn't a pitch"));
     }
 
     #[test]
