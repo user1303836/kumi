@@ -50,6 +50,8 @@ struct Record {
     goal_requests: RefCell<Vec<AuditionRequest>>,
     /// Setting up a goal's search waits until the goal is stopped.
     goal_holds: Cell<bool>,
+    /// Reading the Set waits until the operation is stopped.
+    observe_holds: Cell<bool>,
     audio_resolved: RefCell<Vec<String>>,
 }
 struct TestKernel {
@@ -118,8 +120,12 @@ impl Integration for TestIntegration {
         (self.listener)(ConnectionState::Connected, None);
         Ok(())
     }
-    async fn observe(&self, _: Signal, _: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
+    async fn observe(&self, signal: Signal, _: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
         self.record.observations.set(self.record.observations.get() + 1);
+        if self.record.observe_holds.get() {
+            signal.cancelled().await;
+            return Err(RuntimeError::Aborted);
+        }
         if self.record.refresh_error.get() {
             return Err(RuntimeError::plain("secret-token-must-not-escape"));
         }
@@ -599,6 +605,45 @@ local_test!(startup_failure_cleans_integration_and_late_kernel_is_closed, {
     settle().await;
     assert_eq!(h.record.closes.get(), 1);
     assert_eq!(h.session.status().state, TurnState::Closed);
+});
+local_test!(a_first_start_stopped_before_it_finished_finishes_once_live_is_there, {
+    async fn started(h: &Harness) -> bool {
+        for _ in 0..500 {
+            match h.session.submit("hello", None).await {
+                Ok(()) => return true,
+                Err(error) if error.message().contains("busy") => delay(2).await,
+                Err(_) => return false,
+            }
+        }
+        false
+    }
+    // Live drops while the first start reads the Set, then comes back.
+    let h = harness(None, |_| {});
+    h.record.observe_holds.set(true);
+    let s = h.session.clone();
+    let starting = tokio::task::spawn_local(async move { s.start().await });
+    for _ in 0..500 {
+        if h.record.observations.get() > 0 {
+            break;
+        }
+        delay(1).await;
+    }
+    let first = h.record.listeners.borrow()[0].clone();
+    first(ConnectionState::Disconnected, Some(DisconnectCause::Live));
+    let _ = starting.await.unwrap();
+    h.record.observe_holds.set(false);
+    first(ConnectionState::Connected, None);
+    assert!(started(&h).await, "the session started once Live was back");
+    h.session.close().await.unwrap();
+    // The first start's wait runs out before Live is there; then Live connects.
+    let h = harness(None, |o| o.timeout_ms = Some(30));
+    h.record.observe_holds.set(true);
+    let _ = h.session.start().await;
+    h.record.observe_holds.set(false);
+    let first = h.record.listeners.borrow()[0].clone();
+    first(ConnectionState::Connected, None);
+    assert!(started(&h).await, "the session started once Live connected");
+    h.session.close().await.unwrap();
 });
 local_test!(reconnect_carries_same_set_but_other_saved_set_starts_fresh, {
     let h = harness(None, |_| {});

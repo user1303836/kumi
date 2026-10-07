@@ -681,15 +681,18 @@ impl Session {
         }
     }
     fn connection_changed(&self, generation: u64, next: ConnectionState, cause: Option<DisconnectCause>) {
-        let (lost, back) = {
+        let (lost, back, unstarted) = {
             let mut s = self.0.state.borrow_mut();
             if s.generation != generation || s.state == TurnState::Closed {
                 return;
             }
             let lost = s.connection == ConnectionState::Connected && matches!(next, ConnectionState::Disconnected | ConnectionState::Error);
             let back = s.away && next == ConnectionState::Connected;
+            // The first start stopped before it finished (Live lost partway, or its wait ran out before Live was
+            // there): it finishes now that Live is, as /reconnect would.
+            let unstarted = next == ConnectionState::Connected && !s.started && s.active.is_none();
             s.connection = next;
-            (lost, back)
+            (lost, back, unstarted)
         };
         self.emit(SessionEvent::Connection { state: next });
         if lost {
@@ -769,6 +772,21 @@ impl Session {
                     None,
                 );
             }
+        }
+        if unstarted {
+            let _ = self.perform(
+                false,
+                Phase::Start,
+                Box::new(|this, op| {
+                    async move {
+                        this.reset(&op).await?;
+                        Ok(None)
+                    }
+                    .boxed_local()
+                }),
+                None,
+                None,
+            );
         }
     }
     fn begin(&self, place: String, id: String, conversation: Option<&SavedConversation>) {
