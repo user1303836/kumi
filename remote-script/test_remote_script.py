@@ -4069,10 +4069,10 @@ class ViewLocatorClipExpansionTests(unittest.TestCase):
         self.assertEqual(result, {"view": "Arranger", "visible": True}); validate_operation_payload("view.set", "result", result)
         application.view.is_view_visible = lambda name: False
         with self.assertRaisesRegex(ValueError, "not confirmed"): mapper.invoke("view.set", {"view": "Session"})
-        self.assertEqual(mapper.invoke("view.control", {"action": "zoom-in"}), {"action": "zoom-in", "done": True})
-        self.assertEqual(application.view.zooms, [(1, "Arranger", False)])
-        self.assertEqual(mapper.invoke("view.control", {"action": "scroll-right"}), {"action": "scroll-right", "done": True})
-        self.assertEqual(application.view.scrolls, [(1, "Arranger", False)])
+        # Live's NavDirection: up 0, down 1, left 2, right 3; the Arrangement's time runs left to right.
+        for action in ("zoom-in", "zoom-out", "scroll-right", "scroll-left"): self.assertEqual(mapper.invoke("view.control", {"action": action}), {"action": action, "done": True})
+        self.assertEqual(application.view.zooms, [(3, "Arranger", False), (2, "Arranger", False)])
+        self.assertEqual(application.view.scrolls, [(3, "Arranger", False), (2, "Arranger", False)])
         mapper.invoke("view.control", {"action": "follow-on"}); self.assertTrue(song.view.follow_song)
         mapper.invoke("view.control", {"action": "follow-off"}); self.assertFalse(song.view.follow_song)
         track_ref = mapper.snapshot()["tracks"][0]["ref"]
@@ -4269,7 +4269,7 @@ class AudioWarpNoteExpansionTests(unittest.TestCase):
         clip.duplicate_loop = lambda: setattr(clip, "length", clip.length * 2)
         clip.duplicate_region = lambda start, end, dest: setattr(clip, "length", clip.length + (end - start))
         clip.playing_position = 0.5
-        clip.start_scrub = lambda position: setattr(clip, "playing_position", position)
+        clip.scrub = lambda position: setattr(clip, "playing_position", position)  # Live's Clip.scrub (it has no start_scrub)
         clip.stop_scrub = lambda: setattr(clip, "playing_position", 0.0)
         clip.move_playing_pos = lambda offset: setattr(clip, "playing_position", clip.playing_position + offset)
         song.tracks[0].clip_slots[0].clip = clip; mapper = LiveObjectMapper(song); row = mapper.snapshot()["tracks"][0]["clips"][0]
@@ -4991,7 +4991,10 @@ class SongTransportLinkTests(unittest.TestCase):
         self.assertTrue(result["done"]); self.assertEqual(calls[-1], ("scrub", 0.5))
         with self.assertRaisesRegex(ValueError, "distance is required"): mapper.invoke("transport.action", {**fences(), "action": "scrub"})
         result = mapper.invoke("transport.action", {**fences(), "action": "force-link-beat-time", "beatTime": 8.0})
-        self.assertTrue(result["done"]); self.assertEqual(calls[-1], ("link", 8.0))
+        self.assertTrue(result["done"]); self.assertEqual(calls[-1], ("link", 8.0), "a shape whose call takes the beat gets it")
+        # Live's Song.force_link_beat_time() takes nothing: it's called so.
+        song.force_link_beat_time = lambda: calls.append("link")
+        self.assertTrue(mapper.invoke("transport.action", {**fences(), "action": "force-link-beat-time", "beatTime": 8.0})["done"]); self.assertEqual(calls[-1], "link")
         with self.assertRaisesRegex(ValueError, "beatTime is required"): mapper.invoke("transport.action", {**fences(), "action": "force-link-beat-time"})
         stale = fences(); stale["expectedRevision"] = "stale"
         with self.assertRaisesRegex(ValueError, "changed since preview"): mapper.invoke("transport.action", {**stale, "action": "start"})
@@ -5049,6 +5052,11 @@ class SongTransportLinkTests(unittest.TestCase):
         self.assertEqual(captured["format"], "smpte_30")
         self.assertEqual(smpte_result["smpte"], {"hours": 0, "minutes": 1, "seconds": 2, "frames": 12, "subframes": 3})
         validate_operation_payload("song.time-convert", "result", smpte_result)
+        # Live answers these as BeatTime, not beats: the loop in beats is the Song's own.
+        class BeatTime:
+            bars, beats, sub_division, ticks = 3, 1, 1, 0
+        song.get_beats_loop_start = lambda: BeatTime(); song.get_beats_loop_length = lambda: BeatTime(); song.loop_start = 8.0; song.loop_length = 4.0
+        self.assertEqual(mapper.invoke("song.time-convert", {"setRef": set_ref, "query": "beats-loop"}), loop)
         del song.get_beats_loop_length
         unavailable = mapper.invoke("song.time-convert", {"setRef": set_ref, "query": "beats-loop"})
         self.assertEqual(unavailable["available"], False)

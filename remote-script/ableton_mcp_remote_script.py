@@ -1437,7 +1437,7 @@ class LiveObjectMapper:
             if self._probe_classes("slot"): return self._offers("slot", "create_audio_clip")
             return any(not bool(getattr(track, "has_midi_input", False)) and any(callable(getattr(slot, "create_audio_clip", None)) for slot in self._items(getattr(track, "clip_slots", []))[:self._PROBE_SAMPLE]) for track in self._shape_probe()["track"])
         if operation == "clip.action":
-            return self._offers_any("clip", "crop", "duplicate_loop", "start_scrub")
+            return self._offers_any("clip", "crop", "duplicate_loop", "scrub")
         if operation == "automation.envelope.clear":
             return self._offers("clip", "clear_all_envelopes")
         if operation == "note.read-by-id":
@@ -6398,6 +6398,12 @@ class LiveObjectMapper:
             raise ValueError("view change was not confirmed")
         return {"view": view_name, "visible": True}
 
+    @staticmethod
+    def _nav_direction(name: str) -> Any:
+        """Live's Application.View.NavDirection by its name, else the number Live documents for it."""
+        try: return getattr(__import__("Live.Application", fromlist=["Application"]).Application.View.NavDirection, name)
+        except Exception: return {"up": 0, "down": 1, "left": 2, "right": 3}[name]
+
     def _view_control(self, args: dict[str, Any]) -> dict[str, Any]:
         action = args.get("action")
         if action not in self._VIEW_CONTROL_ACTIONS or set(args) - {"action", "trackRef", "view"}:
@@ -6405,15 +6411,17 @@ class LiveObjectMapper:
         view = getattr(self._application(), "view", None)
         if view is None:
             raise ValueError("view control is unavailable")
+        # Live's NavDirection: up 0, down 1, left 2, right 3. The Arrangement's time runs left to right: a scroll goes
+        # left or right, and a zoom is in time (right in, left out), not the tracks' height (up and down).
         if action in {"zoom-in", "zoom-out"}:
             zoom = getattr(view, "zoom_view", None)
             if not callable(zoom): raise ValueError("arrangement zoom is unavailable")
-            zoom(1 if action == "zoom-in" else 0, "Arranger", False)
+            zoom(self._nav_direction("right" if action == "zoom-in" else "left"), "Arranger", False)
             return {"action": action, "done": True}
         if action in {"scroll-left", "scroll-right"}:
             scroll = getattr(view, "scroll_view", None)
             if not callable(scroll): raise ValueError("arrangement scroll is unavailable")
-            scroll(1 if action == "scroll-right" else 0, "Arranger", False)
+            scroll(self._nav_direction("right" if action == "scroll-right" else "left"), "Arranger", False)
             return {"action": action, "done": True}
         if action in {"follow-on", "follow-off"}:
             song_view = getattr(self.song, "view", None)
@@ -6711,7 +6719,8 @@ class LiveObjectMapper:
             if float(region_end) <= float(region_start): raise ValueError("duplicate-region end must exceed start")
             call = lambda: method(float(region_start), float(region_end), float(destination))
         elif action == "scrub-start":
-            method = getattr(clip, "start_scrub", None)
+            # Live's Clip.scrub(position) (it has no start_scrub); stop_scrub ends it.
+            method = getattr(clip, "scrub", None) or getattr(clip, "start_scrub", None)
             if not callable(method): raise ValueError("clip scrub is unavailable")
             position = args.get("offset")
             if not isinstance(position, (int, float)) or isinstance(position, bool) or not math.isfinite(float(position)): raise ValueError("scrub position is invalid")
@@ -7517,7 +7526,12 @@ class LiveObjectMapper:
             method = getattr(song, "force_link_beat_time", None)
             beat = args.get("beatTime")
             if not isinstance(beat, (int, float)) or isinstance(beat, bool) or not math.isfinite(float(beat)): raise ValueError("beatTime is required for force-link-beat-time")
-            call_args = (float(beat),)
+            if not callable(method): raise ValueError(f"transport action {action} is unavailable on this Live shape")
+            # Live's Song.force_link_beat_time() takes nothing: it moves Link's timeline to Live's own beat time. A shape
+            # whose call wants the beat (Boost refuses a call it can't match with a TypeError, before it runs) is given it.
+            try: method()
+            except TypeError: method(float(beat))
+            return {"done": True, "revision": str(self._playback()["revision"])}
         if not callable(method): raise ValueError(f"transport action {action} is unavailable on this Live shape")
         method(*call_args)
         return {"done": True, "revision": str(self._playback()["revision"])}
@@ -7568,7 +7582,10 @@ class LiveObjectMapper:
             if not callable(start_method) or not callable(length_method):
                 return {"available": False, "loopStart": None, "loopLength": None, "smpte": None}
             start = start_method(); length = length_method()
-            if not all(isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) for value in (start, length)):
+            number = lambda value: isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+            # Live answers these as BeatTime (bars, beats, sixteenths, ticks), not beats: the loop in beats is the Song's own.
+            if not (number(start) and number(length)): start, length = self._read_attr(song, "loop_start"), self._read_attr(song, "loop_length")
+            if not (number(start) and number(length)):
                 raise ValueError("beats loop time shape is unreadable")
             return {"available": True, "loopStart": float(start), "loopLength": float(length), "smpte": None}
         format_key = args.get("smpteFormat", "smpte-25")
