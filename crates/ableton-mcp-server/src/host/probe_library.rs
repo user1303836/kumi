@@ -5,6 +5,8 @@ use kumi_common::js::json as js_json;
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant, SystemTime},
 };
 fn unavailable(message: impl Into<String>) -> LibrarySearchError {
     LibraryUnavailable::new(message, json!({})).into()
@@ -38,10 +40,82 @@ fn allowlisted_file(file: &Value, root: &Value, label: &str) -> Result<PathBuf, 
     }
     Ok(real)
 }
-fn read_database(path: &Path) -> Result<SqliteReader, LibrarySearchError> {
-    let bytes = fs::read(path)
-        .map_err(|e| unavailable(format!("the library database is unreadable ({})", crate::delivery::io_error(&e, "open", &[path]))))?;
-    let reader = SqliteReader::new(bytes).map_err(|e| unavailable(format!("the library database is unreadable ({e})")))?;
+/// A database read, by its path and what its file was then (size, mtime and on unix its inode, which a file put in its
+/// place by a rename changes): each page of a search, and the next search, read and parse the file (up to 128 MiB)
+/// again only once it changed. At most two are kept (the files and the plug-ins database), each
+/// for two minutes after its last use.
+struct Read {
+    path: PathBuf,
+    file: FileStamp,
+    reader: Arc<SqliteReader>,
+    used: Instant,
+}
+#[derive(PartialEq)]
+struct FileStamp {
+    len: u64,
+    modified: Option<SystemTime>,
+    #[cfg(unix)]
+    inode: u64,
+}
+impl FileStamp {
+    fn of(stat: &fs::Metadata) -> Self {
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        Self {
+            len: stat.len(),
+            modified: stat.modified().ok(),
+            #[cfg(unix)]
+            inode: stat.ino(),
+        }
+    }
+}
+static READ: Mutex<Vec<Read>> = Mutex::new(Vec::new());
+const KEPT_FOR: Duration = Duration::from_secs(120);
+fn forget_idle(read: &mut Vec<Read>) {
+    read.retain(|kept| kept.used.elapsed() < KEPT_FOR);
+}
+async fn read_database(path: &Path) -> Result<Arc<SqliteReader>, LibrarySearchError> {
+    let unreadable =
+        |e: std::io::Error| unavailable(format!("the library database is unreadable ({})", crate::delivery::io_error(&e, "open", &[path])));
+    let file = FileStamp::of(&fs::metadata(path).map_err(unreadable)?);
+    let cached = {
+        let mut read = READ.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        forget_idle(&mut read);
+        read.iter_mut().find(|kept| kept.path == path && kept.file == file).map(|kept| {
+            kept.used = Instant::now();
+            kept.reader.clone()
+        })
+    };
+    let reader = match cached {
+        Some(reader) => reader,
+        None => {
+            // Off the bridge's only thread: reading and parsing it takes a while.
+            let owned = path.to_path_buf();
+            let parsed = tokio::task::spawn_blocking(move || -> Result<SqliteReader, LibrarySearchError> {
+                let bytes = fs::read(&owned).map_err(|e| {
+                    unavailable(format!("the library database is unreadable ({})", crate::delivery::io_error(&e, "open", &[&owned])))
+                })?;
+                SqliteReader::new(bytes).map_err(|e| unavailable(format!("the library database is unreadable ({e})")))
+            })
+            .await
+            .map_err(|e| unavailable(format!("the library database is unreadable ({e})")))??;
+            let reader = Arc::new(parsed);
+            let mut read = READ.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            read.retain(|kept| kept.path != path);
+            read.push(Read { path: path.to_path_buf(), file, reader: reader.clone(), used: Instant::now() });
+            while read.len() > 2 {
+                read.remove(0);
+            }
+            drop(read);
+            // Let it go once it's idle, even if no other search comes to notice.
+            tokio::spawn(async {
+                tokio::time::sleep(KEPT_FOR).await;
+                forget_idle(&mut READ.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
+            });
+            reader
+        }
+    };
+    // The WAL is checked each time: it changes while the database file doesn't.
     if reader.wal_mode {
         let wal = PathBuf::from(format!("{}-wal", path.to_string_lossy()));
         if wal.exists() && fs::symlink_metadata(wal).is_ok_and(|m| m.len() > 0) {
@@ -107,7 +181,7 @@ impl McpHost {
             return Ok(error(id, -32602, "database, allowlistRoot, and bounded query fields are invalid", None));
         }
         let mode = params.get("mode").filter(|v| !v.is_null()).cloned().unwrap_or(json!("files"));
-        let result = (|| -> Result<Value, LibrarySearchError> {
+        let result: Result<Value, LibrarySearchError> = async {
             let database = allowlisted_file(&params["database"], &params["allowlistRoot"], "library database")?;
             let kind = if mode == "plugins" {
                 LibraryMode::Plugins
@@ -133,14 +207,14 @@ impl McpHost {
                     ));
                 }
                 let path = allowlisted_file(&params["pluginsDatabase"], &params["allowlistRoot"], "plug-in database")?;
-                let reader = read_database(&path)?;
+                let reader = read_database(&path).await?;
                 (
                     assert_supported_plugins_schema(&reader)?,
                     SUPPORTED_PLUGINS_SCHEMA_VERSIONS,
                     serde_json::to_value(query_library_plugins(&reader, &query)?).unwrap(),
                 )
             } else {
-                let reader = read_database(&database)?;
+                let reader = read_database(&database).await?;
                 let version = assert_supported_files_schema(&reader)?;
                 let page = if mode == "tags" {
                     serde_json::to_value(query_library_tag_vocabulary(&reader, &query)?).unwrap()
@@ -156,7 +230,8 @@ impl McpHost {
                 }
             }
             Ok(out)
-        })();
+        }
+        .await;
         Ok(match result {
             Ok(v) => success_text(id, &v),
             Err(LibrarySearchError::Unavailable(e)) => {

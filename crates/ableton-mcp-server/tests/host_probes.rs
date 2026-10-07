@@ -170,6 +170,31 @@ fn replace(v: Value, root: &str, to: &str) -> Value {
     })
 }
 
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn a_library_database_is_read_once_until_it_changes() {
+    use std::os::unix::fs::PermissionsExt;
+    if unsafe { libc::getuid() } == 0 {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path().canonicalize().unwrap();
+    let db = root.join("files.db");
+    std::fs::write(&db, library_fixtures::files_db()).unwrap();
+    let host = McpHost::default();
+    let args = json!({"database":db,"allowlistRoot":root,"limit":2});
+    let first = host.live_library_search_async(&json!(1), &args).await.unwrap();
+    assert_ne!(first["result"]["isError"], true, "{first}");
+    // Unreadable now, but unchanged: the next page (or search) is answered from what was read.
+    std::fs::set_permissions(&db, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let again = host.live_library_search_async(&json!(1), &args).await;
+    std::fs::set_permissions(&db, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(again.unwrap(), first);
+    // Changed: it's read again.
+    std::fs::write(&db, "not a database").unwrap();
+    let changed = host.live_library_search_async(&json!(1), &args).await.unwrap();
+    assert!(changed.to_string().contains("unreadable"), "{changed}");
+}
 #[tokio::test(flavor = "current_thread")]
 async fn library_host_matches_source_allowlists_wal_queries_and_coercion() {
     let root = tempfile::tempdir().unwrap();
