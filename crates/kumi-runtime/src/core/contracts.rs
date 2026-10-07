@@ -651,6 +651,9 @@ pub struct Where {
 pub struct Render {
     pub file: String,
     pub start: f64,
+    /// How long the part heard is, in seconds, when Live stopped short of what was asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seconds: Option<f64>,
 }
 
 /// What a take sounded like: its loudness (null when it couldn't be measured) and a summary line.

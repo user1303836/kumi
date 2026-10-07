@@ -94,9 +94,9 @@ impl Rendering {
                 None => None,
             };
             for (index, render) in &files {
-                let heard = audio::hear(&render.file, heard_options(render.start, beats * 60. / tempo, request.focus, signal.clone()))
-                    .await
-                    .map_err(plain)?;
+                let seconds = render.seconds.unwrap_or(beats * 60. / tempo);
+                let heard =
+                    audio::hear(&render.file, heard_options(render.start, seconds, request.focus, signal.clone())).await.map_err(plain)?;
                 let take = &mut takes[*index];
                 take.heard = Some(Heard { lufs: heard.loudness.integrated_lufs, summary: summary(&heard) });
                 take.render = Some(render.clone());
@@ -285,7 +285,8 @@ impl Rendering {
                         label: if source.mix { "The whole mix".into() } else { source.name.clone() },
                         file: found.file.clone(),
                         start: found.start,
-                        seconds: Some(beats * 60. / tempo),
+                        // A take Live cut short says how much it holds; the note says why.
+                        seconds: Some(found.seconds.unwrap_or(beats * 60. / tempo)),
                         live: false,
                         note: None,
                     })
@@ -386,12 +387,12 @@ impl Rendering {
                         let written = link.write(tap, &raw.0.to_string_lossy().replace('\\', "/"), Some(signal)).await.map_err(plain)?;
                         let capture = read_capture(&raw.0, written.channels, written.sample_rate).await.map_err(plain)?;
                         let wav = self.ears_folder.join(format!("{}.wav", uuid::Uuid::new_v4()));
-                        write_capture_wav(&wav, &capture, 0., capture.left.len() as f64).await.map_err(plain)?;
+                        write_capture_wav(&wav, &capture, 0., capture.frames() as f64).await.map_err(plain)?;
                         takes.borrow_mut().push(HeardTake {
                             label: label.clone(),
                             file: wav.to_string_lossy().into_owned(),
                             start: 0.,
-                            seconds: Some(capture.left.len() as f64 / capture.sample_rate),
+                            seconds: Some(capture.frames() as f64 / capture.sample_rate),
                             live: true,
                             note: None,
                         });

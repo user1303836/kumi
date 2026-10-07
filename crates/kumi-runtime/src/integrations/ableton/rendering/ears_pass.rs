@@ -7,27 +7,36 @@ use crate::ears::{
     link::Tap,
 };
 use kumi_common::js::number::{round, to_string};
+use std::path::Path;
 
-/// The longest part one pass records, in seconds: Kumi Ears holds 900 s, less the lead-in and a margin.
-pub(super) const PASS_SECONDS: f64 = 840.;
-/// What the devices hold at once, in seconds summed over them: Live keeps each recording in memory, and Kumi
-/// reads each one whole.
-const PASS_BUDGET: f64 = 1800.;
+/// The longest part one pass records, in seconds: Kumi keeps a capture's beat and Live's position in memory (about 4
+/// bytes a frame) and copies the sound straight from the device's file.
+pub(super) const PASS_SECONDS: f64 = 600.;
+/// Kumi Ears arms for at most 900 s; a pass arms for its lead-in, the part, half a bar, four bars more and 6 s.
+const ARMED_MOST: f64 = 880.;
+/// What the devices hold at once, in seconds summed over them: Live keeps each recording in memory, 16 bytes a frame.
+const PASS_BUDGET: f64 = 1200.;
 /// Captures longer than this are read one after another rather than side by side.
 const READ_ALONE: f64 = 60.;
+/// How far a part runs on into the next one's start, in seconds: two playbacks (an LFO or a delay elsewhere in its
+/// cycle) are crossfaded there rather than butted together.
+const SEAM: f64 = 0.01;
 
-/// What one device heard of a part: the part as a file, the lead before it (seconds), and where Live stopped
-/// short of the part's end when it did.
+/// What one device heard of a part: the part as a file, the lead before it (seconds), the frames it runs on past its
+/// end for the seam, and where Live stopped short of the part's end when it did.
 struct Part {
     file: PathBuf,
     lead: f64,
+    tail: usize,
     short: Option<Missed>,
 }
 
 /// The parts one listen plays, each short enough for Kumi Ears to hold: the whole stretch in one pass when it
 /// fits, else whole bars back to back.
 fn pieces(window: Window, tempo: f64, meter: f64, taps: usize) -> Vec<Window> {
-    let longest = PASS_SECONDS.min(PASS_BUDGET / taps.max(1) as f64) * tempo / 60.;
+    let by_memory = PASS_SECONDS.min(PASS_BUDGET / taps.max(1) as f64) * tempo / 60.;
+    let by_device = (ARMED_MOST - 6.) * tempo / 60. - (2. + 0.5 + 4.) * meter;
+    let longest = by_memory.min(by_device);
     if !(window.beats > longest) {
         return vec![window];
     }
@@ -52,13 +61,19 @@ impl Rendering {
         let (main_ref, prior) = self.main_prior(rig, signal.clone()).await?;
         let held = rig.hold.is_some();
         let pieces = pieces(rig.window(), tempo, self.observer.beats_per_bar.get(), taps.len());
+        // A listen in parts keeps them in a folder of its own until they're joined, out of the folder's pruning.
+        let folder =
+            if pieces.len() > 1 { self.ears_folder.join(format!("parts-{}", uuid::Uuid::new_v4())) } else { self.ears_folder.clone() };
         let mut started = false;
-        // Each tap's parts so far, in order, with the first one's lead; a tap that missed a part keeps what came before.
-        let mut parts: IndexMap<String, (Vec<PathBuf>, f64)> = IndexMap::new();
+        // Each tap's parts so far, in order; a tap that missed a part keeps what came before, and says so.
+        let mut parts: IndexMap<String, (Vec<Part>, bool)> = IndexMap::new();
         let mut ended: Vec<String> = vec![];
         let result: Result<(), RuntimeError> = self
             .history
             .quietly(None, async {
+                if pieces.len() > 1 {
+                    tokio::fs::create_dir_all(&folder).await.map_err(plain)?;
+                }
                 if rig.hold.as_ref().and_then(|hold| hold.main.as_ref()).is_none() {
                     // Main goes quiet only once its level is noted for after a crash.
                     if !self.save_main(rig, prior, false) {
@@ -75,20 +90,25 @@ impl Rendering {
                     if listening.is_empty() && index > 0 {
                         break;
                     }
-                    let heard = self.ears_piece(rig, &link, &listening, *piece, index == 0, last, &mut started, signal.clone()).await?;
+                    let heard =
+                        self.ears_piece(rig, &link, &listening, &folder, *piece, index == 0, last, &mut started, signal.clone()).await?;
                     for (name, outcome) in heard {
                         let named = if taps.len() > 1 { format!("{name}: ") } else { String::new() };
                         match outcome {
                             Ok(part) => {
-                                let entry = parts.entry(name.clone()).or_insert_with(|| (vec![], part.lead));
-                                entry.0.push(part.file);
-                                if let Some(short) = part.short {
+                                if let Some(short) = &part.short {
                                     rig.notes.push(format!("{named}{}", short.describe(piece.from, piece.beats)));
-                                    ended.push(name);
+                                    ended.push(name.clone());
                                 }
+                                let entry = parts.entry(name).or_insert_with(|| (vec![], false));
+                                entry.1 |= part.short.is_some();
+                                entry.0.push(part);
                             }
                             Err(missed) => {
                                 rig.notes.push(format!("{named}{}", missed.describe(piece.from, piece.beats)));
+                                if let Some(entry) = parts.get_mut(&name) {
+                                    entry.1 = true;
+                                }
                                 ended.push(name);
                             }
                         }
@@ -111,29 +131,37 @@ impl Rendering {
                 rig.notes.push(format!("Main may still be silent: set it back to {} in Live.", fader_db(prior)));
             }
         }
+        let mut files = IndexMap::new();
+        if result.is_ok() {
+            for (name, (heard, short)) in parts {
+                let lead = heard.first().map_or(0., |part| part.lead);
+                let file = self.ears_folder.join(format!("{}.wav", uuid::Uuid::new_v4()));
+                let written = match heard.as_slice() {
+                    [only] if only.file.parent() == Some(self.ears_folder.as_path()) => Ok(only.file.clone()),
+                    [only] => tokio::fs::rename(&only.file, &file).await.map(|_| file),
+                    _ => {
+                        let seams: Vec<_> = heard.iter().map(|part| (part.file.clone(), part.tail)).collect();
+                        join_wavs(&file, &seams).await.map(|_| file)
+                    }
+                };
+                match written {
+                    Ok(file) => {
+                        // What a short take holds after its lead, from the file's own length.
+                        let seconds = if short { wav_seconds(&file).await.map(|seconds| (seconds - lead).max(0.)) } else { None };
+                        files.insert(name, Render { file: file.to_string_lossy().into_owned(), start: lead, seconds });
+                    }
+                    Err(error) => rig.notes.push(format!("Kumi couldn't join what it heard of {name}: {error}")),
+                }
+            }
+        }
+        if pieces.len() > 1 {
+            let _ = tokio::fs::remove_dir_all(&folder).await;
+        }
         let this = self.clone();
         tokio::task::spawn_local(async move {
             this.prune_ears().await;
         });
         result?;
-        let mut files = IndexMap::new();
-        for (name, (mut heard, lead)) in parts {
-            let file = if heard.len() == 1 {
-                heard.pop().unwrap()
-            } else {
-                let joined = self.ears_folder.join(format!("{}.wav", uuid::Uuid::new_v4()));
-                let written = join_wavs(&joined, &heard).await;
-                for part in &heard {
-                    let _ = tokio::fs::remove_file(part).await;
-                }
-                if let Err(error) = written {
-                    rig.notes.push(format!("Kumi couldn't join what it heard of {name}: {error}"));
-                    continue;
-                }
-                joined
-            };
-            files.insert(name, Render { file: file.to_string_lossy().into_owned(), start: lead });
-        }
         Ok(files)
     }
 
@@ -145,6 +173,7 @@ impl Rendering {
         rig: &mut Rig,
         link: &Rc<dyn EarsLink>,
         taps: &[(String, Tap)],
+        folder: &Path,
         piece: Window,
         first: bool,
         last: bool,
@@ -218,7 +247,7 @@ impl Rendering {
                 let signal = signal.clone();
                 async move {
                     let raw = RawFile(self.ears_folder.join(format!("{}.raw", uuid::Uuid::new_v4())));
-                    let outcome = self.ears_part(&link, &tap, &raw, span.position, piece, first, last, signal).await;
+                    let outcome = self.ears_part(&link, &tap, &raw, folder, span.position, piece, first, last, signal).await;
                     drop(raw);
                     Ok::<_, RuntimeError>((name, outcome))
                 }
@@ -248,6 +277,21 @@ impl Rendering {
                     let _ = tokio::fs::remove_file(&part.file).await;
                 }
             }
+            if std::env::var("KUMI_TIMING").is_ok_and(|s| !s.is_empty()) {
+                let missed: Vec<_> = heard
+                    .values()
+                    .filter_map(|outcome| outcome.as_ref().err())
+                    .map(|missed| missed.describe(piece.from, piece.beats))
+                    .collect();
+                eprintln!(
+                    "[ears pass · {} taps · {} beats from {}{}] {}",
+                    taps.len(),
+                    to_string(piece.beats),
+                    to_string(piece.from),
+                    if longer { " · again" } else { "" },
+                    if missed.is_empty() { "heard".into() } else { missed.join(" ") }
+                );
+            }
             if !heard.values().any(|outcome| matches!(outcome, Err(missed) if missed.retry())) {
                 break;
             }
@@ -255,13 +299,14 @@ impl Rendering {
         Ok(heard)
     }
 
-    /// One device's capture of a part, cut to it: written next to the raw file, or why Live's playing missed it.
+    /// One device's capture of a part, cut to it and written into `folder`, or why Live's playing missed it.
     #[allow(clippy::too_many_arguments)]
     async fn ears_part(
         &self,
         link: &Rc<dyn EarsLink>,
         tap: &Tap,
         raw: &RawFile,
+        folder: &Path,
         position: f64,
         piece: Window,
         first: bool,
@@ -283,16 +328,52 @@ impl Rendering {
         };
         let at = frame_at(&part, piece.from).unwrap() as f64;
         let lead = if first { round(0.1 * capture.sample_rate).min(at) } else { 0. };
-        let after = if last { meter / 2. } else { 0. };
-        let end = (part.to as f64).min(at + ((piece.beats + after) * part.samples_per_beat).round());
-        let wav = self.ears_folder.join(format!("{}.wav", uuid::Uuid::new_v4()));
-        write_capture_wav(&wav, &capture, at - lead, end).await.map_err(unread)?;
-        Ok(Part { file: wav, lead: lead / capture.sample_rate, short })
+        // The last part keeps half a bar after it; the others run on a little into the next part, for the seam.
+        let (after, seam) = if last { (meter / 2., 0.) } else { (0., round(SEAM * capture.sample_rate)) };
+        let end = at + ((piece.beats + after) * part.samples_per_beat).round();
+        let reached = (part.to as f64).min(end + seam);
+        let wav = folder.join(format!("{}.wav", uuid::Uuid::new_v4()));
+        write_capture_wav(&wav, &capture, at - lead, reached).await.map_err(unread)?;
+        Ok(Part { file: wav, lead: lead / capture.sample_rate, tail: (reached - end).max(0.) as usize, short })
     }
 }
 fn plain(error: impl std::fmt::Display) -> RuntimeError {
     RuntimeError::plain(error.to_string())
 }
+/// A WAV's length in seconds, from its header (Kumi's own 32-bit float stereo files).
+async fn wav_seconds(file: &Path) -> Option<f64> {
+    use tokio::io::AsyncReadExt;
+    let mut header = [0u8; 44];
+    tokio::fs::File::open(file).await.ok()?.read_exact(&mut header).await.ok()?;
+    let rate = u32::from_le_bytes(header[24..28].try_into().ok()?) as f64;
+    let data = u32::from_le_bytes(header[40..44].try_into().ok()?) as f64;
+    (rate > 0.).then(|| data / 8. / rate)
+}
 fn unread(error: impl std::fmt::Display) -> Missed {
     Missed::Unread(kumi_common::js::string::head(&error.to_string(), 200))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn a_long_listen_is_heard_in_whole_bars_each_kumi_ears_can_hold() {
+        let window = Window { from: 8., beats: 2000. };
+        // One tap at 120 BPM: ten minutes a part (1200 beats), then the rest.
+        let one = pieces(window, 120., 4., 1);
+        assert_eq!(one.iter().map(|piece| (piece.from, piece.beats)).collect::<Vec<_>>(), [(8., 1200.), (1208., 800.)]);
+        // Eight taps share what Live holds at once: 150 s each, 300 beats, every part but the last on a bar.
+        let eight = pieces(window, 120., 4., 8);
+        assert_eq!(eight.len(), 7);
+        assert!(eight[..6].iter().all(|piece| piece.beats == 300.));
+        assert_eq!(eight.iter().map(|piece| piece.beats).sum::<f64>(), 2000.);
+        assert!(eight.windows(2).all(|pair| pair[0].from + pair[0].beats == pair[1].from));
+        // At 20 BPM the device's 900 s, not memory, bounds a part: the lead-in, margins and 6 s fit beside it.
+        let slow = pieces(Window { from: 0., beats: 400. }, 20., 4., 1);
+        let armed = (2. * 4. + slow[0].beats + 2. + 16.) * 60. / 20. + 6.;
+        assert!(armed <= 900., "armed for {armed} s");
+        // What fits is one part, whatever the tempo is unknown to be.
+        assert_eq!(pieces(Window { from: 4., beats: 32. }, 128., 4., 2).len(), 1);
+        assert_eq!(pieces(Window { from: 4., beats: 32. }, f64::NAN, 4., 2).len(), 1);
+    }
 }

@@ -198,14 +198,20 @@ async fn a_capture_is_read_in_whichever_layout_max_wrote_it_trimmed_and_placed_o
     let file = dir.path().join("part.wav");
     let whole = parse_capture(&capture(&parts, true, false, 0, false, None), 3, 48000.0).unwrap();
     write_capture_wav(&file, &whole, 1600.0, (1600 + beat * 2) as f64).await.unwrap();
-    let mut source = open_audio(file, None).await.unwrap();
+    let mut source = open_audio(file.clone(), None).await.unwrap();
     assert_eq!(source.sample_rate, 48000.0);
     assert_eq!(source.channels, 2);
     assert_eq!(source.frames, beat * 2);
     source.close().await.unwrap();
     let raw = dir.path().join("capture.raw");
     std::fs::write(&raw, capture(&parts, true, false, 0, false, None)).unwrap();
-    assert_eq!(read_capture(&raw, 3, 48000.0).await.unwrap().left.len(), 1000 + 600 + beat * 8);
+    let streamed = read_capture(&raw, 3, 48000.0).await.unwrap();
+    assert_eq!(streamed.frames(), 1000 + 600 + beat * 8);
+    assert_eq!((&streamed.sync, &streamed.position), (&whole.sync, &whole.position));
+    // Its sound stays in the file until a part is written out, the same part as from memory.
+    let copied = dir.path().join("copied.wav");
+    write_capture_wav(&copied, &streamed, 1600.0, (1600 + beat * 2) as f64).await.unwrap();
+    assert_eq!(std::fs::read(&copied).unwrap(), std::fs::read(&file).unwrap());
 }
 #[test]
 fn lives_jump_that_lands_on_a_beat_is_found_by_the_position_the_device_records() {
@@ -313,6 +319,55 @@ fn a_quiet_listen_is_one_stretch_at_every_tempo_even_where_beats_land_on_signal_
     let split = runs(&older, Anchors { first: Some(3.0), after_jump: Some(11.5) });
     assert_eq!(split.len(), 2);
     assert_eq!((split[0].to, split[1].from), (hold + 1, hold + 64));
+}
+#[test]
+fn a_miss_says_what_the_capture_held_and_pieces_on_lives_beats_are_one() {
+    // A thousand frames a beat at 48 kHz; the window is beats 8 to 16.
+    let run = |from: usize, to: usize, beat: f64| Run { from, to, beat, samples_per_beat: 1000.0 };
+    let cover = |stretches: &[Run]| cover(stretches, 8.0, 8.0, 48_000.0);
+    assert_eq!(cover(&[]), Err(Missed::Nothing));
+    // Live got there late: the stretch that reaches the end starts after the window's start, so it's played again.
+    let late = cover(&[run(0, 20_000, 10.0)]);
+    assert_eq!(late, Err(Missed::Late { from_beat: 10.0 }));
+    assert!(late.unwrap_err().retry());
+    // Live stopped short: heard from the start to beat 9, and a piece later on.
+    match cover(&[run(0, 3000, 6.0), run(8000, 9000, 14.0)]) {
+        Err(Missed::Cut { run: heard, to_beat, pieces, seconds }) => {
+            assert_eq!((heard.from, heard.to, to_beat, pieces), (0, 3000, 9.0, 2));
+            assert!((seconds - 4000.0 / 48_000.0).abs() < 1e-9);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(!cover(&[run(0, 3000, 6.0)]).unwrap_err().retry(), "playing it again doesn't help a stop");
+    // Live played, but other beats.
+    assert_eq!(cover(&[run(0, 20_000, 40.0)]), Err(Missed::Elsewhere { from_beat: 40.0, to_beat: 60.0 }));
+    // Two pieces on Live's beats, a blip in the phase apart, are one stretch; a jump between them isn't.
+    let joined = cover(&[run(0, 9000, 6.0), run(9064, 20_000, 6.0 + 9.064)]).unwrap();
+    assert_eq!((joined.from, joined.to, joined.beat), (0, 20_000, 6.0));
+    // After a jump back to beat 7, the second piece alone covers the window.
+    assert_eq!(cover(&[run(0, 9000, 6.0), run(9064, 20_000, 7.0)]).unwrap().from, 9064);
+}
+#[tokio::test]
+async fn parts_join_into_one_wav_crossfaded_where_one_runs_into_the_next() {
+    let dir = tempfile::tempdir().unwrap();
+    let rate = 48_000.0;
+    let sound: Vec<f32> = (0..3000).map(|frame| (frame as f32 * 0.01).sin() * 0.5).collect();
+    let capture =
+        Capture { left: sound.clone(), right: sound.clone(), sync: vec![1.5; 3000], position: None, sample_rate: rate, raw: None };
+    let (first, second, joined) = (dir.path().join("1.wav"), dir.path().join("2.wav"), dir.path().join("joined.wav"));
+    // The first part runs 100 frames on into the second's start.
+    write_capture_wav(&first, &capture, 0.0, 1100.0).await.unwrap();
+    write_capture_wav(&second, &capture, 1000.0, 3000.0).await.unwrap();
+    join_wavs(&joined, &[(first, 100), (second, 0)]).await.unwrap();
+    let bytes = std::fs::read(&joined).unwrap();
+    assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize, 36 + 3000 * 8);
+    assert_eq!(u32::from_le_bytes(bytes[40..44].try_into().unwrap()) as usize, 3000 * 8);
+    assert_eq!(bytes.len(), 44 + 3000 * 8);
+    // Both playbacks agree here, so the seam is the sound itself.
+    let samples: Vec<f32> = bytes[44..].chunks_exact(4).map(|word| f32::from_le_bytes(word.try_into().unwrap())).collect();
+    for frame in [0, 999, 1000, 1050, 1099, 1100, 2999] {
+        assert!((samples[frame * 2] - sound[frame]).abs() < 1e-6, "frame {frame}");
+    }
 }
 #[test]
 fn kumi_fetches_the_build_each_computer_has() {
@@ -743,7 +798,7 @@ async fn kumis_socket_hears_devices_hellos_and_arms_writes_and_stops_them_by_tok
             "/kumi/ears/write"=>{let file=msg.args[0].as_text().unwrap();std::fs::write(file,capture(&[Part{frames:480,playing:Some((64.5,480.0)),audio:false}],true,false,0,false,None)).unwrap();("/kumi/ears/written",vec![token.into(),port.into(),file.into(),48000.into(),3.into(),64.5.into(),1.into()])},
             "/kumi/ears/ping"=>("/kumi/ears/pong",vec![token.into(),port.into(),77.into(),(EARS_VERSION as i32).into(),48000.into(),"live_set tracks 2 devices 4".into(),1500.into(),33.25.into(),1.into()]),_=>continue};answering.send_to(&encode_osc(address,&args),("127.0.0.1",reply)).await.unwrap();}}}});
         device.send_to(&encode_osc("/kumi/ears/hello",&[port.into(),77.into(),(EARS_VERSION as i32).into(),48000.into(),"live_set tracks 2 devices 4".into()]),("127.0.0.1",link.port())).await.unwrap();
-        let tap=link.wait_for(Rc::new(|tap|tap.path.starts_with("live_set tracks 2 devices ")),2000,None).await.unwrap();assert_eq!((tap.id,tap.port,tap.path.as_str()),(77.0,port,"live_set tracks 2 devices 4"));assert_eq!(link.taps().iter().map(|tap|tap.id).collect::<Vec<_>>(),vec![77.0]);assert_eq!(link.arm(&tap,10.0,None).await.unwrap(),Armed{beats:64.5,running:true,sample_rate:48000.0});let written=link.write(&tap,&raw,None).await.unwrap();assert_eq!(written.file,raw);assert_eq!(written.channels,3);assert_eq!(written.beats,64.5);assert_eq!(read_capture(Path::new(&raw),3,48000.0).await.unwrap().left.len(),480);assert_eq!(link.ping(&tap,None).await.unwrap().path,"live_set tracks 2 devices 4");assert_eq!(link.transport(&tap,None).await.unwrap(),Some(Transport{beats:33.25,running:true}));
+        let tap=link.wait_for(Rc::new(|tap|tap.path.starts_with("live_set tracks 2 devices ")),2000,None).await.unwrap();assert_eq!((tap.id,tap.port,tap.path.as_str()),(77.0,port,"live_set tracks 2 devices 4"));assert_eq!(link.taps().iter().map(|tap|tap.id).collect::<Vec<_>>(),vec![77.0]);assert_eq!(link.arm(&tap,10.0,None).await.unwrap(),Armed{beats:64.5,running:true,sample_rate:48000.0});let written=link.write(&tap,&raw,None).await.unwrap();assert_eq!(written.file,raw);assert_eq!(written.channels,3);assert_eq!(written.beats,64.5);assert_eq!(read_capture(Path::new(&raw),3,48000.0).await.unwrap().frames(),480);assert_eq!(link.ping(&tap,None).await.unwrap().path,"live_set tracks 2 devices 4");assert_eq!(link.transport(&tap,None).await.unwrap(),Some(Transport{beats:33.25,running:true}));
         device.send_to(&encode_osc("/kumi/ears/hello",&[port.saturating_add(1).into(),78.into(),(EARS_VERSION as i32+1).into(),48000.into(),"live_set tracks 3 devices 0".into()]),("127.0.0.1",link.port())).await.unwrap();tokio::time::sleep(std::time::Duration::from_millis(50)).await;assert_eq!(link.taps().iter().map(|tap|tap.id).collect::<Vec<_>>(),vec![77.0]);
         let dead=tokio::net::UdpSocket::bind(("127.0.0.1",0)).await.unwrap();assert!(link.arm(&Tap{port:dead.local_addr().unwrap().port(),path:"live_set master_track devices 0".into(),..tap},1.0,None).await.unwrap_err().0.contains("listening device on Main didn't answer"));stop.cancel();worker.await.unwrap();link.close().await;
         assert_eq!(place_of("live_set return_tracks 1 devices 3"),Some(Place{kind:"return".into(),index:1,device:3}));assert_eq!(place_of("live_set master_track devices 0"),Some(Place{kind:"main".into(),index:0,device:0}));assert_eq!(describe("live_set tracks 0 devices 1"),"track 1");

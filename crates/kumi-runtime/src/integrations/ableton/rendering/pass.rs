@@ -183,7 +183,11 @@ impl Rendering {
                             if let Some(file) = (self.clip_file)(clip["ref"].as_str().unwrap().into(), signal).await.ok().flatten() {
                                 collected.borrow_mut().insert(
                                     source.name.clone(),
-                                    Render { file, start: ((window.from - start.unwrap_or(span.position)) * 60. / tempo - 0.1).max(0.) },
+                                    Render {
+                                        file,
+                                        start: ((window.from - start.unwrap_or(span.position)) * 60. / tempo - 0.1).max(0.),
+                                        seconds: None,
+                                    },
                                 );
                             }
                             Ok(())
