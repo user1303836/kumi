@@ -2590,6 +2590,25 @@ class ControlSurfaceTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "partial delete"): mapper.invoke("note.delete", {"ref": ref, "noteIds": [1, 2], **self.note_authority(mapper, ref)})
         self.assertEqual(sorted(note.pitch for note in clip.notes), [36, 38]); self.assertEqual(len({note.note_id for note in clip.notes}), 2)
 
+    def test_a_failed_delete_puts_notes_back_making_each_ones_text_once(self):
+        class Note:
+            def __init__(self, note_id, pitch, start): self.note_id = note_id; self.pitch = pitch; self.start_time = start; self.duration = 0.25; self.velocity = 100; self.channel = 1; self.mute = False; self.probability = 1.0; self.velocity_deviation = 0.0; self.release_velocity = 64.0
+        class Clip:
+            length = 64.0
+            def __init__(self): self.notes = [Note(index + 1, 36 + index % 24, index * 0.25) for index in range(300)]; self.next_id = 301
+            def get_all_notes_extended(self): return list(self.notes)
+            # Live took one note too many, then failed: the rollback puts back half the clip.
+            def remove_notes_by_id(self, ids): gone = set(ids) | {300}; self.notes = [note for note in self.notes if note.note_id not in gone]; raise RuntimeError("injected failure after the delete")
+            def add_new_notes(self, notes):
+                for note in notes: self.notes.append(Note(self.next_id, note["pitch"], note["start_time"])); self.next_id += 1
+        song = FakeSong(); clip = Clip(); song.tracks[0].clip_slots[0].clip = clip; mapper = LiveObjectMapper(song); ref = mapper.snapshot()["tracks"][0]["clips"][0]["ref"]
+        args = {"ref": ref, "noteIds": list(range(1, 301, 2)), **self.note_authority(mapper, ref)}
+        canonical = mapper._bounded_canonical; made = []
+        mapper._bounded_canonical = lambda value: made.append(True) or canonical(value)
+        with self.assertRaisesRegex(RuntimeError, "injected failure"): mapper.invoke("note.delete", args)
+        self.assertEqual(sorted((note.pitch, note.start_time) for note in clip.notes), sorted((36 + index % 24, index * 0.25) for index in range(300)))
+        self.assertLess(len(made), 2000, "each note's canonical text is made a few times, not once per note it's compared with")
+
     def test_a_big_note_delete_makes_its_id_set_once(self):
         song = FakeSong(); clip = FakeClip(64.0); song.tracks[0].clip_slots[0].clip = clip
         clip.add_new_notes([{"pitch": 36 + index % 48, "start_time": (index % 256) * 0.25, "duration": 0.25, "velocity": 100, "mute": False} for index in range(2000)])

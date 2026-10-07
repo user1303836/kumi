@@ -3673,13 +3673,16 @@ class LiveObjectMapper:
         new ids). Whether the clip then holds exactly before_rows' content, nothing more."""
         try:
             content = lambda row: {key: row.get(key) for key in self._NOTE_CONTENT_FIELDS}
-            remaining = [content(row) for row in self._read_notes(clip)]; missing: list[dict[str, Any]] = []
+            # What's left, as a multiset of canonical texts: each note's text is made once, not once per prior note.
+            remaining: dict[str, int] = {}; missing: list[dict[str, Any]] = []
+            for row in self._read_notes(clip):
+                text = self._bounded_canonical(content(row)); remaining[text] = remaining.get(text, 0) + 1
             for prior in before_rows:
-                prior_content = content(prior); match = next((index for index, candidate in enumerate(remaining) if self._bounded_canonical(candidate) == self._bounded_canonical(prior_content)), None)
-                if match is None: missing.append(prior)
-                else: remaining.pop(match)
+                text = self._bounded_canonical(content(prior))
+                if remaining.get(text, 0) > 0: remaining[text] -= 1
+                else: missing.append(prior)
             # Content the removal changed rather than took can't be put back by adding notes.
-            if remaining: return False
+            if any(remaining.values()): return False
             if missing:
                 try: spec_class = getattr(__import__("Live.Clip", fromlist=["MidiNoteSpecification"]), "MidiNoteSpecification", None)
                 except Exception: spec_class = None
