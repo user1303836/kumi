@@ -61,6 +61,9 @@ fn subtree_parameters(device: &Value, prefix: &str, sibling_index: Option<usize>
     let name = if is_non_empty_string(&device["name"], 256) { string(&device["name"]) } else { "unnamed" };
     let base = format!("{prefix}{name}{}", sibling_index.map(|i| format!("[{i}]")).unwrap_or_default());
     let mut rows = Vec::new();
+    // A device can have two parameters of one name: the later ones' paths take #2, #3... in their order, so each
+    // path names one parameter, the same way each time the device is read.
+    let mut paths = HashSet::new();
     for parameter in array(&device["parameters"]).iter().filter(|v| v.is_object()) {
         if !is_non_empty_string(&parameter["ref"], 256) || !is_non_empty_string(&parameter["name"], 256) {
             return Err(fail("device state parameter identity is unavailable"));
@@ -68,7 +71,13 @@ fn subtree_parameters(device: &Value, prefix: &str, sibling_index: Option<usize>
         if !number(&parameter["value"]).is_finite() || !parameter["min"].is_number() || !parameter["max"].is_number() {
             continue;
         }
-        rows.push(json!({"path":format!("{base}/{}",string(&parameter["name"])),"name":parameter["name"],"value":parameter["value"],"min":parameter["min"],"max":parameter["max"],"quantization":if number(&parameter["quantization"]).is_finite(){parameter["quantization"].clone()}else{json!(0)},"parameterRef":parameter["ref"],"deviceRef":device["ref"].as_str().unwrap_or(""),"automatable":parameter["automatable"]==true,"enabled":parameter["enabled"]!=false,"deviceEnabled":device["enabled"]!=false}));
+        let mut path = format!("{base}/{}", string(&parameter["name"]));
+        let mut count = 1;
+        while !paths.insert(path.clone()) {
+            count += 1;
+            path = format!("{base}/{}#{count}", string(&parameter["name"]));
+        }
+        rows.push(json!({"path":path,"name":parameter["name"],"value":parameter["value"],"min":parameter["min"],"max":parameter["max"],"quantization":if number(&parameter["quantization"]).is_finite(){parameter["quantization"].clone()}else{json!(0)},"parameterRef":parameter["ref"],"deviceRef":device["ref"].as_str().unwrap_or(""),"automatable":parameter["automatable"]==true,"enabled":parameter["enabled"]!=false,"deviceEnabled":device["enabled"]!=false}));
     }
     let indexed_name = |row: &Value, index: usize, prefix: &str| {
         if is_non_empty_string(&row["name"], 256) {

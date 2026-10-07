@@ -54,6 +54,17 @@ fn subtree_files_validation_and_refusal_reports_match_source() {
     }
 }
 #[test]
+fn a_device_with_two_parameters_of_one_name_is_saved_validated_and_recalled() {
+    let parameter = |reference: &str, value: f64| json!({"ref":reference,"objectIdentity":format!("identity-{reference}"),"name":"Gain","value":value,"min":0,"max":1,"quantization":0,"automatable":true,"enabled":true});
+    let snapshot = json!({"tracks":[{"ref":"track:1","objectIdentity":"track-1","devices":[{"ref":"device:1","objectIdentity":"device-1","name":"Utility","kind":"audio-effect","className":"StereoGain","parameters":[parameter("p1",0.5),parameter("p2",0.25)]}]}]});
+    let file = build_device_state_file(&snapshot, "device:1", "saved").unwrap();
+    let paths: Vec<_> = file["parameters"].as_array().unwrap().iter().map(|row| row["path"].clone()).collect();
+    assert_eq!(paths, [json!("Utility/Gain"), json!("Utility/Gain#2")]);
+    validate_device_state_file(&file).unwrap();
+    let plan = plan_device_state_recall(&snapshot, &file, "device:1", &json!({})).unwrap();
+    assert_eq!((plan["applicable"].clone(), plan["dispositions"][1]["parameterRef"].clone()), (json!(2), json!("p2")));
+}
+#[test]
 fn deterministic_morph_float64_and_quantization_match_source() {
     let fixture = oracle();
     for row in fixture["morph"].as_array().unwrap() {
