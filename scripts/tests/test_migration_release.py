@@ -170,6 +170,44 @@ class MigrationRelease(unittest.TestCase):
             server.server_close()
             thread.join()
 
+    @unittest.skipIf(os.name == "nt", "Unix installer; Windows PowerShell runs in the installer workflow")
+    def test_an_installer_run_from_a_terminal_starts_kumi_and_leaves_no_download_behind(self):
+        import pty
+        class Quiet(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=str(self.out)))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            home = self.root / "terminal home"
+            env = {key: value for key, value in os.environ.items() if key not in {"CI", "KUMI_NO_LAUNCH"}}
+            env.update(KUMI_HOME=str(home), KUMI_RELEASES=f"http://127.0.0.1:{server.server_port}", KUMI_NO_MODIFY_PATH="1",
+                       PATH="/usr/bin:/bin:/usr/sbin:/sbin")
+            # A terminal of its own, so the script takes the path that starts Kumi with `exec`, as from a shell.
+            pid, fd = pty.fork()
+            if pid == 0:
+                os.execve("/bin/sh", ["sh", str(release.native.ROOT / "install.sh")], env)
+            output = b""
+            while True:
+                try:
+                    chunk = os.read(fd, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                output += chunk
+            _, status = os.waitpid(pid, 0)
+            os.close(fd)
+            text = output.decode("utf-8", "replace")
+            self.assertEqual(os.waitstatus_to_exitcode(status), 0, text)
+            self.assertIn("native fixture:", text, "Kumi started from the installer")
+            self.assertEqual(sorted(path.name for path in home.iterdir() if path.name.startswith(".install.")), [], text)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
     def test_npm_command_with_cargo_builds_this_checkout_and_forwards_arguments(self):
         tools = self.root / "tools"
         tools.mkdir()

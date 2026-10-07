@@ -178,6 +178,8 @@ LAUNCHER
   # this script's own input is the download.
   if [ -z "${KUMI_NO_LAUNCH:-}" ] && [ -z "${CI:-}" ] && [ -t 1 ] && { : </dev/tty; } 2>/dev/null; then
     say "  Starting Kumi…"
+    # exec replaces this shell, so the EXIT trap never runs: the download goes now.
+    rm -rf "$work"; trap - EXIT INT TERM
     exec "$bin/kumi" </dev/tty
   fi
   if [ -z "$on_path" ]; then
