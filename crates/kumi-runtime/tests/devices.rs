@@ -210,6 +210,11 @@ fn the_devices_code_cant_reach_files_the_network_or_max_and_live_the_frame_hides
     assert!(matches(&refused("function midi(event) { pass(event); }\n<!-- a note -->"), "Live reads them as comments"));
     // A brace in a string or a comment is only text.
     assert!(check_spec(&with(lowest(), json!({ "code": "const close = \"})();\"; // }\nfunction midi(event) { pass(event); }" }))).is_ok());
+    // A "//" in a string doesn't hide the rest of its line from the check: an import there is refused all the same.
+    assert!(matches(
+        &refused("const url = \"https://x.y/\"; import(\"data:text/javascript,0\");\nfunction midi(event) { pass(event); }"),
+        "isn't allowed, even in a comment or a string: modules aren't available"
+    ));
 }
 
 #[test]

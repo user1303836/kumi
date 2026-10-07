@@ -333,7 +333,7 @@ const SOURCE_OF: &str = r#"(() => {
 /// `-->` as comments in a script and QuickJS doesn't, so the two could read the braces differently.
 fn whole_body(code: &str) -> Option<String> {
     if code.contains("<!--") || code.contains("-->") {
-        return Some("code: \"<!--\" and \"-->\" aren't allowed: Live reads them as comments, which can change what the code is.".into());
+        return Some("code: \"<!--\" and \"-->\" aren't allowed: Live reads them as comments, which can change what the code is (for x--, then >, write \"x-- > 0\").".into());
     }
     let wrapped = format!("function(){{\"use strict\";\n{code}\n}}");
     let read = (|| -> rquickjs::Result<Option<String>> {
@@ -563,10 +563,14 @@ pub fn check_spec(input: &Map<String, Value>) -> Result<DeviceSpec, Vec<String>>
         if !MIDI_FUNCTION.is_match(&code) {
             problems.push("code: define function midi(event), called for each MIDI event that arrives.".to_string());
         }
+        // Matched without comments, and as written too: the comment stripper doesn't know strings, so a "//" or "/*"
+        // inside one could hide the rest of a line (an `import(…)`, which the frame can't shadow) from the first.
         let bare = COMMENTS.replace_all(&code, "");
         for (pattern, why) in FORBIDDEN.iter() {
             if let Some(found) = pattern.find(&bare) {
                 problems.push(format!("code: \"{}\" isn't allowed: {why}.", trim(found.as_str())));
+            } else if let Some(found) = pattern.find(&code) {
+                problems.push(format!("code: \"{}\" isn't allowed, even in a comment or a string: {why}.", trim(found.as_str())));
             }
         }
         problems.extend(whole_body(&code));
