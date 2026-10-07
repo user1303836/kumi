@@ -71,6 +71,14 @@ async fn locks_exclude_other_processes_but_replace_same_process_dead_and_day_old
         child.kill().unwrap();
         child.wait().unwrap();
     }
+    // Logs a learner stopped dead was writing afresh go when the lock is taken; nothing else does.
+    for left in [".sounds-0b1d", ".presets-77", ".sets-x", ".settings.json"] {
+        put(&Path::new(dir).join(left), "left");
+    }
+    acquire_lock(dir).await.unwrap().unwrap().release().await.unwrap();
+    let mut there: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    there.sort();
+    assert_eq!(there, [".settings.json"]);
     for body in ["half-written", "{\"pid\":2147483647,\"at\":9999999999999}", "{\"pid\":\"1\",\"at\":1}"] {
         put(&lock, body);
         acquire_lock(dir).await.unwrap().unwrap().release().await.unwrap();

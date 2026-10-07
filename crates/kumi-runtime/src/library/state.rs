@@ -136,6 +136,17 @@ impl LibraryLock {
         }
     }
 }
+/// The logs being written afresh when a learner was stopped dead (`.sounds-<uuid>` and the like): only a lock's holder
+/// writes them, so once it's taken any left are a gone learner's.
+async fn remove_left_logs(dir: &Path) {
+    let Ok(mut entries) = tokio::fs::read_dir(dir).await else { return };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let name = entry.file_name();
+        if [".sounds-", ".presets-", ".sets-"].iter().any(|kind| name.to_string_lossy().starts_with(kind)) {
+            let _ = tokio::fs::remove_file(entry.path()).await;
+        }
+    }
+}
 /// A same-process or day-old lock is replaced, exactly as the source learner does, and one whose pid has gone to a
 /// process started after it was taken (the learner that took it was killed).
 pub async fn acquire_lock(dir: &str) -> io::Result<Option<LibraryLock>> {
@@ -155,6 +166,7 @@ pub async fn acquire_lock(dir: &str) -> io::Result<Option<LibraryLock>> {
                 handle.write_all(stringify(&json!({"pid":std::process::id(),"at":now_ms()})).as_bytes()).await?;
                 handle.flush().await?;
                 drop(handle);
+                remove_left_logs(Path::new(dir)).await;
                 return Ok(Some(LibraryLock { file }));
             }
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {

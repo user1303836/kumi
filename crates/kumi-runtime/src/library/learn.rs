@@ -673,10 +673,11 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
                     start: None,
                     seconds: None,
                 };
-                let entry = pool
-                    .run(slot, job)
-                    .await
-                    .map_err(|error| RuntimeError::plain(format!("Kumi couldn't start its measuring ({error}); it will try again")))?;
+                // A stop doesn't wait for the measurement (up to the pool's timeout): the pool ends its worker below.
+                let entry = tokio::select! {
+                    entry = pool.run(slot, job) => entry.map_err(|error| RuntimeError::plain(format!("Kumi couldn't start its measuring ({error}); it will try again")))?,
+                    _ = options.signal.cancelled() => return Err(RuntimeError::Aborted),
+                };
                 options.signal.check()?;
                 if entry.error.is_some() && entry.r#class.is_none() && entry.kind.is_none() {
                     progress.value.borrow_mut().failed += 1;
