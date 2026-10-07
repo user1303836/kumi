@@ -223,6 +223,9 @@ $group.Shortcut = [System.Windows.Forms.Shortcut]::CtrlG
 $group.add_Click({ Say 'group' })
 $freeze = $edit.MenuItems.Add('Freeze Track')
 $freeze.Enabled = $false
+# Titles past ASCII, made from ASCII: like Kumi's script, this file has no BOM.
+$cafe = 'Caf' + [char]0x00E9 + ' ' + [char]0x65E5 + [char]0x672C
+$edit.MenuItems.Add($cafe) | Out-Null
 $create = $menu.MenuItems.Add('&Create')
 $create.MenuItems.Add('Insert &MIDI Track') | Out-Null
 $form.Menu = $menu
@@ -232,6 +235,7 @@ $headers.AccessibleName = 'Track Headers'
 $headers.SelectionMode = 'MultiExtended'
 [void]$headers.Items.Add('BASS')
 [void]$headers.Items.Add('Bass')
+[void]$headers.Items.Add($cafe)
 $form.Controls.Add($headers)
 $form.add_Shown({ Say "ready $PID" })
 [System.Windows.Forms.Application]::Run($form)
@@ -278,6 +282,8 @@ async fn on_windows_the_helper_uses_the_win32_menu_finds_the_owned_dialog_and_fi
     assert!(!find(&["Edit", "Freeze Track"]).unwrap().enabled);
     assert!(find(&["Create", "Insert MIDI Track"]).is_some());
     assert!(!menus.iter().any(|item| item.path.last().is_some_and(|title| title.is_empty() || title == "-")), "no separators");
+    // Past ASCII, whole: the script writes it as \u escapes, whatever the console's code page.
+    assert!(find(&["Edit", "Caf\u{e9} \u{65e5}\u{672c}"]).is_some(), "{menus:?}");
 
     // Chosen without bringing the window to the front.
     let group = hands.menu(&["Edit".into(), "Group".into()], MenuOptions::default()).await.unwrap();
@@ -292,6 +298,10 @@ async fn on_windows_the_helper_uses_the_win32_menu_finds_the_owned_dialog_and_fi
     assert_eq!(picked.fields["selected"], json!(["Bass"]));
     let picked = hands.tracks(&[Track { name: "bass".into(), nth: Some(0.0) }], None).await.unwrap();
     assert_eq!((picked.ok, &picked.fields["missing"]), (false, &json!(["bass"])), "{picked:?}");
+    // A name past ASCII goes to the script as escapes and comes back whole.
+    let picked = hands.tracks(&[Track { name: "Caf\u{e9} \u{65e5}\u{672c}".into(), nth: Some(0.0) }], None).await.unwrap();
+    assert!(picked.ok, "{picked:?}");
+    assert_eq!(picked.fields["selected"], json!(["Caf\u{e9} \u{65e5}\u{672c}"]));
     assert!(hands.dialog(None).await.unwrap() == Dialog { open: false, title: None, words: None, buttons: None, file: None });
 
     // An item that opens a modal prompt answers at once, and the prompt is the dialog: its own words and
