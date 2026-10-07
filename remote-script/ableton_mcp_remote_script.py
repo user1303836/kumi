@@ -8131,6 +8131,8 @@ class LiveObjectMapper:
                 if key == "detailClipRef": proposals.append((attribute, None))
                 continue
             if not isinstance(reference, str) or not reference.startswith(f"{self.refs.epoch}:{kind}:"): raise ValueError(f"{key} is stale or invalid")
+            # Song.View's selected_parameter can only be read: Live selects a parameter only when the producer clicks one.
+            if key == "parameterRef": raise ValueError(f"Live doesn't let a script select a parameter (Song.View.selected_parameter can only be read){UNRUN_SUFFIX}")
             proposals.append((attribute, self.refs.get(reference)))
         if not proposals: raise ValueError("selection mutation has no fields")
         def identity_of(value: Any) -> str | None:
@@ -8138,16 +8140,29 @@ class LiveObjectMapper:
         assignments = []
         try:
             for attribute, value in proposals:
-                prior = self._read_attr(view, attribute)
-                setattr(view, attribute, value)
+                if attribute == "selected_device":
+                    # Song.View has no selected_device to set: it selects a device through select_device, which can
+                    # move the selected track to the device's, so both are what goes back.
+                    select = getattr(view, "select_device", None)
+                    if not callable(select): raise ValueError("device selection is unavailable on this Live shape")
+                    prior = (self._read_attr(view, "selected_track"), self._selected_device(view))
+                    select(value)
+                else:
+                    prior = self._read_attr(view, attribute)
+                    setattr(view, attribute, value)
                 assignments.append((attribute, prior))
             for attribute, value in proposals:
-                observed = self._read_attr(view, attribute)
+                observed = self._selected_object(view, attribute)
                 if identity_of(observed) != identity_of(value): raise ValueError("selection change was not confirmed")
         except BaseException as error:
             rollback_failed = False
             for attribute, prior in reversed(assignments):
-                try: setattr(view, attribute, prior)
+                try:
+                    if attribute == "selected_device":
+                        track, device = prior
+                        setattr(view, "selected_track", track)
+                        if device is not None: view.select_device(device)
+                    else: setattr(view, attribute, prior)
                 except BaseException: rollback_failed = True
             if rollback_failed or self._bounded_canonical(self._selection_state()) != self._bounded_canonical(before_state): raise ValueError("selection change failed and exact rollback failed") from error
             raise

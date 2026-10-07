@@ -5318,21 +5318,28 @@ class SelectionViewExpansionTests(unittest.TestCase):
     def test_selection_set_assigns_song_view_selections(self):
         song = FakeSong()
         track = song.tracks[0]; scene = song.scenes[0]; slot = track.clip_slots[0]; device = track.devices[0]; parameter = device.parameters[0]
-        song.view = type("SongView", (), {"selected_track": None, "selected_scene": None, "highlighted_clip_slot": None, "detail_clip": None, "selected_device": None, "selected_parameter": None, "selected_chain": None})()
+        # As Live 12.4's Song.View: a device is selected through select_device (on its track's view), and a parameter can't be.
+        class SongView:
+            selected_track = None; selected_scene = None; highlighted_clip_slot = None; detail_clip = None; selected_parameter = None; selected_chain = None
+            def select_device(self, chosen):
+                owner = next(candidate for candidate in song.tracks if chosen in candidate.devices); self.selected_track = owner; owner.view.selected_device = chosen
+        song.view = SongView(); track.view = type("TrackView", (), {"selected_device": None})()
         clip = FakeClip(4.0); slot.clip = clip
         mapper = LiveObjectMapper(song)
         self.assertTrue(mapper._operation_supported("selection.set"))
         snapshot = mapper.snapshot()
         track_ref = snapshot["tracks"][0]["ref"]; scene_ref = snapshot["scenes"][0]["ref"]; slot_ref = snapshot["tracks"][0]["clipSlots"][0]["ref"]; clip_ref = snapshot["tracks"][0]["clips"][0]["ref"]
         device_ref = snapshot["tracks"][0]["devices"][0]["ref"]; parameter_ref = snapshot["tracks"][0]["devices"][0]["parameters"][0]["ref"]
-        args = {"trackRef": track_ref, "sceneRef": scene_ref, "slotRef": slot_ref, "detailClipRef": clip_ref, "deviceRef": device_ref, "parameterRef": parameter_ref, "expectedStateRevision": mapper._selection_revision()}
+        with self.assertRaisesRegex(ValueError, "^Live doesn't let a script select a parameter.*; nothing changed$"):
+            mapper.invoke("selection.set", {"parameterRef": parameter_ref, "expectedStateRevision": mapper._selection_revision()})
+        args = {"trackRef": track_ref, "sceneRef": scene_ref, "slotRef": slot_ref, "detailClipRef": clip_ref, "deviceRef": device_ref, "expectedStateRevision": mapper._selection_revision()}
         result = mapper.invoke("selection.set", args)
         self.assertTrue(result["changed"]); validate_operation_payload("selection.set", "result", result)
         self.assertIs(song.view.selected_track, track); self.assertIs(song.view.selected_scene, scene)
         self.assertIs(song.view.highlighted_clip_slot, slot); self.assertIs(song.view.detail_clip, clip)
-        self.assertIs(song.view.selected_parameter, parameter)
-        # Live keeps the selected device on the selected track's view: that's what the snapshot and the focus feed name.
-        track.view = type("TrackView", (), {"selected_device": device})()
+        self.assertIsNone(song.view.selected_parameter)
+        # Live keeps the selected device on the selected track's view: that's what select_device set, and what the snapshot and the focus feed name.
+        self.assertIs(track.view.selected_device, device)
         self.assertEqual(mapper.snapshot()["selection"]["deviceRef"], device_ref, "read from the selected track")
         self.assertEqual(mapper.discover("selection")["items"][0]["selectedDeviceRef"], device_ref, "the focus feed names the selected device")
         # Live's device type goes on each device row.
