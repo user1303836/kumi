@@ -279,6 +279,34 @@ async fn perform(
     states.push(clean(record.borrow().clone()));
 }
 #[tokio::test]
+async fn undoing_a_clip_that_moved_ref_deletes_it_where_it_is_now() {
+    let adapter = Rc::new(Adapter::new());
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let mut made = vec![];
+    for (name, position) in [("Earlier", 4), ("New Clip", 8)] {
+        let args = json!({"action":"create","trackRef":"track:track-1","position":position,"length":4,"name":name});
+        let preview = host.live_arrangement_clip_preview_async(&json!(1), &args).await;
+        let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        let apply = json!({"transactionId":body["transactionId"],"confirmation":"apply","idempotencyKey":format!("apply-{name}")});
+        host.live_arrangement_clip_apply_async(&json!(2), &apply, None).await.unwrap();
+        made.push(body["transactionId"].clone());
+    }
+    {
+        // The producer deletes "Earlier": as in Live, "New Clip" moves down to its ref.
+        let mut state = adapter.sim.state.borrow_mut();
+        let rows = state["arrangementClips"].as_array_mut().unwrap();
+        let earlier = rows.iter().position(|r| r["clip"]["name"] == "Earlier").unwrap();
+        let freed = rows.remove(earlier)["clip"]["ref"].clone();
+        rows.iter_mut().find(|r| r["clip"]["name"] == "New Clip").unwrap()["clip"]["ref"] = freed;
+    }
+    let undo = json!({"transactionId":made[1],"confirmation":"undo","idempotencyKey":"undo-key"});
+    let result =
+        host.with_undo_watch(&json!(3), &undo, async { Ok(host.undo_arrangement_clip_async(&json!(3), &undo, None).await) }).await.unwrap();
+    let record = host.transaction_record(made[1].as_str().unwrap()).unwrap();
+    assert_eq!(record.borrow()["state"], "undone", "{result}");
+    assert!(adapter.sim.state.borrow()["arrangementClips"].as_array().unwrap().is_empty());
+}
+#[tokio::test]
 async fn undoing_a_clip_with_another_after_it_is_confirmed_by_identity() {
     // The read after the delete failing first leaves the undo uncertain, for a retry with the same key to settle.
     for fault in ["", "undo-read"] {
