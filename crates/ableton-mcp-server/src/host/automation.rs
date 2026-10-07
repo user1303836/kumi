@@ -546,7 +546,7 @@ impl McpHost {
                     let (from, to) = inserted_range(payload);
                     let intermediate: Vec<_> = prior_points
                         .into_iter()
-                        .filter(|p| !p.is_object() || p["time"].as_f64().is_none_or(|n| n < from || n > to))
+                        .filter(|p| !p.is_object() || p["time"].as_f64().is_none_or(|n| n < from || n >= to))
                         .collect();
                     if !clip_properties::scalar_same(tuning::field(&current, "exists")?, prior.get("exists"))
                         || canonical_mutation_identity(&nullish_array(tuning::field(&current, "points")?))?
@@ -593,7 +593,7 @@ impl McpHost {
                 }
                 let restore: Vec<_> = point_array(&prior["points"])
                     .into_iter()
-                    .filter(|p| p.is_object() && p["time"].as_f64().is_some_and(|n| n >= from && n <= to))
+                    .filter(|p| p.is_object() && p["time"].as_f64().is_some_and(|n| n >= from && n < to))
                     .collect();
                 if !restore.is_empty() && !has("automation.point.insert") {
                     let args = self
@@ -618,7 +618,8 @@ impl McpHost {
                     let mut restore = vec![];
                     for point in points {
                         let time = tuning::field(&point, "time")?.and_then(Value::as_f64).unwrap_or(f64::NAN);
-                        if time >= payload["from"].as_f64().unwrap() && time <= payload["to"].as_f64().unwrap() {
+                        // What Live's delete_events_in_range took: from up to, not including, to.
+                        if time >= payload["from"].as_f64().unwrap() && time < payload["to"].as_f64().unwrap() {
                             restore.push(point);
                         }
                     }

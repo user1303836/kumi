@@ -275,7 +275,8 @@ impl DeterministicLiveSimulator {
                             return Err(LiveError::range_error("from/to are invalid"));
                         }
                         let before = envelope.len();
-                        envelope.retain(|p| p["time"].as_f64().is_some_and(|v| v < from || v > to));
+                        // Live's delete_events_in_range: from up to, not including, to.
+                        envelope.retain(|p| p["time"].as_f64().is_some_and(|v| v < from || v >= to));
                         json!({"deleted":before-envelope.len()})
                     }
                     _ => unreachable!(),
