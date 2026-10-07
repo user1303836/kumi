@@ -319,7 +319,8 @@ class RemoteScriptTests(unittest.TestCase):
     def test_the_owner_checks_are_asked_about_the_configs_files_together(self):
         package = __import__("AbletonMcpBridge")
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory); config = root / "bridge-config.json"; secret = root / "secret"; log = root / "logs" / "bridge.log"
+            # Resolved: a Mac's temporary folder is under /var, a symlink, and the batch follows none.
+            root = Path(directory).resolve(); config = root / "bridge-config.json"; secret = root / "secret"; log = root / "logs" / "bridge.log"
             bridge = {"host": "127.0.0.1", "port": 9765, "secretFile": str(secret), "timeoutMs": 5000, "diagnostics": {"path": str(log), "maxBytes": remote_module._DIAGNOSTICS_MAX_BYTES}}
             config.write_text(json.dumps({"version": 2, "server": {"command": "kumi-bridge", "args": []}, "bridge": bridge}), encoding="utf-8")
             reference = root / "bridge-reference.json"; reference.write_text(json.dumps({"config": str(config)}), encoding="utf-8")
@@ -347,7 +348,7 @@ class RemoteScriptTests(unittest.TestCase):
             return types.SimpleNamespace(returncode=package._ACL_ANSWERED)
         shares = ["//host/share/x", "\\\\host\\share\\x", "/\\host\\share\\x", "\\\\?\\UNC\\host\\share\\x", "\\\\.\\UNC\\host\\share\\x", "\\??\\UNC\\host\\share\\x"]
         with tempfile.TemporaryDirectory() as directory, patch("os.stat", guarded(os.stat)), patch("io.open", guarded(io.open)), patch("AbletonMcpBridge.subprocess.run", run), patch.dict(package._ACL_VERDICTS, clear=True):
-            root = Path(directory); config = root / "bridge-config.json"; reference = root / "bridge-reference.json"; secret = root / "secret"; log = root / "logs" / "bridge.log"
+            root = Path(directory).resolve(); config = root / "bridge-config.json"; reference = root / "bridge-reference.json"; secret = root / "secret"; log = root / "logs" / "bridge.log"
             secret.write_text("x", encoding="utf-8")
             def write(secret_file, log_file, config_file=config):
                 bridge = {"host": "127.0.0.1", "port": 9765, "secretFile": str(secret_file), "timeoutMs": 5000, "diagnostics": {"path": str(log_file), "maxBytes": remote_module._DIAGNOSTICS_MAX_BYTES}}
@@ -371,7 +372,7 @@ class RemoteScriptTests(unittest.TestCase):
         # one first (to a share, say).
         package = __import__("AbletonMcpBridge")
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory); config = root / "bridge-config.json"; secret = root / "secret"; log = root / "logs" / "bridge.log"; reference = root / "reference.json"
+            root = Path(directory).resolve(); config = root / "bridge-config.json"; secret = root / "secret"; log = root / "logs" / "bridge.log"; reference = root / "reference.json"
             bridge = {"host": "127.0.0.1", "port": 9765, "secretFile": str(root / "secret-link"), "timeoutMs": 5000, "diagnostics": {"path": str(log), "maxBytes": remote_module._DIAGNOSTICS_MAX_BYTES}}
             config.write_text(json.dumps({"version": 2, "server": {"command": "kumi-bridge", "args": []}, "bridge": bridge}), encoding="utf-8")
             secret.write_text("x", encoding="utf-8"); reference.write_text(json.dumps({"config": str(config)}), encoding="utf-8")
@@ -383,6 +384,35 @@ class RemoteScriptTests(unittest.TestCase):
             self.assertEqual(package._config_paths(reference), [reference, config, log, log.parent])
             reference.write_text(json.dumps({"config": str(root / "config-link")}), encoding="utf-8")
             self.assertEqual(package._config_paths(reference), [reference])
+
+    def test_the_owner_checks_batch_follows_no_linked_folder_on_the_way(self):
+        # A config another account can write may name a file under a folder that links elsewhere (on Windows, to a
+        # share): the batch reads no further than the link, leaving the file to its own check.
+        package = __import__("AbletonMcpBridge")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve(); config = root / "bridge-config.json"; log = root / "logs" / "bridge.log"; reference = root / "bridge-reference.json"
+            (root / "elsewhere").mkdir(); (root / "elsewhere" / "secret").write_text("x", encoding="utf-8")
+            def write(secret_file, config_file=config):
+                bridge = {"host": "127.0.0.1", "port": 9765, "secretFile": str(secret_file), "timeoutMs": 5000, "diagnostics": {"path": str(log), "maxBytes": remote_module._DIAGNOSTICS_MAX_BYTES}}
+                config.write_text(json.dumps({"version": 2, "server": {"command": "kumi-bridge", "args": []}, "bridge": bridge}), encoding="utf-8")
+                reference.write_text(json.dumps({"config": str(config_file)}), encoding="utf-8")
+            links = []
+            try:
+                (root / "linked").symlink_to(root / "elsewhere", target_is_directory=True); links.append(root / "linked")
+            except OSError:
+                pass
+            if os.name == "nt":
+                import _winapi
+                _winapi.CreateJunction(str(root / "elsewhere"), str(root / "junction")); links.append(root / "junction")
+            if not links:
+                self.skipTest("this account can't make a linked folder")
+            write(root / "elsewhere" / "secret")
+            self.assertEqual(package._config_paths(reference), [reference, config, root / "elsewhere" / "secret", log, log.parent])
+            for link in links:
+                write(link / "secret"); self.assertEqual(package._config_paths(reference), [reference, config, log, log.parent], link)
+                write(link / "secret", link / "config.json"); self.assertEqual(package._config_paths(reference), [reference], link)
+                self.assertFalse(package._no_link_on_the_way(link / "missing" / "deeper"), link)
+            self.assertTrue(package._no_link_on_the_way(root / "missing" / "deeper"), "a part that isn't there ends the way")
 
     def test_owner_verdicts_past_their_time_go_when_one_is_kept(self):
         # The diagnostics log's key changes as it grows, and its owner is checked once a minute for as long as Live runs.

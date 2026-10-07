@@ -83,13 +83,29 @@ def _local_path(path: Path) -> bool:
     return path.is_absolute() and not str(path).replace("/", "\\").startswith(("\\\\", "\\??\\"))
 
 
+def _no_link_on_the_way(path: Path) -> bool:
+    """Whether path, and each folder above it, is reached without following a link: a symlink, or on Windows a
+    junction or other name-surrogate reparse point (a cloud file's isn't one). os.lstat reads each from the root down
+    without following it, so nothing past the first link is touched. A part that isn't there ends the way."""
+    try:
+        for step in reversed((path, *path.parents)):
+            found = os.lstat(step)
+            if stat.S_ISLNK(found.st_mode) or getattr(found, "st_reparse_tag", 0) & 0x20000000:
+                return False
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def _config_paths(reference: Path) -> list[Path]:
     """The files _read_config checks the owner of, as far as they can be read now: its checks then find their
     verdicts waiting, one PowerShell run in all on Windows instead of one each. Nothing in them is trusted until those
-    checks pass, so no symlink is followed (they refuse one anyway) and a path that isn't a _local_path isn't touched
-    at all, left to its own check: a reference or config another account can write mustn't have Live contact a host
-    it names."""
-    looked_at = lambda path: _local_path(path) and not path.is_symlink()
+    checks pass, so no link is followed, at the path or a folder above it (the checks refuse a linked file anyway), and
+    a path that isn't a _local_path isn't touched at all, left to its own check: a reference or config another
+    account can write mustn't have Live contact a host it names."""
+    looked_at = lambda path: _local_path(path) and _no_link_on_the_way(path)
     paths: list[Path] = []
     try:
         if not looked_at(reference): return paths
