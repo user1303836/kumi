@@ -312,6 +312,56 @@ static MIX_OR_OUTPUT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^(mix|
 static MIDI_FUNCTION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?-u:\b)function\s+midi\s*\(").unwrap());
 static COMMENTS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"//[^\n]*|/\*[\s\S]*?\*/").unwrap());
 
+/// The source text of a function, by the intrinsic captured before anything else runs, in a context where no code is
+/// made from strings: what [`whole_body`] reads the device's function back with.
+const SOURCE_OF: &str = r#"(() => {
+  const toString = Function.prototype.toString;
+  const apply = Reflect.apply;
+  const refuse = function () { throw new EvalError("Code generation from strings disallowed for this context"); };
+  for (const sample of [function () {}, function* () {}, async function () {}, async function* () {}]) {
+    Object.defineProperty(Object.getPrototypeOf(sample), "constructor", { value: refuse, writable: false, configurable: false });
+  }
+  globalThis.eval = refuse;
+  globalThis.Function = refuse;
+  return (f) => apply(toString, f, []);
+})()"#;
+
+/// Whether the code is one whole function body, as the frame needs: the frame puts it inside a function of its own,
+/// within the scope that hides Max and Live, so code that closed that function early (opening another for the frame's
+/// tail) would run outside every name the frame hides. Read alone inside a strict function, in a context of its own,
+/// the function has to come back holding all of it. HTML-like comments are refused first: Live's V8 reads `<!--` and
+/// `-->` as comments in a script and QuickJS doesn't, so the two could read the braces differently.
+fn whole_body(code: &str) -> Option<String> {
+    if code.contains("<!--") || code.contains("-->") {
+        return Some("code: \"<!--\" and \"-->\" aren't allowed: Live reads them as comments, which can change what the code is.".into());
+    }
+    let wrapped = format!("function(){{\"use strict\";\n{code}\n}}");
+    let read = (|| -> rquickjs::Result<Option<String>> {
+        let runtime = rquickjs::Runtime::new()?;
+        runtime.set_memory_limit(64 * 1024 * 1024);
+        let until = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        runtime.set_interrupt_handler(Some(Box::new(move || std::time::Instant::now() > until)));
+        let context = rquickjs::Context::full(&runtime)?;
+        context.with(|ctx| {
+            let source: rquickjs::Function = ctx.eval(SOURCE_OF)?;
+            let mut options = rquickjs::context::EvalOptions::default();
+            options.strict = false;
+            let value: rquickjs::Value = ctx.eval_with_options(format!("({wrapped})"), options)?;
+            if !value.is_function() {
+                return Ok(None);
+            }
+            Ok(Some(source.call::<_, String>((value,))?))
+        })
+    })();
+    match read {
+        Ok(Some(text)) if text == wrapped => None,
+        Ok(_) => Some("code: it has to be one function's body: a } in it closes the device's function early.".into()),
+        Err(_) => {
+            Some("code: it doesn't read as one function's body (a brace, quote or bracket that isn't closed, or one too many).".into())
+        }
+    }
+}
+
 /// What the device's code may not reach: files, the network, the rest of Max and Live, and the
 /// frame's own plumbing (it sends through send and pass, and times through after, so no note is
 /// left hanging). The frame also hides these names from the code; the check says why up front.
@@ -519,6 +569,7 @@ pub fn check_spec(input: &Map<String, Value>) -> Result<DeviceSpec, Vec<String>>
                 problems.push(format!("code: \"{}\" isn't allowed: {why}.", trim(found.as_str())));
             }
         }
+        problems.extend(whole_body(&code));
     }
     // Only a MIDI effect's code runs outside Live; an audio effect or instrument is heard with audition once loaded.
     let tests: Vec<Value> = match input.get("tests") {

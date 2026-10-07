@@ -199,6 +199,17 @@ fn the_devices_code_cant_reach_files_the_network_or_max_and_live_the_frame_hides
     assert!(matches(&refused.join(" "), "can't make code"));
     // Ordinary names are fine: Math.max, a helper called parse, a class.
     assert!(check_spec(&with(lowest(), json!({ "code": "class Voice { constructor(p) { this.p = p; } }\nconst parse = (x) => Math.max(0, x);\nfunction midi(event) { pass(event); }" }))).is_ok());
+    // The code is one function's body, as the frame needs: code that closes the device's function early, or leaves a
+    // brace open, is refused whatever names it uses, and so are HTML-like comments, which Live reads as comments.
+    let refused = |code: &str| problems_of(check_spec(&with(lowest(), json!({ "code": code })))).join(" ");
+    assert!(matches(
+        &refused("function midi(event) { pass(event); }\n})();\nconst outside = 1;\n(function () {"),
+        "closes the device's function early"
+    ));
+    assert!(matches(&refused("function midi(event) { pass(event);"), "doesn't read as one function's body"));
+    assert!(matches(&refused("function midi(event) { pass(event); }\n<!-- a note -->"), "Live reads them as comments"));
+    // A brace in a string or a comment is only text.
+    assert!(check_spec(&with(lowest(), json!({ "code": "const close = \"})();\"; // }\nfunction midi(event) { pass(event); }" }))).is_ok());
 }
 
 #[test]
@@ -261,8 +272,9 @@ fn kumi_runs_the_devices_tests_and_its_own_checks_a_working_device_passes_a_brok
         "expect": [{ "type": "noteon", "pitch": 60, "at": 15 }, { "type": "noteoff", "pitch": 60, "at": 90 }] }] }),
     ));
     assert_eq!(zero.problems, Vec::<String>::new());
-    let broken = check_midi_device(&spec(json!({ "code": "function midi(event) { pass(event) ", "tests": [] })));
-    assert!(matches(&broken.problems.join(" "), "the code doesn't run"), "{:?}", broken.problems);
+    // Code that doesn't read is refused before it's run: it isn't one function's body.
+    let broken = problems_of(check_spec(&with(lowest(), json!({ "code": "function midi(event) { pass(event) ", "tests": [] }))));
+    assert!(matches(&broken.join(" "), "doesn't read as one function's body"), "{broken:?}");
     // In Kumi's own process too, where nothing else would end it.
     let flooded = check_midi_device(&spec(
         json!({ "code": "function midi(event) { for (;;) send({ type: 'cc', controller: 1, value: 1 }); }", "tests": [] }),
