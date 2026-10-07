@@ -148,6 +148,36 @@ fn preview_change_payloads_match_source() {
     }
 }
 #[tokio::test]
+async fn a_mutation_that_panics_leaves_its_transaction_free_to_try_again() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let adapter = Rc::new(Adapter::new(&json!({})));
+            let host = Rc::new(McpHost::new(adapter, McpHostOptions::default()).unwrap());
+            let args = json!({"transactionId":"transaction-1","idempotencyKey":"key-1234"});
+            // It yields first, so the panic comes inside the flight's task.
+            let panics = |_: Option<Signal>| async {
+                tokio::task::yield_now().await;
+                if args_are_fine() {
+                    panic!("the operation panics");
+                }
+                Ok::<_, LiveError>(None)
+            };
+            let first = host.single_flight_mutation("tool", &json!(1), &args, panics, None).await;
+            assert!(first.is_err(), "{first:?}");
+            assert_eq!(host.active_async_operations(), 0);
+            // The same request runs again, rather than joining the dead flight or finding the transaction in flight.
+            let answers = |_: Option<Signal>| async {
+                Ok(Some(json!({"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{}"}],"isError":false}})))
+            };
+            let second = host.single_flight_mutation("tool", &json!(2), &args, answers, None).await;
+            assert!(second.as_ref().is_ok_and(Option::is_some), "{second:?}");
+        })
+        .await;
+}
+fn args_are_fine() -> bool {
+    true
+}
+#[tokio::test]
 async fn shared_mutation_waiters_cancellation_conflicts_and_retirement_match_source() {
     tokio::task::LocalSet::new().run_until(async{
  for row in fixture()["flights"].as_array().unwrap(){

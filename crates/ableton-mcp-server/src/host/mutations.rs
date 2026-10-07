@@ -16,6 +16,27 @@ pub(super) struct MutationFlight {
     settled: Cell<bool>,
     promise: Shared<LocalBoxFuture<'static, MutationOutcome>>,
 }
+/// What a flight marks while its operation runs, cleared however the flight ends: an operation that panics would
+/// otherwise leave its transaction in flight for good (so finalization refuses it) and its flight joinable.
+struct FlightCleanup {
+    host: Rc<McpHost>,
+    flight: Rc<MutationFlight>,
+    identity: String,
+    transaction_id: Option<String>,
+}
+impl Drop for FlightCleanup {
+    fn drop(&mut self) {
+        let host = &self.host;
+        host.active_async_operations.set(host.active_async_operations.get() - 1);
+        self.flight.settled.set(true);
+        if let Some(id) = &self.transaction_id {
+            retention::clear_in_flight(id);
+        }
+        if host.in_flight_mutations.borrow().get(&self.identity).is_some_and(|flight| Rc::ptr_eq(flight, &self.flight)) {
+            host.in_flight_mutations.borrow_mut().remove(&self.identity);
+        }
+    }
+}
 struct Waiter(Rc<MutationFlight>);
 impl Drop for Waiter {
     fn drop(&mut self) {
@@ -229,8 +250,13 @@ impl McpHost {
                 retention::mark_in_flight(id);
             }
             self.active_async_operations.set(self.active_async_operations.get() + 1);
+            let cleanup = FlightCleanup {
+                host: self.clone(),
+                flight: flight.clone(),
+                identity: identity.clone(),
+                transaction_id: transaction_id.clone(),
+            };
             let host = self.clone();
-            let owned = flight.clone();
             let mut operation = execute(Some(signal)).boxed_local();
             // Calling an async JavaScript function runs its first synchronous stretch immediately.
             let immediate = operation.as_mut().now_or_never();
@@ -255,14 +281,7 @@ impl McpHost {
                             .await;
                     }
                 }
-                host.active_async_operations.set(host.active_async_operations.get() - 1);
-                owned.settled.set(true);
-                if let Some(id) = &transaction_id {
-                    retention::clear_in_flight(id);
-                }
-                if host.in_flight_mutations.borrow().get(&identity).is_some_and(|flight| Rc::ptr_eq(flight, &owned)) {
-                    host.in_flight_mutations.borrow_mut().remove(&identity);
-                }
+                drop(cleanup);
                 let _ = send.send(outcome);
             });
             flight
