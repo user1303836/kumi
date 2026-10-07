@@ -345,9 +345,11 @@ mod tests {
         let line = format!("{}\u{1f600}{}", "a".repeat(1999), "b".repeat(4500));
         let cut: Vec<String> = (0..6501).step_by(2000).map(|at| slice(&line, at, Some(at + 2000))).collect();
         assert_eq!(lines_of(&format!("x\r\n{line}\nz")), [vec!["x".to_owned()], cut, vec!["z".to_owned()]].concat());
-        // A line of 2M units is encoded once, not once for each of its thousand pieces.
+        // A line of 4M units is encoded once, not once for each of its 2000 pieces (a debug build took 27 s for half
+        // as long a line that way). The budget is wide for a loaded runner.
         let start = std::time::Instant::now();
-        assert_eq!(lines_of(&"\u{e9}".repeat(2_000_000)).len(), 1000);
-        assert!(start.elapsed().as_millis() < 2_000, "{} ms", start.elapsed().as_millis());
+        assert_eq!(lines_of(&"\u{e9}".repeat(4_000_000)).len(), 2000);
+        let budget = if cfg!(debug_assertions) { 10_000 } else { 4_000 };
+        assert!(start.elapsed().as_millis() < budget, "{} ms", start.elapsed().as_millis());
     }
 }
