@@ -68,31 +68,29 @@ pub enum Window {
 }
 type WindowCache = HashMap<(usize, Window), Arc<Vec<f64>>>;
 static WINDOWS: LazyLock<Mutex<WindowCache>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-/// A Hann window (or Blackman–Harris, for finding partials), normalized so its sum is 1.
+/// A Hann window (or Blackman–Harris, for finding partials), normalized so its sum is 1. The FFT sizes' are kept;
+/// one cut to a short sound's length is made for it alone, or there'd be one kept for every length heard.
 pub fn window(size: usize, kind: Window) -> Arc<Vec<f64>> {
-    WINDOWS
-        .lock()
-        .unwrap()
-        .entry((size, kind))
-        .or_insert_with(|| {
-            let mut values: Vec<_> = (0..size)
-                .map(|index| {
-                    let phase = 2.0 * PI * index as f64 / (size as f64 - 1.0);
-                    match kind {
-                        Window::Hann => 0.5 - 0.5 * phase.cos(),
-                        Window::BlackmanHarris => {
-                            0.35875 - 0.48829 * phase.cos() + 0.14128 * (2.0 * phase).cos() - 0.01168 * (3.0 * phase).cos()
-                        }
-                    }
-                })
-                .collect();
-            let sum: f64 = values.iter().sum();
-            for value in &mut values {
-                *value /= sum;
+    if !size.is_power_of_two() {
+        return Arc::new(window_values(size, kind));
+    }
+    WINDOWS.lock().unwrap().entry((size, kind)).or_insert_with(|| Arc::new(window_values(size, kind))).clone()
+}
+fn window_values(size: usize, kind: Window) -> Vec<f64> {
+    let mut values: Vec<_> = (0..size)
+        .map(|index| {
+            let phase = 2.0 * PI * index as f64 / (size as f64 - 1.0);
+            match kind {
+                Window::Hann => 0.5 - 0.5 * phase.cos(),
+                Window::BlackmanHarris => 0.35875 - 0.48829 * phase.cos() + 0.14128 * (2.0 * phase).cos() - 0.01168 * (3.0 * phase).cos(),
             }
-            Arc::new(values)
         })
-        .clone()
+        .collect();
+    let sum: f64 = values.iter().sum();
+    for value in &mut values {
+        *value /= sum;
+    }
+    values
 }
 /// A biquad filter (transposed direct form II) with its own state.
 #[derive(Clone, Debug)]
@@ -188,6 +186,15 @@ impl TruePeak {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_fft_sizes_windows_are_kept() {
+        let cut = window(1237, Window::BlackmanHarris);
+        assert_eq!(cut.len(), 1237);
+        assert!((cut.iter().sum::<f64>() - 1.0).abs() < 1e-9);
+        assert!(!WINDOWS.lock().unwrap().contains_key(&(1237, Window::BlackmanHarris)));
+        assert!(Arc::ptr_eq(&window(2048, Window::Hann), &window(2048, Window::Hann)));
+    }
 
     #[test]
     fn a_percentile_puts_nan_last() {
