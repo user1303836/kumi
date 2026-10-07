@@ -77,6 +77,10 @@ impl McpEndpoint for Fixture {
         let expected = &self.case["calls"][index];
         eq(&actual, expected, &format!("{} dispatch {index}", self.case["label"]));
         self.calls.set(index + 1);
+        // A file that goes away just as this call is answered (moved or deleted while Kumi works).
+        if let Some(gone) = self.case["config"]["removeAt"].as_object().filter(|at| at["call"].as_u64() == Some(index as u64)) {
+            let _ = std::fs::remove_file(gone["path"].as_str().unwrap());
+        }
         if self.case["config"]["cancelOn"].as_str() == Some(name) && !self.cancelled.replace(true) {
             if let Some(held) = &self.held_apply {
                 let reply = held.reply.borrow_mut().take().expect("one held apply");
@@ -195,7 +199,8 @@ async fn replay(chunk: usize, chunks: usize) {
     let generation = format!("chunk-{chunk:02}");
     EARS.with(|ears| *ears.borrow_mut() = std::env::temp_dir().join("kumi-ears").join(&generation));
     let folder = tempfile::tempdir().unwrap();
-    for kind in ["square", "noise", "silence"] {
+    // "vanishing" is a square wave a case can have taken away (removeAt).
+    for kind in ["square", "noise", "silence", "vanishing"] {
         wav(folder.path(), kind);
     }
     let source: Value = serde_json::from_str(include_str!("support/rendering-oracle.json")).unwrap();

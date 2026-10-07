@@ -185,7 +185,14 @@ impl Rendering {
             let mut snippet = request.clone();
             snippet.reference_from = Some(request.reference_from.unwrap_or(0.) + offset * 60. / tempo);
             snippet.reference_seconds = Some(beats * 60. / tempo);
-            let reference = self.heard_reference(named, &snippet, signal).await?;
+            // A stop or a failed read here leaves the rig as much as one before: it's taken down, as above.
+            let reference = match self.heard_reference(named, &snippet, signal).await {
+                Ok(reference) => reference,
+                Err(error) => {
+                    self.close_rig(rig).await;
+                    return Err(error);
+                }
+            };
             goal.screen = Some(Screen { from: rig.from + offset, beats, reference });
         }
         Ok(Ok(Rc::new(goal)))
