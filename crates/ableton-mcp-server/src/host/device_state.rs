@@ -92,16 +92,25 @@ pub fn write_device_state_file_atomically(target: &Path, file: &Value, overwrite
     if target_exists {
         fs::rename(&temporary, target).map_err(|e| crate::delivery::io_error(&e, "rename", &[&temporary, target]))?;
     } else {
-        fs::hard_link(&temporary, target).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::AlreadyExists {
-                LiveError::error("device-state snapshot target changed during save; retry")
-            } else {
-                crate::delivery::io_error(&e, "link", &[&temporary, target])
-            }
-        })?;
-        fs::remove_file(&temporary).map_err(|e| crate::delivery::io_error(&e, "unlink", &[&temporary]))?;
+        publish_new(&temporary, target, |from, to| fs::hard_link(from, to))?;
     }
     Ok(target_exists)
+}
+/// A first save goes in only if nothing is at the target: a hard link, which fails if something is. A volume without
+/// hard links (FAT32, exFAT, many SMB shares) gets a rename instead, once the target is seen to be still absent.
+fn publish_new(temporary: &Path, target: &Path, link: impl FnOnce(&Path, &Path) -> std::io::Result<()>) -> Result<(), LiveError> {
+    let changed = || LiveError::error("device-state snapshot target changed during save; retry");
+    match link(temporary, target) {
+        Ok(()) => fs::remove_file(temporary).map_err(|e| crate::delivery::io_error(&e, "unlink", &[temporary])),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(changed()),
+        Err(e) => match fs::symlink_metadata(target) {
+            Err(absent) if absent.kind() == std::io::ErrorKind::NotFound => {
+                fs::rename(temporary, target).map_err(|e| crate::delivery::io_error(&e, "rename", &[temporary, target]))
+            }
+            Ok(_) => Err(changed()),
+            Err(_) => Err(crate::delivery::io_error(&e, "link", &[temporary, target])),
+        },
+    }
 }
 impl McpHost {
     pub async fn dispatch_device_state_tool(&self, call: &ToolCall, signal: Option<&Signal>) -> Option<Result<Option<Value>, LiveError>> {
@@ -220,5 +229,25 @@ impl McpHost {
                 "Device-state recall may be uncertain; reconcile with the exact original idempotency key and do not retry blindly.",
             ),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn a_first_save_goes_in_where_the_volume_has_no_hard_links() {
+        let folder = tempfile::tempdir().unwrap();
+        let (temporary, target) = (folder.path().join("save.tmp"), folder.path().join("Bass.json"));
+        let unsupported = |_: &Path, _: &Path| Err(std::io::Error::from(std::io::ErrorKind::Unsupported));
+        fs::write(&temporary, b"{}").unwrap();
+        publish_new(&temporary, &target, unsupported).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"{}");
+        assert!(!temporary.exists());
+        // Something there by then still isn't replaced.
+        fs::write(&temporary, b"{\"new\":true}").unwrap();
+        let error = publish_new(&temporary, &target, unsupported).unwrap_err();
+        assert!(error.message().contains("changed during save"), "{}", error.message());
+        assert_eq!(fs::read(&target).unwrap(), b"{}");
     }
 }
