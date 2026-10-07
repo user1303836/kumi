@@ -17695,7 +17695,10 @@ var ExtensionServer = class {
     for (let index = buffer.indexOf(10); index >= 0; index = buffer.indexOf(10)) {
       const line = buffer.subarray(0, index);
       buffer = buffer.subarray(index + 1);
-      if (line.length > 0) void this.onFrame(connection, line.toString("utf8"));
+      if (line.length > 0) this.onFrame(connection, line.toString("utf8")).catch((error) => {
+        this.log(`a request failed unexpectedly: ${error instanceof Error ? error.message : String(error)}`);
+        this.error(connection, "invalid", "request failed");
+      });
     }
     if (buffer.length > 0) {
       connection.pieces.push(buffer);
@@ -17710,6 +17713,10 @@ var ExtensionServer = class {
     try {
       request = JSON.parse(text);
     } catch {
+      this.error(connection, "invalid", "malformed request");
+      return;
+    }
+    if (typeof request !== "object" || request === null || Array.isArray(request)) {
       this.error(connection, "invalid", "malformed request");
       return;
     }

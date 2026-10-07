@@ -41,7 +41,7 @@ async function connect() {
     return waitFor(() => frames.find((frame) => frame.id === id));
   };
   const invoke = async (operation, args) => { const response = await send({ method: "invoke", operation, args }); if (!response.ok) throw new Error(response.error); return response.result; };
-  return { socket, hello, events, send, invoke, mac, close: () => socket.destroy() };
+  return { socket, hello, frames, events, send, invoke, mac, close: () => socket.destroy() };
 }
 
 before(async () => {
@@ -90,6 +90,16 @@ test("unsigned, replayed and unknown requests are refused", async () => {
   assert.match((await client.send({ method: "invoke", operation: "tempo.set", args: {} })).error, /unavailable on the Extensions channel/);
   assert.match((await client.send({ method: "invoke", operation: "render.offline", args: { trackRef: "1:track:2" } })).error, /required by registry/);
   assert.match((await client.send({ method: "invoke", operation: "render.offline", args: { trackRef: "1:track:2", fromBeat: 0, toBeat: 4 } })).error, /expectedName is required/);
+  client.close();
+});
+
+test("a line that isn't a request object is refused, and the host keeps serving", async () => {
+  // Any local process can write to the port: `null` threw outside every catch and ended the whole host.
+  const client = await connect();
+  for (const line of ["null", "[]", "42", "\"text\""]) client.socket.write(`${line}\n`);
+  const refused = await waitFor(() => { const found = client.frames.filter((frame) => frame.id === "invalid"); return found.length >= 4 && found; });
+  assert.ok(refused.every((frame) => frame.ok === false));
+  assert.equal((await client.send({ method: "status" })).ok, true);
   client.close();
 });
 

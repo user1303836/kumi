@@ -79,7 +79,11 @@ export class ExtensionServer {
     let buffer = Buffer.concat(connection.pieces); connection.pieces = []; connection.buffered = 0;
     for (let index = buffer.indexOf(10); index >= 0; index = buffer.indexOf(10)) {
       const line = buffer.subarray(0, index); buffer = buffer.subarray(index + 1);
-      if (line.length > 0) void this.onFrame(connection, line.toString("utf8"));
+      // Nothing a frame does may reject unhandled: Node would end the whole Extension Host for it.
+      if (line.length > 0) this.onFrame(connection, line.toString("utf8")).catch((error: unknown) => {
+        this.log(`a request failed unexpectedly: ${error instanceof Error ? error.message : String(error)}`);
+        this.error(connection, "invalid", "request failed");
+      });
     }
     if (buffer.length > 0) { connection.pieces.push(buffer); connection.buffered = buffer.length; }
   }
@@ -91,6 +95,8 @@ export class ExtensionServer {
   private async onFrame(connection: Connection, text: string): Promise<void> {
     let request: Record<string, unknown>;
     try { request = JSON.parse(text) as Record<string, unknown>; } catch { this.error(connection, "invalid", "malformed request"); return; }
+    // Only an object can be a request (Object.keys(null) throws).
+    if (typeof request !== "object" || request === null || Array.isArray(request)) { this.error(connection, "invalid", "malformed request"); return; }
     const keys = Object.keys(request);
     const now = Date.now();
     if (!REQUIRED.every((key) => keys.includes(key)) || keys.some((key) => !REQUIRED.includes(key) && !OPTIONAL.includes(key))
