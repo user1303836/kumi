@@ -7374,7 +7374,8 @@ class _BridgeSocketFixture:
 class AbsoluteFilePathTests(unittest.TestCase):
     def test_a_file_path_is_one_live_can_open_as_it_stands(self):
         accepted = ["/Users/me/Kick.wav", "C:\\Users\\me\\Kick.wav", "c:/Users/me/Kick.wav", "\\\\nas\\home\\AppData\\Kumi\\staging\\Kick.wav"]
-        refused = ["C:Kick.wav", "Kick.wav", "\\\\?\\C:\\Kick.wav", "\\\\.\\pipe\\x", "\\\\", "", "/" * 1025, 7, None, "1:\\Kick.wav"]
+        refused = ["C:Kick.wav", "Kick.wav", "\\\\?\\C:\\Kick.wav", "\\\\.\\pipe\\x", "\\\\", "", "/" * 1025, 7, None, "1:\\Kick.wav",
+                   "//./pipe/x", "//?/C:/Kick.wav", "/\\.\\pipe\\x", "\\/server/share", "\u00df:\\Kick.wav"]
         self.assertEqual([remote_module._absolute_file_path(path) for path in accepted], [True] * len(accepted))
         self.assertEqual([remote_module._absolute_file_path(path) for path in refused], [False] * len(refused))
 

@@ -363,9 +363,10 @@ def _absolute_file_path(path: Any) -> bool:
     root (X:\... or X:/...), or on a share (\\server\share\..., where a redirected AppData keeps the bridge's staged
     files). Not drive-relative (C:foo, from the drive's current folder) nor a device namespace (\\?\, \\.\)."""
     if not isinstance(path, str) or not 1 <= len(path) <= 1024: return False
+    # Two separators, in any spelling, are a share only as \\server: //./pipe, //?/C: and /\.\ are device namespaces.
+    if len(path) > 1 and path[0] in "\\/" and path[1] in "\\/": return path[:2] == "\\\\" and len(path) > 2 and path[2] not in "\\/?."
     if path.startswith("/"): return True
-    if len(path) > 2 and "A" <= path[0].upper() <= "Z" and path[1] == ":" and path[2] in "\\/": return True
-    return path.startswith("\\\\") and len(path) > 2 and path[2] not in "\\/?."
+    return len(path) > 2 and path[0].isascii() and path[0].isalpha() and path[1] == ":" and path[2] in "\\/"
 
 
 def _sets_input_from_main(code: Any) -> bool:
