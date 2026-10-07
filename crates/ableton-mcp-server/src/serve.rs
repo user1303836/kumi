@@ -58,7 +58,9 @@ pub async fn serve<I: AsyncRead + 'static, O: AsyncWrite + 'static, D: AsyncWrit
                     Ok(Ok(value)) => Ok(value.map(|v| stringify(&v))),
                     _ => {
                         diagnostics.lock().await.write_all(b"mcp-host: internal fault\n").await.map_err(|e| e.to_string())?;
-                        Ok(Some(stringify(&error(&Value::Null, -32603, "Internal error", None))))
+                        // The stdio layer answers it under the request's own id ("Internal error"): Kumi waits for
+                        // that id, and would sit out its timeout on an answer to null.
+                        Err("internal fault".into())
                     }
                 }
             }

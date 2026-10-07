@@ -513,6 +513,102 @@ async fn stdio_contains_delayed_handler_rejection_and_correlates_it_to_its_own_r
     .await;
 }
 
+/// Live's status, until `fault` is set: then a panic inside the bridge.
+struct Faulting {
+    fault: Cell<bool>,
+}
+impl ableton_mcp_server::live::LiveAdapter for Faulting {
+    fn status(&self) -> Result<ableton_mcp_server::live::LiveStatus, ableton_mcp_server::live::LiveError> {
+        assert!(!self.fault.get(), "a fault inside the bridge");
+        ableton_mcp_server::live::UnavailableLiveAdapter.status()
+    }
+    fn snapshot(&self) -> Result<ableton_mcp_server::live::LiveSnapshot, ableton_mcp_server::live::LiveError> {
+        ableton_mcp_server::live::UnavailableLiveAdapter.snapshot()
+    }
+    fn get(&self, r: &ableton_mcp_server::live::LiveRef) -> Result<Option<Value>, ableton_mcp_server::live::LiveError> {
+        ableton_mcp_server::live::UnavailableLiveAdapter.get(r)
+    }
+    fn invoke(&self, i: &ableton_mcp_server::live::LiveInvocation) -> Result<Value, ableton_mcp_server::live::LiveError> {
+        ableton_mcp_server::live::UnavailableLiveAdapter.invoke(i)
+    }
+    fn subscribe(
+        &self,
+        l: ableton_mcp_server::live::LiveListener,
+    ) -> Result<ableton_mcp_server::live::Unsubscribe, ableton_mcp_server::live::LiveError> {
+        ableton_mcp_server::live::UnavailableLiveAdapter.subscribe(l)
+    }
+    fn reconnect(&self) -> Result<ableton_mcp_server::live::LiveStatus, ableton_mcp_server::live::LiveError> {
+        self.status()
+    }
+}
+#[async_trait::async_trait(?Send)]
+impl ableton_mcp_server::live::AsyncLiveAdapter for Faulting {
+    async fn snapshot_async(
+        &self,
+        c: Option<&ableton_mcp_server::live::LiveOperationContext>,
+        r: Option<&ableton_mcp_server::live::LiveSnapshotRequest>,
+    ) -> Result<ableton_mcp_server::live::LiveSnapshot, ableton_mcp_server::live::LiveError> {
+        ableton_mcp_server::live::UnavailableLiveAdapter.snapshot_async(c, r).await
+    }
+    async fn discover_async(
+        &self,
+        r: &ableton_mcp_server::live::LiveDiscoveryRequest,
+        c: Option<&ableton_mcp_server::live::LiveOperationContext>,
+    ) -> Result<ableton_mcp_server::live::LiveDiscoveryResult, ableton_mcp_server::live::LiveError> {
+        ableton_mcp_server::live::UnavailableLiveAdapter.discover_async(r, c).await
+    }
+    async fn get_async(
+        &self,
+        r: &ableton_mcp_server::live::LiveRef,
+        c: Option<&ableton_mcp_server::live::LiveOperationContext>,
+    ) -> Result<Option<Value>, ableton_mcp_server::live::LiveError> {
+        ableton_mcp_server::live::UnavailableLiveAdapter.get_async(r, c).await
+    }
+    async fn invoke_async(
+        &self,
+        i: &ableton_mcp_server::live::LiveInvocation,
+        c: Option<&ableton_mcp_server::live::LiveOperationContext>,
+    ) -> Result<Value, ableton_mcp_server::live::LiveError> {
+        ableton_mcp_server::live::UnavailableLiveAdapter.invoke_async(i, c).await
+    }
+    async fn reconnect_async(
+        &self,
+        _: Option<&ableton_mcp_server::live::LiveOperationContext>,
+    ) -> Result<ableton_mcp_server::live::LiveStatus, ableton_mcp_server::live::LiveError> {
+        ableton_mcp_server::live::LiveAdapter::status(self)
+    }
+    async fn close(&self) -> Result<(), ableton_mcp_server::live::LiveError> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn a_fault_inside_the_bridge_is_answered_under_the_requests_own_id() {
+    local(async {
+        let (input, reader) = Pipe::new();
+        let (output, writer) = WriterHandle::new();
+        let (_diagnostics, log) = WriterHandle::new();
+        let adapter = Rc::new(Faulting { fault: Cell::new(false) });
+        let served: Rc<dyn ableton_mcp_server::live::AsyncLiveAdapter> = adapter.clone();
+        let done = spawn_local(ableton_mcp_server::serve::serve(reader, writer, log, Some(served), Default::default()));
+        input.write(&format!(
+            "{}\n{}\n",
+            json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"})
+        ));
+        until(|| output.received().iter().any(|line| id_of(line) == 1)).await;
+        adapter.fault.set(true);
+        input.write(&format!("{}\n", json!({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"live_status","arguments":{}}})));
+        until(|| output.received().iter().any(|line| id_of(line) == 7)).await;
+        let answer = output.received().iter().map(|line| parse(line)).find(|frame| frame["id"] == 7).unwrap();
+        assert_eq!(answer["error"], json!({"code":-32603,"message":"Internal error"}), "{answer}");
+        assert!(!output.received().iter().any(|line| parse(line)["id"].is_null()), "an answer to null");
+        input.end();
+        let _ = done.await;
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn stdio_refuses_an_in_flight_bound_outside_1_to_64() {
     local(async {
