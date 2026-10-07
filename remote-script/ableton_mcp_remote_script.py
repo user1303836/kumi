@@ -3965,10 +3965,29 @@ class LiveObjectMapper:
     def _capture_authority_revision(self) -> str:
         """Byte for byte the host's captureAuthorityRevision (and the simulator's): the host previews a
         capture with it, so any other formula refused every capture as changed since preview. Clips are
-        bound by identity and note content, not playback state, so it holds while Live plays."""
-        snapshot = self.snapshot()
-        authority = {"tracks": [{"ref": track.get("ref"), "objectIdentity": track.get("objectIdentity"), "clips": [{"ref": clip.get("ref"), "objectIdentity": clip.get("objectIdentity"), "notesRevision": clip.get("notesRevision")} for clip in track.get("clips", [])]} for track in snapshot.get("tracks", [])],
-                     "scenes": [{"ref": scene.get("ref"), "objectIdentity": scene.get("objectIdentity"), "index": scene.get("index")} for scene in snapshot.get("scenes", [])], "playbackRevision": snapshot.get("playback", {}).get("revision")}
+        bound by identity and note content, not playback state, so it holds while Live plays.
+
+        The fields are read directly (each track's and Session clip's identity, each clip's notes, the
+        scenes, the playback revision), as a whole-Set snapshot's rows give them, without building the rest
+        of it; a snapshot the shared read already holds is used as it is."""
+        cache = self._read_cache
+        snapshot = cache.get("snapshot") if cache is not None else None
+        if snapshot is not None:
+            tracks = [{"ref": track.get("ref"), "objectIdentity": track.get("objectIdentity"), "clips": [{"ref": clip.get("ref"), "objectIdentity": clip.get("objectIdentity"), "notesRevision": clip.get("notesRevision")} for clip in track.get("clips", [])]} for track in snapshot.get("tracks", [])]
+            scenes = [{"ref": scene.get("ref"), "objectIdentity": scene.get("objectIdentity"), "index": scene.get("index")} for scene in snapshot.get("scenes", [])]
+            playback = snapshot.get("playback", {}).get("revision")
+        else:
+            tracks = []
+            for index, (track, _) in enumerate(self._track_entries(kinds=False)):
+                clips = []
+                for slot_index, slot in enumerate(self._items(getattr(track, "clip_slots", []))):
+                    clip = getattr(slot, "clip", None)
+                    if clip is None: continue
+                    clips.append({"ref": self.refs.put("clip", clip, f"{index}:{slot_index}"), "objectIdentity": self._capture_object_identity(clip), "notesRevision": hashlib.sha256(self._bounded_canonical(self._read_notes(clip)).encode("utf-8")).hexdigest()})
+                tracks.append({"ref": self.refs.put("track", track, str(index)), "objectIdentity": self._capture_object_identity(track), "clips": clips})
+            scenes = [{"ref": self.refs.put("scene", scene, str(index)), "objectIdentity": self._capture_object_identity(scene), "index": index} for index, scene in enumerate(self._items(getattr(self.song, "scenes", [])))]
+            playback = self._playback()["revision"]
+        authority = {"tracks": tracks, "scenes": scenes, "playbackRevision": playback}
         return hashlib.sha256(self._bounded_canonical(authority).encode("utf-8")).hexdigest()
 
     def _capture_midi(self, args: dict[str, Any]) -> dict[str, Any]:

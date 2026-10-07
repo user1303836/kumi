@@ -1371,23 +1371,25 @@ class ControlSurfaceTests(unittest.TestCase):
         mapper = LiveObjectMapper(song); result = mapper.invoke("scene.capture", {"expectedStateRevision": mapper._capture_authority_revision()})
         self.assertIs(mapper.refs.get(result["ref"]), created); self.assertEqual(result["objectIdentity"], mapper._capture_object_identity(created))
 
-    def test_scene_capture_authority_refuses_truncated_warp_markers(self):
+    def test_a_capture_previews_from_rows_that_refuse_truncated_warp_markers(self):
         class Marker:
             def __init__(self, value): self.beat_time = value; self.sample_time = value * 100.0
         song = FakeSong(); clip = FakeClip(4.0); clip.warp_markers = [Marker(float(index)) for index in range(257)]; song.tracks[0].clip_slots[0].clip = clip
         mapper = LiveObjectMapper(song)
-        # A clip's markers aren't capped: 257 read whole. Only past the discovery bound is a read refused.
-        mapper._capture_authority_revision()
-        with patch.object(remote_module, "MAX_DISCOVERY_COLLECTION_LENGTH", 256), self.assertRaisesRegex(ValueError, "warp-marker content exceeds"):
-            mapper._capture_authority_revision()
+        # A clip's markers aren't capped: 257 read whole. Only past the discovery bound is a read refused: the
+        # whole-Set rows the host previews a capture from. The authority itself hashes no markers.
+        mapper.snapshot(); revision = mapper._capture_authority_revision()
+        with patch.object(remote_module, "MAX_DISCOVERY_COLLECTION_LENGTH", 256):
+            with self.assertRaisesRegex(ValueError, "warp-marker content exceeds"): mapper.snapshot()
+            self.assertEqual(mapper._capture_authority_revision(), revision)
 
-    def test_scene_capture_authority_refuses_unreadable_warp_markers(self):
+    def test_a_capture_previews_from_rows_that_refuse_unreadable_warp_markers(self):
         class UnreadableWarpClip(FakeClip):
             @property
             def warp_markers(self): raise RuntimeError("unreadable")
         song = FakeSong(); song.tracks[0].clip_slots[0].clip = UnreadableWarpClip(4.0); mapper = LiveObjectMapper(song)
-        with self.assertRaisesRegex(ValueError, "warp-marker collection is unreadable"):
-            mapper._capture_authority_revision()
+        with self.assertRaisesRegex(ValueError, "warp-marker collection is unreadable"): mapper.snapshot()
+        self.assertEqual(len(mapper._capture_authority_revision()), 64, "the authority hashes identities, notes, scenes and playback only")
 
     def test_owned_delete_refuses_replacements_at_the_same_traversal_location(self):
         song = FakeSong(); song.tracks[0].clip_slots[0].clip = FakeClip(4.0); mapper = LiveObjectMapper(song); snapshot = mapper.snapshot(); clip_ref = snapshot["tracks"][0]["clips"][0]["ref"]; original_clip = song.tracks[0].clip_slots[0].clip; clip_authority = mapper._session_clip_authority(clip_ref)
@@ -2607,6 +2609,20 @@ class ControlSurfaceTests(unittest.TestCase):
         song = FakeSong(); song.scenes.append(FakeScene("Scene 2")); source = song.tracks[0].clip_slots[0]; source.clip = FakeClip(4.0); target = FakeSlot(); song.tracks[0].clip_slots.append(target)
         source.duplicate_clip_to = lambda destination: setattr(destination, "clip", FakeClip(source.clip.length)); mapper = LiveObjectMapper(song, provenance="real-live"); snapshot = mapper.snapshot(); track = snapshot["tracks"][0]; source_row = track["clips"][0]; target_slot = track["clipSlots"][1]; target_scene = snapshot["scenes"][1]; args = {"ref": source_row["ref"], "targetTrackRef": track["ref"], "targetSceneIndex": 1, "arrangementPosition": None, **mapper._session_clip_authority(source_row["ref"]), "expectedContentFingerprint": mapper._mapped_fingerprint(source_row["ref"]), "expectedTargetTrackIdentity": track["objectIdentity"], "expectedTargetSlotRef": target_slot["ref"], "expectedTargetSlotIdentity": target_slot["objectIdentity"], "expectedTargetSceneRef": target_scene["ref"], "expectedTargetSceneIdentity": target_scene["objectIdentity"], "expectedTargetCollectionRevision": None}; moved = mapper.invoke("clip.move", args, "preexisting-move-transaction")
         self.assertNotIn("ownershipToken", moved); self.assertEqual(mapper._owned_cleanup_tokens, {}); self.assertIsNone(source.clip); self.assertIsNotNone(target.clip)
+
+    def test_the_capture_authority_reads_what_it_hashes_not_the_whole_set(self):
+        song = rich_song(); mapper = LiveObjectMapper(song)
+        snapshot = mapper.snapshot()
+        # The host's formula, from a whole snapshot's rows.
+        expected = hashlib.sha256(mapper._bounded_canonical({
+            "tracks": [{"ref": track["ref"], "objectIdentity": track["objectIdentity"], "clips": [{"ref": clip["ref"], "objectIdentity": clip["objectIdentity"], "notesRevision": clip["notesRevision"]} for clip in track["clips"]]} for track in snapshot["tracks"]],
+            "scenes": [{"ref": scene["ref"], "objectIdentity": scene["objectIdentity"], "index": scene["index"]} for scene in snapshot["scenes"]],
+            "playbackRevision": snapshot["playback"]["revision"]}).encode()).hexdigest()
+        self.assertTrue(any(track["clips"] for track in snapshot["tracks"]), "the Set has clips with notes to hash")
+        with patch.object(mapper, "snapshot", side_effect=AssertionError("the capture authority built a whole-Set snapshot")):
+            self.assertEqual(mapper._capture_authority_revision(), expected)
+        # Within a shared read that already holds a whole snapshot, its rows are used as they are.
+        self.assertEqual(mapper._shared_reads(lambda: (mapper.snapshot(), mapper._capture_authority_revision())[1]), expected)
 
     def test_capture_midi_refuses_any_preexisting_session_content(self):
         song = FakeSong(); song.tracks[0].clip_slots[0].clip = FakeClip(4.0); called = []; song.capture_midi = lambda: called.append(True); mapper = LiveObjectMapper(song); expected = mapper._capture_authority_revision()
