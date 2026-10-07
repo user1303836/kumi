@@ -7602,7 +7602,8 @@ class LiveObjectMapper:
             "colorIndex": int(color_index) if isinstance(color_index, int) and not isinstance(color_index, bool) and 0 <= color_index <= 69 else None,
             "color": int(color_rgb) if isinstance(color_rgb, int) and not isinstance(color_rgb, bool) and 0 <= color_rgb <= 0xFFFFFF else None,
             "isVisible": optional_bool(track, "is_visible"),
-            "isSelected": (selected_track is track) if selected_track is not None else None,
+            # Live hands out a fresh proxy each read: the selected track is this one when it's the same Live object.
+            "isSelected": (selected_track is track or self._capture_object_identity(selected_track) == self._capture_object_identity(track)) if selected_track is not None else None,
             "isFrozen": optional_bool(track, "is_frozen"),
             "foldState": optional_bool(track, "fold_state") if optional_bool(track, "fold_state") is not None else optional_bool(track, "is_folded"),
             "implicitArm": optional_bool(track, "implicit_arm"),

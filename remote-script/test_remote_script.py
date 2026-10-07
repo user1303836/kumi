@@ -5141,6 +5141,13 @@ class TrackStructureExpansionTests(unittest.TestCase):
             mapper.invoke("track.duplicate", {"ref": row["ref"], "expectedObjectIdentity": row["objectIdentity"], "expectedStructureRevision": mapper._structure_revision()})
         self.assertEqual((calls, len(song.tracks)), ([], 3), "Live was never asked")
 
+    def test_the_selected_track_is_known_through_a_fresh_proxy(self):
+        # Live hands out a new proxy for the same track on each read.
+        song = FakeSong(); song.tracks.append(FakeTrack()); song.tracks[0]._live_ptr = 101; song.tracks[1]._live_ptr = 102
+        song.view = types.SimpleNamespace(selected_track=types.SimpleNamespace(_live_ptr=102))
+        rows = LiveObjectMapper(song).snapshot()["tracks"]
+        self.assertEqual([row["isSelected"] for row in rows[:2]], [False, True])
+
     def test_track_view_set_and_select_instrument(self):
         song = FakeSong()
         track = song.tracks[0]
