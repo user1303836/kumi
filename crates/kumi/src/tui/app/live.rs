@@ -199,11 +199,12 @@ impl TuiApp {
                         if app.0.state.borrow().closing {
                             return;
                         }
-                        let detail = app.0.state.borrow().focus.as_ref().and_then(|f| f.detail);
-                        match detail {
-                            Some(LiveDetail::Clip) => app.read_clip(true),
-                            Some(LiveDetail::Device) => app.read_tree(true),
-                            None => app.read_strip(true),
+                        // What the pane shows is what's read again (the detail view can hold a clip or a device
+                        // the pane doesn't show).
+                        match shown {
+                            "tree" => app.read_tree(true),
+                            "clip" => app.read_clip(true),
+                            _ => app.read_strip(true),
                         }
                     }
                 }));

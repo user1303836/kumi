@@ -711,6 +711,59 @@ case!(clip_session_arrangement_and_fractional_scene_forwarding, async {
     assert!(!has(&h.screen(), "FOCUS · Session"));
     h.close().await;
 });
+/// What a pane's timer read again, by kind: `arrangement` calls.
+fn arrangement_reads(h: &Harness) -> usize {
+    h.calls().iter().filter(|c| *c == "arrangement").count()
+}
+fn arrangement_strip() -> Rc<Control> {
+    let c = Rc::new(Control::default());
+    *c.arrangement.borrow_mut() = Some(
+        serde_json::from_value(
+            json!({"length":128,"position":64,"playing":true,"loop":{"start":64,"length":16,"enabled":true},"locators":[]}),
+        )
+        .unwrap(),
+    );
+    c
+}
+case!(the_arrangement_shown_beside_a_clip_in_detail_is_what_the_pane_reads_again, async {
+    tokio::time::pause();
+    let h = Harness::with(120, 36, arrangement_strip(), |_| {});
+    h.start().await;
+    h.connect();
+    // A clip in Live's detail view, then the Arrangement: the pane shows the Arrangement, not the clip.
+    let mut focus = json!({"track":{"name":"Keys","color":"#5ec1f7","kind":"midi"},"trackRef":"3:track:1","sceneIndex":2,
+        "slotRef":"3:clip_slot:1:2","clip":"Chords","detail":"Clip","view":"Session"});
+    h.emit(json!({"type":"focus","focus":focus}));
+    focus["view"] = json!("Arrangement");
+    h.emit(json!({"type":"focus","focus":focus}));
+    delay(5).await;
+    h.has("FOCUS · Arrangement");
+    let read = arrangement_reads(&h);
+    tokio::time::advance(std::time::Duration::from_millis(3100)).await;
+    delay(5).await;
+    assert!(arrangement_reads(&h) > read, "the Arrangement shown was read again: {:?}", h.calls());
+    h.close().await;
+});
+case!(the_pane_stops_reading_live_while_it_isnt_drawn, async {
+    tokio::time::pause();
+    let h = Harness::with(120, 36, arrangement_strip(), |_| {});
+    h.start().await;
+    h.connect();
+    h.emit(json!({"type":"focus","focus":{"track":{"name":"Keys","color":"#5ec1f7","kind":"midi"},"trackRef":"3:track:1","view":"Arrangement"}}));
+    delay(5).await;
+    h.has("FOCUS · Arrangement");
+    tokio::time::advance(std::time::Duration::from_millis(1600)).await;
+    delay(5).await;
+    let read = arrangement_reads(&h);
+    assert!(read >= 2, "the shown pane is kept fresh: {:?}", h.calls());
+    // Narrower than the pane needs: the dock instead, and nothing to keep fresh.
+    h.resize(90, 36);
+    delay(5).await;
+    tokio::time::advance(std::time::Duration::from_millis(4600)).await;
+    delay(5).await;
+    assert_eq!(arrangement_reads(&h), read, "{:?}", h.calls());
+    h.close().await;
+});
 case!(pointed_live_pin_transport_and_interrupted_step, async {
     let h = Harness::new(120, 40);
     h.start().await;

@@ -62,12 +62,15 @@ impl TuiApp {
         screen.fill(screen.bounds(), &st::GROUND);
         self.0.state.borrow_mut().hits.clear();
         if columns < 24 || rows < 8 {
+            // No pane to keep fresh here, nor during setup or beside the dock below.
+            self.keep_tree_fresh(None);
             screen.put(1, 0, &truncate("Make this window bigger for Kumi", columns - 2), &st::DIM);
             let frame = self.0.renderer.borrow_mut().frame(&screen, None);
             self.0.tty.write(&frame);
             return;
         }
         if self.setup_active() {
+            self.keep_tree_fresh(None);
             let cursor = self.draw_setup(&mut screen, columns, rows).filter(|_| !self.0.state.borrow().closing);
             let frame = self.0.renderer.borrow_mut().frame(&screen, cursor);
             self.0.tty.write(&frame);
@@ -90,6 +93,7 @@ impl TuiApp {
         if pane != 0 {
             self.draw_pane(&mut screen, Rect::new(left, 1, pane, rows - 1));
         } else {
+            self.keep_tree_fresh(None);
             self.draw_dock(&mut screen, Rect::new(0, box_top - dock - 1, columns, dock));
         }
         if chip != 0 {
