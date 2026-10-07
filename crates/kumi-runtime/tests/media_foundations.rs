@@ -1196,6 +1196,24 @@ async fn a_songs_form_sections_where_whats_played_and_how_it_sounds_change_in_ba
     let heard: serde_json::Value = serde_json::from_str(&heard.text).unwrap();
     assert_eq!(heard["form"]["summary"], form.summary);
 }
+#[tokio::test]
+async fn a_form_asked_for_in_bars_of_no_beats_or_at_a_tempo_past_the_schema_is_still_heard() {
+    use kumi_runtime::audio::structure::{hear_form, FormOptions};
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("tone.wav");
+    let tone: Vec<f32> = (0..12 * 48000).map(|i| (0.3 * (2.0 * std::f64::consts::PI * 220.0 * i as f64 / 48000.0).sin()) as f32).collect();
+    wav(&file, &[tone.clone(), tone], 16);
+    let path = file.to_str().unwrap();
+    // A bar of no beats was endless bars (a capacity overflow): the schema's 1 to 16 holds.
+    let none = hear_form(path, FormOptions { beats_per_bar: Some(0.0), ..Default::default() }).await.unwrap();
+    assert_eq!(none.beats_per_bar, 1.0);
+    let many = hear_form(path, FormOptions { beats_per_bar: Some(64.0), ..Default::default() }).await.unwrap();
+    assert_eq!(many.beats_per_bar, 16.0);
+    // A Set tempo past 20 to 999 BPM isn't one: the file's own, or 120, counts the bars, as without one.
+    let wild = hear_form(path, FormOptions { tempo: Some(1e9), ..Default::default() }).await.unwrap();
+    let without = hear_form(path, FormOptions::default()).await.unwrap();
+    assert_eq!((wild.bars, &wild.tempo.bpm, &wild.at_set_tempo), (without.bars, &without.tempo.bpm, &None));
+}
 #[test]
 fn section_edges_come_from_diagonal_novelty_snapped_to_four_bar_phrases_never_closer_than_four_bars() {
     use kumi_runtime::audio::structure::boundaries;

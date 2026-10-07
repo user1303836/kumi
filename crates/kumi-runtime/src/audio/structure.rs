@@ -231,11 +231,13 @@ impl FormMeter {
         self.low_share.push(if total > 1e-20 { low / total } else { 0.0 });
     }
     fn form(&self, file: &str, seconds: f64, options: &FormOptions) -> Form {
-        let beats_per_bar = options.beats_per_bar.unwrap_or(4.0);
+        // The schema's ranges, held here too (a model can send anything): a bar of no beats is endless bars.
+        let beats_per_bar = options.beats_per_bar.unwrap_or(4.0).clamp(1.0, 16.0);
+        let set_tempo = options.tempo.filter(|tempo| (20.0..=999.0).contains(tempo));
         let onsets = onset_strength(&self.onset_frames);
         let onset_rate = self.rate / 512.0;
-        let found = estimate_tempo(&onsets, onset_rate, options.tempo);
-        let bpm = found.or(options.tempo).unwrap_or(120.0);
+        let found = estimate_tempo(&onsets, onset_rate, set_tempo);
+        let bpm = found.or(set_tempo).unwrap_or(120.0);
         let tempo = FormTempo { bpm: round(bpm, 1), from: if found.is_some() { "file" } else { "set" }.into() };
         let frame_seconds = self.hop as f64 / self.rate;
         let loudest = self.level.iter().copied().fold(-200.0, f64::max);
@@ -283,13 +285,9 @@ impl FormMeter {
                 for v in &mut chroma {
                     *v /= norm;
                 }
-                let hits = peaks
-                    .iter()
-                    .filter(|at| {
-                        **at as f64 / onset_rate >= origin + bar as f64 * bar_seconds
-                            && (**at as f64 / onset_rate) < origin + (bar + 1) as f64 * bar_seconds
-                    })
-                    .count() as f64;
+                // Peaks come in time order: those from the bar's start to its end.
+                let before = |time: f64| peaks.partition_point(|at| (*at as f64 / onset_rate) < time);
+                let hits = (before(origin + (bar + 1) as f64 * bar_seconds) - before(origin + bar as f64 * bar_seconds)) as f64;
                 Bar {
                     chroma,
                     timbre: (0..TIMBRE).map(|i| mean(&|f| self.timbre[f][i])).collect(),
@@ -320,8 +318,7 @@ impl FormMeter {
                     .collect()
             })
             .collect();
-        let matrix: Vec<Vec<_>> = vectors.iter().map(|row| vectors.iter().map(|other| similar(row, other)).collect()).collect();
-        let edges = boundaries(&matrix, count);
+        let edges = boundaries_by(count, |i, j| similar(&vectors[i], &vectors[j]));
         let starts: Vec<_> = std::iter::once(0).chain(edges).collect();
         let sections: Vec<_> = starts.iter().enumerate().map(|(i, from)| (*from, starts.get(i + 1).copied().unwrap_or(count))).collect();
         let section_level: Vec<_> = sections
@@ -418,9 +415,7 @@ impl FormMeter {
             form.sections.iter().map(|s| format!("{} {}", s.role, s.bars)).collect::<Vec<_>>().join(" · "),
             to_string(form.tempo.bpm)
         );
-        form.at_set_tempo = options
-            .tempo
-            .filter(|v| *v != 0.0)
+        form.at_set_tempo = set_tempo
             .map(|tempo| format!("{} at the Set's {} BPM", clock(count as f64 * beats_per_bar * 60.0 / tempo), to_string(round(tempo, 2))));
         form
     }
@@ -436,6 +431,10 @@ fn similar(a: &[f64], b: &[f64]) -> f64 {
 }
 /// Section edges from diagonal novelty, snapped to nearby four-bar phrases and at least four bars apart.
 pub fn boundaries(matrix: &[Vec<f64>], count: usize) -> Vec<usize> {
+    boundaries_by(count, |i, j| matrix[i][j])
+}
+/// boundaries(), asking how alike two bars are only as it needs to: for bars at most 7 apart, not every pair.
+pub fn boundaries_by(count: usize, similarity: impl Fn(usize, usize) -> f64) -> Vec<usize> {
     let half = if count >= 32 { 4 } else { 2 };
     let sigma = half as f64 / 2.0;
     let novelty: Vec<_> = (0..count)
@@ -452,7 +451,7 @@ pub fn boundaries(matrix: &[Vec<f64>], count: usize) -> Vec<usize> {
                         continue;
                     }
                     let taper = (-((a as f64 + 0.5).powi(2) + (b as f64 + 0.5).powi(2)) / (2.0 * sigma * sigma)).exp();
-                    sum += (if a < 0 { -1.0 } else { 1.0 }) * (if b < 0 { -1.0 } else { 1.0 }) * taper * matrix[i as usize][j as usize];
+                    sum += (if a < 0 { -1.0 } else { 1.0 }) * (if b < 0 { -1.0 } else { 1.0 }) * taper * similarity(i as usize, j as usize);
                     weight += taper;
                 }
             }
