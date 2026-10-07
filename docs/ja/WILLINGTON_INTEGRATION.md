@@ -10,7 +10,7 @@ Willington は、Live の Python API では届かない部分に手が届くネ�
 | --- | --- | --- | --- |
 | `set_clip_follow_actions` | `live_follow_actions_preview/apply` | Session クリップの Follow Action の 10 個のフィールドすべて | WillingtonBindings |
 | `edit_rack_mapping` | `live_willington_device_preview/apply` | `macro-name`、`variation-name`、`macro-mapping` | WillingtonDeviceTools |
-| `run_python` | `live_run_python` | Live の LFO、Shaper、Envelope Follower（それぞれ 8 つの対象）と Expression Control（5 つ）のパラメータへのマッピング（Willington の `map_modulation`） | WillingtonDeviceTools |
+| `map_modulator` | `live_run_python`（`live_willington_device_preview/apply` があるときに提供） | Live の LFO、Shaper、Envelope Follower（それぞれ 8 つの対象）と Expression Control（5 つ）のパラメータへのマッピング（Willington の `map_modulation`） | WillingtonDeviceTools |
 | `edit_rack_mapping` | `live_willington_device_preview/apply` | `selector-zone`、`key-zone`、`velocity-zone` | WillingtonRackZones |
 
 ブリッジが提供するのは、プロバイダーが書き込み有効の状態で読み込まれている編集の種類だけです。`live_willington_device_preview` は、それらの `kind` の値だけを並べます。どの編集でも、トランスポートが止まっている必要があります。
@@ -21,7 +21,7 @@ Willington は、Live の Python API では届かない部分に手が届くネ�
 
 Kumi で `/willington` と入力します。`Remote Scripts/AbletonMcpBridge` の中、ブリッジの `__init__.py` の隣に `willington.json` を書き込み、DeviceTools と RackZones を編集つきでオンにします。ブリッジは Live を動かしたまま、1 秒以内にそれらを読み込みます。合格した[セルフテスト](#follow-action-のセルフテスト)があれば、Follow Action もオンになります。その編集にはセルフテストが必要で、Live はそのバインディングを取り外せないためです。もう一度 `/willington` と入力するとファイルを削除し、ブリッジは DeviceTools と RackZones をアンインストールして、Follow Action の書き込みをオフにします。Follow Action のバインディングは Live を再起動するまで残り、Kumi はそう伝えます。バインディングがオフのあいだは、Kumi が起動時にそう伝えます。
 
-Kumi はモデルにも伝えます。バインディングがオフのときにその編集が必要な依頼があると、`/willington` でオンになることを一言添えます。オンのときは、Live で自分でマッピングするよう頼む代わりに、Kumi がマクロを、そして `run_python` で Live のモジュレーターをマッピングします。
+Kumi はモデルにも伝えます。バインディングがオフのときにその編集が必要な依頼があると、`/willington` でオンになることを一言添えます。オンのときは、Live で自分でマッピングするよう頼む代わりに、Kumi がマクロを、そして `map_modulator` で、読み込んだのと同じプランの中で Live のモジュレーターをマッピングします。
 
 どの Live ビルドに対応するかは、手元の Willington のリリースによって決まります。Kumi のコピーなら、ブリッジのフォルダーの `willington/release.json` に書かれています。Willington の検証済みのバインディング：macOS ARM64 の Live 12.4.15b4 と b5 用の Follow Action と DeviceTools、macOS ARM64 の b5 用の RackZones、そして Windows x64 の Live 12.4.15b5 用の 3 つすべてです。Intel macOS には対応していません。各プロバイダーは、動いている Live プロセスの OS、アーキテクチャ、バージョン、実行ファイルのハッシュからバインディングを選び、ネイティブライブラリは動いている実行ファイルそのもの（macOS では Mach-O の UUID、Windows では CodeView の GUID）も確認します。
 
@@ -144,7 +144,7 @@ Willington にはこれらのためのネイティブメソッドがあります
 
 - **バリエーションの上書き**：バリエーションの名前だけでなく、保存されたマクロの値と有効マスクの全体を読み取り、復元する必要があります。
 - **Drum Sampler のサンプルの直接置き換え**：今のサンプルの同一性とパス、そして置き換えで変わるものの復元が必要です。Browser を通じたプリセットやサンプルのロードは使えます。
-- **取り消せる変更としてのモジュレーターのマッピング**：ネイティブの変更はあとから落ち着くため、Live のスレッドと歩調が合いません。まず、落ち着いた状態の確認、ソースと対象の正確な持ち主の確認、キャンセル、復元が必要です。それまでは Kumi が `run_python` でモジュレーターをマッピングし、HISTORY には記録されません。マッピングを元に戻すにはスロットをクリアします（`map_modulation(slot, None)`）。Live の取り消しが効くかどうかは確認されていません。
+- **ブリッジのトランザクションとしてのモジュレーターのマッピング**：ネイティブの変更はあとから落ち着くため、Live のスレッドと歩調が合いません。まず、落ち着いた状態の確認、ソースと対象の正確な持ち主の確認、キャンセル、復元が必要です。それまでは `map_modulator` が Kumi 自身の Python でマッピングし、HISTORY に記録します。Kumi の取り消しは、Kumi が埋めたスロットを、そのスロットがまだマッピングしたパラメータを保っている間だけ空に戻します（`map_modulation(slot, None)`）。別のマッピングを置き換えたマッピングは、Kumi が前のものを戻せないため kept になります。Live の取り消しが効くかどうかは確認されていません。
 
 ネイティブメソッドがあるだけでは、取り消せる操作には足りません。ランタイムの記述子やプロトコルのエントリを追加するだけで、それを提供しないでください。
 

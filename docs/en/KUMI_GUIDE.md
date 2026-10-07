@@ -585,6 +585,13 @@ Enter from sent again. If Live is still away after 30 seconds, Kumi asks whether
 it's open with AbletonMcpBridge chosen as a Control Surface. `/reconnect` tries
 at once.
 
+Live can also be only busy: loading a big Set or a heavy device can keep it
+from answering for a while. Kumi tells the two apart by whether AbletonMcpBridge
+is still listening. When Live is busy, Kumi says so and waits: the request
+isn't cancelled, and it carries on when Live answers, with nothing to discover
+again. If Live comes back with another Set open, the request stops there, as it
+does when you open a Set yourself.
+
 Kumi's undo lasts as long as its connection to Live: after Live restarts, a
 reconnect or a Kumi restart, earlier changes read **no undo** and can be undone
 only with Live's own undo. `/new` keeps the connection, so undo still works.

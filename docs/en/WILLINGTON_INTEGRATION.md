@@ -17,7 +17,7 @@ tools simply don't appear, and the rest of Kumi works as before.
 | --- | --- | --- | --- |
 | `set_clip_follow_actions` | `live_follow_actions_preview/apply` | All ten Follow Action fields of a Session clip | WillingtonBindings |
 | `edit_rack_mapping` | `live_willington_device_preview/apply` | `macro-name`, `variation-name`, `macro-mapping` | WillingtonDeviceTools |
-| `run_python` | `live_run_python` | Live's LFO, Shaper and Envelope Follower (8 targets each) and Expression Control (5) mapped to parameters, with Willington's `map_modulation` | WillingtonDeviceTools |
+| `map_modulator` | `live_run_python`, offered with `live_willington_device_preview/apply` | Live's LFO, Shaper and Envelope Follower (8 targets each) and Expression Control (5) mapped to parameters, with Willington's `map_modulation` | WillingtonDeviceTools |
 | `edit_rack_mapping` | `live_willington_device_preview/apply` | `selector-zone`, `key-zone`, `velocity-zone` | WillingtonRackZones |
 
 The bridge offers only the edit kinds whose provider is loaded with writes
@@ -43,8 +43,8 @@ are off, Kumi says so when it starts.
 
 Kumi tells its model too. With the bindings off, a request that needs one of
 their edits gets a sentence saying that `/willington` turns them on; with them
-on, Kumi maps macros itself, and Live's modulators through `run_python`, instead
-of asking you to map them in Live.
+on, Kumi maps macros itself, and Live's modulators with `map_modulator`, in the
+same plan that loads them, instead of asking you to map them in Live.
 
 Which Live builds they cover depends on the Willington release you have; for
 Kumi's copy, `willington/release.json` in the bridge's folder names it. Willington's
@@ -265,11 +265,13 @@ they can be undone safely:
 - **Replacing a Drum Sampler's sample directly**: needs the current sample's
   identity and path, and restoring what replacing it changes. Loading presets
   and samples through the Browser works.
-- **Mapping a modulator as an undoable change**: the native change settles
+- **Mapping a modulator as a bridge transaction**: the native change settles
   later, out of step with Live's thread. It needs settled-state checks, exact
   ownership of source and target, cancellation and restoration first. Until
-  then Kumi maps modulators with `run_python`, with no HISTORY entry: clearing
-  the slot (`map_modulation(slot, None)`) takes a mapping back, and Live's undo
+  then `map_modulator` maps through Kumi's own Python, with a HISTORY entry:
+  Kumi's undo empties a slot it filled (`map_modulation(slot, None)`), only
+  while the slot still holds the parameter it mapped, and a mapping that
+  replaced another is kept, since Kumi can't map the old one back. Live's undo
   for it is unverified.
 
 A native method existing isn't enough for an undoable operation: don't offer

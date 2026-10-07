@@ -248,6 +248,8 @@ Kumi 还会记住它最后一次看到的每个已保存工程是什么样子。
 
 Live 关闭或崩溃时，Kumi 会在一秒内察觉，告诉你，并保留对话。它每两秒查找一次 Live，Live 回来后会自动重新连接；正在执行的请求会回到输入框中，按一下 Enter 即可重新发送。如果 30 秒后 Live 仍未回来，Kumi 会问你 Live 是否已打开、是否已把 AbletonMcpBridge 选为 Control Surface。`/reconnect` 会立即尝试重连。
 
+Live 也可能只是忙：加载大型 Set 或重量级设备时，它可能有一段时间不回应。Kumi 根据 AbletonMcpBridge 是否仍在监听来区分这两种情况。Live 忙时，Kumi 会告诉你并等待：请求不会被取消，Live 回应后会继续执行，无需重新查找任何东西。如果 Live 回来时打开的是另一个 Set，请求会在那里停止，就像你自己打开一个 Set 时一样。
+
 Kumi 的撤销只在它与 Live 的连接持续期间有效：在 Live 重启、重新连接或 Kumi 重启之后，之前的修改会显示 **no undo**，只能用 Live 自己的撤销来撤回。`/new` 会保留连接，所以撤销仍然可用。
 
 ## 更新、报告与卸载

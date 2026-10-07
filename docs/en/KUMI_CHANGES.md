@@ -40,7 +40,8 @@ Live's own timer now serves requests between ticks too, so a request waits
 milliseconds rather than a tick.
 `KUMI_FAST=0` goes back to the preview and apply.
 
-Once a change is sent to Live it runs to the end (up to 30 seconds), even if
+Once a change is sent to Live it runs to the end (up to 30 seconds, longer for
+a change of many tracks, scenes, pads or clips, at most ten minutes), even if
 you press Esc, so every change that reaches Live is in HISTORY. If Live doesn't
 confirm it, the row reads **check Live** rather than vanishing. Each turn, the
 model sees Kumi's latest changes and where each stands (applied, undone, kept,
@@ -58,7 +59,8 @@ unsure, or expired after a reconnect), so an undo you clicked isn't news to it.
   notes, MIDI transforms and warp markers, and for a Session MIDI clip whose
   name, length or notes changed, it's refused when you changed the same thing
   again since. A refused undo leaves the row reading **kept**, with the reason.
-  Retrying an undo Live didn't confirm can't undo twice.
+  Retrying an undo Live didn't confirm can't undo twice. `/undo` takes back the
+  latest change, even one that reads **check Live**.
 - **Kept changes.** Some changes have no Kumi undo, because Live gives scripts
   no way back: deleting a clip, scene, track, locator, device or return track;
   every `edit_clip` action; a new rack chain or a deleted variation; clearing a
@@ -83,8 +85,20 @@ as few replies as it can.
 
 - **One call.** `make_changes` runs a whole plan of changes, actions and waits
   in order. A step names what it makes (`as: "rack"`) and later steps use it
-  (`"@rack"`). `each` repeats a step over a list (`{"note": [36, 37, 38]}`). The
-  plan stops at the first failure and says what was done and what was skipped.
+  (`"@rack"`). `each` repeats a step over a list (`{"note": [36, 37, 38]}`).
+- **A refused step isn't a stop.** When Live refuses a step, nothing of it
+  changed, so the rest of the plan runs. Only the steps that need it wait: those
+  using what it would have made (its `@name`) or changing the same track, tracks
+  or scenes added or deleted after a refused add or delete, and launches,
+  recordings and waits after a refused launch. The result lists what was
+  refused, with why, and what waited, so one more plan sends only those. A
+  change Live may have made without confirming it still stops the plan there.
+- **References last when tracks and scenes move.** After a step adds, deletes,
+  duplicates or groups tracks, or adds or deletes scenes, the references from
+  earlier in the answer still name the same tracks, scenes, devices and clips:
+  Kumi moves them with what moved. So one plan can delete several tracks, or
+  add a track and go on with the tracks after it, without reading the Set
+  again.
 - **A wrong parameter name isn't a stop.** A device's parameters are set by name
   in the same plan that loads it ("@op", "Osc-B Fine", "50 %"), with no read
   first. A name the device doesn't have, or a value it can't take, is set aside:
@@ -153,7 +167,7 @@ as few replies as it can.
 | `set_chain`, `set_chain_mixer` | A rack chain's mute, solo or colour; its volume, pan or on/off |
 | `delete_device`, `delete_clip`, `delete_scene`, `delete_track`, `delete_locator` | Deletions, all kept: Live's undo brings them back |
 | `clear_range` | A stretch of one track in the Arrangement cleared, clips at its edges cut (needs the extension; kept) |
-| `set_clip_follow_actions`, `edit_rack_mapping` | With [Willington](WILLINGTON_INTEGRATION.md)'s bindings on (`/willington`): Follow Actions; macro names, mappings, variation names and chain zones |
+| `set_clip_follow_actions`, `edit_rack_mapping`, `map_modulator` | With [Willington](WILLINGTON_INTEGRATION.md)'s bindings on (`/willington`): Follow Actions; macro names, mappings, variation names and chain zones; Live's modulators mapped to parameters |
 | `live_command` | Live's own commands its scripting lacks: group, freeze, flatten, bounce, consolidate, convert to MIDI, separate stems, slice, save, save as (Windows), new Set, open a Set (Windows), export ([the guide](KUMI_GUIDE.md#lives-own-commands); kept: Live's undo takes it back) |
 
 `make_changes` runs any of these in a plan, and `undo_change` undoes one.
@@ -230,8 +244,9 @@ Live doesn't let scripts map a macro or a modulator to a parameter, set a
 macro's range or name a macro. Kumi says so and you do it in Live (Map, then
 click the parameter). With [Willington](WILLINGTON_INTEGRATION.md)'s bindings on
 (`/willington`), Kumi can name macros and map them, and map Live's LFO, Shaper,
-Envelope Follower and Expression Control modulators to parameters (through
-`run_python`).
+Envelope Follower and Expression Control modulators to parameters
+(`map_modulator`), in the same plan that loads them; Kumi's undo empties a slot
+it filled.
 
 ## Samples and drum kits
 
