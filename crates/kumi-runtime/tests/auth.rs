@@ -78,6 +78,21 @@ async fn credential_store_is_owner_only_atomic_and_removes_entries_on_request() 
         Credential::Oauth(OAuthCredential { access: String::new(), refresh: String::new(), expires: 0.0, account_id: String::new() });
     assert!(store.update_with("x", |_| async { Ok(Some(malformed)) }).await.unwrap_err().to_string().contains("malformed credential"));
 }
+#[cfg(windows)]
+#[tokio::test]
+async fn on_windows_the_credential_file_is_owner_only_wherever_kumi_home_puts_it() {
+    use kumi_runtime::auth::store::windows_owner_only;
+    // A folder in the temp folder (as KUMI_HOME can point anywhere) gives its files SYSTEM's and the Administrators'
+    // rules too: only the DACL Kumi sets leaves one rule, full control for you, by the bridge's own check.
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("kumi-home").join("auth.json");
+    let store = open_credential_store(&path);
+    store.update_with("openai-codex", |_| async { Ok(Some(credential("r"))) }).await.unwrap();
+    assert!(windows_owner_only(&path), "{}", path.display());
+    store.update_with("other", |_| async { Ok(Some(credential("s"))) }).await.unwrap();
+    assert!(windows_owner_only(&path), "still, once written again");
+    assert_eq!(store.list().await.unwrap().len(), 2);
+}
 #[tokio::test]
 async fn credential_store_keeps_api_keys_beside_sign_ins_and_refuses_anything_that_isnt_one_word() {
     let temp = tempfile::tempdir().unwrap();
