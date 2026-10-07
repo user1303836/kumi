@@ -23,5 +23,5 @@ pub fn main() -> i32 {
         Ok(runtime) => runtime,
         Err(_) => return 1,
     };
-    tokio::task::LocalSet::new().block_on(&runtime, run(&std::env::args().skip(1).collect::<Vec<_>>())).emit()
+    tokio::task::LocalSet::new().block_on(&runtime, run(&kumi_common::env::args().skip(1).collect::<Vec<_>>())).emit()
 }

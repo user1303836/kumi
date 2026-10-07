@@ -19,7 +19,7 @@ pub fn kumi_extension_folders(
     let env = match env {
         Some(env) => env,
         None => {
-            process_env = std::env::vars().collect();
+            process_env = kumi_common::env::vars();
             &process_env
         }
     };

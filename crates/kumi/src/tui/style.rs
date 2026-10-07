@@ -190,7 +190,7 @@ pub fn os_release() -> String {
 
 /// `detect_color_depth` for this process: its environment, platform and OS release.
 pub fn detect_color_depth_here() -> ColorDepth {
-    detect_color_depth(&std::env::vars().collect(), process_platform(), &os_release())
+    detect_color_depth(&kumi_common::env::vars(), process_platform(), &os_release())
 }
 
 static TERM_256: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-256(color)?$").unwrap());

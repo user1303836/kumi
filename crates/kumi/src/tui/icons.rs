@@ -172,7 +172,7 @@ pub enum IconStyle {
 
 /// `detect_icon_style` for this process: its environment and platform.
 pub fn detect_icon_style_here() -> IconStyle {
-    detect_icon_style(&std::env::vars().collect(), process_platform())
+    detect_icon_style(&kumi_common::env::vars(), process_platform())
 }
 
 /// Glyphs, or badges where they may not show: KUMI_ICONS chooses outright; otherwise badges on the

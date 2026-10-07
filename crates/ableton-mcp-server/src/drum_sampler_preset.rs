@@ -48,7 +48,7 @@ pub fn process_platform() -> &'static str {
 
 /// `process.env` as a map.
 pub fn process_env() -> HashMap<String, String> {
-    std::env::vars().collect()
+    kumi_common::env::vars()
 }
 
 /// `path.join(...)`.

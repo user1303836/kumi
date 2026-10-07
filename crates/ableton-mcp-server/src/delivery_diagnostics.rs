@@ -54,7 +54,7 @@ fn report(package_root: Option<&Path>, config_path: Option<&Path>) -> (Diagnosti
             Err(_) => permissions = SecretPermissions::Invalid,
         }
     }
-    let policy = match crate::tool_catalog::tool_policy_from_env(&std::env::vars().collect()) {
+    let policy = match crate::tool_catalog::tool_policy_from_env(&kumi_common::env::vars()) {
         Ok(policy) => json!({"profile":policy.profile,"allowOverrides":policy.allow,"denyOverrides":policy.deny}),
         Err(_) => json!({"profile":"invalid","allowOverrides":[],"denyOverrides":[]}),
     };

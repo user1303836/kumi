@@ -426,9 +426,9 @@ pub fn main_with(factory: AbletonFactory) -> i32 {
         Rc::new(crate::tui::tty::Stdin::new()),
         Rc::new(crate::tui::tty::Stdout::new()),
         Rc::new(crate::tui::tty::Stdout::stderr()),
-        std::env::vars().collect(),
+        kumi_common::env::vars(),
     );
-    io.args = std::env::args().skip(1).collect();
+    io.args = kumi_common::env::args().skip(1).collect();
     io.signals = true;
     if let Ok(executable) = std::env::current_exe() {
         if let Err(error) = install::ensure_native_launcher(&io.env, &executable) {

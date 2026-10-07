@@ -66,5 +66,5 @@ pub fn run(args: &[String]) -> CommandOutput {
     result.unwrap_or_else(|error| CommandOutput::error(error.message(), 1))
 }
 pub fn main() -> i32 {
-    run(&std::env::args().skip(1).collect::<Vec<_>>()).emit()
+    run(&kumi_common::env::args().skip(1).collect::<Vec<_>>()).emit()
 }

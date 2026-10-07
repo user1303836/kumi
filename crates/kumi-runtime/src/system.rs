@@ -3,9 +3,9 @@ use std::collections::HashMap;
 /// `process.env`, as the functions that took an `env` parameter read it (tests pass their own).
 pub type Env = HashMap<String, String>;
 
-/// `process.env` of this process.
+/// `process.env` of this process (a name or value that isn't Unicode read as near as it can be).
 pub fn process_env() -> Env {
-    std::env::vars().collect()
+    kumi_common::env::vars()
 }
 
 /// `process.platform`: "win32", "darwin", "linux", or the system's own name elsewhere.

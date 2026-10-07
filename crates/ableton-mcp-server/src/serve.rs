@@ -20,7 +20,7 @@ pub async fn serve<I: AsyncRead + 'static, O: AsyncWrite + 'static, D: AsyncWrit
     if options.tool_policy.is_none() {
         options.tool_policy = Some(
             serde_json::to_value(
-                crate::tool_catalog::tool_policy_from_env(&std::env::vars().collect()).map_err(|e| LiveError::error(e.to_string()))?,
+                crate::tool_catalog::tool_policy_from_env(&kumi_common::env::vars()).map_err(|e| LiveError::error(e.to_string()))?,
             )
             .unwrap(),
         );

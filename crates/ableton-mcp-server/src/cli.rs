@@ -74,7 +74,7 @@ pub async fn configured_adapter(path: &Path) -> Result<Rc<dyn AsyncLiveAdapter>,
 }
 
 pub fn main() -> i32 {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<String> = kumi_common::env::args().skip(1).collect();
     // The metadata probe needs neither configuration nor asynchronous runtime initialization.
     if args.len() == 1 && args[0] == "--version" {
         println!("ableton-mcp-server {}", crate::host::SERVER_VERSION);
