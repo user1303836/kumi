@@ -2590,6 +2590,19 @@ class ControlSurfaceTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "partial delete"): mapper.invoke("note.delete", {"ref": ref, "noteIds": [1, 2], **self.note_authority(mapper, ref)})
         self.assertEqual(sorted(note.pitch for note in clip.notes), [36, 38]); self.assertEqual(len({note.note_id for note in clip.notes}), 2)
 
+    def test_a_big_note_delete_makes_its_id_set_once(self):
+        song = FakeSong(); clip = FakeClip(64.0); song.tracks[0].clip_slots[0].clip = clip
+        clip.add_new_notes([{"pitch": 36 + index % 48, "start_time": (index % 256) * 0.25, "duration": 0.25, "velocity": 100, "mute": False} for index in range(2000)])
+        made = []; real = set
+        def counting(*args): made.append(True); return real(*args)
+        def remove(ids): gone = real(ids); clip.notes = [note for note in clip.notes if note["note_id"] not in gone]
+        clip.remove_notes_by_id = remove
+        mapper = LiveObjectMapper(song); ref = mapper.snapshot()["tracks"][0]["clips"][0]["ref"]
+        args = {"ref": ref, "noteIds": [note["note_id"] for note in clip.notes][::2], **self.note_authority(mapper, ref)}
+        with patch.object(remote_module, "set", counting, create=True): self.assertEqual(mapper.invoke("note.delete", args), {"deleted": 1000})
+        self.assertEqual(len(clip.notes), 1000)
+        self.assertLess(len(made), 100, "the ids to delete become a set once, not once a note")
+
     def test_clip_delete_requires_authoritative_absence(self):
         song = FakeSong(); slot = song.tracks[0].clip_slots[0]; slot.clip = FakeClip(4.0); slot.delete_clip = lambda: None; mapper = LiveObjectMapper(song); ref = mapper.snapshot()["tracks"][0]["clips"][0]["ref"]
         with self.assertRaisesRegex(ValueError, "not confirmed"): mapper.invoke("clip.delete", {"ref": ref, **mapper._session_clip_authority(ref)})

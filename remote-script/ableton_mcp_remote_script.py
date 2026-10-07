@@ -3654,7 +3654,7 @@ class LiveObjectMapper:
             raise ValueError("note deletion is unavailable on this Live shape")
         before_rows = self._read_notes(clip); existing = {int(row["id"]) for row in before_rows if isinstance(row.get("id"), int)}
         if len(existing) != len(before_rows) or any(note_id not in existing for note_id in note_ids): raise ValueError("complete stable note identity is required for deletion")
-        expected_rows = [row for row in before_rows if row["id"] not in set(note_ids)]; canonical_rows = lambda rows: self._bounded_canonical(sorted(rows, key=lambda row: int(row["id"]))); operation_error: BaseException | None = None
+        deleting = set(note_ids); expected_rows = [row for row in before_rows if row["id"] not in deleting]; canonical_rows = lambda rows: self._bounded_canonical(sorted(rows, key=lambda row: int(row["id"]))); operation_error: BaseException | None = None
         try: clip.remove_notes_by_id(note_ids)
         except BaseException as error: operation_error = error
         try: after_rows = self._read_notes(clip)
