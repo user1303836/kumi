@@ -128,6 +128,11 @@ impl McpHost {
             }
             if params["action"] == "move" {
                 let target = beat + params["distance"].as_f64().unwrap();
+                // A move too small for the beat time to show (1e-20 from beat 2) can never be confirmed, nor told from
+                // no move.
+                if same(&json!(target), &json!(beat)) {
+                    return Ok(error(id, -32602, "distance is too small to move the marker", None));
+                }
                 if target < 0.0 || (beats.iter().any(|v| v.as_f64() == Some(target)) && target != beat) {
                     return Ok(error(id, -32602, "warp-marker move target collides with an existing marker", None));
                 }

@@ -342,14 +342,19 @@ async fn a_marker_moved_by_a_fraction_is_undone() {
     assert_eq!(undone["state"], "undone", "{undone}");
 }
 #[tokio::test]
-async fn a_move_by_nothing_is_refused_at_preview() {
+async fn a_move_too_small_to_change_the_beat_is_refused_at_preview() {
     let sim = Rc::new(DeterministicLiveSimulator::new());
     setup(&sim, "session-move");
     let host = McpHost::new(sim, McpHostOptions::default()).unwrap();
-    // The Remote Script can never confirm a move that leaves the marker in place.
-    let zero =
-        host.live_warp_marker_preview_async(&json!(1), &json!({"clipRef":"clip:clip-1","action":"move","beatTime":2,"distance":0})).await;
-    assert_eq!(zero["error"]["code"], -32602, "{zero}");
+    // The Remote Script can never confirm a move that leaves the marker in place: 2 + 1e-20 is 2, and 2 + 1e-12 is
+    // within the tolerance beat times compare with.
+    for distance in [0.0, 1e-20, 1e-12] {
+        let refused = host
+            .live_warp_marker_preview_async(&json!(1), &json!({"clipRef":"clip:clip-1","action":"move","beatTime":2,"distance":distance}))
+            .await;
+        assert_eq!(refused["error"]["code"], -32602, "{distance}: {refused}");
+        assert!(refused["error"]["message"].as_str().unwrap().starts_with("distance"), "{distance}: {refused}");
+    }
 }
 #[tokio::test]
 async fn warp_marker_validation_matches_source() {
