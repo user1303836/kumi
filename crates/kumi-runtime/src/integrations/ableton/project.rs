@@ -708,12 +708,13 @@ fn plural(kind: &str) -> String {
 fn known(kind: &str) -> bool {
     KINDS.iter().any(|(one, _)| *one == kind)
 }
-fn records(pages: &[JsonObject]) -> IndexMap<String, Value> {
+/// A snapshot's records by their ids, borrowed from its pages: a diff names only a few of them.
+fn records(pages: &[JsonObject]) -> IndexMap<&str, &Value> {
     let mut rows = IndexMap::new();
     for page in pages {
         for item in page.get("records").and_then(Value::as_array).into_iter().flatten() {
             if let Some(id) = item["snapshotId"].as_str() {
-                rows.insert(id.to_owned(), item.clone());
+                rows.insert(id, item);
             }
         }
     }
@@ -736,7 +737,7 @@ fn quoted(value: &Value, fallback: &str) -> String {
 }
 static DERIVED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"/(parentSnapshotId|structureHash|trackCount|sceneCount|clipCount|deviceCount)$|/hash$").unwrap());
-fn named(kind: &str, items: &[Value], verb: &str) -> String {
+fn named(kind: &str, items: &[&Value], verb: &str) -> String {
     let names: Vec<_> = items.iter().map(|item| quoted(&item["name"], "")).filter(|s| !s.is_empty()).collect();
     if items.len() == 1 {
         return trim(&format!("{verb} {kind} {}", names.first().map(String::as_str).unwrap_or(""))).into();
@@ -747,15 +748,15 @@ fn named(kind: &str, items: &[Value], verb: &str) -> String {
         format!("{verb} {} {}", items.len(), plural(kind))
     }
 }
-fn pick(ids: &Value, from: &IndexMap<String, Value>) -> Vec<Value> {
-    ids.as_array().into_iter().flatten().filter_map(|id| from.get(&js_text(Some(id))).cloned()).collect()
+fn pick<'a>(ids: &Value, from: &IndexMap<&str, &'a Value>) -> Vec<&'a Value> {
+    ids.as_array().into_iter().flatten().filter_map(|id| from.get(js_text(Some(id)).as_str()).copied()).collect()
 }
-fn resolve_ambiguity(
+fn resolve_ambiguity<'a>(
     item: &Value,
-    was: &IndexMap<String, Value>,
-    now: &IndexMap<String, Value>,
-    added: &mut IndexMap<String, Vec<Value>>,
-    removed: &mut IndexMap<String, Vec<Value>>,
+    was: &IndexMap<&str, &'a Value>,
+    now: &IndexMap<&str, &'a Value>,
+    added: &mut IndexMap<String, Vec<&'a Value>>,
+    removed: &mut IndexMap<String, Vec<&'a Value>>,
     lines: &mut Vec<String>,
 ) {
     let kind = js_text(item.get("kind"));
@@ -792,9 +793,9 @@ pub fn describe_diff(diff: &JsonObject, before: &[JsonObject], after: &[JsonObje
     let was = records(before);
     let now = records(after);
     let mut lines = vec![];
-    let mut added: IndexMap<String, Vec<Value>> = IndexMap::new();
-    let mut removed: IndexMap<String, Vec<Value>> = IndexMap::new();
-    let mut edited: IndexMap<String, Vec<(Value, IndexSet<String>)>> = IndexMap::new();
+    let mut added: IndexMap<String, Vec<&Value>> = IndexMap::new();
+    let mut removed: IndexMap<String, Vec<&Value>> = IndexMap::new();
+    let mut edited: IndexMap<String, Vec<(&Value, IndexSet<String>)>> = IndexMap::new();
     for item in diff.get("items").and_then(Value::as_array).into_iter().flatten() {
         if item["type"] == "ambiguity" {
             resolve_ambiguity(item, &was, &now, &mut added, &mut removed, &mut lines);
@@ -805,17 +806,17 @@ pub fn describe_diff(diff: &JsonObject, before: &[JsonObject], after: &[JsonObje
         }
         let Some(facets) = item["facets"].as_array() else { continue };
         let kind = js_text(item.get("kind"));
-        let old = item["beforeSnapshotId"].as_str().and_then(|id| was.get(id));
-        let current = item["afterSnapshotId"].as_str().and_then(|id| now.get(id));
+        let old = item["beforeSnapshotId"].as_str().and_then(|id| was.get(id)).copied();
+        let current = item["afterSnapshotId"].as_str().and_then(|id| now.get(id)).copied();
         if facets.iter().any(|v| v == "added") {
             if let Some(current) = current {
-                added.entry(kind).or_default().push(current.clone());
+                added.entry(kind).or_default().push(current);
                 continue;
             }
         }
         if facets.iter().any(|v| v == "removed") {
             if let Some(old) = old {
-                removed.entry(kind).or_default().push(old.clone());
+                removed.entry(kind).or_default().push(old);
                 continue;
             }
         }
@@ -838,7 +839,7 @@ pub fn describe_diff(diff: &JsonObject, before: &[JsonObject], after: &[JsonObje
             details.iter().filter_map(|d| d["path"].as_str()?.split('/').nth(2)).filter(|p| !p.is_empty()).map(str::to_owned).collect();
         if !what.is_empty() {
             if let Some(row) = current.or(old) {
-                edited.entry(kind).or_default().push((row.clone(), what));
+                edited.entry(kind).or_default().push((row, what));
             }
         }
     }
@@ -894,8 +895,7 @@ fn numeric(value: Option<&Value>) -> f64 {
         _ => f64::NAN,
     }
 }
-fn track_coordinates(pages: &[JsonObject]) -> IndexMap<String, String> {
-    let rows = records(pages);
+fn track_coordinates(rows: &IndexMap<&str, &Value>) -> IndexMap<String, String> {
     let mut tracks: Vec<_> = rows.values().filter(|r| r["kind"] == "track").collect();
     tracks.sort_by(|a, b| (numeric(a.get("order")) - numeric(b.get("order"))).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
     let mut counts: IndexMap<String, usize> = IndexMap::new();
@@ -977,8 +977,8 @@ pub struct DescribedWatch {
 pub fn describe_watch(diff: &JsonObject, before: &[JsonObject], after: &[JsonObject], limit: Option<usize>) -> DescribedWatch {
     let was = records(before);
     let now = records(after);
-    let mut tracks = track_coordinates(before);
-    tracks.extend(track_coordinates(after));
+    let mut tracks = track_coordinates(&was);
+    tracks.extend(track_coordinates(&now));
     let on = |row: Option<&Value>| {
         row.and_then(|r| r["data"]["parentSnapshotId"].as_str())
             .and_then(|p| tracks.get(p))
@@ -992,10 +992,10 @@ pub fn describe_watch(diff: &JsonObject, before: &[JsonObject], after: &[JsonObj
             continue;
         }
         let change = if item["type"] == "ambiguity" {
-            let names = |ids: &Value, from: &IndexMap<String, Value>| {
+            let names = |ids: &Value, from: &IndexMap<&str, &Value>| {
                 let mut counted: IndexMap<String, usize> = IndexMap::new();
                 for id in ids.as_array().into_iter().flatten() {
-                    if let Some(name) = from.get(&js_text(Some(id))).and_then(|r| r["name"].as_str()) {
+                    if let Some(name) = from.get(js_text(Some(id)).as_str()).and_then(|r| r["name"].as_str()) {
                         *counted.entry(name.into()).or_default() += 1;
                     }
                 }
@@ -1018,8 +1018,8 @@ pub fn describe_watch(diff: &JsonObject, before: &[JsonObject], after: &[JsonObj
                 continue;
             }
             let Some(facets) = item["facets"].as_array() else { continue };
-            let old = item["beforeSnapshotId"].as_str().and_then(|id| was.get(id));
-            let current = item["afterSnapshotId"].as_str().and_then(|id| now.get(id));
+            let old = item["beforeSnapshotId"].as_str().and_then(|id| was.get(id)).copied();
+            let current = item["afterSnapshotId"].as_str().and_then(|id| now.get(id)).copied();
             if facets.iter().any(|v| v == "added") && current.is_some() {
                 let current = current.unwrap();
                 let mut c = json!({"added":kind}).as_object().unwrap().clone();
