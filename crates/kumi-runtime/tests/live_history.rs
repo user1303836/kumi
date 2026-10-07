@@ -5,10 +5,13 @@ use kumi_common::{
     js::json::stringify,
 };
 use kumi_runtime::{
-    core::{contracts::JsonObject, errors::RuntimeError},
+    core::{
+        contracts::{ChangeRecord, JsonObject},
+        errors::RuntimeError,
+    },
     integrations::ableton::{
         connection::{ConnectionOptions, LiveConnection},
-        history::{Applied, FastResult, History},
+        history::{Applied, FastResult, History, MAX_ENTRIES},
         remember::Remember,
     },
     mcp::{
@@ -178,4 +181,46 @@ async fn undo_quiet_groups_retirement_and_emergency_stop_match_source() {
   connection.close().await.unwrap();
  }
 }).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_sessions_history_keeps_at_most_its_cap_however_changes_come_in() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let endpoint = Rc::new(Fixture { config: json!({}), calls: RefCell::new(Vec::new()), original: RefCell::new(Signal::new()) });
+            let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
+            let out = endpoint.clone();
+            options.connect = Some(Rc::new(move |_| {
+                let endpoint: Rc<dyn McpEndpoint> = out.clone();
+                async move { Ok(endpoint) }.boxed_local()
+            }));
+            let connection = LiveConnection::new(options);
+            connection.start(Signal::new()).await.unwrap();
+            let remember = Remember::new(connection.clone(), None, None);
+            let history = History::new(connection.clone(), remember, Some(50), None);
+            let record = |n: usize| {
+                serde_json::from_value::<ChangeRecord>(json!({"id":format!("c{n}"),"family":"clip","title":"Made a clip","state":"applied","at":0}))
+                    .unwrap()
+            };
+            // An Arrangement build: more changes than the cap, quietly, then one group of them.
+            let mut ids = Vec::new();
+            history
+                .quietly(Some(&mut ids), async {
+                    for n in 0..MAX_ENTRIES + 100 {
+                        history.remember(record(n), String::new(), None);
+                    }
+                })
+                .await;
+            assert_eq!(history.entries.borrow().len(), MAX_ENTRIES);
+            assert!(history.entries.borrow().get("c0").is_none(), "the oldest go first");
+            history.grouped("Built the arrangement", &ids, &[]);
+            assert_eq!(history.entries.borrow().len(), MAX_ENTRIES);
+            // One by one past the cap: each brings it back down.
+            for n in 0..3 {
+                history.remember(record(MAX_ENTRIES + 100 + n), String::new(), None);
+            }
+            assert_eq!(history.entries.borrow().len(), MAX_ENTRIES);
+            connection.close().await.unwrap();
+        })
+        .await;
 }

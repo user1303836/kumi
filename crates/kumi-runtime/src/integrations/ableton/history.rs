@@ -30,6 +30,8 @@ use std::{
 
 /// The most each call to Live of Kumi's undo of a cut waits.
 const RESTORE_MS: u64 = 30_000;
+/// The most changes a session's history keeps, the oldest going first.
+pub const MAX_ENTRIES: usize = 20_000;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Restore {
@@ -139,14 +141,20 @@ impl History {
     pub fn is_quiet(&self) -> bool {
         self.quiet.borrow().is_some()
     }
+    /// At most MAX_ENTRIES changes are kept, the oldest going first, however they came in (quiet ones, groups).
+    fn keep_within_cap(&self) {
+        let mut entries = self.entries.borrow_mut();
+        let over = entries.len().saturating_sub(MAX_ENTRIES);
+        if over > 0 {
+            entries.drain(..over);
+        }
+    }
     pub fn remember(&self, record: ChangeRecord, transaction_id: String, restore: Option<Restore>) {
         self.entries.borrow_mut().insert(record.id.clone(), Rc::new(RefCell::new(Applied::new(record.clone(), transaction_id, restore))));
+        self.keep_within_cap();
         if let Some(quiet) = self.quiet.borrow_mut().as_mut() {
             quiet.push(record.id.clone());
             return;
-        }
-        if self.entries.borrow().len() > 20_000 {
-            self.entries.borrow_mut().shift_remove_index(0);
         }
         self.emit(&record);
         self.remember.schedule_save(20_000);
@@ -254,6 +262,7 @@ impl History {
         let mut entry = Applied::new(record.clone(), String::new(), None);
         entry.members = Some(members);
         self.entries.borrow_mut().insert(record.id.clone(), Rc::new(RefCell::new(entry)));
+        self.keep_within_cap();
         self.emit(&record);
         self.remember.schedule_save(20_000);
         Some(record.id)
