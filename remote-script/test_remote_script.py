@@ -5301,7 +5301,9 @@ class SelectionViewExpansionTests(unittest.TestCase):
         self.assertEqual(row["clipView"], {"gridQuantization": 1, "gridIsTriplet": False})
         self.assertTrue(mapper._operation_supported("device.view.set"))
         device_row = mapper.snapshot()["tracks"][0]["devices"][0]
-        collapsed_revision = hashlib.sha256(mapper._bounded_canonical({"collapsed": False}).encode()).hexdigest()
+        # The host fences on the row's own view, as Live has it.
+        self.assertEqual(device_row["view"], {"isCollapsed": False})
+        collapsed_revision = hashlib.sha256(mapper._bounded_canonical({"collapsed": device_row["view"]["isCollapsed"]}).encode()).hexdigest()
         result = mapper.invoke("device.view.set", {"ref": device_row["ref"], "collapsed": True, "expectedObjectIdentity": device_row["objectIdentity"], "expectedStateRevision": collapsed_revision})
         self.assertTrue(result["changed"]); validate_operation_payload("device.view.set", "result", result)
         self.assertTrue(device.view.is_collapsed)

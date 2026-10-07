@@ -2012,6 +2012,10 @@ class LiveObjectMapper:
             "sidechainRoutingType": self._choice_name(self._read_attr(device, "input_routing_type")),
             "parameters": parameters,
         }
+        # Collapsed in its chain or not: what device.view.set fences on. A device's view is never content
+        # (_owned_device_row leaves it out of ownership checks).
+        device_view = getattr(device, "view", None); collapsed = self._read_attr(device_view, "is_collapsed") if device_view is not None else None
+        row["view"] = {"isCollapsed": collapsed if isinstance(collapsed, bool) else None}
         if row["canHaveChains"] is True:
             row["chains"] = self._chain_rows(device, device_ref, track_index, path, traversal, depth)
             chain_selector = self._read_attr(device, "chain_selector")
@@ -2039,6 +2043,7 @@ class LiveObjectMapper:
             pad_scroll = self._read_attr(rack_view, "drum_pads_scroll_position") if rack_view is not None else None
             show_devices = self._read_attr(rack_view, "is_showing_chain_devices") if rack_view is not None else None
             row["view"] = {
+                **row["view"],
                 "selectedChainRef": self.refs.put("chain", selected_chain, f"{device_ref}:selected") if selected_chain is not None else None,
                 "selectedPadIndex": int(self._read_attr(selected_pad, "index")) if selected_pad is not None and isinstance(self._read_attr(selected_pad, "index"), int) and not isinstance(self._read_attr(selected_pad, "index"), bool) else None,
                 "padScrollPosition": int(pad_scroll) if isinstance(pad_scroll, int) and not isinstance(pad_scroll, bool) else None,
