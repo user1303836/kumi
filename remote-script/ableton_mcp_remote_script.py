@@ -8505,7 +8505,21 @@ class LiveObjectMapper:
             if not isinstance(value, bool): raise ValueError("chainActivator is invalid")
             proposals.append((parameter, 1.0 if value else 0.0, "chain activator"))
         if not proposals: raise ValueError("chain mixer mutation has no fields")
-        for parameter, target, name in proposals: self._set_parameter_direct(parameter, target, name)
+        applied: list[tuple[Any, Any]] = []
+        try:
+            for parameter, target, name in proposals:
+                prior = self._read_attr(parameter, "value")
+                self._set_parameter_direct(parameter, target, name); applied.append((parameter, prior))
+        except BaseException as error:
+            # The one that failed put itself back; those written before it go back too, so a failed call leaves the chain as it was.
+            rollback_failed = False
+            for parameter, prior in reversed(applied):
+                try: parameter.value = prior
+                except BaseException: rollback_failed = True
+                restored = self._read_attr(parameter, "value")
+                if not isinstance(restored, (int, float)) or isinstance(restored, bool) or not _same_number(restored, prior): rollback_failed = True
+            if rollback_failed: raise ValueError("chain mixer change failed and exact rollback failed") from error
+            raise
         revision = self.refs.touch(reference)
         return {"changed": True, "revision": revision}
 

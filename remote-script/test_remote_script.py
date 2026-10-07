@@ -5578,6 +5578,19 @@ class MixerRoutingExpansionTests(unittest.TestCase):
             result = mapper.invoke("mixer.extended.set", {**fences, "crossfader": -0.5})
             self.assertTrue(result["changed"]); self.assertEqual(mixer.crossfader.value, -0.5)
 
+    def test_a_failed_chain_mixer_change_puts_back_what_it_wrote_before(self):
+        class Stuck(FakeParameter):
+            def __setattr__(self, name, value):
+                if name == "value" and getattr(self, "stuck", False): raise RuntimeError("Live refused the pan")
+                object.__setattr__(self, name, value)
+        song = FakeSong(); mixer = FakeMixerDevice(); mixer.panning = Stuck(); mixer.panning.value = 0.0; mixer.panning.min = -1.0; mixer.panning.stuck = True
+        chain = type("Chain", (), {"name": "Chain 1", "devices": [], "mute": False, "solo": False, "mixer_device": mixer})()
+        rack = FakeDevice(); rack.name = "Rack"; rack.can_have_chains = True; rack.chains = [chain]; song.tracks[0].devices = [rack]
+        mapper = LiveObjectMapper(song); row = mapper.snapshot()["tracks"][0]["devices"][0]["chains"][0]; mixer.volume.value = 0.8
+        fences = {"ref": row["ref"], "expectedObjectIdentity": row["objectIdentity"], "expectedMixerIdentity": mapper._capture_object_identity(mixer), "expectedStateRevision": hashlib.sha256(mapper._bounded_canonical({"sends": [send.value for send in mixer.sends]}).encode()).hexdigest()}
+        with self.assertRaises(ValueError): mapper.invoke("chain-mixer.set", {**fences, "volume": 0.3, "pan": -0.5})
+        self.assertEqual((mixer.volume.value, mixer.panning.value), (0.8, 0.0), "the volume written before the pan failed is back too")
+
     def test_chain_mixer_fields_and_set(self):
         song = FakeSong()
         chain = type("Chain", (), {"name": "Chain 1", "devices": [], "mute": False, "solo": False, "mixer_device": FakeMixerDevice()})()
