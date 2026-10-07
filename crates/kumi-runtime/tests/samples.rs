@@ -16,14 +16,15 @@ fn wav_aiff_partial_odd_streamed_and_malformed_headers_match_source() {
         }
     }
 }
-#[test]
-fn a_sample_named_on_a_network_share_is_never_looked_at() {
+#[tokio::test(flavor = "current_thread")]
+async fn a_sample_named_on_a_network_share_is_never_looked_at() {
     use kumi_runtime::integrations::ableton::change_context::SampleBank;
     let folder = tempfile::tempdir().unwrap();
     let root = folder.path().canonicalize().unwrap().to_string_lossy().into_owned();
     std::fs::write(format!("{root}/kick.wav"), b"RIFF").unwrap();
     let bank = SampleBank::default();
-    assert!(bank.sample(&format!("{root}/kick.wav")).is_some());
+    *bank.places.borrow_mut() = Some(vec![]);
+    assert!(bank.sample(&format!("{root}/kick.wav")).await.is_some());
     // "//" before a local path is that same path off Windows: only the refusal keeps it out there.
     for path in [
         format!("/{root}/kick.wav"),
@@ -31,8 +32,35 @@ fn a_sample_named_on_a_network_share_is_never_looked_at() {
         r"/\host\share\kick.wav".into(),
         r"\??\UNC\host\share\kick.wav".into(),
     ] {
-        assert!(bank.sample(&path).is_none(), "{path}");
+        assert!(bank.sample(&path).await.is_none(), "{path}");
     }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_sound_in_one_of_lives_places_on_a_share_is_copied_here_first() {
+    use kumi_runtime::integrations::ableton::change_context::SampleBank;
+    let folder = tempfile::tempdir().unwrap();
+    let root = folder.path().canonicalize().unwrap().to_string_lossy().into_owned();
+    for (path, bytes) in [("Place/Kicks/kick.wav", &b"RIFF one"[..]), ("Other/snare.wav", b"RIFF")] {
+        std::fs::create_dir_all(std::path::Path::new(&format!("{root}/{path}")).parent().unwrap()).unwrap();
+        std::fs::write(format!("{root}/{path}"), bytes).unwrap();
+    }
+    let bank = SampleBank::default();
+    // A Place on a share: "//" before a local folder spells a share, and off Windows it reads as that folder.
+    *bank.places.borrow_mut() = Some(vec![format!("/{root}/Place")]);
+    let cache = format!("{root}/cache");
+    *bank.cache.borrow_mut() = Some(cache.clone().into());
+    let shared = format!("/{root}/Place/Kicks/kick.wav");
+    let copied = bank.sample(&shared).await.unwrap();
+    assert!(copied.path.starts_with(&format!("{cache}/")) && copied.path.ends_with("kick.wav"), "{copied:?}");
+    assert_eq!(std::path::Path::new(&copied.path).parent().unwrap().to_string_lossy(), copied.folder);
+    assert_eq!(std::fs::read(&copied.path).unwrap(), b"RIFF one");
+    // The same file again: the copy is kept. Changed at the Place: copied again.
+    assert_eq!(bank.sample(&shared).await.unwrap(), copied);
+    std::fs::write(format!("{root}/Place/Kicks/kick.wav"), b"RIFF two!").unwrap();
+    assert_eq!(std::fs::read(&bank.sample(&shared).await.unwrap().path).unwrap(), b"RIFF two!");
+    // Another share isn't opened, and nothing of it is copied.
+    assert!(bank.sample(&format!("/{root}/Other/snare.wav")).await.is_none());
+    assert_eq!(std::fs::read_dir(&cache).unwrap().count(), 1);
 }
 #[test]
 fn natural_sample_name_sort_matches_source_numeric_and_base_collation() {

@@ -46,7 +46,7 @@ pub struct ParameterRange {
 }
 #[async_trait(?Send)]
 pub trait ChangeContext {
-    fn sample(&self, path: &str) -> Option<SampleFile>;
+    async fn sample(&self, path: &str) -> Option<SampleFile>;
     async fn parameters(&self, device_ref: &str) -> Result<Vec<ParameterRange>, RuntimeError>;
     async fn ranges(&self, device_ref: &str) -> Result<Vec<ParameterRange>, RuntimeError>;
     async fn pick(&self, selector: SampleSelector) -> Result<Option<SampleFile>, RuntimeError>;
@@ -160,7 +160,7 @@ fn numeric(value: &Value) -> Value {
 }
 async fn sample_for(value: Option<&Value>, context: &dyn ChangeContext) -> Result<Result<SampleFile, String>, RuntimeError> {
     Ok(match value{
-        Some(Value::String(path))=>context.sample(path).ok_or_else(||"Give the path of an audio file on this computer (one find_sounds returned, a recording, the producer's own), or {\"random\": true, \"words\": [...]} for Kumi to pick one.".into()),
+        Some(Value::String(path))=>context.sample(path).await.ok_or_else(||"Give the path of an audio file on this computer (one find_sounds returned, a recording, the producer's own), or {\"random\": true, \"words\": [...]} for Kumi to pick one.".into()),
         Some(Value::Object(selector))=>{
             let strings=|key:&str|array(selector.get(key)).iter().filter_map(Value::as_str).map(str::to_owned).collect();
             context.pick(SampleSelector{words:strings("words"),folders:strings("folders"),random:selector.get("random")==Some(&Value::Bool(true))}).await?.ok_or_else(||"No sample matches that; try other words or folders.".into())
@@ -445,7 +445,11 @@ impl ChangeKind {
                 out
             }
             "replace_sample" | "import_audio" => {
-                let Some(found) = input.get("sample").and_then(Value::as_str).and_then(|s| context.sample(s)) else {
+                let found = match input.get("sample").and_then(Value::as_str) {
+                    Some(sample) => context.sample(sample).await,
+                    None => None,
+                };
+                let Some(found) = found else {
                     return Ok(Err("Give the path of an audio file on this computer (absolute, or from ~).".into()));
                 };
                 let mut out = if self.tool == "replace_sample" {

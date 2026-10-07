@@ -13,7 +13,7 @@ struct Context {
 }
 #[async_trait(?Send)]
 impl ChangeContext for Context {
-    fn sample(&self, path: &str) -> Option<SampleFile> {
+    async fn sample(&self, path: &str) -> Option<SampleFile> {
         self.calls.borrow_mut().push(json!(["sample", path]));
         path.starts_with("/samples/").then(|| SampleFile { path: path.into(), folder: "/samples".into() })
     }
