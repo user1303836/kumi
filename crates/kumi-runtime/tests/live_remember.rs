@@ -24,10 +24,14 @@ struct Fixture {
     storage: RefCell<Vec<Value>>,
     owner: RefCell<Weak<Remember>>,
 }
+/// The identity Kumi gives the Set Live calls `name` (as a look at the Set reads it).
+fn identity(name: &str) -> String {
+    stringify(&json!(["7:set:0", name]))
+}
 fn current() -> Rc<CurrentProject> {
     // The test store takes the Set's path as its project, so what it records reads as before.
     Rc::new(CurrentProject {
-        identity: "song".into(),
+        identity: identity("song"),
         name: "Set".into(),
         path: Some("/saved.als".into()),
         project: Some("/saved.als".into()),
@@ -43,7 +47,7 @@ impl McpEndpoint for Fixture {
         None
     }
     async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
-        let names = ["live_project_info", "live_project_snapshot_export", "live_project_snapshot_diff"];
+        let names = ["live_discover", "live_project_info", "live_project_snapshot_export", "live_project_snapshot_diff"];
         Ok(serde_json::from_value(json!({"tools":names.iter().filter(|name|!self.config["missing"].as_array().is_some_and(|a|a.contains(&json!(name)))).map(|name|json!({"name":name,"inputSchema":{"type":"object"}})).collect::<Vec<_>>()})).unwrap())
     }
     async fn call(&self, name: &str, args: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
@@ -54,7 +58,10 @@ impl McpEndpoint for Fixture {
         if self.config["replace"] == true {
             *self.owner.borrow().upgrade().unwrap().current.borrow_mut() = Some(current());
         }
-        let body = if name == "live_project_info" {
+        let body = if name == "live_discover" {
+            // The Set Live has open: "song" unless the case opened another.
+            json!({"epoch":7,"kind":"set","items":[{"ref":"7:set:0","objectIdentity":self.config.get("liveSet").cloned().unwrap_or(json!("song"))}]})
+        } else if name == "live_project_info" {
             self.config.get("info").cloned().unwrap_or_else(|| json!({"path":"/saved.als","exists":true}))
         } else if name == "live_project_snapshot_diff" {
             if self.config["diffError"] == true {
@@ -155,7 +162,7 @@ async fn saved_set_memory_export_queue_and_catch_up_match_source() {
                     None => Some(current()),
                     Some(Value::Null) => None,
                     Some(p) => Some(Rc::new(CurrentProject {
-                        identity: p["identity"].as_str().unwrap().into(),
+                        identity: identity(p["identity"].as_str().unwrap()),
                         name: p["name"].as_str().unwrap().into(),
                         path: p["path"].as_str().map(str::to_owned),
                         project: p["path"].as_str().map(str::to_owned),
@@ -176,7 +183,7 @@ async fn saved_set_memory_export_queue_and_catch_up_match_source() {
                         Ok(json!([null, null]))
                     }
                     "catch" => {
-                        memory.catch_up("song".into(), "Set".into(), config["afterReconnect"] == true);
+                        memory.catch_up(identity("song"), "Set".into(), config["afterReconnect"] == true);
                         memory.pending().await;
                         Ok(json!(*memory.context.borrow()))
                     }

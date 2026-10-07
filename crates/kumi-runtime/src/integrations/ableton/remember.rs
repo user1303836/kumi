@@ -110,6 +110,22 @@ impl Remember {
         }
         Ok(pages)
     }
+    /// Whether Live has the Set `identity` open, read now. What Kumi knows of the open Set (`current`) changes only
+    /// with its next look, so after the producer opened another Set an export can be that one's: it's kept only as
+    /// the Set it was read from.
+    async fn still_open(&self, identity: &str, signal: Signal) -> bool {
+        let read = self
+            .connection
+            .call("live_discover", super::views::object(json!({"kind":"set","limit":1,"fields":["ref","objectIdentity"]})), signal)
+            .await;
+        let Some(page) = read.ok().and_then(|read| payload(&read).ok()) else { return false };
+        page.get("items")
+            .and_then(Value::as_array)
+            .filter(|items| items.len() == 1)
+            .and_then(|items| items[0].as_object())
+            .and_then(|row| super::context::set_identity(row).ok())
+            .is_some_and(|open| open == identity)
+    }
     pub fn save_now(self: &Rc<Self>, bound: Option<u64>) -> Saving {
         self.enqueue(move |this| {
             async move {
@@ -126,8 +142,8 @@ impl Remember {
                 if !connection.has("live_project_snapshot_export") {
                     return Ok(());
                 }
-                let pages = this.export_pages(signal).await?;
-                if !this.current().is_some_and(|current| Rc::ptr_eq(&current, &known)) {
+                let pages = this.export_pages(signal.clone()).await?;
+                if !this.current().is_some_and(|current| Rc::ptr_eq(&current, &known)) || !this.still_open(&known.identity, signal).await {
                     return Ok(());
                 }
                 store
@@ -240,6 +256,7 @@ impl Remember {
    let connection=&this.connection;let signal=abort::any([connection.lifetime.clone(),abort::timeout(60_000)]);connection.ensure_catalog(signal.clone()).await.map_err(RuntimeError::from)?;
    if !["live_project_info","live_project_snapshot_export","live_project_snapshot_diff"].iter().all(|name|connection.has(name)){return Ok(())}if !this.current().is_some_and(|p|p.identity==identity){return Ok(())}
    let pages=this.export_pages(signal.clone()).await?;
+   if !this.still_open(&identity,signal.clone()).await{return Ok(())}
    // This Set's own baseline, or, when it moved here, the project's latest: a version first seen here starts fresh.
    let baseline=store.load_set(&project,&path).await?;
    if let Some(baseline)=baseline.filter(|_|this.current().is_some_and(|p|p.identity==identity)){
