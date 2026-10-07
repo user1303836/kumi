@@ -2664,6 +2664,15 @@ class ControlSurfaceTests(unittest.TestCase):
         self.assertEqual(sorted((note.pitch, note.start_time) for note in clip.notes), sorted((36 + index % 24, index * 0.25) for index in range(300)))
         self.assertLess(len(made), 2000, "each note's canonical text is made a few times, not once per note it's compared with")
 
+    def test_a_note_on_another_midi_channel_is_refused_before_anything_is_added(self):
+        song = FakeSong(); clip = FakeClip(4.0); song.tracks[0].clip_slots[0].clip = clip
+        mapper = LiveObjectMapper(song); ref = mapper.snapshot()["tracks"][0]["clips"][0]["ref"]
+        notes = [{"pitch": 36, "start": 0, "duration": 0.25, "velocity": 100, "channel": 1}, {"pitch": 38, "start": 1, "duration": 0.25, "velocity": 100, "channel": 10}]
+        with self.assertRaisesRegex(ValueError, "^Live's clip notes have no MIDI channel, so a note can't be on channel 10"):
+            mapper.invoke("note.add-batch", {"ref": ref, "notes": notes, **self.note_authority(mapper, ref)})
+        self.assertEqual(clip.notes, [], "nothing was added")
+        self.assertEqual(mapper.invoke("note.add-batch", {"ref": ref, "notes": notes[:1], **self.note_authority(mapper, ref)})["added"], 1)
+
     def test_a_big_note_delete_makes_its_id_set_once(self):
         song = FakeSong(); clip = FakeClip(64.0); song.tracks[0].clip_slots[0].clip = clip
         clip.add_new_notes([{"pitch": 36 + index % 48, "start_time": (index % 256) * 0.25, "duration": 0.25, "velocity": 100, "mute": False} for index in range(2000)])

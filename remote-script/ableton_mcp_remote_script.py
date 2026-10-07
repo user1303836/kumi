@@ -12324,6 +12324,9 @@ class LiveObjectMapper:
                 or not math.isfinite(float(note["start"])) or not math.isfinite(float(note["duration"]))
                 or float(note["start"]) < 0 or float(note["duration"]) <= 0):
             raise ValueError("note is invalid")
+        # Live's clip notes have no MIDI channel: Live keeps every note on channel 1, and a note asked for on another
+        # couldn't be confirmed (the batch went back with a misleading "Live changed …").
+        if note["channel"] != 1: raise ValueError(f"Live's clip notes have no MIDI channel, so a note can't be on channel {note['channel']}: leave the channel out, or use 1{UNRUN_SUFFIX}")
         if float(note["start"]) + float(note["duration"]) > (self._note_time_end(clip) or 0.0):
             raise ValueError(f"note runs past the clip: {self._note_span(clip)}")
         probability = note.get("probability")
