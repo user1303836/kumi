@@ -358,16 +358,9 @@ fn swap_failed(windows: bool, kept: bool) -> String {
         (false, false) => format!("Couldn't put the new Kumi in place, and the one you had couldn't go back, so kumi won't start: {installer}."),
     }
 }
+/// What an update leaves behind, removed when it ends, best effort: a file a scan still holds can't make a good
+/// update fail.
 struct Cleanup(Vec<String>);
-impl Cleanup {
-    fn finish(&mut self) -> std::io::Result<()> {
-        for path in &self.0 {
-            remove(path)?
-        }
-        self.0.clear();
-        Ok(())
-    }
-}
 impl Drop for Cleanup {
     fn drop(&mut self) {
         for path in &self.0 {
@@ -424,7 +417,7 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
     tokio::fs::create_dir_all(&downloads).await.map_err(error)?;
     let bundle = join(&downloads, &manifest.bundle);
     let fresh = join(&home, "app.new");
-    let mut cleanup = Cleanup(vec![fresh.clone(), bundle.clone()]);
+    let cleanup = Cleanup(vec![fresh.clone(), bundle.clone()]);
     let result: Result<i32, RuntimeError> = async {
         let downloaded = step(
             io.out.clone(),
@@ -494,7 +487,7 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
         Ok(0)
     }
     .await;
-    cleanup.finish().map_err(error)?;
+    drop(cleanup);
     let code = result?;
     if code != 0 {
         return Ok(code);

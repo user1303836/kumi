@@ -224,6 +224,31 @@ async fn checked_executable_update_swap_and_rollback() {
         out.0.borrow()
     );
 }
+#[cfg(unix)]
+#[tokio::test]
+async fn an_update_in_place_is_an_update_even_when_its_download_cant_be_removed() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let env = env(dir.path());
+    let home = Path::new(&env["KUMI_HOME"]);
+    put(home.join("app/package.json"), json!({"version":KUMI_VERSION}).to_string());
+    put(home.join("app").join(executable_name("kumi")), "earlier");
+    let bytes = fake_release(dir.path(), "99.0.0");
+    let mut good = manifest("99.0.0");
+    good["sha256"] = json!(hex::encode(Sha256::digest(&bytes)));
+    // The download lands in a file that's there already, in a folder it can't be removed from afterwards (as a
+    // file a scan holds can't be, on Windows).
+    let downloads = home.join("downloads");
+    put(downloads.join("kumi.tar.gz"), "");
+    fs::set_permissions(&downloads, fs::Permissions::from_mode(0o555)).unwrap();
+    let (mut updated, out) = io(&env);
+    updated.fetcher = Some(Rc::new(Serve { manifest: good, bytes, status: 200, offline: false, calls: RefCell::new(vec![]) }));
+    let code = update_installed(updated).await;
+    fs::set_permissions(&downloads, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(code.unwrap(), 0, "{}", out.0.borrow());
+    assert!(out.0.borrow().contains("Kumi is now 99.0.0"), "{}", out.0.borrow());
+    assert!(out.0.borrow().contains("To connect Live"), "the bridge step still runs: {}", out.0.borrow());
+}
 #[tokio::test]
 async fn failed_unpack_or_probe_preserves_current_app() {
     let dir = tempfile::tempdir().unwrap();
