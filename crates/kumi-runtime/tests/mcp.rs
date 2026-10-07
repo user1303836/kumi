@@ -266,6 +266,17 @@ local_test!(missing_capabilities_cannot_be_called_even_under_the_allowlist, {
     tools.close().await.unwrap();
 });
 
+local_test!(a_bridge_that_exits_while_a_child_holds_its_pipes_is_seen_closed, {
+    // A host a bridge launched can keep the bridge's stdout and stderr open after the bridge is gone: its requests
+    // fail once it's gone, not at their timeouts.
+    let (_, tools) = open("normal", 20_000).await;
+    tools.refresh(signal()).await.unwrap();
+    let started = Instant::now();
+    assert!(call(&tools, "server_status", json!({"action":"exit-held"})).await.is_err());
+    assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
+    tools.close().await.unwrap();
+});
+
 local_test!(oversized_protocol_frame_closes_transport_and_invalidates_old_descriptors, {
     let (_, tools) = open("normal", 2000).await;
     tools.refresh(signal()).await.unwrap();

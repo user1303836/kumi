@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ErrorCode, ListToolsRequestSchema, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { setTimeout as delay } from "node:timers/promises";
 import { writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 const mode = process.argv[2] ?? "normal";
 const server = new Server({ name: "kumi-synthetic-fixture", version: "1" }, { capabilities: { tools: { listChanged: true } } });
 let changed = false;
@@ -28,6 +29,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     await delay(60_000, undefined, { signal: extra.signal });
   }
   if (args.action === "exit") { process.exit(0); }
+  // Exits while a process it started still holds its stdout and stderr, as a host a bridge launched could on Windows.
+  if (args.action === "exit-held") {
+    spawn(process.execPath, ["-e", "setTimeout(() => {}, 15000)"], { stdio: ["ignore", "inherit", "inherit"], detached: true }).unref();
+    process.exit(0);
+  }
   // An answer that crosses the client's cancel: written after it, as a bridge finishing its work does.
   if (args.action === "late") {
     const id = extra.requestId;

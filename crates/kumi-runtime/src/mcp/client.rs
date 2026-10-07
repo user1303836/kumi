@@ -165,6 +165,9 @@ pub struct Options {
     pub cwd: Option<PathBuf>,
 }
 
+/// How long the transport waits, after the bridge exits, for its output to end before it counts as closed anyway.
+const EXIT_GRACE: Duration = Duration::from_millis(1000);
+
 /// `Number.isSafeInteger(ms) && ms >= 1`.
 fn valid_timeout(ms: u64) -> bool {
     (1..=9_007_199_254_740_991).contains(&ms)
@@ -217,8 +220,9 @@ fn child_environment(entry: &Path, allow_tools: &[String]) -> Vec<(String, Strin
         set("ABLETON_MCP_TOOL_POLICY", "full".into());
         set("ABLETON_MCP_TOOL_ALLOW", unique.into_iter().collect::<Vec<_>>().join(","));
     }
-    // Windows runtime variables are not inference credentials. No complete process.env inheritance.
-    for key in ["SYSTEMROOT", "SYSTEMDRIVE", "TEMP", "TMP"] {
+    // Windows runtime variables are not inference credentials. No complete process.env inheritance. PROGRAMDATA is
+    // where the bridge finds Live's Extension Host, on whichever drive Windows is.
+    for key in ["SYSTEMROOT", "SYSTEMDRIVE", "TEMP", "TMP", "PROGRAMDATA"] {
         if let Some(value) = std::env::var(key).ok().filter(|value| !value.is_empty()) {
             set(key, value);
         }
@@ -469,6 +473,13 @@ impl Transport {
         }
         self.exited.set(true);
         self.one_closed();
+        // A process the bridge started may hold its pipes open (on Windows it can inherit them), so their ends may
+        // never come: once the bridge is gone, what it wrote gets a moment to be read, then the transport is closed.
+        tokio::time::sleep(EXIT_GRACE).await;
+        if self.closes_needed.get() > 0 {
+            self.closes_needed.set(1);
+            self.one_closed();
+        }
     }
 
     #[cfg(unix)]
@@ -485,9 +496,9 @@ impl Transport {
         let _ = child.start_kill();
     }
 
-    /// One of exit, stdout's end and stderr's end; the third is the child's `close` event.
+    /// One of exit, stdout's end and stderr's end; the third is the child's `close` event (once only).
     fn one_closed(&self) {
-        let left = self.closes_needed.get().saturating_sub(1);
+        let Some(left) = self.closes_needed.get().checked_sub(1) else { return };
         self.closes_needed.set(left);
         if left == 0 {
             self.attached.set(false);
