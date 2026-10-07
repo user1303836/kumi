@@ -3310,6 +3310,32 @@ class RealtimePlaneTests(unittest.TestCase):
         probe.close()
         return _RealtimePlane(_Bridge(), "127.0.0.1", port)
 
+    def test_an_oversized_datagram_on_windows_is_dropped_and_ingress_goes_on(self):
+        import socket as _socket
+        from ableton_mcp_remote_script import _RealtimePlane
+        plane = _RealtimePlane(types.SimpleNamespace(), "127.0.0.1", 0)
+
+        class TooBig(OSError):
+            winerror = 10040
+
+        class Socket:
+            def __init__(self): self.reads = 0
+            def recvfrom(self, size):
+                self.reads += 1
+                if self.reads == 1: raise TooBig(10040, "A message sent on a datagram socket was larger than the internal message buffer")
+                if self.reads == 2: return b"not a packet", ("127.0.0.1", 40000)
+                plane._stop.set(); raise _socket.timeout()
+
+        plane._socket = Socket(); plane._recv_loop()
+        self.assertEqual((plane._socket.reads, plane.dropped_invalid), (3, 2), "both dropped as invalid, and the datagram after the oversized one read")
+
+    def test_other_socket_errors_still_end_the_ingress(self):
+        from ableton_mcp_remote_script import _RealtimePlane
+        plane = _RealtimePlane(types.SimpleNamespace(), "127.0.0.1", 0); reads = []
+        def broken(size): reads.append(size); raise OSError(9, "Bad file descriptor")
+        plane._socket = types.SimpleNamespace(recvfrom=broken); plane._recv_loop()
+        self.assertEqual((len(reads), plane.dropped_invalid), (1, 0))
+
     def _arm(self, plane, ttl_ms, channels, references, source_ports=None):
         authorities = [plane._bridge.mapper._realtime_parameter_authority(reference) for reference in references]
         return plane.arm(ttl_ms, channels, references, source_ports, authorities)

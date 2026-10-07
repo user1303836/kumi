@@ -12612,6 +12612,10 @@ class _RealtimeAuthorityChanged(ValueError):
     pass
 
 
+# Windows' code for a datagram larger than the receive buffer (its errno and winerror alike).
+_WSAEMSGSIZE = 10040
+
+
 class _RealtimePlane:
     """Short-lived loopback realtime ingress shared by JSON UDP, OSC, XY,
     and Max clients. Authentication, endpoint/channel allowlists, sequence and
@@ -12757,7 +12761,13 @@ class _RealtimePlane:
                 data, address = self._socket.recvfrom(REALTIME_MAX_DATAGRAM + 1)
             except socket.timeout:
                 continue
-            except OSError:
+            except OSError as error:
+                # Windows refuses a datagram bigger than the buffer (WSAEMSGSIZE) where other systems cut it:
+                # it's an oversized packet, dropped like one, not the end of the ingress.
+                if not self._stop.is_set() and _WSAEMSGSIZE in (getattr(error, "winerror", None), error.errno):
+                    with self._lock:
+                        self.dropped_invalid += 1
+                    continue
                 break
             try:
                 self._handle(data, address)
