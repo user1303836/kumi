@@ -152,6 +152,26 @@ fn drum_patterns_print_as_lanes_and_read_back() {
 }
 
 #[test]
+fn a_long_drum_clip_that_never_repeats_prints_in_a_moment() {
+    // 256 bars of four drums on irregular sixteenths: each lane's period is found in one pass, not one per length.
+    let frame = Frame { drums: true, ..Frame::default() };
+    let mut rng = StdRng::seed_from_u64(29);
+    let mut notes = vec![];
+    for pitch in [36, 38, 42, 46] {
+        for step in 0..256 * 16 {
+            if rng.random_bool(0.3) {
+                notes.push(Note::new(pitch, step as f64 * 0.25, 0.25, 100.));
+            }
+        }
+    }
+    let start = std::time::Instant::now();
+    let text = round_trip(&notes, &frame);
+    assert_eq!(text.lines().count(), 4, "a lane for each drum");
+    let budget = if cfg!(debug_assertions) { 5_000 } else { 1_000 };
+    assert!(start.elapsed().as_millis() < budget, "took {} ms", start.elapsed().as_millis());
+}
+
+#[test]
 fn a_loop_on_the_grid_prints_short() {
     let frame = Frame { drums: true, ..Frame::default() };
     let written = "kick x..x..x...x..x.. *16\nsnare ....X... *32\nhat x.x.x.x.x.x.3.x. *16 o=40\nC0 /8 x--.x... *16";

@@ -23,7 +23,14 @@ pub fn print(notes: &[Note], frame: &Frame) -> Printed {
     let mut sorted = notes.to_vec();
     sorted.sort_by(order);
     let compact = compact(&sorted, frame);
-    let text = if reads_back(&compact, &sorted, frame) { compact } else { plain(&sorted, frame) };
+    // Each text is read back once: the compact print when it reads back, else the plain one, and whether that does.
+    let (text, reads) = if reads_back(&compact, &sorted, frame) {
+        (compact, true)
+    } else {
+        let plain = plain(&sorted, frame);
+        let reads = reads_back(&plain, &sorted, frame);
+        (plain, reads)
+    };
     let mut left_out = vec![];
     if sorted.iter().any(|note| note.release_velocity.is_some_and(|velocity| velocity != 64.)) {
         left_out.push("release velocities aren't written");
@@ -31,7 +38,7 @@ pub fn print(notes: &[Note], frame: &Frame) -> Printed {
     if sorted.iter().any(|note| note.channel.is_some_and(|channel| channel > 1)) {
         left_out.push("MIDI channels aren't written");
     }
-    if !reads_back(&text, &sorted, frame) {
+    if !reads {
         left_out.push("the text doesn't read back as the notes");
     }
     Printed { text, exact: left_out.is_empty(), left_out }
@@ -42,6 +49,9 @@ fn reads_back(text: &str, notes: &[Note], frame: &Frame) -> bool {
 }
 /// Whether two lists hold the same notes, in any order: times to float noise, the rest exactly.
 fn same(read: &[Note], notes: &[Note]) -> bool {
+    if read.len() != notes.len() {
+        return false;
+    }
     // By pitch first: float noise mustn't swap two pitches that start together.
     let by_pitch = |a: &Note, b: &Note| a.pitch.cmp(&b.pitch).then(a.start.total_cmp(&b.start)).then(a.duration.total_cmp(&b.duration));
     let (mut read, mut notes) = (read.to_vec(), notes.to_vec());
@@ -347,7 +357,7 @@ fn fit(hits: &[Note], step_text: &str, frame: &Frame, velocity: f64) -> Option<S
         .collect::<Option<_>>()?;
     // The shortest period the steps repeat in, played as many times as it takes (or until where they end).
     let length = chars.len();
-    let period = (1..=length).find(|period| (0..length).all(|at| chars[at] == chars[at % period]))?;
+    let period = (length > 0).then(|| shortest_period(&chars))?;
     let times = length.div_ceil(period);
     let fill = if period == length {
         String::new()
@@ -382,6 +392,22 @@ fn fit(hits: &[Note], step_text: &str, frame: &Frame, velocity: f64) -> Option<S
         line += &if text.chars().all(|c| PATTERN.contains(c)) { format!(" {text}t") } else { format!(" {text}") };
     }
     Some(line)
+}
+/// The shortest period `chars` repeat in (every char the same as the one a period before it), `chars.len()` when they
+/// don't: their length less their longest border, which the KMP prefix function finds in one pass.
+fn shortest_period(chars: &[char]) -> usize {
+    let mut border = vec![0; chars.len()];
+    for at in 1..chars.len() {
+        let mut longest = border[at - 1];
+        while longest > 0 && chars[at] != chars[longest] {
+            longest = border[longest - 1];
+        }
+        if chars[at] == chars[longest] {
+            longest += 1;
+        }
+        border[at] = longest;
+    }
+    chars.len() - border.last().copied().unwrap_or(0)
 }
 /// The lane's velocity classes: at most three velocities (a ratchet's must be `x`'s), the defaults where they serve.
 fn classes(pattern: &[Step], defaults: &[(char, f64); 3]) -> Option<Vec<(char, f64)>> {
@@ -422,6 +448,28 @@ fn classes(pattern: &[Step], defaults: &[(char, f64); 3]) -> Option<Vec<(char, f
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_lanes_period_is_the_shortest_its_steps_repeat_in() {
+        // The search it replaces: the first length every step matches the step that many before it.
+        let searched = |chars: &[char]| (1..=chars.len()).find(|period| (0..chars.len()).all(|at| chars[at] == chars[at % period]));
+        let mut seed = 7u64;
+        let mut cases: Vec<Vec<char>> = vec![];
+        for length in 1..=12 {
+            for bits in 0..1u32 << length {
+                cases.push((0..length).map(|at| if bits >> at & 1 == 1 { 'x' } else { '.' }).collect());
+            }
+        }
+        for _ in 0..2000 {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let length = 1 + (seed >> 33) as usize % 64;
+            let period = 1 + (seed >> 45) as usize % length;
+            cases.push((0..length).map(|at| ['.', 'x', 'X', 'o', '-'][(at % period * 7 + (seed as usize >> (at % 16))) % 5]).collect());
+        }
+        for chars in &cases {
+            assert_eq!(Some(shortest_period(chars)), searched(chars), "{}", chars.iter().collect::<String>());
+        }
+    }
 
     #[test]
     fn a_drum_loop_prints_as_lanes_and_reads_back() {
