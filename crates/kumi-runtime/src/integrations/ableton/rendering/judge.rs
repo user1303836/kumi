@@ -66,6 +66,9 @@ struct GainStage {
     limited: bool,
 }
 
+/// The first round's word when no listening model is found.
+const NO_LISTENER: &str = "No listening model: judging by Kumi's meters alone (add GEMINI_API_KEY to have one listen too)";
+
 /// A judged run: its checklist, what the whole stretch measures as things stand, and the rounds so far.
 pub struct JudgeRun {
     pub(super) checklist: Checklist,
@@ -283,6 +286,8 @@ impl Rendering {
                 change: crate::listening::checklist::Change::Same,
             })
             .collect();
+        // Said once a run: whether a listening model will hear the changes beside the meters.
+        let alone = self.listener(signal.clone()).await.is_none().then(|| NO_LISTENER.to_string());
         let round = Round {
             round: 0,
             kind: RoundKind::Start,
@@ -296,7 +301,7 @@ impl Rendering {
                 format!("Kumi can't read {} in what it heard, so it's left off the checklist", unreadable.join(", ").to_lowercase())
             }),
             rebalanced: None,
-            listener: None,
+            listener: alone,
             problems,
             next: self.next_step(&run),
             met: run.target.is_none(),
