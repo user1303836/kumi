@@ -191,6 +191,9 @@ pub struct Seen {
     pub off: bool,
     /// Its switches that are on (Live's Limiter's Maximize On): some change which knob does a job.
     pub switched_on: Vec<String>,
+    /// An EQ's bands, when Kumi read them: each band's number, frequency (Hz), whether it's on, and whether its gain
+    /// shapes the sound (a bell or a shelf, not a cut).
+    pub bands: Vec<(u8, f64, bool, bool)>,
 }
 
 impl Seen {
@@ -292,18 +295,56 @@ fn on_stock(device: &Seen, job: &Job, stock: &Stock) -> Found {
     }
 }
 
-/// An EQ's band for a job named by role, when the target's frequency is known: of `bands` (each band's number, its
-/// frequency in Hz, whether it's on, and whether its gain does anything: a bell or a shelf, not a cut), the one
-/// nearest `near` in octaves. Bands that are on and shape come first, then any on, then any.
-pub fn nearest_band(bands: &[(u8, f64, bool, bool)], near: f64) -> Option<u8> {
-    let nearest = |keep: &dyn Fn(&(u8, f64, bool, bool)) -> bool| {
-        bands
-            .iter()
-            .filter(|band| keep(band) && band.1 > 0. && near > 0.)
-            .min_by(|a, b| (a.1 / near).log2().abs().total_cmp(&(b.1 / near).log2().abs()))
-            .map(|band| band.0)
+/// How far from the frequency a change is after an EQ band may sit and still be the one turned for it, octaves.
+const NEAR_BAND: f64 = 1.;
+
+/// An EQ's band for a job named by role, when the frequency the change is after is known: of `bands` (each band's
+/// number, its frequency in Hz, whether it's on, and whether its gain shapes: a bell or a shelf, not a cut), the one
+/// nearest `near` that's on (and for a gain, shapes), within about an octave. None when no band is: Kumi asks which.
+pub fn nearest_band(bands: &[(u8, f64, bool, bool)], near: f64, gain: bool) -> Option<u8> {
+    bands
+        .iter()
+        .filter(|band| band.2 && (band.3 || !gain) && band.1 > 0. && near > 0.)
+        .map(|band| (band.0, (band.1 / near).log2().abs()))
+        .filter(|(_, octaves)| *octaves <= NEAR_BAND)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(band, _)| band)
+}
+
+/// A frequency in words: "120 Hz", "2.5 kHz".
+fn hz(at: f64) -> String {
+    if at >= 1000. {
+        format!("{} kHz", (at / 100.).round() / 10.)
+    } else {
+        format!("{} Hz", at.round())
+    }
+}
+
+/// A word as a role on a device, as `find` reads it; an EQ band's job (`eq gain`, `eq frequency`) on an EQ whose
+/// bands Kumi read goes to the band nearest `near` (Hz, the frequency the change is after), within about an octave.
+pub fn find_near(device: &Seen, word: &str, near: Option<f64>) -> Option<Found> {
+    let found = find(device, word)?;
+    let (Found::Several(_), Some(near), Some(job)) = (&found, near, job_named(word)) else { return Some(found) };
+    let knob = match job.name {
+        "eq gain" => "Gain",
+        "eq frequency" => "Frequency",
+        _ => return Some(found),
     };
-    nearest(&|band| band.2 && band.3).or_else(|| nearest(&|band| band.2)).or_else(|| nearest(&|_| true))
+    if device.bands.is_empty() {
+        return Some(found);
+    }
+    let called = device.called();
+    Some(match nearest_band(&device.bands, near, knob == "Gain") {
+        Some(band) => Found::Knob {
+            name: format!("{band} {knob} A"),
+            read: format!("{called}'s {} is {band} {knob} A, the band nearest {}", job.name, hz(near)),
+        },
+        None => Found::Several(format!(
+            "None of {called}'s bands that are on{} sits within an octave of {}: name one in knobs, or turn one on there.",
+            if knob == "Gain" { " and shape (a bell or a shelf)" } else { "" },
+            hz(near)
+        )),
+    })
 }
 
 /// A word as a role on a device: its knob, or why it can't be turned there; None when the word is no role of this
@@ -396,6 +437,11 @@ pub enum Resolved {
 /// `words` on `devices[asked]`: knob names as they are, roles found. When a role can't be turned there, every word on
 /// the first other device of the track that turns them all, in the agreed order; or why nothing can, and how to fix it.
 pub fn resolve(devices: &[Seen], asked: usize, words: &[String]) -> Resolved {
+    resolve_near(devices, asked, words, None)
+}
+
+/// `resolve`, with an EQ band's job going to the band nearest `near` (Hz) on whichever EQ does it.
+pub fn resolve_near(devices: &[Seen], asked: usize, words: &[String], near: Option<f64>) -> Resolved {
     let device = &devices[asked];
     let (mut knobs, mut read, mut missing) = (vec![], vec![], vec![]);
     for word in words {
@@ -403,7 +449,7 @@ pub fn resolve(devices: &[Seen], asked: usize, words: &[String]) -> Resolved {
             knobs.push(name.clone());
             continue;
         }
-        match find(device, word) {
+        match find_near(device, word, near) {
             // Not a role: tune's own lookup by name decides.
             None => knobs.push(word.clone()),
             Some(Found::Knob { name, read: how }) => {
@@ -426,7 +472,7 @@ pub fn resolve(devices: &[Seen], asked: usize, words: &[String]) -> Resolved {
     let mut naming: Option<(usize, Vec<String>)> = None;
     for at in agreed_order(devices, Some(asked)) {
         let other = &devices[at];
-        let found: Vec<Option<Found>> = jobs.iter().map(|job| find(other, job.name)).collect();
+        let found: Vec<Option<Found>> = jobs.iter().map(|job| find_near(other, job.name, near)).collect();
         if found.iter().all(|found| matches!(found, Some(Found::Knob { .. }))) {
             let (knobs, read) = found
                 .into_iter()

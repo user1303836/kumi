@@ -2,6 +2,7 @@
 //! device's name, class and whether it's on, the parameters Live lets Kumi turn, and for a plug-in every name Live
 //! lists for it, so the plug-in map's names are checked against Live's own before any is used.
 
+use super::super::display::parse_display;
 use super::tune::{DeviceKnob, TuneHow, TuneRequest};
 use super::*;
 use crate::listening::{knobs::Unit, round::Round};
@@ -24,25 +25,13 @@ impl Rendering {
         signal: Signal,
     ) -> Result<Result<Option<TuneRequest>, String>, RuntimeError> {
         let turnable: Vec<String> = knobs.iter().map(|knob| knob.name.clone()).collect();
-        let mut banded = request.clone();
-        let mut bands = vec![];
-        for word in banded.knobs.iter_mut() {
-            if let Some(band) = near.and_then(|near| eq_band(word, knobs, near).map(|band| (band, near))) {
-                bands.push(format!("{word} is {}, the band nearest {}", band.0, hz(band.1)));
-                *word = band.0;
-            }
-        }
-        if !bands.is_empty() {
-            banded.change = Some(request.change.iter().cloned().chain(bands).collect::<Vec<_>>().join(". "));
-        }
-        let banding = banded.knobs != request.knobs;
-        let request = &banded;
         if request.how == TuneHow::Fit || request.knobs.iter().all(|word| turnable.iter().any(|name| roles::same(name, word))) {
-            return Ok(Ok(banding.then(|| request.clone())));
+            return Ok(Ok(None));
         }
         let long = self.long_device(&request.device);
         let (mut devices, asked) = self.track_devices(&long, signal.clone()).await?;
         devices[asked].turnable = turnable.to_vec();
+        devices[asked].bands = bands_of(knobs);
         if is_plugin(&devices[asked].class) {
             devices[asked].listed = self.listed_names(&long, signal.clone()).await?;
         }
@@ -53,7 +42,7 @@ impl Rendering {
             }
             signal.check()?;
         }
-        Ok(match roles::resolve(&devices, asked, &request.knobs) {
+        Ok(match roles::resolve_near(&devices, asked, &request.knobs, near) {
             Resolved::AsAsked => Ok(None),
             Resolved::On { device, knobs, read, instead } => {
                 let mut found = request.clone();
@@ -146,7 +135,8 @@ impl Rendering {
     /// empty when Live can't say.
     async fn read_seen(&self, device: &mut Seen, signal: Signal) {
         let long = self.long_device(&device.reference);
-        if let Ok(rows) = self.rows("parameter", json!({"parent":long,"fields":["name","value","max"]}), signal.clone()).await {
+        let fields = json!({"parent":long,"fields":["name","value","max","displayValue"]});
+        if let Ok(rows) = self.rows("parameter", fields, signal.clone()).await {
             let name = |row: &JsonObject| row.get("name").and_then(Value::as_str).map(str::to_owned);
             let number = |row: &JsonObject, key: &str| row.get(key).and_then(Value::as_f64);
             device.turnable = rows.iter().filter_map(name).filter(|name| name != "Device On").collect();
@@ -156,6 +146,21 @@ impl Rendering {
                 .filter(|row| number(row, "max").is_some_and(|max| max <= 1.) && number(row, "value").is_some_and(|value| value >= 0.5))
                 .filter_map(name)
                 .collect();
+            // An EQ Eight's bands, by what Live shows: each band's frequency, and whether it's on and shapes.
+            let shown = |named: String| {
+                rows.iter()
+                    .find(|row| row.get("name").and_then(Value::as_str) == Some(named.as_str()))
+                    .and_then(|row| row.get("displayValue").and_then(Value::as_str).map(str::to_owned))
+            };
+            device.bands = rows
+                .iter()
+                .filter_map(|row| {
+                    let band: u8 = row.get("name").and_then(Value::as_str)?.strip_suffix(" Frequency A")?.parse().ok()?;
+                    let at = parse_display(row.get("displayValue").and_then(Value::as_str)?).filter(|read| read.unit == "hz")?.value;
+                    let on = device.switched_on.iter().any(|name| *name == format!("{band} Filter On A"));
+                    Some((band, at, on, shown(format!("{band} Filter Type A")).is_none_or(|kind| shapes(&kind))))
+                })
+                .collect();
         }
         if device.adapter().is_some() {
             device.listed = self.listed_names(&long, signal).await.ok().flatten();
@@ -163,16 +168,11 @@ impl Rendering {
     }
 }
 
-/// `eq gain` or `eq frequency` on Live's EQ Eight: the knob of the band nearest `near` (Hz) that's on and shapes (a
-/// bell or a shelf: a cut's gain does nothing). None for any other word or device.
-fn eq_band(word: &str, knobs: &[DeviceKnob], near: f64) -> Option<String> {
-    let knob = match roles::job_named(word)?.name {
-        "eq gain" => "Gain",
-        "eq frequency" => "Frequency",
-        _ => return None,
-    };
+/// An EQ Eight's bands from its knobs: each band's number, frequency (Hz), whether it's on, and whether its gain shapes
+/// (a bell or a shelf: a cut's gain does nothing). None for any other device.
+fn bands_of(knobs: &[DeviceKnob]) -> Vec<(u8, f64, bool, bool)> {
     let named = |name: String| knobs.iter().find(|knob| knob.name == name);
-    let bands: Vec<(u8, f64, bool, bool)> = knobs
+    knobs
         .iter()
         .filter_map(|frequency| {
             let band: u8 = frequency.name.strip_suffix(" Frequency A")?.parse().ok()?;
@@ -180,20 +180,16 @@ fn eq_band(word: &str, knobs: &[DeviceKnob], near: f64) -> Option<String> {
             let on = named(format!("{band} Filter On A")).is_none_or(|on| on.raw >= 0.5);
             let shapes = named(format!("{band} Filter Type A"))
                 .and_then(|kind| kind.items.get(kind.raw.round().max(0.) as usize))
-                .is_none_or(|kind| kind.to_lowercase().contains("bell") || kind.to_lowercase().contains("shelf"));
+                .is_none_or(|kind| shapes(kind));
             Some((band, at, on, shapes))
         })
-        .collect();
-    Some(format!("{} {knob} A", roles::nearest_band(&bands, near)?))
+        .collect()
 }
 
-/// A frequency in words: "120 Hz", "2.5 kHz".
-fn hz(at: f64) -> String {
-    if at >= 1000. {
-        format!("{} kHz", (at / 100.).round() / 10.)
-    } else {
-        format!("{} Hz", at.round())
-    }
+/// Whether an EQ band's type shapes with its gain: a bell or a shelf, not a cut or a notch.
+fn shapes(kind: &str) -> bool {
+    let kind = kind.to_lowercase();
+    kind.contains("bell") || kind.contains("shelf")
 }
 
 /// What's read of each device on a track: its name, class, and whether it's on (Live's is_active).

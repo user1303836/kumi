@@ -2,7 +2,9 @@
 //! how to configure it, another device on the track doing the job in the agreed order (Ozone 12, the other mapped
 //! plug-ins, Live's own devices; none that's off), Live's own device to add placed where its job goes, a job on Live's
 //! own devices by their Live 12 names, and fixes that name a role.
-use kumi_runtime::plugins::roles::{agreed_order, find, job_for_item, job_named, nearest_band, plugin_fix, resolve, Found, Resolved, Seen};
+use kumi_runtime::plugins::roles::{
+    agreed_order, find, job_for_item, job_named, nearest_band, plugin_fix, resolve, resolve_near, Found, Resolved, Seen,
+};
 use serde_json::Value;
 
 /// Ozone 12.1's own parameter names, as Live listed them on the machine its format was read on.
@@ -26,6 +28,7 @@ fn ozone(turnable: &[&str]) -> Seen {
         listed: Some(ozone_names()),
         off: false,
         switched_on: vec![],
+        bands: vec![],
     }
 }
 
@@ -38,6 +41,7 @@ fn stock(reference: &str, name: &str, class: &str, turnable: &[&str]) -> Seen {
         listed: None,
         off: false,
         switched_on: vec![],
+        bands: vec![],
     }
 }
 
@@ -153,6 +157,7 @@ fn another_device_on_the_track_does_the_job_in_the_agreed_order() {
         listed: Some(strings(&["Gain", "Output Level", "Style", "Lookahead"])),
         off: false,
         switched_on: vec![],
+        bands: vec![],
     };
     let eq = stock("d4", "EQ Eight", "Eq8", &["Device On", "1 Gain A", "1 Frequency A"]);
     let track = |ozone_knobs: &[&str], pro_l_knobs: &[&str]| vec![limiter("d0"), pro_l(pro_l_knobs), ozone(ozone_knobs), eq.clone()];
@@ -292,6 +297,7 @@ fn a_fix_names_a_mapped_plug_ins_role_when_one_on_the_track_does_the_job() {
         listed: Some(strings(&["Band 1 Gain", "Band 1 Frequency"])),
         off: false,
         switched_on: vec![],
+        bands: vec![],
     };
     let fix = plugin_fix(&[ozone(&[]), pro_q], balance, Some("an EQ Eight")).unwrap();
     assert!(fix.starts_with("Pro-Q 4's gain (Band 1 Gain)") && fix.contains("knobs [\"Band 1 Gain\"]"), "{fix}");
@@ -316,6 +322,7 @@ fn low_width_is_the_lowest_bands_width_only() {
         listed: Some(strings(&["Width", "Mix"])),
         off: false,
         switched_on: vec![],
+        bands: vec![],
     };
     assert_eq!(plugin_fix(&[supermassive], low, Some("the Imager")), None);
 }
@@ -324,14 +331,32 @@ fn low_width_is_the_lowest_bands_width_only() {
 fn an_eq_band_named_by_role_is_the_one_nearest_the_target() {
     // EQ Eight's bands: number, frequency, on, and whether its gain shapes (a bell or a shelf, not a cut).
     let bands = [(1, 40., true, false), (2, 120., true, true), (3, 900., false, true), (4, 2500., true, true), (8, 12000., true, true)];
-    assert_eq!(nearest_band(&bands, 3000.), Some(4));
-    assert_eq!(nearest_band(&bands, 100.), Some(2));
-    // A band that's off, or a cut whose gain does nothing, gives way to one that's on and shapes: at 900 Hz, band 4
-    // (1.5 octaves off) rather than band 3, which is off.
-    assert_eq!(nearest_band(&bands, 900.), Some(4));
-    assert_eq!(nearest_band(&bands, 40.), Some(2));
-    // With none that shape, the nearest that's on; with none on, the nearest.
-    assert_eq!(nearest_band(&[(1, 40., true, false), (2, 500., false, true)], 400.), Some(1));
-    assert_eq!(nearest_band(&[(1, 40., false, false), (2, 500., false, true)], 400.), Some(2));
-    assert_eq!(nearest_band(&[], 400.), None);
+    assert_eq!(nearest_band(&bands, 3000., true), Some(4));
+    assert_eq!(nearest_band(&bands, 100., true), Some(2));
+    // Only bands that are on, within about an octave: at 900 Hz band 3 is off, and the others sit further off.
+    assert_eq!(nearest_band(&bands, 900., true), None);
+    // A gain needs a band that shapes; a frequency can be a cut's.
+    assert_eq!(nearest_band(&bands, 40., true), None);
+    assert_eq!(nearest_band(&bands, 40., false), Some(1));
+    // A 5 kHz target doesn't home a 200 Hz bell.
+    assert_eq!(nearest_band(&[(3, 200., true, true)], 5000., true), None);
+    // On the EQ Eight asked, or one reached by fallback, "eq gain" is the nearest band's gain.
+    let mut eq = stock("d5", "EQ Eight", "Eq8", &["Device On", "2 Gain A", "4 Gain A", "8 Gain A"]);
+    eq.bands = bands.to_vec();
+    match resolve_near(&[eq.clone()], 0, &strings(&["eq gain"]), Some(2800.)) {
+        Resolved::On { device: 0, knobs, read, .. } => {
+            assert_eq!(knobs, ["4 Gain A"]);
+            assert_eq!(read, ["EQ Eight's eq gain is 4 Gain A, the band nearest 2.8 kHz"]);
+        }
+        other => panic!("{other:?}"),
+    }
+    match resolve_near(&[limiter("d0"), eq.clone()], 0, &strings(&["eq gain"]), Some(110.)) {
+        Resolved::On { device: 1, knobs, .. } => assert_eq!(knobs, ["2 Gain A"]),
+        other => panic!("{other:?}"),
+    }
+    // None near: Kumi asks which band.
+    match resolve_near(&[eq], 0, &strings(&["eq gain"]), Some(500.)) {
+        Resolved::Refused(why) => assert!(why.starts_with("None of EQ Eight's bands that are on and shape"), "{why}"),
+        other => panic!("{other:?}"),
+    }
 }

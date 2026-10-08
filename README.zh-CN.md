@@ -89,4 +89,4 @@ sh scripts/test-isolated.sh                        # 无需 Live 或登录
 
 ## 许可证
 
-[MIT](LICENSE.md)。Ableton Live 是 Ableton AG 的商标；Kumi 与 Ableton 没有关联，也未获其认可。
+[MIT](LICENSE.md)。来自他人成果的部分，以及 Kumi 下载的模型，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。Ableton Live 是 Ableton AG 的商标；Kumi 与 Ableton 没有关联，也未获其认可。

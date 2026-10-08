@@ -313,7 +313,8 @@ clashes with the kick?") and Kumi hears it in Live directly, with nothing to set
 up:
 
 - **While Live plays**, it listens to what's playing for a few seconds, and
-  leaves Main and the transport alone.
+  leaves Main and the transport alone. A whole-song listen still goes quietly
+  from the start (Main silenced) and leaves Live stopped.
 - **While Live is stopped**, it plays the loop (or a few bars from the playhead,
   the part you name, or the whole song to its last clip) with Main silenced, and
   puts Main back. A listen takes as long as the music it hears.
@@ -351,7 +352,7 @@ trusting them:
   loudness. It keeps the change only if its target improved and nothing else got
   audibly worse (a measure it can no longer read, such as silence, counts as
   worse); if the peaks come back or it clips at that level, the change goes too.
-  Otherwise Kumi's own undo takes it back.
+  A change that isn't kept, Kumi's own undo takes back.
 - **Code picks the numbers.** Kumi chooses the change; code finds its values,
   with as few listens as it can: an EQ calculated from what was measured (the
   smallest cut that clears a resonance, or bands toward a reference's shape),
@@ -359,9 +360,10 @@ trusting them:
   de-esser's threshold), one knob probed across its range (seven settings
   heard side by side on scratch copies of the track in one pass, then set where
   its response meets the target), or a few knobs that interact searched in
-  small generations, each heard the same way. Probing and searching work on a
-  device on a track. What a knob was heard to do on a track is remembered for a
-  month, so the next time it's homed in on there, Kumi starts where that says.
+  small generations, each heard the same way. Probing and searching need a run
+  judged on one track (`judge` with `track`), not the mix. What a knob was heard
+  to do on a track is remembered for a month, so the next time it's homed in on
+  there, Kumi starts where that says.
   Every added device and every move has to earn its place.
 - **The round log** shows each round in the conversation: what it was after, the
   change, the numbers before → after, kept or taken back and why, and what's
@@ -413,7 +415,8 @@ artists by one name, or an album and an artist), Kumi asks you once which you
 mean, and your answer settles it. Each reference is measured once and kept in
 `~/.kumi/references`; a file or folder is measured again once its files change.
 For one element of a reference (its bass, its drums), Kumi can put the track in
-your Set, separate its stems with Live's own splitter, and measure a stem.
+your Set, separate its stems with Live's own splitter (Kumi may ask you to click
+the track's clip), and measure a stem.
 
 **A part's feel** is judged on its notes, with no listening: where it plays in
 the bar (in five lanes for a part on a Drum Rack: kick, snare, hats, cymbals and
@@ -471,8 +474,9 @@ to do. A message of yours while it runs is answered, then the goal waits for
 you. The GOAL tab shows the goal, its turns and time against the budget, the
 last check and what's next. `/goal` alone shows it; `/goal edit <words>` changes
 it, `/goal resume` carries on (with a fresh budget for whatever ran out),
-`/goal pause` or Esc pauses it, and `/goal clear` ends it (a paused sound-match
-search too). Another `/goal` while one is unfinished asks first: send it again,
+`/goal pause` or Esc pauses it, and `/goal clear` ends it (with no unfinished
+goal, it ends a paused sound-match search). Another `/goal` while one is
+unfinished asks first: send it again,
 or `/goal new: <words>`, to replace it. A goal is kept with its Set, so it's
 still there after a restart. An unsaved Set's goal is kept by Live's identity
 for it while the Set stays open (through a restart of Kumi or a new
@@ -834,7 +838,7 @@ closed). Your conversations, notes, recipes and sign-ins stay unless you add
 | Conversation size | Earlier Live reads shrink past about 160 KB; the oldest exchanges drop off past about 400 KB |
 | Audio heard | The first 12 minutes of a file, up to an hour when asked; a whole song up to an hour |
 | Video transcription | 90 minutes at a time |
-| Free disk space checked first | 100 MB to record (on the Set's disk, or your home folder's for an unsaved Set), 100 MB to make a device (on the User Library's disk), twice a model's size and 200 MB more to fetch one (in Kumi's folder) |
+| Free disk space checked first | 100 MB to record (on the Set's disk, or your home folder's for an unsaved Set), 100 MB to make a device (on the User Library's disk), twice a model's size and 200 MB more to fetch one of Kumi's own, a slot link's size and 200 MB more (in Kumi's folder) |
 
 **Listening** hears files, recordings and the Set's tracks and mix (the Set
 through Kumi Ears, which needs Max for Live). It measures, compares and judges
@@ -926,7 +930,7 @@ Environment variables (paths must be absolute):
 | `OLLAMA_HOST`, `LM_API_TOKEN` | Where Ollama listens, as Ollama reads it; LM Studio's API token, when its server wants one |
 | `KUMI_EARS=0` | Hear the Set by recording, without Kumi Ears |
 | `KUMI_LISTENER`, `KUMI_LISTENER_KEY` | The listening model that judges changes beside the meters, as `<base URL>#<model>` (an OpenAI-compatible server that takes audio), and its key; `off` for none |
-| `GEMINI_API_KEY`, `GOOGLE_API_KEY` | A Gemini API key for the listening model (Gemini's newest model, from its own list) |
+| `GEMINI_API_KEY`, `GOOGLE_API_KEY` | A Gemini API key for the listening model (Gemini's newest Flash model, from its own list) |
 | `KUMI_FAST=0` | Set device parameters through the bridge's preview and apply, the slower way ([how a change works](KUMI_CHANGES.md#how-a-change-works)) |
 | `KUMI_YTDLP`, `KUMI_FFMPEG`, `KUMI_WHISPER`, `KUMI_WHISPER_MODEL` | Your own yt-dlp, ffmpeg, whisper.cpp (`whisper-cli`) or speech model (`ggml-*.bin`), by path |
 | `KUMI_REMOTE_SCRIPTS_DIR` | Live's Remote Scripts folder, when Kumi doesn't find it |

@@ -64,7 +64,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | `/willington` | 开启或关闭 [Willington](WILLINGTON_INTEGRATION.md)。在支持的构建上请求机架绑定；片段 Follow Actions 和原生编辑还要求通过匹配实际库的自测。原生编辑仅支持 b5 macOS ARM64。启用前保持关闭；桥接包含 Willington 时可用。 |
 | `/login`、`/logout` | 登录（在浏览器中用 ChatGPT 登录，或输入只显示为圆点的 API 密钥）或退出登录 |
 | `/loop <what to reach>` | 按判定的轮次工作：一次修改，听修改前后，只有目标项变好、其他方面没变差才保留，然后下一个目标。所有项目达成、修改不再有帮助，或到 16 轮或 45 分钟时停止；按 Esc 或 `/loop stop` 也会停止。要匹配某个声音（“让我的 pad 听起来像 ~/ref.wav”）时改为旋钮搜索：单独输入 `/loop` 继续已暂停的搜索，`/loop stop` 结束它 |
-| `/goal <what to reach>` | 跨多个回合坚持一个目标，每个回合后检查（测量过时看判定的数值），直到达成、受阻、停滞（连续三个回合没有更接近）或用完预算。`/goal` 显示它；`/goal resume`（用完的部分换上新的预算）、`/goal edit <words>`、`/goal new: <words>`（替换未完成的目标）、`/goal pause`（或 Esc）、`/goal clear`（暂停中的声音匹配搜索也一并结束） |
+| `/goal <what to reach>` | 跨多个回合坚持一个目标，每个回合后检查（测量过时看判定的数值），直到达成、受阻、停滞（连续三个回合没有更接近）或用完预算。`/goal` 显示它；`/goal resume`（用完的部分换上新的预算）、`/goal edit <words>`、`/goal new: <words>`（替换未完成的目标）、`/goal pause`（或 Esc）、`/goal clear`（没有未完成的目标时，结束暂停中的声音匹配搜索） |
 | `/slots` | 显示每项聆听工作（分轨、扒谱、聆听、嵌入）由哪个模型负责，并用平常的话替换：`/slots listening gemini`、`/slots listening off`、`/slots listening <base URL>#<model>`、`/slots embeddings <.onnx 文件或 https 链接>`。新模型会先测试；`/slots back <job>` 撤回替换 |
 | `/memory` | Kumi 记住的一切：关于你和本工程的笔记、从你的工程中学到的东西、技巧、配方和经验；选择一项即可让它忘掉（笔记还可以修改文字或置顶，配方可以运行或忘掉） |
 | `/note <id> <new words>` | 不经模型修改一条笔记的文字；在 `/memory` 中选择笔记的 “Change the words” 会替你开头 |

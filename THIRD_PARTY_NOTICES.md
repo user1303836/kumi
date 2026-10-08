@@ -5,7 +5,7 @@ their licenses.
 
 ## Models fetched on first use
 
-Kumi's listening models aren't in the bundle: Kumi fetches them the first time they're needed, each checked against its
+Kumi's own models aren't in the bundle: Kumi fetches them the first time they're needed, each checked against its
 SHA-256, from its `models-1` release (https://github.com/user1303836/kumi/releases/tag/models-1). That release's
 `LICENSE` and `NOTICE` files carry their licenses and notices:
 

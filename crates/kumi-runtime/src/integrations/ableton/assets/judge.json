@@ -7,7 +7,7 @@
       "goal": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Starts a run (and ends any other)",
+        "description": "Starts a run (and ends any other; inside a /loop, a second goal is refused)",
         "properties": {
           "loudness": {"type": "number", "minimum": -60, "maximum": 0, "description": "Integrated loudness to reach, LUFS"},
           "true_peak": {"type": "number", "minimum": -12, "maximum": 0, "description": "The true-peak ceiling, dBTP"},
