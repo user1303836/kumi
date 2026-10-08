@@ -208,5 +208,9 @@ fn a_knob_probed_before_starts_where_its_saved_response_says() {
     let at = aged.split("\"at\": ").nth(1).unwrap().split(',').next().unwrap().trim().to_string();
     std::fs::write(&file, aged.replace(&format!("\"at\": {at}"), "\"at\": 1000")).unwrap();
     assert_eq!(probes.load("Reverb", "Decay Time", "decay time", "Pad"), None);
+    // A file Kumi can't read (a newer Kumi's) is never written over.
+    std::fs::write(&file, "{\"responses\": \"a newer kind\"}").unwrap();
+    assert!(probes.add("Reverb", "Decay Time", "decay time", "Pad", &[(0., 1.)], Some(0.1)).is_err());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "{\"responses\": \"a newer kind\"}");
     let _ = std::fs::remove_dir_all(&dir);
 }

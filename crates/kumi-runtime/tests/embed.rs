@@ -55,7 +55,7 @@ fn resampling_keeps_the_pitch_and_the_level() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_known_signal_embeds_as_the_converted_model_did() {
     let Some(folder) = std::env::var("KUMI_TEST_MODELS").ok().filter(|folder| !folder.is_empty()) else {
-        eprintln!("skipped: set KUMI_TEST_MODELS to a folder holding onnxruntime-1.23.2/ and clap-music-audio.onnx to run it");
+        eprintln!("skipped: set KUMI_TEST_MODELS to a folder named models holding onnxruntime-1.23.2/ and clap-music-audio.onnx to run it");
         return;
     };
     let fixture: Value = serde_json::from_str(include_str!("support/clap-fixture.json")).unwrap();
@@ -64,6 +64,8 @@ async fn a_known_signal_embeds_as_the_converted_model_did() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("known.wav");
     std::fs::write(&file, wav(&[known_signal()], 48_000)).unwrap();
+    // Kumi finds its models in `models` in its folder.
+    assert!(std::path::Path::new(&folder).ends_with("models"), "KUMI_TEST_MODELS has to be a folder named models: {folder}");
     std::env::set_var("KUMI_HOME", std::path::Path::new(&folder).parent().unwrap());
     let signal = kumi_common::abort::Signal::new();
     let got = kumi_runtime::listening::embed::vibe(&file, 0., 3., None, None, &|said| eprintln!("{said}"), &signal).await.unwrap();
@@ -85,7 +87,7 @@ async fn a_known_signal_embeds_as_the_converted_model_did() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_known_signals_effects_embed_as_the_converted_model_did() {
     let Some(folder) = std::env::var("KUMI_TEST_MODELS").ok().filter(|folder| !folder.is_empty()) else {
-        eprintln!("skipped: set KUMI_TEST_MODELS to a folder holding onnxruntime-1.23.2/ and afx-rep.onnx to run it");
+        eprintln!("skipped: set KUMI_TEST_MODELS to a folder named models holding onnxruntime-1.23.2/ and afx-rep.onnx to run it");
         return;
     };
     let fixture: Value = serde_json::from_str(include_str!("support/afx-fixture.json")).unwrap();
@@ -100,6 +102,8 @@ async fn a_known_signals_effects_embed_as_the_converted_model_did() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("known-stereo.wav");
     std::fs::write(&file, wav(&[left, right], 48_000)).unwrap();
+    // Kumi finds its models in `models` in its folder.
+    assert!(std::path::Path::new(&folder).ends_with("models"), "KUMI_TEST_MODELS has to be a folder named models: {folder}");
     std::env::set_var("KUMI_HOME", std::path::Path::new(&folder).parent().unwrap());
     let signal = kumi_common::abort::Signal::new();
     let got = kumi_runtime::listening::embed::effects(&file, 0., 3., &|said| eprintln!("{said}"), &signal).await.unwrap();

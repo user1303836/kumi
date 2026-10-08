@@ -13,9 +13,9 @@ if args['action'] in ('before', 'make'):
     device = obj
     track = device.canonical_parent
     if track not in tracks:
-        raise ValueError('search tunes a device on a track itself (not in a rack, a return or Main)')
+        raise ValueError('Kumi hears copies of the device\'s own track, so the device has to be on a track itself (not in a rack, a return or Main)')
     if getattr(track, 'is_foldable', False):
-        raise ValueError('search copies one track, and this one is a group (its copy would take its tracks along): tune a device on a track inside it')
+        raise ValueError('Kumi copies one track, and this one is a group (its copy would take its tracks along): pick a device on a track inside it')
 if args['action'] == 'before':
     result = {'before': [identity(t) for t in tracks], 'source': str(track.name)}
 elif args['action'] == 'make':

@@ -347,9 +347,13 @@ trusting them:
   with as few listens as it can: an EQ calculated from what was measured (the
   smallest cut that clears a resonance, or bands toward a reference's shape),
   one knob homed in on (a limiter's gain until the loudness is right, a
-  de-esser's threshold), or a few knobs that interact searched in small
-  generations, each heard side by side on scratch copies of the track in one
-  pass. Every added device and every move has to earn its place.
+  de-esser's threshold), one knob probed across its range (seven settings
+  heard side by side on scratch copies of the track in one pass, then set where
+  its response meets the target), or a few knobs that interact searched in
+  small generations, each heard the same way. What a knob was heard to do on a
+  track is remembered for a month, so the next time it's turned there Kumi
+  starts where that says. Every added device and every move has to earn its
+  place.
 - **The round log** shows each round in the conversation: what it was after, the
   change, the numbers before → after, kept or taken back and why, and what's
   next, with the listens so far. A target that resists two changes in a row
@@ -881,7 +885,8 @@ Kumi keeps everything in `~/.kumi`. `~/.kumi/settings.json` holds:
 | `libraryFolders` | More folders for Kumi to learn sounds, presets and Sets from |
 | `voice` | Talking: `send` (send when you stop), `language`, `microphone` (`/voice`) |
 
-`~/.kumi/slots.json` keeps the model slots you swapped (`/slots`).
+`~/.kumi/slots.json` keeps the model slots you swapped (`/slots`), and
+`~/.kumi/probes` what each knob was heard to do, by device and track.
 
 Environment variables (paths must be absolute):
 

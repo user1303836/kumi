@@ -44,7 +44,7 @@ fn activations_read_into_notes_as_basic_pitch_reads_them() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_known_melody_is_heard_as_its_notes() {
     let Some(folder) = std::env::var("KUMI_TEST_MODELS").ok().filter(|folder| !folder.is_empty()) else {
-        eprintln!("skipped: set KUMI_TEST_MODELS to a folder holding onnxruntime-1.23.2/ and basic-pitch.onnx to run it");
+        eprintln!("skipped: set KUMI_TEST_MODELS to a folder named models holding onnxruntime-1.23.2/ and basic-pitch.onnx to run it");
         return;
     };
     // C3, E3, G3, C4, half a second each with a gap, a few harmonics each, at 44.1 kHz.
@@ -83,6 +83,8 @@ async fn a_known_melody_is_heard_as_its_notes() {
     wav.extend_from_slice(&(data.len() as u32).to_le_bytes());
     wav.extend_from_slice(&data);
     std::fs::write(&file, wav).unwrap();
+    // Kumi finds its models in `models` in its folder.
+    assert!(std::path::Path::new(&folder).ends_with("models"), "KUMI_TEST_MODELS has to be a folder named models: {folder}");
     std::env::set_var("KUMI_HOME", std::path::Path::new(&folder).parent().unwrap());
     let signal = kumi_common::abort::Signal::new();
     let heard = pitched_notes(&file, 0., 2.4, &|said| eprintln!("{said}"), &signal).await.unwrap();

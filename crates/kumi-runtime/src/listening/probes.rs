@@ -104,13 +104,19 @@ impl Probes {
         self.dir.join(format!("{}.json", name.trim_matches('_')))
     }
 
-    fn all(&self, device: &str) -> Vec<Response> {
-        std::fs::read(self.file(device)).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
+    /// A device kind's saved responses: none when there's no file yet, and an error when the file is there but can't
+    /// be read (a newer Kumi's, say), so it's never written over.
+    fn all(&self, device: &str) -> std::io::Result<Vec<Response>> {
+        match std::fs::read(self.file(device)) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(std::io::Error::other),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
+            Err(error) => Err(error),
+        }
     }
 
     /// A knob's saved response for a measure, heard on `scope` (a track's name, or "mix") within the month.
     pub fn load(&self, device: &str, knob: &str, measure: &str, scope: &str) -> Option<Response> {
-        self.all(device).into_iter().find(|response| {
+        self.all(device).ok()?.into_iter().find(|response| {
             response.knob.eq_ignore_ascii_case(knob)
                 && response.measure == measure
                 && response.scope == scope
@@ -134,7 +140,7 @@ impl Probes {
         if heard.is_empty() {
             return Ok(());
         }
-        let mut all = self.all(device);
+        let mut all = self.all(device)?;
         let index = match all
             .iter()
             .position(|response| response.knob.eq_ignore_ascii_case(knob) && response.measure == measure && response.scope == scope)
@@ -160,12 +166,15 @@ impl Probes {
     }
 }
 
-/// Written whole through a temporary file, so a reader never sees half of it.
+/// Written whole through a temporary file of this write's own, so a reader never sees half of it.
 fn write(file: &Path, all: &[Response]) -> std::io::Result<()> {
     if let Some(parent) = file.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let partial = file.with_extension("json.partial");
+    let tag = uuid::Uuid::new_v4().simple().to_string();
+    let partial = file.with_extension(format!("json.partial-{}-{}", std::process::id(), &tag[..8]));
     std::fs::write(&partial, serde_json::to_vec_pretty(all).map_err(std::io::Error::other)?)?;
-    std::fs::rename(&partial, file)
+    std::fs::rename(&partial, file).inspect_err(|_| {
+        let _ = std::fs::remove_file(&partial);
+    })
 }

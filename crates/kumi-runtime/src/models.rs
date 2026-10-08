@@ -341,7 +341,16 @@ pub async fn runtime(say: Say<'_>, signal: &Signal) -> Result<(), String> {
     LOADED
         .get_or_init(|| match ort::init_from(&path) {
             Ok(environment) => {
-                environment.commit();
+                // The runtime's own log stays out of the terminal (and the app on it), unless KUMI_TIMING asks for it.
+                let log: ort::logging::LoggerFunction = std::sync::Arc::new(|level, category, _, _, message| {
+                    if std::env::var("KUMI_TIMING").is_ok_and(|set| !set.is_empty()) {
+                        eprintln!("[onnxruntime {level:?}] {category}: {message}");
+                    }
+                });
+                environment.with_logger(log).commit();
+                if let Ok(environment) = ort::environment::Environment::current() {
+                    environment.set_log_level(ort::logging::LogLevel::Warning);
+                }
                 Ok(())
             }
             Err(error) => Err(format!("Kumi couldn't load its model runtime: {error}")),
@@ -352,17 +361,31 @@ pub async fn runtime(say: Say<'_>, signal: &Signal) -> Result<(), String> {
 static PREPARING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The library out of the runtime's archive, into `folder` (tar reads the zips too; Windows has had it since 2018).
+/// Only the library is unpacked: Windows' archive also holds a 380 MB debug file.
 async fn unpack(archive: &Path, folder: &Path, library: &str) -> Result<(), String> {
     let tag = uuid::Uuid::new_v4().simple().to_string();
     let scratch = folder.with_extension(format!("unpacking-{}-{}", std::process::id(), &tag[..8]));
     let _ = std::fs::remove_dir_all(&scratch);
     std::fs::create_dir_all(&scratch).map_err(|error| error.to_string())?;
     let result = async {
+        let listed = tokio::process::Command::new("tar")
+            .arg("-tf")
+            .arg(archive)
+            .output()
+            .await
+            .map_err(|error| format!("Kumi couldn't read its model runtime's archive: {error}"))?;
+        let member = String::from_utf8_lossy(&listed.stdout)
+            .lines()
+            .map(str::trim)
+            .find(|member| member.rsplit(['/', '\\']).next() == Some(library))
+            .map(str::to_string)
+            .ok_or("Kumi's model runtime wasn't where its archive should have it.")?;
         let output = tokio::process::Command::new("tar")
             .arg("-xf")
             .arg(archive)
             .arg("-C")
             .arg(&scratch)
+            .arg(&member)
             .output()
             .await
             .map_err(|error| format!("Kumi couldn't unpack its model runtime: {error}"))?;
@@ -399,7 +422,25 @@ pub struct Tensor {
     pub data: Vec<f32>,
 }
 
-static SESSIONS: Mutex<Vec<(PathBuf, ort::session::Session)>> = Mutex::new(vec![]);
+/// The models loaded, each with when it last ran: one that hasn't run for `IDLE` is let go (AFx-Rep alone holds
+/// about 0.4 GB once loaded).
+static SESSIONS: Mutex<Vec<(PathBuf, ort::session::Session, std::time::Instant)>> = Mutex::new(vec![]);
+const IDLE: std::time::Duration = std::time::Duration::from_secs(180);
+/// Whether a thread is letting idle models go.
+static REAPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Lets go of models that haven't run for a while, every half minute, until none are loaded.
+fn reap() {
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        let Ok(mut sessions) = SESSIONS.lock() else { return };
+        sessions.retain(|(_, _, ran)| ran.elapsed() < IDLE);
+        if sessions.is_empty() {
+            REAPING.store(false, std::sync::atomic::Ordering::SeqCst);
+            return;
+        }
+    }
+}
 
 /// Runs a model on named inputs (once the runtime is ready): its outputs by name. On a thread of its own, as a model
 /// can take a while; each model is loaded once.
@@ -413,16 +454,20 @@ pub async fn run(model: &Path, inputs: Vec<(String, Tensor)>, outputs: Vec<Strin
 
 fn run_now(model: &Path, inputs: Vec<(String, Tensor)>, outputs: &[String]) -> Result<Vec<Tensor>, String> {
     let mut sessions = SESSIONS.lock().map_err(|_| "Kumi's models were left in a bad state.".to_string())?;
-    let index = match sessions.iter().position(|(path, _)| path == model) {
+    let index = match sessions.iter().position(|(path, _, _)| path == model) {
         Some(index) => index,
         None => {
             let session = ort::session::Session::builder()
                 .and_then(|mut builder| builder.commit_from_file(model))
                 .map_err(|error| format!("Kumi couldn't load {}: {error}", model.display()))?;
-            sessions.push((model.to_path_buf(), session));
+            sessions.push((model.to_path_buf(), session, std::time::Instant::now()));
+            if !REAPING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                std::thread::spawn(reap);
+            }
             sessions.len() - 1
         }
     };
+    sessions[index].2 = std::time::Instant::now();
     let session = &mut sessions[index].1;
     let mut values: Vec<(String, ort::session::SessionInputValue<'static>)> = vec![];
     for (name, tensor) in inputs {

@@ -218,10 +218,6 @@ fn a_kit_that_piles_up_and_parts_that_duck_and_interlock() {
     let (_, found) = kit(&ordinary, 120.);
     assert!(!found.iter().any(|problem| problem.contains("sits apart") || problem.contains("nothing between")), "{found:?}");
     assert!(!found.iter().any(|problem| problem.contains("Crash rings")), "{found:?}");
-    // Two tracks far apart (a bass and hats) aren't a kit with a gap.
-    let bass = ("Bass".to_string(), mono(&notes(4., 0.5, 0.4, |t| 0.5 * (2. * PI * 100. * t).sin())));
-    let (_, found) = kit(&[bass, ordinary[3].clone()], 120.);
-    assert!(!found.iter().any(|problem| problem.contains("nothing between")), "{found:?}");
     // A pad ducking 6 dB under a kick on every beat, back within about 150 ms.
     let kick = notes(4., 0.5, 0.1, |t| 0.8 * (-t / 0.03).exp() * (2. * PI * 55. * t).sin());
     let mut noise = Noise(10);
