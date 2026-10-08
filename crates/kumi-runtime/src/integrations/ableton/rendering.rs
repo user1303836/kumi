@@ -126,7 +126,7 @@ impl Rendering {
             step,
             clip_file,
             restore: options.restore_file.as_ref().map(restore_store),
-            copies_journal: options.restore_file.as_ref().map(|file| PathBuf::from(format!("{file}.copies.json"))),
+            copies_journal: options.restore_file.as_ref().map(|file| PathBuf::from(format!("{file}.copies"))),
             copies_live: RefCell::new(vec![]),
             on_action: options.on_action.clone(),
             on_audition: options.on_audition.clone(),

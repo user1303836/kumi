@@ -19,6 +19,7 @@ use crate::listening::{
     round::{Round, RoundKind},
 };
 use kumi_common::js::{number::to_string, string::head};
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TuneHow {
@@ -572,14 +573,11 @@ impl Rendering {
 
 impl Rendering {
     /// Notes a search's scratch copies (`entry`: their prefix, the tracks there before, the copied track's name) with
-    /// the Set they're in and this Kumi's process, or forgets them (None) once they're gone.
+    /// the Set they're in and this Kumi's process, or forgets them (None) once they're gone. Each Kumi keeps its own
+    /// journal, so two never write over each other's entries.
     pub(super) fn note_copies(&self, prefix: &str, entry: Option<Value>) {
-        let Some(file) = &self.copies_journal else { return };
-        let mut entries: Vec<Value> = std::fs::read(file)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-            .and_then(|value| value.as_array().cloned())
-            .unwrap_or_default();
+        let Some(own) = self.own_journal() else { return };
+        let mut entries = read_journal(&own);
         entries.retain(|kept| kept["prefix"].as_str() != Some(prefix));
         if let Some(mut entry) = entry {
             entry["set"] = json!(self.connection().set.borrow().clone());
@@ -587,68 +585,94 @@ impl Rendering {
             entry["pid"] = json!(std::process::id());
             entries.push(entry);
         }
-        if entries.is_empty() {
-            let _ = std::fs::remove_file(file);
-        } else {
-            let temporary = file.with_extension(format!("{}.tmp", std::process::id()));
-            if std::fs::write(&temporary, serde_json::to_vec(&entries).unwrap_or_default()).is_ok() {
-                let _ = std::fs::rename(&temporary, file);
-            }
-        }
+        write_journal(&own, &entries);
+    }
+
+    /// This Kumi's journal of scratch copies.
+    fn own_journal(&self) -> Option<PathBuf> {
+        self.copies_journal.as_ref().map(|base| PathBuf::from(format!("{}-{}.json", base.display(), std::process::id())))
     }
 
     /// Removes scratch copies a search left in this Set (cut off by a crash or a lost connection), once Live is back:
-    /// the tracks that weren't there before it and carry its prefix or the copied track's name. Another running
-    /// Kumi's copies are its own to remove; an entry is forgotten only once nothing of it is left.
+    /// the tracks that weren't there before it and carry its prefix. A track with the copied track's name that wasn't
+    /// there before is named for the producer, not taken: it may be theirs. Another running Kumi's copies are its own
+    /// to remove; an entry is forgotten only once nothing of it is left.
     pub(super) async fn sweep_copies(&self, identity: &str, path: Option<&str>, signal: Signal) {
-        let Some(file) = &self.copies_journal else { return };
-        let Some(entries) = std::fs::read(file).ok().and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok()) else { return };
-        for entry in entries.as_array().into_iter().flatten() {
-            let Some(prefix) = entry["prefix"].as_str().filter(|prefix| prefix.starts_with("Kumi · try ")) else { continue };
-            let here = match entry["path"].as_str().filter(|saved| !saved.is_empty()) {
-                Some(saved) => Some(saved) == path,
-                None => entry["set"].as_str() == Some(identity),
-            };
-            let theirs = entry["pid"].as_f64().is_some_and(|pid| pid as u32 != std::process::id() && crate::library::state::alive(pid));
-            let in_use = self.copies_live.borrow().iter().any(|live| live == prefix);
-            if !here || theirs || in_use {
-                continue;
-            }
-            let args = json!({"action":"drop","prefix":prefix,"before":entry["before"],"source":entry["source"]});
-            let code = format!(
-                "import json\nARGS = json.loads({})\n{COPIES_SCRIPT}",
-                serde_json::to_string(&args.to_string()).unwrap_or_default()
-            );
-            let swept = self
-                .connection()
-                .call("live_run_python", object(json!({"code":code,"mode":"exec","timeoutMs":20000})), signal.clone())
-                .await;
-            let done = swept
-                .ok()
-                .filter(|read| read.is_error != Some(true))
-                .and_then(|read| super::super::context::payload(&read).ok())
-                .filter(|done| done.get("ok") == Some(&Value::Bool(true)))
-                .map(|done| done["result"].clone());
-            if let Some(done) = done {
-                if done["left"].as_u64() == Some(0) {
-                    self.note_copies(prefix, None);
+        let Some(base) = &self.copies_journal else { return };
+        for file in journals(base) {
+            let mut entries = read_journal(&file);
+            let mut changed = false;
+            for entry in entries.clone() {
+                let Some(prefix) = entry["prefix"].as_str().filter(|prefix| prefix.starts_with("Kumi · try ")) else { continue };
+                let here = match entry["path"].as_str().filter(|saved| !saved.is_empty()) {
+                    Some(saved) => Some(saved) == path,
+                    None => entry["set"].as_str() == Some(identity),
+                };
+                let theirs = entry["pid"].as_f64().is_some_and(|pid| pid as u32 != std::process::id() && crate::library::state::alive(pid));
+                let in_use = self.copies_live.borrow().iter().any(|live| live == prefix);
+                if !here || theirs || in_use {
+                    continue;
                 }
+                let args = json!({"action":"drop","prefix":prefix,"before":entry["before"],"source":entry["source"]});
+                let code = format!(
+                    "import json\nARGS = json.loads({})\n{COPIES_SCRIPT}",
+                    serde_json::to_string(&args.to_string()).unwrap_or_default()
+                );
+                let swept = self
+                    .connection()
+                    .call("live_run_python", object(json!({"code":code,"mode":"exec","timeoutMs":20000})), signal.clone())
+                    .await;
+                let Some(done) = swept
+                    .ok()
+                    .filter(|read| read.is_error != Some(true))
+                    .and_then(|read| super::super::context::payload(&read).ok())
+                    .filter(|done| done.get("ok") == Some(&Value::Bool(true)))
+                    .map(|done| done["result"].clone())
+                else {
+                    continue;
+                };
                 if let Some(gone) = done["gone"].as_u64().filter(|gone| *gone > 0) {
                     self.tell(format!("Kumi removed {gone} scratch copies a cut-off search left in this Set."), None);
                 }
+                for name in done["newcomers"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+                    self.tell(
+                        format!("A track named “{name}” appeared while Kumi's search was cut off. If it's a leftover copy, delete it."),
+                        None,
+                    );
+                }
+                if done["left"].as_u64() == Some(0) {
+                    entries.retain(|kept| kept["prefix"].as_str() != Some(prefix));
+                    changed = true;
+                }
+            }
+            if changed {
+                write_journal(&file, &entries);
             }
         }
     }
 
-    /// Opens one Live undo step for Kumi's own work, when the bridge can: its id, to close it with.
-    pub(super) async fn open_undo_step(&self, label: &str) -> Option<String> {
+    /// Opens one Live undo step for Kumi's own work, when the bridge can, closing by itself after about `seconds`
+    /// (the work's own length, with room): its id, to close it with. When the answer is lost, a step may be open with
+    /// no id to close it by, so whatever step is open is closed then.
+    pub(super) async fn open_undo_step(&self, label: &str, seconds: f64) -> Option<String> {
         if !self.connection().has("live_undo_step_begin") || !self.connection().has("live_undo_step_end") {
             return None;
         }
+        let limit = (seconds * 1000.).clamp(30_000., 600_000.).round() as u64;
         let signal = abort::any([self.connection().lifetime.clone(), abort::timeout(10_000)]);
-        let opened =
-            self.connection().call("live_undo_step_begin", object(json!({"label":label,"timeoutMs":600_000})), signal).await.ok()?;
-        super::super::context::payload(&opened).ok()?.get("stepId").and_then(Value::as_str).filter(|id| !id.is_empty()).map(str::to_owned)
+        match self.connection().call("live_undo_step_begin", object(json!({"label":label,"timeoutMs":limit})), signal).await {
+            Ok(opened) => super::super::context::payload(&opened)
+                .ok()?
+                .get("stepId")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned),
+            Err(_) => {
+                let signal = abort::any([self.connection().lifetime.clone(), abort::timeout(10_000)]);
+                let _ = self.connection().call("live_undo_step_end", object(json!({})), signal).await;
+                None
+            }
+        }
     }
 
     pub(super) async fn close_undo_step(&self, step: Option<String>) {
@@ -810,10 +834,11 @@ impl Rendering {
         };
         // One Live undo step for the whole search: the copies made, set and dropped (and the listens between) undo as
         // one, to nothing.
-        let copies = match self.open_copies(&request.device, search.lambda, "Kumi: search", signal.clone()).await? {
-            Ok(copies) => copies,
-            Err(why) => return Ok(Err(why)),
-        };
+        let copies =
+            match self.open_copies(&request.device, search.lambda, ("Kumi: search", SEARCH_GENERATIONS, window), signal.clone()).await? {
+                Ok(copies) => copies,
+                Err(why) => return Ok(Err(why)),
+            };
         // The search, then the copies go whatever happened.
         let searched: Result<Result<(), String>, RuntimeError> = async {
             for _ in 0..SEARCH_GENERATIONS {
@@ -900,4 +925,39 @@ fn describe_band(band: &Band) -> String {
 
 fn round1(value: f64) -> f64 {
     (value * 10.).round() / 10.
+}
+
+/// Every Kumi's journal of scratch copies beside `base` (`<base>-<process>.json`).
+fn journals(base: &Path) -> Vec<PathBuf> {
+    let (Some(folder), Some(stem)) = (base.parent(), base.file_name().and_then(|name| name.to_str())) else { return vec![] };
+    let Ok(listed) = std::fs::read_dir(folder) else { return vec![] };
+    listed
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(&format!("{stem}-")) && name.ends_with(".json"))
+        })
+        .collect()
+}
+
+fn read_journal(file: &Path) -> Vec<Value> {
+    std::fs::read(file)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default()
+}
+
+/// Written whole beside itself and moved into place; gone once it holds nothing.
+fn write_journal(file: &Path, entries: &[Value]) {
+    if entries.is_empty() {
+        let _ = std::fs::remove_file(file);
+        return;
+    }
+    let temporary = file.with_extension("json.partial");
+    if std::fs::write(&temporary, serde_json::to_vec(entries).unwrap_or_default()).is_ok() {
+        let _ = std::fs::rename(&temporary, file);
+    }
 }

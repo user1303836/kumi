@@ -29,18 +29,21 @@ pub(super) struct Copies {
 }
 
 impl Rendering {
-    /// Makes `count` copies of a device's track. The tracks there before are noted first (by Live's identity), so a
-    /// crash or a lost connection still leaves the copies to be swept.
+    /// Makes `count` copies of a device's track, for work heard in `passes` passes over `window`. The tracks there
+    /// before are noted first (by Live's identity), so a crash or a lost connection still leaves the copies to be
+    /// swept, and the one undo step lasts about as long as the work.
     pub(super) async fn open_copies(
         &self,
         device: &str,
         count: usize,
-        label: &str,
+        (label, passes, window): (&str, u32, Window),
         signal: Signal,
     ) -> Result<Result<Copies, String>, RuntimeError> {
         let tag = uuid::Uuid::new_v4().to_string()[..4].to_owned();
         let prefix = format!("Kumi · try {tag}");
-        let step = self.open_undo_step(label).await;
+        let tempo = self.observer.tempo.get().filter(|tempo| *tempo > 0.).unwrap_or(120.);
+        // Each pass is the window heard plus setting up; making and dropping the copies, a minute.
+        let step = self.open_undo_step(label, passes as f64 * (window.beats * 60. / tempo + 10.) + 60.).await;
         let known = match self.copies(device, json!({"action":"before"}), signal.clone()).await {
             Ok(Ok(known)) => known,
             Ok(Err(why)) => {
@@ -95,7 +98,7 @@ impl Rendering {
         let dropped = self
             .copies(
                 &copies.device,
-                json!({"action":"drop","prefix":copies.prefix,"before":copies.known["before"],"source":copies.known["source"]}),
+                json!({"action":"drop","prefix":copies.prefix,"before":copies.known["before"],"source":copies.known["source"],"by_name":true}),
                 self.cleanup(),
             )
             .await;
@@ -223,7 +226,7 @@ impl Rendering {
                 })
                 .collect()
         };
-        let copies = match self.open_copies(&request.device, PROBE_POINTS, "Kumi: probe", signal.clone()).await? {
+        let copies = match self.open_copies(&request.device, PROBE_POINTS, ("Kumi: probe", 1, window), signal.clone()).await? {
             Ok(copies) => copies,
             Err(why) => return Ok(Err(why)),
         };
