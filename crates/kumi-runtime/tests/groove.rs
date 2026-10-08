@@ -12,11 +12,14 @@ use kumi_runtime::{
         errors::RuntimeError,
     },
     integrations::ableton::{
+        changes::CHANGES,
         connection::LiveConnection,
         history::{History, Restore},
+        mutations::Mutations,
         notes::{clip_and_track, track_name},
         observation::Observer,
         options::{AbletonOptions, EarsSetup},
+        parameters::Parameters,
         remember::Remember,
         rendering::{FormRequest, GrooveRequest, Rendering},
     },
@@ -66,6 +69,11 @@ fn beat(late: f64, accents: bool) -> Vec<Value> {
         .collect()
 }
 
+/// A tool's answer, as the bridge gives it.
+fn reply(body: Value) -> CallToolResult {
+    serde_json::from_value(json!({"content":[{"type":"text","text":stringify(&body)}],"structuredContent":body})).unwrap()
+}
+
 fn page(kind: &str, items: Value) -> CallToolResult {
     let body = json!({"epoch":7,"kind":kind,"items":items,"revision":"r1","truncated":false});
     serde_json::from_value(json!({"content":[{"type":"text","text":stringify(&body)}],"structuredContent":body})).unwrap()
@@ -87,9 +95,22 @@ impl McpEndpoint for Live {
         Some(serde_json::from_value(json!({"name":"fake","version":"1.0.89"})).unwrap())
     }
     async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
-        Ok(serde_json::from_value(json!({"tools":[{"name":"live_discover","inputSchema":{"type":"object"}}]})).unwrap())
+        let tools: Vec<Value> = ["live_discover", "live_object_rename_preview", "live_object_rename_apply"]
+            .iter()
+            .map(|name| json!({"name":name,"inputSchema":{"type":"object"}}))
+            .collect();
+        Ok(serde_json::from_value(json!({ "tools": tools })).unwrap())
     }
-    async fn call(&self, _: &str, args: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
+    async fn call(&self, name: &str, args: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
+        // A rename, as the bridge answers one: previewed, then applied.
+        match name {
+            "live_object_rename_preview" => {
+                return Ok(reply(json!({"transactionId":"tx-rename","confirmation":"apply",
+                    "target":{"kind":args["kind"],"ref":args["ref"],"currentName":"Beat"},"proposedName":args["name"]})));
+            }
+            "live_object_rename_apply" => return Ok(reply(json!({"transactionId":"tx-rename","state":"applied"}))),
+            _ => {}
+        }
         let parent = args.get("parent").and_then(Value::as_str).unwrap_or("").to_owned();
         let rows = |items: Vec<Value>| Value::Array(items.iter().map(|row| asked(row, &args)).collect());
         let pad = |name: &str, note: u8| json!({"name":name,"note":note,"chains":[{"name":name}]});
@@ -164,6 +185,7 @@ struct Groove {
     connection: Rc<LiveConnection>,
     history: Rc<History>,
     observer: Rc<Observer>,
+    options: Rc<AbletonOptions>,
     made: Rc<RefCell<Vec<(String, JsonObject)>>>,
 }
 
@@ -219,7 +241,7 @@ async fn groove_with(live: Rc<Live>, clip_file: ResolveAudio) -> Groove {
         }),
         clip_file,
     );
-    Groove { rendering, connection, history, observer, made }
+    Groove { rendering, connection, history, observer, options, made }
 }
 
 fn request(value: Value) -> GrooveRequest {
@@ -439,6 +461,25 @@ async fn a_judged_run_follows_kumis_renames_of_its_own_track_alone() {
             // A track that came to its place since (one added before it), renamed: not followed either.
             rename("c912", "7:track:0", "Reference", "Keys");
             assert_eq!(now().as_deref(), Some("Beat"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_judged_run_follows_a_rename_made_through_kumis_changes() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // As the hand-made renames above, but made the way the model makes one: the long ref Mutations records
+            // for it is the one the run keeps.
+            let Groove { rendering, connection, history, observer, options, .. } = groove(live(true)).await;
+            let named = rendering.named(Some("Beat"), None, Signal::new()).await;
+            let short = connection.references.borrow_mut().short_ref("7:track:0");
+            let mutations = Mutations::new(Rc::new(Parameters::new(history.clone(), options.fast)), observer, options.clone());
+            let rename = CHANGES.iter().find(|kind| kind.tool == "rename").unwrap();
+            let input = json!({"kind":"track","ref":short,"name":"Drums"}).as_object().unwrap().clone();
+            let outcome = mutations.change(rename, input, Signal::new(), true).await;
+            assert!(!outcome.is_error, "{}", outcome.text);
+            assert_eq!(rendering.names_now(&named).0.as_deref(), Some("Drums"));
         })
         .await;
 }

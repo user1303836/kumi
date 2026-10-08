@@ -677,6 +677,17 @@ fn rebalancing_turns_only_a_device_thats_on() {
     assert_eq!(picked(&[row("Limiter", true), row("Utility", false)]), Some((serde_json::json!("Limiter"), true)));
     // A Utility that's off isn't one either.
     assert_eq!(picked(&[row("Utility", false)]), None);
+    // Live's own, by class: a plug-in renamed "Limiter" (or "Utility") isn't one, and a Limiter renamed still is.
+    let named = |name: &str, class: &str| {
+        serde_json::json!({"ref": name, "name": name, "className": class, "enabled": true}).as_object().unwrap().clone()
+    };
+    assert_eq!(picked(&[named("Limiter", "PluginDevice")]), None);
+    assert_eq!(picked(&[named("Utility", "AuPluginDevice")]), None);
+    assert_eq!(
+        picked(&[named("Master Ceiling", "Limiter"), named("Limiter", "PluginDevice")]),
+        Some((serde_json::json!("Master Ceiling"), true))
+    );
+    assert_eq!(picked(&[named("Trim", "StereoGain")]), Some((serde_json::json!("Trim"), false)));
 }
 
 #[test]

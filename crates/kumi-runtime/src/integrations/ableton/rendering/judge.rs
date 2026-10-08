@@ -1550,18 +1550,21 @@ pub fn gain_parameter<'a>(limiter: bool, maximizing: bool, names: &[&'a str]) ->
     wanted.iter().find_map(|want| names.iter().find(|name| *name == want).copied())
 }
 
-/// The device rebalancing turns, from a chain's rows (with `enabled`): the last Limiter that's on (peaks then stay
-/// put), else a Utility that's the last device on. One that's off turns nothing: without either, rebalancing puts a
-/// Utility at the end.
+/// The device rebalancing turns, from a chain's rows (with `className` and `enabled`): the last Limiter that's on
+/// (peaks then stay put), else a Utility that's the last device on. Live's own, by class: a plug-in or a rack named
+/// "Limiter" or "Utility" isn't one. One that's off turns nothing: without either, rebalancing puts a Utility at the
+/// end.
 pub fn gain_device(rows: &[JsonObject]) -> Option<(JsonObject, bool)> {
     let on = |row: &JsonObject| row.get("enabled") != Some(&Value::Bool(false));
-    let named = |row: &JsonObject, name: &str| {
-        row.get("className").and_then(Value::as_str) == Some(name) || row.get("name").and_then(Value::as_str) == Some(name)
-    };
-    if let Some(at) = rows.iter().rposition(|row| on(row) && named(row, "Limiter")) {
+    let class = |row: &JsonObject| row.get("className").and_then(Value::as_str).unwrap_or("").to_owned();
+    if let Some(at) = rows.iter().rposition(|row| on(row) && class(row) == "Limiter") {
         return Some((rows[at].clone(), true));
     }
-    rows.iter().rev().find(|row| on(row)).filter(|row| named(row, "Utility") || named(row, "StereoGain")).map(|row| (row.clone(), false))
+    rows.iter()
+        .rev()
+        .find(|row| on(row))
+        .filter(|row| matches!(class(row).as_str(), "StereoGain" | "Utility"))
+        .map(|row| (row.clone(), false))
 }
 
 /// A device row's identity in Live (empty when the bridge doesn't say).
