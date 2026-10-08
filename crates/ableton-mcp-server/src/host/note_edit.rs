@@ -127,7 +127,29 @@ fn applied_as_asked(t: &Value, applied: &[Value]) -> bool {
         let deleted: HashSet<_> = t["noteIds"].as_array().into_iter().flatten().map(js_json::stringify).collect();
         prior.iter().filter(|note| !deleted.contains(&key(note))).cloned().collect()
     };
-    note_fence(&live_precision(applied)) == note_fence(&live_precision(&expected))
+    note_fence(&live_precision(applied)) == note_fence(&live_precision(&expected)) || same_notes(applied, &expected)
+}
+/// The same notes by id, each field the same and each number within a millionth (relative or absolute), as the Remote
+/// Script checks its own edit: Live can keep a start a hair off the one it was given (0.354 as 0.35399990634), which
+/// rounding both through f32 doesn't always bring together.
+fn same_notes(observed: &[Value], expected: &[Value]) -> bool {
+    let by_id: HashMap<String, &Value> = expected.iter().map(|note| (key(note), note)).collect();
+    if observed.len() != expected.len() || by_id.len() != expected.len() || by_id.contains_key("$undefined") {
+        return false;
+    }
+    let close = |a: f64, b: f64| (a - b).abs() <= 1e-6_f64.max(1e-6 * a.abs().max(b.abs()));
+    observed.iter().all(|note| {
+        let Some(wanted) = by_id.get(&key(note)) else { return false };
+        let (note, wanted) = (normalized_note(note, false, true, true), normalized_note(wanted, false, true, true));
+        let (Some(note), Some(wanted)) = (note.as_object(), wanted.as_object()) else { return false };
+        note.len() == wanted.len()
+            && note.iter().all(|(field, value)| {
+                wanted.get(field).is_some_and(|other| match (value.as_f64(), other.as_f64()) {
+                    (Some(a), Some(b)) => close(a, b),
+                    _ => value == other,
+                })
+            })
+    })
 }
 pub(super) fn note_content_fence(notes: &[Value]) -> String {
     fence(notes, true)
@@ -687,5 +709,17 @@ mod tests {
             assert_eq!(note_fence(notes), row["fence"].as_str().unwrap());
             assert_eq!(note_content_fence(notes), row["content"].as_str().unwrap());
         }
+    }
+    #[test]
+    fn a_start_live_keeps_a_hair_off_is_applied_as_asked() {
+        let note = |id: u64, start: f64, velocity: f64| json!({"pitch":42,"start":start,"duration":0.1,"velocity":velocity,"channel":1,"id":id,"mute":false,"probability":1,"velocityDeviation":0,"releaseVelocity":64});
+        let t = json!({"kind":"update","priorAllNotes":[note(6, 0.0, 98.), note(7, 0.35, 58.)],"patches":[{"id":7,"start":0.354,"velocity":60.0}]});
+        // Asked 0.354, Live keeps 0.35399990634365636: through f32 the two differ, within a millionth they're the same.
+        assert!(applied_as_asked(&t, &[note(6, 0.0, 98.), note(7, 0.35399990634365636, 60.)]));
+        assert_ne!(note_fence(&live_precision(&[note(7, 0.35399990634365636, 60.)])), note_fence(&live_precision(&[note(7, 0.354, 60.)])));
+        // A start Live really moved, a velocity it clamped, a note it dropped: not as asked.
+        assert!(!applied_as_asked(&t, &[note(6, 0.0, 98.), note(7, 0.3541, 60.)]));
+        assert!(!applied_as_asked(&t, &[note(6, 0.0, 98.), note(7, 0.354, 59.)]));
+        assert!(!applied_as_asked(&t, &[note(7, 0.354, 60.)]));
     }
 }
