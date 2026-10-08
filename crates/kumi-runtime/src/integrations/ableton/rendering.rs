@@ -57,6 +57,8 @@ pub struct Rendering {
     restore: Option<RestoreStore>,
     /// Scratch copies a search made and hasn't removed yet (beside the render journal): swept when Live is back.
     copies_journal: Option<PathBuf>,
+    /// The prefixes of copies a search of this process is using right now: never swept.
+    copies_live: RefCell<Vec<String>>,
     on_action: Option<Rc<dyn Fn(ActionEvent)>>,
     on_audition: Option<Rc<dyn Fn(AuditionEvent)>>,
     on_judge: Option<Rc<dyn Fn(crate::listening::round::Round)>>,
@@ -119,6 +121,7 @@ impl Rendering {
             clip_file,
             restore: options.restore_file.as_ref().map(restore_store),
             copies_journal: options.restore_file.as_ref().map(|file| PathBuf::from(format!("{file}.copies.json"))),
+            copies_live: RefCell::new(vec![]),
             on_action: options.on_action.clone(),
             on_audition: options.on_audition.clone(),
             on_judge: options.on_judge.clone(),

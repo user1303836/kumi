@@ -574,7 +574,8 @@ impl Rendering {
                 None => entry["set"].as_str() == Some(identity),
             };
             let theirs = entry["pid"].as_f64().is_some_and(|pid| pid as u32 != std::process::id() && crate::library::state::alive(pid));
-            if !here || theirs {
+            let in_use = self.copies_live.borrow().iter().any(|live| live == prefix);
+            if !here || theirs || in_use {
                 continue;
             }
             let args = json!({"action":"drop","prefix":prefix,"before":entry["before"],"source":entry["source"]});
@@ -795,6 +796,7 @@ impl Rendering {
             }
         };
         self.note_copies(&prefix, Some(json!({"prefix":prefix,"before":known["before"],"source":known["source"]})));
+        self.copies_live.borrow_mut().push(prefix.clone());
         // The search, then the copies go whatever happened (a make cut off partway takes its own back).
         let searched: Result<Result<(), String>, RuntimeError> = async {
             let made = match self
@@ -852,6 +854,7 @@ impl Rendering {
             )
             .await;
         self.close_undo_step(step).await;
+        self.copies_live.borrow_mut().retain(|live| *live != prefix);
         match dropped {
             // Forgotten only once nothing of them is left.
             Ok(Ok(done)) if done["left"].as_u64() == Some(0) => self.note_copies(&prefix, None),
