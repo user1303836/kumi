@@ -130,7 +130,11 @@ impl Rendering {
             *self.ears_setup.borrow_mut() = Some(setup.clone());
             setup
         };
-        let link = setup.await;
+        // Shared with any other caller, the setup goes on without this one: Esc stops only this wait.
+        let link = tokio::select! {
+            link = setup => link,
+            _ = signal.cancelled() => return Err(RuntimeError::Aborted),
+        };
         if link.is_none() {
             *self.ears_setup.borrow_mut() = None;
             if !lifetime.is_cancelled() {

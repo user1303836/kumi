@@ -455,6 +455,9 @@ struct LiveTool {
     description: String,
     schema: JsonObject,
 }
+/// Live tools that only read Kumi's own library: they don't wait for Live.
+const AWAY_FROM_LIVE: &[&str] = &["find_sounds"];
+
 #[async_trait(?Send)]
 impl KernelTool for LiveTool {
     fn name(&self) -> &str {
@@ -473,8 +476,12 @@ impl KernelTool for LiveTool {
     async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
         let owner = &self.owner;
         // One Live tool call at a time, across answers too: a stopped answer's call still putting Live back (taking a
-        // round back, closing a render) finishes before this one starts.
-        let _live = owner.rendering.hold(&signal).await?;
+        // round back, closing a render) finishes before this one starts. Reading Kumi's library, away from Live, needs
+        // no turn (several such calls run together).
+        let _live = match AWAY_FROM_LIVE.contains(&self.name.as_str()) {
+            true => None,
+            false => Some(owner.rendering.hold(&signal).await?),
+        };
         if let Some(kind) = CHANGES.iter().find(|k| k.tool == self.name) {
             let out = owner.mutations.change(kind, input, signal, false).await;
             return Ok(ToolResult { text: out.text, is_error: out.is_error, ..Default::default() });

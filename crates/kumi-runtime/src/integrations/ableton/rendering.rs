@@ -139,11 +139,18 @@ impl Rendering {
     /// Live, for one tool call: once a stopped answer's call has finished putting Live back, and Esc while waiting
     /// stops this one before it starts.
     pub async fn hold(&self, signal: &Signal) -> Result<tokio::sync::MutexGuard<'_, ()>, RuntimeError> {
-        tokio::select! {
+        if let Ok(held) = self.busy.try_lock() {
+            return Ok(held);
+        }
+        // Said, so a call that waits doesn't look stuck.
+        self.tell("Finishing the stopped answer's clean-up in Live first", Some(true));
+        let held = tokio::select! {
             biased;
             _ = signal.cancelled() => Err(RuntimeError::Aborted),
             held = self.busy.lock() => Ok(held),
-        }
+        };
+        self.tell("Live is free again", Some(false));
+        held
     }
     /// Resolves once no Live tool call is running: a stopped answer's has finished putting Live back.
     pub async fn settled(&self) {
