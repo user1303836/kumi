@@ -2,7 +2,9 @@
 # tracks there now, and the copied track's name), "make" (count), "set" (values) and "drop". A copy is the track a
 # duplicate adds, found by comparing the tracks before and after (never by position). A make stops itself well inside
 # its time limit, so a make cut off partway still takes back the copies it made. A drop removes the tracks that
-# weren't there before ("before") and carry the prefix or the copied track's name ("source": a copy never renamed).
+# weren't there before ("before") and carry the prefix, or the copied track's name ("source": a copy never renamed)
+# while Live's identities still hold. They hold only within one run of Live: after a restart every track has a new
+# one, so a track goes by that name only when the copied track itself is still found among the identities.
 args = ARGS
 identity = bridge._capture_object_identity
 tracks = list(song.tracks)
@@ -54,11 +56,12 @@ elif args['action'] == 'set':
 else:
     before = set(args.get('before') or [])
     source = args.get('source')
+    current = source is not None and any(identity(t) in before and str(t.name) == source for t in tracks)
     def ours(t):
         name = str(t.name)
         if before and identity(t) in before:
             return False
-        return name.startswith(args['prefix'] + ' ') or (bool(before) and source is not None and name == source)
+        return name.startswith(args['prefix'] + ' ') or (current and name == source)
     gone = 0
     for index in reversed(range(len(tracks))):
         if ours(tracks[index]):
