@@ -76,6 +76,10 @@ pub fn groove_request(input: &JsonObject) -> Result<GrooveRequest, String> {
     let request = GrooveRequest {
         clip: text("clip"),
         reference: text("reference"),
+        reference_tempo: input
+            .get("reference_tempo")
+            .and_then(Value::as_f64)
+            .filter(|tempo| tempo.is_finite() && (20. ..=400.).contains(tempo)),
         audio: text("audio"),
         change: text("change"),
         apply: input.get("apply") == Some(&Value::Bool(true)),
@@ -84,7 +88,9 @@ pub fn groove_request(input: &JsonObject) -> Result<GrooveRequest, String> {
     };
     let starting = request.clip.is_some() || request.reference.is_some();
     if starting && (request.clip.is_none() || request.reference.is_none()) {
-        return Err("A run starts with both clip (the part) and reference (the reference's MIDI clip).".into());
+        return Err(
+            "A run starts with both clip (the part) and reference (the reference's MIDI clip, or an audio file of a pitched part).".into(),
+        );
     }
     if starting && (request.change.is_some() || request.apply || request.done) {
         return Err("Start a run first; judge a change (or apply, or end it) in a later call.".into());

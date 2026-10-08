@@ -400,7 +400,9 @@ with Live's own splitter, and measure a stem.
 (or the part) plays in the bar, how early or late each step sits (its push and
 swing), its accents, syncopation and fills, against a reference's MIDI. For a
 record's drums, Kumi separates its stems, converts the drum stem to MIDI with
-Live's Drums to MIDI, and moves each hit onto the stem's real onset first. Kumi
+Live's Drums to MIDI, and moves each hit onto the stem's real onset first. A
+pitched part that isn't in Live (a bass line in an audio file) becomes notes with
+Basic Pitch, on the beat grid of its tempo. Kumi
 can move your notes toward the reference itself, step by step, and keeps a
 change only if it got closer without anything else moving away.
 

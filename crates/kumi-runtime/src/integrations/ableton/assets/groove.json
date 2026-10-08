@@ -1,5 +1,5 @@
 {
-  "description": "Shape a part's feel toward a reference's, judged on the notes with no listening: where each lane plays (kick, snare, hats, the rest; one lane for a pitched part), its timing step by step (push, swing, laid-back hats), its velocity accents, syncopation and fills. Start a run with clip (the part, a MIDI clip) and reference (a MIDI clip with the reference's notes). For a reference's drums: put the track in the Arrangement, separate its stems (live_command separate_stems), convert the drum stem to MIDI (live_command convert_drums_to_midi), and give that MIDI clip as reference and the drum stem's clip as audio: Kumi hears the stem and moves each converted hit onto its real onset. Then change the notes (change_notes, transform_midi swing, quantize) and call groove with change, or let code move the notes toward the reference's timing and accents with apply: true (amount 0–1, all the way when left out). Kumi keeps a change only if its target got closer and nothing else moved away, taking it back otherwise, and names the next target. done: true ends the run with before → after.",
+  "description": "Shape a part's feel toward a reference's, judged on the notes with no listening: where each lane plays (kick, snare, hats, the rest; one lane for a pitched part), its timing step by step (push, swing, laid-back hats), its velocity accents, syncopation and fills. Start a run with clip (the part, a MIDI clip) and reference (a MIDI clip with the reference's notes). For a reference's drums: put the track in the Arrangement, separate its stems (live_command separate_stems), convert the drum stem to MIDI (live_command convert_drums_to_midi), and give that MIDI clip as reference and the drum stem's clip as audio: Kumi hears the stem and moves each converted hit onto its real onset. For a pitched part that isn't in Live (a bass line in an audio file), give the file as reference: Kumi turns it into notes with Basic Pitch, on the beat grid of its tempo (reference_tempo, or estimated) from the file's start as beat one. Then change the notes (change_notes, transform_midi swing, quantize) and call groove with change, or let code move the notes toward the reference's timing and accents with apply: true (amount 0–1, all the way when left out). Kumi keeps a change only if its target got closer and nothing else moved away, taking it back otherwise, and names the next target. done: true ends the run with before → after.",
   "schema": {
     "type": "object",
     "additionalProperties": false,
@@ -14,7 +14,13 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 256,
-        "description": "Starts a run: the reference's MIDI clip (its clipRef)"
+        "description": "Starts a run: the reference's MIDI clip (its clipRef), or an audio file of a pitched part that isn't in Live (Basic Pitch turns it into notes; the file starts on beat one)"
+      },
+      "reference_tempo": {
+        "type": "number",
+        "minimum": 20,
+        "maximum": 400,
+        "description": "With an audio file as the reference: its tempo, BPM (Kumi estimates it when left out)"
       },
       "audio": {
         "type": "string",

@@ -16,3 +16,4 @@ pub mod notes;
 pub mod probes;
 pub mod round;
 pub mod sound;
+pub mod transcribe;

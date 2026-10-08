@@ -1,7 +1,8 @@
 //! The groove judge: a part's feel shaped toward a reference's, judged on the notes, without listening. Each round
 //! re-reads the part, keeps a change only if its target got closer and nothing else moved away, and takes it back
 //! otherwise. Code can move the notes itself (the reference's timing and accents, step by step); a reference's drums,
-//! from Live's Drums to MIDI, have their hits moved onto the drum stem's own onsets first.
+//! from Live's Drums to MIDI, have their hits moved onto the drum stem's own onsets first. A pitched part that isn't in
+//! Live (an audio file) is turned into notes with Basic Pitch.
 
 use super::super::connection::NO_CURRENT_LIVE;
 use super::rig::Window;
@@ -18,8 +19,11 @@ use std::collections::HashMap;
 pub struct GrooveRequest {
     /// The part: a MIDI clip.
     pub clip: Option<String>,
-    /// The reference: a MIDI clip (a reference's drums through Drums to MIDI, say).
+    /// The reference: a MIDI clip (a reference's drums through Drums to MIDI, say), or an audio file of a pitched part
+    /// that isn't in Live.
     pub reference: Option<String>,
+    /// An audio file reference's tempo (BPM); estimated when left out.
+    pub reference_tempo: Option<f64>,
     /// The reference's drum stem (an audio clip), to move its hits onto their onsets.
     pub audio: Option<String>,
     pub change: Option<String>,
@@ -58,7 +62,7 @@ impl Rendering {
         }
         let signal = abort::any([original, self.connection().lifetime.clone()]);
         let outcome = if let (Some(clip), Some(reference)) = (&request.clip, &request.reference) {
-            self.groove_start(clip, reference, request.audio.as_deref(), signal.clone()).await
+            self.groove_start(clip, (reference, request.reference_tempo), request.audio.as_deref(), signal.clone()).await
         } else if self.groove.borrow().is_none() {
             return Ok(Err("Start with clip (the part) and reference (a MIDI clip): groove compares their feel.".into()));
         } else if request.done {
@@ -80,6 +84,50 @@ impl Rendering {
     }
 
     /// A clip's notes as Live has them.
+    /// A pitched part in an audio file (one that isn't in Live) as notes, with Basic Pitch: on the beat grid of its
+    /// tempo (given, else estimated), from the file's start as beat one.
+    async fn file_notes(&self, file: &str, tempo: Option<f64>, signal: Signal) -> Result<Read, String> {
+        let tempo = match tempo {
+            Some(tempo) => tempo,
+            None => crate::audio::analyze::analyze_file(
+                file,
+                crate::audio::analyze::AnalyzeOptions { seconds: Some(120.), signal: Some(signal.clone()), ..Default::default() },
+            )
+            .await
+            .ok()
+            .and_then(|analysis| analysis.tempo)
+            .map(|tempo| tempo.bpm)
+            .ok_or("Kumi couldn't tell its tempo: give reference_tempo (its BPM).")?,
+        };
+        let say = |said: &str| self.tell(said.to_string(), None);
+        let heard = crate::listening::transcribe::pitched_notes(std::path::Path::new(file), 0., 120., &say, &signal).await?;
+        if heard.is_empty() {
+            return Err("Basic Pitch heard no notes in it.".into());
+        }
+        let beats = tempo / 60.;
+        let notes: Vec<(i64, Note)> = heard
+            .iter()
+            .enumerate()
+            .map(|(index, note)| {
+                (
+                    index as i64,
+                    Note {
+                        start: note.start * beats,
+                        length: ((note.end - note.start) * beats).max(1. / 64.),
+                        pitch: note.pitch as i32,
+                        velocity: (note.strength as f64 * 127.).round().clamp(1., 127.),
+                    },
+                )
+            })
+            .collect();
+        let name = file.rsplit(['/', '\\']).next().unwrap_or(file).to_string();
+        Ok(Read {
+            name: format!("{name} ({} notes at {} BPM, by Basic Pitch)", notes.len(), to_string((tempo * 10.).round() / 10.)),
+            notes,
+            song_zero: None,
+        })
+    }
+
     async fn clip_notes(&self, clip: &str, signal: Signal) -> Result<Read, String> {
         let input = object(json!({"clipRef": clip, "format": "json"}));
         let read = super::super::notes::read_notes(&input, self.connection(), self.observer.tempo.get(), signal).await;
@@ -178,13 +226,21 @@ impl Rendering {
     async fn groove_start(
         self: &Rc<Self>,
         clip: &str,
-        reference: &str,
+        (reference, reference_tempo): (&str, Option<f64>),
         audio: Option<&str>,
         signal: Signal,
     ) -> Result<Result<Round, String>, RuntimeError> {
-        let mut wanted = match self.clip_notes(reference, signal.clone()).await {
-            Ok(read) => read,
-            Err(why) => return Ok(Err(format!("The reference: {why}"))),
+        let file = audio::audio_path(reference);
+        let mut wanted = if std::path::Path::new(&file).is_file() {
+            match self.file_notes(&file, reference_tempo, signal.clone()).await {
+                Ok(read) => read,
+                Err(why) => return Ok(Err(format!("The reference: {why}"))),
+            }
+        } else {
+            match self.clip_notes(reference, signal.clone()).await {
+                Ok(read) => read,
+                Err(why) => return Ok(Err(format!("The reference: {why}"))),
+            }
         };
         let mut said = String::new();
         if let Some(audio) = audio {

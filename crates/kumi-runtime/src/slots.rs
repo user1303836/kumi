@@ -89,7 +89,9 @@ pub fn describe(job: Job, choice: &Choice) -> String {
     match (job, choice) {
         (_, Choice::File { path }) => format!("the model file {path}"),
         (Job::Stems, _) => "Live's own splitter".into(),
-        (Job::Transcription, _) => "Live's conversions (drums, melody and harmony to MIDI)".into(),
+        (Job::Transcription, _) => {
+            "Live's conversions (drums, melody and harmony to MIDI), and Basic Pitch for a pitched part in a file that isn't in Live".into()
+        }
         (Job::Embeddings, Choice::Off) => "off: no embeddings".into(),
         (Job::Embeddings, _) => {
             "Kumi's own: LAION-CLAP's music model for style and AFx-Rep for effects, fetched from Kumi's models release the first time they're needed".into()
