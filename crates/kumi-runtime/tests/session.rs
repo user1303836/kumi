@@ -59,6 +59,8 @@ struct Record {
     putting_back: RefCell<Option<Rc<Notify>>>,
     /// How often the session waited for its integration to settle.
     settled: Cell<usize>,
+    /// The integration comes wrapped in a fallback, as the app has it.
+    wrapped: Cell<bool>,
 }
 struct TestKernel {
     record: Rc<Record>,
@@ -221,7 +223,12 @@ fn harness(run: Option<Run>, config: impl FnOnce(&mut SessionOptions)) -> Harnes
     let obs = observation.clone();
     let integration: IntegrationFactory = Box::new(move |listener| {
         r.listeners.borrow_mut().push(listener.clone());
-        Rc::new(TestIntegration { record: r.clone(), observation: obs.clone(), listener })
+        let bare = Rc::new(TestIntegration { record: r.clone(), observation: obs.clone(), listener });
+        if r.wrapped.get() {
+            kumi_runtime::with_fallback(bare, Rc::new(|| panic!("no fallback")), Rc::new(|_| {})) as Rc<dyn Integration>
+        } else {
+            bare
+        }
     });
     let mut options = SessionOptions::new(factory, integration, Rc::new(move |e| out.borrow_mut().push(e)));
     options.timeout_ms = Some(5000);
@@ -394,6 +401,12 @@ local_test!(cooperative_cancel_keeps_kernel_usage_and_finished_steps, {
     assert_eq!(h.session.status().connection, ConnectionState::Disconnected);
 });
 local_test!(a_stopped_answer_ends_once_its_tool_calls_have_put_live_back, {
+    for wrapped in [false, true] {
+        a_stopped_answer_waits_for_its_put_back(wrapped).await;
+    }
+});
+/// As the session has its integration bare, and as the app has it, in a fallback.
+async fn a_stopped_answer_waits_for_its_put_back(wrapped: bool) {
     let h = harness(
         Some(Rc::new(|_, signal, _| {
             async move {
@@ -404,6 +417,7 @@ local_test!(a_stopped_answer_ends_once_its_tool_calls_have_put_live_back, {
         })),
         |_| {},
     );
+    h.record.wrapped.set(wrapped);
     // A judge call is still taking its round back in Live when Esc comes.
     let putting_back = Rc::new(Notify::new());
     *h.record.putting_back.borrow_mut() = Some(putting_back.clone());
@@ -419,9 +433,9 @@ local_test!(a_stopped_answer_ends_once_its_tool_calls_have_put_live_back, {
     putting_back.notify_one();
     running.await.unwrap().unwrap();
     cancelling.await.unwrap().unwrap();
-    assert!(ended(&h.events));
+    assert!(ended(&h.events), "wrapped: {wrapped}");
     assert_eq!(h.record.settled.get(), 1);
-});
+}
 local_test!(uncooperative_timeout_is_bounded_and_quarantines_kernel, {
     let h = harness(Some(hang_once()), |o| o.timeout_ms = Some(15));
     h.session.start().await.unwrap();

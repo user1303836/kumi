@@ -780,6 +780,7 @@ impl Integration for Ableton {
         if !self.connection.started.get() || self.connection.closed.get() {
             return Err(KumiError::new(FailureKind::Request, "Kumi isn't connected to Live, so it can't undo.").into());
         }
+        let _live = self.rendering.hold(&signal).await?;
         let outcome = self.history.undo(id.unwrap_or("last"), signal, false).await?;
         outcome.record.ok_or_else(|| KumiError::new(FailureKind::Request, outcome.text).into())
     }
@@ -823,18 +824,21 @@ impl Integration for Ableton {
         true
     }
     async fn audition(&self, request: &AuditionRequest, signal: Signal) -> Result<Result<AuditionResult, String>, RuntimeError> {
+        let _live = self.rendering.hold(&signal).await?;
         self.rendering.audition(request, signal).await
     }
     fn has_goal(&self) -> bool {
         true
     }
     async fn goal(&self, request: &AuditionRequest, signal: Signal) -> Result<Result<Rc<dyn GoalRig>, String>, RuntimeError> {
+        let _live = self.rendering.hold(&signal).await?;
         self.rendering.open_goal(request, signal).await
     }
     fn has_hear(&self) -> bool {
         true
     }
     async fn hear(&self, request: &HearRequest, signal: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
+        let _live = self.rendering.hold(&signal).await?;
         self.rendering.hear_in_set(request, signal).await
     }
 }

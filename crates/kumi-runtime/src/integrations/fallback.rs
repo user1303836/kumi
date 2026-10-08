@@ -46,6 +46,9 @@ impl Integration for FallbackIntegration {
     async fn close(&self) -> Result<(), RuntimeError> {
         self.current().close().await
     }
+    async fn settled(&self) {
+        self.current().settled().await
+    }
     fn has_undo(&self) -> bool {
         true
     }
