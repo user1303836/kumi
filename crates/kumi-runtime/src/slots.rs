@@ -80,11 +80,14 @@ pub enum Choice {
     Openai,
     /// A model on this computer behind an OpenAI-compatible server that takes audio: its address and model.
     Local { base: String, model: String },
+    /// A model file on this computer, for Kumi's own model runtime to load (the embeddings model, once fetched).
+    File { path: String },
 }
 
 /// A choice for a job, in words.
 pub fn describe(job: Job, choice: &Choice) -> String {
     match (job, choice) {
+        (_, Choice::File { path }) => format!("the model file {path}"),
         (Job::Stems, _) => "Live's own splitter".into(),
         (Job::Transcription, _) => "Live's conversions (drums, melody and harmony to MIDI)".into(),
         (Job::Embeddings, _) => "none yet".into(),
@@ -134,6 +137,15 @@ impl Slots {
 
     pub fn now(&self, job: Job) -> Choice {
         self.0.get(&job).map(|slot| slot.now.clone()).unwrap_or_default()
+    }
+
+    /// The model file a slot holds, for Kumi's own model runtime to load (the embeddings model, once fetched); None
+    /// while the slot holds anything else.
+    pub fn model_file(&self, job: Job) -> Option<PathBuf> {
+        match self.now(job) {
+            Choice::File { path } => Some(PathBuf::from(path)),
+            _ => None,
+        }
     }
 
     /// Swaps a slot to `choice`, keeping what it held to go back to.
@@ -350,7 +362,8 @@ async fn found(
     signal: Signal,
 ) -> Result<Option<Rc<dyn Listener>>, String> {
     match choice {
-        Choice::Off => Ok(None),
+        // Kumi runs no listening model file itself.
+        Choice::Off | Choice::File { .. } => Ok(None),
         Choice::Gemini => gemini(store, env, signal).await,
         Choice::Openai => openai(store, env, signal).await,
         Choice::Local { base, model } => Ok(Some(local(base, model, env))),

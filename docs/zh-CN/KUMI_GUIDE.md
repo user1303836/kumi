@@ -334,7 +334,7 @@ Kumi 会在启动时检查是否有新版本，每天最多一次；没有新版
 - **网络搜索和阅读**会发送到上面提到的搜索服务，Kumi 读取的网页也会看到它的请求。Kumi 不会读取带有密钥或令牌的地址。
 - **下载**来自 GitHub（Kumi 的发布版本和更新检查、yt-dlp、ffmpeg 和 whisper.cpp）、Hugging Face（语音模型）以及你指定的视频网站。
 - 用文字指定的**参考**会按名字在 MusicBrainz 和 ListenBrainz 上查找，Spotify 链接从 Spotify 的公开页面读取（艺人链接从 MusicBrainz），音频通过 YouTube 搜索获取，测量完即删除。
-- **音频**在你的电脑上分析；只有数字会发送给模型。如果有聆听模型，它会收到所判定修改的简短片段（每段最长 10 秒，单声道）：有 Gemini API 密钥时发给 Gemini，有 OpenAI API 密钥时发给 OpenAI，或发给 `KUMI_LISTENER` 指定的模型。`KUMI_LISTENER=off` 可以关闭。
+- **音频**在你的电脑上分析；只有数字会发送给模型。如果有聆听模型，它会收到所判定修改的简短片段（每段最长 10 秒，单声道）：有 Gemini API 密钥时发给 Gemini，有 OpenAI API 密钥时发给 OpenAI，或发给 `KUMI_LISTENER` 或聆听槽位（`/slots`）指定的模型。`KUMI_LISTENER=off` 或 `/slots listening off` 可以关闭；试用新的聆听模型时只会发送一段已知的测试音。
 - **你的声音**在你的电脑上转写，录音随即删除；只有你发送时的文字会离开。
 - **你的素材库**在你的电脑上学习；只有手册的页面来自网络。
 

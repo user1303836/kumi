@@ -170,6 +170,13 @@ fn a_slot_is_kept_in_its_file_and_swaps_are_taken_back_in_turn() {
     assert_eq!(read.back(Job::Listening), Some(Choice::Default));
     assert_eq!(read.back(Job::Listening), None);
     assert_eq!(read, Slots::default());
+    // The embeddings model's file, for the model runtime to load once one is fetched.
+    let model = folder.path().join("models").join("embeddings.onnx");
+    read.switch(Job::Embeddings, Choice::File { path: model.display().to_string() });
+    assert_eq!((read.model_file(Job::Embeddings), read.model_file(Job::Listening)), (Some(model.clone()), None));
+    assert_eq!(slots::describe(Job::Embeddings, &read.now(Job::Embeddings)), format!("the model file {}", model.display()));
+    assert_eq!(read.back(Job::Embeddings), Some(Choice::Default));
+    assert_eq!(read.model_file(Job::Embeddings), None);
     // A file Kumi can't read leaves the defaults.
     std::fs::write(&file, "{not json").unwrap();
     assert_eq!(Slots::load(&file), Slots::default());

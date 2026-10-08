@@ -838,8 +838,9 @@ says which need which.
 - **Audio** is analysed on your computer; only the numbers go to the model. A
   listening model, when there is one, gets short excerpts (at most 10 seconds
   each, mono) of the changes it weighs: Gemini with a Gemini API key, OpenAI
-  with an OpenAI API key, or the model in `KUMI_LISTENER`. `KUMI_LISTENER=off`
-  stops that.
+  with an OpenAI API key, or the model in `KUMI_LISTENER` or the listening slot
+  (`/slots`). `KUMI_LISTENER=off` or `/slots listening off` stops that; trying a
+  new listening model sends it only a known test tone.
 - **Your voice** is written down on your computer, and the recording deleted as
   soon as it is; only the words leave, when you send them.
 - **Your library** is learned on your computer; only the manual's pages come from
