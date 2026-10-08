@@ -337,6 +337,13 @@ trusting them:
   tolerance. Kumi first hears the whole stretch and lists what's off: harsh or
   resonant frequencies, wide lows, rumble, DC, a loud bass note, overs and
   clipping, and what masks the element you name.
+- **Masking is read only through a transparent Main.** Kumi hears the element
+  before Main's chain and the mix after it, so masking is on the checklist only
+  while Main's devices are off, meters (Spectrum, Tuner) or a Utility that only
+  turns the level (the element is heard at that level too). With anything else
+  on Main, such as a limiter or an EQ, it's left off and the run says so: to
+  work on the element cutting through, judge it with Main's devices switched
+  off, then the master's loudness and peaks on their own.
 - **One change at a time:** after each change Kumi hears before and after at the
   same loudness, and keeps the change only if its target improved and nothing
   else got audibly worse (a measure it can no longer read, such as silence,

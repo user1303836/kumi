@@ -372,11 +372,6 @@ impl Mutations {
         if let Some(clip) = args.get("clipRef").and_then(Value::as_str) {
             history.made_on(&record.id, clip);
         }
-        // Where it was made, by its long ref: a judged round tells a change on Main's chain by it.
-        if let Some(at) = ["deviceRef", "parameterRef", "trackRef"].iter().find_map(|key| args.get(*key).and_then(Value::as_str)) {
-            let long = connection.references.borrow().lengthen(&json!({ "ref": at }));
-            history.made_at(&record.id, long["ref"].as_str().unwrap_or(at));
-        }
         // The device a load or a duplicate made, by Live's identity for it: what may be removed if Live won't undo it.
         if applied && matches!(kind.tool.as_str(), "load_device" | "duplicate_device" | "load_sample") {
             let identity = [

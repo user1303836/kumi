@@ -228,21 +228,28 @@ impl Rendering {
                 let audible = |id: &String| self.history.entries.borrow().get(id).is_some_and(|entry| entry.borrow().audible());
                 let made = self.applied_since(&run.checkpoint).iter().any(|(id, _)| audible(id));
                 let undone = run.checkpoint.iter().any(|id| !ids.contains(id) && audible(id));
-                if made || undone {
+                // Python run in Live, a command or Live's own undo may have changed it too, outside HISTORY.
+                let outside = !self.history.outside_since(run.outside).is_empty();
+                if made || undone || outside {
                     run.stale = true;
                 }
                 run.checkpoint = ids;
+                run.outside = self.history.outside.borrow().len();
+                // The steer was this answer's: the new answer's changes are its own again.
+                run.steered = None;
             }
         }
     }
-    /// The producer's words came into the answer under way: a judged or groove run's changes since its last round
-    /// may be theirs from here, so none of them is a round's to take back. The run starts again from what's in Live.
+    /// The producer's words came into the answer under way: a judged or groove run's changes from here may be theirs,
+    /// so they aren't a round's to take back. The first steer marks where; the run's next round takes back only what
+    /// came before it, then starts again from what's in Live.
     pub fn steered(&self) {
+        let applied = self.applied_ids();
         if let Some(run) = self.judge.borrow_mut().as_mut() {
-            run.steered = true;
+            run.steered.get_or_insert_with(|| applied.clone());
         }
         if let Some(run) = self.groove.borrow_mut().as_mut() {
-            run.steered();
+            run.steered(applied);
         }
     }
     /// A restart of Live may make Max for Live available; bridge-only disconnects leave refusal intact.

@@ -20,6 +20,7 @@ use kumi_runtime::{
         remember::Remember,
         rendering::{FormRequest, GrooveRequest, Rendering},
     },
+    listening::round::RoundKind,
     mcp::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, Implementation, ListToolsResult},
@@ -326,6 +327,48 @@ async fn a_round_not_kept_takes_back_only_the_parts_note_edits_and_says_what_sta
             assert!(why.contains("no note changes on the part to take back"), "{why}");
             assert!(why.contains("left as they are (not note changes on the part): Bass volume -2 dB"), "{why}");
             assert!(round.changes.is_empty(), "{:?}", round.changes);
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn after_the_producers_words_a_groove_round_reads_the_part_again_and_judges_nothing() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let live = live(true);
+            let Groove { rendering, history, .. } = groove(live.clone()).await;
+            let first =
+                rendering.groove(&request(json!({"clip":"7:clip:0:0","reference":"7:clip:1:0"})), Signal::new()).await.unwrap().unwrap();
+            // A note edit on the part, the producer's words, then another edit (maybe what they asked for).
+            let edit = |id: &str, title: &str| {
+                let record: ChangeRecord =
+                    serde_json::from_value(json!({"id":id,"family":"clip","title":title,"state":"applied","at":0})).unwrap();
+                history.remember(record, format!("t{id}"), None);
+                history.made_by(id, "change_notes");
+                history.made_on(id, "7:clip:0:0");
+            };
+            edit("c901", "Hats 6 ms later");
+            rendering.steered();
+            edit("c902", "Kick on the and");
+            *live.notes.borrow_mut().get_mut("7:clip:0:0").unwrap() = beat(6., false);
+            let change = GrooveRequest { change: Some("hats later".into()), ..Default::default() };
+            let round = rendering.groove(&change, Signal::new()).await.unwrap().unwrap();
+            // Nothing judged: only the edit made before the words is taken back (this Live won't, and it's said), and the
+            // run starts from the notes as they are.
+            assert_eq!((round.kind, round.kept), (RoundKind::Start, None));
+            let why = round.why.clone().unwrap();
+            assert!(why.contains("Live wouldn't take back Hats 6 ms later") && !why.contains("Kick on the and"), "{why}");
+            assert_ne!(round.rows, first.rows);
+            // The next round is judged from those lines.
+            let next = rendering.groove(&change, Signal::new()).await.unwrap().unwrap();
+            assert_eq!(next.kind, RoundKind::Judged);
+            let after: Vec<_> = round.rows.iter().map(|row| row.after).collect();
+            assert_eq!(next.rows.iter().map(|row| row.before).collect::<Vec<_>>(), after);
+            // Words in one answer don't reach the next: its first round is judged as usual.
+            rendering.steered();
+            rendering.reset_turn(false);
+            let later = rendering.groove(&change, Signal::new()).await.unwrap().unwrap();
+            assert_eq!(later.kind, RoundKind::Judged);
         })
         .await;
 }

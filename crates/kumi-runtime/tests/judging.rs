@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use kumi_runtime::listening::{
     checklist::{Change, Checklist, Goal, Item, Quantity, Role, Target},
     detect,
-    judging::{decide, matched, predict, processing, rebalance, removable, take_back, Listen, Placed, RoundHost, Unheard},
+    judging::{decide, matched, predict, processing, rebalance, removable, renamed, take_back, Listen, Placed, RoundHost, Unheard},
     listener::{Choice, Opinion},
     measure::{measure_samples, Heard},
 };
@@ -230,6 +230,8 @@ struct Pretend {
     stuck_gain: Option<String>,
     /// Kumi's undo of a rebalance step fails.
     stuck_rebalance: bool,
+    /// What changed Live outside HISTORY since the round began (Python run in Live, say).
+    outside: Option<String>,
     sound: Box<dyn Fn(f64) -> Vec<Option<f64>>>,
 }
 
@@ -243,6 +245,7 @@ impl Pretend {
             unheard: Cell::new(0),
             stuck_gain: None,
             stuck_rebalance: false,
+            outside: None,
             sound: Box::new(sound),
         }
     }
@@ -318,6 +321,9 @@ impl RoundHost for Pretend {
     }
     fn audible(&self, id: &str) -> bool {
         self.history.borrow().iter().find(|entry| entry.id == id).is_none_or(|entry| entry.audible)
+    }
+    fn outside(&self) -> Option<String> {
+        self.outside.clone()
     }
     async fn undo(&self, id: &str) -> Result<(), String> {
         let mut history = self.history.borrow_mut();
@@ -477,6 +483,27 @@ async fn a_device_live_wont_undo_goes_only_when_its_one_the_round_made() {
     let live = Pretend::new(|_| vec![]);
     let taken = take_back(&live, &[]).await;
     assert!(taken.said.starts_with("nothing in HISTORY") && taken.stayed);
+    // Python run in Live beside a change in HISTORY: the change goes, and what Python did is said to stay.
+    let mut live = Pretend::new(|_| vec![]);
+    live.outside = Some("Python run in Live".into());
+    live.change("EQ Eight · 3 Gain A 0 → −3 dB", true);
+    let taken = take_back(&live, &[]).await;
+    assert!(taken.said.starts_with("taken back: EQ Eight") && taken.stayed, "{taken:?}");
+    assert!(
+        taken.said.ends_with("whatever Python run in Live changed isn't in HISTORY, so it stays (change it back yourself if it should go)"),
+        "{taken:?}"
+    );
+    // With nothing in HISTORY, it says which.
+    let mut live = Pretend::new(|_| vec![]);
+    live.outside = Some("a command of Live's menus".into());
+    let taken = take_back(&live, &[]).await;
+    assert_eq!(
+        (taken.said.as_str(), taken.stayed),
+        (
+            "nothing in HISTORY to take back; whatever a command of Live's menus changed isn't in HISTORY, so it stays (change it back yourself if it should go)",
+            true
+        )
+    );
 }
 
 #[tokio::test]
@@ -512,6 +539,21 @@ async fn a_round_whose_loudness_cant_be_matched_isnt_kept() {
     let (excerpt, predicted, gain, verdict) = judged(&live);
     let settled = rebalance(&live, &checklist, Some(PEAK), &whole, predicted, excerpt, gain, verdict).await;
     assert!(!settled.verdict.kept && settled.verdict.why.contains("Live wouldn't take it back"), "{:?}", settled.verdict);
+    // A knob at its end (a maximizer's Threshold near 0 dB): the step asked for 2 dB and loudness moved a tenth of it.
+    let live = Pretend::new(|gain| vec![Some(-12. + 0.1 * gain), Some(-3. + 0.1 * gain), Some(-1.), Some(0.)]);
+    live.change("Loaded Limiter on Main", true);
+    let (excerpt, predicted, gain, verdict) = judged(&live);
+    let settled = rebalance(&live, &checklist, Some(PEAK), &whole, predicted, excerpt, gain, verdict).await;
+    assert_eq!(settled.listens, 1);
+    assert!(
+        !settled.verdict.kept
+            && settled
+                .verdict
+                .why
+                .contains("its loudness couldn't be matched (it's 1.8 dB louder: Utility gain -2 dB moved loudness -0.2 dB)"),
+        "{:?}",
+        settled.verdict
+    );
 }
 
 #[test]
@@ -586,6 +628,15 @@ async fn a_round_is_decided_whole_kept_and_rebalanced_or_taken_back() {
     let edge = vec![Some(-14.), Some(-0.8), Some(-1.), Some(0.)];
     let decided = decide(&live, &checklist, Some(PEAK), &edge, &edge, after, None, 3, &[]).await;
     assert!(!decided.verdict.kept && decided.verdict.why.contains("less than the processing costs"), "{:?}", decided.verdict);
+}
+
+#[test]
+fn a_run_follows_its_tracks_renames() {
+    let renames = |pairs: &[(&str, &str)]| pairs.iter().map(|(from, to)| (from.to_string(), to.to_string())).collect::<Vec<_>>();
+    // Renamed twice, beside another track's rename: the last name.
+    assert_eq!(renamed("Vocal", &renames(&[("Vocal", "Lead Vox"), ("Bass", "Sub"), ("Lead Vox", "Lead")])), "Lead");
+    // A rename taken back isn't applied any more, so it isn't followed: the name it had.
+    assert_eq!(renamed("Vocal", &renames(&[("Bass", "Sub")])), "Vocal");
 }
 
 #[test]

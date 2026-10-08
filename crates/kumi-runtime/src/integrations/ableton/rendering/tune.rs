@@ -3,12 +3,12 @@
 //! generations, each generation heard in one pass on scratch copies of the track. Each round logs its listens.
 
 use super::super::connection::NO_CURRENT_LIVE;
-use super::judge::JudgeHeard;
+use super::judge::{masking_items, JudgeHeard};
 use super::pass::RECORD_LEAD;
 use super::rig::Window;
 use super::*;
 use crate::listening::{
-    checklist::{plan_cut, Quantity, Target},
+    checklist::{masking_unfair, plan_cut, Quantity, Target},
     cmaes::Cmaes,
     detect::ProblemKind,
     fit::{fit, Band, Limits, Shape},
@@ -92,6 +92,7 @@ impl Rendering {
         if self.rendering.get() {
             return Ok(Err("Kumi is already listening to something; wait for it.".into()));
         }
+        self.follow_renames();
         let index = {
             let run = self.judge.borrow();
             let Some(run) = run.as_ref().filter(|run| run.rounds.last().is_some_and(|round| round.kind != RoundKind::Done)) else {
@@ -199,6 +200,19 @@ impl Rendering {
                 Ok(Err(head(&error.to_string(), 400)))
             }
         }
+    }
+
+    /// An EQ Eight's mode, as Live numbers it (0 Stereo, 1 L/R, 2 M/S); None when Live doesn't say.
+    async fn eq_mode(&self, device: &str, signal: Signal) -> Result<Option<i64>, RuntimeError> {
+        let long = self.connection().references.borrow().lengthen(&json!({"deviceRef":device}));
+        let long = long["deviceRef"].as_str().unwrap_or(device).to_owned();
+        let code = "result = int(obj.global_mode)";
+        let read = self
+            .connection()
+            .call("live_run_python", object(json!({"code":code,"mode":"exec","ref":long,"timeoutMs":5000})), signal)
+            .await?;
+        let done = if read.is_error == Some(true) { None } else { super::super::context::payload(&read).ok() };
+        Ok(done.filter(|done| done.get("ok") == Some(&Value::Bool(true))).and_then(|done| done.get("result")?.as_i64()))
     }
 
     /// A device's knobs with the text Live shows across each one's range, read in one call.
@@ -342,6 +356,13 @@ impl Rendering {
         let knob = |band: usize, what: &str| knobs.iter().find(|knob| knob.name == format!("{band} {what} A"));
         if knob(1, "Frequency").is_none() {
             return Ok(Err("fit sets an EQ Eight's bands: put an EQ Eight where the fix belongs, then tune it.".into()));
+        }
+        // fit writes the A curve: in L/R or M/S that's the left or mid channel's alone.
+        if self.eq_mode(&request.device, signal.clone()).await?.is_some_and(|mode| mode != 0) {
+            return Ok(Err(
+                "This EQ Eight is in L/R or M/S mode, and fit writes only its A curve (the left or mid channel): set it to Stereo, or put a fresh EQ Eight where the fix belongs, then tune it."
+                    .into(),
+            ));
         }
         let unused: Vec<usize> = (1..=8)
             .filter(|band| {
@@ -539,11 +560,23 @@ impl Rendering {
                     Ok(heard) => heard,
                     Err(why) => return Ok(Err(why)),
                 };
-                let values = {
+                let mut values = {
                     let mut guard = self.judge.borrow_mut();
                     guard.as_mut().unwrap().listens += 1;
                     heard.read(&checklist)
                 };
+                // Main's chain moves the mix but not the focus (heard before it): masking can't be read across it, so
+                // no probe goes by it. As a guard it reads as it was; as the target, the homing stops.
+                if !heard.main_unfair.is_empty() {
+                    let masking = masking_items(&checklist);
+                    if masking.contains(&index) {
+                        let focus = focus.as_deref().unwrap_or("the focus");
+                        return Ok(Err(masking_unfair(focus, &heard.main_unfair).unwrap_or_default()));
+                    }
+                    for at in masking {
+                        values[at] = before_all.get(at).copied().flatten();
+                    }
+                }
                 let Some(measured) = values[index] else { return Ok(Ok(Homed::Stuck)) };
                 let reached = checklist.items[index].quantity.moved(start, before, measured);
                 // A probe that makes anything else audibly worse is too far, however close it gets.

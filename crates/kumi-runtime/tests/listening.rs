@@ -1,7 +1,7 @@
 //! The listening loop's ears and judge on synthetic sound: what they measure, what they find and where, and how a
 //! checklist decides whether a change stays.
 use kumi_runtime::listening::{
-    checklist::{Change, Checklist, Goal, Profile, Quantity, Target},
+    checklist::{main_chain, masking_unfair, Change, Checklist, Goal, MainDevice, MainState, Profile, Quantity, Target},
     detect::{self, ProblemKind},
     measure::{measure_samples, Heard},
 };
@@ -190,6 +190,86 @@ fn masking_is_a_target_to_mask_ratio_against_the_rest() {
     };
     let (down, up) = (at(-6.), at(6.));
     assert!(down > up, "{down}% buried 6 dB down, {up}% 6 dB up");
+}
+
+#[test]
+fn masking_is_read_only_while_mains_chain_is_transparent() {
+    let device = |name: &str, class: &str, on: bool, parameters: &[(&str, f64, &str)]| MainDevice {
+        name: name.into(),
+        class: class.into(),
+        on,
+        parameters: parameters.iter().map(|(name, value, shown)| (name.to_string(), *value, shown.to_string())).collect(),
+    };
+    // A Limiter on Main from the start: masking is left off, and the note says what to do instead.
+    let limited = main_chain(&[device("Limiter", "Limiter", true, &[])]);
+    assert_eq!(limited.unfair, ["Limiter"]);
+    let note = masking_unfair("Vocal", &limited.unfair).expect("masking left off");
+    assert!(note.contains("(Limiter)") && note.contains("Main's devices switched off") && note.contains("#289"), "{note}");
+    // Spectrum, Tuner, Kumi's Ears and a Limiter switched off leave it on, at no gain.
+    let clear = main_chain(&[
+        device("Spectrum", "SpectrumAnalyzer", true, &[]),
+        device("Tuner", "Tuner", true, &[]),
+        device("Kumi Ears", "MxDeviceAudioEffect", true, &[]),
+        device("Limiter", "Limiter", false, &[]),
+    ]);
+    assert_eq!(clear, MainState::default());
+    assert_eq!(masking_unfair("Vocal", &clear.unfair), None);
+    // A Utility that only turns the level is a gain the focus is heard with too, read as Live has it at each listen: a
+    // kept +2 dB rebalance, then the producer's undo back to 0 dB.
+    let utility = |gain: &str| {
+        device(
+            "Utility",
+            "StereoGain",
+            true,
+            &[
+                ("Device On", 1., "On"),
+                ("Left Inv", 0., "Off"),
+                ("Right Inv", 0., "Off"),
+                ("Channel Mode", 1., "Stereo"),
+                ("Stereo Width", 1., "100.0 %"),
+                ("Mono", 0., "Off"),
+                ("Balance", 0., "C"),
+                ("Gain", 0., gain),
+                ("Mute", 0., "Off"),
+                ("Bass Mono", 0., "Off"),
+                ("Bass Mono Frequency", 120., "120 Hz"),
+            ],
+        )
+    };
+    assert_eq!(main_chain(&[utility("2.00 dB")]), MainState { unfair: vec![], gain: 2. });
+    assert_eq!(main_chain(&[utility("0.00 dB")]), MainState::default());
+    assert_eq!(main_chain(&[utility("2.00 dB"), utility("-1.5 dB")]).gain, 0.5);
+    // Anything else a Utility does moves the mix and not the focus.
+    for (name, value, shown) in [
+        ("Mono", 1., "On"),
+        ("Stereo Width", 0.5, "50.0 %"),
+        ("Channel Mode", 0., "Left"),
+        ("Balance", -0.4, "40L"),
+        ("Gain", 0., "-inf dB"),
+        ("Left Inv", 1., "On"),
+        ("Mute", 1., "On"),
+    ] {
+        let mut changed = utility("0.00 dB");
+        for parameter in changed.parameters.iter_mut().filter(|(named, ..)| named == name) {
+            *parameter = (name.into(), value, shown.into());
+        }
+        assert_eq!(main_chain(&[changed]).unfair, ["Utility"], "{name} at {shown}");
+    }
+}
+
+#[test]
+fn masking_heard_through_mains_gain_reads_true_once_the_focus_gets_that_gain_too() {
+    // The vocal plays over quiet noise: it isn't buried.
+    let vocal = sine(6., 2000., 0.05);
+    let rest = pink(6., -50., 12);
+    let mix = mixed(&[&vocal, &rest]);
+    let truth = detect::masking_share(&heard(&vocal, &vocal), &heard(&mix, &mix)).unwrap();
+    // 8 dB on Main: the mix comes out 8 dB up, and the vocal is heard before Main.
+    let up: Vec<f64> = mix.iter().map(|sample| sample * 10f64.powf(8. / 20.)).collect();
+    let skewed = detect::masking_share(&heard(&vocal, &vocal), &heard(&up, &up)).unwrap();
+    let fair = detect::masking_share(&heard(&vocal, &vocal).gained(8.), &heard(&up, &up)).unwrap();
+    assert!(skewed - truth > 50., "{truth}% buried read {skewed}% through 8 dB on Main");
+    assert!((fair - truth).abs() <= 2., "{truth}% buried read {fair}% with the focus given Main's 8 dB");
 }
 
 #[test]

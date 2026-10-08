@@ -53,8 +53,9 @@ pub struct GrooveRun {
     tempo: f64,
     target: Option<String>,
     checkpoint: Vec<String>,
-    /// The producer's words came in while it ran: its next round counts its changes from then on.
-    steered: bool,
+    /// The producer's words came in while it ran: the changes applied then. The part's note changes made before them
+    /// are the round's own; what came after may be what the producer asked for.
+    steered: Option<Vec<String>>,
     round: u32,
     started: i64,
     misses: HashMap<String, u32>,
@@ -66,12 +67,13 @@ impl GrooveRun {
     /// these (the changes applied now).
     pub(super) fn carry_on(&mut self, applied: Vec<String>) {
         self.checkpoint = applied;
-        self.steered = false;
+        self.steered = None;
     }
 
-    /// The producer's words came in mid-answer: what changes from here may be theirs, not the next round's.
-    pub(super) fn steered(&mut self) {
-        self.steered = true;
+    /// The producer's words came in mid-answer: what changes from here may be theirs, not the next round's. The first
+    /// steer marks where; a later one changes nothing of that.
+    pub(super) fn steered(&mut self, applied: Vec<String>) {
+        self.steered.get_or_insert(applied);
     }
 
     /// Its lines at the tempo a round reads the part at, after the Set's tempo changed: timing gaps are a share of the
@@ -401,28 +403,13 @@ impl Rendering {
             tempo: part_feel.tempo,
             target: None,
             checkpoint: self.applied_ids(),
-            steered: false,
+            steered: None,
             round: 0,
             started: now_ms(),
             misses: HashMap::new(),
             rounds: vec![],
         };
         run.target = next_line(&run);
-        let rows: Vec<Row> = run
-            .lines
-            .iter()
-            .map(|line| Row {
-                id: line.id.clone(),
-                label: line.label.clone(),
-                unit: line.unit.clone(),
-                wanted: wanted_of(line),
-                before: None,
-                after: Some(line.value),
-                gap_before: 0.,
-                gap_after: round1(line.off()),
-                change: Change::Same,
-            })
-            .collect();
         let round = Round {
             round: 0,
             kind: RoundKind::Start,
@@ -430,7 +417,7 @@ impl Rendering {
             target: None,
             change: None,
             changes: vec![],
-            rows,
+            rows: start_rows(&run),
             kept: None,
             why: None,
             rebalanced: None,
@@ -447,15 +434,13 @@ impl Rendering {
     }
 
     async fn groove_round(self: &Rc<Self>, request: &GrooveRequest, signal: Signal) -> Result<Result<Round, String>, RuntimeError> {
-        // After the producer's words came in, what changed since the last round may be theirs: it stays, and the round
-        // counts from here.
-        let applied = self.applied_ids();
+        let mark = self.groove.borrow_mut().as_mut().unwrap().steered.take();
+        if let Some(mark) = mark {
+            return self.groove_again(mark, request.apply, signal).await;
+        }
         let (clip, checkpoint, kit) = {
-            let mut run = self.groove.borrow_mut();
-            let run = run.as_mut().unwrap();
-            if run.steered {
-                run.carry_on(applied);
-            }
+            let run = self.groove.borrow();
+            let run = run.as_ref().unwrap();
             (run.clip.clone(), run.checkpoint.clone(), run.kit.clone())
         };
         let mut change = request.change.clone();
@@ -573,6 +558,75 @@ impl Rendering {
         Ok(Ok(round))
     }
 
+    /// The producer's words came in during the run: the part's note changes made before them (this answer's own) go,
+    /// to be made again and judged, and what came after them (maybe what they asked for) stays. The run reads the
+    /// part's notes again and starts from there, judging nothing.
+    async fn groove_again(self: &Rc<Self>, mark: Vec<String>, apply: bool, signal: Signal) -> Result<Result<Round, String>, RuntimeError> {
+        let (clip, checkpoint, kit) = {
+            let run = self.groove.borrow();
+            let run = run.as_ref().unwrap();
+            (run.clip.clone(), run.checkpoint.clone(), run.kit.clone())
+        };
+        let mine = clip_and_track(self.connection(), &clip).map(|(long, _)| long);
+        let (changes, _) = self.note_changes_since(&checkpoint, mine.as_deref());
+        let own: Vec<(String, String)> = changes.into_iter().filter(|(id, _)| mark.contains(id)).collect();
+        let mut refused = vec![];
+        // Taken back to the end, Esc or not.
+        for (id, title) in own.iter().rev() {
+            match self.history.undo(id, self.cleanup(), false).await {
+                Ok(undone) if !undone.is_error => {}
+                _ => refused.push(title.clone()),
+            }
+        }
+        let titles = own.iter().map(|(_, title)| title.as_str()).collect::<Vec<_>>().join(", ");
+        let mut said = match (own.is_empty(), refused.is_empty()) {
+            (true, _) => "Your words came in during the run, and none of this answer's note changes on the part came before them, so Kumi read the part's notes again and starts from here: what came after them is in this baseline, not judged".to_string(),
+            (false, true) => format!(
+                "Your words came in during the run: this answer's note changes on the part made before them went ({titles}), and what came after them stays in this baseline. Make the change again, then judge it"
+            ),
+            (false, false) => format!(
+                "Your words came in during the run: Live wouldn't take back {} (undo it yourself), so Kumi read the part's notes as they are and starts from here",
+                refused.join(", ")
+            ),
+        };
+        if apply {
+            said.push_str("; nothing was moved in this call: apply again to judge it");
+        }
+        let read = match self.clip_notes(&clip, signal).await {
+            Ok(read) => read,
+            Err(why) if own.is_empty() => return Ok(Err(why)),
+            Err(why) => return Ok(Err(format!("{why} (the note changes made before your words went first: {titles})"))),
+        };
+        let part = self.feel_of(&read.notes, &kit, None);
+        let ids = self.applied_ids();
+        let mut guard = self.groove.borrow_mut();
+        let run = guard.as_mut().unwrap();
+        run.follow_tempo(part.tempo);
+        run.lines = lines(&gaps(&part, &run.reference.at_tempo(part.tempo)));
+        run.checkpoint = ids;
+        run.target = next_line(run);
+        let round = Round {
+            round: run.round,
+            kind: RoundKind::Start,
+            heard: format!("the notes of {} against {}", read.name, run.reference_name),
+            target: None,
+            change: None,
+            changes: vec![],
+            rows: start_rows(run),
+            kept: None,
+            why: Some(said),
+            rebalanced: None,
+            listener: None,
+            problems: vec![],
+            next: next_of(run),
+            met: run.target.is_none(),
+            listens: 0,
+            elapsed_ms: now_ms() - run.started,
+        };
+        run.rounds.push(round.clone());
+        Ok(Ok(round))
+    }
+
     fn groove_done(&self) -> Round {
         let mut guard = self.groove.borrow_mut();
         let run = guard.as_mut().unwrap();
@@ -615,6 +669,24 @@ impl Rendering {
         run.rounds.push(round.clone());
         round
     }
+}
+
+/// A run's lines as a start reads them: where each is now, against what it wants.
+fn start_rows(run: &GrooveRun) -> Vec<Row> {
+    run.lines
+        .iter()
+        .map(|line| Row {
+            id: line.id.clone(),
+            label: line.label.clone(),
+            unit: line.unit.clone(),
+            wanted: wanted_of(line),
+            before: None,
+            after: Some(line.value),
+            gap_before: 0.,
+            gap_after: round1(line.off()),
+            change: Change::Same,
+        })
+        .collect()
 }
 
 /// The part of a clip's own time Live plays (its notes there are heard), and where its notes have to end: the latest

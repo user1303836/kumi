@@ -2430,6 +2430,8 @@ local_test!(a_message_during_a_goals_loop_ends_the_loop_and_the_goal_waits, {
         .boxed_local()
     });
     let h = harness(Some(run), |_| {});
+    // As the app has the integration: in a fallback, which passes the steer on.
+    h.record.wrapped.set(true);
     *held.borrow_mut() = Some(h.session.clone());
     h.session.start().await.unwrap();
     h.session.goal(Some("master this to -9 LUFS")).await.unwrap();

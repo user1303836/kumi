@@ -959,6 +959,13 @@ impl Checklist {
         dropped
     }
 
+    /// It without the items at `indices`, the rest in order.
+    pub fn without(&self, indices: &[usize]) -> Checklist {
+        Checklist {
+            items: self.items.iter().enumerate().filter(|(index, _)| !indices.contains(index)).map(|(_, item)| item.clone()).collect(),
+        }
+    }
+
     /// Whether anything on it is to be worked toward (not only guards).
     pub fn has_targets(&self) -> bool {
         self.items.iter().any(|item| item.role != Role::Guard)
@@ -1178,6 +1185,90 @@ impl Checklist {
         }
         .map(round1)
     }
+}
+
+/// One of Main's devices as masking needs it: its name and class, whether it's on, and (a Utility's) its parameters
+/// by name, value and the text Live shows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MainDevice {
+    pub name: String,
+    pub class: String,
+    pub on: bool,
+    pub parameters: Vec<(String, f64, String)>,
+}
+
+/// Main's chain as masking reads it: the devices that change the mix in a way the focus element (heard before Main)
+/// doesn't share, and the gain of the Utilities that only turn the level (the focus is heard that much louder too).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MainState {
+    pub unfair: Vec<String>,
+    pub gain: f64,
+}
+
+/// Main's chain, read: devices that are off, Spectrum and Tuner change nothing; a Utility that only turns the level is
+/// a gain the focus is heard with too; anything else makes masking unreadable there.
+pub fn main_chain(devices: &[MainDevice]) -> MainState {
+    let mut state = MainState::default();
+    for device in devices.iter().filter(|device| device.on) {
+        if matches!(device.class.as_str(), "SpectrumAnalyzer" | "Tuner") || device.name.starts_with("Kumi Ears") {
+            continue;
+        }
+        match utility_gain(device) {
+            Some(gain) => state.gain += gain,
+            None => state.unfair.push(device.name.clone()),
+        }
+    }
+    state.gain = round1(state.gain);
+    state
+}
+
+/// A Utility's gain (dB) when that's all it changes: width at 100 %, both channels as they are (no mono, no channel
+/// flipped, muted or picked), balance at the centre. None for anything else.
+pub fn utility_gain(device: &MainDevice) -> Option<f64> {
+    if !matches!(device.class.as_str(), "StereoGain" | "Utility") {
+        return None;
+    }
+    let mut gain = 0.;
+    for (name, value, shown) in &device.parameters {
+        let lower = name.to_lowercase();
+        let shown = shown.trim();
+        let number = || {
+            let text: String = shown.chars().filter(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '+')).collect();
+            text.parse::<f64>().ok()
+        };
+        // A switch is on as Live shows it: a frequency or a time beside one ("Bass Mono Freq", 120 Hz) isn't a switch.
+        let on = shown.eq_ignore_ascii_case("on") || (!shown.chars().any(char::is_alphabetic) && *value >= 0.5);
+        if lower == "gain" {
+            gain = if shown.starts_with("-inf") { return None } else { number()? };
+        } else if lower.contains("width") && shown.ends_with('%') {
+            if (number()? - 100.).abs() > 0.5 {
+                return None;
+            }
+        } else if lower.contains("channel") {
+            if !shown.to_lowercase().contains("stereo") {
+                return None;
+            }
+        } else if ["mono", "inv", "phase", "mute", "swap"].iter().any(|flag| lower.contains(flag)) {
+            if on {
+                return None;
+            }
+        } else if (lower.contains("balance") || lower.contains("panorama")) && value.abs() > 1e-3 && shown != "C" {
+            return None;
+        }
+    }
+    Some(gain)
+}
+
+/// Why masking can't be read fairly on a run over the mix, when it can't: the mix is heard after Main's chain but
+/// `focus` before it, so a device there (a limiter's gain, its limiting, an EQ) moves one and not the other. Masked by
+/// 0 % read as 100 % with 8 dB on Main, and 100 % as 12 % under heavy limiting. `devices` are Main's (`MainState`).
+pub fn masking_unfair(focus: &str, devices: &[String]) -> Option<String> {
+    (!devices.is_empty()).then(|| {
+        format!(
+            "Masking can't be read through Main's chain ({}): it's left off the checklist. To work on {focus} cutting through, judge it with Main's devices switched off, then the master's loudness and peaks on their own; reading it through Main's chain is #289",
+            devices.join(", ")
+        )
+    })
 }
 
 fn item(id: &str, label: &str, role: Role, unit: &str, quantity: Quantity, target: Target, jnd: f64) -> Item {

@@ -49,6 +49,9 @@ impl Integration for FallbackIntegration {
     async fn settled(&self) {
         self.current().settled().await
     }
+    fn steered(&self) {
+        self.current().steered()
+    }
     fn has_undo(&self) -> bool {
         true
     }

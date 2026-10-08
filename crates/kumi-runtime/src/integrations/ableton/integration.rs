@@ -493,6 +493,19 @@ impl KernelTool for LiveTool {
         // What may change any device without Live telling (Python run in Live, a command, a plug-in, an undo): the
         // next turn reads them all.
         let unseen = matches!(self.name.as_str(), "run_python" | "live_command" | "plugin" | "undo_change" | "undo_in_live");
+        // What changes Live outside HISTORY: a judged round can't take it back, and says so.
+        let command = input.get("command").and_then(Value::as_str).unwrap_or("");
+        let outside = match self.name.as_str() {
+            "run_python" => Some("Python run in Live"),
+            "live_command" if !["save", "collect_all_and_save", "save_as", "export_audio", "export_midi_clip"].contains(&command) => {
+                Some("a command of Live's menus")
+            }
+            "undo_in_live" => Some("Live's own undo"),
+            _ => None,
+        };
+        if let Some(what) = outside {
+            owner.history.outside.borrow_mut().push(what);
+        }
         let result = match self.name.as_str() {
             "find_sounds" => owner.find_sounds(input, signal).await,
             "read_notes" => Ok(super::notes::read_notes(&input, &owner.connection, owner.observer.tempo.get(), signal).await),
