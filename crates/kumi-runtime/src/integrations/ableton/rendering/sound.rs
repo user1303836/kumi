@@ -60,20 +60,20 @@ impl Rendering {
         if let Some(against) = against.as_ref().filter(|against| !names.contains(against)) {
             heard_names.push(against.clone());
         }
-        let heard = match self.hear_tracks(&heard_names, window, signal).await? {
+        let heard = match self.hear_takes(&heard_names, window, signal).await? {
             Ok(heard) => heard,
             Err(why) => return Ok(Err(why)),
         };
-        let trigger = against.as_ref().and_then(|name| heard.get(name));
+        let trigger = against.as_ref().and_then(|name| heard.get(name)).map(|(heard, _)| heard);
         let beat_ms = 60_000. / tempo;
         let mut sounds = serde_json::Map::new();
         let mut pieces: Vec<(String, Heard)> = vec![];
         for name in &names {
-            let Some(sound) = heard.get(name) else {
+            let Some((sound, lead)) = heard.get(name) else {
                 sounds.insert(name.clone(), json!("nothing came through from it there"));
                 continue;
             };
-            let mut said = described(sound, tempo, window.from, meter);
+            let mut said = described(sound, tempo, window.from, meter, *lead);
             if let (Some(trigger), Some(against)) = (trigger.filter(|_| against.as_ref() != Some(name)), against.as_ref()) {
                 if let Some((depth, recovery)) = ducking(sound, trigger) {
                     said["ducks"] =
@@ -102,12 +102,11 @@ impl Rendering {
     }
 }
 
-/// One sound's measures, its effects and their problems, as the model reads them (heard from beat `from`: the take
-/// starts a tenth of a second before it, the record pass's lead-in, unless `from` is the song's start).
-fn described(heard: &Heard, tempo: f64, from: f64, meter: f64) -> Value {
+/// One sound's measures, its effects and their problems, as the model reads them (heard from beat `from`, the take
+/// starting `lead` seconds before it).
+fn described(heard: &Heard, tempo: f64, from: f64, meter: f64, lead: f64) -> Value {
     let m = &heard.measures;
     let beat_ms = 60_000. / tempo;
-    let lead = (from * 60. / tempo).min(0.1);
     let bar = |seconds: f64| format!("bar {}", ((from + (seconds - lead).max(0.) * tempo / 60.) / meter).floor() as i64 + 1);
     let fx = effects(heard, Some(tempo), Some(lead + (from.ceil() - from) * beat_ms / 1000.));
     let mut said = serde_json::Map::new();
@@ -136,14 +135,14 @@ fn described(heard: &Heard, tempo: f64, from: f64, meter: f64) -> Value {
     put("top", bandwidth(heard).map(|hz| format!("{} kHz", round2(hz / 1000.))));
     put("noise floor", noise_floor(heard).map(|db| format!("{db} dB under its loud parts")));
     put("tail", tail(heard).map(|db| format!("{db} dB under each hit 300 ms on")));
-    // A reverb only when its tails fall in two slopes; one slope is the sound's own decay.
+    // A reverb only when its tails fall in two slopes, the second slower; else only how fast it dies away.
     put(
         if fx.reverb { "reverb" } else { "decay (RT60)" },
         fx.decay_time.map(|seconds| {
             let mut words = if fx.reverb {
                 format!("its tails decay in {seconds} s (RT60), slower than the sound's own fall")
             } else {
-                format!("it falls 60 dB in {seconds} s, in one slope: its own decay (no reverb tail heard)")
+                format!("it falls 60 dB in {seconds} s")
             };
             if let Some(octaves) = fx.darkening.filter(|octaves| octaves.abs() >= 0.1) {
                 words += &format!(", {} {} octaves", if octaves > 0. { "darkening" } else { "brightening" }, octaves.abs());

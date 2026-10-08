@@ -63,6 +63,35 @@ fn an_808s_pitch_drop_and_a_tremolos_rate_are_measured() {
 }
 
 #[test]
+fn a_low_notes_own_waveform_isnt_a_swing_and_each_hits_crest_reads_its_grit() {
+    // A held 55 Hz saw: its waveform ripples the millisecond envelope, which isn't a swing; with a 4 Hz tremolo, it is.
+    let saw = |depth: f64| -> Vec<f64> {
+        (0..(6. * RATE) as usize)
+            .map(|n| n as f64 / RATE)
+            .map(|t| {
+                let tremolo = 10f64.powf(depth * (2. * PI * 4. * t).sin() / 20.);
+                0.15 * tremolo * (1..=12).map(|k| (2. * PI * 55. * k as f64 * t).sin() / k as f64).sum::<f64>()
+            })
+            .collect()
+    };
+    assert_eq!(mono(&saw(0.)).measures.modulation, None);
+    let rate = mono(&saw(3.)).measures.modulation.unwrap();
+    assert!((rate - 4.).abs() < 0.3, "{rate} Hz");
+    // Each hit's crest: driven into saturation it flattens; a reverb tail after it leaves it be.
+    let mut noise = Noise(21);
+    let snare = notes(4., 0.5, 0.45, |t| 0.4 * noise.next() * (-t / 0.05).exp());
+    let clean = mono(&snare).measures.hit_crest.unwrap();
+    let driven: Vec<f64> = snare.iter().map(|sample| 0.5 * (4. * sample).tanh() / 4f64.tanh()).collect();
+    let gritty = mono(&driven).measures.hit_crest.unwrap();
+    assert!(gritty < clean - 3., "{clean} dB, driven {gritty} dB");
+    let mut noise = Noise(22);
+    let tail: Vec<f64> = notes(4., 0.5, 0.45, |t| if t > 0.01 { 0.1 * noise.next() * (-t / 0.3).exp() } else { 0. });
+    let wet: Vec<f64> = snare.iter().zip(&tail).map(|(hit, tail)| hit + tail).collect();
+    let roomy = mono(&wet).measures.hit_crest.unwrap();
+    assert!((roomy - clean).abs() < 1.5, "{clean} dB, with a tail {roomy} dB");
+}
+
+#[test]
 fn at_44_1_khz_an_808s_drop_holds_over_a_long_listen() {
     // The 808 every second for 40 s at 44.1 kHz: its millisecond steps (44 and 45 samples) keep to the clock, so its
     // hits don't drift off the pitch they're read at.
@@ -125,6 +154,16 @@ fn harmonics_width_top_and_tail_read_as_heard() {
     };
     let (high, low) = (harmonics(&mono(&saturated(150.))).unwrap(), harmonics(&mono(&saturated(82.))).unwrap());
     assert!((high.warmth - low.warmth).abs() < 1. && (high.warmth + 5.).abs() < 1.5, "{high:?} against {low:?}");
+    // A 55 Hz note's 3rd (165 Hz) is read apart from its loud 4th (220 Hz), a third-octave away.
+    let fourth: Vec<f64> = (0..(3. * RATE) as usize)
+        .map(|n| n as f64 / RATE)
+        .map(|t| {
+            let phase = 2. * PI * 55. * t;
+            0.25 * (phase.sin() + 0.5 * (2. * phase).sin() + 0.25 * (3. * phase).sin() + 0.7 * (4. * phase).sin())
+        })
+        .collect();
+    let deep = harmonics(&mono(&fourth)).unwrap();
+    assert!((deep.warmth + 5.).abs() < 1.5, "{deep:?}");
     // Mono is narrow; two unrelated noises are wide.
     let (mut a, mut b) = (Noise(5), Noise(6));
     let left: Vec<f64> = (0..(2. * RATE) as usize).map(|_| a.next() * 0.2).collect();

@@ -97,13 +97,34 @@ fn a_reading_a_change_hid_is_open_but_worked_on_last() {
             item("decay time", Quantity::DecayTime, Target::Between { low: 1., high: 1.4 }, Role::Reference, 0.1),
         ],
     };
-    // What can be read comes first; alone, the unread one is open, not met.
+    // What can be read comes first. A sound's measure its effect hides isn't worked on until it reads again, and the
+    // run can end met without it.
     assert_eq!(checklist.next(&[None, Some(0.5)]), Some(1));
-    assert_eq!(checklist.next(&[None, Some(1.2)]), Some(0));
+    assert_eq!(checklist.next(&[None, Some(1.2)]), None);
     // Read again after a change: in tolerance, its target is met; read anywhere else, nothing can be told of it.
     assert!(checklist.verdict(Some(0), &[None, Some(1.2)], &[Some(150.), Some(1.2)]).kept);
     let verdict = checklist.verdict(Some(1), &[None, Some(0.5)], &[Some(400.), Some(0.9)]);
     assert!(verdict.kept && verdict.rows[0].change == Change::Same, "{verdict:?}");
+}
+
+#[test]
+fn a_guard_stays_beside_a_number_asked_for_unless_the_two_couldnt_both_pass() {
+    // A punch asked for at least 8 dB keeps the guard that it mustn't fall; asked at most 6 dB, the two couldn't both
+    // pass, so the number asked for stands alone.
+    let tone: Vec<f64> = (0..(6. * RATE) as usize).map(|n| 0.2 * (2. * std::f64::consts::PI * 440. * n as f64 / RATE).sin()).collect();
+    let mix = heard(&tone);
+    let guards = |target: Target| {
+        let goal =
+            Goal { targets: vec![kumi_runtime::listening::checklist::Explicit { measure: Quantity::Crest, target }], ..Default::default() };
+        Checklist::new(&goal, &mix, &[])
+            .items
+            .iter()
+            .filter(|item| item.quantity == Quantity::Crest)
+            .map(|item| item.role)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(guards(Target::AtLeast { value: 8. }), [Role::Target, Role::Guard]);
+    assert_eq!(guards(Target::AtMost { value: 6. }), [Role::Target]);
 }
 
 #[test]

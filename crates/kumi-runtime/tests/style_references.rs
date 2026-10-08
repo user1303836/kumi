@@ -11,7 +11,7 @@ use kumi_runtime::{
     references::{
         fetch::{kept, Fetcher},
         sources::{embed_entity, spotify_parts, stamp, Kind, Resolved, Sources},
-        store::{KeptReference, KeptTrack, ReferenceStore},
+        store::{KeptReference, KeptTrack, ReferenceStore, KEPT_VERSION},
         tool::{reference_tools, ReferenceTool},
     },
     video::programs::ProgramOptions,
@@ -556,7 +556,7 @@ fn wav(path: &std::path::Path, seconds: f64, hz: f64, amplitude: f64) {
 
 fn kept_reference(key: &str, name: &str, kind: &str, stamp: Option<String>) -> KeptReference {
     KeptReference {
-        version: 1,
+        version: KEPT_VERSION,
         key: key.into(),
         name: name.into(),
         kind: kind.into(),

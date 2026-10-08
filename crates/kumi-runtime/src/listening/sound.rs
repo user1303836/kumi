@@ -5,7 +5,7 @@
 //! deep one ducks under the other and how fast it comes back, whether their hits interlock or collide, and whether a
 //! bass note sits off the key. And the problems: clicks at note edges, a note jumping out.
 
-use super::measure::{band_edges, band_span, fine_hz, percentile, Heard, FINE_BINS, FINE_FROM, LOW_BANDS};
+use super::measure::{band_edges, fine_hz, percentile, Heard, FINE_BINS, FINE_FROM};
 use serde::{Deserialize, Serialize};
 
 /// A pitched sound's harmonics: its fundamental (Hz), the 2nd and 3rd against it (dB: warmth), and even harmonics
@@ -17,13 +17,14 @@ pub struct Harmonics {
     pub even_odd: f64,
 }
 
-/// The loud frames' mean power: each third-octave's (mid and side) and its mid alone, each fine bin's density (mid,
-/// per FFT bin, as measured) and its mid in all (the density times the FFT bins it holds).
+/// The loud frames' mean power: each third-octave's (mid and side), each fine bin's density (mid, per FFT bin, as
+/// measured) and its mid in all (the density times the FFT bins it holds), and the low stream's own bins (mid, up to
+/// `LOW_FINE_TOP`).
 struct Spectrum {
     bands: Vec<f64>,
-    mids: Vec<f64>,
     fine: Vec<f64>,
     totals: Vec<f64>,
+    lows: Vec<f64>,
 }
 
 fn spectrum(heard: &Heard) -> Option<Spectrum> {
@@ -40,12 +41,18 @@ fn spectrum(heard: &Heard) -> Option<Spectrum> {
     }
     let mean = |value: &dyn Fn(usize) -> f64| picked.iter().map(|frame| value(*frame)).sum::<f64>() / picked.len() as f64;
     let bands: Vec<f64> = (0..31).map(|band| mean(&|frame| (frames.mid[frame][band] + frames.side[frame][band]) as f64)).collect();
-    let mids: Vec<f64> = (0..31).map(|band| mean(&|frame| frames.mid[frame][band] as f64)).collect();
     let fine: Vec<f64> =
         (0..FINE_BINS).map(|bin| mean(&|frame| frames.fine.get(frame).map_or(0., |row| 10f64.powf(row[bin] as f64 / 10.)))).collect();
     let counts = fine_counts(frames.hop, heard.measures.sample_rate);
     let totals = fine.iter().zip(counts).map(|(density, count)| density * count as f64).collect();
-    Some(Spectrum { bands, mids, fine, totals })
+    // The low stream's frames that fall in loud main frames.
+    let low: Vec<&Vec<f32>> = (0..frames.low_fine.len())
+        .filter(|low| main_frame(heard, *low).is_some_and(|frame| frames.level[frame] as f64 >= loud))
+        .map(|low| &frames.low_fine[low])
+        .collect();
+    let width = low.iter().map(|row| row.len()).min().unwrap_or(0);
+    let lows = (0..width).map(|bin| low.iter().map(|row| row[bin] as f64).sum::<f64>() / low.len() as f64).collect();
+    Some(Spectrum { bands, fine, totals, lows })
 }
 
 /// How many of the main FFT's bins each fine bin holds, as `measure` sorts them (frames `hop` apart: the FFT is four
@@ -67,21 +74,21 @@ fn fine_counts(hop: f64, rate: f64) -> [usize; FINE_BINS] {
     counts
 }
 
-/// A partial's mid power: all of it, wherever it falls. Whole fine bins (semitones) from 250 Hz, whole third-octaves
-/// under it, over a window wide enough for its FFT bins' spread (two bins either side) and at least a semitone either
-/// side, so a partial on either side of 250 Hz, or at a band's edge, reads in full.
+/// A partial's mid power: all of it, wherever it falls. Whole fine bins (semitones) from 250 Hz; under it, the low
+/// stream's own bins (about 3 Hz apart, so a low note's neighbouring partials stay apart). The window is a semitone
+/// either side, or two FFT bins when that's wider, so a partial on either side of 250 Hz reads in full.
 fn partial(hz: f64, heard: &Heard, spectrum: &Spectrum) -> f64 {
     let frames = &heard.frames;
-    // The low bands come from the low stream (its FFT four of its own hops long), the rest from the main one.
-    let hop = if hz < band_span(LOW_BANDS).0 { frames.bass_hop } else { frames.hop };
-    let reach = (hz * (2f64.powf(1. / 12.) - 1.)).max(2. / (4. * hop.max(1e-9)));
-    let (low, high) = (hz - reach, hz + reach);
-    let overlaps = |(from, to): (f64, f64)| from < high && to > low;
     let fine_edges = |bin: usize| (FINE_FROM * 2f64.powf((bin as f64 - 0.5) / 12.), FINE_FROM * 2f64.powf((bin as f64 + 0.5) / 12.));
-    if low >= fine_edges(0).0 {
-        (0..FINE_BINS).filter(|bin| overlaps(fine_edges(*bin))).map(|bin| spectrum.totals[bin]).sum()
+    let low_stream = hz - hz * (2f64.powf(1. / 12.) - 1.) < fine_edges(0).0;
+    // The low stream's FFT bins are `low_bin_hz` apart; the main one's a quarter of a hop's inverse.
+    let bin_hz = if low_stream { frames.low_bin_hz } else { 1. / (4. * frames.hop.max(1e-9)) };
+    let reach = (hz * (2f64.powf(1. / 12.) - 1.)).max(2. * bin_hz);
+    let (low, high) = (hz - reach, hz + reach);
+    if low_stream {
+        spectrum.lows.iter().enumerate().filter(|(bin, _)| (low..=high).contains(&(*bin as f64 * bin_hz))).map(|(_, power)| power).sum()
     } else {
-        (0..31).filter(|band| overlaps(band_span(*band))).map(|band| spectrum.mids[band]).sum()
+        (0..FINE_BINS).filter(|bin| fine_edges(*bin).0 < high && fine_edges(*bin).1 > low).map(|bin| spectrum.totals[bin]).sum()
     }
 }
 
@@ -307,7 +314,8 @@ pub struct Piece {
     pub name: String,
     pub noise_floor: Option<f64>,
     pub bandwidth: Option<f64>,
-    pub distortion: Option<f64>,
+    /// Each hit's crest (dB): saturation and clipping flatten it.
+    pub hit_crest: Option<f64>,
     /// Its decay (ms) against a beat: under 1 it rings out before the next beat.
     pub decay_beats: Option<f64>,
     pub centroid: Option<f64>,
@@ -322,7 +330,7 @@ pub fn kit(pieces: &[(String, Heard)], tempo: f64) -> (Vec<Piece>, Vec<String>) 
             name: name.clone(),
             noise_floor: noise_floor(heard),
             bandwidth: bandwidth(heard),
-            distortion: heard.measures.distortion,
+            hit_crest: heard.measures.hit_crest,
             decay_beats: heard.measures.decay.map(|ms| round1(ms / beat_ms)),
             centroid: heard.measures.centroid,
         })
@@ -351,7 +359,7 @@ pub fn kit(pieces: &[(String, Heard)], tempo: f64) -> (Vec<Piece>, Vec<String>) 
     };
     odd_one(&|piece| piece.noise_floor, 12., "noise floor (dB)", &mut found);
     odd_one(&|piece| Some(12. * (piece.bandwidth? / 1000.).log2()), 12., "top (semitones above 1 kHz)", &mut found);
-    odd_one(&|piece| piece.distortion, 6., "grit (dB)", &mut found);
+    odd_one(&|piece| piece.hit_crest, 4., "crest at each hit (dB: lower is grittier)", &mut found);
     // Coverage: a pile-up (three pieces centred within a third of an octave) or a gap (five octaves between
     // neighbours' centres: a kick and hats with nothing between them; a kick, a snare and hats lie closer).
     let mut centres: Vec<(String, f64)> = measured.iter().filter_map(|piece| Some((piece.name.clone(), piece.centroid?))).collect();

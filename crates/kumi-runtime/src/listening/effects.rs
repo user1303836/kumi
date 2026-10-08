@@ -80,7 +80,7 @@ pub fn effects(heard: &Heard, tempo: Option<f64>, first_beat: Option<f64>) -> Ef
     let (darkening, widening) = colour(heard);
     Effects {
         decay_time: decay_time(heard),
-        reverb: slopes(heard).is_some_and(|(own, tail)| tail > own / 2.),
+        reverb: slopes(heard).is_some_and(|(_, tail)| tail.is_some()),
         darkening,
         widening,
         echo: echo(heard),
@@ -163,25 +163,36 @@ fn decay_time_of(db: &[f64], (peak, end): (usize, usize)) -> Option<f64> {
     (falls < -1.).then(|| (-60. / falls).clamp(0.05, 30.))
 }
 
-/// How its undisturbed tails fall, dB a second (the medians): from the peak to 15 dB down (the sound's own decay), and
-/// from there on (a reverb's tail, when it's slower), when both can be read.
-pub fn slopes(heard: &Heard) -> Option<(f64, f64)> {
+/// How its undisturbed tails fall, dB a second: the sound's own fall (the median), and a slower tail after it (a
+/// reverb's) when most of them show one. A tail's first 25 ms are the hit's own fall, however close under the hit the
+/// tail starts; what follows, a tail when it falls under half as steeply after a drop of 3 dB and more. Otherwise it's
+/// one slope, the sound's own, and nothing is said of a reverb.
+pub fn slopes(heard: &Heard) -> Option<(f64, Option<f64>)> {
     let (db, floor, _) = levels(heard)?;
-    let least = (0.03 / HOP).round() as usize;
-    let (mut own, mut tail): (Vec<f64>, Vec<f64>) = decays(&db, floor)
-        .into_iter()
-        .filter_map(|(peak, end)| {
-            let split = (peak..=end).find(|k| db[*k] <= db[peak] - 15.)?;
-            (split >= peak + least && end >= split + least * 2 && db[split] - db[end] >= 10.)
-                .then(|| (slope(&db[peak..=split]), slope(&db[split..=end])))
-        })
-        .unzip();
+    let (head, least) = ((0.025 / HOP).round() as usize, (0.06 / HOP).round() as usize);
+    let mut own = vec![];
+    let mut tails = vec![];
+    for (peak, end) in decays(&db, floor) {
+        let knee = peak + head;
+        let two = end >= knee + least && db[peak] - db[knee] >= 3. && db[knee] - db[end] >= 10.;
+        let (fall, tail) = (slope(&db[peak..=knee.min(end)]), two.then(|| slope(&db[knee..=end])));
+        match tail.filter(|tail| *tail > fall / 2.) {
+            Some(tail) => {
+                own.push(fall);
+                tails.push(tail);
+            }
+            None => own.push(slope(&db[peak..=end])),
+        }
+    }
     if own.is_empty() {
         return None;
     }
-    own.sort_by(f64::total_cmp);
-    tail.sort_by(f64::total_cmp);
-    Some((percentile(&own, 0.5), percentile(&tail, 0.5)))
+    let median = |mut values: Vec<f64>| {
+        values.sort_by(f64::total_cmp);
+        percentile(&values, 0.5)
+    };
+    let reverb = (tails.len() * 2 >= own.len()).then(|| median(tails));
+    Some((median(own), reverb))
 }
 
 /// Decay time (RT60, seconds): the median over its undisturbed tails.
@@ -369,14 +380,25 @@ pub fn echo(heard: &Heard) -> Option<Echo> {
 /// How far each echo falls when there are none: as far as a reverb's decay is measured.
 pub const NO_ECHO: f64 = 60.;
 
-/// How far each echo falls, dB: `NO_ECHO` for a sound with hits that no copies follow, so a dry sound and a delayed
-/// one can be compared. None with no hit to hear echoes after.
+/// How far each echo falls, dB: `NO_ECHO` when there are none and there could have been, so a dry sound and a delayed
+/// one can be compared: most of its hits die away 40 dB before the next comes, so a copy (30 dB under at most) would
+/// have stood out. None when that can't be told: hits too close to hear between (a delayed 8th-note riff's repeats
+/// land on its notes), or none at all.
 pub fn echo_falls(heard: &Heard) -> Option<f64> {
     if let Some(echo) = echo(heard) {
         return Some(echo.falls);
     }
     let (db, floor, _) = levels(heard)?;
-    (!onsets(&db, floor).is_empty()).then_some(NO_ECHO)
+    let hits = onsets(&db, floor);
+    let clear = hits
+        .iter()
+        .enumerate()
+        .filter(|(index, (at, peak))| {
+            let next = hits.get(index + 1).map_or(db.len(), |(next, _)| *next);
+            db[*at..next].iter().any(|level| *level <= peak - 40.)
+        })
+        .count();
+    (!hits.is_empty() && clear * 3 >= hits.len() * 2).then_some(NO_ECHO)
 }
 
 /// A time as the nearest note value at a tempo ("dotted 1/8") and how far off it is (a fraction: 0.02 is 2 % long).
@@ -419,13 +441,14 @@ fn moving(values: &[f64], width: usize) -> Vec<f64> {
 }
 
 /// How far its level swings at its modulation rate, dB: within each cycle, the level's highest against its lowest
-/// around its own slow trend (the median over the loud cycles). 0 when it was heard long enough to find a swing (two
-/// seconds) and has none, so a sound without modulation can be compared with one with it.
+/// around its own slow trend (the median over the loud cycles). 0 for a held sound (no hits) heard long enough to find
+/// a swing (two seconds) that has none, so a sound without modulation can be compared with one with it. None when that
+/// can't be told: hits whose rhythm could hide a swing (a gated pad), or too short a listen.
 pub fn swing(heard: &Heard) -> Option<f64> {
     // A held sound has no silence to set a floor by: what sounds is within 30 dB of its loud parts.
-    let (db, _, loud) = levels(heard)?;
+    let (db, floor, loud) = levels(heard)?;
     let Some(rate) = heard.measures.modulation.filter(|rate| *rate > 0.) else {
-        return (db.len() as f64 * HOP >= 2.).then_some(0.);
+        return (db.len() as f64 * HOP >= 2. && onsets(&db, floor).is_empty()).then_some(0.);
     };
     let period = ((1. / rate) / HOP).round().max(2.) as usize;
     let trend = moving(&db, period * 2 + 1);
@@ -631,7 +654,7 @@ pub fn problems(heard: &Heard, effects: &Effects, tempo: Option<f64>, at: &dyn F
             found.push(format!("its echoes barely die away ({} dB a repeat): the feedback is near running away", echo.falls));
         }
     }
-    // Against the dry hit's own decay: a long sound is mostly tail by itself, an effect burying it adds far more.
+    // Against the dry hit's own fall: a long sound is mostly tail by itself, an effect burying it adds far more.
     if let (Some(share), Some((own, _))) = (effects.tail_share.filter(|share| *share >= 75.), slopes(heard)) {
         if share - own_share(own) >= 25. {
             found.push(format!("{share} % of its energy is tail: the effect buries the dry hits"));

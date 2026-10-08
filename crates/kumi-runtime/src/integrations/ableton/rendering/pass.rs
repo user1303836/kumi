@@ -3,6 +3,9 @@ use super::rig::Rig;
 use super::*;
 use kumi_common::js::number::to_string;
 
+/// How long the record pass's takes run before the part, seconds: a lead for its first hit to rise out of.
+pub(super) const RECORD_LEAD: f64 = 0.1;
+
 impl Rendering {
     pub(super) async fn render_pass(self: &Rc<Self>, rig: &mut Rig, signal: Signal) -> Result<IndexMap<String, Render>, RuntimeError> {
         if rig.ears.is_some() {
@@ -185,7 +188,7 @@ impl Rendering {
                                     source.name.clone(),
                                     Render {
                                         file,
-                                        start: ((window.from - start.unwrap_or(span.position)) * 60. / tempo - 0.1).max(0.),
+                                        start: ((window.from - start.unwrap_or(span.position)) * 60. / tempo - RECORD_LEAD).max(0.),
                                         seconds: None,
                                     },
                                 );

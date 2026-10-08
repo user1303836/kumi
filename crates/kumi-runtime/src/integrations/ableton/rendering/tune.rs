@@ -4,6 +4,7 @@
 
 use super::super::connection::NO_CURRENT_LIVE;
 use super::judge::JudgeHeard;
+use super::pass::RECORD_LEAD;
 use super::rig::Window;
 use super::*;
 use crate::listening::{
@@ -716,6 +717,17 @@ impl Rendering {
         window: Window,
         signal: Signal,
     ) -> Result<Result<IndexMap<String, crate::listening::measure::Heard>, String>, RuntimeError> {
+        Ok(self.hear_takes(names, window, signal).await?.map(|heard| heard.into_iter().map(|(name, (heard, _))| (name, heard)).collect()))
+    }
+
+    /// `hear_tracks`, each take with how long it runs before `window.from` (seconds): the record pass keeps a short
+    /// lead before the part, Kumi Ears measures from the part itself.
+    pub(super) async fn hear_takes(
+        self: &Rc<Self>,
+        names: &[String],
+        window: Window,
+        signal: Signal,
+    ) -> Result<Result<IndexMap<String, (crate::listening::measure::Heard, f64)>, String>, RuntimeError> {
         let tempo = self.observer.tempo.get().unwrap_or(120.);
         let candidates: Vec<AuditionCandidate> =
             names.iter().map(|name| AuditionCandidate { track: name.clone(), mix: None, label: None, clip: None }).collect();
@@ -727,6 +739,7 @@ impl Rendering {
             self.render_pass(rig.as_mut().unwrap(), signal.clone()).await
         }
         .await;
+        let ears = rig.as_ref().is_some_and(|rig| rig.ears.is_some());
         if let Some(rig) = rig.as_mut() {
             self.close_rig(rig).await;
         }
@@ -743,7 +756,16 @@ impl Rendering {
             )
             .await
             .map_err(|error| RuntimeError::plain(error.to_string()))?;
-            heard.insert(name.clone(), measured);
+            // The record pass's lead is cut short only where its clip starts less than that before the part (the
+            // song's start).
+            let lead = if ears {
+                0.
+            } else if render.start > 0. {
+                RECORD_LEAD
+            } else {
+                (window.from * 60. / tempo).min(RECORD_LEAD)
+            };
+            heard.insert(name.clone(), (measured, lead));
         }
         if heard.is_empty() {
             return Ok(Err("Nothing came through from the copies; is something playing on the track there?".into()));

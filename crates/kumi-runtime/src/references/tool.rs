@@ -4,7 +4,7 @@
 use super::{
     fetch::Fetcher,
     sources::{stamp, Choice, Kind, Resolved, Sources, Wanted},
-    store::{KeptReference, KeptTrack, ReferenceStore},
+    store::{KeptReference, KeptTrack, ReferenceStore, KEPT_VERSION},
 };
 use crate::{
     audio::tools::ResolveAudio,
@@ -203,7 +203,7 @@ impl ReferenceTool {
         }
         let profile = Profile::combine(&name, &profiles).ok_or("Kumi measured nothing.")?;
         let kept = KeptReference {
-            version: 1,
+            version: KEPT_VERSION,
             key: ReferenceStore::key(what),
             name,
             kind: format!("{kind:?}").to_lowercase(),

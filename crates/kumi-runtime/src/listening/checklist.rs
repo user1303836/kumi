@@ -112,6 +112,9 @@ pub struct SoundProfile {
     /// Its pumping (dB), as the mix guard reads it: a sound goal's guard may move toward it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pumping: Option<Spread>,
+    /// Each hit's waveform crest (dB): a sound goal's punch guard may move toward it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hit_crest: Option<Spread>,
 }
 
 impl SoundProfile {
@@ -144,6 +147,7 @@ impl SoundProfile {
             sweep: fx.sweep.map(|value| Spread::point(value, 0.25)),
             tail_share: fx.tail_share.map(|value| Spread::point(value, 5.)),
             pumping: m.pumping.map(|value| Spread::point(value, 1.)),
+            hit_crest: m.hit_crest.map(|value| Spread::point(value, 2.)),
         }
     }
 }
@@ -271,6 +275,7 @@ impl Profile {
                 sweep: pick(&|track| track.sound.sweep),
                 tail_share: pick(&|track| track.sound.tail_share),
                 pumping: pick(&|track| track.sound.pumping),
+                hit_crest: pick(&|track| track.sound.hit_crest),
             },
             vibe: vibe.clone(),
             vibe_spread: vibe.as_ref().and_then(|centre| {
@@ -327,6 +332,8 @@ pub enum Quantity {
     Psr,
     Range,
     Crest,
+    /// Each hit's waveform crest (`Measures::hit_crest`).
+    HitCrest,
     Pumping,
     Distortion,
     LowWidth,
@@ -390,6 +397,7 @@ impl Quantity {
         matches!(
             self,
             Quantity::Attack
+                | Quantity::HitCrest
                 | Quantity::Decay
                 | Quantity::Sustain
                 | Quantity::Centroid
@@ -445,8 +453,11 @@ pub enum Target {
     NoLowerThan {
         value: f64,
     },
-    /// Held where it was (a sound goal's loudness: a sample's level says nothing about the sound's).
-    Kept,
+    /// Held where it was at the run's first listen, `value` (a sound goal's loudness: a sample's level says nothing
+    /// about the sound's).
+    Kept {
+        value: f64,
+    },
 }
 
 impl Target {
@@ -502,7 +513,7 @@ impl Item {
             Target::AtMost { value } => Some((value - self.jnd, (value - self.jnd * 3., value))),
             Target::AtLeast { value } => Some((value + self.jnd, (value, value + self.jnd * 3.))),
             Target::Between { low, high } => Some(((low + high) / 2., (low + (high - low) * 0.1, high - (high - low) * 0.1))),
-            Target::NoHigher | Target::NoLower | Target::NoHigherThan { .. } | Target::NoLowerThan { .. } | Target::Kept => None,
+            Target::NoHigher | Target::NoLower | Target::NoHigherThan { .. } | Target::NoLowerThan { .. } | Target::Kept { .. } => None,
         }
     }
     /// How far off target a value is, in just-noticeable steps (0 within tolerance).
@@ -513,7 +524,7 @@ impl Item {
             Target::AtMost { value: limit } => (value - limit).max(0.),
             Target::AtLeast { value: limit } => (limit - value).max(0.),
             Target::Between { low, high } => (low - value).max(value - high).max(0.),
-            Target::NoHigher | Target::NoLower | Target::NoHigherThan { .. } | Target::NoLowerThan { .. } | Target::Kept => 0.,
+            Target::NoHigher | Target::NoLower | Target::NoHigherThan { .. } | Target::NoLowerThan { .. } | Target::Kept { .. } => 0.,
         };
         off / self.jnd
     }
@@ -529,7 +540,7 @@ impl Item {
             Target::NoLower => "no lower".into(),
             Target::NoHigherThan { value } => format!("no higher than it was or the reference's {}{unit}", number(value)),
             Target::NoLowerThan { value } => format!("no lower than it was or the reference's {}{unit}", number(value)),
-            Target::Kept => "where it was".into(),
+            Target::Kept { value } => format!("where it was, {}{unit}", number(value)),
         }
     }
 }
@@ -841,20 +852,50 @@ impl Checklist {
             (None, true) => Target::NoHigher,
             (None, false) => Target::NoLower,
         };
+        // A sound goal's punch is each hit's own crest (a 2 dB step): the crest over 400 ms moves with how often the
+        // notes come, and saturation and clipping, which the dropped distortion guard let through, flatten a hit's.
         let m = &heard.measures;
         let guards = [
-            ("punch", "Punch (crest)", Quantity::Crest, m.crest, toward(sounds.and_then(|r| r.crest), false)),
-            ("pumping", "Pumping", Quantity::Pumping, m.pumping, toward(sounds.and_then(|r| r.sound.pumping), true)),
-            ("distortion", "Distortion at peaks", Quantity::Distortion, m.distortion.filter(|_| !goal.sound), Target::NoHigher),
+            ("punch", "Punch (crest)", Quantity::Crest, m.crest.filter(|_| !goal.sound), Target::NoLower, 1.),
+            (
+                "hit crest",
+                "Punch at each hit (its peak against the 20 ms around it)",
+                Quantity::HitCrest,
+                m.hit_crest.filter(|_| goal.sound),
+                toward(sounds.and_then(|r| r.sound.hit_crest), false),
+                2.,
+            ),
+            ("pumping", "Pumping", Quantity::Pumping, m.pumping, toward(sounds.and_then(|r| r.sound.pumping), true), 1.),
+            ("distortion", "Distortion at peaks", Quantity::Distortion, m.distortion.filter(|_| !goal.sound), Target::NoHigher, 1.),
         ];
-        for (id, label, quantity, measured, target) in guards {
-            if measured.is_some() && !items.iter().any(|item| item.quantity == quantity) {
-                items.push(item(id, label, Role::Guard, "dB", quantity, target, 1.));
+        for (id, label, quantity, measured, target, step) in guards {
+            // An explicit target for the same measure keeps the guard beside it, unless it asks for the guard's wrong
+            // way (punch at most, pumping at least) or pins it (a value, a range): then the two couldn't both pass.
+            let higher = target.limit(0.).is_some_and(|(up, _)| up);
+            let conflicts = items.iter().any(|item| {
+                item.quantity == quantity
+                    && match item.target {
+                        Target::Exactly { .. } | Target::Between { .. } => true,
+                        Target::AtMost { .. } => !higher,
+                        Target::AtLeast { .. } => higher,
+                        _ => false,
+                    }
+            });
+            if measured.is_some() && !conflicts {
+                items.push(item(id, label, Role::Guard, "dB", quantity, target, step));
             }
         }
-        // A sound goal's loudness, held where it was: every round is brought back to the level the track played at.
-        if goal.sound && m.integrated.is_some() && !items.iter().any(|item| item.quantity == Quantity::Integrated) {
-            items.push(item("loudness", "Loudness (held where it was)", Role::Guard, "LUFS", Quantity::Integrated, Target::Kept, 1.));
+        // A sound goal's loudness, held where the first listen heard it: every round is brought back there.
+        if let Some(value) = m.integrated.filter(|_| goal.sound && !items.iter().any(|item| item.quantity == Quantity::Integrated)) {
+            items.push(item(
+                "loudness",
+                "Loudness (held where it was)",
+                Role::Guard,
+                "LUFS",
+                Quantity::Integrated,
+                Target::Kept { value: round1(value) },
+                1.,
+            ));
         }
         if !items.iter().any(|item| item.quantity == Quantity::Clipped) {
             // A step is a twentieth of what clips now: a few samples either way between listens isn't a change.
@@ -940,13 +981,15 @@ impl Checklist {
 
     /// The biggest gap, passing over `skip` (targets that changes keep failing on) while another is still off. One that
     /// can't be read now is open, never met, but no change can be judged on it: it comes once nothing readable is off.
+    /// A sound's or an effect's measure that its effect hides (a decay under a long tail) isn't worked on until it reads
+    /// again, and the run can end met without it.
     pub fn next_skipping(&self, values: &[Option<f64>], skip: &[usize]) -> Option<usize> {
         let mut open: Vec<(usize, f64)> = self
             .items
             .iter()
             .zip(values)
             .enumerate()
-            .filter(|(_, (item, _))| item.role != Role::Guard)
+            .filter(|(_, (item, value))| item.role != Role::Guard && (value.is_some() || !item.quantity.of_sound()))
             .map(|(index, (item, value))| (index, if value.is_some() { item.gap(*value) } else { f64::INFINITY }))
             .filter(|(_, gap)| *gap > 0.)
             .collect();
@@ -999,7 +1042,7 @@ impl Checklist {
             // A limiter bringing peaks down flattens them a little too.
             let peaks = target.is_some_and(|index| self.items[index].quantity == Quantity::TruePeak);
             let slack = match item.quantity {
-                Quantity::Crest => allowance,
+                Quantity::Crest | Quantity::HitCrest => allowance,
                 Quantity::Pumping => allowance / 2.,
                 Quantity::Distortion if peaks => allowance / 2.,
                 _ => 0.,
@@ -1093,6 +1136,8 @@ impl Checklist {
         let now = after[index]?;
         match self.items[index].target {
             Target::Exactly { value, within } => ((now - value).abs() > within).then_some(value - now),
+            // Held where the first listen heard it, so rounds that each move it a little don't add up.
+            Target::Kept { value } => ((now - value).abs() > 0.5).then_some(value - now),
             // No loudness asked for: keep it where it was.
             _ => before[index].filter(|was| (now - was).abs() > 0.5).map(|was| was - now),
         }
@@ -1113,6 +1158,7 @@ fn describe(quantity: &Quantity) -> (String, String, &'static str, f64) {
         Quantity::Psr => ("density".into(), "Density (peak to short-term loudness)".into(), "dB", 1.),
         Quantity::Range => ("range".into(), "Loudness range".into(), "LU", 1.),
         Quantity::Crest => ("crest".into(), "Punch (crest)".into(), "dB", 1.),
+        Quantity::HitCrest => ("hit crest".into(), "Punch at each hit".into(), "dB", 2.),
         Quantity::Pumping => ("pumping".into(), "Pumping".into(), "dB", 1.),
         Quantity::Distortion => ("distortion".into(), "Distortion at peaks".into(), "dB", 1.),
         Quantity::LowWidth => ("low width".into(), "Stereo below 120 Hz".into(), "dB", 2.),
@@ -1162,6 +1208,7 @@ fn reading(quantity: &Quantity, heard: &Heard, focus: Option<&Heard>) -> Option<
         Quantity::Psr => m.psr,
         Quantity::Range => m.range,
         Quantity::Crest => m.crest,
+        Quantity::HitCrest => m.hit_crest,
         Quantity::Pumping => m.pumping,
         Quantity::Distortion => m.distortion,
         Quantity::LowWidth => m.low_width,

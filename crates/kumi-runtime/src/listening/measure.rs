@@ -23,6 +23,9 @@ pub const FINE_FROM: f64 = 250.;
 pub const FINE_BINS: usize = 72;
 /// The level envelope's step, seconds.
 pub const ENVELOPE_HOP: f64 = 0.005;
+/// How high the low stream's own bins are kept, Hz: past the fine spectrum's first bins, for a partial's window around
+/// 250 Hz.
+pub const LOW_FINE_TOP: f64 = 280.;
 /// A fine bin's center, in Hz.
 pub fn fine_hz(bin: usize) -> f64 {
     FINE_FROM * 2f64.powf(bin as f64 / 12.)
@@ -109,6 +112,11 @@ pub struct Measures {
     /// How often its level swings (a tremolo, an LFO, beating between detuned voices), Hz.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modulation: Option<f64>,
+    /// Each hit's waveform crest: its sample peak over its RMS in the 20 ms around the hit's peak, dB (the median over
+    /// its hits). It reads the hit alone, so tails, reverb and how often it plays don't move it; saturation and
+    /// clipping flatten it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hit_crest: Option<f64>,
     /// Notes that start with a jump from silence (a click at the note's edge).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub clicks: usize,
@@ -137,6 +145,10 @@ pub struct Frames {
     pub bass_hop: f64,
     /// The strongest pitch from 30 to 250 Hz in each low frame: its frequency and level (dB), when there's one.
     pub bass: Vec<Option<(f32, f32)>>,
+    /// Each low frame's mid power per bin up to `LOW_FINE_TOP` (the low stream's own resolution, `low_bin_hz` apart): a
+    /// low sound's partials, read one by one.
+    pub low_fine: Vec<Vec<f32>>,
+    pub low_bin_hz: f64,
     /// The level every 5 ms (`ENVELOPE_HOP`): the RMS of mid and side over the 20 ms around it, linear. Echoes,
     /// decays and swings are read off it.
     pub envelope: Vec<f32>,
@@ -178,6 +190,9 @@ impl Heard {
         self.frames.level.iter_mut().for_each(|value| *value += db);
         for (_, level) in self.frames.bass.iter_mut().flatten() {
             *level += db;
+        }
+        for row in self.frames.low_fine.iter_mut() {
+            row.iter_mut().for_each(|value| *value *= power);
         }
         let amplitude = 10f32.powf(db / 20.);
         self.frames.envelope.iter_mut().for_each(|value| *value *= amplitude);
@@ -410,6 +425,8 @@ struct Meter {
     milli_side: f64,
     envelope: Vec<f32>,
     side_envelope: Vec<f32>,
+    // Each millisecond's sample peak (of the mid), for a hit's waveform crest.
+    peaks: Vec<f32>,
     // Each millisecond's biggest and typical sample-to-sample jump, and its peak: clicks at note edges and crackle.
     previous: f64,
     jumps: Vec<f32>,
@@ -501,7 +518,12 @@ impl Meter {
             low_mid: vec![0.; LOW_SIZE / 2 + 1],
             low_side: vec![0.; LOW_SIZE / 2 + 1],
             low_sums: [0.; 4],
-            frames: Frames { hop: (size / 4) as f64 / rate, bass_hop: (LOW_SIZE / 4 * decimate) as f64 / rate, ..Default::default() },
+            frames: Frames {
+                hop: (size / 4) as f64 / rate,
+                bass_hop: (LOW_SIZE / 4 * decimate) as f64 / rate,
+                low_bin_hz: low_rate / LOW_SIZE as f64,
+                ..Default::default()
+            },
             low_frames: vec![],
             millis: 0,
             milli_end: ((rate / 1000.).round() as usize).max(1),
@@ -510,6 +532,7 @@ impl Meter {
             milli_side: 0.,
             envelope: vec![],
             side_envelope: vec![],
+            peaks: vec![],
             previous: 0.,
             jumps: vec![],
             milli_peak: 0.,
@@ -600,6 +623,7 @@ impl Meter {
                 }
                 self.envelope.push(rms as f32);
                 self.side_envelope.push((self.milli_side / self.in_milli as f64).sqrt() as f32);
+                self.peaks.push(self.milli_peak as f32);
                 self.milli_sum = 0.;
                 self.milli_side = 0.;
                 self.in_milli = 0;
@@ -707,6 +731,8 @@ impl Meter {
             (((k as f64 + shift.clamp(-0.5, 0.5)) * bin_hz) as f32, (10. * (power + 1e-20).log10()) as f32)
         });
         self.frames.bass.push(note);
+        let kept = ((LOW_FINE_TOP / bin_hz) as usize + 1).min(self.low_mid.len());
+        self.frames.low_fine.push(self.low_mid[..kept].iter().map(|power| *power as f32).collect());
         self.low_frames.push((mid, side));
     }
 
@@ -860,6 +886,7 @@ impl Meter {
         };
         let (attack, decay, sustain) = envelope_of(&self.envelope);
         let modulation = modulation_of(&self.envelope);
+        let hit_crest = hit_crest_of(&self.envelope, &self.peaks);
         let pitch_drop = pitch_drop_of(&self.envelope, &self.crossings);
         // Brightness and noisiness over the loud frames.
         let (centroid, noise) = {
@@ -929,6 +956,7 @@ impl Meter {
             noise,
             pitch_drop,
             modulation,
+            hit_crest,
             clicks: self.clicks,
             crackle: if seconds > 0. { round1(self.spikes as f64 / seconds) } else { 0. },
         };
@@ -998,25 +1026,25 @@ fn hits_of(db: &[f64]) -> Vec<usize> {
     hits
 }
 
-/// How often the level swings, Hz: the strongest clear repeat of the millisecond envelope (its slow trend over 4 s
-/// taken out) between a twentieth of a second and two seconds (20 to 0.5 Hz). A repeat that's the notes' own rhythm
-/// (most hits followed by another that far on) isn't a swing: plucked 8ths aren't a tremolo.
+/// How often the level swings, Hz: a clear repeat of the millisecond envelope (held over 25 ms, so a low note's own
+/// waveform isn't read as a swing; its slow trend over 4 s taken out) between a twentieth of a second and two seconds
+/// (20 to 0.5 Hz): the shortest within a tenth of the strongest, so a swing isn't read at twice its period. A repeat
+/// that's the notes' own rhythm (most hits followed by another that far on) isn't a swing: plucked 8ths aren't a
+/// tremolo.
 fn modulation_of(envelope: &[f32]) -> Option<f64> {
     if envelope.len() < 2000 {
         return None;
     }
-    // Ten-millisecond steps, in dB, the slow trend taken out.
-    let coarse: Vec<f64> = envelope
-        .chunks(10)
-        .map(|chunk| 20. * ((chunk.iter().map(|v| *v as f64).sum::<f64>() / chunk.len() as f64) + 1e-9).log10())
-        .collect();
+    let db = held(&envelope.iter().map(|value| 20. * (*value as f64 + 1e-9).log10()).collect::<Vec<_>>());
+    // Ten-millisecond steps, the slow trend taken out.
+    let coarse: Vec<f64> = db.chunks(10).map(|chunk| chunk.iter().sum::<f64>() / chunk.len() as f64).collect();
     let trend = moving(&coarse, 400);
     let wave: Vec<f64> = coarse.iter().zip(&trend).map(|(value, trend)| value - trend).collect();
     let energy: f64 = wave.iter().map(|value| value * value).sum();
     if energy / wave.len() as f64 <= 0.25 {
         return None;
     }
-    let hits = hits_of(&held(&envelope.iter().map(|value| 20. * (*value as f64 + 1e-9).log10()).collect::<Vec<_>>()));
+    let hits = hits_of(&db);
     // Whether most hits are followed by another `lag` steps on (within 15 ms).
     let rhythm = |lag: usize| {
         let followed = hits
@@ -1031,12 +1059,34 @@ fn modulation_of(envelope: &[f32]) -> Option<f64> {
     };
     let top = 200.min(wave.len() / 3);
     let correlation: Vec<f64> = (0..=top + 1).map(|lag| wave.iter().zip(&wave[lag..]).map(|(a, b)| a * b).sum::<f64>() / energy).collect();
-    // A clear repeat, and a peak of its own (not the slope down from lag 0).
-    (5..=top)
+    // Clear repeats, each a peak of its own (not the slope down from lag 0).
+    let repeats: Vec<usize> = (5..=top)
         .filter(|lag| correlation[*lag] >= 0.4 && correlation[*lag] >= correlation[lag - 1] && correlation[*lag] >= correlation[lag + 1])
         .filter(|lag| !rhythm(*lag))
-        .max_by(|a, b| correlation[*a].total_cmp(&correlation[*b]))
-        .map(|lag| round2(100. / lag as f64))
+        .collect();
+    let strongest = repeats.iter().map(|lag| correlation[*lag]).fold(f64::MIN, f64::max);
+    repeats.into_iter().find(|lag| correlation[*lag] >= strongest * 0.9).map(|lag| round2(100. / lag as f64))
+}
+
+/// Each hit's waveform crest, dB: the sample peak over the RMS in the 20 ms around the hit's loudest millisecond, the
+/// median over its hits.
+fn hit_crest_of(envelope: &[f32], peaks: &[f32]) -> Option<f64> {
+    let raw: Vec<f64> = envelope.iter().map(|value| 20. * (*value as f64 + 1e-9).log10()).collect();
+    let hits = hits_of(&held(&raw));
+    let mut crests: Vec<f64> = hits
+        .iter()
+        .enumerate()
+        .filter_map(|(index, start)| {
+            let end = hits.get(index + 1).copied().unwrap_or(raw.len()).min(start + 300);
+            let at = (*start..end).max_by(|a, b| raw[*a].total_cmp(&raw[*b]))?;
+            let (from, to) = (at.saturating_sub(10), (at + 10).min(raw.len()).min(peaks.len()));
+            let power = envelope[from..to].iter().map(|value| (*value as f64).powi(2)).sum::<f64>() / (to - from).max(1) as f64;
+            let peak = peaks[from..to].iter().copied().fold(0f32, f32::max) as f64;
+            (power > 1e-12 && peak > 0.).then(|| 20. * peak.log10() - 10. * power.log10())
+        })
+        .collect();
+    crests.sort_by(f64::total_cmp);
+    (!crests.is_empty()).then(|| round1(percentile(&crests, 0.5)))
 }
 
 /// How far a low sound's pitch falls over its first quarter second, semitones: at each hit, the low end's first full
