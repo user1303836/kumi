@@ -56,13 +56,13 @@ pub static JOBS: LazyLock<Vec<Job>> = LazyLock::new(|| {
             name: "eq gain",
             words: &["eq gain", "band gain", "eq band gain"],
             plugins: vec![("ozone12", "eq gain", None), ("proq4", "gain", None)],
-            stock: vec![stock("Eq8", "EQ Eight", r"^[1-8] Gain A$", "a band's gain (1 Gain A … 8 Gain A)")],
+            stock: vec![stock("Eq8", "EQ Eight", r"^[1-8] Gain A$", "band gain: 1 Gain A … 8 Gain A")],
         },
         Job {
             name: "eq frequency",
             words: &["eq frequency", "band frequency", "eq band frequency"],
             plugins: vec![("ozone12", "eq frequency", None), ("proq4", "frequency", None)],
-            stock: vec![stock("Eq8", "EQ Eight", r"^[1-8] Frequency A$", "a band's frequency (1 Frequency A …)")],
+            stock: vec![stock("Eq8", "EQ Eight", r"^[1-8] Frequency A$", "band frequency: 1 Frequency A … 8 Frequency A")],
         },
         Job {
             name: "compressor threshold",
@@ -353,17 +353,19 @@ pub fn resolve(devices: &[Seen], asked: usize, words: &[String]) -> Resolved {
     let Some(jobs) = words.iter().map(|word| job_of(device, word)).collect::<Option<Vec<_>>>() else {
         return Resolved::Refused(why);
     };
+    // The first that turns every word's knob; else the first that does every job with a knob to name.
+    let mut naming: Option<(usize, Vec<String>)> = None;
     for at in agreed_order(devices, Some(asked)) {
         let other = &devices[at];
-        let found: Option<Vec<(String, String)>> = jobs
-            .iter()
-            .map(|job| match find(other, job.name) {
-                Some(Found::Knob { name, read }) => Some((name, read)),
-                _ => None,
-            })
-            .collect();
-        if let Some(found) = found {
-            let (knobs, read) = found.into_iter().unzip();
+        let found: Vec<Option<Found>> = jobs.iter().map(|job| find(other, job.name)).collect();
+        if found.iter().all(|found| matches!(found, Some(Found::Knob { .. }))) {
+            let (knobs, read) = found
+                .into_iter()
+                .filter_map(|found| match found {
+                    Some(Found::Knob { name, read }) => Some((name, read)),
+                    _ => None,
+                })
+                .unzip();
             return Resolved::On {
                 device: at,
                 knobs,
@@ -371,6 +373,25 @@ pub fn resolve(devices: &[Seen], asked: usize, words: &[String]) -> Resolved {
                 instead: Some(format!("{why} Kumi tunes {} on the same track instead.", other.called())),
             };
         }
+        if naming.is_none() && found.iter().all(|found| matches!(found, Some(Found::Knob { .. } | Found::Several(_)))) {
+            let several = found
+                .into_iter()
+                .filter_map(|found| match found {
+                    Some(Found::Several(why)) => Some(why),
+                    _ => None,
+                })
+                .collect();
+            naming = Some((at, several));
+        }
+    }
+    if let Some((at, several)) = naming {
+        let other = &devices[at];
+        return Resolved::Refused(format!(
+            "{why} {} on the same track does it (device \"{}\"): {}",
+            other.called(),
+            other.reference,
+            several.join(" ")
+        ));
     }
     // Nothing on the track does it: Live's own devices that would, each with its knobs.
     let mut by_device: Vec<(&str, Vec<&str>)> = vec![];
@@ -380,7 +401,7 @@ pub fn resolve(devices: &[Seen], asked: usize, words: &[String]) -> Resolved {
             None => by_device.push((stock.device, vec![stock.knob_said])),
         }
     }
-    let suggested: Vec<String> = by_device.iter().map(|(device, knobs)| format!("Live's {device} (its {})", knobs.join(", "))).collect();
+    let suggested: Vec<String> = by_device.iter().map(|(device, knobs)| format!("Live's {device} ({})", knobs.join(", "))).collect();
     if suggested.is_empty() {
         return Resolved::Refused(format!("{why} Nothing else on this track does it."));
     }

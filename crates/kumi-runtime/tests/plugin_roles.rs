@@ -133,7 +133,19 @@ fn another_device_on_the_track_does_the_job_in_the_agreed_order() {
     assert_eq!(on(&track(&[], &[])), (0, strings(&["Gain"])));
     // Nothing on the track can: Live's own device to put there, said.
     match resolve(&[ozone(&[])], 0, &strings(&["ceiling"])) {
-        Resolved::Refused(why) => assert!(why.contains("isn't configured") && why.contains("Live's Limiter (its Ceiling)"), "{why}"),
+        Resolved::Refused(why) => assert!(why.contains("isn't configured") && why.contains("Live's Limiter (Ceiling)"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    // Another device does the job but has several knobs for it: which, to name one there.
+    let eq_bands = stock("d5", "EQ Eight", "Eq8", &["Device On", "1 Gain A", "2 Gain A"]);
+    match resolve(&[limiter("d0"), eq_bands], 0, &strings(&["eq gain"])) {
+        Resolved::Refused(why) => {
+            assert!(
+                why.starts_with("Limiter has no eq gain.") && why.contains("EQ Eight on the same track does it (device \"d5\")"),
+                "{why}"
+            );
+            assert!(why.contains("1 Gain A, 2 Gain A. Name one in knobs."), "{why}");
+        }
         other => panic!("{other:?}"),
     }
     // A knob named as the device shows it isn't a role: as asked.
