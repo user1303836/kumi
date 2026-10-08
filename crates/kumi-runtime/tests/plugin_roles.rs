@@ -1,6 +1,7 @@
 //! Knobs found by role: Ozone 12's roles against the names Live listed for it, a role Live hasn't configured said with
 //! how to configure it, another device on the track doing the job in the agreed order (Ozone 12, the other mapped
-//! plug-ins, Live's own devices), a job on Live's own devices by their Live 12 names, and fixes that name a role.
+//! plug-ins, Live's own devices; none that's off), Live's own device to add placed where its job goes, a job on Live's
+//! own devices by their Live 12 names, and fixes that name a role.
 use kumi_runtime::plugins::roles::{agreed_order, find, job_for_item, job_named, plugin_fix, resolve, Found, Resolved, Seen};
 use serde_json::Value;
 
@@ -23,11 +24,12 @@ fn ozone(turnable: &[&str]) -> Seen {
         class: "PluginDevice".into(),
         turnable: strings(turnable),
         listed: Some(ozone_names()),
+        off: false,
     }
 }
 
 fn stock(reference: &str, name: &str, class: &str, turnable: &[&str]) -> Seen {
-    Seen { reference: reference.into(), name: name.into(), class: class.into(), turnable: strings(turnable), listed: None }
+    Seen { reference: reference.into(), name: name.into(), class: class.into(), turnable: strings(turnable), listed: None, off: false }
 }
 
 /// Live 12.4's Limiter, by the names Live gave its parameters.
@@ -70,7 +72,7 @@ fn ozone_12s_roles_land_on_the_names_live_lists_for_it() {
     assert_eq!(knob(find(&full, "limiter gain")), "MAX: Input Gain");
     assert_eq!(knob(find(&full, "Limiter Ceiling")), "MAX: Output Level");
     // Several knobs (bands, or a role's switches beside its knobs): one has to be named.
-    for (word, count) in [("width", 6), ("compressor threshold", 4), ("exciter", 8)] {
+    for (word, count) in [("width", 4), ("compressor threshold", 4), ("exciter", 8)] {
         match find(&full, word) {
             Some(Found::Several(why)) => assert!(why.contains(&format!("is {count} knobs")), "{word}: {why}"),
             other => panic!("{word}: {other:?}"),
@@ -88,6 +90,11 @@ fn ozone_12s_roles_land_on_the_names_live_lists_for_it() {
     }
     // A word that's no role and no job is a knob's name, for tune's own lookup.
     assert_eq!(find(&full, "MAX: Bypass"), None);
+    // Width is a job too, narrowed as the job is: the Stereoizer's delay isn't width, though Ozone's role covers it.
+    match find(&ozone(&["IMG: Aux Stereoizer Delay"]), "width") {
+        Some(Found::Missing(why)) => assert!(why.contains("isn't configured") && !why.contains("Stereoizer"), "{why}"),
+        other => panic!("{other:?}"),
+    }
 }
 
 #[test]
@@ -135,6 +142,7 @@ fn another_device_on_the_track_does_the_job_in_the_agreed_order() {
         class: "PluginDevice".into(),
         turnable: strings(turnable),
         listed: Some(strings(&["Gain", "Output Level", "Style", "Lookahead"])),
+        off: false,
     };
     let eq = stock("d4", "EQ Eight", "Eq8", &["Device On", "1 Gain A", "1 Frequency A"]);
     let track = |ozone_knobs: &[&str], pro_l_knobs: &[&str]| vec![limiter("d0"), pro_l(pro_l_knobs), ozone(ozone_knobs), eq.clone()];
@@ -146,9 +154,24 @@ fn another_device_on_the_track_does_the_job_in_the_agreed_order() {
     assert_eq!(on(&track(&["MAX: Input Gain"], &["Gain"])), (2, strings(&["MAX: Input Gain"])));
     assert_eq!(on(&track(&[], &["Gain"])), (1, strings(&["Gain"])));
     assert_eq!(on(&track(&[], &[])), (0, strings(&["Input Gain"])));
-    // Nothing on the track can: Live's own device to put there, said.
+    // Nothing on the track can: Live's own device to put there, said, and where: a limiter's job last on the chain,
+    // any other before the track's last limiter.
     match resolve(&[ozone(&[])], 0, &strings(&["ceiling"])) {
-        Resolved::Refused(why) => assert!(why.contains("isn't configured") && why.contains("Live's Limiter (Ceiling)"), "{why}"),
+        Resolved::Refused(why) => {
+            assert!(why.contains("isn't configured") && why.contains("Live's Limiter (Ceiling) last on the chain"), "{why}")
+        }
+        other => panic!("{other:?}"),
+    }
+    match resolve(&[limiter("d0")], 0, &strings(&["eq gain"])) {
+        Resolved::Refused(why) => {
+            assert!(why.contains("Live's EQ Eight (band gain: 1 Gain A … 8 Gain A) before Limiter (device \"d0\")"), "{why}");
+            assert!(!why.contains("last on the chain"), "{why}");
+        }
+        other => panic!("{other:?}"),
+    }
+    // Ozone 12 is a final limiter too.
+    match resolve(&[stock("d0", "Saturator", "Saturator", &["Device On", "Drive"]), ozone(&[])], 0, &strings(&["compressor ratio"])) {
+        Resolved::Refused(why) => assert!(why.contains("Live's Compressor (Ratio) before Ozone 12 (device \"d1\")"), "{why}"),
         other => panic!("{other:?}"),
     }
     // Another device does the job but has several knobs for it: which, to name one there.
@@ -166,6 +189,26 @@ fn another_device_on_the_track_does_the_job_in_the_agreed_order() {
     // A knob named as the device shows it isn't a role: as asked.
     assert_eq!(resolve(&[limiter("d0")], 0, &strings(&["Input Gain"])), Resolved::AsAsked);
     assert_eq!(resolve(&[limiter("d0")], 0, &strings(&["Release"])), Resolved::AsAsked);
+}
+
+#[test]
+fn a_device_thats_off_isnt_tried_and_is_said_when_its_the_only_one() {
+    let glue = stock("d1", "Glue Compressor", "GlueCompressor", &["Device On", "Threshold", "Ratio"]);
+    let off = |device: Seen| Seen { off: true, ..device };
+    // A Limiter kept off for an A/B: said, not tuned.
+    match resolve(&[glue.clone(), off(limiter("d2"))], 0, &strings(&["limiter gain"])) {
+        Resolved::Refused(why) => assert!(why.contains("Limiter on the same track does it (device \"d2\"), but it's off"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    // Ozone 12 off, a Limiter on: the Limiter does it.
+    let track = vec![off(ozone(&["MAX: Input Gain"])), limiter("d2"), glue];
+    assert_eq!(agreed_order(&track, Some(2)), vec![1]);
+    match resolve(&track, 2, &strings(&["limiter gain"])) {
+        Resolved::On { device, knobs, .. } => assert_eq!((device, knobs), (1, strings(&["Input Gain"]))),
+        other => panic!("{other:?}"),
+    }
+    // And a fix doesn't name it.
+    assert_eq!(plugin_fix(&track, job_for_item("loudness").unwrap(), Some("the last limiter's gain")), None);
 }
 
 #[test]
@@ -206,13 +249,51 @@ fn a_fix_names_a_mapped_plug_ins_role_when_one_on_the_track_does_the_job() {
     let loudness = job_for_item("loudness").unwrap();
     let fix = plugin_fix(&[limiter("d0"), ozone(&["MAX: Input Gain"])], loudness, Some(generic)).unwrap();
     assert!(
-        fix.starts_with("Ozone 12's threshold (MAX: Input Gain), homed in (tune with how: home, device \"d1\", knobs [\"threshold\"])"),
+        fix.starts_with(
+            "Ozone 12's threshold (MAX: Input Gain), homed in (tune with how: home, device \"d1\", knobs [\"MAX: Input Gain\"])"
+        ),
         "{fix}"
     );
     assert!(fix.ends_with(&format!("; or {generic}")), "{fix}");
     // Not configured: what to do, and the fix it had.
     let fix = plugin_fix(&[ozone(&[])], loudness, Some(generic)).unwrap();
-    assert!(fix.contains("would do it") && fix.contains("Configure") && fix.ends_with(generic), "{fix}");
+    assert!(fix.contains("would do it") && fix.contains("Configure") && fix.ends_with(generic) && !fix.contains(".; or"), "{fix}");
     // Live's own devices only: the fix stays as it was.
     assert_eq!(plugin_fix(&[limiter("d0")], loudness, Some(generic)), None);
+    // A role Live lists no name for (Ozone's EQ bands here) leads nowhere: the next plug-in that does the job, or the
+    // fix as it was.
+    let balance = job_for_item("balance low mids").unwrap();
+    assert_eq!(plugin_fix(&[ozone(&[])], balance, Some("an EQ Eight")), None);
+    let pro_q = Seen {
+        reference: "d2".into(),
+        name: "FabFilter Pro-Q 4".into(),
+        class: "PluginDevice".into(),
+        turnable: strings(&["Band 1 Gain"]),
+        listed: Some(strings(&["Band 1 Gain", "Band 1 Frequency"])),
+        off: false,
+    };
+    let fix = plugin_fix(&[ozone(&[]), pro_q], balance, Some("an EQ Eight")).unwrap();
+    assert!(fix.starts_with("Pro-Q 4's gain (Band 1 Gain)") && fix.contains("knobs [\"Band 1 Gain\"]"), "{fix}");
+}
+
+#[test]
+fn low_width_is_the_lowest_bands_width_only() {
+    let low = job_for_item("low width").unwrap();
+    assert_eq!(low.name, "low width");
+    // Only another band configured: the lowest band's knob is named, to configure.
+    let fix = plugin_fix(&[ozone(&["IMG: Aux Band 3 Width Percent"])], low, None).unwrap();
+    assert!(fix.contains("would do it") && fix.contains("IMG: Aux Band 1 Width Percent") && !fix.contains("Band 3"), "{fix}");
+    // Configured, it's that knob by its name.
+    let fix = plugin_fix(&[ozone(&["IMG: Aux Band 1 Width Percent", "IMG: Aux Band 3 Width Percent"])], low, None).unwrap();
+    assert!(fix.contains("knobs [\"IMG: Aux Band 1 Width Percent\"]"), "{fix}");
+    // A reverb's width isn't the low end's.
+    let supermassive = Seen {
+        reference: "d3".into(),
+        name: "ValhallaSupermassive".into(),
+        class: "PluginDevice".into(),
+        turnable: strings(&["Width"]),
+        listed: Some(strings(&["Width", "Mix"])),
+        off: false,
+    };
+    assert_eq!(plugin_fix(&[supermassive], low, Some("the Imager")), None);
 }

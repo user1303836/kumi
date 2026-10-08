@@ -1,6 +1,6 @@
 //! Knobs named by role in tune, and fixes that name a mapped plug-in's role. A track is read as tune sees it: each
-//! device's name and class, the parameters Live lets Kumi turn, and for a plug-in every name Live lists for it, so the
-//! plug-in map's names are checked against Live's own before any is used.
+//! device's name, class and whether it's on, the parameters Live lets Kumi turn, and for a plug-in every name Live
+//! lists for it, so the plug-in map's names are checked against Live's own before any is used.
 
 use super::tune::{TuneHow, TuneRequest};
 use super::*;
@@ -66,10 +66,11 @@ impl Rendering {
         let Some(job) = round.next.as_ref().and_then(|next| roles::job_for_item(&next.id)) else { return };
         let Some(track) = self.judge.borrow().as_ref().map(|run| run.track.clone()) else { return };
         let Ok(parent) = self.scope_ref(track.as_deref(), signal.clone()).await else { return };
-        let Ok(rows) = self.rows("device", json!({"parent":parent,"fields":["name","className"]}), signal.clone()).await else { return };
+        let Ok(rows) = self.rows("device", json!({"parent":parent,"fields":DEVICE_FIELDS}), signal.clone()).await else { return };
         let mut devices: Vec<Seen> = rows.iter().map(seen).collect();
-        let doing: Vec<usize> =
-            (0..devices.len()).filter(|at| devices[*at].adapter().is_some_and(|adapter| roles::job_role(adapter, job).is_some())).collect();
+        let doing: Vec<usize> = (0..devices.len())
+            .filter(|at| !devices[*at].off && devices[*at].adapter().is_some_and(|adapter| roles::job_role(adapter, job).is_some()))
+            .collect();
         if doing.is_empty() {
             return;
         }
@@ -88,18 +89,13 @@ impl Rendering {
         long["deviceRef"].as_str().unwrap_or(device).to_owned()
     }
 
-    /// The devices on a device's track (its top level, in order) by name and class, and where the device is among
-    /// them: after them, when it's inside a rack.
+    /// The devices on a device's track (its top level, in order) by name, class and whether they're on, and where the
+    /// device is among them: after them, when it's inside a rack.
     async fn track_devices(&self, long: &str, signal: Signal) -> Result<(Vec<Seen>, usize), RuntimeError> {
         let mut devices: Vec<Seen> = vec![];
         if let Some(on) = ON_TRACK.captures(long) {
             let track = format!("{}:track:{}", &on[1], &on[2]);
-            devices = self
-                .rows("device", json!({"parent":track,"fields":["name","className"]}), signal.clone())
-                .await?
-                .iter()
-                .map(seen)
-                .collect();
+            devices = self.rows("device", json!({"parent":track,"fields":DEVICE_FIELDS}), signal.clone()).await?.iter().map(seen).collect();
         }
         if let Some(at) = devices.iter().position(|device| self.long_device(&device.reference) == long) {
             return Ok((devices, at));
@@ -147,8 +143,12 @@ impl Rendering {
     }
 }
 
+/// What's read of each device on a track: its name, class, and whether it's on (Live's is_active).
+const DEVICE_FIELDS: [&str; 3] = ["name", "className", "enabled"];
+
 /// A device row as tune sees it, before its parameters are read.
 fn seen(row: &JsonObject) -> Seen {
     let text = |key: &str| row.get(key).and_then(Value::as_str).unwrap_or("").to_owned();
-    Seen { reference: text("ref"), name: text("name"), class: text("className"), ..Default::default() }
+    let off = row.get("enabled") == Some(&Value::Bool(false));
+    Seen { reference: text("ref"), name: text("name"), class: text("className"), off, ..Default::default() }
 }

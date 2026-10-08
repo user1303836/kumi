@@ -2,7 +2,9 @@
 //! lists for that plug-in (the map's names are patterns, not promises) and used only when Live has that parameter
 //! configured. A job ("limiter gain", "ceiling", "eq gain") is a role any device can have: the mapped plug-ins' roles
 //! that do it, and Live's own knobs that do. When a device can't turn a knob, another on the same track does the job,
-//! in the agreed order: Ozone 12, then the other mapped plug-ins, then Live's own devices.
+//! in the agreed order: Ozone 12, then the other mapped plug-ins, then Live's own devices. A device that's off isn't
+//! tried (it's said when it's the only one that would do it), and Live's own device to add goes where its job does: a
+//! limiter's last on the chain, the rest before the track's last limiter.
 
 use std::sync::LazyLock;
 
@@ -117,8 +119,18 @@ pub static JOBS: LazyLock<Vec<Job>> = LazyLock::new(|| {
             plugins: vec![("ozone12", "width", Some(pattern(r"(?i)Width"))), ("supermassive", "width", None)],
             stock: vec![],
         },
+        // The lows' width is the lowest band's: Ozone 12's Imager band 1 (a reverb's width isn't the low end's).
+        Job {
+            name: "low width",
+            words: &["low width", "low end width", "bass width", "low stereo width"],
+            plugins: vec![("ozone12", "width", Some(pattern(r"(?i)\bBand 1\b.*Width")))],
+            stock: vec![],
+        },
     ]
 });
+
+/// The jobs that are a final limiter's: what does them goes last on the chain.
+const LIMITER_JOBS: [&str; 2] = ["limiter gain", "ceiling"];
 
 /// Live's classes for plug-in devices (VST, VST3 and Audio Units).
 pub fn is_plugin(class: &str) -> bool {
@@ -160,6 +172,8 @@ pub struct Seen {
     pub turnable: Vec<String>,
     /// Every name Live lists for a plug-in (its get_parameter_names); None for Live's own devices, or not read.
     pub listed: Option<Vec<String>>,
+    /// Switched off in Live (kept for an A/B, say): it isn't tried for a job.
+    pub off: bool,
 }
 
 impl Seen {
@@ -214,11 +228,15 @@ fn list(names: &[&String]) -> String {
     format!("{}{}", shown.join(", "), if more > 0 { format!(" and {more} more") } else { String::new() })
 }
 
+/// What Live lists for a plug-in (else what it can turn): every name, and those a role matches, narrowed.
+fn named<'a>(device: &'a Seen, hint: &PluginParameterHint, narrow: Option<&Pattern>) -> (&'a [String], Vec<&'a String>) {
+    let listed = device.listed.as_ref().unwrap_or(&device.turnable);
+    (listed, listed.iter().filter(|name| hint.matches(name) && narrow.is_none_or(|narrow| matches(narrow, name))).collect())
+}
+
 /// A mapped plug-in's role, checked against what Live lists for it and has configured.
 fn on_plugin(device: &Seen, adapter: &'static PluginAdapter, hint: &PluginParameterHint, narrow: Option<&Pattern>) -> Found {
-    let listed = device.listed.as_ref().unwrap_or(&device.turnable);
-    let names: Vec<&String> =
-        listed.iter().filter(|name| hint.matches(name) && narrow.is_none_or(|narrow| matches(narrow, name))).collect();
+    let (listed, names) = named(device, hint, narrow);
     let role = format!("{}'s {}", adapter.name, hint.role);
     if names.is_empty() {
         return Found::Missing(format!(
@@ -260,8 +278,8 @@ pub fn find(device: &Seen, word: &str) -> Option<Found> {
     let job = job_named(&word);
     match device.adapter() {
         Some(adapter) => {
-            // The plug-in's own role first, then a job it does.
-            let wanted = own_role(adapter, &word).map(|hint| (hint, None)).or_else(|| job.and_then(|job| job_role(adapter, job)));
+            // A job it does first, narrowed as the job is (its role may cover more), then the plug-in's own role.
+            let wanted = job.and_then(|job| job_role(adapter, job)).or_else(|| own_role(adapter, &word).map(|hint| (hint, None)));
             match wanted {
                 Some((hint, narrow)) => Some(on_plugin(device, adapter, hint, narrow)),
                 None => job.map(|job| Found::Missing(format!("{} has no {} in Kumi's map of it.", adapter.name, job.name))),
@@ -294,9 +312,23 @@ fn job_of(device: &Seen, word: &str) -> Option<&'static Job> {
     JOBS.iter().find(|job| job.plugins.iter().any(|(id, role, _)| *id == adapter.id && *role == word))
 }
 
+/// Whether a device does a job: a mapped plug-in with a role for it, or one of Live's devices the job names.
+pub fn does(device: &Seen, job: &'static Job) -> bool {
+    match device.adapter() {
+        Some(adapter) => job_role(adapter, job).is_some(),
+        None => !is_plugin(&device.class) && job.stock.iter().any(|stock| stock.class == device.class),
+    }
+}
+
 /// The track's devices other than `asked`, in the agreed order: Ozone 12, then the other mapped plug-ins, then Live's
-/// own devices; within each, later in the chain first (nearer the output). Plug-ins Kumi has no map of aren't tried.
+/// own devices; within each, later in the chain first (nearer the output). Plug-ins Kumi has no map of aren't tried,
+/// nor devices that are off.
 pub fn agreed_order(devices: &[Seen], asked: Option<usize>) -> Vec<usize> {
+    in_order(devices, asked, false)
+}
+
+/// The track's devices that are on (or off), other than `asked`, in the agreed order.
+fn in_order(devices: &[Seen], asked: Option<usize>, off: bool) -> Vec<usize> {
     let rank = |device: &Seen| match device.adapter() {
         Some(adapter) if adapter.id == "ozone12" => Some(0),
         Some(_) => Some(1),
@@ -306,7 +338,7 @@ pub fn agreed_order(devices: &[Seen], asked: Option<usize>) -> Vec<usize> {
     let mut order: Vec<(usize, usize)> = devices
         .iter()
         .enumerate()
-        .filter(|(at, _)| Some(*at) != asked)
+        .filter(|(at, device)| Some(*at) != asked && device.off == off)
         .filter_map(|(at, device)| rank(device).map(|rank| (rank, at)))
         .collect();
     order.sort_by(|(rank_a, at_a), (rank_b, at_b)| rank_a.cmp(rank_b).then(at_b.cmp(at_a)));
@@ -394,21 +426,41 @@ pub fn resolve(devices: &[Seen], asked: usize, words: &[String]) -> Resolved {
             several.join(" ")
         ));
     }
+    // One that does it is off: said, as it may be kept off on purpose.
+    if let Some(off) =
+        in_order(devices, Some(asked), true).into_iter().map(|at| &devices[at]).find(|other| jobs.iter().all(|job| does(other, job)))
+    {
+        return Resolved::Refused(format!(
+            "{why} {} on the same track does it (device \"{}\"), but it's off: switch it on (make_changes' switch_device) to tune it there.",
+            off.called(),
+            off.reference
+        ));
+    }
     // Nothing on the track does it: Live's own devices that would, each with its knobs (not the kind asked, which
-    // just said it can't).
-    let mut by_device: Vec<(&str, Vec<&str>)> = vec![];
-    for stock in jobs.iter().filter_map(|job| job.stock.iter().find(|stock| stock.class != device.class)) {
-        match by_device.iter_mut().find(|(device, _)| *device == stock.device) {
-            Some((_, knobs)) => knobs.push(stock.knob_said),
-            None => by_device.push((stock.device, vec![stock.knob_said])),
+    // just said it can't), and where each goes: a limiter's job last on the chain, the rest before the track's last
+    // limiter.
+    let last_limiter =
+        devices.iter().rposition(|device| LIMITER_JOBS.iter().filter_map(|name| job_named(name)).any(|job| does(device, job)));
+    let place = |job: &Job| match last_limiter {
+        Some(at) if !LIMITER_JOBS.contains(&job.name) => {
+            format!("before {} (device \"{}\")", devices[at].called(), devices[at].reference)
+        }
+        _ => "last on the chain".to_string(),
+    };
+    let mut by_device: Vec<(&str, Vec<&str>, String)> = vec![];
+    for (job, stock) in jobs.iter().filter_map(|job| job.stock.iter().find(|stock| stock.class != device.class).map(|stock| (job, stock))) {
+        match by_device.iter_mut().find(|(device, _, _)| *device == stock.device) {
+            Some((_, knobs, _)) => knobs.push(stock.knob_said),
+            None => by_device.push((stock.device, vec![stock.knob_said], place(job))),
         }
     }
-    let suggested: Vec<String> = by_device.iter().map(|(device, knobs)| format!("Live's {device} ({})", knobs.join(", "))).collect();
+    let suggested: Vec<String> =
+        by_device.iter().map(|(device, knobs, place)| format!("Live's {device} ({}) {place}", knobs.join(", "))).collect();
     if suggested.is_empty() {
         return Resolved::Refused(format!("{why} Nothing else on this track does it."));
     }
     Resolved::Refused(format!(
-        "{why} Nothing else on this track does it: put {} on the track (make_changes loads it; last on the chain for a master) and tune it by the same role.",
+        "{why} Nothing else on this track does it: put {}, and tune it by the same role (make_changes loads it).",
         suggested.join(" and ")
     ))
 }
@@ -418,31 +470,35 @@ pub fn job_for_item(id: &str) -> Option<&'static Job> {
     match id {
         "loudness" => job_named("limiter gain"),
         "true peak" => job_named("ceiling"),
-        "low width" => job_named("width"),
+        "low width" => job_named("low width"),
         _ if id.starts_with("balance ") => job_named("eq gain"),
         _ => None,
     }
 }
 
-/// A fix naming a mapped plug-in's role, when one on the track does the job (the first in the agreed order), with the
-/// fix it would have had after it. None when no mapped plug-in on the track does it.
+/// A fix naming a mapped plug-in's role, when one on the track that's on does the job (the first in the agreed order),
+/// with the fix it would have had after it. None when no mapped plug-in on the track does it, or Live lists no name
+/// for its role there (a map that doesn't fit that version leads nowhere).
 pub fn plugin_fix(devices: &[Seen], job: &'static Job, otherwise: Option<&str>) -> Option<String> {
     let said = agreed_order(devices, None).into_iter().find_map(|at| {
         let device = &devices[at];
         let adapter = device.adapter()?;
         let (hint, narrow) = job_role(adapter, job)?;
+        if named(device, hint, narrow).1.is_empty() {
+            return None;
+        }
         let role = format!("{}'s {}", adapter.name, hint.role);
         let reference = &device.reference;
         Some(match on_plugin(device, adapter, hint, narrow) {
             Found::Knob { name, .. } => {
-                format!("{role} ({name}), homed in (tune with how: home, device \"{reference}\", knobs [\"{}\"])", hint.role)
+                format!("{role} ({name}), homed in (tune with how: home, device \"{reference}\", knobs [\"{name}\"])")
             }
             Found::Several(why) => format!("{why} Then tune with how: home, device \"{reference}\", knobs [that one]"),
             Found::Missing(why) => format!("{role} would do it: {why}"),
         })
     })?;
     Some(match otherwise {
-        Some(otherwise) => format!("{said}; or {otherwise}"),
+        Some(otherwise) => format!("{}; or {otherwise}", said.trim_end_matches('.')),
         None => said,
     })
 }
