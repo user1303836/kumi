@@ -220,6 +220,37 @@ pub async fn take_back(host: &dyn RoundHost, checkpoint: &[String], known: Optio
     }
 }
 
+/// What a searched candidate costs: the target's gap in steps (as the whole would read), anything it makes audibly
+/// worse (as the judge would count it: each costs ten steps and how far past its tolerance it went), and how far the
+/// knobs moved from `start` (processing that has to earn its place). One whose target, or anything else, can't be
+/// read costs everything: silence isn't on target.
+pub fn candidate_cost(
+    checklist: &Checklist,
+    target: usize,
+    before: &[Option<f64>],
+    whole: &[Option<f64>],
+    after: &[Option<f64>],
+    point: &[f64],
+    start: &[f64],
+) -> f64 {
+    let predicted = predict(checklist, whole, before, after);
+    let Some(reached) = predicted[target] else { return f64::INFINITY };
+    if predicted.iter().zip(whole).any(|(now, was)| was.is_some() && now.is_none()) {
+        return f64::INFINITY;
+    }
+    let verdict = checklist.verdict(Some(target), whole, &predicted);
+    let gap = checklist.items[target].gap(Some(reached));
+    let worse: f64 =
+        verdict.rows.iter().filter(|row| verdict.hurt.contains(&row.id)).map(|row| 10. + (row.gap_after - row.gap_before).max(0.)).sum();
+    let distance: f64 = point.iter().zip(start).map(|(a, b)| (a - b).abs()).sum();
+    let cost = gap + worse + distance * 0.5;
+    if cost.is_finite() {
+        cost
+    } else {
+        f64::INFINITY
+    }
+}
+
 /// The devices on the chain `now` that weren't on it at the checkpoint (`known`), when they're exactly the `made` a
 /// round's changes made; else why not.
 pub fn removable(known: &[Placed], now: &[Placed], made: usize) -> Result<Vec<Placed>, String> {

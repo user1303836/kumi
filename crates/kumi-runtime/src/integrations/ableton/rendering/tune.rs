@@ -7,13 +7,14 @@ use super::judge::JudgeHeard;
 use super::rig::Window;
 use super::*;
 use crate::listening::{
-    checklist::{plan_cut, Checklist, Quantity, Role, Target, REGIONS},
+    checklist::{plan_cut, Quantity, Target},
     cmaes::Cmaes,
     detect::ProblemKind,
     fit::{fit, Band, Limits, Shape},
     home::{Homed, Homing},
+    judging::{candidate_cost, predict},
     knobs::{Scale, Unit},
-    measure::{measure_file, MeasureOptions, THIRDS},
+    measure::{measure_file, MeasureOptions},
     round::{Round, RoundKind},
 };
 use kumi_common::js::{number::to_string, string::head};
@@ -102,14 +103,22 @@ impl Rendering {
         };
         let signal = abort::any([original, self.connection().lifetime.clone()]);
         let outcome = async {
-            // The target's excerpt, and how it sounds as things stand.
+            // The target's excerpt, and how it sounds as things stand. With a change already made (a device just put in
+            // place), its "before" can't be heard any more: then the bars whose before is known.
+            let changed = {
+                let run = self.judge.borrow();
+                !self.applied_since(&run.as_ref().unwrap().checkpoint).is_empty()
+            };
             let window = {
                 let mut guard = self.judge.borrow_mut();
                 let run = guard.as_mut().unwrap();
                 run.target = Some(index);
-                let window = self.excerpt_for(run);
-                run.window = window;
-                window
+                let wanted = self.excerpt_for(run);
+                let known = run.excerpts.iter().any(|excerpt| excerpt.window == wanted && excerpt.state == run.state);
+                if known || !changed {
+                    run.window = wanted;
+                }
+                run.window
             };
             if let Err(why) = self.ensure_before(window, signal.clone()).await? {
                 return Ok(Err(why));
@@ -231,20 +240,7 @@ impl Rendering {
             let run = self.judge.borrow();
             let run = run.as_ref().unwrap();
             let item = &run.checklist.items[index];
-            // Every balance gap still open, for a fit to the reference's shape.
-            let regions: Vec<(usize, f64, f64)> = run
-                .checklist
-                .items
-                .iter()
-                .zip(&run.whole)
-                .filter_map(|(item, value)| match (&item.quantity, item.target, value) {
-                    (Quantity::Region { region }, Target::Between { low, high }, Some(value)) if item.gap(Some(*value)) > 0. => {
-                        Some((*region, (low + high) / 2. - value, item.jnd))
-                    }
-                    _ => None,
-                })
-                .collect();
-            (item.quantity.clone(), item.target, item.label.clone(), run.whole[index], regions)
+            (item.quantity.clone(), item.target, item.label.clone(), run.whole[index], run.checklist.region_points(&run.whole))
         };
         let (bands, predicted) = match quantity {
             Quantity::Problem { problem: ProblemKind::Resonance | ProblemKind::Harshness, low, high, steady: true, .. } => {
@@ -264,11 +260,9 @@ impl Rendering {
                     "{label} comes and goes: a static cut would dull it all the time. Home in on a de-esser's or a dynamic band's threshold instead (how: home)."
                 )))
             }
-            Quantity::Region { .. } if !open_regions.is_empty() => {
-                let points: Vec<(f64, f64, f64)> =
-                    open_regions.iter().map(|(region, gap, jnd)| ((THIRDS[REGIONS[*region].1] * THIRDS[REGIONS[*region].2]).sqrt(), *gap, 1. / jnd.max(0.1))).collect();
+            Quantity::Region { .. } if open_regions.iter().any(|(_, gap, _)| *gap != 0.) => {
                 let limits = Limits { db: 6., q: (0.3, 4.), hz: (20., 20_000.), bands: 4, within: 0.5 };
-                (fit(&points, &limits, CURVE_RATE), None)
+                (fit(&open_regions, &limits, CURVE_RATE), None)
             }
             _ => {
                 return Ok(Err(format!(
@@ -303,6 +297,16 @@ impl Rendering {
             )));
         }
         let mut values: Vec<(&DeviceKnob, f64)> = vec![];
+        // The fit draws fixed-Q bells at full scale: Adaptive Q narrows deep cuts and Scale rescales every gain.
+        if let Some(adaptive) = knobs.iter().find(|knob| knob.name == "Adaptive Q") {
+            values.push((adaptive, adaptive.item("Off").unwrap_or(adaptive.min)));
+        }
+        if let Some(scale) = knobs.iter().find(|knob| knob.name == "Scale") {
+            match &scale.scale {
+                Some(units) => values.push((scale, units.raw(100.))),
+                None => return Ok(Err("Kumi couldn't read this EQ Eight's Scale.".into())),
+            }
+        }
         let mut said = vec![];
         for (band, slot) in bands.iter().zip(&unused) {
             // Live 12 calls a band's width "Q" ("1 Q A"); older Live, "Resonance".
@@ -370,7 +374,8 @@ impl Rendering {
             let item = &run.checklist.items[index];
             let (aim, met) = match item.target {
                 Target::Exactly { value, within } => (value, (value - within * 0.8, value + within * 0.8)),
-                // Anything under a ceiling meets it; it aims a step under, so the next round has room.
+                // Up to three steps under a ceiling meets it (further under is processing for nothing); it aims a step
+                // under, so the next round has room.
                 Target::AtMost { value } => (value - item.jnd, (value - item.jnd * 3., value)),
                 Target::AtLeast { value } => (value + item.jnd, (value, value + item.jnd * 3.)),
                 Target::Between { low, high } => ((low + high) / 2., (low + (high - low) * 0.1, high - (high - low) * 0.1)),
@@ -401,7 +406,8 @@ impl Rendering {
         // What the knob measures where it is is known only when nothing changed since the last judged listen (a
         // limiter just put in place changes it): otherwise that's the first probe.
         let mut homing =
-            Homing::new(aim, met, (scale.perceptual(low), scale.perceptual(high)), x0, (!changed).then_some(start), HOME_PROBES);
+            Homing::new(aim, met, (scale.perceptual(low), scale.perceptual(high)), x0, (!changed).then_some(start), HOME_PROBES)
+                .resolution(scale.step());
         // A dB knob moves a level in dB about one for one, to begin with.
         let slope = (scale.unit == Unit::Db && matches!(unit.as_str(), "LUFS" | "dB" | "dBTP")).then_some(1.);
         let (track, focus) = {
@@ -410,39 +416,46 @@ impl Rendering {
             (run.track.clone(), run.focus.clone())
         };
         let mut heard_at: Vec<(f64, JudgeHeard)> = vec![];
-        let stop = loop {
-            let at = match homing.next(slope) {
-                Ok(at) => at,
-                Err(why) => break why,
-            };
-            self.set_knobs(&request.device, &[(knob, scale.raw(scale.from_perceptual(at)))], signal.clone()).await?;
-            let heard = match self.judge_hear(track.as_deref(), focus.as_deref(), window, signal.clone()).await? {
-                Ok(heard) => heard,
-                Err(why) => return Ok(Err(why)),
-            };
-            let values = {
-                let mut guard = self.judge.borrow_mut();
-                guard.as_mut().unwrap().listens += 1;
-                checklist.read(&heard.main, heard.focus.as_ref())
-            };
-            let Some(measured) = values[index] else { break Homed::Stuck };
-            let reached = checklist.items[index].quantity.moved(start, before, measured);
-            // A probe that makes anything else audibly worse is too far, however close it gets.
-            let predicted: Vec<Option<f64>> = checklist
-                .items
-                .iter()
-                .enumerate()
-                .map(|(at, item)| match (whole_all.get(at).copied().flatten(), before_all.get(at).copied().flatten(), values[at]) {
-                    (Some(whole), Some(was), Some(now)) => Some(item.quantity.moved(whole, was, now)),
-                    (_, _, now) => now,
-                })
-                .collect();
-            if checklist.verdict(Some(index), &whole_all, &predicted).hurt.is_empty() {
-                homing.heard(at, reached);
-            } else {
-                homing.hurt(at, reached);
+        let probed: Result<Result<Homed, String>, RuntimeError> = async {
+            loop {
+                let at = match homing.next(slope) {
+                    Ok(at) => at,
+                    Err(why) => return Ok(Ok(why)),
+                };
+                self.set_knobs(&request.device, &[(knob, scale.raw(scale.from_perceptual(at)))], signal.clone()).await?;
+                let heard = match self.judge_hear(track.as_deref(), focus.as_deref(), window, signal.clone()).await? {
+                    Ok(heard) => heard,
+                    Err(why) => return Ok(Err(why)),
+                };
+                let values = {
+                    let mut guard = self.judge.borrow_mut();
+                    guard.as_mut().unwrap().listens += 1;
+                    checklist.read(&heard.main, heard.focus.as_ref())
+                };
+                let Some(measured) = values[index] else { return Ok(Ok(Homed::Stuck)) };
+                let reached = checklist.items[index].quantity.moved(start, before, measured);
+                // A probe that makes anything else audibly worse is too far, however close it gets.
+                let predicted = predict(&checklist, &whole_all, &before_all, &values);
+                if checklist.verdict(Some(index), &whole_all, &predicted).hurt.is_empty() {
+                    homing.heard(at, reached);
+                } else {
+                    homing.hurt(at, reached);
+                }
+                heard_at.push((at, heard));
             }
-            heard_at.push((at, heard));
+        }
+        .await;
+        // A homing that ends unjudged (nothing came through, Esc, Live gone) puts the knob back.
+        let stop = match probed {
+            Ok(Ok(stop)) => stop,
+            Ok(Err(why)) => {
+                let _ = self.set_knobs(&request.device, &[(knob, knob.raw)], self.cleanup()).await;
+                return Ok(Err(why));
+            }
+            Err(error) => {
+                let _ = self.set_knobs(&request.device, &[(knob, knob.raw)], self.cleanup()).await;
+                return Err(error);
+            }
         };
         let (best, reached) = homing.best().unwrap_or((x0, start));
         let Some(position) = heard_at.iter().position(|(at, _)| *at == best) else {
@@ -458,7 +471,10 @@ impl Rendering {
         let last = heard_at.len() - 1;
         let (_, heard) = heard_at.swap_remove(position);
         if position != last {
-            self.set_knobs(&request.device, &[(knob, scale.raw(scale.from_perceptual(best)))], signal.clone()).await?;
+            if let Err(error) = self.set_knobs(&request.device, &[(knob, scale.raw(scale.from_perceptual(best)))], signal.clone()).await {
+                let _ = self.set_knobs(&request.device, &[(knob, knob.raw)], self.cleanup()).await;
+                return Err(error);
+            }
         }
         let shown = |at: f64| scale.text(scale.from_perceptual(at));
         let change = format!(
@@ -481,6 +497,68 @@ impl Rendering {
 }
 
 impl Rendering {
+    /// Notes (or, once they're gone, forgets) a search's scratch copies by their name prefix, with the Set they're in.
+    pub(super) fn note_copies(&self, prefix: &str, made: bool) {
+        let Some(file) = &self.copies_journal else { return };
+        let mut entries: Vec<Value> = std::fs::read(file)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .and_then(|value| value.as_array().cloned())
+            .unwrap_or_default();
+        entries.retain(|entry| entry["prefix"].as_str() != Some(prefix));
+        if made {
+            entries.push(json!({
+                "prefix": prefix,
+                "set": self.connection().set.borrow().clone(),
+                "path": self.history.remember.current().and_then(|project| project.path.clone()),
+            }));
+        }
+        if entries.is_empty() {
+            let _ = std::fs::remove_file(file);
+        } else {
+            let temporary = file.with_extension(format!("{}.tmp", std::process::id()));
+            if std::fs::write(&temporary, serde_json::to_vec(&entries).unwrap_or_default()).is_ok() {
+                let _ = std::fs::rename(&temporary, file);
+            }
+        }
+    }
+
+    /// Removes scratch copies a search left in this Set (cut off by a crash or a lost connection), once Live is back.
+    pub(super) async fn sweep_copies(&self, identity: &str, path: Option<&str>, signal: Signal) {
+        let Some(file) = &self.copies_journal else { return };
+        let Some(entries) = std::fs::read(file).ok().and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok()) else { return };
+        for entry in entries.as_array().into_iter().flatten() {
+            let Some(prefix) = entry["prefix"].as_str().filter(|prefix| prefix.starts_with("Kumi · try ")) else { continue };
+            let here = match entry["path"].as_str().filter(|saved| !saved.is_empty()) {
+                Some(saved) => Some(saved) == path,
+                None => entry["set"].as_str() == Some(identity),
+            };
+            if !here {
+                continue;
+            }
+            let code = format!(
+                "import json\nPREFIX = json.loads({})\ngone = 0\nfor index in reversed(range(len(song.tracks))):\n    if str(song.tracks[index].name).startswith(PREFIX + ' '):\n        song.delete_track(index)\n        gone += 1\nresult = {{'gone': gone}}\n",
+                serde_json::to_string(&serde_json::to_string(prefix).unwrap_or_default()).unwrap_or_default()
+            );
+            let swept = self
+                .connection()
+                .call("live_run_python", object(json!({"code":code,"mode":"exec","timeoutMs":20000})), signal.clone())
+                .await;
+            let gone = swept
+                .ok()
+                .filter(|read| read.is_error != Some(true))
+                .and_then(|read| super::super::context::payload(&read).ok())
+                .filter(|done| done.get("ok") == Some(&Value::Bool(true)))
+                .map(|done| done["result"]["gone"].as_u64().unwrap_or(0));
+            if let Some(gone) = gone {
+                self.note_copies(prefix, false);
+                if gone > 0 {
+                    self.tell(format!("Kumi removed {gone} scratch copies a cut-off search left in this Set."), None);
+                }
+            }
+        }
+    }
+
     /// Runs the scratch-copies script on a device's track.
     async fn copies(&self, device: &str, args: Value, signal: Signal) -> Result<Result<Value, String>, RuntimeError> {
         let long = self.connection().references.borrow().lengthen(&json!({"deviceRef":device}));
@@ -590,6 +668,25 @@ impl Rendering {
         let Some(before) = before else {
             return Ok(Err("Kumi lost what the excerpt sounded like before; judge the run again.".into()));
         };
+        if let Quantity::Problem { problem: ProblemKind::Masking, .. } = checklist.items[index].quantity {
+            return Ok(Err(
+                "Masking is measured against the focus track, which the copies don't play with: home in on one knob instead (how: home)."
+                    .into(),
+            ));
+        }
+        // The copies are of the device's own track, so it has to be the run's.
+        let device_track = {
+            let long = self.connection().references.borrow().lengthen(&json!({"deviceRef":request.device}));
+            long["deviceRef"].as_str().and_then(super::super::mutations::track_index_of)
+        };
+        let run_track = self
+            .scope_ref(Some(&scoped), signal.clone())
+            .await
+            .ok()
+            .and_then(|reference| super::super::mutations::track_index_of(&reference));
+        if device_track.is_none() || device_track != run_track {
+            return Ok(Err(format!("search hears copies of the run's own track ({scoped}): tune a device on it, or home in on one knob.")));
+        }
         // Where the knobs are now, as fractions of their perceptual ranges.
         let span = |scale: &Scale| {
             let (low, high) = scale.range();
@@ -608,19 +705,23 @@ impl Rendering {
             scale.raw(scale.from_perceptual(low + at.clamp(0., 1.) * (high - low)))
         };
         let start: Vec<f64> = chosen.iter().map(|(knob, scale)| fraction(scale, knob.raw)).collect();
+        // Where the knobs are now costs no listen: its gap as the run reads it. A search has to beat it.
+        let standing = candidate_cost(&checklist, index, &before, &whole, &before, &start, &start);
         let tag = uuid::Uuid::new_v4().to_string()[..4].to_owned();
         let prefix = format!("Kumi · try {tag}");
         let mut search = Cmaes::new(&start, 0.2, None, crate::core::evolve::seeded(rand::random::<u32>()));
-        let made =
-            match self.copies(&request.device, json!({"action":"make","count":search.lambda,"prefix":prefix}), signal.clone()).await? {
-                Ok(made) => made,
-                Err(why) => return Ok(Err(why)),
-            };
-        let position = made.get("position").and_then(Value::as_u64).unwrap_or(0);
-        let names: Vec<String> =
-            made.get("names").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
-        // The search, then the copies go whatever happened.
+        // Noted before the copies are made, so a crash or a lost connection still leaves them to be swept.
+        self.note_copies(&prefix, true);
+        // The search, then the copies go whatever happened (a make cut off partway takes its own back).
         let searched: Result<Result<(), String>, RuntimeError> = async {
+            let made =
+                match self.copies(&request.device, json!({"action":"make","count":search.lambda,"prefix":prefix}), signal.clone()).await? {
+                    Ok(made) => made,
+                    Err(why) => return Ok(Err(why)),
+                };
+            let position = made.get("position").and_then(Value::as_u64).unwrap_or(0);
+            let names: Vec<String> =
+                made.get("names").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
             for _ in 0..SEARCH_GENERATIONS {
                 let points = search.ask();
                 let mut values = serde_json::Map::new();
@@ -643,7 +744,7 @@ impl Rendering {
                     .iter()
                     .zip(&points)
                     .map(|(name, point)| match heard.get(name) {
-                        Some(heard) => search_cost(&checklist, index, &before, &whole, &checklist.read(heard, None), point, &start),
+                        Some(heard) => candidate_cost(&checklist, index, &before, &whole, &checklist.read(heard, None), point, &start),
                         None => f64::INFINITY,
                     })
                     .collect();
@@ -652,10 +753,28 @@ impl Rendering {
             Ok(Ok(()))
         }
         .await;
-        let _ = self.copies(&request.device, json!({"action":"drop","prefix":prefix}), self.cleanup()).await;
+        match self.copies(&request.device, json!({"action":"drop","prefix":prefix}), self.cleanup()).await {
+            Ok(Ok(_)) => self.note_copies(&prefix, false),
+            Ok(Err(why)) => {
+                self.tell(format!("Kumi couldn't remove its scratch copies ({why}); it'll try again when Live reconnects."), None)
+            }
+            Err(error) => self.tell(
+                format!(
+                    "Kumi couldn't remove its scratch copies ({}); it'll try again when Live reconnects.",
+                    head(&error.to_string(), 160)
+                ),
+                None,
+            ),
+        }
         match searched? {
             Ok(()) => {}
             Err(why) => return Ok(Err(why)),
+        }
+        if search.best.as_ref().is_none_or(|(_, cost)| !(*cost < standing - 0.25)) {
+            return Ok(Err(format!(
+                "The search heard nothing better than where the knobs are (in {} generations of {}); they stay. Try other knobs or another device.",
+                search.generation, search.lambda
+            )));
         }
         let Some((best, _)) = search.best.clone() else {
             return Ok(Err("The search heard nothing to choose from.".into()));
@@ -678,43 +797,6 @@ impl Rendering {
         );
         self.judge_round(Some(change), None, signal).await
     }
-}
-
-/// What a candidate costs: the target's gap in steps (as the whole would read), every guard's worsening in steps,
-/// and how far the knobs moved (processing that has to earn its place).
-fn search_cost(
-    checklist: &Checklist,
-    index: usize,
-    before: &[Option<f64>],
-    whole: &[Option<f64>],
-    after: &[Option<f64>],
-    point: &[f64],
-    start: &[f64],
-) -> f64 {
-    let moved = |at: usize| match (whole[at], before[at], after[at]) {
-        (Some(whole), Some(before), Some(after)) => Some(whole + (after - before)),
-        _ => None,
-    };
-    let item = &checklist.items[index];
-    let gap = item.gap(moved(index));
-    let worse: f64 = checklist
-        .items
-        .iter()
-        .enumerate()
-        .filter(|(_, item)| item.role == Role::Guard)
-        .map(|(at, item)| match (before[at], after[at]) {
-            (Some(before), Some(after)) => {
-                let change = match item.target {
-                    Target::NoLower => before - after,
-                    _ => after - before,
-                };
-                (change / item.jnd - 1.).max(0.)
-            }
-            _ => 0.,
-        })
-        .sum();
-    let distance: f64 = point.iter().zip(start).map(|(a, b)| (a - b).abs()).sum();
-    gap + worse + distance * 0.5
 }
 
 /// The model's own words for the change, as the log's lead-in.

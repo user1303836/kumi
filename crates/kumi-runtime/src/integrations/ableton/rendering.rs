@@ -55,6 +55,8 @@ pub struct Rendering {
     step: RenderStep,
     clip_file: ResolveAudio,
     restore: Option<RestoreStore>,
+    /// Scratch copies a search made and hasn't removed yet (beside the render journal): swept when Live is back.
+    copies_journal: Option<PathBuf>,
     on_action: Option<Rc<dyn Fn(ActionEvent)>>,
     on_audition: Option<Rc<dyn Fn(AuditionEvent)>>,
     on_judge: Option<Rc<dyn Fn(crate::listening::round::Round)>>,
@@ -116,6 +118,7 @@ impl Rendering {
             step,
             clip_file,
             restore: options.restore_file.as_ref().map(restore_store),
+            copies_journal: options.restore_file.as_ref().map(|file| PathBuf::from(format!("{file}.copies.json"))),
             on_action: options.on_action.clone(),
             on_audition: options.on_audition.clone(),
             on_judge: options.on_judge.clone(),
@@ -219,6 +222,7 @@ impl Rendering {
         false
     }
     pub async fn restore_after_crash(&self, identity: &str, path: Option<&str>, signal: Signal) -> Result<Option<String>, RuntimeError> {
+        self.sweep_copies(identity, path, signal.clone()).await;
         let Some(pending) = self.restore.as_ref().and_then(RestoreStore::load) else { return Ok(None) };
         if self.rendering.get() {
             return Ok(None);

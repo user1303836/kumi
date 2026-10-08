@@ -44,6 +44,9 @@ pub struct Scale {
     pub unit: Unit,
     /// (raw, shown) in raw order.
     points: Vec<(f64, f64)>,
+    /// A plain number heard as a factor (a Q, say: from 0.1 to 18), so searched on a log scale.
+    #[serde(default)]
+    log: bool,
 }
 
 impl Scale {
@@ -51,7 +54,7 @@ impl Scale {
     /// unit and moves one way. None for a switch, a list or text that doesn't read as numbers.
     pub fn read(grid: &[(f64, String)]) -> Option<Scale> {
         let read: Vec<(f64, f64, String)> =
-            grid.iter().filter_map(|(raw, text)| parse_display(text).map(|shown| (*raw, shown.value, shown.unit))).collect();
+            grid.iter().filter_map(|(raw, text)| parse_display(&plain(text)).map(|shown| (*raw, shown.value, shown.unit))).collect();
         // The unit most of the range shows in.
         let mut counts: Vec<(String, usize)> = vec![];
         for (_, _, unit) in &read {
@@ -68,9 +71,8 @@ impl Scale {
         let mut points: Vec<(f64, f64)> = read
             .into_iter()
             .filter(|(_, _, seen)| *seen == unit)
-            .map(|(raw, shown, _)| {
-                (raw, if kind == Unit::Db && shown == f64::NEG_INFINITY { FLOOR_DB } else { shown.max(FLOOR_DB.min(shown)) })
-            })
+            // A dB knob's quiet end (and its "-inf") stands at the floor.
+            .map(|(raw, shown, _)| (raw, if kind == Unit::Db { shown.max(FLOOR_DB) } else { shown }))
             .filter(|(raw, shown)| raw.is_finite() && shown.is_finite())
             .collect();
         points.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -91,11 +93,17 @@ impl Scale {
         if kept.len() < 2 || kept.first()?.1 == kept.last()?.1 {
             return None;
         }
-        Some(Scale { unit: kind, points: kept })
+        // A plain number that's always above zero and spans ten times or more is a factor.
+        let (low, high) = (kept.iter().map(|p| p.1).fold(f64::MAX, f64::min), kept.iter().map(|p| p.1).fold(f64::MIN, f64::max));
+        let log = kind == Unit::Plain && low > 0. && high >= low * 10.;
+        Some(Scale { unit: kind, points: kept, log })
     }
     /// A scale straight from numbers: raw equals shown (a parameter whose text is its number).
     pub fn linear(unit: Unit, min: f64, max: f64) -> Scale {
-        Scale { unit, points: vec![(min, min), (max, max)] }
+        Scale { unit, points: vec![(min, min), (max, max)], log: false }
+    }
+    fn logarithmic(&self) -> bool {
+        self.log || self.unit.logarithmic()
     }
     /// The lowest and highest values shown, in the unit.
     pub fn range(&self) -> (f64, f64) {
@@ -109,14 +117,14 @@ impl Scale {
     /// Where a value sits for a listener: dB as it is, octaves, log-time, log-ratio, a fraction for percent.
     pub fn perceptual(&self, shown: f64) -> f64 {
         match self.unit {
-            unit if unit.logarithmic() => shown.max(1e-9).log2(),
+            _ if self.logarithmic() => shown.max(1e-9).log2(),
             Unit::Percent => shown / 100.,
             _ => shown,
         }
     }
     pub fn from_perceptual(&self, at: f64) -> f64 {
         match self.unit {
-            unit if unit.logarithmic() => at.exp2(),
+            _ if self.logarithmic() => at.exp2(),
             Unit::Percent => at * 100.,
             _ => at,
         }
@@ -130,6 +138,8 @@ impl Scale {
             Unit::Ratio => 0.25,
             Unit::Percent => 0.05,
             Unit::Semitones => 0.5,
+            // A factor: about a fifth either way (a quarter of an octave of it).
+            Unit::Plain if self.log => 0.25,
             Unit::Plain => {
                 let (lo, hi) = self.range();
                 (hi - lo).abs() / 20.
@@ -165,6 +175,24 @@ impl Scale {
             Unit::Plain => rounded(shown, 3),
         }
     }
+}
+
+/// Live's text as the shared reader takes it: a leading "+" dropped ("+24 st"), and a decimal comma read as a point
+/// ("1,5 kHz"; a comma before exactly three digits stays a thousands separator: "1,234 Hz").
+fn plain(text: &str) -> String {
+    let text = text.trim().trim_start_matches('+');
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    for (at, c) in chars.iter().enumerate() {
+        let digit = |at: usize| chars.get(at).is_some_and(|c| c.is_ascii_digit());
+        let thousands = (1..=3).all(|n| digit(at + n)) && !digit(at + 4);
+        if *c == ',' && at > 0 && digit(at - 1) && digit(at + 1) && !thousands && !text.contains('.') {
+            out.push('.');
+        } else {
+            out.push(*c);
+        }
+    }
+    out
 }
 
 /// Piecewise-linear, clamped at the ends; `points` sorted by x.

@@ -885,7 +885,7 @@ impl Rendering {
     }
 
     /// The run's track (Main without one), by ref.
-    async fn scope_ref(self: &Rc<Self>, track: Option<&str>, signal: Signal) -> Result<String, RuntimeError> {
+    pub(super) async fn scope_ref(self: &Rc<Self>, track: Option<&str>, signal: Signal) -> Result<String, RuntimeError> {
         match track {
             Some(track) => {
                 let tracks = self.rows("track", json!({"fields":["name"]}), signal).await?;

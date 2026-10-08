@@ -6,7 +6,7 @@
 use super::{
     detect::{self, hertz, Problem, ProblemKind},
     fit::{response, Band, Shape},
-    measure::{fine_hz, percentile, Heard, Measures, FINE_BINS},
+    measure::{fine_hz, percentile, Heard, Measures, FINE_BINS, THIRDS},
 };
 use serde::{Deserialize, Serialize};
 
@@ -566,6 +566,23 @@ impl Checklist {
                 Quantity::TruePeak => after.map(|peak| peak + gain),
                 Quantity::Clipped if gain != 0. => before.or(*after),
                 _ => *after,
+            })
+            .collect()
+    }
+
+    /// The points an EQ is fitted to toward a reference's shape: each region's centre (Hz), how far it's off (dB: an
+    /// open gap pulls its way, one in tolerance is held at 0 so a wide band can't push it out) and its weight.
+    pub fn region_points(&self, whole: &[Option<f64>]) -> Vec<(f64, f64, f64)> {
+        self.items
+            .iter()
+            .zip(whole)
+            .filter_map(|(item, value)| match (&item.quantity, item.target, value) {
+                (Quantity::Region { region }, Target::Between { low, high }, Some(value)) => {
+                    let (_, from, to) = REGIONS[*region];
+                    let gap = if item.gap(Some(*value)) > 0. { (low + high) / 2. - value } else { 0. };
+                    Some(((THIRDS[from] * THIRDS[to]).sqrt(), gap, 1. / item.jnd.max(0.1)))
+                }
+                _ => None,
             })
             .collect()
     }

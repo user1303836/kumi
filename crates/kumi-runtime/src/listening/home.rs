@@ -8,7 +8,7 @@
 pub struct Homing {
     /// Where it steps toward, inside `met`.
     pub aim: f64,
-    /// Any measure in this range meets the target (anything under a ceiling, say).
+    /// Any measure in this range meets the target (a few steps under a ceiling, say).
     pub met: (f64, f64),
     pub low: f64,
     pub high: f64,
@@ -20,6 +20,9 @@ pub struct Homing {
     /// Probes that made something else audibly worse: never the answer, and the knob doesn't go that far again.
     pub hurt: Vec<f64>,
     pub most: usize,
+    /// Probes closer than this sound the same (one just-noticeable step of the knob): one that close to another isn't
+    /// heard again.
+    pub resolution: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,17 +47,27 @@ impl Homing {
             known: measured.is_some(),
             hurt: vec![],
             most,
+            resolution: (high - low).abs() * 1e-6,
         }
     }
-    /// A probe that made something else worse: the knob stays on this side of it from now on.
+    /// Probes closer than `step` (one just-noticeable step of the knob, in its perceptual units) count as the same.
+    pub fn resolution(mut self, step: f64) -> Self {
+        self.resolution = self.resolution.max(step.abs());
+        self
+    }
+    /// A probe that made something else worse: the knob stays on this side of it from now on. One where the knob
+    /// started (it already hurt before the knob moved: the change around it did) rules nothing out on either side.
     pub fn hurt(&mut self, knob: f64, measured: f64) {
         self.probes.push((knob, measured));
         self.hurt.push(knob);
         let margin = (self.high - self.low) * 1e-3;
+        if (knob - self.first).abs() <= self.resolution {
+            return;
+        }
         if knob > self.first {
-            self.high = self.high.min(knob - margin);
+            self.high = self.high.min(knob - margin).max(self.low);
         } else {
-            self.low = self.low.max(knob + margin);
+            self.low = self.low.max(knob + margin).min(self.high);
         }
     }
     pub fn met(&self, measured: f64) -> bool {
@@ -113,8 +126,12 @@ impl Homing {
                 }
             }
         };
+        // Hurt on both sides leaves no room (and no NaN gets this far).
+        if !(self.low < self.high) || !wanted.is_finite() {
+            return Err(Homed::Stuck);
+        }
         let wanted = wanted.clamp(self.low, self.high);
-        if self.probes.iter().any(|p| (p.0 - wanted).abs() < 1e-6 * (self.high - self.low).max(1e-9)) {
+        if self.probes.iter().any(|p| (p.0 - wanted).abs() < self.resolution.max(1e-9 * (self.high - self.low))) {
             return Err(Homed::Stuck);
         }
         Ok(wanted)
