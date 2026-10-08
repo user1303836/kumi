@@ -76,6 +76,15 @@ fn a_searched_candidate_that_goes_silent_or_hurts_something_never_wins() {
     let whole = vec![Some(-14.), Some(0.), Some(0.), Some(0.1)];
     let copy = candidate_cost(&guarded, 1, &whole, &whole, &[Some(-14.), Some(-1.2), Some(0.), None], &[0.6, 0.5], &start);
     assert!(copy.is_finite() && copy < standing, "{copy}");
+    // A sound's own measure a longer tail hides on a copy (its decay) is unread there, not lost, while the copy is heard;
+    // a copy heard as nothing at all still costs everything.
+    let mut sound = peaks();
+    sound.items.push(item("decay", Quantity::Decay, Target::Between { low: 150., high: 250. }, Role::Target, 10.));
+    let whole = vec![Some(-14.), Some(0.), Some(0.), Some(120.)];
+    let hidden = candidate_cost(&sound, 1, &whole, &whole, &[Some(-14.), Some(-1.2), Some(0.), None], &[0.6, 0.5], &start);
+    assert!(hidden.is_finite() && hidden < standing, "{hidden}");
+    let silent = candidate_cost(&sound, 1, &whole, &whole, &[None, Some(-1.2), None, None], &[0.6, 0.5], &start);
+    assert_eq!(silent, f64::INFINITY);
 }
 
 #[test]

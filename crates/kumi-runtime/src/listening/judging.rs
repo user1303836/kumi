@@ -367,9 +367,19 @@ pub fn candidate_cost(
 ) -> f64 {
     let predicted = predict(checklist, whole, before, after);
     let Some(reached) = predicted[target] else { return f64::INFINITY };
-    // A reading lost is silence, never on target; the learned models' guards are only unheard (copies aren't embedded).
-    let models = |item: &Item| matches!(item.quantity, Quantity::Vibe { .. } | Quantity::EffectStyle { .. });
-    if predicted.iter().zip(whole).zip(&checklist.items).any(|((now, was), item)| was.is_some() && now.is_none() && !models(item)) {
+    // A reading lost is silence, never on target. As the verdict reads them, the learned models' guards are only
+    // unheard (copies aren't embedded), and a sound's or an effect's own measure can go unread while the rest of the
+    // copy is heard (a longer tail filling the gaps a decay was read in).
+    let heard = checklist.items.iter().zip(&predicted).any(|(item, value)| {
+        value.is_some()
+            && matches!(
+                item.quantity,
+                Quantity::Integrated | Quantity::TruePeak | Quantity::Plr | Quantity::Psr | Quantity::Crest | Quantity::Distortion
+            )
+    });
+    let excused =
+        |item: &Item| matches!(item.quantity, Quantity::Vibe { .. } | Quantity::EffectStyle { .. }) || (heard && item.quantity.of_sound());
+    if predicted.iter().zip(whole).zip(&checklist.items).any(|((now, was), item)| was.is_some() && now.is_none() && !excused(item)) {
         return f64::INFINITY;
     }
     let verdict = checklist.verdict(Some(target), whole, &predicted);
