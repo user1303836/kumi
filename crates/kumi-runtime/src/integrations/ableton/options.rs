@@ -106,7 +106,9 @@ impl AbletonOptions {
     }
 }
 
-/// Finds the listening model (None: no provider has one).
+/// Finds the listening model: one, none (no provider has one), or why it couldn't tell (the network, Esc).
 pub type ListenerSource = Rc<
-    dyn Fn(kumi_common::abort::Signal) -> futures::future::LocalBoxFuture<'static, Option<Rc<dyn crate::listening::listener::Listener>>>,
+    dyn Fn(
+        kumi_common::abort::Signal,
+    ) -> futures::future::LocalBoxFuture<'static, Result<Option<Rc<dyn crate::listening::listener::Listener>>, String>>,
 >;

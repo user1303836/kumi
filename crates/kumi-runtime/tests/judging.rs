@@ -5,7 +5,8 @@ use async_trait::async_trait;
 use kumi_runtime::listening::{
     checklist::{Change, Checklist, Goal, Item, Quantity, Role, Target},
     detect,
-    judging::{matched, predict, processing, rebalance, removable, take_back, Listen, Placed, RoundHost, Unheard},
+    judging::{decide, matched, predict, processing, rebalance, removable, take_back, Listen, Placed, RoundHost, Unheard},
+    listener::{Choice, Opinion},
     measure::{measure_samples, Heard},
 };
 use std::cell::{Cell, RefCell};
@@ -229,6 +230,9 @@ impl RoundHost for Pretend {
     fn stopped(&self) -> bool {
         false
     }
+    async fn limited(&self) -> bool {
+        false
+    }
     async fn chain(&self) -> Result<Vec<Placed>, String> {
         Ok(self.chain.borrow().clone())
     }
@@ -407,4 +411,48 @@ fn clipping_says_when() {
     let clipping = found.iter().find(|problem| problem.id == "clipping").unwrap();
     assert_eq!(clipping.at.len(), 2);
     assert!(clipping.what.contains("at 0:01, 0:03"), "{}", clipping.what);
+}
+
+/// An excerpt heard after a change, reading `after`.
+fn heard_after(after: Vec<Option<f64>>) -> Listen {
+    Listen { loudness: after[LOUDNESS], values: after, file: "after.wav".into(), start: 0. }
+}
+
+#[tokio::test]
+async fn a_round_is_decided_whole_kept_and_rebalanced_or_taken_back() {
+    let checklist = checklist();
+    let whole = vec![Some(-14.), Some(0.), Some(-1.), Some(0.)];
+    // Kept: a limiter brings the peaks down and loudness up 2 dB, and rebalancing brings it back.
+    let live = Pretend::new(|gain| vec![Some(-12. + gain), Some(-3. + gain), Some(-1.), Some(0.)]);
+    live.change("Loaded Limiter on Main", true);
+    let after = live.listen();
+    let decided = decide(&live, &checklist, Some(PEAK), &whole, &whole, after, None, 1, &[]).await;
+    assert!(decided.verdict.kept, "{:?}", decided.verdict);
+    assert_eq!((live.gain.get(), decided.whole[LOUDNESS], decided.listens), (-2., Some(-14.), 1));
+    // Silence after the change: every reading lost, not kept, and taken back.
+    let live = Pretend::new(|_| vec![None, None, None, None]);
+    live.change("Utility · Mute on", true);
+    let silent = heard_after(vec![None, None, None, None]);
+    let decided = decide(&live, &checklist, Some(PEAK), &whole, &whole, silent, None, 0, &[]).await;
+    assert!(!decided.verdict.kept && decided.verdict.why.contains("couldn't be read"), "{:?}", decided.verdict);
+    assert!(decided.verdict.why.contains("taken back: Utility · Mute on"), "{:?}", decided.verdict);
+    assert!(live.history.borrow().iter().all(|entry| !entry.applied));
+    // The listening model hears it distorted both ways and prefers it before: not kept, whatever the meters say.
+    let live = Pretend::new(|gain| vec![Some(-14. + gain), Some(-1.5 + gain), Some(-1.), Some(0.)]);
+    live.change("Saturator · Drive 0 → 12 dB", true);
+    let after = live.listen();
+    let opinion = Opinion { closer: Some(Choice::Before), new_problems: vec!["distorted".into()], said: "first / second".into() };
+    let decided = decide(&live, &checklist, Some(PEAK), &whole, &whole, after, Some(&opinion), 0, &[]).await;
+    assert!(
+        !decided.verdict.kept && decided.verdict.why.starts_with("the listening model heard it distorted both ways"),
+        "{:?}",
+        decided.verdict
+    );
+    // Three devices for a fifth of a step: the processing costs more than it earns.
+    let live = Pretend::new(|gain| vec![Some(-14. + gain), Some(-1.04 + gain), Some(-1.), Some(0.)]);
+    live.change("Loaded Compressor on Main", true);
+    let after = live.listen();
+    let edge = vec![Some(-14.), Some(-0.8), Some(-1.), Some(0.)];
+    let decided = decide(&live, &checklist, Some(PEAK), &edge, &edge, after, None, 3, &[]).await;
+    assert!(!decided.verdict.kept && decided.verdict.why.contains("less than the processing costs"), "{:?}", decided.verdict);
 }

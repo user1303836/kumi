@@ -226,28 +226,30 @@ fn client() -> reqwest::Client {
 }
 
 /// OpenAI's newest audio-capable chat model for a key, from its own model list (ids that take audio: "…audio…", not
-/// the realtime, speech or transcription ones).
-pub async fn openai_listener(key: &str, signal: Signal) -> Option<ChatListener> {
+/// the realtime, speech or transcription ones). None when the list has none; an error when it couldn't be read (the
+/// network, the service, Esc), which another try may get past.
+pub async fn openai_listener(key: &str, signal: Signal) -> Result<Option<ChatListener>, String> {
     let client = client();
     let listed = tokio::select! {
-        listed = client.get("https://api.openai.com/v1/models").bearer_auth(key).timeout(std::time::Duration::from_secs(20)).send() => listed.ok()?,
-        _ = signal.cancelled() => return None,
+        listed = client.get("https://api.openai.com/v1/models").bearer_auth(key).timeout(std::time::Duration::from_secs(20)).send() => listed.map_err(|error| error.to_string())?,
+        _ = signal.cancelled() => return Err("stopped".into()),
     };
     if !listed.status().is_success() {
-        return None;
+        return Err(format!("OpenAI's model list answered {}", listed.status()));
     }
     let body: Value = tokio::select! {
-        body = listed.json() => body.ok()?,
-        _ = signal.cancelled() => return None,
+        body = listed.json() => body.map_err(|error| error.to_string())?,
+        _ = signal.cancelled() => return Err("stopped".into()),
     };
     let model = body["data"]
-        .as_array()?
-        .iter()
+        .as_array()
+        .into_iter()
+        .flatten()
         .filter_map(|row| Some((row["id"].as_str()?.to_string(), row["created"].as_f64().unwrap_or(0.))))
         .filter(|(id, _)| id.contains("audio") && !["realtime", "tts", "transcribe", "mini-tts"].iter().any(|word| id.contains(word)))
-        .max_by(|a, b| a.1.total_cmp(&b.1))?
-        .0;
-    Some(ChatListener { base: "https://api.openai.com/v1".into(), key: Some(key.into()), model, client })
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(model, _)| model);
+    Ok(model.map(|model| ChatListener { base: "https://api.openai.com/v1".into(), key: Some(key.into()), model, client }))
 }
 
 /// Whether a path is a file a listener can be given.

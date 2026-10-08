@@ -3,7 +3,10 @@
 //! loudness it ends at), and a round taken back (what Live wouldn't undo removed only when it's a device the round
 //! itself made, known by Live's identity for it). Rendering does these in Live; a test does them on a pretend Set.
 
-use super::checklist::{Checklist, Verdict};
+use super::{
+    checklist::{Checklist, Verdict},
+    listener::{Choice, Opinion},
+};
 use async_trait::async_trait;
 use kumi_common::js::number::to_string;
 use std::path::PathBuf;
@@ -51,6 +54,8 @@ pub trait RoundHost {
     async fn chain(&self) -> Result<Vec<Placed>, String>;
     /// Whether Esc (or Live going away) has stopped the round.
     fn stopped(&self) -> bool;
+    /// Whether a limiter after the gain rebalancing turns holds the peaks (then they don't move with it).
+    async fn limited(&self) -> bool;
     /// Deletes a device; whether it went.
     async fn delete(&self, reference: &str) -> bool;
 }
@@ -81,6 +86,88 @@ pub fn matched(before: Option<f64>, after: Option<f64>) -> (f64, f64) {
         _ => 0.,
     };
     (louder.min(0.), -louder.max(0.))
+}
+
+/// What a heard change comes to: the verdict (with what was taken back, when it wasn't kept), what rebalancing did,
+/// the whole stretch and the excerpt as things stand in Live when it was kept, the listens it took, and whether Esc
+/// stopped it.
+#[derive(Debug, Clone)]
+pub struct Decided {
+    pub verdict: Verdict,
+    pub rebalanced: Option<String>,
+    pub whole: Vec<Option<f64>>,
+    pub excerpt: Listen,
+    pub listens: u32,
+    pub stopped: bool,
+}
+
+/// A round's decision once its change is heard (`after`, on the excerpt whose "before" read `before`):
+/// - the whole stretch predicted from what the excerpt moved;
+/// - peaks and clipping judged at the loudness rebalancing will bring back;
+/// - the listening model's veto when it hears an artifact both ways (`opinion`);
+/// - the cost of the devices the change made (`made`);
+/// - rebalancing, and the round judged again as it ends up.
+///
+/// Not kept, Kumi's changes since `checkpoint` are taken back, and the verdict says what went.
+#[allow(clippy::too_many_arguments)]
+pub async fn decide(
+    host: &dyn RoundHost,
+    checklist: &Checklist,
+    target: Option<usize>,
+    whole: &[Option<f64>],
+    before: &[Option<f64>],
+    after: Listen,
+    opinion: Option<&Opinion>,
+    made: usize,
+    checkpoint: &[String],
+) -> Decided {
+    let predicted = predict(checklist, whole, before, &after.values);
+    let gain = checklist.rebalance(whole, &predicted);
+    // Rebalancing will bring loudness back by `gain`: peaks move with it, unless a limiter after the gain holds them.
+    let level = match gain {
+        Some(gain) if !host.limited().await => gain,
+        _ => 0.,
+    };
+    let mut verdict = checklist.verdict(target, whole, &checklist.at_level(whole, &predicted, level));
+    if let Some(opinion) = opinion {
+        let artifacts: Vec<&str> = opinion
+            .new_problems
+            .iter()
+            .map(String::as_str)
+            .filter(|problem| ["distorted", "pumping", "clipped"].contains(problem))
+            .collect();
+        if verdict.kept && opinion.closer == Some(Choice::Before) && !artifacts.is_empty() {
+            verdict.kept = false;
+            verdict.why = format!("the listening model heard it {} both ways", artifacts.join(" and "));
+        }
+    }
+    let target_id = target.map(|index| checklist.items[index].id.clone());
+    if let (true, Some(why)) = (verdict.kept, processing(&verdict, target_id.as_deref(), made)) {
+        verdict.kept = false;
+        verdict.why = why;
+    }
+    let mut decided = Decided { verdict, rebalanced: None, whole: predicted, excerpt: after, listens: 0, stopped: false };
+    if let (true, Some(gain)) = (decided.verdict.kept, gain) {
+        let settled = rebalance(host, checklist, target, whole, decided.whole, decided.excerpt, gain, decided.verdict).await;
+        decided = Decided {
+            verdict: settled.verdict,
+            rebalanced: settled.rebalanced,
+            whole: settled.whole,
+            excerpt: settled.excerpt,
+            listens: settled.listens,
+            stopped: settled.stopped,
+        };
+        if let (true, Some(why)) = (decided.verdict.kept, processing(&decided.verdict, target_id.as_deref(), made)) {
+            decided.verdict.kept = false;
+            decided.verdict.why = why;
+        }
+    }
+    if !decided.verdict.kept {
+        // Kumi's undo takes the round's changes back (a rebalance's too), newest first.
+        let words = take_back(host, checkpoint).await;
+        decided.verdict.why.push_str(&format!("; {words}"));
+    }
+    decided
 }
 
 /// A kept change, rebalanced: what the round's verdict ends as, what rebalancing did, the whole stretch and the

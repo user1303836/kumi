@@ -11,7 +11,7 @@ use crate::listening::{
     checklist::{note_stretch, worst_stretch, Checklist, Explicit, Goal, Profile, Quantity, Row},
     detect::{self, Problem, ProblemKind},
     judging::{self, Listen, Placed, RoundHost, Unheard},
-    listener::{compare, Choice, Listener, Opinion, Take},
+    listener::{compare, Listener, Opinion, Take},
     measure::{measure_file, Heard, MeasureOptions},
     round::{Next, Round, RoundKind},
 };
@@ -346,74 +346,43 @@ impl Rendering {
                 Err(why) => return Ok(Err(why)),
             },
         };
-        let (after, predicted, gain, target_label) = {
+        let (after, target_label, aim) = {
             let mut guard = self.judge.borrow_mut();
             let run = guard.as_mut().unwrap();
             run.round += 1;
             // Silence after the change reads nothing: every reading lost, so it's taken back.
             let after = heard.read(&run.checklist);
-            // The whole stretch as it would be now: what the excerpt moved, moved there too.
-            let predicted = judging::predict(&run.checklist, &run.whole, &before.values, &after);
-            let gain = run.checklist.rebalance(&run.whole, &predicted);
-            (after, predicted, gain, target.map(|index| run.checklist.items[index].label.clone()))
-        };
-        // Rebalancing will bring loudness back by `gain`: peaks move with it, unless a limiter after the gain holds them.
-        let level = match gain {
-            Some(gain) => match self.find_gain_stage(signal.clone()).await {
-                Ok(Some(stage)) if stage.limited => 0.,
-                _ => gain,
-            },
-            None => 0.,
-        };
-        let mut verdict = {
-            let run = self.judge.borrow();
-            let run = run.as_ref().unwrap();
-            run.checklist.verdict(target, &run.whole, &run.checklist.at_level(&run.whole, &predicted, level))
+            let aim = match target.map(|index| &run.checklist.items[index]) {
+                Some(item) => format!("{} toward {}, with nothing else getting worse", item.label, item.wanted()),
+                None => "a better-sounding mix with nothing getting worse".into(),
+            };
+            (after, target.map(|index| run.checklist.items[index].label.clone()), aim)
         };
         // The listening model hears the change too: advice, unless it hears an obvious artifact both ways.
-        let aim = match (&target_label, target.map(|index| self.judge.borrow().as_ref().unwrap().checklist.items[index].wanted())) {
-            (Some(label), Some(wanted)) => format!("{label} toward {wanted}, with nothing else getting worse"),
-            _ => "a better-sounding mix with nothing getting worse".into(),
-        };
         let heard_by = self.listen_to_change(&before, &heard, &aim, signal.clone()).await;
         let listener = heard_by.as_ref().map(|(name, opinion)| opinion.line(name));
-        if let Some((_, opinion)) = &heard_by {
-            let artifacts: Vec<&String> =
-                opinion.new_problems.iter().filter(|problem| ["distorted", "pumping", "clipped"].contains(&problem.as_str())).collect();
-            if verdict.kept && opinion.closer == Some(Choice::Before) && !artifacts.is_empty() {
-                verdict.kept = false;
-                verdict.why = format!(
-                    "the listening model heard it {} both ways",
-                    artifacts.iter().map(|problem| problem.as_str()).collect::<Vec<_>>().join(" and ")
-                );
-            }
-        }
-        // A cost for processing: each device the change made (on any track) has to earn half a step on its target.
-        let made = self.created_by(&changes);
-        let target_id = target.map(|index| self.judge.borrow().as_ref().unwrap().checklist.items[index].id.clone());
-        if let (true, Some(why)) = (verdict.kept, judging::processing(&verdict, target_id.as_deref(), made)) {
-            verdict.kept = false;
-            verdict.why = why;
-        }
         let excerpt = Listen { values: after, loudness: heard.main.measures.integrated, file: heard.file.clone(), start: heard.start };
         let host = InLive { rendering: self, track: track.clone(), focus: focus.clone(), window, signal: signal.clone() };
-        let (mut verdict, rebalanced, whole_now, excerpt, stopped) = match (verdict.kept, gain) {
-            (true, Some(gain)) => {
-                let (checklist, whole) = {
-                    let run = self.judge.borrow();
-                    let run = run.as_ref().unwrap();
-                    (run.checklist.clone(), run.whole.clone())
-                };
-                let mut settled = judging::rebalance(&host, &checklist, target, &whole, predicted, excerpt, gain, verdict).await;
-                self.judge.borrow_mut().as_mut().unwrap().listens += settled.listens;
-                if let (true, Some(why)) = (settled.verdict.kept, judging::processing(&settled.verdict, target_id.as_deref(), made)) {
-                    settled.verdict.kept = false;
-                    settled.verdict.why = why;
-                }
-                (settled.verdict, settled.rebalanced, settled.whole, settled.excerpt, settled.stopped)
-            }
-            _ => (verdict, None, predicted, excerpt, false),
+        let (checklist, whole) = {
+            let run = self.judge.borrow();
+            let run = run.as_ref().unwrap();
+            (run.checklist.clone(), run.whole.clone())
         };
+        let made = self.created_by(&changes);
+        let decided = judging::decide(
+            &host,
+            &checklist,
+            target,
+            &whole,
+            &before.values,
+            excerpt,
+            heard_by.as_ref().map(|(_, opinion)| opinion),
+            made,
+            &checkpoint,
+        )
+        .await;
+        self.judge.borrow_mut().as_mut().unwrap().listens += decided.listens;
+        let judging::Decided { verdict, rebalanced, whole: whole_now, excerpt, stopped, .. } = decided;
         if verdict.kept {
             let file = self.keep_file(&excerpt.file).await;
             let mut guard = self.judge.borrow_mut();
@@ -423,10 +392,6 @@ impl Rendering {
             let state = run.state;
             run.excerpts.retain(|excerpt| excerpt.state == state);
             run.excerpts.push(Excerpt { window, state, values: excerpt.values, file, start: excerpt.start, loudness: excerpt.loudness });
-        } else {
-            // Kumi's undo takes the round's changes back (a rebalance's too), newest first.
-            let words = judging::take_back(&host, &checkpoint).await;
-            verdict.why.push_str(&format!("; {words}"));
         }
         let ids = self.applied_ids();
         let next_window = {
@@ -608,8 +573,8 @@ impl Rendering {
         }
     }
 
-    /// The listening model: one found is kept; none found is believed for ten minutes (a lookup that failed or was
-    /// stopped may find one next time), and a lookup cut short by Esc isn't believed at all.
+    /// The listening model: one found is kept; a definite none (no provider has one) is believed for ten minutes, to
+    /// notice a key added since; a lookup that failed (the network, the service, Esc) isn't kept at all.
     async fn listener(&self, signal: Signal) -> Option<Rc<dyn Listener>> {
         if let Some((known, at)) = self.listener.borrow().clone() {
             if known.is_some() || now_ms() - at < 600_000 {
@@ -617,13 +582,16 @@ impl Rendering {
             }
         }
         let found = match &self.listener_source {
-            Some(source) => source(signal.clone()).await,
-            None => None,
+            Some(source) => source(signal).await,
+            None => Ok(None),
         };
-        if found.is_some() || signal.check().is_ok() {
-            *self.listener.borrow_mut() = Some((found.clone(), now_ms()));
+        match found {
+            Ok(found) => {
+                *self.listener.borrow_mut() = Some((found.clone(), now_ms()));
+                found
+            }
+            Err(_) => None,
         }
-        found
     }
 
     /// What the listening model makes of the change: the excerpt before and after, level-matched, both ways.
@@ -635,12 +603,9 @@ impl Rendering {
         let skip = ((seconds - 10.) / 2.).max(0.);
         // Level-matched by turning the louder take down: raising the quieter one could clip it, which the model would
         // hear as the change's fault.
-        let louder = match (before.loudness, after.main.measures.integrated) {
-            (Some(before), Some(after)) => after - before,
-            _ => 0.,
-        };
-        let first = Take { file: before.file.clone(), start: before.start + skip, seconds: seconds.min(10.), gain: louder.min(0.) };
-        let second = Take { file: after.file.clone(), start: after.start + skip, seconds: seconds.min(10.), gain: -louder.max(0.) };
+        let (first_gain, second_gain) = judging::matched(before.loudness, after.main.measures.integrated);
+        let first = Take { file: before.file.clone(), start: before.start + skip, seconds: seconds.min(10.), gain: first_gain };
+        let second = Take { file: after.file.clone(), start: after.start + skip, seconds: seconds.min(10.), gain: second_gain };
         match compare(listener.as_ref(), &first, &second, aim, signal).await {
             Ok(opinion) => Some((listener.name(), opinion)),
             Err(why) => Some((listener.name(), Opinion { closer: None, new_problems: vec![], said: why })),
@@ -1102,6 +1067,9 @@ impl RoundHost for InLive<'_> {
     }
     fn stopped(&self) -> bool {
         self.signal.check().is_err()
+    }
+    async fn limited(&self) -> bool {
+        matches!(self.rendering.find_gain_stage(self.signal.clone()).await, Ok(Some(stage)) if stage.limited)
     }
     async fn chain(&self) -> Result<Vec<Placed>, String> {
         self.rendering.chain_now(self.track.as_deref(), self.rendering.cleanup()).await.map_err(|error| head(&error.to_string(), 120))

@@ -160,21 +160,22 @@ async fn run() -> Result<i32, RuntimeError> {
             let (store, env) = (store.clone(), env.clone());
             async move {
                 if listening_off(&env) {
-                    return None;
+                    return Ok(None);
                 }
                 if let Some(listener) = listener_from_env(&env) {
-                    return Some(Rc::new(listener) as Rc<dyn Listener>);
+                    return Ok(Some(Rc::new(listener) as Rc<dyn Listener>));
                 }
-                let key = api_key_for(ProviderId::Openai, store.as_ref(), Some(&env)).await.ok().flatten()?.key;
-                openai_listener(&key, signal).await.map(|listener| Rc::new(listener) as Rc<dyn Listener>)
+                let Some(key) = api_key_for(ProviderId::Openai, store.as_ref(), Some(&env)).await.ok().flatten() else { return Ok(None) };
+                Ok(openai_listener(&key.key, signal).await?.map(|listener| Rc::new(listener) as Rc<dyn Listener>))
             }
             .boxed_local()
         }) as ListenerSource
     });
     if let Some(find) = &listener {
         match find(Signal::new()).await {
-            Some(found) => println!("Listening model: {}", found.name()),
-            None => println!("Listening model: none found (no OpenAI API key, and KUMI_LISTENER isn't set)"),
+            Ok(Some(found)) => println!("Listening model: {}", found.name()),
+            Ok(None) => println!("Listening model: none found (no OpenAI API key, and KUMI_LISTENER isn't set)"),
+            Err(why) => println!("Listening model: couldn't look ({why})"),
         }
     }
     let folder = tempfile::Builder::new().prefix("kumi-loop-live-").tempdir().map_err(|error| RuntimeError::plain(error.to_string()))?;
