@@ -4,7 +4,7 @@
 use kumi_runtime::listening::{
     checklist::{Checklist, Goal, Profile},
     measure::{measure_samples, Heard},
-    sound::{against_key, bandwidth, ducking, harmonics, interlock, kit, problems, tail, width},
+    sound::{against_key, bandwidth, ducking, harmonics, interlock, key_classes, kit, problems, tail, width},
 };
 use std::f64::consts::PI;
 
@@ -175,7 +175,7 @@ fn a_bass_note_off_the_key_is_heard_and_a_sound_is_judged_against_a_reference_so
     let line = |hz: [f64; 4]| -> Vec<f64> {
         (0..(4. * RATE) as usize).map(|n| n as f64 / RATE).map(|t| 0.5 * (2. * PI * hz[((t / 1.) as usize).min(3)] * t).sin()).collect()
     };
-    let major = [0u8, 2, 4, 5, 7, 9, 11];
+    let major = key_classes("C major").unwrap();
     let (_, in_key) = against_key(&mono(&line([65.41, 82.41, 98., 65.41])), &major).unwrap();
     let (_, off_key) = against_key(&mono(&line([65.41, 82.41, 92.5, 65.41])), &major).unwrap();
     assert!(in_key < 10. && off_key > 15., "{in_key}% and {off_key}% off the key");
@@ -189,5 +189,26 @@ fn a_bass_note_off_the_key_is_heard_and_a_sound_is_judged_against_a_reference_so
     let values = checklist.read(&sound, None);
     let at = checklist.items.iter().position(|item| item.id == "pitch drop").expect("a pitch drop item");
     assert!(checklist.items[at].gap(values[at]) > 3., "{:?} reads {:?}", checklist.items[at], values[at]);
-    assert_eq!(checklist.next(&values).map(|index| checklist.items[index].id.as_str()).is_some(), true);
+    assert!(checklist.next(&values).is_some());
+}
+
+#[test]
+fn keys_read_as_said() {
+    let sorted = |key: &str| {
+        key_classes(key).map(|mut classes| {
+            classes.sort_unstable();
+            classes
+        })
+    };
+    assert_eq!(sorted("Bb major"), Some(vec![0, 2, 3, 5, 7, 9, 10]));
+    for minor in ["F# minor", "F#m", "f#min", "F♯ Min", "Gb minor"] {
+        assert_eq!(sorted(minor), Some(vec![1, 2, 4, 6, 8, 9, 11]), "{minor}");
+    }
+    assert_eq!(sorted("E♭m"), sorted("Eb minor"));
+    // D dorian has C major's notes; A aeolian is A minor.
+    assert_eq!(sorted("D dorian"), sorted("C"));
+    assert_eq!(sorted("A aeolian"), sorted("Am"));
+    for not_a_key in ["", "H minor", "apple", "C harmonic minor"] {
+        assert_eq!(key_classes(not_a_key), None, "{not_a_key}");
+    }
 }

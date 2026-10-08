@@ -776,7 +776,7 @@ impl Rendering {
     }
 
     /// A track's name, from its ref or its name.
-    async fn track_name(&self, named: &str, signal: Signal) -> Option<String> {
+    pub(super) async fn track_name(&self, named: &str, signal: Signal) -> Option<String> {
         let long = self.connection().references.borrow().lengthen(&json!({"trackRef":named}));
         let long = long["trackRef"].as_str().unwrap_or(named).to_owned();
         let tracks = self.rows("track", json!({"fields":["name"]}), signal).await.ok()?;

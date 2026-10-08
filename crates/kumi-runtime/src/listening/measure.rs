@@ -655,10 +655,13 @@ impl Meter {
                 self.low_sums[2] += m;
                 self.low_sums[3] += s;
             }
-            if (30. ..250.).contains(&hz) && k + 1 < self.low_mid.len() && m > self.low_mid[k - 1] && m >= self.low_mid[k + 1] {
-                if strongest.is_none_or(|(_, power)| m > power) {
-                    strongest = Some((k, m));
-                }
+            if (30. ..250.).contains(&hz)
+                && k + 1 < self.low_mid.len()
+                && m > self.low_mid[k - 1]
+                && m >= self.low_mid[k + 1]
+                && strongest.is_none_or(|(_, power)| m > power)
+            {
+                strongest = Some((k, m));
             }
         }
         let note = strongest.map(|(k, power)| {

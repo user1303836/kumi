@@ -647,12 +647,7 @@ impl Rendering {
         match done {
             Some(done) if done.get("ok") == Some(&Value::Bool(true)) => Ok(Ok(done.get("result").cloned().unwrap_or(Value::Null))),
             Some(done) => Ok(Err(head(
-                &done
-                    .get("error")
-                    .and_then(|error| error.get("message"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("Live refused the copies")
-                    .to_string(),
+                &done.get("error").and_then(|error| error.get("message")).and_then(Value::as_str).unwrap_or("Live refused the copies"),
                 300,
             ))),
             None => Ok(Err("Live refused the copies.".into())),
@@ -660,7 +655,7 @@ impl Rendering {
     }
 
     /// Several tracks heard quietly in one pass over `window`, each measured.
-    async fn hear_tracks(
+    pub(super) async fn hear_tracks(
         self: &Rc<Self>,
         names: &[String],
         window: Window,

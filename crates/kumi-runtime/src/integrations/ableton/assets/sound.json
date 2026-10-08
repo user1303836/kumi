@@ -1,0 +1,15 @@
+{
+  "description": "Measure sounds in Live: the tracks heard quietly side by side in one pass (8 bars from from_beat unless beats says). Each sound gets its attack, decay (and how it sits against a beat), sustain, brightness, noisiness, pitch drop (an 808's or a kick's), modulation rate (and the beats a cycle), warmth (2nd and 3rd harmonics, even against odd), width, top (bandwidth), noise floor, tail (a dry hit falls far, a reverberant one hangs on) and crackle, plus its problems: clicks at note edges, DC, a note jumping out. Several tracks are judged as a kit too: a piece whose noise floor, top or grit sits apart, pieces piling up or a gap between them, decays ringing into the next hits, and pieces that sound the same. With against (a kick, say), how far each track ducks under it and how fast it comes back, and whether their hits interlock or collide. With key, how far each track's notes sit from it. To move a sound toward a reference sound, judge it with goal.sound.",
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["tracks"],
+    "properties": {
+      "tracks": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string", "minLength": 1}, "description": "The tracks to measure (names or refs)"},
+      "against": {"type": "string", "minLength": 1, "description": "A track the others duck under or play against (its name or ref)"},
+      "key": {"type": "string", "minLength": 1, "maxLength": 40, "description": "The song's key, like \"F# minor\", \"Bb major\" or \"D dorian\""},
+      "from_beat": {"type": "number", "minimum": 0, "description": "Where to listen from, in beats"},
+      "beats": {"type": "number", "exclusiveMinimum": 0, "description": "How long, in beats (8 bars when left out)"}
+    }
+  }
+}

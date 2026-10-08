@@ -125,10 +125,10 @@ impl Round {
             lines.push("  every item is within tolerance".into());
         } else if let Some(next) = &self.next {
             lines.push(format!(
-                "  next: {} ({}{}, wants {}){}",
+                "  next: {} ({}{} steps off, wants {}){}",
                 next.label.to_lowercase(),
                 next.now.map(|now| format!("{} now, ", number(now))).unwrap_or_default(),
-                format!("{} steps off", number(next.gap)),
+                number(next.gap),
                 next.wanted,
                 next.fix.as_ref().map(|fix| format!(": {fix}")).unwrap_or_default()
             ));

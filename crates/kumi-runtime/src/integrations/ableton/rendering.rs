@@ -8,6 +8,7 @@ mod judge;
 mod listen;
 mod pass;
 mod rig;
+mod sound;
 mod tune;
 use super::{
     audition::{restore_store, RestoreStore},
@@ -92,6 +93,7 @@ pub struct Rendering {
 pub use form::FormRequest;
 pub use groove::GrooveRequest;
 pub use judge::{GoalRequest, JudgeRequest};
+pub use sound::SoundRequest;
 pub use tune::{TuneHow, TuneRequest};
 impl Rendering {
     /// Kumi starts playing the Set for itself, Main down: what Live plays meanwhile isn't heard by the producer. True

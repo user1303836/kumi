@@ -349,3 +349,40 @@ fn number(value: f64) -> String {
 fn round1(value: f64) -> f64 {
     (value * 10.).round() / 10.
 }
+
+/// A key in words ("F# minor", "Bbm", "C", "D dorian") as its notes' pitch classes (0 is C): the major scale, the
+/// natural minor or a mode. None when it doesn't read as a key.
+pub fn key_classes(key: &str) -> Option<Vec<u8>> {
+    const MAJOR: [i32; 7] = [0, 2, 4, 5, 7, 9, 11];
+    let words: Vec<String> = key.split_whitespace().map(|word| word.to_lowercase()).collect();
+    let mut letters = words.first()?.chars().peekable();
+    let root: i32 = match letters.next()? {
+        'c' => 0,
+        'd' => 2,
+        'e' => 4,
+        'f' => 5,
+        'g' => 7,
+        'a' => 9,
+        'b' => 11,
+        _ => return None,
+    };
+    let mut shift = 0;
+    while let Some(accidental) = letters.next_if(|c| matches!(c, '#' | '♯' | 'b' | '♭')) {
+        shift += if matches!(accidental, '#' | '♯') { 1 } else { -1 };
+    }
+    // What follows the note, joined or as the next word: nothing or "maj" is major, "m" or "min" minor, or a mode.
+    let rest: String = letters.collect();
+    let quality = if rest.is_empty() { words.get(1).cloned().unwrap_or_default() } else { rest };
+    let mode = match quality.as_str() {
+        "" => 0,
+        q if q.starts_with("maj") || q.starts_with("ion") => 0,
+        q if q.starts_with("dor") => 1,
+        q if q.starts_with("phr") => 2,
+        q if q.starts_with("lyd") => 3,
+        q if q.starts_with("mix") => 4,
+        q if q.starts_with('m') || q.starts_with("aeo") => 5,
+        q if q.starts_with("loc") => 6,
+        _ => return None,
+    };
+    Some((0..7).map(|step| (root + shift + MAJOR[(mode + step) % 7] - MAJOR[mode]).rem_euclid(12) as u8).collect())
+}

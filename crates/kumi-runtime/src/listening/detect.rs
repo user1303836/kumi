@@ -150,7 +150,7 @@ pub fn harshness(heard: &Heard) -> Vec<Problem> {
     let share = |bin: usize| hits[bin].len() as f64 / active.len() as f64;
     let mut tops: Vec<usize> = (0..FINE_BINS).filter(|bin| share(*bin) >= 0.03 && hits[*bin].len() >= 3).collect();
     tops.sort_by(|a, b| share(*b).total_cmp(&share(*a)));
-    let mut taken = vec![false; FINE_BINS];
+    let mut taken = [false; FINE_BINS];
     let mut problems = vec![];
     for top in tops {
         if taken[top] {

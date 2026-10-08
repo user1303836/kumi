@@ -274,7 +274,7 @@ fn plugphasor(tempo: f64, rate: f64, stopped: usize, beat: f64, frames: usize, j
         let now = beat + moved + (frame as f64 - stopped as f64) / per_beat;
         if frame % 64 == 0 {
             let into = now.rem_euclid(1.0);
-            held = (playing && frame > stopped && into * per_beat < 1.0).then(|| (2.0 + into) as f32);
+            held = (playing && frame > stopped && into * per_beat < 1.0).then_some((2.0 + into) as f32);
         }
         let sync = if playing { held.unwrap_or((1.0 + now.rem_euclid(1.0)) as f32) } else { 1.0 };
         let sound = if playing { (frame % 100) as f32 / 1000.0 } else { 0.0 };

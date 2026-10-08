@@ -392,6 +392,17 @@ contrast, an energy plateau, odd phrase lengths, a drop that arrives unprepared,
 a loop left unchanged for 32 bars or more. Against a reference song, it says how
 the two forms differ.
 
+**A sound** is measured beside the others in one quiet pass: its attack, its
+decay against the beat, brightness, an 808's or a kick's pitch drop, a wobble's
+rate in beats, warmth (2nd and 3rd harmonics), width, top, noise floor, how long
+its tail hangs on, and crackle. Kumi points out clicks at note edges, DC and
+notes that jump out. A kit is judged as one: a piece whose noise floor, top or
+grit sits apart, pieces that pile up or leave a gap, decays ringing into the next
+hit. Against a kick, it says how far each part ducks and how fast it comes back,
+and whether their hits interlock or collide; with the key, how far each part's
+notes sit from it. Ask for a sound like a reference sound and Kumi closes those
+measured gaps round by round, keeping only what got closer.
+
 `/loop` and what to reach works in rounds until it's met: one change, judged,
 then the next target. Kumi decides when it stops, not the model: every item
 within tolerance, changes no longer helping, or 16 rounds or 45 minutes. Its

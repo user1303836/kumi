@@ -1,5 +1,5 @@
 //! The judge tool: the model's side of a judged run (a goal in, a round's log out).
-use super::rendering::{FormRequest, GoalRequest, GrooveRequest, JudgeRequest, TuneHow, TuneRequest};
+use super::rendering::{FormRequest, GoalRequest, GrooveRequest, JudgeRequest, SoundRequest, TuneHow, TuneRequest};
 use crate::{
     core::contracts::JsonObject,
     listening::{
@@ -20,6 +20,36 @@ pub const TUNE_TOOL: &str = "tune";
 static TUNE: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("assets/tune.json")).unwrap());
 pub static TUNE_DESCRIPTION: LazyLock<String> = LazyLock::new(|| TUNE["description"].as_str().unwrap().into());
 pub static TUNE_SCHEMA: LazyLock<JsonObject> = LazyLock::new(|| TUNE["schema"].as_object().unwrap().clone());
+
+pub const SOUND_TOOL: &str = "sound";
+static SOUND: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("assets/sound.json")).unwrap());
+pub static SOUND_DESCRIPTION: LazyLock<String> = LazyLock::new(|| SOUND["description"].as_str().unwrap().into());
+pub static SOUND_SCHEMA: LazyLock<JsonObject> = LazyLock::new(|| SOUND["schema"].as_object().unwrap().clone());
+
+/// The sound tool's input as a request, or what's wrong with it.
+pub fn sound_request(input: &JsonObject) -> Result<SoundRequest, String> {
+    let text = |key: &str| input.get(key).and_then(Value::as_str).map(trim).filter(|s| !s.is_empty()).map(str::to_owned);
+    let tracks: Vec<String> = input
+        .get("tracks")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect();
+    if tracks.is_empty() {
+        return Err("Name the tracks to measure (tracks).".into());
+    }
+    Ok(SoundRequest {
+        tracks,
+        against: text("against"),
+        key: text("key"),
+        from_beat: input.get("from_beat").and_then(Value::as_f64).filter(|v| v.is_finite() && *v >= 0.),
+        beats: input.get("beats").and_then(Value::as_f64).filter(|v| v.is_finite() && *v > 0.),
+    })
+}
 
 pub const FORM_TOOL: &str = "form";
 static FORM: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("assets/form.json")).unwrap());

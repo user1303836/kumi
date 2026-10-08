@@ -71,7 +71,7 @@ async fn gemini_listens_with_the_newest_model_that_takes_what_its_given_and_answ
             assert!(!listener.hears_width(), "Gemini hears a mono downmix: no questions about width or air");
             let heard = listener.ask(b"RIFF....WAVE", "punch toward 10 dB", Signal::new()).await.unwrap();
             assert_eq!((heard.closer.as_str(), heard.first.as_slice()), ("second", ["muddy".to_string()].as_slice()));
-            let requests = seen.borrow();
+            let requests = seen.borrow().clone();
             let asked = requests.iter().find(|request| request.starts_with("POST")).unwrap();
             assert!(asked.starts_with("POST /v1beta/models/gemini-2.5-flash:generateContent"), "{}", &asked[..80]);
             assert!(
