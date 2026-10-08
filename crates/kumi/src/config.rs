@@ -121,6 +121,7 @@ location!(load_memory_file, "KUMI_MEMORY_FILE", "memory.json");
 location!(load_techniques_file, "KUMI_TECHNIQUES_FILE", "techniques.json");
 location!(load_restore_file, "KUMI_RESTORE_FILE", "audition-restore.json");
 location!(load_goals_dir, "KUMI_GOALS_DIR", "goals");
+location!(load_references_dir, "KUMI_REFERENCES_DIR", "references");
 location!(load_playbook_file, "KUMI_PLAYBOOK_FILE", "playbook.json");
 location!(load_gaps_file, "KUMI_GAPS_FILE", "gaps.jsonl");
 location!(load_timings_file, "KUMI_TIMINGS_FILE", "timings.jsonl");

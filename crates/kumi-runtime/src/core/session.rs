@@ -87,6 +87,8 @@ pub struct SessionOptions {
     pub listen: bool,
     pub recipes: Option<Rc<dyn RecipeStore>>,
     pub watch: Option<VideoDirectories>,
+    /// Where measured references are kept (the reference tool is offered with listening when it's set).
+    pub references: Option<Rc<crate::references::store::ReferenceStore>>,
     pub web: bool,
     pub web_client: Option<Rc<dyn WebClient>>,
     pub techniques: Option<Rc<dyn TechniqueStore>>,
@@ -130,6 +132,7 @@ impl SessionOptions {
             listen: false,
             recipes: None,
             watch: None,
+            references: None,
             web: false,
             web_client: None,
             techniques: None,
@@ -469,6 +472,30 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             })
         } else {
             vec![]
+        };
+        // References are measured from audio fetched with the same programs videos use.
+        let listening = match (&options.references, options.listen) {
+            (Some(store), true) => {
+                let mut listening = listening;
+                let programs = crate::video::programs::ProgramOptions {
+                    tools_dir: options.watch.as_ref().map(|dirs| dirs.tools_dir.clone()).unwrap_or_default(),
+                    ..Default::default()
+                };
+                let resolve = weak.clone();
+                let clips: crate::audio::tools::ResolveAudio = Rc::new(move |named, signal| {
+                    let integration = resolve.upgrade().and_then(|i| i.state.borrow().integration.clone());
+                    async move {
+                        match integration {
+                            Some(i) if i.has_audio_file() => i.audio_file(&named, signal).await,
+                            _ => Ok(None),
+                        }
+                    }
+                    .boxed_local()
+                });
+                listening.extend(crate::references::tool::reference_tools(store.clone(), programs, Some(clips)));
+                listening
+            }
+            _ => listening,
         };
         let answers = Rc::new(Cell::new(0));
         let watching = options
@@ -907,7 +934,7 @@ impl Session {
                 .tools
                 .iter()
                 .filter(|tool| self.0.shelf.is_empty() || tool.name() != FIND_SOUNDS_TOOL)
-                .map(|tool| self.with_taste(self.with_technique(tool.clone())))
+                .map(|tool| self.with_loop(self.with_taste(self.with_technique(tool.clone()))))
                 .collect();
             if let Some(notes) = &self.0.notes {
                 tools.extend(notes.tools.clone());
@@ -1402,6 +1429,14 @@ impl Session {
         result
     }
     /// Kumi's undo tool, watched for the producer's undos it makes.
+    /// judge and tune, held to the loop: once it's over, only the run's end (judge done) goes through.
+    fn with_loop(&self, tool: Rc<dyn KernelTool>) -> Rc<dyn KernelTool> {
+        if matches!(tool.name(), "judge" | "tune") {
+            Rc::new(LoopGuard { tool, session: Rc::downgrade(&self.0) })
+        } else {
+            tool
+        }
+    }
     fn with_taste(&self, tool: Rc<dyn KernelTool>) -> Rc<dyn KernelTool> {
         match &self.0.taste {
             Some(taste) if tool.name() == "undo_change" => taste.watch_undo(tool),
@@ -1416,6 +1451,37 @@ impl Session {
                 learned: learned.clone(),
             }),
             _ => tool,
+        }
+    }
+}
+
+struct LoopGuard {
+    tool: Rc<dyn KernelTool>,
+    session: std::rc::Weak<Inner>,
+}
+#[async_trait(?Send)]
+impl KernelTool for LoopGuard {
+    fn name(&self) -> &str {
+        self.tool.name()
+    }
+    fn description(&self) -> &str {
+        self.tool.description()
+    }
+    fn input_schema(&self) -> JsonObject {
+        self.tool.input_schema()
+    }
+    async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
+        let ending = self.tool.name() == "judge" && input.get("done") == Some(&Value::Bool(true));
+        let starting = input.get("goal").is_some();
+        let over = self.session.upgrade().and_then(|inner| {
+            let s = inner.state.borrow();
+            s.looping.as_ref().and_then(|run| run.borrow().over())
+        });
+        match over {
+            Some(why) if !ending && !starting => Ok(ToolResult::error(format!(
+                "Kumi's loop is over: {why}. End the run with judge done: true (one last listen to the whole stretch), then tell the producer what changed and what's still off."
+            ))),
+            _ => self.tool.execute(input, signal).await,
         }
     }
 }

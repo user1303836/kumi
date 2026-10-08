@@ -305,13 +305,11 @@ impl Rendering {
         let mut values: Vec<(&DeviceKnob, f64)> = vec![];
         let mut said = vec![];
         for (band, slot) in bands.iter().zip(&unused) {
-            let (Some(on), Some(kind), Some(hz), Some(db), Some(q)) = (
-                knob(*slot, "Filter On"),
-                knob(*slot, "Filter Type"),
-                knob(*slot, "Frequency"),
-                knob(*slot, "Gain"),
-                knob(*slot, "Resonance"),
-            ) else {
+            // Live 12 calls a band's width "Q" ("1 Q A"); older Live, "Resonance".
+            let width = knob(*slot, "Q").or_else(|| knob(*slot, "Resonance"));
+            let (Some(on), Some(kind), Some(hz), Some(db), Some(q)) =
+                (knob(*slot, "Filter On"), knob(*slot, "Filter Type"), knob(*slot, "Frequency"), knob(*slot, "Gain"), width)
+            else {
                 return Ok(Err("Kumi couldn't find this EQ Eight's band knobs.".into()));
             };
             let shape = match band.shape {

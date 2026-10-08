@@ -48,6 +48,8 @@ pub struct AbletonOptions {
     pub on_judge: Option<Rc<dyn Fn(crate::listening::round::Round)>>,
     /// Finds an audio-capable model among the producer's providers to listen beside the meters (asked once).
     pub listener: Option<ListenerSource>,
+    /// Measured references the judge can work toward by name.
+    pub references: Option<Rc<crate::references::store::ReferenceStore>>,
     pub ears: Option<EarsSetup>,
     pub hands: Option<HandsSetup>,
     pub fast: Option<bool>,
@@ -80,6 +82,7 @@ impl AbletonOptions {
             on_audition: None,
             on_judge: None,
             listener: None,
+            references: None,
             ears: None,
             hands: None,
             fast: None,

@@ -8,7 +8,7 @@ use super::super::{connection::NO_CURRENT_LIVE, display::parse_display};
 use super::rig::Window;
 use super::*;
 use crate::listening::{
-    checklist::{worst_stretch, Checklist, Explicit, Goal, Profile, Quantity, Row},
+    checklist::{note_stretch, worst_stretch, Checklist, Explicit, Goal, Profile, Quantity, Row},
     detect::{self, Problem, ProblemKind},
     listener::{compare, Choice, Listener, Opinion, Take},
     measure::{measure_file, Heard, MeasureOptions},
@@ -240,6 +240,7 @@ impl Rendering {
                 Quantity::Problem { problem: ProblemKind::Resonance | ProblemKind::Harshness, low, high, steady, .. } => {
                     worst_stretch(&heard.main, low, high, steady, length, bar)
                 }
+                Quantity::Problem { problem: ProblemKind::LoudNote, low, high, .. } => note_stretch(&heard.main, low, high, length, bar),
                 _ => None,
             })
             .collect();
@@ -653,8 +654,15 @@ impl Rendering {
         Ok(Ok(round))
     }
 
-    /// A reference's profile, from a file or a clip in the Set.
+    /// A reference's profile: one measured with the reference tool (by what was asked for or its name), else from a
+    /// file or a clip in the Set.
     async fn reference_profile(&self, named: &str, signal: Signal) -> Result<Profile, String> {
+        if let Some(kept) = match &self.references {
+            Some(store) => store.load(named).await,
+            None => None,
+        } {
+            return Ok(kept.profile);
+        }
         let file = (self.clip_file)(named.into(), signal.clone()).await.ok().flatten().unwrap_or_else(|| audio::audio_path(named));
         let heard = measure_file(&file, MeasureOptions { signal: Some(signal), ..Default::default() })
             .await

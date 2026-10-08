@@ -76,6 +76,8 @@ pub struct Rendering {
     /// The judged run under way (or the last one).
     judge: RefCell<Option<judge::JudgeRun>>,
     listener_source: Option<super::options::ListenerSource>,
+    /// Measured references, read by name for the judge.
+    references: Option<Rc<crate::references::store::ReferenceStore>>,
     /// The listening model, once looked for (None inside: there's none).
     listener: RefCell<Option<Option<Rc<dyn crate::listening::listener::Listener>>>>,
 }
@@ -132,6 +134,7 @@ impl Rendering {
             best_steps: RefCell::new(vec![]),
             judge: RefCell::new(None),
             listener_source: options.listener.clone(),
+            references: options.references.clone(),
             listener: RefCell::new(None),
         })
     }

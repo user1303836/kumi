@@ -251,6 +251,8 @@ pub(super) async fn run_session(
     });
     let controller: Rc<RefCell<Option<Weak<dyn SessionController>>>> = Rc::new(RefCell::new(None));
     let listener_store = store.clone();
+    // Measured references: the reference tool keeps them, the judge works toward them by name.
+    let references = Rc::new(kumi_runtime::references::store::ReferenceStore::new(load_references_dir(&io.env)?));
     let models = Rc::new(create_model_control(ModelControlOptions {
         store,
         settings_file: settings_file.clone(),
@@ -323,6 +325,7 @@ pub(super) async fn run_session(
         let controller = controller.clone();
         let live_config = live_config.clone();
         let bundled = bundled.clone();
+        let references = references.clone();
         Box::new(move |on_connection| {
             let Some(bridge_config) = live_config.borrow().clone() else {
                 return create_inference_only_integration(Rc::new(move |state| on_connection(state, None)));
@@ -403,6 +406,7 @@ pub(super) async fn run_session(
                     emit(SessionEvent::Judged(round));
                 })
             });
+            options.references = Some(references.clone());
             options.listener = Some({
                 let store = listener_store.clone();
                 let env = env.clone();
@@ -523,6 +527,7 @@ pub(super) async fn run_session(
     options.store = database;
     let goals = load_goals_dir(&io.env)?;
     options.objectives = Some(create_objective_store(goals.clone()));
+    options.references = Some(references);
     options.goals = Some(create_goal_store(goals));
     options.gaps = Some(load_gaps_file(&io.env)?);
     options.timings = Some(load_timings_file(&io.env)?);

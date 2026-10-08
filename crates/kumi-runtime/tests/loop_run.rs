@@ -170,3 +170,24 @@ fn a_goals_check_reads_the_models_line_and_code_applies_the_budget_and_no_progre
     let mut goal = Objective::new("master it", budget);
     assert_eq!(after_turn(&mut goal, go_on(), true, 60_000).verdict, Verdict::Budget);
 }
+
+#[test]
+fn the_loop_says_when_its_over_so_only_the_runs_end_is_judged_after_that() {
+    let mut run = LoopRun::new("master it", BUDGET);
+    assert_eq!(run.over(), None);
+    run.judged(round(0, RoundKind::Start, None, 0., false));
+    for number in 1..=4 {
+        run.judged(round(number, RoundKind::Judged, Some(true), 1.5, false));
+        assert_eq!(run.over(), None, "round {number}");
+    }
+    // The fifth judged round spends the budget, even inside one long answer.
+    run.judged(round(5, RoundKind::Judged, Some(true), 1.5, false));
+    assert_eq!(run.over(), Some("its budget is spent"));
+    // Met is over too; and once the run has ended, there's nothing to hold.
+    let mut met = LoopRun::new("master it", BUDGET);
+    met.judged(round(0, RoundKind::Start, None, 0., false));
+    met.judged(round(1, RoundKind::Judged, Some(true), 2.5, true));
+    assert_eq!(met.over(), Some("every item on the checklist is within tolerance"));
+    met.judged(round(2, RoundKind::Done, None, 0., true));
+    assert_eq!(met.over(), None);
+}

@@ -97,6 +97,42 @@ impl Profile {
             tilt: Spread::point(m.tilt, 0.5),
         }
     }
+
+    /// Several tracks' profile: each measure's middle across them and the range they keep to, from the 10th to the
+    /// 90th percentile of the tracks (with few tracks, from the lowest to the highest, never narrower than one
+    /// track's own range). "In the style" is inside it.
+    pub fn combine(name: &str, tracks: &[Profile]) -> Option<Profile> {
+        let first = tracks.first()?;
+        if tracks.len() == 1 {
+            return Some(Profile { name: name.into(), ..first.clone() });
+        }
+        let spread = |spreads: Vec<Spread>| -> Option<Spread> {
+            if spreads.is_empty() {
+                return None;
+            }
+            let mut mids: Vec<f64> = spreads.iter().map(|spread| spread.mid).collect();
+            mids.sort_by(f64::total_cmp);
+            let (low, high) =
+                if mids.len() >= 5 { (percentile(&mids, 0.1), percentile(&mids, 0.9)) } else { (mids[0], mids[mids.len() - 1]) };
+            // At least as wide as a typical track's own range.
+            let mut halves: Vec<f64> = spreads.iter().map(|spread| (spread.high - spread.low) / 2.).collect();
+            halves.sort_by(f64::total_cmp);
+            let half = percentile(&halves, 0.5);
+            let mid = percentile(&mids, 0.5);
+            Some(Spread { mid: round1(mid), low: round1(low.min(mid - half)), high: round1(high.max(mid + half)) })
+        };
+        let pick = |get: &dyn Fn(&Profile) -> Option<Spread>| spread(tracks.iter().filter_map(get).collect());
+        Some(Profile {
+            name: name.into(),
+            tracks: tracks.iter().map(|track| track.tracks).sum(),
+            regions: (0..first.regions.len()).filter_map(|region| pick(&|track| track.regions.get(region).copied())).collect(),
+            integrated: pick(&|track| track.integrated),
+            plr: pick(&|track| track.plr),
+            crest: pick(&|track| track.crest),
+            low_width: pick(&|track| track.low_width),
+            tilt: pick(&|track| Some(track.tilt)).unwrap_or(first.tilt),
+        })
+    }
 }
 
 /// What a goal asks: explicit targets, a reference, the problems to clear and the element that must cut through.
@@ -654,6 +690,26 @@ pub fn worst_stretch(heard: &Heard, low: f64, high: f64, steady: bool, seconds: 
         .step_by(stride)
         .map(|at| (at, region_excess_in(heard, low, high, steady, at..at + length, &|_| 0.)))
         .max_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(at, _)| at as f64 * hop)
+}
+
+/// Where a bass note between `low` and `high` plays most: the start of the `seconds`-long stretch (moved `step`
+/// seconds at a time) with the most of its frames, so a change to it is heard where it is.
+pub fn note_stretch(heard: &Heard, low: f64, high: f64, seconds: f64, step: f64) -> Option<f64> {
+    let frames = &heard.frames;
+    let hop = frames.bass_hop;
+    let length = (seconds / hop.max(1e-9)).round() as usize;
+    if hop <= 0. || length == 0 || frames.bass.len() <= length {
+        return None;
+    }
+    let playing: Vec<u32> =
+        frames.bass.iter().map(|pitch| u32::from(pitch.is_some_and(|(hz, _)| (low..=high).contains(&(hz as f64))))).collect();
+    let stride = ((step / hop).round() as usize).max(1);
+    (0..=playing.len() - length)
+        .step_by(stride)
+        .map(|at| (at, playing[at..at + length].iter().sum::<u32>()))
+        .filter(|(_, count)| *count > 0)
+        .max_by_key(|(_, count)| *count)
         .map(|(at, _)| at as f64 * hop)
 }
 

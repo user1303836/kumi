@@ -201,6 +201,24 @@ impl LoopRun {
             to_string(minutes)
         ))
     }
+    /// Why the loop is over now (met, out of budget or stalled), as a judged round arrives: then only the run's end is
+    /// judged. None while it goes on (or once the run has ended).
+    pub fn over(&self) -> Option<&'static str> {
+        let last = self.rounds.last()?;
+        if last.kind == RoundKind::Done {
+            return None;
+        }
+        let judged = self.judged_rounds().count() as u32;
+        if last.met {
+            Some("every item on the checklist is within tolerance")
+        } else if judged >= self.budget.rounds || (self.now)() - self.started >= self.budget.ms {
+            Some("its budget is spent")
+        } else if self.stalled() {
+            Some("changes stopped helping")
+        } else {
+            None
+        }
+    }
     /// The last rounds kept nothing, or the gaps they closed add up to less than a step.
     fn stalled(&self) -> bool {
         let rounds: Vec<&Round> = self.judged_rounds().collect();

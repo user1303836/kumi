@@ -16,6 +16,7 @@ pub mod mcp;
 pub mod notation;
 pub mod plugins;
 pub mod providers;
+pub mod references;
 pub mod system;
 pub mod version;
 pub mod video;
