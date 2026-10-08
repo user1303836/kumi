@@ -91,6 +91,26 @@ pub struct Measures {
     /// Noisiness: the spectral flatness of the loud frames, dB (0 is noise, far under it a pure tone).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub noise: Option<f64>,
+    /// How far a low sound's pitch falls over its first quarter second, semitones (an 808's or a kick's drop; median
+    /// over its hits).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pitch_drop: Option<f64>,
+    /// How often its level swings (a tremolo, an LFO, beating between detuned voices), Hz.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modulation: Option<f64>,
+    /// Notes that start with a jump from silence (a click at the note's edge).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub clicks: usize,
+    /// Crackle: lone spikes a second in the quiet stretches (dust).
+    #[serde(default, skip_serializing_if = "is_nothing")]
+    pub crackle: f64,
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
+}
+fn is_nothing(value: &f64) -> bool {
+    *value == 0.
 }
 
 /// What the detectors read, in time: per frame (every `hop` seconds) each third-octave's mid and side power, the
@@ -362,6 +382,16 @@ struct Meter {
     in_milli: usize,
     milli_sum: f64,
     envelope: Vec<f32>,
+    // Each millisecond's biggest and typical sample-to-sample jump, and its peak: clicks at note edges and crackle.
+    previous: f64,
+    jumps: Vec<f32>,
+    milli_peak: f64,
+    clicks: usize,
+    spikes: usize,
+    // The low end's rising zero crossings (seconds), for a low sound's pitch as it moves: two one-poles at 300 Hz.
+    low_pass: [f64; 2],
+    low_last: f64,
+    crossings: Vec<f64>,
 }
 
 impl Meter {
@@ -449,6 +479,14 @@ impl Meter {
             in_milli: 0,
             milli_sum: 0.,
             envelope: vec![],
+            previous: 0.,
+            jumps: vec![],
+            milli_peak: 0.,
+            clicks: 0,
+            spikes: 0,
+            low_pass: [0.; 2],
+            low_last: 0.,
+            crossings: vec![],
         }
     }
 
@@ -499,10 +537,39 @@ impl Meter {
             let (mid, side) = ((l + r) / 2., (l - r) / 2.);
             self.milli_sum += mid * mid;
             self.in_milli += 1;
+            self.jumps.push((mid - self.previous).abs() as f32);
+            self.previous = mid;
+            let pole = 1. - (-2. * std::f64::consts::PI * 300. / self.rate).exp();
+            self.low_pass[0] += pole * (mid - self.low_pass[0]);
+            self.low_pass[1] += pole * (self.low_pass[0] - self.low_pass[1]);
+            let low = self.low_pass[1];
+            if self.low_last < 0. && low >= 0. && self.crossings.len() < 2_000_000 {
+                // Where between this sample and the last it crossed.
+                let into = self.low_last / (self.low_last - low);
+                self.crossings.push((self.count as f64 - 1. + into) / self.rate);
+            }
+            self.low_last = low;
+            self.milli_peak = self.milli_peak.max(mid.abs());
             if self.in_milli == self.milli {
-                self.envelope.push((self.milli_sum / self.milli as f64).sqrt() as f32);
+                let rms = (self.milli_sum / self.milli as f64).sqrt();
+                // A click: out of near silence (the 3 ms before under −60 dB), one jump far bigger than the rest of
+                // the millisecond's (a waveform cut, not a transient's burst of them).
+                let silent_before = self.envelope.len() >= 3 && self.envelope[self.envelope.len() - 3..].iter().all(|level| *level < 1e-3);
+                let mut jumps = std::mem::take(&mut self.jumps);
+                let biggest = jumps.iter().copied().fold(0f32, f32::max) as f64;
+                jumps.sort_by(f32::total_cmp);
+                let typical = jumps.get(jumps.len() * 3 / 4).copied().unwrap_or(0.) as f64;
+                if silent_before && biggest >= 0.05 && biggest >= typical * 6. {
+                    self.clicks += 1;
+                }
+                // Crackle: a lone spike standing far over a quiet millisecond (under −30 dB).
+                if rms < 0.03 && rms > 1e-6 && self.milli_peak >= rms * 5. && !silent_before {
+                    self.spikes += 1;
+                }
+                self.envelope.push(rms as f32);
                 self.milli_sum = 0.;
                 self.in_milli = 0;
+                self.milli_peak = 0.;
             }
             let first = self.band[0].process(mid);
             let banded = self.band[1].process(first);
@@ -753,6 +820,8 @@ impl Meter {
             })
         };
         let (attack, decay, sustain) = envelope_of(&self.envelope);
+        let modulation = modulation_of(&self.envelope);
+        let pitch_drop = pitch_drop_of(&self.envelope, &self.crossings);
         // Brightness and noisiness over the loud frames.
         let (centroid, noise) = {
             let mut levels: Vec<f64> = self.frames.level.iter().map(|level| *level as f64).collect();
@@ -819,6 +888,10 @@ impl Meter {
             sustain,
             centroid,
             noise,
+            pitch_drop,
+            modulation,
+            clicks: self.clicks,
+            crackle: if seconds > 0. { round1(self.spikes as f64 / seconds) } else { 0. },
         };
         Heard { measures, frames: self.frames }
     }
@@ -828,7 +901,8 @@ impl Meter {
 /// its attack, decay (to 20 dB under the peak, before the next hit) and the level a quarter second on are the medians
 /// over the hits.
 fn envelope_of(envelope: &[f32]) -> (Option<f64>, Option<f64>, Option<f64>) {
-    let db: Vec<f64> = envelope.iter().map(|value| 20. * (*value as f64 + 1e-9).log10()).collect();
+    let raw: Vec<f64> = envelope.iter().map(|value| 20. * (*value as f64 + 1e-9).log10()).collect();
+    let db = held(&raw);
     let loudest = db.iter().copied().fold(f64::MIN, f64::max);
     let mut hits: Vec<usize> = vec![];
     let mut at = 20;
@@ -850,7 +924,8 @@ fn envelope_of(envelope: &[f32]) -> (Option<f64>, Option<f64>, Option<f64>) {
         let peak_at = start + peak_at;
         let amplitude = |level: f64| 10f64.powf(level / 20.);
         let (low, high) = (amplitude(peak) * 0.1, amplitude(peak) * 0.9);
-        let from = (*start..=peak_at).find(|at| amplitude(db[*at]) >= low).unwrap_or(*start);
+        // The attack on the raw envelope (the held one keeps the rise's timing too).
+        let from = (*start..=peak_at).find(|at| amplitude(raw[*at].max(db[*at])) >= low).unwrap_or(*start);
         let to = (from..=peak_at).find(|at| amplitude(db[*at]) >= high).unwrap_or(peak_at);
         attacks.push((to - from) as f64);
         if let Some(fallen) = (peak_at..end).find(|at| db[*at] <= peak - 20.) {
@@ -865,6 +940,74 @@ fn envelope_of(envelope: &[f32]) -> (Option<f64>, Option<f64>, Option<f64>) {
         (!values.is_empty()).then(|| round1(percentile(&values, 0.5)))
     };
     (median(attacks), median(decays), median(sustains))
+}
+
+/// How often the level swings, Hz: the strongest repeat of the millisecond envelope (its slow trend taken out) between
+/// a twentieth of a second and two seconds, when it repeats clearly.
+fn modulation_of(envelope: &[f32]) -> Option<f64> {
+    if envelope.len() < 2000 {
+        return None;
+    }
+    // Ten-millisecond steps, in dB, the half-second trend taken out.
+    let coarse: Vec<f64> = envelope
+        .chunks(10)
+        .map(|chunk| 20. * ((chunk.iter().map(|v| *v as f64).sum::<f64>() / chunk.len() as f64) + 1e-9).log10())
+        .collect();
+    let trend = moving(&coarse, 50);
+    let wave: Vec<f64> = coarse.iter().zip(&trend).map(|(value, trend)| value - trend).collect();
+    let energy: f64 = wave.iter().map(|value| value * value).sum();
+    if energy / wave.len() as f64 <= 0.25 {
+        return None;
+    }
+    let correlate = |lag: usize| wave.iter().zip(&wave[lag..]).map(|(a, b)| a * b).sum::<f64>() / energy;
+    let (lag, strength) = (5..=200.min(wave.len() / 3)).map(|lag| (lag, correlate(lag))).max_by(|a, b| a.1.total_cmp(&b.1))?;
+    // A clear repeat, and a peak of its own (not the slope down from lag 0).
+    (strength >= 0.4 && correlate(lag) >= correlate(lag - 1) && correlate(lag) >= correlate(lag + 1)).then(|| round2(100. / lag as f64))
+}
+
+/// How far a low sound's pitch falls over its first quarter second, semitones: at each hit, the low end's first full
+/// period (between its first two rising zero crossings) against its period 200 ms in, the median over hits that have
+/// both.
+fn pitch_drop_of(envelope: &[f32], crossings: &[f64]) -> Option<f64> {
+    if crossings.len() < 4 {
+        return None;
+    }
+    // The pitch around a moment: one over the period of the crossing pair that holds it, when it's 30–250 Hz.
+    let pitch = |at: f64| {
+        let next = crossings.partition_point(|crossing| *crossing <= at);
+        let (a, b) = (crossings.get(next.checked_sub(1)?)?, crossings.get(next)?);
+        let hz = 1. / (b - a);
+        (30. ..=250.).contains(&hz).then_some(hz)
+    };
+    let db = held(&envelope.iter().map(|value| 20. * (*value as f64 + 1e-9).log10()).collect::<Vec<_>>());
+    let mut drops = vec![];
+    let mut at = 20;
+    while at < db.len() {
+        let before = db[at - 20..at].iter().copied().fold(f64::MAX, f64::min);
+        if db[at] - before >= 12. {
+            let start = (at - 20 + db[at - 20..=at].iter().position(|level| *level >= before + 1.).unwrap_or(0)) as f64 / 1000.;
+            // Its first period: the first two crossings after it starts, the first within 60 ms.
+            let first = crossings.partition_point(|crossing| *crossing <= start);
+            let early = match (crossings.get(first), crossings.get(first + 1)) {
+                (Some(a), Some(b)) if a - start < 0.06 => Some(1. / (b - a)).filter(|hz| (30. ..=250.).contains(hz)),
+                _ => None,
+            };
+            if let (Some(early), Some(later)) = (early, pitch(start + 0.2)) {
+                drops.push(12. * (early / later).log2());
+            }
+            at += 300;
+        } else {
+            at += 1;
+        }
+    }
+    drops.sort_by(f64::total_cmp);
+    (!drops.is_empty()).then(|| round1(percentile(&drops, 0.5)))
+}
+
+/// The millisecond envelope held at its peak over the 25 ms before each step: a low note's waveform dips between its
+/// peaks (a 1 ms window is far shorter than its period), and those dips aren't the sound falling away.
+fn held(db: &[f64]) -> Vec<f64> {
+    (0..db.len()).map(|at| db[at.saturating_sub(24)..=at].iter().copied().fold(f64::MIN, f64::max)).collect()
 }
 
 fn moving(values: &[f64], size: usize) -> Vec<f64> {

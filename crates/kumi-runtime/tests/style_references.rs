@@ -521,6 +521,7 @@ fn profile(loudness: f64) -> Profile {
         sustain: None,
         centroid: None,
         noise: None,
+        sound: Default::default(),
     }
 }
 

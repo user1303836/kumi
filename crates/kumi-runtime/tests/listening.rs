@@ -464,7 +464,8 @@ fn a_sounds_envelope_brightness_and_noisiness_are_measured_and_judged_against_a_
     let (attack, decay) = (measured.attack.unwrap(), measured.decay.unwrap());
     assert!(attack < 6., "attack {attack}");
     assert!((100. ..220.).contains(&decay), "decay {decay}");
-    let dark = pluck(220., 25., 40.);
+    // A slower decay that still falls 20 dB within its half second.
+    let dark = pluck(220., 25., 60.);
     let dark_measures = heard(&dark, &dark).measures;
     assert!(dark_measures.centroid.unwrap() < measured.centroid.unwrap() * 0.6, "{:?} {:?}", dark_measures.centroid, measured.centroid);
     assert!(dark_measures.attack.unwrap() > attack + 10., "{:?}", dark_measures.attack);

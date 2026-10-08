@@ -13,7 +13,7 @@
           "true_peak": {"type": "number", "minimum": -12, "maximum": 0, "description": "The true-peak ceiling, dBTP"},
           "reference": {"type": "string", "minLength": 1, "maxLength": 1024, "description": "A reference: one measured with the reference tool (its name), an audio file's path (~/…) or an audio clip's clipRef"},
           "problems": {"type": "boolean", "description": "Clear what Kumi's detectors find (true when left out)"},
-          "sound": {"type": "boolean", "description": "A single sound (a patch, a hit) against a reference sound: its attack, decay, where it settles, brightness and noisiness join the checklist. Judge it on the track that plays it (track)"},
+          "sound": {"type": "boolean", "description": "A single sound (a patch, a hit) against a reference sound: its attack, decay, where it settles, brightness, noisiness, pitch drop (an 808's or a kick's), modulation rate, width, top (bandwidth), noise floor, warmth (2nd and 3rd harmonics), tail and crackle join the checklist. Judge it on the track that plays it (track)"},
           "focus": {"type": "string", "minLength": 1, "maxLength": 256, "description": "The track that must cut through the rest (its ref or name)"},
           "targets": {
             "type": "array",

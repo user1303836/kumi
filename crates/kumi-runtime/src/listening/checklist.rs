@@ -7,6 +7,7 @@ use super::{
     detect::{self, hertz, Problem, ProblemKind},
     fit::{response, Band, Shape},
     measure::{fine_hz, percentile, Heard, Measures, FINE_BINS, THIRDS},
+    sound,
 };
 use serde::{Deserialize, Serialize};
 
@@ -56,6 +57,51 @@ pub struct Profile {
     pub centroid: Option<Spread>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub noise: Option<Spread>,
+    /// The rest of a sound's measures: its pitch drop, modulation, width, top, noise floor, warmth, tail and crackle.
+    #[serde(default, skip_serializing_if = "SoundProfile::is_empty")]
+    pub sound: SoundProfile,
+}
+
+/// A sound's measures beyond its envelope and tone, each with its range.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SoundProfile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pitch_drop: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modulation: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bandwidth: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noise_floor: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warmth: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tail: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crackle: Option<Spread>,
+}
+
+impl SoundProfile {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+    /// One sound's, with a step either side.
+    pub fn of(heard: &Heard) -> Self {
+        let m = &heard.measures;
+        Self {
+            pitch_drop: m.pitch_drop.map(|value| Spread::point(value, 0.5)),
+            modulation: m.modulation.map(|value| Spread::point(value, (value * 0.1).max(0.25))),
+            width: sound::width(heard).map(|value| Spread::point(value, 2.)),
+            bandwidth: sound::bandwidth(heard).map(|hz| Spread::point(round1(hz / 1000.), 1.)),
+            noise_floor: sound::noise_floor(heard).map(|value| Spread::point(value, 3.)),
+            warmth: sound::harmonics(heard).map(|harmonics| Spread::point(harmonics.warmth, 2.)),
+            tail: sound::tail(heard).map(|value| Spread::point(value, 3.)),
+            crackle: Some(Spread::point(m.crackle, 2.)),
+        }
+    }
 }
 
 /// A measure's typical value and the range it keeps to (the 20th to 80th percentile).
@@ -117,6 +163,7 @@ impl Profile {
             sustain: m.sustain.map(|value| Spread::point(value, 2.)),
             centroid: m.centroid.map(|value| Spread::point(value, value * 0.12)),
             noise: m.noise.map(|value| Spread::point(value, 2.)),
+            sound: SoundProfile::of(heard),
         }
     }
 
@@ -159,6 +206,16 @@ impl Profile {
             sustain: pick(&|track| track.sustain),
             centroid: pick(&|track| track.centroid),
             noise: pick(&|track| track.noise),
+            sound: SoundProfile {
+                pitch_drop: pick(&|track| track.sound.pitch_drop),
+                modulation: pick(&|track| track.sound.modulation),
+                width: pick(&|track| track.sound.width),
+                bandwidth: pick(&|track| track.sound.bandwidth),
+                noise_floor: pick(&|track| track.sound.noise_floor),
+                warmth: pick(&|track| track.sound.warmth),
+                tail: pick(&|track| track.sound.tail),
+                crackle: pick(&|track| track.sound.crackle),
+            },
         })
     }
 }
@@ -218,6 +275,14 @@ pub enum Quantity {
     Sustain,
     Centroid,
     Noise,
+    PitchDrop,
+    Modulation,
+    Width,
+    Bandwidth,
+    NoiseFloor,
+    Warmth,
+    Tail,
+    Crackle,
     Region {
         region: usize,
     },
@@ -405,6 +470,14 @@ impl Checklist {
                     ("sustain", "Where it settles, as the reference", "dB", Quantity::Sustain, reference.sustain, 0., 2.),
                     ("brightness", "Brightness (centroid), as the reference", "Hz", Quantity::Centroid, reference.centroid, 0.12, 50.),
                     ("noisiness", "Noisiness, as the reference", "dB", Quantity::Noise, reference.noise, 0., 2.),
+                    ("pitch drop", "Pitch drop, as the reference", "st", Quantity::PitchDrop, reference.sound.pitch_drop, 0., 0.5),
+                    ("modulation", "Modulation rate, as the reference", "Hz", Quantity::Modulation, reference.sound.modulation, 0.1, 0.25),
+                    ("width", "Width, as the reference", "dB", Quantity::Width, reference.sound.width, 0., 2.),
+                    ("top", "Top (bandwidth), as the reference", "kHz", Quantity::Bandwidth, reference.sound.bandwidth, 0., 1.),
+                    ("noise floor", "Noise floor, as the reference", "dB", Quantity::NoiseFloor, reference.sound.noise_floor, 0., 3.),
+                    ("warmth", "Warmth (2nd and 3rd harmonics), as the reference", "dB", Quantity::Warmth, reference.sound.warmth, 0., 2.),
+                    ("tail", "Tail (300 ms after a hit), as the reference", "dB", Quantity::Tail, reference.sound.tail, 0., 3.),
+                    ("crackle", "Crackle, as the reference", "/s", Quantity::Crackle, reference.sound.crackle, 0., 2.),
                 ];
                 for (id, label, unit, quantity, spread, share, least) in sound {
                     let Some(spread) = spread else { continue };
@@ -757,6 +830,14 @@ fn describe(quantity: &Quantity) -> (String, String, &'static str, f64) {
         Quantity::Sustain => ("sustain".into(), "Where it settles".into(), "dB", 2.),
         Quantity::Centroid => ("brightness".into(), "Brightness (centroid)".into(), "Hz", 50.),
         Quantity::Noise => ("noisiness".into(), "Noisiness".into(), "dB", 2.),
+        Quantity::PitchDrop => ("pitch drop".into(), "Pitch drop".into(), "st", 0.5),
+        Quantity::Modulation => ("modulation".into(), "Modulation rate".into(), "Hz", 0.25),
+        Quantity::Width => ("width".into(), "Width".into(), "dB", 2.),
+        Quantity::Bandwidth => ("top".into(), "Top (bandwidth)".into(), "kHz", 1.),
+        Quantity::NoiseFloor => ("noise floor".into(), "Noise floor".into(), "dB", 3.),
+        Quantity::Warmth => ("warmth".into(), "Warmth (2nd and 3rd harmonics)".into(), "dB", 2.),
+        Quantity::Tail => ("tail".into(), "Tail (300 ms after a hit)".into(), "dB", 3.),
+        Quantity::Crackle => ("crackle".into(), "Crackle".into(), "/s", 2.),
         Quantity::Region { region } => (format!("balance {}", REGIONS[*region].0), capital(REGIONS[*region].0), "dB", 1.),
         Quantity::Problem { problem, low, high, .. } => {
             (format!("{problem:?} {}", hertz((low * high).sqrt())).to_lowercase(), format!("{problem:?}"), "dB", 1.)
@@ -789,6 +870,14 @@ fn reading(quantity: &Quantity, heard: &Heard, focus: Option<&Heard>) -> Option<
         Quantity::Sustain => m.sustain,
         Quantity::Centroid => m.centroid,
         Quantity::Noise => m.noise,
+        Quantity::PitchDrop => m.pitch_drop,
+        Quantity::Modulation => m.modulation,
+        Quantity::Width => sound::width(heard),
+        Quantity::Bandwidth => sound::bandwidth(heard).map(|hz| round1(hz / 1000.)),
+        Quantity::NoiseFloor => sound::noise_floor(heard),
+        Quantity::Warmth => sound::harmonics(heard).map(|harmonics| harmonics.warmth),
+        Quantity::Tail => sound::tail(heard),
+        Quantity::Crackle => Some(m.crackle),
         Quantity::Region { region } => Some(round1(region_level(&m.balance, *region))),
         Quantity::Problem { problem, low, high, steady, focus: name } => match problem {
             ProblemKind::Harshness | ProblemKind::Resonance => Some(region_excess(heard, *low, *high, *steady)),

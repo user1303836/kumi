@@ -12,3 +12,4 @@ pub mod listener;
 pub mod measure;
 pub mod notes;
 pub mod round;
+pub mod sound;
