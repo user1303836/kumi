@@ -124,6 +124,8 @@ struct Entry {
     undoable: bool,
     /// The gain a rebalance step turned.
     turned: f64,
+    /// Live's identity for the device it made.
+    created: Option<String>,
 }
 
 /// Live as far as a round can tell: a gain stage, HISTORY, a chain, and what the excerpt reads at each gain.
@@ -134,6 +136,10 @@ struct Pretend {
     deleted: RefCell<Vec<String>>,
     /// Listens to come that won't come through.
     unheard: Cell<usize>,
+    /// The gain stage can't be turned (why).
+    stuck_gain: Option<String>,
+    /// Kumi's undo of a rebalance step fails.
+    stuck_rebalance: bool,
     sound: Box<dyn Fn(f64) -> Vec<Option<f64>>>,
 }
 
@@ -145,12 +151,19 @@ impl Pretend {
             chain: RefCell::new(vec![]),
             deleted: RefCell::new(vec![]),
             unheard: Cell::new(0),
+            stuck_gain: None,
+            stuck_rebalance: false,
             sound: Box::new(sound),
         }
     }
     fn change(&self, title: &str, undoable: bool) {
+        self.made_one(title, undoable, None);
+    }
+    /// A change that made a device, Live's identity for it recorded.
+    fn made_one(&self, title: &str, undoable: bool, created: Option<&str>) {
         let id = format!("c{}", self.history.borrow().len() + 1);
-        self.history.borrow_mut().push(Entry { id, title: title.into(), applied: true, undoable, turned: 0. });
+        let created = created.map(str::to_owned);
+        self.history.borrow_mut().push(Entry { id, title: title.into(), applied: true, undoable, turned: 0., created });
     }
     fn listen(&self) -> Listen {
         let values = (self.sound)(self.gain.get());
@@ -165,8 +178,19 @@ fn device(identity: &str, name: &str) -> Placed {
 #[async_trait(?Send)]
 impl RoundHost for Pretend {
     async fn turn(&self, gain: f64) -> Result<String, String> {
+        if let Some(why) = &self.stuck_gain {
+            return Err(why.clone());
+        }
         let id = format!("r{}", self.history.borrow().len() + 1);
-        self.history.borrow_mut().push(Entry { id, title: format!("Utility gain {gain} dB"), applied: true, undoable: true, turned: gain });
+        let undoable = !self.stuck_rebalance;
+        self.history.borrow_mut().push(Entry {
+            id,
+            title: format!("Utility gain {gain} dB"),
+            applied: true,
+            undoable,
+            turned: gain,
+            created: None,
+        });
         self.gain.set(self.gain.get() + gain);
         Ok("Utility gain".into())
     }
@@ -198,8 +222,12 @@ impl RoundHost for Pretend {
         self.gain.set(self.gain.get() - entry.turned);
         Ok(())
     }
-    fn created_by(&self, changes: &[(String, String)]) -> usize {
-        changes.iter().filter(|(_, title)| title.starts_with("Loaded ")).count()
+    fn made(&self, changes: &[(String, String)]) -> Vec<String> {
+        let history = self.history.borrow();
+        changes.iter().filter_map(|(id, _)| history.iter().find(|entry| &entry.id == id)?.created.clone()).collect()
+    }
+    fn stopped(&self) -> bool {
+        false
     }
     async fn chain(&self) -> Result<Vec<Placed>, String> {
         Ok(self.chain.borrow().clone())
@@ -252,13 +280,13 @@ async fn a_rebalance_that_clips_takes_the_round_back() {
         settled.verdict
     );
     // Taken back: the change and the rebalance both.
-    let said = take_back(&live, &[], Some(&[])).await;
+    let said = take_back(&live, &[]).await;
     assert!(said.starts_with("taken back: EQ Eight") && said.contains("Utility gain 3 dB"), "{said}");
     assert_eq!(live.gain.get(), 0.);
 }
 
 #[tokio::test]
-async fn a_rebalance_nobody_heard_is_taken_back_and_the_round_judged_as_the_change_left_it() {
+async fn a_rebalance_nobody_heard_is_taken_back_and_the_round_isnt_kept() {
     let checklist = checklist();
     let whole = vec![Some(-14.), Some(0.), Some(-1.), Some(0.)];
     let live = Pretend::new(|gain| vec![Some(-12. + gain), Some(-3. + gain), Some(-1.), Some(0.)]);
@@ -271,40 +299,84 @@ async fn a_rebalance_nobody_heard_is_taken_back_and_the_round_judged_as_the_chan
     let settled = rebalance(&live, &checklist, Some(PEAK), &whole, predicted, excerpt, gain, verdict).await;
     assert_eq!(live.gain.get(), 0., "the step nobody heard was taken back");
     assert!(settled.rebalanced.as_deref().is_some_and(|said| said.contains("couldn't hear the rebalance")), "{settled:?}");
-    assert_eq!((settled.listens, settled.whole[PEAK]), (0, Some(-3.)));
-    // As the change left it, peaks are down and loudness (not the target) is up: kept.
-    assert!(settled.verdict.kept, "{:?}", settled.verdict);
+    assert_eq!(settled.listens, 0);
+    // Its loudness never got matched, so the round can't be judged fairly: not kept.
+    assert!(
+        !settled.verdict.kept && settled.verdict.why.contains("its loudness couldn't be matched (it's 2 dB louder"),
+        "{:?}",
+        settled.verdict
+    );
 }
 
 #[tokio::test]
-async fn a_device_live_wont_undo_goes_only_when_its_exactly_what_the_round_made() {
-    let known = vec![device("1", "EQ Eight"), device("2", "Limiter")];
-    let stuck = |chain: Vec<Placed>| {
+async fn a_device_live_wont_undo_goes_only_when_its_one_the_round_made() {
+    // Main's chain (the run's); what the round made, by Live's identity for it.
+    let stuck = |load: &str, made: &str, chain: Vec<Placed>| {
         let live = Pretend::new(|_| vec![]);
-        live.change("Loaded Compressor on Main", false);
+        live.made_one(load, false, Some(made));
         live.change("Compressor · Threshold −20 → −30 dB", true);
         *live.chain.borrow_mut() = chain;
         live
     };
-    // The chain has the one device the round made, besides what was there: it goes.
-    let live = stuck(vec![device("1", "EQ Eight"), device("2", "Limiter"), device("9", "Compressor")]);
-    let said = take_back(&live, &[], Some(&known)).await;
+    // The round's Compressor is on Main and Live won't undo it: it goes, the producer's Glue doesn't.
+    let live = stuck(
+        "Loaded Compressor on Main",
+        "9",
+        vec![device("1", "EQ Eight"), device("7", "Glue Compressor"), device("2", "Limiter"), device("9", "Compressor")],
+    );
+    let said = take_back(&live, &[]).await;
     assert!(said.contains("so Kumi removed Compressor instead"), "{said}");
     assert_eq!(*live.deleted.borrow(), ["device:9"]);
-    // One more: the producer dragged a device on. Nothing goes.
-    let live = stuck(vec![device("1", "EQ Eight"), device("7", "Saturator"), device("2", "Limiter"), device("9", "Compressor")]);
-    let said = take_back(&live, &[], Some(&known)).await;
-    assert!(said.contains("the chain has 2 new devices and the change made 1") && said.ends_with("undo it yourself"), "{said}");
-    assert!(live.deleted.borrow().is_empty());
-    // Without the chain from before the change, nothing goes either.
-    let live = stuck(vec![device("9", "Compressor")]);
-    let said = take_back(&live, &[], None).await;
-    assert!(said.contains("couldn't read the chain before the change") && live.deleted.borrow().is_empty(), "{said}");
-    // Devices Live won't tell apart are never removed.
-    assert!(removable(&known, &[device("", "Compressor")], 1).is_err());
+    // A mix run: the stuck EQ was loaded on Bass, and Main's new device is the producer's Glue. Nothing on Main goes.
+    let live = stuck("Loaded EQ Eight on Bass", "5", vec![device("1", "EQ Eight"), device("2", "Limiter"), device("8", "Glue Compressor")]);
+    let said = take_back(&live, &[]).await;
+    assert!(said.ends_with("undo it yourself") && live.deleted.borrow().is_empty(), "{said}");
+    // A bridge that doesn't say identities: nothing is removed.
+    let live = Pretend::new(|_| vec![]);
+    live.made_one("Loaded Compressor on Main", false, None);
+    *live.chain.borrow_mut() = vec![device("9", "Compressor")];
+    let said = take_back(&live, &[]).await;
+    assert!(said.ends_with("undo it yourself") && live.deleted.borrow().is_empty(), "{said}");
+    // A device Live doesn't say the identity of is never one.
+    assert!(removable(&[device("", "Compressor")], &["".to_string()]).is_empty());
     // Nothing applied: nothing to take back.
     let live = Pretend::new(|_| vec![]);
-    assert!(take_back(&live, &[], Some(&known)).await.starts_with("nothing in HISTORY"));
+    assert!(take_back(&live, &[]).await.starts_with("nothing in HISTORY"));
+}
+
+#[tokio::test]
+async fn a_round_whose_loudness_cant_be_matched_isnt_kept() {
+    let checklist = checklist();
+    let whole = vec![Some(-14.), Some(0.), Some(-1.), Some(0.)];
+    let setup = || {
+        let live = Pretend::new(|gain| vec![Some(-12. + gain), Some(-3. + gain), Some(-1.), Some(0.)]);
+        live.change("Loaded Limiter on Main", true);
+        live
+    };
+    let judged = |live: &Pretend| {
+        let excerpt = live.listen();
+        let predicted = predict(&checklist, &whole, &whole, &excerpt.values);
+        let gain = checklist.rebalance(&whole, &predicted).unwrap();
+        let verdict = checklist.verdict(Some(PEAK), &whole, &checklist.at_level(&whole, &predicted, gain));
+        (excerpt, predicted, gain, verdict)
+    };
+    // The gain stage can't be turned: 2 dB louder can't be judged against the louder take.
+    let mut live = setup();
+    live.stuck_gain = Some("the gain knob doesn't show dB".into());
+    let (excerpt, predicted, gain, verdict) = judged(&live);
+    let settled = rebalance(&live, &checklist, Some(PEAK), &whole, predicted, excerpt, gain, verdict).await;
+    assert!(
+        !settled.verdict.kept && settled.verdict.why.contains("its loudness couldn't be matched (it's 2 dB louder"),
+        "{:?}",
+        settled.verdict
+    );
+    // A step nobody heard that Live wouldn't take back: Live is in a state nobody heard.
+    let mut live = setup();
+    live.stuck_rebalance = true;
+    live.unheard.set(1);
+    let (excerpt, predicted, gain, verdict) = judged(&live);
+    let settled = rebalance(&live, &checklist, Some(PEAK), &whole, predicted, excerpt, gain, verdict).await;
+    assert!(!settled.verdict.kept && settled.verdict.why.contains("Live wouldn't take it back"), "{:?}", settled.verdict);
 }
 
 #[test]

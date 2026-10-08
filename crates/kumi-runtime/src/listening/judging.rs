@@ -1,7 +1,7 @@
 //! A judged round's moves, apart from Live: the whole stretch predicted from an excerpt, the two takes a listener
 //! compares brought to one loudness, a kept change rebalanced (each step heard, then the round judged again at the
-//! loudness it ends at), and a round taken back (what Live wouldn't undo removed only when it's exactly what the round
-//! made). Rendering does these in Live; a test does them on a pretend chain.
+//! loudness it ends at), and a round taken back (what Live wouldn't undo removed only when it's a device the round
+//! itself made, known by Live's identity for it). Rendering does these in Live; a test does them on a pretend Set.
 
 use super::checklist::{Checklist, Verdict};
 use async_trait::async_trait;
@@ -45,10 +45,12 @@ pub trait RoundHost {
     fn applied_since(&self, mark: &[String]) -> Vec<(String, String)>;
     /// Kumi's undo of one change; why not, when Live wouldn't.
     async fn undo(&self, id: &str) -> Result<(), String>;
-    /// How many devices these changes made (loaded or duplicated).
-    fn created_by(&self, changes: &[(String, String)]) -> usize;
+    /// Live's identities for the devices these changes made (loaded or duplicated), as HISTORY recorded them.
+    fn made(&self, changes: &[(String, String)]) -> Vec<String>;
     /// The run's chain as it is now.
     async fn chain(&self) -> Result<Vec<Placed>, String>;
+    /// Whether Esc (or Live going away) has stopped the round.
+    fn stopped(&self) -> bool;
     /// Deletes a device; whether it went.
     async fn delete(&self, reference: &str) -> bool;
 }
@@ -96,7 +98,9 @@ pub struct Settled {
 /// Brings loudness back after a kept change: `gain` first, each step heard and the next sized by what the last one did
 /// (a limiter after the gain holds peaks and eats some of it), at most three. A step nobody heard is taken back (Live
 /// stays as it was last heard). Then the round is judged again as it ends up in Live: at the loudness it ends at, what
-/// rebalancing moved (peaks, clipping) counts; with nothing heard, as the change left it.
+/// rebalancing moved (peaks, clipping) counts; with nothing heard, as the change left it. A round whose loudness
+/// couldn't be matched by a step or more, or whose unheard step Live wouldn't take back, isn't kept: it can't be
+/// judged fairly.
 #[allow(clippy::too_many_arguments)]
 pub async fn rebalance(
     host: &dyn RoundHost,
@@ -110,12 +114,19 @@ pub async fn rebalance(
 ) -> Settled {
     let mut settled = Settled { verdict, rebalanced: None, whole: predicted, excerpt, listens: 0, stopped: false };
     let (mut step, mut total, mut steps, mut label) = (Some(gain), 0., 0, String::new());
+    // Why the round can't be judged fairly, when it can't.
+    let mut unfair = None;
+    let off = if gain < 0. { "louder" } else { "quieter" };
     while let Some(gain) = step {
         let mark = host.applied();
         match host.turn(gain).await {
             Ok(stage) => label = stage,
             Err(why) => {
+                settled.stopped = host.stopped();
                 settled.rebalanced = Some(format!("loudness is {} dB off; {why}", to_string(-gain)));
+                if settled.listens == 0 {
+                    unfair = Some(format!("its loudness couldn't be matched (it's {} dB {off}: {why})", to_string(round1(gain.abs()))));
+                }
                 break;
             }
         }
@@ -124,13 +135,29 @@ pub async fn rebalance(
         let again = match host.hear().await {
             Ok(again) => again,
             Err(unheard) => {
-                for (id, _) in host.applied_since(&mark).iter().rev() {
-                    let _ = host.undo(id).await;
+                let mut stuck = vec![];
+                for (id, title) in host.applied_since(&mark).iter().rev() {
+                    if let Err(why) = host.undo(id).await {
+                        stuck.push(format!("{title} ({why})"));
+                    }
                 }
-                total -= gain;
-                steps -= 1;
                 settled.stopped = unheard.stopped;
-                settled.rebalanced = Some(format!("couldn't hear the rebalance ({}), so its last step was taken back", unheard.why));
+                if stuck.is_empty() {
+                    total -= gain;
+                    steps -= 1;
+                    settled.rebalanced = Some(format!("couldn't hear the rebalance ({}), so its last step was taken back", unheard.why));
+                    if settled.listens == 0 {
+                        unfair = Some(format!(
+                            "its loudness couldn't be matched (it's {} dB {off}: Kumi couldn't hear the rebalance)",
+                            to_string(round1(gain.abs()))
+                        ));
+                    }
+                } else {
+                    let why =
+                        format!("Kumi couldn't hear its rebalance ({}) and Live wouldn't take it back: {}", unheard.why, stuck.join(", "));
+                    settled.rebalanced = Some(why.clone());
+                    unfair = Some(why);
+                }
                 break;
             }
         };
@@ -154,10 +181,11 @@ pub async fn rebalance(
         ));
     }
     let again = checklist.verdict(target, whole, &settled.whole);
-    settled.verdict = match (again.kept, settled.listens) {
-        (false, 0) => Verdict { why: format!("{} (its loudness couldn't be matched)", again.why), ..again },
-        (false, _) => Verdict { why: format!("{} once loudness was matched", again.why), ..again },
-        (true, _) => again,
+    settled.verdict = match (unfair, again.kept, settled.listens) {
+        (Some(why), _, _) => Verdict { kept: false, why, ..again },
+        (None, false, 0) => Verdict { why: format!("{} (its loudness couldn't be matched)", again.why), ..again },
+        (None, false, _) => Verdict { why: format!("{} once loudness was matched", again.why), ..again },
+        (None, true, _) => again,
     };
     settled
 }
@@ -176,47 +204,43 @@ pub fn processing(verdict: &Verdict, target: Option<&str>, made: usize) -> Optio
 }
 
 /// Takes a round back: Kumi's changes since `checkpoint` undone, newest first. What Live wouldn't undo is said; a
-/// device such a change made goes instead, but only when the chain shows exactly the new devices (against `known`,
-/// the chain at the checkpoint) those changes made: one the producer added by hand would make them more, and then
-/// nothing is removed. The words that end the round's why.
-pub async fn take_back(host: &dyn RoundHost, checkpoint: &[String], known: Option<&[Placed]>) -> String {
+/// device such a change made goes instead when it's on the run's chain, known by Live's identity for it (recorded
+/// when it was made), so a device the producer added is never one of them. The words that end the round's why.
+pub async fn take_back(host: &dyn RoundHost, checkpoint: &[String]) -> String {
     let all = host.applied_since(checkpoint);
     if all.is_empty() {
         return "nothing in HISTORY to take back (change it back yourself if you changed it another way)".into();
     }
     let mut stuck = vec![];
+    let mut said = vec![];
     for (id, title) in all.iter().rev() {
         if let Err(why) = host.undo(id).await {
-            stuck.push((id.clone(), format!("{title} ({why})")));
+            stuck.push((id.clone(), title.clone()));
+            said.push(format!("{title} ({why})"));
         }
     }
     if stuck.is_empty() {
         return format!("taken back: {}", all.iter().map(|(_, title)| title.as_str()).collect::<Vec<_>>().join(", "));
     }
-    let titles = stuck.iter().map(|(_, title)| title.as_str()).collect::<Vec<_>>().join(", ");
-    let made = host.created_by(&stuck);
-    if made == 0 {
+    let titles = said.join(", ");
+    let made = host.made(&stuck);
+    if made.is_empty() {
         return format!("Live wouldn't take back {titles}: undo it yourself");
     }
-    let found = match known {
-        None => Err("Kumi couldn't read the chain before the change".to_string()),
-        Some(known) => host.chain().await.and_then(|now| removable(known, &now, made)),
+    let found = match host.chain().await {
+        Ok(now) => removable(&now, &made),
+        Err(why) => return format!("Live wouldn't take back {titles} ({why}): undo it yourself"),
     };
-    match found {
-        Err(why) => format!("Live wouldn't take back {titles} ({why}): undo it yourself"),
-        Ok(new) => {
-            let mut removed = vec![];
-            for device in new.iter().rev() {
-                if host.delete(&device.reference).await {
-                    removed.push(device.name.clone());
-                }
-            }
-            if removed.is_empty() {
-                format!("Live wouldn't take back {titles}: undo it yourself")
-            } else {
-                format!("Live wouldn't undo {titles}, so Kumi removed {} instead", removed.join(", "))
-            }
+    let mut removed = vec![];
+    for device in found.iter().rev() {
+        if host.delete(&device.reference).await {
+            removed.push(device.name.clone());
         }
+    }
+    if removed.is_empty() {
+        format!("Live wouldn't take back {titles}: undo it yourself")
+    } else {
+        format!("Live wouldn't undo {titles}, so Kumi removed {} instead", removed.join(", "))
     }
 }
 
@@ -251,17 +275,10 @@ pub fn candidate_cost(
     }
 }
 
-/// The devices on the chain `now` that weren't on it at the checkpoint (`known`), when they're exactly the `made` a
-/// round's changes made; else why not.
-pub fn removable(known: &[Placed], now: &[Placed], made: usize) -> Result<Vec<Placed>, String> {
-    if now.iter().any(|device| device.identity.is_empty()) {
-        return Err("Live didn't say which devices are which".into());
-    }
-    let new: Vec<Placed> = now.iter().filter(|device| !known.iter().any(|was| was.identity == device.identity)).cloned().collect();
-    if new.len() != made {
-        return Err(format!("the chain has {} new devices and the change made {made}", new.len()));
-    }
-    Ok(new)
+/// The devices on the chain `now` that a round made (`made`, Live's identities for them); a device Live doesn't say the
+/// identity of is never one.
+pub fn removable(now: &[Placed], made: &[String]) -> Vec<Placed> {
+    now.iter().filter(|device| !device.identity.is_empty() && made.contains(&device.identity)).cloned().collect()
 }
 
 fn round1(value: f64) -> f64 {

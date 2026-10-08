@@ -1,19 +1,29 @@
-# Scratch copies of a device's track, for a search heard side by side: action "make" (count), "set" (values), "drop".
-# A copy is the track a duplicate adds (found by comparing the tracks before and after, never by position); a make cut
-# off partway takes back the copies it made.
+# Scratch copies of a device's track, for a search heard side by side. Actions: "before" (Live's identities for the
+# tracks there now, and the copied track's name), "make" (count), "set" (values) and "drop". A copy is the track a
+# duplicate adds, found by comparing the tracks before and after (never by position). A make stops itself well inside
+# its time limit, so a make cut off partway still takes back the copies it made. A drop removes the tracks that
+# weren't there before ("before") and carry the prefix or the copied track's name ("source": a copy never renamed).
 args = ARGS
-device = obj
-track = device.canonical_parent
+identity = bridge._capture_object_identity
 tracks = list(song.tracks)
-if args['action'] == 'make':
+if args['action'] in ('before', 'make'):
+    device = obj
+    track = device.canonical_parent
     if track not in tracks:
         raise ValueError('search tunes a device on a track itself (not in a rack, a return or Main)')
     if getattr(track, 'is_foldable', False):
         raise ValueError('search copies one track, and this one is a group (its copy would take its tracks along): tune a device on a track inside it')
+if args['action'] == 'before':
+    result = {'before': [identity(t) for t in tracks], 'source': str(track.name)}
+elif args['action'] == 'make':
+    import time
+    started = time.perf_counter()
     position = list(track.devices).index(device)
     made = []
     try:
         for k in range(args['count']):
+            if time.perf_counter() - started > args['budget']:
+                raise ValueError('Live took too long making the copies (%d of %d made)' % (len(made), args['count']))
             before = list(song.tracks)
             song.duplicate_track(before.index(track))
             added = [t for t in song.tracks if t not in before]
@@ -42,9 +52,16 @@ elif args['action'] == 'set':
                 p.value = max(float(p.min), min(float(p.max), float(value)))
     result = {'ok': True}
 else:
+    before = set(args.get('before') or [])
+    source = args.get('source')
+    def ours(t):
+        name = str(t.name)
+        if before and identity(t) in before:
+            return False
+        return name.startswith(args['prefix'] + ' ') or (bool(before) and source is not None and name == source)
     gone = 0
     for index in reversed(range(len(tracks))):
-        if str(tracks[index].name).startswith(args['prefix'] + ' '):
+        if ours(tracks[index]):
             song.delete_track(index)
             gone += 1
-    result = {'gone': gone}
+    result = {'gone': gone, 'left': len([t for t in song.tracks if ours(t)])}

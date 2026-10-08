@@ -73,6 +73,10 @@ pub struct Applied {
     /// undone. Not kept past this Live connection: its refs aren't either.
     #[serde(skip)]
     pub shift: Option<Shift>,
+    /// Live's identity for the device the change made (a load or a duplicate), when the bridge said: what may be
+    /// removed in its place if Live won't undo it. Not kept past this Live connection: identities aren't either.
+    #[serde(skip)]
+    pub created: Option<String>,
 }
 impl Applied {
     pub fn new(record: ChangeRecord, transaction_id: String, restore: Option<Restore>) -> Self {
@@ -89,6 +93,7 @@ impl Applied {
             material: None,
             trimmed: None,
             shift: None,
+            created: None,
         }
     }
 }
@@ -655,6 +660,12 @@ impl History {
         Ok(None)
     }
     /// Keep what a change cut or deleted with its record, for Kumi's undo to make again.
+    /// Notes Live's identity for the device a change made.
+    pub fn made(&self, change: &str, identity: String) {
+        if let Some(entry) = self.entries.borrow().get(change) {
+            entry.borrow_mut().created = Some(identity);
+        }
+    }
     pub fn attach_material(&self, change: &str, material: Material) {
         if let Some(entry) = self.entries.borrow().get(change) {
             entry.borrow_mut().material = Some(material);

@@ -155,9 +155,20 @@ impl Rendering {
             self.rounds.set(0);
             self.best.set(None);
             // A judged run's changes are the ones since its last round: what the producer asked for in between isn't
-            // a round's to take back.
+            // a round's to take back. If that changed the sound, the run's numbers are out of date: its next judge hears
+            // its bars again first.
             let ids = self.applied_ids();
-            if let Some(run) = self.judge.borrow_mut().as_mut() {
+            let mut guard = self.judge.borrow_mut();
+            if let Some(run) = guard.as_mut() {
+                let between = self.applied_since(&run.checkpoint);
+                let audible = between.iter().any(|(id, _)| {
+                    self.history.entries.borrow().get(id).is_some_and(|entry| {
+                        !matches!(entry.borrow().record.family, ChangeFamily::Rename | ChangeFamily::Color | ChangeFamily::Locators)
+                    })
+                });
+                if audible {
+                    run.stale = true;
+                }
                 run.checkpoint = ids;
             }
         }

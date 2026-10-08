@@ -142,3 +142,28 @@ fn knob_text_reads_signs_decimal_commas_factors_and_quiet_ends() {
     let gain = Scale::read(&grid(&["-inf dB", "-90.0 dB", "-70.0 dB", "-40.0 dB", "0.00 dB", "6.00 dB"])).unwrap();
     assert_eq!(gain.range(), (-70., 6.));
 }
+
+#[test]
+fn a_device_and_a_track_are_compared_by_their_long_refs() {
+    use kumi_runtime::integrations::ableton::{mutations::same_track, references::References};
+    let mut book = References::default();
+    let track = book.short_ref("7:track:3");
+    let other = book.short_ref("7:track:4");
+    let device = book.short_ref("7:device:3:0");
+    // A short ref is a counter ("track:1" is the first one handed out), so it's read long first.
+    assert_eq!((track.as_str(), device.as_str()), ("track:1", "device:1"));
+    assert!(same_track(&book, &device, &track));
+    assert!(!same_track(&book, &device, &other));
+    assert!(!same_track(&book, &device, "track:9"));
+}
+
+#[test]
+fn a_true_peak_ceiling_is_homed_in_finer_than_a_decibel() {
+    // A limiter's ceiling at −0.5 dB lets peaks reach −0.3 dBTP; the aim is −1.2. The next probe is 0.9 dB away: under
+    // the knob's own 1 dB step, but over a true peak's 0.2 dB one, so it's heard.
+    let homing = Homing::new(-1.2, (-1.6, -1.), (-24., 0.), -0.5, Some(-0.3), 4).resolution(0.2);
+    let at = homing.next(Some(1.)).unwrap();
+    assert!((at + 1.4).abs() < 1e-9, "{at}");
+    let coarse = Homing::new(-1.2, (-1.6, -1.), (-24., 0.), -0.5, Some(-0.3), 4).resolution(1.);
+    assert_eq!(coarse.next(Some(1.)), Err(Homed::Stuck));
+}

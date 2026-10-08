@@ -87,11 +87,10 @@ pub struct JudgeRun {
     pub(super) round: u32,
     pub(super) listens: u32,
     pub(super) started: i64,
-    /// The devices on the run's track (Main without one) at the checkpoint: None when they couldn't be read, and then
-    /// nothing is removed.
-    pub(super) chain: Option<Vec<Placed>>,
-    /// Ended with done: its changes are no longer a round's to take back.
-    pub(super) over: bool,
+    /// Why the run is over, once it is (it ended with done): no change is judged against it after.
+    pub(super) ended: Option<String>,
+    /// Live changed under it (other requests in between): its numbers are out of date until it hears its bars again.
+    pub(super) stale: bool,
     /// Per checklist item, rounds in a row that went after it and were taken back.
     pub(super) misses: Vec<u32>,
     /// Per checklist item, where in the span (seconds from its start) a problem stands out most: its excerpt.
@@ -182,8 +181,8 @@ impl Rendering {
         };
         let goal = &goal;
         let heard = match self.judge_hear(track.as_deref(), goal.focus.as_deref(), span, signal.clone()).await? {
+            Ok(JudgeHeard { silent: Some(why), .. }) | Err(why) => return Ok(Err(why)),
             Ok(heard) => heard,
-            Err(why) => return Ok(Err(why)),
         };
         let offset = span.from * 60. / tempo;
         let mut problems = detect::harshness(&heard.main);
@@ -240,8 +239,8 @@ impl Rendering {
             round: 0,
             listens: 1,
             started,
-            chain: None,
-            over: false,
+            ended: None,
+            stale: false,
             misses: vec![],
             worst: vec![],
             rounds: vec![],
@@ -262,7 +261,6 @@ impl Rendering {
                 _ => None,
             })
             .collect();
-        run.chain = self.chain_now(run.track.as_deref(), signal.clone()).await.ok();
         run.target = run.checklist.next(&run.whole);
         run.window = self.excerpt_for(&run);
         // Before anything changes, the excerpt's "before" is cut from what was just heard.
@@ -322,11 +320,14 @@ impl Rendering {
         let (track, focus, window, target, state, checkpoint) = {
             let run = self.judge.borrow();
             let run = run.as_ref().unwrap();
-            if run.over {
-                return Ok(Err("That run is over (it ended with done): start a new one with a goal.".into()));
+            if let Some(why) = &run.ended {
+                return Ok(Err(format!("That run is over ({why}): start a new one with a goal.")));
             }
             (run.track.clone(), run.focus.clone(), run.window, run.target, run.state, run.checkpoint.clone())
         };
+        if self.judge.borrow().as_ref().unwrap().stale {
+            return self.rebaseline(signal).await;
+        }
         let before = {
             let run = self.judge.borrow();
             run.as_ref().unwrap().excerpts.iter().find(|excerpt| excerpt.window == window && excerpt.state == state).cloned()
@@ -349,7 +350,8 @@ impl Rendering {
             let mut guard = self.judge.borrow_mut();
             let run = guard.as_mut().unwrap();
             run.round += 1;
-            let after = run.checklist.read(&heard.main, heard.focus.as_ref());
+            // Silence after the change reads nothing: every reading lost, so it's taken back.
+            let after = heard.read(&run.checklist);
             // The whole stretch as it would be now: what the excerpt moved, moved there too.
             let predicted = judging::predict(&run.checklist, &run.whole, &before.values, &after);
             let gain = run.checklist.rebalance(&run.whole, &predicted);
@@ -423,18 +425,14 @@ impl Rendering {
             run.excerpts.push(Excerpt { window, state, values: excerpt.values, file, start: excerpt.start, loudness: excerpt.loudness });
         } else {
             // Kumi's undo takes the round's changes back (a rebalance's too), newest first.
-            let known = self.judge.borrow().as_ref().unwrap().chain.clone();
-            let words = judging::take_back(&host, &checkpoint, known.as_deref()).await;
+            let words = judging::take_back(&host, &checkpoint).await;
             verdict.why.push_str(&format!("; {words}"));
         }
         let ids = self.applied_ids();
-        let read = if stopped { self.cleanup() } else { signal.clone() };
-        let chain = self.chain_now(track.as_deref(), read).await.ok();
         let next_window = {
             let mut guard = self.judge.borrow_mut();
             let run = guard.as_mut().unwrap();
             run.checkpoint = ids;
-            run.chain = chain;
             // A target two changes in a row failed on waits while another gap is open.
             if let Some(index) = target {
                 run.misses[index] = if verdict.kept { 0 } else { run.misses[index] + 1 };
@@ -503,6 +501,78 @@ impl Rendering {
         Ok(Ok(round))
     }
 
+    /// A new baseline when Live changed under the run (other requests in between): its bars heard as they are now, the
+    /// whole stretch moved by what they moved, and HISTORY's changes so far taken as the run's starting point. Nothing
+    /// is judged (a change already made is in the new baseline); the round says so, and what's next.
+    pub(super) async fn rebaseline(self: &Rc<Self>, signal: Signal) -> Result<Result<Round, String>, RuntimeError> {
+        let (track, focus, window) = {
+            let run = self.judge.borrow();
+            let run = run.as_ref().unwrap();
+            (run.track.clone(), run.focus.clone(), run.window)
+        };
+        let heard = match self.judge_hear(track.as_deref(), focus.as_deref(), window, signal.clone()).await? {
+            Ok(JudgeHeard { silent: Some(why), .. }) | Err(why) => return Ok(Err(why)),
+            Ok(heard) => heard,
+        };
+        let file = self.keep_file(&heard.file).await;
+        let ids = self.applied_ids();
+        let round = {
+            let mut guard = self.judge.borrow_mut();
+            let run = guard.as_mut().unwrap();
+            run.listens += 1;
+            let values = heard.read(&run.checklist);
+            let before = run
+                .excerpts
+                .iter()
+                .find(|excerpt| excerpt.window == window && excerpt.state == run.state)
+                .map(|excerpt| excerpt.values.clone());
+            let was = run.whole.clone();
+            run.whole = match before {
+                Some(before) => judging::predict(&run.checklist, &run.whole, &before, &values),
+                None if window == run.span => values.clone(),
+                None => run.whole.clone(),
+            };
+            run.state += 1;
+            let state = run.state;
+            run.excerpts = vec![Excerpt { window, state, values, file, start: heard.start, loudness: heard.main.measures.integrated }];
+            run.checkpoint = ids;
+            run.stale = false;
+            let skip: Vec<usize> = run.misses.iter().enumerate().filter(|(_, misses)| **misses >= 2).map(|(index, _)| index).collect();
+            run.target = run.checklist.next_skipping(&run.whole, &skip);
+            run.window = self.excerpt_for(run);
+            let verdict = run.checklist.verdict(None, &was, &run.whole);
+            let round = Round {
+                round: run.round,
+                kind: RoundKind::Start,
+                heard: self.describe(window, run),
+                target: None,
+                change: None,
+                changes: vec![],
+                rows: verdict.rows,
+                kept: None,
+                why: Some(
+                    "Live changed since the run's last listen (other requests in between), so Kumi heard its bars again and starts from here: a change already made is in this baseline, not judged"
+                        .into(),
+                ),
+                rebalanced: None,
+                listener: None,
+                problems: vec![],
+                next: self.next_step(run),
+                met: run.target.is_none(),
+                listens: run.listens,
+                elapsed_ms: now_ms() - run.started,
+            };
+            run.rounds.push(round.clone());
+            round
+        };
+        // The next change is judged on its target's bars when their "before" can be heard now, else on these.
+        let next = self.judge.borrow().as_ref().unwrap().window;
+        if self.ensure_before(next, signal).await?.is_err() {
+            self.judge.borrow_mut().as_mut().unwrap().window = window;
+        }
+        Ok(Ok(round))
+    }
+
     /// The excerpt `window` as things stand, heard now unless it already has been in this state.
     pub(super) async fn ensure_before(self: &Rc<Self>, window: Window, signal: Signal) -> Result<Result<(), String>, RuntimeError> {
         let (known, track, focus) = {
@@ -518,8 +588,8 @@ impl Rendering {
             return Ok(Ok(()));
         }
         let heard = match self.judge_hear(track.as_deref(), focus.as_deref(), window, signal).await? {
+            Ok(JudgeHeard { silent: Some(why), .. }) | Err(why) => return Ok(Err(why)),
             Ok(heard) => heard,
-            Err(why) => return Ok(Err(why)),
         };
         let file = self.keep_file(&heard.file).await;
         let mut guard = self.judge.borrow_mut();
@@ -584,15 +654,15 @@ impl Rendering {
             (run.track.clone(), run.focus.clone(), run.span)
         };
         let heard = match self.judge_hear(track.as_deref(), focus.as_deref(), span, signal).await? {
+            Ok(JudgeHeard { silent: Some(why), .. }) | Err(why) => return Ok(Err(why)),
             Ok(heard) => heard,
-            Err(why) => return Ok(Err(why)),
         };
         let ids = self.applied_ids();
         let mut guard = self.judge.borrow_mut();
         let run = guard.as_mut().unwrap();
         run.listens += 1;
         // Over: what it kept stays, and nothing after is a round's to take back.
-        run.over = true;
+        run.ended = Some("it ended with done".into());
         run.checkpoint = ids;
         let now = run.checklist.read(&heard.main, heard.focus.as_ref());
         let verdict = run.checklist.verdict(None, &run.first, &now);
@@ -692,14 +762,14 @@ impl Rendering {
             }
         };
         let heard_main = measure(main.file.clone(), main.start).await?;
-        // Silence isn't a mix within tolerance: nothing was heard.
-        if heard_main.measures.integrated.is_none_or(|loudness| loudness < -70.) {
-            return Ok(Err(format!(
+        // Silence isn't a mix within tolerance: it reads nothing, and what that means is the caller's to say.
+        let silent = heard_main.measures.integrated.is_none_or(|loudness| loudness < -70.).then(|| {
+            format!(
                 "Kumi heard only silence from {}{}. Is Live's audio running, and is something playing there in the Arrangement?",
                 track.unwrap_or("the mix"),
                 if notes.is_empty() { String::new() } else { format!(" ({})", notes.join(" ")) }
-            )));
-        }
+            )
+        });
         let (heard_focus, focus_file) = match focus_name.clone().and_then(|name| files.get(&name).cloned()) {
             Some(render) => {
                 // Heard before its fader: as the mix hears it, at the fader's level (so turning it up reads as up).
@@ -710,7 +780,7 @@ impl Rendering {
             None => (None, None),
         };
         let file = self.keep_file(&PathBuf::from(&main.file)).await;
-        Ok(Ok(JudgeHeard { main: heard_main, focus: heard_focus, file, start: main.start, focus_file }))
+        Ok(Ok(JudgeHeard { main: heard_main, focus: heard_focus, file, start: main.start, focus_file, silent }))
     }
 
     /// A track's fader, dB as Live shows it (−inf reads as −120; None when Kumi can't read it).
@@ -1006,7 +1076,7 @@ impl RoundHost for InLive<'_> {
     async fn hear(&self) -> Result<Listen, Unheard> {
         match self.rendering.judge_hear(self.track.as_deref(), self.focus.as_deref(), self.window, self.signal.clone()).await {
             Ok(Ok(heard)) => {
-                let values = self.rendering.judge.borrow().as_ref().unwrap().checklist.read(&heard.main, heard.focus.as_ref());
+                let values = heard.read(&self.rendering.judge.borrow().as_ref().unwrap().checklist);
                 Ok(Listen { values, loudness: heard.main.measures.integrated, file: heard.file, start: heard.start })
             }
             Ok(Err(why)) => Err(Unheard { why, stopped: false }),
@@ -1026,8 +1096,12 @@ impl RoundHost for InLive<'_> {
             Err(error) => Err(head(&error.to_string(), 120)),
         }
     }
-    fn created_by(&self, changes: &[(String, String)]) -> usize {
-        self.rendering.created_by(changes)
+    fn made(&self, changes: &[(String, String)]) -> Vec<String> {
+        let entries = self.rendering.history.entries.borrow();
+        changes.iter().filter_map(|(id, _)| entries.get(id).and_then(|entry| entry.borrow().created.clone())).collect()
+    }
+    fn stopped(&self) -> bool {
+        self.signal.check().is_err()
     }
     async fn chain(&self) -> Result<Vec<Placed>, String> {
         self.rendering.chain_now(self.track.as_deref(), self.rendering.cleanup()).await.map_err(|error| head(&error.to_string(), 120))
@@ -1045,6 +1119,18 @@ pub(super) struct JudgeHeard {
     pub focus_file: Option<(PathBuf, f64)>,
     pub file: PathBuf,
     pub start: f64,
+    /// Silence came through (why that's a problem, said): nothing on the checklist can be read from it.
+    pub silent: Option<String>,
+}
+
+impl JudgeHeard {
+    /// What each checklist item reads: nothing at all from silence.
+    pub fn read(&self, checklist: &Checklist) -> Vec<Option<f64>> {
+        if self.silent.is_some() {
+            return vec![None; checklist.items.len()];
+        }
+        checklist.read(&self.main, self.focus.as_ref())
+    }
 }
 
 /// Devices by the name Live shows (its class when it has none).

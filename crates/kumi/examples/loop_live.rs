@@ -2,7 +2,8 @@
 //! with each judged round, tool call and answer printed as it happens. It uses the bridge from the same build and a
 //! throwaway folder for notes and recipes, so ~/.kumi isn't touched. It changes the open Set: use a disposable one.
 //!   cargo build --profile ci-release -p ableton-mcp-server --bins
-//!   cargo run --profile ci-release -p kumi --example loop_live -- --set "<Set name>" "<request>" ["<request>" …]
+//!   cargo run --profile ci-release -p kumi --example loop_live -- --set "<Set name>" [--listener] "<request>" […]
+//! With --listener, the judge asks the listening model as the app would (an OpenAI API key, or KUMI_LISTENER).
 use futures::FutureExt;
 use kumi::config::{find_bridge_config, load_inference_config, safe_error};
 use kumi_common::{
@@ -16,12 +17,13 @@ use kumi_runtime::{
         memory::MemoryStoreOptions,
     },
     create_ableton_integration, create_agent_kernel, create_memory_store, create_recipe_store, create_session,
-    integrations::ableton::{connection::Connect, AbletonOptions},
+    integrations::ableton::{connection::Connect, options::ListenerSource, AbletonOptions},
     kernel::agent::AgentKernelOptions,
     kernel::agent::ModelBinding,
+    listening::listener::{listener_from_env, listening_off, openai_listener, Listener},
     mcp::client,
     open_credential_store,
-    providers::{resolve_model, ResolveModelOptions},
+    providers::{api_key_for, resolve_model, ProviderId, ResolveModelOptions},
     system::process_env,
     ChangeRecord, IntegrationFactory, Kernel, KernelFactory, KernelOptions, RuntimeError, Session, SessionController, SessionEvent,
     SessionOptions, BRIDGE_TOOLS,
@@ -108,8 +110,13 @@ async fn run() -> Result<i32, RuntimeError> {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let at = argv.iter().position(|arg| arg == "--set").ok_or_else(|| RuntimeError::plain("Name the Set: --set \"<Set name>\""))?;
     let wanted = trim(argv.get(at + 1).map(String::as_str).unwrap_or("")).to_owned();
-    let prompts: Vec<String> =
-        argv.iter().enumerate().filter(|(index, _)| *index != at && *index != at + 1).map(|(_, prompt)| prompt.clone()).collect();
+    let listening = argv.iter().any(|arg| arg == "--listener");
+    let prompts: Vec<String> = argv
+        .iter()
+        .enumerate()
+        .filter(|(index, arg)| *index != at && *index != at + 1 && *arg != "--listener")
+        .map(|(_, prompt)| prompt.clone())
+        .collect();
     if wanted.is_empty() || prompts.is_empty() {
         return Err(RuntimeError::plain("Usage: loop_live --set \"<Set name>\" \"<request>\" [\"<request>\" …]"));
     }
@@ -145,6 +152,31 @@ async fn run() -> Result<i32, RuntimeError> {
         .await?,
     );
     println!("Model: {}", binding.id);
+    // The listening model, found as the app finds it.
+    let listener: Option<ListenerSource> = listening.then(|| {
+        let store = Rc::new(open_credential_store(&config.auth_file));
+        let env = env.clone();
+        Rc::new(move |signal: Signal| {
+            let (store, env) = (store.clone(), env.clone());
+            async move {
+                if listening_off(&env) {
+                    return None;
+                }
+                if let Some(listener) = listener_from_env(&env) {
+                    return Some(Rc::new(listener) as Rc<dyn Listener>);
+                }
+                let key = api_key_for(ProviderId::Openai, store.as_ref(), Some(&env)).await.ok().flatten()?.key;
+                openai_listener(&key, signal).await.map(|listener| Rc::new(listener) as Rc<dyn Listener>)
+            }
+            .boxed_local()
+        }) as ListenerSource
+    });
+    if let Some(find) = &listener {
+        match find(Signal::new()).await {
+            Some(found) => println!("Listening model: {}", found.name()),
+            None => println!("Listening model: none found (no OpenAI API key, and KUMI_LISTENER isn't set)"),
+        }
+    }
     let folder = tempfile::Builder::new().prefix("kumi-loop-live-").tempdir().map_err(|error| RuntimeError::plain(error.to_string()))?;
     let place = folder.path().to_path_buf();
     let controller = Rc::new(RefCell::new(None::<Weak<Session>>));
@@ -170,6 +202,7 @@ async fn run() -> Result<i32, RuntimeError> {
         let controller = controller.clone();
         Box::new(move |on_connection| {
             let mut options = AbletonOptions::new(on_connection);
+            options.listener = listener.clone();
             options.bridge_config = Some(bridge_config.clone());
             options.connect = Some(connect_to(bridge.clone(), bridge_config.clone()));
             let watch = |controller: &Rc<RefCell<Option<Weak<Session>>>>, event: WatchEvent| {

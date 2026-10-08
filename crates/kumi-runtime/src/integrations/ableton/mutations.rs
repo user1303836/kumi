@@ -368,6 +368,25 @@ impl Mutations {
             })
         });
         history.remember(record.clone(), transaction.into(), restore);
+        // The device a load or a duplicate made, by Live's identity for it: what may be removed if Live won't undo it.
+        if applied && matches!(kind.tool.as_str(), "load_device" | "duplicate_device" | "load_sample") {
+            let identity = [
+                result.get("deviceObjectIdentity"),
+                record_of(result.get("created")).get("deviceObjectIdentity"),
+                record_of(result.get("created")).get("objectIdentity"),
+                record_of(result.get("result")).get("objectIdentity"),
+            ]
+            .into_iter()
+            .flatten()
+            .find_map(|value| match value {
+                Value::String(text) if !text.is_empty() => Some(text.clone()),
+                Value::Number(number) => Some(number.to_string()),
+                _ => None,
+            });
+            if let Some(identity) = identity {
+                history.made(&record.id, identity);
+            }
+        }
         if let Some((mut material, clips)) = kept {
             let view = json!({"change":record.id,"tool":kind.tool,"track":material.track,"remnants":material.remnants});
             let remember = &history.remember;
@@ -745,6 +764,12 @@ fn restructure_shift(tool: &str, args: &JsonObject, preview: &JsonObject, result
     }
     (!shift.is_empty()).then_some(shift)
 }
+/// Whether a device is on a track, by their refs read long (a short ref is a counter, not a place).
+pub fn same_track(book: &super::references::References, device: &str, track: &str) -> bool {
+    let long = book.lengthen(&json!({"deviceRef":device,"trackRef":track}));
+    let (Some(device), Some(track)) = (long["deviceRef"].as_str(), long["trackRef"].as_str()) else { return false };
+    track.contains(":track:") && track_index_of(device).is_some_and(|index| Some(index) == track_index_of(track))
+}
 pub fn track_index_of(reference: &str) -> Option<f64> {
     static MATCH: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r":(?:track|clip_slot|clip|arrangement_clip|device|chain|drum_pad|routing_choice|take_lane|mixer):([0-9]+)").unwrap()
@@ -828,4 +853,9 @@ mod tests {
         assert_eq!(items(json!({"pads":(0..16).map(|n| json!({"note":n})).collect::<Vec<_>>()})), 16);
         assert_eq!(items(json!({"tempo":124})), 1);
     }
+}
+
+/// A JSON value as an object (an empty one when it isn't).
+fn record_of(value: Option<&Value>) -> JsonObject {
+    value.and_then(Value::as_object).cloned().unwrap_or_default()
 }
