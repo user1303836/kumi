@@ -183,11 +183,17 @@ async fn groove(live: Rc<Live>) -> Groove {
     observer.tempo.set(Some(120.));
     let made = Rc::new(RefCell::new(vec![]));
     let changes = made.clone();
+    let book = connection.clone();
     let rendering = Rendering::new(
         history.clone(),
         observer,
         &options,
         Rc::new(move |tool: String, input: JsonObject, _| {
+            // As Kumi's changes do: only what Live was read for in this answer can be named.
+            let long = book.references.borrow().lengthen(&Value::Object(input.clone()));
+            if let Err(stale) = book.references.borrow().require_fresh_references(long.as_object().unwrap()) {
+                return async move { Err(RuntimeError::plain(stale.0)) }.boxed_local();
+            }
             if tool == "change_notes" {
                 let mut notes = live.notes.borrow_mut();
                 let clip = notes.get_mut(input["clipRef"].as_str().unwrap()).unwrap();
@@ -311,6 +317,22 @@ async fn a_round_not_kept_takes_back_only_the_parts_note_edits_and_says_what_sta
             assert!(why.contains("no note changes on the part to take back"), "{why}");
             assert!(why.contains("left as they are (not note changes on the part): Bass volume -2 dB"), "{why}");
             assert!(round.changes.is_empty(), "{:?}", round.changes);
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_apply_in_a_later_answer_reads_the_clip_again() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let live = live(true);
+            let Groove { rendering, connection, made, .. } = groove(live.clone()).await;
+            rendering.groove(&request(json!({"clip":"7:clip:0:0","reference":"7:clip:1:0"})), Signal::new()).await.unwrap().unwrap();
+            // A new answer: what Live was read for in the last one can't be named until it's read again.
+            connection.discard_reads();
+            let round = rendering.groove(&request(json!({"apply":true})), Signal::new()).await.unwrap().unwrap();
+            assert_eq!(round.kept, Some(true), "{:?}", round.why);
+            assert_eq!(made.borrow().len(), 1);
         })
         .await;
 }

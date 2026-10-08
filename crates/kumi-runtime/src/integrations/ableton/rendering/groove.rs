@@ -216,6 +216,17 @@ impl Rendering {
         })
     }
 
+    /// The run's clip read again from Live (its row, by its slot or track), so this answer may change it.
+    async fn read_again(&self, clip: &str, signal: Signal) -> Result<(), RuntimeError> {
+        let Some((long, track)) = clip_and_track(self.connection(), clip) else { return Ok(()) };
+        let (kind, parent) = if long.contains(":arrangement_clip:") {
+            ("arrangement-clip", track)
+        } else {
+            ("session-clip", long.replacen(":clip:", ":clip_slot:", 1))
+        };
+        self.rows(kind, json!({"parent": parent, "fields": ["name"]}), signal).await.map(|_| ())
+    }
+
     /// How a clip's notes fall into lanes: by its track's Drum Rack, when it has one.
     async fn lanes_of(&self, clip: &str, signal: Signal) -> Kit {
         let Some((_, track)) = clip_and_track(self.connection(), clip) else { return Kit::pitched() };
@@ -431,7 +442,9 @@ impl Rendering {
                 return Ok(Err("The notes already sit where the reference's do; nothing to move.".into()));
             }
             let count = patches.len();
-            // One change, so Live takes all of it or none, and HISTORY takes it back as one.
+            // One change, so Live takes all of it or none, and HISTORY takes it back as one. Its clip is read again
+            // first: a change names only what Live was read for in this answer, and the run may have started in another.
+            self.read_again(&clip, signal.clone()).await?;
             self.step("change_notes", json!({"clipRef": clip, "notes": patches}), signal.clone()).await?;
             change = Some(format!(
                 "{}moved {count} notes {}toward the reference's timing and accents",
