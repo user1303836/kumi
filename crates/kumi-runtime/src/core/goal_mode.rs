@@ -4,7 +4,7 @@
 //! (never discarding what's done), and is kept on disk so it survives a restart. The listen, assess, adjust loop is one
 //! of its tools: a turn that starts a judged run runs the loop inside it.
 
-use super::errors::RuntimeError;
+use super::errors::{FailureKind, RuntimeError};
 use crate::listening::round::{Round, RoundKind};
 use async_trait::async_trait;
 use regex::Regex;
@@ -17,7 +17,8 @@ use tokio::io::AsyncWriteExt;
 pub struct ObjectiveBudget {
     pub turns: u32,
     pub ms: i64,
-    /// Turns in a row with no change in the Set and no progress on a checklist before it counts as stuck.
+    /// Turns in a row without progress before it counts as stuck: a judged turn progresses when it closes the gap by
+    /// a step or more, an unjudged one when it changes the Set.
     pub idle: u32,
 }
 pub const OBJECTIVE_BUDGET: ObjectiveBudget = ObjectiveBudget { turns: 12, ms: 60 * 60_000, idle: 3 };
@@ -68,7 +69,7 @@ pub struct Objective {
     pub elapsed_ms: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last: Option<Check>,
-    /// Turns in a row that changed nothing.
+    /// Turns in a row without progress.
     #[serde(default)]
     pub idle: u32,
 }
@@ -253,18 +254,19 @@ impl ObjectiveStore for FileObjectiveStore {
     }
 }
 
-/// After a turn: the check, with the budget and progress rules applied (code decides, not the model).
-pub fn after_turn(objective: &mut Objective, check: Check, changed: bool, elapsed_ms: i64) -> Check {
+/// After a turn: the check, with the budget and progress rules applied (code decides, not the model). `progress`: the
+/// turn closed the judge's gap by a step or more, or (when nothing was judged) changed the Set.
+pub fn after_turn(objective: &mut Objective, check: Check, progress: bool, elapsed_ms: i64) -> Check {
     objective.turns += 1;
     objective.elapsed_ms = elapsed_ms;
-    objective.idle = if changed || check.measured { 0 } else { objective.idle + 1 };
+    objective.idle = if progress { 0 } else { objective.idle + 1 };
     let check = match check.verdict {
         Verdict::Complete | Verdict::Blocked => check,
         // Out of budget: what's still off stays the reason, so the status and a resume say where it got.
         _ if objective.turns >= objective.budget.turns || elapsed_ms >= objective.budget.ms => Check { verdict: Verdict::Budget, ..check },
         _ if objective.idle >= objective.budget.idle => Check {
             verdict: Verdict::Stuck,
-            reason: format!("{} turns in a row changed nothing", objective.idle),
+            reason: format!("{} turns in a row got no closer", objective.idle),
             next: check.next.clone(),
             measured: check.measured,
         },
@@ -278,4 +280,27 @@ pub fn after_turn(objective: &mut Objective, check: Check, changed: bool, elapse
     };
     objective.last = Some(check.clone());
     check
+}
+
+/// A turn's or a check's error as the goal's last check: one the producer must fix first (sign in, billing, the model,
+/// Kumi's settings, Live) stops it as blocked, naming what to do; any other pauses it, for /goal resume.
+pub fn error_check(error: &RuntimeError) -> Check {
+    let reason = kumi_common::js::string::head(&error.message(), 200);
+    let fix = match error.kumi().map(|kumi| kumi.kind) {
+        Some(FailureKind::Auth) => Some("sign in again (/login)"),
+        Some(FailureKind::Billing) => Some("sort out the provider account's billing or credits, or choose another model (/model)"),
+        Some(FailureKind::Model) => Some("choose another model (/model)"),
+        Some(FailureKind::Config) => Some("fix the setting the error names"),
+        Some(FailureKind::Live) => Some("check that Live is open with Kumi's bridge"),
+        _ => None,
+    };
+    match fix {
+        Some(fix) => Check { verdict: Verdict::Blocked, reason, next: Some(format!("{fix}, then /goal resume")), measured: false },
+        None => Check { verdict: Verdict::Continue, reason, next: None, measured: false },
+    }
+}
+
+/// A command's words as a subcommand: any case, trailing punctuation and extra spaces aside (`Pause.` is `pause`).
+pub fn command_word(words: &str) -> String {
+    words.split_whitespace().collect::<Vec<_>>().join(" ").trim_end_matches(|c: char| c.is_ascii_punctuation()).trim().to_lowercase()
 }

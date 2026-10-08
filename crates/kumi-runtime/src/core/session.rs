@@ -225,14 +225,28 @@ struct State {
     goal_reference: Option<String>,
     /// The judge's last round this session: what /goal and the loop check after a turn.
     judged_last: Option<crate::listening::round::Round>,
-    /// The loop running this turn (an explicit /loop, a request that calls for it, or the model's own judged run).
+    /// The loop running this turn (an explicit /loop, a request that calls for it, or the model's own judged change).
     looping: Option<Rc<RefCell<super::loop_run::LoopRun>>>,
+    /// A judged run's first listen, kept until the model judges a change (which starts the loop with it).
+    judge_start: Option<crate::listening::round::Round>,
+    /// What the judge's kept changes closed, in steps, and how many rounds it logged: a goal's turn progresses when
+    /// it closes a step or more.
+    judged_closed: f64,
+    judged_count: u64,
     /// The request of the turn running now, for a loop the model starts by judging.
     turn_request: Option<String>,
     /// The /goal objective for a place (the Set it belongs to), and the operation pursuing it.
     objective: Option<(String, super::goal_mode::Objective)>,
     objective_op: Option<Rc<Operation>>,
     objective_stopped: bool,
+    /// When the running goal's time is up (ms since the epoch): a loop inside it ends by then.
+    objective_until: Option<i64>,
+    /// A goal's self-check is being asked: the producer's messages wait for the next turn.
+    checking: bool,
+    /// The producer's messages taken into an answer (steering): a goal pauses after a turn that took one.
+    steers: u64,
+    /// A new goal's words, held back once because an unfinished goal would be replaced: sent again, they replace it.
+    pending_goal: Option<String>,
     /// Changes applied this session, to tell a goal's turn that changed something from one that didn't.
     applied: u64,
     state: TurnState,
@@ -301,6 +315,14 @@ struct Inner {
 pub struct Session(Rc<Inner>);
 fn now() -> i64 {
     chrono::Utc::now().timestamp_millis()
+}
+/// A loop's budget: its own, but no longer than the goal it runs in has left.
+fn loop_budget(until: Option<i64>) -> super::loop_run::LoopBudget {
+    let budget = super::loop_run::LOOP_BUDGET;
+    match until {
+        Some(until) => super::loop_run::LoopBudget { ms: budget.ms.min((until - now()).max(0)), ..budget },
+        None => budget,
+    }
 }
 fn ready() -> Done {
     async { Ok(()) }.boxed_local().shared()
@@ -593,10 +615,17 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                 goal_reference: None,
                 judged_last: None,
                 looping: None,
+                judge_start: None,
+                judged_closed: 0.,
+                judged_count: 0,
                 turn_request: None,
                 objective: None,
                 objective_op: None,
                 objective_stopped: false,
+                objective_until: None,
+                checking: false,
+                steers: 0,
+                pending_goal: None,
                 applied: 0,
                 state: TurnState::Idle,
                 connection: ConnectionState::Disconnected,
@@ -1213,6 +1242,10 @@ impl Session {
                 };
                 self.enqueue(async move { store.move_conversation(&id, UNSAVED, &to).await });
             }
+            // Its goal goes with it, so the next new Set doesn't find it.
+            if let Some(project) = &snapshot.project {
+                self.move_unsaved_objective(&project.id);
+            }
         }
         self.0.state.borrow_mut().observation = Some(snapshot.label.clone());
         self.emit(SessionEvent::Observation { label: snapshot.label.clone() });
@@ -1471,17 +1504,34 @@ impl KernelTool for LoopGuard {
         self.tool.input_schema()
     }
     async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
-        let ending = matches!(self.tool.name(), "judge" | "groove") && input.get("done") == Some(&Value::Bool(true));
-        let starting = input.get("goal").is_some() || input.get("reference").is_some();
-        let over = self.session.upgrade().and_then(|inner| {
+        let name = self.tool.name();
+        let ending = matches!(name, "judge" | "groove") && input.get("done") == Some(&Value::Bool(true));
+        let starting = match name {
+            "judge" => input.contains_key("goal"),
+            "groove" => input.contains_key("reference") || input.contains_key("clip"),
+            _ => false,
+        };
+        // Code decides the loop, not the model: once over, only the run's end; while it goes, its checklist stands
+        // and the run ends when Kumi asks.
+        let held = self.session.upgrade().and_then(|inner| {
             let s = inner.state.borrow();
-            s.looping.as_ref().and_then(|run| run.borrow().over())
+            let run = s.looping.as_ref()?.borrow();
+            if let Some(why) = run.over() {
+                return (!ending).then(|| format!(
+                    "Kumi's loop is over: {why}. End the run with judge done: true (one last listen to the whole stretch), then tell the producer what changed and what's still off."
+                ));
+            }
+            if starting && run.started() {
+                return Some("Kumi's loop already has its checklist: work toward it, one change at a time, judging each (judge with change). Kumi decides when the loop stops.".into());
+            }
+            if ending {
+                return run.holds_done();
+            }
+            None
         });
-        match over {
-            Some(why) if !ending && !starting => Ok(ToolResult::error(format!(
-                "Kumi's loop is over: {why}. End the run with judge done: true (one last listen to the whole stretch), then tell the producer what changed and what's still off."
-            ))),
-            _ => self.tool.execute(input, signal).await,
+        match held {
+            Some(why) => Ok(ToolResult::error(why)),
+            None => self.tool.execute(input, signal).await,
         }
     }
 }
@@ -1607,7 +1657,9 @@ impl SessionController for Session {
     fn steer(&self, text: &str) -> bool {
         let held = {
             let s = self.0.state.borrow();
+            // A goal's self-check isn't the place for the producer's words: they wait for the next turn.
             if s.state == TurnState::Closed
+                || s.checking
                 || !s.active.as_ref().is_some_and(|op| op.is_turn && op.phase.get() == Phase::Inference)
                 || trim(text).is_empty()
                 || text.len() > 16 * 1024
@@ -1618,6 +1670,7 @@ impl SessionController for Session {
         };
         let steered = held.is_some_and(|h| h.value.has_steer() && h.value.steer(text));
         if steered {
+            self.0.state.borrow_mut().steers += 1;
             if let Some(taste) = &self.0.taste {
                 taste.steered(text);
             }
@@ -1807,11 +1860,27 @@ impl SessionController for Session {
             }
             WatchEvent::Action(_) => return,
             WatchEvent::Judged(round) => {
+                use crate::listening::round::RoundKind;
                 let mut s = self.0.state.borrow_mut();
+                s.judged_count += 1;
+                if round.kind == RoundKind::Judged && round.kept == Some(true) {
+                    s.judged_closed += round.rows.iter().map(|row| row.gap_before - row.gap_after).sum::<f64>();
+                }
                 // The model judging a change in a turn of its own starts the loop: Kumi judged the request needs it.
+                // A run that only measured doesn't; its first listen joins the loop if one starts.
                 if s.looping.is_none() && s.active.is_some() && s.matching.is_none() {
-                    let request = s.turn_request.clone().unwrap_or_default();
-                    s.looping = Some(Rc::new(RefCell::new(super::loop_run::LoopRun::new(request, super::loop_run::LOOP_BUDGET))));
+                    match round.kind {
+                        RoundKind::Start => s.judge_start = Some(round.clone()),
+                        RoundKind::Judged => {
+                            let request = s.turn_request.clone().unwrap_or_default();
+                            let mut run = super::loop_run::LoopRun::new(request, loop_budget(s.objective_until));
+                            if let Some(start) = s.judge_start.take() {
+                                run.judged(start);
+                            }
+                            s.looping = Some(Rc::new(RefCell::new(run)));
+                        }
+                        RoundKind::Done => s.judge_start = None,
+                    }
                 }
                 if let Some(run) = &s.looping {
                     run.borrow_mut().judged(round.clone());
@@ -2102,13 +2171,18 @@ impl SessionController for Session {
                 self.notice("No goal yet: /goal and what to reach, such as /goal master this to -9 LUFS with the vocal cutting through.");
                 Ok(())
             }
+            objective::GoalCommand::Say(text) => {
+                self.notice(text);
+                Ok(())
+            }
             objective::GoalCommand::Run(objective, fresh) => {
                 {
                     let mut s = self.0.state.borrow_mut();
                     s.turns += 1;
                     s.interrupted = None;
                 }
-                let input = format!("/goal {}", objective.objective);
+                // Offered again after Live comes back, it carries the goal on (its turns and budget kept).
+                let input = "/goal resume".to_string();
                 self.perform(
                     true,
                     Phase::Refresh,
@@ -2134,6 +2208,18 @@ impl SessionController for Session {
         true
     }
     async fn stop_loop(&self) -> Result<bool, RuntimeError> {
+        // A running judged loop (a goal's too) stops as Esc stops it, first; a sound-match search, running or paused,
+        // ends for good.
+        let running = {
+            let s = self.0.state.borrow();
+            let searching = s.goal_op.as_ref().is_some_and(|op| s.active.as_ref().is_some_and(|a| a.id == op.id));
+            s.active.clone().filter(|op| !searching && op.is_turn && (s.looping.is_some() || s.objective_op.is_some()))
+        };
+        if let Some(op) = running {
+            op.signal.cancel();
+            let _ = op.done.clone().await;
+            return Ok(true);
+        }
         self.stop_goal_inner().await
     }
     fn has_goal_status(&self) -> bool {

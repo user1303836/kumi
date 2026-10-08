@@ -383,19 +383,26 @@ change only if it got closer without anything else moving away.
 
 `/loop` and what to reach works in rounds until it's met: one change, judged,
 then the next target. Kumi decides when it stops, not the model: every item
-within tolerance, changes no longer helping, or 16 rounds or 45 minutes. It ends
-with one more listen to the whole stretch and what changed. Kumi starts the same
-loop by itself when a request needs it. Esc stops it, and what's kept stays.
+within tolerance, changes no longer helping, or 16 rounds or 45 minutes. Its
+checklist stays as first set, and the model ends the run only when Kumi asks:
+one more listen to the whole stretch and what changed. Kumi starts the same loop
+by itself when the model judges a change of its own (measuring alone starts
+nothing). Esc or `/loop stop` stops it, and what's kept stays.
 
 `/goal` and what to reach keeps at one goal across turns until it's met. After
 every turn Kumi checks it: by the judge's numbers when it measured, otherwise by
 the model's own check, which must say complete, blocked (and what you must do
 first) or continue (and the next step). It stops at 12 turns, an hour, or three
-turns in a row that changed nothing, saying how far it got. The GOAL tab shows
-the goal, its turns and time against the budget, the last check and what's
-next. `/goal` alone shows it; `/goal edit <words>` changes it, `/goal resume`
-carries on (with a fresh budget), `/goal pause` or Esc pauses it, and
-`/goal clear` ends it. A goal is kept with its Set, so it's still there after a
+turns in a row that got no closer (by the judge's numbers, a step or more;
+otherwise, a change in the Set), saying how far it got. An error you must fix
+(sign-in, billing, the model, a setting, Live) stops it as blocked, naming what
+to do. A message of yours while it runs is answered, then the goal waits for
+you. The GOAL tab shows the goal, its turns and time against the budget, the
+last check and what's next. `/goal` alone shows it; `/goal edit <words>` changes
+it, `/goal resume` carries on (with a fresh budget), `/goal pause` or Esc pauses
+it, and `/goal clear` ends it. Another `/goal` while one is unfinished asks
+first: send it again, or `/goal new <words>`, to replace it. A goal is kept with
+its Set (it moves with an unsaved Set's first save), so it's still there after a
 restart.
 
 ## Matching a reference

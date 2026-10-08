@@ -2,6 +2,7 @@
 use super::*;
 use crate::core::{
     evolve::{Evolution, NewSlot, TrialHow, EVOLVE},
+    goal_mode::command_word,
     loop_run::{loop_setup, wants_loop, LoopRun, LOOP_BUDGET, LOOP_HINT},
     match_run::{starts_match, MatchBudget, MatchDecision, MatchRun, MatchState, MatchStop, KEEP_GOING, MATCH_BUDGET},
     playbook::{lesson_from, lesson_line, playbook_brief, PlaybookStore, Reaction},
@@ -22,8 +23,13 @@ pub(super) fn add_usage(to: &mut Usage, from: Option<&Usage>) {
     }
 }
 impl Operation {
+    /// Lets the operation run `ms` from now, never less than it was let already (a loop inside a goal keeps the goal's).
     pub(super) fn extend(&self, ms: u64) {
-        self.limit.set(Some(Instant::now() + Duration::from_millis(ms)));
+        let until = Instant::now() + Duration::from_millis(ms);
+        if self.limit.get().is_some_and(|limit| limit >= until) {
+            return;
+        }
+        self.limit.set(Some(until));
         self.changed.notify_one();
     }
 }
@@ -131,14 +137,24 @@ impl Session {
         let searching = self.0.state.borrow().integration.as_ref().is_some_and(|i| i.has_goal());
         if let Some(request) = text.strip_prefix("/loop").filter(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace)).map(trim)
         {
-            if request.is_empty() || matches!(request.to_lowercase().as_str(), "resume" | "carry on" | "continue") {
+            let word = command_word(request);
+            if request.is_empty() || matches!(word.as_str(), "resume" | "carry on" | "continue") {
                 if searching && self.goal_paused_here().await {
                     return self.run_goal(op, None).await;
                 }
                 self.notice("Nothing to pick up here. Say what to reach: /loop and the goal, such as /loop master this to -9 LUFS with the vocal cutting through.");
                 return Ok(None);
             }
-            if searching && starts_match(request) {
+            // Its control words are never a request: nothing is running now (Esc or /loop stop stops a running loop).
+            if matches!(word.as_str(), "stop" | "end" | "cancel" | "pause") {
+                if word != "pause" && searching && self.stop_goal_inner().await? {
+                    return Ok(None);
+                }
+                self.notice(if word == "pause" { "There's no loop running to pause." } else { "There's no loop to stop." });
+                return Ok(None);
+            }
+            // A request the judge measures (mastering, the mix) runs in judged rounds, even with a reference in it.
+            if searching && starts_match(request) && !wants_loop(request) {
                 return self.run_goal(op, Some(request.to_owned())).await;
             }
         }
@@ -152,6 +168,12 @@ impl Session {
             None => String::new(),
         };
         let budget = self.0.options.match_budget.unwrap_or(MATCH_BUDGET);
+        // The loop: an explicit /loop, or a request that calls for it (the model judging a change starts one too).
+        let explicit = text
+            .strip_prefix("/loop")
+            .filter(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+            .map(|rest| trim(rest).to_owned());
+        let judged_loop = explicit.as_deref().is_some_and(wants_loop);
         let carried =
             self.0.options.matching && !starts_match(&text) && KEEP_GOING.is_match(&text) && self.0.state.borrow().last_run.is_some();
         if !carried {
@@ -159,7 +181,7 @@ impl Session {
         }
         let run = if !self.0.options.matching {
             None
-        } else if starts_match(&text) {
+        } else if starts_match(&text) && !judged_loop {
             Some(Rc::new(RefCell::new(MatchRun::new(&text, budget))))
         } else if carried {
             let previous = self.0.state.borrow().last_run.clone().unwrap();
@@ -170,11 +192,6 @@ impl Session {
         } else {
             None
         };
-        // The loop: an explicit /loop, or a request that calls for it (the model judging a change starts one too).
-        let explicit = text
-            .strip_prefix("/loop")
-            .filter(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
-            .map(|rest| trim(rest).to_owned());
         let looping = (run.is_none() && explicit.is_some())
             .then(|| Rc::new(RefCell::new(LoopRun::new(explicit.clone().unwrap_or_else(|| text.clone()), LOOP_BUDGET))));
         // A request the judge can measure gets a hint to work in judged rounds; the model decides, and its own judge
@@ -187,16 +204,18 @@ impl Session {
             }
             s.matching = run.clone();
             s.looping = looping;
+            s.judge_start = None;
             s.turn_request = Some(explicit.clone().unwrap_or_else(|| text.clone()));
+        }
+        // What the producer asked (an explicit /loop's request, not Kumi's words around it). A match run goes on by
+        // itself: its words aren't a reaction.
+        if let Some(taste) = &self.0.taste {
+            taste.turn_started(explicit.as_deref().unwrap_or(&text), run.is_none());
         }
         let text = match &explicit {
             Some(request) => loop_setup(request),
             None => text,
         };
-        // A match run goes on by itself: its words aren't a reaction.
-        if let Some(taste) = &self.0.taste {
-            taste.turn_started(&text, run.is_none());
-        }
         let brief = if run.is_some() && !carried {
             playbook_brief(&self.playbook_serial(|s| async move { s.list().await }.boxed_local()).await.unwrap_or_default(), &text, 5)
         } else {

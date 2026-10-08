@@ -609,16 +609,22 @@ impl TuiApp {
             self.hold(raw, when);
             return Ok(());
         }
-        if command == "/goal pause" {
+        // /goal's and /loop's control words, in any case and with trailing punctuation: never a goal or a request.
+        let goal_word = subcommand(command, "/goal");
+        let loop_word = subcommand(command, "/loop");
+        if matches!(goal_word.as_deref(), Some("pause" | "hold")) || loop_word.as_deref() == Some("pause") {
             self.clear_editor();
             if self.busy() {
                 self.cancel();
             } else {
-                self.notice("There's no goal running to pause.", NoticeTone::Info);
+                self.notice(
+                    if loop_word.is_some() { "There's no loop running to pause." } else { "There's no goal running to pause." },
+                    NoticeTone::Info,
+                );
             }
             return Ok(());
         }
-        if matches!(command, "/goal stop" | "/goal end" | "/goal clear") && controller.has_stop_goal() {
+        if matches!(goal_word.as_deref(), Some("stop" | "end" | "clear" | "cancel" | "done")) && controller.has_stop_goal() {
             self.clear_editor();
             if !controller.stop_goal().await? {
                 self.notice("There's no goal to stop.", NoticeTone::Info);
@@ -626,7 +632,7 @@ impl TuiApp {
             return Ok(());
         }
         // A loop ends as Esc ends it; a sound-match search ends for good (paused ones too) and keeps its best.
-        if command == "/loop stop" {
+        if matches!(loop_word.as_deref(), Some("stop" | "end" | "cancel")) {
             self.clear_editor();
             if !(controller.has_stop_loop() && controller.stop_loop().await?) {
                 if self.busy() {
@@ -1005,3 +1011,10 @@ pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/help", about: "Keys and commands" },
     Command { name: "/quit", about: "Close Kumi" },
 ];
+
+/// A command's subcommand words, read as the session reads them (any case, trailing punctuation aside): `/goal Pause.`
+/// is `pause`. None when the line isn't that command.
+fn subcommand(command: &str, name: &str) -> Option<String> {
+    let rest = command.strip_prefix(name)?;
+    (rest.is_empty() || rest.starts_with(char::is_whitespace)).then(|| kumi_runtime::core::goal_mode::command_word(rest))
+}

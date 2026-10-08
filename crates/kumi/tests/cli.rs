@@ -224,8 +224,11 @@ case!(live_binding_passes_callbacks_and_stores_to_native_session, async {
     f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false}));
     let called = Rc::new(Cell::new(false));
     let mark = called.clone();
+    let judged = Rc::new(RefCell::new(None));
+    let tell = judged.clone();
     let factory: AbletonFactory = Rc::new(move |options| {
         mark.set(true);
+        *tell.borrow_mut() = options.on_judge.clone();
         assert!(options.bridge_config.is_some());
         assert!(options.project_store.is_some());
         assert!(options.restore_file.as_ref().unwrap().ends_with("audition-restore.json"));
@@ -238,18 +241,45 @@ case!(live_binding_passes_callbacks_and_stores_to_native_session, async {
                 && options.on_watch.is_some()
                 && options.on_catch_up.is_some()
                 && options.on_audition.is_some()
+                && options.on_judge.is_some()
         );
         let connection = options.on_connection;
         create_inference_only_integration(Rc::new(move |state| connection(state, None)))
     });
     let task = tokio::task::spawn_local(run(f.io(&["--bridge-config", config.to_str().unwrap()]), factory));
     f.input.wait_ready().await;
+    // The judge's rounds reach the session (the loop's decisions) and the screen.
+    let on_judge = judged.borrow().clone().expect("the judge's callback");
+    on_judge(judged_round());
+    f.wait_output("[judged] Round 1 · loudness").await;
+    f.wait_output("[judged]   kept: loudness improved").await;
     f.input.write("/quit\n");
     f.input.end();
     assert_eq!(tokio::time::timeout(std::time::Duration::from_secs(10), task).await.unwrap().unwrap(), 0);
     assert!(called.get());
     assert!(f.err.0.borrow().is_empty());
 });
+fn judged_round() -> kumi_runtime::listening::round::Round {
+    use kumi_runtime::listening::round::{Round, RoundKind};
+    Round {
+        round: 1,
+        kind: RoundKind::Judged,
+        heard: "the mix, bars 1–9".into(),
+        target: Some("Loudness".into()),
+        change: None,
+        changes: vec![],
+        rows: vec![],
+        kept: Some(true),
+        why: Some("loudness improved".into()),
+        rebalanced: None,
+        listener: None,
+        problems: vec![],
+        next: None,
+        met: false,
+        listens: 2,
+        elapsed_ms: 0,
+    }
+}
 case!(a_database_that_cant_open_leaves_notes_in_their_files_and_says_so, async {
     let f = Fixture::new(false);
     f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"libraryFolders":[]}));

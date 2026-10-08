@@ -63,8 +63,8 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | `/fast` | 当提供方在列表中提供时，开启模型的更快档位（ChatGPT 的“Fast”：回答更快，用量也更多）；再次输入 `/fast` 关闭。模型名旁会显示“· fast” |
 | `/willington` | 开启或关闭 [Willington](WILLINGTON_INTEGRATION.md)。在支持的构建上请求机架绑定；片段 Follow Actions 和原生编辑还要求通过匹配实际库的自测。原生编辑仅支持 b5 macOS ARM64。启用前保持关闭；桥接包含 Willington 时可用。 |
 | `/login`、`/logout` | 登录（在浏览器中用 ChatGPT 登录，或输入只显示为圆点的 API 密钥）或退出登录 |
-| `/loop <what to reach>` | 按判定的轮次工作直到达成：一次修改，听修改前后，只有其他方面没变差才保留，然后下一个目标。要匹配某个声音（“让我的 pad 听起来像 ~/ref.wav”）时改为旋钮搜索：单独输入 `/loop` 继续已暂停的搜索，`/loop stop` 结束它 |
-| `/goal <what to reach>` | 跨多个回合坚持一个目标，每个回合后检查（测量过时看判定的数值），直到达成、受阻或用完预算。`/goal` 显示它；`/goal resume`、`/goal edit <words>`、`/goal pause`（或 Esc）、`/goal clear` |
+| `/loop <what to reach>` | 按判定的轮次工作直到达成：一次修改，听修改前后，只有其他方面没变差才保留，然后下一个目标；按 Esc 或 `/loop stop` 停止。要匹配某个声音（“让我的 pad 听起来像 ~/ref.wav”）时改为旋钮搜索：单独输入 `/loop` 继续已暂停的搜索，`/loop stop` 结束它 |
+| `/goal <what to reach>` | 跨多个回合坚持一个目标，每个回合后检查（测量过时看判定的数值），直到达成、受阻或用完预算。`/goal` 显示它；`/goal resume`、`/goal edit <words>`、`/goal new <words>`（替换未完成的目标）、`/goal pause`（或 Esc）、`/goal clear` |
 | `/memory` | Kumi 记住的一切：关于你和本工程的笔记、从你的工程中学到的东西、技巧、配方和经验；选择一项即可让它忘掉（笔记还可以修改文字或置顶，配方可以运行或忘掉） |
 | `/note <id> <new words>` | 不经模型修改一条笔记的文字；在 `/memory` 中选择笔记的 “Change the words” 会替你开头 |
 | `/recipes` | 你的配方：运行或忘掉一个。有空位的配方会写好一行 `/recipe`，填上已固定的对象，由你补完 |

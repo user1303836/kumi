@@ -53,6 +53,8 @@ struct Record {
     /// Reading the Set waits until the operation is stopped.
     observe_holds: Cell<bool>,
     audio_resolved: RefCell<Vec<String>>,
+    /// The producer's messages the kernel took while it answered.
+    steered: RefCell<Vec<String>>,
 }
 struct TestKernel {
     record: Rc<Record>,
@@ -90,6 +92,13 @@ impl Kernel for TestKernel {
     }
     fn transcript(&self) -> Vec<TranscriptLine> {
         transcript_of(&self.history.borrow())
+    }
+    fn has_steer(&self) -> bool {
+        true
+    }
+    fn steer(&self, text: &str) -> bool {
+        self.record.steered.borrow_mut().push(text.into());
+        true
     }
     fn has_aside(&self) -> bool {
         true
@@ -1793,8 +1802,11 @@ local_test!(goal_full_length_checks_control_reported_scores_and_time_cap, {
     h.session.close().await.unwrap();
 });
 use kumi_runtime::{
-    core::goal_mode::{
-        create_objective_store, ObjectiveBudget, ObjectiveState, ObjectiveStatus, ObjectiveStore, Verdict, OBJECTIVE_BUDGET,
+    core::{
+        goal_mode::{
+            create_objective_store, Objective, ObjectiveBudget, ObjectiveState, ObjectiveStatus, ObjectiveStore, Verdict, OBJECTIVE_BUDGET,
+        },
+        loop_run::LoopState,
     },
     listening::round::{Round, RoundKind},
 };
@@ -1978,6 +1990,398 @@ local_test!(a_goal_with_a_judged_run_is_checked_on_the_judges_numbers_and_the_lo
     assert_eq!((last.state, last.verdict, last.measured), (ObjectiveState::Done, Some(Verdict::Complete), true));
     assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Loop(status) if status.rounds == 2 && status.kept == 2)));
     h.session.close().await.unwrap();
+});
+/// A tool the loop guard holds (judge, tune): what reached it.
+struct Guarded {
+    name: &'static str,
+    ran: Rc<RefCell<Vec<String>>>,
+}
+#[async_trait(?Send)]
+impl KernelTool for Guarded {
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn description(&self) -> &str {
+        "Guarded."
+    }
+    fn input_schema(&self) -> JsonObject {
+        json!({"type":"object"}).as_object().unwrap().clone()
+    }
+    async fn execute(&self, input: JsonObject, _: Signal) -> Result<ToolResult, RuntimeError> {
+        self.ran.borrow_mut().push(format!("{} {}", self.name, input.keys().cloned().collect::<Vec<_>>().join(",")));
+        Ok(ToolResult::text("ok"))
+    }
+}
+local_test!(a_loops_checklist_and_end_are_kumis_and_once_over_only_the_runs_end_goes_through, {
+    let ran = Rc::new(RefCell::new(vec![]));
+    let refused = Rc::new(RefCell::new(vec![]));
+    let held = Rc::new(RefCell::new(None::<(Session, Rc<Record>)>));
+    let (active, said) = (held.clone(), refused.clone());
+    let run: Run = Rc::new(move |input, _, emit| {
+        let (session, record) = active.borrow().clone().unwrap();
+        let said = said.clone();
+        async move {
+            if !input.starts_with("[Kumi loop] master this to -9 LUFS") {
+                emit(KernelEvent::Text { text: "Done.".into() })?;
+                return Ok(complete());
+            }
+            let tools = record.created.borrow().last().unwrap().tools.clone();
+            let call = |name: &str, input: Value| {
+                let tool = tools.iter().find(|tool| tool.name() == name).unwrap().clone();
+                async move { tool.execute(input.as_object().unwrap().clone(), Signal::new()).await.unwrap() }
+            };
+            let refusal = |result: ToolResult| {
+                if result.is_error {
+                    said.borrow_mut().push(result.text);
+                }
+            };
+            // A run starts and a change is judged: the loop holds its checklist and its end.
+            refusal(call("judge", json!({"goal": {"loudness": -9}})).await);
+            session.watch(WatchEvent::Judged(round(0, RoundKind::Start, false)));
+            refusal(call("judge", json!({"change": "Limiter gain +2 dB"})).await);
+            session.watch(WatchEvent::Judged(round(1, RoundKind::Judged, false)));
+            refusal(call("judge", json!({"goal": {"loudness": -10}})).await);
+            refusal(call("judge", json!({"done": true})).await);
+            // Met: the loop is over, and only the run's end is judged.
+            session.watch(WatchEvent::Judged(round(2, RoundKind::Judged, true)));
+            refusal(call("tune", json!({"device": "d1", "how": "home"})).await);
+            refusal(call("judge", json!({"change": "one more"})).await);
+            refusal(call("judge", json!({"done": true})).await);
+            session.watch(WatchEvent::Judged(round(3, RoundKind::Done, true)));
+            emit(KernelEvent::Text { text: "Judged it.".into() })?;
+            Ok(complete())
+        }
+        .boxed_local()
+    });
+    let h = harness(Some(run), |_| {});
+    h.observation.borrow_mut().tools =
+        vec![Rc::new(Guarded { name: "judge", ran: ran.clone() }), Rc::new(Guarded { name: "tune", ran: ran.clone() })];
+    *held.borrow_mut() = Some((h.session.clone(), h.record.clone()));
+    h.session.start().await.unwrap();
+    h.session.submit("/loop master this to -9 LUFS", None).await.unwrap();
+    assert_eq!(*ran.borrow(), ["judge goal", "judge change", "judge done"]);
+    let refused = refused.borrow().clone();
+    assert_eq!(refused.len(), 4, "{refused:?}");
+    assert!(refused[0].contains("already has its checklist"), "{}", refused[0]);
+    assert!(refused[1].contains("Kumi's loop isn't over"), "{}", refused[1]);
+    assert!(refused[2].contains("Kumi's loop is over: every item") && refused[3].contains("Kumi's loop is over"), "{refused:?}");
+    // Its end ends it: no more rounds asked for.
+    assert_eq!(h.record.calls.borrow().len(), 1);
+    assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Loop(status) if status.state == LoopState::Done)));
+    h.session.close().await.unwrap();
+});
+local_test!(a_turn_that_only_measured_starts_no_loop_and_a_measured_loop_request_isnt_a_search, {
+    let held = Rc::new(RefCell::new(None::<Session>));
+    let active = held.clone();
+    let run: Run = Rc::new(move |input, _, emit| {
+        let session = active.borrow().clone().unwrap();
+        async move {
+            if !input.starts_with("[Kumi loop]") {
+                session.watch(WatchEvent::Judged(round(0, RoundKind::Start, false)));
+            }
+            emit(KernelEvent::Text { text: "It reads -12 LUFS.".into() })?;
+            Ok(complete())
+        }
+        .boxed_local()
+    });
+    let h = harness(Some(run), |_| {});
+    *held.borrow_mut() = Some(h.session.clone());
+    *h.record.goal_rig.borrow_mut() = Some(Rc::new(SearchRig::new(vec![50.])));
+    h.session.start().await.unwrap();
+    h.session.submit("how far off -9 LUFS is the master?", None).await.unwrap();
+    assert_eq!(h.record.calls.borrow().len(), 1, "no loop: nothing was changed");
+    assert!(!h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Loop(_))));
+    // Mastering toward a reference runs in judged rounds, not the knob search.
+    h.session.submit("/loop master this to match the reference.wav", None).await.unwrap();
+    assert!(h.record.goal_requests.borrow().is_empty());
+    assert!(h.record.calls.borrow()[1].starts_with("[Kumi loop] master this to match the reference.wav"), "{:?}", h.record.calls.borrow());
+    h.session.close().await.unwrap();
+});
+local_test!(control_words_never_start_a_goal_or_a_loop_and_an_unfinished_goal_is_replaced_only_when_asked, {
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_objective_store(dir.path().join("goals"));
+    let h = harness(Some(auditing(&["CONTINUE: raise the limiter"])), |o| {
+        o.objectives = Some(store.clone());
+        o.objective_budget = Some(ObjectiveBudget { turns: 1, ..OBJECTIVE_BUDGET });
+    });
+    h.session.start().await.unwrap();
+    h.session.goal(Some("get the master to -9 LUFS")).await.unwrap();
+    assert_eq!(objectives(&h).pop().unwrap().state, ObjectiveState::Paused);
+    let calls = || h.record.calls.borrow().len();
+    assert_eq!(calls(), 2);
+    h.session.goal(Some("Pause.")).await.unwrap();
+    assert!(h.notice("There's no goal running to pause."));
+    h.session.goal(Some("edit")).await.unwrap_err();
+    h.session.submit("/loop End!", None).await.unwrap();
+    assert!(h.notice("There's no loop to stop."));
+    h.session.submit("/loop pause", None).await.unwrap();
+    assert!(h.notice("There's no loop running to pause."));
+    assert_eq!(calls(), 2, "none of them ran anything");
+    assert_eq!(objectives(&h).pop().unwrap().objective, "get the master to -9 LUFS");
+    // Another goal asks first; the same words again replace it. Its own words carry it on.
+    h.session.goal(Some("make the bass louder")).await.unwrap();
+    assert!(h.notice("This Set has an unfinished goal: “get the master to -9 LUFS” (1 turn so far)"));
+    assert_eq!(calls(), 2);
+    h.session.goal(Some("Get the master to -9 LUFS.")).await.unwrap();
+    assert!(
+        h.record.calls.borrow()[2].starts_with("[Kumi goal] get the master to -9 LUFS\nNot there yet"),
+        "{:?}",
+        h.record.calls.borrow()
+    );
+    h.session.goal(Some("make the bass louder")).await.unwrap();
+    assert_eq!(calls(), 4, "asked first");
+    h.session.goal(Some("make the bass louder")).await.unwrap();
+    assert!(h.record.calls.borrow()[4].starts_with("[Kumi goal] make the bass louder"), "{:?}", h.record.calls.borrow());
+    h.session.goal(Some("new make the kick punchier")).await.unwrap();
+    assert!(h.record.calls.borrow()[6].starts_with("[Kumi goal] make the kick punchier"), "{:?}", h.record.calls.borrow());
+    h.session.close().await.unwrap();
+});
+local_test!(a_goal_whose_check_fails_is_kept_paused_and_blocked_on_what_the_producer_must_fix, {
+    let cases = [
+        (
+            KumiError::new(FailureKind::Auth, "Not signed in to Anthropic."),
+            Verdict::Blocked,
+            Some("sign in again (/login), then /goal resume"),
+        ),
+        (
+            KumiError::new(FailureKind::Model, "That model isn't available."),
+            Verdict::Blocked,
+            Some("choose another model (/model), then /goal resume"),
+        ),
+        (KumiError::new(FailureKind::Network, "The connection dropped."), Verdict::Continue, None),
+    ];
+    for (error, verdict, next) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let store = create_objective_store(dir.path().join("goals"));
+        let failing = error.clone();
+        let run: Run = Rc::new(move |input, _, emit| {
+            let failing = failing.clone();
+            async move {
+                if input.starts_with("[Kumi goal check]") {
+                    return Err(failing.into());
+                }
+                emit(KernelEvent::Text { text: "Raised the limiter.".into() })?;
+                Ok(complete())
+            }
+            .boxed_local()
+        });
+        let h = harness(Some(run), |o| o.objectives = Some(store.clone()));
+        h.session.start().await.unwrap();
+        h.session.goal(Some("get the master to -9 LUFS")).await.unwrap();
+        assert!(h.error(&error.message), "the error is shown");
+        let shown = objectives(&h).pop().unwrap();
+        assert_eq!((shown.state, shown.verdict, shown.next.as_deref()), (ObjectiveState::Paused, Some(verdict), next));
+        h.session.close().await.unwrap();
+        let kept = kept_goal(&store, ObjectiveState::Paused).await;
+        assert_eq!(kept.last.unwrap().verdict, verdict);
+    }
+    // Kept as running by a Kumi that closed mid-turn: it's paused, to pick up.
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_objective_store(dir.path().join("goals"));
+    let running = Objective { state: ObjectiveState::Running, ..Objective::new("make the vocal cut through", OBJECTIVE_BUDGET) };
+    store.save("unsaved", &running).await.unwrap();
+    let h = harness(Some(auditing(&["COMPLETE: the vocal sits clear"])), |o| o.objectives = Some(store.clone()));
+    h.session.start().await.unwrap();
+    h.session.goal(None).await.unwrap();
+    assert_eq!(objectives(&h).pop().unwrap().state, ObjectiveState::Paused);
+    h.session.goal(Some("resume")).await.unwrap();
+    assert_eq!(objectives(&h).pop().unwrap().state, ObjectiveState::Done);
+    h.session.close().await.unwrap();
+});
+/// Polls the store until `place` holds the goal in `state`.
+async fn kept_at(
+    store: &Rc<kumi_runtime::core::goal_mode::FileObjectiveStore>,
+    place: &str,
+    state: ObjectiveState,
+) -> kumi_runtime::core::goal_mode::Objective {
+    for _ in 0..1000 {
+        if let Some(kept) = store.load(place).await.unwrap().filter(|kept| kept.state == state) {
+            return kept;
+        }
+        delay(2).await;
+    }
+    panic!("no {state:?} goal at {place}: {:?}", store.load(place).await.unwrap());
+}
+local_test!(a_goal_stays_with_the_set_it_began_in_and_moves_with_its_first_save, {
+    // The Set it runs in is saved during the first turn (unsaved → set-a), or the model's turn looks at another Set
+    // (set-a → set-b): either way it stays with its own Set.
+    for (from, to, kept) in [(None, "set-a", "set-a"), (Some("set-a"), "set-b", "set-a")] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = create_objective_store(dir.path().join("goals"));
+        let observation = Rc::new(RefCell::new(None::<Rc<RefCell<Observation>>>));
+        let seen = observation.clone();
+        let turns = Rc::new(Cell::new(0));
+        let run: Run = Rc::new(move |input, _, emit| {
+            let (seen, turns) = (seen.clone(), turns.clone());
+            async move {
+                if input.starts_with("[Kumi goal check]") {
+                    emit(KernelEvent::Text {
+                        text: if turns.get() < 2 { "CONTINUE: one more" } else { "COMPLETE: it reads -9 LUFS" }.into(),
+                    })?;
+                    return Ok(complete());
+                }
+                turns.set(turns.get() + 1);
+                if turns.get() == 1 {
+                    seen.borrow().clone().unwrap().borrow_mut().project = Some(ProjectRef { id: to.into(), name: to.into() });
+                }
+                emit(KernelEvent::Text { text: "Worked.".into() })?;
+                Ok(complete())
+            }
+            .boxed_local()
+        });
+        let h = harness(Some(run), |o| o.objectives = Some(store.clone()));
+        *observation.borrow_mut() = Some(h.observation.clone());
+        h.observation.borrow_mut().project = from.map(|id| ProjectRef { id: id.into(), name: id.into() });
+        h.session.start().await.unwrap();
+        h.session.goal(Some("get the master to -9 LUFS")).await.unwrap();
+        h.session.close().await.unwrap();
+        kept_at(&store, kept, ObjectiveState::Done).await;
+        assert!(store.load("unsaved").await.unwrap().is_none(), "nothing left for the next unsaved Set");
+        if to != kept {
+            assert!(store.load(to).await.unwrap().is_none(), "nothing in {to}");
+        }
+    }
+});
+local_test!(the_producers_message_waits_out_the_goals_check_and_pauses_it_after_the_turn_that_took_it, {
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_objective_store(dir.path().join("goals"));
+    let held = Rc::new(RefCell::new(None::<Session>));
+    let taken = Rc::new(RefCell::new(vec![]));
+    let turns = Rc::new(Cell::new(0));
+    let (active, log, count) = (held.clone(), taken.clone(), turns.clone());
+    let run: Run = Rc::new(move |input, _, emit| {
+        let session = active.borrow().clone().unwrap();
+        let (log, count) = (log.clone(), count.clone());
+        async move {
+            if input.starts_with("[Kumi goal check]") {
+                // Said while Kumi checks: it waits for the next turn.
+                log.borrow_mut().push(session.steer("stop touching the vocal"));
+                emit(KernelEvent::Text { text: "CONTINUE: cut the pads at 300 Hz".into() })?;
+                return Ok(complete());
+            }
+            count.set(count.get() + 1);
+            if count.get() == 2 {
+                log.borrow_mut().push(session.steer("stop touching the vocal"));
+            }
+            emit(KernelEvent::Text { text: "Cut the pads.".into() })?;
+            Ok(complete())
+        }
+        .boxed_local()
+    });
+    let h = harness(Some(run), |o| o.objectives = Some(store.clone()));
+    *held.borrow_mut() = Some(h.session.clone());
+    h.session.start().await.unwrap();
+    h.session.goal(Some("make the vocal cut through")).await.unwrap();
+    assert_eq!(*taken.borrow(), [false, true]);
+    assert_eq!(*h.record.steered.borrow(), ["stop touching the vocal"]);
+    // The turn that took it answered it; then the goal waits for the producer, with no check in between.
+    assert_eq!(h.record.calls.borrow().len(), 3, "{:?}", h.record.calls.borrow());
+    assert!(h.notice("Goal paused after 2 turns: you stepped in · /goal resume carries on"));
+    assert_eq!(objectives(&h).pop().unwrap().state, ObjectiveState::Paused);
+    h.session.close().await.unwrap();
+    kept_goal(&store, ObjectiveState::Paused).await;
+});
+local_test!(a_message_during_a_goals_loop_ends_the_loop_and_the_goal_waits, {
+    let held = Rc::new(RefCell::new(None::<Session>));
+    let active = held.clone();
+    let run: Run = Rc::new(move |input, _, emit| {
+        let session = active.borrow().clone().unwrap();
+        async move {
+            if input.starts_with("[Kumi goal]") {
+                session.watch(WatchEvent::Judged(round(0, RoundKind::Start, false)));
+                session.watch(WatchEvent::Judged(round(1, RoundKind::Judged, false)));
+            } else {
+                // A round of the loop inside it takes the producer's message.
+                assert!(session.steer("leave the vocal alone"));
+                session.watch(WatchEvent::Judged(round(2, RoundKind::Judged, false)));
+            }
+            emit(KernelEvent::Text { text: "Judged it.".into() })?;
+            Ok(complete())
+        }
+        .boxed_local()
+    });
+    let h = harness(Some(run), |_| {});
+    *held.borrow_mut() = Some(h.session.clone());
+    h.session.start().await.unwrap();
+    h.session.goal(Some("master this to -9 LUFS")).await.unwrap();
+    let calls = h.record.calls.borrow().clone();
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(calls[1].starts_with("[Kumi loop] Round 1."), "{}", calls[1]);
+    assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Loop(status) if status.state == LoopState::Paused)));
+    assert!(h.notice("Goal paused after 1 turn: you stepped in · /goal resume carries on"));
+    h.session.close().await.unwrap();
+});
+local_test!(a_goal_that_gets_no_closer_is_stuck_even_when_the_judge_measured_each_turn, {
+    let held = Rc::new(RefCell::new(None::<Session>));
+    let active = held.clone();
+    let turns = Rc::new(Cell::new(0));
+    let run: Run = Rc::new(move |_, _, emit| {
+        let session = active.borrow().clone().unwrap();
+        let turns = turns.clone();
+        async move {
+            turns.set(turns.get() + 1);
+            // Each turn's change is judged and taken back: the gap closes by nothing.
+            let number = turns.get() * 10;
+            let taken_back =
+                Round { kept: Some(false), why: Some("it hurt punch (crest)".into()), ..round(number, RoundKind::Judged, false) };
+            session.watch(WatchEvent::Judged(taken_back));
+            session.watch(WatchEvent::Judged(round(number + 1, RoundKind::Done, false)));
+            emit(KernelEvent::Text { text: "Tried a limiter.".into() })?;
+            Ok(complete())
+        }
+        .boxed_local()
+    });
+    let h = harness(Some(run), |o| o.objective_budget = Some(ObjectiveBudget { idle: 2, ..OBJECTIVE_BUDGET }));
+    *held.borrow_mut() = Some(h.session.clone());
+    h.session.start().await.unwrap();
+    h.session.goal(Some("master this to -9 LUFS")).await.unwrap();
+    let last = objectives(&h).pop().unwrap();
+    assert_eq!((last.state, last.verdict, last.turns, last.measured), (ObjectiveState::Paused, Some(Verdict::Stuck), 2, true));
+    assert!(h.notice("Goal stuck after 2 turns: 2 turns in a row got no closer"));
+    // The judge measured each turn, so no self-check was asked.
+    assert_eq!(h.record.calls.borrow().len(), 2);
+    h.session.close().await.unwrap();
+});
+local_test!(loop_stop_stops_the_running_loop_before_a_paused_search_on_the_set, {
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_goal_store(dir.path().join("goals"));
+    let mut raw = SearchRig::new(vec![55.]);
+    raw.ms = 25;
+    let rig = Rc::new(raw);
+    let h = goal_harness(rig.clone(), true, |o| o.goals = Some(store.clone()));
+    h.session.start().await.unwrap();
+    let s = h.session.clone();
+    let running = tokio::task::spawn_local(async move { s.submit("/loop match my reference", None).await });
+    generation(&h.session, 2).await;
+    h.session.cancel().await.unwrap();
+    running.await.unwrap().unwrap();
+    h.session.close().await.unwrap();
+    assert_eq!(store.load("unsaved").await.unwrap().unwrap().status, GoalRun::Paused);
+    // A judged loop runs on the same Set; /loop stop stops it, not the paused search.
+    let waits: Run = Rc::new(|_, signal, _| {
+        async move {
+            signal.cancelled().await;
+            Ok(cancelled())
+        }
+        .boxed_local()
+    });
+    let h = harness(Some(waits), |o| o.goals = Some(store.clone()));
+    *h.record.goal_rig.borrow_mut() = Some(rig.clone());
+    h.session.start().await.unwrap();
+    let s = h.session.clone();
+    let running = tokio::task::spawn_local(async move { s.submit("/loop master this to -9 LUFS", None).await });
+    for _ in 0..500 {
+        if !h.record.calls.borrow().is_empty() {
+            break;
+        }
+        delay(1).await;
+    }
+    assert!(h.session.stop_loop().await.unwrap());
+    tokio::time::timeout(Duration::from_secs(5), running).await.expect("the loop stopped").unwrap().unwrap();
+    // The app hears it isn't running anymore.
+    assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Loop(status) if status.state == LoopState::Paused)));
+    h.session.close().await.unwrap();
+    assert_eq!(store.load("unsaved").await.unwrap().unwrap().status, GoalRun::Paused, "the search is still there to pick up");
 });
 local_test!(match_polish_confirms_improvement_at_full_length_and_restores_if_not_better, {
     // Exercise the full search budget independently of the host timer resolution.

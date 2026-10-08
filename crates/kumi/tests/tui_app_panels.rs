@@ -396,6 +396,10 @@ case!(a_goal_and_its_loop_show_where_they_are_and_each_judged_round, async {
     // The loop inside it: where it is, and each round in the transcript.
     h.emit(json!({"type":"loop","state":"running","request":"master this to -9 LUFS","rounds":1,"kept":1,"reverted":0,"listens":3,"elapsedMs":30000,"roundsLeft":15,"next":"True peak"}));
     h.has("loop · round 1 · 1 kept");
+    // Stopped short (Esc, the producer stepping in, an error), the loop says so: its label goes, the goal's comes back.
+    h.emit(json!({"type":"loop","state":"paused","request":"master this to -9 LUFS","rounds":1,"kept":1,"reverted":0,"listens":3,"elapsedMs":31000,"roundsLeft":15}));
+    assert!(!has(&h.screen(), "loop · round 1"));
+    h.has("goal · turn 2/12");
     h.emit(json!({"type":"judged","round":2,"kind":"judged","heard":"the mix, bars 49–57","target":"True peak","change":"Limiter ceiling -1 → -3.5 dB","rows":[],"kept":false,"why":"it hurt punch (crest)","met":false,"listens":4,"elapsedMs":42000}));
     for s in ["Round 2 · true peak", "change: Limiter ceiling -1 → -3.5 dB", "reverted: it hurt punch (crest)", "4 listens · 0:42"] {
         h.has(s)
@@ -406,6 +410,16 @@ case!(a_goal_and_its_loop_show_where_they_are_and_each_judged_round, async {
     h.emit(json!({"type":"state","state":"idle"}));
     h.has("met · turn 2 of 12");
     h.has("measured: the judge's checklist is met");
+    // Control words, in any case: never a goal of their own.
+    h.type_text("/goal Pause.\r").await;
+    h.has("There's no goal running to pause.");
+    assert!(!h.calls().iter().any(|call| call.starts_with("goal:Pause")));
+    h.type_text("/loop End!\r").await;
+    assert!(h.calls().contains(&"stop-loop".into()));
+    // A sound-match search taking over shows in the GOAL tab instead of the finished goal.
+    h.emit(json!({"type":"goal","state":"starting","goal":"make my pad sound like ~/ref.wav","generation":0,"rendered":0,"trend":[],"elapsedMs":0,"candidates":0}));
+    h.has("setting up");
+    assert!(!has(&h.screen(), "met · turn 2 of 12"));
     h.close().await;
 });
 case!(goal_dashboard_and_aside_panel, async {

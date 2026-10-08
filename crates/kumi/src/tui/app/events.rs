@@ -458,7 +458,10 @@ impl TuiApp {
                 }
                 let mut status = value.clone();
                 status["since"] = json!(perf_now() - n("elapsedMs"));
-                self.0.state.borrow_mut().goal = Some(status);
+                let mut state = self.0.state.borrow_mut();
+                state.goal = Some(status);
+                // A sound-match search took over: the GOAL tab shows it, not the last /goal.
+                state.objective = None;
             }
             "match" => {
                 self.0.state.borrow_mut().matching = if get("state") == "running" {

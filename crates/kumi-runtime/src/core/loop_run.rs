@@ -1,8 +1,8 @@
 //! The loop: listen, assess, adjust, repeat until a goal is met. Each time the model ends its answer, code looks at the
 //! judge's rounds (listen and assess are the judge's; adjust is the model's one change) and decides, not the model:
 //! the checklist met, changes no longer helping, or the budget spent ends it; otherwise the model goes back in with
-//! the round's numbers and the next target. A run starts on an explicit /loop, or when the model starts a judged run
-//! itself (Kumi judging that a request needs the loop).
+//! the round's numbers and the next target. A run starts on an explicit /loop, or when the model judges a change of
+//! its own (Kumi judging that a request needs the loop); a judged run that only measured doesn't start one.
 
 use super::contracts::JsonObject;
 use crate::listening::round::{Round, RoundKind};
@@ -46,6 +46,8 @@ pub enum LoopDecision {
 #[serde(rename_all = "lowercase")]
 pub enum LoopState {
     Running,
+    /// Stopped by Esc, the producer stepping in, or an error: nothing more runs, and nothing was decided.
+    Paused,
     Done,
 }
 
@@ -88,11 +90,16 @@ pub fn wants_loop(request: &str) -> bool {
 pub struct LoopRun {
     pub request: String,
     started: i64,
+    /// Every round of the loop, from each judged run in it: they all count toward its budget and stall rule.
     pub rounds: Vec<Round>,
     /// Times Kumi sent the model back, and nudged it to judge.
     asked: u32,
     nudged: u32,
     seen: usize,
+    /// Listens the loop's earlier judged runs took (each run counts its own).
+    listens_before: u32,
+    /// Why Kumi stopped the loop, once it has: then only the run's end is judged.
+    stopped: Option<LoopStop>,
     budget: LoopBudget,
     now: Rc<dyn Fn() -> i64>,
 }
@@ -102,16 +109,33 @@ impl LoopRun {
         Self::with_clock(request, budget, Rc::new(now_ms))
     }
     pub fn with_clock(request: impl Into<String>, budget: LoopBudget, now: Rc<dyn Fn() -> i64>) -> Self {
-        Self { request: request.into(), started: now(), rounds: vec![], asked: 0, nudged: 0, seen: 0, budget, now }
+        Self {
+            request: request.into(),
+            started: now(),
+            rounds: vec![],
+            asked: 0,
+            nudged: 0,
+            seen: 0,
+            listens_before: 0,
+            stopped: None,
+            budget,
+            now,
+        }
     }
-    /// A round the judge logged.
+    pub fn budget(&self) -> LoopBudget {
+        self.budget
+    }
+    /// A round the judge logged. A new judged run inside the loop doesn't start its counts again: its rounds join the
+    /// loop's.
     pub fn judged(&mut self, round: Round) {
         if round.kind == RoundKind::Start {
-            // A new run of the judge: what came before was another checklist.
-            self.rounds.clear();
-            self.seen = 0;
+            self.listens_before += self.rounds.last().map_or(0, |last| last.listens);
         }
         self.rounds.push(round);
+    }
+    /// Whether a judged run is going in the loop: its checklist stands until the loop is over.
+    pub fn started(&self) -> bool {
+        self.rounds.last().is_some_and(|last| last.kind != RoundKind::Done)
     }
     fn judged_rounds(&self) -> impl Iterator<Item = &Round> {
         self.rounds.iter().filter(|round| round.kind == RoundKind::Judged)
@@ -124,7 +148,7 @@ impl LoopRun {
             rounds: self.judged_rounds().count() as u32,
             kept: self.judged_rounds().filter(|round| round.kept == Some(true)).count() as u32,
             reverted: self.judged_rounds().filter(|round| round.kept == Some(false)).count() as u32,
-            listens: last.map_or(0, |round| round.listens),
+            listens: self.listens_before + last.map_or(0, |round| round.listens),
             elapsed_ms: (self.now)() - self.started,
             rounds_left: self.budget.rounds.saturating_sub(self.judged_rounds().count() as u32),
             next: last.and_then(|round| round.next.as_ref()).map(|next| next.label.clone()),
@@ -134,6 +158,13 @@ impl LoopRun {
     }
     /// What happens after the model's answer.
     pub fn decide(&mut self) -> LoopDecision {
+        let decision = self.next_step();
+        if let LoopDecision::Stop { stop, .. } = &decision {
+            self.stopped = Some(*stop);
+        }
+        decision
+    }
+    fn next_step(&mut self) -> LoopDecision {
         let fresh = self.rounds.len() > self.seen;
         self.seen = self.rounds.len();
         let Some(last) = self.rounds.last().cloned() else {
@@ -208,6 +239,15 @@ impl LoopRun {
         if last.kind == RoundKind::Done {
             return None;
         }
+        if let Some(stop) = self.stopped {
+            return Some(match stop {
+                LoopStop::Met => "every item on the checklist is within tolerance",
+                LoopStop::Stalled => "changes stopped helping",
+                LoopStop::Budget => "its budget is spent",
+                LoopStop::Unjudged => "the last answers judged no change",
+                LoopStop::Ended => "it was ended",
+            });
+        }
         let judged = self.judged_rounds().count() as u32;
         if last.met {
             Some("every item on the checklist is within tolerance")
@@ -218,6 +258,30 @@ impl LoopRun {
         } else {
             None
         }
+    }
+    /// Why the model can't end the run yet (judge done): the loop isn't over, and code decides when it is. None when
+    /// done may go through (the loop is over, or no judged run is going).
+    pub fn holds_done(&self) -> Option<String> {
+        if !self.started() || self.over().is_some() {
+            return None;
+        }
+        let last = self.rounds.last()?;
+        let left = self.budget.rounds.saturating_sub(self.judged_rounds().count() as u32);
+        let next = last
+            .next
+            .as_ref()
+            .map(|next| {
+                format!(
+                    " Next: {} ({}wants {}).",
+                    next.label.to_lowercase(),
+                    next.now.map(|now| format!("{} now, ", to_string(now))).unwrap_or_default(),
+                    next.wanted
+                )
+            })
+            .unwrap_or_default();
+        Some(format!(
+            "Kumi's loop isn't over: the checklist isn't met and changes are still helping.{next} Budget left: {left} rounds. Make one change toward it and judge it; Kumi asks for done when it's time."
+        ))
     }
     /// The last rounds kept nothing, or the gaps they closed add up to less than a step.
     fn stalled(&self) -> bool {

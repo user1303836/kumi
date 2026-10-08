@@ -930,6 +930,14 @@ impl Terminal for PlainTerminal {
                 }
             }
             "notice" => self.notice(get("message")),
+            // The judge's rounds, a line each, so a loop's work shows here too.
+            "judged" => {
+                if let SessionEvent::Judged(round) = &event {
+                    for line in round.lines() {
+                        self.notice(&format!("[judged] {line}"));
+                    }
+                }
+            }
             "error" => {
                 self.error(&RuntimeError::plain(get("message")));
                 self.0.state.borrow_mut().text.discard();

@@ -118,6 +118,9 @@ fn an_answer_without_a_judged_change_is_nudged_once_then_the_loop_ends() {
     assert!(matches!(run.decide(), LoopDecision::Next(text) if text.contains("Judge the change you made")));
     assert!(matches!(run.decide(), LoopDecision::Next(text) if text.contains("Judge the change you made")));
     assert!(matches!(run.decide(), LoopDecision::Stop { stop: LoopStop::Unjudged, .. }));
+    // Kumi ended it: the done its wrap-up asks for goes through, and nothing else is judged.
+    assert_eq!(run.over(), Some("the last answers judged no change"));
+    assert!(run.holds_done().is_none());
     // A run ended with done is over.
     let mut run = LoopRun::new("master it", BUDGET);
     run.judged(round(0, RoundKind::Start, None, 0., false));
@@ -144,7 +147,7 @@ fn a_goals_check_reads_the_models_line_and_code_applies_the_budget_and_no_progre
     assert_eq!(read_audit("**COMPLETE** — master reads -9.1 LUFS").verdict, Verdict::Complete);
     let vague = read_audit("I think it's nearly there.");
     assert_eq!((vague.verdict, vague.reason.as_str()), (Verdict::Continue, "the check got no clear answer"));
-    // Turns that change nothing in a row are stuck; a change, or a judged measurement, is progress.
+    // Turns without progress in a row are stuck: a measurement alone isn't progress.
     let budget = ObjectiveBudget { turns: 10, ms: 60_000, idle: 2 };
     let mut goal = Objective::new("make the vocal cut through", budget);
     let go_on = || read_audit("CONTINUE: cut the pads at 300 Hz");
@@ -163,6 +166,9 @@ fn a_goals_check_reads_the_models_line_and_code_applies_the_budget_and_no_progre
         check.measured && check.verdict == Verdict::Continue && check.next.as_deref() == Some("loudness (-10.5 now, wants -9 LUFS ±0.5)"),
         "{check:?}"
     );
+    let mut measured = Objective::new("master it", budget);
+    assert_eq!(after_turn(&mut measured, check.clone(), false, 1_000).verdict, Verdict::Continue);
+    assert_eq!(after_turn(&mut measured, check, false, 2_000).verdict, Verdict::Stuck);
     judged.met = true;
     assert_eq!(after_turn(&mut goal, measured_check(Some(&judged)).unwrap(), false, 5_000).verdict, Verdict::Complete);
     assert_eq!(goal.state, ObjectiveState::Done);
@@ -190,4 +196,30 @@ fn the_loop_says_when_its_over_so_only_the_runs_end_is_judged_after_that() {
     assert_eq!(met.over(), Some("every item on the checklist is within tolerance"));
     met.judged(round(2, RoundKind::Done, None, 0., true));
     assert_eq!(met.over(), None);
+}
+
+#[test]
+fn a_new_judged_run_inside_the_loop_keeps_its_counts_and_an_early_done_is_held_back() {
+    let mut run = LoopRun::new("master it", BUDGET);
+    assert!(!run.started() && run.holds_done().is_none());
+    run.judged(round(0, RoundKind::Start, None, 0., false));
+    run.judged(round(1, RoundKind::Judged, Some(true), 1.5, false));
+    assert!(run.started());
+    let held = run.holds_done().unwrap();
+    assert!(
+        held.contains("isn't over") && held.contains("Next: loudness (-10.5 now, wants -9 LUFS ±0.5)") && held.contains("4 rounds"),
+        "{held}"
+    );
+    // Another run started in it doesn't start the counts again: its rounds spend the same budget.
+    run.judged(round(0, RoundKind::Start, None, 0., false));
+    for number in 1..=4 {
+        run.judged(round(number, RoundKind::Judged, Some(true), 1.5, false));
+    }
+    assert_eq!(run.over(), Some("its budget is spent"));
+    assert!(run.holds_done().is_none(), "over: done goes through");
+    let status = run.status(kumi_runtime::core::loop_run::LoopState::Running, None);
+    assert_eq!((status.rounds, status.kept, status.listens), (5, 5, 2 + 5));
+    // Once its run has ended, nothing is held.
+    run.judged(round(5, RoundKind::Done, None, 0., false));
+    assert!(!run.started() && run.holds_done().is_none());
 }
