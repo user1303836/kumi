@@ -7,9 +7,9 @@ fn embedded_helpers_keep_their_hashes() {
     // The Mac helper installs as kumi-hands-<first 12 hex of its hash>, and macOS ties the producer's
     // Accessibility permission to that file: a changed MAC_SOURCE asks for the permission again.
     use sha2::{Digest, Sha256};
-    assert_eq!(HANDS_VERSION, 2);
+    assert_eq!(HANDS_VERSION, 3);
     for (source, expected) in [
-        (mac::MAC_SOURCE, "16045380d38220f9dfd1a6dd318dac9b655fc41758f2531efc46ab97f82a7ba3"),
+        (mac::MAC_SOURCE, "e8bb739b960cab5359dfe2f3fe1ccd12385cc0e7a9b2fc2b9b3308deb6185b12"),
         (windows::WINDOWS_SOURCE, "f16733836d388b86e5293926c645a7d73b45c59027e1b84b945482d19a97d9b2"),
     ] {
         assert_eq!(hex::encode(Sha256::digest(source)), expected);
