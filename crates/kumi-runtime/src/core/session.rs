@@ -229,10 +229,10 @@ struct State {
     looping: Option<Rc<RefCell<super::loop_run::LoopRun>>>,
     /// A judged run's first listen, kept until the model judges a change (which starts the loop with it).
     judge_start: Option<crate::listening::round::Round>,
-    /// What the judge's kept changes closed, in steps, and how many rounds it logged: a goal's turn progresses when
+    /// What the judge's kept changes closed, in steps, and how many changes it judged: a goal's turn progresses when
     /// it closes a step or more.
     judged_closed: f64,
-    judged_count: u64,
+    judged_changes: u64,
     /// The request of the turn running now, for a loop the model starts by judging.
     turn_request: Option<String>,
     /// The /goal objective for a place (the Set it belongs to), and the operation pursuing it.
@@ -243,8 +243,10 @@ struct State {
     objective_until: Option<i64>,
     /// A goal's self-check is being asked: the producer's messages wait for the next turn.
     checking: bool,
-    /// The producer's messages taken into an answer (steering): a goal pauses after a turn that took one.
+    /// The producer's messages taken into an answer (steering): a goal pauses after a turn that took one, and a loop
+    /// ends after it. And how many there were when this turn began.
     steers: u64,
+    turn_steers: u64,
     /// A new goal's words, held back once because an unfinished goal would be replaced: sent again, they replace it.
     pending_goal: Option<String>,
     /// Changes applied this session, to tell a goal's turn that changed something from one that didn't.
@@ -617,7 +619,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                 looping: None,
                 judge_start: None,
                 judged_closed: 0.,
-                judged_count: 0,
+                judged_changes: 0,
                 turn_request: None,
                 objective: None,
                 objective_op: None,
@@ -625,6 +627,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                 objective_until: None,
                 checking: false,
                 steers: 0,
+                turn_steers: 0,
                 pending_goal: None,
                 applied: 0,
                 state: TurnState::Idle,
@@ -1214,12 +1217,18 @@ impl Session {
         let hints = (pinned.is_some() || continuing).then_some(ObserveHints { pinned, continuing: continuing.then_some(true) });
         let snapshot = integration.observe(op.signal.clone(), hints).await?;
         self.assert_current(op)?;
-        {
+        let other_set = {
             let mut s = self.0.state.borrow_mut();
             s.project = snapshot.project.as_ref().map(|p| p.id.clone());
             s.set_name = snapshot.project.as_ref().map(|p| p.name.clone());
+            let other_set = s.set.as_ref().is_some_and(|set| *set != snapshot.key);
             s.set = Some(snapshot.key.clone());
             s.plan = snapshot.tools.iter().find(|t| t.name() == "make_changes").cloned();
+            other_set
+        };
+        // Another Set is open: the goal shown was the last Set's.
+        if other_set {
+            self.emit(SessionEvent::ObjectiveCleared);
         }
         if snapshot.project.is_some() && self.0.notes.is_some() {
             let this = self.clone();
@@ -1524,7 +1533,8 @@ impl KernelTool for LoopGuard {
             if starting && run.started() {
                 return Some("Kumi's loop already has its checklist: work toward it, one change at a time, judging each (judge with change). Kumi decides when the loop stops.".into());
             }
-            if ending {
+            // The producer stepped in (stop, leave it): the run may end now.
+            if ending && s.steers <= run.steers {
                 return run.holds_done();
             }
             None
@@ -1862,9 +1872,11 @@ impl SessionController for Session {
             WatchEvent::Judged(round) => {
                 use crate::listening::round::RoundKind;
                 let mut s = self.0.state.borrow_mut();
-                s.judged_count += 1;
-                if round.kind == RoundKind::Judged && round.kept == Some(true) {
-                    s.judged_closed += round.rows.iter().map(|row| row.gap_before - row.gap_after).sum::<f64>();
+                if round.kind == RoundKind::Judged {
+                    s.judged_changes += 1;
+                    if round.kept == Some(true) {
+                        s.judged_closed += round.rows.iter().map(|row| row.gap_before - row.gap_after).sum::<f64>();
+                    }
                 }
                 // The model judging a change in a turn of its own starts the loop: Kumi judged the request needs it.
                 // A run that only measured doesn't; its first listen joins the loop if one starts.
@@ -1874,6 +1886,7 @@ impl SessionController for Session {
                         RoundKind::Judged => {
                             let request = s.turn_request.clone().unwrap_or_default();
                             let mut run = super::loop_run::LoopRun::new(request, loop_budget(s.objective_until));
+                            run.steers = s.turn_steers;
                             if let Some(start) = s.judge_start.take() {
                                 run.judged(start);
                             }
@@ -2168,6 +2181,7 @@ impl SessionController for Session {
                 Ok(())
             }
             objective::GoalCommand::Show(None) => {
+                self.emit(SessionEvent::ObjectiveCleared);
                 self.notice("No goal yet: /goal and what to reach, such as /goal master this to -9 LUFS with the vocal cutting through.");
                 Ok(())
             }

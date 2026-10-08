@@ -502,6 +502,8 @@ impl TuiApp {
                 self.0.state.borrow_mut().objective = Some(status);
                 self.0.tabs.show("goal");
             }
+            // No goal here (none set, or another Set is open): the GOAL tab stops showing the last one.
+            "objective-cleared" => self.0.state.borrow_mut().objective = None,
             "loop" => {
                 self.0.state.borrow_mut().looping = if get("state") == "running" {
                     let mut status = value.clone();

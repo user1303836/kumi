@@ -416,6 +416,9 @@ case!(a_goal_and_its_loop_show_where_they_are_and_each_judged_round, async {
     assert!(!h.calls().iter().any(|call| call.starts_with("goal:Pause")));
     h.type_text("/loop End!\r").await;
     assert!(h.calls().contains(&"stop-loop".into()));
+    // No goal here (another Set open): the tab lets the finished one go.
+    h.emit(json!({"type":"objective-cleared"}));
+    assert!(!has(&h.screen(), "met · turn 2 of 12"));
     // A sound-match search taking over shows in the GOAL tab instead of the finished goal.
     h.emit(json!({"type":"goal","state":"starting","goal":"make my pad sound like ~/ref.wav","generation":0,"rendered":0,"trend":[],"elapsedMs":0,"candidates":0}));
     h.has("setting up");

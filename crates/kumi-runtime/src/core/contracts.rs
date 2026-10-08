@@ -1237,6 +1237,8 @@ pub enum SessionEvent {
     Goal(GoalStatus),
     /// A /goal objective's status: where it is, turns and time against its budget, and the last check.
     Objective(super::goal_mode::ObjectiveStatus),
+    /// No goal to show: there's none here, or another Set is open.
+    ObjectiveCleared,
     Heard(HeardEvent),
     Auditioned(AuditionEvent),
     /// A round of a judged run: its target, change, numbers before and after, keep or revert, and what's next.

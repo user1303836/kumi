@@ -72,6 +72,10 @@ pub struct Objective {
     /// Turns in a row without progress.
     #[serde(default)]
     pub idle: u32,
+    /// The conversation it was set in. Every unsaved Set shares one place, so an unsaved Set's goal is only the one
+    /// set in its own conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<String>,
 }
 
 impl Objective {
@@ -85,6 +89,7 @@ impl Objective {
             elapsed_ms: 0,
             last: None,
             idle: 0,
+            conversation: None,
         }
     }
     /// What the app shows: the objective, where it is, the turns and time against the budget, and the last check.
@@ -280,6 +285,24 @@ pub fn after_turn(objective: &mut Objective, check: Check, progress: bool, elaps
     };
     objective.last = Some(check.clone());
     check
+}
+
+/// How much of the judge's gap closed between two of its rounds on the same checklist, in steps: what stands after
+/// each (a change taken back leaves the gap it found). None when they can't be compared (no round before, or another
+/// checklist).
+pub fn gap_closed(before: Option<&Round>, after: Option<&Round>) -> Option<f64> {
+    let (before, after) = (before?, after?);
+    fn ids(round: &Round) -> Vec<&str> {
+        let mut ids: Vec<&str> = round.rows.iter().map(|row| row.id.as_str()).collect();
+        ids.sort_unstable();
+        ids
+    }
+    if before.rows.is_empty() || ids(before) != ids(after) {
+        return None;
+    }
+    let standing =
+        |round: &Round| round.rows.iter().map(|row| if round.kept == Some(false) { row.gap_before } else { row.gap_after }).sum::<f64>();
+    Some(standing(before) - standing(after))
 }
 
 /// A turn's or a check's error as the goal's last check: one the producer must fix first (sign in, billing, the model,

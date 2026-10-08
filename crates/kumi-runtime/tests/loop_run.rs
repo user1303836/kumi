@@ -2,7 +2,7 @@
 //! and otherwise sends the model back with the round's numbers and the next target.
 use kumi_runtime::{
     core::{
-        goal_mode::{after_turn, measured_check, read_audit, Objective, ObjectiveBudget, ObjectiveState, Verdict},
+        goal_mode::{after_turn, gap_closed, measured_check, read_audit, Objective, ObjectiveBudget, ObjectiveState, Verdict},
         loop_run::{wants_loop, LoopBudget, LoopDecision, LoopRun, LoopStop},
     },
     listening::{
@@ -222,4 +222,19 @@ fn a_new_judged_run_inside_the_loop_keeps_its_counts_and_an_early_done_is_held_b
     // Once its run has ended, nothing is held.
     run.judged(round(5, RoundKind::Done, None, 0., false));
     assert!(!run.started() && run.holds_done().is_none());
+}
+
+#[test]
+fn the_gap_a_goals_turn_closed_is_read_off_the_judges_rounds_on_one_checklist() {
+    let before = round(1, RoundKind::Judged, Some(true), 1., false);
+    let mut after = round(2, RoundKind::Judged, Some(true), 2., false);
+    // Kept: what stands is each round's after (1.5 → 0.5).
+    assert_eq!(gap_closed(Some(&before), Some(&after)), Some(1.));
+    // Taken back: what stands is the gap it found.
+    after.kept = Some(false);
+    assert_eq!(gap_closed(Some(&before), Some(&after)), Some(-1.));
+    // Nothing before, or another checklist: nothing to compare.
+    assert_eq!(gap_closed(None, Some(&after)), None);
+    after.rows[0].id = "true-peak".into();
+    assert_eq!(gap_closed(Some(&before), Some(&after)), None);
 }

@@ -158,6 +158,24 @@ impl Session {
                 return self.run_goal(op, Some(request.to_owned())).await;
             }
         }
+        // The loop: an explicit /loop, or a request that calls for it (the model judging a change starts one too). An
+        // explicit one is there from the start, so /loop stop finds it even while Live is still being read.
+        let explicit = text
+            .strip_prefix("/loop")
+            .filter(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+            .map(|rest| trim(rest).to_owned());
+        let judged_loop = explicit.as_deref().is_some_and(wants_loop);
+        let matched = self.0.options.matching && starts_match(&text) && !judged_loop;
+        let looping =
+            explicit.as_ref().filter(|_| !matched).map(|request| Rc::new(RefCell::new(LoopRun::new(request.clone(), LOOP_BUDGET))));
+        {
+            let mut s = self.0.state.borrow_mut();
+            s.turn_steers = s.steers;
+            if let Some(run) = &looping {
+                run.borrow_mut().steers = s.steers;
+                s.looping = Some(run.clone());
+            }
+        }
         let snapshot = self.observe(&op, pinned, false).await?;
         self.assert_current(&op)?;
         let note = match &self.0.learned {
@@ -168,12 +186,6 @@ impl Session {
             None => String::new(),
         };
         let budget = self.0.options.match_budget.unwrap_or(MATCH_BUDGET);
-        // The loop: an explicit /loop, or a request that calls for it (the model judging a change starts one too).
-        let explicit = text
-            .strip_prefix("/loop")
-            .filter(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
-            .map(|rest| trim(rest).to_owned());
-        let judged_loop = explicit.as_deref().is_some_and(wants_loop);
         let carried =
             self.0.options.matching && !starts_match(&text) && KEEP_GOING.is_match(&text) && self.0.state.borrow().last_run.is_some();
         if !carried {
@@ -181,7 +193,7 @@ impl Session {
         }
         let run = if !self.0.options.matching {
             None
-        } else if starts_match(&text) && !judged_loop {
+        } else if matched {
             Some(Rc::new(RefCell::new(MatchRun::new(&text, budget))))
         } else if carried {
             let previous = self.0.state.borrow().last_run.clone().unwrap();
@@ -192,8 +204,7 @@ impl Session {
         } else {
             None
         };
-        let looping = (run.is_none() && explicit.is_some())
-            .then(|| Rc::new(RefCell::new(LoopRun::new(explicit.clone().unwrap_or_else(|| text.clone()), LOOP_BUDGET))));
+        let looping = looping.filter(|_| run.is_none());
         // A request the judge can measure gets a hint to work in judged rounds; the model decides, and its own judge
         // call starts the loop.
         let note = if run.is_none() && explicit.is_none() && wants_loop(&text) { format!("{note}{LOOP_HINT}") } else { note };

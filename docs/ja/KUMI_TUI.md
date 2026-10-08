@@ -64,7 +64,7 @@ Kumi はターミナルウィンドウ全体を使い、Kumi が閉じたとき�
 | `/willington` | [Willington](WILLINGTON_INTEGRATION.md) をオン/オフにします。対応ビルドでラックのバインディングを要求し、クリップの Follow Actions とネイティブ編集には実際のライブラリに一致するセルフテストの合格も必要です。ネイティブ編集は b5 macOS ARM64 のみです。有効にするまではオフで、ブリッジに Willington があるときに使えます。 |
 | `/login`, `/logout` | サインイン（ブラウザで ChatGPT、またはドットでだけ表示される API キー）またはサインアウト |
 | `/loop <what to reach>` | 達成するまで判定付きのラウンドで作業する：一つの変更を前後で聴き、ほかに悪くなったものがなければ残し、次の目標へ。Esc か `/loop stop` で止まる。合わせたい音（「パッドを ~/ref.wav みたいな音にして」）ならノブ探索になり、`/loop` だけで一時停止した探索を再開し、`/loop stop` で終える |
-| `/goal <what to reach>` | ターンをまたいで一つのゴールを続け、毎ターン確認する（測ったときは判定の数値で）。達成、ブロック、予算切れまで。`/goal` で表示。`/goal resume`、`/goal edit <words>`、`/goal new <words>`（終わっていないゴールを置き換える）、`/goal pause`（または Esc）、`/goal clear` |
+| `/goal <what to reach>` | ターンをまたいで一つのゴールを続け、毎ターン確認する（測ったときは判定の数値で）。達成、ブロック、予算切れまで。`/goal` で表示。`/goal resume`、`/goal edit <words>`、`/goal new: <words>`（終わっていないゴールを置き換える）、`/goal pause`（または Esc）、`/goal clear` |
 | `/memory` | Kumi が保存しているすべて：あなたとこの Set についてのメモ、あなたの Set から学んだこと、テクニック、レシピ、教訓。一つ選ぶと忘れさせられる（メモは言葉を変えるかピン留めもでき、レシピは実行するか忘れさせる） |
 | `/note <id> <new words>` | モデルを使わずにメモの言葉を変える。`/memory` でメモの「Change the words」を選ぶと入力が始まる |
 | `/recipes` | あなたのレシピ：実行するか、忘れさせる。空欄のあるレシピは `/recipe` の行を書き始め、ピン留めしたものを埋めておくので、続きを入力する |

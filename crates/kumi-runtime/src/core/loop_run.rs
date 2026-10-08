@@ -100,6 +100,9 @@ pub struct LoopRun {
     listens_before: u32,
     /// Why Kumi stopped the loop, once it has: then only the run's end is judged.
     stopped: Option<LoopStop>,
+    /// How many of the producer's messages had been taken when its turn began: one more, and the producer has stepped
+    /// in (the run may end, and the answer that took it is the loop's last).
+    pub steers: u64,
     budget: LoopBudget,
     now: Rc<dyn Fn() -> i64>,
 }
@@ -118,6 +121,7 @@ impl LoopRun {
             seen: 0,
             listens_before: 0,
             stopped: None,
+            steers: 0,
             budget,
             now,
         }

@@ -28,16 +28,11 @@ impl Session {
     ) -> Result<TurnResult, RuntimeError> {
         let mut result = first;
         let mut usage = result.usage.clone().unwrap_or_default();
-        let mut steers = self.0.state.borrow().steers;
         while result.stop_reason == StopReason::Completed && !op.signal.is_cancelled() {
-            // Inside a goal, the producer's message comes first: the answer that took it ends the loop, and the goal
-            // waits for them.
-            {
-                let s = self.0.state.borrow();
-                if s.objective_op.is_some() && s.steers > steers {
-                    break;
-                }
-                steers = s.steers;
+            // The producer's message comes first: the answer that took it is the loop's last (a goal then waits for
+            // them).
+            if self.0.state.borrow().steers > run.borrow().steers {
+                break;
             }
             let decision = run.borrow_mut().decide();
             let (text, stop) = match decision {

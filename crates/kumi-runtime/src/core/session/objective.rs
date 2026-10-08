@@ -4,8 +4,8 @@
 use super::matching::add_usage;
 use super::*;
 use crate::core::goal_mode::{
-    after_turn, command_word, error_check, measured_check, objective_audit, objective_first, objective_next, read_audit, Check, Objective,
-    ObjectiveState, Verdict, OBJECTIVE_BUDGET,
+    after_turn, command_word, error_check, gap_closed, measured_check, objective_audit, objective_first, objective_next, read_audit, Check,
+    Objective, ObjectiveState, Verdict, OBJECTIVE_BUDGET,
 };
 
 /// A goal run's hold on the session's objective flags, released however the run ends.
@@ -49,15 +49,17 @@ impl Session {
         let s = self.0.state.borrow();
         s.objective_op.as_ref().is_some_and(|op| s.active.as_ref().is_some_and(|active| active.id == op.id))
     }
-    /// The objective for this Set: in memory, else from disk. One kept as running with nothing running it (Kumi
-    /// closed, or crashed, mid-turn) is paused.
+    /// The objective for this Set: in memory, else from disk. Every unsaved Set shares one place, so an unsaved Set's
+    /// goal is only the one set in its own conversation. One kept as running with nothing running it (Kumi closed, or
+    /// crashed, mid-turn) is paused.
     pub(super) async fn objective_kept(&self) -> Option<Objective> {
-        let place = self.objective_place();
+        let (place, conversation) = (self.objective_place(), self.0.state.borrow().conversation_id.clone());
         let held = self.0.state.borrow().objective.as_ref().filter(|(at, _)| *at == place).map(|(_, objective)| objective.clone());
         let mut kept = match held {
             Some(held) => Some(held),
             None => self.0.options.objectives.clone()?.load(&place).await.ok().flatten(),
-        };
+        }
+        .filter(|objective| place != UNSAVED || objective.conversation.as_deref() == Some(conversation.as_str()));
         if let Some(objective) = kept.as_mut().filter(|objective| objective.state == ObjectiveState::Running) {
             if !self.objective_running() {
                 objective.state = ObjectiveState::Paused;
@@ -88,15 +90,23 @@ impl Session {
         }
         self.persist_objective(&place.at, objective);
     }
-    /// The unsaved Set's goal, moved to the Set's own place when it's first saved (as its conversation is).
+    /// The unsaved Set's goal, moved to the Set's own place when it's first saved (as its conversation is). Only its
+    /// own: a goal another unsaved Set left stays where it is.
     pub(super) fn move_unsaved_objective(&self, to: &str) {
-        if let Some((at, _)) = self.0.state.borrow_mut().objective.as_mut().filter(|(at, _)| at == UNSAVED) {
-            *at = to.to_owned();
-        }
+        let conversation = {
+            let mut s = self.0.state.borrow_mut();
+            let conversation = s.conversation_id.clone();
+            if let Some((at, _)) =
+                s.objective.as_mut().filter(|(at, objective)| at == UNSAVED && objective.conversation.as_ref() == Some(&conversation))
+            {
+                *at = to.to_owned();
+            }
+            conversation
+        };
         if let Some(store) = self.0.options.objectives.clone() {
             let to = to.to_owned();
             self.enqueue(async move {
-                if let Some(goal) = store.load(UNSAVED).await? {
+                if let Some(goal) = store.load(UNSAVED).await?.filter(|goal| goal.conversation.as_ref() == Some(&conversation)) {
                     store.save(&to, &goal).await?;
                     store.clear(UNSAVED).await?;
                 }
@@ -107,12 +117,14 @@ impl Session {
     pub(super) fn emit_objective(&self, objective: &Objective, elapsed_ms: i64) {
         self.emit(SessionEvent::Objective(objective.status(elapsed_ms)));
     }
-    /// One turn toward the objective: the model works, and the loop runs inside when it starts a judged run.
+    /// One turn toward the objective: the model works, and the loop runs inside when it judges a change. The run's
+    /// first turn is a new request (the judge starts afresh); later ones carry on.
     async fn objective_turn(
         &self,
         op: &Rc<Operation>,
         prompt: &str,
         objective: &str,
+        first: bool,
         usage: &mut Usage,
     ) -> Result<TurnResult, RuntimeError> {
         {
@@ -120,21 +132,16 @@ impl Session {
             s.looping = None;
             s.judge_start = None;
             s.turn_request = Some(objective.to_owned());
+            s.turn_steers = s.steers;
         }
-        let snapshot = self.observe(op, None, true).await?;
+        let snapshot = self.observe(op, None, !first).await?;
         self.assert_current(op)?;
         op.phase.set(Phase::Inference);
-        let steers = self.0.state.borrow().steers;
         let result = self.ask(op, prompt, &snapshot.context, None, vec![], "").await?;
         add_usage(usage, result.usage.as_ref());
-        // An answer that took the producer's message runs no loop after it: the goal waits for them.
-        let (looping, stepped_in) = {
-            let mut s = self.0.state.borrow_mut();
-            (s.looping.take(), s.steers > steers)
-        };
+        let looping = self.0.state.borrow().looping.clone();
         let result = match looping {
-            Some(looping) if result.stop_reason == StopReason::Completed && !stepped_in => {
-                self.0.state.borrow_mut().looping = Some(looping.clone());
+            Some(looping) if result.stop_reason == StopReason::Completed => {
                 let looped = self.run_loop(op, &looping, result).await;
                 self.0.state.borrow_mut().looping = None;
                 looped?
@@ -145,17 +152,18 @@ impl Session {
     }
     /// The check after a turn: the judge's numbers when this turn measured something, else the model's own audit, which
     /// must end in complete, blocked or continue. The producer's messages wait meanwhile: the check changes nothing.
+    /// None when it was stopped (Esc, /goal stop): what it said by then isn't an answer.
     async fn objective_check(
         &self,
         op: &Rc<Operation>,
         objective: &str,
         judged_before: &Option<crate::listening::round::Round>,
         usage: &mut Usage,
-    ) -> Result<Check, RuntimeError> {
+    ) -> Result<Option<Check>, RuntimeError> {
         let judged = self.0.state.borrow().judged_last.clone();
         if judged != *judged_before {
             if let Some(check) = measured_check(judged.as_ref()) {
-                return Ok(check);
+                return Ok(Some(check));
             }
         }
         let said = Rc::new(RefCell::new(String::new()));
@@ -167,8 +175,11 @@ impl Session {
         self.0.state.borrow_mut().checking = false;
         let result = result?;
         add_usage(usage, result.usage.as_ref());
+        if result.stop_reason == StopReason::Cancelled || op.signal.is_cancelled() {
+            return Ok(None);
+        }
         let answer = said.borrow().clone();
-        Ok(read_audit(&answer))
+        Ok(Some(read_audit(&answer)))
     }
     /// A turn's or a check's error: the goal is kept paused (blocked when the producer must fix something first,
     /// named), never left running.
@@ -200,17 +211,20 @@ impl Session {
         }
         let mut usage = Usage::default();
         objective.state = ObjectiveState::Running;
+        objective.conversation = Some(place.conversation.clone());
         self.persist_running(&mut place, &objective);
         self.emit_objective(&objective, now() - started);
         let mut prompt = if fresh { objective_first(&objective.objective) } else { objective_next(&objective) };
         let mut stop_reason = StopReason::Completed;
         let mut stepped_in = false;
+        let mut first = true;
         loop {
-            let (applied, judged_before, closed, judged_count, steers) = {
+            let (applied, judged_before, closed, judged_changes, steers) = {
                 let s = self.0.state.borrow();
-                (s.applied, s.judged_last.clone(), s.judged_closed, s.judged_count, s.steers)
+                (s.applied, s.judged_last.clone(), s.judged_closed, s.judged_changes, s.steers)
             };
-            let turn = self.objective_turn(&op, &prompt, &objective.objective, &mut usage).await;
+            let turn = self.objective_turn(&op, &prompt, &objective.objective, first, &mut usage).await;
+            first = false;
             let turn = match turn {
                 // A turn that ran out of steps did work too: the check says where it got.
                 Ok(result) if result.stop_reason != StopReason::Cancelled && !op.signal.is_cancelled() => Ok(result),
@@ -233,7 +247,12 @@ impl Session {
                 break;
             }
             let check = match self.objective_check(&op, &objective.objective, &judged_before, &mut usage).await {
-                Ok(check) => check,
+                Ok(Some(check)) => check,
+                // Stopped mid-check: no answer, no turn counted.
+                Ok(None) => {
+                    stop_reason = StopReason::Cancelled;
+                    break;
+                }
                 Err(_) if op.signal.is_cancelled() => {
                     stop_reason = StopReason::Cancelled;
                     break;
@@ -243,15 +262,15 @@ impl Session {
                     return Err(error);
                 }
             };
-            // Progress: a judged turn closes the gap by a step or more (a change taken back closes nothing); an
-            // unjudged one changes the Set.
+            // Progress: the judge's gap closed by a step or more, by kept changes or between its readings before and
+            // after the turn (measure, change, measure again); a change taken back closes nothing. With nothing to
+            // compare and no change judged, a change in the Set.
             let progress = {
                 let s = self.0.state.borrow();
-                if s.judged_count > judged_count {
-                    s.judged_closed - closed >= 1.
-                } else {
-                    s.applied > applied
-                }
+                let standing = gap_closed(judged_before.as_ref(), s.judged_last.as_ref());
+                s.judged_closed - closed >= 1.
+                    || standing.is_some_and(|closed| closed >= 1.)
+                    || (standing.is_none() && s.judged_changes == judged_changes && s.applied > applied)
             };
             let check = after_turn(&mut objective, check, progress, now() - started);
             self.persist_running(&mut place, &objective);
@@ -297,7 +316,7 @@ impl Session {
         ));
         Ok(Some(TurnResult { stop_reason, usage: Some(usage) }))
     }
-    /// /goal's words: a new objective, or status, resume, pause, edit <words>, new <words>, stop. The subcommands are
+    /// /goal's words: a new objective, or status, resume, pause, edit <words>, new: <words>, stop. The subcommands are
     /// read in any case and with trailing punctuation; they never start a goal of their own.
     pub(super) async fn objective_command(&self, text: Option<String>) -> Result<GoalCommand, RuntimeError> {
         let budget = self.0.options.objective_budget.unwrap_or(OBJECTIVE_BUDGET);
@@ -318,11 +337,12 @@ impl Session {
                 return Ok(GoalCommand::Show(None));
             }
             "edit" | "new" => {
+                let how = if word == "new" { "new:" } else { "edit" };
                 return Err(KumiError::new(
                     FailureKind::Request,
-                    format!("Say the goal's words after /goal {word}, such as /goal {word} master this to -9 LUFS."),
+                    format!("Say the goal's words after /goal {how}, such as /goal {how} master this to -9 LUFS."),
                 )
-                .into())
+                .into());
             }
             _ => {}
         }
@@ -342,18 +362,20 @@ impl Session {
                 None => Err(KumiError::new(FailureKind::Request, "There's no goal to edit. Start one: /goal and what to reach.").into()),
             };
         }
-        // An unfinished goal is replaced only when the producer says so: /goal new, or the same words sent again. The
-        // same words as the goal itself carry it on.
-        let kept = self.objective_kept().await.filter(|kept| kept.state != ObjectiveState::Done);
-        let (words, replacing) = if first == "new" && kept.is_some() { (rest, true) } else { (words, false) };
-        if let Some(kept) = kept {
+        // `/goal new: <words>` replaces an unfinished goal at once ("new chords for the bridge" is a goal's words).
+        if let Some(rest) = words.get(..4).filter(|start| start.eq_ignore_ascii_case("new:")).map(|_| trim(&words[4..])) {
+            return Ok(GoalCommand::Run(Objective::new(rest, budget), true));
+        }
+        // Otherwise an unfinished goal is replaced only when the same words are sent again; the goal's own words carry
+        // it on.
+        if let Some(kept) = self.objective_kept().await.filter(|kept| kept.state != ObjectiveState::Done) {
             if command_word(&kept.objective) == command_word(words) {
                 return self.objective_resume(budget).await;
             }
-            if !replacing && pending.as_deref() != Some(words) {
+            if pending.as_deref() != Some(words) {
                 self.0.state.borrow_mut().pending_goal = Some(words.to_owned());
                 return Ok(GoalCommand::Say(format!(
-                    "This Set has an unfinished goal: “{}” ({} turn{} so far). Send the same /goal again, or /goal new and the words, to replace it; /goal resume carries it on.",
+                    "This Set has an unfinished goal: “{}” ({} turn{} so far). Send the same /goal again, or /goal new: and the words, to replace it; /goal resume carries it on.",
                     kept.objective,
                     kept.turns,
                     if kept.turns == 1 { "" } else { "s" }

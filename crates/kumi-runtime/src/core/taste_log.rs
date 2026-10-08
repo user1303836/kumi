@@ -118,10 +118,17 @@ impl TasteLog {
             }
         }
     }
-    /// The producer's words steering the turn under way: theirs to quote too.
+    /// The producer's words steering the turn under way: theirs to quote too. Said into work toward a goal or a match,
+    /// they make the rest of the turn the producer's.
     pub fn steered(&self, text: &str) {
         let mut state = self.state.borrow_mut();
         if !state.attended {
+            state.attended = true;
+            state.request = text.to_owned();
+            state.requests.push_back(kept_request(text));
+            while state.requests.len() > REQUESTS {
+                state.requests.pop_front();
+            }
             return;
         }
         state.request = format!("{}\n{text}", state.request);

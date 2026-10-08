@@ -387,7 +387,8 @@ within tolerance, changes no longer helping, or 16 rounds or 45 minutes. Its
 checklist stays as first set, and the model ends the run only when Kumi asks:
 one more listen to the whole stretch and what changed. Kumi starts the same loop
 by itself when the model judges a change of its own (measuring alone starts
-nothing). Esc or `/loop stop` stops it, and what's kept stays.
+nothing). Esc or `/loop stop` stops it, and so does a message of yours once it's
+answered; what's kept stays.
 
 `/goal` and what to reach keeps at one goal across turns until it's met. After
 every turn Kumi checks it: by the judge's numbers when it measured, otherwise by
@@ -401,9 +402,10 @@ you. The GOAL tab shows the goal, its turns and time against the budget, the
 last check and what's next. `/goal` alone shows it; `/goal edit <words>` changes
 it, `/goal resume` carries on (with a fresh budget), `/goal pause` or Esc pauses
 it, and `/goal clear` ends it. Another `/goal` while one is unfinished asks
-first: send it again, or `/goal new <words>`, to replace it. A goal is kept with
-its Set (it moves with an unsaved Set's first save), so it's still there after a
-restart.
+first: send it again, or `/goal new: <words>`, to replace it. A goal is kept with
+its Set, so it's still there after a restart. An unsaved Set has no name to keep
+it by: its goal stays with that conversation, and moves with the Set's first
+save.
 
 ## Matching a reference
 
