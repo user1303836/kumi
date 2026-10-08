@@ -631,12 +631,34 @@ async fn a_round_is_decided_whole_kept_and_rebalanced_or_taken_back() {
 }
 
 #[test]
-fn a_run_follows_its_tracks_renames() {
-    let renames = |pairs: &[(&str, &str)]| pairs.iter().map(|(from, to)| (from.to_string(), to.to_string())).collect::<Vec<_>>();
-    // Renamed twice, beside another track's rename: the last name.
-    assert_eq!(renamed("Vocal", &renames(&[("Vocal", "Lead Vox"), ("Bass", "Sub"), ("Lead Vox", "Lead")])), "Lead");
-    // A rename taken back isn't applied any more, so it isn't followed: the name it had.
-    assert_eq!(renamed("Vocal", &renames(&[("Bass", "Sub")])), "Vocal");
+fn a_run_follows_its_own_tracks_renames_not_a_namesakes() {
+    let renames = |pairs: &[(&str, &str)]| pairs.iter().map(|(at, to)| (at.to_string(), to.to_string())).collect::<Vec<_>>();
+    // Two tracks called Vocal; the run's is the second. Kumi renaming the first doesn't move the run onto it.
+    assert_eq!(renamed("Vocal", Some("1:track:5"), &renames(&[("1:track:3", "Vocal 2")])), "Vocal");
+    // Its own, renamed twice: the newest name.
+    let both = renames(&[("1:track:5", "Lead"), ("1:track:3", "Vocal 2"), ("1:track:5", "Lead Vox")]);
+    assert_eq!(renamed("Vocal", Some("1:track:5"), &both), "Lead Vox");
+    // A rename taken back isn't applied, so it isn't listed: the name it had. Without the run's ref, nothing is followed.
+    assert_eq!(renamed("Vocal", Some("1:track:5"), &[]), "Vocal");
+    assert_eq!(renamed("Vocal", None, &renames(&[("1:track:5", "Lead")])), "Vocal");
+}
+
+#[test]
+fn rebalancing_turns_only_a_device_thats_on() {
+    use kumi_runtime::integrations::ableton::rendering::gain_device;
+    let row = |name: &str, on: bool| {
+        serde_json::json!({"ref": name, "name": name, "className": name, "enabled": on}).as_object().unwrap().clone()
+    };
+    let picked =
+        |rows: &[serde_json::Map<String, serde_json::Value>]| gain_device(rows).map(|(row, limited)| (row["ref"].clone(), limited));
+    // A Limiter switched off on Main turns nothing: a Utility goes at the end (none here), and peaks aren't held.
+    assert_eq!(picked(&[row("EQ Eight", true), row("Limiter", false)]), None);
+    // A Utility on before it is the last device on: it's turned.
+    assert_eq!(picked(&[row("Utility", true), row("Limiter", false)]), Some((serde_json::json!("Utility"), false)));
+    // A Limiter that's on holds the peaks, whatever's off after it.
+    assert_eq!(picked(&[row("Limiter", true), row("Utility", false)]), Some((serde_json::json!("Limiter"), true)));
+    // A Utility that's off isn't one either.
+    assert_eq!(picked(&[row("Utility", false)]), None);
 }
 
 #[test]

@@ -319,9 +319,12 @@ pub fn processing(verdict: &Verdict, target: Option<&str>, made: usize) -> Optio
     })
 }
 
-/// A name after renames (old → new, oldest first): a run finds its track and focus by name, so it follows them.
-pub fn renamed(name: &str, renames: &[(String, String)]) -> String {
-    renames.iter().fold(name.to_owned(), |name, (from, to)| if *from == name { to.clone() } else { name })
+/// The name a run's track goes by now, from the name and ref it started with and Kumi's track renames since (each
+/// renamed track's ref and new name, oldest first): its newest, matched by ref so another track of the same name is
+/// never followed. Without its ref, the name it started with.
+pub fn renamed(name: &str, reference: Option<&str>, renames: &[(String, String)]) -> String {
+    let newest = reference.and_then(|reference| renames.iter().rev().find(|(at, _)| at == reference));
+    newest.map_or_else(|| name.to_owned(), |(_, to)| to.clone())
 }
 
 /// What a take-back did: its words for the round's why, and whether any of it stayed in Live.

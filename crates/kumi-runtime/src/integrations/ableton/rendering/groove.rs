@@ -594,8 +594,15 @@ impl Rendering {
         }
         let read = match self.clip_notes(&clip, signal).await {
             Ok(read) => read,
-            Err(why) if own.is_empty() => return Ok(Err(why)),
-            Err(why) => return Ok(Err(format!("{why} (the note changes made before your words went first: {titles})"))),
+            Err(why) => {
+                // Still to start again: the next round re-reads the notes and starts from them, taking back nothing of
+                // what came after the words (what went before them is gone by then).
+                self.groove.borrow_mut().as_mut().unwrap().steered = Some(mark);
+                return Ok(Err(match own.is_empty() {
+                    true => why,
+                    false => format!("{why} (the note changes made before your words went first: {titles})"),
+                }));
+            }
         };
         let part = self.feel_of(&read.notes, &kit, None);
         let ids = self.applied_ids();

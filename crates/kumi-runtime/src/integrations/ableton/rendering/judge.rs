@@ -84,8 +84,8 @@ pub struct JudgeRun {
     /// The track and focus it hears, by name: after a rename Kumi made, the new one.
     pub(super) track: Option<String>,
     pub(super) focus: Option<String>,
-    /// Their names as the run started, and Kumi's changes then: the renames since are followed from these.
-    pub(super) named: (Option<String>, Option<String>, Vec<String>),
+    /// Their names and refs as the run started, and Kumi's changes then: the renames since are followed from these.
+    pub(super) named: Named,
     pub(super) span: Window,
     /// The span's own capture (its file and where the part starts), to cut excerpts from before anything changes.
     pub(super) span_file: (PathBuf, f64),
@@ -119,6 +119,14 @@ pub struct JudgeRun {
     /// Per checklist item, where in the span (seconds from its start) a problem stands out most: its excerpt.
     pub(super) worst: Vec<Option<f64>>,
     pub rounds: Vec<Round>,
+}
+
+/// A judged run's track and focus as it started: each one's name and its ref then, and Kumi's changes then. Kumi's
+/// renames since are followed by the ref, so another track of the same name is never taken for one of them.
+pub(super) struct Named {
+    pub(super) track: Option<(String, Option<String>)>,
+    pub(super) focus: Option<(String, Option<String>)>,
+    pub(super) from: Vec<String>,
 }
 
 impl JudgeRun {
@@ -309,9 +317,22 @@ impl Rendering {
                 }
             )));
         }
+        // Where its track and focus are, so Kumi's renames of them (not of a namesake) are followed.
+        let track_ref = match &track {
+            Some(name) => self.scope_ref(Some(name), signal.clone()).await.ok(),
+            None => None,
+        };
+        let focus_ref = match &goal.focus {
+            Some(name) => self.scope_ref(Some(name), signal.clone()).await.ok(),
+            None => None,
+        };
         let mut run = JudgeRun {
             checklist,
-            named: (track.clone(), goal.focus.clone(), self.applied_ids()),
+            named: Named {
+                track: track.clone().map(|name| (name, track_ref)),
+                focus: goal.focus.clone().map(|name| (name, focus_ref)),
+                from: self.applied_ids(),
+            },
             track,
             focus: goal.focus.clone(),
             span,
@@ -1143,13 +1164,11 @@ impl Rendering {
                 let name = Some(text("name")).filter(|name| !name.is_empty()).unwrap_or_else(|| class.clone());
                 let mut parameters = vec![];
                 if on && matches!(class.as_str(), "StereoGain" | "Utility") {
-                    let read = self
-                        .rows("parameter", json!({"parent":row.get("ref"),"fields":["name","value","displayValue"]}), signal.clone())
-                        .await?;
+                    let read =
+                        self.rows("parameter", json!({"parent":row.get("ref"),"fields":["name","displayValue"]}), signal.clone()).await?;
                     for parameter in &read {
-                        let value = parameter.get("value").and_then(Value::as_f64).unwrap_or(0.);
                         let field = |key: &str| parameter.get(key).and_then(Value::as_str).unwrap_or("").to_string();
-                        parameters.push((field("name"), value, field("displayValue")));
+                        parameters.push((field("name"), field("displayValue")));
                     }
                 }
                 devices.push(MainDevice { name, class, on, parameters });
@@ -1300,26 +1319,30 @@ impl Rendering {
         (!what.is_empty()).then(|| what.join(" and "))
     }
 
-    /// The judged run hears its track and focus by name: after a rename Kumi made since it started, by the new one (a
-    /// rename taken back since drops out, and the name goes back with it).
+    /// The judged run hears its track and focus by name: after Kumi renamed one of them since it started, by its new
+    /// name (a rename taken back since drops out, and the name goes back with it).
     pub(super) fn follow_renames(&self) {
         let mut guard = self.judge.borrow_mut();
         let Some(run) = guard.as_mut() else { return };
+        // Kumi's track renames since, oldest first: the renamed track's ref, and its new name.
         let renames: Vec<(String, String)> = self
             .history
             .entries
             .borrow()
             .iter()
-            .filter(|(id, _)| !run.named.2.contains(id))
+            .filter(|(id, _)| !run.named.from.contains(id))
             .filter_map(|(_, entry)| {
                 let entry = entry.borrow();
                 let applied = matches!(entry.record.state, ChangeState::Applied | ChangeState::Kept);
                 let restore = entry.restore.as_ref().filter(|restore| applied && restore.field == "name")?;
-                Some((restore.value.clone()?, entry.record.track.as_ref()?.name.clone()))
+                Some((restore.reference.clone(), entry.record.track.as_ref()?.name.clone()))
             })
             .collect();
-        run.track = run.named.0.as_deref().map(|name| judging::renamed(name, &renames));
-        run.focus = run.named.1.as_deref().map(|name| judging::renamed(name, &renames));
+        let follow = |named: &Option<(String, Option<String>)>| {
+            named.as_ref().map(|(name, reference)| judging::renamed(name, reference.as_deref(), &renames))
+        };
+        run.track = follow(&run.named.track);
+        run.focus = follow(&run.named.focus);
     }
 
     /// Kumi's changes in HISTORY now (applied ones), to tell a round's own from what came before.
@@ -1421,12 +1444,12 @@ impl Rendering {
             .count()
     }
 
-    /// Where rebalancing turns the level as the chain stands, without adding anything: the last Limiter, else a
-    /// Utility last. None when there's neither (rebalancing then puts a Utility at the end).
+    /// Where rebalancing turns the level as the chain stands, without adding anything: the last Limiter that's on, else
+    /// a Utility last of those on. None when there's neither (rebalancing then puts a Utility at the end).
     async fn find_gain_stage(self: &Rc<Self>, signal: Signal) -> Result<Option<GainStage>, RuntimeError> {
         let scope = self.judge.borrow().as_ref().and_then(|run| run.track.clone());
         let track = self.scope_ref(scope.as_deref(), signal.clone()).await?;
-        let rows = self.rows("device", json!({"parent":track,"fields":["name","className"]}), signal.clone()).await?;
+        let rows = self.rows("device", json!({"parent":track,"fields":["name","className","enabled"]}), signal.clone()).await?;
         let Some((device, limited)) = gain_device(&rows) else { return Ok(None) };
         self.gain_knob(&device, limited, signal).await.map(Some)
     }
@@ -1503,15 +1526,18 @@ fn drop_items(run: &mut JudgeRun, indices: &[usize]) {
     run.target = None;
 }
 
-/// The device rebalancing turns, from a chain's rows: the last Limiter (peaks then stay put), else a Utility last.
-fn gain_device(rows: &[JsonObject]) -> Option<(JsonObject, bool)> {
+/// The device rebalancing turns, from a chain's rows (with `enabled`): the last Limiter that's on (peaks then stay
+/// put), else a Utility that's the last device on. One that's off turns nothing: without either, rebalancing puts a
+/// Utility at the end.
+pub fn gain_device(rows: &[JsonObject]) -> Option<(JsonObject, bool)> {
+    let on = |row: &JsonObject| row.get("enabled") != Some(&Value::Bool(false));
     let named = |row: &JsonObject, name: &str| {
         row.get("className").and_then(Value::as_str) == Some(name) || row.get("name").and_then(Value::as_str) == Some(name)
     };
-    if let Some(at) = rows.iter().rposition(|row| named(row, "Limiter")) {
+    if let Some(at) = rows.iter().rposition(|row| on(row) && named(row, "Limiter")) {
         return Some((rows[at].clone(), true));
     }
-    rows.last().filter(|row| named(row, "Utility") || named(row, "StereoGain")).map(|row| (row.clone(), false))
+    rows.iter().rev().find(|row| on(row)).filter(|row| named(row, "Utility") || named(row, "StereoGain")).map(|row| (row.clone(), false))
 }
 
 /// A device row's identity in Live (empty when the bridge doesn't say).

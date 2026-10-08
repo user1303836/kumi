@@ -77,7 +77,7 @@ fn db(volume: f64) -> String {
 #[derive(Clone, Deserialize)]
 struct Knob(String, f64, f64, bool, Option<Vec<String>>, [String; 5], Option<f64>);
 
-/// Operator, Saturator and EQ Eight with every parameter Live 12.4 gives them (live-devices.json): their names,
+/// Operator, Saturator, EQ Eight and Utility with every parameter Live 12.4 gives them (live-devices.json): their names,
 /// ranges and steps, and Live's text at five points across each range, between which a value's text is
 /// interpolated, so names and values "as Live shows them" work here as they do in Live.
 static LIVE_DEVICES: LazyLock<HashMap<String, Vec<Knob>>> = LazyLock::new(|| {
@@ -234,7 +234,7 @@ impl Parameter {
     }
 }
 
-/// A device's parameters as synthetic rows: Live's own for the three above, a few named knobs otherwise.
+/// A device's parameters as synthetic rows: Live's own for the four above, a few named knobs otherwise.
 fn device_parameters(device: &Device, name: &str, fallback: &[&str]) -> Vec<Rc<Parameter>> {
     let knobs = LIVE_DEVICES.get(name).cloned().unwrap_or_else(|| {
         let texts = ["0.0 %", "25 %", "50 %", "75 %", "100 %"].map(String::from);
@@ -259,13 +259,12 @@ fn device_parameters(device: &Device, name: &str, fallback: &[&str]) -> Vec<Rc<P
         .collect()
 }
 
-/// A few knobs of each other device the Browser loads here, so a build can be set up (Operator, Saturator and
-/// EQ Eight have Live's own).
+/// A few knobs of each other device the Browser loads here, so a build can be set up (Operator, Saturator, EQ Eight
+/// and Utility have Live's own).
 fn knobs_of(name: &str) -> &'static [&'static str] {
     match name {
         "Auto Filter" => &["Frequency", "Resonance", "LFO Amount", "Dry/Wet"],
         "Reverb" => &["Decay Time", "Dry/Wet"],
-        "Utility" => &["Gain", "Width"],
         _ => &["Dry/Wet"],
     }
 }

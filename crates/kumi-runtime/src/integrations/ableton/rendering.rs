@@ -103,7 +103,7 @@ pub struct Rendering {
 }
 pub use form::FormRequest;
 pub use groove::GrooveRequest;
-pub use judge::{GoalRequest, JudgeRequest};
+pub use judge::{gain_device, GoalRequest, JudgeRequest};
 pub use sound::SoundRequest;
 pub use tune::{TuneHow, TuneRequest};
 /// Kumi playing the Set for itself, Main down: what Live plays meanwhile isn't heard by the producer. However the

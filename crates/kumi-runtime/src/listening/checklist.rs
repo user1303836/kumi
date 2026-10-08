@@ -1188,13 +1188,13 @@ impl Checklist {
 }
 
 /// One of Main's devices as masking needs it: its name and class, whether it's on, and (a Utility's) its parameters
-/// by name, value and the text Live shows.
+/// by name and the text Live shows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MainDevice {
     pub name: String,
     pub class: String,
     pub on: bool,
-    pub parameters: Vec<(String, f64, String)>,
+    pub parameters: Vec<(String, String)>,
 }
 
 /// Main's chain as masking reads it: the devices that change the mix in a way the focus element (heard before Main)
@@ -1222,41 +1222,41 @@ pub fn main_chain(devices: &[MainDevice]) -> MainState {
     state
 }
 
-/// A Utility's gain (dB) when that's all it changes: width at 100 %, both channels as they are (no mono, no channel
-/// flipped, muted or picked), balance at the centre. None for anything else.
+/// A Utility's gain (dB) when that's all it changes, read by name from what Live shows. Every parameter has to be one
+/// Kumi knows, at its neutral setting: both channels as they are (no invert, mono or mute, Channel Mode Stereo),
+/// Balance and Mid/Side Balance at the centre. Live 12.4 calls the gain Output; before, Gain beside a Stereo Width (at
+/// 100 %). None for anything else: a parameter Kumi doesn't know, text it can't read, or no gain at all.
 pub fn utility_gain(device: &MainDevice) -> Option<f64> {
     if !matches!(device.class.as_str(), "StereoGain" | "Utility") {
         return None;
     }
-    let mut gain = 0.;
-    for (name, value, shown) in &device.parameters {
-        let lower = name.to_lowercase();
+    let mut gain = None;
+    for (name, shown) in &device.parameters {
         let shown = shown.trim();
         let number = || {
             let text: String = shown.chars().filter(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '+')).collect();
             text.parse::<f64>().ok()
         };
-        // A switch is on as Live shows it: a frequency or a time beside one ("Bass Mono Freq", 120 Hz) isn't a switch.
-        let on = shown.eq_ignore_ascii_case("on") || (!shown.chars().any(char::is_alphabetic) && *value >= 0.5);
-        if lower == "gain" {
-            gain = if shown.starts_with("-inf") { return None } else { number()? };
-        } else if lower.contains("width") && shown.ends_with('%') {
-            if (number()? - 100.).abs() > 0.5 {
-                return None;
+        let neutral = match name.as_str() {
+            "Output" | "Gain" => {
+                gain = Some(number().filter(|_| !shown.starts_with("-inf"))?);
+                true
             }
-        } else if lower.contains("channel") {
-            if !shown.to_lowercase().contains("stereo") {
-                return None;
-            }
-        } else if ["mono", "inv", "phase", "mute", "swap"].iter().any(|flag| lower.contains(flag)) {
-            if on {
-                return None;
-            }
-        } else if (lower.contains("balance") || lower.contains("panorama")) && value.abs() > 1e-3 && shown != "C" {
+            // On (off devices don't count at all); the bass's frequency matters only with Bass Mono on, a DC filter
+            // only below what's heard.
+            "Device On" | "Bass Freq" | "DC Filter" => true,
+            "Left Inv" | "Right Inv" | "Mono" | "Bass Mono" | "Mute" => shown == "Off",
+            "Channel Mode" => shown == "Stereo",
+            "Balance" => shown == "C",
+            "Mid/Side Balance" => shown == "0",
+            "Stereo Width" => shown.ends_with('%') && number().is_some_and(|width| (width - 100.).abs() < 0.5),
+            _ => false,
+        };
+        if !neutral {
             return None;
         }
     }
-    Some(gain)
+    gain
 }
 
 /// Why masking can't be read fairly on a run over the mix, when it can't: the mix is heard after Main's chain but

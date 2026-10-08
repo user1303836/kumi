@@ -374,6 +374,41 @@ async fn after_the_producers_words_a_groove_round_reads_the_part_again_and_judge
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn a_steered_round_whose_read_fails_still_starts_again_next_time() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let live = live(true);
+            let Groove { rendering, history, .. } = groove(live.clone()).await;
+            rendering.groove(&request(json!({"clip":"7:clip:0:0","reference":"7:clip:1:0"})), Signal::new()).await.unwrap().unwrap();
+            let edit = |id: &str, title: &str| {
+                let record: ChangeRecord =
+                    serde_json::from_value(json!({"id":id,"family":"clip","title":title,"state":"applied","at":0})).unwrap();
+                history.remember(record, format!("t{id}"), None);
+                history.made_by(id, "change_notes");
+                history.made_on(id, "7:clip:0:0");
+            };
+            edit("c901", "Hats 6 ms later");
+            rendering.steered();
+            edit("c902", "Kick on the and");
+            // The part can't be read this time (its notes gone for a moment).
+            let part = live.notes.borrow_mut().insert("7:clip:0:0".into(), vec![]).unwrap();
+            let change = GrooveRequest { change: Some("hats later".into()), ..Default::default() };
+            let failed = rendering.groove(&change, Signal::new()).await.unwrap();
+            assert!(failed.as_ref().is_err_and(|why| why.contains("no notes to measure")), "{failed:?}");
+            // Tried again: still a start from the notes as they are, so the producer's edit after the words isn't judged.
+            live.notes.borrow_mut().insert("7:clip:0:0".into(), part);
+            let again = rendering.groove(&change, Signal::new()).await.unwrap().unwrap();
+            assert_eq!(again.kind, RoundKind::Start);
+            assert!(!again.why.clone().unwrap().contains("Kick on the and"), "{:?}", again.why);
+            // And the round after takes back nothing of it.
+            let next = rendering.groove(&change, Signal::new()).await.unwrap().unwrap();
+            assert_eq!((next.kind, next.kept), (RoundKind::Judged, Some(false)));
+            assert!(next.why.clone().unwrap().contains("no note changes on the part to take back"), "{:?}", next.why);
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn an_apply_in_a_later_answer_reads_the_clip_again() {
     tokio::task::LocalSet::new()
         .run_until(async {

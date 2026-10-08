@@ -204,6 +204,9 @@ impl Rendering {
 
     /// An EQ Eight's mode, as Live numbers it (0 Stereo, 1 L/R, 2 M/S); None when Live doesn't say.
     async fn eq_mode(&self, device: &str, signal: Signal) -> Result<Option<i64>, RuntimeError> {
+        if !self.connection().has("live_run_python") {
+            return Ok(None);
+        }
         let long = self.connection().references.borrow().lengthen(&json!({"deviceRef":device}));
         let long = long["deviceRef"].as_str().unwrap_or(device).to_owned();
         let code = "result = int(obj.global_mode)";
@@ -358,11 +361,20 @@ impl Rendering {
             return Ok(Err("fit sets an EQ Eight's bands: put an EQ Eight where the fix belongs, then tune it.".into()));
         }
         // fit writes the A curve: in L/R or M/S that's the left or mid channel's alone.
-        if self.eq_mode(&request.device, signal.clone()).await?.is_some_and(|mode| mode != 0) {
-            return Ok(Err(
-                "This EQ Eight is in L/R or M/S mode, and fit writes only its A curve (the left or mid channel): set it to Stereo, or put a fresh EQ Eight where the fix belongs, then tune it."
-                    .into(),
-            ));
+        match self.eq_mode(&request.device, signal.clone()).await? {
+            Some(0) => {}
+            Some(_) => {
+                return Ok(Err(
+                    "This EQ Eight is in L/R or M/S mode, and fit writes only its A curve (the left or mid channel): set it to Stereo, or put a fresh EQ Eight where the fix belongs, then tune it."
+                        .into(),
+                ))
+            }
+            None => {
+                return Ok(Err(
+                    "Kumi couldn't read whether this EQ Eight is in Stereo, L/R or M/S mode, and fit writes only its A curve, which is the whole sound only in Stereo: home in on its bands instead (how: home)."
+                        .into(),
+                ))
+            }
         }
         let unused: Vec<usize> = (1..=8)
             .filter(|band| {
