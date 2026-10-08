@@ -184,6 +184,8 @@ fn a_change_toward_a_wetter_reference_is_kept_and_one_past_its_punch_is_taken_ba
     let verdict = checklist.verdict(Some(decay_time), &before, &after);
     assert!(verdict.kept && verdict.rows[punch].change != Change::Worse, "{verdict:#?}");
     let Target::NoLowerThan { value: floor } = checklist.items[punch].target else { panic!("{:?}", checklist.items[punch]) };
+    // The floor is the reference's own crest, not its spread's low edge: a matching sound can't be clipped flatter.
+    assert!((floor - (punchy - 4.)).abs() < 0.06, "{floor} against {}", punchy - 4.);
     after[punch] = Some(floor - 3.);
     let verdict = checklist.verdict(Some(decay_time), &before, &after);
     assert!(!verdict.kept && verdict.hurt.contains(&"hit crest".to_string()), "{verdict:#?}");

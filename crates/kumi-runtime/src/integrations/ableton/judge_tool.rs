@@ -227,13 +227,20 @@ pub fn judge_reply(round: &Round) -> Value {
     if let Some(kept) = round.kept {
         reply["kept"] = json!(kept);
     }
-    reply["note"] = json!(match (round.kind, round.met) {
-        (_, true) => "Every item is within tolerance: say so and stop, or end the run with done: true for a last whole listen.",
-        (RoundKind::Done, false) => "The run is over. Say what changed, before → after, and what's still off.",
-        (RoundKind::Start, false) => "Make one change toward next, then call judge with change.",
-        (RoundKind::Judged, false) if round.kept == Some(false) =>
-            "Kumi took that change back. Try another way to close next (another device, a different setting), then judge it.",
-        (RoundKind::Judged, false) => "Kept. Make one change toward next, then judge it.",
-    });
+    let unread = round.unread();
+    let note: String = match (round.kind, round.met) {
+        (_, true) if !unread.is_empty() => format!(
+            "Every item Kumi could read is within tolerance, but it couldn't read {}: say so, then stop, or end the run with done: true for a last whole listen.",
+            unread.join(", ")
+        ),
+        (_, true) => "Every item is within tolerance: say so and stop, or end the run with done: true for a last whole listen.".into(),
+        (RoundKind::Done, false) => "The run is over. Say what changed, before → after, and what's still off.".into(),
+        (RoundKind::Start, false) => "Make one change toward next, then call judge with change.".into(),
+        (RoundKind::Judged, false) if round.kept == Some(false) => {
+            "Kumi took that change back. Try another way to close next (another device, a different setting), then judge it.".into()
+        }
+        (RoundKind::Judged, false) => "Kept. Make one change toward next, then judge it.".into(),
+    };
+    reply["note"] = json!(note);
     reply
 }

@@ -853,7 +853,11 @@ impl Checklist {
             (None, false) => Target::NoLower,
         };
         // A sound goal's punch is each hit's own crest (a 2 dB step): the crest over 400 ms moves with how often the
-        // notes come, and saturation and clipping, which the dropped distortion guard let through, flatten a hit's.
+        // notes come, and saturation and clipping, which the dropped distortion guard let through, flatten a hit's. It
+        // may fall to the reference's own, never under it: its spread's low edge would let a matching reference's sound
+        // be clipped 4 dB flatter.
+        let toward_its_own =
+            |spread: Option<Spread>| spread.map_or(Target::NoLower, |spread| Target::NoLowerThan { value: round1(spread.mid) });
         let m = &heard.measures;
         let guards = [
             ("punch", "Punch (crest)", Quantity::Crest, m.crest.filter(|_| !goal.sound), Target::NoLower, 1.),
@@ -862,7 +866,7 @@ impl Checklist {
                 "Punch at each hit (its peak against the 20 ms around it)",
                 Quantity::HitCrest,
                 m.hit_crest.filter(|_| goal.sound),
-                toward(sounds.and_then(|r| r.sound.hit_crest), false),
+                toward_its_own(sounds.and_then(|r| r.sound.hit_crest)),
                 2.,
             ),
             ("pumping", "Pumping", Quantity::Pumping, m.pumping, toward(sounds.and_then(|r| r.sound.pumping), true), 1.),

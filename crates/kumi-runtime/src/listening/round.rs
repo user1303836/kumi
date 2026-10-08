@@ -69,6 +69,11 @@ pub struct Round {
 }
 
 impl Round {
+    /// What this round couldn't read (a sound's measure its effect hides, say): a run met without them says so.
+    pub fn unread(&self) -> Vec<String> {
+        self.rows.iter().filter(|row| row.after.is_none()).map(|row| row.label.to_lowercase()).collect()
+    }
+
     /// The round in a few lines: what it was after, what changed, the numbers that moved, the verdict and what's next.
     pub fn lines(&self) -> Vec<String> {
         let mut lines = vec![];
@@ -122,7 +127,11 @@ impl Round {
             lines.push(format!("  listener: {listener}"));
         }
         if self.met {
-            lines.push("  every item is within tolerance".into());
+            let unread = self.unread();
+            lines.push(match unread.is_empty() {
+                true => "  every item is within tolerance".into(),
+                false => format!("  every item it could read is within tolerance; it couldn't read {}", unread.join(", ")),
+            });
         } else if let Some(next) = &self.next {
             lines.push(format!(
                 "  next: {} ({}{} steps off, wants {}){}",

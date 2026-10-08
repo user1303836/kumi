@@ -199,6 +199,22 @@ fn the_loop_says_when_its_over_so_only_the_runs_end_is_judged_after_that() {
 }
 
 #[test]
+fn a_run_met_with_something_unread_names_it() {
+    let mut done = round(2, RoundKind::Done, None, 2.5, true);
+    assert!(done.lines().iter().any(|line| line == "  every item is within tolerance"), "{:?}", done.lines());
+    let mut hidden = done.rows[0].clone();
+    (hidden.label, hidden.after) = ("Decay, as the reference".into(), None);
+    done.rows.push(hidden);
+    assert!(
+        done.lines().iter().any(|line| line == "  every item it could read is within tolerance; it couldn't read decay, as the reference"),
+        "{:?}",
+        done.lines()
+    );
+    let note = kumi_runtime::integrations::ableton::judge_tool::judge_reply(&done)["note"].as_str().unwrap().to_string();
+    assert!(note.starts_with("Every item Kumi could read is within tolerance, but it couldn't read decay, as the reference"), "{note}");
+}
+
+#[test]
 fn a_new_judged_run_inside_the_loop_keeps_its_counts_and_an_early_done_is_held_back() {
     let mut run = LoopRun::new("master it", BUDGET);
     assert!(!run.started() && run.holds_done().is_none());
