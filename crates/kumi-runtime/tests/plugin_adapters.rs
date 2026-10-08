@@ -138,6 +138,23 @@ fn sample_names(id: &str) -> &'static [&'static str] {
             "Master Rebalance: Vocal Gain",
             "Unlimiter: Amount",
             "Global: Output Gain",
+            // Ozone 12.1's own names, as Live listed them (plugin-formats/ozone-12).
+            "MAX: Input Gain",
+            "MAX: Output Level",
+            "MAX: Character",
+            "MAX: Soft Clip Mode",
+            "MAX: Transient Shaping Amt",
+            "MAX: Stereo Ind. Sustain Amt",
+            "DYN: Aux Band 1 Comp Threshold",
+            "DYN: Aux Band 1 Lim Ratio",
+            "IMG: Aux Band 1 Width Percent",
+            "EXC: Aux Band 1 Amount",
+            "LEF: Aux Gain",
+            "CLA: Aux Amount",
+            "STBL: Aux Amount",
+            "STEMEQ: Vocals Gain",
+            "UNLIMITER: Amount",
+            "BAS: Punch",
         ],
         "proq4" => &[
             "Band 1 Used",
@@ -286,7 +303,14 @@ fn every_hint_takes_names_in_the_forms_its_written_for_and_each_of_those_names_l
         }
     }
     let eq = |role: &str| ADAPTERS.iter().find(|adapter| adapter.id == "ozone12").unwrap().hints().find(|hint| hint.role == role).unwrap();
-    for name in ["Dynamic EQ: Band 1 Gain", "Match EQ: Band 1 Gain", "Stem EQ: Band 1 Gain"] {
+    for name in [
+        "Dynamic EQ: Band 1 Gain",
+        "Match EQ: Band 1 Gain",
+        "Stem EQ: Band 1 Gain",
+        "DYNEQ: Band 1 Gain",
+        "MATCH EQ: Band 1 Gain",
+        "VEQ: Band 1 Gain",
+    ] {
         assert!(!eq("eq gain").matches(name), "{name}");
     }
 }

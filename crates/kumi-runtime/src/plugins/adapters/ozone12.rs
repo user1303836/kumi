@@ -2,8 +2,9 @@ use std::sync::LazyLock;
 
 use crate::plugins::adapter::{pattern, PluginAdapter, PluginKind, PluginParameterHint, PluginRecipe, PluginSection};
 
-// Names: Ozone starts each parameter with its module (and the module's instance), in a form not confirmed here; the
-// patterns need only the module's name and the control's, in that order.
+// Names: Ozone 12.1 lists each parameter under its module's short code ("MAX: Input Gain", "DYN: Aux Band 1 Comp
+// Threshold", "IMG: Aux Band 1 Width Percent"), as Live listed them (plugin-formats/ozone-12); the patterns also take
+// the module's full name, the form other versions and hosts show. Tune checks every name against Live's list first.
 pub static OZONE12: LazyLock<PluginAdapter> = LazyLock::new(|| {
     PluginAdapter {
     id: "ozone12", name: "Ozone 12", vendor: "iZotope", kind: PluginKind::Effect,
@@ -12,34 +13,34 @@ pub static OZONE12: LazyLock<PluginAdapter> = LazyLock::new(|| {
     sections: vec![
         PluginSection { name: "Maximizer", about: "The final limiter: loudness and the peak ceiling.",
             parameters: vec![
-                PluginParameterHint { role: "threshold", names: pattern(r"(?i)Maximi[sz]er.*Threshold"), about: "dB. Lower pushes harder into the limiter: louder, more limited (output is made up)." },
-                PluginParameterHint { role: "ceiling", names: pattern(r"(?i)Maximi[sz]er.*(Ceiling|Margin|Output Level)"), about: "The highest peak out, dB: -1.0 for streaming." },
-                PluginParameterHint { role: "character", names: pattern(r"(?i)Maximi[sz]er.*Character"), about: "0–10: low is fast and aggressive, high slower and smoother." },
-                PluginParameterHint { role: "mode", names: pattern(r"(?i)Maximi[sz]er.*(Mode|IRC|Style)"), about: "The IRC algorithm: later ones stay cleaner when pushed; Low Latency for live use." },
-                PluginParameterHint { role: "transients and width", names: pattern(r"(?i)Maximi[sz]er.*(Transient|Upward|Soft ?Clip|Stereo Indep|Independence)"), about: "Transient Emphasis keeps attacks, Upward Compress lifts quiet parts, Soft Clip shaves peaks before limiting, Stereo Independence lets left and right limit apart (wider, a less steady center)." },
-                PluginParameterHint { role: "true peak", names: pattern(r"(?i)Maximi[sz]er.*True ?Peak"), about: "On: also catches peaks between samples." },
+                PluginParameterHint { role: "threshold", names: pattern(r"(?i)\b(Maximi[sz]er|MAX)\b\W*(Threshold|Input Gain)$"), about: "dB into the limiter. Ozone 12 shows it as Input Gain: higher pushes harder, louder and more limited (as a Threshold, lower does). Output is made up." },
+                PluginParameterHint { role: "ceiling", names: pattern(r"(?i)\b(Maximi[sz]er|MAX)\b\W*(Ceiling|Margin|Output Level)$"), about: "The highest peak out, dB (Ozone 12's Output Level): -1.0 for streaming." },
+                PluginParameterHint { role: "character", names: pattern(r"(?i)\b(Maximi[sz]er|MAX)\b.*Character"), about: "0–10: low is fast and aggressive, high slower and smoother." },
+                PluginParameterHint { role: "mode", names: pattern(r"(?i)\b(Maximi[sz]er|MAX)\b(?!.*Soft ?Clip).*(Mode|IRC|Style)"), about: "The IRC algorithm: later ones stay cleaner when pushed; Low Latency for live use." },
+                PluginParameterHint { role: "transients and width", names: pattern(r"(?i)\b(Maximi[sz]er|MAX)\b.*(Transient|Upward|Soft ?Clip|Stereo Ind|Independence)"), about: "Transient Emphasis keeps attacks, Upward Compress lifts quiet parts, Soft Clip shaves peaks before limiting, Stereo Independence lets left and right limit apart (wider, a less steady center)." },
+                PluginParameterHint { role: "true peak", names: pattern(r"(?i)\b(Maximi[sz]er|MAX)\b.*True ?Peak"), about: "On: also catches peaks between samples." },
             ] },
         PluginSection { name: "Equalizer and Dynamic EQ", about: "Bands with frequency, gain, Q and shape. A Dynamic EQ band moves its gain only while its range is past the threshold.",
             parameters: vec![
                 // TS: one look-behind with four alternatives; fancy_regex wants each look-behind a fixed width.
-                PluginParameterHint { role: "eq gain", names: pattern(r"(?i)(?<!Dynamic )(?<!Match )(?<!Vintage )(?<!Stem )(EQ|Equali[sz]er)\b.*Band.*Gain"), about: "dB per band." },
-                PluginParameterHint { role: "eq frequency", names: pattern(r"(?i)(?<!Dynamic )(?<!Match )(?<!Vintage )(?<!Stem )(EQ|Equali[sz]er)\b.*Band.*Freq"), about: "Hz per band." },
-                PluginParameterHint { role: "eq q and shape", names: pattern(r"(?i)(?<!Dynamic )(?<!Match )(?<!Vintage )(?<!Stem )(EQ|Equali[sz]er)\b.*Band.*(\bQ\b|Width|Shape|Type)"), about: "Q (higher is narrower) and shape (bell, shelf, cut)." },
-                PluginParameterHint { role: "dynamic eq", names: pattern(r"(?i)Dynamic EQ.*Band.*(Threshold|Gain|Freq|\bQ\b|Attack|Release|Mode)"), about: "Threshold (dB), the gain it moves to past it, frequency, Q, timing; cut or boost." },
+                PluginParameterHint { role: "eq gain", names: pattern(r"(?i)(?<!Dynamic )(?<!Match )(?<!Vintage )(?<!Stem )\b(EQ[0-9]*|Equali[sz]er)\b.*Band.*Gain"), about: "dB per band." },
+                PluginParameterHint { role: "eq frequency", names: pattern(r"(?i)(?<!Dynamic )(?<!Match )(?<!Vintage )(?<!Stem )\b(EQ[0-9]*|Equali[sz]er)\b.*Band.*Freq"), about: "Hz per band." },
+                PluginParameterHint { role: "eq q and shape", names: pattern(r"(?i)(?<!Dynamic )(?<!Match )(?<!Vintage )(?<!Stem )\b(EQ[0-9]*|Equali[sz]er)\b.*Band.*(\bQ\b|Width|Shape|Type)"), about: "Q (higher is narrower) and shape (bell, shelf, cut)." },
+                PluginParameterHint { role: "dynamic eq", names: pattern(r"(?i)(Dynamic EQ|\bDYNEQ\b).*Band.*(Threshold|Gain|Freq|\bQ\b|Attack|Release|Mode)"), about: "Threshold (dB), the gain it moves to past it, frequency, Q, timing; cut or boost." },
             ] },
         PluginSection { name: "Dynamics, Imager, Exciter", about: "Up to four bands each, split by crossovers.",
             parameters: vec![
-                PluginParameterHint { role: "dynamics", names: pattern(r"(?i)Dynamics.*(Threshold|Ratio|Attack|Release|Knee|Gain)"), about: "Per band: threshold (dB), ratio, attack and release (ms), knee, makeup gain." },
-                PluginParameterHint { role: "crossovers", names: pattern(r"(?i)(Dynamics|Imager|Exciter).*(Crossover|Split)"), about: "Where bands split, Hz." },
-                PluginParameterHint { role: "width", names: pattern(r"(?i)Imager.*(Width|Stereoi[sz]e)"), about: "Width per band, -100% (mono) to +100%; keep the lowest band at or under 0. Stereoize widens narrow parts; check mono." },
-                PluginParameterHint { role: "exciter", names: pattern(r"(?i)Exciter.*(Amount|Drive|Mix|Mode)"), about: "Per band: the saturation mode (warm, tape, tube, retro…), its amount, and Mix." },
+                PluginParameterHint { role: "dynamics", names: pattern(r"(?i)\b(Dynamics|DYN)\b.*(Threshold|Ratio|Attack|Release|Knee|Gain|Mix)"), about: "Per band, a compressor and a limiter (Comp and Lim in Ozone 12's names): threshold (dB), ratio, attack and release (ms), knee, makeup gain, mix." },
+                PluginParameterHint { role: "crossovers", names: pattern(r"(?i)\b(Dynamics|Imager|Exciter|DYN|IMG|EXC)\b.*(Crossover|Split)"), about: "Where bands split, Hz." },
+                PluginParameterHint { role: "width", names: pattern(r"(?i)\b(Imager|IMG)\b.*(Width|Stereoi[sz]e)"), about: "Width per band, -100% (mono) to +100%; keep the lowest band at or under 0. Stereoize widens narrow parts; check mono." },
+                PluginParameterHint { role: "exciter", names: pattern(r"(?i)\b(Exciter|EXC)\b.*(Amount|Drive|Mix|Mode)"), about: "Per band: the saturation mode (warm, tape, tube, retro…), its amount, and Mix." },
             ] },
         PluginSection { name: "Tone and balance", about: "Modules that reshape the whole mix's tone or balance, and the chain's levels.",
             parameters: vec![
-                PluginParameterHint { role: "low end focus", names: pattern(r"(?i)Low End Focus.*(Contrast|Gain|Amount|Mode)"), about: "Contrast up tightens and punches the lows; down smooths them." },
-                PluginParameterHint { role: "clarity and stabilizer", names: pattern(r"(?i)(Clarity|Stabili[sz]er).*(Amount|Mix|Speed|Tilt)"), about: "Clarity lifts masked detail; Stabilizer rides the tone toward a target as the song changes. A little goes far." },
-                PluginParameterHint { role: "master rebalance", names: pattern(r"(?i)Rebalance.*(Vocal|Bass|Drum)"), about: "Level of vocals, bass or drums inside the finished mix, dB." },
-                PluginParameterHint { role: "ozone 12 modules", names: pattern(r"(?i)Stem EQ|Unlimiter|Bass Control"), about: "Stem EQ: EQ one part (vocals, bass, drums…) inside the mix. Unlimiter: brings back transients a limiter crushed. Bass Control: tightens and focuses the lows." },
+                PluginParameterHint { role: "low end focus", names: pattern(r"(?i)(Low End Focus|\bLEF\b).*(Contrast|Gain|Amount|Mode)"), about: "Contrast up tightens and punches the lows; down smooths them." },
+                PluginParameterHint { role: "clarity and stabilizer", names: pattern(r"(?i)(Clarity|Stabili[sz]er|\bCLA\b|\bSTBL\b).*(Amount|Mix|Speed|Tilt)"), about: "Clarity lifts masked detail; Stabilizer rides the tone toward a target as the song changes. A little goes far." },
+                PluginParameterHint { role: "master rebalance", names: pattern(r"(?i)(Rebalance|\bMREBAL\b).*(Vocal|Bass|Drum)"), about: "Level of vocals, bass or drums inside the finished mix, dB." },
+                PluginParameterHint { role: "ozone 12 modules", names: pattern(r"(?i)Stem ?EQ|Unlimiter|Bass Control|^BAS:"), about: "Stem EQ: EQ one part (vocals, bass, drums…) inside the mix. Unlimiter: brings back transients a limiter crushed. Bass Control: tightens and focuses the lows." },
                 PluginParameterHint { role: "chain in and out", names: pattern(r"(?i)^(Global[^A-Za-z0-9_]*)?(Input|Output) ?(Gain|Level)$"), about: "dB into and out of the whole chain." },
             ] },
     ],

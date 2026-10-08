@@ -8,6 +8,7 @@ mod judge;
 mod listen;
 mod pass;
 mod rig;
+mod roles;
 mod sound;
 mod tune;
 use super::{

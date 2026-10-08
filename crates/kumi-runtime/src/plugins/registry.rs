@@ -137,6 +137,10 @@ pub fn plugin_guide(device: &str, adapter: Option<&PluginAdapter>, all: &[String
     if let Some(adapter) = adapter {
         guide.insert("recipes".into(), json!(adapter.recipes));
         guide.insert("beyond".into(), json!(adapter.beyond));
+        guide.insert(
+            "byRole".into(),
+            json!("tune takes a role from these sections in knobs (such as \"ceiling\"), or a job (\"limiter gain\", \"ceiling\", \"eq gain\"): Kumi finds its knob among the plug-in's names in Live and turns it only when it's configured, saying which to configure when it isn't."),
+        );
     }
     if !hidden.is_empty() {
         guide.insert("toTurnMore".into(), json!("Live lets Kumi turn only the parameters configured in the device. To add some: the producer clicks Configure in the plug-in's title bar and moves those knobs in its window once (Live keeps them with the Set; Save as Default Configuration in the title bar's menu keeps them for every new one). Kumi can open the plug-in's window with set_device_details (isEditorOpen)."));

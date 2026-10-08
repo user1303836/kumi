@@ -348,8 +348,11 @@ impl Ableton {
             Ok(request) => request,
             Err(why) => return Ok(ToolResult::error(why)),
         };
-        match self.rendering.judge(&request, signal).await? {
-            Ok(round) => Ok(ToolResult::text(stringify(&judge_tool::judge_reply(&round)))),
+        match self.rendering.judge(&request, signal.clone()).await? {
+            Ok(mut round) => {
+                self.rendering.name_plugin_roles(&mut round, signal).await;
+                Ok(ToolResult::text(stringify(&judge_tool::judge_reply(&round))))
+            }
             Err(why) => Ok(ToolResult::error(why)),
         }
     }
@@ -358,8 +361,11 @@ impl Ableton {
             Ok(request) => request,
             Err(why) => return Ok(ToolResult::error(why)),
         };
-        match self.rendering.tune(&request, signal).await? {
-            Ok(round) => Ok(ToolResult::text(stringify(&judge_tool::judge_reply(&round)))),
+        match self.rendering.tune(&request, signal.clone()).await? {
+            Ok(mut round) => {
+                self.rendering.name_plugin_roles(&mut round, signal).await;
+                Ok(ToolResult::text(stringify(&judge_tool::judge_reply(&round))))
+            }
             Err(why) => Ok(ToolResult::error(why)),
         }
     }

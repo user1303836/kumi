@@ -144,10 +144,21 @@ impl Rendering {
                 Ok(knobs) => knobs,
                 Err(why) => return Ok(Err(why)),
             };
+            // Knobs named by role: found on the device, or on another of its track in the agreed order.
+            let names: Vec<String> = knobs.iter().map(|knob| knob.name.clone()).collect();
+            let (request, knobs) = match self.knobs_by_role(request, &names, signal.clone()).await? {
+                Ok(None) => (request.clone(), knobs),
+                Ok(Some(found)) if found.device == request.device => (found, knobs),
+                Ok(Some(found)) => match self.device_knobs(&found.device, signal.clone()).await? {
+                    Ok(knobs) => (found, knobs),
+                    Err(why) => return Ok(Err(why)),
+                },
+                Err(why) => return Ok(Err(why)),
+            };
             match request.how {
-                TuneHow::Fit => self.tune_fit(request, index, window, &knobs, signal.clone()).await,
-                TuneHow::Home => self.tune_home(request, index, window, &knobs, signal.clone()).await,
-                TuneHow::Search => self.tune_search(request, index, window, &knobs, signal.clone()).await,
+                TuneHow::Fit => self.tune_fit(&request, index, window, &knobs, signal.clone()).await,
+                TuneHow::Home => self.tune_home(&request, index, window, &knobs, signal.clone()).await,
+                TuneHow::Search => self.tune_search(&request, index, window, &knobs, signal.clone()).await,
             }
         }
         .await;
