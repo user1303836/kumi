@@ -30,9 +30,24 @@ fn stock(reference: &str, name: &str, class: &str, turnable: &[&str]) -> Seen {
     Seen { reference: reference.into(), name: name.into(), class: class.into(), turnable: strings(turnable), listed: None }
 }
 
-/// Live 12's Limiter, by the names Live gives its parameters.
+/// Live 12.4's Limiter, by the names Live gave its parameters.
 fn limiter(reference: &str) -> Seen {
-    stock(reference, "Limiter", "Limiter", &["Device On", "Gain", "Ceiling", "Release", "Auto Release", "Lookahead", "Mode"])
+    let names = [
+        "Device On",
+        "Input Gain",
+        "Ceiling",
+        "Release",
+        "Auto",
+        "Link",
+        "M/S Link",
+        "Lookahead",
+        "Routing",
+        "Mode",
+        "Maximize On",
+        "Threshold",
+        "Output",
+    ];
+    stock(reference, "Limiter", "Limiter", &names)
 }
 
 fn knob(found: Option<Found>) -> String {
@@ -130,7 +145,7 @@ fn another_device_on_the_track_does_the_job_in_the_agreed_order() {
     };
     assert_eq!(on(&track(&["MAX: Input Gain"], &["Gain"])), (2, strings(&["MAX: Input Gain"])));
     assert_eq!(on(&track(&[], &["Gain"])), (1, strings(&["Gain"])));
-    assert_eq!(on(&track(&[], &[])), (0, strings(&["Gain"])));
+    assert_eq!(on(&track(&[], &[])), (0, strings(&["Input Gain"])));
     // Nothing on the track can: Live's own device to put there, said.
     match resolve(&[ozone(&[])], 0, &strings(&["ceiling"])) {
         Resolved::Refused(why) => assert!(why.contains("isn't configured") && why.contains("Live's Limiter (Ceiling)"), "{why}"),
@@ -149,13 +164,20 @@ fn another_device_on_the_track_does_the_job_in_the_agreed_order() {
         other => panic!("{other:?}"),
     }
     // A knob named as the device shows it isn't a role: as asked.
-    assert_eq!(resolve(&[limiter("d0")], 0, &strings(&["Gain"])), Resolved::AsAsked);
+    assert_eq!(resolve(&[limiter("d0")], 0, &strings(&["Input Gain"])), Resolved::AsAsked);
     assert_eq!(resolve(&[limiter("d0")], 0, &strings(&["Release"])), Resolved::AsAsked);
 }
 
 #[test]
 fn a_job_on_lives_own_devices_by_their_live_12_names() {
-    assert_eq!(knob(find(&limiter("d0"), "limiter gain")), "Gain");
+    assert_eq!(knob(find(&limiter("d0"), "limiter gain")), "Input Gain");
+    // An earlier Live's Limiter called it Gain.
+    assert_eq!(knob(find(&stock("d9", "Limiter", "Limiter", &["Device On", "Gain", "Ceiling"]), "limiter gain")), "Gain");
+    // A Limiter showing no gain knob says so, and doesn't send for another Limiter.
+    match resolve(&[stock("d9", "Limiter", "Limiter", &["Device On", "Ceiling"])], 0, &strings(&["limiter gain"])) {
+        Resolved::Refused(why) => assert_eq!(why, "Limiter shows no limiter gain knob (Input Gain). Nothing else on this track does it."),
+        other => panic!("{other:?}"),
+    }
     assert_eq!(knob(find(&limiter("d0"), "ceiling")), "Ceiling");
     // Live 12's names, as Live gives them.
     let compressor = stock("d1", "Compressor", "Compressor2", &["Device On", "Threshold", "Ratio", "Expansion Ratio", "Attack", "Release"]);

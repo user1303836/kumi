@@ -35,7 +35,7 @@ fn stock(class: &'static str, device: &'static str, knob: &str, knob_said: &'sta
     Stock { class, device, knob: pattern(knob), knob_said }
 }
 
-/// The jobs, with Live's own knobs as Live 12 names them.
+/// The jobs, with Live's own knobs by the names Live 12.4 gives them (read from Live).
 pub static JOBS: LazyLock<Vec<Job>> = LazyLock::new(|| {
     // Ozone's Dynamics has a compressor and a limiter per band: a compressor's job is the compressor's.
     let compressor = |knob: &str| Some(pattern(&format!(r"(?i)^(?!.*\bLim(iter)?\b).*\b{knob}")));
@@ -44,7 +44,8 @@ pub static JOBS: LazyLock<Vec<Job>> = LazyLock::new(|| {
             name: "limiter gain",
             words: &["limiter gain", "maximizer gain", "limiter input", "gain into the limiter"],
             plugins: vec![("ozone12", "threshold", None), ("prol2", "gain", None)],
-            stock: vec![stock("Limiter", "Limiter", r"^Gain$", "Gain")],
+            // Live 12.4 names it Input Gain; earlier Lives, Gain.
+            stock: vec![stock("Limiter", "Limiter", r"^(Input )?Gain$", "Input Gain")],
         },
         Job {
             name: "ceiling",
@@ -393,9 +394,10 @@ pub fn resolve(devices: &[Seen], asked: usize, words: &[String]) -> Resolved {
             several.join(" ")
         ));
     }
-    // Nothing on the track does it: Live's own devices that would, each with its knobs.
+    // Nothing on the track does it: Live's own devices that would, each with its knobs (not the kind asked, which
+    // just said it can't).
     let mut by_device: Vec<(&str, Vec<&str>)> = vec![];
-    for stock in jobs.iter().filter_map(|job| job.stock.first()) {
+    for stock in jobs.iter().filter_map(|job| job.stock.iter().find(|stock| stock.class != device.class)) {
         match by_device.iter_mut().find(|(device, _)| *device == stock.device) {
             Some((_, knobs)) => knobs.push(stock.knob_said),
             None => by_device.push((stock.device, vec![stock.knob_said])),
