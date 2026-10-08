@@ -372,6 +372,14 @@ async fn a_model_file_is_found_by_its_full_path_and_a_link_only_over_https() {
         }
         other => panic!("{other:?}"),
     }
+    // Typed with backslashes, as on Windows, it's the same file, said with this computer's own separators.
+    match command("embeddings \"~\\My Models\\clap.onnx\"", &context, &quiet, Signal::new()).await {
+        Said::Refused(why) => {
+            let wanted = home.join("My Models").join("clap.onnx");
+            assert!(why.ends_with(&format!("there's no such file: {}.", wanted.display())), "{why}");
+        }
+        other => panic!("{other:?}"),
+    }
     // A folder isn't a model file.
     std::fs::create_dir_all(home.join("models.onnx")).unwrap();
     match command("embeddings ~/models.onnx", &context, &quiet, Signal::new()).await {

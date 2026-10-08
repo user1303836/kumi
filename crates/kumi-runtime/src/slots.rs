@@ -233,7 +233,13 @@ fn model_path(path: &str, env: &HashMap<String, String>) -> Result<PathBuf, Stri
             .or_else(home::home_dir)
     };
     let named = match path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
-        Some(rest) => home().ok_or("Kumi can't tell where your home folder is: give the model file's full path.")?.join(rest),
+        // Joined part by part, so the path reads with this computer's own separators whichever were typed.
+        Some(rest) => rest
+            .split(['/', '\\'])
+            .filter(|part| !part.is_empty())
+            .fold(home().ok_or("Kumi can't tell where your home folder is: give the model file's full path.")?, |path, part| {
+                path.join(part)
+            }),
         None => PathBuf::from(path),
     };
     let full = match std::fs::canonicalize(&named) {
