@@ -7,7 +7,8 @@
 //! The decoding and windowing are translated from Basic Pitch's `basic_pitch/note_creation.py`, `inference.py` and
 //! `constants.py` (github.com/spotify/basic-pitch at fa5997af0a8210982619003269994a1be25eddf3), Copyright 2022 Spotify
 //! AB, under the Apache License 2.0. Changed: written in Rust, reading the note and onset outputs only (no pitch
-//! bends, contours or MIDI files), resampled with Kumi's own resampler. THIRD_PARTY_NOTICES.md carries its notices.
+//! bends, contours or MIDI files), resampled with Kumi's own resampler, and each frame timed exactly from the window
+//! layout rather than by Basic Pitch's approximation. THIRD_PARTY_NOTICES.md carries its notices.
 
 use crate::{
     audio::decode::open_audio_to,
@@ -42,10 +43,12 @@ pub struct Heard {
     pub strength: f32,
 }
 
-/// A frame's time, seconds, as Basic Pitch places it (each window's frames a little early, which it corrects).
+/// A frame's time, seconds, from the window layout: each window keeps the frames between its overlaps (142), and the
+/// next window starts 188 samples short of where those end (36 164 samples on, against 142 hops of 256).
 pub fn frame_time(frame: usize) -> f64 {
-    let offset = (HOP as f64 / RATE) * (WINDOW_FRAMES as f64 - WINDOW as f64 / HOP as f64) + 0.0018;
-    frame as f64 * HOP as f64 / RATE - offset * (frame / WINDOW_FRAMES) as f64
+    let kept = WINDOW_FRAMES - OVERLAP_FRAMES;
+    let short = kept * HOP - (WINDOW - OVERLAP_FRAMES * HOP);
+    (frame as f64 * HOP as f64 - (short * (frame / kept)) as f64) / RATE
 }
 
 /// Onsets where the model predicted them, or where a note's activation rises over two frames (scaled to the

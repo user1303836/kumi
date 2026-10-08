@@ -11,7 +11,8 @@ https://github.com/spotify/basic-pitch at revision fa5997af0a8210982619003269994
 licensed under the Apache License, Version 2.0 (below).
 
 Changes: written in Rust; it reads the model's note and onset outputs only (no pitch bends, contours or MIDI files),
-with Basic Pitch's default thresholds; audio is resampled with Kumi's own resampler.
+with Basic Pitch's default thresholds; audio is resampled with Kumi's own resampler, and each frame is timed exactly
+from the window layout rather than by Basic Pitch's approximation.
 
 Basic Pitch's NOTICE:
 

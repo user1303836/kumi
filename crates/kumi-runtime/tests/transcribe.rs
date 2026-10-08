@@ -36,9 +36,13 @@ fn activations_read_into_notes_as_basic_pitch_reads_them() {
     let (frames, onsets) = activations(60, &[(39, 10..20, true)]);
     assert!(notes_from(&frames, &onsets).is_empty());
     // A window's frames are placed a little earlier than a hop each, as Basic Pitch corrects them.
-    assert_eq!(frame_time(0), 0.);
-    assert!((frame_time(86) - 86. * 256. / 22_050.).abs() < 1e-12);
-    assert!((frame_time(172) - (172. * 256. / 22_050. - 0.010326)).abs() < 1e-5);
+    // Each frame where the windows put it: window w keeps its frames 15 to 156, and starts 36 164 samples after the
+    // one before, the first half an overlap (3 840 samples) before the audio.
+    for frame in [0, 1, 86, 141, 142, 143, 172, 284, 1000, 5000] {
+        let (window, local) = (frame / 142, frame % 142 + 15);
+        let sample = window as f64 * 36_164. - 3_840. + local as f64 * 256.;
+        assert!((frame_time(frame) - sample / 22_050.).abs() < 1e-9, "frame {frame}: {} against {}", frame_time(frame), sample / 22_050.);
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
