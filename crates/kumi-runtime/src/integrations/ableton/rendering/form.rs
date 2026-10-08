@@ -6,8 +6,9 @@ use super::judge::JudgeHeard;
 use super::rig::Window;
 use super::*;
 use crate::listening::{
-    form::{compare, form, Form},
+    form::{compare, file_grid, form, form_from, Form},
     measure::{measure_file, MeasureOptions},
+    notes::Grid,
 };
 use kumi_common::js::string::head;
 
@@ -50,10 +51,16 @@ impl Rendering {
                     Ok(file) => file,
                     Err(why) => return Ok(Err(format!("The reference: {why}"))),
                 };
-                match measure_file(&file, MeasureOptions { signal: Some(signal.clone()), ..Default::default() }).await {
-                    Ok(heard) => Some(form(&heard, bar)),
+                let heard = match measure_file(&file, MeasureOptions { signal: Some(signal.clone()), ..Default::default() }).await {
+                    Ok(heard) => heard,
                     Err(error) => return Ok(Err(format!("Kumi couldn't hear the reference: {}", head(&error.to_string(), 200)))),
-                }
+                };
+                // In its own bars: a reference at another tempo cut into this Set's bars gains or loses bars.
+                let grid = file_grid(&file, meter, self.observer.tempo.get(), signal.clone()).await;
+                Some(match grid {
+                    Some(grid) => (form_from(&heard, meter * 60. / grid.tempo, grid.downbeat), Some(grid)),
+                    None => (form(&heard, bar), None),
+                })
             }
             None => None,
         };
@@ -115,7 +122,7 @@ impl Rendering {
 }
 
 /// The form as the model reads it: bar numbers as the song's (from `first`, its first bar, counted from 0).
-fn reply(shape: &Form, first: usize, elements: &[(String, Vec<(usize, usize)>)], reference: Option<&Form>) -> Value {
+fn reply(shape: &Form, first: usize, elements: &[(String, Vec<(usize, usize)>)], reference: Option<&(Form, Option<Grid>)>) -> Value {
     let bars = |from: usize, to: usize| format!("{}–{}", first + from + 1, first + to);
     let sections: Vec<Value> = shape
         .sections
@@ -146,10 +153,14 @@ fn reply(shape: &Form, first: usize, elements: &[(String, Vec<(usize, usize)>)],
     if !plays.is_empty() {
         said["playing"] = Value::Object(plays);
     }
-    if let Some(reference) = reference {
+    if let Some((reference, grid)) = reference {
         said["reference"] = json!({
             "form": reference.sections.iter().map(|section| section.letter).collect::<String>(),
             "bars": reference.bars.len(),
+            "readIn": match grid {
+                Some(grid) => format!("its own bars: {} BPM, beat one {} s in", (grid.tempo * 10.).round() / 10., (grid.downbeat * 100.).round() / 100.),
+                None => "this Set's bars, from its start (its tempo couldn't be told)".into(),
+            },
             "differences": compare(shape, reference),
         });
     }

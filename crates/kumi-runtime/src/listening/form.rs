@@ -2,9 +2,18 @@
 //! into (where they start and end, their lengths, roles and repeats), the transitions between them (drops, gaps,
 //! risers), the intro and outro, and the time to the first hook. Then the problems a form can have: neighbouring
 //! sections without contrast, energy that plateaus, odd phrase lengths, a drop that arrives unprepared, and a stretch
-//! left unchanged too long. Which elements play where comes from the Arrangement, read by the caller.
+//! left unchanged too long. Which elements play where comes from the Arrangement, read by the caller. A reference is
+//! read in its own bars: its tempo and first downbeat fitted to its onsets.
 
-use super::measure::{Heard, THIRDS};
+use super::{
+    measure::{Heard, THIRDS},
+    notes::{fit_grid, onsets, Grid},
+};
+use crate::audio::{
+    analyze::{analyze_file, AnalyzeOptions},
+    decode::open_audio,
+};
+use kumi_common::abort::Signal;
 use serde::{Deserialize, Serialize};
 
 /// One bar of the energy curve.
@@ -62,7 +71,12 @@ pub struct Form {
 
 /// The form of what was heard, `bar` seconds a bar.
 pub fn form(heard: &Heard, bar: f64) -> Form {
-    let bars = floored(curve(heard, bar));
+    form_from(heard, bar, 0.)
+}
+
+/// The form of what was heard, `bar` seconds a bar from `start` seconds in (a recording's first downbeat).
+pub fn form_from(heard: &Heard, bar: f64, start: f64) -> Form {
+    let bars = floored(curve_from(heard, bar, start));
     let sections = sections(&bars);
     let transitions = transitions(&bars, &sections);
     let peak = sections.iter().map(|section| section.loudness).fold(f64::MIN, f64::max);
@@ -77,13 +91,19 @@ pub fn form(heard: &Heard, bar: f64) -> Form {
 
 /// The energy curve, bar by bar.
 pub fn curve(heard: &Heard, bar: f64) -> Vec<Bar> {
+    curve_from(heard, bar, 0.)
+}
+
+/// The energy curve, bar by bar from `start` seconds in.
+pub fn curve_from(heard: &Heard, bar: f64, start: f64) -> Vec<Bar> {
     let frames = &heard.frames;
     if frames.hop <= 0. || bar <= 0. || frames.level.is_empty() {
         return vec![];
     }
     let per_bar = (bar / frames.hop).max(1.);
+    let offset = ((start / frames.hop).round().max(0.) as usize).min(frames.level.len());
     // A last bar that's mostly there counts (the frames stop a window short of the end).
-    let count = (frames.level.len() as f64 / per_bar + 0.25).floor() as usize;
+    let count = ((frames.level.len() - offset) as f64 / per_bar + 0.25).floor() as usize;
     // Onsets: frames whose summed rise across the bands stands well over the song's usual rise.
     let flux: Vec<f64> = (0..frames.mid.len())
         .map(|frame| {
@@ -110,7 +130,8 @@ pub fn curve(heard: &Heard, bar: f64) -> Vec<Bar> {
     let loudest = frames.level.iter().copied().fold(f32::MIN, f32::max) as f64;
     (0..count)
         .map(|index| {
-            let range = (index as f64 * per_bar) as usize..(((index + 1) as f64 * per_bar) as usize).min(frames.level.len());
+            let range =
+                (offset + (index as f64 * per_bar) as usize)..(offset + ((index + 1) as f64 * per_bar) as usize).min(frames.level.len());
             let power: f64 =
                 range.clone().map(|frame| 10f64.powf(frames.level[frame] as f64 / 10.)).sum::<f64>() / range.len().max(1) as f64;
             let bands: Vec<f64> = (0..31)
@@ -128,6 +149,43 @@ pub fn curve(heard: &Heard, bar: f64) -> Vec<Bar> {
             }
         })
         .collect()
+}
+
+/// A recording's own bar grid, fitted to its onsets (`samples`, mono, the first ten minutes at most), each weighed by
+/// how loud its hit is: its tempo within 2 % of `tempo`, or of half or double it, whichever explains them about as well
+/// nearest `near` (the Set's, so its bars compare with the song's), and its first downbeat at or after its start,
+/// seconds.
+pub fn grid_of(samples: &[f32], rate: f64, tempo: f64, beats_per_bar: f64, near: Option<f64>) -> Grid {
+    let samples = &samples[..samples.len().min((600. * rate) as usize)];
+    let onsets: Vec<(f64, f64)> = onsets(samples, rate)
+        .into_iter()
+        .map(|at| {
+            let from = ((at * rate) as usize).min(samples.len());
+            let to = (from + (0.02 * rate) as usize).min(samples.len());
+            (at, samples[from..to].iter().fold(0f32, |peak, sample| peak.max(sample.abs())) as f64)
+        })
+        .collect();
+    let grid = fit_grid(&onsets, tempo, beats_per_bar, true, near);
+    let bar = beats_per_bar * 60. / grid.tempo;
+    Grid { tempo: grid.tempo, downbeat: grid.downbeat.rem_euclid(bar) }
+}
+
+/// A recording's own bar grid, from its file: its tempo (the analysis's, over its first two minutes) fitted to its
+/// onsets as `grid_of` does. None when its tempo can't be told.
+pub async fn file_grid(file: &str, beats_per_bar: f64, near: Option<f64>, signal: Signal) -> Option<Grid> {
+    let options = AnalyzeOptions { seconds: Some(120.), signal: Some(signal.clone()), ..Default::default() };
+    let tempo = analyze_file(file, options).await.ok()?.tempo?.bpm;
+    let mut source = open_audio(file, Some(signal)).await.ok()?;
+    let rate = source.sample_rate;
+    let most = (600. * rate) as usize;
+    let mut samples: Vec<f32> = vec![];
+    while samples.len() < most {
+        let Ok(Some(block)) = source.read(65536.min(most - samples.len())).await else { break };
+        let right = block.get(1).unwrap_or(&block[0]);
+        samples.extend(block[0].iter().zip(right).map(|(left, right)| (left + right) / 2.));
+    }
+    let _ = source.close().await;
+    Some(grid_of(&samples, rate, tempo, beats_per_bar, near))
 }
 
 /// How far under the loudest a frame or a bar is silent (a gap, a lead-in, a tail): a silent bar's loudness is held

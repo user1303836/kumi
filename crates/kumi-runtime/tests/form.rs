@@ -1,7 +1,9 @@
 //! A song's form, heard: sections found where the energy curve turns, their roles and repeats, the turns between
-//! them (a prepared drop and an unprepared one), the intro, outro and first hook; and a flat song's plateau.
+//! them (a prepared drop and an unprepared one), the intro, outro and first hook; a flat song's plateau; and a
+//! reference at another tempo read in its own bars.
+use kumi_common::abort::Signal;
 use kumi_runtime::listening::{
-    form::{compare, form, Form},
+    form::{compare, file_grid, form, form_from, grid_of, Form},
     measure::measure_samples,
 };
 
@@ -30,12 +32,17 @@ struct Part {
 /// A song from its parts: a bed of filtered noise at the part's level (rising or falling across it) with short hits
 /// on the beat grid, brighter for a brighter part.
 fn song(parts: &[Part]) -> Vec<f64> {
+    song_at(parts, BAR, 1.)
+}
+
+/// The same, `bar` seconds a bar, each bar's first hit `accent` times as loud.
+fn song_at(parts: &[Part], bar: f64, accent: f64) -> Vec<f64> {
     let mut noise = Noise(11);
     let mut low = 0.;
     let mut out = vec![];
     for part in parts {
-        let samples = (part.bars as f64 * BAR * RATE) as usize;
-        let beat = BAR / 4.;
+        let samples = (part.bars as f64 * bar * RATE) as usize;
+        let beat = bar / 4.;
         let every = (beat / part.hits.max(1e-6) * RATE) as usize;
         for n in 0..samples {
             let along = n as f64 / samples as f64;
@@ -43,7 +50,9 @@ fn song(parts: &[Part]) -> Vec<f64> {
             let white = noise.next();
             low += 0.05 * (white - low);
             let bed = low * 4. * (1. - part.bright) + white * part.bright;
-            let hit = if part.hits > 0. && every > 0 && n % every < 600 { (1. - (n % every) as f64 / 600.) * white * 3. } else { 0. };
+            let stress = if n % ((bar * RATE) as usize) < 600 { accent } else { 1. };
+            let hit =
+                if part.hits > 0. && every > 0 && n % every < 600 { (1. - (n % every) as f64 / 600.) * white * 3. * stress } else { 0. };
             out.push((bed + hit) * gain);
         }
     }
@@ -146,4 +155,57 @@ fn a_form_too_short_for_a_section_has_no_contrast_to_compare() {
     for said in [compare(&short, &shaped), compare(&shaped, &short)] {
         assert!(said.iter().all(|line| !line.starts_with("contrast") && !line.contains("9223372036854775808")), "{said:?}");
     }
+}
+
+/// A 32-bit float WAV of one channel.
+fn wav(samples: &[f32], rate: u32) -> Vec<u8> {
+    let data: Vec<u8> = samples.iter().copied().flat_map(f32::to_le_bytes).collect();
+    let mut wav = Vec::with_capacity(44 + data.len());
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&3u16.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&rate.to_le_bytes());
+    wav.extend_from_slice(&(rate * 4).to_le_bytes());
+    wav.extend_from_slice(&4u16.to_le_bytes());
+    wav.extend_from_slice(&32u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    wav.extend_from_slice(&data);
+    wav
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_reference_at_another_tempo_is_read_in_its_own_bars() {
+    // A 128 BPM reference (bars of 1.875 s) after 0.3 s of silence, a hit on every beat, each bar's first louder: 8
+    // bars of intro, 16 building, 16 at its peak.
+    let bar = 60. / 128. * 4.;
+    let parts = [
+        Part { bars: 8, from: -32., to: -32., hits: 1., bright: 0.2 },
+        Part { bars: 16, from: -26., to: -16., hits: 1., bright: 0.4 },
+        Part { bars: 16, from: -14., to: -14., hits: 1., bright: 0.6 },
+    ];
+    let mut samples = vec![0.; (0.3 * RATE) as usize];
+    samples.extend(song_at(&parts, bar, 2.));
+    let heard = heard(&samples);
+    let mono: Vec<f32> = samples.iter().map(|sample| *sample as f32).collect();
+    // Its grid, from its file: the Set at 120 BPM.
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("reference.wav");
+    std::fs::write(&file, wav(&mono, RATE as u32)).unwrap();
+    let grid = file_grid(file.to_str().unwrap(), 4., Some(120.), Signal::new()).await.expect("its tempo is told");
+    assert!((grid.tempo - 128.).abs() < 0.3 && (grid.downbeat - 0.3).abs() < 0.03, "{grid:?}");
+    // Told its tempo roughly (127 BPM) or at half, the same grid.
+    for told in [127., 64.] {
+        let again = grid_of(&mono, RATE, told, 4., Some(120.));
+        assert!((again.tempo - grid.tempo).abs() < 0.3 && (again.downbeat - grid.downbeat).abs() < 0.03, "{told}: {again:?}");
+    }
+    // In its own bars: 40, its intro 8 and its peak from bar 25.
+    let own = form_from(&heard, 4. * 60. / grid.tempo, grid.downbeat);
+    assert_eq!(own.bars.len(), 40);
+    assert!(own.intro.abs_diff(8) <= 1 && own.hook.is_some_and(|at| at.abs_diff(24) <= 1), "{own:?}");
+    // Cut into a 120 BPM Set's bars from its first sample, it would read three bars short.
+    assert!(form(&heard, BAR).bars.len() <= 38);
 }
