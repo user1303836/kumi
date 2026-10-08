@@ -1,6 +1,8 @@
 //! Model slots: asked in plain words, kept in a file and taken back, refused honestly where Kumi can't run a model
 //! yet, and a listening model swapped only after it hears a known clip right (a model on this computer, stood in for
-//! by a small server here that really listens: it compares the takes' brightness), followed from the next listen.
+//! by a small server here that really listens: it compares the takes' brightness), followed from the next listen and
+//! off at once. A slots file Kumi can't read turns listening off and isn't written over; a swap made while another is
+//! tried stands; a model file is found by its full path, and a link fetched over https only.
 use async_trait::async_trait;
 use base64::Engine;
 use kumi_common::abort::Signal;
@@ -137,6 +139,13 @@ fn plain_words_ask_for_a_slot_and_what_it_should_use() {
         Ok(Asked::Swap(Job::Stems, Wanted::Link("https://huggingface.co/someone/stems-model".into())))
     );
     assert_eq!(parse("embeddings ~/models/clap.onnx"), Ok(Asked::Swap(Job::Embeddings, Wanted::File("~/models/clap.onnx".into()))));
+    // A path with spaces: in quotes, or running on to its file ending (the words after it still read).
+    let spaced = Ok(Asked::Swap(Job::Embeddings, Wanted::File("~/My Models/clap.onnx".into())));
+    assert_eq!(parse("embeddings \"~/My Models/clap.onnx\""), spaced);
+    assert_eq!(parse("embeddings ‘~/My Models/clap.onnx’"), spaced);
+    assert_eq!(parse("embeddings ~/My Models/clap.onnx"), spaced);
+    assert_eq!(parse("~/My Models/clap.onnx for embeddings, please."), spaced);
+    assert_eq!(parse("embeddings ./clap.onnx."), Ok(Asked::Swap(Job::Embeddings, Wanted::File("./clap.onnx".into()))));
     assert!(parse("back").unwrap_err().contains("Which slot goes back"));
     assert!(parse("listening banana").unwrap_err().contains("doesn't know “banana”"));
     assert!(parse("off").unwrap_err().contains("Which slot"));
@@ -182,9 +191,13 @@ fn a_slot_is_kept_in_its_file_and_swaps_are_taken_back_in_turn() {
     assert_eq!(slots::describe(Job::Embeddings, &read.now(Job::Embeddings)), format!("the model file {}", model.display()));
     assert_eq!(read.back(Job::Embeddings), Some(Choice::Default));
     assert_eq!(read.model_file(Job::Embeddings), None);
-    // A file Kumi can't read leaves the defaults.
+    // A file Kumi can't read (a newer Kumi's, a hand edit) turns listening off, and isn't written over: it's copied
+    // beside first.
     std::fs::write(&file, "{not json").unwrap();
-    assert_eq!(Slots::load(&file), Slots::default());
+    assert!(Slots::read(&file).unwrap_err().starts_with("Kumi can't read the model slots in"));
+    assert_eq!(Slots::load(&file).now(Job::Listening), Choice::Off);
+    let aside = Slots::default().save(&file).unwrap().unwrap();
+    assert_eq!((std::fs::read_to_string(&aside).unwrap().as_str(), Slots::read(&file)), ("{not json", Ok(Slots::default())));
 }
 
 #[tokio::test]
@@ -261,6 +274,21 @@ async fn the_judges_listener_follows_the_slot_from_its_next_listen() {
             let answer = listener.ask(&slots::known_clip(true), slots::KNOWN_AIM, Signal::new()).await.unwrap();
             assert_eq!((answer.closer.as_str(), listener.name()), ("second", "ears-two".to_string()));
             assert_eq!(heard_by_two.load(std::sync::atomic::Ordering::SeqCst), 1);
+            // Swapped off, it's off at once: the judge skips it, and asked anyway, it sends nothing.
+            kept.switch(Job::Listening, Choice::Off);
+            kept.save(&context.file).unwrap();
+            assert!(listener.off());
+            let why = listener.ask(&slots::known_clip(true), slots::KNOWN_AIM, Signal::new()).await.unwrap_err();
+            assert!(why.contains("listening is off"), "{why}");
+            assert_eq!(heard_by_two.load(std::sync::atomic::Ordering::SeqCst), 1, "nothing sent");
+            // Back on, it listens again; a slots file Kumi can't read is off too.
+            kept.back(Job::Listening);
+            kept.save(&context.file).unwrap();
+            assert!(!listener.off());
+            std::fs::write(&context.file, "{not json").unwrap();
+            assert!(listener.off());
+            let why = slots::listener(&context.file, context.store.clone(), &context.env, Signal::new()).await.err().unwrap();
+            assert!(why.contains("can't read the model slots") && why.contains("listening is off"), "{why}");
             // KUMI_LISTENER wins over the slot; off is off.
             let named = slots::listener(
                 &context.file,
@@ -276,4 +304,84 @@ async fn the_judges_listener_follows_the_slot_from_its_next_listen() {
             assert!(slots::listener(&context.file, context.store.clone(), &off, Signal::new()).await.unwrap().is_none());
         })
         .await;
+}
+
+#[tokio::test]
+async fn a_swap_made_while_another_is_tried_stands() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let context = context(folder.path(), &[]);
+            let (ears, _) = server(true).await;
+            // The model is tried (a request to the server) while off is said and kept.
+            let trying = format!("listening {ears}#slow-ears");
+            let (tried, off) =
+                tokio::join!(command(&trying, &context, &quiet, Signal::new()), command("listening off", &context, &quiet, Signal::new()));
+            assert!(matches!(&off, Said::Done(text) if text.contains("Nothing is sent from now on")), "{off:?}");
+            match tried {
+                Said::Refused(why) => {
+                    assert!(why.starts_with("Listening was swapped to off: the meters alone while Kumi tried this one"), "{why}")
+                }
+                other => panic!("{other:?}"),
+            }
+            assert_eq!(Slots::load(&context.file).now(Job::Listening), Choice::Off);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_slots_file_kumi_cant_read_leaves_listening_off_until_a_swap_writes_it_afresh() {
+    let folder = tempfile::tempdir().unwrap();
+    let context = context(folder.path(), &[]);
+    std::fs::write(&context.file, r#"{"listening":{"now":{"use":"someday-model"}}}"#).unwrap();
+    match command("", &context, &quiet, Signal::new()).await {
+        Said::Slots { lines, .. } => {
+            assert!(lines[0].starts_with("Kumi can't read the model slots in") && lines[0].contains("listening is off"), "{lines:?}");
+            assert!(lines.iter().any(|line| line.starts_with("listening (") && line.ends_with("off: the meters alone")), "{lines:?}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        matches!(command("back listening", &context, &quiet, Signal::new()).await, Said::Refused(why) if why.contains("no swap to take back"))
+    );
+    match command("embeddings off", &context, &quiet, Signal::new()).await {
+        Said::Done(text) => assert!(text.contains("couldn't read is copied to") && text.contains("slots.json.unreadable"), "{text}"),
+        other => panic!("{other:?}"),
+    }
+    // Listening stays off in the file written afresh; the one Kumi couldn't read is kept as it was.
+    let kept = Slots::read(&context.file).unwrap();
+    assert_eq!((kept.now(Job::Listening), kept.now(Job::Embeddings)), (Choice::Off, Choice::Off));
+    let aside = folder.path().join("slots.json.unreadable");
+    assert_eq!(std::fs::read_to_string(aside).unwrap(), r#"{"listening":{"now":{"use":"someday-model"}}}"#);
+}
+
+#[tokio::test]
+async fn a_model_file_is_found_by_its_full_path_and_a_link_only_over_https() {
+    let folder = tempfile::tempdir().unwrap();
+    let home = folder.path().join("home");
+    std::fs::create_dir_all(home.join("My Models")).unwrap();
+    let context = context(folder.path(), &[("HOME", home.to_str().unwrap())]);
+    // ~ is the home folder, spaces and all; a file that isn't there is said plainly, before any check.
+    match command("embeddings \"~/My Models/clap.onnx\"", &context, &quiet, Signal::new()).await {
+        Said::Refused(why) => {
+            let wanted = home.join("My Models").join("clap.onnx");
+            assert!(
+                why.starts_with("Embeddings stays on") && why.ends_with(&format!("there's no such file: {}.", wanted.display())),
+                "{why}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    // A folder isn't a model file.
+    std::fs::create_dir_all(home.join("models.onnx")).unwrap();
+    match command("embeddings ~/models.onnx", &context, &quiet, Signal::new()).await {
+        Said::Refused(why) => assert!(why.contains("isn't a model file but a folder"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    // A link is fetched over https only.
+    match command("embeddings http://127.0.0.1:9/model.onnx", &context, &quiet, Signal::new()).await {
+        Said::Refused(why) => assert!(why.contains("Kumi fetches models over https only"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(Slots::read(&context.file), Ok(Slots::default()));
 }

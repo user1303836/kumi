@@ -163,16 +163,71 @@ pub async fn fetch(pinned: &Pinned, to: &Path, what: &str, say: Say<'_>, signal:
     std::fs::rename(&partial, to).map_err(|error| format!("Kumi couldn't keep {what}: {error}"))
 }
 
+/// The largest model Kumi fetches for a slot.
+const UNPINNED_MOST: u64 = 4_000_000_000;
+
 /// A file the producer named (a model for a slot), fetched into `to`: not pinned, as it's their own choice (it's
-/// tried before it's used). Downloaded beside it and moved into place.
+/// tried before it's used). Over https only, redirects included; at most 4 GB, and only with room for it on the disk.
+/// Downloaded beside it and moved into place.
 pub async fn fetch_unpinned(url: &str, to: &Path, signal: &Signal) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err(format!("Kumi fetches models over https only, and {url} isn't."));
+    }
     if to.exists() {
         return Ok(());
     }
     let folder = to.parent().ok_or("Kumi has no folder to keep models in.")?;
     std::fs::create_dir_all(folder).map_err(|error| format!("Kumi couldn't make {}: {error}", folder.display()))?;
     let partial = to.with_extension(format!("partial-{}", std::process::id()));
-    if let Err(why) = download(url, &partial, signal).await {
+    let fetched: Result<(), String> = async {
+        let client = reqwest::Client::builder()
+            .user_agent(format!("kumi/{}", crate::version::KUMI_VERSION))
+            .https_only(true)
+            .connect_timeout(std::time::Duration::from_secs(20))
+            .read_timeout(std::time::Duration::from_secs(60))
+            .build()
+            .map_err(|error| error.to_string())?;
+        let mut response = tokio::select! {
+            sent = client.get(url).send() => sent.map_err(|error| error.to_string())?,
+            _ = signal.cancelled() => return Err("stopped".into()),
+        };
+        if !response.status().is_success() {
+            return Err(format!("it answered {}", response.status()));
+        }
+        // Its size, said or counted so far, against the cap and the disk (200 MB kept spare).
+        let room = free_bytes(folder).await.map_or(u64::MAX, |free| (free - 200e6).max(0.) as u64);
+        let fits = |size: u64| {
+            if size > UNPINNED_MOST {
+                Err(format!("it's larger than the {} GB Kumi takes for a model", UNPINNED_MOST / 1_000_000_000))
+            } else if size > room {
+                Err(format!(
+                    "it needs {} MB or more, and the disk with {} hasn't room for it; free some space and ask again",
+                    size / 1_000_000,
+                    folder.display()
+                ))
+            } else {
+                Ok(())
+            }
+        };
+        if let Some(size) = response.content_length() {
+            fits(size)?;
+        }
+        let mut file = std::fs::File::create(&partial).map_err(|error| error.to_string())?;
+        let mut written: u64 = 0;
+        loop {
+            let chunk = tokio::select! {
+                chunk = response.chunk() => chunk.map_err(|error| error.to_string())?,
+                _ = signal.cancelled() => return Err("stopped".into()),
+            };
+            let Some(chunk) = chunk else { break };
+            written += chunk.len() as u64;
+            fits(written)?;
+            std::io::Write::write_all(&mut file, &chunk).map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+    .await;
+    if let Err(why) = fetched {
         let _ = std::fs::remove_file(&partial);
         return Err(format!("Kumi couldn't fetch {url}: {why}"));
     }

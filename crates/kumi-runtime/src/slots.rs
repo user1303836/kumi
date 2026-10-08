@@ -1,9 +1,10 @@
 //! Model slots: which model does each of Kumi's listening jobs. One slot per job, each with a permissive default:
 //! stems with Live's own splitter, transcription with Live's conversions, listening with the lookup (a model named in
-//! `KUMI_LISTENER`, else Gemini with a Gemini key, else OpenAI with an OpenAI key), and embeddings with none until one
-//! is fetched. A swap is asked for in plain words, or with a model file or a Hugging Face link. A new listening model
-//! is tried on a known clip first and switched to only when it hears it right; every swap is said, and `/slots back`
-//! takes it back. Kumi runs no model files itself yet, so a file or a link is said to be out of reach, not switched to.
+//! `KUMI_LISTENER`, else Gemini with a Gemini key, else OpenAI with an OpenAI key), and embeddings with Kumi's own
+//! models. A swap is asked for in plain words, or with a model file or a Hugging Face link (fetched over https). A new
+//! model is tried first (a listening model on a known clip, an embedding model on two known tones) and switched to
+//! only when it passes; every swap is said, and `/slots back` takes it back. A slots file Kumi can't read turns
+//! listening off rather than guess, and is never written over.
 
 use crate::{
     auth::store::CredentialStore,
@@ -123,27 +124,51 @@ pub fn file_in(kumi_dir: &Path) -> PathBuf {
     kumi_dir.join("slots.json")
 }
 
-/// The slots as kept in Kumi's own folder (KUMI_HOME, or ~/.kumi).
+/// The slots as kept in Kumi's own folder (KUMI_HOME, or ~/.kumi); listening off when the file can't be read.
 pub fn kept() -> Slots {
     let models = crate::models::dir();
     Slots::load(&file_in(models.parent().unwrap_or(&models)))
 }
 
 impl Slots {
-    /// The slots kept in `file`; the defaults when there's no file, or it can't be read.
-    pub fn load(file: &Path) -> Slots {
-        std::fs::read_to_string(file).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()
+    /// The slots kept in `file`: the defaults when there's no file; why, when it's there and can't be read (a newer
+    /// Kumi's, say, or a hand edit).
+    pub fn read(file: &Path) -> Result<Slots, String> {
+        let unreadable = |why: String| format!("Kumi can't read the model slots in {} ({why})", file.display());
+        let text = match std::fs::read_to_string(file) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Slots::default()),
+            Err(error) => return Err(unreadable(error.to_string())),
+        };
+        serde_json::from_str(&text).map_err(|error| unreadable(error.to_string()))
     }
 
-    /// Kept in `file`, written whole to a file beside it and moved into place.
-    pub fn save(&self, file: &Path) -> Result<(), String> {
+    /// The slots kept in `file`, failing closed: when it's there and can't be read, listening is off (nothing is sent)
+    /// and the rest are on their defaults.
+    pub fn load(file: &Path) -> Slots {
+        Slots::read(file).unwrap_or_else(|_| Slots::closed())
+    }
+
+    /// What a slots file Kumi can't read leaves: listening off.
+    pub fn closed() -> Slots {
+        Slots([(Job::Listening, Slot { now: Choice::Off, before: vec![] })].into())
+    }
+
+    /// Kept in `file`, written whole to a file beside it and moved into place. A file there that Kumi can't read isn't
+    /// written over: it's copied beside first, and where to is given back.
+    pub fn save(&self, file: &Path) -> Result<Option<PathBuf>, String> {
         if let Some(folder) = file.parent() {
             std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
         }
+        let aside = match Slots::read(file) {
+            Ok(_) => None,
+            Err(why) => Some(set_aside(file, &why)?),
+        };
         let text = serde_json::to_string_pretty(self).map_err(|error| error.to_string())?;
         let partial = file.with_extension("json.partial");
         std::fs::write(&partial, text + "\n").map_err(|error| error.to_string())?;
-        std::fs::rename(&partial, file).map_err(|error| error.to_string())
+        std::fs::rename(&partial, file).map_err(|error| error.to_string())?;
+        Ok(aside)
     }
 
     pub fn now(&self, job: Job) -> Choice {
@@ -180,6 +205,50 @@ impl Slots {
         }
         Some(was)
     }
+
+    /// Whether any slot holds `choice`, now or to go back to.
+    fn holds(&self, choice: &Choice) -> bool {
+        self.0.values().any(|slot| slot.now == *choice || slot.before.contains(choice))
+    }
+}
+
+/// A slots file Kumi can't read, copied beside it under the first free name (`slots.json.unreadable`): where.
+fn set_aside(file: &Path, why: &str) -> Result<PathBuf, String> {
+    let aside = (1..100)
+        .map(|n| file.with_extension(if n == 1 { "json.unreadable".into() } else { format!("json.unreadable-{n}") }))
+        .find(|aside| !aside.exists())
+        .ok_or_else(|| format!("{why}, and it has no free name beside it to keep it under, so it isn't written over"))?;
+    std::fs::copy(file, &aside)
+        .map_err(|error| format!("{why}, and it couldn't be copied to {} ({error}), so it isn't written over", aside.display()))?;
+    Ok(aside)
+}
+
+/// A model file the producer named, by its full path: `~` is their home, a relative path is from where Kumi was
+/// started. Only a file that's there passes.
+fn model_path(path: &str, env: &HashMap<String, String>) -> Result<PathBuf, String> {
+    let home = || {
+        ["HOME", "USERPROFILE"]
+            .iter()
+            .find_map(|name| env.get(*name).filter(|home| !home.is_empty()).map(PathBuf::from))
+            .or_else(home::home_dir)
+    };
+    let named = match path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        Some(rest) => home().ok_or("Kumi can't tell where your home folder is: give the model file's full path.")?.join(rest),
+        None => PathBuf::from(path),
+    };
+    let full = match std::fs::canonicalize(&named) {
+        Ok(full) => full,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err(format!("there's no such file: {}.", named.display())),
+        Err(error) => return Err(format!("Kumi can't reach {} ({error}).", named.display())),
+    };
+    if !full.is_file() {
+        return Err(format!("{} isn't a model file but a folder: name the file in it.", full.display()));
+    }
+    // Windows' full form starts \\?\; a plain drive path reads better, and everything takes it.
+    Ok(match full.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
+        Some(plain) if plain.get(1..2) == Some(":") => PathBuf::from(plain),
+        _ => full,
+    })
 }
 
 /// What a slot is asked to hold.
@@ -207,6 +276,21 @@ const FILLER: &[&str] = &[
 const BACK: &[&str] = &["back", "revert", "undo", "previous", "restore"];
 const SHOW: &[&str] = &["show", "list", "status", "which", "what"];
 const FILE_ENDINGS: &[&str] = &[".onnx", ".gguf", ".safetensors", ".bin", ".pt", ".pth", ".ckpt", ".tflite", ".mlmodel", ".mlpackage"];
+const QUOTES: &[(char, char)] = &[('"', '"'), ('\'', '\''), ('“', '”'), ('‘', '’')];
+
+/// Whether a word ends as a model file does (a full stop or comma after it aside).
+fn model_ending(word: &str) -> bool {
+    let word = word.to_lowercase();
+    let word = word.trim_end_matches(['.', ',', ';']);
+    FILE_ENDINGS.iter().any(|ending| word.ends_with(ending))
+}
+
+/// Whether a word starts a path: from the root, home or here, a drive, or a model file's name.
+fn starts_path(word: &str) -> bool {
+    let bytes = word.as_bytes();
+    let drive = bytes.len() > 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/');
+    ["/", "~/", "~\\", "./", ".\\", "../", "..\\", "\\\\"].iter().any(|start| word.starts_with(start)) || drive || model_ending(word)
+}
 
 fn job_word(word: &str) -> Option<Job> {
     Job::ALL.into_iter().find(|job| job.words().contains(&word))
@@ -222,11 +306,31 @@ fn choice_word(word: &str) -> Option<Choice> {
     }
 }
 
-/// What the words ask: show the slots, swap one, or take a swap back.
+/// What the words ask: show the slots, swap one, or take a swap back. A model file's path may have spaces: in quotes,
+/// or running on to the word with its file ending (else to the end of the line).
 pub fn parse(words: &str) -> Result<Asked, String> {
     let (mut job, mut wanted, mut back, mut unknown) = (None, None, false, vec![]);
-    for raw in words.split_whitespace() {
+    // Each word, with where it starts.
+    let spans: Vec<(usize, &str)> = words.split_whitespace().map(|word| (word.as_ptr() as usize - words.as_ptr() as usize, word)).collect();
+    let mut next = 0;
+    while next < spans.len() {
+        let (start, raw) = spans[next];
+        next += 1;
         let lower = raw.to_lowercase();
+        // A path in quotes, spaces and all.
+        if let Some((open, close)) = QUOTES.iter().find(|(open, _)| raw.starts_with(*open)) {
+            let inside = &words[start + open.len_utf8()..];
+            if let Some(path) =
+                inside.find(*close).map(|end| &inside[..end]).filter(|path| starts_path(path.trim()) && !path.contains("://"))
+            {
+                wanted = Some(Wanted::File(path.trim().into()));
+                let after = start + open.len_utf8() + path.len() + close.len_utf8();
+                while next < spans.len() && spans[next].0 < after {
+                    next += 1;
+                }
+                continue;
+            }
+        }
         if lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("hf:") || lower.starts_with("hf.co/") {
             let address = raw.trim_end_matches(|c| matches!(c, ',' | ';'));
             let hugging_face = lower.starts_with("hf:") || lower.contains("huggingface.co") || lower.contains("hf.co/");
@@ -238,12 +342,16 @@ pub fn parse(words: &str) -> Result<Asked, String> {
             });
             continue;
         }
-        if raw.starts_with('/')
-            || raw.starts_with("~/")
-            || raw.starts_with("./")
-            || FILE_ENDINGS.iter().any(|ending| lower.ends_with(ending))
-        {
-            wanted = Some(Wanted::File(raw.into()));
+        if starts_path(raw) {
+            // A path with spaces runs on to the word with its file ending, or to the end of the line.
+            let last = if model_ending(raw) {
+                next - 1
+            } else {
+                (next..spans.len()).find(|at| model_ending(spans[*at].1)).unwrap_or(spans.len() - 1)
+            };
+            let end = spans[last].0 + spans[last].1.len();
+            wanted = Some(Wanted::File(words[start..end].trim_end_matches(['.', ',', ';']).into()));
+            next = last + 1;
             continue;
         }
         let word = lower.trim_matches(|c: char| !c.is_alphanumeric() && c != '\'' && c != '’');
@@ -287,7 +395,7 @@ fn takes(job: Option<Job>) -> String {
     match job {
         Some(Job::Listening) => "Listening takes gemini, openai, off, default, or a model on this computer as <address>#<model> (an OpenAI-compatible server that takes audio).".into(),
         Some(job @ (Job::Stems | Job::Transcription)) => format!("{} uses {} for now: Kumi can't run a model file for it yet.", capitalized(job.name()), describe(job, &Choice::Default)),
-        Some(Job::Embeddings) => "Embeddings stay off for now: Kumi can't run a model file for them yet.".into(),
+        Some(Job::Embeddings) => "Embeddings take default (Kumi's own), off, or an ONNX model file or an https link to one: /slots embeddings ~/models/clap.onnx.".into(),
         None => "The slots: stems, transcription, listening and embeddings (/slots shows them).".into(),
     }
 }
@@ -297,13 +405,13 @@ fn capitalized(text: &str) -> String {
     chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
-/// What a slot would hold for what was asked, or why it can't: only listening has models to choose from today, and
-/// Kumi runs no model files itself yet.
+/// What a slot would hold for what was asked, or why it can't: listening takes a model by name or address, embeddings
+/// an ONNX model file (or a link to one) for Kumi's own runtime, and stems and transcription keep Live's own for now.
 pub fn fits(job: Job, wanted: &Wanted) -> Result<Choice, String> {
     match job {
         Job::Listening => match wanted {
             Wanted::Choice(choice) => Ok(choice.clone()),
-            Wanted::File(_) | Wanted::Link(_) => Err("Kumi can't run a model file itself yet. To listen with one on this computer, serve it with an OpenAI-compatible server that takes audio (llama.cpp's llama-server takes a Hugging Face link: llama-server -hf <repo>), then give Kumi its address: /slots listening http://127.0.0.1:8080/v1#<model>.".into()),
+            Wanted::File(_) | Wanted::Link(_) => Err("Kumi doesn't run a listening model file itself. To listen with one on this computer, serve it with an OpenAI-compatible server that takes audio (llama.cpp's llama-server takes a Hugging Face link: llama-server -hf <repo>), then give Kumi its address: /slots listening http://127.0.0.1:8080/v1#<model>.".into()),
         },
         Job::Embeddings => match wanted {
             Wanted::Choice(choice @ (Choice::Default | Choice::Off)) => Ok(choice.clone()),
@@ -317,7 +425,7 @@ pub fn fits(job: Job, wanted: &Wanted) -> Result<Choice, String> {
             Wanted::Choice(Choice::Off) => Err(format!("{} needs something to do it: {} is the one Kumi has.", capitalized(job.name()), describe(job, &Choice::Default))),
             Wanted::Choice(_) => Err(format!("That model doesn't do {}; {} does.", job.name(), describe(job, &Choice::Default))),
             _ => Err(format!(
-                "Kumi can't run a {} model itself yet (that waits on the model runtime it will ship), so {} stays on {}. When it can, this is where one goes: /slots {} <file or Hugging Face link>.",
+                "Kumi can't run a {} model itself yet, so {} stays on {}. When it can, this is where one goes: /slots {} <file or Hugging Face link>.",
                 if job == Job::Stems { "stem" } else { "transcription" },
                 job.name(),
                 describe(job, &Choice::Default),
@@ -333,8 +441,11 @@ pub fn show(slots: &Slots, env: &HashMap<String, String>) -> (Vec<String>, Strin
         .into_iter()
         .map(|job| {
             let now = slots.now(job);
-            let swapped =
-                if now == Choice::Default { String::new() } else { format!(" (swapped: /slots back {} takes it back)", job.name()) };
+            let swapped = if slots.0.get(&job).is_some_and(|slot| !slot.before.is_empty()) {
+                format!(" (swapped: /slots back {} takes it back)", job.name())
+            } else {
+                String::new()
+            };
             format!("{} ({}): {}{swapped}", job.name(), job.about(), describe(job, &now))
         })
         .collect();
@@ -381,17 +492,23 @@ async fn found(
         Choice::Gemini => gemini(store, env, signal).await,
         Choice::Openai => openai(store, env, signal).await,
         Choice::Local { base, model } => Ok(Some(local(base, model, env))),
-        // Gemini first (the best at naming what it hears), then OpenAI's audio models, each by its own key.
-        Choice::Default => match gemini(store, env, signal.clone()).await? {
-            Some(found) => Ok(Some(found)),
-            None => openai(store, env, signal).await,
+        // Gemini first (the best at naming what it hears), then OpenAI's audio models, each by its own key. A Gemini
+        // lookup that fails (a key made for another Google API, say) still lets OpenAI be tried; why it failed is
+        // said only when OpenAI has none either.
+        Choice::Default => match gemini(store, env, signal.clone()).await {
+            Ok(Some(found)) => Ok(Some(found)),
+            Ok(None) => openai(store, env, signal).await,
+            Err(why) => match openai(store, env, signal).await {
+                Ok(Some(found)) => Ok(Some(found)),
+                _ => Err(why),
+            },
         },
     }
 }
 
 /// The listening model, found as the app finds it: `KUMI_LISTENER` first (`off`, or a model by its address), then the
 /// listening slot in `file`. What it finds follows the slot: a swap counts from its next listen. None when there's
-/// no model to listen with.
+/// no model to listen with; why, when the slots file can't be read (listening is off then).
 pub async fn listener(
     file: &Path,
     store: Rc<dyn CredentialStore>,
@@ -404,13 +521,13 @@ pub async fn listener(
     if let Some(listener) = listener_from_env(env) {
         return Ok(Some(Rc::new(listener)));
     }
-    let choice = Slots::load(file).now(Job::Listening);
+    let choice = Slots::read(file).map_err(|why| format!("{why}, so listening is off until /slots swaps it again"))?.now(Job::Listening);
     let Some(now) = found(&choice, store.as_ref(), env, signal).await? else { return Ok(None) };
     Ok(Some(Rc::new(Following { file: file.to_path_buf(), store, env: env.clone(), now: RefCell::new((choice, now)) })))
 }
 
-/// The listening model a session found, following the slot: when it's swapped to another model, that one listens from
-/// the next ask. (A slot swapped to off counts from Kumi's next start: a session's judge keeps the model it found.)
+/// The listening model a session found, following the slot: swapped to another model, that one listens from the next
+/// ask; swapped off (or the slots file can't be read), it's off at once and nothing is sent.
 struct Following {
     file: PathBuf,
     store: Rc<dyn CredentialStore>,
@@ -426,12 +543,23 @@ impl Listener for Following {
     fn hears_width(&self) -> bool {
         self.now.borrow().1.hears_width()
     }
+    fn off(&self) -> bool {
+        Slots::load(&self.file).now(Job::Listening) == Choice::Off
+    }
     async fn ask(&self, wav: &[u8], aim: &str, signal: Signal) -> Result<Answer, String> {
+        // Only the model the slot names now is asked: off sends nothing, and another is found first.
         let wanted = Slots::load(&self.file).now(Job::Listening);
+        if wanted == Choice::Off {
+            return Err("listening is off in its slot, so nothing was sent".into());
+        }
         if wanted != self.now.borrow().0 {
-            if let Ok(Some(swapped)) = found(&wanted, self.store.as_ref(), &self.env, signal.clone()).await {
-                *self.now.borrow_mut() = (wanted, swapped);
-            }
+            let Some(swapped) = found(&wanted, self.store.as_ref(), &self.env, signal.clone()).await? else {
+                return Err(format!(
+                    "the listening slot now names {}, which found no model, so nothing was sent",
+                    describe(Job::Listening, &wanted)
+                ));
+            };
+            *self.now.borrow_mut() = (wanted, swapped);
         }
         let listener = self.now.borrow().1.clone();
         listener.ask(wav, aim, signal).await
@@ -526,60 +654,98 @@ pub enum Said {
 }
 
 /// `/slots` in plain words: shows the slots, swaps one after its check, or takes a swap back. `progress` hears what's
-/// under way (a check takes a few seconds).
+/// under way, and `signal` stops a fetch or a check (a listening model's check has its own minute and a half).
 pub async fn command(words: &str, context: &SlotsContext, progress: &dyn Fn(String), signal: Signal) -> Said {
-    let mut slots = Slots::load(&context.file);
     let asked = match parse(words) {
         Ok(asked) => asked,
         Err(why) => return Said::Refused(why),
     };
+    // A slots file Kumi can't read leaves listening off; a swap copies it beside before writing the slots afresh.
+    let (mut slots, unreadable) = match Slots::read(&context.file) {
+        Ok(slots) => (slots, None),
+        Err(why) => (Slots::closed(), Some(why)),
+    };
+    let keep = |slots: &Slots| {
+        slots.save(&context.file).map_err(|why| format!("Kumi couldn't keep the slots in {}: {why}", context.file.display()))
+    };
     match asked {
         Asked::Show => {
-            let (lines, footer) = show(&slots, &context.env);
+            let (mut lines, footer) = show(&slots, &context.env);
+            if let Some(why) = unreadable {
+                lines.insert(0, format!("{why}, so listening is off. A swap here copies that file beside it and writes the slots afresh."));
+            }
             Said::Slots { lines, footer }
         }
-        Asked::Back(job) => match slots.back(job) {
-            Some(now) => match slots.save(&context.file) {
-                Ok(()) => Said::Done(format!("{} is back on {}.", capitalized(job.name()), describe(job, &now))),
-                Err(why) => Said::Refused(format!("Kumi couldn't keep the slots in {}: {why}", context.file.display())),
-            },
-            None => Said::Refused(format!("{} hasn't been swapped: it's on {}.", capitalized(job.name()), describe(job, &slots.now(job)))),
-        },
+        Asked::Back(job) => {
+            if let Some(why) = unreadable {
+                return Said::Refused(format!(
+                    "{why}, so there's no swap to take back; listening is off until a swap here writes the slots afresh."
+                ));
+            }
+            match slots.back(job) {
+                Some(now) => match keep(&slots) {
+                    Ok(_) => Said::Done(format!("{} is back on {}.", capitalized(job.name()), describe(job, &now))),
+                    Err(why) => Said::Refused(why),
+                },
+                None => {
+                    Said::Refused(format!("{} hasn't been swapped: it's on {}.", capitalized(job.name()), describe(job, &slots.now(job))))
+                }
+            }
+        }
         Asked::Swap(job, wanted) => {
             let choice = match fits(job, &wanted) {
                 Ok(choice) => choice,
                 Err(why) => return Said::Refused(why),
             };
             let was = slots.now(job);
-            if choice == was {
-                return Said::Refused(format!("{} is already on {}.", capitalized(job.name()), describe(job, &choice)));
-            }
             let stays = |why: String| Said::Refused(format!("{} stays on {}: {why}", capitalized(job.name()), describe(job, &was)));
-            // An embedding model from a link is fetched first; then it's tried on two known tones, which it has to tell
-            // apart.
-            let choice = match choice {
-                Choice::File { path } if job == Job::Embeddings && path.starts_with("http") => {
-                    progress(format!("Fetching {path}…"));
-                    match crate::listening::embed::fetch_link(&path, &signal).await {
-                        Ok(kept) => Choice::File { path: kept.to_string_lossy().into_owned() },
+            // A model file by its full path, there; one from a link fetched first (over https, into Kumi's folder).
+            let choice = match (choice, &wanted) {
+                (Choice::File { .. }, Wanted::Link(link)) => {
+                    progress(format!("Fetching {link} (Esc stops it)…"));
+                    match crate::listening::embed::fetch_link(link, &signal).await {
+                        Ok(fetched) => Choice::File { path: fetched.to_string_lossy().into_owned() },
                         Err(why) => return stays(why),
                     }
                 }
-                choice => choice,
+                (Choice::File { path }, _) => match model_path(&path, &context.env) {
+                    Ok(path) => Choice::File { path: path.to_string_lossy().into_owned() },
+                    Err(why) => return stays(why),
+                },
+                (choice, _) => choice,
             };
+            if choice == was {
+                return Said::Refused(format!("{} is already on {}.", capitalized(job.name()), describe(job, &choice)));
+            }
+            // An embedding model is tried on two known tones, which it has to tell apart.
             let tried = if let (Job::Embeddings, Choice::File { path }) = (job, &choice) {
                 progress(format!("Trying {path} on two known tones…"));
                 let say = |said: &str| progress(said.to_string());
+                // The runtime first: one that can't be had says nothing about the model.
+                if let Err(why) = crate::models::runtime(&say, &signal).await {
+                    return stays(format!("{}.", why.trim_end_matches('.')));
+                }
                 match crate::listening::embed::tells_tones_apart(Path::new(path), &say, &signal).await {
                     Ok(heard) => Some(heard),
-                    Err(why) => return stays(format!("{why}.")),
+                    Err(why) => {
+                        // Kumi's copy of a link that fails goes, so the next try fetches it again.
+                        if matches!(wanted, Wanted::Link(_)) && !signal.is_cancelled() && !slots.holds(&choice) {
+                            let _ = std::fs::remove_file(path);
+                            if let Some(folder) = Path::new(path).parent() {
+                                let _ = std::fs::remove_dir(folder);
+                            }
+                        }
+                        return stays(format!("{why}."));
+                    }
                 }
             } else {
                 None
             };
-            // A new listening model is tried on the known clip first.
+            // A new listening model is tried on the known clip first: one that hasn't answered in a minute and a half
+            // won't.
             let heard = if job == Job::Listening && matches!(choice, Choice::Gemini | Choice::Openai | Choice::Local { .. }) {
                 progress(format!("Trying {} on a known clip…", describe(job, &choice)));
+                let signal = kumi_common::abort::any([signal.clone(), kumi_common::abort::timeout(90_000)]);
                 let listener = match found(&choice, context.store.as_ref(), &context.env, signal.clone()).await {
                     Ok(Some(listener)) => listener,
                     Ok(None) => return stays(missing_key(&choice)),
@@ -592,17 +758,27 @@ pub async fn command(words: &str, context: &SlotsContext, progress: &dyn Fn(Stri
             } else {
                 None
             };
-            slots.switch(job, choice.clone());
-            if let Err(why) = slots.save(&context.file) {
-                return Said::Refused(format!("Kumi couldn't keep the slots in {}: {why}", context.file.display()));
+            // Swapped meanwhile (another /slots while this one was tried): the newer word stands.
+            let mut latest = Slots::load(&context.file);
+            if latest.0.get(&job) != slots.0.get(&job) {
+                return Said::Refused(format!(
+                    "{} was swapped to {} while Kumi tried this one, so this swap isn't made: ask again to make it.",
+                    capitalized(job.name()),
+                    describe(job, &latest.now(job))
+                ));
             }
+            latest.switch(job, choice.clone());
+            let aside = match keep(&latest) {
+                Ok(aside) => aside,
+                Err(why) => return Said::Refused(why),
+            };
             let mut said = format!("{} now uses {}", capitalized(job.name()), describe(job, &choice));
             if let Some(heard) = heard.or(tried) {
                 said.push_str(&format!(": {heard}"));
             }
             said.push('.');
             if job == Job::Listening && choice == Choice::Off {
-                said.push_str(" A session that already listens with a model keeps it until Kumi starts again.");
+                said.push_str(" Nothing is sent from now on.");
             } else if job == Job::Listening {
                 said.push_str(
                     " The judge listens with it from its next listen (within ten minutes, when this session had found no listening model).",
@@ -610,6 +786,9 @@ pub async fn command(words: &str, context: &SlotsContext, progress: &dyn Fn(Stri
             }
             if job == Job::Listening && env_wins(&context.env) {
                 said.push_str(" KUMI_LISTENER is set, though, and wins over the slot while it is.");
+            }
+            if let Some(aside) = aside {
+                said.push_str(&format!(" The slots file Kumi couldn't read is copied to {}.", aside.display()));
             }
             said.push_str(&format!(" /slots back {} takes it back.", job.name()));
             Said::Done(said)

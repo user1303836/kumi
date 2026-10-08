@@ -206,8 +206,15 @@ impl TuiApp {
             return;
         }
         if name == "escape" {
+            let checking = self.0.state.borrow().slots_check.is_some();
             if !menu.is_empty() {
                 self.0.state.borrow_mut().menu_dismissed = true;
+            } else if checking {
+                // A /slots fetch or check stops first.
+                let check = self.0.state.borrow_mut().slots_check.take();
+                if let Some(check) = check {
+                    check.abort();
+                }
             } else if self.busy() {
                 self.cancel();
             } else if self.0.state.borrow().pinned.is_some() {
@@ -557,10 +564,23 @@ impl TuiApp {
         if let Some(slots) = self.0.options.slots.clone().filter(|_| command == "/slots" || command.starts_with("/slots ")) {
             self.clear_editor();
             let words = command["/slots".len()..].to_string();
+            // One swap at a time: a model's fetch can take minutes.
+            if self.0.state.borrow().slots_check.is_some() && kumi_runtime::slots::parse(&words) != Ok(kumi_runtime::slots::Asked::Show) {
+                self.notice("Kumi is still trying a model for /slots: wait for it, or Esc stops it.", NoticeTone::Info);
+                return Ok(());
+            }
             let app = self.clone();
             let progress = move |line: String| app.notice(&line, NoticeTone::Info);
-            // A check hears a short clip twice; a model that hasn't answered in a minute and a half won't.
-            let said = kumi_runtime::slots::command(&words, &slots, &progress, kumi_common::abort::timeout(90_000)).await;
+            // Its own stop, Esc: a model's download takes as long as it takes (a listening model's check has its own
+            // minute and a half).
+            let check = Rc::new(kumi_common::abort::Controller::new());
+            let signal = check.signal.clone();
+            self.0.state.borrow_mut().slots_check.get_or_insert_with(|| check.clone());
+            let said = kumi_runtime::slots::command(&words, &slots, &progress, signal).await;
+            let ended = self.0.state.borrow().slots_check.as_ref().is_some_and(|current| Rc::ptr_eq(current, &check));
+            if ended {
+                self.0.state.borrow_mut().slots_check = None;
+            }
             match said {
                 kumi_runtime::slots::Said::Slots { lines, footer } => {
                     self.0.state.borrow_mut().transcript.add(Entry::News {

@@ -178,15 +178,26 @@ async fn read(file: &Path, start: f64, seconds: f64, rate: f64, signal: &Signal)
 }
 
 /// The style-and-vibe model to run: the embeddings slot's file when it holds one, else Kumi's own, fetched the first
-/// time.
+/// time. A slot's file that's gone since gives way to Kumi's own, said once.
 async fn clap_model(slot: Option<PathBuf>, say: Say<'_>, signal: &Signal) -> Result<PathBuf, String> {
     if let Some(file) = slot {
-        return Ok(file);
+        if file.is_file() {
+            return Ok(file);
+        }
+        if GONE.lock().map(|mut said| said.insert(file.clone())).unwrap_or(true) {
+            say(&format!(
+                "The embeddings slot's model file {} is gone, so Kumi's own style model hears in its place: /slots embeddings default swaps back to it for good.",
+                file.display()
+            ));
+        }
     }
     let path = models::dir().join(pinned::CLAP.name);
     models::fetch(&pinned::CLAP, &path, "its style model, LAION-CLAP", say, signal).await?;
     Ok(path)
 }
+
+/// The slot files said to be gone, each said once.
+static GONE: std::sync::Mutex<std::collections::BTreeSet<PathBuf>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
 
 /// What a stretch of a file sounds like to CLAP, by style and vibe: up to six 10 s windows, averaged, unit length.
 pub async fn vibe(file: &Path, start: f64, seconds: f64, slot: Option<PathBuf>, say: Say<'_>, signal: &Signal) -> Result<Vec<f32>, String> {
@@ -229,17 +240,31 @@ pub async fn effects(file: &Path, start: f64, seconds: f64, say: Say<'_>, signal
     Ok(mid.into_iter().chain(side).collect())
 }
 
-/// A style model from a link (a Hugging Face file, say) for the embeddings slot, fetched into Kumi's models folder (a
-/// folder per link, so two called model.onnx stay apart): where it's kept.
+/// A style model from a link (a Hugging Face file, say) for the embeddings slot, fetched over https into Kumi's models
+/// folder (a folder per link, so two called model.onnx stay apart): where it's kept. `hf:<owner>/<repo>/<file>` is that
+/// file on the repo's main branch, and a Hugging Face page for a file (…/blob/…) is fetched as the file (…/resolve/…).
 pub async fn fetch_link(link: &str, signal: &Signal) -> Result<PathBuf, String> {
+    let url = match link.strip_prefix("hf:") {
+        Some(rest) => match rest.trim_start_matches('/').splitn(3, '/').collect::<Vec<_>>()[..] {
+            [owner, repo, file] => format!("https://huggingface.co/{owner}/{repo}/resolve/main/{file}"),
+            _ => return Err(format!("{link} names no file: hf:<owner>/<repo>/<file>.onnx is one.")),
+        },
+        None if link.starts_with("hf.co/") || link.starts_with("huggingface.co/") => format!("https://{link}"),
+        None => link.to_string(),
+    };
+    let url = if url.starts_with("https://huggingface.co/") || url.starts_with("https://hf.co/") {
+        url.replacen("/blob/", "/resolve/", 1)
+    } else {
+        url
+    };
     let name =
-        link.split(['?', '#']).next().unwrap_or(link).rsplit('/').next().filter(|name| name.ends_with(".onnx")).unwrap_or("model.onnx");
+        url.split(['?', '#']).next().unwrap_or(&url).rsplit('/').next().filter(|name| name.ends_with(".onnx")).unwrap_or("model.onnx");
     let tag: String = {
         use sha2::{Digest, Sha256};
-        hex::encode(Sha256::digest(link.as_bytes()))[..12].to_string()
+        hex::encode(Sha256::digest(url.as_bytes()))[..12].to_string()
     };
     let path = models::dir().join("slots").join(tag).join(name);
-    models::fetch_unpinned(link, &path, signal).await?;
+    models::fetch_unpinned(&url, &path, signal).await?;
     Ok(path)
 }
 

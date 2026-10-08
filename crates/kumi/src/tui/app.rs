@@ -266,6 +266,8 @@ struct State {
     flash_timers: Vec<JoinHandle<()>>,
     /// First-run setup, shown in place of the session until it's done or put off.
     setup: Option<setup::Setup>,
+    /// A /slots swap's fetch or check under way: Esc stops it.
+    slots_check: Option<Rc<kumi_common::abort::Controller>>,
 }
 impl State {
     fn new(options: &TuiOptions) -> Self {
@@ -347,6 +349,7 @@ impl State {
             beat_timer: None,
             flash_timers: Vec::new(),
             setup: None,
+            slots_check: None,
         }
     }
 }

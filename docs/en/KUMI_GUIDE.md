@@ -366,15 +366,17 @@ trusting them:
   (Live's own splitter), transcription (Live's conversions), listening (the
   lookup above) and embeddings (Kumi's own: LAION-CLAP's music model for style,
   AFx-Rep for effects). Swap one in plain words, such as
-  `/slots listening gemini`, `/slots listening off` or
+  `/slots listening gemini`, `/slots listening off` (at once, mid-run too) or
   `/slots listening http://127.0.0.1:8080/v1#<model>`. A new listening model is
   tried on a known clip first, and switched to only if it hears it right.
   `/slots back listening` takes a swap back. Embeddings run in Kumi's own model
-  runtime: `/slots embeddings ~/models/clap.onnx` (or a Hugging Face link to an
-  `.onnx` file) is tried on two known tones and used only if it tells them apart;
-  `/slots embeddings off` stops them. The other slots can't take model files
-  yet, and say what to do instead. `KUMI_LISTENER` wins over the listening slot
-  while it's set.
+  runtime: `/slots embeddings ~/models/clap.onnx` (quote a path with spaces) or
+  an https link to an `.onnx` file (up to 4 GB; Esc stops the download) is tried
+  on two known tones and used only if it tells them apart. A file that's gone
+  later gives way to Kumi's own, said once; `/slots embeddings off` stops them.
+  The other slots can't take model files yet, and say what to do instead. A
+  `slots.json` Kumi can't read leaves listening off. `KUMI_LISTENER` wins over
+  the listening slot while it's set.
 - **Style and effects, heard by models.** With a reference, Kumi's style model
   (LAION-CLAP) and effects model (AFx-Rep) hear it and each listen of the run,
   and a change that moves the sound further from the reference's style, or a
