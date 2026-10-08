@@ -361,7 +361,8 @@ pub fn kit(pieces: &[(String, Heard)], tempo: f64) -> (Vec<Piece>, Vec<String>) 
             found.push(format!("{}, {} and {} pile up around {} Hz", window[0].0, window[1].0, window[2].0, window[1].1.round()));
         }
     }
-    for pair in centres.windows(2) {
+    // Coverage is a kit's: two tracks (a bass and a lead) aren't asked to fill what lies between them.
+    for pair in centres.windows(2).filter(|_| centres.len() >= 3) {
         if (pair[1].1 / pair[0].1).log2() > 5. && pair[0].1 > 60. {
             found.push(format!("nothing between {} ({} Hz) and {} ({} Hz)", pair[0].0, pair[0].1.round(), pair[1].0, pair[1].1.round()));
         }
