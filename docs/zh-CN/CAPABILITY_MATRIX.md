@@ -73,7 +73,8 @@
 | 插件自身的窗口或隐藏状态 | 它的参数、预设，以及打开或关闭它的窗口 |
 | 轨道播放时的音频 | 通过 Resampling 捕获；离线渲染 |
 | Browser 相似度搜索、Packs、Cloud | Live 的库数据库：标签、类型、插件列表 |
-| 偏好设置、音频与 MIDI 设置、授权；分轨分离；视频轨道 | — |
+| 分轨分离 | 通过 Live 自己的菜单：Kumi 在 Live 的对话框里选好分轨、是否合并和质量，并等 Live 处理完 |
+| 偏好设置、音频与 MIDI 设置、授权；视频轨道 | — |
 | 重新打开工程后仍保持不变的对象标识 | 引用只在一次连接内有效；探查时会重新读取 |
 
 有意不纳入范围的：Push 及其他硬件控制界面（桥接是一个 Control Surface，但不读取原始 MIDI）、通用的 OSC、网络、串口或传感器连接（实时控制仅限回环）、外部 Link 对等端和 Link Audio，以及桥接内部的 Max for Live 设备。Kumi 自己就能制作 Max for Live 设备；见 [Kumi 指南](KUMI_GUIDE.md#制作-max-for-live-设备)。

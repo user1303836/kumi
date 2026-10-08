@@ -174,7 +174,7 @@ public static class KumiInput {
   public static bool SetText(IntPtr hwnd, string text) { IntPtr result; return SendMessageTimeout(hwnd, 0x000C, IntPtr.Zero, text, 0x2, 1000, out result) != IntPtr.Zero; }
 }
 "@
-$version = 4
+$version = 5
 $auto = [System.Windows.Automation.AutomationElement]
 $tree = [System.Windows.Automation.TreeScope]
 $types = [System.Windows.Automation.ControlType]
@@ -263,6 +263,33 @@ function ButtonNamed($dialog, $name) {
 function PressButton($dialog, $button) {
   if ($button.part) { return [KumiInput]::Click($dialog.hwnd, $button.part) }
   return Press $button.element
+}
+# A dialog's toggles (check boxes) as UI Automation reads them: Live draws its own (Separate Stems' Vocals,
+# Drums, Bass and Others) and Windows' read the same way. Each with its name, whether it's on, whether it can
+# be changed now, and its automation id (Live's are the same in every language).
+function ToggleElements($dialog) { @($dialog.element.FindAll($tree::Descendants, (New-Object System.Windows.Automation.PropertyCondition($auto::ControlTypeProperty, $types::CheckBox)))) }
+function ToggleState($element) {
+  try { return $element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState } catch { return $null }
+}
+function Toggles($dialog) {
+  foreach ($box in (ToggleElements $dialog)) {
+    $name = ([string]$box.Current.Name).Trim()
+    $state = ToggleState $box
+    # A box without a name is drawn beside one that has it (Separate Stems' Merge Stems has two, one unnamed).
+    if (-not $name -or $null -eq $state) { continue }
+    $toggle = @{ name = $name; on = ($state -eq [System.Windows.Automation.ToggleState]::On); enabled = [bool]$box.Current.IsEnabled }
+    if ($box.Current.AutomationId) { $toggle.id = [string]$box.Current.AutomationId }
+    $toggle
+  }
+}
+# The toggle a request names: by its automation id when it gives one, else by its whole name.
+function ToggleNamed($dialog, $one) {
+  $boxes = ToggleElements $dialog
+  if ($one.id) {
+    $box = $boxes | Where-Object { [string]$_.Current.AutomationId -eq [string]$one.id } | Select-Object -First 1
+    if ($box) { return $box }
+  }
+  return $boxes | Where-Object { ([string]$_.Current.Name).Trim() -eq ([string]$one.name).Trim() } | Select-Object -First 1
 }
 $vk = @{ cmd = 0x11; ctrl = 0x11; control = 0x11; shift = 0x10; alt = 0x12; option = 0x12; return = 0x0D; enter = 0x0D; tab = 0x09; space = 0x20; escape = 0x1B; esc = 0x1B;
   delete = 0x2E; backspace = 0x08; left = 0x25; up = 0x26; right = 0x27; down = 0x28; home = 0x24; end = 0x23; pageup = 0x21; pagedown = 0x22 }
@@ -416,7 +443,31 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         $read = @{ ok = $true; open = $true; title = [KumiInput]::Text($dialog.hwnd); words = $words; buttons = $buttons }
         # A Save or an Open dialog says which, so a path goes only where it's meant to (#189).
         if ($kind -eq 'save' -or $kind -eq 'open') { $read.file = $kind }
+        $toggles = @(Toggles $dialog)
+        if ($toggles.Count -gt 0) { $read.toggles = $toggles }
         Done $read
+      }
+      'toggles' {
+        # Each toggle asked for, in order, set on or off as a click would. One Live won't change yet (Separate
+        # Stems' Merge Stems until two or three stems are on) is tried again after the rest.
+        $dialog = DialogOf $process
+        if (-not $dialog) { Done @{ ok = $false; error = 'no-dialog' }; break }
+        $missing = @(); $later = @($request.set)
+        foreach ($pass in 1, 2) {
+          $wanted = $later; $later = @()
+          foreach ($one in $wanted) {
+            $box = ToggleNamed $dialog $one
+            if (-not $box) { $missing += [string]$one.name; continue }
+            $want = if ($one.on) { [System.Windows.Automation.ToggleState]::On } else { [System.Windows.Automation.ToggleState]::Off }
+            # A three-state box goes Off, On, Indeterminate: it's toggled until it's where it was asked to be.
+            for ($turn = 0; $turn -lt 3 -and $box.Current.IsEnabled -and (ToggleState $box) -ne $want; $turn++) {
+              $box.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+            }
+            if ((ToggleState $box) -ne $want) { $later += $one }
+          }
+          if ($later.Count -eq 0) { break }
+        }
+        Done @{ ok = $true; toggles = @(Toggles $dialog); missing = $missing; refused = @($later | ForEach-Object { [string]$_.name }) }
       }
       'answer' {
         $dialog = DialogOf $process
@@ -424,6 +475,9 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         $button = ButtonNamed $dialog $request.button
         for ($look = 0; $look -lt 10 -and -not $button; $look++) { Start-Sleep -Milliseconds 100; $button = ButtonNamed $dialog $request.button }
         if (-not $button) { Done @{ ok = $false; error = 'no-button' }; break }
+        # A button greyed out isn't pressed (Separate Stems' Separate with no stem on).
+        $enabled = if ($button.part) { [KumiInput]::IsWindowEnabled($button.part.hwnd) } else { $button.element.Current.IsEnabled }
+        if (-not $enabled) { Done @{ ok = $false; error = 'disabled'; title = $button.name }; break }
         if (PressButton $dialog $button) { Done @{ ok = $true; pressed = $button.name } } else { Done @{ ok = $false; error = 'press-failed' } }
       }
       'file' {

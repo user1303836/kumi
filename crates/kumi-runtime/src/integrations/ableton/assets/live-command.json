@@ -167,7 +167,7 @@
       "dialog": true
     }
   },
-  "description": "Use Live's own commands, through its menus and keys, for what your other tools can't do: group or ungroup tracks, freeze, unfreeze or flatten a track, bounce a track or clip to audio without playing it (bounce_to_new_track, bounce_track_in_place), consolidate, convert an audio clip to MIDI (melody, harmony, drums), separate stems, slice to a MIDI track, save the Set (or collect all and save), save it as a new file (save_as with path), start a new Set (new_set) or open one (open_set with path), export audio or a MIDI clip. new_set and open_set replace the open Set: say what happens to its unsaved changes with save_current (ask the producer when they didn't say), and references from before are gone once it's open: its answer then has the Set as it is (now), with current references, so carry on in it. Give final: true to the command that finishes the request (a save, a save as, the new Set) and Kumi tells the producer itself. Kumi fills Live's Save and Open dialogs on Windows only: on a Mac, ask the producer to save as or open a Set in Live. When a file is already at path, Live asks before replacing it: ask the producer, never answer it yourself. Live keeps a Set in a project folder: saved as into a folder that isn't one, it makes \"<name> Project\" there, and the result says where the Set went. Never make or edit .als files yourself: Live calls a Set it didn't write corrupt. Give the command and what it works on (track, tracks side by side, or clip): Kumi selects it in Live, presses the command, and says what changed. For anything else Live's menus or keys do, give menu (the item's titles, [\"Create\", \"Insert Silence\"]) or keys ([\"cmd+e\"]). When Live opens a dialog, its words and buttons come back: answer presses one. Live comes to the front for a moment. Prefer your other tools whenever one does the job.",
+  "description": "Use Live's own commands, through its menus and keys, for what your other tools can't do: group or ungroup tracks, freeze, unfreeze or flatten a track, bounce a track or clip to audio without playing it (bounce_to_new_track, bounce_track_in_place), consolidate, convert an audio clip to MIDI (melody, harmony, drums), separate stems, slice to a MIDI track, save the Set (or collect all and save), save it as a new file (save_as with path), start a new Set (new_set) or open one (open_set with path), export audio or a MIDI clip. new_set and open_set replace the open Set: say what happens to its unsaved changes with save_current (ask the producer when they didn't say), and references from before are gone once it's open: its answer then has the Set as it is (now), with current references, so carry on in it. Give final: true to the command that finishes the request (a save, a save as, the new Set) and Kumi tells the producer itself. Kumi fills Live's Save and Open dialogs on Windows only: on a Mac, ask the producer to save as or open a Set in Live. When a file is already at path, Live asks before replacing it: ask the producer, never answer it yourself. Live keeps a Set in a project folder: saved as into a folder that isn't one, it makes \"<name> Project\" there, and the result says where the Set went. Never make or edit .als files yourself: Live calls a Set it didn't write corrupt. Give the command and what it works on (track, tracks side by side, or clip): Kumi selects it in Live, presses the command, and says what changed. separate_stems takes stems (vocals, drums, bass, others; all four when left out), quality (high quality or high speed; as the producer last left it when left out) and merge (true puts two or three stems on one track): Kumi fills Live's Separate Stems dialog, presses Separate, waits while Live works (a minute or more for a whole song) and says the new tracks. For anything else Live's menus or keys do, give menu (the item's titles, [\"Create\", \"Insert Silence\"]) or keys ([\"cmd+e\"]). When Live opens a dialog, its words, buttons and toggles (check boxes, on or off) come back: toggles sets them by name and answer presses a button, both in one call. Given with a command, toggles and answer go to the dialog it opens. Live comes to the front for a moment. Prefer your other tools whenever one does the job.",
   "schema": {
     "type": "object",
     "additionalProperties": false,
@@ -222,6 +222,33 @@
         "maxLength": 256,
         "description": "The clip it works on: its clipRef from this turn (a Session clip; for converting to MIDI, an audio clip in Session or Arrangement), or \"selected\" for the one the producer selected in Live"
       },
+      "stems": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 4,
+        "items": {
+          "type": "string",
+          "enum": [
+            "vocals",
+            "drums",
+            "bass",
+            "others"
+          ]
+        },
+        "description": "For separate_stems: the stems to make (all four when left out)"
+      },
+      "quality": {
+        "type": "string",
+        "enum": [
+          "high quality",
+          "high speed"
+        ],
+        "description": "For separate_stems: Live's quality mode (as the producer last left it when left out)"
+      },
+      "merge": {
+        "type": "boolean",
+        "description": "For separate_stems with two or three stems: true puts them together on one track"
+      },
       "path": {
         "type": "string",
         "minLength": 1,
@@ -262,6 +289,13 @@
           "maxLength": 32
         },
         "description": "Keys to press in Live, one combination each: \"cmd+shift+r\", \"down\""
+      },
+      "toggles": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "boolean"
+        },
+        "description": "Set toggles of the dialog Live has open by name, true on and false off, before answer presses its button: {\"Vocals\": true, \"Drums\": false}"
       },
       "answer": {
         "type": "string",

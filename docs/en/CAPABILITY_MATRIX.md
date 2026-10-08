@@ -100,7 +100,8 @@ of reach of both Live's Python API and the Extensions SDK, or out of scope:
 | A plug-in's own window or hidden state | Its parameters, presets, and opening or closing its window |
 | A track's audio as it plays | Capture through Resampling; offline render |
 | Browser similarity search, Packs, Cloud | Live's library database: tags, kinds, plug-in inventory |
-| Preferences, audio and MIDI setup, licensing; stem separation; video tracks | — |
+| Stem separation | Through Live's own menus: Kumi picks the stems, merging and quality in Live's dialog, and waits for Live |
+| Preferences, audio and MIDI setup, licensing; video tracks | — |
 | Object identities that survive reopening a Set | References last one connection; discovery reads them again |
 
 Out of scope by choice: Push and other hardware surfaces (the bridge is a

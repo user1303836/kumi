@@ -270,7 +270,13 @@ a moment while a Set opens, and the request that asked for it carries on in the
 new Set. Kumi never writes `.als` files itself.
 
 - Kumi selects what the command works on, presses it, and says what changed.
-  When Live opens a dialog (Export, say), Kumi reads it and answers it.
+  When Live opens a dialog (Export, say), Kumi reads it, check boxes included,
+  and answers it.
+- To separate stems, Kumi ticks the stems you ask for in Live's dialog (vocals,
+  drums, bass, others; all four unless you say), puts two or three on one track
+  if you ask, and picks High Quality or High Speed when you say (otherwise the
+  one you used last). It presses Separate and waits while Live works: a minute
+  or more for a whole song.
 - Tracks are selected by name through the accessibility Live 12 offers screen
   readers. Live stays where it is: nothing comes to the front, and a command
   takes well under a second (a bounce or a freeze as long as Live takes to

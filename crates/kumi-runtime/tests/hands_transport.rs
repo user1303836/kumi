@@ -10,7 +10,7 @@ fn embedded_helpers_keep_their_hashes() {
     assert_eq!(HANDS_VERSION, 2);
     for (source, expected) in [
         (mac::MAC_SOURCE, "16045380d38220f9dfd1a6dd318dac9b655fc41758f2531efc46ab97f82a7ba3"),
-        (windows::WINDOWS_SOURCE, "799ce14a0e66fadf1d34fd7c355a826525b9b647c63170a2c233ec07e35441ab"),
+        (windows::WINDOWS_SOURCE, "f16733836d388b86e5293926c645a7d73b45c59027e1b84b945482d19a97d9b2"),
     ] {
         assert_eq!(hex::encode(Sha256::digest(source)), expected);
     }
@@ -56,7 +56,7 @@ while IFS= read -r line; do
  *'"button":"disabled"'*) printf '{"id":%s,"ok":false,"error":"disabled"}\n' "$id";;
  *'"button":"latin1"'*) printf 'Caf\351 menu\n{"id":%s,"ok":true,"after":true}\n' "$id";;
  *'"button":"exit"'*) exit 0;;
- *'"op":"dialog"'*) printf '{"id":%s,"ok":true,"open":true,"title":"Export","words":["Choose a file"],"buttons":["Cancel","Export"]}\n' "$id";;
+ *'"op":"dialog"'*) printf '{"id":%s,"ok":true,"open":true,"title":"Export","words":["Choose a file"],"buttons":["Cancel","Export"],"toggles":[{"name":"Merge Stems","on":false,"enabled":false,"id":"MergeStems.MergeStemsCheckControl"},{"name":"Vocals","on":true,"enabled":true}]}\n' "$id";;
  *'"op":"windows"'*) printf '{"id":%s,"ok":true,"windows":[{"title":"Live","subrole":"AXStandardWindow"}]}\n' "$id";;
  *'"keys":["hang"]'*) :;;
  *'"path":["defer"]'*) held="$id";;
@@ -98,15 +98,29 @@ async fn helpers_are_reused_and_each_operation_has_source_fields_and_results() {
             title: Some("Export".into()),
             words: Some(vec!["Choose a file".into()]),
             buttons: Some(vec!["Cancel".into(), "Export".into()]),
-            file: None
+            file: None,
+            // A toggle greyed out says so, with its id; one that can be changed says neither.
+            toggles: Some(vec![
+                Toggle { name: "Merge Stems".into(), on: false, enabled: false, id: Some("MergeStems.MergeStemsCheckControl".into()) },
+                Toggle { name: "Vocals".into(), on: true, enabled: true, id: None }
+            ])
         }
     );
     assert!(hands.answer("Cancel", None).await.unwrap().ok);
+    let set = [
+        ToggleSet { name: "Vocals, Include or exclude the Vocals stem.".into(), id: Some("VocalsCheckControl".into()), on: true },
+        ToggleSet { name: "Drums".into(), id: None, on: false },
+    ];
+    let toggled = hands.toggles(&set, None).await.unwrap();
+    assert_eq!(
+        toggled.fields["request"]["set"],
+        json!([{"name":"Vocals, Include or exclude the Vocals stem.","id":"VocalsCheckControl","on":true},{"name":"Drums","on":false}])
+    );
     assert_eq!(hands.windows(None).await.unwrap(), vec![Window { title: "Live".into(), subrole: "AXStandardWindow".into() }]);
     assert_eq!(std::fs::read_to_string(folder.path().join("starts")).unwrap(), "start\n");
     let requests: Vec<Value> =
         std::fs::read_to_string(folder.path().join("requests")).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
-    assert_eq!(requests.iter().map(|r| r["id"].as_u64().unwrap()).collect::<Vec<_>>(), (1..=8).collect::<Vec<_>>());
+    assert_eq!(requests.iter().map(|r| r["id"].as_u64().unwrap()).collect::<Vec<_>>(), (1..=9).collect::<Vec<_>>());
     assert_eq!(requests[0], json!({"id":1,"op":"trusted","prompt":false}));
     hands.close();
 }
@@ -228,6 +242,47 @@ $cafe = 'Caf' + [char]0x00E9 + ' ' + [char]0x65E5 + [char]0x672C + ' ' + [char]:
 $edit.MenuItems.Add($cafe) | Out-Null
 $create = $menu.MenuItems.Add('&Create')
 $create.MenuItems.Add('Insert &MIDI Track') | Out-Null
+# Live 12.4's Separate Stems as UI Automation reads it. Live draws its own controls, as WPF does (no child windows):
+# a check box for each stem, Merge Stems (greyed out unless two or three stems are on, keeping its state), Quality
+# Mode, Separate and Cancel. Live remembers what was on last time: Vocals.
+$separate = $create.MenuItems.Add('Separate Stems to New Audio Tracks')
+$separate.add_Click({
+  $window = New-Object System.Windows.Window
+  $window.Title = 'Separate Stems'; $window.Width = 320; $window.Height = 340
+  $panel = New-Object System.Windows.Controls.StackPanel
+  function Box($name, $id, $on) {
+    $box = New-Object System.Windows.Controls.CheckBox
+    $box.Content = ($name -split ',')[0]
+    [System.Windows.Automation.AutomationProperties]::SetName($box, $name)
+    [System.Windows.Automation.AutomationProperties]::SetAutomationId($box, $id)
+    $box.IsChecked = $on
+    [void]$panel.Children.Add($box)
+    return $box
+  }
+  $stems = @(foreach ($name in 'Vocals', 'Drums', 'Bass', 'Others') { Box "$name, Include or exclude the $name stem." "$($name)CheckControl" ($name -eq 'Vocals') })
+  $merge = Box 'Merge Stems' 'MergeStems.MergeStemsCheckControl' $false
+  $merge.IsEnabled = $false
+  $quality = Box 'Quality Mode, Choose between High Speed or High Quality.' 'HighQualityCheckControl' $true
+  $press = New-Object System.Windows.Controls.Button
+  $press.Content = 'Separate'
+  [System.Windows.Automation.AutomationProperties]::SetAutomationId($press, 'SeparateButton')
+  # With no stem on, Live greys out Separate.
+  $count = { $n = @($stems | Where-Object { $_.IsChecked }).Count; $merge.IsEnabled = ($n -ge 2 -and $n -le 3); $press.IsEnabled = ($n -gt 0) }.GetNewClosure()
+  foreach ($box in $stems) { $box.add_Checked($count); $box.add_Unchecked($count) }
+  $press.add_Click({
+    $on = @($stems | Where-Object { $_.IsChecked } | ForEach-Object { $_.Content }) -join ','
+    [Console]::Out.WriteLine("separated $on merge=$($merge.IsChecked) quality=$($quality.IsChecked)"); [Console]::Out.Flush()
+    $window.Close()
+  }.GetNewClosure())
+  [void]$panel.Children.Add($press)
+  $cancel = New-Object System.Windows.Controls.Button
+  $cancel.Content = 'Cancel'
+  $cancel.add_Click({ [Console]::Out.WriteLine('separate cancelled'); [Console]::Out.Flush(); $window.Close() }.GetNewClosure())
+  [void]$panel.Children.Add($cancel)
+  $window.Content = $panel
+  (New-Object System.Windows.Interop.WindowInteropHelper($window)).Owner = $form.Handle
+  [void]$window.ShowDialog()
+})
 $form.Menu = $menu
 # Live's track headers as UI Automation reads them, with two tracks whose names differ only in case. A WPF list, whose
 # automation name is its own: a WinForms ListBox is a native list box, and UI Automation names those its own way.
@@ -305,7 +360,9 @@ async fn on_windows_the_helper_uses_the_win32_menu_finds_the_owned_dialog_and_fi
     let picked = hands.tracks(&[Track { name: "Caf\u{e9} \u{65e5}\u{672c} \u{1f3b9}".into(), nth: Some(0.0) }], None).await.unwrap();
     assert!(picked.ok, "{picked:?}");
     assert_eq!(picked.fields["selected"], json!(["Caf\u{e9} \u{65e5}\u{672c} \u{1f3b9}"]));
-    assert!(hands.dialog(None).await.unwrap() == Dialog { open: false, title: None, words: None, buttons: None, file: None });
+    assert!(
+        hands.dialog(None).await.unwrap() == Dialog { open: false, title: None, words: None, buttons: None, file: None, toggles: None }
+    );
 
     // An item that opens a modal prompt answers at once, and the prompt is the dialog: its own words and
     // buttons, not the main window's. "Don't Save" is Windows' No.
@@ -382,6 +439,66 @@ async fn on_windows_the_helper_uses_the_win32_menu_finds_the_owned_dialog_and_fi
     assert!(hands.answer("Cancel", None).await.unwrap().ok);
     assert_eq!(next(&mut said).await.as_deref(), Some("save cancelled"));
     assert_eq!(std::fs::read(&song).unwrap(), b"the producer's song");
+
+    // Live's Separate Stems asks which stems with toggles of its own: they're read with their ids and whether
+    // they're on, set as asked, and Separate pressed.
+    assert!(hands.menu(&["Create".into(), "Separate Stems to New Audio Tracks".into()], MenuOptions::default()).await.unwrap().ok);
+    let stems = opened(&*hands, |d| d.toggles.is_some()).await;
+    let toggles = stems.toggles.clone().unwrap_or_default();
+    let toggle = |name: &str| toggles.iter().find(|t| t.name.starts_with(name)).map(|t| (t.on, t.enabled, t.id.clone()));
+    assert_eq!(toggle("Vocals, Include"), Some((true, true, Some("VocalsCheckControl".into()))), "{stems:?}");
+    assert_eq!(toggle("Drums, Include"), Some((false, true, Some("DrumsCheckControl".into()))));
+    assert_eq!(toggle("Merge Stems"), Some((false, false, Some("MergeStems.MergeStemsCheckControl".into()))));
+    assert_eq!(toggle("Quality Mode"), Some((true, true, Some("HighQualityCheckControl".into()))));
+    assert_eq!(stems.buttons.as_deref(), Some(&["Separate".to_owned(), "Cancel".to_owned()][..]), "{stems:?}");
+    let set = |name: &str, id: Option<&str>, on: bool| ToggleSet { name: name.into(), id: id.map(Into::into), on };
+    // Merge Stems first, greyed out until Drums is on: it's set once the rest are. A name it doesn't have is missing.
+    let reply = hands
+        .toggles(
+            &[
+                set("Merge Stems", None, true),
+                set("Drums, Include or exclude the Drums stem.", Some("DrumsCheckControl"), true),
+                set("Nope", None, true),
+            ],
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(reply.ok, "{reply:?}");
+    assert_eq!((&reply.fields["missing"], &reply.fields["refused"]), (&json!(["Nope"]), &json!([])), "{reply:?}");
+    let after: Vec<Toggle> = serde_json::from_value(reply.fields["toggles"].clone()).unwrap();
+    assert!(after.iter().any(|t| t.name == "Merge Stems" && t.on && t.enabled), "{after:?}");
+    // Four stems grey Merge Stems out again, still on: it can't be turned off then.
+    let reply = hands
+        .toggles(
+            &[set("x", Some("OthersCheckControl"), true), set("x", Some("BassCheckControl"), true), set("Merge Stems", None, false)],
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(reply.fields["refused"], json!(["Merge Stems"]), "{reply:?}");
+    let reply = hands
+        .toggles(
+            &[
+                set("x", Some("OthersCheckControl"), false),
+                set("x", Some("BassCheckControl"), false),
+                set("Quality Mode, Choose between High Speed or High Quality.", None, false),
+            ],
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(reply.fields["refused"], json!([]), "{reply:?}");
+    // With no stem on, Live greys out Separate: it isn't pressed, and the helper says why.
+    let none =
+        hands.toggles(&[set("x", Some("VocalsCheckControl"), false), set("x", Some("DrumsCheckControl"), false)], None).await.unwrap();
+    assert_eq!(none.fields["refused"], json!([]), "{none:?}");
+    let greyed = hands.answer("Separate", None).await.unwrap();
+    assert_eq!((greyed.ok, greyed.error.as_deref()), (false, Some("disabled")), "{greyed:?}");
+    let back = hands.toggles(&[set("x", Some("VocalsCheckControl"), true), set("x", Some("DrumsCheckControl"), true)], None).await.unwrap();
+    assert_eq!(back.fields["refused"], json!([]), "{back:?}");
+    assert!(hands.answer("Separate", None).await.unwrap().ok);
+    assert_eq!(next(&mut said).await.as_deref(), Some("separated Vocals,Drums merge=True quality=False"));
 
     // Keys land in the window when it can be brought to the front (a locked or busy desktop can refuse).
     let keys = hands.keys(&["ctrl+g".into()], KeysOptions::default()).await.unwrap();
