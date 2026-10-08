@@ -58,7 +58,10 @@ async fn gemini_listens_with_the_newest_model_that_takes_what_its_given_and_answ
                 {"name": "models/gemini-2.5-pro", "supportedGenerationMethods": ["generateContent", "countTokens"]},
                 {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent", "countTokens"]},
                 {"name": "models/gemini-2.5-flash-lite", "supportedGenerationMethods": ["generateContent", "countTokens"]},
-                {"name": "models/gemini-2.5-flash-image", "supportedGenerationMethods": ["generateContent"]}
+                {"name": "models/gemini-2.5-flash-image", "supportedGenerationMethods": ["generateContent"]},
+                // Gemma is in Gemini's list and takes no audio; a transcribing model does another job. Neither listens.
+                {"name": "models/gemma-4-31b-it", "supportedGenerationMethods": ["generateContent", "countTokens"]},
+                {"name": "models/gemini-3.5-transcribe", "supportedGenerationMethods": ["generateContent"]}
             ]});
             let answer = serde_json::json!({"candidates": [{"content": {"parts": [
                 {"text": "{\"closer\": \"second\", \"first\": [\"muddy\"], \"second\": []}"}

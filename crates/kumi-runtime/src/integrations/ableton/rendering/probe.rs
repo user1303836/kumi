@@ -141,7 +141,8 @@ impl Rendering {
         let done = super::super::context::payload(&read).ok()?;
         let pair = done.get("result")?.as_array()?;
         let (class, name) = (pair.first()?.as_str()?, pair.get(1)?.as_str()?);
-        let own = !class.is_empty() && !class.starts_with("Plugin") && !class.starts_with("Mx");
+        // A plug-in (VST "PluginDevice", AU "AuPluginDevice") or a Max device goes by its name; Live's own by class.
+        let own = !class.is_empty() && !class.contains("PluginDevice") && !class.starts_with("Mx");
         Some(if own { class.to_owned() } else { name.to_owned() }).filter(|kind| !kind.is_empty())
     }
 

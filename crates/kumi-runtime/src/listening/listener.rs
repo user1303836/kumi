@@ -66,6 +66,10 @@ pub trait Listener {
     fn hears_width(&self) -> bool {
         true
     }
+    /// Turned off since it was found: the listening slot now says off.
+    fn off(&self) -> bool {
+        false
+    }
     /// Asks once: `first` then `second`, joined with a pause, against the aim. Answers "first", "second" or "same",
     /// and the problems it hears in each.
     async fn ask(&self, wav: &[u8], aim: &str, signal: Signal) -> Result<Answer, String>;
@@ -333,7 +337,13 @@ pub async fn gemini_listener(base: &str, key: &str, signal: Signal) -> Result<Op
         .flatten()
         .filter(|row| row["supportedGenerationMethods"].as_array().is_some_and(|ways| ways.iter().any(|way| way == "generateContent")))
         .filter_map(|row| row["name"].as_str())
-        .filter(|name| !["embedding", "tts", "image", "live", "aqa", "native-audio"].iter().any(|word| name.contains(word)))
+        // Gemini's own models only (Gemma's are listed too, and don't take audio), and not those for another job.
+        .filter(|name| name.starts_with("models/gemini-"))
+        .filter(|name| {
+            !["embedding", "tts", "image", "live", "aqa", "native-audio", "transcribe", "robotics", "computer-use", "omni", "nano-banana"]
+                .iter()
+                .any(|word| name.contains(word))
+        })
         .max_by_key(|name| gemini_rank(name))
         .map(str::to_owned);
     Ok(model.map(|model| GeminiListener { base: base.trim_end_matches('/').into(), key: key.into(), model, client }))

@@ -667,6 +667,10 @@ impl Rendering {
             }
             (None, _) => return None,
         };
+        // Turned off since it was found (the listening slot): not asked, as with no listening model.
+        if listener.off() {
+            return None;
+        }
         if !listener.hears_width() && width_or_air {
             return None;
         }
