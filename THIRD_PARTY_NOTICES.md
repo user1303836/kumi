@@ -3,6 +3,18 @@
 Kumi's own code is under its MIT license (LICENSE.md). The parts below come from other people's work and stay under
 their licenses.
 
+## Models fetched on first use
+
+Kumi's listening models aren't in the bundle: Kumi fetches them the first time they're needed, each checked against its
+SHA-256, from its `models-1` release (https://github.com/user1303836/kumi/releases/tag/models-1). That release's
+`LICENSE` and `NOTICE` files carry their licenses and notices:
+
+- LAION-CLAP's music model (laion/larger_clap_music), Apache License 2.0;
+- AFx-Rep (csteinmetz1/afx-rep), Apache License 2.0, with PANNs' Cnn14 and torchlibrosa under the MIT License;
+- Basic Pitch's model (spotify/basic-pitch), Apache License 2.0.
+
+ONNX Runtime, which runs them, is fetched from Microsoft's own releases, under the MIT License.
+
 ## Basic Pitch (Spotify), Apache License 2.0
 
 `crates/kumi-runtime/src/listening/transcribe.rs` translates into Rust Basic Pitch's note decoding and windowing:

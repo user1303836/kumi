@@ -37,7 +37,7 @@
           "minLength": 1,
           "maxLength": 128
         },
-        "description": "The knobs’ names as the device shows them, or roles: a mapped plug-in's (the plug-in guide lists them, such as \"ceiling\" on Ozone 12) or a job any device does (\"limiter gain\", \"ceiling\", \"eq gain\"). One for home or probe (such as \"Gain\" or \"Decay Time\"), 2–5 for search"
+        "description": "The knobs’ names as the device shows them, or roles: a mapped plug-in's (the plug-in guide lists them, such as \"ceiling\" on Ozone 12) or a job any device does (\"limiter gain\", \"ceiling\", \"eq gain\": on EQ Eight, the band nearest the target's frequency). One for home or probe (such as \"Gain\" or \"Decay Time\"), 2–5 for search"
       },
       "change": {
         "type": "string",
