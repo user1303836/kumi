@@ -192,16 +192,21 @@ fn gaps_written(path: &Path) -> i64 {
 type Job = Box<dyn FnOnce(&Connection) -> Result<(), StoreError> + Send>;
 
 /// Queue `jobs` so the writer takes them as one batch: they go in while the writer is busy with a write
-/// that waits until they're all queued. Each job's answer, in order.
+/// that waits until they're all queued. Each job's answer, in order. The writer gathers a batch as it
+/// takes its first write, so they're queued only once that write runs: queued while the writer was
+/// still gathering, some would join its batch and the rest form another.
 fn one_batch(store: &Store, jobs: Vec<Job>) -> Vec<Result<(), StoreError>> {
     let (release, wait) = std::sync::mpsc::channel::<()>();
+    let (running, started) = std::sync::mpsc::channel::<()>();
     store.write(
         move |_| {
+            running.send(()).ok();
             wait.recv().ok();
             Ok(())
         },
         |_| {},
     );
+    started.recv_timeout(Duration::from_secs(10)).unwrap();
     let (sender, answers) = std::sync::mpsc::channel();
     let count = jobs.len();
     for (index, job) in jobs.into_iter().enumerate() {
@@ -234,6 +239,8 @@ fn when_sqlite_gives_up_a_batch_no_write_of_it_is_kept_and_every_caller_hears_so
         ],
     );
     assert!(answers.iter().all(Result::is_err), "{answers:?}");
+    // Each hears what happened, not that its savepoint went with the transaction.
+    assert!(answers.iter().all(|answer| !format!("{answer:?}").contains("savepoint")), "{answers:?}");
     assert_eq!(count(&store, "SELECT count(*) FROM gaps"), 0, "nothing landed outside the transaction");
     store.write_wait(|c| gaps::add(c, &gap("next", 2))).unwrap();
     assert_eq!(count(&store, "SELECT count(*) FROM gaps"), 1, "the writer carries on");

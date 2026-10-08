@@ -2,7 +2,7 @@
 //! savepoint of one transaction, commits once, then answers each. Nothing waits on purpose, so a lone
 //! write commits as soon as it arrives.
 
-use crate::{in_savepoint, StoreError};
+use crate::{in_savepoint, StoreError, GAVE_UP};
 use rusqlite::{Connection, TransactionBehavior};
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},
@@ -117,7 +117,7 @@ fn run(mut connection: Connection, jobs: mpsc::Receiver<Job>) {
                         None => {
                             answers.push(job(Ok(&*transaction)));
                             if transaction.is_autocommit() {
-                                lost = Some(StoreError::Sqlite("SQLite gave up the write (a full disk or a read or write error)".into()));
+                                lost = Some(StoreError::Sqlite(GAVE_UP.into()));
                             }
                         }
                     }

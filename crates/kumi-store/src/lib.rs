@@ -177,10 +177,19 @@ fn prepare_file(path: &Path) -> Result<(), StoreError> {
     options.open(path).map(drop).map_err(io)
 }
 
-/// Run `job` inside a savepoint of the current transaction: its error rolls back only its own changes.
+/// What a write hears when SQLite rolled back the whole transaction under it.
+pub(crate) const GAVE_UP: &str = "SQLite gave up the write (a full disk or a read or write error)";
+
+/// Run `job` inside a savepoint of the current transaction: its error rolls back only its own changes. When SQLite
+/// ended the whole transaction during it (a full disk, an I/O error), the savepoint went too: the job's own error is
+/// said, not that the savepoint is gone.
 pub(crate) fn in_savepoint<T>(connection: &Connection, job: impl FnOnce(&Connection) -> Result<T, StoreError>) -> Result<T, StoreError> {
     connection.execute_batch("SAVEPOINT job")?;
-    match job(connection) {
+    let result = job(connection);
+    if connection.is_autocommit() {
+        return Err(result.err().unwrap_or_else(|| StoreError::Sqlite(GAVE_UP.into())));
+    }
+    match result {
         Ok(value) => {
             connection.execute_batch("RELEASE job")?;
             Ok(value)
