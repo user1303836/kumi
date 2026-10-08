@@ -415,11 +415,14 @@ pub fn compare(form: &Form, reference: &Form) -> Vec<String> {
     differ("sections", form.sections.len() as f64, reference.sections.len() as f64, 2.);
     let typical = |form: &Form| form.bars.len() as f64 / form.sections.len().max(1) as f64;
     differ("bars a section", typical(form), typical(reference), 4.);
+    // A form too short for a section has no contrast to compare.
     let contrast = |form: &Form| {
         let levels = form.sections.iter().map(|section| section.loudness);
-        levels.clone().fold(f64::MIN, f64::max) - levels.fold(f64::MAX, f64::min)
+        (!form.sections.is_empty()).then(|| levels.clone().fold(f64::MIN, f64::max) - levels.fold(f64::MAX, f64::min))
     };
-    differ("contrast between sections (dB)", contrast(form), contrast(reference), 2.);
+    if let (Some(ours), Some(theirs)) = (contrast(form), contrast(reference)) {
+        differ("contrast between sections (dB)", ours, theirs, 2.);
+    }
     said
 }
 

@@ -369,6 +369,9 @@ impl Mutations {
         });
         history.remember(record.clone(), transaction.into(), restore);
         history.made_by(&record.id, &kind.tool);
+        if let Some(clip) = args.get("clipRef").and_then(Value::as_str) {
+            history.made_on(&record.id, clip);
+        }
         // The device a load or a duplicate made, by Live's identity for it: what may be removed if Live won't undo it.
         if applied && matches!(kind.tool.as_str(), "load_device" | "duplicate_device" | "load_sample") {
             let identity = [

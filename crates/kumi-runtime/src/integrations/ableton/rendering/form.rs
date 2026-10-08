@@ -73,13 +73,16 @@ impl Rendering {
             else {
                 continue;
             };
-            let Ok(clips) =
-                self.rows("arrangement-clip", json!({"parent":reference,"fields":["start","endTime","length"]}), signal.clone()).await
+            let Ok(clips) = self
+                .rows("arrangement-clip", json!({"parent":reference,"fields":["start","endTime","length","muted"]}), signal.clone())
+                .await
             else {
                 continue;
             };
             let mut runs: Vec<(usize, usize)> = clips
                 .iter()
+                // A muted clip doesn't play.
+                .filter(|clip| clip.get("muted").and_then(Value::as_bool) != Some(true))
                 .filter_map(|clip| {
                     let start = clip.get("start").and_then(Value::as_f64)?;
                     // Where it stops playing: a looped clip's length is its loop's, not how far it runs.

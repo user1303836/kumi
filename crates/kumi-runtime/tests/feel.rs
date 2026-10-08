@@ -224,3 +224,14 @@ fn a_recordings_grid_is_fitted_to_its_notes() {
     assert!((doubled.tempo - tempo).abs() < 0.01, "{doubled:?}");
     assert!((doubled.downbeat - lead).abs() < 0.003, "{doubled:?}");
 }
+
+#[test]
+fn a_downbeat_played_early_doesnt_add_a_bar() {
+    // A one-bar loop whose downbeat hat was played 10 ms early, at the loop's end: still one bar, every step once.
+    let tempo = 120.;
+    let mut notes: Vec<Note> = pattern(1, 16, 50., 0., tempo).into_iter().filter(|note| note.pitch != 42 || note.start > 0.).collect();
+    notes.push(Note { start: 4. - 10. / 500., length: 0.1, pitch: 42, velocity: 96. });
+    let measured = drums(&notes, tempo);
+    let hats = measured.lanes.iter().find(|lane| lane.name == "hats").unwrap();
+    assert!(hats.density.iter().all(|density| *density == 1.), "{:?}", hats.density);
+}

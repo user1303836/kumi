@@ -130,3 +130,20 @@ fn silent_bars_dont_wipe_out_the_sections_around_them() {
     let expected = [[16, 32, 40, 56], [16, 32, 40, 56], [17, 33, 41, 57], [16, 32, 40, 56]];
     assert!(found.iter().zip(&expected).all(|(found, expected)| near(found, expected)), "{found:?}");
 }
+
+#[test]
+fn a_form_too_short_for_a_section_has_no_contrast_to_compare() {
+    let bar = (BAR * RATE) as usize;
+    let short = form(&heard(&song(&[Part { bars: 1, from: -18., to: -18., hits: 2., bright: 0.4 }])[..bar / 4]), BAR);
+    assert!(short.sections.is_empty(), "{:?}", short.sections);
+    let shaped = form(
+        &heard(&song(&[
+            Part { bars: 4, from: -30., to: -30., hits: 1., bright: 0.2 },
+            Part { bars: 4, from: -14., to: -14., hits: 4., bright: 0.6 },
+        ])),
+        BAR,
+    );
+    for said in [compare(&short, &shaped), compare(&shaped, &short)] {
+        assert!(said.iter().all(|line| !line.starts_with("contrast") && !line.contains("9223372036854775808")), "{said:?}");
+    }
+}

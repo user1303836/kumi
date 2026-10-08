@@ -201,8 +201,14 @@ pub fn feel(notes: &[Note], tempo: f64, beats_per_bar: f64, kit: &Kit) -> Feel {
     let pushed = push_of(&starts);
     let placed = place(notes, beats_per_bar, steps, (grid, swing, pushed), ms);
     // How often a step is played is counted over the bars the part plays in: a reference's stretches without it (a
-    // song's drum stem through its breaks) aren't read as it playing sparsely.
-    let playing = placed.iter().map(|(bar, _, _)| *bar).collect::<std::collections::BTreeSet<_>>().len().max(1);
+    // song's drum stem through its breaks) aren't read as it playing sparsely. A bar is where a note starts, not where
+    // a downbeat played early is placed (the next bar, which a one-bar loop doesn't have).
+    let playing = notes
+        .iter()
+        .map(|note| (note.start / beats_per_bar).floor().max(0.) as usize)
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+        .max(1);
     let mut names: Vec<&str> = notes.iter().map(|note| kit.lane(note.pitch)).collect();
     names.sort();
     names.dedup();

@@ -81,6 +81,10 @@ pub struct Applied {
     /// track can't). Not kept past this Kumi: a change read back from disk goes by its family.
     #[serde(skip)]
     pub tool: Option<String>,
+    /// The clip a note edit changed, by its long ref: a groove round takes back its own clip's edits only. Not kept
+    /// past this Live connection: refs aren't either.
+    #[serde(skip)]
+    pub clip: Option<String>,
 }
 impl Applied {
     pub fn new(record: ChangeRecord, transaction_id: String, restore: Option<Restore>) -> Self {
@@ -99,6 +103,7 @@ impl Applied {
             shift: None,
             created: None,
             tool: None,
+            clip: None,
         }
     }
     /// Whether the change can change what's heard: not one that only names, colours or marks things, sets the
@@ -693,6 +698,12 @@ impl History {
     pub fn made_by(&self, change: &str, tool: &str) {
         if let Some(entry) = self.entries.borrow().get(change) {
             entry.borrow_mut().tool = Some(tool.into());
+        }
+    }
+    /// Notes the clip a change edited (its long ref).
+    pub fn made_on(&self, change: &str, clip: &str) {
+        if let Some(entry) = self.entries.borrow().get(change) {
+            entry.borrow_mut().clip = Some(clip.into());
         }
     }
     pub fn attach_material(&self, change: &str, material: Material) {

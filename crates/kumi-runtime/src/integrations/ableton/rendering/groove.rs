@@ -19,8 +19,8 @@ use crate::listening::{
 use kumi_common::js::{number::to_string, string::head};
 use std::collections::HashMap;
 
-/// The tools that change a clip's notes: what a groove round takes back when it isn't kept.
-const NOTE_TOOLS: [&str; 5] = ["change_notes", "delete_notes", "edit_notes", "transform_midi", "write_midi_clip"];
+/// The tools that change a clip's notes: what a groove round takes back, on its clip, when it isn't kept.
+const NOTE_TOOLS: [&str; 4] = ["change_notes", "delete_notes", "edit_notes", "transform_midi"];
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GrooveRequest {
@@ -44,8 +44,6 @@ pub struct GrooveRun {
     clip: String,
     /// How the part's notes fall into lanes.
     kit: Kit,
-    /// The part's track, by name: a round takes back note changes there only.
-    track: Option<String>,
     reference: Feel,
     reference_name: String,
     lines: Vec<Line>,
@@ -73,6 +71,8 @@ struct Read {
     notes: Vec<(i64, Note)>,
     /// Song beat of the clip's own time zero.
     song_zero: Option<f64>,
+    /// Where what Live plays of the clip ends, in its own time (its loop's end, say).
+    to: f64,
     /// Where the clip's notes have to end, in its own time: Live's bridge refuses a note past it.
     end: f64,
     /// How its notes fall into lanes.
@@ -162,6 +162,7 @@ impl Rendering {
             ),
             notes,
             song_zero: None,
+            to: f64::INFINITY,
             end: f64::INFINITY,
             kit: Kit::pitched(),
             tempo: Some(grid.tempo),
@@ -207,6 +208,7 @@ impl Rendering {
             name: clip["name"].as_str().unwrap_or("the clip").to_string(),
             notes,
             song_zero,
+            to,
             end,
             kit: Kit::pitched(),
             tempo: None,
@@ -214,11 +216,10 @@ impl Rendering {
         })
     }
 
-    /// How a clip's notes fall into lanes (by its track's Drum Rack, when it has one), and its track's name.
-    async fn lanes_of(&self, clip: &str, signal: Signal) -> (Kit, Option<String>) {
-        let Some((_, track)) = clip_and_track(self.connection(), clip) else { return (Kit::pitched(), None) };
-        let kit = drum_rack(self.connection(), &track, &signal).await.map_or_else(Kit::pitched, |pads| Kit::rack(&pads));
-        (kit, track_name(self.connection(), &track, signal).await)
+    /// How a clip's notes fall into lanes: by its track's Drum Rack, when it has one.
+    async fn lanes_of(&self, clip: &str, signal: Signal) -> Kit {
+        let Some((_, track)) = clip_and_track(self.connection(), clip) else { return Kit::pitched() };
+        drum_rack(self.connection(), &track, &signal).await.map_or_else(Kit::pitched, |pads| Kit::rack(&pads))
     }
 
     fn feel_of(&self, notes: &[(i64, Note)], kit: &Kit, tempo: Option<f64>) -> Feel {
@@ -227,20 +228,16 @@ impl Rendering {
         feel(&notes, tempo, self.observer.beats_per_bar.get().max(1.), kit)
     }
 
-    /// The changes applied since a checkpoint that edit notes on the run's track: what the producer changed in between
-    /// or a judge round kept elsewhere isn't a groove round's to take back.
-    fn note_changes_since(&self, checkpoint: &[String], track: Option<&str>) -> Vec<(String, String)> {
+    /// The changes applied since a checkpoint, split into the note edits on the run's clip (by its long ref) and the
+    /// rest: what the producer changed in between, or a judge round kept, isn't a groove round's to take back.
+    fn note_changes_since(&self, checkpoint: &[String], clip: Option<&str>) -> (Vec<(String, String)>, Vec<(String, String)>) {
         let entries = self.history.entries.borrow();
-        self.applied_since(checkpoint)
-            .into_iter()
-            .filter(|(id, _)| {
-                entries.get(id).is_some_and(|entry| {
-                    let entry = entry.borrow();
-                    let notes = entry.tool.as_deref().is_some_and(|tool| NOTE_TOOLS.contains(&tool));
-                    notes && (track.is_none() || entry.record.track.as_ref().is_none_or(|chip| Some(chip.name.as_str()) == track))
-                })
+        self.applied_since(checkpoint).into_iter().partition(|(id, _)| {
+            entries.get(id).is_some_and(|entry| {
+                let entry = entry.borrow();
+                entry.tool.as_deref().is_some_and(|tool| NOTE_TOOLS.contains(&tool)) && clip.is_some() && entry.clip.as_deref() == clip
             })
-            .collect()
+        })
     }
 
     /// The reference's hits moved onto its drum stem's onsets: the stem heard quietly over the reference's span.
@@ -302,7 +299,15 @@ impl Rendering {
         signal: Signal,
     ) -> Result<Result<Round, String>, RuntimeError> {
         let file = audio::audio_path(reference);
-        let mut wanted = if std::path::Path::new(&file).is_file() {
+        let path = std::path::Path::new(&file);
+        if path.is_file()
+            && path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ["mid", "midi"].contains(&ext.to_lowercase().as_str()))
+        {
+            return Ok(Err(
+                "The reference is a MIDI file: put it on a MIDI track in Live (drag it in) and give that clip as reference.".into()
+            ));
+        }
+        let mut wanted = if path.is_file() {
             match self.file_notes(&file, reference_tempo, signal.clone()).await {
                 Ok(read) => read,
                 Err(why) => return Ok(Err(format!("The reference: {why}"))),
@@ -310,7 +315,7 @@ impl Rendering {
         } else {
             match self.clip_notes(reference, signal.clone()).await {
                 Ok(mut read) => {
-                    read.kit = self.lanes_of(reference, signal.clone()).await.0;
+                    read.kit = self.lanes_of(reference, signal.clone()).await;
                     read
                 }
                 Err(why) => return Ok(Err(format!("The reference: {why}"))),
@@ -327,7 +332,7 @@ impl Rendering {
             Ok(read) => read,
             Err(why) => return Ok(Err(why)),
         };
-        let (mut kit, track) = self.lanes_of(clip, signal).await;
+        let mut kit = self.lanes_of(clip, signal).await;
         let mut reference_feel = self.feel_of(&wanted.notes, &wanted.kit, wanted.tempo);
         let mut part_feel = self.feel_of(&part.notes, &kit, None);
         // Lanes in common or none: a drum part against a pitched reference (or the other way round) is read as one lane
@@ -344,7 +349,6 @@ impl Rendering {
         let mut run = GrooveRun {
             clip: clip.into(),
             kit,
-            track,
             reference: reference_feel,
             reference_name: wanted.name.clone(),
             lines: now.clone(),
@@ -396,10 +400,10 @@ impl Rendering {
     }
 
     async fn groove_round(self: &Rc<Self>, request: &GrooveRequest, signal: Signal) -> Result<Result<Round, String>, RuntimeError> {
-        let (clip, checkpoint, kit, track) = {
+        let (clip, checkpoint, kit) = {
             let run = self.groove.borrow();
             let run = run.as_ref().unwrap();
-            (run.clip.clone(), run.checkpoint.clone(), run.kit.clone(), run.track.clone())
+            (run.clip.clone(), run.checkpoint.clone(), run.kit.clone())
         };
         let mut change = request.change.clone();
         if request.apply {
@@ -422,7 +426,7 @@ impl Rendering {
                 toward(&notes, &part, &run.as_ref().unwrap().reference, self.observer.beats_per_bar.get().max(1.), amount)
             };
             let patches: Vec<Value> =
-                read.notes.iter().zip(&moved).filter_map(|((id, before), after)| inside(*id, before, after, read.end)).collect();
+                read.notes.iter().zip(&moved).filter_map(|((id, before), after)| inside(*id, before, after, (read.to, read.end))).collect();
             if patches.is_empty() {
                 return Ok(Err("The notes already sit where the reference's do; nothing to move.".into()));
             }
@@ -440,7 +444,8 @@ impl Rendering {
             Err(why) => return Ok(Err(why)),
         };
         let part = self.feel_of(&read.notes, &kit, None);
-        let changes = self.note_changes_since(&checkpoint, track.as_deref());
+        let mine = clip_and_track(self.connection(), &clip).map(|(long, _)| long);
+        let (changes, others) = self.note_changes_since(&checkpoint, mine.as_deref());
         let (rows, kept, why, target_label) = {
             let run = self.groove.borrow();
             let run = run.as_ref().unwrap();
@@ -456,12 +461,17 @@ impl Rendering {
                     _ => refused.push(title.clone()),
                 }
             }
+            let titles = |changes: &[(String, String)]| changes.iter().map(|(_, title)| title.as_str()).collect::<Vec<_>>().join(", ");
             if changes.is_empty() {
-                why.push_str("; nothing in HISTORY to take back");
+                why.push_str("; no note changes on the part to take back");
             } else if refused.is_empty() {
-                why.push_str(&format!("; taken back: {}", changes.iter().map(|(_, title)| title.as_str()).collect::<Vec<_>>().join(", ")));
+                why.push_str(&format!("; taken back: {}", titles(&changes)));
             } else {
                 why.push_str(&format!("; Live wouldn't take back {}: undo it yourself", refused.join(", ")));
+            }
+            // A groove round takes back only the part's note edits: say what else stays.
+            if !others.is_empty() {
+                why.push_str(&format!("; left as they are (not note changes on the part): {}", titles(&others)));
             }
         }
         let ids = self.applied_ids();
@@ -576,10 +586,11 @@ fn window(clip: &Value) -> (f64, f64, f64) {
     }
 }
 
-/// A note's patch, when it moved: kept inside the clip, since Live's bridge refuses a note that ends past it. A note
-/// moved later ends by the clip's end, and moves no later than just short of it.
-fn inside(id: i64, before: &Note, after: &Note, end: f64) -> Option<Value> {
-    let start = after.start.min((end - 1. / 64.).max(before.start));
+/// A note's patch, when it moved: kept inside what the clip plays (`to`, where its loop ends, say) and inside the clip
+/// (`end`), since Live's bridge refuses a note that ends past it. A note moved later starts no later than just short
+/// of what's played, and ends by the clip's end.
+fn inside(id: i64, before: &Note, after: &Note, (to, end): (f64, f64)) -> Option<Value> {
+    let start = after.start.min((to.min(end) - 1. / 64.).max(before.start));
     if (start - before.start).abs() <= 1e-4 && before.velocity == after.velocity {
         return None;
     }

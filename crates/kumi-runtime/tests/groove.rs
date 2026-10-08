@@ -1,11 +1,14 @@
 //! The groove judge against a Live that answers as Kumi's bridge does (each row only the fields asked for, with its ref
-//! and parent): it moves a part's notes by their ids, keeps them inside the clip, leaves alone the notes Live never
-//! plays, and finds a clip's track from the short ref the model has.
+//! and parent): it moves a part's notes by their ids, keeps them inside what the clip plays, leaves alone the notes Live
+//! never plays, takes back only the part's own note edits, and finds a clip's track from the short ref the model has.
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_runtime::{
-    core::{contracts::JsonObject, errors::RuntimeError},
+    core::{
+        contracts::{ChangeRecord, JsonObject},
+        errors::RuntimeError,
+    },
     integrations::ableton::{
         connection::LiveConnection,
         history::History,
@@ -24,7 +27,8 @@ use serde_json::{json, Value};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 /// A Live with two Drum Rack tracks ("Beat" and "Reference", pads Kick 36, Snare 38 and Hihat 42), each with a
-/// one-bar looped Session clip in its first slot, and a third track holding a drum stem.
+/// one-bar looped Session clip in its first slot (and "Beat" another in its second, its end marker a bar past its
+/// loop's end), and a third track holding a drum stem.
 struct Live {
     notes: RefCell<HashMap<String, Vec<Value>>>,
     /// Whether note rows carry their ids when asked (an old bridge's didn't).
@@ -104,9 +108,11 @@ impl McpEndpoint for Live {
             "device" => page("device", json!([])),
             "session-clip" => {
                 let clip = parent.replacen(":clip_slot:", ":clip:", 1);
-                let row = json!({"ref":clip,"parentRef":parent,"name":if clip == "7:clip:0:0" { "Beat" } else { "Reference" },
+                let name = if clip.starts_with("7:clip:0:") { "Beat" } else { "Reference" };
+                let end = if clip == "7:clip:0:1" { 8.0 } else { 4.0 };
+                let row = json!({"ref":clip,"parentRef":parent,"name":name,
                     "length":4.0,"isAudio":false,"signatureNumerator":4,"signatureDenominator":4,
-                    "looping":true,"loopStart":0.0,"loopEnd":4.0,"startMarker":0.0,"endMarker":4.0});
+                    "looping":true,"loopStart":0.0,"loopEnd":4.0,"startMarker":0.0,"endMarker":end});
                 page("session-clip", rows(vec![row]))
             }
             "note" => {
@@ -137,16 +143,27 @@ impl McpEndpoint for Live {
     }
 }
 
-/// The part (straight hats, flat velocities, and a note past the loop's end, which Live never plays) and the
-/// reference (hats 12 ms behind, accented).
+/// The part (straight hats, flat velocities, and a note past the loop's end, which Live never plays), the part again
+/// with a downbeat hat played 5 ms early at its loop's end, and the reference (hats 12 ms behind, accented).
 fn live(ids: bool) -> Rc<Live> {
     let mut part = beat(0., false);
     part.push(json!({"id":99,"pitch":42,"start":4.5,"duration":0.25,"velocity":90,"mute":false}));
-    Rc::new(Live { notes: RefCell::new(HashMap::from([("7:clip:0:0".into(), part), ("7:clip:1:0".into(), beat(12., true))])), ids })
+    let mut early = beat(0., false);
+    early.push(json!({"id":50,"pitch":42,"start":3.99,"duration":0.25,"velocity":90,"mute":false}));
+    let notes = HashMap::from([("7:clip:0:0".into(), part), ("7:clip:0:1".into(), early), ("7:clip:1:0".into(), beat(12., true))]);
+    Rc::new(Live { notes: RefCell::new(notes), ids })
+}
+
+/// What the tests hold of the groove judge: it, Live's connection, HISTORY, and the changes it made.
+struct Groove {
+    rendering: Rc<Rendering>,
+    connection: Rc<LiveConnection>,
+    history: Rc<History>,
+    made: Rc<RefCell<Vec<(String, JsonObject)>>>,
 }
 
 /// The groove judge over `live`, and the changes it made (each tool and input), applied to `live`'s notes.
-async fn groove(live: Rc<Live>) -> (Rc<Rendering>, Rc<LiveConnection>, Rc<RefCell<Vec<(String, JsonObject)>>>) {
+async fn groove(live: Rc<Live>) -> Groove {
     let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
     let endpoint = live.clone();
     options.connect = Some(Rc::new(move |_| {
@@ -167,7 +184,7 @@ async fn groove(live: Rc<Live>) -> (Rc<Rendering>, Rc<LiveConnection>, Rc<RefCel
     let made = Rc::new(RefCell::new(vec![]));
     let changes = made.clone();
     let rendering = Rendering::new(
-        history,
+        history.clone(),
         observer,
         &options,
         Rc::new(move |tool: String, input: JsonObject, _| {
@@ -186,7 +203,7 @@ async fn groove(live: Rc<Live>) -> (Rc<Rendering>, Rc<LiveConnection>, Rc<RefCel
         }),
         Rc::new(|_, _| async { Ok(None) }.boxed_local()),
     );
-    (rendering, connection, made)
+    Groove { rendering, connection, history, made }
 }
 
 fn request(value: Value) -> GrooveRequest {
@@ -205,7 +222,7 @@ async fn groove_moves_the_notes_live_plays_by_their_ids_and_keeps_them_in_the_cl
     tokio::task::LocalSet::new()
         .run_until(async {
             let live = live(true);
-            let (rendering, _, made) = groove(live.clone()).await;
+            let Groove { rendering, made, .. } = groove(live.clone()).await;
             let start =
                 rendering.groove(&request(json!({"clip":"7:clip:0:0","reference":"7:clip:1:0"})), Signal::new()).await.unwrap().unwrap();
             let gap =
@@ -237,7 +254,7 @@ async fn groove_moves_the_notes_live_plays_by_their_ids_and_keeps_them_in_the_cl
 async fn without_note_ids_groove_says_why_it_cant_move_them() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let (rendering, _, made) = groove(live(false)).await;
+            let Groove { rendering, made, .. } = groove(live(false)).await;
             rendering.groove(&request(json!({"clip":"7:clip:0:0","reference":"7:clip:1:0"})), Signal::new()).await.unwrap().unwrap();
             let refused = rendering.groove(&request(json!({"apply":true})), Signal::new()).await.unwrap().unwrap_err();
             assert!(refused.contains("without their ids"), "{refused}");
@@ -250,12 +267,50 @@ async fn without_note_ids_groove_says_why_it_cant_move_them() {
 async fn a_short_ref_finds_its_clips_track() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let (_, connection, _) = groove(live(true)).await;
+            let Groove { connection, .. } = groove(live(true)).await;
             // The model has the drum stem's short ref; Live's rows come back with short refs too.
             let short = connection.references.borrow_mut().short_ref("7:arrangement_clip:2:0");
             let (long, track) = clip_and_track(&connection, &short).unwrap();
             assert_eq!((long.as_str(), track.as_str()), ("7:arrangement_clip:2:0", "7:track:2"));
             assert_eq!(track_name(&connection, &track, Signal::new()).await.as_deref(), Some("Drum stem"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_note_isnt_moved_past_where_the_loop_ends() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Laid back like the reference's, the hat played early at the loop's end would land past it, where the
+            // clip's end marker still allows a note but Live doesn't play it.
+            let live = live(true);
+            let Groove { rendering, .. } = groove(live.clone()).await;
+            rendering.groove(&request(json!({"clip":"7:clip:0:1","reference":"7:clip:1:0"})), Signal::new()).await.unwrap().unwrap();
+            rendering.groove(&request(json!({"apply":true})), Signal::new()).await.unwrap().unwrap();
+            let notes = live.notes.borrow();
+            let early = notes["7:clip:0:1"].iter().find(|note| note["id"] == 50).unwrap();
+            assert!(early["start"].as_f64().unwrap() < 4., "{early}");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_round_not_kept_takes_back_only_the_parts_note_edits_and_says_what_stays() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let Groove { rendering, history, .. } = groove(live(true)).await;
+            rendering.groove(&request(json!({"clip":"7:clip:0:0","reference":"7:clip:1:0"})), Signal::new()).await.unwrap().unwrap();
+            // The producer turned a fader meanwhile: not a groove round's to take back.
+            let fader: ChangeRecord =
+                serde_json::from_value(json!({"id":"c900","family":"mixer","title":"Bass volume -2 dB","state":"applied","at":0})).unwrap();
+            history.remember(fader, "t900".into(), None);
+            let change = GrooveRequest { change: Some("nothing yet".into()), ..Default::default() };
+            let round = rendering.groove(&change, Signal::new()).await.unwrap().unwrap();
+            assert_eq!(round.kept, Some(false));
+            let why = round.why.unwrap();
+            assert!(why.contains("no note changes on the part to take back"), "{why}");
+            assert!(why.contains("left as they are (not note changes on the part): Bass volume -2 dB"), "{why}");
+            assert!(round.changes.is_empty(), "{:?}", round.changes);
         })
         .await;
 }

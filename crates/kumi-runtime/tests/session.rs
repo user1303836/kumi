@@ -2015,6 +2015,64 @@ impl KernelTool for Guarded {
         Ok(ToolResult::text("ok"))
     }
 }
+local_test!(a_groove_run_inside_a_loop_is_neither_held_nor_counted, {
+    // A groove run alongside a judge's /loop: its calls go through, before and after the loop is over, and its rounds
+    // (judged on the notes, never listened to) aren't the loop's.
+    let ran = Rc::new(RefCell::new(vec![]));
+    let refused = Rc::new(RefCell::new(vec![]));
+    let held = Rc::new(RefCell::new(None::<(Session, Rc<Record>)>));
+    let (active, said) = (held.clone(), refused.clone());
+    let run: Run = Rc::new(move |input, _, emit| {
+        let (session, record) = active.borrow().clone().unwrap();
+        let said = said.clone();
+        async move {
+            if !input.starts_with("[Kumi loop] master this to -9 LUFS") {
+                emit(KernelEvent::Text { text: "Done.".into() })?;
+                return Ok(complete());
+            }
+            let tools = record.created.borrow().last().unwrap().tools.clone();
+            let call = |name: &str, input: Value| {
+                let tool = tools.iter().find(|tool| tool.name() == name).unwrap().clone();
+                async move { tool.execute(input.as_object().unwrap().clone(), Signal::new()).await.unwrap() }
+            };
+            let refusal = |result: ToolResult| {
+                if result.is_error {
+                    said.borrow_mut().push(result.text);
+                }
+            };
+            let notes = |number: u32, kind: RoundKind| Round { listens: 0, ..round(number, kind, false) };
+            refusal(call("judge", json!({"goal": {"loudness": -9}})).await);
+            session.watch(WatchEvent::Judged(round(0, RoundKind::Start, false)));
+            refusal(call("judge", json!({"change": "Limiter gain +2 dB"})).await);
+            session.watch(WatchEvent::Judged(round(1, RoundKind::Judged, false)));
+            refusal(call("groove", json!({"clip": "clip:1", "reference": "clip:2"})).await);
+            session.watch(WatchEvent::Judged(notes(0, RoundKind::Start)));
+            refusal(call("groove", json!({"apply": true})).await);
+            session.watch(WatchEvent::Judged(notes(1, RoundKind::Judged)));
+            session.watch(WatchEvent::Judged(round(2, RoundKind::Judged, true)));
+            refusal(call("groove", json!({"done": true})).await);
+            refusal(call("judge", json!({"done": true})).await);
+            session.watch(WatchEvent::Judged(round(3, RoundKind::Done, true)));
+            emit(KernelEvent::Text { text: "Judged it.".into() })?;
+            Ok(complete())
+        }
+        .boxed_local()
+    });
+    let h = harness(Some(run), |_| {});
+    h.observation.borrow_mut().tools =
+        vec![Rc::new(Guarded { name: "judge", ran: ran.clone() }), Rc::new(Guarded { name: "groove", ran: ran.clone() })];
+    *held.borrow_mut() = Some((h.session.clone(), h.record.clone()));
+    h.session.start().await.unwrap();
+    h.session.submit("/loop master this to -9 LUFS", None).await.unwrap();
+    assert!(refused.borrow().is_empty(), "{:?}", refused.borrow());
+    assert_eq!(*ran.borrow(), ["judge goal", "judge change", "groove clip,reference", "groove apply", "groove done", "judge done"]);
+    let rounds = h.events.borrow().iter().rev().find_map(|event| match event {
+        SessionEvent::Loop(status) if status.state == LoopState::Done => Some(status.rounds),
+        _ => None,
+    });
+    assert_eq!(rounds, Some(2), "the judge's two rounds, not the groove's");
+    h.session.close().await.unwrap();
+});
 local_test!(a_loops_checklist_and_end_are_kumis_and_once_over_only_the_runs_end_goes_through, {
     let ran = Rc::new(RefCell::new(vec![]));
     let refused = Rc::new(RefCell::new(vec![]));

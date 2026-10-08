@@ -1480,9 +1480,10 @@ impl Session {
         result
     }
     /// Kumi's undo tool, watched for the producer's undos it makes.
-    /// judge and tune, held to the loop: once it's over, only the run's end (judge done) goes through.
+    /// judge and tune, held to the loop: once it's over, only the run's end (judge done) goes through. A groove run
+    /// (judged on the notes, never listened to) isn't the loop's: its calls go through and its rounds aren't counted.
     fn with_loop(&self, tool: Rc<dyn KernelTool>) -> Rc<dyn KernelTool> {
-        if matches!(tool.name(), "judge" | "tune" | "groove") {
+        if matches!(tool.name(), "judge" | "tune") {
             Rc::new(LoopGuard { tool, session: Rc::downgrade(&self.0) })
         } else {
             tool
@@ -1523,12 +1524,8 @@ impl KernelTool for LoopGuard {
     }
     async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
         let name = self.tool.name();
-        let ending = matches!(name, "judge" | "groove") && input.get("done") == Some(&Value::Bool(true));
-        let starting = match name {
-            "judge" => input.contains_key("goal"),
-            "groove" => input.contains_key("reference") || input.contains_key("clip"),
-            _ => false,
-        };
+        let ending = name == "judge" && input.get("done") == Some(&Value::Bool(true));
+        let starting = name == "judge" && input.contains_key("goal");
         // Code decides the loop, not the model: once over, only the run's end; while it goes, its checklist stands
         // and the run ends when Kumi asks.
         let held = self.session.upgrade().and_then(|inner| {
@@ -1912,7 +1909,7 @@ impl SessionController for Session {
                         RoundKind::Done => s.judge_start = None,
                     }
                 }
-                if let Some(run) = &s.looping {
+                if let Some(run) = s.looping.as_ref().filter(|_| round.listens > 0) {
                     run.borrow_mut().judged(round.clone());
                 }
                 s.judged_rounds += 1;
