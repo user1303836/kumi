@@ -420,3 +420,84 @@ async fn native_group_make_changes_records_history_and_moves_track_names_into_th
         })
         .await;
 }
+struct LoadFixture;
+#[async_trait(?Send)]
+impl McpEndpoint for LoadFixture {
+    fn pid(&self) -> Option<u32> {
+        None
+    }
+    fn server_info(&self) -> Option<Implementation> {
+        Some(serde_json::from_value(json!({"name":"fixture","version":"1.0.89"})).unwrap())
+    }
+    async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
+        Ok(serde_json::from_value(json!({"tools":(["live_status","live_browser_load_preview","live_browser_load_apply"].iter().map(|name|json!({"name":name,"inputSchema":{"type":"object"}})).collect::<Vec<_>>())})).unwrap())
+    }
+    async fn call(&self, name: &str, _: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
+        let body = match name {
+            "live_status" => json!({"connected":true,"adapter":"real-live","epoch":7}),
+            "live_browser_load_preview" => {
+                json!({"transactionId":"load1","epoch":7,"confirmation":"apply","undoable":true,"proposed":{"itemId":"audio_effects/Reverb"}})
+            }
+            // The bridge's applied answer names Live's identity for the device it loaded.
+            "live_browser_load_apply" => {
+                json!({"state":"applied","undoable":true,"deviceObjectIdentity":"obj-42","loaded":{"name":"Reverb"}})
+            }
+            _ => panic!("unexpected call: {name}"),
+        };
+        Ok(serde_json::from_value(json!({"content":[{"type":"text","text":body.to_string()}],"structuredContent":body})).unwrap())
+    }
+    fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn stderr_status(&self) -> StderrStatus {
+        StderrStatus { bytes: 0, truncated: false }
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_loads_identity_and_its_tool_reach_history() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
+            options.connect = Some(Rc::new(move |_| {
+                let endpoint: Rc<dyn McpEndpoint> = Rc::new(LoadFixture);
+                async move { Ok(endpoint) }.boxed_local()
+            }));
+            let integration = Ableton::new(options);
+            let connection = integration.connection.clone();
+            connection.start(Signal::new()).await.unwrap();
+            connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
+            connection.available.set(true);
+            connection.epoch.set(Some(7.));
+            connection.references.borrow_mut().refs.insert("7:track:0".into(), "track".into());
+            let result = integration
+                .mutations
+                .make_changes(
+                    json!({"steps":[{"tool":"load_device","input":{"trackRef":"7:track:0","itemId":"audio_effects/Reverb"}}]})
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                    Signal::new(),
+                )
+                .await
+                .unwrap();
+            assert!(!result.is_error, "{}", result.text);
+            let entry = integration.history.entries.borrow().values().next().unwrap().borrow().clone();
+            // What a take-back may remove in its place if Live won't undo it, and a change that can be heard.
+            assert_eq!(entry.created.as_deref(), Some("obj-42"));
+            assert_eq!(entry.tool.as_deref(), Some("load_device"));
+            assert!(entry.audible());
+            // A rename can't be heard, whatever its family; one read back from disk goes by its family.
+            let mut renamed = entry.clone();
+            renamed.tool = Some("rename".into());
+            assert!(!renamed.audible());
+            renamed.tool = None;
+            assert!(renamed.audible(), "a device change read back from disk counts as heard");
+        })
+        .await;
+}

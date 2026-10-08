@@ -99,6 +99,9 @@ pub struct Decided {
     pub excerpt: Listen,
     pub listens: u32,
     pub stopped: bool,
+    /// Not kept, and something of it stayed in Live (it wouldn't take it back): the run's readings no longer describe
+    /// the Set.
+    pub stayed: bool,
 }
 
 /// A round's decision once its change is heard (`after`, on the excerpt whose "before" read `before`):
@@ -146,7 +149,7 @@ pub async fn decide(
         verdict.kept = false;
         verdict.why = why;
     }
-    let mut decided = Decided { verdict, rebalanced: None, whole: predicted, excerpt: after, listens: 0, stopped: false };
+    let mut decided = Decided { verdict, rebalanced: None, whole: predicted, excerpt: after, listens: 0, stopped: false, stayed: false };
     if let (true, Some(gain)) = (decided.verdict.kept, gain) {
         let settled = rebalance(host, checklist, target, whole, decided.whole, decided.excerpt, gain, decided.verdict).await;
         decided = Decided {
@@ -156,6 +159,7 @@ pub async fn decide(
             excerpt: settled.excerpt,
             listens: settled.listens,
             stopped: settled.stopped,
+            stayed: false,
         };
         if let (true, Some(why)) = (decided.verdict.kept, processing(&decided.verdict, target_id.as_deref(), made)) {
             decided.verdict.kept = false;
@@ -164,8 +168,9 @@ pub async fn decide(
     }
     if !decided.verdict.kept {
         // Kumi's undo takes the round's changes back (a rebalance's too), newest first.
-        let words = take_back(host, checkpoint).await;
-        decided.verdict.why.push_str(&format!("; {words}"));
+        let taken = take_back(host, checkpoint).await;
+        decided.verdict.why.push_str(&format!("; {}", taken.said));
+        decided.stayed = taken.stayed;
     }
     decided
 }
@@ -290,13 +295,24 @@ pub fn processing(verdict: &Verdict, target: Option<&str>, made: usize) -> Optio
     })
 }
 
+/// What a take-back did: its words for the round's why, and whether any of it stayed in Live.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TakenBack {
+    pub said: String,
+    pub stayed: bool,
+}
+
 /// Takes a round back: Kumi's changes since `checkpoint` undone, newest first. What Live wouldn't undo is said; a
 /// device such a change made goes instead when it's on the run's chain, known by Live's identity for it (recorded
-/// when it was made), so a device the producer added is never one of them. The words that end the round's why.
-pub async fn take_back(host: &dyn RoundHost, checkpoint: &[String]) -> String {
+/// when it was made), so a device the producer added is never one of them. Anything else Live wouldn't undo stays.
+pub async fn take_back(host: &dyn RoundHost, checkpoint: &[String]) -> TakenBack {
     let all = host.applied_since(checkpoint);
+    let stayed = |said: String| TakenBack { said, stayed: true };
     if all.is_empty() {
-        return "nothing in HISTORY to take back (change it back yourself if you changed it another way)".into();
+        return TakenBack {
+            said: "nothing in HISTORY to take back (change it back yourself if you changed it another way)".into(),
+            stayed: false,
+        };
     }
     let mut stuck = vec![];
     let mut said = vec![];
@@ -307,16 +323,19 @@ pub async fn take_back(host: &dyn RoundHost, checkpoint: &[String]) -> String {
         }
     }
     if stuck.is_empty() {
-        return format!("taken back: {}", all.iter().map(|(_, title)| title.as_str()).collect::<Vec<_>>().join(", "));
+        return TakenBack {
+            said: format!("taken back: {}", all.iter().map(|(_, title)| title.as_str()).collect::<Vec<_>>().join(", ")),
+            stayed: false,
+        };
     }
     let titles = said.join(", ");
     let made = host.made(&stuck);
     if made.is_empty() {
-        return format!("Live wouldn't take back {titles}: undo it yourself");
+        return stayed(format!("Live wouldn't take back {titles}: undo it yourself"));
     }
     let found = match host.chain().await {
         Ok(now) => removable(&now, &made),
-        Err(why) => return format!("Live wouldn't take back {titles} ({why}): undo it yourself"),
+        Err(why) => return stayed(format!("Live wouldn't take back {titles} ({why}): undo it yourself")),
     };
     let mut removed = vec![];
     for device in found.iter().rev() {
@@ -324,10 +343,12 @@ pub async fn take_back(host: &dyn RoundHost, checkpoint: &[String]) -> String {
             removed.push(device.name.clone());
         }
     }
+    // All of it went only when each stuck change made a device and each of those was removed.
+    let left = made.len() < stuck.len() || removed.len() < made.len();
     if removed.is_empty() {
-        format!("Live wouldn't take back {titles}: undo it yourself")
+        stayed(format!("Live wouldn't take back {titles}: undo it yourself"))
     } else {
-        format!("Live wouldn't undo {titles}, so Kumi removed {} instead", removed.join(", "))
+        TakenBack { said: format!("Live wouldn't undo {titles}, so Kumi removed {} instead", removed.join(", ")), stayed: left }
     }
 }
 

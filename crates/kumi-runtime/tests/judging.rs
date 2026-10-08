@@ -284,8 +284,9 @@ async fn a_rebalance_that_clips_takes_the_round_back() {
         settled.verdict
     );
     // Taken back: the change and the rebalance both.
-    let said = take_back(&live, &[]).await;
-    assert!(said.starts_with("taken back: EQ Eight") && said.contains("Utility gain 3 dB"), "{said}");
+    let taken = take_back(&live, &[]).await;
+    let said = taken.said;
+    assert!(said.starts_with("taken back: EQ Eight") && said.contains("Utility gain 3 dB") && !taken.stayed, "{said}");
     assert_eq!(live.gain.get(), 0.);
 }
 
@@ -328,24 +329,25 @@ async fn a_device_live_wont_undo_goes_only_when_its_one_the_round_made() {
         "9",
         vec![device("1", "EQ Eight"), device("7", "Glue Compressor"), device("2", "Limiter"), device("9", "Compressor")],
     );
-    let said = take_back(&live, &[]).await;
-    assert!(said.contains("so Kumi removed Compressor instead"), "{said}");
+    let taken = take_back(&live, &[]).await;
+    assert!(taken.said.contains("so Kumi removed Compressor instead") && !taken.stayed, "{taken:?}");
     assert_eq!(*live.deleted.borrow(), ["device:9"]);
     // A mix run: the stuck EQ was loaded on Bass, and Main's new device is the producer's Glue. Nothing on Main goes.
     let live = stuck("Loaded EQ Eight on Bass", "5", vec![device("1", "EQ Eight"), device("2", "Limiter"), device("8", "Glue Compressor")]);
-    let said = take_back(&live, &[]).await;
-    assert!(said.ends_with("undo it yourself") && live.deleted.borrow().is_empty(), "{said}");
+    let taken = take_back(&live, &[]).await;
+    assert!(taken.said.ends_with("undo it yourself") && taken.stayed && live.deleted.borrow().is_empty(), "{taken:?}");
     // A bridge that doesn't say identities: nothing is removed.
     let live = Pretend::new(|_| vec![]);
     live.made_one("Loaded Compressor on Main", false, None);
     *live.chain.borrow_mut() = vec![device("9", "Compressor")];
-    let said = take_back(&live, &[]).await;
-    assert!(said.ends_with("undo it yourself") && live.deleted.borrow().is_empty(), "{said}");
+    let taken = take_back(&live, &[]).await;
+    assert!(taken.said.ends_with("undo it yourself") && taken.stayed && live.deleted.borrow().is_empty(), "{taken:?}");
     // A device Live doesn't say the identity of is never one.
     assert!(removable(&[device("", "Compressor")], &["".to_string()]).is_empty());
     // Nothing applied: nothing to take back.
     let live = Pretend::new(|_| vec![]);
-    assert!(take_back(&live, &[]).await.starts_with("nothing in HISTORY"));
+    let taken = take_back(&live, &[]).await;
+    assert!(taken.said.starts_with("nothing in HISTORY") && !taken.stayed);
 }
 
 #[tokio::test]

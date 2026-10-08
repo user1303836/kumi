@@ -287,7 +287,7 @@ impl Rendering {
             })
             .collect();
         // Said once a run: whether a listening model will hear the changes beside the meters.
-        let alone = self.listener(signal.clone()).await.is_none().then(|| NO_LISTENER.to_string());
+        let alone = self.listener(signal.clone()).await.0.is_none().then(|| NO_LISTENER.to_string());
         let round = Round {
             round: 0,
             kind: RoundKind::Start,
@@ -331,7 +331,7 @@ impl Rendering {
             (run.track.clone(), run.focus.clone(), run.window, run.target, run.state, run.checkpoint.clone())
         };
         if self.judge.borrow().as_ref().unwrap().stale {
-            return self.rebaseline(signal).await;
+            return Ok(self.rebaseline(signal).await?.map(|(round, _)| round));
         }
         let before = {
             let run = self.judge.borrow();
@@ -373,8 +373,12 @@ impl Rendering {
                 _ => false,
             }
         });
-        let heard_by = self.listen_to_change(&before, &heard, &aim, width_or_air, signal.clone()).await;
-        let listener = heard_by.as_ref().map(|(name, opinion)| opinion.line(name));
+        // Silence is taken back anyway: no one is asked about it.
+        let heard_by = match heard.silent {
+            Some(_) => None,
+            None => self.listen_to_change(&before, &heard, &aim, width_or_air, signal.clone()).await,
+        };
+        let listener = heard_by.as_ref().map(|(line, _)| line.clone());
         let excerpt = Listen { values: after, loudness: heard.main.measures.integrated, file: heard.file.clone(), start: heard.start };
         let host = InLive { rendering: self, track: track.clone(), focus: focus.clone(), window, signal: signal.clone() };
         let (checklist, whole) = {
@@ -390,13 +394,13 @@ impl Rendering {
             &whole,
             &before.values,
             excerpt,
-            heard_by.as_ref().map(|(_, opinion)| opinion),
+            heard_by.as_ref().and_then(|(_, opinion)| opinion.as_ref()),
             made,
             &checkpoint,
         )
         .await;
         self.judge.borrow_mut().as_mut().unwrap().listens += decided.listens;
-        let judging::Decided { verdict, rebalanced, whole: whole_now, excerpt, stopped, .. } = decided;
+        let judging::Decided { verdict, rebalanced, whole: whole_now, excerpt, stopped, stayed, .. } = decided;
         if verdict.kept {
             let file = self.keep_file(&excerpt.file).await;
             let mut guard = self.judge.borrow_mut();
@@ -412,6 +416,10 @@ impl Rendering {
             let mut guard = self.judge.borrow_mut();
             let run = guard.as_mut().unwrap();
             run.checkpoint = ids;
+            // What Live wouldn't take back is still in the Set: the next judge hears the bars again first.
+            if stayed {
+                run.stale = true;
+            }
             // A target two changes in a row failed on waits while another gap is open.
             if let Some(index) = target {
                 run.misses[index] = if verdict.kept { 0 } else { run.misses[index] + 1 };
@@ -481,13 +489,22 @@ impl Rendering {
     }
 
     /// A new baseline when Live changed under the run (other requests in between): its bars heard as they are now, the
-    /// whole stretch moved by what they moved, and HISTORY's changes so far taken as the run's starting point. Nothing
-    /// is judged (a change already made is in the new baseline); the round says so, and what's next.
-    pub(super) async fn rebaseline(self: &Rc<Self>, signal: Signal) -> Result<Result<Round, String>, RuntimeError> {
-        let (track, focus, window) = {
+    /// whole stretch moved by what they moved, and HISTORY's changes so far taken as the run's starting point. This
+    /// answer's own changes are what it means to judge, so they're taken back first (the bars are heard as Live was
+    /// before them) and asked for again. Nothing is judged; the round says so, and what's next. With it, whether
+    /// anything of this answer's was taken back.
+    pub(super) async fn rebaseline(self: &Rc<Self>, signal: Signal) -> Result<Result<(Round, bool), String>, RuntimeError> {
+        let (track, focus, window, checkpoint) = {
             let run = self.judge.borrow();
             let run = run.as_ref().unwrap();
-            (run.track.clone(), run.focus.clone(), run.window)
+            (run.track.clone(), run.focus.clone(), run.window, run.checkpoint.clone())
+        };
+        let audible = |id: &String| self.history.entries.borrow().get(id).is_some_and(|entry| entry.borrow().audible());
+        let taken = if self.applied_since(&checkpoint).iter().any(|(id, _)| audible(id)) {
+            let host = InLive { rendering: self, track: track.clone(), focus: focus.clone(), window, signal: signal.clone() };
+            Some(judging::take_back(&host, &checkpoint).await)
+        } else {
+            None
         };
         let heard = match self.judge_hear(track.as_deref(), focus.as_deref(), window, signal.clone()).await? {
             Ok(JudgeHeard { silent: Some(why), .. }) | Err(why) => return Ok(Err(why)),
@@ -529,10 +546,14 @@ impl Rendering {
                 changes: vec![],
                 rows: verdict.rows,
                 kept: None,
-                why: Some(
-                    "Live changed since the run's last listen (other requests in between), so Kumi heard its bars again and starts from here: a change already made is in this baseline, not judged"
-                        .into(),
-                ),
+                why: Some(match &taken {
+                    None => "Live changed since the run's last listen (other requests in between), so Kumi heard its bars again and starts from here: a change already made is in this baseline, not judged".into(),
+                    Some(taken) => format!(
+                        "Live changed since the run's last listen (other requests in between), so Kumi heard its bars again and starts from here. This answer's changes went first, to hear the bars without them ({}){}: make them again, then judge them",
+                        taken.said,
+                        if taken.stayed { "; what Live kept is in this baseline" } else { "" }
+                    ),
+                }),
                 rebalanced: None,
                 listener: None,
                 problems: vec![],
@@ -549,7 +570,7 @@ impl Rendering {
         if self.ensure_before(next, signal).await?.is_err() {
             self.judge.borrow_mut().as_mut().unwrap().window = window;
         }
-        Ok(Ok(round))
+        Ok(Ok((round, taken.is_some())))
     }
 
     /// The excerpt `window` as things stand, heard now unless it already has been in this state.
@@ -588,23 +609,30 @@ impl Rendering {
     }
 
     /// The listening model: one found is kept; a definite none (no provider has one) is believed for ten minutes, to
-    /// notice a key added since; a lookup that failed (the network, the service, Esc) isn't kept at all.
-    async fn listener(&self, signal: Signal) -> Option<Rc<dyn Listener>> {
+    /// notice a key added since; a lookup that failed (the network, the service) for a minute, so a round doesn't wait
+    /// on it each time. With why it failed, the first time only (to say it once).
+    async fn listener(&self, signal: Signal) -> (Option<Rc<dyn Listener>>, Option<String>) {
         if let Some((known, at)) = self.listener.borrow().clone() {
-            if known.is_some() || now_ms() - at < 600_000 {
-                return known;
+            match known {
+                Ok(Some(found)) => return (Some(found), None),
+                Ok(None) if now_ms() - at < 600_000 => return (None, None),
+                Err(_) if now_ms() - at < 60_000 => return (None, None),
+                _ => {}
             }
         }
         let found = match &self.listener_source {
-            Some(source) => source(signal).await,
+            Some(source) => source(signal.clone()).await,
             None => Ok(None),
         };
+        // Esc isn't the listener failing: nothing is kept.
+        if signal.aborted() {
+            return (None, None);
+        }
+        let was_failing = self.listener.borrow().as_ref().is_some_and(|(known, _)| known.is_err());
+        *self.listener.borrow_mut() = Some((found.clone(), now_ms()));
         match found {
-            Ok(found) => {
-                *self.listener.borrow_mut() = Some((found.clone(), now_ms()));
-                found
-            }
-            Err(_) => None,
+            Ok(found) => (found, None),
+            Err(why) => (None, (!was_failing).then_some(why)),
         }
     }
 
@@ -616,8 +644,17 @@ impl Rendering {
         aim: &str,
         width_or_air: bool,
         signal: Signal,
-    ) -> Option<(String, Opinion)> {
-        let listener = self.listener(signal.clone()).await.filter(|listener| listener.hears_width() || !width_or_air)?;
+    ) -> Option<(String, Option<Opinion>)> {
+        let listener = match self.listener(signal.clone()).await {
+            (Some(listener), _) => listener,
+            (None, Some(why)) => {
+                return Some((format!("the listening model couldn't be reached ({why}); judging by the meters alone for now"), None))
+            }
+            (None, None) => return None,
+        };
+        if !listener.hears_width() && width_or_air {
+            return None;
+        }
         let tempo = self.observer.tempo.get().unwrap_or(120.);
         let seconds = before.window.beats * 60. / tempo;
         // Ten seconds from the middle of the excerpt.
@@ -628,8 +665,8 @@ impl Rendering {
         let first = Take { file: before.file.clone(), start: before.start + skip, seconds: seconds.min(10.), gain: first_gain };
         let second = Take { file: after.file.clone(), start: after.start + skip, seconds: seconds.min(10.), gain: second_gain };
         match compare(listener.as_ref(), &first, &second, aim, signal).await {
-            Ok(opinion) => Some((listener.name(), opinion)),
-            Err(why) => Some((listener.name(), Opinion { closer: None, new_problems: vec![], said: why })),
+            Ok(opinion) => Some((opinion.line(&listener.name()), Some(opinion))),
+            Err(why) => Some((format!("{} couldn't be asked ({why})", listener.name()), None)),
         }
     }
 

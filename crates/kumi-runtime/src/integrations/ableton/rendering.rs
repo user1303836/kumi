@@ -90,7 +90,8 @@ pub struct Rendering {
     /// Measured references, read by name for the judge.
     references: Option<Rc<crate::references::store::ReferenceStore>>,
     /// The listening model, once looked for (None inside: there's none).
-    listener: RefCell<Option<(Option<Rc<dyn crate::listening::listener::Listener>>, i64)>>,
+    /// The listening model as last looked up (found, a definite none, or why the lookup failed), and when.
+    listener: RefCell<Option<(Result<Option<Rc<dyn crate::listening::listener::Listener>>, String>, i64)>>,
 }
 pub use form::FormRequest;
 pub use groove::GrooveRequest;
@@ -166,16 +167,14 @@ impl Rendering {
             // A judged run's changes are the ones since its last round: what the producer asked for in between isn't
             // a round's to take back. If that changed the sound, the run's numbers are out of date: its next judge hears
             // its bars again first.
+            // An undo in between counts too: a change the run's numbers took in that isn't in the Set any more.
             let ids = self.applied_ids();
             let mut guard = self.judge.borrow_mut();
             if let Some(run) = guard.as_mut() {
-                let between = self.applied_since(&run.checkpoint);
-                let audible = between.iter().any(|(id, _)| {
-                    self.history.entries.borrow().get(id).is_some_and(|entry| {
-                        !matches!(entry.borrow().record.family, ChangeFamily::Rename | ChangeFamily::Color | ChangeFamily::Locators)
-                    })
-                });
-                if audible {
+                let audible = |id: &String| self.history.entries.borrow().get(id).is_some_and(|entry| entry.borrow().audible());
+                let made = self.applied_since(&run.checkpoint).iter().any(|(id, _)| audible(id));
+                let undone = run.checkpoint.iter().any(|id| !ids.contains(id) && audible(id));
+                if made || undone {
                     run.stale = true;
                 }
                 run.checkpoint = ids;

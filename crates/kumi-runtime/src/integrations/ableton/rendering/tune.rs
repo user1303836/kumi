@@ -115,7 +115,12 @@ impl Rendering {
         // Live changed under the run: its bars are heard again before any number is picked against them.
         if self.judge.borrow().as_ref().is_some_and(|run| run.stale) {
             match self.rebaseline(signal.clone()).await {
-                Ok(Ok(round)) => self.tell_judged(&round),
+                // The device to tune may have gone with this answer's changes: the round asks for them again first.
+                Ok(Ok((round, true))) => {
+                    self.tell_judged(&round);
+                    return Ok(Ok(round));
+                }
+                Ok(Ok((round, false))) => self.tell_judged(&round),
                 Ok(Err(why)) => return Ok(Err(why)),
                 Err(error) => {
                     signal.check()?;
