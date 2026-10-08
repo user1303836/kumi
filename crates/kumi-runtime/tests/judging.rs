@@ -632,15 +632,33 @@ async fn a_round_is_decided_whole_kept_and_rebalanced_or_taken_back() {
 
 #[test]
 fn a_run_follows_its_own_tracks_renames_not_a_namesakes() {
-    let renames = |pairs: &[(&str, &str)]| pairs.iter().map(|(at, to)| (at.to_string(), to.to_string())).collect::<Vec<_>>();
+    let renames = |rows: &[(&str, &str, &str)]| {
+        rows.iter().map(|(at, from, to)| (at.to_string(), from.to_string(), to.to_string())).collect::<Vec<_>>()
+    };
     // Two tracks called Vocal; the run's is the second. Kumi renaming the first doesn't move the run onto it.
-    assert_eq!(renamed("Vocal", Some("1:track:5"), &renames(&[("1:track:3", "Vocal 2")])), "Vocal");
+    assert_eq!(renamed("Vocal", Some("1:track:5"), &renames(&[("1:track:3", "Vocal", "Vocal 2")])), "Vocal");
     // Its own, renamed twice: the newest name.
-    let both = renames(&[("1:track:5", "Lead"), ("1:track:3", "Vocal 2"), ("1:track:5", "Lead Vox")]);
+    let both = renames(&[("1:track:5", "Vocal", "Lead"), ("1:track:3", "Vocal", "Vocal 2"), ("1:track:5", "Lead", "Lead Vox")]);
     assert_eq!(renamed("Vocal", Some("1:track:5"), &both), "Lead Vox");
+    // Refs are places: another track that came to the run's place since, renamed, isn't followed.
+    assert_eq!(renamed("Vocal", Some("1:track:5"), &renames(&[("1:track:5", "Keys", "Pad")])), "Vocal");
     // A rename taken back isn't applied, so it isn't listed: the name it had. Without the run's ref, nothing is followed.
     assert_eq!(renamed("Vocal", Some("1:track:5"), &[]), "Vocal");
-    assert_eq!(renamed("Vocal", None, &renames(&[("1:track:5", "Lead")])), "Vocal");
+    assert_eq!(renamed("Vocal", None, &renames(&[("1:track:5", "Vocal", "Lead")])), "Vocal");
+}
+
+#[test]
+fn rebalancing_turns_a_limiters_input_and_a_utilitys_output() {
+    use kumi_runtime::integrations::ableton::rendering::gain_parameter;
+    // A Limiter whose parameters list Output before Input Gain: its Output comes after the ceiling, so it isn't the one.
+    let limiter = ["Device On", "Output", "Ceiling", "Release", "Input Gain", "Maximize On", "Threshold"];
+    assert_eq!(gain_parameter(true, false, &limiter), Some("Input Gain"));
+    assert_eq!(gain_parameter(true, true, &limiter), Some("Threshold"));
+    assert_eq!(gain_parameter(true, false, &["Gain", "Ceiling"]), Some("Gain"));
+    // A Utility's level is its Output (an older Live's Gain).
+    assert_eq!(gain_parameter(false, false, &["Device On", "Mid/Side Balance", "Balance", "Output", "Mute"]), Some("Output"));
+    assert_eq!(gain_parameter(false, false, &["Gain", "Stereo Width"]), Some("Gain"));
+    assert_eq!(gain_parameter(false, false, &["Width"]), None);
 }
 
 #[test]

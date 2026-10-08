@@ -260,6 +260,7 @@ fn masking_is_read_only_while_mains_chain_is_transparent() {
         ("Output", "-inf dB"),
         ("Left Inv", "On"),
         ("Mute", "On"),
+        ("Device On", "Off"),
         ("Width Mode", "Stereo"),
         ("Output", "loud"),
     ] {

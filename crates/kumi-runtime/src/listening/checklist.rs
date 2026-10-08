@@ -1242,9 +1242,9 @@ pub fn utility_gain(device: &MainDevice) -> Option<f64> {
                 gain = Some(number().filter(|_| !shown.starts_with("-inf"))?);
                 true
             }
-            // On (off devices don't count at all); the bass's frequency matters only with Bass Mono on, a DC filter
-            // only below what's heard.
-            "Device On" | "Bass Freq" | "DC Filter" => true,
+            "Device On" => shown == "On",
+            // The bass's frequency matters only with Bass Mono on, a DC filter only below what's heard.
+            "Bass Freq" | "DC Filter" => true,
             "Left Inv" | "Right Inv" | "Mono" | "Bass Mono" | "Mute" => shown == "Off",
             "Channel Mode" => shown == "Stereo",
             "Balance" => shown == "C",

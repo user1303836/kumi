@@ -8,12 +8,12 @@ use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_runtime::{
     audio::tools::ResolveAudio,
     core::{
-        contracts::{ChangeRecord, JsonObject},
+        contracts::{ChangeRecord, ChangeState, JsonObject},
         errors::RuntimeError,
     },
     integrations::ableton::{
         connection::LiveConnection,
-        history::History,
+        history::{History, Restore},
         notes::{clip_and_track, track_name},
         observation::Observer,
         options::{AbletonOptions, EarsSetup},
@@ -400,10 +400,45 @@ async fn a_steered_round_whose_read_fails_still_starts_again_next_time() {
             let again = rendering.groove(&change, Signal::new()).await.unwrap().unwrap();
             assert_eq!(again.kind, RoundKind::Start);
             assert!(!again.why.clone().unwrap().contains("Kick on the and"), "{:?}", again.why);
+            let state = |id: &str| history.entries.borrow().get(id).unwrap().borrow().record.state;
+            assert_eq!(state("c902"), ChangeState::Applied);
             // And the round after takes back nothing of it.
             let next = rendering.groove(&change, Signal::new()).await.unwrap().unwrap();
             assert_eq!((next.kind, next.kept), (RoundKind::Judged, Some(false)));
             assert!(next.why.clone().unwrap().contains("no note changes on the part to take back"), "{:?}", next.why);
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_judged_run_follows_kumis_renames_of_its_own_track_alone() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let Groove { rendering, history, .. } = groove(live(true)).await;
+            // A run on Beat: Live's rows give short refs, kept long as HISTORY keeps them.
+            let named = rendering.named(Some("Beat"), None, Signal::new()).await;
+            assert_eq!(named.track, Some(("Beat".into(), Some("7:track:0".into()))));
+            let rename = |id: &str, at: &str, from: &str, to: &str| {
+                let title = format!("Renamed track \"{from}\" → \"{to}\"");
+                let record: ChangeRecord =
+                    serde_json::from_value(json!({"id":id,"family":"rename","title":title,"state":"applied","at":0,"track":{"name":to}}))
+                        .unwrap();
+                let restore = Restore { reference: at.into(), field: "name".into(), value: Some(from.into()) };
+                history.remember(record, format!("t{id}"), Some(restore));
+            };
+            let now = || rendering.names_now(&named).0;
+            // Another track called Beat, renamed: not the run's.
+            rename("c910", "7:track:1", "Beat", "Beat 2");
+            assert_eq!(now().as_deref(), Some("Beat"));
+            // The run's own, renamed: followed.
+            rename("c911", "7:track:0", "Beat", "Drums");
+            assert_eq!(now().as_deref(), Some("Drums"));
+            // Taken back: the name it had.
+            history.entries.borrow().get("c911").unwrap().borrow_mut().record.state = ChangeState::Undone;
+            assert_eq!(now().as_deref(), Some("Beat"));
+            // A track that came to its place since (one added before it), renamed: not followed either.
+            rename("c912", "7:track:0", "Reference", "Keys");
+            assert_eq!(now().as_deref(), Some("Beat"));
         })
         .await;
 }

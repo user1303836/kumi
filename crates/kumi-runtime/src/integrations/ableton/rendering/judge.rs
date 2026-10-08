@@ -121,12 +121,14 @@ pub struct JudgeRun {
     pub rounds: Vec<Round>,
 }
 
-/// A judged run's track and focus as it started: each one's name and its ref then, and Kumi's changes then. Kumi's
-/// renames since are followed by the ref, so another track of the same name is never taken for one of them.
-pub(super) struct Named {
-    pub(super) track: Option<(String, Option<String>)>,
-    pub(super) focus: Option<(String, Option<String>)>,
-    pub(super) from: Vec<String>,
+/// A judged run's track and focus as it started: each one's name and long ref then (as HISTORY keeps refs), and
+/// Kumi's changes then. A rename since is followed only when it's of that ref and from the name the track had: a
+/// namesake's isn't, and nor is that of a track that came to that place (refs are positions) when tracks moved.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Named {
+    pub track: Option<(String, Option<String>)>,
+    pub focus: Option<(String, Option<String>)>,
+    pub from: Vec<String>,
 }
 
 impl JudgeRun {
@@ -318,21 +320,10 @@ impl Rendering {
             )));
         }
         // Where its track and focus are, so Kumi's renames of them (not of a namesake) are followed.
-        let track_ref = match &track {
-            Some(name) => self.scope_ref(Some(name), signal.clone()).await.ok(),
-            None => None,
-        };
-        let focus_ref = match &goal.focus {
-            Some(name) => self.scope_ref(Some(name), signal.clone()).await.ok(),
-            None => None,
-        };
+        let named = self.named(track.as_deref(), goal.focus.as_deref(), signal.clone()).await;
         let mut run = JudgeRun {
             checklist,
-            named: Named {
-                track: track.clone().map(|name| (name, track_ref)),
-                focus: goal.focus.clone().map(|name| (name, focus_ref)),
-                from: self.applied_ids(),
-            },
+            named,
             track,
             focus: goal.focus.clone(),
             span,
@@ -1322,27 +1313,52 @@ impl Rendering {
     /// The judged run hears its track and focus by name: after Kumi renamed one of them since it started, by its new
     /// name (a rename taken back since drops out, and the name goes back with it).
     pub(super) fn follow_renames(&self) {
-        let mut guard = self.judge.borrow_mut();
-        let Some(run) = guard.as_mut() else { return };
-        // Kumi's track renames since, oldest first: the renamed track's ref, and its new name.
-        let renames: Vec<(String, String)> = self
+        let named = match self.judge.borrow().as_ref() {
+            Some(run) => run.named.clone(),
+            None => return,
+        };
+        let (track, focus) = self.names_now(&named);
+        if let Some(run) = self.judge.borrow_mut().as_mut() {
+            (run.track, run.focus) = (track, focus);
+        }
+    }
+
+    /// A run's track and focus as it starts (see `Named`): their names, and their refs read from Live, made long.
+    pub async fn named(self: &Rc<Self>, track: Option<&str>, focus: Option<&str>, signal: Signal) -> Named {
+        let mut named = Named { from: self.applied_ids(), ..Named::default() };
+        for (name, slot) in [(track, &mut named.track), (focus, &mut named.focus)] {
+            let Some(name) = name else { continue };
+            let short = self.scope_ref(Some(name), signal.clone()).await.ok();
+            let long = short.map(|short| {
+                let long = self.connection().references.borrow().lengthen(&json!({ "ref": short }));
+                long["ref"].as_str().unwrap_or(&short).to_owned()
+            });
+            *slot = Some((name.to_owned(), long));
+        }
+        named
+    }
+
+    /// The names a run's track and focus go by now: Kumi's track renames since it started (applied ones), followed by
+    /// the ref and the name each had.
+    pub fn names_now(&self, named: &Named) -> (Option<String>, Option<String>) {
+        // Oldest first: the renamed track's ref, the name it had, and its new one.
+        let renames: Vec<(String, String, String)> = self
             .history
             .entries
             .borrow()
             .iter()
-            .filter(|(id, _)| !run.named.from.contains(id))
+            .filter(|(id, _)| !named.from.contains(id))
             .filter_map(|(_, entry)| {
                 let entry = entry.borrow();
                 let applied = matches!(entry.record.state, ChangeState::Applied | ChangeState::Kept);
                 let restore = entry.restore.as_ref().filter(|restore| applied && restore.field == "name")?;
-                Some((restore.reference.clone(), entry.record.track.as_ref()?.name.clone()))
+                Some((restore.reference.clone(), restore.value.clone()?, entry.record.track.as_ref()?.name.clone()))
             })
             .collect();
-        let follow = |named: &Option<(String, Option<String>)>| {
-            named.as_ref().map(|(name, reference)| judging::renamed(name, reference.as_deref(), &renames))
+        let follow = |slot: &Option<(String, Option<String>)>| {
+            slot.as_ref().map(|(name, reference)| judging::renamed(name, reference.as_deref(), &renames))
         };
-        run.track = follow(&run.named.track);
-        run.focus = follow(&run.named.focus);
+        (follow(&named.track), follow(&named.focus))
     }
 
     /// Kumi's changes in HISTORY now (applied ones), to tell a round's own from what came before.
@@ -1475,12 +1491,8 @@ impl Rendering {
         let named = |name: &str| parameters.iter().find(|row| row.get("name").and_then(Value::as_str) == Some(name));
         let maximizing =
             limited && named("Maximize On").and_then(|row| row.get("value")).and_then(Value::as_f64).is_some_and(|on| on >= 0.5);
-        let found = match maximizing {
-            true => named("Threshold"),
-            false => {
-                parameters.iter().find(|row| matches!(row.get("name").and_then(Value::as_str), Some("Gain" | "Input Gain" | "Output")))
-            }
-        };
+        let names: Vec<&str> = parameters.iter().filter_map(|row| row.get("name").and_then(Value::as_str)).collect();
+        let found = gain_parameter(limited, maximizing, &names).and_then(named);
         let parameter = found
             .and_then(|row| row.get("ref").and_then(Value::as_str).map(str::to_owned))
             .ok_or_else(|| observation("Kumi couldn't find the gain knob."))?;
@@ -1524,6 +1536,18 @@ fn drop_items(run: &mut JudgeRun, indices: &[usize]) {
         excerpt.values = keep(&excerpt.values);
     }
     run.target = None;
+}
+
+/// The knob rebalancing turns on its device, by name among the device's parameters: a Limiter's Input Gain (an older
+/// Live's Gain), or its Threshold while it's maximizing; a Utility's Output (an older Live's Gain). A Limiter's Output
+/// comes after its ceiling: turning that would let the peaks past it.
+pub fn gain_parameter<'a>(limiter: bool, maximizing: bool, names: &[&'a str]) -> Option<&'a str> {
+    let wanted: &[&str] = match (limiter, maximizing) {
+        (true, true) => &["Threshold"],
+        (true, false) => &["Input Gain", "Gain"],
+        (false, _) => &["Output", "Gain"],
+    };
+    wanted.iter().find_map(|want| names.iter().find(|name| *name == want).copied())
 }
 
 /// The device rebalancing turns, from a chain's rows (with `enabled`): the last Limiter that's on (peaks then stay
