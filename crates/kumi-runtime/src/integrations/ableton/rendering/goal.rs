@@ -139,7 +139,18 @@ impl Rendering {
         let reference = self.heard_reference(named, request, signal.clone()).await?;
         let mut rig = self.open_rig(&request.candidates, request.from_beat, request.beats, signal.clone()).await?;
         rig.hold = Some(Held::default());
-        self.tell("Live stays quiet while the goal searches; it comes back when the goal stops or pauses", None);
+        // The candidates are tried where only Kumi hears them; the producer hears the best so far, in the Set.
+        for source in &mut rig.sources {
+            source.quiet = true;
+        }
+        self.tell(
+            if rig.ears.is_some() {
+                "Kumi tries the goal's candidates where only it hears them, and plays its best so far on “Kumi · Goal best”"
+            } else {
+                "The goal's candidates play as Kumi tries them, and its best so far goes on “Kumi · Goal best”"
+            },
+            None,
+        );
         let sources: Vec<_> = rig.sources.iter().map(|source| (source.name.clone(), source.label.clone())).collect();
         let mut goal = Goal {
             render: self.clone(),
@@ -334,6 +345,7 @@ impl GoalRig for Goal {
                     clip: candidate.clip.clone().filter(|s| !s.is_empty()),
                     scene: None,
                     mix: false,
+                    quiet: true,
                 },
                 signal.clone(),
             )

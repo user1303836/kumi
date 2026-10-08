@@ -1,11 +1,13 @@
 # Scratch copies of a device's track, for a search heard side by side. Actions: "before" (Live's identities for the
 # tracks there now, and the copied track's name), "make" (count), "set" (values) and "drop". A copy is the track a
-# duplicate adds, found by comparing the tracks before and after (never by position). A make stops itself well inside
-# its time limit, and a make that fails takes back everything it added, a copy not yet named among them. A drop
-# removes the tracks that weren't there before ("before") and carry the prefix. A search's own drop ("by_name") also
-# removes one with the copied track's name ("source": a copy the bridge's deadline stopped before its rename), while
-# Live's identities still hold: only within one run of Live, so only when the copied track itself is still found among
-# them. A later sweep goes by the prefix alone and names a same-named newcomer instead: it may be the producer's.
+# duplicate adds, found by comparing the tracks before and after (never by position). Only Kumi hears a copy: its fader
+# and sends go all the way down (Kumi hears it before them), so the producer hears the Set, not every copy on top of
+# it. A make stops itself well inside its time limit, and a make that fails takes back everything it added, a copy not
+# yet named among them. A drop removes the tracks that weren't there before ("before") and carry the prefix. A search's
+# own drop ("by_name") also removes one with the copied track's name ("source": a copy the bridge's deadline stopped
+# before its rename), while Live's identities still hold: only within one run of Live, so only when the copied track
+# itself is still found among them. A later sweep goes by the prefix alone and names a same-named newcomer instead: it
+# may be the producer's.
 args = ARGS
 identity = bridge._capture_object_identity
 tracks = list(song.tracks)
@@ -35,6 +37,10 @@ elif args['action'] == 'make':
                 raise ValueError('a copy of the track came out as %d tracks' % len(added))
             made.append(added[0])
             added[0].name = '%s %d' % (args['prefix'], k + 1)
+            mixer = added[0].mixer_device
+            mixer.volume.value = mixer.volume.min
+            for send in mixer.sends:
+                send.value = send.min
     except Exception:
         now = list(song.tracks)
         for index in reversed(range(len(now))):

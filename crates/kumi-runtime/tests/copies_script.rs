@@ -1,7 +1,7 @@
 //! Kumi's scratch-copies script run as Live's Python runs it, against a fake Live: a search's own drop takes its copies
 //! (one never renamed too) and leaves the copied track; a later sweep goes by the prefix alone and names a same-named
 //! newcomer instead of taking it, in the same run of Live and after a restart (when every identity is new); a make
-//! that fails takes back everything it added.
+//! that fails takes back everything it added; the copies a make adds play to Kumi alone.
 use serde_json::{json, Value};
 use std::{
     io::Write,
@@ -9,7 +9,8 @@ use std::{
 };
 
 /// Runs the script with `args` against tracks named `names` with identities `ids` (each duplicate of the copied
-/// track adds `per_copy` tracks): the names left, its result, and the error it raised.
+/// track adds `per_copy` tracks, at the copied track's levels): the names left, each track's fader and sends, its
+/// result, and the error it raised.
 fn live(names: &[&str], ids: &[&str], per_copy: usize, args: Value) -> Value {
     let fake = format!(
         r#"
@@ -17,12 +18,20 @@ import json
 class Device:
     def __init__(self):
         self.canonical_parent = None
+class Parameter:
+    def __init__(self, value):
+        self.value, self.min = value, 0.0
+class Mixer:
+    def __init__(self):
+        self.volume = Parameter(0.85)
+        self.sends = [Parameter(0.5), Parameter(0.3)]
 class Track:
     count = 0
     def __init__(self, name, ident):
         self.name, self.ident, self.is_foldable = name, ident, False
         self.devices = [Device()]
         self.devices[0].canonical_parent = self
+        self.mixer_device = Mixer()
 class Song:
     def __init__(self, tracks):
         self.tracks = tracks
@@ -42,7 +51,8 @@ try:
     exec({body}, g)
 except Exception as raised:
     error = str(raised)
-print(json.dumps({{'left': [str(t.name) for t in song.tracks], 'result': g.get('result'), 'error': error}}))
+levels = [[t.mixer_device.volume.value, [s.value for s in t.mixer_device.sends]] for t in song.tracks]
+print(json.dumps({{'left': [str(t.name) for t in song.tracks], 'levels': levels, 'result': g.get('result'), 'error': error}}))
 "#,
         per_copy = per_copy,
         names = serde_json::to_string(names).unwrap(),
@@ -83,4 +93,14 @@ fn a_make_that_fails_takes_back_everything_it_added() {
     // A make that works names each copy after the prefix.
     let made = live(&["Drums", "Bass"], &["t1", "t2"], 1, json!({"action":"make","count":2,"prefix":"Kumi · try cd34","budget":12}));
     assert_eq!(made["result"]["names"], json!(["Kumi · try cd34 1", "Kumi · try cd34 2"]));
+}
+
+#[test]
+fn the_copies_a_make_adds_play_to_kumi_alone() {
+    // Each copy's fader and sends go all the way down (Kumi hears it before them); the producer's tracks keep theirs.
+    let made = live(&["Drums", "Bass"], &["t1", "t2"], 1, json!({"action":"make","count":2,"prefix":"Kumi · try ef56","budget":12}));
+    assert_eq!(made["left"], json!(["Drums", "Bass", "Kumi · try ef56 2", "Kumi · try ef56 1"]));
+    let up = json!([0.85, [0.5, 0.3]]);
+    let down = json!([0.0, [0.0, 0.0]]);
+    assert_eq!(made["levels"], json!([up, up, down, down]));
 }

@@ -59,8 +59,6 @@ impl Rendering {
         let ears = rig.ears.as_ref().unwrap();
         let link = ears.link.clone();
         let taps: Vec<_> = ears.taps.iter().map(|(name, tap)| (name.clone(), tap.clone())).collect();
-        let (main_ref, prior) = self.main_prior(rig, signal.clone()).await?;
-        let held = rig.hold.is_some();
         let pieces = pieces(rig.window(), tempo, self.observer.beats_per_bar.get(), taps.len());
         // A listen in parts keeps them in a folder of its own until they're joined, out of the folder's pruning.
         let folder =
@@ -74,16 +72,6 @@ impl Rendering {
             .quietly(None, async {
                 if pieces.len() > 1 {
                     tokio::fs::create_dir_all(&folder).await.map_err(plain)?;
-                }
-                if rig.hold.as_ref().and_then(|hold| hold.main.as_ref()).is_none() {
-                    // Main goes quiet only once its level is noted for after a crash.
-                    if !self.save_main(rig, prior, false) {
-                        return Err(observation(MAIN_UNNOTED));
-                    }
-                    self.step("set_mixer", json!({"trackRef":main_ref,"volume":0}), signal.clone()).await?;
-                    if let Some(hold) = &mut rig.hold {
-                        hold.main = Some((main_ref, prior));
-                    }
                 }
                 for (index, piece) in pieces.iter().enumerate() {
                     let last = index + 1 == pieces.len();
@@ -118,19 +106,11 @@ impl Rendering {
                 Ok(())
             })
             .await;
-        let cleanup = self.cleanup();
         if started {
-            self.history.stop_everything(cleanup.clone()).await;
+            self.history.stop_everything(self.cleanup()).await;
         }
         for (_, tap) in &taps {
             link.stop(tap);
-        }
-        if !held {
-            if self.history.quietly(None, self.put_main_back(prior, cleanup)).await {
-                self.clear_restore();
-            } else {
-                rig.notes.push(format!("Main may still be silent: set it back to {} in Live.", fader_db(prior)));
-            }
         }
         let mut files = IndexMap::new();
         if result.is_ok() {
@@ -197,11 +177,15 @@ impl Rendering {
             }
             let seconds = (span.wait + 4. * meter) * beat_ms / 1000. + 6.;
             *started = true;
-            eager_all(taps.iter().map(|(_, tap)| {
+            // A candidate Kumi compares beside the one playing is held back while it records: the producer hears the
+            // Set as it plays, not every candidate on top of each other.
+            let quiet: Vec<bool> =
+                taps.iter().map(|(name, _)| rig.sources.iter().any(|source| source.quiet && !source.mix && source.name == *name)).collect();
+            eager_all(taps.iter().zip(quiet).map(|((_, tap), quiet)| {
                 let link = link.clone();
                 let signal = signal.clone();
                 async move {
-                    link.arm(tap, seconds, Some(signal)).await.map_err(plain)?;
+                    link.arm(tap, seconds, quiet, Some(signal)).await.map_err(plain)?;
                     Ok::<_, RuntimeError>(())
                 }
             }))

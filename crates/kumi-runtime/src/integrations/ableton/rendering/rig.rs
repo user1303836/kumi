@@ -1,4 +1,4 @@
-use super::super::{audition::MainRestore, references::KeptRefs};
+use super::super::{audition::RenderJournal, references::KeptRefs};
 use super::*;
 use crate::ears::link::Tap;
 
@@ -10,10 +10,12 @@ pub(super) struct Source {
     pub clip: Option<String>,
     pub scene: Option<usize>,
     pub mix: bool,
+    /// A candidate Kumi compares beside the one the producer hears: Kumi Ears holds its sound back while it records.
+    /// Never the mix.
+    pub quiet: bool,
 }
 #[derive(Default)]
 pub(super) struct Held {
-    pub main: Option<(String, f64)>,
     pub primed: Option<String>,
     pub recording: bool,
     pub rearm: Vec<String>,
@@ -64,6 +66,8 @@ pub(super) struct Rig {
     pub before_main: bool,
     /// Why that tap wasn't placed, when Kumi Ears was there but it couldn't be.
     pub before_main_missed: Option<String>,
+    /// Whether the record pass noted its render tracks in the crash journal: closing the rig clears it.
+    pub noted: bool,
 }
 impl Rig {
     pub fn window(&self) -> Window {
@@ -71,6 +75,17 @@ impl Rig {
     }
 }
 impl Rendering {
+    /// The bars `window` covers, as said while Live plays them: "bars 17–24", or "bar 17".
+    pub(super) fn bars_of(&self, window: Window) -> String {
+        let meter = self.observer.beats_per_bar.get().max(1.);
+        let bar = |beat: f64| (beat / meter).floor() as i64 + 1;
+        let (first, last) = (bar(window.from), bar(window.from + window.beats - 1e-6));
+        if first >= last {
+            format!("bar {first}")
+        } else {
+            format!("bars {first}–{last}")
+        }
+    }
     pub(super) async fn transport_now(&self, signal: Signal) -> Transport {
         let rows = self.rows("set", json!({"fields":["position","loop"]}), signal).await.unwrap_or_default();
         let Some(set) = rows.first() else { return Transport::default() };
@@ -112,6 +127,7 @@ impl Rendering {
             recorded: vec![],
             before_main,
             before_main_missed: None,
+            noted: false,
         };
         let link = self.ears_ready(signal.clone()).await?;
         let tracks = self.rows("track", json!({"fields":["name"]}), signal.clone()).await?;
@@ -127,6 +143,7 @@ impl Rendering {
                         mix: true,
                         clip: None,
                         scene: None,
+                        quiet: false,
                     });
                 }
                 continue;
@@ -156,6 +173,7 @@ impl Rendering {
                 clip: candidate.clip.clone().filter(|s| !s.is_empty()),
                 scene: None,
                 mix: false,
+                quiet: false,
             });
         }
         let mut steps = vec![];
@@ -276,37 +294,18 @@ impl Rendering {
         rig.sources.push(source);
         Ok(())
     }
-    pub(super) async fn main_prior(&self, rig: &Rig, signal: Signal) -> Result<(String, f64), RuntimeError> {
-        if let Some(main) = rig.hold.as_ref().and_then(|held| held.main.clone()) {
-            return Ok(main);
-        }
-        let (reference, volume) = self.main_volume(signal).await?;
-        let mut prior = volume.ok_or_else(|| observation("Live didn't say Main's level, so Kumi won't touch it."))?;
-        if prior == 0. {
-            if let Some(pending) = self.restore.as_ref().and_then(RestoreStore::load) {
-                let path = pending.get("path").and_then(Value::as_str).filter(|s| !s.is_empty());
-                let same = if let Some(path) = path {
-                    self.history.remember.current().and_then(|p| p.path.clone()).as_deref() == Some(path)
-                } else {
-                    pending.get("set").and_then(Value::as_str) == self.connection().set.borrow().as_deref()
-                };
-                if same {
-                    prior = pending["volume"].as_f64().unwrap();
-                }
-            }
-        }
-        Ok((reference, prior))
-    }
-    /// Notes Main's level to put back after a crash: whether it's noted (or there's no journal to keep).
-    pub(super) fn save_main(&self, rig: &Rig, volume: f64, scratch: bool) -> bool {
-        let Some(restore) = &self.restore else { return true };
-        restore.save(&MainRestore {
+    /// Notes the record pass's render tracks, so a listen cut off by a crash can say to delete them. A journal that
+    /// can't be written (a full disk) doesn't stop the listen: Live is left as it is, apart from those tracks.
+    pub(super) fn note_render(&self, rig: &mut Rig) {
+        let Some(restore) = &self.restore else { return };
+        rig.noted = true;
+        restore.save(&RenderJournal {
             set: self.connection().set.borrow().clone().unwrap_or_default(),
             path: self.history.remember.current().and_then(|p| p.path.clone()),
-            volume,
+            volume: None,
             at: self.connection().now().timestamp_millis() as f64,
-            scratch: scratch.then(|| rig.sources.iter().map(|s| s.scratch.clone()).collect()),
-        })
+            scratch: Some(rig.sources.iter().map(|s| s.scratch.clone()).collect()),
+        });
     }
     pub(super) fn clear_restore(&self) {
         if let Some(restore) = &self.restore {
@@ -352,13 +351,6 @@ impl Rendering {
                     .is_err()
                 {
                     rig.notes.push("A track Kumi disarmed to render may still be disarmed; arm it again in Live.".into());
-                }
-            }
-            if let Some((_, prior)) = held.main.clone() {
-                if self.history.quietly(None, self.put_main_back(prior, cleanup.clone())).await {
-                    self.clear_restore();
-                } else {
-                    rig.notes.push(format!("Main may still be silent: set it back to {} in Live.", fader_db(prior)));
                 }
             }
         }
@@ -419,6 +411,9 @@ impl Rendering {
                 }
             })
             .await;
+        if std::mem::take(&mut rig.noted) {
+            self.clear_restore();
+        }
         // The record pass's recordings stay in the project after its render tracks go: Kumi read copies, so they go
         // too. A render track Live kept still plays its clips, so then they stay.
         if !scratch_left {

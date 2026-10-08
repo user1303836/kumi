@@ -313,11 +313,14 @@ clashes with the kick?") and Kumi hears it in Live directly, with nothing to set
 up:
 
 - **While Live plays**, it listens to what's playing for a few seconds, and
-  leaves Main and the transport alone. A whole-song listen still goes quietly
-  from the start (Main silenced) and leaves Live stopped.
+  leaves the transport alone. A whole-song listen plays the song from the start
+  and leaves Live stopped.
 - **While Live is stopped**, it plays the loop (or a few bars from the playhead,
-  the part you name, or the whole song to its last clip) with Main silenced, and
-  puts Main back. A listen takes as long as the music it hears.
+  the part you name, or the whole song to its last clip). A listen takes as long
+  as the music it hears.
+- **You hear what Kumi hears.** Kumi never turns Main down or mutes a track it's
+  working on, so you can follow along and steer. Each listen says which bars it
+  plays and why ("after the cut at 300 Hz").
 - **Several tracks at once:** each one's sound, and where two sit in the same
   band at similar levels.
 - **How:** Kumi Ears, a small Max for Live device Kumi brings (`kumi bridge` puts
@@ -325,8 +328,10 @@ up:
   chain when it needs to hear it and takes it away after. Sound passes through
   it untouched, and nothing is recorded into your Set.
 - Auditions and the sound-match search hear their candidates the same way: no
-  scratch tracks, no arming. Without Max for Live, Kumi records to listen
-  instead.
+  scratch tracks, no arming. You hear the first candidate (in the search, its
+  best so far on "Kumi · Goal best"); Kumi Ears holds the others back while Kumi
+  records them. Without Max for Live, Kumi records to listen instead, and the
+  candidates play together.
 
 ## Judging changes and the loop
 
@@ -442,7 +447,7 @@ work: sections without contrast, an energy plateau, odd phrase lengths, a drop
 that arrives unprepared, a loop left unchanged for 32 bars or more. Against a
 reference song, it says how the two forms differ.
 
-**A sound** is measured beside the others in one quiet pass: its attack, its
+**A sound** is measured beside the others in one pass: its attack, its
 decay against the beat, brightness, an 808's or a kick's pitch drop, a wobble's
 rate in beats, warmth (2nd and 3rd harmonics), width, top, noise floor, how long
 its tail hangs on, and crackle. Kumi points out clicks at note edges, DC and
@@ -491,8 +496,9 @@ conversation), and moves with the Set's first save.
 Ask Kumi to make something sound like a reference ("make the bass sound like
 this: ~/refs/bass.wav") and it treats it as a search, not a guess. It listens to
 the reference, builds two to four different takes on their own tracks, and
-renders them together quietly to score each against the reference (0 to 100,
-with the biggest differences). It then refines the best, changes structure when
+renders them together to score each against the reference (0 to 100, with the
+biggest differences); you hear the first take, and Kumi hears the rest on its
+own. It then refines the best, changes structure when
 no knob closes a gap, and stops when it reaches the target, when new ideas stop
 helping, or after 12 rounds or 45 minutes. It ends with the score before and
 after and what still differs.
@@ -929,7 +935,7 @@ Environment variables (paths must be absolute):
 | `KUMI_MEMORY_FILE`, `KUMI_TECHNIQUES_FILE`, `KUMI_PLAYBOOK_FILE` | Notes about you, techniques and lessons |
 | `KUMI_RECIPES_DIR`, `KUMI_PROJECTS_DIR`, `KUMI_GOALS_DIR` | Recipes; each Set's conversations, notes and last state; goals and searches in progress |
 | `KUMI_REFERENCES_DIR` | Measured references |
-| `KUMI_INPUT_HISTORY_FILE`, `KUMI_GAPS_FILE`, `KUMI_RESTORE_FILE` | What you sent (for ↑), the gap log, and Main's level to put back after a crash mid-render |
+| `KUMI_INPUT_HISTORY_FILE`, `KUMI_GAPS_FILE`, `KUMI_RESTORE_FILE` | What you sent (for ↑), the gap log, and the render tracks a listen cut off by a crash leaves behind |
 | `KUMI_VIDEOS_DIR`, `KUMI_TOOLS_DIR` | Watched videos, and the programs Kumi fetches |
 | `KUMI_LIBRARY_DIR` | What Kumi learned of your sounds, presets and Sets |
 | `OLLAMA_HOST`, `LM_API_TOKEN` | Where Ollama listens, as Ollama reads it; LM Studio's API token, when its server wants one |

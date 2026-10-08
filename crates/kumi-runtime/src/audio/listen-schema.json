@@ -41,7 +41,7 @@
     },
     "whole": {
       "type": "boolean",
-      "description": "For the Set: hear the whole song quietly, from the Arrangement's start to its end, in one listen (it takes about the song's length; while Live plays, it stops Live, silences Main for the listen and leaves Live stopped)"
+      "description": "For the Set: hear the whole song, from the Arrangement's start to its end, in one listen (it takes about the song's length; while Live plays, it stops Live, plays the song from its start and leaves Live stopped)"
     },
     "compare_to": {
       "type": "string",

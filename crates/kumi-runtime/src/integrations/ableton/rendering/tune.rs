@@ -569,7 +569,8 @@ impl Rendering {
                 };
                 self.set_knobs(&request.device, &[(knob, scale.raw(scale.from_perceptual(at)))], signal.clone()).await?;
                 current = at;
-                let heard = match self.judge_hear(track.as_deref(), focus.as_deref(), window, signal.clone()).await? {
+                let what = format!("{} at {}", knob.name, scale.text(scale.from_perceptual(at)));
+                let heard = match self.judge_hear(track.as_deref(), focus.as_deref(), window, &what, signal.clone()).await? {
                     Ok(heard) => heard,
                     Err(why) => return Ok(Err(why)),
                 };
@@ -791,14 +792,18 @@ impl Rendering {
         }
     }
 
-    /// Several tracks heard quietly in one pass over `window`, each measured.
+    /// Several tracks heard in one pass over `window`, each measured; `what` says what's heard, as it plays.
     pub(super) async fn hear_tracks(
         self: &Rc<Self>,
         names: &[String],
         window: Window,
+        what: &str,
         signal: Signal,
     ) -> Result<Result<IndexMap<String, crate::listening::measure::Heard>, String>, RuntimeError> {
-        Ok(self.hear_takes(names, window, signal).await?.map(|heard| heard.into_iter().map(|(name, (heard, _))| (name, heard)).collect()))
+        Ok(self
+            .hear_takes(names, window, what, signal)
+            .await?
+            .map(|heard| heard.into_iter().map(|(name, (heard, _))| (name, heard)).collect()))
     }
 
     /// `hear_tracks`, each take with how long it runs before `window.from` (seconds): the record pass keeps a short
@@ -807,12 +812,13 @@ impl Rendering {
         self: &Rc<Self>,
         names: &[String],
         window: Window,
+        what: &str,
         signal: Signal,
     ) -> Result<Result<IndexMap<String, (crate::listening::measure::Heard, f64)>, String>, RuntimeError> {
         let tempo = self.observer.tempo.get().unwrap_or(120.);
         let candidates: Vec<AuditionCandidate> =
             names.iter().map(|name| AuditionCandidate { track: name.clone(), mix: None, label: None, clip: None }).collect();
-        self.tell(format!("Hearing {} takes side by side", names.len()), Some(true));
+        self.tell(format!("Playing {} · {what}", self.bars_of(window)), Some(true));
         let rendering = self.rendering_now();
         let mut rig = None;
         let rendered: Result<IndexMap<String, Render>, RuntimeError> = async {
@@ -961,7 +967,8 @@ impl Rendering {
                 if let Err(why) = self.set_copies(&copies, values, signal.clone()).await? {
                     return Ok(Err(why));
                 }
-                let heard = match self.hear_tracks(&copies.names, window, signal.clone()).await? {
+                let what = format!("Kumi hears {} settings on copies of {scoped} only it hears", copies.names.len());
+                let heard = match self.hear_tracks(&copies.names, window, &what, signal.clone()).await? {
                     Ok(heard) => heard,
                     Err(why) => return Ok(Err(why)),
                 };

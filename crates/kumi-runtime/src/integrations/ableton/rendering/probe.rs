@@ -243,7 +243,8 @@ impl Rendering {
             if let Err(why) = self.set_copies(&copies, values, signal.clone()).await? {
                 return Ok(Err(why));
             }
-            let heard = match self.hear_tracks(&copies.names, window, signal.clone()).await? {
+            let what = format!("Kumi hears {} across its range on copies only it hears", knob.name);
+            let heard = match self.hear_tracks(&copies.names, window, &what, signal.clone()).await? {
                 Ok(heard) => heard,
                 Err(why) => return Ok(Err(why)),
             };

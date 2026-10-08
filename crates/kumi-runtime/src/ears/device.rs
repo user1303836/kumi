@@ -1,11 +1,12 @@
-//! Kumi Ears passes the sound through and records audio with Live's beat phase and position.
+//! Kumi Ears records audio with Live's beat phase and position and passes the sound on, holding it back only for a
+//! candidate Kumi compares on its own.
 
 use crate::devices::amxd::{encode_amxd, DeviceType};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
 
-pub const EARS_VERSION: u32 = 3;
+pub const EARS_VERSION: u32 = 4;
 pub const EARS_NAME: &str = "Kumi Ears";
 /// In a folder named for its kind: Live's Browser item says nothing else, and an item that might be an instrument
 /// doesn't load onto a track that has one (Live would replace it), so on a MIDI track it would never go.
