@@ -4,7 +4,7 @@
 //! itself made, known by Live's identity for it). Rendering does these in Live; a test does them on a pretend Set.
 
 use super::{
-    checklist::{Checklist, Verdict},
+    checklist::{Checklist, Item, Quantity, Verdict},
     listener::{Choice, Opinion},
 };
 use async_trait::async_trait;
@@ -367,7 +367,9 @@ pub fn candidate_cost(
 ) -> f64 {
     let predicted = predict(checklist, whole, before, after);
     let Some(reached) = predicted[target] else { return f64::INFINITY };
-    if predicted.iter().zip(whole).any(|(now, was)| was.is_some() && now.is_none()) {
+    // A reading lost is silence, never on target; the learned models' guards are only unheard (copies aren't embedded).
+    let models = |item: &Item| matches!(item.quantity, Quantity::Vibe { .. } | Quantity::EffectStyle { .. });
+    if predicted.iter().zip(whole).zip(&checklist.items).any(|((now, was), item)| was.is_some() && now.is_none() && !models(item)) {
         return f64::INFINITY;
     }
     let verdict = checklist.verdict(Some(target), whole, &predicted);

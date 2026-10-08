@@ -70,6 +70,12 @@ fn a_searched_candidate_that_goes_silent_or_hurts_something_never_wins() {
     // Peaks fixed by clipping instead: worse than standing still.
     let clipped = candidate_cost(&checklist, 1, &whole, &whole, &[Some(-14.), Some(-1.5), Some(40.)], &[0.6, 0.5], &start);
     assert!(clipped > standing, "{clipped} vs {standing}");
+    // The copies aren't heard by the learned models: a style guard with no reading on one is unheard, not lost.
+    let mut guarded = peaks();
+    guarded.items.push(item("vibe", Quantity::Vibe { to: vec![1., 0.] }, Target::NoHigher, Role::Guard, 0.03));
+    let whole = vec![Some(-14.), Some(0.), Some(0.), Some(0.1)];
+    let copy = candidate_cost(&guarded, 1, &whole, &whole, &[Some(-14.), Some(-1.2), Some(0.), None], &[0.6, 0.5], &start);
+    assert!(copy.is_finite() && copy < standing, "{copy}");
 }
 
 #[test]
@@ -175,10 +181,12 @@ fn a_knob_probed_before_starts_where_its_saved_response_says() {
     let probes = Probes::at(&dir);
     // A reverb's decay knob (in octaves of time) against the decay time it gave, heard across its range.
     let heard = [(-1., 0.4), (0., 0.8), (1., 1.5), (2., 2.9), (3., 5.5)];
-    probes.add("Reverb", "Decay Time", "decay time", &heard, 0.1).unwrap();
-    assert_eq!(probes.load("Reverb", "Size", "decay time"), None);
-    assert_eq!(probes.load("Reverb", "Decay Time", "tail share"), None);
-    let saved = probes.load("Reverb", "Decay Time", "decay time").unwrap();
+    probes.add("Reverb", "Decay Time", "decay time", "Pad", &heard, None).unwrap();
+    assert_eq!(probes.load("Reverb", "Size", "decay time", "Pad"), None);
+    assert_eq!(probes.load("Reverb", "Decay Time", "tail share", "Pad"), None);
+    // Heard on the pad: not what the knob does to the drums.
+    assert_eq!(probes.load("Reverb", "Decay Time", "decay time", "Drums"), None);
+    let saved = probes.load("Reverb", "Decay Time", "decay time", "Pad").unwrap();
     // It reads 0.9 s where it is (0.1 s over the saved curve): 2.0 s is a curve's 1.9 s, two sevenths past its 1.5.
     let guess = saved.predict((0., 0.9), 2.).unwrap();
     assert!((guess - (1. + 0.4 / 1.4)).abs() < 1e-9, "{guess}");
@@ -187,9 +195,18 @@ fn a_knob_probed_before_starts_where_its_saved_response_says() {
     // Beyond what the knob ever reached: the end that came closest.
     assert_eq!(saved.predict((0., 0.8), 9.), Some(3.));
     // Heard again near a setting: the newer reading replaces it.
-    probes.add("Reverb", "Decay Time", "decay time", &[(1.02, 1.6)], 0.1).unwrap();
-    let points = probes.load("Reverb", "Decay Time", "decay time").unwrap().points;
+    probes.add("Reverb", "Decay Time", "decay time", "Pad", &[(1.02, 1.6)], Some(0.1)).unwrap();
+    let points = probes.load("Reverb", "Decay Time", "decay time", "Pad").unwrap().points;
     assert_eq!(points.len(), 5);
     assert!(points.contains(&(1.02, 1.6)) && !points.contains(&(1., 1.5)));
+    // Probed again across its range: what was heard is the response now.
+    probes.add("Reverb", "Decay Time", "decay time", "Pad", &[(0., 1.), (2., 3.)], None).unwrap();
+    assert_eq!(probes.load("Reverb", "Decay Time", "decay time", "Pad").unwrap().points, vec![(0., 1.), (2., 3.)]);
+    // A response unheard for over a month isn't used.
+    let file = dir.join("reverb.json");
+    let aged = std::fs::read_to_string(&file).unwrap();
+    let at = aged.split("\"at\": ").nth(1).unwrap().split(',').next().unwrap().trim().to_string();
+    std::fs::write(&file, aged.replace(&format!("\"at\": {at}"), "\"at\": 1000")).unwrap();
+    assert_eq!(probes.load("Reverb", "Decay Time", "decay time", "Pad"), None);
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -141,7 +141,11 @@ impl Rendering {
         let done = super::super::context::payload(&read).ok()?;
         let pair = done.get("result")?.as_array()?;
         let (class, name) = (pair.first()?.as_str()?, pair.get(1)?.as_str()?);
-        // A plug-in (VST "PluginDevice", AU "AuPluginDevice") or a Max device goes by its name; Live's own by class.
+        // A plug-in (VST "PluginDevice", AU "AuPluginDevice") or a Max device goes by its name; Live's own by class. A
+        // rack isn't saved: its macros are each rack's own.
+        if class.ends_with("GroupDevice") {
+            return None;
+        }
         let own = !class.is_empty() && !class.contains("PluginDevice") && !class.starts_with("Mx");
         Some(if own { class.to_owned() } else { name.to_owned() }).filter(|kind| !kind.is_empty())
     }
@@ -261,9 +265,13 @@ impl Rendering {
         if let Some(kind) = &kind {
             let probes = Probes::home();
             for (measure, item) in checklist.items.iter().enumerate() {
+                // Masking is read as it was before on every copy (they play without the focus track): not a response.
+                if matches!(item.quantity, Quantity::Problem { problem: ProblemKind::Masking, .. }) {
+                    continue;
+                }
                 let points: Vec<(f64, f64)> = probed.iter().filter_map(|(at, values)| Some((*at, values[measure]?))).collect();
                 if points.len() >= 2 {
-                    let _ = probes.add(kind, &knob.name, &item.id, &points, scale.step());
+                    let _ = probes.add(kind, &knob.name, &item.id, &scoped, &points, None);
                 }
             }
         }
@@ -273,6 +281,7 @@ impl Rendering {
             measure: item.id.clone(),
             points: probed.iter().filter_map(|(at, values)| Some((*at, values[index]?))).collect(),
             at: 0,
+            scope: scoped.clone(),
         };
         if response.points.len() < 2 {
             return Ok(Err(format!(

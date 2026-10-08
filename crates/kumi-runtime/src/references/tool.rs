@@ -86,14 +86,36 @@ impl KernelTool for ReferenceTool {
         let again = input.get("again").and_then(Value::as_bool) == Some(true);
         if !again {
             if let Some(kept) = self.store.load(&what).await {
-                return Ok(ToolResult::text(stringify(&reply(&kept, true, &what))));
+                // Kept before the style model could hear it: measured again once the model can be had, else said.
+                let fetched = std::cell::RefCell::new(vec![]);
+                let style = match kept.profile.vibe.is_none() && embeddings_on() {
+                    true => {
+                        let say = |said: &str| fetched.borrow_mut().push(said.to_string());
+                        embed::style_model(crate::slots::kept().model_file(crate::slots::Job::Embeddings), &say, &signal).await.err()
+                    }
+                    false => None,
+                };
+                if kept.profile.vibe.is_some() || !embeddings_on() || style.is_some() {
+                    signal.check()?;
+                    let mut said = reply(&kept, true, &what);
+                    if let Some(why) = style {
+                        said["style"] = json!(unstyled(&why));
+                    }
+                    if !fetched.borrow().is_empty() {
+                        said["fetched"] = json!(fetched.take());
+                    }
+                    return Ok(ToolResult::text(stringify(&said)));
+                }
             }
         }
         match self.measure(&what, count, signal.clone()).await {
-            Ok(Measured::Kept(kept, missed, fetched)) => {
+            Ok(Measured::Kept(kept, missed, fetched, style)) => {
                 let mut said = reply(&kept, false, &what);
                 if !missed.is_empty() {
                     said["passedOver"] = json!(missed);
+                }
+                if let Some(why) = style.filter(|_| kept.profile.vibe.is_none()) {
+                    said["style"] = json!(unstyled(&why));
                 }
                 if !fetched.is_empty() {
                     said["fetched"] = json!(fetched);
@@ -113,9 +135,20 @@ impl KernelTool for ReferenceTool {
     }
 }
 
+/// Whether the embeddings slot lets the style model hear references.
+fn embeddings_on() -> bool {
+    crate::slots::kept().now(crate::slots::Job::Embeddings) != crate::slots::Choice::Off
+}
+
+/// What a reference the style model couldn't hear says.
+fn unstyled(why: &str) -> String {
+    format!("the style model couldn't hear it ({why}), so a judge run won't guard its style; asked for again, it's heard then")
+}
+
 enum Measured {
-    /// Kept, the tracks passed over (with why), and what Kumi fetched for it (a model, the first time).
-    Kept(Box<KeptReference>, Vec<String>, Vec<String>),
+    /// Kept, the tracks passed over (with why), what Kumi fetched for it (a model, the first time), and why the style
+    /// model couldn't hear a track, when it couldn't.
+    Kept(Box<KeptReference>, Vec<String>, Vec<String>, Option<String>),
     Ask {
         question: String,
         options: Vec<Choice>,
@@ -139,6 +172,7 @@ impl ReferenceTool {
         let mut profiles = vec![];
         let mut used = vec![];
         let mut missed = vec![];
+        let mut unstyled = None;
         let fetched = std::cell::RefCell::new(vec![]);
         let say = |said: &str| fetched.borrow_mut().push(said.to_string());
         for wanted in &tracks {
@@ -147,7 +181,8 @@ impl ReferenceTool {
             }
             signal.check().map_err(|error| error.to_string())?;
             match self.one(wanted, alone, &say, signal.clone()).await {
-                Ok((profile, source)) => {
+                Ok((profile, source, style)) => {
+                    unstyled = unstyled.or(style);
                     profiles.push(profile);
                     used.push(KeptTrack { artist: wanted.artist.clone(), title: wanted.title.clone(), source, mbid: wanted.mbid.clone() });
                 }
@@ -179,12 +214,18 @@ impl ReferenceTool {
             stamp: if kind == Kind::Files { stamp(what) } else { None },
         };
         self.store.save(&kept).await.map_err(|error| format!("Kumi measured it but couldn't keep it: {error}"))?;
-        Ok(Measured::Kept(Box::new(kept), missed, fetched.take()))
+        Ok(Measured::Kept(Box::new(kept), missed, fetched.take(), unstyled))
     }
 
     /// One track's profile and where its audio came from: fetched (or found), checked to be a finished track, measured.
-    /// Audio Kumi fetched goes once it's measured.
-    async fn one(&self, wanted: &Wanted, alone: bool, say: embed::Say<'_>, signal: Signal) -> Result<(Profile, String), String> {
+    /// Audio Kumi fetched goes once it's measured. Beside them, why the style model couldn't hear it, when it couldn't.
+    async fn one(
+        &self,
+        wanted: &Wanted,
+        alone: bool,
+        say: embed::Say<'_>,
+        signal: Signal,
+    ) -> Result<(Profile, String, Option<String>), String> {
         let audio = self.fetcher.audio(wanted, signal.clone()).await?;
         let heard = measure_file(
             &audio.file.to_string_lossy(),
@@ -194,9 +235,10 @@ impl ReferenceTool {
         .map_err(|error| head(&error.to_string(), 200));
         // How it sounds to the style model, while the audio is still here (when the embeddings slot isn't off).
         let vibe = match &heard {
-            Ok(heard) if crate::slots::kept().now(crate::slots::Job::Embeddings) != crate::slots::Choice::Off => {
+            Ok(heard) if embeddings_on() => {
                 let slot = crate::slots::kept().model_file(crate::slots::Job::Embeddings);
-                embed::vibe(&audio.file, 0., heard.measures.seconds.min(MEASURED), slot, say, &signal).await.ok()
+                let seconds = heard.measures.seconds.min(MEASURED);
+                Some(embed::vibe(&audio.file, 0., seconds, heard.measures.integrated, slot, say, &signal).await)
             }
             _ => None,
         };
@@ -214,8 +256,15 @@ impl ReferenceTool {
             return Err(format!("{:.0} s long, a sample or a sketch rather than a track", measures.seconds));
         }
         let mut profile = Profile::of(&label(wanted), &heard);
-        profile.vibe = vibe;
-        Ok((profile, audio.source))
+        let style = match vibe {
+            Some(Ok(vibe)) => {
+                profile.vibe = Some(vibe);
+                None
+            }
+            Some(Err(why)) => Some(why),
+            None => None,
+        };
+        Ok((profile, audio.source, style))
     }
 }
 

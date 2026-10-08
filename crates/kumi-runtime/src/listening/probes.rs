@@ -1,6 +1,7 @@
 //! Devices probed: what a knob does to a measure across its range, heard once and saved, so the next time that knob
 //! is turned toward that measure Kumi starts where the response says the target lies instead of feeling its way.
-//! Saved per device kind (Live's own devices by class, plug-ins by name), knob and measure.
+//! Saved per device kind (Live's own devices by class, plug-ins by name), knob, measure and what was heard (a track,
+//! or the mix): a knob does different things to different sounds. A response unheard for a month isn't used.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -16,6 +17,16 @@ pub struct Response {
     pub points: Vec<(f64, f64)>,
     /// When it was last heard, Unix seconds.
     pub at: u64,
+    /// What it was heard on: a track's name, or "mix".
+    #[serde(default)]
+    pub scope: String,
+}
+
+/// How long a response is used: a month, in seconds.
+const KEPT_FOR: u64 = 30 * 24 * 3600;
+
+fn now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|since| since.as_secs()).unwrap_or(0)
 }
 
 impl Response {
@@ -97,31 +108,54 @@ impl Probes {
         std::fs::read(self.file(device)).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
     }
 
-    /// A knob's saved response for a measure.
-    pub fn load(&self, device: &str, knob: &str, measure: &str) -> Option<Response> {
-        self.all(device).into_iter().find(|response| response.knob.eq_ignore_ascii_case(knob) && response.measure == measure)
+    /// A knob's saved response for a measure, heard on `scope` (a track's name, or "mix") within the month.
+    pub fn load(&self, device: &str, knob: &str, measure: &str, scope: &str) -> Option<Response> {
+        self.all(device).into_iter().find(|response| {
+            response.knob.eq_ignore_ascii_case(knob)
+                && response.measure == measure
+                && response.scope == scope
+                && response.at + KEPT_FOR >= now()
+        })
     }
 
-    /// Adds what was heard (knob, reading) to a knob's response for a measure: a setting heard again (within
-    /// `close`, a just-noticeable step of the knob) takes the newer reading.
-    pub fn add(&self, device: &str, knob: &str, measure: &str, heard: &[(f64, f64)], close: f64) -> std::io::Result<()> {
+    /// Adds what was heard (knob, reading) on `scope` to a knob's response for a measure: a setting heard again (within
+    /// `close`, a just-noticeable step of the knob) takes the newer reading. With `close` None (a probe, the knob
+    /// heard across its range), what was heard replaces the response.
+    pub fn add(
+        &self,
+        device: &str,
+        knob: &str,
+        measure: &str,
+        scope: &str,
+        heard: &[(f64, f64)],
+        close: Option<f64>,
+    ) -> std::io::Result<()> {
         let heard: Vec<(f64, f64)> = heard.iter().copied().filter(|(x, y)| x.is_finite() && y.is_finite()).collect();
         if heard.is_empty() {
             return Ok(());
         }
         let mut all = self.all(device);
-        let index = match all.iter().position(|response| response.knob.eq_ignore_ascii_case(knob) && response.measure == measure) {
+        let index = match all
+            .iter()
+            .position(|response| response.knob.eq_ignore_ascii_case(knob) && response.measure == measure && response.scope == scope)
+        {
             Some(index) => index,
             None => {
-                all.push(Response { knob: knob.into(), measure: measure.into(), points: vec![], at: 0 });
+                all.push(Response { knob: knob.into(), measure: measure.into(), points: vec![], at: 0, scope: scope.into() });
                 all.len() - 1
             }
         };
         let response = &mut all[index];
-        response.points.retain(|(x, _)| heard.iter().all(|(new, _)| (new - x).abs() > close.abs()));
+        // An old response is heard afresh rather than added to.
+        match close {
+            Some(close) if response.at + KEPT_FOR >= now() => {
+                response.points.retain(|(x, _)| heard.iter().all(|(new, _)| (new - x).abs() > close.abs()))
+            }
+            _ => response.points.clear(),
+        }
         response.points.extend(heard);
         response.points.sort_by(|a, b| a.0.total_cmp(&b.0));
-        response.at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|since| since.as_secs()).unwrap_or(0);
+        response.at = now();
         write(&self.file(device), &all)
     }
 }

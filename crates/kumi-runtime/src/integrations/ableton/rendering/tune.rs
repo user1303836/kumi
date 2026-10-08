@@ -475,7 +475,8 @@ impl Rendering {
         // the excerpt's readings, so the aim moves by how far the whole stretch reads from the excerpt.
         let kind = self.device_kind(&request.device, signal.clone()).await;
         let measure = checklist.items[index].id.clone();
-        let saved = kind.as_ref().and_then(|kind| Probes::home().load(kind, &knob.name, &measure));
+        let scope = self.judge.borrow().as_ref().and_then(|run| run.track.clone()).unwrap_or_else(|| "mix".into());
+        let saved = kind.as_ref().and_then(|kind| Probes::home().load(kind, &knob.name, &measure, &scope));
         if let Some(response) = &saved {
             let now = if changed { response.at_knob(x0) } else { Some(before) };
             if let Some(guess) = now.and_then(|now| response.predict((x0, now), aim - (start - before))) {
@@ -535,7 +536,7 @@ impl Rendering {
         // What each probe read on the excerpt, saved for the next time.
         if let Some(kind) = &kind {
             let heard: Vec<(f64, f64)> = heard_at.iter().filter_map(|(at, heard)| Some((*at, heard.read(&checklist)[index]?))).collect();
-            let _ = Probes::home().add(kind, &knob.name, &measure, &heard, resolution);
+            let _ = Probes::home().add(kind, &knob.name, &measure, &scope, &heard, Some(resolution));
         }
         let (best, reached) = homing.best().unwrap_or((x0, start));
         let Some(position) = heard_at.iter().position(|(at, _)| *at == best) else {

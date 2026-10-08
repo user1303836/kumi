@@ -133,6 +133,11 @@ pub async fn fetch(pinned: &Pinned, to: &Path, what: &str, say: Say<'_>, signal:
     if to.exists() {
         return Ok(());
     }
+    // One fetch at a time in this Kumi: two that want the same file wait for the first, then find it there.
+    let _turn = FETCHING.lock().await;
+    if to.exists() {
+        return Ok(());
+    }
     if pinned.sha256.is_empty() {
         return Err(format!("{what} isn't published yet, so Kumi can't fetch it."));
     }
@@ -146,9 +151,11 @@ pub async fn fetch(pinned: &Pinned, to: &Path, what: &str, say: Say<'_>, signal:
             folder.display()
         ));
     }
+    sweep_partials(folder);
     say(&format!("Kumi is fetching {what} (once, about {} MB).", (pinned.size / 1_000_000).max(1)));
-    let partial = to.with_extension(format!("partial-{}", std::process::id()));
-    let fetched = download(pinned.url, &partial, signal).await;
+    let partial = partial_beside(to);
+    // A body longer than the pinned file isn't it: stopped as soon as it's longer.
+    let fetched = download_at_most(pinned.url, &partial, Some(pinned.size), signal).await;
     let digest = match fetched {
         Ok(digest) => digest,
         Err(why) => {
@@ -160,7 +167,48 @@ pub async fn fetch(pinned: &Pinned, to: &Path, what: &str, say: Say<'_>, signal:
         let _ = std::fs::remove_file(&partial);
         return Err(format!("The {what} Kumi downloaded didn't match its checksum, so it wasn't kept."));
     }
-    std::fs::rename(&partial, to).map_err(|error| format!("Kumi couldn't keep {what}: {error}"))
+    keep(&partial, to).map_err(|error| format!("Kumi couldn't keep {what}: {error}"))
+}
+
+/// One fetch at a time in this Kumi.
+static FETCHING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// A temporary name beside `to`, this Kumi's and this fetch's own (`<name>.partial-<process>-<random>`).
+fn partial_beside(to: &Path) -> PathBuf {
+    let tag = uuid::Uuid::new_v4().simple().to_string();
+    to.with_extension(format!("partial-{}-{}", std::process::id(), &tag[..8]))
+}
+
+/// A finished download moved into place; when another Kumi got there first (the move fails, the file is there), the
+/// download goes and theirs stays.
+fn keep(partial: &Path, to: &Path) -> std::io::Result<()> {
+    match std::fs::rename(partial, to) {
+        Ok(()) => Ok(()),
+        Err(_) if to.exists() => {
+            let _ = std::fs::remove_file(partial);
+            Ok(())
+        }
+        Err(error) => {
+            let _ = std::fs::remove_file(partial);
+            Err(error)
+        }
+    }
+}
+
+/// What a Kumi that's gone left behind in `folder`: its half-fetched files and half-unpacked folders.
+fn sweep_partials(folder: &Path) {
+    let Ok(listed) = std::fs::read_dir(folder) else { return };
+    for entry in listed.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else { continue };
+        let Some(rest) = name.split_once(".partial-").or_else(|| name.split_once(".unpacking-")).map(|(_, rest)| rest) else {
+            continue;
+        };
+        let pid: Option<u32> = rest.split('-').next().and_then(|pid| pid.parse().ok());
+        if pid.is_some_and(|pid| pid != std::process::id() && !crate::library::state::alive(pid as f64)) {
+            let _ = if path.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+        }
+    }
 }
 
 /// The largest model Kumi fetches for a slot.
@@ -234,10 +282,13 @@ pub async fn fetch_unpinned(url: &str, to: &Path, signal: &Signal) -> Result<(),
     std::fs::rename(&partial, to).map_err(|error| format!("Kumi couldn't keep {url}: {error}"))
 }
 
-/// A download streamed to `path`: its SHA-256 (hex).
-async fn download(url: &str, path: &Path, signal: &Signal) -> Result<String, String> {
+/// A download streamed to `path`, stopped past `most` bytes: its SHA-256 (hex). A stalled connection gives up rather
+/// than wait for Esc.
+async fn download_at_most(url: &str, path: &Path, most: Option<u64>, signal: &Signal) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .user_agent(format!("kumi/{}", crate::version::KUMI_VERSION))
+        .connect_timeout(std::time::Duration::from_secs(20))
+        .read_timeout(std::time::Duration::from_secs(60))
         .build()
         .map_err(|error| error.to_string())?;
     let mut response = client.get(url).send().await.map_err(|error| error.to_string())?;
@@ -246,6 +297,7 @@ async fn download(url: &str, path: &Path, signal: &Signal) -> Result<String, Str
     }
     let mut file = std::fs::File::create(path).map_err(|error| error.to_string())?;
     let mut hash = Sha256::new();
+    let mut written: u64 = 0;
     loop {
         signal.check().map_err(|_| "stopped".to_string())?;
         let chunk = tokio::select! {
@@ -253,6 +305,10 @@ async fn download(url: &str, path: &Path, signal: &Signal) -> Result<String, Str
             _ = signal.cancelled() => return Err("stopped".into()),
         };
         let Some(chunk) = chunk else { break };
+        written += chunk.len() as u64;
+        if most.is_some_and(|most| written > most) {
+            return Err("it's larger than the file it should be".into());
+        }
         hash.update(&chunk);
         std::io::Write::write_all(&mut file, &chunk).map_err(|error| error.to_string())?;
     }
@@ -272,11 +328,15 @@ pub async fn runtime(say: Say<'_>, signal: &Signal) -> Result<(), String> {
     let folder = dir().join(format!("onnxruntime-{RUNTIME_VERSION}"));
     let path = folder.join(library);
     if !path.exists() {
-        let download = dir().join(archive.name);
-        fetch(&archive, &download, "its model runtime, ONNX Runtime", say, signal).await?;
-        let unpacked = unpack(&download, &folder, library).await;
-        let _ = std::fs::remove_file(&download);
-        unpacked?;
+        // One setup at a time in this Kumi: a second waits, then finds the library there.
+        let _turn = PREPARING.lock().await;
+        if !path.exists() {
+            let download = dir().join(archive.name);
+            fetch(&archive, &download, "its model runtime, ONNX Runtime", say, signal).await?;
+            let unpacked = unpack(&download, &folder, library).await;
+            let _ = std::fs::remove_file(&download);
+            unpacked?;
+        }
     }
     LOADED
         .get_or_init(|| match ort::init_from(&path) {
@@ -289,9 +349,12 @@ pub async fn runtime(say: Say<'_>, signal: &Signal) -> Result<(), String> {
         .clone()
 }
 
+static PREPARING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// The library out of the runtime's archive, into `folder` (tar reads the zips too; Windows has had it since 2018).
 async fn unpack(archive: &Path, folder: &Path, library: &str) -> Result<(), String> {
-    let scratch = folder.with_extension(format!("unpacking-{}", std::process::id()));
+    let tag = uuid::Uuid::new_v4().simple().to_string();
+    let scratch = folder.with_extension(format!("unpacking-{}-{}", std::process::id(), &tag[..8]));
     let _ = std::fs::remove_dir_all(&scratch);
     std::fs::create_dir_all(&scratch).map_err(|error| error.to_string())?;
     let result = async {
@@ -308,7 +371,7 @@ async fn unpack(archive: &Path, folder: &Path, library: &str) -> Result<(), Stri
         }
         let found = find(&scratch, library).ok_or("Kumi's model runtime wasn't where its archive should have it.")?;
         std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
-        std::fs::rename(found, folder.join(library)).map_err(|error| error.to_string())
+        keep(&found, &folder.join(library)).map_err(|error| error.to_string())
     }
     .await;
     let _ = std::fs::remove_dir_all(&scratch);

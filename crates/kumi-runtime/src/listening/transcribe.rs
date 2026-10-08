@@ -60,12 +60,7 @@ fn inferred_onsets(onsets: &[Vec<f32>], frames: &[Vec<f32>]) -> Vec<Vec<f32>> {
             rises[t][key] = one.min(two).max(0.);
         }
     }
-    // The first frames rise from nothing before them: Basic Pitch counts those rises from zero.
-    for t in 0..count.min(2) {
-        for key in 0..KEYS {
-            rises[t][key] = 0.;
-        }
-    }
+    // The first two frames rise from nothing before them: Basic Pitch zeroes those rises, as they are here.
     let strongest_onset = onsets.iter().flatten().copied().fold(0f32, f32::max);
     let strongest_rise = rises.iter().flatten().copied().fold(0f32, f32::max);
     (0..count)
@@ -199,10 +194,11 @@ pub async fn pitched_notes(file: &Path, start: f64, seconds: f64, say: Say<'_>, 
         mono.extend(chunk[0].iter().zip(right).map(|(left, right)| (left + right) / 2.));
     }
     let _ = source.close().await;
-    let audio = resample(&mono, native, RATE);
-    if audio.is_empty() {
+    if mono.iter().all(|sample| sample.abs() < 1e-4) {
         return Err("Nothing was heard to transcribe.".into());
     }
+    // Resampled and, below, decoded off the app's thread.
+    let audio = tokio::task::spawn_blocking(move || resample(&mono, native, RATE)).await.map_err(|error| error.to_string())?;
     // Overlapping windows, the first half an overlap in, as Basic Pitch slices them.
     let overlap = OVERLAP_FRAMES * HOP;
     let step = WINDOW - overlap;
@@ -212,6 +208,9 @@ pub async fn pitched_notes(file: &Path, start: f64, seconds: f64, say: Say<'_>, 
     let keep = OVERLAP_FRAMES / 2;
     let mut at = 0;
     while at < padded.len() {
+        if signal.is_cancelled() {
+            return Err("stopped".into());
+        }
         let mut window: Vec<f32> = padded[at..(at + WINDOW).min(padded.len())].to_vec();
         window.resize(WINDOW, 0.);
         let input = Tensor { shape: vec![1, WINDOW, 1], data: window };
@@ -232,10 +231,14 @@ pub async fn pitched_notes(file: &Path, start: f64, seconds: f64, say: Say<'_>, 
     let count = (audio.len() as f64 * (RATE / HOP as f64).floor() / RATE).floor() as usize;
     frames.truncate(count);
     onsets.truncate(count);
-    let mut heard: Vec<Heard> = notes_from(&frames, &onsets)
-        .into_iter()
-        .map(|(first, end, pitch, strength)| Heard { start: frame_time(first), end: frame_time(end), pitch, strength })
-        .collect();
-    heard.sort_by(|a, b| a.start.total_cmp(&b.start).then(a.pitch.cmp(&b.pitch)));
-    Ok(heard)
+    tokio::task::spawn_blocking(move || {
+        let mut heard: Vec<Heard> = notes_from(&frames, &onsets)
+            .into_iter()
+            .map(|(first, end, pitch, strength)| Heard { start: frame_time(first), end: frame_time(end), pitch, strength })
+            .collect();
+        heard.sort_by(|a, b| a.start.total_cmp(&b.start).then(a.pitch.cmp(&b.pitch)));
+        heard
+    })
+    .await
+    .map_err(|error| error.to_string())
 }

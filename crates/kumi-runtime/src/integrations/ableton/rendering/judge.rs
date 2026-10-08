@@ -158,12 +158,12 @@ impl Rendering {
         let tempo = self.observer.tempo.get().unwrap();
         let started = now_ms();
         *self.judge.borrow_mut() = None;
-        let reference = match &goal.reference {
-            Some(named) => match self.reference_profile(named, signal.clone()).await {
-                Ok(profile) => Some(profile),
+        let (reference, unguarded) = match &goal.reference {
+            Some(named) => match self.reference_profile(named, goal.sound, signal.clone()).await {
+                Ok((profile, unguarded)) => (Some(profile), unguarded),
                 Err(why) => return Ok(Err(why)),
             },
-            None => None,
+            None => (None, None),
         };
         // The learned models hear this run's listens when the reference was heard by them: its style always, a sound's
         // effects too.
@@ -312,9 +312,15 @@ impl Rendering {
             changes: vec![],
             rows,
             kept: None,
-            why: (!unreadable.is_empty()).then(|| {
-                format!("Kumi can't read {} in what it heard, so it's left off the checklist", unreadable.join(", ").to_lowercase())
-            }),
+            why: {
+                let unread = (!unreadable.is_empty()).then(|| {
+                    format!("Kumi can't read {} in what it heard, so it's left off the checklist", unreadable.join(", ").to_lowercase())
+                });
+                match (unread, unguarded) {
+                    (Some(unread), Some(unguarded)) => Some(format!("{unread}. {unguarded}")),
+                    (unread, unguarded) => unread.or(unguarded),
+                }
+            },
             rebalanced: None,
             listener: alone,
             problems,
@@ -735,13 +741,20 @@ impl Rendering {
     }
 
     /// A reference's profile: one measured with the reference tool (by what was asked for or its name), else from a
-    /// file or a clip in the Set.
-    async fn reference_profile(&self, named: &str, signal: Signal) -> Result<Profile, String> {
+    /// file or a clip in the Set. Its effects are heard by the effects model only for a sound's goal, the one run that
+    /// guards them. Beside it, what the run won't guard because the models didn't hear the reference, and why.
+    async fn reference_profile(&self, named: &str, sound: bool, signal: Signal) -> Result<(Profile, Option<String>), String> {
         if let Some(kept) = match &self.references {
             Some(store) => store.load(named).await,
             None => None,
         } {
-            return Ok(kept.profile);
+            let unguarded = (models_on() && kept.profile.vibe.is_none()).then(|| {
+                format!(
+                    "{} was kept without how it sounds to the style model, so this run doesn't guard its style; the reference tool adds it when asked for it again",
+                    kept.name
+                )
+            });
+            return Ok((kept.profile, unguarded));
         }
         let file = (self.clip_file)(named.into(), signal.clone()).await.ok().flatten().unwrap_or_else(|| audio::audio_path(named));
         let heard = measure_file(&file, MeasureOptions { signal: Some(signal.clone()), ..Default::default() })
@@ -750,20 +763,32 @@ impl Rendering {
         let name = file.rsplit(['/', '\\']).next().unwrap_or(&file).to_string();
         let mut profile = Profile::of(&name, &heard);
         // How it sounds to the learned models, when they're on: what a run guards against drifting from.
+        let mut unheard = vec![];
         if models_on() {
             let say = |said: &str| self.tell(said.to_string(), None);
             let seconds = heard.measures.seconds;
             let slot = crate::slots::kept().model_file(crate::slots::Job::Embeddings);
-            profile.vibe = embed::vibe(Path::new(&file), 0., seconds, slot, &say, &signal).await.ok();
-            profile.effects = embed::effects(Path::new(&file), 0., seconds, &say, &signal).await.ok();
+            match embed::vibe(Path::new(&file), 0., seconds, heard.measures.integrated, slot, &say, &signal).await {
+                Ok(vibe) => profile.vibe = Some(vibe),
+                Err(why) => unheard.push(format!("its style ({why})")),
+            }
+            if sound {
+                match embed::effects(Path::new(&file), 0., seconds, &say, &signal).await {
+                    Ok(effects) => profile.effects = Some(effects),
+                    Err(why) => unheard.push(format!("its effects ({why})")),
+                }
+            }
         }
-        Ok(profile)
+        signal.check().map_err(|error| error.to_string())?;
+        let unguarded = (!unheard.is_empty())
+            .then(|| format!("The models couldn't hear the reference's {}, so this run doesn't guard them", unheard.join(" or ")));
+        Ok((profile, unguarded))
     }
 
-    /// What the learned models make of a stretch of a capture, when the run guards against drifting from its
-    /// reference's style or effects; nothing when it doesn't. When a model can't be had, that's said once and the run
-    /// goes on by its measures.
-    async fn embedding(&self, file: &Path, start: f64, seconds: f64, signal: &Signal) -> Option<Embedding> {
+    /// What the learned models make of a stretch of a capture (`loudness`, its integrated loudness, LUFS), when the run
+    /// guards against drifting from its reference's style or effects; nothing when it doesn't. When a model can't be
+    /// had, that's said once and the run goes on by its measures; Esc isn't a model failing, and leaves the guards on.
+    async fn embedding(&self, file: &Path, start: f64, seconds: f64, loudness: Option<f64>, signal: &Signal) -> Option<Embedding> {
         let (vibe, effects) = self.embedding_wanted.get();
         if !vibe && !effects {
             return None;
@@ -772,8 +797,9 @@ impl Rendering {
         let mut embedding = Embedding::default();
         if vibe {
             let slot = crate::slots::kept().model_file(crate::slots::Job::Embeddings);
-            match embed::vibe(file, start, seconds, slot, &say, signal).await {
+            match embed::vibe(file, start, seconds, loudness, slot, &say, signal).await {
                 Ok(found) => embedding.vibe = Some(found),
+                Err(_) if signal.is_cancelled() => return None,
                 Err(why) => {
                     self.tell(format!("Kumi can't hear style with its style model now ({why}); the run goes on by its measures."), None);
                     self.embedding_wanted.set((false, self.embedding_wanted.get().1));
@@ -783,6 +809,7 @@ impl Rendering {
         if effects {
             match embed::effects(file, start, seconds, &say, signal).await {
                 Ok(found) => embedding.effects = Some(found),
+                Err(_) if signal.is_cancelled() => return None,
                 Err(why) => {
                     self.tell(
                         format!("Kumi can't hear effects with its effects model now ({why}); the run goes on by its measures."),
@@ -866,7 +893,8 @@ impl Rendering {
             None => (None, None),
         };
         if silent.is_none() {
-            heard_main.embedding = self.embedding(Path::new(&main.file), main.start, seconds, &signal).await;
+            heard_main.embedding =
+                self.embedding(Path::new(&main.file), main.start, seconds, heard_main.measures.integrated, &signal).await;
         }
         let file = self.keep_file(&PathBuf::from(&main.file)).await;
         Ok(Ok(JudgeHeard { main: heard_main, focus: heard_focus, file, start: main.start, focus_file, silent }))
@@ -973,7 +1001,7 @@ impl Rendering {
         };
         let (file, start) = run.span_file.clone();
         let mut heard = cut(file.clone(), start).await?;
-        heard.embedding = self.embedding(&file, start + into, seconds, &signal).await;
+        heard.embedding = self.embedding(&file, start + into, seconds, heard.measures.integrated, &signal).await;
         let focus = match run.span_focus.clone() {
             Some((file, start)) => Some(cut(file, start).await?),
             None => None,

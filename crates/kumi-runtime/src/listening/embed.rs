@@ -24,6 +24,9 @@ pub const AFX_RATE: f64 = 48_000.;
 pub const AFX_SAMPLES: usize = 262_144;
 /// Windows heard at most, spread over what's heard (their embeddings averaged).
 const MOST_WINDOWS: usize = 6;
+/// The loudness (LUFS) a stretch is heard at by the style model when its own is known: CLAP's log-mel moves with gain,
+/// and a change of level alone isn't one of style.
+const STYLE_LOUDNESS: f64 = -14.;
 
 /// A Slaney-style mel filter bank (as librosa and CLAP's feature extractor make it): `mels` triangles evenly spaced in
 /// Slaney mels from `low` to `high` Hz over `bins` FFT bins up to half of `rate`, each scaled to about equal energy.
@@ -85,7 +88,8 @@ pub fn clap_features(window: &[f32]) -> Vec<f32> {
 }
 
 /// Audio from one rate to another: a windowed sinc (Blackman, 32 zero crossings a side), its cutoff under the lower
-/// rate's half.
+/// rate's half. Between whole rates, each output sample's kernel is one of a few made once (polyphase: 44.1 to 48 kHz
+/// is 160 kernels of 69 taps, 44.1 to 22.05 kHz one).
 pub fn resample(input: &[f32], from: f64, to: f64) -> Vec<f32> {
     if (from - to).abs() < 1e-6 || input.is_empty() {
         return input.to_vec();
@@ -95,18 +99,50 @@ pub fn resample(input: &[f32], from: f64, to: f64) -> Vec<f32> {
     let cutoff = 0.5 * ratio.min(1.) * 0.95;
     let width = (32. / (2. * cutoff)).ceil();
     let length = (input.len() as f64 * ratio).round() as usize;
-    (0..length)
+    let weight = |x: f64| {
+        let y = 2. * cutoff * x;
+        let sinc = if y.abs() < 1e-12 { 1. } else { (std::f64::consts::PI * y).sin() / (std::f64::consts::PI * y) };
+        let phase = std::f64::consts::PI * x / width;
+        2. * cutoff * sinc * (0.42 + 0.5 * phase.cos() + 0.08 * (2. * phase).cos())
+    };
+    // An output sample sits `up` phases between input samples, stepping `down` phases a sample.
+    let phases = (from.fract() == 0. && to.fract() == 0. && from >= 1. && to >= 1.)
+        .then(|| {
+            let (from, to) = (from as u64, to as u64);
+            let (mut a, mut b) = (from, to);
+            while b != 0 {
+                (a, b) = (b, a % b);
+            }
+            (to / a, from / a)
+        })
+        .filter(|(up, _)| *up <= 4096);
+    let Some((up, down)) = phases else {
+        return (0..length)
+            .map(|n| {
+                let at = n as f64 / ratio;
+                let (first, last) = ((at - width).ceil().max(0.) as usize, ((at + width).floor() as usize).min(input.len() - 1));
+                (first..=last).map(|k| input[k] as f64 * weight(at - k as f64)).sum::<f64>() as f32
+            })
+            .collect();
+    };
+    // Each phase's kernel: where its taps start against the input sample before it, and their weights.
+    let kernels: Vec<(i64, Vec<f64>)> = (0..up)
+        .map(|phase| {
+            let offset = phase as f64 / up as f64;
+            let (first, last) = ((offset - width).ceil() as i64, (offset + width).floor() as i64);
+            (first, (first..=last).map(|tap| weight(offset - tap as f64)).collect())
+        })
+        .collect();
+    (0..length as u64)
         .map(|n| {
-            let at = n as f64 / ratio;
-            let (first, last) = ((at - width).ceil().max(0.) as usize, ((at + width).floor() as usize).min(input.len() - 1));
+            let before = (n * down / up) as i64;
+            let (first, taps) = &kernels[(n * down % up) as usize];
             let mut sum = 0.;
-            for (k, sample) in input.iter().enumerate().take(last + 1).skip(first) {
-                let x = at - k as f64;
-                let y = 2. * cutoff * x;
-                let sinc = if y.abs() < 1e-12 { 1. } else { (std::f64::consts::PI * y).sin() / (std::f64::consts::PI * y) };
-                let phase = std::f64::consts::PI * x / width;
-                let blackman = 0.42 + 0.5 * phase.cos() + 0.08 * (2. * phase).cos();
-                sum += *sample as f64 * 2. * cutoff * sinc * blackman;
+            for (tap, weight) in taps.iter().enumerate() {
+                let at = before + first + tap as i64;
+                if at >= 0 && (at as usize) < input.len() {
+                    sum += input[at as usize] as f64 * weight;
+                }
             }
             sum as f32
         })
@@ -159,22 +195,48 @@ fn windows(total: usize, length: usize, count: usize) -> Vec<usize> {
     (0..count).map(|k| if count == 1 { room / 2 } else { room * k / (count - 1) }).collect()
 }
 
-/// A stretch of a file as channels at `rate` (stereo when it has two or more).
-async fn read(file: &Path, start: f64, seconds: f64, rate: f64, signal: &Signal) -> Result<Vec<Vec<f32>>, String> {
+/// Up to `count` windows of `length` seconds spread over a stretch of a file, each as channels at `rate` (stereo when
+/// it has two or more). Only the windows are read, and they're resampled off the app's thread. Silence is refused.
+async fn read_windows(
+    file: &Path,
+    (start, seconds): (f64, f64),
+    (length, count): (f64, usize),
+    rate: f64,
+    signal: &Signal,
+) -> Result<Vec<Vec<Vec<f32>>>, String> {
     let mut source = open_audio_to(file, Some(signal.clone()), Some(start + seconds + 1.)).await.map_err(|error| error.to_string())?;
     let native = source.sample_rate;
-    source.seek(start * native);
-    let wanted = (seconds * native).round() as usize;
     let channels = source.channels.clamp(1, 2);
-    let mut audio: Vec<Vec<f32>> = vec![vec![]; channels];
-    while audio[0].len() < wanted {
-        let Some(chunk) = source.read((wanted - audio[0].len()).min(65_536)).await.map_err(|error| error.to_string())? else { break };
-        for (channel, samples) in audio.iter_mut().enumerate() {
-            samples.extend_from_slice(&chunk[channel.min(chunk.len() - 1)]);
+    let total = (seconds * native).round() as usize;
+    let span = (length * native).round() as usize;
+    let mut raw: Vec<Vec<Vec<f32>>> = vec![];
+    for at in windows(total, span, count) {
+        source.seek(start * native + at as f64);
+        let wanted = span.min(total.saturating_sub(at)).max(1);
+        let mut audio: Vec<Vec<f32>> = vec![vec![]; channels];
+        while audio[0].len() < wanted {
+            let Some(chunk) = source.read((wanted - audio[0].len()).min(65_536)).await.map_err(|error| error.to_string())? else { break };
+            for (channel, samples) in audio.iter_mut().enumerate() {
+                samples.extend_from_slice(&chunk[channel.min(chunk.len() - 1)]);
+            }
         }
+        raw.push(audio);
     }
     let _ = source.close().await;
-    Ok(audio.iter().map(|samples| resample(samples, native, rate)).collect())
+    if raw.iter().flatten().flatten().all(|sample| sample.abs() < 1e-4) {
+        return Err("there's only silence there".into());
+    }
+    let signal = signal.clone();
+    tokio::task::spawn_blocking(move || {
+        raw.into_iter()
+            .map(|window| match signal.is_cancelled() {
+                true => Err("stopped".to_string()),
+                false => Ok(window.iter().map(|channel| resample(channel, native, rate)).collect()),
+            })
+            .collect()
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// The style-and-vibe model to run: the embeddings slot's file when it holds one, else Kumi's own, fetched the first
@@ -196,18 +258,47 @@ async fn clap_model(slot: Option<PathBuf>, say: Say<'_>, signal: &Signal) -> Res
     Ok(path)
 }
 
+/// The style model, ready to run: the runtime and the model fetched when they aren't here yet.
+pub async fn style_model(slot: Option<PathBuf>, say: Say<'_>, signal: &Signal) -> Result<(), String> {
+    models::runtime(say, signal).await?;
+    clap_model(slot, say, signal).await.map(|_| ())
+}
+
 /// The slot files said to be gone, each said once.
 static GONE: std::sync::Mutex<std::collections::BTreeSet<PathBuf>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
 
 /// What a stretch of a file sounds like to CLAP, by style and vibe: up to six 10 s windows, averaged, unit length.
-pub async fn vibe(file: &Path, start: f64, seconds: f64, slot: Option<PathBuf>, say: Say<'_>, signal: &Signal) -> Result<Vec<f32>, String> {
+/// `loudness` is the stretch's integrated loudness (LUFS) when it's known, and the stretch is then heard at
+/// `STYLE_LOUDNESS`, so takes and references at different levels compare by their style alone.
+pub async fn vibe(
+    file: &Path,
+    start: f64,
+    seconds: f64,
+    loudness: Option<f64>,
+    slot: Option<PathBuf>,
+    say: Say<'_>,
+    signal: &Signal,
+) -> Result<Vec<f32>, String> {
     models::runtime(say, signal).await?;
     let model = clap_model(slot, say, signal).await?;
-    let audio = read(file, start, seconds, CLAP_RATE, signal).await?;
-    let mono: Vec<f32> = (0..audio[0].len()).map(|n| audio.iter().map(|channel| channel[n]).sum::<f32>() / audio.len() as f32).collect();
+    let heard = read_windows(file, (start, seconds), (CLAP_SAMPLES as f64 / CLAP_RATE, MOST_WINDOWS), CLAP_RATE, signal).await?;
+    let gain = loudness.filter(|loudness| loudness.is_finite()).map_or(1., |loudness| 10f64.powf((STYLE_LOUDNESS - loudness) / 20.)) as f32;
+    // Each window as one channel, its log-mel made off the app's thread.
+    let features: Vec<Vec<f32>> = tokio::task::spawn_blocking(move || {
+        heard
+            .iter()
+            .map(|window| {
+                let mono: Vec<f32> = (0..window[0].len())
+                    .map(|n| gain * window.iter().map(|channel| channel[n]).sum::<f32>() / window.len() as f32)
+                    .collect();
+                clap_features(&mono)
+            })
+            .collect()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
     let mut all = vec![];
-    for at in windows(mono.len(), CLAP_SAMPLES, MOST_WINDOWS) {
-        let features = clap_features(&mono[at..(at + CLAP_SAMPLES).min(mono.len())]);
+    for features in features {
         let input = Tensor { shape: vec![1, 1, CLAP_FRAMES, CLAP_MELS], data: features };
         let out = models::run(&model, vec![("input_features".into(), input)], vec!["audio_embeds".into()]).await?;
         all.push(out.into_iter().next().map(|tensor| tensor.data).unwrap_or_default());
@@ -221,16 +312,16 @@ pub async fn effects(file: &Path, start: f64, seconds: f64, say: Say<'_>, signal
     models::runtime(say, signal).await?;
     let model = models::dir().join(pinned::AFX_REP.name);
     models::fetch(&pinned::AFX_REP, &model, "its effects model, AFx-Rep", say, signal).await?;
-    let audio = read(file, start, seconds, AFX_RATE, signal).await?;
-    let (left, right) = (&audio[0], audio.get(1).unwrap_or(&audio[0]));
+    let heard = read_windows(file, (start, seconds), (AFX_SAMPLES as f64 / AFX_RATE, MOST_WINDOWS), AFX_RATE, signal).await?;
     let (mut mids, mut sides) = (vec![], vec![]);
-    for at in windows(left.len(), AFX_SAMPLES, MOST_WINDOWS) {
-        let end = (at + AFX_SAMPLES).min(left.len());
+    for window in &heard {
+        let (left, right) = (&window[0], window.get(1).unwrap_or(&window[0]));
+        let length = left.len().min(right.len()).min(AFX_SAMPLES);
         // Each window at its own peak, as the model was trained.
-        let peak = left[at..end].iter().chain(&right[at..end]).fold(1e-8f32, |peak, sample| peak.max(sample.abs()));
-        let mut data: Vec<f32> = left[at..end].iter().map(|sample| sample / peak).collect();
-        data.extend(right[at..end].iter().map(|sample| sample / peak));
-        let input = Tensor { shape: vec![1, 2, end - at], data };
+        let peak = left[..length].iter().chain(&right[..length]).fold(1e-8f32, |peak, sample| peak.max(sample.abs()));
+        let mut data: Vec<f32> = left[..length].iter().map(|sample| sample / peak).collect();
+        data.extend(right[..length].iter().map(|sample| sample / peak));
+        let input = Tensor { shape: vec![1, 2, length], data };
         let out = models::run(&model, vec![("audio".into(), input)], vec!["mid".into(), "side".into()]).await?;
         let mut out = out.into_iter();
         mids.push(out.next().map(|tensor| tensor.data).unwrap_or_default());

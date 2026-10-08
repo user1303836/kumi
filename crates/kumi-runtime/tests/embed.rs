@@ -66,9 +66,20 @@ async fn a_known_signal_embeds_as_the_converted_model_did() {
     std::fs::write(&file, wav(&[known_signal()], 48_000)).unwrap();
     std::env::set_var("KUMI_HOME", std::path::Path::new(&folder).parent().unwrap());
     let signal = kumi_common::abort::Signal::new();
-    let got = kumi_runtime::listening::embed::vibe(&file, 0., 3., None, &|said| eprintln!("{said}"), &signal).await.unwrap();
+    let got = kumi_runtime::listening::embed::vibe(&file, 0., 3., None, None, &|said| eprintln!("{said}"), &signal).await.unwrap();
     let apart = distance(&got, &expected).unwrap();
     assert!(apart < 1e-3, "{apart}");
+    // 4 dB louder: heard at a common loudness, it's the same style; heard as it is, it isn't.
+    let louder = dir.path().join("louder.wav");
+    std::fs::write(&louder, wav(&[known_signal().iter().map(|sample| sample * 10f32.powf(0.2)).collect()], 48_000)).unwrap();
+    let vibe = |file: std::path::PathBuf, loudness: Option<f64>| {
+        let signal = signal.clone();
+        async move { kumi_runtime::listening::embed::vibe(&file, 0., 3., loudness, None, &|_| {}, &signal).await.unwrap() }
+    };
+    let matched = distance(&vibe(file.clone(), Some(-20.)).await, &vibe(louder.clone(), Some(-16.)).await).unwrap();
+    let unmatched = distance(&got, &vibe(louder, None).await).unwrap();
+    eprintln!("4 dB louder: {unmatched:.4} apart as heard, {matched:.5} at a common loudness");
+    assert!(matched < 1e-4 && unmatched > 10. * matched, "{matched} {unmatched}");
 }
 
 #[tokio::test(flavor = "current_thread")]
