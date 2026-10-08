@@ -393,11 +393,12 @@ impl Quantity {
     }
 
     /// A sound's own measure or an effect's (a sound goal's): each can go unread on its own while the rest is heard.
+    /// Not the punch at each hit, which reads whenever there's sound (with no hits, off its louder stretches): one
+    /// that's gone is lost, so the guard holds when a change flattens the sound.
     pub fn of_sound(&self) -> bool {
         matches!(
             self,
             Quantity::Attack
-                | Quantity::HitCrest
                 | Quantity::Decay
                 | Quantity::Sustain
                 | Quantity::Centroid

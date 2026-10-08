@@ -341,3 +341,37 @@ fn keys_read_as_said() {
         assert_eq!(key_classes(not_a_key), None, "{not_a_key}");
     }
 }
+
+#[test]
+fn a_saturated_or_held_sound_keeps_its_punch_reading_and_a_slow_swing_reads() {
+    // Plucked 16ths at 120 BPM (a bright tone falling fast): driven 12 dB into saturation, a note's tail stays near
+    // the next note's level, so the hits' 12 dB rises are gone. Its punch still reads, and lower.
+    let pluck = |t: f64| 0.5 * (-t / 0.05).exp() * (1..=8).map(|k| (2. * PI * 330. * k as f64 * t).sin() / k as f64).sum::<f64>();
+    let plucks = notes(4., 0.125, 0.125, pluck);
+    let clean = mono(&plucks).measures.hit_crest.unwrap();
+    let driven: Vec<f64> = plucks.iter().map(|sample| 0.5 * (4. * sample).tanh()).collect();
+    let flattened = mono(&driven).measures.hit_crest.expect("a saturated part's punch still reads");
+    assert!(flattened < clean - 2., "{clean} dB, driven {flattened} dB");
+    // A held pad has no hits: its punch is its louder stretches' crest, and a sound goal guards it.
+    let pad: Vec<f64> = (0..(4. * RATE) as usize)
+        .map(|n| n as f64 / RATE)
+        .map(|t| {
+            0.1 * [220., 277.2, 329.6]
+                .iter()
+                .map(|hz| (1..=10).map(|k| (2. * PI * hz * k as f64 * t).sin() / k as f64).sum::<f64>())
+                .sum::<f64>()
+        })
+        .collect();
+    let held = mono(&pad);
+    assert!(held.measures.hit_crest.is_some(), "{:?}", held.measures.hit_crest);
+    let goal = Goal { reference: Some(Profile::of("pad", &held)), sound: true, ..Default::default() };
+    let checklist = Checklist::new(&goal, &held, &[]);
+    assert!(checklist.items.iter().any(|item| item.id == "hit crest"), "{:?}", checklist.items);
+    // A held tone swinging once every two seconds, over 16 s.
+    let slow: Vec<f64> = (0..(16. * RATE) as usize)
+        .map(|n| n as f64 / RATE)
+        .map(|t| 0.3 * 10f64.powf(3. * (2. * PI * 0.5 * t).sin() / 20.) * (2. * PI * 440. * t).sin())
+        .collect();
+    let rate = mono(&slow).measures.modulation.expect("a 0.5 Hz swing reads");
+    assert!((rate - 0.5).abs() < 0.02, "{rate} Hz");
+}

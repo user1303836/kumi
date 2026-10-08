@@ -165,8 +165,8 @@ fn decay_time_of(db: &[f64], (peak, end): (usize, usize)) -> Option<f64> {
 
 /// How its undisturbed tails fall, dB a second: the sound's own fall (the median), and a slower tail after it (a
 /// reverb's) when most of them show one. A tail's first 25 ms are the hit's own fall, however close under the hit the
-/// tail starts; what follows, a tail when it falls under half as steeply after a drop of 3 dB and more. Otherwise it's
-/// one slope, the sound's own, and nothing is said of a reverb.
+/// tail starts; what follows, a tail when it falls under half as steeply after a drop of 3 dB and more, and evenly.
+/// Otherwise it's one slope, the sound's own, and nothing is said of a reverb.
 pub fn slopes(heard: &Heard) -> Option<(f64, Option<f64>)> {
     let (db, floor, _) = levels(heard)?;
     let (head, least) = ((0.025 / HOP).round() as usize, (0.06 / HOP).round() as usize);
@@ -175,7 +175,14 @@ pub fn slopes(heard: &Heard) -> Option<(f64, Option<f64>)> {
     for (peak, end) in decays(&db, floor) {
         let knee = peak + head;
         let two = end >= knee + least && db[peak] - db[knee] >= 3. && db[knee] - db[end] >= 10.;
-        let (fall, tail) = (slope(&db[peak..=knee.min(end)]), two.then(|| slope(&db[knee..=end])));
+        // A reverb's tail falls evenly, its two halves at about the same rate; a note held at a sustain and then
+        // released doesn't (its first half is flat).
+        let even = |from: usize, to: usize| {
+            let middle = (from + to) / 2;
+            let (first, second) = (slope(&db[from..=middle]), slope(&db[middle..=to]));
+            first < 0. && second < 0. && first.max(second) / first.min(second) >= 0.5
+        };
+        let (fall, tail) = (slope(&db[peak..=knee.min(end)]), (two && even(knee, end)).then(|| slope(&db[knee..=end])));
         match tail.filter(|tail| *tail > fall / 2.) {
             Some(tail) => {
                 own.push(fall);

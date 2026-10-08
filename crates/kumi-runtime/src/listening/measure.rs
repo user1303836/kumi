@@ -1011,12 +1011,17 @@ fn envelope_of(envelope: &[f32]) -> (Option<f64>, Option<f64>, Option<f64>) {
 /// Its hits in the held millisecond envelope (dB): rises of 12 dB or more within 20 ms, within 40 dB of the loudest
 /// and 60 ms apart at least, each where it starts rising.
 fn hits_of(db: &[f64]) -> Vec<usize> {
+    hits_rising(db, 12.)
+}
+
+/// Its hits, rises of `rise` dB or more within 20 ms (otherwise as `hits_of`).
+fn hits_rising(db: &[f64], rise: f64) -> Vec<usize> {
     let loudest = db.iter().copied().fold(f64::MIN, f64::max);
     let mut hits: Vec<usize> = vec![];
     let mut at = 20;
     while at < db.len() {
         let before = db[at - 20..at].iter().copied().fold(f64::MAX, f64::min);
-        if db[at] - before >= 12. && db[at] > loudest - 40. && hits.last().is_none_or(|last| at - last > 60) {
+        if db[at] - before >= rise && db[at] > loudest - 40. && hits.last().is_none_or(|last| at - last > 60) {
             hits.push(at - 20 + db[at - 20..=at].iter().position(|level| *level >= before + 1.).unwrap_or(0));
             at += 60;
         } else {
@@ -1057,7 +1062,9 @@ fn modulation_of(envelope: &[f32]) -> Option<f64> {
             .count();
         hits.len() >= 4 && followed * 2 >= hits.len()
     };
-    let top = 200.min(wave.len() / 3);
+    // Two seconds (0.5 Hz) is the slowest swing it reports; the correlation of one that slow peaks a lag or three
+    // past it, so the search reaches 2.05 s.
+    let top = 205.min(wave.len() / 3);
     let correlation: Vec<f64> = (0..=top + 1).map(|lag| wave.iter().zip(&wave[lag..]).map(|(a, b)| a * b).sum::<f64>() / energy).collect();
     // Clear repeats, each a peak of its own (not the slope down from lag 0).
     let repeats: Vec<usize> = (5..=top)
@@ -1069,22 +1076,41 @@ fn modulation_of(envelope: &[f32]) -> Option<f64> {
 }
 
 /// Each hit's waveform crest, dB: the sample peak over the RMS in the 20 ms around the hit's loudest millisecond, the
-/// median over its hits.
+/// median over its hits. Saturation or a tail that fills the gaps can flatten its hits' 12 dB rises: then rises of
+/// 6 dB count. A sound with no hits at all (a pad) reads the median crest of its louder 20 ms stretches. So the
+/// reading stays while a change flattens the sound, which is what it guards.
 fn hit_crest_of(envelope: &[f32], peaks: &[f32]) -> Option<f64> {
     let raw: Vec<f64> = envelope.iter().map(|value| 20. * (*value as f64 + 1e-9).log10()).collect();
-    let hits = hits_of(&held(&raw));
-    let mut crests: Vec<f64> = hits
-        .iter()
-        .enumerate()
-        .filter_map(|(index, start)| {
-            let end = hits.get(index + 1).copied().unwrap_or(raw.len()).min(start + 300);
-            let at = (*start..end).max_by(|a, b| raw[*a].total_cmp(&raw[*b]))?;
-            let (from, to) = (at.saturating_sub(10), (at + 10).min(raw.len()).min(peaks.len()));
-            let power = envelope[from..to].iter().map(|value| (*value as f64).powi(2)).sum::<f64>() / (to - from).max(1) as f64;
-            let peak = peaks[from..to].iter().copied().fold(0f32, f32::max) as f64;
-            (power > 1e-12 && peak > 0.).then(|| 20. * peak.log10() - 10. * power.log10())
-        })
-        .collect();
+    let db = held(&raw);
+    let length = envelope.len().min(peaks.len());
+    // A stretch's crest: its sample peak over its RMS.
+    let crest = |from: usize, to: usize| {
+        let power = envelope[from..to].iter().map(|value| (*value as f64).powi(2)).sum::<f64>() / (to - from).max(1) as f64;
+        let peak = peaks[from..to].iter().copied().fold(0f32, f32::max) as f64;
+        (power > 1e-12 && peak > 0.).then(|| (power, 20. * peak.log10() - 10. * power.log10()))
+    };
+    let mut hits = hits_rising(&db, 12.);
+    if hits.is_empty() {
+        hits = hits_rising(&db, 6.);
+    }
+    let mut crests: Vec<f64> = if hits.is_empty() {
+        // The louder half of its 20 ms stretches.
+        let stretches: Vec<(f64, f64)> = (0..length / 20).filter_map(|k| crest(k * 20, k * 20 + 20)).collect();
+        let mut powers: Vec<f64> = stretches.iter().map(|(power, _)| *power).collect();
+        powers.sort_by(f64::total_cmp);
+        let middle = if powers.is_empty() { 0. } else { percentile(&powers, 0.5) };
+        stretches.into_iter().filter(|(power, _)| *power >= middle).map(|(_, crest)| crest).collect()
+    } else {
+        hits.iter()
+            .enumerate()
+            .filter_map(|(index, start)| {
+                let end = hits.get(index + 1).copied().unwrap_or(raw.len()).min(start + 300);
+                let at = (*start..end).max_by(|a, b| raw[*a].total_cmp(&raw[*b]))?;
+                crest(at.saturating_sub(10), (at + 10).min(length).max(at.saturating_sub(10)))
+            })
+            .map(|(_, crest)| crest)
+            .collect()
+    };
     crests.sort_by(f64::total_cmp);
     (!crests.is_empty()).then(|| round1(percentile(&crests, 0.5)))
 }

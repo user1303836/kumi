@@ -321,3 +321,33 @@ fn a_reverb_tail_close_under_its_hit_is_still_a_reverb() {
         assert!(effects(&wet, None, None).reverb, "{rt60} s at {level}: {fall} then {tail:?} dB a second");
     }
 }
+
+#[test]
+fn a_note_decaying_to_a_sustain_isnt_a_reverb() {
+    // A synth note every 0.75 s: 30 ms from its peak down to a sustain 10 dB under, released at 430 ms. Its fall then
+    // holds, so the part after its first 25 ms doesn't fall evenly as a reverb's tail does.
+    let note = |hold: f64, every: f64| -> Vec<f64> {
+        (0..(6. * RATE) as usize)
+            .map(|n| n as f64 / RATE)
+            .map(|t| {
+                let into = t % every;
+                if into >= hold + 0.02 {
+                    return 0.;
+                }
+                let level = if into < 0.002 { into / 0.002 } else { (-(into - 0.002) / 0.03).exp().max(10f64.powf(-10. / 20.)) };
+                let release = ((hold + 0.02 - into) / 0.02).min(1.);
+                0.5 * level * release * (2. * PI * 330. * t).sin()
+            })
+            .collect()
+    };
+    let synth = note(0.43, 0.75);
+    let (own, reverb) = effects::slopes(&heard(&synth, &synth)).unwrap();
+    assert_eq!(reverb, None, "its own fall {own} dB a second");
+    // Held for a second, it's mostly past its first 60 ms, as such a note is by itself: no effect buries it.
+    let held = note(1., 1.5);
+    let heard = heard(&held, &held);
+    let found = effects::problems(&heard, &effects(&heard, None, None), None, &|seconds| format!("{seconds} s"));
+    assert!(found.iter().all(|problem| !problem.contains("buries")), "{found:?}");
+    // A reverb's tail after a hit still reads as one.
+    assert!(effects::slopes(&hits(Some(1.2), None)).unwrap().1.is_some());
+}
