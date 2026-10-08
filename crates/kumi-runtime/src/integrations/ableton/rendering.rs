@@ -149,7 +149,7 @@ impl Rendering {
             _ = signal.cancelled() => Err(RuntimeError::Aborted),
             held = self.busy.lock() => Ok(held),
         };
-        self.tell("Live is free again", Some(false));
+        self.tell(if held.is_ok() { "Live is free again" } else { "Stopped waiting for Live" }, Some(false));
         held
     }
     /// Resolves once no Live tool call is running: a stopped answer's has finished putting Live back.

@@ -90,7 +90,7 @@ impl KernelTool for ReferenceTool {
                 // before models were recorded): measured again once the model can be had, else said.
                 let slot = crate::slots::kept().model_file(crate::slots::Job::Embeddings);
                 let styled = match kept.profile.vibe.is_some() && embeddings_on() {
-                    true => kept.profile.vibe_model.as_deref() == Some(embed::style_id(slot.as_deref()).await.as_str()),
+                    true => kept.profile.vibe_model.as_deref() == Some(embed::style_id(slot.as_deref(), &signal).await.as_str()),
                     false => kept.profile.vibe.is_some(),
                 };
                 let fetched = std::cell::RefCell::new(vec![]);

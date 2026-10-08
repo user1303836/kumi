@@ -345,6 +345,11 @@ impl Rendering {
         signal: Signal,
     ) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         let seconds = request.seconds.unwrap_or(8.).clamp(2., PASS_SECONDS);
+        // Each tap's capture lands in Kumi's folder: with too little room for them, it's refused before Live plays.
+        let taps = if request.mix == Some(true) { 1 } else { request.tracks.len() };
+        if let Some(why) = self.no_room(seconds, taps, &std::env::temp_dir()).await {
+            return Ok(Err(why));
+        }
         let mut steps = vec![];
         let mut placed = vec![];
         let result: Result<Vec<HeardTake>, RuntimeError> = async {

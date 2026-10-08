@@ -287,16 +287,43 @@ impl Rendering {
             }
         }
         rig.recorded.extend(recorded);
+        // Its copies are Kumi's takes too: pruned as an Ears pass's are.
+        let this = self.clone();
+        tokio::task::spawn_local(async move {
+            this.prune_ears().await;
+        });
         result?;
         Ok(files)
     }
 
-    /// Why a pass can't go ahead for lack of disk, when it can't: room for each take as it's captured and as it's
-    /// written out, and some to spare.
+    /// Why a pass can't go ahead for lack of disk, when it can't. Kumi's own folder holds every take; a record pass's
+    /// are Live's recordings first, in the project.
     async fn no_room_for(&self, rig: &Rig) -> Option<String> {
         let tempo = self.observer.tempo.get().filter(|tempo| *tempo > 0.)?;
-        let seconds = rig.window().beats * 60. / tempo + 10.;
-        let needed = seconds * TAKE_BYTES_PER_SECOND * 2. * rig.sources.len().max(1) as f64 + 200e6;
-        crate::core::disk::low_disk(&std::env::temp_dir().to_string_lossy(), needed, "for Kumi to hear this").await
+        let seconds = rig.window().beats * 60. / tempo;
+        let takes = rig.sources.len();
+        if let Some(why) = self.no_room(seconds, takes, &std::env::temp_dir()).await {
+            return Some(why);
+        }
+        match rig.ears {
+            Some(_) => None,
+            None => self.no_room(seconds, takes, &self.recordings_folder()).await,
+        }
+    }
+
+    /// Why there's no room on the disk holding `folder` for `takes` takes of `seconds` each, as captured and as written
+    /// out with some to spare, when there isn't.
+    pub(super) async fn no_room(&self, seconds: f64, takes: usize, folder: &std::path::Path) -> Option<String> {
+        let needed = (seconds + 10.) * TAKE_BYTES_PER_SECOND * 2. * takes.max(1) as f64 + 200e6;
+        crate::core::disk::low_disk(&folder.to_string_lossy(), needed, "for Kumi to hear this").await
+    }
+
+    /// Where Live records a record pass's takes: in the Set's project, else (an unsaved Set) in a project of its own
+    /// under the home folder.
+    fn recordings_folder(&self) -> PathBuf {
+        let current = self.history.remember.current.borrow().clone();
+        current
+            .and_then(|set| set.path.as_ref().and_then(|path| std::path::Path::new(path).parent().map(std::path::Path::to_path_buf)))
+            .unwrap_or_else(|| home::home_dir().unwrap_or_else(std::env::temp_dir))
     }
 }

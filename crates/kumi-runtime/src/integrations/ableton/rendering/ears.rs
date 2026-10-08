@@ -132,9 +132,11 @@ impl Rendering {
             .boxed_local()
             .shared();
             *self.ears_setup.borrow_mut() = Some(setup.clone());
+            // Driven on its own, so a caller that stops waiting doesn't pause it for the next.
+            tokio::task::spawn_local(setup.clone());
             setup
         };
-        // Shared with any other caller, the setup goes on without this one: Esc stops only this wait.
+        // The setup goes on without this caller: Esc stops only this wait.
         let link = tokio::select! {
             link = setup => link,
             _ = signal.cancelled() => return Err(RuntimeError::Aborted),

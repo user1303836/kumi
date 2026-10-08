@@ -23,6 +23,13 @@ pub struct FormRequest {
 
 impl Rendering {
     pub async fn form(self: &Rc<Self>, request: &FormRequest, original: Signal) -> Result<Result<Value, String>, RuntimeError> {
+        let formed = self.form_now(request, original).await;
+        // form hears through the judge's listen, which keeps its takes in judge/: they go now, a judged run's own stay.
+        self.prune_kept().await;
+        formed
+    }
+
+    async fn form_now(self: &Rc<Self>, request: &FormRequest, original: Signal) -> Result<Result<Value, String>, RuntimeError> {
         if !self.available() {
             return Ok(Err(NO_CURRENT_LIVE.into()));
         }

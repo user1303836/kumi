@@ -361,6 +361,9 @@ impl Session {
             return Ok(None);
         };
         op.extend(ms + 10 * 60_000);
+        // Stopped, the polish still settles and closes its rig (a settle may take two minutes): the answer waits for
+        // that, as a goal's passes do, so the next one doesn't run beside it.
+        op.linger.set(op.linger.get().max(180_000));
         let start_event = KernelEvent::ToolStart { id: String::new(), name: String::new() };
         let end_event = KernelEvent::ToolEnd { id: String::new(), name: String::new(), is_error: false, elapsed_ms: 0 };
         op.progress(Some(&start_event));

@@ -181,7 +181,7 @@ impl Rendering {
         *self.style_model.borrow_mut() = None;
         if models_on() {
             let slot = crate::slots::kept().model_file(crate::slots::Job::Embeddings);
-            let style = embed::style_id(slot.as_deref()).await;
+            let style = embed::style_id(slot.as_deref(), &signal).await;
             *self.style_model.borrow_mut() = Some((slot, style));
         }
         let (reference, unguarded) = match &goal.reference {
@@ -751,13 +751,18 @@ impl Rendering {
             Ok(heard) => heard,
         };
         let ids = self.applied_ids();
+        // The whole span's readings are worked out off the app's thread.
+        let checklist = self.judge.borrow().as_ref().unwrap().checklist.clone();
+        let (main, focus) = (heard.main, heard.focus);
+        let now = tokio::task::spawn_blocking(move || checklist.read(&main, focus.as_ref()))
+            .await
+            .map_err(|error| RuntimeError::plain(error.to_string()))?;
         let mut guard = self.judge.borrow_mut();
         let run = guard.as_mut().unwrap();
         run.listens += 1;
         // Over: what it kept stays, and nothing after is a round's to take back.
         run.ended = Some("it ended with done".into());
         run.checkpoint = ids;
-        let now = run.checklist.read(&heard.main, heard.focus.as_ref());
         let verdict = run.checklist.verdict(None, &run.first, &now);
         run.whole = now;
         let target = run.checklist.next(&run.whole);

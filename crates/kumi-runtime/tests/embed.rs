@@ -137,15 +137,22 @@ fn wav(channels: &[Vec<f32>], rate: u32) -> Vec<u8> {
 #[tokio::test(flavor = "current_thread")]
 async fn a_style_vector_names_the_model_that_made_it() {
     // No slot file, or one that's gone: Kumi's own, by its pinned SHA-256.
-    assert_eq!(style_id(None).await, own_style_id());
+    let signal = kumi_common::abort::Signal::new();
+    assert_eq!(style_id(None, &signal).await, own_style_id());
     let dir = tempfile::tempdir().unwrap();
-    assert_eq!(style_id(Some(&dir.path().join("gone.onnx"))).await, own_style_id());
+    assert_eq!(style_id(Some(&dir.path().join("gone.onnx")), &signal).await, own_style_id());
     // A slot's file: its own SHA-256, the same each time, and another once the file changes.
     let file = dir.path().join("clap.onnx");
     std::fs::write(&file, b"one model").unwrap();
-    let first = style_id(Some(&file)).await;
+    let first = style_id(Some(&file), &signal).await;
     assert_eq!(first, "sha256:e7940ca0c091e09b23054a7756d26bebdbe8dd70c1250850a35a9561325c83b9");
-    assert_eq!(style_id(Some(&file)).await, first);
+    assert_eq!(style_id(Some(&file), &signal).await, first);
     std::fs::write(&file, b"another model").unwrap();
-    assert_ne!(style_id(Some(&file)).await, first);
+    assert_ne!(style_id(Some(&file), &signal).await, first);
+    // Esc stops the wait for a hash: the file stands for itself.
+    let stopped = kumi_common::abort::Signal::new();
+    stopped.cancel();
+    let big = dir.path().join("big.onnx");
+    std::fs::write(&big, b"a big model").unwrap();
+    assert_eq!(style_id(Some(&big), &stopped).await, format!("file:{}", big.display()));
 }
