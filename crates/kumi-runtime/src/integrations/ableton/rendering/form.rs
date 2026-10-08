@@ -42,17 +42,14 @@ impl Rendering {
             },
         };
         let span = Window { from, beats: (beats / meter).ceil().max(1.) * meter };
-        let heard = match self.judge_hear(None, None, span, signal.clone()).await? {
-            Ok(JudgeHeard { silent: Some(why), .. }) | Err(why) => return Ok(Err(why)),
-            Ok(heard) => heard,
-        };
         let bar = meter * 60. / tempo;
-        let shape = form(&heard.main, bar);
-        let first = (from / meter) as usize;
-        let elements = self.elements(span, meter, signal.clone()).await;
+        // The reference first: one that can't be heard says so before the song is.
         let reference = match &request.reference {
             Some(named) => {
-                let file = (self.clip_file)(named.clone(), signal.clone()).await.ok().flatten().unwrap_or_else(|| audio::audio_path(named));
+                let file = match self.reference_file(named, signal.clone()).await? {
+                    Ok(file) => file,
+                    Err(why) => return Ok(Err(format!("The reference: {why}"))),
+                };
                 match measure_file(&file, MeasureOptions { signal: Some(signal.clone()), ..Default::default() }).await {
                     Ok(heard) => Some(form(&heard, bar)),
                     Err(error) => return Ok(Err(format!("Kumi couldn't hear the reference: {}", head(&error.to_string(), 200)))),
@@ -60,6 +57,13 @@ impl Rendering {
             }
             None => None,
         };
+        let heard = match self.judge_hear(None, None, span, signal.clone()).await? {
+            Ok(JudgeHeard { silent: Some(why), .. }) | Err(why) => return Ok(Err(why)),
+            Ok(heard) => heard,
+        };
+        let shape = form(&heard.main, bar);
+        let first = (from / meter) as usize;
+        let elements = self.elements(span, meter, signal.clone()).await;
         Ok(Ok(reply(&shape, first, &elements, reference.as_ref())))
     }
 

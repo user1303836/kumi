@@ -1,7 +1,7 @@
 //! Sequencing measured on the notes, exactly and cheaply: where in the bar a part plays (how its notes cluster), how
 //! early or late each grid step sits (its timing profile, and the swing in it), how hard (its velocity profile), how
 //! much it plays off the beat (syncopation) and how its phrase ends differ (fills). A part on a Drum Rack splits into
-//! lanes (kick, snare, hats, the rest), named from its pads; any other part is one lane.
+//! lanes (kick, snare, hats, cymbals, perc), named from its pads; any other part is one lane.
 
 use serde::{Deserialize, Serialize};
 use std::f64::consts::TAU;

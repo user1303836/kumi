@@ -756,7 +756,11 @@ impl Rendering {
             });
             return Ok((kept.profile, unguarded));
         }
-        let file = (self.clip_file)(named.into(), signal.clone()).await.ok().flatten().unwrap_or_else(|| audio::audio_path(named));
+        let file = match self.reference_file(named, signal.clone()).await {
+            Ok(Ok(file)) => file,
+            Ok(Err(why)) => return Err(format!("The reference: {why}")),
+            Err(error) => return Err(error.to_string()),
+        };
         let heard = measure_file(&file, MeasureOptions { signal: Some(signal.clone()), ..Default::default() })
             .await
             .map_err(|error| format!("Kumi couldn't hear the reference: {}", head(&error.to_string(), 200)))?;

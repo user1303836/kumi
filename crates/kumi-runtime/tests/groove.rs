@@ -1,10 +1,12 @@
 //! The groove judge against a Live that answers as Kumi's bridge does (each row only the fields asked for, with its ref
 //! and parent): it moves a part's notes by their ids, keeps them inside what the clip plays, leaves alone the notes Live
-//! never plays, takes back only the part's own note edits, and finds a clip's track from the short ref the model has.
+//! never plays, takes back only the part's own note edits, and finds a clip's track from the short ref the model has. A
+//! reference that can't be heard (a file that isn't there, a stale or MIDI clip) says which, before anything is heard.
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_runtime::{
+    audio::tools::ResolveAudio,
     core::{
         contracts::{ChangeRecord, JsonObject},
         errors::RuntimeError,
@@ -16,7 +18,7 @@ use kumi_runtime::{
         observation::Observer,
         options::{AbletonOptions, EarsSetup},
         remember::Remember,
-        rendering::{GrooveRequest, Rendering},
+        rendering::{FormRequest, GrooveRequest, Rendering},
     },
     mcp::{
         client::{McpEndpoint, StderrStatus},
@@ -164,6 +166,11 @@ struct Groove {
 
 /// The groove judge over `live`, and the changes it made (each tool and input), applied to `live`'s notes.
 async fn groove(live: Rc<Live>) -> Groove {
+    groove_with(live, Rc::new(|_, _| async { Ok(None) }.boxed_local())).await
+}
+
+/// The same, finding clips' files with `clip_file`.
+async fn groove_with(live: Rc<Live>, clip_file: ResolveAudio) -> Groove {
     let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
     let endpoint = live.clone();
     options.connect = Some(Rc::new(move |_| {
@@ -207,7 +214,7 @@ async fn groove(live: Rc<Live>) -> Groove {
             changes.borrow_mut().push((tool, input));
             async { Ok(JsonObject::new()) }.boxed_local()
         }),
-        Rc::new(|_, _| async { Ok(None) }.boxed_local()),
+        clip_file,
     );
     Groove { rendering, connection, history, made }
 }
@@ -333,6 +340,41 @@ async fn an_apply_in_a_later_answer_reads_the_clip_again() {
             let round = rendering.groove(&request(json!({"apply":true})), Signal::new()).await.unwrap().unwrap();
             assert_eq!(round.kept, Some(true), "{:?}", round.why);
             assert_eq!(made.borrow().len(), 1);
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_reference_file_that_isnt_there_says_so_rather_than_reading_as_a_clip_ref() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let Groove { rendering, made, .. } = groove(live(true)).await;
+            let why = rendering
+                .groove(&request(json!({"clip":"7:clip:0:0","reference":"/nowhere/bass line.wav"})), Signal::new())
+                .await
+                .unwrap()
+                .unwrap_err();
+            assert!(why.starts_with("The reference: there's no audio file at ") && why.contains("bass line.wav"), "{why}");
+            assert!(made.borrow().is_empty());
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_stale_or_midi_reference_clip_says_which_before_the_song_is_heard() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for why in
+                ["That clip isn't one from this turn's discovery; discover it again.", "That's a MIDI clip, which has no sound of its own."]
+            {
+                let clip_file: ResolveAudio = Rc::new(move |_, _| async move { Err(RuntimeError::Observation(why.into())) }.boxed_local());
+                let Groove { rendering, made, .. } = groove_with(live(true), clip_file).await;
+                let request = FormRequest { from_beat: Some(0.), beats: Some(16.), reference: Some("clip:9".into()) };
+                let said = rendering.form(&request, Signal::new()).await.unwrap().unwrap_err();
+                assert_eq!(said, format!("The reference: {why}"));
+                // Nothing was played or made to hear the song first.
+                assert!(made.borrow().is_empty());
+            }
         })
         .await;
 }

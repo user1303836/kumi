@@ -276,8 +276,17 @@ impl Rendering {
         self.tell(&text, None);
         Ok(Some(text))
     }
+    /// The audio file a reference names: a clip's, else the name itself as a file. A clipRef that's stale, gone or a
+    /// MIDI clip's says so, rather than reading as a file that isn't there.
+    async fn reference_file(&self, named: &str, signal: Signal) -> Result<Result<String, String>, RuntimeError> {
+        match (self.clip_file)(named.into(), signal).await {
+            Ok(file) => Ok(Ok(file.unwrap_or_else(|| audio::audio_path(named)))),
+            Err(RuntimeError::Aborted) => Err(RuntimeError::Aborted),
+            Err(error) => Ok(Err(error.to_string())),
+        }
+    }
     async fn heard_reference(&self, named: &str, request: &AuditionRequest, signal: Signal) -> Result<Analysis, RuntimeError> {
-        let file = (self.clip_file)(named.into(), signal.clone()).await.ok().flatten().unwrap_or_else(|| audio::audio_path(named));
+        let file = self.reference_file(named, signal.clone()).await?.map_err(RuntimeError::Observation)?;
         let key = stringify(&json!([file, request.reference_from.unwrap_or(0.), request.reference_seconds, request.focus]));
         if let Some(known) = self.reference_cache.borrow().get(&key) {
             return Ok(known.clone());

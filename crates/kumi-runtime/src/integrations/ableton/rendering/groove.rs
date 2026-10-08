@@ -318,6 +318,15 @@ impl Rendering {
                 "The reference is a MIDI file: put it on a MIDI track in Live (drag it in) and give that clip as reference.".into()
             ));
         }
+        // A file that isn't there says so, rather than reading as a clip's ref.
+        let names_a_file = reference.contains(['/', '\\'])
+            || path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| audio::AUDIO_EXTENSIONS.contains(&format!(".{}", ext.to_lowercase()).as_str()));
+        if names_a_file && !path.is_file() {
+            return Ok(Err(format!("The reference: there's no audio file at {file}.")));
+        }
         let mut wanted = if path.is_file() {
             match self.file_notes(&file, reference_tempo, signal.clone()).await {
                 Ok(read) => read,
