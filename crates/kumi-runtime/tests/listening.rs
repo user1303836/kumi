@@ -456,6 +456,17 @@ fn an_eq_is_fitted_to_a_gap_instead_of_tried() {
 }
 
 #[test]
+fn a_frequency_live_shows_reads_in_hz_with_either_decimal_mark() {
+    use kumi_runtime::listening::knobs::shown_hz;
+    // A European Live writes "1,5 kHz": a decimal comma, not a thousands separator.
+    assert_eq!(shown_hz("1,5 kHz"), Some(1500.));
+    assert_eq!(shown_hz("2.50 kHz"), Some(2500.));
+    assert_eq!(shown_hz("1,234 Hz"), Some(1234.));
+    assert_eq!(shown_hz("120 Hz"), Some(120.));
+    assert_eq!(shown_hz("-3.0 dB"), None);
+}
+
+#[test]
 fn knob_units_come_from_the_text_live_shows() {
     use kumi_runtime::listening::knobs::{Scale, Unit};
     // A frequency knob, logarithmic over its raw range, read in octaves.

@@ -422,13 +422,14 @@ the track's clip), and measure a stem.
 the bar (in five lanes for a part on a Drum Rack: kick, snare, hats, cymbals and
 percussion), how early or late each step sits (its push and swing), its accents,
 syncopation and fills, against a reference's MIDI. For a record's drums, Kumi
-separates its stems, converts the drum stem to MIDI with Live's Drums to MIDI,
-and moves each hit onto the stem's real onset first. A pitched part that isn't
-in Live (a bass line in an audio file, up to two minutes of it) becomes notes
-with Basic Pitch, on a grid fitted to them (its tempo and first downbeat); from
-audio, its timing and swing are compared, not its accents. Fills need 8 bars or
-more. Kumi can move your notes toward the reference itself, step by step, and
-keeps a change only if it got closer without anything else moving away.
+separates its stems (you click the track's clip when Kumi asks), converts the
+drum stem to MIDI with Live's Drums to MIDI, and moves each hit onto the stem's
+real onset first. A pitched part that isn't in Live (a bass line in an audio
+file, up to two minutes of it) becomes notes with Basic Pitch, on a grid fitted
+to them (its tempo and first downbeat); from audio, its timing and swing are
+compared, not its accents. Fills need 8 bars or more. Kumi can move your notes
+toward the reference itself, step by step, and keeps a change only if it got
+closer without anything else moving away.
 
 **A song's form** is heard bar by bar: the energy curve (loudness, density,
 brightness, low end), the sections with their roles and repeats, the turns
@@ -545,13 +546,14 @@ and its real parameters, matched against what the plug-in shows Live.
 - **Knobs by role.** When Kumi tunes a plug-in, it can name a knob by what it
   does: a role from the guide (Ozone 12's ceiling) or a job any device does (a
   limiter's gain, its ceiling, an EQ band's gain, a compressor's threshold). On
-  EQ Eight, an EQ band is the one nearest the frequency the change is after. It
-  finds the knob among the names the plug-in shows Live and turns it only when
-  it's configured. When it isn't, Kumi says which knob to configure, and has
-  another device on the same track do the job meanwhile: Ozone 12 first, then
-  the other plug-ins Kumi knows, then Live's own devices. With none on the
-  track, Kumi says which of Live's devices to add and where: a limiter last, an
-  EQ or a compressor before the last limiter.
+  EQ Eight, an EQ band is the nearest band that's on (a bell or a shelf for a
+  gain), within about an octave of the frequency the change is after; otherwise
+  Kumi asks which. It finds the knob among the names the plug-in shows Live and
+  turns it only when it's configured. When it isn't, Kumi says which knob to
+  configure, and has another device on the same track do the job meanwhile:
+  Ozone 12 first, then the other plug-ins Kumi knows, then Live's own devices.
+  With none on the track, Kumi says which of Live's devices to add and where: a
+  limiter last, an EQ or a compressor before the last limiter.
 - **What isn't a parameter** (an oscillator's wavetable, filter types, modulation
   routing, Ozone's Master Assistant) is done in the plug-in's window; the guide
   says where.

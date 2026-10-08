@@ -2,10 +2,12 @@
 //! device's name, class and whether it's on, the parameters Live lets Kumi turn, and for a plug-in every name Live
 //! lists for it, so the plug-in map's names are checked against Live's own before any is used.
 
-use super::super::display::parse_display;
 use super::tune::{DeviceKnob, TuneHow, TuneRequest};
 use super::*;
-use crate::listening::{knobs::Unit, round::Round};
+use crate::listening::{
+    knobs::{shown_hz, Unit},
+    round::Round,
+};
 use crate::plugins::roles::{self, is_plugin, Found, Resolved, Seen};
 use regex::Regex;
 use std::sync::LazyLock;
@@ -156,7 +158,7 @@ impl Rendering {
                 .iter()
                 .filter_map(|row| {
                     let band: u8 = row.get("name").and_then(Value::as_str)?.strip_suffix(" Frequency A")?.parse().ok()?;
-                    let at = parse_display(row.get("displayValue").and_then(Value::as_str)?).filter(|read| read.unit == "hz")?.value;
+                    let at = shown_hz(row.get("displayValue").and_then(Value::as_str)?)?;
                     let on = device.switched_on.iter().any(|name| *name == format!("{band} Filter On A"));
                     Some((band, at, on, shown(format!("{band} Filter Type A")).is_none_or(|kind| shapes(&kind))))
                 })

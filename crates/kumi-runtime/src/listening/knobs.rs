@@ -177,6 +177,11 @@ impl Scale {
     }
 }
 
+/// A frequency as Live shows it ("2.50 kHz", "1,5 kHz", "120 Hz"), in Hz; None for text that isn't one.
+pub fn shown_hz(text: &str) -> Option<f64> {
+    parse_display(&plain(text)).filter(|shown| shown.unit == "hz").map(|shown| shown.value)
+}
+
 /// Live's text as the shared reader takes it: a leading "+" dropped ("+24 st"), and a decimal comma read as a point
 /// ("1,5 kHz"; a comma before exactly three digits stays a thousands separator: "1,234 Hz").
 fn plain(text: &str) -> String {
