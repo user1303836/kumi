@@ -1,0 +1,12 @@
+{
+  "description": "Lay out the song's form, heard. Kumi listens to the whole Arrangement quietly (or from_beat for beats) and reads it bar by bar: the energy curve (loudness, density, brightness, low end); the sections it falls into (their bars, role: intro, build, peak, break, verse or outro, and a letter shared by sections that sound alike); the turns between them (a drop or a fall, and what prepares it: a build, a gap or a riser); the intro and outro lengths and the bar the first hook starts on; which tracks play where, from the Arrangement's clips; and the problems a form can have: neighbouring sections without contrast, energy that plateaus, odd phrase lengths, a drop that arrives unprepared, a stretch left unchanged for 32 bars and more. With a reference (an audio file or a clip in the Set), its form too, read at this Set's bar length, and how the two differ. A whole-song listen takes as long as the song.",
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "from_beat": {"type": "number", "minimum": 0, "description": "Where to start, in beats (the Arrangement's start when left out)"},
+      "beats": {"type": "number", "exclusiveMinimum": 0, "description": "How long, in beats (to the song's last clip when left out)"},
+      "reference": {"type": "string", "minLength": 1, "maxLength": 1024, "description": "A song to compare the form with: an audio file or a clip in the Set (its clipRef)"}
+    }
+  }
+}

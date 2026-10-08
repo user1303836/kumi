@@ -363,6 +363,12 @@ impl Ableton {
             Err(why) => Ok(ToolResult::error(why)),
         }
     }
+    async fn form_tool(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
+        match self.rendering.form(&judge_tool::form_request(&input), signal).await? {
+            Ok(said) => Ok(ToolResult::text(stringify(&said))),
+            Err(why) => Ok(ToolResult::error(why)),
+        }
+    }
     async fn groove_tool(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
         let request = match judge_tool::groove_request(&input) {
             Ok(request) => request,
@@ -479,6 +485,7 @@ impl KernelTool for LiveTool {
             "judge" => owner.judge_tool(input, signal).await,
             "tune" => owner.tune_tool(input, signal).await,
             "groove" => owner.groove_tool(input, signal).await,
+            "form" => owner.form_tool(input, signal).await,
             "render" => owner.render_tool(input, signal).await,
             "undo_in_live" => owner.live_undo(input, signal).await,
             "run_python" => owner.run_python(input, signal).await,
@@ -670,6 +677,7 @@ impl ObservationHost for Ableton {
             offered.push(self.tool(judge_tool::JUDGE_TOOL, &judge_tool::JUDGE_DESCRIPTION, judge_tool::JUDGE_SCHEMA.clone()));
             offered.push(self.tool(judge_tool::TUNE_TOOL, &judge_tool::TUNE_DESCRIPTION, judge_tool::TUNE_SCHEMA.clone()));
             offered.push(self.tool(judge_tool::GROOVE_TOOL, &judge_tool::GROOVE_DESCRIPTION, judge_tool::GROOVE_SCHEMA.clone()));
+            offered.push(self.tool(judge_tool::FORM_TOOL, &judge_tool::FORM_DESCRIPTION, judge_tool::FORM_SCHEMA.clone()));
         }
         if self.mutations.supported(Some(FULL_CONTROL_BRIDGE)) && tools.has("live_render_offline") {
             offered.push(self.tool(audition::RENDER_TOOL, &audition::RENDER_DESCRIPTION, audition::RENDER_SCHEMA.clone()));

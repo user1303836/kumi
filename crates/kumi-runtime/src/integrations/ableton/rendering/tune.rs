@@ -321,9 +321,20 @@ impl Rendering {
         let scale = knobs.iter().find(|knob| knob.name == "Scale");
         let adaptive_on = adaptive.is_some_and(|knob| knob.raw > knob.min);
         let scaled = scale.is_some_and(|knob| knob.scale.as_ref().is_none_or(|units| (units.shown(knob.raw) - 100.).abs() > 0.5));
-        if unused.len() < 8 && (adaptive_on || scaled) {
+        // The bands they'd reshape: on, a bell or a shelf, with gain (a cut filter has none, so a fresh EQ Eight's low
+        // cut isn't one).
+        let shaped = (1..=8).any(|band| {
+            let on = knob(band, "Filter On").is_some_and(|on| on.raw > on.min);
+            let gained = knob(band, "Filter Type").is_some_and(|kind| {
+                kind.items.get(kind.raw.round() as usize).is_some_and(|item| item.contains("Bell") || item.contains("Shelf"))
+            });
+            let boosted =
+                knob(band, "Gain").and_then(|gain| gain.scale.as_ref().map(|units| units.shown(gain.raw).abs() >= 0.05)).unwrap_or(false);
+            on && gained && boosted
+        });
+        if shaped && (adaptive_on || scaled) {
             return Ok(Err(
-                "This EQ Eight has bands of its own, shaped by Adaptive Q or a Scale away from 100%; fit draws fixed-Q bands at full scale and won't reshape them. Put a fresh EQ Eight where the fix belongs, then tune it."
+                "This EQ Eight has bands with gain of its own, shaped by Adaptive Q or a Scale away from 100%; fit draws fixed-Q bands at full scale and won't reshape them. Put a fresh EQ Eight where the fix belongs, then tune it."
                     .into(),
             ));
         }

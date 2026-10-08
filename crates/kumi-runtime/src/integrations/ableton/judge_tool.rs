@@ -1,5 +1,5 @@
 //! The judge tool: the model's side of a judged run (a goal in, a round's log out).
-use super::rendering::{GoalRequest, GrooveRequest, JudgeRequest, TuneHow, TuneRequest};
+use super::rendering::{FormRequest, GoalRequest, GrooveRequest, JudgeRequest, TuneHow, TuneRequest};
 use crate::{
     core::contracts::JsonObject,
     listening::{
@@ -20,6 +20,20 @@ pub const TUNE_TOOL: &str = "tune";
 static TUNE: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("assets/tune.json")).unwrap());
 pub static TUNE_DESCRIPTION: LazyLock<String> = LazyLock::new(|| TUNE["description"].as_str().unwrap().into());
 pub static TUNE_SCHEMA: LazyLock<JsonObject> = LazyLock::new(|| TUNE["schema"].as_object().unwrap().clone());
+
+pub const FORM_TOOL: &str = "form";
+static FORM: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("assets/form.json")).unwrap());
+pub static FORM_DESCRIPTION: LazyLock<String> = LazyLock::new(|| FORM["description"].as_str().unwrap().into());
+pub static FORM_SCHEMA: LazyLock<JsonObject> = LazyLock::new(|| FORM["schema"].as_object().unwrap().clone());
+
+/// The form tool's input as a request.
+pub fn form_request(input: &JsonObject) -> FormRequest {
+    FormRequest {
+        from_beat: input.get("from_beat").and_then(Value::as_f64).filter(|v| v.is_finite() && *v >= 0.),
+        beats: input.get("beats").and_then(Value::as_f64).filter(|v| v.is_finite() && *v > 0.),
+        reference: input.get("reference").and_then(Value::as_str).map(trim).filter(|s| !s.is_empty()).map(str::to_owned),
+    }
+}
 
 pub const GROOVE_TOOL: &str = "groove";
 static GROOVE: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("assets/groove.json")).unwrap());

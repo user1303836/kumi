@@ -384,6 +384,14 @@ Live's Drums to MIDI, and moves each hit onto the stem's real onset first. Kumi
 can move your notes toward the reference itself, step by step, and keeps a
 change only if it got closer without anything else moving away.
 
+**A song's form** is heard bar by bar: the energy curve (loudness, density,
+brightness, low end), the sections with their roles and repeats, the turns
+between them and what prepares each drop, the intro, outro and first hook, and
+which tracks play where. Kumi also points out what doesn't work: sections without
+contrast, an energy plateau, odd phrase lengths, a drop that arrives unprepared,
+a loop left unchanged for 32 bars or more. Against a reference song, it says how
+the two forms differ.
+
 `/loop` and what to reach works in rounds until it's met: one change, judged,
 then the next target. Kumi decides when it stops, not the model: every item
 within tolerance, changes no longer helping, or 16 rounds or 45 minutes. Its

@@ -1,6 +1,7 @@
 //! Quiet render rigs, listening devices, auditions, and held goal passes.
 mod ears;
 mod ears_pass;
+mod form;
 mod goal;
 mod groove;
 mod judge;
@@ -88,6 +89,7 @@ pub struct Rendering {
     /// The listening model, once looked for (None inside: there's none).
     listener: RefCell<Option<(Option<Rc<dyn crate::listening::listener::Listener>>, i64)>>,
 }
+pub use form::FormRequest;
 pub use groove::GrooveRequest;
 pub use judge::{GoalRequest, JudgeRequest};
 pub use tune::{TuneHow, TuneRequest};

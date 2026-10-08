@@ -4,6 +4,7 @@ pub mod checklist;
 pub mod cmaes;
 pub mod detect;
 pub mod fit;
+pub mod form;
 pub mod home;
 pub mod judging;
 pub mod knobs;
