@@ -23,7 +23,7 @@ const HOP: usize = 256;
 /// A window's samples (2 s less a hop) and frames.
 const WINDOW: usize = 43_844;
 const WINDOW_FRAMES: usize = 172;
-/// Frames dropped at each end of a window's activations (their overlap with the next), and the overlap in samples.
+/// How many frames a window overlaps the next by: half of them are dropped at each end of its activations.
 const OVERLAP_FRAMES: usize = 30;
 const KEYS: usize = 88;
 const LOWEST_MIDI: u8 = 21;
