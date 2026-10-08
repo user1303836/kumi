@@ -90,7 +90,10 @@ pub fn describe(job: Job, choice: &Choice) -> String {
         (_, Choice::File { path }) => format!("the model file {path}"),
         (Job::Stems, _) => "Live's own splitter".into(),
         (Job::Transcription, _) => "Live's conversions (drums, melody and harmony to MIDI)".into(),
-        (Job::Embeddings, _) => "none yet".into(),
+        (Job::Embeddings, Choice::Off) => "off: no embeddings".into(),
+        (Job::Embeddings, _) => {
+            "Kumi's own: LAION-CLAP's music model for style and AFx-Rep for effects, fetched from Kumi's models release the first time they're needed".into()
+        }
         (Job::Listening, Choice::Default) => {
             "the lookup: a model named in KUMI_LISTENER, else Gemini with a Gemini key, else OpenAI with an OpenAI key".into()
         }
@@ -116,6 +119,12 @@ pub struct Slots(pub BTreeMap<Job, Slot>);
 /// Where the slots are kept, in Kumi's folder.
 pub fn file_in(kumi_dir: &Path) -> PathBuf {
     kumi_dir.join("slots.json")
+}
+
+/// The slots as kept in Kumi's own folder (KUMI_HOME, or ~/.kumi).
+pub fn kept() -> Slots {
+    let models = crate::models::dir();
+    Slots::load(&file_in(models.parent().unwrap_or(&models)))
 }
 
 impl Slots {
@@ -295,8 +304,11 @@ pub fn fits(job: Job, wanted: &Wanted) -> Result<Choice, String> {
             Wanted::File(_) | Wanted::Link(_) => Err("Kumi can't run a model file itself yet. To listen with one on this computer, serve it with an OpenAI-compatible server that takes audio (llama.cpp's llama-server takes a Hugging Face link: llama-server -hf <repo>), then give Kumi its address: /slots listening http://127.0.0.1:8080/v1#<model>.".into()),
         },
         Job::Embeddings => match wanted {
-            Wanted::Choice(Choice::Default | Choice::Off) => Ok(Choice::Default),
-            _ => Err("Kumi can't run an embedding model itself yet (that waits on the model runtime it will ship), so embeddings stay off. When it can, this is where one goes: /slots embeddings <file or Hugging Face link>.".into()),
+            Wanted::Choice(choice @ (Choice::Default | Choice::Off)) => Ok(choice.clone()),
+            Wanted::Choice(_) => Err("That's a listening model; the embeddings slot takes Kumi's own (default), off, or an ONNX model file or link that takes CLAP's input (a 10 s log-mel, 1001 × 64) and gives an embedding.".into()),
+            Wanted::File(path) if path.to_lowercase().ends_with(".onnx") => Ok(Choice::File { path: path.clone() }),
+            Wanted::Link(link) if link.to_lowercase().ends_with(".onnx") => Ok(Choice::File { path: link.clone() }),
+            _ => Err("Kumi's runtime runs ONNX models: give an .onnx file, or a Hugging Face link to one (…/resolve/main/model.onnx).".into()),
         },
         Job::Stems | Job::Transcription => match wanted {
             Wanted::Choice(Choice::Default) => Ok(Choice::Default),
@@ -541,6 +553,28 @@ pub async fn command(words: &str, context: &SlotsContext, progress: &dyn Fn(Stri
                 return Said::Refused(format!("{} is already on {}.", capitalized(job.name()), describe(job, &choice)));
             }
             let stays = |why: String| Said::Refused(format!("{} stays on {}: {why}", capitalized(job.name()), describe(job, &was)));
+            // An embedding model from a link is fetched first; then it's tried on two known tones, which it has to tell
+            // apart.
+            let choice = match choice {
+                Choice::File { path } if job == Job::Embeddings && path.starts_with("http") => {
+                    progress(format!("Fetching {path}…"));
+                    match crate::listening::embed::fetch_link(&path, &signal).await {
+                        Ok(kept) => Choice::File { path: kept.to_string_lossy().into_owned() },
+                        Err(why) => return stays(why),
+                    }
+                }
+                choice => choice,
+            };
+            let tried = if let (Job::Embeddings, Choice::File { path }) = (job, &choice) {
+                progress(format!("Trying {path} on two known tones…"));
+                let say = |said: &str| progress(said.to_string());
+                match crate::listening::embed::tells_tones_apart(Path::new(path), &say, &signal).await {
+                    Ok(heard) => Some(heard),
+                    Err(why) => return stays(format!("{why}.")),
+                }
+            } else {
+                None
+            };
             // A new listening model is tried on the known clip first.
             let heard = if job == Job::Listening && matches!(choice, Choice::Gemini | Choice::Openai | Choice::Local { .. }) {
                 progress(format!("Trying {} on a known clip…", describe(job, &choice)));
@@ -561,7 +595,7 @@ pub async fn command(words: &str, context: &SlotsContext, progress: &dyn Fn(Stri
                 return Said::Refused(format!("Kumi couldn't keep the slots in {}: {why}", context.file.display()));
             }
             let mut said = format!("{} now uses {}", capitalized(job.name()), describe(job, &choice));
-            if let Some(heard) = heard {
+            if let Some(heard) = heard.or(tried) {
                 said.push_str(&format!(": {heard}"));
             }
             said.push('.');

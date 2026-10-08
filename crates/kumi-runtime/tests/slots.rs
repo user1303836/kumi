@@ -147,11 +147,16 @@ fn a_slot_takes_only_what_kumi_can_run_and_says_why_not() {
     let link = Wanted::Link("https://huggingface.co/someone/model".into());
     assert!(fits(Job::Stems, &link).unwrap_err().contains("can't run a stem model itself yet"));
     assert!(fits(Job::Transcription, &Wanted::File("/models/notes.onnx".into())).unwrap_err().contains("stays on Live's conversions"));
-    assert!(fits(Job::Embeddings, &link).unwrap_err().contains("embeddings stay off"));
+    // Embeddings run in Kumi's own runtime: an ONNX file, or a link to one; a model page isn't one.
+    assert!(fits(Job::Embeddings, &link).unwrap_err().contains("ONNX"));
+    let onnx = "https://huggingface.co/someone/model/resolve/main/model.onnx";
+    assert_eq!(fits(Job::Embeddings, &Wanted::Link(onnx.into())), Ok(Choice::File { path: onnx.into() }));
+    assert_eq!(fits(Job::Embeddings, &Wanted::File("/models/clap.onnx".into())), Ok(Choice::File { path: "/models/clap.onnx".into() }));
+    assert!(fits(Job::Embeddings, &Wanted::Choice(Choice::Gemini)).is_err());
     assert!(fits(Job::Listening, &link).unwrap_err().contains("llama-server -hf"));
     assert_eq!(fits(Job::Stems, &Wanted::Choice(Choice::Default)), Ok(Choice::Default));
     assert!(fits(Job::Stems, &Wanted::Choice(Choice::Gemini)).is_err());
-    assert_eq!(fits(Job::Embeddings, &Wanted::Choice(Choice::Off)), Ok(Choice::Default));
+    assert_eq!(fits(Job::Embeddings, &Wanted::Choice(Choice::Off)), Ok(Choice::Off));
 }
 
 #[test]

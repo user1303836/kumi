@@ -163,6 +163,22 @@ pub async fn fetch(pinned: &Pinned, to: &Path, what: &str, say: Say<'_>, signal:
     std::fs::rename(&partial, to).map_err(|error| format!("Kumi couldn't keep {what}: {error}"))
 }
 
+/// A file the producer named (a model for a slot), fetched into `to`: not pinned, as it's their own choice (it's
+/// tried before it's used). Downloaded beside it and moved into place.
+pub async fn fetch_unpinned(url: &str, to: &Path, signal: &Signal) -> Result<(), String> {
+    if to.exists() {
+        return Ok(());
+    }
+    let folder = to.parent().ok_or("Kumi has no folder to keep models in.")?;
+    std::fs::create_dir_all(folder).map_err(|error| format!("Kumi couldn't make {}: {error}", folder.display()))?;
+    let partial = to.with_extension(format!("partial-{}", std::process::id()));
+    if let Err(why) = download(url, &partial, signal).await {
+        let _ = std::fs::remove_file(&partial);
+        return Err(format!("Kumi couldn't fetch {url}: {why}"));
+    }
+    std::fs::rename(&partial, to).map_err(|error| format!("Kumi couldn't keep {url}: {error}"))
+}
+
 /// A download streamed to `path`: its SHA-256 (hex).
 async fn download(url: &str, path: &Path, signal: &Signal) -> Result<String, String> {
     let client = reqwest::Client::builder()
@@ -202,7 +218,7 @@ pub async fn runtime(say: Say<'_>, signal: &Signal) -> Result<(), String> {
     let path = folder.join(library);
     if !path.exists() {
         let download = dir().join(archive.name);
-        fetch(&archive, &download, "its model runtime (ONNX Runtime)", say, signal).await?;
+        fetch(&archive, &download, "its model runtime, ONNX Runtime", say, signal).await?;
         let unpacked = unpack(&download, &folder, library).await;
         let _ = std::fs::remove_file(&download);
         unpacked?;

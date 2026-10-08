@@ -10,13 +10,15 @@ use super::*;
 use crate::listening::{
     checklist::{note_stretch, worst_stretch, Checklist, Explicit, Goal, Profile, Quantity, Row, REGIONS},
     detect::{self, Problem, ProblemKind},
+    embed,
     judging::{self, Listen, Placed, RoundHost, Unheard},
     listener::{compare, Listener, Opinion, Take},
-    measure::{measure_file, Heard, MeasureOptions},
+    measure::{measure_file, Embedding, Heard, MeasureOptions},
     round::{Next, Round, RoundKind},
 };
 use async_trait::async_trait;
 use kumi_common::js::{number::to_string, string::head};
+use std::path::Path;
 
 /// What the model asks of the judge: a goal (which starts a run), what to hear, the change since the last call, or
 /// the end.
@@ -163,6 +165,12 @@ impl Rendering {
             },
             None => None,
         };
+        // The learned models hear this run's listens when the reference was heard by them: its style always, a sound's
+        // effects too.
+        self.embedding_wanted.set(match &reference {
+            Some(profile) if models_on() => (profile.vibe.is_some(), profile.effects.is_some() && goal.sound),
+            _ => (false, false),
+        });
         let span = match (request.from_beat, request.beats) {
             (Some(from), Some(beats)) if beats > 0. => Window { from, beats },
             (from, beats) => {
@@ -732,11 +740,55 @@ impl Rendering {
             return Ok(kept.profile);
         }
         let file = (self.clip_file)(named.into(), signal.clone()).await.ok().flatten().unwrap_or_else(|| audio::audio_path(named));
-        let heard = measure_file(&file, MeasureOptions { signal: Some(signal), ..Default::default() })
+        let heard = measure_file(&file, MeasureOptions { signal: Some(signal.clone()), ..Default::default() })
             .await
             .map_err(|error| format!("Kumi couldn't hear the reference: {}", head(&error.to_string(), 200)))?;
         let name = file.rsplit(['/', '\\']).next().unwrap_or(&file).to_string();
-        Ok(Profile::of(&name, &heard))
+        let mut profile = Profile::of(&name, &heard);
+        // How it sounds to the learned models, when they're on: what a run guards against drifting from.
+        if models_on() {
+            let say = |said: &str| self.tell(said.to_string(), None);
+            let seconds = heard.measures.seconds;
+            let slot = crate::slots::kept().model_file(crate::slots::Job::Embeddings);
+            profile.vibe = embed::vibe(Path::new(&file), 0., seconds, slot, &say, &signal).await.ok();
+            profile.effects = embed::effects(Path::new(&file), 0., seconds, &say, &signal).await.ok();
+        }
+        Ok(profile)
+    }
+
+    /// What the learned models make of a stretch of a capture, when the run guards against drifting from its
+    /// reference's style or effects; nothing when it doesn't. When a model can't be had, that's said once and the run
+    /// goes on by its measures.
+    async fn embedding(&self, file: &Path, start: f64, seconds: f64, signal: &Signal) -> Option<Embedding> {
+        let (vibe, effects) = self.embedding_wanted.get();
+        if !vibe && !effects {
+            return None;
+        }
+        let say = |said: &str| self.tell(said.to_string(), None);
+        let mut embedding = Embedding::default();
+        if vibe {
+            let slot = crate::slots::kept().model_file(crate::slots::Job::Embeddings);
+            match embed::vibe(file, start, seconds, slot, &say, signal).await {
+                Ok(found) => embedding.vibe = Some(found),
+                Err(why) => {
+                    self.tell(format!("Kumi can't hear style with its style model now ({why}); the run goes on by its measures."), None);
+                    self.embedding_wanted.set((false, self.embedding_wanted.get().1));
+                }
+            }
+        }
+        if effects {
+            match embed::effects(file, start, seconds, &say, signal).await {
+                Ok(found) => embedding.effects = Some(found),
+                Err(why) => {
+                    self.tell(
+                        format!("Kumi can't hear effects with its effects model now ({why}); the run goes on by its measures."),
+                        None,
+                    );
+                    self.embedding_wanted.set((self.embedding_wanted.get().0, false));
+                }
+            }
+        }
+        (embedding.vibe.is_some() || embedding.effects.is_some()).then_some(embedding)
     }
 
     /// Hears `window` quietly: the mix (or the run's track) and the focus element in one pass, measured.
@@ -791,7 +843,7 @@ impl Rendering {
                     .map_err(|error| RuntimeError::plain(error.to_string()))
             }
         };
-        let heard_main = measure(main.file.clone(), main.start).await?;
+        let mut heard_main = measure(main.file.clone(), main.start).await?;
         // Silence isn't a mix within tolerance: it reads nothing, and what that means is the caller's to say.
         let silent = heard_main.measures.integrated.is_none_or(|loudness| loudness < -70.).then(|| {
             format!(
@@ -809,6 +861,9 @@ impl Rendering {
             }
             None => (None, None),
         };
+        if silent.is_none() {
+            heard_main.embedding = self.embedding(Path::new(&main.file), main.start, seconds, &signal).await;
+        }
         let file = self.keep_file(&PathBuf::from(&main.file)).await;
         Ok(Ok(JudgeHeard { main: heard_main, focus: heard_focus, file, start: main.start, focus_file, silent }))
     }
@@ -913,7 +968,8 @@ impl Rendering {
             }
         };
         let (file, start) = run.span_file.clone();
-        let heard = cut(file.clone(), start).await?;
+        let mut heard = cut(file.clone(), start).await?;
+        heard.embedding = self.embedding(&file, start + into, seconds, &signal).await;
         let focus = match run.span_focus.clone() {
             Some((file, start)) => Some(cut(file, start).await?),
             None => None,
@@ -1194,4 +1250,9 @@ fn next_of(run: &JudgeRun, index: usize) -> Next {
 
 fn round1(value: f64) -> f64 {
     (value * 10.).round() / 10.
+}
+
+/// Whether the learned models may be used: the embeddings slot isn't off.
+fn models_on() -> bool {
+    crate::slots::kept().now(crate::slots::Job::Embeddings) != crate::slots::Choice::Off
 }

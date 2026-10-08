@@ -90,6 +90,8 @@ pub struct Rendering {
     /// Measured references, read by name for the judge.
     references: Option<Rc<crate::references::store::ReferenceStore>>,
     /// The listening model, once looked for (None inside: there's none).
+    /// Whether the run's listens are heard by the learned models too: the style model, the effects model.
+    embedding_wanted: Cell<(bool, bool)>,
     /// The listening model as last looked up (found, a definite none, or why the lookup failed), and when.
     listener: RefCell<Option<(Result<Option<Rc<dyn crate::listening::listener::Listener>>, String>, i64)>>,
 }
@@ -154,6 +156,7 @@ impl Rendering {
             listener_source: options.listener.clone(),
             references: options.references.clone(),
             listener: RefCell::new(None),
+            embedding_wanted: Cell::new((false, false)),
         })
     }
     pub fn round_count(&self) -> usize {

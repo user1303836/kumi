@@ -14,6 +14,7 @@ use crate::{
     },
     listening::{
         checklist::{Profile, Spread, REGIONS},
+        embed,
         measure::{measure_file, MeasureOptions},
     },
     video::programs::ProgramOptions,
@@ -89,10 +90,13 @@ impl KernelTool for ReferenceTool {
             }
         }
         match self.measure(&what, count, signal.clone()).await {
-            Ok(Measured::Kept(kept, missed)) => {
+            Ok(Measured::Kept(kept, missed, fetched)) => {
                 let mut said = reply(&kept, false, &what);
                 if !missed.is_empty() {
                     said["passedOver"] = json!(missed);
+                }
+                if !fetched.is_empty() {
+                    said["fetched"] = json!(fetched);
                 }
                 Ok(ToolResult::text(stringify(&said)))
             }
@@ -110,8 +114,8 @@ impl KernelTool for ReferenceTool {
 }
 
 enum Measured {
-    /// Kept, and the tracks passed over (with why).
-    Kept(Box<KeptReference>, Vec<String>),
+    /// Kept, the tracks passed over (with why), and what Kumi fetched for it (a model, the first time).
+    Kept(Box<KeptReference>, Vec<String>, Vec<String>),
     Ask {
         question: String,
         options: Vec<Choice>,
@@ -135,12 +139,14 @@ impl ReferenceTool {
         let mut profiles = vec![];
         let mut used = vec![];
         let mut missed = vec![];
+        let fetched = std::cell::RefCell::new(vec![]);
+        let say = |said: &str| fetched.borrow_mut().push(said.to_string());
         for wanted in &tracks {
             if profiles.len() >= count {
                 break;
             }
             signal.check().map_err(|error| error.to_string())?;
-            match self.one(wanted, alone, signal.clone()).await {
+            match self.one(wanted, alone, &say, signal.clone()).await {
                 Ok((profile, source)) => {
                     profiles.push(profile);
                     used.push(KeptTrack { artist: wanted.artist.clone(), title: wanted.title.clone(), source, mbid: wanted.mbid.clone() });
@@ -173,17 +179,27 @@ impl ReferenceTool {
             stamp: if kind == Kind::Files { stamp(what) } else { None },
         };
         self.store.save(&kept).await.map_err(|error| format!("Kumi measured it but couldn't keep it: {error}"))?;
-        Ok(Measured::Kept(Box::new(kept), missed))
+        Ok(Measured::Kept(Box::new(kept), missed, fetched.take()))
     }
 
     /// One track's profile and where its audio came from: fetched (or found), checked to be a finished track, measured.
     /// Audio Kumi fetched goes once it's measured.
-    async fn one(&self, wanted: &Wanted, alone: bool, signal: Signal) -> Result<(Profile, String), String> {
+    async fn one(&self, wanted: &Wanted, alone: bool, say: embed::Say<'_>, signal: Signal) -> Result<(Profile, String), String> {
         let audio = self.fetcher.audio(wanted, signal.clone()).await?;
-        let heard =
-            measure_file(&audio.file.to_string_lossy(), MeasureOptions { start: None, seconds: Some(MEASURED), signal: Some(signal) })
-                .await
-                .map_err(|error| head(&error.to_string(), 200));
+        let heard = measure_file(
+            &audio.file.to_string_lossy(),
+            MeasureOptions { start: None, seconds: Some(MEASURED), signal: Some(signal.clone()) },
+        )
+        .await
+        .map_err(|error| head(&error.to_string(), 200));
+        // How it sounds to the style model, while the audio is still here (when the embeddings slot isn't off).
+        let vibe = match &heard {
+            Ok(heard) if crate::slots::kept().now(crate::slots::Job::Embeddings) != crate::slots::Choice::Off => {
+                let slot = crate::slots::kept().model_file(crate::slots::Job::Embeddings);
+                embed::vibe(&audio.file, 0., heard.measures.seconds.min(MEASURED), slot, say, &signal).await.ok()
+            }
+            _ => None,
+        };
         if audio.fetched {
             let _ = tokio::fs::remove_file(&audio.file).await;
         }
@@ -197,7 +213,9 @@ impl ReferenceTool {
         if !alone && measures.seconds < SHORTEST {
             return Err(format!("{:.0} s long, a sample or a sketch rather than a track", measures.seconds));
         }
-        Ok((Profile::of(&label(wanted), &heard), audio.source))
+        let mut profile = Profile::of(&label(wanted), &heard);
+        profile.vibe = vibe;
+        Ok((profile, audio.source))
     }
 }
 

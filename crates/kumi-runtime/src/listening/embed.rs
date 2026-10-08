@@ -5,10 +5,12 @@
 
 use crate::{
     audio::{decode::open_audio_to, dsp::fft},
-    models::{self, pinned, Say, Tensor},
+    models::{self, pinned, Tensor},
 };
 use kumi_common::abort::Signal;
 use std::path::{Path, PathBuf};
+
+pub use crate::models::Say;
 
 /// CLAP hears 10 s at 48 kHz: 1001 frames of 64 mel bands.
 pub const CLAP_RATE: f64 = 48_000.;
@@ -182,7 +184,7 @@ async fn clap_model(slot: Option<PathBuf>, say: Say<'_>, signal: &Signal) -> Res
         return Ok(file);
     }
     let path = models::dir().join(pinned::CLAP.name);
-    models::fetch(&pinned::CLAP, &path, "its style model (LAION-CLAP)", say, signal).await?;
+    models::fetch(&pinned::CLAP, &path, "its style model, LAION-CLAP", say, signal).await?;
     Ok(path)
 }
 
@@ -207,7 +209,7 @@ pub async fn vibe(file: &Path, start: f64, seconds: f64, slot: Option<PathBuf>, 
 pub async fn effects(file: &Path, start: f64, seconds: f64, say: Say<'_>, signal: &Signal) -> Result<Vec<f32>, String> {
     models::runtime(say, signal).await?;
     let model = models::dir().join(pinned::AFX_REP.name);
-    models::fetch(&pinned::AFX_REP, &model, "its effects model (AFx-Rep)", say, signal).await?;
+    models::fetch(&pinned::AFX_REP, &model, "its effects model, AFx-Rep", say, signal).await?;
     let audio = read(file, start, seconds, AFX_RATE, signal).await?;
     let (left, right) = (&audio[0], audio.get(1).unwrap_or(&audio[0]));
     let (mut mids, mut sides) = (vec![], vec![]);
@@ -225,4 +227,51 @@ pub async fn effects(file: &Path, start: f64, seconds: f64, say: Say<'_>, signal
     }
     let (Some(mid), Some(side)) = (averaged(&mids), averaged(&sides)) else { return Err("Nothing was heard to embed.".into()) };
     Ok(mid.into_iter().chain(side).collect())
+}
+
+/// A style model from a link (a Hugging Face file, say) for the embeddings slot, fetched into Kumi's models folder (a
+/// folder per link, so two called model.onnx stay apart): where it's kept.
+pub async fn fetch_link(link: &str, signal: &Signal) -> Result<PathBuf, String> {
+    let name =
+        link.split(['?', '#']).next().unwrap_or(link).rsplit('/').next().filter(|name| name.ends_with(".onnx")).unwrap_or("model.onnx");
+    let tag: String = {
+        use sha2::{Digest, Sha256};
+        hex::encode(Sha256::digest(link.as_bytes()))[..12].to_string()
+    };
+    let path = models::dir().join("slots").join(tag).join(name);
+    models::fetch_unpinned(link, &path, signal).await?;
+    Ok(path)
+}
+
+/// The quick test for a style model in the embeddings slot: two known tones, a plain one and a bright one, have to
+/// come out as embeddings that tell them apart. It takes CLAP's input (`input_features`, a 10 s log-mel) and gives
+/// `audio_embeds`.
+pub async fn tells_tones_apart(model: &Path, say: Say<'_>, signal: &Signal) -> Result<String, String> {
+    models::runtime(say, signal).await?;
+    let tone = |bright: bool| -> Vec<f32> {
+        let partials = if bright { 40 } else { 1 };
+        (0..(2. * CLAP_RATE) as usize)
+            .map(|n| {
+                let t = n as f64 / CLAP_RATE;
+                (1..=partials).map(|k| (2. * std::f64::consts::PI * 220. * k as f64 * t).sin() / k as f64).sum::<f64>() as f32 * 0.2
+            })
+            .collect()
+    };
+    let mut heard = vec![];
+    for bright in [false, true] {
+        let input = Tensor { shape: vec![1, 1, CLAP_FRAMES, CLAP_MELS], data: clap_features(&tone(bright)) };
+        let out = models::run(model, vec![("input_features".into(), input)], vec!["audio_embeds".into()])
+            .await
+            .map_err(|why| format!("it doesn't run as a style model in this slot does (input_features in, audio_embeds out): {why}"))?;
+        let embedding = out.into_iter().next().map(|tensor| tensor.data).unwrap_or_default();
+        if embedding.len() < 16 || embedding.iter().any(|value| !value.is_finite()) {
+            return Err("what it gives isn't an embedding".into());
+        }
+        heard.push(embedding);
+    }
+    let apart = distance(&heard[0], &heard[1]).ok_or("its embeddings can't be compared")?;
+    if apart < 0.001 {
+        return Err(format!("it heard a plain and a bright tone as the same (distance {apart:.4})"));
+    }
+    Ok(format!("it told a plain tone from a bright one (distance {apart:.2})"))
 }

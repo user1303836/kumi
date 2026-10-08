@@ -27,7 +27,7 @@ async fn slots_are_shown_swapped_and_taken_back() {
             h.type_text("\x15/slots\r").await;
             h.has("Model slots");
             h.has("stems (a mix split into its parts): Live's own splitter");
-            h.has("embeddings (how alike two sounds are): none yet");
+            h.has("embeddings (how alike two sounds are): Kumi's own: LAION-CLAP's music model");
             h.type_text("/slots stems https://huggingface.co/someone/stems\r").await;
             h.has("Kumi can't run a stem model itself yet");
             assert_eq!(Slots::load(&file), Slots::default());

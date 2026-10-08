@@ -364,13 +364,24 @@ trusting them:
   alone.
 - **Model slots.** `/slots` shows which model does each listening job: stems
   (Live's own splitter), transcription (Live's conversions), listening (the
-  lookup above) and embeddings (none yet). Swap one in plain words, such as
+  lookup above) and embeddings (Kumi's own: LAION-CLAP's music model for style,
+  AFx-Rep for effects). Swap one in plain words, such as
   `/slots listening gemini`, `/slots listening off` or
   `/slots listening http://127.0.0.1:8080/v1#<model>`. A new listening model is
   tried on a known clip first, and switched to only if it hears it right.
-  `/slots back listening` takes a swap back. Kumi can't run model files itself
-  yet, so a file or a Hugging Face link is turned down with what to do instead.
-  `KUMI_LISTENER` wins over the listening slot while it's set.
+  `/slots back listening` takes a swap back. Embeddings run in Kumi's own model
+  runtime: `/slots embeddings ~/models/clap.onnx` (or a Hugging Face link to an
+  `.onnx` file) is tried on two known tones and used only if it tells them apart;
+  `/slots embeddings off` stops them. The other slots can't take model files
+  yet, and say what to do instead. `KUMI_LISTENER` wins over the listening slot
+  while it's set.
+- **Style and effects, heard by models.** With a reference, Kumi's style model
+  (LAION-CLAP) and effects model (AFx-Rep) hear it and each listen of the run,
+  and a change that moves the sound further from the reference's style, or a
+  sound's effects further from the reference sound's, is taken back. They're
+  fetched once, the first time they're needed (ONNX Runtime about 10 MB, the
+  models about 245 MB, each checked against its checksum), into
+  `~/.kumi/models`.
 
 **References** become targets too. Give Kumi a file, a folder of them, a YouTube
 video or playlist, a Spotify link, or just words ("like Burial", "dub techno",
@@ -831,7 +842,8 @@ says which need which.
   reads see its requests. Kumi doesn't read an address that carries a key or a
   token.
 - **Downloads** come from GitHub (Kumi's releases and update checks, yt-dlp,
-  ffmpeg and whisper.cpp), Hugging Face (the speech model), and the video sites you name.
+  ffmpeg and whisper.cpp, ONNX Runtime and Kumi's listening models), Hugging Face
+  (the speech model, or a model you name for a slot), and the video sites you name.
 - **References** in words are looked up by name on MusicBrainz and ListenBrainz,
   a Spotify link on Spotify's public page (an artist's on MusicBrainz), and their
   audio comes from a YouTube search and is deleted once it's measured.

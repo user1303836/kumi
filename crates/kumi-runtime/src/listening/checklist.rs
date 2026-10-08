@@ -856,8 +856,10 @@ impl Checklist {
         for (index, item) in self.items.iter().enumerate() {
             let (b, a) = (before[index], after[index]);
             let (gap_before, gap_after) = (item.gap(b), item.gap(a));
+            // A learned model that couldn't hear this listen (it couldn't be fetched, say) says nothing either way.
+            let unheard = a.is_none() && matches!(item.quantity, Quantity::Vibe { .. } | Quantity::EffectStyle { .. });
             // A reading that's gone (silence, or the part stopped playing) is never within tolerance.
-            if b.is_some() && a.is_none() {
+            if b.is_some() && a.is_none() && !unheard {
                 lost.push(index);
             }
             // A limiter bringing peaks down flattens them a little too.
@@ -869,6 +871,7 @@ impl Checklist {
                 _ => 0.,
             };
             let change = match (item.target, b, a) {
+                _ if unheard => Change::Same,
                 (_, Some(_), None) => Change::Worse,
                 (Target::NoHigher, Some(b), Some(a)) if a - b > item.jnd + slack => Change::Worse,
                 (Target::NoLower, Some(b), Some(a)) if b - a > item.jnd + slack => Change::Worse,
