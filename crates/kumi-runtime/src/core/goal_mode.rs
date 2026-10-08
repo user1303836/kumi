@@ -206,7 +206,7 @@ pub trait ObjectiveStore {
     async fn clear(&self, place: &str) -> Result<(), RuntimeError>;
 }
 
-/// Goals kept as files, one per Set (`<place>.goal.json`, beside the knob searches' own files).
+/// Goals kept as files, one per Set (`<place>-<hash>.goal.json`, beside the knob searches' own files).
 pub struct FileObjectiveStore {
     folder: PathBuf,
 }
@@ -214,9 +214,12 @@ pub fn create_objective_store(folder: impl Into<PathBuf>) -> Rc<FileObjectiveSto
     Rc::new(FileObjectiveStore { folder: folder.into() })
 }
 impl FileObjectiveStore {
+    /// The place's own words cut short, and a hash of all of it: two Sets whose long paths start alike stay apart.
     fn file(&self, place: &str) -> PathBuf {
-        let safe: String = place.chars().map(|c| if c.is_ascii_alphanumeric() || "_.-".contains(c) { c } else { '_' }).take(120).collect();
-        self.folder.join(format!("{}.goal.json", if safe.is_empty() { "unsaved".into() } else { safe }))
+        use sha2::{Digest, Sha256};
+        let safe: String = place.chars().map(|c| if c.is_ascii_alphanumeric() || "_.-".contains(c) { c } else { '_' }).take(80).collect();
+        let hash = hex::encode(Sha256::digest(place.as_bytes()));
+        self.folder.join(format!("{}-{}.goal.json", if safe.is_empty() { "unsaved" } else { &safe }, &hash[..12]))
     }
 }
 #[async_trait(?Send)]

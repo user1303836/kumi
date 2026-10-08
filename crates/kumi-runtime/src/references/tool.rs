@@ -263,7 +263,8 @@ impl ReferenceTool {
         if !alone && measures.seconds < SHORTEST {
             return Err(format!("{:.0} s long, a sample or a sketch rather than a track", measures.seconds));
         }
-        let mut profile = Profile::of(&label(wanted), &heard);
+        let name = label(wanted);
+        let mut profile = tokio::task::spawn_blocking(move || Profile::of(&name, &heard)).await.map_err(|error| error.to_string())?;
         let style = match vibe {
             Some(Ok((vibe, model))) => {
                 (profile.vibe, profile.vibe_model) = (Some(vibe), Some(model));

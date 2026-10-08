@@ -225,19 +225,6 @@ impl Rendering {
             Ok(heard) => heard,
         };
         let offset = span.from * 60. / tempo;
-        let mut problems = detect::harshness(&heard.main);
-        problems.extend(detect::low_end(&heard.main));
-        problems.extend(detect::peaks(&heard.main, goal.true_peak));
-        if let (Some(focus), Some(name)) = (&heard.focus, &goal.focus) {
-            problems.extend(detect::masking(focus, &heard.main, name));
-        }
-        // Times as the song's, not the capture's.
-        for problem in &mut problems {
-            for span in &mut problem.at {
-                span[0] += offset;
-                span[1] += offset;
-            }
-        }
         let goal = Goal {
             loudness: goal.loudness,
             true_peak: goal.true_peak,
@@ -247,9 +234,45 @@ impl Rendering {
             targets: goal.targets.clone(),
             sound: goal.sound,
         };
-        let mut checklist = Checklist::new(&goal, &heard.main, &problems);
-        let mut whole = checklist.read(&heard.main, heard.focus.as_ref());
-        let unreadable = checklist.drop_unreadable(&mut whole);
+        // A problem's excerpt is where it stands out most (a steady one, too: the loudest bars may bury it).
+        let length = self.excerpt_beats() * 60. / tempo;
+        let bar = self.observer.beats_per_bar.get().max(1.) * 60. / tempo;
+        // What was heard is worked out off the app's thread: detectors, the checklist and where each problem stands
+        // out take a while over a whole song.
+        let (main, focus) = (heard.main, heard.focus);
+        let analysed = tokio::task::spawn_blocking(move || {
+            let mut problems = detect::harshness(&main);
+            problems.extend(detect::low_end(&main));
+            problems.extend(detect::peaks(&main, goal.true_peak));
+            if let (Some(focus), Some(name)) = (&focus, &goal.focus) {
+                problems.extend(detect::masking(focus, &main, name));
+            }
+            // Times as the song's, not the capture's.
+            for problem in &mut problems {
+                for span in &mut problem.at {
+                    span[0] += offset;
+                    span[1] += offset;
+                }
+            }
+            let mut checklist = Checklist::new(&goal, &main, &problems);
+            let mut whole = checklist.read(&main, focus.as_ref());
+            let unreadable = checklist.drop_unreadable(&mut whole);
+            let worst: Vec<Option<f64>> = checklist
+                .items
+                .iter()
+                .map(|item| match item.quantity {
+                    Quantity::Problem { problem: ProblemKind::Resonance | ProblemKind::Harshness, low, high, steady, .. } => {
+                        worst_stretch(&main, low, high, steady, length, bar)
+                    }
+                    Quantity::Problem { problem: ProblemKind::LoudNote, low, high, .. } => note_stretch(&main, low, high, length, bar),
+                    _ => None,
+                })
+                .collect();
+            (main, goal, problems, checklist, whole, unreadable, worst)
+        })
+        .await
+        .map_err(|error| RuntimeError::plain(error.to_string()))?;
+        let (main, goal, problems, checklist, whole, unreadable, worst) = analysed;
         if !checklist.has_targets() {
             return Ok(Err(format!(
                 "Nothing to work toward: {}. Give a target (a loudness, a true-peak ceiling, a reference or numbers), or tell the producer it already sounds right.",
@@ -267,7 +290,7 @@ impl Rendering {
             span,
             span_file: (heard.file.clone(), heard.start),
             span_focus: heard.focus_file.clone(),
-            loudness: heard.main.measures.short_term.clone(),
+            loudness: main.measures.short_term.clone(),
             problems: problems.clone(),
             first: whole.clone(),
             whole: whole.clone(),
@@ -286,21 +309,7 @@ impl Rendering {
             rounds: vec![],
         };
         run.misses = vec![0; run.checklist.items.len()];
-        // A problem's excerpt is where it stands out most (a steady one, too: the loudest bars may bury it).
-        let length = self.excerpt_beats() * 60. / tempo;
-        let bar = self.observer.beats_per_bar.get().max(1.) * 60. / tempo;
-        run.worst = run
-            .checklist
-            .items
-            .iter()
-            .map(|item| match item.quantity {
-                Quantity::Problem { problem: ProblemKind::Resonance | ProblemKind::Harshness, low, high, steady, .. } => {
-                    worst_stretch(&heard.main, low, high, steady, length, bar)
-                }
-                Quantity::Problem { problem: ProblemKind::LoudNote, low, high, .. } => note_stretch(&heard.main, low, high, length, bar),
-                _ => None,
-            })
-            .collect();
+        run.worst = worst;
         run.target = run.checklist.next(&run.whole);
         run.window = self.excerpt_for(&run);
         // Before anything changes, the excerpt's "before" is cut from what was just heard.
@@ -819,11 +828,14 @@ impl Rendering {
             Ok(Err(why)) => return Err(format!("The reference: {why}")),
             Err(error) => return Err(error.to_string()),
         };
-        let heard = measure_file(&file, MeasureOptions { signal: Some(signal.clone()), ..Default::default() })
+        // Its first six minutes, as the reference tool measures a track.
+        let options = MeasureOptions { seconds: Some(MEASURED), signal: Some(signal.clone()), ..Default::default() };
+        let heard = measure_file(&file, options)
             .await
             .map_err(|error| format!("Kumi couldn't hear the reference: {}", head(&error.to_string(), 200)))?;
         let name = file.rsplit(['/', '\\']).next().unwrap_or(&file).to_string();
-        let mut profile = Profile::of(&name, &heard);
+        let (mut profile, heard) =
+            tokio::task::spawn_blocking(move || (Profile::of(&name, &heard), heard)).await.map_err(|error| error.to_string())?;
         // How it sounds to the learned models, when they're on: what a run guards against drifting from.
         let mut unheard = vec![];
         if models_on() {

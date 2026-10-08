@@ -1303,9 +1303,20 @@ pub fn worst_stretch(heard: &Heard, low: f64, high: f64, steady: bool, seconds: 
         return None;
     }
     let stride = ((step / hop).round() as usize).max(1);
+    // The stretches overlap about eight times over: each frame's excess is worked out once, and each stretch reads
+    // its loud frames' from that.
+    let bins = bins_between(low, high);
+    let excess: Vec<f64> = match bins.is_empty() {
+        true => vec![],
+        false => heard.frames.fine.iter().map(|fine| frame_excess(fine, &bins)).collect(),
+    };
     (0..=count - length)
         .step_by(stride)
-        .map(|at| (at, region_excess_in(heard, low, high, steady, at..at + length, &|_| 0.)))
+        .map(|at| {
+            let range = at..at + length;
+            let read = |frame: usize| excess[frame];
+            (at, if bins.is_empty() { 0. } else { excess_over(heard, steady, range, &read) })
+        })
         .max_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(at, _)| at as f64 * hop)
 }
@@ -1331,7 +1342,32 @@ pub fn note_stretch(heard: &Heard, low: f64, high: f64, seconds: f64, step: f64)
 }
 
 fn region_excess_in(heard: &Heard, low: f64, high: f64, steady: bool, range: std::ops::Range<usize>, shift: &dyn Fn(f64) -> f64) -> f64 {
+    let bins = bins_between(low, high);
+    if bins.is_empty() {
+        return 0.;
+    }
     let moved: Vec<f32> = (0..FINE_BINS).map(|bin| shift(fine_hz(bin)) as f32).collect();
+    let read = |frame: usize| {
+        let fine: Vec<f32> = heard.frames.fine[frame].iter().zip(&moved).map(|(db, by)| db + by).collect();
+        frame_excess(&fine, &bins)
+    };
+    excess_over(heard, steady, range, &read)
+}
+
+/// The fine bins between `low` and `high` Hz (not the edge ones).
+fn bins_between(low: f64, high: f64) -> Vec<usize> {
+    (1..FINE_BINS - 1).filter(|bin| (low..=high).contains(&fine_hz(*bin))).collect()
+}
+
+/// How far a frame's loudest bin among `bins` stands over the level around it, dB.
+fn frame_excess(fine: &[f32], bins: &[usize]) -> f64 {
+    let power: Vec<f64> = fine.iter().map(|db| 10f64.powf(*db as f64 / 10.)).collect();
+    bins.iter().map(|bin| fine[*bin] as f64 - detect::local_level(&power, *bin)).fold(f64::MIN, f64::max)
+}
+
+/// A stretch's excess: its loud frames' (within 20 dB of its loudest), their median when steady, else the 90th
+/// percentile, each read by `excess`.
+fn excess_over(heard: &Heard, steady: bool, range: std::ops::Range<usize>, excess: &dyn Fn(usize) -> f64) -> f64 {
     let frames = &heard.frames;
     let range = range.start.min(frames.fine.len())..range.end.min(frames.fine.len());
     let mut levels: Vec<f64> = frames.level[range.clone()].iter().map(|level| *level as f64).collect();
@@ -1340,18 +1376,7 @@ fn region_excess_in(heard: &Heard, low: f64, high: f64, steady: bool, range: std
         return 0.;
     }
     let loud = percentile(&levels, 0.95) - 20.;
-    let bins: Vec<usize> = (1..FINE_BINS - 1).filter(|bin| (low..=high).contains(&fine_hz(*bin))).collect();
-    if bins.is_empty() {
-        return 0.;
-    }
-    let mut excesses: Vec<f64> = range
-        .filter(|frame| frames.level[*frame] as f64 >= loud)
-        .map(|frame| {
-            let fine: Vec<f32> = frames.fine[frame].iter().zip(&moved).map(|(db, by)| db + by).collect();
-            let power: Vec<f64> = fine.iter().map(|db| 10f64.powf(*db as f64 / 10.)).collect();
-            bins.iter().map(|bin| fine[*bin] as f64 - detect::local_level(&power, *bin)).fold(f64::MIN, f64::max)
-        })
-        .collect();
+    let mut excesses: Vec<f64> = range.filter(|frame| frames.level[*frame] as f64 >= loud).map(excess).collect();
     excesses.sort_by(f64::total_cmp);
     round1(percentile(&excesses, if steady { 0.5 } else { 0.9 }).max(0.))
 }

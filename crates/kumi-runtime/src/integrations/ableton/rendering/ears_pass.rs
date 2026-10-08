@@ -41,7 +41,8 @@ fn pieces(window: Window, tempo: f64, meter: f64, taps: usize) -> Vec<Window> {
         return vec![window];
     }
     let step = ((longest / meter).floor() * meter).max(meter);
-    let end = window.from + window.beats;
+    // Never more than the longest listen, however long a stretch was asked for: the plan is built here, at once.
+    let end = window.from + window.beats.min(super::listen::LONGEST_LISTEN * tempo / 60.);
     let mut found = vec![];
     let mut from = window.from;
     while from < end - 1e-9 {
@@ -316,8 +317,15 @@ impl Rendering {
         let meter = self.observer.beats_per_bar.get();
         let written = link.write(tap, &raw.0.to_string_lossy().replace('\\', "/"), Some(signal)).await.map_err(unread)?;
         let capture = read_capture(&raw.0, written.channels, written.sample_rate).await.map_err(unread)?;
-        let stretches = runs(&capture, Anchors { first: Some(written.beats), after_jump: Some(position) });
-        let (part, short) = match cover(&stretches, piece.from, piece.beats, capture.sample_rate) {
+        // The capture's beats are read off the app's thread: a long part holds millions of frames.
+        let anchors = Anchors { first: Some(written.beats), after_jump: Some(position) };
+        let (capture, covered) = tokio::task::spawn_blocking(move || {
+            let covered = cover(&runs(&capture, anchors), piece.from, piece.beats, capture.sample_rate);
+            (capture, covered)
+        })
+        .await
+        .map_err(unread)?;
+        let (part, short) = match covered {
             Ok(part) => (part, None),
             // Heard from the part's start but not to its end: what was heard is kept, and said.
             Err(Missed::Cut { run, to_beat, pieces, seconds }) => {

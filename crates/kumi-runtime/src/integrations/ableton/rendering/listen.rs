@@ -457,7 +457,7 @@ fn round_number(value: f64) -> f64 {
 /// The end of the last clip in the Arrangement, in beats.
 const SONG_END_SCRIPT: &str = "end = 0.0\nfor track in list(song.tracks):\n    for clip in list(getattr(track, 'arrangement_clips', None) or []):\n        end = max(end, float(clip.end_time))\nresult = {'end': end}\n";
 /// The longest stretch one listen hears, in seconds (a judged run's span, a form's, a sound's and an audition's too).
-const LONGEST_LISTEN: f64 = 3600.;
+pub(super) const LONGEST_LISTEN: f64 = 3600.;
 /// Why a stretch of `beats` is too long to hear at once, when it is, and what to do instead.
 pub(super) fn too_long(beats: f64, tempo: f64, instead: &str) -> Option<String> {
     let seconds = beats * 60. / tempo;

@@ -10,6 +10,7 @@ use crate::listening::{
     measure::{measure_file, MeasureOptions},
     notes::Grid,
 };
+use crate::references::tool::MEASURED;
 use kumi_common::js::string::head;
 
 /// What the model asks of the form tool: a stretch (the whole song without one) and a reference to compare with.
@@ -54,7 +55,9 @@ impl Rendering {
                     Ok(file) => file,
                     Err(why) => return Ok(Err(format!("The reference: {why}"))),
                 };
-                let heard = match measure_file(&file, MeasureOptions { signal: Some(signal.clone()), ..Default::default() }).await {
+                // Its first six minutes, as the reference tool measures a track.
+                let options = MeasureOptions { seconds: Some(MEASURED), signal: Some(signal.clone()), ..Default::default() };
+                let heard = match measure_file(&file, options).await {
                     Ok(heard) => heard,
                     Err(error) => return Ok(Err(format!("Kumi couldn't hear the reference: {}", head(&error.to_string(), 200)))),
                 };

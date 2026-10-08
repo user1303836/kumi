@@ -317,6 +317,23 @@ fn a_cut_at_a_resonance_reads_as_the_resonance_going_down_and_a_planned_cut_land
 }
 
 #[test]
+fn a_resonance_is_judged_where_it_stands_out_most() {
+    use kumi_runtime::listening::checklist::worst_stretch;
+    // Pink noise throughout, and a 1.1 kHz tone 12 dB over its third-octave from 12 s to 16 s only.
+    let noise = pink(20., -20., 7);
+    let mut tone = vec![0.; noise.len()];
+    let ring = sine(4., 1100., 0.07);
+    let from = (12. * RATE) as usize;
+    tone[from..from + ring.len()].copy_from_slice(&ring);
+    let mix = mixed(&[&noise, &tone]);
+    let heard = heard(&mix, &mix);
+    let at = worst_stretch(&heard, 1050., 1160., false, 4., 1.).unwrap();
+    assert!((at - 12.).abs() <= 1., "{at}");
+    // With no bins in the band, every stretch reads nothing, and the last is taken, as before.
+    assert!(worst_stretch(&heard, 30_000., 31_000., false, 4., 1.).is_some());
+}
+
+#[test]
 fn an_eq_is_fitted_to_a_gap_instead_of_tried() {
     use kumi_runtime::listening::fit::{fit, total, Band, Shape, MASTER_LIMITS};
     // The gap two known bands would close: a 4 dB dip at 800 Hz and 2.5 dB more air.

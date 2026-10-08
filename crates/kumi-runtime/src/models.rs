@@ -347,25 +347,30 @@ pub async fn runtime(say: Say<'_>, signal: &Signal) -> Result<(), String> {
             unpacked?;
         }
     }
-    LOADED
-        .get_or_init(|| match ort::init_from(&path) {
-            Ok(environment) => {
-                // The runtime's own log stays out of the terminal (and the app on it), unless KUMI_TIMING asks for it.
-                let log: ort::logging::LoggerFunction = std::sync::Arc::new(|level, category, _, _, message| {
-                    if std::env::var("KUMI_TIMING").is_ok_and(|set| !set.is_empty()) {
-                        eprintln!("[onnxruntime {level:?}] {category}: {message}");
+    // Loading the library is done off the app's thread.
+    tokio::task::spawn_blocking(move || {
+        LOADED
+            .get_or_init(|| match ort::init_from(&path) {
+                Ok(environment) => {
+                    // The runtime's own log stays out of the terminal (and the app on it), unless KUMI_TIMING asks for it.
+                    let log: ort::logging::LoggerFunction = std::sync::Arc::new(|level, category, _, _, message| {
+                        if std::env::var("KUMI_TIMING").is_ok_and(|set| !set.is_empty()) {
+                            eprintln!("[onnxruntime {level:?}] {category}: {message}");
+                        }
+                    });
+                    // Nothing about Kumi's model runs leaves the computer: ONNX Runtime's own telemetry is off.
+                    environment.with_logger(log).with_telemetry(false).commit();
+                    if let Ok(environment) = ort::environment::Environment::current() {
+                        environment.set_log_level(ort::logging::LogLevel::Warning);
                     }
-                });
-                // Nothing about Kumi's model runs leaves the computer: ONNX Runtime's own telemetry is off.
-                environment.with_logger(log).with_telemetry(false).commit();
-                if let Ok(environment) = ort::environment::Environment::current() {
-                    environment.set_log_level(ort::logging::LogLevel::Warning);
+                    Ok(())
                 }
-                Ok(())
-            }
-            Err(error) => Err(format!("Kumi couldn't load its model runtime: {error}")),
-        })
-        .clone()
+                Err(error) => Err(format!("Kumi couldn't load its model runtime: {error}")),
+            })
+            .clone()
+    })
+    .await
+    .map_err(|error| format!("Kumi couldn't load its model runtime: {error}"))?
 }
 
 static PREPARING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());

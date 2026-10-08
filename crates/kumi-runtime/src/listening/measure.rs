@@ -244,7 +244,8 @@ async fn measure_source(source: &mut AudioSource, options: &MeasureOptions) -> R
         done += left.len();
         tokio::task::yield_now().await;
     }
-    Ok(meter.finish())
+    // What's heard is worked out off the app's thread: a long take's measures take a while.
+    tokio::task::spawn_blocking(move || meter.finish()).await.map_err(|error| AudioError(error.to_string()))
 }
 
 /// Measures samples in memory (tests, and audio Kumi made itself).

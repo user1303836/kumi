@@ -420,18 +420,24 @@ pub fn link_path(url: &str) -> PathBuf {
 /// `audio_embeds`.
 pub async fn tells_tones_apart(model: &Path, say: Say<'_>, signal: &Signal) -> Result<String, String> {
     models::runtime(say, signal).await?;
-    let tone = |bright: bool| -> Vec<f32> {
-        let partials = if bright { 40 } else { 1 };
-        (0..(2. * CLAP_RATE) as usize)
-            .map(|n| {
-                let t = n as f64 / CLAP_RATE;
-                (1..=partials).map(|k| (2. * std::f64::consts::PI * 220. * k as f64 * t).sin() / k as f64).sum::<f64>() as f32 * 0.2
-            })
-            .collect()
-    };
+    // Both tones' log-mels, made off the app's thread.
+    let features = tokio::task::spawn_blocking(|| {
+        let tone = |bright: bool| -> Vec<f32> {
+            let partials = if bright { 40 } else { 1 };
+            (0..(2. * CLAP_RATE) as usize)
+                .map(|n| {
+                    let t = n as f64 / CLAP_RATE;
+                    (1..=partials).map(|k| (2. * std::f64::consts::PI * 220. * k as f64 * t).sin() / k as f64).sum::<f64>() as f32 * 0.2
+                })
+                .collect()
+        };
+        [false, true].map(|bright| clap_features(&tone(bright)))
+    })
+    .await
+    .map_err(|error| error.to_string())?;
     let mut heard = vec![];
-    for bright in [false, true] {
-        let input = Tensor { shape: vec![1, 1, CLAP_FRAMES, CLAP_MELS], data: clap_features(&tone(bright)) };
+    for data in features {
+        let input = Tensor { shape: vec![1, 1, CLAP_FRAMES, CLAP_MELS], data };
         let out = models::run(model, vec![("input_features".into(), input)], vec!["audio_embeds".into()])
             .await
             .map_err(|why| format!("it doesn't run as a style model in this slot does (input_features in, audio_embeds out): {why}"))?;
