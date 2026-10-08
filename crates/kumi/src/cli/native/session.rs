@@ -20,7 +20,7 @@ use kumi_runtime::{
         store_client::StoreClient,
     },
     library::{create_library, LibraryOptions},
-    listening::listener::{listener_from_env, listening_off, openai_listener, Listener},
+    listening::listener::{gemini_key, gemini_listener, listener_from_env, listening_off, openai_listener, Listener, GEMINI},
     providers::{api_key_for, ProviderId},
     video::programs::{configure_programs, ProgramDefaults},
     *,
@@ -418,6 +418,12 @@ pub(super) async fn run_session(
                         }
                         if let Some(listener) = listener_from_env(&env) {
                             return Ok(Some(Rc::new(listener) as Rc<dyn Listener>));
+                        }
+                        // Gemini first (the best at naming what it hears), then OpenAI's audio models, each by its own key.
+                        if let Some(key) = gemini_key(store.as_ref(), &env).await {
+                            if let Some(listener) = gemini_listener(GEMINI, &key, signal.clone()).await? {
+                                return Ok(Some(Rc::new(listener) as Rc<dyn Listener>));
+                            }
                         }
                         let Some(key) = api_key_for(ProviderId::Openai, store.as_ref(), Some(&env)).await.ok().flatten() else {
                             return Ok(None);

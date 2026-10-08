@@ -8,7 +8,7 @@ use super::super::{connection::NO_CURRENT_LIVE, display::parse_display};
 use super::rig::Window;
 use super::*;
 use crate::listening::{
-    checklist::{note_stretch, worst_stretch, Checklist, Explicit, Goal, Profile, Quantity, Row},
+    checklist::{note_stretch, worst_stretch, Checklist, Explicit, Goal, Profile, Quantity, Row, REGIONS},
     detect::{self, Problem, ProblemKind},
     judging::{self, Listen, Placed, RoundHost, Unheard},
     listener::{compare, Listener, Opinion, Take},
@@ -358,8 +358,17 @@ impl Rendering {
             };
             (after, target.map(|index| run.checklist.items[index].label.clone()), aim)
         };
-        // The listening model hears the change too: advice, unless it hears an obvious artifact both ways.
-        let heard_by = self.listen_to_change(&before, &heard, &aim, signal.clone()).await;
+        // The listening model hears the change too: advice, unless it hears an obvious artifact both ways. One that hears
+        // a mono downmix at a low rate isn't asked about width or the top octave.
+        let width_or_air = target.is_some_and(|index| {
+            let run = self.judge.borrow();
+            match run.as_ref().unwrap().checklist.items[index].quantity {
+                Quantity::LowWidth => true,
+                Quantity::Region { region } => crate::listening::measure::THIRDS[REGIONS[region].2] >= 8_000.,
+                _ => false,
+            }
+        });
+        let heard_by = self.listen_to_change(&before, &heard, &aim, width_or_air, signal.clone()).await;
         let listener = heard_by.as_ref().map(|(name, opinion)| opinion.line(name));
         let excerpt = Listen { values: after, loudness: heard.main.measures.integrated, file: heard.file.clone(), start: heard.start };
         let host = InLive { rendering: self, track: track.clone(), focus: focus.clone(), window, signal: signal.clone() };
@@ -595,8 +604,15 @@ impl Rendering {
     }
 
     /// What the listening model makes of the change: the excerpt before and after, level-matched, both ways.
-    async fn listen_to_change(&self, before: &Excerpt, after: &JudgeHeard, aim: &str, signal: Signal) -> Option<(String, Opinion)> {
-        let listener = self.listener(signal.clone()).await?;
+    async fn listen_to_change(
+        &self,
+        before: &Excerpt,
+        after: &JudgeHeard,
+        aim: &str,
+        width_or_air: bool,
+        signal: Signal,
+    ) -> Option<(String, Opinion)> {
+        let listener = self.listener(signal.clone()).await.filter(|listener| listener.hears_width() || !width_or_air)?;
         let tempo = self.observer.tempo.get().unwrap_or(120.);
         let seconds = before.window.beats * 60. / tempo;
         // Ten seconds from the middle of the excerpt.

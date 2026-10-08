@@ -356,9 +356,12 @@ trusting them:
   waits while Kumi works on the next one.
 - **A listening model**, when there is one, hears before and after too, and can
   turn down a change it hears as harsh, muddy or distorted; the meters decide
-  anything at the dB level. With an OpenAI API key it's OpenAI's newest audio
-  model; `KUMI_LISTENER` names another (`<base URL>#<model>`, such as a model
-  server on your computer), and `KUMI_LISTENER=off` leaves the meters alone.
+  anything at the dB level. With a Gemini API key (`GEMINI_API_KEY`) it's
+  Gemini's newest model, picked from Gemini's own list (it hears a mono mix, so
+  it isn't asked about width or air); else, with an OpenAI API key, OpenAI's
+  newest audio model. `KUMI_LISTENER` names another (`<base URL>#<model>`, such
+  as a model server on your computer), and `KUMI_LISTENER=off` leaves the meters
+  alone.
 
 **References** become targets too. Give Kumi a file, a folder of them, a YouTube
 video or playlist, a Spotify link, or just words ("like Burial", "dub techno",
@@ -794,8 +797,9 @@ says which need which.
   audio comes from a YouTube search and is deleted once it's measured.
 - **Audio** is analysed on your computer; only the numbers go to the model. A
   listening model, when there is one, gets short excerpts (at most 10 seconds
-  each, mono) of the changes it weighs: OpenAI with an OpenAI API key, or the
-  model in `KUMI_LISTENER`. `KUMI_LISTENER=off` stops that.
+  each, mono) of the changes it weighs: Gemini with a Gemini API key, OpenAI
+  with an OpenAI API key, or the model in `KUMI_LISTENER`. `KUMI_LISTENER=off`
+  stops that.
 - **Your voice** is written down on your computer, and the recording deleted as
   soon as it is; only the words leave, when you send them.
 - **Your library** is learned on your computer; only the manual's pages come from
@@ -835,6 +839,7 @@ Environment variables (paths must be absolute):
 | `OLLAMA_HOST`, `LM_API_TOKEN` | Where Ollama listens, as Ollama reads it; LM Studio's API token, when its server wants one |
 | `KUMI_EARS=0` | Hear the Set by recording, without Kumi Ears |
 | `KUMI_LISTENER`, `KUMI_LISTENER_KEY` | The listening model that judges changes beside the meters, as `<base URL>#<model>` (an OpenAI-compatible server that takes audio), and its key; `off` for none |
+| `GEMINI_API_KEY`, `GOOGLE_API_KEY` | A Gemini API key for the listening model (Gemini's newest model, from its own list) |
 | `KUMI_FAST=0` | Set device parameters through the bridge's preview and apply, the slower way ([how a change works](KUMI_CHANGES.md#how-a-change-works)) |
 | `KUMI_YTDLP`, `KUMI_FFMPEG`, `KUMI_WHISPER`, `KUMI_WHISPER_MODEL` | Your own yt-dlp, ffmpeg, whisper.cpp (`whisper-cli`) or speech model (`ggml-*.bin`), by path |
 | `KUMI_REMOTE_SCRIPTS_DIR` | Live's Remote Scripts folder, when Kumi doesn't find it |

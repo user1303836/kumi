@@ -20,7 +20,7 @@ use kumi_runtime::{
     integrations::ableton::{connection::Connect, options::ListenerSource, AbletonOptions},
     kernel::agent::AgentKernelOptions,
     kernel::agent::ModelBinding,
-    listening::listener::{listener_from_env, listening_off, openai_listener, Listener},
+    listening::listener::{gemini_key, gemini_listener, listener_from_env, listening_off, openai_listener, Listener, GEMINI},
     mcp::client,
     open_credential_store,
     providers::{api_key_for, resolve_model, ProviderId, ResolveModelOptions},
@@ -165,6 +165,12 @@ async fn run() -> Result<i32, RuntimeError> {
                 if let Some(listener) = listener_from_env(&env) {
                     return Ok(Some(Rc::new(listener) as Rc<dyn Listener>));
                 }
+                // Gemini first (the best at naming what it hears), then OpenAI's audio models, each by its own key.
+                if let Some(key) = gemini_key(store.as_ref(), &env).await {
+                    if let Some(listener) = gemini_listener(GEMINI, &key, signal.clone()).await? {
+                        return Ok(Some(Rc::new(listener) as Rc<dyn Listener>));
+                    }
+                }
                 let Some(key) = api_key_for(ProviderId::Openai, store.as_ref(), Some(&env)).await.ok().flatten() else { return Ok(None) };
                 Ok(openai_listener(&key.key, signal).await?.map(|listener| Rc::new(listener) as Rc<dyn Listener>))
             }
@@ -174,7 +180,7 @@ async fn run() -> Result<i32, RuntimeError> {
     if let Some(find) = &listener {
         match find(Signal::new()).await {
             Ok(Some(found)) => println!("Listening model: {}", found.name()),
-            Ok(None) => println!("Listening model: none found (no OpenAI API key, and KUMI_LISTENER isn't set)"),
+            Ok(None) => println!("Listening model: none found (no Gemini or OpenAI API key, and KUMI_LISTENER isn't set)"),
             Err(why) => println!("Listening model: couldn't look ({why})"),
         }
     }

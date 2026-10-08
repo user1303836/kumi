@@ -3,9 +3,10 @@
 //! 2 dB peak. Kumi asks it as an A/B ("which is closer to the aim?"), the two takes joined with a pause, then again with
 //! the order swapped, because models favor a position: only an answer that holds both ways counts.
 //!
-//! Any OpenAI-compatible chat endpoint that takes audio serves: OpenAI's own audio models with an API key, or a model
-//! on this computer (a llama.cpp server with Qwen3-Omni, say) named in `KUMI_LISTENER` as `<base url>#<model>`.
-//! `KUMI_LISTENER=off` leaves the meters alone.
+//! A model on this computer named in `KUMI_LISTENER` (`<base url>#<model>`, any OpenAI-compatible chat endpoint that
+//! takes audio: a llama.cpp server with Qwen3-Omni, say), else Gemini with a Gemini API key, else OpenAI's audio
+//! models with an OpenAI API key, each picked from the provider's own model list. `KUMI_LISTENER=off` leaves the meters
+//! alone.
 
 use crate::audio::decode::open_audio;
 use async_trait::async_trait;
@@ -60,6 +61,11 @@ impl Opinion {
 pub trait Listener {
     /// The model, as the log names it.
     fn name(&self) -> String;
+    /// Whether it hears stereo and the top octave: one that hears a mono downmix at a low rate isn't asked about width,
+    /// phase or air.
+    fn hears_width(&self) -> bool {
+        true
+    }
     /// Asks once: `first` then `second`, joined with a pause, against the aim. Answers "first", "second" or "same",
     /// and the problems it hears in each.
     async fn ask(&self, wav: &[u8], aim: &str, signal: Signal) -> Result<Answer, String>;
@@ -256,3 +262,105 @@ pub async fn openai_listener(key: &str, signal: Signal) -> Result<Option<ChatLis
 pub fn readable(path: &Path) -> bool {
     path.is_file()
 }
+
+/// Gemini, with a Gemini API key: the audio goes in a generateContent request, and the answer comes back as JSON.
+/// Gemini hears a mono downmix at a low rate, so it isn't asked about width, phase or air.
+pub struct GeminiListener {
+    pub base: String,
+    pub key: String,
+    /// "models/…", as Gemini's list names it.
+    pub model: String,
+    pub client: reqwest::Client,
+}
+
+#[async_trait(?Send)]
+impl Listener for GeminiListener {
+    fn name(&self) -> String {
+        self.model.trim_start_matches("models/").to_string()
+    }
+    fn hears_width(&self) -> bool {
+        false
+    }
+    async fn ask(&self, wav: &[u8], aim: &str, signal: Signal) -> Result<Answer, String> {
+        let body = json!({
+            "contents": [{"parts": [
+                {"text": question(aim)},
+                {"inline_data": {"mime_type": "audio/wav", "data": base64::engine::general_purpose::STANDARD.encode(wav)}}
+            ]}],
+            "generationConfig": {"responseMimeType": "application/json"}
+        });
+        let address = format!("{}/v1beta/{}:generateContent", self.base.trim_end_matches('/'), self.model);
+        let sent = tokio::select! {
+            sent = self.client.post(address).header("x-goog-api-key", &self.key).json(&body).send() => sent.map_err(|error| format!("the listening model didn't answer: {error}"))?,
+            _ = signal.cancelled() => return Err("stopped".into()),
+        };
+        let status = sent.status();
+        let reply: Value = tokio::select! {
+            reply = sent.json() => reply.map_err(|error| format!("the listening model's answer wasn't JSON: {error}"))?,
+            _ = signal.cancelled() => return Err("stopped".into()),
+        };
+        if !status.is_success() {
+            return Err(format!("the listening model refused ({status})"));
+        }
+        let text: String =
+            reply["candidates"][0]["content"]["parts"].as_array().into_iter().flatten().filter_map(|part| part["text"].as_str()).collect();
+        parse_answer(&text)
+            .ok_or_else(|| format!("the listening model's answer wasn't the JSON asked for: {}", kumi_common::js::string::head(&text, 120)))
+    }
+}
+
+/// Gemini's best listener for a key, from its own model list: the models that generate content from what they're
+/// given (not the embedding, speech, image or live ones), the newest version first, a released one before a preview,
+/// and of one version the light ("flash") one, which hears as well for a fraction of the cost. None when the list has
+/// none; an error when it couldn't be read.
+pub async fn gemini_listener(base: &str, key: &str, signal: Signal) -> Result<Option<GeminiListener>, String> {
+    let client = client();
+    let address = format!("{}/v1beta/models?pageSize=1000", base.trim_end_matches('/'));
+    let listed = tokio::select! {
+        listed = client.get(address).header("x-goog-api-key", key).timeout(std::time::Duration::from_secs(20)).send() => listed.map_err(|error| error.to_string())?,
+        _ = signal.cancelled() => return Err("stopped".into()),
+    };
+    if !listed.status().is_success() {
+        return Err(format!("Gemini's model list answered {}", listed.status()));
+    }
+    let body: Value = tokio::select! {
+        body = listed.json() => body.map_err(|error| error.to_string())?,
+        _ = signal.cancelled() => return Err("stopped".into()),
+    };
+    let model = body["models"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|row| row["supportedGenerationMethods"].as_array().is_some_and(|ways| ways.iter().any(|way| way == "generateContent")))
+        .filter_map(|row| row["name"].as_str())
+        .filter(|name| !["embedding", "tts", "image", "live", "aqa", "native-audio"].iter().any(|word| name.contains(word)))
+        .max_by_key(|name| gemini_rank(name))
+        .map(str::to_owned);
+    Ok(model.map(|model| GeminiListener { base: base.trim_end_matches('/').into(), key: key.into(), model, client }))
+}
+
+/// How a Gemini model ranks as a listener, from its name: its version, a released one over a preview or experiment,
+/// then the light one of a version.
+fn gemini_rank(name: &str) -> (Vec<u32>, bool, bool) {
+    let version: Vec<u32> = name
+        .trim_start_matches("models/")
+        .split('-')
+        .find(|part| part.chars().next().is_some_and(|c| c.is_ascii_digit()))
+        .map(|part| part.split('.').filter_map(|piece| piece.parse().ok()).collect())
+        .unwrap_or_default();
+    (version, !(name.contains("preview") || name.contains("exp")), name.contains("flash") && !name.contains("lite"))
+}
+
+/// Gemini's API key: saved under "gemini", else GEMINI_API_KEY or GOOGLE_API_KEY.
+pub async fn gemini_key(
+    store: &dyn crate::auth::store::CredentialStore,
+    env: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    if let Ok(Some(crate::auth::store::Credential::ApiKey { key })) = store.get("gemini").await {
+        return Some(key);
+    }
+    ["GEMINI_API_KEY", "GOOGLE_API_KEY"].iter().find_map(|name| env.get(*name).filter(|key| !key.trim().is_empty()).cloned())
+}
+
+/// Gemini's public address.
+pub const GEMINI: &str = "https://generativelanguage.googleapis.com";
