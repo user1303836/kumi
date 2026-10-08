@@ -18,6 +18,9 @@ pub struct Bar {
     pub brightness: f64,
     /// Its share below 120 Hz, dB.
     pub low: f64,
+    /// Silent for most of it: a gap, a lead-in or a tail.
+    #[serde(default)]
+    pub silent: bool,
 }
 
 /// A section: its bars (from 0, end not included), its role, and the letter it shares with the sections it repeats.
@@ -59,7 +62,7 @@ pub struct Form {
 
 /// The form of what was heard, `bar` seconds a bar.
 pub fn form(heard: &Heard, bar: f64) -> Form {
-    let bars = curve(heard, bar);
+    let bars = floored(curve(heard, bar));
     let sections = sections(&bars);
     let transitions = transitions(&bars, &sections);
     let peak = sections.iter().map(|section| section.loudness).fold(f64::MIN, f64::max);
@@ -104,6 +107,7 @@ pub fn curve(heard: &Heard, bar: f64) -> Vec<Bar> {
         .map(|at| flux[at] > line && (at == 0 || flux[at] >= flux[at - 1]) && flux.get(at + 1).is_none_or(|next| flux[at] >= *next))
         .collect();
     let low_bands = THIRDS.iter().filter(|hz| **hz < 120.).count();
+    let loudest = frames.level.iter().copied().fold(f32::MIN, f32::max) as f64;
     (0..count)
         .map(|index| {
             let range = (index as f64 * per_bar) as usize..(((index + 1) as f64 * per_bar) as usize).min(frames.level.len());
@@ -120,17 +124,47 @@ pub fn curve(heard: &Heard, bar: f64) -> Vec<Bar> {
                 density: range.clone().filter(|frame| onset.get(*frame).copied().unwrap_or(false)).count() as f64 / bar,
                 brightness: centre,
                 low: 10. * ((low + 1e-20) / total).log10(),
+                silent: range.clone().filter(|frame| (frames.level[*frame] as f64) < loudest - SILENT).count() * 2 >= range.len().max(1),
             }
         })
         .collect()
+}
+
+/// How far under the loudest a frame or a bar is silent (a gap, a lead-in, a tail): a silent bar's loudness is held
+/// there.
+const SILENT: f64 = 60.;
+
+/// Which bars are silent: most of their frames, or the whole bar, `SILENT` dB and more under the loudest.
+fn silent(bars: &[Bar]) -> Vec<bool> {
+    let loudest = bars.iter().map(|bar| bar.loudness).fold(f64::MIN, f64::max);
+    bars.iter().map(|bar| bar.silent || bar.loudness <= loudest - SILENT + 1e-9).collect()
+}
+
+/// The curve with its silent bars held at the floor (`SILENT` dB under the loudest) and given the density, brightness
+/// and low end of the nearest bar that's heard: digital silence reads -197 dB with no spectrum, which would swamp the
+/// song's scale and read as a riser out of nothing. A silent bar stays a gap (a turn's preparation).
+fn floored(mut bars: Vec<Bar>) -> Vec<Bar> {
+    let quiet = silent(&bars);
+    let floor = bars.iter().map(|bar| bar.loudness).fold(f64::MIN, f64::max) - SILENT;
+    for index in 0..bars.len() {
+        if !quiet[index] {
+            continue;
+        }
+        let near =
+            (1..bars.len()).flat_map(|by| [index.checked_sub(by), Some(index + by)]).flatten().find(|at| *at < bars.len() && !quiet[*at]);
+        bars[index] = Bar { loudness: floor, silent: true, ..near.map_or(bars[index], |at| bars[at]) };
+    }
+    bars
 }
 
 /// The least each measure's spread is taken as: about one noticeable step (2 dB of loudness, an onset a second, a
 /// quarter of an octave of brightness, 2 dB of low end), so a song that barely moves isn't read as one that does.
 const FLOORS: [f64; 4] = [2., 1., 0.25, 2.];
 
-/// The bars as one vector each, every measure put on the song's own scale (how far from its middle, in its spread).
+/// The bars as one vector each, every measure put on the song's own scale (how far from its middle, in its spread):
+/// the scale of the bars that are heard, silent ones left out of it.
 fn scaled(bars: &[Bar]) -> Vec<[f64; 4]> {
+    let quiet = silent(bars);
     let columns: Vec<Vec<f64>> = vec![
         bars.iter().map(|bar| bar.loudness).collect(),
         bars.iter().map(|bar| bar.density).collect(),
@@ -141,8 +175,9 @@ fn scaled(bars: &[Bar]) -> Vec<[f64; 4]> {
         .iter()
         .zip(FLOORS)
         .map(|(column, floor)| {
-            let mean = column.iter().sum::<f64>() / column.len().max(1) as f64;
-            let spread = (column.iter().map(|value| (value - mean).powi(2)).sum::<f64>() / column.len().max(1) as f64).sqrt();
+            let heard: Vec<f64> = column.iter().zip(&quiet).filter(|(_, quiet)| !**quiet).map(|(value, _)| *value).collect();
+            let mean = heard.iter().sum::<f64>() / heard.len().max(1) as f64;
+            let spread = (heard.iter().map(|value| (value - mean).powi(2)).sum::<f64>() / heard.len().max(1) as f64).sqrt();
             (mean, spread.max(floor))
         })
         .collect();
@@ -174,21 +209,28 @@ fn mean(rows: &[[f64; 4]]) -> [f64; 4] {
 }
 
 /// The sections: cut where the bars on either side differ most (four bars each way), at least four bars apart; each
-/// with its role (by how its energy sits in the song) and a letter shared with the sections it sounds like.
+/// with its role (by how its energy sits in the song) and a letter shared with the sections it sounds like. Silent bars
+/// aren't compared (the bars heard on either side of them are), and no section starts on one: a gap ends the section
+/// before it.
 pub fn sections(bars: &[Bar]) -> Vec<Section> {
     if bars.is_empty() {
         return vec![];
     }
     let rows = scaled(bars);
+    let quiet = silent(bars);
+    let heard: Vec<usize> = (0..bars.len()).filter(|at| !quiet[*at]).collect();
     let width = 4;
     let novelty: Vec<f64> = (0..=bars.len())
         .map(|at| {
-            if at < 2 || at + 2 > bars.len() {
+            if at < 2 || at + 2 > bars.len() || quiet.get(at) == Some(&true) {
                 return 0.;
             }
-            let before = &rows[at.saturating_sub(width)..at];
-            let after = &rows[at..(at + width).min(rows.len())];
-            distance(&mean(before), &mean(after))
+            let before: Vec<[f64; 4]> = heard.iter().rev().filter(|bar| **bar < at).take(width).map(|bar| rows[*bar]).collect();
+            let after: Vec<[f64; 4]> = heard.iter().filter(|bar| **bar >= at).take(width).map(|bar| rows[*bar]).collect();
+            if before.is_empty() || after.is_empty() {
+                return 0.;
+            }
+            distance(&mean(&before), &mean(&after))
         })
         .collect();
     let mut ranked: Vec<usize> = (1..bars.len()).filter(|at| novelty[*at] > 0.).collect();
@@ -225,10 +267,10 @@ pub fn sections(bars: &[Bar]) -> Vec<Section> {
             // Rising: its second half louder than its first by 2 dB (its last bar left out: a window there hears the next
             // section's start).
             let rising = to - from >= 4 && {
-                let body = &bars[*from..to - 1];
+                let body: Vec<f64> = (*from..to - 1).filter(|at| !quiet[*at]).map(|at| bars[at].loudness).collect();
                 let half = body.len() / 2;
-                let level = |bars: &[Bar]| bars.iter().map(|bar| bar.loudness).sum::<f64>() / bars.len().max(1) as f64;
-                level(&body[half..]) - level(&body[..half]) > 2.
+                let level = |levels: &[f64]| levels.iter().sum::<f64>() / levels.len().max(1) as f64;
+                body.len() >= 2 && level(&body[half..]) - level(&body[..half]) > 2.
             };
             let role = if loudness >= peak - 1.5 {
                 "peak"
@@ -243,7 +285,8 @@ pub fn sections(bars: &[Bar]) -> Vec<Section> {
             } else {
                 "verse"
             };
-            let centre = mean(&rows[*from..*to]);
+            let heard: Vec<[f64; 4]> = (*from..*to).filter(|at| !quiet[*at]).map(|at| rows[at]).collect();
+            let centre = mean(if heard.is_empty() { &rows[*from..*to] } else { &heard[..] });
             let letter = match letters.iter().find(|(known, _)| distance(known, &centre) < 0.75) {
                 Some((_, letter)) => *letter,
                 None => {

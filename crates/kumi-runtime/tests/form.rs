@@ -110,3 +110,23 @@ fn a_song_that_never_moves_plateaus_and_is_compared_with_one_that_does() {
     assert!(said.iter().any(|line| line.starts_with("contrast between sections")), "{said:?}");
     assert!(said.iter().any(|line| line.starts_with("intro")), "{said:?}");
 }
+
+#[test]
+fn silent_bars_dont_wipe_out_the_sections_around_them() {
+    // Intro, verse, break, drop and outro at -20, -15, -21, -10 and -20 dB, told apart by their level alone.
+    let part = |bars: usize, level: f64| Part { bars, from: level, to: level, hits: 2., bright: 0.4 };
+    let clean = song(&[part(16, -20.), part(16, -15.), part(8, -21.), part(16, -10.), part(8, -20.)]);
+    let bar = (BAR * RATE) as usize;
+    let cuts = |samples: &[f64]| edges(&form(&heard(samples), BAR));
+    let near = |found: &[usize], expected: &[usize]| {
+        found.len() == expected.len() && expected.iter().all(|at| found.iter().any(|cut| cut.abs_diff(*at) <= 1))
+    };
+    // As it is; with one silent bar before the drop (the gap ends the break); starting a bar in, as an Arrangement can;
+    // and with two silent bars at its end.
+    let mut gap = clean.clone();
+    gap[39 * bar..40 * bar].fill(0.);
+    let found =
+        [cuts(&clean), cuts(&gap), cuts(&[vec![0.; bar], clean.clone()].concat()), cuts(&[clean.clone(), vec![0.; 2 * bar]].concat())];
+    let expected = [[16, 32, 40, 56], [16, 32, 40, 56], [17, 33, 41, 57], [16, 32, 40, 56]];
+    assert!(found.iter().zip(&expected).all(|(found, expected)| near(found, expected)), "{found:?}");
+}

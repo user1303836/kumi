@@ -73,7 +73,8 @@ impl Rendering {
             else {
                 continue;
             };
-            let Ok(clips) = self.rows("arrangement-clip", json!({"parent":reference,"fields":["start","length"]}), signal.clone()).await
+            let Ok(clips) =
+                self.rows("arrangement-clip", json!({"parent":reference,"fields":["start","endTime","length"]}), signal.clone()).await
             else {
                 continue;
             };
@@ -81,7 +82,11 @@ impl Rendering {
                 .iter()
                 .filter_map(|clip| {
                     let start = clip.get("start").and_then(Value::as_f64)?;
-                    let end = start + clip.get("length").and_then(Value::as_f64)?;
+                    // Where it stops playing: a looped clip's length is its loop's, not how far it runs.
+                    let end = match clip.get("endTime").and_then(Value::as_f64) {
+                        Some(end) => end,
+                        None => start + clip.get("length").and_then(Value::as_f64)?,
+                    };
                     let (start, end) = (start.max(span.from), end.min(span.from + span.beats));
                     (end > start).then(|| ((start / meter).floor() as usize + 1, (end / meter).ceil() as usize))
                 })
