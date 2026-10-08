@@ -856,6 +856,18 @@ pub fn create_web_client(options: WebClientOptions) -> Rc<dyn WebClient> {
 }
 
 /// Why a status isn't a page, in a few words ("it refused Kumi").
+/// A response's body, read until `most` bytes: a longer one is refused rather than held in memory.
+pub async fn body_at_most(mut response: reqwest::Response, most: usize) -> Result<Vec<u8>, String> {
+    let mut body = Vec::new();
+    while let Some(piece) = response.chunk().await.map_err(|error| error.to_string())? {
+        if body.len() + piece.len() > most {
+            return Err(format!("its answer ran past {} kB", most / 1000));
+        }
+        body.extend_from_slice(&piece);
+    }
+    Ok(body)
+}
+
 pub fn status_words(status: u16) -> String {
     match status_word(status) {
         Some(words) => words.to_string(),

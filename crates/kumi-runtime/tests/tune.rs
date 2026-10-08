@@ -193,6 +193,13 @@ fn a_knob_probed_before_starts_where_its_saved_response_says() {
     probes.add("Reverb", "Decay Time", "decay time", "Pad", &heard, None).unwrap();
     assert_eq!(probes.load("Reverb", "Size", "decay time", "Pad"), None);
     assert_eq!(probes.load("Reverb", "Decay Time", "tail share", "Pad"), None);
+    // Only the producer's: the folder Kumi made is 0700 and the file 0600.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(std::fs::metadata(dir.join("reverb.json")).unwrap().permissions().mode() & 0o777, 0o600);
+    }
     // Heard on the pad: not what the knob does to the drums.
     assert_eq!(probes.load("Reverb", "Decay Time", "decay time", "Drums"), None);
     let saved = probes.load("Reverb", "Decay Time", "decay time", "Pad").unwrap();

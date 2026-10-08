@@ -391,15 +391,28 @@ pub async fn fetch_link(link: &str, signal: &Signal) -> Result<PathBuf, String> 
     } else {
         url
     };
-    let name =
-        url.split(['?', '#']).next().unwrap_or(&url).rsplit('/').next().filter(|name| name.ends_with(".onnx")).unwrap_or("model.onnx");
+    let path = link_path(&url);
+    if !path.starts_with(models::dir().join("slots")) {
+        return Err(format!("Kumi wouldn't keep the model from {link} outside its models folder."));
+    }
+    models::fetch_unpinned(&url, &path, signal).await?;
+    Ok(path)
+}
+
+/// Where a model fetched from `url` is kept: in a folder of its own under models/slots, by the file's own name when
+/// that's a plain .onnx name (letters, digits, dots, dashes and underscores, so no `..\` or drive reaches outside
+/// it), else as model.onnx.
+pub fn link_path(url: &str) -> PathBuf {
+    let last = url.split(['?', '#']).next().unwrap_or(url).rsplit(['/', '\\']).next().unwrap_or("");
+    let plain = |name: &&str| {
+        name.ends_with(".onnx") && !name.starts_with('.') && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+    };
+    let name = Some(last).filter(plain).unwrap_or("model.onnx");
     let tag: String = {
         use sha2::{Digest, Sha256};
         hex::encode(Sha256::digest(url.as_bytes()))[..12].to_string()
     };
-    let path = models::dir().join("slots").join(tag).join(name);
-    models::fetch_unpinned(&url, &path, signal).await?;
-    Ok(path)
+    models::dir().join("slots").join(tag).join(name)
 }
 
 /// The quick test for a style model in the embeddings slot: two known tones, a plain one and a bright one, have to

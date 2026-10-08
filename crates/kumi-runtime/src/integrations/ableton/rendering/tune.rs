@@ -978,14 +978,11 @@ fn read_journal(file: &Path) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-/// Written whole beside itself and moved into place; gone once it holds nothing.
+/// Written whole beside itself and moved into place, only the producer's; gone once it holds nothing.
 fn write_journal(file: &Path, entries: &[Value]) {
     if entries.is_empty() {
         let _ = std::fs::remove_file(file);
         return;
     }
-    let temporary = file.with_extension("json.partial");
-    if std::fs::write(&temporary, serde_json::to_vec(entries).unwrap_or_default()).is_ok() {
-        let _ = std::fs::rename(&temporary, file);
-    }
+    let _ = crate::core::private::write(file, &serde_json::to_vec(entries).unwrap_or_default());
 }

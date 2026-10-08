@@ -5,8 +5,8 @@
 //!
 //! A model on this computer named in `KUMI_LISTENER` (`<base url>#<model>`, any OpenAI-compatible chat endpoint that
 //! takes audio: a llama.cpp server with Qwen3-Omni, say), else Gemini with a Gemini API key, else OpenAI's audio
-//! models with an OpenAI API key, each picked from the provider's own model list. `KUMI_LISTENER=off` leaves the meters
-//! alone.
+//! models with an OpenAI API key, each picked from the provider's own model list. `KUMI_LISTENER=off`, or any value
+//! that isn't `<base url>#<model>`, leaves the meters alone: an opt-out never falls through to a cloud model.
 
 use crate::audio::decode::open_audio;
 use async_trait::async_trait;
@@ -69,6 +69,10 @@ pub trait Listener {
     /// Turned off since it was found: the listening slot now says off.
     fn off(&self) -> bool {
         false
+    }
+    /// Why it's off, when it is ("Listening is off in /slots").
+    fn off_why(&self) -> String {
+        "Listening is off".into()
     }
     /// Asks once: `first` then `second`, joined with a pause, against the aim. Answers "first", "second" or "same",
     /// and the problems it hears in each.
@@ -195,7 +199,7 @@ impl Listener for ChatListener {
         };
         let status = sent.status();
         let reply: Value = tokio::select! {
-            reply = sent.json() => reply.map_err(|error| format!("the listening model's answer wasn't JSON: {error}"))?,
+            reply = answer(sent) => reply?,
             _ = signal.cancelled() => return Err("stopped".into()),
         };
         if !status.is_success() {
@@ -207,32 +211,67 @@ impl Listener for ChatListener {
     }
 }
 
-/// The JSON object in a model's answer (it may wrap it in prose or a code fence).
+/// A listening model's answer as JSON, read up to a megabyte (an answer is a few lines).
+async fn answer(sent: reqwest::Response) -> Result<Value, String> {
+    let body = crate::web::net::body_at_most(sent, 1_000_000).await.map_err(|why| format!("the listening model's answer: {why}"))?;
+    serde_json::from_slice(&body).map_err(|error| format!("the listening model's answer wasn't JSON: {error}"))
+}
+
+/// A provider's model list as JSON, read up to 8 MB.
+async fn model_list(listed: reqwest::Response) -> Result<Value, String> {
+    let body = crate::web::net::body_at_most(listed, 8_000_000).await.map_err(|why| format!("the model list: {why}"))?;
+    serde_json::from_slice(&body).map_err(|error| error.to_string())
+}
+
+/// The JSON object in a model's answer (it may wrap it in prose or a code fence). None when there's none, a closing
+/// brace before the opening one included.
 pub fn parse_answer(text: &str) -> Option<Answer> {
     let start = text.find('{')?;
     let end = text.rfind('}')?;
-    serde_json::from_str(&text[start..=end]).ok()
+    serde_json::from_str(text.get(start..=end)?).ok()
 }
 
-/// `KUMI_LISTENER=off`: no listening model, the meters alone (no audio leaves the computer).
-pub fn listening_off(env: &std::collections::HashMap<String, String>) -> bool {
-    env.get("KUMI_LISTENER").is_some_and(|value| matches!(value.trim().to_lowercase().as_str(), "off" | "none" | "0" | "false"))
-}
-/// A listener named in `KUMI_LISTENER` (`<base url>#<model>`, its key in `KUMI_LISTENER_KEY` when it needs one).
-pub fn listener_from_env(env: &std::collections::HashMap<String, String>) -> Option<ChatListener> {
-    let named = env.get("KUMI_LISTENER").filter(|value| !value.trim().is_empty())?;
-    let (base, model) = named.split_once('#')?;
-    Some(ChatListener {
-        base: base.trim().into(),
-        key: env.get("KUMI_LISTENER_KEY").cloned(),
-        model: model.trim().into(),
-        client: client(),
-    })
+/// What `KUMI_LISTENER` says.
+pub enum FromEnv {
+    /// Unset or empty: the listening slot decides.
+    Unset,
+    /// A model by its address (`<base url>#<model>`, its key in `KUMI_LISTENER_KEY` when it needs one).
+    Named(ChatListener),
+    /// No listening model, the meters alone, and why. Any value that isn't a model's address is off: an opt-out
+    /// that's misspelled or quoted never falls through to a cloud model.
+    Off(String),
 }
 
-/// A client that gives up on a model that stops answering (a minute and a half: it hears 20 s of audio).
-fn client() -> reqwest::Client {
-    reqwest::Client::builder().timeout(std::time::Duration::from_secs(90)).build().unwrap_or_default()
+/// What `KUMI_LISTENER` says (its value is never repeated back: an address may carry a password).
+pub fn from_env(env: &std::collections::HashMap<String, String>) -> FromEnv {
+    let Some(value) = env.get("KUMI_LISTENER").map(|value| value.trim().trim_matches(['"', '\'']).trim()).filter(|value| !value.is_empty())
+    else {
+        return FromEnv::Unset;
+    };
+    if matches!(value.to_lowercase().as_str(), "off" | "none" | "0" | "false" | "no" | "disabled") {
+        return FromEnv::Off("KUMI_LISTENER turns listening off".into());
+    }
+    match value.split_once('#') {
+        Some((base, model)) if (base.starts_with("http://") || base.starts_with("https://")) && !model.trim().is_empty() => {
+            FromEnv::Named(ChatListener {
+                base: base.trim().into(),
+                key: env.get("KUMI_LISTENER_KEY").cloned(),
+                model: model.trim().into(),
+                client: client(),
+            })
+        }
+        _ => FromEnv::Off("KUMI_LISTENER is neither off nor a model's address (<base url>#<model>), so listening is off".into()),
+    }
+}
+
+/// A client for a listening model: one that gives up on a model that stops answering (a minute and a half: it hears
+/// 20 s of audio), and follows no redirect, so a key never goes on to another host.
+pub(crate) fn client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(90))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap_or_default()
 }
 
 /// OpenAI's newest audio-capable chat model for a key, from its own model list (ids that take audio: "…audio…", not
@@ -248,7 +287,7 @@ pub async fn openai_listener(key: &str, signal: Signal) -> Result<Option<ChatLis
         return Err(format!("OpenAI's model list answered {}", listed.status()));
     }
     let body: Value = tokio::select! {
-        body = listed.json() => body.map_err(|error| error.to_string())?,
+        body = model_list(listed) => body?,
         _ = signal.cancelled() => return Err("stopped".into()),
     };
     let model = body["data"]
@@ -300,7 +339,7 @@ impl Listener for GeminiListener {
         };
         let status = sent.status();
         let reply: Value = tokio::select! {
-            reply = sent.json() => reply.map_err(|error| format!("the listening model's answer wasn't JSON: {error}"))?,
+            reply = answer(sent) => reply?,
             _ = signal.cancelled() => return Err("stopped".into()),
         };
         if !status.is_success() {
@@ -328,7 +367,7 @@ pub async fn gemini_listener(base: &str, key: &str, signal: Signal) -> Result<Op
         return Err(format!("Gemini's model list answered {}", listed.status()));
     }
     let body: Value = tokio::select! {
-        body = listed.json() => body.map_err(|error| error.to_string())?,
+        body = model_list(listed) => body?,
         _ = signal.cancelled() => return Err("stopped".into()),
     };
     let model = body["models"]

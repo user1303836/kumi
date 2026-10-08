@@ -171,10 +171,19 @@ async fn login_with(config: &AppConfig, io: &CliIo) -> Result<(), RuntimeError> 
 }
 pub async fn run(io: CliIo, factory: AbletonFactory) -> i32 {
     io.exit_after_reopen.set(false);
-    let mut secrets: Vec<String> = ["AI_GATEWAY_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENCODE_API_KEY", "LM_API_TOKEN"]
-        .into_iter()
-        .filter_map(|s| io.env.get(s).filter(|s| !s.is_empty()).cloned())
-        .collect();
+    let mut secrets: Vec<String> = [
+        "AI_GATEWAY_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENCODE_API_KEY",
+        "LM_API_TOKEN",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "KUMI_LISTENER_KEY",
+    ]
+    .into_iter()
+    .filter_map(|s| io.env.get(s).filter(|s| !s.is_empty()).cloned())
+    .collect();
     if let Ok(file) = load_settings_file(&io.env) {
         for server in read_settings(&file).model_servers {
             if let Some(key) = server.api_key.filter(|s| !s.is_empty()) {

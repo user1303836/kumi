@@ -347,7 +347,8 @@ pub async fn runtime(say: Say<'_>, signal: &Signal) -> Result<(), String> {
                         eprintln!("[onnxruntime {level:?}] {category}: {message}");
                     }
                 });
-                environment.with_logger(log).commit();
+                // Nothing about Kumi's model runs leaves the computer: ONNX Runtime's own telemetry is off.
+                environment.with_logger(log).with_telemetry(false).commit();
                 if let Ok(environment) = ort::environment::Environment::current() {
                     environment.set_log_level(ort::logging::LogLevel::Warning);
                 }

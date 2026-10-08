@@ -141,7 +141,14 @@ impl Fetcher {
         if let Some(kept) = kept(&self.folder, &id) {
             return Ok(kept);
         }
-        tokio::fs::create_dir_all(&self.folder).await.map_err(|error| format!("Kumi couldn't make {}: {error}", self.folder.display()))?;
+        // Only the producer's: what's downloaded into it stays out of other users' reach (yt-dlp writes its files as the
+        // system's defaults have them).
+        let mut builder = tokio::fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        builder.mode(0o700);
+        builder.create(&self.folder).await.map_err(|error| format!("Kumi couldn't make {}: {error}", self.folder.display()))?;
+        sweep(&self.folder);
         let (ytdlp, extras) = self.ytdlp(signal).await?;
         let template = self.folder.join(format!("{id}.%(ext)s"));
         let mut args: Vec<String> = vec![
@@ -189,6 +196,19 @@ pub fn kept(folder: &Path, id: &str) -> Option<PathBuf> {
             && path.file_stem().and_then(|stem| stem.to_str()) == Some(id)
             && path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| !matches!(ext, "part" | "ytdl" | "temp"))
     })
+}
+
+/// What a Kumi that stopped mid-measure left in the folder (a download it never got to delete once measured), gone once
+/// it's a day old.
+fn sweep(folder: &Path) {
+    let Ok(entries) = std::fs::read_dir(folder) else { return };
+    let day = std::time::Duration::from_secs(24 * 3600);
+    for path in entries.filter_map(|entry| entry.ok().map(|entry| entry.path())) {
+        let age = std::fs::metadata(&path).and_then(|meta| meta.modified()).ok().and_then(|at| at.elapsed().ok());
+        if path.is_file() && age.is_some_and(|age| age > day) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 /// What a failed download left behind (`<id>.m4a.part` and the like), gone.

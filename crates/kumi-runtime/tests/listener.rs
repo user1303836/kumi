@@ -1,7 +1,7 @@
 //! The listening model through Gemini: picked from Gemini's own model list by what each model does, asked with the
 //! audio in a generateContent request, its JSON answer read back; and kept off questions about width or air.
 use kumi_common::abort::Signal;
-use kumi_runtime::listening::listener::{gemini_listener, Listener};
+use kumi_runtime::listening::listener::{from_env, gemini_listener, parse_answer, FromEnv, Listener};
 use std::{cell::RefCell, rc::Rc};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -88,4 +88,22 @@ async fn gemini_listens_with_the_newest_model_that_takes_what_its_given_and_answ
             assert!(gemini_listener(&base, "the-key", Signal::new()).await.unwrap().is_none());
         })
         .await;
+}
+
+#[test]
+fn kumi_listener_names_a_model_or_turns_listening_off() {
+    let env = |value: &str| [("KUMI_LISTENER".to_string(), value.to_string())].into_iter().collect::<std::collections::HashMap<_, _>>();
+    // Off, said any way, and anything that isn't a model's address: an opt-out never falls through to a cloud model.
+    for off in ["off", "No", "disabled", "\"off\"", "gemini", "http://127.0.0.1:8080/v1", "127.0.0.1:8080/v1#qwen", "http://host#"] {
+        assert!(matches!(from_env(&env(off)), FromEnv::Off(_)), "{off}");
+    }
+    assert!(matches!(from_env(&env("http://127.0.0.1:8080/v1#qwen")), FromEnv::Named(_)));
+    assert!(matches!(from_env(&env("  ")), FromEnv::Unset));
+    assert!(matches!(from_env(&Default::default()), FromEnv::Unset));
+}
+
+#[test]
+fn an_answer_with_its_braces_the_wrong_way_round_is_no_answer() {
+    assert_eq!(parse_answer("} {"), None);
+    assert_eq!(parse_answer("Here: {\"closer\": \"first\"}").map(|answer| answer.closer), Some("first".to_string()));
 }

@@ -69,8 +69,9 @@ struct GainStage {
     limited: bool,
 }
 
-/// The first round's word when no listening model is found.
-const NO_LISTENER: &str = "No listening model: judging by Kumi's meters alone (add GEMINI_API_KEY to have one listen too)";
+/// The first round's word when no listening model is found (and none was turned off: that says why instead).
+const NO_LISTENER: &str =
+    "No listening model: judging by Kumi's meters alone (with a Gemini or OpenAI API key one listens too; /slots shows the choices)";
 
 /// A judged run: its checklist, what the whole stretch measures as things stand, and the rounds so far.
 pub struct JudgeRun {
@@ -302,9 +303,16 @@ impl Rendering {
                 change: crate::listening::checklist::Change::Same,
             })
             .collect();
-        // Said once a run: whether a listening model will hear the changes beside the meters.
+        // Said once a run: whether a listening model will hear the changes beside the meters, and which one, since what
+        // it hears leaves the computer; or why none will.
         let alone = match self.listener(signal.clone()).await {
-            (Some(_), _) => None,
+            (Some(listener), _) if listener.off() => {
+                Some(format!("{}: judging by Kumi's meters alone, and nothing is sent", listener.off_why()))
+            }
+            (Some(listener), _) => Some(format!(
+                "{} will hear 10 s of each change, before and after, beside the meters; /slots listening off stops it",
+                listener.name()
+            )),
             // A key is there but the model couldn't be reached: that, not the key, is what to say.
             (None, Some((why, _))) => {
                 Some(format!("The listening model couldn't be reached ({why}): judging by Kumi's meters alone for now"))

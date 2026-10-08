@@ -325,6 +325,9 @@ async fn words_become_an_artists_an_albums_or_a_genres_tracks() {
             // Words that only look like a path are words.
             let found = sources.resolve(".38 Special", 6, Signal::new()).await.unwrap();
             assert_eq!(titles(&found), ["Hold On Loosely"]);
+            // An audio file that isn't there is said so, not looked up as words.
+            let missing = sources.resolve("missing mixdown.wav", 6, Signal::new()).await;
+            assert!(missing.as_ref().is_err_and(|why| why.starts_with("There's no such file")), "{missing:?}");
             assert!(matches!(sources.resolve("Music", 6, Signal::new()).await, Ok(Resolved::Ask { .. })));
         })
         .await;
@@ -634,6 +637,14 @@ async fn kept_references_are_found_by_name_only_among_ones_made_from_words() {
     let kept = kept_reference("x", "X", "artist", None);
     store.save(&kept).await.unwrap();
     assert_eq!(ReferenceStore::new(place.path().join("kept")).load("X").await.unwrap(), kept);
+    // Only the producer's: its folder 0700 and its files 0600.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&place.path().join("kept")), 0o700);
+        assert_eq!(mode(&place.path().join("kept").join("x.json")), 0o600);
+    }
 }
 
 /// A stand-in yt-dlp: it writes each call's arguments to `args.log` (a call per block), answers searches and playlists

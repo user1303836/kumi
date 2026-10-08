@@ -162,6 +162,11 @@ impl Sources {
         if looks_like_path(what) {
             return files(&crate::audio::audio_path(what), count);
         }
+        // An audio file's name, or a Windows path, that isn't there is said so, not searched for as words (a name with
+        // a slash, AC/DC say, still is).
+        if audio(Path::new(what.trim())) || what.contains('\\') {
+            return Err(format!("There's no such file: {}.", crate::audio::audio_path(what)));
+        }
         self.words(what, count, signal).await
     }
 
@@ -207,8 +212,11 @@ impl Sources {
         if !sent.status().is_success() {
             return Err(format!("{} answered {}", host(url), sent.status()));
         }
+        // A page is read up to 8 MB: a longer answer is refused rather than held in memory.
         tokio::select! {
-            text = sent.text() => text.map_err(|error| format!("{} broke off: {error}", host(url))),
+            body = crate::web::net::body_at_most(sent, 8_000_000) => body
+                .map(|body| String::from_utf8_lossy(&body).into_owned())
+                .map_err(|why| format!("{}: {why}", host(url))),
             _ = signal.cancelled() => Err("stopped".into()),
         }
     }

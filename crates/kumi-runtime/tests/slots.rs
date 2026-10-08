@@ -289,19 +289,45 @@ async fn the_judges_listener_follows_the_slot_from_its_next_listen() {
             assert!(listener.off());
             let why = slots::listener(&context.file, context.store.clone(), &context.env, Signal::new()).await.err().unwrap();
             assert!(why.contains("can't read the model slots") && why.contains("listening is off"), "{why}");
-            // KUMI_LISTENER wins over the slot; off is off.
-            let named = slots::listener(
-                &context.file,
-                context.store.clone(),
-                &[("KUMI_LISTENER".to_string(), format!("{one}#by-env"))].into(),
-                Signal::new(),
-            )
-            .await
-            .unwrap()
-            .unwrap();
+            // KUMI_LISTENER names a model that listens in the slot's place, but the slot's off (or a slots file Kumi
+            // can't read) still stops it.
+            let by_env: HashMap<String, String> = [("KUMI_LISTENER".to_string(), format!("{one}#by-env"))].into();
+            let named = slots::listener(&context.file, context.store.clone(), &by_env, Signal::new()).await.unwrap().unwrap();
             assert_eq!(named.name(), "by-env");
-            let off: HashMap<String, String> = [("KUMI_LISTENER".to_string(), "off".to_string())].into();
-            assert!(slots::listener(&context.file, context.store.clone(), &off, Signal::new()).await.unwrap().is_none());
+            assert!(named.off(), "the slots file can't be read");
+            kept.save(&context.file).unwrap();
+            assert!(!named.off());
+            kept.switch(Job::Listening, Choice::Off);
+            kept.save(&context.file).unwrap();
+            assert!(named.off() && named.off_why() == "Listening is off in /slots", "{}", named.off_why());
+            let why = named.ask(&slots::known_clip(true), slots::KNOWN_AIM, Signal::new()).await.unwrap_err();
+            assert!(why.contains("listening is off"), "{why}");
+            // Off, or anything that isn't a model's address, is a listener that's off and says why.
+            for value in ["off", "no", "\"off\"", "gemini", one.as_str()] {
+                let env: HashMap<String, String> = [("KUMI_LISTENER".to_string(), value.to_string())].into();
+                let off = slots::listener(&context.file, context.store.clone(), &env, Signal::new()).await.unwrap().unwrap();
+                assert!(off.off() && off.off_why().starts_with("KUMI_LISTENER"), "{value}: {}", off.off_why());
+            }
+            // Off in its slot when it's looked up, it's off, and it follows the slot back on.
+            let fresh = tempfile::tempdir().unwrap();
+            let elsewhere = crate::context(fresh.path(), &[]);
+            let mut slots_there = Slots::default();
+            slots_there.switch(Job::Listening, Choice::Off);
+            slots_there.save(&elsewhere.file).unwrap();
+            let follows = slots::listener(&elsewhere.file, elsewhere.store.clone(), &elsewhere.env, Signal::new()).await.unwrap().unwrap();
+            assert!(follows.off() && follows.off_why() == "Listening is off in /slots", "{}", follows.off_why());
+            slots_there.switch(Job::Listening, Choice::Local { base: one.clone(), model: "ears-one".into() });
+            slots_there.save(&elsewhere.file).unwrap();
+            assert!(!follows.off());
+            assert_eq!(follows.name(), format!("ears-one at {one}"));
+            follows.ask(&slots::known_clip(true), slots::KNOWN_AIM, Signal::new()).await.unwrap();
+            assert_eq!(follows.name(), "ears-one");
+            // The slots file is the producer's alone.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                assert_eq!(std::fs::metadata(&elsewhere.file).unwrap().permissions().mode() & 0o777, 0o600);
+            }
         })
         .await;
 }
@@ -392,4 +418,21 @@ async fn a_model_file_is_found_by_its_full_path_and_a_link_only_over_https() {
         other => panic!("{other:?}"),
     }
     assert_eq!(Slots::read(&context.file), Ok(Slots::default()));
+}
+
+#[test]
+fn a_model_link_is_kept_in_its_own_folder_whatever_its_name() {
+    let slots_folder = kumi_runtime::models::dir().join("slots");
+    for (link, name) in [
+        ("https://huggingface.co/o/r/resolve/main/clap.onnx", "clap.onnx"),
+        ("https://example.com/..\\..\\evil.onnx", "evil.onnx"),
+        ("https://example.com/..%5C..%5Cevil.onnx", "model.onnx"),
+        ("https://example.com/C:\\Windows\\evil.onnx?x=1", "evil.onnx"),
+        ("https://example.com/.onnx", "model.onnx"),
+        ("https://example.com/weights.bin", "model.onnx"),
+    ] {
+        let path = kumi_runtime::listening::embed::link_path(link);
+        assert!(path.starts_with(&slots_folder) && path.parent().unwrap().parent() == Some(slots_folder.as_path()), "{link}: {path:?}");
+        assert_eq!(path.file_name().unwrap(), name, "{link}");
+    }
 }

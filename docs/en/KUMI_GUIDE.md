@@ -364,8 +364,9 @@ trusting them:
   Gemini's newest model, picked from Gemini's own list (it hears a mono mix, so
   it isn't asked about width or air); else, with an OpenAI API key, OpenAI's
   newest audio model. `KUMI_LISTENER` names another (`<base URL>#<model>`, such
-  as a model server on your computer), and `KUMI_LISTENER=off` leaves the meters
-  alone.
+  as a model server on your computer), and `KUMI_LISTENER=off` (or any value
+  that isn't a model's address) leaves the meters alone. A run's first round says
+  which model will listen.
 - **Model slots.** `/slots` shows which model does each listening job: stems
   (Live's own splitter), transcription (Live's conversions), listening (the
   lookup above) and embeddings (Kumi's own: LAION-CLAP's music model for style,
@@ -380,7 +381,7 @@ trusting them:
   later gives way to Kumi's own, said once; `/slots embeddings off` stops them.
   The other slots can't take model files yet, and say what to do instead. A
   `slots.json` Kumi can't read leaves listening off. `KUMI_LISTENER` wins over
-  the listening slot while it's set.
+  the listening slot while it's set, but `/slots listening off` still stops it.
 - **Style and effects, heard by models.** With a reference, Kumi's style model
   (LAION-CLAP) and effects model (AFx-Rep) hear it and each listen of the run,
   and a change that moves the sound further from the reference's style, or a

@@ -10,6 +10,7 @@ pub mod loop_run;
 pub mod match_run;
 pub mod memory;
 pub mod playbook;
+pub mod private;
 pub mod recall;
 pub mod recipes;
 pub mod session;

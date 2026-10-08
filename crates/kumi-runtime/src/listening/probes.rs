@@ -166,15 +166,8 @@ impl Probes {
     }
 }
 
-/// Written whole through a temporary file of this write's own, so a reader never sees half of it.
+/// Written whole through a temporary file of this write's own, so a reader never sees half of it, and only the
+/// producer's.
 fn write(file: &Path, all: &[Response]) -> std::io::Result<()> {
-    if let Some(parent) = file.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let tag = uuid::Uuid::new_v4().simple().to_string();
-    let partial = file.with_extension(format!("json.partial-{}-{}", std::process::id(), &tag[..8]));
-    std::fs::write(&partial, serde_json::to_vec_pretty(all).map_err(std::io::Error::other)?)?;
-    std::fs::rename(&partial, file).inspect_err(|_| {
-        let _ = std::fs::remove_file(&partial);
-    })
+    crate::core::private::write(file, &serde_json::to_vec_pretty(all).map_err(std::io::Error::other)?)
 }

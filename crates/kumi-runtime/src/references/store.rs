@@ -110,13 +110,20 @@ impl ReferenceStore {
         }
         None
     }
+    /// Kept whole in its own file, only the producer's (a folder Kumi makes is 0700, the file 0600).
     pub async fn save(&self, kept: &KeptReference) -> Result<(), String> {
         let mut builder = tokio::fs::DirBuilder::new();
         builder.recursive(true);
+        #[cfg(unix)]
+        builder.mode(0o700);
         builder.create(&self.folder).await.map_err(|error| error.to_string())?;
         let temporary = self.folder.join(format!(".reference-{}", uuid::Uuid::new_v4()));
         let written = async {
-            let mut file = tokio::fs::File::create(&temporary).await?;
+            let mut options = tokio::fs::OpenOptions::new();
+            options.create(true).truncate(true).write(true);
+            #[cfg(unix)]
+            options.mode(0o600);
+            let mut file = options.open(&temporary).await?;
             file.write_all(&serde_json::to_vec_pretty(kept).expect("a reference serializes")).await?;
             file.flush().await?;
             drop(file);

@@ -8,9 +8,7 @@
 
 use crate::{
     auth::store::CredentialStore,
-    listening::listener::{
-        gemini_key, gemini_listener, listener_from_env, listening_off, openai_listener, Answer, ChatListener, Listener, GEMINI,
-    },
+    listening::listener::{self, gemini_key, gemini_listener, openai_listener, Answer, ChatListener, FromEnv, Listener, GEMINI},
     providers::{api_key_for, ProviderId},
 };
 use async_trait::async_trait;
@@ -157,17 +155,13 @@ impl Slots {
     /// Kept in `file`, written whole to a file beside it and moved into place. A file there that Kumi can't read isn't
     /// written over: it's copied beside first, and where to is given back.
     pub fn save(&self, file: &Path) -> Result<Option<PathBuf>, String> {
-        if let Some(folder) = file.parent() {
-            std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
-        }
         let aside = match Slots::read(file) {
             Ok(_) => None,
             Err(why) => Some(set_aside(file, &why)?),
         };
         let text = serde_json::to_string_pretty(self).map_err(|error| error.to_string())?;
-        let partial = file.with_extension("json.partial");
-        std::fs::write(&partial, text + "\n").map_err(|error| error.to_string())?;
-        std::fs::rename(&partial, file).map_err(|error| error.to_string())?;
+        // Only the producer's, as Kumi's other stores are.
+        crate::core::private::write(file, (text + "\n").as_bytes()).map_err(|error| error.to_string())?;
         Ok(aside)
     }
 
@@ -218,7 +212,9 @@ fn set_aside(file: &Path, why: &str) -> Result<PathBuf, String> {
         .map(|n| file.with_extension(if n == 1 { "json.unreadable".into() } else { format!("json.unreadable-{n}") }))
         .find(|aside| !aside.exists())
         .ok_or_else(|| format!("{why}, and it has no free name beside it to keep it under, so it isn't written over"))?;
-    std::fs::copy(file, &aside)
+    let bytes = std::fs::read(file)
+        .map_err(|error| format!("{why}, and it couldn't be copied to {} ({error}), so it isn't written over", aside.display()))?;
+    crate::core::private::write(&aside, &bytes)
         .map_err(|error| format!("{why}, and it couldn't be copied to {} ({error}), so it isn't written over", aside.display()))?;
     Ok(aside)
 }
@@ -459,8 +455,8 @@ pub fn show(slots: &Slots, env: &HashMap<String, String>) -> (Vec<String>, Strin
             format!("{} ({}): {}{swapped}", job.name(), job.about(), describe(job, &now))
         })
         .collect();
-    if env_wins(env) {
-        lines.push("KUMI_LISTENER is set, so it wins over the listening slot while it is.".into());
+    if let Some(said) = env_says(env) {
+        lines.push(said);
     }
     (
         lines,
@@ -481,12 +477,7 @@ async fn openai(store: &dyn CredentialStore, env: &HashMap<String, String>, sign
 }
 
 fn local(base: &str, model: &str, env: &HashMap<String, String>) -> Rc<dyn Listener> {
-    Rc::new(ChatListener {
-        base: base.into(),
-        key: env.get("KUMI_LISTENER_KEY").cloned(),
-        model: model.into(),
-        client: reqwest::Client::builder().timeout(std::time::Duration::from_secs(90)).build().unwrap_or_default(),
-    })
+    Rc::new(ChatListener { base: base.into(), key: env.get("KUMI_LISTENER_KEY").cloned(), model: model.into(), client: listener::client() })
 }
 
 /// The listener a choice names, found now; None when it finds none (Off, or no key).
@@ -516,24 +507,93 @@ async fn found(
     }
 }
 
-/// The listening model, found as the app finds it: `KUMI_LISTENER` first (`off`, or a model by its address), then the
-/// listening slot in `file`. What it finds follows the slot: a swap counts from its next listen. None when there's
-/// no model to listen with; why, when the slots file can't be read (listening is off then).
+/// The listening model, found as the app finds it: `KUMI_LISTENER` first (off, or a model by its address), then the
+/// listening slot in `file`. What it finds follows the slot: a swap counts from its next listen, and the slot's off
+/// stops even the model `KUMI_LISTENER` names. Listening that's off is a listener that's off (it says why, and sends
+/// nothing); None when there's no model to listen with; why, when the slots file can't be read (listening is off
+/// then).
 pub async fn listener(
     file: &Path,
     store: Rc<dyn CredentialStore>,
     env: &HashMap<String, String>,
     signal: Signal,
 ) -> Result<Option<Rc<dyn Listener>>, String> {
-    if listening_off(env) {
-        return Ok(None);
-    }
-    if let Some(listener) = listener_from_env(env) {
-        return Ok(Some(Rc::new(listener)));
+    match listener::from_env(env) {
+        FromEnv::Off(why) => return Ok(Some(Rc::new(Silent(why)))),
+        FromEnv::Named(named) => return Ok(Some(Rc::new(EnvNamed { file: file.to_path_buf(), named }))),
+        FromEnv::Unset => {}
     }
     let choice = Slots::read(file).map_err(|why| format!("{why}, so listening is off until /slots swaps it again"))?.now(Job::Listening);
-    let Some(now) = found(&choice, store.as_ref(), env, signal).await? else { return Ok(None) };
+    let now: Rc<dyn Listener> = match choice {
+        Choice::Off => Rc::new(Silent(OFF_IN_SLOT.into())),
+        _ => match found(&choice, store.as_ref(), env, signal).await? {
+            Some(now) => now,
+            None => return Ok(None),
+        },
+    };
     Ok(Some(Rc::new(Following { file: file.to_path_buf(), store, env: env.clone(), now: RefCell::new((choice, now)) })))
+}
+
+/// Why listening is off when the slot says so.
+const OFF_IN_SLOT: &str = "Listening is off in /slots";
+
+/// Listening that's off: it says why, and sends nothing.
+struct Silent(String);
+
+#[async_trait(?Send)]
+impl Listener for Silent {
+    fn name(&self) -> String {
+        self.0.clone()
+    }
+    fn hears_width(&self) -> bool {
+        false
+    }
+    fn off(&self) -> bool {
+        true
+    }
+    fn off_why(&self) -> String {
+        self.0.clone()
+    }
+    async fn ask(&self, _wav: &[u8], _aim: &str, _signal: Signal) -> Result<Answer, String> {
+        Err(format!("{}, so nothing was sent", self.0.to_lowercase()))
+    }
+}
+
+/// The model `KUMI_LISTENER` names: it listens in the slot's place, but the slot's off (or a slots file Kumi can't
+/// read) stops it at once.
+struct EnvNamed {
+    file: PathBuf,
+    named: ChatListener,
+}
+
+#[async_trait(?Send)]
+impl Listener for EnvNamed {
+    fn name(&self) -> String {
+        self.named.name()
+    }
+    fn hears_width(&self) -> bool {
+        self.named.hears_width()
+    }
+    fn off(&self) -> bool {
+        Slots::load(&self.file).now(Job::Listening) == Choice::Off
+    }
+    fn off_why(&self) -> String {
+        off_why(&self.file)
+    }
+    async fn ask(&self, wav: &[u8], aim: &str, signal: Signal) -> Result<Answer, String> {
+        if self.off() {
+            return Err("listening is off in its slot, so nothing was sent".into());
+        }
+        self.named.ask(wav, aim, signal).await
+    }
+}
+
+/// Why the listening slot has listening off: it says so, or the slots file can't be read.
+fn off_why(file: &Path) -> String {
+    match Slots::read(file) {
+        Ok(_) => OFF_IN_SLOT.into(),
+        Err(why) => capitalized(&format!("{why}, so listening is off")),
+    }
 }
 
 /// The listening model a session found, following the slot: swapped to another model, that one listens from the next
@@ -547,14 +607,23 @@ struct Following {
 
 #[async_trait(?Send)]
 impl Listener for Following {
+    /// The model it found, or, swapped since, what the slot names now (found at its next ask).
     fn name(&self) -> String {
-        self.now.borrow().1.name()
+        let wanted = Slots::load(&self.file).now(Job::Listening);
+        let now = self.now.borrow();
+        if wanted != now.0 && wanted != Choice::Off {
+            return describe(Job::Listening, &wanted);
+        }
+        now.1.name()
     }
     fn hears_width(&self) -> bool {
         self.now.borrow().1.hears_width()
     }
     fn off(&self) -> bool {
         Slots::load(&self.file).now(Job::Listening) == Choice::Off
+    }
+    fn off_why(&self) -> String {
+        off_why(&self.file)
     }
     async fn ask(&self, wav: &[u8], aim: &str, signal: Signal) -> Result<Answer, String> {
         // Only the model the slot names now is asked: off sends nothing, and another is found first.
@@ -794,8 +863,19 @@ pub async fn command(words: &str, context: &SlotsContext, progress: &dyn Fn(Stri
                     " The judge listens with it from its next listen (within ten minutes, when this session had found no listening model).",
                 );
             }
-            if job == Job::Listening && env_wins(&context.env) {
-                said.push_str(" KUMI_LISTENER is set, though, and wins over the slot while it is.");
+            if let Some(host) = plain_elsewhere(&choice) {
+                said.push_str(&format!(
+                    " Its audio goes to {host} over plain http, unencrypted: an https address keeps it private on the way."
+                ));
+            }
+            if job == Job::Listening {
+                match listener::from_env(&context.env) {
+                    FromEnv::Off(why) => said.push_str(&format!(" {}, though, while it's set.", capitalized(&why))),
+                    FromEnv::Named(_) if choice != Choice::Off => {
+                        said.push_str(" KUMI_LISTENER names a model, though, and it listens in the slot's place while it's set.")
+                    }
+                    _ => {}
+                }
             }
             if let Some(aside) = aside {
                 said.push_str(&format!(" The slots file Kumi couldn't read is copied to {}.", aside.display()));
@@ -806,8 +886,25 @@ pub async fn command(words: &str, context: &SlotsContext, progress: &dyn Fn(Stri
     }
 }
 
-fn env_wins(env: &HashMap<String, String>) -> bool {
-    env.get("KUMI_LISTENER").is_some_and(|value| !value.trim().is_empty())
+/// The other computer a listening model is reached on over plain http, when it is (this computer's own is fine).
+fn plain_elsewhere(choice: &Choice) -> Option<String> {
+    let Choice::Local { base, .. } = choice else { return None };
+    let url = reqwest::Url::parse(base).ok().filter(|url| url.scheme() == "http")?;
+    let host = url.host_str()?.trim_matches(['[', ']']);
+    let here = host == "localhost" || host.parse::<std::net::IpAddr>().is_ok_and(|address| address.is_loopback());
+    (!here).then(|| host.to_string())
+}
+
+/// What `KUMI_LISTENER` does to the listening slot, when it's set.
+fn env_says(env: &HashMap<String, String>) -> Option<String> {
+    match listener::from_env(env) {
+        FromEnv::Unset => None,
+        FromEnv::Off(why) => Some(format!("{} while it's set.", capitalized(&why))),
+        FromEnv::Named(_) => Some(
+            "KUMI_LISTENER names a model, which listens in the listening slot's place while it's set; /slots listening off still stops it."
+                .into(),
+        ),
+    }
 }
 
 /// Why a choice found no model.

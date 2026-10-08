@@ -376,7 +376,15 @@ pub async fn write_report(io: ReportIo) -> Result<i32, RuntimeError> {
             }
         }
     }
-    for name in ["AI_GATEWAY_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENCODE_API_KEY"] {
+    for name in [
+        "AI_GATEWAY_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENCODE_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "KUMI_LISTENER_KEY",
+    ] {
         secrets.push(env.get(name).cloned().unwrap_or_default())
     }
     let redact = redactor(&secrets, &home, &user);
