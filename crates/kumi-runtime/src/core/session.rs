@@ -1895,8 +1895,9 @@ impl SessionController for Session {
                     }
                 }
                 // The model judging a change in a turn of its own starts the loop: Kumi judged the request needs it.
-                // A run that only measured doesn't; its first listen joins the loop if one starts.
-                if s.looping.is_none() && s.active.is_some() && s.matching.is_none() {
+                // A run that only measured doesn't; its first listen joins the loop if one starts. Nor does a groove
+                // round (judged on the notes, never listened to): the loop's words send the model to the judge.
+                if s.looping.is_none() && s.active.is_some() && s.matching.is_none() && round.listens > 0 {
                     match round.kind {
                         RoundKind::Start => s.judge_start = Some(round.clone()),
                         RoundKind::Judged => {

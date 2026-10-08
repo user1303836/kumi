@@ -1,9 +1,10 @@
 //! Sequencing measured on the notes, exactly and cheaply: where in the bar a part plays (how its notes cluster), how
 //! early or late each grid step sits (its timing profile, and the swing in it), how hard (its velocity profile), how
-//! much it plays off the beat (syncopation) and how its phrase ends differ (fills). A drum part splits into lanes
-//! (kick, snare, hats, the rest); a pitched part is one lane.
+//! much it plays off the beat (syncopation) and how its phrase ends differ (fills). A part on a Drum Rack splits into
+//! lanes (kick, snare, hats, the rest), named from its pads; any other part is one lane.
 
 use serde::{Deserialize, Serialize};
+use std::f64::consts::TAU;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Note {
@@ -27,12 +28,45 @@ pub struct Lane {
     pub notes: usize,
 }
 
+/// How a part's notes fall into lanes: a Drum Rack's by its pads, each lane what its pad holds (kick, snare, hats,
+/// cymbals, the rest as perc: by the pad's name, else by its note on the General MIDI drum map); any other part's, one
+/// lane.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Kit {
+    /// Whether the part plays a Drum Rack.
+    pub drums: bool,
+    /// The rack's pads that hold something: each one's note and lane.
+    pub pads: Vec<(i32, String)>,
+}
+
+impl Kit {
+    /// A pitched part's: one lane.
+    pub fn pitched() -> Self {
+        Self::default()
+    }
+
+    /// A Drum Rack's, from its pads that hold something (name and note).
+    pub fn rack(pads: &[(String, u8)]) -> Self {
+        Self { drums: true, pads: pads.iter().map(|(name, note)| (*note as i32, pad_lane(name, *note as i32).to_string())).collect() }
+    }
+
+    /// A note's lane.
+    pub fn lane(&self, pitch: i32) -> &str {
+        if !self.drums {
+            return "notes";
+        }
+        self.pads.iter().find(|(note, _)| *note == pitch).map_or_else(|| drum_lane(pitch), |(_, lane)| lane.as_str())
+    }
+}
+
 /// A part's feel.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Feel {
     pub tempo: f64,
     pub steps: usize,
     pub bars: usize,
+    /// How its notes fall into lanes.
+    pub kit: Kit,
     pub lanes: Vec<Lane>,
     /// The grid it swings on: 8 (eighths) or 16, and how much: 50 % is straight, 66.7 % triplet.
     pub grid: u32,
@@ -60,18 +94,31 @@ pub fn drum_lane(pitch: i32) -> &'static str {
     }
 }
 
-/// Whether the notes look like drums: few pitches, all in the drum map's range.
-pub fn drums(notes: &[Note]) -> bool {
-    let mut pitches: Vec<i32> = notes.iter().map(|note| note.pitch).collect();
-    pitches.sort();
-    pitches.dedup();
-    !pitches.is_empty() && pitches.len() <= 12 && pitches.iter().all(|pitch| (35..=81).contains(pitch))
+/// A Drum Rack pad's lane, by what its name says it holds, else by its note on the General MIDI drum map.
+pub fn pad_lane(name: &str, note: i32) -> &'static str {
+    let name = name.to_lowercase();
+    let words: Vec<&str> = name.split(|c: char| !c.is_alphanumeric()).filter(|word| !word.is_empty()).collect();
+    let says =
+        |parts: &[&str], short: &[&str]| parts.iter().any(|part| name.contains(part)) || words.iter().any(|word| short.contains(word));
+    if says(&["kick", "kik", "bassdrum", "bass drum"], &["bd"]) {
+        "kick"
+    } else if says(&["hat", "hihat"], &["hh", "oh", "ch"]) {
+        "hats"
+    } else if says(&["snare", "clap", "rim", "snap"], &["sd", "snr", "clp", "cp"]) {
+        "snare"
+    } else if says(&["crash", "ride", "cymbal", "china", "splash"], &["cym"]) {
+        "cymbals"
+    } else if says(&["tom", "conga", "bongo", "shaker", "perc", "cowbell", "tamb", "clave"], &[]) {
+        "perc"
+    } else {
+        drum_lane(note)
+    }
 }
 
 /// The swung grid that explains the notes best: eighths or sixteenths, and the swing (50–75 %), by how close the
 /// notes sit to it. Sixteenths have to explain them clearly better, being twice as dense.
 pub fn fit_swing(starts: &[f64]) -> (u32, f64) {
-    // Lateness all round isn't swing: the part's push (how it sits on the eighths) comes out first.
+    // Lateness all round isn't swing: the part's push (how it sits on the beats) comes out first.
     let push = push_of(starts);
     let starts: Vec<f64> = starts.iter().map(|start| start - push).collect();
     let starts = &starts;
@@ -100,11 +147,10 @@ pub fn fit_swing(starts: &[f64]) -> (u32, f64) {
     }
 }
 
-/// How far ahead (−) or behind (+) the part sits on the beat, in beats: the median offset of the notes near an eighth
-/// (within a sixteenth's half), where swing doesn't move them.
+/// How far ahead (−) or behind (+) the part sits on the beat, in beats: the median offset of the notes near a beat
+/// (within a sixteenth's half), which neither eighth nor sixteenth swing moves.
 pub fn push_of(starts: &[f64]) -> f64 {
-    let mut near: Vec<f64> =
-        starts.iter().map(|start| start - (start / 0.5).round() * 0.5).filter(|offset| offset.abs() <= 0.125).collect();
+    let mut near: Vec<f64> = starts.iter().map(|start| start - start.round()).filter(|offset| offset.abs() <= 0.125).collect();
     if near.is_empty() {
         return 0.;
     }
@@ -112,46 +158,59 @@ pub fn push_of(starts: &[f64]) -> f64 {
     near[near.len() / 2]
 }
 
-/// The part's feel at `tempo`, bars of `beats_per_bar`.
-pub fn feel(notes: &[Note], tempo: f64, beats_per_bar: f64) -> Feel {
-    let steps = (beats_per_bar * 4.).round().max(1.) as usize;
+/// Where a step of the bar sits on the swung grid, in beats from the bar's start: `grid` 8 or 16, `swing` its swing
+/// (50 straight), `pushed` the part's push in beats.
+fn swung(step: usize, grid: u32, swing: f64, pushed: f64) -> f64 {
     let sixteenth = 0.25;
+    let at = step as f64 * sixteenth + pushed;
+    let (unit, odd) = if grid == 16 { (sixteenth, step % 2 == 1) } else { (2. * sixteenth, step % 4 == 2) };
+    if odd {
+        at - unit + 2. * unit * swing / 100.
+    } else {
+        at
+    }
+}
+
+/// Each note's place: its bar, its step on the swung grid (a late last step is the next bar's first), and how far it
+/// sits from that step's straight place, ms. Measuring and moving notes place them alike.
+fn place(notes: &[Note], beats_per_bar: f64, steps: usize, (grid, swing, pushed): (u32, f64, f64), ms: f64) -> Vec<(usize, usize, f64)> {
+    let sixteenth = 0.25;
+    let at = |step: usize| swung(step, grid, swing, pushed);
+    notes
+        .iter()
+        .map(|note| {
+            let bar = (note.start / beats_per_bar).floor().max(0.) as usize;
+            let within = note.start - bar as f64 * beats_per_bar;
+            let step = (0..steps).min_by(|a, b| (within - at(*a)).abs().total_cmp(&(within - at(*b)).abs())).unwrap_or(0);
+            // The last step's neighbour is the next bar's first.
+            let (bar, step) = if within - at(step) > sixteenth * 0.75 && step == steps - 1 { (bar + 1, 0) } else { (bar, step) };
+            let straight = bar as f64 * beats_per_bar + step as f64 * sixteenth;
+            (bar, step, (note.start - straight) * ms)
+        })
+        .collect()
+}
+
+/// The part's feel at `tempo`, bars of `beats_per_bar`, its notes in lanes by `kit`.
+pub fn feel(notes: &[Note], tempo: f64, beats_per_bar: f64, kit: &Kit) -> Feel {
+    let steps = (beats_per_bar * 4.).round().max(1.) as usize;
     let ms = 60_000. / tempo.max(1.);
     let bars = notes.iter().map(|note| (note.start / beats_per_bar).floor() as i64 + 1).max().unwrap_or(0).max(1) as usize;
     let starts: Vec<f64> = notes.iter().map(|note| note.start).collect();
     let (grid, swing) = fit_swing(&starts);
     // Each note's step on the swung grid, and how far it sits from the straight one.
     let pushed = push_of(&starts);
-    let swung = |step: usize| -> f64 {
-        let at = step as f64 * sixteenth + pushed;
-        let (unit, odd) = if grid == 16 { (sixteenth, step % 2 == 1) } else { (2. * sixteenth, step % 4 == 2) };
-        if odd {
-            at - unit + 2. * unit * swing / 100.
-        } else {
-            at
-        }
-    };
-    let placed: Vec<(usize, usize, f64)> = notes
-        .iter()
-        .map(|note| {
-            let bar = (note.start / beats_per_bar).floor().max(0.) as usize;
-            let within = note.start - bar as f64 * beats_per_bar;
-            let step = (0..steps).min_by(|a, b| (within - swung(*a)).abs().total_cmp(&(within - swung(*b)).abs())).unwrap_or(0);
-            // The last step's neighbour is the next bar's first.
-            let (bar, step) = if within - swung(step) > sixteenth * 0.75 && step == steps - 1 { (bar + 1, 0) } else { (bar, step) };
-            let straight = bar as f64 * beats_per_bar + step as f64 * sixteenth;
-            (bar, step, (note.start - straight) * ms)
-        })
-        .collect();
-    let is_drums = drums(notes);
-    let mut names: Vec<&str> = if is_drums { notes.iter().map(|note| drum_lane(note.pitch)).collect() } else { vec!["notes"] };
+    let placed = place(notes, beats_per_bar, steps, (grid, swing, pushed), ms);
+    // How often a step is played is counted over the bars the part plays in: a reference's stretches without it (a
+    // song's drum stem through its breaks) aren't read as it playing sparsely.
+    let playing = placed.iter().map(|(bar, _, _)| *bar).collect::<std::collections::BTreeSet<_>>().len().max(1);
+    let mut names: Vec<&str> = notes.iter().map(|note| kit.lane(note.pitch)).collect();
     names.sort();
     names.dedup();
     let mean = |values: &Vec<f64>| (!values.is_empty()).then(|| round1(values.iter().sum::<f64>() / values.len() as f64));
     let lanes: Vec<Lane> = names
         .iter()
         .map(|name| {
-            let members: Vec<usize> = (0..notes.len()).filter(|index| !is_drums || drum_lane(notes[*index].pitch) == *name).collect();
+            let members: Vec<usize> = (0..notes.len()).filter(|index| kit.lane(notes[*index].pitch) == *name).collect();
             let mut hit = vec![std::collections::BTreeSet::new(); steps];
             let mut offsets = vec![vec![]; steps];
             let mut velocities = vec![vec![]; steps];
@@ -163,7 +222,7 @@ pub fn feel(notes: &[Note], tempo: f64, beats_per_bar: f64) -> Feel {
             }
             Lane {
                 name: (*name).into(),
-                density: hit.iter().map(|bars_hit| round2(bars_hit.len() as f64 / bars as f64)).collect(),
+                density: hit.iter().map(|bars_hit| round2(bars_hit.len() as f64 / playing as f64)).collect(),
                 offset: offsets.iter().map(mean).collect(),
                 velocity: velocities.iter().map(mean).collect(),
                 notes: members.len(),
@@ -173,10 +232,10 @@ pub fn feel(notes: &[Note], tempo: f64, beats_per_bar: f64) -> Feel {
     let distance: Vec<f64> = notes
         .iter()
         .zip(&placed)
-        .map(|(note, (bar, step, _))| ((note.start - (*bar as f64 * beats_per_bar + swung(*step))) * ms).abs())
+        .map(|(note, (bar, step, _))| ((note.start - (*bar as f64 * beats_per_bar + swung(*step, grid, swing, pushed))) * ms).abs())
         .collect();
     let looseness = round1(distance.iter().sum::<f64>() / distance.len().max(1) as f64);
-    let push = round1(push_of(&starts) * ms);
+    let push = round1(pushed * ms);
     // Syncopation: notes on weak sixteenths (off the eighths) with nothing on the next eighth.
     let occupied: std::collections::HashSet<(usize, usize)> = placed.iter().map(|(bar, step, _)| (*bar, *step)).collect();
     let weak: Vec<&(usize, usize, f64)> = placed.iter().filter(|(_, step, _)| step % 2 == 1).collect();
@@ -200,7 +259,115 @@ pub fn feel(notes: &[Note], tempo: f64, beats_per_bar: f64) -> Feel {
     let velocities: Vec<f64> = notes.iter().map(|note| note.velocity).collect();
     let mean = velocities.iter().sum::<f64>() / velocities.len().max(1) as f64;
     let velocity_spread = round1((velocities.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / velocities.len().max(1) as f64).sqrt());
-    Feel { tempo, steps, bars, lanes, grid, swing, looseness, push, syncopation, fills, velocity_spread }
+    Feel { tempo, steps, bars, kit: kit.clone(), lanes, grid, swing, looseness, push, syncopation, fills, velocity_spread }
+}
+
+impl Feel {
+    /// Its velocities left out (a transcription's are how sure it was of a note, not how hard it was played): no
+    /// velocity lines against it, and moving notes toward it leaves their velocities alone.
+    pub fn without_velocities(mut self) -> Self {
+        for lane in &mut self.lanes {
+            lane.velocity.fill(None);
+        }
+        self
+    }
+
+    /// One of its lanes, by name.
+    pub fn lane(&self, name: &str) -> Option<&Lane> {
+        self.lanes.iter().find(|lane| lane.name == name)
+    }
+}
+
+/// The index of the largest value, the first of equals.
+fn largest(values: impl Iterator<Item = (usize, f64)>) -> Option<usize> {
+    values
+        .fold(None, |best: Option<(usize, f64)>, (index, value)| match best {
+            Some((_, top)) if top >= value => best,
+            _ => Some((index, value)),
+        })
+        .map(|(index, _)| index)
+}
+
+/// A recording's beat grid, fitted to its notes' onsets.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Grid {
+    pub tempo: f64,
+    /// Seconds: the first downbeat at or before the first onset (beat one of the bar the recording starts in).
+    pub downbeat: f64,
+}
+
+/// A recording's beat grid fitted to its notes' onsets (seconds, each with its weight): the tempo searched within 2 %
+/// of `tempo` (and of half and double it, with `octaves`) for the one whose sixteenths the onsets sit on most closely,
+/// its phase, and the sixteenth that starts the bar: the one that puts the most weight on the bar's strongest places
+/// (its downbeat, its middle, the beats, the eighths). Of tempos that explain the onsets about as well (half and double
+/// often do), the one nearest `near`.
+pub fn fit_grid(onsets: &[(f64, f64)], tempo: f64, beats_per_bar: f64, octaves: bool, near: Option<f64>) -> Grid {
+    let weight: f64 = onsets.iter().map(|(_, weight)| weight).sum();
+    let first = onsets.iter().map(|(at, _)| *at).fold(f64::MAX, f64::min);
+    if onsets.len() < 8 || weight <= 0. || tempo <= 0. {
+        return Grid { tempo, downbeat: if first.is_finite() { first.max(0.) } else { 0. } };
+    }
+    // How closely the onsets sit on a tempo's sixteenths (0–1), and where those fall (0–1 of a sixteenth).
+    let resultant = |tempo: f64| -> (f64, f64) {
+        let period = 15. / tempo;
+        let (x, y) = onsets.iter().fold((0., 0.), |(x, y), (at, weight)| {
+            let angle = TAU * at / period;
+            (x + weight * angle.cos(), y + weight * angle.sin())
+        });
+        ((x * x + y * y).sqrt() / weight, y.atan2(x).rem_euclid(TAU) / TAU)
+    };
+    // Within 2 % in steps of 0.01 %, then finer around the best: over two minutes, a tempo off by 0.01 % drifts 12 ms.
+    let search = |around: f64| -> (f64, f64) {
+        let mut best = (around, resultant(around).0);
+        for step in -200..=200 {
+            let candidate = around * (1. + step as f64 * 1e-4);
+            let strength = resultant(candidate).0;
+            if strength > best.1 {
+                best = (candidate, strength);
+            }
+        }
+        let coarse = best.0;
+        for step in -60..=60 {
+            let candidate = coarse * (1. + step as f64 * 2.5e-6);
+            let strength = resultant(candidate).0;
+            if strength > best.1 {
+                best = (candidate, strength);
+            }
+        }
+        best
+    };
+    let mut candidates = vec![search(tempo)];
+    if octaves {
+        candidates.extend([search(tempo / 2.), search(tempo * 2.)]);
+    }
+    let strongest = candidates.iter().map(|(_, strength)| *strength).fold(0., f64::max);
+    let near = near.unwrap_or(tempo);
+    let tempo = candidates
+        .iter()
+        .filter(|(_, strength)| *strength >= strongest * 0.9)
+        .min_by(|a, b| (a.0 / near).ln().abs().total_cmp(&(b.0 / near).ln().abs()))
+        .map_or(tempo, |(tempo, _)| *tempo);
+    let period = 15. / tempo;
+    let origin = resultant(tempo).1 * period;
+    // The weight on each sixteenth of the bar.
+    let slots = (beats_per_bar * 4.).round().max(4.) as usize;
+    let mut per_slot = vec![0.; slots];
+    for (at, weight) in onsets {
+        per_slot[(((at - origin) / period).round() as i64).rem_euclid(slots as i64) as usize] += weight;
+    }
+    let salience = |slot: usize| match slot {
+        0 => 4.,
+        _ if slots.is_multiple_of(8) && slot == slots / 2 => 3.,
+        _ if slot.is_multiple_of(4) => 2.,
+        _ if slot.is_multiple_of(2) => 1.5,
+        _ => 1.,
+    };
+    let downbeat = largest((0..slots).map(|first| (first, (0..slots).map(|slot| per_slot[(first + slot) % slots] * salience(slot)).sum())))
+        .unwrap_or(0);
+    let bar = slots as f64 * period;
+    let mut at = origin + downbeat as f64 * period;
+    at += ((first + period / 2. - at) / bar).floor() * bar;
+    Grid { tempo, downbeat: at }
 }
 
 /// How far a part's feel is from a reference's, item by item: what the groove checklist reads.
@@ -242,8 +409,12 @@ pub fn gaps(part: &Feel, reference: &Feel) -> Gaps {
             lane.density.iter().zip(&wanted.density).map(|(a, b)| (a - b).abs()).sum::<f64>() / wanted.density.len().max(1) as f64;
         density.push((wanted.name.clone(), round2(apart)));
     }
+    // Swing on eighths and swing on sixteenths aren't the same feel, however alike their numbers: on different grids,
+    // each one's swing counts as apart.
+    let swing =
+        if part.grid == reference.grid { (part.swing - reference.swing).abs() } else { (part.swing - 50.) + (reference.swing - 50.) };
     Gaps {
-        swing: round1((part.swing - reference.swing).abs()),
+        swing: round1(swing),
         timing,
         velocity,
         density,
@@ -255,27 +426,27 @@ pub fn gaps(part: &Feel, reference: &Feel) -> Gaps {
     }
 }
 
-/// The part's notes moved toward the reference's feel: each note to the reference's timing on its step (and lane),
-/// its velocity toward the reference's there, by `amount` (0–1). Notes on steps the reference doesn't play stay.
+/// The part's notes moved toward the reference's feel, by `amount` (0–1): each step's notes (in each lane) by how far
+/// the reference's timing and velocity there are from the part's, so each note keeps its own lean (a roll, a flam).
+/// Notes are placed on steps as `feel` places them (`part` is the feel of these notes); notes on steps the reference
+/// doesn't play stay.
 pub fn toward(notes: &[Note], part: &Feel, reference: &Feel, beats_per_bar: f64, amount: f64) -> Vec<Note> {
     let ms = 60_000. / part.tempo.max(1.);
-    let is_drums = drums(notes);
+    let starts: Vec<f64> = notes.iter().map(|note| note.start).collect();
+    let placed = place(notes, beats_per_bar, part.steps, (part.grid, part.swing, push_of(&starts)), ms);
     notes
         .iter()
-        .map(|note| {
-            let lane_name = if is_drums { drum_lane(note.pitch) } else { "notes" };
-            let Some(wanted) = reference.lanes.iter().find(|lane| lane.name == lane_name) else { return *note };
-            let bar = (note.start / beats_per_bar).floor().max(0.);
-            let within = note.start - bar * beats_per_bar;
-            let step = ((within / 0.25).round() as usize).min(part.steps - 1);
-            let straight = bar * beats_per_bar + step as f64 * 0.25;
+        .zip(&placed)
+        .map(|(note, (_, step, _))| {
+            let name = part.kit.lane(note.pitch);
+            let (Some(ours), Some(wanted)) = (part.lane(name), reference.lane(name)) else { return *note };
+            let at = |values: &[Option<f64>]| values.get(*step).copied().flatten();
             let mut moved = *note;
-            if let Some(offset) = wanted.offset.get(step).copied().flatten() {
-                let target = straight + offset / ms;
-                moved.start = (note.start + (target - note.start) * amount).max(0.);
+            if let (Some(have), Some(want)) = (at(&ours.offset), at(&wanted.offset)) {
+                moved.start = (note.start + (want - have) / ms * amount).max(0.);
             }
-            if let Some(velocity) = wanted.velocity.get(step).copied().flatten() {
-                moved.velocity = (note.velocity + (velocity - note.velocity) * amount).clamp(1., 127.).round();
+            if let (Some(have), Some(want)) = (at(&ours.velocity), at(&wanted.velocity)) {
+                moved.velocity = (note.velocity + (want - have) * amount).clamp(1., 127.).round();
             }
             moved
         })

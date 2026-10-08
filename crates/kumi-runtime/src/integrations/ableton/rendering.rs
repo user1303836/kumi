@@ -172,6 +172,10 @@ impl Rendering {
             // its bars again first.
             // An undo in between counts too: a change the run's numbers took in that isn't in the Set any more.
             let ids = self.applied_ids();
+            // A groove run's the same: its rounds re-read the notes, so only its checkpoint moves.
+            if let Some(run) = self.groove.borrow_mut().as_mut() {
+                run.carry_on(ids.clone());
+            }
             let mut guard = self.judge.borrow_mut();
             if let Some(run) = guard.as_mut() {
                 let audible = |id: &String| self.history.entries.borrow().get(id).is_some_and(|entry| entry.borrow().audible());

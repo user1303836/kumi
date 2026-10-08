@@ -13,11 +13,25 @@ use crate::{
 use kumi_common::{abort::Signal, js::json::stringify};
 use serde_json::{json, Value};
 
-/// The fields `read_notes` reads of each note.
-const NOTE_FIELDS: [&str; 9] =
-    ["pitch", "start", "duration", "velocity", "mute", "probability", "velocityDeviation", "releaseVelocity", "channel"];
+/// The fields `read_notes` reads of each note: its id too, which edits by id (change_notes) name it by.
+const NOTE_FIELDS: [&str; 10] =
+    ["id", "pitch", "start", "duration", "velocity", "mute", "probability", "velocityDeviation", "releaseVelocity", "channel"];
 /// The fields `read_notes` reads of an Arrangement clip: where it sits, and the part of its notes it plays.
-const ARRANGEMENT_FIELDS: [&str; 9] = ["name", "start", "endTime", "length", "isAudio", "looping", "loopStart", "loopEnd", "startMarker"];
+const ARRANGEMENT_FIELDS: [&str; 10] =
+    ["name", "start", "endTime", "length", "isAudio", "looping", "loopStart", "loopEnd", "startMarker", "endMarker"];
+/// The fields `read_notes` reads of a Session clip: its meter, and the part of its notes it plays.
+const SESSION_FIELDS: [&str; 10] = [
+    "name",
+    "length",
+    "isAudio",
+    "signatureNumerator",
+    "signatureDenominator",
+    "looping",
+    "loopStart",
+    "loopEnd",
+    "startMarker",
+    "endMarker",
+];
 /// The most clips one `read_notes` reads.
 const CLIPS: usize = 16;
 
@@ -187,25 +201,45 @@ fn note_json(note: &Note) -> Value {
 
 /// The pads of the track's Drum Rack that hold something (name and note), which lane names go by; none without one.
 pub async fn pads(connection: &LiveConnection, track: &str, signal: &Signal) -> Vec<(String, u8)> {
+    drum_rack(connection, track, signal).await.unwrap_or_default()
+}
+
+/// The track's Drum Rack, if it has one: its pads that hold something (name and note).
+pub async fn drum_rack(connection: &LiveConnection, track: &str, signal: &Signal) -> Option<Vec<(String, u8)>> {
     let read = |args: Value| views::pages(connection, args.as_object().cloned().unwrap_or_default(), signal.clone());
-    let Ok(devices) =
-        read(json!({"kind":"device","parent":track,"fields":["className","canHaveDrumPads"],"limit":connection.page_limit()})).await
-    else {
-        return vec![];
-    };
-    let Some(rack) = rows(&devices)
+    let devices = read(json!({"kind":"device","parent":track,"fields":["className","canHaveDrumPads"],"limit":connection.page_limit()}))
+        .await
+        .ok()?;
+    let rack = rows(&devices)
         .into_iter()
         .find(|row| row.get("canHaveDrumPads") == Some(&json!(true)))
-        .and_then(|row| row.get("ref").and_then(Value::as_str).map(str::to_owned))
-    else {
-        return vec![];
-    };
-    let Ok(rack) = read(json!({"kind":"device","filters":{"ref":rack},"fields":["drumPads"],"limit":1})).await else { return vec![] };
+        .and_then(|row| row.get("ref").and_then(Value::as_str).map(str::to_owned))?;
+    let Ok(rack) = read(json!({"kind":"device","filters":{"ref":rack},"fields":["drumPads"],"limit":1})).await else { return Some(vec![]) };
     let pads = rows(&rack).into_iter().next().and_then(|row| row.get("drumPads").and_then(Value::as_array).cloned()).unwrap_or_default();
-    pads.iter()
-        .filter(|pad| pad.get("chains").and_then(Value::as_array).is_some_and(|chains| !chains.is_empty()))
-        .filter_map(|pad| Some((pad.get("name")?.as_str()?.to_owned(), u8::try_from(pad.get("note")?.as_u64()?).ok()?)))
-        .collect()
+    Some(
+        pads.iter()
+            .filter(|pad| pad.get("chains").and_then(Value::as_array).is_some_and(|chains| !chains.is_empty()))
+            .filter_map(|pad| Some((pad.get("name")?.as_str()?.to_owned(), u8::try_from(pad.get("note")?.as_u64()?).ok()?)))
+            .collect(),
+    )
+}
+
+/// A clip's long ref, from the ref the model has (a short one, or long), and the long ref of the track it's on.
+pub fn clip_and_track(connection: &LiveConnection, clip: &str) -> Option<(String, String)> {
+    let long = connection.references.borrow().lengthen(&json!({"clipRef": clip}))["clipRef"].as_str()?.to_owned();
+    let parts: Vec<&str> = long.split(':').collect();
+    let [epoch, "clip" | "arrangement_clip", track, _] = parts[..] else { return None };
+    let track = format!("{epoch}:track:{track}");
+    Some((long, track))
+}
+
+/// A track's name, by its long ref.
+pub async fn track_name(connection: &LiveConnection, track: &str, signal: Signal) -> Option<String> {
+    let tracks = connection.rows("track", views::object(json!({"fields":["name"]})), signal).await.ok()?;
+    // Rows come with the refs the model sees: each one's long ref is the one to match.
+    let long =
+        |row: &JsonObject| connection.references.borrow().lengthen(&json!({"ref": row.get("ref")}))["ref"].as_str().map(str::to_owned);
+    tracks.iter().find(|row| long(row).as_deref() == Some(track)).and_then(|row| row.get("name")?.as_str().map(str::to_owned))
 }
 fn rows(read: &CallToolResult) -> Vec<JsonObject> {
     if read.is_error == Some(true) {
@@ -255,8 +289,9 @@ async fn read_clip(connection: &LiveConnection, clip: &str, json: bool, tempo: O
     let track = format!("{epoch}:track:{track}");
     let row = if session {
         let slot = clip.replacen(":clip:", ":clip_slot:", 1);
-        let fields = ["name", "length", "isAudio", "signatureNumerator", "signatureDenominator"];
-        let read = read(json!({"kind":"session-clip","parent":slot,"fields":fields,"limit":1})).await.map_err(|error| error.to_string())?;
+        let read = read(json!({"kind":"session-clip","parent":slot,"fields":SESSION_FIELDS,"limit":1}))
+            .await
+            .map_err(|error| error.to_string())?;
         rows(&read).into_iter().next()
     } else {
         let read = read(json!({"kind":"arrangement-clip","parent":track,"fields":ARRANGEMENT_FIELDS,"limit":connection.page_limit()}))
@@ -278,7 +313,15 @@ async fn read_clip(connection: &LiveConnection, clip: &str, json: bool, tempo: O
     let name = row.get("name").cloned().unwrap_or(Value::Null);
     if json {
         let mut result = json!({"name": name, "notes": found});
-        if !session {
+        if session {
+            // Which of its notes the clip plays, in its own time.
+            let looped: JsonObject = SESSION_FIELDS[5..]
+                .iter()
+                .chain(["length"].iter())
+                .filter_map(|field| Some((field.to_string(), row.get(*field).filter(|value| !value.is_null())?.clone())))
+                .collect();
+            result["loop"] = Value::Object(looped);
+        } else {
             // Live's rows are in the clip's own time; this says where the clip plays them.
             let placed: JsonObject = ARRANGEMENT_FIELDS[1..]
                 .iter()

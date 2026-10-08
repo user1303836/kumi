@@ -2,18 +2,25 @@
 //! re-reads the part, keeps a change only if its target got closer and nothing else moved away, and takes it back
 //! otherwise. Code can move the notes itself (the reference's timing and accents, step by step); a reference's drums,
 //! from Live's Drums to MIDI, have their hits moved onto the drum stem's own onsets first. A pitched part that isn't in
-//! Live (an audio file) is turned into notes with Basic Pitch.
+//! Live (an audio file) is turned into notes with Basic Pitch, on a grid fitted to them. A part on a Drum Rack is read
+//! in lanes by its pads; any other part, and a transcribed one, is one lane.
 
-use super::super::connection::NO_CURRENT_LIVE;
+use super::super::{
+    connection::NO_CURRENT_LIVE,
+    notes::{clip_and_track, drum_rack, read_notes, track_name},
+};
 use super::rig::Window;
 use super::*;
 use crate::listening::{
     checklist::{Change, Row},
-    notes::{feel, gaps, lines, onsets, refine, toward, Feel, Line, Note},
+    notes::{feel, fit_grid, gaps, lines, onsets, refine, toward, Feel, Kit, Line, Note},
     round::{Next, Round, RoundKind},
 };
 use kumi_common::js::{number::to_string, string::head};
 use std::collections::HashMap;
+
+/// The tools that change a clip's notes: what a groove round takes back when it isn't kept.
+const NOTE_TOOLS: [&str; 5] = ["change_notes", "delete_notes", "edit_notes", "transform_midi", "write_midi_clip"];
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GrooveRequest {
@@ -35,6 +42,10 @@ pub struct GrooveRequest {
 
 pub struct GrooveRun {
     clip: String,
+    /// How the part's notes fall into lanes.
+    kit: Kit,
+    /// The part's track, by name: a round takes back note changes there only.
+    track: Option<String>,
     reference: Feel,
     reference_name: String,
     lines: Vec<Line>,
@@ -47,12 +58,29 @@ pub struct GrooveRun {
     rounds: Vec<Round>,
 }
 
-/// A clip's notes with their ids, in its own time, and where its own time starts in the song (Arrangement clips).
+impl GrooveRun {
+    /// A new answer: what the producer asked for since isn't a round's to take back, so the run's changes count from
+    /// these (the changes applied now).
+    pub(super) fn carry_on(&mut self, applied: Vec<String>) {
+        self.checkpoint = applied;
+    }
+}
+
+/// Notes to measure: a clip's (with their ids) in its own time, or a transcription's in beats of its fitted grid.
 struct Read {
     name: String,
+    /// The notes Live plays, each with its id (-1 when Live didn't give one).
     notes: Vec<(i64, Note)>,
     /// Song beat of the clip's own time zero.
     song_zero: Option<f64>,
+    /// Where the clip's notes have to end, in its own time: Live's bridge refuses a note past it.
+    end: f64,
+    /// How its notes fall into lanes.
+    kit: Kit,
+    /// Its tempo, when it isn't the Set's (a recording's).
+    tempo: Option<f64>,
+    /// Whether its velocities say how hard each note was played (a transcription's say how sure it was).
+    velocities: bool,
 }
 
 impl Rendering {
@@ -83,11 +111,12 @@ impl Rendering {
         }
     }
 
-    /// A clip's notes as Live has them.
-    /// A pitched part in an audio file (one that isn't in Live) as notes, with Basic Pitch: on the beat grid of its
-    /// tempo (given, else estimated), from the file's start as beat one.
+    /// A pitched part in an audio file (one that isn't in Live) as notes, with Basic Pitch: in beats of a grid fitted
+    /// to them (its tempo within 2 % of the given or estimated one, half or double an estimate when that's nearer the
+    /// Set's, and where its first downbeat falls), so a lead-in or a tempo off by a hair doesn't read as its feel. Its
+    /// velocities are Basic Pitch's confidence, not how hard it was played: they aren't compared.
     async fn file_notes(&self, file: &str, tempo: Option<f64>, signal: Signal) -> Result<Read, String> {
-        let tempo = match tempo {
+        let base = match tempo {
             Some(tempo) => tempo,
             None => crate::audio::analyze::analyze_file(
                 file,
@@ -104,7 +133,10 @@ impl Rendering {
         if heard.is_empty() {
             return Err("Basic Pitch heard no notes in it.".into());
         }
-        let beats = tempo / 60.;
+        let onsets: Vec<(f64, f64)> = heard.iter().map(|note| (note.start, note.strength as f64)).collect();
+        let meter = self.observer.beats_per_bar.get().max(1.);
+        let grid = fit_grid(&onsets, base, meter, tempo.is_none(), self.observer.tempo.get());
+        let beats = grid.tempo / 60.;
         let notes: Vec<(i64, Note)> = heard
             .iter()
             .enumerate()
@@ -112,30 +144,42 @@ impl Rendering {
                 (
                     index as i64,
                     Note {
-                        start: note.start * beats,
+                        start: (note.start - grid.downbeat) * beats,
                         length: ((note.end - note.start) * beats).max(1. / 64.),
                         pitch: note.pitch as i32,
-                        velocity: (note.strength as f64 * 127.).round().clamp(1., 127.),
+                        velocity: 100.,
                     },
                 )
             })
             .collect();
         let name = file.rsplit(['/', '\\']).next().unwrap_or(file).to_string();
         Ok(Read {
-            name: format!("{name} ({} notes at {} BPM, by Basic Pitch)", notes.len(), to_string((tempo * 10.).round() / 10.)),
+            name: format!(
+                "{name} ({} notes by Basic Pitch, on its grid: {} BPM, beat one {} s in)",
+                notes.len(),
+                to_string((grid.tempo * 100.).round() / 100.),
+                to_string((grid.downbeat * 1000.).round() / 1000.)
+            ),
             notes,
             song_zero: None,
+            end: f64::INFINITY,
+            kit: Kit::pitched(),
+            tempo: Some(grid.tempo),
+            velocities: false,
         })
     }
 
+    /// A clip's notes as Live has them: the ones it plays (not those before its start or past its end, which a split or
+    /// shortened clip keeps), each with its id.
     async fn clip_notes(&self, clip: &str, signal: Signal) -> Result<Read, String> {
         let input = object(json!({"clipRef": clip, "format": "json"}));
-        let read = super::super::notes::read_notes(&input, self.connection(), self.observer.tempo.get(), signal).await;
+        let read = read_notes(&input, self.connection(), self.observer.tempo.get(), signal).await;
         let done: Value = serde_json::from_str(&read.text).map_err(|_| "Kumi couldn't read the clip's notes.".to_string())?;
         let clip = &done["clips"][0];
         if let Some(error) = clip["error"].as_str() {
             return Err(format!("{}: {error}", clip["clip"].as_str().unwrap_or("the clip")));
         }
+        let (from, to, end) = window(clip);
         let notes: Vec<(i64, Note)> = clip["notes"]
             .as_array()
             .into_iter()
@@ -152,17 +196,51 @@ impl Rendering {
                     },
                 ))
             })
+            .filter(|(_, note)| note.start >= from - 1e-9 && note.start < to - 1e-9)
             .collect();
         if notes.is_empty() {
             return Err(format!("{} has no notes to measure.", clip["name"].as_str().unwrap_or("The clip")));
         }
         let placement = &clip["placement"];
         let song_zero = placement["start"].as_f64().map(|start| start - placement["startMarker"].as_f64().unwrap_or(0.));
-        Ok(Read { name: clip["name"].as_str().unwrap_or("the clip").to_string(), notes, song_zero })
+        Ok(Read {
+            name: clip["name"].as_str().unwrap_or("the clip").to_string(),
+            notes,
+            song_zero,
+            end,
+            kit: Kit::pitched(),
+            tempo: None,
+            velocities: true,
+        })
     }
 
-    fn feel_of(&self, notes: &[Note]) -> Feel {
-        feel(notes, self.observer.tempo.get().unwrap_or(120.), self.observer.beats_per_bar.get().max(1.))
+    /// How a clip's notes fall into lanes (by its track's Drum Rack, when it has one), and its track's name.
+    async fn lanes_of(&self, clip: &str, signal: Signal) -> (Kit, Option<String>) {
+        let Some((_, track)) = clip_and_track(self.connection(), clip) else { return (Kit::pitched(), None) };
+        let kit = drum_rack(self.connection(), &track, &signal).await.map_or_else(Kit::pitched, |pads| Kit::rack(&pads));
+        (kit, track_name(self.connection(), &track, signal).await)
+    }
+
+    fn feel_of(&self, notes: &[(i64, Note)], kit: &Kit, tempo: Option<f64>) -> Feel {
+        let notes: Vec<Note> = notes.iter().map(|(_, note)| *note).collect();
+        let tempo = tempo.or(self.observer.tempo.get()).unwrap_or(120.);
+        feel(&notes, tempo, self.observer.beats_per_bar.get().max(1.), kit)
+    }
+
+    /// The changes applied since a checkpoint that edit notes on the run's track: what the producer changed in between
+    /// or a judge round kept elsewhere isn't a groove round's to take back.
+    fn note_changes_since(&self, checkpoint: &[String], track: Option<&str>) -> Vec<(String, String)> {
+        let entries = self.history.entries.borrow();
+        self.applied_since(checkpoint)
+            .into_iter()
+            .filter(|(id, _)| {
+                entries.get(id).is_some_and(|entry| {
+                    let entry = entry.borrow();
+                    let notes = entry.tool.as_deref().is_some_and(|tool| NOTE_TOOLS.contains(&tool));
+                    notes && (track.is_none() || entry.record.track.as_ref().is_none_or(|chip| Some(chip.name.as_str()) == track))
+                })
+            })
+            .collect()
     }
 
     /// The reference's hits moved onto its drum stem's onsets: the stem heard quietly over the reference's span.
@@ -170,18 +248,11 @@ impl Rendering {
         let Some(zero) = reference.song_zero else {
             return Err("Onsets line up only with an Arrangement clip: put the reference's MIDI in the Arrangement.".into());
         };
-        let parts: Vec<&str> = audio.split(':').collect();
-        let [epoch, "arrangement_clip", track, _] = parts[..] else {
+        // The model has the stem's short ref: its long one says its track.
+        let Some((_, track)) = clip_and_track(self.connection(), audio).filter(|(long, _)| long.contains(":arrangement_clip:")) else {
             return Err("audio is the drum stem's Arrangement clip (its clipRef).".into());
         };
-        let tracks = self.rows("track", json!({"fields":["name"]}), signal.clone()).await.map_err(|error| error.to_string())?;
-        let wanted = format!("{epoch}:track:{track}");
-        let name = tracks
-            .iter()
-            .find(|row| row.get("ref").and_then(Value::as_str) == Some(wanted.as_str()))
-            .and_then(|row| row.get("name").and_then(Value::as_str))
-            .ok_or("Kumi couldn't find the drum stem's track.")?
-            .to_string();
+        let name = track_name(self.connection(), &track, signal.clone()).await.ok_or("Kumi couldn't find the drum stem's track.")?;
         let first = reference.notes.iter().map(|(_, note)| note.start).fold(f64::MAX, f64::min);
         let last = reference.notes.iter().map(|(_, note)| note.start + note.length).fold(0., f64::max);
         let meter = self.observer.beats_per_bar.get().max(1.);
@@ -238,7 +309,10 @@ impl Rendering {
             }
         } else {
             match self.clip_notes(reference, signal.clone()).await {
-                Ok(read) => read,
+                Ok(mut read) => {
+                    read.kit = self.lanes_of(reference, signal.clone()).await.0;
+                    read
+                }
                 Err(why) => return Ok(Err(format!("The reference: {why}"))),
             }
         };
@@ -249,15 +323,28 @@ impl Rendering {
                 Err(why) => return Ok(Err(why)),
             }
         }
-        let part = match self.clip_notes(clip, signal).await {
+        let part = match self.clip_notes(clip, signal.clone()).await {
             Ok(read) => read,
             Err(why) => return Ok(Err(why)),
         };
-        let reference_feel = self.feel_of(&wanted.notes.iter().map(|(_, note)| *note).collect::<Vec<_>>());
-        let part_feel = self.feel_of(&part.notes.iter().map(|(_, note)| *note).collect::<Vec<_>>());
+        let (mut kit, track) = self.lanes_of(clip, signal).await;
+        let mut reference_feel = self.feel_of(&wanted.notes, &wanted.kit, wanted.tempo);
+        let mut part_feel = self.feel_of(&part.notes, &kit, None);
+        // Lanes in common or none: a drum part against a pitched reference (or the other way round) is read as one lane
+        // each, so their timing still compares.
+        if !part_feel.lanes.iter().any(|lane| reference_feel.lane(&lane.name).is_some()) {
+            kit = Kit::pitched();
+            reference_feel = self.feel_of(&wanted.notes, &kit, wanted.tempo);
+            part_feel = self.feel_of(&part.notes, &kit, None);
+        }
+        if !wanted.velocities {
+            reference_feel = reference_feel.without_velocities();
+        }
         let now = lines(&gaps(&part_feel, &reference_feel));
         let mut run = GrooveRun {
             clip: clip.into(),
+            kit,
+            track,
             reference: reference_feel,
             reference_name: wanted.name.clone(),
             lines: now.clone(),
@@ -309,41 +396,39 @@ impl Rendering {
     }
 
     async fn groove_round(self: &Rc<Self>, request: &GrooveRequest, signal: Signal) -> Result<Result<Round, String>, RuntimeError> {
-        let (clip, checkpoint) = {
+        let (clip, checkpoint, kit, track) = {
             let run = self.groove.borrow();
             let run = run.as_ref().unwrap();
-            (run.clip.clone(), run.checkpoint.clone())
+            (run.clip.clone(), run.checkpoint.clone(), run.kit.clone(), run.track.clone())
         };
         let mut change = request.change.clone();
         if request.apply {
-            // Code moves the notes: each to the reference's timing and accent on its step.
+            // Code moves the notes: each step's by how far the reference's timing and accent there are from the part's.
             let read = match self.clip_notes(&clip, signal.clone()).await {
                 Ok(read) => read,
                 Err(why) => return Ok(Err(why)),
             };
+            if read.notes.iter().any(|(id, _)| *id < 0) {
+                return Ok(Err(
+                    "Live gave the clip's notes without their ids, so Kumi can't move them: update Kumi's bridge (kumi doctor says how)."
+                        .into(),
+                ));
+            }
             let amount = request.amount.unwrap_or(1.).clamp(0., 1.);
             let notes: Vec<Note> = read.notes.iter().map(|(_, note)| *note).collect();
-            let part = self.feel_of(&notes);
+            let part = self.feel_of(&read.notes, &kit, None);
             let moved = {
                 let run = self.groove.borrow();
                 toward(&notes, &part, &run.as_ref().unwrap().reference, self.observer.beats_per_bar.get().max(1.), amount)
             };
-            let patches: Vec<Value> = read
-                .notes
-                .iter()
-                .zip(&moved)
-                .filter(|((id, before), after)| {
-                    *id >= 0 && ((before.start - after.start).abs() > 1e-4 || before.velocity != after.velocity)
-                })
-                .map(|((id, _), after)| json!({"id": id, "start": after.start, "velocity": after.velocity}))
-                .collect();
+            let patches: Vec<Value> =
+                read.notes.iter().zip(&moved).filter_map(|((id, before), after)| inside(*id, before, after, read.end)).collect();
             if patches.is_empty() {
                 return Ok(Err("The notes already sit where the reference's do; nothing to move.".into()));
             }
             let count = patches.len();
-            for chunk in patches.chunks(500) {
-                self.step("change_notes", json!({"clipRef": clip, "notes": chunk}), signal.clone()).await?;
-            }
+            // One change, so Live takes all of it or none, and HISTORY takes it back as one.
+            self.step("change_notes", json!({"clipRef": clip, "notes": patches}), signal.clone()).await?;
             change = Some(format!(
                 "{}moved {count} notes {}toward the reference's timing and accents",
                 change.map(|said| format!("{}: ", said.trim_end_matches('.'))).unwrap_or_default(),
@@ -354,8 +439,8 @@ impl Rendering {
             Ok(read) => read,
             Err(why) => return Ok(Err(why)),
         };
-        let part = self.feel_of(&read.notes.iter().map(|(_, note)| *note).collect::<Vec<_>>());
-        let changes = self.applied_since(&checkpoint);
+        let part = self.feel_of(&read.notes, &kit, None);
+        let changes = self.note_changes_since(&checkpoint, track.as_deref());
         let (rows, kept, why, target_label) = {
             let run = self.groove.borrow();
             let run = run.as_ref().unwrap();
@@ -457,6 +542,53 @@ impl Rendering {
         run.rounds.push(round.clone());
         round
     }
+}
+
+/// The part of a clip's own time Live plays (its notes there are heard), and where its notes have to end: the latest
+/// of its length, loop end and end marker, as Live's bridge holds them. Unbounded where Live didn't say.
+fn window(clip: &Value) -> (f64, f64, f64) {
+    let (info, session) = match clip.get("loop") {
+        Some(info) => (info, true),
+        None => (&clip["placement"], false),
+    };
+    let number = |key: &str| info[key].as_f64().filter(|value| value.is_finite());
+    let end = ["length", "loopEnd", "endMarker"].iter().filter_map(|key| number(key)).fold(f64::NEG_INFINITY, f64::max);
+    let end = if end.is_finite() { end } else { f64::INFINITY };
+    let looped = match (number("loopStart"), number("loopEnd")) {
+        (Some(from), Some(to)) if info["looping"].as_bool() == Some(true) && to > from => Some((from, to)),
+        _ => None,
+    };
+    let marker = number("startMarker").or(number("loopStart"));
+    let unbounded = (f64::NEG_INFINITY, f64::INFINITY, end);
+    if session {
+        // A Session clip plays from its start marker: its loop over and over, or on to its end marker.
+        return match (looped, marker) {
+            (Some((from, to)), marker) => (marker.unwrap_or(from).min(from), to, end),
+            (None, marker) => (marker.unwrap_or(f64::NEG_INFINITY), number("endMarker").unwrap_or(f64::INFINITY), end),
+        };
+    }
+    // An Arrangement clip plays for its span from its start marker, its loop repeating once reached.
+    let span = number("endTime").zip(number("start")).map(|(to, from)| to - from).or(number("length"));
+    match (marker, span, looped) {
+        (Some(marker), Some(span), Some((from, to))) if span > to - marker => (marker.min(from), to, end),
+        (Some(marker), Some(span), _) => (marker, marker + span, end),
+        _ => unbounded,
+    }
+}
+
+/// A note's patch, when it moved: kept inside the clip, since Live's bridge refuses a note that ends past it. A note
+/// moved later ends by the clip's end, and moves no later than just short of it.
+fn inside(id: i64, before: &Note, after: &Note, end: f64) -> Option<Value> {
+    let start = after.start.min((end - 1. / 64.).max(before.start));
+    if (start - before.start).abs() <= 1e-4 && before.velocity == after.velocity {
+        return None;
+    }
+    let mut patch = json!({"id": id, "start": start, "velocity": after.velocity});
+    let length = before.length.min(end - start);
+    if length < before.length - 1e-9 {
+        patch["duration"] = json!(length);
+    }
+    Some(patch)
 }
 
 /// The biggest gap, passing over a target two changes in a row failed on while another is open.
