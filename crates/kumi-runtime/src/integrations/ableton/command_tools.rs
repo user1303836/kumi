@@ -17,7 +17,7 @@ use crate::{
         contracts::{ActionEvent, ChangeRecord, JsonObject, ToolResult},
         errors::RuntimeError,
     },
-    hands::{self, Hands, HandsError, KeysOptions, MenuItem, MenuOptions, OpenHandsOptions, Track},
+    hands::{self, Hands, HandsError, KeysOptions, MenuItem, MenuOptions, OpenHandsOptions, Toggle, ToggleSet, Track},
     mcp::allowed_tools::CallOptions,
     plugins::registry::{adapter_for, folder_for, plugin_guide, ExposedParameter},
 };
@@ -104,6 +104,185 @@ fn set_places(path: &std::path::Path) -> Vec<(PathBuf, Option<std::time::SystemT
 fn button_title(title: &str) -> String {
     title.replace('&', "").replace('\u{2019}', "'").trim().trim_end_matches(['.', '\u{2026}']).to_lowercase()
 }
+/// Live's Separate Stems dialog (Live 12.3 on): each stem's toggle by its accessibility id, the same in every
+/// language, and by its name, as Live 12.4 reads them on Windows.
+const STEMS: [(&str, &str, &str); 4] = [
+    ("vocals", "VocalsCheckControl", "Vocals"),
+    ("drums", "DrumsCheckControl", "Drums"),
+    ("bass", "BassCheckControl", "Bass"),
+    ("others", "OthersCheckControl", "Others"),
+];
+/// Merge to Single Track: Live takes it with two or three stems only, and greys it out (keeping its state)
+/// with one or four.
+const MERGE_STEMS: [&str; 3] = ["MergeStems.MergeStemsCheckControl", "Merge Stems", "Merge to Single Track"];
+/// Quality Mode: on for High Quality, off for High Speed.
+const HIGH_QUALITY: [&str; 2] = ["HighQualityCheckControl", "Quality Mode"];
+const SEPARATE: [&str; 2] = ["Separate", "SeparateButton"];
+/// How long Kumi waits on Live's work after pressing a dialog's button: Separate Stems at High Quality takes
+/// minutes for a whole song (rounds of 250 ms).
+const WORK_ROUNDS: u32 = 20 * 60 * 4;
+/// A toggle's name as Live gives it, split at its first comma: what it is ("Vocals") and what it does
+/// ("Include or exclude the Vocals stem.").
+fn toggle_parts(name: &str) -> (&str, Option<&str>) {
+    match name.split_once(", ") {
+        Some((short, about)) if !short.trim().is_empty() && !about.trim().is_empty() => (short.trim(), Some(about.trim())),
+        _ => (name.trim(), None),
+    }
+}
+/// The toggle one of `names` stands for among a dialog's: by its id, its whole name or its name before the
+/// comma, in any case, the first name that finds one.
+fn toggle_named<'a>(toggles: &'a [Toggle], names: &[String]) -> Option<&'a Toggle> {
+    names.iter().find_map(|name| {
+        let wanted = button_title(name);
+        toggles.iter().find(|toggle| {
+            toggle.id.as_deref().is_some_and(|id| id.to_lowercase() == wanted)
+                || button_title(&toggle.name) == wanted
+                || button_title(toggle_parts(&toggle.name).0) == wanted
+        })
+    })
+}
+/// A dialog as the model sees it: each toggle by its name, on or off, enabled false when Live has it greyed
+/// out, and what it does when Live says.
+fn shown(dialog: &hands::Dialog) -> Value {
+    let mut value = serde_json::to_value(dialog).unwrap();
+    if let Some(toggles) = &dialog.toggles {
+        value["toggles"] = toggles
+            .iter()
+            .map(|toggle| {
+                let (name, about) = toggle_parts(&toggle.name);
+                let mut shown = json!({"name":name,"on":toggle.on});
+                if !toggle.enabled {
+                    shown["enabled"] = json!(false);
+                }
+                if let Some(about) = about {
+                    shown["about"] = json!(about);
+                }
+                shown
+            })
+            .collect();
+    }
+    value
+}
+/// What the model is told to do with a dialog Kumi hands back.
+fn next_for(dialog: &hands::Dialog) -> &'static str {
+    if dialog.toggles.as_ref().is_some_and(|toggles| !toggles.is_empty()) {
+        "Set its toggles by name with toggles and press its button with answer, both in one call, or tell the producer what it asks."
+    } else {
+        "Answer it with answer (the button's title), or tell the producer what it asks."
+    }
+}
+/// A toggle asked for: the names that may stand for it (an id first, when Kumi knows it), on or off.
+struct Wanted {
+    names: Vec<String>,
+    on: bool,
+}
+impl Wanted {
+    fn said(&self) -> &str {
+        self.names.last().map(String::as_str).unwrap_or("")
+    }
+}
+/// What a command's dialog gets, given with the command: its toggles set, then its button pressed. For
+/// separate_stems, `stems` says what Separate Stems is asked for (Kumi reports what it separated).
+struct Fill {
+    toggles: Vec<Wanted>,
+    answer: Option<Vec<String>>,
+    stems: Option<Vec<&'static str>>,
+}
+/// How a command's dialog went: filled, pressed and Live's work seen through (the tracks after, and what to
+/// say of it); handed back (Live asked something else, or Kumi couldn't fill it), with what to do next; or no
+/// dialog came.
+enum Filled {
+    Done(Vec<String>, JsonObject),
+    Back(hands::Dialog, String),
+    NoDialog,
+}
+/// A dialog a command handed back to the model for Live's work after it (Separate Stems, a bounce): the
+/// model's answer finishes the command, so Kumi waits for that work, says what it made, and keeps it in
+/// HISTORY under the command's title only then.
+struct Handed {
+    before: Vec<String>,
+    title: String,
+}
+/// What Live's work after a press came to: the tracks after, a dialog Live asked instead, and whether its
+/// progress window came up.
+struct Worked {
+    after: Vec<String>,
+    asked: Option<hands::Dialog>,
+    busy: bool,
+}
+/// The toggles input gives, in its order: each name, on (true) or off (false).
+fn wanted_toggles(input: &JsonObject) -> Result<Vec<Wanted>, String> {
+    let Some(given) = input.get("toggles").filter(|v| !v.is_null()) else { return Ok(vec![]) };
+    let Some(given) = given.as_object() else {
+        return Err("toggles names each toggle with true (on) or false (off): {\"Vocals\": true}.".into());
+    };
+    given
+        .iter()
+        .map(|(name, on)| match on.as_bool() {
+            Some(on) => Ok(Wanted { names: vec![name.clone()], on }),
+            None => Err(format!("toggles takes true (on) or false (off) for {name}.")),
+        })
+        .collect()
+}
+/// The tracks Live made and the ones it took away, by name: a name there more often than before counts as made.
+fn changed_tracks(before: &[String], after: &[String]) -> (Vec<String>, Vec<String>) {
+    let added = after
+        .iter()
+        .filter(|name| !before.contains(name) || after.iter().filter(|n| n == name).count() > before.iter().filter(|n| n == name).count())
+        .cloned()
+        .collect();
+    let removed = before.iter().filter(|name| !after.contains(name)).cloned().collect();
+    (added, removed)
+}
+/// Separate Stems filled as separate_stems asks: the stems (all four when not given), Merge to Single Track
+/// (off unless asked, for two or three), Quality Mode when given (else as the producer last left it), then
+/// Separate. Refused before anything is pressed when Live couldn't do it.
+fn stems_fill(input: &JsonObject) -> Result<Fill, String> {
+    let given = match input.get("stems").filter(|v| !v.is_null()) {
+        None => STEMS.iter().map(|(stem, _, _)| stem.to_string()).collect(),
+        Some(Value::Array(stems)) => stems.iter().map(|v| v.as_str().unwrap_or("").trim().to_lowercase()).collect::<Vec<_>>(),
+        Some(_) => return Err("stems lists the stems to make: [\"vocals\", \"drums\"].".into()),
+    };
+    let mut stems = Vec::new();
+    for stem in &given {
+        let Some((known, _, _)) = STEMS.iter().find(|(known, _, _)| known == stem) else {
+            return Err(format!("Live separates vocals, drums, bass and others; not “{stem}”."));
+        };
+        if !stems.contains(known) {
+            stems.push(*known);
+        }
+    }
+    if stems.is_empty() {
+        return Err("Give at least one stem: vocals, drums, bass or others.".into());
+    }
+    stems.sort_by_key(|stem| STEMS.iter().position(|(known, _, _)| known == stem));
+    let merge = input.get("merge").and_then(Value::as_bool);
+    let merging = (2..=3).contains(&stems.len());
+    if merge == Some(true) && !merging {
+        return Err(format!("Live merges two or three stems into one track; with {} leave merge out.", stems.len()));
+    }
+    let quality = match input.get("quality").and_then(Value::as_str).map(|q| q.trim().to_lowercase().replace('_', " ")) {
+        None => None,
+        Some(q) if q == "high quality" => Some(true),
+        Some(q) if q == "high speed" => Some(false),
+        Some(q) => return Err(format!("quality is high quality or high speed, not “{q}”.")),
+    };
+    // Each stem asked for goes on before the others go off, so the dialog never has none on (Live greys out
+    // Separate then).
+    let mut toggles: Vec<Wanted> = STEMS
+        .iter()
+        .filter(|(stem, _, _)| stems.contains(stem))
+        .chain(STEMS.iter().filter(|(stem, _, _)| !stems.contains(stem)))
+        .map(|(stem, id, name)| Wanted { names: vec![id.to_string(), name.to_string()], on: stems.contains(stem) })
+        .collect();
+    if merging {
+        toggles.push(Wanted { names: MERGE_STEMS.iter().map(|n| n.to_string()).collect(), on: merge == Some(true) });
+    }
+    if let Some(high) = quality {
+        toggles.push(Wanted { names: HIGH_QUALITY.iter().map(|n| n.to_string()).collect(), on: high });
+    }
+    Ok(Fill { toggles, answer: Some(SEPARATE.iter().map(|n| n.to_string()).collect()), stems: Some(stems) })
+}
 /// Bringing Live's window forward: true when it came.
 pub type FrontLive = Rc<dyn Fn() -> LocalBoxFuture<'static, bool>>;
 #[derive(Default)]
@@ -125,6 +304,8 @@ pub struct CommandTools {
     menu_items: RefCell<Option<Vec<MenuItem>>>,
     /// A Set switch set_file handed back a dialog for, which the model's answer can finish or cancel.
     switch_handed_back: Cell<bool>,
+    /// A command's dialog handed back to the model, whose answer starts Live's work (Separate Stems).
+    handed: RefCell<Option<Handed>>,
 }
 #[derive(Debug)]
 enum CommandError {
@@ -210,6 +391,7 @@ impl CommandTools {
             hands_setup: RefCell::new(None),
             menu_items: RefCell::new(None),
             switch_handed_back: Cell::new(false),
+            handed: RefCell::new(None),
         }
     }
     fn tell(&self, title: impl Into<String>) {
@@ -335,36 +517,20 @@ impl CommandTools {
             let _ = hands.trusted(true).await;
             return Ok(ToolResult::error("Kumi needs Accessibility access to use Live's menus. macOS just asked for it: in System Settings › Privacy & Security › Accessibility, turn on the app Kumi runs in (your terminal), then ask again. Tell the producer exactly that."));
         }
-        if let Some(answer) = input.get("answer").and_then(Value::as_str) {
-            let answered = hands.answer(answer, Some(signal.clone())).await?;
-            if !answered.ok {
-                let open = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
-                return Ok(ToolResult::error(if open.open {
-                    format!(
-                        "Live's dialog has no \"{answer}\" button; its buttons: {}.",
-                        open.buttons.map(|v| v.join(", ")).filter(|v| !v.is_empty()).unwrap_or_else(|| "none Kumi can see".into())
-                    )
-                } else {
-                    "Live has no dialog open.".into()
-                }));
-            }
-            // Windows says No where macOS says Don't Save: what was pressed is said as Live says it.
-            let pressed = answered.fields.get("pressed").and_then(Value::as_str).filter(|s| !s.is_empty()).unwrap_or(answer).to_owned();
-            self.tell(format!("Pressed {pressed} in Live's dialog"));
-            // A switch Kumi handed back stays Kumi's until it's cancelled here.
-            if self.switch_handed_back.get() && button_title(&pressed) == "cancel" {
-                self.switch_handed_back.set(false);
-                self.connection.forget_set_change();
-            }
-            delay(200, signal).await?;
-            let next = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
-            let mut out = args(json!({"pressed":pressed}));
-            if next.open {
-                out.insert("dialog".into(), serde_json::to_value(next).unwrap());
-            }
-            return Ok(ToolResult::text(stringify(&Value::Object(out))));
-        }
+        let toggles = match wanted_toggles(input) {
+            Ok(toggles) => toggles,
+            Err(why) => return Ok(ToolResult::error(why)),
+        };
+        let answer = input.get("answer").and_then(Value::as_str);
         let named_command = input.get("command").and_then(Value::as_str);
+        let menu = strings(input.get("menu"));
+        let keys = strings(input.get("keys"));
+        // An answer or toggles on their own are for the dialog Live has open; given with a command, for the
+        // dialog that command opens.
+        if named_command.is_none() && menu.is_empty() && keys.is_empty() && (answer.is_some() || !toggles.is_empty()) {
+            return self.answer_dialog(answer, &toggles, signal, hands).await;
+        }
+        self.handed.borrow_mut().take();
         let command = named_command.and_then(|name| COMMANDS.get(name));
         if let Some(name) = named_command.filter(|_| command.is_none()) {
             return Ok(ToolResult::error(format!("Kumi doesn't know the command {name}; name the menu item instead (menu).")));
@@ -374,11 +540,24 @@ impl CommandTools {
                 return self.set_file(name, command, input, signal, hands).await;
             }
         }
-        let menu = strings(input.get("menu"));
-        let keys = strings(input.get("keys"));
         if command.is_none() && menu.is_empty() && keys.is_empty() {
             return Ok(ToolResult::error("Give a command, a menu item (menu) or keys."));
         }
+        let stems_given = ["stems", "quality", "merge"].iter().any(|key| input.get(*key).is_some_and(|v| !v.is_null()));
+        if stems_given && named_command != Some("separate_stems") {
+            return Ok(ToolResult::error("stems, quality and merge are for separate_stems."));
+        }
+        // What goes into the dialog the command opens: Separate Stems' stems, or the toggles and answer given.
+        let fill = if named_command == Some("separate_stems") && (stems_given || (toggles.is_empty() && answer.is_none())) {
+            match stems_fill(input) {
+                Ok(fill) => Some(fill),
+                Err(why) => return Ok(ToolResult::error(why)),
+            }
+        } else if !toggles.is_empty() || answer.is_some() {
+            Some(Fill { toggles, answer: answer.map(|a| vec![a.to_owned()]), stems: None })
+        } else {
+            None
+        };
         let track = input.get("track").and_then(Value::as_str).filter(|s| !s.is_empty());
         let tracks = strings(input.get("tracks"));
         let clip = input.get("clip").and_then(Value::as_str).filter(|s| !s.is_empty());
@@ -606,9 +785,20 @@ impl CommandTools {
                 delay(100, signal).await?;
             }
         }
-        if command
-            .is_some_and(|c| includes(&c.titles[0], &["Bounce", "Convert", "Separate", "Slice", "Consolidate", "Flatten", "Paste Bounced"]))
-        {
+        // The dialog the command opens, filled and answered as asked, and Live's work after it seen through.
+        let (mut finished, mut dialog, mut next, mut said) = (None, None, None, JsonObject::new());
+        if let Some(fill) = &fill {
+            match self.fill(hands, fill, &before, signal).await? {
+                Filled::Done(after, report) => (finished, said) = (Some(after), report),
+                Filled::Back(open, why) => (dialog, next) = (Some(open), Some(why)),
+                Filled::NoDialog => {}
+            }
+        }
+        let filled = finished.is_some() || dialog.is_some();
+        let works = command.is_some_and(|c| {
+            includes(&c.titles[0], &["Bounce", "Convert", "Separate", "Slice", "Consolidate", "Flatten", "Paste Bounced"])
+        });
+        if works && !filled {
             delay(150, signal).await?;
             for _ in 0..1200 {
                 let open = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
@@ -619,10 +809,15 @@ impl CommandTools {
             }
         }
         let title = command.map(|c| format!("{}{what}", c.done)).unwrap_or_else(|| format!("Pressed {pressed} in Live"));
-        self.tell(&title);
         let asks = command.and_then(|c| c.dialog) == Some(true);
-        let mut dialog = None;
-        for _ in 0..if asks { 6 } else { 2 } {
+        let looks = if filled {
+            0
+        } else if asks {
+            6
+        } else {
+            2
+        };
+        for _ in 0..looks {
             delay(if asks { 250 } else { 150 }, signal).await?;
             let open = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
             if open.open && open.buttons.as_ref().is_some_and(|b| !b.is_empty()) && !in_progress(&open) {
@@ -630,15 +825,24 @@ impl CommandTools {
                 break;
             }
         }
+        // Live asks before its work: the work, and saying it's done, come with the model's answer.
+        let handing = works && dialog.is_some();
+        if !handing {
+            self.tell(&title);
+        }
         {
             let mut refs = self.connection.references.borrow_mut();
             refs.invalidate();
             refs.clear_names();
         }
         self.connection.lease.set(self.connection.lease.get() + 1);
-        let mut after = self.track_names(signal).await?;
+        let mut after = match finished.take() {
+            Some(after) => after,
+            None => self.track_names(signal).await?,
+        };
         for _ in 0..8 {
             if dialog.is_some()
+                || filled
                 || !command.is_some_and(|c| {
                     c.target != Target::None && includes(&c.titles[0], &["Bounce", "Convert", "Separate", "Slice", "Group"])
                 })
@@ -649,18 +853,10 @@ impl CommandTools {
             delay(250, signal).await?;
             after = self.track_names(signal).await?;
         }
-        let added: Vec<_> = after
-            .iter()
-            .filter(|name| {
-                !before.contains(name) || after.iter().filter(|n| n == name).count() > before.iter().filter(|n| n == name).count()
-            })
-            .cloned()
-            .collect();
-        let removed: Vec<_> = before.iter().filter(|name| !after.contains(name)).cloned().collect();
+        let (added, removed) = changed_tracks(&before, &after);
         let saved = if let Some(before) = saved_before { self.modified()?.is_some_and(|after| after > before) } else { false };
-        if command.is_some() || !added.is_empty() || !removed.is_empty() {
-            let record:ChangeRecord=serde_json::from_value(json!({"id":format!("l{}",&uuid::Uuid::new_v4().to_string()[..8]),"family":"structure","title":title,"state":"kept","note":"Done with Live's own command: Live's undo (Cmd-Z) takes it back.","at":self.connection.now().timestamp_millis()})).unwrap();
-            self.history.emit(&record);
+        if (command.is_some() || !added.is_empty() || !removed.is_empty()) && !handing {
+            self.record_command(&title);
         }
         let mut out = args(json!({"pressed":pressed}));
         if let Some(key) = key.filter(|s| !s.is_empty()) {
@@ -675,11 +871,290 @@ impl CommandTools {
         if saved {
             out.insert("saved".into(), json!(true));
         }
+        out.extend(said);
         if let Some(dialog) = dialog {
-            out.insert("dialog".into(), serde_json::to_value(dialog).unwrap());
-            out.insert("next".into(), json!("Answer it with answer (the button's title), or tell the producer what it asks."));
+            out.insert("dialog".into(), shown(&dialog));
+            out.insert("next".into(), json!(next.unwrap_or_else(|| next_for(&dialog).to_owned())));
+        }
+        // The model's answer starts Live's work: Kumi sees it through then, and says what it made.
+        if handing {
+            *self.handed.borrow_mut() = Some(Handed { before, title });
         }
         out.insert("note".into(), json!("References from before are gone: discover again before using any."));
+        Ok(ToolResult::text(stringify(&Value::Object(out))))
+    }
+    /// HISTORY's entry for what Live's own command did: kept, for Live's undo to take back.
+    fn record_command(&self, title: &str) {
+        let record: ChangeRecord = serde_json::from_value(json!({"id":format!("l{}",&uuid::Uuid::new_v4().to_string()[..8]),"family":"structure","title":title,"state":"kept","note":"Done with Live's own command: Live's undo (Cmd-Z) takes it back.","at":self.connection.now().timestamp_millis()})).unwrap();
+        self.history.emit(&record);
+    }
+    /// The dialog a command opened, filled as asked: its toggles set, its button pressed, and Live's work
+    /// after it seen through (Separate Stems: its progress window, then the stems' tracks).
+    async fn fill(&self, hands: &dyn Hands, fill: &Fill, before: &[String], signal: &Signal) -> Result<Filled, CommandError> {
+        // Live puts its dialog up a moment after the menu, and its controls a moment after that.
+        let mut dialog = None;
+        for _ in 0..20 {
+            delay(250, signal).await?;
+            let open = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
+            let controls = open.buttons.as_ref().is_some_and(|b| !b.is_empty()) || open.toggles.as_ref().is_some_and(|t| !t.is_empty());
+            if open.open && controls && !in_progress(&open) {
+                dialog = Some(open);
+                break;
+            }
+        }
+        let Some(mut dialog) = dialog else { return Ok(Filled::NoDialog) };
+        if !fill.toggles.is_empty() {
+            match self.set_toggles(hands, &dialog, &fill.toggles, signal).await? {
+                Ok(set) => dialog = set,
+                Err(why) => {
+                    let now = hands.dialog(Some(signal.clone())).await.ok().filter(|now| now.open).unwrap_or(dialog);
+                    let next = format!("{why} Nothing in it was pressed. {}", next_for(&now));
+                    return Ok(Filled::Back(now, next));
+                }
+            }
+        }
+        let mut report = JsonObject::new();
+        if let Some(stems) = &fill.stems {
+            let toggles = dialog.toggles.clone().unwrap_or_default();
+            report.insert("stems".into(), json!(stems));
+            if let Some(high) = toggle_named(&toggles, &HIGH_QUALITY.map(String::from)) {
+                report.insert("quality".into(), json!(if high.on { "high quality" } else { "high speed" }));
+            }
+            // Greyed out, Merge Stems keeps its state but Live doesn't merge.
+            if toggle_named(&toggles, &MERGE_STEMS.map(String::from)).is_some_and(|merge| merge.on && merge.enabled) {
+                report.insert("merged".into(), json!(true));
+            }
+        }
+        let Some(answer) = &fill.answer else {
+            let next = next_for(&dialog).to_owned();
+            return Ok(Filled::Back(dialog, next));
+        };
+        // The button by the first of its names Live has: its id stands in when its title is in another language.
+        let (mut pressed, mut greyed) = (None, false);
+        for name in answer {
+            let reply = hands.answer(name, Some(signal.clone())).await?;
+            if reply.ok {
+                pressed = Some(reply.fields.get("pressed").and_then(Value::as_str).filter(|s| !s.is_empty()).unwrap_or(name).to_owned());
+                break;
+            }
+            greyed |= reply.error.as_deref() == Some("disabled");
+        }
+        let Some(pressed) = pressed else {
+            let button = answer.first().map(String::as_str).unwrap_or("");
+            let why = if greyed {
+                format!("Live has “{button}” greyed out right now, so nothing in it was pressed.")
+            } else {
+                format!("Live's dialog has no “{button}” button, so nothing in it was pressed.")
+            };
+            let next = format!("{why} {}", next_for(&dialog));
+            return Ok(Filled::Back(dialog, next));
+        };
+        report.insert("answered".into(), json!(pressed));
+        if button_title(&pressed) == "cancel" {
+            return Ok(Filled::Done(self.track_names(signal).await?, report));
+        }
+        match &fill.stems {
+            Some(stems) => self.tell(format!("Separating stems: {}", stems.join(", "))),
+            None => self.tell(format!("Pressed {pressed} in Live's dialog")),
+        }
+        let worked = self.finish_work(hands, before, Some(&dialog), signal).await?;
+        Ok(match worked.asked {
+            Some(asked) => {
+                let next = next_for(&asked).to_owned();
+                Filled::Back(asked, next)
+            }
+            None => Filled::Done(worked.after, report),
+        })
+    }
+    /// The toggles of Live's open dialog set as asked, in order: Ok with the dialog as it is after, or what to
+    /// tell the model (a toggle it doesn't have, one Live kept as it was).
+    async fn set_toggles(
+        &self,
+        hands: &dyn Hands,
+        dialog: &hands::Dialog,
+        wanted: &[Wanted],
+        signal: &Signal,
+    ) -> Result<Result<hands::Dialog, String>, CommandError> {
+        let toggles = dialog.toggles.clone().unwrap_or_default();
+        let mut set = Vec::new();
+        for one in wanted {
+            let Some(toggle) = toggle_named(&toggles, &one.names) else {
+                return Ok(Err(if toggles.is_empty() {
+                    "Live's dialog has no toggles.".to_owned()
+                } else {
+                    format!(
+                        "Live's dialog has no toggle “{}”; its toggles: {}.",
+                        one.said(),
+                        toggles.iter().map(|t| toggle_parts(&t.name).0).collect::<Vec<_>>().join(", ")
+                    )
+                }));
+            };
+            set.push(ToggleSet { name: toggle.name.clone(), id: toggle.id.clone(), on: one.on });
+        }
+        let reply = hands.toggles(&set, Some(signal.clone())).await?;
+        if !reply.ok {
+            return Ok(Err(match reply.error.as_deref() {
+                Some("no-dialog") => "Live has no dialog open.".to_owned(),
+                error => format!("Kumi couldn't set the dialog's toggles ({}).", error.unwrap_or("undefined")),
+            }));
+        }
+        let after: Vec<Toggle> = reply.fields.get("toggles").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+        for (one, asked) in wanted.iter().zip(&set) {
+            let Some(now) = after.iter().find(|t| if asked.id.is_some() { t.id == asked.id } else { t.name == asked.name }) else {
+                return Ok(Err(format!("Live's dialog lost its toggle “{}” while Kumi set it.", one.said())));
+            };
+            if now.on != asked.on {
+                let state = if now.on { "on" } else { "off" };
+                return Ok(Err(if now.enabled {
+                    format!("Live kept “{}” {state} when Kumi set it.", toggle_parts(&now.name).0)
+                } else {
+                    format!("Live has “{}” greyed out right now, so it stayed {state}.", toggle_parts(&now.name).0)
+                }));
+            }
+        }
+        let mut dialog = dialog.clone();
+        dialog.toggles = Some(after);
+        Ok(Ok(dialog))
+    }
+    /// Live's work after a press, seen through: its progress window waited out (Separate Stems' comes up about
+    /// 2 s after Separate in Live 12.4), then the tracks as they are. A question or an error Live asks instead
+    /// comes back as the dialog; the dialog just answered, while it closes, doesn't.
+    async fn finish_work(
+        &self,
+        hands: &dyn Hands,
+        before: &[String],
+        answered: Option<&hands::Dialog>,
+        signal: &Signal,
+    ) -> Result<Worked, CommandError> {
+        let (mut busy, mut quiet, mut closing, mut seen) = (false, 0, 0, None);
+        for _ in 0..WORK_ROUNDS {
+            delay(250, signal).await?;
+            let open = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
+            if open.open && answered.is_some_and(|d| d.title == open.title && d.buttons == open.buttons) && closing < 8 {
+                closing += 1;
+                continue;
+            }
+            // A progress window, or one still putting its buttons up.
+            if open.open && (in_progress(&open) || open.buttons.as_ref().is_none_or(Vec::is_empty)) {
+                (busy, quiet) = (true, 0);
+                continue;
+            }
+            if open.open {
+                return Ok(Worked { after: self.track_names(signal).await?, asked: Some(open), busy });
+            }
+            let after = self.track_names(signal).await?;
+            // Live's new tracks come in one go: read the same twice, they're all there.
+            if after != before {
+                if seen.as_ref() == Some(&after) {
+                    return Ok(Worked { after, asked: None, busy });
+                }
+                seen = Some(after);
+                continue;
+            }
+            quiet += 1;
+            // Nothing new: done once its progress window has been gone a second, or when none came in 8 s.
+            if (busy && quiet >= 4) || quiet >= 32 {
+                return Ok(Worked { after, asked: None, busy });
+            }
+        }
+        Ok(Worked { after: self.track_names(signal).await?, asked: None, busy })
+    }
+    /// The dialog Live has open answered: its toggles set as asked, then the button pressed. When a command
+    /// handed it back for Live's work after it, the work is seen through and what it made said.
+    async fn answer_dialog(
+        &self,
+        answer: Option<&str>,
+        toggles: &[Wanted],
+        signal: &Signal,
+        hands: &dyn Hands,
+    ) -> Result<ToolResult, CommandError> {
+        let mut set = None;
+        if !toggles.is_empty() {
+            let open = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
+            if !open.open {
+                return Ok(ToolResult::error("Live has no dialog open."));
+            }
+            set = match self.set_toggles(hands, &open, toggles, signal).await? {
+                Ok(dialog) => Some(dialog),
+                Err(why) => return Ok(ToolResult::error(why)),
+            };
+            let said = toggles.iter().map(|t| format!("{} {}", t.said(), if t.on { "on" } else { "off" })).collect::<Vec<_>>();
+            self.tell(format!("Set {} in Live's dialog", said.join(", ")));
+        }
+        let answer = match (answer, set) {
+            (Some(answer), _) => answer,
+            (None, Some(set)) => return Ok(ToolResult::text(stringify(&json!({"dialog":shown(&set)})))),
+            (None, None) => return Ok(ToolResult::error("Give answer (a button's title) or toggles.")),
+        };
+        // A command's dialog, whose answer starts Live's work: read before it's pressed, to tell it from what
+        // Live shows after.
+        let handed = self.handed.borrow_mut().take();
+        let asked = match &handed {
+            Some(_) => hands.dialog(Some(signal.clone())).await.ok(),
+            None => None,
+        };
+        let answered = hands.answer(answer, Some(signal.clone())).await?;
+        if !answered.ok {
+            *self.handed.borrow_mut() = handed;
+            if answered.error.as_deref() == Some("disabled") {
+                return Ok(ToolResult::error(format!("Live has “{answer}” greyed out right now, so nothing was pressed.")));
+            }
+            let open = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
+            return Ok(ToolResult::error(if open.open {
+                format!(
+                    "Live's dialog has no \"{answer}\" button; its buttons: {}.",
+                    open.buttons.map(|v| v.join(", ")).filter(|v| !v.is_empty()).unwrap_or_else(|| "none Kumi can see".into())
+                )
+            } else {
+                "Live has no dialog open.".into()
+            }));
+        }
+        // Windows says No where macOS says Don't Save: what was pressed is said as Live says it.
+        let pressed = answered.fields.get("pressed").and_then(Value::as_str).filter(|s| !s.is_empty()).unwrap_or(answer).to_owned();
+        self.tell(format!("Pressed {pressed} in Live's dialog"));
+        // A switch Kumi handed back stays Kumi's until it's cancelled here.
+        if self.switch_handed_back.get() && button_title(&pressed) == "cancel" {
+            self.switch_handed_back.set(false);
+            self.connection.forget_set_change();
+        }
+        let mut out = args(json!({"pressed":pressed}));
+        if let Some(handed) = handed.filter(|_| button_title(&pressed) != "cancel") {
+            let worked = self.finish_work(hands, &handed.before, asked.as_ref(), signal).await?;
+            {
+                let mut refs = self.connection.references.borrow_mut();
+                refs.invalidate();
+                refs.clear_names();
+            }
+            self.connection.lease.set(self.connection.lease.get() + 1);
+            let (added, removed) = changed_tracks(&handed.before, &worked.after);
+            if !added.is_empty() {
+                out.insert("newTracks".into(), json!(added));
+            }
+            if !removed.is_empty() {
+                out.insert("goneTracks".into(), json!(removed));
+            }
+            match worked.asked {
+                Some(next) => {
+                    out.insert("dialog".into(), shown(&next));
+                    out.insert("next".into(), json!(next_for(&next)));
+                    // Its answer still finishes the command.
+                    *self.handed.borrow_mut() = Some(handed);
+                }
+                // Done: what Live worked on, or made, is the command's, in HISTORY too.
+                None if worked.busy || !added.is_empty() || !removed.is_empty() => {
+                    self.tell(&handed.title);
+                    self.record_command(&handed.title);
+                }
+                None => {}
+            }
+            out.insert("note".into(), json!("References from before are gone: discover again before using any."));
+            return Ok(ToolResult::text(stringify(&Value::Object(out))));
+        }
+        delay(200, signal).await?;
+        let next = hands.dialog(Some(signal.clone())).await.unwrap_or_default();
+        if next.open {
+            out.insert("dialog".into(), shown(&next));
+        }
         Ok(ToolResult::text(stringify(&Value::Object(out))))
     }
     /// The Set's file through Live's own commands: save it under a name (save_as, or save with a path for a
@@ -818,7 +1293,7 @@ impl CommandTools {
                 if words.contains("save changes") || words.contains("before closing") {
                     let Some(answer) = save_current else {
                         // Answered by hand, the Open dialog that follows would be left for no one to fill.
-                        out.insert("dialog".into(), serde_json::to_value(&dialog).unwrap());
+                        out.insert("dialog".into(), shown(&dialog));
                         out.insert("next".into(), json!("Live asks whether to save the open Set first: answer Cancel, ask the producer, then run this again with save_current (yes saves it, no discards it)."));
                         hand_back(&mut expected);
                         return Ok(ToolResult::text(stringify(&Value::Object(out))));
@@ -837,7 +1312,7 @@ impl CommandTools {
                         .unwrap_or_else(|| usual.to_owned());
                     let answered = hands.answer(&button, Some(signal.clone())).await?;
                     if !answered.ok {
-                        out.insert("dialog".into(), serde_json::to_value(&dialog).unwrap());
+                        out.insert("dialog".into(), shown(&dialog));
                         out.insert("next".into(), json!("Kumi couldn't answer it: answer it yourself with answer, by its button's title."));
                         hand_back(&mut expected);
                         return Ok(ToolResult::text(stringify(&Value::Object(out))));
@@ -873,7 +1348,7 @@ impl CommandTools {
                     && wanted == "save"
                     && ((existed && question)
                         || ["already exists", "replace", "既に存在", "置き換え", "已存在", "替换"].iter().any(|w| words.contains(w)));
-                out.insert("dialog".into(), serde_json::to_value(&dialog).unwrap());
+                out.insert("dialog".into(), shown(&dialog));
                 out.insert("next".into(), json!(if unsaved {
                     "Live wants a file for the open Set, which was never saved, before it opens another: answer Cancel, save it with save_as and a path, then ask again; or give save_current no to discard it.".to_owned()
                 } else if replacing {

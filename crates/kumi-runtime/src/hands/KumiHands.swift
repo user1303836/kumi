@@ -2,7 +2,7 @@
 import Cocoa
 import ApplicationServices
 
-let version = 2
+let version = 3
 let liveBundles = ["com.ableton.live"]
 
 func emit(_ object: [String: Any]) {
@@ -189,10 +189,46 @@ func texts(_ element: AXUIElement, _ depth: Int = 0) -> (words: [String], button
 func button(_ element: AXUIElement, _ name: String, _ depth: Int = 0) -> AXUIElement? {
   if depth > 8 { return nil }
   for child in children(element) {
-    if role(child) == (kAXButtonRole as String) && title(child).lowercased() == name.lowercased() { return child }
+    if role(child) == (kAXButtonRole as String) && (title(child).lowercased() == name.lowercased() || identifier(child) == name) { return child }
     if let found = button(child, name, depth + 1) { return found }
   }
   return nil
+}
+/** Its accessibility identifier: Live's are the same in every language (VocalsCheckControl). */
+func identifier(_ element: AXUIElement) -> String { (value(element, "AXIdentifier") as? String) ?? "" }
+/** Whether a check box is on (its value is 1; 2 is mixed). */
+func isOn(_ element: AXUIElement) -> Bool { ((value(element, kAXValueAttribute as String) as? NSNumber)?.intValue ?? 0) == 1 }
+/** A dialog's toggles (check boxes): each with its name, whether it's on, whether it can be changed now, and its identifier. */
+func toggles(_ element: AXUIElement, _ depth: Int = 0) -> [[String: Any]] {
+  var found: [[String: Any]] = []
+  if depth > 8 { return found }
+  for child in children(element) {
+    if role(child) == (kAXCheckBoxRole as String) {
+      let name = label(child).trimmingCharacters(in: .whitespaces)
+      if !name.isEmpty {
+        var toggle: [String: Any] = ["name": name, "on": isOn(child), "enabled": enabled(child)]
+        if !identifier(child).isEmpty { toggle["id"] = identifier(child) }
+        found.append(toggle)
+      }
+    }
+    found += toggles(child, depth + 1)
+  }
+  return found
+}
+/** The first check box under an element that matches. */
+func checkBox(_ element: AXUIElement, _ matches: (AXUIElement) -> Bool, _ depth: Int = 0) -> AXUIElement? {
+  if depth > 8 { return nil }
+  for child in children(element) {
+    if role(child) == (kAXCheckBoxRole as String) && matches(child) { return child }
+    if let found = checkBox(child, matches, depth + 1) { return found }
+  }
+  return nil
+}
+/** The check box a request names: by its identifier when it gives one, else by its whole name. */
+func checkBox(_ window: AXUIElement, id: String, name: String) -> AXUIElement? {
+  let named = name.trimmingCharacters(in: .whitespaces)
+  if !id.isEmpty, let found = checkBox(window, { identifier($0) == id }) { return found }
+  return checkBox(window, { label($0).trimmingCharacters(in: .whitespaces) == named })
 }
 
 while let line = readLine() {
@@ -249,12 +285,36 @@ while let line = readLine() {
   case "dialog":
     guard let window = dialog(app) else { done(["ok": true, "open": false]); break }
     let read = texts(window)
-    done(["ok": true, "open": true, "title": title(window), "words": read.words, "buttons": read.buttons])
+    var reply: [String: Any] = ["ok": true, "open": true, "title": title(window), "words": read.words, "buttons": read.buttons]
+    let boxes = toggles(window)
+    if !boxes.isEmpty { reply["toggles"] = boxes }
+    done(reply)
   case "answer":
     let name = (request["button"] as? String) ?? ""
     guard let window = dialog(app), let target = button(window, name) else { done(["ok": false, "error": "no-button"]); break }
+    // A button greyed out isn't pressed (Separate Stems' Separate with no stem on).
+    if !enabled(target) { done(["ok": false, "error": "disabled", "title": title(target)]); break }
     let result = AXUIElementPerformAction(target, kAXPressAction as CFString)
     done(result == .success ? ["ok": true] : ["ok": false, "error": "press-failed"])
+  case "toggles":
+    // Each toggle asked for, in order, set on or off as a click would. One Live won't change yet (Separate
+    // Stems' Merge Stems until two or three stems are on) is tried again after the rest.
+    guard let window = dialog(app) else { done(["ok": false, "error": "no-dialog"]); break }
+    var missing: [String] = []
+    var later = (request["set"] as? [[String: Any]]) ?? []
+    for _ in 0..<2 {
+      let wanted = later
+      later = []
+      for one in wanted {
+        let name = (one["name"] as? String) ?? ""
+        let want = (one["on"] as? Bool) ?? false
+        guard let box = checkBox(window, id: (one["id"] as? String) ?? "", name: name) else { missing.append(name); continue }
+        if isOn(box) != want && enabled(box) { AXUIElementPerformAction(box, kAXPressAction as CFString); usleep(50_000) }
+        if isOn(box) != want { later.append(one) }
+      }
+      if later.isEmpty { break }
+    }
+    done(["ok": true, "toggles": toggles(window), "missing": missing, "refused": later.map { ($0["name"] as? String) ?? "" }])
   case "windows":
     let element = AXUIElementCreateApplication(app.processIdentifier)
     let windows = (value(element, kAXWindowsAttribute as String) as? [AXUIElement]) ?? []

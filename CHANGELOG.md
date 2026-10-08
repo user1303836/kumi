@@ -3,6 +3,17 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.11.2 — 2026-10-08
+
+Ships with bridge 1.0.90, as 1.11.1 did.
+
+- Separating stems works: Kumi picks the stems you ask for in Live's Separate Stems dialog (all four
+  by default), merging and quality included, presses Separate and waits until Live has made the
+  tracks; Kumi also reads and sets the check boxes of Live's other dialogs.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.11.1 — 2026-10-08
 
 Ships with bridge 1.0.90, as 1.11.0 did.

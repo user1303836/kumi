@@ -9,6 +9,7 @@ import os
 from contextlib import contextmanager
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import tarfile
@@ -454,7 +455,8 @@ class MigrationRelease(unittest.TestCase):
             replies = [json.loads(line) for line in self.launched(helper, env, input=
                 '{"id":1,"op":"version"}\n{"id":2,"op":"trusted","prompt":false}\n').splitlines()]
             self.assertEqual([(reply["id"], reply["ok"]) for reply in replies], [(1, True), (2, True)])
-            self.assertEqual(replies[0]["version"], 2)
+            # The helper answers with its source's version, which goes up with each change to it.
+            self.assertEqual(replies[0]["version"], int(re.search(r"^let version = (\d+)$", source.read_text(encoding="utf-8"), re.M)[1]))
             self.assertIsInstance(replies[1]["trusted"], bool)  # No prompt or Live operation; permission continuity needs a real terminal.
         suffix = ".exe" if os.name == "nt" else ""
         self.assertIn(manifest["bridge"], self.launched(app / ("ableton-mcp-server" + suffix), env, "--version"))

@@ -100,6 +100,36 @@ pub struct Dialog {
     /// "save" or "open" for Windows' Save and Open dialogs, which Kumi can fill (#189).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
+    /// Its toggles (check boxes), when it has any: Live's Separate Stems asks which stems with them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toggles: Option<Vec<Toggle>>,
+}
+/// A dialog's toggle as Kumi's hands read it: its accessible name (Live's say what they do after a comma:
+/// "Vocals, Include or exclude the Vocals stem."), whether it's on, whether it can be changed now (Separate
+/// Stems' Merge Stems only with two or three stems on), and its accessibility id when it has one (Live's are
+/// the same in every language: VocalsCheckControl).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Toggle {
+    pub name: String,
+    pub on: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+}
+fn yes() -> bool {
+    true
+}
+fn is_yes(value: &bool) -> bool {
+    *value
+}
+/// A toggle to set, by its id when it has one (else its name, whole, as `dialog` read it): on or off.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToggleSet {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    pub on: bool,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Window {
@@ -115,6 +145,13 @@ pub trait Hands {
     async fn keys(&self, combos: &[String], options: KeysOptions) -> Result<HandsReply, HandsError>;
     async fn dialog(&self, signal: Option<Signal>) -> Result<Dialog, HandsError>;
     async fn answer(&self, button: &str, signal: Option<Signal>) -> Result<HandsReply, HandsError>;
+    /// Set the toggles of the dialog Live has open, in order, each on or off; one Live won't change yet is
+    /// tried again after the rest. The reply has the toggles as they are after, the ones it couldn't find
+    /// (`missing`) and the ones Live wouldn't change (`refused`).
+    async fn toggles(&self, set: &[ToggleSet], signal: Option<Signal>) -> Result<HandsReply, HandsError> {
+        let _ = (set, signal);
+        Err(HandsError::new("Kumi can't set the toggles of Live's dialogs here.", HandsErrorKind::Unavailable))
+    }
     async fn windows(&self, signal: Option<Signal>) -> Result<Vec<Window>, HandsError>;
     /// Fill the dialog Live has open with `path` and press its default button, only when it's the `kind`
     /// ("save" or "open") of dialog asked for (Windows).
@@ -400,10 +437,14 @@ impl Hands for Persistent {
             words: reply.fields.get("words").and_then(|v| serde_json::from_value(v.clone()).ok()),
             buttons: reply.fields.get("buttons").and_then(|v| serde_json::from_value(v.clone()).ok()),
             file: reply.fields.get("file").and_then(Value::as_str).map(str::to_string),
+            toggles: reply.fields.get("toggles").and_then(|v| serde_json::from_value(v.clone()).ok()),
         })
     }
     async fn answer(&self, button: &str, signal: Option<Signal>) -> Result<HandsReply, HandsError> {
         Self::checked(self.ask("answer", json!({"button":button}), signal).await?)
+    }
+    async fn toggles(&self, set: &[ToggleSet], signal: Option<Signal>) -> Result<HandsReply, HandsError> {
+        Self::checked(self.ask("toggles", json!({"set":set}), signal).await?)
     }
     async fn file(&self, path: &str, kind: &str, signal: Option<Signal>) -> Result<HandsReply, HandsError> {
         Self::checked(self.ask("file", json!({"path":path,"kind":kind}), signal).await?)
