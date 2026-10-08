@@ -8,4 +8,5 @@ pub mod home;
 pub mod knobs;
 pub mod listener;
 pub mod measure;
+pub mod notes;
 pub mod round;

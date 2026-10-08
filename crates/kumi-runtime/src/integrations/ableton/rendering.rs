@@ -2,6 +2,7 @@
 mod ears;
 mod ears_pass;
 mod goal;
+mod groove;
 mod judge;
 mod listen;
 mod pass;
@@ -75,12 +76,15 @@ pub struct Rendering {
     best_steps: RefCell<Vec<String>>,
     /// The judged run under way (or the last one).
     judge: RefCell<Option<judge::JudgeRun>>,
+    /// The groove run under way (or the last one).
+    groove: RefCell<Option<groove::GrooveRun>>,
     listener_source: Option<super::options::ListenerSource>,
     /// Measured references, read by name for the judge.
     references: Option<Rc<crate::references::store::ReferenceStore>>,
     /// The listening model, once looked for (None inside: there's none).
     listener: RefCell<Option<Option<Rc<dyn crate::listening::listener::Listener>>>>,
 }
+pub use groove::GrooveRequest;
 pub use judge::{GoalRequest, JudgeRequest};
 pub use tune::{TuneHow, TuneRequest};
 impl Rendering {
@@ -133,6 +137,7 @@ impl Rendering {
             reference_cache: RefCell::new(IndexMap::new()),
             best_steps: RefCell::new(vec![]),
             judge: RefCell::new(None),
+            groove: RefCell::new(None),
             listener_source: options.listener.clone(),
             references: options.references.clone(),
             listener: RefCell::new(None),

@@ -1431,7 +1431,7 @@ impl Session {
     /// Kumi's undo tool, watched for the producer's undos it makes.
     /// judge and tune, held to the loop: once it's over, only the run's end (judge done) goes through.
     fn with_loop(&self, tool: Rc<dyn KernelTool>) -> Rc<dyn KernelTool> {
-        if matches!(tool.name(), "judge" | "tune") {
+        if matches!(tool.name(), "judge" | "tune" | "groove") {
             Rc::new(LoopGuard { tool, session: Rc::downgrade(&self.0) })
         } else {
             tool
@@ -1471,8 +1471,8 @@ impl KernelTool for LoopGuard {
         self.tool.input_schema()
     }
     async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
-        let ending = self.tool.name() == "judge" && input.get("done") == Some(&Value::Bool(true));
-        let starting = input.get("goal").is_some();
+        let ending = matches!(self.tool.name(), "judge" | "groove") && input.get("done") == Some(&Value::Bool(true));
+        let starting = input.get("goal").is_some() || input.get("reference").is_some();
         let over = self.session.upgrade().and_then(|inner| {
             let s = inner.state.borrow();
             s.looping.as_ref().and_then(|run| run.borrow().over())

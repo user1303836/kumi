@@ -363,6 +363,16 @@ impl Ableton {
             Err(why) => Ok(ToolResult::error(why)),
         }
     }
+    async fn groove_tool(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
+        let request = match judge_tool::groove_request(&input) {
+            Ok(request) => request,
+            Err(why) => return Ok(ToolResult::error(why)),
+        };
+        match self.rendering.groove(&request, signal).await? {
+            Ok(round) => Ok(ToolResult::text(stringify(&judge_tool::judge_reply(&round)))),
+            Err(why) => Ok(ToolResult::error(why)),
+        }
+    }
     async fn audition_tool(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
         let request = match audition::audition_request(&input) {
             Ok(request) => request,
@@ -468,6 +478,7 @@ impl KernelTool for LiveTool {
             "audition" => owner.audition_tool(input, signal).await,
             "judge" => owner.judge_tool(input, signal).await,
             "tune" => owner.tune_tool(input, signal).await,
+            "groove" => owner.groove_tool(input, signal).await,
             "render" => owner.render_tool(input, signal).await,
             "undo_in_live" => owner.live_undo(input, signal).await,
             "run_python" => owner.run_python(input, signal).await,
@@ -658,6 +669,7 @@ impl ObservationHost for Ableton {
             offered.push(self.tool(audition::AUDITION_TOOL, &audition::AUDITION_DESCRIPTION, audition::AUDITION_SCHEMA.clone()));
             offered.push(self.tool(judge_tool::JUDGE_TOOL, &judge_tool::JUDGE_DESCRIPTION, judge_tool::JUDGE_SCHEMA.clone()));
             offered.push(self.tool(judge_tool::TUNE_TOOL, &judge_tool::TUNE_DESCRIPTION, judge_tool::TUNE_SCHEMA.clone()));
+            offered.push(self.tool(judge_tool::GROOVE_TOOL, &judge_tool::GROOVE_DESCRIPTION, judge_tool::GROOVE_SCHEMA.clone()));
         }
         if self.mutations.supported(Some(FULL_CONTROL_BRIDGE)) && tools.has("live_render_offline") {
             offered.push(self.tool(audition::RENDER_TOOL, &audition::RENDER_DESCRIPTION, audition::RENDER_SCHEMA.clone()));

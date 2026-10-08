@@ -98,10 +98,12 @@ impl Rendering {
                     if this.open_ears.is_some() {
                         return Ok(Some(link));
                     }
-                    let installed = install_ears(this.user_library.clone().unwrap_or_else(|| user_library(None, None)))
+                    install_ears(this.user_library.clone().unwrap_or_else(|| user_library(None, None)))
                         .await
                         .map_err(|e| RuntimeError::plain(e.to_string()))?;
-                    let deadline = now_ms() + if installed.written { 20_000 } else { 4_000 };
+                    // Live's browser shows a device it already had within moments, but one just written (or any,
+                    // while Live is still indexing after it opened) can take a while.
+                    let deadline = now_ms() + 20_000;
                     while now_ms() < deadline {
                         let seen = this
                             .connection()

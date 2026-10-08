@@ -1,5 +1,5 @@
 //! The judge tool: the model's side of a judged run (a goal in, a round's log out).
-use super::rendering::{GoalRequest, JudgeRequest, TuneHow, TuneRequest};
+use super::rendering::{GoalRequest, GrooveRequest, JudgeRequest, TuneHow, TuneRequest};
 use crate::{
     core::contracts::JsonObject,
     listening::{
@@ -20,6 +20,36 @@ pub const TUNE_TOOL: &str = "tune";
 static TUNE: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("assets/tune.json")).unwrap());
 pub static TUNE_DESCRIPTION: LazyLock<String> = LazyLock::new(|| TUNE["description"].as_str().unwrap().into());
 pub static TUNE_SCHEMA: LazyLock<JsonObject> = LazyLock::new(|| TUNE["schema"].as_object().unwrap().clone());
+
+pub const GROOVE_TOOL: &str = "groove";
+static GROOVE: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("assets/groove.json")).unwrap());
+pub static GROOVE_DESCRIPTION: LazyLock<String> = LazyLock::new(|| GROOVE["description"].as_str().unwrap().into());
+pub static GROOVE_SCHEMA: LazyLock<JsonObject> = LazyLock::new(|| GROOVE["schema"].as_object().unwrap().clone());
+
+/// The groove tool's input as a request, or what's wrong with it.
+pub fn groove_request(input: &JsonObject) -> Result<GrooveRequest, String> {
+    let text = |key: &str| input.get(key).and_then(Value::as_str).map(trim).filter(|s| !s.is_empty()).map(str::to_owned);
+    let request = GrooveRequest {
+        clip: text("clip"),
+        reference: text("reference"),
+        audio: text("audio"),
+        change: text("change"),
+        apply: input.get("apply") == Some(&Value::Bool(true)),
+        amount: input.get("amount").and_then(Value::as_f64).filter(|v| v.is_finite()),
+        done: input.get("done") == Some(&Value::Bool(true)),
+    };
+    let starting = request.clip.is_some() || request.reference.is_some();
+    if starting && (request.clip.is_none() || request.reference.is_none()) {
+        return Err("A run starts with both clip (the part) and reference (the reference's MIDI clip).".into());
+    }
+    if starting && (request.change.is_some() || request.apply || request.done) {
+        return Err("Start a run first; judge a change (or apply, or end it) in a later call.".into());
+    }
+    if !starting && request.change.is_none() && !request.apply && !request.done {
+        return Err("Give clip and reference to start, the change you made, apply: true, or done: true.".into());
+    }
+    Ok(request)
+}
 
 /// The tune tool's input as a request, or what's wrong with it.
 pub fn tune_request(input: &JsonObject) -> Result<TuneRequest, String> {

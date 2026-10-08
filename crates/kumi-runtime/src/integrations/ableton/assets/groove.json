@@ -1,0 +1,47 @@
+{
+  "description": "Shape a part's feel toward a reference's, judged on the notes with no listening: where each lane plays (kick, snare, hats, the rest; one lane for a pitched part), its timing step by step (push, swing, laid-back hats), its velocity accents, syncopation and fills. Start a run with clip (the part, a MIDI clip) and reference (a MIDI clip with the reference's notes). For a reference's drums: put the track in the Arrangement, separate its stems (live_command separate_stems), convert the drum stem to MIDI (live_command convert_drums_to_midi), and give that MIDI clip as reference and the drum stem's clip as audio: Kumi hears the stem and moves each converted hit onto its real onset. Then change the notes (change_notes, transform_midi swing, quantize) and call groove with change, or let code move the notes toward the reference's timing and accents with apply: true (amount 0–1, all the way when left out). Kumi keeps a change only if its target got closer and nothing else moved away, taking it back otherwise, and names the next target. done: true ends the run with before → after.",
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "clip": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256,
+        "description": "Starts a run: the part, a MIDI clip's clipRef"
+      },
+      "reference": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256,
+        "description": "Starts a run: the reference's MIDI clip (its clipRef)"
+      },
+      "audio": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256,
+        "description": "The reference's drum stem (an Arrangement audio clip's clipRef): its hits' onsets refine the reference's timing"
+      },
+      "change": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 400,
+        "description": "What you changed in the part, to judge it"
+      },
+      "apply": {
+        "type": "boolean",
+        "description": "Code moves the part's notes toward the reference's timing and accents, then judges that"
+      },
+      "amount": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "With apply: how far (1, all the way, when left out)"
+      },
+      "done": {
+        "type": "boolean",
+        "description": "Ends the run: before → after on every line"
+      }
+    }
+  }
+}

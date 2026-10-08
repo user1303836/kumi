@@ -724,6 +724,14 @@ impl Rendering {
             }
         };
         let heard_main = measure(main.file.clone(), main.start).await?;
+        // Silence isn't a mix within tolerance: nothing was heard.
+        if heard_main.measures.integrated.is_none_or(|loudness| loudness < -70.) {
+            return Ok(Err(format!(
+                "Kumi heard only silence from {}{}. Is Live's audio running, and is something playing there in the Arrangement?",
+                track.unwrap_or("the mix"),
+                if notes.is_empty() { String::new() } else { format!(" ({})", notes.join(" ")) }
+            )));
+        }
         let (heard_focus, focus_file) = match focus_name.clone().and_then(|name| files.get(&name).cloned()) {
             Some(render) => {
                 // Heard before its fader: as the mix hears it, at the fader's level (so turning it up reads as up).
@@ -1001,7 +1009,7 @@ impl Rendering {
         let parameters = self.rows("parameter", json!({"parent":device_ref,"fields":["name"]}), signal).await?;
         let parameter = parameters
             .iter()
-            .find(|row| matches!(row.get("name").and_then(Value::as_str), Some("Gain" | "Input Gain")))
+            .find(|row| matches!(row.get("name").and_then(Value::as_str), Some("Gain" | "Input Gain" | "Output")))
             .and_then(|row| row.get("ref").and_then(Value::as_str).map(str::to_owned))
             .ok_or_else(|| observation("Kumi couldn't find the gain knob."))?;
         let name = device.get("name").and_then(Value::as_str).unwrap_or("Utility").to_string();
