@@ -109,6 +109,12 @@ pub struct SoundProfile {
     pub sweep: Option<Spread>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tail_share: Option<Spread>,
+    /// Its pumping and distortion at peaks (dB), as the mix guards read them: a sound goal's guards may move toward
+    /// them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pumping: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distortion: Option<Spread>,
 }
 
 impl SoundProfile {
@@ -123,7 +129,11 @@ impl SoundProfile {
             pitch_drop: m.pitch_drop.map(|value| Spread::point(value, 0.5)),
             modulation: m.modulation.map(|value| Spread::point(value, (value * 0.1).max(0.25))),
             width: sound::width(heard).map(|value| Spread::point(value, 2.)),
-            bandwidth: sound::bandwidth(heard).map(|hz| Spread::point(round1(hz / 1000.), 1.)),
+            // kHz, half a third-octave either side: a band brighter or darker is heard.
+            bandwidth: sound::bandwidth(heard).map(|hz| {
+                let khz = hz / 1000.;
+                Spread { mid: round2(khz), low: round2(khz * 2f64.powf(-1. / 6.)), high: round2(khz * 2f64.powf(1. / 6.)) }
+            }),
             noise_floor: sound::noise_floor(heard).map(|value| Spread::point(value, 3.)),
             warmth: sound::harmonics(heard).map(|harmonics| Spread::point(harmonics.warmth, 2.)),
             tail: sound::tail(heard).map(|value| Spread::point(value, 3.)),
@@ -131,10 +141,13 @@ impl SoundProfile {
             decay_time: fx.decay_time.map(|value| Spread::point(value, (value * 0.1).max(0.05))),
             darkening: fx.darkening.map(|value| Spread::point(value, 0.25)),
             echo_time: fx.echo.map(|echo| Spread::point(echo.ms, (echo.ms * 0.03).max(5.))),
-            echo_falls: fx.echo.map(|echo| Spread::point(echo.falls, 1.5)),
+            // No echoes is a fall of 60 dB, and no modulation a swing of 0 dB: a dry reference asks for a delay to go.
+            echo_falls: effects::echo_falls(heard).map(|falls| Spread::point(falls, 1.5)),
             swing: fx.swing.map(|value| Spread::point(value, 1.)),
             sweep: fx.sweep.map(|value| Spread::point(value, 0.25)),
             tail_share: fx.tail_share.map(|value| Spread::point(value, 5.)),
+            pumping: m.pumping.map(|value| Spread::point(value, 1.)),
+            distortion: m.distortion.map(|value| Spread::point(value, 1.)),
         }
     }
 }
@@ -261,6 +274,8 @@ impl Profile {
                 swing: pick(&|track| track.sound.swing),
                 sweep: pick(&|track| track.sound.sweep),
                 tail_share: pick(&|track| track.sound.tail_share),
+                pumping: pick(&|track| track.sound.pumping),
+                distortion: pick(&|track| track.sound.distortion),
             },
             vibe: vibe.clone(),
             vibe_spread: vibe.as_ref().and_then(|centre| {
@@ -374,6 +389,33 @@ impl Quantity {
             _ => moved,
         }
     }
+
+    /// A sound's own measure or an effect's (a sound goal's): each can go unread on its own while the rest is heard.
+    pub fn of_sound(&self) -> bool {
+        matches!(
+            self,
+            Quantity::Attack
+                | Quantity::Decay
+                | Quantity::Sustain
+                | Quantity::Centroid
+                | Quantity::Noise
+                | Quantity::PitchDrop
+                | Quantity::Modulation
+                | Quantity::Width
+                | Quantity::Bandwidth
+                | Quantity::NoiseFloor
+                | Quantity::Warmth
+                | Quantity::Tail
+                | Quantity::Crackle
+                | Quantity::DecayTime
+                | Quantity::Darkening
+                | Quantity::EchoTime
+                | Quantity::EchoFalls
+                | Quantity::Swing
+                | Quantity::Sweep
+                | Quantity::TailShare
+        )
+    }
 }
 
 /// Where an item should be.
@@ -399,6 +441,31 @@ pub enum Target {
     NoHigher,
     /// A guard that mustn't get lower (punch).
     NoLower,
+    /// A guard in a sound goal: it may rise toward the reference's own range, up to `value` (its top), but no higher
+    /// than that or than where it was. Adding the reference's effect moves it toward the reference, which isn't worse.
+    NoHigherThan {
+        value: f64,
+    },
+    /// Likewise downward, to `value` (the bottom of the reference's range).
+    NoLowerThan {
+        value: f64,
+    },
+    /// Held where it was (a sound goal's loudness: a sample's level says nothing about the sound's).
+    Kept,
+}
+
+impl Target {
+    /// A guard's direction (true when higher is worse) and how far it may go that way before a change counts against
+    /// it: where it was, or as far as the reference's own range reaches.
+    fn limit(&self, was: f64) -> Option<(bool, f64)> {
+        match *self {
+            Target::NoHigher => Some((true, was)),
+            Target::NoHigherThan { value } => Some((true, was.max(value))),
+            Target::NoLower => Some((false, was)),
+            Target::NoLowerThan { value } => Some((false, was.min(value))),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -440,7 +507,7 @@ impl Item {
             Target::AtMost { value } => Some((value - self.jnd, (value - self.jnd * 3., value))),
             Target::AtLeast { value } => Some((value + self.jnd, (value, value + self.jnd * 3.))),
             Target::Between { low, high } => Some(((low + high) / 2., (low + (high - low) * 0.1, high - (high - low) * 0.1))),
-            Target::NoHigher | Target::NoLower => None,
+            Target::NoHigher | Target::NoLower | Target::NoHigherThan { .. } | Target::NoLowerThan { .. } | Target::Kept => None,
         }
     }
     /// How far off target a value is, in just-noticeable steps (0 within tolerance).
@@ -451,7 +518,7 @@ impl Item {
             Target::AtMost { value: limit } => (value - limit).max(0.),
             Target::AtLeast { value: limit } => (limit - value).max(0.),
             Target::Between { low, high } => (low - value).max(value - high).max(0.),
-            Target::NoHigher | Target::NoLower => 0.,
+            Target::NoHigher | Target::NoLower | Target::NoHigherThan { .. } | Target::NoLowerThan { .. } | Target::Kept => 0.,
         };
         off / self.jnd
     }
@@ -465,6 +532,9 @@ impl Item {
             Target::Between { low, high } => format!("{} to {}{unit}", number(low), number(high)),
             Target::NoHigher => "no higher".into(),
             Target::NoLower => "no lower".into(),
+            Target::NoHigherThan { value } => format!("no higher than it was or the reference's {}{unit}", number(value)),
+            Target::NoLowerThan { value } => format!("no lower than it was or the reference's {}{unit}", number(value)),
+            Target::Kept => "where it was".into(),
         }
     }
 }
@@ -492,7 +562,9 @@ impl Checklist {
                 Target::Exactly { value, within: 0.5 },
                 1.,
             ));
-        } else if let Some(spread) = reference.and_then(|r| r.integrated) {
+        } else if let Some(spread) = reference.and_then(|r| r.integrated).filter(|_| !goal.sound) {
+            // A sound's reference is a sample, whose level says nothing about how loud the sound plays: a sound goal
+            // holds the track's loudness where it was instead (a guard, below).
             items.push(item(
                 "loudness",
                 "Loudness, as the reference",
@@ -552,7 +624,19 @@ impl Checklist {
                     ("pitch drop", "Pitch drop, as the reference", "st", Quantity::PitchDrop, reference.sound.pitch_drop, 0., 0.5),
                     ("modulation", "Modulation rate, as the reference", "Hz", Quantity::Modulation, reference.sound.modulation, 0.1, 0.25),
                     ("width", "Width, as the reference", "dB", Quantity::Width, reference.sound.width, 0., 2.),
-                    ("top", "Top (bandwidth), as the reference", "kHz", Quantity::Bandwidth, reference.sound.bandwidth, 0., 1.),
+                    (
+                        "top",
+                        "Top (bandwidth, octaves over 1 kHz: 3 is 8 kHz), as the reference",
+                        "oct",
+                        Quantity::Bandwidth,
+                        reference.sound.bandwidth.map(|khz| Spread {
+                            mid: octaves(khz.mid),
+                            low: octaves(khz.low),
+                            high: octaves(khz.high),
+                        }),
+                        0.,
+                        1. / 3.,
+                    ),
                     ("noise floor", "Noise floor, as the reference", "dB", Quantity::NoiseFloor, reference.sound.noise_floor, 0., 3.),
                     ("warmth", "Warmth (2nd and 3rd harmonics), as the reference", "dB", Quantity::Warmth, reference.sound.warmth, 0., 2.),
                     ("tail", "Tail (300 ms after a hit), as the reference", "dB", Quantity::Tail, reference.sound.tail, 0., 3.),
@@ -607,13 +691,15 @@ impl Checklist {
                 ];
                 for (id, label, unit, quantity, spread, share, least) in sound {
                     let Some(spread) = spread else { continue };
+                    // Seconds and octaves move in steps under a tenth.
+                    let round = if matches!(unit, "s" | "oct") { round2 } else { round1 };
                     items.push(item(
                         id,
                         label,
                         Role::Reference,
                         unit,
                         quantity,
-                        Target::Between { low: round1(spread.low), high: round1(spread.high) },
+                        Target::Between { low: round(spread.low), high: round(spread.high) },
                         (spread.mid.abs() * share).max(least),
                     ));
                 }
@@ -623,6 +709,8 @@ impl Checklist {
             // one knob moves them, but a change that drifts away is caught. Only once the models heard this listen.
             let models = heard.embedding.as_ref();
             if let (Some(to), true) = (reference.vibe.clone(), models.is_some_and(|heard| heard.vibe.is_some())) {
+                // A step is half how far the reference's own tracks lie from their style, when it's known.
+                let step = reference.vibe_spread.map_or(0.03, |spread| round2((spread / 2.).clamp(0.02, 0.1)));
                 items.push(item(
                     "vibe",
                     "Style and vibe (no further from the reference)",
@@ -630,7 +718,7 @@ impl Checklist {
                     "",
                     Quantity::Vibe { to },
                     Target::NoHigher,
-                    0.03,
+                    step,
                 ));
             }
             if let (Some(to), true) =
@@ -659,10 +747,17 @@ impl Checklist {
                 ));
             }
         }
+        // A number the producer gave is theirs: it takes the place of the reference's for the same measure, and says so.
         for explicit in &goal.targets {
             let (id, label, unit, jnd) = describe(&explicit.measure);
-            if !items.iter().any(|item| item.id == id) {
-                items.push(item(&id, &label, Role::Target, unit, explicit.measure.clone(), explicit.target, jnd));
+            let mut asked = item(&id, &label, Role::Target, unit, explicit.measure.clone(), explicit.target, jnd);
+            match items.iter().position(|item| item.id == id) {
+                Some(at) if items[at].role == Role::Reference => {
+                    asked.label = format!("{label}, as asked (in place of the reference's {})", items[at].wanted());
+                    items[at] = asked;
+                }
+                Some(_) => {}
+                None => items.push(asked),
             }
         }
         if goal.problems {
@@ -738,15 +833,36 @@ impl Checklist {
                 _ => None,
             });
         }
-        // The guards: punch, pumping, distortion and clipping mustn't get audibly worse.
-        if heard.measures.crest.is_some() {
-            items.push(item("punch", "Punch (crest)", Role::Guard, "dB", Quantity::Crest, Target::NoLower, 1.));
+        // The guards: punch, pumping, distortion and clipping mustn't get audibly worse. In a sound goal, moving toward
+        // the reference sound's own punch, pumping or distortion isn't worse (its reverb lowers punch toward the
+        // reference's); going past the reference's range is.
+        let sounds = reference.filter(|_| goal.sound);
+        let toward = |spread: Option<Spread>, higher: bool| match (spread, higher) {
+            (Some(spread), true) => Target::NoHigherThan { value: round1(spread.high) },
+            (Some(spread), false) => Target::NoLowerThan { value: round1(spread.low) },
+            (None, true) => Target::NoHigher,
+            (None, false) => Target::NoLower,
+        };
+        let m = &heard.measures;
+        let guards = [
+            ("punch", "Punch (crest)", Quantity::Crest, m.crest, toward(sounds.and_then(|r| r.crest), false)),
+            ("pumping", "Pumping", Quantity::Pumping, m.pumping, toward(sounds.and_then(|r| r.sound.pumping), true)),
+            (
+                "distortion",
+                "Distortion at peaks",
+                Quantity::Distortion,
+                m.distortion,
+                toward(sounds.and_then(|r| r.sound.distortion), true),
+            ),
+        ];
+        for (id, label, quantity, measured, target) in guards {
+            if measured.is_some() && !items.iter().any(|item| item.quantity == quantity) {
+                items.push(item(id, label, Role::Guard, "dB", quantity, target, 1.));
+            }
         }
-        if heard.measures.pumping.is_some() {
-            items.push(item("pumping", "Pumping", Role::Guard, "dB", Quantity::Pumping, Target::NoHigher, 1.));
-        }
-        if heard.measures.distortion.is_some() {
-            items.push(item("distortion", "Distortion at peaks", Role::Guard, "dB", Quantity::Distortion, Target::NoHigher, 1.));
+        // A sound goal's loudness, held where it was: every round is brought back to the level the track played at.
+        if goal.sound && m.integrated.is_some() && !items.iter().any(|item| item.quantity == Quantity::Integrated) {
+            items.push(item("loudness", "Loudness (held where it was)", Role::Guard, "LUFS", Quantity::Integrated, Target::Kept, 1.));
         }
         if !items.iter().any(|item| item.quantity == Quantity::Clipped) {
             // A step is a twentieth of what clips now: a few samples either way between listens isn't a change.
@@ -762,12 +878,23 @@ impl Checklist {
     }
 
     /// The items a listen can't read, taken off the checklist (and said): what can't be measured can't be judged, and an
-    /// item left on that reads nothing would pass as within tolerance. Their labels.
+    /// item left on that reads nothing would pass as within tolerance. Their labels. An effect the sound doesn't have
+    /// yet stays: its depth reads as none (no echoes, no swing), and its time (the reference's, to aim the effect at)
+    /// reads once it's there.
     pub fn drop_unreadable(&mut self, values: &mut Vec<Option<f64>>) -> Vec<String> {
+        let reads = |quantity: Quantity, none: f64| {
+            self.items.iter().zip(values.iter()).any(|(item, value)| item.quantity == quantity && *value == Some(none))
+        };
+        let (no_echo, no_swing) = (reads(Quantity::EchoFalls, effects::NO_ECHO), reads(Quantity::Swing, 0.));
         let mut dropped = vec![];
         let mut kept = vec![];
         for (item, value) in self.items.drain(..).zip(values.drain(..)) {
-            if value.is_none() && item.role != Role::Guard {
+            let waiting = match item.quantity {
+                Quantity::EchoTime => no_echo,
+                Quantity::Modulation => no_swing,
+                _ => false,
+            };
+            if value.is_none() && item.role != Role::Guard && !waiting {
                 dropped.push(item.label.clone());
             } else {
                 kept.push((item, value));
@@ -819,9 +946,10 @@ impl Checklist {
         self.next_skipping(values, &[])
     }
 
-    /// The biggest gap, passing over `skip` (targets that changes keep failing on) while another is still off.
+    /// The biggest gap, passing over `skip` (targets that changes keep failing on) while another is still off. One that
+    /// can't be read now is open, never met, but no change can be judged on it: it comes once nothing readable is off.
     pub fn next_skipping(&self, values: &[Option<f64>], skip: &[usize]) -> Option<usize> {
-        let open: Vec<(usize, f64)> = self
+        let mut open: Vec<(usize, f64)> = self
             .items
             .iter()
             .zip(values)
@@ -830,6 +958,9 @@ impl Checklist {
             .map(|(index, (item, value))| (index, if value.is_some() { item.gap(*value) } else { f64::INFINITY }))
             .filter(|(_, gap)| *gap > 0.)
             .collect();
+        if open.iter().any(|(_, gap)| gap.is_finite()) {
+            open.retain(|(_, gap)| gap.is_finite());
+        }
         let fresh = open.iter().filter(|(index, _)| !skip.contains(index)).max_by(|a, b| a.1.total_cmp(&b.1));
         fresh.or_else(|| open.iter().max_by(|a, b| a.1.total_cmp(&b.1))).map(|(index, _)| *index)
     }
@@ -853,15 +984,26 @@ impl Checklist {
             .and_then(|index| Some((after[index]? - before[index]?).abs()))
             .unwrap_or(0.);
         let mut lost = vec![];
+        // Silence reads nothing anywhere. A sound's or an effect's measure can go unread on its own while the rest of
+        // the listen is heard (a reverb's tail filling the gaps a decay was read in): unreadable this round, not lost.
+        let heard = self.items.iter().zip(after).any(|(item, value)| {
+            value.is_some()
+                && matches!(
+                    item.quantity,
+                    Quantity::Integrated | Quantity::TruePeak | Quantity::Plr | Quantity::Psr | Quantity::Crest | Quantity::Distortion
+                )
+        });
         for (index, item) in self.items.iter().enumerate() {
             let (b, a) = (before[index], after[index]);
             let (gap_before, gap_after) = (item.gap(b), item.gap(a));
             // A learned model that couldn't hear this listen (it couldn't be fetched, say) says nothing either way.
             let unheard = a.is_none() && matches!(item.quantity, Quantity::Vibe { .. } | Quantity::EffectStyle { .. });
+            let unread = a.is_none() && heard && item.quantity.of_sound();
             // A reading that's gone (silence, or the part stopped playing) is never within tolerance.
-            if b.is_some() && a.is_none() && !unheard {
+            if b.is_some() && a.is_none() && !unheard && !unread {
                 lost.push(index);
             }
+            let is_target = target == Some(index);
             // A limiter bringing peaks down flattens them a little too.
             let peaks = target.is_some_and(|index| self.items[index].quantity == Quantity::TruePeak);
             let slack = match item.quantity {
@@ -870,39 +1012,42 @@ impl Checklist {
                 Quantity::Distortion if peaks => allowance / 2.,
                 _ => 0.,
             };
-            let change = match (item.target, b, a) {
-                _ if unheard => Change::Same,
-                (_, Some(_), None) => Change::Worse,
-                (Target::NoHigher, Some(b), Some(a)) if a - b > item.jnd + slack => Change::Worse,
-                (Target::NoLower, Some(b), Some(a)) if b - a > item.jnd + slack => Change::Worse,
-                (Target::NoHigher | Target::NoLower, Some(b), Some(a)) if (a - b).abs() <= item.jnd + slack => Change::Same,
-                (Target::NoHigher, Some(b), Some(a)) => {
-                    if a < b {
+            let change = match (b, a) {
+                _ if unheard || unread => Change::Same,
+                // Nothing to compare with: read in tolerance now, the target is met; anything else can't be told.
+                (None, _) => {
+                    if is_target && a.is_some() && gap_after == 0. {
                         Change::Better
                     } else {
                         Change::Same
                     }
                 }
-                (Target::NoLower, Some(b), Some(a)) => {
-                    if a > b {
-                        Change::Better
-                    } else {
-                        Change::Same
+                (Some(_), None) => Change::Worse,
+                (Some(b), Some(a)) => match item.target.limit(b) {
+                    // A guard: worse past where it may go, better by a step the other way.
+                    Some((up, limit)) => {
+                        let (past, back) = if up { (a - limit, b - a) } else { (limit - a, a - b) };
+                        if past > item.jnd + slack {
+                            Change::Worse
+                        } else if back > item.jnd + slack {
+                            Change::Better
+                        } else {
+                            Change::Same
+                        }
                     }
-                }
-                _ if gap_after < gap_before - 0.5 || (gap_before > 0. && gap_after == 0.) => Change::Better,
-                // Worse by a step, or out of tolerance by half of one.
-                _ if gap_after > gap_before + 1. || (gap_before == 0. && gap_after > 0.5) => Change::Worse,
-                _ => Change::Same,
+                    None if gap_after < gap_before - 0.5 || (gap_before > 0. && gap_after == 0.) => Change::Better,
+                    // Worse by a step, or out of tolerance by half of one.
+                    None if gap_after > gap_before + 1. || (gap_before == 0. && gap_after > 0.5) => Change::Worse,
+                    None => Change::Same,
+                },
             };
-            let is_target = target == Some(index);
             if is_target && change == Change::Better {
                 improved = true;
             }
             if !is_target && change == Change::Worse && (item.quantity != Quantity::Integrated || lost.contains(&index)) {
                 hurt.push(index);
             }
-            if item.role != Role::Guard {
+            if item.role != Role::Guard && b.is_some() && !unread {
                 total.0 += gap_before;
                 total.1 += gap_after;
             }
@@ -990,7 +1135,7 @@ fn describe(quantity: &Quantity) -> (String, String, &'static str, f64) {
         Quantity::PitchDrop => ("pitch drop".into(), "Pitch drop".into(), "st", 0.5),
         Quantity::Modulation => ("modulation".into(), "Modulation rate".into(), "Hz", 0.25),
         Quantity::Width => ("width".into(), "Width".into(), "dB", 2.),
-        Quantity::Bandwidth => ("top".into(), "Top (bandwidth)".into(), "kHz", 1.),
+        Quantity::Bandwidth => ("top".into(), "Top (bandwidth, octaves over 1 kHz: 3 is 8 kHz)".into(), "oct", 1. / 3.),
         Quantity::NoiseFloor => ("noise floor".into(), "Noise floor".into(), "dB", 3.),
         Quantity::Warmth => ("warmth".into(), "Warmth (2nd and 3rd harmonics)".into(), "dB", 2.),
         Quantity::Tail => ("tail".into(), "Tail (300 ms after a hit)".into(), "dB", 3.),
@@ -1039,7 +1184,7 @@ fn reading(quantity: &Quantity, heard: &Heard, focus: Option<&Heard>) -> Option<
         Quantity::PitchDrop => m.pitch_drop,
         Quantity::Modulation => m.modulation,
         Quantity::Width => sound::width(heard),
-        Quantity::Bandwidth => sound::bandwidth(heard).map(|hz| round1(hz / 1000.)),
+        Quantity::Bandwidth => sound::bandwidth(heard).map(|hz| octaves(hz / 1000.)),
         Quantity::NoiseFloor => sound::noise_floor(heard),
         Quantity::Warmth => sound::harmonics(heard).map(|harmonics| harmonics.warmth),
         Quantity::Tail => sound::tail(heard),
@@ -1047,7 +1192,7 @@ fn reading(quantity: &Quantity, heard: &Heard, focus: Option<&Heard>) -> Option<
         Quantity::DecayTime => effects::decay_time(heard),
         Quantity::Darkening => effects::darkening(heard),
         Quantity::EchoTime => effects::echo(heard).map(|echo| echo.ms),
-        Quantity::EchoFalls => effects::echo(heard).map(|echo| echo.falls),
+        Quantity::EchoFalls => effects::echo_falls(heard),
         Quantity::Swing => effects::swing(heard),
         Quantity::Sweep => effects::sweep(heard).map(|(octaves, _)| octaves),
         Quantity::TailShare => effects::tail_share(heard),
@@ -1203,6 +1348,11 @@ fn round2(value: f64) -> f64 {
 
 fn round1(value: f64) -> f64 {
     (value * 10.).round() / 10.
+}
+
+/// kHz as octaves over 1 kHz (where a sound's top is judged: it moves in third-octaves).
+fn octaves(khz: f64) -> f64 {
+    round2(khz.max(0.02).log2())
 }
 
 /// The smallest bell cut that brings a peak between `low` and `high` to `wanted` dB over its neighbours, predicted on

@@ -1,9 +1,9 @@
 //! Effects, read off synthetic sounds: a reverb's decay time and how its tail darkens and widens, echoes found (and a
 //! rhythm not taken for them), a tremolo's depth, a filter's sweep, pumping against the beat, the tail's share, a tail
-//! cut off, and a dry sound judged against a wet reference.
+//! cut off, and a dry sound judged against a wet reference, a change toward it kept and one past it taken back.
 use kumi_runtime::listening::{
-    checklist::{Checklist, Goal, Profile},
-    effects::{cut_tails, decay_time, echo, effects, note_value, pump, sweep, swing, tail_share},
+    checklist::{Change, Checklist, Explicit, Goal, Profile, Quantity, Role, Spread, Target},
+    effects::{self, cut_tails, decay_time, echo, echo_falls, effects, note_value, pump, sweep, swing, tail_share, NO_ECHO},
     measure::{measure_samples, Heard},
 };
 use std::f64::consts::PI;
@@ -28,9 +28,9 @@ fn heard(left: &[f64], right: &[f64]) -> Heard {
     measure_samples(&left, &right, RATE)
 }
 
-/// A burst every 1.5 s for 6 s, gone in 0.2 s; wet, a tail after it falling 60 dB in 1.2 s, its top rolling off an
-/// octave every 0.2 s, each side its own noise; `cut` stops the tail that far after each burst.
-fn hits(wet: bool, cut: Option<f64>) -> Heard {
+/// A burst every 1.5 s for 6 s, gone in 0.2 s; with a tail (its RT60), one after it falling 60 dB in that time, its
+/// top rolling off an octave every 0.2 s, each side its own noise; `cut` stops the tail that far after each burst.
+fn hits(tail: Option<f64>, cut: Option<f64>) -> Heard {
     let (mut burst, mut left_noise, mut right_noise) = (Noise(1), Noise(2), Noise(3));
     let (mut low_left, mut low_right) = ([0.; 2], [0.; 2]);
     let count = (6. * RATE) as usize;
@@ -39,11 +39,11 @@ fn hits(wet: bool, cut: Option<f64>) -> Heard {
         let t = (n as f64 / RATE) % 1.5;
         let dry = 0.5 * burst.next() * falling(t, 0.2);
         let (mut l, mut r) = (dry, dry);
-        if wet && cut.is_none_or(|cut| t < cut) {
+        if let Some(rt60) = tail.filter(|_| cut.is_none_or(|cut| t < cut)) {
             let cutoff = (8000. * 2f64.powf(-t / 0.2)).max(300.);
             let pole = 1. - (-2. * PI * cutoff / RATE).exp();
             // Rolled off without getting quieter for it: the noise's power follows the cutoff.
-            let gain = 0.15 * falling(t, 1.2) * (8000. / cutoff).sqrt();
+            let gain = 0.15 * falling(t, rt60) * (8000. / cutoff).sqrt();
             for (state, noise, out) in [(&mut low_left, &mut left_noise, &mut l), (&mut low_right, &mut right_noise, &mut r)] {
                 state[0] += pole * (noise.next() - state[0]);
                 state[1] += pole * (state[0] - state[1]);
@@ -58,7 +58,7 @@ fn hits(wet: bool, cut: Option<f64>) -> Heard {
 
 #[test]
 fn a_reverbs_decay_darkening_width_and_share_are_read_off_its_tails() {
-    let (wet, dry) = (hits(true, None), hits(false, None));
+    let (wet, dry) = (hits(Some(1.2), None), hits(None, None));
     let (wet_fx, dry_fx) = (effects(&wet, None, None), effects(&dry, None, None));
     let time = wet_fx.decay_time.unwrap();
     assert!((time - 1.2).abs() < 0.25, "{time} s");
@@ -68,7 +68,7 @@ fn a_reverbs_decay_darkening_width_and_share_are_read_off_its_tails() {
     let (wet_share, dry_share) = (tail_share(&wet).unwrap(), tail_share(&dry).unwrap());
     assert!(wet_share > dry_share + 10. && dry_share < 10., "{wet_share} % against {dry_share} %");
     // A tail stopped half a second in reads as cut; one that dies away doesn't.
-    assert!(cut_tails(&hits(true, Some(0.5))).len() >= 3);
+    assert!(cut_tails(&hits(Some(1.2), Some(0.5))).len() >= 3);
     assert!(cut_tails(&wet).is_empty() && cut_tails(&dry).is_empty());
     // A dry sound against the wet one as its reference: the checklist asks for the longer decay.
     let goal = Goal { reference: Some(Profile::of("wet", &wet)), sound: true, ..Default::default() };
@@ -142,6 +142,130 @@ fn a_tremolos_depth_a_filters_sweep_and_pumping_against_the_beat() {
     let pumped = pump(&heard(&pad, &pad), 120., Some(0.)).unwrap();
     assert!(pumped.depth > 5. && pumped.depth < 10. && pumped.lowest < Some(0.15) && pumped.back > 0.1 && pumped.back < 0.45, "{pumped:?}");
     // A hit isn't pumping.
-    assert_eq!(pump(&hits(false, None), 120., Some(0.)), None);
+    assert_eq!(pump(&hits(None, None), 120., Some(0.)), None);
     assert!(decay_time(&heard(&pad, &pad)).is_none_or(|time| time < 0.5));
+}
+
+#[test]
+fn a_change_toward_a_wetter_reference_is_kept_and_one_past_its_punch_is_taken_back() {
+    // The reference: the bursts with a 1.2 s tail. The sound: dry, then given a 0.6 s tail.
+    let (reference, dry, wetter) = (hits(Some(1.2), None), hits(None, None), hits(Some(0.6), None));
+    // A wetter reference with less punch: its reverb fills between the hits.
+    let mut profile = Profile::of("wet", &reference);
+    let punchy = dry.measures.crest.unwrap();
+    profile.crest = Some(Spread { mid: punchy - 4., low: punchy - 5.5, high: punchy - 2.5 });
+    let goal = Goal { reference: Some(profile), sound: true, ..Default::default() };
+    let mut checklist = Checklist::new(&goal, &dry, &[]);
+    let mut before = checklist.read(&dry, None);
+    let dropped = checklist.drop_unreadable(&mut before);
+    // A sample's level isn't the sound's: loudness is held where it was, not brought to the reference's.
+    let loudness = checklist.items.iter().position(|item| item.quantity == Quantity::Integrated).expect("loudness held");
+    assert_eq!((checklist.items[loudness].role, checklist.items[loudness].target), (Role::Guard, Target::Kept));
+    let at = |id: &str| checklist.items.iter().position(|item| item.id == id).unwrap_or_else(|| panic!("no {id}: {dropped:?}"));
+    let (decay_time, punch) = (at("decay time"), at("punch"));
+    let mut after = checklist.read(&wetter, None);
+    // A measure the tail hides this round (the hit's own decay to 20 dB under) is unreadable now, not lost.
+    let hidden = at("decay");
+    after[hidden] = None;
+    let verdict = checklist.verdict(Some(decay_time), &before, &after);
+    assert!(verdict.kept, "{verdict:#?}");
+    assert_eq!(verdict.rows[hidden].change, Change::Same);
+    // Punch falling toward the reference's isn't worse; past the reference's range, it is.
+    after[punch] = before[punch].map(|crest| crest - 3.);
+    let verdict = checklist.verdict(Some(decay_time), &before, &after);
+    assert!(verdict.kept && verdict.rows[punch].change != Change::Worse, "{verdict:#?}");
+    let Target::NoLowerThan { value: floor } = checklist.items[punch].target else { panic!("{:?}", checklist.items[punch]) };
+    after[punch] = Some(floor - 2.);
+    let verdict = checklist.verdict(Some(decay_time), &before, &after);
+    assert!(!verdict.kept && verdict.hurt.contains(&"punch".to_string()), "{verdict:#?}");
+    // Rounds are brought back to where the sound played.
+    let mut louder = before.clone();
+    louder[loudness] = before[loudness].map(|lufs| lufs + 3.);
+    assert_eq!(checklist.rebalance(&before, &louder), Some(-3.));
+}
+
+#[test]
+fn an_effect_only_one_side_has_reaches_the_checklist_and_a_number_asked_for_wins() {
+    let blip = |t: f64| if (0. ..0.02).contains(&t) { (2. * PI * 1000. * t).sin() * (-t / 0.005).exp() } else { 0. };
+    let echoed: Vec<f64> = (0..(8. * RATE) as usize)
+        .map(|n| (n as f64 / RATE) % 2.)
+        .map(|t| (0..=5).map(|k| 0.5 * 10f64.powf(-6. * k as f64 / 20.) * blip(t - k as f64 * 0.375)).sum())
+        .collect();
+    let plain: Vec<f64> = (0..(8. * RATE) as usize).map(|n| 0.5 * blip((n as f64 / RATE) % 0.5)).collect();
+    let (echoed, plain) = (heard(&echoed, &echoed), heard(&plain, &plain));
+    assert_eq!(echo_falls(&plain), Some(NO_ECHO));
+    // A dry reference: the echoes are asked to go.
+    let goal = Goal { reference: Some(Profile::of("dry", &plain)), sound: true, ..Default::default() };
+    let checklist = Checklist::new(&goal, &echoed, &[]);
+    let values = checklist.read(&echoed, None);
+    let fall = checklist.items.iter().position(|item| item.id == "echo fall").expect("an echo fall item");
+    assert!(checklist.items[fall].gap(values[fall]) > 3., "{:?} reads {:?}", checklist.items[fall], values[fall]);
+    // A delayed reference against the dry sound: no echoes is a fall of 60 dB, and the echo time stays on to aim at.
+    let goal = Goal { reference: Some(Profile::of("echoed", &echoed)), sound: true, ..Default::default() };
+    let mut checklist = Checklist::new(&goal, &plain, &[]);
+    let mut values = checklist.read(&plain, None);
+    checklist.drop_unreadable(&mut values);
+    let fall = checklist.items.iter().position(|item| item.id == "echo fall").expect("an echo fall item");
+    assert_eq!(values[fall], Some(NO_ECHO));
+    let time = checklist.items.iter().position(|item| item.id == "echo time").expect("the echo time stays");
+    assert_eq!(values[time], None);
+    // What can be read is worked on first.
+    assert!(checklist.next(&values).is_some_and(|next| next != time));
+    // A number the producer asked for takes the reference's place, and says so.
+    let asked = Target::Exactly { value: 250., within: 10. };
+    let goal = Goal {
+        reference: Some(Profile::of("echoed", &echoed)),
+        sound: true,
+        targets: vec![Explicit { measure: Quantity::EchoTime, target: asked }],
+        ..Default::default()
+    };
+    let checklist = Checklist::new(&goal, &plain, &[]);
+    let times: Vec<_> = checklist.items.iter().filter(|item| item.id == "echo time").collect();
+    assert!(
+        times.len() == 1
+            && times[0].role == Role::Target
+            && times[0].target == asked
+            && times[0].label.contains("in place of the reference's"),
+        "{times:?}"
+    );
+}
+
+#[test]
+fn guesses_arent_said_as_effects() {
+    // One slope is the sound's own decay; two, the second slower, a reverb.
+    let (wet, dry) = (hits(Some(1.2), None), hits(None, None));
+    assert!(effects(&wet, None, None).reverb && !effects(&dry, None, None).reverb);
+    // A long 808 is mostly tail by itself: no effect is burying it.
+    let eight: Vec<f64> = (0..(6. * RATE) as usize)
+        .map(|n| (n as f64 / RATE) % 1.)
+        .map(|t| if t < 0.9 { 0.8 * (-t / 0.5).exp() * (2. * PI * (45. * t + 15. * 0.07 * (1. - (-t / 0.07).exp()))).sin() } else { 0. })
+        .collect();
+    let eight = heard(&eight, &eight);
+    let found = effects::problems(&eight, &effects(&eight, Some(120.), None), Some(120.), &|seconds| format!("{seconds} s"));
+    assert!(!found.iter().any(|problem| problem.contains("buries")), "{found:?}");
+    // A held bass note let go with a 1 ms release isn't a tail cut off.
+    let held: Vec<f64> = (0..(8. * RATE) as usize)
+        .map(|n| {
+            let t = (n as f64 / RATE) % 1.;
+            let gain = if t < 0.75 { 1. } else { (1. - (t - 0.75) / 0.001).max(0.) };
+            0.5 * gain * (2. * PI * 55. * n as f64 / RATE).sin()
+        })
+        .collect();
+    assert_eq!(cut_tails(&heard(&held, &held)), Vec::<f64>::new());
+    // Plucked 8ths at 120 BPM with no LFO: their rhythm isn't a modulation, and they don't swing.
+    let plucks: Vec<f64> = (0..(8. * RATE) as usize)
+        .map(|n| 0.5 * (-((n as f64 / RATE) % 0.25) / 0.05).exp() * (2. * PI * 330. * n as f64 / RATE).sin())
+        .collect();
+    let plucked = heard(&plucks, &plucks);
+    assert_eq!((plucked.measures.modulation, swing(&plucked)), (None, Some(0.)));
+    // A bass line an octave wide isn't a filter sweeping: its brightness is read against its notes.
+    let mut phase = 0.;
+    let line: Vec<f64> = (0..(8. * RATE) as usize)
+        .map(|n| {
+            phase += 2. * PI * if (n as f64 / RATE / 0.5) as usize % 2 == 0 { 55. } else { 110. } / RATE;
+            0.15 * (1..=10).map(|k| (k as f64 * phase).sin() / k as f64).sum::<f64>()
+        })
+        .collect();
+    let (octaves, _) = sweep(&heard(&line, &line)).unwrap();
+    assert!(octaves < 0.25, "{octaves} octaves");
 }

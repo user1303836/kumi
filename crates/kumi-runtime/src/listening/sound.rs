@@ -5,7 +5,7 @@
 //! deep one ducks under the other and how fast it comes back, whether their hits interlock or collide, and whether a
 //! bass note sits off the key. And the problems: clicks at note edges, a note jumping out.
 
-use super::measure::{band_edges, fine_hz, percentile, Heard, FINE_BINS};
+use super::measure::{band_edges, band_span, fine_hz, percentile, Heard, FINE_BINS, FINE_FROM, LOW_BANDS};
 use serde::{Deserialize, Serialize};
 
 /// A pitched sound's harmonics: its fundamental (Hz), the 2nd and 3rd against it (dB: warmth), and even harmonics
@@ -17,8 +17,16 @@ pub struct Harmonics {
     pub even_odd: f64,
 }
 
-/// The loud frames' mean power in each third-octave and each fine bin.
-fn spectrum(heard: &Heard) -> Option<(Vec<f64>, Vec<f64>)> {
+/// The loud frames' mean power: each third-octave's (mid and side) and its mid alone, each fine bin's density (mid,
+/// per FFT bin, as measured) and its mid in all (the density times the FFT bins it holds).
+struct Spectrum {
+    bands: Vec<f64>,
+    mids: Vec<f64>,
+    fine: Vec<f64>,
+    totals: Vec<f64>,
+}
+
+fn spectrum(heard: &Heard) -> Option<Spectrum> {
     let frames = &heard.frames;
     let mut levels: Vec<f64> = frames.level.iter().map(|level| *level as f64).collect();
     if levels.is_empty() {
@@ -30,50 +38,112 @@ fn spectrum(heard: &Heard) -> Option<(Vec<f64>, Vec<f64>)> {
     if picked.is_empty() {
         return None;
     }
-    let bands: Vec<f64> = (0..31)
-        .map(|band| {
-            picked.iter().map(|frame| (frames.mid[*frame][band] + frames.side[*frame][band]) as f64).sum::<f64>() / picked.len() as f64
-        })
-        .collect();
-    let fine: Vec<f64> = (0..FINE_BINS)
-        .map(|bin| {
-            picked.iter().filter_map(|frame| frames.fine.get(*frame)).map(|row| 10f64.powf(row[bin] as f64 / 10.)).sum::<f64>()
-                / picked.len() as f64
-        })
-        .collect();
-    Some((bands, fine))
+    let mean = |value: &dyn Fn(usize) -> f64| picked.iter().map(|frame| value(*frame)).sum::<f64>() / picked.len() as f64;
+    let bands: Vec<f64> = (0..31).map(|band| mean(&|frame| (frames.mid[frame][band] + frames.side[frame][band]) as f64)).collect();
+    let mids: Vec<f64> = (0..31).map(|band| mean(&|frame| frames.mid[frame][band] as f64)).collect();
+    let fine: Vec<f64> =
+        (0..FINE_BINS).map(|bin| mean(&|frame| frames.fine.get(frame).map_or(0., |row| 10f64.powf(row[bin] as f64 / 10.)))).collect();
+    let counts = fine_counts(frames.hop, heard.measures.sample_rate);
+    let totals = fine.iter().zip(counts).map(|(density, count)| density * count as f64).collect();
+    Some(Spectrum { bands, mids, fine, totals })
 }
 
-/// The power at a frequency: from the fine spectrum where it reaches (a semitone's resolution), else the
-/// third-octave holding it.
-fn power_at(hz: f64, bands: &[f64], fine: &[f64]) -> Option<f64> {
-    if hz >= fine_hz(0) && hz <= fine_hz(FINE_BINS - 1) {
-        let bin = (12. * (hz / fine_hz(0)).log2()).round() as usize;
-        return fine.get(bin).copied();
+/// How many of the main FFT's bins each fine bin holds, as `measure` sorts them (frames `hop` apart: the FFT is four
+/// hops long). A fine bin holding none repeats its neighbour's density, so it counts for nothing here.
+fn fine_counts(hop: f64, rate: f64) -> [usize; FINE_BINS] {
+    let bin_hz = 1. / (4. * hop.max(1e-9));
+    let mut counts = [0; FINE_BINS];
+    let mut k = 1;
+    while k as f64 * bin_hz <= rate / 2. {
+        let bin = (12. * (k as f64 * bin_hz / FINE_FROM).log2() + 0.5).floor();
+        if bin >= FINE_BINS as f64 {
+            break;
+        }
+        if bin >= 0. {
+            counts[bin as usize] += 1;
+        }
+        k += 1;
     }
-    let band = (0..31).find(|band| {
-        let (low, high) = band_edges(*band);
-        hz >= low && hz < high
-    })?;
-    bands.get(band).copied()
+    counts
 }
 
-/// The harmonics of a pitched sound, when it has a steady pitch: the bass line's for a low sound, else the lowest fine
+/// A partial's mid power: all of it, wherever it falls. Whole fine bins (semitones) from 250 Hz, whole third-octaves
+/// under it, over a window wide enough for its FFT bins' spread (two bins either side) and at least a semitone either
+/// side, so a partial on either side of 250 Hz, or at a band's edge, reads in full.
+fn partial(hz: f64, heard: &Heard, spectrum: &Spectrum) -> f64 {
+    let frames = &heard.frames;
+    // The low bands come from the low stream (its FFT four of its own hops long), the rest from the main one.
+    let hop = if hz < band_span(LOW_BANDS).0 { frames.bass_hop } else { frames.hop };
+    let reach = (hz * (2f64.powf(1. / 12.) - 1.)).max(2. / (4. * hop.max(1e-9)));
+    let (low, high) = (hz - reach, hz + reach);
+    let overlaps = |(from, to): (f64, f64)| from < high && to > low;
+    let fine_edges = |bin: usize| (FINE_FROM * 2f64.powf((bin as f64 - 0.5) / 12.), FINE_FROM * 2f64.powf((bin as f64 + 0.5) / 12.));
+    if low >= fine_edges(0).0 {
+        (0..FINE_BINS).filter(|bin| overlaps(fine_edges(*bin))).map(|bin| spectrum.totals[bin]).sum()
+    } else {
+        (0..31).filter(|band| overlaps(band_span(*band))).map(|band| spectrum.mids[band]).sum()
+    }
+}
+
+/// A low part's notes, from the low stream's strongest peak in each of its frames (30–250 Hz): kept when it's within
+/// 18 dB of the loudest and holds a real share of all that sounds then (within 15 dB of it), each as its low frame and
+/// pitch (Hz). None when the part isn't low: under half its loud frames have one (a lead's lows are leakage, not
+/// notes).
+pub fn bass_line(heard: &Heard) -> Option<Vec<(usize, f64)>> {
+    let frames = &heard.frames;
+    if frames.level.is_empty() {
+        return None;
+    }
+    let mut levels: Vec<f64> = frames.level.iter().map(|level| *level as f64).collect();
+    levels.sort_by(f64::total_cmp);
+    let loud = percentile(&levels, 0.95) - 20.;
+    let loudest = frames.bass.iter().flatten().map(|(_, db)| *db as f64).fold(f64::MIN, f64::max);
+    let (mut sounding, mut notes) = (0, vec![]);
+    for (low, note) in frames.bass.iter().enumerate() {
+        let Some(level) = main_frame(heard, low).map(|frame| frames.level[frame] as f64).filter(|level| *level >= loud) else {
+            continue;
+        };
+        sounding += 1;
+        if let Some((hz, db)) = note.map(|(hz, db)| (hz as f64, db as f64)) {
+            if db >= loudest - 18. && db >= level - 15. {
+                notes.push((low, hz));
+            }
+        }
+    }
+    (notes.len() * 2 > sounding).then_some(notes)
+}
+
+/// The main frame centred nearest a low frame's centre.
+pub fn main_frame(heard: &Heard, low: usize) -> Option<usize> {
+    let frames = &heard.frames;
+    let ratio = frames.bass_hop / frames.hop.max(1e-9);
+    let frame = ((low + 2) as f64 * ratio - 2.).round().max(0.) as usize;
+    (frame < frames.level.len()).then_some(frame)
+}
+
+/// The harmonics of a pitched sound, when it has a steady pitch: the bass line's for a low part, else the lowest fine
 /// peak standing 10 dB over the spectrum's middle.
 pub fn harmonics(heard: &Heard) -> Option<Harmonics> {
-    let (bands, fine) = spectrum(heard)?;
-    let mut pitches: Vec<f64> = heard.frames.bass.iter().flatten().map(|(hz, _)| *hz as f64).collect();
-    let fundamental = if pitches.len() * 2 >= heard.frames.bass.len().max(1) {
-        pitches.sort_by(f64::total_cmp);
-        percentile(&pitches, 0.5)
-    } else {
-        let mut sorted = fine.clone();
-        sorted.sort_by(f64::total_cmp);
-        let middle = sorted[sorted.len() / 2];
-        let bin = (1..FINE_BINS - 1).find(|bin| fine[*bin] > middle * 10. && fine[*bin] >= fine[bin - 1] && fine[*bin] >= fine[bin + 1])?;
-        fine_hz(bin)
+    let spectrum = spectrum(heard)?;
+    let fundamental = match bass_line(heard) {
+        Some(notes) => {
+            let mut pitches: Vec<f64> = notes.into_iter().map(|(_, hz)| hz).collect();
+            pitches.sort_by(f64::total_cmp);
+            percentile(&pitches, 0.5)
+        }
+        None => {
+            let fine = &spectrum.fine;
+            let mut sorted = fine.clone();
+            sorted.sort_by(f64::total_cmp);
+            let middle = sorted[sorted.len() / 2];
+            let bin =
+                (1..FINE_BINS - 1).find(|bin| fine[*bin] > middle * 10. && fine[*bin] >= fine[bin - 1] && fine[*bin] >= fine[bin + 1])?;
+            fine_hz(bin)
+        }
     };
-    let level = |k: f64| power_at(fundamental * k, &bands, &fine);
+    // Up to the fine spectrum's top (about 15 kHz).
+    let top = fine_hz(FINE_BINS - 1);
+    let level = |k: f64| (fundamental * k <= top).then(|| partial(fundamental * k, heard, &spectrum));
     let first = level(1.)?;
     let (second, third) = (level(2.)?, level(3.)?);
     let db = |power: f64| 10. * (power + 1e-20).log10();
@@ -86,18 +156,18 @@ pub fn harmonics(heard: &Heard) -> Option<Harmonics> {
     })
 }
 
-/// How wide it is: its side against its mid over the loud frames, dB (−30 and under is mono).
+/// How wide it is: its side against its mid over the loud frames, dB (−30 is mono: narrower isn't heard).
 pub fn width(heard: &Heard) -> Option<f64> {
     let frames = &heard.frames;
     let (mid, side) = frames.mid.iter().zip(&frames.side).fold((0., 0.), |(mid, side), (m, s)| {
         (mid + m.iter().map(|v| *v as f64).sum::<f64>(), side + s.iter().map(|v| *v as f64).sum::<f64>())
     });
-    (mid > 1e-14).then(|| round1((10. * ((side + 1e-20) / mid).log10()).max(-60.)))
+    (mid > 1e-14).then(|| round1((10. * ((side + 1e-20) / mid).log10()).max(-30.)))
 }
 
 /// Where it stops: the top of the highest third-octave within 30 dB of its loudest, Hz (a lo-fi sound's is low).
 pub fn bandwidth(heard: &Heard) -> Option<f64> {
-    let (bands, _) = spectrum(heard)?;
+    let Spectrum { bands, .. } = spectrum(heard)?;
     let loudest = bands.iter().copied().fold(0., f64::max);
     if loudest <= 0. {
         return None;
@@ -106,35 +176,84 @@ pub fn bandwidth(heard: &Heard) -> Option<f64> {
     Some(band_edges(top).1.round())
 }
 
-/// The noise floor: its quietest frames (the 5th percentile) under its loud ones (the 95th), dB.
-pub fn noise_floor(heard: &Heard) -> Option<f64> {
-    let mut levels: Vec<f64> = heard.frames.level.iter().map(|level| *level as f64).filter(|level| level.is_finite()).collect();
-    if levels.len() < 20 {
+/// Its frames' levels (dB), none under 70 dB below its loud parts (digital silence reads as that, as `effects` sets
+/// its floor), and the loud parts' level (the 95th percentile).
+fn floored(heard: &Heard) -> Option<(Vec<f64>, f64)> {
+    let level: Vec<f64> = heard.frames.level.iter().map(|level| *level as f64).filter(|level| level.is_finite()).collect();
+    if level.is_empty() {
         return None;
     }
-    levels.sort_by(f64::total_cmp);
-    Some(round1(percentile(&levels, 0.05) - percentile(&levels, 0.95)))
+    let mut sorted = level.clone();
+    sorted.sort_by(f64::total_cmp);
+    let loud = percentile(&sorted, 0.95);
+    Some((level.into_iter().map(|level| level.max(loud - 70.)).collect(), loud))
 }
 
-/// Space: how far the level stands under each hit's peak 300 ms on (the median over hits, dB): a dry hit falls far,
-/// a reverberant one hangs on.
-pub fn tail(heard: &Heard) -> Option<f64> {
-    let frames = &heard.frames;
-    let steps = (0.3 / frames.hop.max(1e-9)).round() as usize;
-    let level: Vec<f64> = frames.level.iter().map(|level| *level as f64).collect();
-    let mut tails = vec![];
-    let mut at = 2;
-    while at + steps < level.len() {
-        if level[at] - level[at - 2] >= 10. {
-            let peak = level[at..(at + 5).min(level.len())].iter().copied().fold(f64::MIN, f64::max);
-            tails.push(level[at + steps] - peak);
-            at += steps;
-        } else {
+/// The noise floor: where its quiet stretches (30 dB and more under its loud parts) bottom out and hold still (their
+/// frames within 3 dB of the stretch's lowest, falling under 6 dB a second), under its loud parts, dB, at most 70 dB
+/// down. Silence reads as −70, and a tail dying away isn't a floor: None when nothing quiet holds still (a pad, gaps
+/// a reverb fills).
+pub fn noise_floor(heard: &Heard) -> Option<f64> {
+    let (level, loud) = floored(heard)?;
+    if level.len() < 20 {
+        return None;
+    }
+    let hop = heard.frames.hop;
+    let mut floors = vec![];
+    let mut at = 0;
+    while at < level.len() {
+        if level[at] > loud - 30. {
+            at += 1;
+            continue;
+        }
+        let start = at;
+        while at < level.len() && level[at] <= loud - 30. {
             at += 1;
         }
+        let quiet = &level[start..at];
+        let lowest = quiet.iter().copied().fold(f64::MAX, f64::min);
+        let bottom: Vec<(f64, f64)> =
+            quiet.iter().enumerate().filter(|(_, level)| **level <= lowest + 3.).map(|(k, level)| (k as f64 * hop, *level)).collect();
+        if bottom.len() >= 4 && slope(&bottom).abs() <= 6. {
+            floors.extend(bottom.iter().map(|(_, level)| *level));
+        }
+    }
+    if floors.len() < 5 {
+        return None;
+    }
+    floors.sort_by(f64::total_cmp);
+    Some(round1(percentile(&floors, 0.5) - loud))
+}
+
+/// A line's slope through points, y a unit of x.
+fn slope(points: &[(f64, f64)]) -> f64 {
+    let count = points.len() as f64;
+    let (mean_x, mean_y) = (points.iter().map(|p| p.0).sum::<f64>() / count, points.iter().map(|p| p.1).sum::<f64>() / count);
+    let (sxy, sxx) = points.iter().fold((0., 0.), |(sxy, sxx), (x, y)| (sxy + (x - mean_x) * (y - mean_y), sxx + (x - mean_x).powi(2)));
+    if sxx > 0. {
+        sxy / sxx
+    } else {
+        0.
+    }
+}
+
+/// Space: how far the level stands under each hit's peak 300 ms on (the median over hits, dB, at most 70 down): a dry
+/// hit falls far, a reverberant one hangs on. Only hits with no other within those 300 ms: the next hit isn't tail.
+pub fn tail(heard: &Heard) -> Option<f64> {
+    let (level, _) = floored(heard)?;
+    let steps = (0.3 / heard.frames.hop.max(1e-9)).round() as usize;
+    let found = hits(heard);
+    let mut tails: Vec<f64> = found
+        .iter()
+        .enumerate()
+        .filter(|(index, (at, _))| at + steps < level.len() && found.get(index + 1).is_none_or(|(next, _)| *next > at + steps))
+        .map(|(_, (at, peak))| level[at + steps] - peak)
+        .collect();
+    if tails.len() < 2 {
+        return None;
     }
     tails.sort_by(f64::total_cmp);
-    (!tails.is_empty()).then(|| round1(percentile(&tails, 0.5)))
+    Some(round1(percentile(&tails, 0.5)))
 }
 
 /// The hits' peak levels (dB), each a rise of 10 dB within two frames.
@@ -209,35 +328,32 @@ pub fn kit(pieces: &[(String, Heard)], tempo: f64) -> (Vec<Piece>, Vec<String>) 
         })
         .collect();
     let mut found = vec![];
-    // Cohesion: one piece far off the others in noise floor, bandwidth or grit.
-    let odd_one = |values: Vec<(String, f64)>, by: f64, what: &str, found: &mut Vec<String>| {
-        if values.len() < 3 {
-            return;
-        }
-        let mut sorted: Vec<f64> = values.iter().map(|(_, value)| *value).collect();
-        sorted.sort_by(f64::total_cmp);
-        let middle = percentile(&sorted, 0.5);
-        for (name, value) in &values {
-            if (value - middle).abs() >= by {
-                found.push(format!("{name}'s {what} ({}) sits apart from the kit's ({})", number(*value), number(middle)));
+    // Cohesion: one piece far off the others in noise floor, top or grit. Only against pieces of a similar range
+    // (centred within two octaves of it, three at least): a kick's top and grit differ from a hat's by instrument, not
+    // by belonging.
+    let odd_one = |value: &dyn Fn(&Piece) -> Option<f64>, by: f64, what: &str, found: &mut Vec<String>| {
+        for piece in &measured {
+            let (Some(own), Some(centre)) = (value(piece), piece.centroid) else { continue };
+            let mut peers: Vec<f64> = measured
+                .iter()
+                .filter(|other| other.centroid.is_some_and(|other| (other / centre).log2().abs() <= 2.))
+                .filter_map(|other| value(other))
+                .collect();
+            if peers.len() < 3 {
+                continue;
+            }
+            peers.sort_by(f64::total_cmp);
+            let middle = percentile(&peers, 0.5);
+            if (own - middle).abs() >= by {
+                found.push(format!("{}'s {what} ({}) sits apart from its neighbours' ({})", piece.name, number(own), number(middle)));
             }
         }
     };
-    odd_one(
-        measured.iter().filter_map(|piece| Some((piece.name.clone(), piece.noise_floor?))).collect(),
-        12.,
-        "noise floor (dB)",
-        &mut found,
-    );
-    odd_one(
-        measured.iter().filter_map(|piece| Some((piece.name.clone(), 12. * (piece.bandwidth? / 1000.).log2()))).collect(),
-        12.,
-        "bandwidth (semitones above 1 kHz)",
-        &mut found,
-    );
-    odd_one(measured.iter().filter_map(|piece| Some((piece.name.clone(), piece.distortion?))).collect(), 6., "grit (dB)", &mut found);
-    // Coverage: a pile-up (three pieces centred within a third of an octave) or a gap (an octave and a half between
-    // neighbours' centres).
+    odd_one(&|piece| piece.noise_floor, 12., "noise floor (dB)", &mut found);
+    odd_one(&|piece| Some(12. * (piece.bandwidth? / 1000.).log2()), 12., "top (semitones above 1 kHz)", &mut found);
+    odd_one(&|piece| piece.distortion, 6., "grit (dB)", &mut found);
+    // Coverage: a pile-up (three pieces centred within a third of an octave) or a gap (five octaves between
+    // neighbours' centres: a kick and hats with nothing between them; a kick, a snare and hats lie closer).
     let mut centres: Vec<(String, f64)> = measured.iter().filter_map(|piece| Some((piece.name.clone(), piece.centroid?))).collect();
     centres.sort_by(|a, b| a.1.total_cmp(&b.1));
     for window in centres.windows(3) {
@@ -246,14 +362,27 @@ pub fn kit(pieces: &[(String, Heard)], tempo: f64) -> (Vec<Piece>, Vec<String>) 
         }
     }
     for pair in centres.windows(2) {
-        if (pair[1].1 / pair[0].1).log2() > 1.5 && pair[0].1 > 60. {
+        if (pair[1].1 / pair[0].1).log2() > 5. && pair[0].1 > 60. {
             found.push(format!("nothing between {} ({} Hz) and {} ({} Hz)", pair[0].0, pair[0].1.round(), pair[1].0, pair[1].1.round()));
         }
     }
-    // Decays against the tempo: a piece ringing over two beats.
-    for piece in &measured {
-        if let Some(beats) = piece.decay_beats.filter(|beats| *beats > 2.) {
-            found.push(format!("{} rings for {} beats: its decay runs into the next hits", piece.name, number(beats)));
+    // Decays against the piece's own hits: one still within 20 dB of its peak when its next hit comes, most times (a
+    // crash or an 808 that hits rarely may ring as long as it likes).
+    for (name, heard) in pieces {
+        let level = &heard.frames.level;
+        let found_hits = hits(heard);
+        let pairs: Vec<(f64, f64)> = found_hits
+            .windows(2)
+            .map(|pair| (pair[0].1 - level[pair[1].0 - 2] as f64, (pair[1].0 - pair[0].0) as f64 * heard.frames.hop * 1000.))
+            .collect();
+        let ringing = pairs.iter().filter(|(fallen, _)| *fallen < 20.).count();
+        if pairs.len() >= 2 && ringing * 2 > pairs.len() {
+            let mut apart: Vec<f64> = pairs.iter().map(|(_, ms)| *ms).collect();
+            apart.sort_by(f64::total_cmp);
+            found.push(format!(
+                "{name} rings into its next hit: still within 20 dB of its peak when the next comes ({} ms on)",
+                percentile(&apart, 0.5).round()
+            ));
         }
     }
     // Distinct: two pieces whose balance is all but the same.
@@ -276,7 +405,8 @@ pub fn ducking(target: &Heard, trigger: &Heard) -> Option<(f64, f64)> {
     let level: Vec<f64> = target.frames.level.iter().map(|level| *level as f64).collect();
     let mut depths = vec![];
     let mut recoveries = vec![];
-    for (at, _) in hits(trigger) {
+    // The two parts were measured apart: a hit past the end of the target's take has nothing to duck.
+    for (at, _) in hits(trigger).into_iter().filter(|(at, _)| *at > 0 && *at < level.len()) {
         let before = level[at.saturating_sub(4)..at].iter().copied().fold(f64::MIN, f64::max);
         let window = &level[at..(at + (0.5 / hop) as usize).min(level.len())];
         let Some((low_at, low)) = window.iter().copied().enumerate().min_by(|a, b| a.1.total_cmp(&b.1)) else { continue };
@@ -298,7 +428,7 @@ pub fn ducking(target: &Heard, trigger: &Heard) -> Option<(f64, f64)> {
 }
 
 /// How two parts' hits meet: the share of one's hits landing within 30 ms of the other's (colliding) and the share
-/// falling between them (interlocking).
+/// falling between them while the other plays (interlocking). The rest come while the other is silent.
 pub fn interlock(a: &Heard, b: &Heard) -> Option<(f64, f64)> {
     let hop = a.frames.hop;
     let (first, second): (Vec<usize>, Vec<usize>) =
@@ -306,16 +436,37 @@ pub fn interlock(a: &Heard, b: &Heard) -> Option<(f64, f64)> {
     if first.len() < 4 || second.len() < 4 {
         return None;
     }
-    let near = (0.03 / hop).ceil() as usize;
+    // Within 30 ms, to a frame (about 21 ms at 48 kHz).
+    let near = (0.03 / hop).floor().max(1.) as usize;
     let colliding = first.iter().filter(|at| second.iter().any(|other| other.abs_diff(**at) <= near)).count();
+    // Between: while the other plays (in a gap of its no wider than twice its usual spacing, or within one spacing
+    // of its first or last hit), not where it's silent.
+    let mut gaps: Vec<f64> = second.windows(2).map(|pair| (pair[1] - pair[0]) as f64).collect();
+    gaps.sort_by(f64::total_cmp);
+    let usual = percentile(&gaps, 0.5);
+    let between = first
+        .iter()
+        .filter(|at| !second.iter().any(|other| other.abs_diff(**at) <= near))
+        .filter(|at| {
+            let next = second.partition_point(|other| other < at);
+            let span = match (next.checked_sub(1).map(|prev| second[prev]), second.get(next)) {
+                (Some(prev), Some(next)) => (next - prev) as f64 / 2.,
+                (Some(prev), None) => (**at - prev) as f64,
+                (None, Some(next)) => (next - **at) as f64,
+                (None, None) => f64::INFINITY,
+            };
+            span <= usual
+        })
+        .count();
     let share = |count: usize| ((count as f64 / first.len() as f64) * 100.).round();
-    Some((share(colliding), share(first.len() - colliding)))
+    Some((share(colliding), share(between)))
 }
 
 /// A low part's pitch against a key (its notes as pitch classes, 0 is C): how far its notes sit from the nearest note
-/// of the key, cents (median), and the share of its time off the key by over a quarter tone.
+/// of the key, cents (median), and the share of its time off the key by over a quarter tone. None for a part that
+/// isn't low: its bass line is where its notes are read.
 pub fn against_key(heard: &Heard, key: &[u8]) -> Option<(f64, f64)> {
-    let pitches: Vec<f64> = heard.frames.bass.iter().flatten().map(|(hz, _)| *hz as f64).collect();
+    let pitches: Vec<f64> = bass_line(heard)?.into_iter().map(|(_, hz)| hz).collect();
     if pitches.len() < 8 || key.is_empty() {
         return None;
     }
@@ -350,8 +501,8 @@ fn round1(value: f64) -> f64 {
     (value * 10.).round() / 10.
 }
 
-/// A key in words ("F# minor", "Bbm", "C", "D dorian") as its notes' pitch classes (0 is C): the major scale, the
-/// natural minor or a mode. None when it doesn't read as a key.
+/// A key in words ("F# minor", "Bbm", "C", "D dorian", "A harmonic minor") as its notes' pitch classes (0 is C): the
+/// major scale, the natural minor, the harmonic or melodic minor, or a mode. None when it doesn't read as a key.
 pub fn key_classes(key: &str) -> Option<Vec<u8>> {
     const MAJOR: [i32; 7] = [0, 2, 4, 5, 7, 9, 11];
     let words: Vec<String> = key.split_whitespace().map(|word| word.to_lowercase()).collect();
@@ -373,16 +524,24 @@ pub fn key_classes(key: &str) -> Option<Vec<u8>> {
     // What follows the note, joined or as the next word: nothing or "maj" is major, "m" or "min" minor, or a mode.
     let rest: String = letters.collect();
     let quality = if rest.is_empty() { words.get(1).cloned().unwrap_or_default() } else { rest };
-    let mode = match quality.as_str() {
-        "" => 0,
-        q if q.starts_with("maj") || q.starts_with("ion") => 0,
-        q if q.starts_with("dor") => 1,
-        q if q.starts_with("phr") => 2,
-        q if q.starts_with("lyd") => 3,
-        q if q.starts_with("mix") => 4,
-        q if q.starts_with('m') || q.starts_with("aeo") => 5,
-        q if q.starts_with("loc") => 6,
-        _ => return None,
+    let scale: Vec<i32> = match quality.as_str() {
+        // The minor scale with its 7th raised, and the melodic minor with its 6th raised too.
+        q if q.starts_with("har") => vec![0, 2, 3, 5, 7, 8, 11],
+        q if q.starts_with("mel") => vec![0, 2, 3, 5, 7, 9, 11],
+        q => {
+            let mode = match q {
+                "" => 0,
+                q if q.starts_with("maj") || q.starts_with("ion") => 0,
+                q if q.starts_with("dor") => 1,
+                q if q.starts_with("phr") => 2,
+                q if q.starts_with("lyd") => 3,
+                q if q.starts_with("mix") => 4,
+                q if q.starts_with('m') || q.starts_with("aeo") => 5,
+                q if q.starts_with("loc") => 6,
+                _ => return None,
+            };
+            (0..7).map(|step| MAJOR[(mode + step) % 7] - MAJOR[mode]).collect()
+        }
     };
-    Some((0..7).map(|step| (root + shift + MAJOR[(mode + step) % 7] - MAJOR[mode]).rem_euclid(12) as u8).collect())
+    Some(scale.into_iter().map(|interval| (root + shift + interval).rem_euclid(12) as u8).collect())
 }

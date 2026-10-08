@@ -1,10 +1,11 @@
-//! Sound design, measured on synthetic sounds: an 808's pitch drop, a tremolo's rate, clicks at note edges and dust,
-//! harmonics (warmth), width and top, a kit that piles up, a pad ducking under a kick, hats interlocking with it, a
-//! bass note off the key, and a sound judged against a reference sound.
+//! Sound design, measured on synthetic sounds: an 808's pitch drop (at 44.1 kHz over a long listen too), a tremolo's
+//! rate, clicks at note edges and dust, harmonics (warmth) on either side of 250 Hz, width and top, a noise floor and
+//! digital silence, a kit that piles up and one that doesn't, a pad ducking under a kick, hats interlocking with it, a
+//! bass note off the key and a lead that isn't a bass line, and a sound judged against a reference sound.
 use kumi_runtime::listening::{
     checklist::{Checklist, Goal, Profile},
     measure::{measure_samples, Heard},
-    sound::{against_key, bandwidth, ducking, harmonics, interlock, key_classes, kit, problems, tail, width},
+    sound::{against_key, bandwidth, ducking, harmonics, interlock, key_classes, kit, noise_floor, problems, tail, width},
 };
 use std::f64::consts::PI;
 
@@ -62,6 +63,26 @@ fn an_808s_pitch_drop_and_a_tremolos_rate_are_measured() {
 }
 
 #[test]
+fn at_44_1_khz_an_808s_drop_holds_over_a_long_listen() {
+    // The 808 every second for 40 s at 44.1 kHz: its millisecond steps (44 and 45 samples) keep to the clock, so its
+    // hits don't drift off the pitch they're read at.
+    let rate = 44_100.;
+    let samples: Vec<f32> = (0..(40. * rate) as usize)
+        .map(|n| {
+            let t = (n as f64 / rate) % 1.;
+            let phase = 2. * PI * (45. * t + 15. * 0.07 * (1. - (-t / 0.07).exp()));
+            if t < 0.9 {
+                (0.8 * (-t / 0.5).exp() * phase.sin()) as f32
+            } else {
+                0.
+            }
+        })
+        .collect();
+    let drop = measure_samples(&samples, &samples, rate).measures.pitch_drop.unwrap();
+    assert!((2.5..4.5).contains(&drop), "{drop} semitones");
+}
+
+#[test]
 fn clicks_at_note_edges_and_dust_are_counted() {
     // Notes cut in at the top of their wave: each starts with a jump out of silence.
     let cut = notes(4., 0.5, 0.25, |t| 0.5 * (2. * PI * 440. * t + PI / 2.).sin());
@@ -95,6 +116,15 @@ fn harmonics_width_top_and_tail_read_as_heard() {
     assert!((warm.fundamental - 330.).abs() < 20., "{warm:?}");
     assert!(warm.warmth > -8. && warm.warmth < -2., "{warm:?}");
     assert!(bare.warmth < warm.warmth - 15., "{bare:?} against {warm:?}");
+    // The same saturation on a 150 Hz bass (partials over 250 Hz) and an 82 Hz one (all under it) reads the same.
+    let saturated = |hz: f64| -> Vec<f64> {
+        (0..(3. * RATE) as usize)
+            .map(|n| n as f64 / RATE)
+            .map(|t| 0.3 * ((2. * PI * hz * t).sin() + 0.5 * (4. * PI * hz * t).sin() + 0.25 * (6. * PI * hz * t).sin()))
+            .collect()
+    };
+    let (high, low) = (harmonics(&mono(&saturated(150.))).unwrap(), harmonics(&mono(&saturated(82.))).unwrap());
+    assert!((high.warmth - low.warmth).abs() < 1. && (high.warmth + 5.).abs() < 1.5, "{high:?} against {low:?}");
     // Mono is narrow; two unrelated noises are wide.
     let (mut a, mut b) = (Noise(5), Noise(6));
     let left: Vec<f64> = (0..(2. * RATE) as usize).map(|_| a.next() * 0.2).collect();
@@ -120,6 +150,27 @@ fn harmonics_width_top_and_tail_read_as_heard() {
     let dry = notes(4., 0.5, 0.45, |t| 0.6 * (-t / 0.02).exp() * (2. * PI * 200. * t).sin());
     let wet = notes(4., 0.5, 0.45, |t| 0.6 * (-t / 0.25).exp() * (2. * PI * 200. * t).sin());
     assert!(tail(&mono(&dry)).unwrap() < tail(&mono(&wet)).unwrap() - 10.);
+    // Digital silence after a dry hit reads as about 70 dB down, not 200.
+    assert!(tail(&mono(&dry)).unwrap() > -75., "{:?}", tail(&mono(&dry)));
+    // Dry 16th hats at 120 BPM: the next hat comes within 300 ms, so there's no tail to read.
+    let mut noise = Noise(12);
+    let hats = notes(4., 0.125, 0.03, |t| noise.next() * 0.5 * (-t / 0.008).exp());
+    assert_eq!(tail(&mono(&hats)), None);
+}
+
+#[test]
+fn a_noise_floor_is_where_quiet_stretches_hold_still() {
+    // Notes with digital silence between them: 70 dB down, as far as it reads.
+    let clean = notes(4., 0.5, 0.2, |t| 0.5 * (2. * PI * 440. * t).sin());
+    assert_eq!(noise_floor(&mono(&clean)), Some(-70.));
+    // A hiss about 52 dB under them reads as itself.
+    let mut noise = Noise(11);
+    let hissy: Vec<f64> = clean.iter().map(|sample| sample + 0.5 * 10f64.powf(-50. / 20.) * noise.next()).collect();
+    let floor = noise_floor(&mono(&hissy)).unwrap();
+    assert!((-56. ..-48.).contains(&floor), "{floor} dB");
+    // Gaps a long tail fills never hold still: no floor to read, rather than the tail read as one.
+    let ringing = notes(4., 0.5, 0.5, |t| 0.5 * (-6.9 * t / 1.2).exp() * (2. * PI * 440. * t).sin());
+    assert_eq!(noise_floor(&mono(&ringing)), None);
 }
 
 #[test]
@@ -142,6 +193,31 @@ fn a_kit_that_piles_up_and_parts_that_duck_and_interlock() {
     let (measured, found) = kit(&pieces, 120.);
     assert_eq!(measured.len(), 4);
     assert!(found.iter().any(|problem| problem.contains("pile up")), "{found:?}");
+    // The kick is a kick: octaves under the rest, so its top and grit aren't held against theirs.
+    assert!(!found.iter().any(|problem| problem.contains("sits apart") || problem.contains("nothing between")), "{found:?}");
+    // An ordinary kit (kick, snare, clap and hats) hangs together, and a crash ringing between its rare hits is fine.
+    let band = |seed: u64, keep: f64, every: f64, length: f64| -> Vec<f64> {
+        let mut noise = Noise(seed);
+        let (mut state, mut last) = (0., 0.);
+        notes(4., every, length, |t| {
+            // Noise high-passed (keep near 1) or low-passed (keep small), decaying.
+            let raw = noise.next();
+            state += keep * (raw - state);
+            let out = if keep > 0.5 { raw - last } else { state };
+            last = raw;
+            out * 0.5 * (-t / (length / 3.)).exp()
+        })
+    };
+    let ordinary = vec![
+        ("Kick".to_string(), mono(&notes(4., 0.5, 0.3, |t| 0.8 * (-t / 0.1).exp() * (2. * PI * 55. * t).sin()))),
+        ("Snare".to_string(), mono(&band(13, 0.3, 1., 0.2))),
+        ("Clap".to_string(), mono(&band(14, 0.2, 1., 0.15))),
+        ("Hats".to_string(), mono(&band(15, 0.9, 0.25, 0.05))),
+        ("Crash".to_string(), mono(&band(16, 0.9, 2., 1.9))),
+    ];
+    let (_, found) = kit(&ordinary, 120.);
+    assert!(!found.iter().any(|problem| problem.contains("sits apart") || problem.contains("nothing between")), "{found:?}");
+    assert!(!found.iter().any(|problem| problem.contains("Crash rings")), "{found:?}");
     // A pad ducking 6 dB under a kick on every beat, back within about 150 ms.
     let kick = notes(4., 0.5, 0.1, |t| 0.8 * (-t / 0.03).exp() * (2. * PI * 55. * t).sin());
     let mut noise = Noise(10);
@@ -154,6 +230,8 @@ fn a_kit_that_piles_up_and_parts_that_duck_and_interlock() {
         .collect();
     let (depth, recovery) = ducking(&mono(&pad), &mono(&kick)).unwrap();
     assert!((depth - 6.).abs() < 2.5 && recovery > 60. && recovery < 250., "{depth} dB, {recovery} ms");
+    // A take shorter than the kick's (measured apart): its hits past the end have nothing to duck.
+    assert!(ducking(&mono(&pad[..pad.len() / 2]), &mono(&kick)).is_some());
     // Hats between the kicks interlock; hats on them collide.
     let offbeat: Vec<f64> = (0..(4. * RATE) as usize)
         .map(|n| {
@@ -179,6 +257,11 @@ fn a_bass_note_off_the_key_is_heard_and_a_sound_is_judged_against_a_reference_so
     let (_, in_key) = against_key(&mono(&line([65.41, 82.41, 98., 65.41])), &major).unwrap();
     let (_, off_key) = against_key(&mono(&line([65.41, 82.41, 92.5, 65.41])), &major).unwrap();
     assert!(in_key < 10. && off_key > 15., "{in_key}% and {off_key}% off the key");
+    // A lead in C major (C5, E5, G5) isn't a bass line: no low notes are invented for it, and its fundamental is its own.
+    let lead = mono(&line([523.25, 659.25, 783.99, 523.25]));
+    assert_eq!(against_key(&lead, &major), None);
+    let own = harmonics(&lead).unwrap();
+    assert!((own.fundamental - 523.).abs() < 30., "{own:?}");
     // An 808 with its drop as the reference; one without as the sound: the checklist asks for the drop.
     let falling = notes(6., 1., 0.9, |t| 0.8 * (-t / 0.5).exp() * (2. * PI * (45. * t + 15. * 0.07 * (1. - (-t / 0.07).exp()))).sin());
     let flat = notes(6., 1., 0.9, |t| 0.8 * (-t / 0.5).exp() * (2. * PI * 45. * t).sin());
@@ -208,7 +291,10 @@ fn keys_read_as_said() {
     // D dorian has C major's notes; A aeolian is A minor.
     assert_eq!(sorted("D dorian"), sorted("C"));
     assert_eq!(sorted("A aeolian"), sorted("Am"));
-    for not_a_key in ["", "H minor", "apple", "C harmonic minor"] {
+    // The minor's 7th raised, and its 6th too.
+    assert_eq!(sorted("C harmonic minor"), Some(vec![0, 2, 3, 5, 7, 8, 11]));
+    assert_eq!(sorted("C melodic minor"), Some(vec![0, 2, 3, 5, 7, 9, 11]));
+    for not_a_key in ["", "H minor", "apple", "C hungarian"] {
         assert_eq!(key_classes(not_a_key), None, "{not_a_key}");
     }
 }

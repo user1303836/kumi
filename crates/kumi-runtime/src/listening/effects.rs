@@ -3,7 +3,10 @@
 //! filter moving), pumping against the beat, and how much of the sound is tail. And what's wrong: tails cut off,
 //! echoes out of time, repeats that don't die away, tails burying the dry sound.
 
-use super::measure::{percentile, Heard, ENVELOPE_HOP, THIRDS};
+use super::{
+    measure::{percentile, Heard, ENVELOPE_HOP, THIRDS},
+    sound,
+};
 use serde::{Deserialize, Serialize};
 
 const HOP: f64 = ENVELOPE_HOP;
@@ -39,6 +42,10 @@ pub struct Effects {
     /// Decay time (RT60) from the slope of its tails, seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decay_time: Option<f64>,
+    /// Whether its tails fall in two slopes, the second under half as steep: a reverb's tail after the sound's own fall
+    /// (one slope is the sound's own decay).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reverb: bool,
     /// How much darker its tails are than its hits, octaves (damping).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub darkening: Option<f64>,
@@ -73,6 +80,7 @@ pub fn effects(heard: &Heard, tempo: Option<f64>, first_beat: Option<f64>) -> Ef
     let (darkening, widening) = colour(heard);
     Effects {
         decay_time: decay_time(heard),
+        reverb: slopes(heard).is_some_and(|(own, tail)| tail > own / 2.),
         darkening,
         widening,
         echo: echo(heard),
@@ -153,6 +161,27 @@ fn decay_time_of(db: &[f64], (peak, end): (usize, usize)) -> Option<f64> {
     })?;
     let falls = slope(&db[start..=end]);
     (falls < -1.).then(|| (-60. / falls).clamp(0.05, 30.))
+}
+
+/// How its undisturbed tails fall, dB a second (the medians): from the peak to 15 dB down (the sound's own decay), and
+/// from there on (a reverb's tail, when it's slower), when both can be read.
+pub fn slopes(heard: &Heard) -> Option<(f64, f64)> {
+    let (db, floor, _) = levels(heard)?;
+    let least = (0.03 / HOP).round() as usize;
+    let (mut own, mut tail): (Vec<f64>, Vec<f64>) = decays(&db, floor)
+        .into_iter()
+        .filter_map(|(peak, end)| {
+            let split = (peak..=end).find(|k| db[*k] <= db[peak] - 15.)?;
+            (split >= peak + least && end >= split + least * 2 && db[split] - db[end] >= 10.)
+                .then(|| (slope(&db[peak..=split]), slope(&db[split..=end])))
+        })
+        .unzip();
+    if own.is_empty() {
+        return None;
+    }
+    own.sort_by(f64::total_cmp);
+    tail.sort_by(f64::total_cmp);
+    Some((percentile(&own, 0.5), percentile(&tail, 0.5)))
 }
 
 /// Decay time (RT60, seconds): the median over its undisturbed tails.
@@ -337,6 +366,19 @@ pub fn echo(heard: &Heard) -> Option<Echo> {
     })
 }
 
+/// How far each echo falls when there are none: as far as a reverb's decay is measured.
+pub const NO_ECHO: f64 = 60.;
+
+/// How far each echo falls, dB: `NO_ECHO` for a sound with hits that no copies follow, so a dry sound and a delayed
+/// one can be compared. None with no hit to hear echoes after.
+pub fn echo_falls(heard: &Heard) -> Option<f64> {
+    if let Some(echo) = echo(heard) {
+        return Some(echo.falls);
+    }
+    let (db, floor, _) = levels(heard)?;
+    (!onsets(&db, floor).is_empty()).then_some(NO_ECHO)
+}
+
 /// A time as the nearest note value at a tempo ("dotted 1/8") and how far off it is (a fraction: 0.02 is 2 % long).
 pub fn note_value(seconds: f64, tempo: f64) -> (String, f64) {
     const VALUES: [(&str, f64); 14] = [
@@ -377,11 +419,14 @@ fn moving(values: &[f64], width: usize) -> Vec<f64> {
 }
 
 /// How far its level swings at its modulation rate, dB: within each cycle, the level's highest against its lowest
-/// around its own slow trend (the median over the loud cycles).
+/// around its own slow trend (the median over the loud cycles). 0 when it was heard long enough to find a swing (two
+/// seconds) and has none, so a sound without modulation can be compared with one with it.
 pub fn swing(heard: &Heard) -> Option<f64> {
-    let rate = heard.measures.modulation.filter(|rate| *rate > 0.)?;
     // A held sound has no silence to set a floor by: what sounds is within 30 dB of its loud parts.
     let (db, _, loud) = levels(heard)?;
+    let Some(rate) = heard.measures.modulation.filter(|rate| *rate > 0.) else {
+        return (db.len() as f64 * HOP >= 2.).then_some(0.);
+    };
     let period = ((1. / rate) / HOP).round().max(2.) as usize;
     let trend = moving(&db, period * 2 + 1);
     let mut depths: Vec<f64> = db
@@ -410,8 +455,25 @@ pub fn sweep(heard: &Heard) -> Option<(f64, Option<f64>)> {
     }
     levels.sort_by(f64::total_cmp);
     let loud = percentile(&levels, 0.95) - 20.;
+    // A low part's brightness follows its notes: read against its bass line, a melody isn't a filter moving.
+    let notes: Option<Vec<Option<f64>>> = sound::bass_line(heard).map(|line| {
+        let mut pitches = vec![None; frames.bass.len()];
+        for (low, hz) in line {
+            pitches[low] = Some(hz);
+        }
+        let ratio = frames.bass_hop / frames.hop.max(1e-9);
+        (0..frames.level.len())
+            .map(|frame| pitches.get(((frame as f64 + 2.) / ratio - 2.).round().max(0.) as usize).copied().flatten())
+            .collect()
+    });
     let series: Vec<Option<f64>> = (0..frames.level.len())
-        .map(|frame| if frames.level[frame] as f64 >= loud { centroid_at(heard, frame).map(f64::log2) } else { None })
+        .map(|frame| {
+            let centroid = centroid_at(heard, frame).filter(|_| frames.level[frame] as f64 >= loud)?.log2();
+            match &notes {
+                Some(notes) => notes[frame].map(|hz| centroid - hz.log2()),
+                None => Some(centroid),
+            }
+        })
         .collect();
     let mut values: Vec<f64> = series.iter().flatten().copied().collect();
     if values.len() < 20 {
@@ -518,7 +580,8 @@ pub fn tail_shares(heard: &Heard, bar: f64) -> Vec<Option<f64>> {
 }
 
 /// Where its tails are cut off: a fall of 25 dB within 20 ms, to near the floor, out of a tail that was dying away
-/// slowly (under 10 dB in the 100 ms before). Seconds into what was heard.
+/// (3 to 10 dB in the 100 ms before, and not already falling fast: a held note's release isn't a cut tail). Seconds
+/// into what was heard.
 pub fn cut_tails(heard: &Heard) -> Vec<f64> {
     let Some((db, floor, _)) = levels(heard) else { return vec![] };
     let (fall, before) = ((0.02 / HOP).round() as usize, (0.1 / HOP).round() as usize);
@@ -526,7 +589,8 @@ pub fn cut_tails(heard: &Heard) -> Vec<f64> {
     let mut at = fall + before;
     while at < db.len() {
         let (was, then) = (db[at - fall], db[at - fall - before]);
-        if was - db[at] >= 25. && was > floor + 25. && db[at] <= floor + 8. && then - was < 10. && then >= was - 3. {
+        let steady = db[at - fall - 1] - was <= 1.5;
+        if was - db[at] >= 25. && was > floor + 25. && db[at] <= floor + 8. && then - was < 10. && then - was >= 3. && steady {
             found.push(round2(at as f64 * HOP));
             at += before;
         } else {
@@ -567,10 +631,20 @@ pub fn problems(heard: &Heard, effects: &Effects, tempo: Option<f64>, at: &dyn F
             found.push(format!("its echoes barely die away ({} dB a repeat): the feedback is near running away", echo.falls));
         }
     }
-    if let Some(share) = effects.tail_share.filter(|share| *share >= 75.) {
-        found.push(format!("{share} % of its energy is tail: the effect buries the dry hits"));
+    // Against the dry hit's own decay: a long sound is mostly tail by itself, an effect burying it adds far more.
+    if let (Some(share), Some((own, _))) = (effects.tail_share.filter(|share| *share >= 75.), slopes(heard)) {
+        if share - own_share(own) >= 25. {
+            found.push(format!("{share} % of its energy is tail: the effect buries the dry hits"));
+        }
     }
     found
+}
+
+/// The tail's share (%) a hit decaying at `slope` dB a second would have by itself, over the second after it.
+fn own_share(slope: f64) -> f64 {
+    let rate = (-slope).max(1e-6) * std::f64::consts::LN_10 / 10.;
+    let energy = |from: f64, to: f64| ((-rate * from).exp() - (-rate * to).exp()) / rate;
+    energy(0.06, 1.) / energy(0., 1.) * 100.
 }
 
 fn round1(value: f64) -> f64 {

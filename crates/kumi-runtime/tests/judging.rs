@@ -90,6 +90,40 @@ fn peaks_are_judged_at_the_loudness_rebalancing_brings_back() {
 }
 
 #[test]
+fn a_reading_a_change_hid_is_open_but_worked_on_last() {
+    let checklist = Checklist {
+        items: vec![
+            item("decay", Quantity::Decay, Target::Between { low: 100., high: 200. }, Role::Reference, 10.),
+            item("decay time", Quantity::DecayTime, Target::Between { low: 1., high: 1.4 }, Role::Reference, 0.1),
+        ],
+    };
+    // What can be read comes first; alone, the unread one is open, not met.
+    assert_eq!(checklist.next(&[None, Some(0.5)]), Some(1));
+    assert_eq!(checklist.next(&[None, Some(1.2)]), Some(0));
+    // Read again after a change: in tolerance, its target is met; read anywhere else, nothing can be told of it.
+    assert!(checklist.verdict(Some(0), &[None, Some(1.2)], &[Some(150.), Some(1.2)]).kept);
+    let verdict = checklist.verdict(Some(1), &[None, Some(0.5)], &[Some(400.), Some(0.9)]);
+    assert!(verdict.kept && verdict.rows[0].change == Change::Same, "{verdict:?}");
+}
+
+#[test]
+fn the_style_guards_step_is_half_the_references_own_spread() {
+    let tone: Vec<f64> = (0..(2. * RATE) as usize).map(|n| 0.3 * (2. * std::f64::consts::PI * 440. * n as f64 / RATE).sin()).collect();
+    let mut heard = heard(&tone);
+    heard.embedding = Some(kumi_runtime::listening::measure::Embedding { vibe: Some(vec![1., 0.]), effects: None });
+    let mut reference = kumi_runtime::listening::checklist::Profile::of("style", &heard);
+    reference.vibe = Some(vec![0., 1.]);
+    let step = |spread: Option<f64>| {
+        let goal = Goal {
+            reference: Some(kumi_runtime::listening::checklist::Profile { vibe_spread: spread, ..reference.clone() }),
+            ..Default::default()
+        };
+        Checklist::new(&goal, &heard, &[]).items.into_iter().find(|item| item.id == "vibe").map(|item| item.jnd)
+    };
+    assert_eq!((step(Some(0.12)), step(Some(0.5)), step(Some(0.01)), step(None)), (Some(0.06), Some(0.1), Some(0.02), Some(0.03)));
+}
+
+#[test]
 fn the_quieter_take_is_never_raised_to_meet_the_other() {
     // The change made it 3 dB louder: that take goes down 3 dB.
     assert_eq!(matched(Some(-14.), Some(-11.)), (0., -3.));
