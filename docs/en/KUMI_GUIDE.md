@@ -362,6 +362,15 @@ trusting them:
   newest audio model. `KUMI_LISTENER` names another (`<base URL>#<model>`, such
   as a model server on your computer), and `KUMI_LISTENER=off` leaves the meters
   alone.
+- **Model slots.** `/slots` shows which model does each listening job: stems
+  (Live's own splitter), transcription (Live's conversions), listening (the
+  lookup above) and embeddings (none yet). Swap one in plain words, such as
+  `/slots listening gemini`, `/slots listening off` or
+  `/slots listening http://127.0.0.1:8080/v1#<model>`. A new listening model is
+  tried on a known clip first, and switched to only if it hears it right.
+  `/slots back listening` takes a swap back. Kumi can't run model files itself
+  yet, so a file or a Hugging Face link is turned down with what to do instead.
+  `KUMI_LISTENER` wins over the listening slot while it's set.
 
 **References** become targets too. Give Kumi a file, a folder of them, a YouTube
 video or playlist, a Spotify link, or just words ("like Burial", "dub techno",
@@ -494,6 +503,13 @@ and its real parameters, matched against what the plug-in shows Live.
   parameters. The guide says which those are and how to add more: click
   **Configure** in the plug-in's title bar and move the knobs in its window once.
   Kumi can open the plug-in's window for you.
+- **Knobs by role.** When Kumi tunes a plug-in, it can name a knob by what it
+  does: a role from the guide (Ozone 12's ceiling) or a job any device does (a
+  limiter's gain, its ceiling, an EQ band's gain, a compressor's threshold). It
+  finds the knob among the names the plug-in shows Live and turns it only when
+  it's configured. When it isn't, Kumi says which knob to configure, and has
+  another device on the same track do the job meanwhile: Ozone 12 first, then
+  the other plug-ins Kumi knows, then Live's own devices.
 - **What isn't a parameter** (an oscillator's wavetable, filter types, modulation
   routing, Ozone's Master Assistant) is done in the plug-in's window; the guide
   says where.
@@ -847,6 +863,8 @@ Kumi keeps everything in `~/.kumi`. `~/.kumi/settings.json` holds:
 | `modelServers` | OpenAI-compatible model servers: `[{ "name", "baseURL", "apiKey" }]` ([models on your computer](#models-on-your-computer)) |
 | `libraryFolders` | More folders for Kumi to learn sounds, presets and Sets from |
 | `voice` | Talking: `send` (send when you stop), `language`, `microphone` (`/voice`) |
+
+`~/.kumi/slots.json` keeps the model slots you swapped (`/slots`).
 
 Environment variables (paths must be absolute):
 

@@ -3,15 +3,16 @@
 //! throwaway folder for notes and recipes, so ~/.kumi isn't touched. It changes the open Set: use a disposable one.
 //!   cargo build --profile ci-release -p ableton-mcp-server --bins
 //!   cargo run --profile ci-release -p kumi --example loop_live -- --set "<Set name>" [--listener] "<request>" […]
-//! With --listener, the judge asks the listening model as the app would (an OpenAI API key, or KUMI_LISTENER).
+//! With --listener, the judge asks the listening model as the app would: the listening slot (/slots), or KUMI_LISTENER.
 use futures::FutureExt;
-use kumi::config::{find_bridge_config, load_inference_config, safe_error};
+use kumi::config::{find_bridge_config, kumi_dir, load_inference_config, safe_error};
 use kumi_common::{
     abort::Signal,
     js::string::{head, trim},
     time::perf_now,
 };
 use kumi_runtime::{
+    auth::store::CredentialStore,
     core::{
         contracts::{ActionEvent, KernelEvent, KernelTool, ToolResult, WatchEvent},
         memory::MemoryStoreOptions,
@@ -20,10 +21,10 @@ use kumi_runtime::{
     integrations::ableton::{connection::Connect, options::ListenerSource, AbletonOptions},
     kernel::agent::AgentKernelOptions,
     kernel::agent::ModelBinding,
-    listening::listener::{gemini_key, gemini_listener, listener_from_env, listening_off, openai_listener, Listener, GEMINI},
     mcp::client,
     open_credential_store,
-    providers::{api_key_for, resolve_model, ProviderId, ResolveModelOptions},
+    providers::{resolve_model, ResolveModelOptions},
+    slots,
     system::process_env,
     ChangeRecord, IntegrationFactory, Kernel, KernelFactory, KernelOptions, RuntimeError, Session, SessionController, SessionEvent,
     SessionOptions, BRIDGE_TOOLS,
@@ -154,27 +155,13 @@ async fn run() -> Result<i32, RuntimeError> {
     println!("Model: {}", binding.id);
     // The listening model, found as the app finds it.
     let listener: Option<ListenerSource> = listening.then(|| {
-        let store = Rc::new(open_credential_store(&config.auth_file));
+        let store: Rc<dyn CredentialStore> = Rc::new(open_credential_store(&config.auth_file));
         let env = env.clone();
+        let slots = slots::file_in(Path::new(&kumi_dir(&env)));
         Rc::new(move |signal: Signal| {
-            let (store, env) = (store.clone(), env.clone());
-            async move {
-                if listening_off(&env) {
-                    return Ok(None);
-                }
-                if let Some(listener) = listener_from_env(&env) {
-                    return Ok(Some(Rc::new(listener) as Rc<dyn Listener>));
-                }
-                // Gemini first (the best at naming what it hears), then OpenAI's audio models, each by its own key.
-                if let Some(key) = gemini_key(store.as_ref(), &env).await {
-                    if let Some(listener) = gemini_listener(GEMINI, &key, signal.clone()).await? {
-                        return Ok(Some(Rc::new(listener) as Rc<dyn Listener>));
-                    }
-                }
-                let Some(key) = api_key_for(ProviderId::Openai, store.as_ref(), Some(&env)).await.ok().flatten() else { return Ok(None) };
-                Ok(openai_listener(&key.key, signal).await?.map(|listener| Rc::new(listener) as Rc<dyn Listener>))
-            }
-            .boxed_local()
+            let (store, env, slots) = (store.clone(), env.clone(), slots.clone());
+            // The listening slot's model, as the app finds it (KUMI_LISTENER wins over it).
+            async move { slots::listener(&slots, store, &env, signal).await }.boxed_local()
         }) as ListenerSource
     });
     if let Some(find) = &listener {

@@ -368,6 +368,7 @@ impl TuiApp {
                         "/btw" => c.has_aside(),
                         "/voice" => self.0.voice.is_some(),
                         "/willington" => self.willington().is_some(),
+                        "/slots" => self.0.options.slots.is_some(),
                         _ => true,
                     }
             })
@@ -550,6 +551,27 @@ impl TuiApp {
             self.clear_editor();
             if let Err(e) = self.open_update().await {
                 self.panel_failed(&e);
+            }
+            return Ok(());
+        }
+        if let Some(slots) = self.0.options.slots.clone().filter(|_| command == "/slots" || command.starts_with("/slots ")) {
+            self.clear_editor();
+            let words = command["/slots".len()..].to_string();
+            let app = self.clone();
+            let progress = move |line: String| app.notice(&line, NoticeTone::Info);
+            // A check hears a short clip twice; a model that hasn't answered in a minute and a half won't.
+            let said = kumi_runtime::slots::command(&words, &slots, &progress, kumi_common::abort::timeout(90_000)).await;
+            match said {
+                kumi_runtime::slots::Said::Slots { lines, footer } => {
+                    self.0.state.borrow_mut().transcript.add(Entry::News {
+                        title: "Model slots".into(),
+                        items: lines,
+                        footer: Some(footer),
+                    });
+                    self.0.scheduler.request();
+                }
+                kumi_runtime::slots::Said::Done(text) => self.notice(&text, NoticeTone::Info),
+                kumi_runtime::slots::Said::Refused(text) => self.notice(&text, NoticeTone::Warn),
             }
             return Ok(());
         }
@@ -982,7 +1004,7 @@ pub(super) struct Command {
     pub about: &'static str,
 }
 
-pub(super) const HELP: &str = "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, and /conversations goes back to an earlier one · /reconnect connects to Live again, keeping the conversation · /copy copies the last answer; to select text yourself, hold Shift while dragging (Option in iTerm2) · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one; /willington turns Willington's bindings (macro mapping and more) on or off; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your Sets), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi, and /changelog says what's new in it · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands";
+pub(super) const HELP: &str = "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, and /conversations goes back to an earlier one · /reconnect connects to Live again, keeping the conversation · /copy copies the last answer; to select text yourself, hold Shift while dragging (Option in iTerm2) · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one; /willington turns Willington's bindings (macro mapping and more) on or off; /slots shows which model does each listening job (stems, transcription, listening, embeddings), swaps one in plain words after a quick test, and /slots back takes a swap back; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your Sets), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi, and /changelog says what's new in it · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands";
 pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/new", about: "Forget this conversation and start fresh" },
     Command { name: "/btw", about: "Ask something on the side, without interrupting Kumi" },
@@ -997,6 +1019,7 @@ pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/effort", about: "How hard the model thinks" },
     Command { name: "/fast", about: "The model's faster tier, when its provider offers one" },
     Command { name: "/willington", about: "Willington's bindings in Live: macro mapping, zones" },
+    Command { name: "/slots", about: "Which model does each listening job: /slots listening gemini, /slots back listening" },
     Command { name: "/login", about: "Sign in to a provider" },
     Command { name: "/loop", about: "Listen, judge and adjust in rounds until the goal is met: /loop <what>, then stop" },
     Command { name: "/goal", about: "Keep at one goal until it's met: /goal <what>, then resume, edit, pause, clear" },

@@ -20,8 +20,7 @@ use kumi_runtime::{
         store_client::StoreClient,
     },
     library::{create_library, LibraryOptions},
-    listening::listener::{gemini_key, gemini_listener, listener_from_env, listening_off, openai_listener, Listener, GEMINI},
-    providers::{api_key_for, ProviderId},
+    slots,
     video::programs::{configure_programs, ProgramDefaults},
     *,
 };
@@ -251,6 +250,9 @@ pub(super) async fn run_session(
     });
     let controller: Rc<RefCell<Option<Weak<dyn SessionController>>>> = Rc::new(RefCell::new(None));
     let listener_store = store.clone();
+    // Which model does each listening job: /slots shows, swaps and takes back.
+    let slots_file = slots::file_in(std::path::Path::new(&crate::config::kumi_dir(&io.env)));
+    let slots_context = Rc::new(slots::SlotsContext { file: slots_file.clone(), store: store.clone(), env: io.env.clone() });
     // Measured references: the reference tool keeps them, the judge works toward them by name.
     let references = Rc::new(kumi_runtime::references::store::ReferenceStore::new(load_references_dir(&io.env)?));
     let models = Rc::new(create_model_control(ModelControlOptions {
@@ -408,29 +410,13 @@ pub(super) async fn run_session(
             });
             options.references = Some(references.clone());
             options.listener = Some({
-                let store = listener_store.clone();
+                let store: Rc<dyn CredentialStore> = listener_store.clone();
                 let env = env.clone();
+                let slots = slots_file.clone();
                 Rc::new(move |signal| {
-                    let (store, env) = (store.clone(), env.clone());
-                    async move {
-                        if listening_off(&env) {
-                            return Ok(None);
-                        }
-                        if let Some(listener) = listener_from_env(&env) {
-                            return Ok(Some(Rc::new(listener) as Rc<dyn Listener>));
-                        }
-                        // Gemini first (the best at naming what it hears), then OpenAI's audio models, each by its own key.
-                        if let Some(key) = gemini_key(store.as_ref(), &env).await {
-                            if let Some(listener) = gemini_listener(GEMINI, &key, signal.clone()).await? {
-                                return Ok(Some(Rc::new(listener) as Rc<dyn Listener>));
-                            }
-                        }
-                        let Some(key) = api_key_for(ProviderId::Openai, store.as_ref(), Some(&env)).await.ok().flatten() else {
-                            return Ok(None);
-                        };
-                        Ok(openai_listener(&key.key, signal).await?.map(|listener| Rc::new(listener) as Rc<dyn Listener>))
-                    }
-                    .boxed_local()
+                    let (store, env, slots) = (store.clone(), env.clone(), slots.clone());
+                    // The listening slot's model (KUMI_LISTENER wins over it), following the slot when it's swapped.
+                    async move { slots::listener(&slots, store, &env, signal).await }.boxed_local()
                 })
             });
             options.on_catch_up = Some({
@@ -652,6 +638,7 @@ pub(super) async fn run_session(
         options.open_browser = Some(Rc::new(login::open_browser));
         options.updates = Some(updates);
         options.willington = Some(WillingtonControl::new(io.env.clone()));
+        options.slots = Some(slots_context);
         options.voice = Some(Rc::new(create_voice_control(VoiceControlOptions {
             env: Some(io.env.clone()),
             tools_dir,

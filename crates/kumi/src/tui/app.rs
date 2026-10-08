@@ -81,6 +81,8 @@ pub struct TuiOptions {
     pub connect_live: Option<ConnectLive>,
     /// /willington, where Kumi's bridge can carry Willington.
     pub willington: Option<WillingtonControl>,
+    /// /slots: which model does each listening job, swapped and taken back.
+    pub slots: Option<Rc<kumi_runtime::slots::SlotsContext>>,
     /// What's new since the producer last opened Kumi, shown once as it starts.
     pub whats_new: Option<crate::whats_new::News>,
 }
@@ -115,6 +117,7 @@ impl TuiOptions {
             voice: None,
             connect_live: None,
             willington: None,
+            slots: None,
             whats_new: None,
         }
     }
