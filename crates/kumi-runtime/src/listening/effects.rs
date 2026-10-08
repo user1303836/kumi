@@ -485,17 +485,23 @@ pub fn sweep(heard: &Heard) -> Option<(f64, Option<f64>)> {
     }
     levels.sort_by(f64::total_cmp);
     let loud = percentile(&levels, 0.95) - 20.;
-    // A low part's brightness follows its notes: read against its bass line, a melody isn't a filter moving.
-    let notes: Option<Vec<Option<f64>>> = sound::bass_line(heard).map(|line| {
-        let mut pitches = vec![None; frames.bass.len()];
-        for (low, hz) in line {
-            pitches[low] = Some(hz);
+    // A pitched part's brightness follows its notes: read against them (a low part's bass line, another's lowest clear
+    // peak frame by frame), a melody isn't a filter moving.
+    let notes: Option<Vec<Option<f64>>> = match sound::bass_line(heard) {
+        Some(line) => {
+            let mut pitches = vec![None; frames.bass.len()];
+            for (low, hz) in line {
+                pitches[low] = Some(hz);
+            }
+            let ratio = frames.bass_hop / frames.hop.max(1e-9);
+            Some(
+                (0..frames.level.len())
+                    .map(|frame| pitches.get(((frame as f64 + 2.) / ratio - 2.).round().max(0.) as usize).copied().flatten())
+                    .collect(),
+            )
         }
-        let ratio = frames.bass_hop / frames.hop.max(1e-9);
-        (0..frames.level.len())
-            .map(|frame| pitches.get(((frame as f64 + 2.) / ratio - 2.).round().max(0.) as usize).copied().flatten())
-            .collect()
-    });
+        None => sound::melody(heard),
+    };
     let series: Vec<Option<f64>> = (0..frames.level.len())
         .map(|frame| {
             let centroid = centroid_at(heard, frame).filter(|_| frames.level[frame] as f64 >= loud)?.log2();

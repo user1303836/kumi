@@ -283,6 +283,28 @@ fn guesses_arent_said_as_effects() {
         .collect();
     let (octaves, _) = sweep(&heard(&line, &line)).unwrap();
     assert!(octaves < 0.25, "{octaves} octaves");
+    // Nor is a lead an octave wide above the bass range: its brightness is read against each moment's own pitch.
+    let lead = |hz: &dyn Fn(f64) -> f64, cutoff: &dyn Fn(f64) -> f64| -> Vec<f64> {
+        let (mut phase, mut state) = (0., [0.; 2]);
+        (0..(8. * RATE) as usize)
+            .map(|n| {
+                let t = n as f64 / RATE;
+                phase += 2. * PI * hz(t) / RATE;
+                let saw = 0.15 * (1..=20).map(|k| (k as f64 * phase).sin() / k as f64).sum::<f64>();
+                let pole = 1. - (-2. * PI * cutoff(t) / RATE).exp();
+                state[0] += pole * (saw - state[0]);
+                state[1] += pole * (state[0] - state[1]);
+                state[1]
+            })
+            .collect()
+    };
+    let melody = lead(&|t| if (t / 0.5) as usize % 2 == 0 { 440. } else { 880. }, &|_| 12_000.);
+    let (octaves, _) = sweep(&heard(&melody, &melody)).unwrap();
+    assert!(octaves < 0.25, "a lead an octave wide: {octaves} octaves");
+    // A held note through a filter sweeping three octaves still sweeps.
+    let filtered = lead(&|_| 330., &|t| 1200. * 2f64.powf(1.5 * (2. * PI * 0.5 * t).sin()));
+    let (octaves, cycle) = sweep(&heard(&filtered, &filtered)).unwrap();
+    assert!(octaves > 0.5 && cycle.is_some_and(|cycle| (cycle - 2.).abs() < 0.25), "{octaves} octaves every {cycle:?} s");
 }
 
 #[test]

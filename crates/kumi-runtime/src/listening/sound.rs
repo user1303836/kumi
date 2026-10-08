@@ -120,6 +120,41 @@ pub fn bass_line(heard: &Heard) -> Option<Vec<(usize, f64)>> {
     (notes.len() * 2 > sounding).then_some(notes)
 }
 
+/// A pitched part's notes above the bass range, frame by frame (Hz, a semitone apart): each loud frame's lowest fine
+/// peak standing 10 dB over the frame's middle and within 30 dB of its strongest. None when the part isn't pitched:
+/// under half its loud frames have one (noise, a kit).
+pub fn melody(heard: &Heard) -> Option<Vec<Option<f64>>> {
+    let frames = &heard.frames;
+    if frames.level.is_empty() {
+        return None;
+    }
+    let mut levels: Vec<f64> = frames.level.iter().map(|level| *level as f64).collect();
+    levels.sort_by(f64::total_cmp);
+    let loud = percentile(&levels, 0.95) - 20.;
+    let (mut sounding, mut pitched) = (0, 0);
+    let notes: Vec<Option<f64>> = frames
+        .fine
+        .iter()
+        .zip(&frames.level)
+        .map(|(fine, level)| {
+            if (*level as f64) < loud {
+                return None;
+            }
+            sounding += 1;
+            let mut sorted = *fine;
+            sorted.sort_by(f32::total_cmp);
+            let (middle, strongest) = (sorted[FINE_BINS / 2], sorted[FINE_BINS - 1]);
+            let bin = (0..FINE_BINS - 1).find(|bin| {
+                let at = fine[*bin];
+                at >= middle + 10. && at >= strongest - 30. && (*bin == 0 || at >= fine[bin - 1]) && at >= fine[bin + 1]
+            })?;
+            pitched += 1;
+            Some(fine_hz(bin))
+        })
+        .collect();
+    (pitched * 2 > sounding).then_some(notes)
+}
+
 /// The main frame centred nearest a low frame's centre.
 pub fn main_frame(heard: &Heard, low: usize) -> Option<usize> {
     let frames = &heard.frames;
