@@ -292,6 +292,20 @@ fn on_stock(device: &Seen, job: &Job, stock: &Stock) -> Found {
     }
 }
 
+/// An EQ's band for a job named by role, when the target's frequency is known: of `bands` (each band's number, its
+/// frequency in Hz, whether it's on, and whether its gain does anything: a bell or a shelf, not a cut), the one
+/// nearest `near` in octaves. Bands that are on and shape come first, then any on, then any.
+pub fn nearest_band(bands: &[(u8, f64, bool, bool)], near: f64) -> Option<u8> {
+    let nearest = |keep: &dyn Fn(&(u8, f64, bool, bool)) -> bool| {
+        bands
+            .iter()
+            .filter(|band| keep(band) && band.1 > 0. && near > 0.)
+            .min_by(|a, b| (a.1 / near).log2().abs().total_cmp(&(b.1 / near).log2().abs()))
+            .map(|band| band.0)
+    };
+    nearest(&|band| band.2 && band.3).or_else(|| nearest(&|band| band.2)).or_else(|| nearest(&|_| true))
+}
+
 /// A word as a role on a device: its knob, or why it can't be turned there; None when the word is no role of this
 /// device's and no job (a knob's own name, maybe).
 pub fn find(device: &Seen, word: &str) -> Option<Found> {

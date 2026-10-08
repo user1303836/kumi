@@ -78,9 +78,10 @@ fn kind_of(tool: &str) -> Option<Activity> {
         | "live_arrangement_automation_read"
         | "watch_me"
         | "select"
-        | "show" => Activity::Look,
+        | "show"
+        | "groove" => Activity::Look,
         "make_device" | "arrange" => Activity::Build,
-        "listen" | "audition" | "judge" | "tune" | "groove" => Activity::Listen,
+        "listen" | "audition" | "judge" | "tune" | "sound" | "form" | "reference" => Activity::Listen,
         "watch_video" => Activity::Watch,
         "play" | "fire_scene" | "launch_clip" | "jump_to_locator" => Activity::Play,
         "record" | "capture_midi" => Activity::Record,

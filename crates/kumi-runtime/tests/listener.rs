@@ -1,7 +1,7 @@
 //! The listening model through Gemini: picked from Gemini's own model list by what each model does, asked with the
 //! audio in a generateContent request, its JSON answer read back; and kept off questions about width or air.
 use kumi_common::abort::Signal;
-use kumi_runtime::listening::listener::{from_env, gemini_listener, parse_answer, FromEnv, Listener};
+use kumi_runtime::listening::listener::{from_env, gemini_listener, parse_answer, ChatListener, FromEnv, Listener};
 use std::{cell::RefCell, rc::Rc};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -72,6 +72,9 @@ async fn gemini_listens_with_the_newest_model_that_takes_what_its_given_and_answ
             // The newest released version, and of that version the light model that isn't the lite one.
             assert_eq!(listener.name(), "gemini-2.5-flash");
             assert!(!listener.hears_width(), "Gemini hears a mono downmix: no questions about width or air");
+            // Every listener is sent a mono downmix, an OpenAI-compatible one too.
+            let chat = ChatListener { base: base.clone(), key: None, model: "audio".into(), client: reqwest::Client::new() };
+            assert!(!chat.hears_width());
             let heard = listener.ask(b"RIFF....WAVE", "punch toward 10 dB", Signal::new()).await.unwrap();
             assert_eq!((heard.closer.as_str(), heard.first.as_slice()), ("second", ["muddy".to_string()].as_slice()));
             let requests = seen.borrow().clone();

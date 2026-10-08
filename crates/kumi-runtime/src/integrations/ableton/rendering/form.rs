@@ -161,6 +161,9 @@ fn reply(shape: &Form, first: usize, elements: &[(String, Vec<(usize, usize)>)],
         "outro": format!("{} bars", shape.outro),
         "firstHook": shape.hook.map(|bar| format!("bar {}", first + bar + 1)),
         "loudnessByBar": shape.bars.iter().map(|bar| (bar.loudness * 10.).round() / 10.).collect::<Vec<_>>(),
+        "onsetsPerSecondByBar": shape.bars.iter().map(|bar| (bar.density * 10.).round() / 10.).collect::<Vec<_>>(),
+        "brightnessHzByBar": shape.bars.iter().map(|bar| (20. * bar.brightness.exp2() / 10.).round() * 10.).collect::<Vec<_>>(),
+        "lowEndDbByBar": shape.bars.iter().map(|bar| (bar.low * 10.).round() / 10.).collect::<Vec<_>>(),
         "problems": shape.problems,
     });
     if !plays.is_empty() {

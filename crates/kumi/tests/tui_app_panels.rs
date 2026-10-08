@@ -393,6 +393,10 @@ case!(a_goal_and_its_loop_show_where_they_are_and_each_judged_round, async {
     ] {
         h.has(s)
     }
+    // /goal alone while it works shows its tab, rather than asking for Esc.
+    h.type_text("/goal\r").await;
+    assert!(!has(&h.screen(), "press esc to stop it first"), "{:?}", h.screen());
+    h.has("working · turn 1 of 12");
     // The loop inside it: where it is, and each round in the transcript.
     h.emit(json!({"type":"loop","state":"running","request":"master this to -9 LUFS","rounds":1,"kept":1,"reverted":0,"listens":3,"elapsedMs":30000,"roundsLeft":15,"next":"True peak"}));
     h.has("loop · round 1 · 1 kept");

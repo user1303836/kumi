@@ -197,7 +197,8 @@ impl Session {
         self.assert_current(&op)?;
         let note = match &self.0.learned {
             Some(l) => {
-                l.drafts.turn_started(&text, true);
+                // An explicit /loop is work toward a goal: nobody is asked to keep a technique from it.
+                l.drafts.turn_started(&text, explicit.is_none());
                 l.drafts.waiting().map(|name| waiting_note(&name)).unwrap_or_default()
             }
             None => String::new(),

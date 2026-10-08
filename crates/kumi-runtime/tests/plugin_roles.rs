@@ -2,7 +2,7 @@
 //! how to configure it, another device on the track doing the job in the agreed order (Ozone 12, the other mapped
 //! plug-ins, Live's own devices; none that's off), Live's own device to add placed where its job goes, a job on Live's
 //! own devices by their Live 12 names, and fixes that name a role.
-use kumi_runtime::plugins::roles::{agreed_order, find, job_for_item, job_named, plugin_fix, resolve, Found, Resolved, Seen};
+use kumi_runtime::plugins::roles::{agreed_order, find, job_for_item, job_named, nearest_band, plugin_fix, resolve, Found, Resolved, Seen};
 use serde_json::Value;
 
 /// Ozone 12.1's own parameter names, as Live listed them on the machine its format was read on.
@@ -318,4 +318,20 @@ fn low_width_is_the_lowest_bands_width_only() {
         switched_on: vec![],
     };
     assert_eq!(plugin_fix(&[supermassive], low, Some("the Imager")), None);
+}
+
+#[test]
+fn an_eq_band_named_by_role_is_the_one_nearest_the_target() {
+    // EQ Eight's bands: number, frequency, on, and whether its gain shapes (a bell or a shelf, not a cut).
+    let bands = [(1, 40., true, false), (2, 120., true, true), (3, 900., false, true), (4, 2500., true, true), (8, 12000., true, true)];
+    assert_eq!(nearest_band(&bands, 3000.), Some(4));
+    assert_eq!(nearest_band(&bands, 100.), Some(2));
+    // A band that's off, or a cut whose gain does nothing, gives way to one that's on and shapes: at 900 Hz, band 4
+    // (1.5 octaves off) rather than band 3, which is off.
+    assert_eq!(nearest_band(&bands, 900.), Some(4));
+    assert_eq!(nearest_band(&bands, 40.), Some(2));
+    // With none that shape, the nearest that's on; with none on, the nearest.
+    assert_eq!(nearest_band(&[(1, 40., true, false), (2, 500., false, true)], 400.), Some(1));
+    assert_eq!(nearest_band(&[(1, 40., false, false), (2, 500., false, true)], 400.), Some(2));
+    assert_eq!(nearest_band(&[], 400.), None);
 }

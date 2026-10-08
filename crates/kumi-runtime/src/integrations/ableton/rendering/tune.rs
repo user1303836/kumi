@@ -8,14 +8,14 @@ use super::pass::RECORD_LEAD;
 use super::rig::Window;
 use super::*;
 use crate::listening::{
-    checklist::{masking_unfair, plan_cut, Quantity, Target},
+    checklist::{masking_unfair, plan_cut, Quantity, Target, REGIONS},
     cmaes::Cmaes,
     detect::ProblemKind,
     fit::{fit, Band, Limits, Shape},
     home::{Homed, Homing},
     judging::{candidate_cost, predict},
     knobs::{Scale, Unit},
-    measure::{measure_file, MeasureOptions},
+    measure::{measure_file, MeasureOptions, THIRDS},
     probes::Probes,
     round::{Round, RoundKind},
 };
@@ -170,9 +170,10 @@ impl Rendering {
                 Ok(knobs) => knobs,
                 Err(why) => return Ok(Err(why)),
             };
-            // Knobs named by role: found on the device, or on another of its track in the agreed order.
-            let names: Vec<String> = knobs.iter().map(|knob| knob.name.clone()).collect();
-            let (request, knobs) = match self.knobs_by_role(request, &names, signal.clone()).await? {
+            // Knobs named by role: found on the device, or on another of its track in the agreed order. An EQ band goes
+            // nearest where the target sits in frequency.
+            let near = self.judge.borrow().as_ref().and_then(|run| target_hz(&run.checklist.items.get(index)?.quantity));
+            let (request, knobs) = match self.knobs_by_role(request, &knobs, near, signal.clone()).await? {
                 Ok(None) => (request.clone(), knobs),
                 Ok(Some(found)) if found.device == request.device => (found, knobs),
                 Ok(Some(found)) => match self.device_knobs(&found.device, signal.clone()).await? {
@@ -848,7 +849,7 @@ impl Rendering {
             heard.insert(name.clone(), (measured, lead));
         }
         if heard.is_empty() {
-            return Ok(Err("Nothing came through from the copies; is something playing on the track there?".into()));
+            return Ok(Err("Nothing came through; is something playing on those tracks there?".into()));
         }
         Ok(Ok(heard))
     }
@@ -1019,6 +1020,18 @@ impl Rendering {
 /// The model's own words for the change, as the log's lead-in.
 pub(super) fn said_first(request: &TuneRequest) -> String {
     request.change.as_ref().map(|change| format!("{}. ", change.trim().trim_end_matches('.'))).unwrap_or_default()
+}
+
+/// Where a checklist item sits in frequency (Hz): a balance region's middle, or a problem's band; None for the rest.
+fn target_hz(quantity: &Quantity) -> Option<f64> {
+    match quantity {
+        Quantity::Region { region } => {
+            let (_, low, high) = REGIONS[*region];
+            Some((THIRDS[low] * THIRDS[high]).sqrt())
+        }
+        Quantity::Problem { low, high, .. } => Some((low * high).sqrt()),
+        _ => None,
+    }
 }
 
 fn describe_band(band: &Band) -> String {

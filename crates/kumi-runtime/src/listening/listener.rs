@@ -61,10 +61,10 @@ impl Opinion {
 pub trait Listener {
     /// The model, as the log names it.
     fn name(&self) -> String;
-    /// Whether it hears stereo and the top octave: one that hears a mono downmix at a low rate isn't asked about width,
-    /// phase or air.
+    /// Whether it hears stereo and the top octave. Kumi sends every listener a mono downmix, so none is asked about
+    /// width, phase or air.
     fn hears_width(&self) -> bool {
-        true
+        false
     }
     /// Turned off since it was found: the listening slot now says off.
     fn off(&self) -> bool {
@@ -307,7 +307,6 @@ pub fn readable(path: &Path) -> bool {
 }
 
 /// Gemini, with a Gemini API key: the audio goes in a generateContent request, and the answer comes back as JSON.
-/// Gemini hears a mono downmix at a low rate, so it isn't asked about width, phase or air.
 pub struct GeminiListener {
     pub base: String,
     pub key: String,
@@ -320,9 +319,6 @@ pub struct GeminiListener {
 impl Listener for GeminiListener {
     fn name(&self) -> String {
         self.model.trim_start_matches("models/").to_string()
-    }
-    fn hears_width(&self) -> bool {
-        false
     }
     async fn ask(&self, wav: &[u8], aim: &str, signal: Signal) -> Result<Answer, String> {
         let body = json!({

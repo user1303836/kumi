@@ -1150,6 +1150,10 @@ local_test!(technique_is_taken_out_of_whole_and_streamed_plans_and_offered_after
             })
             .collect::<Vec<_>>()
     };
+    // Work toward a /loop's goal isn't asked about, even when it builds.
+    h.session.submit("/loop build a Reese", None).await.unwrap();
+    assert!(actions().is_empty(), "{:?}", actions());
+    let since = h.events.borrow().len();
     h.session.submit("build a Reese", None).await.unwrap();
     assert_eq!(received.borrow().last().unwrap(), json!({"steps":[{"tool":"load_device"}]}).as_object().unwrap());
     assert_eq!(actions(), [TechniqueAction::Offered]);
@@ -1157,6 +1161,7 @@ local_test!(technique_is_taken_out_of_whole_and_streamed_plans_and_offered_after
         .events
         .borrow()
         .iter()
+        .skip(since)
         .filter_map(|e| match e {
             SessionEvent::TurnComplete { .. } => Some("answered"),
             SessionEvent::Technique(_) => Some("offered"),

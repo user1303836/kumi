@@ -240,11 +240,11 @@ pub fn judge_reply(round: &Round) -> Value {
         ),
         (_, true) => "Every item is within tolerance: say so and stop, or end the run with done: true for a last whole listen.".into(),
         (RoundKind::Done, false) => "The run is over. Say what changed, before → after, and what's still off.".into(),
-        (RoundKind::Start, false) => "Make one change toward next, then call judge with change.".into(),
+        (RoundKind::Start, false) => "Make one change toward next, then call judge with change (a tune is judged already).".into(),
         (RoundKind::Judged, false) if round.kept == Some(false) => {
-            "Kumi took that change back. Try another way to close next (another device, a different setting), then judge it.".into()
+            "Kumi took that change back. Try another way to close next (another device, a different setting), then judge it (a tune is judged already).".into()
         }
-        (RoundKind::Judged, false) => "Kept. Make one change toward next, then judge it.".into(),
+        (RoundKind::Judged, false) => "Kept. Make one change toward next, then judge it (a tune is judged already).".into(),
     };
     reply["note"] = json!(note);
     reply

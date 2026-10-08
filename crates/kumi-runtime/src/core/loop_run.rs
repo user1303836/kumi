@@ -233,7 +233,7 @@ impl LoopRun {
             })
             .unwrap_or_default();
         LoopDecision::Next(format!(
-            "[Kumi loop] Round {}. {verdict}{next} Budget left: {left} rounds, about {} minutes. Make one change toward it, then judge it (Kumi asks for done when it's time).",
+            "[Kumi loop] Round {}. {verdict}{next} Budget left: {left} rounds, about {} minutes. Make one change toward it, then judge it (a tune is judged already; Kumi asks for done when it's time).",
             last.round,
             to_string(minutes)
         ))
@@ -286,7 +286,7 @@ impl LoopRun {
             })
             .unwrap_or_default();
         Some(format!(
-            "Kumi's loop isn't over: the checklist isn't met and changes are still helping.{next} Budget left: {left} rounds. Make one change toward it and judge it; Kumi asks for done when it's time."
+            "Kumi's loop isn't over: the checklist isn't met and changes are still helping.{next} Budget left: {left} rounds. Make one change toward it and judge it (a tune is judged already); Kumi asks for done when it's time."
         ))
     }
     /// The last rounds kept nothing, or the gaps they closed add up to less than a step.

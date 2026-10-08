@@ -19,6 +19,11 @@ fn each_kind_of_task_has_its_own_glyph_a_cell_wide_that_moves() {
     assert_eq!(activity_of(Some("live_discover")), Activity::Look);
     assert_eq!(activity_of(Some("set_mixer")), Activity::Change);
     assert_eq!(activity_of(Some("audition")), Activity::Listen);
+    // sound, form and reference listen; groove reads notes.
+    for tool in ["sound", "form", "reference"] {
+        assert_eq!(activity_of(Some(tool)), Activity::Listen, "{tool}");
+    }
+    assert_eq!(activity_of(Some("groove")), Activity::Look);
     assert_eq!(activity_of(None), Activity::Think);
     let mut kinds = HashSet::new();
     for kind in Activity::ALL {

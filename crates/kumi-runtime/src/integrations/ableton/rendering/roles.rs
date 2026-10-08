@@ -2,9 +2,9 @@
 //! device's name, class and whether it's on, the parameters Live lets Kumi turn, and for a plug-in every name Live
 //! lists for it, so the plug-in map's names are checked against Live's own before any is used.
 
-use super::tune::{TuneHow, TuneRequest};
+use super::tune::{DeviceKnob, TuneHow, TuneRequest};
 use super::*;
-use crate::listening::round::Round;
+use crate::listening::{knobs::Unit, round::Round};
 use crate::plugins::roles::{self, is_plugin, Found, Resolved, Seen};
 use regex::Regex;
 use std::sync::LazyLock;
@@ -14,15 +14,31 @@ static ON_TRACK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([0-9]+):devic
 
 impl Rendering {
     /// The tune request with its knobs named by role found: on its device, or else on another of its track, in the
-    /// agreed order. None when no knob is named by role; why, when nothing can turn one.
+    /// agreed order. An EQ band named by role on an EQ Eight is the band nearest `near` (the target's frequency, Hz)
+    /// when it's known. None when no knob is named by role; why, when nothing can turn one.
     pub(super) async fn knobs_by_role(
         &self,
         request: &TuneRequest,
-        turnable: &[String],
+        knobs: &[DeviceKnob],
+        near: Option<f64>,
         signal: Signal,
     ) -> Result<Result<Option<TuneRequest>, String>, RuntimeError> {
+        let turnable: Vec<String> = knobs.iter().map(|knob| knob.name.clone()).collect();
+        let mut banded = request.clone();
+        let mut bands = vec![];
+        for word in banded.knobs.iter_mut() {
+            if let Some(band) = near.and_then(|near| eq_band(word, knobs, near).map(|band| (band, near))) {
+                bands.push(format!("{word} is {}, the band nearest {}", band.0, hz(band.1)));
+                *word = band.0;
+            }
+        }
+        if !bands.is_empty() {
+            banded.change = Some(request.change.iter().cloned().chain(bands).collect::<Vec<_>>().join(". "));
+        }
+        let banding = banded.knobs != request.knobs;
+        let request = &banded;
         if request.how == TuneHow::Fit || request.knobs.iter().all(|word| turnable.iter().any(|name| roles::same(name, word))) {
-            return Ok(Ok(None));
+            return Ok(Ok(banding.then(|| request.clone())));
         }
         let long = self.long_device(&request.device);
         let (mut devices, asked) = self.track_devices(&long, signal.clone()).await?;
@@ -144,6 +160,39 @@ impl Rendering {
         if device.adapter().is_some() {
             device.listed = self.listed_names(&long, signal).await.ok().flatten();
         }
+    }
+}
+
+/// `eq gain` or `eq frequency` on Live's EQ Eight: the knob of the band nearest `near` (Hz) that's on and shapes (a
+/// bell or a shelf: a cut's gain does nothing). None for any other word or device.
+fn eq_band(word: &str, knobs: &[DeviceKnob], near: f64) -> Option<String> {
+    let knob = match roles::job_named(word)?.name {
+        "eq gain" => "Gain",
+        "eq frequency" => "Frequency",
+        _ => return None,
+    };
+    let named = |name: String| knobs.iter().find(|knob| knob.name == name);
+    let bands: Vec<(u8, f64, bool, bool)> = knobs
+        .iter()
+        .filter_map(|frequency| {
+            let band: u8 = frequency.name.strip_suffix(" Frequency A")?.parse().ok()?;
+            let at = frequency.scale.as_ref().filter(|scale| scale.unit == Unit::Hz)?.shown(frequency.raw);
+            let on = named(format!("{band} Filter On A")).is_none_or(|on| on.raw >= 0.5);
+            let shapes = named(format!("{band} Filter Type A"))
+                .and_then(|kind| kind.items.get(kind.raw.round().max(0.) as usize))
+                .is_none_or(|kind| kind.to_lowercase().contains("bell") || kind.to_lowercase().contains("shelf"));
+            Some((band, at, on, shapes))
+        })
+        .collect();
+    Some(format!("{} {knob} A", roles::nearest_band(&bands, near)?))
+}
+
+/// A frequency in words: "120 Hz", "2.5 kHz".
+fn hz(at: f64) -> String {
+    if at >= 1000. {
+        format!("{} kHz", (at / 100.).round() / 10.)
+    } else {
+        format!("{} Hz", at.round())
     }
 }
 

@@ -685,7 +685,12 @@ impl TuiApp {
             }
             return Ok(());
         }
-        if command == "/goal" && self.busy() && self.0.state.borrow().goal.is_some() {
+        // /goal alone while a goal works (a /goal objective, or a sound-match search) shows its tab.
+        let goal_running = {
+            let state = self.0.state.borrow();
+            state.goal.is_some() || state.objective.is_some()
+        };
+        if command == "/goal" && self.busy() && goal_running {
             self.clear_editor();
             self.0.tabs.show("goal");
             self.0.scheduler.request();
@@ -1039,7 +1044,7 @@ pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/effort", about: "How hard the model thinks" },
     Command { name: "/fast", about: "The model's faster tier, when its provider offers one" },
     Command { name: "/willington", about: "Willington's bindings in Live: macro mapping, zones" },
-    Command { name: "/slots", about: "Which model does each listening job: /slots listening gemini, /slots back listening" },
+    Command { name: "/slots", about: "Which model does each listening job: /slots listening gemini, /slots back <job>" },
     Command { name: "/login", about: "Sign in to a provider" },
     Command { name: "/loop", about: "Listen, judge and adjust in rounds until the goal is met: /loop <what>, then stop" },
     Command { name: "/goal", about: "Keep at one goal until it's met: /goal <what>, then resume, edit, pause, clear" },
