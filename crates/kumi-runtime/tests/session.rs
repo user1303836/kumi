@@ -55,6 +55,10 @@ struct Record {
     audio_resolved: RefCell<Vec<String>>,
     /// The producer's messages the kernel took while it answered.
     steered: RefCell<Vec<String>>,
+    /// A stopped tool call still putting Live back: settling waits for this, when it's set.
+    putting_back: RefCell<Option<Rc<Notify>>>,
+    /// How often the session waited for its integration to settle.
+    settled: Cell<usize>,
 }
 struct TestKernel {
     record: Rc<Record>,
@@ -117,6 +121,13 @@ struct TestIntegration {
 }
 #[async_trait(?Send)]
 impl Integration for TestIntegration {
+    async fn settled(&self) {
+        let putting_back = self.record.putting_back.borrow().clone();
+        if let Some(putting_back) = putting_back {
+            putting_back.notified().await;
+        }
+        self.record.settled.set(self.record.settled.get() + 1);
+    }
     fn has_audio_file(&self) -> bool {
         true
     }
@@ -381,6 +392,35 @@ local_test!(cooperative_cancel_keeps_kernel_usage_and_finished_steps, {
     assert!(h.events.borrow().iter().any(|e|matches!(e,SessionEvent::TurnComplete{result,..}if result.stop_reason==StopReason::Cancelled&&result.usage.as_ref().is_some_and(|u|u.input_tokens==4.))));
     h.session.close().await.unwrap();
     assert_eq!(h.session.status().connection, ConnectionState::Disconnected);
+});
+local_test!(a_stopped_answer_ends_once_its_tool_calls_have_put_live_back, {
+    let h = harness(
+        Some(Rc::new(|_, signal, _| {
+            async move {
+                signal.cancelled().await;
+                Ok(cancelled())
+            }
+            .boxed_local()
+        })),
+        |_| {},
+    );
+    // A judge call is still taking its round back in Live when Esc comes.
+    let putting_back = Rc::new(Notify::new());
+    *h.record.putting_back.borrow_mut() = Some(putting_back.clone());
+    h.session.start().await.unwrap();
+    let running = spawned(&h.session, "master it");
+    settle().await;
+    let session = h.session.clone();
+    let cancelling = tokio::task::spawn_local(async move { session.cancel().await });
+    // Well past the grace, the answer is still stopping, so the next one can't start beside it.
+    delay(60).await;
+    let ended = |events: &Rc<RefCell<Vec<SessionEvent>>>| events.borrow().iter().any(|e| matches!(e, SessionEvent::TurnComplete { .. }));
+    assert!(!running.is_finished() && !cancelling.is_finished() && !ended(&h.events));
+    putting_back.notify_one();
+    running.await.unwrap().unwrap();
+    cancelling.await.unwrap().unwrap();
+    assert!(ended(&h.events));
+    assert_eq!(h.record.settled.get(), 1);
 });
 local_test!(uncooperative_timeout_is_bounded_and_quarantines_kernel, {
     let h = harness(Some(hang_once()), |o| o.timeout_ms = Some(15));

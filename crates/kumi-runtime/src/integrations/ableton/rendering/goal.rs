@@ -366,9 +366,10 @@ impl GoalRig for Goal {
                 trial.values.iter().map(|value| to_fixed(*value, 4)).collect::<Vec<_>>().join(",")
             )
         };
-        if r.begin_rendering() {
+        if r.is_rendering() {
             return Err(observation("Another render is running."));
         }
+        let rendering = r.rendering_now();
         let set_from = now_ms();
         let mut render_from = set_from;
         let mut generation = Generation { screened, ..Default::default() };
@@ -450,7 +451,7 @@ impl GoalRig for Goal {
             }
         }
         .await;
-        r.end_rendering();
+        drop(rendering);
         let files = result?;
         let heard_from = now_ms();
         let tempo = r.observer.tempo.get().unwrap_or(f64::NAN);

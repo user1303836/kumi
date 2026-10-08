@@ -410,6 +410,9 @@ pub trait Integration {
     /// What's in Live now; `pinned` (what the producer pointed at) is checked against it and given to the model.
     async fn observe(&self, signal: Signal, hints: Option<ObserveHints>) -> Result<Observation, RuntimeError>;
     async fn close(&self) -> Result<(), RuntimeError>;
+    /// Resolves once no tool call is still at work in the app (a stopped answer's, putting it back): a stopped answer
+    /// ends only then, so the next one doesn't run beside it.
+    async fn settled(&self) {}
     fn has_undo(&self) -> bool {
         false
     }

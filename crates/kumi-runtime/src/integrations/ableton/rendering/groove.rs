@@ -283,7 +283,7 @@ impl Rendering {
         let from = ((zero + first) / meter).floor() * meter;
         let window = Window { from, beats: (((zero + last) - from) / meter).ceil().max(1.) * meter };
         let candidates = vec![AuditionCandidate { track: name, mix: None, label: None, clip: None }];
-        self.begin_rendering();
+        let rendering = self.rendering_now();
         let mut rig = None;
         let rendered: Result<IndexMap<String, Render>, RuntimeError> = async {
             rig = Some(self.open_rig(&candidates, Some(window.from), Some(window.beats), signal.clone()).await?);
@@ -293,7 +293,7 @@ impl Rendering {
         if let Some(rig) = rig.as_mut() {
             self.close_rig(rig).await;
         }
-        self.end_rendering();
+        drop(rendering);
         let files = rendered.map_err(|error| error.to_string())?;
         let render = files.values().next().cloned().ok_or("Nothing came through from the drum stem.")?;
         let mut source = crate::audio::decode::open_audio(&render.file, Some(signal)).await.map_err(|error| error.0)?;

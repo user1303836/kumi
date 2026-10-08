@@ -919,7 +919,7 @@ impl Rendering {
             candidates.push(AuditionCandidate { track: focus.into(), mix: None, label: None, clip: None });
         }
         self.tell(format!("Listening quietly: {}", super::super::more_changes::bars(window.from)), Some(true));
-        self.begin_rendering();
+        let rendering = self.rendering_now();
         let mut rig = None;
         let rendered: Result<(IndexMap<String, Render>, Vec<(String, bool)>), RuntimeError> = async {
             rig = Some(self.open_rig(&candidates, Some(window.from), Some(window.beats), signal.clone()).await?);
@@ -933,7 +933,7 @@ impl Rendering {
             self.close_rig(rig).await;
             notes.extend(rig.notes.clone());
         }
-        self.end_rendering();
+        drop(rendering);
         self.tell("Listened", Some(false));
         let (files, sources) = rendered?;
         let main_name = sources.iter().find(|(name, mix)| *mix || Some(name.as_str()) == track).map(|(name, _)| name.clone());

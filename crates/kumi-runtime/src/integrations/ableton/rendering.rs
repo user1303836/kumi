@@ -77,6 +77,9 @@ pub struct Rendering {
     ears_failed_at: Cell<Option<i64>>,
     ears_folder: PathBuf,
     rendering: Cell<bool>,
+    /// Held for the whole of each Live tool call. A stopped answer's call goes on putting Live back (taking a round
+    /// back, closing a render, removing copies), and the next call, or the next answer, waits for it.
+    busy: tokio::sync::Mutex<()>,
     rounds: Cell<usize>,
     best: Cell<Option<f64>>,
     told_quietly: Cell<bool>,
@@ -103,20 +106,52 @@ pub use groove::GrooveRequest;
 pub use judge::{GoalRequest, JudgeRequest};
 pub use sound::SoundRequest;
 pub use tune::{TuneHow, TuneRequest};
-impl Rendering {
-    /// Kumi starts playing the Set for itself, Main down: what Live plays meanwhile isn't heard by the producer. True
-    /// when a render was already running, which nothing changes.
-    pub fn begin_rendering(&self) -> bool {
-        if self.rendering.replace(true) {
-            return true;
+/// Kumi playing the Set for itself, Main down: what Live plays meanwhile isn't heard by the producer. However the
+/// render ends, a panic included, dropping it makes what Live plays the producer's again, and the next look at Live
+/// puts Main back if the render left it down. One taken while another render runs changes nothing.
+pub struct RenderingNow<'a> {
+    rendering: &'a Rendering,
+    began: bool,
+}
+
+impl Drop for RenderingNow<'_> {
+    fn drop(&mut self) {
+        if self.began {
+            self.rendering.rendering.set(false);
+            self.rendering.history.connection.rendering.set(false);
         }
-        self.history.connection.rendering.set(true);
-        false
     }
-    /// Kumi's render is over: what Live plays is the producer's again.
-    pub fn end_rendering(&self) {
-        self.rendering.set(false);
-        self.history.connection.rendering.set(false);
+}
+
+impl Rendering {
+    /// Kumi starts playing the Set for itself (see `RenderingNow`).
+    pub fn rendering_now(&self) -> RenderingNow<'_> {
+        let began = !self.rendering.replace(true);
+        if began {
+            self.history.connection.rendering.set(true);
+        }
+        RenderingNow { rendering: self, began }
+    }
+    /// Whether Kumi is playing the Set for itself now.
+    pub fn is_rendering(&self) -> bool {
+        self.rendering.get()
+    }
+    /// Live, for one tool call: once a stopped answer's call has finished putting Live back, and Esc while waiting
+    /// stops this one before it starts.
+    pub async fn hold(&self, signal: &Signal) -> Result<tokio::sync::MutexGuard<'_, ()>, RuntimeError> {
+        tokio::select! {
+            biased;
+            _ = signal.cancelled() => Err(RuntimeError::Aborted),
+            held = self.busy.lock() => Ok(held),
+        }
+    }
+    /// Resolves once no Live tool call is running: a stopped answer's has finished putting Live back.
+    pub async fn settled(&self) {
+        drop(self.busy.lock().await);
+    }
+    /// Whether a Live tool call is running now.
+    pub fn is_busy(&self) -> bool {
+        self.busy.try_lock().is_err()
     }
     pub fn new(
         history: Rc<History>,
@@ -149,6 +184,7 @@ impl Rendering {
             ears_failed_at: Cell::new(None),
             ears_folder,
             rendering: Cell::new(false),
+            busy: tokio::sync::Mutex::new(()),
             rounds: Cell::new(0),
             best: Cell::new(None),
             told_quietly: Cell::new(false),

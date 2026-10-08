@@ -59,6 +59,8 @@ use super::{
     playbook::PlaybookStore,
 };
 
+/// How long a stopped answer waits for its tool calls to finish putting Live back before it ends anyway.
+const SETTLE_MS: u64 = 60_000;
 const UNSAVED: &str = "unsaved";
 const STILL_MISSING: &str =
     "Kumi can't reach Live. Is it open, with AbletonMcpBridge chosen as a Control Surface (Settings → Link, Tempo & MIDI)?";
@@ -1374,6 +1376,13 @@ impl Session {
         let mut result = Ok(());
         let settled_result = outcome.as_ref().ok().and_then(|r| r.clone());
         if op.signal.is_cancelled() {
+            // A tool call the answer started may still be putting Live back (taking a round back, closing a render):
+            // the answer ends once it has, so the next one doesn't run beside it. Past SETTLE_MS the next answer may
+            // start, and its Live tool calls still wait for it.
+            let integration = self.0.state.borrow().integration.clone();
+            if let Some(integration) = integration {
+                let _ = tokio::time::timeout(Duration::from_millis(SETTLE_MS), integration.settled()).await;
+            }
             if !settled.get() {
                 self.0.state.borrow_mut().must_reset = true;
                 if self.drop_kernel().await.is_err() {

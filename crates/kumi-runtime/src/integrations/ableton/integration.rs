@@ -467,10 +467,14 @@ impl KernelTool for LiveTool {
         self.schema.clone()
     }
     fn stream(&self, signal: Signal, on_start: Rc<dyn Fn()>) -> Option<Box<dyn StreamingCall>> {
-        (self.name == "make_changes").then(|| self.owner.mutations.stream_changes(signal, on_start))
+        // While a stopped answer's call is still putting Live back, changes wait for it in execute: none stream.
+        (self.name == "make_changes" && !self.owner.rendering.is_busy()).then(|| self.owner.mutations.stream_changes(signal, on_start))
     }
     async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
         let owner = &self.owner;
+        // One Live tool call at a time, across answers too: a stopped answer's call still putting Live back (taking a
+        // round back, closing a render) finishes before this one starts.
+        let _live = owner.rendering.hold(&signal).await?;
         if let Some(kind) = CHANGES.iter().find(|k| k.tool == self.name) {
             let out = owner.mutations.change(kind, input, signal, false).await;
             return Ok(ToolResult { text: out.text, is_error: out.is_error, ..Default::default() });
@@ -729,6 +733,9 @@ impl ObservationHost for Ableton {
 impl Integration for Ableton {
     async fn start(&self, signal: Signal) -> Result<(), RuntimeError> {
         self.connection.start(signal).await
+    }
+    async fn settled(&self) {
+        self.rendering.settled().await
     }
     async fn observe(&self, signal: Signal, hints: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
         self.observer.observe(self, signal, hints).await
