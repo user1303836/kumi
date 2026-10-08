@@ -41,6 +41,21 @@ pub struct Profile {
     pub crest: Option<Spread>,
     pub low_width: Option<Spread>,
     pub tilt: Spread,
+    /// How far its quiet and loud stretches lie apart (loudness range, LU): the song's contrast between sections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<Spread>,
+    /// A sound's own: its attack and decay (ms), where it settles (dB under its peak), brightness (Hz) and noisiness
+    /// (dB).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attack: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decay: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sustain: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centroid: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noise: Option<Spread>,
 }
 
 /// A measure's typical value and the range it keeps to (the 20th to 80th percentile).
@@ -95,6 +110,13 @@ impl Profile {
             crest: m.crest.map(|value| Spread::point(value, 1.5)),
             low_width: m.low_width.map(|value| Spread::point(value, 4.)),
             tilt: Spread::point(m.tilt, 0.5),
+            range: m.range.map(|value| Spread::point(value, 1.5)),
+            // A step either side: a fifth of an attack or decay, two dB, a sixth of an octave of brightness.
+            attack: m.attack.map(|value| Spread::point(value, (value * 0.2).max(2.))),
+            decay: m.decay.map(|value| Spread::point(value, (value * 0.15).max(10.))),
+            sustain: m.sustain.map(|value| Spread::point(value, 2.)),
+            centroid: m.centroid.map(|value| Spread::point(value, value * 0.12)),
+            noise: m.noise.map(|value| Spread::point(value, 2.)),
         }
     }
 
@@ -131,6 +153,12 @@ impl Profile {
             crest: pick(&|track| track.crest),
             low_width: pick(&|track| track.low_width),
             tilt: pick(&|track| Some(track.tilt)).unwrap_or(first.tilt),
+            range: pick(&|track| track.range),
+            attack: pick(&|track| track.attack),
+            decay: pick(&|track| track.decay),
+            sustain: pick(&|track| track.sustain),
+            centroid: pick(&|track| track.centroid),
+            noise: pick(&|track| track.noise),
         })
     }
 }
@@ -153,6 +181,9 @@ pub struct Goal {
     pub focus: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<Explicit>,
+    /// A single sound against a reference sound: its envelope, brightness and noisiness are on the checklist too.
+    #[serde(default)]
+    pub sound: bool,
 }
 fn yes() -> bool {
     true
@@ -182,6 +213,11 @@ pub enum Quantity {
     Rumble,
     Clipped,
     Tilt,
+    Attack,
+    Decay,
+    Sustain,
+    Centroid,
+    Noise,
     Region {
         region: usize,
     },
@@ -359,6 +395,40 @@ impl Checklist {
                     Quantity::LowWidth,
                     Target::AtMost { value: round1(spread.high.max(-20.)) },
                     2.,
+                ));
+            }
+            // A sound against a sound: its envelope and tone.
+            if goal.sound {
+                let sound = [
+                    ("attack", "Attack, as the reference", "ms", Quantity::Attack, reference.attack, 0.2, 2.),
+                    ("decay", "Decay, as the reference", "ms", Quantity::Decay, reference.decay, 0.15, 10.),
+                    ("sustain", "Where it settles, as the reference", "dB", Quantity::Sustain, reference.sustain, 0., 2.),
+                    ("brightness", "Brightness (centroid), as the reference", "Hz", Quantity::Centroid, reference.centroid, 0.12, 50.),
+                    ("noisiness", "Noisiness, as the reference", "dB", Quantity::Noise, reference.noise, 0., 2.),
+                ];
+                for (id, label, unit, quantity, spread, share, least) in sound {
+                    let Some(spread) = spread else { continue };
+                    items.push(item(
+                        id,
+                        label,
+                        Role::Reference,
+                        unit,
+                        quantity,
+                        Target::Between { low: round1(spread.low), high: round1(spread.high) },
+                        (spread.mid.abs() * share).max(least),
+                    ));
+                }
+            }
+            // Its form's contrast: how far the quiet and the loud sections lie apart.
+            if let Some(spread) = reference.range.filter(|_| heard.measures.range.is_some()) {
+                items.push(item(
+                    "range",
+                    "Contrast between sections (loudness range), as the reference",
+                    Role::Reference,
+                    "LU",
+                    Quantity::Range,
+                    Target::Between { low: round1(spread.low), high: round1(spread.high) },
+                    1.,
                 ));
             }
         }
@@ -618,6 +688,11 @@ fn describe(quantity: &Quantity) -> (String, String, &'static str, f64) {
         Quantity::Rumble => ("rumble".into(), "Rumble under 30 Hz".into(), "dB", 2.),
         Quantity::Clipped => ("clipping".into(), "Clipped samples".into(), "", 1.),
         Quantity::Tilt => ("tilt".into(), "Brightness (tilt)".into(), "dB/oct", 0.3),
+        Quantity::Attack => ("attack".into(), "Attack".into(), "ms", 2.),
+        Quantity::Decay => ("decay".into(), "Decay".into(), "ms", 10.),
+        Quantity::Sustain => ("sustain".into(), "Where it settles".into(), "dB", 2.),
+        Quantity::Centroid => ("brightness".into(), "Brightness (centroid)".into(), "Hz", 50.),
+        Quantity::Noise => ("noisiness".into(), "Noisiness".into(), "dB", 2.),
         Quantity::Region { region } => (format!("balance {}", REGIONS[*region].0), capital(REGIONS[*region].0), "dB", 1.),
         Quantity::Problem { problem, low, high, .. } => {
             (format!("{problem:?} {}", hertz((low * high).sqrt())).to_lowercase(), format!("{problem:?}"), "dB", 1.)
@@ -641,6 +716,11 @@ pub fn read(quantity: &Quantity, heard: &Heard, focus: Option<&Heard>) -> Option
         Quantity::Rumble => m.rumble,
         Quantity::Clipped => Some(m.clipped as f64),
         Quantity::Tilt => Some(m.tilt),
+        Quantity::Attack => m.attack,
+        Quantity::Decay => m.decay,
+        Quantity::Sustain => m.sustain,
+        Quantity::Centroid => m.centroid,
+        Quantity::Noise => m.noise,
         Quantity::Region { region } => Some(round1(region_level(&m.balance, *region))),
         Quantity::Problem { problem, low, high, steady, focus: name } => match problem {
             ProblemKind::Harshness | ProblemKind::Resonance => Some(region_excess(heard, *low, *high, *steady)),

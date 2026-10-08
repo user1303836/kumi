@@ -73,6 +73,20 @@ pub struct Measures {
     pub dc: [f64; 2],
     /// Short-term loudness every second, LUFS.
     pub short_term: Vec<Option<f64>>,
+    /// A sound's envelope over its hits (medians): attack from a tenth to nine tenths of the peak, ms; decay from the
+    /// peak to 20 dB under it, ms; and where it settles a quarter second after the peak, dB under it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attack: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decay: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sustain: Option<f64>,
+    /// Brightness: the spectral centroid of the loud frames, Hz (median).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centroid: Option<f64>,
+    /// Noisiness: the spectral flatness of the loud frames, dB (0 is noise, far under it a pure tone).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noise: Option<f64>,
 }
 
 /// What the detectors read, in time: per frame (every `hop` seconds) each third-octave's mid and side power, the
@@ -338,6 +352,11 @@ struct Meter {
     low_sums: [f64; 4],
     frames: Frames,
     low_frames: Vec<([f32; LOW_BANDS], [f32; LOW_BANDS])>,
+    // The envelope every millisecond (RMS of the mid), for attacks and decays.
+    milli: usize,
+    in_milli: usize,
+    milli_sum: f64,
+    envelope: Vec<f32>,
 }
 
 impl Meter {
@@ -420,6 +439,10 @@ impl Meter {
             low_sums: [0.; 4],
             frames: Frames { hop: (size / 4) as f64 / rate, bass_hop: (LOW_SIZE / 4 * decimate) as f64 / rate, ..Default::default() },
             low_frames: vec![],
+            milli: ((rate / 1000.).round() as usize).max(1),
+            in_milli: 0,
+            milli_sum: 0.,
+            envelope: vec![],
         }
     }
 
@@ -461,6 +484,13 @@ impl Meter {
                 self.in_block = 0;
             }
             let (mid, side) = ((l + r) / 2., (l - r) / 2.);
+            self.milli_sum += mid * mid;
+            self.in_milli += 1;
+            if self.in_milli == self.milli {
+                self.envelope.push((self.milli_sum / self.milli as f64).sqrt() as f32);
+                self.milli_sum = 0.;
+                self.in_milli = 0;
+            }
             let first = self.band[0].process(mid);
             let banded = self.band[1].process(first);
             self.tick_peak = self.tick_peak.max(mid.abs());
@@ -709,6 +739,37 @@ impl Meter {
                 round1(mean(&|level| level >= loud) - mean(&|level| level >= low && level <= high))
             })
         };
+        let (attack, decay, sustain) = envelope_of(&self.envelope);
+        // Brightness and noisiness over the loud frames.
+        let (centroid, noise) = {
+            let mut levels: Vec<f64> = self.frames.level.iter().map(|level| *level as f64).collect();
+            levels.sort_by(f64::total_cmp);
+            let loud = if levels.is_empty() { 0. } else { percentile(&levels, 0.95) - 20. };
+            let mut centroids = vec![];
+            let mut flatness = vec![];
+            for (frame, level) in self.frames.level.iter().enumerate() {
+                if (*level as f64) < loud {
+                    continue;
+                }
+                let powers: Vec<f64> = (0..31).map(|band| (self.frames.mid[frame][band] + self.frames.side[frame][band]) as f64).collect();
+                let total: f64 = powers.iter().sum();
+                if total > 1e-14 {
+                    centroids.push(powers.iter().zip(THIRDS.iter()).map(|(power, hz)| power * hz).sum::<f64>() / total);
+                }
+                let fine: Vec<f64> = self.frames.fine[frame].iter().map(|db| 10f64.powf(*db as f64 / 10.)).collect();
+                let arithmetic = fine.iter().sum::<f64>() / fine.len() as f64;
+                let geometric = (fine.iter().map(|power| (power + 1e-30).ln()).sum::<f64>() / fine.len() as f64).exp();
+                if arithmetic > 1e-20 {
+                    flatness.push(10. * (geometric / arithmetic).log10());
+                }
+            }
+            centroids.sort_by(f64::total_cmp);
+            flatness.sort_by(f64::total_cmp);
+            (
+                (!centroids.is_empty()).then(|| percentile(&centroids, 0.5).round()),
+                (!flatness.is_empty()).then(|| round1(percentile(&flatness, 0.5))),
+            )
+        };
         let [below, low_all, low_mid, low_side] = self.low_sums;
         let measures = Measures {
             seconds,
@@ -739,9 +800,57 @@ impl Meter {
             rumble: (low_all > 1e-14).then(|| round1(10. * ((below + 1e-20) / low_all).log10())),
             dc: [self.dc[0] / self.count.max(1) as f64, self.dc[1] / self.count.max(1) as f64],
             short_term,
+            attack,
+            decay,
+            sustain,
+            centroid,
+            noise,
         };
         Heard { measures, frames: self.frames }
     }
+}
+
+/// A sound's envelope from its hits, at a millisecond a step: each hit is a rise of 12 dB or more within 20 ms, and
+/// its attack, decay (to 20 dB under the peak, before the next hit) and the level a quarter second on are the medians
+/// over the hits.
+fn envelope_of(envelope: &[f32]) -> (Option<f64>, Option<f64>, Option<f64>) {
+    let db: Vec<f64> = envelope.iter().map(|value| 20. * (*value as f64 + 1e-9).log10()).collect();
+    let loudest = db.iter().copied().fold(f64::MIN, f64::max);
+    let mut hits: Vec<usize> = vec![];
+    let mut at = 20;
+    while at < db.len() {
+        let before = db[at - 20..at].iter().copied().fold(f64::MAX, f64::min);
+        if db[at] - before >= 12. && db[at] > loudest - 40. && hits.last().is_none_or(|last| at - last > 60) {
+            hits.push(at - 20 + db[at - 20..=at].iter().position(|level| *level >= before + 1.).unwrap_or(0));
+            at += 60;
+        } else {
+            at += 1;
+        }
+    }
+    let (mut attacks, mut decays, mut sustains) = (vec![], vec![], vec![]);
+    for (index, start) in hits.iter().enumerate() {
+        let end = hits.get(index + 1).copied().unwrap_or(db.len()).min(start + 4000);
+        let Some((peak_at, peak)) = db[*start..end].iter().copied().enumerate().take(300).max_by(|a, b| a.1.total_cmp(&b.1)) else {
+            continue;
+        };
+        let peak_at = start + peak_at;
+        let amplitude = |level: f64| 10f64.powf(level / 20.);
+        let (low, high) = (amplitude(peak) * 0.1, amplitude(peak) * 0.9);
+        let from = (*start..=peak_at).find(|at| amplitude(db[*at]) >= low).unwrap_or(*start);
+        let to = (from..=peak_at).find(|at| amplitude(db[*at]) >= high).unwrap_or(peak_at);
+        attacks.push((to - from) as f64);
+        if let Some(fallen) = (peak_at..end).find(|at| db[*at] <= peak - 20.) {
+            decays.push((fallen - peak_at) as f64);
+        }
+        if peak_at + 250 < end {
+            sustains.push(db[peak_at + 250] - peak);
+        }
+    }
+    let median = |mut values: Vec<f64>| {
+        values.sort_by(f64::total_cmp);
+        (!values.is_empty()).then(|| round1(percentile(&values, 0.5)))
+    };
+    (median(attacks), median(decays), median(sustains))
 }
 
 fn moving(values: &[f64], size: usize) -> Vec<f64> {

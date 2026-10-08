@@ -121,6 +121,7 @@ pub fn judge_request(input: &JsonObject) -> Result<JudgeRequest, String> {
                 problems: goal.get("problems").and_then(Value::as_bool).unwrap_or(true),
                 focus: text(goal, "focus"),
                 targets,
+                sound: goal.get("sound").and_then(Value::as_bool).unwrap_or(false),
             })
         }
         Some(_) => return Err("goal is an object: what to reach.".into()),

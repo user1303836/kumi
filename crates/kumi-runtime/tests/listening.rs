@@ -443,3 +443,50 @@ fn homing_stops_short_of_a_setting_that_makes_something_else_worse() {
     assert!(matches!(stop, Some(Homed::Spent | Homed::Stuck)), "{stop:?}");
     assert!(homing.hurt.iter().all(|at| *at > 4.));
 }
+
+#[test]
+fn a_sounds_envelope_brightness_and_noisiness_are_measured_and_judged_against_a_reference_sound() {
+    use kumi_runtime::listening::checklist::Goal;
+    // Plucks: a fast attack and a decay of about 150 ms to 20 dB under, every half second; one bright, one dark.
+    let pluck = |hz: f64, attack_ms: f64, decay_db_per_s: f64| -> Vec<f64> {
+        (0..(4. * RATE) as usize)
+            .map(|n| {
+                let t = (n as f64 / RATE) % 0.5;
+                let envelope =
+                    if t * 1000. < attack_ms { t * 1000. / attack_ms } else { 10f64.powf(-decay_db_per_s * (t - attack_ms / 1000.) / 20.) };
+                let phase = 2. * PI * hz * n as f64 / RATE;
+                envelope * 0.4 * (phase.sin() + 0.5 * (2. * phase).sin() + 0.33 * (3. * phase).sin())
+            })
+            .collect()
+    };
+    let bright = pluck(880., 2., 130.);
+    let measured = heard(&bright, &bright).measures;
+    let (attack, decay) = (measured.attack.unwrap(), measured.decay.unwrap());
+    assert!(attack < 6., "attack {attack}");
+    assert!((100. ..220.).contains(&decay), "decay {decay}");
+    let dark = pluck(220., 25., 40.);
+    let dark_measures = heard(&dark, &dark).measures;
+    assert!(dark_measures.centroid.unwrap() < measured.centroid.unwrap() * 0.6, "{:?} {:?}", dark_measures.centroid, measured.centroid);
+    assert!(dark_measures.attack.unwrap() > attack + 10., "{:?}", dark_measures.attack);
+    // Judged against the bright pluck: the dark one is off on attack, decay and brightness; the bright one isn't.
+    let reference = Profile::of("pluck", &heard(&bright, &bright));
+    let goal = Goal { reference: Some(reference), sound: true, problems: false, ..Default::default() };
+    let checklist = Checklist::new(&goal, &heard(&dark, &dark), &[]);
+    let off: Vec<&str> = checklist
+        .items
+        .iter()
+        .zip(checklist.read(&heard(&dark, &dark), None))
+        .filter(|(item, value)| item.gap(*value) > 0.)
+        .map(|(item, _)| item.id.as_str())
+        .collect();
+    for id in ["attack", "decay", "brightness"] {
+        assert!(off.contains(&id), "{id} not off: {off:?}");
+    }
+    let same = checklist.read(&heard(&bright, &bright), None);
+    assert!(checklist
+        .items
+        .iter()
+        .zip(&same)
+        .filter(|(item, _)| ["attack", "decay", "brightness"].contains(&item.id.as_str()))
+        .all(|(item, value)| item.gap(*value) == 0.));
+}

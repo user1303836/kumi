@@ -368,6 +368,14 @@ measured once and kept in `~/.kumi/references`. For one element of a reference
 (its bass, its drums), Kumi can put the track in your Set, separate its stems
 with Live's own splitter, and measure a stem.
 
+**A part's feel** is judged on its notes, with no listening: where each drum
+(or the part) plays in the bar, how early or late each step sits (its push and
+swing), its accents, syncopation and fills, against a reference's MIDI. For a
+record's drums, Kumi separates its stems, converts the drum stem to MIDI with
+Live's Drums to MIDI, and moves each hit onto the stem's real onset first. Kumi
+can move your notes toward the reference itself, step by step, and keeps a
+change only if it got closer without anything else moving away.
+
 `/loop` and what to reach works in rounds until it's met: one change, judged,
 then the next target. Kumi decides when it stops, not the model: every item
 within tolerance, changes no longer helping, or 16 rounds or 45 minutes. It ends

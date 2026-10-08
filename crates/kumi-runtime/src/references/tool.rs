@@ -211,6 +211,9 @@ fn reply(kept: &KeptReference, cached: bool) -> Value {
         measures.insert("stereo below 120 Hz".into(), json!(spread(value, "dB")));
     }
     measures.insert("brightness (tilt)".into(), json!(spread(&p.tilt, "dB/oct")));
+    if let Some(value) = &p.range {
+        measures.insert("contrast between sections (loudness range)".into(), json!(spread(value, "LU")));
+    }
     let balance: serde_json::Map<String, Value> =
         p.regions.iter().enumerate().map(|(region, value)| (REGIONS[region].0.to_string(), json!(spread(value, "dB")))).collect();
     measures.insert("balance (each region against the whole)".into(), Value::Object(balance));

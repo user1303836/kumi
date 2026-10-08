@@ -39,6 +39,8 @@ pub struct GoalRequest {
     pub problems: bool,
     pub focus: Option<String>,
     pub targets: Vec<Explicit>,
+    /// A single sound against a reference sound (its envelope and tone on the checklist too).
+    pub sound: bool,
 }
 
 /// One part of the run's stretch heard as things stand: its checklist values and its sound.
@@ -200,6 +202,7 @@ impl Rendering {
             problems: goal.problems,
             focus: goal.focus.clone(),
             targets: goal.targets.clone(),
+            sound: goal.sound,
         };
         let checklist = Checklist::new(&goal, &heard.main, &problems);
         let whole = checklist.read(&heard.main, heard.focus.as_ref());

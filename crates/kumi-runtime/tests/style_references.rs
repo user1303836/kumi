@@ -214,6 +214,12 @@ fn several_tracks_make_one_profile_with_the_range_they_keep_to() {
         crest: Some(Spread::point(9., 1.5)),
         low_width: None,
         tilt: Spread::point(tilt, 0.5),
+        range: None,
+        attack: None,
+        decay: None,
+        sustain: None,
+        centroid: None,
+        noise: None,
     };
     let tracks: Vec<Profile> = [-7., -8., -9., -10., -11., -6.5].iter().map(|loudness| one(*loudness, -3.)).collect();
     let combined = Profile::combine("dub techno", &tracks).unwrap();
