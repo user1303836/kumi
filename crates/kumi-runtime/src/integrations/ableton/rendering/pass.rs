@@ -5,9 +5,25 @@ use kumi_common::js::number::to_string;
 
 /// How long the record pass's takes run before the part, seconds: a lead for its first hit to rise out of.
 pub(super) const RECORD_LEAD: f64 = 0.1;
+/// A second of a take as a pass may hold it: stereo floats at 96 kHz.
+const TAKE_BYTES_PER_SECOND: f64 = 96_000. * 2. * 4.;
+
+/// Whether a clip's file is Live's own recording of one of Kumi's render tracks: in a Recorded folder, named after
+/// the track. Anything else a clip holds may be the producer's.
+pub(super) fn kumi_recording(file: &std::path::Path, tracks: &[String]) -> bool {
+    file.parent().and_then(|folder| folder.file_name()).is_some_and(|folder| folder == "Recorded")
+        && file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| tracks.iter().any(|track| name.starts_with(&format!("{track} "))))
+}
 
 impl Rendering {
     pub(super) async fn render_pass(self: &Rc<Self>, rig: &mut Rig, signal: Signal) -> Result<IndexMap<String, Render>, RuntimeError> {
+        // A pass writes each take before it's read: with too little room for them, it's refused before Live plays.
+        if let Some(why) = self.no_room_for(rig).await {
+            return Err(observation(why));
+        }
         if rig.ears.is_some() {
             return self.ears_pass(rig, signal).await;
         }
@@ -26,6 +42,8 @@ impl Rendering {
         let mut started = false;
         let mut rearm = rig.hold.as_mut().map(|hold| std::mem::take(&mut hold.rearm)).unwrap_or_default();
         let mut files = IndexMap::new();
+        // Every recording the pass makes, in the project: a late take's first try too.
+        let recorded = RefCell::new(Vec::<String>::new());
         let result: Result<(), RuntimeError> = self
             .history
             .quietly(None, async {
@@ -155,6 +173,7 @@ impl Rendering {
                         let signal = signal.clone();
                         let late = &late;
                         let collected = &collected;
+                        let recorded = &recorded;
                         async move {
                             let clips = self
                                 .rows("arrangement-clip", json!({"parent":reference,"fields":["start","length","isAudio"]}), signal.clone())
@@ -184,6 +203,7 @@ impl Rendering {
                                 late.set(true);
                             }
                             if let Some(file) = (self.clip_file)(clip["ref"].as_str().unwrap().into(), signal).await.ok().flatten() {
+                                recorded.borrow_mut().push(file.clone());
                                 collected.borrow_mut().insert(
                                     source.name.clone(),
                                     Render {
@@ -245,7 +265,38 @@ impl Rendering {
         if std::env::var("KUMI_TIMING").is_ok_and(|s| !s.is_empty()) {
             eprintln!("[render pass · {} sources{}] {} ms", rig.sources.len(), if held { " · held" } else { "" }, laps.join(" · "));
         }
+        // Live's recordings of the render tracks land in the project (Samples/Recorded, each named after its track):
+        // Kumi reads copies in its own folder, and the recordings go with the render tracks (close_rig). Any other file
+        // a clip holds, or one that can't be copied, is read where it is and stays.
+        let tracks: Vec<String> = rig.sources.iter().map(|source| source.scratch.clone()).collect();
+        let mut recorded: Vec<PathBuf> =
+            recorded.into_inner().into_iter().map(PathBuf::from).filter(|file| kumi_recording(file, &tracks)).collect();
+        if result.is_ok() {
+            let _ = tokio::fs::create_dir_all(&self.ears_folder).await;
+            for render in files.values_mut() {
+                let original = PathBuf::from(&render.file);
+                if !recorded.contains(&original) {
+                    continue;
+                }
+                let extension = original.extension().and_then(|extension| extension.to_str()).unwrap_or("wav");
+                let copy = self.ears_folder.join(format!("{}.{extension}", uuid::Uuid::new_v4()));
+                match tokio::fs::copy(&original, &copy).await {
+                    Ok(_) => render.file = copy.to_string_lossy().into_owned(),
+                    Err(_) => recorded.retain(|file| *file != original),
+                }
+            }
+        }
+        rig.recorded.extend(recorded);
         result?;
         Ok(files)
+    }
+
+    /// Why a pass can't go ahead for lack of disk, when it can't: room for each take as it's captured and as it's
+    /// written out, and some to spare.
+    async fn no_room_for(&self, rig: &Rig) -> Option<String> {
+        let tempo = self.observer.tempo.get().filter(|tempo| *tempo > 0.)?;
+        let seconds = rig.window().beats * 60. / tempo + 10.;
+        let needed = seconds * TAKE_BYTES_PER_SECOND * 2. * rig.sources.len().max(1) as f64 + 200e6;
+        crate::core::disk::low_disk(&std::env::temp_dir().to_string_lossy(), needed, "for Kumi to hear this").await
     }
 }

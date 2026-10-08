@@ -44,6 +44,8 @@ pub(super) struct Rig {
     pub transport: Transport,
     pub notes: Vec<String>,
     pub ears: Option<RigEars>,
+    /// Live's own recordings of the record pass, in the project: Kumi reads copies, and these go with the render tracks.
+    pub recorded: Vec<PathBuf>,
 }
 impl Rig {
     pub fn window(&self) -> Window {
@@ -78,6 +80,7 @@ impl Rendering {
             hold: None,
             window: None,
             ears: None,
+            recorded: vec![],
         };
         let link = self.ears_ready(signal.clone()).await?;
         let tracks = self.rows("track", json!({"fields":["name"]}), signal.clone()).await?;
@@ -328,6 +331,7 @@ impl Rendering {
                 }
             }
         }
+        let mut scratch_left = false;
         self.history
             .quietly(None, async {
                 for id in rig.steps.iter().rev() {
@@ -342,6 +346,7 @@ impl Rendering {
                     let undone = self.history.undo(id, cleanup.clone(), record.family == ChangeFamily::Structure).await.ok();
                     if undone.as_ref().is_none_or(|undone| undone.is_error) {
                         if record.family == ChangeFamily::Structure {
+                            scratch_left = true;
                             let tracks = self.rows("track", json!({"fields":["name"]}), cleanup.clone()).await.unwrap_or_default();
                             for name in &scratch {
                                 if let Some(reference) = tracks
@@ -381,5 +386,12 @@ impl Rendering {
                 }
             })
             .await;
+        // The record pass's recordings stay in the project after its render tracks go: Kumi read copies, so they go
+        // too. A render track Live kept still plays its clips, so then they stay.
+        if !scratch_left {
+            for file in rig.recorded.drain(..) {
+                let _ = tokio::fs::remove_file(file).await;
+            }
+        }
     }
 }

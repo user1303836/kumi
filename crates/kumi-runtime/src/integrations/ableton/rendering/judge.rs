@@ -112,8 +112,25 @@ impl JudgeRun {
     }
 }
 
+/// Every file in `folder` but those `stored`.
+pub(super) async fn prune_unstored(folder: &std::path::Path, stored: &[PathBuf]) {
+    let Ok(mut listed) = tokio::fs::read_dir(folder).await else { return };
+    while let Ok(Some(entry)) = listed.next_entry().await {
+        if !stored.contains(&entry.path()) {
+            let _ = tokio::fs::remove_file(entry.path()).await;
+        }
+    }
+}
+
 impl Rendering {
     pub async fn judge(self: &Rc<Self>, request: &JudgeRequest, original: Signal) -> Result<Result<Round, String>, RuntimeError> {
+        let judged = self.judge_now(request, original).await;
+        // The takes the run no longer stores go, however the call ended.
+        self.prune_kept().await;
+        judged
+    }
+
+    async fn judge_now(self: &Rc<Self>, request: &JudgeRequest, original: Signal) -> Result<Result<Round, String>, RuntimeError> {
         if !self.available() {
             return Ok(Err(NO_CURRENT_LIVE.into()));
         }
@@ -190,6 +207,9 @@ impl Rendering {
                 Window { from, beats: beats.unwrap_or(end - from).max(self.observer.beats_per_bar.get()) }
             }
         };
+        if let Some(why) = super::listen::too_long(span.beats, tempo, "judge part of it: give from_beat and beats") {
+            return Ok(Err(why));
+        }
         // Tracks by name, so the log says "Vocal Main", not a ref.
         let mut goal = goal.clone();
         if let Some(named) = goal.focus.clone() {
@@ -1005,6 +1025,19 @@ impl Rendering {
     }
 
     /// Copies a capture into the judge's own folder, out of the listening folder's pruning.
+    /// What judge/ holds that the run doesn't store goes: its span's takes and its excerpts stay, and a new run's
+    /// takes replace an old run's.
+    pub(super) async fn prune_kept(&self) {
+        let stored: Vec<PathBuf> = match self.judge.borrow().as_ref() {
+            Some(run) => std::iter::once(run.span_file.0.clone())
+                .chain(run.span_focus.iter().map(|(file, _)| file.clone()))
+                .chain(run.excerpts.iter().map(|excerpt| excerpt.file.clone()))
+                .collect(),
+            None => vec![],
+        };
+        prune_unstored(&self.ears_folder.join("judge"), &stored).await;
+    }
+
     pub(super) async fn keep_file(&self, file: &std::path::Path) -> PathBuf {
         let folder = self.ears_folder.join("judge");
         let _ = tokio::fs::create_dir_all(&folder).await;

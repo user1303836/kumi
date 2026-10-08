@@ -51,6 +51,9 @@ impl Rendering {
             })
             .collect();
         let mut beats = request.beats.unwrap_or(8.);
+        if let Some(why) = too_long(beats, tempo, "audition a part") {
+            return Ok(Err(why));
+        }
         let rendering = self.rendering_now();
         let mut rig = None;
         let rendered: Result<(), RuntimeError> = async {
@@ -257,11 +260,8 @@ impl Rendering {
         let beats = whole.unwrap_or_else(|| {
             request.beats.unwrap_or_else(|| looped.and_then(|v| v["length"].as_f64()).unwrap_or(4. * self.observer.beats_per_bar.get()))
         });
-        if beats * 60. / tempo > LONGEST_LISTEN {
-            return Ok(Err(format!(
-                "That's {} of music; Kumi listens to at most an hour at once, so listen in parts.",
-                clock(beats * 60. / tempo)
-            )));
+        if let Some(why) = too_long(beats, tempo, "listen in parts") {
+            return Ok(Err(why));
         }
         let candidates = if request.mix == Some(true) {
             vec![AuditionCandidate { track: MIX_CANDIDATE.into(), mix: Some(true), label: Some("The whole mix".into()), clip: None }]
@@ -456,8 +456,14 @@ fn round_number(value: f64) -> f64 {
 }
 /// The end of the last clip in the Arrangement, in beats.
 const SONG_END_SCRIPT: &str = "end = 0.0\nfor track in list(song.tracks):\n    for clip in list(getattr(track, 'arrangement_clips', None) or []):\n        end = max(end, float(clip.end_time))\nresult = {'end': end}\n";
-/// The longest stretch one listen hears, in seconds.
+/// The longest stretch one listen hears, in seconds (a judged run's span, a form's, a sound's and an audition's too).
 const LONGEST_LISTEN: f64 = 3600.;
+/// Why a stretch of `beats` is too long to hear at once, when it is, and what to do instead.
+pub(super) fn too_long(beats: f64, tempo: f64, instead: &str) -> Option<String> {
+    let seconds = beats * 60. / tempo;
+    (seconds > LONGEST_LISTEN || !seconds.is_finite())
+        .then(|| format!("That's {} of music; Kumi listens to at most an hour at once, so {instead}.", clock(seconds)))
+}
 fn clock(seconds: f64) -> String {
     let whole = round(seconds) as i64;
     format!("{}:{:02}", whole / 60, whole % 60)

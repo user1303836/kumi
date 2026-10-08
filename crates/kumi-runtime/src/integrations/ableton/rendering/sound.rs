@@ -44,6 +44,9 @@ impl Rendering {
         let meter = self.observer.beats_per_bar.get().max(1.);
         // Eight bars from where it starts, unless asked.
         let window = Window { from: request.from_beat.unwrap_or(0.).max(0.), beats: request.beats.unwrap_or(8. * meter).max(meter) };
+        if let Some(why) = super::listen::too_long(window.beats, self.observer.tempo.get().unwrap_or(120.), "hear a shorter part") {
+            return Ok(Err(why));
+        }
         // The tracks by name, and the one the others duck under (heard in the same pass).
         let mut names: Vec<String> = vec![];
         for named in &request.tracks {

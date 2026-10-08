@@ -79,6 +79,13 @@ pub(super) const COPIES_BUDGET: f64 = 12.;
 
 impl Rendering {
     pub async fn tune(self: &Rc<Self>, request: &TuneRequest, original: Signal) -> Result<Result<Round, String>, RuntimeError> {
+        let tuned = self.tune_now(request, original).await;
+        // The takes the run no longer stores go, however the call ended.
+        self.prune_kept().await;
+        tuned
+    }
+
+    async fn tune_now(self: &Rc<Self>, request: &TuneRequest, original: Signal) -> Result<Result<Round, String>, RuntimeError> {
         if !self.available() {
             return Ok(Err(NO_CURRENT_LIVE.into()));
         }

@@ -43,6 +43,9 @@ impl Rendering {
             },
         };
         let span = Window { from, beats: (beats / meter).ceil().max(1.) * meter };
+        if let Some(why) = super::listen::too_long(span.beats, tempo, "read its form in parts: give from_beat and beats") {
+            return Ok(Err(why));
+        }
         let bar = meter * 60. / tempo;
         // The reference first: one that can't be heard says so before the song is.
         let reference = match &request.reference {

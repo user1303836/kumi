@@ -10,6 +10,10 @@ use std::path::Path;
 /// How long a listening device that couldn't be set up is left alone: one wait (up to about 9 s) each
 /// time at most, not one an audition (a match run auditions a dozen times).
 pub(super) const EARS_RETRY_MS: i64 = 10 * 60_000;
+/// How many bytes of takes Kumi's folder keeps (the newest).
+const TAKES_KEPT: u64 = 1_000_000_000;
+/// A take this young may still be being read: pruning leaves it.
+const FRESH: std::time::Duration = std::time::Duration::from_secs(120);
 /// A capture's raw file, removed however its read ends: a sibling tap failing, or a stop, drops the read partway.
 pub(super) struct RawFile(pub(super) PathBuf);
 impl Drop for RawFile {
@@ -223,50 +227,45 @@ impl Rendering {
             ears.taps.clear();
         }
     }
+    /// Kumi's own takes in its folder (see `prune_takes`).
     pub(super) async fn prune_ears(&self) {
-        let result: Result<(), std::io::Error> = async {
-            let mut directory = tokio::fs::read_dir(&self.ears_folder).await?;
-            let mut names = vec![];
-            while let Some(entry) = directory.next_entry().await? {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if name.ends_with(".wav") {
-                    names.push(entry.path());
-                } else if name.ends_with(".raw")
-                    && entry
-                        .metadata()
-                        .await
-                        .ok()
-                        .and_then(|meta| meta.modified().ok())
-                        .and_then(|at| at.elapsed().ok())
-                        .is_some_and(|age| age > std::time::Duration::from_secs(600))
-                {
-                    // A raw capture outlives its read only when Kumi stopped mid-read; none is still being written
-                    // ten minutes on.
-                    let _ = tokio::fs::remove_file(entry.path()).await;
-                }
-            }
-            if names.len() <= 96 {
-                return Ok(());
-            }
-            let mut dated = vec![];
-            for path in names {
-                let modified = std::fs::metadata(&path)?.modified()?;
-                dated.push((path, modified));
-            }
-            dated.sort_by_key(|(_, time)| *time);
-            let remove = dated.len() - 64;
-            for (path, _) in dated.into_iter().take(remove) {
-                match tokio::fs::remove_file(path).await {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error),
-                }
-            }
-            Ok(())
-        }
-        .await;
-        let _ = result;
+        let _ = prune_takes(&self.ears_folder, TAKES_KEPT, FRESH).await;
     }
+}
+
+/// Kumi's own takes in `folder`: the newest stay, up to `budget` bytes of them (and 64 once there are more than 96).
+/// A take younger than `fresh` may still be being read, so it always stays. Raw captures a stopped read left go
+/// after ten minutes.
+pub(super) async fn prune_takes(folder: &Path, budget: u64, fresh: std::time::Duration) -> std::io::Result<()> {
+    let mut directory = tokio::fs::read_dir(folder).await?;
+    let mut takes = vec![];
+    while let Some(entry) = directory.next_entry().await? {
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        let Ok(meta) = entry.metadata().await else { continue };
+        let age = meta.modified().ok().and_then(|at| at.elapsed().ok()).unwrap_or_default();
+        if [".wav", ".aif", ".aiff"].iter().any(|ending| name.ends_with(ending)) {
+            takes.push((entry.path(), meta.len(), age));
+        } else if name.ends_with(".raw") && age > std::time::Duration::from_secs(600) {
+            // A raw capture outlives its read only when Kumi stopped mid-read; none is still being written ten
+            // minutes on.
+            let _ = tokio::fs::remove_file(entry.path()).await;
+        }
+    }
+    takes.sort_by_key(|(_, _, age)| *age);
+    let crowded = takes.len() > 96;
+    let mut kept = 0u64;
+    for (index, (path, bytes, age)) in takes.into_iter().enumerate() {
+        kept += bytes;
+        if age < fresh || !(kept > budget || (crowded && index >= 64)) {
+            continue;
+        }
+        match tokio::fs::remove_file(path).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -297,6 +296,53 @@ mod tests {
         assert!(running.join("take.wav").is_file());
         assert!(!crashed.exists());
         assert!(older.join("take.wav").is_file(), "a keeperless folder goes only once it's a day old");
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn takes_are_kept_to_a_budget_newest_first_and_a_fresh_one_always() {
+        let folder = tempfile::tempdir().unwrap();
+        let take = |name: &str, bytes: usize, minutes: u64| {
+            let path = folder.path().join(name);
+            std::fs::write(&path, vec![0u8; bytes]).unwrap();
+            let at = std::time::SystemTime::now() - std::time::Duration::from_secs(minutes * 60);
+            std::fs::File::options().write(true).open(&path).unwrap().set_modified(at).unwrap();
+            path
+        };
+        // Newest first: a fresh 300-byte take still being read, then 50, 50 and 80 bytes of older ones.
+        let reading = take("reading.wav", 300, 0);
+        let newer = take("newer.wav", 50, 5);
+        let older = take("older.aif", 50, 10);
+        let oldest = take("oldest.wav", 80, 20);
+        let other = take("notes.txt", 500, 30);
+        prune_takes(folder.path(), 420, std::time::Duration::from_secs(60)).await.unwrap();
+        // 300 + 50 + 50 fit in 420; the oldest would pass it. A fresh take stays even past the budget.
+        assert!(reading.exists() && newer.exists() && older.exists() && !oldest.exists() && other.exists());
+        prune_takes(folder.path(), 100, std::time::Duration::from_secs(60)).await.unwrap();
+        assert!(reading.exists() && !newer.exists() && !older.exists(), "past the budget, only what's fresh stays");
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_judged_runs_folder_keeps_only_what_the_run_stores() {
+        let folder = tempfile::tempdir().unwrap();
+        let [span, excerpt, dropped] = ["span.wav", "excerpt.wav", "dropped.wav"].map(|name| {
+            let path = folder.path().join(name);
+            std::fs::write(&path, b"take").unwrap();
+            path
+        });
+        super::super::judge::prune_unstored(folder.path(), &[span.clone(), excerpt.clone()]).await;
+        assert!(span.exists() && excerpt.exists() && !dropped.exists());
+        // A new run, or none, stores none of the old run's takes.
+        super::super::judge::prune_unstored(folder.path(), &[]).await;
+        assert!(!span.exists() && !excerpt.exists());
+    }
+    #[test]
+    fn only_kumis_own_recordings_go_from_the_project() {
+        let tracks = vec!["Kumi · render 1 ab12".to_string()];
+        let recorded = |path: &str| super::super::pass::kumi_recording(std::path::Path::new(path), &tracks);
+        assert!(recorded("/Set Project/Samples/Recorded/Kumi · render 1 ab12 0001 [2026-10-08 101500].wav"));
+        // Another render's, the producer's own recordings, or what a clip holds from elsewhere: kept.
+        assert!(!recorded("/Set Project/Samples/Recorded/Kumi · render 10 ab12 0001.wav"));
+        assert!(!recorded("/Set Project/Samples/Recorded/Vocal 0001 [2026-10-08 101500].wav"));
+        assert!(!recorded("/Set Project/Samples/Imported/Kumi · render 1 ab12 0001.wav"));
+        assert!(!recorded("/Users/me/Music/square.wav"));
     }
     #[test]
     fn a_raw_capture_goes_when_its_read_ends() {
