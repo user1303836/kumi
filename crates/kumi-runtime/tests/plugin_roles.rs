@@ -25,11 +25,20 @@ fn ozone(turnable: &[&str]) -> Seen {
         turnable: strings(turnable),
         listed: Some(ozone_names()),
         off: false,
+        switched_on: vec![],
     }
 }
 
 fn stock(reference: &str, name: &str, class: &str, turnable: &[&str]) -> Seen {
-    Seen { reference: reference.into(), name: name.into(), class: class.into(), turnable: strings(turnable), listed: None, off: false }
+    Seen {
+        reference: reference.into(),
+        name: name.into(),
+        class: class.into(),
+        turnable: strings(turnable),
+        listed: None,
+        off: false,
+        switched_on: vec![],
+    }
 }
 
 /// Live 12.4's Limiter, by the names Live gave its parameters.
@@ -143,6 +152,7 @@ fn another_device_on_the_track_does_the_job_in_the_agreed_order() {
         turnable: strings(turnable),
         listed: Some(strings(&["Gain", "Output Level", "Style", "Lookahead"])),
         off: false,
+        switched_on: vec![],
     };
     let eq = stock("d4", "EQ Eight", "Eq8", &["Device On", "1 Gain A", "1 Frequency A"]);
     let track = |ozone_knobs: &[&str], pro_l_knobs: &[&str]| vec![limiter("d0"), pro_l(pro_l_knobs), ozone(ozone_knobs), eq.clone()];
@@ -222,6 +232,16 @@ fn a_job_on_lives_own_devices_by_their_live_12_names() {
         other => panic!("{other:?}"),
     }
     assert_eq!(knob(find(&limiter("d0"), "ceiling")), "Ceiling");
+    // Maximizing, Live 12.4's Limiter turns Threshold for its gain and Output for its ceiling (Input Gain and Ceiling
+    // do nothing then, as heard on real Live).
+    let maximizing = Seen { switched_on: strings(&["Maximize On"]), ..limiter("d0") };
+    assert_eq!(knob(find(&maximizing, "limiter gain")), "Threshold");
+    assert_eq!(knob(find(&maximizing, "ceiling")), "Output");
+    // A Limiter to add is said as it comes, not maximizing.
+    match resolve(&[stock("d4", "EQ Eight", "Eq8", &["Device On", "1 Gain A"])], 0, &strings(&["ceiling"])) {
+        Resolved::Refused(why) => assert!(why.contains("Live's Limiter (Ceiling) last on the chain"), "{why}"),
+        other => panic!("{other:?}"),
+    }
     // Live 12's names, as Live gives them.
     let compressor = stock("d1", "Compressor", "Compressor2", &["Device On", "Threshold", "Ratio", "Expansion Ratio", "Attack", "Release"]);
     assert_eq!(knob(find(&compressor, "compressor ratio")), "Ratio");
@@ -245,7 +265,7 @@ fn a_fix_names_a_mapped_plug_ins_role_when_one_on_the_track_does_the_job() {
     assert_eq!(job_for_item("true peak").map(|job| job.name), Some("ceiling"));
     assert_eq!(job_for_item("balance low mids").map(|job| job.name), Some("eq gain"));
     assert!(job_for_item("punch").is_none());
-    let generic = "the last limiter's gain, homed in (tune with how: home, knobs [\"Gain\"])";
+    let generic = "the last limiter's gain, homed in (tune with how: home, knobs [\"limiter gain\"])";
     let loudness = job_for_item("loudness").unwrap();
     let fix = plugin_fix(&[limiter("d0"), ozone(&["MAX: Input Gain"])], loudness, Some(generic)).unwrap();
     assert!(
@@ -271,6 +291,7 @@ fn a_fix_names_a_mapped_plug_ins_role_when_one_on_the_track_does_the_job() {
         turnable: strings(&["Band 1 Gain"]),
         listed: Some(strings(&["Band 1 Gain", "Band 1 Frequency"])),
         off: false,
+        switched_on: vec![],
     };
     let fix = plugin_fix(&[ozone(&[]), pro_q], balance, Some("an EQ Eight")).unwrap();
     assert!(fix.starts_with("Pro-Q 4's gain (Band 1 Gain)") && fix.contains("knobs [\"Band 1 Gain\"]"), "{fix}");
@@ -294,6 +315,7 @@ fn low_width_is_the_lowest_bands_width_only() {
         turnable: strings(&["Width"]),
         listed: Some(strings(&["Width", "Mix"])),
         off: false,
+        switched_on: vec![],
     };
     assert_eq!(plugin_fix(&[supermassive], low, Some("the Imager")), None);
 }

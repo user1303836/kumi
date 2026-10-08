@@ -820,9 +820,9 @@ impl Checklist {
         }
         for added in items.iter_mut() {
             added.fix = added.fix.take().or_else(|| match added.quantity {
-                Quantity::Integrated => Some("the last limiter's gain, homed in (tune with how: home, knobs [\"Gain\"])".into()),
+                Quantity::Integrated => Some("the last limiter's gain, homed in (tune with how: home, knobs [\"limiter gain\"])".into()),
                 Quantity::TruePeak => {
-                    Some("a true-peak limiter last, its ceiling under the target (tune with how: home, knobs [\"Ceiling\"])".into())
+                    Some("a true-peak limiter last, its ceiling under the target (tune with how: home, knobs [\"ceiling\"])".into())
                 }
                 Quantity::Region { .. } => Some("an EQ Eight toward the reference's shape (tune with how: fit)".into()),
                 _ => None,

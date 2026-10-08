@@ -13,12 +13,14 @@ use crate::plugins::{
     registry::adapter_for,
 };
 
-/// One of Live's devices that does a job: its class, its name in words, the knob's pattern, and the knob in words.
+/// One of Live's devices that does a job: its class, its name in words, the knob's pattern, the knob in words, and a
+/// switch of the device's that has to be on for that knob to do it (an entry with one is tried first).
 pub struct Stock {
     pub class: &'static str,
     pub device: &'static str,
     pub knob: Pattern,
     pub knob_said: &'static str,
+    pub when: Option<&'static str>,
 }
 
 /// A job any device can do, by its knob on each.
@@ -34,7 +36,11 @@ pub struct Job {
 }
 
 fn stock(class: &'static str, device: &'static str, knob: &str, knob_said: &'static str) -> Stock {
-    Stock { class, device, knob: pattern(knob), knob_said }
+    Stock { class, device, knob: pattern(knob), knob_said, when: None }
+}
+
+fn stock_when(switch: &'static str, class: &'static str, device: &'static str, knob: &str, knob_said: &'static str) -> Stock {
+    Stock { when: Some(switch), ..stock(class, device, knob, knob_said) }
 }
 
 /// The jobs, with Live's own knobs by the names Live 12.4 gives them (read from Live).
@@ -46,14 +52,23 @@ pub static JOBS: LazyLock<Vec<Job>> = LazyLock::new(|| {
             name: "limiter gain",
             words: &["limiter gain", "maximizer gain", "limiter input", "gain into the limiter"],
             plugins: vec![("ozone12", "threshold", None), ("prol2", "gain", None)],
-            // Live 12.4 names it Input Gain; earlier Lives, Gain.
-            stock: vec![stock("Limiter", "Limiter", r"^(Input )?Gain$", "Input Gain")],
+            // Live 12.4 names it Input Gain; earlier Lives, Gain. Maximizing, Input Gain does nothing and Threshold drives
+            // it (heard on Live 12.4: Threshold -0.3 to -3.1 dB raised the loudness 2.9 LU).
+            stock: vec![
+                stock_when("Maximize On", "Limiter", "Limiter", r"^Threshold$", "Threshold, as it's maximizing"),
+                stock("Limiter", "Limiter", r"^(Input )?Gain$", "Input Gain"),
+            ],
         },
         Job {
             name: "ceiling",
             words: &["ceiling", "limiter ceiling", "output ceiling", "true peak ceiling"],
             plugins: vec![("ozone12", "ceiling", None), ("prol2", "output level", None)],
-            stock: vec![stock("Limiter", "Limiter", r"^Ceiling$", "Ceiling")],
+            // Maximizing, Ceiling does nothing and Output sets where it peaks (heard on Live 12.4: Output -24 to 0 dB moved
+            // the true peak -26.2 to -2.2 dBTP).
+            stock: vec![
+                stock_when("Maximize On", "Limiter", "Limiter", r"^Output$", "Output, as it's maximizing"),
+                stock("Limiter", "Limiter", r"^Ceiling$", "Ceiling"),
+            ],
         },
         Job {
             name: "eq gain",
@@ -174,6 +189,8 @@ pub struct Seen {
     pub listed: Option<Vec<String>>,
     /// Switched off in Live (kept for an A/B, say): it isn't tried for a job.
     pub off: bool,
+    /// Its switches that are on (Live's Limiter's Maximize On): some change which knob does a job.
+    pub switched_on: Vec<String>,
 }
 
 impl Seen {
@@ -193,6 +210,10 @@ impl Seen {
             None if self.name.is_empty() => "the device".into(),
             None => self.name.clone(),
         }
+    }
+
+    fn is_on(&self, switch: &str) -> bool {
+        self.switched_on.iter().any(|name| same(name, switch))
     }
 
     fn can_turn(&self, name: &str) -> bool {
@@ -294,7 +315,8 @@ pub fn find(device: &Seen, word: &str) -> Option<Found> {
         }),
         None => {
             let job = job?;
-            Some(match job.stock.iter().find(|stock| stock.class == device.class) {
+            let fits = |stock: &&Stock| stock.class == device.class && stock.when.is_none_or(|switch| device.is_on(switch));
+            Some(match job.stock.iter().find(fits) {
                 Some(stock) => on_stock(device, job, stock),
                 None => Found::Missing(format!("{} has no {}.", device.called(), job.name)),
             })
@@ -448,7 +470,10 @@ pub fn resolve(devices: &[Seen], asked: usize, words: &[String]) -> Resolved {
         _ => "last on the chain".to_string(),
     };
     let mut by_device: Vec<(&str, Vec<&str>, String)> = vec![];
-    for (job, stock) in jobs.iter().filter_map(|job| job.stock.iter().find(|stock| stock.class != device.class).map(|stock| (job, stock))) {
+    // A device added fresh has its switches as they come: no maximizing.
+    let fresh =
+        |job: &&'static Job| job.stock.iter().find(|stock| stock.class != device.class && stock.when.is_none()).map(|stock| (*job, stock));
+    for (job, stock) in jobs.iter().filter_map(fresh) {
         match by_device.iter_mut().find(|(device, _, _)| *device == stock.device) {
             Some((_, knobs, _)) => knobs.push(stock.knob_said),
             None => by_device.push((stock.device, vec![stock.knob_said], place(job))),

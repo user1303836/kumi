@@ -126,15 +126,19 @@ impl Rendering {
         Ok(done.get("names").and_then(Value::as_array).map(|names| names.iter().filter_map(Value::as_str).map(str::to_owned).collect()))
     }
 
-    /// A device's turnable parameters, and for a mapped plug-in what Live lists; left empty when Live can't say.
+    /// A device's turnable parameters and the switches that are on, and for a mapped plug-in what Live lists; left
+    /// empty when Live can't say.
     async fn read_seen(&self, device: &mut Seen, signal: Signal) {
         let long = self.long_device(&device.reference);
-        if let Ok(rows) = self.rows("parameter", json!({"parent":long,"fields":["name"]}), signal.clone()).await {
-            device.turnable = rows
+        if let Ok(rows) = self.rows("parameter", json!({"parent":long,"fields":["name","value","max"]}), signal.clone()).await {
+            let name = |row: &JsonObject| row.get("name").and_then(Value::as_str).map(str::to_owned);
+            let number = |row: &JsonObject, key: &str| row.get(key).and_then(Value::as_f64);
+            device.turnable = rows.iter().filter_map(name).filter(|name| name != "Device On").collect();
+            // A switch is a parameter from 0 to 1; on at its top.
+            device.switched_on = rows
                 .iter()
-                .filter_map(|row| row.get("name").and_then(Value::as_str))
-                .filter(|name| *name != "Device On")
-                .map(str::to_owned)
+                .filter(|row| number(row, "max").is_some_and(|max| max <= 1.) && number(row, "value").is_some_and(|value| value >= 0.5))
+                .filter_map(name)
                 .collect();
         }
         if device.adapter().is_some() {

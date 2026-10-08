@@ -424,12 +424,16 @@ pub fn fits(job: Job, wanted: &Wanted) -> Result<Choice, String> {
             Wanted::Choice(Choice::Default) => Ok(Choice::Default),
             Wanted::Choice(Choice::Off) => Err(format!("{} needs something to do it: {} is the one Kumi has.", capitalized(job.name()), describe(job, &Choice::Default))),
             Wanted::Choice(_) => Err(format!("That model doesn't do {}; {} does.", job.name(), describe(job, &Choice::Default))),
-            _ => Err(format!(
-                "Kumi can't run a {} model itself yet, so {} stays on {}. When it can, this is where one goes: /slots {} <file or Hugging Face link>.",
-                if job == Job::Stems { "stem" } else { "transcription" },
+            _ if job == Job::Stems => Err(format!(
+                "Kumi can't run a stem model itself yet, so {} stays on {}. When it can, this is where one goes: /slots {} <file or Hugging Face link>.",
                 job.name(),
                 describe(job, &Choice::Default),
                 job.name()
+            )),
+            _ => Err(format!(
+                "{} stays on {}: the slot doesn't take another transcription model yet.",
+                capitalized(job.name()),
+                describe(job, &Choice::Default)
             )),
         },
     }
