@@ -6,6 +6,7 @@
 use super::{
     detect::{self, hertz, Problem, ProblemKind},
     effects,
+    embed::{self, averaged as average},
     fit::{response, Band, Shape},
     measure::{fine_hz, percentile, Heard, Measures, FINE_BINS, THIRDS},
     sound,
@@ -61,6 +62,15 @@ pub struct Profile {
     /// The rest of a sound's measures: its pitch drop, modulation, width, top, noise floor, warmth, tail and crackle.
     #[serde(default, skip_serializing_if = "SoundProfile::is_empty")]
     pub sound: SoundProfile,
+    /// How it sounds to the style model (CLAP, unit length; several tracks' averaged), when it was heard by one, and
+    /// how far its tracks lie from that (their typical distance: "in the style" is within it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vibe: Option<Vec<f32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vibe_spread: Option<f64>,
+    /// How its effects sound to the effects model (AFx-Rep: mid and side, each unit length).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effects: Option<Vec<f32>>,
 }
 
 /// A sound's measures beyond its envelope and tone, each with its range.
@@ -189,6 +199,9 @@ impl Profile {
             centroid: m.centroid.map(|value| Spread::point(value, value * 0.12)),
             noise: m.noise.map(|value| Spread::point(value, 2.)),
             sound: SoundProfile::of(heard),
+            vibe: heard.embedding.as_ref().and_then(|embedding| embedding.vibe.clone()),
+            vibe_spread: None,
+            effects: heard.embedding.as_ref().and_then(|embedding| embedding.effects.clone()),
         }
     }
 
@@ -216,6 +229,7 @@ impl Profile {
             Some(Spread { mid: round1(mid), low: round1(low.min(mid - half)), high: round1(high.max(mid + half)) })
         };
         let pick = |get: &dyn Fn(&Profile) -> Option<Spread>| spread(tracks.iter().filter_map(get).collect());
+        let vibe = average(&tracks.iter().filter_map(|track| track.vibe.clone()).collect::<Vec<_>>());
         Some(Profile {
             name: name.into(),
             tracks: tracks.iter().map(|track| track.tracks).sum(),
@@ -248,6 +262,13 @@ impl Profile {
                 sweep: pick(&|track| track.sound.sweep),
                 tail_share: pick(&|track| track.sound.tail_share),
             },
+            vibe: vibe.clone(),
+            vibe_spread: vibe.as_ref().and_then(|centre| {
+                let mut far: Vec<f64> = tracks.iter().filter_map(|track| embed::distance(track.vibe.as_deref()?, centre)).collect();
+                far.sort_by(f64::total_cmp);
+                (!far.is_empty()).then(|| round2(percentile(&far, 0.5)))
+            }),
+            effects: average(&tracks.iter().filter_map(|track| track.effects.clone()).collect::<Vec<_>>()),
         })
     }
 }
@@ -322,6 +343,14 @@ pub enum Quantity {
     Swing,
     Sweep,
     TailShare,
+    /// How far it sounds from a reference to the style model (CLAP): 0 alike, 1 unrelated.
+    Vibe {
+        to: Vec<f32>,
+    },
+    /// How far its effects sound from a reference's to the effects model (AFx-Rep).
+    EffectStyle {
+        to: Vec<f32>,
+    },
     Region {
         region: usize,
     },
@@ -588,6 +617,34 @@ impl Checklist {
                         (spread.mid.abs() * share).max(least),
                     ));
                 }
+            }
+            // What the measures miss, to the learned models: a change mustn't move it further from the reference's style
+            // and vibe (CLAP), nor a sound's effects further from the reference sound's (AFx-Rep). Guards, not targets: no
+            // one knob moves them, but a change that drifts away is caught. Only once the models heard this listen.
+            let models = heard.embedding.as_ref();
+            if let (Some(to), true) = (reference.vibe.clone(), models.is_some_and(|heard| heard.vibe.is_some())) {
+                items.push(item(
+                    "vibe",
+                    "Style and vibe (no further from the reference)",
+                    Role::Guard,
+                    "",
+                    Quantity::Vibe { to },
+                    Target::NoHigher,
+                    0.03,
+                ));
+            }
+            if let (Some(to), true) =
+                (reference.effects.clone().filter(|_| goal.sound), models.is_some_and(|heard| heard.effects.is_some()))
+            {
+                items.push(item(
+                    "effect style",
+                    "Its effects (no further from the reference's)",
+                    Role::Guard,
+                    "",
+                    Quantity::EffectStyle { to },
+                    Target::NoHigher,
+                    0.03,
+                ));
             }
             // Its form's contrast: how far the quiet and the loud sections lie apart.
             if let Some(spread) = reference.range.filter(|_| heard.measures.range.is_some()) {
@@ -942,6 +999,8 @@ fn describe(quantity: &Quantity) -> (String, String, &'static str, f64) {
         Quantity::Swing => ("swing".into(), "How far it swings (modulation depth)".into(), "dB", 1.),
         Quantity::Sweep => ("sweep".into(), "How far its brightness moves".into(), "oct", 0.25),
         Quantity::TailShare => ("tail share".into(), "Its tail's share of its energy".into(), "%", 5.),
+        Quantity::Vibe { .. } => ("vibe".into(), "Style and vibe, to the style model".into(), "", 0.02),
+        Quantity::EffectStyle { .. } => ("effect style".into(), "Its effects, to the effects model".into(), "", 0.02),
         Quantity::Region { region } => (format!("balance {}", REGIONS[*region].0), capital(REGIONS[*region].0), "dB", 1.),
         Quantity::Problem { problem, low, high, .. } => {
             (format!("{problem:?} {}", hertz((low * high).sqrt())).to_lowercase(), format!("{problem:?}"), "dB", 1.)
@@ -989,6 +1048,8 @@ fn reading(quantity: &Quantity, heard: &Heard, focus: Option<&Heard>) -> Option<
         Quantity::Swing => effects::swing(heard),
         Quantity::Sweep => effects::sweep(heard).map(|(octaves, _)| octaves),
         Quantity::TailShare => effects::tail_share(heard),
+        Quantity::Vibe { to } => embed::distance(heard.embedding.as_ref()?.vibe.as_deref()?, to).map(round2),
+        Quantity::EffectStyle { to } => embed::distance(heard.embedding.as_ref()?.effects.as_deref()?, to).map(round2),
         Quantity::Region { region } => Some(round1(region_level(&m.balance, *region))),
         Quantity::Problem { problem, low, high, steady, focus: name } => match problem {
             ProblemKind::Harshness | ProblemKind::Resonance => Some(region_excess(heard, *low, *high, *steady)),
@@ -1133,6 +1194,10 @@ pub fn number(value: f64) -> String {
         format!("{rounded:.1}")
     }
 }
+fn round2(value: f64) -> f64 {
+    (value * 100.).round() / 100.
+}
+
 fn round1(value: f64) -> f64 {
     (value * 10.).round() / 10.
 }

@@ -41,6 +41,7 @@ home.workspace = true
 indexmap.workspace = true
 md-5.workspace = true
 memchr.workspace = true
+ort.workspace = true
 percent-encoding.workspace = true
 rand.workspace = true
 regex.workspace = true

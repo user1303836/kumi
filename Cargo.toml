@@ -35,6 +35,8 @@ libc = "0.2"
 # MD5: the checksum Serum 2 keeps over a preset's compressed body.
 md-5 = "0.10"
 memchr = "2"
+# ONNX Runtime is loaded at run time from the copy Kumi fetches on first use: nothing native at build time.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dynamic", "api-23"] }
 percent-encoding = "2"
 fancy-regex = "0.14"
 rand = "0.9"

@@ -522,6 +522,9 @@ fn profile(loudness: f64) -> Profile {
         centroid: None,
         noise: None,
         sound: Default::default(),
+        vibe: None,
+        vibe_spread: None,
+        effects: None,
     }
 }
 

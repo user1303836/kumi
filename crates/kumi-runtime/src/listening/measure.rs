@@ -140,11 +140,19 @@ impl Frames {
     }
 }
 
-/// A listen's measures and the frames behind them.
+/// A listen's measures and the frames behind them, and what the learned models made of it when they heard it.
 #[derive(Debug, Clone)]
 pub struct Heard {
     pub measures: Measures,
     pub frames: Frames,
+    pub embedding: Option<Embedding>,
+}
+
+/// What the learned models made of a listen: the style model's embedding (CLAP) and the effects model's (AFx-Rep).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Embedding {
+    pub vibe: Option<Vec<f32>>,
+    pub effects: Option<Vec<f32>>,
 }
 
 impl Heard {
@@ -920,7 +928,7 @@ impl Meter {
                 (power[from..to].iter().sum::<f64>() / (to - from).max(1) as f64).sqrt() as f32
             })
             .collect();
-        Heard { measures, frames: self.frames }
+        Heard { measures, frames: self.frames, embedding: None }
     }
 }
 
