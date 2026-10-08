@@ -855,7 +855,6 @@ pub fn create_web_client(options: WebClientOptions) -> Rc<dyn WebClient> {
     Rc::new(NetClient { http, allow, language: locale() })
 }
 
-/// Why a status isn't a page, in a few words ("it refused Kumi").
 /// A response's body, read until `most` bytes: a longer one is refused rather than held in memory.
 pub async fn body_at_most(mut response: reqwest::Response, most: usize) -> Result<Vec<u8>, String> {
     let mut body = Vec::new();
@@ -868,6 +867,7 @@ pub async fn body_at_most(mut response: reqwest::Response, most: usize) -> Resul
     Ok(body)
 }
 
+/// Why a status isn't a page, in a few words ("it refused Kumi").
 pub fn status_words(status: u16) -> String {
     match status_word(status) {
         Some(words) => words.to_string(),

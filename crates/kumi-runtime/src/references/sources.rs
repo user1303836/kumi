@@ -102,9 +102,12 @@ impl Default for Sources {
 impl Sources {
     /// With other servers (for tests).
     pub fn new(musicbrainz: &str, listenbrainz: &str, spotify: &str) -> Self {
+        // Kumi's own sources are https: nothing is followed off it to plain http (stand-in servers in tests are http).
+        let secure = [musicbrainz, listenbrainz, spotify].iter().all(|base| base.starts_with("https://"));
         let client = reqwest::Client::builder()
             .user_agent(format!("Kumi/{} ( https://github.com/user1303836/kumi )", crate::KUMI_VERSION))
             .timeout(Duration::from_secs(20))
+            .https_only(secure)
             .build()
             .expect("an HTTP client");
         Self {
@@ -486,7 +489,8 @@ impl Sources {
     async fn popularity(&self, of: &str, body: Value, signal: &Signal) -> Value {
         let asked = async {
             let sent = self.client.post(format!("{}/1/popularity/{of}", self.listenbrainz)).json(&body).send().await.ok()?;
-            sent.json::<Value>().await.ok()
+            let body = crate::web::net::body_at_most(sent, 8_000_000).await.ok()?;
+            serde_json::from_slice::<Value>(&body).ok()
         };
         tokio::select! {
             rows = asked => rows.unwrap_or_default(),
