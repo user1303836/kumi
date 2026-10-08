@@ -272,7 +272,8 @@ impl McpHost {
                 }
             }
             record.borrow_mut()["created"]=json!({"deviceRef":loaded["deviceRef"],"objectIdentity":loaded["deviceObjectIdentity"],"fingerprint":fingerprint});record.borrow_mut()["applyKey"]=p["idempotencyKey"].clone();record.borrow_mut()["state"]=json!("applied");
-            Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","deviceRef":loaded["deviceRef"],"placement":self.device_placement(&snapshot,&created)?,"idempotent":false})))
+            // The created device's identity goes back too: what a client may remove in its place if the undo can't run.
+            Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","deviceRef":loaded["deviceRef"],"deviceObjectIdentity":loaded["deviceObjectIdentity"],"placement":self.device_placement(&snapshot,&created)?,"idempotent":false})))
         }.await;
         Some(
             result.unwrap_or_else(|e| {
