@@ -173,6 +173,8 @@ pub struct Heard {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Embedding {
     pub vibe: Option<Vec<f32>>,
+    /// Which style model made `vibe` (`embed::style_id`): it compares only with a vector the same model made.
+    pub vibe_model: Option<String>,
     pub effects: Option<Vec<f32>>,
 }
 

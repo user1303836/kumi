@@ -1,8 +1,8 @@
 //! Embeddings' inputs, made in Kumi as the models take them: CLAP's log-mel against its own feature extractor's on a
 //! known signal, and audio resampled without moving its pitch. With KUMI_TEST_MODELS naming a folder that holds the
 //! runtime and the models (Kumi's models folder layout), whole embeddings are checked against what the shipped models
-//! gave for the same signal; tests never fetch.
-use kumi_runtime::listening::embed::{clap_features, distance, resample, CLAP_MELS};
+//! gave for the same signal; tests never fetch. A style vector names the model that made it.
+use kumi_runtime::listening::embed::{clap_features, distance, own_style_id, resample, style_id, CLAP_MELS};
 use serde_json::Value;
 use std::f64::consts::PI;
 
@@ -68,7 +68,8 @@ async fn a_known_signal_embeds_as_the_converted_model_did() {
     assert!(std::path::Path::new(&folder).ends_with("models"), "KUMI_TEST_MODELS has to be a folder named models: {folder}");
     std::env::set_var("KUMI_HOME", std::path::Path::new(&folder).parent().unwrap());
     let signal = kumi_common::abort::Signal::new();
-    let got = kumi_runtime::listening::embed::vibe(&file, 0., 3., None, None, &|said| eprintln!("{said}"), &signal).await.unwrap();
+    let (got, model) = kumi_runtime::listening::embed::vibe(&file, 0., 3., None, None, &|said| eprintln!("{said}"), &signal).await.unwrap();
+    assert_eq!(model, own_style_id());
     let apart = distance(&got, &expected).unwrap();
     assert!(apart < 1e-3, "{apart}");
     // 4 dB louder: heard at a common loudness, it's the same style; heard as it is, it isn't.
@@ -76,7 +77,7 @@ async fn a_known_signal_embeds_as_the_converted_model_did() {
     std::fs::write(&louder, wav(&[known_signal().iter().map(|sample| sample * 10f32.powf(0.2)).collect()], 48_000)).unwrap();
     let vibe = |file: std::path::PathBuf, loudness: Option<f64>| {
         let signal = signal.clone();
-        async move { kumi_runtime::listening::embed::vibe(&file, 0., 3., loudness, None, &|_| {}, &signal).await.unwrap() }
+        async move { kumi_runtime::listening::embed::vibe(&file, 0., 3., loudness, None, &|_| {}, &signal).await.unwrap().0 }
     };
     let matched = distance(&vibe(file.clone(), Some(-20.)).await, &vibe(louder.clone(), Some(-16.)).await).unwrap();
     let unmatched = distance(&got, &vibe(louder, None).await).unwrap();
@@ -131,4 +132,20 @@ fn wav(channels: &[Vec<f32>], rate: u32) -> Vec<u8> {
     wav.extend_from_slice(&(data.len() as u32).to_le_bytes());
     wav.extend_from_slice(&data);
     wav
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_style_vector_names_the_model_that_made_it() {
+    // No slot file, or one that's gone: Kumi's own, by its pinned SHA-256.
+    assert_eq!(style_id(None).await, own_style_id());
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(style_id(Some(&dir.path().join("gone.onnx"))).await, own_style_id());
+    // A slot's file: its own SHA-256, the same each time, and another once the file changes.
+    let file = dir.path().join("clap.onnx");
+    std::fs::write(&file, b"one model").unwrap();
+    let first = style_id(Some(&file)).await;
+    assert_eq!(first, "sha256:e7940ca0c091e09b23054a7756d26bebdbe8dd70c1250850a35a9561325c83b9");
+    assert_eq!(style_id(Some(&file)).await, first);
+    std::fs::write(&file, b"another model").unwrap();
+    assert_ne!(style_id(Some(&file)).await, first);
 }

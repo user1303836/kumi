@@ -13,9 +13,10 @@ use crate::listening::{
     embed,
     judging::{self, Listen, Placed, RoundHost, Unheard},
     listener::{compare, Listener, Opinion, Take},
-    measure::{measure_file, Embedding, Heard, MeasureOptions},
+    measure::{measure_file, percentile, Embedding, Heard, MeasureOptions},
     round::{Next, Round, RoundKind},
 };
+use crate::references::{store::KeptReference, tool::MEASURED};
 use async_trait::async_trait;
 use kumi_common::js::{number::to_string, string::head};
 use std::path::Path;
@@ -158,6 +159,13 @@ impl Rendering {
         let tempo = self.observer.tempo.get().unwrap();
         let started = now_ms();
         *self.judge.borrow_mut() = None;
+        // The style model this run hears with, fixed now: the reference's style and every listen's are its.
+        *self.style_model.borrow_mut() = None;
+        if models_on() {
+            let slot = crate::slots::kept().model_file(crate::slots::Job::Embeddings);
+            let style = embed::style_id(slot.as_deref()).await;
+            *self.style_model.borrow_mut() = Some((slot, style));
+        }
         let (reference, unguarded) = match &goal.reference {
             Some(named) => match self.reference_profile(named, goal.sound, signal.clone()).await {
                 Ok((profile, unguarded)) => (Some(profile), unguarded),
@@ -744,10 +752,32 @@ impl Rendering {
     /// file or a clip in the Set. Its effects are heard by the effects model only for a sound's goal, the one run that
     /// guards them. Beside it, what the run won't guard because the models didn't hear the reference, and why.
     async fn reference_profile(&self, named: &str, sound: bool, signal: Signal) -> Result<(Profile, Option<String>), String> {
-        if let Some(kept) = match &self.references {
+        if let Some(mut kept) = match &self.references {
             Some(store) => store.load(named).await,
             None => None,
         } {
+            // Heard by another style model than this run's (or kept before models were recorded): its style is heard
+            // again from its files when they're all still here, else this run doesn't guard it.
+            let style = self.style_model.borrow().as_ref().map(|(_, style)| style.clone());
+            if style.is_some() && kept.profile.vibe.is_some() && kept.profile.vibe_model != style {
+                match self.restyled(&kept, &signal).await {
+                    Some((vibe, spread, model)) => {
+                        (kept.profile.vibe, kept.profile.vibe_spread, kept.profile.vibe_model) = (Some(vibe), spread, Some(model));
+                        if let Some(store) = &self.references {
+                            let _ = store.save(&kept).await;
+                        }
+                    }
+                    None => {
+                        signal.check().map_err(|error| error.to_string())?;
+                        (kept.profile.vibe, kept.profile.vibe_spread, kept.profile.vibe_model) = (None, None, None);
+                        let why = format!(
+                            "{} was heard by another style model than this run's, so this run doesn't guard its style; the reference tool hears it again with this one when asked for it again",
+                            kept.name
+                        );
+                        return Ok((kept.profile, Some(why)));
+                    }
+                }
+            }
             let unguarded = (models_on() && kept.profile.vibe.is_none()).then(|| {
                 format!(
                     "{} was kept without how it sounds to the style model, so this run doesn't guard its style; the reference tool adds it when asked for it again",
@@ -771,9 +801,10 @@ impl Rendering {
         if models_on() {
             let say = |said: &str| self.tell(said.to_string(), None);
             let seconds = heard.measures.seconds;
-            let slot = crate::slots::kept().model_file(crate::slots::Job::Embeddings);
-            match embed::vibe(Path::new(&file), 0., seconds, heard.measures.integrated, slot, &say, &signal).await {
-                Ok(vibe) => profile.vibe = Some(vibe),
+            let (slot, style) = self.style_model.borrow().clone().unzip();
+            match embed::vibe(Path::new(&file), 0., seconds, heard.measures.integrated, slot.flatten(), &say, &signal).await {
+                Ok((vibe, model)) if Some(&model) == style.as_ref() => (profile.vibe, profile.vibe_model) = (Some(vibe), Some(model)),
+                Ok(_) => unheard.push("its style (the style model changed while it was heard)".into()),
                 Err(why) => unheard.push(format!("its style ({why})")),
             }
             if sound {
@@ -789,6 +820,34 @@ impl Rendering {
         Ok((profile, unguarded))
     }
 
+    /// A kept reference's style heard again with this run's style model, from its files when they're all still here (a
+    /// file or a folder kept): each heard as the reference tool hears it, at a common loudness, the vibes averaged, with
+    /// how far they lie from that. None when it wasn't kept from files, or one is gone or can't be heard.
+    async fn restyled(&self, kept: &KeptReference, signal: &Signal) -> Option<(Vec<f32>, Option<f64>, String)> {
+        let (slot, style) = self.style_model.borrow().clone()?;
+        if kept.kind != "files" || kept.tracks.is_empty() || kept.tracks.iter().any(|track| !Path::new(&track.source).is_file()) {
+            return None;
+        }
+        let say = |said: &str| self.tell(said.to_string(), None);
+        let mut vibes = vec![];
+        for track in &kept.tracks {
+            let options = MeasureOptions { seconds: Some(MEASURED), signal: Some(signal.clone()), ..Default::default() };
+            let heard = measure_file(&track.source, options).await.ok()?;
+            let seconds = heard.measures.seconds.min(MEASURED);
+            let file = Path::new(&track.source);
+            let (vibe, model) = embed::vibe(file, 0., seconds, heard.measures.integrated, slot.clone(), &say, signal).await.ok()?;
+            if model != style {
+                return None;
+            }
+            vibes.push(vibe);
+        }
+        let centre = embed::averaged(&vibes)?;
+        let mut far: Vec<f64> = vibes.iter().filter_map(|vibe| embed::distance(vibe, &centre)).collect();
+        far.sort_by(f64::total_cmp);
+        let spread = (vibes.len() > 1 && !far.is_empty()).then(|| (percentile(&far, 0.5) * 100.).round() / 100.);
+        Some((centre, spread, style))
+    }
+
     /// What the learned models make of a stretch of a capture (`loudness`, its integrated loudness, LUFS), when the run
     /// guards against drifting from its reference's style or effects; nothing when it doesn't. When a model can't be
     /// had, that's said once and the run goes on by its measures; Esc isn't a model failing, and leaves the guards on.
@@ -800,9 +859,17 @@ impl Rendering {
         let say = |said: &str| self.tell(said.to_string(), None);
         let mut embedding = Embedding::default();
         if vibe {
-            let slot = crate::slots::kept().model_file(crate::slots::Job::Embeddings);
-            match embed::vibe(file, start, seconds, loudness, slot, &say, signal).await {
-                Ok(found) => embedding.vibe = Some(found),
+            let (slot, style) = self.style_model.borrow().clone().unzip();
+            match embed::vibe(file, start, seconds, loudness, slot.flatten(), &say, signal).await {
+                Ok((found, model)) if Some(&model) == style.as_ref() => (embedding.vibe, embedding.vibe_model) = (Some(found), Some(model)),
+                // Its slot's file went partway: what heard this isn't the model the run started with.
+                Ok(_) => {
+                    self.tell(
+                        "The style model changed during this run (the embeddings slot's file is gone), so the run stops guarding style and goes on by its measures.".to_string(),
+                        None,
+                    );
+                    self.embedding_wanted.set((false, self.embedding_wanted.get().1));
+                }
                 Err(_) if signal.is_cancelled() => return None,
                 Err(why) => {
                     self.tell(format!("Kumi can't hear style with its style model now ({why}); the run goes on by its measures."), None);

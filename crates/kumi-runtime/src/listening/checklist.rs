@@ -68,6 +68,10 @@ pub struct Profile {
     pub vibe: Option<Vec<f32>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vibe_spread: Option<f64>,
+    /// Which style model heard it (`embed::style_id`): its vibe compares only with a listen the same model heard. None
+    /// for a vibe kept before models were recorded, which compares with nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vibe_model: Option<String>,
     /// How its effects sound to the effects model (AFx-Rep: mid and side, each unit length).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Vec<f32>>,
@@ -214,6 +218,11 @@ impl Profile {
             sound: SoundProfile::of(heard),
             vibe: heard.embedding.as_ref().and_then(|embedding| embedding.vibe.clone()),
             vibe_spread: None,
+            vibe_model: heard
+                .embedding
+                .as_ref()
+                .filter(|embedding| embedding.vibe.is_some())
+                .and_then(|embedding| embedding.vibe_model.clone()),
             effects: heard.embedding.as_ref().and_then(|embedding| embedding.effects.clone()),
         }
     }
@@ -242,7 +251,10 @@ impl Profile {
             Some(Spread { mid: round1(mid), low: round1(low.min(mid - half)), high: round1(high.max(mid + half)) })
         };
         let pick = |get: &dyn Fn(&Profile) -> Option<Spread>| spread(tracks.iter().filter_map(get).collect());
-        let vibe = average(&tracks.iter().filter_map(|track| track.vibe.clone()).collect::<Vec<_>>());
+        // The tracks' vibes are averaged only when one model heard them all: one model's numbers aren't another's.
+        let vibe_model = tracks.iter().find(|track| track.vibe.is_some()).and_then(|track| track.vibe_model.clone());
+        let one_model = vibe_model.is_some() && tracks.iter().all(|track| track.vibe.is_none() || track.vibe_model == vibe_model);
+        let vibe = average(&tracks.iter().filter(|_| one_model).filter_map(|track| track.vibe.clone()).collect::<Vec<_>>());
         Some(Profile {
             name: name.into(),
             tracks: tracks.iter().map(|track| track.tracks).sum(),
@@ -283,6 +295,7 @@ impl Profile {
                 far.sort_by(f64::total_cmp);
                 (!far.is_empty()).then(|| round2(percentile(&far, 0.5)))
             }),
+            vibe_model: vibe_model.filter(|_| vibe.is_some()),
             effects: average(&tracks.iter().filter_map(|track| track.effects.clone()).collect::<Vec<_>>()),
         })
     }
@@ -715,7 +728,10 @@ impl Checklist {
             // and vibe (CLAP), nor a sound's effects further from the reference sound's (AFx-Rep). Guards, not targets: no
             // one knob moves them, but a change that drifts away is caught. Only once the models heard this listen.
             let models = heard.embedding.as_ref();
-            if let (Some(to), true) = (reference.vibe.clone(), models.is_some_and(|heard| heard.vibe.is_some())) {
+            // Only like with like: a vibe the listen's model didn't make (another model, or one not recorded) says
+            // nothing of how far this listen is from it.
+            let same_model = reference.vibe_model.is_some() && models.is_some_and(|heard| heard.vibe_model == reference.vibe_model);
+            if let (Some(to), true) = (reference.vibe.clone(), same_model && models.is_some_and(|heard| heard.vibe.is_some())) {
                 // A step is half how far the reference's own tracks lie from their style, when it's known.
                 let step = reference.vibe_spread.map_or(0.03, |spread| round2((spread / 2.).clamp(0.02, 0.1)));
                 items.push(item(

@@ -503,6 +503,12 @@ fn several_tracks_make_one_profile_with_the_range_they_keep_to() {
     // Two alike: never narrower than one track's own range.
     let alike = Profile::combine("two", &[profile(-8.), profile(-8.)]).unwrap();
     assert_eq!(alike.integrated.unwrap(), Spread { mid: -8., low: -9., high: -7. });
+    // Their style is averaged only when one model heard them all: one model's numbers aren't another's.
+    let heard_by = |model: &str, vibe: Vec<f32>| Profile { vibe: Some(vibe), vibe_model: Some(model.into()), ..profile(-8.) };
+    let same = Profile::combine("same", &[heard_by("sha256:a", vec![1., 0.]), heard_by("sha256:a", vec![0., 1.])]).unwrap();
+    assert_eq!((same.vibe.is_some(), same.vibe_model.as_deref()), (true, Some("sha256:a")));
+    let mixed = Profile::combine("mixed", &[heard_by("sha256:a", vec![1., 0.]), heard_by("sha256:b", vec![0., 1.])]).unwrap();
+    assert_eq!((mixed.vibe, mixed.vibe_spread, mixed.vibe_model), (None, None, None));
 }
 
 fn profile(loudness: f64) -> Profile {
@@ -524,6 +530,7 @@ fn profile(loudness: f64) -> Profile {
         sound: Default::default(),
         vibe: None,
         vibe_spread: None,
+        vibe_model: None,
         effects: None,
     }
 }

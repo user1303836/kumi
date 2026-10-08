@@ -267,7 +267,49 @@ pub async fn style_model(slot: Option<PathBuf>, say: Say<'_>, signal: &Signal) -
 /// The slot files said to be gone, each said once.
 static GONE: std::sync::Mutex<std::collections::BTreeSet<PathBuf>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
 
-/// What a stretch of a file sounds like to CLAP, by style and vibe: up to six 10 s windows, averaged, unit length.
+/// Which style model a slot's choice runs, as recorded with every vector it makes: the model file's SHA-256, Kumi's own
+/// known from its pin (when the slot holds no file, or its file is gone) and a slot's file hashed once. Vectors compare
+/// only with ones the same model made: two models' numbers don't mean the same thing, however alike their length.
+pub async fn style_id(slot: Option<&Path>) -> String {
+    match slot.filter(|file| file.is_file()) {
+        Some(file) => file_id(file).await,
+        None => own_style_id(),
+    }
+}
+
+/// Kumi's own style model's identity.
+pub fn own_style_id() -> String {
+    format!("sha256:{}", pinned::CLAP.sha256)
+}
+
+/// A model file's identity, its SHA-256, hashed once for its size and time changed.
+async fn file_id(file: &Path) -> String {
+    type Hashed = std::collections::BTreeMap<(PathBuf, u64, Option<std::time::SystemTime>), String>;
+    static HASHED: std::sync::Mutex<Hashed> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+    let meta = std::fs::metadata(file).ok();
+    let key = (file.to_path_buf(), meta.as_ref().map_or(0, |meta| meta.len()), meta.and_then(|meta| meta.modified().ok()));
+    if let Some(known) = HASHED.lock().ok().and_then(|hashed| hashed.get(&key).cloned()) {
+        return known;
+    }
+    let path = file.to_path_buf();
+    let hashed = tokio::task::spawn_blocking(move || -> Option<String> {
+        use sha2::{Digest, Sha256};
+        let mut hash = Sha256::new();
+        std::io::copy(&mut std::io::BufReader::new(std::fs::File::open(&path).ok()?), &mut hash).ok()?;
+        Some(format!("sha256:{}", hex::encode(hash.finalize())))
+    })
+    .await
+    .ok()
+    .flatten();
+    let id = hashed.unwrap_or_else(|| format!("file:{}", file.display()));
+    if let Ok(mut known) = HASHED.lock() {
+        known.insert(key, id.clone());
+    }
+    id
+}
+
+/// What a stretch of a file sounds like to CLAP, by style and vibe: up to six 10 s windows, averaged, unit length, and
+/// which model heard it (`style_id`: the slot's file, or Kumi's own when the slot holds none or its file is gone).
 /// `loudness` is the stretch's integrated loudness (LUFS) when it's known, and the stretch is then heard at
 /// `STYLE_LOUDNESS`, so takes and references at different levels compare by their style alone.
 pub async fn vibe(
@@ -278,9 +320,10 @@ pub async fn vibe(
     slot: Option<PathBuf>,
     say: Say<'_>,
     signal: &Signal,
-) -> Result<Vec<f32>, String> {
+) -> Result<(Vec<f32>, String), String> {
     models::runtime(say, signal).await?;
-    let model = clap_model(slot, say, signal).await?;
+    let model = clap_model(slot.clone(), say, signal).await?;
+    let id = if slot.as_deref() == Some(model.as_path()) { file_id(&model).await } else { own_style_id() };
     let heard = read_windows(file, (start, seconds), (CLAP_SAMPLES as f64 / CLAP_RATE, MOST_WINDOWS), CLAP_RATE, signal).await?;
     let gain = loudness.filter(|loudness| loudness.is_finite()).map_or(1., |loudness| 10f64.powf((STYLE_LOUDNESS - loudness) / 20.)) as f32;
     // Each window as one channel, its log-mel made off the app's thread.
@@ -303,7 +346,7 @@ pub async fn vibe(
         let out = models::run(&model, vec![("input_features".into(), input)], vec!["audio_embeds".into()]).await?;
         all.push(out.into_iter().next().map(|tensor| tensor.data).unwrap_or_default());
     }
-    averaged(&all).ok_or_else(|| "Nothing was heard to embed.".into())
+    averaged(&all).map(|vector| (vector, id)).ok_or_else(|| "Nothing was heard to embed.".into())
 }
 
 /// What a stretch of a file's effects sound like to AFx-Rep: its mid's and side's embeddings side by side, each unit

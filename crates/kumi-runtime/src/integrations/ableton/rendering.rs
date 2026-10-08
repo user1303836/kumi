@@ -92,6 +92,9 @@ pub struct Rendering {
     /// The listening model, once looked for (None inside: there's none).
     /// Whether the run's listens are heard by the learned models too: the style model, the effects model.
     embedding_wanted: Cell<(bool, bool)>,
+    /// The style model a judge run hears with, fixed when it starts: the embeddings slot's file then (None: Kumi's
+    /// own) and its identity. A slot swapped during a run doesn't change it.
+    style_model: RefCell<Option<(Option<PathBuf>, String)>>,
     /// The listening model as last looked up (found, a definite none, or why the lookup failed), and when.
     listener: RefCell<Option<(Result<Option<Rc<dyn crate::listening::listener::Listener>>, String>, i64)>>,
 }
@@ -157,6 +160,7 @@ impl Rendering {
             references: options.references.clone(),
             listener: RefCell::new(None),
             embedding_wanted: Cell::new((false, false)),
+            style_model: RefCell::new(None),
         })
     }
     pub fn round_count(&self) -> usize {

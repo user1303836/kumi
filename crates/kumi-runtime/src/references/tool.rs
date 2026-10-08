@@ -31,7 +31,7 @@ use std::rc::Rc;
 pub const REFERENCE_TOOL: &str = "reference";
 const DESCRIPTION: &str = "Turn a reference into measured targets, once: an audio file or a folder of them, a YouTube video or playlist, a Spotify link (track, album, playlist or artist), or words: an artist (\"bladee\"), an album (\"Kid A\") or a genre or style (\"dub techno\"). Kumi finds example tracks (for words, the artist's most listened recordings, an album's tracks or a genre's main artists, through MusicBrainz and ListenBrainz; the audio from a YouTube search, matched by length), measures each, and keeps a profile with each measure's typical value and the range the tracks keep to: loudness, dynamics, punch, tonal balance by region, stereo below 120 Hz and brightness. Silent tracks, and (in a folder or a search) ones under 30 seconds, are passed over. It's kept, so asking again costs nothing (a file or folder is measured again once its files change). When the words could mean more than one thing it answers with a question and options: ask the producer that one question, then call again with the `what` of the option they pick. Work toward the profile with judge (goal.reference: what the reply's note says). For one element of a reference (its bass, its drums), put the track in the Set, separate its stems (live_command separate_stems) and give a stem's clipRef. Fetching and measuring takes a minute or two.";
 /// How long a track is heard for its profile: long enough for its loud and quiet parts.
-const MEASURED: f64 = 360.;
+pub const MEASURED: f64 = 360.;
 /// A track measured for a style is a finished track: at least this long (but one file the producer gives is taken as
 /// it is) ...
 const SHORTEST: f64 = 30.;
@@ -86,16 +86,22 @@ impl KernelTool for ReferenceTool {
         let again = input.get("again").and_then(Value::as_bool) == Some(true);
         if !again {
             if let Some(kept) = self.store.load(&what).await {
-                // Kept before the style model could hear it: measured again once the model can be had, else said.
+                // Kept before the style model could hear it, or heard by another style model than the slot's now (or
+                // before models were recorded): measured again once the model can be had, else said.
+                let slot = crate::slots::kept().model_file(crate::slots::Job::Embeddings);
+                let styled = match kept.profile.vibe.is_some() && embeddings_on() {
+                    true => kept.profile.vibe_model.as_deref() == Some(embed::style_id(slot.as_deref()).await.as_str()),
+                    false => kept.profile.vibe.is_some(),
+                };
                 let fetched = std::cell::RefCell::new(vec![]);
-                let style = match kept.profile.vibe.is_none() && embeddings_on() {
+                let style = match !styled && embeddings_on() {
                     true => {
                         let say = |said: &str| fetched.borrow_mut().push(said.to_string());
-                        embed::style_model(crate::slots::kept().model_file(crate::slots::Job::Embeddings), &say, &signal).await.err()
+                        embed::style_model(slot, &say, &signal).await.err()
                     }
                     false => None,
                 };
-                if kept.profile.vibe.is_some() || !embeddings_on() || style.is_some() {
+                if styled || !embeddings_on() || style.is_some() {
                     signal.check()?;
                     let mut said = reply(&kept, true, &what);
                     if let Some(why) = style {
@@ -169,6 +175,8 @@ impl ReferenceTool {
         }
         // One file the producer gave is taken as it is, however short.
         let alone = tracks.len() == 1 && matches!(kind, Kind::Files | Kind::Video);
+        // One style model hears every track: the slot's choice now.
+        let slot = crate::slots::kept().model_file(crate::slots::Job::Embeddings);
         let mut profiles = vec![];
         let mut used = vec![];
         let mut missed = vec![];
@@ -180,7 +188,7 @@ impl ReferenceTool {
                 break;
             }
             signal.check().map_err(|error| error.to_string())?;
-            match self.one(wanted, alone, &say, signal.clone()).await {
+            match self.one(wanted, alone, &say, slot.clone(), signal.clone()).await {
                 Ok((profile, source, style)) => {
                     unstyled = unstyled.or(style);
                     profiles.push(profile);
@@ -224,6 +232,7 @@ impl ReferenceTool {
         wanted: &Wanted,
         alone: bool,
         say: embed::Say<'_>,
+        slot: Option<std::path::PathBuf>,
         signal: Signal,
     ) -> Result<(Profile, String, Option<String>), String> {
         let audio = self.fetcher.audio(wanted, signal.clone()).await?;
@@ -236,7 +245,6 @@ impl ReferenceTool {
         // How it sounds to the style model, while the audio is still here (when the embeddings slot isn't off).
         let vibe = match &heard {
             Ok(heard) if embeddings_on() => {
-                let slot = crate::slots::kept().model_file(crate::slots::Job::Embeddings);
                 let seconds = heard.measures.seconds.min(MEASURED);
                 Some(embed::vibe(&audio.file, 0., seconds, heard.measures.integrated, slot, say, &signal).await)
             }
@@ -257,8 +265,8 @@ impl ReferenceTool {
         }
         let mut profile = Profile::of(&label(wanted), &heard);
         let style = match vibe {
-            Some(Ok(vibe)) => {
-                profile.vibe = Some(vibe);
+            Some(Ok((vibe, model))) => {
+                (profile.vibe, profile.vibe_model) = (Some(vibe), Some(model));
                 None
             }
             Some(Err(why)) => Some(why),
