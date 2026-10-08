@@ -103,8 +103,9 @@ pub fn tune_request(input: &JsonObject) -> Result<TuneRequest, String> {
             Some("fit") => TuneHow::Fit,
             Some("home") => TuneHow::Home,
             Some("search") => TuneHow::Search,
+            Some("probe") => TuneHow::Probe,
             _ => return Err(
-                "how is fit (an EQ calculated from what was measured), home (one knob homed in on) or search (2 to 5 knobs that interact)."
+                "how is fit (an EQ calculated from what was measured), home (one knob homed in on), search (2 to 5 knobs that interact) or probe (one knob heard across its range)."
                     .into(),
             ),
         };
@@ -119,8 +120,8 @@ pub fn tune_request(input: &JsonObject) -> Result<TuneRequest, String> {
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
         .collect();
-    if how == TuneHow::Home && knobs.len() != 1 {
-        return Err("home moves one knob: give its name in knobs.".into());
+    if matches!(how, TuneHow::Home | TuneHow::Probe) && knobs.len() != 1 {
+        return Err("home and probe move one knob: give its name in knobs.".into());
     }
     if how == TuneHow::Search && !(2..=5).contains(&knobs.len()) {
         return Err("search tunes 2 to 5 knobs that interact: give their names in knobs.".into());

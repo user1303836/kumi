@@ -15,6 +15,7 @@ use crate::listening::{
     judging::{candidate_cost, predict},
     knobs::{Scale, Unit},
     measure::{measure_file, MeasureOptions},
+    probes::Probes,
     round::{Round, RoundKind},
 };
 use kumi_common::js::{number::to_string, string::head};
@@ -27,6 +28,8 @@ pub enum TuneHow {
     Home,
     /// A few knobs that interact, searched in generations heard side by side.
     Search,
+    /// One knob heard across its range in one pass, what it does saved, then set where it meets the target.
+    Probe,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,14 +44,14 @@ pub struct TuneRequest {
 
 /// A device's knob: where it is, its range, the values it lists (a switch or a menu), and its scale.
 #[derive(Debug, Clone)]
-struct DeviceKnob {
-    reference: String,
-    name: String,
-    raw: f64,
-    min: f64,
-    max: f64,
-    items: Vec<String>,
-    scale: Option<Scale>,
+pub(super) struct DeviceKnob {
+    pub(super) reference: String,
+    pub(super) name: String,
+    pub(super) raw: f64,
+    pub(super) min: f64,
+    pub(super) max: f64,
+    pub(super) items: Vec<String>,
+    pub(super) scale: Option<Scale>,
 }
 
 impl DeviceKnob {
@@ -70,7 +73,7 @@ const CURVE_RATE: f64 = 48_000.;
 const HOME_PROBES: usize = 4;
 /// Seconds a make of copies may take before it stops itself (well inside the script's 20 s limit, so it can take back
 /// what it made).
-const COPIES_BUDGET: f64 = 12.;
+pub(super) const COPIES_BUDGET: f64 = 12.;
 
 impl Rendering {
     pub async fn tune(self: &Rc<Self>, request: &TuneRequest, original: Signal) -> Result<Result<Round, String>, RuntimeError> {
@@ -159,6 +162,7 @@ impl Rendering {
                 TuneHow::Fit => self.tune_fit(&request, index, window, &knobs, signal.clone()).await,
                 TuneHow::Home => self.tune_home(&request, index, window, &knobs, signal.clone()).await,
                 TuneHow::Search => self.tune_search(&request, index, window, &knobs, signal.clone()).await,
+                TuneHow::Probe => self.tune_probe(&request, index, window, &knobs, signal.clone()).await,
             }
         }
         .await;
@@ -229,7 +233,7 @@ impl Rendering {
     }
 
     /// Sets knobs to raw values in one step.
-    async fn set_knobs(&self, device: &str, values: &[(&DeviceKnob, f64)], signal: Signal) -> Result<(), RuntimeError> {
+    pub(super) async fn set_knobs(&self, device: &str, values: &[(&DeviceKnob, f64)], signal: Signal) -> Result<(), RuntimeError> {
         let values: Vec<Value> = values.iter().map(|(knob, raw)| json!({"parameterRef":knob.reference,"value":raw})).collect();
         self.step("set_device_parameters", json!({"deviceRef":device,"values":values}), signal).await?;
         Ok(())
@@ -423,14 +427,8 @@ impl Rendering {
             let run = self.judge.borrow();
             let run = run.as_ref().unwrap();
             let item = &run.checklist.items[index];
-            let (aim, met) = match item.target {
-                Target::Exactly { value, within } => (value, (value - within * 0.8, value + within * 0.8)),
-                // Up to three steps under a ceiling meets it (further under is processing for nothing); it aims a step
-                // under, so the next round has room.
-                Target::AtMost { value } => (value - item.jnd, (value - item.jnd * 3., value)),
-                Target::AtLeast { value } => (value + item.jnd, (value, value + item.jnd * 3.)),
-                Target::Between { low, high } => ((low + high) / 2., (low + (high - low) * 0.1, high - (high - low) * 0.1)),
-                Target::NoHigher | Target::NoLower => return Ok(Err(format!("{} is a guard, not something to home in on.", item.label))),
+            let Some((aim, met)) = item.aim() else {
+                return Ok(Err(format!("{} is a guard, not something to home in on.", item.label)));
             };
             let excerpt = run.excerpts.iter().find(|excerpt| excerpt.window == window && excerpt.state == run.state);
             let before = excerpt.and_then(|excerpt| excerpt.values[index]);
@@ -467,6 +465,17 @@ impl Rendering {
         let mut homing =
             Homing::new(aim, met, (scale.perceptual(low), scale.perceptual(high)), x0, (!changed).then_some(start), HOME_PROBES)
                 .resolution(resolution);
+        // What this knob was heard to do to this measure before (probed, or homed in on), as the first setting to try:
+        // the excerpt's readings, so the aim moves by how far the whole stretch reads from the excerpt.
+        let kind = self.device_kind(&request.device, signal.clone()).await;
+        let measure = checklist.items[index].id.clone();
+        let saved = kind.as_ref().and_then(|kind| Probes::home().load(kind, &knob.name, &measure));
+        if let Some(response) = &saved {
+            let now = if changed { response.at_knob(x0) } else { Some(before) };
+            if let Some(guess) = now.and_then(|now| response.predict((x0, now), aim - (start - before))) {
+                homing = homing.guess(guess);
+            }
+        }
         // Where the knob is now (it moves with each probe).
         let mut current = x0;
         let (track, focus) = {
@@ -517,6 +526,11 @@ impl Rendering {
                 return Err(error);
             }
         };
+        // What each probe read on the excerpt, saved for the next time.
+        if let Some(kind) = &kind {
+            let heard: Vec<(f64, f64)> = heard_at.iter().filter_map(|(at, heard)| Some((*at, heard.read(&checklist)[index]?))).collect();
+            let _ = Probes::home().add(kind, &knob.name, &measure, &heard, resolution);
+        }
         let (best, reached) = homing.best().unwrap_or((x0, start));
         let Some(position) = heard_at.iter().position(|(at, _)| *at == best) else {
             // Nothing heard beat where it was: the knob goes back and nothing is judged.
@@ -627,7 +641,7 @@ impl Rendering {
     }
 
     /// Opens one Live undo step for Kumi's own work, when the bridge can: its id, to close it with.
-    async fn open_undo_step(&self, label: &str) -> Option<String> {
+    pub(super) async fn open_undo_step(&self, label: &str) -> Option<String> {
         if !self.connection().has("live_undo_step_begin") || !self.connection().has("live_undo_step_end") {
             return None;
         }
@@ -637,7 +651,7 @@ impl Rendering {
         super::super::context::payload(&opened).ok()?.get("stepId").and_then(Value::as_str).filter(|id| !id.is_empty()).map(str::to_owned)
     }
 
-    async fn close_undo_step(&self, step: Option<String>) {
+    pub(super) async fn close_undo_step(&self, step: Option<String>) {
         if let Some(step) = step {
             let signal = abort::any([self.connection().lifetime.clone(), abort::timeout(10_000)]);
             let _ = self.connection().call("live_undo_step_end", object(json!({"stepId":step})), signal).await;
@@ -645,7 +659,7 @@ impl Rendering {
     }
 
     /// Runs the scratch-copies script on a device's track.
-    async fn copies(&self, device: &str, args: Value, signal: Signal) -> Result<Result<Value, String>, RuntimeError> {
+    pub(super) async fn copies(&self, device: &str, args: Value, signal: Signal) -> Result<Result<Value, String>, RuntimeError> {
         let long = self.connection().references.borrow().lengthen(&json!({"deviceRef":device}));
         let long = long["deviceRef"].as_str().unwrap_or(device).to_owned();
         let code =
@@ -658,7 +672,7 @@ impl Rendering {
         match done {
             Some(done) if done.get("ok") == Some(&Value::Bool(true)) => Ok(Ok(done.get("result").cloned().unwrap_or(Value::Null))),
             Some(done) => Ok(Err(head(
-                &done.get("error").and_then(|error| error.get("message")).and_then(Value::as_str).unwrap_or("Live refused the copies"),
+                done.get("error").and_then(|error| error.get("message")).and_then(Value::as_str).unwrap_or("Live refused the copies"),
                 300,
             ))),
             None => Ok(Err("Live refused the copies.".into())),
@@ -781,8 +795,6 @@ impl Rendering {
         let start: Vec<f64> = chosen.iter().map(|(knob, scale)| fraction(scale, knob.raw)).collect();
         // Where the knobs are now costs no listen: its gap as the run reads it. A search has to beat it.
         let standing = candidate_cost(&checklist, index, &before, &whole, &before, &start, &start);
-        let tag = uuid::Uuid::new_v4().to_string()[..4].to_owned();
-        let prefix = format!("Kumi · try {tag}");
         let mut search = Cmaes::new(&start, 0.2, None, crate::core::evolve::seeded(rand::random::<u32>()));
         // What the copies can't hear (the focus track isn't with them) reads as it did before.
         let heard_alone = |values: Vec<Option<f64>>| -> Vec<Option<f64>> {
@@ -798,57 +810,30 @@ impl Rendering {
         };
         // One Live undo step for the whole search: the copies made, set and dropped (and the listens between) undo as
         // one, to nothing.
-        let step = self.open_undo_step("Kumi: search").await;
-        // The tracks there before, by Live's identity, noted before any copy is made: a crash or a lost connection
-        // still leaves the copies to be swept, an unrenamed one among them.
-        let known = match self.copies(&request.device, json!({"action":"before"}), signal.clone()).await {
-            Ok(Ok(known)) => known,
-            Ok(Err(why)) => {
-                self.close_undo_step(step).await;
-                return Ok(Err(why));
-            }
-            Err(error) => {
-                self.close_undo_step(step).await;
-                return Err(error);
-            }
+        let copies = match self.open_copies(&request.device, search.lambda, "Kumi: search", signal.clone()).await? {
+            Ok(copies) => copies,
+            Err(why) => return Ok(Err(why)),
         };
-        self.note_copies(&prefix, Some(json!({"prefix":prefix,"before":known["before"],"source":known["source"]})));
-        self.copies_live.borrow_mut().push(prefix.clone());
-        // The search, then the copies go whatever happened (a make cut off partway takes its own back).
+        // The search, then the copies go whatever happened.
         let searched: Result<Result<(), String>, RuntimeError> = async {
-            let made = match self
-                .copies(
-                    &request.device,
-                    json!({"action":"make","count":search.lambda,"prefix":prefix,"budget":COPIES_BUDGET}),
-                    signal.clone(),
-                )
-                .await?
-            {
-                Ok(made) => made,
-                Err(why) => return Ok(Err(why)),
-            };
-            let position = made.get("position").and_then(Value::as_u64).unwrap_or(0);
-            let names: Vec<String> =
-                made.get("names").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
             for _ in 0..SEARCH_GENERATIONS {
                 let points = search.ask();
                 let mut values = serde_json::Map::new();
-                for (name, point) in names.iter().zip(&points) {
+                for (name, point) in copies.names.iter().zip(&points) {
                     let knobs: serde_json::Map<String, Value> =
                         chosen.iter().zip(point).map(|((knob, scale), at)| (knob.name.clone(), json!(raw_at(scale, *at)))).collect();
                     values.insert(name.clone(), Value::Object(knobs));
                 }
-                if let Err(why) =
-                    self.copies(&request.device, json!({"action":"set","position":position,"values":values}), signal.clone()).await?
-                {
+                if let Err(why) = self.set_copies(&copies, values, signal.clone()).await? {
                     return Ok(Err(why));
                 }
-                let heard = match self.hear_tracks(&names, window, signal.clone()).await? {
+                let heard = match self.hear_tracks(&copies.names, window, signal.clone()).await? {
                     Ok(heard) => heard,
                     Err(why) => return Ok(Err(why)),
                 };
                 self.judge.borrow_mut().as_mut().unwrap().listens += 1;
-                let costs: Vec<f64> = names
+                let costs: Vec<f64> = copies
+                    .names
                     .iter()
                     .zip(&points)
                     .map(|(name, point)| match heard.get(name) {
@@ -863,33 +848,7 @@ impl Rendering {
             Ok(Ok(()))
         }
         .await;
-        let dropped = self
-            .copies(
-                &request.device,
-                json!({"action":"drop","prefix":prefix,"before":known["before"],"source":known["source"]}),
-                self.cleanup(),
-            )
-            .await;
-        self.close_undo_step(step).await;
-        self.copies_live.borrow_mut().retain(|live| *live != prefix);
-        match dropped {
-            // Forgotten only once nothing of them is left.
-            Ok(Ok(done)) if done["left"].as_u64() == Some(0) => self.note_copies(&prefix, None),
-            Ok(Ok(done)) => self.tell(
-                format!("{} of Kumi's scratch copies are still in the Set; it'll remove them when Live reconnects.", done["left"]),
-                None,
-            ),
-            Ok(Err(why)) => {
-                self.tell(format!("Kumi couldn't remove its scratch copies ({why}); it'll try again when Live reconnects."), None)
-            }
-            Err(error) => self.tell(
-                format!(
-                    "Kumi couldn't remove its scratch copies ({}); it'll try again when Live reconnects.",
-                    head(&error.to_string(), 160)
-                ),
-                None,
-            ),
-        }
+        self.close_copies(copies).await;
         match searched? {
             Ok(()) => {}
             Err(why) => return Ok(Err(why)),
@@ -925,7 +884,7 @@ impl Rendering {
 }
 
 /// The model's own words for the change, as the log's lead-in.
-fn said_first(request: &TuneRequest) -> String {
+pub(super) fn said_first(request: &TuneRequest) -> String {
     request.change.as_ref().map(|change| format!("{}. ", change.trim().trim_end_matches('.'))).unwrap_or_default()
 }
 

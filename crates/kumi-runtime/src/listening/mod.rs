@@ -12,5 +12,6 @@ pub mod knobs;
 pub mod listener;
 pub mod measure;
 pub mod notes;
+pub mod probes;
 pub mod round;
 pub mod sound;

@@ -1,6 +1,6 @@
 //! Code picking numbers: homing that never runs out of room, a searched candidate that goes silent or hurts something
 //! never winning, an EQ fit that holds the regions already in tolerance, a search as short as Kumi runs it, and knob
-//! text read the way Live writes it.
+//! text read the way Live writes it, and a knob probed before starting where its saved response says.
 use kumi_runtime::listening::{
     checklist::{Checklist, Item, Quantity, Role, Target, REGIONS},
     cmaes::Cmaes,
@@ -8,6 +8,7 @@ use kumi_runtime::listening::{
     home::{Homed, Homing},
     judging::candidate_cost,
     knobs::{Scale, Unit},
+    probes::Probes,
 };
 
 const RATE: f64 = 48_000.;
@@ -166,4 +167,29 @@ fn a_true_peak_ceiling_is_homed_in_finer_than_a_decibel() {
     assert!((at + 1.4).abs() < 1e-9, "{at}");
     let coarse = Homing::new(-1.2, (-1.6, -1.), (-24., 0.), -0.5, Some(-0.3), 4).resolution(1.);
     assert_eq!(coarse.next(Some(1.)), Err(Homed::Stuck));
+}
+
+#[test]
+fn a_knob_probed_before_starts_where_its_saved_response_says() {
+    let dir = std::env::temp_dir().join(format!("kumi-probes-{}", std::process::id()));
+    let probes = Probes::at(&dir);
+    // A reverb's decay knob (in octaves of time) against the decay time it gave, heard across its range.
+    let heard = [(-1., 0.4), (0., 0.8), (1., 1.5), (2., 2.9), (3., 5.5)];
+    probes.add("Reverb", "Decay Time", "decay time", &heard, 0.1).unwrap();
+    assert_eq!(probes.load("Reverb", "Size", "decay time"), None);
+    assert_eq!(probes.load("Reverb", "Decay Time", "tail share"), None);
+    let saved = probes.load("Reverb", "Decay Time", "decay time").unwrap();
+    // It reads 0.9 s where it is (0.1 s over the saved curve): 2.0 s is a curve's 1.9 s, two sevenths past its 1.5.
+    let guess = saved.predict((0., 0.9), 2.).unwrap();
+    assert!((guess - (1. + 0.4 / 1.4)).abs() < 1e-9, "{guess}");
+    let homing = Homing::new(2., (1.9, 2.1), (-1., 4.), 0., Some(0.9), 4).guess(guess);
+    assert_eq!(homing.next(None), Ok(guess));
+    // Beyond what the knob ever reached: the end that came closest.
+    assert_eq!(saved.predict((0., 0.8), 9.), Some(3.));
+    // Heard again near a setting: the newer reading replaces it.
+    probes.add("Reverb", "Decay Time", "decay time", &[(1.02, 1.6)], 0.1).unwrap();
+    let points = probes.load("Reverb", "Decay Time", "decay time").unwrap().points;
+    assert_eq!(points.len(), 5);
+    assert!(points.contains(&(1.02, 1.6)) && !points.contains(&(1., 1.5)));
+    let _ = std::fs::remove_dir_all(&dir);
 }

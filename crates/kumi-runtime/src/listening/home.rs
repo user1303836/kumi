@@ -23,6 +23,8 @@ pub struct Homing {
     /// Probes closer than this sound the same (one just-noticeable step of the knob): one that close to another isn't
     /// heard again.
     pub resolution: f64,
+    /// Where to try first, from what the knob was heard to do before (a saved response).
+    guess: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,7 +50,15 @@ impl Homing {
             hurt: vec![],
             most,
             resolution: (high - low).abs() * 1e-6,
+            guess: None,
         }
+    }
+    /// A first setting to hear, from what the knob is known to do, in place of feeling its way from where it is.
+    pub fn guess(mut self, at: f64) -> Self {
+        if at.is_finite() {
+            self.guess = Some(at.clamp(self.low, self.high));
+        }
+        self
     }
     /// Probes closer than `step` (one just-noticeable step of the knob, in its perceptual units) count as the same.
     pub fn resolution(mut self, step: f64) -> Self {
@@ -95,10 +105,16 @@ impl Homing {
     /// knob, when known before any probe (a gain moves loudness one for one).
     pub fn next(&self, slope: Option<f64>) -> Result<f64, Homed> {
         if self.probes.is_empty() {
-            return Ok(self.first);
+            return Ok(self.guess.unwrap_or(self.first));
         }
         if let Some(done) = self.done() {
             return Err(done);
+        }
+        // The guess first, unless where it started is already that close.
+        if let Some(guess) = self.guess.filter(|_| self.listens() == 0) {
+            if self.probes.iter().all(|p| (p.0 - guess).abs() >= self.resolution.max(1e-9 * (self.high - self.low))) {
+                return Ok(guess);
+            }
         }
         let (x, y) = *self.probes.last().unwrap();
         // The closest probes on either side of the aim, once there are some: false position between them.

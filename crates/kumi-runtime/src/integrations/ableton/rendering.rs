@@ -5,6 +5,7 @@ mod form;
 mod goal;
 mod groove;
 mod judge;
+mod probe;
 mod listen;
 mod pass;
 mod rig;

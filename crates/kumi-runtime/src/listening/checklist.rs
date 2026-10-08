@@ -403,6 +403,17 @@ pub struct Item {
 }
 
 impl Item {
+    /// Where a knob turned for it should take it, and the range that meets it: up to three steps under a ceiling
+    /// (further under is processing for nothing), aiming a step under so the next round has room. None for a guard.
+    pub fn aim(&self) -> Option<(f64, (f64, f64))> {
+        match self.target {
+            Target::Exactly { value, within } => Some((value, (value - within * 0.8, value + within * 0.8))),
+            Target::AtMost { value } => Some((value - self.jnd, (value - self.jnd * 3., value))),
+            Target::AtLeast { value } => Some((value + self.jnd, (value, value + self.jnd * 3.))),
+            Target::Between { low, high } => Some(((low + high) / 2., (low + (high - low) * 0.1, high - (high - low) * 0.1))),
+            Target::NoHigher | Target::NoLower => None,
+        }
+    }
     /// How far off target a value is, in just-noticeable steps (0 within tolerance).
     pub fn gap(&self, value: Option<f64>) -> f64 {
         let Some(value) = value else { return 0. };
