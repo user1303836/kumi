@@ -1,7 +1,9 @@
 //! A part's feel measured on its notes: swing fitted on the right grid, each lane's timing, velocity and where it
 //! plays (lanes by a Drum Rack's pads, one lane for anything else), the notes moved toward a reference's feel closing
-//! the gaps, and a recording's grid fitted to its notes.
-use kumi_runtime::listening::notes::{feel, fit_grid, fit_swing, gaps, lines, pad_lane, toward, Feel, Kit, Note};
+//! the gaps, a recording's grid fitted to its notes, and a drum stem's hits found per band and refined lane by lane.
+use kumi_runtime::listening::notes::{
+    feel, fit_grid, fit_swing, gaps, high_onsets, lines, onsets, pad_lane, refine, refine_kit, toward, Feel, Kit, Note,
+};
 
 /// A Drum Rack with a kick, a snare and closed hats where Live's Drums to MIDI writes them.
 fn kit() -> Kit {
@@ -234,4 +236,86 @@ fn a_downbeat_played_early_doesnt_add_a_bar() {
     let measured = drums(&notes, tempo);
     let hats = measured.lanes.iter().find(|lane| lane.name == "hats").unwrap();
     assert!(hats.density.iter().all(|density| *density == 1.), "{:?}", hats.density);
+}
+
+/// Two and a half seconds of a drum stem at 44.1 kHz over a quiet noise floor: a kick (a 55 Hz thump with a short
+/// 2.5 kHz click) at each of `kicks` (seconds), and a closed hat (a burst of noise) `hat_late` seconds after each.
+fn stem(kicks: &[f64], hat_late: f64) -> Vec<f32> {
+    let rate = 44_100.;
+    let mut seed = 7u64;
+    let mut noise = move || {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((seed >> 33) as f64 / (1u64 << 31) as f64) * 2. - 1.
+    };
+    let mut samples: Vec<f32> = (0..(2.5 * rate) as usize).map(|_| (0.003 * noise()) as f32).collect();
+    for kick in kicks {
+        let start = (kick * rate) as usize;
+        for n in 0..(0.3 * rate) as usize {
+            let t = n as f64 / rate;
+            let click = if t < 0.003 { 0.5 * (std::f64::consts::TAU * 2500. * t).sin() * (-t / 0.001).exp() } else { 0. };
+            samples[start + n] += (0.8 * (std::f64::consts::TAU * 55. * t).sin() * (-t / 0.025).exp() + click) as f32;
+        }
+        let start = ((kick + hat_late) * rate) as usize;
+        for n in 0..(0.12 * rate) as usize {
+            let t = n as f64 / rate;
+            samples[start + n] += (0.3 * noise() * (-t / 0.015).exp()) as f32;
+        }
+    }
+    samples
+}
+
+#[test]
+fn a_hat_just_behind_a_kick_keeps_its_own_onset_in_the_highs() {
+    let kicks = [0.25, 0.75, 1.25, 1.75];
+    let samples = stem(&kicks, 0.015);
+    // The whole stem gives one onset for each kick and its hat, at the kick.
+    let whole = onsets(&samples, 44_100.);
+    assert_eq!(whole.len(), 4, "{whole:?}");
+    for (onset, kick) in whole.iter().zip(kicks) {
+        assert!((onset - kick).abs() < 0.004, "{whole:?}");
+    }
+    // The highs give the hats', 15 ms later.
+    let highs = high_onsets(&samples, 44_100.);
+    assert_eq!(highs.len(), 4, "{highs:?}");
+    for (onset, kick) in highs.iter().zip(kicks) {
+        assert!((onset - (kick + 0.015)).abs() < 0.004, "{highs:?}");
+    }
+}
+
+#[test]
+fn refining_a_drum_stem_keeps_a_laid_back_hats_timing() {
+    // Drums to MIDI put each hat on its kick; the stem has them 15 ms (0.03 beats at 120 BPM) behind.
+    let kicks = [0.25, 0.75, 1.25, 1.75];
+    let samples = stem(&kicks, 0.015);
+    let beats = |found: Vec<f64>| -> Vec<f64> { found.iter().map(|seconds| seconds * 2.).collect() };
+    let (whole, highs) = (beats(onsets(&samples, 44_100.)), beats(high_onsets(&samples, 44_100.)));
+    let mut notes = vec![];
+    for kick in kicks {
+        notes.push(Note { start: kick * 2., length: 0.25, pitch: 36, velocity: 110. });
+        notes.push(Note { start: kick * 2., length: 0.25, pitch: 42, velocity: 90. });
+    }
+    refine_kit(&mut notes, &kit(), &whole, &highs, 0.08);
+    for pair in notes.chunks(2) {
+        let late = (pair[1].start - pair[0].start) * 500.;
+        assert!((late - 15.).abs() < 3., "the hat sits {late} ms behind its kick: {notes:?}");
+    }
+    // One band for everything, as before: both snap onto the kick's onset and the hats read on the beat.
+    let mut merged: Vec<Note> = notes.iter().map(|note| Note { start: (note.start * 4.).round() / 4., ..*note }).collect();
+    refine(&mut merged, &whole, 0.08);
+    assert!(merged.chunks(2).all(|pair| (pair[1].start - pair[0].start).abs() < 1e-9), "{merged:?}");
+}
+
+#[test]
+fn an_onset_goes_to_the_notes_nearest_it_only() {
+    // Notes 0.02 beats apart near one onset: only the nearer moves; two notes that start together move together.
+    let mut notes = vec![
+        Note { start: 1., length: 0.25, pitch: 36, velocity: 100. },
+        Note { start: 1.02, length: 0.25, pitch: 38, velocity: 100. },
+        Note { start: 2., length: 0.25, pitch: 36, velocity: 100. },
+        Note { start: 2., length: 0.25, pitch: 49, velocity: 100. },
+    ];
+    let moved = refine(&mut notes, &[0.99, 2.01], 0.08);
+    let starts: Vec<f64> = notes.iter().map(|note| note.start).collect();
+    assert_eq!(starts, vec![0.99, 1.02, 2.01, 2.01]);
+    assert_eq!(moved, 3);
 }

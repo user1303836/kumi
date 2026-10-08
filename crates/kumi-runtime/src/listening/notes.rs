@@ -3,6 +3,7 @@
 //! much it plays off the beat (syncopation) and how its phrase ends differ (fills). A part on a Drum Rack splits into
 //! lanes (kick, snare, hats, cymbals, perc), named from its pads; any other part is one lane.
 
+use crate::audio::dsp::high_pass;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::TAU;
 
@@ -282,6 +283,23 @@ impl Feel {
     pub fn lane(&self, name: &str) -> Option<&Lane> {
         self.lanes.iter().find(|lane| lane.name == name)
     }
+
+    /// The same feel at another tempo, its timing kept as a share of the beat: each step's offset, its push and its
+    /// looseness, ms at `tempo`. A groove run reads its reference at the tempo each round hears the part at.
+    pub fn at_tempo(&self, tempo: f64) -> Feel {
+        let mut feel = self.clone();
+        if tempo <= 0. || (tempo - self.tempo).abs() < 1e-9 {
+            return feel;
+        }
+        let scale = self.tempo / tempo;
+        for offset in feel.lanes.iter_mut().flat_map(|lane| lane.offset.iter_mut().flatten()) {
+            *offset = round1(*offset * scale);
+        }
+        feel.push = round1(self.push * scale);
+        feel.looseness = round1(self.looseness * scale);
+        feel.tempo = tempo;
+        feel
+    }
 }
 
 /// The index of the largest value, the first of equals.
@@ -470,6 +488,22 @@ fn round2(value: f64) -> f64 {
 /// Where hits start in a recording, seconds: the rises of a short-window energy envelope (a quarter of a millisecond
 /// apart, on the signal's first difference, so lows don't smear them), each at least 30 ms after the last.
 pub fn onsets(samples: &[f32], rate: f64) -> Vec<f64> {
+    rises(samples, rate, false)
+}
+
+/// Where hats and cymbals hit in a drum recording, seconds: the onsets of its highs (above 7 kHz, which a kick or a
+/// snare's body hardly reaches), the loudest of any within 30 ms. A hat just behind a kick, one onset in the whole
+/// recording, keeps its own here.
+pub fn high_onsets(samples: &[f32], rate: f64) -> Vec<f64> {
+    let hz = 7000f64.min(rate * 0.4);
+    let mut filters = [high_pass(rate, hz), high_pass(rate, hz)];
+    let highs: Vec<f32> =
+        samples.iter().map(|sample| filters.iter_mut().fold(*sample as f64, |value, filter| filter.process(value)) as f32).collect();
+    rises(&highs, rate, true)
+}
+
+/// The rises that mark onsets, seconds; of two within 30 ms, the first (or with `loudest`, the louder).
+fn rises(samples: &[f32], rate: f64, loudest: bool) -> Vec<f64> {
     let hop = ((rate / 1000.).round() as usize).max(1);
     let window = hop * 4;
     if samples.len() < window * 4 {
@@ -487,29 +521,72 @@ pub fn onsets(samples: &[f32], rate: f64) -> Vec<f64> {
     sorted.sort_by(f64::total_cmp);
     let threshold = sorted[sorted.len() * 9 / 10].max(6.);
     let gap = (0.03 * rate / hop as f64) as usize;
-    let mut found: Vec<f64> = vec![];
-    let mut last: Option<usize> = None;
+    // Each onset's frame, and how loud it rises to.
+    let mut found: Vec<(usize, f64)> = vec![];
     for (frame, value) in rise.iter().enumerate() {
         let peak = *value >= threshold && (frame == 0 || rise[frame - 1] < *value) && rise.get(frame + 1).is_none_or(|next| next <= value);
-        if peak && last.is_none_or(|at| frame - at >= gap) {
-            found.push(((frame + 2) * hop) as f64 / rate);
-            last = Some(frame);
+        if !peak {
+            continue;
+        }
+        let level = energy[frame + 3];
+        match found.last_mut() {
+            Some((at, kept)) if frame - *at < gap => {
+                if loudest && level > *kept {
+                    (*at, *kept) = (frame, level);
+                }
+            }
+            _ => found.push((frame, level)),
         }
     }
-    found
+    found.iter().map(|(frame, _)| ((frame + 2) * hop) as f64 / rate).collect()
 }
 
-/// Notes moved onto the hits they stand for: each to the nearest onset within `within` beats (onsets in beats too).
-/// Drums to MIDI places hits on its own analysis grid; the recording says where they really are.
+/// Notes moved onto the hits they stand for: each onset within `within` beats of a note (onsets in beats too) to the
+/// nearest notes only, those that start together, so notes at different times never land on one hit. Drums to MIDI
+/// places hits on its own analysis grid; the recording says where they really are.
 pub fn refine(notes: &mut [Note], onsets: &[f64], within: f64) -> usize {
+    let mut onsets: Vec<f64> = onsets.to_vec();
+    onsets.sort_by(f64::total_cmp);
+    let mut starts: Vec<f64> = notes.iter().map(|note| note.start).collect();
+    starts.sort_by(f64::total_cmp);
+    starts.dedup_by(|a, b| (*a - *b).abs() <= 1e-6);
+    // Every start and onset close enough, nearest first: each pairs once.
+    let mut pairs: Vec<(f64, usize, usize)> = vec![];
+    for (index, start) in starts.iter().enumerate() {
+        let from = onsets.partition_point(|at| *at < start - within);
+        pairs.extend(
+            onsets[from..].iter().take_while(|at| **at <= start + within).enumerate().map(|(k, at)| ((at - start).abs(), index, from + k)),
+        );
+    }
+    pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (mut placed, mut taken) = (vec![None; starts.len()], vec![false; onsets.len()]);
+    for (_, index, onset) in pairs {
+        if placed[index].is_none() && !taken[onset] {
+            (placed[index], taken[onset]) = (Some(onsets[onset]), true);
+        }
+    }
     let mut moved = 0;
     for note in notes.iter_mut() {
-        let nearest = onsets.iter().copied().min_by(|a, b| (a - note.start).abs().total_cmp(&(b - note.start).abs()));
-        if let Some(at) = nearest.filter(|at| (at - note.start).abs() <= within) {
-            if (at - note.start).abs() > 1e-6 {
-                note.start = at.max(0.);
-                moved += 1;
-            }
+        let index = starts.partition_point(|start| *start < note.start - 1e-6);
+        if let Some(at) = placed.get(index).copied().flatten().filter(|at| (at - note.start).abs() > 1e-6) {
+            note.start = at.max(0.);
+            moved += 1;
+        }
+    }
+    moved
+}
+
+/// A drum recording's hits refined lane by lane: hats and cymbals onto the onsets of its highs, the rest onto the
+/// whole recording's (both in beats), so a hat just behind a kick keeps its own timing.
+pub fn refine_kit(notes: &mut [Note], kit: &Kit, onsets: &[f64], high_onsets: &[f64], within: f64) -> usize {
+    let (high, rest): (Vec<usize>, Vec<usize>) =
+        (0..notes.len()).partition(|index| kit.drums && matches!(kit.lane(notes[*index].pitch), "hats" | "cymbals"));
+    let mut moved = 0;
+    for (members, found) in [(high, high_onsets), (rest, onsets)] {
+        let mut lane: Vec<Note> = members.iter().map(|index| notes[*index]).collect();
+        moved += refine(&mut lane, found, within);
+        for (index, note) in members.iter().zip(lane) {
+            notes[*index] = note;
         }
     }
     moved

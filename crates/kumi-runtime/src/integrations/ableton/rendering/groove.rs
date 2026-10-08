@@ -13,7 +13,7 @@ use super::rig::Window;
 use super::*;
 use crate::listening::{
     checklist::{Change, Row},
-    notes::{feel, fit_grid, gaps, lines, onsets, refine, toward, Feel, Kit, Line, Note},
+    notes::{feel, fit_grid, gaps, high_onsets, lines, onsets, refine_kit, toward, Feel, Kit, Line, Note},
     round::{Next, Round, RoundKind},
 };
 use kumi_common::js::{number::to_string, string::head};
@@ -44,10 +44,13 @@ pub struct GrooveRun {
     clip: String,
     /// How the part's notes fall into lanes.
     kit: Kit,
+    /// The reference's feel at its own tempo; each round reads it at the part's (timing as a share of the beat).
     reference: Feel,
     reference_name: String,
     lines: Vec<Line>,
     first: Vec<Line>,
+    /// The tempo the lines' ms are at: the Set's when they were read.
+    tempo: f64,
     target: Option<String>,
     checkpoint: Vec<String>,
     round: u32,
@@ -61,6 +64,19 @@ impl GrooveRun {
     /// these (the changes applied now).
     pub(super) fn carry_on(&mut self, applied: Vec<String>) {
         self.checkpoint = applied;
+    }
+
+    /// Its lines at the tempo a round reads the part at, after the Set's tempo changed: timing gaps are a share of the
+    /// beat, so their ms follow it, and a round compares like with like.
+    fn follow_tempo(&mut self, tempo: f64) {
+        if tempo <= 0. || (tempo - self.tempo).abs() < 1e-9 {
+            return;
+        }
+        let scale = self.tempo / tempo;
+        for line in self.lines.iter_mut().chain(self.first.iter_mut()).filter(|line| line.unit == "ms") {
+            line.value = round1(line.value * scale);
+        }
+        self.tempo = tempo;
     }
 }
 
@@ -292,10 +308,11 @@ impl Rendering {
         }
         let _ = source.close().await;
         let tempo = self.observer.tempo.get().unwrap_or(120.);
-        // Onsets in the clip's own beats.
-        let found: Vec<f64> = onsets(&samples, rate).iter().map(|seconds| window.from + seconds * tempo / 60. - zero).collect();
+        // Onsets in the clip's own beats: the whole stem's, and its highs' for the hats and cymbals.
+        let beats = |found: Vec<f64>| -> Vec<f64> { found.iter().map(|seconds| window.from + seconds * tempo / 60. - zero).collect() };
+        let (found, highs) = (beats(onsets(&samples, rate)), beats(high_onsets(&samples, rate)));
         let mut notes: Vec<Note> = reference.notes.iter().map(|(_, note)| *note).collect();
-        let moved = refine(&mut notes, &found, 0.04 * tempo / 60.);
+        let moved = refine_kit(&mut notes, &reference.kit, &found, &highs, 0.04 * tempo / 60.);
         for ((_, note), refined) in reference.notes.iter_mut().zip(notes) {
             *note = refined;
         }
@@ -365,7 +382,7 @@ impl Rendering {
         if !wanted.velocities {
             reference_feel = reference_feel.without_velocities();
         }
-        let now = lines(&gaps(&part_feel, &reference_feel));
+        let now = lines(&gaps(&part_feel, &reference_feel.at_tempo(part_feel.tempo)));
         let mut run = GrooveRun {
             clip: clip.into(),
             kit,
@@ -373,6 +390,7 @@ impl Rendering {
             reference_name: wanted.name.clone(),
             lines: now.clone(),
             first: now,
+            tempo: part_feel.tempo,
             target: None,
             checkpoint: self.applied_ids(),
             round: 0,
@@ -443,7 +461,13 @@ impl Rendering {
             let part = self.feel_of(&read.notes, &kit, None);
             let moved = {
                 let run = self.groove.borrow();
-                toward(&notes, &part, &run.as_ref().unwrap().reference, self.observer.beats_per_bar.get().max(1.), amount)
+                toward(
+                    &notes,
+                    &part,
+                    &run.as_ref().unwrap().reference.at_tempo(part.tempo),
+                    self.observer.beats_per_bar.get().max(1.),
+                    amount,
+                )
             };
             let patches: Vec<Value> =
                 read.notes.iter().zip(&moved).filter_map(|((id, before), after)| inside(*id, before, after, (read.to, read.end))).collect();
@@ -469,9 +493,10 @@ impl Rendering {
         let mine = clip_and_track(self.connection(), &clip).map(|(long, _)| long);
         let (changes, others) = self.note_changes_since(&checkpoint, mine.as_deref());
         let (rows, kept, why, target_label) = {
-            let run = self.groove.borrow();
-            let run = run.as_ref().unwrap();
-            let now = lines(&gaps(&part, &run.reference));
+            let mut run = self.groove.borrow_mut();
+            let run = run.as_mut().unwrap();
+            run.follow_tempo(part.tempo);
+            let now = lines(&gaps(&part, &run.reference.at_tempo(part.tempo)));
             verdict(run, &now)
         };
         let mut why = why;

@@ -7,7 +7,6 @@ use super::{
 use kumi_common::abort::{Signal, SignalExt};
 use kumi_common::js::number::{round as js_round, to_string};
 use serde::{Deserialize, Serialize};
-use std::f64::consts::{FRAC_1_SQRT_2, PI};
 pub const ANALYSIS_VERSION: u32 = 1;
 #[derive(Debug, Clone, Copy)]
 pub struct Band {
@@ -530,16 +529,6 @@ impl Meter {
             scale: "9 = loudest, each step 3 dB quieter, · = silent".into(),
         }
     }
-}
-fn low_pass(rate: f64, hz: f64) -> Biquad {
-    let k = (PI * hz / rate).tan();
-    let norm = 1.0 / (1.0 + k / FRAC_1_SQRT_2 + k * k);
-    Biquad::new(k * k * norm, 2.0 * k * k * norm, k * k * norm, 2.0 * (k * k - 1.0) * norm, (1.0 - k / FRAC_1_SQRT_2 + k * k) * norm)
-}
-fn high_pass(rate: f64, hz: f64) -> Biquad {
-    let k = (PI * hz / rate).tan();
-    let norm = 1.0 / (1.0 + k / FRAC_1_SQRT_2 + k * k);
-    Biquad::new(norm, -2.0 * norm, norm, 2.0 * (k * k - 1.0) * norm, (1.0 - k / FRAC_1_SQRT_2 + k * k) * norm)
 }
 fn slope(points: &[(f64, f64)]) -> f64 {
     if points.len() < 2 {

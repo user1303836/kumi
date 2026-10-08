@@ -156,11 +156,13 @@ fn live(ids: bool) -> Rc<Live> {
     Rc::new(Live { notes: RefCell::new(notes), ids })
 }
 
-/// What the tests hold of the groove judge: it, Live's connection, HISTORY, and the changes it made.
+/// What the tests hold of the groove judge: it, Live's connection, HISTORY, what it observes of the Set, and the
+/// changes it made.
 struct Groove {
     rendering: Rc<Rendering>,
     connection: Rc<LiveConnection>,
     history: Rc<History>,
+    observer: Rc<Observer>,
     made: Rc<RefCell<Vec<(String, JsonObject)>>>,
 }
 
@@ -193,7 +195,7 @@ async fn groove_with(live: Rc<Live>, clip_file: ResolveAudio) -> Groove {
     let book = connection.clone();
     let rendering = Rendering::new(
         history.clone(),
-        observer,
+        observer.clone(),
         &options,
         Rc::new(move |tool: String, input: JsonObject, _| {
             // As Kumi's changes do: only what Live was read for in this answer can be named.
@@ -216,7 +218,7 @@ async fn groove_with(live: Rc<Live>, clip_file: ResolveAudio) -> Groove {
         }),
         clip_file,
     );
-    Groove { rendering, connection, history, made }
+    Groove { rendering, connection, history, observer, made }
 }
 
 fn request(value: Value) -> GrooveRequest {
@@ -375,6 +377,32 @@ async fn a_stale_or_midi_reference_clip_says_which_before_the_song_is_heard() {
                 // Nothing was played or made to hear the song first.
                 assert!(made.borrow().is_empty());
             }
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_tempo_change_mid_run_keeps_the_references_timing_as_a_share_of_the_beat() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let live = live(true);
+            let Groove { rendering, observer, .. } = groove(live.clone()).await;
+            // The reference's hats sit 12 ms behind at 120 BPM: 0.024 beats.
+            rendering.groove(&request(json!({"clip":"7:clip:0:0","reference":"7:clip:1:0"})), Signal::new()).await.unwrap().unwrap();
+            observer.tempo.set(Some(150.));
+            let round = rendering.groove(&request(json!({"apply":true})), Signal::new()).await.unwrap().unwrap();
+            assert_eq!(round.kept, Some(true), "{:?}", round.why);
+            // At 150 BPM the part's hats move 0.024 beats (9.6 ms), not 12 ms (0.03 beats).
+            for note in &live.notes.borrow()["7:clip:0:0"] {
+                if note["pitch"] == 42 && note["id"] != 99 {
+                    let start = note["start"].as_f64().unwrap();
+                    let late = start - (start * 4.).floor() / 4.;
+                    assert!((late - 0.024).abs() < 0.002, "{note}");
+                }
+            }
+            let timing = round.rows.iter().find(|row| row.id == "timing hats").unwrap();
+            assert_eq!(timing.before, Some(9.6), "{timing:?}");
+            assert_eq!(timing.gap_after, 0., "{timing:?}");
         })
         .await;
 }

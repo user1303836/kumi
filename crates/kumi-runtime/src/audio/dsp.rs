@@ -1,7 +1,7 @@
 //! The signal processing Kumi's listening is built from: FFT, windows, filters, conversions.
 
 use serde::{Deserialize, Serialize};
-use std::f64::consts::PI;
+use std::f64::consts::{FRAC_1_SQRT_2, PI};
 use std::{
     collections::HashMap,
     sync::{Arc, LazyLock, Mutex},
@@ -113,6 +113,18 @@ impl Biquad {
         self.z2 = self.b2 * input - self.a2 * output;
         output
     }
+}
+/// A second-order Butterworth low-pass at `hz`.
+pub fn low_pass(rate: f64, hz: f64) -> Biquad {
+    let k = (PI * hz / rate).tan();
+    let norm = 1.0 / (1.0 + k / FRAC_1_SQRT_2 + k * k);
+    Biquad::new(k * k * norm, 2.0 * k * k * norm, k * k * norm, 2.0 * (k * k - 1.0) * norm, (1.0 - k / FRAC_1_SQRT_2 + k * k) * norm)
+}
+/// A second-order Butterworth high-pass at `hz`.
+pub fn high_pass(rate: f64, hz: f64) -> Biquad {
+    let k = (PI * hz / rate).tan();
+    let norm = 1.0 / (1.0 + k / FRAC_1_SQRT_2 + k * k);
+    Biquad::new(norm, -2.0 * norm, norm, 2.0 * (k * k - 1.0) * norm, (1.0 - k / FRAC_1_SQRT_2 + k * k) * norm)
 }
 /// ITU-R BS.1770's K-weighting at any sample rate, from the analog prototypes.
 pub fn k_weighting(sample_rate: f64) -> [Biquad; 2] {
