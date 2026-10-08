@@ -287,7 +287,14 @@ impl Rendering {
             })
             .collect();
         // Said once a run: whether a listening model will hear the changes beside the meters.
-        let alone = self.listener(signal.clone()).await.0.is_none().then(|| NO_LISTENER.to_string());
+        let alone = match self.listener(signal.clone()).await {
+            (Some(_), _) => None,
+            // A key is there but the model couldn't be reached: that, not the key, is what to say.
+            (None, Some((why, _))) => {
+                Some(format!("The listening model couldn't be reached ({why}): judging by Kumi's meters alone for now"))
+            }
+            (None, None) => Some(NO_LISTENER.to_string()),
+        };
         let round = Round {
             round: 0,
             kind: RoundKind::Start,
@@ -610,13 +617,13 @@ impl Rendering {
 
     /// The listening model: one found is kept; a definite none (no provider has one) is believed for ten minutes, to
     /// notice a key added since; a lookup that failed (the network, the service) for a minute, so a round doesn't wait
-    /// on it each time. With why it failed, the first time only (to say it once).
-    async fn listener(&self, signal: Signal) -> (Option<Rc<dyn Listener>>, Option<String>) {
+    /// on it each time. With why it failed, and whether that's news (to say it once a round).
+    async fn listener(&self, signal: Signal) -> (Option<Rc<dyn Listener>>, Option<(String, bool)>) {
         if let Some((known, at)) = self.listener.borrow().clone() {
             match known {
                 Ok(Some(found)) => return (Some(found), None),
                 Ok(None) if now_ms() - at < 600_000 => return (None, None),
-                Err(_) if now_ms() - at < 60_000 => return (None, None),
+                Err(why) if now_ms() - at < 60_000 => return (None, Some((why, false))),
                 _ => {}
             }
         }
@@ -632,7 +639,7 @@ impl Rendering {
         *self.listener.borrow_mut() = Some((found.clone(), now_ms()));
         match found {
             Ok(found) => (found, None),
-            Err(why) => (None, (!was_failing).then_some(why)),
+            Err(why) => (None, Some((why, !was_failing))),
         }
     }
 
@@ -647,10 +654,10 @@ impl Rendering {
     ) -> Option<(String, Option<Opinion>)> {
         let listener = match self.listener(signal.clone()).await {
             (Some(listener), _) => listener,
-            (None, Some(why)) => {
+            (None, Some((why, true))) => {
                 return Some((format!("the listening model couldn't be reached ({why}); judging by the meters alone for now"), None))
             }
-            (None, None) => return None,
+            (None, _) => return None,
         };
         if !listener.hears_width() && width_or_air {
             return None;
