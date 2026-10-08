@@ -3,6 +3,11 @@
 //! and onset activations per frame (86 a second, 88 keys) read into notes as Basic Pitch's own decoding does: onsets
 //! (predicted, or where a note's activation rises) followed while the note sounds, then what's left traced from its
 //! strongest point (its "melodia trick").
+//!
+//! The decoding and windowing are translated from Basic Pitch's `basic_pitch/note_creation.py`, `inference.py` and
+//! `constants.py` (github.com/spotify/basic-pitch at fa5997af0a8210982619003269994a1be25eddf3), Copyright 2022 Spotify
+//! AB, under the Apache License 2.0. Changed: written in Rust, reading the note and onset outputs only (no pitch
+//! bends, contours or MIDI files), resampled with Kumi's own resampler. THIRD_PARTY_NOTICES.md carries its notices.
 
 use crate::{
     audio::decode::open_audio_to,

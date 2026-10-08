@@ -333,7 +333,7 @@ def build_release(root: Path, binaries: Path, out: Path, target: str, source: di
         copy(root / "scripts/migration/kumi.mjs", bundle / "apps/kumi/bin/kumi.mjs")
         json_write(bundle / "apps/mcp-server/package.json", {"version": metadata["bridge"]})
         json_write(bundle / "kumi-install.json", {"kumi": version, "bridge": metadata["bridge"], "runtime": "rust-native", "target": target})
-        for name in ("LICENSE.md", "README.md", "CHANGELOG.md"):
+        for name in ("LICENSE.md", "THIRD_PARTY_NOTICES.md", "README.md", "CHANGELOG.md"):
             copy(root / name, bundle / name)
         prepared = bundle / "bridge"
         prepared.mkdir()
