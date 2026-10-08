@@ -147,10 +147,27 @@ pub fn judge_request(input: &JsonObject) -> Result<JudgeRequest, String> {
                     "low_width" => Quantity::LowWidth,
                     "rumble" => Quantity::Rumble,
                     "brightness" => Quantity::Tilt,
+                    "decay_time" => Quantity::DecayTime,
+                    "tail_darkening" => Quantity::Darkening,
+                    "echo_time" => Quantity::EchoTime,
+                    "echo_fall" => Quantity::EchoFalls,
+                    "swing" => Quantity::Swing,
+                    "sweep" => Quantity::Sweep,
+                    "tail_share" => Quantity::TailShare,
                     other => return Err(format!("{other} isn't a measure Kumi can target.")),
                 };
+                // Within a noticeable step unless asked.
+                let step = match measure {
+                    Quantity::DecayTime => 0.1,
+                    Quantity::EchoTime => 10.,
+                    Quantity::EchoFalls => 1.5,
+                    Quantity::Swing => 1.,
+                    Quantity::Darkening | Quantity::Sweep => 0.25,
+                    Quantity::TailShare => 5.,
+                    _ => 0.5,
+                };
                 let target = match (number(wanted, "value"), number(wanted, "at_least"), number(wanted, "at_most")) {
-                    (Some(value), _, _) => Target::Exactly { value, within: number(wanted, "within").unwrap_or(0.5) },
+                    (Some(value), _, _) => Target::Exactly { value, within: number(wanted, "within").unwrap_or(step) },
                     (None, Some(low), Some(high)) if low <= high => Target::Between { low, high },
                     (None, Some(value), None) => Target::AtLeast { value },
                     (None, None, Some(value)) => Target::AtMost { value },

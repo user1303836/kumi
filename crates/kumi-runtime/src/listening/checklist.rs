@@ -5,6 +5,7 @@
 
 use super::{
     detect::{self, hertz, Problem, ProblemKind},
+    effects,
     fit::{response, Band, Shape},
     measure::{fine_hz, percentile, Heard, Measures, FINE_BINS, THIRDS},
     sound,
@@ -82,6 +83,22 @@ pub struct SoundProfile {
     pub tail: Option<Spread>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crackle: Option<Spread>,
+    /// Its effects: a reverb's decay time (s) and how much its tail darkens (octaves), its echoes' time (ms) and fall
+    /// (dB a repeat), how far it swings (dB), how far its brightness sweeps (octaves), its tail's share (%).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decay_time: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub darkening: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub echo_time: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub echo_falls: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swing: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep: Option<Spread>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tail_share: Option<Spread>,
 }
 
 impl SoundProfile {
@@ -91,6 +108,7 @@ impl SoundProfile {
     /// One sound's, with a step either side.
     pub fn of(heard: &Heard) -> Self {
         let m = &heard.measures;
+        let fx = effects::effects(heard, None, None);
         Self {
             pitch_drop: m.pitch_drop.map(|value| Spread::point(value, 0.5)),
             modulation: m.modulation.map(|value| Spread::point(value, (value * 0.1).max(0.25))),
@@ -100,6 +118,13 @@ impl SoundProfile {
             warmth: sound::harmonics(heard).map(|harmonics| Spread::point(harmonics.warmth, 2.)),
             tail: sound::tail(heard).map(|value| Spread::point(value, 3.)),
             crackle: Some(Spread::point(m.crackle, 2.)),
+            decay_time: fx.decay_time.map(|value| Spread::point(value, (value * 0.1).max(0.05))),
+            darkening: fx.darkening.map(|value| Spread::point(value, 0.25)),
+            echo_time: fx.echo.map(|echo| Spread::point(echo.ms, (echo.ms * 0.03).max(5.))),
+            echo_falls: fx.echo.map(|echo| Spread::point(echo.falls, 1.5)),
+            swing: fx.swing.map(|value| Spread::point(value, 1.)),
+            sweep: fx.sweep.map(|value| Spread::point(value, 0.25)),
+            tail_share: fx.tail_share.map(|value| Spread::point(value, 5.)),
         }
     }
 }
@@ -215,6 +240,13 @@ impl Profile {
                 warmth: pick(&|track| track.sound.warmth),
                 tail: pick(&|track| track.sound.tail),
                 crackle: pick(&|track| track.sound.crackle),
+                decay_time: pick(&|track| track.sound.decay_time),
+                darkening: pick(&|track| track.sound.darkening),
+                echo_time: pick(&|track| track.sound.echo_time),
+                echo_falls: pick(&|track| track.sound.echo_falls),
+                swing: pick(&|track| track.sound.swing),
+                sweep: pick(&|track| track.sound.sweep),
+                tail_share: pick(&|track| track.sound.tail_share),
             },
         })
     }
@@ -283,6 +315,13 @@ pub enum Quantity {
     Warmth,
     Tail,
     Crackle,
+    DecayTime,
+    Darkening,
+    EchoTime,
+    EchoFalls,
+    Swing,
+    Sweep,
+    TailShare,
     Region {
         region: usize,
     },
@@ -478,6 +517,53 @@ impl Checklist {
                     ("warmth", "Warmth (2nd and 3rd harmonics), as the reference", "dB", Quantity::Warmth, reference.sound.warmth, 0., 2.),
                     ("tail", "Tail (300 ms after a hit), as the reference", "dB", Quantity::Tail, reference.sound.tail, 0., 3.),
                     ("crackle", "Crackle, as the reference", "/s", Quantity::Crackle, reference.sound.crackle, 0., 2.),
+                    (
+                        "decay time",
+                        "Decay time (a reverb's RT60), as the reference",
+                        "s",
+                        Quantity::DecayTime,
+                        reference.sound.decay_time,
+                        0.1,
+                        0.05,
+                    ),
+                    (
+                        "tail darkening",
+                        "How much its tail darkens, as the reference",
+                        "oct",
+                        Quantity::Darkening,
+                        reference.sound.darkening,
+                        0.,
+                        0.25,
+                    ),
+                    ("echo time", "Echo time, as the reference", "ms", Quantity::EchoTime, reference.sound.echo_time, 0.03, 5.),
+                    (
+                        "echo fall",
+                        "How far each echo falls, as the reference",
+                        "dB",
+                        Quantity::EchoFalls,
+                        reference.sound.echo_falls,
+                        0.,
+                        1.5,
+                    ),
+                    (
+                        "swing",
+                        "How far it swings (modulation depth), as the reference",
+                        "dB",
+                        Quantity::Swing,
+                        reference.sound.swing,
+                        0.,
+                        1.,
+                    ),
+                    ("sweep", "How far its brightness moves, as the reference", "oct", Quantity::Sweep, reference.sound.sweep, 0., 0.25),
+                    (
+                        "tail share",
+                        "Its tail's share of its energy (wet against dry), as the reference",
+                        "%",
+                        Quantity::TailShare,
+                        reference.sound.tail_share,
+                        0.,
+                        5.,
+                    ),
                 ];
                 for (id, label, unit, quantity, spread, share, least) in sound {
                     let Some(spread) = spread else { continue };
@@ -838,6 +924,13 @@ fn describe(quantity: &Quantity) -> (String, String, &'static str, f64) {
         Quantity::Warmth => ("warmth".into(), "Warmth (2nd and 3rd harmonics)".into(), "dB", 2.),
         Quantity::Tail => ("tail".into(), "Tail (300 ms after a hit)".into(), "dB", 3.),
         Quantity::Crackle => ("crackle".into(), "Crackle".into(), "/s", 2.),
+        Quantity::DecayTime => ("decay time".into(), "Decay time (a reverb's RT60)".into(), "s", 0.1),
+        Quantity::Darkening => ("tail darkening".into(), "How much its tail darkens".into(), "oct", 0.25),
+        Quantity::EchoTime => ("echo time".into(), "Echo time".into(), "ms", 10.),
+        Quantity::EchoFalls => ("echo fall".into(), "How far each echo falls".into(), "dB", 1.5),
+        Quantity::Swing => ("swing".into(), "How far it swings (modulation depth)".into(), "dB", 1.),
+        Quantity::Sweep => ("sweep".into(), "How far its brightness moves".into(), "oct", 0.25),
+        Quantity::TailShare => ("tail share".into(), "Its tail's share of its energy".into(), "%", 5.),
         Quantity::Region { region } => (format!("balance {}", REGIONS[*region].0), capital(REGIONS[*region].0), "dB", 1.),
         Quantity::Problem { problem, low, high, .. } => {
             (format!("{problem:?} {}", hertz((low * high).sqrt())).to_lowercase(), format!("{problem:?}"), "dB", 1.)
@@ -878,6 +971,13 @@ fn reading(quantity: &Quantity, heard: &Heard, focus: Option<&Heard>) -> Option<
         Quantity::Warmth => sound::harmonics(heard).map(|harmonics| harmonics.warmth),
         Quantity::Tail => sound::tail(heard),
         Quantity::Crackle => Some(m.crackle),
+        Quantity::DecayTime => effects::decay_time(heard),
+        Quantity::Darkening => effects::darkening(heard),
+        Quantity::EchoTime => effects::echo(heard).map(|echo| echo.ms),
+        Quantity::EchoFalls => effects::echo(heard).map(|echo| echo.falls),
+        Quantity::Swing => effects::swing(heard),
+        Quantity::Sweep => effects::sweep(heard).map(|(octaves, _)| octaves),
+        Quantity::TailShare => effects::tail_share(heard),
         Quantity::Region { region } => Some(round1(region_level(&m.balance, *region))),
         Quantity::Problem { problem, low, high, steady, focus: name } => match problem {
             ProblemKind::Harshness | ProblemKind::Resonance => Some(region_excess(heard, *low, *high, *steady)),

@@ -13,7 +13,7 @@
           "true_peak": {"type": "number", "minimum": -12, "maximum": 0, "description": "The true-peak ceiling, dBTP"},
           "reference": {"type": "string", "minLength": 1, "maxLength": 1024, "description": "A reference: one measured with the reference tool (its name), an audio file's path (~/…) or an audio clip's clipRef"},
           "problems": {"type": "boolean", "description": "Clear what Kumi's detectors find (true when left out)"},
-          "sound": {"type": "boolean", "description": "A single sound (a patch, a hit) against a reference sound: its attack, decay, where it settles, brightness, noisiness, pitch drop (an 808's or a kick's), modulation rate, width, top (bandwidth), noise floor, warmth (2nd and 3rd harmonics), tail and crackle join the checklist. Judge it on the track that plays it (track)"},
+          "sound": {"type": "boolean", "description": "A single sound (a patch, a hit) against a reference sound: its attack, decay, where it settles, brightness, noisiness, pitch drop (an 808's or a kick's), modulation rate, width, top (bandwidth), noise floor, warmth (2nd and 3rd harmonics), tail and crackle join the checklist, and its effects: a reverb's decay time and how its tail darkens, echoes' time and fall, how deep it swings, how far its brightness sweeps and its tail's share. Judge it on the track that plays it (track)"},
           "focus": {"type": "string", "minLength": 1, "maxLength": 256, "description": "The track that must cut through the rest (its ref or name)"},
           "targets": {
             "type": "array",
@@ -23,7 +23,7 @@
               "additionalProperties": false,
               "required": ["measure"],
               "properties": {
-                "measure": {"type": "string", "enum": ["dynamics", "density", "range", "punch", "pumping", "distortion", "low_width", "rumble", "brightness"], "description": "dynamics: peak to loudness (dB); density: peak to short-term loudness (dB); range: loudness range (LU); punch: crest (dB); low_width: side under mid below 120 Hz (dB); rumble: under 30 Hz against 30–120 Hz (dB); brightness: tilt (dB per octave, 0 is pink)"},
+                "measure": {"type": "string", "enum": ["dynamics", "density", "range", "punch", "pumping", "distortion", "low_width", "rumble", "brightness", "decay_time", "tail_darkening", "echo_time", "echo_fall", "swing", "sweep", "tail_share"], "description": "dynamics: peak to loudness (dB); density: peak to short-term loudness (dB); range: loudness range (LU); punch: crest (dB); low_width: side under mid below 120 Hz (dB); rumble: under 30 Hz against 30–120 Hz (dB); brightness: tilt (dB per octave, 0 is pink); decay_time: a reverb's RT60 (s); tail_darkening: how much its tails darken (octaves); echo_time: ms between echoes; echo_fall: dB each echo falls; swing: modulation depth (dB); sweep: how far its brightness moves (octaves); tail_share: its tail's share of its energy (%)"},
                 "at_least": {"type": "number"},
                 "at_most": {"type": "number"},
                 "value": {"type": "number"},

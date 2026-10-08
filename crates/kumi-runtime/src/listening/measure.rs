@@ -21,6 +21,8 @@ pub const LOW_BANDS: usize = 8;
 /// The fine spectrum's bins: twelfths of an octave from 250 Hz, six octaves.
 pub const FINE_FROM: f64 = 250.;
 pub const FINE_BINS: usize = 72;
+/// The level envelope's step, seconds.
+pub const ENVELOPE_HOP: f64 = 0.005;
 /// A fine bin's center, in Hz.
 pub fn fine_hz(bin: usize) -> f64 {
     FINE_FROM * 2f64.powf(bin as f64 / 12.)
@@ -126,6 +128,9 @@ pub struct Frames {
     pub bass_hop: f64,
     /// The strongest pitch from 30 to 250 Hz in each low frame: its frequency and level (dB), when there's one.
     pub bass: Vec<Option<(f32, f32)>>,
+    /// The level every 5 ms (`ENVELOPE_HOP`): the RMS of mid and side over the 20 ms around it, linear. Echoes,
+    /// decays and swings are read off it.
+    pub envelope: Vec<f32>,
 }
 
 impl Frames {
@@ -157,6 +162,8 @@ impl Heard {
         for (_, level) in self.frames.bass.iter_mut().flatten() {
             *level += db;
         }
+        let amplitude = 10f32.powf(db / 20.);
+        self.frames.envelope.iter_mut().for_each(|value| *value *= amplitude);
         self
     }
 }
@@ -377,11 +384,13 @@ struct Meter {
     low_sums: [f64; 4],
     frames: Frames,
     low_frames: Vec<([f32; LOW_BANDS], [f32; LOW_BANDS])>,
-    // The envelope every millisecond (RMS of the mid), for attacks and decays.
+    // The envelope every millisecond (RMS of the mid, and of the side), for attacks and decays.
     milli: usize,
     in_milli: usize,
     milli_sum: f64,
+    milli_side: f64,
     envelope: Vec<f32>,
+    side_envelope: Vec<f32>,
     // Each millisecond's biggest and typical sample-to-sample jump, and its peak: clicks at note edges and crackle.
     previous: f64,
     jumps: Vec<f32>,
@@ -478,7 +487,9 @@ impl Meter {
             milli: ((rate / 1000.).round() as usize).max(1),
             in_milli: 0,
             milli_sum: 0.,
+            milli_side: 0.,
             envelope: vec![],
+            side_envelope: vec![],
             previous: 0.,
             jumps: vec![],
             milli_peak: 0.,
@@ -536,6 +547,7 @@ impl Meter {
             }
             let (mid, side) = ((l + r) / 2., (l - r) / 2.);
             self.milli_sum += mid * mid;
+            self.milli_side += side * side;
             self.in_milli += 1;
             self.jumps.push((mid - self.previous).abs() as f32);
             self.previous = mid;
@@ -567,7 +579,9 @@ impl Meter {
                     self.spikes += 1;
                 }
                 self.envelope.push(rms as f32);
+                self.side_envelope.push((self.milli_side / self.milli as f64).sqrt() as f32);
                 self.milli_sum = 0.;
+                self.milli_side = 0.;
                 self.in_milli = 0;
                 self.milli_peak = 0.;
             }
@@ -896,6 +910,16 @@ impl Meter {
             clicks: self.clicks,
             crackle: if seconds > 0. { round1(self.spikes as f64 / seconds) } else { 0. },
         };
+        // Every 5 ms, the level over the 20 ms around it.
+        let power: Vec<f64> =
+            self.envelope.iter().zip(&self.side_envelope).map(|(mid, side)| (*mid as f64).powi(2) + (*side as f64).powi(2)).collect();
+        self.frames.envelope = (0..power.len() / 5)
+            .map(|step| {
+                let centre = step * 5 + 2;
+                let (from, to) = (centre.saturating_sub(10), (centre + 10).min(power.len()));
+                (power[from..to].iter().sum::<f64>() / (to - from).max(1) as f64).sqrt() as f32
+            })
+            .collect();
         Heard { measures, frames: self.frames }
     }
 }

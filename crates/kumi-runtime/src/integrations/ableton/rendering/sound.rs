@@ -5,6 +5,7 @@ use super::super::connection::NO_CURRENT_LIVE;
 use super::rig::Window;
 use super::*;
 use crate::listening::{
+    effects::{self, effects, note_value},
     measure::Heard,
     sound::{against_key, bandwidth, ducking, harmonics, interlock, key_classes, kit, noise_floor, problems, tail, width},
 };
@@ -72,7 +73,7 @@ impl Rendering {
                 sounds.insert(name.clone(), json!("nothing came through from it there"));
                 continue;
             };
-            let mut said = described(sound, beat_ms);
+            let mut said = described(sound, tempo, window.from, meter);
             if let (Some(trigger), Some(against)) = (trigger.filter(|_| against.as_ref() != Some(name)), against.as_ref()) {
                 if let Some((depth, recovery)) = ducking(sound, trigger) {
                     said["ducks"] =
@@ -101,9 +102,12 @@ impl Rendering {
     }
 }
 
-/// One sound's measures and problems, as the model reads them.
-fn described(heard: &Heard, beat_ms: f64) -> Value {
+/// One sound's measures, its effects and their problems, as the model reads them (heard from beat `from`).
+fn described(heard: &Heard, tempo: f64, from: f64, meter: f64) -> Value {
     let m = &heard.measures;
+    let beat_ms = 60_000. / tempo;
+    let bar = |seconds: f64| format!("bar {}", ((from + seconds * tempo / 60.) / meter).floor() as i64 + 1);
+    let fx = effects(heard, Some(tempo), Some((from.ceil() - from) * beat_ms / 1000.));
     let mut said = serde_json::Map::new();
     let mut put = |key: &str, value: Option<String>| {
         if let Some(value) = value {
@@ -130,10 +134,70 @@ fn described(heard: &Heard, beat_ms: f64) -> Value {
     put("top", bandwidth(heard).map(|hz| format!("{} kHz", round2(hz / 1000.))));
     put("noise floor", noise_floor(heard).map(|db| format!("{db} dB under its loud parts")));
     put("tail", tail(heard).map(|db| format!("{db} dB under each hit 300 ms on")));
+    put(
+        "reverb",
+        fx.decay_time.map(|seconds| {
+            let mut words = format!("its tails decay in {seconds} s (RT60)");
+            if let Some(octaves) = fx.darkening.filter(|octaves| octaves.abs() >= 0.1) {
+                words += &format!(", {} {} octaves", if octaves > 0. { "darkening" } else { "brightening" }, octaves.abs());
+            }
+            if let Some(db) = fx.widening.filter(|db| db.abs() >= 1.) {
+                words += &format!(", {} {} dB", if db > 0. { "widening" } else { "narrowing" }, db.abs());
+            }
+            words
+        }),
+    );
+    put(
+        "echoes",
+        fx.echo.map(|echo| {
+            let (name, off) = note_value(echo.ms / 1000., tempo);
+            let value = if off.abs() <= 0.03 { format!("a {name}") } else { format!("{} % off a {name}", (off * 100.).round()) };
+            let darkens =
+                echo.darkens.filter(|octaves| *octaves >= 0.1).map(|octaves| format!(" and {octaves} octaves darker")).unwrap_or_default();
+            format!("every {} ms ({value}), {} repeats, each {} dB down{darkens}", echo.ms, echo.repeats, echo.falls)
+        }),
+    );
+    put("swing", fx.swing.map(|db| format!("{db} dB at its modulation rate")));
+    put(
+        "brightness moves",
+        fx.sweep.filter(|octaves| *octaves >= 0.25).map(|octaves| {
+            let cycle =
+                fx.sweep_cycle.map(|seconds| format!(", once every {} beats", round2(seconds * 1000. / beat_ms))).unwrap_or_default();
+            format!("over {octaves} octaves{cycle}")
+        }),
+    );
+    put(
+        "pumping",
+        fx.pump.map(|pump| {
+            let lowest = pump.lowest.map(|beats| format!(", deepest {} % into the beat", (beats * 100.).round())).unwrap_or_default();
+            format!("dips {} dB once a beat{lowest}, back within {} % of it", pump.depth, (pump.back * 100.).round())
+        }),
+    );
+    put(
+        "tail share",
+        fx.tail_share.map(|share| {
+            let mut words = format!("{share} % of its energy comes after each hit's first 60 ms");
+            let bars: Vec<(usize, f64)> = effects::tail_shares(heard, meter * beat_ms / 1000.)
+                .iter()
+                .enumerate()
+                .filter_map(|(index, share)| Some((index, (*share)?)))
+                .collect();
+            let wettest = bars.iter().copied().max_by(|a, b| a.1.total_cmp(&b.1));
+            let driest = bars.iter().copied().min_by(|a, b| a.1.total_cmp(&b.1));
+            if let (Some((wet_at, wet)), Some((dry_at, dry))) = (wettest, driest) {
+                if wet - dry >= 15. {
+                    let first = (from / meter).floor() as usize + 1;
+                    words += &format!(" (from {dry} % in bar {} to {wet} % in bar {})", first + dry_at, first + wet_at);
+                }
+            }
+            words
+        }),
+    );
     if m.crackle > 0. {
         said.insert("crackle".into(), json!(format!("{} a second", m.crackle)));
     }
-    let found = problems(heard);
+    let mut found = problems(heard);
+    found.extend(effects::problems(heard, &fx, Some(tempo), &bar));
     if !found.is_empty() {
         said.insert("problems".into(), json!(found));
     }

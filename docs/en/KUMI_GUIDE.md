@@ -400,7 +400,12 @@ notes that jump out. A kit is judged as one: a piece whose noise floor, top or
 grit sits apart, pieces that pile up or leave a gap, decays ringing into the next
 hit. Against a kick, it says how far each part ducks and how fast it comes back,
 and whether their hits interlock or collide; with the key, how far each part's
-notes sit from it. Ask for a sound like a reference sound and Kumi closes those
+notes sit from it. Effects are read off what's heard too: a reverb's decay time
+and how its tails darken and widen, echoes as a note value with their repeats
+and how far each falls, how deep a swing goes, how far a filter sweeps, pumping
+against the beat, and how much of the sound is tail, bar by bar. Kumi flags tails
+cut off, echoes out of time, repeats that don't die away and tails burying the
+dry hits. Ask for a sound or an effect like a reference and Kumi closes those
 measured gaps round by round, keeping only what got closer.
 
 `/loop` and what to reach works in rounds until it's met: one change, judged,

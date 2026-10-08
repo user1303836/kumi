@@ -3,6 +3,7 @@
 pub mod checklist;
 pub mod cmaes;
 pub mod detect;
+pub mod effects;
 pub mod fit;
 pub mod form;
 pub mod home;
