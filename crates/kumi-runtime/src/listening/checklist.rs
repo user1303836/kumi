@@ -534,6 +534,42 @@ impl Checklist {
         self.items.iter().map(|item| read(&item.quantity, heard, focus)).collect()
     }
 
+    /// The items a listen can't read, taken off the checklist (and said): what can't be measured can't be judged, and an
+    /// item left on that reads nothing would pass as within tolerance. Their labels.
+    pub fn drop_unreadable(&mut self, values: &mut Vec<Option<f64>>) -> Vec<String> {
+        let mut dropped = vec![];
+        let mut kept = vec![];
+        for (item, value) in self.items.drain(..).zip(values.drain(..)) {
+            if value.is_none() && item.role != Role::Guard {
+                dropped.push(item.label.clone());
+            } else {
+                kept.push((item, value));
+            }
+        }
+        (self.items, *values) = kept.into_iter().unzip();
+        dropped
+    }
+
+    /// Whether anything on it is to be worked toward (not only guards).
+    pub fn has_targets(&self) -> bool {
+        self.items.iter().any(|item| item.role != Role::Guard)
+    }
+
+    /// `after` as it will read once loudness is brought back by `gain` dB: peaks move with it (unless a limiter after
+    /// the gain holds them, then `gain` is 0 here), and how many samples clip can't be told until it's heard, so it
+    /// reads as before.
+    pub fn at_level(&self, before: &[Option<f64>], after: &[Option<f64>], gain: f64) -> Vec<Option<f64>> {
+        self.items
+            .iter()
+            .zip(before.iter().zip(after))
+            .map(|(item, (before, after))| match item.quantity {
+                Quantity::TruePeak => after.map(|peak| peak + gain),
+                Quantity::Clipped if gain != 0. => before.or(*after),
+                _ => *after,
+            })
+            .collect()
+    }
+
     /// The biggest gap, the item to work on next; None when every item is within tolerance.
     pub fn next(&self, values: &[Option<f64>]) -> Option<usize> {
         self.next_skipping(values, &[])
@@ -547,7 +583,7 @@ impl Checklist {
             .zip(values)
             .enumerate()
             .filter(|(_, (item, _))| item.role != Role::Guard)
-            .map(|(index, (item, value))| (index, item.gap(*value)))
+            .map(|(index, (item, value))| (index, if value.is_some() { item.gap(*value) } else { f64::INFINITY }))
             .filter(|(_, gap)| *gap > 0.)
             .collect();
         let fresh = open.iter().filter(|(index, _)| !skip.contains(index)).max_by(|a, b| a.1.total_cmp(&b.1));
@@ -572,9 +608,14 @@ impl Checklist {
             })
             .and_then(|index| Some((after[index]? - before[index]?).abs()))
             .unwrap_or(0.);
+        let mut lost = vec![];
         for (index, item) in self.items.iter().enumerate() {
             let (b, a) = (before[index], after[index]);
             let (gap_before, gap_after) = (item.gap(b), item.gap(a));
+            // A reading that's gone (silence, or the part stopped playing) is never within tolerance.
+            if b.is_some() && a.is_none() {
+                lost.push(index);
+            }
             // A limiter bringing peaks down flattens them a little too.
             let peaks = target.is_some_and(|index| self.items[index].quantity == Quantity::TruePeak);
             let slack = match item.quantity {
@@ -584,6 +625,7 @@ impl Checklist {
                 _ => 0.,
             };
             let change = match (item.target, b, a) {
+                (_, Some(_), None) => Change::Worse,
                 (Target::NoHigher, Some(b), Some(a)) if a - b > item.jnd + slack => Change::Worse,
                 (Target::NoLower, Some(b), Some(a)) if b - a > item.jnd + slack => Change::Worse,
                 (Target::NoHigher | Target::NoLower, Some(b), Some(a)) if (a - b).abs() <= item.jnd + slack => Change::Same,
@@ -610,7 +652,7 @@ impl Checklist {
             if is_target && change == Change::Better {
                 improved = true;
             }
-            if !is_target && change == Change::Worse && item.quantity != Quantity::Integrated {
+            if !is_target && change == Change::Worse && (item.quantity != Quantity::Integrated || lost.contains(&index)) {
                 hurt.push(index);
             }
             if item.role != Role::Guard {
@@ -633,8 +675,13 @@ impl Checklist {
         if target.is_none() && total.1 < total.0 - 0.5 {
             improved = true;
         }
-        let kept = improved && hurt.is_empty();
-        let why = if !improved {
+        let kept = improved && hurt.is_empty() && lost.is_empty();
+        let why = if !lost.is_empty() {
+            format!(
+                "{} couldn't be read after it (silence, or it stopped playing there)",
+                lost.iter().map(|index| self.items[*index].label.to_lowercase()).collect::<Vec<_>>().join(", ")
+            )
+        } else if !improved {
             match target {
                 Some(index) => format!("{} didn't improve", self.items[index].label),
                 None => "the gaps didn't close".into(),
@@ -700,8 +747,12 @@ fn describe(quantity: &Quantity) -> (String, String, &'static str, f64) {
     }
 }
 
-/// A quantity read from a listen.
+/// A quantity read from a listen: None when it can't be read there (silence reads as nothing, never as a number).
 pub fn read(quantity: &Quantity, heard: &Heard, focus: Option<&Heard>) -> Option<f64> {
+    reading(quantity, heard, focus).filter(|value| value.is_finite())
+}
+
+fn reading(quantity: &Quantity, heard: &Heard, focus: Option<&Heard>) -> Option<f64> {
     let m: &Measures = &heard.measures;
     match quantity {
         Quantity::Integrated => m.integrated,
@@ -731,8 +782,8 @@ pub fn read(quantity: &Quantity, heard: &Heard, focus: Option<&Heard>) -> Option
                     .map_or(0., |p| p.excess),
             ),
             ProblemKind::Masking => {
-                let focus = focus?;
-                Some(detect::masking(focus, heard, name.as_deref().unwrap_or("it")).map_or(0., |p| p.excess))
+                let _ = name;
+                detect::masking_share(focus?, heard)
             }
             _ => None,
         },

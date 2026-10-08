@@ -339,8 +339,10 @@ trusting them:
   clipping, and what masks the element you name.
 - **One change at a time:** after each change Kumi hears before and after at the
   same loudness, and keeps the change only if its target improved and nothing
-  else got audibly worse. Otherwise Kumi's own undo takes it back. When a kept
-  change moved the level, the last limiter or Utility evens it out.
+  else got audibly worse (a measure it can no longer read, such as silence,
+  counts as worse). Otherwise Kumi's own undo takes it back. When a kept change
+  moved the level, the last limiter or Utility evens it out and Kumi hears it
+  again: if the peaks come back or it clips at that level, the change goes too.
 - **Code picks the numbers.** Kumi chooses the change; code finds its values,
   with as few listens as it can: an EQ calculated from what was measured (the
   smallest cut that clears a resonance, or bands toward a reference's shape),

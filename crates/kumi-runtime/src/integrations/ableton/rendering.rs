@@ -82,7 +82,7 @@ pub struct Rendering {
     /// Measured references, read by name for the judge.
     references: Option<Rc<crate::references::store::ReferenceStore>>,
     /// The listening model, once looked for (None inside: there's none).
-    listener: RefCell<Option<Option<Rc<dyn crate::listening::listener::Listener>>>>,
+    listener: RefCell<Option<(Option<Rc<dyn crate::listening::listener::Listener>>, i64)>>,
 }
 pub use groove::GrooveRequest;
 pub use judge::{GoalRequest, JudgeRequest};
@@ -151,6 +151,12 @@ impl Rendering {
         if !continuing {
             self.rounds.set(0);
             self.best.set(None);
+            // A judged run's changes are the ones since its last round: what the producer asked for in between isn't
+            // a round's to take back.
+            let ids = self.applied_ids();
+            if let Some(run) = self.judge.borrow_mut().as_mut() {
+                run.checkpoint = ids;
+            }
         }
     }
     /// A restart of Live may make Max for Live available; bridge-only disconnects leave refusal intact.

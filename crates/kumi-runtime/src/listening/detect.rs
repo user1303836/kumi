@@ -398,9 +398,17 @@ pub fn peaks(heard: &Heard, ceiling: Option<f64>) -> Vec<Problem> {
         problems.push(Problem {
             kind: ProblemKind::Clipping,
             id: "clipping".into(),
-            what: format!("{} samples at full scale", measures.clipped),
+            what: format!(
+                "{} samples at full scale{}",
+                measures.clipped,
+                if measures.clipped_at.is_empty() {
+                    String::new()
+                } else {
+                    format!(", at {}", measures.clipped_at.iter().map(|span| clock(span[0])).collect::<Vec<_>>().join(", "))
+                }
+            ),
             hz: None,
-            at: vec![],
+            at: measures.clipped_at.clone(),
             excess: round1((measures.clipped as f64).log10() * 10.),
             steady: None,
             fix: "lower the level into whatever clips (often the master, or a track driven into it)".into(),
@@ -428,60 +436,12 @@ const MASK_OFFSET: f64 = 6.;
 /// rest of a mix always covers); where most of that falls under the threshold, the target is buried. The problem's
 /// amount is how much of the time the target plays it's buried there, in percent.
 pub fn masking(target: &Heard, mix: &Heard, name: &str) -> Option<Problem> {
-    let (t, m) = (&target.frames, &mix.frames);
-    let count = t.mid.len().min(m.mid.len());
-    if count < 8 {
+    let Buried { share, frames: buried, bands: masked_bands, deficits } = buried(target, mix)?;
+    if share < 0.1 {
         return None;
     }
-    let spreads: Vec<Vec<f64>> = (0..31)
-        .map(|maskee| (0..31).map(|masker| 10f64.powf((spread(THIRDS[maskee], THIRDS[masker]) - MASK_OFFSET) / 10.)).collect())
-        .collect();
-    let hearing: Vec<f64> = THIRDS.iter().map(|hz| 10f64.powf(a_weighting(*hz) / 10.)).collect();
-    let target_levels: Vec<f64> = (0..count)
-        .map(|frame| 10. * (t.mid[frame].iter().zip(&t.side[frame]).map(|(a, b)| (*a + *b) as f64).sum::<f64>() + 1e-20).log10())
-        .collect();
-    let mut sorted = target_levels.clone();
-    sorted.sort_by(f64::total_cmp);
-    let loud = percentile(&sorted, 0.95);
-    let mut buried: Vec<(usize, f64)> = vec![];
-    let mut masked_bands = [0usize; 31];
-    let mut deficits = vec![];
-    let mut heard_frames = 0;
-    for frame in 0..count {
-        // Only where the target plays.
-        if target_levels[frame] < loud - 20. {
-            continue;
-        }
-        heard_frames += 1;
-        let power = |frames: &Frames, band: usize| (frames.mid[frame][band] + frames.side[frame][band]) as f64;
-        let target_bands: Vec<f64> = (0..31).map(|band| power(t, band)).collect();
-        let others: Vec<f64> = (0..31).map(|band| (power(m, band) - target_bands[band]).max(0.)).collect();
-        let weighed: Vec<f64> = (0..31).map(|band| target_bands[band] * hearing[band]).collect();
-        let strongest = weighed.iter().copied().fold(0., f64::max);
-        let (mut carried, mut lost, mut worst) = (0., 0., 0f64);
-        for band in 0..31 {
-            // The target's bands that carry it, as the ear weighs them: within 15 dB of its strongest.
-            if weighed[band] < strongest * 10f64.powf(-1.5) {
-                continue;
-            }
-            let threshold: f64 = (0..31).map(|masker| others[masker] * spreads[band][masker]).sum();
-            let ratio = 10. * ((target_bands[band] + 1e-20) / (threshold + 1e-20)).log10();
-            carried += weighed[band];
-            if ratio < 0. {
-                lost += weighed[band];
-                masked_bands[band] += 1;
-                worst = worst.min(ratio);
-            }
-        }
-        if carried > 0. && lost / carried >= 0.5 {
-            buried.push((frame, -worst));
-            deficits.push(-worst);
-        }
-    }
-    let share = buried.len() as f64 / heard_frames.max(1) as f64;
-    if heard_frames < 8 || share < 0.1 {
-        return None;
-    }
+    let t = &target.frames;
+    let mut deficits = deficits;
     deficits.sort_by(f64::total_cmp);
     let deficit = round1(percentile(&deficits, 0.5));
     // The bands most often masked, as one range.
@@ -515,6 +475,81 @@ pub fn masking(target: &Heard, mix: &Heard, name: &str) -> Option<Problem> {
         ),
         source: None,
     })
+}
+
+/// How much of the time a target element plays it's buried under the rest of the mix, in percent: None when it hardly
+/// plays in what was heard (nothing to tell, which isn't the same as not buried).
+pub fn masking_share(target: &Heard, mix: &Heard) -> Option<f64> {
+    buried(target, mix).map(|buried| (buried.share * 100.).round())
+}
+
+/// Where a target plays, how it fares against the rest: the share of those frames it's buried in, those frames (and how
+/// far under, dB), and how often each band was masked.
+struct Buried {
+    share: f64,
+    frames: Vec<(usize, f64)>,
+    bands: [usize; 31],
+    deficits: Vec<f64>,
+}
+
+/// A band level this low (dB, of full scale's power) is silence.
+const SILENT_DB: f64 = -80.;
+
+fn buried(target: &Heard, mix: &Heard) -> Option<Buried> {
+    let (t, m) = (&target.frames, &mix.frames);
+    let count = t.mid.len().min(m.mid.len());
+    if count < 8 {
+        return None;
+    }
+    let spreads: Vec<Vec<f64>> = (0..31)
+        .map(|maskee| (0..31).map(|masker| 10f64.powf((spread(THIRDS[maskee], THIRDS[masker]) - MASK_OFFSET) / 10.)).collect())
+        .collect();
+    let hearing: Vec<f64> = THIRDS.iter().map(|hz| 10f64.powf(a_weighting(*hz) / 10.)).collect();
+    let target_levels: Vec<f64> = (0..count)
+        .map(|frame| 10. * (t.mid[frame].iter().zip(&t.side[frame]).map(|(a, b)| (*a + *b) as f64).sum::<f64>() + 1e-20).log10())
+        .collect();
+    let mut sorted = target_levels.clone();
+    sorted.sort_by(f64::total_cmp);
+    let loud = percentile(&sorted, 0.95);
+    let mut buried: Vec<(usize, f64)> = vec![];
+    let mut masked_bands = [0usize; 31];
+    let mut deficits = vec![];
+    let mut heard_frames = 0;
+    for frame in 0..count {
+        // Only where the target plays (and not silence: then there's nothing to bury).
+        if target_levels[frame] < (loud - 20.).max(SILENT_DB) {
+            continue;
+        }
+        heard_frames += 1;
+        let power = |frames: &Frames, band: usize| (frames.mid[frame][band] + frames.side[frame][band]) as f64;
+        let target_bands: Vec<f64> = (0..31).map(|band| power(t, band)).collect();
+        let others: Vec<f64> = (0..31).map(|band| (power(m, band) - target_bands[band]).max(0.)).collect();
+        let weighed: Vec<f64> = (0..31).map(|band| target_bands[band] * hearing[band]).collect();
+        let strongest = weighed.iter().copied().fold(0., f64::max);
+        let (mut weight, mut under, mut worst) = (0., 0., 0f64);
+        for band in 0..31 {
+            // The target's bands that carry it, as the ear weighs them: within 15 dB of its strongest.
+            if weighed[band] < strongest * 10f64.powf(-1.5) {
+                continue;
+            }
+            let threshold: f64 = (0..31).map(|masker| others[masker] * spreads[band][masker]).sum();
+            let ratio = 10. * ((target_bands[band] + 1e-20) / (threshold + 1e-20)).log10();
+            weight += weighed[band];
+            if ratio < 0. {
+                under += weighed[band];
+                masked_bands[band] += 1;
+                worst = worst.min(ratio);
+            }
+        }
+        if weight > 0. && under / weight >= 0.5 {
+            buried.push((frame, -worst));
+            deficits.push(-worst);
+        }
+    }
+    if heard_frames < 8 {
+        return None;
+    }
+    Some(Buried { share: buried.len() as f64 / heard_frames as f64, frames: buried, bands: masked_bands, deficits })
 }
 
 fn percent(share: f64) -> String {

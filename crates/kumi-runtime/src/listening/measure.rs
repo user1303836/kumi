@@ -51,6 +51,10 @@ pub struct Measures {
     pub psr: Option<f64>,
     /// Samples at or past full scale.
     pub clipped: usize,
+    /// When they came (seconds from the start of what was measured), moments under half a second apart as one: the
+    /// first five.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clipped_at: Vec<[f64; 2]>,
     /// When the highest true peak came, in seconds from the start of what was measured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peak_at: Option<f64>,
@@ -324,6 +328,7 @@ struct Meter {
     true_peak: f64,
     sample_peak: f64,
     clipped: usize,
+    clipped_at: Vec<[f64; 2]>,
     dc: [f64; 2],
     count: usize,
     // Punch and pumping, every 10 ms.
@@ -410,6 +415,7 @@ impl Meter {
             true_peak: 0.,
             sample_peak: 0.,
             clipped: 0,
+            clipped_at: vec![],
             dc: [0.; 2],
             count: 0,
             tick,
@@ -459,6 +465,13 @@ impl Meter {
                 self.sample_peak = self.sample_peak.max(magnitude);
                 if magnitude >= 0.999 {
                     self.clipped += 1;
+                    let at = self.count as f64 / self.rate;
+                    let count = self.clipped_at.len();
+                    match self.clipped_at.last_mut() {
+                        Some(last) if at - last[1] < 0.5 => last[1] = at,
+                        _ if count < 5 => self.clipped_at.push([at, at]),
+                        _ => {}
+                    }
                 }
                 let peaker = &mut self.peakers[channel];
                 peaker.push(sample);
@@ -783,6 +796,7 @@ impl Meter {
             plr: integrated.map(|integrated| round1(true_peak - integrated)),
             psr: psr.map(round1),
             clipped: self.clipped,
+            clipped_at: self.clipped_at.iter().map(|span| [round1(span[0]), round1(span[1])]).collect(),
             peak_at: self
                 .block_peaks
                 .iter()

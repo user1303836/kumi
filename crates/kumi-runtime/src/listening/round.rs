@@ -113,7 +113,7 @@ impl Round {
         match self.kept {
             Some(true) => lines.push(format!("  kept: {}", self.why.clone().unwrap_or_default())),
             Some(false) => lines.push(format!("  reverted: {}", self.why.clone().unwrap_or_default())),
-            None => {}
+            None => lines.extend(self.why.as_ref().map(|why| format!("  note: {why}"))),
         }
         if let Some(rebalanced) = &self.rebalanced {
             lines.push(format!("  rebalanced: {rebalanced}"));

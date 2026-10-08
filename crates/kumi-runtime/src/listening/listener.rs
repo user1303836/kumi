@@ -178,12 +178,16 @@ impl Listener for ChatListener {
         if let Some(key) = &self.key {
             request = request.bearer_auth(key);
         }
+        // The whole exchange, sending and reading back, gives way to Esc.
         let sent = tokio::select! {
             sent = request.send() => sent.map_err(|error| format!("the listening model didn't answer: {error}"))?,
             _ = signal.cancelled() => return Err("stopped".into()),
         };
         let status = sent.status();
-        let reply: Value = sent.json().await.map_err(|error| format!("the listening model's answer wasn't JSON: {error}"))?;
+        let reply: Value = tokio::select! {
+            reply = sent.json() => reply.map_err(|error| format!("the listening model's answer wasn't JSON: {error}"))?,
+            _ = signal.cancelled() => return Err("stopped".into()),
+        };
         if !status.is_success() {
             return Err(format!("the listening model refused ({status})"));
         }
@@ -212,22 +216,30 @@ pub fn listener_from_env(env: &std::collections::HashMap<String, String>) -> Opt
         base: base.trim().into(),
         key: env.get("KUMI_LISTENER_KEY").cloned(),
         model: model.trim().into(),
-        client: reqwest::Client::new(),
+        client: client(),
     })
+}
+
+/// A client that gives up on a model that stops answering (a minute and a half: it hears 20 s of audio).
+fn client() -> reqwest::Client {
+    reqwest::Client::builder().timeout(std::time::Duration::from_secs(90)).build().unwrap_or_default()
 }
 
 /// OpenAI's newest audio-capable chat model for a key, from its own model list (ids that take audio: "…audio…", not
 /// the realtime, speech or transcription ones).
 pub async fn openai_listener(key: &str, signal: Signal) -> Option<ChatListener> {
-    let client = reqwest::Client::new();
+    let client = client();
     let listed = tokio::select! {
-        listed = client.get("https://api.openai.com/v1/models").bearer_auth(key).send() => listed.ok()?,
+        listed = client.get("https://api.openai.com/v1/models").bearer_auth(key).timeout(std::time::Duration::from_secs(20)).send() => listed.ok()?,
         _ = signal.cancelled() => return None,
     };
     if !listed.status().is_success() {
         return None;
     }
-    let body: Value = listed.json().await.ok()?;
+    let body: Value = tokio::select! {
+        body = listed.json() => body.ok()?,
+        _ = signal.cancelled() => return None,
+    };
     let model = body["data"]
         .as_array()?
         .iter()

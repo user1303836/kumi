@@ -5,6 +5,7 @@ pub mod cmaes;
 pub mod detect;
 pub mod fit;
 pub mod home;
+pub mod judging;
 pub mod knobs;
 pub mod listener;
 pub mod measure;
