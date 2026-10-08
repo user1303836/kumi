@@ -85,6 +85,10 @@ pub struct Applied {
     /// past this Live connection: refs aren't either.
     #[serde(skip)]
     pub clip: Option<String>,
+    /// Where the change was made (the long ref of its device, parameter or track): a judged round tells a change on
+    /// Main's chain by it. Not kept past this Live connection.
+    #[serde(skip)]
+    pub at: Option<String>,
 }
 impl Applied {
     pub fn new(record: ChangeRecord, transaction_id: String, restore: Option<Restore>) -> Self {
@@ -104,21 +108,14 @@ impl Applied {
             created: None,
             tool: None,
             clip: None,
+            at: None,
         }
     }
     /// Whether the change can change what's heard: not one that only names, colours or marks things, sets the
-    /// scale or the transport, or adds empty tracks and scenes (or captures one).
+    /// transport, or adds empty tracks and scenes (or captures one). The scale can: tunings and devices follow it.
     pub fn audible(&self) -> bool {
-        const SILENT: [&str; 8] = [
-            "rename",
-            "set_track_color",
-            "set_locators",
-            "delete_locator",
-            "set_scale",
-            "set_transport",
-            "add_tracks_and_scenes",
-            "capture_scene",
-        ];
+        const SILENT: [&str; 7] =
+            ["rename", "set_track_color", "set_locators", "delete_locator", "set_transport", "add_tracks_and_scenes", "capture_scene"];
         match &self.tool {
             Some(tool) => !SILENT.contains(&tool.as_str()),
             None => !matches!(self.record.family, ChangeFamily::Rename | ChangeFamily::Color | ChangeFamily::Locators),
@@ -698,6 +695,12 @@ impl History {
     pub fn made_by(&self, change: &str, tool: &str) {
         if let Some(entry) = self.entries.borrow().get(change) {
             entry.borrow_mut().tool = Some(tool.into());
+        }
+    }
+    /// Notes where a change was made (its device's, parameter's or track's long ref).
+    pub fn made_at(&self, change: &str, at: &str) {
+        if let Some(entry) = self.entries.borrow().get(change) {
+            entry.borrow_mut().at = Some(at.into());
         }
     }
     /// Notes the clip a change edited (its long ref).

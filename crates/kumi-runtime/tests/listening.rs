@@ -229,6 +229,13 @@ fn a_change_stays_only_when_its_target_improves_and_nothing_else_gets_audibly_wo
     assert!(!checklist.verdict(Some(loudness), &before, &before).kept);
     // After a kept change that left loudness off target, rebalancing brings it back.
     assert_eq!(checklist.rebalance(&before, &louder), Some(round1(-10. - louder[loudness].unwrap())));
+    // With no loudness asked for (peaks only), it's held where the first listen heard it: quieter isn't a fix.
+    let peaks = Checklist::new(&Goal { true_peak: Some(-1.), problems: false, ..Default::default() }, &first, &[]);
+    let held = peaks.items.iter().position(|item| item.quantity == Quantity::Integrated).expect("loudness held");
+    assert!(matches!(peaks.items[held].target, Target::Kept { .. }), "{:?}", peaks.items[held]);
+    let mut quieter = peaks.read(&first, None);
+    quieter[held] = quieter[held].map(|v| v - 2.);
+    assert_eq!(peaks.rebalance(&peaks.read(&first, None), &quieter), Some(2.));
 }
 
 fn round1(value: f64) -> f64 {

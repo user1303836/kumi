@@ -316,14 +316,19 @@ impl Rendering {
         target = target.clamp(floor.min(ceiling), ceiling.max(floor));
         let reached = response.at_knob(target).map(|reading| reading + (now - response.at_knob(x0).unwrap_or(now)) + (start - here));
         let gap_now = item.gap(Some(start));
-        if reached.is_none_or(|reached| item.gap(Some(reached)) >= gap_now) || (target - x0).abs() < scale.step() {
+        // Closer as the judge counts it: by more than half a step, or onto the target.
+        let closes = |reached: f64| {
+            let gap = item.gap(Some(reached));
+            gap < gap_now - 0.5 || (gap_now > 0. && gap == 0.)
+        };
+        if reached.is_none_or(|reached| !closes(reached)) || (target - x0).abs() < scale.step() {
             let readings: Vec<String> = response
                 .points
                 .iter()
                 .map(|(at, value)| format!("{} → {}", scale.text(scale.from_perceptual(*at)), to_string(round1(*value))))
                 .collect();
             return Ok(Err(format!(
-                "{} doesn't bring {} closer across its range ({}); it stays where it is. Try another knob or device.",
+                "{} doesn't bring {} audibly closer across its range ({}); it stays where it is. Try another knob or device.",
                 knob.name,
                 item.label,
                 readings.join(", ")

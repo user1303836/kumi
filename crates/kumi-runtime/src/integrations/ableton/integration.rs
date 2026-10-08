@@ -744,6 +744,9 @@ impl Integration for Ableton {
     async fn settled(&self) {
         self.rendering.settled().await
     }
+    fn steered(&self) {
+        self.rendering.steered();
+    }
     async fn observe(&self, signal: Signal, hints: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
         self.observer.observe(self, signal, hints).await
     }

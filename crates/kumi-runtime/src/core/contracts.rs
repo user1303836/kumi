@@ -413,6 +413,8 @@ pub trait Integration {
     /// Resolves once no tool call is still at work in the app (a stopped answer's, putting it back): a stopped answer
     /// ends only then, so the next one doesn't run beside it.
     async fn settled(&self) {}
+    /// The producer's words came into the answer under way (a steer): what it changes from here may be theirs.
+    fn steered(&self) {}
     fn has_undo(&self) -> bool {
         false
     }

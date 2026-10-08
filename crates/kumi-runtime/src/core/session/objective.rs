@@ -4,8 +4,8 @@
 use super::matching::add_usage;
 use super::*;
 use crate::core::goal_mode::{
-    after_turn, command_word, error_check, gap_closed, measured_check, objective_audit, objective_first, objective_next, read_audit, Check,
-    Objective, ObjectiveState, Verdict, OBJECTIVE_BUDGET,
+    after_turn, audit_against, command_word, error_check, gap_closed, measured_check, objective_audit, objective_first, objective_next,
+    read_audit, Check, Objective, ObjectiveState, Verdict, OBJECTIVE_BUDGET,
 };
 
 /// A goal run's hold on the session's objective flags, released however the run ends.
@@ -181,7 +181,7 @@ impl Session {
         &self,
         op: &Rc<Operation>,
         objective: &str,
-        rounds_before: u64,
+        (goal_rounds, rounds_before): (u64, u64),
         usage: &mut Usage,
     ) -> Result<Option<Check>, RuntimeError> {
         let (judged, rounds) = {
@@ -206,7 +206,8 @@ impl Session {
             return Ok(None);
         }
         let answer = said.borrow().clone();
-        Ok(Some(read_audit(&answer)))
+        // The model's word doesn't outrank the judge's measure in this goal's run.
+        Ok(Some(audit_against(read_audit(&answer), judged.as_ref().filter(|_| rounds > goal_rounds))))
     }
     /// A turn's or a check's error: the goal is kept paused (blocked when the producer must fix something first,
     /// named), never left running.
@@ -245,6 +246,8 @@ impl Session {
         let mut stop_reason = StopReason::Completed;
         let mut stepped_in = false;
         let mut first = true;
+        // The judge's rounds before this goal ran: one logged since is its own measure.
+        let goal_rounds = self.0.state.borrow().judged_rounds;
         loop {
             let (applied, judged_before, rounds, closed, judged_changes, steers) = {
                 let s = self.0.state.borrow();
@@ -273,7 +276,7 @@ impl Session {
                 stepped_in = true;
                 break;
             }
-            let check = match self.objective_check(&op, &objective.objective, rounds, &mut usage).await {
+            let check = match self.objective_check(&op, &objective.objective, (goal_rounds, rounds), &mut usage).await {
                 Ok(Some(check)) => check,
                 // Stopped mid-check: no answer, no turn counted.
                 Ok(None) => {

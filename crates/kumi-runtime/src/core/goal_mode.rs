@@ -152,6 +152,20 @@ pub fn objective_audit(objective: &str) -> String {
 
 static AUDIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?im)^\W*(COMPLETE|BLOCKED|CONTINUE)\W*[:\-–—]?\s*(.*)$").unwrap());
 
+/// The self-audit's verdict against the judge's: a goal the judge measured short in this run (`last`, when it measured
+/// since the goal began) isn't met on the model's word; it's measured again first.
+pub fn audit_against(check: Check, last: Option<&Round>) -> Check {
+    match last {
+        Some(round) if check.verdict == Verdict::Complete && !round.met => Check {
+            verdict: Verdict::Continue,
+            reason: "the judge last measured it short of its checklist".into(),
+            next: Some("measure it again with judge, then say whether it's met".into()),
+            measured: false,
+        },
+        _ => check,
+    }
+}
+
 /// The self-audit's line, read: an answer without one is a continue, its words the reason.
 pub fn read_audit(answer: &str) -> Check {
     match AUDIT.captures(answer) {
@@ -303,8 +317,19 @@ pub fn gap_closed(before: Option<&Round>, after: Option<&Round>) -> Option<f64> 
     if before.rows.is_empty() || ids(before) != ids(after) {
         return None;
     }
-    let standing =
-        |round: &Round| round.rows.iter().map(|row| if round.kept == Some(false) { row.gap_before } else { row.gap_after }).sum::<f64>();
+    // Where each round left an item: as it was when its change was taken back, else as it ended. An item either round
+    // couldn't read (hidden by an effect, or not there yet) counts on neither side.
+    let at = |round: &Round, row: &crate::listening::checklist::Row| {
+        if round.kept == Some(false) {
+            (row.before, row.gap_before)
+        } else {
+            (row.after, row.gap_after)
+        }
+    };
+    let read = |round: &Round, id: &str| round.rows.iter().any(|row| row.id == id && at(round, row).0.is_some());
+    let standing = |round: &Round| {
+        round.rows.iter().filter(|row| read(before, &row.id) && read(after, &row.id)).map(|row| at(round, row).1).sum::<f64>()
+    };
     Some(standing(before) - standing(after))
 }
 

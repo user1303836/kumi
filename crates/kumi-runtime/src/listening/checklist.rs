@@ -906,8 +906,9 @@ impl Checklist {
                 items.push(item(id, label, Role::Guard, "dB", quantity, target, step));
             }
         }
-        // A sound goal's loudness, held where the first listen heard it: every round is brought back there.
-        if let Some(value) = m.integrated.filter(|_| goal.sound && !items.iter().any(|item| item.quantity == Quantity::Integrated)) {
+        // Loudness with no number asked for (a sound's, or a goal of peaks or balance), held where the first listen heard
+        // it: every round is brought back there, so a change is heard at the same loudness and quieter isn't a fix.
+        if let Some(value) = m.integrated.filter(|_| !items.iter().any(|item| item.quantity == Quantity::Integrated)) {
             items.push(item(
                 "loudness",
                 "Loudness (held where it was)",
@@ -1149,6 +1150,19 @@ impl Checklist {
             rows,
             hurt: hurt.into_iter().map(|index| self.items[index].id.clone()).collect(),
         }
+    }
+
+    /// The gain that brings loudness back after a round's change (`target`, the item it works on), when it's audibly
+    /// off: to its target on a round that works on loudness, where the first listen heard it when it's held, and
+    /// otherwise to where it was before the change, so the change isn't judged on what a louder (or quieter) rebalance
+    /// does to its punch.
+    pub fn rebalance_round(&self, before: &[Option<f64>], after: &[Option<f64>], target: Option<usize>) -> Option<f64> {
+        let index = self.items.iter().position(|item| item.quantity == Quantity::Integrated)?;
+        if target == Some(index) || matches!(self.items[index].target, Target::Kept { .. }) {
+            return self.rebalance(before, after);
+        }
+        let now = after[index]?;
+        before[index].filter(|was| (now - was).abs() > 0.5).map(|was| round1(was - now))
     }
 
     /// The gain that brings loudness back to its target (or to where it was, without one), when it's audibly off.

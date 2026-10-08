@@ -173,9 +173,14 @@ pub fn judge_request(input: &JsonObject) -> Result<JudgeRequest, String> {
                     Quantity::TailShare => 5.,
                     _ => 0.5,
                 };
+                // A tolerance of nothing, or a range of one point, can't be met: a point is that value within a step.
                 let target = match (number(wanted, "value"), number(wanted, "at_least"), number(wanted, "at_most")) {
+                    (Some(_), _, _) if number(wanted, "within").is_some_and(|within| within <= 0.) => {
+                        return Err("within is how far from value still counts: give it above 0 (a noticeable step, say).".into())
+                    }
                     (Some(value), _, _) => Target::Exactly { value, within: number(wanted, "within").unwrap_or(step) },
-                    (None, Some(low), Some(high)) if low <= high => Target::Between { low, high },
+                    (None, Some(low), Some(high)) if low == high => Target::Exactly { value: low, within: step },
+                    (None, Some(low), Some(high)) if low < high => Target::Between { low, high },
                     (None, Some(value), None) => Target::AtLeast { value },
                     (None, None, Some(value)) => Target::AtMost { value },
                     _ => return Err("Give each target a value (and within), at_least or at_most.".into()),

@@ -36,6 +36,8 @@ async fn settle() {
 }
 #[derive(Default)]
 struct Record {
+    /// Steers the integration heard of: a judged run's changes from then on may be the producer's.
+    live_steered: Cell<usize>,
     calls: RefCell<Vec<String>>,
     created: RefCell<Vec<KernelOptions>>,
     closes: Cell<usize>,
@@ -152,6 +154,9 @@ impl Integration for TestIntegration {
             return Err(RuntimeError::plain("secret-token-must-not-escape"));
         }
         Ok(self.observation.borrow().clone())
+    }
+    fn steered(&self) {
+        self.record.live_steered.set(self.record.live_steered.get() + 1);
     }
     async fn close(&self) -> Result<(), RuntimeError> {
         self.record.integration_closes.set(self.record.integration_closes.get() + 1);
@@ -2433,6 +2438,8 @@ local_test!(a_message_during_a_goals_loop_ends_the_loop_and_the_goal_waits, {
     assert!(calls[1].starts_with("[Kumi loop] Round 1."), "{}", calls[1]);
     assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::Loop(status) if status.state == LoopState::Paused)));
     assert!(h.notice("Goal paused after 1 turn: you stepped in · /goal resume carries on"));
+    // Live heard of it: what the loop's answer changes from then on may be the producer's, not a round's to take back.
+    assert_eq!(h.record.live_steered.get(), 1);
     h.session.close().await.unwrap();
 });
 local_test!(a_goal_stopped_during_its_check_reads_nothing_from_the_half_answer, {

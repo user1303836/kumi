@@ -53,6 +53,8 @@ pub struct GrooveRun {
     tempo: f64,
     target: Option<String>,
     checkpoint: Vec<String>,
+    /// The producer's words came in while it ran: its next round counts its changes from then on.
+    steered: bool,
     round: u32,
     started: i64,
     misses: HashMap<String, u32>,
@@ -64,6 +66,12 @@ impl GrooveRun {
     /// these (the changes applied now).
     pub(super) fn carry_on(&mut self, applied: Vec<String>) {
         self.checkpoint = applied;
+        self.steered = false;
+    }
+
+    /// The producer's words came in mid-answer: what changes from here may be theirs, not the next round's.
+    pub(super) fn steered(&mut self) {
+        self.steered = true;
     }
 
     /// Its lines at the tempo a round reads the part at, after the Set's tempo changed: timing gaps are a share of the
@@ -393,6 +401,7 @@ impl Rendering {
             tempo: part_feel.tempo,
             target: None,
             checkpoint: self.applied_ids(),
+            steered: false,
             round: 0,
             started: now_ms(),
             misses: HashMap::new(),
@@ -438,9 +447,15 @@ impl Rendering {
     }
 
     async fn groove_round(self: &Rc<Self>, request: &GrooveRequest, signal: Signal) -> Result<Result<Round, String>, RuntimeError> {
+        // After the producer's words came in, what changed since the last round may be theirs: it stays, and the round
+        // counts from here.
+        let applied = self.applied_ids();
         let (clip, checkpoint, kit) = {
-            let run = self.groove.borrow();
-            let run = run.as_ref().unwrap();
+            let mut run = self.groove.borrow_mut();
+            let run = run.as_mut().unwrap();
+            if run.steered {
+                run.carry_on(applied);
+            }
             (run.clip.clone(), run.checkpoint.clone(), run.kit.clone())
         };
         let mut change = request.change.clone();
@@ -502,8 +517,9 @@ impl Rendering {
         let mut why = why;
         if !kept {
             let mut refused = vec![];
+            // Taken back to the end, Esc or not: what was changed is put back.
             for (id, title) in changes.iter().rev() {
-                match self.history.undo(id, signal.clone(), false).await {
+                match self.history.undo(id, self.cleanup(), false).await {
                     Ok(undone) if !undone.is_error => {}
                     _ => refused.push(title.clone()),
                 }

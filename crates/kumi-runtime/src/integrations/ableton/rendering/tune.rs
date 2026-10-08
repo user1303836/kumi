@@ -121,7 +121,7 @@ impl Rendering {
         };
         let signal = abort::any([original, self.connection().lifetime.clone()]);
         // Live changed under the run: its bars are heard again before any number is picked against them.
-        if self.judge.borrow().as_ref().is_some_and(|run| run.stale) {
+        if self.judge.borrow().as_ref().is_some_and(|run| run.out_of_date()) {
             match self.rebaseline(signal.clone()).await {
                 // The device to tune may have gone with this answer's changes: the round asks for them again first.
                 Ok(Ok((round, true))) => {
@@ -143,20 +143,28 @@ impl Rendering {
                 let run = self.judge.borrow();
                 !self.applied_since(&run.as_ref().unwrap().checkpoint).is_empty()
             };
-            let window = {
+            // The run's window moves only once its "before" is heard: a listen that fails or is stopped leaves the run
+            // where it was.
+            let (window, known) = {
                 let mut guard = self.judge.borrow_mut();
                 let run = guard.as_mut().unwrap();
                 run.target = Some(index);
                 let wanted = self.excerpt_for(run);
-                let known = run.excerpts.iter().any(|excerpt| excerpt.window == wanted && excerpt.state == run.state);
-                if known || !changed {
-                    run.window = wanted;
-                }
-                run.window
+                let known = |window: Window| run.excerpts.iter().any(|excerpt| excerpt.window == window && excerpt.state == run.state);
+                let window = if known(wanted) || !changed { wanted } else { run.window };
+                (window, known(window))
             };
+            // Heard now, a "before" would hold the change already made, which then goes unjudged.
+            if changed && !known {
+                return Ok(Err(
+                    "A change is already in Live, and Kumi doesn't know how these bars sounded before it: judge it first (judge with change), or take it back, then tune."
+                        .into(),
+                ));
+            }
             if let Err(why) = self.ensure_before(window, signal.clone()).await? {
                 return Ok(Err(why));
             }
+            self.judge.borrow_mut().as_mut().unwrap().window = window;
             let knobs = match self.device_knobs(&request.device, signal.clone()).await? {
                 Ok(knobs) => knobs,
                 Err(why) => return Ok(Err(why)),
@@ -282,17 +290,28 @@ impl Rendering {
         knobs: &[DeviceKnob],
         signal: Signal,
     ) -> Result<Result<Round, String>, RuntimeError> {
-        let (quantity, target, label, now, open_regions) = {
+        let (quantity, target, label, now, open_regions, excerpt) = {
             let run = self.judge.borrow();
             let run = run.as_ref().unwrap();
             let item = &run.checklist.items[index];
-            (item.quantity.clone(), item.target, item.label.clone(), run.whole[index], run.checklist.region_points(&run.whole))
+            let excerpt = run
+                .excerpts
+                .iter()
+                .find(|excerpt| excerpt.window == window && excerpt.state == run.state)
+                .and_then(|excerpt| excerpt.values[index]);
+            (item.quantity.clone(), item.target, item.label.clone(), run.whole[index], run.checklist.region_points(&run.whole), excerpt)
         };
         let (bands, predicted) = match quantity {
             Quantity::Problem { problem: ProblemKind::Resonance | ProblemKind::Harshness, low, high, steady: true, .. } => {
                 let wanted = match target {
                     Target::AtMost { value } => value - 0.5,
                     _ => return Ok(Err(format!("{label} has no ceiling to cut it down to."))),
+                };
+                // The cut is planned on the excerpt where it stands out most, which reads over the whole stretch: aimed
+                // as far over the target, so the whole lands on it rather than under.
+                let wanted = match (now, excerpt) {
+                    (Some(whole), Some(excerpt)) => wanted + (excerpt - whole),
+                    _ => wanted,
                 };
                 let heard = self.before_heard(window, signal.clone()).await?;
                 let (band, predicted) = plan_cut(&heard, low, high, true, wanted, 4., CURVE_RATE);
@@ -351,15 +370,19 @@ impl Rendering {
         let adaptive_on = adaptive.is_some_and(|knob| knob.raw > knob.min);
         let scaled = scale.is_some_and(|knob| knob.scale.as_ref().is_none_or(|units| (units.shown(knob.raw) - 100.).abs() > 0.5));
         // The bands they'd reshape: on, a bell or a shelf, with gain (a cut filter has none, so a fresh EQ Eight's low
-        // cut isn't one).
-        let shaped = (1..=8).any(|band| {
-            let on = knob(band, "Filter On").is_some_and(|on| on.raw > on.min);
-            let gained = knob(band, "Filter Type").is_some_and(|kind| {
-                kind.items.get(kind.raw.round() as usize).is_some_and(|item| item.contains("Bell") || item.contains("Shelf"))
-            });
-            let boosted =
-                knob(band, "Gain").and_then(|gain| gain.scale.as_ref().map(|units| units.shown(gain.raw).abs() >= 0.05)).unwrap_or(false);
-            on && gained && boosted
+        // cut isn't one), on either curve (B is the right or side channel's, in L/R or M/S).
+        let curve = |band: usize, what: &str, which: &str| knobs.iter().find(|knob| knob.name == format!("{band} {what} {which}"));
+        let shaped = ["A", "B"].iter().any(|which| {
+            (1..=8).any(|band| {
+                let on = curve(band, "Filter On", which).is_some_and(|on| on.raw > on.min);
+                let gained = curve(band, "Filter Type", which).is_some_and(|kind| {
+                    kind.items.get(kind.raw.round() as usize).is_some_and(|item| item.contains("Bell") || item.contains("Shelf"))
+                });
+                let boosted = curve(band, "Gain", which)
+                    .and_then(|gain| gain.scale.as_ref().map(|units| units.shown(gain.raw).abs() >= 0.05))
+                    .unwrap_or(false);
+                on && gained && boosted
+            })
         });
         if shaped && (adaptive_on || scaled) {
             return Ok(Err(
@@ -367,14 +390,18 @@ impl Rendering {
                     .into(),
             ));
         }
+        // What else it sets is said with the bands.
+        let mut settings = vec![];
         if let Some(adaptive) = adaptive.filter(|_| adaptive_on) {
             values.push((adaptive, adaptive.item("Off").unwrap_or(adaptive.min)));
+            settings.push("Adaptive Q off");
         }
         if let Some(scale) = scale.filter(|_| scaled) {
             match &scale.scale {
                 Some(units) => values.push((scale, units.raw(100.))),
                 None => return Ok(Err("Kumi couldn't read this EQ Eight's Scale.".into())),
             }
+            settings.push("Scale to 100%");
         }
         let mut said = vec![];
         for (band, slot) in bands.iter().zip(&unused) {
@@ -402,9 +429,10 @@ impl Rendering {
         }
         self.set_knobs(&request.device, &values, signal.clone()).await?;
         let change = format!(
-            "{}EQ fitted: {}{}",
+            "{}EQ fitted: {}{}{}",
             said_first(request),
             said.join(", "),
+            if settings.is_empty() { String::new() } else { format!("; {}", settings.join(", ")) },
             predicted.map(|predicted| format!(" ({predicted})")).unwrap_or_default()
         );
         self.judge_round(Some(change), None, signal).await
@@ -548,8 +576,8 @@ impl Rendering {
         }
         let (best, reached) = homing.best().unwrap_or((x0, start));
         let Some(position) = heard_at.iter().position(|(at, _)| *at == best) else {
-            // Nothing heard beat where it was: the knob goes back and nothing is judged.
-            self.set_knobs(&request.device, &[(knob, knob.raw)], signal.clone()).await?;
+            // Nothing heard beat where it was: the knob goes back (Esc or not) and nothing is judged.
+            self.set_knobs(&request.device, &[(knob, knob.raw)], self.cleanup()).await?;
             return Ok(Err(format!(
                 "Moving {} didn't bring {label} closer to {} in {} listens; it's back where it was. Try another knob or device.",
                 knob.name,
@@ -913,8 +941,8 @@ impl Rendering {
             Ok(()) => {}
             Err(why) => return Ok(Err(why)),
         }
-        // Better than standing still by half a step (or half of what's left, near the target).
-        if search.best.as_ref().is_none_or(|(_, cost)| !(*cost < standing - (standing / 2.).min(0.25))) {
+        // Better than standing still by half a step (or half of what's left, near the target), as the judge counts better.
+        if search.best.as_ref().is_none_or(|(_, cost)| !(*cost < standing - (standing / 2.).min(0.5))) {
             return Ok(Err(format!(
                 "The search heard nothing better than where the knobs are (in {} generations of {}); they stay. Try other knobs or another device.",
                 search.generation, search.lambda

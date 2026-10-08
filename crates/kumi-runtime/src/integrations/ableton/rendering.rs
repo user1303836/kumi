@@ -235,6 +235,16 @@ impl Rendering {
             }
         }
     }
+    /// The producer's words came into the answer under way: a judged or groove run's changes since its last round
+    /// may be theirs from here, so none of them is a round's to take back. The run starts again from what's in Live.
+    pub fn steered(&self) {
+        if let Some(run) = self.judge.borrow_mut().as_mut() {
+            run.steered = true;
+        }
+        if let Some(run) = self.groove.borrow_mut().as_mut() {
+            run.steered();
+        }
+    }
     /// A restart of Live may make Max for Live available; bridge-only disconnects leave refusal intact.
     pub fn reset_live(&self) {
         self.ears_refused.set(false);

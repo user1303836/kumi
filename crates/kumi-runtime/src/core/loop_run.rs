@@ -132,7 +132,9 @@ impl LoopRun {
     /// A round the judge logged. A new judged run inside the loop doesn't start its counts again: its rounds join the
     /// loop's.
     pub fn judged(&mut self, round: Round) {
-        if round.kind == RoundKind::Start {
+        // A new run's first round (its first listen) starts its count again; a run hearing its bars again goes on with
+        // its own.
+        if round.kind == RoundKind::Start && round.round == 0 && round.listens <= 1 {
             self.listens_before += self.rounds.last().map_or(0, |last| last.listens);
         }
         self.rounds.push(round);
@@ -301,7 +303,15 @@ impl LoopRun {
         let closed: f64 = recent
             .iter()
             .filter(|round| round.kept == Some(true))
-            .map(|round| round.rows.iter().map(|row| row.gap_before - row.gap_after).sum::<f64>())
+            // A reading the change hid (or that wasn't there before) closed nothing.
+            .map(|round| {
+                round
+                    .rows
+                    .iter()
+                    .filter(|row| row.before.is_some() && row.after.is_some())
+                    .map(|row| row.gap_before - row.gap_after)
+                    .sum::<f64>()
+            })
             .sum();
         closed < 1.
     }

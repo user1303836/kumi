@@ -67,6 +67,8 @@ struct GainStage {
     parameter: String,
     label: String,
     limited: bool,
+    /// The knob turns the other way: a maximizing Limiter's Threshold, lowered to make it louder.
+    inverted: bool,
 }
 
 /// The first round's word when no listening model is found (and none was turned off: that says why instead).
@@ -98,6 +100,12 @@ pub struct JudgeRun {
     pub(super) ended: Option<String>,
     /// Live changed under it (other requests in between): its numbers are out of date until it hears its bars again.
     pub(super) stale: bool,
+    /// The producer's words came in while it ran (a steer): what this answer changed since its last round may be
+    /// theirs, so it isn't a round's to take back. The run hears its bars again with all of it, and starts from there.
+    pub(super) steered: bool,
+    /// The gain rebalancing has added on Main since the run began (dB), on a run over the mix. The mix is heard after
+    /// Main's chain but the focus element before it, so the focus is heard this much louder too: as Main puts it out.
+    pub(super) main_gain: f64,
     /// Per checklist item, rounds in a row that went after it and were taken back.
     pub(super) misses: Vec<u32>,
     /// Per checklist item, where in the span (seconds from its start) a problem stands out most: its excerpt.
@@ -109,6 +117,11 @@ impl JudgeRun {
     /// The last round, as the app and /goal read it.
     pub fn last(&self) -> Option<&Round> {
         self.rounds.last()
+    }
+
+    /// Whether its bars are heard again before the next change is judged or tuned.
+    pub(super) fn out_of_date(&self) -> bool {
+        self.stale || self.steered
     }
 }
 
@@ -304,6 +317,8 @@ impl Rendering {
             started,
             ended: None,
             stale: false,
+            steered: false,
+            main_gain: 0.,
             misses: vec![],
             worst: vec![],
             rounds: vec![],
@@ -396,7 +411,7 @@ impl Rendering {
             }
             (run.track.clone(), run.focus.clone(), run.window, run.target, run.state, run.checkpoint.clone())
         };
-        if self.judge.borrow().as_ref().unwrap().stale {
+        if self.judge.borrow().as_ref().unwrap().out_of_date() {
             return Ok(self.rebaseline(signal).await?.map(|(round, _)| round));
         }
         let before = {
@@ -445,12 +460,31 @@ impl Rendering {
             None => self.listen_to_change(&before, &heard, &aim, width_or_air, signal.clone()).await,
         };
         let listener = heard_by.as_ref().map(|(line, _)| line.clone());
+        // A change on Main's chain moves the mix but not the focus, which is heard before it: masking can't be read
+        // across it, so it reads as it was (as clipping does across a rebalance).
+        let masking: Vec<usize> = {
+            let run = self.judge.borrow();
+            let items = &run.as_ref().unwrap().checklist.items;
+            (0..items.len())
+                .filter(|index| matches!(items[*index].quantity, Quantity::Problem { problem: ProblemKind::Masking, .. }))
+                .collect()
+        };
+        let held: Vec<(usize, Option<f64>)> =
+            if track.is_none() && !masking.is_empty() && self.changes_on_main(&changes, signal.clone()).await {
+                masking.iter().map(|index| (*index, before.values[*index])).collect()
+            } else {
+                vec![]
+            };
+        let mut after = after;
+        for (index, value) in &held {
+            after[*index] = *value;
+        }
         let excerpt = Listen { values: after, loudness: heard.main.measures.integrated, file: heard.file.clone(), start: heard.start };
-        let host = InLive { rendering: self, track: track.clone(), focus: focus.clone(), window, signal: signal.clone() };
-        let (checklist, whole) = {
+        let host = InLive { rendering: self, track: track.clone(), focus: focus.clone(), window, signal: signal.clone(), held };
+        let (checklist, whole, main_gain) = {
             let run = self.judge.borrow();
             let run = run.as_ref().unwrap();
-            (run.checklist.clone(), run.whole.clone())
+            (run.checklist.clone(), run.whole.clone(), run.main_gain)
         };
         let made = self.created_by(&changes);
         let decided = judging::decide(
@@ -465,7 +499,15 @@ impl Rendering {
             &checkpoint,
         )
         .await;
-        self.judge.borrow_mut().as_mut().unwrap().listens += decided.listens;
+        {
+            let mut guard = self.judge.borrow_mut();
+            let run = guard.as_mut().unwrap();
+            run.listens += decided.listens;
+            // What rebalancing left turned on Main stays with a kept round; a round taken back took it back too.
+            if track.is_none() {
+                run.main_gain = main_gain + if decided.verdict.kept { decided.rebalanced_by } else { 0. };
+            }
+        }
         let judging::Decided { verdict, rebalanced, whole: whole_now, excerpt, stopped, stayed, .. } = decided;
         if verdict.kept {
             let file = self.keep_file(&excerpt.file).await;
@@ -560,21 +602,38 @@ impl Rendering {
     /// before them) and asked for again. Nothing is judged; the round says so, and what's next. With it, whether
     /// anything of this answer's was taken back.
     pub(super) async fn rebaseline(self: &Rc<Self>, signal: Signal) -> Result<Result<(Round, bool), String>, RuntimeError> {
-        let (track, focus, window, checkpoint) = {
+        let (track, focus, window, checkpoint, steered) = {
             let run = self.judge.borrow();
             let run = run.as_ref().unwrap();
-            (run.track.clone(), run.focus.clone(), run.window, run.checkpoint.clone())
+            (run.track.clone(), run.focus.clone(), run.window, run.checkpoint.clone(), run.steered)
         };
         let audible = |id: &String| self.history.entries.borrow().get(id).is_some_and(|entry| entry.borrow().audible());
-        let taken = if self.applied_since(&checkpoint).iter().any(|(id, _)| audible(id)) {
-            let host = InLive { rendering: self, track: track.clone(), focus: focus.clone(), window, signal: signal.clone() };
+        // After the producer's words came in, this answer's changes may be what they asked for: none go.
+        let taken = if !steered && self.applied_since(&checkpoint).iter().any(|(id, _)| audible(id)) {
+            let host = InLive { rendering: self, track: track.clone(), focus: focus.clone(), window, signal: signal.clone(), held: vec![] };
             Some(judging::take_back(&host, &checkpoint).await)
         } else {
             None
         };
-        let heard = match self.judge_hear(track.as_deref(), focus.as_deref(), window, signal.clone()).await? {
-            Ok(JudgeHeard { silent: Some(why), .. }) | Err(why) => return Ok(Err(why)),
-            Ok(heard) => heard,
+        // What went is said however the listen ends: the model mustn't report it as made.
+        let went = taken
+            .as_ref()
+            .filter(|taken| !taken.said.starts_with("nothing"))
+            .map(|taken| format!("This answer's changes went first, to hear the bars without them ({}): make them again", taken.said));
+        let heard = match self.judge_hear(track.as_deref(), focus.as_deref(), window, signal.clone()).await {
+            Ok(Ok(JudgeHeard { silent: Some(why), .. })) | Ok(Err(why)) => {
+                return Ok(Err(match went {
+                    Some(went) => format!("{why}. {went} once the bars can be heard"),
+                    None => why,
+                }))
+            }
+            Ok(Ok(heard)) => heard,
+            Err(error) => {
+                if let Some(went) = went {
+                    self.tell(went, None);
+                }
+                return Err(error);
+            }
         };
         let file = self.keep_file(&heard.file).await;
         let ids = self.applied_ids();
@@ -599,6 +658,7 @@ impl Rendering {
             run.excerpts = vec![Excerpt { window, state, values, file, start: heard.start, loudness: heard.main.measures.integrated }];
             run.checkpoint = ids;
             run.stale = false;
+            run.steered = false;
             let skip: Vec<usize> = run.misses.iter().enumerate().filter(|(_, misses)| **misses >= 2).map(|(index, _)| index).collect();
             run.target = run.checklist.next_skipping(&run.whole, &skip);
             run.window = self.excerpt_for(run);
@@ -613,6 +673,7 @@ impl Rendering {
                 rows: verdict.rows,
                 kept: None,
                 why: Some(match &taken {
+                    None if steered => "Your words came in during the run, so Kumi heard its bars again with what changed since in them, and starts from here: nothing of it was taken back or judged".into(),
                     None => "Live changed since the run's last listen (other requests in between), so Kumi heard its bars again and starts from here: a change already made is in this baseline, not judged".into(),
                     Some(taken) => format!(
                         "Live changed since the run's last listen (other requests in between), so Kumi heard its bars again and starts from here. This answer's changes went first, to hear the bars without them ({}){}: make them again, then judge them",
@@ -633,9 +694,12 @@ impl Rendering {
         };
         // The next change is judged on its target's bars when their "before" can be heard now, else on these.
         let next = self.judge.borrow().as_ref().unwrap().window;
-        if self.ensure_before(next, signal).await?.is_err() {
+        let heard_before = self.ensure_before(next, signal).await;
+        if !matches!(heard_before, Ok(Ok(()))) {
             self.judge.borrow_mut().as_mut().unwrap().window = window;
         }
+        // Esc stops here; a "before" that couldn't be heard only leaves these bars.
+        let _ = heard_before?;
         Ok(Ok((round, taken.is_some())))
     }
 
@@ -999,11 +1063,14 @@ impl Rendering {
                 if notes.is_empty() { String::new() } else { format!(" ({})", notes.join(" ")) }
             )
         });
+        // On a run over the mix, the gain rebalancing added on Main since: the mix is heard after Main's chain.
+        let main_gain = if track.is_none() { self.judge.borrow().as_ref().map_or(0., |run| run.main_gain) } else { 0. };
         let (heard_focus, focus_file) = match focus_name.clone().and_then(|name| files.get(&name).cloned()) {
             Some(render) => {
-                // Heard before its fader: as the mix hears it, at the fader's level (so turning it up reads as up).
+                // Heard before its fader: as the mix hears it, at the fader's level (so turning it up reads as up), and
+                // Main's added gain on top.
                 let fader = self.fader_of(focus_name.as_deref().unwrap_or(""), signal.clone()).await.unwrap_or(0.);
-                let heard = measure(render.file.clone(), render.start).await?.gained(fader);
+                let heard = measure(render.file.clone(), render.start).await?.gained(fader + main_gain);
                 (Some(heard), Some((self.keep_file(&PathBuf::from(&render.file)).await, render.start)))
             }
             None => (None, None),
@@ -1014,6 +1081,26 @@ impl Rendering {
         }
         let file = self.keep_file(&PathBuf::from(&main.file)).await;
         Ok(Ok(JudgeHeard { main: heard_main, focus: heard_focus, file, start: main.start, focus_file, silent }))
+    }
+
+    /// Whether any of a round's changes was made on Main (its chain or its mixer), by where HISTORY says each was made.
+    /// Main's own refs name it; its devices' and mixer's count it after the regular tracks and the returns.
+    async fn changes_on_main(self: &Rc<Self>, changes: &[(String, String)], signal: Signal) -> bool {
+        let at: Vec<String> = {
+            let entries = self.history.entries.borrow();
+            changes.iter().filter_map(|(id, _)| entries.get(id).and_then(|entry| entry.borrow().at.clone())).collect()
+        };
+        if at.iter().any(|at| at.contains(":main")) {
+            return true;
+        }
+        if at.is_empty() {
+            return false;
+        }
+        let tracks = self.rows("track", json!({"fields":["name"]}), signal.clone()).await;
+        let returns = self.rows("return-track", json!({"fields":["name"]}), signal).await;
+        let (Ok(tracks), Ok(returns)) = (tracks, returns) else { return false };
+        let main = (tracks.len() + returns.len()) as f64;
+        at.iter().any(|at| super::super::mutations::track_index_of(at) == Some(main))
     }
 
     /// A track's fader, dB as Live shows it (−inf reads as −120; None when Kumi can't read it).
@@ -1190,6 +1277,7 @@ impl Rendering {
             .filter(|reading| reading.unit == "db")
             .map(|reading| reading.value)
             .ok_or("the gain knob doesn't show dB")?;
+        let gain = if stage.inverted { -gain } else { gain };
         let wanted = if now.is_finite() { now + gain } else { gain };
         self.step(
             "set_device_parameter",
@@ -1270,18 +1358,28 @@ impl Rendering {
         self.gain_knob(&device, false, signal).await
     }
 
-    /// A gain stage's knob: its Gain, Input Gain or Output.
+    /// A gain stage's knob: its Gain, Input Gain or Output. A Limiter that's maximizing (Live 12.4's Maximize On) does
+    /// nothing with its Input Gain: its Threshold drives it, lowered to make it louder.
     async fn gain_knob(self: &Rc<Self>, device: &JsonObject, limited: bool, signal: Signal) -> Result<GainStage, RuntimeError> {
         let device_ref =
             device.get("ref").and_then(Value::as_str).map(str::to_owned).ok_or_else(|| observation("A device without a ref."))?;
-        let parameters = self.rows("parameter", json!({"parent":device_ref,"fields":["name"]}), signal).await?;
-        let parameter = parameters
-            .iter()
-            .find(|row| matches!(row.get("name").and_then(Value::as_str), Some("Gain" | "Input Gain" | "Output")))
+        let parameters = self.rows("parameter", json!({"parent":device_ref,"fields":["name","value"]}), signal).await?;
+        let named = |name: &str| parameters.iter().find(|row| row.get("name").and_then(Value::as_str) == Some(name));
+        let maximizing =
+            limited && named("Maximize On").and_then(|row| row.get("value")).and_then(Value::as_f64).is_some_and(|on| on >= 0.5);
+        let found = match maximizing {
+            true => named("Threshold"),
+            false => {
+                parameters.iter().find(|row| matches!(row.get("name").and_then(Value::as_str), Some("Gain" | "Input Gain" | "Output")))
+            }
+        };
+        let parameter = found
             .and_then(|row| row.get("ref").and_then(Value::as_str).map(str::to_owned))
             .ok_or_else(|| observation("Kumi couldn't find the gain knob."))?;
         let name = device.get("name").and_then(Value::as_str).unwrap_or("Utility").to_string();
-        Ok(GainStage { device: device_ref, parameter, label: format!("{name} gain"), limited })
+        // Said by the level it turns: a maximizing Limiter's threshold goes the other way.
+        let label = if maximizing { format!("{name} level (its Threshold, maximizing)") } else { format!("{name} gain") };
+        Ok(GainStage { device: device_ref, parameter, label, limited, inverted: maximizing })
     }
 }
 
@@ -1313,17 +1411,30 @@ struct InLive<'a> {
     focus: Option<String>,
     window: Window,
     signal: Signal,
+    /// Checklist items read as they were before the change, whatever a listen says (masking, after a change on Main's
+    /// chain: the focus is heard before it), with that reading.
+    held: Vec<(usize, Option<f64>)>,
 }
 
 #[async_trait(?Send)]
 impl RoundHost for InLive<'_> {
     async fn turn(&self, gain: f64) -> Result<String, String> {
-        self.rendering.rebalance(gain, self.signal.clone()).await.map(|(label, _)| label)
+        let label = self.rendering.rebalance(gain, self.signal.clone()).await.map(|(label, _)| label)?;
+        // On a run over the mix, rebalancing turns Main: the focus is heard that much louder from here.
+        if self.track.is_none() {
+            if let Some(run) = self.rendering.judge.borrow_mut().as_mut() {
+                run.main_gain += gain;
+            }
+        }
+        Ok(label)
     }
     async fn hear(&self) -> Result<Listen, Unheard> {
         match self.rendering.judge_hear(self.track.as_deref(), self.focus.as_deref(), self.window, self.signal.clone()).await {
             Ok(Ok(heard)) => {
-                let values = heard.read(&self.rendering.judge.borrow().as_ref().unwrap().checklist);
+                let mut values = heard.read(&self.rendering.judge.borrow().as_ref().unwrap().checklist);
+                for (index, value) in &self.held {
+                    values[*index] = *value;
+                }
                 Ok(Listen { values, loudness: heard.main.measures.integrated, file: heard.file, start: heard.start })
             }
             Ok(Err(why)) => Err(Unheard { why, stopped: false }),
@@ -1335,6 +1446,9 @@ impl RoundHost for InLive<'_> {
     }
     fn applied_since(&self, mark: &[String]) -> Vec<(String, String)> {
         self.rendering.applied_since(mark)
+    }
+    fn audible(&self, id: &str) -> bool {
+        self.rendering.history.entries.borrow().get(id).is_none_or(|entry| entry.borrow().audible())
     }
     async fn undo(&self, id: &str) -> Result<(), String> {
         match self.rendering.history.undo(id, self.rendering.cleanup(), false).await {

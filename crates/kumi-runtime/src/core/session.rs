@@ -1696,6 +1696,11 @@ impl SessionController for Session {
         let steered = held.is_some_and(|h| h.value.has_steer() && h.value.steer(text));
         if steered {
             self.0.state.borrow_mut().steers += 1;
+            // A judged run's changes from here may be the producer's: a round mustn't take them back.
+            let integration = self.0.state.borrow().integration.clone();
+            if let Some(integration) = integration {
+                integration.steered();
+            }
             if let Some(taste) = &self.0.taste {
                 taste.steered(text);
             }
@@ -1897,7 +1902,13 @@ impl SessionController for Session {
                 if round.kind == RoundKind::Judged {
                     s.judged_changes += 1;
                     if round.kept == Some(true) {
-                        s.judged_closed += round.rows.iter().map(|row| row.gap_before - row.gap_after).sum::<f64>();
+                        // A reading the change hid (or that wasn't there before) closed nothing.
+                        s.judged_closed += round
+                            .rows
+                            .iter()
+                            .filter(|row| row.before.is_some() && row.after.is_some())
+                            .map(|row| row.gap_before - row.gap_after)
+                            .sum::<f64>();
                     }
                 }
                 // The model judging a change in a turn of its own starts the loop: Kumi judged the request needs it.

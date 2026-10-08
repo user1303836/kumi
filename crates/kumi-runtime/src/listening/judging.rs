@@ -46,6 +46,12 @@ pub trait RoundHost {
     fn applied(&self) -> Vec<String>;
     /// Those not in `mark`, oldest first: ids and titles.
     fn applied_since(&self, mark: &[String]) -> Vec<(String, String)>;
+    /// Whether a change can change what's heard (a rename, a colour, a locator, the scale, the transport or an empty
+    /// track can't): a round takes back only what it could have heard.
+    fn audible(&self, id: &str) -> bool {
+        let _ = id;
+        true
+    }
     /// Kumi's undo of one change; why not, when Live wouldn't.
     async fn undo(&self, id: &str) -> Result<(), String>;
     /// Live's identities for the devices these changes made (loaded or duplicated), as HISTORY recorded them.
@@ -102,6 +108,8 @@ pub struct Decided {
     /// Not kept, and something of it stayed in Live (it wouldn't take it back): the run's readings no longer describe
     /// the Set.
     pub stayed: bool,
+    /// The gain rebalancing left turned (dB), kept or not: what the run's level moved by where rebalancing goes.
+    pub rebalanced_by: f64,
 }
 
 /// A round's decision once its change is heard (`after`, on the excerpt whose "before" read `before`):
@@ -125,7 +133,7 @@ pub async fn decide(
     checkpoint: &[String],
 ) -> Decided {
     let predicted = predict(checklist, whole, before, &after.values);
-    let gain = checklist.rebalance(whole, &predicted);
+    let gain = checklist.rebalance_round(whole, &predicted, target);
     // Rebalancing will bring loudness back by `gain`: peaks move with it, unless a limiter after the gain holds them.
     let level = match gain {
         Some(gain) if !host.limited().await => gain,
@@ -149,7 +157,16 @@ pub async fn decide(
         verdict.kept = false;
         verdict.why = why;
     }
-    let mut decided = Decided { verdict, rebalanced: None, whole: predicted, excerpt: after, listens: 0, stopped: false, stayed: false };
+    let mut decided = Decided {
+        verdict,
+        rebalanced: None,
+        whole: predicted,
+        excerpt: after,
+        listens: 0,
+        stopped: false,
+        stayed: false,
+        rebalanced_by: 0.,
+    };
     if let (true, Some(gain)) = (decided.verdict.kept, gain) {
         let settled = rebalance(host, checklist, target, whole, decided.whole, decided.excerpt, gain, decided.verdict).await;
         decided = Decided {
@@ -160,6 +177,7 @@ pub async fn decide(
             listens: settled.listens,
             stopped: settled.stopped,
             stayed: false,
+            rebalanced_by: settled.gain,
         };
         if let (true, Some(why)) = (decided.verdict.kept, processing(&decided.verdict, target_id.as_deref(), made)) {
             decided.verdict.kept = false;
@@ -185,6 +203,8 @@ pub struct Settled {
     pub excerpt: Listen,
     pub listens: u32,
     pub stopped: bool,
+    /// The gain left turned (dB): every step heard, less one taken back.
+    pub gain: f64,
 }
 
 /// Brings loudness back after a kept change: `gain` first, each step heard and the next sized by what the last one did
@@ -204,7 +224,7 @@ pub async fn rebalance(
     gain: f64,
     verdict: Verdict,
 ) -> Settled {
-    let mut settled = Settled { verdict, rebalanced: None, whole: predicted, excerpt, listens: 0, stopped: false };
+    let mut settled = Settled { verdict, rebalanced: None, whole: predicted, excerpt, listens: 0, stopped: false, gain: 0. };
     let (mut step, mut total, mut steps, mut label) = (Some(gain), 0., 0, String::new());
     // Why the round can't be judged fairly, when it can't.
     let mut unfair = None;
@@ -257,13 +277,14 @@ pub async fn rebalance(
         let was = settled.excerpt.loudness;
         settled.whole = predict(checklist, &settled.whole, &settled.excerpt.values, &again.values);
         settled.excerpt = again;
-        let still = checklist.rebalance(whole, &settled.whole);
+        let still = checklist.rebalance_round(whole, &settled.whole, target);
         let slope = match (was, settled.excerpt.loudness) {
             (Some(was), Some(now)) if gain.abs() >= 0.1 => ((now - was) / gain).clamp(0.2, 1.),
             _ => 1.,
         };
         step = still.map(|more| round1((more / slope).clamp(-12., 12.))).filter(|next| next.abs() >= 0.2 && steps < 3);
     }
+    settled.gain = total;
     if settled.rebalanced.is_none() && steps > 0 {
         settled.rebalanced = Some(format!(
             "{label} {}{} dB{}",
@@ -302,17 +323,17 @@ pub struct TakenBack {
     pub stayed: bool,
 }
 
-/// Takes a round back: Kumi's changes since `checkpoint` undone, newest first. What Live wouldn't undo is said; a
+/// Takes a round back: Kumi's changes since `checkpoint` that can change what's heard undone, newest first (a rename,
+/// a colour, a locator, the scale or the transport isn't the round's to take back). What Live wouldn't undo is said; a
 /// device such a change made goes instead when it's on the run's chain, known by Live's identity for it (recorded
 /// when it was made), so a device the producer added is never one of them. Anything else Live wouldn't undo stays.
+/// With nothing in HISTORY, what changed the sound (Python, a command or a plug-in's own window) stays: the run hears
+/// its bars again before the next change.
 pub async fn take_back(host: &dyn RoundHost, checkpoint: &[String]) -> TakenBack {
-    let all = host.applied_since(checkpoint);
+    let all: Vec<(String, String)> = host.applied_since(checkpoint).into_iter().filter(|(id, _)| host.audible(id)).collect();
     let stayed = |said: String| TakenBack { said, stayed: true };
     if all.is_empty() {
-        return TakenBack {
-            said: "nothing in HISTORY to take back (change it back yourself if you changed it another way)".into(),
-            stayed: false,
-        };
+        return stayed("nothing in HISTORY to take back (change it back yourself if you changed it another way)".into());
     }
     let mut stuck = vec![];
     let mut said = vec![];

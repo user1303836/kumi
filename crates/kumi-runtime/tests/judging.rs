@@ -214,6 +214,8 @@ struct Entry {
     turned: f64,
     /// Live's identity for the device it made.
     created: Option<String>,
+    /// It can change what's heard (a rename can't).
+    audible: bool,
 }
 
 /// Live as far as a round can tell: a gain stage, HISTORY, a chain, and what the excerpt reads at each gain.
@@ -251,7 +253,20 @@ impl Pretend {
     fn made_one(&self, title: &str, undoable: bool, created: Option<&str>) {
         let id = format!("c{}", self.history.borrow().len() + 1);
         let created = created.map(str::to_owned);
-        self.history.borrow_mut().push(Entry { id, title: title.into(), applied: true, undoable, turned: 0., created });
+        self.history.borrow_mut().push(Entry { id, title: title.into(), applied: true, undoable, turned: 0., created, audible: true });
+    }
+    /// A change that can't change what's heard (a rename).
+    fn silent(&self, title: &str) {
+        let id = format!("c{}", self.history.borrow().len() + 1);
+        self.history.borrow_mut().push(Entry {
+            id,
+            title: title.into(),
+            applied: true,
+            undoable: true,
+            turned: 0.,
+            created: None,
+            audible: false,
+        });
     }
     fn listen(&self) -> Listen {
         let values = (self.sound)(self.gain.get());
@@ -278,6 +293,7 @@ impl RoundHost for Pretend {
             undoable,
             turned: gain,
             created: None,
+            audible: true,
         });
         self.gain.set(self.gain.get() + gain);
         Ok("Utility gain".into())
@@ -299,6 +315,9 @@ impl RoundHost for Pretend {
             .filter(|entry| entry.applied && !mark.contains(&entry.id))
             .map(|entry| (entry.id.clone(), entry.title.clone()))
             .collect()
+    }
+    fn audible(&self, id: &str) -> bool {
+        self.history.borrow().iter().find(|entry| entry.id == id).is_none_or(|entry| entry.audible)
     }
     async fn undo(&self, id: &str) -> Result<(), String> {
         let mut history = self.history.borrow_mut();
@@ -328,6 +347,21 @@ impl RoundHost for Pretend {
         self.deleted.borrow_mut().push(reference.into());
         true
     }
+}
+
+#[test]
+fn a_round_on_another_item_brings_loudness_back_where_it_was_not_to_its_target() {
+    let checklist = checklist();
+    // 3 dB under the loudness wanted; a brightness change takes 1 dB more.
+    let before = vec![Some(-17.), Some(-3.), Some(-1.), Some(0.)];
+    let after = vec![Some(-18.), Some(-4.), Some(-0.2), Some(0.)];
+    // Back where it was, not up to −14: a louder rebalance would squeeze punch for a change that didn't ask for it.
+    assert_eq!(checklist.rebalance_round(&before, &after, Some(BRIGHTNESS)), Some(1.));
+    assert_eq!(checklist.rebalance_round(&before, &after, None), Some(1.));
+    // A round on loudness itself goes to its target.
+    assert_eq!(checklist.rebalance_round(&before, &after, Some(LOUDNESS)), Some(4.));
+    // Within half a dB of where it was: left alone.
+    assert_eq!(checklist.rebalance_round(&before, &[Some(-17.3), Some(-3.), Some(-0.5), Some(0.)], Some(BRIGHTNESS)), None);
 }
 
 #[tokio::test]
@@ -431,10 +465,18 @@ async fn a_device_live_wont_undo_goes_only_when_its_one_the_round_made() {
     assert!(taken.said.ends_with("undo it yourself") && taken.stayed && live.deleted.borrow().is_empty(), "{taken:?}");
     // A device Live doesn't say the identity of is never one.
     assert!(removable(&[device("", "Compressor")], &["".to_string()]).is_empty());
-    // Nothing applied: nothing to take back.
+    // A round takes back only what could change what's heard: a rename (the producer's, asked mid-loop) stays.
+    let live = Pretend::new(|_| vec![]);
+    live.change("EQ Eight · 3 Gain A 0 → −3 dB", true);
+    live.silent("Renamed Guitar → Gtr");
+    let taken = take_back(&live, &[]).await;
+    assert_eq!(taken.said, "taken back: EQ Eight · 3 Gain A 0 → −3 dB");
+    assert!(live.history.borrow().iter().any(|entry| entry.title.starts_with("Renamed") && entry.applied));
+    // Nothing applied: nothing to take back, and whatever changed the sound another way stays, so the run hears its
+    // bars again.
     let live = Pretend::new(|_| vec![]);
     let taken = take_back(&live, &[]).await;
-    assert!(taken.said.starts_with("nothing in HISTORY") && !taken.stayed);
+    assert!(taken.said.starts_with("nothing in HISTORY") && taken.stayed);
 }
 
 #[tokio::test]
@@ -544,4 +586,19 @@ async fn a_round_is_decided_whole_kept_and_rebalanced_or_taken_back() {
     let edge = vec![Some(-14.), Some(-0.8), Some(-1.), Some(0.)];
     let decided = decide(&live, &checklist, Some(PEAK), &edge, &edge, after, None, 3, &[]).await;
     assert!(!decided.verdict.kept && decided.verdict.why.contains("less than the processing costs"), "{:?}", decided.verdict);
+}
+
+#[test]
+fn an_explicit_target_that_couldnt_be_met_is_refused_or_read_as_its_point() {
+    use kumi_runtime::integrations::ableton::judge_tool::judge_request;
+    let request = |target: serde_json::Value| {
+        let input = serde_json::json!({ "goal": { "targets": [target] } });
+        judge_request(input.as_object().unwrap())
+    };
+    // A tolerance of nothing: no reading would ever be within it.
+    let refused = request(serde_json::json!({ "measure": "decay_time", "value": 1.8, "within": 0 }));
+    assert!(refused.as_ref().is_err_and(|why| why.contains("above 0")), "{refused:?}");
+    // A range of one point is that value, within a noticeable step.
+    let point = request(serde_json::json!({ "measure": "decay_time", "at_least": 1.8, "at_most": 1.8 })).unwrap();
+    assert_eq!(point.goal.unwrap().targets[0].target, Target::Exactly { value: 1.8, within: 0.1 });
 }

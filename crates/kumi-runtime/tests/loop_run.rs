@@ -2,7 +2,9 @@
 //! and otherwise sends the model back with the round's numbers and the next target.
 use kumi_runtime::{
     core::{
-        goal_mode::{after_turn, gap_closed, measured_check, read_audit, Objective, ObjectiveBudget, ObjectiveState, Verdict},
+        goal_mode::{
+            after_turn, audit_against, gap_closed, measured_check, read_audit, Objective, ObjectiveBudget, ObjectiveState, Verdict,
+        },
         loop_run::{wants_loop, LoopBudget, LoopDecision, LoopRun, LoopStop},
     },
     listening::{
@@ -253,4 +255,52 @@ fn the_gap_a_goals_turn_closed_is_read_off_the_judges_rounds_on_one_checklist() 
     assert_eq!(gap_closed(None, Some(&after)), None);
     after.rows[0].id = "true-peak".into();
     assert_eq!(gap_closed(Some(&before), Some(&after)), None);
+    // A reading the turn's change hid (a decay under a longer tail) isn't credited as closed.
+    let mut before = round(1, RoundKind::Judged, Some(true), 1., false);
+    let mut after = round(2, RoundKind::Judged, Some(true), 2., false);
+    let decay = |after: Option<f64>, gap_after: f64| Row {
+        id: "decay".into(),
+        label: "Decay".into(),
+        unit: "ms".into(),
+        wanted: "180 to 250 ms".into(),
+        before: Some(150.),
+        after,
+        gap_before: 3.,
+        gap_after,
+        change: Change::Same,
+    };
+    before.rows.push(decay(Some(150.), 3.));
+    after.rows.push(decay(None, 0.));
+    assert_eq!(gap_closed(Some(&before), Some(&after)), Some(1.));
+}
+
+#[test]
+fn a_run_hearing_its_bars_again_goes_on_with_its_own_listens() {
+    let mut run = LoopRun::new("master it", BUDGET);
+    run.judged(round(0, RoundKind::Start, None, 0., false));
+    run.judged(round(1, RoundKind::Judged, Some(true), 1., false));
+    // Live changed between answers: the run heard its bars again (a Start round, its listens going on).
+    let mut again = round(1, RoundKind::Start, None, 0., false);
+    again.listens = 3;
+    run.judged(again);
+    let mut next = round(2, RoundKind::Judged, Some(true), 1., false);
+    next.listens = 5;
+    run.judged(next);
+    assert_eq!(run.status(kumi_runtime::core::loop_run::LoopState::Running, None).listens, 5);
+    // A new run inside the loop starts its own count: the loop adds the last run's to it.
+    run.judged(round(0, RoundKind::Start, None, 0., false));
+    assert_eq!(run.status(kumi_runtime::core::loop_run::LoopState::Running, None).listens, 6);
+}
+
+#[test]
+fn a_goal_the_judge_measured_short_isnt_met_on_the_models_word() {
+    let short = round(1, RoundKind::Judged, Some(true), 1., false);
+    let met = round(2, RoundKind::Judged, Some(true), 2., true);
+    let said = || read_audit("COMPLETE: it sounds right now");
+    let check = audit_against(said(), Some(&short));
+    assert_eq!(check.verdict, Verdict::Continue);
+    assert!(check.next.is_some_and(|next| next.contains("judge")));
+    assert_eq!(audit_against(said(), Some(&met)).verdict, Verdict::Complete);
+    // Nothing measured in this goal's run: its word stands.
+    assert_eq!(audit_against(said(), None).verdict, Verdict::Complete);
 }
