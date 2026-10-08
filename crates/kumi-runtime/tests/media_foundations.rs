@@ -776,6 +776,8 @@ fn kumi_ears_passes_the_sound_through_records_four_channels_and_every_patch_cord
     // A held-back recording's sound passes again when it's written or stopped, or its time is up (a crash included).
     let code = ears_code();
     assert!(code.contains("const quiet = Number(args[3]) === 1;") && code.contains("passing.schedule(seconds * 1000);"));
+    // The level goes as a float message: v8 sends a bare 0 as nothing, so a held-back track kept playing on real Live.
+    assert!(code.contains(r#"outlet(10, "float", 0);"#) && code.contains(r#"outlet(10, "float", 1);"#) && !code.contains("outlet(10, 0)"));
     assert_eq!(code.matches("pass();").count(), 3, "arm without quiet, stop and write all let the sound pass");
     assert_eq!(boxes["obj-code"]["code"], ears_code());
     for (index, port) in KUMI_PORTS.iter().enumerate() {
