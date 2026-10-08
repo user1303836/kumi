@@ -109,12 +109,9 @@ pub struct SoundProfile {
     pub sweep: Option<Spread>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tail_share: Option<Spread>,
-    /// Its pumping and distortion at peaks (dB), as the mix guards read them: a sound goal's guards may move toward
-    /// them.
+    /// Its pumping (dB), as the mix guard reads it: a sound goal's guard may move toward it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pumping: Option<Spread>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub distortion: Option<Spread>,
 }
 
 impl SoundProfile {
@@ -147,7 +144,6 @@ impl SoundProfile {
             sweep: fx.sweep.map(|value| Spread::point(value, 0.25)),
             tail_share: fx.tail_share.map(|value| Spread::point(value, 5.)),
             pumping: m.pumping.map(|value| Spread::point(value, 1.)),
-            distortion: m.distortion.map(|value| Spread::point(value, 1.)),
         }
     }
 }
@@ -275,7 +271,6 @@ impl Profile {
                 sweep: pick(&|track| track.sound.sweep),
                 tail_share: pick(&|track| track.sound.tail_share),
                 pumping: pick(&|track| track.sound.pumping),
-                distortion: pick(&|track| track.sound.distortion),
             },
             vibe: vibe.clone(),
             vibe_spread: vibe.as_ref().and_then(|centre| {
@@ -834,8 +829,11 @@ impl Checklist {
             });
         }
         // The guards: punch, pumping, distortion and clipping mustn't get audibly worse. In a sound goal, moving toward
-        // the reference sound's own punch, pumping or distortion isn't worse (its reverb lowers punch toward the
-        // reference's); going past the reference's range is.
+        // the reference sound's own punch or pumping isn't worse (its reverb lowers punch toward the reference's);
+        // going past the reference's range is. A sound goal has no distortion guard: a sound's loudest moments are its
+        // hits and its middling ones their tails, so how much brighter the first are reads its tail's darkness (an
+        // item of its own) rather than distortion, and a longer tail reads as more. Clipping, and the sound's own
+        // warmth and crackle, stay.
         let sounds = reference.filter(|_| goal.sound);
         let toward = |spread: Option<Spread>, higher: bool| match (spread, higher) {
             (Some(spread), true) => Target::NoHigherThan { value: round1(spread.high) },
@@ -847,13 +845,7 @@ impl Checklist {
         let guards = [
             ("punch", "Punch (crest)", Quantity::Crest, m.crest, toward(sounds.and_then(|r| r.crest), false)),
             ("pumping", "Pumping", Quantity::Pumping, m.pumping, toward(sounds.and_then(|r| r.sound.pumping), true)),
-            (
-                "distortion",
-                "Distortion at peaks",
-                Quantity::Distortion,
-                m.distortion,
-                toward(sounds.and_then(|r| r.sound.distortion), true),
-            ),
+            ("distortion", "Distortion at peaks", Quantity::Distortion, m.distortion.filter(|_| !goal.sound), Target::NoHigher),
         ];
         for (id, label, quantity, measured, target) in guards {
             if measured.is_some() && !items.iter().any(|item| item.quantity == quantity) {

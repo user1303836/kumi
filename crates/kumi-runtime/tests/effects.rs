@@ -163,6 +163,8 @@ fn a_change_toward_a_wetter_reference_is_kept_and_one_past_its_punch_is_taken_ba
     assert_eq!((checklist.items[loudness].role, checklist.items[loudness].target), (Role::Guard, Target::Kept));
     let at = |id: &str| checklist.items.iter().position(|item| item.id == id).unwrap_or_else(|| panic!("no {id}: {dropped:?}"));
     let (decay_time, punch) = (at("decay time"), at("punch"));
+    // How much brighter the hits are than their tails is the tail's darkness, not distortion: no such guard here.
+    assert!(checklist.items.iter().all(|item| item.quantity != Quantity::Distortion), "{:?}", checklist.items);
     let mut after = checklist.read(&wetter, None);
     // A measure the tail hides this round (the hit's own decay to 20 dB under) is unreadable now, not lost.
     let hidden = at("decay");
