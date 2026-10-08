@@ -23,7 +23,7 @@ fn main() {
         let input = serde_json::json!({"what": what, "tracks": tracks}).as_object().unwrap().clone();
         let started = std::time::Instant::now();
         let result = tool.execute(input, Signal::new()).await.expect("the tool ran");
-        println!("{} after {:.0} s{}", if result.is_error { "failed" } else { "done" }, started.elapsed().as_secs_f64(), "");
+        println!("{} after {:.0} s", if result.is_error { "failed" } else { "done" }, started.elapsed().as_secs_f64());
         println!("{}", result.text);
     });
 }

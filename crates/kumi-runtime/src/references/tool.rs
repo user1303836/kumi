@@ -3,7 +3,7 @@
 
 use super::{
     fetch::Fetcher,
-    sources::{Kind, Resolved, Sources, Wanted},
+    sources::{stamp, Choice, Kind, Resolved, Sources, Wanted},
     store::{KeptReference, KeptTrack, ReferenceStore},
 };
 use crate::{
@@ -28,9 +28,14 @@ use serde_json::{json, Value};
 use std::rc::Rc;
 
 pub const REFERENCE_TOOL: &str = "reference";
-const DESCRIPTION: &str = "Turn a reference into measured targets, once: an audio file or a folder of them, a YouTube video or playlist, a Spotify link (track, album, playlist or artist), or words: an artist (\"bladee\"), an album (\"Kid A\") or a genre or style (\"dub techno\"). Kumi finds example tracks (for words, the artist's most listened recordings, an album's tracks or a genre's main artists, through MusicBrainz and ListenBrainz; the audio from YouTube Music, matched by length), measures each, and keeps a profile with each measure's typical value and the range the tracks keep to: loudness, dynamics, punch, tonal balance by region, stereo below 120 Hz and brightness. It's kept, so asking again costs nothing. When the words could mean more than one thing it answers with a question: ask the producer that one question, then call again with their answer. Work toward the profile with judge (goal.reference: its name). For one element of a reference (its bass, its drums), put the track in the Set, separate its stems (live_command separate_stems) and give a stem's clipRef. Fetching and measuring takes a minute or two.";
+const DESCRIPTION: &str = "Turn a reference into measured targets, once: an audio file or a folder of them, a YouTube video or playlist, a Spotify link (track, album, playlist or artist), or words: an artist (\"bladee\"), an album (\"Kid A\") or a genre or style (\"dub techno\"). Kumi finds example tracks (for words, the artist's most listened recordings, an album's tracks or a genre's main artists, through MusicBrainz and ListenBrainz; the audio from a YouTube search, matched by length), measures each, and keeps a profile with each measure's typical value and the range the tracks keep to: loudness, dynamics, punch, tonal balance by region, stereo below 120 Hz and brightness. Silent tracks, and (in a folder or a search) ones under 30 seconds, are passed over. It's kept, so asking again costs nothing (a file or folder is measured again once its files change). When the words could mean more than one thing it answers with a question and options: ask the producer that one question, then call again with the `what` of the option they pick. Work toward the profile with judge (goal.reference: what the reply's note says). For one element of a reference (its bass, its drums), put the track in the Set, separate its stems (live_command separate_stems) and give a stem's clipRef. Fetching and measuring takes a minute or two.";
 /// How long a track is heard for its profile: long enough for its loud and quiet parts.
 const MEASURED: f64 = 360.;
+/// A track measured for a style is a finished track: at least this long (but one file the producer gives is taken as
+/// it is) ...
+const SHORTEST: f64 = 30.;
+/// ... and at least this loud (LUFS), not silent or muted.
+const QUIETEST: f64 = -45.;
 
 pub struct ReferenceTool {
     pub store: Rc<ReferenceStore>,
@@ -59,7 +64,7 @@ impl KernelTool for ReferenceTool {
             "additionalProperties": false,
             "required": ["what"],
             "properties": {
-                "what": {"type": "string", "minLength": 1, "maxLength": 1024, "description": "The reference: a file or folder path, a clip in the Set (its clipRef), a YouTube or Spotify link, or an artist, album or genre in plain words"},
+                "what": {"type": "string", "minLength": 1, "maxLength": 1024, "description": "The reference: a file or folder path, a clip in the Set (its clipRef), a YouTube or Spotify link, an artist, album or genre in plain words, or a question's answer (its option's what: artist:<id> or album:<id>)"},
                 "tracks": {"type": "integer", "minimum": 3, "maximum": 10, "description": "How many example tracks to measure (6 when left out)"},
                 "again": {"type": "boolean", "description": "Measure it again even though it's kept"}
             }
@@ -80,12 +85,12 @@ impl KernelTool for ReferenceTool {
         let again = input.get("again").and_then(Value::as_bool) == Some(true);
         if !again {
             if let Some(kept) = self.store.load(&what).await {
-                return Ok(ToolResult::text(stringify(&reply(&kept, true))));
+                return Ok(ToolResult::text(stringify(&reply(&kept, true, &what))));
             }
         }
         match self.measure(&what, count, signal.clone()).await {
             Ok(Measured::Kept(kept, missed)) => {
-                let mut said = reply(&kept, false);
+                let mut said = reply(&kept, false, &what);
                 if !missed.is_empty() {
                     said["passedOver"] = json!(missed);
                 }
@@ -94,7 +99,7 @@ impl KernelTool for ReferenceTool {
             Ok(Measured::Ask { question, options }) => Ok(ToolResult::text(stringify(&json!({
                 "question": question,
                 "options": options,
-                "note": "Ask the producer this one question (with these options when there are some), then call reference again with what they say."
+                "note": "Ask the producer this one question (with these options' labels when there are some), then call reference again with what: the picked option's what (or, when they name something else, their words)."
             })))),
             Err(why) => {
                 signal.check()?;
@@ -106,24 +111,27 @@ impl KernelTool for ReferenceTool {
 
 enum Measured {
     /// Kept, and the tracks passed over (with why).
-    Kept(KeptReference, Vec<String>),
+    Kept(Box<KeptReference>, Vec<String>),
     Ask {
         question: String,
-        options: Vec<String>,
+        options: Vec<Choice>,
     },
 }
 
 impl ReferenceTool {
     async fn measure(&self, what: &str, count: usize, signal: Signal) -> Result<Measured, String> {
         // A few spare tracks: an upload that doesn't match is passed over, not counted as one less example.
-        let (name, kind, mut tracks) = match self.sources.resolve(what, count + 4, signal.clone()).await? {
+        let (name, kind, mut tracks, mbid) = match self.sources.resolve(what, count + 4, signal.clone()).await? {
             Resolved::Ask { question, options } => return Ok(Measured::Ask { question, options }),
-            Resolved::Tracks { name, kind, tracks } => (name, kind, tracks),
+            Resolved::Tracks { name, kind, tracks, mbid } => (name, kind, tracks, mbid),
         };
-        // A playlist link stands for its videos.
-        if kind == Kind::Video && crate::video::youtube_id(what).is_none() {
-            tracks = self.fetcher.playlist(what, count, signal.clone()).await?;
+        // A playlist stands for its videos.
+        if kind == Kind::Playlist {
+            let url = tracks.first().and_then(|track| track.url.clone()).unwrap_or_default();
+            tracks = self.fetcher.playlist(&url, count + 4, signal.clone()).await?;
         }
+        // One file the producer gave is taken as it is, however short.
+        let alone = tracks.len() == 1 && matches!(kind, Kind::Files | Kind::Video);
         let mut profiles = vec![];
         let mut used = vec![];
         let mut missed = vec![];
@@ -132,25 +140,16 @@ impl ReferenceTool {
                 break;
             }
             signal.check().map_err(|error| error.to_string())?;
-            match self.one(wanted, signal.clone()).await {
-                Ok(profile) => {
+            match self.one(wanted, alone, signal.clone()).await {
+                Ok((profile, source)) => {
                     profiles.push(profile);
-                    used.push(KeptTrack {
-                        artist: wanted.artist.clone(),
-                        title: wanted.title.clone(),
-                        source: wanted
-                            .file
-                            .as_ref()
-                            .map(|file| file.display().to_string())
-                            .or_else(|| wanted.url.clone())
-                            .unwrap_or_else(|| "YouTube Music".into()),
-                    });
+                    used.push(KeptTrack { artist: wanted.artist.clone(), title: wanted.title.clone(), source, mbid: wanted.mbid.clone() });
                 }
                 Err(why) => missed.push(format!("{}: {why}", label(wanted))),
             }
         }
-        let wanted_least = if kind == Kind::Files || kind == Kind::Video { 1 } else { 3.min(tracks.len()).min(count) };
-        if profiles.len() < wanted_least {
+        let wanted_least = if matches!(kind, Kind::Files | Kind::Video | Kind::Playlist) { 1 } else { 3.min(tracks.len()).min(count) };
+        if profiles.len() < wanted_least.max(1) {
             return Err(format!(
                 "Kumi could measure only {} of {name}'s tracks{}",
                 profiles.len(),
@@ -170,18 +169,35 @@ impl ReferenceTool {
             tracks: used,
             profile,
             at: now_ms(),
+            mbid,
+            stamp: if kind == Kind::Files { stamp(what) } else { None },
         };
         self.store.save(&kept).await.map_err(|error| format!("Kumi measured it but couldn't keep it: {error}"))?;
-        Ok(Measured::Kept(kept, missed))
+        Ok(Measured::Kept(Box::new(kept), missed))
     }
 
-    /// One track's profile: its audio fetched (or found) and measured.
-    async fn one(&self, wanted: &Wanted, signal: Signal) -> Result<Profile, String> {
-        let file = self.fetcher.audio(wanted, signal.clone()).await?;
-        let heard = measure_file(&file.to_string_lossy(), MeasureOptions { start: None, seconds: Some(MEASURED), signal: Some(signal) })
-            .await
-            .map_err(|error| head(&error.to_string(), 200))?;
-        Ok(Profile::of(&label(wanted), &heard))
+    /// One track's profile and where its audio came from: fetched (or found), checked to be a finished track, measured.
+    /// Audio Kumi fetched goes once it's measured.
+    async fn one(&self, wanted: &Wanted, alone: bool, signal: Signal) -> Result<(Profile, String), String> {
+        let audio = self.fetcher.audio(wanted, signal.clone()).await?;
+        let heard =
+            measure_file(&audio.file.to_string_lossy(), MeasureOptions { start: None, seconds: Some(MEASURED), signal: Some(signal) })
+                .await
+                .map_err(|error| head(&error.to_string(), 200));
+        if audio.fetched {
+            let _ = tokio::fs::remove_file(&audio.file).await;
+        }
+        let heard = heard?;
+        let measures = &heard.measures;
+        match measures.integrated.filter(|loudness| loudness.is_finite()) {
+            None => return Err("silent, nothing to measure".into()),
+            Some(loudness) if loudness < QUIETEST => return Err(format!("too quiet for a finished track ({loudness:.0} LUFS)")),
+            Some(_) => {}
+        }
+        if !alone && measures.seconds < SHORTEST {
+            return Err(format!("{:.0} s long, a sample or a sketch rather than a track", measures.seconds));
+        }
+        Ok((Profile::of(&label(wanted), &heard), audio.source))
     }
 }
 
@@ -193,8 +209,9 @@ fn label(wanted: &Wanted) -> String {
     }
 }
 
-/// A kept reference as the model reads it: its tracks and each measure's typical value and range.
-fn reply(kept: &KeptReference, cached: bool) -> Value {
+/// A kept reference as the model reads it: its tracks and each measure's typical value and range, and how judge finds
+/// it again (by what was asked for).
+fn reply(kept: &KeptReference, cached: bool, what: &str) -> Value {
     let p = &kept.profile;
     let spread = |spread: &Spread, unit: &str| format!("{} {unit} ({} to {})", spread.mid, spread.low, spread.high);
     let mut measures = serde_json::Map::new();
@@ -223,6 +240,6 @@ fn reply(kept: &KeptReference, cached: bool) -> Value {
         "tracks": kept.tracks.iter().map(|track| if track.artist.is_empty() { track.title.clone() } else { format!("{} – {}", track.artist, track.title) }).collect::<Vec<_>>(),
         "measures": measures,
         "kept": if cached { "measured before, read back" } else { "measured now, kept for next time" },
-        "note": format!("To work toward it: judge with goal.reference \"{}\". Its ranges are the style's: inside them is in the style.", kept.name)
+        "note": format!("To work toward it: judge with goal.reference \"{what}\". Its ranges are the style's: inside them is in the style.")
     })
 }

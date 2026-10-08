@@ -1,5 +1,5 @@
-//! Measured references, kept: each reference is measured once, then read back by what was asked for or by its name.
-//! One file per reference (`<key>.json`), and the downloaded audio beside them.
+//! Measured references, kept: each reference is measured once, then read back by what was asked for (a file or folder
+//! only while its files are as they were), or, for words, by its name. One file per reference (`<key>.json`).
 
 use crate::listening::checklist::Profile;
 use serde::{Deserialize, Serialize};
@@ -11,8 +11,11 @@ use tokio::io::AsyncWriteExt;
 pub struct KeptTrack {
     pub artist: String,
     pub title: String,
-    /// The link or file its audio came from.
+    /// The video or file its audio came from.
     pub source: String,
+    /// Its MusicBrainz recording, when it came from there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mbid: Option<String>,
 }
 
 /// A measured reference.
@@ -27,6 +30,12 @@ pub struct KeptReference {
     pub tracks: Vec<KeptTrack>,
     pub profile: Profile,
     pub at: i64,
+    /// The artist or album on MusicBrainz, when it's one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mbid: Option<String>,
+    /// A file's or folder's files as they were measured (names, sizes, times changed): changed, it's measured again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stamp: Option<String>,
 }
 
 pub struct ReferenceStore {
@@ -40,7 +49,7 @@ impl ReferenceStore {
     pub fn folder(&self) -> &Path {
         &self.folder
     }
-    /// Where fetched audio is kept.
+    /// Where fetched audio goes until it's measured.
     pub fn audio_folder(&self) -> PathBuf {
         self.folder.join("audio")
     }
@@ -72,18 +81,24 @@ impl ReferenceStore {
     fn file(&self, key: &str) -> PathBuf {
         self.folder.join(format!("{key}.json"))
     }
-    /// A kept reference: by what was asked for, else by its name.
+    /// A kept reference: by what was asked for (a file or folder only while its files are as they were measured), else,
+    /// for words, by the name of one made from words (an artist, album, genre or Spotify link), never a file's or a
+    /// video's.
     pub async fn load(&self, what: &str) -> Option<KeptReference> {
         let key = Self::key(what);
         if let Some(kept) = read(&self.file(&key)).await {
-            return Some(kept);
+            return kept.stamp.as_ref().is_none_or(|stamp| super::sources::stamp(what).as_ref() == Some(stamp)).then_some(kept);
+        }
+        if super::sources::is_place(what) {
+            return None;
         }
         let wanted = super::sources::folded(what);
         let mut entries = tokio::fs::read_dir(&self.folder).await.ok()?;
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "json") {
-                if let Some(kept) = read(&path).await.filter(|kept| super::sources::folded(&kept.name) == wanted) {
+                let named = |kept: &KeptReference| super::sources::Kind::named(&kept.kind) && super::sources::folded(&kept.name) == wanted;
+                if let Some(kept) = read(&path).await.filter(named) {
                     return Some(kept);
                 }
             }

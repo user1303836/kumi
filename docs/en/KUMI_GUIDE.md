@@ -361,10 +361,13 @@ trusting them:
 **References** become targets too. Give Kumi a file, a folder of them, a YouTube
 video or playlist, a Spotify link, or just words ("like Burial", "dub techno",
 "Kid A"): it finds example tracks (an artist's best-known songs, an album's
-tracks, a genre's main artists), measures each, and keeps a profile with the
+tracks, a genre's main artists), measures each (passing over silent tracks and,
+in a folder or a search, sketches under 30 seconds), and keeps a profile with the
 range the tracks keep to, so "in the style" means inside it. When the words could
-mean more than one thing, Kumi asks you once which you mean. Each reference is
-measured once and kept in `~/.kumi/references`. For one element of a reference
+mean more than one thing (two artists by one name, or an album and an artist),
+Kumi asks you once which you mean, and your answer settles it. Each reference is
+measured once and kept in `~/.kumi/references`; a file or folder is measured
+again once its files change. For one element of a reference
 (its bass, its drums), Kumi can put the track in your Set, separate its stems
 with Live's own splitter, and measure a stem.
 
@@ -776,7 +779,8 @@ says which need which.
 - **Downloads** come from GitHub (Kumi's releases and update checks, yt-dlp,
   ffmpeg and whisper.cpp), Hugging Face (the speech model), and the video sites you name.
 - **References** in words are looked up by name on MusicBrainz and ListenBrainz,
-  a Spotify link on Spotify's public page, and their audio comes from YouTube.
+  a Spotify link on Spotify's public page (an artist's on MusicBrainz), and their
+  audio comes from a YouTube search and is deleted once it's measured.
 - **Audio** is analysed on your computer; only the numbers go to the model. A
   listening model, when there is one, gets short excerpts (at most 10 seconds
   each, mono) of the changes it weighs: OpenAI with an OpenAI API key, or the
@@ -813,7 +817,7 @@ Environment variables (paths must be absolute):
 | `KUMI_AUTH_FILE`, `KUMI_SETTINGS_FILE` | The sign-in store and the settings file |
 | `KUMI_MEMORY_FILE`, `KUMI_TECHNIQUES_FILE`, `KUMI_PLAYBOOK_FILE` | Notes about you, techniques and lessons |
 | `KUMI_RECIPES_DIR`, `KUMI_PROJECTS_DIR`, `KUMI_GOALS_DIR` | Recipes; each Set's conversations, notes and last state; goals and searches in progress |
-| `KUMI_REFERENCES_DIR` | Measured references and their audio |
+| `KUMI_REFERENCES_DIR` | Measured references |
 | `KUMI_INPUT_HISTORY_FILE`, `KUMI_GAPS_FILE`, `KUMI_RESTORE_FILE` | What you sent (for ↑), the gap log, and Main's level to put back after a crash mid-render |
 | `KUMI_VIDEOS_DIR`, `KUMI_TOOLS_DIR` | Watched videos, and the programs Kumi fetches |
 | `KUMI_LIBRARY_DIR` | What Kumi learned of your sounds, presets and Sets |
