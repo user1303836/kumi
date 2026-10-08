@@ -225,6 +225,8 @@ struct State {
     goal_reference: Option<String>,
     /// The judge's last round this session: what /goal and the loop check after a turn.
     judged_last: Option<crate::listening::round::Round>,
+    /// The judge's rounds this session, counted: a goal's turn compares readings only when it logged one.
+    judged_rounds: u64,
     /// The loop running this turn (an explicit /loop, a request that calls for it, or the model's own judged change).
     looping: Option<Rc<RefCell<super::loop_run::LoopRun>>>,
     /// A judged run's first listen, kept until the model judges a change (which starts the loop with it).
@@ -279,6 +281,8 @@ struct State {
     chosen: Option<Chosen>,
     project: Option<String>,
     set: Option<String>,
+    /// Live's identity for the open Set, from the last look that read Live: an unsaved Set's goal is kept by it.
+    set_identity: Option<String>,
     set_name: Option<String>,
     plan: Option<Rc<dyn KernelTool>>,
     turns: u32,
@@ -616,6 +620,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                 goal_stopped: false,
                 goal_reference: None,
                 judged_last: None,
+                judged_rounds: 0,
                 looping: None,
                 judge_start: None,
                 judged_closed: 0.,
@@ -656,6 +661,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                 chosen: None,
                 project: None,
                 set: None,
+                set_identity: None,
                 set_name: None,
                 plan: None,
                 turns: 0,
@@ -1221,6 +1227,9 @@ impl Session {
             let mut s = self.0.state.borrow_mut();
             s.project = snapshot.project.as_ref().map(|p| p.id.clone());
             s.set_name = snapshot.project.as_ref().map(|p| p.name.clone());
+            if let Some(identity) = &snapshot.set {
+                s.set_identity = Some(identity.clone());
+            }
             let other_set = s.set.as_ref().is_some_and(|set| *set != snapshot.key);
             s.set = Some(snapshot.key.clone());
             s.plan = snapshot.tools.iter().find(|t| t.name() == "make_changes").cloned();
@@ -1751,6 +1760,13 @@ impl SessionController for Session {
                     } else {
                         this.reset(&op).await?;
                     }
+                    // The goal shown was the last conversation's, not this Set's (an unsaved Set Live gave no identity
+                    // for): it's no longer shown.
+                    let shown = this.0.state.borrow().objective.is_some();
+                    if shown && this.objective_kept().await.is_none() {
+                        this.0.state.borrow_mut().objective = None;
+                        this.emit(SessionEvent::ObjectiveCleared);
+                    }
                     this.notice("New conversation. The last one is kept; /conversations goes back to it.");
                     Ok(None)
                 }
@@ -1898,6 +1914,7 @@ impl SessionController for Session {
                 if let Some(run) = &s.looping {
                     run.borrow_mut().judged(round.clone());
                 }
+                s.judged_rounds += 1;
                 s.judged_last = Some(round);
                 return;
             }

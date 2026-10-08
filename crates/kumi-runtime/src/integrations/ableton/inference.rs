@@ -16,6 +16,7 @@ pub(crate) fn no_access(key: &str, now: DateTime<Utc>, project: Option<ProjectRe
         instructions: super::context::INSTRUCTIONS.into(),
         tools: vec![],
         project,
+        set: None,
         tracks: None,
         saved_at: None,
         context: stringify(

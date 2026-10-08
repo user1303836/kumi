@@ -68,6 +68,7 @@ impl Integration for TestIntegration {
             instructions: String::new(),
             tools: vec![],
             project: None,
+            set: None,
             tracks: None,
             saved_at: None,
         })

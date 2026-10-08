@@ -33,6 +33,22 @@ impl Operation {
         self.changed.notify_one();
     }
 }
+/// An explicit /loop's run on the session, taken off again if the turn ends before the loop does (Live unreachable,
+/// the turn superseded, the model's call failing): left there, it would take later rounds and look like a loop running.
+struct LoopHold {
+    session: Session,
+    run: Rc<RefCell<LoopRun>>,
+}
+impl Drop for LoopHold {
+    fn drop(&mut self) {
+        if let Ok(mut s) = self.session.0.state.try_borrow_mut() {
+            if s.looping.as_ref().is_some_and(|run| Rc::ptr_eq(run, &self.run)) {
+                s.looping = None;
+            }
+        }
+    }
+}
+
 impl Session {
     pub(super) fn playbook_serial<T: 'static>(
         &self,
@@ -176,6 +192,7 @@ impl Session {
                 s.looping = Some(run.clone());
             }
         }
+        let _hold = looping.as_ref().map(|run| LoopHold { session: self.clone(), run: run.clone() });
         let snapshot = self.observe(&op, pinned, false).await?;
         self.assert_current(&op)?;
         let note = match &self.0.learned {

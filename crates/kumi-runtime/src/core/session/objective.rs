@@ -35,23 +35,37 @@ impl Drop for ObjectiveHold {
 }
 
 /// Where a running goal is kept: the Set it began in, pinned for the run. An unsaved Set's goal moves to the Set's own
-/// place when it's first saved (the same conversation going on), never to another Set opened meanwhile.
+/// place when it's first saved (the same Set, by Live's identity, or the same conversation without one), never to
+/// another Set opened meanwhile.
 struct Place {
     at: String,
     conversation: String,
 }
 
+/// An unsaved Set's own place: Live's identity for it.
+fn unsaved_place(identity: &str) -> String {
+    format!("{UNSAVED}:{identity}")
+}
+
 impl Session {
+    /// Where this Set's goal is kept: its project; for an unsaved Set, Live's identity for it (which holds while the Set
+    /// stays open, through a Kumi restart and a new conversation); without one, the place every unsaved Set shares,
+    /// where each goal is its own conversation's.
     fn objective_place(&self) -> String {
-        self.0.state.borrow().project.clone().unwrap_or(UNSAVED.into())
+        let s = self.0.state.borrow();
+        match (&s.project, &s.set_identity) {
+            (Some(project), _) => project.clone(),
+            (None, Some(identity)) => unsaved_place(identity),
+            (None, None) => UNSAVED.into(),
+        }
     }
     fn objective_running(&self) -> bool {
         let s = self.0.state.borrow();
         s.objective_op.as_ref().is_some_and(|op| s.active.as_ref().is_some_and(|active| active.id == op.id))
     }
-    /// The objective for this Set: in memory, else from disk. Every unsaved Set shares one place, so an unsaved Set's
-    /// goal is only the one set in its own conversation. One kept as running with nothing running it (Kumi closed, or
-    /// crashed, mid-turn) is paused.
+    /// The objective for this Set: in memory, else from disk. In the place unsaved Sets share (Live's identity for the
+    /// Set unknown), a goal is only the one set in its own conversation. One kept as running with nothing running it
+    /// (Kumi closed, or crashed, mid-turn) is paused.
     pub(super) async fn objective_kept(&self) -> Option<Objective> {
         let (place, conversation) = (self.objective_place(), self.0.state.borrow().conversation_id.clone());
         let held = self.0.state.borrow().objective.as_ref().filter(|(at, _)| *at == place).map(|(_, objective)| objective.clone());
@@ -76,39 +90,49 @@ impl Session {
     }
     /// Saves the running goal where it belongs, following its Set's first save.
     fn persist_running(&self, place: &mut Place, objective: &Objective) {
-        if place.at == UNSAVED {
-            let saved = {
-                let s = self.0.state.borrow();
-                s.project.clone().filter(|_| s.conversation_id == place.conversation)
+        let saved = {
+            let s = self.0.state.borrow();
+            // Still the Set it began in: the same Live identity, or (without one) the same conversation.
+            let same = match &s.set_identity {
+                _ if place.at == UNSAVED => s.conversation_id == place.conversation,
+                Some(identity) => place.at == unsaved_place(identity),
+                None => false,
             };
-            if let Some(to) = saved {
-                if let Some(store) = self.0.options.objectives.clone() {
-                    self.enqueue(async move { store.clear(UNSAVED).await });
-                }
-                place.at = to;
+            s.project.clone().filter(|_| same)
+        };
+        if let Some(to) = saved {
+            if let Some(store) = self.0.options.objectives.clone() {
+                let from = place.at.clone();
+                self.enqueue(async move { store.clear(&from).await });
             }
+            place.at = to;
         }
         self.persist_objective(&place.at, objective);
     }
-    /// The unsaved Set's goal, moved to the Set's own place when it's first saved (as its conversation is). Only its
-    /// own: a goal another unsaved Set left stays where it is.
+    /// The unsaved Set's goal, moved to the Set's own place when it's first saved. Only its own: a goal another unsaved
+    /// Set left stays where it is.
     pub(super) fn move_unsaved_objective(&self, to: &str) {
-        let conversation = {
+        let (from, conversation) = {
             let mut s = self.0.state.borrow_mut();
+            let from = s.set_identity.as_deref().map(unsaved_place).unwrap_or(UNSAVED.into());
             let conversation = s.conversation_id.clone();
-            if let Some((at, _)) =
-                s.objective.as_mut().filter(|(at, objective)| at == UNSAVED && objective.conversation.as_ref() == Some(&conversation))
+            let shared = from == UNSAVED;
+            if let Some((at, _)) = s
+                .objective
+                .as_mut()
+                .filter(|(at, objective)| *at == from && (!shared || objective.conversation.as_ref() == Some(&conversation)))
             {
                 *at = to.to_owned();
             }
-            conversation
+            (from, conversation)
         };
         if let Some(store) = self.0.options.objectives.clone() {
             let to = to.to_owned();
             self.enqueue(async move {
-                if let Some(goal) = store.load(UNSAVED).await?.filter(|goal| goal.conversation.as_ref() == Some(&conversation)) {
+                let shared = from == UNSAVED;
+                if let Some(goal) = store.load(&from).await?.filter(|goal| !shared || goal.conversation.as_ref() == Some(&conversation)) {
                     store.save(&to, &goal).await?;
-                    store.clear(UNSAVED).await?;
+                    store.clear(&from).await?;
                 }
                 Ok(())
             });
@@ -157,11 +181,14 @@ impl Session {
         &self,
         op: &Rc<Operation>,
         objective: &str,
-        judged_before: &Option<crate::listening::round::Round>,
+        rounds_before: u64,
         usage: &mut Usage,
     ) -> Result<Option<Check>, RuntimeError> {
-        let judged = self.0.state.borrow().judged_last.clone();
-        if judged != *judged_before {
+        let (judged, rounds) = {
+            let s = self.0.state.borrow();
+            (s.judged_last.clone(), s.judged_rounds)
+        };
+        if rounds > rounds_before {
             if let Some(check) = measured_check(judged.as_ref()) {
                 return Ok(Some(check));
             }
@@ -219,9 +246,9 @@ impl Session {
         let mut stepped_in = false;
         let mut first = true;
         loop {
-            let (applied, judged_before, closed, judged_changes, steers) = {
+            let (applied, judged_before, rounds, closed, judged_changes, steers) = {
                 let s = self.0.state.borrow();
-                (s.applied, s.judged_last.clone(), s.judged_closed, s.judged_changes, s.steers)
+                (s.applied, s.judged_last.clone(), s.judged_rounds, s.judged_closed, s.judged_changes, s.steers)
             };
             let turn = self.objective_turn(&op, &prompt, &objective.objective, first, &mut usage).await;
             first = false;
@@ -246,7 +273,7 @@ impl Session {
                 stepped_in = true;
                 break;
             }
-            let check = match self.objective_check(&op, &objective.objective, &judged_before, &mut usage).await {
+            let check = match self.objective_check(&op, &objective.objective, rounds, &mut usage).await {
                 Ok(Some(check)) => check,
                 // Stopped mid-check: no answer, no turn counted.
                 Ok(None) => {
@@ -263,11 +290,12 @@ impl Session {
                 }
             };
             // Progress: the judge's gap closed by a step or more, by kept changes or between its readings before and
-            // after the turn (measure, change, measure again); a change taken back closes nothing. With nothing to
-            // compare and no change judged, a change in the Set.
+            // after the turn (measure, change, measure again); a change taken back closes nothing. Readings are
+            // compared only when the turn logged a round (else the last one is the turn's start, compared with
+            // itself). With nothing to compare and no change judged, a change in the Set.
             let progress = {
                 let s = self.0.state.borrow();
-                let standing = gap_closed(judged_before.as_ref(), s.judged_last.as_ref());
+                let standing = (s.judged_rounds > rounds).then(|| gap_closed(judged_before.as_ref(), s.judged_last.as_ref())).flatten();
                 s.judged_closed - closed >= 1.
                     || standing.is_some_and(|closed| closed >= 1.)
                     || (standing.is_none() && s.judged_changes == judged_changes && s.applied > applied)

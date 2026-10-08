@@ -189,6 +189,7 @@ fn harness(run: Option<Run>, config: impl FnOnce(&mut SessionOptions)) -> Harnes
         instructions: "fixture instructions".into(),
         tools: vec![],
         project: None,
+        set: None,
         tracks: None,
         saved_at: None,
     }));
@@ -2512,6 +2513,108 @@ local_test!(an_unsaved_sets_goal_is_its_own_and_moves_only_with_its_own_first_sa
     h.session.close().await.unwrap();
     assert!(store.load("set-b").await.unwrap().is_none());
     assert_eq!(store.load("unsaved").await.unwrap().unwrap().objective, "make the bass louder");
+});
+local_test!(an_unsaved_sets_goal_is_kept_by_lives_identity_through_a_restart_and_a_new_conversation, {
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_objective_store(dir.path().join("goals"));
+    // Unsaved Set "live-set-1": a goal, paused.
+    let waits: Run = Rc::new(|_, signal, _| {
+        async move {
+            signal.cancelled().await;
+            Ok(cancelled())
+        }
+        .boxed_local()
+    });
+    let h = harness(Some(waits), |o| o.objectives = Some(store.clone()));
+    h.observation.borrow_mut().set = Some("live-set-1".into());
+    h.session.start().await.unwrap();
+    let s = h.session.clone();
+    let running = tokio::task::spawn_local(async move { s.goal(Some("make the bass louder")).await });
+    for _ in 0..500 {
+        if !h.record.calls.borrow().is_empty() {
+            break;
+        }
+        delay(1).await;
+    }
+    h.session.cancel().await.unwrap();
+    running.await.unwrap().unwrap();
+    h.session.close().await.unwrap();
+    kept_at(&store, "unsaved:live-set-1", ObjectiveState::Paused).await;
+    // Kumi restarts with the Set still open: its goal is there, after a new conversation too, and stopping ends it.
+    let h = harness(Some(auditing(&["COMPLETE: done"])), |o| o.objectives = Some(store.clone()));
+    h.observation.borrow_mut().set = Some("live-set-1".into());
+    h.session.start().await.unwrap();
+    h.session.goal(None).await.unwrap();
+    assert_eq!(objectives(&h).pop().unwrap().objective, "make the bass louder");
+    h.session.new_conversation().await.unwrap();
+    assert!(!h.events.borrow().iter().any(|e| matches!(e, SessionEvent::ObjectiveCleared)), "it's still this Set's goal");
+    assert!(h.session.stop_goal().await.unwrap());
+    kept_at(&store, "unsaved:live-set-1", ObjectiveState::Done).await;
+    h.session.close().await.unwrap();
+    // Another unsaved Set doesn't see it.
+    let h = harness(None, |o| o.objectives = Some(store.clone()));
+    h.observation.borrow_mut().set = Some("live-set-2".into());
+    h.session.start().await.unwrap();
+    h.session.goal(None).await.unwrap();
+    assert!(h.notice("No goal yet"));
+    h.session.close().await.unwrap();
+});
+local_test!(a_goal_shown_from_another_conversation_is_cleared_by_a_new_one_when_live_gave_no_identity, {
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_objective_store(dir.path().join("goals"));
+    let waits: Run = Rc::new(|_, signal, _| {
+        async move {
+            signal.cancelled().await;
+            Ok(cancelled())
+        }
+        .boxed_local()
+    });
+    let h = harness(Some(waits), |o| o.objectives = Some(store.clone()));
+    h.session.start().await.unwrap();
+    let s = h.session.clone();
+    let running = tokio::task::spawn_local(async move { s.goal(Some("make the bass louder")).await });
+    for _ in 0..500 {
+        if !h.record.calls.borrow().is_empty() {
+            break;
+        }
+        delay(1).await;
+    }
+    h.session.cancel().await.unwrap();
+    running.await.unwrap().unwrap();
+    // Without Live's identity, a new conversation's unsaved Set can't claim the goal: the GOAL tab is cleared.
+    h.session.new_conversation().await.unwrap();
+    assert!(h.events.borrow().iter().any(|e| matches!(e, SessionEvent::ObjectiveCleared)));
+    h.session.close().await.unwrap();
+});
+local_test!(a_goal_whose_turns_change_the_set_without_judging_progresses_after_an_earlier_judged_round, {
+    let held = Rc::new(RefCell::new(None::<Session>));
+    let active = held.clone();
+    let turns = Rc::new(Cell::new(0i64));
+    let run: Run = Rc::new(move |input, _, emit| {
+        let session = active.borrow().clone().unwrap();
+        let turns = turns.clone();
+        async move {
+            if input.starts_with("[Kumi goal check]") {
+                emit(KernelEvent::Text { text: "CONTINUE: the next section".into() })?;
+                return Ok(complete());
+            }
+            // Each turn edits clips and tracks without judging them.
+            turns.set(turns.get() + 1);
+            session.watch(WatchEvent::Change(change(&format!("c{}", turns.get()), "applied", turns.get())));
+            emit(KernelEvent::Text { text: "Built the next section.".into() })?;
+            Ok(complete())
+        }
+        .boxed_local()
+    });
+    let h = harness(Some(run), |o| o.objective_budget = Some(ObjectiveBudget { turns: 3, idle: 2, ..OBJECTIVE_BUDGET }));
+    *held.borrow_mut() = Some(h.session.clone());
+    h.session.start().await.unwrap();
+    // A round judged earlier in the session (a /loop, a judge call, an earlier goal) is no turn's reading.
+    h.session.watch(WatchEvent::Judged(measured(1, 4.)));
+    h.session.goal(Some("add a breakdown at bar 33")).await.unwrap();
+    let last = objectives(&h).pop().unwrap();
+    assert_eq!((last.verdict, last.turns), (Some(Verdict::Budget), 3), "not stuck: {last:?}");
+    h.session.close().await.unwrap();
 });
 local_test!(a_goal_that_gets_no_closer_is_stuck_even_when_the_judge_measured_each_turn, {
     let held = Rc::new(RefCell::new(None::<Session>));

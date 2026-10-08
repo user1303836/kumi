@@ -72,8 +72,8 @@ pub struct Objective {
     /// Turns in a row without progress.
     #[serde(default)]
     pub idle: u32,
-    /// The conversation it was set in. Every unsaved Set shares one place, so an unsaved Set's goal is only the one
-    /// set in its own conversation.
+    /// The conversation it was set in. An unsaved Set's goal is kept by Live's identity for the Set; without one, every
+    /// unsaved Set shares one place, where a goal is only the one set in its own conversation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation: Option<String>,
 }

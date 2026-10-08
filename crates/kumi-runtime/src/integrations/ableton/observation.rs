@@ -831,6 +831,7 @@ impl Observer {
                 instructions: INSTRUCTIONS.into(),
                 tools: host.definitions(),
                 project: project_ref,
+                set: Some(identity.clone()),
                 tracks: track_list
                     .filter(|_| !more_tracks)
                     .map(|tracks| tracks.iter().filter_map(|t| t.get("name").and_then(Value::as_str).map(str::to_owned)).collect()),

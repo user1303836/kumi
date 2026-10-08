@@ -305,6 +305,9 @@ pub struct Observation {
     pub tools: Vec<Rc<dyn KernelTool>>,
     /// The saved Set this is about (an opaque id), so its conversation can be kept between sessions.
     pub project: Option<ProjectRef>,
+    /// Live's identity for the open Set: it holds while the Set stays open in this run of Live, through a Kumi restart
+    /// and a new conversation (an unsaved Set's goal is kept by it). None when Live wasn't read.
+    pub set: Option<String>,
     /// The Set's track names, when all of them were read (names are data).
     pub tracks: Option<Vec<String>>,
     /// When the saved Set's file was last written: a later time means the producer saved it.
