@@ -123,7 +123,8 @@ def stage(bundle: bytes, licenses: dict[str, bytes], commit: str, version: str, 
         (folder / name).write_bytes(content)
     files = release.inventory(folder)
     manifest = {"schema": release.WILLINGTON_SCHEMA, "version": version, "commit": commit, "files": files}
-    (folder / "release.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # Keep --run/--check byte-identical across Windows and POSIX checkouts.
+    (folder / "release.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     release.willington_files(folder)
     return files
 
