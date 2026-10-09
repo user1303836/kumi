@@ -3,6 +3,18 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.11.3 — 2026-10-08
+
+Ships with bridge 1.0.91, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.91
+
+- Willington supports Live 12.4.15b6 on Apple Silicon, including native editing.
+
 ## 1.11.2 — 2026-10-08
 
 Ships with bridge 1.0.90, as 1.11.1 did.
