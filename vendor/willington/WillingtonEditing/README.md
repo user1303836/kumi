@@ -1,14 +1,15 @@
 # Native editing
 
-Exact-build adapter validated for **Live 12.4.15b5 macOS ARM64** within the
-[documented fixture coverage](../../evidence/native-editing/b5/README.md). All four
+Exact-build adapter validated for **Live 12.4.15b5/b6 macOS ARM64** within the
+[b5](../../evidence/native-editing/b5/README.md) and
+[b6 fixture coverage](../../evidence/live-12.4.15b6-arm64/README.md). All four
 feature families are included in normal matrix bundles and default profile
 selection. Writes remain disabled until explicitly enabled. No Windows support
 is claimed. Kumi’s separate integration status is described below.
 
 ```sh
 python3 scripts/releases/build_profile.py WillingtonEditing \
-  --profile profiles/live-12.4.15b5-editing-arm64.json
+  --profile profiles/live-12.4.15b6-arm64.json
 ```
 
 With this checkout's `integrations` on Live's Python path, import
@@ -147,7 +148,7 @@ Max encoding, not an external synthesizer's bend-range configuration. See the
 Generated devices reference checkout JavaScript by absolute path. Failed mutation
 tests require inspecting/restoring the fixture before retrying. Disable writes
 when finished. See the [evidence index](../../evidence/native-editing/b5/README.md)
-for measured coverage and corrected failures. Run the 19 offline adapter tests
+for measured coverage and corrected failures. Run the offline adapter tests
 with `python3 integrations/WillingtonEditing/test_offline.py`.
 
 `consumer_validation.py` exercises the public Python methods through a bridge
@@ -160,19 +161,20 @@ several calls inside one script can produce several Live undo steps.
 
 The native implementation was merged in
 [Willington PR #11](https://github.com/xonedsp/willington/pull/11). The profile
-is now validated for the exact macOS ARM64 b5 build and included in normal matrix
-bundles. Kumi's [documentation PR #248](https://github.com/user1303836/kumi/pull/248)
+is now validated for exact macOS ARM64 b5 and b6 builds and included in normal
+matrix bundles. Kumi's [documentation PR #248](https://github.com/user1303836/kumi/pull/248)
 explains standalone use in English, Japanese and Simplified Chinese.
-[Runtime draft #249](https://github.com/user1303836/kumi/pull/249) adds separate
-preview/apply transactions; it is not part of Kumi's currently bundled support.
+[Merged runtime PR #249](https://github.com/user1303836/kumi/pull/249) adds separate
+preview/apply transactions. The installed Kumi bundle must include matching
+bindings and evidence for the running Live build.
 
-The runtime draft requires both negotiated editing operations and writable kinds
-before exposing its tools. Write enablement requires a self-test receipt for the
+The runtime integration requires negotiated editing operations and writable
+kinds before exposing its tools. Write enablement requires a self-test receipt for the
 exact compiled library. It fences edits by object identity, connection epoch and
 state revision, retains private prior state for explicit restoration, and handles
 same-key retries after lost replies. Its contract is narrower than the native API:
 
-| Operation | Kumi runtime draft |
+| Operation | Kumi runtime |
 | --- | --- |
 | Group creation | Contiguous top-level tracks; no Kumi history inverse |
 | Scene/global Follow Actions | Stopped edits with guarded explicit restoration, including the global switch |
@@ -181,13 +183,26 @@ same-key retries after lost replies. Its contract is narrower than the native AP
 
 Existing Arrangement curves are preserved by snapshot restoration. Snapshot
 expiration can prevent later history restoration, even within one connection.
-The draft does not use blind Live undo to compensate for an edit. Its
+The integration does not use blind Live undo to compensate for an edit. Its
 [candidate fixture evidence](https://github.com/cyclesonata/kumi/blob/497a0936/docs/evidence/willington-native-editing-candidate.json)
 covers Kumi mapper operations through authenticated `python.run`, including all
 four reversible kinds and group creation followed by explicit native cleanup.
 This is not evidence of a released bundle or end-to-end chat transport.
 
-Kumi's approved import of a carrying Willington bundle, production write
-evidence and Kumi's protocol release remain prerequisites for shipping its
-transaction tools. Durable cross-session snapshots and scene/global observers are not
-provided by this component.
+This b6 profile still needs a coordinated import into Kumi's vendored bundle;
+Willington promotion does not update that separate consumer automatically.
+Durable cross-session snapshots and scene/global observers are not provided by
+this component.
+
+## Live 12.4.15b6 profile
+
+All editing bindings share `live-12.4.15b6-arm64` with the other three components.
+Default `install()` selects this validated row, and matrix bundles contain its
+exact library. The snapshot `profile` field comes from the verified artifact
+manifest; b6 snapshots no longer carry a hard-coded b5 identity. Restoration
+rejects another profile even when the remaining shape is valid.
+
+The [b6 receipts](../../evidence/live-12.4.15b6-arm64/README.md) cover native
+transactions, Max parsing, group mixer/Main routing, scene UI scheduling, MPE
+and Arrangement playback, snapshot edge cases, and save/reload persistence.
+The same documented ownership and stopped-transport limits apply.

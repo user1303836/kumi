@@ -74,7 +74,7 @@ def owner(obj, cls):
 class Native:
     def __init__(self, library, *, defer_enable=False):
         from WillingtonRuntime import verify
-        verify(library)
+        self.profile_id = verify(library)['profile_id']
         self.snapshot_key = os.urandom(32)
         self._snapshot_owners = {}
         self.retired = False
@@ -311,7 +311,7 @@ class Native:
             _length_ = count.value*6
         rows = Rows()
         checked(self._arrangement_snapshot(track._live_ptr, parameter._live_ptr, ct.addressof(rows), count.value, ct.addressof(count), ct.addressof(exists)))
-        state = {'schema': 1, 'profile': 'live-12.4.15b5-editing-arm64',
+        state = {'schema': 1, 'profile': self.profile_id,
                 'parameter_handle': str(parameter._live_ptr), 'value_domain': 'native',
                 'owner_token': self._snapshot_binding(song, track, parameter),
                 'exists': exists.value, 'events': [list(rows[i:i+6]) for i in range(0,len(rows),6)]}
@@ -328,7 +328,7 @@ class Native:
     def arrangement_restore(self, track, parameter, state):
         song = self.arrangement_owner(track, parameter, True)
         if (type(state) is not dict or type(state.get('schema')) is not int or state['schema'] != 1
-                or state.get('profile') != 'live-12.4.15b5-editing-arm64'
+                or state.get('profile') != self.profile_id
                 or state.get('value_domain') != 'native'
                 or state.get('parameter_handle') != str(parameter._live_ptr)
                 or type(state.get('exists')) is not bool or type(state.get('events')) is not list):
