@@ -1,4 +1,4 @@
-//! The form tool: the song heard quietly and read bar by bar, which tracks play where (from the Arrangement), and a
+//! The form tool: the song played, heard and read bar by bar, which tracks play where (from the Arrangement), and a
 //! reference's form beside it.
 
 use super::super::connection::NO_CURRENT_LIVE;

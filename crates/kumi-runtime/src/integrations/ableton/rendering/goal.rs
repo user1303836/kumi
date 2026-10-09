@@ -139,15 +139,16 @@ impl Rendering {
         let reference = self.heard_reference(named, request, signal.clone()).await?;
         let mut rig = self.open_rig(&request.candidates, request.from_beat, request.beats, signal.clone()).await?;
         rig.hold = Some(Held::default());
-        // The candidates are tried where only Kumi hears them; the producer hears the best so far, in the Set.
+        // The candidates are tried where only Kumi hears them; the best goes on “Kumi · Goal best” once the search
+        // pauses or ends (`keep_best`, after the rig is closed).
         for source in &mut rig.sources {
             source.quiet = true;
         }
         self.tell(
             if rig.ears.is_some() {
-                "Kumi tries the goal's candidates where only it hears them, and plays its best so far on “Kumi · Goal best”"
+                "Kumi tries the goal's candidates where only it hears them, and puts its best on “Kumi · Goal best” when the search pauses or ends"
             } else {
-                "The goal's candidates play as Kumi tries them, and its best so far goes on “Kumi · Goal best”"
+                "The goal's candidates play as Kumi tries them, and its best goes on “Kumi · Goal best” when the search pauses or ends"
             },
             None,
         );

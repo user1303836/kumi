@@ -226,7 +226,7 @@ impl Rendering {
         let signal = abort::any([original, self.connection().lifetime.clone()]);
         let rows = self.rows("set", json!({"fields":["playing","position","loop"]}), signal.clone()).await.unwrap_or_default();
         let set = rows.first();
-        // While Live plays, a listen with no place hears it as it plays; the whole song is heard quietly from its start.
+        // While Live plays, a listen with no place hears it as it plays; the whole song is played from its start.
         if set.and_then(|set| set.get("playing")) == Some(&json!(true)) && request.from_beat.is_none() && request.whole != Some(true) {
             if let Some(link) = self.ears_ready(signal.clone()).await? {
                 return self.hear_as_it_plays(link, request, signal).await;

@@ -324,20 +324,22 @@ up:
 - **While Live is stopped**, it plays the loop (or a few bars from the playhead,
   the part you name, or the whole song to its last clip). A listen takes as long
   as the music it hears.
-- **You hear what Kumi hears.** Kumi never turns Main down or mutes a track it's
-  working on, so you can follow along and steer. Each listen says which bars it
-  plays and why ("after the cut at 300 Hz").
+- **You hear what Kumi hears.** While it listens, Kumi never turns Main down or
+  mutes a track it's working on, so you can follow along and steer. Each listen
+  says which bars it plays and why ("after the cut at 300 Hz").
 - **Several tracks at once:** each one's sound, and where two sit in the same
   band at similar levels.
 - **How:** Kumi Ears, a small Max for Live device Kumi brings (`kumi bridge` puts
   it in your User Library's Kumi folder). Kumi places it at the end of a track's
   chain when it needs to hear it and takes it away after. Sound passes through
-  it untouched, and nothing is recorded into your Set.
+  it unchanged, except a candidate it holds back (below), and nothing is
+  recorded into your Set.
 - Auditions and the sound-match search hear their candidates the same way: no
-  scratch tracks, no arming. You hear the first candidate (in the search, its
-  best so far on "Kumi · Goal best"); Kumi Ears holds the others back while Kumi
-  records them. Without Max for Live, Kumi records to listen instead, and the
-  candidates play together.
+  scratch tracks, no arming. In an audition you hear the first candidate, and
+  Kumi Ears holds the others back while Kumi records them. The search holds all
+  its candidates back and puts its best on "Kumi · Goal best" when it pauses or
+  ends. Without Max for Live, Kumi records to listen instead, and the candidates
+  play together.
 
 ## Judging changes and the loop
 
@@ -512,8 +514,11 @@ after and what still differs.
 `/loop` and a sound to match goes further: Kumi keeps searching, mostly with
 its own fast knob search and with the model's bigger ideas every few
 generations, until the score reaches 95, you stop it, or four hours pass. The
-GOAL tab shows how it's going. Esc pauses the search, `/loop` alone picks it up
-again (even after a restart), and `/loop stop` ends it.
+GOAL tab shows how it's going. With Max for Live, Kumi holds the candidates back
+while it tries them, so you hear the Set without them; the best goes on
+"Kumi · Goal best" when the search pauses or ends. Esc pauses the search,
+`/loop` alone picks it up again (even after a restart), and `/loop stop` ends
+it.
 
 What Kumi learns from each match is kept as a lesson (✦) for the next one;
 `/memory` lists them.

@@ -1,4 +1,4 @@
-//! The judge in Live: a goal as a checklist, heard quietly. The run starts with the whole stretch heard once (the
+//! The judge in Live: a goal as a checklist, heard as Live plays. The run starts with the whole stretch heard once (the
 //! problems found there, placed in time), then judges each change on an excerpt (the bars around the target's worst
 //! moment, else the loudest part), keeps it only if its target improved and nothing else got audibly worse, takes
 //! it back with Kumi's undo otherwise, brings loudness back to target after every kept change, and logs every

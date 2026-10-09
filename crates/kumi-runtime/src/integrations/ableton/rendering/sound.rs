@@ -1,4 +1,4 @@
-//! The sound tool: tracks heard quietly side by side in one pass, each sound measured, a kit judged as one, how each
+//! The sound tool: tracks heard side by side in one pass, each sound measured, a kit judged as one, how each
 //! part ducks under and interlocks with another, and how far its notes sit from a key.
 
 use super::super::connection::NO_CURRENT_LIVE;

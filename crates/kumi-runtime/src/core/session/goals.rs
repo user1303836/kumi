@@ -382,13 +382,8 @@ impl Session {
                     self.0.state.borrow_mut().heard_last = None;
                     let closing = rig.close().await.unwrap_or_default();
                     open = false;
-                    closed_notes.extend(closing.clone());
+                    closed_notes.extend(closing);
 
-                    if closing.iter().any(|s| s.contains("Main may still be silent")) {
-                        state.status = GoalRun::Paused;
-                        state.why = Some("Main couldn't be put back; set it in Live, then /loop carries on".into());
-                        break;
-                    }
                     let best = leader.as_ref().and_then(|l| l.score.map(|score| Best { label: l.label.clone(), score: round(score) }));
                     let structural = structural.cloned();
 
