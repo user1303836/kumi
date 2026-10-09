@@ -3,6 +3,18 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.11.4 — 2026-10-08
+
+Ships with bridge 1.0.91, as 1.11.3 did.
+
+- Kumi's listens play out loud: Main is never turned down and the tracks Kumi works on are never
+  muted, so you hear what Kumi hears and can steer it. With Max for Live, candidates Kumi compares
+  side by side are heard by Kumi alone while you hear the first, and each listen says which bars it
+  plays and why.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.11.3 — 2026-10-08
 
 Ships with bridge 1.0.91, which Live loads when it restarts. After updating, Kumi offers to quit Live
