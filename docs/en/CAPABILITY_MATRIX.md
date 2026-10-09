@@ -15,7 +15,7 @@ tools, built on these, are in [how Kumi changes your Set](KUMI_CHANGES.md).
 | --- | --- |
 | Remote Script | `AbletonMcpBridge`, inside Live, through Live's Python API |
 | Extension | Kumi's Live extension, in Live's Extension Host (Live 12.4 or later) |
-| Willington | Native bindings, in Kumi's bridge from the release that carries Willington's files, or installed yourself; off until `/willington`, for the Live builds they cover: macOS ARM64 12.4.15b4 and b5, Windows x64 12.4.15b5 ([Willington](WILLINGTON_INTEGRATION.md)) |
+| Willington | Native bindings, in Kumi's bridge from the release that carries Willington's files, or installed yourself; off until `/willington`, for the Live builds they cover: macOS ARM64 12.4.15b4, b5 and b6 (requires a b6 bundle), Windows x64 12.4.15b5 ([Willington](WILLINGTON_INTEGRATION.md)) |
 | Bridge | The bridge process itself, without Live |
 
 A tool is offered only when the Live it's connected to has the operations it
@@ -91,12 +91,12 @@ of reach of both Live's Python API and the Extensions SDK, or out of scope:
 | --- | --- |
 | Saving, opening or exporting the Set; Collect All and Save (through Live's scripting) | Through Live's own menus instead: save, new Set, Collect All and Save, export; save as and open a Set on Windows. A verified backup of the saved Set; importing a single file into the project. |
 | Exporting the mix or stems; freezing and flattening | Offline render of an audio track's own clips; recording through Resampling |
-| Creating group tracks | [Native editing through Willington](WILLINGTON_INTEGRATION.md#native-editing-and-its-self-test), with a passing self-test; b5 macOS ARM64 only |
-| Editing Arrangement automation | [Native editing through Willington](WILLINGTON_INTEGRATION.md#native-editing-and-its-self-test), with a passing self-test; b5 macOS ARM64 only |
+| Creating group tracks | [Native editing through Willington](WILLINGTON_INTEGRATION.md#native-editing-and-its-self-test), with a passing self-test; b5/b6 macOS ARM64 only (requires the matching bundle) |
+| Editing Arrangement automation | [Native editing through Willington](WILLINGTON_INTEGRATION.md#native-editing-and-its-self-test), with a passing self-test; b5/b6 macOS ARM64 only (requires the matching bundle) |
 | Mapping a macro or modulator to a parameter | Wavetable's and Drift's modulation matrices; macro and modulator mapping through Willington |
-| Follow Actions | Session clip Follow Actions through Willington; scene/global actions: [Native editing through Willington](WILLINGTON_INTEGRATION.md#native-editing-and-its-self-test), with a passing self-test; b5 macOS ARM64 only |
+| Follow Actions | Session clip Follow Actions through Willington; scene/global actions: [Native editing through Willington](WILLINGTON_INTEGRATION.md#native-editing-and-its-self-test), with a passing self-test; b5/b6 macOS ARM64 only (requires the matching bundle) |
 | Comp editing, deleting or auditioning take lanes | Reading lanes and comps, renaming lanes, audio into a lane |
-| Per-note MPE (pressure, slide, per-note tuning) | [Native editing through Willington](WILLINGTON_INTEGRATION.md#native-editing-and-its-self-test), with a passing self-test; b5 macOS ARM64 only |
+| Per-note MPE (pressure, slide, per-note tuning) | [Native editing through Willington](WILLINGTON_INTEGRATION.md#native-editing-and-its-self-test), with a passing self-test; b5/b6 macOS ARM64 only (requires the matching bundle) |
 | A plug-in's own window or hidden state | Its parameters, presets, and opening or closing its window |
 | A track's audio as it plays | Capture through Resampling; offline render |
 | Browser similarity search, Packs, Cloud | Live's library database: tags, kinds, plug-in inventory |

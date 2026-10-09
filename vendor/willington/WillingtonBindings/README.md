@@ -1,6 +1,6 @@
 # Willington follow-action bindings
 
-Experimental native Clip properties for **Live 12.4.15b4 (2026-09-17_a0ac16f342), Apple Silicon**. All ten properties below are registered on `Live.Clip.Clip` and exposed to Max for Live. Each supports get, set and observation, plus Python's usual `add_<property>_listener`, `remove_<property>_listener`, and `<property>_has_listener` methods.
+Experimental native Clip properties for **Live 12.4.15b4/b5/b6, macOS ARM64**. All ten properties below are registered on `Live.Clip.Clip` and exposed to Max for Live. Each supports get, set and observation, plus Python's usual `add_<property>_listener`, `remove_<property>_listener`, and `<property>_has_listener` methods.
 
 | Property | Values / units |
 | --- | --- |
@@ -14,7 +14,8 @@ Experimental native Clip properties for **Live 12.4.15b4 (2026-09-17_a0ac16f342)
 
 Action IDs: **0** No Action, **1** Stop, **2** Play Again, **3** Previous, **4** Next, **5** First, **6** Last, **7** Any, **8** Other, **9** Jump. The jump property selects the target when its action is Jump. Unlinked time and linked loop count are separate stored values.
 
-These extend clips only. Scene follow actions and the global Follow Actions switch are outside this implementation.
+These extend clips only. [Native Editing](../WillingtonEditing/README.md) supplies
+scene follow actions and the global switch on supported macOS ARM64 builds.
 
 ## Windows x64
 
@@ -121,3 +122,11 @@ limitation are documented in [b5 validation](../../evidence/live-12.4.15b5-arm64
 See the [release workflow](../../scripts/releases/README.md) for research builds,
 validation gates, installation paths and rollback. Supporting a new build never
 means just changing the accepted hash.
+
+## Live 12.4.15b6 macOS ARM64
+
+The validated `live-12.4.15b6-arm64` profile is selected automatically on its exact
+executable and included in matrix bundles. Build explicitly with
+`build.sh --profile profiles/live-12.4.15b6-arm64.json`. The legacy single-build
+default remains b4. Both Python and actual Max getter/setter/observer suites pass
+26 cases; see the [b6 evidence](../../evidence/live-12.4.15b6-arm64/README.md).

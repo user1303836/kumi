@@ -1,6 +1,6 @@
 [package]
 name = "kumi-runtime"
-version = "1.11.2"
+version = "1.11.3"
 description = "Kumi's runtime: the agent kernel, model providers, the MCP client, the Ableton integration, audio, video, web and the producer's library."
 edition.workspace = true
 license.workspace = true

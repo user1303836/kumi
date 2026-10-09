@@ -4,7 +4,9 @@ English · [简体中文](../zh-CN/WILLINGTON_NATIVE_EDITING.md) · [日本語](
 
 Willington's repository is private; the upstream links in this guide require access.
 
-This guide describes the native Python APIs. Kumi’s guarded tools and receipt-gated `/willington` setup are described in [Willington integration](WILLINGTON_INTEGRATION.md#native-editing-and-its-self-test). Native editing requires the installed validated **Live 12.4.15b5 macOS ARM64** component; other builds and Windows are unsupported.
+This guide describes the native Python APIs. Kumi’s guarded tools and receipt-gated `/willington` setup are described in [Willington integration](WILLINGTON_INTEGRATION.md#native-editing-and-its-self-test). Native editing requires the installed validated **Live 12.4.15b5 or b6 macOS ARM64** component; other builds and Windows are unsupported.
+
+For b6, install Willington `03b6efccd1c72ef816ae5be6f28ad33115ef3e9a` or a later bundle retaining the b6 profile. Older Kumi bundles need updating. See the [b6 upstream validation](https://github.com/xonedsp/willington/blob/03b6efccd1c72ef816ae5be6f28ad33115ef3e9a/evidence/live-12.4.15b6-arm64/README.md) and [Kumi CI-bundle validation](../evidence/willington-b6-import.json).
 
 For disposable-fixture development, follow the upstream
 [build and installation instructions](https://github.com/xonedsp/willington/blob/main/integrations/WillingtonEditing/README.md).

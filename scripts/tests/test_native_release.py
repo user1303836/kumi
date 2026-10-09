@@ -381,8 +381,10 @@ class NativeRelease(unittest.TestCase):
         listed = vendor.vendor(fetched["bundle"], fetched["licenses"], fetched["commit"], root=self.root)
         self.assertEqual(set(listed), {*runtime, "LICENSE.md"})
         self.assertEqual(release.willington_files(folder), listed)
-        self.assertEqual(json.loads((folder / "release.json").read_text(encoding="utf-8")),
-                         {"schema": release.WILLINGTON_SCHEMA, "version": "c" * 12, "commit": "c" * 40, "files": listed})
+        expected_manifest = {"schema": release.WILLINGTON_SCHEMA, "version": "c" * 12, "commit": "c" * 40, "files": listed}
+        # --check compares bytes; a Windows import must not translate these LF bytes to CRLF.
+        self.assertEqual((folder / "release.json").read_bytes(),
+                         (json.dumps(expected_manifest, indent=2, sort_keys=True) + "\n").encode("utf-8"))
         # The earlier update's files go, its LICENSE among them, and nothing staged is left beside the folder.
         self.assertFalse((folder / "LICENSE").exists())
         self.assertEqual([path.name for path in folder.parent.iterdir()], ["willington"])

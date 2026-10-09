@@ -4,7 +4,9 @@
 
 Willington 的仓库是私有的；本指南中的上游链接需要访问权限。
 
-本指南说明原生 Python API。Kumi 的受保护工具和凭据验证式 `/willington` 设置见 [Willington 集成](WILLINGTON_INTEGRATION.md#原生编辑及其自测)。原生编辑要求安装已验证的 **Live 12.4.15b5 macOS ARM64** 组件；不支持其他构建或 Windows。
+本指南说明原生 Python API。Kumi 的受保护工具和凭据验证式 `/willington` 设置见 [Willington 集成](WILLINGTON_INTEGRATION.md#原生编辑及其自测)。原生编辑要求安装已验证的 **Live 12.4.15b5 或 b6 macOS ARM64** 组件；不支持其他构建或 Windows。
+
+b6 需要 Willington `03b6efccd1c72ef816ae5be6f28ad33115ef3e9a`，或保留 b6 配置的后续捆绑包。旧版 Kumi 捆绑包需要更新。参见 [b6 上游验证](https://github.com/xonedsp/willington/blob/03b6efccd1c72ef816ae5be6f28ad33115ef3e9a/evidence/live-12.4.15b6-arm64/README.md)和 [Kumi CI 捆绑包验证](../evidence/willington-b6-import.json)。
 
 在可丢弃的测试工程中开发时，请遵循上游的[构建与安装说明](https://github.com/xonedsp/willington/blob/main/integrations/WillingtonEditing/README.md)。安装提升后的包后，`api.install()` 会自动选择并验证与精确构建匹配的库。写入默认关闭，必须明确启用；播放必须停止。安装后，如果 full 策略允许 Python，就可以通过 `run_python`（在主机接口中为 `live_run_python`）调用这些方法。如果方法不存在或精确构建检查拒绝加载，则表示不可用，无论 Kumi 的 Willington 开关处于什么状态。
 

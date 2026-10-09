@@ -23,7 +23,7 @@ Willington 是一组原生提供程序（provider），能触及 Live 的 Python
 
 Kumi 也会告诉它的模型。绑定关闭时，遇到需要这些编辑的请求，会附上一句：`/willington` 可以开启它们；绑定开启时，Kumi 会自己映射宏，并在加载调制器的同一个计划中用 `map_modulator` 映射 Live 的调制器，而不是请你在 Live 中映射。
 
-覆盖哪些 Live 构建版本，取决于你所用的 Willington 版本；对 Kumi 自带的副本，桥接文件夹里的 `willington/release.json` 写明了这个版本。Willington 经过验证的绑定：macOS ARM64 上 Live 12.4.15b4 和 b5 的跟随动作和 DeviceTools，macOS ARM64 上 b5 的 RackZones，以及 Windows x64 上 Live 12.4.15b5 的全部三者。不支持 Intel macOS。每个提供程序会根据正在运行的 Live 进程的操作系统、架构、版本和可执行文件哈希选择绑定，原生库还会检查正在运行的可执行文件本身（macOS 上是 Mach-O UUID，Windows 上是 CodeView GUID）。
+覆盖哪些 Live 构建版本，取决于你所用的 Willington 版本；对 Kumi 自带的副本，桥接文件夹里的 `willington/release.json` 写明了这个版本。Willington 经过验证的绑定：macOS ARM64 上 Live 12.4.15b4、b5 和 b6 的跟随动作和 DeviceTools，macOS ARM64 上 b5/b6 的 RackZones，以及 Windows x64 上 Live 12.4.15b5 的全部三者。不支持 Intel macOS。每个提供程序会根据正在运行的 Live 进程的操作系统、架构、版本和可执行文件哈希选择绑定，原生库还会检查正在运行的可执行文件本身（macOS 上是 Mach-O UUID，Windows 上是 CodeView GUID）。
 
 跟随动作编辑还需要所选的库通过一次自检：WillingtonBindings 文件夹中要有 `self-test.json`，其中 `"status": "passed"`，并且 `library_sha256` 等于该库的 SHA-256。没有它，只有跟随动作编辑保持关闭；宏、名称和区域编辑仍然可用。
 
@@ -150,7 +150,9 @@ Willington 有用于以下操作的原生方法，但在能够安全撤销之前
 
 ## 原生编辑及其自测
 
-安装并验证适用于 **Live 12.4.15b5 macOS ARM64** 的 `WillingtonEditing` 后，Kumi 提供分组创建、编曲自动化、场景/全局 Follow Actions 和逐音符 MPE。其他构建、Intel macOS 和 Windows 不支持此组件。仅当仅所有者可访问的 `self-test.json` 与已安装库匹配时，`/willington` 才请求编辑；提供器还会核对 Live 实际选择的库。凭据缺失或过期时编辑保持关闭。更新会保留凭据，但库发生变化后需要重新测试。
+安装并验证适用于 **Live 12.4.15b5 或 b6 macOS ARM64** 的 `WillingtonEditing` 后，Kumi 提供分组创建、编曲自动化、场景/全局 Follow Actions 和逐音符 MPE。其他构建、Intel macOS 和 Windows 不支持此组件。仅当仅所有者可访问的 `self-test.json` 与已安装库匹配时，`/willington` 才请求编辑；提供器还会核对 Live 实际选择的库。凭据缺失或过期时编辑保持关闭。更新会保留凭据，但库发生变化后需要重新测试。
+
+Live 12.4.15b6 ARM64 需要 Willington 提交 `03b6efccd1c72ef816ae5be6f28ad33115ef3e9a`，或保留该配置的后续捆绑包。仍携带旧包的 Kumi 版本需要更新捆绑包才能支持 b6；请检查 `willington/WillingtonRuntime/matrix.json` 中是否有 `live-12.4.15b6-arm64` 条目，且包含 `status: "validated"` 和所需组件。`willington/release.json` 标明捆绑包的提交。[CI 捆绑包验证记录](../evidence/willington-b6-import.json)涵盖自动加载、禁用写入时的拒绝以及 Kumi 原生编辑测试。本地自测凭据仍须匹配所选库的哈希。
 
 `group_tracks`, `set_scene_follow_actions`, `set_global_follow_actions`, `set_note_expression`, `edit_arrangement_automation` → `live_native_editing_preview/apply`.
 
