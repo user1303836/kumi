@@ -1,0 +1,564 @@
+{
+  "schema": 1,
+  "date": "2026-10-08",
+  "status": "passed",
+  "scope": "Exact CI-built bundle import and local Kumi provider validation; fixture-scoped, not arbitrary-Set coverage.",
+  "willington": {
+    "commit": "03b6efccd1c72ef816ae5be6f28ad33115ef3e9a",
+    "run": 37854905848,
+    "artifact": 11584025338,
+    "artifact_sha256": "fe123978e553ec35c20dca955b7af31f3bc1059cac538dd869f6360a28bb613c"
+  },
+  "kumi_base": "0c76f0c4",
+  "offline_tests": {
+    "release_import": 19,
+    "provider": 43,
+    "native_editing": 10
+  },
+  "fresh_process": {
+    "status": "passed",
+    "identity": {
+      "platform": "macos",
+      "architecture": "arm64",
+      "version": "12.4.15b6",
+      "source_sha256": "4a2cf9cd479e5157acc1faccf73a9a849e822b7262b856cf183fc1c952bebaa0"
+    },
+    "components": {
+      "WillingtonBindings": {
+        "profile": "live-12.4.15b6-arm64",
+        "library": "AbletonMcpBridge/willington/WillingtonBindings/build/live-12.4.15b6-arm64/libwillington.dylib",
+        "sha256": "48375745aa9c602c29abc5513b9d44a87b80ed061c3d251dce92be746f5a06bd",
+        "writesEnabled": false
+      },
+      "WillingtonDeviceTools": {
+        "profile": "live-12.4.15b6-arm64",
+        "library": "AbletonMcpBridge/willington/WillingtonDeviceTools/build/live-12.4.15b6-arm64/libwillington_devices.dylib",
+        "sha256": "ff886aaa9b44660998f7fb216971c5b431b5ca2da068d26841699441c9a5fe43",
+        "writesEnabled": false
+      },
+      "WillingtonRackZones": {
+        "profile": "live-12.4.15b6-arm64",
+        "library": "AbletonMcpBridge/willington/WillingtonRackZones/build/live-12.4.15b6-arm64/libwillington_zones.dylib",
+        "sha256": "dc44af5184f229e2a2d716a9eef9181c13cd16a2c3626ffe27f47b914ec4f4ee",
+        "writesEnabled": false
+      },
+      "WillingtonEditing": {
+        "profile": "live-12.4.15b6-arm64",
+        "library": "AbletonMcpBridge/willington/WillingtonEditing/build/live-12.4.15b6-arm64/libwillington_editing.dylib",
+        "sha256": "e0a35e4374c7e2eddbfcd56a7aeb80e50e294327c298e00b61400d63673d8d29",
+        "writesEnabled": false
+      }
+    },
+    "disabledEditingWriteRejected": true,
+    "editingSnapshotProfile": "live-12.4.15b6-arm64"
+  },
+  "native_editing_mapper_fixture": {
+    "component": "WillingtonEditing",
+    "status": "passed",
+    "library_sha256": "e0a35e4374c7e2eddbfcd56a7aeb80e50e294327c298e00b61400d63673d8d29",
+    "checks": [
+      {
+        "kind": "global-follow",
+        "edit": {
+          "enabled": false
+        },
+        "observed": false,
+        "applied": true,
+        "restoredExact": true
+      },
+      {
+        "kind": "scene-follow",
+        "edit": {
+          "chance_a": 35,
+          "loop_count": 2,
+          "time": 0.3333333333333333
+        },
+        "observed": {
+          "action_a": 9,
+          "action_b": 0,
+          "chance_a": 35,
+          "chance_b": 65,
+          "enabled": false,
+          "jump_a": 2,
+          "jump_b": 0,
+          "linked": true,
+          "loop_count": 2,
+          "time": 0.3333333333333333
+        },
+        "applied": true,
+        "restoredExact": true
+      },
+      {
+        "kind": "note-expression",
+        "edit": {
+          "exists": true,
+          "events": [
+            [
+              0.1,
+              47.25,
+              0.2,
+              0.3,
+              0.7,
+              0.8
+            ],
+            [
+              1.1,
+              92.125,
+              0.5,
+              0.5,
+              0.5,
+              0.5
+            ]
+          ]
+        },
+        "observed": {
+          "dimension": "pressure",
+          "events": [
+            [
+              0.1,
+              47.25,
+              0.2,
+              0.3,
+              0.7,
+              0.8
+            ],
+            [
+              1.1,
+              92.125,
+              0.5,
+              0.5,
+              0.5,
+              0.5
+            ]
+          ],
+          "exists": true,
+          "time_origin": "note_start",
+          "unit": "midi"
+        },
+        "applied": true,
+        "restoredExact": true
+      },
+      {
+        "kind": "arrangement-automation",
+        "edit": {
+          "action": "insert",
+          "event": [
+            60,
+            0.55,
+            0.5,
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        "observed": {
+          "snapshotCaptured": true
+        },
+        "applied": true,
+        "restoredExact": true
+      },
+      {
+        "kind": "scene-follow",
+        "edit": {
+          "linked": false
+        },
+        "observed": {
+          "action_a": 9,
+          "action_b": 0,
+          "chance_a": 100,
+          "chance_b": 0,
+          "enabled": false,
+          "jump_a": 2,
+          "jump_b": 0,
+          "linked": false,
+          "loop_count": 1,
+          "time": 4
+        },
+        "applied": true,
+        "restoredExact": true
+      },
+      {
+        "kind": "scene-follow",
+        "edit": {
+          "linked": true,
+          "loop_count": 3
+        },
+        "observed": {
+          "action_a": 9,
+          "action_b": 0,
+          "chance_a": 100,
+          "chance_b": 0,
+          "enabled": false,
+          "jump_a": 2,
+          "jump_b": 0,
+          "linked": true,
+          "loop_count": 3,
+          "time": 4
+        },
+        "applied": true,
+        "restoredExact": true
+      },
+      {
+        "kind": "group-tracks",
+        "applied": true,
+        "topologyRestored": true,
+        "cleanup": "explicit native ungroup; no Kumi history inverse"
+      }
+    ]
+  },
+  "follow_actions": {
+    "status": "passed",
+    "library_sha256": "48375745aa9c602c29abc5513b9d44a87b80ed061c3d251dce92be746f5a06bd",
+    "case_count": 26,
+    "checks": {
+      "listeners_registered": true,
+      "invalid_values_rejected": true,
+      "listeners_removed": true,
+      "mfl_allowlist": true
+    }
+  },
+  "rack_zones": {
+    "completed_checks": [
+      {
+        "kind": "zone",
+        "rack": "Instrument",
+        "zone": "key",
+        "before": {
+          "fadeMaximum": 127,
+          "fadeMinimum": 0,
+          "lowerBound": 0,
+          "maximum": 127,
+          "minimum": 0,
+          "upperBound": 127
+        },
+        "after": {
+          "fadeMaximum": 98,
+          "fadeMinimum": 24,
+          "lowerBound": 0,
+          "maximum": 110,
+          "minimum": 16,
+          "upperBound": 127
+        },
+        "undoRedoRestored": true,
+        "invalidRejected": [
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "kind": "zone",
+        "rack": "Instrument",
+        "zone": "velocity",
+        "before": {
+          "fadeMaximum": 127,
+          "fadeMinimum": 1,
+          "lowerBound": 1,
+          "maximum": 127,
+          "minimum": 1,
+          "upperBound": 127
+        },
+        "after": {
+          "fadeMaximum": 98,
+          "fadeMinimum": 24,
+          "lowerBound": 1,
+          "maximum": 110,
+          "minimum": 16,
+          "upperBound": 127
+        },
+        "undoRedoRestored": true,
+        "invalidRejected": [
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "kind": "zone",
+        "rack": "Instrument",
+        "zone": "selector",
+        "before": {
+          "fadeMaximum": 0,
+          "fadeMinimum": 0,
+          "lowerBound": 0,
+          "maximum": 0,
+          "minimum": 0,
+          "upperBound": 127
+        },
+        "after": {
+          "fadeMaximum": 98,
+          "fadeMinimum": 24,
+          "lowerBound": 0,
+          "maximum": 110,
+          "minimum": 16,
+          "upperBound": 127
+        },
+        "undoRedoRestored": true,
+        "invalidRejected": [
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "kind": "zone",
+        "rack": "MIDI",
+        "zone": "key",
+        "before": {
+          "fadeMaximum": 127,
+          "fadeMinimum": 0,
+          "lowerBound": 0,
+          "maximum": 127,
+          "minimum": 0,
+          "upperBound": 127
+        },
+        "after": {
+          "fadeMaximum": 98,
+          "fadeMinimum": 24,
+          "lowerBound": 0,
+          "maximum": 110,
+          "minimum": 16,
+          "upperBound": 127
+        },
+        "undoRedoRestored": true,
+        "invalidRejected": [
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "kind": "zone",
+        "rack": "MIDI",
+        "zone": "velocity",
+        "before": {
+          "fadeMaximum": 127,
+          "fadeMinimum": 1,
+          "lowerBound": 1,
+          "maximum": 127,
+          "minimum": 1,
+          "upperBound": 127
+        },
+        "after": {
+          "fadeMaximum": 98,
+          "fadeMinimum": 24,
+          "lowerBound": 1,
+          "maximum": 110,
+          "minimum": 16,
+          "upperBound": 127
+        },
+        "undoRedoRestored": true,
+        "invalidRejected": [
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "kind": "zone",
+        "rack": "MIDI",
+        "zone": "selector",
+        "before": {
+          "fadeMaximum": 0,
+          "fadeMinimum": 0,
+          "lowerBound": 0,
+          "maximum": 0,
+          "minimum": 0,
+          "upperBound": 127
+        },
+        "after": {
+          "fadeMaximum": 98,
+          "fadeMinimum": 24,
+          "lowerBound": 0,
+          "maximum": 110,
+          "minimum": 16,
+          "upperBound": 127
+        },
+        "undoRedoRestored": true,
+        "invalidRejected": [
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "kind": "zone",
+        "rack": "Audio",
+        "zone": "selector",
+        "before": {
+          "fadeMaximum": 0,
+          "fadeMinimum": 0,
+          "lowerBound": 0,
+          "maximum": 0,
+          "minimum": 0,
+          "upperBound": 127
+        },
+        "after": {
+          "fadeMaximum": 98,
+          "fadeMinimum": 24,
+          "lowerBound": 0,
+          "maximum": 110,
+          "minimum": 16,
+          "upperBound": 127
+        },
+        "undoRedoRestored": true,
+        "invalidRejected": [
+          true,
+          true,
+          true
+        ]
+      }
+    ],
+    "writes_disabled_after_checks": true
+  },
+  "device_tools": {
+    "status": "passed",
+    "suite": "full",
+    "checks": [
+      "input and write guards",
+      "create mapping",
+      "undo creation",
+      "verify creation undo and redo",
+      "verify creation redo and set inverted range",
+      "low endpoint",
+      "high endpoint and remove",
+      "removal readback and undo",
+      "undo restored mapping and redo",
+      "redo removed mapping",
+      "clear all four modulators",
+      "assign each last mapping slot",
+      "check and clear last slots",
+      "restore first-slot mappings",
+      "verify restored modulation signals"
+    ],
+    "mapping_events": [
+      [
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      [
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      [
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      [
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      [
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      [
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    ]
+  },
+  "provider_reenabled": {
+    "status": "passed",
+    "automaticProviderReload": true,
+    "preservedExistingWriteOptIn": true,
+    "editingEnabledWithExactLibraryReceipt": true,
+    "writesEnabled": {
+      "follow": true,
+      "device": true,
+      "zone": true,
+      "editing": true
+    },
+    "stopped": true
+  },
+  "limitations": [
+    "Native Editing was tested through the current Kumi mapper fixture, not the Rust host/MCP history end-to-end fixture.",
+    "The direct command-loop device smoke runner stopped at a macro-range undo assertion; it is not a passing full suite. The subsequent full 15-step device regression passed with the real _Framework.ControlSurface scheduler, including mapping creation/removal undo/redo, inverted endpoints and all four modulators.",
+    "The current installed bridge loaded the packaged bundle after a process restart. The latest Kumi mapper source was loaded separately for its Native Editing fixture.",
+    "The upstream Willington files check requires a repository-owner import PR; this evidence does not authorize bypassing that check."
+  ]
+}

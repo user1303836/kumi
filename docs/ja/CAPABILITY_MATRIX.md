@@ -12,7 +12,7 @@
 | --- | --- |
 | Remote Script | `AbletonMcpBridge`。Live の中で、Live の Python API を通じて動作します |
 | 拡張機能 | Kumi の Live 拡張機能。Live の Extension Host で動作します（Live 12.4 以降） |
-| Willington | ネイティブバインディング。Willington のファイルを収めたリリースからは Kumi のブリッジに入っていて、それまでは自分でインストールします。`/willington` でオンにするまではオフで、対応する Live ビルド用です：macOS ARM64 の 12.4.15b4 と b5、Windows x64 の 12.4.15b5（[Willington](WILLINGTON_INTEGRATION.md)） |
+| Willington | ネイティブバインディング。Willington のファイルを収めたリリースからは Kumi のブリッジに入っていて、それまでは自分でインストールします。`/willington` でオンにするまではオフで、対応する Live ビルド用です：macOS ARM64 の 12.4.15b4、b5、b6（b6 対応バンドルが必要）、Windows x64 の 12.4.15b5（[Willington](WILLINGTON_INTEGRATION.md)） |
 | ブリッジ | ブリッジのプロセスそのもの。Live を使いません |
 
 ツールが提供されるのは、接続先の Live にそのツールに必要な操作があり（ブリッジは接続時にそれを知ります）、かつデプロイメントポリシーがそれを許可している場合だけです（[ユーザーガイド](USER_GUIDE.md)を参照）。
@@ -64,12 +64,12 @@ Live 12.4.15b5 の Python API の全数調査（[LOM 監査](../evidence/lom-aud
 | --- | --- |
 | Live のスクリプトによる Set の保存、オープン、書き出し。Collect All and Save | 代わりに Live 自身のメニューを通して：保存、新しい Set、Collect All and Save、書き出し。名前を付けて保存と Set を開くのは Windows で。保存済みの Set の検証済みバックアップ。単一のファイルのプロジェクトへのインポート。 |
 | ミックスやステムの書き出し。フリーズとフラット化 | オーディオトラック自身のクリップのオフラインレンダリング。Resampling を通じた録音 |
-| グループトラックの作成 | [Willington のネイティブ編集](WILLINGTON_INTEGRATION.md#ネイティブ編集とセルフテスト)。セルフテスト合格が必要で、b5 macOS ARM64 のみ |
-| アレンジメントのオートメーションの編集 | [Willington のネイティブ編集](WILLINGTON_INTEGRATION.md#ネイティブ編集とセルフテスト)。セルフテスト合格が必要で、b5 macOS ARM64 のみ |
+| グループトラックの作成 | [Willington のネイティブ編集](WILLINGTON_INTEGRATION.md#ネイティブ編集とセルフテスト)。セルフテスト合格が必要で、b5/b6 macOS ARM64 のみ（対応バンドルが必要） |
+| アレンジメントのオートメーションの編集 | [Willington のネイティブ編集](WILLINGTON_INTEGRATION.md#ネイティブ編集とセルフテスト)。セルフテスト合格が必要で、b5/b6 macOS ARM64 のみ（対応バンドルが必要） |
 | マクロやモジュレーターのパラメータへのマッピング | Wavetable と Drift のモジュレーションマトリクス。Willington を通じたマクロとモジュレーターのマッピング |
-| Follow Actions | Session クリップの Follow Actions は Willington で提供。シーン/全体の操作：[Willington のネイティブ編集](WILLINGTON_INTEGRATION.md#ネイティブ編集とセルフテスト)。セルフテスト合格が必要で、b5 macOS ARM64 のみ |
+| Follow Actions | Session クリップの Follow Actions は Willington で提供。シーン/全体の操作：[Willington のネイティブ編集](WILLINGTON_INTEGRATION.md#ネイティブ編集とセルフテスト)。セルフテスト合格が必要で、b5/b6 macOS ARM64 のみ（対応バンドルが必要） |
 | コンプの編集、テイクレーンの削除や試聴 | レーンとコンプの読み取り、レーンの名前の変更、レーンへのオーディオ |
-| ノートごとの MPE（プレッシャー、スライド、ノートごとのチューニング） | [Willington のネイティブ編集](WILLINGTON_INTEGRATION.md#ネイティブ編集とセルフテスト)。セルフテスト合格が必要で、b5 macOS ARM64 のみ |
+| ノートごとの MPE（プレッシャー、スライド、ノートごとのチューニング） | [Willington のネイティブ編集](WILLINGTON_INTEGRATION.md#ネイティブ編集とセルフテスト)。セルフテスト合格が必要で、b5/b6 macOS ARM64 のみ（対応バンドルが必要） |
 | プラグイン独自のウィンドウや内部の状態 | そのパラメータ、プリセット、ウィンドウの開閉 |
 | 再生中のトラックの音声 | Resampling を通じたキャプチャ。オフラインレンダリング |
 | Browser の類似検索、Packs、Cloud | Live のライブラリデータベース：タグ、種類、プラグインの一覧 |

@@ -49,7 +49,7 @@ same plan that loads them, instead of asking you to map them in Live.
 Which Live builds they cover depends on the Willington release you have; for
 Kumi's copy, `willington/release.json` in the bridge's folder names it. Willington's
 validated bindings: Follow Actions and DeviceTools for macOS ARM64 Live
-12.4.15b4 and b5, Rack Zones for macOS ARM64 b5, and all three for Windows x64
+12.4.15b4, b5 and b6, Rack Zones for macOS ARM64 b5/b6, and those three for Windows x64
 Live 12.4.15b5. Intel macOS isn't covered. Each provider selects bindings using
 the running Live process's OS, architecture, version and executable hash, and
 the native libraries also check the running executable itself (its Mach-O UUID
@@ -279,7 +279,9 @@ one by adding only a runtime descriptor or a protocol entry.
 
 ## Native editing and its self-test
 
-Kumi offers native group creation, Arrangement automation, scene/global Follow Actions and per-note MPE when `WillingtonEditing` is installed and verified for **Live 12.4.15b5 macOS ARM64**. Other builds, Intel macOS and Windows do not support this component. `/willington` requests editing only with an owner-only `self-test.json` matching an installed library; the provider checks the library actually selected in Live again. Missing or stale evidence leaves editing off. Updates preserve the receipt, but a changed library needs a new test.
+Kumi offers native group creation, Arrangement automation, scene/global Follow Actions and per-note MPE when `WillingtonEditing` is installed and verified for **Live 12.4.15b5 or b6 macOS ARM64**. Other builds, Intel macOS and Windows do not support this component. `/willington` requests editing only with an owner-only `self-test.json` matching an installed library; the provider checks the library actually selected in Live again. Missing or stale evidence leaves editing off. Updates preserve the receipt, but a changed library needs a new test.
+
+Live 12.4.15b6 ARM64 requires Willington commit `03b6efccd1c72ef816ae5be6f28ad33115ef3e9a` or a later bundle retaining that profile. Kumi releases that still carry an older bundle do not gain b6 support until the bundle is updated; check `willington/WillingtonRuntime/matrix.json` for a `live-12.4.15b6-arm64` row with `status: "validated"` and the required component. `willington/release.json` identifies the bundle commit. [Exact CI-bundle validation](../evidence/willington-b6-import.json) covers automatic loading, disabled-write refusal and the Kumi native-editing fixture. Local self-test receipts remain tied to each selected library hash.
 
 `group_tracks`, `set_scene_follow_actions`, `set_global_follow_actions`, `set_note_expression`, `edit_arrangement_automation` → `live_native_editing_preview/apply`.
 

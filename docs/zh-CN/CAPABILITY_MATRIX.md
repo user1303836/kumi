@@ -12,7 +12,7 @@
 | --- | --- |
 | Remote Script | `AbletonMcpBridge`，在 Live 内部，通过 Live 的 Python API 工作 |
 | 扩展 | Kumi 的 Live 扩展，运行在 Live 的 Extension Host 中（Live 12.4 或更高） |
-| Willington | 原生绑定：从带有 Willington 文件的版本起放在 Kumi 的桥接中，在此之前可以自己安装；在 `/willington` 开启之前一直关闭，适用于它覆盖的 Live 构建版本：macOS ARM64 上的 12.4.15b4 和 b5，Windows x64 上的 12.4.15b5（[Willington](WILLINGTON_INTEGRATION.md)） |
+| Willington | 原生绑定：从带有 Willington 文件的版本起放在 Kumi 的桥接中，在此之前可以自己安装；在 `/willington` 开启之前一直关闭，适用于它覆盖的 Live 构建版本：macOS ARM64 上的 12.4.15b4、b5 和 b6（需要支持 b6 的包），Windows x64 上的 12.4.15b5（[Willington](WILLINGTON_INTEGRATION.md)） |
 | 桥接 | 桥接进程本身，不经过 Live |
 
 只有当所连接的 Live 具备某个工具所需的操作（桥接在连接时得知这一点），并且部署策略允许时，才会提供该工具（见[用户指南](USER_GUIDE.md)）。
@@ -64,12 +64,12 @@
 | --- | --- |
 | 通过 Live 的脚本保存、打开或导出工程；Collect All and Save | 改为通过 Live 自己的菜单：保存、新建工程、Collect All and Save、导出；另存为和打开工程限 Windows。已保存工程的经验证备份；把单个文件导入项目。 |
 | 导出混音或分轨（stems）；冻结和合并（flatten） | 对音频轨道自身片段的离线渲染；通过 Resampling 录音 |
-| 创建编组轨道 | [通过 Willington 原生编辑](WILLINGTON_INTEGRATION.md#原生编辑及其自测)，要求自测通过；仅支持 b5 macOS ARM64 |
-| 编辑编曲视图中的自动化 | [通过 Willington 原生编辑](WILLINGTON_INTEGRATION.md#原生编辑及其自测)，要求自测通过；仅支持 b5 macOS ARM64 |
+| 创建编组轨道 | [通过 Willington 原生编辑](WILLINGTON_INTEGRATION.md#原生编辑及其自测)，要求自测通过；仅支持 b5/b6 macOS ARM64（需要匹配的包） |
+| 编辑编曲视图中的自动化 | [通过 Willington 原生编辑](WILLINGTON_INTEGRATION.md#原生编辑及其自测)，要求自测通过；仅支持 b5/b6 macOS ARM64（需要匹配的包） |
 | 把宏或调制器映射到参数 | Wavetable 和 Drift 的调制矩阵；通过 Willington 进行宏和调制器映射 |
-| Follow Actions | 通过 Willington 提供 Session 片段 Follow Actions；场景/全局操作：[通过 Willington 原生编辑](WILLINGTON_INTEGRATION.md#原生编辑及其自测)，要求自测通过；仅支持 b5 macOS ARM64 |
+| Follow Actions | 通过 Willington 提供 Session 片段 Follow Actions；场景/全局操作：[通过 Willington 原生编辑](WILLINGTON_INTEGRATION.md#原生编辑及其自测)，要求自测通过；仅支持 b5/b6 macOS ARM64（需要匹配的包） |
 | comp 编辑，删除或试听 take lane | 读取 lane 和 comp、重命名 lane、把音频放进 lane |
-| 逐音符 MPE（压力、滑音、逐音符调音） | [通过 Willington 原生编辑](WILLINGTON_INTEGRATION.md#原生编辑及其自测)，要求自测通过；仅支持 b5 macOS ARM64 |
+| 逐音符 MPE（压力、滑音、逐音符调音） | [通过 Willington 原生编辑](WILLINGTON_INTEGRATION.md#原生编辑及其自测)，要求自测通过；仅支持 b5/b6 macOS ARM64（需要匹配的包） |
 | 插件自身的窗口或隐藏状态 | 它的参数、预设，以及打开或关闭它的窗口 |
 | 轨道播放时的音频 | 通过 Resampling 捕获；离线渲染 |
 | Browser 相似度搜索、Packs、Cloud | Live 的库数据库：标签、类型、插件列表 |

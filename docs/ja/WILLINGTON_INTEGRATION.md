@@ -23,7 +23,7 @@ Kumi で `/willington` と入力します。`Remote Scripts/AbletonMcpBridge` �
 
 Kumi はモデルにも伝えます。バインディングがオフのときにその編集が必要な依頼があると、`/willington` でオンになることを一言添えます。オンのときは、Live で自分でマッピングするよう頼む代わりに、Kumi がマクロを、そして `map_modulator` で、読み込んだのと同じプランの中で Live のモジュレーターをマッピングします。
 
-どの Live ビルドに対応するかは、手元の Willington のリリースによって決まります。Kumi のコピーなら、ブリッジのフォルダーの `willington/release.json` に書かれています。Willington の検証済みのバインディング：macOS ARM64 の Live 12.4.15b4 と b5 用の Follow Action と DeviceTools、macOS ARM64 の b5 用の RackZones、そして Windows x64 の Live 12.4.15b5 用の 3 つすべてです。Intel macOS には対応していません。各プロバイダーは、動いている Live プロセスの OS、アーキテクチャ、バージョン、実行ファイルのハッシュからバインディングを選び、ネイティブライブラリは動いている実行ファイルそのもの（macOS では Mach-O の UUID、Windows では CodeView の GUID）も確認します。
+どの Live ビルドに対応するかは、手元の Willington のリリースによって決まります。Kumi のコピーなら、ブリッジのフォルダーの `willington/release.json` に書かれています。Willington の検証済みのバインディング：macOS ARM64 の Live 12.4.15b4、b5、b6 用の Follow Action と DeviceTools、macOS ARM64 の b5/b6 用の RackZones、そして Windows x64 の Live 12.4.15b5 用の 3 つすべてです。Intel macOS には対応していません。各プロバイダーは、動いている Live プロセスの OS、アーキテクチャ、バージョン、実行ファイルのハッシュからバインディングを選び、ネイティブライブラリは動いている実行ファイルそのもの（macOS では Mach-O の UUID、Windows では CodeView の GUID）も確認します。
 
 Follow Action を編集するには、選ばれたライブラリのセルフテストに合格していることも必要です。WillingtonBindings のフォルダーに、`"status": "passed"` と、そのライブラリの SHA-256 に等しい `library_sha256` を持つ `self-test.json` が必要です。これがないと Follow Action の編集だけがオフのままで、マクロ、名前、ゾーンの編集は動作します。
 
@@ -150,7 +150,9 @@ Willington にはこれらのためのネイティブメソッドがあります
 
 ## ネイティブ編集とセルフテスト
 
-Kumi は、`WillingtonEditing` がインストールされ、**Live 12.4.15b5 macOS ARM64** 用として検証されている場合に、グループ作成、Arrangement オートメーション、シーン/全体の Follow Actions、ノートごとの MPE を提供します。他のビルド、Intel macOS、Windows は対象外です。`/willington` は、インストール済みライブラリと一致する所有者専用の `self-test.json` がある場合だけ編集を要求し、プロバイダーは Live が実際に選択したライブラリとの一致を再確認します。記録がない場合や古い場合は編集を無効にします。更新は記録を保持しますが、ライブラリが変わったら再テストが必要です。
+Kumi は、`WillingtonEditing` がインストールされ、**Live 12.4.15b5 または b6 macOS ARM64** 用として検証されている場合に、グループ作成、Arrangement オートメーション、シーン/全体の Follow Actions、ノートごとの MPE を提供します。他のビルド、Intel macOS、Windows は対象外です。`/willington` は、インストール済みライブラリと一致する所有者専用の `self-test.json` がある場合だけ編集を要求し、プロバイダーは Live が実際に選択したライブラリとの一致を再確認します。記録がない場合や古い場合は編集を無効にします。更新は記録を保持しますが、ライブラリが変わったら再テストが必要です。
+
+Live 12.4.15b6 ARM64 には、Willington のコミット `03b6efccd1c72ef816ae5be6f28ad33115ef3e9a`、またはそのプロファイルを含む後続のバンドルが必要です。古いバンドルを同梱する Kumi は更新するまで b6 に対応しません。`willington/WillingtonRuntime/matrix.json` に `live-12.4.15b6-arm64` の行があり、`status: "validated"` と必要なコンポーネントが記載されていることを確認してください。`willington/release.json` はバンドルのコミットを示します。[CI バンドルの検証記録](../evidence/willington-b6-import.json)には、自動読み込み、書き込み無効時の拒否、Kumi のネイティブ編集テストの結果があります。ローカルのセルフテスト記録は、選択したライブラリのハッシュと一致する必要があります。
 
 `group_tracks`, `set_scene_follow_actions`, `set_global_follow_actions`, `set_note_expression`, `edit_arrangement_automation` → `live_native_editing_preview/apply`.
 

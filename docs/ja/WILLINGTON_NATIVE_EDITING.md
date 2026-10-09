@@ -4,7 +4,9 @@
 
 Willington のリポジトリは非公開です。このガイドの上流リンクを開くにはアクセス権が必要です。
 
-このガイドはネイティブ Python API を説明します。Kumi の保護されたツールと、記録を確認する `/willington` の設定は [Willington 統合](WILLINGTON_INTEGRATION.md#ネイティブ編集とセルフテスト)を参照してください。ネイティブ編集にはインストール済みの検証済み **Live 12.4.15b5 macOS ARM64** コンポーネントが必要です。他のビルドと Windows は対象外です。
+このガイドはネイティブ Python API を説明します。Kumi の保護されたツールと、記録を確認する `/willington` の設定は [Willington 統合](WILLINGTON_INTEGRATION.md#ネイティブ編集とセルフテスト)を参照してください。ネイティブ編集にはインストール済みの検証済み **Live 12.4.15b5 または b6 macOS ARM64** コンポーネントが必要です。他のビルドと Windows は対象外です。
+
+b6 には Willington `03b6efccd1c72ef816ae5be6f28ad33115ef3e9a`、または b6 プロファイルを含む後続のバンドルが必要です。古い Kumi バンドルは更新してください。[b6 の上流検証](https://github.com/xonedsp/willington/blob/03b6efccd1c72ef816ae5be6f28ad33115ef3e9a/evidence/live-12.4.15b6-arm64/README.md)と [Kumi CI バンドルの検証](../evidence/willington-b6-import.json)を参照してください。
 
 使い捨てのテスト用 Set での開発では、上流の[ビルドとインストール手順](https://github.com/xonedsp/willington/blob/main/integrations/WillingtonEditing/README.md)に従ってください。昇格済みパッケージをインストールすると、`api.install()` がビルドに一致するライブラリを自動で選択・検証します。書き込みは明示的に有効にするまで無効で、トランスポートは停止している必要があります。インストール後、full ポリシーが Python を許可していれば、`run_python`（ホスト側では `live_run_python`）からメソッドを呼べます。メソッドがない場合やビルドの検証で拒否された場合は、Kumi の Willington スイッチにかかわらず利用できません。
 
