@@ -428,8 +428,8 @@ pub trait Integration {
     fn fingerprint(&self) -> Option<Value> {
         None
     }
-    /// The first time at or after `since` (ms) that Live was heard playing (the producer's playing, not Kumi's own
-    /// silent renders), for whether they heard one of Kumi's changes. None when it hasn't played since.
+    /// The first time at or after `since` (ms) that Live was heard playing (the producer's playing, or Kumi's own
+    /// listens, which play through Main), for whether they heard one of Kumi's changes. None if it hasn't played since.
     fn first_heard(&self, since: i64) -> Option<i64> {
         let _ = since;
         None
@@ -485,7 +485,7 @@ pub trait Integration {
     fn has_audition(&self) -> bool {
         false
     }
-    /// Render candidates quietly, hear them and set them against a reference (the audition tool's work); `Err(why)` inside says why not.
+    /// Render candidates, hear them and set them against a reference (the audition tool's work); `Err(why)` inside says why not.
     async fn audition(&self, request: &AuditionRequest, signal: Signal) -> Result<Result<AuditionResult, String>, RuntimeError> {
         let _ = (request, signal);
         Err(absent())
@@ -501,7 +501,7 @@ pub trait Integration {
     fn has_hear(&self) -> bool {
         false
     }
-    /// Hear tracks (or the mix) in the Set directly: as they play now, or quietly over a stretch of the Arrangement; a file each, or why not.
+    /// Hear tracks (or the mix) in the Set directly: as they play now, or by playing a stretch of the Arrangement; a file each, or why not.
     async fn hear(&self, request: &HearRequest, signal: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         let _ = (request, signal);
         Err(absent())
@@ -515,7 +515,7 @@ pub struct HearRequest {
     pub tracks: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mix: Option<bool>,
-    /// A stretch of the Arrangement to play quietly, in beats; left out, what's playing now (or, stopped, the loop or the playhead's part).
+    /// A stretch of the Arrangement to play, in beats; left out, what's playing now (or, stopped, the loop or the playhead's part).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_beat: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -523,7 +523,7 @@ pub struct HearRequest {
     /// How long to hear what's playing now.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seconds: Option<f64>,
-    /// The whole song, from the Arrangement's start to its end, quietly.
+    /// The whole song, from the Arrangement's start to its end, in one listen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub whole: Option<bool>,
 }
@@ -706,7 +706,7 @@ pub struct AuditionResult {
     pub reference: Option<ReferenceHeard>,
     /// How long the render and listening took.
     pub seconds: f64,
-    /// Anything the producer should know (Main couldn't be put back, a scratch track stayed).
+    /// Anything the producer should know (a render track that stayed, a track left disarmed).
     pub notes: Vec<String>,
 }
 

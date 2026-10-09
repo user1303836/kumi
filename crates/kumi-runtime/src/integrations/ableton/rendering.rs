@@ -1,4 +1,4 @@
-//! Quiet render rigs, listening devices, auditions, and held goal passes.
+//! Render rigs, listening devices, auditions, and held goal passes.
 mod ears;
 mod ears_pass;
 mod form;
@@ -82,7 +82,8 @@ pub struct Rendering {
     busy: tokio::sync::Mutex<()>,
     rounds: Cell<usize>,
     best: Cell<Option<f64>>,
-    told_quietly: Cell<bool>,
+    /// Whether an audition said how long its rounds take.
+    told_length: Cell<bool>,
     reference_cache: RefCell<IndexMap<String, Analysis>>,
     best_steps: RefCell<Vec<String>>,
     /// The judged run under way (or the last one).
@@ -106,9 +107,8 @@ pub use groove::GrooveRequest;
 pub use judge::{gain_device, gain_parameter, GoalRequest, JudgeRequest, Named};
 pub use sound::SoundRequest;
 pub use tune::{TuneHow, TuneRequest};
-/// Kumi playing the Set for itself, Main down: what Live plays meanwhile isn't heard by the producer. However the
-/// render ends, a panic included, dropping it makes what Live plays the producer's again, and the next look at Live
-/// puts Main back if the render left it down. One taken while another render runs changes nothing.
+/// Kumi playing the Set to listen. Main stays as the producer has it, so they hear what Kumi hears (and steer from it).
+/// However the render ends, a panic included, dropping it ends it. One taken while another render runs changes nothing.
 pub struct RenderingNow<'a> {
     rendering: &'a Rendering,
     began: bool,
@@ -118,21 +118,17 @@ impl Drop for RenderingNow<'_> {
     fn drop(&mut self) {
         if self.began {
             self.rendering.rendering.set(false);
-            self.rendering.history.connection.rendering.set(false);
         }
     }
 }
 
 impl Rendering {
-    /// Kumi starts playing the Set for itself (see `RenderingNow`).
+    /// Kumi starts playing the Set to listen (see `RenderingNow`).
     pub fn rendering_now(&self) -> RenderingNow<'_> {
         let began = !self.rendering.replace(true);
-        if began {
-            self.history.connection.rendering.set(true);
-        }
         RenderingNow { rendering: self, began }
     }
-    /// Whether Kumi is playing the Set for itself now.
+    /// Whether Kumi is playing the Set to listen now.
     pub fn is_rendering(&self) -> bool {
         self.rendering.get()
     }
@@ -194,7 +190,7 @@ impl Rendering {
             busy: tokio::sync::Mutex::new(()),
             rounds: Cell::new(0),
             best: Cell::new(None),
-            told_quietly: Cell::new(false),
+            told_length: Cell::new(false),
             reference_cache: RefCell::new(IndexMap::new()),
             best_steps: RefCell::new(vec![]),
             judge: RefCell::new(None),
@@ -321,22 +317,25 @@ impl Rendering {
         if saved_path.map_or_else(|| pending.get("set").and_then(Value::as_str) != Some(identity), |saved| Some(saved) != path) {
             return Ok(None);
         }
-        let volume = pending["volume"].as_f64().unwrap();
-        if !self.history.quietly(None, self.put_main_back(volume, signal)).await {
-            return Ok(None);
+        // Main's level is only in a journal an older Kumi left: it turned Main down to listen.
+        let volume = pending.get("volume").and_then(Value::as_f64);
+        if let Some(volume) = volume {
+            if !self.history.quietly(None, self.put_main_back(volume, signal)).await {
+                return Ok(None);
+            }
         }
         self.restore.as_ref().unwrap().clear();
         let scratch = pending.get("scratch").and_then(Value::as_array).filter(|s| !s.is_empty());
-        let text = format!(
-            "Kumi's last render was cut off, so it put Main back to {}.{}",
-            fader_db(volume),
-            scratch
-                .map(|items| format!(
-                    " Delete its render tracks if they're still there: {}.",
-                    items.iter().map(js_string).collect::<Vec<_>>().join(", ")
-                ))
-                .unwrap_or_default()
-        );
+        let delete = scratch.map(|items| {
+            format!(" Delete its render tracks if they're still there: {}.", items.iter().map(js_string).collect::<Vec<_>>().join(", "))
+        });
+        let text = match (volume, delete) {
+            (Some(volume), delete) => {
+                format!("Kumi's last render was cut off, so it put Main back to {}.{}", fader_db(volume), delete.unwrap_or_default())
+            }
+            (None, Some(delete)) => format!("Kumi's last listen was cut off.{delete}"),
+            (None, None) => return Ok(None),
+        };
         self.tell(&text, None);
         Ok(Some(text))
     }
@@ -388,8 +387,6 @@ impl Rendering {
 fn object(value: Value) -> JsonObject {
     value.as_object().cloned().unwrap_or_default()
 }
-/// Why a render didn't start: Main's level couldn't be noted to put back after a crash.
-const MAIN_UNNOTED: &str = "Kumi couldn't note Main's level to put back after a crash (is the disk full?), so it left Main as it is and didn't render. Free some space, then try again.";
 fn observation(message: impl Into<String>) -> RuntimeError {
     RuntimeError::Observation(message.into())
 }

@@ -62,7 +62,9 @@ pub trait EarsLink {
     fn port(&self) -> u16;
     fn taps(&self) -> Vec<Tap>;
     async fn wait_for(&self, accept: Rc<dyn for<'a> Fn(&'a Tap) -> bool>, timeout_ms: u64, signal: Option<Signal>) -> Option<Tap>;
-    async fn arm(&self, tap: &Tap, seconds: f64, signal: Option<Signal>) -> Result<Armed, EarsError>;
+    /// Starts a recording of up to `seconds`. `quiet` holds the track's sound back meanwhile (a candidate only Kumi
+    /// hears): the device lets it pass again when the recording is written or stopped, or its time is up.
+    async fn arm(&self, tap: &Tap, seconds: f64, quiet: bool, signal: Option<Signal>) -> Result<Armed, EarsError>;
     async fn write(&self, tap: &Tap, file: &str, signal: Option<Signal>) -> Result<Written, EarsError>;
     fn stop(&self, tap: &Tap);
     async fn ping(&self, tap: &Tap, signal: Option<Signal>) -> Option<Tap>;
@@ -173,7 +175,16 @@ impl SocketLink {
             });
         }
     }
-    async fn ask(&self, tap: &Tap, address: &str, what: OscArg, expect: &str, signal: Option<Signal>) -> Result<OscMessage, EarsError> {
+    /// Sends (what, the port to answer on, a token, then `more`) and waits for the answer that carries the token.
+    async fn ask(
+        &self,
+        tap: &Tap,
+        address: &str,
+        what: OscArg,
+        more: &[OscArg],
+        expect: &str,
+        signal: Option<Signal>,
+    ) -> Result<OscMessage, EarsError> {
         let token = uuid::Uuid::new_v4().to_string()[..12].to_string();
         let (tx, mut rx) = mpsc::unbounded_channel();
         self.state.replies.borrow_mut().insert(token.clone(), tx);
@@ -182,7 +193,9 @@ impl SocketLink {
         if signal.is_cancelled() {
             return Err(EarsError("This operation was aborted".into()));
         }
-        self.send(tap, address, &[what, self.port.into(), token.into()]);
+        let mut args = vec![what, self.port.into(), token.into()];
+        args.extend_from_slice(more);
+        self.send(tap, address, &args);
         let deadline = tokio::time::sleep(Duration::from_millis(REPLY_MS));
         tokio::pin!(deadline);
         loop {
@@ -217,8 +230,8 @@ impl EarsLink for SocketLink {
             tokio::select! {_ = &mut timeout=>return None,_=signal.cancelled()=>return None,message=heard.recv()=>match message{Ok(tap)if tap.version==EARS_VERSION as f64&&accept(&tap)=>return Some(tap),Err(broadcast::error::RecvError::Closed)=>return None,_=>{}}}
         }
     }
-    async fn arm(&self, tap: &Tap, seconds: f64, signal: Option<Signal>) -> Result<Armed, EarsError> {
-        let reply = self.ask(tap, "/kumi/ears/arm", OscArg::Float(seconds), "/kumi/ears/armed", signal).await?;
+    async fn arm(&self, tap: &Tap, seconds: f64, quiet: bool, signal: Option<Signal>) -> Result<Armed, EarsError> {
+        let reply = self.ask(tap, "/kumi/ears/arm", OscArg::Float(seconds), &[i32::from(quiet).into()], "/kumi/ears/armed", signal).await?;
         Ok(Armed {
             beats: number(&reply.args, 2).unwrap_or(0.0),
             running: number(&reply.args, 3) == Some(1.0),
@@ -226,7 +239,7 @@ impl EarsLink for SocketLink {
         })
     }
     async fn write(&self, tap: &Tap, file: &str, signal: Option<Signal>) -> Result<Written, EarsError> {
-        let reply = self.ask(tap, "/kumi/ears/write", file.into(), "/kumi/ears/written", signal).await?;
+        let reply = self.ask(tap, "/kumi/ears/write", file.into(), &[], "/kumi/ears/written", signal).await?;
         Ok(Written {
             file: reply.args.get(2).and_then(OscValue::as_text).filter(|v| !v.is_empty()).unwrap_or(file).into(),
             sample_rate: number(&reply.args, 3).filter(|v| *v > 0.0).unwrap_or(tap.sample_rate),
@@ -239,11 +252,11 @@ impl EarsLink for SocketLink {
         self.send(tap, "/kumi/ears/stop", &["".into(), self.port.into(), "".into()]);
     }
     async fn ping(&self, tap: &Tap, signal: Option<Signal>) -> Option<Tap> {
-        self.ask(tap, "/kumi/ears/ping", "".into(), "/kumi/ears/pong", signal).await.ok()?;
+        self.ask(tap, "/kumi/ears/ping", "".into(), &[], "/kumi/ears/pong", signal).await.ok()?;
         self.state.known.borrow().get(&tap.id.to_bits()).cloned()
     }
     async fn transport(&self, tap: &Tap, signal: Option<Signal>) -> Result<Option<Transport>, EarsError> {
-        match self.ask(tap, "/kumi/ears/ping", "".into(), "/kumi/ears/pong", signal.clone()).await {
+        match self.ask(tap, "/kumi/ears/ping", "".into(), &[], "/kumi/ears/pong", signal.clone()).await {
             Ok(reply) => Ok(number(&reply.args, 7).map(|beats| Transport { beats, running: number(&reply.args, 8) == Some(1.0) })),
             Err(error) => {
                 if signal.is_some_and(|s| s.is_cancelled()) {

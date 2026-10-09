@@ -174,8 +174,6 @@ pub struct LiveConnection {
     last_transport: RefCell<String>,
     /// When Live was heard playing: each time that changed (ms, and whether it was), newest last.
     heard: RefCell<VecDeque<(i64, bool)>>,
-    /// Kumi is playing the Set for itself, Main down (a silent render): playing then isn't heard.
-    pub rendering: Cell<bool>,
 }
 impl LiveConnection {
     pub fn new(options: ConnectionOptions) -> Rc<Self> {
@@ -219,7 +217,6 @@ impl LiveConnection {
             transport_reads: Cell::new(0),
             last_transport: RefCell::new(String::new()),
             heard: RefCell::new(VecDeque::new()),
-            rendering: Cell::new(false),
         })
     }
     pub fn now(&self) -> DateTime<Utc> {
@@ -694,9 +691,9 @@ impl LiveConnection {
             }));
         }
     }
-    /// What a transport read found: Live playing is heard, unless Kumi is playing the Set for itself.
+    /// What a transport read found: Live playing is heard, Kumi's own listens too (they play through Main).
     pub fn note_transport(&self, playing: bool) {
-        self.note_heard(playing && !self.rendering.get());
+        self.note_heard(playing);
     }
     /// Whether Live is heard playing now, kept when that changes.
     fn note_heard(&self, playing: bool) {

@@ -277,7 +277,7 @@ impl Rendering {
         })
     }
 
-    /// The reference's hits moved onto its drum stem's onsets: the stem heard quietly over the reference's span.
+    /// The reference's hits moved onto its drum stem's onsets: the stem heard over the reference's span.
     async fn refined(self: &Rc<Self>, reference: &mut Read, audio: &str, signal: Signal) -> Result<usize, String> {
         let Some(zero) = reference.song_zero else {
             return Err("Onsets line up only with an Arrangement clip: put the reference's MIDI in the Arrangement.".into());
@@ -292,6 +292,7 @@ impl Rendering {
         let meter = self.observer.beats_per_bar.get().max(1.);
         let from = ((zero + first) / meter).floor() * meter;
         let window = Window { from, beats: (((zero + last) - from) / meter).ceil().max(1.) * meter };
+        self.tell(format!("Playing {} · finding the hits on {name}", self.bars_of(window)), Some(true));
         let candidates = vec![AuditionCandidate { track: name, mix: None, label: None, clip: None }];
         let rendering = self.rendering_now();
         let mut rig = None;
@@ -304,6 +305,7 @@ impl Rendering {
             self.close_rig(rig).await;
         }
         drop(rendering);
+        self.tell("Listened", Some(false));
         let files = rendered.map_err(|error| error.to_string())?;
         let render = files.values().next().cloned().ok_or("Nothing came through from the drum stem.")?;
         let mut source = crate::audio::decode::open_audio(&render.file, Some(signal)).await.map_err(|error| error.0)?;

@@ -199,7 +199,7 @@ clips, the transport and recording together; `/stop` does the same any time.
 | `find_sounds` | Finds sounds on disk by words in their names and folders, or at random, in the folders you name or where Live keeps samples; once Kumi has learned your library, by what they are and how they sound too |
 | `find_presets`, `my_sets` | Your presets by words, device and kind; your Sets by words, tempo and key |
 | `plugin` | A plug-in's guide (what it does, its real parameters, which Kumi can turn now), or a wavetable made for it |
-| `audition` | Renders candidate tracks, or the whole mix (`{"mix": true}`), quietly in one pass and scores each against a reference |
+| `audition` | Renders candidate tracks, or the whole mix (`{"mix": true}`), in one pass and scores each against a reference |
 | `render` | Renders an audio track's own clips to a file without playing them, before its devices (needs the extension) |
 | `make_device` | Makes a Max for Live device ([the guide](KUMI_GUIDE.md#making-max-for-live-devices)) |
 | `watch_me` | Notes the Set, then sees what you changed by hand, for a recipe |

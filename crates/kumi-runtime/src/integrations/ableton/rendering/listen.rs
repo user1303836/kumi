@@ -3,6 +3,7 @@ use super::super::{
 };
 use super::ears::RawFile;
 use super::ears_pass::PASS_SECONDS;
+use super::rig::{Rig, Source, Window};
 use super::*;
 use crate::{
     audio::{matching::closeness, tools::summary},
@@ -57,18 +58,15 @@ impl Rendering {
         let rendering = self.rendering_now();
         let mut rig = None;
         let rendered: Result<(), RuntimeError> = async {
-            self.tell(
-                if !self.told_quietly.get() {
-                    format!("Listening to my version quietly (about {} s a round)", to_string(round_number(beats * 60. / tempo + 6.)))
-                } else {
-                    format!("Round {round}: listening quietly")
-                },
-                Some(true),
-            );
-            self.told_quietly.set(true);
             rig = Some(self.open_rig(&request.candidates, request.from_beat, request.beats, signal.clone()).await?);
             let rig = rig.as_mut().unwrap();
+            // The producer hears the first candidate where it plays; Kumi hears the others on their own.
+            for source in rig.sources.iter_mut().skip(1) {
+                source.quiet = !source.mix;
+            }
             beats = rig.beats;
+            let length = (!self.told_length.replace(true)).then(|| round_number(beats * 60. / tempo + 6.));
+            self.tell(auditioning(rig, round, length), Some(true));
             let rendered = self.render_pass(rig, signal.clone()).await?;
             for (index, source) in rig.sources.iter().enumerate() {
                 let at = takes.iter().position(|take| take.track == source.track || take.track == source.name).unwrap_or(index);
@@ -228,7 +226,7 @@ impl Rendering {
         let signal = abort::any([original, self.connection().lifetime.clone()]);
         let rows = self.rows("set", json!({"fields":["playing","position","loop"]}), signal.clone()).await.unwrap_or_default();
         let set = rows.first();
-        // While Live plays, a listen with no place hears it as it plays; the whole song is heard quietly from its start.
+        // While Live plays, a listen with no place hears it as it plays; the whole song is played from its start.
         if set.and_then(|set| set.get("playing")) == Some(&json!(true)) && request.from_beat.is_none() && request.whole != Some(true) {
             if let Some(link) = self.ears_ready(signal.clone()).await? {
                 return self.hear_as_it_plays(link, request, signal).await;
@@ -269,12 +267,14 @@ impl Rendering {
         } else {
             request.tracks.iter().map(|track| AuditionCandidate { track: track.clone(), mix: None, label: None, clip: None }).collect()
         };
-        self.tell(format!("Listening quietly from {}", bars(from)), Some(true));
         let rendering = self.rendering_now();
         let mut rig = None;
         let result: Result<Vec<HeardTake>, RuntimeError> = async {
             rig = Some(self.open_rig(&candidates, Some(from), Some(beats), signal.clone()).await?);
             let rig = rig.as_mut().unwrap();
+            let heard: Vec<String> =
+                rig.sources.iter().map(|source| if source.mix { "the mix".into() } else { source.name.clone() }).collect();
+            self.tell(format!("Playing {} · listening to {}", self.bars_of(Window { from, beats }), heard.join(", ")), Some(true));
             let rendered = self.render_pass(rig, signal.clone()).await?;
             Ok(rig
                 .sources
@@ -393,7 +393,7 @@ impl Rendering {
                 let signal = signal.clone();
                 let link = link.clone();
                 async move {
-                    link.arm(tap, seconds + 2., Some(signal)).await.map_err(plain)?;
+                    link.arm(tap, seconds + 2., false, Some(signal)).await.map_err(plain)?;
                     Ok::<_, RuntimeError>(())
                 }
             }))
@@ -459,6 +459,21 @@ impl Rendering {
 }
 fn round_number(value: f64) -> f64 {
     round(value)
+}
+/// What an audition plays, as it starts: the first candidate, which the producer hears in the Set, and how many more
+/// Kumi hears on its own (with Kumi Ears; the record pass plays them all), with how long a round takes the first time.
+fn auditioning(rig: &Rig, round: usize, length: Option<f64>) -> String {
+    let label = |source: &Source| if source.mix { "the whole mix".to_string() } else { source.label.clone() };
+    let first = rig.sources.first().map(label).unwrap_or_else(|| "the candidates".into());
+    let others = rig.sources.len().saturating_sub(1);
+    let more = match (others, rig.ears.is_some()) {
+        (0, _) => String::new(),
+        (1, true) => "; Kumi hears the other one on its own".into(),
+        (others, true) => format!("; Kumi hears the other {others} on their own"),
+        (others, false) => format!(" and {others} more beside it"),
+    };
+    let length = length.map(|seconds| format!(" (about {} s a round)", to_string(seconds))).unwrap_or_default();
+    format!("Round {round}: playing {first}{more}{length}")
 }
 /// The end of the last clip in the Arrangement, in beats.
 const SONG_END_SCRIPT: &str = "end = 0.0\nfor track in list(song.tracks):\n    for clip in list(getattr(track, 'arrangement_clips', None) or []):\n        end = max(end, float(clip.end_time))\nresult = {'end': end}\n";

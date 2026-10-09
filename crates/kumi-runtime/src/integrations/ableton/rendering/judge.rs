@@ -1,4 +1,4 @@
-//! The judge in Live: a goal as a checklist, heard quietly. The run starts with the whole stretch heard once (the
+//! The judge in Live: a goal as a checklist, heard as Live plays. The run starts with the whole stretch heard once (the
 //! problems found there, placed in time), then judges each change on an excerpt (the bars around the target's worst
 //! moment, else the loudest part), keeps it only if its target improved and nothing else got audibly worse, takes
 //! it back with Kumi's undo otherwise, brings loudness back to target after every kept change, and logs every
@@ -255,7 +255,7 @@ impl Rendering {
             None => None,
         };
         let goal = &goal;
-        let heard = match self.judge_hear(track.as_deref(), goal.focus.as_deref(), span, signal.clone()).await? {
+        let heard = match self.judge_hear(track.as_deref(), goal.focus.as_deref(), span, "where the run starts", signal.clone()).await? {
             Ok(JudgeHeard { silent: Some(why), .. }) | Err(why) => return Ok(Err(why)),
             Ok(heard) => heard,
         };
@@ -452,7 +452,7 @@ impl Rendering {
         let changes = self.applied_since(&checkpoint);
         let heard = match pre {
             Some(heard) => heard,
-            None => match self.judge_hear(track.as_deref(), focus.as_deref(), window, signal.clone()).await? {
+            None => match self.judge_hear(track.as_deref(), focus.as_deref(), window, &after(change.as_deref()), signal.clone()).await? {
                 Ok(heard) => {
                     self.judge.borrow_mut().as_mut().unwrap().listens += 1;
                     heard
@@ -649,7 +649,8 @@ impl Rendering {
             .as_ref()
             .filter(|taken| !taken.said.starts_with("nothing"))
             .map(|taken| format!("This answer's changes went first, to hear the bars without them ({}): make them again", taken.said));
-        let heard = match self.judge_hear(track.as_deref(), focus.as_deref(), window, signal.clone()).await {
+        let what = if went.is_some() { "without this answer's changes" } else { "as it is now" };
+        let heard = match self.judge_hear(track.as_deref(), focus.as_deref(), window, what, signal.clone()).await {
             Ok(Ok(JudgeHeard { silent: Some(why), .. })) | Ok(Err(why)) => {
                 return Ok(Err(match went {
                     Some(went) => format!("{why}. {went} once the bars can be heard"),
@@ -766,7 +767,7 @@ impl Rendering {
         if known {
             return Ok(Ok(()));
         }
-        let heard = match self.judge_hear(track.as_deref(), focus.as_deref(), window, signal).await? {
+        let heard = match self.judge_hear(track.as_deref(), focus.as_deref(), window, "before the next change", signal).await? {
             Ok(JudgeHeard { silent: Some(why), .. }) | Err(why) => return Ok(Err(why)),
             Ok(heard) => heard,
         };
@@ -862,7 +863,7 @@ impl Rendering {
             let run = run.as_ref().unwrap();
             (run.track.clone(), run.focus.clone(), run.span)
         };
-        let heard = match self.judge_hear(track.as_deref(), focus.as_deref(), span, signal).await? {
+        let heard = match self.judge_hear(track.as_deref(), focus.as_deref(), span, "where the run ends", signal).await? {
             Ok(JudgeHeard { silent: Some(why), .. }) | Err(why) => return Ok(Err(why)),
             Ok(heard) => heard,
         };
@@ -1058,12 +1059,14 @@ impl Rendering {
         (embedding.vibe.is_some() || embedding.effects.is_some()).then_some(embedding)
     }
 
-    /// Hears `window` quietly: the mix (or the run's track) and the focus element in one pass, measured.
+    /// Hears `window`: the mix (or the run's track) and the focus element in one pass, measured. The producer hears it
+    /// too, told the bars and `what` they hear (the state it's in: "after …", "where the run starts").
     pub(super) async fn judge_hear(
         self: &Rc<Self>,
         track: Option<&str>,
         focus: Option<&str>,
         window: Window,
+        what: &str,
         signal: Signal,
     ) -> Result<Result<JudgeHeard, String>, RuntimeError> {
         let tempo = self.observer.tempo.get().unwrap_or(120.);
@@ -1075,7 +1078,7 @@ impl Rendering {
         if let Some(focus) = focus.filter(|focus| Some(*focus) != track) {
             candidates.push(AuditionCandidate { track: focus.into(), mix: None, label: None, clip: None });
         }
-        self.tell(format!("Listening quietly: {}", super::super::more_changes::bars(window.from)), Some(true));
+        self.tell(format!("Playing {} · {what}", self.bars_of(window)), Some(true));
         let rendering = self.rendering_now();
         let mut rig = None;
         let rendered: Result<(IndexMap<String, Render>, Vec<(String, bool)>), RuntimeError> = async {
@@ -1182,8 +1185,8 @@ impl Rendering {
     }
 
     /// Main's chain as masking needs it, read from Live as it is now: what on it moves the mix but not the focus, and
-    /// the level its Utilities add. Main's fader isn't in it: the mix is heard before the fader, which a quiet listen
-    /// turns down. A chain Kumi can't read counts as one it can't read masking through.
+    /// the level its Utilities add. Main's fader isn't in it: the mix is heard before the fader. A chain Kumi can't read
+    /// counts as one it can't read masking through.
     async fn main_state(self: &Rc<Self>, signal: Signal) -> MainState {
         let read = async {
             let (main, _) = self.main_volume(signal.clone()).await?;
@@ -1622,6 +1625,14 @@ fn identity(row: &JsonObject) -> String {
 
 /// A round's moves in Live: its excerpt heard, its track's chain, Kumi's HISTORY. Taking back and removing go on after
 /// Esc (what was changed is put back), with the cleanup's own time limit.
+/// What a round's listen plays, said to the producer: after the change it judges, in the model's (or tune's) words.
+fn after(change: Option<&str>) -> String {
+    match change.map(str::trim).filter(|change| !change.is_empty()) {
+        Some(change) => format!("after {}", kumi_common::js::string::head(change.trim_end_matches('.'), 120)),
+        None => "after this answer's changes".into(),
+    }
+}
+
 struct InLive<'a> {
     rendering: &'a Rc<Rendering>,
     track: Option<String>,
@@ -1639,7 +1650,11 @@ impl RoundHost for InLive<'_> {
         self.rendering.rebalance(gain, self.signal.clone()).await.map(|(label, _)| label)
     }
     async fn hear(&self) -> Result<Listen, Unheard> {
-        match self.rendering.judge_hear(self.track.as_deref(), self.focus.as_deref(), self.window, self.signal.clone()).await {
+        match self
+            .rendering
+            .judge_hear(self.track.as_deref(), self.focus.as_deref(), self.window, "as it is now", self.signal.clone())
+            .await
+        {
             Ok(Ok(heard)) => {
                 let mut values = heard.read(&self.rendering.judge.borrow().as_ref().unwrap().checklist);
                 for (index, value) in &self.held {

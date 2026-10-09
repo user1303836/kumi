@@ -1,4 +1,4 @@
-//! The sound tool: tracks heard quietly side by side in one pass, each sound measured, a kit judged as one, how each
+//! The sound tool: tracks heard side by side in one pass, each sound measured, a kit judged as one, how each
 //! part ducks under and interlocks with another, and how far its notes sit from a key.
 
 use super::super::connection::NO_CURRENT_LIVE;
@@ -63,7 +63,8 @@ impl Rendering {
         if let Some(against) = against.as_ref().filter(|against| !names.contains(against)) {
             heard_names.push(against.clone());
         }
-        let heard = match self.hear_takes(&heard_names, window, signal).await? {
+        let what = format!("measuring {}", heard_names.join(", "));
+        let heard = match self.hear_takes(&heard_names, window, &what, signal).await? {
             Ok(heard) => heard,
             Err(why) => return Ok(Err(why)),
         };

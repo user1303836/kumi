@@ -1,4 +1,4 @@
-//! The form tool: the song heard quietly and read bar by bar, which tracks play where (from the Arrangement), and a
+//! The form tool: the song played, heard and read bar by bar, which tracks play where (from the Arrangement), and a
 //! reference's form beside it.
 
 use super::super::connection::NO_CURRENT_LIVE;
@@ -77,7 +77,7 @@ impl Rendering {
             }
             None => None,
         };
-        let heard = match self.judge_hear(None, None, span, signal.clone()).await? {
+        let heard = match self.judge_hear(None, None, span, "the song, read bar by bar", signal.clone()).await? {
             Ok(JudgeHeard { silent: Some(why), .. }) | Err(why) => return Ok(Err(why)),
             Ok(heard) => heard,
         };

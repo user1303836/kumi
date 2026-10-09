@@ -35,8 +35,6 @@ impl Rendering {
             laps.push(format!("{what} {}", now - lap_at));
             lap_at = now;
         };
-        let (main_ref, prior) = self.main_prior(rig, signal.clone()).await?;
-        lap("main read");
         let held = rig.hold.is_some();
         let window = rig.window();
         let mut started = false;
@@ -47,17 +45,10 @@ impl Rendering {
         let result: Result<(), RuntimeError> = self
             .history
             .quietly(None, async {
-                if rig.hold.as_ref().and_then(|held| held.main.as_ref()).is_none() {
-                    // Main goes quiet only once its level is noted for after a crash.
-                    if !self.save_main(rig, prior, true) {
-                        return Err(observation(MAIN_UNNOTED));
-                    }
-                    self.step("set_mixer", json!({"trackRef":main_ref,"volume":0}), signal.clone()).await?;
-                    if let Some(held) = &mut rig.hold {
-                        held.main = Some((main_ref, prior));
-                    }
+                // Main stays as the producer has it: they hear the pass as Kumi does.
+                if !rig.noted {
+                    self.note_render(rig);
                 }
-                lap("main down");
                 let tracks = self.rows("track", json!({"fields":["name","armed"]}), signal.clone()).await?;
                 lap("tracks read");
                 let mut indices = vec![];
@@ -248,15 +239,6 @@ impl Rendering {
                     .is_err()
                 {
                     rig.notes.push("A track Kumi disarmed to render may still be disarmed; arm it again in Live.".into());
-                }
-            }
-            if !held {
-                let back = self.history.quietly(None, self.put_main_back(prior, cleanup)).await;
-                lap("main back");
-                if back {
-                    self.clear_restore();
-                } else {
-                    rig.notes.push(format!("Main may still be silent: set it back to {} in Live.", fader_db(prior)));
                 }
             }
         } else {

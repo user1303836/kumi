@@ -761,12 +761,24 @@ fn kumi_ears_passes_the_sound_through_records_four_channels_and_every_patch_cord
             .iter()
             .any(|v| v["patchline"]["source"] == serde_json::json!([s, o]) && v["patchline"]["destination"] == serde_json::json!([d, i]))
     };
-    assert!(cord("obj-plugin", 0, "obj-plugout", 0) && cord("obj-plugin", 1, "obj-plugout", 1));
+    // The sound passes on through a level the code sets (1, or 0 for a candidate only Kumi hears); Kumi records it
+    // before that level.
+    assert!(cord("obj-plugin", 0, "obj-pass-0", 0) && cord("obj-pass-0", 0, "obj-plugout", 0));
+    assert!(cord("obj-plugin", 1, "obj-pass-1", 0) && cord("obj-pass-1", 0, "obj-plugout", 1));
+    assert_eq!((boxes["obj-pass-0"]["text"].as_str(), boxes["obj-pass-1"]["text"].as_str()), (Some("*~ 1."), Some("*~ 1.")));
+    assert!(cord("obj-code", 10, "obj-pass-0", 1) && cord("obj-code", 10, "obj-pass-1", 1));
+    assert!(!cord("obj-plugin", 0, "obj-plugout", 0) && !cord("obj-plugin", 1, "obj-plugout", 1));
     assert!(cord("obj-plugin", 0, "obj-record", 0) && cord("obj-plugin", 1, "obj-record", 1) && cord("obj-beat1", 0, "obj-record", 2));
     assert_eq!(boxes["obj-record"]["text"], "record~ ---kumiears 4");
     assert!(cord("obj-sync", 6, "obj-where", 0) && cord("obj-where", 0, "obj-record", 3));
     assert!(!ears_code().contains("__"));
-    assert!(ears_code().contains("const VERSION = 3;"));
+    assert!(ears_code().contains("const VERSION = 4;") && EARS_VERSION == 4);
+    // A held-back recording's sound passes again when it's written or stopped, or its time is up (a crash included).
+    let code = ears_code();
+    assert!(code.contains("const quiet = Number(args[3]) === 1;") && code.contains("passing.schedule(seconds * 1000);"));
+    // The level goes as a float message: v8 sends a bare 0 as nothing, so a held-back track kept playing on real Live.
+    assert!(code.contains(r#"outlet(10, "float", 0);"#) && code.contains(r#"outlet(10, "float", 1);"#) && !code.contains("outlet(10, 0)"));
+    assert_eq!(code.matches("pass();").count(), 3, "arm without quiet, stop and write all let the sound pass");
     assert_eq!(boxes["obj-code"]["code"], ears_code());
     for (index, port) in KUMI_PORTS.iter().enumerate() {
         assert_eq!(boxes[format!("obj-send-{index}").as_str()]["text"], format!("udpsend 127.0.0.1 {port}"));
@@ -798,15 +810,15 @@ async fn kumis_socket_hears_devices_hellos_and_arms_writes_and_stops_them_by_tok
     use kumi_runtime::ears::{device::EARS_VERSION, link::*};
     use std::rc::Rc;
     tokio::task::LocalSet::new().run_until(async{
-        let link=open_ears_link(EarsOptions{port:Some(0),..Default::default()}).await.unwrap();let device=Rc::new(tokio::net::UdpSocket::bind(("127.0.0.1",0)).await.unwrap());let port=device.local_addr().unwrap().port();let root=tempfile::tempdir().unwrap();let raw=root.path().join("device.raw").to_string_lossy().into_owned();let answering=device.clone();let stop=kumi_common::abort::Signal::new();let closed=stop.clone();
+        let link=open_ears_link(EarsOptions{port:Some(0),..Default::default()}).await.unwrap();let device=Rc::new(tokio::net::UdpSocket::bind(("127.0.0.1",0)).await.unwrap());let port=device.local_addr().unwrap().port();let root=tempfile::tempdir().unwrap();let raw=root.path().join("device.raw").to_string_lossy().into_owned();let answering=device.clone();let stop=kumi_common::abort::Signal::new();let quiet_seen=Rc::new(std::cell::RefCell::new(Vec::<Option<f64>>::new()));let armed_quiet=quiet_seen.clone();let closed=stop.clone();
         let worker=tokio::task::spawn_local(async move{let mut packet=vec![0u8;65536];loop{tokio::select!{_ = closed.cancelled()=>break,read=answering.recv_from(&mut packet)=>{let(n,_)=read.unwrap();let msg=decode_osc(&packet[..n]).unwrap();let reply=msg.args[1].as_number().unwrap() as u16;let token=msg.args[2].as_text().unwrap();let (address,args)=match msg.address.as_str(){
-            "/kumi/ears/arm"=>("/kumi/ears/armed",vec![token.into(),port.into(),64.5.into(),1.into(),48000.into()]),
+            "/kumi/ears/arm"=>{armed_quiet.borrow_mut().push(msg.args.get(3).and_then(|v|v.as_number()));("/kumi/ears/armed",vec![token.into(),port.into(),64.5.into(),1.into(),48000.into()])},
             "/kumi/ears/write"=>{let file=msg.args[0].as_text().unwrap();std::fs::write(file,capture(&[Part{frames:480,playing:Some((64.5,480.0)),audio:false}],true,false,0,false,None)).unwrap();("/kumi/ears/written",vec![token.into(),port.into(),file.into(),48000.into(),3.into(),64.5.into(),1.into()])},
             "/kumi/ears/ping"=>("/kumi/ears/pong",vec![token.into(),port.into(),77.into(),(EARS_VERSION as i32).into(),48000.into(),"live_set tracks 2 devices 4".into(),1500.into(),33.25.into(),1.into()]),_=>continue};answering.send_to(&encode_osc(address,&args),("127.0.0.1",reply)).await.unwrap();}}}});
         device.send_to(&encode_osc("/kumi/ears/hello",&[port.into(),77.into(),(EARS_VERSION as i32).into(),48000.into(),"live_set tracks 2 devices 4".into()]),("127.0.0.1",link.port())).await.unwrap();
-        let tap=link.wait_for(Rc::new(|tap|tap.path.starts_with("live_set tracks 2 devices ")),2000,None).await.unwrap();assert_eq!((tap.id,tap.port,tap.path.as_str()),(77.0,port,"live_set tracks 2 devices 4"));assert_eq!(link.taps().iter().map(|tap|tap.id).collect::<Vec<_>>(),vec![77.0]);assert_eq!(link.arm(&tap,10.0,None).await.unwrap(),Armed{beats:64.5,running:true,sample_rate:48000.0});let written=link.write(&tap,&raw,None).await.unwrap();assert_eq!(written.file,raw);assert_eq!(written.channels,3);assert_eq!(written.beats,64.5);assert_eq!(read_capture(Path::new(&raw),3,48000.0).await.unwrap().frames(),480);assert_eq!(link.ping(&tap,None).await.unwrap().path,"live_set tracks 2 devices 4");assert_eq!(link.transport(&tap,None).await.unwrap(),Some(Transport{beats:33.25,running:true}));
+        let tap=link.wait_for(Rc::new(|tap|tap.path.starts_with("live_set tracks 2 devices ")),2000,None).await.unwrap();assert_eq!((tap.id,tap.port,tap.path.as_str()),(77.0,port,"live_set tracks 2 devices 4"));assert_eq!(link.taps().iter().map(|tap|tap.id).collect::<Vec<_>>(),vec![77.0]);assert_eq!(link.arm(&tap,10.0,false,None).await.unwrap(),Armed{beats:64.5,running:true,sample_rate:48000.0});assert_eq!(link.arm(&tap,10.0,true,None).await.unwrap().beats,64.5);assert_eq!(*quiet_seen.borrow(),vec![Some(0.0),Some(1.0)]);let written=link.write(&tap,&raw,None).await.unwrap();assert_eq!(written.file,raw);assert_eq!(written.channels,3);assert_eq!(written.beats,64.5);assert_eq!(read_capture(Path::new(&raw),3,48000.0).await.unwrap().frames(),480);assert_eq!(link.ping(&tap,None).await.unwrap().path,"live_set tracks 2 devices 4");assert_eq!(link.transport(&tap,None).await.unwrap(),Some(Transport{beats:33.25,running:true}));
         device.send_to(&encode_osc("/kumi/ears/hello",&[port.saturating_add(1).into(),78.into(),(EARS_VERSION as i32+1).into(),48000.into(),"live_set tracks 3 devices 0".into()]),("127.0.0.1",link.port())).await.unwrap();tokio::time::sleep(std::time::Duration::from_millis(50)).await;assert_eq!(link.taps().iter().map(|tap|tap.id).collect::<Vec<_>>(),vec![77.0]);
-        let dead=tokio::net::UdpSocket::bind(("127.0.0.1",0)).await.unwrap();assert!(link.arm(&Tap{port:dead.local_addr().unwrap().port(),path:"live_set master_track devices 0".into(),..tap},1.0,None).await.unwrap_err().0.contains("listening device on Main didn't answer"));stop.cancel();worker.await.unwrap();link.close().await;
+        let dead=tokio::net::UdpSocket::bind(("127.0.0.1",0)).await.unwrap();assert!(link.arm(&Tap{port:dead.local_addr().unwrap().port(),path:"live_set master_track devices 0".into(),..tap},1.0,false,None).await.unwrap_err().0.contains("listening device on Main didn't answer"));stop.cancel();worker.await.unwrap();link.close().await;
         assert_eq!(place_of("live_set return_tracks 1 devices 3"),Some(Place{kind:"return".into(),index:1,device:3}));assert_eq!(place_of("live_set master_track devices 0"),Some(Place{kind:"main".into(),index:0,device:0}));assert_eq!(describe("live_set tracks 0 devices 1"),"track 1");
     }).await;
 }

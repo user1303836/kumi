@@ -1,4 +1,4 @@
-//! Audition requests, render timing, and the crash journal that restores Main.
+//! Audition requests, render timing, and the crash journal of what a cut-off listen leaves to put right.
 use crate::{
     audio::analyze::Analysis,
     core::contracts::{AuditionCandidate, AuditionRequest, JsonObject, MIX_CANDIDATE},
@@ -89,12 +89,15 @@ pub fn render_span(from_beat: f64, beats: f64, beats_per_bar: f64, tempo: f64, l
     let preroll = from_beat - position;
     RenderSpan { position, preroll, wait: preroll + beats + beats_per_bar / 2.0 }
 }
+/// What a cut-off listen leaves to put right: the record pass's render tracks, and Main's level in a journal an older
+/// Kumi left (it turned Main down to listen; listens leave Main alone now).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MainRestore {
+pub struct RenderJournal {
     pub set: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    pub volume: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<f64>,
     pub at: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scratch: Option<Vec<String>>,
@@ -142,7 +145,7 @@ impl RestoreStore {
         let value: Value = serde_json::from_str(&String::from_utf8_lossy(&bytes)).ok()?;
         let value = value.as_object()?;
         if value.get("set").is_some_and(Value::is_string)
-            && value.get("volume").and_then(Value::as_f64).is_some_and(|v| (0.0..=1.0).contains(&v))
+            && value.get("volume").is_none_or(|v| v.as_f64().is_some_and(|v| (0.0..=1.0).contains(&v)))
             && value.get("at").is_some_and(Value::is_number)
         {
             Some(value.clone())

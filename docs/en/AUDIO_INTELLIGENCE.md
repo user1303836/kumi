@@ -8,9 +8,10 @@ short capture from Live to measure and then delete.
 
 **Kumi doesn't use these tools.** Kumi has its own listening, on your computer:
 it reads audio files and the Set's audio clips, records or renders what it
-built (its `audition` tool records each candidate onto a scratch track with
-Main silenced; `render` renders an audio track's clips through Kumi's Live
-extension), and measures the result. See [listening](KUMI_GUIDE.md#listening)
+built (its `audition` tool hears each candidate in Live through its Kumi Ears
+device, or without Max for Live records it onto a scratch track, while Main
+plays as you have it; `render` renders an audio track's clips through Kumi's
+Live extension), and measures the result. See [listening](KUMI_GUIDE.md#listening)
 in the Kumi guide and [how Kumi changes your Set](KUMI_CHANGES.md).
 
 ## The tools

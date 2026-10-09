@@ -424,8 +424,9 @@ impl EarsLink for EarsReplay {
         }
         tap
     }
-    async fn arm(&self, tap: &Tap, seconds: f64, _: Option<Signal>) -> Result<Armed, EarsError> {
-        let call = self.next("arm", json!([tap, seconds]));
+    async fn arm(&self, tap: &Tap, seconds: f64, quiet: bool, _: Option<Signal>) -> Result<Armed, EarsError> {
+        // A tap held back while it records says so; one that passes the sound on is armed as before.
+        let call = self.next("arm", if quiet { json!([tap, seconds, "quiet"]) } else { json!([tap, seconds]) });
         tokio::task::yield_now().await;
         Ok(serde_json::from_value(call["result"].clone()).unwrap())
     }
@@ -455,7 +456,7 @@ impl EarsLink for EarsReplay {
 
 /// The source cleanup oracle, reached through the real kernel and public audition tool.
 #[tokio::test(flavor = "current_thread")]
-async fn cancelled_kernel_audition_restores_main_and_removes_scratch_tracks_after_close() {
+async fn cancelled_kernel_audition_removes_scratch_tracks_and_clears_its_journal_after_close() {
     use futures::StreamExt;
     use kumi_runtime::{
         ai::{
@@ -495,7 +496,8 @@ async fn cancelled_kernel_audition_restores_main_and_removes_scratch_tracks_afte
             let folder = tempfile::tempdir().unwrap();
             wav(folder.path(), "square");
             let source: Value = serde_json::from_str(include_str!("support/rendering-oracle.json")).unwrap();
-            let source_case = source["cases"].as_array().unwrap().iter().find(|case| case["label"] == "cancel-live_mixer_apply").unwrap();
+            let source_case =
+                source["cases"].as_array().unwrap().iter().find(|case| case["label"] == "cancel-live_recording_apply").unwrap();
             let case = fixture_paths::map_strings(source_case, &|text| text.replace("$AUDIO", folder.path().to_str().unwrap()));
             let (acknowledge, reply) = tokio::sync::oneshot::channel();
             let held = Rc::new(HeldApply { dispatched: tokio::sync::Notify::new(), reply: RefCell::new(Some(reply)) });
@@ -583,7 +585,7 @@ async fn cancelled_kernel_audition_restores_main_and_removes_scratch_tracks_afte
                     .await
             });
             tokio::time::timeout(Duration::from_secs(2), held.dispatched.notified()).await.unwrap();
-            assert!(restore.is_file(), "Main restoration is journaled before muting it");
+            assert!(restore.is_file(), "the render tracks are journaled before Live records");
             controller.cancel();
             let result = tokio::time::timeout(Duration::from_secs(1), running).await.unwrap().unwrap().unwrap();
             assert_eq!(result.stop_reason, StopReason::Cancelled);
@@ -591,8 +593,8 @@ async fn cancelled_kernel_audition_restores_main_and_removes_scratch_tracks_afte
             drop(kernel);
             assert!(acknowledge.send(()).is_ok(), "cancelling the kernel dropped audition before its cleanup");
             tokio::time::timeout(Duration::from_secs(2), finished.notified()).await.unwrap();
-            assert_eq!(endpoint.calls.get(), case["calls"].as_array().unwrap().len(), "all source restore/undo/transport calls finish");
-            assert!(!restore.exists(), "confirmed Main restoration clears the crash journal");
+            assert_eq!(endpoint.calls.get(), case["calls"].as_array().unwrap().len(), "all source stop/undo/transport calls finish");
+            assert!(!restore.exists(), "closing the rig clears the crash journal");
             assert!(integration.history.entries.borrow().is_empty(), "scratch changes are removed after cleanup");
             assert!(matches!(events.borrow().as_slice(), [KernelEvent::ToolStart { .. }]), "late cleanup must not deliver a model result");
             integration.close().await.unwrap();
