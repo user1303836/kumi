@@ -1,0 +1,18 @@
+{
+  "platform": "macos",
+  "architecture": "arm64",
+  "version": "12.4.15b6 (2026-10-01_8378f48a19)",
+  "executable": "/Applications/Ableton Live 12 Beta.app/Contents/MacOS/Live",
+  "source_sha256": "4a2cf9cd479e5157acc1faccf73a9a849e822b7262b856cf183fc1c952bebaa0",
+  "arm64_sha256": "77a25f5a10a83b3326389a96ca9510949ccaf5d3d3862d5f38fb4b0b7300dc31",
+  "native_source_sha256": "abcb0bcb325e4d08f997e81f2d60a91b5234da67c70e05475abf95622a268c95",
+  "profile_id": "live-12.4.15b6-arm64",
+  "profile_sha256": "5917f12a77cb75b956d38e1923d240c663ad0e9846a3e5434fcb31b8fb854ae5",
+  "validation_status": "validated",
+  "runtime_notes": [
+    "All four components passed exact-build b6 macOS ARM64 fixture validation; see the evidence index for measured coverage and limits.",
+    "Default selection and matrix bundles include this exact executable; writes remain disabled until explicitly enabled.",
+    "Scene scheduling is validated via Live UI launches. The global performance switch requires an explicit inverse; opaque Arrangement snapshots are bound to a live adapter session."
+  ],
+  "library_sha256": "e0a35e4374c7e2eddbfcd56a7aeb80e50e294327c298e00b61400d63673d8d29"
+}

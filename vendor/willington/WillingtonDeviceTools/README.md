@@ -1,6 +1,6 @@
 # Willington Device Tools
 
-Experimental extensions for **Live 12.4.15b4 (2026-09-17_a0ac16f342), macOS ARM64**.
+Experimental extensions for **Live 12.4.15b4/b5/b6, macOS ARM64**.
 They add Python Remote Script methods and expose those methods to Max's LiveAPI.
 The executable is not patched on disk. Registration lasts for the Live process;
 disconnecting this Control Surface removes its methods and disables its writes.
@@ -8,7 +8,7 @@ disconnecting this Control Surface removes its methods and disables its writes.
 **Status:** native operations have passed fixture tests in Live and a 27-check Max
 LiveAPI suite. Mapping creation/removal passed undo and redo. Continuous and enum
 ranges use parameter units; boolean controls have a separate macro-threshold method.
-The adapter remains experimental and restricted to this exact build. See the
+The adapter remains experimental and restricted to validated exact builds. See the
 [investigation and evidence](https://github.com/cyclesonata/ableton-decomp/blob/main/research/api-gaps/README.md).
 
 ## Build and package
@@ -211,3 +211,15 @@ counts. Max LiveAPI calls, variation rename undo, Set persistence and Kumi
 transactions are not yet validated on Windows. The
 [static mapping record](../../evidence/live-12.4.15b5-windows-x86_64/device-tools/static-mapping.json)
 explains each address and layout.
+
+## Live 12.4.15b6 macOS ARM64
+
+The validated `live-12.4.15b6-arm64` profile participates in automatic selection
+and normal matrix bundles. Use `build.sh --profile profiles/live-12.4.15b6-arm64.json`
+for an explicit build; the legacy single-build default remains b4. The complete
+15-step native regression and 27-check Max suite pass, including all four stock
+modulators and native signal-source checks. See [b6 evidence](../../evidence/live-12.4.15b6-arm64/README.md).
+
+Run the asynchronous regression through the normal ControlSurface scheduler.
+An ad hoc callback outside that scheduler can alter Live undo transaction
+boundaries after a macro-value edit and is not an equivalent test environment.
