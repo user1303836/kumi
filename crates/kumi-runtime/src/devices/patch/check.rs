@@ -63,8 +63,8 @@ pub const RULES: [&str; 15] = [
 
 /// How far a chain of messages is followed from a fan-out.
 const MAX_HOPS: usize = 24;
-/// How far two boxes can run into each other and only touch, in pixels.
-const TOUCH: f64 = 1.5;
+/// How far two boxes can run into each other and only touch, in pixels: a box's own margin around its text.
+const TOUCH: f64 = 3.0;
 /// Boxes Max draws behind others on purpose: a cord or a box over one is fine.
 const BACKDROPS: [&str; 3] = ["panel", "fpic", "live.line"];
 /// Max's Live objects that are parameters unless turned off.
@@ -256,7 +256,8 @@ impl Checker<'_> {
         let label = labels(patcher);
         self.looked(BOXES_OVERLAP, placed.len());
         for (index, (item, rect)) in placed.iter().enumerate() {
-            // Boxes a pixel or so into each other only touch: Max's rounding, or a comment's empty margin.
+            // Boxes a few pixels into each other only touch: Max's rounding, a box grown a little since it was placed, a
+            // comment's empty margin.
             let shrunk = Rect::new(rect.x + TOUCH, rect.y + TOUCH, (rect.w - 2.0 * TOUCH).max(0.0), (rect.h - 2.0 * TOUCH).max(0.0));
             for (other, other_rect) in &placed[index + 1..] {
                 if shrunk.overlaps(other_rect) {
@@ -274,9 +275,9 @@ impl Checker<'_> {
         self.looked(CORD_UPWARD, patcher.cords.len());
         for cord in &patcher.cords {
             let (Some(from), Some(to)) = (by_id.get(cord.from.as_str()), by_id.get(cord.to.as_str())) else { continue };
-            let (Some(start), Some(end)) = (from.rect(), to.rect()) else { continue };
-            let start = outlet_point(&start, from.outlets().max(cord.outlet + 1), cord.outlet);
-            let end = inlet_point(&end, to.inlets().max(cord.inlet + 1), cord.inlet);
+            let (Some(source), Some(target)) = (from.rect(), to.rect()) else { continue };
+            let start = outlet_point(&source, from.outlets().max(cord.outlet + 1), cord.outlet);
+            let end = inlet_point(&target, to.inlets().max(cord.inlet + 1), cord.inlet);
             let points: Vec<[f64; 2]> = std::iter::once(start).chain(cord.midpoints.iter().copied()).chain(std::iter::once(end)).collect();
             let under: Vec<&MaxBox> = placed
                 .iter()
@@ -297,8 +298,9 @@ impl Checker<'_> {
                     ),
                 );
             }
-            // A cord that closes a loop has to run back up; any other runs down from its outlet to its inlet.
-            if end[1] < start[1] - 0.5 && !reaches(&next, &cord.to, &cord.from) {
+            // A cord that closes a loop has to run back up; any other goes down, or across to a box beside its own: it
+            // runs up when its inlet is above the top of the box it leaves.
+            if end[1] < source.y - 0.5 && !reaches(&next, &cord.to, &cord.from) {
                 self.found(
                     CORD_UPWARD,
                     at,
@@ -365,13 +367,22 @@ impl Checker<'_> {
         }
     }
 
-    /// Whether the message `selector` only sets something in a box, sending nothing at once: its code says no function
-    /// the message calls sends, or Max's reference says it's an attribute or a method that sends nothing.
-    fn quiet(&self, item: &MaxBox, selector: &str) -> bool {
-        if let Some(sends) = item.code.as_ref().and_then(|code| code.sends_at_once(selector)) {
-            return !sends;
+    /// What the message `selector` does to a box: only changes how it looks (Max's reference files the attribute under
+    /// Appearance, Color…), only sets something (an attribute, a method that sends nothing, a function of its code that
+    /// never reaches an outlet), or makes it send.
+    fn answer(&self, item: &MaxBox, selector: &str) -> Answer {
+        let ui = item.maxclass() != "newobj";
+        if self.reference.is_some_and(|reference| reference.looks_only(item.class(), selector, ui)) {
+            return Answer::Looks;
         }
-        self.reference.is_some_and(|reference| reference.quiet(item.class(), selector))
+        if let Some(sends) = item.code.as_ref().and_then(|code| code.sends_at_once(selector)) {
+            return if sends { Answer::Sends } else { Answer::Sets };
+        }
+        if self.reference.is_some_and(|reference| reference.quiet(item.class(), selector, ui)) {
+            Answer::Sets
+        } else {
+            Answer::Sends
+        }
     }
 
     /// Where a message into `inlet` of box `id` goes in the same chain: each box it reaches, and whether to make it
@@ -402,8 +413,13 @@ impl Checker<'_> {
                 }
                 continue;
             }
-            if let Some(selectors) = message.as_ref().filter(|selectors| selectors.iter().all(|selector| self.quiet(item, selector))) {
-                arrival.kept.entry(inlet).or_insert_with(|| selectors.first().cloned());
+            let answers: Vec<(&String, Answer)> =
+                message.iter().flatten().map(|selector| (selector, self.answer(item, selector))).collect();
+            if !answers.is_empty() && answers.iter().all(|(_, answer)| *answer != Answer::Sends) {
+                // Only redrawn, the box keeps nothing the order of messages could change.
+                if let Some((selector, _)) = answers.iter().find(|(_, answer)| *answer == Answer::Sets) {
+                    arrival.kept.entry(inlet).or_insert_with(|| Some(selector.to_string()));
+                }
                 continue;
             }
             arrival.hot = true;
@@ -570,6 +586,16 @@ impl Checker<'_> {
             );
         }
     }
+}
+
+/// What a message does to a box.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Answer {
+    /// Only changes how it looks: nothing it sends depends on it.
+    Looks,
+    /// Only sets something it sends later.
+    Sets,
+    Sends,
 }
 
 /// How a chain of messages reached a box.
@@ -890,6 +916,12 @@ mod tests {
         back.midpoints = vec![[43.5, 150.], [150., 150.], [150., 30.], [43.5, 30.]];
         routed.cords.push(back);
         assert_eq!(rules(&check(&routed)), Vec::<&str>::new(), "{:#?}", check(&routed));
+        // A cord across to a box beside its own, on the same row, doesn't run up.
+        let beside = read(json!({ "boxes": [
+            newobj("obj-1", "* 100.", [40., 40., 40., 22.], 2, 1),
+            newobj("obj-2", "prepend set", [120., 48., 70., 22.], 1, 1)
+        ], "lines": [cord("obj-1", 0, "obj-2", 0)] }));
+        assert_eq!(rules(&check(&beside)), Vec::<&str>::new());
     }
 
     #[test]
@@ -950,10 +982,11 @@ mod tests {
         ], "lines": [cord("obj-1", 0, "obj-5", 0), cord("obj-1", 0, "obj-5", 1)] }));
         assert_eq!(order_says(&check(&direct)), Vec::<&str>::new());
 
-        // Hiding a toggle doesn't make it send; setting it only keeps the value, and a bang beside it isn't settled.
+        // Hiding a toggle only changes how it looks; setting it keeps a value, and a bang beside it isn't settled.
         let mut reference = Reference::default();
         reference.objects.insert("toggle".into(), Object { quiet: BTreeSet::from(["set".to_string()]), ..Object::default() });
-        reference.objects.insert("jbox".into(), Object { quiet: BTreeSet::from(["hidden".to_string()]), ..Object::default() });
+        let hidden_only = BTreeSet::from(["hidden".to_string()]);
+        reference.objects.insert("jbox".into(), Object { quiet: hidden_only.clone(), looks: hidden_only, ..Object::default() });
         let toggle = |id: &str, rect: [f64; 4]| json!({ "box": { "id": id, "maxclass": "toggle", "patching_rect": rect, "numinlets": 1, "numoutlets": 1, "outlettype": ["int"] } });
         let hidden = read(json!({ "boxes": [
             newobj("obj-1", "random 10", [40., 20., 70., 22.], 2, 1),
@@ -963,14 +996,21 @@ mod tests {
         ], "lines": [cord("obj-1", 0, "obj-2", 0), cord("obj-2", 0, "obj-3", 0), cord("obj-3", 0, "obj-5", 0), cord("obj-1", 0, "obj-5", 1)] }));
         assert_eq!(order_says(&check(&hidden)).len(), 1, "without Max's reference, the toggle may send");
         assert_eq!(order_says(&check_with(&hidden, standard(), Some(&reference))), Vec::<&str>::new());
-        let set_and_bang = read(json!({ "boxes": [
-            newobj("obj-1", "random 10", [40., 20., 70., 22.], 2, 1),
-            message("obj-2", "set $1", [0., 60., 50., 22.]),
-            message("obj-4", "bang", [80., 60., 40., 22.]),
-            toggle("obj-3", [40., 120., 24., 24.])
-        ], "lines": [cord("obj-1", 0, "obj-2", 0), cord("obj-1", 0, "obj-4", 0), cord("obj-2", 0, "obj-3", 0), cord("obj-4", 0, "obj-3", 0)] }));
+        let beside_a_bang = |first: &str| {
+            read(json!({ "boxes": [
+                newobj("obj-1", "random 10", [40., 20., 70., 22.], 2, 1),
+                message("obj-2", &format!("{first} $1"), [0., 60., 50., 22.]),
+                message("obj-4", "bang", [80., 60., 40., 22.]),
+                toggle("obj-3", [40., 120., 24., 24.])
+            ], "lines": [cord("obj-1", 0, "obj-2", 0), cord("obj-1", 0, "obj-4", 0), cord("obj-2", 0, "obj-3", 0), cord("obj-4", 0, "obj-3", 0)] }))
+        };
         assert_eq!(
-            order_says(&check_with(&set_and_bang, standard(), Some(&reference))),
+            order_says(&check_with(&beside_a_bang("hidden"), standard(), Some(&reference))),
+            Vec::<&str>::new(),
+            "nothing the toggle sends depends on whether it's hidden"
+        );
+        assert_eq!(
+            order_says(&check_with(&beside_a_bang("set"), standard(), Some(&reference))),
             ["outlet 0 of [random 10] reaches toggle twice, once with `set` (which only sets it) and once to make it send: which arrives first depends on where boxes sit. Send it through a [t] whose right outlet sends the `set`."]
         );
 

@@ -98,12 +98,16 @@ pub struct Object {
     pub outlet_types: Vec<String>,
     pub inlet_digests: Vec<String>,
     pub outlet_digests: Vec<String>,
-    /// How many saved instances the counts were fitted to (0: the reference page's alone).
+    /// How many different saved texts the counts were fitted to (0: the reference page's alone).
     pub seen: usize,
     /// The messages that only set something in it, sending nothing at once: its attributes, and the methods its page
     /// says send nothing ("Set the value with no output") or that set a thing without a word of sending.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub quiet: BTreeSet<String>,
+    /// Of those, the attributes that only change how it looks or is described (hidden, bgcolor, fontsize): nothing
+    /// it sends depends on them.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub looks: BTreeSet<String>,
 }
 
 /// The page of the attributes every box has (hidden, presentation_rect, varname…).
@@ -146,11 +150,23 @@ impl Reference {
         Some(Ports { inlets, outlets, outlet_types })
     }
 
-    /// Whether the message `selector` only sets something in an object of `class` (one of its attributes or every
-    /// box's, or a method its page says sends nothing), so the object sends nothing at once.
-    pub fn quiet(&self, class: &str, selector: &str) -> bool {
-        let lists = |object: Option<&Object>| object.is_some_and(|object| object.quiet.contains(selector));
-        lists(self.object(class)) || lists(self.objects.get(BOX_PAGE))
+    /// Whether the message `selector` only sets something in an object of `class` (one of its attributes, or a method
+    /// its page says sends nothing), so the object sends nothing at once. A box with a face (`ui`: a live.dial, a
+    /// jsui) also takes every box's attributes (hidden, presentation_rect) as messages.
+    pub fn quiet(&self, class: &str, selector: &str, ui: bool) -> bool {
+        self.own_or_box(class, selector, ui).is_some()
+    }
+
+    /// Whether the message `selector` only changes how an object of `class` looks (an attribute filed under
+    /// Appearance, Color, Font…), so nothing it sends depends on it.
+    pub fn looks_only(&self, class: &str, selector: &str, ui: bool) -> bool {
+        self.own_or_box(class, selector, ui).is_some_and(|object| object.looks.contains(selector))
+    }
+
+    /// The page that says `selector` only sets something: the object's own, else every box's for one with a face.
+    fn own_or_box(&self, class: &str, selector: &str, ui: bool) -> Option<&Object> {
+        let own = self.object(class).filter(|object| object.quiet.contains(selector));
+        own.or_else(|| self.objects.get(BOX_PAGE).filter(|object| ui && object.quiet.contains(selector)))
     }
 }
 
@@ -202,15 +218,24 @@ fn saved_by(patcher: &Value) -> [u64; 3] {
     [part("major"), part("minor"), part("revision")]
 }
 
-/// The instances that say what Max does now: of those with the same arguments, the ones the newest Max saved. A help
-/// patcher saved before an object gained an outlet keeps the count it had then ([midiparse] gained its eighth).
+/// The instances that say what Max does now, one for each text: of those with the same arguments, the newest Max's
+/// saves, and of those the ports saved most. A help patcher saved before an object gained an outlet keeps the count it
+/// had then ([midiparse] gained its eighth), and a patcher holding one text many times says it once.
 fn newest(instances: Vec<Instance>) -> Vec<Instance> {
-    let mut latest: HashMap<Vec<String>, [u64; 3]> = HashMap::new();
-    for instance in &instances {
-        let version = latest.entry(instance.args.clone()).or_default();
-        *version = (*version).max(instance.version);
+    let mut texts: BTreeMap<Vec<String>, Vec<Instance>> = BTreeMap::new();
+    for instance in instances {
+        texts.entry(instance.args.clone()).or_default().push(instance);
     }
-    instances.into_iter().filter(|instance| latest[&instance.args] == instance.version).collect()
+    texts
+        .into_values()
+        .filter_map(|saves| {
+            let latest = saves.iter().map(|save| save.version).max()?;
+            let latest: Vec<Instance> = saves.into_iter().filter(|save| save.version == latest).collect();
+            let ports = |save: &Instance| (save.inlets, save.outlets);
+            let most = latest.iter().max_by_key(|save| latest.iter().filter(|other| ports(other) == ports(save)).count()).map(ports)?;
+            latest.into_iter().find(|save| ports(save) == most)
+        })
+        .collect()
 }
 
 static OBJECT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"<c74object\s+name="([^"]+)"([^>]*)>"#).unwrap());
@@ -224,7 +249,8 @@ static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]+>").unwrap());
 static METHOD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?s)<method\s+name="([^"]+)"[^>]*>(.*?)</method>"#).unwrap());
 /// An attribute's opening tag (self-closing for one without parts) or its closing tag: an attribute's own attributes
 /// (its label, its category) are written inside it.
-static ATTRIBUTE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"<attribute\s+name="([^"]+)"[^>]*?(/?)>|</attribute>"#).unwrap());
+static ATTRIBUTE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"<attribute\s+name="([^"]+)"([^>]*?)(/?)>|</attribute>"#).unwrap());
+static VALUE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\bvalue="([^"]*)""#).unwrap());
 /// How a page says a method sends nothing: "with no output", "without triggering output", "do not output".
 static SENDS_NOTHING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\b(without|no|not)\b[^.]*\boutput").unwrap());
 /// How a page says a method sends: "Output the value", "Set the value and cause output", "Set both values, output…".
@@ -238,22 +264,29 @@ static SETS: LazyLock<Regex> = LazyLock::new(|| {
 /// The messages that carry what an object works on: whatever their page says, they're its reason to send.
 const DATA: [&str; 6] = ["bang", "int", "float", "list", "anything", "symbol"];
 
-/// The messages a page says only set something: its attributes (not an attribute's own), and its methods that send
-/// nothing; a method that sends, by an attribute's name, isn't quiet.
-fn quiet_messages(text: &str) -> BTreeSet<String> {
-    let mut quiet = BTreeSet::new();
+/// The categories of attributes that only change how a box looks or is described, never what it sends.
+const LOOKS: [&str; 10] = ["Appearance", "Color", "Description", "Font", "Image", "Name", "Pictures", "Ruler", "Shadow", "View"];
+
+/// The messages a page says only set something (its attributes, not an attribute's own, and its methods that send
+/// nothing; a method that sends, by an attribute's name, isn't quiet), and of those the attributes that only change
+/// how the box looks (filed under Appearance, Color, Font…).
+fn quiet_messages(text: &str) -> (BTreeSet<String>, BTreeSet<String>) {
+    let (mut quiet, mut looks) = (BTreeSet::new(), BTreeSet::new());
     let mut depth = 0usize;
+    let mut attribute = String::new();
     for tag in ATTRIBUTE.captures_iter(text) {
-        match tag.get(1) {
-            Some(name) => {
-                if depth == 0 {
-                    quiet.insert(name.as_str().to_string());
-                }
-                if &tag[2] != "/" {
-                    depth += 1;
-                }
-            }
-            None => depth = depth.saturating_sub(1),
+        let Some(name) = tag.get(1) else {
+            depth = depth.saturating_sub(1);
+            continue;
+        };
+        if depth == 0 {
+            attribute = name.as_str().to_string();
+            quiet.insert(attribute.clone());
+        } else if depth == 1 && name.as_str() == "category" && VALUE.captures(&tag[2]).is_some_and(|value| LOOKS.contains(&&value[1])) {
+            looks.insert(attribute.clone());
+        }
+        if &tag[3] != "/" {
+            depth += 1;
         }
     }
     for method in METHOD.captures_iter(text) {
@@ -267,8 +300,10 @@ fn quiet_messages(text: &str) -> BTreeSet<String> {
         } else {
             quiet.remove(name);
         }
+        // A method by an attribute's name does what its page says.
+        looks.remove(name);
     }
-    quiet
+    (quiet, looks)
 }
 
 /// A reference page's text as plain words: tags out, entities read, spaces collapsed.
@@ -299,6 +334,7 @@ fn read_page(text: &str) -> Option<(String, Object)> {
             .unwrap_or_default()
     };
     let (inlets, outlets) = (ports(&INLETS), ports(&OUTLETS));
+    let (quiet, looks) = quiet_messages(text);
     let outlet_types =
         outlets.iter().map(|(kind, _)| if kind.starts_with("signal") { "signal".to_string() } else { String::new() }).collect();
     let object = Object {
@@ -310,7 +346,8 @@ fn read_page(text: &str) -> Option<(String, Object)> {
         inlet_digests: inlets.into_iter().map(|(_, digest)| digest).collect(),
         outlet_digests: outlets.into_iter().map(|(_, digest)| digest).collect(),
         seen: 0,
-        quiet: quiet_messages(text),
+        quiet,
+        looks,
     };
     Some((name, object))
 }
@@ -434,7 +471,7 @@ fn sources(c74: &Path) -> Sources {
 }
 
 /// How Kumi learns the reference: a new way is learned anew, as a new Max is.
-const LEARNER: u32 = 2;
+const LEARNER: u32 = 4;
 
 /// What the reference is learned from in a Max's C74 folder, and how, as one line: a new Max reads differently.
 pub fn fingerprint(c74: &Path) -> String {
@@ -461,6 +498,7 @@ fn unpaged(module: &str, inlets: usize, outlets: usize) -> Object {
         outlet_digests: Vec::new(),
         seen: 0,
         quiet: BTreeSet::new(),
+        looks: BTreeSet::new(),
     }
 }
 
@@ -613,6 +651,13 @@ mod tests {
             [8, 7],
             "the newest save of the same text says what Max does now; a text saved once stays"
         );
+        // Eight comparisons with two inlets, and one help patcher holding one text eleven times with one: a text says
+        // its count once.
+        let mut compare: Vec<Instance> =
+            ["0.", "60.", "120.", "180.", "240.", "360.", "380.", "420."].iter().map(|arg| instance(&[arg], 2, 1)).collect();
+        compare.extend((0..11).map(|_| instance(&["1"], 1, 1)));
+        compare.extend((0..6).map(|_| instance(&[], 2, 1)));
+        assert_eq!(fit(&newest(compare), |i| i.inlets, 2), Count::Fixed { count: 2 });
         let route = [instance(&["a"], 2, 2), instance(&["a", "b"], 3, 3), instance(&["a", "b", "c"], 4, 4)];
         assert_eq!(fit(&route, |i| i.outlets, 2), Count::Arguments { plus: 1, bare: 2 }, "the page's count when never seen bare");
         let plus = [instance(&[], 2, 1), instance(&["1"], 2, 1), instance(&["0.5"], 2, 1)];
@@ -666,21 +711,33 @@ mod tests {
             </methodlist>
             <attributelist>
               <attribute name="carryflag" get="1" set="1" type="int" size="1"><digest>Carry flag</digest>
-                <attributelist><attribute name="label" get="1" set="1" type="symbol" size="1" value="Carry" /></attributelist>
+                <attributelist><attribute name="label" get="1" set="1" type="symbol" size="1" value="Carry" />
+                  <attribute name="category" get="1" set="1" type="symbol" size="1" value="Color" /></attributelist>
               </attribute>
-              <attribute name="compatmode" get="1" set="1" type="int" size="1" />
+              <attribute name="compatmode" get="1" set="1" type="int" size="1">
+                <attributelist><attribute name="category" get="1" set="1" type="symbol" size="1" value="Behavior" /></attributelist>
+              </attribute>
+              <attribute name="textcolor" get="1" set="1" type="float" size="4">
+                <attributelist><attribute name="category" get="1" set="1" type="symbol" size="1" value="Color" /></attributelist>
+              </attribute>
             </attributelist></c74object>"#;
         let (_, object) = read_page(page).unwrap();
         assert_eq!(
             object.quiet.iter().map(String::as_str).collect::<Vec<_>>(),
-            ["compatmode", "max", "poll", "set"],
+            ["compatmode", "max", "poll", "set", "textcolor"],
             "attributes (not an attribute's own), and methods that send nothing; a number always counts"
         );
+        assert_eq!(object.looks.iter().map(String::as_str).collect::<Vec<_>>(), ["textcolor"], "filed under Color, and not a method");
         let mut reference = Reference::default();
         reference.objects.insert("counter".into(), object);
-        reference.objects.insert(BOX_PAGE.into(), Object { quiet: BTreeSet::from(["hidden".to_string()]), ..unpaged("max", 0, 0) });
-        assert!(reference.quiet("counter", "set") && reference.quiet("counter", "hidden") && !reference.quiet("counter", "jam"));
-        assert!(reference.quiet("prepend", "hidden") && !reference.quiet("prepend", "set"), "every box's attributes, nothing else");
+        reference.objects.insert(
+            BOX_PAGE.into(),
+            Object { quiet: BTreeSet::from(["hidden".to_string()]), looks: BTreeSet::from(["hidden".to_string()]), ..unpaged("max", 0, 0) },
+        );
+        assert!(reference.quiet("counter", "set", false) && !reference.quiet("counter", "jam", false));
+        assert!(reference.looks_only("counter", "textcolor", false) && !reference.looks_only("counter", "set", false));
+        assert!(reference.looks_only("live.dial", "hidden", true), "a box with a face takes every box's attributes");
+        assert!(!reference.quiet("prepend", "hidden", false), "an object in a box doesn't");
     }
 
     #[test]
@@ -706,10 +763,8 @@ mod tests {
                 inlets: Count::Arguments { plus: 1, bare: 2 },
                 outlets: Count::Arguments { plus: 1, bare: 2 },
                 outlet_types: vec![String::new()],
-                inlet_digests: vec![],
-                outlet_digests: vec![],
                 seen: 3,
-                quiet: BTreeSet::new(),
+                ..Object::default()
             },
         );
         assert_eq!(reference.ports("route a b c").map(|ports| (ports.inlets, ports.outlets, ports.outlet_types.len())), Some((4, 4, 4)));

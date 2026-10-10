@@ -1,21 +1,21 @@
 {
   "about": "Kumi's standard for Max for Live patchers. Each rule has a level (error: Kumi doesn't make a device that breaks it; warn: Kumi says so; advice: Kumi mentions it when asked; off) and what measuring well-made devices found: how many times it was broken (found) in how many of the things it looks at (of). Measurements are counts only, made by examples/max_patch_survey.rs on the machine the devices are on.",
   "rules": {
-    "patch.unknown-object": { "level": "error", "looks_at": "objects", "measured": { "found": 0, "of": 260 } },
-    "patch.no-such-port": { "level": "error", "looks_at": "cords", "measured": { "found": 0, "of": 627 } },
-    "layout.cord-over-box": { "level": "error", "looks_at": "cords", "measured": { "found": 1, "of": 627 } },
-    "layout.boxes-overlap": { "level": "error", "looks_at": "boxes", "measured": { "found": 1, "of": 551 } },
-    "layout.cord-upward": { "level": "warn", "looks_at": "cords", "measured": { "found": 3, "of": 627 } },
-    "order.fan-out-rejoins": { "level": "error", "looks_at": "fan-outs", "measured": { "found": 0, "of": 63 } },
-    "names.shared-by-copies": { "level": "warn", "looks_at": "named objects", "measured": { "found": 0, "of": 11 } },
-    "params.default-name": { "level": "warn", "looks_at": "parameters", "measured": { "found": 0, "of": 43 } },
-    "params.same-name": { "level": "error", "looks_at": "parameters", "measured": { "found": 0, "of": 43 } },
-    "params.bank-repeat": { "level": "error", "looks_at": "bank slots", "measured": { "found": 2, "of": 32 } },
-    "params.bank-unknown": { "level": "error", "looks_at": "bank slots", "measured": { "found": 0, "of": 32 } },
-    "params.bank-missing": { "level": "warn", "looks_at": "parameters", "measured": { "found": 12, "of": 43 } },
-    "params.no-info": { "level": "advice", "looks_at": "parameters", "measured": { "found": 41, "of": 43 } },
+    "patch.unknown-object": { "level": "error", "looks_at": "objects", "measured": { "found": 0, "of": 4189 } },
+    "patch.no-such-port": { "level": "error", "looks_at": "cords", "measured": { "found": 0, "of": 6110 } },
+    "layout.cord-over-box": { "level": "error", "looks_at": "cords", "measured": { "found": 143, "of": 6110 } },
+    "layout.boxes-overlap": { "level": "error", "looks_at": "boxes", "measured": { "found": 2, "of": 5675 } },
+    "layout.cord-upward": { "level": "warn", "looks_at": "cords", "measured": { "found": 12, "of": 6110 } },
+    "order.fan-out-rejoins": { "level": "error", "looks_at": "fan-outs", "measured": { "found": 2, "of": 466 } },
+    "names.shared-by-copies": { "level": "warn", "looks_at": "named objects", "measured": { "found": 0, "of": 1401 } },
+    "params.default-name": { "level": "warn", "looks_at": "parameters", "measured": { "found": 0, "of": 143 } },
+    "params.same-name": { "level": "error", "looks_at": "parameters", "measured": { "found": 0, "of": 143 } },
+    "params.bank-repeat": { "level": "error", "looks_at": "bank slots", "measured": { "found": 2, "of": 212 } },
+    "params.bank-unknown": { "level": "error", "looks_at": "bank slots", "measured": { "found": 0, "of": 212 } },
+    "params.bank-missing": { "level": "warn", "looks_at": "parameters", "measured": { "found": 14, "of": 143 } },
+    "params.no-info": { "level": "advice", "looks_at": "parameters", "measured": { "found": 141, "of": 143 } },
     "gen.param-twice": { "level": "error", "looks_at": "Param declarations", "measured": { "found": 2, "of": 72 } },
-    "face.hidden-by-panel": { "level": "warn", "looks_at": "panels", "measured": { "found": 0, "of": 2 } }
+    "face.hidden-by-panel": { "level": "warn", "looks_at": "panels", "measured": { "found": 0, "of": 9 } }
   },
-  "measured": { "devices": 2, "patchers": 16, "boxes": 554, "cords": 627, "layout": { "bent_cords": 231, "crossings": 770, "boxes_in_columns": 466, "down_gap_quartiles": [15.0, 28.0, 82.5], "side_gap_quartiles": [24.0, 72.0, 164.0] } }
+  "measured": { "devices": 6, "patchers": 201, "boxes": 5700, "cords": 6110, "layout": { "bent_cords": 1646, "crossings": 2756, "boxes_in_columns": 4767, "down_gap_quartiles": [11.5, 24.0, 61.0], "side_gap_quartiles": [27.3, 71.5, 177.0] } }
 }

@@ -39,6 +39,8 @@ struct Survey {
     ports: BTreeMap<&'static str, usize>,
     /// The classes it predicted wrongly, and how often.
     port_misses: BTreeMap<String, usize>,
+    /// The versions of Max that saved the files holding them: an older Max gave some objects fewer outlets.
+    port_misses_saved_by: BTreeMap<String, usize>,
 }
 
 fn main() {
@@ -126,11 +128,17 @@ impl Survey {
             *self.looked_at.entry(rule).or_default() += count;
         }
         let mut seen = std::collections::HashSet::new();
-        self.walk(&patcher, &mut seen);
+        self.walk(&patcher, &mut seen, "");
     }
 
     /// A patcher's shape, objects and colours, then those of each patcher inside it (a file used twice, once).
-    fn walk(&mut self, patcher: &Patcher, seen: &mut std::collections::HashSet<String>) {
+    /// `saved_by` is the version of Max that saved the file it's in, as major.minor.
+    fn walk(&mut self, patcher: &Patcher, seen: &mut std::collections::HashSet<String>, saved_by: &str) {
+        let version = patcher.fields.get("appversion").map(|version| {
+            let part = |key: &str| version.get(key).and_then(Value::as_u64).unwrap_or(0);
+            format!("{}.{}", part("major"), part("minor"))
+        });
+        let saved_by = version.as_deref().unwrap_or(saved_by);
         self.patchers += 1;
         let measured = shape(patcher);
         self.shape.boxes += measured.boxes;
@@ -169,6 +177,7 @@ impl Survey {
                         Some(ports) if (ports.inlets, ports.outlets) == saved => "predicted",
                         Some(_) => {
                             *self.port_misses.entry(catalog().canonical(item.class()).to_string()).or_default() += 1;
+                            *self.port_misses_saved_by.entry(saved_by.to_string()).or_default() += 1;
                             "mispredicted"
                         }
                         None => "unknown",
@@ -181,7 +190,7 @@ impl Survey {
                 (None, Some((name, inner))) if seen.insert(name.clone()) => inner,
                 _ => continue,
             };
-            self.walk(inner, seen);
+            self.walk(inner, seen, saved_by);
         }
     }
 
@@ -211,7 +220,11 @@ impl Survey {
                 "side_gap_quartiles": gaps(&self.shape.side_gaps),
             },
             "faces": self.faces,
-            "reference_ports": { "outcomes": self.ports, "mispredicted_classes": self.port_misses },
+            "reference_ports": {
+                "outcomes": self.ports,
+                "mispredicted_classes": self.port_misses,
+                "mispredicted_saved_by": self.port_misses_saved_by,
+            },
             "colours": self.colours,
             "objects": self.objects,
         })
