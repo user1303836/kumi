@@ -16,7 +16,9 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt;
+use std::sync::LazyLock;
 
+use regex::Regex;
 use serde_json::Value;
 
 use super::catalog::{catalog, Catalog};
@@ -65,6 +67,8 @@ pub const RULES: [&str; 15] = [
 const MAX_HOPS: usize = 24;
 /// How far two boxes can run into each other and only touch, in pixels: a box's own margin around its text.
 const TOUCH: f64 = 3.0;
+/// A name written like a reversed domain: com.example.sync, org.example.clock.
+static REVERSED_DOMAIN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]{2,6}\.[A-Za-z0-9-]+\.[A-Za-z0-9_.-]+$").unwrap());
 /// Boxes Max draws behind others on purpose: a cord or a box over one is fine.
 const BACKDROPS: [&str; 3] = ["panel", "fpic", "live.line"];
 /// Max's Live objects that are parameters unless turned off.
@@ -452,8 +456,9 @@ impl Checker<'_> {
                 continue;
             }
             self.looked(SHARED_BY_COPIES, 1);
-            // ---name is each copy's own; #0 and #1… are an abstraction's own or its arguments; $1 is filled in later.
-            if name.starts_with("---") || name.contains('#') || name.starts_with('$') {
+            // ---name is each copy's own; #0 and #1… are an abstraction's own or its arguments; $1 is filled in later; a
+            // name written like a reversed domain (com.example.sync) is shared on purpose, by every device that knows it.
+            if name.starts_with("---") || name.contains('#') || name.starts_with('$') || REVERSED_DOMAIN.is_match(name) {
                 continue;
             }
             self.found(
@@ -1034,6 +1039,7 @@ mod tests {
             newobj("obj-1", "s level", [40., 20., 60., 22.], 1, 0),
             newobj("obj-2", "r ---level", [140., 20., 70., 22.], 0, 1),
             newobj("obj-3", "buffer~ #0-loops", [240., 20., 110., 22.], 1, 2),
+            newobj("obj-8", "s com.example.sync", [380., 20., 110., 22.], 1, 0),
             { "box": { "id": "obj-4", "maxclass": "live.dial", "patching_rect": [40., 60., 44., 48.], "parameter_enable": 1,
                 "saved_attribute_attributes": { "valueof": { "parameter_longname": "live.dial[1]" } } } },
             { "box": { "id": "obj-5", "maxclass": "live.dial", "patching_rect": [100., 60., 44., 48.], "annotation": "How hard it drives.",
@@ -1061,7 +1067,7 @@ mod tests {
         );
         assert_eq!(report.findings[0].level, Level::Warn);
         assert_eq!(report.findings[3].level, Level::Advice);
-        assert_eq!(report.looked_at[SHARED_BY_COPIES], 3);
+        assert_eq!(report.looked_at[SHARED_BY_COPIES], 4, "a reversed domain is shared on purpose");
         assert_eq!(report.looked_at[PARAM_TWICE], 3);
     }
 
