@@ -2,8 +2,8 @@
 //! builds the device around it.
 //!
 //! - An audio effect: plugin~ → gen~ (the model's code) → Kumi's output stage → plugout~.
-//! - An instrument: notein → poly (voice allocation) → one gen~ per voice (the model's voice) →
-//!   Kumi's output stage → plugout~.
+//! - An instrument: notein → poly (voice allocation) → one [p voice n] per voice, each holding a gen~ with the
+//!   model's voice → Kumi's output stage → plugout~.
 //!
 //! Kumi's output stage is fixed and always there: the model's own output has NaN, denormals and DC
 //! taken out and is held under +6 dBFS (a runaway feedback patch is caught); on an effect a Mix knob
@@ -298,7 +298,9 @@ fn gen_box(id: &str, code: &str, rect: [f64; 4]) -> PatchBox {
         inner.push(PatchBox::new(json!({ "id": format!("obj-out-{index}"), "maxclass": "newobj", "text": format!("out {index}"), "numinlets": 1, "numoutlets": 0, "patching_rect": [40.0 + (index - 1) as f64 * 90.0, 510.0, 37.0, 22.0] })));
         lines.push(Line::new("obj-code", index as u32 - 1, &format!("obj-out-{index}"), 0));
     }
-    // gen~ has an inlet for each in, and always at least one, which also takes Param messages.
+    // gen~ has an inlet for each in, and always at least one, which also takes Param messages. It's as wide as its
+    // inlets need and no wider: Kumi's layout places it.
+    let rect = [rect[0], rect[1], (18 * ins.max(2)).max(46) as f64, rect[3]];
     PatchBox::new(
         json!({ "id": id, "maxclass": "newobj", "text": "gen~", "numinlets": ins.max(1), "numoutlets": 2, "outlettype": ["signal", "signal"], "patching_rect": rect,
         "patcher": { "fileversion": 1, "appversion": { "major": 9, "minor": 1, "revision": 5, "architecture": "x64", "modernui": 1 }, "classnamespace": "dsp.gen",
@@ -320,6 +322,11 @@ impl Face {
     }
 
     fn add(&mut self, control: &Control, param: &str, targets: &[&str]) {
+        self.add_to(control, param, targets, 0);
+    }
+
+    /// A control whose "<param> <value>" goes into inlet `inlet` of each target.
+    fn add_to(&mut self, control: &Control, param: &str, targets: &[&str], inlet: u32) {
         let index = self.count;
         self.count += 1;
         let id = format!("obj-control-{}", index + 1);
@@ -334,7 +341,7 @@ impl Face {
         self.boxes.push(PatchBox::new(json!({ "id": prepend, "maxclass": "newobj", "text": format!("prepend {param}"), "numinlets": 1, "numoutlets": 1, "outlettype": [""], "patching_rect": [760.0 + index as f64 * 90.0, 100.0, 80.0, 22.0] })));
         self.lines.push(Line::new(&id, 0, &prepend, 0));
         for target in targets {
-            self.lines.push(Line::new(&prepend, 0, target, 0));
+            self.lines.push(Line::new(&prepend, 0, target, inlet));
         }
     }
 
@@ -483,19 +490,73 @@ pub fn audio_effect_patcher(spec: &GenSpec) -> Value {
     )
 }
 
-/// An instrument's patcher: `voices` copies of the model's voice, the notes shared out by poly.
+/// A newobj box (a Max object), with its in- and outlets and what each outlet sends ("" for anything, by default).
+fn obj(boxes: &mut Vec<PatchBox>, id: &str, text: &str, ins: usize, outs: usize, rect: [f64; 4], outlettype: Option<&[&str]>) {
+    let outlettype: Vec<&str> = outlettype.map(|types| types.to_vec()).unwrap_or_else(|| vec![""; outs]);
+    boxes.push(PatchBox::new(json!({ "id": id, "maxclass": "newobj", "text": text, "numinlets": ins, "numoutlets": outs, "outlettype": outlettype, "patching_rect": rect })));
+}
+
+fn wire(lines: &mut Vec<Line>, source: &str, outlet: u32, destination: &str, inlet: u32) {
+    lines.push(Line::new(source, outlet, destination, inlet));
+}
+
+/// A subpatcher's inlet or outlet object: Max numbers them from 1, left to right.
+fn port(boxes: &mut Vec<PatchBox>, id: &str, maxclass: &str, index: usize, comment: &str, x: f64, y: f64) {
+    let (ins, outs, outlettype) = if maxclass == "inlet" { (0, 1, vec![""]) } else { (1, 0, vec![]) };
+    boxes.push(PatchBox::new(json!({ "id": id, "maxclass": maxclass, "index": index, "comment": comment, "numinlets": ins, "numoutlets": outs, "outlettype": outlettype, "patching_rect": [x, y, 30.0, 30.0] })));
+}
+
+/// One voice, [p voice n]: its note in on the left inlet (pitch and velocity, from route), the device's Params, bend
+/// and mod wheel on the right, its sound out of the two outlets. Inside are the voice's gen~ and what turns a note into
+/// its Params.
+fn voice_box(n: usize, code: &str) -> PatchBox {
+    let mut boxes: Vec<PatchBox> = Vec::new();
+    let mut lines: Vec<Line> = Vec::new();
+    port(&mut boxes, "obj-notes", "inlet", 1, "note: pitch and velocity", 40.0, 20.0);
+    port(&mut boxes, "obj-params", "inlet", 2, "Params, bend and mod wheel", 400.0, 20.0);
+    // The note and velocity first, then the strike: trigger sends right to left.
+    obj(&mut boxes, "obj-order", "t l l", 1, 2, [40.0, 70.0, 40.0, 22.0], None);
+    obj(&mut boxes, "obj-unpack", "unpack 0 0", 1, 2, [40.0, 100.0, 70.0, 22.0], Some(&["int", "int"]));
+    obj(&mut boxes, "obj-note", "prepend note", 1, 1, [40.0, 130.0, 90.0, 22.0], None);
+    obj(&mut boxes, "obj-velocity", "prepend velocity", 1, 1, [40.0, 160.0, 100.0, 22.0], None);
+    // Every note played (a velocity above 0) counts one more strike, from 1: a bare counter's first count is 0, which
+    // left strike at 0 and every voice's first note unplayed.
+    obj(&mut boxes, "obj-heard", "unpack 0 0", 1, 2, [160.0, 100.0, 70.0, 22.0], Some(&["int", "int"]));
+    obj(&mut boxes, "obj-played", "sel 0", 2, 2, [160.0, 130.0, 40.0, 22.0], Some(&["bang", ""]));
+    obj(&mut boxes, "obj-bang", "t b", 1, 1, [160.0, 160.0, 30.0, 22.0], Some(&["bang"]));
+    obj(&mut boxes, "obj-count", "counter 1 1000000", 5, 4, [160.0, 190.0, 110.0, 22.0], Some(&["int", "", "", "int"]));
+    obj(&mut boxes, "obj-strike", "prepend strike", 1, 1, [160.0, 220.0, 90.0, 22.0], None);
+    boxes.push(gen_box("obj-voice", code, [40.0, 260.0, 100.0, 22.0]));
+    port(&mut boxes, "obj-left", "outlet", 1, "left", 40.0, 300.0);
+    port(&mut boxes, "obj-right", "outlet", 2, "right", 200.0, 300.0);
+    wire(&mut lines, "obj-notes", 0, "obj-order", 0);
+    wire(&mut lines, "obj-order", 1, "obj-unpack", 0);
+    wire(&mut lines, "obj-unpack", 0, "obj-note", 0);
+    wire(&mut lines, "obj-unpack", 1, "obj-velocity", 0);
+    wire(&mut lines, "obj-order", 0, "obj-heard", 0);
+    wire(&mut lines, "obj-heard", 1, "obj-played", 0);
+    wire(&mut lines, "obj-played", 1, "obj-bang", 0);
+    wire(&mut lines, "obj-bang", 0, "obj-count", 0);
+    wire(&mut lines, "obj-count", 0, "obj-strike", 0);
+    for param in ["obj-note", "obj-velocity", "obj-strike", "obj-params"] {
+        wire(&mut lines, param, 0, "obj-voice", 0);
+    }
+    wire(&mut lines, "obj-voice", 0, "obj-left", 0);
+    wire(&mut lines, "obj-voice", 1, "obj-right", 0);
+    PatchBox::new(
+        json!({ "id": format!("obj-voice-{n}"), "maxclass": "newobj", "text": format!("p voice {n}"), "numinlets": 2, "numoutlets": 2,
+        "outlettype": ["signal", "signal"], "patching_rect": [40.0 + (n - 1) as f64 * 90.0, 420.0, 70.0, 22.0],
+        "patcher": { "fileversion": 1, "appversion": { "major": 9, "minor": 1, "revision": 5, "architecture": "x64", "modernui": 1 }, "classnamespace": "box",
+            "rect": [100.0, 100.0, 640.0, 480.0], "gridsize": [8.0, 8.0], "boxes": boxes, "lines": lines } }),
+    )
+}
+
+/// An instrument's patcher: `voices` copies of the model's voice, each a [p voice n], the notes shared out by poly.
 pub fn instrument_patcher(spec: &GenSpec) -> Value {
     let voices = round(spec.voices.unwrap_or(8.0)).clamp(1.0, MAX_VOICES as f64) as usize;
     let mut boxes: Vec<PatchBox> = Vec::new();
     let mut lines: Vec<Line> = Vec::new();
     let mut face = Face::new(spec.controls.len() + 1);
-    fn obj(boxes: &mut Vec<PatchBox>, id: &str, text: &str, ins: usize, outs: usize, rect: [f64; 4], outlettype: Option<&[&str]>) {
-        let outlettype: Vec<&str> = outlettype.map(|types| types.to_vec()).unwrap_or_else(|| vec![""; outs]);
-        boxes.push(PatchBox::new(json!({ "id": id, "maxclass": "newobj", "text": text, "numinlets": ins, "numoutlets": outs, "outlettype": outlettype, "patching_rect": rect })));
-    }
-    fn wire(lines: &mut Vec<Line>, source: &str, outlet: u32, destination: &str, inlet: u32) {
-        lines.push(Line::new(source, outlet, destination, inlet));
-    }
     // The track's notes; poly shares them out to voices, taking the oldest when all are busy, and sends voice, pitch, velocity.
     obj(&mut boxes, "obj-notein", "notein", 1, 3, [40.0, 20.0, 60.0, 22.0], Some(&["int", "int", "int"]));
     obj(&mut boxes, "obj-poly", &format!("poly {voices} 1"), 2, 3, [40.0, 60.0, 80.0, 22.0], Some(&["int", "int", "int"]));
@@ -523,57 +584,24 @@ pub fn instrument_patcher(spec: &GenSpec) -> Value {
     wire(&mut lines, "obj-modscale", 0, "obj-mod", 0);
     let code = voice_code(spec);
     let mut voice_ids: Vec<String> = Vec::new();
-    boxes.push(gen_box("obj-output", OUTPUT_STAGE_INSTRUMENT, [40.0, 500.0, 300.0, 22.0]));
-    obj(&mut boxes, "obj-plugout", "plugout~ 1 2", 2, 0, [40.0, 560.0, 80.0, 22.0], Some(&[]));
-    for voice in 0..voices {
-        let n = voice + 1;
+    for n in 1..=voices {
         let id = format!("obj-voice-{n}");
-        let x = 40.0 + voice as f64 * 120.0;
-        voice_ids.push(id.clone());
-        // The voice's note and velocity first, then its strike: trigger sends right to left.
-        obj(&mut boxes, &format!("obj-order-{n}"), "t l l", 1, 2, [x, 180.0, 40.0, 22.0], None);
-        obj(&mut boxes, &format!("obj-unpack-{n}"), "unpack 0 0", 1, 2, [x, 210.0, 70.0, 22.0], Some(&["int", "int"]));
-        obj(&mut boxes, &format!("obj-note-{n}"), "prepend note", 1, 1, [x, 240.0, 90.0, 22.0], None);
-        obj(&mut boxes, &format!("obj-velocity-{n}"), "prepend velocity", 1, 1, [x, 270.0, 100.0, 22.0], None);
-        // Every note played (a velocity above 0) counts one more strike, from 1: a bare counter's first count
-        // is 0, which left strike at 0 and every voice's first note unplayed.
-        obj(&mut boxes, &format!("obj-heard-{n}"), "unpack 0 0", 1, 2, [x + 60.0, 280.0, 70.0, 22.0], Some(&["int", "int"]));
-        obj(&mut boxes, &format!("obj-played-{n}"), "sel 0", 2, 2, [x + 60.0, 305.0, 40.0, 22.0], Some(&["bang", ""]));
-        obj(&mut boxes, &format!("obj-bang-{n}"), "t b", 1, 1, [x + 60.0, 330.0, 30.0, 22.0], Some(&["bang"]));
-        obj(
-            &mut boxes,
-            &format!("obj-count-{n}"),
-            "counter 1 1000000",
-            5,
-            4,
-            [x + 60.0, 355.0, 110.0, 22.0],
-            Some(&["int", "", "", "int"]),
-        );
-        obj(&mut boxes, &format!("obj-strike-{n}"), "prepend strike", 1, 1, [x + 60.0, 380.0, 90.0, 22.0], None);
-        boxes.push(gen_box(&id, &code, [x, 420.0, 100.0, 22.0]));
-        wire(&mut lines, "obj-route", voice as u32, &format!("obj-order-{n}"), 0);
-        wire(&mut lines, &format!("obj-order-{n}"), 1, &format!("obj-unpack-{n}"), 0);
-        wire(&mut lines, &format!("obj-unpack-{n}"), 0, &format!("obj-note-{n}"), 0);
-        wire(&mut lines, &format!("obj-unpack-{n}"), 1, &format!("obj-velocity-{n}"), 0);
-        wire(&mut lines, &format!("obj-order-{n}"), 0, &format!("obj-heard-{n}"), 0);
-        wire(&mut lines, &format!("obj-heard-{n}"), 1, &format!("obj-played-{n}"), 0);
-        wire(&mut lines, &format!("obj-played-{n}"), 1, &format!("obj-bang-{n}"), 0);
-        wire(&mut lines, &format!("obj-bang-{n}"), 0, &format!("obj-count-{n}"), 0);
-        wire(&mut lines, &format!("obj-count-{n}"), 0, &format!("obj-strike-{n}"), 0);
-        wire(&mut lines, &format!("obj-note-{n}"), 0, &id, 0);
-        wire(&mut lines, &format!("obj-velocity-{n}"), 0, &id, 0);
-        wire(&mut lines, &format!("obj-strike-{n}"), 0, &id, 0);
-        wire(&mut lines, "obj-bend", 0, &id, 0);
-        wire(&mut lines, "obj-mod", 0, &id, 0);
+        boxes.push(voice_box(n, &code));
+        wire(&mut lines, "obj-route", n as u32 - 1, &id, 0);
+        wire(&mut lines, "obj-bend", 0, &id, 1);
+        wire(&mut lines, "obj-mod", 0, &id, 1);
         // Signals into one inlet add up: every voice into the output stage.
         wire(&mut lines, &id, 0, "obj-output", 0);
         wire(&mut lines, &id, 1, "obj-output", 1);
+        voice_ids.push(id);
     }
+    boxes.push(gen_box("obj-output", OUTPUT_STAGE_INSTRUMENT, [40.0, 500.0, 300.0, 22.0]));
+    obj(&mut boxes, "obj-plugout", "plugout~ 1 2", 2, 0, [40.0, 560.0, 80.0, 22.0], Some(&[]));
     wire(&mut lines, "obj-output", 0, "obj-plugout", 0);
     wire(&mut lines, "obj-output", 1, "obj-plugout", 1);
     let targets: Vec<&str> = voice_ids.iter().map(String::as_str).collect();
     for control in &spec.controls {
-        face.add(control, &param_name(control.name()), &targets);
+        face.add_to(control, &param_name(control.name()), &targets, 1);
     }
     face.add(&OUTPUT, "kumi_output", &["obj-output"]);
     let width = face.width();

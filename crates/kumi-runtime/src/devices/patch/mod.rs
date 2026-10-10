@@ -11,6 +11,7 @@ pub mod catalog;
 pub mod check;
 pub mod frozen;
 pub mod geometry;
+pub mod layout;
 pub mod measure;
 pub mod standard;
 

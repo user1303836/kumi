@@ -2,6 +2,9 @@
 //! holding the Max patcher as JSON (NUL-terminated), as Live's own device templates are laid out.
 
 use kumi_common::js::json::stringify_with_indent;
+
+use super::patch::layout::arrange;
+use super::patch::{NoFiles, Patcher};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -176,7 +179,8 @@ pub struct DevicePatcherOptions {
 }
 
 /// A device's top-level patcher, as Live's templates have it: opened in presentation (the device's
-/// face), `width` pixels wide, with `description` as its info text.
+/// face), `width` pixels wide, with `description` as its info text. Its boxes are laid out by Kumi's layout, so the
+/// patcher keeps Kumi's standard for Max patchers (`max-standard/`).
 pub fn device_patcher(kind: DeviceType, options: DevicePatcherOptions) -> Value {
     let amxdtype = u32::from_be_bytes(kind.code().as_bytes().try_into().expect("a four-letter code"));
     let project = json!({
@@ -184,7 +188,7 @@ pub fn device_patcher(kind: DeviceType, options: DevicePatcherOptions) -> Value 
         "showdependencies": 1, "autolocalize": 0, "contents": { "patchers": {} }, "layout": {}, "searchpath": {}, "detailsvisible": 0, "amxdtype": amxdtype, "readonly": 0, "devpathtype": 0, "devpath": ".",
         "sortmode": 0, "viewmode": 0,
     });
-    json!({
+    let document = json!({
         "patcher": {
             "fileversion": 1,
             "appversion": { "major": 9, "minor": 1, "revision": 5, "architecture": "x64", "modernui": 1 },
@@ -219,5 +223,8 @@ pub fn device_patcher(kind: DeviceType, options: DevicePatcherOptions) -> Value 
             "project": project,
             "autosave": 0,
         },
-    })
+    });
+    let mut patcher = Patcher::read(&document, &NoFiles);
+    arrange(&mut patcher);
+    patcher.to_document()
 }

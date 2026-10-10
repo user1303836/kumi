@@ -492,28 +492,44 @@ fn an_instrument_notes_shared_out_by_poly_to_one_gen_per_voice_bend_exactly_0_at
     assert_eq!(inner(&patcher, "obj-bendscale")["text"], "/ 32.");
     let voices = boxes_of(&patcher).into_iter().filter(|item| item["id"].as_str().unwrap().starts_with("obj-voice-")).count();
     assert_eq!(voices, 6);
-    assert_eq!(inner(&patcher, "obj-voice-1")["numinlets"], 1, "no audio input, one inlet for its Params");
+    // Each voice is a [p voice n]: its note in on the left, the Params, bend and mod wheel on the right, its sound out.
+    assert_eq!(inner(&patcher, "obj-voice-2")["text"], "p voice 2");
+    let voice = json!({ "patcher": inner(&patcher, "obj-voice-1")["patcher"] });
+    assert_eq!(inner(&voice, "obj-voice")["text"], "gen~");
+    assert_eq!(inner(&voice, "obj-voice")["numinlets"], 1, "no audio input, one inlet for its Params");
+    assert_eq!((inner(&voice, "obj-notes")["maxclass"].as_str(), inner(&voice, "obj-params")["index"].as_u64()), (Some("inlet"), Some(2)));
     let lines = wires(&patcher);
     for voice in 1..=6 {
         for expected in [
-            format!("obj-route:{}>obj-order-{voice}:0", voice - 1),
-            format!("obj-order-{voice}:1>obj-unpack-{voice}:0"),
-            format!("obj-order-{voice}:0>obj-heard-{voice}:0"),
-            format!("obj-note-{voice}:0>obj-voice-{voice}:0"),
-            format!("obj-strike-{voice}:0>obj-voice-{voice}:0"),
+            format!("obj-route:{}>obj-voice-{voice}:0", voice - 1),
+            format!("obj-bend:0>obj-voice-{voice}:1"),
+            format!("obj-mod:0>obj-voice-{voice}:1"),
+            format!("obj-prepend-1:0>obj-voice-{voice}:1"),
             format!("obj-voice-{voice}:0>obj-output:0"),
             format!("obj-voice-{voice}:1>obj-output:1"),
-            format!("obj-prepend-1:0>obj-voice-{voice}:0"),
         ] {
             assert!(lines.contains(&expected), "{expected}");
         }
     }
+    let inside = wires(&voice);
+    for expected in [
+        "obj-notes:0>obj-order:0",
+        "obj-order:1>obj-unpack:0",
+        "obj-order:0>obj-heard:0",
+        "obj-note:0>obj-voice:0",
+        "obj-strike:0>obj-voice:0",
+        "obj-params:0>obj-voice:0",
+        "obj-voice:0>obj-left:0",
+        "obj-voice:1>obj-right:0",
+    ] {
+        assert!(inside.contains(&expected.to_string()), "{expected}");
+    }
     assert!(
-        lines.contains(&"obj-heard-1:1>obj-played-1:0".to_string()) && lines.contains(&"obj-played-1:1>obj-bang-1:0".to_string()),
+        inside.contains(&"obj-heard:1>obj-played:0".to_string()) && inside.contains(&"obj-played:1>obj-bang:0".to_string()),
         "a strike counts only notes played (velocity above 0)"
     );
     // On real Live, a bare counter (first count 0) left strike at 0, so no voice played its first note.
-    assert_eq!(inner(&patcher, "obj-count-1")["text"], "counter 1 1000000", "a voice's first note changes strike too");
+    assert_eq!(inner(&voice, "obj-count")["text"], "counter 1 1000000", "a voice's first note changes strike too");
     assert!(matches(&code_of(&patcher, "obj-output"), "Param kumi_output"));
     assert!(!matches(&code_of(&patcher, "obj-output"), "kumi_mix"), "an instrument has no dry signal to mix");
     assert_eq!(decode_amxd(&encode_amxd(DeviceType::Instrument, &patcher)).map(|decoded| decoded.kind), Some(DeviceType::Instrument));
@@ -721,4 +737,24 @@ async fn make_device_makes_audio_effect_and_instrument_with_kumis_knobs() {
     assert_eq!(instrument["type"], "instrument");
     assert_eq!(instrument["voices"], 6);
     assert_eq!(decode_amxd(&std::fs::read(folder.path().join("Kumi/Pluck.amxd")).unwrap()).unwrap().kind, DeviceType::Instrument);
+}
+
+#[test]
+fn kumis_own_devices_keep_its_standard_for_max_patchers() {
+    use kumi_runtime::devices::patch::check::check;
+    use kumi_runtime::devices::patch::standard::Level;
+    use kumi_runtime::devices::patch::{NoFiles, Patcher};
+    let midi = midi_device_patcher(&spec(
+        json!({ "controls": [{ "name": "Window", "type": "number", "min": 1, "max": 50, "default": 15, "unit": "ms" }, { "name": "Mode", "type": "choice", "options": ["Lowest", "Highest"], "default": "Lowest" }, { "name": "Bypass Drums", "type": "switch", "default": false }] }),
+    ));
+    let devices = [
+        ("MIDI effect", midi),
+        ("audio effect", audio_effect_patcher(&gen_spec(&grit()))),
+        ("instrument", instrument_patcher(&gen_spec(&pluck()))),
+    ];
+    for (kind, patcher) in devices {
+        let report = check(&Patcher::read(&patcher, &NoFiles));
+        let broken: Vec<String> = report.at_least(Level::Warn).map(ToString::to_string).collect();
+        assert!(broken.is_empty(), "the {kind} breaks {} rules:\n{}", broken.len(), broken.join("\n"));
+    }
 }
