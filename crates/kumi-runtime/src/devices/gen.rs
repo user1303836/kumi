@@ -50,6 +50,7 @@ static COMMENTS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"//[^\n]*|/\*[\s
 static FUNCTION_HEAD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(").unwrap());
 static OPEN_BRACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\{").unwrap());
 static INPUT_READ: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?-u:\b)in([1-9])(?-u:\b)").unwrap());
+static OUTPUT_WRITTEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?-u:\b)out([1-9][0-9]?)\s*=[^=]").unwrap());
 static OUT1: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?-u:\b)out1\s*=").unwrap());
 static OUT2: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?-u:\b)out2\s*=").unwrap());
 static OUT_MORE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?-u:\b)out[3-9](?-u:\b)").unwrap());
@@ -248,7 +249,7 @@ pub fn with_params(code: &str, lines: &[String], heading: &str) -> String {
     parts.join("\n")
 }
 
-const OUTPUT_STAGE_EFFECT: &str = concat!(
+pub(crate) const OUTPUT_STAGE_EFFECT: &str = concat!(
     "// Kumi's output stage (fixed): the effect's output made safe (NaN, denormals and DC out, held under +6 dBFS),\n",
     "// mixed with the dry signal, which passes untouched, then Output.\n",
     "Param kumi_mix(100, min=0, max=100);\n",
@@ -259,7 +260,7 @@ const OUTPUT_STAGE_EFFECT: &str = concat!(
     "out2 = mix(in4, clamp(dcblock(fixnan(fixdenorm(in2))), -2, 2), wet) * gain;"
 );
 
-const OUTPUT_STAGE_INSTRUMENT: &str = concat!(
+pub(crate) const OUTPUT_STAGE_INSTRUMENT: &str = concat!(
     "// Kumi's output stage (fixed): the voices made safe (NaN, denormals and DC out, held under +6 dBFS), then Output.\n",
     "Param kumi_output(0, min=-36, max=12);\n",
     "gain = dbtoa(kumi_output);\n",
@@ -283,60 +284,64 @@ fn max_lines(code: &str) -> String {
     LINE_ENDINGS.replace_all(code, "\r\n").into_owned()
 }
 
-/// A gen~ box holding one codebox, wired to as many inlets as the code reads and two outlets.
-fn gen_box(id: &str, code: &str, rect: [f64; 4]) -> PatchBox {
-    let ins = inputs_read(code);
+/// The highest outN the code assigns (0 when none): how many outlets its codebox has.
+pub fn outputs_written(code: &str) -> usize {
+    let bare = without_comments(code);
+    OUTPUT_WRITTEN.captures_iter(&bare).map(|found| found[1].parse::<usize>().unwrap_or(0)).max().unwrap_or(0)
+}
+
+/// A gen patcher (a gen~'s, or a gen's) holding one codebox, with an in for each of its `ins` and an out for each of
+/// its `outs`.
+pub(crate) fn gen_patcher(code: &str, ins: usize, outs: usize) -> Value {
     let mut inner: Vec<PatchBox> = Vec::new();
     let mut lines: Vec<Line> = Vec::new();
-    inner.push(PatchBox::new(json!({ "id": "obj-code", "maxclass": "codebox", "code": max_lines(code), "fontface": 0, "fontname": "<Monospaced>", "fontsize": 12.0, "numinlets": ins, "numoutlets": 2,
-        "outlettype": ["", ""], "patching_rect": [40.0, 80.0, 600.0, 400.0] })));
+    inner.push(PatchBox::new(json!({ "id": "obj-code", "maxclass": "codebox", "code": max_lines(code), "fontface": 0, "fontname": "<Monospaced>", "fontsize": 12.0, "numinlets": ins, "numoutlets": outs,
+        "outlettype": vec![""; outs], "patching_rect": [40.0, 80.0, 600.0, 400.0] })));
     for index in 1..=ins {
         inner.push(PatchBox::new(json!({ "id": format!("obj-in-{index}"), "maxclass": "newobj", "text": format!("in {index}"), "numinlets": 0, "numoutlets": 1, "outlettype": [""], "patching_rect": [40.0 + (index - 1) as f64 * 90.0, 20.0, 30.0, 22.0] })));
         lines.push(Line::new(&format!("obj-in-{index}"), 0, "obj-code", index as u32 - 1));
     }
-    for index in [1usize, 2] {
+    for index in 1..=outs {
         inner.push(PatchBox::new(json!({ "id": format!("obj-out-{index}"), "maxclass": "newobj", "text": format!("out {index}"), "numinlets": 1, "numoutlets": 0, "patching_rect": [40.0 + (index - 1) as f64 * 90.0, 510.0, 37.0, 22.0] })));
         lines.push(Line::new("obj-code", index as u32 - 1, &format!("obj-out-{index}"), 0));
     }
+    json!({ "fileversion": 1, "appversion": { "major": 9, "minor": 1, "revision": 5, "architecture": "x64", "modernui": 1 }, "classnamespace": "dsp.gen",
+        "rect": [100.0, 100.0, 720.0, 600.0], "gridsize": [15.0, 15.0], "boxes": inner, "lines": lines })
+}
+
+/// A gen~ box holding one codebox, wired to as many inlets as the code reads and two outlets.
+pub(crate) fn gen_box(id: &str, code: &str, rect: [f64; 4]) -> PatchBox {
+    let ins = inputs_read(code);
     // gen~ has an inlet for each in, and always at least one, which also takes Param messages. It's as wide as its
     // inlets need and no wider: Kumi's layout places it.
     let rect = [rect[0], rect[1], (18 * ins.max(2)).max(46) as f64, rect[3]];
     PatchBox::new(
         json!({ "id": id, "maxclass": "newobj", "text": "gen~", "numinlets": ins.max(1), "numoutlets": 2, "outlettype": ["signal", "signal"], "patching_rect": rect,
-        "patcher": { "fileversion": 1, "appversion": { "major": 9, "minor": 1, "revision": 5, "architecture": "x64", "modernui": 1 }, "classnamespace": "dsp.gen",
-            "rect": [100.0, 100.0, 720.0, 600.0], "gridsize": [15.0, 15.0], "boxes": inner, "lines": lines } }),
+        "patcher": gen_patcher(code, ins, 2) }),
     )
 }
 
-/// Builds the face's `total` controls: each sends "<param> <value>" to its targets.
-struct Face {
-    boxes: Vec<PatchBox>,
-    lines: Vec<Line>,
+/// Builds the face's `total` controls: each sends "<param> <value>" to its targets, or (in a patch) its value alone.
+pub(crate) struct Face {
+    pub(crate) boxes: Vec<PatchBox>,
+    pub(crate) lines: Vec<Line>,
     count: usize,
     layout: FaceLayout,
 }
 
 impl Face {
-    fn new(total: usize) -> Face {
+    pub(crate) fn new(total: usize) -> Face {
         Face { boxes: Vec::new(), lines: Vec::new(), count: 0, layout: face_layout(total) }
     }
 
-    fn add(&mut self, control: &Control, param: &str, targets: &[&str]) {
+    pub(crate) fn add(&mut self, control: &Control, param: &str, targets: &[&str]) {
         self.add_to(control, param, targets, 0);
     }
 
     /// A control whose "<param> <value>" goes into inlet `inlet` of each target.
     fn add_to(&mut self, control: &Control, param: &str, targets: &[&str], inlet: u32) {
         let index = self.count;
-        self.count += 1;
-        let id = format!("obj-control-{}", index + 1);
-        let (x, y) = self.layout.at(index);
-        let (item, valueof) = face_control(control, x, y);
-        // A menu's first outlet is the chosen option's index; a dial's and a toggle's is the value.
-        let mut item_box = json!({ "id": id, "varname": control.name(), "parameter_enable": 1, "presentation": 1, "patching_rect": [760.0 + index as f64 * 90.0, 30.0, 44.0, 48.0] });
-        extend(&mut item_box, item);
-        extend(&mut item_box, json!({ "saved_attribute_attributes": { "valueof": valueof } }));
-        self.boxes.push(PatchBox::new(item_box));
+        let id = self.add_alone(control);
         let prepend = format!("obj-prepend-{}", index + 1);
         self.boxes.push(PatchBox::new(json!({ "id": prepend, "maxclass": "newobj", "text": format!("prepend {param}"), "numinlets": 1, "numoutlets": 1, "outlettype": [""], "patching_rect": [760.0 + index as f64 * 90.0, 100.0, 80.0, 22.0] })));
         self.lines.push(Line::new(&id, 0, &prepend, 0));
@@ -345,7 +350,22 @@ impl Face {
         }
     }
 
-    fn width(&self) -> f64 {
+    /// A control in its place on the face, alone: its box's id. A menu's first outlet is the chosen option's index; a
+    /// dial's and a toggle's is the value.
+    pub(crate) fn add_alone(&mut self, control: &Control) -> String {
+        let index = self.count;
+        self.count += 1;
+        let id = format!("obj-control-{}", index + 1);
+        let (x, y) = self.layout.at(index);
+        let (item, valueof) = face_control(control, x, y);
+        let mut item_box = json!({ "id": id, "varname": control.name(), "parameter_enable": 1, "presentation": 1, "patching_rect": [760.0 + index as f64 * 90.0, 30.0, 44.0, 48.0] });
+        extend(&mut item_box, item);
+        extend(&mut item_box, json!({ "saved_attribute_attributes": { "valueof": valueof } }));
+        self.boxes.push(PatchBox::new(item_box));
+        id
+    }
+
+    pub(crate) fn width(&self) -> f64 {
         (16 + self.layout.columns * 52).max(140) as f64
     }
 }
