@@ -46,6 +46,10 @@
     "about": "Audio objects (named with ~) that answer a message with a message at once; every other ~ object ends a chain of messages.",
     "classes": ["buffer~", "info~", "peek~", "polybuffer~", "snapshot~"]
   },
+  "contents": {
+    "about": "Objects whose inlets and outlets come from what's inside them (a subpatcher, code, a file), not from their text.",
+    "classes": ["bpatcher", "gen", "gen~", "js", "jsui", "mc.gen~", "mc.poly~", "mxj", "node.script", "p", "patcher", "pfft~", "poly~", "rnbo~", "v8", "v8.codebox", "v8ui"]
+  },
   "named": {
     "about": "Objects whose first argument names something shared by every patcher in Max that uses the name. In Max for Live a name starting with --- is made unique to each copy of the device.",
     "classes": [

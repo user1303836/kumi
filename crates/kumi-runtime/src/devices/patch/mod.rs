@@ -13,6 +13,7 @@ pub mod frozen;
 pub mod geometry;
 pub mod layout;
 pub mod measure;
+pub mod reference;
 pub mod standard;
 
 use serde_json::{json, Map, Value};

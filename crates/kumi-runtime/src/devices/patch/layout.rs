@@ -769,7 +769,7 @@ mod tests {
     #[test]
     fn a_cord_that_closes_a_loop_goes_round_the_side_and_loose_boxes_sit_to_the_right() {
         let patcher = laid_out(json!({ "boxes": [
-            newobj("a", "t b i", 50., 1, 2), newobj("b", "+ 1", 40., 2, 1), newobj("store", "buffer~ ---grains", 110., 1, 2)
+            newobj("a", "t b i", 50., 1, 2), newobj("b", "+ 1", 40., 2, 1), newobj("store", "buffer~ ---loops", 110., 1, 2)
         ], "lines": [cord("a", 1, "b", 0), cord("b", 0, "a", 0)] }));
         let report = check(&patcher);
         assert!(report.findings.iter().all(|finding| finding.rule != CORD_OVER_BOX && finding.rule != CORD_UPWARD), "{report:#?}");

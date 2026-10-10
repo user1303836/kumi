@@ -2,6 +2,8 @@
 //! broke and the fix, and every one is found in one pass, so whoever made the patcher (the model, or Kumi's own
 //! builder) fixes them all at once. What a rule looks at is counted too, for the survey's measurements.
 //!
+//! - **patch**: every object is one Max knows (when Kumi has learned the installed Max), and every cord leaves and
+//!   enters a port its box has.
 //! - **layout**: no cord runs over a box, no two boxes overlap, cords run down the patcher except to close a loop.
 //! - **order**: when one outlet's cords meet again at a box, one at a cold inlet and one at its hot inlet, which
 //!   arrives first depends on where boxes sit; a trigger makes it explicit.
@@ -18,10 +20,13 @@ use serde_json::Value;
 
 use super::catalog::{catalog, Catalog};
 use super::geometry::{inlet_point, outlet_point, Rect};
+use super::reference::Reference;
 use super::standard::{standard, Level, Standard};
 use super::{MaxBox, Patcher};
 use crate::devices::face::hidden_by_panels;
 
+pub const UNKNOWN_OBJECT: &str = "patch.unknown-object";
+pub const NO_SUCH_PORT: &str = "patch.no-such-port";
 pub const CORD_OVER_BOX: &str = "layout.cord-over-box";
 pub const BOXES_OVERLAP: &str = "layout.boxes-overlap";
 pub const CORD_UPWARD: &str = "layout.cord-upward";
@@ -37,7 +42,9 @@ pub const PARAM_TWICE: &str = "gen.param-twice";
 pub const HIDDEN_BY_PANEL: &str = "face.hidden-by-panel";
 
 /// Every rule the checker knows.
-pub const RULES: [&str; 13] = [
+pub const RULES: [&str; 15] = [
+    UNKNOWN_OBJECT,
+    NO_SUCH_PORT,
     CORD_OVER_BOX,
     BOXES_OVERLAP,
     CORD_UPWARD,
@@ -105,14 +112,16 @@ impl Report {
     }
 }
 
-/// A device's patcher checked against Kumi's standard, the patchers inside it too.
+/// A device's patcher checked against Kumi's standard, the patchers inside it too. The rules that need to know Max's
+/// objects (which exist, how many ports each has for its arguments) are left out: see [`check_with`].
 pub fn check(patcher: &Patcher) -> Report {
-    check_with(patcher, standard())
+    check_with(patcher, standard(), None)
 }
 
-/// A device's patcher checked against `standard`.
-pub fn check_with(patcher: &Patcher, standard: &Standard) -> Report {
-    let mut checker = Checker { standard, catalog: catalog(), report: Report::default(), files_seen: HashSet::new() };
+/// A device's patcher checked against `standard`, and against what `reference` knows of Max's objects (the installed
+/// Max's, from [`super::reference::installed`]).
+pub fn check_with(patcher: &Patcher, standard: &Standard, reference: Option<&Reference>) -> Report {
+    let mut checker = Checker { standard, catalog: catalog(), reference, report: Report::default(), files_seen: HashSet::new() };
     checker.walk(patcher, "");
     checker.params(patcher);
     checker.face(patcher);
@@ -122,6 +131,7 @@ pub fn check_with(patcher: &Patcher, standard: &Standard) -> Report {
 struct Checker<'a> {
     standard: &'a Standard,
     catalog: &'a Catalog,
+    reference: Option<&'a Reference>,
     report: Report,
     /// Files already checked: a dial used three times is one patcher, checked once.
     files_seen: HashSet<String>,
@@ -146,10 +156,12 @@ impl Checker<'_> {
     }
 
     fn walk(&mut self, patcher: &Patcher, at: &str) {
+        self.ports(patcher, at);
         self.layout(patcher, at);
         if patcher.is_gen() {
             self.gen_code(patcher, at);
         } else {
+            self.objects(patcher, at);
             self.order(patcher, at);
             self.names(patcher, at);
         }
@@ -160,6 +172,74 @@ impl Checker<'_> {
                 _ => continue,
             };
             self.walk(inner, &inside(at, item));
+        }
+    }
+
+    /// How many inlets (or outlets) a box has: as saved with it, else as the reference counts them for its text.
+    fn port_count(&self, item: &MaxBox, inlets: bool) -> Option<usize> {
+        let saved = item.fields.get(if inlets { "numinlets" } else { "numoutlets" }).and_then(Value::as_u64);
+        saved.map(|count| count as usize).or_else(|| {
+            let ports = self.reference?.ports(item.text()).filter(|_| item.maxclass() == "newobj")?;
+            Some(if inlets { ports.inlets } else { ports.outlets })
+        })
+    }
+
+    fn ports(&mut self, patcher: &Patcher, at: &str) {
+        let by_id: HashMap<&str, &MaxBox> = patcher.boxes.iter().map(|item| (item.id(), item)).collect();
+        let label = labels(patcher);
+        self.looked(NO_SUCH_PORT, patcher.cords.len());
+        for cord in &patcher.cords {
+            let (Some(from), Some(to)) = (by_id.get(cord.from.as_str()), by_id.get(cord.to.as_str())) else {
+                let missing = if by_id.contains_key(cord.from.as_str()) { &cord.to } else { &cord.from };
+                self.found(
+                    NO_SUCH_PORT,
+                    at,
+                    format!("a cord joins {missing}, which isn't in the patcher: take the cord out, or add the box."),
+                );
+                continue;
+            };
+            if let Some(outlets) = self.port_count(from, false).filter(|outlets| cord.outlet >= *outlets) {
+                self.found(
+                    NO_SUCH_PORT,
+                    at,
+                    format!(
+                        "a cord leaves outlet {} of {}, which has {outlets} (counted from 0): use one of its outlets.",
+                        cord.outlet,
+                        label[from.id()]
+                    ),
+                );
+            }
+            if let Some(inlets) = self.port_count(to, true).filter(|inlets| cord.inlet >= *inlets) {
+                self.found(
+                    NO_SUCH_PORT,
+                    at,
+                    format!(
+                        "a cord enters inlet {} of {}, which has {inlets} (counted from 0): use one of its inlets.",
+                        cord.inlet,
+                        label[to.id()]
+                    ),
+                );
+            }
+        }
+    }
+
+    fn objects(&mut self, patcher: &Patcher, at: &str) {
+        let Some(reference) = self.reference else { return };
+        let label = labels(patcher);
+        for item in patcher.boxes.iter().filter(|item| item.maxclass() == "newobj" && !item.class().is_empty()) {
+            self.looked(UNKNOWN_OBJECT, 1);
+            // An abstraction the device holds is an object of its own.
+            if item.file.is_some() || reference.object(item.class()).is_some() {
+                continue;
+            }
+            self.found(
+                UNKNOWN_OBJECT,
+                at,
+                format!(
+                    "{} isn't an object this machine's Max knows: check its name (a typo, an object from a package that isn't installed, or an abstraction the device doesn't hold).",
+                    label[item.id()]
+                ),
+            );
         }
     }
 
@@ -766,7 +846,7 @@ mod tests {
         let device = read(json!({ "boxes": [
             newobj("obj-1", "s level", [40., 20., 60., 22.], 1, 0),
             newobj("obj-2", "r ---level", [140., 20., 70., 22.], 0, 1),
-            newobj("obj-3", "buffer~ #0-grains", [240., 20., 110., 22.], 1, 2),
+            newobj("obj-3", "buffer~ #0-loops", [240., 20., 110., 22.], 1, 2),
             { "box": { "id": "obj-4", "maxclass": "live.dial", "patching_rect": [40., 60., 44., 48.], "parameter_enable": 1,
                 "saved_attribute_attributes": { "valueof": { "parameter_longname": "live.dial[1]" } } } },
             { "box": { "id": "obj-5", "maxclass": "live.dial", "patching_rect": [100., 60., 44., 48.], "annotation": "How hard it drives.",
@@ -831,6 +911,50 @@ mod tests {
             check(&device).findings,
             Vec::<Finding>::new(),
             "the dial in each bpatcher is renamed; the top-level override is left over"
+        );
+    }
+
+    #[test]
+    fn an_object_max_doesnt_know_and_a_cord_to_a_port_a_box_hasnt_got_are_found() {
+        use crate::devices::patch::reference::{Count, Object, Reference};
+        let mut reference = Reference::default();
+        for (class, inlets, outlets) in [
+            ("metro", Count::Fixed { count: 2 }, Count::Fixed { count: 1 }),
+            ("route", Count::Arguments { plus: 1, bare: 2 }, Count::Arguments { plus: 1, bare: 2 }),
+        ] {
+            reference.objects.insert(
+                class.into(),
+                Object {
+                    module: "max".into(),
+                    digest: String::new(),
+                    inlets,
+                    outlets,
+                    outlet_types: vec![],
+                    inlet_digests: vec![],
+                    outlet_digests: vec![],
+                    seen: 1,
+                },
+            );
+        }
+        let patcher = read(json!({ "boxes": [
+            newobj("obj-1", "metro 100", [40., 20., 70., 22.], 2, 1),
+            { "box": { "id": "obj-2", "maxclass": "newobj", "text": "route a b", "patching_rect": [40., 80., 70., 22.] } },
+            newobj("obj-3", "metor 100", [160., 20., 70., 22.], 2, 1)
+        ], "lines": [cord("obj-1", 1, "obj-2", 0), cord("obj-1", 0, "obj-2", 3), cord("obj-1", 0, "obj-9", 0)] }));
+        let said: Vec<String> = check_with(&patcher, standard(), Some(&reference)).findings.iter().map(Finding::to_string).collect();
+        assert_eq!(
+            said,
+            [
+                "patch.no-such-port: a cord leaves outlet 1 of [metro 100], which has 1 (counted from 0): use one of its outlets.",
+                "patch.no-such-port: a cord enters inlet 3 of [route a b], which has 3 (counted from 0): use one of its inlets.",
+                "patch.no-such-port: a cord joins obj-9, which isn't in the patcher: take the cord out, or add the box.",
+                "patch.unknown-object: [metor 100] isn't an object this machine's Max knows: check its name (a typo, an object from a package that isn't installed, or an abstraction the device doesn't hold).",
+            ],
+            "route a b's ports come from the reference: it wasn't saved with any"
+        );
+        assert!(
+            check(&patcher).findings.iter().all(|finding| finding.rule != UNKNOWN_OBJECT),
+            "without a reference, no object is called unknown"
         );
     }
 

@@ -183,11 +183,11 @@ mod tests {
         let mut main = main.to_vec();
         main.push(0);
         let bytes =
-            frozen_device(&[("JSON", "Grain.amxd", 0x11, &main), ("JSON", "dial.maxpat", 0, dial), ("TEXT", "dial.js", 0, b"mgraphics")]);
+            frozen_device(&[("JSON", "Echo.amxd", 0x11, &main), ("JSON", "dial.maxpat", 0, dial), ("TEXT", "dial.js", 0, b"mgraphics")]);
         let device = read_device(&bytes).expect("a frozen device");
         assert_eq!(device.code, "aaaa");
         let frozen = device.frozen.as_ref().expect("its files");
-        assert_eq!(frozen.files.iter().map(|file| file.name.as_str()).collect::<Vec<_>>(), ["Grain.amxd", "dial.maxpat", "dial.js"]);
+        assert_eq!(frozen.files.iter().map(|file| file.name.as_str()).collect::<Vec<_>>(), ["Echo.amxd", "dial.maxpat", "dial.js"]);
         assert_eq!(frozen.bytes(frozen.file("dial.js").unwrap()), Some(&b"mgraphics"[..]));
         let patcher = super::super::Patcher::read(&device.patcher, frozen);
         assert_eq!(patcher.boxes[0].inner().map(|inner| inner.boxes[0].maxclass()), Some("jsui"));

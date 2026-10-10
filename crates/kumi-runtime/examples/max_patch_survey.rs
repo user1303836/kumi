@@ -7,14 +7,19 @@
 //!     <file or folder>...
 //!
 //! --findings prints each device's broken rules here, to read them; they never go into the report.
+//!
+//! With Max installed, the report also says how well Kumi's reference of Max's objects (learned from this machine's
+//! Max) predicts the inlets and outlets the devices' objects were saved with.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use kumi_runtime::devices::patch::catalog::catalog;
-use kumi_runtime::devices::patch::check::{check, RULES};
+use kumi_runtime::devices::patch::check::{check_with, RULES};
 use kumi_runtime::devices::patch::frozen::read_device;
 use kumi_runtime::devices::patch::measure::{quantile, shape, Shape};
+use kumi_runtime::devices::patch::reference;
+use kumi_runtime::devices::patch::standard::standard;
 use kumi_runtime::devices::patch::{Files, MaxBox, NoFiles, Patcher};
 use serde_json::{json, Map, Value};
 
@@ -30,6 +35,10 @@ struct Survey {
     objects: BTreeMap<String, usize>,
     colours: BTreeMap<String, BTreeMap<String, usize>>,
     faces: BTreeMap<&'static str, usize>,
+    /// Max objects whose saved inlets and outlets the reference predicted, didn't, or doesn't know.
+    ports: BTreeMap<&'static str, usize>,
+    /// The classes it predicted wrongly, and how often.
+    port_misses: BTreeMap<String, usize>,
 }
 
 fn main() {
@@ -103,7 +112,7 @@ impl Survey {
         if patcher.fields.get("openinpresentation").and_then(Value::as_f64) == Some(1.0) {
             *self.faces.entry("devices opening in presentation").or_default() += 1;
         }
-        let report = check(&patcher);
+        let report = check_with(&patcher, standard(), reference::installed());
         if self.print_findings {
             eprintln!("{}: {} broken", file.display(), report.findings.len());
             for finding in &report.findings {
@@ -153,6 +162,20 @@ impl Survey {
             if matches!(item.class(), "js" | "v8") {
                 *self.faces.entry("js or v8").or_default() += 1;
             }
+            if let (Some(reference), false, "newobj", None) = (reference::installed(), patcher.is_gen(), item.maxclass(), &item.file) {
+                if !catalog().ports_from_contents(item.class()) {
+                    let saved = (item.inlets(), item.outlets());
+                    let outcome = match reference.ports(item.text()) {
+                        Some(ports) if (ports.inlets, ports.outlets) == saved => "predicted",
+                        Some(_) => {
+                            *self.port_misses.entry(catalog().canonical(item.class()).to_string()).or_default() += 1;
+                            "mispredicted"
+                        }
+                        None => "unknown",
+                    };
+                    *self.ports.entry(outcome).or_default() += 1;
+                }
+            }
             let inner = match (&item.patcher, &item.file) {
                 (Some(inner), _) => inner,
                 (None, Some((name, inner))) if seen.insert(name.clone()) => inner,
@@ -188,6 +211,7 @@ impl Survey {
                 "side_gap_quartiles": gaps(&self.shape.side_gaps),
             },
             "faces": self.faces,
+            "reference_ports": { "outcomes": self.ports, "mispredicted_classes": self.port_misses },
             "colours": self.colours,
             "objects": self.objects,
         })

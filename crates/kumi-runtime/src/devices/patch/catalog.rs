@@ -30,6 +30,7 @@ pub struct Catalog {
     inlets: HashMap<String, Inlets>,
     deferred: HashSet<String>,
     audio_with_messages: HashSet<String>,
+    contents: HashSet<String>,
     named: HashSet<String>,
     roles: HashMap<String, Role>,
 }
@@ -67,6 +68,7 @@ impl Catalog {
         }
         catalog.deferred = names(&value["deferred"]["classes"]).collect();
         catalog.audio_with_messages = names(&value["audio_with_messages"]["classes"]).collect();
+        catalog.contents = names(&value["contents"]["classes"]).collect();
         catalog.named = names(&value["named"]["classes"]).collect();
         for (role, key) in [(Role::Dsp, "dsp"), (Role::Storage, "storage"), (Role::Timing, "timing"), (Role::Wireless, "wireless")] {
             for class in names(&value["roles"][key]) {
@@ -108,6 +110,11 @@ impl Catalog {
         class.ends_with('~') && !self.audio_with_messages.contains(class)
     }
 
+    /// Whether the object's inlets and outlets come from what's inside it (a subpatcher, code, a file), not its text.
+    pub fn ports_from_contents(&self, class: &str) -> bool {
+        self.contents.contains(self.canonical(class))
+    }
+
     /// Whether the object's first argument names something every patcher using the name shares.
     pub fn names_something(&self, class: &str) -> bool {
         self.named.contains(self.canonical(class))
@@ -134,6 +141,7 @@ mod tests {
         assert!(catalog.defers("del") && catalog.defers("qlim") && !catalog.defers("speedlim"));
         assert!(catalog.ends_messages("*~") && !catalog.ends_messages("snapshot~") && !catalog.ends_messages("prepend"));
         assert!(catalog.names_something("s") && catalog.names_something("buffer~") && !catalog.names_something("pv"));
+        assert!(catalog.ports_from_contents("p") && catalog.ports_from_contents("gen~") && !catalog.ports_from_contents("route"));
         assert_eq!(catalog.role("buffer~"), Some(Role::Storage));
         assert_eq!(catalog.role("prepend"), None);
     }
