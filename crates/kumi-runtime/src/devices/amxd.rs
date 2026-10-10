@@ -79,21 +79,28 @@ pub struct DecodedAmxd {
 
 /// A device file's type and patcher; None when it isn't one.
 pub fn decode_amxd(bytes: &[u8]) -> Option<DecodedAmxd> {
+    let (code, chunk) = patcher_chunk(bytes)?;
+    let kind = DeviceType::from_code(code)?;
+    let text = String::from_utf8_lossy(chunk);
+    let text = text.trim_end_matches('\0');
+    serde_json::from_str::<Value>(text).ok().map(|patcher| DecodedAmxd { kind, patcher })
+}
+
+/// A device file's four-letter type code and its "ptch" chunk as it lies in the file: the patcher's JSON, or a frozen
+/// device's container of files (see [`super::patch::frozen`]).
+pub fn patcher_chunk(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
     if bytes.len() < 12 || &bytes[0..4] != b"ampf" {
         return None;
     }
     let read_u32 = |at: usize| u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]) as usize;
     let length = read_u32(4);
     let code = &bytes[8..(8 + length).min(bytes.len())];
-    let kind = DeviceType::from_code(code)?;
     let mut at = 8 + length;
     while at + 8 <= bytes.len() {
         let tag = &bytes[at..at + 4];
         let size = read_u32(at + 4);
         if tag == b"ptch" {
-            let text = String::from_utf8_lossy(&bytes[(at + 8).min(bytes.len())..(at + 8 + size).min(bytes.len())]);
-            let text = text.trim_end_matches('\0');
-            return serde_json::from_str::<Value>(text).ok().map(|patcher| DecodedAmxd { kind, patcher });
+            return Some((code, &bytes[(at + 8).min(bytes.len())..(at + 8 + size).min(bytes.len())]));
         }
         at += 8 + size;
     }
