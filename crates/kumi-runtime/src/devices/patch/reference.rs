@@ -1,11 +1,11 @@
 //! What Kumi knows of each of Max's objects, learned on this machine from the installed Max so it keeps up as Max
 //! changes: each object's inlets and outlets for the arguments it's given, fitted to the instances saved in Max's own
-//! help patchers, and what the object and each inlet and outlet are for (its reference page's digests). Max's bundled
-//! packages count (not Gen's or RNBO's pages, whose operators share names with Max's objects), and so do the
-//! abstractions Max ships. It's learned once for each Max and kept in Kumi's folder; none of Max's files are carried
-//! in Kumi.
+//! help patchers, what the object and each inlet and outlet are for (its reference page's digests), and the messages
+//! that only set something in it (its attributes, and the methods its page says send nothing). Max's bundled packages
+//! count (not Gen's or RNBO's pages, whose operators share names with Max's objects), and so do the abstractions Max
+//! ships. It's learned once for each Max and kept in Kumi's folder; none of Max's files are carried in Kumi.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -31,6 +31,12 @@ pub enum Count {
     Variables { bare: usize },
 }
 
+impl Default for Count {
+    fn default() -> Count {
+        Count::Fixed { count: 0 }
+    }
+}
+
 impl Count {
     pub fn of(&self, args: &[String]) -> usize {
         match *self {
@@ -42,8 +48,9 @@ impl Count {
                     args.len() + plus
                 }
             }
+            // A count of none ([gate 0]) is Max's default.
             Count::FirstArgument { plus, bare } => match args.first().and_then(|arg| arg.parse::<f64>().ok()) {
-                Some(value) if value >= 0.0 && value.fract() == 0.0 && value <= 512.0 => value as usize + plus,
+                Some(value) if value >= 1.0 && value.fract() == 0.0 && value <= 512.0 => value as usize + plus,
                 _ => bare,
             },
             Count::Formats { bare } => Some(formats(args)).filter(|count| *count > 0).unwrap_or(bare),
@@ -80,7 +87,7 @@ fn variables(args: &[String]) -> usize {
         .unwrap_or(0)
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Object {
     /// max, msp, jit or m4l ("" for one only the help patchers have).
     pub module: String,
@@ -93,7 +100,14 @@ pub struct Object {
     pub outlet_digests: Vec<String>,
     /// How many saved instances the counts were fitted to (0: the reference page's alone).
     pub seen: usize,
+    /// The messages that only set something in it, sending nothing at once: its attributes, and the methods its page
+    /// says send nothing ("Set the value with no output") or that set a thing without a word of sending.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub quiet: BTreeSet<String>,
 }
+
+/// The page of the attributes every box has (hidden, presentation_rect, varname…).
+const BOX_PAGE: &str = "jbox";
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Reference {
@@ -131,6 +145,13 @@ impl Reference {
         let outlet_types = (0..outlets).map(|at| object.outlet_types.get(at).cloned().unwrap_or_else(|| filler.clone())).collect();
         Some(Ports { inlets, outlets, outlet_types })
     }
+
+    /// Whether the message `selector` only sets something in an object of `class` (one of its attributes or every
+    /// box's, or a method its page says sends nothing), so the object sends nothing at once.
+    pub fn quiet(&self, class: &str, selector: &str) -> bool {
+        let lists = |object: Option<&Object>| object.is_some_and(|object| object.quiet.contains(selector));
+        lists(self.object(class)) || lists(self.objects.get(BOX_PAGE))
+    }
 }
 
 /// A box's text as Max reads it into atoms: words, a quoted symbol one atom.
@@ -164,13 +185,32 @@ pub fn atoms(text: &str) -> Vec<String> {
     atoms
 }
 
-/// An instance saved in a help patcher: its arguments, inlets, outlets and what its outlets send.
+/// An instance saved in a help patcher: its arguments, inlets, outlets and what its outlets send, and the version of
+/// Max that saved it.
 #[derive(Debug, Clone)]
 struct Instance {
     args: Vec<String>,
     inlets: usize,
     outlets: usize,
     outlet_types: Vec<String>,
+    version: [u64; 3],
+}
+
+/// The version of Max that saved a patcher (its appversion), [0, 0, 0] when it doesn't say.
+fn saved_by(patcher: &Value) -> [u64; 3] {
+    let part = |key: &str| patcher["appversion"][key].as_u64().unwrap_or(0);
+    [part("major"), part("minor"), part("revision")]
+}
+
+/// The instances that say what Max does now: of those with the same arguments, the ones the newest Max saved. A help
+/// patcher saved before an object gained an outlet keeps the count it had then ([midiparse] gained its eighth).
+fn newest(instances: Vec<Instance>) -> Vec<Instance> {
+    let mut latest: HashMap<Vec<String>, [u64; 3]> = HashMap::new();
+    for instance in &instances {
+        let version = latest.entry(instance.args.clone()).or_default();
+        *version = (*version).max(instance.version);
+    }
+    instances.into_iter().filter(|instance| latest[&instance.args] == instance.version).collect()
 }
 
 static OBJECT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"<c74object\s+name="([^"]+)"([^>]*)>"#).unwrap());
@@ -181,6 +221,55 @@ static OUTLETS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<outletlist>
 static PORT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?s)<(?:inlet|outlet)\s+id="(\d+)"(?:\s+type="([^"]*)")?[^>]*>\s*<digest>(.*?)</digest>"#).unwrap());
 static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]+>").unwrap());
+static METHOD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?s)<method\s+name="([^"]+)"[^>]*>(.*?)</method>"#).unwrap());
+/// An attribute's opening tag (self-closing for one without parts) or its closing tag: an attribute's own attributes
+/// (its label, its category) are written inside it.
+static ATTRIBUTE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"<attribute\s+name="([^"]+)"[^>]*?(/?)>|</attribute>"#).unwrap());
+/// How a page says a method sends nothing: "with no output", "without triggering output", "do not output".
+static SENDS_NOTHING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\b(without|no|not)\b[^.]*\boutput").unwrap());
+/// How a page says a method sends: "Output the value", "Set the value and cause output", "Set both values, output…".
+static SENDS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^(output|send|report|trigger|bang|dump)\b|\b(cause|causes|causing|trigger|triggers|and|or|then)\s+(output|send|sends|report|reports)\b|,\s*(output|send|sends|report|reports)\b").unwrap()
+});
+/// How a page says a method sets something: "Set the maximum value", "Replace the stored message", "Turn off polling".
+static SETS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^(set|sets|replace|replaces|change|changes|store|stores|clear|clears|define|defines|enable|enables|disable|disables|turn|reset|resets|initialize|initializes|add|adds|insert|inserts|append|appends|prepend|prepends|remove|removes|delete|deletes)\b").unwrap()
+});
+/// The messages that carry what an object works on: whatever their page says, they're its reason to send.
+const DATA: [&str; 6] = ["bang", "int", "float", "list", "anything", "symbol"];
+
+/// The messages a page says only set something: its attributes (not an attribute's own), and its methods that send
+/// nothing; a method that sends, by an attribute's name, isn't quiet.
+fn quiet_messages(text: &str) -> BTreeSet<String> {
+    let mut quiet = BTreeSet::new();
+    let mut depth = 0usize;
+    for tag in ATTRIBUTE.captures_iter(text) {
+        match tag.get(1) {
+            Some(name) => {
+                if depth == 0 {
+                    quiet.insert(name.as_str().to_string());
+                }
+                if &tag[2] != "/" {
+                    depth += 1;
+                }
+            }
+            None => depth = depth.saturating_sub(1),
+        }
+    }
+    for method in METHOD.captures_iter(text) {
+        let name = &method[1];
+        if name.starts_with('(') || DATA.contains(&name) {
+            continue;
+        }
+        let digest = DIGEST.captures(&method[2]).map(|found| plain(&found[1])).unwrap_or_default();
+        if SENDS_NOTHING.is_match(&digest) || (!SENDS.is_match(&digest) && SETS.is_match(&digest)) {
+            quiet.insert(name.to_string());
+        } else {
+            quiet.remove(name);
+        }
+    }
+    quiet
+}
 
 /// A reference page's text as plain words: tags out, entities read, spaces collapsed.
 fn plain(text: &str) -> String {
@@ -221,13 +310,14 @@ fn read_page(text: &str) -> Option<(String, Object)> {
         inlet_digests: inlets.into_iter().map(|(_, digest)| digest).collect(),
         outlet_digests: outlets.into_iter().map(|(_, digest)| digest).collect(),
         seen: 0,
+        quiet: quiet_messages(text),
     };
     Some((name, object))
 }
 
-/// The instances of Max's objects saved in a help patcher and the patchers inside it (not gen's or RNBO's, whose
-/// operators share names with Max's objects).
-fn instances(patcher: &Value, found: &mut HashMap<String, Vec<Instance>>) {
+/// The instances of Max's objects saved in a help patcher (by Max `version`) and the patchers inside it (not gen's or
+/// RNBO's, whose operators share names with Max's objects).
+fn instances(patcher: &Value, version: [u64; 3], found: &mut HashMap<String, Vec<Instance>>) {
     let space = patcher.get("classnamespace").and_then(Value::as_str).unwrap_or("box");
     if space != "box" {
         return;
@@ -247,11 +337,12 @@ fn instances(patcher: &Value, found: &mut HashMap<String, Vec<Instance>>) {
                     inlets: inlets as usize,
                     outlets: outlets as usize,
                     outlet_types,
+                    version,
                 });
             }
         }
         if item["patcher"].is_object() {
-            instances(&item["patcher"], found);
+            instances(&item["patcher"], version, found);
         }
     }
 }
@@ -342,12 +433,20 @@ fn sources(c74: &Path) -> Sources {
     found
 }
 
-/// What the reference is learned from in a Max's C74 folder, as one line: a new Max reads differently.
+/// How Kumi learns the reference: a new way is learned anew, as a new Max is.
+const LEARNER: u32 = 2;
+
+/// What the reference is learned from in a Max's C74 folder, and how, as one line: a new Max reads differently.
 pub fn fingerprint(c74: &Path) -> String {
     let found = sources(c74);
     let all = found.pages.iter().chain(&found.help).chain(&found.abstractions);
     let bytes: u64 = all.filter_map(|file| std::fs::metadata(file).ok()).map(|meta| meta.len()).sum();
-    format!("{} pages, {} help patchers, {} abstractions, {bytes} bytes", found.pages.len(), found.help.len(), found.abstractions.len())
+    format!(
+        "learner {LEARNER}: {} pages, {} help patchers, {} abstractions, {bytes} bytes",
+        found.pages.len(),
+        found.help.len(),
+        found.abstractions.len()
+    )
 }
 
 /// An object only a help patcher or an abstraction tells of: no reference page.
@@ -361,6 +460,7 @@ fn unpaged(module: &str, inlets: usize, outlets: usize) -> Object {
         inlet_digests: Vec::new(),
         outlet_digests: Vec::new(),
         seen: 0,
+        quiet: BTreeSet::new(),
     }
 }
 
@@ -377,13 +477,14 @@ pub fn learn(c74: &Path) -> Reference {
     let mut seen: HashMap<String, Vec<Instance>> = HashMap::new();
     for file in &found.help {
         if let Some(document) = std::fs::read(file).ok().and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok()) {
-            instances(&document["patcher"], &mut seen);
+            instances(&document["patcher"], saved_by(&document["patcher"]), &mut seen);
         }
     }
     // An alias (t) starts from what's learned of the class it stands for (trigger), so it comes after it.
     let mut seen: Vec<(String, Vec<Instance>)> = seen.into_iter().collect();
     seen.sort_by_key(|(class, _)| (catalog().canonical(class) != class, class.clone()));
     for (class, instances) in seen {
+        let instances = newest(instances);
         let start = objects.get(catalog().canonical(&class)).cloned().unwrap_or_else(|| unpaged("", 0, 0));
         let object = objects.entry(class).or_insert(start);
         // What's known for no arguments (the page's count, or an alias's class's), for an object never seen without.
@@ -485,7 +586,7 @@ mod tests {
     use serde_json::json;
 
     fn instance(args: &[&str], inlets: usize, outlets: usize) -> Instance {
-        Instance { args: args.iter().map(|arg| arg.to_string()).collect(), inlets, outlets, outlet_types: vec![] }
+        Instance { args: args.iter().map(|arg| arg.to_string()).collect(), inlets, outlets, outlet_types: vec![], version: [9, 0, 0] }
     }
 
     #[test]
@@ -494,11 +595,23 @@ mod tests {
             [instance(&[], 2, 1), instance(&["0", "0"], 2, 1), instance(&["0", "0", "0"], 3, 1), instance(&["0", "0", "0", "0"], 4, 1)];
         assert_eq!(fit(&pack, |i| i.inlets, 2), Count::Arguments { plus: 0, bare: 2 });
         assert_eq!(fit(&pack, |i| i.outlets, 1), Count::Fixed { count: 1 });
-        let gate = [instance(&[], 2, 1), instance(&["2"], 2, 2), instance(&["4"], 2, 4), instance(&["8", "1"], 2, 8)];
+        let gate =
+            [instance(&[], 2, 1), instance(&["2"], 2, 2), instance(&["4"], 2, 4), instance(&["8", "1"], 2, 8), instance(&["0"], 2, 1)];
         assert_eq!(
             fit(&gate, |i| i.outlets, 1),
             Count::FirstArgument { plus: 0, bare: 1 },
             "gate's outlets are its first argument's value"
+        );
+        assert_eq!(Count::FirstArgument { plus: 0, bare: 1 }.of(&["0".to_string()]), 1, "[gate 0] has Max's default");
+        let midiparse = newest(vec![
+            instance(&[], 1, 7),
+            Instance { version: [9, 1, 0], ..instance(&[], 1, 8) },
+            Instance { version: [7, 0, 3], ..instance(&["x"], 1, 7) },
+        ]);
+        assert_eq!(
+            midiparse.iter().map(|i| i.outlets).collect::<Vec<_>>(),
+            [8, 7],
+            "the newest save of the same text says what Max does now; a text saved once stays"
         );
         let route = [instance(&["a"], 2, 2), instance(&["a", "b"], 3, 3), instance(&["a", "b", "c"], 4, 4)];
         assert_eq!(fit(&route, |i| i.outlets, 2), Count::Arguments { plus: 1, bare: 2 }, "the page's count when never seen bare");
@@ -538,6 +651,39 @@ mod tests {
     }
 
     #[test]
+    fn a_page_says_which_messages_only_set_something() {
+        let page = r#"<c74object name="counter" module="max">
+            <methodlist>
+              <method name="int"><digest>Set the counter value with no output</digest></method>
+              <method name="set"><digest>Set the counter value with no output</digest></method>
+              <method name="jam"><digest>Set the counter value and cause output</digest></method>
+              <method name="max"><digest>Set the maximum value</digest></method>
+              <method name="min"><digest>Set the minimum value, cause output</digest></method>
+              <method name="next"><digest>Output next count value</digest></method>
+              <method name="carryflag"><digest>Send carry output now</digest></method>
+              <method name="poll"><digest>Set output on mouse movement</digest></method>
+              <method name="(mouse)"><digest>Click it</digest></method>
+            </methodlist>
+            <attributelist>
+              <attribute name="carryflag" get="1" set="1" type="int" size="1"><digest>Carry flag</digest>
+                <attributelist><attribute name="label" get="1" set="1" type="symbol" size="1" value="Carry" /></attributelist>
+              </attribute>
+              <attribute name="compatmode" get="1" set="1" type="int" size="1" />
+            </attributelist></c74object>"#;
+        let (_, object) = read_page(page).unwrap();
+        assert_eq!(
+            object.quiet.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["compatmode", "max", "poll", "set"],
+            "attributes (not an attribute's own), and methods that send nothing; a number always counts"
+        );
+        let mut reference = Reference::default();
+        reference.objects.insert("counter".into(), object);
+        reference.objects.insert(BOX_PAGE.into(), Object { quiet: BTreeSet::from(["hidden".to_string()]), ..unpaged("max", 0, 0) });
+        assert!(reference.quiet("counter", "set") && reference.quiet("counter", "hidden") && !reference.quiet("counter", "jam"));
+        assert!(reference.quiet("prepend", "hidden") && !reference.quiet("prepend", "set"), "every box's attributes, nothing else");
+    }
+
+    #[test]
     fn a_boxs_ports_follow_its_arguments_and_gen_patchers_are_left_out() {
         let mut found = HashMap::new();
         instances(
@@ -546,6 +692,7 @@ mod tests {
                 { "box": { "maxclass": "newobj", "text": "gen~", "numinlets": 1, "numoutlets": 1, "patcher": { "classnamespace": "dsp.gen",
                     "boxes": [{ "box": { "maxclass": "newobj", "text": "+ 1", "numinlets": 1, "numoutlets": 1 } }] } } }
             ] }),
+            [9, 0, 0],
             &mut found,
         );
         assert_eq!(found["route"][0].args, ["a", "b c"], "a quoted symbol is one argument, attributes aren't arguments");
@@ -562,6 +709,7 @@ mod tests {
                 inlet_digests: vec![],
                 outlet_digests: vec![],
                 seen: 3,
+                quiet: BTreeSet::new(),
             },
         );
         assert_eq!(reference.ports("route a b c").map(|ports| (ports.inlets, ports.outlets, ports.outlet_types.len())), Some((4, 4, 4)));

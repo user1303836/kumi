@@ -128,6 +128,12 @@ impl Files for Frozen {
         let file = self.file(name).filter(|file| file.kind == "JSON")?;
         parse(self.bytes(file)?)
     }
+
+    fn text(&self, name: &str) -> Option<String> {
+        let bytes = self.bytes(self.file(name)?)?;
+        let end = bytes.iter().rposition(|byte| *byte != 0).map_or(0, |at| at + 1);
+        Some(String::from_utf8_lossy(&bytes[..end]).into_owned())
+    }
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 //! A Max patcher as Kumi reads, checks and lays it out: its boxes in order (Max draws a box above the boxes listed
 //! after it in its layer), its cords, and every other field as Max wrote it, so a patcher read and written back is the
-//! same JSON. A box's own patcher (a [p], an embedded bpatcher, a gen~) is read with it, and the file an abstraction or
-//! a bpatcher names is read through [`Files`] (a frozen device's own files, or none).
+//! same JSON. A box's own patcher (a [p], an embedded bpatcher, a gen~) is read with it, and the file an abstraction, a
+//! bpatcher or a code box names is read through [`Files`] (a frozen device's own files, or none).
 //!
 //! The standard Kumi holds patchers to is data in `max-standard/` at the repository's root: each rule's level, what
 //! the rules know of Max's objects, and what measuring well-made devices found. The model never reads it: it hears a
@@ -9,6 +9,7 @@
 
 pub mod catalog;
 pub mod check;
+pub mod code;
 pub mod frozen;
 pub mod geometry;
 pub mod layout;
@@ -18,12 +19,18 @@ pub mod standard;
 
 use serde_json::{json, Map, Value};
 
+use code::Code;
 use geometry::Rect;
 
-/// The files a patcher's abstractions and bpatchers name.
+/// The files a patcher's abstractions, bpatchers and code boxes name.
 pub trait Files {
     /// The JSON of the patcher file `name` (`dial.maxpat`), if there is one.
     fn patcher(&self, name: &str) -> Option<Value>;
+
+    /// The text of the file `name` (`dial.js`), if there is one.
+    fn text(&self, _name: &str) -> Option<String> {
+        None
+    }
 }
 
 /// No files: only what's embedded is read.
@@ -55,6 +62,8 @@ pub struct MaxBox {
     /// The file the box loads (an abstraction, a bpatcher, a poly~'s voice), read through [`Files`]: its name and
     /// patcher. It's never written back into the box.
     pub file: Option<(String, Patcher)>,
+    /// The JavaScript the box runs (a [v8ui]'s file, a [v8.codebox]'s own), read to know what a message makes it do.
+    pub code: Option<Code>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -135,7 +144,8 @@ impl MaxBox {
             Some(inner) if inner.is_object() => Some(Patcher::read_within(&inner.take(), files, open)),
             _ => None,
         };
-        let mut item = MaxBox { fields, patcher, file: None };
+        let mut item = MaxBox { fields, patcher, file: None, code: None };
+        item.code = Code::read(&item, files);
         if item.patcher.is_none() && open.len() < MAX_DEPTH {
             if let Some(name) = item.file_name() {
                 if !open.contains(&name) {

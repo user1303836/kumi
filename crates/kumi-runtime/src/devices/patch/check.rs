@@ -5,8 +5,9 @@
 //! - **patch**: every object is one Max knows (when Kumi has learned the installed Max), and every cord leaves and
 //!   enters a port its box has.
 //! - **layout**: no cord runs over a box, no two boxes overlap, cords run down the patcher except to close a loop.
-//! - **order**: when one outlet's cords meet again at a box, one at a cold inlet and one at its hot inlet, which
-//!   arrives first depends on where boxes sit; a trigger makes it explicit.
+//! - **order**: when one outlet's cords meet again at a box, one only to be kept (a cold inlet, or a message that only
+//!   sets something) and one to make it send, which arrives first depends on where boxes sit; a trigger makes it
+//!   explicit. A branch that sets the inlet itself before it sends is settled.
 //! - **names**: a send, a buffer~ or a dict named without `---` is shared by every copy of the device.
 //! - **params**: Live parameters are named for what they do, once each, kept in Push's banks and explained in Live's
 //!   Info View.
@@ -20,7 +21,7 @@ use serde_json::Value;
 
 use super::catalog::{catalog, Catalog};
 use super::geometry::{inlet_point, outlet_point, Rect};
-use super::reference::Reference;
+use super::reference::{atoms, Reference};
 use super::standard::{standard, Level, Standard};
 use super::{MaxBox, Patcher};
 use crate::devices::face::hidden_by_panels;
@@ -62,6 +63,8 @@ pub const RULES: [&str; 15] = [
 
 /// How far a chain of messages is followed from a fan-out.
 const MAX_HOPS: usize = 24;
+/// How far two boxes can run into each other and only touch, in pixels.
+const TOUCH: f64 = 1.5;
 /// Boxes Max draws behind others on purpose: a cord or a box over one is fine.
 const BACKDROPS: [&str; 3] = ["panel", "fpic", "live.line"];
 /// Max's Live objects that are parameters unless turned off.
@@ -253,8 +256,8 @@ impl Checker<'_> {
         let label = labels(patcher);
         self.looked(BOXES_OVERLAP, placed.len());
         for (index, (item, rect)) in placed.iter().enumerate() {
-            // Half a pixel either way is Max's rounding, not an overlap.
-            let shrunk = Rect::new(rect.x + 0.5, rect.y + 0.5, (rect.w - 1.0).max(0.0), (rect.h - 1.0).max(0.0));
+            // Boxes a pixel or so into each other only touch: Max's rounding, or a comment's empty margin.
+            let shrunk = Rect::new(rect.x + TOUCH, rect.y + TOUCH, (rect.w - 2.0 * TOUCH).max(0.0), (rect.h - 2.0 * TOUCH).max(0.0));
             for (other, other_rect) in &placed[index + 1..] {
                 if shrunk.overlaps(other_rect) {
                     self.found(
@@ -325,61 +328,97 @@ impl Checker<'_> {
         self.looked(FAN_OUT_REJOINS, fan_outs.len());
         for ((index, outlet), branches) in fan_outs {
             let source = &patcher.boxes[index];
-            let reached: Vec<HashMap<&str, Arrival>> = branches.iter().map(|&(to, inlet)| self.follow(&by_id, &next, to, inlet)).collect();
+            let message = messages_out(source);
+            let reached: Vec<HashMap<&str, Arrival>> =
+                branches.iter().map(|&(to, inlet)| self.follow(&by_id, &next, to, inlet, message.clone())).collect();
             let mut named: HashSet<&str> = HashSet::new();
             for (i, branch) in reached.iter().enumerate() {
                 for (&id, arrival) in branch {
-                    let Some(cold) = arrival.cold else { continue };
-                    let hot_elsewhere = reached.iter().enumerate().any(|(j, other)| j != i && other.get(id).is_some_and(|other| other.hot));
-                    if hot_elsewhere && named.insert(id) {
-                        self.found(
-                            FAN_OUT_REJOINS,
-                            at,
-                            format!(
-                                "outlet {outlet} of {} reaches {} twice, at cold inlet {cold} and at its hot inlet: which arrives first depends on where boxes sit. Send it through a [t] whose right outlet feeds the cold inlet.",
+                    for (&inlet, how) in &arrival.kept {
+                        // Another branch that makes the box send uses whichever value came last, unless it sets this
+                        // inlet itself first. Two of the fan-out's own cords into one box go right to left, wherever
+                        // it sits.
+                        let unsettled = reached.iter().enumerate().any(|(j, other)| {
+                            j != i
+                                && other.get(id).is_some_and(|other| other.hot && !other.kept.contains_key(&inlet))
+                                && !(branches[i].0 == id && branches[j].0 == id)
+                        });
+                        if !unsettled || !named.insert(id) {
+                            continue;
+                        }
+                        let says = match how {
+                            None => format!(
+                                "outlet {outlet} of {} reaches {} twice, at cold inlet {inlet} and at its hot inlet: which arrives first depends on where boxes sit. Send it through a [t] whose right outlet feeds the cold inlet.",
                                 label[source.id()],
                                 label[id]
                             ),
-                        );
+                            Some(selector) => format!(
+                                "outlet {outlet} of {} reaches {} twice, once with `{selector}` (which only sets it) and once to make it send: which arrives first depends on where boxes sit. Send it through a [t] whose right outlet sends the `{selector}`.",
+                                label[source.id()],
+                                label[id]
+                            ),
+                        };
+                        self.found(FAN_OUT_REJOINS, at, says);
                     }
                 }
             }
         }
     }
 
-    /// Where a message into `inlet` of box `id` goes in the same chain: each box it reaches, and whether at a hot inlet
-    /// or a cold one. A box that keeps it (a cold inlet), ends it (an audio object) or sends it later goes no further.
+    /// Whether the message `selector` only sets something in a box, sending nothing at once: its code says no function
+    /// the message calls sends, or Max's reference says it's an attribute or a method that sends nothing.
+    fn quiet(&self, item: &MaxBox, selector: &str) -> bool {
+        if let Some(sends) = item.code.as_ref().and_then(|code| code.sends_at_once(selector)) {
+            return !sends;
+        }
+        self.reference.is_some_and(|reference| reference.quiet(item.class(), selector))
+    }
+
+    /// Where a message into `inlet` of box `id` goes in the same chain: each box it reaches, and whether to make it
+    /// send or only to be kept. `message` is what arrives, by its first words, when a box's text says it. A box that
+    /// keeps it (a cold inlet, a message that only sets something), ends it (an audio object) or sends it later goes
+    /// no further.
     fn follow<'p>(
         &self,
         by_id: &HashMap<&str, &'p MaxBox>,
         next: &HashMap<&'p str, Vec<(usize, &'p str, usize)>>,
         id: &'p str,
         inlet: usize,
+        message: Option<Vec<String>>,
     ) -> HashMap<&'p str, Arrival> {
         let mut reached: HashMap<&str, Arrival> = HashMap::new();
-        let mut queue = VecDeque::from([(id, inlet, 0usize)]);
+        let mut queue = VecDeque::from([(id, inlet, 0usize, message)]);
         let mut seen = HashSet::new();
-        while let Some((id, inlet, hops)) = queue.pop_front() {
-            if !seen.insert((id, inlet)) {
+        while let Some((id, inlet, hops, message)) = queue.pop_front() {
+            if !seen.insert((id, inlet, message.clone())) {
                 continue;
             }
             let Some(item) = by_id.get(id) else { continue };
             let class = item.class();
-            let hot = self.catalog.hot(class, inlet);
             let arrival = reached.entry(id).or_default();
-            if hot {
-                arrival.hot = true;
-            } else if !self.catalog.all_hot(class) {
-                arrival.cold.get_or_insert(inlet);
+            if !self.catalog.hot(class, inlet) {
+                if !self.catalog.all_hot(class) {
+                    arrival.kept.entry(inlet).or_insert(None);
+                }
+                continue;
             }
+            if let Some(selectors) = message.as_ref().filter(|selectors| selectors.iter().all(|selector| self.quiet(item, selector))) {
+                arrival.kept.entry(inlet).or_insert_with(|| selectors.first().cloned());
+                continue;
+            }
+            arrival.hot = true;
             let ends =
                 self.catalog.ends_messages(class) || self.catalog.defers(class) || matches!(class, "outlet" | "send" | "s" | "forward");
-            if !hot || ends || hops >= MAX_HOPS {
+            if ends || hops >= MAX_HOPS {
+                continue;
+            }
+            let out = messages_out(item);
+            if out.as_ref().is_some_and(Vec::is_empty) {
                 continue;
             }
             for &(outlet, to, to_inlet) in next.get(id).into_iter().flatten() {
                 if !item.sends_signal(outlet) {
-                    queue.push_back((to, to_inlet, hops + 1));
+                    queue.push_back((to, to_inlet, hops + 1, out.clone()));
                 }
             }
         }
@@ -503,8 +542,11 @@ impl Checker<'_> {
             }
         }
         if !banks.is_empty() {
+            let mut while_running = HashSet::new();
+            banked_while_running(patcher, &mut while_running);
             self.looked(BANK_MISSING, automatable.len());
-            for parameter in automatable.iter().filter(|parameter| !banked.contains(parameter.name.as_str())) {
+            let missing = |parameter: &&&Parameter| !banked.contains(parameter.name.as_str()) && !while_running.contains(&parameter.name);
+            for parameter in automatable.iter().filter(missing) {
                 self.found(
                     BANK_MISSING,
                     &parameter.at,
@@ -531,11 +573,28 @@ impl Checker<'_> {
 }
 
 /// How a chain of messages reached a box.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 struct Arrival {
+    /// Whether it reached an inlet that makes the box send, with a message that does.
     hot: bool,
-    /// The first cold inlet it reached.
-    cold: Option<usize>,
+    /// The inlets where the box only kept what came: a cold inlet (None), or a message that only sets something
+    /// (`set`, an attribute, a function that doesn't send).
+    kept: BTreeMap<usize, Option<String>>,
+}
+
+/// The messages a box sends, where its text says them: each of a message box's messages that leave by its outlet
+/// (what follows a semicolon goes to receivers), a [prepend]'s word; by each one's first word. None when a message
+/// comes from what reached the box, or starts with a number or a $ argument.
+fn messages_out(item: &MaxBox) -> Option<Vec<String>> {
+    let word = |message: &str| atoms(message).into_iter().next().filter(|word| !word.starts_with('$') && word.parse::<f64>().is_err());
+    match item.maxclass() {
+        "message" => {
+            let out = item.text().split(';').next().unwrap_or("");
+            out.split(',').map(str::trim).filter(|message| !message.is_empty()).map(word).collect()
+        }
+        "newobj" if item.class() == "prepend" => item.args().first().and_then(|first| word(first)).map(|word| vec![word]),
+        _ => None,
+    }
 }
 
 /// How notes name a patcher's boxes: each one's label, with its scripting name (or else its id) when another box in
@@ -558,6 +617,27 @@ fn labels(patcher: &Patcher) -> HashMap<&str, String> {
             (item.id(), label)
         })
         .collect()
+}
+
+/// The parameters a device puts in its Push banks while it runs: the names in the `edit` and `new` messages its
+/// message boxes send [live.banks] (`edit 0 main 2 "Rate"`: bank 0, called main, gets Rate in its third slot).
+fn banked_while_running(patcher: &Patcher, names: &mut HashSet<String>) {
+    let banks: HashSet<&str> = patcher.boxes.iter().filter(|item| item.class() == "live.banks").map(MaxBox::id).collect();
+    for cord in patcher.cords.iter().filter(|cord| banks.contains(cord.to.as_str())) {
+        let Some(item) = patcher.find(&cord.from).filter(|item| item.maxclass() == "message") else { continue };
+        for message in item.text().split(';').next().unwrap_or("").split(',') {
+            let words = atoms(message);
+            if matches!(words.first().map(String::as_str), Some("edit" | "new")) {
+                // After the bank's index and name come pairs: a slot, and the parameter in it (- for none).
+                names.extend(words.into_iter().skip(4).step_by(2).filter(|name| name != "-"));
+            }
+        }
+    }
+    for item in &patcher.boxes {
+        if let Some(inner) = item.inner() {
+            banked_while_running(inner, names);
+        }
+    }
 }
 
 /// Each box's cords: the outlet, the box and inlet it goes to.
@@ -763,8 +843,10 @@ fn without_comments(code: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::devices::patch::reference::Object;
     use crate::devices::patch::NoFiles;
     use serde_json::json;
+    use std::collections::BTreeSet;
 
     fn read(value: Value) -> Patcher {
         Patcher::read(&value, &NoFiles)
@@ -841,6 +923,71 @@ mod tests {
         assert_eq!(rules(&check(&apart)), Vec::<&str>::new());
     }
 
+    fn message(id: &str, text: &str, rect: [f64; 4]) -> Value {
+        json!({ "box": { "id": id, "maxclass": "message", "text": text, "patching_rect": rect, "numinlets": 2, "numoutlets": 1, "outlettype": [""] } })
+    }
+
+    fn order_says(report: &Report) -> Vec<&str> {
+        report.findings.iter().filter(|finding| finding.rule == FAN_OUT_REJOINS).map(|finding| finding.says.as_str()).collect()
+    }
+
+    #[test]
+    fn a_branch_that_sets_the_inlet_itself_or_a_message_that_only_sets_something_settles_a_fan_out() {
+        // Both branches pass one [t l l], which sets [+]'s right inlet before its left: each sets it itself.
+        let shared = read(json!({ "boxes": [
+            newobj("obj-1", "random 10", [40., 20., 70., 22.], 2, 1),
+            newobj("obj-2", "* 1", [0., 60., 40., 22.], 2, 1),
+            newobj("obj-3", "* 2", [80., 60., 40., 22.], 2, 1),
+            newobj("obj-4", "t l l", [40., 100., 40., 22.], 1, 2),
+            newobj("obj-5", "+", [40., 140., 40., 22.], 2, 1)
+        ], "lines": [cord("obj-1", 0, "obj-2", 0), cord("obj-1", 0, "obj-3", 0), cord("obj-2", 0, "obj-4", 0), cord("obj-3", 0, "obj-4", 0),
+            cord("obj-4", 1, "obj-5", 1), cord("obj-4", 0, "obj-5", 0)] }));
+        assert_eq!(order_says(&check(&shared)), Vec::<&str>::new());
+        // Two of a fan-out's own cords into one box go right to left, wherever the box sits.
+        let direct = read(json!({ "boxes": [
+            newobj("obj-1", "random 10", [40., 20., 70., 22.], 2, 1),
+            newobj("obj-5", "+", [40., 140., 40., 22.], 2, 1)
+        ], "lines": [cord("obj-1", 0, "obj-5", 0), cord("obj-1", 0, "obj-5", 1)] }));
+        assert_eq!(order_says(&check(&direct)), Vec::<&str>::new());
+
+        // Hiding a toggle doesn't make it send; setting it only keeps the value, and a bang beside it isn't settled.
+        let mut reference = Reference::default();
+        reference.objects.insert("toggle".into(), Object { quiet: BTreeSet::from(["set".to_string()]), ..Object::default() });
+        reference.objects.insert("jbox".into(), Object { quiet: BTreeSet::from(["hidden".to_string()]), ..Object::default() });
+        let toggle = |id: &str, rect: [f64; 4]| json!({ "box": { "id": id, "maxclass": "toggle", "patching_rect": rect, "numinlets": 1, "numoutlets": 1, "outlettype": ["int"] } });
+        let hidden = read(json!({ "boxes": [
+            newobj("obj-1", "random 10", [40., 20., 70., 22.], 2, 1),
+            message("obj-2", "hidden $1", [0., 60., 60., 22.]),
+            toggle("obj-3", [0., 100., 24., 24.]),
+            newobj("obj-5", "+", [0., 160., 80., 22.], 2, 1)
+        ], "lines": [cord("obj-1", 0, "obj-2", 0), cord("obj-2", 0, "obj-3", 0), cord("obj-3", 0, "obj-5", 0), cord("obj-1", 0, "obj-5", 1)] }));
+        assert_eq!(order_says(&check(&hidden)).len(), 1, "without Max's reference, the toggle may send");
+        assert_eq!(order_says(&check_with(&hidden, standard(), Some(&reference))), Vec::<&str>::new());
+        let set_and_bang = read(json!({ "boxes": [
+            newobj("obj-1", "random 10", [40., 20., 70., 22.], 2, 1),
+            message("obj-2", "set $1", [0., 60., 50., 22.]),
+            message("obj-4", "bang", [80., 60., 40., 22.]),
+            toggle("obj-3", [40., 120., 24., 24.])
+        ], "lines": [cord("obj-1", 0, "obj-2", 0), cord("obj-1", 0, "obj-4", 0), cord("obj-2", 0, "obj-3", 0), cord("obj-4", 0, "obj-3", 0)] }));
+        assert_eq!(
+            order_says(&check_with(&set_and_bang, standard(), Some(&reference))),
+            ["outlet 0 of [random 10] reaches toggle twice, once with `set` (which only sets it) and once to make it send: which arrives first depends on where boxes sit. Send it through a [t] whose right outlet sends the `set`."]
+        );
+
+        // A code box's function that doesn't reach an outlet only sets something; one that does, sends.
+        let code = |selector: &str| {
+            read(json!({ "boxes": [
+                newobj("obj-1", "random 10", [40., 20., 70., 22.], 2, 1),
+                message("obj-2", &format!("{selector} $1"), [0., 60., 80., 22.]),
+                { "box": { "id": "obj-3", "maxclass": "v8.codebox", "filename": "none", "patching_rect": [0., 100., 120., 40.], "numinlets": 1, "numoutlets": 1,
+                    "code": "var kept = 0;\nfunction keep(v) { kept = v; }\nfunction play(v) { outlet(0, kept + v); }" } },
+                newobj("obj-5", "+", [0., 180., 80., 22.], 2, 1)
+            ], "lines": [cord("obj-1", 0, "obj-2", 0), cord("obj-2", 0, "obj-3", 0), cord("obj-3", 0, "obj-5", 0), cord("obj-1", 0, "obj-5", 1)] }))
+        };
+        assert_eq!(order_says(&check(&code("keep"))), Vec::<&str>::new());
+        assert_eq!(order_says(&check(&code("play"))).len(), 1);
+    }
+
     #[test]
     fn names_every_copy_shares_parameters_banks_and_gen_params_are_each_found() {
         let device = read(json!({ "boxes": [
@@ -876,6 +1023,23 @@ mod tests {
         assert_eq!(report.findings[3].level, Level::Advice);
         assert_eq!(report.looked_at[SHARED_BY_COPIES], 3);
         assert_eq!(report.looked_at[PARAM_TWICE], 3);
+    }
+
+    #[test]
+    fn a_parameter_the_device_banks_while_it_runs_is_in_a_bank() {
+        let device = |cords: Vec<Value>| {
+            read(json!({ "boxes": [
+                { "box": { "id": "obj-1", "maxclass": "live.dial", "patching_rect": [40., 20., 44., 48.], "annotation": "a",
+                    "saved_attribute_attributes": { "valueof": { "parameter_longname": "Drive" } } } },
+                { "box": { "id": "obj-2", "maxclass": "live.dial", "patching_rect": [100., 20., 44., 48.], "annotation": "b",
+                    "saved_attribute_attributes": { "valueof": { "parameter_longname": "Rate Synced" } } } },
+                message("obj-3", "edit 0 Main 1 \"Rate Synced\", edit 0 Main 2 -", [40., 100., 200., 22.]),
+                newobj("obj-4", "live.banks", [40., 140., 70., 22.], 1, 1)
+            ], "lines": cords, "parameters": { "parameterbanks": { "0": { "index": 0, "name": "Main", "parameters": ["Drive", "-", "-", "-"] } } } }))
+        };
+        let banked = |patcher: &Patcher| check(patcher).findings.iter().filter(|finding| finding.rule == BANK_MISSING).count();
+        assert_eq!(banked(&device(vec![cord("obj-3", 0, "obj-4", 0)])), 0, "[live.banks] puts it in bank 0 while the device runs");
+        assert_eq!(banked(&device(vec![])), 1);
     }
 
     #[test]
@@ -916,25 +1080,13 @@ mod tests {
 
     #[test]
     fn an_object_max_doesnt_know_and_a_cord_to_a_port_a_box_hasnt_got_are_found() {
-        use crate::devices::patch::reference::{Count, Object, Reference};
+        use crate::devices::patch::reference::Count;
         let mut reference = Reference::default();
         for (class, inlets, outlets) in [
             ("metro", Count::Fixed { count: 2 }, Count::Fixed { count: 1 }),
             ("route", Count::Arguments { plus: 1, bare: 2 }, Count::Arguments { plus: 1, bare: 2 }),
         ] {
-            reference.objects.insert(
-                class.into(),
-                Object {
-                    module: "max".into(),
-                    digest: String::new(),
-                    inlets,
-                    outlets,
-                    outlet_types: vec![],
-                    inlet_digests: vec![],
-                    outlet_digests: vec![],
-                    seen: 1,
-                },
-            );
+            reference.objects.insert(class.into(), Object { module: "max".into(), inlets, outlets, seen: 1, ..Object::default() });
         }
         let patcher = read(json!({ "boxes": [
             newobj("obj-1", "metro 100", [40., 20., 70., 22.], 2, 1),

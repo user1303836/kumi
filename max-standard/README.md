@@ -24,4 +24,5 @@ max-standard/
 cargo run -p kumi-runtime --example max_patch_survey -- report.json --into max-standard/standard.json <device or folder>...
 ```
 
-`--findings` also prints each device's broken rules, to read them; they never go into the report.
+- `--into` replaces the measured counts, it doesn't add to them: survey every device measured so far at once.
+- `--findings` also prints each device's broken rules, to read them; they never go into the report.
