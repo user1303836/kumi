@@ -2,6 +2,9 @@
 //! holding the Max patcher as JSON (NUL-terminated), as Live's own device templates are laid out.
 
 use kumi_common::js::json::stringify_with_indent;
+
+use super::patch::layout::arrange;
+use super::patch::{NoFiles, Patcher};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -79,21 +82,28 @@ pub struct DecodedAmxd {
 
 /// A device file's type and patcher; None when it isn't one.
 pub fn decode_amxd(bytes: &[u8]) -> Option<DecodedAmxd> {
+    let (code, chunk) = patcher_chunk(bytes)?;
+    let kind = DeviceType::from_code(code)?;
+    let text = String::from_utf8_lossy(chunk);
+    let text = text.trim_end_matches('\0');
+    serde_json::from_str::<Value>(text).ok().map(|patcher| DecodedAmxd { kind, patcher })
+}
+
+/// A device file's four-letter type code and its "ptch" chunk as it lies in the file: the patcher's JSON, or a frozen
+/// device's container of files (see [`super::patch::frozen`]).
+pub fn patcher_chunk(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
     if bytes.len() < 12 || &bytes[0..4] != b"ampf" {
         return None;
     }
     let read_u32 = |at: usize| u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]) as usize;
     let length = read_u32(4);
     let code = &bytes[8..(8 + length).min(bytes.len())];
-    let kind = DeviceType::from_code(code)?;
     let mut at = 8 + length;
     while at + 8 <= bytes.len() {
         let tag = &bytes[at..at + 4];
         let size = read_u32(at + 4);
         if tag == b"ptch" {
-            let text = String::from_utf8_lossy(&bytes[(at + 8).min(bytes.len())..(at + 8 + size).min(bytes.len())]);
-            let text = text.trim_end_matches('\0');
-            return serde_json::from_str::<Value>(text).ok().map(|patcher| DecodedAmxd { kind, patcher });
+            return Some((code, &bytes[(at + 8).min(bytes.len())..(at + 8 + size).min(bytes.len())]));
         }
         at += 8 + size;
     }
@@ -169,7 +179,8 @@ pub struct DevicePatcherOptions {
 }
 
 /// A device's top-level patcher, as Live's templates have it: opened in presentation (the device's
-/// face), `width` pixels wide, with `description` as its info text.
+/// face), `width` pixels wide, with `description` as its info text. Its boxes are laid out by Kumi's layout, so the
+/// patcher keeps Kumi's standard for Max patchers (`max-standard/`).
 pub fn device_patcher(kind: DeviceType, options: DevicePatcherOptions) -> Value {
     let amxdtype = u32::from_be_bytes(kind.code().as_bytes().try_into().expect("a four-letter code"));
     let project = json!({
@@ -177,7 +188,7 @@ pub fn device_patcher(kind: DeviceType, options: DevicePatcherOptions) -> Value 
         "showdependencies": 1, "autolocalize": 0, "contents": { "patchers": {} }, "layout": {}, "searchpath": {}, "detailsvisible": 0, "amxdtype": amxdtype, "readonly": 0, "devpathtype": 0, "devpath": ".",
         "sortmode": 0, "viewmode": 0,
     });
-    json!({
+    let document = json!({
         "patcher": {
             "fileversion": 1,
             "appversion": { "major": 9, "minor": 1, "revision": 5, "architecture": "x64", "modernui": 1 },
@@ -212,5 +223,8 @@ pub fn device_patcher(kind: DeviceType, options: DevicePatcherOptions) -> Value 
             "project": project,
             "autosave": 0,
         },
-    })
+    });
+    let mut patcher = Patcher::read(&document, &NoFiles);
+    arrange(&mut patcher);
+    patcher.to_document()
 }

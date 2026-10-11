@@ -5,6 +5,8 @@ use super::{
     gen::{audio_effect_patcher, instrument_patcher, GenSpec, MIX, OUTPUT},
     harness::{check_midi_device_isolated, IsolatedOptions},
     midi::midi_device_patcher,
+    patch::reference,
+    patched::patched_device,
     spec::{check_spec, Control, DeviceSpec},
 };
 use crate::{
@@ -105,7 +107,12 @@ impl KernelTool for DeviceTool {
                 return Ok(ToolResult::error(stringify(&json!({"problems": problems, "next":"Fix these and call make_device again."}))))
             }
         };
-        let tested = if let DeviceSpec::MidiEffect(midi) = &spec {
+        let tested = if let DeviceSpec::Patch(_) = &spec {
+            match reference::installed() {
+                Some(_) => "Kumi's checks passed: every object is one this machine's Max has, every cord meets a port, and no message's order is left to where its boxes sit; Kumi laid it out top to bottom".to_string(),
+                None => "Kumi's checks passed (Max wasn't found here, so its objects weren't checked against it); Kumi laid it out top to bottom".to_string(),
+            }
+        } else if let DeviceSpec::MidiEffect(midi) = &spec {
             let verified = check_midi_device_isolated(midi, IsolatedOptions::default()).await;
             if !verified.problems.is_empty() {
                 return Ok(ToolResult::error(stringify(
@@ -150,6 +157,18 @@ impl KernelTool for DeviceTool {
                 s.name = name.clone();
                 instrument_patcher(&s)
             }
+            DeviceSpec::Patch(s) => {
+                let mut s = s.clone();
+                s.name = name.clone();
+                match patched_device(&s, reference::installed()) {
+                    Ok(patcher) => patcher,
+                    Err(problems) => {
+                        return Ok(ToolResult::error(stringify(
+                            &json!({"problems": problems, "next":"Fix these and call make_device again."}),
+                        )))
+                    }
+                }
+            }
         };
         let written: Result<(), RuntimeError> = async {
             let mut options = tokio::fs::OpenOptions::new();
@@ -180,10 +199,13 @@ impl KernelTool for DeviceTool {
             }
             signal.check()?;
         }
+        // A silent render means the code didn't compile, or a patch passes no sound.
+        let silent =
+            if matches!(spec, DeviceSpec::Patch(_)) { "the patch passes no sound: fix it" } else { "the code didn't compile: fix it" };
         let (kind,next,extra)=match spec.kind() {
-            DeviceType::MidiEffect => ("MIDI effect","load_device with this itemId on the MIDI track; Live puts a MIDI effect before the instrument.",vec![]),
-            DeviceType::AudioEffect => ("audio effect","load_device with this itemId on the track, then hear it with audition while audio plays through that track (a silent render means the code didn't compile: fix it and make it again).",vec![&*MIX,&*OUTPUT]),
-            DeviceType::Instrument => ("instrument","load_device with this itemId on a MIDI track, write a short clip, and hear it with audition (a silent render means the code didn't compile: fix it and make it again).",vec![&*OUTPUT]),
+            DeviceType::MidiEffect => ("MIDI effect","load_device with this itemId on the MIDI track; Live puts a MIDI effect before the instrument.".to_string(),vec![]),
+            DeviceType::AudioEffect => ("audio effect",format!("load_device with this itemId on the track, then hear it with audition while audio plays through that track (a silent render means {silent} and make it again)."),vec![&*MIX,&*OUTPUT]),
+            DeviceType::Instrument => ("instrument",format!("load_device with this itemId on a MIDI track, write a short clip, and hear it with audition (a silent render means {silent} and make it again)."),vec![&*OUTPUT]),
         };
         let controls: Vec<_> = spec.controls().iter().chain(extra).map(describe_control).collect();
         let mut result = json!({"made":name,"type":kind,"itemId":item_id,"file":file.to_string_lossy(),"controls":controls});

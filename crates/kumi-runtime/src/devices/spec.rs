@@ -1,5 +1,6 @@
-//! What the model asks for when it makes a device, and the checks it has to pass. The model never
-//! writes a patch: it names the device, its knobs and its code, and Kumi builds the rest.
+//! What the model asks for when it makes a device, and the checks it has to pass. The model names the device and its
+//! knobs, then gives its code (JavaScript or GenExpr, which Kumi builds a device around) or a patch of Max's own
+//! objects in Kumi's notation, which Kumi frames, lays out and checks.
 
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -12,6 +13,8 @@ use serde_json::{Map, Value};
 
 use super::amxd::DeviceType;
 use super::gen::{check_gen_code, param_name, param_problem, MAX_VOICES};
+use super::patch::reference;
+use super::patched::patched_device;
 
 /// A knob, a menu or a switch on the device: an ordinary Live parameter, automatable and mappable.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -245,12 +248,23 @@ pub struct InstrumentSpec {
     pub voices: u32,
 }
 
+/// A device of any kind that the model patches with Max's own objects, in Kumi's notation.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct PatchSpec {
+    pub kind: DeviceType,
+    pub name: String,
+    pub about: String,
+    pub controls: Vec<Control>,
+    pub patch: String,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DeviceSpec {
     MidiEffect(MidiSpec),
     AudioEffect(AudioEffectSpec),
     Instrument(InstrumentSpec),
+    Patch(PatchSpec),
 }
 
 impl DeviceSpec {
@@ -259,6 +273,7 @@ impl DeviceSpec {
             DeviceSpec::MidiEffect(_) => DeviceType::MidiEffect,
             DeviceSpec::AudioEffect(_) => DeviceType::AudioEffect,
             DeviceSpec::Instrument(_) => DeviceType::Instrument,
+            DeviceSpec::Patch(spec) => spec.kind,
         }
     }
 
@@ -267,6 +282,7 @@ impl DeviceSpec {
             DeviceSpec::MidiEffect(spec) => &spec.name,
             DeviceSpec::AudioEffect(spec) => &spec.name,
             DeviceSpec::Instrument(spec) => &spec.name,
+            DeviceSpec::Patch(spec) => &spec.name,
         }
     }
 
@@ -275,6 +291,7 @@ impl DeviceSpec {
             DeviceSpec::MidiEffect(spec) => &spec.about,
             DeviceSpec::AudioEffect(spec) => &spec.about,
             DeviceSpec::Instrument(spec) => &spec.about,
+            DeviceSpec::Patch(spec) => &spec.about,
         }
     }
 
@@ -283,14 +300,17 @@ impl DeviceSpec {
             DeviceSpec::MidiEffect(spec) => &spec.controls,
             DeviceSpec::AudioEffect(spec) => &spec.controls,
             DeviceSpec::Instrument(spec) => &spec.controls,
+            DeviceSpec::Patch(spec) => &spec.controls,
         }
     }
 
+    /// The device's code, or its patch.
     pub fn code(&self) -> &str {
         match self {
             DeviceSpec::MidiEffect(spec) => &spec.code,
             DeviceSpec::AudioEffect(spec) => &spec.code,
             DeviceSpec::Instrument(spec) => &spec.code,
+            DeviceSpec::Patch(spec) => &spec.patch,
         }
     }
 }
@@ -439,7 +459,10 @@ pub fn check_spec(input: &Map<String, Value>) -> Result<DeviceSpec, Vec<String>>
     if kind.is_none() {
         problems.push(format!("type {}: midi_effect, audio_effect or instrument.", stringify(input.get("type").unwrap_or(&Value::Null))));
     }
-    let gen = matches!(kind, Some(DeviceType::AudioEffect) | Some(DeviceType::Instrument));
+    // A device given as a patch of Max's objects has no code of its own: its controls are wired in the patch.
+    let patched = input.get("patch").is_some_and(|patch| !patch.is_null());
+    let sound = matches!(kind, Some(DeviceType::AudioEffect) | Some(DeviceType::Instrument));
+    let gen = sound && !patched;
     let name = trimmed_string(input.get("name"));
     if !NAME.is_match(&name) {
         problems.push("name: 1–32 characters, letters, digits, spaces and . _ ( ) & ' + -, starting with a letter or digit.".to_string());
@@ -479,7 +502,7 @@ pub fn check_spec(input: &Map<String, Value>) -> Result<DeviceSpec, Vec<String>>
             ));
             continue;
         }
-        if gen && MIX_OR_OUTPUT.is_match(&control_name) {
+        if sound && MIX_OR_OUTPUT.is_match(&control_name) {
             let what = if kind == Some(DeviceType::AudioEffect) { "audio effect" } else { "instrument" };
             problems.push(format!("{label}.name: Kumi adds {control_name} to every {what} itself; leave it out."));
             continue;
@@ -555,7 +578,15 @@ pub fn check_spec(input: &Map<String, Value>) -> Result<DeviceSpec, Vec<String>>
         }
     }
     let code = input.get("code").and_then(Value::as_str).unwrap_or("").to_string();
-    if trim(&code).is_empty() || utf16_len(&code) > MAX_CODE {
+    let patch = input.get("patch").and_then(Value::as_str).unwrap_or("").to_string();
+    if patched {
+        if !trim(&code).is_empty() {
+            problems.push("code: give the device's code or its patch, not both (a gen~ in the patch holds its own code).".to_string());
+        }
+        if trim(&patch).is_empty() || utf16_len(&patch) > MAX_CODE {
+            problems.push("patch: the device as a patch of Max's objects in Kumi's notation, up to 100,000 characters.".to_string());
+        }
+    } else if trim(&code).is_empty() || utf16_len(&code) > MAX_CODE {
         problems.push(format!("code: the device's {}, up to 100,000 characters.", if gen { "GenExpr" } else { "JavaScript" }));
     } else if gen {
         problems.extend(check_gen_code(&code, kind.expect("a gen device has a type"), &checked));
@@ -577,6 +608,10 @@ pub fn check_spec(input: &Map<String, Value>) -> Result<DeviceSpec, Vec<String>>
     }
     // Only a MIDI effect's code runs outside Live; an audio effect or instrument is heard with audition once loaded.
     let tests: Vec<Value> = match input.get("tests") {
+        Some(Value::Array(items)) if patched && !items.is_empty() => {
+            problems.push("tests: they run a MIDI effect's code; a patch is heard in Live, so leave them out.".to_string());
+            Vec::new()
+        }
         Some(Value::Array(items)) if !gen => items.clone(),
         _ => Vec::new(),
     };
@@ -614,7 +649,7 @@ pub fn check_spec(input: &Map<String, Value>) -> Result<DeviceSpec, Vec<String>>
         checked_tests.push(MidiTest { name: head(name, 80), set, input: input_events, expect: expected });
     }
     let mut voices: u32 = 8;
-    if kind == Some(DeviceType::Instrument) {
+    if kind == Some(DeviceType::Instrument) && !patched {
         if let Some(given) = input.get("voices") {
             match given.as_f64().filter(|value| value.fract() == 0.0 && *value >= 1.0 && *value <= MAX_VOICES as f64) {
                 Some(given) => voices = given as u32,
@@ -622,7 +657,7 @@ pub fn check_spec(input: &Map<String, Value>) -> Result<DeviceSpec, Vec<String>>
             }
         }
     }
-    if !gen {
+    if !gen && !patched {
         if let Some(runs_free) = input.get("runs_free") {
             if !runs_free.is_boolean() {
                 problems
@@ -632,6 +667,12 @@ pub fn check_spec(input: &Map<String, Value>) -> Result<DeviceSpec, Vec<String>>
     }
     if !problems.is_empty() {
         return Err(problems);
+    }
+    if patched {
+        let spec = PatchSpec { kind: kind.unwrap_or(DeviceType::MidiEffect), name, about, controls: checked, patch };
+        // Built and checked now, so what's wrong with the patch comes back before anything is written.
+        patched_device(&spec, reference::installed())?;
+        return Ok(DeviceSpec::Patch(spec));
     }
     match kind {
         Some(DeviceType::AudioEffect) => Ok(DeviceSpec::AudioEffect(AudioEffectSpec { name, about, controls: checked, code })),

@@ -1,0 +1,67 @@
+{
+  "about": "What Kumi's checks know of Max's objects beyond what a patcher says about them. A class not listed follows Max's convention: only its left inlet is hot. Every list here is an exception to that convention or a fact a rule needs.",
+  "aliases": {
+    "b": "bangbang",
+    "del": "delay",
+    "f": "float",
+    "i": "int",
+    "p": "patcher",
+    "r": "receive",
+    "s": "send",
+    "sel": "select",
+    "t": "trigger",
+    "v": "value"
+  },
+  "inlets": {
+    "about": "Which inlets make an object send: \"all\", {\"hot\": [...]} or {\"cold\": [...]} (every other inlet hot). Code, subpatchers and abstractions decide for themselves, so they count as all hot.",
+    "buddy": "all",
+    "bpatcher": "all",
+    "counter": { "hot": [0, 3] },
+    "funnel": "all",
+    "gate": { "hot": [1] },
+    "gen": "all",
+    "gen~": "all",
+    "js": "all",
+    "jsui": "all",
+    "mc.gen~": "all",
+    "mc.poly~": "all",
+    "midiformat": "all",
+    "mxj": "all",
+    "node.script": "all",
+    "pak": "all",
+    "patcher": "all",
+    "pfft~": "all",
+    "poly~": "all",
+    "rnbo~": "all",
+    "switch": { "cold": [0] },
+    "timer": "all",
+    "v8": "all",
+    "v8.codebox": "all"
+  },
+  "deferred": {
+    "about": "Objects that send later (another scheduler tick, or the low-priority queue), so what they send isn't ordered against the message that reached them.",
+    "classes": ["defer", "deferlow", "delay", "pipe", "qlim"]
+  },
+  "audio_with_messages": {
+    "about": "Audio objects (named with ~) that answer a message with a message at once; every other ~ object ends a chain of messages.",
+    "classes": ["buffer~", "info~", "peek~", "polybuffer~", "snapshot~"]
+  },
+  "contents": {
+    "about": "Objects whose inlets and outlets come from what's inside them (a subpatcher, code, a file), not from their text.",
+    "classes": ["bpatcher", "gen", "gen~", "js", "jsui", "mc.gen~", "mc.poly~", "mxj", "node.script", "p", "patcher", "pfft~", "poly~", "rnbo~", "v8", "v8.codebox", "v8ui"]
+  },
+  "named": {
+    "about": "Objects whose first argument names something shared by every patcher in Max that uses the name. In Max for Live a name starting with --- is made unique to each copy of the device.",
+    "classes": [
+      "buffer~", "buffir~", "coll", "dict", "groove~", "index~", "info~", "lookup~", "mc.receive~", "mc.send~", "peek~", "play~",
+      "poke~", "polybuffer~", "receive", "receive~", "record~", "send", "send~", "table", "value", "wave~"
+    ]
+  },
+  "roles": {
+    "about": "What an object is for, as a patcher's colours can show it.",
+    "dsp": ["gen", "gen~", "mc.gen~", "mc.poly~", "pfft~", "poly~", "rnbo~"],
+    "storage": ["buffer~", "coll", "dict", "polybuffer~", "pattrstorage", "table", "value"],
+    "timing": ["defer", "deferlow", "delay", "line", "metro", "pipe", "qlim", "speedlim", "timer"],
+    "wireless": ["forward", "mc.receive~", "mc.send~", "receive", "receive~", "send", "send~"]
+  }
+}
