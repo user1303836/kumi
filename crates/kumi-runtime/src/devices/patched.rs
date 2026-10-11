@@ -24,6 +24,9 @@ use super::spec::PatchSpec;
 /// shares). Its layout, its face and its parameters are Kumi's.
 const THE_PATCH_S: [&str; 3] = ["patch.", "order.", "names."];
 
+/// A [v8ui]'s size on the face: as tall as the face has room for.
+const VIEW: [f64; 2] = [160.0, 150.0];
+
 /// A newobj box of Kumi's own, with its in- and outlets and what each outlet sends.
 fn object(id: &str, text: &str, ins: usize, outs: usize, outlettype: &[&str]) -> PatchBox {
     PatchBox::new(json!({ "id": id, "maxclass": "newobj", "text": text, "numinlets": ins, "numoutlets": outs, "outlettype": outlettype,
@@ -43,7 +46,8 @@ pub fn patched_device(spec: &PatchSpec, reference: Option<&Reference>) -> Result
         DeviceType::AudioEffect => vec![&*MIX, &*OUTPUT],
         DeviceType::Instrument => vec![&*OUTPUT],
     };
-    let mut face = Face::new(spec.controls.len() + kumis.len());
+    let on_face = spec.controls.len() + kumis.len();
+    let mut face = Face::new(on_face);
     match spec.kind {
         DeviceType::MidiEffect => {
             boxes.push(object("obj-in", "midiin", 1, 1, &["int"]));
@@ -79,7 +83,17 @@ pub fn patched_device(spec: &PatchSpec, reference: Option<&Reference>) -> Result
         controls,
         reference,
     };
-    let (patch_boxes, patch_lines) = expand(&notation, &outside).map_err(said)?;
+    let (mut patch_boxes, patch_lines) = expand(&notation, &outside).map_err(said)?;
+    // What draws (a [v8ui]) is on the face too: beside the controls, each as tall as the face, the device as wide as
+    // they take.
+    let mut width = face.width();
+    let mut x = if on_face == 0 { 8.0 } else { width };
+    for entry in patch_boxes.iter_mut().filter(|entry| entry["box"]["maxclass"] == "v8ui") {
+        entry["box"]["presentation"] = json!(1);
+        entry["box"]["presentation_rect"] = json!([x, 8.0, VIEW[0], VIEW[1]]);
+        x += VIEW[0] + 8.0;
+        width = width.max(x);
+    }
     let mut problems: Vec<String> = Vec::new();
     // A control nothing takes from does nothing; an out nothing reaches is a device that's silent.
     for control in &spec.controls {
@@ -122,7 +136,6 @@ pub fn patched_device(spec: &PatchSpec, reference: Option<&Reference>) -> Result
         let ((from, outlet), (to, inlet)) = (end("source"), end("destination"));
         lines.push(Line::new(&from, outlet, &to, inlet));
     }
-    let width = face.width();
     boxes.extend(face.boxes);
     lines.extend(face.lines);
     let document =
@@ -184,6 +197,17 @@ mod tests {
                 },
             );
         }
+        // As Max's help shows [pipe]: bare or with a delay time.
+        reference.objects.insert(
+            "pipe".into(),
+            Object {
+                inlets: Count::Fixed { count: 2 },
+                outlets: Count::Fixed { count: 1 },
+                seen: 13,
+                most_arguments: Some(1),
+                ..Object::default()
+            },
+        );
         reference
     }
 
@@ -240,6 +264,28 @@ mod tests {
             patched_device(&spec(DeviceType::MidiEffect, vec![knob("Semitones", -24.0, 24.0, Unit::St)], transposer), Some(&reference))
                 .unwrap();
         assert_eq!(broken(&midi, &reference), Vec::<String>::new());
+        // [pipe 0 0 125] delays pitch and velocity: an outlet and an inlet more than Max's help ever shows.
+        let echo = concat!(
+            "notes = [unpack 0 0]\n",
+            "later = [pipe 0 0 125]\n",
+            "pair = [pack 0 0]\n",
+            "in -> [midiparse] -> notes -> later\n",
+            "notes.1 -> later.1\n",
+            "later.1 -> pair.1\n",
+            "later -> pair -> [midiformat] -> out\n",
+        );
+        let echo = patched_device(&spec(DeviceType::MidiEffect, vec![], echo), Some(&reference)).unwrap();
+        let later = Patcher::read(&echo, &NoFiles).boxes.into_iter().find(|item| item.str("varname") == "later").unwrap();
+        assert_eq!((later.inlets(), later.outlets()), (2, 2), "as its cords use it");
+        // What a [v8ui] draws is on the face, beside the controls; the device is as wide as it takes.
+        let drawn = "view = [v8ui] { function msg_float(v) { mgraphics.redraw(); } }\n\"Semitones\" -> view\nin -> out\n";
+        let drawn =
+            patched_device(&spec(DeviceType::MidiEffect, vec![knob("Semitones", -24.0, 24.0, Unit::St)], drawn), Some(&reference)).unwrap();
+        let view = Patcher::read(&drawn, &NoFiles).boxes.into_iter().find(|item| item.maxclass() == "v8ui").unwrap();
+        assert!(view.shown());
+        assert_eq!(view.presentation_rect().map(|rect| (rect.x, rect.w)), Some((140.0, VIEW[0])));
+        assert_eq!(drawn["patcher"]["devicewidth"], json!(140.0 + VIEW[0] + 8.0));
+        assert_eq!(broken(&drawn, &reference), Vec::<String>::new());
 
         let synth = concat!(
             "voice = [gen~] {\n",

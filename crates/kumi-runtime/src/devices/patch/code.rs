@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use regex::Regex;
+use serde_json::Value;
 
 use super::{Files, MaxBox};
 
@@ -47,13 +48,17 @@ static DEFINITION: LazyLock<Regex> = LazyLock::new(|| {
 const KEYWORDS: [&str; 9] = ["if", "for", "while", "switch", "catch", "function", "return", "with", "else"];
 
 impl Code {
-    /// The code a box runs (a [v8.codebox]'s own, a [v8ui]'s or a [js]'s file) with what it includes and requires,
-    /// read through `files`; None for a box that runs none, or whose file can't be read.
+    /// The code a box runs (a [v8.codebox]'s own, a [v8ui]'s or a [js]'s file, or what it embeds) with what it
+    /// includes and requires, read through `files`; None for a box that runs none, or whose file can't be read.
     pub fn read(item: &MaxBox, files: &dyn Files) -> Option<Code> {
+        let embedded = || {
+            let file = item.fields.get("textfile").filter(|file| file.get("embed").and_then(Value::as_i64) == Some(1))?;
+            file.get("text").and_then(Value::as_str).map(str::to_string)
+        };
         let own = match item.class() {
             "v8.codebox" => Some(item.str("code").to_string()).filter(|code| !code.is_empty()),
-            "v8ui" | "jsui" => script(files, item.str("filename")),
-            "js" | "v8" if item.maxclass() == "newobj" => script(files, item.args().first().copied().unwrap_or("")),
+            "v8ui" | "jsui" => embedded().or_else(|| script(files, item.str("filename"))),
+            "js" | "v8" if item.maxclass() == "newobj" => embedded().or_else(|| script(files, item.args().first().copied().unwrap_or(""))),
             _ => None,
         }?;
         let mut code = Code::default();
@@ -104,6 +109,51 @@ impl Code {
         }
         Some(false)
     }
+}
+
+static INLETS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:^|[^\w$.])inlets\s*=\s*(\d+)").unwrap());
+static OUTLETS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:^|[^\w$.])outlets\s*=\s*(\d+)").unwrap());
+
+/// The inlets and outlets a script gives its box (`inlets = 2; outlets = 3;` in its global code), each None when it
+/// doesn't say (Max gives one).
+pub fn declared_ports(source: &str) -> (Option<usize>, Option<usize>) {
+    let clean = clean(source);
+    let count = |pattern: &Regex| pattern.captures(&clean).and_then(|found| found[1].parse().ok());
+    (count(&INLETS), count(&OUTLETS))
+}
+
+static AT_LINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r":(\d+)(?::\d+)?\)?\s*$").unwrap());
+
+/// What stops JavaScript from parsing, with its line (from 1); None when it parses. The code is only read, never run:
+/// `Function(source)` makes a function of it without calling it. QuickJS reads it as Max's engine would, short of a
+/// few newer forms.
+pub fn syntax_problem(source: &str) -> Option<(usize, String)> {
+    let checked = (|| -> rquickjs::Result<Option<(usize, String)>> {
+        let runtime = rquickjs::Runtime::new()?;
+        runtime.set_memory_limit(64 * 1024 * 1024);
+        let until = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        runtime.set_interrupt_handler(Some(Box::new(move || std::time::Instant::now() > until)));
+        let context = rquickjs::Context::full(&runtime)?;
+        context.with(|ctx| {
+            let make: rquickjs::Function = ctx.globals().get("Function")?;
+            match make.call::<_, rquickjs::Value>((source,)) {
+                Ok(_) => Ok(None),
+                Err(rquickjs::Error::Exception) => {
+                    let thrown = ctx.catch();
+                    let exception = thrown.as_exception();
+                    let message = exception.and_then(|exception| exception.message()).unwrap_or_else(|| "it doesn't parse".into());
+                    // The function the text is put in starts two lines before it, and ends a line after it.
+                    let line = exception
+                        .and_then(|exception| exception.stack())
+                        .and_then(|stack| stack.lines().find_map(|line| AT_LINE.captures(line)?[1].parse::<usize>().ok()))
+                        .map_or(1, |line| line.saturating_sub(2).clamp(1, source.lines().count().max(1)));
+                    Ok(Some((line, message)))
+                }
+                Err(other) => Err(other),
+            }
+        })
+    })();
+    checked.unwrap_or(None)
 }
 
 /// A script file's text, by its name with or without `.js`.
@@ -329,5 +379,18 @@ mod tests {
         assert!(partial.partial);
         assert_eq!(partial.sends_at_once("keep"), None, "what it includes can't be read, so it can't be known");
         assert!(Code::read(&code_box(json!({ "maxclass": "newobj", "text": "js nowhere" })), &files).is_none());
+
+        let embedded = code_box(json!({ "maxclass": "newobj", "text": "v8 steps @embed 1", "filename": "steps.js",
+            "textfile": { "text": "function bang() { outlet(0, 1); }", "filename": "steps.js", "flags": 1, "embed": 1, "autowatch": 1 } }));
+        assert_eq!(Code::read(&embedded, &files).unwrap().sends_at_once("bang"), Some(true), "the code it embeds, with no file");
+    }
+
+    #[test]
+    fn a_scripts_ports_and_whether_it_parses_are_read_from_its_code() {
+        assert_eq!(declared_ports("inlets = 2;\noutlets = 3;\nfunction bang() { this.inlets = 9; }"), (Some(2), Some(3)));
+        assert_eq!(declared_ports("// outlets = 4\nfunction bang() { outlet(0, 1); }"), (None, None), "a comment doesn't count");
+        assert_eq!(syntax_problem("outlets = 1;\nfunction bang() { outlet(0, [1, 2].map((x) => x * 2)); }"), None);
+        assert_eq!(syntax_problem("outlets = 1;\nfunction bang() {\n  outlet(0, 1;\n}\n"), Some((3, "Unexpected token ';'".into())));
+        assert_eq!(syntax_problem("function f( {"), Some((1, "Unexpected end of input".into())), "the last line, at most");
     }
 }

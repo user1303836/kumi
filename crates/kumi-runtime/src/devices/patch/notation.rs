@@ -10,6 +10,8 @@
 //! "Rate" -> [prepend interval] -> clock    # a control, by its name
 //! accent = (bang)                          # a message box
 //! fx = [gen~] { out1 = in1 * 0.5; }        # gen~ holds GenExpr
+//! steps = [v8 steps] { … }                 # v8 holds JavaScript, embedded in the device
+//! scope = [v8ui] { … }                     # v8ui holds JavaScript that draws, on the device's face
 //! voice = [p voice] { … }                  # a subpatcher holds a patch; its [inlet]s and [outlet]s number from the
 //!                                          # left, as they're written
 //! ```
@@ -18,6 +20,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde_json::{json, Value};
 
+use super::code::{declared_ports, syntax_problem};
 use super::reference::{atoms, Reference};
 use crate::devices::gen::{gen_patcher, inputs_read, outputs_written};
 
@@ -46,6 +49,8 @@ pub enum What {
     Message(String),
     /// A gen~ (or a gen) and its GenExpr.
     Gen { text: String, code: String },
+    /// A v8 (or a v8ui, which draws) and its JavaScript, embedded in the device.
+    Js { text: String, code: String },
     /// A subpatcher (`[p name]`) and the patch in it.
     Patcher { text: String, inner: Notation },
 }
@@ -54,7 +59,9 @@ impl What {
     /// Its object's class: "metro" for [metro 125], "message" for a message box.
     pub fn class(&self) -> String {
         match self {
-            What::Object(text) | What::Gen { text, .. } | What::Patcher { text, .. } => atoms(text).into_iter().next().unwrap_or_default(),
+            What::Object(text) | What::Gen { text, .. } | What::Js { text, .. } | What::Patcher { text, .. } => {
+                atoms(text).into_iter().next().unwrap_or_default()
+            }
             What::Message(_) => "message".into(),
         }
     }
@@ -257,10 +264,12 @@ fn tokens(text: &str, first_line: usize) -> Result<Vec<(Token, usize)>, String> 
     Ok(out)
 }
 
-/// The objects that hold what a block gives them: GenExpr for gen~ and gen, a patch for a subpatcher.
+/// The objects that hold what a block gives them: GenExpr for gen~ and gen, JavaScript for v8 and v8ui, a patch for a
+/// subpatcher.
 fn holds(class: &str) -> Option<&'static str> {
     match class {
         "gen~" | "gen" => Some("GenExpr"),
+        "v8" | "v8ui" => Some("JavaScript"),
         "p" | "patcher" => Some("a patch"),
         _ => None,
     }
@@ -314,6 +323,10 @@ impl Reader<'_> {
                         self.at += 1;
                         What::Gen { text, code }
                     }
+                    (Some((code, _)), Some("JavaScript")) => {
+                        self.at += 1;
+                        What::Js { text, code }
+                    }
                     (Some((inner, from)), Some(_)) => {
                         self.at += 1;
                         match parse_from(&inner, from, false) {
@@ -324,8 +337,15 @@ impl Reader<'_> {
                             }
                         }
                     }
+                    (Some(_), None) if matches!(class.as_str(), "js" | "jsui" | "v8.codebox") => {
+                        self.problems.push(format!(
+                            "line {line}: write JavaScript as [v8] {{ … }}, or [v8ui] {{ … }} to draw: Max's modern engine, embedded in the device."
+                        ));
+                        return None;
+                    }
                     (Some(_), None) => {
-                        self.problems.push(format!("line {line}: only [gen~], [gen] and [p] hold a {{ … }} block, not [{class}]."));
+                        self.problems
+                            .push(format!("line {line}: only [gen~], [gen], [v8], [v8ui] and [p] hold a {{ … }} block, not [{class}]."));
                         return None;
                     }
                     (None, Some(held)) => {
@@ -568,6 +588,43 @@ fn expand_within(notation: &Notation, outside: &Outside, top: bool) -> Result<(V
                 json!({ "maxclass": "newobj", "text": text, "numinlets": ins.max(1), "numoutlets": outs, "outlettype": vec![kind; outs],
                     "patcher": gen_patcher(code, ins, outs) })
             }
+            What::Js { .. } if class == "v8ui" && !top => {
+                problems.push(format!(
+                    "line {}: a [v8ui] draws on the device's face: put it in the device's own patch, not in a [p].",
+                    item.line
+                ));
+                continue;
+            }
+            What::Js { text, code } => {
+                if let Some((line, message)) = syntax_problem(code) {
+                    problems.push(format!("line {}: [{text}]'s JavaScript doesn't parse: {message}.", item.line + line - 1));
+                    continue;
+                }
+                let (ins, outs) = declared_ports(code);
+                let (ins, outs) = (ins.unwrap_or(1), outs.unwrap_or(1));
+                for (used, has, port, side) in [(inlets_used[at], ins, "inlet", "inlets"), (outlets_used[at], outs, "outlet", "outlets")] {
+                    if used > has {
+                        problems.push(format!(
+                            "line {}: a cord uses {port} {} of [{text}], whose code gives it {has}: set {side} = {used}; in its code.",
+                            item.line,
+                            used - 1
+                        ));
+                    }
+                }
+                // As Max saves embedded code: the box opens it, and no file is needed.
+                let embedded =
+                    |file: &str, flags: u8| json!({ "text": code, "filename": file, "flags": flags, "embed": 1, "autowatch": 1 });
+                if class == "v8ui" {
+                    json!({ "maxclass": "v8ui", "filename": "none", "numinlets": ins, "numoutlets": outs, "outlettype": vec![""; outs],
+                        "parameter_enable": 0, "textfile": embedded("none", 0), "patching_rect": [40.0, 40.0 + at as f64 * 30.0, 120.0, 60.0] })
+                } else {
+                    let name = atoms(text).into_iter().nth(1).filter(|word| !word.starts_with('@'));
+                    let file = name.map_or("none".to_string(), |name| if name.ends_with(".js") { name } else { format!("{name}.js") });
+                    let text = if text.contains("@embed") { text.clone() } else { format!("{text} @embed 1") };
+                    json!({ "maxclass": "newobj", "text": text, "filename": file, "numinlets": ins, "numoutlets": outs,
+                        "outlettype": vec![""; outs], "saved_object_attributes": { "parameter_enable": 0 }, "textfile": embedded(&file, 1) })
+                }
+            }
             What::Patcher { text, inner } => {
                 let within = Outside { boxes: HashMap::new(), controls: BTreeMap::new(), reference: outside.reference };
                 let (inner_boxes, inner_lines) = match expand_within(inner, &within, false) {
@@ -732,7 +789,65 @@ mod tests {
                 "line 4: a line is a box (name = [object]) or cords between boxes (a -> b).",
                 "line 5: [gen~] holds GenExpr: write it in a { … } block after the box.",
                 "line 6: out is the device's own (what it receives and sends); name the box something else.",
-                "line 7: only [gen~], [gen] and [p] hold a { … } block, not [print].",
+                "line 7: only [gen~], [gen], [v8], [v8ui] and [p] hold a { … } block, not [print].",
+            ]
+        );
+        assert_eq!(
+            parse("old = [js] { function bang() {} }\nsteps = [v8]\n").unwrap_err(),
+            [
+                "line 1: write JavaScript as [v8] { … }, or [v8ui] { … } to draw: Max's modern engine, embedded in the device.",
+                "line 2: [v8] holds JavaScript: write it in a { … } block after the box.",
+            ]
+        );
+    }
+
+    #[test]
+    fn javascript_is_embedded_in_its_box_with_the_ports_its_code_gives() {
+        let notation = parse(concat!(
+            "steps = [v8 steps] {\n",
+            "  inlets = 2;\n",
+            "  outlets = 2;\n",
+            "  function bang() { outlet(0, [1, 0, 1].map((x) => x * 127)); }\n",
+            "}\n",
+            "view = [v8ui] {\n",
+            "  mgraphics.init();\n",
+            "  function paint() { mgraphics.rectangle(0, 0, 10, 10); mgraphics.fill(); }\n",
+            "}\n",
+            "steps.1 -> view\n",
+            "steps -> out\n",
+        ))
+        .unwrap();
+        let outside = Outside { boxes: HashMap::from([("out".to_string(), "obj-out".to_string())]), ..Outside::default() };
+        let (boxes, _) = expand(&notation, &outside).unwrap();
+        let steps = &boxes[0]["box"];
+        assert_eq!(
+            (steps["text"].clone(), steps["numinlets"].clone(), steps["numoutlets"].clone()),
+            (json!("v8 steps @embed 1"), json!(2), json!(2))
+        );
+        assert_eq!((steps["textfile"]["embed"].clone(), steps["textfile"]["filename"].clone()), (json!(1), json!("steps.js")));
+        assert!(steps["textfile"]["text"].as_str().unwrap().contains("function bang()"), "its code, in the device: no file");
+        let view = &boxes[1]["box"];
+        assert_eq!((view["maxclass"].clone(), view["numinlets"].clone(), view["numoutlets"].clone()), (json!("v8ui"), json!(1), json!(1)));
+
+        let wrong = parse(concat!(
+            "a = [v8] {\n",
+            "  function bang() {\n",
+            "    outlet(0, 1;\n",
+            "  }\n",
+            "}\n",
+            "b = [v8] { function bang() { outlet(1, 1); } }\n",
+            "b.1 -> out\n",
+            "p1 = [p inner] {\n",
+            "  [inlet] -> [v8ui] { function paint() {} }\n",
+            "}\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            expand(&wrong, &outside).unwrap_err(),
+            [
+                "line 3: [v8]'s JavaScript doesn't parse: Unexpected token ';'.",
+                "line 6: a cord uses outlet 1 of [v8], whose code gives it 1: set outlets = 2; in its code.",
+                "line 9: a [v8ui] draws on the device's face: put it in the device's own patch, not in a [p].",
             ]
         );
     }

@@ -100,6 +100,11 @@ pub struct Object {
     pub outlet_digests: Vec<String>,
     /// How many different saved texts the counts were fitted to (0: the reference page's alone).
     pub seen: usize,
+    /// The most arguments any of those texts had (None: the page's alone). A count that stayed the same only bare or
+    /// with one argument says nothing of more: one more argument can add a port ([pipe 0 0 1 250] delays three
+    /// numbers), and Max's help may never show it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub most_arguments: Option<usize>,
     /// The messages that only set something in it, sending nothing at once: its attributes, and the methods its page
     /// says send nothing ("Set the value with no output") or that set a thing without a word of sending.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
@@ -134,8 +139,9 @@ impl Reference {
         self.objects.get(class).or_else(|| self.objects.get(catalog().canonical(class)))
     }
 
-    /// An object's ports for a box's text ("route a b c"): None for a class the reference doesn't know, or one whose
-    /// ports come from what's inside it (a subpatcher, gen~, code).
+    /// An object's ports for a box's text ("route a b c"): None for a class the reference doesn't know, one whose
+    /// ports come from what's inside it (a subpatcher, gen~, code), or one given more arguments than the instances its
+    /// fixed count was seen in, when those had at most one.
     pub fn ports(&self, text: &str) -> Option<Ports> {
         let words = atoms(text);
         let (class, rest) = words.split_first()?;
@@ -144,6 +150,11 @@ impl Reference {
         }
         let object = self.object(class)?;
         let args: Vec<String> = rest.iter().take_while(|word| !word.starts_with('@')).cloned().collect();
+        let unseen =
+            |count: &Count| matches!(count, Count::Fixed { .. }) && object.most_arguments.is_some_and(|most| most < 2 && args.len() > most);
+        if unseen(&object.inlets) || unseen(&object.outlets) {
+            return None;
+        }
         let (inlets, outlets) = (object.inlets.of(&args), object.outlets.of(&args));
         let filler = object.outlet_types.last().cloned().unwrap_or_default();
         let outlet_types = (0..outlets).map(|at| object.outlet_types.get(at).cloned().unwrap_or_else(|| filler.clone())).collect();
@@ -316,7 +327,8 @@ fn plain(text: &str) -> String {
 /// An object from its reference page (a .maxref.xml): its class and what the page says of it.
 fn read_page(text: &str) -> Option<(String, Object)> {
     let head = OBJECT.captures(text)?;
-    let name = head[1].to_string();
+    // As it's typed in Max: the page escapes it ("&gt;" is [>]).
+    let name = plain(&head[1]);
     let module = MODULE.captures(&head[2]).map(|found| found[1].to_string()).unwrap_or_default();
     let digest = DIGEST.captures(text).map(|found| plain(&found[1])).unwrap_or_default();
     let ports = |list: &Regex| -> Vec<(String, String)> {
@@ -346,6 +358,7 @@ fn read_page(text: &str) -> Option<(String, Object)> {
         inlet_digests: inlets.into_iter().map(|(_, digest)| digest).collect(),
         outlet_digests: outlets.into_iter().map(|(_, digest)| digest).collect(),
         seen: 0,
+        most_arguments: None,
         quiet,
         looks,
     };
@@ -471,7 +484,7 @@ fn sources(c74: &Path) -> Sources {
 }
 
 /// How Kumi learns the reference: a new way is learned anew, as a new Max is.
-const LEARNER: u32 = 4;
+const LEARNER: u32 = 5;
 
 /// What the reference is learned from in a Max's C74 folder, and how, as one line: a new Max reads differently.
 pub fn fingerprint(c74: &Path) -> String {
@@ -497,6 +510,7 @@ fn unpaged(module: &str, inlets: usize, outlets: usize) -> Object {
         inlet_digests: Vec::new(),
         outlet_digests: Vec::new(),
         seen: 0,
+        most_arguments: None,
         quiet: BTreeSet::new(),
         looks: BTreeSet::new(),
     }
@@ -539,6 +553,7 @@ pub fn learn(c74: &Path) -> Reference {
             object.outlet_types = types;
         }
         object.seen = instances.len();
+        object.most_arguments = instances.iter().map(|instance| instance.args.len()).max();
     }
     for file in &found.abstractions {
         let Some(name) = file.file_stem().map(|stem| stem.to_string_lossy().into_owned()) else { continue };
@@ -771,5 +786,28 @@ mod tests {
         assert_eq!(reference.ports("route").map(|ports| ports.outlets), Some(2));
         assert_eq!(reference.ports("nothing 1 2"), None);
         assert_eq!(atoms(r#"sprintf "%s and %s" \"q"#), ["sprintf", "%s and %s", "\"q"]);
+    }
+
+    #[test]
+    fn a_count_seen_only_bare_or_with_one_argument_isnt_taken_for_more() {
+        let fixed = |inlets: usize, outlets: usize, seen: usize, most: Option<usize>| Object {
+            inlets: Count::Fixed { count: inlets },
+            outlets: Count::Fixed { count: outlets },
+            seen,
+            most_arguments: most,
+            ..Object::default()
+        };
+        let mut reference = Reference::default();
+        // Max's help has [pipe] bare and with a delay time; never delaying more than one number.
+        reference.objects.insert("pipe".into(), fixed(2, 1, 13, Some(1)));
+        reference.objects.insert("zl".into(), fixed(2, 2, 89, Some(3)));
+        reference.objects.insert("cverb~".into(), fixed(2, 2, 0, None));
+        let ports = |text: &str| reference.ports(text).map(|ports| (ports.inlets, ports.outlets));
+        assert_eq!(ports("pipe 250"), Some((2, 1)));
+        assert_eq!(ports("pipe 0 0 1 250"), None, "three numbers delayed: never seen, so its cords say");
+        assert_eq!(ports("zl group 4 @zlmaxsize 512"), Some((2, 2)), "the same with more arguments seen: it stays");
+        assert_eq!(ports("cverb~ 0.5 0.2 0.9"), Some((2, 2)), "a page alone is taken at its word");
+        let (name, _) = read_page(r#"<c74object name="&gt;=" module="max"><digest>Compare</digest></c74object>"#).unwrap();
+        assert_eq!(name, ">=", "named as it's typed in Max, so its page and its help instances meet");
     }
 }
