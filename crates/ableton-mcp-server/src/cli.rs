@@ -2,13 +2,23 @@
 use crate::command::CommandOutput;
 use crate::{
     bridge::{
-        extension_setup::{with_extension, ExtensionSetup},
-        live_extension_folders::kumi_extension_folders,
         remote_adapter::{RemoteScriptEndpoint, RemoteScriptLiveAdapter},
     },
     delivery::{read_any_config, read_secret_file},
     live::{AsyncLiveAdapter, LiveError},
 };
+
+#[cfg(feature = "live-11")]
+use crate::bridge::live11_adapter::RemoteOnlyAdapter;
+
+#[cfg(not(feature = "live-11"))]
+use crate::{
+    bridge::{
+        extension_setup::{with_extension, ExtensionSetup},
+        live_extension_folders::kumi_extension_folders,
+    },
+};
+
 use std::{
     path::{Path, PathBuf},
     rc::Rc,
@@ -47,6 +57,7 @@ pub fn config_argument(args: &[String]) -> Result<Option<PathBuf>, CommandOutput
     }
     Err(CommandOutput::error("mcp-host: unknown option", 2))
 }
+
 pub async fn configured_adapter(path: &Path) -> Result<Rc<dyn AsyncLiveAdapter>, LiveError> {
     let config = read_any_config(path)?;
     let bridge = config.bridge().ok_or_else(|| LiveError::error("version-1 configuration does not enable a Live adapter"))?;
@@ -59,18 +70,29 @@ pub async fn configured_adapter(path: &Path) -> Result<Rc<dyn AsyncLiveAdapter>,
         retire_after: None,
     };
     let remote: Rc<dyn AsyncLiveAdapter> = Rc::new(RemoteScriptLiveAdapter::connect(endpoint).await?);
-    if std::env::var("ABLETON_MCP_EXTENSION").ok().as_deref() == Some("off") {
-        return Ok(remote);
+    
+    // In Live 11 mode, use RemoteOnlyAdapter (no extension)
+    #[cfg(feature = "live-11")]
+    {
+        return Ok(Rc::new(RemoteOnlyAdapter::new(remote)));
     }
-    let mut setup = ExtensionSetup::new(
-        std::env::var_os("ABLETON_MCP_EXTENSION_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).join("live-extension")),
-    );
-    setup.installed_storage = kumi_extension_folders(None, None, None).map(|f| f.data);
-    setup.launch = Some(std::env::var("ABLETON_MCP_EXTENSION").ok().as_deref() != Some("external"));
-    setup.log = Some(Rc::new(|line| eprintln!("mcp-host: {line}")));
-    Ok(Rc::new(with_extension(remote, setup)))
+    
+    // In normal mode, check for extension disable env var or set up extension
+    #[cfg(not(feature = "live-11"))]
+    {
+        if std::env::var("ABLETON_MCP_EXTENSION").ok().as_deref() == Some("off") {
+            return Ok(remote);
+        }
+        let mut setup = ExtensionSetup::new(
+            std::env::var_os("ABLETON_MCP_EXTENSION_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).join("live-extension")),
+        );
+        setup.installed_storage = kumi_extension_folders(None, None, None).map(|f| f.data);
+        setup.launch = Some(std::env::var("ABLETON_MCP_EXTENSION").ok().as_deref() != Some("external"));
+        setup.log = Some(Rc::new(|line| eprintln!("mcp-host: {line}")));
+        Ok(Rc::new(with_extension(remote, setup)))
+    }
 }
 
 pub fn main() -> i32 {

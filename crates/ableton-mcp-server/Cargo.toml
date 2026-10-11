@@ -72,6 +72,11 @@ unicode-normalization.workspace = true
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
+[features]
+default = []
+# Live 11 compatibility mode: disables Extension-only code paths
+live-11 = []
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true

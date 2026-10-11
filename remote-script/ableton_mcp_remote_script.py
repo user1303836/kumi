@@ -9222,7 +9222,7 @@ class LiveObjectMapper:
         if not any(self._capture_same_object(item, chain, chain_identity) for item in self._items(self._read_attr(rack, "chains") or [])):
             raise ValueError("zone chain is no longer in this rack")
         if not callable(getattr(chain, "get_zone", None)) or not callable(getattr(chain, "set_zone", None)): raise ValueError("zone bindings are unavailable")
-        kind = args["kind"].removesuffix("-zone")
+        kind = args["kind"][:-len("-zone")] if args["kind"].endswith("-zone") else args["kind"]
         zone = json.loads(chain.get_zone(kind))
         fields = {"minimum", "maximum", "fadeMinimum", "fadeMaximum", "lowerBound", "upperBound"}
         if not isinstance(zone, dict) or set(zone) != fields or any(type(value) is not int for value in zone.values()): raise ValueError("invalid native zone readback")
@@ -9306,7 +9306,7 @@ class LiveObjectMapper:
             if not state["lowerBound"] <= desired["minimum"] <= desired["fadeMinimum"] <= desired["fadeMaximum"] <= desired["maximum"] <= state["upperBound"]:
                 raise ValueError("zone endpoints must be ordered and in bounds")
             chain = self.refs.get(args["targetRef"])
-            def write(value): chain.set_zone(kind.removesuffix("-zone"), *[value[key] for key in fields])
+            def write(value): chain.set_zone(kind[:-len("-zone")] if kind.endswith("-zone") else kind, *[value[key] for key in fields])
             restore = {key: state[key] for key in fields}
             def confirmed(after): return all(after[key] == desired[key] for key in fields)
         elif kind in {"macro-name", "variation-name"}:
@@ -11661,8 +11661,11 @@ class LiveObjectMapper:
         matches = lookup(item_id); path = item_id
         repeat = re.fullmatch(r"(.+)#([2-9]|[1-9]\d+)", item_id)
         if matches: item = matches[0]
-        elif repeat and len(again := lookup(repeat.group(1))) >= int(repeat.group(2)):
-            item = again[int(repeat.group(2)) - 1]; path = repeat.group(1)
+        elif repeat:
+            again = lookup(repeat.group(1))
+            if len(again) >= int(repeat.group(2)):
+                item = again[int(repeat.group(2)) - 1]; path = repeat.group(1)
+            else: raise ValueError("browser item identity is missing")
         else: raise ValueError("browser item identity is missing")
         name = str(self._read_attr(item, "name") or ""); explicit_device = self._read_attr(item, "is_device"); is_device = explicit_device is True or (explicit_device is None and item_category in self._DEVICE_BROWSER_CATEGORIES and self._read_attr(item, "is_loadable") is True)
         return item, {"id": item_id, "objectIdentity": self._browser_item_identity(item_id, item), "name": name, "category": item_category, "path": path, "isDevice": is_device}
