@@ -100,11 +100,13 @@ pub struct Object {
     pub outlet_digests: Vec<String>,
     /// How many different saved texts the counts were fitted to (0: the reference page's alone).
     pub seen: usize,
-    /// The most arguments any of those texts had (None: the page's alone). A count that stayed the same only bare or
-    /// with one argument says nothing of more: one more argument can add a port ([pipe 0 0 1 250] delays three
-    /// numbers), and Max's help may never show it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub most_arguments: Option<usize>,
+    /// The numbers of arguments its counts hold for, as Max's help shows them (at least two in three of the texts with
+    /// that many agree), and those they don't: a rule none of Kumi's counts fits. [pipe]'s inlets are its arguments
+    /// but never fewer than two, so [pipe 0 0 1 250] has four; [notein] alone has an outlet for the channel.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub held: Vec<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unheld: Vec<usize>,
     /// The messages that only set something in it, sending nothing at once: its attributes, and the methods its page
     /// says send nothing ("Set the value with no output") or that set a thing without a word of sending.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
@@ -140,8 +142,8 @@ impl Reference {
     }
 
     /// An object's ports for a box's text ("route a b c"): None for a class the reference doesn't know, one whose
-    /// ports come from what's inside it (a subpatcher, gen~, code), or one given more arguments than the instances its
-    /// fixed count was seen in, when those had at most one.
+    /// ports come from what's inside it (a subpatcher, gen~, code), or one whose fixed count doesn't hold for that many
+    /// arguments.
     pub fn ports(&self, text: &str) -> Option<Ports> {
         let words = atoms(text);
         let (class, rest) = words.split_first()?;
@@ -150,9 +152,16 @@ impl Reference {
         }
         let object = self.object(class)?;
         let args: Vec<String> = rest.iter().take_while(|word| !word.starts_with('@')).cloned().collect();
-        let unseen =
-            |count: &Count| matches!(count, Count::Fixed { .. }) && object.most_arguments.is_some_and(|most| most < 2 && args.len() > most);
-        if unseen(&object.inlets) || unseen(&object.outlets) {
+        // A fixed count holds where Max's help shows it does; for a number of arguments the help never shows, only when
+        // it held at every number shown, up to two or more (one more argument can add a port).
+        let n = args.len();
+        let holds = |count: &Count| {
+            !matches!(count, Count::Fixed { .. })
+                || (object.held.is_empty() && object.unheld.is_empty())
+                || object.held.contains(&n)
+                || (object.unheld.is_empty() && object.held.last().is_some_and(|&most| n <= most || most >= 2))
+        };
+        if !holds(&object.inlets) || !holds(&object.outlets) {
             return None;
         }
         let (inlets, outlets) = (object.inlets.of(&args), object.outlets.of(&args));
@@ -358,7 +367,8 @@ fn read_page(text: &str) -> Option<(String, Object)> {
         inlet_digests: inlets.into_iter().map(|(_, digest)| digest).collect(),
         outlet_digests: outlets.into_iter().map(|(_, digest)| digest).collect(),
         seen: 0,
-        most_arguments: None,
+        held: Vec::new(),
+        unheld: Vec::new(),
         quiet,
         looks,
     };
@@ -443,6 +453,19 @@ fn fit(instances: &[Instance], value: impl Fn(&Instance) -> usize, page: usize) 
     best
 }
 
+/// The numbers of arguments an object's counts hold for and those they don't: held where at least two in three of the
+/// instances with that many agree, so one odd save among many doesn't undo a count.
+fn evidence(instances: &[Instance], inlets: Count, outlets: Count) -> (Vec<usize>, Vec<usize>) {
+    let mut tally: BTreeMap<usize, (usize, usize)> = BTreeMap::new();
+    for instance in instances {
+        let agrees = inlets.of(&instance.args) == instance.inlets && outlets.of(&instance.args) == instance.outlets;
+        let (agree, against) = tally.entry(instance.args.len()).or_default();
+        *if agrees { agree } else { against } += 1;
+    }
+    let (held, unheld): (Vec<_>, Vec<_>) = tally.into_iter().partition(|(_, (agree, against))| *agree > 0 && *agree >= 2 * *against);
+    (held.into_iter().map(|(n, _)| n).collect(), unheld.into_iter().map(|(n, _)| n).collect())
+}
+
 /// Every file under a folder with one of the extensions, in order.
 fn files(folder: &Path, extension: &str, found: &mut Vec<PathBuf>) {
     let mut entries: Vec<PathBuf> = std::fs::read_dir(folder).into_iter().flatten().flatten().map(|entry| entry.path()).collect();
@@ -484,7 +507,7 @@ fn sources(c74: &Path) -> Sources {
 }
 
 /// How Kumi learns the reference: a new way is learned anew, as a new Max is.
-const LEARNER: u32 = 5;
+const LEARNER: u32 = 7;
 
 /// What the reference is learned from in a Max's C74 folder, and how, as one line: a new Max reads differently.
 pub fn fingerprint(c74: &Path) -> String {
@@ -510,7 +533,8 @@ fn unpaged(module: &str, inlets: usize, outlets: usize) -> Object {
         inlet_digests: Vec::new(),
         outlet_digests: Vec::new(),
         seen: 0,
-        most_arguments: None,
+        held: Vec::new(),
+        unheld: Vec::new(),
         quiet: BTreeSet::new(),
         looks: BTreeSet::new(),
     }
@@ -553,7 +577,7 @@ pub fn learn(c74: &Path) -> Reference {
             object.outlet_types = types;
         }
         object.seen = instances.len();
-        object.most_arguments = instances.iter().map(|instance| instance.args.len()).max();
+        (object.held, object.unheld) = evidence(&instances, object.inlets, object.outlets);
     }
     for file in &found.abstractions {
         let Some(name) = file.file_stem().map(|stem| stem.to_string_lossy().into_owned()) else { continue };
@@ -789,23 +813,56 @@ mod tests {
     }
 
     #[test]
-    fn a_count_seen_only_bare_or_with_one_argument_isnt_taken_for_more() {
-        let fixed = |inlets: usize, outlets: usize, seen: usize, most: Option<usize>| Object {
-            inlets: Count::Fixed { count: inlets },
-            outlets: Count::Fixed { count: outlets },
-            seen,
-            most_arguments: most,
-            ..Object::default()
+    fn a_count_holds_only_for_the_arguments_the_instances_agree_on() {
+        let fitted = |instances: &[Instance], page: (usize, usize)| {
+            let (inlets, outlets) = (fit(instances, |i| i.inlets, page.0), fit(instances, |i| i.outlets, page.1));
+            let (held, unheld) = evidence(instances, inlets, outlets);
+            Object { inlets, outlets, seen: instances.len(), held, unheld, ..Object::default() }
         };
+        // [pipe] in Max's help: mostly a delay time alone; a few delay several numbers, an inlet and an outlet each.
+        let mut pipe: Vec<Instance> = ["100", "50", "25", "500", "4n", "1"].iter().map(|arg| instance(&[arg], 2, 1)).collect();
+        pipe.extend([instance(&[], 2, 1), instance(&["0", "10000"], 2, 1), instance(&["0.", "1000"], 2, 1)]);
+        pipe.extend([instance(&["0", "0", "1000"], 3, 2), instance(&["0.", "0.", "0.", "2000"], 4, 3)]);
+        let pipe = fitted(&pipe, (2, 1));
+        assert_eq!((pipe.inlets, pipe.outlets), (Count::Fixed { count: 2 }, Count::Fixed { count: 1 }), "no count Kumi fits says it all");
+        assert_eq!((pipe.held.as_slice(), pipe.unheld.as_slice()), ([0, 1, 2].as_slice(), [3, 4].as_slice()));
+        // [notein] alone, or with a port's name, has an outlet for the channel; with a channel number it hasn't. As in Max's
+        // help, the two tie, and the count is the smaller.
+        let notein = [
+            instance(&[], 1, 3),
+            instance(&["17"], 1, 2),
+            instance(&["QUNEO"], 1, 3),
+            instance(&["a"], 1, 3),
+            instance(&["b", "6"], 1, 2),
+            instance(&["a", "1"], 1, 2),
+        ];
+        let notein = fitted(&notein, (1, 3));
+        assert_eq!(notein.outlets, Count::Fixed { count: 2 });
+        // [*] has a right inlet; one odd save among many doesn't undo it.
+        let mut times: Vec<Instance> = (0..9).map(|at| instance(&[&at.to_string()], 2, 1)).collect();
+        times.push(instance(&["pi"], 1, 1));
+        let times = fitted(&times, (2, 1));
         let mut reference = Reference::default();
-        // Max's help has [pipe] bare and with a delay time; never delaying more than one number.
-        reference.objects.insert("pipe".into(), fixed(2, 1, 13, Some(1)));
-        reference.objects.insert("zl".into(), fixed(2, 2, 89, Some(3)));
-        reference.objects.insert("cverb~".into(), fixed(2, 2, 0, None));
+        reference.objects.insert("pipe".into(), pipe);
+        reference.objects.insert("notein".into(), notein);
+        reference.objects.insert("*".into(), times);
+        reference.objects.insert("metro".into(), fitted(&[instance(&["100"], 2, 1), instance(&["250"], 2, 1)], (2, 1)));
+        reference.objects.insert("zl".into(), fitted(&[instance(&["group"], 2, 2), instance(&["slice", "2", "x"], 2, 2)], (2, 2)));
+        reference
+            .objects
+            .insert("cverb~".into(), Object { inlets: Count::Fixed { count: 2 }, outlets: Count::Fixed { count: 2 }, ..Object::default() });
         let ports = |text: &str| reference.ports(text).map(|ports| (ports.inlets, ports.outlets));
-        assert_eq!(ports("pipe 250"), Some((2, 1)));
-        assert_eq!(ports("pipe 0 0 1 250"), None, "three numbers delayed: never seen, so its cords say");
-        assert_eq!(ports("zl group 4 @zlmaxsize 512"), Some((2, 2)), "the same with more arguments seen: it stays");
+        assert_eq!((ports("pipe 250"), ports("pipe 0 250")), (Some((2, 1)), Some((2, 1))), "where the instances agree");
+        assert_eq!((ports("pipe 0 0 1000"), ports("pipe 0 0 1 250")), (None, None), "where they don't, and past them: its cords say");
+        assert_eq!(ports("notein"), None, "alone, it has a channel outlet the count doesn't");
+        assert_eq!(ports("notein a 1"), Some((1, 2)));
+        assert_eq!(ports("* 2."), Some((2, 1)));
+        assert_eq!(
+            (ports("metro"), ports("metro 100 200")),
+            (Some((2, 1)), None),
+            "seen only with one argument: one more could add a port"
+        );
+        assert_eq!(ports("zl group 4 @zlmaxsize 512"), Some((2, 2)), "held up to three arguments, and none disagrees: it stays");
         assert_eq!(ports("cverb~ 0.5 0.2 0.9"), Some((2, 2)), "a page alone is taken at its word");
         let (name, _) = read_page(r#"<c74object name="&gt;=" module="max"><digest>Compare</digest></c74object>"#).unwrap();
         assert_eq!(name, ">=", "named as it's typed in Max, so its page and its help instances meet");

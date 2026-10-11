@@ -197,14 +197,15 @@ mod tests {
                 },
             );
         }
-        // As Max's help shows [pipe]: bare or with a delay time.
+        // As Max's help shows [pipe]: a delay time alone holds two inlets and an outlet; several numbers delayed don't.
         reference.objects.insert(
             "pipe".into(),
             Object {
                 inlets: Count::Fixed { count: 2 },
                 outlets: Count::Fixed { count: 1 },
                 seen: 13,
-                most_arguments: Some(1),
+                held: vec![0, 1, 2],
+                unheld: vec![3, 4, 13],
                 ..Object::default()
             },
         );
