@@ -74,6 +74,23 @@ pub enum AppConfig {
     Library {
         rebuild: bool,
     },
+    /// `kumi export`: a kept conversation as a file.
+    Export {
+        /// Its id, the start of one or its name; None for the latest.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        conversation: Option<String>,
+        /// "md", "html" or "json".
+        format: String,
+        /// Where it goes: a file, or a folder for the usual name; None for the folder Kumi runs in.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        out: Option<String>,
+        full: bool,
+        raw: bool,
+    },
+    /// `kumi import`: a conversation saved with `kumi export --json`.
+    Import {
+        file: String,
+    },
     LoginChoose {
         auth_file: String,
         pi_auth_file: String,
@@ -520,8 +537,66 @@ pub fn chatgpt_sign_in(env: &Env) -> LoginMethod {
     }
 }
 /// Kumi's commands, for an unknown one that's probably one of them misspelled.
-const COMMANDS: [&str; 12] =
-    ["auth", "bridge", "doctor", "help", "library", "login", "logout", "model", "report", "uninstall", "update", "version"];
+const COMMANDS: [&str; 14] = [
+    "auth",
+    "bridge",
+    "doctor",
+    "export",
+    "help",
+    "import",
+    "library",
+    "login",
+    "logout",
+    "model",
+    "report",
+    "uninstall",
+    "update",
+    "version",
+];
+/// `kumi export [id or name | --last] [--md | --html | --json] [-o <path>] [--full] [--raw]`: which conversation (the
+/// latest without one), its format (Markdown without one), where it goes and what's in it.
+fn export_config(args: &[String]) -> Result<AppConfig, RuntimeError> {
+    let usage = || RuntimeError::plain("Use: export [id or name | --last] [--md | --html | --json] [-o <path>] [--full] [--raw].");
+    let (mut words, mut format, mut out, mut full, mut raw, mut last) = (vec![], None, None, false, false, false);
+    let mut at = 0;
+    while at < args.len() {
+        let chosen = match args[at].as_str() {
+            "--md" | "--markdown" => Some("md"),
+            "--html" => Some("html"),
+            "--json" => Some("json"),
+            _ => None,
+        };
+        match args[at].as_str() {
+            _ if chosen.is_some() => {
+                if format.is_some_and(|format| Some(format) != chosen) {
+                    return Err(RuntimeError::plain("Choose one of --md, --html and --json."));
+                }
+                format = chosen;
+            }
+            "--full" => full = true,
+            "--raw" => raw = true,
+            "--last" => last = true,
+            "-o" | "--output" => {
+                at += 1;
+                let path = args.get(at).filter(|path| !path.is_empty() && !controls(path, true)).ok_or_else(usage)?;
+                out = Some(path.clone());
+            }
+            word if word.starts_with('-') => return Err(usage()),
+            word => words.push(word.to_string()),
+        }
+        at += 1;
+    }
+    if last && !words.is_empty() {
+        return Err(usage());
+    }
+    Ok(AppConfig::Export {
+        conversation: (!words.is_empty()).then(|| words.join(" ")),
+        format: format.unwrap_or("md").into(),
+        out,
+        full,
+        raw,
+    })
+}
 /// What Kumi says about words it doesn't know, leading to its help.
 fn unknown(word: Option<&str>) -> RuntimeError {
     let help = format!("{} --help lists the commands.", *KUMI_START);
@@ -578,6 +653,15 @@ pub fn load_config(args: &[String], env: &Env) -> Result<AppConfig, RuntimeError
             return Err(RuntimeError::plain("Use: library [--rebuild]."));
         }
         return Ok(AppConfig::Library { rebuild: at(1) == Some("--rebuild") });
+    }
+    if first == Some("export") {
+        return export_config(&args[1..]);
+    }
+    if first == Some("import") {
+        return match &args[1..] {
+            [file] if !file.is_empty() && !file.starts_with('-') && !controls(file, true) => Ok(AppConfig::Import { file: file.clone() }),
+            _ => Err(RuntimeError::plain("Use: import <file> (a conversation saved with: export --json).")),
+        };
     }
     if first == Some("update") {
         if args.len() > 2 || at(1).is_some_and(|s| s != "--rollback" && s != "--check") {

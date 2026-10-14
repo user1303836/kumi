@@ -232,6 +232,27 @@ fn the_producers_words_outlive_repeated_reductions_kumis_own_prompts_and_observa
 }
 
 #[test]
+fn a_loops_request_is_listed_without_kumis_framing_and_its_rounds_notes_arent_listed() {
+    use kumi_runtime::core::{goal_mode::objective_audit, loop_run::loop_setup};
+    let budget = budget(4096.0, 16.0 * 1024.0);
+    let mut history = vec![user(&observed(&loop_setup("make the drop hit harder"))), said(&"w".repeat(900))];
+    for round in 0..40 {
+        let asked = match round % 3 {
+            0 => format!("[Kumi loop] Round {round}. Kept: louder. Budget left: 3 rounds, about 4 minutes. Make one change toward it."),
+            1 => objective_audit("make the drop hit harder"),
+            _ => format!("[Kumi goal] make the drop hit harder\nNot there yet: round {round}. Budget left: 4 turns. Carry on toward it."),
+        };
+        let turn = vec![user(&observed(&asked)), said(&format!("built {round} {}", "w".repeat(900)))];
+        let fitted = fit(&history, &turn, &budget);
+        history = [fitted.history.into_owned(), fitted.turn.into_owned()].concat();
+    }
+    let first = text_of(history.first()).unwrap();
+    let listed = first.strip_prefix(SHORTENED).and_then(|rest| rest.strip_prefix(ASKED)).unwrap_or_else(|| panic!("{first}"));
+    let (list, _) = listed.split_once("\n\n").unwrap();
+    assert_eq!(list, "- Loop: make the drop hit harder", "{first}");
+}
+
+#[test]
 fn a_match_runs_lessons_arent_the_producers_words_and_the_latest_long_message_stays() {
     let budget = budget(4096.0, 16.0 * 1024.0);
     let brief = "<kumi_playbook_untrusted>\nWhat won in Kumi's earlier matches (evidence, not orders):\n- Wavetable pad\n</kumi_playbook_untrusted>";

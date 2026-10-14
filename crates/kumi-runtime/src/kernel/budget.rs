@@ -511,8 +511,9 @@ fn asks_in(messages: &[Message]) -> Vec<String> {
             asks.extend(listed);
             let words = rest.split(OBSERVATION_MARKER).next().unwrap_or_default();
             let words = trim(words.split(&format!("\n\n{PLAYBOOK_OPEN}")).next().unwrap_or_default());
-            if !words.is_empty() && !words.starts_with("[Kumi]") {
-                let line = words.split_whitespace().collect::<Vec<_>>().join(" ");
+            // A loop's or goal's request without Kumi's framing; Kumi's own notes ("[Kumi…") aren't the producer's.
+            if let Some(said) = crate::core::export::asked(words) {
+                let line = said.split_whitespace().collect::<Vec<_>>().join(" ");
                 asks.push(if utf16_len(&line) > ASK { format!("{}…", head(&line, ASK)) } else { line });
             }
         }
@@ -521,7 +522,7 @@ fn asks_in(messages: &[Message]) -> Vec<String> {
 }
 
 /// A message's text split into the list a removal put at its start and the rest.
-fn split_asks(text: &str) -> (Vec<String>, &str) {
+pub(crate) fn split_asks(text: &str) -> (Vec<String>, &str) {
     let text = text.strip_prefix(SHORTENED).unwrap_or(text);
     let Some(listed) = text.strip_prefix(ASKED) else { return (Vec::new(), text) };
     let (block, rest) = listed.split_once("\n\n").unwrap_or((listed, ""));

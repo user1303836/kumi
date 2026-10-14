@@ -52,7 +52,7 @@ Kumi opens once it's installed and walks you through signing in and connecting t
 - **Looks things up:** searches the web and reads pages, PDFs, manuals and code on GitHub, so it can build an effect like one it has read about.
 - **Shows where you are:** FOCUS follows what you touch in Live, as a device tree, a piano roll or a Session or Arrangement strip. Click a device to point at it: "this Saturator's too harsh".
 - **Remembers:** notes about you and each Set, techniques it learns from what you keep, and recipes you can replay. Every save is shown, and one click forgets it.
-- **Keeps your conversations** for each Set, each with an id that takes it up again from anywhere (`kumi -r`), and says what changed while it was closed.
+- **Keeps your conversations** for each Set, each with an id that takes it up again from anywhere (`kumi -r`), and says what changed while it was closed. `/share` turns one into a web page to send, with keys and paths taken out.
 - **Works with your model:** sign in with ChatGPT, or use an OpenAI, Anthropic or OpenCode API key.
 
 ## Status

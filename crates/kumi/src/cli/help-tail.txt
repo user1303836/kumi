@@ -7,6 +7,6 @@ Kumi reads the open Live Set and makes the changes you ask for; each change can 
 and bounces when you ask, listens to audio (a reference, a sample, a recording) and compares it, keeps short notes
 of what you tell it that Live can't show, and saves your ways of working as recipes to replay, including ones it
 learns by watching you.
-In a session: /help /status /model /effort /login /logout /memory /recipes /resume /rename /fork /voice /undo /refresh /reconnect /new /update /quit. Ctrl-C cancels work, or exits if idle.
+In a session: /help /status /model /effort /login /logout /memory /recipes /resume /rename /fork /export /share /voice /undo /refresh /reconnect /new /update /quit. Ctrl-C cancels work, or exits if idle.
 Ctrl-T talks instead of typing: what you say is written down on this computer (whisper.cpp) and lands in the input box.
 KUMI_TRACE=1 prints MCP dispatch names only.

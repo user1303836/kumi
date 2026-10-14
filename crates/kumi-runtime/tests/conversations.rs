@@ -1,7 +1,7 @@
 //! Kept conversations found by id or name across every Set, with names, pins and copies beside them, an index made
 //! again from the files, locks between Kumis, and keeping at least what Kumi 1.16 kept: hermetic, in temporary folders.
 use kumi_runtime::core::{
-    contracts::{Claim, ConversationMatch, ConversationStore, SavedConversation},
+    contracts::{Claim, ConversationMatch, ConversationStore, ConversationSummary, SavedConversation},
     conversations::{create_conversation_store, create_conversation_store_keeping, fresh_id, title},
 };
 use serde_json::{json, Value};
@@ -691,4 +691,57 @@ async fn what_a_later_kumi_adds_to_the_index_or_beside_a_conversation_is_read_pa
     assert!(store.delete(A, "mv66me0m9newer").await.unwrap());
     assert_eq!(std::fs::read_to_string(&file).unwrap(), later);
     assert_eq!(store.days_kept().await, 0, "what it says settings said is taken");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_conversation_from_a_file_and_every_copy_of_it_say_so() {
+    use kumi_runtime::core::conversations::IMPORTED;
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_conversation_store(dir.path());
+    store.create(IMPORTED, "imported0001", &said("from a file", 10), Some("Theirs (imported)"), None).await.unwrap();
+    store.create(A, "copied000001", &said("from a file", 11), None, Some("imported0001")).await.unwrap();
+    store.create(B, "copied000002", &said("from a file", 12), None, Some("copied000001")).await.unwrap();
+    store.create(A, "mine00000001", &said("my own", 13), None, None).await.unwrap();
+    store.create(B, "mine00000002", &said("my own", 14), None, Some("mine00000001")).await.unwrap();
+    let rows = store.all().await.unwrap();
+    let imported = |id: &str| rows.iter().find(|row| row.id == id).unwrap().imported;
+    assert!(imported("imported0001") && imported("copied000001") && imported("copied000002"));
+    assert!(!imported("mine00000001") && !imported("mine00000002"));
+    // A fresh look at the folders finds the same.
+    std::fs::remove_file(dir.path().join("conversation-index.json")).ok();
+    let again = create_conversation_store(dir.path()).all().await.unwrap();
+    assert!(again.iter().find(|row| row.id == "copied000002").unwrap().imported);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_conversation_from_a_file_keeps_its_set_and_an_earlier_kumi_writing_the_index_back_loses_nothing() {
+    use kumi_runtime::core::conversations::IMPORTED;
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_conversation_store(dir.path());
+    store.create(IMPORTED, "imported0001", &said("from a file", 10), None, None).await.unwrap();
+    assert!(store.note_set(IMPORTED, "imported0001", "Their Song\nand more").await.unwrap());
+    assert!(!store.note_set(IMPORTED, "nothere00001", "Their Song").await.unwrap());
+    store.create(A, "copied000001", &said("from a file", 11), None, Some("imported0001")).await.unwrap();
+    let row = |rows: &[ConversationSummary], id: &str| rows.iter().find(|row| row.id == id).unwrap().clone();
+    let rows = store.all().await.unwrap();
+    assert_eq!(row(&rows, "imported0001").set.as_deref(), Some("Their Song and more"));
+    assert!(row(&rows, "copied000001").imported);
+    // Written back by a Kumi that knew neither: the entries are read again.
+    let file = dir.path().join("conversation-index.json");
+    let mut index: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    for entry in index["conversations"].as_object_mut().unwrap().values_mut() {
+        let entry = entry.as_object_mut().unwrap();
+        entry.remove("imported");
+        entry.remove("set");
+        entry["stamp"].as_object_mut().unwrap().remove("reads");
+    }
+    std::fs::write(&file, index.to_string()).unwrap();
+    let rows = create_conversation_store(dir.path()).all().await.unwrap();
+    assert_eq!(row(&rows, "imported0001").set.as_deref(), Some("Their Song and more"));
+    assert!(row(&rows, "copied000001").imported, "a copy of an import stays one");
+}
+
+#[test]
+fn a_title_draws_what_it_says() {
+    assert_eq!(title(None, "\u{202E}gnol \u{200B}kick\u{E0041}"), "gnol kick");
 }

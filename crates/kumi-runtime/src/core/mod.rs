@@ -3,6 +3,7 @@ pub mod conversations;
 pub mod disk;
 pub mod errors;
 pub mod evolve;
+pub mod export;
 pub mod file_sync;
 pub mod gaps;
 pub mod goal;

@@ -844,6 +844,17 @@ impl TuiApp {
             self.copy_last_answer();
             return Ok(());
         }
+        // This conversation as a file: the choices, or the one named (copy, md, html, json).
+        if let Some(words) = argument(command, "/export") {
+            self.clear_editor();
+            self.export_as(&words).await;
+            return Ok(());
+        }
+        if command == "/share" {
+            self.clear_editor();
+            self.share().await;
+            return Ok(());
+        }
         if let Some((willington, on)) = self.willington().filter(|_| command == "/willington") {
             self.clear_editor();
             match (willington.set)(!on).await {
@@ -1188,7 +1199,7 @@ pub(super) struct Command {
     pub about: &'static str,
 }
 
-pub(super) const HELP: &str = "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · ctrl+b moves a slow step that doesn't use Live (a video, pages) to the background (press it twice in tmux), and /jobs shows, stops or reruns background jobs · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, /resume goes back to one kept (this Set's, or any Set's by its id or name), /rename names this one, and /fork carries on in a copy · /reconnect connects to Live again, keeping the conversation · /copy copies the last answer; to select text yourself, hold Shift while dragging (Option in iTerm2) · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one; /willington turns Willington's bindings (macro mapping and more) on or off; /slots shows which model does each listening job (stems, transcription, listening, embeddings), swaps one in plain words after a quick test, and /slots back <job> takes a swap back; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your Sets), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi, and /changelog says what's new in it · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands";
+pub(super) const HELP: &str = "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · ctrl+b moves a slow step that doesn't use Live (a video, pages) to the background (press it twice in tmux), and /jobs shows, stops or reruns background jobs · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, /resume goes back to one kept (this Set's, or any Set's by its id or name), /rename names this one, and /fork carries on in a copy · /reconnect connects to Live again, keeping the conversation · /copy copies the last answer, /export copies or saves the whole conversation, and /share saves it as a web page to send; to select text yourself, hold Shift while dragging (Option in iTerm2) · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one; /willington turns Willington's bindings (macro mapping and more) on or off; /slots shows which model does each listening job (stems, transcription, listening, embeddings), swaps one in plain words after a quick test, and /slots back <job> takes a swap back; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your Sets), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi, and /changelog says what's new in it · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands";
 pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/new", about: "Start a fresh conversation (the last one is kept); /new <name> names it" },
     Command { name: "/btw", about: "Ask something on the side, without interrupting Kumi" },
@@ -1202,6 +1213,8 @@ pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/stop", about: "Stop Live: clips, the transport and recording" },
     Command { name: "/refresh", about: "Read your Live Set again" },
     Command { name: "/copy", about: "Copy Kumi's last answer" },
+    Command { name: "/export", about: "This conversation as a file: choose, or /export copy, md, html or json (for another Kumi)" },
+    Command { name: "/share", about: "Save this conversation as a web page that opens anywhere, to send" },
     Command { name: "/model", about: "Choose the model Kumi talks to" },
     Command { name: "/effort", about: "How hard the model thinks" },
     Command { name: "/fast", about: "The model's faster tier, when its provider offers one" },

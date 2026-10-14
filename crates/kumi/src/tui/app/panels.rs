@@ -373,6 +373,7 @@ impl TuiApp {
             let set = match row.set.as_deref() {
                 Some(name) => self.clean(name, 20),
                 None if row.place == "unsaved" => "A Set not saved yet".into(),
+                None if row.place == kumi_runtime::IMPORTED => "Imported".into(),
                 None => "A saved Set".into(),
             };
             let age = if row.current { "this one".into() } else { since(row.saved_at as f64, now) };

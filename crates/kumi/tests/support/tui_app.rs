@@ -102,6 +102,8 @@ pub struct Control {
     pub clip: RefCell<Option<ClipView>>,
     pub session: RefCell<Option<SessionStrip>>,
     pub arrangement: RefCell<Option<ArrangementStrip>>,
+    /// What /export and /share get as the conversation going on now.
+    pub export: RefCell<Option<ConversationToExport>>,
 }
 impl Default for Control {
     fn default() -> Self {
@@ -124,6 +126,7 @@ impl Default for Control {
             clip: RefCell::default(),
             session: RefCell::default(),
             arrangement: RefCell::default(),
+            export: RefCell::default(),
         }
     }
 }
@@ -477,6 +480,10 @@ impl SessionController for Control {
     }
     async fn conversation_lines(&self, _: &str) -> Result<Vec<TranscriptLine>, RuntimeError> {
         Ok(self.get("lines").unwrap_or_default())
+    }
+    async fn conversation_to_export(&self) -> Option<ConversationToExport> {
+        self.call("export");
+        self.export.borrow().clone()
     }
     fn has_library(&self) -> bool {
         self.library.borrow().is_some()

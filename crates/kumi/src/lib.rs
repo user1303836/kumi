@@ -3,6 +3,7 @@ pub mod bridge_setup;
 pub mod cli;
 pub mod config;
 pub mod doctor;
+pub mod export;
 pub mod history;
 pub mod input;
 pub mod install;

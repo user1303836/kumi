@@ -88,6 +88,14 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
     fs::write(conversations.join("latest1.json"),json!({"savedAt":2,"checkpoint":{"version":1,"messages":[{"role":"user","content":[{"type":"text","text":format!("Load my sample from {home}/Music/kick.wav")}]},{"role":"assistant","content":[{"type":"tool-call","toolName":"make_changes","input":{"steps":[{"tool":"set_tempo","input":{"tempo":124}}]}}]},{"role":"tool","content":[{"type":"tool-result","output":{"type":"text","value":"{\"done\":[{\"changed\":\"Tempo 120 → 124 BPM\"}]}"}}]}]},"changes":[{"title":"Tempo 120 → 124 BPM","state":"applied"}]}).to_string()).unwrap();
     // A name beside it, written after it, isn't a conversation.
     fs::write(conversations.join("latest1.meta"), json!({"version":1,"name":"Kick"}).to_string()).unwrap();
+    // Newer, but someone else's words: an import, and a copy of one taken up in a Set.
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    let imports = conversations.parent().unwrap().parent().unwrap().join("imported/conversations");
+    fs::create_dir_all(&imports).unwrap();
+    let words = |text: &str| json!({"savedAt":3,"checkpoint":{"version":1,"messages":[{"role":"user","content":text}]}}).to_string();
+    fs::write(imports.join("import01.json"), words("SOMEONE ELSES WORDS")).unwrap();
+    fs::write(conversations.join("copy0001.json"), words("A COPY OF AN IMPORT")).unwrap();
+    fs::write(conversations.join("copy0001.meta"), json!({"version":1,"imported":true}).to_string()).unwrap();
     let log = dir.path().join("Log.txt");
     fs::write(
         &log,
@@ -166,6 +174,8 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
     }
     for absent in [
         "an older one",
+        "SOMEONE ELSES WORDS",
+        "A COPY OF AN IMPORT",
         "MemoryUsage",
         "unrelated",
         "MidiRemoteScript",

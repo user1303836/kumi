@@ -1106,3 +1106,152 @@ case!(a_chat_that_keeps_no_conversations_says_so, async {
     assert!(!h.calls().iter().any(|call| call.starts_with("submit")), "{:?}", h.calls());
     h.close().await;
 });
+/// A conversation as the session gives it to /export: the producer's words and an answer `long` characters long.
+fn to_export(words: &str, long: usize) -> kumi_runtime::core::contracts::ConversationToExport {
+    use kumi_runtime::core::contracts::{ConversationToExport, KernelCheckpoint, SavedConversation};
+    let messages = vec![
+        json!({"role": "user", "content": [{"type": "text", "text": words}]}),
+        json!({"role": "assistant", "content": [{"type": "text", "text": format!("Done. {}", "la ".repeat(long / 3))}]}),
+    ];
+    ConversationToExport {
+        id: "k3x9a1b2".into(),
+        title: words.into(),
+        set: Some("Song".into()),
+        created: 1_760_000_000_000,
+        conversation: SavedConversation {
+            saved_at: 1_760_000_100_000,
+            checkpoint: KernelCheckpoint { version: 1, messages, origin: None, tools: None },
+            changes: None,
+            first: Some(words.into()),
+            turns: Some(1),
+        },
+        words: ("Live", "Set"),
+    }
+}
+/// The files in `folder` with `extension`, by name.
+fn exported_files(folder: &std::path::Path, extension: &str) -> Vec<std::path::PathBuf> {
+    let mut files: Vec<_> = std::fs::read_dir(folder)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|e| e == extension))
+        .collect();
+    files.sort();
+    files
+}
+case!(share_over_ssh_says_where_the_page_is_and_opens_nothing, async {
+    let folder = tempfile::tempdir().unwrap();
+    let revealed: Rc<RefCell<Vec<std::path::PathBuf>>> = Rc::default();
+    let (into, shown) = (folder.path().to_path_buf(), revealed.clone());
+    let h = Harness::with(140, 36, Rc::new(Control::default()), move |o| {
+        o.folder = Some(into);
+        o.remote = true;
+        o.reveal = Some(Rc::new(move |path: &std::path::Path| shown.borrow_mut().push(path.to_path_buf())));
+    });
+    h.start().await;
+    h.connect();
+    *h.control.export.borrow_mut() = Some(to_export("Over SSH", 30));
+    h.type_text("/share\r").await;
+    h.has("Saved on the computer Kumi runs on (over SSH):");
+    assert!(!h.screen().join("\n").contains("Open it") && !h.screen().join("\n").contains("Show it in"), "{}", h.screen().join("\n"));
+    let page = exported_files(folder.path(), "html").pop().unwrap();
+    h.type_text("\r").await;
+    let copied = {
+        let output = h.output.text.borrow();
+        let start = output.rfind("\x1b]52;c;").expect("a copy through the terminal") + 7;
+        let end = start + output[start..].find('\x07').unwrap();
+        use base64::Engine;
+        String::from_utf8(base64::engine::general_purpose::STANDARD.decode(&output[start..end]).unwrap()).unwrap()
+    };
+    assert_eq!(copied, page.display().to_string());
+    h.type_text("\x1b[B\r").await;
+    assert!(h.browsed.borrow().is_empty() && revealed.borrow().is_empty(), "nothing opened on the computer Kumi runs on");
+    h.close().await;
+});
+case!(export_copies_or_saves_this_conversation_and_share_offers_the_page, async {
+    let folder = tempfile::tempdir().unwrap();
+    let revealed: Rc<RefCell<Vec<std::path::PathBuf>>> = Rc::default();
+    let (into, shown) = (folder.path().to_path_buf(), revealed.clone());
+    let h = Harness::with(140, 36, Rc::new(Control::default()), move |o| {
+        o.folder = Some(into);
+        o.reveal = Some(Rc::new(move |path: &std::path::Path| shown.borrow_mut().push(path.to_path_buf())));
+        o.command = "cargo run -p kumi --".into();
+    });
+    h.start().await;
+    h.connect();
+    h.type_text("/export\r").await;
+    h.has("Export this conversation");
+    h.has("another Kumi carries it on: cargo run -p kumi --");
+    h.type_text("\r").await;
+    h.has("There's nothing to export yet");
+    // Copied through the terminal, with what the session knows to be secret taken out.
+    *h.control.export.borrow_mut() = Some(to_export("Make the kick punchier private-token", 30));
+    h.type_text("/export\r").await;
+    h.type_text("\r").await;
+    h.has("Copied this conversation as Markdown.");
+    let copied = {
+        let output = h.output.text.borrow();
+        let start = output.rfind("\x1b]52;c;").expect("a copy through the terminal") + 7;
+        let end = start + output[start..].find('\x07').unwrap();
+        use base64::Engine;
+        String::from_utf8(base64::engine::general_purpose::STANDARD.decode(&output[start..end]).unwrap()).unwrap()
+    };
+    assert!(copied.starts_with("# Make the kick punchier [secret]\n"), "{copied}");
+    assert!(!copied.contains("private-token"));
+    assert!(exported_files(folder.path(), "md").is_empty(), "a copy saves no file");
+    // Longer than a terminal takes: saved instead, and said so.
+    *h.control.export.borrow_mut() = Some(to_export("A long one", 70_000));
+    h.type_text("/export\r").await;
+    h.type_text("\r").await;
+    h.has("too long to copy through the terminal");
+    let saved = exported_files(folder.path(), "md");
+    assert_eq!(saved.len(), 1);
+    assert!(std::fs::read_to_string(&saved[0]).unwrap().contains("A long one"));
+    // Named: a page straight away, the copy, and a word /export doesn't take.
+    *h.control.export.borrow_mut() = Some(to_export("Named formats", 30));
+    h.type_text("/export html\r").await;
+    h.has("Saved this conversation as a web page:");
+    assert!(folder.path().join("kumi-named-formats-k3x9a1b2.html").exists());
+    h.type_text("/export json\r").await;
+    assert!(folder.path().join("kumi-named-formats-k3x9a1b2.json").exists());
+    h.type_text("/export copy\r").await;
+    h.has("Copied this conversation as Markdown.");
+    h.type_text("/export pdf\r").await;
+    h.has("Use /export alone for the choices");
+    for file in std::fs::read_dir(folder.path()).unwrap() {
+        let file = file.unwrap().path();
+        if file.file_name().unwrap().to_string_lossy().contains("named-formats") {
+            std::fs::remove_file(file).unwrap();
+        }
+    }
+    *h.control.export.borrow_mut() = Some(to_export("A long one", 70_000));
+    // A web page; /share shows that one while nothing in the conversation changed, and its choices stay until Done.
+    h.type_text("/export\r").await;
+    h.type_text("\x1b[B\x1b[B\r").await;
+    h.has("Saved this conversation as a web page:");
+    let page = folder.path().join("kumi-a-long-one-k3x9a1b2.html");
+    assert!(std::fs::read_to_string(&page).unwrap().starts_with("<!doctype html>"));
+    h.type_text("/share\r").await;
+    h.has("Copy its path");
+    h.type_text("\r").await;
+    assert_eq!(h.browsed.borrow().last().cloned(), Some(page.display().to_string()));
+    h.type_text("\x1b[B\r").await;
+    assert_eq!(revealed.borrow().as_slice(), [page.clone()]);
+    h.type_text("\x1b[B\r").await;
+    let copied = {
+        let output = h.output.text.borrow();
+        let start = output.rfind("\x1b]52;c;").expect("a copy through the terminal") + 7;
+        let end = start + output[start..].find('\x07').unwrap();
+        use base64::Engine;
+        String::from_utf8(base64::engine::general_purpose::STANDARD.decode(&output[start..end]).unwrap()).unwrap()
+    };
+    assert_eq!(copied, page.display().to_string());
+    h.has("Done");
+    h.type_text("\x1b[B\r").await;
+    assert_eq!(exported_files(folder.path(), "html"), [page.clone()], "one page, however often it's shared");
+    // Something new in the conversation: a new page.
+    *h.control.export.borrow_mut() = Some(to_export("A long one, and more", 70_000));
+    h.type_text("/share\r").await;
+    h.type_text("\x1b[B\x1b[B\x1b[B\r").await;
+    assert_eq!(exported_files(folder.path(), "html").len(), 2);
+    h.close().await;
+});

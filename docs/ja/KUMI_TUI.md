@@ -32,6 +32,8 @@ Kumi はターミナルウィンドウ全体を使い、Kumi が閉じたとき�
 | `kumi` | Live で開いている Set で Kumi を開く。初回はサインインし、ブリッジを Live に入れる（Live の再起動も任せられる） |
 | `kumi -c`（`--continue` でも可） | どの Set のものでも、最後に使った会話の続きから始める |
 | `kumi -r [ID または名前]`（`--resume` でも可） | 保存された会話を ID（または先頭部分）か名前で選んで続ける。引数なしなら一覧から選ぶ。どちらも `--inference-only` と使える |
+| `kumi export [ID または名前 \| --last] [--md \| --html \| --json] [--full] [--raw] [-o パス]` | 保存された会話を Markdown（既定）、Web ページ、Kumi 用ファイルとして保存。ID を省くか `--last` で最新の会話。`--full` で各ステップの入力と結果も加え、`--raw` でキーやパスを残す |
+| `kumi import <ファイル>` | `kumi export --json` で保存した会話を取り込み、`kumi -r` で続けられるようにする |
 | `kumi --inference-only` | Live なしでチャットする |
 | `kumi --bridge-config <absolute path>` | 自分のブリッジ設定を使う |
 | `kumi login` | サインイン：ChatGPT か API キーかを尋ねる |
@@ -58,6 +60,8 @@ Kumi はターミナルウィンドウ全体を使い、Kumi が閉じたとき�
 | `/resume [ID または名前]` | 保存された会話：この Set のもの、Tab ですべての Set のもの。一つ選ぶとその続きから再開する。ID（または先頭部分）か名前を付けるとその会話。`/conversations` も同じ |
 | `/rename [name]` | この会話に名前を付ける。名前なしなら今の名前が入力欄に入り、変えられる |
 | `/fork [name]` | この会話のコピーに新しい ID で続ける。元の会話は残る |
+| `/export [copy \| md \| html \| json]` | この会話をファイルに：Markdown としてコピー、または Markdown、Web ページ、Kumi 用ファイル（`kumi import`）として保存。省くと選べます。64 KB を超えるとコピーの代わりにファイルに保存 |
+| `/share` | この会話をどこでも開ける Web ページとして保存し（何も変わっていなければ同じページ）、Done を選ぶまで、開く、Finder（エクスプローラー）で表示する、パスをコピーする。SSH 経由ではページの場所を伝えます |
 | `/reconnect` | 新しいブリッジで Live に接続し直す。会話はそのまま（それ以前の変更は Kumi の undo を失う） |
 | `/undo` | Kumi の最新の変更を取り消す |
 | `/stop` | Live を止める：クリップ、トランスポート、録音。Kumi の答えも止める |
@@ -145,7 +149,7 @@ Kumi はターミナルウィンドウ全体を使い、Kumi が閉じたとき�
 
 ## プレーンモード
 
-`KUMI_UI=plain`、またはパイプを通した入力や出力では、代わりに一行ずつのプレーンなインターフェースになり、スクリーンリーダーやログに向いています。使えるのは `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new [name]`、`/resume [番号、ID または名前]`（と `/conversations`）、`/rename <name>`、`/fork [name]`、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/willington`、`/update`、`/changelog`、`/quit` で、`/btw`、`/goal`、`/loop`、`/slots`、`/jobs`、`/copy` はありません。`/resume` はこの Set の会話、次にほかの Set の会話に番号を付けます。別の Set の会話についての Kumi の質問には 1、2、3 で答えます（答えを待つ間もコマンドは使え、ほかの言葉にはもう一度質問します）。バックグラウンドジョブが始まったときと終わったときは知らせ、あなたの依頼に必要なジョブは Kumi が何もしていないときに続きを進めます。サインインはシェルから `kumi login` で行います。Ctrl-C は答えを止め、Kumi が何もしていないときは終了します。
+`KUMI_UI=plain`、またはパイプを通した入力や出力では、代わりに一行ずつのプレーンなインターフェースになり、スクリーンリーダーやログに向いています。使えるのは `/help`、`/status`、`/undo`、`/stop`、`/refresh`、`/reconnect`、`/new [name]`、`/resume [番号、ID または名前]`（と `/conversations`）、`/rename <name>`、`/fork [name]`、`/export [md|html|json]`、`/share`（どちらもファイルを保存し、場所を伝えます）、`/model [provider/model]`、`/effort [level|default]`、`/fast`、`/logout <provider>`、`/memory`、`/forget <id>`、`/note <id> <new words>`、`/pin <id>`、`/unpin <id>`、`/recipes`、`/willington`、`/update`、`/changelog`、`/quit` で、`/btw`、`/goal`、`/loop`、`/slots`、`/jobs`、`/copy` はありません。`/resume` はこの Set の会話、次にほかの Set の会話に番号を付けます。別の Set の会話についての Kumi の質問には 1、2、3 で答えます（答えを待つ間もコマンドは使え、ほかの言葉にはもう一度質問します）。バックグラウンドジョブが始まったときと終わったときは知らせ、あなたの依頼に必要なジョブは Kumi が何もしていないときに続きを進めます。サインインはシェルから `kumi login` で行います。Ctrl-C は答えを止め、Kumi が何もしていないときは終了します。
 
 ## Kumi から離れているとき
 

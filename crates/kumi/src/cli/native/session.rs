@@ -110,13 +110,6 @@ impl LiveSetup for LiveSide {
         live_app::settings_menu(kumi_runtime::system::platform())
     }
 }
-/// What `kumi -r` says of a conversation Kumi let go.
-fn gone_words(keep_days: u32) -> String {
-    match keep_days {
-        0 => "That conversation isn't kept any more.".into(),
-        days => format!("That conversation isn't kept any more (Kumi keeps {days} days, and pinned ones always)."),
-    }
-}
 /// Live runs on macOS and Windows only: elsewhere Kumi chats without it, and setup only signs in.
 fn live_here() -> bool {
     live_app::runs_on(kumi_runtime::system::platform())
@@ -743,9 +736,14 @@ pub(super) async fn run_session(
     } else {
         None
     };
+    // What /export and /share take out: what `kumi report` takes out, as this computer knows it at each export.
+    let redact = crate::export::redactor_maker(&io.env);
     let ui: Rc<dyn Terminal> = if full_screen {
         let mut options = TuiOptions::new(session, io.input.clone(), io.out.clone(), mode);
         options.models = Some(models);
+        options.redact = Some(redact);
+        options.command = io.command().to_string();
+        options.reveal = Some(Rc::new(crate::export::reveal));
         options.startup_notice = if connect_why.is_some() { None } else { notice };
         options.choose_conversation = choose.clone();
         options.whats_new = whats_new;
@@ -807,6 +805,8 @@ pub(super) async fn run_session(
     } else {
         let mut options = TerminalOptions::new(session, io.input.clone(), io.out.clone(), models, mode);
         options.startup_notice = notice;
+        options.redact = Some(redact);
+        options.command = io.command().to_string();
         options.choose_conversation = choose.clone();
         options.whats_new = whats_new;
         options.instant = instant;

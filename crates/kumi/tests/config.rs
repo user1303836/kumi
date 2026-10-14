@@ -339,3 +339,33 @@ fn conversations_keep_days_is_read_kept_and_bounded() {
     std::fs::write(&file, json!({"conversations":{"keepDays":0}}).to_string()).unwrap();
     assert_eq!(read_settings(&file).conversations.and_then(|c| c.keep_days), Some(0));
 }
+#[test]
+fn export_and_import_take_a_conversation_a_format_and_a_file() {
+    let env = env();
+    assert_eq!(value(&["export"], &env), json!({"mode": "export", "format": "md", "full": false, "raw": false}));
+    assert_eq!(
+        value(&["export", "kick", "fix", "--html", "--full", "-o", "out"], &env),
+        json!({"mode": "export", "conversation": "kick fix", "format": "html", "out": "out", "full": true, "raw": false})
+    );
+    assert_eq!(
+        value(&["export", "--last", "--json", "--json", "--raw"], &env),
+        json!({"mode": "export", "format": "json", "full": false, "raw": true})
+    );
+    for wrong in [
+        &["export", "--md", "--html"][..],
+        &["export", "-o"],
+        &["export", "--last", "k3x9"],
+        &["export", "--everything"],
+        &["export", "-o", "a\u{7}"],
+    ] {
+        assert!(load_config(&args(wrong), &env).is_err(), "{wrong:?}");
+    }
+    assert_eq!(value(&["import", "chat.json"], &env), json!({"mode": "import", "file": "chat.json"}));
+    for wrong in [&["import"][..], &["import", "a.json", "b.json"], &["import", "--all"]] {
+        assert_eq!(
+            load_config(&args(wrong), &env).unwrap_err().to_string(),
+            "Use: import <file> (a conversation saved with: export --json).",
+            "{wrong:?}"
+        );
+    }
+}

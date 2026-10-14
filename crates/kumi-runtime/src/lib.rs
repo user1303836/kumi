@@ -42,7 +42,7 @@ pub use core::contracts::{
     SessionEvent, SessionStatus, SessionStrip, SetAsk, SetChoice, StreamingCall, TechniqueEvent, TechniqueSummary, ToolImage, ToolResult,
     TranscriptLine, TurnResult, TurnState, Usage, WatchedEvent, WebEvent,
 };
-pub use core::conversations::{create_conversation_store, create_conversation_store_keeping, KEEP_DAYS};
+pub use core::conversations::{create_conversation_store, create_conversation_store_keeping, gone_words, IMPORTED, KEEP_DAYS};
 pub use core::errors::{FailureKind, KumiError, RuntimeError};
 pub use core::gaps::{gap_tools, GAP_GUIDANCE, GAP_TOOL};
 pub use core::goal::{create_goal_store, GoalBudget, GoalState, GoalStatus, GoalStore, GOAL_BUDGET};

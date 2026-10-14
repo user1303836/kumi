@@ -1,0 +1,323 @@
+{
+  "format": "kumi-conversation",
+  "version": 1,
+  "id": "k3x9a1b2",
+  "title": "Make the kick punchier [secret]",
+  "set": "Song [secret]",
+  "daw": "Live",
+  "noun": "Set",
+  "model": "openai/gpt-test-[secret]",
+  "created": 1760399990000,
+  "saved": 1760399999900,
+  "exported": 1760400000000,
+  "requests": 5,
+  "kumi": "9.9.9",
+  "full": false,
+  "redacted": true,
+  "partial": true,
+  "earlier": [
+    "an earlier ask [secret]",
+    "a second earlier ask"
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Make the kick punchier [secret]. See [the manual](https://www.ableton.com/manual).\n\n[a picture]"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Looking at your Set [secret]."
+        },
+        {
+          "type": "tool-call",
+          "toolCallId": "call_1",
+          "toolName": "live_discover",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": [
+        {
+          "type": "tool-result",
+          "toolCallId": "call_1",
+          "toolName": "live_discover",
+          "output": {
+            "type": "text",
+            "value": "[left out of the export]"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "The kick sits at -6 dB, so I'll raise it to -3 dB. Mind <img src=x onerror=alert(1)> here, and `<user>` in code."
+        },
+        {
+          "type": "tool-call",
+          "toolCallId": "call_2",
+          "toolName": "set_mixer",
+          "input": {}
+        },
+        {
+          "type": "tool-call",
+          "toolCallId": "call_3",
+          "toolName": "probe_[secret]",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": [
+        {
+          "type": "tool-result",
+          "toolCallId": "call_2",
+          "toolName": "set_mixer",
+          "output": {
+            "type": "text",
+            "value": "[left out of the export]"
+          }
+        },
+        {
+          "type": "tool-result",
+          "toolCallId": "call_3",
+          "toolName": "probe_[secret]",
+          "output": {
+            "type": "text",
+            "value": "[left out of the export]"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "The render is done. More in [the manual](https://www.ableton.com/manual), not [this](file:///etc/passwd)."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Goal: make a pad like the reference"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool-call",
+          "toolCallId": "call_4",
+          "toolName": "search_conversations",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": [
+        {
+          "type": "tool-result",
+          "toolCallId": "call_4",
+          "toolName": "search_conversations",
+          "output": {
+            "type": "text",
+            "value": "[left out of the export]"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Here is the pad.\n\n```\nlet x = <user>;\n```"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "and the token?"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Your session token is [secret], kept safe."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "show the codes [2J"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Inert: ]0;title ]52;c;aGk= ]8;;https://x\\link]8;;\\ [201~ 31m done."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Loop: make it louder"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Starting."
+        },
+        {
+          "type": "tool-call",
+          "toolCallId": "call_5",
+          "toolName": "judge",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": [
+        {
+          "type": "tool-result",
+          "toolCallId": "call_5",
+          "toolName": "judge",
+          "output": {
+            "type": "text",
+            "value": "[left out of the export]"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Round two is in."
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Brighter now."
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "CONTINUE: almost there."
+        }
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "id": "c1",
+      "family": "mixer",
+      "title": "Volume -6 → -3 dB [secret]",
+      "track": {
+        "name": "Kick [secret]"
+      },
+      "state": "applied",
+      "at": 1760399999000,
+      "picture": {
+        "kind": "values",
+        "values": [
+          {
+            "name": "Volume [secret]",
+            "fromText": "-6 dB",
+            "toText": "-3 dB"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c2",
+      "family": "parameter",
+      "title": "EQ Eight band 2",
+      "state": "undone",
+      "at": 1760399999500,
+      "picture": {
+        "kind": "eq",
+        "before": [
+          {
+            "shape": "bell",
+            "freq": 1000,
+            "gainDb": 0,
+            "q": 0.71,
+            "on": true
+          }
+        ],
+        "after": [
+          {
+            "shape": "bell",
+            "freq": 1000,
+            "gainDb": 4,
+            "q": 0.71,
+            "on": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "c3",
+      "family": "tempo",
+      "title": "Tempo 120 → 124 BPM",
+      "state": "unsure",
+      "at": 1760399999600
+    },
+    {
+      "id": "c4",
+      "family": "rename",
+      "title": "Renamed Bass",
+      "state": "expired",
+      "at": 1760399999700
+    }
+  ]
+}

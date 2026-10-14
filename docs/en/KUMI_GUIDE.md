@@ -862,6 +862,23 @@ Set's conversation moves to the Set's own folder when you first save it.
   value last set (`0` still keeps all). After a rollback, a Kumi 1.16 or
   earlier keeps only each Set's 20 newest, and so does a Kumi window opened
   before the update, until it closes.
+- **Sharing:** `/export` copies this conversation as Markdown, or saves it as
+  Markdown, a web page or a file for Kumi (`/export copy`, `md`, `html` or
+  `json` does one straight away). `/share` saves the web page, then opens it,
+  shows it in Finder (Explorer) or copies its path. Files go in the folder you
+  started Kumi in, named after the conversation, never over another file; on
+  macOS and Linux, only you can read them.
+- **What an export holds:** what you and Kumi said, each step by name, and the
+  changes from HISTORY (with pictures on the web page). Keys, tokens, your home
+  folder and your account name are taken out. Live's details, your notes,
+  Kumi's notes to the model and the model's reasoning never leave. The web page
+  loads nothing from the internet.
+- **From the shell:** `kumi export [id or name]` saves Markdown (`--md`, the
+  default; `--html`, `--json`); without an id (or with `--last`), your latest
+  conversation. `--full` adds each step's input and result, `-o <path>` chooses
+  where, and `--raw` leaves keys and paths in (and says so).
+  `kumi import <file>` keeps a file saved with `--json`; `kumi -r <id>` carries
+  it on in a copy, and Kumi tells the model it came from a file.
 
 When you mention something from before ("the reverb chain from last week's
 vocal"), Kumi looks through the conversations kept for every Set, and its

@@ -1,6 +1,6 @@
 //! `kumi report`, with native runtime version information.
 use crate::{
-    config::{load_auth_file, load_db_file, load_gaps_file, load_projects_dir, load_settings_file, load_timings_file},
+    config::{load_auth_file, load_db_file, load_gaps_file, load_projects_dir, load_settings_file, load_timings_file, read_settings},
     doctor::{doctor_checks, format_doctor, Check, DoctorIo},
     spinner::step,
     tui::style::os_release,
@@ -17,7 +17,7 @@ use kumi_runtime::{
     core::{errors::RuntimeError, gaps::logged_gaps},
     library::sources::join,
     system::{self, Env},
-    KUMI_VERSION,
+    IMPORTED, KUMI_VERSION,
 };
 use serde_json::Value;
 use std::{path::Path, rc::Rc, time::UNIX_EPOCH};
@@ -34,7 +34,9 @@ impl ReportIo {
         Self { doctor, folder: None, home: None, user: None, now: None, live_logs: None }
     }
 }
-/// Secrets are removed before paths and usernames, with the same bounded heuristic patterns as the source.
+/// Secrets are removed first: known ones (sign-ins, keys in the environment), then by their shapes (Bearer tokens, provider
+/// keys, JWTs, a URL's password and query secrets, fields named for a secret with their values quoted or bare, long
+/// tokens). Then the home folder, and the account name (also where a URL encodes it after %2F or %5C).
 pub fn redactor(secrets: &[String], home: &str, user: &str) -> impl Fn(&str) -> String {
     let mut known: Vec<_> = secrets.iter().filter(|s| utf16_len(s) >= 8).cloned().collect();
     known.sort_by_key(|s| std::cmp::Reverse(utf16_len(s)));
@@ -45,17 +47,35 @@ pub fn redactor(secrets: &[String], home: &str, user: &str) -> impl Fn(&str) -> 
             homes.push(path)
         }
     }
-    let name = (utf16_len(user) >= 3)
-        .then(|| fancy_regex::Regex::new(&format!(r"(?i)(?<![A-Za-z0-9]){}(?![A-Za-z0-9])", regex::escape(user))).unwrap());
+    let name = (utf16_len(user) >= 3).then(|| {
+        fancy_regex::Regex::new(&format!(r"(?i)(?:(?<=%2F)|(?<=%5C)|(?<![A-Za-z0-9])){}(?![A-Za-z0-9])", regex::escape(user))).unwrap()
+    });
     let whitespace = r"\x09-\x0d \u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}";
     let bearer = regex::Regex::new(&format!(r#"(?i)(?-u:\b)Bearer[{whitespace}]+[^{whitespace}"']+"#)).unwrap();
-    let key = regex::Regex::new(r"(?-u:\b)(sk|pk|rk)-[A-Za-z0-9_-]{12,}").unwrap();
-    let jwt = regex::Regex::new(r"(?-u:\b)eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}").unwrap();
-    let field = regex::Regex::new(&format!(
-        r#"(?i)("?(?:api[_-]?key|token|secret|password|access|refresh)"?[{whitespace}]*[:=][{whitespace}]*)"([^"]*)""#
+    // Provider keys by their shapes: sk-, pk- and rk- keys, Stripe's, Google's, GitHub's, AWS key ids and Slack's.
+    let key = regex::Regex::new(concat!(
+        r"(?-u:\b)(?:(?:sk|pk|rk)-[A-Za-z0-9_-]{12,}|[sr]k_(?:live|test)_[A-Za-z0-9]{10,}|AIza[0-9A-Za-z_-]{30,}",
+        r"|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|(?:AKIA|ASIA)[0-9A-Z]{16}|xox[abposr]-[A-Za-z0-9-]{10,})"
     ))
     .unwrap();
-    let long = fancy_regex::Regex::new(r"(?<![A-Za-z0-9+_-])[A-Za-z0-9+_-]{48,}={0,2}(?![A-Za-z0-9+_-])").unwrap();
+    let jwt = regex::Regex::new(r"(?-u:\b)eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}").unwrap();
+    // A URL's password (scheme://user:password@host), and the secrets its query carries.
+    let login = regex::Regex::new(r#"(?i)((?-u:\b)[a-z][a-z0-9+.-]*://[^\s/:@'"]+:)[^\s/@'"]+@"#).unwrap();
+    let query = regex::Regex::new(
+        r#"(?i)([?&;](?:access_token|refresh_token|id_token|token|api_?key|key|secret|client_secret|password|passwd|pwd|auth|sig|signature|code)=)[^&#\s'"]+"#,
+    )
+    .unwrap();
+    // A field named for a secret (api_key, AWS_SECRET_ACCESS_KEY, db_password, x-auth-token…): a value in double quotes,
+    // escaped ones too (JSON inside a string), or for the plainest names in single quotes or bare.
+    let named = r"[A-Za-z0-9_-]*(?:api[_-]?key|apikey|token|secret|password|passwd|pwd|pw|passphrase|private[_-]?key)[A-Za-z0-9_-]*";
+    let quoted = regex::Regex::new(&format!(
+        r#"(?i)((?:\\?")?(?:{named}|access|refresh)(?:\\?")?[{whitespace}]*[:=][{whitespace}]*)(\\?")((?:[^"\\]|\\.)*?)(\\?")"#
+    ))
+    .unwrap();
+    let bare =
+        regex::Regex::new(&format!(r#"(?i)((?-u:\b){named}[{whitespace}]*[:=][{whitespace}]*)('[^'\n]*'|[^{whitespace}"'&,;)\]}}<>]+)"#))
+            .unwrap();
+    let long = fancy_regex::Regex::new(r"(?<![A-Za-z0-9+_-])[A-Za-z0-9+_-]{32,}={0,2}(?![A-Za-z0-9+_-])").unwrap();
     move |text| {
         let mut out = text.to_string();
         for secret in &known {
@@ -67,13 +87,41 @@ pub fn redactor(secrets: &[String], home: &str, user: &str) -> impl Fn(&str) -> 
         out = bearer.replace_all(&out, "Bearer [secret]").into_owned();
         out = key.replace_all(&out, "[secret]").into_owned();
         out = jwt.replace_all(&out, "[secret]").into_owned();
-        out = field
-            .replace_all(
-                &out,
-                |caps: &regex::Captures| if utf16_len(&caps[2]) >= 8 { format!("{}\"[secret]\"", &caps[1]) } else { caps[0].to_string() },
-            )
+        out = login.replace_all(&out, "${1}[secret]@").into_owned();
+        out = query.replace_all(&out, "${1}[secret]").into_owned();
+        out = quoted
+            .replace_all(&out, |caps: &regex::Captures| {
+                if utf16_len(&caps[3]) >= 8 {
+                    format!("{}{}[secret]{}", &caps[1], &caps[2], &caps[4])
+                } else {
+                    caps[0].to_string()
+                }
+            })
             .into_owned();
-        out = long.replace_all(&out, "[long value]").into_owned();
+        out = bare
+            .replace_all(&out, |caps: &regex::Captures| {
+                let value = caps[2].trim_matches('\'');
+                if value == "[secret]" || utf16_len(value) < 8 {
+                    caps[0].to_string()
+                } else if caps[2].starts_with('\'') {
+                    format!("{}'[secret]'", &caps[1])
+                } else {
+                    format!("{}[secret]", &caps[1])
+                }
+            })
+            .into_owned();
+        // A long token: 32 characters with letters and digits in them (as titles hide them), or any 48.
+        out = long
+            .replace_all(&out, |caps: &fancy_regex::Captures| {
+                let run = &caps[0];
+                let mixed = run.chars().any(|c| c.is_ascii_digit()) && run.chars().any(|c| c.is_ascii_alphabetic());
+                if mixed || run.len() >= 48 {
+                    "[long value]".to_string()
+                } else {
+                    run.to_string()
+                }
+            })
+            .into_owned();
         if let Some(name) = &name {
             out = name.replace_all(&out, "<user>").into_owned()
         }
@@ -138,10 +186,11 @@ async fn modified(file: &str) -> Option<f64> {
     }
 }
 /// The newest kept conversation in any Set's folder: when it was saved, its id and the conversation. Only `<id>.json`
-/// files are conversations (a name or pin beside one isn't).
+/// files are conversations (a name or pin beside one isn't). One imported from a file, or a copy of one, holds someone
+/// else's words, so it's never the one.
 async fn last_conversation(projects: &str) -> Option<(f64, String, Value)> {
     let mut best: Option<(String, String, f64)> = None;
-    for place in names(projects).await {
+    for place in names(projects).await.into_iter().filter(|place| place != IMPORTED) {
         let folder = join(projects, &format!("{place}/conversations"));
         for name in names(&folder).await {
             let Some(id) = name
@@ -152,7 +201,7 @@ async fn last_conversation(projects: &str) -> Option<(f64, String, Value)> {
             };
             let file = join(&folder, &name);
             if let Some(at) = modified(&file).await {
-                if best.as_ref().is_none_or(|best| at > best.2) {
+                if best.as_ref().is_none_or(|best| at > best.2) && !imported(&join(&folder, &format!("{id}.meta"))).await {
                     best = Some((file, id.to_string(), at))
                 }
             }
@@ -160,6 +209,11 @@ async fn last_conversation(projects: &str) -> Option<(f64, String, Value)> {
     }
     let (file, id, at) = best?;
     Some((at, id, serde_json::from_str(&read(&file).await?).ok()?))
+}
+/// Whether a conversation's sidecar says it came from a file (or was copied from one that did).
+async fn imported(meta: &str) -> bool {
+    let Some(text) = read(meta).await.filter(|text| text.len() <= 16 * 1024) else { return false };
+    serde_json::from_str::<Value>(&text).ok().and_then(|meta| meta.get("imported").and_then(Value::as_bool)).unwrap_or(false)
 }
 fn describe_conversation(value: &Value) -> Vec<String> {
     let mut lines = vec![];
@@ -337,7 +391,7 @@ async fn live_log_lines(file: &str) -> Vec<String> {
     }
     picked.into_iter().rev().take(150).collect::<Vec<_>>().into_iter().rev().map(|s| clip(s, 400)).collect()
 }
-fn username() -> String {
+pub fn username() -> String {
     #[cfg(unix)]
     {
         unsafe {
@@ -368,11 +422,8 @@ fn username() -> String {
     }
     String::new()
 }
-pub async fn write_report(io: ReportIo) -> Result<i32, RuntimeError> {
-    let env = &io.doctor.env;
-    let home = io.home.clone().unwrap_or_else(|| home::home_dir().unwrap_or_default().display().to_string());
-    let user = io.user.clone().unwrap_or_else(username);
-    let now = io.now.as_ref().map(|now| now()).unwrap_or_else(Utc::now);
+/// What Kumi knows to be secret: every string in its saved sign-ins, and the keys in its environment.
+pub async fn known_secrets(env: &Env) -> Vec<String> {
     let mut secrets = vec![];
     if let Ok(file) = load_auth_file(env) {
         if let Ok(credentials) = open_credential_store(file).list().await {
@@ -381,17 +432,32 @@ pub async fn write_report(io: ReportIo) -> Result<i32, RuntimeError> {
             }
         }
     }
-    for name in [
-        "AI_GATEWAY_API_KEY",
-        "OPENAI_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "OPENCODE_API_KEY",
-        "GEMINI_API_KEY",
-        "GOOGLE_API_KEY",
-        "KUMI_LISTENER_KEY",
-    ] {
+    for name in KEY_VARIABLES {
         secrets.push(env.get(name).cloned().unwrap_or_default())
     }
+    // A model server's key, as settings give it.
+    if let Ok(file) = load_settings_file(env) {
+        secrets.extend(read_settings(&file).model_servers.into_iter().filter_map(|server| server.api_key));
+    }
+    secrets
+}
+/// The variables that hold a key or token Kumi uses.
+pub const KEY_VARIABLES: [&str; 8] = [
+    "AI_GATEWAY_API_KEY",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENCODE_API_KEY",
+    "LM_API_TOKEN",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "KUMI_LISTENER_KEY",
+];
+pub async fn write_report(io: ReportIo) -> Result<i32, RuntimeError> {
+    let env = &io.doctor.env;
+    let home = io.home.clone().unwrap_or_else(|| home::home_dir().unwrap_or_default().display().to_string());
+    let user = io.user.clone().unwrap_or_else(username);
+    let now = io.now.as_ref().map(|now| now()).unwrap_or_else(Utc::now);
+    let secrets = known_secrets(env).await;
     let redact = redactor(&secrets, &home, &user);
     let file = step(io.doctor.out.clone(), env, "Writing Kumi's report…", compose(&io, &redact, &home, now), false).await?;
     io.doctor.out.write(&format!("Kumi's report is in {}\nIt has Kumi's versions, the doctor's checks, what Kumi did in your last conversation, and the bridge's lines from Live's log. Keys and tokens are taken out. Send it with a few words about what happened.\n",redact(&file)));

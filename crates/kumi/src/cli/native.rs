@@ -5,6 +5,7 @@ use crate::{
     bridge_setup::{self, BridgeSetupIo},
     config::*,
     doctor::{self, DoctorIo},
+    export::{self, ExportRequest},
     input::TerminalInput,
     install::{self, InstalledIo},
     library::{run_library, LibraryIo},
@@ -21,7 +22,11 @@ use kumi_common::{
     js::{number, string},
 };
 use kumi_runtime::{
-    core::contracts::Integration, integrations::ableton::AbletonOptions, providers::ProviderId, system::Env, RuntimeError, KUMI_VERSION,
+    core::{contracts::Integration, export::Format},
+    integrations::ableton::AbletonOptions,
+    providers::ProviderId,
+    system::Env,
+    RuntimeError, KUMI_VERSION,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -72,7 +77,7 @@ pub fn help(installed: bool) -> String {
         "Sign in and connect Live: it puts the bridge in Live and can restart Live for you.\nThen talk about the open Live Set; /login and /model change the sign-in and model.",
     ));
     first.push((format!("{cmd} bridge"), "Or, with Live closed: put the bridge into Live, or bring it up to date"));
-    let mut more=vec![("-c, --continue","Continue the conversation you had last, in any Set"),("-r, --resume [id or name]","Continue a kept conversation by its id, the start of one, or its name;\nalone, choose one (both work with --inference-only too)"),("--inference-only","Chat without Live"),("--bridge-config <path>","Use this bridge configuration (an absolute path)"),("login","Sign in: asks whether with ChatGPT or an API key"),("login <provider>","Sign in to one provider: openai-codex with a ChatGPT plan (--device\nwithout a browser); anthropic, openai, opencode with an API key (asked for)"),("logout <provider>","Remove Kumi's sign-in for that provider"),("model [<provider>/<model>]","Show or choose the model; ollama/<model> or lmstudio/<model> for one on this computer"),("auth","Show which providers are usable (no secrets)"),("doctor","Check sign-in, the bridge, Live and the terminal"),("library","What Kumi knows of your sounds, presets and Sets (it learns them in the\nbackground); --rebuild learns them all again"),("update","Bring Kumi up to date, and the bridge in Live when it's older"),("update --check","Say whether there's a newer Kumi, without installing it")];
+    let mut more=vec![("-c, --continue","Continue the conversation you had last, in any Set"),("-r, --resume [id or name]","Continue a kept conversation by its id, the start of one, or its name;\nalone, choose one (both work with --inference-only too)"),("export [id or name]","Save a kept conversation as Markdown (--md, the default; --html a web page;\n--json a file another Kumi imports); your latest without an id or with --last.\n--full adds each step's input and result, -o <path> chooses where, --raw leaves\nkeys and paths in"),("import <file>","Keep a conversation saved with export --json, to carry on with -r"),("--inference-only","Chat without Live"),("--bridge-config <path>","Use this bridge configuration (an absolute path)"),("login","Sign in: asks whether with ChatGPT or an API key"),("login <provider>","Sign in to one provider: openai-codex with a ChatGPT plan (--device\nwithout a browser); anthropic, openai, opencode with an API key (asked for)"),("logout <provider>","Remove Kumi's sign-in for that provider"),("model [<provider>/<model>]","Show or choose the model; ollama/<model> or lmstudio/<model> for one on this computer"),("auth","Show which providers are usable (no secrets)"),("doctor","Check sign-in, the bridge, Live and the terminal"),("library","What Kumi knows of your sounds, presets and Sets (it learns them in the\nbackground); --rebuild learns them all again"),("update","Bring Kumi up to date, and the bridge in Live when it's older"),("update --check","Say whether there's a newer Kumi, without installing it")];
     if installed {
         more.extend([
             ("update --rollback", "Go back to the Kumi you had before the last update"),
@@ -174,19 +179,8 @@ async fn login_with(config: &AppConfig, io: &CliIo) -> Result<(), RuntimeError> 
 }
 pub async fn run(io: CliIo, factory: AbletonFactory) -> i32 {
     io.exit_after_reopen.set(false);
-    let mut secrets: Vec<String> = [
-        "AI_GATEWAY_API_KEY",
-        "OPENAI_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "OPENCODE_API_KEY",
-        "LM_API_TOKEN",
-        "GEMINI_API_KEY",
-        "GOOGLE_API_KEY",
-        "KUMI_LISTENER_KEY",
-    ]
-    .into_iter()
-    .filter_map(|s| io.env.get(s).filter(|s| !s.is_empty()).cloned())
-    .collect();
+    let mut secrets: Vec<String> =
+        crate::report::KEY_VARIABLES.into_iter().filter_map(|s| io.env.get(s).filter(|s| !s.is_empty()).cloned()).collect();
     if let Ok(file) = load_settings_file(&io.env) {
         for server in read_settings(&file).model_servers {
             if let Some(key) = server.api_key.filter(|s| !s.is_empty()) {
@@ -215,6 +209,16 @@ async fn dispatch(io: &CliIo, factory: AbletonFactory, secrets: &mut Vec<String>
         }
         AppConfig::Doctor => doctor::run_doctor(doctor_io(io, factory)).await,
         AppConfig::Report => write_report(ReportIo::new(doctor_io(io, factory))).await,
+        AppConfig::Export { conversation, format, out, full, raw } => {
+            let format = match format.as_str() {
+                "html" => Format::Html,
+                "json" => Format::Json,
+                _ => Format::Markdown,
+            };
+            let request = ExportRequest { conversation: conversation.clone(), format, out: out.clone(), full: *full, raw: *raw };
+            export::export_command(request, &io.env, io.out.as_ref(), io.err.as_ref(), io.command()).await
+        }
+        AppConfig::Import { file } => export::import_command(file, &io.env, io.out.as_ref(), io.err.as_ref(), io.command()).await,
         AppConfig::Update { rollback, check } => {
             if *rollback && !io.installed() {
                 io.out.write("This Kumi runs from a copy of its repository, so there's no earlier Kumi kept to go back to. Check out the commit you want with git, then run: cargo build --release --workspace\n");

@@ -38,6 +38,13 @@ const MAX_KEPT_CHANGES: usize = 100;
 const MAX_KEPT: usize = 20;
 /// Days a conversation is kept after it was last used, beyond its place's newest (`conversations.keepDays`).
 pub const KEEP_DAYS: u32 = 90;
+/// What Kumi says of a conversation it let go, when the producer names it.
+pub fn gone_words(keep_days: u32) -> String {
+    match keep_days {
+        0 => "That conversation isn't kept any more.".into(),
+        days => format!("That conversation isn't kept any more (Kumi keeps {days} days, and pinned ones always)."),
+    }
+}
 const DAY_MS: f64 = 86_400_000.0;
 const INDEX: &str = "conversation-index.json";
 /// The most let-go ids the index remembers, to say one isn't kept any more.
@@ -99,7 +106,9 @@ pub fn new_conversation_id(at: i64) -> String {
     rand::rngs::OsRng.try_fill_bytes(&mut bytes).expect("OS randomness");
     format!("{}{}", digits.into_iter().rev().collect::<String>(), hex::encode(bytes))
 }
-static PLACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([0-9a-f]{32}|unsaved)$").unwrap());
+/// Where `kumi import` keeps conversations from files: made on another computer, they carry on in a copy.
+pub const IMPORTED: &str = "imported";
+static PLACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([0-9a-f]{32}|unsaved|imported)$").unwrap());
 static CONVERSATION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-z]{6,24}$").unwrap());
 /// The Set's name in a baseline file: its first key `name`, which comes before the pages.
 static BASELINE_NAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"[{,]"name":("(?:[^"\\]|\\.)*")"#).unwrap());
@@ -159,7 +168,9 @@ impl Drop for FileConversationStore {
 /// looks like a key hidden, at most 60 characters.
 pub fn title(name: Option<&str>, first: &str) -> String {
     let words = name.map(trim).filter(|name| !name.is_empty()).unwrap_or(first);
-    let line = crate::core::recall::plain(words, MAX_TITLE + 1);
+    // Characters that draw nothing could hide words in it, or turn it around.
+    let words: String = words.chars().filter(|c| !crate::core::export::invisible(*c)).collect();
+    let line = crate::core::recall::plain(&words, MAX_TITLE + 1);
     if utf16_len(&line) > MAX_TITLE {
         format!("{}…", trim(&head(&line, MAX_TITLE - 1)))
     } else {
@@ -199,13 +210,19 @@ struct Meta {
     pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     forked_from: Option<String>,
+    /// It came from a file (kumi import), or was copied from one that did.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    imported: bool,
+    /// The Set a conversation from a file was about, as the file said: no place of its own names it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    set: Option<String>,
     /// What a later Kumi keeps here, kept as it is when this one writes the file again.
     #[serde(flatten)]
     later: serde_json::Map<String, Value>,
 }
 impl Meta {
     fn is_empty(&self) -> bool {
-        self.name.is_none() && !self.pinned && self.forked_from.is_none() && self.later.is_empty()
+        self.name.is_none() && !self.pinned && self.forked_from.is_none() && !self.imported && self.set.is_none() && self.later.is_empty()
     }
 }
 /// A name as the producer gave it: one line, at most 60 characters; None when there's nothing left.
@@ -226,6 +243,8 @@ async fn read_meta(file: &Path) -> Meta {
         name: meta.name.as_deref().and_then(clean_name),
         pinned: meta.pinned,
         forked_from: meta.forked_from.filter(|id| CONVERSATION.is_match(id)),
+        imported: meta.imported,
+        set: meta.set.as_deref().and_then(clean_name),
         later: meta.later,
     }
 }
@@ -304,13 +323,18 @@ fn locked_elsewhere(file: &Path) -> bool {
 }
 
 /// The files of a conversation as last read: when `<id>.json` was written (ns) and its size, and when `<id>.meta` was (0
-/// without one). Anything else, and it's read again.
+/// without one), with what of them the entry holds ([`READS`]). Anything else, and it's read again.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct Stamp {
     modified: u64,
     size: u64,
     meta: u64,
+    /// An entry an earlier Kumi wrote back has none (it doesn't know them), so it's read again.
+    #[serde(default)]
+    reads: u32,
 }
+/// What of a conversation's files an entry holds: 1 once it holds whether it came from a file, and that file's Set.
+const READS: u32 = 1;
 /// A kept conversation, as the index lists it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -325,6 +349,10 @@ struct Entry {
     pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     forked_from: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    imported: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    set: Option<String>,
     stamp: Stamp,
 }
 /// A place's Set name, as its baseline said when Kumi read it, with when the baseline was written.
@@ -545,6 +573,12 @@ impl FileConversationStore {
             }
         }
     }
+    /// Remembers the Set a conversation from a file was about, as the file said: listed and exported again with it. False
+    /// when it isn't kept.
+    pub async fn note_set(&self, place: &str, id: &str, set: &str) -> Result<bool, RuntimeError> {
+        let set = clean_name(set);
+        self.change_meta(place, id, |meta| meta.set = set).await
+    }
     /// Holds conversations as on a file system that can't lock (some network drives): for tests.
     #[doc(hidden)]
     pub fn without_file_locks(&self) {
@@ -567,7 +601,7 @@ impl FileConversationStore {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 let Ok(metadata) = entry.metadata().await else { continue };
                 if let Some(id) = name.strip_suffix(".json").filter(|id| CONVERSATION.is_match(id)) {
-                    files.push((id.to_owned(), Stamp { modified: stamp_of(&metadata), size: metadata.len(), meta: 0 }));
+                    files.push((id.to_owned(), Stamp { modified: stamp_of(&metadata), size: metadata.len(), meta: 0, reads: READS }));
                 } else if let Some(id) = name.strip_suffix(".meta").filter(|id| CONVERSATION.is_match(id)) {
                     metas.insert(id.to_owned(), stamp_of(&metadata));
                 }
@@ -638,6 +672,8 @@ impl FileConversationStore {
                     name: meta.name,
                     pinned: meta.pinned,
                     forked_from: meta.forked_from,
+                    imported: meta.imported,
+                    set: meta.set,
                     stamp: *stamp,
                 },
             );
@@ -681,18 +717,20 @@ impl FileConversationStore {
                 let current = self.current_id(&place).await;
                 currents.insert(place.clone(), current);
             }
+            let imported = entry.imported || place == IMPORTED;
             rows.push(ConversationSummary {
                 current: currents[&place].as_deref() == Some(id.as_str()),
                 id,
                 saved_at: entry.saved_at,
                 first: entry.first.clone(),
                 turns: entry.turns,
-                set: index.places.get(&place).and_then(|known| known.name.clone()),
+                set: index.places.get(&place).and_then(|known| known.name.clone()).or_else(|| entry.set.clone()),
                 place,
                 name: entry.name.clone(),
                 pinned: entry.pinned,
                 forked_from: entry.forked_from.clone(),
                 created: entry.created,
+                imported,
             });
         }
         rows.sort_by(|a, b| b.saved_at.cmp(&a.saved_at));
@@ -1039,14 +1077,22 @@ impl ConversationStore for FileConversationStore {
         from: Option<&str>,
     ) -> Result<(), RuntimeError> {
         self.file(place, id)?;
+        let from = from.filter(|from| CONVERSATION.is_match(from));
+        // A copy of a conversation from a file is one too: its words are the file's, however often it's copied.
+        let imported = place == IMPORTED
+            || match from {
+                Some(from) => matches!(self.find(from).await, Ok(ConversationMatch::One(row)) if row.id == from && row.imported),
+                None => false,
+            };
         // Beside it before it's there: a look at the folder never finds it without them.
-        let meta = Meta {
-            name: name.and_then(clean_name),
-            forked_from: from.filter(|from| CONVERSATION.is_match(from)).map(str::to_owned),
-            ..Meta::default()
-        };
+        let meta = Meta { name: name.and_then(clean_name), forked_from: from.map(str::to_owned), imported, ..Meta::default() };
         self.write_meta(place, id, &meta).await?;
-        self.save(place, id, conversation).await
+        self.save(place, id, conversation).await?;
+        // Nothing kept of it (its last exchange alone runs longer than Kumi keeps): nothing beside it either.
+        if !self.file(place, id)?.exists() {
+            remove(self.kept(place)?.join(format!("{id}.meta"))).await?;
+        }
+        Ok(())
     }
     /// Where the file system can lock, the system's lock on `<id>.lock` decides: one Kumi gets it however many ask at
     /// once, and a Kumi that's gone holds nothing. Where it can't (some network drives), the file names the Kumi that has

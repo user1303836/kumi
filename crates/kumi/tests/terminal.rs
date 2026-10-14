@@ -99,6 +99,7 @@ struct Control {
     now: RefCell<Option<ConversationNow>>,
     /// A chat without Live, started without -c or -r: no conversation is kept.
     keeps_none: Cell<bool>,
+    export: RefCell<Option<ConversationToExport>>,
 }
 impl Default for Control {
     fn default() -> Self {
@@ -121,6 +122,7 @@ impl Default for Control {
             named: RefCell::new(vec![]),
             now: RefCell::new(None),
             keeps_none: Cell::new(false),
+            export: RefCell::new(None),
         }
     }
 }
@@ -286,6 +288,9 @@ impl SessionController for Control {
     }
     async fn conversation_now(&self) -> Option<ConversationNow> {
         self.now.borrow().clone()
+    }
+    async fn conversation_to_export(&self) -> Option<ConversationToExport> {
+        self.export.borrow().clone()
     }
     fn has_reconnect(&self) -> bool {
         self.reconnect.get()
@@ -829,6 +834,57 @@ async fn output_bound_cancels_and_eof_dispatches_last_line() {
             f.input.end();
             f.quit().await;
             assert!(f.control.calls.borrow().contains(&"submit:last line".into()));
+        })
+        .await;
+}
+#[tokio::test]
+async fn export_and_share_save_this_conversation_where_kumi_was_started_with_secrets_taken_out() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let into = folder.path().to_path_buf();
+            let f = Fixture::with(false, false, None, None, None, move |o| o.folder = Some(into));
+            flush().await;
+            f.input.write("/export\n");
+            flush().await;
+            assert!(f.text().contains("[export] There's nothing to export yet: ask Kumi something first."), "{}", f.text());
+            let messages = vec![
+                json!({"role": "user", "content": [{"type": "text", "text": "Night drive with private-token"}]}),
+                json!({"role": "assistant", "content": [{"type": "text", "text": "Done."}]}),
+            ];
+            *f.control.export.borrow_mut() = Some(ConversationToExport {
+                id: "k3x9a1b2".into(),
+                title: "Night drive private-token".into(),
+                set: None,
+                created: 0,
+                conversation: SavedConversation {
+                    saved_at: 1,
+                    checkpoint: KernelCheckpoint { version: 1, messages, origin: None, tools: None },
+                    changes: None,
+                    first: None,
+                    turns: Some(1),
+                },
+                words: ("Live", "Set"),
+            });
+            for command in ["/export\n", "/export html\n", "/share\n", "/export pdf\n"] {
+                f.input.write(command);
+                flush().await;
+            }
+            let mut names: Vec<String> =
+                std::fs::read_dir(folder.path()).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
+            names.sort();
+            assert_eq!(
+                names,
+                ["kumi-night-drive-secret-k3x9a1b2.html", "kumi-night-drive-secret-k3x9a1b2.md"],
+                "/share shows the page again"
+            );
+            assert!(f.text().contains("[export] This conversation's web page is saved already: "), "{}", f.text());
+            let markdown = std::fs::read_to_string(folder.path().join("kumi-night-drive-secret-k3x9a1b2.md")).unwrap();
+            assert!(markdown.contains("Night drive with [secret]") && !markdown.contains("private-token"), "{markdown}");
+            assert!(f.text().contains("[export] Saved this conversation as Markdown: "), "{}", f.text());
+            assert!(f.text().contains("[export] Saved this conversation as a web page: "));
+            assert!(f.text().contains("[export] Use /export [md | html | json]"));
+            f.quit().await;
         })
         .await;
 }

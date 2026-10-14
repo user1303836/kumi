@@ -5,3 +5,5 @@ vendor/willington/** -text -whitespace
 # Plug-in format fixtures are the bytes a plug-in or host wrote, read back exactly by the tests: no
 # line-ending conversion, and no whitespace checks.
 plugin-formats/*/format-*/fixtures/** -text -whitespace
+# Exports as Kumi writes them, compared byte for byte by their tests: Markdown's line breaks end in two spaces.
+crates/kumi-runtime/tests/support/export/** -whitespace

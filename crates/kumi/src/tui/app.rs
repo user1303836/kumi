@@ -13,6 +13,7 @@ mod panels;
 mod records;
 mod setup;
 pub use setup::{waveform, LiveInstalled, LiveSetup, WAVE_WIDTH};
+mod sharing;
 mod shown;
 
 use super::{
@@ -112,10 +113,19 @@ pub struct TuiOptions {
     pub reach: Option<Rc<dyn Fn() -> LocalBoxFuture<'static, Option<String>>>>,
     /// Kumi runs on another computer (over SSH), whose browser isn't the producer's: ChatGPT signs in with a code.
     pub remote: bool,
+    /// How the producer runs Kumi from a shell ("kumi"), where Kumi's words name one of its commands.
+    pub command: String,
     /// Puts text on this computer's clipboard with its own tool, for terminals that don't take the terminal's way.
     pub copy: Option<Rc<dyn Fn(&str)>>,
     /// The producer chooses a kept conversation as Kumi starts (`kumi -r`): the list opens with this typed in it.
     pub choose_conversation: Option<String>,
+    /// What /export and /share take out: `kumi report`'s redactor, made at each export. None takes out what `secrets`
+    /// holds, the home folder and the account name.
+    pub redact: Option<crate::export::MakeRedactor>,
+    /// Shows a file in the system's file manager (/share); None shows nothing.
+    pub reveal: Option<Rc<dyn Fn(&std::path::Path)>>,
+    /// Where /export and /share save; None saves in the folder Kumi was started in.
+    pub folder: Option<std::path::PathBuf>,
 }
 /// Live's part of first-run setup: the setup shows it when Kumi's bridge isn't in Live yet, or is older
 /// than Kumi's.
@@ -160,8 +170,12 @@ impl TuiOptions {
             next_time: None,
             reach: None,
             remote: false,
+            command: "kumi".into(),
             copy: None,
             choose_conversation: None,
+            redact: None,
+            reveal: None,
+            folder: None,
         }
     }
 }
@@ -245,6 +259,9 @@ struct Strip {
     reading: bool,
 }
 struct State {
+    /// The web page saved last for this conversation (by /share or /export), with its key: /share shows it again while
+    /// nothing in the conversation changed.
+    shared: Option<(u64, std::path::PathBuf)>,
     editor: Editor,
     transcript: Transcript,
     stream: StreamingText,
@@ -385,6 +402,7 @@ struct State {
 impl State {
     fn new(options: &TuiOptions) -> Self {
         Self {
+            shared: None,
             editor: Editor::new(),
             transcript: Transcript::default(),
             stream: StreamingText::new(&options.secrets),
