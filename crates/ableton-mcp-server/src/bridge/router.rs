@@ -1,16 +1,23 @@
 //! Keep the Remote Script authoritative for shared operations and route extension-only operations beside it.
+#[cfg(not(feature = "live-11"))]
 use super::extension_channel::ExtensionChannel;
+#[cfg(not(feature = "live-11"))]
 use super::listeners::Listeners;
 use crate::live::*;
+#[cfg(not(feature = "live-11"))]
 use async_trait::async_trait;
 use serde_json::json;
+#[cfg(not(feature = "live-11"))]
 use std::rc::Rc;
+
 /// Operations the extension deliberately replaces. Empty until both channels' semantics agree.
 pub const EXTENSION_FIRST: &[&str] = &[];
+
 pub fn route_to_extension(operation: &str, remote: &LiveStatus, extension: Option<&LiveStatus>) -> bool {
     extension.is_some_and(|extension| extension.has_operation(operation))
         && (!remote.has_operation(operation) || EXTENSION_FIRST.contains(&operation))
 }
+
 pub fn merged_status(remote: &LiveStatus, extension: Option<&LiveStatus>, reason: &str) -> LiveStatus {
     let mut status = remote.clone();
     let Some(extension) = extension.filter(|_| remote.connected) else {
@@ -43,14 +50,20 @@ pub fn merged_status(remote: &LiveStatus, extension: Option<&LiveStatus>, reason
     status.extra.insert("channels".into(), json!({"extension":channel}));
     status
 }
+
+#[cfg(not(feature = "live-11"))]
 struct RoutedInner {
     remote: Rc<dyn AsyncLiveAdapter>,
     extension: ExtensionChannel,
     listeners: Listeners<dyn Fn(Option<&LiveStatus>)>,
     on_close: Rc<dyn Fn()>,
 }
+
+#[cfg(not(feature = "live-11"))]
 #[derive(Clone)]
 pub struct RoutedLiveAdapter(Rc<RoutedInner>);
+
+#[cfg(not(feature = "live-11"))]
 pub fn routed_adapter(remote: Rc<dyn AsyncLiveAdapter>, extension: ExtensionChannel, on_close: Option<Rc<dyn Fn()>>) -> RoutedLiveAdapter {
     let adapter = RoutedLiveAdapter(Rc::new(RoutedInner {
         remote,
@@ -70,6 +83,8 @@ pub fn routed_adapter(remote: Rc<dyn AsyncLiveAdapter>, extension: ExtensionChan
     }
     adapter
 }
+
+#[cfg(not(feature = "live-11"))]
 impl LiveAdapter for RoutedLiveAdapter {
     fn status(&self) -> Result<LiveStatus, LiveError> {
         Ok(merged_status(&self.0.remote.status()?, self.0.extension.status().as_ref(), &self.0.extension.reason()))
@@ -104,6 +119,8 @@ impl LiveAdapter for RoutedLiveAdapter {
         self.0.remote.reconnect()
     }
 }
+
+#[cfg(not(feature = "live-11"))]
 #[async_trait(?Send)]
 impl AsyncLiveAdapter for RoutedLiveAdapter {
     async fn snapshot_async(

@@ -1,35 +1,29 @@
-# macOS metadata
+# Test artifacts
+*.prof
+*.perf
+*.flamegraph
+/tests/*.ALS
+/tests/*.alc
+
+# Build artifacts
+target/
+*.o
+*.a
+*.so
+*.dylib
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
 .DS_Store
+Thumbs.db
 
-# Locally supplied Ableton Extensions SDK (pre-release; its licence forbids redistributing it)
-/extensions-sdk-1.0.0-beta.0/
-/vendor/ableton-extensions-sdk*/
-
-# Smithers workflow/runtime state and locally provisioned agent skills (ephemeral — never commit)
-/.smithers/
-smithers.db
-smithers.db-shm
-smithers.db-wal
-/.agents/
-/.claude/
-/.pi-subagents/
-
-# Python bytecode
-__pycache__/
-*.pyc
-/.pi/
-
-# npm installs
-/node_modules/
-/apps/live-extension/node_modules/
-/crates/kumi-runtime/tests/support/node_modules/
-# Release bundles built locally
-/release/
-
-# Local review bookkeeping
-docs/evidence/willington-review.json
-
-/target/
-
-# Local port inventory and agent handoff notes
-/.port-notes/
+# Kumi runtime
+.kumi/
+.kumi-local/
+*.db
+*.db-shm
+*.db-wal
