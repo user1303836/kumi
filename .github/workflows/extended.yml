@@ -1,0 +1,130 @@
+name: Extended
+
+# Every test, on every platform: what the CI workflow's blocking runs leave out (the `extended` set in
+# .config/nextest.toml): the recorded-source oracles, the long listening, form and rendering simulations, the video
+# tests (with ffmpeg), the benchmarks, the interoperability tests beside the official MCP and model SDKs (from npm), the
+# migration from the published Kumi 1.7.5, the long sweeps of the timing building blocks, each platform's every test,
+# and the documentation tests. It blocks nothing: it runs each week, by hand, and on a pull request labelled full-tests
+# (from the push after the label is added, and when it is added).
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+
+jobs:
+  tests:
+    # Shards, so that no runner takes more than about ten minutes.
+    name: Extended / ${{ matrix.label }} (${{ matrix.part }}/${{ matrix.parts }})
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-tests')
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, label: Linux, part: 1, parts: 3 }
+          - { os: ubuntu-24.04, label: Linux, part: 2, parts: 3 }
+          - { os: ubuntu-24.04, label: Linux, part: 3, parts: 3 }
+          - { os: macos-15, label: macOS, part: 1, parts: 2 }
+          - { os: macos-15, label: macOS, part: 2, parts: 2 }
+          - { os: windows-2025, label: Windows, part: 1, parts: 3 }
+          - { os: windows-2025, label: Windows, part: 2, parts: 3 }
+          - { os: windows-2025, label: Windows, part: 3, parts: 3 }
+    env:
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld
+    steps:
+      - name: Stop Windows Defender scanning the workspace (it slows every file the build touches)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      # Restores main's cache (CI saves it); saves none of its own, so the repository's 10 GB keeps main's.
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+        with:
+          save-if: false
+      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
+        with:
+          tool: nextest
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: crates/kumi-runtime/tests/support/package-lock.json
+      - name: Install the official MCP and model SDKs the interoperability tests run beside Kumi's
+        run: npm ci --prefix crates/kumi-runtime/tests/support --ignore-scripts
+      - name: The published Kumi 1.7.5, fetched once for the migration tests
+        shell: bash
+        run: |
+          python="$(command -v python3 || command -v python)"
+          echo "KUMI_LEGACY_APP=$("$python" scripts/fetch-legacy-release.py "$RUNNER_TEMP/kumi-1.7.5")" >> "$GITHUB_ENV"
+      # The video tests skip without ffmpeg. This is the build Kumi itself fetches on Linux (BtbN's newest
+      # numbered LGPL one), at 8.1 or later, which asks for a stream in pieces (-request_size) as YouTube wants.
+      # It's read from the release tagged latest, not releases/latest: each day's dated build (about 13:07Z) is
+      # releases/latest until BtbN makes latest again from it about 20 minutes later, and its names have no
+      # "-latest-". While latest is made again (deleted, then uploaded anew), the newest dated build serves.
+      - name: ffmpeg, for the video tests
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP"
+          # The tagged release's newest numbered build, into $asset, checked against that release's checksums.
+          # A function tested with || runs without set -e, hence its own || return and &&.
+          fetch() {
+            local from="https://github.com/BtbN/FFmpeg-Builds/releases/download/$1" names
+            names="$(gh api "repos/BtbN/FFmpeg-Builds/releases/tags/$1" --jq '.assets[].name')" || return
+            asset="$(grep -E '^ffmpeg-n[0-9]+\.[0-9.]+(-latest|-[0-9]+-g[0-9a-f]+)?-linux64-lgpl-[0-9]+\.[0-9]+\.tar\.xz$' <<<"$names" | sort -V | tail -1)" || return
+            curl -fsSL --retry 3 -o "$asset" "$from/$asset" &&
+              curl -fsSL --retry 3 "$from/checksums.sha256" | grep -F "  $asset" | sha256sum -c -
+          }
+          newest_dated() { gh api 'repos/BtbN/FFmpeg-Builds/releases?per_page=10' --jq '[.[].tag_name | select(startswith("autobuild-"))] | max'; }
+          fetch latest || fetch "$(newest_dated)"
+          tar -xJf "$asset"
+          bin="$RUNNER_TEMP/${asset%.tar.xz}/bin"
+          # Read whole, then searched: a pipe into grep -q can close early, and ffmpeg, still writing, fails under pipefail.
+          help="$("$bin/ffmpeg" -hide_banner -h protocol=http)"
+          grep -q -- -request_size <<<"$help"
+          "$bin/ffmpeg" -version | sed -n 1p
+          echo "$bin" >> "$GITHUB_PATH"
+      - name: Every test, a share of them, in a home of their own
+        if: runner.os != 'Windows'
+        env:
+          KUMI_NEXTEST: "1"
+        run: sh scripts/test-isolated.sh --profile extended --partition hash:${{ matrix.part }}/${{ matrix.parts }}
+      - name: Every test, a share of them, in a home of their own (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          KUMI_NEXTEST: "1"
+          RUST_TEST_NOCAPTURE: '1'
+        run: ./scripts/test-isolated.ps1 --profile extended --partition 'hash:${{ matrix.part }}/${{ matrix.parts }}'
+
+  docs:
+    name: Extended / documentation tests
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-tests')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+        with:
+          save-if: false
+      - run: cargo test --workspace --locked --doc

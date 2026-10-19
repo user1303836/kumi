@@ -4,3 +4,70 @@
 # The Remote Script adapter's tests give each local connection 500 ms.
 filter = 'test(/bounded_latency|reads_in_a_moment|looks_at_each_byte_once|read_in_linear_time|analyzed_quickly_part_by_part|keeps_the_runtime_responsive|returns_promptly|maximum_duplicate_ambiguity/) | binary(remote_adapter)'
 threads-required = "num-cpus"
+
+# CI's three sets (.github/workflows/ci.yml and extended.yml). A pull request and each push to main run `ci` on Linux and
+# `ci-os` on macOS and Windows; the Extended workflow runs `extended`, every test, by hand, on the `full-tests` label and
+# each week. What `ci` leaves out, and why:
+# - the recorded-source oracles (a host workflow replayed against what the TypeScript host did, `…_match_source` and the
+#   like): long replays of behaviour the port froze, which the unit tests beside them check in pieces;
+# - the long listening, form and rendering simulations (whole songs analysed), the video tests (ffmpeg) and the
+#   benchmarks;
+# - the interoperability tests run beside the official MCP and model SDKs (npm), and the migration from the published
+#   1.7.5 (downloaded);
+# - the long sample-by-sample sweeps of the timing building blocks (kit::clock): the rules each one proves are run by the
+#   short tests beside them, which stay.
+# Live's own pins (pin_first_request, the changes oracle) stay in `ci` whatever their names say.
+[profile.ci]
+default-filter = '''
+not (
+    binary_id(kumi-runtime::live_rendering) | binary_id(kumi-runtime::form) | binary_id(kumi-runtime::video)
+  | binary_id(kumi-runtime::listening) | binary_id(kumi-runtime::effects) | binary_id(kumi-runtime::sound)
+  | binary_id(kumi-runtime::style_references) | binary_id(kumi-runtime::ai_sdk)
+  | binary_id(ableton-mcp-server::benchmark) | binary_id(ableton-mcp-server::lifecycle_migration)
+  | (binary_id(kumi-runtime::mcp) & not test(/read_buffer_looks_at_each_byte/))
+  | (binary_id(kumi-runtime::media_foundations) & test(/a_quiet_listen_is_one_stretch|a_songs_form_sections_where/))
+  | (test(/match(es)?_(the_)?(source|typescript)|source_oracle|oracle|matches?_typescript/)
+      & not binary_id(kumi-runtime::changes) & not binary_id(kumi-runtime::pin_first_request))
+  | test(/kit::clock::tests::(a_tempo_change_of_any_size|lives_loop_starts|play_after_a_stop|stopping_ends_the_steps|a_jump_lands_on_its_step|on_lives_own_recordings|a_tempo_ramp)/)
+)
+'''
+# A blocking test that runs past 30 s fails, by name: what takes that long belongs in `extended`, or needs making faster.
+slow-timeout = { period = "15s", terminate-after = 2 }
+fail-fast = false
+
+# What differs by platform: installing, launching and updating; the terminal and stdin; Hands; paths, files and child
+# processes; the store; and a few smoke tests. The Ableton bridge's install lifecycle runs in `ci` on Linux (in a
+# moment there) and on every platform in `extended` (minutes on Windows).
+[profile.ci-os]
+default-filter = '''
+(
+    binary(install) | binary(cli_binary) | binary(cli) | binary(update) | binary(bridge_setup) | binary(doctor)
+  | binary(live_extension) | binary(report) | binary(login) | binary(config) | binary(history) | binary(library)
+  | binary(stdin_handoff) | binary(terminal) | binary(tui) | binary(voice_input) | binary(hands_transport) | binary(auth)
+  | binary(system) | binary(disk) | binary(samples) | binary(project_runtime) | binary(library_files)
+  | binary(library_learn) | binary(library_search) | binary(library_state_plan) | binary(voice) | binary(local_servers)
+  | binary(session) | binary(agent) | binary(lifecycle_release) | binary(delivery) | binary(delivery_cli)
+  | binary(extension_launcher) | binary(extension_channel) | binary(stdio) | binary(fixture_paths) | binary(project)
+  | binary(host_probes) | binary(analysis_runner) | binary(sqlite_reader) | binary(native_connected)
+  | binary(remote_adapter) | binary(loopback) | binary(ai_transport) | binary(network) | binary(store)
+  | binary(willington) | binary(windows_console_control) | binary(windows_stdin) | binary(windows_tty)
+) & not (
+    binary_id(kumi-runtime::live_rendering) | binary_id(kumi-runtime::form) | binary_id(kumi-runtime::video)
+  | binary_id(kumi-runtime::listening) | binary_id(kumi-runtime::effects) | binary_id(kumi-runtime::sound)
+  | binary_id(kumi-runtime::style_references) | binary_id(kumi-runtime::ai_sdk)
+  | binary_id(ableton-mcp-server::benchmark) | binary_id(ableton-mcp-server::lifecycle_migration)
+  | (binary_id(kumi-runtime::mcp) & not test(/read_buffer_looks_at_each_byte/))
+  | (binary_id(kumi-runtime::media_foundations) & test(/a_quiet_listen_is_one_stretch|a_songs_form_sections_where/))
+  | (test(/match(es)?_(the_)?(source|typescript)|source_oracle|oracle|matches?_typescript/)
+      & not binary_id(kumi-runtime::changes) & not binary_id(kumi-runtime::pin_first_request))
+  | test(/kit::clock::tests::(a_tempo_change_of_any_size|lives_loop_starts|play_after_a_stop|stopping_ends_the_steps|a_jump_lands_on_its_step|on_lives_own_recordings|a_tempo_ramp)/)
+)
+'''
+slow-timeout = { period = "15s", terminate-after = 2 }
+fail-fast = false
+
+# Every test. The longest (a Windows install lifecycle, a migration from 1.7.5) take two minutes; four is a hang.
+[profile.extended]
+default-filter = 'all()'
+slow-timeout = { period = "60s", terminate-after = 4 }
+fail-fast = false
