@@ -950,7 +950,7 @@ impl Listening {
         // How it sounds to the learned models, when they're on: what a run guards against drifting from.
         let mut unheard = vec![];
         if models_on() {
-            let say = |said: &str| self.tell(said.to_string(), None);
+            let say = |said: &str| self.tell(said, None);
             let seconds = heard.measures.seconds;
             let (slot, style) = self.style_model.borrow().clone().unzip();
             match embed::vibe(Path::new(&file), 0., seconds, heard.measures.integrated, slot.flatten(), &say, &signal).await {
@@ -979,7 +979,7 @@ impl Listening {
         if kept.kind != "files" || kept.tracks.is_empty() || kept.tracks.iter().any(|track| !Path::new(&track.source).is_file()) {
             return None;
         }
-        let say = |said: &str| self.tell(said.to_string(), None);
+        let say = |said: &str| self.tell(said, None);
         let mut vibes = vec![];
         for track in &kept.tracks {
             let options = MeasureOptions { seconds: Some(MEASURED), signal: Some(signal.clone()), ..Default::default() };
@@ -1007,7 +1007,7 @@ impl Listening {
         if !vibe && !effects {
             return None;
         }
-        let say = |said: &str| self.tell(said.to_string(), None);
+        let say = |said: &str| self.tell(said, None);
         let mut embedding = Embedding::default();
         if vibe {
             let (slot, style) = self.style_model.borrow().clone().unzip();
@@ -1016,7 +1016,7 @@ impl Listening {
                 // Its slot's file went partway: what heard this isn't the model the run started with.
                 Ok(_) => {
                     self.tell(
-                        "The style model changed during this run (the embeddings slot's file is gone), so the run stops guarding style and goes on by its measures.".to_string(),
+                        "The style model changed during this run (the embeddings slot's file is gone), so the run stops guarding style and goes on by its measures.",
                         None,
                     );
                     self.embedding_wanted.set((false, self.embedding_wanted.get().1));

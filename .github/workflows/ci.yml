@@ -76,6 +76,9 @@ jobs:
       - name: The tests, in a home of their own (no test reaches this machine's Live folders or ~/.kumi)
         env:
           KUMI_NEXTEST: "1"
+          # Temporary files in memory: the tests' homes, Sets and stores write and sync many small files, which a
+          # runner's disk makes several times slower.
+          TMPDIR: /dev/shm
         run: sh scripts/test-isolated.sh --profile ci
       - run: git diff --check
 
@@ -137,12 +140,15 @@ jobs:
         if: runner.os != 'Windows'
         env:
           KUMI_NEXTEST: "1"
+          # Only the test binaries the profile names are built.
+          KUMI_NEXTEST_BUILD_PROFILE: ci-os
         run: sh scripts/test-isolated.sh --profile ci-os
       - name: The tests, in a home of their own (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           KUMI_NEXTEST: "1"
+          KUMI_NEXTEST_BUILD_PROFILE: ci-os
           RUST_TEST_NOCAPTURE: '1'
         run: ./scripts/test-isolated.ps1 --profile ci-os
 

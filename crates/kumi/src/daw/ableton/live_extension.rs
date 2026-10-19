@@ -21,7 +21,7 @@ pub fn live_extensions_dir(env: &Env, platform: &str) -> Option<String> {
     }
 }
 pub fn former_extensions_dir(env: &Env, platform: &str) -> Option<String> {
-    if platform == "win32" && !env.get("KUMI_LIVE_EXTENSIONS_DIR").is_some_and(|s| !s.is_empty()) {
+    if platform == "win32" && env.get("KUMI_LIVE_EXTENSIONS_DIR").is_none_or(|s| s.is_empty()) {
         env.get("APPDATA").filter(|s| !s.is_empty()).map(|root| join(root, "Ableton/Extensions"))
     } else {
         None

@@ -12,7 +12,15 @@ trap 'rm -rf "$test_home"' EXIT INT TERM
 export HOME="$test_home" USERPROFILE="$test_home" APPDATA="$test_home/AppData/Roaming" LOCALAPPDATA="$test_home/AppData/Local" XDG_CONFIG_HOME="$test_home/.config" KUMI_HOME="$test_home/.kumi"
 unset KUMI_REMOTE_SCRIPTS_DIR KUMI_LIVE_EXTENSIONS_DIR
 if [ "${KUMI_NEXTEST:-}" = 1 ]; then
-  cargo nextest run --workspace --locked "$@"
+  # A profile that names its test binaries (`binary(…)` in its default-filter, .config/nextest.toml) builds only those:
+  # nextest builds every binary it could run, whatever the filter, and runs the ones the filter leaves.
+  only=""
+  if [ -n "${KUMI_NEXTEST_BUILD_PROFILE:-}" ]; then
+    only="$(awk -v p="[profile.$KUMI_NEXTEST_BUILD_PROFILE]" '$0 == p { on = 1; next } /^\[/ { on = 0 } on' .config/nextest.toml \
+      | grep -o 'binary([a-z0-9_]*)' | sed 's/^binary(\(.*\))$/--test \1/' | tr '\n' ' ')"
+  fi
+  # shellcheck disable=SC2086
+  cargo nextest run --workspace --locked $only "$@"
 else
   cargo test --workspace --locked "$@"
 fi

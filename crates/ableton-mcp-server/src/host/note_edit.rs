@@ -264,7 +264,7 @@ impl McpHost {
                 };
                 let mut seen = HashSet::new();
                 for patch in rows {
-                    if !patch.as_object().is_some_and(|o| o.len() >= 2) || !integer(&patch["id"]) || !has_only(patch, NOTE_FIELDS) {
+                    if patch.as_object().is_none_or(|o| o.len() < 2) || !integer(&patch["id"]) || !has_only(patch, NOTE_FIELDS) {
                         return Ok(error(id, -32602, "note patches require an id, at least one edit, and only supported fields", None));
                     }
                     if !seen.insert(key(patch)) {
@@ -647,7 +647,7 @@ impl McpHost {
                 return Err(LiveError::type_error("Cannot read properties of null (reading 'added')"));
             }
             if result["added"].as_f64() != Some(notes.len() as f64)
-                || !result["noteIds"].as_array().is_some_and(|ids| ids.len() == notes.len())
+                || result["noteIds"].as_array().is_none_or(|ids| ids.len() != notes.len())
             {
                 return Err(LiveError::error("note delete undo did not re-add the complete batch"));
             }

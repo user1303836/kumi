@@ -60,8 +60,7 @@ fn win32_normalize(path: &str) -> String {
     let path = path.replace('/', "\\");
     let bytes = path.as_bytes();
     // The root: a UNC share, a drive (absolute or drive-relative), a bare separator, or none.
-    let (root, rest, absolute) = if path.starts_with("\\\\") {
-        let after = &path[2..];
+    let (root, rest, absolute) = if let Some(after) = path.strip_prefix("\\\\") {
         let mut segments = after.splitn(3, '\\');
         let host = segments.next().unwrap_or("");
         let share = segments.next().unwrap_or("");
@@ -74,8 +73,8 @@ fn win32_normalize(path: &str) -> String {
         } else {
             (drive.to_string(), path[2..].to_string(), false)
         }
-    } else if path.starts_with('\\') {
-        ("\\".to_string(), path[1..].to_string(), true)
+    } else if let Some(rest) = path.strip_prefix('\\') {
+        ("\\".to_string(), rest.to_string(), true)
     } else {
         (String::new(), path.clone(), false)
     };

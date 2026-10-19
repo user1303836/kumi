@@ -312,7 +312,7 @@ impl LiveRenderer {
             failed => {
                 let why = failed.map(|undone| undone.text).unwrap_or_else(|error| error.to_string());
                 self.tell(
-                    &format!(
+                    format!(
                         "Couldn't take back “{}” ({}); check it in Live.",
                         title.unwrap_or_else(|| "a step of Kumi's".into()),
                         kumi_common::js::string::head(&why, 200)

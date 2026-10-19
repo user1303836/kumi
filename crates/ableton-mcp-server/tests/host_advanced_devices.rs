@@ -15,7 +15,7 @@ fn clean(mut value: Value, root: &str) -> Value {
             value["result"]["content"][0]["text"] = body;
         }
     }
-    fn walk(value: &mut Value, key: &str, root: &str) {
+    fn walk(value: &mut Value, key: &str, _root: &str) {
         if key == "expiresAt" && *value != 0 {
             *value = json!("$time");
             return;
@@ -28,17 +28,16 @@ fn clean(mut value: Value, root: &str) -> Value {
             Value::String(text) => {
                 if ["devadv_", "chainset_"].iter().any(|prefix| text.starts_with(prefix)) {
                     *text = "$transaction".into();
-                    return;
                 }
             }
             Value::Array(items) => {
                 for item in items {
-                    walk(item, "", root)
+                    walk(item, "", _root)
                 }
             }
             Value::Object(items) => {
                 for (key, item) in items {
-                    walk(item, key, root)
+                    walk(item, key, _root)
                 }
             }
             _ => {}

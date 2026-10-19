@@ -53,7 +53,7 @@ pub async fn mcp_tool(
     let raw = String::from_utf8_lossy(&response.body);
     static MESSAGE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""(result|error)""#).unwrap());
     let message = if response.content_type == "text/event-stream" {
-        raw.split(['\r', '\n']).filter_map(|s| s.strip_prefix("data:")).map(trim).filter(|s| MESSAGE.is_match(s)).last().unwrap_or("")
+        raw.split(['\r', '\n']).filter_map(|s| s.strip_prefix("data:")).map(trim).rfind(|s| MESSAGE.is_match(s)).unwrap_or("")
     } else {
         &raw
     };

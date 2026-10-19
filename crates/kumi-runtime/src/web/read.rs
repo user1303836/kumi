@@ -57,7 +57,7 @@ fn size_words(bytes: usize) -> String {
     }
 }
 fn file_name(path: &str) -> Option<String> {
-    path.split('/').filter(|s| !s.is_empty()).last().and_then(decode).filter(|s| !s.is_empty())
+    path.split('/').rfind(|s| !s.is_empty()).and_then(decode).filter(|s| !s.is_empty())
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PictureSize {

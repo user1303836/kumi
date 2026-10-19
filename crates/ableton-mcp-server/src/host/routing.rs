@@ -104,7 +104,7 @@ impl McpHost {
         if proposed.get("inputType").is_some() || proposed.get("outputType").is_some() {
             self.views.whole_set(context, Some(&[LiveSnapshotPart::Tracks])).await
         } else {
-            self.views.view_for(context, &[reference.clone()], None, &[]).await
+            self.views.view_for(context, std::slice::from_ref(reference), None, &[]).await
         }
     }
     async fn routing_identity_view_async(
@@ -135,7 +135,7 @@ impl McpHost {
         failure: &str,
     ) -> Result<Value, LiveError> {
         loop {
-            let snapshot = self.views.view_for(Some(context), &[reference.clone()], None, &[]).await?;
+            let snapshot = self.views.view_for(Some(context), std::slice::from_ref(reference), None, &[]).await?;
             let snapshot = serde_json::to_value(snapshot).unwrap();
             let track = tracks(&snapshot)
                 .find(|t| &t["ref"] == reference)

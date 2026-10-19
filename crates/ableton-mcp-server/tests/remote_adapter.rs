@@ -1,3 +1,6 @@
+// A test drives one task at a time and holds its fake's state across its own awaits; nothing else borrows it then.
+// (Kumi's own code holds no RefCell across an await: CI's clippy denies it there.)
+#![allow(clippy::await_holding_refcell_ref)]
 use ableton_mcp_server::{
     bridge::remote_adapter::*,
     live::*,
@@ -245,6 +248,7 @@ fn authority_classifications_match_python() {
         ("TRANSACTION_DELETIONS", TRANSACTION_DELETIONS),
         ("EXPLICIT_DELETIONS", EXPLICIT_DELETIONS),
     ] {
+        #[allow(clippy::regex_creation_in_loops)] // (three lists)
         let quoted = regex::Regex::new(r#""([^"]+)""#).unwrap();
         let py = regex::Regex::new(&format!(r"_{name} = \{{([^}}]*)\}}")).unwrap().captures(python).unwrap();
         let set = |text: &str| quoted.captures_iter(text).map(|m| m[1].to_owned()).collect::<std::collections::BTreeSet<_>>();

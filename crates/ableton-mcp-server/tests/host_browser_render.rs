@@ -1,3 +1,6 @@
+// A test drives one task at a time and holds its fake's state across its own awaits; nothing else borrows it then.
+// (Kumi's own code holds no RefCell across an await: CI's clippy denies it there.)
+#![allow(clippy::await_holding_refcell_ref)]
 use ableton_mcp_server::{
     host::{helpers::canonical_mutation_identity, McpHost, McpHostOptions, ToolCall},
     live::*,

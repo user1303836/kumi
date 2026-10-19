@@ -112,7 +112,7 @@ fn validate_request(request: &mut Value) -> Result<(), LiveError> {
         || !integer(&request["sceneIndex"], 0.0, 100_000.0)
         || !request["name"].as_str().is_some_and(|name| (1..=256).contains(&kumi_common::js::string::utf16_len(name)))
         || !request["length"].as_f64().is_some_and(|n| n.is_finite() && n > 0.0 && n <= 1024.0)
-        || !request["notes"].as_array().is_some_and(|notes| notes.len() <= MAX_SESSION_MIDI_NOTES)
+        || request["notes"].as_array().is_none_or(|notes| notes.len() > MAX_SESSION_MIDI_NOTES)
     {
         return Err(fail("invalid MIDI clip request"));
     }
@@ -479,7 +479,7 @@ fn with_authority(mut args: Value, authority: Value) -> Value {
     args
 }
 fn check_created(created: &Value) -> Result<(), LiveError> {
-    if !created["ref"].as_str().is_some_and(|s| !s.is_empty())
+    if created["ref"].as_str().is_none_or(|s| s.is_empty())
         || !created["objectIdentity"].is_string()
         || !created["createdFingerprint"].is_string()
     {

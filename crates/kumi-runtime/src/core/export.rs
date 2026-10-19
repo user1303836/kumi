@@ -373,8 +373,8 @@ fn read(source: &Source, options: &Options) -> Document {
     let changes = source.conversation.changes.iter().flatten().map(|change| redacted_change(change, redact)).collect();
     Document {
         title: redact(source.title),
-        place: source.place.map(|place| redact(place)),
-        model: source.conversation.checkpoint.origin.as_deref().map(|model| redact(model)),
+        place: source.place.map(redact),
+        model: source.conversation.checkpoint.origin.as_deref().map(redact),
         requests: source.conversation.turns.unwrap_or(producer).max(producer),
         partial: cleaned.partial,
         earlier: cleaned.earlier,
@@ -892,7 +892,7 @@ fn redacted_change(change: &ChangeRecord, redact: &dyn Fn(&str) -> String) -> Ch
         if let Some(names) = &mut devices.devices {
             names.iter_mut().for_each(|name| *name = redact(name));
         }
-        devices.rack = devices.rack.as_deref().map(|rack| redact(rack));
+        devices.rack = devices.rack.as_deref().map(redact);
         if let Some(chains) = &mut devices.chains {
             for chain in chains {
                 chain.name = redact(&chain.name);
@@ -905,17 +905,17 @@ fn redacted_change(change: &ChangeRecord, redact: &dyn Fn(&str) -> String) -> Ch
             for value in values {
                 value.name = redact(&value.name);
                 for text in [&mut value.from_text, &mut value.to_text, &mut value.asked] {
-                    *text = text.as_deref().map(|text| redact(text));
+                    *text = text.as_deref().map(redact);
                 }
             }
         };
         let levels = |levels: &mut MixLevels| {
             for text in [&mut levels.volume_text, &mut levels.pan_text] {
-                *text = text.as_deref().map(|text| redact(text));
+                *text = text.as_deref().map(redact);
             }
             for send in &mut levels.sends {
                 send.name = redact(&send.name);
-                send.text = send.text.as_deref().map(|text| redact(text));
+                send.text = send.text.as_deref().map(redact);
             }
         };
         match picture {

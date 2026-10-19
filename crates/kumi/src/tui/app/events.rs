@@ -211,7 +211,7 @@ impl TuiApp {
                                 steps.push(Step {
                                     id: format!("resumed:{}", steps.len()),
                                     tool: Some(tool.into()),
-                                    label: step_label(tool).into(),
+                                    label: step_label(tool),
                                     ..Default::default()
                                 });
                             }
@@ -813,7 +813,7 @@ impl TuiApp {
                             steps.push(Step {
                                 id: get("id").into(),
                                 tool: Some(get("name").into()),
-                                label: step_label(get("name")).into(),
+                                label: step_label(get("name")),
                                 state: StepState::Running,
                                 started_at: Some(perf_now()),
                                 ..Default::default()
@@ -992,7 +992,7 @@ impl TuiApp {
             if back {
                 let mut words = state.held.drain(..).map(|h| h.text).collect::<Vec<_>>();
                 if !state.editor.is_empty() {
-                    words.push(state.editor.text().into());
+                    words.push(state.editor.text());
                 }
                 state.editor.set(&words.join("\n"));
                 state.recall = None;
@@ -1016,7 +1016,7 @@ impl TuiApp {
             let mut words = vec![next.text];
             words.extend(state.held.drain(..).map(|h| h.text));
             if !state.editor.is_empty() {
-                words.push(state.editor.text().into());
+                words.push(state.editor.text());
             }
             state.editor.set(&words.join("\n"));
             drop(state);

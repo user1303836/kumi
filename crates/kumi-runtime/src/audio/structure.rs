@@ -183,7 +183,7 @@ impl FormMeter {
             let mono = (left[i] as f64 + right[i] as f64) / 2.0;
             self.ring[self.filled % self.size] = mono;
             self.filled += 1;
-            if self.filled >= self.size && (self.filled - self.size) % self.hop == 0 {
+            if self.filled >= self.size && (self.filled - self.size).is_multiple_of(self.hop) {
                 self.spectrum();
             }
             let low = self.onset_low.process(mono);

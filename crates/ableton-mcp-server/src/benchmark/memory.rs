@@ -63,7 +63,7 @@ pub fn peak_rss_bytes() -> Result<u64, String> {
             let bytes = usage.ru_maxrss.max(0) as u64;
             return Ok(if cfg!(target_os = "macos") { bytes } else { bytes * 1024 });
         }
-        return Err(std::io::Error::last_os_error().to_string());
+        Err(std::io::Error::last_os_error().to_string())
     }
     #[cfg(windows)]
     {

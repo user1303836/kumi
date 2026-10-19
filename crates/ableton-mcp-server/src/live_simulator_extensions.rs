@@ -48,7 +48,7 @@ fn write_silent_wav(path: &std::path::Path, seconds: f64) -> Result<u64, LiveErr
             let digits = received.trim_start_matches('-');
             let mut grouped = String::new();
             for (i, c) in digits.chars().enumerate() {
-                if i > 0 && (digits.len() - i) % 3 == 0 {
+                if i > 0 && (digits.len() - i).is_multiple_of(3) {
                     grouped.push('_');
                 }
                 grouped.push(c);

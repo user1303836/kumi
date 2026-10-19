@@ -91,7 +91,7 @@ impl Store {
     /// Open the database at `path`, making it (and its folder) if needed, and bring its schema up to
     /// date. Another Kumi may have it open too. A database from a newer Kumi isn't opened.
     pub fn open(path: impl AsRef<Path>) -> Result<Store, StoreError> {
-        Store::open_with(path.as_ref(), |connection| schema::migrate(connection))
+        Store::open_with(path.as_ref(), schema::migrate)
     }
     /// Open a Set's history (`history`) the same way: its own file, with its own schema.
     pub fn open_history(path: impl AsRef<Path>) -> Result<Store, StoreError> {

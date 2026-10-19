@@ -6,7 +6,7 @@ use super::super::{
 use super::*;
 use crate::text::library_line;
 use base64::Engine;
-use std::task::{Context, Poll};
+use std::task::Context;
 
 impl TuiApp {
     pub(super) fn on_input(&self, event: InputEvent) {
@@ -422,7 +422,7 @@ impl TuiApp {
             }
         }
         .boxed_local();
-        if let Poll::Pending = future.as_mut().poll(&mut Context::from_waker(futures::task::noop_waker_ref())) {
+        if future.as_mut().poll(&mut Context::from_waker(futures::task::noop_waker_ref())).is_pending() {
             tokio::task::spawn_local(future);
         }
     }
@@ -1074,7 +1074,7 @@ impl TuiApp {
                 .aside(
                     &question,
                     Rc::new(move |text| {
-                        answer.borrow_mut().answer.push_str(&writer.borrow_mut().push(&text));
+                        answer.borrow_mut().answer.push_str(&writer.borrow_mut().push(text));
                         scheduler.request();
                     }),
                     Some(signal.clone()),

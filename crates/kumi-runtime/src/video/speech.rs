@@ -142,7 +142,7 @@ pub async fn transcribe(whisper: &str, model: &str, wav: &str, options: Transcri
         }
     };
     let result = if !status.success() {
-        Err(VideoFailure::other(trim(&tail).split('\n').filter(|s| !s.is_empty()).next_back().map_or_else(
+        Err(VideoFailure::other(trim(&tail).split('\n').rfind(|s| !s.is_empty()).map_or_else(
             || format!("whisper.cpp stopped ({})", status.code().map_or_else(|| "null".into(), |c| c.to_string())),
             |line| head(line, 300),
         )))

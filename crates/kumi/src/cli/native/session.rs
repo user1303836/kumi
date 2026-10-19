@@ -733,7 +733,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     let running = ui.run();
     library.start();
     let settings = read_settings(&settings_file);
-    let update_check = if settings.update_check != Some(false) && !io.env.get("KUMI_NO_UPDATE_CHECK").is_some_and(|s| !s.is_empty()) {
+    let update_check = if settings.update_check != Some(false) && io.env.get("KUMI_NO_UPDATE_CHECK").is_none_or(|s| s.is_empty()) {
         let cache = std::path::Path::new(&settings_file)
             .parent()
             .unwrap_or(std::path::Path::new("."))

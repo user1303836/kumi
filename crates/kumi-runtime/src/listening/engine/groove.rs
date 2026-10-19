@@ -138,7 +138,7 @@ impl Listening {
             .map(|tempo| tempo.bpm)
             .ok_or("Kumi couldn't tell its tempo: give reference_tempo (its BPM).")?,
         };
-        let say = |said: &str| self.tell(said.to_string(), None);
+        let say = |said: &str| self.tell(said, None);
         let heard = crate::listening::transcribe::pitched_notes(std::path::Path::new(file), 0., 120., &say, &signal).await?;
         if heard.is_empty() {
             return Err("Basic Pitch heard no notes in it.".into());

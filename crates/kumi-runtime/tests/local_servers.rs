@@ -219,8 +219,7 @@ async fn failed(binding: Rc<LocalBinding>, large: bool) -> KumiError {
     let prompt = if large { instructions() } else { "fixture instructions".into() };
     run(binding, &prompt, if large { catalog() } else { vec![tempo(Default::default())] })
         .await
-        .err()
-        .expect("answer failed")
+        .expect_err("answer failed")
         .kumi()
         .expect("Kumi failure")
         .clone()

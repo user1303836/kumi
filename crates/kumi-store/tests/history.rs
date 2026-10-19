@@ -60,7 +60,7 @@ fn ops_are_kept_with_their_view_and_listed_newest_first() {
     let store = Store::open_history(folder.path().join("history.db")).unwrap();
     let first = Op::new(None, 1_000, "cut", "Deleted Bass", json!({"leaves":["a"]}));
     let second = Op::new(Some(first.id.clone()), 2_000, "cut", "Cleared beats 4 to 8 on Drums", json!({"leaves":["b","c"]}));
-    let ops = vec![first.clone(), second.clone()];
+    let ops = [first.clone(), second.clone()];
     store.write_wait(move |c| ops.iter().map(|op| history::put_op(c, op)).collect::<Result<Vec<_>, _>>()).unwrap();
     assert_eq!(store.read(|c| history::recent_ops(c, 10)).unwrap(), vec![second.clone(), first.clone()]);
     assert_eq!(store.read(|c| history::recent_ops(c, 1)).unwrap(), vec![second]);

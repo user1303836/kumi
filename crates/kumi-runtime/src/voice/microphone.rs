@@ -350,8 +350,7 @@ pub fn start_capture(ffmpeg: &str, input: &[String]) -> Capture {
                 Ok(s) => Some(
                     trim(&tail)
                         .lines()
-                        .filter(|s| !s.is_empty())
-                        .next_back()
+                        .rfind(|s| !s.is_empty())
                         .map(|s| head(s, 300))
                         .unwrap_or_else(|| format!("ffmpeg stopped ({})", s.code().map_or("null".into(), |c| c.to_string()))),
                 ),

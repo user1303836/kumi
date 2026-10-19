@@ -101,7 +101,7 @@ impl McpHost {
             let adapter = self.async_adapter();
             let context = self.transaction_context(p, signal, AUDITION_DEADLINE_MS);
             if !reconcile {
-                let snapshot = self.views.view_for(Some(&context), &[reference.clone()], None, &[]).await?;
+                let snapshot = self.views.view_for(Some(&context), std::slice::from_ref(reference), None, &[]).await?;
                 if track(&snapshot, reference).is_none_or(|r| json!(fence(reference, &r)) != t["fence"]) {
                     return Ok(transaction_error(id, "track identity or state changed since preview; preview again"));
                 }
@@ -110,7 +110,7 @@ impl McpHost {
             record.borrow_mut()["applyKey"] = p["idempotencyKey"].clone();
             let result = adapter.invoke_async(&LiveInvocation::new("track.set", payload.clone()), Some(&context)).await?;
             confirmed(&result, "changed", "track properties change was not confirmed")?;
-            let snapshot = self.views.view_for(Some(&context), &[reference.clone()], None, &[]).await?;
+            let snapshot = self.views.view_for(Some(&context), std::slice::from_ref(reference), None, &[]).await?;
             let verified = track(&snapshot, reference)
                 .filter(|t| t.get("objectIdentity") == payload.get("expectedObjectIdentity"))
                 .ok_or_else(|| LiveError::error("edited track identity changed after apply"))?;

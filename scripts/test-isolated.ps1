@@ -14,7 +14,15 @@ try {
   $env:XDG_CONFIG_HOME = Join-Path $home_ '.config'; $env:KUMI_HOME = Join-Path $home_ '.kumi'
   Remove-Item Env:KUMI_REMOTE_SCRIPTS_DIR -ErrorAction SilentlyContinue
   Remove-Item Env:KUMI_LIVE_EXTENSIONS_DIR -ErrorAction SilentlyContinue
-  if ($env:KUMI_NEXTEST -eq '1') { & cargo nextest run --workspace --locked @args } else { & cargo test --workspace --locked @args }
+  # A profile that names its test binaries (`binary(…)` in its default-filter, .config/nextest.toml) builds only those:
+  # nextest builds every binary it could run, whatever the filter, and runs the ones the filter leaves.
+  [string[]]$only = @()
+  if ($env:KUMI_NEXTEST_BUILD_PROFILE) {
+    $config = Get-Content -Raw (Join-Path $PSScriptRoot '..\.config\nextest.toml')
+    $section = [regex]::Match($config, '(?ms)^\[profile\.' + [regex]::Escape($env:KUMI_NEXTEST_BUILD_PROFILE) + '\]\s*$(.*?)(?=^\[|\z)').Groups[1].Value
+    $only = [regex]::Matches($section, 'binary\(([a-z0-9_]+)\)') | ForEach-Object { '--test'; $_.Groups[1].Value }
+  }
+  if ($env:KUMI_NEXTEST -eq '1') { & cargo nextest run --workspace --locked @only @args } else { & cargo test --workspace --locked @args }
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
   Remove-Item -Recurse -Force $home_ -ErrorAction SilentlyContinue

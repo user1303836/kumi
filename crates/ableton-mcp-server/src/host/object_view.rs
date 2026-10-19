@@ -203,7 +203,7 @@ impl McpHost {
             let adapter = self.async_adapter();
             let context = self.transaction_context(p, signal, AUDITION_DEADLINE_MS);
             if !reconcile {
-                let snapshot = self.views.view_for(Some(&context), &[reference.clone()], None, &[]).await?;
+                let snapshot = self.views.view_for(Some(&context), std::slice::from_ref(reference), None, &[]).await?;
                 let row = self.object_view_row(kind, &snapshot, reference)?;
                 if json!(kind.fence(reference, &row)) != t["fence"] {
                     return Ok(transaction_error(
@@ -216,7 +216,7 @@ impl McpHost {
             record.borrow_mut()["applyKey"] = p["idempotencyKey"].clone();
             let result = adapter.invoke_async(&LiveInvocation::new(kind.operation(), t["payload"].clone()), Some(&context)).await?;
             confirmed(&result, "changed", &format!("{} view change was not confirmed", kind.noun()))?;
-            let snapshot = self.views.view_for(Some(&context), &[reference.clone()], None, &[]).await?;
+            let snapshot = self.views.view_for(Some(&context), std::slice::from_ref(reference), None, &[]).await?;
             let verified = self.object_view_row(kind, &snapshot, reference)?;
             for field in kind.fields() {
                 if t["payload"].get(*field).is_some() && !scalar_same(kind.observed(&verified, field), t["payload"].get(*field)) {
@@ -281,7 +281,7 @@ impl McpHost {
             if reconcile {
                 self.replay_undo_recovery(&record, adapter.as_ref(), &context).await?;
             }
-            let snapshot = self.views.view_for(Some(&context), &[reference.clone()], None, &[]).await?;
+            let snapshot = self.views.view_for(Some(&context), std::slice::from_ref(reference), None, &[]).await?;
             let row = self.object_view_row(kind, &snapshot, reference)?;
             if let Some(moved) = self.undo_target_moved(
                 id,

@@ -88,16 +88,16 @@ pub fn parse_als_xml(xml: &str) -> Result<AlsXmlNode, ProjectError> {
             cursor = end;
             continue;
         }
-        if rest.starts_with("<!--") {
-            let end = rest[4..].find("-->").map(|n| cursor + 4 + n).ok_or_else(|| fail("Live Set XML is malformed (comment)"))?;
+        if let Some(after) = rest.strip_prefix("<!--") {
+            let end = after.find("-->").map(|n| cursor + 4 + n).ok_or_else(|| fail("Live Set XML is malformed (comment)"))?;
             if xml[cursor + 4..end].contains("--") {
                 return Err(fail("Live Set XML is malformed (comment)"));
             }
             cursor = end + 3;
             continue;
         }
-        if rest.starts_with("<![CDATA[") {
-            let end = rest[9..].find("]]>").map(|n| cursor + 9 + n).ok_or_else(|| fail("Live Set XML is malformed (CDATA)"))?;
+        if let Some(after) = rest.strip_prefix("<![CDATA[") {
+            let end = after.find("]]>").map(|n| cursor + 9 + n).ok_or_else(|| fail("Live Set XML is malformed (CDATA)"))?;
             push_text(&mut stack, &mut lengths, &xml[cursor + 9..end], true)?;
             cursor = end + 3;
             continue;

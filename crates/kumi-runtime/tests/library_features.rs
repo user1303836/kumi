@@ -91,7 +91,7 @@ async fn files_keep_full_duration_measure_requested_part_and_cancel() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("kick.wav");
     let samples = kick(50., 1.);
-    std::fs::write(&path, wav(&[samples.clone()], 44100)).unwrap();
+    std::fs::write(&path, wav(std::slice::from_ref(&samples), 44100)).unwrap();
     let path = path.to_str().unwrap();
     let full = measure_sound(path, MeasureOptions::default()).await.unwrap();
     assert_eq!(full.seconds, 1.);

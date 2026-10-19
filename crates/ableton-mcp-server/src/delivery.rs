@@ -569,7 +569,7 @@ pub fn migrate_config(input: &Path, output: &Path, force: bool, bridge: Option<&
     } else if source.is_object() && source["version"].as_f64() == Some(1.0) {
         AnyConfig::Server(parse_config(&source)?)
     } else if source.is_object() {
-        if !source["command"].as_str().is_some_and(|v| !v.is_empty())
+        if source["command"].as_str().is_none_or(|v| v.is_empty())
             || !source["args"].as_array().is_some_and(|args| args.iter().all(Value::is_string))
         {
             return Err(fail("legacy configuration must contain command and string args"));

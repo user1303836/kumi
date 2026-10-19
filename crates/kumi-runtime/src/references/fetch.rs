@@ -225,6 +225,17 @@ fn downloaded(name: &str) -> bool {
         .is_some_and(|format| matches!(format, "m4a" | "webm" | "opus" | "mp3" | "ogg" | "aac" | "mp4" | "mka"))
 }
 
+/// What a failed download left behind (`<id>.m4a.part` and the like), gone.
+fn let_go(folder: &Path, id: &str) {
+    let Ok(entries) = std::fs::read_dir(folder) else { return };
+    let start = format!("{id}.");
+    for path in entries.filter_map(|entry| entry.ok().map(|entry| entry.path())) {
+        if path.is_file() && path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with(&start)) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -250,16 +261,5 @@ mod tests {
         super::sweep(folder.path());
         assert!(swept.iter().all(|path| !path.exists()), "{swept:?}");
         assert!(kept.iter().all(|path| path.exists()), "{kept:?}");
-    }
-}
-
-/// What a failed download left behind (`<id>.m4a.part` and the like), gone.
-fn let_go(folder: &Path, id: &str) {
-    let Ok(entries) = std::fs::read_dir(folder) else { return };
-    let start = format!("{id}.");
-    for path in entries.filter_map(|entry| entry.ok().map(|entry| entry.path())) {
-        if path.is_file() && path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with(&start)) {
-            let _ = std::fs::remove_file(path);
-        }
     }
 }

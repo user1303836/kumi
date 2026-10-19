@@ -126,7 +126,7 @@ impl DeterministicLiveSimulator {
                 fence(args, &json!({"routingType":io["routingType"],"routingChannel":io["routingChannel"]}), "device IO")?;
                 for key in ["routingType", "routingChannel"] {
                     if let Some(v) = args.get(key) {
-                        if !v.as_str().is_some_and(|s| !s.is_empty()) {
+                        if v.as_str().is_none_or(|s| s.is_empty()) {
                             return Err(LiveError::range_error(format!("{key} is invalid")));
                         }
                         io[key] = v.clone();
@@ -222,7 +222,7 @@ impl DeterministicLiveSimulator {
                     if ["oversample", "monoPoly", "isEditorOpen", "overdubAfterRecord"].contains(key) {
                         set_bool(row, args, key, key)?;
                     } else if ["irCategory", "irFile"].contains(key) {
-                        if !value.as_str().is_some_and(|s| !s.is_empty()) {
+                        if value.as_str().is_none_or(|s| s.is_empty()) {
                             return Err(LiveError::range_error(format!("{key} is invalid")));
                         }
                         let list = row.get(if *key == "irCategory" { "irCategoryList" } else { "irFileList" }).and_then(Value::as_array);

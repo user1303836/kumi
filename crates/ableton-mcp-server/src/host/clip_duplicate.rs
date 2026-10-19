@@ -145,7 +145,7 @@ impl McpHost {
                     json!(self.arrangement_collection_revision(&snapshot, track.as_str().unwrap())?);
                 fence = js_json::stringify(&json!({
                 "arrangement":self.arrangement_fence(&snapshot,
-                &[track.clone()])?,
+                std::slice::from_ref(track))?,
                 "sourceAuthority":authority,
                 "sourceFingerprint":fingerprint}
                 ));

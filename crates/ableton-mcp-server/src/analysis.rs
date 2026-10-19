@@ -591,7 +591,7 @@ fn analyze_pcm_internal(
     if !is_integer(channels) || channels < 1.0 || channels > MAX_ANALYSIS_CHANNELS as f64 {
         return Err(RangeError(format!("channels must be an integer from 1 to {MAX_ANALYSIS_CHANNELS}")));
     }
-    if !is_integer(frame_size) || frame_size < 256.0 || frame_size > 4096.0 {
+    if !is_integer(frame_size) || !(256.0..=4096.0).contains(&frame_size) {
         return Err(RangeError("frameSize must be an integer from 256 to 4096".to_string()));
     }
     let sample_count = input.samples.len();
@@ -601,7 +601,7 @@ fn analyze_pcm_internal(
     let sample_rate = input.sample_rate;
     let channels = channels as usize;
     let frame_size = frame_size as usize;
-    if sample_count % channels != 0 {
+    if !sample_count.is_multiple_of(channels) {
         return Err(RangeError("samples must contain complete channel frames".to_string()));
     }
     if sample_count as f64 / channels as f64 / sample_rate > MAX_ANALYSIS_SECONDS {

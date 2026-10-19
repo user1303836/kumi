@@ -155,6 +155,8 @@ impl SeededRandom {
     }
 
     /// The next value in [0, 1).
+    // (a seeded random source that never ends, not an iterator)
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> f64 {
         self.state = self.state.wrapping_add(0x6d2b79f5);
         let mut value = self.state;
@@ -876,7 +878,7 @@ fn new_note(pitch: f64, start: f64, duration: f64, velocity: f64) -> Note {
 /// possible. The raw bucket construction is normalized so the first pulse
 /// lands on step 0 (the canonical representation of each rhythm).
 pub fn bjorklund(pulses: i64, steps: i64) -> Result<Vec<bool>, MidiTransformError> {
-    if pulses < 0 || steps < 1 || steps > 64 || pulses > steps {
+    if pulses < 0 || !(1..=64).contains(&steps) || pulses > steps {
         return Err(range("euclidean pulses/steps are invalid"));
     }
     let steps_count = steps as usize;

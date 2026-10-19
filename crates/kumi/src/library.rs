@@ -40,7 +40,7 @@ fn grouped(value: usize) -> String {
     let text = value.to_string();
     let mut out = String::new();
     for (i, ch) in text.chars().enumerate() {
-        if i > 0 && (text.len() - i) % 3 == 0 {
+        if i > 0 && (text.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(ch);

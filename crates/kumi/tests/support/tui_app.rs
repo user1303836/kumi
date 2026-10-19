@@ -365,7 +365,7 @@ impl SessionController for Control {
         true
     }
     async fn daw_message(&self, text: &str) -> Result<bool, RuntimeError> {
-        self.call(&format!("daw-message:{text}"));
+        self.call(format!("daw-message:{text}"));
         Ok(true)
     }
     async fn daw_recording(&self) -> Result<Option<bool>, RuntimeError> {

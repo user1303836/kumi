@@ -219,7 +219,7 @@ impl TuiApp {
             if slot.index == strip.scene {
                 screen.fill(Rect::new(x - 1, row, width + 2, 1), &st::RAISED);
             }
-            let mut column = screen.put(x, row, &format!("{:>3}", number::to_string(slot.index as f64 + 1.)), &st::FAINT) + 1;
+            let mut column = screen.put(x, row, &format!("{:>3}", number::to_string(slot.index + 1.)), &st::FAINT) + 1;
             let Some(clip) = &slot.clip else {
                 screen.put(column, row, "·", &st::FAINT);
                 continue;
@@ -614,7 +614,6 @@ impl TuiApp {
                 action: undo.clone(),
                 open: Some(toggle.clone()),
                 keys: keys.clone(),
-                ..Default::default()
             });
             if lines.len() > 1 {
                 rows.push(TabRow {

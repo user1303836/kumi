@@ -1,4 +1,7 @@
 //! Native audio formats and transport fixtures for audio, listening and video.
+// A test drives one task at a time and holds its fake's state across its own awaits; nothing else borrows it then.
+// (Kumi's own code holds no RefCell across an await: CI's clippy denies it there.)
+#![allow(clippy::await_holding_refcell_ref)]
 use futures::FutureExt;
 use kumi_runtime::{
     audio::decode::open_audio,
@@ -76,7 +79,7 @@ async fn wav_16_bit_24_bit_float_and_aiff_decode_to_the_same_samples_other_files
         if name.ends_with("aiff") {
             aiff(&path, &sine);
         } else {
-            wav(&path, &[sine.clone()], bits);
+            wav(&path, std::slice::from_ref(&sine), bits);
         }
         let mut source = open_audio(path, None).await.unwrap();
         assert_eq!(source.sample_rate, 48000.0, "{name}");
@@ -567,7 +570,7 @@ async fn wavetables_shapes_as_harmonics_keyframes_morphing_cycles_cut_from_a_sou
         })
         .collect();
     let note = folder.path().join("wavetable-saw.wav");
-    wav(&note, &[saw.clone()], 32);
+    wav(&note, std::slice::from_ref(&saw), 32);
     assert!((period_of(&saw[..48000], 48000.0).unwrap() - 48000.0 / 110.0).abs() < 1.0);
     let cut = frames_from_audio(note.to_str().unwrap(), 8.0, None, None).await.unwrap();
     assert_eq!(cut.len(), 8);

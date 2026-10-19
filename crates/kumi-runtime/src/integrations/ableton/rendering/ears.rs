@@ -41,7 +41,7 @@ pub(super) async fn sweep_ears(folder: &Path) {
         let gone = match tokio::fs::read(path.join(OWNER)).await {
             Ok(bytes) => serde_json::from_slice::<Value>(&bytes).ok().is_some_and(|owner| {
                 let (Some(pid), Some(started)) = (owner["pid"].as_u64(), owner["started"].as_i64()) else { return false };
-                !u32::try_from(pid).ok().and_then(kumi_common::process::started_at_ms).is_some_and(|now| (now - started).abs() <= 2_000)
+                u32::try_from(pid).ok().and_then(kumi_common::process::started_at_ms).is_none_or(|now| (now - started).abs() > 2_000)
             }),
             Err(_) => entry
                 .metadata()
@@ -395,6 +395,20 @@ pub(super) async fn prune_takes(folder: &Path, budget: u64, fresh: std::time::Du
     Ok(())
 }
 
+/// The device among a chain's rows that Live knows by `identity` (a rack's devices are among them too).
+fn device_with<'a>(rows: &'a [JsonObject], identity: &str) -> Option<&'a JsonObject> {
+    rows.iter().find(|row| !identity.is_empty() && object_identity(row) == identity)
+}
+
+/// A device row's identity in Live (empty when the bridge doesn't say).
+fn object_identity(row: &JsonObject) -> String {
+    match row.get("objectIdentity") {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Number(number)) => number.to_string(),
+        _ => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -497,19 +511,5 @@ mod tests {
         let path = raw.0.clone();
         drop(raw);
         assert!(!path.exists());
-    }
-}
-
-/// The device among a chain's rows that Live knows by `identity` (a rack's devices are among them too).
-fn device_with<'a>(rows: &'a [JsonObject], identity: &str) -> Option<&'a JsonObject> {
-    rows.iter().find(|row| !identity.is_empty() && object_identity(row) == identity)
-}
-
-/// A device row's identity in Live (empty when the bridge doesn't say).
-fn object_identity(row: &JsonObject) -> String {
-    match row.get("objectIdentity") {
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::Number(number)) => number.to_string(),
-        _ => String::new(),
     }
 }

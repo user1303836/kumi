@@ -35,7 +35,6 @@ impl McpHost {
             deadline_ms: Some(self.deadline(base)),
             idempotency_key: params["idempotencyKey"].as_str().map(str::to_owned),
             transaction_id: params["transactionId"].as_str().map(str::to_owned),
-            ..Default::default()
         }
     }
     pub async fn live_batch_preview_async(&self, id: &Value, params: &Value) -> Value {

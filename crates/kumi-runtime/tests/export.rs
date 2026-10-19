@@ -617,7 +617,7 @@ fn outside_fences(markdown: &str) -> Vec<String> {
         let rest = &line[indent..];
         let run = rest.len() - rest.trim_start_matches(['`', '~']).len();
         let marker = &rest[..run];
-        let uniform = marker.chars().all(|c| Some(c) == marker.chars().next());
+        let uniform = marker.chars().all(|c| marker.starts_with(c));
         let after = &rest[run..];
         (indent <= 3 && run >= 3 && uniform && !(marker.starts_with('`') && after.contains('`')))
             .then(|| (marker.to_string(), after.to_string()))

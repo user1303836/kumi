@@ -25,7 +25,7 @@ fn observations_are_kept_whole_and_read_back_newest_first() {
     second.weight = None;
     second.heard = None;
     second.facts = json!({"quote":"never put reverb on the kick","lean":"never"});
-    let kept = vec![first.clone(), second.clone()];
+    let kept = [first.clone(), second.clone()];
     store.write_wait(move |c| kept.iter().try_for_each(|o| observations::append(c, o))).unwrap();
     assert_eq!(store.read(|c| observations::recent(c, 10)).unwrap(), vec![second.clone(), first]);
     assert_eq!(store.read(|c| observations::recent(c, 1)).unwrap(), vec![second]);

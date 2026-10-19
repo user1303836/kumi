@@ -1,4 +1,7 @@
 //! Source bridge setup scenarios, with npm packaging replaced by native receipt-bound artifacts.
+// A test drives one task at a time and holds its fake's state across its own awaits; nothing else borrows it then.
+// (Kumi's own code holds no RefCell across an await: CI's clippy denies it there.)
+#![allow(clippy::await_holding_refcell_ref)]
 use futures::FutureExt;
 use kumi::{
     bridge_setup::*,

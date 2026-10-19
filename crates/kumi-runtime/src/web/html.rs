@@ -612,8 +612,8 @@ pub fn html_to_text(html: &str, base: &str) -> String {
             }
         }
         let tail = &html[at..];
-        if tail.starts_with("<!--") {
-            at = tail[4..].find("-->").map_or(html.len(), |v| at + 4 + v + 3);
+        if let Some(after) = tail.strip_prefix("<!--") {
+            at = after.find("-->").map_or(html.len(), |v| at + 4 + v + 3);
             continue;
         }
         if tail.starts_with("<![CDATA[") {

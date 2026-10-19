@@ -136,7 +136,7 @@ pub use crate::core::picture::format_number;
 pub fn note_name(note: f64) -> String {
     let index = note % 12.0;
     let notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-    let name = if index >= 0.0 && index < 12.0 && index.fract() == 0.0 { notes[index as usize] } else { "undefined" };
+    let name = if (0.0..12.0).contains(&index) && index.fract() == 0.0 { notes[index as usize] } else { "undefined" };
     format!("{name}{}", number::to_string((note / 12.0).floor() - 2.0))
 }
 pub use crate::core::refs::hex_color;
@@ -744,7 +744,7 @@ impl ChangeKind {
             return Some("The clip cut something where it landed that wasn't named before (put there in between), so Kumi leaves taking it back to Live's own undo.".into());
         }
         if !matches!(self.tool.as_str(), "move_clip" | "add_arrangement_clip")
-            || !preview.get("replaces").and_then(Value::as_array).is_some_and(|r| !r.is_empty())
+            || preview.get("replaces").and_then(Value::as_array).is_none_or(|r| r.is_empty())
         {
             return None;
         }

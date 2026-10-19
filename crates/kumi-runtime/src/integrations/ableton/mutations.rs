@@ -292,11 +292,7 @@ impl Mutations {
         {
             Ok(result) => result,
             Err(_) => {
-                history.remember(
-                    new_record(kind, summary, ChangeState::Unsure, connection.now().timestamp_millis()),
-                    transaction.into(),
-                    None,
-                );
+                history.remember(new_record(kind, summary, ChangeState::Unsure, connection.now().timestamp_millis()), transaction, None);
                 return Ok(ChangeOutcome::stop("Live didn't confirm this change, so it may or may not have happened. Tell the producer to check Live; discover again before more changes."));
             }
         };
@@ -305,17 +301,13 @@ impl Mutations {
             if !uncertain(&applied) {
                 return Ok(ChangeOutcome::error(text));
             }
-            history.remember(new_record(kind, summary, ChangeState::Unsure, connection.now().timestamp_millis()), transaction.into(), None);
+            history.remember(new_record(kind, summary, ChangeState::Unsure, connection.now().timestamp_millis()), transaction, None);
             return Ok(ChangeOutcome::stop(format!("Live couldn't confirm this change: {text}")));
         }
         let mut result = match context::payload(&applied) {
             Ok(value) => value,
             Err(_) => {
-                history.remember(
-                    new_record(kind, summary, ChangeState::Unsure, connection.now().timestamp_millis()),
-                    transaction.into(),
-                    None,
-                );
+                history.remember(new_record(kind, summary, ChangeState::Unsure, connection.now().timestamp_millis()), transaction, None);
                 return Ok(ChangeOutcome::stop("Kumi couldn't read Live's answer to this change, so it can't confirm whether it happened. Tell the producer to check Live; discover again before more changes."));
             }
         };
@@ -405,7 +397,7 @@ impl Mutations {
                 })
             })
         });
-        history.remember(record.clone(), transaction.into(), restore);
+        history.remember(record.clone(), transaction, restore);
         if applied {
             super::parameters::curve_later(history, kind, args.get("deviceRef"), &record.id, final_summary.picture.as_ref());
         }
@@ -840,6 +832,11 @@ fn kumi_undo_words(names: &str, clips: &[super::snapshots::Captured]) -> String 
     )
 }
 
+/// A JSON value as an object (an empty one when it isn't).
+fn record_of(value: Option<&Value>) -> JsonObject {
+    value.and_then(Value::as_object).cloned().unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -894,9 +891,4 @@ mod tests {
         assert_eq!(items(json!({"pads":(0..16).map(|n| json!({"note":n})).collect::<Vec<_>>()})), 16);
         assert_eq!(items(json!({"tempo":124})), 1);
     }
-}
-
-/// A JSON value as an object (an empty one when it isn't).
-fn record_of(value: Option<&Value>) -> JsonObject {
-    value.and_then(Value::as_object).cloned().unwrap_or_default()
 }

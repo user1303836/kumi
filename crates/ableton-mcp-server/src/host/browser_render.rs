@@ -121,8 +121,8 @@ impl McpHost {
                 let mut items=Vec::with_capacity(rows.len());
                 for row in rows{
                     if !row.is_object()||!is_non_empty_string(&row["id"],256)||!is_non_empty_string(&row["objectIdentity"],256)
-                        ||!row["name"].as_str().is_some_and(|s|utf16_len(s)<=256)||!is_non_empty_string(&row["category"],64)
-                        ||!row["path"].as_str().is_some_and(|s|utf16_len(s)<=512)||!row["isDevice"].is_boolean(){return Err(LiveError::error("browser search returned a malformed candidate set"));}
+                        ||row["name"].as_str().is_none_or(|s| utf16_len(s) > 256)||!is_non_empty_string(&row["category"],64)
+                        ||row["path"].as_str().is_none_or(|s| utf16_len(s) > 512)||!row["isDevice"].is_boolean(){return Err(LiveError::error("browser search returned a malformed candidate set"));}
                     items.push(json!({"id":row["id"],"objectIdentity":row["objectIdentity"],"name":row["name"],"category":row["category"],"path":row["path"],"isDevice":row["isDevice"]}));
                 }
                 let entry=BrowserCache{items:std::rc::Rc::new(items),at:self.browser_now(),epoch};let mut cache=self.browser_search_cache.borrow_mut();

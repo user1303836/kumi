@@ -37,7 +37,8 @@ pub fn technique_row(t: &Technique) -> stored::Technique {
     }
 }
 pub fn technique_of(t: stored::Technique) -> Technique {
-    let source = (t.source_title.is_some() || t.source_url.is_some()).then(|| TechniqueSource { title: t.source_title, url: t.source_url });
+    let source =
+        (t.source_title.is_some() || t.source_url.is_some()).then_some(TechniqueSource { title: t.source_title, url: t.source_url });
     Technique {
         body: TechniqueBody {
             name: t.name,

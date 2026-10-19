@@ -152,7 +152,7 @@ impl McpHost {
         };
         let transaction = record.borrow().clone();
         if transaction["kind"] != "rename"
-            || !transaction["clipRef"].as_str().is_some_and(|s| !s.is_empty())
+            || transaction["clipRef"].as_str().is_none_or(|s| s.is_empty())
             || (transaction["state"] == "previewed"
                 && transaction["expiresAt"].as_f64().is_some_and(|v| v <= kumi_common::time::now_ms_f64()))
         {
@@ -229,7 +229,7 @@ impl McpHost {
             return transaction_error(id, "Unknown or expired rename transaction");
         };
         let transaction = record.borrow().clone();
-        if transaction["kind"] != "rename" || !transaction["clipRef"].as_str().is_some_and(|s| !s.is_empty()) {
+        if transaction["kind"] != "rename" || transaction["clipRef"].as_str().is_none_or(|s| s.is_empty()) {
             return transaction_error(id, "Unknown or expired rename transaction");
         }
         if transaction["state"] == "undone" && transaction["undoKey"] == params["idempotencyKey"] {

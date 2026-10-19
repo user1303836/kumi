@@ -339,7 +339,7 @@ fn is_kumis(control: &Control) -> bool {
 
 /// A control's object and its label in its cell, centred.
 fn place(cell: Cell, x: f64, y: f64, w: f64, h: f64) -> Spot {
-    let label = cell.labelled().then(|| [x, y, w, 13.0]);
+    let label = cell.labelled().then_some([x, y, w, 13.0]);
     let below = if cell.labelled() { 14.0 } else { 0.0 };
     let rect = match cell {
         Cell::Dial => [x + ((w - 44.0) / 2.0).floor(), y, 44.0, 48.0],

@@ -207,7 +207,7 @@ fn executable(entry: &ToolCatalogEntry, status: &LiveStatus, offered: &Offered) 
         return false;
     }
     if entry.name.starts_with("live_native_editing_")
-        && !status.extra.get("nativeEditingKinds").and_then(Value::as_array).is_some_and(|kinds| !kinds.is_empty())
+        && status.extra.get("nativeEditingKinds").and_then(Value::as_array).is_none_or(|kinds| kinds.is_empty())
     {
         return false;
     }
