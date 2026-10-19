@@ -228,10 +228,12 @@ fn presets(library: &Path, root: &str) -> Value {
 async fn drum_pad_workflows_preserve_source_loading_file_authority_and_recovery() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let fixture: Value = serde_json::from_reader(flate2::read::MultiGzDecoder::new(
-                include_bytes!("fixtures/host-drum-pad-oracle.json.gz").as_slice(),
-            ))
-            .unwrap();
+            // Unpacked whole, then parsed: serde_json reads a reader a byte at a time.
+            let mut bytes = Vec::new();
+            flate2::read::MultiGzDecoder::new(include_bytes!("fixtures/host-drum-pad-oracle.json.gz").as_slice())
+                .read_to_end(&mut bytes)
+                .unwrap();
+            let fixture: Value = serde_json::from_slice(&bytes).unwrap();
             for case in fixture["cases"].as_array().unwrap() {
                 let label = case["label"].as_str().unwrap();
                 if std::env::var("KUMI_DRUM_PAD_CASE").ok().is_some_and(|v| v != label) {

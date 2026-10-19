@@ -1238,7 +1238,7 @@ case!(export_copies_or_saves_this_conversation_and_share_offers_the_page, async 
     h.type_text("\r").await;
     assert_eq!(h.browsed.borrow().last().cloned(), Some(page.display().to_string()));
     h.type_text("\x1b[B\r").await;
-    assert_eq!(revealed.borrow().as_slice(), std::slice::from_ref(&page));
+    assert_eq!(revealed.borrow().as_slice(), [page.clone()]);
     h.type_text("\x1b[B\r").await;
     let copied = {
         let output = h.output.text.borrow();
@@ -1250,7 +1250,7 @@ case!(export_copies_or_saves_this_conversation_and_share_offers_the_page, async 
     assert_eq!(copied, page.display().to_string());
     h.has("Done");
     h.type_text("\x1b[B\r").await;
-    assert_eq!(exported_files(folder.path(), "html"), std::slice::from_ref(&page), "one page, however often it's shared");
+    assert_eq!(exported_files(folder.path(), "html"), [page.clone()], "one page, however often it's shared");
     // Something new in the conversation: a new page.
     *h.control.export.borrow_mut() = Some(to_export("A long one, and more", 70_000));
     h.type_text("/share\r").await;

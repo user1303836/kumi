@@ -6,7 +6,7 @@ use ableton_mcp_server::{
 use kumi_common::abort::Signal;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{cell::RefCell, collections::VecDeque, fs, path::Path, rc::Rc};
+use std::{cell::RefCell, collections::VecDeque, fs, path::Path, rc::Rc, sync::LazyLock};
 fn same(a: &Value, b: &Value, label: &str) {
     assert_eq!(canonical_mutation_identity(a).unwrap(), canonical_mutation_identity(b).unwrap(), "{label}");
 }
@@ -17,6 +17,7 @@ fn clean(mut value: Value, root: &str) -> Value {
         }
     }
     fn walk(value: &mut Value, key: &str, root: &str) {
+        static STAGE: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r#"\$stage/[^/"\\\s]+/"#).unwrap());
         if key == "expiresAt" && *value != 0 {
             *value = json!("$time");
             return;
@@ -37,7 +38,7 @@ fn clean(mut value: Value, root: &str) -> Value {
                     *text = text.replace('\\', "/");
                 }
                 *text = text.replace("$root/managed", "$stage");
-                *text = regex::Regex::new(r#"\$stage/[^/"\\\s]+/"#).unwrap().replace_all(text, "$$stage/$$copy/").into_owned();
+                *text = STAGE.replace_all(text, "$$stage/$$copy/").into_owned();
             }
             Value::Array(items) => {
                 for item in items {

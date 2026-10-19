@@ -79,6 +79,14 @@ debug = "line-tables-only"
 [profile.dev.package.serde_json]
 opt-level = 3
 
+# The same for gzip: Sets, presets and the tests' recorded fixtures (tens of megabytes) are gzipped.
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.crc32fast]
+opt-level = 3
+[profile.dev.package.adler2]
+opt-level = 3
+
 # The GenExpr interpreter runs Kumi's building blocks a sample at a time in their tests: optimized, a song's worth of
 # samples takes a moment instead of minutes.
 [profile.dev.package.kumi-genexpr]
