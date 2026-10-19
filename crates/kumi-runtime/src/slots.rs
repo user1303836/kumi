@@ -348,7 +348,7 @@ pub fn parse_for(profile: &DawProfile, words: &str) -> Result<Asked, String> {
             }
         }
         if lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("hf:") || lower.starts_with("hf.co/") {
-            let address = raw.trim_end_matches([',', ';']);
+            let address = raw.trim_end_matches(|c| matches!(c, ',' | ';'));
             let hugging_face = lower.starts_with("hf:") || lower.contains("huggingface.co") || lower.contains("hf.co/");
             wanted = Some(match address.split_once('#') {
                 Some((base, model)) if !hugging_face && !model.trim().is_empty() => {

@@ -451,7 +451,7 @@ fn ableton_root_attributes(xml: &str) -> Result<AbletonRootAttributes, ProjectEr
     let mut attributes: Vec<(String, String)> = Vec::new();
     for found in ATTRIBUTE.captures_iter(&root) {
         let decoded = decode_xml_attribute(&found[2])?;
-        match attributes.iter_mut().find(|(name, _)| *name == found[1]) {
+        match attributes.iter_mut().find(|(name, _)| *name == &found[1]) {
             Some(entry) => entry.1 = decoded,
             None => attributes.push((found[1].to_string(), decoded)),
         }

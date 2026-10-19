@@ -7,12 +7,6 @@ use crate::core::{
     playbook::{lesson_from_goal, lesson_line, playbook_brief, GoalLeader},
 };
 use indexmap::IndexMap;
-use std::sync::LazyLock;
-
-/// What a tried idea is said as: "Tried:" and the rest of its line.
-static TRIED: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(?i-u:Tried:)[\t\n\x0b\x0c\r \u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]*([^\r\n\u{2028}\u{2029}]+)").unwrap()
-});
 use kumi_common::js::number::{round, to_string};
 
 fn reported(e: &Evolution, full: &IndexMap<String, f64>, screening: bool) -> Option<Slot> {
@@ -224,7 +218,7 @@ impl Session {
                 return Ok(Some(setup));
             }
             let heard = self.0.state.borrow().heard_last.clone();
-            if heard.as_ref().and_then(|e| e.request.as_ref()).is_none_or(|r| r.reference.as_ref().is_none_or(|s| s.is_empty())) {
+            if !heard.as_ref().and_then(|e| e.request.as_ref()).is_some_and(|r| r.reference.as_ref().is_some_and(|s| !s.is_empty())) {
                 let status = {
                     let mut s = self.0.state.borrow_mut();
                     let status = s.goal_status.as_mut().unwrap();
@@ -327,11 +321,7 @@ impl Session {
                 }
                 screening = rig.screens();
 
-                if screening
-                    && evolution.generation > 0
-                    && evolution.generation.is_multiple_of(4)
-                    && last_confirm != Some(evolution.generation)
-                {
+                if screening && evolution.generation > 0 && evolution.generation % 4 == 0 && last_confirm != Some(evolution.generation) {
                     last_confirm = Some(evolution.generation);
                     let elites = evolution
                         .slots
@@ -360,11 +350,7 @@ impl Session {
                 }
                 let trials = evolution.propose();
                 let result = rig
-                    .generation(
-                        &generation_trials(&evolution, &trials),
-                        op.signal.clone(),
-                        Some(GenerationOptions { screen: Some(screening) }),
-                    )
+                    .generation(&generation_trials(&evolution, &trials), op.signal.clone(), Some(GenerationOptions { screen: Some(screening) }))
                     .await?;
 
                 evolution.scored(&trials, &result.scores);
@@ -408,14 +394,7 @@ impl Session {
                     let leap = self
                         .goal_ask(
                             &op,
-                            &goal_leap_for(
-                                &self.0.options.profile,
-                                &state,
-                                best.as_ref(),
-                                &gaps.iter().take(3).cloned().collect::<Vec<_>>(),
-                                stalled,
-                                structural.as_ref(),
-                            ),
+                            &goal_leap_for(&self.0.options.profile, &state, best.as_ref(), &gaps.iter().take(3).cloned().collect::<Vec<_>>(), stalled, structural.as_ref()),
                             &mut usage,
                             &said,
                         )
@@ -425,10 +404,7 @@ impl Session {
                         break;
                     }
                     let words = said.borrow().clone();
-                    let idea = TRIED
-                        .captures(&words)
-                        .map(|m| m[1].to_owned())
-                        .or_else(|| trim(&words).split('\n').find(|s| !s.is_empty()).map(str::to_owned));
+                    let idea=regex::Regex::new(r"(?i-u:Tried:)[\t\n\x0b\x0c\r \u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]*([^\r\n\u{2028}\u{2029}]+)").unwrap().captures(&words).map(|m|m[1].to_owned()).or_else(||trim(&words).split('\n').find(|s|!s.is_empty()).map(str::to_owned));
 
                     if let Some(idea) = idea {
                         let clean = idea.replace(['*', '_', '`'], "");
@@ -470,8 +446,7 @@ impl Session {
                 }
             }
             Ok::<(), RuntimeError>(())
-        }
-        .await;
+        }.await;
 
         if let Err(error) = searching {
             if !op.signal.is_cancelled() {

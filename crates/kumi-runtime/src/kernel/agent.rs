@@ -1235,8 +1235,8 @@ impl Turn {
     }
 }
 
-// Tools that only read, away from Live: the web, the library and its samples, Live's manual, earlier
-// conversations. Consecutive calls to them in one reply run together.
+/// Tools that only read, away from Live: the web, the library and its samples, Live's manual, earlier
+/// conversations. Consecutive calls to them in one reply run together.
 
 /// A call as it runs: the model's own call (its id and name stay on the result), the tool that runs (the one
 /// call_tool names, or the call's own) and its input.

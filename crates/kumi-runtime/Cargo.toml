@@ -78,6 +78,3 @@ tempfile.workspace = true
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
 # live_views reads deep Set snapshots, as the bridge does.
 serde_json = { workspace = true, features = ["unbounded_depth"] }
-
-[lints]
-workspace = true

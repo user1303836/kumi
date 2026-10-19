@@ -225,7 +225,7 @@ impl McpHost {
             let status=self.fresh_status(Some(&LiveOperationContext::with_deadline(self.deadline(AUDITION_DEADLINE_MS)))).await?;
             if !status.connected||!status.capabilities.iter().any(|c|c.as_str()=="session.read"){return Err(LiveError::error("session read capability is unavailable"))}
             let op=f.operation(p);if !status.has_operation(op){return Err(LiveError::error(if f==Family::Io{format!("{op} is unavailable on this Live shape")}else{format!("{} editing is unavailable",f.noun())}))}
-            let reference=&p[f.reference()];let snapshot=self.views.view_for(None,std::slice::from_ref(reference),None,&[]).await?;
+            let reference=&p[f.reference()];let snapshot=self.views.view_for(None,&[reference.clone()],None,&[]).await?;
             let (object,rack)=self.extended_object(f,&snapshot,reference)?;
             if f==Family::Extended && (object.is_null()||!is_non_empty_string(&object["objectIdentity"],256)){return Err(LiveError::error("track identity is not authoritative"))}
             let mixer=&object["mixer"];
@@ -290,7 +290,7 @@ impl McpHost {
             let context = self.transaction_context(p, signal, AUDITION_DEADLINE_MS);
             let reference = if f == Family::Io { &t["payload"]["ref"] } else { &t["clipRef"] };
             if !reconcile {
-                let snapshot = self.views.view_for(Some(&context), std::slice::from_ref(reference), None, &[]).await?;
+                let snapshot = self.views.view_for(Some(&context), &[reference.clone()], None, &[]).await?;
                 let (object, _) = self.extended_object(f, &snapshot, reference)?;
                 if (f == Family::Extended && (object.is_null() || !truthy(&object["mixer"])))
                     || t["fence"] != fence(f, reference, &object, &t["payload"])
@@ -321,7 +321,7 @@ impl McpHost {
             if result["changed"] != true {
                 return Err(LiveError::error(format!("{} change was not confirmed", f.noun())));
             }
-            let snapshot = self.views.view_for(Some(&context), std::slice::from_ref(reference), None, &[]).await?;
+            let snapshot = self.views.view_for(Some(&context), &[reference.clone()], None, &[]).await?;
             let (object, _) = self.extended_object(f, &snapshot, reference)?;
             if f == Family::Io {
                 let current = state(f, &object, &t["payload"]);
@@ -396,7 +396,7 @@ impl McpHost {
                 self.replay_undo_recovery(&record, adapter.as_ref(), &context).await?;
             }
             let reference = if f == Family::Io { &t["payload"]["ref"] } else { &t["clipRef"] };
-            let snapshot = self.views.view_for(Some(&context), std::slice::from_ref(reference), None, &[]).await?;
+            let snapshot = self.views.view_for(Some(&context), &[reference.clone()], None, &[]).await?;
             let (object, _) = self.extended_object(f, &snapshot, reference)?;
             let mixer = &object["mixer"];
             if f != Family::Io && (object.is_null() || !truthy(mixer) || !is_non_empty_string(&mixer["mixerIdentity"], 256)) {

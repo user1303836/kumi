@@ -145,7 +145,7 @@ pub async fn build(plan: &Plan, material: &Material, host: &dyn ArrangeHost, sig
             built.notes.push("Live doesn't offer adding locators for this Set, so the sections aren't marked.".into());
         } else if !plan.locators.is_empty() {
             host.tell("Arranging · naming the sections");
-            for pair in plan.locators.as_chunks::<2>().0 {
+            for pair in plan.locators.chunks_exact(2) {
                 let (first, second) = (&pair[0], &pair[1]);
                 match host
                     .change(

@@ -38,8 +38,7 @@ pub fn payload(result: &CallToolResult) -> Result<JsonObject, ObservationError> 
 }
 pub fn status_payload(result: &CallToolResult) -> Result<JsonObject, ObservationError> {
     let value = payload(result)?;
-    let valid_epoch =
-        value.get("epoch").and_then(Value::as_f64).is_some_and(|n| (0.0..=9007199254740991.0).contains(&n) && n.fract() == 0.0);
+    let valid_epoch = value.get("epoch").and_then(Value::as_f64).is_some_and(|n| n >= 0.0 && n <= 9007199254740991.0 && n.fract() == 0.0);
     if !value.get("connected").is_some_and(Value::is_boolean)
         || !value.get("adapter").is_some_and(Value::is_string)
         || (value.get("connected") == Some(&Value::Bool(true)) && !valid_epoch)

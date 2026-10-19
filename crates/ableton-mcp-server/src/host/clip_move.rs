@@ -162,7 +162,8 @@ impl McpHost {
             let row = self.clip_row(&snapshot, reference)?;
             let mut payload = json!({});
             let mut replaces = vec![];
-            let fence = if row.arrangement {
+            let fence;
+            if row.arrangement {
                 if !status.has_operation("arrangement.clip.move") {
                     return Err(LiveError::error("arrangement clip move is unavailable"));
                 }
@@ -249,7 +250,7 @@ impl McpHost {
                 if let Some(start) = row.clip.get("start") {
                     payload["priorPosition"] = start.clone();
                 }
-                arrangement_target_fence(arrangement_move_fence(&params["clipRef"], &row.clip, &fingerprint), target.as_ref())
+                fence = arrangement_target_fence(arrangement_move_fence(&params["clipRef"], &row.clip, &fingerprint), target.as_ref());
             } else {
                 if !status.has_operation("clip.move") {
                     return Err(LiveError::error("atomic Session clip move is unavailable"));
@@ -318,8 +319,8 @@ impl McpHost {
                     return Err(LiveError::error("Session move source scene identity is incomplete"));
                 }
 
-                target_fence(&authority, &fingerprint, &track, &target, &scene)
-            };
+                fence = target_fence(&authority, &fingerprint, &track, &target, &scene);
+            }
             let mut t = json!({
             "id":tempo::transaction_id("clipmove"),
             "epoch":status.epoch,

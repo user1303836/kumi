@@ -249,7 +249,7 @@ impl McpHost {
                 self.release_staged_import_for(&t);
             } else {
                 let reference = if action == "move" { record.borrow()["created"]["ref"].clone() } else { t["payload"]["ref"].clone() };
-                let snapshot = self.views.view_for(Some(&context), std::slice::from_ref(&reference), None, &[]).await?;
+                let snapshot = self.views.view_for(Some(&context), &[reference.clone()], None, &[]).await?;
                 let located = self.device_row(&snapshot, reference.as_str().unwrap_or(""))?;
                 if action == "enable" {
                     if let Some(moved) = Self::moved_target(

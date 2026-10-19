@@ -23,7 +23,7 @@ fn brightness(samples: &[f64]) -> f64 {
 /// Which take of a WAV the judge sends (first, 0.8 s of silence, second) is brighter, by listening to it.
 fn brighter(wav: &[u8]) -> &'static str {
     let rate = u32::from_le_bytes(wav[24..28].try_into().unwrap()) as usize;
-    let samples: Vec<f64> = wav[44..].as_chunks::<2>().0.iter().map(|pair| i16::from_le_bytes([pair[0], pair[1]]) as f64).collect();
+    let samples: Vec<f64> = wav[44..].chunks_exact(2).map(|pair| i16::from_le_bytes([pair[0], pair[1]]) as f64).collect();
     // The pause splits the takes: the longest run of silence.
     let (mut best, mut run, mut at) = ((0, 0), 0, 0);
     for (index, sample) in samples.iter().enumerate() {

@@ -475,7 +475,7 @@ pub struct Annotations {
 /// Whether `atob` would take the text: the forgiving-base64 decode of the HTML standard.
 pub fn forgiving_base64(text: &str) -> bool {
     let mut cleaned: Vec<u8> = text.bytes().filter(|byte| !matches!(byte, b'\t' | b'\n' | b'\x0c' | b'\r' | b' ')).collect();
-    if cleaned.len().is_multiple_of(4) {
+    if cleaned.len() % 4 == 0 {
         if cleaned.ends_with(b"==") {
             cleaned.truncate(cleaned.len() - 2);
         } else if cleaned.ends_with(b"=") {

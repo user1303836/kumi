@@ -819,7 +819,7 @@ impl RemoteScriptLiveAdapter {
                 }
                 let reference = row[if operation == "browser.load" { "deviceRef" } else { "ref" }].as_str();
                 let token = row["ownershipToken"].as_str();
-                if reference.is_none() || token.is_none_or(|t| kumi_common::js::string::utf16_len(t) < 32) {
+                if reference.is_none() || !token.is_some_and(|t| kumi_common::js::string::utf16_len(t) >= 32) {
                     return Err(LiveError::error("remote creation ownership token is missing"));
                 }
                 tokens.push((reference.unwrap().to_owned(), token.unwrap().to_owned()));

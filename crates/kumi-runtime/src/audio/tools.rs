@@ -107,7 +107,7 @@ pub fn transcription_for(profile: &DawProfile, notes: &[HeardNote], tempo: Optio
             counts.push((midi, 1));
         }
     }
-    counts.sort_by_key(|a| std::cmp::Reverse(a.1));
+    counts.sort_by(|a, b| b.1.cmp(&a.1));
     let most: Vec<_> = counts.into_iter().take(6).map(|(midi, count)| json!({"midi":midi,"count":count})).collect();
     let mut out=json!({"unit":tempo.map_or_else(||"seconds".into(),|t|format!("beats at {} BPM (a 16th is 0.25; starts as played, not on the grid)",to_string(t))),"columns":["start","pitch (MIDI; null: a hit with no clear pitch)","velocity","length"],"rows":rows}).as_object().unwrap().clone();
     if notes.len() > 400 {

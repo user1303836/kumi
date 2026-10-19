@@ -286,7 +286,7 @@ fn mixer_target<'a>(snapshot: &'a Value, reference: &str) -> Result<MixerTarget<
     let nullable_identity = |value: Option<&Value>| value.is_some_and(|v| v.is_null() || is_non_empty_string(v, 256));
     if !["volumeIdentity", "panIdentity", "cueIdentity"].iter().all(|key| nullable_identity(mixer.get(*key)))
         || !mixer["sendIdentities"].as_array().is_some_and(|rows| rows.iter().all(|row| is_non_empty_string(row, 256)))
-        || mixer["sendRefs"].as_array().is_none_or(|rows| rows.len() != array(&mixer["sendIdentities"]).len())
+        || !mixer["sendRefs"].as_array().is_some_and(|rows| rows.len() == array(&mixer["sendIdentities"]).len())
     {
         return Err(fail("transaction batch mixer parameter identities are incomplete"));
     }

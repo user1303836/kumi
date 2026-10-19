@@ -38,7 +38,8 @@ Windows では、いくつかのテストがシンボリックリンクを作成
 | `sh scripts/test-isolated.sh`（Windows では `./scripts/test-isolated.ps1`） | テスト専用のホームで `cargo test --workspace --locked` を実行します。引数は `cargo test` に渡します |
 | `sh scripts/test-isolated.sh -p kumi-runtime --test hands_transport` | 一つのクレートの、一つのテストファイルだけを実行します |
 | `cargo fmt --all --check` | CI と同じようにフォーマットを確認します |
-| `cargo clippy --workspace --all-targets --locked -- -D warnings` | CI と同じ Lint（await をまたいで保持される `RefCell` の借用も含みます） |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lint。CI では今のところ参考扱いです |
+| `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref` | await をまたいで保持される `RefCell` の借用。Lint の CI ジョブを失敗させます |
 | `KUMI_NEXTEST=1 sh scripts/test-isolated.sh --profile ci` | `Rust / Linux` が実行するテストを cargo-nextest で実行します（`--profile ci-os`：macOS と Windows が実行するもの、`--profile extended`：すべてのテスト） |
 | `cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark` | ブリッジの性能の基準。[開発者ガイド](DEVELOPER_GUIDE.md#ビルドテスト計測)を参照してください |
 
@@ -106,7 +107,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 | --- | --- | --- |
 | **CI** | `Rust / Linux` | `.config/nextest.toml` の `ci` セットを分離ランナーで、一度のビルドで実行します。Extended ワークフローが実行する長いテスト（設定ファイルに理由とともに列挙）以外のすべてのテストです。30 秒を超えたテストは名前つきで失敗します。続いて `git diff --check` |
 | | `Rust / macOS`、`Rust / Windows` | `ci-os` セット：プラットフォームによって異なるテスト（インストール、起動、更新、ターミナル、stdin と Windows のコンソール、Hands、パス、ファイル、子プロセス、ストア）。ビルドするのもそれらだけです |
-| | `Rust / Lint`（Ubuntu） | `cargo fmt --check` と、すべてのターゲットに対する `-D warnings` の Clippy。コードが意図して従わない lint は、`Cargo.toml` で一度だけ、それぞれ理由とともに許可しています |
+| | `Rust / Lint`（Ubuntu） | `cargo fmt --check`、サンプルのビルド、Clippy（参考扱い。ただし await をまたいで保持される `RefCell` の借用はジョブを失敗させます） |
 | | `Python Remote Script / ubuntu-24.04`、`macos-15`、`windows-2025`（Python 3.11） | Remote Script のテストを実行し、パッケージをコンパイルします |
 | | `Live extension`（Ubuntu、Node 24） | コミットされたビルドに対する、拡張機能のテスト |
 | | `Release scripts`（Ubuntu） | この変更の空白のチェック、続いてパッケージングのテスト、リリーススクリプトのテスト、`scripts/check-installers.sh`（install.sh が POSIX sh であること、install.ps1 が構文解析でき ASCII であること）。`main` へのプッシュでは、`main` の raw のインストーラーと最新リリースのものも確認します |

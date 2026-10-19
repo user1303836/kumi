@@ -230,7 +230,7 @@ impl McpHost {
                 args["value"] = p["value"].clone();
                 prior = json!({"targets":targets});
                 impact = "edits-wavetable-modulation";
-            } else if let Some(slice_action) = edit.strip_prefix("slice-") {
+            } else if edit.starts_with("slice-") {
                 if family(device, "sample").is_none() {
                     return Ok(transaction_error(id, "slicing needs a Simpler with a sample; that device has none"));
                 }
@@ -245,7 +245,7 @@ impl McpHost {
                 if edit == "slice-move" && !scalar_same(p.get("toTime"), p.get("time")) && includes("toTime") {
                     return Ok(transaction_error(id, "a slice is already at the new time"));
                 }
-                args["action"] = json!(slice_action);
+                args["action"] = json!(&edit[6..]);
                 for key in ["time", "toTime"] {
                     if let Some(v) = p.get(key) {
                         args[key] = v.clone();

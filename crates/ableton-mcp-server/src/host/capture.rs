@@ -504,8 +504,7 @@ impl McpHost {
         let host = self.clone();
         let held = record.clone();
         let request_id = id.clone();
-        // (the operation runs spawned; its promise is kept with the record, not here)
-        drop(self.start_record_operation(&record, async move {
+        let _ = self.start_record_operation(&record, async move {
             let result = host.dispatch_audio_capture_apply(&request_id, &held, Some(&controller)).await.unwrap_or(Value::Null);
             {
                 let mut t = held.borrow_mut();
@@ -515,7 +514,7 @@ impl McpHost {
             }
             host.capture_controllers.borrow_mut().retain(|c| c.record.upgrade().is_some_and(|r| !Rc::ptr_eq(&r, &held)));
             Ok(result)
-        }));
+        });
         self.await_audio_capture_apply(id, &record, signal).await
     }
     async fn dispatch_audio_capture_apply(&self, id: &Value, record: &TransactionRecord, signal: Option<&Signal>) -> Option<Value> {

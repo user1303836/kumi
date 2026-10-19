@@ -1016,7 +1016,7 @@ impl Session {
                 if let Some(op) = active.filter(|op| op.is_turn) {
                     op.signal.cancel();
                     let DawWords { app, place, .. } = self.0.options.profile.words;
-                    self.notice(format!(
+                    self.notice(&format!(
                         "{app} opened another {place} while it was busy, so Kumi stopped what it was doing: nothing it was doing lands in the other {place}."
                     ));
                 }
@@ -1699,7 +1699,7 @@ impl Session {
                 if let Some(kept) = resumed.filter(|_| first || reason == Some("set") || picked) {
                     let earlier = {
                         let s = self.0.state.borrow();
-                        s.changes.iter().filter(|c| s.seen.get(&c.id).is_none_or(|ours| ours.at != c.at)).cloned().collect::<Vec<_>>()
+                        s.changes.iter().filter(|c| !s.seen.get(&c.id).is_some_and(|ours| ours.at == c.at)).cloned().collect::<Vec<_>>()
                     };
                     self.emit(SessionEvent::Resumed {
                         saved_at: kept.saved_at,
@@ -2460,7 +2460,7 @@ impl SessionController for Session {
                     }
                     this.reset(&op).await?;
                     if this.0.state.borrow().connection == ConnectionState::Connected {
-                        this.notice(format!("Reconnected to {}; the conversation carries on.", this.0.options.profile.words.app));
+                        this.notice(&format!("Reconnected to {}; the conversation carries on.", this.0.options.profile.words.app));
                     }
                     Ok(None)
                 }

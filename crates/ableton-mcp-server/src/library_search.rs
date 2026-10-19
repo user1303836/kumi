@@ -10,7 +10,6 @@
 //! - Plugins database version 1: plugins, plugin_modules, plugin_domains with
 //!   dev_identifier-driven format classification (device:vst3:, device:vst:,
 //!   device:au:), shape-probed against the same install.
-//!
 //! Any other version reports `unsupported` with the observed version rather
 //! than guessing. The schema is undocumented and unofficial; results are
 //! labeled discovery evidence, and loadability still flows through

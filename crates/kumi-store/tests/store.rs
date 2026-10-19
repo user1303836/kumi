@@ -141,8 +141,7 @@ fn reads_run_beside_writes_and_see_each_commit() {
 fn crash_child() {
     let Ok(path) = std::env::var("KUMI_STORE_CRASH_CHILD") else { return };
     let store = Store::open(&path).unwrap();
-    let mut batch = 0;
-    loop {
+    for batch in 0.. {
         store.write(
             move |c| {
                 for n in 0..10 {
@@ -158,7 +157,6 @@ fn crash_child() {
         if batch % 50 == 0 {
             store.write_wait(|_| Ok(())).unwrap();
         }
-        batch += 1;
     }
 }
 

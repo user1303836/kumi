@@ -64,7 +64,7 @@ async fn a_file_that_isnt_whole_is_named_once_a_session() {
     let (client, _) = StoreClient::open(dir.path().join("kumi.db"), files.clone(), 1).await.unwrap();
     let sync = FileSync::new(client, files.clone(), &[]);
     std::fs::write(&files.memory, r#"{"version":1,"notes":[{"id":"p1""#).unwrap();
-    assert_eq!(sync.look().await.unwrap().unwrap().not_whole, std::slice::from_ref(&files.memory));
+    assert_eq!(sync.look().await.unwrap().unwrap().not_whole, [files.memory.clone()]);
     // Still not whole, changed again: not named again.
     std::fs::write(&files.memory, r#"{"version":1,"notes":[{"id":"p1","te"#).unwrap();
     assert!(sync.look().await.unwrap().unwrap().not_whole.is_empty());

@@ -185,7 +185,7 @@ fn validate_source(source: &ReferencePcmSource, label: &str) -> Result<Validated
     }
     let channels = source.channels as usize;
     let sample_length = source.samples.len();
-    if sample_length == 0 || !sample_length.is_multiple_of(channels) {
+    if sample_length == 0 || sample_length % channels != 0 {
         return Err(RangeError(format!("{label}.samples must contain complete channel frames")));
     }
     if sample_length as f64 / channels as f64 / source.sample_rate > MAX_COMPARISON_SECONDS_PER_SOURCE {
@@ -476,7 +476,7 @@ pub(crate) fn compare_reference_audio_mode(input: &ReferenceComparisonInput, str
     let alignment = input.alignment.unwrap_or_default();
     let mode = alignment.mode.unwrap_or(AlignmentMode::Auto);
     let max_lag_seconds = alignment.max_lag_seconds.unwrap_or(5.0);
-    if !max_lag_seconds.is_finite() || !(0.0..=MAX_ALIGNMENT_LAG_SECONDS).contains(&max_lag_seconds) {
+    if !max_lag_seconds.is_finite() || max_lag_seconds < 0.0 || max_lag_seconds > MAX_ALIGNMENT_LAG_SECONDS {
         return Err(RangeError(format!("alignment.maxLagSeconds must be from 0 to {}", number::to_string(MAX_ALIGNMENT_LAG_SECONDS))));
     }
     let project_resampled = resample_validated_pcm(&project_source, COMPARISON_ANALYSIS_RATE)?;

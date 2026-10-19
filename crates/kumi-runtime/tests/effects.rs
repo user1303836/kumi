@@ -277,7 +277,7 @@ fn guesses_arent_said_as_effects() {
     let mut phase = 0.;
     let line: Vec<f64> = (0..(8. * RATE) as usize)
         .map(|n| {
-            phase += 2. * PI * if ((n as f64 / RATE / 0.5) as usize).is_multiple_of(2) { 55. } else { 110. } / RATE;
+            phase += 2. * PI * if (n as f64 / RATE / 0.5) as usize % 2 == 0 { 55. } else { 110. } / RATE;
             0.15 * (1..=10).map(|k| (k as f64 * phase).sin() / k as f64).sum::<f64>()
         })
         .collect();
@@ -298,7 +298,7 @@ fn guesses_arent_said_as_effects() {
             })
             .collect()
     };
-    let melody = lead(&|t| if ((t / 0.5) as usize).is_multiple_of(2) { 440. } else { 880. }, &|_| 12_000.);
+    let melody = lead(&|t| if (t / 0.5) as usize % 2 == 0 { 440. } else { 880. }, &|_| 12_000.);
     let (octaves, _) = sweep(&heard(&melody, &melody)).unwrap();
     assert!(octaves < 0.25, "a lead an octave wide: {octaves} octaves");
     // A held note through a filter sweeping three octaves still sweeps.

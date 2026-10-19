@@ -41,7 +41,8 @@ Run from the repository root.
 | `sh scripts/test-isolated.sh` (Windows: `./scripts/test-isolated.ps1`) | `cargo test --workspace --locked` in a home of its own; arguments go to `cargo test` |
 | `sh scripts/test-isolated.sh -p kumi-runtime --test hands_transport` | One test file of one crate |
 | `cargo fmt --all --check` | Formatting, as CI checks it |
-| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lints, as CI checks them (a `RefCell` borrow held across an await among them) |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lints; advisory in CI for now |
+| `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref` | A `RefCell` borrow held across an await; fails the Lint CI job |
 | `KUMI_NEXTEST=1 sh scripts/test-isolated.sh --profile ci` | The tests `Rust / Linux` runs, with cargo-nextest (`--profile ci-os`: what macOS and Windows run; `--profile extended`: every test) |
 | `cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark` | The bridge's performance budgets; see [the developer guide](DEVELOPER_GUIDE.md#build-test-and-measure) |
 
@@ -145,7 +146,7 @@ These workflows run on every pull request, and the CI, Willington files and Inst
 | --- | --- | --- |
 | **CI** | `Rust / Linux` | The `ci` set of `.config/nextest.toml` through the isolated runner, built once: every test but the long ones the Extended workflow runs, which the config lists with why. A test that runs past 30 s fails, by name. Then `git diff --check` |
 | | `Rust / macOS`, `Rust / Windows` | The `ci-os` set: the tests that differ by platform (installing, launching and updating; the terminal, stdin and the Windows console; Hands; paths, files and child processes; the store), and only those built |
-| | `Rust / Lint` (Ubuntu) | `cargo fmt --check` and Clippy over every target with `-D warnings`. The lints the code goes against on purpose are allowed once, in `Cargo.toml`, each with its reason |
+| | `Rust / Lint` (Ubuntu) | `cargo fmt --check`, the examples' build and Clippy (advisory, except a `RefCell` borrow held across an await, which fails the job) |
 | | `Python Remote Script / ubuntu-24.04`, `macos-15`, `windows-2025` (Python 3.11) | The Remote Script's tests; compiles the package |
 | | `Live extension` (Ubuntu, Node 24) | The extension's tests, against its committed build |
 | | `Release scripts` (Ubuntu) | The whitespace check of the change, then the packaging tests, the release script's tests and `scripts/check-installers.sh` (install.sh is POSIX sh; install.ps1 parses and is ASCII). Pushes to `main` also check `main`'s raw installers and the latest release's |

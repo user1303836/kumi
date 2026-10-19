@@ -334,7 +334,7 @@ impl TuiApp {
             add(String::new(), st::TEXT);
             add(format!("Kumi {newer} is out · /update gets it"), st::ACCENT);
         }
-        if width >= LOGO_WIDTH && height > rows.len() as i32 + LOGO_HEIGHT {
+        if width >= LOGO_WIDTH && height >= rows.len() as i32 + LOGO_HEIGHT + 1 {
             let mut logo = LOGO_LETTERS.iter().map(|s| (s.to_string(), st::BRIGHT, true)).collect::<Vec<_>>();
             logo.extend([(String::new(), st::TEXT, false), (LOGO_RULE.into(), st::FAINT, true), (String::new(), st::TEXT, false)]);
             logo.extend(rows);

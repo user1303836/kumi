@@ -349,7 +349,7 @@ impl Cord {
 /// A segmented cord's midpoints as Max saves them, [x1, y1, x2, y2…], as points.
 fn points(value: &Value) -> Vec<[f64; 2]> {
     let numbers: Vec<f64> = value.as_array().map(|numbers| numbers.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
-    numbers.as_chunks::<2>().0.to_vec()
+    numbers.chunks_exact(2).map(|pair| [pair[0], pair[1]]).collect()
 }
 
 fn with_extension(name: &str, extension: &str) -> String {

@@ -317,7 +317,7 @@ pub fn read_bridge_server(config_path: &str) -> Result<BridgeServer, RuntimeErro
 }
 fn grouped(n: usize) -> String {
     let raw = n.to_string();
-    raw.chars().enumerate().map(|(i, c)| if i > 0 && (raw.len() - i).is_multiple_of(3) { format!(",{c}") } else { c.to_string() }).collect()
+    raw.chars().enumerate().map(|(i, c)| if i > 0 && (raw.len() - i) % 3 == 0 { format!(",{c}") } else { c.to_string() }).collect()
 }
 async fn library_check(env: &Env) -> Option<Check> {
     let dir = load_library_dir(env).ok()?;

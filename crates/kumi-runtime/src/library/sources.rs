@@ -575,7 +575,8 @@ static CORE_LIBRARY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)Core Li
 pub fn read_indexer_log(text: &str) -> IndexerLog {
     let last = |kind: &str| -> Vec<(String, String)> {
         let marker = format!("Configure: {kind}:");
-        let line = text.split('\n').map(|line| line.strip_suffix('\r').unwrap_or(line)).rfind(|line| line.contains(&marker)).unwrap_or("");
+        let line =
+            text.split('\n').map(|line| line.strip_suffix('\r').unwrap_or(line)).filter(|line| line.contains(&marker)).last().unwrap_or("");
         let key = format!("{kind}:");
         let rest = match line.find(&key) {
             Some(at) => &line[at + key.len()..],

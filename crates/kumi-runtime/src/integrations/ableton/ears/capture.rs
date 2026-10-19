@@ -227,7 +227,7 @@ fn raw_chunks(
                 let span = &mut bytes[..count * 4];
                 file.seek(SeekFrom::Start(4 * raw.layout.index(raw.channels, raw.frames, *channel, first) as u64))?;
                 file.read_exact(span)?;
-                run.extend(span.as_chunks::<4>().0.iter().map(|&word| raw.layout.value(word)));
+                run.extend(span.chunks_exact(4).map(|word| raw.layout.value(word.try_into().expect("four bytes"))));
             }
         }
         each(first, &values)?;
@@ -686,7 +686,8 @@ fn join_parts(file: &Path, parts: &[(PathBuf, usize)]) -> std::io::Result<()> {
         while first < frames {
             let count = CHUNK.min(frames - first);
             input.read_exact(&mut bytes[..count * 8])?;
-            let mut samples: Vec<f32> = bytes[..count * 8].as_chunks::<4>().0.iter().map(|&word| f32::from_le_bytes(word)).collect();
+            let mut samples: Vec<f32> =
+                bytes[..count * 8].chunks_exact(4).map(|word| f32::from_le_bytes(word.try_into().expect("four bytes"))).collect();
             for frame in first..(first + count).min(fade) {
                 let weight = (frame as f32 + 0.5) / fade as f32;
                 for channel in 0..2 {

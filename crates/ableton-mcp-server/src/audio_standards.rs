@@ -392,14 +392,14 @@ fn measure_loudness(samples: &[f64], sample_rate: f64, channels: usize, weights:
         ring[frame % short_term_frames] = frame_energy;
         let end_frame = frame + 1;
 
-        if end_frame >= momentary_frames && (end_frame - momentary_frames).is_multiple_of(momentary_hop) {
+        if end_frame >= momentary_frames && (end_frame - momentary_frames) % momentary_hop == 0 {
             let energy = (momentary_sum / momentary_frames as f64).max(0.0);
             block_energies.push(energy);
             if let Some(lufs) = loudness_from_energy(energy) {
                 momentary_points.push(LoudnessPoint { time_seconds: end_frame as f64 / sample_rate, lufs });
             }
         }
-        if end_frame >= short_term_frames && (end_frame - short_term_frames).is_multiple_of(short_term_hop) {
+        if end_frame >= short_term_frames && (end_frame - short_term_frames) % short_term_hop == 0 {
             if let Some(lufs) = loudness_from_energy((short_term_sum / short_term_frames as f64).max(0.0)) {
                 short_term_points.push(LoudnessPoint { time_seconds: end_frame as f64 / sample_rate, lufs });
             }
@@ -611,7 +611,7 @@ pub fn analyze_standards_audio(input: &StandardsAudioInput) -> Result<StandardsA
         || input.channels > 32.0
         || sample_length == 0
         || sample_length > 10_000_000
-        || !sample_length.is_multiple_of(input.channels as usize)
+        || sample_length % (input.channels as usize) != 0
     {
         return Err(RangeError("channels and samples must contain 1-10000000 complete frames across at most 32 channels".to_string()));
     }

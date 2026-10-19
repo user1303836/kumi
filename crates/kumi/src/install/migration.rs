@@ -86,13 +86,6 @@ fn write_launcher_for(home: &str, windows: bool) -> std::io::Result<()> {
     }
     result
 }
-/// Legacy probes require this file; native updates retain it so old rollback can return here.
-pub fn legacy_entry(app: &str) -> String {
-    join(app, "apps/kumi/bin/kumi.mjs")
-}
-pub fn has_app(app: &str) -> bool {
-    Path::new(&join(app, &executable_name("kumi"))).is_file() || Path::new(&legacy_entry(app)).is_file()
-}
 
 #[cfg(test)]
 mod tests {
@@ -251,4 +244,11 @@ mod tests {
         assert!(native.contains("\r\nsetlocal\r\n"));
         assert!(native.contains("for %%I in (\"%~dp0..\") do set \"KUMI_HOME=%%~fI\""));
     }
+}
+/// Legacy probes require this file; native updates retain it so old rollback can return here.
+pub fn legacy_entry(app: &str) -> String {
+    join(app, "apps/kumi/bin/kumi.mjs")
+}
+pub fn has_app(app: &str) -> bool {
+    Path::new(&join(app, &executable_name("kumi"))).is_file() || Path::new(&legacy_entry(app)).is_file()
 }

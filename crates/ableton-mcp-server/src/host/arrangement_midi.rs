@@ -33,7 +33,7 @@ fn midi_args(p: &Value) -> Result<Vec<Value>, String> {
     }
     let fields = ["trackRef", "start", "length", "notes", "name", "looping"];
     let rows = if p.get("clips").is_some() {
-        if !has_only(p, &["clips"]) || p["clips"].as_array().is_none_or(|a| a.is_empty()) {
+        if !has_only(p, &["clips"]) || !p["clips"].as_array().is_some_and(|a| !a.is_empty()) {
             return Err("give one clip's trackRef, start, length and notes, or clips: a list of them".into());
         }
         p["clips"].as_array().unwrap().clone()
@@ -400,7 +400,7 @@ impl McpHost {
             return Ok(None);
         };
         Ok(Some(js_json::stringify(
-            &json!({"track":[track.ref_,track.object_identity,track.name],"clips":self.arrangement_fence(s,std::slice::from_ref(reference))?}),
+            &json!({"track":[track.ref_,track.object_identity,track.name],"clips":self.arrangement_fence(s,&[reference.clone()])?}),
         )))
     }
     pub async fn live_clip_clear_range_preview_async(&self, id: &Value, p: &Value) -> Value {

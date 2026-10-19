@@ -322,7 +322,7 @@ pub fn line(timing: &TurnTiming, elapsed_ms: u64, stop: Value, usage: Option<&Us
     }
     // The three tools that took longest, longest first: what a slow turn waited on.
     let mut slowest: Vec<_> = timing.by_tool.iter().collect();
-    slowest.sort_by_key(|a| std::cmp::Reverse(a.1 .1));
+    slowest.sort_by(|a, b| b.1 .1.cmp(&a.1 .1));
     if !slowest.is_empty() {
         line["slowTools"] =
             json!(slowest.into_iter().take(3).map(|(tool, (calls, ms))| json!({"tool":tool,"calls":calls,"ms":ms})).collect::<Vec<_>>());

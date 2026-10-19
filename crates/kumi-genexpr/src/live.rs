@@ -47,12 +47,6 @@ pub struct Live {
     pub played: bool,
 }
 
-impl Default for Live {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Live {
     pub fn new() -> Live {
         Live {
@@ -91,7 +85,7 @@ impl Live {
     /// One sample: what plugphasor~ and plugsync~ (position, play flag, tempo) say, and where the song truly is;
     /// then the song moves on.
     pub fn tick(&mut self) -> ([f64; 4], f64) {
-        let first = self.sample.is_multiple_of(VECTOR);
+        let first = self.sample % VECTOR == 0;
         let was_playing = self.playing;
         if first {
             for change in std::mem::take(&mut self.pending) {
@@ -229,7 +223,7 @@ pub fn run_tracing(
     let mut steps = Vec::new();
     let mut positions = Vec::new();
     for _ in 0..samples {
-        if live.sample.is_multiple_of(VECTOR) {
+        if live.sample % VECTOR == 0 {
             between(device, live, live.sample);
         }
         let sample = live.sample;

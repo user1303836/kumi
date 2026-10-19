@@ -626,7 +626,7 @@ async fn every_conversation_kumi_1_16_3_kept_is_still_kept() {
         };
         let before = make(&dir.path().join("before"));
         let now = make(&dir.path().join("now"));
-        kumi_1_16_3::trim(before.parent().unwrap());
+        kumi_1_16_3::trim(&before.parent().unwrap().to_path_buf());
         create_conversation_store_keeping(dir.path().join("now"), Some(keep_days)).tidy(A).await.unwrap();
         let old: BTreeSet<String> = kumi_1_16_3::names(&before).into_iter().collect();
         let new: BTreeSet<String> = kumi_1_16_3::names(&now).into_iter().collect();

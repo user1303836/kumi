@@ -286,7 +286,7 @@ pub fn parse_live_registry(text: &str) -> Result<LiveRegistry, RegistryError> {
                 break;
             };
             let length = js_string::utf16_len(id);
-            if !(1..=128).contains(&length) {
+            if length < 1 || length > 128 {
                 ok = false;
                 break;
             }

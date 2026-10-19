@@ -547,7 +547,7 @@ pub fn live_user_library(env: &Env) -> Option<String> {
             configs.push((file, mtime));
         }
     }
-    configs.sort_by_key(|a| std::cmp::Reverse(a.1));
+    configs.sort_by(|a, b| b.1.cmp(&a.1));
     static USER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<UserLibrary>(.*?)</UserLibrary>").unwrap());
     for (file, _) in configs {
         let text = std::fs::read_to_string(file).ok()?;

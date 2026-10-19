@@ -168,7 +168,7 @@ fn opened_versions(settings: &str) -> Vec<(u32, String)> {
             Some((found[2].parse().ok()?, found[1].to_string()))
         })
         .collect();
-    opened.sort_by_key(|a| std::cmp::Reverse(a.0));
+    opened.sort_by(|a, b| b.0.cmp(&a.0));
     opened
 }
 

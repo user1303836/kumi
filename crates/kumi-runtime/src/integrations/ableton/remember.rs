@@ -174,7 +174,7 @@ impl Remember {
         *self.timer.borrow_mut() = Some(stop.clone());
         let weak = Rc::downgrade(self);
         tokio::task::spawn_local(async move {
-            tokio::select! {biased;_=stop.cancelled()=>{},_=tokio::time::sleep(Duration::from_millis(delay))=>{if let Some(this)=weak.upgrade(){drop(this.save_now(None));}}}
+            tokio::select! {biased;_=stop.cancelled()=>{},_=tokio::time::sleep(Duration::from_millis(delay))=>{if let Some(this)=weak.upgrade(){let _=this.save_now(None);}}}
         });
     }
     /// The project of the saved Set `identity` at `path` (`project::decide_project`), from the id kept inside
@@ -252,10 +252,9 @@ impl Remember {
         else {
             return;
         };
-        // (the work runs spawned; the saving it hands back is kept by the queue)
-        drop(self.enqueue(move|this|async move{
+        let _ = self.enqueue(move|this|async move{
    let connection=&this.connection;let signal=abort::any([connection.lifetime.clone(),abort::timeout(60_000)]);connection.ensure_catalog(signal.clone()).await.map_err(RuntimeError::from)?;
-   if !["live_project_info","live_project_snapshot_export","live_project_snapshot_diff"].iter().all(|name|connection.has(name)){return Ok(())}if this.current().is_none_or(|p| p.identity != identity){return Ok(())}
+   if !["live_project_info","live_project_snapshot_export","live_project_snapshot_diff"].iter().all(|name|connection.has(name)){return Ok(())}if !this.current().is_some_and(|p|p.identity==identity){return Ok(())}
    let pages=this.export_pages(signal.clone()).await?;
    if !this.still_open(&identity,signal.clone()).await{return Ok(())}
    // This Set's own baseline, or, when it moved here, the project's latest: a version first seen here starts fresh.
@@ -272,7 +271,7 @@ impl Remember {
     }
    }
    store.save(&project,&Baseline{version:1,path,name,saved_at:connection.now().timestamp_millis(),artifact_id:artifact_of(&pages)?,pages}).await?;this.last_saved.set(kumi_common::time::now_ms());Ok(())
-  }.boxed_local()));
+  }.boxed_local());
     }
 }
 fn artifact_of(pages: &[JsonObject]) -> Result<String, RuntimeError> {

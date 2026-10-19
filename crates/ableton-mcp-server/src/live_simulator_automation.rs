@@ -229,7 +229,7 @@ impl DeterministicLiveSimulator {
                         json!({"created":true})
                     }
                     "automation.envelope.delete" => {
-                        if clip.get_mut("envelopes").and_then(Value::as_object_mut).is_none_or(|o| o.remove(parameter).is_none()) {
+                        if !clip.get_mut("envelopes").and_then(Value::as_object_mut).is_some_and(|o| o.remove(parameter).is_some()) {
                             return Err(LiveError::error("envelope does not exist"));
                         }
                         json!({"deleted":true})

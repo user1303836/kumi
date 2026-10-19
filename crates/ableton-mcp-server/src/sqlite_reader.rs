@@ -207,7 +207,7 @@ impl SqliteReader {
         }
         let page_size_raw = be_u16(&bytes, 16) as usize;
         let page_size = if page_size_raw == 1 { 65536 } else { page_size_raw };
-        if !(512..=65536).contains(&page_size) || page_size & (page_size - 1) != 0 {
+        if page_size < 512 || page_size > 65536 || page_size & (page_size - 1) != 0 {
             return Err(fail("sqlite page size is invalid"));
         }
         let write_version = bytes[18];
@@ -227,7 +227,7 @@ impl SqliteReader {
             return Err(fail("sqlite text encoding is unsupported; UTF-8 is required"));
         }
         let page_count = be_u32(&bytes, 28);
-        if !(1..=MAX_PAGES).contains(&page_count) {
+        if page_count < 1 || page_count > MAX_PAGES {
             return Err(fail("sqlite page count is invalid"));
         }
         let expected = page_count as usize * page_size;

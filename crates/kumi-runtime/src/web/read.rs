@@ -57,7 +57,7 @@ fn size_words(bytes: usize) -> String {
     }
 }
 fn file_name(path: &str) -> Option<String> {
-    path.split('/').rfind(|s| !s.is_empty()).and_then(decode).filter(|s| !s.is_empty())
+    path.split('/').filter(|s| !s.is_empty()).last().and_then(decode).filter(|s| !s.is_empty())
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PictureSize {
@@ -187,7 +187,7 @@ pub fn max_patch_summary(root: &Value) -> Option<String> {
     }
     if !objects.is_empty() {
         let mut objects: Vec<_> = objects.into_iter().collect();
-        objects.sort_by_key(|a| std::cmp::Reverse(a.1));
+        objects.sort_by(|a, b| b.1.cmp(&a.1));
         lines.push(format!(
             "Made of: {}.",
             objects

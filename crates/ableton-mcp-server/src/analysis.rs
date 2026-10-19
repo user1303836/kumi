@@ -591,7 +591,7 @@ fn analyze_pcm_internal(
     if !is_integer(channels) || channels < 1.0 || channels > MAX_ANALYSIS_CHANNELS as f64 {
         return Err(RangeError(format!("channels must be an integer from 1 to {MAX_ANALYSIS_CHANNELS}")));
     }
-    if !is_integer(frame_size) || !(256.0..=4096.0).contains(&frame_size) {
+    if !is_integer(frame_size) || frame_size < 256.0 || frame_size > 4096.0 {
         return Err(RangeError("frameSize must be an integer from 256 to 4096".to_string()));
     }
     let sample_count = input.samples.len();
@@ -601,7 +601,7 @@ fn analyze_pcm_internal(
     let sample_rate = input.sample_rate;
     let channels = channels as usize;
     let frame_size = frame_size as usize;
-    if !sample_count.is_multiple_of(channels) {
+    if sample_count % channels != 0 {
         return Err(RangeError("samples must contain complete channel frames".to_string()));
     }
     if sample_count as f64 / channels as f64 / sample_rate > MAX_ANALYSIS_SECONDS {
@@ -839,7 +839,7 @@ pub fn decode_float32_le(base64: &str) -> Result<Vec<f32>, RangeError> {
         return Err(RangeError("pcmBase64 must contain bounded float32 PCM".to_string()));
     }
     let mut result = Vec::with_capacity(bytes.len() / 4);
-    for chunk in bytes.as_chunks::<4>().0 {
+    for chunk in bytes.chunks_exact(4) {
         let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         if !sample.is_finite() || !(-1.0..=1.0).contains(&sample) {
             return Err(RangeError("pcmBase64 must contain finite normalized float32 PCM".to_string()));

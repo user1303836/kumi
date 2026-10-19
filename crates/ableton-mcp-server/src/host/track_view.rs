@@ -125,7 +125,7 @@ impl McpHost {
             let adapter = self.async_adapter();
             let context = self.transaction_context(p, signal, AUDITION_DEADLINE_MS);
             if !reconcile {
-                let snapshot = self.views.view_for(Some(&context), std::slice::from_ref(reference), None, &[]).await?;
+                let snapshot = self.views.view_for(Some(&context), &[reference.clone()], None, &[]).await?;
                 if track(&snapshot, reference).is_none_or(|r| json!(fence(reference, &r)) != t["fence"]) {
                     return Ok(transaction_error(id, "track identity or view state changed since preview; preview again"));
                 }
@@ -142,7 +142,7 @@ impl McpHost {
                 confirmed(&result, "changed", "track view change was not confirmed")?;
             }
             if payload["selectInstrument"] == true {
-                let snapshot = self.views.view_for(Some(&context), std::slice::from_ref(reference), None, &[]).await?;
+                let snapshot = self.views.view_for(Some(&context), &[reference.clone()], None, &[]).await?;
                 let track = track(&snapshot, reference);
                 let mut args = json!({"ref":reference});
                 if let Some(identity) = track.as_ref().and_then(|t| t.get("objectIdentity")) {
@@ -153,7 +153,7 @@ impl McpHost {
                 confirmed(&result, "done", "instrument selection was not confirmed")?;
             }
             if edits {
-                let snapshot = self.views.view_for(Some(&context), std::slice::from_ref(reference), None, &[]).await?;
+                let snapshot = self.views.view_for(Some(&context), &[reference.clone()], None, &[]).await?;
                 let verified = track(&snapshot, reference);
                 for (f, row) in FIELDS {
                     if let Some(v) = payload.get(*f) {

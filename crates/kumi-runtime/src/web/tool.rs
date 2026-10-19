@@ -317,7 +317,7 @@ impl WebTool {
         }
         let from = from as usize;
         let (mut end, mut size) = (from - 1, 0);
-        while end < total && (end == from - 1 || size + utf16_len(&lines[end]) < 24_000) {
+        while end < total && (end == from - 1 || size + utf16_len(&lines[end]) + 1 <= 24_000) {
             size += utf16_len(&lines[end]) + 1;
             end += 1;
         }

@@ -757,7 +757,7 @@ impl FileConversationStore {
                 imported,
             });
         }
-        rows.sort_by_key(|a| std::cmp::Reverse(a.saved_at));
+        rows.sort_by(|a, b| b.saved_at.cmp(&a.saved_at));
         rows
     }
     async fn write_meta(&self, place: &str, id: &str, meta: &Meta) -> Result<(), RuntimeError> {

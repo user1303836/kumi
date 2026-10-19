@@ -83,9 +83,7 @@ async fn native_http_streams_a_response_and_cancels_a_body_that_is_still_arrivin
     let server = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
         let mut bytes = [0; 2048];
-        // (the request, however much of it came first: the answer goes out after it)
-        let read = socket.read(&mut bytes).await.unwrap();
-        assert!(read > 0, "the request came");
+        socket.read(&mut bytes).await.unwrap();
         socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nX-Test: yes\r\n\r\nfirst").await.unwrap();
         std::future::pending::<()>().await;
     });

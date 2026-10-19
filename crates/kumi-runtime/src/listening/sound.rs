@@ -380,7 +380,7 @@ pub fn kit(pieces: &[(String, Heard)], tempo: f64) -> (Vec<Piece>, Vec<String>) 
             let mut peers: Vec<f64> = measured
                 .iter()
                 .filter(|other| other.centroid.is_some_and(|other| (other / centre).log2().abs() <= 2.))
-                .filter_map(value)
+                .filter_map(|other| value(other))
                 .collect();
             if peers.len() < 3 {
                 continue;

@@ -138,7 +138,7 @@ fn grouped(value: usize) -> String {
     let text = value.to_string();
     let mut out = String::new();
     for (i, c) in text.chars().enumerate() {
-        if i > 0 && (text.len() - i).is_multiple_of(3) {
+        if i > 0 && (text.len() - i) % 3 == 0 {
             out.push(',');
         }
         out.push(c);
@@ -426,7 +426,7 @@ impl LibraryTool {
                         }
                     })
                     .collect();
-                candidates.sort_by_key(|a| std::cmp::Reverse(a.mtime));
+                candidates.sort_by(|a, b| b.mtime.cmp(&a.mtime));
                 candidates.first().copied()
             };
             let entry = entries.iter().find(|e| Some(&e.path) == path.as_ref()).or_else(|| newest(true)).or_else(|| newest(false));

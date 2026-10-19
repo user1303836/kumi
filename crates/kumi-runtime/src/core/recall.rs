@@ -286,7 +286,7 @@ impl KernelTool for Recall {
                 }
             }
         }
-        techniques.sort_by_key(|a| std::cmp::Reverse(a.0));
+        techniques.sort_by(|a, b| b.0.cmp(&a.0));
         let mut recipes = vec![];
         if let Some(store) = &self.0.recipes {
             for recipe in store.list().await? {
@@ -298,7 +298,7 @@ impl KernelTool for Recall {
                 }
             }
         }
-        recipes.sort_by_key(|a| std::cmp::Reverse(a.0));
+        recipes.sort_by(|a, b| b.0.cmp(&a.0));
         if found.is_empty() && techniques.is_empty() && recipes.is_empty() {
             return Ok(ToolResult::text(format!(
                 "Nothing kept from before holds those words ({}). Other words may find it: a device, a track's name, what the sound was for.",

@@ -691,7 +691,7 @@ async fn what_an_unsaved_set_kept_is_written_once_its_saved_and_its_ops_carry_on
             let history = SetHistory::default();
             let clip: Captured = serde_json::from_value(verse()).unwrap();
             let unsaved = CurrentProject { path: None, project: None, unsaved: true, ..project() };
-            history.keep(Some(&store), Some(&unsaved), std::slice::from_ref(&clip), "Deleted Verse", json!({}), 1);
+            history.keep(Some(&store), Some(&unsaved), &[clip.clone()], "Deleted Verse", json!({}), 1);
             // The producer saves: the next observation finds the project id.
             history.identified(Some(&store), Some(&project()));
             history.keep(Some(&store), Some(&project()), &[clip], "Deleted Verse again", json!({}), 2);

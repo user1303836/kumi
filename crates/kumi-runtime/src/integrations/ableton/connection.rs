@@ -770,7 +770,7 @@ impl LiveConnection {
             let signal = abort::any([self.lifetime.clone(), abort::timeout(3000)]);
             let count = self.transport_reads.get();
             self.transport_reads.set(count + 1);
-            if count.is_multiple_of(8) && self.has("live_song_state") {
+            if count % 8 == 0 && self.has("live_song_state") {
                 let song = self.call("live_song_state", JsonObject::new(), signal.clone()).await.ok();
                 let state = match song.filter(|s| s.is_error != Some(true)) {
                     Some(song) => context::payload(&song)?,

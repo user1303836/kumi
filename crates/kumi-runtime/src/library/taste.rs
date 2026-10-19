@@ -335,7 +335,7 @@ pub fn build_taste(sets: &[SetSummary], now: Option<i64>) -> Taste {
         }
     }
     let mut sorted: Vec<_> = by_role.iter().collect();
-    sorted.sort_by_key(|a| std::cmp::Reverse(a.1.len()));
+    sorted.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
     for (role, list) in sorted {
         if list.len() < 2 {
             continue;

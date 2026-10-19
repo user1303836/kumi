@@ -119,7 +119,8 @@ impl McpHost {
                 payload[field] = Value::Null;
             }
 
-            let fence = if to_arrangement {
+            let fence;
+            if to_arrangement {
                 payload["arrangementPosition"] = params["arrangementPosition"].clone();
                 let track = &source.track.as_ref().unwrap()["ref"];
                 // Live cuts what a copy lands on, and a copy that splits or covers a clip fails after the cut, so
@@ -142,12 +143,12 @@ impl McpHost {
                 }
                 payload["expectedTargetCollectionRevision"] =
                     json!(self.arrangement_collection_revision(&snapshot, track.as_str().unwrap())?);
-                js_json::stringify(&json!({
+                fence = js_json::stringify(&json!({
                 "arrangement":self.arrangement_fence(&snapshot,
-                std::slice::from_ref(track))?,
+                &[track.clone()])?,
                 "sourceAuthority":authority,
                 "sourceFingerprint":fingerprint}
-                ))
+                ));
             } else {
                 let snapshot = serde_json::to_value(&snapshot).unwrap();
                 let (track, target, scene) = target_rows(&snapshot, &params["targetTrackRef"], &params["targetSceneIndex"]);
@@ -172,8 +173,8 @@ impl McpHost {
                 payload["expectedTargetSlotIdentity"] = target["objectIdentity"].clone();
                 payload["expectedTargetSceneRef"] = scene["ref"].clone();
                 payload["expectedTargetSceneIdentity"] = scene["objectIdentity"].clone();
-                target_fence(&authority, &fingerprint, &track, &target, &scene)
-            };
+                fence = target_fence(&authority, &fingerprint, &track, &target, &scene);
+            }
 
             let t = json!({
             "id":tempo::transaction_id("clipdup"),

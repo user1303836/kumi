@@ -255,7 +255,7 @@ pub fn estimate_key(notes: &[KeyEstimateNote]) -> KeyEstimate {
         .collect();
     let best = scored.first().map_or(0.0, |candidate| candidate.score);
     let second = scored.get(1).map_or(0.0, |candidate| candidate.score);
-    let insufficient = note_count < 3 || !(3..10).contains(&pitch_class_count) || best < EVIDENCE_FLOOR;
+    let insufficient = note_count < 3 || pitch_class_count < 3 || pitch_class_count >= 10 || best < EVIDENCE_FLOOR;
     let ambiguous = !insufficient
         && best - second < AMBIGUITY_MARGIN
         && (scored.first().map_or(0.0, |candidate| candidate.tonic_evidence)

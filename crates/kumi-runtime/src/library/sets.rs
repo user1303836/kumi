@@ -409,7 +409,8 @@ impl TagHandler for Reader {
         if self.clip.as_ref().is_some_and(|clip| depth == clip.depth) {
             self.clip = None;
         }
-        if let Some(mut inner) = self.devices.pop_if(|inner| depth == inner.depth) {
+        if self.devices.last().is_some_and(|inner| depth == inner.depth) {
+            let mut inner = self.devices.pop().unwrap();
             for open in &mut self.devices {
                 open.names.insert(inner.device.name.clone());
             }

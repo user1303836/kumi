@@ -627,7 +627,7 @@ impl Observer {
                 .unwrap_or_else(|| "(unnamed/unsaved)".into());
 
             let project = self.remember.current();
-            let new_set = project.as_ref().is_none_or(|p| p.identity != identity);
+            let new_set = !project.as_ref().is_some_and(|p| p.identity == identity);
             let mut path = if new_set { None } else { project.as_ref().and_then(|p| p.path.clone()) };
             // Never saved, as Live says (a saved Set whose file can't be found now has no path either).
             let mut unsaved = !new_set && project.as_ref().is_some_and(|p| p.unsaved);

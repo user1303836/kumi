@@ -26,7 +26,6 @@ fn normalize_paths(value: &mut Value) {
                     if let Some(path) = value.as_str() {
                         let root = std::env::temp_dir().to_string_lossy().trim_end_matches(std::path::MAIN_SEPARATOR).to_owned();
                         if let Some(relative) = path.strip_prefix(&root) {
-                            #[allow(clippy::regex_creation_in_loops)] // (a test's few rows)
                             let suffix =
                                 regex::Regex::new(r"kumi-simulated-render-\d+-").unwrap().replace(relative, "kumi-simulated-render-$$pid-");
                             *value = json!(format!("$tmp{suffix}").replace('\\', "/"));

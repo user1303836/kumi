@@ -180,9 +180,10 @@ async fn ask_newest(env: &Env, fetch: Rc<dyn Fetch>) -> (String, AskedRelease) {
     let usual = release_base(env);
     if env.get("KUMI_RELEASES").is_none_or(|s| s.is_empty()) {
         if let Some(base) = newest_release_base(&fetch).await {
-            // The usual way goes over the same network: no second wait for the same failure.
-            if let asked @ (AskedRelease::Manifest(_) | AskedRelease::Offline(..)) = ask_release_at(&base, Some(fetch.clone())).await {
-                return (base, asked);
+            match ask_release_at(&base, Some(fetch.clone())).await {
+                // The usual way goes over the same network: no second wait for the same failure.
+                asked @ (AskedRelease::Manifest(_) | AskedRelease::Offline(..)) => return (base, asked),
+                _ => {}
             }
         }
     }
@@ -285,9 +286,9 @@ pub fn not_yours(home: &str) -> Option<String> {
         if me == 0 {
             return None;
         }
-        std::iter::once(home.to_string())
+        return std::iter::once(home.to_string())
             .chain(["app", "app.previous", "app.previous.old", "app.new", "app.rollback", "bin", "downloads"].map(|part| join(home, part)))
-            .find(|path| fs::symlink_metadata(path).is_ok_and(|m| m.uid() != me))
+            .find(|path| fs::symlink_metadata(path).is_ok_and(|m| m.uid() != me));
     }
     #[cfg(not(unix))]
     {

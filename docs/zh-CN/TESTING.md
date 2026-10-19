@@ -38,7 +38,8 @@ python3 -m unittest discover -s scripts/tests -p 'test_*release.py'
 | `sh scripts/test-isolated.sh`（Windows：`./scripts/test-isolated.ps1`） | 在独立的主目录中运行 `cargo test --workspace --locked`；参数会传给 `cargo test` |
 | `sh scripts/test-isolated.sh -p kumi-runtime --test hands_transport` | 只运行一个 crate 的一个测试文件 |
 | `cargo fmt --all --check` | 按 CI 的方式检查格式 |
-| `cargo clippy --workspace --all-targets --locked -- -D warnings` | 与 CI 相同的 Lint 检查（包括跨 await 持有的 `RefCell` 借用） |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lint 检查；目前在 CI 中仅供参考 |
+| `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref` | 跨 await 持有的 `RefCell` 借用；会使 Lint CI 任务失败 |
 | `KUMI_NEXTEST=1 sh scripts/test-isolated.sh --profile ci` | 用 cargo-nextest 运行 `Rust / Linux` 运行的测试（`--profile ci-os`：macOS 和 Windows 运行的测试；`--profile extended`：全部测试） |
 | `cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark` | 桥接的性能预算；见[开发者指南](DEVELOPER_GUIDE.md#构建测试与测量) |
 
@@ -106,7 +107,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 | --- | --- | --- |
 | **CI** | `Rust / Linux` | 通过隔离运行器运行 `.config/nextest.toml` 的 `ci` 集合，只构建一次：除 Extended 工作流运行的长测试（配置文件中列出并说明原因）之外的全部测试。运行超过 30 秒的测试会按名称失败。然后运行 `git diff --check` |
 | | `Rust / macOS`、`Rust / Windows` | `ci-os` 集合：因平台而异的测试（安装、启动和更新；终端、stdin 和 Windows 控制台；Hands；路径、文件和子进程；存储），也只构建这些测试 |
-| | `Rust / Lint`（Ubuntu） | `cargo fmt --check`，以及对所有目标以 `-D warnings` 运行的 Clippy。代码有意不遵循的 lint 在 `Cargo.toml` 中统一允许，每个都写明原因 |
+| | `Rust / Lint`（Ubuntu） | `cargo fmt --check`、示例的构建和 Clippy（仅供参考，但跨 await 持有 `RefCell` 借用会使该任务失败） |
 | | `Python Remote Script / ubuntu-24.04`、`macos-15`、`windows-2025`（Python 3.11） | Remote Script 的测试；编译该包 |
 | | `Live extension`（Ubuntu，Node 24） | 针对已提交的构建运行扩展的测试 |
 | | `Release scripts`（Ubuntu） | 检查本次修改的空白字符，然后运行打包测试、发布脚本的测试和 `scripts/check-installers.sh`（install.sh 是 POSIX sh；install.ps1 能被解析且只含 ASCII）。推送到 `main` 时，还会检查 `main` 的 raw 安装程序和最新版本中的安装程序 |

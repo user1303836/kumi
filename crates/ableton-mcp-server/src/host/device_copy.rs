@@ -75,7 +75,7 @@ impl McpHost {
                 return Ok(transaction_error(id, "Live connection epoch changed; preview again"));
             }
             let context = self.transaction_context(p, signal, reads::AUDITION_DEADLINE_MS);
-            let snapshot = self.views.view_for(Some(&context), std::slice::from_ref(reference), None, &[]).await?;
+            let snapshot = self.views.view_for(Some(&context), &[reference.clone()], None, &[]).await?;
             let current = self.device_row(&snapshot, reference.as_str().unwrap())?;
             if json!(copy_fence(reference, &current)) != t["fence"] {
                 return Ok(transaction_error(id, "the device or its chain changed since the preview; preview again"));

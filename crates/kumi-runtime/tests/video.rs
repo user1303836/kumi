@@ -1,7 +1,4 @@
 //! Video watching, with complete-result caption and moment oracles.
-// A test drives one task at a time and holds its fake's state across its own awaits; nothing else borrows it then.
-// (Kumi's own code holds no RefCell across an await: CI's clippy denies it there.)
-#![allow(clippy::await_holding_refcell_ref)]
 use futures::FutureExt;
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_runtime::video::{

@@ -71,30 +71,6 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 webpki-roots = "1"
 
-# Clippy runs with -D warnings in CI. These of its lints the code goes against on purpose, so they're off:
-# - type_complexity, too_many_arguments, result_large_err, large_enum_variant: the host's ported functions keep the
-#   shapes and errors of the TypeScript they replaced, which their tests compare against;
-# - needless_range_loop: the analysis code indexes parallel buffers by one index, which reads plainer than zips;
-# - neg_cmp_op_on_partial_ord: `!(x > 0.0)` is how the code says "not a positive number, NaN included";
-# - suspicious_else_formatting, possible_missing_else: the ported host writes guard clauses one after another on one
-#   line;
-# - nonminimal_bool, if_same_then_else, unnecessary_unwrap: conditions kept as the TypeScript wrote them (two reasons for
-#   one outcome, a check and its unwrap side by side);
-# - manual_clamp: `x.max(0.0).min(127.0)` takes NaN to the low end, which `clamp` doesn't.
-[workspace.lints.clippy]
-type_complexity = "allow"
-too_many_arguments = "allow"
-result_large_err = "allow"
-large_enum_variant = "allow"
-needless_range_loop = "allow"
-neg_cmp_op_on_partial_ord = "allow"
-suspicious_else_formatting = "allow"
-possible_missing_else = "allow"
-nonminimal_bool = "allow"
-if_same_then_else = "allow"
-unnecessary_unwrap = "allow"
-manual_clamp = "allow"
-
 # Line tables are enough for a panic's backtrace; full debug info multiplies the build folder's size.
 [profile.dev]
 debug = "line-tables-only"

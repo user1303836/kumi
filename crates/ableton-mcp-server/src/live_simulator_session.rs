@@ -122,7 +122,7 @@ impl DeterministicLiveSimulator {
                 let set_name = string_arg(args, "setName")?;
                 let launch = operation == "session.audition-launch";
                 let playback = if launch {
-                    if args.get("sceneName").and_then(Value::as_str).is_none_or(|s| kumi_common::js::string::utf16_len(s) > 256) {
+                    if !args.get("sceneName").and_then(Value::as_str).is_some_and(|s| kumi_common::js::string::utf16_len(s) <= 256) {
                         return Err(LiveError::type_error("sceneName must be a string of at most 256 characters"));
                     }
                     ranged_number(args.get("sceneIndex").unwrap_or(&Value::Null), 0., 10_000., true, "sceneIndex is invalid")?;

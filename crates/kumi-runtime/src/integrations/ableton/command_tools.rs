@@ -1644,16 +1644,6 @@ fn raw_harmonics(value: &Value) -> Result<Option<Vec<f64>>, CommandError> {
         _ => None,
     })
 }
-/// A track's ref, by its ref or else its name, among `rows` (a read of the Set's tracks).
-fn track_ref_in(rows: &[JsonObject], named: &str) -> Result<String, CommandError> {
-    rows.iter()
-        .find(|r| r.get("ref").and_then(Value::as_str) == Some(named))
-        .or_else(|| rows.iter().find(|r| r.get("name").and_then(Value::as_str) == Some(named)))
-        .and_then(|r| r.get("ref"))
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or_else(|| ObservationError(format!("{named} isn't a track in this turn's discovery; discover it again.")).into())
-}
 
 #[cfg(test)]
 mod tests {
@@ -1668,4 +1658,14 @@ mod tests {
         assert_eq!(raw_harmonics(&json!({"length":3,"1":2})).unwrap(), Some(vec![0.0, 2.0, 0.0]), "a short one as it is");
         assert!(matches!(raw_harmonics(&json!({"length":4294967296.0})), Err(CommandError::Other(_))), "past u32's range, refused");
     }
+}
+/// A track's ref, by its ref or else its name, among `rows` (a read of the Set's tracks).
+fn track_ref_in(rows: &[JsonObject], named: &str) -> Result<String, CommandError> {
+    rows.iter()
+        .find(|r| r.get("ref").and_then(Value::as_str) == Some(named))
+        .or_else(|| rows.iter().find(|r| r.get("name").and_then(Value::as_str) == Some(named)))
+        .and_then(|r| r.get("ref"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| ObservationError(format!("{named} isn't a track in this turn's discovery; discover it again.")).into())
 }
