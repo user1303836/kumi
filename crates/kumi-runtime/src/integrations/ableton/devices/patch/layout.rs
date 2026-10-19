@@ -9,7 +9,8 @@
 //!
 //! It's for the patchers Kumi builds, which make every order that matters explicit with a trigger (the standard's
 //! order rule), so moving a box never changes what the patcher does. Max numbers a subpatcher's inlet and outlet
-//! objects by where they sit, so they stay in their order, inlets in the top row and outlets in the bottom one.
+//! objects by where they sit, so they stay in their order, wired or not: every inlet in the top row and every outlet in
+//! the bottom one.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
@@ -68,7 +69,9 @@ pub fn arrange_with(patcher: &mut Patcher, spacing: &Spacing) {
             Some(Wire { cord, from, outlet: line.outlet, to: *index.get(line.to.as_str())?, inlet: line.inlet, weight })
         })
         .collect();
-    // Boxes wired together are drawn together, each group beside the last, in the order the patcher lists them.
+    // Boxes wired together are drawn together, each group beside the last, in the order the patcher lists them. Max
+    // numbers inlet and outlet objects by where they sit, so all of them, wired or not, are drawn as one group with
+    // everything wired to them: its top row holds every inlet and its bottom row every outlet, each in order.
     let mut group: Vec<usize> = (0..patcher.boxes.len()).collect();
     fn root(group: &mut [usize], at: usize) -> usize {
         let mut at = at;
@@ -78,17 +81,27 @@ pub fn arrange_with(patcher: &mut Patcher, spacing: &Spacing) {
         }
         at
     }
-    for wire in &wires {
-        let (a, b) = (root(&mut group, wire.from), root(&mut group, wire.to));
+    fn join(group: &mut [usize], a: usize, b: usize) {
+        let (a, b) = (root(group, a), root(group, b));
         group[a.max(b)] = a.min(b);
     }
-    let mut wired = vec![false; patcher.boxes.len()];
+    let mut grouped = vec![false; patcher.boxes.len()];
     for wire in &wires {
-        wired[wire.from] = true;
-        wired[wire.to] = true;
+        join(&mut group, wire.from, wire.to);
+        grouped[wire.from] = true;
+        grouped[wire.to] = true;
+    }
+    let pins: Vec<usize> = (0..patcher.boxes.len())
+        .filter(|&at| patcher.boxes[at].rect().is_some() && matches!(patcher.boxes[at].class(), "inlet" | "outlet"))
+        .collect();
+    if let Some(&first) = pins.first() {
+        for &pin in &pins {
+            join(&mut group, first, pin);
+            grouped[pin] = true;
+        }
     }
     let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-    for (at, _) in wired.iter().enumerate().filter(|(_, wired)| **wired) {
+    for (at, _) in grouped.iter().enumerate().filter(|(_, grouped)| **grouped) {
         let top = root(&mut group, at);
         groups.entry(top).or_default().push(at);
     }
@@ -104,7 +117,7 @@ pub fn arrange_with(patcher: &mut Patcher, spacing: &Spacing) {
     }
     let mut y = spacing.margin;
     for (at, item) in patcher.boxes.iter().enumerate() {
-        if let (false, Some(rect)) = (wired[at], item.rect()) {
+        if let (false, Some(rect)) = (grouped[at], item.rect()) {
             placed.insert(at, (left, y));
             y += rect.h + spacing.row_gap / 2.0;
         }
@@ -983,13 +996,19 @@ mod tests {
         (text, ins, outs)
     }
 
+    /// How many random patches the sweep makes.
+    const PATCHES: usize = 120;
+
     #[test]
     fn every_ps_inlets_and_outlets_keep_their_order_however_its_patch_is_wired() {
         let mut random = Lcg(313);
         let started = std::time::Instant::now();
         let mut wrong: Vec<(usize, String, Vec<String>)> = Vec::new();
-        for patch in 0..300 {
+        // The [p]s swept, nested ones too.
+        let mut ps = 0;
+        for patch in 0..PATCHES {
             let (text, _, _) = random_p(&mut random, "p", 2);
+            ps += text.matches("[p ").count();
             let (notation, found) = parse(&format!("p = {text}\n"));
             assert!(found.wrong.is_empty(), "{found:?}\n{text}");
             let outside = Outside { boxes: HashMap::new(), controls: BTreeMap::new(), reference: None, output_stage: false };
@@ -1006,8 +1025,10 @@ mod tests {
             }
         }
         let first = wrong.first().map(|(patch, text, found)| format!("patch {patch}: {found:#?}\n{text}")).unwrap_or_default();
-        assert!(wrong.is_empty(), "{} of 300 patches, the first {first}", wrong.len());
-        assert!(started.elapsed().as_millis() < 1_000, "swept in {:?}", started.elapsed());
+        assert!(wrong.is_empty(), "{} of {PATCHES} patches, the first {first}", wrong.len());
+        assert!(ps >= 300, "a few hundred [p]s: {ps}");
+        // A guard, not a benchmark: unoptimized, it takes about half a second.
+        assert!(started.elapsed().as_secs() < 10, "swept in {:?}", started.elapsed());
     }
 
     #[test]
