@@ -9,7 +9,8 @@
 //!
 //! It's for the patchers Kumi builds, which make every order that matters explicit with a trigger (the standard's
 //! order rule), so moving a box never changes what the patcher does. Max numbers a subpatcher's inlet and outlet
-//! objects by where they sit, so they stay in their order, inlets in the top row and outlets in the bottom one.
+//! objects by where they sit, so they stay in their order, wired or not: every inlet in the top row and every outlet in
+//! the bottom one.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
@@ -68,7 +69,9 @@ pub fn arrange_with(patcher: &mut Patcher, spacing: &Spacing) {
             Some(Wire { cord, from, outlet: line.outlet, to: *index.get(line.to.as_str())?, inlet: line.inlet, weight })
         })
         .collect();
-    // Boxes wired together are drawn together, each group beside the last, in the order the patcher lists them.
+    // Boxes wired together are drawn together, each group beside the last, in the order the patcher lists them. Max
+    // numbers inlet and outlet objects by where they sit, so all of them, wired or not, are drawn as one group with
+    // everything wired to them: its top row holds every inlet and its bottom row every outlet, each in order.
     let mut group: Vec<usize> = (0..patcher.boxes.len()).collect();
     fn root(group: &mut [usize], at: usize) -> usize {
         let mut at = at;
@@ -78,17 +81,27 @@ pub fn arrange_with(patcher: &mut Patcher, spacing: &Spacing) {
         }
         at
     }
-    for wire in &wires {
-        let (a, b) = (root(&mut group, wire.from), root(&mut group, wire.to));
+    fn join(group: &mut [usize], a: usize, b: usize) {
+        let (a, b) = (root(group, a), root(group, b));
         group[a.max(b)] = a.min(b);
     }
-    let mut wired = vec![false; patcher.boxes.len()];
+    let mut grouped = vec![false; patcher.boxes.len()];
     for wire in &wires {
-        wired[wire.from] = true;
-        wired[wire.to] = true;
+        join(&mut group, wire.from, wire.to);
+        grouped[wire.from] = true;
+        grouped[wire.to] = true;
+    }
+    let pins: Vec<usize> = (0..patcher.boxes.len())
+        .filter(|&at| patcher.boxes[at].rect().is_some() && matches!(patcher.boxes[at].class(), "inlet" | "outlet"))
+        .collect();
+    if let Some(&first) = pins.first() {
+        for &pin in &pins {
+            join(&mut group, first, pin);
+            grouped[pin] = true;
+        }
     }
     let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-    for (at, _) in wired.iter().enumerate().filter(|(_, wired)| **wired) {
+    for (at, _) in grouped.iter().enumerate().filter(|(_, grouped)| **grouped) {
         let top = root(&mut group, at);
         groups.entry(top).or_default().push(at);
     }
@@ -104,7 +117,7 @@ pub fn arrange_with(patcher: &mut Patcher, spacing: &Spacing) {
     }
     let mut y = spacing.margin;
     for (at, item) in patcher.boxes.iter().enumerate() {
-        if let (false, Some(rect)) = (wired[at], item.rect()) {
+        if let (false, Some(rect)) = (grouped[at], item.rect()) {
             placed.insert(at, (left, y));
             y += rect.h + spacing.row_gap / 2.0;
         }
@@ -720,9 +733,15 @@ fn tracks(jogs: &mut [Jog], gaps: usize, lane: f64) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::devices::patch::check::{check, CORD_OVER_BOX, CORD_UPWARD};
-    use crate::devices::patch::{NoFiles, Patcher};
+    use crate::devices::amxd::DeviceType;
+    use crate::devices::gen::{instrument_patcher, GenSpec};
+    use crate::devices::patch::check::{check, BOXES_OVERLAP, CORD_OVER_BOX, CORD_UPWARD};
+    use crate::devices::patch::notation::{expand, parse, Outside};
+    use crate::devices::patch::{MaxBox, NoFiles, Patcher};
+    use crate::devices::patched::patched_device;
+    use crate::devices::spec::{MapSpec, PatchSpec};
     use serde_json::{json, Value};
+    use std::collections::BTreeMap;
 
     fn newobj(id: &str, text: &str, width: f64, ins: usize, outs: usize) -> Value {
         json!({ "box": { "id": id, "maxclass": "newobj", "text": text, "patching_rect": [500., 500., width, 22.], "numinlets": ins, "numoutlets": outs, "outlettype": vec![""; outs] } })
@@ -817,5 +836,234 @@ mod tests {
         assert_eq!(settle(&[10., 10.], &[1., 1.], &[20.]), vec![0., 20.], "two wanting one place share it");
         assert_eq!(settle(&[0., 100.], &[1., 1.], &[20.]), vec![0., 100.], "room enough: each where it wants");
         assert_eq!(settle(&[10., 10.], &[3., 1.], &[20.]), vec![5., 25.], "the heavier keeps nearer");
+    }
+
+    /// Each patcher in `patcher`, at any depth, whose inlet objects (or outlet objects), left to right as Max numbers
+    /// them, aren't 1, 2, 3… in the order they were made (their index).
+    fn misnumbered(patcher: &Patcher, at: &str) -> Vec<String> {
+        let mut wrong = Vec::new();
+        for class in ["inlet", "outlet"] {
+            let mut pins: Vec<(f64, u64)> = patcher
+                .boxes
+                .iter()
+                .filter(|item| item.maxclass() == class)
+                .map(|item| (item.rect().expect("placed").x, item.fields["index"].as_u64().expect("made with its index")))
+                .collect();
+            pins.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let apart = pins.windows(2).all(|pair| pair[0].0 < pair[1].0);
+            if !apart || pins.iter().enumerate().any(|(n, pin)| pin.1 != n as u64 + 1) {
+                wrong.push(format!("{at}: {class}s left to right (x, index) {pins:?}"));
+            }
+        }
+        for item in &patcher.boxes {
+            if let Some(inner) = &item.patcher {
+                wrong.extend(misnumbered(inner, &format!("{at} › {}", item.id())));
+            }
+        }
+        wrong
+    }
+
+    fn patched(kind: DeviceType, patch: &str, sources: usize) -> (Patcher, crate::devices::findings::Findings) {
+        let map = MapSpec { sources: (1..=sources).map(|n| format!("Mod {n}")).collect(), ..MapSpec::default() };
+        let spec = PatchSpec { kind, name: "Pins".into(), about: "A [p].".into(), controls: vec![], patch: patch.into(), map };
+        let (document, found) = patched_device(&spec, None);
+        (Patcher::read(&document, &NoFiles), found)
+    }
+
+    #[test]
+    fn a_ps_inlets_and_outlets_keep_the_order_written_whatever_they_are_wired_to() {
+        let outside = "in.0 -> inner\nin.1 -> inner.1\ninner -> out.0\ninner.1 -> out.1\n";
+        // Two chains apart, the boxes of the one written second written first.
+        let apart = concat!(
+            "inner = [p inner] {\n",
+            "  a = [*~ 0.5]\n",
+            "  b = [*~ 0.25]\n",
+            "  [inlet] -> b -> [outlet]\n",
+            "  [inlet] -> a -> [outlet]\n",
+            "}\n",
+        );
+        // An inlet and an outlet wired to nothing, each written before one that is.
+        let loose = concat!(
+            "inner = [p inner] {\n",
+            "  first = [inlet]\n",
+            "  second = [inlet]\n",
+            "  spare = [outlet]\n",
+            "  second -> [*~ 0.5] -> [outlet]\n",
+            "}\n",
+        );
+        // Crossed: the first inlet to the second outlet, the second to the first.
+        let crossed = concat!(
+            "inner = [p inner] {\n",
+            "  one = [inlet]\n",
+            "  two = [inlet]\n",
+            "  left = [outlet]\n",
+            "  right = [outlet]\n",
+            "  one -> [*~ 0.5] -> right\n",
+            "  two -> [*~ 0.25] -> left\n",
+            "}\n",
+        );
+        let mut wrong = Vec::new();
+        for (called, patch) in [("apart", apart), ("loose", loose), ("crossed", crossed)] {
+            let (patcher, found) = patched(DeviceType::AudioEffect, &format!("{patch}{outside}"), 0);
+            assert!(found.wrong.is_empty() && found.changed.is_empty() && found.notes.is_empty(), "{called}: {found:?}");
+            wrong.extend(misnumbered(&patcher, called));
+        }
+        assert_eq!(wrong, Vec::<String>::new());
+    }
+
+    /// A small seeded generator, so the sweep is the same each run.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            ((self.0 >> 33) % n as u64) as usize
+        }
+    }
+
+    /// A [p] named `name` holding inlets, outlets and boxes between, written in a random order: chains from inlets to
+    /// outlets that cross, join and skip rows, pins wired to nothing, sometimes a loop, and (while `depth` lasts) a [p]
+    /// in it. Its notation, and its inlets and outlets.
+    fn random_p(random: &mut Lcg, name: &str, depth: usize) -> (String, usize, usize) {
+        let (ins, outs, middle) = (1 + random.below(4), 1 + random.below(4), random.below(7));
+        // Each box: its name, its notation, and its inlets and outlets (an object's are as many as its cords use). The
+        // inlets first, then the outlets, then the boxes between.
+        let mut boxes: Vec<(String, String, usize, usize)> = Vec::new();
+        for n in 0..ins {
+            boxes.push((format!("{name}_i{n}"), "[inlet]".into(), 0, 1));
+        }
+        for n in 0..outs {
+            boxes.push((format!("{name}_o{n}"), "[outlet]".into(), 1, 0));
+        }
+        for n in 0..middle {
+            let own = format!("{name}_m{n}");
+            if depth > 0 && random.below(3) == 0 {
+                let (text, i, o) = random_p(random, &own, depth - 1);
+                boxes.push((own, text, i, o));
+            } else {
+                boxes.push((own, ["[*~ 0.5]", "[+ 1]", "[t b b]", "[pack 0 0]"][random.below(4)].into(), 2, 2));
+            }
+        }
+        let pins = ins + outs;
+        let mut cords: Vec<(usize, usize, usize, usize)> = Vec::new();
+        let mut wire = |random: &mut Lcg, from: usize, to: usize| {
+            cords.push((from, random.below(boxes[from].3), to, random.below(boxes[to].2)));
+        };
+        // What a box feeds: an outlet, or a box between that comes after it.
+        let next = |random: &mut Lcg, from: usize| -> usize {
+            let first = (from + 1).max(pins);
+            let pick = random.below(outs + boxes.len() - first);
+            if pick < outs {
+                ins + pick
+            } else {
+                first + pick - outs
+            }
+        };
+        let mut fed = vec![false; boxes.len()];
+        for from in (0..ins).chain(pins..boxes.len()) {
+            // An inlet left unwired now and then; a box between feeds one or two.
+            let count = if from < ins { usize::from(random.below(5) > 0) } else { 1 + random.below(2) };
+            for _ in 0..count {
+                let to = next(random, from);
+                fed[to] = true;
+                wire(random, from, to);
+            }
+        }
+        if middle >= 2 && random.below(3) == 0 {
+            // A loop: a box feeds the last one, which feeds it back.
+            let (a, b) = (pins + random.below(middle - 1), boxes.len() - 1);
+            wire(random, a, b);
+            wire(random, b, a);
+        }
+        for outlet in ins..pins {
+            if !fed[outlet] && random.below(5) > 0 {
+                let from = random.below(ins + middle);
+                wire(random, if from < ins { from } else { from + outs }, outlet);
+            }
+        }
+        let mut order: Vec<usize> = (0..boxes.len()).collect();
+        for at in (1..order.len()).rev() {
+            order.swap(at, random.below(at + 1));
+        }
+        let mut text = format!("[p {name}] {{\n");
+        for at in order {
+            text.push_str(&format!("{} = {}\n", boxes[at].0, boxes[at].1));
+        }
+        for (from, outlet, to, inlet) in cords {
+            text.push_str(&format!("{}.{outlet} -> {}.{inlet}\n", boxes[from].0, boxes[to].0));
+        }
+        text.push('}');
+        (text, ins, outs)
+    }
+
+    /// How many random patches the sweep makes.
+    const PATCHES: usize = 120;
+
+    #[test]
+    fn every_ps_inlets_and_outlets_keep_their_order_however_its_patch_is_wired() {
+        let mut random = Lcg(313);
+        let started = std::time::Instant::now();
+        let mut wrong: Vec<(usize, String, Vec<String>)> = Vec::new();
+        // The [p]s swept, nested ones too.
+        let mut ps = 0;
+        for patch in 0..PATCHES {
+            let (text, _, _) = random_p(&mut random, "p", 2);
+            ps += text.matches("[p ").count();
+            let (notation, found) = parse(&format!("p = {text}\n"));
+            assert!(found.wrong.is_empty(), "{found:?}\n{text}");
+            let outside = Outside { boxes: HashMap::new(), controls: BTreeMap::new(), reference: None, output_stage: false };
+            let expanded = expand(&notation, &outside);
+            assert!(expanded.found.wrong.is_empty(), "{:?}\n{text}", expanded.found);
+            let lines: Vec<Value> = expanded.lines.into_iter().map(|(line, _)| line).collect();
+            let patcher = laid_out(json!({ "boxes": expanded.boxes, "lines": lines }));
+            let mut found = misnumbered(&patcher, "");
+            let report = check(&patcher);
+            let layout = [CORD_OVER_BOX, BOXES_OVERLAP, CORD_UPWARD];
+            found.extend(report.findings.iter().filter(|finding| layout.contains(&finding.rule)).map(ToString::to_string));
+            if !found.is_empty() {
+                wrong.push((patch, text, found));
+            }
+        }
+        let first = wrong.first().map(|(patch, text, found)| format!("patch {patch}: {found:#?}\n{text}")).unwrap_or_default();
+        assert!(wrong.is_empty(), "{} of {PATCHES} patches, the first {first}", wrong.len());
+        assert!(ps >= 300, "a few hundred [p]s: {ps}");
+        // A guard, not a benchmark: unoptimized, it takes about half a second.
+        assert!(started.elapsed().as_secs() < 10, "swept in {:?}", started.elapsed());
+    }
+
+    #[test]
+    fn kumis_own_subpatchers_keep_their_inlets_and_outlets_in_order() {
+        // Kumi's building blocks, each made as a [p].
+        let kit = concat!(
+            "clock = [kumi.clock 16n 8n]\n",
+            "song = [kumi.transport]\n",
+            "notes = [kumi.notes]\n",
+            "song.2 -> [snapshot~ 100] -> [/ 10.] -> clock.1\n",
+            "clock -> [+ 60] -> notes\n",
+            "clock.1 -> [* 0.5] -> notes.2\n",
+            "clock.2 -> [* 100] -> notes.1\n",
+            "notes -> out\n",
+        );
+        let (patcher, found) = patched(DeviceType::MidiEffect, kit, 0);
+        assert!(found.wrong.is_empty(), "{:?}", found.wrong);
+        assert_eq!(patcher.boxes.iter().filter(|item| item.text().starts_with("p kumi.")).count(), 3);
+        assert_eq!(misnumbered(&patcher, ""), Vec::<String>::new());
+        // A code instrument's voices, each a [p voice n].
+        let spec = GenSpec {
+            name: "Voices".into(),
+            about: String::new(),
+            controls: vec![],
+            code: "out1 = 0;\nout2 = 0;\n".into(),
+            voices: Some(4.0),
+        };
+        let patcher = Patcher::read(&instrument_patcher(&spec), &NoFiles);
+        assert_eq!(patcher.boxes.iter().filter(|item| item.text().starts_with("p voice ")).count(), 4);
+        assert_eq!(misnumbered(&patcher, ""), Vec::<String>::new());
+        // The Map page, an inlet for each source.
+        let modulated = "[cycle~ 1] -> mod.0\n[cycle~ 2] -> mod.1\n[cycle~ 3] -> mod.2\nin -> out\n";
+        let (patcher, found) = patched(DeviceType::MidiEffect, modulated, 3);
+        assert!(found.wrong.is_empty(), "{:?}", found.wrong);
+        assert_eq!(patcher.boxes.iter().find(|item| item.maxclass() == "bpatcher").map(MaxBox::inlets), Some(3));
+        assert_eq!(misnumbered(&patcher, ""), Vec::<String>::new());
     }
 }

@@ -1205,7 +1205,7 @@ dependencies = [
 
 [[package]]
 name = "kumi"
-version = "1.19.2"
+version = "1.19.3"
 dependencies = [
  "ableton-mcp-server",
  "async-trait",
@@ -1240,7 +1240,7 @@ dependencies = [
 
 [[package]]
 name = "kumi-common"
-version = "1.19.2"
+version = "1.19.3"
 dependencies = [
  "icu_collator",
  "icu_locale_core",
@@ -1258,7 +1258,7 @@ version = "1.19.2"
 
 [[package]]
 name = "kumi-runtime"
-version = "1.19.2"
+version = "1.19.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
