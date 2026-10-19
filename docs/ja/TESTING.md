@@ -38,8 +38,8 @@ Windows では、いくつかのテストがシンボリックリンクを作成
 | `sh scripts/test-isolated.sh`（Windows では `./scripts/test-isolated.ps1`） | テスト専用のホームで `cargo test --workspace --locked` を実行します。引数は `cargo test` に渡します |
 | `sh scripts/test-isolated.sh -p kumi-runtime --test hands_transport` | 一つのクレートの、一つのテストファイルだけを実行します |
 | `cargo fmt --all --check` | CI と同じようにフォーマットを確認します |
-| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lint。CI では今のところ参考扱いです |
-| `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref` | await をまたいで保持される `RefCell` の借用。Linux の CI ジョブを失敗させます |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | CI と同じ Lint（await をまたいで保持される `RefCell` の借用も含みます） |
+| `KUMI_NEXTEST=1 sh scripts/test-isolated.sh --profile ci` | `Rust / Linux` が実行するテストを cargo-nextest で実行します（`--profile ci-os`：macOS と Windows が実行するもの、`--profile extended`：すべてのテスト） |
 | `cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark` | ブリッジの性能の基準。[開発者ガイド](DEVELOPER_GUIDE.md#ビルドテスト計測)を参照してください |
 
 分離ランナーはテスト専用のホームを用意します。`HOME`、`USERPROFILE`、`APPDATA`、`LOCALAPPDATA`、`XDG_CONFIG_HOME`、`KUMI_HOME` は新しい一時フォルダーの中を指し、`KUMI_REMOTE_SCRIPTS_DIR` と `KUMI_LIVE_EXTENSIONS_DIR` は取り除かれるので、どのテストもあなたの Live のフォルダーや `~/.kumi` には届きません。
@@ -100,29 +100,30 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
 ## CI
 
-プルリクエストのたびに次のワークフローが実行され、最初の二つは `main` へのプッシュのたびにも実行されます：
+プルリクエストのたびに次のワークフローが実行され、CI、Willington files、Installer は `main` へのプッシュのたびにも実行されます：
 
 | ワークフロー | ジョブ | 実行内容 |
 | --- | --- | --- |
-| **CI** | `Rust / Linux (1/3)`、`(2/3)`、`(3/3)`、`Rust / macOS`、`Rust / Windows (1/2)`、`(2/2)` | 公式 SDK をインストールした状態での分離ランナーによる全テスト。nextest がハッシュでランナーに振り分けます（Linux では各ランナーに 3 分の 1、Windows では半分ずつ）。macOS ではすべてのターゲットがコンパイルできることも確認し、Linux ではテストの後に `git diff --check` を実行します |
-| | `Rust / Windows checks` | コンソール入力のテスト、続いてすべてのターゲットがコンパイルできることの確認 |
-| | `Rust / Lint`（Ubuntu） | `cargo fmt --check`、ドキュメントテスト、サンプルのビルド、Clippy（参考扱い。ただし await をまたいで保持される `RefCell` の借用はジョブを失敗させます） |
+| **CI** | `Rust / Linux` | `.config/nextest.toml` の `ci` セットを分離ランナーで、一度のビルドで実行します。Extended ワークフローが実行する長いテスト（設定ファイルに理由とともに列挙）以外のすべてのテストです。30 秒を超えたテストは名前つきで失敗します。続いて `git diff --check` |
+| | `Rust / macOS`、`Rust / Windows` | `ci-os` セット：プラットフォームによって異なるテスト（インストール、起動、更新、ターミナル、stdin と Windows のコンソール、Hands、パス、ファイル、子プロセス、ストア）。ビルドするのもそれらだけです |
+| | `Rust / Lint`（Ubuntu） | `cargo fmt --check` と、すべてのターゲットに対する `-D warnings` の Clippy。コードが意図して従わない lint は、`Cargo.toml` で一度だけ、それぞれ理由とともに許可しています |
 | | `Python Remote Script / ubuntu-24.04`、`macos-15`、`windows-2025`（Python 3.11） | Remote Script のテストを実行し、パッケージをコンパイルします |
 | | `Live extension`（Ubuntu、Node 24） | コミットされたビルドに対する、拡張機能のテスト |
-| | `Release scripts`（Ubuntu） | この変更の空白のチェック、続いてパッケージングのテスト、リリーススクリプトのテスト、`scripts/check-installers.sh`（install.sh が POSIX sh であること、install.ps1 が構文解析でき ASCII であること）。`main` へのプッシュと毎晩の実行では、`main` の raw のインストーラーと最新リリースのものも確認します |
+| | `Release scripts`（Ubuntu） | この変更の空白のチェック、続いてパッケージングのテスト、リリーススクリプトのテスト、`scripts/check-installers.sh`（install.sh が POSIX sh であること、install.ps1 が構文解析でき ASCII であること）。`main` へのプッシュでは、`main` の raw のインストーラーと最新リリースのものも確認します |
 | | `Required CI` | 上記がすべてパスした場合にだけパスします |
+| **Extended** | `Extended / Linux (1/3)` から `(3/3)`、`Extended / macOS (1/2)`、`(2/2)`、`Extended / Windows (1/3)` から `(3/3)`、`Extended / documentation tests` | 公式 SDK をインストールした状態での全テスト（`extended` セット）：`ci` が省くもの（記録されたソースのオラクル、長いリスニング・フォーム・レンダリングのシミュレーション、ffmpeg を使うビデオ、ベンチマーク、公式の MCP とモデルの SDK と並べて実行する相互運用テスト、Kumi 1.7.5 からの移行、タイミングのビルディングブロックの長いスイープ）と、各プラットフォームの全テスト。続いてドキュメントテスト。毎週、手動で、また `full-tests` ラベルの付いたプルリクエストで実行され、何もブロックしません |
 | **Willington files** | `Willington files`（Ubuntu） | `vendor/willington/` を変えられるのは、このリポジトリの `willington/` ブランチから出たリポジトリ所有者のプルリクエストだけで、そのプルリクエストはほかに何も変えません。`main` にあるこのチェックが、プルリクエストのコードではなくファイルの一覧を読んで実行されます |
-| **Installer** | `Native bundle / <target>`（6 つ）、`Aggregate native and existing-installer releases`、続いて `Install / <system>`（6 つ）と `Existing installer transition / <system>`（3 つ）。`Installer edges / <system>`（3 つ）はバンドルを必要としません | macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドル（Mac のバンドルには、Kumi が Live のメニューを使うためのヘルパー（ユニバーサル、アドホック署名）が入り、Intel 向けは Apple Silicon でクロスビルドします）、続いて既存のインストールが更新に使う互換リリースをビルドし、インストーラーと一緒に、GitHub がリリースのファイルを配信するのと同じ形でローカルで配信します。各システムで：そこからワンライナーでプロデューサーと同じ方法でインストールし（Windows では、非 ASCII 文字の名前のフォルダーにある `KUMI_HOME` で、Windows PowerShell 5.1 を使います）、バージョン、`doctor`、ブリッジとその解析ワーカーを確認し、修復として再インストールし、使い捨ての Remote Scripts フォルダーに `kumi bridge --yes` を実行し、`kumi update`、`kumi update --rollback`、`kumi uninstall` を実行します。続いて各システムの 1 つのインストール（macOS arm64、Linux x64、Windows x64）が、空白と非 ASCII 文字を含むホームで次を行います：このビルドのインストーラーで GitHub の最新リリースを、続いて `KUMI_VERSION` でこのビルドの 1 つ前のリリースをインストールし、そのリリースのブリッジを入れ、このビルドへの更新と 2 回のロールバックのたびに Kumi とブリッジを確認し、アンインストールします。PATH の行は macOS では zsh の `ZDOTDIR` に、Linux では fish の `conf.d` に入り、そのシェルが `kumi` を見つけ、アンインストールで取り除かれます。Windows ではこれを PowerShell 7 で実行します。このビルドのインストール、ブリッジ、ロールバック、アンインストールは非 ASCII 文字の名前のフォルダーにある `KUMI_HOME` で、1 つ前のリリースからの更新は空白だけを含むホームで行います（そのリリース自身の更新機能が展開するため）。移行のジョブは、Kumi 1.7.5 と新しいバンドルで移行テストを実行します。edges のジョブは、install.sh と install.ps1 を代わりのリリースに対して実行します：リリースがない、応答がない、サインインページが返る、チェックサムが合わない、Kumi が起動しない、Ctrl-C。`v*` タグのプッシュでは、これらがすべてパスした後に `publish` がバンドルとインストーラーをリリースに添付し、`scripts/release.py` がノートを書いていればリリースを公開します。 |
+| **Installer** | `Native bundle / <target>`、`Aggregate native and existing-installer releases`、続いて `Install / <system>` と `Existing installer transition / <system>`。`Installer edges / <system>`（3 つ）はバンドルを必要としません | `main` へのプッシュと、インストールを変えるプルリクエストでは、x64 の Linux と Windows、Apple Silicon の macOS のバンドルをビルドし、それぞれで以下のとおりインストール、確認、アンインストールします。タグ、手動の実行、`full-tests` ラベルの付いたプルリクエストではすべてを行います：macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドル（Mac のバンドルには、Kumi が Live のメニューを使うためのヘルパー（ユニバーサル、アドホック署名）が入り、Intel 向けは Apple Silicon でクロスビルドします）、続いて既存のインストールが更新に使う互換リリースをビルドし、インストーラーと一緒に、GitHub がリリースのファイルを配信するのと同じ形でローカルで配信します。各システムで：そこからワンライナーでプロデューサーと同じ方法でインストールし（Windows では、非 ASCII 文字の名前のフォルダーにある `KUMI_HOME` で、Windows PowerShell 5.1 を使います）、バージョン、`doctor`、ブリッジとその解析ワーカーを確認し、修復として再インストールし、使い捨ての Remote Scripts フォルダーに `kumi bridge --yes` を実行し、`kumi update`、`kumi update --rollback`、`kumi uninstall` を実行します。続いて各システムの 1 つのインストール（macOS arm64、Linux x64、Windows x64）が、空白と非 ASCII 文字を含むホームで次を行います：このビルドのインストーラーで GitHub の最新リリースを、続いて `KUMI_VERSION` でこのビルドの 1 つ前のリリースをインストールし、そのリリースのブリッジを入れ、このビルドへの更新と 2 回のロールバックのたびに Kumi とブリッジを確認し、アンインストールします。PATH の行は macOS では zsh の `ZDOTDIR` に、Linux では fish の `conf.d` に入り、そのシェルが `kumi` を見つけ、アンインストールで取り除かれます。Windows ではこれを PowerShell 7 で実行します。このビルドのインストール、ブリッジ、ロールバック、アンインストールは非 ASCII 文字の名前のフォルダーにある `KUMI_HOME` で、1 つ前のリリースからの更新は空白だけを含むホームで行います（そのリリース自身の更新機能が展開するため）。移行のジョブは、Kumi 1.7.5 と新しいバンドルで移行テストを実行します。edges のジョブは、install.sh と install.ps1 を代わりのリリースに対して実行します：リリースがない、応答がない、サインインページが返る、チェックサムが合わない、Kumi が起動しない、Ctrl-C。`v*` タグのプッシュでは、これらがすべてパスした後に `publish` がバンドルとインストーラーをリリースに添付し、`scripts/release.py` がノートを書いていればリリースを公開します。 |
 
 プルリクエストでは、実行される範囲が狭くなります：
 
-- `Rust / macOS` と `Rust / Windows` はプラットフォームによって異なるテストを実行し、`Python Remote Script` は macOS を省きます。
+- `Python Remote Script` は macOS を省きます。
 - Rust のビルドキャッシュは `main` からだけ保存されます。プルリクエストは `main` のものを復元し、何も保存しません。
-- Installer が 6 つすべてをビルドしてインストールするのは、インストール、更新、リリース、Willington のファイル、Mac のヘルパー、Kumi が使う `tar` と PowerShell、ダウンロードの方法（HTTP クライアントとネットワークの設定）とパスの組み立て、Kumi の拡張機能を Live に入れる処理、または依存関係を変える変更の場合だけです。ブリッジ（Remote Script、プロトコル、Live の拡張機能）やバージョン番号を変える変更では Linux のものをビルド、インストール、確認し、それ以外の変更では Linux のバンドルをビルドするだけです。
-- Kumi が保持するものの保存方法（`crates/kumi-store`、設定とサインイン、メモリー、テクニック、プレイブック、ギャップ、以前の Kumi のファイル）を変える変更にも、既存のデータを残したまま更新とロールバックを行う、Linux のインストールと更新の確認が付きます。
-- プルリクエストと `main` へのプッシュでは、Installer のバンドルを `ci-release` プロファイルでビルドします。これはリリースプロファイルのプログラム全体の最適化を省きます。タグは `release` でビルドします。
+- Installer が各システムの 1 台でビルドしてインストールするのは、インストール、更新、リリース、Willington のファイル、Mac のヘルパー、Kumi が使う `tar` と PowerShell、ダウンロードの方法（HTTP クライアントとネットワークの設定）とパスの組み立て、Kumi の拡張機能を Live に入れる処理、または依存関係を変える変更の場合だけです。6 つすべて、GitHub のリリースからの更新、edges、移行は `full-tests` ラベルで実行されます。ブリッジ（Remote Script、プロトコル、Live の拡張機能）やバージョン番号を変える変更では Linux のものをビルド、インストール、確認し、それ以外の変更では Linux のバンドルをビルドするだけです。
+- Kumi が保持するものの保存方法（`crates/kumi-store`、設定とサインイン、メモリー、テクニック、プレイブック、ギャップ、以前の Kumi のファイル）を変える変更にも、既存のデータを残したまま更新とロールバックを行う、Linux のインストールの確認が付きます。
+- プルリクエストと `main` へのプッシュでは、Installer のバンドルを `ci-release` プロファイルでビルドします。これはリリースプロファイルのプログラム全体の最適化を省き、最適化も控えめにします。タグは `release` でビルドします。
 
-`main` へのプッシュとタグではすべてが実行され、CI は毎晩すべてを実行します。Installer も毎晩 `release` プロファイルで 6 つのバンドルをすべてビルドし、次のタグのためにそのプロファイルのビルドキャッシュを温めておきます。
+`main` へのプッシュでは、インストールを変えるプルリクエストと同じものが実行され、タグでは Installer のすべてが実行されます。Extended ワークフローは毎週すべてのテストを実行します。Installer は毎晩 `release` プロファイルで 6 つのバンドルをすべてビルドし、次のタグのためにそのプロファイルのビルドキャッシュを温めておきます。
 
 `main` にマージするには、`Required CI` と `Willington files` がパスする必要があります。Installer は必須ではありません。残りのルールは[リリースと配布](DISTRIBUTION_POLICY.md#マージゲート)にあります。
 

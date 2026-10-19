@@ -13,6 +13,8 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+    # labeled: the full run starts when a pull request is labelled full-tests (see What to build).
+    types: [opened, synchronize, reopened, labeled]
   schedule:
     - cron: "47 5 * * *"
   # Warms the release profile's cache by hand, as the nightly run does.
@@ -44,15 +46,16 @@ jobs:
       - id: plan
         shell: bash
         run: |
-          # Tags, main and pull requests that change installing, updating, releasing, Willington's files, the Mac helper
-          # the bundle carries, the tar and PowerShell Kumi runs, how it downloads (its HTTP client and network settings)
-          # and builds paths, how Kumi finds, opens and checks the DAW (its DAW modules and the doctor), or how Kumi's
-          # extension goes into Live build all six platforms, install each, update to it from the release before it and
-          # check the update from the JavaScript release. A pull request that changes the
-          # bridge (the Remote Script, the protocol it ships, the Live extension), a version number or how Kumi stores
-          # what it keeps (the store, settings and sign-ins, memory, techniques, playbook, gaps, an older Kumi's files),
-          # which the update and rollback must carry over, does that on Linux. Any other builds Linux's bundle only; main
-          # installs and checks it once merged.
+          # Main, and pull requests that change installing, updating, releasing, Willington's files, the Mac helper the
+          # bundle carries, the tar and PowerShell Kumi runs, how it downloads (its HTTP client and network settings) and
+          # builds paths, how Kumi finds, opens and checks the DAW (its DAW modules and the doctor), or how Kumi's extension
+          # goes into Live, build and install on one machine of each system (Linux and Windows on x64, macOS on Apple
+          # silicon); tags, a run by hand and a pull request labelled full-tests build all six platforms, install each,
+          # update to it from the release before it and check the update from the JavaScript release (see below). A pull
+          # request that changes the bridge (the Remote Script, the protocol it ships, the Live extension), a version
+          # number or how Kumi stores what it keeps (the store, settings and sign-ins, memory, techniques, playbook, gaps,
+          # an older Kumi's files) installs on Linux. Any other builds Linux's bundle only; main installs and checks it once
+          # merged.
           full=true
           checks=true
           installing_paths='^(install\.(sh|ps1)|scripts/|vendor/willington/|\.github/workflows/installer\.yml|crates/kumi/src/(install|update|process\.rs|cli/|daw/|doctor)|crates/ableton-mcp-server/src/(lifecycle|delivery|migrate|setup|install_remote_script|platform)|crates/kumi-runtime/src/integrations/ableton/hands/(KumiHands\.swift|mac\.rs)|crates/kumi-runtime/src/(system\.rs|ai/http\.rs|net/|library/sources\.rs))'
@@ -87,19 +90,34 @@ jobs:
               fi
             fi
           fi
-          echo "full=$full" >> "$GITHUB_OUTPUT"
+          # Every platform, the updates from GitHub's releases, the edges and the transition from the JavaScript installer run
+          # on tags, by hand and on a pull request labelled full-tests (the nightly run only builds, above). Each push to
+          # main, and a pull request that changes installing, install and remove on one machine of each system: Linux and
+          # Windows on x64, macOS on Apple silicon.
+          extended=false
+          case "${{ github.event_name }}" in
+            workflow_dispatch) extended=true ;;
+            push) [[ "${{ github.ref }}" == refs/tags/v* ]] && extended=true ;;
+            pull_request) [[ "${{ contains(github.event.pull_request.labels.*.name, 'full-tests') }}" == "true" ]] && extended=true ;;
+          esac
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then extended=true; fi
+          echo "full=$extended" >> "$GITHUB_OUTPUT"
           echo "checks=$checks" >> "$GITHUB_OUTPUT"
-          if $full; then
+          if $extended; then
             # The Intel Mac bundle is built on an Apple Silicon Mac, a cross build: the Intel runners take about twice
             # as long. The Intel Mac install below still runs on Intel.
             echo 'targets=[{"os":"macos-15","target":"aarch64-apple-darwin"},{"os":"macos-15","target":"x86_64-apple-darwin"},{"os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"},{"os":"ubuntu-22.04-arm","target":"aarch64-unknown-linux-gnu"},{"os":"windows-2025","target":"x86_64-pc-windows-msvc"},{"os":"windows-11-arm","target":"aarch64-pc-windows-msvc"}]' >> "$GITHUB_OUTPUT"
             # One install on each system (update) also updates to this bundle from the release before it, from GitHub.
             echo 'installs=[{"os":"macos-15","label":"macOS-arm64","update":true},{"os":"macos-15-intel","label":"macOS-x64"},{"os":"ubuntu-22.04","label":"Linux-x64","update":true},{"os":"ubuntu-22.04-arm","label":"Linux-arm64"},{"os":"windows-2025","label":"Windows-x64","update":true},{"os":"windows-11-arm","label":"Windows-arm64"}]' >> "$GITHUB_OUTPUT"
             echo 'migrations=["macos-15","ubuntu-24.04","windows-2025"]' >> "$GITHUB_OUTPUT"
+          elif $full; then
+            echo 'targets=[{"os":"macos-15","target":"aarch64-apple-darwin"},{"os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"},{"os":"windows-2025","target":"x86_64-pc-windows-msvc"}]' >> "$GITHUB_OUTPUT"
+            echo 'installs=[{"os":"macos-15","label":"macOS-arm64"},{"os":"ubuntu-22.04","label":"Linux-x64"},{"os":"windows-2025","label":"Windows-x64"}]' >> "$GITHUB_OUTPUT"
+            echo 'migrations=[]' >> "$GITHUB_OUTPUT"
           else
             echo 'targets=[{"os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"}]' >> "$GITHUB_OUTPUT"
-            echo 'installs=[{"os":"ubuntu-22.04","label":"Linux-x64","update":true}]' >> "$GITHUB_OUTPUT"
-            echo 'migrations=["ubuntu-24.04"]' >> "$GITHUB_OUTPUT"
+            echo 'installs=[{"os":"ubuntu-22.04","label":"Linux-x64"}]' >> "$GITHUB_OUTPUT"
+            echo 'migrations=[]' >> "$GITHUB_OUTPUT"
           fi
 
   native:
@@ -606,7 +624,7 @@ jobs:
   migration:
     name: Existing installer transition / ${{ matrix.os }}
     needs: [plan, bundle]
-    if: ${{ !cancelled() && needs.bundle.result == 'success' }}
+    if: ${{ !cancelled() && needs.bundle.result == 'success' && needs.plan.outputs.migrations != '[]' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:

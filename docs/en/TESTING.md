@@ -41,8 +41,8 @@ Run from the repository root.
 | `sh scripts/test-isolated.sh` (Windows: `./scripts/test-isolated.ps1`) | `cargo test --workspace --locked` in a home of its own; arguments go to `cargo test` |
 | `sh scripts/test-isolated.sh -p kumi-runtime --test hands_transport` | One test file of one crate |
 | `cargo fmt --all --check` | Formatting, as CI checks it |
-| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lints; advisory in CI for now |
-| `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref` | A `RefCell` borrow held across an await; fails the Linux CI job |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lints, as CI checks them (a `RefCell` borrow held across an await among them) |
+| `KUMI_NEXTEST=1 sh scripts/test-isolated.sh --profile ci` | The tests `Rust / Linux` runs, with cargo-nextest (`--profile ci-os`: what macOS and Windows run; `--profile extended`: every test) |
 | `cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark` | The bridge's performance budgets; see [the developer guide](DEVELOPER_GUIDE.md#build-test-and-measure) |
 
 The isolated runner gives the tests a home of their own: `HOME`, `USERPROFILE`,
@@ -139,43 +139,44 @@ agree; keep them in step by hand.
 
 ## CI
 
-These workflows run on every pull request, and the first two on every push to `main` too:
+These workflows run on every pull request, and the CI, Willington files and Installer workflows on every push to `main` too:
 
 | Workflow | Jobs | What runs |
 | --- | --- | --- |
-| **CI** | `Rust / Linux (1/3)`, `(2/3)`, `(3/3)`, `Rust / macOS`, `Rust / Windows (1/2)`, `(2/2)` | Every test through the isolated runner with the official SDKs installed, which nextest shares out by hash: a third on each Linux runner, half on each Windows runner. macOS also checks every target compiles; Linux runs `git diff --check` after its tests |
-| | `Rust / Windows checks` | The console input tests, then a check that every target compiles |
-| | `Rust / Lint` (Ubuntu) | `cargo fmt --check`, the documentation tests, the examples' build and Clippy (advisory, except a `RefCell` borrow held across an await, which fails the job) |
+| **CI** | `Rust / Linux` | The `ci` set of `.config/nextest.toml` through the isolated runner, built once: every test but the long ones the Extended workflow runs, which the config lists with why. A test that runs past 30 s fails, by name. Then `git diff --check` |
+| | `Rust / macOS`, `Rust / Windows` | The `ci-os` set: the tests that differ by platform (installing, launching and updating; the terminal, stdin and the Windows console; Hands; paths, files and child processes; the store), and only those built |
+| | `Rust / Lint` (Ubuntu) | `cargo fmt --check` and Clippy over every target with `-D warnings`. The lints the code goes against on purpose are allowed once, in `Cargo.toml`, each with its reason |
 | | `Python Remote Script / ubuntu-24.04`, `macos-15`, `windows-2025` (Python 3.11) | The Remote Script's tests; compiles the package |
 | | `Live extension` (Ubuntu, Node 24) | The extension's tests, against its committed build |
-| | `Release scripts` (Ubuntu) | The whitespace check of the change, then the packaging tests, the release script's tests and `scripts/check-installers.sh` (install.sh is POSIX sh; install.ps1 parses and is ASCII). Pushes to `main` and the nightly run also check `main`'s raw installers and the latest release's |
+| | `Release scripts` (Ubuntu) | The whitespace check of the change, then the packaging tests, the release script's tests and `scripts/check-installers.sh` (install.sh is POSIX sh; install.ps1 parses and is ASCII). Pushes to `main` also check `main`'s raw installers and the latest release's |
 | | `Required CI` | Passes only when all of the above passed |
+| **Extended** | `Extended / Linux (1/3)` to `(3/3)`, `Extended / macOS (1/2)`, `(2/2)`, `Extended / Windows (1/3)` to `(3/3)`, `Extended / documentation tests` | Every test (the `extended` set) with the official SDKs installed: what `ci` leaves out (the recorded-source oracles, the long listening, form and rendering simulations, video with ffmpeg, the benchmarks, the interoperability tests beside the official MCP and model SDKs, the migration from Kumi 1.7.5, the long sweeps of the timing building blocks) and each platform's every test; then the documentation tests. It runs each week, by hand, and on a pull request labelled `full-tests`, and blocks nothing |
 | **Willington files** | `Willington files` (Ubuntu) | Only the repository owner's pull requests, from a `willington/` branch in this repository, change `vendor/willington/`, and such a pull request changes nothing else. `main`'s copy of the check runs, reading the pull request's file list, never its code |
-| **Installer** | `Native bundle / <target>` (six), `Aggregate native and existing-installer releases`, then `Install / <system>` (six) and `Existing installer transition / <system>` (three); `Installer edges / <system>` (three) needs no bundle | Builds a native bundle for Intel and ARM on macOS, Linux and Windows (each Mac bundle with the helper Kumi uses Live's menus with, universal and ad hoc signed; the Intel one cross-built on Apple Silicon), then the compatibility release that existing installations update from, and serves them locally with the installers, as GitHub serves a release's files. On each system: installs with the one-liner from that copy, as producers do (Windows PowerShell 5.1 on Windows, with `KUMI_HOME` in a folder named in non-ASCII letters), checks the version, `doctor`, the bridge and its analysis worker, installs again as a repair, runs `kumi bridge --yes` into a scratch Remote Scripts folder, `kumi update`, `kumi update --rollback` and `kumi uninstall`. One install on each system (macOS arm64, Linux x64, Windows x64) then, in a home with spaces and non-ASCII letters, installs GitHub's latest release with this build's installer and then, with `KUMI_VERSION`, the release before this build; puts that release's bridge in; updates to this build and rolls back twice, checking the Kumi and the bridge each time; and uninstalls. The PATH line goes in zsh's `ZDOTDIR` on macOS and fish's `conf.d` on Linux, where that shell finds `kumi`, and the uninstall takes it out; Windows runs this in PowerShell 7: this build's install, the bridge, the rollbacks and the uninstall with `KUMI_HOME` in a folder named in non-ASCII letters, and the update from the release before in a home with spaces only (that release's own updater unpacks it). The transition jobs run the migration tests with Kumi 1.7.5 and the new bundles. The edges jobs run install.sh and install.ps1 against stand-in releases: a missing release, no answer, a sign-in page, a bad checksum, a Kumi that doesn't start, Ctrl-C. On a `v*` tag's push, once all these pass, `publish` attaches the bundle and the installers to the release, and publishes it when `scripts/release.py` wrote its notes. |
+| **Installer** | `Native bundle / <target>`, `Aggregate native and existing-installer releases`, then `Install / <system>` and `Existing installer transition / <system>`; `Installer edges / <system>` (three) needs no bundle | Each push to `main`, and a pull request that changes installing, builds a bundle for Linux and Windows on x64 and macOS on Apple silicon and, on each, installs, checks and uninstalls as below. Tags, a run by hand and a pull request labelled `full-tests` do all of it: build a native bundle for Intel and ARM on macOS, Linux and Windows (each Mac bundle with the helper Kumi uses Live's menus with, universal and ad hoc signed; the Intel one cross-built on Apple Silicon), then the compatibility release that existing installations update from, and serves them locally with the installers, as GitHub serves a release's files. On each system: installs with the one-liner from that copy, as producers do (Windows PowerShell 5.1 on Windows, with `KUMI_HOME` in a folder named in non-ASCII letters), checks the version, `doctor`, the bridge and its analysis worker, installs again as a repair, runs `kumi bridge --yes` into a scratch Remote Scripts folder, `kumi update`, `kumi update --rollback` and `kumi uninstall`. One install on each system (macOS arm64, Linux x64, Windows x64) then, in a home with spaces and non-ASCII letters, installs GitHub's latest release with this build's installer and then, with `KUMI_VERSION`, the release before this build; puts that release's bridge in; updates to this build and rolls back twice, checking the Kumi and the bridge each time; and uninstalls. The PATH line goes in zsh's `ZDOTDIR` on macOS and fish's `conf.d` on Linux, where that shell finds `kumi`, and the uninstall takes it out; Windows runs this in PowerShell 7: this build's install, the bridge, the rollbacks and the uninstall with `KUMI_HOME` in a folder named in non-ASCII letters, and the update from the release before in a home with spaces only (that release's own updater unpacks it). The transition jobs run the migration tests with Kumi 1.7.5 and the new bundles. The edges jobs run install.sh and install.ps1 against stand-in releases: a missing release, no answer, a sign-in page, a bad checksum, a Kumi that doesn't start, Ctrl-C. On a `v*` tag's push, once all these pass, `publish` attaches the bundle and the installers to the release, and publishes it when `scripts/release.py` wrote its notes. |
 
 On a pull request, less runs:
 
-- `Rust / macOS` and `Rust / Windows` run the tests that differ by platform,
-  and `Python Remote Script` skips macOS.
+- `Python Remote Script` skips macOS.
 - Rust's build caches are saved from `main` only: a pull request restores
   `main`'s and saves none.
-- The Installer builds and installs all six only for a change to installing,
-  updating, releasing, Willington's files, the Mac helper, the `tar` and
-  PowerShell Kumi runs, how it downloads (its HTTP client and network settings)
-  and builds paths, how Kumi's extension goes into Live, or a dependency. A
-  change to the bridge (the Remote Script, the protocol, the Live extension) or
-  a version number builds, installs and checks Linux's; any other change builds
-  Linux's bundle only.
+- The Installer builds and installs on one machine of each system only for a
+  change to installing, updating, releasing, Willington's files, the Mac helper,
+  the `tar` and PowerShell Kumi runs, how it downloads (its HTTP client and
+  network settings) and builds paths, how Kumi's extension goes into Live, or a
+  dependency; all six, the updates from GitHub's releases, the edges and the
+  transition run with the `full-tests` label. A change to the bridge (the Remote
+  Script, the protocol, the Live extension) or a version number builds, installs
+  and checks Linux's; any other change builds Linux's bundle only.
 - A change to how Kumi stores what it keeps (`crates/kumi-store`, settings and
   sign-ins, memory, techniques, playbook, gaps, an older Kumi's files) also gets
-  Linux's install and update check, which updates and rolls back over existing
-  data.
+  Linux's install check, which updates and rolls back over existing data.
 - The Installer's bundles, on pull requests and pushes to `main`, build with
   the `ci-release` profile, which skips the release profile's whole-program
-  optimization. Tags build with `release`.
+  optimization and optimizes less. Tags build with `release`.
 
-Each push to `main` and each tag run everything, and CI runs in full each night.
-Each night the Installer also builds all six bundles with the `release` profile,
+Each push to `main` runs what a pull request that changes installing runs, and
+each tag all of the Installer. The Extended workflow runs every test each week.
+Each night the Installer builds all six bundles with the `release` profile,
 which keeps that profile's build cache warm for the next tag.
 
 To merge into `main`, `Required CI` and `Willington files` must pass. The Installer isn't required.

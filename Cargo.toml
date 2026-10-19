@@ -120,3 +120,5 @@ strip = true
 inherits = "release"
 lto = "off"
 codegen-units = 16
+# Installed and checked, never timed or published: less optimizing, for a build in half the time.
+opt-level = 1
