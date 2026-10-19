@@ -100,13 +100,12 @@ fn lookaround(pattern: &str) -> bool {
             b'\\' => escaped = true,
             b'[' => class = true,
             b']' => class = false,
-            b'(' if !class => {
-                if bytes.get(i + 1) == Some(&b'?')
-                    && (matches!(bytes.get(i + 2), Some(b'=' | b'!'))
-                        || bytes.get(i + 2) == Some(&b'<') && matches!(bytes.get(i + 3), Some(b'=' | b'!')))
-                {
-                    return true;
-                }
+            b'(' if !class
+                && bytes.get(i + 1) == Some(&b'?')
+                && (matches!(bytes.get(i + 2), Some(b'=' | b'!'))
+                    || bytes.get(i + 2) == Some(&b'<') && matches!(bytes.get(i + 3), Some(b'=' | b'!'))) =>
+            {
+                return true;
             }
             _ => {}
         }

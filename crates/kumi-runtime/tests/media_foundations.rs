@@ -367,7 +367,7 @@ async fn parts_join_into_one_wav_crossfaded_where_one_runs_into_the_next() {
     assert_eq!(u32::from_le_bytes(bytes[40..44].try_into().unwrap()) as usize, 3000 * 8);
     assert_eq!(bytes.len(), 44 + 3000 * 8);
     // Both playbacks agree here, so the seam is the sound itself.
-    let samples: Vec<f32> = bytes[44..].chunks_exact(4).map(|word| f32::from_le_bytes(word.try_into().unwrap())).collect();
+    let samples: Vec<f32> = bytes[44..].as_chunks::<4>().0.iter().map(|&word| f32::from_le_bytes(word)).collect();
     for frame in [0, 999, 1000, 1050, 1099, 1100, 2999] {
         assert!((samples[frame * 2] - sound[frame]).abs() < 1e-6, "frame {frame}");
     }

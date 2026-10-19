@@ -435,7 +435,7 @@ pub fn unpack_vector(text: &str) -> Vec<f32> {
         .collect();
     let clean = &clean[..clean.len() - clean.len() % 4 + if clean.len() % 4 >= 2 { clean.len() % 4 } else { 0 }];
     let bytes = LENIENT.0.decode(clean).unwrap_or_default();
-    bytes.chunks_exact(4).map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])).collect()
+    bytes.as_chunks::<4>().0.iter().map(|&chunk| f32::from_le_bytes(chunk)).collect()
 }
 
 #[cfg(test)]

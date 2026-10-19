@@ -218,7 +218,7 @@ async fn prune(folder: &str) -> Result<(), VideoFailure> {
             }
         }
     }
-    folders.sort_by(|a, b| b.1.cmp(&a.1));
+    folders.sort_by_key(|a| std::cmp::Reverse(a.1));
     // Tidying, not the watch: a file held (a WAV loaded in Live, one being scanned) waits for the next prune.
     for (path, _) in folders.into_iter().skip(24) {
         let _ = tokio::fs::remove_dir_all(path).await;

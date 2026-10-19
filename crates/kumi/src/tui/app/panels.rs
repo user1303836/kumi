@@ -635,7 +635,8 @@ impl TuiApp {
                             None => app.notice("That note was already gone.", NoticeTone::Info),
                         },
                         Some("forget") => {
-                            if c.forget(&note.id).await?.is_none() {
+                            let gone = c.forget(&note.id).await?.is_none();
+                            if gone {
                                 app.notice("That note was already gone.", NoticeTone::Info);
                             }
                         }

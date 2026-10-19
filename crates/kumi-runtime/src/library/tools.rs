@@ -426,7 +426,7 @@ impl LibraryTool {
                         }
                     })
                     .collect();
-                candidates.sort_by(|a, b| b.mtime.cmp(&a.mtime));
+                candidates.sort_by_key(|a| std::cmp::Reverse(a.mtime));
                 candidates.first().copied()
             };
             let entry = entries.iter().find(|e| Some(&e.path) == path.as_ref()).or_else(|| newest(true)).or_else(|| newest(false));

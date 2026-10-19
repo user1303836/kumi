@@ -1133,8 +1133,8 @@ fn read_recording(path: &Path) -> Result<(f64, Vec<[f64; 4]>), String> {
                 rate = u32::from_le_bytes(body[4..8].try_into().unwrap()) as f64;
             }
             b"data" if channels == 6 => {
-                let floats: Vec<f64> = body.chunks_exact(4).map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()) as f64).collect();
-                return Ok((rate, floats.chunks_exact(6).map(|c| [c[0] + c[1], c[2] + c[3], c[4], c[5]]).collect()));
+                let floats: Vec<f64> = body.as_chunks::<4>().0.iter().map(|&bytes| f32::from_le_bytes(bytes) as f64).collect();
+                return Ok((rate, floats.as_chunks::<6>().0.iter().map(|c| [c[0] + c[1], c[2] + c[3], c[4], c[5]]).collect()));
             }
             _ => {}
         }

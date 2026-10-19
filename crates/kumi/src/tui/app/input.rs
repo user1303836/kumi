@@ -1164,10 +1164,8 @@ impl TuiApp {
                     );
                 }
             }
-            Err(error) => {
-                if !self.0.state.borrow().closing {
-                    self.error(&error);
-                }
+            Err(error) if !self.0.state.borrow().closing => {
+                self.error(&error);
             }
             _ => {}
         }

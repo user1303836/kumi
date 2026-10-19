@@ -100,7 +100,7 @@ fn strict_tar_parser_rejects_checksum_links_duplicates_paths_and_termination() {
     let mut bytes = original.clone();
     bytes[100] ^= 1;
     check(&bytes, "checksum is invalid");
-    for kind in [b'1', b'2', b'5', b'x', b'g'] {
+    for kind in *b"125xg" {
         let mut bytes = original.clone();
         bytes[156] = kind;
         checksum(&mut bytes[..512]);

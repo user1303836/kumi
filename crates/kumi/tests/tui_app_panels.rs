@@ -674,6 +674,8 @@ case!(resume_lists_this_sets_and_every_sets_conversations_and_asks_about_another
     h.type_text("/resume far\r").await;
     h.has("filter: far");
     h.type_text("\x1b").await;
+    // (an esc read with the next keys reads as alt and one of them: they go once the list has closed)
+    h.wait_until_hidden("filter: far").await;
     // A long name, cut in its row, is found by its end too.
     let mut all: Vec<serde_json::Value> = h.control.get("all").unwrap();
     all.push(json!({"id":"far003","savedAt":now-9000000,"first":"tune the kick","turns":1,"current":false,"place":"b","set":"Morning Run","name":"Kick and sub ideas for the second drop"}));
@@ -683,6 +685,7 @@ case!(resume_lists_this_sets_and_every_sets_conversations_and_asks_about_another
     h.type_text("second drop").await;
     h.has("Kick and sub ideas for the se…");
     h.type_text("\x1b").await;
+    h.wait_until_hidden("filter: second drop").await;
     h.type_text("/resume nothing\r").await;
     h.has("No conversation nothing; /resume lists them.");
     // Another Set's: open it there (recommended), carry it on here as a copy, or leave it; esc leaves it.

@@ -75,7 +75,7 @@ pub trait DawSetup {
 }
 
 /// Live's side of setup, as the app and its tests have always named it.
-pub use DawSetup as LiveSetup;
+pub use self::DawSetup as LiveSetup;
 
 /// How long Kumi keeps watching, after the producer put the Live step off, for Live to quit on the
 /// request Kumi already sent (its save dialog still up), so it can open Live again.

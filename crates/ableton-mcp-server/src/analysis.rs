@@ -839,7 +839,7 @@ pub fn decode_float32_le(base64: &str) -> Result<Vec<f32>, RangeError> {
         return Err(RangeError("pcmBase64 must contain bounded float32 PCM".to_string()));
     }
     let mut result = Vec::with_capacity(bytes.len() / 4);
-    for chunk in bytes.chunks_exact(4) {
+    for chunk in bytes.as_chunks::<4>().0 {
         let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         if !sample.is_finite() || !(-1.0..=1.0).contains(&sample) {
             return Err(RangeError("pcmBase64 must contain finite normalized float32 PCM".to_string()));
