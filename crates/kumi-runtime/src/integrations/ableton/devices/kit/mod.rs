@@ -3,8 +3,6 @@
 //! worked out once, in [`clock`], and tested sample by sample.
 
 pub mod clock;
-#[cfg(test)]
-pub(crate) mod genexpr;
 
 use clock::{CLOCK, TRANSPORT};
 

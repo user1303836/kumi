@@ -286,7 +286,7 @@ pub fn page(id: &str, name: &str, sources: &[String], slots: usize, modulate: bo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::devices::kit::genexpr::Gen;
+    use kumi_genexpr::Gen;
 
     #[test]
     fn each_slot_follows_its_source_between_its_min_and_max() {

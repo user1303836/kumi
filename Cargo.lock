@@ -1253,6 +1253,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "kumi-genexpr"
+version = "1.19.2"
+
+[[package]]
 name = "kumi-runtime"
 version = "1.19.2"
 dependencies = [
@@ -1269,6 +1273,7 @@ dependencies = [
  "home",
  "indexmap",
  "kumi-common",
+ "kumi-genexpr",
  "kumi-store",
  "libc",
  "md-5",

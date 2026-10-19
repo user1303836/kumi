@@ -71,6 +71,8 @@ libc.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+# The GenExpr interpreter the building blocks' tests run their gen~ code in (optimized even in tests).
+kumi-genexpr.workspace = true
 tempfile.workspace = true
 # Certificates for the stand-in servers and proxies of the network tests, with the ring Kumi's TLS already has.
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }

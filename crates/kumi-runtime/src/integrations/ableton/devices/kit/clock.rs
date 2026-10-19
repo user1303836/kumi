@@ -272,244 +272,8 @@ out4 = playing;
 
 #[cfg(test)]
 mod tests {
-    use super::super::genexpr::Gen;
     use super::*;
-
-    const RATE: f64 = 44_100.0;
-    const VECTOR: usize = 64;
-
-    /// A change Live makes on the next vector's first sample.
-    #[derive(Debug, Clone, Copy)]
-    enum Change {
-        Play,
-        Stop,
-        Jump(f64),
-        Tempo(f64),
-    }
-
-    /// Live as a Max for Live device sees it, one sample at a time, the way Live 12 was recorded doing it (the module's
-    /// notes say what). The song position moves at the tempo while Live plays and goes back at its loop's end on the
-    /// sample it reaches it.
-    struct Live {
-        position: f64,
-        bpm: f64,
-        playing: bool,
-        loop_on: bool,
-        loop_start: f64,
-        loop_length: f64,
-        /// How far a tempo change moves the song position: this many samples of the change in a sample's advance.
-        tempo_shift: f64,
-        /// plugphasor~ reads 0 while Live is stopped, as its reference says, instead of holding.
-        zero_when_stopped: bool,
-        /// plugsync~'s position is a sample further on every this many vectors (0: never).
-        jitter: usize,
-        /// The sig~s after plugsync~ read 0 for the first vector, as when the device loads while Live plays.
-        late_first_vector: bool,
-        sample: usize,
-        pending: Vec<Change>,
-        heard: f64,
-        flag: f64,
-        said_bpm: f64,
-        phase: f64,
-        line: f64,
-        held: Option<f64>,
-        held_vector: bool,
-        stepped: f64,
-        played: bool,
-    }
-
-    impl Live {
-        fn new() -> Live {
-            Live {
-                position: 0.0,
-                bpm: 120.0,
-                playing: false,
-                loop_on: false,
-                loop_start: 0.0,
-                loop_length: 4.0,
-                tempo_shift: 400.0,
-                zero_when_stopped: false,
-                jitter: 0,
-                late_first_vector: false,
-                sample: 0,
-                pending: Vec::new(),
-                heard: 0.0,
-                flag: 0.0,
-                said_bpm: 0.0,
-                phase: 0.0,
-                line: 0.0,
-                held: None,
-                held_vector: false,
-                stepped: 0.0,
-                played: false,
-            }
-        }
-
-        fn advance(&self) -> f64 {
-            self.bpm / 60.0 / RATE
-        }
-
-        fn change(&mut self, change: Change) {
-            self.pending.push(change);
-        }
-
-        /// One sample: what plugphasor~ and plugsync~ (position, play flag, tempo) say, and where the song truly is;
-        /// then the song moves on.
-        fn tick(&mut self) -> ([f64; 4], f64) {
-            let first = self.sample % VECTOR == 0;
-            let was_playing = self.playing;
-            if first {
-                for change in std::mem::take(&mut self.pending) {
-                    match change {
-                        Change::Play => self.playing = true,
-                        Change::Stop => self.playing = false,
-                        Change::Jump(to) => self.position = to,
-                        Change::Tempo(bpm) => {
-                            let before = self.advance();
-                            self.bpm = bpm;
-                            if self.playing {
-                                self.position += self.tempo_shift * (self.advance() - before);
-                            }
-                        }
-                    }
-                }
-                let silent = self.late_first_vector && self.sample == 0;
-                self.flag = if self.playing && !silent { 1.0 } else { 0.0 };
-                self.said_bpm = if silent { 0.0 } else { self.bpm };
-                self.heard = if silent {
-                    0.0
-                } else if self.playing {
-                    let mut samples = (self.position / self.advance()).round() - VECTOR as f64;
-                    if self.jitter > 0 && (self.sample / VECTOR) % self.jitter == self.jitter - 1 {
-                        samples += 1.0;
-                    }
-                    samples * self.advance()
-                } else {
-                    self.position
-                };
-            }
-            let fraction = |x: f64| x - x.floor();
-            // plugphasor~: a line from where Live says the song is on the vector's first sample. Where that's behind
-            // the phase it would have gone on to (unwrapped: a beat's line just before the vector counts), it holds
-            // until the line passes it or the vector ends; the vector after a hold takes Live's phase as it is.
-            let out = if !self.playing {
-                if was_playing && first {
-                    self.phase = fraction(self.position);
-                }
-                if self.zero_when_stopped || !self.played {
-                    0.0
-                } else {
-                    self.phase
-                }
-            } else if first {
-                self.line = self.position;
-                let own = self.phase + if was_playing { self.stepped } else { 0.0 };
-                let live = fraction(self.position);
-                if live >= own - 1e-9 || !self.played || self.held_vector {
-                    self.held = None;
-                    self.held_vector = false;
-                    live
-                } else {
-                    self.held = Some(own);
-                    self.held_vector = true;
-                    own
-                }
-            } else {
-                let live = fraction(self.line + (self.sample % VECTOR) as f64 * self.advance());
-                match self.held {
-                    Some(held) if live < held => held,
-                    _ => {
-                        self.held = None;
-                        live
-                    }
-                }
-            };
-            self.phase = out;
-            self.played |= self.playing;
-            let truth = self.position;
-            self.stepped = 0.0;
-            if self.playing {
-                let end = self.loop_start + self.loop_length;
-                let next = self.position + self.advance();
-                let inside = self.loop_on && self.position >= self.loop_start && self.position < end;
-                self.position = if inside && next >= end { next - self.loop_length } else { next };
-                self.stepped = self.advance();
-            }
-            self.sample += 1;
-            ([out, self.heard, self.flag, self.said_bpm], truth)
-        }
-    }
-
-    /// Kumi's transport and clock, wired as [kumi.clock] wires them.
-    struct Device {
-        transport: Gen,
-        clock: Gen,
-    }
-
-    impl Device {
-        fn new(delayed: bool, division: f64, length: f64) -> Device {
-            let mut device = Device { transport: Gen::new(TRANSPORT, delayed), clock: Gen::new(CLOCK, delayed) };
-            device.clock.set("division", division);
-            device.clock.set("length", length);
-            device
-        }
-
-        /// The device told Live's loop settings, as its live.observers tell it.
-        fn told_loop(&mut self, live: &Live) {
-            self.transport.set("loop_on", if live.loop_on { 1.0 } else { 0.0 });
-            self.transport.set("loop_start", live.loop_start);
-            self.transport.set("loop_length", live.loop_length);
-        }
-
-        /// One sample: whether a step starts, its index and its length in ms (read from the clock's buffer, as the
-        /// patch's peek~ reads them once the vector is done), and where the true song position was.
-        fn tick(&mut self, live: &mut Live) -> (bool, f64, f64, f64) {
-            let (read, truth) = live.tick();
-            let transport = self.transport.tick(&read, 6);
-            let clock = self.clock.tick(&transport, 4);
-            let memory = &self.clock.buffers[0].1;
-            if clock[0] > 0.5 {
-                assert_eq!((memory[0], memory[1]), (clock[1], clock[2]), "the buffer holds the step that starts");
-            }
-            (clock[0] > 0.5, memory[0], memory[1], truth)
-        }
-    }
-
-    /// A step that started: the sample, its index, and the true song position then.
-    #[derive(Debug, Clone, PartialEq)]
-    struct Step {
-        sample: usize,
-        index: usize,
-        position: f64,
-    }
-
-    /// `samples` of the song through Kumi's clock, `between` running before each vector (Live's settings moving),
-    /// with every sample's true song position.
-    fn run_tracing(
-        device: &mut Device,
-        live: &mut Live,
-        samples: usize,
-        mut between: impl FnMut(&mut Device, &mut Live, usize),
-    ) -> (Vec<Step>, Vec<(usize, f64)>) {
-        let mut steps = Vec::new();
-        let mut positions = Vec::new();
-        for _ in 0..samples {
-            if live.sample % VECTOR == 0 {
-                between(device, live, live.sample);
-            }
-            let sample = live.sample;
-            let (fire, index, _, position) = device.tick(live);
-            positions.push((sample, position));
-            if fire {
-                steps.push(Step { sample, index: index as usize, position });
-            }
-        }
-        (steps, positions)
-    }
-
-    fn run(device: &mut Device, live: &mut Live, samples: usize, between: impl FnMut(&mut Device, &mut Live, usize)) -> Vec<Step> {
-        run_tracing(device, live, samples, between).0
-    }
+    use kumi_genexpr::live::{run, run_tracing, Change, Device, Live, Step, RATE, VECTOR};
 
     /// How Live and Max can differ without changing a step: a History's new value read at once or at the next sample,
     /// plugphasor~ holding or reading 0 while stopped, and plugsync~'s position a sample off now and then.
@@ -529,7 +293,7 @@ mod tests {
         }
 
         fn device(&self, division: f64, length: f64) -> Device {
-            Device::new(self.delayed, division, length)
+            Device::new(TRANSPORT, CLOCK, self.delayed, division, length)
         }
     }
 
@@ -773,7 +537,7 @@ mod tests {
             live.bpm = from;
             live.tempo_shift = shift;
             live.position = start;
-            let mut device = Device::new(delayed, 0.25, 16.0);
+            let mut device = Device::new(TRANSPORT, CLOCK, delayed, 0.25, 16.0);
             live.change(Change::Play);
             let (steps, positions) = run_tracing(&mut device, &mut live, samples, |_, live, sample| {
                 if let Some(bpm) = tempo(sample) {
@@ -895,7 +659,7 @@ mod tests {
         live.playing = true;
         live.played = true;
         live.position = 3.1;
-        let mut device = Device::new(false, 0.25, 16.0);
+        let mut device = Device::new(TRANSPORT, CLOCK, false, 0.25, 16.0);
         let steps = run(&mut device, &mut live, 30_000, |_, _, _| {});
         assert_eq!(steps[0].index, 13, "{steps:?}");
         assert!((steps[0].position - 3.25).abs() < 0.0001, "{steps:?}");
@@ -910,7 +674,7 @@ mod tests {
         let mut live = Live::new();
         live.loop_on = true;
         live.loop_length = 3.5;
-        let mut device = Device::new(false, 0.25, 16.0);
+        let mut device = Device::new(TRANSPORT, CLOCK, false, 0.25, 16.0);
         live.change(Change::Play);
         let (steps, positions) = run_tracing(&mut device, &mut live, (RATE * 3.0) as usize, |_, _, _| {});
         let wraps: Vec<usize> = positions.windows(2).filter(|pair| pair[1].1 < pair[0].1).map(|pair| pair[1].0).collect();
@@ -923,7 +687,7 @@ mod tests {
         assert!(after.windows(2).all(|pair| pair[1].index == pair[0].index + 1), "{steps:?}");
         // And told of a loop Live doesn't have: the steps go back at its end, then on with Live within a vector.
         let mut live = Live::new();
-        let mut device = Device::new(false, 0.25, 16.0);
+        let mut device = Device::new(TRANSPORT, CLOCK, false, 0.25, 16.0);
         device.transport.set("loop_on", 1.0);
         device.transport.set("loop_length", 3.5);
         live.change(Change::Play);
@@ -950,7 +714,7 @@ mod tests {
             (0..20_000).map(|_| (divisions[(random() % divisions.len() as u64) as usize], (random() % 51) as f64 / 100.0)).collect();
         let mut live = Live::new();
         live.jitter = 5;
-        let mut device = Device::new(false, 0.25, 16.0);
+        let mut device = Device::new(TRANSPORT, CLOCK, false, 0.25, 16.0);
         live.change(Change::Play);
         let steps = run(&mut device, &mut live, 64 * 20_000, |device, _, sample| {
             let (division, swing) = picks[sample / 64];
@@ -981,7 +745,7 @@ mod tests {
     fn a_division_change_on_the_sample_a_line_falls_lands_one_step_there() {
         // From sixteenths to eighths at the start of beat 2, where both grids have a line: one step there, then eighths.
         let mut live = Live::new();
-        let mut device = Device::new(false, 0.25, 16.0);
+        let mut device = Device::new(TRANSPORT, CLOCK, false, 0.25, 16.0);
         live.change(Change::Play);
         let change = (1.0 / 2.0 * RATE) as usize / 64 * 64;
         let steps = run(&mut device, &mut live, (2.0 * RATE) as usize, |device, _, sample| {
@@ -997,7 +761,7 @@ mod tests {
     #[test]
     fn a_shorter_length_starts_the_pattern_again_at_its_next_step() {
         let mut live = Live::new();
-        let mut device = Device::new(false, 0.25, 16.0);
+        let mut device = Device::new(TRANSPORT, CLOCK, false, 0.25, 16.0);
         live.change(Change::Play);
         let steps = run(&mut device, &mut live, (RATE * 4.0) as usize, |device, _, sample| {
             if sample == (2.6 / 2.0 * RATE) as usize / 64 * 64 {
@@ -1013,7 +777,7 @@ mod tests {
     #[test]
     fn a_swing_raised_after_the_off_beat_doesnt_play_it_again() {
         let mut live = Live::new();
-        let mut device = Device::new(false, 0.25, 16.0);
+        let mut device = Device::new(TRANSPORT, CLOCK, false, 0.25, 16.0);
         live.change(Change::Play);
         let raise = (0.26 / 2.0 * RATE) as usize / VECTOR * VECTOR;
         let steps = run(&mut device, &mut live, (RATE * 1.0) as usize, |device, _, sample| {
@@ -1033,7 +797,7 @@ mod tests {
     fn a_division_change_inside_a_pair_waits_for_the_new_grids_line() {
         // From quarter notes to eighth-note triplets at 0.4 beats: nothing at once, the next step at 2/3.
         let mut live = Live::new();
-        let mut device = Device::new(false, 1.0, 16.0);
+        let mut device = Device::new(TRANSPORT, CLOCK, false, 1.0, 16.0);
         live.change(Change::Play);
         let change = (0.4 / 2.0 * RATE) as usize / VECTOR * VECTOR;
         let steps = run(&mut device, &mut live, (RATE * 0.6) as usize, |device, _, sample| {
@@ -1124,7 +888,7 @@ mod tests {
     fn replay(name: &str, looped: Option<(f64, f64)>, read: &[[f64; 4]]) {
         let truth = truth(read, looped);
         for division in [0.25, 1.0 / 6.0] {
-            let mut device = Device::new(false, division, 16.0);
+            let mut device = Device::new(TRANSPORT, CLOCK, false, division, 16.0);
             if let Some((start, length)) = looped {
                 device.transport.set("loop_on", 1.0);
                 device.transport.set("loop_start", start);

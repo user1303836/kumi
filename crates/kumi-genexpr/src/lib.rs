@@ -9,6 +9,8 @@
 //! sample, which shows the code means the same whichever way gen~ orders them. Anything else (an unknown name or
 //! operator, a local read before it's set) fails the test that runs it.
 
+pub mod live;
+
 #[derive(Debug, Clone, PartialEq)]
 enum Token {
     Number(f64),
