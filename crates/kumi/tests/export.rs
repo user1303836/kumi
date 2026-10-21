@@ -29,7 +29,8 @@ fn zone() -> FixedOffset {
 
 /// Secrets by their shapes, each with what of it must not survive.
 const SHAPES: [(&str, &str); 14] = [
-    ("AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY", "9tSrke72PouQMnMX"),
+    // An example, not a key, and in pieces as the Stripe one below: whole, secret scanning takes it for a real key.
+    (concat!("AIza", "SyEXAMPLE-EXAMPLE-EXAMPLE-EXAMPLE-0"), "EXAMPLE-EXAMPLE-EXAMPLE"),
     ("ghp_16C7e42F292c6912E7710c838347Ae178B4a", "16C7e42F292c6912E77"),
     ("AKIAIOSFODNN7EXAMPLE", "IOSFODNN7EXAMPLE"),
     ("aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "bPxRfiCYEXAMPLEKEY"),
