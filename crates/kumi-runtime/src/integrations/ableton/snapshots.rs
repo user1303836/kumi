@@ -36,10 +36,11 @@ const CLIP_VERSION: u8 = 1;
 pub const CODE_LIMIT: usize = 65_536;
 /// What each call leaves free under that.
 const MARGIN: usize = 1024;
-/// The most kept clips' JSON this session holds in memory; the oldest past it are read back from history.db.
-const KEPT_BYTES: usize = 64 * 1024 * 1024;
+/// The most kept clips' JSON this session holds in memory; the oldest past it are read back from history.db. (A
+/// megabyte in this module's tests, which fill it.)
+const KEPT_BYTES: usize = if cfg!(test) { 1024 * 1024 } else { 64 * 1024 * 1024 };
 /// The most an unsaved Set's kept clips wait in memory to be written once it's saved.
-const PENDING_BYTES: usize = 64 * 1024 * 1024;
+const PENDING_BYTES: usize = if cfg!(test) { 1024 * 1024 } else { 64 * 1024 * 1024 };
 /// Live's own refusals that Kumi passes on: they say what's in the way.
 const CHECKS: &[&str] = &[
     "changed in Live since",
@@ -697,7 +698,7 @@ mod tests {
             over_file: false,
         };
         let mut kept = vec![];
-        for n in 0..300 {
+        for n in 0..8 {
             kept.extend(history.keep(None, Some(&current), &[clip(&n.to_string())], "Deleted", json!({}), n));
         }
         assert!(history.bytes.get() <= KEPT_BYTES, "{}", history.bytes.get());

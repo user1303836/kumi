@@ -98,6 +98,16 @@ opt-level = 3
 [profile.dev.package.adler2]
 opt-level = 3
 
+# And regular expressions: the terminal's Markdown is matched by a backtracking one, which long lines take to its limit.
+[profile.dev.package.fancy-regex]
+opt-level = 3
+[profile.dev.package.regex]
+opt-level = 3
+[profile.dev.package.regex-automata]
+opt-level = 3
+[profile.dev.package.regex-syntax]
+opt-level = 3
+
 # The GenExpr interpreter runs Kumi's building blocks a sample at a time in their tests: optimized, a song's worth of
 # samples takes a moment instead of minutes.
 [profile.dev.package.kumi-genexpr]

@@ -14,8 +14,11 @@ threads-required = "num-cpus"
 #   benchmarks;
 # - the interoperability tests run beside the official MCP and model SDKs (npm), and the migration from the published
 #   1.7.5 (downloaded);
-# - the long sample-by-sample sweeps of the timing building blocks (kit::clock): the rules each one proves are run by the
-#   short tests beside them, which stay;
+# - the long sample-by-sample sweeps of the timing building blocks (kit::clock), each in every way Live and Max can differ:
+#   the short tests beside them, which stay, check the same rules, except tempo changes and jumps by whole beats, which
+#   only these sweeps check;
+# - the layers tool's whole flows against its fake DAW (renders of every layer, aligned and glued): the tool's own tests,
+#   the limiter's flow and what it needs stay;
 # - REAPER's and Renoise's whole-flow runs on simulators: the listening flows (own_listening_e2e, fake_daw_listening:
 #   renders, auditions, goals and judged rounds, a minute of CPU), the word checks over whole sessions (daw_words) and
 #   the full-screen app's sessions (app_sessions). The engine's, the host's and the extension's own tests stay, and so do
@@ -35,6 +38,8 @@ not (
   | (test(/match(es)?_(the_)?(source|typescript)|source_oracle|oracle|matches?_typescript/)
       & not binary_id(kumi-runtime::changes) & not binary_id(kumi-runtime::pin_first_request))
   | test(/kit::clock::tests::(a_tempo_change_of_any_size|lives_loop_starts|play_after_a_stop|stopping_ends_the_steps|a_jump_lands_on_its_step|on_lives_own_recordings|a_tempo_ramp)/)
+  | test(/kit::clock::tests::(steps_start_on_the_sample|a_start_inside_a_step|a_jump_by_whole_beats|a_tempo_rise_just_after|a_division_or_swing_moved)/)
+  | test(/core::layers::fake_backend_tests::(a_late_flipped_layer|glue_hears_the_group)/)
 )
 '''
 # A blocking test that runs past 30 s fails, by name: what takes that long belongs in `extended`, or needs making faster.
@@ -71,6 +76,8 @@ default-filter = '''
   | (test(/match(es)?_(the_)?(source|typescript)|source_oracle|oracle|matches?_typescript/)
       & not binary_id(kumi-runtime::changes) & not binary_id(kumi-runtime::pin_first_request))
   | test(/kit::clock::tests::(a_tempo_change_of_any_size|lives_loop_starts|play_after_a_stop|stopping_ends_the_steps|a_jump_lands_on_its_step|on_lives_own_recordings|a_tempo_ramp)/)
+  | test(/kit::clock::tests::(steps_start_on_the_sample|a_start_inside_a_step|a_jump_by_whole_beats|a_tempo_rise_just_after|a_division_or_swing_moved)/)
+  | test(/core::layers::fake_backend_tests::(a_late_flipped_layer|glue_hears_the_group)/)
 )
 '''
 slow-timeout = { period = "15s", terminate-after = 2 }

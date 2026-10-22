@@ -489,61 +489,61 @@ fn kumi_runs_the_devices_tests_and_its_own_checks_a_working_device_passes_a_brok
 #[tokio::test]
 async fn a_devices_code_is_checked_in_a_process_of_its_own_it_cant_reach_kumi_cant_make_code_from_strings_and_cant_hang_kumi() {
     use_built_harness();
-    // The same verdicts as in-process.
-    assert_eq!(
-        check_midi_device_isolated(&spec(json!({})), IsolatedOptions::default()).await,
-        Checked { passed: 4, of: 4, problems: vec![], runaway: false }
+    // Each check in a process of its own, all at once: two of them wait out their deadline.
+    let isolated = |code: Value, options: IsolatedOptions| async move { check_midi_device_isolated(&spec(code), options).await };
+    let (same, escape, (endless, endless_took), sending, saying, looping, throwing) = tokio::join!(
+        isolated(json!({}), IsolatedOptions::default()),
+        isolated(
+            json!({ "code": "function midi(event) { const F = post['constr' + 'uctor']; F('return process')().exit(3); pass(event); }", "tests": [] }),
+            IsolatedOptions::default(),
+        ),
+        async {
+            let started = Instant::now();
+            let endless = isolated(
+                json!({ "code": "function midi(event) { while (true) {} }", "tests": [] }),
+                IsolatedOptions { timeout_ms: Some(1_500) },
+            )
+            .await;
+            (endless, started.elapsed())
+        },
+        isolated(
+            json!({ "code": "function midi(event) { for (;;) send({ type: 'cc', controller: 1, value: 1 }); }", "tests": [] }),
+            IsolatedOptions::default(),
+        ),
+        isolated(
+            json!({ "code": "function midi(event) { for (;;) post('Kumi device: again\\n'); pass(event); }", "tests": [] }),
+            IsolatedOptions::default()
+        ),
+        isolated(
+            json!({ "code": "let i = 0; while (true) { i++; }\nfunction midi(event) { pass(event); }", "tests": [] }),
+            IsolatedOptions::default()
+        ),
+        isolated(
+            json!({ "code": "function midi(event) { if (event.type === 'cc') missing(); if (event.type !== 'noteoff') pass(event); }", "tests": [] }),
+            IsolatedOptions::default(),
+        ),
     );
+    // The same verdicts as in-process.
+    assert_eq!(same, Checked { passed: 4, of: 4, problems: vec![], runaway: false });
     // An escape through a host function's constructor can't compile anything.
-    let escape = check_midi_device_isolated(
-        &spec(json!({ "code": "function midi(event) { const F = post['constr' + 'uctor']; F('return process')().exit(3); pass(event); }", "tests": [] })),
-        IsolatedOptions::default(),
-    )
-    .await;
     assert!(matches(&escape.problems.join(" "), "it threw: .*[Cc]ode generation from strings disallowed"), "{:?}", escape.problems);
     // A loop that never ends is stopped at the deadline, and said.
-    let started = Instant::now();
-    let endless = check_midi_device_isolated(
-        &spec(json!({ "code": "function midi(event) { while (true) {} }", "tests": [] })),
-        IsolatedOptions { timeout_ms: Some(1_500) },
-    )
-    .await;
     assert!(matches(&endless.problems.join(" "), "didn't finish within 2 s; something loops forever"), "{:?}", endless.problems);
     assert!(endless.runaway, "code that never stops is said to run away, for the device to keep it unrun");
-    assert!(started.elapsed().as_millis() < 5_000);
+    assert!(endless_took.as_millis() < 5_000);
     // A loop that sends or says without end is stopped once a run has kept enough, and said so: before, what it sent
     // and said grew the check's process toward a gigabyte until the deadline.
-    let sending = check_midi_device_isolated(
-        &spec(json!({ "code": "function midi(event) { for (;;) send({ type: 'cc', controller: 1, value: 1 }); }", "tests": [] })),
-        IsolatedOptions::default(),
-    )
-    .await;
     assert!(
         matches(&sending.problems.join(" "), r"it sent more than \d+ events for 11 in, and was stopped there; something sends without end"),
         "{:?}",
         sending.problems
     );
     assert!(sending.runaway);
-    let saying = check_midi_device_isolated(
-        &spec(json!({ "code": "function midi(event) { for (;;) post('Kumi device: again\\n'); pass(event); }", "tests": [] })),
-        IsolatedOptions::default(),
-    )
-    .await;
     assert!(matches(&saying.problems.join(" "), "Kumi's check: it threw: again"), "{:?}", saying.problems);
     assert!(!matches(&saying.problems.join(" "), "didn't finish"), "{:?}", saying.problems);
     assert!(saying.runaway, "it says without end");
     // A top level that never stops runs away too; code that throws, fails its tests or leaves notes hanging doesn't.
-    let looping = check_midi_device_isolated(
-        &spec(json!({ "code": "let i = 0; while (true) { i++; }\nfunction midi(event) { pass(event); }", "tests": [] })),
-        IsolatedOptions::default(),
-    )
-    .await;
     assert!(looping.runaway && matches(&looping.problems.join(" "), "Script execution timed out after 2000ms"), "{looping:?}");
-    let throwing = check_midi_device_isolated(
-        &spec(json!({ "code": "function midi(event) { if (event.type === 'cc') missing(); if (event.type !== 'noteoff') pass(event); }", "tests": [] })),
-        IsolatedOptions::default(),
-    )
-    .await;
     assert!(!throwing.runaway && throwing.problems.len() == 2, "{throwing:?}");
 }
 

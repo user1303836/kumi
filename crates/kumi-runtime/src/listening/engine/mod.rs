@@ -419,7 +419,8 @@ mod tests {
         let leads = |lead: f64, from: f64| async move {
             let host = Rc::new(Recording { lead, dir: tempfile::tempdir().unwrap(), flag: ListenFlag::default() });
             let listening = Listening::new(host, None, None, None, None);
-            let heard = listening.hear_takes(&["Bass".to_string()], Window { from, beats: 8. }, "measuring Bass", Signal::new()).await;
+            // (a beat of noise after its lead: the lead is what's checked, and a short take hears quickly)
+            let heard = listening.hear_takes(&["Bass".to_string()], Window { from, beats: 2. }, "measuring Bass", Signal::new()).await;
             heard.unwrap().unwrap()["Bass"].1
         };
         assert_eq!(leads(0.5, 16.).await, 0.5, "inside the song: the whole lead");

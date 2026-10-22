@@ -18,8 +18,9 @@ struct Fake {
     dir: tempfile::TempDir,
     /// The master fader (dB).
     master: Cell<f64>,
-    /// The mix before the fader: 1 kHz at this amplitude, with spikes (peaks) and a quiet tail as asked.
+    /// The mix before the fader: 1 kHz at this amplitude for this long, with spikes (peaks) and a quiet tail as asked.
     amplitude: f32,
+    seconds: u32,
     spikes: f32,
     tail: Option<f32>,
     renders: Cell<usize>,
@@ -32,6 +33,7 @@ impl Fake {
             dir: tempfile::tempdir().unwrap(),
             master: Cell::new(0.),
             amplitude,
+            seconds: 4,
             spikes: 0.,
             tail: None,
             renders: Cell::new(0),
@@ -49,7 +51,7 @@ impl SpecBackend for Rc<Fake> {
     async fn render_mix(&self, _stretch: Option<(f64, f64)>, _signal: &Signal) -> Result<Render, String> {
         let gain = 10f32.powf(self.master.get() as f32 / 20.);
         let mut mono: Vec<f32> =
-            (0..RATE * 4).map(|k| self.amplitude * (2. * std::f32::consts::PI * 1000. * k as f32 / RATE as f32).sin()).collect();
+            (0..RATE * self.seconds).map(|k| self.amplitude * (2. * std::f32::consts::PI * 1000. * k as f32 / RATE as f32).sin()).collect();
         if self.spikes > 0. {
             for at in (0..mono.len()).step_by(RATE as usize / 2) {
                 mono[at] = self.spikes;
@@ -90,8 +92,8 @@ fn line<'a>(reply: &'a Value, what: &str) -> &'a Value {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_quiet_mix_is_checked_against_spotify_fixed_by_its_master_fader_and_measured_again() {
-    // (a 1 kHz tone at 0.12 peak: about -18 LUFS, a few dB under Spotify's)
-    let fake = Fake::new(0.12);
+    // (a 1 kHz tone at 0.12 peak: about -18 LUFS, a few dB under Spotify's; a second of it measures as four do)
+    let fake = Rc::new(Fake { seconds: 1, ..Rc::try_unwrap(Fake::new(0.12)).ok().unwrap() });
     let tool = DeliverySpec::new(fake.clone()).tool();
     let checked = run(&tool, json!({"spec": "spotify"})).await.unwrap();
     assert_eq!(checked["ok"], false, "{checked}");
@@ -115,20 +117,21 @@ async fn a_quiet_mix_is_checked_against_spotify_fixed_by_its_master_fader_and_me
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_fader_never_pushes_peaks_past_the_ceiling_nor_past_its_most() {
-    // Spikes at full scale over a quiet tone: louder means past the ceiling, so a limiter first.
-    let fake = Rc::new(Fake { spikes: 0.95, ..Rc::try_unwrap(Fake::new(0.03)).ok().unwrap() });
+    // Spikes at full scale over a quiet tone: louder means past the ceiling, so a limiter first. (A second of each mix.)
+    let short = |amplitude| Rc::try_unwrap(Fake::new(amplitude)).ok().unwrap();
+    let fake = Rc::new(Fake { spikes: 0.95, seconds: 1, ..short(0.03) });
     let tool = DeliverySpec::new(fake.clone()).tool();
     let fixed = run(&tool, json!({"action": "fix", "spec": "spotify"})).await.unwrap();
     assert!(fake.moves.borrow().is_empty(), "{fixed}");
     assert!(fixed["said"][0].as_str().unwrap().contains("limit the master's peaks first (the Fake's limiter)"), "{fixed}");
     // Too loud is brought down whatever its peaks.
-    let loud = Fake::new(0.9);
+    let loud = Rc::new(Fake { seconds: 1, ..short(0.9) });
     let tool = DeliverySpec::new(loud.clone()).tool();
     let fixed = run(&tool, json!({"action": "fix", "spec": "ebu-r128"})).await.unwrap();
     assert!(loud.moves.borrow()[0] < 0., "{fixed}");
     assert_eq!(fixed["ok"], true, "{fixed}");
     // A fader at its most: a gainer.
-    let quiet = Fake::new(0.002);
+    let quiet = Rc::new(Fake { seconds: 1, ..short(0.002) });
     let tool = DeliverySpec::new(quiet.clone()).tool();
     let fixed = run(&tool, json!({"action": "fix", "spec": "spotify"})).await.unwrap();
     assert!(fixed["said"][0].as_str().unwrap().contains("a gainer on the master"), "{fixed}");

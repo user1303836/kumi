@@ -444,41 +444,48 @@ async fn ask_with_a_recommendation(h: &Harness) {
 }
 
 case!(nobody_there_kumi_takes_its_recommended_answer_after_the_countdown_and_any_key_stops_it, async {
+    // Each case waits out a countdown of a second or more, in a Kumi of its own: all at once.
     let quick = AwaySettings { answer_after: 1, ..AwaySettings::default() };
-    let h = away_with(Rc::new(Control::default()), NotifyChannel::None, quick.clone());
-    h.start().await;
-    h.connect();
-    ask_with_a_recommendation(&h).await;
-    h.wait_for("Taking 2 (recommended) in 1 s · any key cancels").await;
-    h.has("2. Drums bus");
-    h.has("recommended");
-    h.wait_for_call("submit:Drums bus").await;
-    h.has("No answer in 1 s; went with 2.");
-    assert!(!h.calls().iter().any(|c| c.starts_with("picked:")), "not the producer's pick: {:?}", h.calls());
-    h.close().await;
+    let taken = async {
+        let h = away_with(Rc::new(Control::default()), NotifyChannel::None, quick.clone());
+        h.start().await;
+        h.connect();
+        ask_with_a_recommendation(&h).await;
+        h.wait_for("Taking 2 (recommended) in 1 s · any key cancels").await;
+        h.has("2. Drums bus");
+        h.has("recommended");
+        h.wait_for_call("submit:Drums bus").await;
+        h.has("No answer in 1 s; went with 2.");
+        assert!(!h.calls().iter().any(|c| c.starts_with("picked:")), "not the producer's pick: {:?}", h.calls());
+        h.close().await;
+    };
     // Where /goal is offered, the goal that stopped on the question carries on with the answer.
-    let control = Rc::new(Control::default());
-    *control.extra.borrow_mut() = json!({"goal": true});
-    let h = away_with(control, NotifyChannel::None, quick.clone());
-    h.start().await;
-    h.connect();
-    ask_with_a_recommendation(&h).await;
-    h.wait_for_call("goal:answer: Drums bus").await;
-    assert!(!h.calls().iter().any(|c| c == "submit:Drums bus"), "not a message of its own: {:?}", h.calls());
-    h.close().await;
+    let goal = async {
+        let control = Rc::new(Control::default());
+        *control.extra.borrow_mut() = json!({"goal": true});
+        let h = away_with(control, NotifyChannel::None, quick.clone());
+        h.start().await;
+        h.connect();
+        ask_with_a_recommendation(&h).await;
+        h.wait_for_call("goal:answer: Drums bus").await;
+        assert!(!h.calls().iter().any(|c| c == "submit:Drums bus"), "not a message of its own: {:?}", h.calls());
+        h.close().await;
+    };
     // A key: the producer's there.
-    let h = away_with(Rc::new(Control::default()), NotifyChannel::None, quick.clone());
-    h.start().await;
-    h.connect();
-    ask_with_a_recommendation(&h).await;
-    h.wait_for("any key cancels").await;
-    h.type_text("\x1b[B").await;
-    delay(1300).await;
-    assert!(!h.calls().iter().any(|c| c == "submit:Drums bus"), "{:?}", h.calls());
-    assert!(!has(&h.screen(), "any key cancels"));
-    h.close().await;
+    let key = async {
+        let h = away_with(Rc::new(Control::default()), NotifyChannel::None, quick.clone());
+        h.start().await;
+        h.connect();
+        ask_with_a_recommendation(&h).await;
+        h.wait_for("any key cancels").await;
+        h.type_text("\x1b[B").await;
+        delay(1300).await;
+        assert!(!h.calls().iter().any(|c| c == "submit:Drums bus"), "{:?}", h.calls());
+        assert!(!has(&h.screen(), "any key cancels"));
+        h.close().await;
+    };
     // Someone at the window, with no run under way: no countdown; and 0 never counts down.
-    for (settings, run) in [(quick.clone(), false), (AwaySettings { answer_after: 0, ..AwaySettings::default() }, true)] {
+    let no_countdown = |settings: AwaySettings, run: bool| async move {
         let h = away_with(Rc::new(Control::default()), NotifyChannel::None, settings);
         h.start().await;
         h.connect();
@@ -491,5 +498,12 @@ case!(nobody_there_kumi_takes_its_recommended_answer_after_the_countdown_and_any
         delay(1300).await;
         assert!(!h.calls().iter().any(|c| c == "submit:Drums bus"), "{:?}", h.calls());
         h.close().await;
-    }
+    };
+    tokio::join!(
+        taken,
+        goal,
+        key,
+        no_countdown(quick.clone(), false),
+        no_countdown(AwaySettings { answer_after: 0, ..AwaySettings::default() }, true)
+    );
 });
