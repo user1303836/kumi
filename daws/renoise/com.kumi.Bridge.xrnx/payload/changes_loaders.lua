@@ -349,7 +349,7 @@ base.register({
     local program = instrument.phrase_playback_mode == renoise.Instrument.PHRASES_PLAY_SELECTIVE and instrument.phrase_program == plan.index
     return {
       applied = { index = plan.index, print = phrases_.phrase_print(phrase), program = program or nil }, created = { ref = places_.ref_of(env, "phrase", m), kind = "phrase" },
-      material = { made = places_.place_of(env, "phrase", m), program = program_place, programAfter = program_after },
+      material = { made = places_.place_of(env, "phrase", m), program = program_place, programAfter = program_after, zeroZScan = phrases_.zero_z_scan(song, env) },
       target = places_.target_of(env, "phrase", m),
       display = {
         title = string.format("Loaded the phrase %s into %s", q(places_.phrase_label(plan.index, phrase)), q(plan.label)),

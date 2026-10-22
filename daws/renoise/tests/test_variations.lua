@@ -565,6 +565,31 @@ test("variations: Kumi's undo of a take leaves it once the producer plays it by 
   ok(restore(peer, "phrase-add", again).result)
 end)
 
+test("variations: in a song too big to look through whole, Kumi's undo of a take looks at the patterns changed since it came", function()
+  local _, peer = setup({ patch = function(env_)
+    local path = env_.bundle .. "payload/changes_phrases.lua"
+    local f = assert(io.open(path, "rb"))
+    local text = f:read("*a")
+    f:close()
+    local changed, count = text:gsub("M%.ZERO_Z_READS = 200000", "M.ZERO_Z_READS = 150")
+    assert(count == 1, "the limit")
+    f = assert(io.open(path, "wb"))
+    f:write(changed)
+    f:close()
+  end })
+  -- (two patterns with a note each: more than 150 reads to look through)
+  mock.ops.set_note(1, 1, 1, 1, { note = 48, instrument = 1 })
+  mock.ops.set_note(2, 1, 1, 1, { note = 48, instrument = 1 })
+  local record = change(peer, "phrase-add", { ref = iref(place(peer), 2), lines = 8, content = CHOP })
+  ok(restore(peer, "phrase-add", record).result, "no pattern changed since it came: nothing names it")
+  eq(#instrument(2).phrases, 1)
+  local again = change(peer, "phrase-add", { ref = iref(place(peer), 2), lines = 8, content = CHOP })
+  mock.ops.set_effect(1, 1, 1, 1, 256 + 35, 2)
+  local refused = restore(peer, "phrase-add", again)
+  failure(refused, "changed")
+  ok(refused.error.message:find("is named by 1 0Z command", 1, true), refused.error.message)
+end)
+
 -- read {kind: where}
 
 test("variations: where a kept phrase and pattern are now, and a track carried past a track made before it", function()

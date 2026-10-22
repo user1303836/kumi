@@ -243,7 +243,7 @@ local function range_ok(v) return type(v) == "table" and whole(0, 119)(v[1]) and
 
 -- (set below, once the column helpers are there)
 local write_content
-local zero_z_cells
+local zero_z_cells, zero_z_scan
 
 local function add_plan(song, env, input)
   local n, objects, label = places_.locate(song, env, "instrument", input, "phrase-add")
@@ -377,21 +377,53 @@ local function add_apply(song, env, input, fence, desc)
     applied = { index = plan.index, print = phrase_print(phrase), program = program or nil },
     -- (M7: its place too, which Kumi finds it by after other phrases came and went)
     created = { ref = places_.ref_of(env, "phrase", m), kind = "phrase", place = places_.place_of(env, "phrase", m) },
-    material = { made = places_.place_of(env, "phrase", m), program = program_place, programAfter = program_after },
+    material = { made = places_.place_of(env, "phrase", m), program = program_place, programAfter = program_after, zeroZScan = zero_z_scan(song, env) },
     target = places_.target_of(env, "phrase", m),
     display = { title = string.format("Added phrase %s to %s%s", q(places_.phrase_label(plan.index, phrase)), q(plan.label), with_lines(input)), before = { phrases = plan.count }, after = { phrases = plan.count + 1 } },
     undo = { desc = desc, entry = true }, prior = { phrases = plan.count }, place = places_.journal_place("phrase", m), shape = "made",
   }
 end
 
+-- What a phrase Kumi makes keeps for the look at 0Z commands its undo makes (#400 review notes): the pool's mark and every
+-- pattern's count of changed lines then. A 0Z command naming it is written after it came (Renoise renumbers those before), so
+-- in a song too big to look through whole, the patterns changed or made since are enough.
+zero_z_scan = function(song, env)
+  if not env.pattern_mark or not env.pattern_touch_mark then return nil end
+  local patterns = {}
+  for p = 1, #song.patterns do patterns[p] = true end
+  return { mark = env.pattern_mark(), touches = base.touch_marks(env, patterns) }
+end
+
+-- The patterns (numbered now) changed or made since `scan` was kept, or nil when that can't be told.
+local function zero_z_scope(song, env, scan)
+  if type(scan) ~= "table" or type(scan.touches) ~= "table" or not scan.mark or not env.pattern_at or not env.pattern_touched_since then
+    return nil
+  end
+  local scope, known = {}, {}
+  for key, mark in pairs(scan.touches) do
+    local now, why = env.pattern_at(tonumber(key), scan.mark)
+    if why == "unknown" then return nil end
+    if now then
+      known[now] = true
+      if not mark or env.pattern_touched_since(now, mark) ~= false then scope[now] = true end
+    end
+  end
+  for p = 1, #song.patterns do
+    if not known[p] then scope[p] = true end
+  end
+  return scope
+end
+
 -- How the producer plays phrase `ph` of `instrument` now, in words, or nil: keys mapped to it, the program (unless it was the
--- program when Kumi made it: `was_program`), or 0Z commands naming it (or a song too big to look through).
-local function in_use(song, instrument, phrase, ph, was_program)
+-- program when Kumi made it: `was_program`), or 0Z commands naming it (looked for in `scope`'s patterns when the song is too
+-- big to look through whole; or a song too big for that too).
+local function in_use(song, instrument, phrase, ph, was_program, scope)
   if phrase.mapping then return "is mapped to keys" end
   if instrument.phrase_playback_mode == renoise.Instrument.PHRASES_PLAY_SELECTIVE and instrument.phrase_program == ph and not was_program then
     return "is the instrument's phrase program"
   end
   local named = zero_z_cells(song, ph)
+  if named == nil and scope then named = zero_z_cells(song, ph, scope) end
   if named == nil then return "may be named by 0Z commands (the song is too big for Kumi to look)" end
   if #named > 0 then return string.format("is named by %d 0Z %s in the patterns", #named, #named == 1 and "command" or "commands") end
   return nil
@@ -414,7 +446,7 @@ local function remove_made(song, env, restore, desc, kind)
   -- (one the producer plays since, by keys, as the program or by 0Z commands, stays: deleting it would undo their work, and
   -- Renoise clears the 0Z cells that name it)
   if not restore.discard then
-    local use = in_use(song, objects.instrument, objects.phrase, n[2], (restore.applied or {}).program)
+    local use = in_use(song, objects.instrument, objects.phrase, n[2], (restore.applied or {}).program, zero_z_scope(song, env, material.zeroZScan))
     if use then fail("changed", label .. " " .. use .. " since Kumi made it: Kumi left it, so nothing that plays it is lost") end
   end
   -- (the program back on the phrase it played when Kumi made this one: Renoise moves it as it deletes one, so whether the
@@ -426,7 +458,7 @@ local function remove_made(song, env, restore, desc, kind)
   base.note_restored_at(env.journal, kind, places_.journal_place("phrase", n))
   return { restored = { deleted = true }, display = { title = "Removed " .. label .. " (put back)" }, undo = { desc = desc, entry = true } }
 end
-M.phrase_print, M.remove_made = phrase_print, remove_made
+M.phrase_print, M.remove_made, M.zero_z_scan = phrase_print, remove_made, zero_z_scan
 
 local function add_restore(song, env, restore, desc) return remove_made(song, env, restore, desc, "phrase-add") end
 
@@ -489,15 +521,15 @@ end
 -- kind}; nil when the song is too big to look through in one callback. Renoise 3.5.4 clears those that name a phrase it deletes
 -- (and renumbers the later ones), and an insert renumbers again but never fills a cleared one (lab 2026-10-21).
 M.ZERO_Z_READS = 200000
--- The cells whose 0Z command names phrase `wanted` (a number, or a set of numbers: one look for them all), each with `ph`; nil
--- when the song is too big to look through.
-zero_z_cells = function(song, wanted)
+-- The cells whose 0Z command names phrase `wanted` (a number, or a set of numbers: one look for them all), each with `ph`, in
+-- every pattern or those in `only` (a set of numbers); nil when they are too big to look through.
+zero_z_cells = function(song, wanted, only)
   local rows_ = import("rows")
   local named = type(wanted) == "table" and wanted or { [wanted] = true }
   local found, reads = {}, 0
   for p = 1, #song.patterns do
     local pattern = song:pattern(p)
-    for t = 1, rows_.track_count(song) do
+    for t = 1, (not only or only[p]) and rows_.track_count(song) or 0 do
       local pattern_track = pattern:track(t)
       if not pattern_track.is_alias and not pattern_track.is_empty then
         for l = 1, pattern.number_of_lines do
