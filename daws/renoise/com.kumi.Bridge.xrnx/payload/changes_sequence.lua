@@ -820,13 +820,14 @@ local function drop_preview(song, env, input)
   }
 end
 
--- A pattern Renoise is about to remove as its slot lets go of it: what makes it again (its name, length and aliases; it is empty).
-local function gone_pattern(song, p)
+-- A pattern Renoise is about to remove as its slot lets go of it: what makes it again (its name, length and aliases, each a
+-- place in the pool, followed to where that pattern is when the undo makes it again; it is empty).
+local function gone_pattern(song, env, p)
   local pattern = song:pattern(p)
   local aliases = {}
   for t = 1, rows.track_count(song) do
     local alias = pattern:track(t).alias_pattern_index
-    if alias > 0 then aliases[tostring(t)] = alias end
+    if alias > 0 then aliases[tostring(t)] = base.pattern_place(env, alias) end
   end
   return { name = pattern.name, lines = pattern.number_of_lines, aliases = aliases }
 end
@@ -850,7 +851,7 @@ local function drop_apply(song, env, input, fence, desc)
     local pool = #song.patterns
     local p = sequencer.pattern_sequence[item.slot]
     local goes = goes_with_pattern(song, p, item.slot)
-    local kept = goes and gone_pattern(song, p) or nil
+    local kept = goes and gone_pattern(song, env, p) or nil
     sequencer:delete_sequence_at(item.slot)
     if #song.patterns < pool then item.gone = kept or { name = "", lines = 64, aliases = {} } end
   end
@@ -913,7 +914,12 @@ local function drop_restore(song, env, restore, desc)
       if item.gone.lines and pattern.number_of_lines ~= item.gone.lines then pattern.number_of_lines = item.gone.lines end
       if item.gone.name and item.gone.name ~= "" then pattern.name = item.gone.name end
       for key, alias in pairs(item.gone.aliases or {}) do
-        pcall(function() pattern:track(tonumber(key)).alias_pattern_index = alias end)
+        -- (a place followed to where its pattern is now; one gone since is left out. A number is a record's from before places)
+        local target = alias
+        if type(alias) == "table" then target = env.pattern_at and env.pattern_at(alias.n, alias.mark) or nil end
+        if type(target) == "number" and target <= #song.patterns then
+          pcall(function() pattern:track(tonumber(key)).alias_pattern_index = target end)
+        end
       end
     else
       sequencer:insert_sequence_at(item.slot, patterns[i])

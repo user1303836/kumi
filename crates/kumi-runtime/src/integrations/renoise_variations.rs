@@ -490,11 +490,17 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
     }
 
     async fn key_now(&self, source: &Source<Lines, RenoiseData>, signal: &Signal) -> Option<String> {
-        // (the pattern, track, phrase and instrument numbers in a key, as their places give them now)
+        // (the pattern, track, phrase and instrument numbers in a key, as their places give them now; a source gone matches
+        // nothing, so what's at its old position starts a set of its own)
         let data = &source.data;
+        let gone = |rows: &[Value]| rows.iter().any(|row| row.get("gone") == Some(&Value::Bool(true)));
+        let dead = format!("gone:{}", source.key);
         let instrument = match &data.placement {
             Placement::Phrases { instrument, .. } => {
                 let found = self.locate(vec![json!({"instrument": instrument})], None, signal).await.ok()?;
+                if gone(&found) {
+                    return Some(dead);
+                }
                 Some(found.first()?.get("index")?.as_u64()?)
             }
             Placement::Patterns { .. } => None,
@@ -502,6 +508,9 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
         match &data.kind {
             SourceKind::Range { pattern, track, layout, first, last, .. } => {
                 let found = self.locate(vec![json!({"pattern": pattern}), json!({"track": track})], *layout, signal).await.ok()?;
+                if gone(&found) {
+                    return Some(dead);
+                }
                 let number = found.first()?.get("number")?.as_u64()?;
                 let track = found.get(1)?.get("ref")?.as_str()?.rsplit(':').next()?.parse::<u64>().ok()?;
                 let range = format!("range:{number}:{track}:{first}:{last}");
@@ -512,6 +521,9 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
             }
             SourceKind::Phrase { place } => {
                 let found = self.locate(vec![json!({"phrase": place})], None, signal).await.ok()?;
+                if gone(&found) {
+                    return Some(dead);
+                }
                 Some(format!("phrase:{}", found.first()?.get("ref")?.as_str()?.splitn(3, ':').nth(2)?))
             }
             SourceKind::Instrument => Some(format!("instrument:{}", instrument?)),

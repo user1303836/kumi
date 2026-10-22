@@ -338,6 +338,34 @@ test("variations: an empty pattern Renoise removes with its dropped slot is made
   ok(made)
 end)
 
+test("variations: a removed pattern made again by Kumi's undo aliases the patterns it did, where the pool has them now", function()
+  local _, peer = seq_setup()
+  -- (pattern 4: unused, kept in the pool by a note; pattern 5: played at slot 5, the one the variation aliases)
+  K.change(peer, "slot-insert", {})
+  mock.ops.set_note(4, 1, 1, 1, { note = 48, instrument = 0 })
+  local E = K.place(peer)
+  K.change(peer, "slots-drop", { refs = { K.ref(E, "seq", 5) } })
+  K.change(peer, "slot-insert", {})
+  local target = #mock.data.patterns
+  mock.ops.set_note(target, 1, 1, 1, { note = 50, instrument = 0 })
+  -- (the variation: a new pattern after it, aliasing it on track 2)
+  K.change(peer, "slot-insert", {})
+  local v = #mock.data.patterns
+  mock.song:pattern(v):track(2).alias_pattern_index = target
+  mock.data.patterns[v].name = "V"
+  local E2 = K.place(peer)
+  local record = K.change(peer, "slots-drop", { refs = { K.ref(E2, "seq", 6) } })
+  eq(#mock.data.patterns, target, "Renoise removed the variation's pattern")
+  -- (the producer deletes the unused pattern 4: the pool's later patterns move down, and the slots playing them)
+  mock.ops.remove_pattern(4)
+  for s, p in ipairs(mock.data.sequence) do if p > 4 then mock.data.sequence[s] = p - 1 end end
+  local undone = K.restore(peer, record)
+  ok(undone.result, json.encode(undone.error or {}))
+  local again = #mock.data.patterns
+  eq(mock.data.patterns[again].name, "V")
+  eq(mock.song:pattern(again):track(2).alias_pattern_index, target - 1, "the pattern it aliased, one down now")
+end)
+
 -- (review W3)
 test("variations: Kumi's undo of a slot drop leaves a section the producer made or renamed on the next slot since", function()
   local _, peer = seq_setup()
