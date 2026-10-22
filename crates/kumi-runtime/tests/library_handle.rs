@@ -133,6 +133,9 @@ async fn background_learning_holds_while_paused_notifies_and_closes_native_child
             tokio::time::sleep(Duration::from_millis(450)).await;
             assert_eq!(statuses.borrow().len(), count);
             library.close().await;
+            // A sound the first run didn't learn, so the paused learner has a file to hold at: with nothing left to
+            // learn it finishes at once, paused or not, and Paused can come and go between two looks.
+            put(&studio.extra.join("Late Kick.wav"), fixture::wav(&[fixture::kick(50., 0.2)], 44100));
             let paused = make(&studio, true);
             paused.pause();
             paused.start();
