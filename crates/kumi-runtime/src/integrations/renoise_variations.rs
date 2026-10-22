@@ -705,19 +705,21 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
                 if after.lpb == before.lpb {
                     return write(lines).await.map(|(change, _)| (change, None));
                 }
-                // (a phrase's LPB is a setting of its own, a step of its own: the lines first, when any changed, so a refusal there
-                // writes nothing; an LPB Renoise then refuses leaves lines that went in, told as what the take holds)
-                let written = if lines.is_empty() { None } else { Some(write(lines).await?.0) };
-                match self.change("phrase_set", json!({"ref": reference, "lpb": after.lpb}), signal).await {
-                    Ok((change, _)) => Ok((change, None)),
-                    Err((why, stops)) => match written {
-                        Some(change) => {
-                            let mut holds = after.clone();
-                            holds.lpb = before.lpb;
-                            Ok((change, Some((holds, format!("its LPB stayed {}: {why}", before.lpb)))))
-                        }
-                        None => Err((why, stops)),
-                    },
+                // (a phrase's LPB is a setting of its own, a step of its own: it goes first, so the lines' step is the last to touch
+                // the phrase and Kumi's undo takes each back in turn, and the take names both; lines Renoise then refuses leave the
+                // new LPB, told as what the take holds)
+                let (speed, _) = self.change("phrase_set", json!({"ref": reference, "lpb": after.lpb}), signal).await?;
+                if lines.is_empty() {
+                    return Ok((speed, None));
+                }
+                match write(lines).await {
+                    Ok((change, _)) => Ok((format!("{speed} and {change}"), None)),
+                    Err((why, true)) => Err((format!("{why} (its LPB is {} already: {speed})", after.lpb), true)),
+                    Err((why, false)) => {
+                        let mut holds = before.clone();
+                        holds.lpb = after.lpb;
+                        Ok((speed, Some((holds, format!("its lines stayed as they were: {why}")))))
+                    }
                 }
             }
         }

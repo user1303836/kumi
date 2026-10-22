@@ -1285,6 +1285,41 @@ async fn a_copy_named_like_a_take_is_never_taken_for_it() {
         .await;
 }
 
+/// (#400 review notes) A phrase take changed in speed and lines is two steps, the LPB first: the take names both, and Kumi's
+/// undo takes back the lines, then the LPB.
+#[tokio::test(flavor = "current_thread")]
+async fn a_phrase_take_changed_in_speed_and_lines_names_both_changes_and_each_undoes() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let (script, simulator, renoise, observed, told) = renoise_with_changes(home.path()).await;
+            let pad = run_tool(&tool(&observed, "renoise_read"), json!({"kind": "instrument"})).await["items"][1]["ref"].as_str().unwrap().to_owned();
+            let arp: Value = serde_json::from_str(ARP).unwrap();
+            let variations = tool(&observed, "variations");
+            run_tool(&variations, json!({"action": "make", "source": {"instrumentRef": pad}, "takes": [{"lines": arp}], "count": 1, "seed": 5, "listen": false})).await;
+            let before = script.made_phrases(2)[0].1.clone();
+            let changed = run_tool(
+                &variations,
+                json!({"action": "change", "names": ["V1"], "takes": [{"direction": "faster, an octave up", "ops": [{"op": "speed", "factor": 2}, {"op": "transpose", "semitones": 12}]}], "listen": false}),
+            )
+            .await;
+            let line = changed["changed"][0]["line"].as_str().unwrap().to_owned();
+            let ids = regex::Regex::new(r"\((c\d+) and (c\d+)\)").unwrap().captures(&line).map(|found| (found[1].to_owned(), found[2].to_owned()));
+            let (speed, lines) = ids.unwrap_or_else(|| panic!("both changes named: {line}"));
+            assert_eq!(told.borrow().len(), 3, "the take, the LPB, then the lines");
+            assert_ne!(script.made_phrases(2)[0].1, before, "its lines transposed");
+            let undo = tool(&observed, "undo_change");
+            for id in [lines, speed] {
+                let undone = undo.execute(input(json!({"change": id})), Signal::new()).await.unwrap();
+                assert!(!undone.is_error, "{id}: {}", undone.text);
+            }
+            assert_eq!(script.made_phrases(2)[0].1, before, "its lines as they were");
+            renoise.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
+}
+
 /// (review W12) A phrase take changed only in speed is one phrase_set: changed, told once, and still Kumi's to drop.
 #[tokio::test(flavor = "current_thread")]
 async fn a_phrase_take_changed_only_in_speed_is_one_change_and_stays_kumis() {
