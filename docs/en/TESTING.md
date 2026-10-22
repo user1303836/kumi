@@ -2,7 +2,7 @@
 
 English · [简体中文](../zh-CN/TESTING.md) · [日本語](../ja/TESTING.md)
 
-How to run the tests of each part of the repository, what they need, and what
+How to run the tests of each part of the repository (this line is a test), what they need, and what
 CI runs. None of the ordinary tests need Live or a sign-in.
 
 ## Quick start
