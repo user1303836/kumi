@@ -127,6 +127,59 @@ pub fn with_anchors(mut notes: Vec<Note>, anchors: &[Note]) -> Vec<Note> {
     notes
 }
 
+/// How far apart two note lists are: the share of notes without a partner (same pitch and channel, its start near), and
+/// how far partners' velocities and starts are.
+pub fn notes_apart(a: &[Note], b: &[Note]) -> f64 {
+    let most = a.len().max(b.len());
+    if most == 0 {
+        return 0.;
+    }
+    let mut used = vec![false; b.len()];
+    let mut apart = 0.;
+    let mut unmatched = 0usize;
+    for note in a {
+        let partner = b
+            .iter()
+            .enumerate()
+            .filter(|(k, other)| {
+                !used[*k] && other.pitch == note.pitch && other.channel == note.channel && (other.start - note.start).abs() <= 0.25
+            })
+            .min_by(|(_, x), (_, y)| (x.start - note.start).abs().total_cmp(&(y.start - note.start).abs()));
+        match partner {
+            Some((k, other)) => {
+                used[k] = true;
+                apart += 0.5 * ((other.velocity - note.velocity).abs() as f64 / 64.).min(1.)
+                    + 0.5 * ((other.start - note.start).abs() / 0.25).min(1.);
+            }
+            None => unmatched += 1,
+        }
+    }
+    unmatched += used.iter().filter(|u| !**u).count();
+    ((unmatched as f64 + apart) / most as f64).min(1.)
+}
+
+/// What a take holds of notes its source doesn't: pitch classes it has no note of, unless an operator moved pitch on purpose.
+pub fn foreign_classes(source: &[Note], take: &[Note], ops: &[Value]) -> Vec<String> {
+    if ops.iter().any(|op| op.get("op").and_then(Value::as_str) == Some("pitch")) {
+        return Vec::new();
+    }
+    let classes: BTreeSet<i64> = source.iter().map(|note| note.pitch % 12).collect();
+    let outside: BTreeSet<i64> = take.iter().map(|note| note.pitch % 12).filter(|class| !classes.contains(class)).collect();
+    if outside.is_empty() {
+        Vec::new()
+    } else {
+        vec![format!("{} note class{} the source doesn't have", outside.len(), if outside.len() == 1 { "" } else { "es" })]
+    }
+}
+
+/// Whether a take keeps every anchor note as it is: which one it doesn't, in words.
+pub fn anchors_in(anchors: &[Note], notes: &[Note]) -> Result<(), String> {
+    match anchors.iter().find(|anchor| !notes.iter().any(|note| note == *anchor)) {
+        Some(anchor) => Err(format!("the anchor note {} at {:.2} isn't as it was", anchor.pitch, anchor.start)),
+        None => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

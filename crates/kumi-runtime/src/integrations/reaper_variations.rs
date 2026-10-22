@@ -11,7 +11,7 @@ use crate::core::{
     variations::{
         backend::{Rendered, Rewritten, Source, VariationsBackend, Words},
         heard::heard_of,
-        notes::{amount, note_op, round, sign, some_of, with_anchors, Note},
+        notes::{amount, anchors_in, foreign_classes, note_op, notes_apart, round, sign, some_of, with_anchors, Note},
         tool::{names, names_to_find},
         Material, Rng, TakeSet,
     },
@@ -62,37 +62,6 @@ pub struct ItemTake {
     pub fade_out: f64,
     pub notes: Vec<Note>,
     pub anchors: Vec<Note>,
-}
-
-/// How far apart two note lists are: the share of notes without a partner (same pitch and channel, its start near), and
-/// how far partners' velocities and starts are.
-fn notes_apart(a: &[Note], b: &[Note]) -> f64 {
-    let most = a.len().max(b.len());
-    if most == 0 {
-        return 0.;
-    }
-    let mut used = vec![false; b.len()];
-    let mut apart = 0.;
-    let mut unmatched = 0usize;
-    for note in a {
-        let partner = b
-            .iter()
-            .enumerate()
-            .filter(|(k, other)| {
-                !used[*k] && other.pitch == note.pitch && other.channel == note.channel && (other.start - note.start).abs() <= 0.25
-            })
-            .min_by(|(_, x), (_, y)| (x.start - note.start).abs().total_cmp(&(y.start - note.start).abs()));
-        match partner {
-            Some((k, other)) => {
-                used[k] = true;
-                apart += 0.5 * ((other.velocity - note.velocity).abs() as f64 / 64.).min(1.)
-                    + 0.5 * ((other.start - note.start).abs() / 0.25).min(1.);
-            }
-            None => unmatched += 1,
-        }
-    }
-    unmatched += used.iter().filter(|u| !**u).count();
-    ((unmatched as f64 + apart) / most as f64).min(1.)
 }
 
 impl Material for ItemTake {
@@ -404,25 +373,13 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
         if !source.midi && take.offset - source.offset > ATTACK + 1e-6 {
             return Err(format!("its start moved {:.0} ms into the sound: past its attack", (take.offset - source.offset) * 1000.));
         }
-        match source.anchors.iter().find(|anchor| !take.notes.iter().any(|note| note == *anchor)) {
-            Some(anchor) => Err(format!("the anchor note {} at {:.2} isn't as it was", anchor.pitch, anchor.start)),
-            None => Ok(()),
-        }
+        anchors_in(&source.anchors, &take.notes)
     }
 
     fn judge(&self, source: Option<&ItemTake>, take: &ItemTake, ops: &[Value], _factor: f64) -> Vec<String> {
         // (a MIDI take keeps its source's notes' pitch classes, unless it was moved on purpose)
         let Some(source) = source.filter(|source| source.midi) else { return Vec::new() };
-        if ops.iter().any(|op| op.get("op").and_then(Value::as_str) == Some("pitch")) {
-            return Vec::new();
-        }
-        let classes: BTreeSet<i64> = source.notes.iter().map(|note| note.pitch % 12).collect();
-        let outside: BTreeSet<i64> = take.notes.iter().map(|note| note.pitch % 12).filter(|class| !classes.contains(class)).collect();
-        if outside.is_empty() {
-            Vec::new()
-        } else {
-            vec![format!("{} note class{} the source doesn't have", outside.len(), if outside.len() == 1 { "" } else { "es" })]
-        }
+        foreign_classes(&source.notes, &take.notes, ops)
     }
 
     fn digest(&self, material: &ItemTake) -> String {
