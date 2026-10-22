@@ -187,7 +187,15 @@ impl<S: RefScheme + 'static> JamBackend for RenoiseJam<S> {
                     hits,
                 });
             }
-            parts.push(Part { reference: short, name, slots: vec![(s + 1, self.short(slot_ref))], lpb, tracks: part_tracks, holds_more });
+            parts.push(Part {
+                reference: short,
+                name,
+                slots: vec![(s + 1, self.short(slot_ref))],
+                lines: length,
+                lpb,
+                tracks: part_tracks,
+                holds_more,
+            });
         }
         Ok(parts)
     }

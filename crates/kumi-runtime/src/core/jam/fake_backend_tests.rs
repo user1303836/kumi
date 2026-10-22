@@ -82,6 +82,7 @@ fn part(n: usize, keys: Vec<Hit>, drums: Vec<Hit>) -> Part {
         reference: format!("p{n}"),
         name: format!("Pattern {n:02}"),
         slots: vec![(n, format!("s{n}"))],
+        lines: 64,
         lpb: 4,
         tracks: vec![track("t1", "Keys", keys), track("t2", "Drums", drums)],
         holds_more: false,
@@ -169,6 +170,22 @@ async fn no_slot_is_dropped_or_replayed_on_a_look_at_some_tracks_or_a_pattern_ho
     let says = looked["proposals"].to_string();
     assert!(!says.contains("slot 04") && !says.contains("slot 06"), "{looked}");
     assert!(says.contains("slot 07 plays Pattern 07, which is empty"), "{looked}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_longer_pattern_printing_the_same_is_neither_replayed_nor_aliased() {
+    // Pattern 03 is 128 lines: its first 64 are Pattern 01's, the rest empty, so each track prints the same.
+    let mut parts = r35().parts.clone();
+    parts[2] = Part { lines: 128, ..parts[0].clone() };
+    parts[2].reference = "p3".into();
+    parts[2].name = "Pattern 03".into();
+    parts[2].slots = vec![(3, "s3".into())];
+    let fake = Rc::new(Fake { parts, ..Fake::default() });
+    let tool = Jam::new(fake.clone()).tool();
+    let looked = run(&tool, json!({"patterns": ["s3"]})).await.unwrap();
+    let says = looked["proposals"].to_string();
+    assert!(!says.contains("there instead") && !says.contains("an alias of"), "{looked}");
+    assert!(!looked["said"].to_string().contains("Pattern 03 (slot 03) is"), "{looked}");
 }
 
 #[tokio::test(flavor = "current_thread")]

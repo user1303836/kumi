@@ -37,14 +37,15 @@ pub struct TrackPart {
     pub hits: Vec<Hit>,
 }
 
-/// A part: its ref and name, the slots that play it (their number, from 1, and ref), its lines per beat, its tracks, and
-/// whether it holds more than their lines (automation, or lines on tracks not read: a master's or a send's commands), which
-/// no slot-level change may drop.
+/// A part: its ref and name, the slots that play it (their number, from 1, and ref), how many lines it has and how many a
+/// beat, its tracks, and whether it holds more than their lines (automation, or lines on tracks not read: a master's or a
+/// send's commands), which no slot-level change may drop.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Part {
     pub reference: String,
     pub name: String,
     pub slots: Vec<(usize, String)>,
+    pub lines: u32,
     pub lpb: u32,
     pub tracks: Vec<TrackPart>,
     pub holds_more: bool,
@@ -59,16 +60,19 @@ impl Part {
         self.tracks.iter().find(|track| track.track == reference)
     }
 
-    /// The same lines as `other` on every track.
+    /// As long as `other`, with the same lines on every track (a longer part whose first lines match and the rest is empty
+    /// prints the same, but playing the other instead would shorten the song).
     pub fn same_as(&self, other: &Part) -> bool {
         !self.empty()
+            && self.lines == other.lines
             && self.tracks.len() == other.tracks.len()
             && self.tracks.iter().all(|track| other.track(&track.track).is_some_and(|theirs| theirs.digest == track.digest))
     }
 
-    /// How it differs from `other` when only by a few notes (at most `most`), in words; None when more, or the same.
+    /// How it differs from `other` when only by a few notes (at most `most`), in words; None when more, the same, or another
+    /// length.
     pub fn near(&self, other: &Part, most: usize) -> Option<String> {
-        if self.empty() || other.empty() || self.same_as(other) {
+        if self.empty() || other.empty() || self.lines != other.lines || self.same_as(other) {
             return None;
         }
         let mut said = Vec::new();
@@ -237,13 +241,25 @@ mod tests {
             notes: hits.len(),
             hits,
         };
-        let part =
-            |tracks: Vec<TrackPart>| Part { reference: "p".into(), name: String::new(), slots: vec![], lpb: 4, tracks, holds_more: false };
+        let part = |tracks: Vec<TrackPart>| Part {
+            reference: "p".into(),
+            name: String::new(),
+            slots: vec![],
+            lines: 64,
+            lpb: 4,
+            tracks,
+            holds_more: false,
+        };
         let a = part(vec![track("x", vec![hit(0., 60), hit(8., 62)])]);
         let b = part(vec![track("x", vec![hit(0., 60), hit(8., 62)])]);
         let c = part(vec![track("y", vec![hit(0., 60), hit(8., 62), hit(12., 67)])]);
         assert!(a.same_as(&b) && !a.same_as(&c));
         assert_eq!(c.near(&a, 3).as_deref(), Some("1 note more on \u{201c}Keys\u{201d}"));
+        // Twice as long, the same lines first and the rest empty: it prints the same, but it isn't the same, nor near.
+        let long = Part { lines: 128, ..b.clone() };
+        let longer = Part { lines: 128, ..c.clone() };
+        assert!(!long.same_as(&a) && !a.same_as(&long));
+        assert_eq!(longer.near(&a, 3), None);
         assert!(part(vec![track("", vec![])]).empty());
     }
 }

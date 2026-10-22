@@ -126,8 +126,10 @@ impl<B: JamBackend + 'static> Jam<B> {
                 said.push(format!("{} (slot {slots}) is {} with {how}", part.name, other.name));
             }
             for track in part.tracks.iter().filter(|track| !track.empty && !track.alias) {
+                // (as long as this part: a longer part's lines past the other's end would play as an alias's empty lines)
                 if let Some(of) = earlier.iter().find(|other| {
-                    other.tracks.iter().any(|theirs| theirs.track == track.track && theirs.digest == track.digest && !theirs.alias)
+                    other.lines == part.lines
+                        && other.tracks.iter().any(|theirs| theirs.track == track.track && theirs.digest == track.digest && !theirs.alias)
                 }) {
                     let pid = id("a");
                     rows.push(json!({"id": pid, "says": format!("\u{201c}{}\u{201d} in {} is the same as in {}: make it {} of {}", track.name, part.name, of.name, words.alias, of.name)}));
