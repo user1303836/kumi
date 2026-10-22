@@ -7,6 +7,8 @@ local sha256 = T.load_payload_module("sha256")
 local test, eq, ok = T.test, T.eq, T.ok
 
 local PROTOCOL = "kumi-daw/1"
+-- The tool's own version (a release that changes the tool moves it).
+local VERSION = T.load_payload_module("version")
 local PORT = 9780
 local CLIENT_NONCE = "0123456789abcdef0123456789abcdef"
 
@@ -185,7 +187,7 @@ test("bridge: listens on 127.0.0.1:9780 and writes the discovery file", function
   eq(discovery.host, "127.0.0.1")
   eq(discovery.port, PORT)
   eq(discovery.protocol, PROTOCOL)
-  eq(discovery.version, "1.0.0")
+  eq(discovery.version, VERSION)
   eq(discovery.dawVersion, "3.5.4")
   eq(discovery.resource, env.resource)
   ok(discovery.project.id and discovery.project.path == nil, "an unsaved song has no path")
@@ -217,7 +219,7 @@ test("bridge: the handshake proves both sides and the welcome says who it is", f
   local env = setup({ song = { name = "Tune Title", file_name = "/songs/tune.xrns", playing = true } })
   local _, welcome = connect(env)
   eq(welcome.daw, "renoise")
-  eq(welcome.bridge, "1.0.0")
+  eq(welcome.bridge, VERSION)
   eq(welcome.dawVersion, "3.5.4")
   eq(welcome.pid, 4242)
   eq(welcome.resource, env.resource)

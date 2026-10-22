@@ -418,8 +418,10 @@ jobs:
           kumi update
           test "$(kumi --version)" = "Kumi $version"
           after="$(bridge)"; after_extension="$(extension)"
-          # REAPER's extension and Renoise's tool from this build, in scratch DAW folders: that release knows neither DAW,
-          # so its rollback leaves both as they are, said, and so does its own rollback back to this build.
+          # REAPER's extension and Renoise's tool from this build, in scratch DAW folders. A release that knows neither DAW
+          # (1.19 and before) leaves both as they are on its rollback, said; one that carries them puts back its own copy of
+          # each, said where it isn't this build's. The rollback back to this build puts this build's back, from the
+          # generations kept.
           python3 scripts/tests/daw_bridges.py prepare "$reaper" "$renoise"
           kumi --daw reaper bridge --yes
           kumi --daw renoise bridge --yes
@@ -429,14 +431,24 @@ jobs:
           test "$(kumi --version)" = "Kumi $previous"
           test "$(bridge)" = "$before"
           test "$(extension)" = "$before_extension"
-          grep -q "Kumi's extension stays in REAPER" rollback.txt
-          grep -q "Kumi's tool stays in Renoise" rollback.txt
-          test "$(placed app.previous)" = "$(cat daws.txt)"
+          if [[ -d "$home/.kumi/app/daws" ]]; then
+            placed app | tee earlier.txt
+            while read -r daw carried sha _; do
+              if [[ "$sha" != "$(grep "^$daw " daws.txt | cut -d' ' -f3)" ]]; then
+                if [[ "$daw" == reaper ]]; then said="Kumi's extension $carried is back in REAPER"; else said="Kumi's tool $carried is back in Renoise"; fi
+                grep -qF "$said, as Kumi $previous had it" rollback.txt
+              fi
+            done < earlier.txt
+          else
+            grep -q "Kumi's extension stays in REAPER" rollback.txt
+            grep -q "Kumi's tool stays in Renoise" rollback.txt
+            test "$(placed app.previous)" = "$(cat daws.txt)"
+          fi
           kumi update --rollback
           test "$(kumi --version)" = "Kumi $version"
           if [[ "$before" == "$after" ]]; then test "$(bridge)" = "$after"; else test "$(bridge | cut -d' ' -f1)" = "${after%% *}"; fi
           test "$(extension)" = "$after_extension"
-          test "$(placed app)" = "$(cat daws.txt)"
+          test "$(placed app | cut -d' ' -f1-4)" = "$(cut -d' ' -f1-4 daws.txt)"
 
           # Uninstalling takes the PATH line out, and REAPER's and Renoise's bridges.
           kumi uninstall --yes
@@ -621,6 +633,10 @@ jobs:
             $env:KUMI_RENOISE_PREFS_DIR = $script:renoise = Join-Path $script:root 'Renoise\V3.5.4'
             Remove-Item Env:KUMI_RELEASES, Env:KUMI_VERSION -ErrorAction SilentlyContinue
           }
+          # Placed's lines as fields: DAW, version, SHA-256, generation and the receipt's last action.
+          function Rows([string]$Said) { @($Said -split "`r?`n" | Where-Object { $_ } | ForEach-Object { , $_.Split(' ') }) }
+          # Placed's lines less the last action: the copy, and the generation it came from.
+          function Kept([string]$Said) { (Rows $Said | ForEach-Object { $_[0..3] -join ' ' }) -join "`n" }
           # REAPER's extension and Renoise's tool as Kumi put them, compared with the copies the Kumi in `App` carries.
           function Placed([string]$App) {
             $said = python scripts/tests/daw_bridges.py placed (Join-Path $env:KUMI_HOME $App) $env:KUMI_HOME $reaper $renoise | Out-String
@@ -669,8 +685,10 @@ jobs:
           Kumi update
           if ((& $kumi --version) -ne "Kumi $version") { throw "the update didn't give $version" }
           $after = Bridge; $afterExtension = Extension
-          # REAPER's extension and Renoise's tool from this build, in scratch DAW folders: that release knows neither DAW,
-          # so its rollback leaves both as they are, said, and so does its own rollback back to this build.
+          # REAPER's extension and Renoise's tool from this build, in scratch DAW folders. A release that knows neither DAW
+          # (1.19 and before) leaves both as they are on its rollback, said; one that carries them puts back its own copy of
+          # each, said where it isn't this build's. The rollback back to this build puts this build's back, from the
+          # generations kept.
           python scripts/tests/daw_bridges.py prepare $reaper $renoise
           if ($LASTEXITCODE -ne 0) { throw "the DAWs' folders weren't made" }
           Kumi --daw reaper bridge --yes
@@ -681,14 +699,25 @@ jobs:
           if ((& $kumi --version) -ne "Kumi $previous") { throw "the first rollback didn't give $previous" }
           if ((Bridge) -ne $before) { throw "the first rollback left bridge $(Bridge), not $before" }
           if ((Extension) -ne $beforeExtension) { throw "the first rollback left extension $(Extension), not $beforeExtension" }
-          if ($rolled -notmatch "Kumi's extension stays in REAPER" -or $rolled -notmatch "Kumi's tool stays in Renoise") { throw "the rollback didn't say REAPER's and Renoise's bridges stay" }
-          if ((Placed 'app.previous') -ne $daws) { throw "the first rollback changed REAPER's or Renoise's bridge" }
+          if (Test-Path -LiteralPath (Join-Path $env:KUMI_HOME 'app\daws')) {
+            $mine = @{}
+            foreach ($row in (Rows $daws)) { $mine[$row[0]] = $row[2] }
+            foreach ($row in (Rows (Placed 'app'))) {
+              if ($row[2] -ne $mine[$row[0]]) {
+                $said = if ($row[0] -eq 'reaper') { "Kumi's extension $($row[1]) is back in REAPER" } else { "Kumi's tool $($row[1]) is back in Renoise" }
+                if (-not $rolled.Contains("$said, as Kumi $previous had it")) { throw "the rollback didn't say: $said, as Kumi $previous had it" }
+              }
+            }
+          } else {
+            if ($rolled -notmatch "Kumi's extension stays in REAPER" -or $rolled -notmatch "Kumi's tool stays in Renoise") { throw "the rollback didn't say REAPER's and Renoise's bridges stay" }
+            if ((Placed 'app.previous') -ne $daws) { throw "the first rollback changed REAPER's or Renoise's bridge" }
+          }
           Kumi update --rollback
           if ((& $kumi --version) -ne "Kumi $version") { throw "the second rollback didn't give $version" }
           $bridge = Bridge
           if ($(if ($before -eq $after) { $bridge -ne $after } else { $bridge.Split(' ')[0] -ne $after.Split(' ')[0] })) { throw "the second rollback left bridge $bridge, not $after" }
           if ((Extension) -ne $afterExtension) { throw "the second rollback left extension $(Extension), not $afterExtension" }
-          if ((Placed 'app') -ne $daws) { throw "the second rollback changed REAPER's or Renoise's bridge" }
+          if ((Kept (Placed 'app')) -ne (Kept $daws)) { throw "the second rollback didn't put this build's REAPER and Renoise bridges back" }
           Uninstall
           python scripts/tests/daw_bridges.py removed $env:KUMI_HOME $reaper $renoise
           if ($LASTEXITCODE -ne 0) { throw "REAPER's or Renoise's bridge stayed" }

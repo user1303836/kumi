@@ -66,7 +66,7 @@ async fn renoises_tool_goes_in_is_found_and_chosen_and_comes_out() {
     let out = Rc::new(Out::default());
     let code = renoise.setup_bridge(out.clone(), &env, yes()).await.unwrap();
     assert_eq!(code, 0, "{}", out.0.borrow());
-    assert!(out.0.borrow().contains("Kumi's tool 1.0.0 is in Renoise"), "{}", out.0.borrow());
+    assert!(out.0.borrow().contains(&format!("Kumi's tool {} is in Renoise", tool_version())), "{}", out.0.borrow());
     let tool = dir.path().join("Renoise").join("V3.5.4").join("Scripts").join("Tools").join("com.kumi.Bridge.xrnx");
     assert!(tool.join("main.lua").exists() && tool.join("bridge-reference.json").exists());
     assert!(renoise.bridge_installed(&env));
@@ -299,6 +299,15 @@ fn copy_folder(from: &std::path::Path, to: &std::path::Path) {
     }
 }
 
+/// The version of Renoise's tool this checkout carries (its version.lua), which a release that changes the tool moves on.
+fn tool_version() -> String {
+    let lua = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua"),
+    )
+    .unwrap();
+    lua.split('"').nth(1).expect("version.lua returns the tool's version").to_owned()
+}
+
 /// A Kumi's app folder carrying REAPER's extension (these bytes, this version) and Renoise's tool (this checkout's,
 /// saying `tool`), laid out as a release lays them out.
 fn app_carrying(root: &std::path::Path, name: &str, extension: &[u8], version: &str, tool: &str) -> std::path::PathBuf {
@@ -312,7 +321,7 @@ fn app_carrying(root: &std::path::Path, name: &str, extension: &[u8], version: &
     copy_folder(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../daws/renoise/com.kumi.Bridge.xrnx"), &folder);
     let lua = folder.join("payload").join("version.lua");
     let text = std::fs::read_to_string(&lua).unwrap();
-    std::fs::write(&lua, text.replace("\"1.0.0\"", &format!("\"{tool}\""))).unwrap();
+    std::fs::write(&lua, text.replace(&format!("\"{}\"", tool_version()), &format!("\"{tool}\""))).unwrap();
     app
 }
 
@@ -414,7 +423,7 @@ async fn a_kumi_an_earlier_updater_put_in_place_brings_its_bridge_as_it_starts()
         folder: true,
         reference: tools.join(folder).join(daw_bridge::install::RENOISE_REFERENCE),
     };
-    // Renoise's tool 0.9.0, as the Kumi before put it in; this checkout carries 1.0.0.
+    // Renoise's tool 0.9.0, as the Kumi before put it in; this checkout carries its own (tool_version).
     let earlier = app_carrying(dir.path(), "app.earlier", b"x", "0.0.9", "0.9.0").join("daws/renoise").join(folder);
     let home = std::path::PathBuf::from(&env["KUMI_HOME"]);
     let put_earlier = || daw_bridge::lifecycle::Lifecycle::new(&home, target.clone()).install(&earlier, "0.9.0").unwrap();
@@ -422,8 +431,9 @@ async fn a_kumi_an_earlier_updater_put_in_place_brings_its_bridge_as_it_starts()
     let out = Rc::new(Out::default());
     let io = kumi::install::InstalledIo::new(out.clone(), env.clone());
     own::RENOISE.finish_transition(&io).await;
-    assert!(out.0.borrow().contains("Kumi's tool 1.0.0 is in Renoise now: restart Renoise if it's open."), "{}", out.0.borrow());
-    assert_eq!(receipt_of(&env, Daw::Renoise).version.as_deref(), Some("1.0.0"));
+    let tool = tool_version();
+    assert!(out.0.borrow().contains(&format!("Kumi's tool {tool} is in Renoise now: restart Renoise if it's open.")), "{}", out.0.borrow());
+    assert_eq!(receipt_of(&env, Daw::Renoise).version.as_deref(), Some(tool.as_str()));
     out.0.borrow_mut().clear();
     own::RENOISE.finish_transition(&io).await;
     assert_eq!(out.0.borrow().as_str(), "", "in already: nothing to do");
@@ -492,7 +502,9 @@ async fn an_update_keeps_the_bridges_in_place_and_a_rollback_takes_each_to_the_c
     std::fs::create_dir_all(resource.join("UserPlugins")).unwrap();
     std::fs::write(resource.join("reaper.ini"), "[REAPER]\n").unwrap();
     env.insert("KUMI_REAPER_RESOURCE_DIR".into(), resource.to_string_lossy().into_owned());
-    let now = app_carrying(dir.path(), "app", b"extension 0.1.0", "0.1.0", "1.0.0");
+    // (`now` carries the tool setup puts in, this checkout's)
+    let tool = tool_version();
+    let now = app_carrying(dir.path(), "app", b"extension 0.1.0", "0.1.0", &tool);
     let earlier = app_carrying(dir.path(), "app.previous", b"extension 0.0.9", "0.0.9", "0.9.0");
     let unknowing = dir.path().join("app.older");
     std::fs::create_dir_all(&unknowing).unwrap();
@@ -529,7 +541,7 @@ async fn an_update_keeps_the_bridges_in_place_and_a_rollback_takes_each_to_the_c
     assert_eq!(out.0.borrow().as_str(), "");
 
     // Rolled back to a Kumi carrying 0.0.9 and 0.9.0, then forward again.
-    for (app, kumi_version, reaper, renoise) in [(&earlier, "1.19.2", "0.0.9", "0.9.0"), (&now, "1.19.3", "0.1.0", "1.0.0")] {
+    for (app, kumi_version, reaper, renoise) in [(&earlier, "1.19.2", "0.0.9", "0.9.0"), (&now, "1.19.3", "0.1.0", tool.as_str())] {
         out.0.borrow_mut().clear();
         for provider in [&own::REAPER as &dyn DawProvider, &own::RENOISE] {
             let step = provider.prepare_rollback(&io, &home, &app.to_string_lossy(), kumi_version, false).await.unwrap();
