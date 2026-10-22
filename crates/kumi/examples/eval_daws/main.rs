@@ -91,6 +91,16 @@ static LIVE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
     Regex::new(r"\b(Live|Ableton|Sets?|Session|Arrangement|Main|[Ss]cenes?|[Rr]acks?|[Cc]lip slots?|Control Surfaces?|Remote Scripts?|Max for Live|M4L|Operator)\b").unwrap()
 });
 
+/// "Set" as the verb, any producer's word: starting a sentence, a line, a list's item or what follows a colon ("Set Bass to
+/// -6 dB", "Done: Set tempo"), or before the words a verb takes ("Set up", "Set the"). Live's Set is a noun mid-sentence.
+static SET_VERB: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"(?m)(^\s*(?:[-*•]\s+)?|[.!?:;]\s+)Set\b|\bSet (up|the|it|to|a|an|your|my)\b").unwrap());
+
+/// Live's words in what Kumi said, but "Set" as the verb.
+fn live_words(text: &str) -> Vec<String> {
+    LIVE.find_iter(&SET_VERB.replace_all(text, "${1}")).map(|m| m.as_str().to_owned()).collect()
+}
+
 /// What every scenario also checks.
 fn every_scenario(scenario: &Scenario, run: &Run) -> Vec<Check> {
     let mut checks = vec![];
@@ -124,12 +134,8 @@ fn every_scenario(scenario: &Scenario, run: &Run) -> Vec<Check> {
         .collect();
     checks.push(Check::new("no extension called unchecked", unchecked.is_empty(), unchecked.join(", ")));
     // The DAW's own words in what Kumi said and in HISTORY.
-    // ("Set" as the verb is any producer's word: "Set up", "Set the"…)
-    let verbs = Regex::new(r"\bSet (up|the|it|to|a|an|your|my)\b").unwrap();
-    let heard: Vec<String> = std::iter::once(run.said.as_str())
-        .chain(run.changes.iter().map(|change| change.title.as_str()))
-        .flat_map(|text| LIVE.find_iter(&verbs.replace_all(text, "")).map(|m| m.as_str().to_owned()).collect::<Vec<_>>())
-        .collect();
+    let heard: Vec<String> =
+        std::iter::once(run.said.as_str()).chain(run.changes.iter().map(|change| change.title.as_str())).flat_map(live_words).collect();
     checks.push(Check::new("the DAW's own words, never Live's", heard.is_empty(), heard.join(", ")));
     let named = scenario.names.iter().any(|name| run.said.to_lowercase().contains(&name.to_lowercase()));
     checks.push(Check::new("says what it found or changed, by name", named, head(&run.said.replace('\n', " "), 160)));
@@ -629,4 +635,33 @@ fn main() {
     });
     let _ = std::io::stdout().flush();
     std::process::exit(code);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #401 (PR #400 review D20): "Set" starting a sentence is the verb, not Live's Set, so the check passes it; Live's Set
+    /// mid-sentence is still caught, so the check can fail.
+    #[test]
+    fn set_starting_a_sentence_is_the_verb_and_lives_set_is_caught() {
+        let none: Vec<String> = vec![];
+        assert_eq!(live_words("Set the reverb to 30%. Set Bass to -6 dB.\n- Set Kick's send to -12 dB"), none);
+        assert_eq!(live_words("Done: Set tempo to 124. I'll set it up; Set up the bus"), none);
+        assert_eq!(live_words("I saved your Set. Your Sets folder has 3"), ["Set", "Sets"]);
+        assert_eq!(live_words("Added a Rack to the Session view"), ["Rack", "Session"]);
+    }
+
+    /// The names a scenario expects in Kumi's answer aren't the producer's own words, so saying them proves something and
+    /// the check can fail.
+    #[test]
+    fn no_scenarios_names_are_in_what_the_producer_says() {
+        for scenario in scenarios::all() {
+            assert!(!scenario.names.is_empty(), "{}", scenario.id);
+            let says = scenario.says.join(" ").to_lowercase();
+            for name in scenario.names {
+                assert!(!says.contains(&name.to_lowercase()), "{}: {name} is in {says:?}", scenario.id);
+            }
+        }
+    }
 }

@@ -410,7 +410,7 @@ end
             read: "",
             teardown: None,
             generates: false,
-            names: &["variation", "region"],
+            names: &["region", "render"],
             expect: |seen| {
                 let (before, after) = (seen.before, seen.after);
                 let source = |state: &Value, i: usize| {
@@ -487,7 +487,7 @@ track("FX Hall Reverb")
             read: "",
             teardown: None,
             generates: false,
-            names: &["Keys & Harp", "stem"],
+            names: &["Keys & Harp"],
             expect: |seen| {
                 let (before, after) = (seen.before, seen.after);
                 let celesta = track_like(after, "celesta");
@@ -538,7 +538,7 @@ audio(track("Drums"), MEDIA .. "/break120.wav", 0, 8)
                 r#"reaper.set_config_var_string("itemtimelock", "1", 0) reaper.set_config_var_string("loopnewitems", "14", 0) reaper.set_config_var_string("splitautoxfade", "0", 0) return "ok""#,
             ),
             generates: false,
-            names: &["Synth", "128"],
+            names: &["BPM", "rate", "timebase"],
             expect: |seen| {
                 let (before, after) = (seen.before, seen.after);
                 let tempo = after["tempo"].as_f64().unwrap_or(0.0);
@@ -697,7 +697,7 @@ end
 "#,
             teardown: None,
             generates: false,
-            names: &["Snare", "0S40", "0SC0", "line 12", "line 20"],
+            names: &["0S40", "0SC0", "line 12"],
             expect: |seen| {
                 let (before, after) = (seen.before, seen.after);
                 let effects = |state: &Value, line: u64| -> Vec<String> {
@@ -736,7 +736,7 @@ note(seq:pattern(1), 1, 0, "C-4", 0)
             read: r#"out.lines = notes_of(song.sequencer:pattern(1), 1)"#,
             teardown: None,
             generates: false,
-            names: &["instrument"],
+            names: &["Amen", "sample"],
             expect: |seen| {
                 let (before, after) = (seen.before, seen.after);
                 let count = |state: &Value| list(&state["instruments"]).len();
@@ -779,7 +779,7 @@ note(seq:pattern(1), 2, 0, "C-4", 1)
             read: r#"out.lines = {notes_of(song.sequencer:pattern(1), 1), notes_of(song.sequencer:pattern(1), 2)}"#,
             teardown: None,
             generates: false,
-            names: &["group", "Bus Compressor", "Think"],
+            names: &["group", "Bus Compressor"],
             expect: |seen| {
                 let after = seen.after;
                 let (amen, think) = (track(after, "Amen"), track(after, "Think"));
@@ -838,7 +838,7 @@ end
 "#,
             teardown: None,
             generates: false,
-            names: &["duplicate", "column"],
+            names: &["03", "slot", "Hats"],
             expect: |seen| {
                 let (before, after) = (seen.before, seen.after);
                 let slots = |state: &Value| list(&state["slots"]).len();
@@ -883,7 +883,7 @@ note(seq:pattern(1), 1, 0, "C-4", 0)
             read: "",
             teardown: None,
             generates: false,
-            names: &["Delay", "send"],
+            names: &["Delay", "#Send", "Vox"],
             expect: |seen| {
                 let (before, after) = (seen.before, seen.after);
                 let sends_on = |state: &Value| {

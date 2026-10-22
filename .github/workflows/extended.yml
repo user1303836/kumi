@@ -4,9 +4,9 @@ name: Extended
 # .config/nextest.toml): the recorded-source oracles, the long listening, form and rendering simulations, the video
 # tests (with ffmpeg), the benchmarks, the interoperability tests beside the official MCP and model SDKs (from npm), the
 # migration from the published Kumi 1.7.5, the long sweeps of the timing building blocks, each platform's every test,
-# the documentation tests, and REAPER's extension built against the newest SDK header Cockos has published. It blocks
-# nothing: it runs each week, by hand, and on a pull request labelled full-tests (from the push after the label is added,
-# and when it is added).
+# the documentation tests, the eval runner's own tests, and REAPER's extension built against the newest SDK header Cockos
+# has published. It blocks nothing: it runs each week, by hand, and on a pull request labelled full-tests (from the push
+# after the label is added, and when it is added).
 
 on:
   schedule:
@@ -120,7 +120,7 @@ jobs:
         run: ./scripts/test-isolated.ps1 --profile extended --partition 'hash:${{ matrix.part }}/${{ matrix.parts }}'
 
   docs:
-    name: Extended / documentation tests
+    name: Extended / documentation and eval runner tests
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-tests')
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -131,6 +131,9 @@ jobs:
         with:
           save-if: false
       - run: cargo test --workspace --locked --doc
+      # The eval runner's own tests (its lab guard, and that its Live-words and names checks can fail): an example's tests,
+      # which no test binary holds.
+      - run: cargo test -p kumi --locked --example eval_daws
 
   reaper-sdk:
     # REAPER's newest SDK headers, from Cockos' repository, in place of the vendored ones: build.rs generates every
