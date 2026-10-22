@@ -33,3 +33,6 @@ docs/evidence/willington-review.json
 
 # Local port inventory and agent handoff notes
 /.port-notes/
+
+# Agents' working files (plans, notes)
+/.hermes/

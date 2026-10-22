@@ -1,0 +1,68 @@
+# Kumi: guide for agents
+
+Kumi is a terminal agent that drives DAWs: Ableton Live, REAPER and Renoise (Logic Pro in progress, #374).
+It's one Cargo workspace. Each DAW is reached through a bridge that runs inside or beside it.
+
+## Where things live
+- `crates/kumi`: the app. TUI (`src/tui/`), CLI, install/update/doctor; `src/daw/` wires each DAW in.
+- `crates/kumi-runtime`: the agent, providers, listening, library, media and the DAW-neutral core.
+  - `src/kernel/`: the agent loop. `src/core/`: the DAW-neutral model (HISTORY, plans, sessions, places, FOCUS
+    views, and workflows such as jam, layers and stems).
+  - `src/integrations/ableton/`: Live, host side. `own_*` and `shared/`: what REAPER and Renoise share.
+  - `src/integrations/reaper*.rs`, `renoise*.rs`: REAPER and Renoise, host side.
+- `crates/ableton-mcp-server`: Live's bridge (an MCP server). `remote-script/` runs inside Live (Python);
+  `apps/live-extension/` is Live's extension (TypeScript); `protocol/` is the only list of Live operations.
+- `crates/daw-bridge` (the `kumi-daw/1` wire) and `crates/daw-mcp-server` (the host): Kumi's own bridges.
+- `crates/reaper-kumi`: REAPER's extension. `daws/renoise/com.kumi.Bridge.xrnx`: Renoise's tool (Lua).
+- `crates/kumi-store` (SQLite), `kumi-common` (shared utilities), `kumi-genexpr` (gen~ test interpreter).
+- `max-standard/` (Max patch rules) and `plugin-formats/` (plug-in preset formats): data Kumi builds in.
+- `tests/support/`: test helpers that several crates include with `#[path]`.
+- `scripts/`: release and packaging (Python), the isolated test runners. `install.sh` and `install.ps1`: the installers.
+- `.config/nextest.toml`: CI's test sets (`ci`, `ci-os`, `extended`). `.github/workflows/`: CI.
+- `docs/en`, `docs/ja`, `docs/zh-CN`: user docs. DEVELOPER_GUIDE.md and TESTING.md have the details.
+
+## Commands
+- Tests, in a home of their own (never your real ~/.kumi or Live folders):
+  `KUMI_NEXTEST=1 sh scripts/test-isolated.sh --profile ci -p <crate>` (Windows: `scripts/test-isolated.ps1`)
+  - Needs cargo-nextest. Without `KUMI_NEXTEST=1` the runner uses `cargo test`.
+- One test file: `sh scripts/test-isolated.sh -p kumi-runtime --test <name>`
+- Format and the gating lint:
+  `cargo fmt --all --check`
+  `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref`
+- Before a push: `cargo fmt --all --check` and `git diff --check origin/main...HEAD`; CI fails on both.
+- Release scripts' tests: `python3 -m unittest discover -s scripts/tests -p 'test_*release.py'`
+- Wait for CI: `gh pr checks <n> --required --watch`. Only "Required CI" and "Willington files" are required.
+
+## Searching
+- `.ignore` hides the recorded oracles (JSON files of up to 30 MB, some on one line) and built bundles from search.
+- Search them on purpose with `rg -u`, or `rg --no-ignore-dot`, which still skips what git ignores (`target/`).
+
+## Rules
+- Use worktrees. On long tasks, open a PR early and keep pushing at a regular cadence.
+- Commit subjects are plain English and say what changed. No conventional-commit prefixes.
+- Every PR body has `Changelog:` lines (`Changelog: none` for internal work); `scripts/release.py` reads them.
+- A bridge or Remote Script change bumps `crates/ableton-mcp-server`'s version (DEVELOPER_GUIDE, "Releasing").
+- A docs change goes into `docs/en`, `docs/ja` and `docs/zh-CN` in the same PR.
+- Docs are concise and factual, bulleted where possible.
+- Docs that aren't for users (design docs, agent notes, prompts, PRDs) stay out of git; `.hermes/` is ignored.
+  AGENTS.md and CLAUDE.md are the exceptions.
+- Never change binary names, the installed bundle layout or the wire protocols.
+- Never copy Live operation names or the registry hash out of `protocol/`.
+- `vendor/willington/` changes only in the owner's PRs from a `willington/` branch that change nothing else.
+- Tests never need a running DAW, a sign-in or anything from this machine.
+
+## Pins and oracles
+- Goldens are byte-exact, and `KUMI_BLESS=1` rewrites them: the pins in `crates/kumi/tests/goldens` and
+  `crates/kumi-runtime/tests/goldens`, the host's `crates/daw-mcp-server/tests/golden` and the wire vectors in
+  `crates/daw-bridge/tests/vectors`. A refactor's proof is "goldens unchanged".
+- Oracles (`*-oracle.json`, `*_oracle.json`, the TUI's `screens.json`) were recorded from the TypeScript version
+  (tag `v1.7.6`). Nothing regenerates them.
+
+## Glossary
+- own bridge: Kumi's own bridge for REAPER, Renoise and Logic over `kumi-daw/1` (Live uses its MCP bridge).
+- Hands: the helper that drives Live's menus and windows. Ears: how Kumi hears a DAW's audio.
+- place: where a conversation, its notes and its jobs are kept (a project id, "unsaved", "reaper-<id>").
+- FOCUS: what the producer is looking at (view, track, item, device), plus the transport.
+- catch-up: what changed in the project since Kumi last looked (snapshots).
+- kit: building blocks for Max for Live devices (`[kumi.transport]`, `[kumi.clock]`, `[kumi.notes]`).
+- slots: which model does each listening job. Willington: optional native Live providers (`vendor/willington/`).

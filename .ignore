@@ -1,0 +1,8 @@
+# Search noise: recorded data and built bundles. Git and Cargo don't read this file.
+# Search these on purpose with `rg -u` (or `rg --no-ignore-dot`, which still skips what git ignores).
+# The oracles recorded from the TypeScript version (tag v1.7.6): files of up to 30 MB, some on one line.
+*-oracle.json
+*_oracle.json
+crates/kumi/tests/support/app/screens.json
+# The Live extension's committed build.
+apps/live-extension/dist/
