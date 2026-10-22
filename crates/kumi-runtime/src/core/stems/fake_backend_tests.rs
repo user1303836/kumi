@@ -17,6 +17,8 @@ const RATE: u32 = 44_100;
 struct Fake {
     dir: tempfile::TempDir,
     placed: RefCell<Vec<(String, PathBuf)>>,
+    /// The files Kumi wrote, which it deletes once they're placed.
+    made: RefCell<Vec<PathBuf>>,
 }
 
 fn the_track() -> Vec<f32> {
@@ -54,7 +56,15 @@ impl StemsBackend for Rc<Fake> {
     }
 
     async fn place(&self, _track: &str, stems: &[(String, &Path)], _from: f64, _beats: f64, _signal: &Signal) -> Result<Value, String> {
-        self.placed.borrow_mut().extend(stems.iter().map(|(name, path)| (name.clone(), path.to_path_buf())));
+        // (a copy of each, as a DAW keeps one: Kumi's own goes once placed)
+        let kept = self.dir.path().join("kept");
+        std::fs::create_dir_all(&kept).unwrap();
+        for (k, (name, path)) in stems.iter().enumerate() {
+            let copy = kept.join(format!("{k}.wav"));
+            std::fs::copy(path, &copy).unwrap();
+            self.placed.borrow_mut().push((name.clone(), copy));
+            self.made.borrow_mut().push(path.to_path_buf());
+        }
         Ok(json!({"change": "c1"}))
     }
 }
@@ -69,12 +79,13 @@ async fn run(tool: &Rc<dyn KernelTool>, input: Value) -> Result<Value, String> {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_tracks_stems_are_files_that_play_back_as_it_did() {
-    let fake = Rc::new(Fake { dir: tempfile::tempdir().unwrap(), placed: RefCell::default() });
+    let fake = Rc::new(Fake { dir: tempfile::tempdir().unwrap(), placed: RefCell::default(), made: RefCell::default() });
     let tool = Stems::new(fake.clone()).tool();
     let done = run(&tool, json!({"track": "t1", "fromBeat": 0, "beats": 4})).await.unwrap();
     assert_eq!(done["stems"], json!(["Loop drums", "Loop bass", "Loop other"]), "{done}");
     let placed = fake.placed.borrow().clone();
     assert_eq!(placed.len(), 3);
+    assert!(fake.made.borrow().iter().all(|path| !path.exists()), "Kumi's own files go once placed");
     // (the three files add back up to the track, away from its edges)
     let mut sum = vec![0f32; RATE as usize * 2];
     for (_, path) in placed.iter() {
@@ -93,7 +104,7 @@ async fn a_tracks_stems_are_files_that_play_back_as_it_did() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn what_stems_needs_is_said() {
-    let tool = Stems::new(Rc::new(Fake { dir: tempfile::tempdir().unwrap(), placed: RefCell::default() })).tool();
+    let tool = Stems::new(Rc::new(Fake { dir: tempfile::tempdir().unwrap(), placed: RefCell::default(), made: RefCell::default() })).tool();
     assert!(run(&tool, json!({"fromBeat": 0, "beats": 4})).await.unwrap_err().starts_with("track:"));
     assert!(run(&tool, json!({"track": "t1", "fromBeat": 0, "beats": 400})).await.unwrap_err().starts_with("fromBeat and beats"));
 }

@@ -52,12 +52,14 @@ impl<B: StemsBackend + 'static> Stems<B> {
         }
         let ([left, right], rate) =
             crate::audio::decode::read_stereo(&render.file, &signal, render.start, seconds).await.map_err(|error| error.0)?;
-        if signal.is_cancelled() {
-            return Err("stopped".into());
-        }
-        let parts = split(&left, &right, rate);
-        let folder = self.backend.folder().join("stems");
-        std::fs::create_dir_all(&folder).map_err(|error| format!("Kumi couldn't make its stems folder: {error}"))?;
+        // (off Kumi's own thread, so the conversation keeps going; Esc stops the wait)
+        let parts = tokio::select! {
+            parts = tokio::task::spawn_blocking(move || split(&left, &right, rate)) => parts.map_err(|error| error.to_string())?,
+            _ = signal.cancelled() => return Err("stopped".into()),
+        };
+        // (in Kumi's listening folder, which Kumi clears, and gone once placed: the DAW keeps its own copy)
+        let folder = self.backend.folder();
+        std::fs::create_dir_all(&folder).map_err(|error| format!("Kumi couldn't make its listening folder: {error}"))?;
         let stamp = kumi_common::time::now_ms();
         let mut files: Vec<(String, PathBuf)> = Vec::new();
         for (stem, channels) in [("drums", &parts.drums), ("bass", &parts.bass), ("other", &parts.other)] {
@@ -67,12 +69,16 @@ impl<B: StemsBackend + 'static> Stems<B> {
             files.push((format!("{name} {stem}"), path));
         }
         let stems: Vec<(String, &std::path::Path)> = files.iter().map(|(stem, path)| (stem.clone(), path.as_path())).collect();
-        let made = self.backend.place(track, &stems, from, beats, &signal).await?;
+        let made = self.backend.place(track, &stems, from, beats, &signal).await;
+        for (_, path) in &files {
+            let _ = std::fs::remove_file(path);
+        }
+        let made = made?;
         let named: Vec<&str> = files.iter().map(|(stem, _)| stem.as_str()).collect();
         Ok(json!({
             "stems": named,
             "made": made,
-            "said": format!("split by Kumi's own splitter: drums (what hits), bass (what sustains under {BASS_HZ:.0} Hz) and other (the rest, voices too); together they play as the track did"),
+            "said": format!("split by Kumi's own splitter: drums (what hits), bass (what sustains under {BASS_HZ:.0} Hz) and other (the rest, voices too); together they play as the track did, beside it: mute the track to hear the stems alone"),
         }))
     }
 }

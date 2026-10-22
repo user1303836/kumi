@@ -62,14 +62,12 @@ impl<S: RefScheme + 'static> OwnEars<S> {
         OwnEars { plan, renderer, daw }
     }
 
-    /// The track rendered alone over the stretch (REAPER: its items before its FX; Renoise: through its devices), and its name.
-    async fn render_named(&self, track: &str, from: f64, beats: f64, signal: &Signal) -> Result<(Render, String), String> {
+    /// The track rendered alone over the stretch, and its name: `raw`, REAPER's items before the track's FX (what audio to
+    /// MIDI hears); else, and always in Renoise, the track through its devices before its fader (what a stem is).
+    async fn render_named(&self, track: &str, from: f64, beats: f64, raw: bool, signal: &Signal) -> Result<(Render, String), String> {
         let long = self.plan.lengthen(track)?;
         let name = self.row(&long, signal).await?.get("name").and_then(Value::as_str).unwrap_or("Track").to_string();
-        let stage = match self.daw {
-            Daw::Reaper => "items",
-            Daw::Renoise => "pre-fader",
-        };
+        let stage = if raw && self.daw == Daw::Reaper { "items" } else { "pre-fader" };
         Ok((self.renderer.render_track(&long, stage, Window { from, beats }, signal).await?, name))
     }
 
@@ -171,10 +169,16 @@ fn renoise_stem_steps(
     slots: &[Slot],
 ) -> Result<Vec<Value>, String> {
     let (slot, line, delay) = place_in(from, slots, lpb).ok_or("the stretch's start isn't in a slot of the song")?;
+    // (each named after its stem, not its file)
     let mut steps: Vec<Value> = stems
         .iter()
         .enumerate()
-        .map(|(k, (_, path))| json!({"tool": "instrument_load", "as": format!("i{k}"), "input": {"path": path.to_string_lossy()}}))
+        .flat_map(|(k, (stem, path))| {
+            [
+                json!({"tool": "instrument_load", "as": format!("i{k}"), "input": {"path": path.to_string_lossy()}}),
+                json!({"tool": "instrument_rename", "input": {"ref": format!("@i{k}"), "name": stem}}),
+            ]
+        })
         .collect();
     steps
         .push(json!({"tool": "track_add", "as": "stems", "input": {"type": "sequencer", "name": format!("{name} stems"), "index": index}}));
@@ -300,7 +304,7 @@ impl<S: RefScheme + 'static> ToMidiBackend for OwnEars<S> {
     }
 
     async fn render(&self, track: &str, from: f64, beats: f64, signal: &Signal) -> Result<(Render, String), String> {
-        self.render_named(track, from, beats, signal).await
+        self.render_named(track, from, beats, true, signal).await
     }
 
     async fn tempo(&self, _from: f64, _signal: &Signal) -> Result<f64, String> {
@@ -375,7 +379,7 @@ impl<S: RefScheme + 'static> StemsBackend for OwnEars<S> {
     }
 
     async fn render(&self, track: &str, from: f64, beats: f64, signal: &Signal) -> Result<(Render, String), String> {
-        self.render_named(track, from, beats, signal).await
+        self.render_named(track, from, beats, false, signal).await
     }
 
     fn folder(&self) -> PathBuf {
@@ -455,9 +459,10 @@ mod tests {
         reaper.iter().for_each(|step| fits(REAPER.kinds, step));
         // (the stretch from beat 6: line 8 of the slot from beat 4)
         let renoise = renoise_stem_steps(&stems, "Loop", 3, 6., 4., &[slot(2, "1:pattern:1", 4., 4.)]).unwrap();
-        assert_eq!(renoise.len(), 4);
-        assert_eq!(renoise[3]["input"]["lines"][0]["line"], 8);
-        assert_eq!(renoise[3]["input"]["lines"][0]["notes"][1], json!({"col": 2, "note": "C-4", "instrumentRef": "@i1"}));
+        assert_eq!(renoise.len(), 6);
+        assert_eq!(renoise[1]["input"], json!({"ref": "@i0", "name": "Loop drums"}));
+        assert_eq!(renoise[5]["input"]["lines"][0]["line"], 8);
+        assert_eq!(renoise[5]["input"]["lines"][0]["notes"][1], json!({"col": 2, "note": "C-4", "instrumentRef": "@i1"}));
         renoise.iter().for_each(|step| fits(RENOISE.kinds, step));
         assert!(renoise_stem_steps(&stems, "Loop", 3, 20., 4., &[slot(2, "1:pattern:1", 4., 4.)]).is_err(), "past the song");
     }

@@ -80,11 +80,22 @@ fn median(values: &mut [f32]) -> f32 {
     values[values.len() / 2]
 }
 
-/// Splits a stereo stretch (left, right, at `rate`).
+/// Splits a stereo stretch (left, right, at `rate`). Its frames start `SIZE − HOP` before it and end as far past it (silence
+/// there), so its first and last samples are covered by every frame a sample is, and nothing at its edges is divided by a
+/// window's near-nothing.
 pub fn split(left: &[f32], right: &[f32], rate: f64) -> Split {
     let length = left.len().min(right.len());
-    let frames = length.div_ceil(HOP).max(1);
-    let (l, r) = (analyse(&left[..length], frames), analyse(&right[..length], frames));
+    let lead = SIZE - HOP;
+    let padded = |samples: &[f32]| {
+        let mut out = vec![0f32; lead];
+        out.extend_from_slice(&samples[..length]);
+        out.extend(std::iter::repeat_n(0f32, lead));
+        out
+    };
+    let (left, right) = (padded(left), padded(right));
+    let total = left.len();
+    let frames = (total - SIZE).div_ceil(HOP) + 1;
+    let (l, r) = (analyse(&left, frames), analyse(&right, frames));
     let bins = SIZE / 2 + 1;
     // (the mid's magnitudes, what the masks are read from)
     let magnitude: Vec<Vec<f32>> =
@@ -109,7 +120,9 @@ pub fn split(left: &[f32], right: &[f32], rate: f64) -> Split {
     drop(magnitude);
     let cut = ((BASS_HZ / rate * SIZE as f64).round() as usize).min(bins);
     let harmonic = &harmonic;
-    let stem = |mask: &dyn Fn(usize, usize) -> f32| [synthesise(&l, mask, length), synthesise(&r, mask, length)];
+    let stem = |mask: &dyn Fn(usize, usize) -> f32| {
+        [&l, &r].map(|spectra| synthesise(spectra, mask, total).into_iter().skip(lead).take(length).collect::<Vec<f32>>())
+    };
     Split {
         drums: stem(&|f, k| 1. - harmonic[f][k]),
         bass: stem(&|f, k| if k < cut { harmonic[f][k] } else { 0. }),
@@ -140,11 +153,18 @@ mod tests {
         }
         let split = split(&mono, &mono, rate);
         let energy = |samples: &[f32]| samples.iter().map(|v| (*v as f64).powi(2)).sum::<f64>();
-        // (the stems add back up to the input, away from the edges)
+        // (the stems add back up to the input, its edges too)
+        let whole = 0..n;
+        let sum: Vec<f32> = whole.clone().map(|k| split.drums[0][k] + split.bass[0][k] + split.other[0][k]).collect();
+        let error: f64 = sum.iter().zip(&mono).map(|(a, b)| ((a - b) as f64).powi(2)).sum();
+        assert!(error < energy(&mono) * 1e-3, "{error}");
+        // (no stem clicks at the edges: none peaks past the input's peak there)
+        let peak = |samples: &[f32]| samples.iter().fold(0f32, |most, v| most.max(v.abs()));
+        let edge = peak(&mono[..256]).max(peak(&mono[n - 256..]));
+        for stem in [&split.drums[0], &split.bass[0], &split.other[0]] {
+            assert!(peak(&stem[..256]) <= edge * 1.5 && peak(&stem[n - 256..]) <= edge * 1.5, "{} {}", peak(&stem[..256]), edge);
+        }
         let inner = 4096..n - 4096;
-        let sum: Vec<f32> = inner.clone().map(|k| split.drums[0][k] + split.bass[0][k] + split.other[0][k]).collect();
-        let error: f64 = sum.iter().zip(&mono[inner.clone()]).map(|(a, b)| ((a - b) as f64).powi(2)).sum();
-        assert!(error < energy(&mono[inner.clone()]) * 1e-3, "{error}");
         // (the bass in bass, the pad in other, the clicks in drums: each stem holds most of its part's energy)
         let tone = |samples: &[f32], hz: f64| {
             let (mut re, mut im) = (0f64, 0f64);
