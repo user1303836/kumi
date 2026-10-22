@@ -737,10 +737,11 @@ impl Host {
                                 .get("instrument")
                                 .and_then(Value::as_str)
                                 .ok_or("phrases.instrument: the instrument's ref".to_string())?;
-                            let list: Vec<u64> =
-                                phrases.get("phrases").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
-                            if list.is_empty() || list.len() as u64 > MAX_COPIES {
-                                return Err(format!("phrases.phrases: 1 to {MAX_COPIES} phrase numbers"));
+                            // (each a phrase's number, or its place, which the tool follows to where the phrase is now: #401)
+                            let given: Vec<Value> = phrases.get("phrases").and_then(Value::as_array).cloned().unwrap_or_default();
+                            let list: Vec<Value> = given.iter().filter(|phrase| phrase.is_u64() || phrase.is_object()).cloned().collect();
+                            if list.is_empty() || list.len() != given.len() || list.len() as u64 > MAX_COPIES {
+                                return Err(format!("phrases.phrases: 1 to {MAX_COPIES} phrases, each its number or its place"));
                             }
                             let mut players = Map::new();
                             players.insert("instrument".into(), instrument.into());
