@@ -16,6 +16,7 @@ local base = import("changes_base")
 local discovery = import("discovery")
 local listening = import("listening")
 local log = import("log")
+local instruments_ = import("instruments")
 
 local fail, bad, q = base.fail, base.bad, base.q
 
@@ -246,19 +247,28 @@ local function make_player(song, at, name, spot)
   end)
 end
 
--- Where players of phrases play: the instrument, its phrases (from 1) and the note, and the pattern and line the range starts at
--- (a slot's first line). Refused unless the range starts where a slot does.
+-- Where players of phrases play: the instrument, its phrases (from 1, or their places: followed to where each is now, so an edit
+-- since they were looked up never plays another phrase) and the note, and the pattern and line the range starts at (a slot's
+-- first line). Refused unless the range starts where a slot does.
 local function players_of(song, env, players, range)
   if type(players) ~= "table" or type(players.instrument) ~= "string" or type(players.phrases) ~= "table" or #players.phrases == 0 then
-    bad("phrases is {instrument, phrases, note?}: the instrument's ref and its phrases' numbers (from 1)")
+    bad("phrases is {instrument, phrases, note?}: the instrument's ref and its phrases (numbers from 1, or places)")
   end
   local i = refs.expect(players.instrument, "instrument", 1, env.epoch())[1]
   if i > #song.instruments then fail("gone", "that instrument isn't in the song any more") end
   local instrument = song:instrument(i)
-  for _, ph in ipairs(players.phrases) do
-    if type(ph) ~= "number" or ph ~= math.floor(ph) or ph < 1 or ph > #instrument.phrases then
-      bad(string.format("phrases are numbers from 1 to %d (the instrument's phrases)", #instrument.phrases))
+  local list = {}
+  for k, ph in ipairs(players.phrases) do
+    if type(ph) == "table" then
+      local n, why = instruments_.follow(env, ph)
+      if not n then fail(why == "gone" and "gone" or "stale", "a phrase to play isn't where Kumi found it any more: read again") end
+      if n[1] ~= i then fail("changed", "a phrase to play is in another instrument now: read again") end
+      ph = n[2]
     end
+    if type(ph) ~= "number" or ph ~= math.floor(ph) or ph < 1 or ph > #instrument.phrases then
+      bad(string.format("phrases are numbers from 1 to %d (the instrument's phrases), or their places", #instrument.phrases))
+    end
+    list[k] = ph
   end
   local note = players.note == nil and 48 or players.note
   if type(note) ~= "number" or note ~= math.floor(note) or note < 0 or note > 119 then bad("note is from 0 to 119 (48 is C-4)") end
@@ -266,7 +276,7 @@ local function players_of(song, env, players, range)
   local timeline = listening.timeline(song, env.pattern_mark)
   for _, slot in ipairs(timeline.slots) do
     if math.abs(slot.beat - range.fromBeat) < 1e-6 then
-      return { instrument = i, list = players.phrases, note = note, pattern = slot.pattern, line = 1, name = instrument.name }
+      return { instrument = i, list = list, note = note, pattern = slot.pattern, line = 1, name = instrument.name }
     end
   end
   bad("range must start where a slot of the sequence starts")

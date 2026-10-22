@@ -230,16 +230,17 @@ impl<S: RefScheme + 'static> RenoiseBackend<S> {
     /// Phrase takes heard through players of their phrases: scratch tracks, one per phrase, made, rendered at once and dropped.
     async fn hear_phrases(&self, set: &mut RenoiseSet, numbers: &[usize], with_source: bool, signal: &Signal) -> Result<Rendered, String> {
         let found = self.find(set, numbers, signal).await?;
-        let mut phrases: Vec<(Option<usize>, u64)> = Vec::new();
+        // (each phrase by its place: the players follow it to where it is when they're made)
+        let mut phrases: Vec<(Option<usize>, Value)> = Vec::new();
         if let (true, SourceKind::Phrase { place }) = (with_source, &set.source.data.kind) {
             let row = self.locate(vec![json!({"phrase": place})], None, signal).await?;
-            if let Some(index) = row.first().and_then(|row| row.get("index")).and_then(Value::as_u64) {
-                phrases.push((None, index));
+            if let Some(place) = row.first().filter(|row| row.get("index").is_some()).and_then(|row| row.get("place")) {
+                phrases.push((None, place.clone()));
             }
         }
         for (number, row) in numbers.iter().zip(&found) {
-            if let Some(index) = row.get("index").and_then(Value::as_u64) {
-                phrases.push((Some(*number), index));
+            if let Some(place) = row.get("place").filter(|_| row.get("index").is_some()) {
+                phrases.push((Some(*number), place.clone()));
             }
         }
         if phrases.is_empty() {
@@ -256,7 +257,7 @@ impl<S: RefScheme + 'static> RenoiseBackend<S> {
             .map(|take| take.material.length as f64 / take.material.lpb.max(1) as f64)
             .fold(1., f64::max)
             .min(PHRASE_BEATS_MOST);
-        let list: Vec<u64> = phrases.iter().map(|(_, index)| *index).collect();
+        let list: Vec<Value> = phrases.iter().map(|(_, place)| place.clone()).collect();
         let args = json!({"action": "make", "count": list.len(), "label": "variations", "range": {"fromBeat": 0, "beats": beats},
             "phrases": {"instrument": instrument, "phrases": list, "note": note}});
         let made = match self.renderer.ask("scratch", args, self.renderer.cleanup_signal()).await {

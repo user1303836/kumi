@@ -571,6 +571,23 @@ end)
 
 -- M7 (variations): players of phrases, for Kumi to hear phrase takes
 
+test("scratch: players of phrases by their places play each where it is now, after a phrase was made before it", function()
+  local env, peer = setup()
+  local ins = mock.song:instrument(1)
+  for k = 1, 3 do ins:insert_phrase_at(k).name = "V" .. k end
+  local epoch = place(peer)
+  local where = result(call(peer, "read", { kind = "where", items = { { phrase = epoch .. ":phrase:1.3" } } }), "where")
+  local kept = where.items[1].place
+  ok(type(kept) == "table", "a place: " .. json.encode(where))
+  ins:insert_phrase_at(1).name = "New"
+  local layout
+  epoch, layout = place(peer)
+  result(call(peer, "scratch", { action = "make", scratchId = "s9p2a", count = 1, label = "variations", epoch = epoch, layout = layout,
+    range = { fromBeat = 4, beats = 4 }, phrases = { instrument = epoch .. ":instrument:1", phrases = { kept }, note = 50 } }), "make")
+  eq(mock.song:pattern(2):track(6):line(1):effect_column(1).amount_string, "04", "V3, phrase 04 now")
+  result(call(peer, "scratch", { action = "drop", scratchId = "s9p2a" }), "drop")
+end)
+
 test("scratch: players of phrases are empty tracks, each playing the instrument's note with a 0Zxx at the range's first line; drop takes them", function()
   local env, peer = setup()
   local ins = mock.song:instrument(1)
