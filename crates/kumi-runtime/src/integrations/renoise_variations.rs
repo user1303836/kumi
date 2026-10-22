@@ -11,7 +11,7 @@ use crate::core::{
     contracts::JsonObject,
     refs::RefScheme,
     variations::{
-        backend::{Rendered, Rewritten, Source, VariationsBackend, Words},
+        backend::{Rendered, Rewritten, Source, Undroppable, VariationsBackend, Words},
         heard::{heard_of, Heard},
         tool::{names, names_to_find},
         Rng, TakeSet, TakeState,
@@ -879,19 +879,21 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
         Ok(json!({"change": change, "title": applied.pointer("/display/title").cloned().unwrap_or(Value::Null)}))
     }
 
-    async fn undroppable(&self, set: &RenoiseSet, number: usize, row: &Value, signal: &Signal) -> Option<String> {
+    async fn undroppable(&self, set: &RenoiseSet, number: usize, row: &Value, signal: &Signal) -> Option<Undroppable> {
         match (&set.source.data.placement, &set.source.data.kind) {
             (Placement::Phrases { .. }, _) => None,
             (Placement::Patterns { .. }, kind) => {
                 let slots = row.get("slots").and_then(Value::as_array).map_or(0, Vec::len);
                 if slots != 1 {
-                    return Some(format!("plays in {slots} slots now"));
+                    return Some(Undroppable::InUse(format!("plays in {slots} slots now")));
                 }
                 if let Some(why) = edited_around(row) {
-                    return Some(why);
+                    return Some(Undroppable::Edited(why));
                 }
                 match kind {
-                    SourceKind::Range { first, last, .. } => self.edited_outside(set, number, row, *first, *last, signal).await,
+                    SourceKind::Range { first, last, .. } => {
+                        self.edited_outside(set, number, row, *first, *last, signal).await.map(Undroppable::Edited)
+                    }
                     _ => None,
                 }
             }

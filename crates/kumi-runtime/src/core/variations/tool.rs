@@ -1,7 +1,7 @@
 //! The variations tool (M7), the same in every DAW: make takes of a source, then keep, change and drop them by number. Core
 //! draws and checks each take, keeps the sets (in Kumi's folder, by the project's own id, so a restart forgets nothing kept),
 //! renders and hears takes before they're shown, and answers a line per take; the DAW's backend reads, writes, finds and renders.
-use super::backend::{found, gone, Recipe, Rewritten, Set, Source, VariationsBackend, Words};
+use super::backend::{found, gone, Recipe, Rewritten, Set, Source, Undroppable, VariationsBackend, Words};
 use super::heard::Heard;
 use super::{check, kept_name, roll, seed_of, take_name, Bounds, Material, Purpose, Rng, Take, TakeSet, TakeState, Verdict};
 use crate::core::contracts::{JsonObject, KernelTool, Reach, ToolResult};
@@ -489,9 +489,17 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                 }
                 edited.push(format!("V{number}"));
             }
-            if let Some(why) = self.backend.undroppable(&set, number, &row, signal).await {
-                skipped.push(format!("V{number} {why}: left as it is"));
-                continue;
+            match self.backend.undroppable(&set, number, &row, signal).await {
+                Some(Undroppable::InUse(why)) => {
+                    skipped.push(format!("V{number} {why}: left as it is"));
+                    continue;
+                }
+                Some(Undroppable::Edited(why)) if !named.contains(&number) => {
+                    skipped.push(format!("V{number} {why}: left as it is (name it to drop it anyway)"));
+                    continue;
+                }
+                Some(Undroppable::Edited(_)) if !edited.contains(&format!("V{number}")) => edited.push(format!("V{number}")),
+                _ => {}
             }
             dropping.push((number, row));
         }

@@ -81,6 +81,14 @@ pub fn gone(row: &Value) -> bool {
     row.get("gone") == Some(&Value::Bool(true))
 }
 
+/// Why a found take stays out of a drop: an edit Kumi's digest doesn't see (a take the producer names goes all the same), or
+/// its use elsewhere (it never goes).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Undroppable {
+    Edited(String),
+    InUse(String),
+}
+
 /// A rewrite made: its change, and what the take holds instead of what was asked when only part went in (and why).
 pub type Rewritten<M> = (String, Option<(M, String)>);
 
@@ -170,9 +178,9 @@ pub trait VariationsBackend: Sized {
     /// Puts a kept take where the producer says (one change): what it answered.
     async fn place(&self, set: &mut Set<Self>, number: usize, row: &Value, at: &JsonObject, signal: &Signal) -> Result<Value, String>;
 
-    /// Why a found take can't go in a drop (it's in use elsewhere, or holds the producer's edit where its digest doesn't look),
-    /// or None.
-    async fn undroppable(&self, set: &Set<Self>, number: usize, row: &Value, signal: &Signal) -> Option<String>;
+    /// Why a found take stays out of a drop (it holds the producer's edit where its digest doesn't look, or it's in use
+    /// elsewhere), or None.
+    async fn undroppable(&self, set: &Set<Self>, number: usize, row: &Value, signal: &Signal) -> Option<Undroppable>;
 
     /// Drops found takes in one change: its id and what the DAW said.
     async fn drop(&self, set: &Set<Self>, rows: &[(usize, Value)], signal: &Signal) -> Result<(String, Value), String>;

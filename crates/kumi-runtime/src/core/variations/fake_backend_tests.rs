@@ -1,7 +1,7 @@
 //! The variations tool against a fake DAW of sixteen steps, with no DAW at all: what core owns, the same for every backend
 //! (numbering across makes, keep, change, drop and "rest", the checks and their warnings, the sets kept across a restart,
 //! takes found again by their names, and when takes are rendered and drawn again).
-use super::backend::{Rendered, Rewritten, Set, Source, VariationsBackend, Words};
+use super::backend::{Rendered, Rewritten, Set, Source, Undroppable, VariationsBackend, Words};
 use super::heard::Heard;
 use super::tool::{names, Variations};
 use super::{Material, Rng};
@@ -48,6 +48,8 @@ struct Daw {
     unreadable: Cell<Option<u64>>,
     /// Kept sets' keys as their sources' places give them now (a position the producer moved).
     moved: RefCell<BTreeMap<String, String>>,
+    /// Why a take stays out of a drop, by its id.
+    undroppable: RefCell<BTreeMap<u64, Undroppable>>,
 }
 
 impl Daw {
@@ -251,8 +253,8 @@ impl VariationsBackend for Fake {
         Ok(json!("at the end"))
     }
 
-    async fn undroppable(&self, _: &Set<Self>, _: usize, _: &Value, _: &Signal) -> Option<String> {
-        None
+    async fn undroppable(&self, _: &Set<Self>, _: usize, row: &Value, _: &Signal) -> Option<Undroppable> {
+        self.0.undroppable.borrow().get(&id_of(row)).cloned()
     }
 
     async fn drop(&self, _: &Set<Self>, rows: &[(usize, Value)], _: &Signal) -> Result<(String, Value), String> {
@@ -414,6 +416,23 @@ async fn a_take_the_producer_edited_or_deleted_is_left_out_of_a_drop() {
     let named = run(&tool, json!({"action": "drop", "names": ["V1"]})).await.unwrap();
     assert_eq!((named["dropped"].clone(), named["edited"].clone()), (json!(["V1"]), json!(["V1"])), "{named}");
     assert!(daw.names().is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_named_take_goes_past_an_edit_the_backend_sees_but_never_past_its_use_elsewhere() {
+    let home = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let tool = kumi(&daw, home.path());
+    run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 3, "seed": 5, "listen": false})).await.unwrap();
+    daw.undroppable.borrow_mut().insert(1, Undroppable::Edited("was edited on its other tracks".into()));
+    daw.undroppable.borrow_mut().insert(2, Undroppable::InUse("plays in 2 slots now".into()));
+    let rest = run(&tool, json!({"action": "drop"})).await.unwrap();
+    assert_eq!(rest["dropped"], json!(["V3"]), "{rest}");
+    assert!(rest["skipped"][0].as_str().unwrap().contains("name it to drop it anyway"), "{rest}");
+    let named = run(&tool, json!({"action": "drop", "names": ["V1", "V2"]})).await.unwrap();
+    assert_eq!((named["dropped"].clone(), named["edited"].clone()), (json!(["V1"]), json!(["V1"])), "{named}");
+    assert!(named["skipped"][0].as_str().unwrap().starts_with("V2 plays in 2 slots now"), "{named}");
+    assert_eq!(daw.names(), ["V2 \u{b7} Beat"]);
 }
 
 #[tokio::test(flavor = "current_thread")]

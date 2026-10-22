@@ -9,7 +9,7 @@ use crate::core::{
     contracts::JsonObject,
     refs::RefScheme,
     variations::{
-        backend::{Rendered, Rewritten, Source, VariationsBackend, Words},
+        backend::{Rendered, Rewritten, Source, Undroppable, VariationsBackend, Words},
         heard::heard_of,
         notes::{amount, anchors_in, foreign_classes, note_op, notes_apart, round, sign, some_of, with_anchors, Note},
         tool::{names, names_to_find},
@@ -508,7 +508,7 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
         Ok(json!({"change": change}))
     }
 
-    async fn undroppable(&self, _set: &ReaperSet, _number: usize, _row: &Value, _signal: &Signal) -> Option<String> {
+    async fn undroppable(&self, _set: &ReaperSet, _number: usize, _row: &Value, _signal: &Signal) -> Option<Undroppable> {
         None
     }
 

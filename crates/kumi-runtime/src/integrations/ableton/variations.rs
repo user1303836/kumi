@@ -12,7 +12,7 @@ use super::observation::Observer;
 use crate::core::{
     contracts::JsonObject,
     variations::{
-        backend::{Rendered, Rewritten, Source, VariationsBackend, Words},
+        backend::{Rendered, Rewritten, Source, Undroppable, VariationsBackend, Words},
         notes::{amount, anchors_in, foreign_classes, note_op, notes_apart, round, with_anchors, Note, NOTE_OPS},
         tool::{names, names_to_find},
         Material, Rng, TakeSet,
@@ -552,7 +552,7 @@ impl VariationsBackend for LiveVariations {
         Err("in Live a kept take stays in its slot: drag it where it goes".into())
     }
 
-    async fn undroppable(&self, _set: &LiveSet, _number: usize, _row: &Value, _signal: &Signal) -> Option<String> {
+    async fn undroppable(&self, _set: &LiveSet, _number: usize, _row: &Value, _signal: &Signal) -> Option<Undroppable> {
         None
     }
 
