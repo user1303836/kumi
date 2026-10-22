@@ -2,7 +2,7 @@
 //! the tool does them for a producer. It adds a MIDI track with a clip in the first scene (its takes go in the empty slots
 //! below it) and one in the last (its takes add scenes), runs the tool on each, then deletes the scenes and the track it
 //! added. No model and no sign-in; Kumi's sets of takes are kept in a scratch folder, not ~/.kumi. It works in the open Set
-//! (at least 5 scenes): name it, and use a disposable one.
+//! (a new one: at least 5 scenes, none with clips): name it, and use a disposable one.
 //!   cargo build -p ableton-mcp-server --bins
 //!   cargo run -p kumi --example variations_live -- --set "<Set name>"
 use futures::FutureExt;
@@ -135,9 +135,10 @@ impl Run {
         if self.tool("variations").is_none() {
             return Err(RuntimeError::plain("variations isn't offered for this Set (an older bridge?)"));
         }
-        let scenes = self.rows("scene", json!({"fields": ["name"]})).await?.len();
-        if scenes < 5 {
-            return Err(RuntimeError::plain(format!("the Set has {scenes} scenes: the check needs at least 5")));
+        let rows = self.rows("scene", json!({"fields": ["name", "isEmpty"]})).await?;
+        let scenes = rows.len();
+        if scenes < 5 || rows.iter().any(|scene| scene["isEmpty"] != true) {
+            return Err(RuntimeError::plain(format!("the check needs a new Set: at least 5 scenes, none with clips ({scenes} scenes)")));
         }
         if self.track().await.is_some() {
             return Err(RuntimeError::plain(format!(
@@ -213,6 +214,11 @@ impl Run {
         self.say(
             dropped.is_ok() && !names.contains_key(&(last + 1)) && !names.contains_key(&(last + 2)),
             &format!("drop rest: both deleted ({})", brief(&dropped)),
+        );
+        let note = dropped.as_ref().ok().and_then(|answer| answer["in"]["note"].as_str()).unwrap_or("").to_owned();
+        self.say(
+            note.contains("V1 \u{b7} Hook") && note.contains("V2 \u{b7} Hook"),
+            &format!("the answer says Kumi's scenes stay, empty ({note})"),
         );
         Ok(())
     }

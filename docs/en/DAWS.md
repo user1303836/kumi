@@ -76,8 +76,8 @@ does the job there.
 - Live's own menus do what its scripting can't: freezing, bouncing, stems,
   audio to MIDI ([Live's own commands](KUMI_GUIDE.md#lives-own-commands)).
 - **Variations** (`variations`): numbered takes V1, V2… of a Session MIDI
-  clip, each a new clip in an empty slot below it on its track (a scene added
-  at the end when none is free). Their notes move in pitch, velocity or
+  clip, each a new clip below it on its track in a scene with no other clips
+  (a scene added at the end when none is free). Their notes move in pitch, velocity or
   timing, or thin out, or Kumi writes them; the notes you name stay as they
   are. Kumi checks each differs from the source and the others yet keeps its
   key. Live plays a MIDI clip only live: launch the takes to hear them. Kept

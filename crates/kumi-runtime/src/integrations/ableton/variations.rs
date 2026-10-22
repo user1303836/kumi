@@ -1,6 +1,6 @@
 //! Live's backend for the variations tool (#401): only Live's facts. Its material is what a Session MIDI clip plays (core's
-//! shared note form and operators), its takes are new clips in the empty Session slots below the source on its track (a
-//! scene added when none is free), written by write_midi_clip, found where Kumi left them or by the names Kumi gave them, a
+//! shared note form and operators), its takes are new clips below the source on its track, each in a scene with no other
+//! clip (a song's section plays what its scene holds), a scene added at the end when none is free, written by write_midi_clip, found where Kumi left them or by the names Kumi gave them, a
 //! rewrite the clip deleted and written again in its slot, kept takes renamed. Live plays a MIDI clip through its instrument
 //! only live, so its takes aren't rendered: the producer launches their slots to hear them. Core's tool does the rest.
 use super::changes::CHANGES;
@@ -21,7 +21,7 @@ use crate::core::{
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 pub static WORDS: Words = Words {
@@ -30,7 +30,7 @@ pub static WORDS: Words = Words {
     anchors: "the clip's notes every take keeps as they are (their index, from 0, as read_notes' json lists them)",
     ops: "pitch (semitones, up or down: the notes move), velocity (velocities moved), timing (loosened, in beats), thin (fewer notes); amount 0 to 1",
     lines: "a MIDI clip's notes ({pitch, start, duration, velocity}: beats from the start of what the clip plays; its anchor notes stay as they are: no need to write them)",
-    places: "clips (each take in an empty Session slot below the source on its track, a scene added when none is free)",
+    places: "clips (each take below the source on its track, in a scene with no other clip; a scene added at the end when none is free)",
     place_names: &["clips"],
     at: "none in Live: a kept take stays in its slot (drag it where it goes)",
     options: "none in Live",
@@ -101,9 +101,10 @@ fn clip_at(track: &str, scene: u64) -> Option<String> {
     Some(format!("{epoch}:clip:{index}:{scene}"))
 }
 
-/// The first empty slot below `scene`.
-fn free_below(slots: &[(u64, Option<String>)], scene: u64) -> Option<u64> {
-    slots.iter().find(|(at, clip)| *at > scene && clip.is_none()).map(|(at, _)| *at)
+/// The first slot below `scene` in a scene with no clip on any track (`empty`): a scene that's a section of the song
+/// plays what it holds, an empty slot there included (it stops the track).
+fn free_below(slots: &[(u64, Option<String>)], scene: u64, empty: &BTreeSet<u64>) -> Option<u64> {
+    slots.iter().find(|(at, clip)| *at > scene && clip.is_none() && empty.contains(at)).map(|(at, _)| *at)
 }
 
 /// The part of a clip that plays (beats from its start): its loop when it loops, else its markers.
@@ -249,6 +250,12 @@ impl LiveVariations {
             format!("the source's track \u{201c}{}\u{201d} isn't in the Set where Kumi left it: read again", data.track_name)
         })?;
         row.get("ref").and_then(Value::as_str).map(str::to_owned).ok_or_else(|| "a track without a ref".to_string())
+    }
+
+    /// The scenes with no clip on any track (by their index), as Live says of each.
+    async fn empty_scenes(&self, signal: &Signal) -> Result<BTreeSet<u64>, String> {
+        let rows = self.rows("scene", json!({"fields": ["index", "isEmpty"]}), signal).await?;
+        Ok(rows.iter().filter(|row| row.get("isEmpty") == Some(&Value::Bool(true))).filter_map(|row| row.get("index")?.as_u64()).collect())
     }
 
     /// A track's Session slots in order: each scene, and the clip there (short ref) when there is one.
@@ -419,8 +426,9 @@ impl VariationsBackend for LiveVariations {
     ) -> Result<(String, Value, String), (String, bool)> {
         let name = names(number, &set.source.short)[0].clone();
         let mut track = self.track_now(&set.source.data, signal).await.map_err(|why| (why, true))?;
-        // (the first empty slot below the source; a scene at the end when none is free, named after the take)
-        let mut free = free_below(&self.slots(&track, signal).await.map_err(|why| (why, true))?, set.source.data.scene);
+        // (the first slot below the source in a scene of its own; a scene at the end when none is free, named after the take)
+        let empty = self.empty_scenes(signal).await.map_err(|why| (why, true))?;
+        let mut free = free_below(&self.slots(&track, signal).await.map_err(|why| (why, true))?, set.source.data.scene, &empty);
         let mut made = Vec::new();
         if free.is_none() {
             let (id, _) = self.change("add_tracks_and_scenes", json!({"tracks": [], "scenes": [{"name": name}]}), signal).await?;
@@ -548,7 +556,7 @@ impl VariationsBackend for LiveVariations {
         None
     }
 
-    async fn drop(&self, _set: &LiveSet, rows: &[(usize, Value)], signal: &Signal) -> Result<(String, Value), String> {
+    async fn drop(&self, set: &LiveSet, rows: &[(usize, Value)], signal: &Signal) -> Result<(String, Value), String> {
         // (one change a clip: Live deletes a clip at a time)
         let mut ids = Vec::new();
         let mut dropped = Vec::new();
@@ -569,7 +577,30 @@ impl VariationsBackend for LiveVariations {
                 }
             }
         }
-        Ok((ids.join(", "), json!({"display": {"title": format!("Deleted {} takes", rows.len())}})))
+        // (a scene Kumi added for a take stays, now empty: deleting it would leave its clip's undo nowhere to go)
+        let scenes = self.rows("scene", json!({"fields": ["index", "name", "isEmpty"]}), signal).await.unwrap_or_default();
+        let left: Vec<String> = rows
+            .iter()
+            .filter_map(|(number, row)| {
+                let at = row.get("scene").and_then(Value::as_u64)?;
+                let scene = scenes.iter().find(|scene| scene.get("index").and_then(Value::as_u64) == Some(at))?;
+                let named = scene.get("name").and_then(Value::as_str)?;
+                (scene.get("isEmpty") == Some(&Value::Bool(true)) && named == names(*number, &set.source.short)[0])
+                    .then(|| format!("\u{201c}{named}\u{201d}"))
+            })
+            .collect();
+        let mut display = json!({"title": format!("Deleted {} takes", rows.len())});
+        if !left.is_empty() {
+            display["note"] = json!(format!(
+                "The scene{} Kumi added for {} stay{}, empty ({}): later takes go there, or the producer deletes {} in Live.",
+                if left.len() == 1 { "" } else { "s" },
+                if left.len() == 1 { "it" } else { "them" },
+                if left.len() == 1 { "s" } else { "" },
+                left.join(", "),
+                if left.len() == 1 { "it" } else { "them" }
+            ));
+        }
+        Ok((ids.join(", "), json!({"display": display})))
     }
 
     fn cant_render(&self) -> Option<String> {
@@ -689,11 +720,14 @@ mod tests {
     }
 
     #[test]
-    fn a_take_goes_in_the_first_free_slot_below_its_source_and_is_found_where_it_was_left_or_by_its_name() {
+    fn a_take_goes_below_its_source_in_a_scene_with_no_other_clip_and_is_found_where_it_was_left_or_by_its_name() {
         let slots = vec![(0, Some("c0".to_string())), (1, None), (2, Some("c2".into())), (3, None), (4, Some("c4".into()))];
-        assert_eq!(free_below(&slots, 0), Some(1));
-        assert_eq!(free_below(&slots, 1), Some(3));
-        assert_eq!(free_below(&slots, 3), None, "a scene is added");
+        let empty: BTreeSet<u64> = [1, 3].into();
+        assert_eq!(free_below(&slots, 0, &empty), Some(1));
+        assert_eq!(free_below(&slots, 1, &empty), Some(3));
+        assert_eq!(free_below(&slots, 3, &empty), None, "a scene is added");
+        // (a section of the song: its other tracks' clips play with an empty slot there, which stops this track)
+        assert_eq!(free_below(&slots, 0, &[3].into()), Some(3));
         let named: BTreeMap<String, String> =
             [("c0", "Arp"), ("c2", "V1 \u{b7} Arp"), ("c4", "V2 \u{b7} Arp")].iter().map(|(c, n)| (c.to_string(), n.to_string())).collect();
         let wanted = |name: &str| [format!("{name} \u{b7} kept"), name.to_string()];
