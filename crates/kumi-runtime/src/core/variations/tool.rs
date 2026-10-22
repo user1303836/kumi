@@ -644,15 +644,30 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         if let Some(why) = self.backend.cant_render() {
             return vec![format!("The takes weren't rendered: {why}")];
         }
-        if self.backend.playing(signal).await {
-            return vec![format!(
-                "{app} is playing, and a render would stop it: the takes weren't rendered (they're checked on their lines). Ask to hear them once it's stopped."
-            )];
+        match self.backend.playing(signal).await {
+            Some(false) => {}
+            Some(true) => {
+                return vec![format!(
+                    "{app} is playing, and a render would stop it: the takes weren't rendered (they're checked on their lines). Ask to hear them once it's stopped."
+                )]
+            }
+            None => {
+                return vec![format!(
+                    "Kumi couldn't tell whether {app} is playing, and a render would stop it: the takes weren't rendered (they're checked on their lines). Ask to hear them."
+                )]
+            }
         }
         let mut notes = Vec::new();
         let mut pending: Vec<usize> = numbers.to_vec();
         let mut source: Option<Option<Heard>> = None;
         for round in 0..3u32 {
+            // (a later round renders the takes drawn again: the producer may have pressed play meanwhile)
+            if round > 0 && self.backend.playing(signal).await != Some(false) {
+                notes.push(format!(
+                    "{app} plays now (or couldn't say whether it does): the takes drawn again weren't rendered again. Ask to hear them once it's stopped."
+                ));
+                break;
+            }
             let (heard_source, heard) = match self.backend.render(set, &pending, source.is_none(), signal).await {
                 Ok(rendered) => rendered,
                 Err(why) => {

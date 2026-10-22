@@ -304,7 +304,7 @@ impl Parameters {
         if targets.is_empty() {
             let mut reply = object(json!({"changed":null}));
             reply.extend(misses);
-            return Ok(ChangeOutcome { text: stringify(&json!(reply)), is_error: true, missed: Some(count), stops: false });
+            return Ok(ChangeOutcome { text: stringify(&json!(reply)), is_error: true, missed: Some(count), stops: false, applied: None });
         }
         signal.check()?;
         self.history.changes_this_turn.set(self.history.changes_this_turn.get() + 1);
@@ -430,7 +430,13 @@ impl Parameters {
         }
         reply.insert("live".into(),json!({"parameters":rows.iter().map(|row|{let mut result=JsonObject::new();for (from,to) in [("name","name"),("value","value"),("display","displayValue")]{if let Some(value)=row.get(from){result.insert(to.into(),value.clone());}}result}).collect::<Vec<_>>()}));
         reply.extend(misses);
-        Ok(ChangeOutcome { text: stringify(&json!(reply)), is_error: false, missed: (count > 0).then_some(count), stops: false })
+        Ok(ChangeOutcome {
+            text: stringify(&json!(reply)),
+            is_error: false,
+            missed: (count > 0).then_some(count),
+            stops: false,
+            applied: None,
+        })
     }
 }
 /// A device's parameters (`fields` of each), page by page.

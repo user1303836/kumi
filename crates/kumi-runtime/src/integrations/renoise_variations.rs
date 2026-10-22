@@ -292,7 +292,6 @@ impl<S: RefScheme + 'static> RenoiseBackend<S> {
     /// One change of Kumi's by its step's name: its change id and what the DAW answered, or why it wasn't made (and whether the
     /// request must stop there).
     async fn change(&self, tool: &str, input: Value, signal: &Signal) -> Result<(String, Value), (String, bool)> {
-        *self.plan.last_applied.borrow_mut() = None;
         let outcome = self.plan.change_by(tool, input.as_object().cloned().unwrap_or_default(), signal.clone()).await;
         let answer: Value = serde_json::from_str(&outcome.text).unwrap_or(Value::Null);
         if outcome.is_error || outcome.stops {
@@ -300,7 +299,7 @@ impl<S: RefScheme + 'static> RenoiseBackend<S> {
             return Err((why, outcome.stops));
         }
         let id = answer.get("change").and_then(Value::as_str).unwrap_or("").to_string();
-        Ok((id, self.plan.last_applied.borrow_mut().take().unwrap_or(Value::Null)))
+        Ok((id, outcome.applied.unwrap_or(Value::Null)))
     }
 
     /// A phrase source's own settings (key tracking, base note), for its takes; what `options` gives wins.
@@ -798,9 +797,8 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
         self.renderer.why_not()
     }
 
-    async fn playing(&self, signal: &Signal) -> bool {
-        let focus = self.plan.link().call("focus", json!({}), signal.clone()).await.ok().and_then(Result::ok).unwrap_or(Value::Null);
-        focus.pointer("/transport/playing") == Some(&Value::Bool(true))
+    async fn playing(&self, signal: &Signal) -> Option<bool> {
+        self.plan.playing(signal).await
     }
 
     async fn render(&self, set: &mut RenoiseSet, numbers: &[usize], with_source: bool, signal: &Signal) -> Result<Rendered, String> {

@@ -323,7 +323,7 @@ impl<const P: bool> PlanHost for FakeDaw<P> {
         json!({"deviceRef":group[0]["deviceRef"],"values":values}).as_object().unwrap().clone()
     }
     async fn change(&self, kind: &'static Kind, input: JsonObject, _signal: Signal, _confirmed: bool) -> ChangeOutcome {
-        let done = |reply: Value| ChangeOutcome { text: reply.to_string(), is_error: false, missed: None, stops: false };
+        let done = |reply: Value| ChangeOutcome { text: reply.to_string(), is_error: false, missed: None, stops: false, applied: None };
         match kind.tool {
             "set_tempo" => {
                 let title = format!("Tempo 120 → {} BPM", input["bpm"]);

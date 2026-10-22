@@ -119,6 +119,6 @@ impl Mutations {
         let mut live = result.clone();
         live.remove("track");
         reply.insert("live".into(), connection.references.borrow_mut().shorten(&Value::Object(live)));
-        Ok(ChangeOutcome { text: stringify(&Value::Object(reply)), is_error: false, missed: None, stops: false })
+        Ok(ChangeOutcome { text: stringify(&Value::Object(reply)), is_error: false, missed: None, stops: false, applied: None })
     }
 }

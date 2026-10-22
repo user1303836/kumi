@@ -39,6 +39,9 @@ struct Daw {
     next: Cell<u64>,
     changes: Cell<usize>,
     playing: Cell<bool>,
+    /// The DAW can't say whether it plays (its focus read fails); it starts playing once it made this many renders (0: never).
+    focus_fails: Cell<bool>,
+    plays_after: Cell<usize>,
     renders: Cell<usize>,
     clips: Cell<usize>,
     generation: Cell<u64>,
@@ -254,8 +257,10 @@ impl VariationsBackend for Fake {
         None
     }
 
-    async fn playing(&self, _: &Signal) -> bool {
-        self.0.playing.get()
+    async fn playing(&self, _: &Signal) -> Option<bool> {
+        let daw = &self.0;
+        let started = daw.plays_after.get() > 0 && daw.renders.get() >= daw.plays_after.get();
+        (!daw.focus_fails.get()).then_some(daw.playing.get() || started)
     }
 
     async fn render(&self, set: &mut Set<Self>, numbers: &[usize], with_source: bool, _: &Signal) -> Result<Rendered, String> {
@@ -444,6 +449,27 @@ async fn nothing_renders_while_the_daw_plays_and_a_take_that_clips_where_the_sou
     assert!(line.contains(" \u{b7} heard: peak \u{2212}6.0 dBFS"), "heard again, fine now: {made}");
     assert_eq!(daw.changes.get(), 3, "the first take, the second, and its rewrite");
     assert_eq!(daw.renders.get(), 2, "the take, then the take drawn again");
+}
+
+/// (#400 review notes) Nothing renders when the DAW can't say whether it plays, and a take drawn again isn't rendered again once
+/// the producer pressed play.
+#[tokio::test(flavor = "current_thread")]
+async fn nothing_renders_when_the_daw_cant_say_it_plays_or_starts_playing_between_rounds() {
+    let home = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let tool = kumi(&daw, home.path());
+    daw.focus_fails.set(true);
+    let made = run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 1, "seed": 6})).await.unwrap();
+    assert!(made["heard"][0].as_str().unwrap().starts_with("Kumi couldn't tell whether Fake is playing"), "{made}");
+    assert_eq!(daw.renders.get(), 0);
+
+    daw.focus_fails.set(false);
+    daw.clips.set(1);
+    daw.plays_after.set(1);
+    let made = run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 1, "seed": 7})).await.unwrap();
+    assert!(made["heard"].to_string().contains("Fake plays now (or couldn't say whether it does)"), "{made}");
+    assert!(made["takes"][0]["line"].as_str().unwrap().contains("drawn again after the render"), "{made}");
+    assert_eq!(daw.renders.get(), 1, "the take drawn again isn't rendered while the DAW plays");
 }
 
 /// (review W9) A make on the same source goes on with the source as it is now: a take is drawn from the producer's edit.

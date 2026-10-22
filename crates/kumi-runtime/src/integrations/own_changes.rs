@@ -622,8 +622,6 @@ pub struct OwnPlan<S: RefScheme + 'static> {
     /// Kumi's track renames, oldest first: the change, the track's ref and the name it had and was given (a judged run
     /// follows its track by them).
     pub(super) renamed: RefCell<Vec<(String, String, String, String)>>,
-    /// (M7) What the DAW answered the last change it applied (`created`, `applied`): the variations find their takes by it.
-    pub(super) last_applied: RefCell<Option<Value>>,
     /// (#401) The chunks run_lua ran this session without stopping at an error (their hashes, the latest kept): a script is
     /// kept only once it ran so.
     ran: RefCell<Vec<u64>>,
@@ -656,7 +654,6 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
             added: Cell::new(0),
             not_copied: RefCell::new(None),
             renamed: RefCell::default(),
-            last_applied: RefCell::default(),
             ran: RefCell::default(),
         })
     }
@@ -692,6 +689,12 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
             return Err(format!("{reference} isn't one of this turn's refs (the song may have changed): read again for a current one"));
         }
         Ok(long)
+    }
+
+    /// (#401) Whether the DAW plays now, as its focus says; None when it couldn't say (a render then waits).
+    pub(super) async fn playing(&self, signal: &Signal) -> Option<bool> {
+        let focus = self.link().call("focus", json!({}), signal.clone()).await.ok()?.ok()?;
+        focus.pointer("/transport/playing").and_then(Value::as_bool)
     }
 
     /// A read as the read tool makes it, from the book's epoch when it names refs (and `layout`, when they are from then):
@@ -1000,6 +1003,7 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
                 is_error: false,
                 missed: None,
                 stops: false,
+                applied: None,
             };
         }
         let (Some(transaction), Some(confirmation)) =
@@ -1053,7 +1057,6 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
         };
         follow_epoch(&self.link().book, &self.link().epoch, &self.link().layout, &applied);
         note_epoch(&self.link().seen_in, &self.link().book.borrow().scheme, &applied);
-        *self.last_applied.borrow_mut() = Some(applied.clone());
         let title = applied.pointer("/display/title").and_then(Value::as_str).map(str::to_owned).unwrap_or(title);
         // (r-tracks) Done, and nothing the DAW keeps changed (an action the DAW made no undo point of: a view, selection or
         // transport one): no row in HISTORY, and the host forgets it.
@@ -1066,6 +1069,7 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
                 is_error: false,
                 missed: None,
                 stops: false,
+                applied: Some(applied.clone()),
             };
         }
         // What the producer should know of it (a step the DAW's own undo skips), on its row and in its answer.
@@ -1160,7 +1164,7 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
                 reply[key] = super::own_bridge::shorten_anywhere(&mut self.link().book.borrow_mut(), value);
             }
         }
-        ChangeOutcome { text: stringify(&reply), is_error: false, missed: None, stops: false }
+        ChangeOutcome { text: stringify(&reply), is_error: false, missed: None, stops: false, applied: Some(applied) }
     }
 
     /// One action through the host's tool: what the producer is told it did, or why it didn't.

@@ -168,8 +168,8 @@ pub trait VariationsBackend: Sized {
     /// Why the DAW can't render for Kumi now, or None.
     fn cant_render(&self) -> Option<String>;
 
-    /// Whether the DAW plays now (a render would stop it).
-    async fn playing(&self, signal: &Signal) -> bool;
+    /// Whether the DAW plays now (a render would stop it); None when it couldn't say, and then nothing renders.
+    async fn playing(&self, signal: &Signal) -> Option<bool>;
 
     /// Renders the takes (and the source, when asked) offline and hears them.
     async fn render(&self, set: &mut Set<Self>, numbers: &[usize], with_source: bool, signal: &Signal) -> Result<Rendered, String>;

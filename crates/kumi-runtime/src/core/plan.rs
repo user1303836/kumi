@@ -56,10 +56,14 @@ pub struct ChangeOutcome {
     /// refusal, with nothing changed, and the plan goes on with the steps that don't depend on it (#259).
     #[serde(skip)]
     pub stops: bool,
+    /// What the DAW answered when it applied the change (the place it made, its rows): a backend composing on it reads it
+    /// here (#401, no cell shared between changes).
+    #[serde(skip)]
+    pub applied: Option<Value>,
 }
 impl ChangeOutcome {
     pub fn error(text: impl Into<String>) -> Self {
-        Self { text: text.into(), is_error: true, missed: None, stops: false }
+        Self { text: text.into(), is_error: true, missed: None, stops: false, applied: None }
     }
     /// An error after which nothing more should be tried: the DAW may have changed, or can't be read.
     pub fn stop(text: impl Into<String>) -> Self {

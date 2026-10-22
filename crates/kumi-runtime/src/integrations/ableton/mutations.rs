@@ -625,6 +625,7 @@ impl Mutations {
             is_error: record.state != ChangeState::Applied && permanent.is_none(),
             missed: (!unwritten.is_empty()).then_some(unwritten.len()),
             stops: record.state == ChangeState::Unsure,
+            applied: None,
         })
     }
     async fn append_at_end(&self, kind: &ChangeKind, input: JsonObject, signal: Signal) -> Result<JsonObject, ReadError> {
