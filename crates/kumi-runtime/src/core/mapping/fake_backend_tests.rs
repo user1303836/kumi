@@ -59,25 +59,10 @@ impl MappingBackend for Rc<Fake> {
 fn tone(path: &Path, midi: f64, amplitude: f64, seconds: f64) {
     let rate = 44_100u32;
     let hz = 440. * 2f64.powf((midi - 69.) / 12.);
-    let frames = (rate as f64 * seconds) as u32;
-    let mut bytes = Vec::new();
-    bytes.extend(b"RIFF");
-    bytes.extend((36 + frames * 2).to_le_bytes());
-    bytes.extend(b"WAVEfmt ");
-    bytes.extend(16u32.to_le_bytes());
-    bytes.extend(1u16.to_le_bytes());
-    bytes.extend(1u16.to_le_bytes());
-    bytes.extend(rate.to_le_bytes());
-    bytes.extend((rate * 2).to_le_bytes());
-    bytes.extend(2u16.to_le_bytes());
-    bytes.extend(16u16.to_le_bytes());
-    bytes.extend(b"data");
-    bytes.extend((frames * 2).to_le_bytes());
-    for k in 0..frames {
-        let value = amplitude * (2. * std::f64::consts::PI * hz * k as f64 / rate as f64).sin();
-        bytes.extend(((value * 32767.) as i16).to_le_bytes());
-    }
-    std::fs::write(path, bytes).unwrap();
+    let mono: Vec<f32> = (0..(rate as f64 * seconds) as usize)
+        .map(|k| (amplitude * (2. * std::f64::consts::PI * hz * k as f64 / rate as f64).sin()) as f32)
+        .collect();
+    crate::audio::decode::write_test_wav(path, &mono, rate);
 }
 
 async fn run(tool: &Rc<dyn KernelTool>, input: Value) -> Result<Value, String> {

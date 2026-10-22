@@ -24,6 +24,7 @@ does the job there.
 | Stop everything at once (`/stop`) | ✓ | ✓ | ✓ |
 | Variations as numbered takes you keep, change or drop | not yet | not yet: item variations come later | ✓ |
 | Sample maps: sounds laid across the keys by name, pitch and loudness, and an instrument tidy | not yet | not yet: drum kits only (`drum_kit`) | ✓ |
+| Chops a recording at its real hits and lays the slices out to play it | not yet | not yet | ✓ |
 | Knows whether the DAW is recording | ✓ | ✓ | ✓ |
 | A line in the DAW's status bar | ✓ | no: REAPER's API has no status bar (a notification instead) | ✓ |
 | Opens a saved project | ✓ | not yet: you open it yourself (`kumi -r` and setup's restart don't) | not yet: you open it yourself (`kumi -r` and setup's restart don't) |
@@ -258,6 +259,14 @@ saves the song, instruments and device presets.
   articulation. It says what it decided and asks only what it can't tell. The
   tidy finds instruments no note plays, copies, and samples two instruments
   hold, and changes only what you accept.
+- **Chops** (`chop`): a break cut at its real hits, each found to the frame
+  and named as a kick, snare, hat, ghost or roll, with the break's own tempo
+  worked out from its length. Kumi slices it in one step (on the song's grid
+  when the tempos match) and lays the slices out to play it as recorded, using
+  the delay column for hits between lines. It renders the result and says how
+  close the hits land and how deeply it nulls against the recording. The
+  lighter densities (no ghosts or rolls; kick and snare) come as variations
+  takes to keep or drop.
 - **Instruments from sample files:** a drum kit with mute groups, or keys with
   velocity layers, in one instrument.
 - **Doofers** from devices, with named macros.

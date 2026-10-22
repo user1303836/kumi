@@ -20,6 +20,7 @@ pub mod reaper;
 pub mod reaper_changes;
 pub mod renoise;
 pub mod renoise_changes;
+mod renoise_chop;
 mod renoise_lines;
 mod renoise_mapping;
 mod renoise_variations;

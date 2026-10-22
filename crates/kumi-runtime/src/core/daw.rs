@@ -646,6 +646,9 @@ pub struct Capabilities {
     /// (#401) The sample map: sound files or an instrument's samples laid out across the keys from their names, pitch and
     /// loudness, and the song's instruments tidied (core's, with the DAW's backend): Renoise's keyzones.
     pub sample_mapping: bool,
+    /// (#401) Chopping: a drum recording cut at its real hits and laid out to play it, lighter densities as variations takes
+    /// (core's, with the DAW's backend): Renoise's slices.
+    pub chop: bool,
 }
 
 /// One DAW as Kumi knows it: its id (None when no DAW is known), its words and what it can do.
@@ -769,6 +772,7 @@ impl DawProfile {
             renders_to_listen: false,
             variations: false,
             sample_mapping: false,
+            chop: false,
         },
         vocab: PromptVocab {
             plan_tool: crate::live_word!(plan_tool),
@@ -954,6 +958,7 @@ impl DawProfile {
             presets: true,
             variations: true,
             sample_mapping: true,
+            chop: true,
             ..Capabilities::NONE
         },
         vocab: PromptVocab {
@@ -1084,6 +1089,7 @@ impl Capabilities {
         renders_to_listen: false,
         variations: false,
         sample_mapping: false,
+        chop: false,
     };
 }
 

@@ -19,6 +19,7 @@ const ROWS: &[(&str, &str)] = &[
     ("stop_transport", "Stop everything at once"),
     ("variations", "Variations as numbered takes"),
     ("sample_mapping", "Sample maps"),
+    ("chop", "Chops a recording at its real hits"),
     ("recording_state", "Knows whether the DAW is recording"),
     ("status_line", "A line in the DAW's status bar"),
     ("open_project", "Opens a saved project"),

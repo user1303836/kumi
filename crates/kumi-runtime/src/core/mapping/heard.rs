@@ -1,7 +1,7 @@
 //! A sample heard for mapping: its pitch (as a MIDI note, from the pitch tracker over its first seconds) and how sure, its
 //! loudness (K-weighted, over its loudest 400 ms: what decides velocity order) and its peak. Off Kumi's thread.
 use super::HeardSample;
-use crate::audio::{analyze::track_pitch, decode::open_audio_to, dsp::k_weighting};
+use crate::audio::{analyze::track_pitch, decode::read_mono, dsp::k_weighting};
 use kumi_common::abort::Signal;
 
 /// How much of a sample is heard: enough for a note's pitch and its attack's loudness.
@@ -11,21 +11,7 @@ const LOUDNESS_WINDOW: f64 = 0.4;
 
 /// A file heard, or why it couldn't be.
 pub async fn hear_file(path: &str, signal: &Signal) -> Result<HeardSample, String> {
-    let mut source = open_audio_to(path, Some(signal.clone()), Some(HEARD_SECONDS)).await.map_err(|e| e.0)?;
-    let rate = source.sample_rate;
-    let most = (rate * HEARD_SECONDS) as usize;
-    let mut mono: Vec<f32> = Vec::new();
-    while mono.len() < most {
-        let Some(block) = source.read(65_536).await.map_err(|e| e.0)? else { break };
-        let channels = block.len().max(1);
-        let frames = block.first().map_or(0, Vec::len);
-        for frame in 0..frames {
-            mono.push(block.iter().map(|channel| channel[frame]).sum::<f32>() / channels as f32);
-        }
-    }
-    let _ = source.close().await;
-    mono.truncate(most);
-    let seconds = source.frames as f64 / rate;
+    let (mono, rate, seconds) = read_mono(path, signal, 0., HEARD_SECONDS).await.map_err(|e| e.0)?;
     tokio::task::spawn_blocking(move || heard_of(&mono, rate, seconds)).await.map_err(|_| "Kumi couldn't hear that file".to_string())
 }
 
