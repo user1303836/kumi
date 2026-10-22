@@ -128,15 +128,17 @@ async fn an_instruments_own_samples_are_laid_out_and_articulations_need_a_part()
         held("s:1", "Low", Ok(file("low", 48.))),
         held("s:2", "High", Ok(file("high", 72.))),
         held("s:3", "Broken", Err("no audio".into())),
+        Held { note_off: true, ..held("s:4", "Release", Ok(file("release", 48.))) },
     ];
     let tool = Mapping::new(fake.clone()).tool();
     let laid = run(&tool, json!({"instrumentRef": "in:1", "action": "apply", "layout": "keys"})).await.unwrap();
-    assert_eq!(laid["leftOut"][0]["sample"], "Broken", "{laid}");
+    assert!(laid["leftOut"].as_array().unwrap().iter().any(|row| row["sample"] == "Broken"), "{laid}");
     assert!(
         laid["decided"].as_array().unwrap().iter().any(|line| line.as_str().unwrap().starts_with("“Broken” couldn't be heard")),
         "{laid}"
     );
-    // What wasn't laid out still sounds over the new zones: said, so it can be moved or deleted.
+    // What wasn't laid out still sounds over the new zones: said, so it can be moved or deleted; a release sample on the
+    // note-off layer was left on purpose and isn't.
     assert_eq!(laid["stillSounding"], json!(["“Broken” (C-1 to G9)"]), "{laid}");
     let (instrument, roots): (String, Vec<(String, i32)>) = {
         let remapped = fake.remapped.borrow();

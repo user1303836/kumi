@@ -165,8 +165,9 @@ impl<B: MappingBackend + 'static> Mapping<B> {
     /// The instrument's samples a remap leaves where they were that still sound in the new zones (keys and velocities).
     fn still_sounding(&self, held: &[Held], planned: &Planned) -> Vec<String> {
         let laid: BTreeSet<&str> = planned.samples.iter().map(|placed| placed.id.as_str()).collect();
+        // (a sample on the note-off layer plays as a key lets go, never with the new zones' notes: it was left on purpose)
         held.iter()
-            .filter(|sample| !laid.contains(sample.reference.as_str()))
+            .filter(|sample| !laid.contains(sample.reference.as_str()) && !sample.note_off)
             .filter(|sample| {
                 planned.samples.iter().any(|placed| {
                     sample.zone.0 <= placed.zone.1

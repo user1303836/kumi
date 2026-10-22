@@ -82,6 +82,11 @@ fn zero_padded_numbers_are_notes_only_when_heard_so_or_when_they_dont_count_take
     let plan = plan(&takes, &asked(), &name);
     assert_eq!(plan.layout, Layout::Drums, "no notes: a key each: {plan:#?}");
     assert!(plan.findings.iter().any(|f| f.contains("zero-padded")), "{:#?}", plan.findings);
+    // Takes counted from 000, or with gaps (a take left out), nothing heard.
+    for stems in [["Vox_000", "Vox_001", "Vox_002"], ["Vox_001", "Vox_002", "Vox_004"]] {
+        let takes: Vec<Sample> = stems.iter().map(|stem| Sample::new(*stem, *stem, None)).collect();
+        assert_eq!(super::plan(&takes, &asked(), &name).layout, Layout::Drums, "{stems:?} are takes");
+    }
     // Notes: 048, 060, 072, nothing heard (not a run from 001).
     let notes: Vec<Sample> = ["Piano_048", "Piano_060", "Piano_072"].iter().map(|stem| Sample::new(*stem, *stem, None)).collect();
     let plan = super::plan(&notes, &asked(), &name);

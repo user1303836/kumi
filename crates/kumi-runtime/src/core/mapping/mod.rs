@@ -178,7 +178,7 @@ fn convention(samples: &[Sample], asked: Option<i32>, tracker: bool) -> Option<C
 }
 
 /// Zero-padded numbers ("001") are a sample's MIDI note only when its pitch agrees (an octave either way), or, with nothing
-/// heard, when the set's numbers aren't a run from 001 (take numbers, in most packs).
+/// heard, when the set's numbers don't count takes: a run from 000 or 001, gaps and all (as many numbers as half its span).
 fn settle_padded(samples: &mut [Sample], findings: &mut Vec<String>) {
     let padded = |s: &Sample| match s.hints.note {
         Some(Written::Padded(n)) => Some(n),
@@ -188,7 +188,10 @@ fn settle_padded(samples: &mut [Sample], findings: &mut Vec<String>) {
     let mut unheard: Vec<u8> = samples.iter().filter(|s| heard(s).is_none()).filter_map(padded).collect();
     unheard.sort_unstable();
     unheard.dedup();
-    let run = !unheard.is_empty() && unheard.iter().enumerate().all(|(k, n)| *n as usize == k + 1);
+    let run = match (unheard.first(), unheard.last()) {
+        (Some(low), Some(high)) => *low <= 1 && (*high - *low) as usize + 1 <= 2 * unheard.len(),
+        _ => false,
+    };
     let mut dropped = 0;
     for sample in samples.iter_mut() {
         let Some(n) = padded(sample) else { continue };
