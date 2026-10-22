@@ -199,10 +199,8 @@ impl<S: RefScheme + 'static> ChopBackend for RenoiseChop<S> {
         let length = (beats * lpb as f64 - 1e-3).ceil().max(1.) as u64;
         let last = (first + length - 1).max(cells.iter().map(|cell| cell.line).max().unwrap_or(first));
         let (pattern_long, lines) = self.pattern_of(&self.plan.lengthen(pattern)?, signal).await?;
-        if last >= lines {
-            return Err(format!(
-                "the recording is {length} lines at {lpb} lines a beat, from line {first:02} to {last:02}, and the pattern has {lines}: lay it from an earlier line, in a longer pattern, or lengthen this one (pattern_length)"
-            ));
+        if let Some(why) = too_long(length, lpb, first, last, lines) {
+            return Err(why);
         }
         let columns = cells.iter().map(|cell| cell.col).max().unwrap_or(1);
         // Notes already in those columns of the range are the producer's: never written over unless asked.
@@ -215,16 +213,7 @@ impl<S: RefScheme + 'static> ChopBackend for RenoiseChop<S> {
                 signal,
             )
             .await?;
-        let held: Vec<u64> = rows
-            .iter()
-            .filter_map(|row| {
-                let line = row.get("line").and_then(Value::as_u64)?;
-                let shown = row.get("notes").and_then(Value::as_array).into_iter().flatten();
-                let mut notes = shown.chain(row.pointer("/hidden/notes").and_then(Value::as_array).into_iter().flatten());
-                let taken = notes.any(|note| note.get("col").and_then(Value::as_u64).is_some_and(|col| col <= columns));
-                (line >= first && line <= last && taken).then_some(line)
-            })
-            .collect();
+        let held = held_lines(&rows, first, last, columns);
         if !held.is_empty() && !replace {
             let shown: Vec<String> = held.iter().take(8).map(|line| format!("{line:02}")).collect();
             return Err(format!(
@@ -333,6 +322,28 @@ impl<S: RefScheme + 'static> ChopBackend for RenoiseChop<S> {
     }
 }
 
+/// Why a range from `first` to `last` doesn't fit a pattern of `lines`, in words with the way out, or None.
+fn too_long(length: u64, lpb: u64, first: u64, last: u64, lines: u64) -> Option<String> {
+    (last >= lines).then(|| {
+        format!(
+            "the recording is {length} lines at {lpb} lines a beat, from line {first:02} to {last:02}, and the pattern has {lines}: lay it from an earlier line, in a longer pattern, or lengthen this one (pattern_length)"
+        )
+    })
+}
+
+/// The lines from `first` to `last` whose first `columns` note columns hold a note (shown or hidden), as the line read gives them.
+fn held_lines(rows: &[Value], first: u64, last: u64, columns: u64) -> Vec<u64> {
+    rows.iter()
+        .filter_map(|row| {
+            let line = row.get("line").and_then(Value::as_u64)?;
+            let shown = row.get("notes").and_then(Value::as_array).into_iter().flatten();
+            let mut notes = shown.chain(row.pointer("/hidden/notes").and_then(Value::as_array).into_iter().flatten());
+            let taken = notes.any(|note| note.get("col").and_then(Value::as_u64).is_some_and(|col| col <= columns));
+            (line >= first && line <= last && taken).then_some(line)
+        })
+        .collect()
+}
+
 /// sample_slices' input: a slice marker at each frame not cut yet (Renoise counts frames from 1), and, with `replace`, the old
 /// ones that aren't among them deleted. A marker already where it should be stays.
 fn cut_input(recording: &Recording, frames: &[usize], replace: bool) -> Value {
@@ -419,6 +430,21 @@ mod tests {
         assert_eq!(lay["lines"][1]["notes"], json!([{"col": 1, "clear": true}, {"col": 2, "clear": true}]));
         assert_eq!(lay["lines"][3]["notes"][1], json!({"col": 2, "note": "D#4", "instrument": 1, "delay": 128}));
         assert_eq!(lay["lines"].as_array().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn notes_in_the_columns_a_chop_needs_are_found_and_a_range_past_the_pattern_is_said() {
+        let rows = vec![
+            json!({"line": 3, "notes": [{"col": 1, "note": "C-4"}]}),
+            json!({"line": 5, "notes": [{"col": 3, "note": "E-4"}]}),
+            json!({"line": 6, "hidden": {"notes": [{"col": 2, "note": "G-4"}]}}),
+            json!({"line": 40, "notes": [{"col": 1, "note": "C-4"}]}),
+        ];
+        assert_eq!(held_lines(&rows, 0, 31, 2), vec![3, 6], "column 3 isn't needed; line 40 is past the range; hidden counts");
+        assert!(held_lines(&rows, 8, 31, 2).is_empty());
+        let why = too_long(128, 8, 0, 127, 64).unwrap();
+        assert!(why.starts_with("the recording is 128 lines at 8 lines a beat, from line 00 to 127, and the pattern has 64"), "{why}");
+        assert!(too_long(64, 4, 0, 63, 64).is_none());
     }
 
     #[test]
