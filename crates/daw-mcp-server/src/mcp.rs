@@ -384,6 +384,31 @@ fn tool_list(daw: Daw) -> Value {
             "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false},
         }));
     }
+    // (#401) A chore kept as the DAW's own action (REAPER's Action List, Renoise's Tools menu): files and menus, not the project.
+    list.as_array_mut().expect("a list").extend([
+        json!({
+            "name": "script_install",
+            "title": format!("Keep a script in {daw}"),
+            "description": format!("Keeps a Lua chunk as {daw}'s own action ({}), under slug: a file and its action, not the project, so no step of {daw}'s undo; script_remove takes it away. A script kept already is written over only with replace. Answers {{file, where}}.", if daw == Daw::Reaper { "REAPER's Action List, Scripts/Kumi, one undo block a run" } else { "Tools > Kumi in Renoise's menu, with a shortcut to set" }),
+            "inputSchema": {"type": "object", "properties": merged(&pick, json!({
+                "slug": {"type": "string", "pattern": "^[a-z0-9-]{1,64}$", "description": "Its file's name"},
+                "name": {"type": "string", "minLength": 1, "maxLength": 80},
+                "description": {"type": "string", "maxLength": 500},
+                "code": {"type": "string", "minLength": 1, "maxLength": 200000},
+                "replace": {"type": "boolean"},
+            })), "required": ["slug", "name", "code"], "additionalProperties": false},
+            "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false},
+        }),
+        json!({
+            "name": "script_remove",
+            "title": format!("Remove a kept script from {daw}"),
+            "description": format!("Takes a kept script away from {daw}: its action and its file."),
+            "inputSchema": {"type": "object", "properties": merged(&pick, json!({
+                "slug": {"type": "string", "pattern": "^[a-z0-9-]{1,64}$"},
+            })), "required": ["slug"], "additionalProperties": false},
+            "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false},
+        }),
+    ]);
     // M6: what changed in the project while Kumi wasn't looking, and what the producer did while it watched.
     let catchup = json!([
         {
@@ -707,6 +732,11 @@ pub async fn handle(host: &Host, message: &Value) -> Option<Value> {
                 // m4-r-fxenv
                 "fx_chain_save" if host.daw() == Daw::Reaper => {
                     let (answer, is_error) = host.fx_chain_save(&arguments).await;
+                    result(id, tool_result(answer, is_error))
+                }
+                // (#401) a chore kept as the DAW's own action: files and menus, passed on as they come
+                "script_install" | "script_remove" => {
+                    let (answer, is_error) = host.passthrough(name, &arguments).await;
                     result(id, tool_result(answer, is_error))
                 }
                 // (r-tracks) Saving: the project in either DAW, tracks as a template in REAPER.

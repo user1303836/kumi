@@ -1191,6 +1191,15 @@ impl ReaperScript {
             "track_template_save" => Ok(
                 json!({"epoch": epoch, "saved": format!("/lab/REAPER/TrackTemplates/{}.RTrackTemplate", params["name"].as_str().unwrap_or("Template"))}),
             ),
+            // (#401) a kept script: a file and an action, nothing in the project changed
+            "script_install" => Ok(json!({
+                "file": format!("/lab/REAPER/Scripts/Kumi/{}.lua", params["slug"].as_str().unwrap_or("script")),
+                "command": "_RSlab",
+                "where": "\u{201c}Script: lab.lua\u{201d} in REAPER's Action List",
+            })),
+            "script_remove" => {
+                Ok(json!({"removed": format!("/lab/REAPER/Scripts/Kumi/{}.lua", params["slug"].as_str().unwrap_or("script"))}))
+            }
             "read" => Self::read(&state, &epoch, params),
             "digest" => Self::digest(&state, &epoch, params),
             "snapshot" => {

@@ -231,6 +231,22 @@ async fn reapers_saves_go_to_the_bridge_by_name_and_are_no_change() {
     assert_eq!(released["released"], 0, "{released}");
 }
 
+// (#401) A kept script reaches the bridge by name, its arguments as they came: files and an action, no change.
+#[tokio::test]
+async fn a_kept_script_goes_to_the_bridge_by_name_and_is_no_change() {
+    let mut lab = Lab::start().await;
+    let asked = json!({"slug": "tidy-hats", "name": "Tidy hats", "code": "return 1", "replace": true});
+    let (answer, is_error) = lab.tool("script_install", asked.clone()).await;
+    assert!(!is_error, "{answer}");
+    assert_eq!(answer["file"], "/lab/REAPER/Scripts/Kumi/tidy-hats.lua");
+    let (answer, is_error) = lab.tool("script_remove", json!({"slug": "tidy-hats"})).await;
+    assert!(!is_error, "{answer}");
+    let sent = lab.script.asked();
+    let (_, install) = sent.iter().find(|(method, _)| method == "script_install").expect("asked by name");
+    assert_eq!(install, &asked, "the arguments as they came");
+    assert!(sent.iter().any(|(method, _)| method == "script_remove"));
+}
+
 #[tokio::test]
 async fn renoises_song_is_saved_through_the_same_tool_and_a_version_is_refused() {
     let home = tempfile::tempdir().unwrap();
