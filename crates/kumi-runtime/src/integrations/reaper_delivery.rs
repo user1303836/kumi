@@ -6,7 +6,7 @@ use super::own_changes::OwnPlan;
 use super::own_listening::OwnRenderer;
 use crate::core::delivery::{
     assets::Item,
-    backend::{DeliveryBackend, NewRegion, Region, Targets, Words},
+    backend::{DeliveryBackend, NewRegion, Region, Rendered, Targets, Words},
 };
 use crate::core::refs::RefScheme;
 use async_trait::async_trait;
@@ -158,12 +158,22 @@ impl<S: RefScheme + 'static> DeliveryBackend for ReaperDelivery<S> {
         Ok(Targets { files, folder: answer.get("folder").and_then(Value::as_str).unwrap_or("").to_string(), there, notes })
     }
 
-    async fn render(&self, settings: &Value, expect: &[String], signal: &Signal) -> Result<Value, String> {
+    async fn render(&self, settings: &Value, expect: &[String], signal: &Signal) -> Result<Rendered, String> {
         let mut args = self.host_settings(settings)?;
         args["expect"] = json!(expect);
         let started = self.call("deliver", args, signal).await?;
         match self.renderer.wait(&started, signal).await {
-            Ok(Ok(done)) => Ok(done.get("files").cloned().unwrap_or(Value::Null)),
+            Ok(Ok(done)) => Ok(Rendered {
+                files: done.get("files").cloned().unwrap_or(Value::Null),
+                notes: done
+                    .get("notes")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect(),
+            }),
             Ok(Err(why)) => Err(why),
             Err(error) => Err(error.to_string()),
         }

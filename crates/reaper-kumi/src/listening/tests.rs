@@ -1854,6 +1854,15 @@ fn a_delivery_of_some_regions_renders_only_theirs_and_puts_every_row_back() {
     let notes = ask(json!({"regionRefs": ["r:region:{REG-2}"]}))["notes"].to_string();
     assert!(notes.contains("\u{201c}Reverb\u{201d} is soloed: every file holds only what solo lets through"), "{notes}");
     assert!(notes.contains("\u{201c}Kick\u{201d} is muted"), "{notes}");
+    // The render says them too (a render called without a check).
+    rig.ask(
+        "deliver_start",
+        json!({"jobId": "d0", "source": "matrix", "pattern": "$region", "folder": folder, "regionRefs": ["r:region:{REG-2}"]}),
+    )
+    .unwrap();
+    let ended = rig.until_ended("d0");
+    assert!(ended["notes"].to_string().contains("is soloed") && ended["notes"].to_string().contains("is muted"), "{ended}");
+    std::fs::remove_file(folder.join("Chorus.wav")).unwrap();
     fake::with(|s| {
         s.tracks[3].solo = 0;
         s.tracks[1].mute = false;

@@ -1,7 +1,7 @@
 //! The render_files tool against a fake DAW (no DAW): items grouped and named, regions made in one change, the dry run
 //! measured against the names, the render refused until it would write exactly them.
 use super::assets::Item;
-use super::backend::{DeliveryBackend, NewRegion, Region, Targets, Words};
+use super::backend::{DeliveryBackend, NewRegion, Region, Rendered, Targets, Words};
 use super::tool::Delivery;
 use crate::core::contracts::KernelTool;
 use async_trait::async_trait;
@@ -30,6 +30,8 @@ struct Fake {
     rendered: RefCell<Vec<(Value, Vec<String>)>>,
     /// A target the fake's pattern adds that nobody planned.
     stray: RefCell<Option<String>>,
+    /// What the fake says of its renders, checked and rendered.
+    notes: RefCell<Vec<String>>,
 }
 
 #[async_trait(?Send)]
@@ -79,12 +81,15 @@ impl DeliveryBackend for Rc<Fake> {
             files.push(format!("{folder}/{stray}.wav"));
         }
         let there = files.iter().filter(|file| self.there.borrow().contains(file)).cloned().collect();
-        Ok(Targets { files, folder, there, notes: vec![] })
+        Ok(Targets { files, folder, there, notes: self.notes.borrow().clone() })
     }
 
-    async fn render(&self, settings: &Value, expect: &[String], _signal: &Signal) -> Result<Value, String> {
+    async fn render(&self, settings: &Value, expect: &[String], _signal: &Signal) -> Result<Rendered, String> {
         self.rendered.borrow_mut().push((settings.clone(), expect.to_vec()));
-        Ok(json!(expect.iter().map(|file| json!({"file": file, "seconds": 1.0})).collect::<Vec<_>>()))
+        Ok(Rendered {
+            files: json!(expect.iter().map(|file| json!({"file": file, "seconds": 1.0})).collect::<Vec<_>>()),
+            notes: self.notes.borrow().clone(),
+        })
     }
 }
 
@@ -160,10 +165,13 @@ async fn assets_are_planned_in_the_projects_convention_regions_made_in_one_chang
     // A region named that isn't there is said.
     let unknown = run(&tool, json!({"action": "check", "regions": ["Footstep_Gravel_09"]})).await.unwrap_err();
     assert!(unknown.contains("no region is named"), "{unknown}");
+    // What the DAW says of the render (a solo, the dialog's extras) comes with it, once.
+    fake.notes.borrow_mut().push("“Lead” is soloed".into());
     let rendered = run(&tool, json!({"action": "render", "names": names, "folder": "/game", "format": "wav", "bits": 24, "tailMs": 500}))
         .await
         .unwrap();
     assert_eq!(rendered["count"], 3);
+    assert_eq!(rendered["notes"], json!(["“Lead” is soloed"]));
     let (settings, expect) = fake.rendered.borrow()[0].clone();
     assert_eq!(settings["pattern"], "$region", "a file per region by default");
     assert_eq!(settings["source"], "matrix", "from the DAW's delivery source by default");

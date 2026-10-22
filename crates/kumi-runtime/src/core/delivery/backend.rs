@@ -48,6 +48,13 @@ pub struct Targets {
     pub notes: Vec<String>,
 }
 
+/// What a render wrote (the DAW's rows of its files) and what it says of it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Rendered {
+    pub files: Value,
+    pub notes: Vec<String>,
+}
+
 #[async_trait(?Send)]
 pub trait DeliveryBackend {
     fn words(&self) -> &'static Words;
@@ -64,5 +71,5 @@ pub trait DeliveryBackend {
     async fn targets(&self, settings: &Value, signal: &Signal) -> Result<Targets, String>;
 
     /// Renders with `settings`, refusing unless the DAW would write exactly `expect`: each file written, as the DAW says.
-    async fn render(&self, settings: &Value, expect: &[String], signal: &Signal) -> Result<Value, String>;
+    async fn render(&self, settings: &Value, expect: &[String], signal: &Signal) -> Result<Rendered, String>;
 }

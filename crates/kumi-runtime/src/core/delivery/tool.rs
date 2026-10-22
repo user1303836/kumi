@@ -300,9 +300,14 @@ impl<B: DeliveryBackend + 'static> Delivery<B> {
         }
         let settings = self.settings(input, signal).await?;
         let done = self.backend.render(&settings, &targets.files, signal).await?;
-        Ok(
-            json!({"rendered": done, "folder": targets.folder, "count": targets.files.len(), "said": format!("{} rendered with the settings asked; every render setting is back as it was", self.backend.words().app)}),
-        )
+        let mut reply = json!({"rendered": done.files, "folder": targets.folder, "count": targets.files.len(), "said": format!("{} rendered with the settings asked; every render setting is back as it was", self.backend.words().app)});
+        // (what the check said of these settings, then what the render said)
+        let mut notes = targets.notes.clone();
+        notes.extend(done.notes.into_iter().filter(|note| !targets.notes.contains(note)));
+        if !notes.is_empty() {
+            reply["notes"] = json!(notes);
+        }
+        Ok(reply)
     }
 
     /// The render's settings from the input: the keys the DAW takes, by default a file per region from the DAW's delivery

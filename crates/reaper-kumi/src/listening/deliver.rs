@@ -553,6 +553,9 @@ pub fn run(reaper: &Reaper, reads: &Reads, plan: &Plan, hooks: &dyn Hooks) -> En
     let mut put_back = PutBack::note(reaper, proj);
     let mut rows = spec.regions.as_ref().map(|_| Rows::note(reaper, proj));
     let mut outcome: Result<Vec<String>, (String, String)> = set(reaper, reads, proj, spec, rows.as_ref()).map(|()| Vec::new());
+    if outcome.is_ok() {
+        notes.extend(hearing(reaper, proj, spec));
+    }
     let mut made: Vec<PathBuf> = Vec::new();
     let mut cancelled = false;
     if outcome.is_ok() {
