@@ -296,7 +296,7 @@ jobs:
         run: |
           python scripts/build-native-release.py --check-extension "$REAPER_KUMI_ARTIFACT" --target "$(rustc -vV | sed -n 's/^host: //p')" --thin
       - name: It loads, with REAPER's entry point
-        run: cargo test -p reaper-kumi --locked --test loads
+        run: cargo test -p reaper-kumi --locked --test it -- "loads::"
       # REAPER calls the extension through the C++ shim's vtable, laid out by each platform's C++ ABI.
       - name: REAPER's calls through the shim's vtable reach Rust
         run: cargo test -p reaper-kumi --locked --lib csurf::tests
