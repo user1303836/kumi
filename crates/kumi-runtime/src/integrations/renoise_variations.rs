@@ -4,7 +4,6 @@
 //! Takes are found by the places the tool's logs follow, else by the names Kumi gave them; the source pattern, track and
 //! instrument the same way. Pattern takes render on the source's track from their slots, phrase takes through players of their
 //! phrases (scratch tracks, gone after). Core's tool does the rest.
-use super::own_bridge::follow_epoch;
 use super::own_changes::OwnPlan;
 use super::own_listening::OwnRenderer;
 use super::renoise_lines::{note_text, note_value, Lines, Op};
@@ -102,51 +101,15 @@ impl<S: RefScheme + 'static> RenoiseBackend<S> {
     // Reading
 
     fn lengthen(&self, reference: &str) -> Result<String, String> {
-        let link = self.plan.link();
-        let long = link.book.borrow().lengthen(&json!({"ref": reference}));
-        let long = long["ref"].as_str().unwrap_or(reference).to_string();
-        if super::own_bridge::SHORT_REF.is_match(&long) {
-            return Err(format!("{reference} isn't one of this turn's refs (the song may have changed): read again for a current one"));
-        }
-        Ok(long)
+        self.plan.lengthen(reference)
     }
 
-    /// A read through the tool, from the book's epoch when it names refs (and `layout`, when they are from then): its answer.
-    async fn read(&self, mut args: Value, layout: Option<u64>, signal: &Signal) -> Result<Value, String> {
-        let link = self.plan.link();
-        let input = args.as_object().cloned().unwrap_or_default();
-        if ["parent", "track", "items", "ref"].iter().any(|key| input.contains_key(*key)) {
-            self.plan.place_request(&mut args, &input);
-        }
-        if let Some(layout) = layout {
-            args["layout"] = layout.into();
-        }
-        match link.call("read", args, signal.clone()).await {
-            Ok(Ok(answer)) => {
-                follow_epoch(&link.book, &link.epoch, &link.layout, &answer);
-                Ok(answer)
-            }
-            Ok(Err(refused)) => Err(refused.why),
-            Err(error) => Err(error.to_string()),
-        }
+    async fn read(&self, args: Value, layout: Option<u64>, signal: &Signal) -> Result<Value, String> {
+        self.plan.read_through(args, layout, signal).await
     }
 
     async fn rows(&self, args: Value, signal: &Signal) -> Result<Vec<Value>, String> {
-        let mut out = Vec::new();
-        let mut cursor: Option<String> = None;
-        for _ in 0..LINE_PAGES {
-            let mut asked = args.clone();
-            if let Some(cursor) = &cursor {
-                asked["cursor"] = cursor.clone().into();
-            }
-            let page = self.read(asked, None, signal).await?;
-            out.extend(page.get("items").and_then(Value::as_array).cloned().unwrap_or_default());
-            match page.get("nextCursor").and_then(Value::as_str) {
-                Some(next) => cursor = Some(next.into()),
-                None => return Ok(out),
-            }
-        }
-        Ok(out)
+        self.plan.rows_through(args, LINE_PAGES, signal).await
     }
 
     /// Where each item is now (`read {kind: "where"}`): {pattern}, {instrument}, {phrase} (a place or a ref) or {track} (a ref

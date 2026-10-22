@@ -80,6 +80,10 @@ local FENCES = {
   { "keyzone-overlap", "plain", function(E) return { ref = iref(E, 1), mode = "cycle" } end, function() data(1).overlap = 2 end },
   { "keyzone-drumkit", "plain", function(E) return { ref = iref(E, 1) } end, function() data(1).samples[2].base_note = 70 end },
   { "keyzone-drumkit", "plain", function(E) return { ref = iref(E, 1) } end, function() mock.ops.insert_sample(1) end },
+  { "keyzone-map", "plain", function(E) return { ref = iref(E, 1), samples = { { sampleRef = sref(E, 1, 1), noteRange = { 0, 59 }, baseNote = 48 } } } end,
+    function() data(1).samples[1].base_note = 70 end },
+  { "keyzone-map", "plain", function(E) return { ref = iref(E, 1), overlap = "cycle", samples = { { sampleRef = sref(E, 1, 1), noteRange = { 0, 59 }, baseNote = 48 } } } end,
+    function() data(1).overlap = 2 end },
   { "sample-load", "plain", function(E) return { ref = iref(E, 1), path = wav_file("Clap") } end, function() mock.ops.insert_sample(1) end },
   { "sample-load", "plain", function(E) return { ref = sref(E, 1, 1), path = wav_file("Clap") } end, function() data(1).samples[1].name = "Other" end },
   { "sample-delete", "plain", function(E) return { ref = sref(E, 1, 2) } end, function() data(1).samples[2].name = "Other" end },
@@ -151,7 +155,7 @@ end
 -- Every kind of the stream has its fence here.
 test("fence: every instrument kind is in the fence table", function()
   for _, kind in ipairs({ "instrument-rename", "instrument-set", "instrument-macro", "instrument-add", "instrument-delete", "instrument-load",
-    "instrument-duplicate", "instrument-move", "sample-set", "keyzone-set", "keyzone-overlap", "keyzone-drumkit", "sample-load", "sample-delete",
+    "instrument-duplicate", "instrument-move", "sample-set", "keyzone-set", "keyzone-overlap", "keyzone-drumkit", "keyzone-map", "sample-load", "sample-delete",
     "sample-slices", "modset-add", "modset-delete", "modset-set", "moddevice-add", "moddevice-delete", "moddevice-move", "moddevice-set",
     "moddevice-param", "chain-add", "chain-delete", "chain-set", "chaindevice-add", "chaindevice-delete", "chaindevice-move", "chaindevice-bypass",
     "chaindevice-param", "phrase-add", "phrase-delete", "phrase-set", "phrase-map", "phrase-playback", "phrase-write", "phrase-clear",

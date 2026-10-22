@@ -643,6 +643,9 @@ pub struct Capabilities {
     /// (M7) The variations tool: numbered takes of a source, kept, changed or dropped by number (core's, with the DAW's backend):
     /// Renoise's patterns and phrases.
     pub variations: bool,
+    /// (#401) The sample map: sound files or an instrument's samples laid out across the keys from their names, pitch and
+    /// loudness, and the song's instruments tidied (core's, with the DAW's backend): Renoise's keyzones.
+    pub sample_mapping: bool,
 }
 
 /// One DAW as Kumi knows it: its id (None when no DAW is known), its words and what it can do.
@@ -765,6 +768,7 @@ impl DawProfile {
             // (Live hears as it plays, through Kumi Ears or a recording)
             renders_to_listen: false,
             variations: false,
+            sample_mapping: false,
         },
         vocab: PromptVocab {
             plan_tool: crate::live_word!(plan_tool),
@@ -949,6 +953,7 @@ impl DawProfile {
             catch_up: true,
             presets: true,
             variations: true,
+            sample_mapping: true,
             ..Capabilities::NONE
         },
         vocab: PromptVocab {
@@ -1078,6 +1083,7 @@ impl Capabilities {
         presets: false,
         renders_to_listen: false,
         variations: false,
+        sample_mapping: false,
     };
 }
 

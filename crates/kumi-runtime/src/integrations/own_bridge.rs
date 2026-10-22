@@ -166,6 +166,8 @@ pub struct OwnIntegration<S: RefScheme + 'static> {
     places: Places,
     /// (M7) The variations tool, where the DAW's profile offers it (core's, with the DAW's backend).
     variations: Option<Rc<dyn KernelTool>>,
+    /// (#401) The sample map, where the DAW's profile offers it (core's, with the DAW's backend).
+    mapping: Option<Rc<dyn KernelTool>>,
 }
 
 /// How REAPER and Renoise tell templates and a song's own folder, for core's rules on copies: a project in REAPER's
@@ -309,6 +311,12 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
             let backend = super::renoise_variations::RenoiseBackend::new(changes.clone(), listening.renderer.clone());
             crate::core::variations::tool::Variations::new(backend, options.kumi_home.clone()).tool()
         });
+    // (#401) the sample map, where the DAW offers it
+    let mapping: Option<Rc<dyn KernelTool>> = (daw.profile.caps.sample_mapping && daw.profile.id == Some(crate::core::daw::DawId::Renoise))
+        .then(|| {
+            let backend = super::renoise_mapping::RenoiseMapping::new(changes.clone(), listening.renderer.clone());
+            crate::core::mapping::tool::Mapping::new(backend).tool()
+        });
     let kumi_home = options.kumi_home.clone();
     Rc::new(OwnIntegration::<S> {
         daw,
@@ -345,6 +353,7 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
         shifts: Rc::default(),
         places: Places::new(&kumi_home, daw.host_flag),
         variations,
+        mapping,
     })
 }
 
@@ -908,6 +917,10 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         // M7: the variations loop, where the DAW offers it.
         if let Some(variations) = &self.variations {
             tools.push(variations.clone());
+        }
+        // #401: the sample map, where the DAW offers it.
+        if let Some(mapping) = &self.mapping {
+            tools.push(mapping.clone());
         }
         tools
     }

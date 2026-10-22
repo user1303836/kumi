@@ -23,6 +23,7 @@ does the job there.
 | Code run inside the DAW | ✓ Python | ✓ Lua (ReaScript), REAPER's API and actions | ✓ Lua |
 | Stop everything at once (`/stop`) | ✓ | ✓ | ✓ |
 | Variations as numbered takes you keep, change or drop | not yet | not yet: item variations come later | ✓ |
+| Sample maps: sounds laid across the keys by name, pitch and loudness, and an instrument tidy | not yet | not yet: drum kits only (`drum_kit`) | ✓ |
 | Knows whether the DAW is recording | ✓ | ✓ | ✓ |
 | A line in the DAW's status bar | ✓ | no: REAPER's API has no status bar (a notification instead) | ✓ |
 | Opens a saved project | ✓ | not yet: you open it yourself (`kumi -r` and setup's restart don't) | not yet: you open it yourself (`kumi -r` and setup's restart don't) |
@@ -248,6 +249,15 @@ saves the song, instruments and device presets.
   lines; a pattern's lines become a phrase you play from any key (`variations`
   extract), and a faster copy is switched to with `0Zxx`, since a phrase's LPB
   is fixed.
+- **Sample maps** (`map_samples`): a folder of sounds, or an instrument's own
+  samples, laid across the keys in one step. Kumi reads each file name's note
+  ("C3", "A#2", "C-4", "060"), velocity ("v3", "vel64", "ff") and round robin
+  ("rr2"), hears each sample's pitch and loudness, and works out whether the
+  names put middle C at C3 or C4. It plans roots and zones, velocity layers in
+  loudness order, round robins that take turns, and an instrument per
+  articulation. It says what it decided and asks only what it can't tell. The
+  tidy finds instruments no note plays, copies, and samples two instruments
+  hold, and changes only what you accept.
 - **Instruments from sample files:** a drum kit with mute groups, or keys with
   velocity layers, in one instrument.
 - **Doofers** from devices, with named macros.

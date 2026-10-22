@@ -186,7 +186,7 @@ impl OwnKind {
         self.deletes = true;
         self
     }
-    fn input_schema(&self) -> JsonObject {
+    pub(super) fn input_schema(&self) -> JsonObject {
         serde_json::from_str(self.schema).expect("a change kind's schema is JSON")
     }
 }
@@ -660,6 +660,56 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
     /// The epoch (and, where refs are places, the layout) a request about these refs is asked from, as a change's is.
     pub(super) fn place_request(&self, args: &mut Value, input: &JsonObject) {
         self.place(args, input)
+    }
+
+    /// A ref the model gave, long (as the bridge takes it), or why it isn't one of this turn's.
+    pub(super) fn lengthen(&self, reference: &str) -> Result<String, String> {
+        let long = self.link().book.borrow().lengthen(&json!({"ref": reference}));
+        let long = long["ref"].as_str().unwrap_or(reference).to_string();
+        if SHORT_REF.is_match(&long) {
+            return Err(format!("{reference} isn't one of this turn's refs (the song may have changed): read again for a current one"));
+        }
+        Ok(long)
+    }
+
+    /// A read as the read tool makes it, from the book's epoch when it names refs (and `layout`, when they are from then):
+    /// its answer, the book following the epoch it gives. Core tools' backends read through it (the variations, the sample map).
+    pub(super) async fn read_through(&self, mut args: Value, layout: Option<u64>, signal: &Signal) -> Result<Value, String> {
+        let link = self.link();
+        let input = args.as_object().cloned().unwrap_or_default();
+        if ["parent", "track", "items", "ref"].iter().any(|key| input.contains_key(*key)) {
+            self.place(&mut args, &input);
+        }
+        if let Some(layout) = layout {
+            args["layout"] = layout.into();
+        }
+        match link.call("read", args, signal.clone()).await {
+            Ok(Ok(answer)) => {
+                follow_epoch(&link.book, &link.epoch, &link.layout, &answer);
+                Ok(answer)
+            }
+            Ok(Err(refused)) => Err(refused.why),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    /// Every row of a read, page after page (at most `pages` of them).
+    pub(super) async fn rows_through(&self, args: Value, pages: usize, signal: &Signal) -> Result<Vec<Value>, String> {
+        let mut out = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..pages {
+            let mut asked = args.clone();
+            if let Some(cursor) = &cursor {
+                asked["cursor"] = cursor.clone().into();
+            }
+            let page = self.read_through(asked, None, signal).await?;
+            out.extend(page.get("items").and_then(Value::as_array).cloned().unwrap_or_default());
+            match page.get("nextCursor").and_then(Value::as_str) {
+                Some(next) => cursor = Some(next.into()),
+                None => return Ok(out),
+            }
+        }
+        Ok(out)
     }
 
     /// The tools for this DAW's changes: each core kind's and action's, make_changes with every kind and action as a step,

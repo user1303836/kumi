@@ -418,6 +418,160 @@ base.register({
   reread = places_.reread("instrument"), read = function(instrument) return all_zones(instrument) end, same = same_zones,
 })
 
+-- keyzone-map (#401, sample mapping): an instrument's samples laid out as given, each its own zone, velocity range and base
+-- note, and the instrument's overlap mode, as one change: what Kumi's sample map plans for an instrument the song has. The
+-- record keeps each sample's zone before and after by its place, and the overlap mode; the undo puts back only what still
+-- holds what Kumi set.
+
+local function map_plan(song, env, input)
+  local n, objects, label = places_.locate(song, env, "instrument", input, "keyzone-map")
+  local instrument = objects.instrument
+  if type(input.samples) ~= "table" or #input.samples == 0 then bad("samples: each sample's {sampleRef, noteRange, velocityRange?, baseNote}") end
+  if #input.samples > #instrument.samples then bad("there are more samples than " .. q(label) .. " holds") end
+  local chosen, zones, before, seen = {}, {}, {}, {}
+  local in_keys, in_velocity = whole(0, 119), whole(0, 127)
+  for k, given in ipairs(input.samples) do
+    if type(given) ~= "table" then bad("each sample is {sampleRef, noteRange, velocityRange?, baseNote}") end
+    local found = places_.numbers_of(env, "sample", given.sampleRef, "sampleRef")
+    if found[1] ~= n[1] then bad("every sampleRef must be a sample of that instrument") end
+    if seen[found[2]] then bad("a sample is given twice") end
+    seen[found[2]] = true
+    local sample = instrument:sample(found[2])
+    if sample.sample_mapping.read_only then bad(q(label) .. " is sliced: its slices' keys follow the slice markers") end
+    local notes, velocity = given.noteRange, given.velocityRange or { 0, 127 }
+    if type(notes) ~= "table" or not in_keys(notes[1]) or not in_keys(notes[2]) or notes[1] > notes[2] then
+      bad("a sample's noteRange is [low, high], notes from 0 to 119")
+    end
+    if type(velocity) ~= "table" or not in_velocity(velocity[1]) or not in_velocity(velocity[2]) or velocity[1] > velocity[2] then
+      bad("a sample's velocityRange is [low, high], from 0 to 127")
+    end
+    if not in_keys(given.baseNote) then bad("a sample's baseNote is the note it sounds at, 0 to 119 (C-4 is 48)") end
+    chosen[k] = found[2]
+    before[k] = zone_of(sample)
+    zones[k] = { noteRange = { notes[1], notes[2] }, velocityRange = { velocity[1], velocity[2] }, baseNote = given.baseNote }
+  end
+  if input.overlap ~= nil and OVERLAPS.parse(input.overlap) == nil then bad("overlap is all (layered), cycle (round robin) or random") end
+  return {
+    n = n, label = label, samples = chosen, zones = zones, before = before, count = #instrument.samples,
+    overlap = input.overlap, overlap_before = OVERLAPS.get(instrument.sample_mapping_overlap_mode),
+  }
+end
+
+local function map_title(plan)
+  local words = string.format("Laid out %s: %d %s", q(plan.label), #plan.samples, #plan.samples == 1 and "sample" or "samples")
+  if plan.overlap and plan.overlap ~= plan.overlap_before then
+    words = words .. (plan.overlap == "cycle" and ", round robins in turn" or plan.overlap == "random" and ", round robins at random" or ", layers together")
+  end
+  return words
+end
+
+local function map_preview(song, env, input)
+  local plan = map_plan(song, env, input)
+  local unchanged = plan.overlap == nil or plan.overlap == plan.overlap_before
+  for k = 1, #plan.zones do if not same_zone(plan.zones[k], plan.before[k]) then unchanged = false end end
+  return {
+    target = places_.target_of(env, "instrument", plan.n), prior = { zones = plan.before, overlap = plan.overlap_before },
+    fence = { samples = plan.samples, zones = plan.before, count = plan.count, overlap = plan.overlap_before },
+    display = { title = map_title(plan), before = { zones = plan.before }, after = { zones = plan.zones }, unchanged = unchanged or nil },
+  }
+end
+
+local function map_apply(song, env, input, fence, desc)
+  local ok, plan = pcall(map_plan, song, env, input)
+  if not ok then base.gone_is_changed(plan) end
+  if plan.count ~= fence.count or not base.same_table(plan.samples, fence.samples) then fail("changed", q(plan.label) .. "'s samples changed since the preview") end
+  if plan.overlap_before ~= fence.overlap then fail("changed", q(plan.label) .. "'s overlap changed since the preview") end
+  for k = 1, #plan.before do
+    if not same_zone(plan.before[k], fence.zones[k]) then fail("changed", q(plan.label) .. "'s keyzones changed since the preview") end
+  end
+  local instrument = song:instrument(plan.n[1])
+  local journal_prior = all_zones(instrument)
+  journal_prior.overlap = plan.overlap_before
+  song:describe_undo(desc)
+  for k, s in ipairs(plan.samples) do set_zone(instrument:sample(s), plan.zones[k]) end
+  if plan.overlap then instrument.sample_mapping_overlap_mode = OVERLAPS.parse(plan.overlap) end
+  local held = not plan.overlap or OVERLAPS.get(instrument.sample_mapping_overlap_mode) == plan.overlap
+  for k, s in ipairs(plan.samples) do if not same_zone(zone_of(instrument:sample(s)), plan.zones[k]) then held = false end end
+  if not held then
+    for k, s in ipairs(plan.samples) do pcall(set_zone, instrument:sample(s), plan.before[k]) end
+    pcall(function() instrument.sample_mapping_overlap_mode = OVERLAPS.parse(plan.overlap_before) end)
+    fail("failed", "Renoise didn't keep the keyzones as laid out")
+  end
+  local places = {}
+  for k, s in ipairs(plan.samples) do places[k] = places_.place_of(env, "sample", { plan.n[1], s }) end
+  if env.watch_undo then
+    for _, s in ipairs(plan.samples) do env.watch_undo(instrument:sample(s).sample_mapping.note_range_observable) end
+  end
+  local after_overlap = OVERLAPS.get(instrument.sample_mapping_overlap_mode)
+  local journal_applied = all_zones(instrument)
+  journal_applied.overlap = after_overlap
+  return {
+    applied = { zones = plan.zones, overlap = after_overlap },
+    material = { samples = places, instrument = places_.place_of(env, "instrument", plan.n) },
+    target = places_.target_of(env, "instrument", plan.n),
+    display = { title = map_title(plan), before = { zones = plan.before }, after = { zones = plan.zones } },
+    undo = { desc = desc, entry = true }, prior = journal_prior, journal_applied = journal_applied,
+    place = places_.journal_place("instrument", plan.n),
+  }
+end
+
+local function map_restore(song, env, restore, desc)
+  local material, prior, applied = restore.material, restore.prior, restore.applied
+  if type(material) ~= "table" or type(material.samples) ~= "table" or type(prior) ~= "table" or type(applied) ~= "table"
+    or type(prior.zones) ~= "table" or type(applied.zones) ~= "table" then
+    bad("material, prior and applied: the samples, their zones and the overlap")
+  end
+  local found, todo = {}, false
+  for k, kept in ipairs(material.samples) do
+    local n, why, list = places_.follow(env, kept)
+    if not n then places_.follow_failed(why, list, "a sample Kumi laid out") end
+    local sample = song:instrument(n[1]):sample(n[2])
+    local now = zone_of(sample)
+    if not same_zone(now, prior.zones[k]) then
+      if not restore.discard and not same_zone(now, applied.zones[k]) then
+        fail("changed", string.format("the keyzone of %s changed in Renoise since Kumi laid it out", q(places_.sample_label(n[2], sample))))
+      end
+      todo = true
+    end
+    found[k] = n
+  end
+  local at
+  if material.instrument then
+    local n, why, list = places_.follow(env, material.instrument)
+    if not n then places_.follow_failed(why, list, "the instrument Kumi laid out") end
+    at = n[1]
+  elseif found[1] then
+    at = found[1][1]
+  end
+  local overlap_back = false
+  if at and prior.overlap and applied.overlap then
+    local now = OVERLAPS.get(song:instrument(at).sample_mapping_overlap_mode)
+    if now ~= prior.overlap then
+      if not restore.discard and now ~= applied.overlap then fail("changed", "the instrument's overlap changed in Renoise since Kumi laid it out") end
+      overlap_back = true
+    end
+  end
+  if not todo and not overlap_back then
+    return { restored = { done = true }, display = { title = "The keyzones are back already" }, undo = { desc = desc, entry = false }, unwritten = true }
+  end
+  song:describe_undo(desc)
+  for k, n in ipairs(found) do set_zone(song:instrument(n[1]):sample(n[2]), prior.zones[k]) end
+  if overlap_back then song:instrument(at).sample_mapping_overlap_mode = OVERLAPS.parse(prior.overlap) end
+  if at then base.note_restored_at(env.journal, "keyzone-map", places_.journal_place("instrument", { at })) end
+  return { restored = { done = true }, display = { title = "Keyzones put back as they were" }, undo = { desc = desc, entry = true } }
+end
+
+base.register({
+  kind = "keyzone-map", custom = true, by_place = true,
+  preview = map_preview, apply = map_apply, restore = map_restore, reread = places_.reread("instrument"),
+  read = function(instrument)
+    local state = all_zones(instrument)
+    state.overlap = OVERLAPS.get(instrument.sample_mapping_overlap_mode)
+    return state
+  end,
+  same = function(a, b) return same_zones(a, b) and a.overlap == b.overlap end,
+})
+
 -- Samples loaded, deleted
 
 local SETTINGS_KEPT = { "name", "volumeDb", "panning", "transpose", "fineTune", "loop", "loopStart", "loopEnd", "loopRelease", "beatSync",

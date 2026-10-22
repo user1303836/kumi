@@ -215,6 +215,71 @@ local function one(params, epoch)
   return { items = array({ row }), epoch = epoch }
 end
 
+-- The tidy's look at every instrument (#401, sample mapping): how many notes play it (one pass over the song's patterns, within
+-- a budget of reads: none counted when the song is too big for one look) and a print of each sample's audio (its shape and 16
+-- values through it), so instruments no note plays, copies and samples two instruments hold can be told.
+M.TIDY_READS = 400000
+M.TIDY_PROBES = 16
+local function sample_print(sample)
+  local buffer = sample.sample_buffer
+  if not buffer.has_sample_data then return nil end
+  local frames = buffer.number_of_frames
+  local sum = 5381
+  for k = 1, M.TIDY_PROBES do
+    local value = buffer:sample_data(1, math.max(1, math.floor(frames * k / (M.TIDY_PROBES + 1))))
+    local text = string.format("%.4f|", tonumber(type(value) == "table" and value[1] or value) or 0)
+    for i = 1, #text do sum = (sum * 33 + text:byte(i)) % 4294967296 end
+  end
+  -- (short: a song's every sample fits one answer)
+  return string.format("%d.%d.%d.%08x", frames, buffer.number_of_channels, buffer.sample_rate, sum)
+end
+
+local function tidy_rows(song, epoch)
+  local counts, reads, counted = {}, 0, true
+  local tracks = track_count(song)
+  for p = 1, #song.patterns do
+    local pattern = song:pattern(p)
+    for t = 1, tracks do
+      local pattern_track = pattern:track(t)
+      reads = reads + 1
+      -- (an alias's lines are its source pattern's, counted there)
+      if not pattern_track.is_alias and not pattern_track.is_empty and song:track(t).max_note_columns > 0 then
+        for l = 1, pattern.number_of_lines do
+          local line = pattern_track:line(l)
+          reads = reads + 1
+          if not line.is_empty then
+            -- (hidden columns too: a note there still names the instrument, and a tidy never calls it unplayed)
+            for c = 1, 12 do
+              local column = line:note_column(c)
+              reads = reads + 1
+              local v = column.instrument_value
+              if v < 255 and column.note_value < 120 then counts[v] = (counts[v] or 0) + 1 end
+            end
+          end
+          if reads > M.TIDY_READS then counted = false; break end
+        end
+      end
+      if not counted then break end
+    end
+    if not counted then break end
+  end
+  local out = {}
+  for i = 1, #song.instruments do
+    local instrument = song:instrument(i)
+    local samples = {}
+    for s = 1, #instrument.samples do
+      local sample = instrument:sample(s)
+      if not sample.is_slice_alias then samples[#samples + 1] = { name = sample.name, print = sample_print(sample) or json.null } end
+    end
+    out[i] = {
+      ref = refs.make(epoch, "instrument", i), index = i - 1, name = instrument.name, samples = array(samples),
+      notes = counted and (counts[i - 1] or 0) or json.null, plugin = instrument.plugin_properties.plugin_loaded,
+      phrases = #instrument.phrases,
+    }
+  end
+  return out, counted
+end
+
 -- read {kind, parent?, cursor?, limit?, track?} or {ref}
 function M.read(job, params, epoch)
   if type(params) ~= "table" then fail("bad-params", "read needs a kind") end
@@ -378,6 +443,9 @@ function M.read(job, params, epoch)
       local row = param_row(live, epoch, t, d, k)
       return with_grid and with_grid(row, live:track(t):device(d):parameter(k)) or row
     end)
+  elseif kind == "tidy" then
+    local items, counted = tidy_rows(song, epoch)
+    return { items = array(items), counted = counted, epoch = epoch }
   elseif kind == "spans" then
     return reads_listening.spans(job, params, epoch, page)
   elseif kind == "modset" or kind == "chain" then
