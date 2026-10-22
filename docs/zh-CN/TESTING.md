@@ -124,8 +124,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 - `Python Remote Script` 跳过 macOS。
 - Rust 的构建缓存只从 `main` 保存：拉取请求恢复 `main` 的缓存，不保存任何缓存。
 - 每个部分的作业只在它测试的内容改变时运行：只改 Renoise 工具的 Lua 时 Rust 的作业会跳过；`REAPER extension loads` 在扩展的 crate、它链接的 `daw-bridge` 部分、锁文件和发布脚本改变时运行；`Renoise tool` 在 `daws/renoise` 改变时运行。
-- 只有修改安装、更新、发布、Willington 的文件、Mac 辅助程序、Kumi 使用的 `tar` 和 PowerShell、下载方式（HTTP 客户端和网络设置）和路径的拼接、Kumi 把扩展放进 Live 的方式、REAPER 和 Renoise 桥接的构建与装入方式（不包括 REAPER 的修改类型或宿主程序的工具）或依赖项的变更，Installer 才会在每个系统的一台机器上构建并安装；全部六个、从 GitHub 版本的更新、edges 和迁移在 `full-tests` 标签下运行。修改桥接（Remote Script、协议、Live 扩展）或版本号的变更会构建、安装并检查 Linux 的发行包；其他变更只构建 Linux 的发行包。
-- 修改 Kumi 保存其所保留内容的方式（`crates/kumi-store`、设置和登录信息、记忆、技巧、playbook、gaps、旧版 Kumi 的文件）的变更，也会运行 Linux 的安装检查，在已有数据上进行更新和回滚。
+- 只有修改安装相关部分的变更，Installer 才会在每个系统的一台机器上构建并安装：安装程序、安装、更新、发布、Willington 的文件、Mac 辅助程序、Kumi 使用的 `tar` 和 PowerShell、下载方式（HTTP 客户端和网络设置）和路径的拼接、Kumi 把扩展放进 Live 的方式、REAPER 和 Renoise 桥接的构建与装入方式，以及 Installer 的工作流（不包括它们的测试）。其他拉取请求什么都不构建，合并后由 `main` 的运行来检查。全部六个、从 GitHub 版本的更新、edges 和迁移在 `full-tests` 标签下运行。
 - 在拉取请求和推送到 `main` 时，Installer 的发行包用 `ci-release` 配置构建，它省去 release 配置的全程序优化，优化程度也更低。标签用 `release` 构建。
 
 每次推送到 `main` 运行与修改安装的拉取请求相同的内容，每个标签运行 Installer 的全部内容。Extended 工作流每周运行全部测试。Installer 每晚会用 `release` 配置构建全部六个发行包（失败时会开一个 issue：“The nightly Installer build failed”），从而为下一个标签保持该配置的构建缓存。

@@ -124,8 +124,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 - `Python Remote Script` は macOS を省きます。
 - Rust のビルドキャッシュは `main` からだけ保存されます。プルリクエストは `main` のものを復元し、何も保存しません。
 - それぞれの世界のジョブは、テストする対象が変わったときに実行されます。Rust のジョブは Renoise のツールの Lua だけの変更では省かれ、`REAPER extension loads` は拡張機能のクレート、それがリンクする `daw-bridge` の部分、ロックファイル、リリーススクリプトの変更で、`Renoise tool` は `daws/renoise` の変更で実行されます。
-- Installer が各システムの 1 台でビルドしてインストールするのは、インストール、更新、リリース、Willington のファイル、Mac のヘルパー、Kumi が使う `tar` と PowerShell、ダウンロードの方法（HTTP クライアントとネットワークの設定）とパスの組み立て、Kumi の拡張機能を Live に入れる処理、REAPER と Renoise のブリッジのビルドと配置（REAPER の変更の種類やホストのツールは含まない）、または依存関係を変える変更の場合だけです。6 つすべて、GitHub のリリースからの更新、edges、移行は `full-tests` ラベルで実行されます。ブリッジ（Remote Script、プロトコル、Live の拡張機能）やバージョン番号を変える変更では Linux のものをビルド、インストール、確認し、それ以外の変更では Linux のバンドルをビルドするだけです。
-- Kumi が保持するものの保存方法（`crates/kumi-store`、設定とサインイン、メモリー、テクニック、プレイブック、ギャップ、以前の Kumi のファイル）を変える変更にも、既存のデータを残したまま更新とロールバックを行う、Linux のインストールの確認が付きます。
+- Installer が各システムの 1 台でビルドしてインストールするのは、インストールに関わる部分を変える変更の場合だけです：インストーラー、インストール、更新、リリース、Willington のファイル、Mac のヘルパー、Kumi が使う `tar` と PowerShell、ダウンロードの方法（HTTP クライアントとネットワークの設定）とパスの組み立て、Kumi の拡張機能を Live に入れる処理、REAPER と Renoise のブリッジのビルドと配置、そして Installer のワークフロー（それぞれのテストは含まない）。それ以外のプルリクエストでは何もビルドせず、マージ後の `main` の実行で確認します。6 つすべて、GitHub のリリースからの更新、edges、移行は `full-tests` ラベルで実行されます。
 - プルリクエストと `main` へのプッシュでは、Installer のバンドルを `ci-release` プロファイルでビルドします。これはリリースプロファイルのプログラム全体の最適化を省き、最適化も控えめにします。タグは `release` でビルドします。
 
 `main` へのプッシュでは、インストールを変えるプルリクエストと同じものが実行され、タグでは Installer のすべてが実行されます。Extended ワークフローは毎週すべてのテストを実行します。Installer は毎晩 `release` プロファイルで 6 つのバンドルをすべてビルドし（失敗すると issue「The nightly Installer build failed」を開きます）、次のタグのためにそのプロファイルのビルドキャッシュを温めておきます。

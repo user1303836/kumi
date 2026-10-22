@@ -171,17 +171,14 @@ On a pull request, less runs:
   parts of `daw-bridge` it links, the lockfile and the release script, and
   `Renoise tool` for `daws/renoise`.
 - The Installer builds and installs on one machine of each system only for a
-  change to installing, updating, releasing, Willington's files, the Mac helper,
-  the `tar` and PowerShell Kumi runs, how it downloads (its HTTP client and
-  network settings) and builds paths, how Kumi's extension goes into Live, how
-  REAPER's and Renoise's bridges are built and go in (not a REAPER change kind or
-  a host tool), or a dependency; all six, the updates from GitHub's releases, the edges and the
-  transition run with the `full-tests` label. A change to the bridge (the Remote
-  Script, the protocol, the Live extension) or a version number builds, installs
-  and checks Linux's; any other change builds Linux's bundle only.
-- A change to how Kumi stores what it keeps (`crates/kumi-store`, settings and
-  sign-ins, memory, techniques, playbook, gaps, an older Kumi's files) also gets
-  Linux's install check, which updates and rolls back over existing data.
+  change to the install surface: the installers, installing, updating and
+  releasing, Willington's files, the Mac helper, the `tar` and PowerShell Kumi
+  runs, how it downloads (its HTTP client and network settings) and builds
+  paths, how Kumi's extension goes into Live, how REAPER's and Renoise's bridges
+  are built and go in, and the Installer's workflow; not their tests. Any other
+  pull request builds nothing, and `main`'s run checks it once merged. All six,
+  the updates from GitHub's releases, the edges and the transition run with the
+  `full-tests` label.
 - The Installer's bundles, on pull requests and pushes to `main`, build with
   the `ci-release` profile, which skips the release profile's whole-program
   optimization and optimizes less. Tags build with `release`.
