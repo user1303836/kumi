@@ -19,6 +19,7 @@ mod pack_tests;
 pub mod reaper;
 pub mod reaper_changes;
 mod reaper_delivery;
+mod reaper_routing;
 pub mod renoise;
 pub mod renoise_changes;
 mod renoise_chop;

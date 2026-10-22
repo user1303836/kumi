@@ -652,6 +652,9 @@ pub struct Capabilities {
     /// (#401) Delivery: assets' regions from the timeline's items, named in the project's convention, the DAW's own dry run of
     /// the files, and the render (core's, with the DAW's backend): REAPER's regions and render.
     pub delivery: bool,
+    /// (#401) Routing: the project's routing as a graph, what's likely wrong in it in words, and sidechains, parallel buses and
+    /// stems built as one plan (core's, with the DAW's backend): REAPER's sends and folders.
+    pub routing: bool,
 }
 
 /// One DAW as Kumi knows it: its id (None when no DAW is known), its words and what it can do.
@@ -777,6 +780,7 @@ impl DawProfile {
             sample_mapping: false,
             chop: false,
             delivery: false,
+            routing: false,
         },
         vocab: PromptVocab {
             plan_tool: crate::live_word!(plan_tool),
@@ -869,6 +873,7 @@ impl DawProfile {
             renders_to_listen: true,
             presets: true,
             delivery: true,
+            routing: true,
             ..Capabilities::NONE
         },
         vocab: PromptVocab {
@@ -1096,6 +1101,7 @@ impl Capabilities {
         sample_mapping: false,
         chop: false,
         delivery: false,
+        routing: false,
     };
 }
 

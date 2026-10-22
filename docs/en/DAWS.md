@@ -26,6 +26,7 @@ does the job there.
 | Sample maps: sounds laid across the keys by name, pitch and loudness, and an instrument tidy | not yet | not yet: drum kits only (`drum_kit`) | ✓ |
 | Chops a recording at its real hits and lays the slices out to play it | not yet | not yet | ✓ |
 | Delivers files: a region per asset, named in the project's convention, a dry run first | not yet | ✓ | not yet |
+| Finds why a track plays twice or nowhere, and builds sidechains, parallel buses and stems as one undo step | not yet | ✓ | not yet |
 | Knows whether the DAW is recording | ✓ | ✓ | ✓ |
 | A line in the DAW's status bar | ✓ | no: REAPER's API has no status bar (a notification instead) | ✓ |
 | Opens a saved project | ✓ | not yet: you open it yourself (`kumi -r` and setup's restart don't) | not yet: you open it yourself (`kumi -r` and setup's restart don't) |
@@ -155,6 +156,13 @@ next version), track templates and FX chains.
   master, without the render dialog's normalizing or second format unless you
   say, never over a file that's there unless you say, with REAPER's render
   settings put back after.
+- **Routing** (`routing`): why a track is too loud, silent or cancels. Kumi
+  reads every way each track reaches the master (folders, sends, hardware
+  outputs) and names what's likely wrong: a track heard twice through buses
+  that only sum, a loop, a track heard nowhere, a sidechain on channels its
+  track doesn't have, a duplicate with its polarity inverted. It builds a
+  sidechain (the kick ducking the bass through ReaComp), a parallel bus or
+  stems as one step of REAPER's undo, and reads the routing again to check it.
 - **Drum kits** from sound files: a ReaSamplOmatic5000 per pad, as a folder of
   pad tracks or one container, hi-hats choking.
 - **Sounds from tutorials and references:** `watch_video`, then ReaEQ,

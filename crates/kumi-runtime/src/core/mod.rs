@@ -32,6 +32,7 @@ pub mod project;
 pub mod recall;
 pub mod recipes;
 pub mod refs;
+pub mod routing;
 pub mod session;
 pub mod store_backed;
 pub mod store_client;

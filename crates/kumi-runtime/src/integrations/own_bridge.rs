@@ -172,6 +172,8 @@ pub struct OwnIntegration<S: RefScheme + 'static> {
     chop: Option<Rc<dyn KernelTool>>,
     /// (#401) Delivery, where the DAW's profile offers it (core's, with the DAW's backend).
     delivery: Option<Rc<dyn KernelTool>>,
+    /// (#401) The routing doctor and builder, where the DAW's profile offers it (core's, with the DAW's backend).
+    routing: Option<Rc<dyn KernelTool>>,
 }
 
 /// How REAPER and Renoise tell templates and a song's own folder, for core's rules on copies: a project in REAPER's
@@ -332,6 +334,12 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
             let backend = super::reaper_delivery::ReaperDelivery::new(changes.clone(), listening.renderer.clone());
             crate::core::delivery::tool::Delivery::new(backend).tool()
         });
+    // (#401) routing, where the DAW offers it
+    let routing: Option<Rc<dyn KernelTool>> =
+        (daw.profile.caps.routing && daw.profile.id == Some(crate::core::daw::DawId::Reaper)).then(|| {
+            let backend = super::reaper_routing::ReaperRouting::new(changes.clone());
+            crate::core::routing::tool::Routing::new(backend).tool()
+        });
     let kumi_home = options.kumi_home.clone();
     Rc::new(OwnIntegration::<S> {
         daw,
@@ -371,6 +379,7 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
         mapping,
         chop,
         delivery,
+        routing,
     })
 }
 
@@ -944,6 +953,9 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         }
         if let Some(delivery) = &self.delivery {
             tools.push(delivery.clone());
+        }
+        if let Some(routing) = &self.routing {
+            tools.push(routing.clone());
         }
         tools
     }
