@@ -561,6 +561,65 @@ reaper.SetMediaItemSelected(it, true)
                 ]
             },
         },
+        // REAPER: a track split into stems by Kumi's own splitter (#401), each on a new track.
+        Scenario {
+            id: "P32",
+            daw: Daw::Reaper,
+            says: &["Split the Loop track into stems"],
+            before: None,
+            fixture: r#"
+audio(track("Loop"), MEDIA .. "/break120.wav", 0, 8)
+"#,
+            read: "",
+            teardown: None,
+            generates: false,
+            names: &["drums", "other"],
+            expect: |seen| {
+                let (before, after) = (seen.before, seen.after);
+                let tracks: Vec<String> = list(&after["tracks"]).iter().filter_map(|t| t["name"].as_str().map(str::to_owned)).collect();
+                let stem = |word: &str| {
+                    list(&after["tracks"])
+                        .into_iter()
+                        .find(|t| t["name"].as_str().is_some_and(|n| n != "Loop" && n.to_lowercase().contains(word)))
+                        .cloned()
+                };
+                let placed = ["drums", "bass", "other"].iter().all(|word| stem(word).is_some_and(|t| list(&t["items"]).len() == 1));
+                let items = |state: &Value| track(state, "Loop").map(|t| list(&t["items"]).len());
+                vec![
+                    Check::new("the stems tool split it", seen.tools.iter().any(|t| t == "stems"), seen.tools.join(", ")),
+                    Check::new("drums, bass and other on tracks of their own, an item each", placed, tracks.join(", ")),
+                    Check::new("the Loop track is as it was", items(before).is_some() && items(before) == items(after), ""),
+                ]
+            },
+        },
+        // REAPER: a track's audio turned into MIDI by Kumi's own ears (#401), on a new track.
+        Scenario {
+            id: "P33",
+            daw: Daw::Reaper,
+            says: &["Turn the Bass track's audio into notes"],
+            before: None,
+            fixture: r#"
+audio(track("Bass"), MEDIA .. "/bass.wav", 0, 8)
+"#,
+            read: "",
+            teardown: None,
+            generates: true,
+            names: &["MIDI", "melody"],
+            expect: |seen| {
+                let (before, after) = (seen.before, seen.after);
+                let written = list(&after["tracks"])
+                    .into_iter()
+                    .filter(|t| t["name"] != "Bass")
+                    .flat_map(|t| list(&t["items"]))
+                    .any(|item| item["notes"].as_u64().unwrap_or(0) > 0);
+                let items = |state: &Value| track(state, "Bass").map(|t| list(&t["items"]).len());
+                vec![
+                    Check::new("the audio-to-MIDI tool heard it", seen.tools.iter().any(|t| t == "audio_to_midi"), seen.tools.join(", ")),
+                    Check::new("notes written on a new track", written, format!("{} notes", after["notes"])),
+                    Check::new("the Bass track is as it was", items(before).is_some() && items(before) == items(after), ""),
+                ]
+            },
+        },
         // REAPER: a new instrument in a big orchestral template.
         Scenario {
             id: "P23",
@@ -1104,6 +1163,76 @@ end
                         mentions(seen.said, &["same", "copy", "copies", "duplicate", "alias", "repeat", "identical"]),
                         "",
                     ),
+                ]
+            },
+        },
+        // Renoise: a track split into stems by Kumi's own splitter (#401), each an instrument played on a new track.
+        Scenario {
+            id: "R36",
+            daw: Daw::Renoise,
+            says: &["Split the Loop track into stems"],
+            before: None,
+            fixture: r#"
+song:track(1).name = "Loop"
+sample_instrument(1, "Loop", MEDIA .. "/break120.wav")
+note(seq:pattern(1), 1, 0, "C-4", 0)
+"#,
+            read: "",
+            teardown: None,
+            generates: true,
+            names: &["drums", "other"],
+            expect: |seen| {
+                let (before, after) = (seen.before, seen.after);
+                let instruments: Vec<String> =
+                    list(&after["instruments"]).iter().filter_map(|i| i["name"].as_str().map(str::to_owned)).collect();
+                let loaded = ["drums", "bass", "other"].iter().all(|word| {
+                    list(&after["instruments"]).iter().any(|i| {
+                        i["name"].as_str().is_some_and(|n| n.to_lowercase().contains(word))
+                            && list(&i["samples"]).iter().any(|s| s["frames"].as_u64().unwrap_or(0) > 0)
+                    })
+                });
+                let played = list(&after["tracks"]).iter().any(|t| t["name"].as_str().is_some_and(|n| n.to_lowercase().contains("stems")));
+                let source = |state: &Value| list(&state["instruments"]).first().map(|i| i["samples"].clone());
+                vec![
+                    Check::new("the stems tool split it", seen.tools.iter().any(|t| t == "stems"), seen.tools.join(", ")),
+                    Check::new("drums, bass and other loaded as instruments", loaded, instruments.join(", ")),
+                    Check::new(
+                        "a new track plays them",
+                        played && after["notes"].as_u64() > before["notes"].as_u64(),
+                        format!("{} notes", after["notes"]),
+                    ),
+                    Check::new("the Loop instrument is as it was", source(before).is_some() && source(before) == source(after), ""),
+                ]
+            },
+        },
+        // Renoise: a track's audio turned into notes by Kumi's own ears (#401), on a new track.
+        Scenario {
+            id: "R37",
+            daw: Daw::Renoise,
+            says: &["Turn the Bass track's audio into notes"],
+            before: None,
+            fixture: r#"
+song:track(1).name = "Bass"
+sample_instrument(1, "Bass", MEDIA .. "/bass.wav")
+note(seq:pattern(1), 1, 0, "C-4", 0)
+"#,
+            read: "",
+            teardown: None,
+            generates: true,
+            names: &["melody", "harmony"],
+            expect: |seen| {
+                let (before, after) = (seen.before, seen.after);
+                let tracks: Vec<String> = list(&after["tracks"]).iter().filter_map(|t| t["name"].as_str().map(str::to_owned)).collect();
+                let new_track = tracks.iter().any(|name| name != "Bass" && name.starts_with("Bass"));
+                let more = after["notes"].as_u64().unwrap_or(0) > before["notes"].as_u64().unwrap_or(0) + 2;
+                vec![
+                    Check::new("the audio-to-MIDI tool heard it", seen.tools.iter().any(|t| t == "audio_to_midi"), seen.tools.join(", ")),
+                    Check::new(
+                        "notes written on a new track",
+                        new_track && more,
+                        format!("{} notes; {}", after["notes"], tracks.join(", ")),
+                    ),
+                    Check::new("the Bass track is still there", tracks.iter().any(|name| name == "Bass"), ""),
                 ]
             },
         },

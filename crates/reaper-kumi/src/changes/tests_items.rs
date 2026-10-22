@@ -197,6 +197,9 @@ fn a_media_file_is_imported_in_place_and_a_missing_or_unreadable_one_is_refused(
     assert!(state(|s| s.items.sources.iter().all(|source| source.freed)));
     lab.undo("item-import", &preview, &applied).unwrap();
     assert!(item(&made).is_none());
+    // Given a name, the take and the change's title have it (a stem's file carries its time).
+    let named = lab.preview("item-import", json!({"ref": SNARE, "path": path, "positionBeats": 4.0, "name": "Loop drums"})).unwrap();
+    assert!(named["display"]["title"].as_str().unwrap().starts_with("Added “Loop drums” on “Snare”"), "{}", named["display"]);
     // A MIDI file's length is in beats.
     let midi = media_file("riff.mid", "MIDI", 8.0, true);
     let (_, applied) = lab.make("item-import", json!({"ref": SNARE, "path": midi, "position": 0.0}));

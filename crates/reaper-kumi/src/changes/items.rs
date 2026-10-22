@@ -296,6 +296,8 @@ fn make_title(ctx: &Ctx, make: &Make, import: bool) -> String {
     let track = super::track_name(ctx.reaper, make.track);
     let at = marks::bar_text(ctx.reaper, ctx.proj, make.start);
     match (&make.file, &make.name) {
+        // (by the take's name when it's given one: a file of Kumi's own is named for Kumi, a stem's with its time)
+        (Some(_), Some(name)) if import => format!("Added {} on {} at {at}", quoted(&rows::clip(name)), quoted(&track)),
         (Some((path, _)), _) if import => {
             let file = std::path::Path::new(path).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
             format!("Added {} on {} at {at}", quoted(&rows::clip(&file)), quoted(&track))
