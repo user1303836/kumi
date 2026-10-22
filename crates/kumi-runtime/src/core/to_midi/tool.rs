@@ -69,7 +69,7 @@ impl<B: ToMidiBackend + 'static> ToMidi<B> {
         let mut reply = json!({"heard": words, "track": midi_name, "made": made, "next": "say what was heard; offer to tidy it (quantize) or to try another stretch"});
         if moving {
             reply["tempo"] = json!(format!(
-                "the tempo moves inside this stretch ({tempo:.1} BPM at its start, {average:.1} on average): the notes are placed by the average, so they drift from the grid where it changes; hear a stretch of one tempo to place them exactly"
+                "this stretch plays at {average:.1} BPM on average (the transport shows {tempo:.1}): the notes are placed by its average, so if its tempo changes inside it, they drift from the grid there"
             ));
         }
         Ok(reply)

@@ -28,6 +28,9 @@ pub const HAT: u8 = 42;
 
 /// How long a drum note is (beats: a 16th), at most.
 const DRUM_LENGTH: f64 = 0.25;
+/// The shortest leftover a melody keeps of a note that outlasts the one over it (beats: a 16th of a beat): a chord tone
+/// ringing a few ms past the top note is no note of the melody.
+const LEFTOVER: f64 = 1. / 16.;
 /// A drum's velocity: its kind's loudest hit's, less this much a dB under it; a ghost at most `GHOST_MOST`.
 const LOUDEST: f64 = 120.;
 const PER_DB: f64 = 3.;
@@ -89,10 +92,11 @@ pub fn pitched(heard: &[Heard], per_second: f64, beats: f64, melody: bool) -> Ve
 }
 
 /// The highest note sounding at each moment: a note starting under a higher one starts where that one ends (or goes, when it
-/// ends first), and one a higher one starts over is cut there.
+/// ends first or what's left is shorter than a 16th of a beat), and one a higher one starts over is cut there.
 fn skyline(notes: Vec<MidiNote>) -> Vec<MidiNote> {
     let mut out: Vec<MidiNote> = Vec::new();
     for mut note in notes {
+        let mut moved = false;
         loop {
             let over = out
                 .iter()
@@ -105,11 +109,12 @@ fn skyline(notes: Vec<MidiNote>) -> Vec<MidiNote> {
             let ends = note.start + note.length;
             note.length = ends - over;
             note.start = over;
+            moved = true;
             if note.length <= 1e-9 {
                 break;
             }
         }
-        if note.length <= 1e-9 {
+        if note.length <= 1e-9 || (moved && note.length < LEFTOVER) {
             continue;
         }
         for kept in
@@ -197,6 +202,9 @@ mod tests {
             steps.iter().map(|note| (note.pitch, (note.start * 100.).round() / 100.)).collect::<Vec<_>>(),
             [(72, 0.), (70, 1.05), (69, 2.)]
         );
+        // (a chord's tones ringing 4 to 8 ms past the top note leave nothing of themselves in the melody)
+        let ringing = pitched(&[heard(0., 0.996, 72), heard(0., 1.0, 67), heard(0., 1.002, 64), heard(0., 1.004, 60)], 1., 8., true);
+        assert_eq!(ringing.iter().map(|note| note.pitch).collect::<Vec<_>>(), [72]);
         // (one pitch twice, overlapping: the first is cut where the second starts)
         let again = pitched(&[heard(0., 1., 60), heard(0.5, 1., 60)], 2., 8., false);
         assert_eq!(again[0].length, 1.);
