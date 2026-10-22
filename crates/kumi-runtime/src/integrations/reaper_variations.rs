@@ -11,7 +11,7 @@ use crate::core::{
     variations::{
         backend::{Rendered, Rewritten, Source, VariationsBackend, Words},
         heard::heard_of,
-        tool::names,
+        tool::{names, names_to_find},
         Material, Rng, TakeSet,
     },
 };
@@ -562,10 +562,10 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
                 continue;
             };
             let known = take.place.get("ref").and_then(Value::as_str).and_then(|reference| by_ref.get(reference)).cloned();
-            // (found again by the name Kumi gave it, as made or as kept)
-            let named = names(*number, &set.source.short);
+            // (found again by the name Kumi gave it, as made or as kept: a kept take's kept name first)
+            let named = names_to_find(*number, &set.source.short, take.state);
             let found = known.or_else(|| {
-                rows.iter().find(|row| row.get("name").and_then(Value::as_str).is_some_and(|name| named.iter().any(|n| n == name))).cloned()
+                named.iter().find_map(|n| rows.iter().find(|row| row.get("name").and_then(Value::as_str) == Some(n.as_str()))).cloned()
             });
             match found {
                 Some(row) => {

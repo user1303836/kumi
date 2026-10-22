@@ -456,6 +456,10 @@ mod tests {
     fn takes_are_named_after_their_source_and_a_kept_mark_always_fits() {
         assert_eq!(take_name(3, "Amen chop"), "V3 \u{b7} Amen chop");
         assert_eq!(kept_name(3, "Amen chop"), "V3 \u{b7} Amen chop \u{b7} kept");
+        // (a kept take is looked for by its kept name first)
+        let [first, second] = super::tool::names_to_find(3, "Amen chop", TakeState::Kept);
+        assert_eq!((first.as_str(), second.as_str()), ("V3 \u{b7} Amen chop \u{b7} kept", "V3 \u{b7} Amen chop"));
+        assert_eq!(super::tool::names_to_find(3, "Amen chop", TakeState::Shown)[0], "V3 \u{b7} Amen chop");
         let long = "x".repeat(80);
         assert_eq!(take_name(12, &long).chars().count(), NAME_MOST);
         let kept = kept_name(12, &long);

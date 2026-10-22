@@ -13,7 +13,7 @@ use crate::core::{
     variations::{
         backend::{Rendered, Rewritten, Source, VariationsBackend, Words},
         heard::{heard_of, Heard},
-        tool::names,
+        tool::{names, names_to_find},
         Rng, TakeSet, TakeState,
     },
 };
@@ -401,8 +401,8 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
                 last,
                 slot,
             };
-            let (placement, instrument_name) = match place.unwrap_or("patterns") {
-                "patterns" => (Placement::Patterns { section: format!("Variations of {pattern_name}") }, String::new()),
+            let (placement, instrument_name, set_of) = match place.unwrap_or("patterns") {
+                "patterns" => (Placement::Patterns { section: format!("Variations of {pattern_name}") }, String::new(), String::new()),
                 _ => {
                     // (a pattern's lines become phrases of the instrument they play: its notes lose their instrument column)
                     let instrument = match options.get("instrumentRef").and_then(Value::as_str) {
@@ -424,14 +424,13 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
                     if let Some(base) = base {
                         settings.entry("baseNote").or_insert(base);
                     }
-                    (Placement::Phrases { instrument: row.get("place").cloned().unwrap_or(Value::Null), settings }, named(row, ""))
+                    // (phrase takes of a range are a set of their own for each instrument they go to)
+                    let set_of = format!(":phrases:{}", row.get("index").and_then(Value::as_u64).unwrap_or(0));
+                    (Placement::Phrases { instrument: row.get("place").cloned().unwrap_or(Value::Null), settings }, named(row, ""), set_of)
                 }
             };
-            // (phrase takes of a range are a set of their own: a make with another place starts another set)
-            let key = match placement {
-                Placement::Patterns { .. } => key,
-                Placement::Phrases { .. } => format!("{key}:phrases"),
-            };
+            // (a make with another place, or into another instrument, starts another set)
+            let key = format!("{key}{set_of}");
             let data = RenoiseData { kind, placement, instrument_name };
             return Ok(Source { label, short: pattern_name, key, material: Some(material), data });
         }
@@ -649,7 +648,10 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
             if !found.get(k).is_some_and(lost) {
                 continue;
             }
-            let Some(reference) = names(*number, &set.source.short).iter().find_map(|name| only_named(&rows, name)) else { continue };
+            let state = set.take(*number).map_or(TakeState::Shown, |take| take.state);
+            let Some(reference) = names_to_find(*number, &set.source.short, state).iter().find_map(|name| only_named(&rows, name)) else {
+                continue;
+            };
             let again = self.locate(vec![item(&set.source.data.placement, json!(reference))], None, signal).await?;
             if let Some(row) = again.into_iter().next().filter(|row| row.get("ref").is_some()) {
                 if let Some(take) = set.take_mut(*number) {

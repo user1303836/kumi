@@ -922,6 +922,17 @@ pub fn names(number: usize, source: &str) -> [String; 2] {
     [take_name(number, source), kept_name(number, source)]
 }
 
+/// The names a backend finds a take by when its place is lost, in the order to try them: a kept take's kept name first (a
+/// copy the producer made of it before it was kept holds the name it was made with).
+pub fn names_to_find(number: usize, source: &str, state: TakeState) -> [String; 2] {
+    let [made, kept] = names(number, source);
+    if state == TakeState::Kept {
+        [kept, made]
+    } else {
+        [made, kept]
+    }
+}
+
 struct VariationsTool<B: VariationsBackend + 'static> {
     owner: Rc<Variations<B>>,
 }
