@@ -52,24 +52,30 @@ impl<B: StemsBackend + 'static> Stems<B> {
         }
         let ([left, right], rate) =
             crate::audio::decode::read_stereo(&render.file, &signal, render.start, seconds).await.map_err(|error| error.0)?;
-        // (off Kumi's own thread, so the conversation keeps going; Esc stops the wait)
-        let parts = tokio::select! {
-            parts = tokio::task::spawn_blocking(move || split(&left, &right, rate)) => parts.map_err(|error| error.to_string())?,
-            _ = signal.cancelled() => return Err("stopped".into()),
-        };
         // (in Kumi's listening folder, which Kumi clears, and gone once placed: the DAW keeps its own copy)
         let folder = self.backend.folder();
-        std::fs::create_dir_all(&folder).map_err(|error| format!("Kumi couldn't make its listening folder: {error}"))?;
-        let stamp = kumi_common::time::now_ms();
-        let mut files: Vec<(String, PathBuf)> = Vec::new();
-        for (stem, channels) in [("drums", &parts.drums), ("bass", &parts.bass), ("other", &parts.other)] {
-            let path = folder.join(format!("{} {stem} {stamp}.wav", plain(&name)));
-            std::fs::write(&path, crate::audio::decode::float_wav(&channels[..], rate as u32))
-                .map_err(|error| format!("Kumi couldn't write the {stem} stem: {error}"))?;
-            files.push((format!("{name} {stem}"), path));
-        }
+        let base = format!("{} {}", plain(&name), kumi_common::time::now_ms());
+        let stem_names = name.clone();
+        // (the split and the writes off Kumi's own thread, so the conversation keeps going; Esc stops the wait)
+        let writing = tokio::task::spawn_blocking(move || -> Result<Vec<(String, PathBuf)>, String> {
+            let parts = split(&left, &right, rate);
+            std::fs::create_dir_all(&folder).map_err(|error| format!("Kumi couldn't make its listening folder: {error}"))?;
+            let mut files = Vec::new();
+            for (stem, channels) in [("drums", &parts.drums), ("bass", &parts.bass), ("other", &parts.other)] {
+                let path = folder.join(format!("{base} {stem}.wav"));
+                std::fs::write(&path, crate::audio::decode::float_wav(&channels[..], rate as u32))
+                    .map_err(|error| format!("Kumi couldn't write the {stem} stem: {error}"))?;
+                files.push((format!("{stem_names} {stem}"), path));
+            }
+            Ok(files)
+        });
+        let files = tokio::select! {
+            files = writing => files.map_err(|error| error.to_string())??,
+            _ = signal.cancelled() => return Err("stopped".into()),
+        };
         let stems: Vec<(String, &std::path::Path)> = files.iter().map(|(stem, path)| (stem.clone(), path.as_path())).collect();
-        let made = self.backend.place(track, &stems, from, beats, &signal).await;
+        let made =
+            if signal.is_cancelled() { Err("stopped".into()) } else { self.backend.place(track, &stems, from, beats, &signal).await };
         for (_, path) in &files {
             let _ = std::fs::remove_file(path);
         }
