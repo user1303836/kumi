@@ -6,7 +6,7 @@ use ableton_mcp_server::{
 };
 use serde_json::{json, Value};
 use std::{cell::RefCell, rc::Rc};
-#[path = "support/library_fixtures.rs"]
+#[path = "../support/library_fixtures.rs"]
 mod library_fixtures;
 struct Adapter {
     sim: DeterministicLiveSimulator,
@@ -72,7 +72,7 @@ impl AsyncLiveAdapter for Adapter {
     }
 }
 fn fixture() -> Value {
-    serde_json::from_str(include_str!("support/host_probes_oracle.json")).unwrap()
+    serde_json::from_str(include_str!("../support/host_probes_oracle.json")).unwrap()
 }
 fn parsed(mut v: Value) -> Value {
     if let Some(t) = v["result"]["content"][0]["text"].as_str() {

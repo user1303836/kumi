@@ -115,7 +115,7 @@ fn clean(mut v: Value) -> Value {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn browser_ranking_cache_and_offline_render_match_source() {
-    let data: Value = serde_json::from_str(include_str!("fixtures/host-browser-render-oracle.json")).unwrap();
+    let data: Value = serde_json::from_str(include_str!("../fixtures/host-browser-render-oracle.json")).unwrap();
     for (index, case) in data["cases"].as_array().unwrap().iter().enumerate() {
         let sim = DeterministicLiveSimulator::new();
         sim.state.borrow_mut()["tracks"][0]["mediaKind"] = json!("audio");
@@ -165,7 +165,7 @@ async fn browser_ranking_cache_and_offline_render_match_source() {
 /// A walk of Live's Browser is kept ten minutes; a search it can't answer walks again, at most once a minute.
 #[tokio::test(flavor = "current_thread")]
 async fn a_kept_browser_walk_lasts_ten_minutes_and_a_search_it_cant_answer_walks_again() {
-    let data: Value = serde_json::from_str(include_str!("fixtures/host-browser-render-oracle.json")).unwrap();
+    let data: Value = serde_json::from_str(include_str!("../fixtures/host-browser-render-oracle.json")).unwrap();
     let sim = DeterministicLiveSimulator::new();
     let mut status = serde_json::to_value(sim.status().unwrap()).unwrap();
     status["operations"] = json!(live_registry_operations());

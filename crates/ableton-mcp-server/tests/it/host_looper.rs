@@ -129,7 +129,7 @@ impl AsyncLiveAdapter for Replay {
 async fn looper_matches_source_workflows() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let fixture: Value = serde_json::from_str(include_str!("fixtures/host-looper-oracle.json")).unwrap();
+            let fixture: Value = serde_json::from_str(include_str!("../fixtures/host-looper-oracle.json")).unwrap();
             for case in fixture["cases"].as_array().unwrap() {
                 let label = case["label"].as_str().unwrap();
                 if std::env::var("KUMI_LOOPER_CASE").ok().is_some_and(|v| v != label) {

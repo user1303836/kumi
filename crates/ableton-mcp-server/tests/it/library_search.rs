@@ -3,7 +3,7 @@
 //! `unavailable`, `privacy` and `provenance`) belongs to the host's tests. Everything the
 //! library-search module itself decides is asserted here against the same fixtures.
 
-#[path = "support/library_fixtures.rs"]
+#[path = "../support/library_fixtures.rs"]
 mod library_fixtures;
 
 use std::collections::HashMap;

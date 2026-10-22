@@ -6,7 +6,7 @@ fn args(values: &[&str]) -> Vec<String> {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn command_parsers_match_source_oracle() {
-    let rows: Vec<Value> = serde_json::from_str(include_str!("support/delivery_cli_oracle.json")).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(include_str!("../support/delivery_cli_oracle.json")).unwrap();
     assert_eq!(rows.len(), 79);
     for row in rows {
         let arguments: Vec<String> = serde_json::from_value(row["args"].clone()).unwrap();

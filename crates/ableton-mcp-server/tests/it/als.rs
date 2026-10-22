@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 fn fixture() -> Value {
     {
-        let mut d = serde_json::Deserializer::from_str(include_str!("support/als_oracle.json"));
+        let mut d = serde_json::Deserializer::from_str(include_str!("../support/als_oracle.json"));
         d.disable_recursion_limit();
         Value::deserialize(&mut d).unwrap()
     }

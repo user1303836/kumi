@@ -2,7 +2,7 @@ use ableton_mcp_server::{als::*, project::SetSourceRead, project_semantic::*};
 use serde::Deserialize;
 use serde_json::{json, Value};
 fn fixture() -> Value {
-    let mut d = serde_json::Deserializer::from_str(include_str!("support/project_semantic_oracle.json"));
+    let mut d = serde_json::Deserializer::from_str(include_str!("../support/project_semantic_oracle.json"));
     d.disable_recursion_limit();
     Value::deserialize(&mut d).unwrap()
 }
@@ -132,7 +132,7 @@ fn rehashed_adversarial_and_large_paging_source_oracle() {
 #[test]
 fn canonical_boundaries_keep_source_validation_order() {
     let f = fixture();
-    let cases: Vec<Value> = serde_json::from_str(include_str!("support/project_semantic_bounds_oracle.json")).unwrap();
+    let cases: Vec<Value> = serde_json::from_str(include_str!("../support/project_semantic_bounds_oracle.json")).unwrap();
     for row in cases {
         let count = row["count"].as_u64().unwrap() as usize;
         let value = match row["kind"].as_str().unwrap() {
@@ -152,7 +152,7 @@ fn canonical_boundaries_keep_source_validation_order() {
 #[test]
 fn source_platform_path_classification_and_locators() {
     let f = fixture();
-    let paths: Value = serde_json::from_str(include_str!("support/project_semantic_paths_oracle.json")).unwrap();
+    let paths: Value = serde_json::from_str(include_str!("../support/project_semantic_paths_oracle.json")).unwrap();
     let platform = if cfg!(windows) { "win32" } else { "posix" };
     let options: CreateSemanticProjectOptions = serde_json::from_value(f["cases"][0]["options"].clone()).unwrap();
     for row in paths[platform].as_array().unwrap() {

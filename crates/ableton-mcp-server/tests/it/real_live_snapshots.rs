@@ -38,7 +38,7 @@ fn difference(expected: &Value, actual: &Value, path: &str) -> Option<String> {
 #[test]
 fn real_remote_script_snapshots_parse_and_keep_exactly_their_fields() {
     let fixture: Value =
-        serde_json::from_reader(flate2::read::GzDecoder::new(&include_bytes!("fixtures/real-live-snapshots.json.gz")[..])).unwrap();
+        serde_json::from_reader(flate2::read::GzDecoder::new(&include_bytes!("../fixtures/real-live-snapshots.json.gz")[..])).unwrap();
     let frames = fixture["frames"].as_array().unwrap();
     assert_eq!(frames.len(), 8);
     for frame in frames {
@@ -61,7 +61,7 @@ fn real_remote_script_snapshots_parse_and_keep_exactly_their_fields() {
 fn discovery_results_move_into_the_value_serde_would_make() {
     use ableton_mcp_server::live::{LiveDiscoveryKind, LiveDiscoveryResult};
     let fixture: Value =
-        serde_json::from_reader(flate2::read::GzDecoder::new(&include_bytes!("fixtures/real-live-snapshots.json.gz")[..])).unwrap();
+        serde_json::from_reader(flate2::read::GzDecoder::new(&include_bytes!("../fixtures/real-live-snapshots.json.gz")[..])).unwrap();
     let tracks: Vec<_> =
         fixture["frames"][0]["result"]["tracks"].as_array().unwrap().iter().map(|t| t.as_object().unwrap().clone()).collect();
     for (kind, cursor) in [(LiveDiscoveryKind::Track, None), (LiveDiscoveryKind::SessionClip, Some("next-page".to_string()))] {

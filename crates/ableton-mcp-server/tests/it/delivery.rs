@@ -161,7 +161,7 @@ fn retained_node_policy_matches_the_javascript_bridge_and_platforms() {
 }
 #[test]
 fn legacy_bridge_validation_matches_typescript_oracle() {
-    let cases: Vec<serde_json::Value> = serde_json::from_str(include_str!("fixtures/delivery-oracle.json")).unwrap();
+    let cases: Vec<serde_json::Value> = serde_json::from_str(include_str!("../fixtures/delivery-oracle.json")).unwrap();
     for case in &cases {
         let result = config_for_bridge(
             Path::new(case["entrypoint"].as_str().unwrap()),

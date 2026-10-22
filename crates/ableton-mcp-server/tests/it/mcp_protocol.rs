@@ -3,7 +3,7 @@
 //! `serve` wrapper) belong with the host's port; the wire expectations they assert through the host
 //! are checked here against `prepare_mcp_request` and `format_mcp_response` themselves.
 
-#[path = "support/streams.rs"]
+#[path = "../support/streams.rs"]
 mod streams;
 
 use std::cell::RefCell;

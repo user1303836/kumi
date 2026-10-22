@@ -20,7 +20,7 @@ fn metric<'a>(rows: &'a [BenchmarkMeasurement], name: &str) -> &'a BenchmarkMeas
 #[tokio::test(flavor = "current_thread")]
 async fn source_gates_and_native_resource_evidence() {
     tokio::task::LocalSet::new().run_until(async {
-    let oracle:Value=serde_json::from_str(include_str!("fixtures/benchmark-oracle.json")).unwrap();
+    let oracle:Value=serde_json::from_str(include_str!("../fixtures/benchmark-oracle.json")).unwrap();
     same(json!(BENCHMARK_BUDGETS),&oracle["budgets"]);
     assert_eq!(ANALYSIS_MEASUREMENTS,oracle["analysisMeasurements"].as_u64().unwrap() as usize);
     for row in oracle["percentiles"].as_array().unwrap(){

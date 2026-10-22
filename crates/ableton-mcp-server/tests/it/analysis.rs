@@ -1,4 +1,4 @@
-#[path = "support/fixtures.rs"]
+#[path = "../support/fixtures.rs"]
 mod fixtures;
 
 use std::f64::consts::PI;

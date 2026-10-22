@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::sync::LazyLock;
 
-static ORACLE: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("fixtures/journeys-oracle.json")).unwrap());
+static ORACLE: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("../fixtures/journeys-oracle.json")).unwrap());
 fn status(index: usize) -> LiveStatus {
     serde_json::from_value(ORACLE["statuses"][index].clone()).unwrap()
 }

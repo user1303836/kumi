@@ -1,5 +1,5 @@
 //! A real JavaScript bridge installation (Kumi 1.7.5's lifecycle) → native migration, with the existing receipt and files untouched by fixture rebinding.
-#[path = "support/lifecycle_fixture.rs"]
+#[path = "../support/lifecycle_fixture.rs"]
 mod fixture;
 use ableton_mcp_server::{delivery::*, lifecycle::*};
 use fixture::*;

@@ -6,7 +6,7 @@ use ableton_mcp_server::registry::{
 };
 use serde_json::{json, Map, Value};
 
-#[path = "support/mod.rs"]
+#[path = "../support/mod.rs"]
 mod support;
 use support::assert_throws;
 
@@ -49,7 +49,7 @@ fn the_bridges_registry_is_its_own_whatever_folder_its_started_from() {
     std::fs::create_dir_all(folder.path().join("a").join("b").join("protocol")).unwrap();
     std::fs::write(folder.path().join("a").join("b").join("protocol").join("ableton-live-v1.operations.json"), &other).unwrap();
     let started = Command::new(std::env::current_exe().expect("the test binary"))
-        .args(["the_bridges_registry_is_its_own_whatever_folder_its_started_from", "--exact", "--nocapture"])
+        .args(["registry::the_bridges_registry_is_its_own_whatever_folder_its_started_from", "--exact", "--nocapture"])
         .env("KUMI_REGISTRY_HASH_PROBE", "1")
         .current_dir(folder.path().join("a").join("b"))
         .output()

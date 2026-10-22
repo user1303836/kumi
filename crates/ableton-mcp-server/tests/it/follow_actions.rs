@@ -7,7 +7,7 @@
 use ableton_mcp_server::follow_actions::{validate_follow_actions, FOLLOW_ACTION_FIELDS, FOLLOW_ACTION_SCHEMA};
 use serde_json::{json, Map, Value};
 
-#[path = "support/mod.rs"]
+#[path = "../support/mod.rs"]
 mod support;
 use support::assert_throws;
 

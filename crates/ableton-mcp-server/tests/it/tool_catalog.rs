@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 
 fn oracle() -> Value {
-    serde_json::from_str(include_str!("fixtures/tool-catalog-oracle.json")).unwrap()
+    serde_json::from_str(include_str!("../fixtures/tool-catalog-oracle.json")).unwrap()
 }
 
 #[test]

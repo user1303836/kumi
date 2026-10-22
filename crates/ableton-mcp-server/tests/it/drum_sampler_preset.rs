@@ -1,4 +1,4 @@
-#[path = "support/drum_sampler.rs"]
+#[path = "../support/drum_sampler.rs"]
 mod drum_sampler;
 
 use std::io::Read;

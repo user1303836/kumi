@@ -11,7 +11,7 @@ use std::{
     rc::Rc,
 };
 fn fixture() -> Value {
-    serde_json::from_str(include_str!("fixtures/host-willington-oracle.json")).unwrap()
+    serde_json::from_str(include_str!("../fixtures/host-willington-oracle.json")).unwrap()
 }
 fn same(a: &Value, b: &Value, label: &str) {
     assert_eq!(canonical_mutation_identity(a).unwrap(), canonical_mutation_identity(b).unwrap(), "{label}");

@@ -1,4 +1,4 @@
-#[path = "support/streams.rs"]
+#[path = "../support/streams.rs"]
 mod streams;
 
 use std::cell::{Cell, RefCell};

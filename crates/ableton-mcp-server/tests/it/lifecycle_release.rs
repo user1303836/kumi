@@ -1,4 +1,4 @@
-#[path = "support/lifecycle_fixture.rs"]
+#[path = "../support/lifecycle_fixture.rs"]
 mod fixture;
 use ableton_mcp_server::lifecycle::*;
 use fixture::*;

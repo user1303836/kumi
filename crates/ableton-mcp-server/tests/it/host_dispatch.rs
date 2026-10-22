@@ -39,7 +39,7 @@ fn clean(value: &Value) -> Value {
 #[tokio::test(flavor = "current_thread")]
 async fn public_requests_fused_changes_and_undo_match_source() {
     tokio::task::LocalSet::new().run_until(async{
-        let data:Value=serde_json::from_str(include_str!("fixtures/host-dispatch-oracle.json")).unwrap();
+        let data:Value=serde_json::from_str(include_str!("../fixtures/host-dispatch-oracle.json")).unwrap();
         for (index,case) in data["cases"].as_array().unwrap().iter().enumerate(){
             let sim=Rc::new(DeterministicLiveSimulator::new());
             let host=Rc::new(McpHost::new(sim.clone(),McpHostOptions{tool_policy:case.get("policy").cloned(),server_version:Some(ORACLE_VERSION.into()),..Default::default()}).unwrap());

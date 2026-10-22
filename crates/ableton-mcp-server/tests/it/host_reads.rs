@@ -103,7 +103,7 @@ impl AsyncLiveAdapter for Adapter {
 }
 #[tokio::test]
 async fn read_handlers_match_source_results_and_exact_adapter_dispatch() {
-    let data: Value = serde_json::from_str(include_str!("fixtures/host-reads-oracle.json")).unwrap();
+    let data: Value = serde_json::from_str(include_str!("../fixtures/host-reads-oracle.json")).unwrap();
     for (index, case) in data["cases"].as_array().unwrap().iter().enumerate() {
         let sim = DeterministicLiveSimulator::new();
         let mut status = serde_json::to_value(sim.status().unwrap()).unwrap();

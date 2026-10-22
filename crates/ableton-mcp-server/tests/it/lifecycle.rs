@@ -1,4 +1,4 @@
-#[path = "support/lifecycle_fixture.rs"]
+#[path = "../support/lifecycle_fixture.rs"]
 mod fixture;
 use ableton_mcp_server::{delivery::*, lifecycle::*, lifecycle_cli};
 use fixture::*;
@@ -525,6 +525,6 @@ async fn lifecycle_results_match_normalized_typescript_sequence_oracle() {
         }
     }
     let actual = normalize(json!(rows), f.folder.path().to_str().unwrap());
-    let expected: Value = serde_json::from_str(include_str!("support/lifecycle_oracle.json")).unwrap();
+    let expected: Value = serde_json::from_str(include_str!("../support/lifecycle_oracle.json")).unwrap();
     assert_eq!(actual, expected);
 }

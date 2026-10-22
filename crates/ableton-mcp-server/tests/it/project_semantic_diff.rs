@@ -2,7 +2,7 @@ use ableton_mcp_server::{project_semantic::*, project_semantic_diff::*};
 use serde::Deserialize;
 use serde_json::{json, Value};
 fn fixture() -> Value {
-    let mut d = serde_json::Deserializer::from_str(include_str!("support/project_semantic_diff_oracle.json"));
+    let mut d = serde_json::Deserializer::from_str(include_str!("../support/project_semantic_diff_oracle.json"));
     d.disable_recursion_limit();
     Value::deserialize(&mut d).unwrap()
 }
@@ -34,7 +34,7 @@ fn source_diff_workflows() {
 #[test]
 fn a_rename_to_a_name_with_a_spaced_slash_is_diffed_both_ways() {
     // "Kick / Snare" isn't a path: the exporter keeps it, so a diff that carries it passes the same test.
-    let mut d = serde_json::Deserializer::from_str(include_str!("support/project_semantic_oracle.json"));
+    let mut d = serde_json::Deserializer::from_str(include_str!("../support/project_semantic_oracle.json"));
     d.disable_recursion_limit();
     let cases = Value::deserialize(&mut d).unwrap();
     let options: CreateSemanticProjectOptions = serde_json::from_value(cases["cases"][0]["options"].clone()).unwrap();
@@ -91,7 +91,7 @@ fn source_diff_paging_and_validation() {
 #[test]
 fn maximum_duplicate_ambiguity_source_oracle() {
     let f = fixture();
-    let semantic: Value = serde_json::from_str(include_str!("support/project_semantic_oracle.json")).unwrap();
+    let semantic: Value = serde_json::from_str(include_str!("../support/project_semantic_oracle.json")).unwrap();
     let mut snapshot = semantic["cases"][0]["snapshot"].clone();
     let base = snapshot["tracks"][0].clone();
     let count = f["large"]["count"].as_u64().unwrap() as usize;
