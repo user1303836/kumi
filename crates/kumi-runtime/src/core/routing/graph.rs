@@ -151,7 +151,7 @@ impl Graph {
                 }
             }
             let sends_out: Vec<&Edge> = self.edges.iter().filter(|edge| edge.from == node.id).collect();
-            if paths.is_empty() && node.sounds && !node.muted {
+            if paths.is_empty() && self.sounding(&node.id) && !node.muted {
                 let hardware = sends_out.iter().any(|edge| edge.route == Route::Hardware && !edge.muted);
                 let midi = sends_out.iter().any(|edge| edge.midi_only && !edge.muted);
                 let (ends, through_muted) = self.dead_ends(&node.id);
@@ -159,7 +159,7 @@ impl Graph {
                 if !hardware && (midi || through_muted) {
                     continue;
                 }
-                let words = if hardware {
+                let mut words = if hardware {
                     format!("{} goes only to a hardware output: the master (and a render of it) never hears it", self.name(&node.id))
                 } else if ends.iter().all(|end| *end == node.id) {
                     format!("{} is heard nowhere: its send to its parent is off and no send of it reaches the master", self.name(&node.id))
@@ -171,7 +171,15 @@ impl Graph {
                         names.join(", ")
                     )
                 };
-                out.push(Lint { tracks: vec![node.id.clone()], kind: if hardware { "hardware-only" } else { "silent" }, words });
+                // (a bus fed by sends: "my reverb does nothing", the sends into it named)
+                let senders = self.senders(&node.id);
+                if !senders.is_empty() {
+                    let names: Vec<String> = senders.iter().map(|id| self.name(id)).collect();
+                    words.push_str(&format!("; the sends of {} into it do nothing", names.join(", ")));
+                }
+                let mut tracks = vec![node.id.clone()];
+                tracks.extend(senders);
+                out.push(Lint { tracks, kind: if hardware { "hardware-only" } else { "silent" }, words });
             }
             if paths.len() >= 2 {
                 let ways: Vec<String> = paths.iter().map(|path| self.path_words(path)).collect();
@@ -227,6 +235,22 @@ impl Graph {
         out
     }
 
+    /// The tracks whose unmuted sends (audio or MIDI) come into this one.
+    pub fn senders(&self, id: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for edge in self.edges.iter().filter(|edge| edge.route == Route::Send && !edge.muted && edge.to.as_deref() == Some(id)) {
+            if !out.contains(&edge.from) {
+                out.push(edge.from.clone());
+            }
+        }
+        out
+    }
+
+    /// Whether a track has sound to lose: its own, or what other tracks send it.
+    pub fn sounding(&self, id: &str) -> bool {
+        self.nodes.get(id).is_some_and(|node| node.sounds) || !self.senders(id).is_empty()
+    }
+
     /// Where a track's audible ways stop short of the master (it alone when it has none), and whether one runs into a muted
     /// track.
     fn dead_ends(&self, from: &str) -> (Vec<String>, bool) {
@@ -253,7 +277,8 @@ impl Graph {
         (ends, through_muted)
     }
 
-    fn through_effect(&self, path: &Path) -> bool {
+    /// Whether a way passes a send effect: a bus with a time effect on it (its return is shared, as meant).
+    pub fn through_effect(&self, path: &Path) -> bool {
         path.iter().any(|&k| {
             let edge = &self.edges[k];
             edge.route == Route::Send
@@ -261,8 +286,19 @@ impl Graph {
         })
     }
 
+    /// Whether a way flips the polarity: an odd count of flips among its sends and the tracks it passes (the source's own
+    /// flips every way alike).
     fn inverted(&self, path: &Path) -> bool {
-        path.iter().filter(|&&k| self.edges[k].inverted).count() % 2 == 1
+        let flips: usize = path
+            .iter()
+            .map(|&k| {
+                let edge = &self.edges[k];
+                let through =
+                    edge.to.as_deref().filter(|to| *to != MASTER).and_then(|to| self.nodes.get(to)).is_some_and(|node| node.inverted);
+                usize::from(edge.inverted) + usize::from(through)
+            })
+            .sum();
+        flips % 2 == 1
     }
 }
 
@@ -399,6 +435,18 @@ mod tests {
             vec![parent("Kick", MASTER), Edge { inverted: true, ..send("Kick", "Bus") }, parent("Bus", MASTER)],
         );
         assert_eq!(cancel.lints()[0].kind, "inverted-duplicate");
+        // A bus whose own polarity is flipped cancels the same way.
+        let mut flipped = node("Bus", &[]);
+        flipped.inverted = true;
+        let bus = graph(vec![node("Kick", &[]), flipped], vec![parent("Kick", MASTER), send("Kick", "Bus"), parent("Bus", MASTER)]);
+        assert_eq!(bus.lints().iter().find(|lint| lint.tracks == ["Kick"]).unwrap().kind, "inverted-duplicate");
+        // A reverb that reaches nothing: heard nowhere, the sends into it named.
+        let mut verb = node("Reverb", &["ReaVerbate"]);
+        verb.sounds = false;
+        let dead = graph(vec![node("Vox", &[]), verb], vec![parent("Vox", MASTER), send("Vox", "Reverb")]);
+        let lint = dead.lints().into_iter().find(|lint| lint.tracks[0] == "Reverb").unwrap();
+        assert_eq!((lint.kind, lint.tracks.clone()), ("silent", vec!["Reverb".to_string(), "Vox".to_string()]));
+        assert!(lint.words.ends_with("the sends of “Vox” into it do nothing"), "{}", lint.words);
         // A muted send is no way at all.
         let muted = graph(
             vec![node("Kick", &[]), node("Bus", &[])],

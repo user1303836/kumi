@@ -20,6 +20,8 @@ struct Fake {
     /// What a run adds to the graph.
     adds: RefCell<Vec<Edge>>,
     channels: RefCell<Option<(String, u32)>>,
+    /// The steps a stems build gives (none: the groups are folders already).
+    stems: RefCell<Vec<Value>>,
 }
 
 #[async_trait(?Send)]
@@ -38,7 +40,7 @@ impl RoutingBackend for Rc<Fake> {
                 steps: vec![json!({"tool": "send_add", "input": {"ref": trigger, "toRef": target, "dstChannels": {"offset": 3}}})],
                 said: vec![],
             },
-            Build::Stems { .. } => Steps { steps: vec![], said: vec!["the folder is that stem already".into()] },
+            Build::Stems { .. } => Steps { steps: self.stems.borrow().clone(), said: vec!["the folder is that stem already".into()] },
             Build::Parallel { .. } => Steps { steps: vec![json!({"tool": "track_add", "input": {}})], said: vec![] },
         })
     }
@@ -170,4 +172,41 @@ async fn a_build_asks_for_what_it_needs() {
     assert!(ask(json!({"action": "build", "kind": "parallel"})).await.starts_with("tracks:"));
     assert!(ask(json!({"action": "build", "kind": "stems", "groups": []})).await.starts_with("groups:"));
     assert!(ask(json!({"action": "rewire"})).await.starts_with("action is"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_stem_is_checked_beside_its_tracks_effect_sends_and_through_the_folder_it_is_already() {
+    // Kick and Snare in the Drums folder, the Kick also sent to a shared reverb; Bass alone.
+    let mut graph = Graph::default();
+    for (id, name, parent) in [("t1", "Drums", None), ("t2", "Kick", Some("t1")), ("t3", "Snare", Some("t1")), ("t4", "Bass", None)] {
+        graph.nodes.insert(id.into(), Node { parent: parent.map(str::to_owned), ..node(id, name) });
+    }
+    graph.nodes.insert("t5".into(), Node { fx: vec!["ReaVerbate".into()], sounds: false, ..node("t5", "Reverb") });
+    graph.nodes.insert(MASTER.into(), Node { id: MASTER.into(), name: "Master".into(), channels: 2, ..Node::default() });
+    graph.edges = vec![
+        route("t2", "t1", Route::Parent),
+        route("t3", "t1", Route::Parent),
+        route("t1", MASTER, Route::Parent),
+        route("t2", "t5", Route::Send),
+        route("t5", MASTER, Route::Parent),
+        route("t4", MASTER, Route::Parent),
+    ];
+    let fake = Rc::new(Fake { graph: RefCell::new(graph), ..Fake::default() });
+    // (the bass's stem is built, by a bus the fake's run adds; the drums are the Drums folder already)
+    fake.graph.borrow_mut().nodes.insert("t6".into(), Node { sounds: false, ..node("t6", "Music") });
+    fake.adds.borrow_mut().push(route("t6", MASTER, Route::Parent));
+    fake.graph.borrow_mut().edges.retain(|edge| edge.from != "t4");
+    fake.adds.borrow_mut().push(route("t4", "t6", Route::Send));
+    *fake.stems.borrow_mut() = vec![json!({"tool": "track_add", "input": {"name": "Music"}})];
+    let tool = Routing::new(fake.clone()).tool();
+    let built = run(
+        &tool,
+        json!({"action": "build", "kind": "stems", "groups": [{"name": "Drum Stem", "tracks": ["t2", "t3"]}, {"name": "Music", "tracks": ["t4"]}]}),
+    )
+    .await
+    .unwrap();
+    let checked: Vec<&str> = built["checked"].as_array().unwrap().iter().map(|c| c.as_str().unwrap()).collect();
+    assert!(checked.iter().all(|line| line.ends_with(": yes")), "{checked:?}");
+    assert!(built.get("next").is_none(), "{built}");
+    assert!(built["said"].to_string().contains("the effect returns (a shared reverb, a delay) stay shared"), "{built}");
 }

@@ -17,7 +17,7 @@ use std::rc::Rc;
 pub static WORDS: Words = Words {
     app: "REAPER",
     parent: "the parent send: to its folder, or the master at the top",
-    compressor: "compressor: an FX of the target's (a ReaComp is switched to its sidechain; another compressor's own sidechain switch is the producer's), else the target's ReaComp, else a ReaComp is added",
+    compressor: "compressor: an FX of the target's to switch to the sidechain (a ReaComp's detector; another compressor's own sidechain switch is the producer's), else a ReaComp is added after its FX",
 };
 
 /// Pages of rows read (200 a page).
@@ -119,6 +119,115 @@ fn folder_already<'g>(graph: &'g Graph, nodes: &[&Node]) -> Option<&'g Node> {
         .flatten()
 }
 
+/// A track of the graph to route (never the master).
+fn track<'g>(graph: &'g Graph, id: &str) -> Result<&'g Node, String> {
+    if id == MASTER {
+        return Err("the master isn't routed so: name tracks".into());
+    }
+    graph.nodes.get(id).ok_or_else(|| format!("{id} isn't a track of this project: read again"))
+}
+
+/// A sidechain's steps: the target given 4 channels, the trigger sent pre-fader to its 3/4, and the compressor that listens:
+/// the one named (`chosen`: its name and ref; a ReaComp's detector switched), else a ReaComp added after the target's FX.
+fn sidechain(graph: &Graph, trigger: &str, target: &str, chosen: Option<(String, String)>) -> Result<Steps, String> {
+    let (kick, bass) = (track(graph, trigger)?, track(graph, target)?);
+    if trigger == target {
+        return Err("trigger and target are one track".into());
+    }
+    let there = graph.edges.iter().any(|edge| {
+        edge.from == trigger && edge.to.as_deref() == Some(target) && edge.route == Route::Send && edge.dst >= 3 && !edge.muted
+    });
+    if there {
+        return Err(format!(
+            "\u{201c}{}\u{201d} reaches \u{201c}{}\u{201d}'s channels 3/4 already: the sidechain is there",
+            kick.name, bass.name
+        ));
+    }
+    let mut out = Steps::default();
+    if bass.channels < 4 {
+        out.steps.push(json!({"tool": "track_channels", "input": {"ref": target, "channels": 4}}));
+    }
+    // (pre-fader: the kick's fader doesn't change how much the bass ducks)
+    out.steps
+        .push(json!({"tool": "send_add", "input": {"ref": trigger, "toRef": target, "mode": "pre-fader", "dstChannels": {"offset": 3}}}));
+    match chosen {
+        Some((name, fx)) if reacomp(&name) => {
+            out.steps.push(json!({"tool": "fx_param", "input": {"ref": fx, "param": DETECTOR, "normalized": SIDECHAIN}}));
+            out.said.push(format!(
+                "\u{201c}{name}\u{201d} on \u{201c}{}\u{201d} now listens to \u{201c}{}\u{201d}, at the threshold and ratio it had",
+                bass.name, kick.name
+            ));
+        }
+        Some((name, _)) => out.said.push(format!(
+            "\u{201c}{name}\u{201d} hears the sidechain once its own sidechain (external key) switch is on: the producer's, in its window"
+        )),
+        None => {
+            out.steps.push(json!({"tool": "fx_add", "input": {"ref": target, "name": "ReaComp (Cockos)"}, "as": "comp"}));
+            out.steps.push(json!({"tool": "fx_param", "input": {"ref": "@comp", "param": DETECTOR, "normalized": SIDECHAIN}}));
+            out.said.push(format!(
+                "a ReaComp was added after \u{201c}{}\u{201d}'s FX, its detector on the sidechain: its threshold and ratio set how far it ducks",
+                bass.name
+            ));
+        }
+    }
+    Ok(out)
+}
+
+/// A parallel bus's steps: the bus, its FX, and a send to it from each track.
+fn parallel(graph: &Graph, tracks: &[String], name: &str, fx: Option<&str>, pre_fader: bool) -> Result<Steps, String> {
+    for id in tracks {
+        track(graph, id)?;
+    }
+    let mut out = Steps::default();
+    out.steps.push(json!({"tool": "track_add", "input": {"name": name}, "as": "bus"}));
+    if let Some(fx) = fx {
+        out.steps.push(json!({"tool": "fx_add", "input": {"ref": "@bus", "name": fx}}));
+    }
+    let mode = if pre_fader { "pre-fader" } else { "post-fader" };
+    for id in tracks {
+        out.steps.push(json!({"tool": "send_add", "input": {"ref": id, "toRef": "@bus", "mode": mode}}));
+    }
+    Ok(out)
+}
+
+/// Stems' steps: each group a folder where REAPER's folder-of takes its tracks (nothing when it's a folder already), else a
+/// bus its tracks send to, their parent sends off.
+fn stems(graph: &Graph, groups: &[(String, Vec<String>)]) -> Result<Steps, String> {
+    let mut out = Steps::default();
+    let mut seen: Vec<&String> = Vec::new();
+    for (k, (stem, tracks)) in groups.iter().enumerate() {
+        let mut nodes: Vec<&Node> = tracks.iter().map(|id| track(graph, id)).collect::<Result<_, _>>()?;
+        if let Some(twice) = tracks.iter().find(|id| seen.contains(id)) {
+            return Err(format!("\u{201c}{}\u{201d} is in two stems: one each", graph.nodes[twice].name));
+        }
+        seen.extend(tracks.iter());
+        nodes.sort_by_key(|node| node.place);
+        if let Some(folder) = folder_already(graph, &nodes) {
+            out.said.push(format!(
+                "\u{201c}{stem}\u{201d} is the folder \u{201c}{}\u{201d} already: nothing to build (rename it if the stem's name matters)",
+                folder.name
+            ));
+        } else if foldable(graph, &nodes) {
+            let refs: Vec<&str> = nodes.iter().map(|node| node.id.as_str()).collect();
+            out.steps.push(json!({"tool": "track_add", "input": {"name": stem, "folderOfRefs": refs}}));
+        } else {
+            let bus = format!("stem{}", k + 1);
+            out.steps.push(json!({"tool": "track_add", "input": {"name": stem}, "as": bus}));
+            for node in &nodes {
+                out.steps.push(json!({"tool": "send_add", "input": {"ref": node.id, "toRef": format!("@{bus}"), "mode": "post-fader"}}));
+                out.steps.push(json!({"tool": "track_main_send", "input": {"ref": node.id, "on": false}}));
+                if let Some(folder) = node.parent.as_ref().and_then(|parent| graph.nodes.get(parent)) {
+                    out.said.push(format!(
+                        "\u{201c}{}\u{201d} leaves its folder \u{201c}{}\u{201d}: it reaches the master only through \u{201c}{stem}\u{201d}",
+                        node.name, folder.name
+                    ));
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
 #[async_trait(?Send)]
 impl<S: RefScheme + 'static> RoutingBackend for ReaperRouting<S> {
     fn words(&self) -> &'static Words {
@@ -197,7 +306,7 @@ impl<S: RefScheme + 'static> RoutingBackend for ReaperRouting<S> {
         let unheard: Vec<String> = graph
             .nodes
             .values()
-            .filter(|node| node.sounds && !node.muted && longs.contains_key(&node.id) && !with_sends.contains(&node.id))
+            .filter(|node| graph.sounding(&node.id) && !node.muted && longs.contains_key(&node.id) && !with_sends.contains(&node.id))
             .filter(|node| graph.paths(&node.id).0.is_empty())
             .map(|node| node.id.clone())
             .collect();
@@ -208,108 +317,26 @@ impl<S: RefScheme + 'static> RoutingBackend for ReaperRouting<S> {
     }
 
     async fn steps(&self, graph: &Graph, build: &Build, signal: &Signal) -> Result<Steps, String> {
-        let track = |id: &str| -> Result<&Node, String> {
-            if id == MASTER {
-                return Err("the master isn't routed so: name tracks".into());
-            }
-            graph.nodes.get(id).ok_or_else(|| format!("{id} isn't a track of this project: read again"))
-        };
-        let mut out = Steps::default();
         match build {
             Build::Sidechain { trigger, target, compressor } => {
-                let (kick, bass) = (track(trigger)?, track(target)?);
-                if trigger == target {
-                    return Err("trigger and target are one track".into());
-                }
-                let there = graph.edges.iter().any(|edge| {
-                    edge.from == *trigger && edge.to.as_deref() == Some(target) && edge.route == Route::Send && edge.dst >= 3 && !edge.muted
-                });
-                if there {
-                    return Err(format!(
-                        "\u{201c}{}\u{201d} reaches \u{201c}{}\u{201d}'s channels 3/4 already: the sidechain is there",
-                        kick.name, bass.name
-                    ));
-                }
-                if bass.channels < 4 {
-                    out.steps.push(json!({"tool": "track_channels", "input": {"ref": target, "channels": 4}}));
-                }
-                // (pre-fader: the kick's fader doesn't change how much the bass ducks)
-                out.steps.push(json!({"tool": "send_add", "input": {"ref": trigger, "toRef": target, "mode": "pre-fader", "dstChannels": {"offset": 3}}}));
-                let (names, refs) = self.fx_of(&self.plan.lengthen(target)?, signal).await?;
+                // (a compressor already there levels the target: it's switched only when named, else a new one ducks)
                 let chosen = match compressor {
                     Some(given) => {
+                        let bass = track(graph, target)?;
+                        let (names, refs) = self.fx_of(&self.plan.lengthen(target)?, signal).await?;
                         let at = refs
                             .iter()
                             .position(|fx| fx == given)
                             .ok_or_else(|| format!("{given} isn't an FX of \u{201c}{}\u{201d} that's on: read its FX again", bass.name))?;
                         Some((names[at].clone(), given.clone()))
                     }
-                    None => names.iter().position(|name| reacomp(name)).map(|at| (names[at].clone(), refs[at].clone())),
+                    None => None,
                 };
-                match chosen {
-                    Some((name, fx)) if reacomp(&name) => {
-                        out.steps.push(json!({"tool": "fx_param", "input": {"ref": fx, "param": DETECTOR, "normalized": SIDECHAIN}}));
-                    }
-                    Some((name, _)) => out.said.push(format!(
-                        "\u{201c}{name}\u{201d} hears the sidechain once its own sidechain (external key) switch is on: the producer's, in its window"
-                    )),
-                    None => {
-                        out.steps.push(json!({"tool": "fx_add", "input": {"ref": target, "name": "ReaComp (Cockos)"}, "as": "comp"}));
-                        out.steps.push(json!({"tool": "fx_param", "input": {"ref": "@comp", "param": DETECTOR, "normalized": SIDECHAIN}}));
-                        out.said.push(format!(
-                            "a ReaComp was added to \u{201c}{}\u{201d}, its detector on the sidechain: its threshold and ratio set how far the bass ducks",
-                            bass.name
-                        ));
-                    }
-                }
+                sidechain(graph, trigger, target, chosen)
             }
-            Build::Parallel { tracks, name, fx, pre_fader } => {
-                for id in tracks {
-                    track(id)?;
-                }
-                out.steps.push(json!({"tool": "track_add", "input": {"name": name}, "as": "bus"}));
-                if let Some(fx) = fx {
-                    out.steps.push(json!({"tool": "fx_add", "input": {"ref": "@bus", "name": fx}}));
-                }
-                let mode = if *pre_fader { "pre-fader" } else { "post-fader" };
-                for id in tracks {
-                    out.steps.push(json!({"tool": "send_add", "input": {"ref": id, "toRef": "@bus", "mode": mode}}));
-                }
-            }
-            Build::Stems { groups } => {
-                let mut seen: Vec<&String> = Vec::new();
-                for (k, (stem, tracks)) in groups.iter().enumerate() {
-                    let mut nodes: Vec<&Node> = tracks.iter().map(|id| track(id)).collect::<Result<_, _>>()?;
-                    if let Some(twice) = tracks.iter().find(|id| seen.contains(id)) {
-                        return Err(format!("\u{201c}{}\u{201d} is in two stems: one each", graph.nodes[twice].name));
-                    }
-                    seen.extend(tracks.iter());
-                    nodes.sort_by_key(|node| node.place);
-                    if let Some(folder) = folder_already(graph, &nodes) {
-                        out.said.push(format!("\u{201c}{stem}\u{201d} is the folder \u{201c}{}\u{201d} already: nothing to build (rename it if the stem's name matters)", folder.name));
-                    } else if foldable(graph, &nodes) {
-                        let refs: Vec<&str> = nodes.iter().map(|node| node.id.as_str()).collect();
-                        out.steps.push(json!({"tool": "track_add", "input": {"name": stem, "folderOfRefs": refs}}));
-                    } else {
-                        let bus = format!("stem{}", k + 1);
-                        out.steps.push(json!({"tool": "track_add", "input": {"name": stem}, "as": bus}));
-                        for node in &nodes {
-                            out.steps.push(
-                                json!({"tool": "send_add", "input": {"ref": node.id, "toRef": format!("@{bus}"), "mode": "post-fader"}}),
-                            );
-                            out.steps.push(json!({"tool": "track_main_send", "input": {"ref": node.id, "on": false}}));
-                            if let Some(folder) = node.parent.as_ref().and_then(|parent| graph.nodes.get(parent)) {
-                                out.said.push(format!(
-                                    "\u{201c}{}\u{201d} leaves its folder \u{201c}{}\u{201d}: it reaches the master only through \u{201c}{stem}\u{201d}",
-                                    node.name, folder.name
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
+            Build::Parallel { tracks, name, fx, pre_fader } => parallel(graph, tracks, name, fx.as_deref(), *pre_fader),
+            Build::Stems { groups } => stems(graph, groups),
         }
-        Ok(out)
     }
 
     async fn run(&self, steps: Vec<Value>, signal: &Signal) -> Result<Value, String> {
@@ -355,6 +382,69 @@ mod tests {
         assert!(!foldable(&g, &pick(&["Drums", "Kick"])), "a folder without all its tracks");
         assert_eq!(folder_already(&g, &pick(&["Kick", "Snare"])).map(|f| f.name.as_str()), Some("Drums"));
         assert!(folder_already(&g, &pick(&["Kick"])).is_none());
+    }
+
+    #[test]
+    fn a_sidechain_adds_its_own_reacomp_unless_one_is_named_and_says_what_it_switched() {
+        let mut g = graph(vec![node("Kick", 1, None), node("Bass", 2, None)]);
+        let added = sidechain(&g, "Kick", "Bass", None).unwrap();
+        let tools: Vec<&str> = added.steps.iter().map(|step| step["tool"].as_str().unwrap()).collect();
+        assert_eq!(tools, ["track_channels", "send_add", "fx_add", "fx_param"], "the bass's own compressor is left to level it");
+        assert!(added.said[0].starts_with("a ReaComp was added after “Bass”'s FX"), "{:?}", added.said);
+        let named = sidechain(&g, "Kick", "Bass", Some(("VST: ReaComp (Cockos)".into(), "f7".into()))).unwrap();
+        assert_eq!(named.steps.last().unwrap()["input"]["ref"], "f7");
+        assert_eq!(named.said, ["“VST: ReaComp (Cockos)” on “Bass” now listens to “Kick”, at the threshold and ratio it had"]);
+        let other = sidechain(&g, "Kick", "Bass", Some(("VST3: Pro-C 2 (FabFilter)".into(), "f8".into()))).unwrap();
+        assert_eq!(other.steps.len(), 2, "its own switch is the producer's");
+        assert!(other.said[0].contains("its own sidechain (external key) switch"));
+        // Four channels already: none given; the sidechain there already: refused.
+        g.nodes.get_mut("Bass").unwrap().channels = 4;
+        assert_eq!(sidechain(&g, "Kick", "Bass", None).unwrap().steps[0]["tool"], "send_add");
+        g.edges.push(Edge {
+            from: "Kick".into(),
+            to: Some("Bass".into()),
+            route: Route::Send,
+            dst: 3,
+            muted: false,
+            inverted: false,
+            volume_db: 0.0,
+            mode: "pre-fader".into(),
+            reference: None,
+            midi_only: false,
+        });
+        assert!(sidechain(&g, "Kick", "Bass", None).unwrap_err().contains("already"));
+        assert!(sidechain(&g, "Kick", MASTER, None).unwrap_err().contains("the master"));
+    }
+
+    #[test]
+    fn stems_fold_what_folds_send_the_rest_and_build_nothing_for_a_folder_already() {
+        let g = graph(vec![
+            node("Drums", 1, None),
+            node("Kick", 2, Some("Drums")),
+            node("Snare", 3, Some("Drums")),
+            node("Bass", 4, None),
+            node("Keys", 5, None),
+        ]);
+        let groups = vec![
+            ("Drum Stem".to_string(), vec!["Snare".to_string(), "Kick".to_string()]),
+            ("Music".to_string(), vec!["Keys".to_string(), "Bass".to_string()]),
+            ("Odd".to_string(), vec!["Snare".to_string()]),
+        ];
+        assert!(stems(&g, &groups).unwrap_err().contains("in two stems"));
+        let built = stems(&g, &groups[..2]).unwrap();
+        assert!(built.said[0].starts_with("“Drum Stem” is the folder “Drums” already"), "{:?}", built.said);
+        assert_eq!(
+            built.steps,
+            [json!({"tool": "track_add", "input": {"name": "Music", "folderOfRefs": ["Bass", "Keys"]}})],
+            "in their order"
+        );
+        // Apart, they go through a bus, out of their folder, said.
+        let apart = stems(&g, &[("Hits".to_string(), vec!["Kick".to_string(), "Bass".to_string()])]).unwrap();
+        let tools: Vec<&str> = apart.steps.iter().map(|step| step["tool"].as_str().unwrap()).collect();
+        assert_eq!(tools, ["track_add", "send_add", "track_main_send", "send_add", "track_main_send"]);
+        assert_eq!(apart.said, ["“Kick” leaves its folder “Drums”: it reaches the master only through “Hits”"]);
+        let bus = parallel(&g, &["Kick".to_string()], "Crush", Some("ReaComp (Cockos)"), true).unwrap();
+        assert_eq!(bus.steps[2]["input"], json!({"ref": "Kick", "toRef": "@bus", "mode": "pre-fader"}));
     }
 
     #[test]

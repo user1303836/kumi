@@ -76,6 +76,9 @@ impl<B: RoutingBackend + 'static> Routing<B> {
         let made = self.backend.run(steps, signal).await?;
         let after = self.backend.graph(signal).await?;
         let checked = check(&before, &after, &build);
+        if shares_effects(&after, &build) {
+            said.push("the effect returns (a shared reverb, a delay) stay shared: in no stem unless one is a stem of its own".into());
+        }
         said.push(format!("one plan: {}'s own undo takes it all back", self.backend.words().app));
         let mut reply = json!({"made": made, "steps": count, "checked": checked, "said": said});
         if checked.iter().any(|line| line.ends_with(": no") || line.ends_with("too few")) {
@@ -160,25 +163,39 @@ fn check(before: &Graph, after: &Graph, build: &Build) -> Vec<String> {
         Build::Stems { groups } => groups
             .iter()
             .flat_map(|(stem, tracks)| {
+                let bus = stem_of(before, after, stem, tracks);
                 tracks.iter().map(move |track| {
                     let (paths, _) = after.paths(track);
-                    let through = paths
-                        .iter()
-                        .filter(|path| {
-                            path.iter().any(|&k| {
-                                after.edges[k].to.as_deref().and_then(|to| after.nodes.get(to)).is_some_and(|node| node.name == *stem)
-                            })
-                        })
-                        .count();
+                    // (a way through an effect return is shared, in no stem: only the others count)
+                    let own: Vec<&Vec<usize>> = paths.iter().filter(|path| !after.through_effect(path)).collect();
+                    let through =
+                        own.iter().filter(|path| path.iter().any(|&k| after.edges[k].to.is_some() && after.edges[k].to == bus)).count();
                     format!(
-                        "{} reaches the master once, through “{stem}”: {}",
+                        "{} reaches the master once (its effect sends aside), through “{stem}”: {}",
                         name(track),
-                        if paths.len() == 1 && through == 1 { "yes" } else { "no" }
+                        if own.len() == 1 && through == 1 { "yes" } else { "no" }
                     )
                 })
             })
             .collect(),
     }
+}
+
+/// A stem's track after a build: the new track by its name (else one there by it), else the folder all of its tracks are in
+/// (a group that was a folder already).
+fn stem_of(before: &Graph, after: &Graph, stem: &str, tracks: &[String]) -> Option<String> {
+    let named = |node: &&super::graph::Node| node.name == stem;
+    let new = after.nodes.values().filter(named).find(|node| !before.nodes.contains_key(&node.id));
+    let parent = tracks.first().and_then(|track| after.nodes.get(track)).and_then(|node| node.parent.clone());
+    let folder =
+        parent.filter(|parent| tracks.iter().all(|track| after.nodes.get(track).is_some_and(|node| node.parent.as_ref() == Some(parent))));
+    new.or_else(|| after.nodes.values().find(named)).map(|node| node.id.clone()).or(folder)
+}
+
+/// Whether a stems build leaves effect returns shared: some track of a group still reaches the master through one.
+fn shares_effects(after: &Graph, build: &Build) -> bool {
+    let Build::Stems { groups } = build else { return false };
+    groups.iter().flat_map(|(_, tracks)| tracks).any(|track| after.paths(track).0.iter().any(|path| after.through_effect(path)))
 }
 
 fn description(words: &super::backend::Words) -> String {
