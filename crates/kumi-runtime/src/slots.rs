@@ -96,8 +96,11 @@ pub fn describe_for(profile: &DawProfile, job: Job, choice: &Choice) -> String {
         (_, Choice::File { path }) => format!("the model file {path}"),
         (Job::Stems, _) if profile.caps.stems => format!("{app}'s own splitter"),
         (Job::Stems, _) => format!("none: {app} has no stem splitter Kumi can use"),
-        (Job::Transcription, _) if profile.caps.audio_to_midi => {
+        (Job::Transcription, _) if profile.caps.audio_to_midi && profile.id == Some(crate::core::daw::DawId::Ableton) => {
             format!("{app}'s conversions (drums, melody and harmony to MIDI), and Basic Pitch for a pitched part in a file that isn't in {app}")
+        }
+        (Job::Transcription, _) if profile.caps.audio_to_midi => {
+            format!("Kumi's own: drums by its hit detector and pitched parts by Basic Pitch, written into {app} (audio_to_midi)")
         }
         (Job::Transcription, _) => "Basic Pitch, for a pitched part in a file".into(),
         (Job::Embeddings, Choice::Off) => "off: no embeddings".into(),

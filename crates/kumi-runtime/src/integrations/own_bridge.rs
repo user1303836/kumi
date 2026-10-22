@@ -186,6 +186,8 @@ pub struct OwnIntegration<S: RefScheme + 'static> {
     jam: Option<Rc<dyn KernelTool>>,
     /// (#401) Layering breaks, where the DAW's profile offers it (core's, with the DAW's backend).
     layers: Option<Rc<dyn KernelTool>>,
+    /// (#401) Audio to MIDI with Kumi's own ears, where the DAW's profile offers it (core's, with the DAW's backend).
+    to_midi: Option<Rc<dyn KernelTool>>,
 }
 
 /// How REAPER and Renoise tell templates and a song's own folder, for core's rules on copies: a project in REAPER's
@@ -380,6 +382,16 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
             let backend = super::renoise_layers::RenoiseLayers::new(changes.clone(), listening.renderer.clone());
             crate::core::layers::tool::Layers::new(backend).tool()
         });
+    // (#401) audio to MIDI, where the DAW offers it through Kumi's own ears
+    let to_midi: Option<Rc<dyn KernelTool>> = match (daw.profile.caps.audio_to_midi, daw.profile.id) {
+        (true, Some(crate::core::daw::DawId::Reaper)) => Some(super::own_to_midi::Daw::Reaper),
+        (true, Some(crate::core::daw::DawId::Renoise)) => Some(super::own_to_midi::Daw::Renoise),
+        _ => None,
+    }
+    .map(|which| {
+        let backend = super::own_to_midi::OwnToMidi::new(changes.clone(), listening.renderer.clone(), which);
+        crate::core::to_midi::tool::ToMidi::new(backend).tool()
+    });
     let kumi_home = options.kumi_home.clone();
     Rc::new(OwnIntegration::<S> {
         daw,
@@ -424,6 +436,7 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
         spec,
         jam,
         layers,
+        to_midi,
     })
 }
 
@@ -1012,6 +1025,9 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         }
         if let Some(layers) = &self.layers {
             tools.push(layers.clone());
+        }
+        if let Some(to_midi) = &self.to_midi {
+            tools.push(to_midi.clone());
         }
         tools
     }

@@ -590,7 +590,8 @@ pub struct Capabilities {
     pub goal_rig: bool,
     /// Splitting a track into stems inside the DAW (Live 12's own splitter).
     pub stems: bool,
-    /// Turning audio into MIDI inside the DAW (Live's conversions).
+    /// Turning audio into MIDI inside the DAW: Live's conversions, or (#401) Kumi's own ears where the DAW has none (core's
+    /// audio_to_midi, with the DAW's backend: drums by the hit detector, pitched parts by Basic Pitch).
     pub audio_to_midi: bool,
     /// Stop clips, the transport and recording at once.
     pub stop_transport: bool,
@@ -895,6 +896,7 @@ impl DawProfile {
             // (#401) SFX variations: items copied with their own settings
             variations: true,
             delivery_spec: true,
+            audio_to_midi: true,
             ..Capabilities::NONE
         },
         vocab: PromptVocab {
@@ -994,6 +996,7 @@ impl DawProfile {
             delivery_spec: true,
             jam: true,
             layers: true,
+            audio_to_midi: true,
             ..Capabilities::NONE
         },
         vocab: PromptVocab {

@@ -15,6 +15,7 @@ pub mod own_phrases;
 pub mod own_pictures;
 mod own_scripts;
 mod own_spec;
+mod own_to_midi;
 pub mod own_views;
 #[cfg(test)]
 mod pack_tests;

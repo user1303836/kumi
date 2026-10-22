@@ -43,7 +43,7 @@ does the job there.
 | Judges its changes, `/loop`, matches references | ✓ | ✓ | ✓ |
 | The audio file behind a clip, item or sample | ✓ | ✓ | ✓ |
 | Splits a track into stems | ✓ Live's own splitter | not yet: no splitter Kumi can use | not yet: no splitter Kumi can use |
-| Turns audio into MIDI | ✓ drums, melody and harmony | not yet: only a pitched part in a file (Basic Pitch) | not yet: only a pitched part in a file (Basic Pitch) |
+| Turns audio into MIDI | ✓ drums, melody and harmony | ✓ drums, melody and harmony, by Kumi's own ears | ✓ drums, melody and harmony, by Kumi's own ears |
 | **FOCUS** | | | |
 | FOCUS and the beat light follow the DAW as it changes | ✓ | ✓ | ✓ |
 | A track's devices as a tree | ✓ | ✓ FX chains and containers | ✓ Track DSPs, Doofers and Splitters |
@@ -173,6 +173,11 @@ next version), track templates and FX chains.
   checks each differs from the source and the others yet stays the same sound
   (its attack, and any notes you name, kept), renders them to hear them, and
   keeps, changes or drops them as you say; `render_files` delivers a file each.
+- **Audio to MIDI** (`audio_to_midi`): a track's audio over a stretch heard by
+  Kumi's own ears: drums (each hit a kick, snare or hat on General MIDI's drum
+  keys, as loud as it hits, a ghost softer), a melody or the harmony (Basic
+  Pitch). The notes go in one MIDI item on a new track under it; add an
+  instrument to hear them.
 - **Delivery to a spec** (`delivery_spec`): ACX, streaming (Spotify, Apple
   Music, YouTube…), podcasts or broadcast (EBU R 128, ATSC A/85, Netflix).
   Kumi renders the mix offline and measures it: integrated loudness, true
@@ -324,6 +329,11 @@ saves the song, instruments and device presets.
   only when no other track plays them). For the glue it hears the group
   without its compressor, then sets a Bus Compressor's threshold until the
   glue measures as asked. The balance is yours, by ear.
+- **Audio to MIDI** (`audio_to_midi`): a track's audio over a stretch heard by
+  Kumi's own ears: drums (kick, snare and hat, as loud as they hit), a melody
+  or the harmony (Basic Pitch). The notes go on a new track, in the patterns
+  its slots play, each on its line with a delay, played by the instrument you
+  name.
 - **Delivery to a spec** (`delivery_spec`): ACX, streaming, podcasts or
   broadcast loudness. Kumi renders the song offline, measures it, moves the
   master's post-FX fader by the gain the spec needs when the peaks allow, and
