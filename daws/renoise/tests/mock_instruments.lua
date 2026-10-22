@@ -500,11 +500,35 @@ local function buffer_object(sample)
     sample_data = function(_, channel, frame)
       local buffer = need()
       if frame < 1 or frame > buffer.frames or channel < 1 or channel > buffer.channels then error("frame or channel out of range", 2) end
-      -- (an edit a test makes at a few frames, as the sample editor would: buffer.edits[frame] = value)
+      -- (what a script wrote, then an edit a test makes at a few frames, as the sample editor would: buffer.edits[frame] = value)
+      local written = buffer.values and buffer.values[channel]
+      if written and written[frame] then return written[frame] end
       if buffer.edits and buffer.edits[frame] then return buffer.edits[frame] end
       local h = 7
       for i = 1, #buffer.content do h = (h * 31 + buffer.content:byte(i)) % 1000003 end
       return math.sin(h + frame * 0.001 + channel)
+    end,
+    -- (a script's writes: prepared, written, then finalized as one undo step; Renoise clips a value to [-1, 1])
+    prepare_sample_data_changes = function()
+      local buffer = need()
+      buffer.prepared = { values = copy(buffer.values or {}) }
+    end,
+    set_sample_data = function(_, channel, frame, value)
+      local buffer = need()
+      if frame < 1 or frame > buffer.frames or channel < 1 or channel > buffer.channels then error("frame or channel out of range", 2) end
+      if type(value) ~= "number" or value ~= value then error("a sample value is a number", 2) end
+      if not buffer.prepared then error("set_sample_data before prepare_sample_data_changes", 2) end
+      buffer.values = buffer.values or {}
+      buffer.values[channel] = buffer.values[channel] or {}
+      buffer.values[channel][frame] = math.max(-1, math.min(1, value))
+    end,
+    finalize_sample_data_changes = function()
+      local buffer = need()
+      if not buffer.prepared then error("finalize_sample_data_changes before prepare_sample_data_changes", 2) end
+      local old, new = buffer.prepared.values, copy(buffer.values or {})
+      buffer.prepared = nil
+      M.fire(obs(sample, "buffer"))
+      M.record(function() buffer.values = copy(old); M.fire(obs(sample, "buffer")) end, function() buffer.values = copy(new); M.fire(obs(sample, "buffer")) end)
     end,
     delete_sample_data = function()
       local old = sample.buffer

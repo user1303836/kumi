@@ -184,6 +184,8 @@ pub struct OwnIntegration<S: RefScheme + 'static> {
     spec: Option<Rc<dyn KernelTool>>,
     /// (#401) Cleaning up a jam, where the DAW's profile offers it (core's, with the DAW's backend).
     jam: Option<Rc<dyn KernelTool>>,
+    /// (#401) Layering breaks, where the DAW's profile offers it (core's, with the DAW's backend).
+    layers: Option<Rc<dyn KernelTool>>,
 }
 
 /// How REAPER and Renoise tell templates and a song's own folder, for core's rules on copies: a project in REAPER's
@@ -372,6 +374,12 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
         let backend = super::renoise_jam::RenoiseJam::new(changes.clone());
         crate::core::jam::tool::Jam::new(backend).tool()
     });
+    // (#401) layering breaks, where the DAW offers it
+    let layers: Option<Rc<dyn KernelTool>> =
+        (daw.profile.caps.layers && daw.profile.id == Some(crate::core::daw::DawId::Renoise)).then(|| {
+            let backend = super::renoise_layers::RenoiseLayers::new(changes.clone(), listening.renderer.clone());
+            crate::core::layers::tool::Layers::new(backend).tool()
+        });
     let kumi_home = options.kumi_home.clone();
     Rc::new(OwnIntegration::<S> {
         daw,
@@ -415,6 +423,7 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
         scripts,
         spec,
         jam,
+        layers,
     })
 }
 
@@ -1000,6 +1009,9 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         }
         if let Some(jam) = &self.jam {
             tools.push(jam.clone());
+        }
+        if let Some(layers) = &self.layers {
+            tools.push(layers.clone());
         }
         tools
     }

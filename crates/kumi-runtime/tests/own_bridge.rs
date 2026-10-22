@@ -122,7 +122,7 @@ async fn reapers_observation_is_its_project_in_short_refs_at_its_place() {
             assert_eq!(context["selection"]["trackRef"], "track:2");
             assert!(!seen.context.contains("{8A5D"), "no GUID reaches the model: {}", seen.context);
             // With every request: the read, REAPER's core change kinds and actions, the plan and the undo (the other kinds wait
-            // behind find_tools).
+            // behind find_tools), and the variations tool (#401: SFX variations as items).
             assert_eq!(
                 seen.tools.iter().filter(|tool| !tool.deferred()).map(|tool| tool.name().to_string()).collect::<Vec<_>>(),
                 [
@@ -138,7 +138,8 @@ async fn reapers_observation_is_its_project_in_short_refs_at_its_place() {
                     "play",
                     "stop",
                     "make_changes",
-                    "undo_change"
+                    "undo_change",
+                    "variations"
                 ]
             );
 

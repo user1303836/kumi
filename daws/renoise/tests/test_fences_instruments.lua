@@ -88,6 +88,7 @@ local FENCES = {
   { "sample-load", "plain", function(E) return { ref = sref(E, 1, 1), path = wav_file("Clap") } end, function() data(1).samples[1].name = "Other" end },
   { "sample-delete", "plain", function(E) return { ref = sref(E, 1, 2) } end, function() data(1).samples[2].name = "Other" end },
   { "sample-slices", "plain", function(E) return { ref = sref(E, 1, 1), insert = { 500 } } end, function() data(1).samples[1].buffer.frames = 900 end },
+  { "sample-invert", "plain", function(E) return { ref = sref(E, 1, 1) } end, function() data(1).samples[1].buffer.edits = { [1] = 0.25 } end },
   { "phrase-add", "plain", function(E) return { ref = iref(E, 2) } end, function() mock.ops.insert_phrase(2) end },
   { "phrase-delete", "plain", function(E) return { ref = pref(E, 2, 1) } end, function() data(2).phrases[1].name = "Other" end },
   { "phrase-set", "plain", function(E) return { ref = pref(E, 2, 1), lpb = 8 } end, function() data(2).phrases[1].lpb = 2 end },
@@ -156,7 +157,7 @@ end
 test("fence: every instrument kind is in the fence table", function()
   for _, kind in ipairs({ "instrument-rename", "instrument-set", "instrument-macro", "instrument-add", "instrument-delete", "instrument-load",
     "instrument-duplicate", "instrument-move", "sample-set", "keyzone-set", "keyzone-overlap", "keyzone-drumkit", "keyzone-map", "sample-load", "sample-delete",
-    "sample-slices", "modset-add", "modset-delete", "modset-set", "moddevice-add", "moddevice-delete", "moddevice-move", "moddevice-set",
+    "sample-slices", "sample-invert", "modset-add", "modset-delete", "modset-set", "moddevice-add", "moddevice-delete", "moddevice-move", "moddevice-set",
     "moddevice-param", "chain-add", "chain-delete", "chain-set", "chaindevice-add", "chaindevice-delete", "chaindevice-move", "chaindevice-bypass",
     "chaindevice-param", "phrase-add", "phrase-delete", "phrase-set", "phrase-map", "phrase-playback", "phrase-write", "phrase-clear",
     "phrase-script", "phrase-render", "plugin-load", "plugin-param", "plugin-preset", "plugin-set", "plugin-suspend", "midi-set" }) do

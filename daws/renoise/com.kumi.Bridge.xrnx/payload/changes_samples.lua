@@ -1002,4 +1002,93 @@ base.register({
   same = function(a, b) return same_list(a.markers, b.markers) end,
 })
 
+
+-- sample-invert {ref} (#401, layering breaks): a sample's audio with its polarity flipped (every value negated, Renoise clips at
+-- full scale), as one step. Renoise has no polarity switch on a track or device, so a layer that fights its main break is
+-- flipped in its sample. Kumi's undo flips it again: refused once the audio changed since, but with discard (the polarity back,
+-- the edits kept). A slice plays its sample's audio (the sample is flipped); more than M.MOST_INVERTED values (frames ×
+-- channels) is refused, since one callback flips them all.
+M.MOST_INVERTED = 4000000
+
+local function invert_buffer(buffer)
+  local frames, channels = buffer.number_of_frames, buffer.number_of_channels
+  buffer:prepare_sample_data_changes()
+  for channel = 1, channels do
+    for frame = 1, frames do
+      local value = buffer:sample_data(channel, frame)
+      buffer:set_sample_data(channel, frame, -(tonumber(type(value) == "table" and value[1] or value) or 0))
+    end
+  end
+  buffer:finalize_sample_data_changes()
+end
+
+local function invert_plan(song, env, input)
+  local n, objects, label = places_.locate(song, env, "sample", input, "sample-invert")
+  local sample = objects.sample
+  if sample.is_slice_alias then bad(label .. " is a slice: it plays its sample's audio, so flip the sample") end
+  local buffer = sample.sample_buffer
+  if not buffer.has_sample_data then bad(label .. " holds no audio") end
+  if buffer.read_only then bad(label .. "'s audio can't be written") end
+  local frames, channels = buffer.number_of_frames, buffer.number_of_channels
+  if frames * channels > M.MOST_INVERTED then
+    fail("failed", string.format("%s is too long to flip in one step (%d frames, %d channels; up to %d values): flip it in Renoise's sample editor",
+      label, frames, channels, M.MOST_INVERTED))
+  end
+  return { n = n, label = label, print = M.buffer_print(buffer) }
+end
+
+local function invert_preview(song, env, input)
+  local plan = invert_plan(song, env, input)
+  return {
+    target = sample_target(env, plan.n), prior = { print = plan.print }, fence = { print = plan.print },
+    display = { title = "Flipped the polarity of " .. plan.label },
+  }
+end
+
+local function invert_apply(song, env, input, fence, desc)
+  local ok, plan = pcall(invert_plan, song, env, input)
+  if not ok then base.gone_is_changed(plan) end
+  if not base.same_table(plan.print, fence.print) then fail("changed", plan.label .. "'s audio changed since the preview") end
+  local sample = song:instrument(plan.n[1]):sample(plan.n[2])
+  song:describe_undo(desc)
+  invert_buffer(sample.sample_buffer)
+  if env.watch_undo then env.watch_undo(sample.sample_buffer_observable) end
+  return {
+    applied = { print = M.buffer_print(sample.sample_buffer) }, material = { at = places_.place_of(env, "sample", plan.n) },
+    target = sample_target(env, plan.n), display = { title = "Flipped the polarity of " .. plan.label },
+    undo = { desc = desc, entry = true }, prior = { print = fence.print }, place = places_.journal_place("sample", plan.n),
+  }
+end
+
+local function invert_restore(song, env, restore, desc)
+  local material, applied = restore.material, restore.applied
+  if type(material) ~= "table" or type(applied) ~= "table" then bad("material and applied: the sample Kumi flipped") end
+  local n, why, list = places_.follow(env, material.at)
+  if not n then places_.follow_failed(why, list, "the sample Kumi flipped") end
+  local sample = song:instrument(n[1]):sample(n[2])
+  local label = q(places_.sample_label(n[2], sample))
+  local now = M.buffer_print(sample.sample_buffer)
+  if base.same_table(now, (restore.prior or {}).print) then
+    return { restored = { done = true }, display = { title = label .. " has its polarity back already" }, undo = { desc = desc, entry = false }, unwritten = true }
+  end
+  local edited = not base.same_table(now, applied.print)
+  if edited and not restore.discard then fail("changed", label .. "'s audio changed in Renoise since Kumi flipped it") end
+  if not sample.sample_buffer.has_sample_data then fail("changed", label .. " holds no audio now") end
+  song:describe_undo(desc)
+  invert_buffer(sample.sample_buffer)
+  base.note_restored_at(env.journal, "sample-invert", places_.journal_place("sample", n))
+  return {
+    restored = { done = true }, display = { title = label .. " has its polarity back" .. (edited and " (with the edits made since)" or "") },
+    undo = { desc = desc, entry = true },
+  }
+end
+
+base.register({
+  kind = "sample-invert", custom = true, by_place = true,
+  preview = invert_preview, apply = invert_apply, restore = invert_restore,
+  reread = places_.reread("sample"),
+  read = function(sample) return { print = M.buffer_print(sample.sample_buffer) } end,
+  same = function(a, b) return base.same_table(a.print, b.print) end,
+})
+
 return M

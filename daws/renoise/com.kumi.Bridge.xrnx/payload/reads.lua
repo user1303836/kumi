@@ -219,7 +219,8 @@ end
 -- `tidy` reads instruments (from the one numbered `cursor`, 1 first): each sample's print, where the sound is (its shape, 256
 -- frames from the first that isn't silence, and 16 points over its first second), so padded hits don't print alike, and a
 -- print of the instrument's settings (its devices, macros and samples' settings, not their names); `tidy-notes` counts the
--- notes of the song's patterns (from the one numbered `cursor`) that play each instrument, hidden columns too.
+-- notes of the song's patterns (from the one numbered `cursor`) that play each instrument, hidden columns too, and with byTrack
+-- the same by track (its number, from 1): which tracks play an instrument (#401, layering breaks).
 M.TIDY_READS = 300000
 M.TIDY_CALLS = 120000
 M.TIDY_SEEK = 32768
@@ -287,8 +288,8 @@ local function tidy_page(song, epoch, from)
   return { items = array(out), epoch = epoch, nextCursor = i <= #song.instruments and tostring(i) or nil }
 end
 
-local function notes_page(song, from)
-  local counts, reads, p = {}, 0, from
+local function notes_page(song, from, by_track)
+  local counts, tracks_counts, reads, p = {}, {}, 0, from
   local tracks = track_count(song)
   while p <= #song.patterns and reads <= M.TIDY_READS do
     local pattern = song:pattern(p)
@@ -306,7 +307,14 @@ local function notes_page(song, from)
               local column = line:note_column(c)
               reads = reads + 1
               local v = column.instrument_value
-              if v < 255 and column.note_value < 120 then counts[tostring(v)] = (counts[tostring(v)] or 0) + 1 end
+              if v < 255 and column.note_value < 120 then
+                counts[tostring(v)] = (counts[tostring(v)] or 0) + 1
+                if by_track then
+                  local mine = tracks_counts[tostring(t)] or {}
+                  tracks_counts[tostring(t)] = mine
+                  mine[tostring(v)] = (mine[tostring(v)] or 0) + 1
+                end
+              end
             end
           end
         end
@@ -314,10 +322,15 @@ local function notes_page(song, from)
     end
     p = p + 1
   end
-  return {
+  local answer = {
     counts = json.object(counts), to = p - 1, patterns = #song.patterns,
     nextCursor = p <= #song.patterns and tostring(p) or nil,
   }
+  if by_track then
+    for t, mine in pairs(tracks_counts) do tracks_counts[t] = json.object(mine) end
+    answer.tracks = json.object(tracks_counts)
+  end
+  return answer
 end
 
 local function tidy_from(params)
@@ -515,7 +528,7 @@ function M.read(job, params, epoch)
   elseif kind == "tidy" then
     return tidy_page(song, epoch, tidy_from(params))
   elseif kind == "tidy-notes" then
-    return notes_page(song, tidy_from(params))
+    return notes_page(song, tidy_from(params), params.byTrack == true)
   elseif kind == "spans" then
     return reads_listening.spans(job, params, epoch, page)
   elseif kind == "modset" or kind == "chain" then

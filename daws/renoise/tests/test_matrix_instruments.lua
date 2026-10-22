@@ -26,6 +26,16 @@ local KINDS = {
   { "modset-set", function(E) return { ref = E .. ":modset:2.1", pitchRange = 24 } end, function(i) return data(i).sets[1].pitch_range == 12 end },
   { "chain-add", function(E) return { ref = iref(E, 2), name = "Verb" } end, function(i) return #data(i).chains == 0 end },
   { "sample-delete", function(E) return { ref = sref(E, 2, 1) } end, function(i) return #data(i).samples == 1 and data(i).samples[1].name == "Saw" end },
+  { "sample-invert", function(E) return { ref = sref(E, 2, 1) } end, function(i)
+    -- (as it was: the value at a frame is the one its audio had before any write)
+    local buffer = data(i).samples[1].buffer
+    local now = mock.song:instrument(i):sample(1).sample_buffer:sample_data(1, 10)
+    local written = buffer.values
+    buffer.values = nil
+    local plain = mock.song:instrument(i):sample(1).sample_buffer:sample_data(1, 10)
+    buffer.values = written
+    return math.abs(now - plain) < 1e-12
+  end },
   { "phrase-delete", function(E) return { ref = pref(E, 2, 1) } end, function(i) return #data(i).phrases == 1 end },
 }
 

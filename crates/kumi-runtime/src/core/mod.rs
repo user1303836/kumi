@@ -17,6 +17,7 @@ pub mod goal_mode;
 pub mod history;
 pub mod jam;
 pub mod jobs;
+pub mod layers;
 pub mod loop_run;
 pub mod mapping;
 pub mod match_run;

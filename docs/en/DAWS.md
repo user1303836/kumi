@@ -30,6 +30,7 @@ does the job there.
 | Keeps a repeated chore as a script: run once as one undo step, then kept as the DAW's own action once you say yes | not yet | ✓ | ✓ |
 | Meets a loudness spec: ACX, streaming or broadcast, measured, fixed at the master fader, measured again | not yet | ✓ | ✓ |
 | Cleans up a jam: empties, copies, repeats and mistakes told from feel, quantized by a strength | not yet | not yet | ✓ |
+| Lines up layered breaks: each layer's offset, polarity and level against the main break, and the glue measured | not yet | not yet | ✓ |
 | Knows whether the DAW is recording | ✓ | ✓ | ✓ |
 | A line in the DAW's status bar | ✓ | no: REAPER's API has no status bar (a notification instead) | ✓ |
 | Opens a saved project | ✓ | not yet: you open it yourself (`kumi -r` and setup's restart don't) | not yet: you open it yourself (`kumi -r` and setup's restart don't) |
@@ -248,7 +249,8 @@ Each change is its own step of Renoise's undo. Every tool is in
   device points.
 - **Instruments and samples** (`instrument_…`, `sample_…`, `keyzone_…`):
   added, duplicated, moved, loaded (.xrni, .sfz, a sample), made from sample
-  files; macros; sample settings, slices, keyzones, drum-kit layouts.
+  files; macros; sample settings, slices, keyzones, drum-kit layouts; a
+  sample's polarity flipped.
 - **Modulation and sample FX** (`modset_…`, `moddevice_…`, `chain_…`,
   `chaindevice_…`).
 - **Phrases** (`phrase_…`, `phrases_drop`): added (with their lines),
@@ -315,6 +317,13 @@ saves the song, instruments and device presets.
   far off the grid where its neighbours aren't, a stray; a swing every beat
   shares is kept). It applies what you accept, quantizes by a strength if you
   ask, and never touches what came before.
+- **Layering breaks** (`layers`): the main break and its layers rendered alone
+  over a stretch, hit by hit: how early or late each layer lands, whether its
+  polarity fights the main's, and how loud it sits. Kumi nudges a layer by its
+  track delay and flips one in its samples (Renoise has no polarity switch;
+  only when no other track plays them). For the glue it hears the group
+  without its compressor, then sets a Bus Compressor's threshold until the
+  glue measures as asked. The balance is yours, by ear.
 - **Delivery to a spec** (`delivery_spec`): ACX, streaming, podcasts or
   broadcast loudness. Kumi renders the song offline, measures it, moves the
   master's post-FX fader by the gain the spec needs when the peaks allow, and

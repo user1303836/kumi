@@ -27,6 +27,7 @@ pub mod renoise;
 pub mod renoise_changes;
 mod renoise_chop;
 mod renoise_jam;
+mod renoise_layers;
 mod renoise_lines;
 mod renoise_mapping;
 mod renoise_variations;

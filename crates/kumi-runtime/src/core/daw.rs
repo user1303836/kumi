@@ -664,6 +664,10 @@ pub struct Capabilities {
     /// (#401) Cleaning up a jam: what was recorded set against what came before, empties, copies, repeats and mistakes
     /// proposed, the accepted ones fixed, and a quantize by a strength (core's, with the DAW's backend): Renoise's patterns.
     pub jam: bool,
+    /// (#401) Layering breaks: each layer's hits against the main break's (offsets, polarity, level), a layer nudged or flipped,
+    /// and the glue the group's compressor adds measured and set (core's, with the DAW's backend): Renoise's track delay, samples
+    /// and Bus Compressor.
+    pub layers: bool,
 }
 
 /// One DAW as Kumi knows it: its id (None when no DAW is known), its words and what it can do.
@@ -793,6 +797,7 @@ impl DawProfile {
             scripts: false,
             delivery_spec: false,
             jam: false,
+            layers: false,
         },
         vocab: PromptVocab {
             plan_tool: crate::live_word!(plan_tool),
@@ -988,6 +993,7 @@ impl DawProfile {
             scripts: true,
             delivery_spec: true,
             jam: true,
+            layers: true,
             ..Capabilities::NONE
         },
         vocab: PromptVocab {
@@ -1124,6 +1130,7 @@ impl Capabilities {
         scripts: false,
         delivery_spec: false,
         jam: false,
+        layers: false,
     };
 }
 
