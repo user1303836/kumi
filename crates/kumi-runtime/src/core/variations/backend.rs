@@ -95,6 +95,12 @@ pub trait VariationsBackend: Sized {
     /// The source a make names, read: its material and where its takes go.
     async fn source(&self, input: &JsonObject, signal: &Signal) -> Result<Source<Self::Material, Self::Data>, String>;
 
+    /// A kept set's key as its source's places give it now, where its key holds a position the producer may have moved since
+    /// (Renoise's pattern, track and instrument numbers): a make on that source goes on with the set. None: its key as kept.
+    async fn key_now(&self, _source: &Source<Self::Material, Self::Data>, _signal: &Signal) -> Option<String> {
+        None
+    }
+
     /// The operators of a direction Kumi picked.
     fn direction_ops(&self, direction: &str) -> Vec<Value>;
 

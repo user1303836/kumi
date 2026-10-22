@@ -191,13 +191,22 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         let recipes = self.recipes_of(input, &source)?;
         let bounds = bounds_of(input);
         let seed = input.get("seed").and_then(Value::as_u64).unwrap_or_else(fresh_seed);
-        // (the same source again: its set goes on, V10 after V9; another source's set stays, by its number or name)
+        // (the same source again, by its places now: its set goes on, V10 after V9; another source's set stays, by its number or
+        // name)
+        let candidates: Vec<Set<B>> = self.sets.borrow().iter().rev().filter(|set| set.source.short == source.short).cloned().collect();
+        let mut same = None;
+        for set in candidates {
+            let key = self.backend.key_now(&set.source, signal).await.unwrap_or_else(|| set.source.key.clone());
+            if key == source.key {
+                same = Some(set);
+                break;
+            }
+        }
         let (mut set, continued) = {
             let sets = self.sets.borrow();
-            match sets.iter().rev().find(|set| set.source.key == source.key && set.source.short == source.short) {
-                Some(set) => {
+            match same {
+                Some(mut set) => {
                     // (the source as it is now, its lines, anchors and settings; its takes and their places stay)
-                    let mut set = set.clone();
                     set.source = source;
                     (set, true)
                 }

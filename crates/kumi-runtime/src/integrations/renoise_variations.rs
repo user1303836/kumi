@@ -489,6 +489,35 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
         Err("source is patternRef and trackRef (with first and last), phraseRef, or instrumentRef".into())
     }
 
+    async fn key_now(&self, source: &Source<Lines, RenoiseData>, signal: &Signal) -> Option<String> {
+        // (the pattern, track, phrase and instrument numbers in a key, as their places give them now)
+        let data = &source.data;
+        let instrument = match &data.placement {
+            Placement::Phrases { instrument, .. } => {
+                let found = self.locate(vec![json!({"instrument": instrument})], None, signal).await.ok()?;
+                Some(found.first()?.get("index")?.as_u64()?)
+            }
+            Placement::Patterns { .. } => None,
+        };
+        match &data.kind {
+            SourceKind::Range { pattern, track, layout, first, last, .. } => {
+                let found = self.locate(vec![json!({"pattern": pattern}), json!({"track": track})], *layout, signal).await.ok()?;
+                let number = found.first()?.get("number")?.as_u64()?;
+                let track = found.get(1)?.get("ref")?.as_str()?.rsplit(':').next()?.parse::<u64>().ok()?;
+                let range = format!("range:{number}:{track}:{first}:{last}");
+                Some(match instrument {
+                    Some(instrument) => format!("{range}:phrases:{instrument}"),
+                    None => range,
+                })
+            }
+            SourceKind::Phrase { place } => {
+                let found = self.locate(vec![json!({"phrase": place})], None, signal).await.ok()?;
+                Some(format!("phrase:{}", found.first()?.get("ref")?.as_str()?.splitn(3, ':').nth(2)?))
+            }
+            SourceKind::Instrument => Some(format!("instrument:{}", instrument?)),
+        }
+    }
+
     fn direction_ops(&self, direction: &str) -> Vec<Value> {
         match direction {
             "denser" => vec![json!({"op": "fill", "amount": 0.3}), json!({"op": "retrig", "amount": 0.2})],

@@ -46,6 +46,8 @@ struct Daw {
     clips: Cell<usize>,
     generation: Cell<u64>,
     unreadable: Cell<Option<u64>>,
+    /// Kept sets' keys as their sources' places give them now (a position the producer moved).
+    moved: RefCell<BTreeMap<String, String>>,
 }
 
 impl Daw {
@@ -101,7 +103,12 @@ impl VariationsBackend for Fake {
         let source = input.get("source").cloned().unwrap_or(Value::Null);
         let material = source["steps"].as_array().map(|steps| Steps(steps.iter().map(|level| level.as_u64().unwrap_or(0) as u8).collect()));
         let name = source["name"].as_str().unwrap_or("Beat");
-        Ok(Source { label: format!("steps of “{name}”"), short: name.into(), key: name.to_lowercase(), material, data: () })
+        let key = source["key"].as_str().map_or_else(|| name.to_lowercase(), str::to_owned);
+        Ok(Source { label: format!("steps of “{name}”"), short: name.into(), key, material, data: () })
+    }
+
+    async fn key_now(&self, source: &Source<Steps, ()>, _: &Signal) -> Option<String> {
+        self.0.moved.borrow().get(&source.key).cloned()
     }
 
     fn direction_ops(&self, direction: &str) -> Vec<Value> {
@@ -449,6 +456,25 @@ async fn nothing_renders_while_the_daw_plays_and_a_take_that_clips_where_the_sou
     assert!(line.contains(" \u{b7} heard: peak \u{2212}6.0 dBFS"), "heard again, fine now: {made}");
     assert_eq!(daw.changes.get(), 3, "the first take, the second, and its rewrite");
     assert_eq!(daw.renders.get(), 2, "the take, then the take drawn again");
+}
+
+/// (#400 review notes) A set whose source moved (its position in its key) goes on when a make names that source where it is now,
+/// and a source now at its old position starts a set of its own.
+#[tokio::test(flavor = "current_thread")]
+async fn a_set_goes_on_from_where_its_source_moved_to() {
+    let home = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let tool = kumi(&daw, home.path());
+    let first = run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 1, "seed": 6, "listen": false})).await.unwrap();
+    assert_eq!(first["takes"][0]["take"], "V1", "{first}");
+    daw.moved.borrow_mut().insert("beat".into(), "beat@2".into());
+    let on = run(&tool, json!({"action": "make", "source": {"steps": BEAT, "key": "beat@2"}, "count": 1, "seed": 7, "listen": false}))
+        .await
+        .unwrap();
+    assert_eq!(on["takes"][0]["take"], "V2", "the same set goes on: {on}");
+    let other = run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 1, "seed": 8, "listen": false})).await.unwrap();
+    assert_eq!(other["takes"][0]["take"], "V3", "a set of its own, its numbers after the other's: {other}");
+    assert_ne!(other["set"], on["set"], "{other} {on}");
 }
 
 /// (#400 review notes) Nothing renders when the DAW can't say whether it plays, and a take drawn again isn't rendered again once
