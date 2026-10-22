@@ -34,7 +34,7 @@ pub static WORDS: Words = Words {
     sources: "a pattern track's lines (patternRef, or a slot for its pattern and its matrix mutes; trackRef; first and last, as Renoise numbers lines, from 00), a phrase (phraseRef), or an instrument (instrumentRef: new phrases from lines you write)",
     anchors: "the lines (as Renoise numbers them) every take keeps as they are: the kick and snare that make it the producer's",
     ops: "shuffle, retrig, reverse, ghosts, thin, fill, accent, octave, transpose, swing, offsets, speed (phrase takes only: a pattern has no LPB of its own); amount 0 to 1",
-    lines: "lines you write, as notes_write takes them, numbered as the source's lines",
+    lines: "lines you write, as notes_write takes them, numbered as the source's lines (its anchor lines stay as they are: no need to write them)",
     places: "patterns (each take a slot of its own in a \"Variations of …\" section at the sequence's end, its other tracks playing the source pattern's, so playing it plays the take in context: a play or render of the whole song plays them too, and drop removes the ones not kept; the default for a pattern's lines) or phrases (new phrases of the instrument; the default otherwise)",
     place_names: &["patterns", "phrases"],
     at: "a phrase on keys [low, high], as the instrument's program, or switchAt {patternRef, trackRef, line, col}: a 0Zxx there plays it (how a pattern switches to a faster copy, since a phrase's LPB is fixed); a pattern take over the source's lines, after the source's slot, or at index",
@@ -568,7 +568,7 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
             _ => 0,
         };
         let mut written = Lines::from_cells(lines, offset, base.length, base.lpb)?;
-        written.anchors = base.anchors.clone();
+        written.keep_anchors_of(base);
         Ok(written)
     }
 

@@ -26,7 +26,7 @@ pub static WORDS: Words = Words {
     sources: "an item (itemRef): an audio item (a footstep, an impact, a whoosh) or a MIDI item",
     anchors: "a MIDI take's notes every take keeps as they are (their index, from 0, as read); an audio take keeps its attack whatever the anchors",
     ops: "pitch (semitones, up or down; a MIDI take's notes move), rate (its playrate: faster or slower, the whole sound still heard), offset (a later start in its source, a few milliseconds), length (shorter), fades, volume; a MIDI take's velocity, timing and thin (fewer notes); amount 0 to 1",
-    lines: "a MIDI take's notes as notes_add takes them ({pitch, start, length, velocity, channel}: quarter notes from the item's start)",
+    lines: "a MIDI take's notes as notes_add takes them ({pitch, start, length, velocity, channel}: quarter notes from the item's start; its anchor notes stay as they are: no need to write them)",
     places: "items (each take a copy of the source item after it on its track, gap seconds apart)",
     place_names: &["items"],
     at: "position (seconds) or positionBeats, and toRef (a track): where a kept take goes",
@@ -471,7 +471,7 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
             .iter()
             .map(|line| Note::of(line).ok_or_else(|| format!("a note needs pitch, start and length: {line}")))
             .collect::<Result<_, _>>()?;
-        Ok(ItemTake { notes, ..base.clone() })
+        Ok(ItemTake { notes: with_anchors(notes, &base.anchors), ..base.clone() })
     }
 
     fn empty(&self, set: &ReaperSet) -> ItemTake {
@@ -730,8 +730,28 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
     }
 }
 
+/// Notes the model wrote with the take's anchor notes in, as they are (#400 review notes: written notes never have to repeat
+/// them), by start and pitch.
+fn with_anchors(mut notes: Vec<Note>, anchors: &[Note]) -> Vec<Note> {
+    for anchor in anchors {
+        if !notes.contains(anchor) {
+            notes.push(anchor.clone());
+        }
+    }
+    notes.sort_by(|a, b| a.start.total_cmp(&b.start).then(a.pitch.cmp(&b.pitch)));
+    notes
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn written_notes_get_the_anchor_notes_they_left_out() {
+        let note = |pitch: i64, start: f64| Note { pitch, start, length: 0.25, velocity: 100, channel: 0 };
+        let anchors = vec![note(36, 0.), note(38, 1.)];
+        let written = with_anchors(vec![note(42, 0.5), note(36, 0.)], &anchors);
+        assert_eq!(written, vec![note(36, 0.), note(42, 0.5), note(38, 1.)]);
+    }
+
     use super::*;
     use crate::core::variations::Bounds;
 

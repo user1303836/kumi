@@ -240,6 +240,22 @@ impl Lines {
         self.anchors.iter().map(|number| (*number, self.rows.get(number))).collect()
     }
 
+    /// `source`'s anchor lines put in as they are (an empty one emptied), and its anchors kept: lines the model wrote never
+    /// have to repeat them (#400 review notes).
+    pub fn keep_anchors_of(&mut self, source: &Lines) {
+        for (number, line) in source.anchored() {
+            match line {
+                Some(line) => {
+                    self.rows.insert(number, line.clone());
+                }
+                None => {
+                    self.rows.remove(&number);
+                }
+            }
+        }
+        self.anchors = source.anchors.clone();
+    }
+
     /// Whether `take` keeps every anchor line of `self` as it is.
     pub fn anchors_kept_in(&self, take: &Lines) -> Result<(), u32> {
         for (number, line) in self.anchored() {
@@ -743,6 +759,21 @@ fn lines_list(numbers: &[u32]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn written_lines_get_the_sources_anchor_lines_as_they_are() {
+        let rows = |pairs: &[(u32, &str)]| -> Vec<Value> {
+            pairs.iter().map(|(line, note)| json!({"line": line, "notes": [{"col": 1, "note": note, "instrument": "00"}]})).collect()
+        };
+        let mut source = Lines::from_rows(&rows(&[(0, "C-4"), (4, "D-4")]), 0, 7, 4);
+        source.anchors = [0, 2].into_iter().collect();
+        let mut written = Lines::from_rows(&rows(&[(0, "E-4"), (2, "F-4"), (6, "G-4")]), 0, 7, 4);
+        written.keep_anchors_of(&source);
+        assert!(source.anchors_kept_in(&written).is_ok());
+        assert_eq!(written.rows.get(&0), source.rows.get(&0), "the source's line 00");
+        assert_eq!(written.rows.get(&2), None, "an empty anchor line stays empty");
+        assert!(written.rows.contains_key(&6), "the rest as written");
+    }
+
     use super::*;
 
     /// A chopped break at LPB 4: kick (00), ghost with an offset (03), snare (04), a roll (06), snare (12), anchors 00 and 04.
