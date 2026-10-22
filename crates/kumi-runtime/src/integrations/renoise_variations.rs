@@ -563,7 +563,7 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
         }
     }
 
-    fn direction_ops(&self, direction: &str) -> Vec<Value> {
+    fn direction_ops(&self, _source: &Source<Lines, RenoiseData>, direction: &str) -> Vec<Value> {
         match direction {
             "denser" => vec![json!({"op": "fill", "amount": 0.3}), json!({"op": "retrig", "amount": 0.2})],
             "sparser" => vec![json!({"op": "thin", "amount": 0.35})],

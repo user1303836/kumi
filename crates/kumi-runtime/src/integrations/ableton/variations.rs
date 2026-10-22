@@ -13,7 +13,10 @@ use crate::core::{
     contracts::JsonObject,
     variations::{
         backend::{Rendered, Rewritten, Source, Undroppable, VariationsBackend, Words},
-        notes::{amount, anchors_in, foreign_classes, note_op, notes_apart, round, with_anchors, Note, NOTE_OPS},
+        notes::{
+            amount, anchors_in, foreign_classes, note_direction_ops, note_op, notes_apart, round, with_anchors, Note, NOTE_DIRECTIONS,
+            NOTE_OPS,
+        },
         tool::{names, names_to_find},
         Material, Rng, TakeSet,
     },
@@ -39,7 +42,7 @@ pub static WORDS: Words = Words {
     rewrites: Some("two changes each (Live adds no notes to a clip: its clip is deleted and written again in its slot)"),
     drops: Some("go a change each (one clip each)"),
     idioms: "Live's Session clips; notes in beats from the start of what the clip plays",
-    directions: &["higher", "lower", "looser", "softer", "sparser"],
+    directions: &NOTE_DIRECTIONS,
     source_schema: r#"{"type":"object","additionalProperties":false,"required":["clipRef"],"properties":{"clipRef":{"type":"string","description":"The Session MIDI clip"}}}"#,
     op_schema: r#"{"type":"object","additionalProperties":false,"required":["op"],"properties":{"op":{"type":"string","enum":["pitch","velocity","timing","thin"]},"amount":{"type":"number","minimum":0,"maximum":1},"up":{"type":"boolean"},"semitones":{"type":"number","minimum":-24,"maximum":24}}}"#,
     options_schema: r#"{"type":"object","additionalProperties":false,"properties":{}}"#,
@@ -168,6 +171,20 @@ fn digest_of(material: &ClipTake) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     json!({"length": round(material.length), "notes": notes}).to_string().hash(&mut hasher);
     format!("{:016x}", hasher.finish())
+}
+
+/// Operators applied to a take, the anchors left as they are and its notes inside its clip: what they did, in a few words.
+fn applied(ops: &[Value], factor: f64, take: &mut ClipTake, source: &ClipTake, rng: &mut Rng) -> Result<Vec<String>, String> {
+    let said = ops
+        .iter()
+        .map(|op| {
+            let name = op.get("op").and_then(Value::as_str).unwrap_or("");
+            note_op(name, op, amount(op, factor), &mut take.notes, &source.anchors, rng)
+                .unwrap_or_else(|| Err(format!("{name} isn't a Live operator")))
+        })
+        .collect();
+    kept_inside(take);
+    said
 }
 
 /// A take's notes inside its clip: one loosened past the clip's end wouldn't play.
@@ -347,16 +364,8 @@ impl VariationsBackend for LiveVariations {
         })
     }
 
-    fn direction_ops(&self, direction: &str) -> Vec<Value> {
-        let op = |name: &str, up: bool| json!({"op": name, "amount": 0.5, "up": up});
-        match direction {
-            "higher" => vec![op("pitch", true)],
-            "lower" => vec![op("pitch", false)],
-            "looser" => vec![op("timing", true)],
-            "softer" => vec![op("velocity", false)],
-            "sparser" => vec![op("thin", true)],
-            _ => vec![op("pitch", true)],
-        }
+    fn direction_ops(&self, _source: &Source<ClipTake, LiveData>, direction: &str) -> Vec<Value> {
+        note_direction_ops(direction)
     }
 
     fn check_ops(&self, _source: &Source<ClipTake, LiveData>, ops: &[Value]) -> Result<(), String> {
@@ -370,16 +379,7 @@ impl VariationsBackend for LiveVariations {
     }
 
     fn apply_ops(&self, ops: &[Value], factor: f64, take: &mut ClipTake, source: &ClipTake, rng: &mut Rng) -> Result<Vec<String>, String> {
-        let said = ops
-            .iter()
-            .map(|op| {
-                let name = op.get("op").and_then(Value::as_str).unwrap_or("");
-                note_op(name, op, amount(op, factor), &mut take.notes, &source.anchors, rng)
-                    .unwrap_or_else(|| Err(format!("{name} isn't a Live operator")))
-            })
-            .collect();
-        kept_inside(take);
-        said
+        applied(ops, factor, take, source, rng)
     }
 
     fn written(&self, _set: &LiveSet, lines: &[Value], base: &ClipTake) -> Result<ClipTake, String> {
@@ -735,6 +735,17 @@ mod tests {
         // (moved: found by its name)
         assert_eq!(pick(&slots, &named, Some(1), &wanted("V2 \u{b7} Arp")), Some((4, "c4".into())));
         assert_eq!(pick(&slots, &named, Some(4), &wanted("V3 \u{b7} Arp")), None);
+    }
+
+    /// Every direction Kumi picks makes a take of an ordinary clip: a make of five gets five takes (real Live: V3 "looser" moved
+    /// notes a few hundredths of a beat, a near-copy, and "higher" and "lower" moved every note, too far).
+    #[test]
+    fn every_direction_kumi_picks_makes_a_take_of_an_ordinary_clip() {
+        crate::core::variations::notes::every_note_direction_makes_a_take(
+            |notes, anchors| ClipTake { notes, length: 4., anchors },
+            applied,
+            |take| take.notes.as_slice(),
+        );
     }
 
     /// The bridge's own schemas for each change a take makes, as every bridge in the fixtures has them.

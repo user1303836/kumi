@@ -62,7 +62,8 @@ pub struct Words {
     pub drops: Option<&'static str>,
     /// The DAW's notation the model writes in (effect commands, numbering).
     pub idioms: &'static str,
-    /// Directions Kumi picks for takes the model leaves to it, each one no other take of a request has.
+    /// Directions Kumi picks for takes the model leaves to it, each one no other take of a request has (a backend's
+    /// `directions` may give a source others: a REAPER MIDI item's are its notes').
     pub directions: &'static [&'static str],
     /// JSON schemas: a source, an operator, the options and `at`.
     pub source_schema: &'static str,
@@ -114,8 +115,13 @@ pub trait VariationsBackend: Sized {
         None
     }
 
-    /// The operators of a direction Kumi picked.
-    fn direction_ops(&self, direction: &str) -> Vec<Value>;
+    /// The directions Kumi picks from for takes of `source` the model leaves to it (the words' by default).
+    fn directions(&self, _source: &Source<Self::Material, Self::Data>) -> &'static [&'static str] {
+        self.words().directions
+    }
+
+    /// The operators of a direction Kumi picked for takes of `source`.
+    fn direction_ops(&self, source: &Source<Self::Material, Self::Data>, direction: &str) -> Vec<Value>;
 
     /// Whether the model's operators are the DAW's, and fit where the source's takes go (before anything is drawn).
     fn check_ops(&self, source: &Source<Self::Material, Self::Data>, ops: &[Value]) -> Result<(), String>;

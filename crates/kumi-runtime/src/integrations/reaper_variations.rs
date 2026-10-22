@@ -11,7 +11,10 @@ use crate::core::{
     variations::{
         backend::{Rendered, Rewritten, Source, Undroppable, VariationsBackend, Words},
         heard::heard_of,
-        notes::{amount, anchors_in, foreign_classes, note_op, notes_apart, round, sign, some_of, with_anchors, Note},
+        notes::{
+            amount, anchors_in, foreign_classes, note_direction_ops, note_op, notes_apart, round, sign, some_of, with_anchors, Note,
+            NOTE_DIRECTIONS,
+        },
         tool::{names, names_to_find},
         Material, Rng, TakeSet,
     },
@@ -321,7 +324,19 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
         })
     }
 
-    fn direction_ops(&self, direction: &str) -> Vec<Value> {
+    fn directions(&self, source: &Source<ItemTake, ReaperData>) -> &'static [&'static str] {
+        if source.material.as_ref().is_some_and(|material| material.midi) {
+            &NOTE_DIRECTIONS
+        } else {
+            WORDS.directions
+        }
+    }
+
+    fn direction_ops(&self, source: &Source<ItemTake, ReaperData>, direction: &str) -> Vec<Value> {
+        // (a MIDI item's takes go by its notes, as a Live clip's do: its settings alone move it too little to be a take)
+        if source.material.as_ref().is_some_and(|material| material.midi) {
+            return note_direction_ops(direction);
+        }
         let op = |name: &str, up: bool| json!({"op": name, "amount": 0.5, "up": up});
         match direction {
             "higher" => vec![op("pitch", true)],
@@ -684,5 +699,16 @@ mod tests {
         let d = take.distance(&source);
         assert!(d > 0.2 && d < 0.6, "{d}");
         assert_eq!(notes_apart(&source.notes, &source.notes), 0.);
+    }
+
+    /// Every direction Kumi picks for a MIDI item makes a take of it: a make of five gets five takes (its settings alone
+    /// moved a take at most 0.06 from its source, a near-copy: "make 4" of a MIDI item gave V1 and V2).
+    #[test]
+    fn every_direction_kumi_picks_for_a_midi_item_makes_a_take_of_it() {
+        crate::core::variations::notes::every_note_direction_makes_a_take(
+            |notes, anchors| ItemTake { midi: true, notes, anchors, ..audio() },
+            |ops, factor, take, source, rng| ops.iter().map(|op| apply_one(op, factor, take, source, rng)).collect(),
+            |take| take.notes.as_slice(),
+        );
     }
 }

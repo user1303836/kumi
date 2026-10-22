@@ -3,7 +3,9 @@
 //! renders and hears takes before they're shown, and answers a line per take; the DAW's backend reads, writes, finds and renders.
 use super::backend::{found, gone, Recipe, Rewritten, Set, Source, Undroppable, VariationsBackend, Words};
 use super::heard::Heard;
-use super::{check, kept_name, roll, seed_of, take_name, Bounds, Material, Purpose, Rng, Take, TakeSet, TakeState, Verdict};
+use super::{
+    bolder_or_milder, check, kept_name, roll, seed_of, take_name, Bounds, Material, Purpose, Rng, Take, TakeSet, TakeState, TRIES,
+};
 use crate::core::contracts::{JsonObject, KernelTool, Reach, ToolResult};
 use crate::core::errors::RuntimeError;
 use async_trait::async_trait;
@@ -18,8 +20,6 @@ use std::rc::Rc;
 /// The most takes one request makes or changes, and the sets Kumi keeps for a project.
 const MOST_TAKES: usize = 16;
 const SETS_KEPT: usize = 8;
-/// How many draws a take gets before Kumi gives up on it.
-const TRIES: u32 = 8;
 
 /// A take drawn, before it's written: its number, material, direction, what was done (and warnings) and its distance.
 pub struct Drawn<M> {
@@ -325,12 +325,13 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         }
         // (the directions the model left to Kumi: distinct from the ones it gave and from each other)
         let words = self.backend.words();
+        let directions = self.backend.directions(&set.source);
         let mut used: Vec<String> = given.iter().map(|recipe| recipe.direction.clone()).collect();
         let mut recipes = given;
         while recipes.len() < numbers.len() {
-            let direction = words.directions.iter().find(|d| !used.iter().any(|u| u == *d)).copied().unwrap_or(words.directions[0]);
+            let direction = directions.iter().find(|d| !used.iter().any(|u| u == *d)).copied().unwrap_or(directions[0]);
             used.push(direction.into());
-            recipes.push(self.of_direction(direction));
+            recipes.push(self.of_direction(&set.source, direction));
         }
         let bounds = bounds_of(input);
         let rows = self.backend.find(&mut set, &numbers, signal).await?;
@@ -534,8 +535,8 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         Ok(recipes)
     }
 
-    fn of_direction(&self, direction: &str) -> Recipe {
-        Recipe { direction: direction.into(), ops: self.backend.direction_ops(direction), lines: None, from: None, picked: true }
+    fn of_direction(&self, source: &Source<B::Material, B::Data>, direction: &str) -> Recipe {
+        Recipe { direction: direction.into(), ops: self.backend.direction_ops(source, direction), lines: None, from: None, picked: true }
     }
 
     /// The recipes a make asks for: the model's, then (to `count`) directions Kumi picks that none of them has.
@@ -550,13 +551,13 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         if wanted > MOST_TAKES {
             return Err(format!("at most {MOST_TAKES} takes at once"));
         }
-        let directions = self.backend.words().directions;
+        let directions = self.backend.directions(source);
         let mut recipes = given;
         let used: Vec<String> = recipes.iter().map(|recipe| recipe.direction.clone()).collect();
         let mut free = directions.iter().filter(|d| !used.iter().any(|u| u == *d));
         while recipes.len() < wanted {
             let direction = free.next().copied().unwrap_or(directions[0]);
-            recipes.push(self.of_direction(direction));
+            recipes.push(self.of_direction(source, direction));
         }
         Ok(recipes)
     }
@@ -576,10 +577,10 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             return first.map(|drawn| (drawn, recipe.clone()));
         }
         let mut last = first.map(|drawn| (drawn, recipe.clone()));
-        let free: Vec<&str> = self.backend.words().directions.iter().copied().filter(|d| !used.iter().any(|u| u == d)).collect();
+        let free: Vec<&str> = self.backend.directions(&set.source).iter().copied().filter(|d| !used.iter().any(|u| u == d)).collect();
         for direction in free {
             used.push(direction.to_string());
-            let mut other = self.of_direction(direction);
+            let mut other = self.of_direction(&set.source, direction);
             other.from = recipe.from;
             last = self.draw(set, number, &other, bounds).map(|drawn| (drawn, other));
             if last.is_ok() {
@@ -614,11 +615,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         // (a try too close to the source or a take draws bolder next time, one too far milder)
         let factor = Cell::new(1.0f64);
         let rolled = roll(set.seed, number, tries, source, &others, &rolling, |seed, before| {
-            match before {
-                Some(Verdict::NearSource(_) | Verdict::NearTake(..)) => factor.set(factor.get() * 1.35),
-                Some(Verdict::FarFromSource(_)) => factor.set(factor.get() * 0.7),
-                _ => {}
-            }
+            factor.set(bolder_or_milder(factor.get(), before));
             let mut take = match &recipe.lines {
                 Some(lines) => backend.written(set, lines, &base)?,
                 None => base.clone(),

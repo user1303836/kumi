@@ -116,7 +116,7 @@ impl VariationsBackend for Fake {
         self.0.moved.borrow().get(&source.key).cloned()
     }
 
-    fn direction_ops(&self, direction: &str) -> Vec<Value> {
+    fn direction_ops(&self, _: &Source<Steps, ()>, direction: &str) -> Vec<Value> {
         let amount = match direction {
             "a few flipped" => 0.15,
             "some flipped" => 0.2,

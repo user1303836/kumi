@@ -208,6 +208,19 @@ pub fn roll<M: Material>(
     last
 }
 
+/// How many draws a take gets before Kumi gives up on it.
+pub const TRIES: u32 = 8;
+
+/// How much of its operators a draw takes (`factor` times their amounts), told why the one before failed: a near-copy of the
+/// source or a take draws bolder next time, one too far milder.
+pub fn bolder_or_milder(factor: f64, before: Option<&Verdict>) -> f64 {
+    match before {
+        Some(Verdict::NearSource(_) | Verdict::NearTake(..)) => factor * 1.35,
+        Some(Verdict::FarFromSource(_)) => factor * 0.7,
+        _ => factor,
+    }
+}
+
 /// Where a take stands in the loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TakeState {
