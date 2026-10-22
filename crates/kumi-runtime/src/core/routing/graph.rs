@@ -154,9 +154,11 @@ impl Graph {
             if paths.is_empty() && self.sounding(&node.id) && !node.muted {
                 let hardware = sends_out.iter().any(|edge| edge.route == Route::Hardware && !edge.muted);
                 let midi = sends_out.iter().any(|edge| edge.midi_only && !edge.muted);
+                // (a ghost trigger: heard nowhere by design, it feeds sidechains' 3/4 only)
+                let triggers = sends_out.iter().any(|edge| edge.route == Route::Send && !edge.muted && !edge.midi_only && edge.dst > 2);
                 let (ends, through_muted) = self.dead_ends(&node.id);
                 // (a way into a track the producer muted is silent as meant; a MIDI send's track sounds elsewhere)
-                if !hardware && (midi || through_muted) {
+                if !hardware && (midi || triggers || through_muted) {
                     continue;
                 }
                 let mut words = if hardware {
@@ -235,10 +237,13 @@ impl Graph {
         out
     }
 
-    /// The tracks whose unmuted sends (audio or MIDI) come into this one.
+    /// The tracks whose unmuted sends bring this one something to hear: audio on its first channels, or MIDI (a sidechain's
+    /// 3/4 is its detector's).
     pub fn senders(&self, id: &str) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
-        for edge in self.edges.iter().filter(|edge| edge.route == Route::Send && !edge.muted && edge.to.as_deref() == Some(id)) {
+        let into =
+            |edge: &&Edge| edge.route == Route::Send && !edge.muted && edge.to.as_deref() == Some(id) && (edge.midi_only || edge.dst <= 2);
+        for edge in self.edges.iter().filter(into) {
             if !out.contains(&edge.from) {
                 out.push(edge.from.clone());
             }
@@ -447,6 +452,11 @@ mod tests {
         let lint = dead.lints().into_iter().find(|lint| lint.tracks[0] == "Reverb").unwrap();
         assert_eq!((lint.kind, lint.tracks.clone()), ("silent", vec!["Reverb".to_string(), "Vox".to_string()]));
         assert!(lint.words.ends_with("the sends of “Vox” into it do nothing"), "{}", lint.words);
+        // A ghost kick, its parent send off, only feeding the bass's 3/4: heard nowhere by design, nothing said.
+        let mut bass = node("Bass", &[]);
+        bass.channels = 4;
+        let ghost = graph(vec![node("Ghost Kick", &[]), bass], vec![Edge { dst: 3, ..send("Ghost Kick", "Bass") }, parent("Bass", MASTER)]);
+        assert!(ghost.lints().is_empty(), "{:?}", ghost.lints());
         // A muted send is no way at all.
         let muted = graph(
             vec![node("Kick", &[]), node("Bus", &[])],
