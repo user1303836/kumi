@@ -94,7 +94,8 @@ pub fn describe_for(profile: &DawProfile, job: Job, choice: &Choice) -> String {
     let app = profile.words.app;
     match (job, choice) {
         (_, Choice::File { path }) => format!("the model file {path}"),
-        (Job::Stems, _) if profile.caps.stems => format!("{app}'s own splitter"),
+        (Job::Stems, _) if profile.caps.stems && profile.id == Some(crate::core::daw::DawId::Ableton) => format!("{app}'s own splitter"),
+        (Job::Stems, _) if profile.caps.stems => format!("Kumi's own splitter: drums, bass and other from a track's stretch, put back in {app} (stems)"),
         (Job::Stems, _) => format!("none: {app} has no stem splitter Kumi can use"),
         (Job::Transcription, _) if profile.caps.audio_to_midi && profile.id == Some(crate::core::daw::DawId::Ableton) => {
             format!("{app}'s conversions (drums, melody and harmony to MIDI), and Basic Pitch for a pitched part in a file that isn't in {app}")

@@ -1,13 +1,16 @@
-//! Audio to MIDI through Kumi's own bridges (#401): REAPER's and Renoise's facts for core's tool. Both render the track
-//! offline (REAPER its items before its FX, Renoise the track through its devices, as Renoise renders a track soloed) and
-//! take the tempo Kumi follows; REAPER writes the notes in one MIDI item on a new track under the source, Renoise in a new
-//! track's pattern lines, a note off the grid on its line with a delay and a pitched note ended by an OFF.
+//! Kumi's own ears through its own bridges (#401): REAPER's and Renoise's facts for core's audio_to_midi and stems tools. Both
+//! render the track offline (REAPER its items before its FX, Renoise the track through its devices, as Renoise renders a track
+//! soloed) and take the tempo Kumi follows. Audio to MIDI: REAPER writes the notes in one MIDI item on a new track under the
+//! source, Renoise in a new track's pattern lines, a note off the grid on its line with a delay and a pitched note ended by an
+//! OFF. Stems: REAPER puts each on a new track under the source, an item over the stretch; Renoise loads each as an instrument
+//! and plays them from the stretch's start on a new track.
 use super::own_changes::OwnPlan;
 use super::own_listening::OwnRenderer;
 use super::renoise_lines::note_text;
 use crate::core::contracts::{JsonObject, Render};
 use crate::core::plan::make_changes;
 use crate::core::refs::RefScheme;
+use crate::core::stems::backend::{StemsBackend, Words as StemWords};
 use crate::core::to_midi::backend::{ToMidiBackend, Words};
 use crate::core::to_midi::{MidiNote, HAT, KICK, SNARE};
 use crate::listening::renderer::{Renderer, Window};
@@ -15,6 +18,7 @@ use async_trait::async_trait;
 use kumi_common::abort::Signal;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 pub static REAPER_WORDS: Words = Words {
@@ -31,6 +35,11 @@ pub static RENOISE_WORDS: Words = Words {
     options_schema: r#"{"type":"object","additionalProperties":false,"properties":{"instrumentRef":{"type":"string","description":"The instrument the notes play"}}}"#,
 };
 
+pub static REAPER_STEM_WORDS: StemWords =
+    StemWords { app: "REAPER", placed: "a new track each under it, its audio an item over the stretch" };
+pub static RENOISE_STEM_WORDS: StemWords =
+    StemWords { app: "Renoise", placed: "a new instrument each, played from the stretch's start on a new track after it (a column each)" };
+
 /// The most note columns a Renoise track has, and the most pages of rows read.
 const COLUMNS: u32 = 12;
 const PAGES: usize = 10;
@@ -42,15 +51,46 @@ pub enum Daw {
     Renoise,
 }
 
-pub struct OwnToMidi<S: RefScheme + 'static> {
+pub struct OwnEars<S: RefScheme + 'static> {
     plan: Rc<OwnPlan<S>>,
     renderer: Rc<OwnRenderer<S>>,
     daw: Daw,
 }
 
-impl<S: RefScheme + 'static> OwnToMidi<S> {
+impl<S: RefScheme + 'static> OwnEars<S> {
     pub fn new(plan: Rc<OwnPlan<S>>, renderer: Rc<OwnRenderer<S>>, daw: Daw) -> Self {
-        OwnToMidi { plan, renderer, daw }
+        OwnEars { plan, renderer, daw }
+    }
+
+    /// The track rendered alone over the stretch (REAPER: its items before its FX; Renoise: through its devices), and its name.
+    async fn render_named(&self, track: &str, from: f64, beats: f64, signal: &Signal) -> Result<(Render, String), String> {
+        let long = self.plan.lengthen(track)?;
+        let name = self.row(&long, signal).await?.get("name").and_then(Value::as_str).unwrap_or("Track").to_string();
+        let stage = match self.daw {
+            Daw::Reaper => "items",
+            Daw::Renoise => "pre-fader",
+        };
+        Ok((self.renderer.render_track(&long, stage, Window { from, beats }, signal).await?, name))
+    }
+
+    /// Renoise's slots over the stretch and its lines a beat.
+    async fn slots(&self, from: f64, beats: f64, signal: &Signal) -> Result<(Vec<Slot>, f64), String> {
+        let song = self.plan.read_through(json!({"kind": "song"}), None, signal).await?;
+        let lpb = song.pointer("/items/0/lpb").and_then(Value::as_u64).unwrap_or(4).max(1) as f64;
+        let rows = self.plan.rows_through(json!({"kind": "sequence", "limit": 200}), PAGES, signal).await?;
+        let slots = rows
+            .iter()
+            .filter_map(|row| {
+                Some(Slot {
+                    number: row.get("ref")?.as_str()?.rsplit(':').next()?.parse().ok()?,
+                    pattern: row.get("patternRef")?.as_str()?.to_string(),
+                    at: row.get("positionBeats")?.as_f64()?,
+                    beats: row.get("lengthBeats")?.as_f64()?,
+                })
+            })
+            .filter(|slot| slot.at < from + beats && slot.at + slot.beats > from)
+            .collect();
+        Ok((slots, lpb))
     }
 
     async fn row(&self, long: &str, signal: &Signal) -> Result<Value, String> {
@@ -79,21 +119,7 @@ impl<S: RefScheme + 'static> OwnToMidi<S> {
         instrument: &str,
         signal: &Signal,
     ) -> Result<Cells, String> {
-        let song = self.plan.read_through(json!({"kind": "song"}), None, signal).await?;
-        let lpb = song.pointer("/items/0/lpb").and_then(Value::as_u64).unwrap_or(4).max(1) as f64;
-        let slots = self.plan.rows_through(json!({"kind": "sequence", "limit": 200}), PAGES, signal).await?;
-        let slots: Vec<Slot> = slots
-            .iter()
-            .filter_map(|row| {
-                Some(Slot {
-                    number: row.get("ref")?.as_str()?.rsplit(':').next()?.parse().ok()?,
-                    pattern: row.get("patternRef")?.as_str()?.to_string(),
-                    at: row.get("positionBeats")?.as_f64()?,
-                    beats: row.get("lengthBeats")?.as_f64()?,
-                })
-            })
-            .filter(|slot| slot.at < from + beats && slot.at + slot.beats > from)
-            .collect();
+        let (slots, lpb) = self.slots(from, beats, signal).await?;
         renoise_cells(notes, drums, from, beats, lpb, &slots, instrument)
     }
 }
@@ -108,6 +134,61 @@ struct Slot {
     pattern: String,
     at: f64,
     beats: f64,
+}
+
+/// Where a beat of the song falls in Renoise: the slot playing it, the line and the delay (256ths of a line), or None past the
+/// slots given.
+fn place_in(beat: f64, slots: &[Slot], lpb: f64) -> Option<(&Slot, u32, u32)> {
+    let slot = slots.iter().find(|slot| slot.at <= beat + 1e-9 && beat < slot.at + slot.beats - 1e-9)?;
+    let at = (beat - slot.at) * lpb;
+    let mut line = at.floor() as u32;
+    let mut delay = ((at - line as f64) * 256.).round() as u32;
+    if delay >= 256 {
+        line += 1;
+        delay = 0;
+    }
+    ((line as f64) < slot.beats * lpb).then_some((slot, line, delay))
+}
+
+/// REAPER's plan for stems: a new track each under the source, its file an item over the stretch.
+fn reaper_stem_steps(stems: &[(String, &Path)], index: u64, from: f64, beats: f64) -> Vec<Value> {
+    let mut steps = Vec::new();
+    for (k, (name, path)) in stems.iter().enumerate() {
+        steps.push(json!({"tool": "track_add", "as": format!("s{k}"), "input": {"name": name, "index": index + k as u64}}));
+        steps.push(json!({"tool": "item_import", "input": {"ref": format!("@s{k}"), "path": path.to_string_lossy(), "positionBeats": from, "lengthBeats": beats, "name": name}}));
+    }
+    steps
+}
+
+/// Renoise's plan for stems: each loaded as a new instrument, and a new track after the source playing them all from the
+/// stretch's start (a column each, C-4: the sample as recorded).
+fn renoise_stem_steps(
+    stems: &[(String, &Path)],
+    name: &str,
+    index: u64,
+    from: f64,
+    lpb: f64,
+    slots: &[Slot],
+) -> Result<Vec<Value>, String> {
+    let (slot, line, delay) = place_in(from, slots, lpb).ok_or("the stretch's start isn't in a slot of the song")?;
+    let mut steps: Vec<Value> = stems
+        .iter()
+        .enumerate()
+        .map(|(k, (_, path))| json!({"tool": "instrument_load", "as": format!("i{k}"), "input": {"path": path.to_string_lossy()}}))
+        .collect();
+    steps
+        .push(json!({"tool": "track_add", "as": "stems", "input": {"type": "sequencer", "name": format!("{name} stems"), "index": index}}));
+    let notes: Vec<Value> = (0..stems.len())
+        .map(|k| {
+            let mut cell = json!({"col": k + 1, "note": "C-4", "instrumentRef": format!("@i{k}")});
+            if delay > 0 {
+                cell["delay"] = json!(delay);
+            }
+            cell
+        })
+        .collect();
+    steps.push(json!({"tool": "notes_write", "input": {"patternRef": slot.pattern, "trackRef": "@stems", "lines": [{"line": line, "notes": notes}]}}));
+    Ok(steps)
 }
 
 /// The notes as Renoise's cells, by pattern: each note on its line (with a delay between lines). Drums take a column a key (kick 1,
@@ -140,17 +221,7 @@ fn renoise_cells(
     // (drums: each key's column)
     let mut key_columns: BTreeMap<u8, u32> = [(KICK, 1), (SNARE, 2), (HAT, 3)].into_iter().collect();
     let mut left_out = 0;
-    let place = |beat: f64| -> Option<(&Slot, u32, u32)> {
-        let slot = slots.iter().find(|slot| slot.at <= beat + 1e-9 && beat < slot.at + slot.beats - 1e-9)?;
-        let at = (beat - slot.at) * lpb;
-        let mut line = at.floor() as u32;
-        let mut delay = ((at - line as f64) * 256.).round() as u32;
-        if delay >= 256 {
-            line += 1;
-            delay = 0;
-        }
-        ((line as f64) < slot.beats * lpb).then_some((slot, line, delay))
-    };
+    let place = |beat: f64| place_in(beat, slots, lpb);
     for note in notes {
         let Some((slot, line, delay)) = place(from + note.start) else {
             left_out += 1;
@@ -220,7 +291,7 @@ fn renoise_cells(
 }
 
 #[async_trait(?Send)]
-impl<S: RefScheme + 'static> ToMidiBackend for OwnToMidi<S> {
+impl<S: RefScheme + 'static> ToMidiBackend for OwnEars<S> {
     fn words(&self) -> &'static Words {
         match self.daw {
             Daw::Reaper => &REAPER_WORDS,
@@ -229,31 +300,7 @@ impl<S: RefScheme + 'static> ToMidiBackend for OwnToMidi<S> {
     }
 
     async fn render(&self, track: &str, from: f64, beats: f64, signal: &Signal) -> Result<(Render, String), String> {
-        if self.renderer.listening_now() {
-            return Err("Kumi is listening to something else just now".into());
-        }
-        if let Some(why) = self.renderer.why_not() {
-            return Err(why);
-        }
-        let long = self.plan.lengthen(track)?;
-        let row = self.row(&long, signal).await?;
-        let name = row.get("name").and_then(Value::as_str).unwrap_or("Track").to_string();
-        // (REAPER: the track's own items before its FX; Renoise: the track through its devices)
-        let stage = match self.daw {
-            Daw::Reaper => "items",
-            Daw::Renoise => "pre-fader",
-        };
-        let sources = vec![json!({"id": "t", "what": "track", "ref": long, "stage": stage})];
-        let _listening = self.renderer.begin_listen();
-        let rendered = self.renderer.render_sources(sources, Window { from, beats }, signal).await;
-        self.renderer.put_tempo_back().await;
-        match rendered {
-            Ok(Ok((files, _))) => {
-                files.get("t").map(|(render, _)| (render.clone(), name)).ok_or_else(|| "the render made no file".to_string())
-            }
-            Ok(Err(why)) => Err(why),
-            Err(error) => Err(error.to_string()),
-        }
+        self.render_named(track, from, beats, signal).await
     }
 
     async fn tempo(&self, _from: f64, _signal: &Signal) -> Result<f64, String> {
@@ -318,6 +365,38 @@ fn reaper_steps(name: &str, index: u64, notes: &[MidiNote], from: f64, beats: f6
     ]
 }
 
+#[async_trait(?Send)]
+impl<S: RefScheme + 'static> StemsBackend for OwnEars<S> {
+    fn words(&self) -> &'static StemWords {
+        match self.daw {
+            Daw::Reaper => &REAPER_STEM_WORDS,
+            Daw::Renoise => &RENOISE_STEM_WORDS,
+        }
+    }
+
+    async fn render(&self, track: &str, from: f64, beats: f64, signal: &Signal) -> Result<(Render, String), String> {
+        self.render_named(track, from, beats, signal).await
+    }
+
+    fn folder(&self) -> PathBuf {
+        self.renderer.folder().to_path_buf()
+    }
+
+    async fn place(&self, track: &str, stems: &[(String, &Path)], from: f64, beats: f64, signal: &Signal) -> Result<Value, String> {
+        let long = self.plan.lengthen(track)?;
+        let row = self.row(&long, signal).await?;
+        let index = row.get("index").and_then(Value::as_u64).unwrap_or(0) + 1;
+        let steps = match self.daw {
+            Daw::Reaper => reaper_stem_steps(stems, index, from, beats),
+            Daw::Renoise => {
+                let (slots, lpb) = self.slots(from, beats, signal).await?;
+                renoise_stem_steps(stems, row.get("name").and_then(Value::as_str).unwrap_or("Track"), index, from, lpb, &slots)?
+            }
+        };
+        self.run(steps, signal).await
+    }
+}
+
 fn round(beats: f64) -> f64 {
     (beats * 10_000.).round() / 10_000.
 }
@@ -358,6 +437,29 @@ mod tests {
             let kind = RENOISE.kinds.iter().find(|kind| kind.tool == "notes_write").unwrap();
             assert_eq!(problem(&Value::Object(kind.input_schema()), &input), None, "{input}");
         }
+    }
+
+    #[test]
+    fn stems_go_on_new_tracks_in_reaper_and_play_as_instruments_in_renoise() {
+        use crate::integrations::reaper_changes::CHANGES as REAPER;
+        let fits = |kinds: &[crate::integrations::own_changes::OwnKind], step: &Value| {
+            let tool = step["tool"].as_str().unwrap();
+            let kind = kinds.iter().find(|kind| kind.tool == tool).unwrap_or_else(|| panic!("{tool}"));
+            assert_eq!(problem(&Value::Object(kind.input_schema()), &step["input"]), None, "{step}");
+        };
+        let (drums, bass) = (Path::new("/tmp/Loop drums.wav"), Path::new("/tmp/Loop bass.wav"));
+        let stems = [("Loop drums".to_string(), drums), ("Loop bass".to_string(), bass)];
+        let reaper = reaper_stem_steps(&stems, 3, 8., 4.);
+        assert_eq!(reaper.len(), 4);
+        assert_eq!(reaper[3]["input"]["ref"], "@s1");
+        reaper.iter().for_each(|step| fits(REAPER.kinds, step));
+        // (the stretch from beat 6: line 8 of the slot from beat 4)
+        let renoise = renoise_stem_steps(&stems, "Loop", 3, 6., 4., &[slot(2, "1:pattern:1", 4., 4.)]).unwrap();
+        assert_eq!(renoise.len(), 4);
+        assert_eq!(renoise[3]["input"]["lines"][0]["line"], 8);
+        assert_eq!(renoise[3]["input"]["lines"][0]["notes"][1], json!({"col": 2, "note": "C-4", "instrumentRef": "@i1"}));
+        renoise.iter().for_each(|step| fits(RENOISE.kinds, step));
+        assert!(renoise_stem_steps(&stems, "Loop", 3, 20., 4., &[slot(2, "1:pattern:1", 4., 4.)]).is_err(), "past the song");
     }
 
     #[test]

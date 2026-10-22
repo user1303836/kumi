@@ -32,7 +32,8 @@ use std::rc::Rc;
 pub const REFERENCE_TOOL: &str = "reference";
 /// What the reference tool says it does; how to take one element of a reference only for a DAW that splits stems.
 fn description(profile: &DawProfile) -> String {
-    let stems = if profile.caps.stems {
+    // (Live's splitter gives a stem's clip; Kumi's own, elsewhere, puts stems on tracks a reference doesn't take)
+    let stems = if profile.caps.stems && profile.id == Some(crate::core::daw::DawId::Ableton) {
         format!("For one element of a reference (its bass, its drums), put the track in the {}, separate its stems (live_command separate_stems) and give a stem's clipRef. ", profile.words.place)
     } else {
         String::new()

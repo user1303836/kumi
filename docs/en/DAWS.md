@@ -42,7 +42,7 @@ does the job there.
 | Auditions candidates against a reference, and goals (`/goal`) on a rig kept open | ✓ | ✓ | ✓ |
 | Judges its changes, `/loop`, matches references | ✓ | ✓ | ✓ |
 | The audio file behind a clip, item or sample | ✓ | ✓ | ✓ |
-| Splits a track into stems | ✓ Live's own splitter | not yet: no splitter Kumi can use | not yet: no splitter Kumi can use |
+| Splits a track into stems | ✓ Live's own splitter | ✓ Kumi's own splitter: drums, bass and other | ✓ Kumi's own splitter: drums, bass and other |
 | Turns audio into MIDI | ✓ drums, melody and harmony | ✓ drums, melody and harmony, by Kumi's own ears | ✓ drums, melody and harmony, by Kumi's own ears |
 | **FOCUS** | | | |
 | FOCUS and the beat light follow the DAW as it changes | ✓ | ✓ | ✓ |
@@ -173,6 +173,10 @@ next version), track templates and FX chains.
   checks each differs from the source and the others yet stays the same sound
   (its attack, and any notes you name, kept), renders them to hear them, and
   keeps, changes or drops them as you say; `render_files` delivers a file each.
+- **Stems** (`stems`): a track's stretch split by Kumi's own splitter into
+  drums (what hits), bass (what sustains under 150 Hz) and other (the rest,
+  voices too), which add up to the track. Each goes on a new track under it,
+  an item over the stretch.
 - **Audio to MIDI** (`audio_to_midi`): a track's audio over a stretch heard by
   Kumi's own ears: drums (each hit a kick, snare or hat on General MIDI's drum
   keys, as loud as it hits, a ghost softer), a melody or the harmony (Basic
@@ -329,6 +333,10 @@ saves the song, instruments and device presets.
   only when no other track plays them). For the glue it hears the group
   without its compressor, then sets a Bus Compressor's threshold until the
   glue measures as asked. The balance is yours, by ear.
+- **Stems** (`stems`): a track's stretch split by Kumi's own splitter into
+  drums, bass (under 150 Hz) and other (voices too), which add up to the
+  track. Each is loaded as a new instrument and played from the stretch's
+  start on a new track after it.
 - **Audio to MIDI** (`audio_to_midi`): a track's audio over a stretch heard by
   Kumi's own ears: drums (kick, snare and hat, as loud as they hit), a melody
   or the harmony (Basic Pitch). The notes go on a new track, in the patterns

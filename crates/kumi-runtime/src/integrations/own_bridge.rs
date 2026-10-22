@@ -188,6 +188,8 @@ pub struct OwnIntegration<S: RefScheme + 'static> {
     layers: Option<Rc<dyn KernelTool>>,
     /// (#401) Audio to MIDI with Kumi's own ears, where the DAW's profile offers it (core's, with the DAW's backend).
     to_midi: Option<Rc<dyn KernelTool>>,
+    /// (#401) Stems by Kumi's own splitter, where the DAW's profile offers it (core's, with the DAW's backend).
+    stems: Option<Rc<dyn KernelTool>>,
 }
 
 /// How REAPER and Renoise tell templates and a song's own folder, for core's rules on copies: a project in REAPER's
@@ -384,13 +386,23 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
         });
     // (#401) audio to MIDI, where the DAW offers it through Kumi's own ears
     let to_midi: Option<Rc<dyn KernelTool>> = match (daw.profile.caps.audio_to_midi, daw.profile.id) {
-        (true, Some(crate::core::daw::DawId::Reaper)) => Some(super::own_to_midi::Daw::Reaper),
-        (true, Some(crate::core::daw::DawId::Renoise)) => Some(super::own_to_midi::Daw::Renoise),
+        (true, Some(crate::core::daw::DawId::Reaper)) => Some(super::own_ears::Daw::Reaper),
+        (true, Some(crate::core::daw::DawId::Renoise)) => Some(super::own_ears::Daw::Renoise),
         _ => None,
     }
     .map(|which| {
-        let backend = super::own_to_midi::OwnToMidi::new(changes.clone(), listening.renderer.clone(), which);
+        let backend = super::own_ears::OwnEars::new(changes.clone(), listening.renderer.clone(), which);
         crate::core::to_midi::tool::ToMidi::new(backend).tool()
+    });
+    // (#401) stems, where the DAW splits by Kumi's own splitter
+    let stems: Option<Rc<dyn KernelTool>> = match (daw.profile.caps.stems, daw.profile.id) {
+        (true, Some(crate::core::daw::DawId::Reaper)) => Some(super::own_ears::Daw::Reaper),
+        (true, Some(crate::core::daw::DawId::Renoise)) => Some(super::own_ears::Daw::Renoise),
+        _ => None,
+    }
+    .map(|which| {
+        let backend = super::own_ears::OwnEars::new(changes.clone(), listening.renderer.clone(), which);
+        crate::core::stems::tool::Stems::new(backend).tool()
     });
     let kumi_home = options.kumi_home.clone();
     Rc::new(OwnIntegration::<S> {
@@ -437,6 +449,7 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
         jam,
         layers,
         to_midi,
+        stems,
     })
 }
 
@@ -1028,6 +1041,9 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         }
         if let Some(to_midi) = &self.to_midi {
             tools.push(to_midi.clone());
+        }
+        if let Some(stems) = &self.stems {
+            tools.push(stems.clone());
         }
         tools
     }

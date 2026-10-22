@@ -388,32 +388,6 @@ fn stretches(marks: Option<&Value>, rate: f64, held: Option<f64>, beats_per_bar:
     found
 }
 
-/// Channels of samples as a 32-bit float WAV.
-fn float_wav(channels: &[Vec<f32>], rate: u32) -> Vec<u8> {
-    let count = channels.len().max(1) as u16;
-    let frames = channels.first().map_or(0, Vec::len);
-    let data = frames * count as usize * 4;
-    let mut wav = Vec::with_capacity(44 + data);
-    wav.extend(b"RIFF");
-    wav.extend((36 + data as u32).to_le_bytes());
-    wav.extend(b"WAVEfmt ");
-    wav.extend(16u32.to_le_bytes());
-    wav.extend(3u16.to_le_bytes());
-    wav.extend(count.to_le_bytes());
-    wav.extend(rate.to_le_bytes());
-    wav.extend((rate * count as u32 * 4).to_le_bytes());
-    wav.extend((count * 4).to_le_bytes());
-    wav.extend(32u16.to_le_bytes());
-    wav.extend(b"data");
-    wav.extend((data as u32).to_le_bytes());
-    for frame in 0..frames {
-        for channel in channels {
-            wav.extend(channel.get(frame).copied().unwrap_or(0.).to_le_bytes());
-        }
-    }
-    wav
-}
-
 impl<S: RefScheme + 'static> OwnRenderer<S> {
     pub(super) fn new(link: Rc<Link<S>>, plan: Rc<OwnPlan<S>>, context: &IntegrationContext, kumi_home: &std::path::Path) -> Self {
         let profile = link.daw.profile;
@@ -474,6 +448,31 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// Why nothing can be heard now, in words: the DAW isn't there, its bridge is older than listening, or it's the demo.
     /// (M7) Kumi is listening to something else now (a judged run, a listen): another check waits its turn.
+    /// Kumi's listening folder for this bridge (one the DAW reads).
+    pub(super) fn folder(&self) -> &std::path::Path {
+        &self.folder
+    }
+
+    /// (#401) A track rendered alone over `window` at `stage` ("items": REAPER's items before the track's FX; "pre-fader"):
+    /// its file, or why not.
+    pub(super) async fn render_track(&self, long: &str, stage: &str, window: Window, signal: &Signal) -> Result<Render, String> {
+        if self.listening_now() {
+            return Err("Kumi is listening to something else just now".into());
+        }
+        if let Some(why) = self.why_not() {
+            return Err(why);
+        }
+        let sources = vec![json!({"id": "t", "what": "track", "ref": long, "stage": stage})];
+        let _listening = self.begin_listen();
+        let rendered = self.render_sources(sources, window, signal).await;
+        self.put_tempo_back().await;
+        match rendered {
+            Ok(Ok((files, _))) => files.get("t").map(|(render, _)| render.clone()).ok_or_else(|| "the render made no file".to_string()),
+            Ok(Err(why)) => Err(why),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
     pub(super) fn listening_now(&self) -> bool {
         self.flag.is_on()
     }
@@ -2170,7 +2169,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
             if reversed { " reversed" } else { "" }
         ));
         std::fs::create_dir_all(&self.folder).map_err(|error| error.to_string())?;
-        std::fs::write(&path, float_wav(&channels, rate as u32)).map_err(|error| error.to_string())?;
+        std::fs::write(&path, crate::audio::decode::float_wav(&channels, rate as u32)).map_err(|error| error.to_string())?;
         Ok(path.to_string_lossy().into_owned())
     }
 

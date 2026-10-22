@@ -38,6 +38,7 @@ pub mod routing;
 pub mod scripts;
 pub mod session;
 pub mod spec;
+pub mod stems;
 pub mod store_backed;
 pub mod store_client;
 pub mod store_import;

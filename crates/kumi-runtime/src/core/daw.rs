@@ -588,7 +588,8 @@ pub struct Capabilities {
     pub audition: bool,
     /// A goal's render rig, kept open across generations.
     pub goal_rig: bool,
-    /// Splitting a track into stems inside the DAW (Live 12's own splitter).
+    /// Splitting a track into stems inside the DAW: Live 12's own splitter, or (#401) Kumi's own where the DAW has none (core's
+    /// stems, with the DAW's backend: drums, bass and other).
     pub stems: bool,
     /// Turning audio into MIDI inside the DAW: Live's conversions, or (#401) Kumi's own ears where the DAW has none (core's
     /// audio_to_midi, with the DAW's backend: drums by the hit detector, pitched parts by Basic Pitch).
@@ -897,6 +898,7 @@ impl DawProfile {
             variations: true,
             delivery_spec: true,
             audio_to_midi: true,
+            stems: true,
             ..Capabilities::NONE
         },
         vocab: PromptVocab {
@@ -997,6 +999,7 @@ impl DawProfile {
             jam: true,
             layers: true,
             audio_to_midi: true,
+            stems: true,
             ..Capabilities::NONE
         },
         vocab: PromptVocab {
