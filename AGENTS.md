@@ -30,7 +30,8 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 - Format and the gating lint:
   `cargo fmt --all --check`
   `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref`
-- Before a push: `cargo fmt --all --check` and `git diff --check origin/main...HEAD`; CI fails on both.
+- Before a push: `python3 scripts/dev.py check` runs Required CI's checks for what the branch changes (whitespace, fmt,
+  the gating lint, the affected crates' `ci` tests, the changed areas' tests; `--dry-run` lists them).
 - Release scripts' tests: `python3 -m unittest discover -s scripts/tests -p 'test_*release.py'`
 - What a branch affects, and the CI jobs that test it: `python3 scripts/dev.py affected --base origin/main`
 - Wait for CI: `gh pr checks <n> --required --watch`. Only "Required CI" and "Willington files" are required.

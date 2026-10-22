@@ -160,6 +160,42 @@ class Affected(unittest.TestCase):
             dev.affected(dev.parse_name_status("M\todd/x"), WORKSPACE, areas)
 
 
+class Select(unittest.TestCase):
+    PACKAGES = sorted(WORKSPACE.folders)
+
+    def test_a_part_tests_its_affected_packages_only(self):
+        self.assertEqual(dev.select(["store", "runtime", "app"], ["--exclude", "wire", "--exclude", "host"], self.PACKAGES),
+                         ["-p", "app", "-p", "runtime", "-p", "store"])
+        self.assertEqual(dev.select(["store", "runtime", "app"], ["-p", "wire", "-p", "host"], self.PACKAGES), [])
+        self.assertEqual(dev.select(["wire", "app"], ["-p", "wire", "-p", "host"], self.PACKAGES), ["-p", "wire"])
+
+    def test_a_part_names_this_workspaces_packages_one_way(self):
+        for selection in (["-p", "gone"], ["-p", "wire", "--exclude", "host"], ["-p"], ["--all"]):
+            with self.assertRaises(dev.Refused, msg=selection):
+                dev.select(["wire"], selection, self.PACKAGES)
+
+
+class Check(unittest.TestCase):
+    def steps(self, *changes: str, windows: bool = False) -> list[str]:
+        return [" ".join(step.command) for step in dev.check_steps(run(*changes), "origin/main", windows=windows)]
+
+    def test_a_packages_change_tests_it_and_its_dependents_only(self):
+        steps = self.steps("M\tcrates/store/src/lib.rs")
+        self.assertIn("cargo fmt --all --check", steps)
+        self.assertIn("sh scripts/test-isolated.sh --profile ci -p app -p runtime -p store", steps)
+        self.assertTrue(any(step.startswith("cargo clippy -p app -p runtime -p store --lib --bins --examples") for step in steps), steps)
+        self.assertFalse(any("remote-script" in step or "renoise" in step for step in steps), steps)
+
+    def test_docs_alone_run_no_rust(self):
+        steps = self.steps("M\tdocs/en/TESTING.md")
+        self.assertFalse(any(step.startswith("cargo") or "test-isolated" in step for step in steps), steps)
+        self.assertTrue(any("test_*release.py" in step for step in steps), "the release scripts' tests check the docs' links")
+
+    def test_each_area_runs_its_own_checks(self):
+        self.assertTrue(any("daws/renoise/tests/run.sh" in step for step in self.steps("M\tdaws/renoise/tool/payload/notes.lua")))
+        self.assertTrue(any("pwsh" in step and "--profile ci -p" in step for step in self.steps("M\tcrates/store/src/lib.rs", windows=True)))
+
+
 class ThisCheckout(unittest.TestCase):
     """scripts/areas.toml against this checkout's files and packages."""
 

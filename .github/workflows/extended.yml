@@ -110,14 +110,24 @@ jobs:
         if: runner.os != 'Windows'
         env:
           KUMI_NEXTEST: "1"
+          KUMI_NEXTEST_LIST: ${{ runner.temp }}/nextest-list.json
         run: sh scripts/test-isolated.sh --profile extended --partition hash:${{ matrix.part }}/${{ matrix.parts }}
       - name: Every test, a share of them, in a home of their own (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           KUMI_NEXTEST: "1"
+          KUMI_NEXTEST_LIST: ${{ runner.temp }}/nextest-list.json
           RUST_TEST_NOCAPTURE: '1'
         run: ./scripts/test-isolated.ps1 --profile extended --partition 'hash:${{ matrix.part }}/${{ matrix.parts }}'
+      # The tests this share selected (`cargo nextest list`), to compare one run's with another's.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: nextest-list-extended-${{ matrix.label }}-${{ matrix.part }}
+          path: ${{ runner.temp }}/nextest-list.json
+          if-no-files-found: ignore
+          retention-days: 14
 
   docs:
     name: Extended / documentation and eval runner tests

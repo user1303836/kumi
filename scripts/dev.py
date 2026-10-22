@@ -7,6 +7,8 @@
     python3 scripts/dev.py affected                       # no base: everything (a push to main)
     python3 scripts/dev.py affected --check               # every tracked file belongs to a package or an area
     python3 scripts/dev.py areas [--in AREA] PATH...      # the areas each path belongs to
+    python3 scripts/dev.py check [--base origin/main]     # Required CI's checks for what this branch changes
+    python3 scripts/dev.py select "PACKAGES" [-p NAME | --exclude NAME]...   # a CI part's affected packages, as -p options
 
 `affected` reads the changed files from `git diff <base>...HEAD`. A file's package is the Cargo package whose folder
 holds it (the longest such folder); its areas are the ones in scripts/areas.toml whose globs match it. The affected
@@ -21,6 +23,16 @@ ids in .github/workflows:
 - renoise_tool: the Renoise tool, or CI's workflow;
 - installer: the install surface (a pull request's Installer runs only for it);
 - network: how Kumi's HTTP clients are made.
+
+`check` runs, in CI's order and for what the branch changes since `--base` (origin/main): the change's whitespace and
+the areas' check; then, when it affects Rust packages, `cargo fmt --all --check`, the gating Clippy lint and the `ci`
+tests (cargo-nextest, through scripts/test-isolated) of those packages, the ones CI's Rust jobs test; then the Remote
+Script's, the Live extension's and the Renoise tool's tests when their areas changed (each skipped, and said, without its
+npm or LuaJIT); and the release scripts' and the installers' checks (the latter skipped without shellcheck and pwsh).
+
+`select` takes the affected packages (space-separated, as `affected --github-output` writes them) and a part of the
+workspace as cargo selects it (`-p` each package, or `--exclude` the rest's), and prints `-p` for each of that part's
+affected packages: the ones a CI job of that part tests. It prints nothing when none is.
 """
 from __future__ import annotations
 
@@ -30,6 +42,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -250,7 +263,7 @@ def command_affected(args: argparse.Namespace) -> int:
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
             for job, runs in result.jobs.items():
                 out.write(f"{job}={'true' if runs else 'false'}\n")
-            out.write(f"packages={json.dumps(result.packages)}\nareas={json.dumps(result.areas)}\n")
+            out.write(f"packages={' '.join(result.packages)}\nareas={' '.join(result.areas)}\n")
     if args.job:
         print("true" if result.jobs[args.job] else "false")
     elif args.json:
@@ -260,6 +273,88 @@ def command_affected(args: argparse.Namespace) -> int:
         print(f"  packages: {', '.join(result.packages) or 'none'}")
         print(f"  areas: {', '.join(result.areas) or 'none'}")
         print(f"  jobs: {', '.join(job for job, runs in result.jobs.items() if runs) or 'none'}")
+    return 0
+
+
+def select(affected_packages: list[str], selection: list[str], packages: list[str]) -> list[str]:
+    """The `-p` options for the affected packages within a part of the workspace that cargo's `-p` or `--exclude`
+    options name."""
+    pairs = list(zip(selection[::2], selection[1::2]))
+    named = {value for flag, value in pairs if flag in ("-p", "--package")}
+    excluded = {value for flag, value in pairs if flag == "--exclude"}
+    if (len(selection) % 2 or not pairs or any(flag not in ("-p", "--package", "--exclude") for flag, _ in pairs)
+            or (named and excluded) or (named | excluded) - set(packages)):
+        raise Refused(f"a part is `-p` packages or `--exclude` packages of this workspace, not `{' '.join(selection)}`")
+    part = named or set(packages) - excluded
+    return [arg for package in sorted(set(affected_packages) & part) for arg in ("-p", package)]
+
+
+@dataclass
+class Step:
+    what: str
+    command: list[str]
+    env: dict[str, str] = field(default_factory=dict)
+    # The programs it needs that may be missing here: the step is skipped, and said, without them.
+    needs: tuple[str, ...] = ()
+
+
+def check_steps(result: Affected, base: str, windows: bool = sys.platform == "win32") -> list[Step]:
+    """Required CI's checks for what `result` affects, in CI's order."""
+    python = sys.executable or "python3"
+    steps = [Step("the change's whitespace", ["git", "diff", "--check", f"{base}...HEAD"]),
+             Step("every tracked file belongs to a package or an area", [python, "scripts/dev.py", "affected", "--check"])]
+    if result.packages:
+        picked = [arg for package in result.packages for arg in ("-p", package)]
+        runner = ["pwsh", "-NoProfile", "-File", "scripts/test-isolated.ps1"] if windows else ["sh", "scripts/test-isolated.sh"]
+        steps += [
+            Step("formatting", ["cargo", "fmt", "--all", "--check"]),
+            Step("no RefCell borrow held across an await", ["cargo", "clippy", *picked, "--lib", "--bins", "--examples",
+                 "--locked", "--", "-A", "clippy::all", "-D", "clippy::await_holding_refcell_ref"]),
+            Step(f"the ci tests of {', '.join(result.packages)}", [*runner, "--profile", "ci", *picked], {"KUMI_NEXTEST": "1"}),
+        ]
+    if "remote-script" in result.areas:
+        steps += [Step("the Remote Script's tests", [python, "-m", "unittest", "discover", "-s", "remote-script", "-p", "test_*.py"]),
+                  Step("the Remote Script compiles", [python, "-m", "compileall", "-q", "remote-script/AbletonMcpBridge"])]
+    if "live-extension" in result.areas:
+        steps += [Step("the Live extension's packages", ["npm", "ci", "--prefix", "apps/live-extension", "--ignore-scripts"], needs=("npm",)),
+                  Step("the Live extension's tests", ["npm", "test", "--prefix", "apps/live-extension"], needs=("npm",))]
+    if "renoise-tool" in result.areas:
+        steps.append(Step("the Renoise tool's tests", ["sh", "daws/renoise/tests/run.sh"], needs=("luajit",)))
+    steps += [Step("the release scripts' tests", [python, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_*release.py"]),
+              Step("dev.py's tests", [python, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_dev.py"])]
+    if not windows:
+        steps.append(Step("the installers' syntax", ["sh", "scripts/check-installers.sh", "."], needs=("shellcheck", "pwsh")))
+    return steps
+
+
+def command_check(args: argparse.Namespace) -> int:
+    result = affected(changes_since(args.base), Workspace.read(), load_areas())
+    steps = check_steps(result, args.base)
+    if result.packages and not args.dry_run:
+        if subprocess.run(["cargo", "nextest", "--version"], capture_output=True).returncode:
+            raise Refused("cargo-nextest isn't installed, and the tests run on it as CI's do: cargo install cargo-nextest --locked")
+    print(f"{result.files} changed file{'' if result.files == 1 else 's'} since {args.base}; packages: "
+          f"{', '.join(result.packages) or 'none'}; areas: {', '.join(result.areas) or 'none'}")
+    for step in steps:
+        shown = " ".join([*(f"{key}={value}" for key, value in step.env.items()), *step.command])
+        missing = [program for program in step.needs if not shutil.which(program)]
+        if missing:
+            print(f"-- {step.what}: skipped, without {' and '.join(missing)} on PATH")
+            continue
+        print(f"-- {step.what}: {shown}", flush=True)
+        if args.dry_run:
+            continue
+        if subprocess.run(step.command, cwd=ROOT, env={**os.environ, **step.env}).returncode:
+            print(f"dev.py check: {step.what} failed", file=sys.stderr)
+            return 1
+    print("dev.py check: every check passed." if not args.dry_run else "dev.py check: nothing run (--dry-run).")
+    return 0
+
+
+def command_select(args: argparse.Namespace) -> int:
+    picked = select(args.affected.split(), args.selection, sorted(Workspace.read().folders))
+    if picked:
+        print(" ".join(picked))
     return 0
 
 
@@ -294,6 +389,14 @@ def main(argv: list[str] | None = None) -> int:
     where.add_argument("--in", dest="within", metavar="AREA", help="fail, naming them, on paths outside AREA")
     where.add_argument("paths", nargs="+")
     where.set_defaults(run=command_areas)
+    check = commands.add_parser("check", help="Required CI's checks for what this branch changes")
+    check.add_argument("--base", default="origin/main", help="the ref the branch is measured from (default origin/main)")
+    check.add_argument("--dry-run", action="store_true", help="say what would run, and run nothing")
+    check.set_defaults(run=command_check)
+    part = commands.add_parser("select", help="a CI part's affected packages, as -p options")
+    part.add_argument("affected", help="the affected packages, space-separated")
+    part.add_argument("selection", nargs=argparse.REMAINDER, help="the part: -p NAME... or --exclude NAME...")
+    part.set_defaults(run=command_select)
     args = parser.parse_args(argv)
     try:
         return args.run(args)

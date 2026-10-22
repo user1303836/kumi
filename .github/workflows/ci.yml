@@ -31,6 +31,7 @@ jobs:
       rust: ${{ steps.paths.outputs.rust_linux }}
       reaper: ${{ steps.paths.outputs.reaper_extension }}
       renoise: ${{ steps.paths.outputs.renoise_tool }}
+      packages: ${{ steps.paths.outputs.packages }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
         with:
@@ -68,28 +69,51 @@ jobs:
           - { part: daw-bridges, label: "Linux (DAW bridges)", crates: "-p daw-bridge -p daw-mcp-server -p reaper-kumi" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      # This part's packages that the change affects, as `dev.py check` picks them (main's pushes: all of them). A part
+      # with none skips the rest.
+      - id: part
+        env:
+          AFFECTED: ${{ needs.changes.outputs.packages }}
+        # (assigned first: a failing dev.py fails the step instead of picking nothing)
+        run: |
+          picked="$(python3 scripts/dev.py select "$AFFECTED" ${{ matrix.crates }})"
+          echo "picked=$picked" | tee -a "$GITHUB_OUTPUT"
+      - if: steps.part.outputs.picked != ''
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
       # Saved from main only. A pull request restores main's; caches saved from pull requests (about 300 MB a job)
       # pushed main's out of the repository's 10 GB. One cache per part: each builds other crates.
-      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      - if: steps.part.outputs.picked != ''
+        uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
           key: ${{ matrix.part }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
+      - if: steps.part.outputs.picked != ''
+        uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
         with:
           tool: nextest
       # A few tests run Node (the Live extension's fake peer); none needs the SDKs from npm.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - if: steps.part.outputs.picked != ''
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
       - name: The tests, in a home of their own (no test reaches this machine's Live folders or ~/.kumi)
+        if: steps.part.outputs.picked != ''
         env:
           KUMI_NEXTEST: "1"
+          KUMI_NEXTEST_LIST: ${{ runner.temp }}/nextest-list.json
           # Temporary files in memory: the tests' homes, Sets and stores write and sync many small files, which a
           # runner's disk makes several times slower.
           TMPDIR: /dev/shm
-        # (word splitting on purpose: the part's crate options)
-        run: sh scripts/test-isolated.sh --profile ci ${{ matrix.crates }}
+        # (word splitting on purpose: the -p options)
+        run: sh scripts/test-isolated.sh --profile ci ${{ steps.part.outputs.picked }}
+      # The tests this part selected (`cargo nextest list`), to compare one run's with another's.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() && steps.part.outputs.picked != '' }}
+        with:
+          name: nextest-list-ci-${{ matrix.part }}
+          path: ${{ runner.temp }}/nextest-list.json
+          if-no-files-found: ignore
+          retention-days: 14
       - if: matrix.part == 'kumi'
         run: git diff --check
 
@@ -156,6 +180,7 @@ jobs:
         if: runner.os != 'Windows'
         env:
           KUMI_NEXTEST: "1"
+          KUMI_NEXTEST_LIST: ${{ runner.temp }}/nextest-list.json
           # Only the test binaries the profile names are built.
           KUMI_NEXTEST_BUILD_PROFILE: ci-os
         run: sh scripts/test-isolated.sh --profile ci-os
@@ -164,9 +189,17 @@ jobs:
         shell: pwsh
         env:
           KUMI_NEXTEST: "1"
+          KUMI_NEXTEST_LIST: ${{ runner.temp }}/nextest-list.json
           KUMI_NEXTEST_BUILD_PROFILE: ci-os
           RUST_TEST_NOCAPTURE: '1'
         run: ./scripts/test-isolated.ps1 --profile ci-os
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: nextest-list-ci-os-${{ runner.os }}
+          path: ${{ runner.temp }}/nextest-list.json
+          if-no-files-found: ignore
+          retention-days: 14
 
   remote-script:
     name: Python Remote Script / ${{ matrix.os }}

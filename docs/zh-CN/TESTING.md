@@ -41,6 +41,7 @@ python3 -m unittest discover -s scripts/tests -p 'test_*release.py'
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lint 检查；目前在 CI 中仅供参考 |
 | `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref` | 跨 await 持有的 `RefCell` 借用；会使 Lint CI 任务失败 |
 | `KUMI_NEXTEST=1 sh scripts/test-isolated.sh --profile ci` | 用 cargo-nextest 运行 `Rust / Linux` 各部分运行的测试（单个部分的用 `-p <crate>` 或 `--exclude <crate>`；`--profile ci-os`：macOS 和 Windows 运行的测试；`--profile extended`：全部测试） |
+| `python3 scripts/dev.py check` | 针对本分支相对 `origin/main` 的改动（用 `--base` 指定其他起点）运行 Required CI 的检查：改动的空白、每个文件都属于某个 crate 或区域，然后对受影响的 crate 运行 `cargo fmt --check`、`RefCell` 的 lint 和它们的 `ci` 测试（用 cargo-nextest），再在有改动时运行 Remote Script、Live 扩展和 Renoise 工具的测试，以及发布脚本的测试。`--dry-run` 只说明会运行什么 |
 | `cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark` | 桥接的性能预算；见[开发者指南](DEVELOPER_GUIDE.md#构建测试与测量) |
 
 隔离运行器为测试提供独立的主目录：`HOME`、`USERPROFILE`、`APPDATA`、`LOCALAPPDATA`、`XDG_CONFIG_HOME` 和 `KUMI_HOME` 都指向一个全新的临时文件夹，`KUMI_REMOTE_SCRIPTS_DIR` 和 `KUMI_LIVE_EXTENSIONS_DIR` 则被移除，因此任何测试都无法触及你的 Live 文件夹或 `~/.kumi`。
@@ -105,7 +106,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
 | 工作流 | 作业 | 运行内容 |
 | --- | --- | --- |
-| **CI** | `Rust / Linux`、`Rust / Linux (Live's bridge)`、`Rust / Linux (DAW bridges)` | 通过隔离运行器运行 `.config/nextest.toml` 的 `ci` 集合，按 crate 分成三个部分同时运行（Kumi 及其运行时；`ableton-mcp-server`；`daw-bridge`、`daw-mcp-server` 和 `reaper-kumi`），所以没有哪个运行器要构建全部测试二进制：除 Extended 工作流运行的长测试（其中包括 REAPER 和 Renoise 的完整流程模拟，配置文件中列出并说明原因）之外的全部测试。运行超过 30 秒的测试会按名称失败。然后运行 `git diff --check` |
+| **CI** | `Rust / Linux`、`Rust / Linux (Live's bridge)`、`Rust / Linux (DAW bridges)` | 通过隔离运行器运行 `.config/nextest.toml` 的 `ci` 集合，按 crate 分成三个部分同时运行（Kumi 及其运行时；`ableton-mcp-server`；`daw-bridge`、`daw-mcp-server` 和 `reaper-kumi`），所以没有哪个运行器要构建全部测试二进制：除 Extended 工作流运行的长测试（其中包括 REAPER 和 Renoise 的完整流程模拟，配置文件中列出并说明原因）之外的全部测试。在拉取请求上，每个部分只测试改动影响到的本部分 crate（由 `scripts/dev.py` 选出，与 `dev.py check` 相同），没有受影响 crate 的部分会跳过。运行超过 30 秒的测试会按名称失败。然后运行 `git diff --check`。每个 Rust 作业（包括 Extended 的）都会把它选中的测试列表保存为构件（`nextest-list-*`），以便比较不同运行的测试 |
 | | `Rust / macOS`、`Rust / Windows` | `ci-os` 集合：因平台而异的测试（安装、启动和更新；终端、stdin 和 Windows 控制台；Hands；路径、文件和子进程；存储），也只构建这些测试 |
 | | `Rust / Lint`（Ubuntu） | `cargo fmt --check`、示例的构建和 Clippy（仅供参考，但跨 await 持有 `RefCell` 借用会使该任务失败） |
 | | `Python Remote Script / ubuntu-24.04`、`macos-15`、`windows-2025`（Python 3.11） | Remote Script 的测试；编译该包 |

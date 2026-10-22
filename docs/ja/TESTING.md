@@ -41,6 +41,7 @@ Windows では、いくつかのテストがシンボリックリンクを作成
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lint。CI では今のところ参考扱いです |
 | `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref` | await をまたいで保持される `RefCell` の借用。Lint の CI ジョブを失敗させます |
 | `KUMI_NEXTEST=1 sh scripts/test-isolated.sh --profile ci` | `Rust / Linux` の各パートが実行するテストを cargo-nextest で実行します（一つのパートのものは `-p <crate>` か `--exclude <crate>`、`--profile ci-os`：macOS と Windows が実行するもの、`--profile extended`：すべてのテスト） |
+| `python3 scripts/dev.py check` | このブランチが `origin/main` から変えたものについて、Required CI のチェックを実行します（別の起点は `--base`）：変更の空白、すべてのファイルがクレートかエリアに属すること、続いて影響を受けるクレートの `cargo fmt --check`、`RefCell` の lint、`ci` テスト（cargo-nextest）、さらに変更があれば Remote Script、Live の拡張機能、Renoise のツールのテスト、そしてリリーススクリプトのテスト。`--dry-run` は何を実行するかだけを示します |
 | `cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark` | ブリッジの性能の基準。[開発者ガイド](DEVELOPER_GUIDE.md#ビルドテスト計測)を参照してください |
 
 分離ランナーはテスト専用のホームを用意します。`HOME`、`USERPROFILE`、`APPDATA`、`LOCALAPPDATA`、`XDG_CONFIG_HOME`、`KUMI_HOME` は新しい一時フォルダーの中を指し、`KUMI_REMOTE_SCRIPTS_DIR` と `KUMI_LIVE_EXTENSIONS_DIR` は取り除かれるので、どのテストもあなたの Live のフォルダーや `~/.kumi` には届きません。
@@ -105,7 +106,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
 | ワークフロー | ジョブ | 実行内容 |
 | --- | --- | --- |
-| **CI** | `Rust / Linux`、`Rust / Linux (Live's bridge)`、`Rust / Linux (DAW bridges)` | `.config/nextest.toml` の `ci` セットを分離ランナーで、クレートごとに三つのパートに分けて同時に実行します（Kumi とそのランタイム、`ableton-mcp-server`、`daw-bridge` と `daw-mcp-server` と `reaper-kumi`）。どのランナーもすべてのテストバイナリをビルドすることはありません。Extended ワークフローが実行する長いテスト（REAPER と Renoise の流れ全体のシミュレーションを含み、設定ファイルに理由とともに列挙）以外のすべてのテストです。30 秒を超えたテストは名前つきで失敗します。続いて `git diff --check` |
+| **CI** | `Rust / Linux`、`Rust / Linux (Live's bridge)`、`Rust / Linux (DAW bridges)` | `.config/nextest.toml` の `ci` セットを分離ランナーで、クレートごとに三つのパートに分けて同時に実行します（Kumi とそのランタイム、`ableton-mcp-server`、`daw-bridge` と `daw-mcp-server` と `reaper-kumi`）。どのランナーもすべてのテストバイナリをビルドすることはありません。Extended ワークフローが実行する長いテスト（REAPER と Renoise の流れ全体のシミュレーションを含み、設定ファイルに理由とともに列挙）以外のすべてのテストです。プルリクエストでは、各パートは変更が影響する自分のクレートだけをテストし（`scripts/dev.py` が `dev.py check` と同じように選びます）、該当するものがないパートは省かれます。30 秒を超えたテストは名前つきで失敗します。続いて `git diff --check`。各 Rust ジョブ（Extended のものも）は、選んだテストの一覧をアーティファクト（`nextest-list-*`）として残し、実行どうしでテストを比べられるようにします |
 | | `Rust / macOS`、`Rust / Windows` | `ci-os` セット：プラットフォームによって異なるテスト（インストール、起動、更新、ターミナル、stdin と Windows のコンソール、Hands、パス、ファイル、子プロセス、ストア）。ビルドするのもそれらだけです |
 | | `Rust / Lint`（Ubuntu） | `cargo fmt --check`、サンプルのビルド、Clippy（参考扱い。ただし await をまたいで保持される `RefCell` の借用はジョブを失敗させます） |
 | | `Python Remote Script / ubuntu-24.04`、`macos-15`、`windows-2025`（Python 3.11） | Remote Script のテストを実行し、パッケージをコンパイルします |
