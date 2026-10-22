@@ -419,6 +419,14 @@ function M.read(job, params, epoch)
           end
           row = { ref = refs.make(epoch, "pattern", p), number = p - 1, name = song:pattern(p).name, lines = song:pattern(p).number_of_lines,
             slots = array(slots), seqRef = slots[1] and refs.make(epoch, "seq", slots[1]) or nil, place = { n = p, mark = env.pattern_mark() } }
+          -- (#401: the tracks holding lines or automation of their own, not an alias's: a variation's pattern has them on its
+          -- varied track only, so another one is the producer's edit)
+          local own = {}
+          for t = 1, track_count(song) do
+            local pattern_track = song:pattern(p):track(t)
+            if pattern_track.alias_pattern_index == 0 and (not pattern_track.is_empty or #pattern_track.automation > 0) then own[#own + 1] = t end
+          end
+          row.ownTracks = array(own)
         else
           row = missing(why)
         end

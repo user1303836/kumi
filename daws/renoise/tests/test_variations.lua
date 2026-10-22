@@ -164,6 +164,20 @@ test("variations: a variation slot is one step: a new pattern at the end, its ot
   eq(mock.song:track(1).visible_effect_columns, effect_columns)
 end)
 
+test("variations: where tells a variation pattern's own tracks: the varied one, and another once the producer writes there", function()
+  local _, peer = seq_setup()
+  local record = K.change(peer, "slot-variation", variation_input((K.place(peer))), "Kumi: V1 (kv01)")
+  local function own()
+    local where = K.call(peer, "read", { kind = "where", items = { { pattern = record.created.place } } })
+    ok(where.result, json.encode(where.error or {}))
+    return table.concat(where.result.items[1].ownTracks, ",")
+  end
+  eq(own(), "1", "only the varied track holds lines of its own")
+  mock.song:pattern(4):track(3).alias_pattern_index = 0
+  mock.ops.set_note(4, 3, 2, 1, { note = 36, instrument = 0 })
+  eq(own(), "1,3", "the bass the producer wrote")
+end)
+
 test("variations: Kumi's undo of a variation follows it past a slot made before it, refuses one edited since, and is unwritten once Renoise's undo took it", function()
   local _, peer = seq_setup()
   local record = K.change(peer, "slot-variation", variation_input((K.place(peer))))

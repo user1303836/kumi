@@ -114,6 +114,19 @@ impl<S: RefScheme + 'static> RenoiseBackend<S> {
 
     /// Where each item is now (`read {kind: "where"}`): {pattern}, {instrument}, {phrase} (a place or a ref) or {track} (a ref
     /// from `layout`).
+    /// Pattern takes' rows with the varied track's number now (`variedTrack`): what tells their own tracks apart (#401).
+    async fn with_varied_track(&self, set: &RenoiseSet, rows: &mut [Value], signal: &Signal) {
+        if !matches!(set.source.data.placement, Placement::Patterns { .. }) || !rows.iter().any(|row| row.get("ref").is_some()) {
+            return;
+        }
+        let number = self.track_now(set, signal).await.ok().and_then(|reference| reference.rsplit(':').next()?.parse::<u64>().ok());
+        for row in rows.iter_mut().filter(|row| row.get("ref").is_some()) {
+            if let Some(number) = number {
+                row["variedTrack"] = json!(number);
+            }
+        }
+    }
+
     async fn locate(&self, items: Vec<Value>, layout: Option<u64>, signal: &Signal) -> Result<Vec<Value>, String> {
         let answer = self.read(json!({"kind": "where", "items": items}), layout, signal).await?;
         Ok(answer.get("items").and_then(Value::as_array).cloned().unwrap_or_default())
@@ -644,6 +657,7 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
                 found[k] = row;
             }
         }
+        self.with_varied_track(set, &mut found, signal).await;
         Ok(found)
     }
 
@@ -779,7 +793,7 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
             Placement::Phrases { .. } => None,
             Placement::Patterns { .. } => {
                 let slots = row.get("slots").and_then(Value::as_array).map_or(0, Vec::len);
-                (slots != 1).then(|| format!("plays in {slots} slots now"))
+                (slots != 1).then(|| format!("plays in {slots} slots now")).or_else(|| edited_around(row))
             }
         }
     }
@@ -942,6 +956,19 @@ fn data_of(value: &Value) -> Option<RenoiseData> {
 }
 
 /// The one row named `name` (none when none or several are), its ref.
+/// A pattern take whose other tracks hold lines or automation of their own (not its source's, by alias), in words: the producer's
+/// edit around the take, which a drop would take with it (#400 review notes: the digest covers only the varied lines).
+fn edited_around(row: &Value) -> Option<String> {
+    let varied = row.get("variedTrack").and_then(Value::as_u64);
+    let others = row.get("ownTracks").and_then(Value::as_array)?.iter().filter_map(Value::as_u64).filter(|t| Some(*t) != varied).count();
+    (others > 0).then(|| {
+        format!(
+            "has lines or automation of its own on {others} other track{} (written since Kumi made it)",
+            if others == 1 { "" } else { "s" }
+        )
+    })
+}
+
 fn only_named(rows: &[Value], name: &str) -> Option<String> {
     if name.is_empty() {
         return None;
@@ -1111,6 +1138,17 @@ fn named(row: &Value, otherwise: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_pattern_take_with_lines_of_its_own_on_another_track_isnt_dropped() {
+        let row = |own: Value| json!({"slots": [9], "ownTracks": own, "variedTrack": 1});
+        assert_eq!(edited_around(&row(json!([1]))), None, "its varied track only");
+        assert_eq!(
+            edited_around(&row(json!([1, 3]))).as_deref(),
+            Some("has lines or automation of its own on 1 other track (written since Kumi made it)")
+        );
+        assert_eq!(edited_around(&json!({"slots": [9]})), None, "a bridge that doesn't say");
+    }
+
     use super::super::renoise_lines::OPS;
     use super::*;
 
