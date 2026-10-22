@@ -190,7 +190,10 @@ Each push to `main` runs what a pull request that changes installing runs, and
 each tag all of the Installer. The Extended workflow runs every test each week.
 Each night the Installer builds all six bundles with the `release` profile,
 which keeps that profile's build cache warm for the next tag; when that fails,
-it opens an issue ("The nightly Installer build failed").
+it opens an issue ("The nightly Installer build failed"). Each day the Caches
+workflow deletes every Rust build cache but the newest of its kind, so older
+lockfile generations don't push the caches pull requests restore out of the
+repository's 10 GB.
 
 To merge into `main`, `Required CI` and `Willington files` must pass. The Installer isn't required.
 [Releases and distribution](DISTRIBUTION_POLICY.md#merge-gate) has the rest of

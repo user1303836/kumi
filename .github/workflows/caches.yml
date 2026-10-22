@@ -1,0 +1,52 @@
+name: Caches
+
+# Keeps the repository's Actions cache under its 10 GB. Rust's caches are saved from main under a new key whenever the
+# lockfile or the toolchain changes, and the older generation stays until it goes 7 days unused or pushes newer caches
+# out, CI's among them, which pull requests restore. Each day this deletes every Rust cache but the newest of its kind:
+# the same key less its last two parts (the toolchain's and the lockfile's hashes), on the same branch. Nothing restores
+# an older generation once a newer one exists.
+
+on:
+  schedule:
+    - cron: "37 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+concurrency:
+  group: ${{ github.workflow }}
+
+jobs:
+  prune:
+    name: Older Rust cache generations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Delete every Rust cache but the newest of its kind
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh cache list --limit 1000 --json id,key,ref,createdAt,sizeInBytes > caches.json
+          python3 - caches.json > older.txt <<'EOF'
+          import json, sys
+          newest = set()
+          for cache in sorted(json.load(open(sys.argv[1])), key=lambda cache: cache["createdAt"], reverse=True):
+              if not cache["key"].startswith("v0-rust-"):
+                  continue
+              kind = (cache["ref"], cache["key"].rsplit("-", 2)[0])
+              if kind in newest:
+                  print(cache["id"], cache["sizeInBytes"], cache["key"])
+              newest.add(kind)
+          EOF
+          freed=0
+          while read -r id size key; do
+            echo "$key: $((size / 1000000)) MB"
+            gh cache delete "$id"
+            freed=$((freed + size))
+          done < older.txt
+          used="$(gh api "repos/$GH_REPO/actions/cache/usage" --jq .active_caches_size_in_bytes)"
+          echo "Deleted $(wc -l < older.txt | tr -d ' ') older generations, $((freed / 1000000)) MB; $((used / 1000000)) MB in use." | tee -a "$GITHUB_STEP_SUMMARY"

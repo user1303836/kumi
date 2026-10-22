@@ -150,12 +150,13 @@ jobs:
           # And REAPER's extension's (scripts/build-native-release.py): both Mac architectures, in one file, and on Windows
           # the x64 build, which REAPER for Windows on Arm (ARM64EC) loads too.
           targets: ${{ matrix.target }}${{ runner.os == 'macOS' && ',aarch64-apple-darwin,x86_64-apple-darwin' || '' }}${{ matrix.target == 'aarch64-pc-windows-msvc' && ',x86_64-pc-windows-msvc' || '' }}
-      # Saved from main only: pull requests and tags restore main's (ci-release from its pushes, release from its
-      # nightly run).
+      # Saved from main only: ci-release from its pushes, release from its nightly run. Pull requests and tags restore
+      # main's. A run by hand saves nothing: its release caches would only push the nightly's out of the repository's
+      # 10 GB (and a tag's own cache can't be read by later tags).
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
           key: ${{ env.PROFILE }}-${{ matrix.target }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' }}
       # Only the Mac bundles carry the helper Kumi uses Live's menus with; each Mac job builds it (universal, under
       # a minute) instead of waiting for a job of its own.
       - name: Build Kumi's Mac helper
