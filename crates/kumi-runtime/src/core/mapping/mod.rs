@@ -189,7 +189,7 @@ fn settle_padded(samples: &mut [Sample], findings: &mut Vec<String>) {
     unheard.sort_unstable();
     unheard.dedup();
     let run = match (unheard.first(), unheard.last()) {
-        (Some(low), Some(high)) => *low <= 1 && (*high - *low) as usize + 1 <= 2 * unheard.len(),
+        (Some(low), Some(high)) => *low <= 1 && ((*high - *low) as usize) < 2 * unheard.len(),
         _ => false,
     };
     let mut dropped = 0;

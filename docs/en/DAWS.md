@@ -147,11 +147,14 @@ next version), track templates and FX chains.
 
 - **Delivery** (`render_files`): files for a game or a client, one per sound.
   Kumi groups the items into assets (stacked layers make one footstep), names
-  them in the convention the project's regions follow (or as you say), adds
-  tails that stop before the next sound, and makes a region for each in one
-  step. It then checks the files REAPER would write against those names,
-  rendering nothing, and renders exactly those files: never over one that's
-  there unless you say, with REAPER's render settings put back after.
+  the new ones in the convention the project's regions follow (or as you say),
+  adds tails that stop before the next sound, and makes a region for each in
+  one step, rendering its asset's own tracks. It then checks the files REAPER
+  would write against those names, rendering nothing, and renders exactly
+  those files: only the delivery's regions, each its tracks through the
+  master, without the render dialog's normalizing or second format unless you
+  say, never over a file that's there unless you say, with REAPER's render
+  settings put back after.
 - **Drum kits** from sound files: a ReaSamplOmatic5000 per pad, as a folder of
   pad tracks or one container, hi-hats choking.
 - **Sounds from tutorials and references:** `watch_video`, then ReaEQ,

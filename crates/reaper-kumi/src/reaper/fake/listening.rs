@@ -278,7 +278,8 @@ unsafe extern "C" fn get_set_project_info(proj: *mut ReaProject, desc: *const c_
 /// The files REAPER would write with the settings as they are, as 7.82 lists them: the master first (`$tracknumber`
 /// "00"), then each selected track (its number, two digits at least); source 2 alone lists none. (#401) Over every region
 /// (bounds 3), a file a region (`$region` its name), or with the region render matrix (source 8) a file for each track a region
-/// renders (`$track` its name, "Master" for the master); `$project` is "untitled" in the fake.
+/// renders (`$track` its name, "Master" for the master), through the master (8|128) one for each region whose row has a track;
+/// `$project` is "untitled" in the fake.
 fn targets(s: &State) -> Option<Vec<String>> {
     let settings = s.listening.numbers.get("RENDER_SETTINGS").copied().unwrap_or(0.0) as i32;
     let bounds = s.listening.numbers.get("RENDER_BOUNDSFLAG").copied().unwrap_or(0.0) as i32;
@@ -294,8 +295,13 @@ fn targets(s: &State) -> Option<Vec<String>> {
         let mut list = Vec::new();
         for region in regions {
             let named = pattern.replace("$region", &region.name);
-            if settings & 8 != 0 {
-                for id in s.render_matrix.get(&region.number).cloned().unwrap_or_default() {
+            let row = s.render_matrix.get(&region.number).cloned().unwrap_or_default();
+            if settings & (8 | 128) == 8 | 128 {
+                if !row.is_empty() {
+                    list.push(format!("{folder}/{}.wav", named.replace("$track", "Master")));
+                }
+            } else if settings & 8 != 0 {
+                for id in row {
                     list.push(format!("{folder}/{}.wav", named.replace("$track", &track_name(&id))));
                 }
             } else {

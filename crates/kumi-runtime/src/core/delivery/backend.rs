@@ -15,6 +15,9 @@ pub struct Words {
     /// What a render's settings are, for the schema's descriptions: the sources and bounds it takes.
     pub sources: &'static str,
     pub bounds: &'static str,
+    /// The source a delivery renders from by default, and what it renders, in words.
+    pub source: &'static str,
+    pub source_said: &'static str,
 }
 
 /// A region the DAW has: its ref, name and stretch (seconds).
@@ -26,7 +29,7 @@ pub struct Region {
     pub end: f64,
 }
 
-/// A region to add: its stretch, name, and the tracks it renders (refs; none: the master mix).
+/// A region to add: its stretch, name, and the tracks it renders (refs: its asset's, unless others are asked for).
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewRegion {
     pub start: f64,
@@ -35,12 +38,14 @@ pub struct NewRegion {
     pub renders: Vec<String>,
 }
 
-/// The files a render would write: their paths, the folder, and those that are there already.
+/// The files a render would write: their paths, the folder, those that are there already, and what the DAW says of the render
+/// (what of its own settings it turns off or keeps, regions that render nothing).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Targets {
     pub files: Vec<String>,
     pub folder: String,
     pub there: Vec<String>,
+    pub notes: Vec<String>,
 }
 
 #[async_trait(?Send)]

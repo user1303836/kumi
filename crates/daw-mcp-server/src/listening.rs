@@ -676,6 +676,8 @@ impl Host {
             "folder",
             "overwrite",
             "expect",
+            "regionRefs",
+            "dialog",
         ] {
             if let Some(value) = arguments.get(key).filter(|value| !value.is_null()) {
                 params.insert(key.into(), value.clone());

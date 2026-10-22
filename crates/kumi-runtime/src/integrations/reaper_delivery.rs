@@ -20,8 +20,10 @@ pub static WORDS: Words = Words {
     region: "region",
     region_pattern: "$region",
     wildcards: "REAPER's wildcards: $region, $track, $parenttrack, $project, $timelineorder ($timelineorder[00] zero-pads it); $tracknameornumber isn't one",
-    sources: "master: the mix, the default; matrix: each region's tracks in the region render matrix; stems: the tracks in trackRefs",
+    sources: "matrix, the default: each region's tracks (its row in the region render matrix) summed through the master, a file per region; master: the whole mix; stems: a file per track in trackRefs",
     bounds: "regions, the default; selected-regions; project; time-selection; or {start, end} in seconds",
+    source: "matrix",
+    source_said: "each region's own tracks summed through the master, a file per region",
 };
 
 /// Pages of rows read for the items, tracks and regions (200 a page).
@@ -41,13 +43,20 @@ impl<S: RefScheme + 'static> ReaperDelivery<S> {
         self.plan.link().book.borrow_mut().short_ref(long)
     }
 
-    /// The settings as the host takes them: its keys as given, the stems' track refs long, from the epoch they were read in.
+    /// The settings as the host takes them: its keys as given, the refs (a stems render's tracks, the regions that render)
+    /// long, from the epoch they were read in.
     fn host_settings(&self, settings: &Value) -> Result<Value, String> {
         let mut out = settings.clone();
-        if let Some(list) = settings.get("trackRefs").and_then(Value::as_array) {
-            let long: Vec<String> =
-                list.iter().filter_map(Value::as_str).map(|reference| self.plan.lengthen(reference)).collect::<Result<_, _>>()?;
-            out["trackRefs"] = json!(long);
+        let mut placed = false;
+        for key in ["trackRefs", "regionRefs"] {
+            if let Some(list) = settings.get(key).and_then(Value::as_array) {
+                let long: Vec<String> =
+                    list.iter().filter_map(Value::as_str).map(|reference| self.plan.lengthen(reference)).collect::<Result<_, _>>()?;
+                out[key] = json!(long);
+                placed = true;
+            }
+        }
+        if placed {
             let input = out.as_object().cloned().unwrap_or_default();
             self.plan.place_request(&mut out, &input);
         }
@@ -70,12 +79,16 @@ impl<S: RefScheme + 'static> DeliveryBackend for ReaperDelivery<S> {
     }
 
     async fn items(&self, tracks: &[String], selected: bool, signal: &Signal) -> Result<Vec<Item>, String> {
-        let names: BTreeMap<String, String> = self
-            .plan
-            .rows_through(json!({"kind": "track", "limit": 200}), PAGES, signal)
-            .await?
+        let track_rows = self.plan.rows_through(json!({"kind": "track", "limit": 200}), PAGES, signal).await?;
+        let names: BTreeMap<String, String> = track_rows
             .iter()
             .filter_map(|row| Some((row.get("ref")?.as_str()?.to_string(), row.get("name")?.as_str()?.to_string())))
+            .collect();
+        // (a muted track's items are no asset's: a guide, a reference)
+        let muted: Vec<&str> = track_rows
+            .iter()
+            .filter(|row| row.get("mute") == Some(&Value::Bool(true)))
+            .filter_map(|row| row.get("ref")?.as_str())
             .collect();
         let mut rows = Vec::new();
         if tracks.is_empty() {
@@ -92,6 +105,9 @@ impl<S: RefScheme + 'static> DeliveryBackend for ReaperDelivery<S> {
             .filter(|row| row.get("muted") != Some(&Value::Bool(true)))
             .filter_map(|row| {
                 let track = row.get("trackRef")?.as_str()?.to_string();
+                if muted.contains(&track.as_str()) {
+                    return None;
+                }
                 let start = row.get("position")?.as_f64()?;
                 let length = row.get("length")?.as_f64()?;
                 Some(Item {
@@ -135,9 +151,11 @@ impl<S: RefScheme + 'static> DeliveryBackend for ReaperDelivery<S> {
         let answer = self.call("deliver_targets", self.host_settings(settings)?, signal).await?;
         let files =
             answer.get("targets").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
-        let there =
-            answer.get("there").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
-        Ok(Targets { files, folder: answer.get("folder").and_then(Value::as_str).unwrap_or("").to_string(), there })
+        let list = |key: &str| -> Vec<String> {
+            answer.get(key).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect()
+        };
+        let (there, notes) = (list("there"), list("notes"));
+        Ok(Targets { files, folder: answer.get("folder").and_then(Value::as_str).unwrap_or("").to_string(), there, notes })
     }
 
     async fn render(&self, settings: &Value, expect: &[String], signal: &Signal) -> Result<Value, String> {

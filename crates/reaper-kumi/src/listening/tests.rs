@@ -15,7 +15,7 @@ use super::board::State;
 use super::*;
 use crate::extension::{Driver, Extension, Outbox, Snapshot};
 use crate::queue::{self, Job, Outcome};
-use crate::reaper::fake::{self, FakeFx, FakeMedia, FakeParam, FakeSend, FakeTrack};
+use crate::reaper::fake::{self, FakeFx, FakeMarker, FakeMedia, FakeParam, FakeSend, FakeTrack};
 
 #[derive(Clone, Default)]
 struct Recorder(Rc<RefCell<Vec<(String, Value)>>>);
@@ -1760,24 +1760,22 @@ fn a_delivery_dry_run_lists_reapers_files_and_puts_every_setting_back() {
     assert_eq!(render_settings(), before, "every render setting put back before the answer");
 }
 
+fn file_names(list: &Value) -> Vec<String> {
+    list.as_array().unwrap().iter().map(|t| Path::new(t.as_str().unwrap()).file_name().unwrap().to_string_lossy().into_owned()).collect()
+}
+
 #[test]
-fn a_delivery_renders_each_regions_tracks_by_name_and_never_writes_over_a_file_unless_asked() {
+fn a_delivery_renders_a_file_per_region_through_the_master_and_never_writes_over_a_file_unless_asked() {
     let rig = Rig::new();
     fake::with(|s| {
-        s.render_matrix.insert(1, vec!["{BBBB}".into(), "master".into()]);
+        s.render_matrix.insert(1, vec!["{BBBB}".into(), "{CCCC}".into()]);
     });
     let before = render_settings();
     let folder = rig.dir.path().join("game");
-    let spec = json!({"bounds": "regions", "source": "matrix", "pattern": "$region_$track", "folder": folder});
+    let spec = json!({"bounds": "regions", "source": "matrix", "pattern": "$region", "folder": folder});
     let dry = rig.ask("deliver_targets", spec.clone()).unwrap();
-    let names = |list: &Value| -> Vec<String> {
-        list.as_array()
-            .unwrap()
-            .iter()
-            .map(|t| Path::new(t.as_str().unwrap()).file_name().unwrap().to_string_lossy().into_owned())
-            .collect()
-    };
-    assert_eq!(names(&dry["targets"]), ["Verse_Kick.wav", "Verse_Master.wav"]);
+    // The region's two tracks summed: one file, not one a track.
+    assert_eq!(file_names(&dry["targets"]), ["Verse.wav"]);
     let mut asked = spec.clone();
     asked["jobId"] = "d1".into();
     asked["expect"] = dry["targets"].clone();
@@ -1785,23 +1783,102 @@ fn a_delivery_renders_each_regions_tracks_by_name_and_never_writes_over_a_file_u
     assert_eq!(started["state"], "queued");
     let ended = rig.until_ended("d1");
     assert_eq!(ended["state"], "done", "{ended}");
-    assert_eq!(ended["files"].as_array().unwrap().len(), 2);
-    assert!(folder.join("Verse_Kick.wav").exists() && folder.join("Verse_Master.wav").exists());
+    assert_eq!(ended["files"].as_array().unwrap().len(), 1);
+    assert_eq!(fake::with(|s| s.listening.renders.last().unwrap().settings), 8 | 128, "the region render matrix via the master");
+    assert!(folder.join("Verse.wav").exists());
     assert_eq!(render_settings(), before, "the producer's settings are back after the render");
     // The files are there now: refused, and the file stays as it was.
-    let kept = std::fs::metadata(folder.join("Verse_Kick.wav")).unwrap().len();
+    let kept = std::fs::metadata(folder.join("Verse.wav")).unwrap().len();
     let mut again = spec.clone();
     again["jobId"] = "d2".into();
     rig.ask("deliver_start", again).unwrap();
     let ended = rig.until_ended("d2");
     assert_eq!(ended["state"], "failed");
     assert!(ended["error"].as_str().unwrap().contains("there already"), "{ended}");
-    assert_eq!(std::fs::metadata(folder.join("Verse_Kick.wav")).unwrap().len(), kept);
+    assert_eq!(std::fs::metadata(folder.join("Verse.wav")).unwrap().len(), kept);
     let mut over = spec.clone();
     over["jobId"] = "d3".into();
     over["overwrite"] = true.into();
     rig.ask("deliver_start", over).unwrap();
     assert_eq!(rig.until_ended("d3")["state"], "done");
+}
+
+#[test]
+fn a_delivery_of_some_regions_renders_only_theirs_and_puts_every_row_back() {
+    let rig = Rig::new();
+    fake::with(|s| {
+        for (guid, name, number, start) in [("{REG-2}", "Chorus", 2, 20.0), ("{REG-3}", "Outro", 3, 30.0)] {
+            s.markers.push(FakeMarker { guid: guid.into(), is_region: true, start, end: start + 4.0, name: name.into(), number, color: 0 });
+        }
+        s.render_matrix.insert(1, vec!["{BBBB}".into()]);
+        s.render_matrix.insert(2, vec!["{CCCC}".into(), "{BBBB}".into()]);
+    });
+    let rows = || {
+        fake::with(|s| {
+            let mut rows: Vec<(i32, Vec<String>)> = s
+                .render_matrix
+                .iter()
+                .map(|(number, row)| (*number, row.iter().cloned().collect::<std::collections::BTreeSet<_>>().into_iter().collect()))
+                .filter(|(_, row): &(i32, Vec<String>)| !row.is_empty())
+                .collect();
+            rows.sort();
+            rows
+        })
+    };
+    let before = rows();
+    let folder = rig.dir.path().join("game");
+    let ask = |more: Value| {
+        let mut spec = json!({"source": "matrix", "pattern": "$region", "folder": folder});
+        spec.as_object_mut().unwrap().extend(more.as_object().unwrap().clone());
+        rig.ask("deliver_targets", spec).unwrap()
+    };
+    // Every region with a row renders, a file each; the Outro's row is empty.
+    assert_eq!(file_names(&ask(json!({}))["targets"]), ["Verse.wav", "Chorus.wav"]);
+    // Picked, only the Chorus; every row back after.
+    let picked = ask(json!({"regionRefs": ["r:region:{REG-2}"]}));
+    assert_eq!(file_names(&picked["targets"]), ["Chorus.wav"]);
+    assert_eq!(rows(), before, "every row put back");
+    // A region picked with an empty row renders nothing, and is said.
+    let empty = ask(json!({"regionRefs": ["r:region:{REG-3}"]}));
+    assert_eq!(empty["count"], 0);
+    assert!(empty["notes"].to_string().contains("render nothing") && empty["notes"].to_string().contains("Outro"), "{empty}");
+    // The mix of a region picked: through the master's row for the render, the row empty again after.
+    let mix = ask(json!({"source": "master", "regionRefs": ["r:region:{REG-3}"]}));
+    assert_eq!(file_names(&mix["targets"]), ["Outro.wav"]);
+    assert_eq!(rows(), before);
+    // Rendered: only the Chorus, every row back.
+    rig.ask(
+        "deliver_start",
+        json!({"jobId": "d1", "source": "matrix", "pattern": "$region", "folder": folder, "regionRefs": ["r:region:{REG-2}"], "expect": picked["targets"]}),
+    )
+    .unwrap();
+    assert_eq!(rig.until_ended("d1")["state"], "done");
+    assert!(folder.join("Chorus.wav").exists() && !folder.join("Verse.wav").exists());
+    assert_eq!(rows(), before);
+}
+
+#[test]
+fn a_delivery_turns_the_render_dialogs_extras_off_unless_asked_and_says_which() {
+    let rig = Rig::new();
+    producer_settings();
+    let before = render_settings();
+    let folder = rig.dir.path().join("game");
+    let dry = rig.ask("deliver_targets", json!({"pattern": "$region", "folder": folder})).unwrap();
+    assert_eq!(dry["notes"], json!(["the render dialog's normalizing, a second format off for this delivery (dialog: true keeps them)"]));
+    rig.ask("deliver_start", json!({"jobId": "d1", "pattern": "$region", "folder": folder, "expect": dry["targets"]})).unwrap();
+    let ended = rig.until_ended("d1");
+    assert_eq!(ended["state"], "done", "{ended}");
+    assert!(ended["notes"].to_string().contains("off for this delivery"), "{ended}");
+    let seen = fake::with(|s| s.listening.renders.last().unwrap().clone());
+    assert_eq!(seen.normalize, render::NO_POSTPROCESSING, "rendered without them");
+    assert_ne!(seen.settings & render::DELAY_START, 0, "the producer's start delay stays");
+    assert_eq!(render_settings(), before, "and they're back after");
+    // Kept, when asked.
+    let kept = rig.ask("deliver_targets", json!({"pattern": "$region", "folder": folder, "dialog": true})).unwrap();
+    assert!(kept["notes"][0].as_str().unwrap().contains("kept, as asked"), "{kept}");
+    rig.ask("deliver_start", json!({"jobId": "d2", "pattern": "$region", "folder": folder, "dialog": true, "overwrite": true})).unwrap();
+    assert_eq!(rig.until_ended("d2")["state"], "done");
+    assert_eq!(fake::with(|s| s.listening.renders.last().unwrap().normalize), 1.0);
 }
 
 #[test]
@@ -1830,9 +1907,20 @@ fn a_deliverys_settings_are_checked_before_anything_is_set() {
         json!({"pattern": "$region", "folder": folder, "format": "wav", "bits": 20}),
         json!({"pattern": "$region", "folder": folder, "sampleRate": 12345}),
         json!({"pattern": "$region", "folder": folder, "bounds": {"start": 4.0, "end": 2.0}}),
+        // (a render's tail over regions runs into the next region's sound)
+        json!({"pattern": "$region", "folder": folder, "tailMs": 500}),
+        json!({"pattern": "$region", "folder": folder, "bounds": "selected-regions", "tailMs": 500}),
+        json!({"pattern": "$region", "folder": folder, "bounds": "project", "regionRefs": ["r:region:{REG-1}"]}),
+        json!({"source": "stems", "trackRefs": ["r:track:{BBBB}"], "pattern": "$track", "folder": folder, "regionRefs": ["r:region:{REG-1}"]}),
+        json!({"pattern": "$region", "folder": folder, "regionRefs": ["r:track:{BBBB}"]}),
+        json!({"pattern": "$region", "folder": folder, "regionRefs": []}),
     ] {
         assert_eq!(rig.ask("deliver_targets", wrong.clone()).unwrap_err().0, "bad-params", "{wrong}");
     }
+    let gone = rig.ask("deliver_targets", json!({"pattern": "$region", "folder": folder, "regionRefs": ["r:region:{NOPE}"]}));
+    assert_eq!(gone.unwrap_err().0, "gone");
+    // A tail past a stretch's end is fine.
+    rig.ask("deliver_targets", json!({"pattern": "$project", "folder": folder, "bounds": "project", "tailMs": 500})).unwrap();
     // With no folder given or set, the project's own folder; a render folder set relative to it, under it.
     fake::with(|s| s.listening.texts.remove("RENDER_FILE"));
     let answer = rig.ask("deliver_targets", json!({"pattern": "$region"})).unwrap();

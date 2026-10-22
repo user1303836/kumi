@@ -42,12 +42,36 @@ pub fn assets(items: &[Item], gap: f64) -> Vec<Asset> {
     out
 }
 
+/// The item that alone makes an asset of several sounds (a bed or a guide running under them): its index and how many assets
+/// the others would make without it, when that's two or more.
+pub fn bridging(items: &[Item], asset: &Asset, gap: f64) -> Option<(usize, usize)> {
+    if asset.items.len() < 3 {
+        return None;
+    }
+    let length = |k: &usize| items[*k].end - items[*k].start;
+    let longest = *asset.items.iter().max_by(|a, b| length(a).total_cmp(&length(b)))?;
+    let rest: Vec<Item> = asset.items.iter().filter(|&&k| k != longest).map(|&k| items[k].clone()).collect();
+    let apart = assets(&rest, gap).len();
+    (apart >= 2).then_some((longest, apart))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn item(track: &str, start: f64, end: f64) -> Item {
         Item { reference: format!("{track}@{start}"), track: track.into(), track_name: track.into(), start, end, name: String::new() }
+    }
+
+    #[test]
+    fn a_bed_under_the_sounds_is_the_item_that_makes_them_one() {
+        let items = vec![item("bed", 0.0, 30.0), item("heel", 1.0, 1.4), item("heel", 4.0, 4.5), item("heel", 9.0, 9.2)];
+        let found = assets(&items, 0.25);
+        assert_eq!(found.len(), 1, "the bed joins them");
+        assert_eq!(bridging(&items, &found[0], 0.25), Some((0, 3)));
+        // Layers stacked on one sound join nothing.
+        let layers = vec![item("heel", 1.0, 1.4), item("toe", 1.05, 1.3), item("gravel", 1.38, 1.9)];
+        assert_eq!(bridging(&layers, &assets(&layers, 0.25)[0], 0.25), None);
     }
 
     #[test]

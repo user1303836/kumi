@@ -532,7 +532,7 @@ fn listening_tools(daw: Daw, pick: &Value) -> Vec<Value> {
 /// (#401) REAPER's renders for delivery: the producer's own files, named by its wildcards, in their folder.
 fn delivery_tools(daw: Daw, pick: &Value) -> Vec<Value> {
     let spec = json!({
-        "source": {"enum": ["master", "matrix", "stems"], "description": "The mix (the default), each region's tracks in the region render matrix, or the tracks named."},
+        "source": {"enum": ["master", "matrix", "stems"], "description": "The mix (the default), each region's tracks in the region render matrix summed through the master (a file per region), or the tracks named."},
         "bounds": {"description": "regions (the default), selected-regions, project, time-selection, or {start, end} in seconds.", "anyOf": [
             {"enum": ["regions", "selected-regions", "project", "time-selection"]},
             {"type": "object", "properties": {"start": {"type": "number", "minimum": 0}, "end": {"type": "number", "minimum": 0}}, "required": ["start", "end"], "additionalProperties": false}
@@ -542,7 +542,9 @@ fn delivery_tools(daw: Daw, pick: &Value) -> Vec<Value> {
         "bits": {"enum": [16, 24, 32], "description": "A WAV's bit depth (24 by default; 32 is float)."},
         "sampleRate": {"description": "A rate, or project.", "anyOf": [{"enum": [22050, 32000, 44100, 48000, 88200, 96000, 176400, 192000]}, {"enum": ["project"]}]},
         "channels": {"enum": [1, 2]},
-        "tailMs": {"type": "integer", "minimum": 0, "maximum": 30000, "description": "Rendered past each region's end, for reverbs to ring out."},
+        "tailMs": {"type": "integer", "minimum": 0, "maximum": 30000, "description": "Rendered past the end, for reverbs to ring out: project, time-selection or {start, end} only (a region's tail is its own length)."},
+        "regionRefs": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Only these regions render (bounds regions; source master or matrix): their rows of the region render matrix alone for the render, every row put back after."},
+        "dialog": {"type": "boolean", "description": "Keep the render dialog's normalizing, limiter, fades, dither and second format (off for a delivery by default)."},
         "pattern": {"type": "string", "minLength": 1, "maxLength": 512, "description": "The files' names, with the wildcards ($region, $track, $project, $timelineorder…)."},
         "folder": {"type": "string", "description": "A whole path; the project's render folder by default."},
         "overwrite": {"type": "boolean", "description": "Write over files that are there already."},
@@ -562,7 +564,7 @@ fn delivery_tools(daw: Daw, pick: &Value) -> Vec<Value> {
             "title": format!("Deliver from {daw}"),
             "description": format!("Renders the producer's files with {daw}'s own render, as a job: {{jobId, state}}, then listen_job gives {{files}}. It renders only the files the dry run listed (expect), never over a file that's there unless overwrite, and puts every render setting back after."),
             "inputSchema": {"type": "object", "properties": merged(pick, spec), "required": ["pattern"], "additionalProperties": false},
-            "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": true},
+            "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": true},
         }),
     ]
 }

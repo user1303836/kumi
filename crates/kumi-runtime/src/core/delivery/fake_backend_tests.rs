@@ -10,8 +10,16 @@ use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-static WORDS: Words =
-    Words { app: "Fake", region: "region", region_pattern: "$region", wildcards: "$region", sources: "master", bounds: "regions" };
+static WORDS: Words = Words {
+    app: "Fake",
+    region: "region",
+    region_pattern: "$region",
+    wildcards: "$region",
+    sources: "matrix",
+    bounds: "regions",
+    source: "matrix",
+    source_said: "each region's own tracks",
+};
 
 #[derive(Default)]
 struct Fake {
@@ -55,13 +63,23 @@ impl DeliveryBackend for Rc<Fake> {
     async fn targets(&self, settings: &Value, _signal: &Signal) -> Result<Targets, String> {
         let folder = settings.get("folder").and_then(Value::as_str).unwrap_or("/renders").to_string();
         let pattern = settings["pattern"].as_str().unwrap_or("$region").to_string();
-        let mut files: Vec<String> =
-            self.regions.borrow().iter().map(|region| format!("{folder}/{}.wav", pattern.replace("$region", &region.name))).collect();
+        // (only the regions asked for render, when some are)
+        let only: Option<Vec<String>> = settings
+            .get("regionRefs")
+            .and_then(Value::as_array)
+            .map(|refs| refs.iter().filter_map(Value::as_str).map(str::to_owned).collect());
+        let mut files: Vec<String> = self
+            .regions
+            .borrow()
+            .iter()
+            .filter(|region| only.as_ref().is_none_or(|only| only.contains(&region.reference)))
+            .map(|region| format!("{folder}/{}.wav", pattern.replace("$region", &region.name)))
+            .collect();
         if let Some(stray) = self.stray.borrow().clone() {
             files.push(format!("{folder}/{stray}.wav"));
         }
         let there = files.iter().filter(|file| self.there.borrow().contains(file)).cloned().collect();
-        Ok(Targets { files, folder, there })
+        Ok(Targets { files, folder, there, notes: vec![] })
     }
 
     async fn render(&self, settings: &Value, expect: &[String], _signal: &Signal) -> Result<Value, String> {
@@ -118,27 +136,39 @@ async fn assets_are_planned_in_the_projects_convention_regions_made_in_one_chang
     let made = run(&tool, json!({"action": "regions", "tailMs": 2500})).await.unwrap();
     assert_eq!(made["made"]["change"], "c1");
     assert_eq!(fake.added.borrow().len(), 1, "one change");
-    assert_eq!(fake.added.borrow()[0].len(), 3);
+    let added = fake.added.borrow()[0].clone();
+    assert_eq!(added.len(), 3);
+    assert_eq!(added[0].renders, ["t:Heel", "t:Toe", "t:Gravel"], "each region renders its asset's own tracks");
+    assert_eq!(added[2].renders, ["t:Heel"]);
+    assert!(made["next"].as_str().unwrap().contains("source matrix, the default"), "{made}");
     // The same again: each has its region already.
     let again = run(&tool, json!({"action": "regions", "tailMs": 2500})).await.unwrap_err();
     assert!(again.contains("already"), "{again}");
 
-    // The dry run, against the names planned: it lists the two older regions too, so it isn't what was planned.
+    // The dry run, against the names planned: only their regions render, not the project's older two.
     let names = json!(["Footstep_Gravel_03", "Footstep_Gravel_04", "Footstep_Gravel_05"]);
     let checked = run(&tool, json!({"action": "check", "names": names, "folder": "/game"})).await.unwrap();
-    assert_eq!(checked["ok"], false, "{checked}");
-    assert_eq!(checked["extra"], json!(["Footstep_Gravel_01", "Footstep_Gravel_02"]));
-    let refused = run(&tool, json!({"action": "render", "names": names, "folder": "/game"})).await.unwrap_err();
-    assert!(refused.starts_with("nothing was rendered"), "{refused}");
-    assert!(fake.rendered.borrow().is_empty());
-    // With the older regions gone (selected regions, in a real DAW), it matches and renders exactly those files.
-    fake.regions.borrow_mut().retain(|region| region.name.as_str() >= "Footstep_Gravel_03");
-    let checked = run(&tool, json!({"action": "check", "names": names, "folder": "/game"})).await.unwrap();
     assert_eq!(checked["ok"], true, "{checked}");
-    let rendered = run(&tool, json!({"action": "render", "names": names, "folder": "/game", "format": "wav", "bits": 24})).await.unwrap();
+    // Without names, every region renders.
+    assert_eq!(run(&tool, json!({"action": "check", "folder": "/game"})).await.unwrap()["count"], 5);
+    // A file nobody planned is extra, and stops the render.
+    *fake.stray.borrow_mut() = Some("Footstep_Gravel_03_alt".into());
+    let refused = run(&tool, json!({"action": "render", "names": names, "folder": "/game"})).await.unwrap_err();
+    assert!(refused.starts_with("nothing was rendered") && refused.contains("extra"), "{refused}");
+    assert!(fake.rendered.borrow().is_empty());
+    *fake.stray.borrow_mut() = None;
+    // A region named that isn't there is said.
+    let unknown = run(&tool, json!({"action": "check", "regions": ["Footstep_Gravel_09"]})).await.unwrap_err();
+    assert!(unknown.contains("no region is named"), "{unknown}");
+    let rendered = run(&tool, json!({"action": "render", "names": names, "folder": "/game", "format": "wav", "bits": 24, "tailMs": 500}))
+        .await
+        .unwrap();
     assert_eq!(rendered["count"], 3);
     let (settings, expect) = fake.rendered.borrow()[0].clone();
     assert_eq!(settings["pattern"], "$region", "a file per region by default");
+    assert_eq!(settings["source"], "matrix", "from the DAW's delivery source by default");
+    assert_eq!(settings["regionRefs"], json!(["r:Footstep_Gravel_03", "r:Footstep_Gravel_04", "r:Footstep_Gravel_05"]));
+    assert!(settings.get("tailMs").is_none(), "a tail is the regions', never the render's: {settings}");
     assert_eq!(settings["bits"], 24);
     assert_eq!(expect, ["/game/Footstep_Gravel_03.wav", "/game/Footstep_Gravel_04.wav", "/game/Footstep_Gravel_05.wav"]);
 }
@@ -162,4 +192,39 @@ async fn a_render_never_writes_over_files_unless_asked_and_a_clash_or_a_bad_name
     let checked = run(&tool, json!({"action": "check"})).await.unwrap();
     assert_eq!(checked["clashes"], json!(["UI_Click_001-001"]));
     assert!(run(&tool, json!({"action": "render", "overwrite": true})).await.unwrap_err().starts_with("nothing was rendered"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn assets_with_regions_keep_their_names_only_new_ones_are_numbered_and_a_bed_under_them_is_said() {
+    let fake = footsteps();
+    // The first two footsteps have their regions from an earlier delivery.
+    fake.regions.borrow_mut().extend([
+        Region { reference: "r:3".into(), name: "Footstep_Gravel_03".into(), start: 10.0, end: 10.9 },
+        Region { reference: "r:4".into(), name: "Footstep_Gravel_04".into(), start: 12.0, end: 12.7 },
+    ]);
+    let tool = Delivery::new(fake.clone()).tool();
+    let planned = run(&tool, json!({})).await.unwrap();
+    let names: Vec<&str> = planned["assets"].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["Footstep_Gravel_03", "Footstep_Gravel_04", "Footstep_Gravel_05"], "{planned}");
+    assert!(planned["assets"][0]["region"].as_str().unwrap().starts_with("there already"));
+    assert!(planned["assets"][2].get("region").is_none());
+    run(&tool, json!({"action": "regions"})).await.unwrap();
+    let added = fake.added.borrow()[0].clone();
+    assert_eq!(added.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["Footstep_Gravel_05"], "only the new one, next in the row");
+
+    // A first that lands on a name a region has is a problem, and makes nothing.
+    let fake = footsteps();
+    let tool = Delivery::new(fake.clone()).tool();
+    let planned = run(&tool, json!({"first": 2})).await.unwrap();
+    assert!(planned["problems"].to_string().contains("a region's name already"), "{planned}");
+    assert!(run(&tool, json!({"action": "regions", "first": 2})).await.unwrap_err().contains("won't do"));
+    assert!(fake.added.borrow().is_empty());
+
+    // A long item under the footsteps makes them one asset: said, with the way out.
+    let mut bed = footsteps();
+    Rc::get_mut(&mut bed).unwrap().items.push(Item { name: "Ambience".into(), ..item("Bed", 9.0, 15.0) });
+    let tool = Delivery::new(bed).tool();
+    let planned = run(&tool, json!({})).await.unwrap();
+    assert_eq!(planned["assets"].as_array().unwrap().len(), 1);
+    assert!(planned["said"].to_string().contains("“Ambience” on “Bed” (6.0 s) runs under 3 sounds"), "{planned}");
 }

@@ -1,7 +1,7 @@
 //! The render_files tool, the same in every DAW: plan assets from the timeline's items (named in the project's own convention),
 //! make their regions in one change, check what a render would write (the DAW's own dry run, against the names planned), and
 //! render it, the DAW's render settings put back after. The DAW's backend reads, adds regions, lists and renders.
-use super::assets::{assets, Asset};
+use super::assets::{assets, bridging, Asset};
 use super::backend::{DeliveryBackend, NewRegion, Region, Targets};
 use super::naming::{convention, numbered, problems};
 use crate::core::contracts::{JsonObject, KernelTool, Reach, ToolResult};
@@ -26,9 +26,10 @@ const SAME_SPAN: f64 = 0.05;
 /// What a tail stops short of: the next asset's start (seconds).
 const BEFORE_NEXT: f64 = 0.01;
 
-/// The keys a render's settings take, passed to the DAW as given.
+/// The keys a render's settings take, passed to the DAW as given. (No tail: tailMs makes the regions longer, up to the next
+/// sound; a render's own tail would run on past each region's end into the next one.)
 const SETTINGS: [&str; 11] =
-    ["source", "bounds", "trackRefs", "format", "bits", "sampleRate", "channels", "tailMs", "pattern", "folder", "overwrite"];
+    ["source", "bounds", "trackRefs", "format", "bits", "sampleRate", "channels", "pattern", "folder", "overwrite", "dialog"];
 
 pub struct Delivery<B: DeliveryBackend> {
     backend: B,
@@ -36,14 +37,24 @@ pub struct Delivery<B: DeliveryBackend> {
     schema: JsonObject,
 }
 
-/// An asset planned: its name, its stretch (with the tail), its items' tracks, and the region there already, if any.
+/// An asset planned: its name, its stretch (with the tail), its items' tracks (names, and refs: what its region renders), and
+/// the region there already, if any.
 struct Planned {
     name: String,
     start: f64,
     end: f64,
     tracks: Vec<String>,
+    renders: Vec<String>,
     layers: usize,
     there: Option<String>,
+}
+
+/// The assets planned, how they're named, what to say of them, and the names the DAW's regions have now.
+struct Assets {
+    planned: Vec<Planned>,
+    naming: String,
+    said: Vec<String>,
+    taken: Vec<String>,
 }
 
 impl<B: DeliveryBackend + 'static> Delivery<B> {
@@ -66,8 +77,9 @@ impl<B: DeliveryBackend + 'static> Delivery<B> {
         }
     }
 
-    /// The assets of the items asked for, named: as asked (name), else in the convention the project's regions follow.
-    async fn assets(&self, input: &JsonObject, signal: &Signal) -> Result<(Vec<Planned>, String, Vec<String>), String> {
+    /// The assets of the items asked for, named: an asset with its region by the region's name, the new ones numbered in a
+    /// row as asked (name), else in the convention the project's regions follow.
+    async fn assets(&self, input: &JsonObject, signal: &Signal) -> Result<Assets, String> {
         let region = self.backend.words().region;
         let tracks: Vec<String> = strings(input.get("onTracks"));
         let selected = input.get("selectedOnly").and_then(Value::as_bool).unwrap_or(false);
@@ -116,6 +128,7 @@ impl<B: DeliveryBackend + 'static> Delivery<B> {
         let tail = input.get("tailMs").and_then(Value::as_f64).unwrap_or(0.).clamp(0., 30_000.) / 1000.;
         let mut said = Vec::new();
         let mut planned = Vec::new();
+        let mut fresh = 0;
         for (k, asset) in found.iter().enumerate() {
             let next = found.get(k + 1).map(|next: &Asset| next.start);
             let mut end = asset.end + tail;
@@ -123,39 +136,62 @@ impl<B: DeliveryBackend + 'static> Delivery<B> {
                 end = (next - BEFORE_NEXT).max(asset.end);
                 said.push(format!("the tail of asset {} stops before the next sound starts", k + 1));
             }
-            let mut tracks: Vec<String> = Vec::new();
+            let (mut tracks, mut renders): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
             for &at in &asset.items {
                 if !tracks.contains(&items[at].track_name) {
                     tracks.push(items[at].track_name.clone());
                 }
+                if !renders.contains(&items[at].track) {
+                    renders.push(items[at].track.clone());
+                }
+            }
+            if let Some((bed, apart)) = bridging(&items, asset, gap) {
+                let bed = &items[bed];
+                said.push(format!(
+                    "asset {} is one only because {} on {} ({:.1} s) runs under {apart} sounds: onTracks without {} keeps them apart",
+                    k + 1,
+                    if bed.name.is_empty() { "an item".to_string() } else { quoted(&bed.name) },
+                    quoted(&bed.track_name),
+                    bed.end - bed.start,
+                    quoted(&bed.track_name)
+                ));
             }
             let there = regions
                 .iter()
                 .find(|region: &&Region| (region.start - asset.start).abs() <= SAME_SPAN && (region.end - end).abs() <= SAME_SPAN.max(tail))
                 .map(|region| region.name.clone());
-            planned.push(Planned {
-                name: numbered(&stem, &separator, pad, first + k),
-                start: asset.start,
-                end,
-                tracks,
-                layers: asset.items.len(),
-                there,
-            });
+            // (an asset with its region is that region's file: only the new ones are numbered, in a row from first)
+            let name = match &there {
+                Some(name) => name.clone(),
+                None => {
+                    fresh += 1;
+                    numbered(&stem, &separator, pad, first + fresh - 1)
+                }
+            };
+            planned.push(Planned { name, start: asset.start, end, tracks, renders, layers: asset.items.len(), there });
         }
-        Ok((planned, naming, said))
+        Ok(Assets { planned, naming, said, taken: names })
     }
 
     async fn plan(&self, input: &JsonObject, make: bool, signal: &Signal) -> Result<Value, String> {
-        let region = self.backend.words().region;
-        let (planned, naming, mut said) = self.assets(input, signal).await?;
-        let names: Vec<String> = planned.iter().map(|p| p.name.clone()).collect();
-        let found = problems(&names);
+        let words = self.backend.words();
+        let region = words.region;
+        let Assets { planned, naming, mut said, taken } = self.assets(input, signal).await?;
+        // (the new names only: those there are the regions' own, as the producer named them)
+        let names: Vec<String> = planned.iter().filter(|p| p.there.is_none()).map(|p| p.name.clone()).collect();
+        let mut found = problems(&names);
+        if let Some(twice) = names.iter().find(|name| taken.iter().any(|old| old.to_lowercase() == name.to_lowercase())) {
+            found.push(format!(
+                "{} is a {region}'s name already: two files of one name (first: a number past the highest there)",
+                quoted(twice)
+            ));
+        }
         let rows: Vec<Value> = planned
             .iter()
             .map(|p| {
                 let mut row = json!({"name": p.name, "from": round(p.start), "to": round(p.end), "layers": p.layers, "tracks": p.tracks});
-                if let Some(there) = &p.there {
-                    row["region"] = json!(format!("there already: {}", quoted(there)));
+                if p.there.is_some() {
+                    row["region"] = json!("there already: its file has its name");
                 }
                 row
             })
@@ -180,7 +216,12 @@ impl<B: DeliveryBackend + 'static> Delivery<B> {
         let new: Vec<NewRegion> = planned
             .iter()
             .filter(|p| p.there.is_none())
-            .map(|p| NewRegion { start: p.start, end: p.end, name: p.name.clone(), renders: renders.clone() })
+            .map(|p| NewRegion {
+                start: p.start,
+                end: p.end,
+                name: p.name.clone(),
+                renders: if renders.is_empty() { p.renders.clone() } else { renders.clone() },
+            })
             .collect();
         if new.is_empty() {
             return Err(format!("each asset has its {region} already: check lists the files a render would write"));
@@ -193,13 +234,16 @@ impl<B: DeliveryBackend + 'static> Delivery<B> {
         if !said.is_empty() {
             reply["said"] = json!(said);
         }
-        reply["next"] = json!("check lists the files a render would write (names: these), then render writes them");
+        reply["next"] = json!(format!(
+            "check lists the files a render would write (names: these, and only their {region}s render; source {}, the default: {}), then render writes them",
+            words.source, words.source_said
+        ));
         Ok(reply)
     }
 
     /// The DAW's dry run, measured against the names expected: what's missing, what's extra, clashes and names that won't do.
     async fn check(&self, input: &JsonObject, signal: &Signal) -> Result<(Value, Targets, bool), String> {
-        let settings = self.settings(input);
+        let settings = self.settings(input, signal).await?;
         let targets = self.backend.targets(&settings, signal).await?;
         let stems: Vec<String> = targets.files.iter().map(|file| stem_of(file)).collect();
         let expected = strings(input.get("names"));
@@ -228,6 +272,9 @@ impl<B: DeliveryBackend + 'static> Delivery<B> {
         if !targets.there.is_empty() {
             reply["there"] = json!(targets.there.iter().map(|file| stem_of(file)).collect::<Vec<_>>());
         }
+        if !targets.notes.is_empty() {
+            reply["notes"] = json!(targets.notes);
+        }
         reply["next"] = json!(if blocking {
             "fix what the check found before rendering (names, regions, the pattern)".to_string()
         } else if !targets.there.is_empty() {
@@ -251,23 +298,49 @@ impl<B: DeliveryBackend + 'static> Delivery<B> {
                 stem_of(&targets.there[0])
             ));
         }
-        let settings = self.settings(input);
+        let settings = self.settings(input, signal).await?;
         let done = self.backend.render(&settings, &targets.files, signal).await?;
         Ok(
             json!({"rendered": done, "folder": targets.folder, "count": targets.files.len(), "said": format!("{} rendered with the settings asked; every render setting is back as it was", self.backend.words().app)}),
         )
     }
 
-    /// The render's settings from the input: the keys the DAW takes, the pattern by default a file per region.
-    fn settings(&self, input: &JsonObject) -> Value {
+    /// The render's settings from the input: the keys the DAW takes, by default a file per region from the DAW's delivery
+    /// source; and the regions that render (`regionRefs`): those named in regions, else, from the default source over regions,
+    /// those the names name when each is a region's (a delivery's own, not every region the project has).
+    async fn settings(&self, input: &JsonObject, signal: &Signal) -> Result<Value, String> {
+        let words = self.backend.words();
         let mut settings = serde_json::Map::new();
         for key in SETTINGS {
             if let Some(value) = input.get(key).filter(|value| !value.is_null()) {
                 settings.insert(key.into(), value.clone());
             }
         }
-        settings.entry("pattern").or_insert(json!(self.backend.words().region_pattern));
-        Value::Object(settings)
+        settings.entry("pattern").or_insert(json!(words.region_pattern));
+        let asked = strings(input.get("regions"));
+        let names = strings(input.get("names"));
+        let by_default = !settings.contains_key("source") && input.get("bounds").is_none_or(|bounds| *bounds == "regions");
+        settings.entry("source").or_insert(json!(words.source));
+        if asked.is_empty() && (names.is_empty() || !by_default) {
+            return Ok(Value::Object(settings));
+        }
+        let regions = self.backend.regions(signal).await?;
+        let named = |name: &String| -> Vec<String> { regions.iter().filter(|r| r.name == *name).map(|r| r.reference.clone()).collect() };
+        let mut picked = Vec::new();
+        for name in &asked {
+            let found = named(name);
+            if found.is_empty() {
+                return Err(format!("no {} is named {}: action regions makes the assets' {}s", words.region, quoted(name), words.region));
+            }
+            picked.extend(found);
+        }
+        if asked.is_empty() && names.iter().all(|name| !named(name).is_empty()) {
+            picked = names.iter().flat_map(named).collect();
+        }
+        if !picked.is_empty() {
+            settings.insert("regionRefs".into(), json!(picked));
+        }
+        Ok(Value::Object(settings))
     }
 }
 
@@ -290,7 +363,7 @@ fn quoted(name: &str) -> String {
 fn description(words: &super::backend::Words) -> String {
     let region = words.region;
     format!(
-        "Deliver files from {app}: one per sound, named for the game or the client. action plan (the default) groups the items into assets (items stacked or within gap seconds, 0.25 by default, are one sound: three layers of a footstep make one) and names them in the convention the project's {region}s follow (Footstep_Gravel_07 goes on to _08), or as name asks (separator _ and pad 2 by default); tailMs lets reverbs ring out (never into the next sound). action regions makes a {region} for each asset not there yet, in one change (renders: the tracks each renders; the master mix by default). action check lists the files a render would write, from {app}'s own dry run, without rendering: give names (the assets' names) and it says what's missing, extra, clashing or there already. action render checks again and writes exactly those files, never over one that's there unless overwrite: true, and puts every render setting back. Settings: pattern ({wildcards}; {pattern} by default: a file per {region}), source ({sources}), bounds ({bounds}), format (wav with bits 16, 24 or 32 float, or project: the format set in {app}'s render dialog, for MP3 or FLAC), sampleRate, channels, folder (the project's render folder by default). Ask only for what the producer must decide: the names, the format and rate the game takes.",
+        "Deliver files from {app}: one per sound, named for the game or the client. action plan (the default) groups the items into assets (items stacked or within gap seconds, 0.25 by default, are one sound: three layers of a footstep make one) and names them in the convention the project's {region}s follow (Footstep_Gravel_07 goes on to _08), or as name asks (separator _ and pad 2 by default); an asset with its {region} already keeps the {region}'s name, and only the new ones are numbered. tailMs makes each {region} run on past its sound for reverbs to ring out (never into the next sound). action regions makes a {region} for each asset not there yet, in one change, each rendering its asset's own tracks (renders: other tracks for all of them). action check lists the files a render would write, from {app}'s own dry run, without rendering: give names (the assets' names) and it says what's missing, extra, clashing or there already; only the {region}s the names name render (regions: name others). action render checks again and writes exactly those files, never over one that's there unless overwrite: true, and puts every render setting back. Settings: pattern ({wildcards}; {pattern} by default: a file per {region}), source ({sources}), bounds ({bounds}), format (wav with bits 16, 24 or 32 float, or project: the format set in {app}'s render dialog, for MP3 or FLAC), sampleRate, channels, folder (the project's render folder by default), dialog (true keeps the render dialog's normalizing, limiter, fades, dither and second format, off for a delivery by default). Ask only for what the producer must decide: the names, the format and rate the game takes.",
         app = words.app,
         wildcards = words.wildcards,
         pattern = words.region_pattern,
@@ -312,9 +385,11 @@ fn schema(words: &super::backend::Words) -> JsonObject {
             "separator": {"type": "string", "maxLength": 2},
             "pad": {"type": "integer", "minimum": 1, "maximum": 6},
             "first": {"type": "integer", "minimum": 0},
-            "tailMs": {"type": "number", "minimum": 0, "maximum": 30000},
-            "renders": {"type": "array", "items": {"type": "string"}, "description": format!("The tracks each new {} renders", words.region)},
+            "tailMs": {"type": "number", "minimum": 0, "maximum": 30000, "description": format!("How far each {} runs on past its sound", words.region)},
+            "renders": {"type": "array", "items": {"type": "string"}, "description": format!("The tracks each new {} renders (its asset's own by default)", words.region)},
             "names": {"type": "array", "items": {"type": "string"}, "maxItems": 2000, "description": "The names the files should have"},
+            "regions": {"type": "array", "items": {"type": "string"}, "maxItems": 2000, "description": format!("The {}s that render, by name (by default those the names name)", words.region)},
+            "dialog": {"type": "boolean", "description": "Keep the render dialog's normalizing, limiter, fades, dither and second format"},
             "pattern": {"type": "string", "minLength": 1, "maxLength": 512},
             "source": {"type": "string", "enum": ["master", "matrix", "stems"]},
             "bounds": {"description": "regions, selected-regions, project, time-selection, or {start, end} in seconds", "anyOf": [

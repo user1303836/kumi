@@ -71,9 +71,9 @@ const STEMS_AND_MASTER: i32 = 1;
 const STEMS_ONLY: i32 = 3;
 const PRE_FADER: i32 = 8192;
 /// "Delay render start to allow FX to initialize": the producer's choice stays (with its `RENDER_DELAY`).
-const DELAY_START: i32 = 16 << 16;
+pub(super) const DELAY_START: i32 = 16 << 16;
 /// `RENDER_NORMALIZE`: disable all render postprocessing (normalize, limit, fades, trim, pad).
-const NO_POSTPROCESSING: f64 = (4 << 16) as f64;
+pub(super) const NO_POSTPROCESSING: f64 = (4 << 16) as f64;
 
 /// What a source's file is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
