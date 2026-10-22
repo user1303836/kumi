@@ -33,7 +33,20 @@ test("chores: a script kept is a menu entry and a shortcut running its file, aga
   local broken = { slug = "tidy-hats", name = "Hats: tidy", code = "error('no hats')", replace = true }
   ok(K.call(peer, "script_install", broken).result)
   mock.menu_entries[ENTRY].invoke()
-  ok(mock.statuses[#mock.statuses]:find("Kumi: Hats: tidy stopped: .*no hats"), mock.statuses[#mock.statuses])
+  ok(mock.statuses[#mock.statuses]:find("Kumi: Hats: tidy: stopped: .*no hats"), mock.statuses[#mock.statuses])
+  -- A run is one step of Renoise's undo, named for it; what it prints goes to the status bar.
+  local printing = { slug = "tidy-hats", name = "Hats: tidy", code = "song:track(2).name = 'Hat 2' print('renamed', 1)", replace = true }
+  ok(K.call(peer, "script_install", printing).result)
+  mock.menu_entries[ENTRY].invoke()
+  eq(K.newest(), "Kumi: Hats: tidy")
+  eq(mock.statuses[#mock.statuses], "Kumi: Hats: tidy: renamed\t1")
+  -- One that runs on is stopped past its time, and says so.
+  local forever = { slug = "tidy-hats", name = "Hats: tidy", code = "while true do end", replace = true }
+  ok(K.call(peer, "script_install", forever).result)
+  mock.clock_step_ms = 10
+  mock.menu_entries[ENTRY].invoke()
+  mock.clock_step_ms = 0
+  ok(mock.statuses[#mock.statuses]:find("Kumi stopped it: it ran longer than 5 s", 1, true), mock.statuses[#mock.statuses])
   -- A reload registers it again, by the new payload.
   local before = mock.menu_entries[ENTRY].invoke
   eq(K.call(peer, "renoise.reload").result.reloading, true)

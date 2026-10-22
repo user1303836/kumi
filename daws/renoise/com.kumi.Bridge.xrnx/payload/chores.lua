@@ -53,8 +53,17 @@ local function wrapped(name, description, code)
     .. "local song = renoise.song()\n" .. code .. "\n"
 end
 
--- What a menu entry or a shortcut runs: the file as it is now, an error on the status bar and Renoise's console.
+-- The longest a kept chore runs: Renoise's watchdog speaks up near 10 s, and the bridge's timers and sockets wait meanwhile.
+M.LIMIT_MS = 5000
+
+-- What a menu entry or a shortcut runs: the file as it is now, as run_lua runs a chunk (a scope of its own with `song`, one
+-- named step of Renoise's undo, stopped past M.LIMIT_MS with the JIT off meanwhile), what it prints and an error on the
+-- status bar and Renoise's console, never a dialog.
 local function runner(path, name)
+  local function say(text)
+    print("Kumi: " .. name .. ": " .. text)
+    renoise.app():show_status("Kumi: " .. name .. ": " .. text)
+  end
   return function()
     local file = io.open(path, "rb")
     if not file then
@@ -64,12 +73,32 @@ local function runner(path, name)
     local text = file:read("*a")
     file:close()
     local chunk, err = loadstring(text, "=" .. name)
-    local ok = chunk ~= nil
-    if chunk then ok, err = pcall(chunk) end
-    if not ok then
-      print("Kumi: " .. name .. ": " .. tostring(err))
-      renoise.app():show_status("Kumi: " .. name .. " stopped: " .. tostring(err))
+    if not chunk then return say("it doesn't compile: " .. tostring(err)) end
+    local song = renoise.song()
+    if not song then return say("no song is open") end
+    setfenv(chunk, setmetatable({
+      song = song,
+      print = function(...)
+        local parts = {}
+        for i = 1, select("#", ...) do parts[i] = tostring((select(i, ...))) end
+        say(table.concat(parts, "\t"))
+      end,
+    }, { __index = _G }))
+    song:describe_undo("Kumi: " .. name)
+    -- (a loop the JIT compiles never sees the hook: the JIT is off while it runs)
+    local jitted = jit and jit.status and jit.status()
+    if jitted then
+      jit.off()
+      jit.flush()
     end
+    local deadline = os.clock() * 1000 + M.LIMIT_MS
+    debug.sethook(function()
+      if os.clock() * 1000 > deadline then error(string.format("Kumi stopped it: it ran longer than %d s", M.LIMIT_MS / 1000), 2) end
+    end, "", 1000)
+    local ok, why = pcall(chunk)
+    debug.sethook()
+    if jitted then jit.on() end
+    if not ok then say("stopped: " .. tostring(why)) end
   end
 end
 

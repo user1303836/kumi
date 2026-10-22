@@ -57,12 +57,40 @@ fn lua_string(text: &str) -> String {
     out
 }
 
+/// The longest a kept chore runs (seconds): REAPER waits for an action, its window frozen.
+const LIMIT_S: u32 = 10;
+
 /// The file REAPER runs: the chunk as a function, called inside one undo block named for it, the screen held still while it
-/// runs, an error on REAPER's console.
+/// runs, stopped past its time where REAPER's Lua has a debug hook, what it prints and an error on REAPER's console.
 pub fn wrapped(name: &str, description: &str, code: &str) -> String {
     let about = if description.is_empty() { String::new() } else { format!("-- {description}\n") };
     format!(
-        "-- Kumi: {name}\n{about}-- Kept by Kumi (its scripts tool removes it). It runs as one step of REAPER's undo.\nlocal function chore()\n{code}\nend\nreaper.Undo_BeginBlock()\nreaper.PreventUIRefresh(1)\nlocal ok, err = pcall(chore)\nreaper.PreventUIRefresh(-1)\nreaper.UpdateArrange()\nreaper.Undo_EndBlock({title}, -1)\nif not ok then reaper.ShowConsoleMsg({prefix} .. tostring(err) .. \"\\n\") end\n",
+        r##"-- Kumi: {name}
+{about}-- Kept by Kumi (its scripts tool removes it). It runs as one step of REAPER's undo.
+local function print(...)
+  local parts = {{}}
+  for i = 1, select("#", ...) do parts[i] = tostring((select(i, ...))) end
+  reaper.ShowConsoleMsg(table.concat(parts, "\t") .. "\n")
+end
+local function chore()
+{code}
+end
+reaper.Undo_BeginBlock()
+reaper.PreventUIRefresh(1)
+local hooked = debug and debug.sethook
+if hooked then
+  local deadline = reaper.time_precise() + {LIMIT_S}
+  debug.sethook(function()
+    if reaper.time_precise() > deadline then error("Kumi stopped it: it ran longer than {LIMIT_S} s", 2) end
+  end, "", 1000)
+end
+local ok, err = pcall(chore)
+if hooked then debug.sethook() end
+reaper.PreventUIRefresh(-1)
+reaper.UpdateArrange()
+reaper.Undo_EndBlock({title}, -1)
+if not ok then reaper.ShowConsoleMsg({prefix} .. tostring(err) .. "\n") end
+"##,
         title = lua_string(name),
         prefix = lua_string(&format!("{name}: "))
     )
@@ -132,6 +160,11 @@ mod tests {
         let text = std::fs::read_to_string(&file).unwrap();
         assert!(text.starts_with("-- Kumi: Colour the drums\n-- Drums red, by name\n"), "{text}");
         assert!(text.contains("local function chore()\nreturn 1\nend") && text.contains("reaper.Undo_EndBlock(\"Colour the drums\", -1)"));
+        assert!(
+            text.contains("local function print(...)") && text.contains("reaper.ShowConsoleMsg(table.concat(parts, \"\\t\") .. \"\\n\")"),
+            "{text}"
+        );
+        assert!(text.contains("error(\"Kumi stopped it: it ran longer than 10 s\", 2)"), "{text}");
         assert_eq!(fake::with(|s| (s.scripts.len(), s.kb_writes)), (1, 1), "registered, in REAPER's key map");
         assert!(kept["command"].as_str().unwrap().starts_with("_RS"), "{kept}");
         assert!(kept["where"].as_str().unwrap().contains("in REAPER's Action List (its command _RS"), "{kept}");
