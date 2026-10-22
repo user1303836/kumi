@@ -458,6 +458,28 @@ async fn nothing_renders_while_the_daw_plays_and_a_take_that_clips_where_the_sou
     assert_eq!(daw.renders.get(), 2, "the take, then the take drawn again");
 }
 
+/// (#400 review notes) Numbers once given to takes of a name never come back, though Kumi let go of the set that gave them (it
+/// holds 8): the takes may still be in the project.
+#[tokio::test(flavor = "current_thread")]
+async fn a_takes_number_never_comes_back_after_its_set_is_let_go() {
+    let home = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let tool = kumi(&daw, home.path());
+    let first = run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 2, "seed": 6, "listen": false})).await.unwrap();
+    assert_eq!(first["takes"][1]["take"], "V2", "{first}");
+    for k in 0..8 {
+        let name = format!("Other {k}");
+        run(&tool, json!({"action": "make", "source": {"steps": BEAT, "name": name}, "count": 1, "seed": 7, "listen": false}))
+            .await
+            .unwrap();
+    }
+    let again =
+        run(&tool, json!({"action": "make", "source": {"steps": BEAT, "key": "beat again"}, "count": 1, "seed": 8, "listen": false}))
+            .await
+            .unwrap();
+    assert_eq!(again["takes"][0]["take"], "V3", "after V2, whose set Kumi let go of: {again}");
+}
+
 /// (#400 review notes) A set whose source moved (its position in its key) goes on when a make names that source where it is now,
 /// and a source now at its old position starts a set of its own.
 #[tokio::test(flavor = "current_thread")]

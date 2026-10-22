@@ -35,6 +35,9 @@ pub struct Variations<B: VariationsBackend> {
     backend: B,
     home: PathBuf,
     sets: RefCell<Vec<Set<B>>>,
+    /// The highest number given to takes of each name (a set's short), kept past the sets Kumi lets go of: a take's name never
+    /// comes back while one of that name may still be in the project (#400 review notes).
+    numbered: RefCell<BTreeMap<String, usize>>,
     /// The project whose sets are loaded.
     loaded: RefCell<Option<String>>,
     description: String,
@@ -50,6 +53,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             backend,
             home,
             sets: RefCell::default(),
+            numbered: RefCell::default(),
             loaded: RefCell::default(),
         })
     }
@@ -107,6 +111,12 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         let kept = project
             .and_then(|project| std::fs::read_to_string(self.store_path(project)).ok())
             .and_then(|text| serde_json::from_str::<Value>(&text).ok());
+        *self.numbered.borrow_mut() = kept
+            .as_ref()
+            .and_then(|value| value.get("numbered"))
+            .and_then(Value::as_object)
+            .map(|numbered| numbered.iter().filter_map(|(name, n)| Some((name.clone(), n.as_u64()? as usize))).collect())
+            .unwrap_or_default();
         *self.sets.borrow_mut() = kept.map(|value| self.sets_of(&value)).unwrap_or_default();
     }
 
@@ -144,7 +154,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                     "material": set.source.material.as_ref().map(|material| backend.material_json(material)), "takes": takes})
             })
             .collect();
-        json!({"version": 1, "sets": sets})
+        json!({"version": 1, "sets": sets, "numbered": *self.numbered.borrow()})
     }
 
     fn sets_of(&self, value: &Value) -> Vec<Set<B>> {
@@ -214,8 +224,9 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                     let id = sets.iter().map(|set| set.id).max().unwrap_or(0) + 1;
                     // (numbers once given to takes of the same name never come back: names stay apart in the DAW)
                     let floor = sets.iter().filter(|other| other.source.short == source.short).map(|other| other.next_number() - 1).max();
+                    let given = self.numbered.borrow().get(&source.short).copied().unwrap_or(0);
                     let mut set: Set<B> = TakeSet::new(id, source, seed);
-                    set.floor = floor.unwrap_or(0);
+                    set.floor = floor.unwrap_or(0).max(given);
                     (set, false)
                 }
             }
@@ -281,6 +292,9 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             reply["note"] = json!(note);
         }
         if !numbers.is_empty() || continued {
+            let mut numbered = self.numbered.borrow_mut();
+            let given = numbered.entry(set.source.short.clone()).or_insert(0);
+            *given = (*given).max(set.next_number() - 1);
             let mut sets = self.sets.borrow_mut();
             sets.retain(|held| held.id != set.id);
             sets.push(set);
