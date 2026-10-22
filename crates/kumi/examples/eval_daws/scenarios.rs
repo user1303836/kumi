@@ -135,6 +135,7 @@ for i = 0, reaper.CountTracks(0) - 1 do
       fadein = r6(reaper.GetMediaItemInfo_Value(it, "D_FADEINLEN")), fadeout = r6(reaper.GetMediaItemInfo_Value(it, "D_FADEOUTLEN")),
       loop = reaper.GetMediaItemInfo_Value(it, "B_LOOPSRC") ~= 0}
     if take then
+      row.name = reaper.GetTakeName(take)
       row.rate = r6(reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE"))
       row.pitch = r6(reaper.GetMediaItemTakeInfo_Value(take, "D_PITCH"))
       row.offset = r6(reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS"))
@@ -516,6 +517,47 @@ return "ok""#
                         list(&after["rendered"]).len() == 12,
                         list(&after["rendered"]).iter().filter_map(|file| file.as_str()).collect::<Vec<_>>().join(", "),
                     ),
+                ]
+            },
+        },
+        // REAPER: SFX variations (#401) of one item, made, then some kept and the rest dropped.
+        Scenario {
+            id: "P31",
+            daw: Daw::Reaper,
+            says: &["Make 4 variations of this footstep", "Keep 1 and 3, drop the others"],
+            before: None,
+            fixture: r#"
+local it = audio(track("Step"), MEDIA .. "/gravel1.wav", 0, 0.4)
+reaper.SetMediaItemSelected(it, true)
+"#,
+            read: "",
+            teardown: None,
+            generates: false,
+            names: &["V1", "V3"],
+            expect: |seen| {
+                let (before, after) = (seen.before, seen.after);
+                let items = |state: &Value| {
+                    track(state, "Step").map(|t| list(&t["items"]).into_iter().cloned().collect::<Vec<_>>()).unwrap_or_default()
+                };
+                let sound = |item: &Value| (item["len"].clone(), item["rate"].clone(), item["pitch"].clone(), item["offset"].clone());
+                let source =
+                    |state: &Value| items(state).into_iter().find(|item| item["pos"].as_f64() == Some(0.0)).map(|item| sound(&item));
+                let names: Vec<String> = items(after).iter().filter_map(|item| item["name"].as_str().map(str::to_owned)).collect();
+                let kept: Vec<&String> = names.iter().filter(|name| name.ends_with("kept")).collect();
+                let left = |number: &str| names.iter().any(|name| name.starts_with(&format!("{number} ")));
+                let differ = items(after)
+                    .iter()
+                    .filter(|item| item["name"].as_str().is_some_and(|name| name.ends_with("kept")))
+                    .all(|item| Some(sound(item)) != source(before));
+                vec![
+                    Check::new("the variations tool made the takes", seen.tools.iter().any(|t| t == "variations"), seen.tools.join(", ")),
+                    Check::new("the source item is as it was", source(before).is_some() && source(before) == source(after), ""),
+                    Check::new(
+                        "V1 and V3 are kept (renamed so), V2 and V4 gone",
+                        kept.len() == 2 && left("V1") && left("V3") && !left("V2") && !left("V4"),
+                        names.join(", "),
+                    ),
+                    Check::new("the kept takes differ from the source", differ && !kept.is_empty(), ""),
                 ]
             },
         },

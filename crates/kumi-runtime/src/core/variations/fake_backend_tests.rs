@@ -410,6 +410,10 @@ async fn a_take_the_producer_edited_or_deleted_is_left_out_of_a_drop() {
     assert!(dropped["skipped"][0].as_str().unwrap().contains("V1 was edited in Fake"), "{dropped}");
     assert!(dropped["skipped"][1].as_str().unwrap().contains("V2 isn't in the Fake any more"), "{dropped}");
     assert_eq!(daw.names(), ["V1 \u{b7} Beat"]);
+    // (named, an edited take goes all the same, and the answer says it was edited)
+    let named = run(&tool, json!({"action": "drop", "names": ["V1"]})).await.unwrap();
+    assert_eq!((named["dropped"].clone(), named["edited"].clone()), (json!(["V1"]), json!(["V1"])), "{named}");
+    assert!(daw.names().is_empty());
 }
 
 #[tokio::test(flavor = "current_thread")]

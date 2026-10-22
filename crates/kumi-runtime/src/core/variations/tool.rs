@@ -11,7 +11,7 @@ use kumi_common::abort::Signal;
 use kumi_common::js::json::stringify;
 use serde_json::{json, Value};
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -462,9 +462,13 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             (set.pick(&names, Purpose::Drop, force)?, set.clone())
         };
         let app = self.backend.words().app;
+        // (the takes named one by one: an edit since Kumi wrote one doesn't keep it, as it does from "rest")
+        let named: BTreeSet<usize> =
+            names.iter().filter_map(|name| name.trim().to_ascii_lowercase().trim_start_matches('v').parse().ok()).collect();
         let rows = self.backend.find(&mut set, &numbers, signal).await?;
         let mut dropping = Vec::new();
         let mut skipped = Vec::new();
+        let mut edited = Vec::new();
         for (number, row) in numbers.iter().copied().zip(rows) {
             if gone(&row) {
                 skipped.push(format!("V{number} isn't in the {app} any more"));
@@ -479,8 +483,11 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             }
             let current = self.backend.current(&set, &row, signal).await?;
             if self.backend.digest(&current) != set.take(number).expect("a picked take").digest {
-                skipped.push(format!("V{number} was edited in {app} since Kumi wrote it: left as it is"));
-                continue;
+                if !named.contains(&number) {
+                    skipped.push(format!("V{number} was edited in {app} since Kumi wrote it: left as it is (name it to drop it anyway)"));
+                    continue;
+                }
+                edited.push(format!("V{number}"));
             }
             if let Some(why) = self.backend.undroppable(&set, number, &row, signal).await {
                 skipped.push(format!("V{number} {why}: left as it is"));
@@ -499,8 +506,11 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             change = json!({"change": id, "title": applied.pointer("/display/title").cloned().unwrap_or(Value::Null),
                 "note": applied.pointer("/display/note").cloned().unwrap_or(Value::Null)});
         }
-        let reply = json!({"set": set.id, "dropped": dropping.iter().map(|(n, _)| format!("V{n}")).collect::<Vec<_>>(), "in": change,
+        let mut reply = json!({"set": set.id, "dropped": dropping.iter().map(|(n, _)| format!("V{n}")).collect::<Vec<_>>(), "in": change,
             "skipped": skipped, "takes": set.lines()});
+        if !edited.is_empty() {
+            reply["edited"] = json!(edited);
+        }
         self.put_back(set);
         Ok(reply)
     }
@@ -802,7 +812,8 @@ with a warning), writes each as one change, {hears}, and answers a line per take
 source starts another set, still there by its number or name (set). change: names (\"V6\", or \"rest\": every take not kept) and takes (a recipe each, in \
 order; left out, Kumi picks distinct directions) rewrite only those takes, {rewrites}: kept takes and the source are never touched (force: true only when the \
 producer named a kept take), and a take the producer edited is left as it is. keep: names; each kept take is renamed “V3 · … · kept” in {app} (a change \
-each), so the mark is there after a restart too; at places one take: {}. drop: names (\"rest\" by default) {drops}. list: the set's takes.",
+each), so the mark is there after a restart too; at places one take: {}. drop: names (\"rest\" by default) {drops}; rest leaves a take edited since \
+Kumi wrote it, one named goes all the same. list: the set's takes.",
         words.sources,
         words.anchors,
         words.ops,
