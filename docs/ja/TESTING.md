@@ -101,7 +101,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
 ## CI
 
-プルリクエストのたびに次のワークフローが実行され、CI、Willington files、Installer は `main` へのプッシュのたびにも実行されます：
+プルリクエストのたびに次のワークフローが実行され、CI、Willington files、Installer、Network は `main` へのプッシュのたびにも実行されます：
 
 | ワークフロー | ジョブ | 実行内容 |
 | --- | --- | --- |
@@ -116,6 +116,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 | | `Required CI` | 上記がすべてパスした場合にだけパスします |
 | **Extended** | `Extended / Linux (1/3)` から `(3/3)`、`Extended / macOS (1/2)`、`(2/2)`、`Extended / Windows (1/3)` から `(3/3)`、`Extended / documentation tests` | 公式 SDK をインストールした状態での全テスト（`extended` セット）：`ci` が省くもの（記録されたソースのオラクル、長いリスニング・フォーム・レンダリングのシミュレーション、ffmpeg を使うビデオ、ベンチマーク、公式の MCP とモデルの SDK と並べて実行する相互運用テスト、Kumi 1.7.5 からの移行、タイミングのビルディングブロックの長いスイープ）と、各プラットフォームの全テスト。続いてドキュメントテスト。毎週、手動で、また `full-tests` ラベルの付いたプルリクエストで実行され、何もブロックしません |
 | | `Extended / REAPER SDK, newest header` | Cockos が公開している最新の SDK ヘッダーで REAPER の拡張機能をビルドし、生成した関数テーブルを確認し、それに移ると増える関数を一覧します |
+| **Network** | `Network / What changed`、続いて `Network / Linux`、`macOS`、`Windows` | 各システム自身の信頼ストアに入れた認証局と、システム自身の設定にあるプロキシを通した、Kumi の HTTP クライアント（`network.rs` の ignored のテスト）。各システムのジョブは、クライアントの作り方を変える変更（`scripts/areas.toml` の `network` エリア）のときだけ実行されます |
 | **Willington files** | `Willington files`（Ubuntu） | `vendor/willington/` を変えられるのは、このリポジトリの `willington/` ブランチから出たリポジトリ所有者のプルリクエストだけで、そのプルリクエストはほかに何も変えません。`main` にあるこのチェックが、プルリクエストのコードではなくファイルの一覧を読んで実行されます |
 | **Installer** | `Native bundle / <target>`、`Aggregate native and existing-installer releases`、続いて `Install / <system>` と `Existing installer transition / <system>`。`Installer edges / <system>`（3 つ）はバンドルを必要としません | `main` へのプッシュと、インストールを変えるプルリクエストでは、x64 の Linux と Windows、Apple Silicon の macOS のバンドルをビルドし、それぞれで以下のとおりインストール、確認、アンインストールします。タグ、手動の実行、`full-tests` ラベルの付いたプルリクエストではすべてを行います：macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドル（Mac のバンドルには、Kumi が Live のメニューを使うためのヘルパー（ユニバーサル、アドホック署名）が入り、Intel 向けは Apple Silicon でクロスビルドします）、続いて既存のインストールが更新に使う互換リリースをビルドし、インストーラーと一緒に、GitHub がリリースのファイルを配信するのと同じ形でローカルで配信します。各システムで：そこからワンライナーでプロデューサーと同じ方法でインストールし（Windows では、非 ASCII 文字の名前のフォルダーにある `KUMI_HOME` で、Windows PowerShell 5.1 を使います）、バージョン、`doctor`、ブリッジとその解析ワーカーを確認し、修復として再インストールし、使い捨ての Remote Scripts フォルダーに `kumi bridge --yes` を実行し、プロデューサー自身のファイルをそれぞれ置いた使い捨ての DAW フォルダーに REAPER の拡張機能と Renoise のツールを入れ（`kumi --daw reaper|renoise bridge --yes`）、それぞれがバンドルのコピーで、リファレンス、レシート、残した世代があることを確かめ、拡張機能を REAPER のエントリーポイントで読み込み、それらのための Kumi のホストを起動します。続いて `kumi update`（両方のブリッジがそのまま）、`kumi update --rollback` を 2 回（両方を前の Kumi のコピーへ、そしてまた戻す）、`kumi uninstall`（両方を取り除き、プロデューサーが変えたツールのコピーを残し、プロデューサー自身のファイルはそのまま）を実行します。続いて各システムの 1 つのインストール（macOS arm64、Linux x64、Windows x64）が、空白と非 ASCII 文字を含むホームで次を行います：このビルドのインストーラーで GitHub の最新リリースを、続いて `KUMI_VERSION` でこのビルドの 1 つ前のリリースをインストールし、そのリリースのブリッジを入れ、このビルドへの更新と 2 回のロールバックのたびに Kumi とブリッジを確認し（REAPER と Renoise のブリッジも入れた状態で。そのリリースはどちらも知らず、そのままにします）、アンインストールします。PATH の行は macOS では zsh の `ZDOTDIR` に、Linux では fish の `conf.d` に入り、そのシェルが `kumi` を見つけ、アンインストールで取り除かれます。Windows ではこれを PowerShell 7 で実行します。このビルドのインストール、ブリッジ、ロールバック、アンインストールは非 ASCII 文字の名前のフォルダーにある `KUMI_HOME` で、1 つ前のリリースからの更新は空白だけを含むホームで行います（そのリリース自身の更新機能が展開するため）。移行のジョブは、Kumi 1.7.5 と新しいバンドルで移行テストを実行します。edges のジョブは、install.sh と install.ps1 を代わりのリリースに対して実行します：リリースがない、応答がない、サインインページが返る、チェックサムが合わない、Kumi が起動しない、Ctrl-C。`v*` タグのプッシュでは、これらがすべてパスした後に `publish` がバンドルとインストーラーをリリースに添付し、`scripts/release.py` がノートを書いていればリリースを公開します。 |
 
@@ -123,7 +124,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
 - `Python Remote Script` は macOS を省きます。
 - Rust のビルドキャッシュは `main` からだけ保存されます。プルリクエストは `main` のものを復元し、何も保存しません。
-- それぞれの世界のジョブは、テストする対象が変わったときに実行されます。Rust のジョブは Renoise のツールの Lua だけの変更では省かれ、`REAPER extension loads` は拡張機能のクレート、それがリンクする `daw-bridge` の部分、ロックファイル、リリーススクリプトの変更で、`Renoise tool` は `daws/renoise` の変更で実行されます。
+- それぞれの世界のジョブは、`scripts/dev.py` がクレートと `scripts/areas.toml` から読み取るとおり、テストする対象が変わったときに実行されます（`python3 scripts/dev.py affected --base origin/main` で、ブランチが何を実行するかがわかります）。Rust のジョブは Renoise のツールの Lua だけの変更では省かれ、`REAPER extension loads` は拡張機能のクレート、それがビルドに使うもの（`daw-bridge`、ロックファイル）、リリーススクリプトの変更で、`Renoise tool` は `daws/renoise` の変更で実行されます。`Release scripts` は、追跡されているすべてのファイルがクレートかエリアに属することを確認します。
 - Installer が各システムの 1 台でビルドしてインストールするのは、インストールに関わる部分を変える変更の場合だけです：インストーラー、インストール、更新、リリース、Willington のファイル、Mac のヘルパー、Kumi が使う `tar` と PowerShell、ダウンロードの方法（HTTP クライアントとネットワークの設定）とパスの組み立て、Kumi の拡張機能を Live に入れる処理、REAPER と Renoise のブリッジのビルドと配置、そして Installer のワークフロー（それぞれのテストは含まない）。それ以外のプルリクエストでは何もビルドせず、マージ後の `main` の実行で確認します。6 つすべて、GitHub のリリースからの更新、edges、移行は `full-tests` ラベルで実行されます。
 - プルリクエストと `main` へのプッシュでは、Installer のバンドルを `ci-release` プロファイルでビルドします。これはリリースプロファイルのプログラム全体の最適化を省き、最適化も控えめにします。タグは `release` でビルドします。
 

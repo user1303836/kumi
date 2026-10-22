@@ -143,7 +143,7 @@ versions this checkout carries.
 
 ## CI
 
-These workflows run on every pull request, and the CI, Willington files and Installer workflows on every push to `main` too:
+These workflows run on every pull request, and the CI, Willington files, Installer and Network workflows on every push to `main` too:
 
 | Workflow | Jobs | What runs |
 | --- | --- | --- |
@@ -158,6 +158,7 @@ These workflows run on every pull request, and the CI, Willington files and Inst
 | | `Required CI` | Passes only when all of the above passed |
 | **Extended** | `Extended / Linux (1/3)` to `(3/3)`, `Extended / macOS (1/2)`, `(2/2)`, `Extended / Windows (1/3)` to `(3/3)`, `Extended / documentation tests` | Every test (the `extended` set) with the official SDKs installed: what `ci` leaves out (the recorded-source oracles, the long listening, form and rendering simulations, video with ffmpeg, the benchmarks, the interoperability tests beside the official MCP and model SDKs, the migration from Kumi 1.7.5, the long sweeps of the timing building blocks) and each platform's every test; then the documentation tests. It runs each week, by hand, and on a pull request labelled `full-tests`, and blocks nothing |
 | | `Extended / REAPER SDK, newest header` | REAPER's extension built against the newest SDK headers Cockos has published, its generated function table checked, and the functions a move to them would bring listed |
+| **Network** | `Network / What changed`, then `Network / Linux`, `macOS`, `Windows` | Kumi's HTTP clients with a certificate authority in each system's own trust store, and through the proxy in its own settings (`network.rs`'s ignored tests). The systems' jobs run only for a change to how the clients are made (the `network` area in `scripts/areas.toml`) |
 | **Willington files** | `Willington files` (Ubuntu) | Only the repository owner's pull requests, from a `willington/` branch in this repository, change `vendor/willington/`, and such a pull request changes nothing else. `main`'s copy of the check runs, reading the pull request's file list, never its code |
 | **Installer** | `Native bundle / <target>`, `Aggregate native and existing-installer releases`, then `Install / <system>` and `Existing installer transition / <system>`; `Installer edges / <system>` (three) needs no bundle | Each push to `main`, and a pull request that changes installing, builds a bundle for Linux and Windows on x64 and macOS on Apple silicon and, on each, installs, checks and uninstalls as below. Tags, a run by hand and a pull request labelled `full-tests` do all of it: build a native bundle for Intel and ARM on macOS, Linux and Windows (each Mac bundle with the helper Kumi uses Live's menus with, universal and ad hoc signed; the Intel one cross-built on Apple Silicon), then the compatibility release that existing installations update from, and serves them locally with the installers, as GitHub serves a release's files. On each system: installs with the one-liner from that copy, as producers do (Windows PowerShell 5.1 on Windows, with `KUMI_HOME` in a folder named in non-ASCII letters), checks the version, `doctor`, the bridge and its analysis worker, installs again as a repair, runs `kumi bridge --yes` into a scratch Remote Scripts folder, puts REAPER's extension and Renoise's tool into scratch DAW folders that each hold a file of the producer's (`kumi --daw reaper|renoise bridge --yes`), checks each is the bundle's copy with its reference, receipt and kept generation, loads the extension with REAPER's entry point and starts Kumi's host for them, then runs `kumi update` (both bridges as they were), `kumi update --rollback` twice (both to an earlier Kumi's copies and back) and `kumi uninstall` (both out, a producer's copy of the tool kept, the producer's own files left). One install on each system (macOS arm64, Linux x64, Windows x64) then, in a home with spaces and non-ASCII letters, installs GitHub's latest release with this build's installer and then, with `KUMI_VERSION`, the release before this build; puts that release's bridge in; updates to this build and rolls back twice, checking the Kumi and the bridge each time (with REAPER's and Renoise's bridges in, which that release doesn't know and leaves be); and uninstalls. The PATH line goes in zsh's `ZDOTDIR` on macOS and fish's `conf.d` on Linux, where that shell finds `kumi`, and the uninstall takes it out; Windows runs this in PowerShell 7: this build's install, the bridge, the rollbacks and the uninstall with `KUMI_HOME` in a folder named in non-ASCII letters, and the update from the release before in a home with spaces only (that release's own updater unpacks it). The transition jobs run the migration tests with Kumi 1.7.5 and the new bundles. The edges jobs run install.sh and install.ps1 against stand-in releases: a missing release, no answer, a sign-in page, a bad checksum, a Kumi that doesn't start, Ctrl-C. On a `v*` tag's push, once all these pass, `publish` attaches the bundle and the installers to the release, and publishes it when `scripts/release.py` wrote its notes. |
 
@@ -166,10 +167,13 @@ On a pull request, less runs:
 - `Python Remote Script` skips macOS.
 - Rust's build caches are saved from `main` only: a pull request restores
   `main`'s and saves none.
-- Each world's jobs run for what they test: Rust's skip a change to the Renoise
-  tool's Lua alone, `REAPER extension loads` runs for the extension's crate, the
-  parts of `daw-bridge` it links, the lockfile and the release script, and
-  `Renoise tool` for `daws/renoise`.
+- Each world's jobs run for what they test, as `scripts/dev.py` reads it from
+  the crates and `scripts/areas.toml` (`python3 scripts/dev.py affected --base
+  origin/main` says what a branch runs): Rust's skip a change to the Renoise
+  tool's Lua alone, `REAPER extension loads` runs for the extension's crate,
+  what it builds with (`daw-bridge`, the lockfile) and the release script, and
+  `Renoise tool` for `daws/renoise`. `Release scripts` checks that every tracked
+  file belongs to a crate or an area.
 - The Installer builds and installs on one machine of each system only for a
   change to the install surface: the installers, installing, updating and
   releasing, Willington's files, the Mac helper, the `tar` and PowerShell Kumi

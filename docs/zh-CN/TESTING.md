@@ -101,7 +101,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
 ## CI
 
-每个拉取请求都会运行下面这些工作流，其中 CI、Willington files 和 Installer 在每次推送到 `main` 时也会运行：
+每个拉取请求都会运行下面这些工作流，其中 CI、Willington files、Installer 和 Network 在每次推送到 `main` 时也会运行：
 
 | 工作流 | 作业 | 运行内容 |
 | --- | --- | --- |
@@ -116,6 +116,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 | | `Required CI` | 只有以上全部通过时才通过 |
 | **Extended** | `Extended / Linux (1/3)` 至 `(3/3)`、`Extended / macOS (1/2)`、`(2/2)`、`Extended / Windows (1/3)` 至 `(3/3)`、`Extended / documentation tests` | 在装好官方 SDK 的情况下运行全部测试（`extended` 集合）：`ci` 省去的内容（录制源的预言测试，长时间的聆听、曲式和渲染模拟，使用 ffmpeg 的视频测试，基准测试，与官方 MCP 和模型 SDK 并排运行的互操作测试，从 Kumi 1.7.5 的迁移，计时构件的长时间扫描）以及每个平台的全部测试；然后是文档测试。每周、手动以及在带有 `full-tests` 标签的拉取请求上运行，不阻塞任何合并 |
 | | `Extended / REAPER SDK, newest header` | 用 Cockos 发布的最新 SDK 头文件构建 REAPER 扩展，检查生成的函数表，并列出改用它们会新增的函数 |
+| **Network** | `Network / What changed`，然后是 `Network / Linux`、`macOS`、`Windows` | Kumi 的 HTTP 客户端，使用装进各系统自身信任存储的证书颁发机构，并经过系统自身设置中的代理（`network.rs` 中被忽略的测试）。各系统的作业只在修改客户端构建方式的变更（`scripts/areas.toml` 中的 `network` 区域）时运行 |
 | **Willington files** | `Willington files`（Ubuntu） | 只有仓库所有者从本仓库 `willington/` 分支发出的拉取请求才能修改 `vendor/willington/`，而这样的拉取请求不修改其他任何内容。运行的是 `main` 上的这项检查，它读取拉取请求的文件列表，从不读取其代码 |
 | **Installer** | `Native bundle / <target>`、`Aggregate native and existing-installer releases`，然后是 `Install / <system>` 和 `Existing installer transition / <system>`；`Installer edges / <system>`（三个）不需要发行包 | 每次推送到 `main`，以及修改安装的拉取请求，会为 x64 的 Linux 和 Windows、Apple Silicon 的 macOS 构建发行包，并在每个系统上按下文安装、检查和卸载。标签、手动运行和带有 `full-tests` 标签的拉取请求运行全部内容：为 macOS、Linux 和 Windows 的 Intel 与 ARM 构建原生发行包（Mac 发行包带有 Kumi 在 Mac 上使用 Live 菜单的辅助程序，通用、临时签名；Intel 的发行包在 Apple Silicon 上交叉构建），再构建现有安装用来更新的兼容版本，并连同安装程序一起，按 GitHub 提供发布文件的方式在本地提供它们。在每个系统上：像制作人那样用一行安装命令从这里安装（在 Windows 上使用 Windows PowerShell 5.1，`KUMI_HOME` 位于名称含非 ASCII 字符的文件夹中），检查版本、`doctor`、桥接及其分析工作进程，再次安装作为修复，运行 `kumi bridge --yes` 安装到一个临时的 Remote Scripts 文件夹，把 REAPER 的扩展和 Renoise 的工具装进各放有一个制作人自己文件的临时 DAW 文件夹（`kumi --daw reaper|renoise bridge --yes`），检查每个都是发行包中的副本并带有参考文件、回执和保留的版本，用 REAPER 的入口点加载扩展，并启动 Kumi 为它们准备的宿主程序，然后运行 `kumi update`（两个桥接保持原样）、两次 `kumi update --rollback`（两者都回到之前 Kumi 的副本，再回来）和 `kumi uninstall`（两者都移除，保留制作人改动过的工具副本，制作人自己的文件不动）。随后每个系统上的一个安装（macOS arm64、Linux x64、Windows x64）在含空格和非 ASCII 字符的主目录中：用本次构建的安装程序安装 GitHub 的最新版本，再用 `KUMI_VERSION` 安装本次构建之前的那个版本；装入该版本的桥接；更新到本次构建并回滚两次，每次都检查 Kumi 和桥接（同时装有 REAPER 和 Renoise 的桥接，那个版本两者都不认识，会原样留下）；最后卸载。PATH 那一行在 macOS 上写入 zsh 的 `ZDOTDIR`，在 Linux 上写入 fish 的 `conf.d`，由该 shell 找到 `kumi`，卸载时被移除；Windows 在 PowerShell 7 中运行这些：本次构建的安装、桥接、回滚和卸载在名称含非 ASCII 字符的文件夹中的 `KUMI_HOME` 下进行，从之前那个版本的更新则在只含空格的主目录中进行（由该版本自己的更新程序解包）。过渡作业用 Kumi 1.7.5 和新的发行包运行迁移测试。edges 作业针对替代版本运行 install.sh 和 install.ps1：版本不存在、无应答、返回登录页面、校验和不匹配、Kumi 无法启动、Ctrl-C。推送 `v*` 标签时，在这些都通过之后，`publish` 把发行包和安装程序附加到发布版本上，并在说明由 `scripts/release.py` 撰写时发布该版本。 |
 
@@ -123,7 +124,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
 - `Python Remote Script` 跳过 macOS。
 - Rust 的构建缓存只从 `main` 保存：拉取请求恢复 `main` 的缓存，不保存任何缓存。
-- 每个部分的作业只在它测试的内容改变时运行：只改 Renoise 工具的 Lua 时 Rust 的作业会跳过；`REAPER extension loads` 在扩展的 crate、它链接的 `daw-bridge` 部分、锁文件和发布脚本改变时运行；`Renoise tool` 在 `daws/renoise` 改变时运行。
+- 每个部分的作业只在它测试的内容改变时运行，由 `scripts/dev.py` 根据各 crate 和 `scripts/areas.toml` 判断（`python3 scripts/dev.py affected --base origin/main` 会说明一个分支运行什么）：只改 Renoise 工具的 Lua 时 Rust 的作业会跳过；`REAPER extension loads` 在扩展的 crate、它构建时用到的内容（`daw-bridge`、锁文件）和发布脚本改变时运行；`Renoise tool` 在 `daws/renoise` 改变时运行。`Release scripts` 会检查每个被跟踪的文件都属于某个 crate 或区域。
 - 只有修改安装相关部分的变更，Installer 才会在每个系统的一台机器上构建并安装：安装程序、安装、更新、发布、Willington 的文件、Mac 辅助程序、Kumi 使用的 `tar` 和 PowerShell、下载方式（HTTP 客户端和网络设置）和路径的拼接、Kumi 把扩展放进 Live 的方式、REAPER 和 Renoise 桥接的构建与装入方式，以及 Installer 的工作流（不包括它们的测试）。其他拉取请求什么都不构建，合并后由 `main` 的运行来检查。全部六个、从 GitHub 版本的更新、edges 和迁移在 `full-tests` 标签下运行。
 - 在拉取请求和推送到 `main` 时，Installer 的发行包用 `ci-release` 配置构建，它省去 release 配置的全程序优化，优化程度也更低。标签用 `release` 构建。
 

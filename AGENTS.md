@@ -17,7 +17,8 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 - `crates/kumi-store` (SQLite), `kumi-common` (shared utilities), `kumi-genexpr` (gen~ test interpreter).
 - `max-standard/` (Max patch rules) and `plugin-formats/` (plug-in preset formats): data Kumi builds in.
 - `tests/support/`: test helpers that several crates include with `#[path]`.
-- `scripts/`: release and packaging (Python), the isolated test runners. `install.sh` and `install.ps1`: the installers.
+- `scripts/`: release and packaging (Python), the isolated test runners, and `dev.py` with `areas.toml` (what a change
+  affects, which CI picks its jobs by). `install.sh` and `install.ps1`: the installers.
 - `.config/nextest.toml`: CI's test sets (`ci`, `ci-os`, `extended`). `.github/workflows/`: CI.
 - `docs/en`, `docs/ja`, `docs/zh-CN`: user docs. DEVELOPER_GUIDE.md and TESTING.md have the details.
 
@@ -31,6 +32,7 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
   `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref`
 - Before a push: `cargo fmt --all --check` and `git diff --check origin/main...HEAD`; CI fails on both.
 - Release scripts' tests: `python3 -m unittest discover -s scripts/tests -p 'test_*release.py'`
+- What a branch affects, and the CI jobs that test it: `python3 scripts/dev.py affected --base origin/main`
 - Wait for CI: `gh pr checks <n> --required --watch`. Only "Required CI" and "Willington files" are required.
 
 ## Searching
@@ -47,6 +49,7 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 - Docs that aren't for users (design docs, agent notes, prompts, PRDs) stay out of git; `.hermes/` is ignored.
   AGENTS.md and CLAUDE.md are the exceptions.
 - Never change binary names, the installed bundle layout or the wire protocols.
+- Every tracked file belongs to a crate or an area in `scripts/areas.toml`; CI fails on one that doesn't.
 - Never copy Live operation names or the registry hash out of `protocol/`.
 - `vendor/willington/` changes only in the owner's PRs from a `willington/` branch that change nothing else.
 - Tests never need a running DAW, a sign-in or anything from this machine.

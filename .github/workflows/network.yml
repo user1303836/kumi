@@ -4,20 +4,12 @@ name: Network
 # before: a certificate authority installed in the system's own trust store (what a network that inspects secure
 # connections asks for), and a proxy in the system's own settings with an exception (on Linux, which has none, in
 # HTTPS_PROXY and NO_PROXY). The tests are network.rs's ignored ones. Only for changes to how Kumi's HTTP clients are
-# made: macOS runners are scarce.
+# made (the `network` area in scripts/areas.toml): macOS runners are scarce.
 
 on:
   push:
     branches: [main]
-    paths:
-      - "crates/kumi-runtime/src/net/**"
-      - "crates/kumi-runtime/tests/network.rs"
-      - ".github/workflows/network.yml"
   pull_request:
-    paths:
-      - "crates/kumi-runtime/src/net/**"
-      - "crates/kumi-runtime/tests/network.rs"
-      - ".github/workflows/network.yml"
 
 permissions:
   contents: read
@@ -31,8 +23,29 @@ env:
   CARGO_PROFILE_DEV_DEBUG: 0
 
 jobs:
+  plan:
+    name: Network / What changed
+    runs-on: ubuntu-24.04
+    outputs:
+      network: ${{ steps.paths.outputs.network }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - id: paths
+        shell: bash
+        run: |
+          # This pull request's files, or this push's.
+          case "${{ github.event_name }}" in
+            pull_request) base="origin/${GITHUB_BASE_REF}" ;;
+            *) base="${{ github.event.before }}" ;;
+          esac
+          python3 scripts/dev.py affected --base "$base" --github-output
+
   system:
     name: Network / ${{ matrix.label }}
+    needs: plan
+    if: needs.plan.outputs.network == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:

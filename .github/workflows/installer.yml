@@ -47,18 +47,16 @@ jobs:
         shell: bash
         run: |
           # Each push to main, and a pull request that changes the install surface, build and install on one machine of
-          # each system (Linux and Windows on x64, macOS on Apple silicon). The install surface is the installers,
-          # installing, updating and releasing, Willington's files, the Mac helper the bundle carries, the tar and
-          # PowerShell Kumi runs, how it downloads (its HTTP client and network settings) and builds paths, how Kumi's
-          # extension goes into Live, how REAPER's and Renoise's bridges are built and go in (the extension's build, shim,
-          # SDK and entry point, the host's binary, the tool's manifest, entry and version, and the shared lifecycle,
-          # detection and files), and this workflow; not their tests. Any other pull request builds nothing: main's run
-          # covers it once merged. Tags, a run by hand and a pull request labelled full-tests build all six platforms,
-          # install each, update to it from the release before it and check the update from the JavaScript release (see
-          # below); the nightly run only builds them.
+          # each system (Linux and Windows on x64, macOS on Apple silicon). The install surface is the `install` area in
+          # scripts/areas.toml: the installers, installing, updating and releasing, Willington's files, the Mac helper the
+          # bundle carries, the tar and PowerShell Kumi runs, how it downloads (its HTTP client and network settings) and
+          # builds paths, how Kumi's extension goes into Live, how REAPER's and Renoise's bridges are built and go in, and
+          # this workflow; not their tests. Any other pull request builds nothing: main's run covers it once merged. Tags,
+          # a run by hand and a pull request labelled full-tests build all six platforms, install each, update to it from
+          # the release before it and check the update from the JavaScript release (see below); the nightly run only
+          # builds them.
           full=true
           checks=true
-          installing_paths='^(install\.(sh|ps1)|scripts/(build-native-release\.py|build-migration-release\.py|build-hands\.py|release\.py|check-installers\.sh|vendor-willington\.py|migration/)|vendor/willington/|\.github/workflows/installer\.yml|crates/kumi/src/(install\.rs|install/|update\.rs|process\.rs|doctor\.rs|doctor/installation\.rs|daw/ableton/(bridge_setup|live_extension|live_app)\.rs|daw/own\.rs)|crates/ableton-mcp-server/src/(lifecycle|delivery|migrate|setup|install_remote_script|platform)|crates/kumi-runtime/src/integrations/ableton/hands/(KumiHands\.swift|mac\.rs)|crates/kumi-runtime/src/(system\.rs|ai/http\.rs|net/|library/sources\.rs)|crates/reaper-kumi/(build\.rs|Cargo\.toml|shim/|sdk/|src/lib\.rs)|crates/daw-mcp-server/(Cargo\.toml|src/bin/)|crates/daw-bridge/(Cargo\.toml|src/(lifecycle|install|detect|files|owner|paths)\.rs)|daws/renoise/com\.kumi\.Bridge\.xrnx/(manifest\.xml|main\.lua|payload/version\.lua))'
           # A change to any of these gets every system's install and transition jobs before it merges: main broke once
           # when the Mac helper's didn't. Each has to be there, so a renamed one can't drop out unnoticed.
           for path in install.sh install.ps1 crates/kumi/src/install.rs crates/kumi/src/update.rs crates/kumi/src/install/migration.rs \
@@ -73,7 +71,7 @@ jobs:
             crates/daw-bridge/src/files.rs crates/daw-bridge/src/owner.rs crates/daw-bridge/src/paths.rs crates/reaper-kumi/shim/csurf.cpp \
             daws/renoise/com.kumi.Bridge.xrnx/manifest.xml daws/renoise/com.kumi.Bridge.xrnx/main.lua daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua; do
             test -e "$path" || { echo "::error::$path, which the installs depend on, isn't there: point this check at its new name"; exit 1; }
-            grep -q -E "$installing_paths" <<<"$path" || { echo "::error::$path must count as installing"; exit 1; }
+            python3 scripts/dev.py areas --in install "$path" > /dev/null || { echo "::error::$path must count as installing (scripts/areas.toml)"; exit 1; }
           done
           # The nightly run only builds, to keep the release profile's cache warm. A run started by hand also installs.
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
@@ -91,11 +89,8 @@ jobs:
           esac
           if [[ "${{ github.event_name }}" == "schedule" ]]; then extended=true; fi
           if [[ "${{ github.event_name }}" == "pull_request" ]] && ! $extended; then
-            base="origin/${GITHUB_BASE_REF}"
-            # Read whole, then searched: grep -q can close a pipe early, and git, still writing, fails under pipefail.
-            changed="$(git diff --name-only "$base...HEAD")"
-            installing="$(grep -E "$installing_paths" <<<"$changed" | grep -v -E '(^|/)(tests|examples)/|(^|/)tests\.rs$' || true)"
-            if [[ -z "$installing" ]]; then
+            installing="$(python3 scripts/dev.py affected --base "origin/${GITHUB_BASE_REF}" --job installer)"
+            if [[ "$installing" == false ]]; then
               full=false
               checks=false
             fi

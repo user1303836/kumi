@@ -27,10 +27,10 @@ jobs:
     name: What changed
     runs-on: ubuntu-24.04
     outputs:
-      code: ${{ steps.paths.outputs.code }}
-      rust: ${{ steps.paths.outputs.rust }}
-      reaper: ${{ steps.paths.outputs.reaper }}
-      renoise: ${{ steps.paths.outputs.renoise }}
+      code: ${{ steps.paths.outputs.remote_script }}
+      rust: ${{ steps.paths.outputs.rust_linux }}
+      reaper: ${{ steps.paths.outputs.reaper_extension }}
+      renoise: ${{ steps.paths.outputs.renoise_tool }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
         with:
@@ -38,31 +38,15 @@ jobs:
       - id: paths
         shell: bash
         run: |
-          # A pull request that changes only documentation skips the builds; main builds everything.
+          # Each world's jobs run for the changes they test, as scripts/dev.py reads them from the packages and
+          # scripts/areas.toml (its docstring says which job runs for what); main runs every one. Documentation alone
+          # skips the builds.
           case "${{ github.event_name }}" in
             pull_request) base="origin/${GITHUB_BASE_REF}" ;;
             merge_group) base="${{ github.event.merge_group.base_sha }}" ;;
             *) base= ;;
           esac
-          # Read whole, then searched: grep -q can close a pipe early, and git, still writing, fails under pipefail.
-          if [[ -n "$base" ]]; then
-            changed="$(git diff --name-only "$base...HEAD")"
-            moved="$(git diff --name-only --diff-filter=ADR "$base...HEAD")"
-          fi
-          # Each world's jobs run for the changes they test (main runs every one): Rust's for all but the Renoise tool's
-          # Lua alone; REAPER's extension for its crate, the parts of daw-bridge it links, the lockfile and the release
-          # script's check; Renoise's tool for its folder. CI's own workflow runs them all.
-          # Kumi's Rust tests read some of the tool, so they run for those: its change kinds (changes*.lua, against Kumi's
-          # list of them), its version, its entry and manifest, and files added to it, removed or renamed (the folder as
-          # it's installed).
-          tool='^daws/renoise/com\.kumi\.Bridge\.xrnx/(main\.lua|manifest\.xml|payload/(changes[^/]*|version)\.lua)$'
-          code=$( [[ -z "$base" ]] || grep -q -v -E '^$|^(docs/|LICENSE)|\.md$' <<<"$changed" && echo true || echo false )
-          rust=$( [[ -z "$base" ]] || grep -q -v -E '^$|^(docs/|LICENSE)|\.md$|^daws/renoise/' <<<"$changed" \
-            || grep -q -E "$tool" <<<"$changed" || grep -q -E '^daws/renoise/com\.kumi\.Bridge\.xrnx/' <<<"$moved" && echo true || echo false )
-          ci='^\.github/workflows/ci\.yml$'
-          reaper=$( [[ -z "$base" ]] || grep -q -E "$ci|^crates/reaper-kumi/|^crates/daw-bridge/(Cargo\.toml|src/(lib|auth|contract|daw|files|frame|handshake|loopback|owner|paths|wire)\.rs)|^Cargo\.(toml|lock)$|^scripts/build-native-release\.py$" <<<"$changed" && echo true || echo false )
-          renoise=$( [[ -z "$base" ]] || grep -q -E "$ci|^daws/renoise/" <<<"$changed" && echo true || echo false )
-          { echo "code=$code"; echo "rust=$rust"; echo "reaper=$reaper"; echo "renoise=$renoise"; } | tee -a "$GITHUB_OUTPUT"
+          python3 scripts/dev.py affected ${base:+--base "$base"} --github-output
 
   rust-linux:
     # The tests that guard producers' Sets and Kumi's wire, the unit tests and Live's pins: the `ci` set in
@@ -352,6 +336,11 @@ jobs:
         run: python3 -m unittest discover -s scripts/tests -p test_native_release.py
       - name: The release script's edits
         run: python3 -m unittest discover -s scripts/tests -p test_release.py
+      # CI picks its jobs by what a change affects (scripts/dev.py): every file has to belong to a package or an area.
+      - name: Every tracked file belongs to a package or an area, and dev.py's tests
+        run: |
+          python3 scripts/dev.py affected --check
+          python3 -m unittest discover -s scripts/tests -p test_dev.py
       # The install jobs run the paths that work; this reads every line, the error paths too.
       - name: The installers are POSIX sh, and PowerShell that parses and is ASCII
         run: sh scripts/check-installers.sh .

@@ -1,0 +1,171 @@
+# What CI tests beyond the Rust packages, read by scripts/dev.py. Every tracked file belongs to a Cargo package (the
+# longest manifest folder holding it), to one or more areas here, or to both: `python3 scripts/dev.py affected --check`
+# fails on a file that belongs to neither.
+#
+# - paths: globs from the repository's root. `*` and `?` stay inside a folder; `**` crosses folders.
+# - feeds: the packages that read these files when they build or test ("*": every one). A change here affects them as
+#   if it were their own, and so the packages that depend on them.
+# - except: globs of files the paths match that aren't the area's.
+# - layout: a file added, removed or renamed under these globs counts as one of this area's.
+
+# Words for people: a change to these alone builds and tests nothing.
+[docs]
+paths = ["docs/**", "**/*.md", "LICENSE*"]
+
+# The workspace's own settings: every package builds and tests by them.
+[workspace]
+paths = ["Cargo.toml", "Cargo.lock", "rustfmt.toml", ".config/**", ".cargo/**"]
+feeds = ["*"]
+
+# The test runners every Rust job runs.
+[test-runners]
+paths = ["scripts/test-isolated.sh", "scripts/test-isolated.ps1"]
+feeds = ["*"]
+
+# Live's operation registry: the bridge ships it, and the Remote Script, the host and Kumi read it.
+[protocol]
+paths = ["protocol/**"]
+feeds = ["ableton-mcp-server", "kumi-common", "kumi-runtime"]
+
+# The Remote Script, which runs inside Live: the bridge carries and installs it, and its hash is checked against it.
+[remote-script]
+paths = ["remote-script/**"]
+feeds = ["ableton-mcp-server", "kumi-runtime", "kumi"]
+
+# Kumi's Live extension (TypeScript), with its committed build.
+[live-extension]
+paths = ["apps/live-extension/**"]
+feeds = ["ableton-mcp-server", "kumi"]
+
+# Kumi's Renoise tool (Lua) and its tests against a mock of Renoise's API.
+[renoise-tool]
+paths = ["daws/renoise/**"]
+
+# What Kumi reads of the tool: its entry, manifest, version and change kinds (Kumi's list of them is checked against
+# them), and the folder as it's installed.
+[renoise-tool-read]
+paths = [
+  "daws/renoise/com.kumi.Bridge.xrnx/main.lua",
+  "daws/renoise/com.kumi.Bridge.xrnx/manifest.xml",
+  "daws/renoise/com.kumi.Bridge.xrnx/payload/changes*.lua",
+  "daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua",
+]
+layout = ["daws/renoise/com.kumi.Bridge.xrnx/**"]
+feeds = ["kumi-runtime", "kumi"]
+
+# REAPER's extension as it ships: its crate and the release script's check of what a bundle may carry.
+[reaper-extension]
+paths = ["crates/reaper-kumi/**", "scripts/build-native-release.py"]
+
+# What Kumi builds in as data: the standard Max patchers are held to, and the plug-in formats it reads.
+[data]
+paths = ["max-standard/**", "plugin-formats/**"]
+feeds = ["kumi-runtime"]
+
+# Test helpers several crates include.
+[test-support]
+paths = ["tests/**"]
+feeds = ["ableton-mcp-server", "kumi-runtime"]
+
+# The eval's fixtures: Live's own device parameters, which the runtime's listening tests read too.
+[eval-fixtures]
+paths = ["crates/kumi/examples/fixtures/**"]
+feeds = ["kumi-runtime"]
+
+# Willington's runtime files, which the bridge ships (only the owner's willington/ pull requests change them).
+[willington]
+paths = ["vendor/willington/**"]
+feeds = ["ableton-mcp-server", "kumi-runtime", "kumi"]
+
+# The installers.
+[installers]
+paths = ["install.sh", "install.ps1"]
+feeds = ["kumi-runtime", "kumi"]
+
+# The npm package at the root (`npm run kumi`), which carries Kumi's version.
+[root-package]
+paths = ["package.json"]
+feeds = ["ableton-mcp-server", "kumi"]
+
+# The install surface: a pull request that changes any of it runs the Installer's builds and installs. The tests and
+# examples beside these files aren't part of it.
+[install]
+paths = [
+  "install.sh",
+  "install.ps1",
+  "crates/kumi/src/install.rs",
+  "crates/kumi/src/install/**",
+  "crates/kumi/src/update.rs",
+  "crates/kumi/src/process.rs",
+  "crates/kumi/src/doctor.rs",
+  "crates/kumi/src/doctor/installation.rs",
+  "crates/kumi/src/daw/ableton/bridge_setup.rs",
+  "crates/kumi/src/daw/ableton/live_extension.rs",
+  "crates/kumi/src/daw/ableton/live_app.rs",
+  "crates/kumi/src/daw/own.rs",
+  "crates/kumi-runtime/src/system.rs",
+  "crates/kumi-runtime/src/ai/http.rs",
+  "crates/kumi-runtime/src/library/sources.rs",
+  "crates/kumi-runtime/src/net/**",
+  "crates/kumi-runtime/src/integrations/ableton/hands/KumiHands.swift",
+  "crates/kumi-runtime/src/integrations/ableton/hands/mac.rs",
+  "crates/ableton-mcp-server/src/install_remote_script*",
+  "crates/ableton-mcp-server/src/install_remote_script*/**",
+  "crates/ableton-mcp-server/src/lifecycle*",
+  "crates/ableton-mcp-server/src/lifecycle*/**",
+  "crates/ableton-mcp-server/src/delivery*",
+  "crates/ableton-mcp-server/src/delivery*/**",
+  "crates/ableton-mcp-server/src/setup*",
+  "crates/ableton-mcp-server/src/setup*/**",
+  "crates/ableton-mcp-server/src/migrate*",
+  "crates/ableton-mcp-server/src/migrate*/**",
+  "crates/ableton-mcp-server/src/platform*",
+  "crates/ableton-mcp-server/src/platform*/**",
+  "crates/daw-bridge/Cargo.toml",
+  "crates/daw-bridge/src/lifecycle.rs",
+  "crates/daw-bridge/src/install.rs",
+  "crates/daw-bridge/src/detect.rs",
+  "crates/daw-bridge/src/files.rs",
+  "crates/daw-bridge/src/owner.rs",
+  "crates/daw-bridge/src/paths.rs",
+  "crates/daw-mcp-server/Cargo.toml",
+  "crates/daw-mcp-server/src/bin/**",
+  "crates/reaper-kumi/build.rs",
+  "crates/reaper-kumi/Cargo.toml",
+  "crates/reaper-kumi/shim/**",
+  "crates/reaper-kumi/sdk/**",
+  "crates/reaper-kumi/src/lib.rs",
+  "daws/renoise/com.kumi.Bridge.xrnx/manifest.xml",
+  "daws/renoise/com.kumi.Bridge.xrnx/main.lua",
+  "daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua",
+  "scripts/build-native-release.py",
+  "scripts/build-migration-release.py",
+  "scripts/build-hands.py",
+  "scripts/release.py",
+  "scripts/check-installers.sh",
+  "scripts/vendor-willington.py",
+  "scripts/migration/**",
+  "vendor/willington/**",
+  ".github/workflows/installer.yml",
+]
+except = ["**/tests/**", "**/examples/**", "**/tests.rs"]
+
+# How Kumi's HTTP clients are made, which the Network workflow checks on each system's own trust store and proxies.
+[network]
+paths = ["crates/kumi-runtime/src/net/**", "crates/kumi-runtime/tests/network.rs", ".github/workflows/network.yml"]
+
+# The release, packaging and migration scripts and their tests.
+[release-scripts]
+paths = ["scripts/**"]
+
+# CI itself.
+[workflows]
+paths = [".github/**"]
+
+# CI's own workflow: its every job runs for a change to it.
+[ci]
+paths = [".github/workflows/ci.yml"]
+
+# The repository's own settings for git and for search.
+[repo]
+paths = [".gitattributes", ".gitignore", ".ignore"]
