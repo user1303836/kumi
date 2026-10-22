@@ -739,7 +739,8 @@ impl<H: PlanHost> Plan<H> {
             if let Some(lines) = reply.get("lines").filter(|v| v.is_array()) {
                 done.insert("lines".into(), lines.clone());
             }
-            // (a step that found it so already: left out of the producer's summary when others changed something)
+            // (a step that found it so already: left out of the producer's summary when others changed something; an action
+            // the DAW keeps no point of, `unkept`, was done and is said)
             if reply.get("unchanged") == Some(&Value::Bool(true)) {
                 done.insert("unchanged".into(), Value::Bool(true));
             }
@@ -993,6 +994,14 @@ mod tests {
         assert_eq!(super::done_summary(&[tempo.clone(), noop.clone()]), "Done: Tempo 120 → 124 BPM.");
         assert_eq!(super::done_summary(&[tempo, noop.clone(), pads]), "Done:\n- Tempo 120 → 124 BPM\n- Renamed Pad to Pads");
         assert_eq!(super::done_summary(std::slice::from_ref(&noop)), "Bass volume -6 dB: it was so already, so nothing changed.");
+        // An action the DAW keeps no point of (play, a selection) was done: it's said.
+        let play = json!({"step": 5, "changed": "Play from bar 5: it changed nothing the project keeps", "unkept": true});
+        let select = json!({"step": 6, "changed": "Select Kick: it changed nothing the project keeps", "unkept": true});
+        assert_eq!(
+            super::done_summary(&[json!({"step": 1, "changed": "Tempo 120 → 124 BPM"}), noop.clone(), play.clone()]),
+            "Done:\n- Tempo 120 → 124 BPM\n- Play from bar 5: it changed nothing the project keeps"
+        );
+        assert_eq!(super::done_summary(&[select, noop.clone(), play]).lines().next(), Some("Done:"));
         let lines = json!({"step": 4, "lines": ["A: it was so already, so nothing changed"], "unchanged": true});
         assert_eq!(
             super::done_summary(&[noop, lines]),

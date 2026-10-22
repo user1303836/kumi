@@ -1061,7 +1061,8 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
             self.history.release(std::slice::from_ref(&transaction));
             let why = applied.pointer("/display/note").and_then(Value::as_str).unwrap_or("it changed nothing the project keeps");
             return ChangeOutcome {
-                text: stringify(&json!({"changed": format!("{title}: {}", why.trim_end_matches('.')), "unchanged": true})),
+                // ("unkept", not "unchanged": it was done, and a plan's summary says it, unlike a step that was so already)
+                text: stringify(&json!({"changed": format!("{title}: {}", why.trim_end_matches('.')), "unkept": true})),
                 is_error: false,
                 missed: None,
                 stops: false,
