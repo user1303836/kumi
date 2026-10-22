@@ -459,6 +459,9 @@ impl Extension {
             "track_template_save" => self.changes.track_template_save(&self.reaper(), &self.reads, params),
             // M5 listening (m5-reaper).
             "render_start" => self.listening.render_start(&self.reaper(), &self.reads, params),
+            // #401: the producer's own files, dry run and render.
+            "deliver_targets" => self.listening.deliver_targets(&self.reaper(), &self.reads, params),
+            "deliver_start" => self.listening.deliver_start(&self.reaper(), &self.reads, params),
             "capture_start" => self.listening.capture_start(&self.reaper(), &self.reads, params),
             "audition" => self.listening.audition(&self.reaper(), params),
             "audio_file" => self.listening.audio_file(&self.reaper(), &self.reads, params),

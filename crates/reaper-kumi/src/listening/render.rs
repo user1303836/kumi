@@ -437,7 +437,7 @@ struct Saved {
 }
 
 /// Puts back what a render changed, however the render ends (a panic included).
-struct PutBack<'a, 'r> {
+pub(super) struct PutBack<'a, 'r> {
     reaper: &'a Reaper<'r>,
     proj: Project,
     saved: Saved,
@@ -445,7 +445,7 @@ struct PutBack<'a, 'r> {
 }
 
 impl<'a, 'r> PutBack<'a, 'r> {
-    fn note(reaper: &'a Reaper<'r>, proj: Project) -> PutBack<'a, 'r> {
+    pub(super) fn note(reaper: &'a Reaper<'r>, proj: Project) -> PutBack<'a, 'r> {
         let numbers = NUMBERS.iter().filter_map(|key| reaper.project_number(proj, key).map(|value| (*key, value))).collect();
         let texts = TEXTS.iter().filter_map(|key| reaper.project_text_long(proj, key).map(|value| (*key, value))).collect();
         let master = reaper.master_track(proj);
@@ -468,7 +468,7 @@ impl<'a, 'r> PutBack<'a, 'r> {
     }
 
     /// Puts everything back and reads it back: what didn't come back, in words.
-    fn now(&mut self) -> Vec<String> {
+    pub(super) fn now(&mut self) -> Vec<String> {
         self.done = true;
         let (reaper, proj) = (self.reaper, self.proj);
         let mut missed = Vec::new();

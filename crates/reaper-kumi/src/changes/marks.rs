@@ -252,6 +252,156 @@ pub fn add_restore(ctx: &Ctx, restore: &Restore) -> Done<Restored> {
     })
 }
 
+// ----- several regions at once (#401, the render pipeline) -----
+
+/// The most regions one change adds.
+pub const MOST_REGIONS: usize = 500;
+
+/// regions-add {regions: [{position|positionBeats, end|endBeats, name?, color?, renderRefs?}]}: every region in one step,
+/// each rendering the tracks named (`renderRefs`, the master as r:track:master) in the region render matrix. The record keeps
+/// each region's GUID, state and matrix; the undo deletes them while each is as made.
+fn regions_plan(ctx: &Ctx, input: &Value) -> Done<Vec<(Add, Vec<TrackId>)>> {
+    let list = input.get("regions").and_then(Value::as_array).ok_or_else(|| bad("regions: the regions to add, as a list"))?;
+    if list.is_empty() || list.len() > MOST_REGIONS {
+        return Err(bad(format!("regions: 1 to {MOST_REGIONS} of them")));
+    }
+    let mut out = Vec::new();
+    for given in list {
+        let plan = add_plan(ctx, given, true)?;
+        let tracks = super::projectitems::matrix_tracks(given, "renderRefs")?;
+        for id in &tracks {
+            ctx.reads.track_by_id(ctx.reaper, ctx.proj, id)?;
+        }
+        out.push((plan, tracks));
+    }
+    Ok(out)
+}
+
+fn regions_title(names: &[String], count: usize) -> String {
+    let named: Vec<&String> = names.iter().filter(|name| !name.is_empty()).collect();
+    match (named.first(), named.last()) {
+        (Some(first), Some(last)) if named.len() > 1 => {
+            format!("Added {count} regions, {} to {}", super::quoted(&rows::clip(first)), super::quoted(&rows::clip(last)))
+        }
+        (Some(first), _) if count == 1 => format!("Added region {}", super::quoted(&rows::clip(first))),
+        _ => format!("Added {count} regions"),
+    }
+}
+
+pub fn regions_preview(ctx: &Ctx, input: &Value) -> Done<Preview> {
+    let plans = regions_plan(ctx, input)?;
+    let names: Vec<String> = plans.iter().map(|(plan, _)| plan.name.clone()).collect();
+    Ok(Preview {
+        target: json!({"ref": null, "kind": "region"}),
+        prior: json!({"markers": ctx.reaper.marker_count(ctx.proj)}),
+        fence: json!({}),
+        display: json!({"title": regions_title(&names, plans.len())}),
+    })
+}
+
+/// A region's matrix as track ids (the master as "master").
+fn matrix_ids(ctx: &Ctx, marker: &Marker) -> Vec<String> {
+    let mut ids: Vec<String> = ctx
+        .reaper
+        .region_render_tracks(ctx.proj, marker.number)
+        .into_iter()
+        .map(|track| super::projectitems::id_text(&super::tracks::track_id_of(ctx, track)))
+        .collect();
+    ids.sort();
+    ids
+}
+
+pub fn regions_apply(ctx: &Ctx, input: &Value) -> Done<Applied> {
+    let plans = regions_plan(ctx, input)?;
+    let mut made: Vec<Marker> = Vec::new();
+    let undo_made = |made: &[Marker]| {
+        for marker in made {
+            ctx.reaper.delete_marker(ctx.proj, &marker.guid);
+        }
+    };
+    for (plan, tracks) in &plans {
+        let Some(guid) = ctx.reaper.add_marker(ctx.proj, true, plan.start, plan.end, &plan.name, plan.color) else {
+            undo_made(&made);
+            return Err(failed("REAPER wouldn't add a region: none were added"));
+        };
+        let Some(marker) = ctx.reaper.marker_by_guid(ctx.proj, &guid) else {
+            undo_made(&made);
+            return Err(failed("a region made isn't in the project: none were added"));
+        };
+        if !tracks.is_empty() {
+            let wanted: serde_json::Map<String, Value> = tracks.iter().map(|id| (super::projectitems::id_text(id), true.into())).collect();
+            if !super::projectitems::write_matrix(ctx, marker.number, &Value::Object(wanted)) {
+                made.push(marker);
+                undo_made(&made);
+                return Err(failed("REAPER wouldn't set a region's render matrix: no region was added"));
+            }
+        }
+        made.push(marker);
+    }
+    let states: Vec<Value> = made
+        .iter()
+        .map(|marker| {
+            let mut state = state(marker);
+            state["matrix"] = json!(matrix_ids(ctx, marker));
+            state
+        })
+        .collect();
+    let refs: Vec<String> = made.iter().map(reference).collect();
+    let names: Vec<String> = made.iter().map(|marker| marker.name.clone()).collect();
+    Ok(Applied {
+        applied: json!({"regions": states}),
+        created: Some(json!({"ref": refs.first(), "kind": "region", "regionRefs": refs})),
+        material: None,
+        display: json!({"title": regions_title(&names, made.len())}),
+        ..Default::default()
+    })
+}
+
+pub fn regions_restore(ctx: &Ctx, restore: &Restore) -> Done<Restored> {
+    let created = restore.created.ok_or_else(|| bad("created: the regions that were added"))?;
+    let refs = created["regionRefs"].as_array().ok_or_else(|| bad("created: the regions' refs"))?;
+    let states = restore.applied["regions"].as_array().ok_or_else(|| bad("applied: the regions as added"))?;
+    let mut found: Vec<Marker> = Vec::new();
+    for (reference, applied) in refs.iter().zip(states) {
+        let marker = match find_for_restore(ctx, reference) {
+            Ok(marker) => marker,
+            // (deleted in REAPER since: nothing to take away)
+            Err(fault) if fault.0 == "gone" => continue,
+            Err(fault) => return Err(fault),
+        };
+        let matrix = matrix_ids(ctx, &marker);
+        let same_matrix = applied["matrix"].as_array().is_none_or(|ids| {
+            let mut ids: Vec<String> = ids.iter().filter_map(Value::as_str).map(str::to_owned).collect();
+            ids.sort();
+            ids == matrix
+        });
+        if !restore.discard && (!same_state(&state(&marker), applied) || !same_matrix) {
+            return Err(changed(format!("{} has been changed in REAPER since Kumi added it", label(&marker))));
+        }
+        found.push(marker);
+    }
+    if found.is_empty() {
+        return Ok(Restored {
+            restored: json!({"deleted": []}),
+            display: json!({"title": "The regions are gone already"}),
+            unwritten: true,
+        });
+    }
+    let mut deleted = Vec::new();
+    for marker in &found {
+        if !ctx.reaper.delete_marker(ctx.proj, &marker.guid) {
+            return Err(failed("REAPER wouldn't delete a region"));
+        }
+        deleted.push(reference(marker));
+    }
+    let title = if found.len() == 1 {
+        format!("{} taken away again", label(&found[0]))
+    } else {
+        format!("{} regions taken away again", found.len())
+    };
+    Ok(Restored { restored: json!({"deleted": deleted}), display: json!({"title": title}), ..Default::default() })
+}
+
 // ----- deleting -----
 
 pub fn delete_preview(ctx: &Ctx, input: &Value) -> Done<Preview> {

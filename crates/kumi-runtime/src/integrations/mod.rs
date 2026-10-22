@@ -18,6 +18,7 @@ pub mod own_views;
 mod pack_tests;
 pub mod reaper;
 pub mod reaper_changes;
+mod reaper_delivery;
 pub mod renoise;
 pub mod renoise_changes;
 mod renoise_chop;

@@ -422,7 +422,7 @@ fn tool_list(daw: Daw) -> Value {
 /// The listening tools (M5): renders and captures as jobs, playing a file out loud, the audio behind a ref, scratch
 /// copies. One `json!` each (the macro's recursion stops at one long list).
 fn listening_tools(daw: Daw, pick: &Value) -> Vec<Value> {
-    vec![
+    let mut tools = vec![
         json!({
             "name": "render",
             "title": format!("Render in {daw}"),
@@ -521,6 +521,48 @@ fn listening_tools(daw: Daw, pick: &Value) -> Vec<Value> {
                 "layout": {"type": "integer", "minimum": 0},
             })), "required": ["action"], "additionalProperties": false},
             "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
+        }),
+    ];
+    if daw == Daw::Reaper {
+        tools.extend(delivery_tools(daw, pick));
+    }
+    tools
+}
+
+/// (#401) REAPER's renders for delivery: the producer's own files, named by its wildcards, in their folder.
+fn delivery_tools(daw: Daw, pick: &Value) -> Vec<Value> {
+    let spec = json!({
+        "source": {"enum": ["master", "matrix", "stems"], "description": "The mix (the default), each region's tracks in the region render matrix, or the tracks named."},
+        "bounds": {"description": "regions (the default), selected-regions, project, time-selection, or {start, end} in seconds.", "anyOf": [
+            {"enum": ["regions", "selected-regions", "project", "time-selection"]},
+            {"type": "object", "properties": {"start": {"type": "number", "minimum": 0}, "end": {"type": "number", "minimum": 0}}, "required": ["start", "end"], "additionalProperties": false}
+        ]},
+        "trackRefs": {"type": "array", "items": {"type": "string"}, "description": "A stems render's tracks."},
+        "format": {"enum": ["wav", "project"], "description": "WAV (the default), or the format set in the render dialog."},
+        "bits": {"enum": [16, 24, 32], "description": "A WAV's bit depth (24 by default; 32 is float)."},
+        "sampleRate": {"description": "A rate, or project.", "anyOf": [{"enum": [22050, 32000, 44100, 48000, 88200, 96000, 176400, 192000]}, {"enum": ["project"]}]},
+        "channels": {"enum": [1, 2]},
+        "tailMs": {"type": "integer", "minimum": 0, "maximum": 30000, "description": "Rendered past each region's end, for reverbs to ring out."},
+        "pattern": {"type": "string", "minLength": 1, "maxLength": 512, "description": "The files' names, with the wildcards ($region, $track, $project, $timelineorder…)."},
+        "folder": {"type": "string", "description": "A whole path; the project's render folder by default."},
+        "overwrite": {"type": "boolean", "description": "Write over files that are there already."},
+        "expect": {"type": "array", "items": {"type": "string"}, "description": "The files the dry run listed: the render refuses others."},
+        "epoch": {"type": "string"},
+    });
+    vec![
+        json!({
+            "name": "deliver_targets",
+            "title": format!("Files a {daw} delivery would write"),
+            "description": format!("The files a delivery render would write, as {daw} lists them, without rendering: {{targets, folder, count, there (those already there)}}. Every render setting is put back before the answer."),
+            "inputSchema": {"type": "object", "properties": merged(pick, spec.clone()), "required": ["pattern"], "additionalProperties": false},
+            "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
+        }),
+        json!({
+            "name": "deliver",
+            "title": format!("Deliver from {daw}"),
+            "description": format!("Renders the producer's files with {daw}'s own render, as a job: {{jobId, state}}, then listen_job gives {{files}}. It renders only the files the dry run listed (expect), never over a file that's there unless overwrite, and puts every render setting back after."),
+            "inputSchema": {"type": "object", "properties": merged(pick, spec), "required": ["pattern"], "additionalProperties": false},
+            "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": true},
         }),
     ]
 }
@@ -625,9 +667,12 @@ pub async fn handle(host: &Host, message: &Value) -> Option<Value> {
                     };
                     result(id, tool_result(answer, is_error))
                 }
-                "render" | "hear" | "listen_job" | "listen_cancel" | "audition" | "audition_stop" | "audio_file" | "scratch" => {
+                "render" | "hear" | "listen_job" | "listen_cancel" | "audition" | "audition_stop" | "audio_file" | "scratch"
+                | "deliver_targets" | "deliver" => {
                     let (answer, is_error) = match name {
                         "render" => host.render(&arguments).await,
+                        "deliver_targets" => host.deliver_targets(&arguments).await,
+                        "deliver" => host.deliver(&arguments).await,
                         "hear" => host.hear(&arguments).await,
                         "listen_job" => host.listen_job(&arguments).await,
                         "listen_cancel" => host.listen_cancel(&arguments).await,

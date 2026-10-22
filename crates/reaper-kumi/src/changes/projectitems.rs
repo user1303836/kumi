@@ -743,7 +743,7 @@ pub fn lane_add_restore(ctx: &Ctx, restore: &Restore) -> Done<Restored> {
 // ----- a region's render matrix -----
 
 /// The tracks a request names for the matrix, by id ("master" for the master).
-fn matrix_tracks(input: &Value, key: &str) -> Done<Vec<TrackId>> {
+pub(super) fn matrix_tracks(input: &Value, key: &str) -> Done<Vec<TrackId>> {
     let Some(list) = input.get(key).filter(|v| !v.is_null()) else { return Ok(vec![]) };
     let list = list.as_array().filter(|list| list.len() <= 1000).ok_or_else(|| bad(format!("{key} must list track refs")))?;
     list.iter()
@@ -754,7 +754,7 @@ fn matrix_tracks(input: &Value, key: &str) -> Done<Vec<TrackId>> {
         .collect()
 }
 
-fn id_text(id: &TrackId) -> String {
+pub(super) fn id_text(id: &TrackId) -> String {
     match id {
         TrackId::Master => "master".into(),
         TrackId::Guid(guid) => guid.clone(),
@@ -771,7 +771,7 @@ fn region_of(ctx: &Ctx, reference: &Value) -> Done<crate::reaper::Marker> {
 }
 
 /// Which of these tracks the region renders now: track id → in the matrix.
-fn matrix_state(ctx: &Ctx, number: i32, ids: &[String]) -> Value {
+pub(super) fn matrix_state(ctx: &Ctx, number: i32, ids: &[String]) -> Value {
     let rendered: Vec<String> = ctx
         .reaper
         .region_render_tracks(ctx.proj, number)
@@ -838,7 +838,7 @@ fn matrix_title(ctx: &Ctx, region: &crate::reaper::Marker, wanted: &Value) -> St
     chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
-fn write_matrix(ctx: &Ctx, number: i32, state: &Value) -> bool {
+pub(super) fn write_matrix(ctx: &Ctx, number: i32, state: &Value) -> bool {
     state.as_object().into_iter().flatten().all(|(id, on)| {
         let track = match id.as_str() {
             "master" => ctx.reaper.master_track(ctx.proj),

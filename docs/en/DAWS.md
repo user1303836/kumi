@@ -25,6 +25,7 @@ does the job there.
 | Variations as numbered takes you keep, change or drop | not yet | not yet: item variations come later | ✓ |
 | Sample maps: sounds laid across the keys by name, pitch and loudness, and an instrument tidy | not yet | not yet: drum kits only (`drum_kit`) | ✓ |
 | Chops a recording at its real hits and lays the slices out to play it | not yet | not yet | ✓ |
+| Delivers files: a region per asset, named in the project's convention, a dry run first | not yet | ✓ | not yet |
 | Knows whether the DAW is recording | ✓ | ✓ | ✓ |
 | A line in the DAW's status bar | ✓ | no: REAPER's API has no status bar (a notification instead) | ✓ |
 | Opens a saved project | ✓ | not yet: you open it yourself (`kumi -r` and setup's restart don't) | not yet: you open it yourself (`kumi -r` and setup's restart don't) |
@@ -120,8 +121,9 @@ tool is in [KUMI_CHANGES](KUMI_CHANGES.md#what-kumi-can-change-in-reaper).
 - **MIDI** (`notes_…`, `midi_events_…`): notes added, changed, deleted,
   quantized, humanized; CC, pitch bend, program, pressure, text, SysEx.
 - **Markers, regions and the loop** (`marker_…`, `region_add`,
-  `region_render`, `ruler_lane`, `time_selection`, `loop_range`): ruler
-  lanes, the region render matrix.
+  `regions_add`, `region_render`, `ruler_lane`, `time_selection`,
+  `loop_range`): ruler lanes, the region render matrix, many regions in one
+  step.
 - **Tempo and project** (`tempo_set`, `tempo_marker_set`, `metronome_switch`,
   `project_…`): tempo markers, time signatures and ramps, the metronome, grid,
   timebase, notes, title, author.
@@ -143,6 +145,13 @@ next version), track templates and FX chains.
 
 ### Workflows
 
+- **Delivery** (`render_files`): files for a game or a client, one per sound.
+  Kumi groups the items into assets (stacked layers make one footstep), names
+  them in the convention the project's regions follow (or as you say), adds
+  tails that stop before the next sound, and makes a region for each in one
+  step. It then checks the files REAPER would write against those names,
+  rendering nothing, and renders exactly those files: never over one that's
+  there unless you say, with REAPER's render settings put back after.
 - **Drum kits** from sound files: a ReaSamplOmatic5000 per pad, as a folder of
   pad tracks or one container, hi-hats choking.
 - **Sounds from tutorials and references:** `watch_video`, then ReaEQ,

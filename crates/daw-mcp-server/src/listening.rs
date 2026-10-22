@@ -660,6 +660,63 @@ impl Host {
         }
     }
 
+    /// (#401) What a delivery is asked to be, each key passed on as given: the bridge checks them.
+    fn delivery_params(arguments: &Value) -> Result<Map<String, Value>, String> {
+        let mut params = Map::new();
+        for key in [
+            "source",
+            "bounds",
+            "trackRefs",
+            "format",
+            "bits",
+            "sampleRate",
+            "channels",
+            "tailMs",
+            "pattern",
+            "folder",
+            "overwrite",
+            "expect",
+        ] {
+            if let Some(value) = arguments.get(key).filter(|value| !value.is_null()) {
+                params.insert(key.into(), value.clone());
+            }
+        }
+        if !params.contains_key("pattern") {
+            return Err("pattern: the files' names, with the DAW's wildcards".into());
+        }
+        place(arguments, &mut params)?;
+        Ok(params)
+    }
+
+    /// `deliver_targets` (#401): the files a delivery would write, every render setting put back before the answer.
+    pub async fn deliver_targets(&self, arguments: &Value) -> (Value, bool) {
+        let pick = match Pick::from_arguments(arguments) {
+            Ok(pick) => pick,
+            Err(why) => return bad(why),
+        };
+        let params = match Self::delivery_params(arguments) {
+            Ok(params) => params,
+            Err(why) => return bad(why),
+        };
+        match self.listening_call("deliver_targets", Value::Object(params), &pick, START_TIMEOUT).await {
+            Ok(answer) => (answer, false),
+            Err(refused) => refused,
+        }
+    }
+
+    /// `deliver` (#401): a delivery rendered as a job, into the producer's folder (follow it with listen_job).
+    pub async fn deliver(&self, arguments: &Value) -> (Value, bool) {
+        let pick = match Pick::from_arguments(arguments) {
+            Ok(pick) => pick,
+            Err(why) => return bad(why),
+        };
+        let params = match Self::delivery_params(arguments) {
+            Ok(params) => params,
+            Err(why) => return bad(why),
+        };
+        self.start_job("deliver_start", "render", params, &pick).await
+    }
+
     /// `scratch`: copies of a track made, set or dropped, for a search, a probe or a goal to hear.
     pub async fn scratch(&self, arguments: &Value) -> (Value, bool) {
         let pick = match Pick::from_arguments(arguments) {

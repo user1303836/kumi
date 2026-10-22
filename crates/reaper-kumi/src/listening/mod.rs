@@ -16,6 +16,7 @@ mod audition;
 pub mod board;
 mod cancel;
 mod capture;
+pub mod deliver;
 mod inside;
 pub mod reads;
 pub mod render;
@@ -106,6 +107,8 @@ pub struct Listening {
     /// A render `render_start` planned, run on a following tick (`queued_now`: planned in this tick, so it waits for the
     /// next, and a cancel can still reach it while it is queued).
     pending: RefCell<Option<render::Plan>>,
+    /// (#401) A delivery `deliver_start` planned: the producer's files, rendered on a following tick as `pending` is.
+    delivery: RefCell<Option<deliver::Plan>>,
     queued_now: Cell<bool>,
     items: RefCell<Option<render::Items>>,
     capture: RefCell<Option<capture::Capture>>,
@@ -187,6 +190,7 @@ impl Listening {
             board,
             folder: RefCell::new(None),
             pending: RefCell::new(None),
+            delivery: RefCell::new(None),
             queued_now: Cell::new(false),
             items: RefCell::new(None),
             capture: RefCell::new(None),
@@ -248,6 +252,40 @@ impl Listening {
         self.pressed.set(None);
         self.told_titles.set(false);
         *self.pending.borrow_mut() = Some(plan);
+        self.queued_now.set(true);
+        Ok(answer)
+    }
+
+    /// `deliver_targets` (#401): the files a delivery would write, with every render setting put back before the answer.
+    pub fn deliver_targets(&self, reaper: &Reaper, reads: &Reads, params: &Value) -> Answer {
+        self.one_at_a_time()?;
+        if let Some(busy_now) = reaper.busy() {
+            return Err(busy(format!("{}; nothing changed", busy_now.reason())));
+        }
+        deliver::targets(reaper, reads, params)
+    }
+
+    /// `deliver_start` (#401): a delivery checked and planned now, rendered on a following tick; answered at once.
+    pub fn deliver_start(&self, reaper: &Reaper, reads: &Reads, params: &Value) -> Answer {
+        let job = render::job_id(params)?;
+        if self.board.knows(&job) {
+            return Err(bad(format!("there is a job {job} already")));
+        }
+        self.one_at_a_time()?;
+        if let Some(busy_now) = reaper.busy() {
+            return Err(busy(format!("{}; nothing changed", busy_now.reason())));
+        }
+        let info = reaper.current_project().ok_or_else(|| failed("REAPER has no project open"))?;
+        if reaper.play_state(info.ptr).recording {
+            return Err(failed("REAPER is recording: a render would stop the recording, so Kumi renders nothing"));
+        }
+        let plan = deliver::plan(reaper, reads, params)?;
+        let answer = json!({"jobId": plan.job, "state": "queued", "folder": plan.spec.folder.to_string_lossy()});
+        // (a REAPER render: its Cancel and its busy answers are a render's)
+        self.board.add(Job::new(&plan.job, Kind::Render, true));
+        self.pressed.set(None);
+        self.told_titles.set(false);
+        *self.delivery.borrow_mut() = Some(plan);
         self.queued_now.set(true);
         Ok(answer)
     }
@@ -517,6 +555,18 @@ impl Listening {
 
     /// A planned render that has waited too long for REAPER to be free: given up, nothing done.
     fn give_up_waiting(&self) {
+        let delivery_waited = self.delivery.borrow().as_ref().is_some_and(|plan| plan.queued.elapsed() > render::queued_for());
+        if delivery_waited {
+            if let Some(plan) = self.delivery.borrow_mut().take() {
+                if self.board.start(&plan.job) {
+                    let error = format!(
+                        "REAPER stayed busy (a dialog, a load or its own render) for {} s: nothing was rendered",
+                        render::queued_for().as_secs()
+                    );
+                    self.end(&plan.job, render::Ended::Failed { code: "busy".into(), error, notes: vec![] });
+                }
+            }
+        }
         let waited = self.pending.borrow().as_ref().is_some_and(|plan| plan.queued.elapsed() > render::queued_for());
         if !waited {
             return;
@@ -534,6 +584,12 @@ impl Listening {
 
     fn run_pending(&self, reaper: &Reaper, reads: &Reads, snapshot: &Mutex<Snapshot>, out: &dyn Outbox) {
         if self.queued_now.replace(false) {
+            return;
+        }
+        if let Some(plan) = self.delivery.borrow_mut().take() {
+            if self.board.start(&plan.job) {
+                self.run_delivery(reaper, reads, &plan, snapshot, out);
+            }
             return;
         }
         let Some(plan) = self.pending.borrow_mut().take() else { return };
@@ -556,6 +612,22 @@ impl Listening {
         }
         let hooks = RunHooks { listening: self, snapshot, out, job: &plan.job };
         let mut ended = render::run(reaper, reads, &plan, &hooks);
+        self.rendering.set(false);
+        self.rendered_at.set(Some(Instant::now()));
+        if auditioning {
+            ended.note_first("The audition playing was stopped: REAPER closes its audio device to render".into());
+        }
+        self.end(&plan.job, ended);
+    }
+
+    /// (#401) A delivery, run as a render is: an audition stops first (REAPER closes its audio device to render).
+    fn run_delivery(&self, reaper: &Reaper, reads: &Reads, plan: &deliver::Plan, snapshot: &Mutex<Snapshot>, out: &dyn Outbox) {
+        let auditioning = self.preview.borrow().is_some();
+        if auditioning {
+            self.stop_preview(reaper);
+        }
+        let hooks = RunHooks { listening: self, snapshot, out, job: &plan.job };
+        let mut ended = deliver::run(reaper, reads, plan, &hooks);
         self.rendering.set(false);
         self.rendered_at.set(Some(Instant::now()));
         if auditioning {
@@ -649,6 +721,8 @@ impl Listening {
             "audition": audio && api.PlayPreviewEx().is_some() && api.StopPreview().is_some() && api.PCM_Source_CreateFromFile().is_some(),
             "grid": api.TrackFX_FormatParamValueNormalized().is_some(),
             "scratch": folder && api.GetTrackStateChunk().is_some() && api.SetTrackStateChunk().is_some() && api.InsertTrackAtIndex().is_some(),
+            // (#401) the producer's own files: deliver_targets and deliver_start
+            "deliver": render,
             "version": VERSION,
         });
         let swept = self.swept_names.borrow();
@@ -685,6 +759,9 @@ impl Listening {
             self.end(&job, ended);
         }
         if let Some(plan) = self.pending.borrow_mut().take() {
+            self.end(&plan.job, render::Ended::Failed { code: "failed".into(), error: "the bridge unloaded".into(), notes: vec![] });
+        }
+        if let Some(plan) = self.delivery.borrow_mut().take() {
             self.end(&plan.job, render::Ended::Failed { code: "failed".into(), error: "the bridge unloaded".into(), notes: vec![] });
         }
         self.scratch.borrow_mut().forget();

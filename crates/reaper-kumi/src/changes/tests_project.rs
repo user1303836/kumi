@@ -314,3 +314,55 @@ fn a_metronome_switched_by_the_producer_since_is_refused_or_back_already() {
     assert_eq!(lab.undo("metronome-switch", &preview, &made, "Kumi: undo (km007)").unwrap()["restored"], json!({"on": false}));
     assert_eq!(metronome_flags(), "8");
 }
+
+#[test]
+fn many_regions_are_added_in_one_step_with_their_matrix_and_the_undo_takes_away_only_those_as_added() {
+    let lab = Lab::new();
+    let before = state(|s| s.markers.len());
+    let input = json!({"regions": [
+        {"position": 20.0, "end": 21.5, "name": "Footstep_Gravel_01", "renderRefs": [KICK]},
+        {"position": 22.0, "end": 23.25, "name": "Footstep_Gravel_02", "renderRefs": [KICK, "r:track:master"]},
+        {"positionBeats": 50.0, "endBeats": 52.0, "name": "Footstep_Gravel_03"}
+    ]});
+    let (preview, made) = lab.make("regions-add", input, "Kumi: x (krs01)");
+    assert_eq!(preview["display"]["title"], "Added 3 regions, “Footstep_Gravel_01” to “Footstep_Gravel_03”");
+    assert_eq!(state(|s| s.markers.len()), before + 3);
+    let refs = made["created"]["regionRefs"].as_array().unwrap().clone();
+    assert_eq!(refs.len(), 3);
+    assert_eq!(made["created"]["ref"], refs[0]);
+    // Each region renders the tracks named in the matrix.
+    let numbers: Vec<i32> = state(|s| s.markers.iter().filter(|m| m.name.starts_with("Footstep")).map(|m| m.number).collect());
+    let matrix = |n: i32| state(|s| s.render_matrix.get(&n).cloned().unwrap_or_default());
+    assert_eq!(matrix(numbers[0]), ["{BBBB}"]);
+    assert_eq!(matrix(numbers[1]), ["{BBBB}", "master"]);
+    assert!(matrix(numbers[2]).is_empty());
+    // The producer renamed one since: the undo is refused, nothing deleted; told to anyway, all three go.
+    state(|s| s.markers.iter_mut().find(|m| m.name == "Footstep_Gravel_02").unwrap().name = "Mine".into());
+    assert_eq!(lab.undo("regions-add", &preview, &made, "Kumi: undo (krs02)").unwrap_err().0, "changed");
+    assert_eq!(state(|s| s.markers.len()), before + 3);
+    state(|s| s.markers.iter_mut().find(|m| m.name == "Mine").unwrap().name = "Footstep_Gravel_02".into());
+    // A track the producer put in one's matrix since is their work too.
+    state(|s| s.render_matrix.get_mut(&numbers[0]).unwrap().push("{AAAA}".into()));
+    assert_eq!(lab.undo("regions-add", &preview, &made, "Kumi: undo (krs03)").unwrap_err().0, "changed");
+    state(|s| s.render_matrix.get_mut(&numbers[0]).unwrap().retain(|id| id != "{AAAA}"));
+    // One deleted in REAPER since: the others go, it isn't missed.
+    state(|s| s.markers.retain(|m| m.name != "Footstep_Gravel_03"));
+    let undone = lab.undo("regions-add", &preview, &made, "Kumi: undo (krs04)").unwrap();
+    assert_eq!(undone["display"]["title"], "2 regions taken away again");
+    assert_eq!(state(|s| s.markers.len()), before);
+    // All gone already: nothing written.
+    let again = lab.undo("regions-add", &preview, &made, "Kumi: undo (krs05)").unwrap();
+    assert_eq!(again["display"]["title"], "The regions are gone already");
+    for wrong in [
+        json!({"regions": []}),
+        json!({"regions": [{"position": 2.0}]}),
+        json!({"regions": [{"position": 2.0, "end": 1.0}]}),
+        json!({"regions": [{"position": 1.0, "end": 2.0, "renderRefs": ["r:region:{REG-1}"]}]}),
+    ] {
+        assert_eq!(lab.preview("regions-add", wrong.clone()).unwrap_err().0, "bad-params", "{wrong}");
+    }
+    assert_eq!(
+        lab.preview("regions-add", json!({"regions": [{"position": 1.0, "end": 2.0, "renderRefs": ["r:track:{NOPE}"]}]})).unwrap_err().0,
+        "failed"
+    );
+}

@@ -1162,7 +1162,10 @@ fn status_says_what_listening_can_do_now() {
     let rig = Rig::new();
     rig.tick();
     let flags = rig.ext.snapshot().status["listening"].clone();
-    assert_eq!(flags, json!({"render": true, "capture": true, "audition": true, "grid": true, "scratch": true, "version": 1}));
+    assert_eq!(
+        flags,
+        json!({"render": true, "capture": true, "audition": true, "grid": true, "scratch": true, "deliver": true, "version": 1})
+    );
     fake::with(|s| s.listening.audio = false);
     rig.tick();
     let flags = rig.ext.snapshot().status["listening"].clone();
@@ -1184,6 +1187,7 @@ fn status_says_what_listening_can_do_now() {
     bare.tick(Driver::Timer);
     let flags = bare.snapshot().status["listening"].clone();
     assert_eq!((flags["render"].as_bool(), flags["scratch"].as_bool(), flags["grid"].as_bool()), (Some(false), Some(false), Some(true)));
+    assert_eq!(flags["deliver"], false, "a delivery is a render");
 }
 
 // ----- scratch copies -----
@@ -1734,4 +1738,106 @@ fn listening_answers_and_rows_name_refs_only_where_refs_go() {
         assert_eq!(daw_bridge::contract::misplaced_refs(&answer), Vec::<String>::new(), "{answer}");
     }
     let _ = FakeTrack::new("{X}", "x");
+}
+
+// ----- deliveries (#401, the render pipeline) -----
+
+#[test]
+fn a_delivery_dry_run_lists_reapers_files_and_puts_every_setting_back() {
+    let rig = Rig::new();
+    producer_settings();
+    let before = render_settings();
+    let folder = rig.dir.path().join("game");
+    let answer = rig
+        .ask(
+            "deliver_targets",
+            json!({"bounds": "regions", "pattern": "SFX_$region", "folder": folder, "format": "wav", "bits": 16, "sampleRate": 48000}),
+        )
+        .unwrap();
+    assert_eq!(answer["targets"], json!([format!("{}/SFX_Verse.wav", folder.display())]), "{answer}");
+    assert_eq!(answer["count"], 1);
+    assert!(answer.get("there").is_none());
+    assert_eq!(render_settings(), before, "every render setting put back before the answer");
+}
+
+#[test]
+fn a_delivery_renders_each_regions_tracks_by_name_and_never_writes_over_a_file_unless_asked() {
+    let rig = Rig::new();
+    fake::with(|s| {
+        s.render_matrix.insert(1, vec!["{BBBB}".into(), "master".into()]);
+    });
+    let before = render_settings();
+    let folder = rig.dir.path().join("game");
+    let spec = json!({"bounds": "regions", "source": "matrix", "pattern": "$region_$track", "folder": folder});
+    let dry = rig.ask("deliver_targets", spec.clone()).unwrap();
+    let names = |list: &Value| -> Vec<String> {
+        list.as_array()
+            .unwrap()
+            .iter()
+            .map(|t| Path::new(t.as_str().unwrap()).file_name().unwrap().to_string_lossy().into_owned())
+            .collect()
+    };
+    assert_eq!(names(&dry["targets"]), ["Verse_Kick.wav", "Verse_Master.wav"]);
+    let mut asked = spec.clone();
+    asked["jobId"] = "d1".into();
+    asked["expect"] = dry["targets"].clone();
+    let started = rig.ask("deliver_start", asked).unwrap();
+    assert_eq!(started["state"], "queued");
+    let ended = rig.until_ended("d1");
+    assert_eq!(ended["state"], "done", "{ended}");
+    assert_eq!(ended["files"].as_array().unwrap().len(), 2);
+    assert!(folder.join("Verse_Kick.wav").exists() && folder.join("Verse_Master.wav").exists());
+    assert_eq!(render_settings(), before, "the producer's settings are back after the render");
+    // The files are there now: refused, and the file stays as it was.
+    let kept = std::fs::metadata(folder.join("Verse_Kick.wav")).unwrap().len();
+    let mut again = spec.clone();
+    again["jobId"] = "d2".into();
+    rig.ask("deliver_start", again).unwrap();
+    let ended = rig.until_ended("d2");
+    assert_eq!(ended["state"], "failed");
+    assert!(ended["error"].as_str().unwrap().contains("there already"), "{ended}");
+    assert_eq!(std::fs::metadata(folder.join("Verse_Kick.wav")).unwrap().len(), kept);
+    let mut over = spec.clone();
+    over["jobId"] = "d3".into();
+    over["overwrite"] = true.into();
+    rig.ask("deliver_start", over).unwrap();
+    assert_eq!(rig.until_ended("d3")["state"], "done");
+}
+
+#[test]
+fn a_delivery_whose_files_arent_the_dry_runs_renders_nothing() {
+    let rig = Rig::new();
+    let folder = rig.dir.path().join("game");
+    let renders = || fake::with(|s| s.listening.renders.len());
+    let before = renders();
+    rig.ask("deliver_start", json!({"jobId": "d1", "pattern": "$region", "folder": folder, "expect": ["/elsewhere/Verse.wav"]})).unwrap();
+    let ended = rig.until_ended("d1");
+    assert_eq!((ended["state"].as_str(), ended["code"].as_str()), (Some("failed"), Some("changed")), "{ended}");
+    assert_eq!(renders(), before, "REAPER never rendered");
+    assert!(!folder.join("Verse.wav").exists());
+}
+
+#[test]
+fn a_deliverys_settings_are_checked_before_anything_is_set() {
+    let rig = Rig::new();
+    let folder = rig.dir.path().join("game");
+    for wrong in [
+        json!({"source": "matrix", "bounds": "project", "pattern": "$region", "folder": folder}),
+        json!({"source": "stems", "pattern": "$track", "folder": folder}),
+        json!({"pattern": "../$region", "folder": folder}),
+        json!({"pattern": "", "folder": folder}),
+        json!({"pattern": "$region", "folder": "relative/folder"}),
+        json!({"pattern": "$region", "folder": folder, "format": "wav", "bits": 20}),
+        json!({"pattern": "$region", "folder": folder, "sampleRate": 12345}),
+        json!({"pattern": "$region", "folder": folder, "bounds": {"start": 4.0, "end": 2.0}}),
+    ] {
+        assert_eq!(rig.ask("deliver_targets", wrong.clone()).unwrap_err().0, "bad-params", "{wrong}");
+    }
+    // With no folder given or set, the project's own folder; a render folder set relative to it, under it.
+    fake::with(|s| s.listening.texts.remove("RENDER_FILE"));
+    let answer = rig.ask("deliver_targets", json!({"pattern": "$region"})).unwrap();
+    assert_eq!(answer["targets"], json!(["/lab/Projects/Verse.wav"]));
+    fake::with(|s| s.listening.texts.insert("RENDER_FILE".into(), "Renders".into()));
+    let answer = rig.ask("deliver_targets", json!({"pattern": "$region"})).unwrap();
+    assert_eq!(answer["folder"], "/lab/Projects/Renders");
 }

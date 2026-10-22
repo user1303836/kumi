@@ -18,6 +18,7 @@ Kumi 能在 Ableton Live、REAPER 和 Renoise 中工作，用的是各个 DAW �
 | 把变奏做成带编号的版本（take），可保留、修改或丢弃 | 尚未 | 尚未：条目（item）的变奏稍后提供 | ✓ |
 | 采样映射：按名称、音高和响度把声音排到键盘上，并整理乐器 | 尚未 | 尚未：只有鼓组（`drum_kit`） | ✓ |
 | 在真正的击打处切开录音，并排好切片来演奏 | 尚未 | 尚未 | ✓ |
+| 交付文件：每个素材一个区域，按项目的命名规则，先试运行 | 尚未 | ✓ | 尚未 |
 | 知道 DAW 是否正在录音 | ✓ | ✓ | ✓ |
 | 在 DAW 的状态栏显示一行 | ✓ | 不能：REAPER 的 API 没有状态栏（改用通知） | ✓ |
 | 打开保存的工程 | ✓ | 尚未：需要你自己打开（`kumi -r` 和设置中的重启都不会打开） | 尚未：需要你自己打开（`kumi -r` 和设置中的重启都不会打开） |
@@ -86,7 +87,7 @@ Kumi 导入的文件，只在你导入的媒体会循环时才循环其源，而
 - **包络与自动化**（`envelope_…`、`automation_item_…`、`automation_override`）：显示与启用、包络点、自动化对象（automation item）、自动化模式。
 - **对象（item）与 take**（`item_…`、`items_glue`、`items_render`、`take_…`、`stretch_markers_…`）：添加、导入文件、移动、分割、修剪、淡入淡出、编组、删除、复制；只在你要求时才粘合（glue）或渲染；take、伸缩标记、take 标记。
 - **MIDI**（`notes_…`、`midi_events_…`）：音符的添加、修改、删除、量化、人性化；CC、弯音、音色切换、压力、文本、SysEx。
-- **标记、区域与循环**（`marker_…`、`region_add`、`region_render`、`ruler_lane`、`time_selection`、`loop_range`）：标尺层、区域渲染矩阵。
+- **标记、区域与循环**（`marker_…`、`region_add`、`regions_add`、`region_render`、`ruler_lane`、`time_selection`、`loop_range`）：标尺层、区域渲染矩阵；一步加入多个区域。
 - **速度与工程**（`tempo_set`、`tempo_marker_set`、`metronome_switch`、`project_…`）：速度标记、拍号与渐变、节拍器、网格、时基、备注、标题、作者。
 - **鼓组与目标**（`drum_kit`、`scratch_keep`）。
 - **脚本**（`run_lua`、`api_call`、`run_action`）。
@@ -101,6 +102,7 @@ Kumi 导入的文件，只在你导入的媒体会循环时才循环其源，而
 
 ### 工作流程
 
+- **交付**（`render_files`）：为游戏或客户交付文件，每个声音一个。Kumi 把条目归成素材（叠在一起的几层是一个脚步声），按工程中区域遵循的命名规则（或按你说的）命名，加上在下一个声音之前停止的尾音，并一步为每个素材建立区域。然后它把 REAPER 将要写出的文件与这些名称核对（不渲染任何东西），再只渲染这些文件：除非你同意，绝不覆盖已有的文件，事后恢复渲染设置。
 - 用声音文件制作**鼓组**：每个打击垫一个 ReaSamplOmatic5000，做成打击垫轨道的文件夹或一个容器，踩镲互相切断。
 - **来自教程和参考曲的声音：** 先 `watch_video`，再用 ReaEQ、ReaComp、ReaSynth 或你的插件做出来，靠耳朵判定。
 - **预设：** 在 REAPER 的资源文件夹中查找并载入 FX 链、轨道模板和工程模板、JSFX 及 FX 预设。

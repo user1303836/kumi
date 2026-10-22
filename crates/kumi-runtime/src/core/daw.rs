@@ -649,6 +649,9 @@ pub struct Capabilities {
     /// (#401) Chopping: a drum recording cut at its real hits and laid out to play it, lighter densities as variations takes
     /// (core's, with the DAW's backend): Renoise's slices.
     pub chop: bool,
+    /// (#401) Delivery: assets' regions from the timeline's items, named in the project's convention, the DAW's own dry run of
+    /// the files, and the render (core's, with the DAW's backend): REAPER's regions and render.
+    pub delivery: bool,
 }
 
 /// One DAW as Kumi knows it: its id (None when no DAW is known), its words and what it can do.
@@ -773,6 +776,7 @@ impl DawProfile {
             variations: false,
             sample_mapping: false,
             chop: false,
+            delivery: false,
         },
         vocab: PromptVocab {
             plan_tool: crate::live_word!(plan_tool),
@@ -864,6 +868,7 @@ impl DawProfile {
             audio_file: true,
             renders_to_listen: true,
             presets: true,
+            delivery: true,
             ..Capabilities::NONE
         },
         vocab: PromptVocab {
@@ -1090,6 +1095,7 @@ impl Capabilities {
         variations: false,
         sample_mapping: false,
         chop: false,
+        delivery: false,
     };
 }
 

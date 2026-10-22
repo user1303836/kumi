@@ -276,11 +276,34 @@ unsafe extern "C" fn get_set_project_info(proj: *mut ReaProject, desc: *const c_
 }
 
 /// The files REAPER would write with the settings as they are, as 7.82 lists them: the master first (`$tracknumber`
-/// "00"), then each selected track (its number, two digits at least); source 2 alone lists none.
+/// "00"), then each selected track (its number, two digits at least); source 2 alone lists none. (#401) Over every region
+/// (bounds 3), a file a region (`$region` its name), or with the region render matrix (source 8) a file for each track a region
+/// renders (`$track` its name, "Master" for the master); `$project` is "untitled" in the fake.
 fn targets(s: &State) -> Option<Vec<String>> {
     let settings = s.listening.numbers.get("RENDER_SETTINGS").copied().unwrap_or(0.0) as i32;
+    let bounds = s.listening.numbers.get("RENDER_BOUNDSFLAG").copied().unwrap_or(0.0) as i32;
     let folder = s.listening.texts.get("RENDER_FILE").cloned().unwrap_or_default();
-    let pattern = s.listening.texts.get("RENDER_PATTERN").cloned().unwrap_or_default();
+    let pattern = s.listening.texts.get("RENDER_PATTERN").cloned().unwrap_or_default().replace("$project", "untitled");
+    if bounds == 3 {
+        let mut regions: Vec<&super::FakeMarker> = s.markers.iter().filter(|m| m.is_region).collect();
+        regions.sort_by(|a, b| a.start.total_cmp(&b.start));
+        let track_name = |id: &str| match id {
+            "master" => "Master".to_string(),
+            guid => s.tracks.iter().find(|t| t.guid == guid).map(|t| t.name.clone()).unwrap_or_default(),
+        };
+        let mut list = Vec::new();
+        for region in regions {
+            let named = pattern.replace("$region", &region.name);
+            if settings & 8 != 0 {
+                for id in s.render_matrix.get(&region.number).cloned().unwrap_or_default() {
+                    list.push(format!("{folder}/{}.wav", named.replace("$track", &track_name(&id))));
+                }
+            } else {
+                list.push(format!("{folder}/{}.wav", named.replace("$track", "Master")));
+            }
+        }
+        return Some(list);
+    }
     let file = |number: &str| format!("{folder}/{}.wav", pattern.replace("$tracknumber", number));
     let selected: Vec<String> =
         s.tracks.iter().enumerate().filter(|(_, t)| t.selected).map(|(n, _)| file(&format!("{:02}", n + 1))).collect();
@@ -415,7 +438,11 @@ pub fn render_action(command: i32) {
     if fail {
         return;
     }
-    let frames = ((seen.end - seen.start) * seen.rate).round().max(0.0) as u64;
+    // (a render of regions is the regions' length: a second, in the fake)
+    let frames = match ((seen.end - seen.start) * seen.rate).round().max(0.0) as u64 {
+        0 => seen.rate as u64,
+        frames => frames,
+    };
     for target in &targets {
         let _ = std::fs::write(target, float_wav(seen.rate as u32, frames / 2, 0.25));
     }
