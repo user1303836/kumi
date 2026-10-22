@@ -65,6 +65,15 @@ local function state_of(song, s)
   return { start = start, name = start and sequencer:sequence_section_name(s) or "", mutes = mutes }
 end
 
+-- The name of the section slot `s` is in (the nearest start at or before it), "" before any.
+local function section_at(song, s)
+  local sequencer = song.sequencer
+  for at = s, 1, -1 do
+    if sequencer:sequence_is_start_of_section(at) then return sequencer:sequence_section_name(at) end
+  end
+  return ""
+end
+
 local function set_state(song, s, state, sections_only)
   local sequencer = song.sequencer
   if sequencer:sequence_is_start_of_section(s) ~= state.start then sequencer:set_sequence_is_start_of_section(s, state.start) end
@@ -280,6 +289,11 @@ local function made_restore(kind, words)
     local same = words.mutes_only and same_list(now_state.mutes, made.state.mutes) or (not words.mutes_only and same_state(now_state, made.state))
     if not restore.discard and not same then
       fail("changed", string.format("slot %d's %s changed in Renoise since Kumi %s", s, words.mutes_only and "mutes" or "mutes or section", words.did))
+    end
+    -- (#401: a section that starts there under another name than the one the slot was made in is the producer's: deleting the
+    -- slot would take its name, as the slot after gets its own state back)
+    if words.mutes_only and not restore.discard and now_state.start and made.section ~= nil and now_state.name ~= made.section then
+      fail("changed", string.format("slot %d starts the section %s in Renoise now, named since Kumi %s", s, q(now_state.name), words.did))
     end
     if made.pattern then
       local why = pattern_changed(song, env, now[s], made.pattern)
@@ -713,7 +727,7 @@ local function variation_apply(song, env, input, fence, desc)
   local shown = cells.read_columns(plan.track)
   shown.hidden = hidden
   applied.pool, applied.at, applied.count = env.pattern_mark and env.pattern_mark() or nil, plan.index, 1
-  applied.made = { { state = state_of(song, plan.index), pattern = keep_pattern(song, env, np) } }
+  applied.made = { { state = state_of(song, plan.index), pattern = keep_pattern(song, env, np), section = section_at(song, plan.index) } }
   applied.columns, applied.priorColumns, applied.cells = shown, columns, #after
   return {
     applied = applied, target = base.target(env, plan.t),

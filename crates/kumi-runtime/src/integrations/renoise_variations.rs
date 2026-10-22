@@ -599,18 +599,19 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
                 let named_slot = slot.filter(|s| plays(*s)).map(|s| format!("{epoch}:seq:{s}")).unwrap_or_else(|| pattern_ref.clone());
                 let mut input = json!({"patternRef": named_slot, "trackRef": track, "first": first, "last": last,
                     "content": material.cells(*first), "name": name});
-                // (after the take before it: the takes stay together)
+                // (after the take before it while that's still the song's last slot: the takes stay together at the end)
                 let previous: Vec<usize> =
                     set.takes.iter().rev().filter(|take| take.state != TakeState::Dropped).map(|take| take.number).take(1).collect();
                 let mut found_set = set.clone();
                 let found = self.find(&mut found_set, &previous, signal).await.map_err(|why| (why, true))?;
-                match found
+                let slot = found
                     .first()
                     .and_then(|row| row.get("slots"))
                     .and_then(Value::as_array)
                     .and_then(|slots| slots.last())
-                    .and_then(Value::as_u64)
-                {
+                    .and_then(Value::as_u64);
+                let end = self.song(signal).await.and_then(|song| song.get("sequenceLength").and_then(Value::as_u64));
+                match after_the_last_take(slot, end) {
                     Some(slot) => input["index"] = json!(slot + 1),
                     None => input["section"] = json!(section),
                 }
@@ -956,6 +957,13 @@ fn data_of(value: &Value) -> Option<RenoiseData> {
 }
 
 /// The one row named `name` (none when none or several are), its ref.
+/// The slot a new pattern take follows: the take before it, while that's the song's last slot (the takes' place at the end);
+/// None when the producer moved it, or slots came after it, and the take goes to the song's end in its own section (#400
+/// review notes: a take after one moved mid-song landed there while the answer said "at the song's end").
+fn after_the_last_take(slot: Option<u64>, end: Option<u64>) -> Option<u64> {
+    slot.filter(|slot| Some(*slot) == end)
+}
+
 /// A pattern take whose other tracks hold lines or automation of their own (not its source's, by alias), in words: the producer's
 /// edit around the take, which a drop would take with it (#400 review notes: the digest covers only the varied lines).
 fn edited_around(row: &Value) -> Option<String> {
@@ -1138,6 +1146,14 @@ fn named(row: &Value, otherwise: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_new_pattern_take_follows_the_last_one_only_while_it_ends_the_song() {
+        assert_eq!(after_the_last_take(Some(12), Some(12)), Some(12));
+        assert_eq!(after_the_last_take(Some(5), Some(12)), None, "moved mid-song: the new take goes to the end");
+        assert_eq!(after_the_last_take(None, Some(12)), None);
+        assert_eq!(after_the_last_take(Some(12), None), None, "the song's length unread");
+    }
+
     #[test]
     fn a_pattern_take_with_lines_of_its_own_on_another_track_isnt_dropped() {
         let row = |own: Value| json!({"slots": [9], "ownTracks": own, "variedTrack": 1});
