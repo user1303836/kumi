@@ -154,6 +154,10 @@ pub fn write_all(dir: &Path) -> std::io::Result<()> {
     write(&dir.join("amen.wav"), &break_loop(170.0, 4, &[0, 2, 10, 11], &[4, 7, 9, 12, 15], 0.0, 13))?;
     write(&dir.join("think.wav"), &break_loop(170.0, 4, &[0, 6, 10], &[4, 12], 0.15, 17))?;
     write(&dir.join("break120.wav"), &break_loop(120.0, 4, &[0, 8, 10], &[4, 12], 0.0, 19))?;
+    // (the same break 16 ms late, a layer of it: what only hearing it finds)
+    let late: Vec<f32> =
+        std::iter::repeat_n(0.0, (0.016 * RATE as f32) as usize).chain(break_loop(120.0, 4, &[0, 8, 10], &[4, 12], 0.0, 19)).collect();
+    write(&dir.join("break120-late.wav"), &late)?;
     for (n, (smooth, decay)) in [(1usize, 18.0f32), (6, 12.0), (24, 8.0)].iter().enumerate() {
         write(&dir.join(format!("gravel{}.wav", n + 1)), &gravel(*smooth, *decay, 23 + n as u64))?;
     }

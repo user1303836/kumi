@@ -238,13 +238,16 @@ for i, t in ipairs(song.tracks) do
   end
   local group = t.group_parent
   out.tracks[#out.tracks + 1] = {index = i, name = t.name, type = types[t.type], group = group and group.name or nil,
-    pre = t.prefx_volume.value, post = t.postfx_volume.value, devices = devices}
+    pre = t.prefx_volume.value, post = t.postfx_volume.value, devices = devices,
+    delay = t.type == R.Track.TRACK_TYPE_SEQUENCER and t.output_delay or nil}
 end
 for _, ins in ipairs(song.instruments) do
   local samples = {}
   for _, s in ipairs(ins.samples) do
     local b = s.sample_buffer
-    samples[#samples + 1] = {name = s.name, frames = b.has_sample_data and b.number_of_frames or 0, rate = b.has_sample_data and b.sample_rate or 0}
+    local keys = s.sample_mapping.note_range
+    samples[#samples + 1] = {name = s.name, frames = b.has_sample_data and b.number_of_frames or 0, rate = b.has_sample_data and b.sample_rate or 0,
+      low = keys[1], high = keys[2]}
   end
   out.instruments[#out.instruments + 1] = {name = ins.name, samples = samples}
 end
@@ -1233,6 +1236,96 @@ note(seq:pattern(1), 1, 0, "C-4", 0)
                         format!("{} notes; {}", after["notes"], tracks.join(", ")),
                     ),
                     Check::new("the Bass track is still there", tracks.iter().any(|name| name == "Bass"), ""),
+                ]
+            },
+        },
+        // Renoise: a layer that lands late against its main break, lined up (#401 layering).
+        Scenario {
+            id: "R38",
+            daw: Daw::Renoise,
+            says: &["The Layer track sounds a bit late against the Amen, line it up"],
+            before: None,
+            // (the same break on both, the layer's 16 ms late in its own audio: both notes on the line)
+            fixture: r#"
+song:track(1).name = "Amen"
+song:track(2).name = "Layer"
+sample_instrument(1, "Amen", MEDIA .. "/break120.wav")
+sample_instrument(2, "Layer", MEDIA .. "/break120-late.wav")
+note(seq:pattern(1), 1, 0, "C-4", 0)
+note(seq:pattern(1), 2, 0, "C-4", 1)
+"#,
+            read: "",
+            teardown: None,
+            generates: false,
+            names: &["16", "15.6"],
+            expect: |seen| {
+                let after = seen.after;
+                let delay = |name: &str| track(after, name).and_then(|t| t["delay"].as_f64());
+                let nudged = delay("Layer").is_some_and(|ms| (-21.0..=-11.0).contains(&ms));
+                vec![
+                    Check::new("the layers tool measured them", seen.tools.iter().any(|t| t == "layers"), seen.tools.join(", ")),
+                    Check::new(
+                        "the Layer moved about 16 ms earlier (its track delay)",
+                        nudged,
+                        format!("Layer {:?} ms, Amen {:?} ms", delay("Layer"), delay("Amen")),
+                    ),
+                    Check::new("the Amen stays where it was", delay("Amen").unwrap_or(0.0).abs() < 0.5, ""),
+                ]
+            },
+        },
+        // Renoise: a kit's samples laid out across the keys (#401 sample mapping), a key each.
+        Scenario {
+            id: "R39",
+            daw: Daw::Renoise,
+            says: &["Lay the Kit's samples out across the keys", "Yes, go ahead"],
+            before: None,
+            fixture: r#"
+local ins = sample_instrument(1, "Kit", MEDIA .. "/kick.wav")
+ins:sample(1).name = "Kick"
+for k, sound in ipairs({{"Snare", "snare.wav"}, {"Shaker", "gravel1.wav"}}) do
+  local s = ins:insert_sample_at(k + 1)
+  s.sample_buffer:load_from(MEDIA .. "/" .. sound[2])
+  s.name = sound[1]
+end
+"#,
+            read: "",
+            teardown: None,
+            generates: false,
+            names: &["Kick", "Snare", "Shaker", "C-4"],
+            // (map_samples, or the keyzone change it makes given straight: a kit of three has nothing to plan)
+            expect: |seen| {
+                let after = seen.after;
+                let kit = list(&after["instruments"]).into_iter().find(|i| i["name"] == "Kit").cloned().unwrap_or(Value::Null);
+                let ranges: Vec<(i64, i64)> =
+                    list(&kit["samples"]).iter().filter_map(|s| Some((s["low"].as_i64()?, s["high"].as_i64()?))).collect();
+                let apart =
+                    ranges.len() == 3 && ranges.iter().enumerate().all(|(k, a)| ranges.iter().skip(k + 1).all(|b| a.1 < b.0 || b.1 < a.0));
+                vec![Check::new("each sample on keys of its own", apart, format!("{ranges:?}"))]
+            },
+        },
+        // Renoise: a drum recording chopped at its real hits and laid out to play it (#401 chop).
+        Scenario {
+            id: "R40",
+            daw: Daw::Renoise,
+            says: &["Chop the Amen at its hits and lay it out in the pattern", "The main hits"],
+            before: None,
+            fixture: r#"
+song:track(1).name = "Amen"
+sample_instrument(1, "Amen", MEDIA .. "/amen.wav")
+"#,
+            read: "",
+            teardown: None,
+            generates: true,
+            names: &["slices", "slice"],
+            expect: |seen| {
+                let (before, after) = (seen.before, seen.after);
+                let amen = list(&after["instruments"]).into_iter().find(|i| i["name"] == "Amen").cloned().unwrap_or(Value::Null);
+                let samples = list(&amen["samples"]).len();
+                let notes = (before["notes"].as_u64().unwrap_or(0), after["notes"].as_u64().unwrap_or(0));
+                vec![
+                    Check::new("the chop tool cut it", seen.tools.iter().any(|t| t == "chop"), seen.tools.join(", ")),
+                    Check::new("the Amen cut into slices (a sample each)", samples >= 6, format!("{samples} samples")),
+                    Check::new("the slices laid out as notes", notes.1 >= notes.0 + 6, format!("{} → {} notes", notes.0, notes.1)),
                 ]
             },
         },
