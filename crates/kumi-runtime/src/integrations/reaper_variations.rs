@@ -371,7 +371,7 @@ fn apply_one(op: &Value, factor: f64, take: &mut ItemTake, source: &ItemTake, rn
             });
             Ok(format!("{} notes fewer", dropped.len()))
         }
-        other => return Err(format!("{other} isn't one of REAPER's variation operators")),
+        other => Err(format!("{other} isn't one of REAPER's variation operators")),
     }
 }
 
