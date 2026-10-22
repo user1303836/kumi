@@ -155,7 +155,7 @@ mod tests {
         let reaper = Reaper::new(&api);
         let asked = json!({"slug": "color-drums", "name": "Colour the drums", "description": "Drums red, by name", "code": "return 1"});
         let kept = install(&reaper, &asked).unwrap();
-        let file = dir.path().join("Scripts/Kumi/color-drums.lua");
+        let file = dir.path().join("Scripts").join("Kumi").join("color-drums.lua");
         assert_eq!(kept["file"], json!(file));
         let text = std::fs::read_to_string(&file).unwrap();
         assert!(text.starts_with("-- Kumi: Colour the drums\n-- Drums red, by name\n"), "{text}");

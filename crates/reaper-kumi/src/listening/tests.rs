@@ -1954,14 +1954,18 @@ fn a_deliverys_settings_are_checked_before_anything_is_set() {
     let answer = rig.ask("deliver_targets", json!({"pattern": "$region"})).unwrap();
     assert_eq!(answer["targets"], json!(["/lab/Projects/Media/Verse.wav"]));
     fake::with(|s| s.listening.texts.insert("RENDER_FILE".into(), "Renders".into()));
-    let folder_of = |rig: &Rig| rig.ask("deliver_targets", json!({"pattern": "$region"})).unwrap()["folder"].clone();
-    assert_eq!(folder_of(&rig), "/lab/Projects/Media/Renders");
+    // (as paths: each platform joins with its own separator)
+    let folder_of = |rig: &Rig| {
+        PathBuf::from(rig.ask("deliver_targets", json!({"pattern": "$region"})).unwrap()["folder"].as_str().unwrap_or_default())
+    };
+    let media = Path::new("/lab/Projects/Media");
+    assert_eq!(folder_of(&rig), media.join("Renders"));
     fake::extra(|e| e.config.insert("defrenderpath".into(), "/lab/Renders".into()));
-    assert_eq!(folder_of(&rig), "/lab/Renders/Renders");
+    assert_eq!(folder_of(&rig), Path::new("/lab/Renders").join("Renders"));
     fake::extra(|e| e.config.insert("defrenderpath".into(), "Bounces".into()));
-    assert_eq!(folder_of(&rig), "/lab/Projects/Media/Bounces/Renders");
+    assert_eq!(folder_of(&rig), media.join("Bounces").join("Renders"));
     fake::with(|s| s.listening.texts.insert("RENDER_FILE".into(), "/elsewhere/Game".into()));
-    assert_eq!(folder_of(&rig), "/elsewhere/Game", "a whole path stands");
+    assert_eq!(folder_of(&rig), Path::new("/elsewhere/Game"), "a whole path stands");
     fake::with(|s| {
         s.listening.texts.remove("RENDER_FILE");
         s.media = String::new();
