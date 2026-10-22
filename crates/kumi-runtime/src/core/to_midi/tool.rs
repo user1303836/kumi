@@ -41,9 +41,13 @@ impl<B: ToMidiBackend + 'static> ToMidi<B> {
             Some((from, beats)) if from >= 0. && beats > 0. && beats <= MOST_BEATS => (from, beats),
             _ => return Err(format!("fromBeat and beats: the stretch to hear (at most {MOST_BEATS} beats)")),
         };
-        let per_second = self.backend.tempo(from, &signal).await? / 60.;
+        let tempo = self.backend.tempo(from, &signal).await?;
         let (render, name) = self.backend.render(track, from, beats, &signal).await?;
-        let seconds = beats / per_second;
+        // (the stretch's own beats a second, from how long it rendered: a tempo change inside it moves its notes by its average)
+        let seconds = render.seconds.filter(|seconds| *seconds > 0.).unwrap_or(beats * 60. / tempo);
+        let per_second = beats / seconds;
+        let average = per_second * 60.;
+        let moving = (average - tempo).abs() > tempo * 0.005;
         let notes = if what == "drums" {
             let (mono, rate, _) =
                 crate::audio::decode::read_mono(&render.file, &signal, render.start, seconds).await.map_err(|error| error.0)?;
@@ -62,9 +66,13 @@ impl<B: ToMidiBackend + 'static> ToMidi<B> {
         let options = input.get("options").and_then(Value::as_object).cloned().unwrap_or_default();
         let midi_name = format!("{name} {}", if what == "drums" { "drums" } else { what });
         let made = self.backend.write(track, &midi_name, &notes, what == "drums", from, beats, &options, &signal).await?;
-        Ok(
-            json!({"heard": words, "track": midi_name, "made": made, "next": "say what was heard; offer to tidy it (quantize) or to try another stretch"}),
-        )
+        let mut reply = json!({"heard": words, "track": midi_name, "made": made, "next": "say what was heard; offer to tidy it (quantize) or to try another stretch"});
+        if moving {
+            reply["tempo"] = json!(format!(
+                "the tempo moves inside this stretch ({tempo:.1} BPM at its start, {average:.1} on average): the notes are placed by the average, so they drift from the grid where it changes; hear a stretch of one tempo to place them exactly"
+            ));
+        }
+        Ok(reply)
     }
 }
 

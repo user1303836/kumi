@@ -65,8 +65,8 @@ pub fn drums(hits: &[Hit], per_second: f64, beats: f64) -> Vec<MidiNote> {
 }
 
 /// Basic Pitch's notes as MIDI notes, `per_second` beats a second, in the stretch's `beats`: every one, or (`melody`) the
-/// highest sounding at each moment, a lower one cut where a higher one starts over it. Velocity from Basic Pitch's
-/// confidence (40 to 120).
+/// highest sounding at each moment: a lower one cut where a higher one starts over it, and one starting under a higher one
+/// starts where that ends (Basic Pitch overlaps legato steps). Velocity from Basic Pitch's confidence (40 to 120).
 pub fn pitched(heard: &[Heard], per_second: f64, beats: f64, melody: bool) -> Vec<MidiNote> {
     let mut notes: Vec<MidiNote> = heard
         .iter()
@@ -88,20 +88,38 @@ pub fn pitched(heard: &[Heard], per_second: f64, beats: f64, melody: bool) -> Ve
     apart(notes)
 }
 
-/// The highest note sounding at each moment: a note starting under a higher one sounding goes, and one a higher one starts
-/// over is cut there.
+/// The highest note sounding at each moment: a note starting under a higher one starts where that one ends (or goes, when it
+/// ends first), and one a higher one starts over is cut there.
 fn skyline(notes: Vec<MidiNote>) -> Vec<MidiNote> {
     let mut out: Vec<MidiNote> = Vec::new();
-    for note in notes {
-        let under = out.iter().any(|kept| kept.pitch > note.pitch && kept.start <= note.start && kept.start + kept.length > note.start);
-        if under {
+    for mut note in notes {
+        loop {
+            let over = out
+                .iter()
+                .filter(|kept| kept.pitch > note.pitch && kept.start <= note.start + 1e-9 && kept.start + kept.length > note.start + 1e-9)
+                .map(|kept| kept.start + kept.length)
+                .fold(f64::NAN, f64::max);
+            if over.is_nan() {
+                break;
+            }
+            let ends = note.start + note.length;
+            note.length = ends - over;
+            note.start = over;
+            if note.length <= 1e-9 {
+                break;
+            }
+        }
+        if note.length <= 1e-9 {
             continue;
         }
-        for kept in out.iter_mut().filter(|kept| kept.pitch < note.pitch && kept.start + kept.length > note.start) {
+        for kept in
+            out.iter_mut().filter(|kept| kept.pitch < note.pitch && kept.start < note.start && kept.start + kept.length > note.start)
+        {
             kept.length = (note.start - kept.start).max(1. / 64.);
         }
         out.push(note);
     }
+    out.sort_by(|a, b| a.start.total_cmp(&b.start));
     out
 }
 
@@ -173,6 +191,12 @@ mod tests {
         assert_eq!(harmony[0].velocity, 80);
         let melody = pitched(&all, 2., 8., true);
         assert_eq!(melody.iter().map(|note| (note.pitch, note.start, note.length)).collect::<Vec<_>>(), [(67, 0., 1.), (72, 1., 2.)]);
+        // (legato steps Basic Pitch overlaps: 72 over 0 to 1.05 s, then 70, then 69: each starts where the one above ends)
+        let steps = pitched(&[heard(0., 1.05, 72), heard(1., 2., 70), heard(1.9, 3., 69)], 1., 8., true);
+        assert_eq!(
+            steps.iter().map(|note| (note.pitch, (note.start * 100.).round() / 100.)).collect::<Vec<_>>(),
+            [(72, 0.), (70, 1.05), (69, 2.)]
+        );
         // (one pitch twice, overlapping: the first is cut where the second starts)
         let again = pitched(&[heard(0., 1., 60), heard(0.5, 1., 60)], 2., 8., false);
         assert_eq!(again[0].length, 1.);

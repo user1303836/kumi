@@ -1,7 +1,7 @@
 //! Note-level moves on a DAW-neutral note form (#400 review notes, shared moves): a MIDI take's notes, in beats from its
 //! start, and the operators every DAW whose takes hold notes shares: notes moved by semitones, velocities and timing loosened,
-//! notes thinned out; each leaves the anchors (the notes every take keeps) as they are. REAPER's MIDI items and Live's clips
-//! take them from here; a backend's own operators (an audio take's rate, its fades) stay its own.
+//! notes thinned out; each leaves the anchors (the notes every take keeps) as they are. REAPER's MIDI items take them
+//! from here; a backend's own operators (an audio take's rate, its fades) stay its own.
 use super::Rng;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;

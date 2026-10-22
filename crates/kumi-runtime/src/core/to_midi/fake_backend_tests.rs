@@ -31,7 +31,8 @@ impl ToMidiBackend for Rc<Fake> {
         let (mono, _) = break_bar(RATE);
         let file = self.dir.path().join("break.wav");
         crate::audio::decode::write_test_wav(&file, &mono, RATE as u32);
-        Ok((Render { file: file.to_string_lossy().into_owned(), start: 0., seconds: None }, "Amen".into()))
+        // (a bar at 170 BPM: the window the render was asked for)
+        Ok((Render { file: file.to_string_lossy().into_owned(), start: 0., seconds: Some(4. * 60. / 170.) }, "Amen".into()))
     }
 
     async fn tempo(&self, _from: f64, _signal: &Signal) -> Result<f64, String> {
