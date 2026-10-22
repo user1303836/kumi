@@ -141,8 +141,6 @@ impl<S: RefScheme + 'static> RenoiseBackend<S> {
         (now != kept).then(|| "has lines of its own outside the varied ones, or another length (since Kumi wrote it)".to_string())
     }
 
-    /// Where each item is now (`read {kind: "where"}`): {pattern}, {instrument}, {phrase} (a place or a ref) or {track} (a ref
-    /// from `layout`).
     /// Pattern takes' rows with the varied track's number now (`variedTrack`): what tells their own tracks apart (#401).
     async fn with_varied_track(&self, set: &RenoiseSet, rows: &mut [Value], signal: &Signal) {
         if !matches!(set.source.data.placement, Placement::Patterns { .. }) || !rows.iter().any(|row| row.get("ref").is_some()) {
@@ -156,6 +154,8 @@ impl<S: RefScheme + 'static> RenoiseBackend<S> {
         }
     }
 
+    /// Where each item is now (`read {kind: "where"}`): {pattern}, {instrument}, {phrase} (a place or a ref) or {track} (a ref
+    /// from `layout`).
     async fn locate(&self, items: Vec<Value>, layout: Option<u64>, signal: &Signal) -> Result<Vec<Value>, String> {
         let answer = self.read(json!({"kind": "where", "items": items}), layout, signal).await?;
         Ok(answer.get("items").and_then(Value::as_array).cloned().unwrap_or_default())
