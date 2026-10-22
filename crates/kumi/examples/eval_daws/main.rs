@@ -13,6 +13,9 @@
 //! parent must hold the `.kumi-eval-lab` marker the lab's setup writes (never Kumi's own folder or the home folder), and
 //! refuses any project or song but the lab's scratch one: unsaved and untitled, or saved under that lab folder.
 //!
+//! A lab DAW that hears no audio device listens by offline render only, and each result says so; REAPER's dummy device
+//! counted as heard (`KUMI_REAPER_LAB_DUMMY`) would capture silence, so a run refuses it.
+//!
 //! cargo run -p kumi --example eval_daws -- --daw reaper|renoise --kumi-home <lab kumi-home> --locks <dir>
 //!     [--only P30,R31] [--out <results.md>]
 //!
@@ -78,6 +81,8 @@ struct Outcome {
     tools: Vec<String>,
     seconds: f64,
     error: Option<String>,
+    /// What the lab is like where it bears on the run (no audio device: listens by offline render only).
+    notes: Vec<String>,
 }
 
 impl Outcome {
@@ -90,6 +95,15 @@ impl Outcome {
 static LIVE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
     Regex::new(r"\b(Live|Ableton|Sets?|Session|Arrangement|Main|[Ss]cenes?|[Rr]acks?|[Cc]lip slots?|Control Surfaces?|Remote Scripts?|Max for Live|M4L|Operator)\b").unwrap()
 });
+
+/// What a lab whose DAW hears no audio device means for a run (#401): Kumi listens by offline render only (its bridge says it
+/// can't capture what plays or audition out loud), so a listen is never a capture of silence there.
+fn hearing(status: &Value) -> Option<String> {
+    let flag = |key: &str| status.pointer(&format!("/listening/{key}")) == Some(&Value::Bool(true));
+    (flag("render") && !flag("capture") && !flag("audition")).then(|| {
+        "the lab DAW hears no audio device: Kumi listened by offline render only (no capture of what plays, no audition out loud)".into()
+    })
+}
 
 /// "Set" as the verb, any producer's word: starting a sentence, a line, a list's item or what follows a colon ("Set Bass to
 /// -6 dB", "Done: Set tempo"), or before the words a verb takes ("Set up", "Set the"). Live's Set is a noun mid-sentence.
@@ -337,6 +351,7 @@ async fn run_scenario(model: &Model, scenario: &Scenario, home: &Path, dirs: &Di
     if status.get("connected") != Some(&Value::Bool(true)) {
         return Err(RuntimeError::plain(format!("the lab DAW isn't connected: {status}")));
     }
+    let notes: Vec<String> = hearing(&status).into_iter().collect();
     // Only the lab's scratch project or song: the fixtures rewrite what's open.
     let project = host_call(&host, "snapshot", json!({})).await.map_err(failure)?["project"].clone();
     guard::scratch(&project, &dirs.lab).map_err(failure)?;
@@ -386,6 +401,7 @@ async fn run_scenario(model: &Model, scenario: &Scenario, home: &Path, dirs: &Di
             tools: vec![],
             seconds: started.elapsed().as_secs_f64(),
             error: None,
+            notes,
         });
     }
     let setup = host_call(&host, "snapshot", json!({})).await.map_err(failure)?["setup"].clone();
@@ -516,7 +532,7 @@ async fn run_scenario(model: &Model, scenario: &Scenario, home: &Path, dirs: &Di
     });
     checks.extend(every_scenario(scenario, &run));
     folder.close().ok();
-    Ok(Outcome { id: scenario.id, checks, said: run.said, tools: tools_used, seconds: started.elapsed().as_secs_f64(), error: None })
+    Ok(Outcome { id: scenario.id, checks, said: run.said, tools: tools_used, seconds: started.elapsed().as_secs_f64(), error: None, notes })
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -526,6 +542,9 @@ fn report(outcome: &Outcome) -> String {
     let mut text = format!("## {} — {} ({:.0} s)\n\n", outcome.id, if outcome.passed() { "passed" } else { "failed" }, outcome.seconds);
     if let Some(error) = &outcome.error {
         text.push_str(&format!("- error: {error}\n"));
+    }
+    for note in &outcome.notes {
+        text.push_str(&format!("- lab: {note}\n"));
     }
     for check in &outcome.checks {
         text.push_str(&format!(
@@ -548,6 +567,12 @@ async fn run() -> Result<i32, RuntimeError> {
         Some("renoise") => Daw::Renoise,
         _ => return Err(RuntimeError::plain(usage)),
     };
+    // (#401) REAPER's dummy device counted as heard captures silence: a lab measuring previews sets it, an eval mustn't.
+    if daw == Daw::Reaper && std::env::var_os("KUMI_REAPER_LAB_DUMMY").is_some_and(|dummy| !dummy.is_empty()) {
+        return Err(RuntimeError::plain(
+            "KUMI_REAPER_LAB_DUMMY counts REAPER's dummy device as heard, so a capture in the lab would be silence: run the evals (and the lab's REAPER) without it",
+        ));
+    }
     let home = PathBuf::from(flag("--kumi-home").ok_or_else(|| RuntimeError::plain(usage))?);
     // Only a marked lab, never Kumi's own folder or the home folder; then the lab's lock, for the whole run (released as
     // `_lock` goes, before the process ends).
@@ -594,6 +619,7 @@ async fn run() -> Result<i32, RuntimeError> {
                 tools: vec![],
                 seconds: 0.0,
                 error: Some(safe_error(Some(&error), &[])),
+                notes: vec![],
             },
         };
         let part = report(&outcome);
@@ -652,15 +678,54 @@ mod tests {
         assert_eq!(live_words("Added a Rack to the Session view"), ["Rack", "Session"]);
     }
 
-    /// The names a scenario expects in Kumi's answer aren't the producer's own words, so saying them proves something and
-    /// the check can fail.
+    /// #401: a lab whose DAW renders but can't capture or audition hears no audio device, and the run says so.
     #[test]
-    fn no_scenarios_names_are_in_what_the_producer_says() {
+    fn a_lab_with_no_audio_device_is_said() {
+        let status = |capture: bool| json!({"listening": {"render": true, "capture": capture, "audition": capture}});
+        assert!(hearing(&status(false)).unwrap().starts_with("the lab DAW hears no audio device"));
+        assert_eq!(hearing(&status(true)), None);
+        assert_eq!(hearing(&json!({"connected": true})), None, "a bridge that doesn't say");
+    }
+
+    /// The names a scenario expects in Kumi's answer are what its project holds or Kumi sets (tracks, items, devices,
+    /// values), never the producer's own words or a domain word any answer says ("I couldn't render the regions"), so
+    /// saying one proves something and the check can fail.
+    #[test]
+    fn a_scenarios_names_are_its_projects_not_the_producers_words_or_common_ones() {
+        const COMMON: &[&str] = &[
+            "empty",
+            "new",
+            "region",
+            "render",
+            "bpm",
+            "rate",
+            "timebase",
+            "sidechain",
+            "compressor",
+            "slot",
+            "sample",
+            "group",
+            "delay",
+            "send",
+            "instrument",
+            "stem",
+            "variation",
+            "column",
+            "duplicate",
+            "track",
+            "pattern",
+            "bus",
+            "loop",
+            "db",
+            "ms",
+        ];
         for scenario in scenarios::all() {
             assert!(!scenario.names.is_empty(), "{}", scenario.id);
             let says = scenario.says.join(" ").to_lowercase();
             for name in scenario.names {
-                assert!(!says.contains(&name.to_lowercase()), "{}: {name} is in {says:?}", scenario.id);
+                let name = name.to_lowercase();
+                assert!(!says.contains(&name), "{}: {name} is in {says:?}", scenario.id);
+                assert!(!COMMON.contains(&name.as_str()), "{}: {name} is a word any answer says", scenario.id);
             }
         }
     }
