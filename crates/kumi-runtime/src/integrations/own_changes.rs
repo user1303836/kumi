@@ -1657,7 +1657,7 @@ mod tests {
     /// The kinds a bridge's code registers, found with `pattern` in the files under `folder` whose names start with
     /// `prefix`, less the kinds that only name a change's target.
     fn registered(folder: &str, prefix: &str, pattern: &str) -> BTreeSet<String> {
-        let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(folder);
+        let folder = kumi_testkit::workspace_path(folder);
         let found = Regex::new(pattern).unwrap();
         let mut kinds = BTreeSet::new();
         for entry in std::fs::read_dir(&folder).unwrap() {

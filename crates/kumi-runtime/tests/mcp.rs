@@ -39,7 +39,7 @@ fn node() -> PathBuf {
         .expect("MCP SDK interoperability tests need Node and: npm ci --prefix crates/kumi-runtime/tests/support")
 }
 fn options(mode: &str, timeout: u64) -> Options {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = kumi_testkit::workspace();
     Options {
         entry: Some(node()),
         args: vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/support/mcp-server.mjs").to_string_lossy().into(), mode.into()],
@@ -338,11 +338,8 @@ local_test!(failed_startup_closes_the_owned_child_already_aborted_startup_create
 });
 
 local_test!(actual_built_bridge_interoperates_without_config_and_truthfully_reports_unavailable_live, {
-    let entry = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug").join(if cfg!(windows) {
-        "ableton-mcp-server.exe"
-    } else {
-        "ableton-mcp-server"
-    });
+    let entry =
+        kumi_testkit::workspace_path("target/debug").join(if cfg!(windows) { "ableton-mcp-server.exe" } else { "ableton-mcp-server" });
     if !entry.is_file() {
         assert_ne!(std::env::var("KUMI_TEST_BRIDGE").as_deref(), Ok("1"), "Build the standalone bridge before the interoperability check");
         eprintln!("Standalone bridge is not built; build it and set KUMI_TEST_BRIDGE=1 for required interoperability verification");

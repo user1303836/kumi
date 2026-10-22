@@ -578,7 +578,8 @@ mod tests {
             assert_eq!(number::to_string(value), expected, "{value}");
         }
         // The vectors the bridge and the Remote Script check too, with JavaScript's text (made with Node).
-        let vectors: serde_json::Value = serde_json::from_str(include_str!("../../../protocol/wire-canonical-vectors.json")).unwrap();
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!(concat!(env!("KUMI_WORKSPACE"), "/protocol/wire-canonical-vectors.json"))).unwrap();
         for case in vectors["numbers"].as_array().unwrap() {
             let value = f64::from_bits(u64::from_str_radix(case["bits"].as_str().unwrap(), 16).unwrap());
             assert_eq!(number::to_string(value), case["text"].as_str().unwrap(), "{case}");

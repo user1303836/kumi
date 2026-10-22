@@ -65,7 +65,7 @@ async fn bind_retrying(port: u16) -> tokio::net::TcpListener {
     panic!("port {port} stayed in use")
 }
 fn old_install(root: &Path, custom: bool) -> (LifecycleOptions, Value) {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let workspace = kumi_testkit::workspace();
     let out = Command::new("node")
         .arg("crates/ableton-mcp-server/tests/support/legacy_install.mjs")
         .arg(json!({"root":root,"version":"1.0.73","custom":custom,"bundle":legacy_app()}).to_string())

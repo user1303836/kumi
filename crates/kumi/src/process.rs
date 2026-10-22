@@ -124,11 +124,12 @@ pub fn executable_name(name: &str) -> String {
 pub fn executable_dir() -> String {
     std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.display().to_string())).unwrap_or(".".into())
 }
+/// The checkout this build was made from; for a release's, a folder that isn't there (this crate's own, where it was
+/// built), so that what's looked for in it isn't found.
 pub fn repository_dir() -> String {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .unwrap_or_else(|_| Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+    kumi_common::dev::checkout()
+        .and_then(|checkout| checkout.canonicalize().ok())
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf())
         .display()
         .to_string()
 }

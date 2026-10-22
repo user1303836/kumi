@@ -73,5 +73,6 @@ unicode-normalization.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
+kumi-testkit.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true

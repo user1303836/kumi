@@ -865,7 +865,7 @@ mod tests {
     const VECTOR_SECRET: &str = "kumi-test-secret-0123456789abcdefghijklmnopqrstuvwxyz";
 
     fn vectors() -> Value {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../daw-bridge/tests/vectors/server.json");
+        let path = kumi_testkit::workspace_path("crates/daw-bridge/tests/vectors/server.json");
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 

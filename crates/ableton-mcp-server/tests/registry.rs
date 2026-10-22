@@ -11,7 +11,7 @@ mod support;
 use support::assert_throws;
 
 fn repository_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
+    kumi_testkit::workspace()
 }
 
 // The Remote Script hashes the registry with Python's json.dumps and the host with JSON.stringify:

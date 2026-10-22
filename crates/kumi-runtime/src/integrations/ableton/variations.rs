@@ -751,7 +751,8 @@ mod tests {
     /// The bridge's own schemas for each change a take makes, as every bridge in the fixtures has them.
     #[test]
     fn every_change_a_take_makes_fits_the_bridges_schema() {
-        let oracle: Value = serde_json::from_str(include_str!("../../../tests/support/public-tools-oracle.json")).unwrap();
+        let oracle: Value =
+            serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/public-tools-oracle.json"))).unwrap();
         let take =
             ClipTake { notes: vec![Note { pitch: 60, start: 0., length: 0.5, velocity: 100, channel: 1 }], length: 4., anchors: vec![] };
         for (tool, input) in [

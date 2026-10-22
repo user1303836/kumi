@@ -16,7 +16,7 @@ use daw_bridge::auth::Secret;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
-const VECTORS: &str = include_str!("../../tests/vectors/renoise-reads.json");
+const VECTORS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/vectors/renoise-reads.json"));
 /// The epoch the vectors were made in.
 const EPOCH: &str = "1";
 const VECTORS_EPOCH: u32 = 1; // (the same, as a number)

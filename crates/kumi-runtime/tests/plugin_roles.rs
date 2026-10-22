@@ -9,8 +9,7 @@ use serde_json::Value;
 
 /// Ozone 12.1's own parameter names, as Live listed them on the machine its format was read on.
 fn ozone_names() -> Vec<String> {
-    let text =
-        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugin-formats/ozone-12/format-1/structure.json")).unwrap();
+    let text = std::fs::read_to_string(kumi_testkit::workspace_path("plugin-formats/ozone-12/format-1/structure.json")).unwrap();
     let structure: Value = serde_json::from_str(&text).unwrap();
     structure["parameters"].as_object().unwrap().keys().filter(|name| !name.contains(" / ")).cloned().collect()
 }

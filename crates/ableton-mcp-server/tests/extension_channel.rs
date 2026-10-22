@@ -26,7 +26,7 @@ struct Peer {
 impl Peer {
     async fn start() -> Self {
         let folder = tempfile::tempdir().unwrap();
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let repo = kumi_testkit::workspace();
         let mut child = Command::new("node")
             .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/extension-peer.mjs"))
             .arg(folder.path())

@@ -125,7 +125,9 @@ pub fn find_extension_bundle() -> Option<PathBuf> {
             candidates.push(directory.join("../live-extension"));
         }
     }
-    candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/live-extension"));
+    if let Some(checkout) = kumi_common::dev::checkout() {
+        candidates.push(checkout.join("apps/live-extension"));
+    }
     candidates.into_iter().find(|path| is_extension(path)).map(|path| std::fs::canonicalize(&path).unwrap_or(path))
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

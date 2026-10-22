@@ -231,7 +231,7 @@ pub fn sha256_hex(text: &str) -> String {
 /// embedded at build time. Never one found from the working directory: a bridge started from a checkout
 /// of another version would take that one's registry and no longer agree with its own Remote Script in
 /// Live.
-pub const LIVE_REGISTRY_TEXT: &str = include_str!("../../../protocol/ableton-live-v1.operations.json");
+pub const LIVE_REGISTRY_TEXT: &str = include_str!(concat!(env!("KUMI_WORKSPACE"), "/protocol/ableton-live-v1.operations.json"));
 
 static REGISTRY: LazyLock<LiveRegistry> =
     LazyLock::new(|| parse_live_registry(LIVE_REGISTRY_TEXT).unwrap_or_else(|error| panic!("{error}")));

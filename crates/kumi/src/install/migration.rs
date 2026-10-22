@@ -93,14 +93,14 @@ mod tests {
 
     #[test]
     fn powershell_installer_and_native_windows_launcher_have_the_same_template() {
-        let script = include_str!("../../../../install.ps1").replace("\r\n", "\n");
+        let script = include_str!(concat!(env!("KUMI_WORKSPACE"), "/install.ps1")).replace("\r\n", "\n");
         let template = script.split_once("$launcher = @'\n").unwrap().1.split_once("\n'@").unwrap().0;
         assert_eq!(template.replace('\n', "\r\n") + "\r\n", launcher(true));
     }
 
     #[test]
     fn shell_installer_and_native_unix_launcher_have_the_same_template() {
-        let script = include_str!("../../../../install.sh");
+        let script = include_str!(concat!(env!("KUMI_WORKSPACE"), "/install.sh"));
         let template = script.split_once("<<'LAUNCHER'\n").unwrap().1.split_once("\nLAUNCHER\n").unwrap().0;
         assert_eq!(format!("{template}\n"), launcher(false));
     }
@@ -108,16 +108,19 @@ mod tests {
     #[test]
     fn every_copy_of_the_one_liners_is_kumis_own() {
         use kumi_runtime::{INSTALL_PS1, INSTALL_SH};
-        let sh = include_str!("../../../../install.sh");
-        let ps1 = include_str!("../../../../install.ps1").replace("\r\n", "\n");
+        let sh = include_str!(concat!(env!("KUMI_WORKSPACE"), "/install.sh"));
+        let ps1 = include_str!(concat!(env!("KUMI_WORKSPACE"), "/install.ps1")).replace("\r\n", "\n");
         // Each script's own header, install.sh's word to Git Bash, and the launchers' word when Kumi's app is missing.
         assert!(sh.contains(&format!("\n#   {INSTALL_SH}\n")));
         assert!(sh.contains(&format!("open PowerShell and run: {INSTALL_PS1}\"")));
         assert!(ps1.contains(&format!("\n#   {INSTALL_PS1}\n")));
         assert_eq!(launcher(false).matches(&format!("run the installer again: {INSTALL_SH}\"")).count(), 2);
         assert_eq!(launcher(true).matches(&format!("run the installer again: {}\r\n", INSTALL_PS1.replace('|', "^|"))).count(), 2);
-        let readmes =
-            [include_str!("../../../../README.md"), include_str!("../../../../README.ja.md"), include_str!("../../../../README.zh-CN.md")];
+        let readmes = [
+            include_str!(concat!(env!("KUMI_WORKSPACE"), "/README.md")),
+            include_str!(concat!(env!("KUMI_WORKSPACE"), "/README.ja.md")),
+            include_str!(concat!(env!("KUMI_WORKSPACE"), "/README.zh-CN.md")),
+        ];
         for readme in readmes {
             assert!(readme.contains(&format!("\n{INSTALL_SH}\n")) && readme.contains(&format!("\n{INSTALL_PS1}\n")));
         }
@@ -138,7 +141,7 @@ mod tests {
         // Windows PowerShell reads a script file without a byte order mark, and a download without a charset (a
         // release asset), in another code page than UTF-8: install.ps1 builds its glyphs from [char]s. cmd reads
         // kumi.cmd in the console's code page.
-        assert!(include_str!("../../../../install.ps1").is_ascii());
+        assert!(include_str!(concat!(env!("KUMI_WORKSPACE"), "/install.ps1")).is_ascii());
         assert!(launcher(true).is_ascii());
     }
 

@@ -1,0 +1,5 @@
+# KUMI_WORKSPACE is this checkout's root (`<checkout>/.`), for what a crate takes from outside its own folder: an include
+# of protocol/ or the Remote Script, a test's fixture. It holds wherever a crate sits. Cargo reads this file from the
+# folder it runs in upwards, so run cargo from inside the checkout. Shipped code reads it only while it builds.
+[env]
+KUMI_WORKSPACE = { value = ".", relative = true }

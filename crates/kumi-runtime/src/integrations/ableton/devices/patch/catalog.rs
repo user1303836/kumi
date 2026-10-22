@@ -38,7 +38,9 @@ pub struct Catalog {
 }
 
 static CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
-    Catalog::from_value(&serde_json::from_str(include_str!("../../../../../../../max-standard/objects.json")).expect("objects.json"))
+    Catalog::from_value(
+        &serde_json::from_str(include_str!(concat!(env!("KUMI_WORKSPACE"), "/max-standard/objects.json"))).expect("objects.json"),
+    )
 });
 
 /// The catalog Kumi carries.

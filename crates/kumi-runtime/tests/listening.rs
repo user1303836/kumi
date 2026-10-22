@@ -245,8 +245,11 @@ fn masking_reads_against_the_mix_as_it_comes_into_mains_chain() {
 
 /// Live 12.4's Utility as Live showed it (the change eval's fixture): each parameter's name and its text now.
 fn live_utility() -> Vec<(String, String)> {
-    let devices: serde_json::Value =
-        serde_json::from_str(include_str!("../../kumi/examples/fixtures/eval_changes/live-devices.json")).unwrap();
+    let devices: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("KUMI_WORKSPACE"),
+        "/crates/kumi/examples/fixtures/eval_changes/live-devices.json"
+    )))
+    .unwrap();
     // [name, min, max, stepped, steps, Live's text at 0, 25, 50, 75 and 100% of the range, a value]
     devices["Utility"]
         .as_array()

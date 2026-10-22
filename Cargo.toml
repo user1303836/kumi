@@ -10,6 +10,7 @@ members = [
     "crates/daw-bridge",
     "crates/daw-mcp-server",
     "crates/reaper-kumi",
+    "crates/kumi-testkit",
 ]
 
 [workspace.package]
@@ -25,6 +26,7 @@ kumi-genexpr = { path = "crates/kumi-genexpr" }
 kumi-runtime = { path = "crates/kumi-runtime" }
 ableton-mcp-server = { path = "crates/ableton-mcp-server" }
 daw-bridge = { path = "crates/daw-bridge" }
+kumi-testkit = { path = "crates/kumi-testkit" }
 
 async-trait = "0.1"
 base64 = "0.22"

@@ -700,7 +700,8 @@ mod tests {
     use super::*;
     #[test]
     fn shared_authority_helpers_match_source_and_clip_bounds() {
-        let f: Value = serde_json::from_str(include_str!("../../tests/support/host_probes_oracle.json")).unwrap();
+        let f: Value =
+            serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/host_probes_oracle.json"))).unwrap();
         let host = McpHost::default();
         for (i, c) in f["helpers"].as_array().unwrap().iter().enumerate() {
             let mut snapshot = f["base"].clone();

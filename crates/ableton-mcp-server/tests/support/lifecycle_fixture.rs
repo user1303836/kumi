@@ -102,7 +102,11 @@ pub fn package_with(parent: &Path, version: &str, policy: &str, extra: &[(&str, 
     files.insert("package.json".into(), kumi_common::js::json::file_text(&metadata).into_bytes());
     files.insert(
         "LICENSE.md".into(),
-        if legacy { b"# Legacy private license notice\n".to_vec() } else { include_bytes!("../../../../LICENSE.md").to_vec() },
+        if legacy {
+            b"# Legacy private license notice\n".to_vec()
+        } else {
+            include_bytes!(concat!(env!("KUMI_WORKSPACE"), "/LICENSE.md")).to_vec()
+        },
     );
     files.insert(if native { binary } else { "dist/src/cli.js" }.into(), format!("fixture artifact payload {version}\n").into_bytes());
     if native {

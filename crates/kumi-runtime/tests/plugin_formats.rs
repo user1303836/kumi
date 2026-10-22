@@ -3,8 +3,6 @@
 //! states were saved by Live 12.4 for the same patches as the preset files, so they also show how a preset and
 //! a host's state relate.
 
-use std::path::PathBuf;
-
 use kumi_runtime::plugins::formats::cbor::{self, Value};
 use kumi_runtime::plugins::formats::ozone12::{self, OzonePreset, OzoneState};
 use kumi_runtime::plugins::formats::serum2::{self, SerumPreset, SerumState, XferFile};
@@ -14,7 +12,7 @@ use kumi_runtime::plugins::formats::vital::VitalPreset;
 use kumi_runtime::plugins::formats::vstpreset::{vst2_chunk, VstPreset};
 
 fn fixture(plugin: &str, name: &str) -> Vec<u8> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../plugin-formats").join(plugin).join("format-1/fixtures").join(name);
+    let path = kumi_testkit::workspace_path("plugin-formats").join(plugin).join("format-1/fixtures").join(name);
     std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
 

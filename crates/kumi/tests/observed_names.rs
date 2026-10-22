@@ -26,7 +26,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-const ORACLE: &str = include_str!("../../kumi-runtime/tests/support/observation-oracle.json");
+const ORACLE: &str = include_str!(concat!(env!("KUMI_WORKSPACE"), "/crates/kumi-runtime/tests/support/observation-oracle.json"));
 
 #[derive(Clone)]
 struct Listener {

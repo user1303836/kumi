@@ -271,7 +271,8 @@ mod tests {
     use super::*;
     #[test]
     fn field_verification_matches_source() {
-        let fixture: Value = serde_json::from_str(include_str!("../../tests/fixtures/host-transport-oracle.json")).unwrap();
+        let fixture: Value =
+            serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/host-transport-oracle.json"))).unwrap();
         for row in fixture["fields"].as_array().unwrap() {
             assert_eq!(
                 field_is(&row["transport"], row["field"].as_str().unwrap(), &row["value"]),

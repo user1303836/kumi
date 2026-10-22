@@ -85,8 +85,8 @@ const COLUMNS: [(&DawProfile, &str); 3] =
     [(&DawProfile::ABLETON, "Live"), (&DawProfile::REAPER, "REAPER"), (&DawProfile::RENOISE, "Renoise")];
 
 fn doc(language: &str) -> String {
-    let path = format!("{}/../../docs/{language}/DAWS.md", env!("CARGO_MANIFEST_DIR"));
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{path}: {error}"))
+    let path = kumi_testkit::workspace_path(format!("docs/{language}/DAWS.md"));
+    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
 
 /// The flags as their names and whether they're on (Option fields are on when Some), read from `Debug`, so a flag added
@@ -187,7 +187,7 @@ fn every_kind_category_is_named_in_its_daws_section() {
 
 #[test]
 fn the_readmes_and_guides_link_the_page() {
-    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let root = kumi_testkit::workspace().display().to_string();
     for (readme, language) in [("README.md", "en"), ("README.ja.md", "ja"), ("README.zh-CN.md", "zh-CN")] {
         let text = std::fs::read_to_string(format!("{root}/{readme}")).unwrap();
         assert!(text.contains(&format!("(docs/{language}/DAWS.md)")), "{readme} links docs/{language}/DAWS.md");

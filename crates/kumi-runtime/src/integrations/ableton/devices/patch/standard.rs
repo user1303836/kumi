@@ -46,7 +46,9 @@ pub struct Standard {
 }
 
 static STANDARD: LazyLock<Standard> = LazyLock::new(|| {
-    Standard::from_value(&serde_json::from_str(include_str!("../../../../../../../max-standard/standard.json")).expect("standard.json"))
+    Standard::from_value(
+        &serde_json::from_str(include_str!(concat!(env!("KUMI_WORKSPACE"), "/max-standard/standard.json"))).expect("standard.json"),
+    )
 });
 
 /// The standard Kumi carries.

@@ -814,7 +814,8 @@ mod tests {
     /// live-transport.json, made by the device_timing_live example): each scene's name, Live's loop if it had one, and
     /// what a device reads at each sample (plugphasor~, and plugsync~'s position, play flag and tempo).
     fn recorded() -> Vec<(String, Option<(f64, f64)>, Vec<[f64; 4]>)> {
-        let file: serde_json::Value = serde_json::from_str(include_str!("../../../../../tests/support/live-transport.json")).unwrap();
+        let file: serde_json::Value =
+            serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/live-transport.json"))).unwrap();
         let rate = file["rate"].as_f64().unwrap();
         assert_eq!((rate, file["vector"].as_u64()), (RATE, Some(VECTOR as u64)));
         let number = |value: &serde_json::Value| value.as_f64().unwrap();

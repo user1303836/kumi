@@ -11,7 +11,7 @@ use kumi_common::js::json::stringify;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
-const CHANGELOG: &str = include_str!("../../../CHANGELOG.md");
+const CHANGELOG: &str = include_str!(concat!(env!("KUMI_WORKSPACE"), "/CHANGELOG.md"));
 /// The most notes the first start after an update shows; `/changelog` has the rest.
 pub const SHOWN: usize = 5;
 /// How many releases `/changelog` shows when there's no update to show them since.

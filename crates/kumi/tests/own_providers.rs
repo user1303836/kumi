@@ -301,10 +301,7 @@ fn copy_folder(from: &std::path::Path, to: &std::path::Path) {
 
 /// The version of Renoise's tool this checkout carries (its version.lua), which a release that changes the tool moves on.
 fn tool_version() -> String {
-    let lua = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua"),
-    )
-    .unwrap();
+    let lua = std::fs::read_to_string(kumi_testkit::workspace_path("daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua")).unwrap();
     lua.split('"').nth(1).expect("version.lua returns the tool's version").to_owned()
 }
 
@@ -318,7 +315,7 @@ fn app_carrying(root: &std::path::Path, name: &str, extension: &[u8], version: &
     std::fs::write(reaper.join(file), extension).unwrap();
     std::fs::write(reaper.join("reaper_kumi.version"), format!("{version}\n")).unwrap();
     let folder = app.join("daws").join("renoise").join("com.kumi.Bridge.xrnx");
-    copy_folder(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../daws/renoise/com.kumi.Bridge.xrnx"), &folder);
+    copy_folder(&kumi_testkit::workspace_path("daws/renoise/com.kumi.Bridge.xrnx"), &folder);
     let lua = folder.join("payload").join("version.lua");
     let text = std::fs::read_to_string(&lua).unwrap();
     std::fs::write(&lua, text.replace(&format!("\"{}\"", tool_version()), &format!("\"{tool}\""))).unwrap();

@@ -82,7 +82,7 @@ fn installer_creates_assets_only_after_explicit_apply_and_preserves_force_behavi
     let root = folder.path().join("package");
     let asset = root.join("remote-script/AbletonMcpBridge");
     std::fs::create_dir_all(&asset).unwrap();
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../remote-script");
+    let source = kumi_testkit::workspace_path("remote-script");
     std::fs::copy(source.join(REMOTE_SCRIPT_ASSET), asset.join(REMOTE_SCRIPT_ASSET)).unwrap();
     std::fs::copy(source.join("AbletonMcpBridge/__init__.py"), asset.join("__init__.py")).unwrap();
     let result = install_remote_script::run_with_package_root(&args(&["--destination", destination.to_str().unwrap(), "--dry-run"]), &root);

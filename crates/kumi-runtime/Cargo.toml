@@ -72,6 +72,7 @@ webpki-roots.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
+kumi-testkit.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 # The GenExpr interpreter the building blocks' tests run their gen~ code in (optimized even in tests).
 kumi-genexpr.workspace = true

@@ -2,10 +2,10 @@ use super::*;
 
 /// A Doofer holding an EQ 5 and a Gainer, a Splitter (Frequency type, a Gainer in lane 1 and an EQ 5 in lane 2, macro 1
 /// mapped into lane 2), a fresh Doofer, a Notepad: as Renoise 3.5.4 wrote them in the lab.
-const DOOFER: &str = include_str!("../../tests/fixtures/renoise/doofer_eq5_gainer.xml");
-const SPLITTER: &str = include_str!("../../tests/fixtures/renoise/splitter_gainer_eq5.xml");
-const FRESH: &str = include_str!("../../tests/fixtures/renoise/doofer_default.xml");
-const NOTEPAD: &str = include_str!("../../tests/fixtures/renoise/notepad.xml");
+const DOOFER: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/renoise/doofer_eq5_gainer.xml"));
+const SPLITTER: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/renoise/splitter_gainer_eq5.xml"));
+const FRESH: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/renoise/doofer_default.xml"));
+const NOTEPAD: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/renoise/notepad.xml"));
 
 const DOOFER_TYPE: &str = "DooferDevice";
 

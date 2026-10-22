@@ -1,0 +1,9 @@
+[package]
+name = "kumi-testkit"
+version = "0.1.0"
+description = "What Kumi's crates' tests share: paths in this checkout. A dev-dependency only; nothing Kumi ships links it."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false

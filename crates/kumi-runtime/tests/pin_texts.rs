@@ -1165,8 +1165,7 @@ fn strings(items: &[&str]) -> Vec<String> {
     items.iter().map(|item| item.to_string()).collect()
 }
 fn ozone_names() -> Vec<String> {
-    let text =
-        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugin-formats/ozone-12/format-1/structure.json")).unwrap();
+    let text = std::fs::read_to_string(kumi_testkit::workspace_path("plugin-formats/ozone-12/format-1/structure.json")).unwrap();
     let structure: Value = serde_json::from_str(&text).unwrap();
     structure["parameters"].as_object().unwrap().keys().filter(|name| !name.contains(" / ")).cloned().collect()
 }

@@ -9,8 +9,10 @@ use std::{
     rc::Rc,
 };
 fn fixture() -> Value {
-    serde_json::from_reader(flate2::read::GzDecoder::new(&include_bytes!("../../tests/fixtures/host-midi-transform-oracle.json.gz")[..]))
-        .unwrap()
+    serde_json::from_reader(flate2::read::GzDecoder::new(
+        &include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/host-midi-transform-oracle.json.gz"))[..],
+    ))
+    .unwrap()
 }
 fn same(a: &Value, b: &Value, label: &str) {
     if canonical_mutation_identity(a).unwrap() == canonical_mutation_identity(b).unwrap() {

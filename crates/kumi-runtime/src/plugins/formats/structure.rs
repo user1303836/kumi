@@ -304,9 +304,9 @@ macro_rules! folder {
     ($plugin:literal, $format:literal) => {
         (
             $plugin,
-            include_str!(concat!("../../../../../plugin-formats/", $plugin, "/plugin.json")),
-            include_str!(concat!("../../../../../plugin-formats/", $plugin, "/", $format, "/structure.json")),
-            include_str!(concat!("../../../../../plugin-formats/", $plugin, "/", $format, "/verified.json")),
+            include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/", $plugin, "/plugin.json")),
+            include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/", $plugin, "/", $format, "/structure.json")),
+            include_str!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/", $plugin, "/", $format, "/verified.json")),
         )
     };
 }

@@ -192,13 +192,12 @@ impl Own {
     fn bundled_source(&self) -> Option<PathBuf> {
         let exe = std::env::current_exe().ok()?;
         let beside = exe.parent()?.to_path_buf();
-        let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let built = match self.daw {
             Daw::Reaper => {
                 let name = reaper_extension_name(Os::current());
                 beside.join(if cfg!(windows) { name.to_string() } else { format!("lib{name}") })
             }
-            Daw::Renoise => checkout.join("daws").join("renoise").join(RENOISE_TOOL_FOLDER),
+            Daw::Renoise => kumi_common::dev::checkout()?.join("daws").join("renoise").join(RENOISE_TOOL_FOLDER),
         };
         self.carried_by(&beside).or_else(|| built.exists().then_some(built))
     }

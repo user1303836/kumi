@@ -15,6 +15,7 @@ dependencies = [
  "hmac",
  "home",
  "kumi-common",
+ "kumi-testkit",
  "libc",
  "memchr",
  "rand 0.9.5",
@@ -1253,6 +1254,7 @@ dependencies = [
  "home",
  "kumi-common",
  "kumi-runtime",
+ "kumi-testkit",
  "libc",
  "memchr",
  "rand 0.9.5",
@@ -1310,6 +1312,7 @@ dependencies = [
  "kumi-common",
  "kumi-genexpr",
  "kumi-store",
+ "kumi-testkit",
  "libc",
  "md-5",
  "memchr",
@@ -1352,6 +1355,10 @@ dependencies = [
  "tempfile",
  "thiserror",
 ]
+
+[[package]]
+name = "kumi-testkit"
+version = "0.1.0"
 
 [[package]]
 name = "lazy_static"
@@ -1888,6 +1895,7 @@ dependencies = [
  "cc",
  "daw-bridge",
  "hex",
+ "kumi-testkit",
  "serde_json",
  "tempfile",
 ]
