@@ -11,6 +11,7 @@ use crate::core::{
     variations::{
         backend::{Rendered, Rewritten, Source, VariationsBackend, Words},
         heard::heard_of,
+        notes::{amount, note_op, round, sign, some_of, with_anchors, Note},
         tool::{names, names_to_find},
         Material, Rng, TakeSet,
     },
@@ -47,36 +48,6 @@ const PAGES: usize = 20;
 /// How far an audio take's start moves at most (seconds): past that its attack isn't the sound's any more.
 const ATTACK: f64 = 0.03;
 
-/// A MIDI note as a take holds it: pitch, start and length (quarter notes from the item's start), velocity and channel.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Note {
-    pub pitch: i64,
-    pub start: f64,
-    pub length: f64,
-    pub velocity: i64,
-    pub channel: i64,
-}
-
-impl Note {
-    fn json(&self) -> Value {
-        json!({"pitch": self.pitch, "start": round(self.start), "length": round(self.length), "velocity": self.velocity, "channel": self.channel})
-    }
-
-    fn of(value: &Value) -> Option<Note> {
-        Some(Note {
-            pitch: value.get("pitch")?.as_i64()?.clamp(0, 127),
-            start: value.get("start")?.as_f64()?.max(0.),
-            length: value.get("length")?.as_f64()?.max(1e-3),
-            velocity: value.get("velocity").and_then(Value::as_i64).unwrap_or(100).clamp(1, 127),
-            channel: value.get("channel").and_then(Value::as_i64).unwrap_or(1).clamp(1, 16),
-        })
-    }
-
-    fn same(&self, other: &Note) -> bool {
-        self.pitch == other.pitch && self.channel == other.channel && (self.start - other.start).abs() < 1e-3
-    }
-}
-
 /// A take: its item's length and fades, its take's start offset, pitch, rate and volume, a MIDI take's notes, and the notes
 /// every take keeps (the anchors).
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -91,10 +62,6 @@ pub struct ItemTake {
     pub fade_out: f64,
     pub notes: Vec<Note>,
     pub anchors: Vec<Note>,
-}
-
-fn round(value: f64) -> f64 {
-    (value * 10_000.).round() / 10_000.
 }
 
 /// How far apart two note lists are: the share of notes without a partner (same pitch and channel, its start near), and
@@ -273,39 +240,17 @@ fn free_after(spans: &[(f64, f64)], from: f64, length: f64, gap: f64) -> f64 {
     at
 }
 
-/// An operator's amount, `factor` times as much (0 to 1).
-fn amount(op: &Value, factor: f64) -> f64 {
-    (op.get("amount").and_then(Value::as_f64).unwrap_or(0.5) * factor).clamp(0., 1.)
-}
-
-/// Up or down: as the operator says, else by chance.
-fn sign(op: &Value, rng: &mut Rng) -> f64 {
-    match op.get("up").and_then(Value::as_bool) {
-        Some(true) => 1.,
-        Some(false) => -1.,
-        None if rng.chance(0.5) => 1.,
-        None => -1.,
-    }
-}
-
-/// A share of `most`, from a third of it to all of it: never next to nothing.
-fn some_of(most: f64, rng: &mut Rng) -> f64 {
-    most * (1. + 2. * rng.below(1000) as f64 / 1000.) / 3.
-}
-
 /// One operator applied to the take so far, `factor` times as much: what it did, in a few words.
 fn apply_one(op: &Value, factor: f64, take: &mut ItemTake, source: &ItemTake, rng: &mut Rng) -> Result<String, String> {
     let name = op.get("op").and_then(Value::as_str).unwrap_or("");
     let much = amount(op, factor);
-    match name {
-        "pitch" if take.midi => {
-            let semitones =
-                op.get("semitones").and_then(Value::as_f64).map(f64::round).unwrap_or_else(|| sign(op, rng) * (1. + (much * 4.).round()));
-            for note in take.notes.iter_mut().filter(|note| !source.anchors.iter().any(|anchor| anchor.same(note))) {
-                note.pitch = (note.pitch + semitones as i64).clamp(0, 127);
-            }
-            Ok(format!("notes {semitones:+} st"))
+    // (a MIDI take's notes move by core's shared note operators)
+    if take.midi {
+        if let Some(done) = note_op(name, op, much, &mut take.notes, &source.anchors, rng) {
+            return done;
         }
+    }
+    match name {
         "pitch" => {
             let semitones = op.get("semitones").and_then(Value::as_f64).unwrap_or_else(|| sign(op, rng) * some_of(2. * much, rng));
             take.pitch += semitones;
@@ -341,34 +286,6 @@ fn apply_one(op: &Value, factor: f64, take: &mut ItemTake, source: &ItemTake, rn
             let db = sign(op, rng) * some_of(4. * much, rng);
             take.volume_db = (take.volume_db + db).clamp(-150., 24.);
             Ok(format!("volume {db:+.1} dB"))
-        }
-        "velocity" => {
-            for note in take.notes.iter_mut().filter(|note| !source.anchors.iter().any(|anchor| anchor.same(note))) {
-                let moved = (sign(op, rng) * some_of(30. * much, rng)).round() as i64;
-                note.velocity = (note.velocity + moved).clamp(1, 127);
-            }
-            Ok("velocities moved".into())
-        }
-        "timing" => {
-            for note in take.notes.iter_mut().filter(|note| !source.anchors.iter().any(|anchor| anchor.same(note))) {
-                note.start = (note.start + sign(op, rng) * some_of(0.06 * much, rng)).max(0.);
-            }
-            Ok("timing loosened".into())
-        }
-        "thin" => {
-            let free: Vec<usize> =
-                (0..take.notes.len()).filter(|k| !source.anchors.iter().any(|anchor| anchor.same(&take.notes[*k]))).collect();
-            // (at least one note goes, and one stays)
-            let most = if take.notes.len() > free.len() { free.len() } else { free.len().saturating_sub(1) };
-            let count = ((free.len() as f64 * 0.4 * much).round() as usize).max(1).min(most);
-            let dropped: BTreeSet<usize> = rng.choose(free.len(), count).into_iter().map(|k| free[k]).collect();
-            let mut k = 0;
-            take.notes.retain(|_| {
-                let keep = !dropped.contains(&k);
-                k += 1;
-                keep
-            });
-            Ok(format!("{} notes fewer", dropped.len()))
         }
         other => Err(format!("{other} isn't one of REAPER's variation operators")),
     }
@@ -730,28 +647,8 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
     }
 }
 
-/// Notes the model wrote with the take's anchor notes in, as they are (#400 review notes: written notes never have to repeat
-/// them), by start and pitch: a written note that is an anchor's (its pitch, channel and start, another velocity or length)
-/// gives way to it.
-fn with_anchors(mut notes: Vec<Note>, anchors: &[Note]) -> Vec<Note> {
-    notes.retain(|note| !anchors.iter().any(|anchor| anchor.same(note)));
-    notes.extend(anchors.iter().cloned());
-    notes.sort_by(|a, b| a.start.total_cmp(&b.start).then(a.pitch.cmp(&b.pitch)));
-    notes
-}
-
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn written_notes_get_the_anchor_notes_they_left_out() {
-        let note = |pitch: i64, start: f64| Note { pitch, start, length: 0.25, velocity: 100, channel: 0 };
-        let anchors = vec![note(36, 0.), note(38, 1.)];
-        let written = with_anchors(vec![note(42, 0.5), note(36, 0.)], &anchors);
-        assert_eq!(written, vec![note(36, 0.), note(42, 0.5), note(38, 1.)]);
-        // (the kick written softer, longer and a hair late is the anchor's own note: one kick, the anchor's)
-        let loose = Note { velocity: 60, length: 0.5, start: 0.0004, ..note(36, 0.) };
-        assert_eq!(with_anchors(vec![loose], &anchors), anchors);
-    }
 
     use super::*;
     use crate::core::variations::Bounds;

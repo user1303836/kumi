@@ -9,6 +9,7 @@ pub mod backend;
 #[cfg(test)]
 mod fake_backend_tests;
 pub mod heard;
+pub mod notes;
 pub mod tool;
 
 /// The most a take's name may be (Renoise's phrase names hold 64 characters).
