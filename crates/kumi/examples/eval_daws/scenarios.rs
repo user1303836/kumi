@@ -157,6 +157,7 @@ while true do
   m = m + 1
 end
 out.tempo = reaper.Master_GetTempo()
+out.master = r6(reaper.GetMediaTrackInfo_Value(reaper.GetMasterTrack(0), "D_VOL"))
 local _, targets = reaper.GetSetProjectInfo_String(0, "RENDER_TARGETS", "", false)
 out.targets = 0
 for _ in targets:gmatch("[^;]+") do out.targets = out.targets + 1 end
@@ -247,7 +248,7 @@ for _, ins in ipairs(song.instruments) do
     local b = s.sample_buffer
     local keys = s.sample_mapping.note_range
     samples[#samples + 1] = {name = s.name, frames = b.has_sample_data and b.number_of_frames or 0, rate = b.has_sample_data and b.sample_rate or 0,
-      low = keys[1], high = keys[2]}
+      low = keys[1], high = keys[2], base = s.sample_mapping.base_note}
   end
   out.instruments[#out.instruments + 1] = {name = ins.name, samples = samples}
 end
@@ -620,6 +621,115 @@ audio(track("Bass"), MEDIA .. "/bass.wav", 0, 8)
                     Check::new("the audio-to-MIDI tool heard it", seen.tools.iter().any(|t| t == "audio_to_midi"), seen.tools.join(", ")),
                     Check::new("notes written on a new track", written, format!("{} notes", after["notes"])),
                     Check::new("the Bass track is as it was", items(before).is_some() && items(before) == items(after), ""),
+                ]
+            },
+        },
+        // REAPER: a track heard twice, found by the routing doctor (#401).
+        Scenario {
+            id: "P34",
+            daw: Daw::Reaper,
+            says: &["My kick sounds louder than its fader says, why?"],
+            before: None,
+            // (the kick reaches the master by its own send and through the bus it also sends to)
+            fixture: r#"
+local bus = track("Drum Bus")
+local kick = track("Kick")
+audio(kick, MEDIA .. "/kickloop.wav", 0, 8)
+reaper.CreateTrackSend(kick, bus)
+"#,
+            read: "",
+            teardown: None,
+            generates: false,
+            names: &["Drum Bus"],
+            expect: |seen| {
+                vec![
+                    Check::new("the routing tool looked", seen.tools.iter().any(|t| t == "routing"), seen.tools.join(", ")),
+                    Check::new(
+                        "it says the kick reaches the master twice",
+                        mentions(seen.said, &["twice", "both", "two ways", "two routes", "two paths", "double"]),
+                        "",
+                    ),
+                ]
+            },
+        },
+        // REAPER: a narration delivered to ACX's spec (#401 delivery to a spec), measured, fixed at the master, measured again (a
+        // second of room tone, silence here, at its head).
+        Scenario {
+            id: "P35",
+            daw: Daw::Reaper,
+            says: &["Get this ready for ACX"],
+            before: None,
+            fixture: r#"
+reaper.SetMediaTrackInfo_Value(reaper.GetMasterTrack(0), "D_VOL", 1)
+audio(track("Narration"), MEDIA .. "/vocal.wav", 1, 6)
+"#,
+            read: "",
+            teardown: Some(r#"reaper.SetMediaTrackInfo_Value(reaper.GetMasterTrack(0), "D_VOL", 1) return "ok""#),
+            generates: false,
+            names: &["RMS", "LUFS", "peak"],
+            expect: |seen| {
+                let (before, after) = (seen.before, seen.after);
+                let moved = before["master"] != after["master"];
+                vec![
+                    Check::new("the spec tool measured it", seen.tools.iter().any(|t| t == "delivery_spec"), seen.tools.join(", ")),
+                    Check::new(
+                        "it fixed the level at the master, or says it meets the spec",
+                        moved || mentions(seen.said, &["passes", "meets", "already"]),
+                        format!("master {} → {}", before["master"], after["master"]),
+                    ),
+                ]
+            },
+        },
+        // REAPER: a repeated chore kept as a script (#401 scripts), run once and kept as an action.
+        Scenario {
+            id: "P36",
+            daw: Daw::Reaper,
+            says: &[
+                "Each time I add a vocal track I name it Vox, color it red and put ReaComp on it. Do that now, and keep it as a script I can run again",
+                "Yes, keep it",
+            ],
+            before: None,
+            fixture: "",
+            read: r#"
+out.kept = {}
+local dir = reaper.GetResourcePath() .. "/Scripts/Kumi"
+local i = 0
+while true do
+  local file = reaper.EnumerateFiles(dir, i)
+  if not file then break end
+  out.kept[#out.kept + 1] = file
+  i = i + 1
+end
+"#,
+            // (the lab's kept scripts and their actions go)
+            teardown: Some(
+                r#"
+local dir = reaper.GetResourcePath() .. "/Scripts/Kumi"
+local files, i = {}, 0
+while true do
+  local file = reaper.EnumerateFiles(dir, i)
+  if not file then break end
+  files[#files + 1] = dir .. "/" .. file
+  i = i + 1
+end
+for _, path in ipairs(files) do reaper.AddRemoveReaScript(false, 0, path, true) os.remove(path) end
+return "ok""#,
+            ),
+            generates: false,
+            names: &["action", "Action List"],
+            expect: |seen| {
+                let (before, after) = (seen.before, seen.after);
+                let vox = track(after, "Vox");
+                let comp = vox.is_some_and(|t| list(&t["fx"]).iter().any(|fx| fx["name"].as_str().is_some_and(|n| n.contains("ReaComp"))));
+                let kept = list(&after["kept"]).len() > list(&before["kept"]).len();
+                vec![
+                    Check::new("the chore done once: Vox with ReaComp", comp, ""),
+                    Check::new("the scripts tool kept it", seen.tools.iter().any(|t| t == "scripts"), seen.tools.join(", ")),
+                    Check::new(
+                        "kept as REAPER's own action (a file in Scripts/Kumi)",
+                        kept,
+                        list(&after["kept"]).iter().filter_map(|f| f.as_str()).collect::<Vec<_>>().join(", "),
+                    ),
                 ]
             },
         },
@@ -1326,6 +1436,89 @@ sample_instrument(1, "Amen", MEDIA .. "/amen.wav")
                     Check::new("the chop tool cut it", seen.tools.iter().any(|t| t == "chop"), seen.tools.join(", ")),
                     Check::new("the Amen cut into slices (a sample each)", samples >= 6, format!("{samples} samples")),
                     Check::new("the slices laid out as notes", notes.1 >= notes.0 + 6, format!("{} → {} notes", notes.0, notes.1)),
+                ]
+            },
+        },
+        // Renoise: a beat delivered to a streaming service's loudness (#401 delivery to a spec).
+        Scenario {
+            id: "R41",
+            daw: Daw::Renoise,
+            says: &["Get this ready for Spotify"],
+            before: None,
+            fixture: r#"
+song:track(song.sequencer_track_count + 1).postfx_volume.value = 1
+song:track(1).name = "Beat"
+sample_instrument(1, "Beat", MEDIA .. "/break120.wav")
+for l = 0, 48, 16 do note(seq:pattern(1), 1, l, "C-4", 0) end
+"#,
+            read: "",
+            teardown: Some(r#"song:track(song.sequencer_track_count + 1).postfx_volume.value = 1 return "ok""#),
+            generates: false,
+            names: &["LUFS", "-14"],
+            expect: |seen| {
+                vec![
+                    Check::new("the spec tool measured it", seen.tools.iter().any(|t| t == "delivery_spec"), seen.tools.join(", ")),
+                    Check::new("it says what it measured", mentions(seen.said, &["lufs"]), ""),
+                ]
+            },
+        },
+        // Renoise: a repeated chore kept as a script (#401 scripts), run once and kept in the Tools menu.
+        Scenario {
+            id: "R42",
+            daw: Daw::Renoise,
+            says: &[
+                "Whenever I start a beat I add a track called Drums with a Compressor on it. Do that now, and keep it as a script",
+                "Yes, keep it",
+            ],
+            before: None,
+            fixture: "",
+            read: "",
+            teardown: None,
+            generates: false,
+            names: &["Tools", "menu"],
+            expect: |seen| {
+                let after = seen.after;
+                let drums = track(after, "Drums")
+                    .is_some_and(|t| list(&t["devices"]).iter().any(|d| d["path"].as_str().is_some_and(|p| p.ends_with("/Compressor"))));
+                vec![
+                    Check::new("the chore done once: Drums with a Compressor", drums, ""),
+                    Check::new("the scripts tool kept it", seen.tools.iter().any(|t| t == "scripts"), seen.tools.join(", ")),
+                ]
+            },
+        },
+        // Renoise: a keyboard's samples mapped to the notes their names say, heard to settle the octave (#401 sample maps).
+        Scenario {
+            id: "R43",
+            daw: Daw::Renoise,
+            says: &["Map the Keys instrument's samples to their notes", "Yes, apply it"],
+            before: None,
+            fixture: r#"
+local ins = sample_instrument(1, "Keys", MEDIA .. "/keys_C3.wav")
+ins:sample(1).name = "Keys C3"
+for k, n in ipairs({"E3", "G3"}) do
+  local s = ins:insert_sample_at(k + 1)
+  s.sample_buffer:load_from(MEDIA .. "/keys_" .. n .. ".wav")
+  s.name = "Keys " .. n
+end
+"#,
+            read: "",
+            teardown: None,
+            generates: false,
+            names: &["C-5", "zone", "root"],
+            expect: |seen| {
+                let after = seen.after;
+                let keys = list(&after["instruments"]).into_iter().find(|i| i["name"] == "Keys").cloned().unwrap_or(Value::Null);
+                let samples: Vec<(i64, i64, i64)> = list(&keys["samples"])
+                    .iter()
+                    .filter_map(|s| Some((s["base"].as_i64()?, s["low"].as_i64()?, s["high"].as_i64()?)))
+                    .collect();
+                let bases: Vec<i64> = samples.iter().map(|(base, _, _)| *base).collect();
+                let zones = samples.iter().all(|(base, low, high)| low <= base && base <= high)
+                    && samples.iter().enumerate().all(|(k, a)| samples.iter().skip(k + 1).all(|b| a.2 < b.1 || b.2 < a.1));
+                vec![
+                    Check::new("the sample-map tool planned it", seen.tools.iter().any(|t| t == "map_samples"), seen.tools.join(", ")),
+                    Check::new("roots where the sounds are: C-5, E-5, G-5 (MIDI 60, 64, 67)", bases == [60, 64, 67], format!("{samples:?}")),
+                    Check::new("each a zone of its own around its root", zones, ""),
                 ]
             },
         },

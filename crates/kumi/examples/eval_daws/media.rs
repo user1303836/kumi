@@ -117,6 +117,17 @@ fn vocal(seconds: f32) -> Vec<f32> {
 }
 
 /// A bass: a sawtooth on one note.
+/// A plucked key: a few harmonics decaying.
+fn key(seconds: f32, hz: f32) -> Vec<f32> {
+    (0..(seconds * RATE as f32) as usize)
+        .map(|i| {
+            let t = i as f32 / RATE as f32;
+            let tone: f32 = (1..=4).map(|h| (2.0 * std::f32::consts::PI * hz * h as f32 * t).sin() / h as f32).sum();
+            0.4 * tone * (-t * 3.0).exp()
+        })
+        .collect()
+}
+
 fn bass(seconds: f32, hz: f32) -> Vec<f32> {
     (0..(seconds * RATE as f32) as usize).map(|i| (((i as f32 * hz / RATE as f32) % 1.0) * 2.0 - 1.0) * 0.4).collect()
 }
@@ -164,5 +175,9 @@ pub fn write_all(dir: &Path) -> std::io::Result<()> {
     write(&dir.join("vocal.wav"), &vocal(6.0))?;
     write(&dir.join("bass.wav"), &bass(8.0, 55.0))?;
     write(&dir.join("kickloop.wav"), &drums(120.0, 4, &[0, 4, 8, 12], &[], 0.0, 29, false))?;
+    // (a keyboard's notes named as their file names say, middle C as C3: 261.63 Hz)
+    for (name, hz) in [("C3", 261.63f32), ("E3", 329.63), ("G3", 392.0)] {
+        write(&dir.join(format!("keys_{name}.wav")), &key(1.0, hz))?;
+    }
     Ok(())
 }
