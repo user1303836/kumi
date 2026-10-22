@@ -1846,6 +1846,18 @@ fn a_delivery_of_some_regions_renders_only_theirs_and_puts_every_row_back() {
     let mix = ask(json!({"source": "master", "regionRefs": ["r:region:{REG-3}"]}));
     assert_eq!(file_names(&mix["targets"]), ["Outro.wav"]);
     assert_eq!(rows(), before);
+    // A soloed track decides every file, and a muted track a rendering row has is in none: both said.
+    fake::with(|s| {
+        s.tracks[3].solo = 1;
+        s.tracks[1].mute = true;
+    });
+    let notes = ask(json!({"regionRefs": ["r:region:{REG-2}"]}))["notes"].to_string();
+    assert!(notes.contains("\u{201c}Reverb\u{201d} is soloed: every file holds only what solo lets through"), "{notes}");
+    assert!(notes.contains("\u{201c}Kick\u{201d} is muted"), "{notes}");
+    fake::with(|s| {
+        s.tracks[3].solo = 0;
+        s.tracks[1].mute = false;
+    });
     // Rendered: only the Chorus, every row back.
     rig.ask(
         "deliver_start",
@@ -1861,6 +1873,8 @@ fn a_delivery_of_some_regions_renders_only_theirs_and_puts_every_row_back() {
 fn a_delivery_turns_the_render_dialogs_extras_off_unless_asked_and_says_which() {
     let rig = Rig::new();
     producer_settings();
+    // (and the producer embeds metadata in their files)
+    fake::with(|s| *s.listening.numbers.get_mut("RENDER_SETTINGS").unwrap() += 512.0);
     let before = render_settings();
     let folder = rig.dir.path().join("game");
     let dry = rig.ask("deliver_targets", json!({"pattern": "$region", "folder": folder})).unwrap();
@@ -1872,6 +1886,7 @@ fn a_delivery_turns_the_render_dialogs_extras_off_unless_asked_and_says_which() 
     let seen = fake::with(|s| s.listening.renders.last().unwrap().clone());
     assert_eq!(seen.normalize, render::NO_POSTPROCESSING, "rendered without them");
     assert_ne!(seen.settings & render::DELAY_START, 0, "the producer's start delay stays");
+    assert_ne!(seen.settings & 512, 0, "and their metadata");
     assert_eq!(render_settings(), before, "and they're back after");
     // Kept, when asked.
     let kept = rig.ask("deliver_targets", json!({"pattern": "$region", "folder": folder, "dialog": true})).unwrap();

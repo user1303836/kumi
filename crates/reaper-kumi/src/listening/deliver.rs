@@ -38,6 +38,9 @@ pub enum Source {
 /// `RENDER_SETTINGS` for "Region render matrix via master": the render matrix (8) through the master (128), a file per region
 /// with its row's tracks summed, none for a region whose row is empty. (The lab batch checks the value.)
 const MATRIX_VIA_MASTER: i32 = 8 | 128;
+/// The producer's own bits of `RENDER_SETTINGS` a delivery keeps: the start delay, and embedding transients (256), metadata
+/// (512: UCS, BWF) and take markers (1024) in the files.
+const KEPT_SETTINGS: i32 = render::DELAY_START | 256 | 512 | 1024;
 
 /// Over what: the project, the time selection, every region, the selected regions, or a stretch (seconds).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -297,32 +300,41 @@ fn extras_note(spec: &Spec, extras: &[&str]) -> Option<String> {
     })
 }
 
-/// Every region's row of the region render matrix (its number and tracks), noted before a delivery that picks regions.
-struct Rows(Vec<(i32, String, Vec<Track>)>);
+/// Every region's row of the region render matrix (its number, GUID and tracks), noted before a delivery that picks regions
+/// and put back however it ends (a panic between included).
+struct Rows<'a, 'r> {
+    reaper: &'a Reaper<'r>,
+    proj: Project,
+    rows: Vec<(i32, String, Vec<Track>)>,
+    done: bool,
+}
 
-impl Rows {
-    fn note(reaper: &Reaper, proj: Project) -> Rows {
+impl<'a, 'r> Rows<'a, 'r> {
+    fn note(reaper: &'a Reaper<'r>, proj: Project) -> Self {
         let regions = (0..reaper.marker_count(proj)).filter_map(|index| reaper.marker(proj, index)).filter(|marker| marker.is_region);
-        Rows(regions.map(|marker| (marker.number, marker.guid, reaper.region_render_tracks(proj, marker.number))).collect())
+        let rows = regions.map(|marker| (marker.number, marker.guid, reaper.region_render_tracks(proj, marker.number))).collect();
+        Rows { reaper, proj, rows, done: false }
     }
 
     /// The rows for a render of these regions alone: theirs as they are (the master's, for a master render), the others empty.
-    fn pick(&self, reaper: &Reaper, proj: Project, regions: &[String], source: Source) {
-        let master: Vec<Track> = reaper.master_track(proj).into_iter().collect();
-        for (number, guid, now) in &self.0 {
+    fn pick(&self, regions: &[String], source: Source) {
+        let master: Vec<Track> = self.reaper.master_track(self.proj).into_iter().collect();
+        for (number, guid, now) in &self.rows {
             let wanted: &[Track] = match (regions.contains(guid), source) {
                 (true, Source::Master) => &master,
                 (true, _) => continue,
                 (false, _) => &[],
             };
-            set_row(reaper, proj, *number, now, wanted);
+            set_row(self.reaper, self.proj, *number, now, wanted);
         }
     }
 
     /// Every row as noted: whether each reads back so.
-    fn put_back(&self, reaper: &Reaper, proj: Project) -> bool {
+    fn put_back(&mut self) -> bool {
+        self.done = true;
+        let (reaper, proj) = (self.reaper, self.proj);
         let mut ok = true;
-        for (number, _, was) in &self.0 {
+        for (number, _, was) in &self.rows {
             let now = reaper.region_render_tracks(proj, *number);
             set_row(reaper, proj, *number, &now, was);
             let back = reaper.region_render_tracks(proj, *number);
@@ -332,13 +344,62 @@ impl Rows {
     }
 
     /// The regions asked for whose row is empty: they render nothing.
-    fn empty(&self, reaper: &Reaper, proj: Project, regions: &[String]) -> Vec<String> {
-        self.0
+    fn empty(&self, regions: &[String]) -> Vec<String> {
+        let (reaper, proj) = (self.reaper, self.proj);
+        self.rows
             .iter()
             .filter(|(number, guid, _)| regions.contains(guid) && reaper.region_render_tracks(proj, *number).is_empty())
             .filter_map(|(_, guid, _)| reaper.marker_by_guid(proj, guid).map(|marker| marker.name))
             .collect()
     }
+}
+
+impl Drop for Rows<'_, '_> {
+    fn drop(&mut self) {
+        if !self.done {
+            let back = self.put_back();
+            crate::log::line(&format!(
+                "a delivery was cut short; the region render matrix {}",
+                if back { "was put back" } else { "wasn't all put back" }
+            ));
+        }
+    }
+}
+
+/// What a delivery's files won't hear, in words: soloed tracks (every file holds only what solo lets through), and muted
+/// tracks a rendering region's row has.
+fn hearing(reaper: &Reaper, proj: Project, spec: &Spec) -> Vec<String> {
+    let named = |tracks: &[Track], one: &str, many: &str| {
+        let names: Vec<String> = tracks.iter().take(3).map(|track| format!("\u{201c}{}\u{201d}", reaper.track_name(*track))).collect();
+        let more = if tracks.len() > 3 { format!(" and {} more", tracks.len() - 3) } else { String::new() };
+        format!("{}{more} {}", names.join(", "), if tracks.len() == 1 { one } else { many })
+    };
+    let mut notes = Vec::new();
+    let tracks: Vec<Track> = (0..reaper.track_count(proj)).filter_map(|index| reaper.track_at(proj, index)).collect();
+    let soloed: Vec<Track> = tracks.iter().copied().filter(|track| reaper.track_value(*track, "I_SOLO") != 0.0).collect();
+    if !soloed.is_empty() {
+        notes.push(format!("{}: every file holds only what solo lets through", named(&soloed, "is soloed", "are soloed")));
+    }
+    if spec.source == Source::Matrix {
+        let mut muted: Vec<Track> = Vec::new();
+        let regions = (0..reaper.marker_count(proj)).filter_map(|index| reaper.marker(proj, index)).filter(|marker| marker.is_region);
+        for region in regions.filter(|region| spec.regions.as_ref().is_none_or(|picked| picked.contains(&region.guid))) {
+            for track in reaper.region_render_tracks(proj, region.number) {
+                if reaper.track_value(track, "B_MUTE") != 0.0 && !muted.contains(&track) {
+                    muted.push(track);
+                }
+            }
+        }
+        if !muted.is_empty() {
+            notes.push(format!(
+                "{}: the files of the regions that render {} won't have {}",
+                named(&muted, "is muted", "are muted"),
+                if muted.len() == 1 { "it" } else { "them" },
+                if muted.len() == 1 { "it" } else { "them" }
+            ));
+        }
+    }
+    notes
 }
 
 fn set_row(reaper: &Reaper, proj: Project, number: i32, now: &[Track], wanted: &[Track]) {
@@ -359,9 +420,8 @@ fn set(reaper: &Reaper, reads: &Reads, proj: Project, spec: &Spec, rows: Option<
         Source::Master | Source::Matrix => MATRIX_VIA_MASTER,
         Source::Stems => 3,
     };
-    // ("delay render start to allow FX to initialize" stays the producer's)
-    let delay = reaper.project_number(proj, "RENDER_SETTINGS").unwrap_or(0.0) as i32 & render::DELAY_START;
-    number("RENDER_SETTINGS", (source | delay) as f64);
+    let kept = reaper.project_number(proj, "RENDER_SETTINGS").unwrap_or(0.0) as i32 & KEPT_SETTINGS;
+    number("RENDER_SETTINGS", (source | kept) as f64);
     let (bounds, tail_bit) = spec.bounds.flags();
     number("RENDER_BOUNDSFLAG", bounds);
     if let Bounds::Range(start, end) = spec.bounds {
@@ -386,7 +446,7 @@ fn set(reaper: &Reaper, reads: &Reads, proj: Project, spec: &Spec, rows: Option<
         reaper.set_project_text(proj, "RENDER_FORMAT2", "");
     }
     if let (Some(regions), Some(rows)) = (&spec.regions, rows) {
-        rows.pick(reaper, proj, regions, spec.source);
+        rows.pick(regions, spec.source);
     }
     if spec.source == Source::Stems {
         let wanted: Vec<Track> = spec
@@ -425,10 +485,13 @@ pub fn targets(reaper: &Reaper, reads: &Reads, params: &Value) -> Result<Value, 
     let spec = spec(reaper, reads, proj, &info.path, params)?;
     let mut notes: Vec<String> = extras_note(&spec, &extras(reaper, proj)).into_iter().collect();
     let mut put_back = PutBack::note(reaper, proj);
-    let rows = spec.regions.as_ref().map(|_| Rows::note(reaper, proj));
+    let mut rows = spec.regions.as_ref().map(|_| Rows::note(reaper, proj));
     let listed = set(reaper, reads, proj, &spec, rows.as_ref()).map(|()| targets_now(reaper, proj));
+    if listed.is_ok() {
+        notes.extend(hearing(reaper, proj, &spec));
+    }
     if let (Some(regions), Some(rows), Source::Matrix) = (&spec.regions, &rows, spec.source) {
-        let empty = rows.empty(reaper, proj, regions);
+        let empty = rows.empty(regions);
         if !empty.is_empty() {
             notes.push(format!(
                 "{} of the regions render nothing: no tracks in their row of the region render matrix ({})",
@@ -437,7 +500,7 @@ pub fn targets(reaper: &Reaper, reads: &Reads, params: &Value) -> Result<Value, 
             ));
         }
     }
-    let rows_back = rows.as_ref().is_none_or(|rows| rows.put_back(reaper, proj));
+    let rows_back = rows.as_mut().is_none_or(|rows| rows.put_back());
     let mut missed = put_back.now();
     if !rows_back {
         missed.push("the region render matrix".into());
@@ -488,7 +551,7 @@ pub fn run(reaper: &Reaper, reads: &Reads, plan: &Plan, hooks: &dyn Hooks) -> En
     let spec = &plan.spec;
     notes.extend(extras_note(spec, &extras(reaper, proj)));
     let mut put_back = PutBack::note(reaper, proj);
-    let rows = spec.regions.as_ref().map(|_| Rows::note(reaper, proj));
+    let mut rows = spec.regions.as_ref().map(|_| Rows::note(reaper, proj));
     let mut outcome: Result<Vec<String>, (String, String)> = set(reaper, reads, proj, spec, rows.as_ref()).map(|()| Vec::new());
     let mut made: Vec<PathBuf> = Vec::new();
     let mut cancelled = false;
@@ -549,7 +612,7 @@ pub fn run(reaper: &Reaper, reads: &Reads, plan: &Plan, hooks: &dyn Hooks) -> En
             outcome = Err(("failed".into(), format!("REAPER's render didn't write {missing}")));
         }
     }
-    let rows_back = rows.as_ref().is_none_or(|rows| rows.put_back(reaper, proj));
+    let rows_back = rows.as_mut().is_none_or(|rows| rows.put_back());
     let mut missed = put_back.now();
     if !rows_back {
         missed.push("the region render matrix".into());
@@ -592,4 +655,28 @@ fn sorted(list: &[String]) -> Vec<&String> {
     let mut out: Vec<&String> = list.iter().collect();
     out.sort();
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reaper::fake;
+
+    #[test]
+    fn the_matrix_rows_come_back_when_a_delivery_is_cut_short() {
+        fake::lab_project();
+        fake::with(|s| {
+            s.render_matrix.insert(1, vec!["{BBBB}".into()]);
+        });
+        let api = fake::api();
+        let reaper = Reaper::new(&api);
+        let proj = reaper.current_project().unwrap().ptr;
+        {
+            let rows = Rows::note(&reaper, proj);
+            rows.pick(&["{ANOTHER}".to_string()], Source::Matrix);
+            assert!(reaper.region_render_tracks(proj, 1).is_empty(), "emptied for the render");
+            // (dropped without put_back: a panic's way out)
+        }
+        assert_eq!(reaper.region_render_tracks(proj, 1).len(), 1, "the row is back");
+    }
 }
