@@ -137,10 +137,26 @@ fn read_params(arguments: &Value) -> Result<Value, String> {
     grid_arg(arguments, &mut params)?;
     call_args(arguments, &mut params)?;
     items_arg(arguments, &mut params)?;
+    switches_arg(arguments, &mut params)?;
     if let Some(limit) = limit_arg(arguments)? {
         params.insert("limit".into(), limit.into());
     }
     Ok(Value::Object(params))
+}
+
+/// (#401) A Renoise read's switches, forwarded only when true: `prints` (a page of patterns, each track's lines summed up,
+/// the jam's comparison) and `byTrack` (tidy-notes' counts per track, layering's players).
+fn switches_arg(arguments: &Value, params: &mut Map<String, Value>) -> Result<(), String> {
+    for name in ["prints", "byTrack"] {
+        match arguments.get(name) {
+            None | Some(Value::Null) | Some(Value::Bool(false)) => {}
+            Some(Value::Bool(true)) => {
+                params.insert(name.into(), true.into());
+            }
+            Some(_) => return Err(format!("{name} must be true or false")),
+        }
+    }
+    Ok(())
 }
 
 /// A parameter's text read at this many points across its range (kind `param`, M5's tune): 2 to `MAX_GRID`.
@@ -347,6 +363,15 @@ mod tests {
         assert!(read_params(&json!({"kind": "where", "items": "all"})).is_err());
         assert!(read_params(&json!({"kind": "where", "items": [1]})).is_err());
         assert!(read_params(&json!({"kind": "song"})).unwrap().get("items").is_none());
+    }
+
+    #[test]
+    fn a_reads_switches_are_forwarded_only_when_true() {
+        let params = read_params(&json!({"kind": "pattern", "prints": true, "limit": 16})).unwrap();
+        assert_eq!(params, json!({"kind": "pattern", "prints": true, "limit": 16}));
+        assert_eq!(read_params(&json!({"kind": "tidy-notes", "byTrack": true})).unwrap()["byTrack"], true);
+        assert!(read_params(&json!({"kind": "pattern", "prints": false})).unwrap().get("prints").is_none());
+        assert!(read_params(&json!({"kind": "pattern", "prints": "yes"})).is_err());
     }
 
     #[test]

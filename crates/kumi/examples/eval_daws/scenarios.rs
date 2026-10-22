@@ -1037,7 +1037,8 @@ end
 "#,
             teardown: None,
             generates: false,
-            names: &["04", "06", "07"],
+            // (slots from 1, as Kumi's Renoise rules number them, or as the sequence shows them)
+            names: &["04", "06", "07", "slot 4", "slots 4", "slot 6", "slot 7"],
             expect: |seen| {
                 let (before, after) = (seen.before, seen.after);
                 let content = |state: &Value, s: usize| (state["slots"][s]["keys"].clone(), state["slots"][s]["drums"].clone());
@@ -1054,6 +1055,12 @@ end
                         "it proposes or makes the clean-up (the empty patterns among it)",
                         empties == 0 || mentions(seen.said, &["empty"]),
                         format!("{empties} empty slots left"),
+                    ),
+                    // (four of the six hold notes: an exact copy and near copies of the first pattern)
+                    Check::new(
+                        "it tells the repeats from the empty patterns",
+                        mentions(seen.said, &["same", "copy", "copies", "duplicate", "alias", "repeat", "identical"]),
+                        "",
                     ),
                 ]
             },
