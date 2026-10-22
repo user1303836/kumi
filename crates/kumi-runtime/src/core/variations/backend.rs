@@ -55,6 +55,11 @@ pub struct Words {
     pub options: &'static str,
     /// The extract action's words, when the DAW has it.
     pub extract: Option<&'static str>,
+    /// How the takes are heard when the DAW doesn't render them for Kumi (None: rendered and heard before they're shown).
+    pub hears: Option<&'static str>,
+    /// How a rewrite is made when it isn't one change, and a drop when it isn't one change for all.
+    pub rewrites: Option<&'static str>,
+    pub drops: Option<&'static str>,
     /// The DAW's notation the model writes in (effect commands, numbering).
     pub idioms: &'static str,
     /// Directions Kumi picks for takes the model leaves to it, each one no other take of a request has.

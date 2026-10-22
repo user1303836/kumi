@@ -3162,5 +3162,176 @@
     "listedBy": null,
     "reach": "DawWrite",
     "stream": false
+  },
+  {
+    "name": "variations",
+    "description": "Variations in Live: numbered takes V1, V2… of a source, each its own object, never written over the source. make: source is a Session MIDI clip (clipRef): what it plays, its loop; anchors are the clip's notes every take keeps as they are (their index, from 0, as read_notes' json lists them). Each of takes is a recipe: ops (pitch (semitones, up or down: the notes move), velocity (velocities moved), timing (loosened, in beats), thin (fewer notes); amount 0 to 1), lines (a MIDI clip's notes ({pitch, start, duration, velocity}: beats from the start of what the clip plays; its anchor notes stay as they are: no need to write them)), and/or from: \"V2\" to start from another take; direction names it in a few words. count without takes picks distinct directions. place: clips (each take in an empty Session slot below the source on its track, a scene added when none is free). options: none in Live. Kumi draws each take and checks it differs from the source and the other takes yet keeps the anchors, the idea, the key and the grid (re-rolling up to 8 times; novelty subtle, clear or bold, or minDistance 0 to 1; lines you write that come close are written with a warning), writes each as one change, doesn't render them (Live plays a MIDI clip only live: the producer launches the takes' slots to hear them), and answers a line per take. A make on the same source goes on numbering (V10 after V9); another source starts another set, still there by its number or name (set). change: names (\"V6\", or \"rest\": every take not kept) and takes (a recipe each, in order; left out, Kumi picks distinct directions) rewrite only those takes, two changes each (Live adds no notes to a clip: its clip is deleted and written again in its slot): kept takes and the source are never touched (force: true only when the producer named a kept take), and a take the producer edited is left as it is. keep: names; each kept take is renamed “V3 · … · kept” in Live (a change each), so the mark is there after a restart too; at places one take: none in Live: a kept take stays in its slot (drag it where it goes). drop: names (\"rest\" by default) go a change each (one clip each). list: the set's takes. Live's Session clips; notes in beats from the start of what the clip plays",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "make",
+            "change",
+            "keep",
+            "drop",
+            "list"
+          ]
+        },
+        "set": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Which set of takes: its number, or its source's name (the latest by default)"
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "clipRef"
+          ],
+          "properties": {
+            "clipRef": {
+              "type": "string",
+              "description": "The Session MIDI clip"
+            }
+          }
+        },
+        "anchors": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "the clip's notes every take keeps as they are (their index, from 0, as read_notes' json lists them)"
+        },
+        "place": {
+          "type": "string",
+          "enum": [
+            "clips"
+          ]
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "takes": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "direction": {
+                "type": "string",
+                "maxLength": 80
+              },
+              "from": {
+                "type": "string",
+                "description": "Another take to start from, such as V2"
+              },
+              "ops": {
+                "type": "array",
+                "maxItems": 12,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "op"
+                  ],
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "pitch",
+                        "velocity",
+                        "timing",
+                        "thin"
+                      ]
+                    },
+                    "amount": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "up": {
+                      "type": "boolean"
+                    },
+                    "semitones": {
+                      "type": "number",
+                      "minimum": -24,
+                      "maximum": 24
+                    }
+                  }
+                }
+              },
+              "lines": {
+                "type": "array",
+                "maxItems": 512,
+                "items": {
+                  "type": "object"
+                },
+                "description": "a MIDI clip's notes ({pitch, start, duration, velocity}: beats from the start of what the clip plays; its anchor notes stay as they are: no need to write them)"
+              }
+            }
+          }
+        },
+        "names": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string"
+          },
+          "description": "Takes: V3, or rest"
+        },
+        "force": {
+          "type": "boolean"
+        },
+        "novelty": {
+          "type": "string",
+          "enum": [
+            "subtle",
+            "clear",
+            "bold"
+          ]
+        },
+        "minDistance": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "How far each take must be from the source and the others (instead of novelty)"
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "listen": {
+          "type": "boolean",
+          "description": "false skips rendering the takes to hear them (on by default)"
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        },
+        "at": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "deferred": true,
+    "listedBy": null,
+    "reach": "DawWrite",
+    "stream": false
   }
 ]

@@ -798,13 +798,24 @@ pub(crate) fn description(words: &Words) -> String {
 Each of takes is a recipe: ops ({}), lines ({}), and/or from: \"V2\" to start from another take; direction names it in a few words. count without takes \
 picks distinct directions. place: {}. options: {}. Kumi draws each take and checks it differs from the source and the other takes yet keeps the anchors, the \
 idea, the key and the grid (re-rolling up to 8 times; novelty subtle, clear or bold, or minDistance 0 to 1; lines you write that come close are written \
-with a warning), writes each as one change, renders and hears the takes before they're shown (never while {app} plays; listen: false skips it), and answers \
-a line per take. A make on the same source goes on numbering (V10 after V9); another source starts another set, still there by its number or name (set). \
-change: names (\"V6\", or \"rest\": every take not kept) and takes (a recipe each, in order; left out, Kumi picks distinct directions) rewrite only those \
-takes, one change each: kept takes and the source are never touched (force: true only when the producer named a kept take), and a take the producer edited \
-is left as it is. keep: names; each kept take is renamed “V3 · … · kept” in {app} (a change each), so the mark is there after a restart too; at places one \
-take: {}. drop: names (\"rest\" by default) go in one change. list: the set's takes.",
-        words.sources, words.anchors, words.ops, words.lines, words.places, words.options, words.at
+with a warning), writes each as one change, {hears}, and answers a line per take. A make on the same source goes on numbering (V10 after V9); another \
+source starts another set, still there by its number or name (set). change: names (\"V6\", or \"rest\": every take not kept) and takes (a recipe each, in \
+order; left out, Kumi picks distinct directions) rewrite only those takes, {rewrites}: kept takes and the source are never touched (force: true only when the \
+producer named a kept take), and a take the producer edited is left as it is. keep: names; each kept take is renamed “V3 · … · kept” in {app} (a change \
+each), so the mark is there after a restart too; at places one take: {}. drop: names (\"rest\" by default) {drops}. list: the set's takes.",
+        words.sources,
+        words.anchors,
+        words.ops,
+        words.lines,
+        words.places,
+        words.options,
+        words.at,
+        hears = words.hears.map_or_else(
+            || format!("renders and hears the takes before they're shown (never while {app} plays; listen: false skips it)"),
+            str::to_owned
+        ),
+        rewrites = words.rewrites.unwrap_or("one change each"),
+        drops = words.drops.unwrap_or("go in one change"),
     );
     if let Some(extract) = words.extract {
         text.push_str(" extract: ");

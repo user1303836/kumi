@@ -22,7 +22,7 @@ does the job there.
 | Instant phrases, made with no model call | ✓ | ✓ | ✓ |
 | Code run inside the DAW | ✓ Python | ✓ Lua (ReaScript), REAPER's API and actions | ✓ Lua |
 | Stop everything at once (`/stop`) | ✓ | ✓ | ✓ |
-| Variations as numbered takes you keep, change or drop | not yet | ✓ items | ✓ |
+| Variations as numbered takes you keep, change or drop | ✓ Session clips | ✓ items | ✓ |
 | Sample maps: sounds laid across the keys by name, pitch and loudness, and an instrument tidy | not yet | not yet: drum kits only (`drum_kit`) | ✓ |
 | Chops a recording at its real hits and lays the slices out to play it | not yet | not yet | ✓ |
 | Delivers files: a region per asset, named in the project's convention, a dry run first | not yet | ✓ | not yet |
@@ -75,6 +75,13 @@ does the job there.
 - A whole plan is one Live undo (Cmd-Z, or Ctrl-Z on Windows).
 - Live's own menus do what its scripting can't: freezing, bouncing, stems,
   audio to MIDI ([Live's own commands](KUMI_GUIDE.md#lives-own-commands)).
+- **Variations** (`variations`): numbered takes V1, V2… of a Session MIDI
+  clip, each a new clip in an empty slot below it on its track (a scene added
+  at the end when none is free). Their notes move in pitch, velocity or
+  timing, or thin out, or Kumi writes them; the notes you name stay as they
+  are. Kumi checks each differs from the source and the others yet keeps its
+  key. Live plays a MIDI clip only live: launch the takes to hear them. Kept
+  takes are renamed "V3 · … · kept".
 
 ## REAPER
 

@@ -17,7 +17,9 @@ use super::{
     plugin_tool, project,
     remember::Remember,
     rendering::Rendering,
-    samples, views,
+    samples,
+    variations::LiveVariations,
+    views,
     views::ViewHost,
     watch::Watch,
 };
@@ -26,6 +28,7 @@ use crate::{
         contracts::*,
         errors::{FailureKind, KumiError, RuntimeError},
         timing,
+        variations::tool::Variations,
     },
     devices::tool::{device_tool, DeviceToolOptions, Made},
     integrations::shared::steps,
@@ -68,20 +71,23 @@ pub struct Ableton {
     closing: RefCell<Option<Closing>>,
     /// The devices this conversation made, which making one again by its name replaces.
     made: Rc<RefCell<Made>>,
+    /// Core's variations tool, with Live's backend: Session clips' takes.
+    variations: Rc<dyn KernelTool>,
 }
 pub fn create_ableton_integration(options: AbletonOptions) -> Rc<dyn Integration> {
     Ableton::new(options)
 }
-/// Where a device Kumi made is kept when making it again replaces it: in Kumi's own folder (KUMI_HOME, or ~/.kumi), out
-/// of Live's Browser.
-fn replaced_devices() -> std::path::PathBuf {
+/// Kumi's own folder: KUMI_HOME, or ~/.kumi.
+fn kumi_home() -> std::path::PathBuf {
     std::env::var("KUMI_HOME")
         .ok()
         .filter(|home| !home.is_empty())
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| home::home_dir().unwrap_or_default().join(".kumi"))
-        .join("devices")
-        .join("replaced")
+}
+/// Where a device Kumi made is kept when making it again replaces it: in Kumi's own folder, out of Live's Browser.
+fn replaced_devices() -> std::path::PathBuf {
+    kumi_home().join("devices").join("replaced")
 }
 impl Ableton {
     pub fn new(options: AbletonOptions) -> Rc<Self> {
@@ -158,6 +164,9 @@ impl Ableton {
                 }),
             );
             let watch = Watch::new(mutations.clone());
+            let variations =
+                Variations::new(LiveVariations::new(connection.clone(), mutations.clone(), history.clone(), observer.clone()), kumi_home())
+                    .tool();
             Self {
                 weak: weak.clone(),
                 connection,
@@ -170,6 +179,7 @@ impl Ableton {
                 options,
                 closing: RefCell::new(None),
                 made,
+                variations,
             }
         })
     }
@@ -447,6 +457,7 @@ impl KernelTool for LiveTool {
                 }
             }
             "plugin" => owner.commands.plugin_tool(&input, signal).await,
+            name if name == owner.variations.name() => owner.variations.execute(input, signal).await,
             _ => Ok(owner.connection.invoke(&self.name, input, signal).await),
         };
         if unseen {
@@ -657,6 +668,21 @@ impl ObservationHost for Ableton {
         }
         if tools.has("live_device_read") {
             offered.push(self.tool(plugin_tool::PLUGIN_TOOL, &plugin_tool::PLUGIN_DESCRIPTION, plugin_tool::PLUGIN_SCHEMA.clone()));
+        }
+        // Takes of a Session clip: read with read_notes, written, renamed and deleted as changes.
+        let change = |name: &str| {
+            CHANGES.iter().any(|k| {
+                k.tool == name
+                    && k.internal != Some(true)
+                    && self.mutations.supported(k.since.as_deref())
+                    && k.available(|tool| tools.has(tool))
+            })
+        };
+        if tools.has("live_discover")
+            && ["write_midi_clip", "delete_clip", "rename", "add_tracks_and_scenes"].iter().all(|name| change(name))
+        {
+            let variations = &self.variations;
+            offered.push(self.tool(variations.name(), variations.description(), variations.input_schema()));
         }
         offered
     }

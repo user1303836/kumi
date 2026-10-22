@@ -643,7 +643,7 @@ pub struct Capabilities {
     /// it plays: REAPER's and Renoise's bridges.
     pub renders_to_listen: bool,
     /// (M7) The variations tool: numbered takes of a source, kept, changed or dropped by number (core's, with the DAW's backend):
-    /// Renoise's patterns and phrases.
+    /// Renoise's patterns and phrases, REAPER's items, Live's Session clips.
     pub variations: bool,
     /// (#401) The sample map: sound files or an instrument's samples laid out across the keys from their names, pitch and
     /// loudness, and the song's instruments tidied (core's, with the DAW's backend): Renoise's keyzones.
@@ -791,7 +791,8 @@ impl DawProfile {
             presets: true,
             // (Live hears as it plays, through Kumi Ears or a recording)
             renders_to_listen: false,
-            variations: false,
+            // (#401) Session clips' takes, in the slots below the source
+            variations: true,
             sample_mapping: false,
             chop: false,
             delivery: false,

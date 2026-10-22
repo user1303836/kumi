@@ -15,7 +15,7 @@ Kumi 能在 Ableton Live、REAPER 和 Renoise 中工作，用的是各个 DAW �
 | 不调用模型就能完成的即时短语 | ✓ | ✓ | ✓ |
 | 在 DAW 内运行代码 | ✓ Python | ✓ Lua（ReaScript）、REAPER 的 API 和动作（action） | ✓ Lua |
 | 一次停止一切（`/stop`） | ✓ | ✓ | ✓ |
-| 把变奏做成带编号的版本（take），可保留、修改或丢弃 | 尚未 | ✓ 条目 | ✓ |
+| 把变奏做成带编号的版本（take），可保留、修改或丢弃 | ✓ Session 片段 | ✓ 条目 | ✓ |
 | 采样映射：按名称、音高和响度把声音排到键盘上，并整理乐器 | 尚未 | 尚未：只有鼓组（`drum_kit`） | ✓ |
 | 在真正的击打处切开录音，并排好切片来演奏 | 尚未 | 尚未 | ✓ |
 | 交付文件：每个素材一个区域，按项目的命名规则，先试运行 | 尚未 | ✓ | 尚未 |
@@ -66,6 +66,7 @@ Kumi 能在 Ableton Live、REAPER 和 Renoise 中工作，用的是各个 DAW �
 - Kumi 的桥接是一个 Remote Script，旁边还有 Kumi 的 Live 扩展和 Willington（[能力矩阵](CAPABILITY_MATRIX.md)）。
 - 整个计划在 Live 中只算一次撤销（Cmd-Z，Windows 上为 Ctrl-Z）。
 - 脚本做不到的事，用 Live 自己的菜单完成：冻结、并轨（bounce）、分轨、音频转 MIDI 等（[Live 自己的命令](KUMI_GUIDE.md#live-自己的命令)）。
+- **变奏**（`variations`）：为一个 Session MIDI 片段做出带编号的版本 V1、V2……，每个都是同一轨道上它下方空槽里的新片段（没有空槽时在末尾加一个场景）。音符的音高、力度或时值会被改变，或被减少，也可以由 Kumi 来写；你指定的音符保持不变。Kumi 会检查每个版本既不同于源和其他版本，又保持原来的调性。Live 只在实时播放时让 MIDI 片段发声，所以要触发这些版本的槽来听。保留下来的版本会改名为“V3 · … · kept”。
 
 ## REAPER
 
