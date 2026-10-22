@@ -1227,6 +1227,10 @@ async fn a_pattern_take_written_on_outside_its_lines_isnt_dropped() {
             let rolls = json!([{"direction": "rolls", "ops": [{"op": "retrig", "amount": 0.5}]}, {"direction": "sparser", "ops": [{"op": "thin", "amount": 0.4}]}]);
             let made = run_tool(&variations, json!({"action": "make", "source": source, "seed": 5, "takes": rolls, "listen": false})).await;
             let first: u64 = made["takes"][0]["ref"].as_str().and_then(|r| r.rsplit(':').next()).and_then(|n| n.parse().ok()).unwrap_or_else(|| panic!("{made}"));
+            // (the producer writes on the source past the lines Kumi varied: the takes are as Kumi wrote them, still droppable)
+            let mut source_lines = script.lines(2, 1).as_array().cloned().unwrap_or_default();
+            source_lines.push(json!({"line": 14, "notes": [{"col": 1, "note": "A-4", "instrument": "00"}]}));
+            script.set_lines(2, 1, Value::Array(source_lines));
             // (the producer writes a note on V1's track past the lines Kumi varied)
             let mut lines = script.lines(first, 1).as_array().cloned().unwrap_or_default();
             lines.push(json!({"line": 12, "notes": [{"col": 1, "note": "G-4", "instrument": "00"}]}));

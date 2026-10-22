@@ -112,29 +112,37 @@ impl<S: RefScheme + 'static> RenoiseBackend<S> {
         self.plan.rows_through(args, LINE_PAGES, signal).await
     }
 
-    /// Where each item is now (`read {kind: "where"}`): {pattern}, {instrument}, {phrase} (a place or a ref) or {track} (a ref
-    /// from `layout`).
-    /// A pattern take whose varied track's lines outside the take's range differ from the source's (copied as they were when Kumi
-    /// made it): the producer's edit there, which the take's digest doesn't cover (#400 review notes); None when they're the
-    /// same, or can't be read (the source gone).
-    async fn edited_outside(&self, set: &RenoiseSet, row: &Value, first: u32, last: u32, signal: &Signal) -> Option<String> {
-        let reference = row.get("ref")?.as_str()?.to_string();
-        let source = self.pattern_now(set, signal).await.ok()?;
-        let source_ref = source.get("ref")?.as_str()?.to_string();
-        let track = self.track_now(set, signal).await.ok()?;
-        let length = |row: &Value| row.get("lines").and_then(Value::as_u64).unwrap_or(64).max(1) as u32;
-        let (take_length, source_length) = (length(row), length(&source));
-        let mut lines = Vec::new();
-        for (pattern, length) in [(&reference, take_length), (&source_ref, source_length)] {
-            let rows =
-                self.rows(json!({"kind": "line", "parent": pattern, "track": track, "hidden": true, "limit": 200}), signal).await.ok()?;
-            let read = Lines::from_rows(&rows, 0, length - 1, 4);
-            lines.push(read.rows.into_iter().filter(|(number, _)| *number < first || *number > last).collect::<Vec<_>>());
-        }
-        (take_length != source_length || lines[0] != lines[1])
-            .then(|| "has lines of its own outside the varied ones (they differ from the source's)".to_string())
+    /// A print of a pattern track's lines outside first..=last, with the pattern's length: what a pattern take's varied track
+    /// holds besides its varied lines (a copy of the source's when Kumi writes it), which its digest doesn't cover.
+    async fn outside_print(
+        &self,
+        pattern: &str,
+        track: &str,
+        length: u32,
+        first: u32,
+        last: u32,
+        signal: &Signal,
+    ) -> Result<String, String> {
+        let rows = self.rows(json!({"kind": "line", "parent": pattern, "track": track, "hidden": true, "limit": 200}), signal).await?;
+        let mut lines = Lines::from_rows(&rows, 0, length.max(1) - 1, 4);
+        lines.rows.retain(|number, _| *number < first || *number > last);
+        Ok(lines.digest())
     }
 
+    /// A pattern take whose varied track's lines outside the take's range, or whose length, changed since Kumi wrote it (as the
+    /// print it kept then says): the producer's edit there (#400 review notes); None when they're as they were, or the take
+    /// was written before Kumi kept the print.
+    async fn edited_outside(&self, set: &RenoiseSet, number: usize, row: &Value, first: u32, last: u32, signal: &Signal) -> Option<String> {
+        let kept = set.take(number)?.place.get("outside")?.as_str()?.to_string();
+        let reference = row.get("ref")?.as_str()?;
+        let track = self.track_now(set, signal).await.ok()?;
+        let length = row.get("lines").and_then(Value::as_u64).unwrap_or(64) as u32;
+        let now = self.outside_print(reference, &track, length, first, last, signal).await.ok()?;
+        (now != kept).then(|| "has lines of its own outside the varied ones, or another length (since Kumi wrote it)".to_string())
+    }
+
+    /// Where each item is now (`read {kind: "where"}`): {pattern}, {instrument}, {phrase} (a place or a ref) or {track} (a ref
+    /// from `layout`).
     /// Pattern takes' rows with the varied track's number now (`variedTrack`): what tells their own tracks apart (#401).
     async fn with_varied_track(&self, set: &RenoiseSet, rows: &mut [Value], signal: &Signal) {
         if !matches!(set.source.data.placement, Placement::Patterns { .. }) || !rows.iter().any(|row| row.get("ref").is_some()) {
@@ -678,8 +686,15 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
                     None => input["section"] = json!(section),
                 }
                 let (change, applied) = self.change("slot_variation", input, signal).await?;
-                let place = applied.pointer("/created/place").cloned().unwrap_or(Value::Null);
+                let mut place = applied.pointer("/created/place").cloned().unwrap_or(Value::Null);
                 let made = applied.pointer("/created/pattern").and_then(Value::as_str).unwrap_or("").to_string();
+                // (what its varied track holds outside the varied lines, as written: a drop tells the producer's edit there by it)
+                let length = source.get("lines").and_then(Value::as_u64).unwrap_or(64) as u32;
+                if let (Some(fields), Ok(print)) =
+                    (place.as_object_mut(), self.outside_print(&made, &track, length, *first, *last, signal).await)
+                {
+                    fields.insert("outside".into(), json!(print));
+                }
                 Ok((change, place, made))
             }
             _ => Err(("this set's takes can't go in patterns".into(), false)),
@@ -718,7 +733,12 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
             let again = self.locate(vec![item(&set.source.data.placement, json!(reference))], None, signal).await?;
             if let Some(row) = again.into_iter().next().filter(|row| row.get("ref").is_some()) {
                 if let Some(take) = set.take_mut(*number) {
+                    // (the print of its lines outside the varied ones stays with it)
+                    let outside = take.place.get("outside").cloned();
                     take.place = row.get("place").cloned().unwrap_or(Value::Null);
+                    if let (Some(fields), Some(outside)) = (take.place.as_object_mut(), outside) {
+                        fields.insert("outside".into(), outside);
+                    }
                 }
                 found[k] = row;
             }
@@ -856,7 +876,7 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
         Ok(json!({"change": change, "title": applied.pointer("/display/title").cloned().unwrap_or(Value::Null)}))
     }
 
-    async fn undroppable(&self, set: &RenoiseSet, _number: usize, row: &Value, signal: &Signal) -> Option<String> {
+    async fn undroppable(&self, set: &RenoiseSet, number: usize, row: &Value, signal: &Signal) -> Option<String> {
         match (&set.source.data.placement, &set.source.data.kind) {
             (Placement::Phrases { .. }, _) => None,
             (Placement::Patterns { .. }, kind) => {
@@ -868,7 +888,7 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
                     return Some(why);
                 }
                 match kind {
-                    SourceKind::Range { first, last, .. } => self.edited_outside(set, row, *first, *last, signal).await,
+                    SourceKind::Range { first, last, .. } => self.edited_outside(set, number, row, *first, *last, signal).await,
                     _ => None,
                 }
             }

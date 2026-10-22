@@ -731,13 +731,11 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
 }
 
 /// Notes the model wrote with the take's anchor notes in, as they are (#400 review notes: written notes never have to repeat
-/// them), by start and pitch.
+/// them), by start and pitch: a written note that is an anchor's (its pitch, channel and start, another velocity or length)
+/// gives way to it.
 fn with_anchors(mut notes: Vec<Note>, anchors: &[Note]) -> Vec<Note> {
-    for anchor in anchors {
-        if !notes.contains(anchor) {
-            notes.push(anchor.clone());
-        }
-    }
+    notes.retain(|note| !anchors.iter().any(|anchor| anchor.same(note)));
+    notes.extend(anchors.iter().cloned());
     notes.sort_by(|a, b| a.start.total_cmp(&b.start).then(a.pitch.cmp(&b.pitch)));
     notes
 }
@@ -750,6 +748,9 @@ mod tests {
         let anchors = vec![note(36, 0.), note(38, 1.)];
         let written = with_anchors(vec![note(42, 0.5), note(36, 0.)], &anchors);
         assert_eq!(written, vec![note(36, 0.), note(42, 0.5), note(38, 1.)]);
+        // (the kick written softer, longer and a hair late is the anchor's own note: one kick, the anchor's)
+        let loose = Note { velocity: 60, length: 0.5, start: 0.0004, ..note(36, 0.) };
+        assert_eq!(with_anchors(vec![loose], &anchors), anchors);
     }
 
     use super::*;
