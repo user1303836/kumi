@@ -1945,11 +1945,27 @@ fn a_deliverys_settings_are_checked_before_anything_is_set() {
     assert_eq!(gone.unwrap_err().0, "gone");
     // A tail past a stretch's end is fine.
     rig.ask("deliver_targets", json!({"pattern": "$project", "folder": folder, "bounds": "project", "tailMs": 500})).unwrap();
-    // With no folder given or set, the project's own folder; a render folder set relative to it, under it.
-    fake::with(|s| s.listening.texts.remove("RENDER_FILE"));
+    // With no folder given, REAPER's own: the project's media folder (a project never saved has REAPER's default one), a
+    // render folder that isn't a whole path inside it; REAPER's default render path over the media folder when it's set.
+    fake::with(|s| {
+        s.listening.texts.remove("RENDER_FILE");
+        s.media = "/lab/Projects/Media".into();
+    });
     let answer = rig.ask("deliver_targets", json!({"pattern": "$region"})).unwrap();
-    assert_eq!(answer["targets"], json!(["/lab/Projects/Verse.wav"]));
+    assert_eq!(answer["targets"], json!(["/lab/Projects/Media/Verse.wav"]));
     fake::with(|s| s.listening.texts.insert("RENDER_FILE".into(), "Renders".into()));
-    let answer = rig.ask("deliver_targets", json!({"pattern": "$region"})).unwrap();
-    assert_eq!(answer["folder"], "/lab/Projects/Renders");
+    let folder_of = |rig: &Rig| rig.ask("deliver_targets", json!({"pattern": "$region"})).unwrap()["folder"].clone();
+    assert_eq!(folder_of(&rig), "/lab/Projects/Media/Renders");
+    fake::extra(|e| e.config.insert("defrenderpath".into(), "/lab/Renders".into()));
+    assert_eq!(folder_of(&rig), "/lab/Renders/Renders");
+    fake::extra(|e| e.config.insert("defrenderpath".into(), "Bounces".into()));
+    assert_eq!(folder_of(&rig), "/lab/Projects/Media/Bounces/Renders");
+    fake::with(|s| s.listening.texts.insert("RENDER_FILE".into(), "/elsewhere/Game".into()));
+    assert_eq!(folder_of(&rig), "/elsewhere/Game", "a whole path stands");
+    fake::with(|s| {
+        s.listening.texts.remove("RENDER_FILE");
+        s.media = String::new();
+    });
+    let none = rig.ask("deliver_targets", json!({"pattern": "$region"})).unwrap_err();
+    assert!(none.1.contains("give folder"), "{none:?}");
 }

@@ -49,6 +49,21 @@ pub struct Scenario {
 // The preludes (each DAW's first Lua: the project or song put back to a plain start, and the fixtures' helpers) and the
 // state readers (the fields every scenario's checks may use).
 
+/// Lua that sets `folder` to REAPER's render folder for the open project, as REAPER resolves it: the render folder when it's
+/// a whole path, else under the default render path (a whole path, or inside the media folder) or the project's media folder.
+macro_rules! reaper_render_folder {
+    () => {
+        r#"
+local function whole(path) return path:sub(1, 1) == "/" end
+local _, set = reaper.GetSetProjectInfo_String(0, "RENDER_FILE", "", false)
+local _, default = reaper.get_config_var_string("defrenderpath")
+local media = reaper.GetProjectPath("")
+local base = (default or "") == "" and media or (whole(default) and default or media .. "/" .. default)
+local folder = set == "" and base or (whole(set) and set or base .. "/" .. set)
+"#
+    };
+}
+
 pub const REAPER_PRELUDE: &str = r#"
 for i = reaper.CountTracks(0) - 1, 0, -1 do reaper.DeleteTrack(reaper.GetTrack(0, i)) end
 local _, markers, regions = reaper.CountProjectMarkers(0)
@@ -434,8 +449,35 @@ for i = 1, 3 do
   reaper.SetMediaItemSelected(it, true)
 end
 "#,
-            read: "",
-            teardown: None,
+            // (the files rendered: one a region, in REAPER's render folder for the project)
+            read: concat!(
+                reaper_render_folder!(),
+                r#"
+local named = {}
+for _, region in ipairs(out.regions) do named[region.name .. ".wav"] = true end
+out.rendered = {}
+local i = 0
+while true do
+  local file = reaper.EnumerateFiles(folder, i)
+  if not file then break end
+  if named[file] then out.rendered[#out.rendered + 1] = file end
+  i = i + 1
+end
+"#
+            ),
+            // (the files go, so the next run renders afresh)
+            teardown: Some(concat!(
+                reaper_render_folder!(),
+                r#"
+local m = 0
+while true do
+  local ok, isrgn, _, _, name = reaper.EnumProjectMarkers(m)
+  if ok == 0 then break end
+  if isrgn and name ~= "" then os.remove(folder .. "/" .. name .. ".wav") end
+  m = m + 1
+end
+return "ok""#
+            )),
             generates: false,
             names: &["01", "Gravel 1", "Gravel 2", "Gravel 3"],
             expect: |seen| {
@@ -469,7 +511,11 @@ end
                         variations.len() >= 6,
                         format!("{} distinct", variations.len()),
                     ),
-                    Check::new("the render lists 12 files", after["targets"].as_u64() == Some(12), format!("{}", after["targets"])),
+                    Check::new(
+                        "12 files rendered, one a region",
+                        list(&after["rendered"]).len() == 12,
+                        list(&after["rendered"]).iter().filter_map(|file| file.as_str()).collect::<Vec<_>>().join(", "),
+                    ),
                 ]
             },
         },

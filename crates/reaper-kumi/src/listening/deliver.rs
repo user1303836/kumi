@@ -107,24 +107,29 @@ fn wav_format(bits: u64) -> Option<&'static str> {
     }
 }
 
-/// The folder the producer's renders go to: the project's render folder (relative to the project's own folder when it isn't
-/// a whole path), else the project's folder; None for a project never saved with no render folder set.
-pub fn render_folder(reaper: &Reaper, proj: Project, path: &str) -> Option<PathBuf> {
-    let project_folder = Path::new(path).parent().filter(|_| !path.is_empty()).map(Path::to_path_buf);
+/// The folder the producer's renders go to, as REAPER's own render resolves it (RENDER_TARGETS in the lab, 7.82): the
+/// project's render folder when it's a whole path; else under REAPER's default render path (Preferences › Paths: a whole
+/// path, or one inside the project's media folder) or, with none set, the project's media folder itself (a project never
+/// saved has REAPER's default one), a render folder that isn't a whole path inside that. None when REAPER gives no media
+/// folder.
+pub fn render_folder(reaper: &Reaper, proj: Project) -> Option<PathBuf> {
     let set = reaper.project_text_long(proj, "RENDER_FILE").unwrap_or_default();
-    let set = set.trim();
-    if !set.is_empty() {
-        let set = PathBuf::from(set);
-        if set.is_absolute() {
-            return Some(set);
-        }
-        return project_folder.map(|folder| folder.join(set));
+    let set = PathBuf::from(set.trim());
+    if set.is_absolute() {
+        return Some(set);
     }
-    project_folder
+    let media = reaper.project_media_folder(proj).map(PathBuf::from);
+    let default = PathBuf::from(reaper.config_text("defrenderpath").unwrap_or_default().trim());
+    let base = match default.as_os_str().is_empty() {
+        true => media?,
+        false if default.is_absolute() => default,
+        false => media?.join(default),
+    };
+    Some(if set.as_os_str().is_empty() { base } else { base.join(set) })
 }
 
 /// The asked delivery, checked.
-pub fn spec(reaper: &Reaper, reads: &Reads, proj: Project, path: &str, params: &Value) -> Result<Spec, Fault> {
+pub fn spec(reaper: &Reaper, reads: &Reads, proj: Project, params: &Value) -> Result<Spec, Fault> {
     let source = match params.get("source").and_then(Value::as_str).unwrap_or("master") {
         "master" => Source::Master,
         "matrix" => Source::Matrix,
@@ -234,8 +239,7 @@ pub fn spec(reaper: &Reaper, reads: &Reads, proj: Project, path: &str, params: &
             }
             folder
         }
-        None => render_folder(reaper, proj, path)
-            .ok_or_else(|| failed("the project isn't saved and has no render folder: save it, or give folder"))?,
+        None => render_folder(reaper, proj).ok_or_else(|| failed("REAPER gives no folder for this project's renders: give folder"))?,
     };
     let expect = match params.get("expect") {
         None | Some(Value::Null) => None,
@@ -482,7 +486,7 @@ fn targets_now(reaper: &Reaper, proj: Project) -> Vec<String> {
 pub fn targets(reaper: &Reaper, reads: &Reads, params: &Value) -> Result<Value, Fault> {
     let info = reaper.current_project().ok_or_else(|| failed("REAPER has no project open"))?;
     let proj = info.ptr;
-    let spec = spec(reaper, reads, proj, &info.path, params)?;
+    let spec = spec(reaper, reads, proj, params)?;
     let mut notes: Vec<String> = extras_note(&spec, &extras(reaper, proj)).into_iter().collect();
     let mut put_back = PutBack::note(reaper, proj);
     let mut rows = spec.regions.as_ref().map(|_| Rows::note(reaper, proj));
@@ -528,7 +532,7 @@ pub fn plan(reaper: &Reaper, reads: &Reads, params: &Value) -> Result<Plan, Faul
     if epoch != reads.epoch() && !reads.epoch_is_of(&epoch, info.ptr) {
         return Err(stale("those refs are from an earlier project: read again"));
     }
-    let spec = spec(reaper, reads, info.ptr, &info.path, params)?;
+    let spec = spec(reaper, reads, info.ptr, params)?;
     Ok(Plan { job, queued: Instant::now(), proj: info.ptr, epoch, spec })
 }
 
