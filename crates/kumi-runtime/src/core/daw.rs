@@ -658,6 +658,9 @@ pub struct Capabilities {
     /// (#401) Kept scripts: a chore run once, then kept to run again by name and as the DAW's own action (core's, with the
     /// DAW's backend): REAPER's Action List, Renoise's Tools menu.
     pub scripts: bool,
+    /// (#401) Delivery to a loudness spec: the mix rendered and measured against ACX, streaming or broadcast, its master
+    /// fader moved by the gain the spec needs, and measured again (core's, with the DAW's backend).
+    pub delivery_spec: bool,
 }
 
 /// One DAW as Kumi knows it: its id (None when no DAW is known), its words and what it can do.
@@ -785,6 +788,7 @@ impl DawProfile {
             delivery: false,
             routing: false,
             scripts: false,
+            delivery_spec: false,
         },
         vocab: PromptVocab {
             plan_tool: crate::live_word!(plan_tool),
@@ -881,6 +885,7 @@ impl DawProfile {
             scripts: true,
             // (#401) SFX variations: items copied with their own settings
             variations: true,
+            delivery_spec: true,
             ..Capabilities::NONE
         },
         vocab: PromptVocab {
@@ -977,6 +982,7 @@ impl DawProfile {
             sample_mapping: true,
             chop: true,
             scripts: true,
+            delivery_spec: true,
             ..Capabilities::NONE
         },
         vocab: PromptVocab {
@@ -1111,6 +1117,7 @@ impl Capabilities {
         delivery: false,
         routing: false,
         scripts: false,
+        delivery_spec: false,
     };
 }
 

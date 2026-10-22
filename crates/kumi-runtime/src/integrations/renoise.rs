@@ -51,6 +51,20 @@ pub const DAW: OwnDaw = OwnDaw {
     catch_up: &CATCH_UP,
     phrases: &PHRASES,
     scripts: &SCRIPTS,
+    spec: &SPEC,
+};
+
+/// (#401) Delivery to a spec in Renoise: the master's row and post-FX fader, and what limits or raises it.
+static SPEC: super::own_spec::OwnSpecFacts = super::own_spec::OwnSpecFacts {
+    words: crate::core::spec::backend::Words {
+        app: "Renoise",
+        fader_most: 3.,
+        limiter:
+            "a Maximizer as the master's last device, its Ceiling a few tenths under the spec's and its Boost by the gain still needed",
+        gainer: "a Gainer device on the master before its Maximizer (up to +12 dB), for the gain past the fader's +3",
+    },
+    is_master: |row| row.get("type").and_then(serde_json::Value::as_str) == Some("master"),
+    fader: "postVolumeDb",
 };
 
 /// (#401) Kept scripts in Renoise: its Lua, kept as entries of the Tools menu, and what takes a thing by its place there.

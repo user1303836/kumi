@@ -51,6 +51,19 @@ pub const DAW: OwnDaw = OwnDaw {
     catch_up: &CATCH_UP,
     phrases: &PHRASES,
     scripts: &SCRIPTS,
+    spec: &SPEC,
+};
+
+/// (#401) Delivery to a spec in REAPER: the master's row and fader, and what limits or raises it.
+static SPEC: super::own_spec::OwnSpecFacts = super::own_spec::OwnSpecFacts {
+    words: crate::core::spec::backend::Words {
+        app: "REAPER",
+        fader_most: 24.,
+        limiter: "ReaLimit (Cockos) as the master's last FX, its Ceiling a few tenths under the spec's and its Threshold down by the gain still needed",
+        gainer: "JS: Volume Adjustment on the master's FX before its limiter, for the gain past the fader",
+    },
+    is_master: |row| row.get("master") == Some(&serde_json::Value::Bool(true)),
+    fader: "volumeDb",
 };
 
 /// (#401) Kept scripts in REAPER: ReaScript, kept as actions, and what takes a thing by its place there.

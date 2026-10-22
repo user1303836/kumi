@@ -83,6 +83,8 @@ pub struct OwnDaw {
     pub phrases: &'static super::own_phrases::OwnPhrases,
     /// (#401) What its kept scripts are in, become, and take by their place (lint rules).
     pub scripts: &'static crate::core::scripts::backend::Words,
+    /// (#401) Its facts for delivery to a spec: its master's row and fader, and what limits or raises the master.
+    pub spec: &'static super::own_spec::OwnSpecFacts,
 }
 
 /// Starts Kumi's host for a DAW: the production one runs `daw-mcp-server`; a test's stand-in answers in its place.
@@ -178,6 +180,8 @@ pub struct OwnIntegration<S: RefScheme + 'static> {
     routing: Option<Rc<dyn KernelTool>>,
     /// (#401) Kept scripts, where the DAW's profile offers them (core's, with the shared backend).
     scripts: Option<Rc<dyn KernelTool>>,
+    /// (#401) Delivery to a spec, where the DAW's profile offers it (core's, with the shared backend).
+    spec: Option<Rc<dyn KernelTool>>,
 }
 
 /// How REAPER and Renoise tell templates and a song's own folder, for core's rules on copies: a project in REAPER's
@@ -356,6 +360,11 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
         let backend = super::own_scripts::OwnScripts::new(changes.clone(), daw.scripts);
         crate::core::scripts::tool::Scripts::new(backend, options.kumi_home.join("scripts").join(daw.host_flag)).tool()
     });
+    // (#401) delivery to a spec, where the DAW offers it
+    let spec: Option<Rc<dyn KernelTool>> = daw.profile.caps.delivery_spec.then(|| {
+        let backend = super::own_spec::OwnSpec::new(changes.clone(), listening.renderer.clone(), daw.spec);
+        crate::core::spec::tool::DeliverySpec::new(backend).tool()
+    });
     let kumi_home = options.kumi_home.clone();
     Rc::new(OwnIntegration::<S> {
         daw,
@@ -397,6 +406,7 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
         delivery,
         routing,
         scripts,
+        spec,
     })
 }
 
@@ -976,6 +986,9 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         }
         if let Some(scripts) = &self.scripts {
             tools.push(scripts.clone());
+        }
+        if let Some(spec) = &self.spec {
+            tools.push(spec.clone());
         }
         tools
     }

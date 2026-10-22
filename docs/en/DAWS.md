@@ -28,6 +28,7 @@ does the job there.
 | Delivers files: a region per asset, named in the project's convention, a dry run first | not yet | ✓ | not yet |
 | Finds why a track plays twice or nowhere, and builds sidechains, parallel buses and stems as one undo step | not yet | ✓ | not yet |
 | Keeps a repeated chore as a script: run once as one undo step, then kept as the DAW's own action once you say yes | not yet | ✓ | ✓ |
+| Meets a loudness spec: ACX, streaming or broadcast, measured, fixed at the master fader, measured again | not yet | ✓ | ✓ |
 | Knows whether the DAW is recording | ✓ | ✓ | ✓ |
 | A line in the DAW's status bar | ✓ | no: REAPER's API has no status bar (a notification instead) | ✓ |
 | Opens a saved project | ✓ | not yet: you open it yourself (`kumi -r` and setup's restart don't) | not yet: you open it yourself (`kumi -r` and setup's restart don't) |
@@ -170,6 +171,12 @@ next version), track templates and FX chains.
   checks each differs from the source and the others yet stays the same sound
   (its attack, and any notes you name, kept), renders them to hear them, and
   keeps, changes or drops them as you say; `render_files` delivers a file each.
+- **Delivery to a spec** (`delivery_spec`): ACX, streaming (Spotify, Apple
+  Music, YouTube…), podcasts or broadcast (EBU R 128, ATSC A/85, Netflix).
+  Kumi renders the mix offline and measures it: integrated loudness, true
+  peak, and for ACX the RMS and noise floor. It moves the master fader by the
+  gain the spec needs when the peaks allow, measures again, and says what a
+  fader can't fix (limiting, noise).
 - **Scripts for a chore** (`scripts`): a chore you repeat, written in Lua
   against your project and run once as one step of REAPER's undo. Once you say
   yes, Kumi keeps it to run again by name, and as an action in the Action List
@@ -299,6 +306,11 @@ saves the song, instruments and device presets.
   close the hits land and how deeply it nulls against the recording. The
   lighter densities (no ghosts or rolls; kick and snare) come as variations
   takes to keep or drop.
+- **Delivery to a spec** (`delivery_spec`): ACX, streaming, podcasts or
+  broadcast loudness. Kumi renders the song offline, measures it, moves the
+  master's post-FX fader by the gain the spec needs when the peaks allow, and
+  measures again; past the fader's +3 dB, it says a Gainer or the Maximizer
+  comes first.
 - **Scripts for a chore** (`scripts`): a chore you repeat, written in Lua
   against your song and run once as one step of Renoise's undo. Once you say
   yes, Kumi keeps it to run again by name, and as Tools > Kumi > its name, with
