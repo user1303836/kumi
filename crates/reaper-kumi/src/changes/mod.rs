@@ -33,6 +33,8 @@ pub(crate) use sends::seen_holds as send_seen_holds;
 mod structure;
 mod tracks;
 mod undo;
+// (#401) the variations tool's takes: items copied with their settings, rewritten, dropped
+mod variations;
 // m4-r-fxenv: FX in every chain, containers, parameter modulation, envelopes and automation items.
 mod containers;
 mod envelopes;
@@ -843,6 +845,7 @@ mod tests_actions;
 mod tests_carried;
 #[cfg(test)]
 mod tests_kits;
+// (#401) the variations tool's takes
 #[cfg(test)]
 mod tests_lab;
 #[cfg(test)]
@@ -851,3 +854,5 @@ mod tests_project;
 mod tests_routing;
 #[cfg(test)]
 mod tests_tracks;
+#[cfg(test)]
+mod tests_variations;

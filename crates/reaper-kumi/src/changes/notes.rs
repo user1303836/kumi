@@ -273,7 +273,7 @@ fn quarter_notes(ctx: &Ctx, take: Take, ppq: f64) -> Done<f64> {
     ctx.reaper.ppq_to_quarter_notes(take, ppq).ok_or_else(|| failed("this REAPER can't turn ticks into beats"))
 }
 
-fn new_note(ctx: &Ctx, take: Take, item_qn: f64, spec: &Value) -> Done<Note> {
+pub(super) fn new_note(ctx: &Ctx, take: Take, item_qn: f64, spec: &Value) -> Done<Note> {
     let pitch = whole(spec, "pitch", 0, 127)?.ok_or_else(|| bad("every note needs a pitch (0 to 127)"))?;
     let start = number(spec, "start")?
         .filter(|s| *s >= 0.0)

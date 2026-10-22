@@ -22,7 +22,7 @@ does the job there.
 | Instant phrases, made with no model call | ✓ | ✓ | ✓ |
 | Code run inside the DAW | ✓ Python | ✓ Lua (ReaScript), REAPER's API and actions | ✓ Lua |
 | Stop everything at once (`/stop`) | ✓ | ✓ | ✓ |
-| Variations as numbered takes you keep, change or drop | not yet | not yet: item variations come later | ✓ |
+| Variations as numbered takes you keep, change or drop | not yet | ✓ items | ✓ |
 | Sample maps: sounds laid across the keys by name, pitch and loudness, and an instrument tidy | not yet | not yet: drum kits only (`drum_kit`) | ✓ |
 | Chops a recording at its real hits and lays the slices out to play it | not yet | not yet | ✓ |
 | Delivers files: a region per asset, named in the project's convention, a dry run first | not yet | ✓ | not yet |
@@ -164,6 +164,12 @@ next version), track templates and FX chains.
   track doesn't have, a duplicate with its polarity inverted. It builds a
   sidechain (the kick ducking the bass through ReaComp), a parallel bus or
   stems as one step of REAPER's undo, and reads the routing again to check it.
+- **SFX variations** (`variations`): numbered takes V1, V2… of an item, each a
+  copy after it on its track with its own pitch, rate, start, length, fades
+  and volume (a MIDI item's notes, velocities and timing vary instead). Kumi
+  checks each differs from the source and the others yet stays the same sound
+  (its attack, and any notes you name, kept), renders them to hear them, and
+  keeps, changes or drops them as you say; `render_files` delivers a file each.
 - **Scripts for a chore** (`scripts`): a chore you repeat, written in Lua
   against your project and run once as one step of REAPER's undo. Once you say
   yes, Kumi keeps it to run again by name, and as an action in the Action List

@@ -3,7 +3,9 @@
 use serde_json::Value;
 
 use super::take_marks::Which as Marks;
-use super::{glue, items, lanes, midi_events, notes, take_marks, takes, transforms, Applied, Ctx, Done, Kind, Preview, Restore, Restored};
+use super::{
+    glue, items, lanes, midi_events, notes, take_marks, takes, transforms, variations, Applied, Ctx, Done, Kind, Preview, Restore, Restored,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Which {
@@ -32,6 +34,9 @@ pub enum Which {
     Render,
     Events(midi_events::Which),
     Transform(transforms::Which),
+    Variation,
+    VariationSet,
+    ItemsDelete,
 }
 
 /// The kind a name is, if it is one of these.
@@ -69,6 +74,9 @@ pub(super) fn kind(name: &str) -> Option<Kind> {
         "midi-events-delete" => Some(Kind::Items(Which::Events(midi_events::Which::Delete))),
         "notes-quantize" => Some(Kind::Items(Which::Transform(transforms::Which::Quantize))),
         "notes-humanize" => Some(Kind::Items(Which::Transform(transforms::Which::Humanize))),
+        "item-variation" => Some(Kind::Items(Which::Variation)),
+        "item-variation-set" => Some(Kind::Items(Which::VariationSet)),
+        "items-delete" => Some(Kind::Items(Which::ItemsDelete)),
         _ => None,
     }
 }
@@ -101,6 +109,9 @@ impl Which {
             Which::Render => glue::render_preview(ctx, input),
             Which::Events(which) => midi_events::preview(ctx, input, which),
             Which::Transform(which) => transforms::preview(ctx, input, which),
+            Which::Variation => variations::add_preview(ctx, input),
+            Which::VariationSet => variations::set_preview(ctx, input),
+            Which::ItemsDelete => variations::drop_preview(ctx, input),
         }
     }
 
@@ -131,12 +142,17 @@ impl Which {
             Which::Render => glue::render_apply(ctx, input, fence),
             Which::Events(which) => midi_events::apply(ctx, input, fence, which),
             Which::Transform(which) => transforms::apply(ctx, input, fence, which),
+            Which::Variation => variations::add_apply(ctx, input, fence),
+            Which::VariationSet => variations::set_apply(ctx, input, fence),
+            Which::ItemsDelete => variations::drop_apply(ctx, input, fence),
         }
     }
 
     pub(super) fn restore(self, ctx: &Ctx, restore: &Restore) -> Done<Restored> {
         match self {
-            Which::ItemAdd | Which::ItemImport | Which::ItemCopy => items::created_restore(ctx, restore),
+            Which::ItemAdd | Which::ItemImport | Which::ItemCopy | Which::Variation => items::created_restore(ctx, restore),
+            Which::VariationSet => variations::set_restore(ctx, restore),
+            Which::ItemsDelete => variations::drop_restore(ctx, restore),
             Which::ItemMove => items::move_restore(ctx, restore),
             Which::ItemSplit => items::split_restore(ctx, restore),
             Which::ItemTrim => items::trim_restore(ctx, restore),

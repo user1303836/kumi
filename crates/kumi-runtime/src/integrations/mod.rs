@@ -21,6 +21,7 @@ pub mod reaper;
 pub mod reaper_changes;
 mod reaper_delivery;
 mod reaper_routing;
+mod reaper_variations;
 pub mod renoise;
 pub mod renoise_changes;
 mod renoise_chop;

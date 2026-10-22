@@ -316,11 +316,18 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
     };
     let changes = OwnPlan::new(link.clone(), context.change_timeout_ms, on_change, context.on_action.clone());
     let listening = OwnListening::new(link.clone(), changes.clone(), context, &options.kumi_home);
-    let variations: Option<Rc<dyn KernelTool>> = (daw.profile.caps.variations && daw.profile.id == Some(crate::core::daw::DawId::Renoise))
-        .then(|| {
+    // (M7) the variations tool, where the DAW offers it: Renoise's patterns and phrases, REAPER's items (#401)
+    let variations: Option<Rc<dyn KernelTool>> = match daw.profile.id.filter(|_| daw.profile.caps.variations) {
+        Some(crate::core::daw::DawId::Renoise) => {
             let backend = super::renoise_variations::RenoiseBackend::new(changes.clone(), listening.renderer.clone());
-            crate::core::variations::tool::Variations::new(backend, options.kumi_home.clone()).tool()
-        });
+            Some(crate::core::variations::tool::Variations::new(backend, options.kumi_home.clone()).tool())
+        }
+        Some(crate::core::daw::DawId::Reaper) => {
+            let backend = super::reaper_variations::ReaperVariations::new(changes.clone(), listening.renderer.clone());
+            Some(crate::core::variations::tool::Variations::new(backend, options.kumi_home.clone()).tool())
+        }
+        _ => None,
+    };
     // (#401) the sample map, where the DAW offers it
     let mapping: Option<Rc<dyn KernelTool>> = (daw.profile.caps.sample_mapping && daw.profile.id == Some(crate::core::daw::DawId::Renoise))
         .then(|| {

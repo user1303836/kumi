@@ -879,6 +879,8 @@ impl DawProfile {
             delivery: true,
             routing: true,
             scripts: true,
+            // (#401) SFX variations: items copied with their own settings
+            variations: true,
             ..Capabilities::NONE
         },
         vocab: PromptVocab {
