@@ -10,7 +10,7 @@ pub mod tool;
 #[cfg(test)]
 mod fake_backend_tests;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 /// A note as the analysis reads it: where it starts (lines from its part's start, delay included), its note number, its
 /// velocity (0 to 1), and where it's written (line, column), for a fix to find it.
@@ -23,7 +23,8 @@ pub struct Hit {
     pub col: u8,
 }
 
-/// A track's part of a pattern: its ref and name, what it holds (the same digest is the same lines), and its hits.
+/// A track's part of a pattern: its ref and name, what it holds (the same digest is the same lines), how many notes, and its
+/// hits (read only for the jam's parts).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrackPart {
     pub track: String,
@@ -32,10 +33,13 @@ pub struct TrackPart {
     pub empty: bool,
     /// It plays another part's lines already (an alias).
     pub alias: bool,
+    pub notes: usize,
     pub hits: Vec<Hit>,
 }
 
-/// A part: its ref and name, the slots that play it (their number, from 1, and ref), its lines per beat, and its tracks.
+/// A part: its ref and name, the slots that play it (their number, from 1, and ref), its lines per beat, its tracks, and
+/// whether it holds more than their lines (automation, or lines on tracks not read: a master's or a send's commands), which
+/// no slot-level change may drop.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Part {
     pub reference: String,
@@ -43,6 +47,7 @@ pub struct Part {
     pub slots: Vec<(usize, String)>,
     pub lpb: u32,
     pub tracks: Vec<TrackPart>,
+    pub holds_more: bool,
 }
 
 impl Part {
@@ -73,23 +78,17 @@ impl Part {
             if track.digest == theirs.digest {
                 continue;
             }
-            let key = |hit: &Hit| (hit.line, hit.col, hit.note);
-            let ours: BTreeSet<_> = track.hits.iter().map(key).collect();
-            let other_keys: BTreeSet<_> = theirs.hits.iter().map(key).collect();
-            let more = ours.difference(&other_keys).count();
-            let fewer = other_keys.difference(&ours).count();
-            if more + fewer == 0 {
-                // (the same notes, other volumes or effects)
-                count += 1;
-                said.push(format!("other volumes or effects on \u{201c}{}\u{201d}", track.name));
-                continue;
-            }
-            count += more + fewer;
+            // (told by how many notes each has: the lines of what came before aren't read)
             let notes = |n: usize| if n == 1 { "1 note".to_string() } else { format!("{n} notes") };
-            match (more, fewer) {
-                (m, 0) => said.push(format!("{} more on \u{201c}{}\u{201d}", notes(m), track.name)),
-                (0, f) => said.push(format!("{} fewer on \u{201c}{}\u{201d}", notes(f), track.name)),
-                (m, f) => said.push(format!("{} more and {} fewer on \u{201c}{}\u{201d}", notes(m), notes(f), track.name)),
+            if track.notes == theirs.notes {
+                count += 1;
+                said.push(format!("other notes or effects on \u{201c}{}\u{201d}", track.name));
+            } else if track.notes > theirs.notes {
+                count += track.notes - theirs.notes;
+                said.push(format!("{} more on \u{201c}{}\u{201d}", notes(track.notes - theirs.notes), track.name));
+            } else {
+                count += theirs.notes - track.notes;
+                said.push(format!("{} fewer on \u{201c}{}\u{201d}", notes(theirs.notes - track.notes), track.name));
             }
         }
         (count <= most && !said.is_empty()).then(|| said.join(", "))
@@ -97,7 +96,7 @@ impl Part {
 }
 
 /// The grid line nearest a position (lines), a tie going to the line it's written on (half a line late is late, not early).
-fn nearest(at: f64) -> f64 {
+pub fn nearest(at: f64) -> f64 {
     (at - 0.5).ceil()
 }
 
@@ -235,9 +234,11 @@ mod tests {
             digest: digest.into(),
             empty: hits.is_empty(),
             alias: false,
+            notes: hits.len(),
             hits,
         };
-        let part = |tracks: Vec<TrackPart>| Part { reference: "p".into(), name: String::new(), slots: vec![], lpb: 4, tracks };
+        let part =
+            |tracks: Vec<TrackPart>| Part { reference: "p".into(), name: String::new(), slots: vec![], lpb: 4, tracks, holds_more: false };
         let a = part(vec![track("x", vec![hit(0., 60), hit(8., 62)])]);
         let b = part(vec![track("x", vec![hit(0., 60), hit(8., 62)])]);
         let c = part(vec![track("y", vec![hit(0., 60), hit(8., 62), hit(12., 67)])]);

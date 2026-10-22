@@ -336,3 +336,23 @@ test("patterns: a longer pattern says it shows kept lines only when there are so
   local kept = K.preview(peer, "pattern-length", { ref = K.ref(K.place(peer), "pattern", 1), lines = 64 })
   ok((kept.display.note or ""):find("hold what was kept", 1, true), tostring(kept.display.note))
 end)
+
+test("patterns: read with prints, each track's lines summed up as the catch-up does, its automation counted, 16 a page", function()
+  local _, peer = K.setup()
+  local E = K.place(peer)
+  local column = mock.song:pattern(1):track(1):line(1):note_column(1)
+  column.note_string, column.instrument_value = "C-4", 0
+  local read = K.call(peer, "read", { kind = "pattern", prints = true, limit = 200, epoch = E })
+  ok(read.result, T.load_payload_module("json").encode(read.error or {}))
+  local first = read.result.items[1]
+  ok(first.prints["1"]:find("^1 notes, 0 effects #"), first.prints["1"])
+  eq(first.prints["2"], nil, "an empty track has no print")
+  eq(first.automation, 0)
+  ok(#read.result.items <= 16, "at most 16 a page")
+  -- The same lines, the same print; other lines, another.
+  local again = K.call(peer, "read", { kind = "pattern", prints = true, epoch = E }).result.items[1]
+  eq(again.prints["1"], first.prints["1"])
+  column.note_string = "D-4"
+  local moved = K.call(peer, "read", { kind = "pattern", prints = true, epoch = E }).result.items[1]
+  ok(moved.prints["1"] ~= first.prints["1"], "another print")
+end)

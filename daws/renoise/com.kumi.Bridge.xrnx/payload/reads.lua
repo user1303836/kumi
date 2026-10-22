@@ -345,6 +345,29 @@ function M.read(job, params, epoch)
     return page(job, epoch, params, #song.sequencer.pattern_sequence, function(s) return beats(sequence_row(the_song(), epoch, s, tracks), s) end)
   elseif kind == "pattern" then
     local tracks = track_count(song)
+    -- (#401: with prints, each track's lines summed up as the catch-up's digest does, and how many automation envelopes it
+    -- has: patterns compared without their lines read; a page of at most 16 of them)
+    if params.prints == true then
+      if type(params.limit) ~= "number" or params.limit > 16 then params.limit = 16 end
+      local digest = import("digest")
+      return page(job, epoch, params, #song.patterns, function(p)
+        local s = the_song()
+        local row = pattern_row(s, epoch, p, tracks)
+        local pattern, prints, automation = s:pattern(p), {}, 0
+        for t = 1, tracks do
+          local pattern_track = pattern:track(t)
+          if pattern_track.alias_pattern_index > 0 then
+            prints[tostring(t)] = string.format("alias of Pattern %02d", pattern_track.alias_pattern_index - 1)
+          elseif not pattern_track.is_empty then
+            prints[tostring(t)] = digest.lines_print(pattern_track, s:track(t), pattern.number_of_lines, nil)
+          end
+          automation = automation + #pattern_track.automation
+        end
+        row.prints = next(prints) and prints or json.object()
+        row.automation = automation
+        return row
+      end)
+    end
     return page(job, epoch, params, #song.patterns, function(p) return pattern_row(the_song(), epoch, p, tracks) end)
   elseif kind == "where" then
     -- M7 (variations): where what Kumi keeps by its place is now, and the place of what a ref names now, for Kumi to find it

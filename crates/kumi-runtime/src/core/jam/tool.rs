@@ -66,11 +66,19 @@ impl<B: JamBackend + 'static> Jam<B> {
     async fn look(&self, input: &JsonObject, signal: &Signal) -> Result<Value, String> {
         let words = self.backend.words();
         let tracks = strings(input.get("tracks"));
-        let parts = self.backend.parts(&tracks, signal).await?;
         let named = strings(input.get("patterns"));
-        let in_jam = |part: &Part| {
-            named.is_empty() || named.iter().any(|name| *name == part.reference || part.slots.iter().any(|(_, slot)| slot == name))
-        };
+        let whole = input.get("wholeSong") == Some(&Value::Bool(true));
+        if named.is_empty() && !whole {
+            return Err(format!(
+                "patterns: the jam's {}s, the new ones since last time (the catch-up names them), by ref or by the slots that play them; or wholeSong: true when the producer asks for the whole song",
+                words.part
+            ));
+        }
+        let parts = self.backend.parts(&tracks, if whole { None } else { Some(&named) }, signal).await?;
+        let in_jam =
+            |part: &Part| whole || named.iter().any(|name| *name == part.reference || part.slots.iter().any(|(_, slot)| slot == name));
+        // (a slot is dropped or replayed whole: only judged on every track, and never one holding more than its tracks' notes)
+        let narrowed = !tracks.is_empty();
         let jam: Vec<String> = parts.iter().filter(|part| in_jam(part)).map(|part| part.reference.clone()).collect();
         if jam.is_empty() {
             return Err(format!("none of those is a {} the sequence plays: read the sequence again", words.part));
@@ -97,7 +105,7 @@ impl<B: JamBackend + 'static> Jam<B> {
         for (k, part) in parts.iter().enumerate().filter(|(_, part)| jam.contains(&part.reference)) {
             let earlier = &parts[..k];
             let slots = part.slots.iter().map(|(n, _)| format!("{n:02}")).collect::<Vec<_>>().join(", ");
-            if part.empty() {
+            if part.empty() && !narrowed && !part.holds_more {
                 for (number, slot) in &part.slots {
                     let pid = id("e");
                     rows.push(json!({"id": pid, "says": format!("slot {number:02} plays {}, which is empty: drop the slot", part.name)}));
@@ -105,7 +113,8 @@ impl<B: JamBackend + 'static> Jam<B> {
                 }
                 continue;
             }
-            if let Some(same) = earlier.iter().find(|other| part.same_as(other)) {
+            let same = earlier.iter().find(|other| !narrowed && !part.holds_more && !other.holds_more && part.same_as(other));
+            if let Some(same) = same {
                 for (number, slot) in &part.slots {
                     let pid = id("s");
                     rows.push(json!({"id": pid, "says": format!("slot {number:02} plays {}, the same as {}: play {} there instead", part.name, same.name, same.name)}));
@@ -158,6 +167,19 @@ impl<B: JamBackend + 'static> Jam<B> {
             (Some(first), Some(last)) => format!("{} {}s, slots {first:02} to {last:02}", jam.len(), words.part),
             _ => format!("{} {}s", jam.len(), words.part),
         };
+        // (what came before, left alone, said)
+        let before: Vec<usize> =
+            parts.iter().filter(|part| !jam.contains(&part.reference)).flat_map(|part| part.slots.iter().map(|(n, _)| *n)).collect();
+        if !before.is_empty() {
+            let listed: Vec<String> = before.iter().map(|n| format!("{n:02}")).collect();
+            said.push(format!("left alone: slots {} (what came before)", listed.join(", ")));
+        }
+        if narrowed {
+            said.push(format!(
+                "only the tracks named were read: no slot is proposed to drop or to play another {} (that needs every track)",
+                words.part
+            ));
+        }
         let mut reply = json!({"jam": jam_words, "proposals": rows});
         if !said.is_empty() {
             reply["said"] = json!(said);
@@ -206,7 +228,8 @@ impl<B: JamBackend + 'static> Jam<B> {
                         if list.iter().any(|edit| matches!(edit, Edit::Remove(h) | Edit::Move(h, _) if same_hit(h, hit))) {
                             continue;
                         }
-                        let class = (super::nearest(hit.at) as u32) % part.lpb.max(1);
+                        // (the feel of the grid line it goes to, not the one it's written near)
+                        let class = ((super::nearest(hit.at / grid) * grid).round() as u32) % part.lpb.max(1);
                         let to = quantized(
                             hit.at,
                             grid,
@@ -279,7 +302,8 @@ fn schema() -> JsonObject {
         "additionalProperties": false,
         "properties": {
             "action": {"type": "string", "enum": ["look", "fix"]},
-            "patterns": {"type": "array", "items": {"type": "string"}, "description": "The jam's parts (by ref, or a slot that plays one): all by default"},
+            "patterns": {"type": "array", "items": {"type": "string"}, "description": "The jam's parts (by ref, or a slot that plays one): the new ones since last time"},
+            "wholeSong": {"type": "boolean", "description": "The whole song is the jam (only when the producer asks)"},
             "tracks": {"type": "array", "items": {"type": "string"}},
             "ids": {"type": "array", "items": {"type": "string"}, "description": "The look's proposals to apply, or [\"all\"]"},
             "quantize": {"type": "object", "additionalProperties": false, "properties": {

@@ -177,6 +177,36 @@ local function track_records(job, song, t, epoch, parents, budget, out)
   job.slice()
 end
 
+-- A pattern track's lines summed up as "n notes, n effects #fingerprint" (the same lines, the same text), `slice` called every
+-- 64 lines (a job's, or none). (#401: the jam's pattern reads compare patterns by it.)
+function M.lines_print(pattern_track, track, length, slice)
+  local print, notes, effects = new_print(), 0, 0
+  local note_columns, effect_columns = track.visible_note_columns, track.visible_effect_columns
+  for l = 1, length do
+    local line = pattern_track:line(l)
+    if not line.is_empty then
+      feed_number(print, l)
+      for c = 1, note_columns do
+        local column = line:note_column(c)
+        if not column.is_empty then
+          notes = notes + ((column.note_value < 120) and 1 or 0)
+          feed(print, format("%d:%d %d %d %d %d %d %d", c, column.note_value, column.instrument_value, column.volume_value,
+            column.panning_value, column.delay_value, column.effect_number_value, column.effect_amount_value))
+        end
+      end
+      for c = 1, effect_columns do
+        local column = line:effect_column(c)
+        if not column.is_empty then
+          effects = effects + 1
+          feed(print, format("e%d:%d %d", c, column.number_value, column.amount_value))
+        end
+      end
+    end
+    if slice and l % 64 == 0 then slice() end
+  end
+  return format("%d notes, %d effects #%s", notes, effects, hex(print))
+end
+
 local function pattern_record(job, song, p, count, labels, budget)
   local pattern = song:pattern(p)
   local length = pattern.number_of_lines
@@ -194,31 +224,7 @@ local function pattern_record(job, song, p, count, labels, budget)
         if budget.content then budget.over = true end
       else
         budget.lines = budget.lines + length
-        local print, notes, effects = new_print(), 0, 0
-        local note_columns, effect_columns = track.visible_note_columns, track.visible_effect_columns
-        for l = 1, length do
-          local line = pattern_track:line(l)
-          if not line.is_empty then
-            feed_number(print, l)
-            for c = 1, note_columns do
-              local column = line:note_column(c)
-              if not column.is_empty then
-                notes = notes + ((column.note_value < 120) and 1 or 0)
-                feed(print, format("%d:%d %d %d %d %d %d %d", c, column.note_value, column.instrument_value, column.volume_value,
-                  column.panning_value, column.delay_value, column.effect_number_value, column.effect_amount_value))
-              end
-            end
-            for c = 1, effect_columns do
-              local column = line:effect_column(c)
-              if not column.is_empty then
-                effects = effects + 1
-                feed(print, format("e%d:%d %d", c, column.number_value, column.amount_value))
-              end
-            end
-          end
-          if l % 64 == 0 then job.slice() end
-        end
-        lines[labels[t]] = format("%d notes, %d effects #%s", notes, effects, hex(print))
+        lines[labels[t]] = M.lines_print(pattern_track, track, length, job.slice)
       end
     end
     for _, entry in ipairs(pattern_track.automation) do

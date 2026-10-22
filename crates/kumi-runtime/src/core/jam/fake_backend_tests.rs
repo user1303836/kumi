@@ -25,8 +25,15 @@ impl JamBackend for Rc<Fake> {
         &WORDS
     }
 
-    async fn parts(&self, _tracks: &[String], _signal: &Signal) -> Result<Vec<Part>, String> {
-        Ok(self.parts.clone())
+    async fn parts(&self, tracks: &[String], _hits_for: Option<&[String]>, _signal: &Signal) -> Result<Vec<Part>, String> {
+        Ok(self
+            .parts
+            .iter()
+            .map(|part| Part {
+                tracks: part.tracks.iter().filter(|t| tracks.is_empty() || tracks.contains(&t.track)).cloned().collect(),
+                ..part.clone()
+            })
+            .collect())
     }
 
     fn note_name(&self, note: i64) -> String {
@@ -67,7 +74,7 @@ fn hit(at: f64, note: i64) -> Hit {
 
 fn track(reference: &str, name: &str, hits: Vec<Hit>) -> TrackPart {
     let digest = hits.iter().map(|h| format!("{}:{}", h.at, h.note)).collect::<Vec<_>>().join(",");
-    TrackPart { track: reference.into(), name: name.into(), digest, empty: hits.is_empty(), alias: false, hits }
+    TrackPart { track: reference.into(), name: name.into(), digest, empty: hits.is_empty(), alias: false, notes: hits.len(), hits }
 }
 
 fn part(n: usize, keys: Vec<Hit>, drums: Vec<Hit>) -> Part {
@@ -77,6 +84,7 @@ fn part(n: usize, keys: Vec<Hit>, drums: Vec<Hit>) -> Part {
         slots: vec![(n, format!("s{n}"))],
         lpb: 4,
         tracks: vec![track("t1", "Keys", keys), track("t2", "Drums", drums)],
+        holds_more: false,
     }
 }
 
@@ -119,6 +127,7 @@ async fn r35s_jam_is_told_as_whats_new_and_cleaned_up_without_touching_what_came
     let fake = r35();
     let tool = Jam::new(fake.clone()).tool();
     assert!(run(&tool, json!({"action": "fix", "ids": ["all"]})).await.unwrap_err().starts_with("look first"));
+    assert!(run(&tool, json!({})).await.unwrap_err().starts_with("patterns: the jam's patterns, the new ones since last time"));
     let jam: Vec<&str> = vec!["s3", "s4", "s5", "s6", "s7", "s8"];
     let looked = run(&tool, json!({"patterns": jam})).await.unwrap();
     assert_eq!(looked["jam"], "6 patterns, slots 03 to 08");
@@ -127,6 +136,7 @@ async fn r35s_jam_is_told_as_whats_new_and_cleaned_up_without_touching_what_came
     assert!(says.iter().any(|s| s.starts_with("slot 06 plays Pattern 06, the same as Pattern 01")), "{says:?}");
     assert!(says.iter().any(|s| s.contains("\u{201c}Drums\u{201d} in Pattern 03 is the same as in Pattern 01")), "{says:?}");
     assert!(looked["said"].to_string().contains("Pattern 03 (slot 03) is Pattern 01 with 1 note more on \u{201c}Keys\u{201d}"), "{looked}");
+    assert!(looked["said"].to_string().contains("left alone: slots 01, 02 (what came before)"), "{looked}");
     assert!(!says.iter().any(|s| s.contains("Pattern 02") && !s.contains("Pattern 01")), "nothing proposed of what came before");
     let fixed = run(&tool, json!({"action": "fix", "ids": ["all"]})).await.unwrap();
     let done = fake.done.borrow().clone();
@@ -141,18 +151,39 @@ async fn r35s_jam_is_told_as_whats_new_and_cleaned_up_without_touching_what_came
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn no_slot_is_dropped_or_replayed_on_a_look_at_some_tracks_or_a_pattern_holding_more_than_its_notes() {
+    // Only the drums read: Pattern 04's keys may play, so no slot-level proposal.
+    let fake = r35();
+    let tool = Jam::new(fake.clone()).tool();
+    let looked = run(&tool, json!({"patterns": ["s3", "s4", "s5", "s6", "s7", "s8"], "tracks": ["t2"]})).await.unwrap();
+    let says = looked["proposals"].to_string();
+    assert!(!says.contains("which is empty") && !says.contains("there instead"), "{looked}");
+    assert!(looked["said"].to_string().contains("no slot is proposed to drop"), "{looked}");
+    // An empty pattern with automation (or a master's commands) isn't empty.
+    let mut parts = r35().parts.clone();
+    parts[3].holds_more = true;
+    parts[5].holds_more = true;
+    let fake = Rc::new(Fake { parts, ..Fake::default() });
+    let tool = Jam::new(fake.clone()).tool();
+    let looked = run(&tool, json!({"patterns": ["s4", "s6", "s7"]})).await.unwrap();
+    let says = looked["proposals"].to_string();
+    assert!(!says.contains("slot 04") && !says.contains("slot 06"), "{looked}");
+    assert!(says.contains("slot 07 plays Pattern 07, which is empty"), "{looked}");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn a_mistake_is_fixed_by_its_id_and_quantize_moves_notes_by_a_strength() {
     // (a swing on the offbeats, one note half a line late on line 4)
     let drums = vec![hit(0., 36), hit(2.25, 42), hit(4.5, 38), hit(6.25, 42), hit(8., 36), hit(10.25, 42), hit(12., 38), hit(14.25, 42)];
     let fake = Rc::new(Fake { parts: vec![part(1, vec![hit(0.3, 60)], drums)], ..Fake::default() });
     let tool = Jam::new(fake.clone()).tool();
-    let looked = run(&tool, json!({})).await.unwrap();
+    let looked = run(&tool, json!({"wholeSong": true})).await.unwrap();
     let mistake = looked["proposals"].as_array().unwrap().iter().find(|p| p["says"].as_str().unwrap().contains("off the grid")).unwrap();
     assert!(looked["said"].to_string().contains("has a feel (line 2 of each beat +0.25)"), "{looked}");
     run(&tool, json!({"action": "fix", "ids": [mistake["id"]]})).await.unwrap();
     assert_eq!(fake.done.borrow().last().unwrap(), "rewrite p1 t2 38:4.5>4", "to the grid");
     // Quantize at half strength, the feel kept: the keys' late note moves halfway to line 0.
-    run(&tool, json!({})).await.unwrap();
+    run(&tool, json!({"wholeSong": true})).await.unwrap();
     run(&tool, json!({"action": "fix", "quantize": {"strength": 0.5, "tracks": ["t1"]}})).await.unwrap();
     assert_eq!(fake.done.borrow().last().unwrap(), "rewrite p1 t1 60:0.3>0.15");
 }

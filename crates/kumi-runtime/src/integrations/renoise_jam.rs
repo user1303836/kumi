@@ -16,8 +16,9 @@ pub static WORDS: Words = Words { app: "Renoise", part: "pattern", slot: "slot",
 
 /// Pages of rows read (200 a page; a pattern holds up to 512 lines).
 const PAGES: usize = 8;
-/// The most patterns a look reads.
+/// The most patterns a look reads, and the pages of patterns read with their prints (16 a page).
 const MOST_PATTERNS: usize = 256;
+const PRINT_PAGES: usize = 64;
 
 pub struct RenoiseJam<S: RefScheme + 'static> {
     plan: Rc<OwnPlan<S>>,
@@ -106,23 +107,37 @@ impl<S: RefScheme + 'static> JamBackend for RenoiseJam<S> {
         &WORDS
     }
 
-    async fn parts(&self, tracks: &[String], signal: &Signal) -> Result<Vec<Part>, String> {
+    async fn parts(&self, tracks: &[String], hits_for: Option<&[String]>, signal: &Signal) -> Result<Vec<Part>, String> {
         let song = self.plan.read_through(json!({"kind": "song"}), None, signal).await?;
         let lpb = song.pointer("/items/0/lpb").and_then(Value::as_u64).unwrap_or(4) as u32;
         let wanted: Vec<String> = tracks.iter().map(|track| self.plan.lengthen(track)).collect::<Result<_, _>>()?;
         let track_rows = self.rows(json!({"kind": "track", "limit": 200}), signal).await?;
-        // (sequencer tracks, by their number in the song from 1: what a pattern's aliases are keyed by)
-        let sequencer: Vec<(usize, String, String)> = track_rows
+        // (sequencer tracks, by their number in the song from 1: what a pattern's prints and aliases are keyed by)
+        let all: Vec<(usize, String, String)> = track_rows
             .iter()
             .enumerate()
             .filter(|(_, row)| row.get("type").and_then(Value::as_str) == Some("sequencer"))
             .filter_map(|(k, row)| {
                 Some((k + 1, row.get("ref")?.as_str()?.to_string(), row.get("name").and_then(Value::as_str).unwrap_or("").to_string()))
             })
-            .filter(|(_, reference, _)| wanted.is_empty() || wanted.contains(reference))
             .collect();
-        let patterns = self.rows(json!({"kind": "pattern", "limit": 200}), signal).await?;
+        let sequencer: Vec<&(usize, String, String)> =
+            all.iter().filter(|(_, reference, _)| wanted.is_empty() || wanted.contains(reference)).collect();
+        // (every pattern's tracks fingerprinted by the tool, its lines not read: those are read for the jam's patterns only)
+        let patterns = self.plan.rows_through(json!({"kind": "pattern", "prints": true, "limit": 16}), PRINT_PAGES, signal).await?;
         let sequence = self.rows(json!({"kind": "sequence", "limit": 200}), signal).await?;
+        let named = |slot: &str, pattern: &str| hits_for.is_none_or(|named| named.iter().any(|n| n == slot || n == pattern));
+        let mut jam: Vec<String> = Vec::new();
+        for slot in &sequence {
+            let (Some(slot_ref), Some(pattern_ref)) =
+                (slot.get("ref").and_then(Value::as_str), slot.get("patternRef").and_then(Value::as_str))
+            else {
+                continue;
+            };
+            if named(&self.short(slot_ref), &self.short(pattern_ref)) && !jam.iter().any(|p| p == pattern_ref) {
+                jam.push(pattern_ref.to_string());
+            }
+        }
         let mut parts: Vec<Part> = Vec::new();
         for (s, slot) in sequence.iter().enumerate() {
             let (Some(slot_ref), Some(pattern_ref)) =
@@ -147,25 +162,32 @@ impl<S: RefScheme + 'static> JamBackend for RenoiseJam<S> {
                 .filter(|name| !name.is_empty())
                 .map_or_else(|| format!("Pattern {number:02}"), |name| format!("Pattern {number:02} \u{201c}{name}\u{201d}"));
             let length = row.get("lines").and_then(Value::as_u64).unwrap_or(64) as u32;
+            let prints = row.get("prints").and_then(Value::as_object).cloned().unwrap_or_default();
+            // (automation, or lines on a track that isn't a sequencer track: the master's or a send's commands)
+            let holds_more = row.get("automation").and_then(Value::as_u64).unwrap_or(0) > 0
+                || prints.keys().any(|key| !all.iter().any(|(number, _, _)| number.to_string() == *key));
+            let read_hits = jam.iter().any(|p| p == pattern_ref);
             let mut part_tracks = Vec::new();
             for (number, reference, track_name) in &sequencer {
-                let alias = row.pointer(&format!("/aliases/{number}")).is_some();
-                let lines = self.lines(pattern_ref, reference, length, lpb, signal).await?;
-                let hits = if alias { Vec::new() } else { hits_of(&lines) };
+                let print = prints.get(&number.to_string()).and_then(Value::as_str).unwrap_or("").to_string();
+                let alias = print.starts_with("alias of");
+                let notes = print.split_once(" notes").and_then(|(count, _)| count.parse::<usize>().ok()).unwrap_or(0);
+                let hits = if read_hits && !alias && !print.is_empty() {
+                    hits_of(&self.lines(pattern_ref, reference, length, lpb, signal).await?)
+                } else {
+                    Vec::new()
+                };
                 part_tracks.push(TrackPart {
                     track: self.short(reference),
                     name: track_name.clone(),
-                    digest: if alias {
-                        format!("alias {}", row.pointer(&format!("/aliases/{number}")).cloned().unwrap_or(Value::Null))
-                    } else {
-                        lines.digest()
-                    },
-                    empty: !alias && lines.rows.is_empty(),
+                    empty: print.is_empty(),
+                    digest: print,
                     alias,
+                    notes,
                     hits,
                 });
             }
-            parts.push(Part { reference: short, name, slots: vec![(s + 1, self.short(slot_ref))], lpb, tracks: part_tracks });
+            parts.push(Part { reference: short, name, slots: vec![(s + 1, self.short(slot_ref))], lpb, tracks: part_tracks, holds_more });
         }
         Ok(parts)
     }
@@ -184,7 +206,7 @@ impl<S: RefScheme + 'static> JamBackend for RenoiseJam<S> {
             .and_then(|row| row.get("lines").and_then(Value::as_u64))
             .ok_or_else(|| format!("{} isn't in the song any more: look again", part.name))? as u32;
         let before = self.lines(&pattern, &track_ref, length, part.lpb, signal).await?;
-        if before.digest() != track.digest {
+        if hits_of(&before) != track.hits {
             return Err(format!("\u{201c}{}\u{201d} in {} changed since the look: look again", track.name, part.name));
         }
         let mut after = before.clone();

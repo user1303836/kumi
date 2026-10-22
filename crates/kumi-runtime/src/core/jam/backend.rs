@@ -25,8 +25,9 @@ pub enum Edit {
 pub trait JamBackend {
     fn words(&self) -> &'static Words;
 
-    /// Every part the sequence plays, in its order, with its tracks (only these, when named).
-    async fn parts(&self, tracks: &[String], signal: &Signal) -> Result<Vec<Part>, String>;
+    /// Every part the sequence plays, in its order, with its tracks (only these, when named); the hits read only for the parts
+    /// `hits_for` names (by ref, or a slot that plays one), every part's when None.
+    async fn parts(&self, tracks: &[String], hits_for: Option<&[String]>, signal: &Signal) -> Result<Vec<Part>, String>;
 
     /// A note's name as the DAW writes it ("C-4").
     fn note_name(&self, note: i64) -> String;
