@@ -198,6 +198,19 @@ impl Lines {
             .collect()
     }
 
+    /// (#401) Each note cell that starts a sound: its line, its column, where it starts (lines, its delay included), its note
+    /// value and its velocity (its volume column's level, 0 to 1: full without one).
+    pub fn note_cells(&self) -> Vec<(u32, u8, f64, u8, f64)> {
+        let mut out = Vec::new();
+        for (number, line) in &self.rows {
+            for note in line.notes.iter().filter(|note| is_note(&note.note)) {
+                let at = *number as f64 + note.delay as f64 / 256.;
+                out.push((*number, note.col, at, note_value(&note.note).unwrap_or(0), level(&note.volume) as f64 / 128.));
+            }
+        }
+        out
+    }
+
     /// Each sound's start (256ths of a line from the range's start) and what it plays.
     fn hits(&self) -> Vec<Hit> {
         let mut out = Vec::new();

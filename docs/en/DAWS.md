@@ -29,6 +29,7 @@ does the job there.
 | Finds why a track plays twice or nowhere, and builds sidechains, parallel buses and stems as one undo step | not yet | ✓ | not yet |
 | Keeps a repeated chore as a script: run once as one undo step, then kept as the DAW's own action once you say yes | not yet | ✓ | ✓ |
 | Meets a loudness spec: ACX, streaming or broadcast, measured, fixed at the master fader, measured again | not yet | ✓ | ✓ |
+| Cleans up a jam: empties, copies, repeats and mistakes told from feel, quantized by a strength | not yet | not yet | ✓ |
 | Knows whether the DAW is recording | ✓ | ✓ | ✓ |
 | A line in the DAW's status bar | ✓ | no: REAPER's API has no status bar (a notification instead) | ✓ |
 | Opens a saved project | ✓ | not yet: you open it yourself (`kumi -r` and setup's restart don't) | not yet: you open it yourself (`kumi -r` and setup's restart don't) |
@@ -306,6 +307,14 @@ saves the song, instruments and device presets.
   close the hits land and how deeply it nulls against the recording. The
   lighter densities (no ghosts or rolls; kick and snare) come as variations
   takes to keep or drop.
+- **Cleaning up a jam** (`jam`): after a catch-up, what you recorded is set
+  against what came before. Kumi says what's new and proposes the clean-up:
+  slots playing empty patterns to drop, a pattern the same as an earlier one
+  to play that one instead, tracks repeating an earlier pattern's as aliases,
+  and notes that read as mistakes rather than feel (a double trigger, a note
+  far off the grid where its neighbours aren't, a stray; a swing every beat
+  shares is kept). It applies what you accept, quantizes by a strength if you
+  ask, and never touches what came before.
 - **Delivery to a spec** (`delivery_spec`): ACX, streaming, podcasts or
   broadcast loudness. Kumi renders the song offline, measures it, moves the
   master's post-FX fader by the gain the spec needs when the peaks allow, and

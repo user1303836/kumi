@@ -15,6 +15,7 @@ pub mod gaps;
 pub mod goal;
 pub mod goal_mode;
 pub mod history;
+pub mod jam;
 pub mod jobs;
 pub mod loop_run;
 pub mod mapping;

@@ -182,6 +182,8 @@ pub struct OwnIntegration<S: RefScheme + 'static> {
     scripts: Option<Rc<dyn KernelTool>>,
     /// (#401) Delivery to a spec, where the DAW's profile offers it (core's, with the shared backend).
     spec: Option<Rc<dyn KernelTool>>,
+    /// (#401) Cleaning up a jam, where the DAW's profile offers it (core's, with the DAW's backend).
+    jam: Option<Rc<dyn KernelTool>>,
 }
 
 /// How REAPER and Renoise tell templates and a song's own folder, for core's rules on copies: a project in REAPER's
@@ -365,6 +367,11 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
         let backend = super::own_spec::OwnSpec::new(changes.clone(), listening.renderer.clone(), daw.spec);
         crate::core::spec::tool::DeliverySpec::new(backend).tool()
     });
+    // (#401) cleaning up a jam, where the DAW offers it
+    let jam: Option<Rc<dyn KernelTool>> = (daw.profile.caps.jam && daw.profile.id == Some(crate::core::daw::DawId::Renoise)).then(|| {
+        let backend = super::renoise_jam::RenoiseJam::new(changes.clone());
+        crate::core::jam::tool::Jam::new(backend).tool()
+    });
     let kumi_home = options.kumi_home.clone();
     Rc::new(OwnIntegration::<S> {
         daw,
@@ -407,6 +414,7 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
         routing,
         scripts,
         spec,
+        jam,
     })
 }
 
@@ -989,6 +997,9 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         }
         if let Some(spec) = &self.spec {
             tools.push(spec.clone());
+        }
+        if let Some(jam) = &self.jam {
+            tools.push(jam.clone());
         }
         tools
     }
@@ -1730,6 +1741,8 @@ pub fn own_rules(daw: &OwnDaw) -> String {
         "The look's setup is how this producer set {app} up: follow it rather than {app}'s factory defaults. When the producer reports a problem: a clear mechanical mistake with one obvious fix ({}) gets that fix as one change, said with what you did and how to take it back (Kumi's undo or {app}'s own); when the fix means choosing between the producer's own routes or settings (one route running through FX, two settings they may have meant), name them exactly and ask one question. Never ask only because nothing is selected. Never change {app}'s preferences, key bindings, mouse modifiers or theme. Describe each change in words, naming what it touched and where. Offer alternatives as separate takes, each undoable, and never make a whole song or part unasked.",
         daw.mechanical
     );
+    // (#401, R35) after time away, what's new first
+    rules.push_str(" After a catch-up, start from what changed since last time: say what's new, and propose or change only that, never what came before.");
     // (#401) a chore kept as a script: once it ran, and only once the producer said yes
     if daw.profile.caps.scripts {
         rules.push_str(" A chore the producer repeats can be kept as a script (scripts): list what's kept first; a new one runs once with run_lua, and is kept only once they said yes.");
