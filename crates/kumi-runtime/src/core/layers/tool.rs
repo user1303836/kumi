@@ -1,8 +1,9 @@
 //! The layers tool, the same in every DAW: look renders the main break and its layers over a stretch and says, layer by layer,
 //! how early or late it lands, whether its polarity fights the main's, and how loud it sits, and which compressor the group
 //! has; align nudges a layer, invert flips one, and glue measures how much peak-to-loudness ratio the group's compressor takes
-//! (the group heard without it first: before one is added, or with it bypassed) and moves its threshold until that's as asked.
-use super::backend::{Compressor, LayersBackend};
+//! (the group heard without it first: before one is added, or with it bypassed) and moves its threshold until that's as asked,
+//! with the master's limiters and compressors bypassed meanwhile (every render passes through them) and on again after.
+use super::backend::{Compressor, Dynamics, LayersBackend};
 use super::{compare, plr};
 use crate::core::contracts::{JsonObject, KernelTool, Reach, Render, ToolResult};
 use crate::core::errors::RuntimeError;
@@ -54,6 +55,11 @@ fn strings(value: Option<&Value>) -> Vec<String> {
 
 fn one(value: f64) -> f64 {
     (value * 10.).round() / 10.
+}
+
+/// Devices' names in a list: “Maximizer”, “L2”.
+fn names(devices: &[Dynamics]) -> String {
+    devices.iter().map(|device| format!("\u{201c}{}\u{201d}", device.name)).collect::<Vec<_>>().join(", ")
 }
 
 impl<B: LayersBackend + 'static> Layers<B> {
@@ -167,6 +173,13 @@ impl<B: LayersBackend + 'static> Layers<B> {
             });
             next.push("glue the group".into());
         }
+        let master = self.backend.master_dynamics(signal).await?;
+        if !master.is_empty() {
+            reply["master"] = json!(format!(
+                "{} on the master: each track is heard through it, so loud hits read quieter than the tracks give (glue bypasses it while it measures)",
+                names(&master)
+            ));
+        }
         reply["next"] = json!(if next.is_empty() {
             "the layers sit well: balance them by ear if the producer asks".to_string()
         } else {
@@ -179,7 +192,54 @@ impl<B: LayersBackend + 'static> Layers<B> {
         let group = input.get("group").and_then(Value::as_str).ok_or("group: the group the layers play in")?;
         let (from, beats) = stretch(input)?;
         let target = input.get("target").and_then(Value::as_f64).unwrap_or(GLUE).clamp(0.5, 6.);
+        // (the master's dynamics bypassed while the glue is measured, and on again after, whatever happened)
+        let master = self.backend.master_dynamics(signal).await?;
         let mut made = Vec::new();
+        for (k, device) in master.iter().enumerate() {
+            match self.backend.bypass(&device.reference, true, signal).await {
+                Ok(done) => made.push(done),
+                Err(why) => {
+                    let still = self.back_on(&master[..k], &mut made, signal).await;
+                    return Err(format!("{why}{still}"));
+                }
+            }
+        }
+        let measured = self.measure_glue(group, from, beats, target, &mut made, signal).await;
+        let still = self.back_on(&master, &mut made, signal).await;
+        let mut reply = measured.map_err(|why| format!("{why}{still}"))?;
+        if !master.is_empty() {
+            reply["master"] = json!(format!("measured with {} on the master bypassed, and on again{still}", names(&master)));
+        }
+        reply["made"] = json!(made);
+        Ok(reply)
+    }
+
+    /// The master's dynamics on again: nothing, or why some stay bypassed, in words to append.
+    async fn back_on(&self, master: &[Dynamics], made: &mut Vec<Value>, signal: &Signal) -> String {
+        let mut off = Vec::new();
+        for device in master {
+            match self.backend.bypass(&device.reference, false, signal).await {
+                Ok(on) => made.push(on),
+                Err(_) => off.push(device.clone()),
+            }
+        }
+        if off.is_empty() {
+            String::new()
+        } else {
+            format!(" ({} on the master couldn't be turned on again: turn it on, or undo its bypass)", names(&off))
+        }
+    }
+
+    /// The glue measured and set: the reply but for what was made, which goes in `made`.
+    async fn measure_glue(
+        &self,
+        group: &str,
+        from: f64,
+        beats: f64,
+        target: f64,
+        made: &mut Vec<Value>,
+        signal: &Signal,
+    ) -> Result<Value, String> {
         // (the group heard without its compressor first: before one is added, or with it bypassed)
         let (reference, peak, mut compressor) = match self.backend.compressor(group, false, signal).await? {
             None => {
@@ -189,9 +249,9 @@ impl<B: LayersBackend + 'static> Layers<B> {
                 (reference, peak, added)
             }
             Some(found) if found.active => {
-                made.push(self.backend.bypass(&found, true, signal).await?);
+                made.push(self.backend.bypass(&found.reference, true, signal).await?);
                 let heard = self.group_plr(group, from, beats, signal).await;
-                match self.backend.bypass(&found, false, signal).await {
+                match self.backend.bypass(&found.reference, false, signal).await {
                     Ok(on) => made.push(on),
                     Err(why) => return Err(format!("{why}: {} is still bypassed", found.name)),
                 }
@@ -200,7 +260,7 @@ impl<B: LayersBackend + 'static> Layers<B> {
             }
             Some(found) => {
                 let (reference, peak) = self.group_plr(group, from, beats, signal).await?;
-                made.push(self.backend.bypass(&found, false, signal).await?);
+                made.push(self.backend.bypass(&found.reference, false, signal).await?);
                 (reference, peak, Compressor { active: true, ..found })
             }
         };
@@ -244,7 +304,6 @@ impl<B: LayersBackend + 'static> Layers<B> {
             "without": format!("{:.1} dB of peak-to-loudness ratio without it", reference),
             "threshold": format!("{:.1} dB", compressor.threshold),
             "passes": passes,
-            "made": made,
         });
         if let Some(said) = said {
             reply["said"] = json!(said);
@@ -255,7 +314,7 @@ impl<B: LayersBackend + 'static> Layers<B> {
 
 fn description(words: &super::backend::Words) -> String {
     format!(
-        "Layer breaks in {app}, hit by hit. action look (the default) renders the main break and its layers (tracks, the main first; 8 at most) over fromBeat and beats (at most 64), each as heard alone: each layer's hits paired with the main's, how early or late it lands (ms, and the hits that stray), whether its polarity fights the main's, and how loud it sits; with group, the group's compressor. align nudges a layer by ms ({nudge}); invert flips its polarity ({invert}); glue measures how much peak-to-loudness ratio the group's compressor ({compressor}) takes, the group heard without it first, and moves its threshold until that's target (1.5 dB by default). Propose what look finds; do what the producer accepts; balance by ear with them.",
+        "Layer breaks in {app}, hit by hit. action look (the default) renders the main break and its layers (tracks, the main first; 8 at most) over fromBeat and beats (at most 64), each as heard alone: each layer's hits paired with the main's, how early or late it lands (ms, and the hits that stray), whether its polarity fights the main's, and how loud it sits; with group, the group's compressor. align nudges a layer by ms ({nudge}); invert flips its polarity ({invert}); glue measures how much peak-to-loudness ratio the group's compressor ({compressor}) takes, the group heard without it first, and moves its threshold until that's target (1.5 dB by default), with the master's limiters and compressors bypassed meanwhile and on again after. Propose what look finds; do what the producer accepts; balance by ear with them.",
         app = words.app,
         nudge = words.nudge,
         invert = words.invert,

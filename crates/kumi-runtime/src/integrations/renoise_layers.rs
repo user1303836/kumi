@@ -3,11 +3,13 @@
 //! ms, the whole track: a sequencer track's only); its polarity flips in its samples, since Renoise has no polarity switch on a
 //! track or device: every sample with audio of the instruments it plays (a slice follows its sample), one sample_invert each,
 //! refused when another track plays one of them; the glue's compressor is a Bus Compressor on the group, added at 2:1 when it
-//! has none, bypassed by device_bypass and its threshold (dB) set by device_param. Core's tool does the rest.
+//! has none, bypassed by device_bypass and its threshold (dB) set by device_param; the master's dynamics are its active
+//! Maximizer, Compressor, Bus Compressor or Gate 2, or a plug-in named as a limiter, maximizer, compressor or clipper. Core's
+//! tool does the rest.
 use super::own_changes::OwnPlan;
 use super::own_listening::OwnRenderer;
 use crate::core::contracts::Render;
-use crate::core::layers::backend::{Compressor, LayersBackend, Words};
+use crate::core::layers::backend::{Compressor, Dynamics, LayersBackend, Words};
 use crate::core::refs::RefScheme;
 use crate::listening::renderer::Window;
 use async_trait::async_trait;
@@ -29,6 +31,9 @@ const COUNT_PAGES: usize = 60;
 /// Renoise's Bus Compressor, and its Ratio's value that reads 2:1 (3.5.4, the lab's inventory of native devices).
 const BUS_COMPRESSOR: &str = "Audio/Effects/Native/Bus Compressor";
 const RATIO_2_TO_1: f64 = 0.525;
+/// Renoise's own dynamics devices, and the words a plug-in's name holds when it's one (lowercase).
+const NATIVE_DYNAMICS: [&str; 4] = ["Maximizer", "Compressor", "Bus Compressor", "Gate 2"];
+const DYNAMICS_WORDS: [&str; 5] = ["limit", "maxim", "compress", "clip", "loud"];
 
 /// Which tracks play which instruments: each track's number (from 1) and the instruments its notes name (from 0).
 type Players = BTreeMap<String, Vec<u64>>;
@@ -40,6 +45,15 @@ pub struct RenoiseLayers<S: RefScheme + 'static> {
 
 fn quoted(text: &str) -> String {
     format!("\u{201c}{text}\u{201d}")
+}
+
+/// Whether a device row is a dynamics device that's on: a limiter, maximizer, compressor or gate.
+fn dynamics(row: &Value) -> bool {
+    let path = row.get("path").and_then(Value::as_str).unwrap_or("");
+    let name = row.get("name").and_then(Value::as_str).unwrap_or("").to_lowercase();
+    let native = path.strip_prefix("Audio/Effects/Native/").is_some_and(|device| NATIVE_DYNAMICS.contains(&device));
+    let plugin = row.get("plugin") == Some(&Value::Bool(true)) && DYNAMICS_WORDS.iter().any(|word| name.contains(word));
+    row.get("active") == Some(&Value::Bool(true)) && (native || plugin)
 }
 
 fn name_of(row: &Value) -> String {
@@ -279,8 +293,30 @@ impl<S: RefScheme + 'static> LayersBackend for RenoiseLayers<S> {
         self.change("device_param", json!({"ref": compressor.reference, "param": "Threshold", "value": value}), signal).await
     }
 
-    async fn bypass(&self, compressor: &Compressor, bypass: bool, signal: &Signal) -> Result<Value, String> {
-        self.change("device_bypass", json!({"ref": compressor.reference, "bypass": bypass}), signal).await
+    async fn master_dynamics(&self, signal: &Signal) -> Result<Vec<Dynamics>, String> {
+        let tracks = self.rows(json!({"kind": "track", "limit": 200}), signal).await?;
+        let master = tracks
+            .iter()
+            .find(|row| row.get("type").and_then(Value::as_str) == Some("master"))
+            .and_then(|row| row.get("ref").and_then(Value::as_str))
+            .ok_or("the master's track row wasn't found")?;
+        let devices = self.rows(json!({"kind": "device", "parent": master, "limit": 200}), signal).await?;
+        Ok(devices
+            .iter()
+            .filter(|row| dynamics(row))
+            .filter_map(|row| {
+                let name = row
+                    .get("displayName")
+                    .and_then(Value::as_str)
+                    .filter(|name| !name.is_empty())
+                    .or_else(|| row.get("name").and_then(Value::as_str))?;
+                Some(Dynamics { reference: row.get("ref").and_then(Value::as_str)?.to_owned(), name: name.to_owned() })
+            })
+            .collect())
+    }
+
+    async fn bypass(&self, reference: &str, bypass: bool, signal: &Signal) -> Result<Value, String> {
+        self.change("device_bypass", json!({"ref": reference, "bypass": bypass}), signal).await
     }
 }
 
@@ -305,6 +341,18 @@ mod tests {
         assert!(why.contains("instrument_duplicate"), "{why}");
         let why = unflippable("3", &[2], &players, &instruments, &names).unwrap();
         assert!(why.starts_with("\u{201c}Synth\u{201d} plays through a plug-in"), "{why}");
+    }
+
+    #[test]
+    fn a_masters_limiter_maximizer_or_compressor_that_is_on_is_dynamics_and_its_eq_isnt() {
+        let row =
+            |path: &str, name: &str, plugin: bool, active: bool| json!({"path": path, "name": name, "plugin": plugin, "active": active});
+        assert!(dynamics(&row("Audio/Effects/Native/Maximizer", "Maximizer", false, true)));
+        assert!(dynamics(&row("Audio/Effects/Native/Bus Compressor", "Bus Compressor", false, true)));
+        assert!(!dynamics(&row("Audio/Effects/Native/Maximizer", "Maximizer", false, false)), "bypassed");
+        assert!(!dynamics(&row("Audio/Effects/Native/EQ 10", "EQ 10", false, true)));
+        assert!(dynamics(&row("Audio/Effects/AU/aufx:lmtr:Fake", "Pro Limiter", true, true)));
+        assert!(!dynamics(&row("Audio/Effects/AU/aufx:rvb2:Fake", "Big Room", true, true)));
     }
 
     #[test]

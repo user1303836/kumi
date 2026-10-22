@@ -1008,7 +1008,7 @@ base.register({
 -- flipped in its sample. Kumi's undo flips it again: refused once the audio changed since, but with discard (the polarity back,
 -- the edits kept). A slice plays its sample's audio (the sample is flipped); more than M.MOST_INVERTED values (frames ×
 -- channels) is refused, since one callback flips them all.
-M.MOST_INVERTED = 4000000
+M.MOST_INVERTED = 2000000
 
 local function invert_buffer(buffer)
   local frames, channels = buffer.number_of_frames, buffer.number_of_channels

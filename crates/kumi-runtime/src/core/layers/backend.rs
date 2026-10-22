@@ -1,6 +1,6 @@
 //! A DAW's side of layering breaks: only its own facts. Tracks rendered over a stretch (each as the producer hears it alone),
-//! a layer nudged earlier or later and its polarity flipped (a change each), and the group's compressor found (or added),
-//! bypassed or not, and its threshold set.
+//! a layer nudged earlier or later and its polarity flipped (a change each), the group's compressor found (or added) and its
+//! threshold set, the master's dynamics (what every render passes through) found, and a device bypassed or on again.
 use crate::core::contracts::Render;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
@@ -25,6 +25,13 @@ pub struct Compressor {
     pub active: bool,
 }
 
+/// A limiter, maximizer or compressor on the master: its ref and name.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Dynamics {
+    pub reference: String,
+    pub name: String,
+}
+
 #[async_trait(?Send)]
 pub trait LayersBackend {
     fn words(&self) -> &'static Words;
@@ -44,6 +51,10 @@ pub trait LayersBackend {
     /// Its threshold set (dB, one change).
     async fn set_threshold(&self, compressor: &Compressor, db: f64, signal: &Signal) -> Result<Value, String>;
 
-    /// It bypassed, or on again (one change).
-    async fn bypass(&self, compressor: &Compressor, bypass: bool, signal: &Signal) -> Result<Value, String>;
+    /// The master's dynamics that are on: a limiter there takes peak-to-loudness ratio from every render, so the glue
+    /// bypasses them while it measures.
+    async fn master_dynamics(&self, signal: &Signal) -> Result<Vec<Dynamics>, String>;
+
+    /// A device (a compressor's or a dynamics' ref) bypassed, or on again (one change).
+    async fn bypass(&self, reference: &str, bypass: bool, signal: &Signal) -> Result<Value, String>;
 }

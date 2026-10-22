@@ -2,7 +2,7 @@
 //! in time, and their group through a compressor the fake models (an instant peak follower at its threshold and ratio).
 //! Look proposes aligning and flipping the late layer; done, it's in time and with the main. Glue hears the group without
 //! its compressor first (before adding one, or bypassed) and moves the threshold until the glue measures as asked.
-use super::backend::{Compressor, LayersBackend, Words};
+use super::backend::{Compressor, Dynamics, LayersBackend, Words};
 use super::tool::Layers;
 use crate::core::contracts::{KernelTool, Render};
 use async_trait::async_trait;
@@ -24,9 +24,13 @@ struct Fake {
     flipped: RefCell<BTreeSet<String>>,
     compressor: RefCell<Option<Compressor>>,
     ratio: f64,
+    /// A limiter on the master (on or not), when there is one: every render passes through it.
+    limiter: RefCell<Option<bool>>,
     done: RefCell<Vec<String>>,
     /// Whether the compressor was on at each render of the group.
     group_heard: RefCell<Vec<bool>>,
+    /// Whether the master's limiter was on at each render.
+    master_heard: RefCell<Vec<bool>>,
 }
 
 impl Fake {
@@ -38,9 +42,22 @@ impl Fake {
             flipped: RefCell::default(),
             compressor: RefCell::new(compressor.map(|(threshold, active)| comp(threshold, active))),
             ratio,
+            limiter: RefCell::new(None),
             done: RefCell::default(),
             group_heard: RefCell::default(),
+            master_heard: RefCell::default(),
         })
+    }
+
+    /// Through the master: its limiter (at -12 dB, hard) when it's on.
+    fn master(&self, mono: Vec<f32>) -> Vec<f32> {
+        let on = *self.limiter.borrow() == Some(true);
+        self.master_heard.borrow_mut().push(on);
+        if on {
+            squash(&mono, -12., 100.)
+        } else {
+            mono
+        }
     }
 
     /// A layer as it plays: where its hits start, their polarity and level, moved by its delay and flipped when asked.
@@ -115,7 +132,7 @@ impl LayersBackend for Rc<Fake> {
     async fn render(&self, tracks: &[String], _from: f64, _beats: f64, _signal: &Signal) -> Result<Vec<Render>, String> {
         let mut renders = Vec::new();
         for track in tracks {
-            let mono = if track == "g" { self.group() } else { self.layer(track) };
+            let mono = self.master(if track == "g" { self.group() } else { self.layer(track) });
             self.renders.set(self.renders.get() + 1);
             let path = self.dir.path().join(format!("r{}.wav", self.renders.get()));
             crate::audio::decode::write_test_wav(&path, &mono, RATE);
@@ -158,11 +175,26 @@ impl LayersBackend for Rc<Fake> {
         Ok(json!({"change": "c"}))
     }
 
-    async fn bypass(&self, _compressor: &Compressor, bypass: bool, _signal: &Signal) -> Result<Value, String> {
-        if let Some(found) = self.compressor.borrow_mut().as_mut() {
-            found.active = !bypass;
+    async fn master_dynamics(&self, _signal: &Signal) -> Result<Vec<Dynamics>, String> {
+        Ok(self
+            .limiter
+            .borrow()
+            .filter(|on| *on)
+            .map(|_| Dynamics { reference: "limiter".into(), name: "Fake Limiter".into() })
+            .into_iter()
+            .collect())
+    }
+
+    async fn bypass(&self, reference: &str, bypass: bool, _signal: &Signal) -> Result<Value, String> {
+        if reference == "limiter" {
+            *self.limiter.borrow_mut() = Some(!bypass);
+            self.done.borrow_mut().push(if bypass { "bypass the limiter" } else { "the limiter on" }.into());
+        } else {
+            if let Some(found) = self.compressor.borrow_mut().as_mut() {
+                found.active = !bypass;
+            }
+            self.done.borrow_mut().push(if bypass { "bypass" } else { "on" }.into());
         }
-        self.done.borrow_mut().push(if bypass { "bypass" } else { "on" }.into());
         Ok(json!({"change": "c"}))
     }
 }
@@ -246,6 +278,35 @@ async fn glue_hears_the_group_without_its_compressor_first_and_moves_the_thresho
     assert_eq!(glued["ok"], false, "{glued}");
     assert!(glued["said"].as_str().unwrap().starts_with("the glue doesn't grow"), "{glued}");
     assert!(fake.done.borrow().iter().filter(|done| done.starts_with("threshold")).count() <= 1, "{:?}", fake.done.borrow());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_limiter_on_the_master_is_said_in_a_look_and_bypassed_while_the_glue_is_measured() {
+    let fake = Fake::new(None, 2.);
+    *fake.limiter.borrow_mut() = Some(true);
+    let tool = Layers::new(fake.clone()).tool();
+    let looked = run(&tool, json!({"tracks": ["main", "l1"], "fromBeat": 0, "beats": 8})).await.unwrap();
+    assert!(looked["master"].as_str().unwrap().starts_with("\u{201c}Fake Limiter\u{201d} on the master"), "{looked}");
+    assert!(fake.done.borrow().is_empty(), "a look changes nothing");
+    fake.master_heard.borrow_mut().clear();
+    let glued = run(&tool, json!({"action": "glue", "group": "g", "fromBeat": 0, "beats": 8})).await.unwrap();
+    let done = fake.done.borrow().clone();
+    assert_eq!(
+        (done.first().map(String::as_str), done.last().map(String::as_str)),
+        (Some("bypass the limiter"), Some("the limiter on")),
+        "{done:?}"
+    );
+    assert!(fake.master_heard.borrow().iter().all(|on| !on), "every glue render without the limiter");
+    assert_eq!(*fake.limiter.borrow(), Some(true), "on again");
+    assert!(glued["master"].as_str().unwrap().contains("bypassed, and on again"), "{glued}");
+    assert_eq!(glued["ok"], true, "{glued}");
+    // On again after a failed measure too.
+    let fake = Fake::new(None, 2.);
+    *fake.limiter.borrow_mut() = Some(true);
+    let tool = Layers::new(fake.clone()).tool();
+    assert!(run(&tool, json!({"action": "glue", "group": "x", "fromBeat": 0, "beats": 8})).await.unwrap_err().contains("no such group"));
+    assert_eq!(*fake.limiter.borrow(), Some(true));
+    assert_eq!(*fake.done.borrow(), ["bypass the limiter", "the limiter on"]);
 }
 
 #[tokio::test(flavor = "current_thread")]

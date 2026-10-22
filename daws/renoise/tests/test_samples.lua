@@ -645,7 +645,7 @@ test("samples: a flip refuses a slice, a sample without audio, and one too long 
   mock.ops.insert_sample(2, { name = "Empty" })
   epoch = place(peer)
   failure(call(peer, "change_preview", { kind = "sample-invert", input = { ref = sref(epoch, 2, 2) }, epoch = epoch }), "bad-params")
-  instrument(2).samples[1].buffer.frames = 5000000
+  instrument(2).samples[1].buffer.frames = 2000001
   failure(call(peer, "change_preview", { kind = "sample-invert", input = { ref = sref(epoch, 2, 1) }, epoch = epoch }), "failed")
 end)
 
