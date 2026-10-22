@@ -1203,6 +1203,43 @@ async fn a_take_that_clips_where_the_source_doesnt_is_drawn_again_and_nothing_re
         .await;
 }
 
+/// (#400 review notes) A pattern take whose varied track the producer wrote on outside the take's lines isn't dropped: its
+/// digest covers only those lines, so the drop compares the rest with the source's, says why, and leaves it.
+#[tokio::test(flavor = "current_thread")]
+async fn a_pattern_take_written_on_outside_its_lines_isnt_dropped() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let (script, simulator, renoise, observed, _told) = renoise_with_changes(home.path()).await;
+            script.set_lines(
+                2,
+                1,
+                json!([
+                    {"line": 0, "notes": [{"col": 1, "note": "C-4", "instrument": "00"}]},
+                    {"line": 2, "notes": [{"col": 1, "note": "D-4", "instrument": "00", "volume": "30"}]},
+                    {"line": 4, "notes": [{"col": 1, "note": "E-4", "instrument": "00"}]},
+                    {"line": 6, "notes": [{"col": 1, "note": "C-4", "instrument": "00"}]},
+                ]),
+            );
+            let variations = tool(&observed, "variations");
+            run_tool(&tool(&observed, "renoise_read"), json!({"kind": "pattern"})).await;
+            let source = json!({"patternRef": "pattern:2", "trackRef": "track:1", "first": 0, "last": 7});
+            let rolls = json!([{"direction": "rolls", "ops": [{"op": "retrig", "amount": 0.5}]}, {"direction": "sparser", "ops": [{"op": "thin", "amount": 0.4}]}]);
+            let made = run_tool(&variations, json!({"action": "make", "source": source, "seed": 5, "takes": rolls, "listen": false})).await;
+            let first: u64 = made["takes"][0]["ref"].as_str().and_then(|r| r.rsplit(':').next()).and_then(|n| n.parse().ok()).unwrap_or_else(|| panic!("{made}"));
+            // (the producer writes a note on V1's track past the lines Kumi varied)
+            let mut lines = script.lines(first, 1).as_array().cloned().unwrap_or_default();
+            lines.push(json!({"line": 12, "notes": [{"col": 1, "note": "G-4", "instrument": "00"}]}));
+            script.set_lines(first, 1, Value::Array(lines));
+            let dropped = run_tool(&variations, json!({"action": "drop"})).await;
+            assert_eq!(dropped["dropped"], json!(["V2"]), "{dropped}");
+            assert!(dropped["skipped"].to_string().contains("outside the varied ones"), "{dropped}");
+            renoise.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
+}
+
 /// (review W6, W9, W5) Phrase takes of a pattern's lines are heard through players of their phrases, and changed and dropped as
 /// phrases; they're a set apart from the range's pattern takes. Speed is refused for pattern takes, before anything is drawn.
 #[tokio::test(flavor = "current_thread")]

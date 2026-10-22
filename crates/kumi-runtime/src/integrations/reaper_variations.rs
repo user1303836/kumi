@@ -631,7 +631,7 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
         Ok(json!({"change": change}))
     }
 
-    fn undroppable(&self, _set: &ReaperSet, _number: usize, _row: &Value) -> Option<String> {
+    async fn undroppable(&self, _set: &ReaperSet, _number: usize, _row: &Value, _signal: &Signal) -> Option<String> {
         None
     }
 

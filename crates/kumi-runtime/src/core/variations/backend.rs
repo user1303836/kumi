@@ -165,8 +165,9 @@ pub trait VariationsBackend: Sized {
     /// Puts a kept take where the producer says (one change): what it answered.
     async fn place(&self, set: &mut Set<Self>, number: usize, row: &Value, at: &JsonObject, signal: &Signal) -> Result<Value, String>;
 
-    /// Why a found take can't go in a drop (it's in use elsewhere), or None.
-    fn undroppable(&self, set: &Set<Self>, number: usize, row: &Value) -> Option<String>;
+    /// Why a found take can't go in a drop (it's in use elsewhere, or holds the producer's edit where its digest doesn't look),
+    /// or None.
+    async fn undroppable(&self, set: &Set<Self>, number: usize, row: &Value, signal: &Signal) -> Option<String>;
 
     /// Drops found takes in one change: its id and what the DAW said.
     async fn drop(&self, set: &Set<Self>, rows: &[(usize, Value)], signal: &Signal) -> Result<(String, Value), String>;

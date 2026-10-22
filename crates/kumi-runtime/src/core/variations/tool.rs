@@ -482,7 +482,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                 skipped.push(format!("V{number} was edited in {app} since Kumi wrote it: left as it is"));
                 continue;
             }
-            if let Some(why) = self.backend.undroppable(&set, number, &row) {
+            if let Some(why) = self.backend.undroppable(&set, number, &row, signal).await {
                 skipped.push(format!("V{number} {why}: left as it is"));
                 continue;
             }

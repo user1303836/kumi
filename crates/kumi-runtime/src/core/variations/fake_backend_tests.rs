@@ -248,7 +248,7 @@ impl VariationsBackend for Fake {
         Ok(json!("at the end"))
     }
 
-    fn undroppable(&self, _: &Set<Self>, _: usize, _: &Value) -> Option<String> {
+    async fn undroppable(&self, _: &Set<Self>, _: usize, _: &Value, _: &Signal) -> Option<String> {
         None
     }
 
