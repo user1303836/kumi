@@ -1,3 +1,4 @@
+// Test only: a non-install code change (closed, not merged).
 //! Kumi's database, `~/.kumi/kumi.db`: what Kumi keeps between sessions (notes, techniques, lessons,
 //! gaps, and what the producer did in answer to Kumi), in SQLite.
 //!
