@@ -21,6 +21,10 @@ M.EVENTS[#M.EVENTS + 1] = "scratch_swept"
 for _, method in ipairs({ "preset_read", "instrument_export", "macro_read", "device_editor", "preset_save" }) do
   M.METHODS[#M.METHODS + 1] = method
 end
+-- (#401: scripts kept for a chore)
+for _, method in ipairs({ "script_install", "script_remove" }) do
+  M.METHODS[#M.METHODS + 1] = method
+end
 -- Set by the bridge: the listening flags (contract §2.8), and why Kumi's own render keeps Renoise busy (nil when none runs).
 M.listening = nil
 M.kumi_busy = nil

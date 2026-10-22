@@ -27,6 +27,7 @@ does the job there.
 | Chops a recording at its real hits and lays the slices out to play it | not yet | not yet | ✓ |
 | Delivers files: a region per asset, named in the project's convention, a dry run first | not yet | ✓ | not yet |
 | Finds why a track plays twice or nowhere, and builds sidechains, parallel buses and stems as one undo step | not yet | ✓ | not yet |
+| Keeps a repeated chore as a script: run once as one undo step, then kept as the DAW's own action once you say yes | not yet | ✓ | ✓ |
 | Knows whether the DAW is recording | ✓ | ✓ | ✓ |
 | A line in the DAW's status bar | ✓ | no: REAPER's API has no status bar (a notification instead) | ✓ |
 | Opens a saved project | ✓ | not yet: you open it yourself (`kumi -r` and setup's restart don't) | not yet: you open it yourself (`kumi -r` and setup's restart don't) |
@@ -163,6 +164,11 @@ next version), track templates and FX chains.
   track doesn't have, a duplicate with its polarity inverted. It builds a
   sidechain (the kick ducking the bass through ReaComp), a parallel bus or
   stems as one step of REAPER's undo, and reads the routing again to check it.
+- **Scripts for a chore** (`scripts`): a chore you repeat, written in Lua
+  against your project and run once as one step of REAPER's undo. Once you say
+  yes, Kumi keeps it to run again by name, and as an action in the Action List
+  (Scripts/Kumi) for a shortcut or a toolbar button. It won't keep one that
+  names this project's ids or Kumi's refs, and says what it takes by its place.
 - **Drum kits** from sound files: a ReaSamplOmatic5000 per pad, as a folder of
   pad tracks or one container, hi-hats choking.
 - **Sounds from tutorials and references:** `watch_video`, then ReaEQ,
@@ -287,6 +293,11 @@ saves the song, instruments and device presets.
   close the hits land and how deeply it nulls against the recording. The
   lighter densities (no ghosts or rolls; kick and snare) come as variations
   takes to keep or drop.
+- **Scripts for a chore** (`scripts`): a chore you repeat, written in Lua
+  against your song and run once as one step of Renoise's undo. Once you say
+  yes, Kumi keeps it to run again by name, and as Tools > Kumi > its name, with
+  a shortcut to set in Renoise's Keys preferences. It won't keep one that names
+  Kumi's refs, and says what it takes by its place.
 - **Instruments from sample files:** a drum kit with mute groups, or keys with
   velocity layers, in one instrument.
 - **Doofers** from devices, with named macros.

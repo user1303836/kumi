@@ -81,6 +81,8 @@ pub struct OwnDaw {
     pub catch_up: &'static CatchUpWords,
     /// How it makes the fixed phrases ("tempo 124", "mute drums") with no model call.
     pub phrases: &'static super::own_phrases::OwnPhrases,
+    /// (#401) What its kept scripts are in, become, and take by their place (lint rules).
+    pub scripts: &'static crate::core::scripts::backend::Words,
 }
 
 /// Starts Kumi's host for a DAW: the production one runs `daw-mcp-server`; a test's stand-in answers in its place.
@@ -174,6 +176,8 @@ pub struct OwnIntegration<S: RefScheme + 'static> {
     delivery: Option<Rc<dyn KernelTool>>,
     /// (#401) The routing doctor and builder, where the DAW's profile offers it (core's, with the DAW's backend).
     routing: Option<Rc<dyn KernelTool>>,
+    /// (#401) Kept scripts, where the DAW's profile offers them (core's, with the shared backend).
+    scripts: Option<Rc<dyn KernelTool>>,
 }
 
 /// How REAPER and Renoise tell templates and a song's own folder, for core's rules on copies: a project in REAPER's
@@ -340,6 +344,11 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
             let backend = super::reaper_routing::ReaperRouting::new(changes.clone());
             crate::core::routing::tool::Routing::new(backend).tool()
         });
+    // (#401) kept scripts, where the DAW offers them: Kumi's copies in its folder, one a DAW
+    let scripts: Option<Rc<dyn KernelTool>> = daw.profile.caps.scripts.then(|| {
+        let backend = super::own_scripts::OwnScripts::new(changes.clone(), daw.scripts);
+        crate::core::scripts::tool::Scripts::new(backend, options.kumi_home.join("scripts").join(daw.host_flag)).tool()
+    });
     let kumi_home = options.kumi_home.clone();
     Rc::new(OwnIntegration::<S> {
         daw,
@@ -380,6 +389,7 @@ pub fn create_own_integration<S: RefScheme + 'static>(daw: &'static OwnDaw, opti
         chop,
         delivery,
         routing,
+        scripts,
     })
 }
 
@@ -956,6 +966,9 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         }
         if let Some(routing) = &self.routing {
             tools.push(routing.clone());
+        }
+        if let Some(scripts) = &self.scripts {
+            tools.push(scripts.clone());
         }
         tools
     }
@@ -1693,10 +1706,15 @@ pub fn instructions_of(daw: &OwnDaw) -> String {
 /// routes are a mistake to fix; a route through FX is the producer's sound, so a choice to ask about.
 pub fn own_rules(daw: &OwnDaw) -> String {
     let app = daw.profile.words.app;
-    format!(
+    let mut rules = format!(
         "The look's setup is how this producer set {app} up: follow it rather than {app}'s factory defaults. When the producer reports a problem: a clear mechanical mistake with one obvious fix ({}) gets that fix as one change, said with what you did and how to take it back (Kumi's undo or {app}'s own); when the fix means choosing between the producer's own routes or settings (one route running through FX, two settings they may have meant), name them exactly and ask one question. Never ask only because nothing is selected. Never change {app}'s preferences, key bindings, mouse modifiers or theme. Describe each change in words, naming what it touched and where. Offer alternatives as separate takes, each undoable, and never make a whole song or part unasked.",
         daw.mechanical
-    )
+    );
+    // (#401) a chore kept as a script: once it ran, and only once the producer said yes
+    if daw.profile.caps.scripts {
+        rules.push_str(" A chore the producer repeats can be kept as a script (scripts): list what's kept first; a new one runs once with run_lua, and is kept only once they said yes.");
+    }
+    rules
 }
 
 /// The setup as the model sees it: a render folder outside the project is named by its last folder, as the project's file is

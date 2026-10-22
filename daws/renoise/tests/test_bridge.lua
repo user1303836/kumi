@@ -227,7 +227,7 @@ test("bridge: the handshake proves both sides and the welcome says who it is", f
   eq(welcome.project.title, "Tune Title")
   eq(welcome.project.path, "/songs/tune.xrns")
   ok(welcome.project.id:match("^%x+$") and #welcome.project.id == 32)
-  eq(table.concat(welcome.methods, ","), "ping,status,renoise.reload,read,snapshot,focus,focus_body,change_preview,change_apply,change_restore,undo_step_begin,undo_step_end,transport_stop,transport_play,audition_note,select,project_save,instrument_save,show_status,digest,render_start,listen_status,listen_cancel,audition,audition_stop,audio_file,scratch,preset_read,instrument_export,macro_read,device_editor,preset_save")
+  eq(table.concat(welcome.methods, ","), "ping,status,renoise.reload,read,snapshot,focus,focus_body,change_preview,change_apply,change_restore,undo_step_begin,undo_step_end,transport_stop,transport_play,audition_note,select,project_save,instrument_save,show_status,digest,render_start,listen_status,listen_cancel,audition,audition_stop,audio_file,scratch,preset_read,instrument_export,macro_read,device_editor,preset_save,script_install,script_remove")
   eq(table.concat(welcome.events, ","), "project,tracks,selection,transport,undone_in_daw,scratch_swept")
   eq(mock.statuses[#mock.statuses], "Kumi connected")
   no_dialogs()

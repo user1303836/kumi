@@ -24,6 +24,7 @@ local reads_listening = import("reads_listening")
 local scratch = import("scratch")
 local actions = import("actions")
 local digest = import("digest")
+local chores = import("chores")
 
 local M = {}
 
@@ -240,6 +241,12 @@ local function configure()
   end
   b.cfg, b.setup_error = cfg, nil
   if cfg.log_dir then configure_log(cfg.log_dir) end
+  -- (#401: the scripts kept for a chore, in the Tools menu again, once a start)
+  if not b.chores_registered then
+    b.chores_registered = true
+    local ok, err = pcall(chores.register_all, cfg)
+    if not ok then log.write("error", "registering the kept scripts: " .. tostring(err)) end
+  end
   return true
 end
 
@@ -1379,6 +1386,10 @@ function handlers.show_status(params)
   return { shown = true }
 end
 
+-- (#401) A chore kept as a menu entry and a shortcut: a file and Renoise's menus, not the song.
+function handlers.script_install(params) return chores.install(params, b.cfg) end
+function handlers.script_remove(params) return chores.remove(params, b.cfg) end
+
 handlers["renoise.reload"] = function()
   host.request_reload()
   return { reloading = true }
@@ -1555,6 +1566,8 @@ function M.start(h, reloading)
   host, st = h, h.state
   st.bridge = st.bridge or { memory = {}, retry_ms = 0, started_ms = 0 }
   b = st.bridge
+  -- (#401: the kept scripts are registered again by this payload, its closures replacing a reload's)
+  b.chores_registered = nil
   b.journal = b.journal or changes.journal_new()
   b.journal.edits = function() return b.edits or 0 end
   b.journal.retouched = retouched

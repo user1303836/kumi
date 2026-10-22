@@ -50,6 +50,24 @@ pub const DAW: OwnDaw = OwnDaw {
     changes: &super::reaper_changes::CHANGES,
     catch_up: &CATCH_UP,
     phrases: &PHRASES,
+    scripts: &SCRIPTS,
+};
+
+/// (#401) Kept scripts in REAPER: ReaScript, kept as actions, and what takes a thing by its place there.
+static SCRIPTS: crate::core::scripts::backend::Words = crate::core::scripts::backend::Words {
+    app: "REAPER",
+    language: "Lua (ReaScript: the reaper table)",
+    action: "an action in REAPER's Action List (Scripts/Kumi), for a shortcut or a toolbar button",
+    places: &[
+        (
+            r"GetTrack\(\s*0\s*,\s*[0-9]+\s*\)",
+            "it takes a track by its place (GetTrack(0, n)): in another project that's another track; the selected ones (GetSelectedTrack) or a name follow the producer",
+        ),
+        (
+            r"GetMediaItem\(\s*0\s*,\s*[0-9]+\s*\)",
+            "it takes an item by its place (GetMediaItem(0, n)): the selected ones (GetSelectedMediaItem) follow the producer",
+        ),
+    ],
 };
 
 /// What changed in a REAPER project, in REAPER's words: catch-up's lines, watch_me's changes and its draft recipe.

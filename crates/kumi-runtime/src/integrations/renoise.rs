@@ -50,6 +50,28 @@ pub const DAW: OwnDaw = OwnDaw {
     changes: &super::renoise_changes::CHANGES,
     catch_up: &CATCH_UP,
     phrases: &PHRASES,
+    scripts: &SCRIPTS,
+};
+
+/// (#401) Kept scripts in Renoise: its Lua, kept as entries of the Tools menu, and what takes a thing by its place there.
+static SCRIPTS: crate::core::scripts::backend::Words = crate::core::scripts::backend::Words {
+    app: "Renoise",
+    language: "Lua (the renoise API, with song for renoise.song())",
+    action: "an entry in Renoise's Tools menu (Tools > Kumi), with a shortcut to set in its Keys preferences",
+    places: &[
+        (
+            r"song:track\(\s*[0-9]+\s*\)|song\.tracks\[\s*[0-9]+\s*\]",
+            "it takes a track by its place: in another song that's another track; song.selected_track or a name follow the producer",
+        ),
+        (
+            r"song:instrument\(\s*[0-9]+\s*\)|song\.instruments\[\s*[0-9]+\s*\]",
+            "it takes an instrument by its place: song.selected_instrument or a name follow the producer",
+        ),
+        (
+            r"song:pattern\(\s*[0-9]+\s*\)|song\.patterns\[\s*[0-9]+\s*\]",
+            "it takes a pattern by its place: song.selected_pattern follows the producer",
+        ),
+    ],
 };
 
 /// What changed in a Renoise song, in Renoise's words: catch-up's lines, watch_me's changes and its draft recipe.

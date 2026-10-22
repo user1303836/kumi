@@ -19,6 +19,7 @@ pub mod read;
 pub mod reaper;
 pub mod refs;
 pub mod rows;
+pub mod scripts;
 pub mod server;
 pub mod setup;
 pub mod window;

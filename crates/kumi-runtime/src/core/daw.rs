@@ -655,6 +655,9 @@ pub struct Capabilities {
     /// (#401) Routing: the project's routing as a graph, what's likely wrong in it in words, and sidechains, parallel buses and
     /// stems built as one plan (core's, with the DAW's backend): REAPER's sends and folders.
     pub routing: bool,
+    /// (#401) Kept scripts: a chore run once, then kept to run again by name and as the DAW's own action (core's, with the
+    /// DAW's backend): REAPER's Action List, Renoise's Tools menu.
+    pub scripts: bool,
 }
 
 /// One DAW as Kumi knows it: its id (None when no DAW is known), its words and what it can do.
@@ -781,6 +784,7 @@ impl DawProfile {
             chop: false,
             delivery: false,
             routing: false,
+            scripts: false,
         },
         vocab: PromptVocab {
             plan_tool: crate::live_word!(plan_tool),
@@ -874,6 +878,7 @@ impl DawProfile {
             presets: true,
             delivery: true,
             routing: true,
+            scripts: true,
             ..Capabilities::NONE
         },
         vocab: PromptVocab {
@@ -969,6 +974,7 @@ impl DawProfile {
             variations: true,
             sample_mapping: true,
             chop: true,
+            scripts: true,
             ..Capabilities::NONE
         },
         vocab: PromptVocab {
@@ -1102,6 +1108,7 @@ impl Capabilities {
         chop: false,
         delivery: false,
         routing: false,
+        scripts: false,
     };
 }
 

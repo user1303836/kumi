@@ -624,6 +624,22 @@ pub struct OwnPlan<S: RefScheme + 'static> {
     pub(super) renamed: RefCell<Vec<(String, String, String, String)>>,
     /// (M7) What the DAW answered the last change it applied (`created`, `applied`): the variations find their takes by it.
     pub(super) last_applied: RefCell<Option<Value>>,
+    /// (#401) The chunks run_lua ran this session without stopping at an error (their hashes, the latest kept): a script is
+    /// kept only once it ran so.
+    ran: RefCell<Vec<u64>>,
+}
+
+/// The most clean runs remembered.
+const MOST_RAN: usize = 64;
+
+/// A chunk's hash, its lines' trailing spaces and its ends left out (the same chunk sent again a little reformatted).
+fn chunk_hash(code: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for line in code.trim().lines() {
+        line.trim_end().hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 impl<S: RefScheme + 'static> OwnPlan<S> {
@@ -641,6 +657,7 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
             not_copied: RefCell::new(None),
             renamed: RefCell::default(),
             last_applied: RefCell::default(),
+            ran: RefCell::default(),
         })
     }
 
@@ -660,6 +677,11 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
     /// The epoch (and, where refs are places, the layout) a request about these refs is asked from, as a change's is.
     pub(super) fn place_request(&self, args: &mut Value, input: &JsonObject) {
         self.place(args, input)
+    }
+
+    /// (#401) Whether run_lua ran this chunk this session without stopping at an error.
+    pub(super) fn ran_cleanly(&self, code: &str) -> bool {
+        self.ran.borrow().contains(&chunk_hash(code))
     }
 
     /// A ref the model gave, long (as the bridge takes it), or why it isn't one of this turn's.
@@ -1058,6 +1080,16 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
             .or_else(|| skipped.then(|| format!("{own_undo} can't take this back; Kumi can.")));
         if kind.kind == "track-add" {
             self.added.set(self.added.get() + 1);
+        }
+        // (#401) a chunk that ran to its end: one a script may keep
+        if kind.kind == "run-lua" && applied.pointer("/applied/failed").is_none() {
+            if let Some(code) = input.get("code").and_then(Value::as_str) {
+                let mut ran = self.ran.borrow_mut();
+                ran.push(chunk_hash(code));
+                if ran.len() > MOST_RAN {
+                    ran.remove(0);
+                }
+            }
         }
         // Code run in the DAW may have changed anything, outside what HISTORY can take back: a judged run hears again.
         if matches!(kind.kind, "run-lua" | "api-call") {

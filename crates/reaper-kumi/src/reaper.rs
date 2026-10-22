@@ -284,6 +284,31 @@ impl<'a> Reaper<'a> {
         (id > 0).then_some(id)
     }
 
+    /// Registers a script file as a main-section action (`commit`: written to REAPER's key map, so it stays across restarts):
+    /// its command id.
+    pub fn add_script(&self, path: &std::path::Path, commit: bool) -> Option<i32> {
+        let register = self.api.AddRemoveReaScript()?;
+        let file = CString::new(path.to_string_lossy().into_owned()).ok()?;
+        let id = unsafe { register(true, 0, file.as_ptr(), commit) };
+        (id > 0).then_some(id)
+    }
+
+    /// Takes a script's action away (from REAPER's key map too, with `commit`).
+    pub fn remove_script(&self, path: &std::path::Path, commit: bool) -> bool {
+        let (Some(register), Ok(file)) = (self.api.AddRemoveReaScript(), CString::new(path.to_string_lossy().into_owned())) else {
+            return false;
+        };
+        unsafe { register(false, 0, file.as_ptr(), commit) };
+        true
+    }
+
+    /// An action's named command ("RS…" for a script), without the underscore its lookup takes.
+    pub fn named_command(&self, command: i32) -> Option<String> {
+        let f = self.api.ReverseNamedCommandLookup()?;
+        let named = unsafe { api::string(f(command)) };
+        (!named.is_empty()).then_some(named)
+    }
+
     /// The action's name as the action list shows it; None when there is no such action.
     pub fn action_name(&self, command: i32) -> Option<String> {
         let f = self.api.kbd_getTextFromCmd()?;

@@ -22,6 +22,7 @@ const ROWS: &[(&str, &str)] = &[
     ("chop", "Chops a recording at its real hits"),
     ("delivery", "Delivers files: a region per asset"),
     ("routing", "Finds why a track plays twice or nowhere, and builds sidechains, parallel buses and stems"),
+    ("scripts", "Keeps a repeated chore as a script"),
     ("recording_state", "Knows whether the DAW is recording"),
     ("status_line", "A line in the DAW's status bar"),
     ("open_project", "Opens a saved project"),

@@ -508,7 +508,7 @@ function M.reset(options)
   M.idle_work = {} -- (n-instruments)
   -- Calls that would crash the real Renoise.
   M.crashes = {}
-  M.servers, M.busy_ports, M.timers, M.menu_entries = {}, {}, {}, {}
+  M.servers, M.busy_ports, M.timers, M.menu_entries, M.keybindings = {}, {}, {}, {}, {}
   M.stat_modes, M.stat_mtimes = {}, {}
   M.stall_timers = false
   M.clock_step_ms = 0
@@ -608,6 +608,12 @@ function M.reset(options)
     end,
     has_menu_entry = function(_, name) return M.menu_entries[name] ~= nil end,
     remove_menu_entry = function(_, name) M.menu_entries[name] = nil end,
+    add_keybinding = function(_, binding)
+      if M.keybindings[binding.name] then error("keybinding '" .. binding.name .. "' already exists") end
+      M.keybindings[binding.name] = binding
+    end,
+    has_keybinding = function(_, name) return M.keybindings[name] ~= nil end,
+    remove_keybinding = function(_, name) M.keybindings[name] = nil end,
   })
 
   renoise = object("renoise", {
