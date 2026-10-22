@@ -1,5 +1,6 @@
 //! The host's change tools (M3 contract §3a) against the simulated REAPER: preview, apply and undo through the journal,
 //! each step fenced, each key answered once.
+#[path = "../common/mod.rs"]
 mod common;
 
 use common::Session;

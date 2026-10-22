@@ -2,6 +2,7 @@
 //! followed to its files, cancelled, refused while another runs, failing; a live capture; a file played out loud; the
 //! audio behind a ref; scratch copies; the checks each tool makes before it asks the bridge; an older bridge; and the
 //! host stopping what still runs when it goes.
+#[path = "../common/mod.rs"]
 mod common;
 
 use common::Session;

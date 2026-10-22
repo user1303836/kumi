@@ -2,9 +2,9 @@
 //! notes and controller lanes, its arrange view each track's items, a track's routing its sends, an FX chain (a take's
 //! too) its tree; Renoise's pattern and phrase editors show the lines around the cursor, its matrix the sequence, an
 //! instrument its keyzones, the DSP chain its Doofers and Splitters. NOW and HISTORY draw each family of their changes.
-#[path = "support/models.rs"]
+#[path = "../support/models.rs"]
 mod models;
-#[path = "support/tui_app.rs"]
+#[path = "../support/tui_app.rs"]
 mod support;
 use kumi::daw::work_with;
 use kumi::tui::{pictures::Graphics, style::ColorDepth};

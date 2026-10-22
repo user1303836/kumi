@@ -14,7 +14,7 @@ use kumi::tui::tty::{emergency_restorers, Tty, TtyInput, TtyOptions, TtyOutput, 
 use kumi::tui::width::{cell_width, text_width, truncate};
 use kumi::tui::wrap::{wrap, Span};
 
-#[path = "support/vt.rs"]
+#[path = "../support/vt.rs"]
 mod vt;
 use vt::VirtualTerminal;
 

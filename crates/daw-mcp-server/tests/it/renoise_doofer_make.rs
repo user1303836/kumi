@@ -1,6 +1,7 @@
 //! doofer-make through the host's tools (M4 n-devices): Kumi's host reads each device's preset data, composes the
 //! container's, and sends the tool the devices with the shapes it read; the tool's undo takes it apart (the host sends the
 //! record on as it is).
+#[path = "../common/mod.rs"]
 mod common;
 
 use common::Session;

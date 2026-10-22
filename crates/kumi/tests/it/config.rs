@@ -18,7 +18,7 @@ fn value(args_: &[&str], env: &Env) -> Value {
     serde_json::to_value(load_config(&args(args_), env).unwrap()).unwrap()
 }
 fn fixture() -> Value {
-    serde_json::from_str(include_str!("support/config/reference.json")).unwrap()
+    serde_json::from_str(include_str!("../support/config/reference.json")).unwrap()
 }
 #[test]
 fn models_are_provider_qualified_or_unset_and_need_no_gateway_key() {

@@ -1,5 +1,6 @@
 //! The host's tools that read the DAW (`read`, `snapshot`, `focus`, `focus_body`) against a scripted Renoise song: a golden
 //! MCP transcript of a whole session, a pattern too big for one page, the frame bound, and what reaches the tool.
+#[path = "../common/mod.rs"]
 mod common;
 
 use common::{golden, Session};

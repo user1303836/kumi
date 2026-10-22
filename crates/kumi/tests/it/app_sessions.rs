@@ -2,9 +2,9 @@
 //! `--daw reaper|renoise`), Kumi's host in process in front of a simulated bridge: the session speaks the DAW's words
 //! (its profile is the DAW's), and says so when the DAW is busy, opens another project in the same tab, or goes away;
 //! none of it in Live's words.
-#[path = "support/live_words.rs"]
+#[path = "../support/live_words.rs"]
 mod live_words;
-#[path = "support/vt.rs"]
+#[path = "../support/vt.rs"]
 mod vt;
 use async_trait::async_trait;
 use daw_bridge::{files::ensure_secret, paths::BridgePaths, Daw};

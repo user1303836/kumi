@@ -1,7 +1,7 @@
 //! First-run setup in the app: only the missing steps, each done in place, then the session.
-#[path = "support/models.rs"]
+#[path = "../support/models.rs"]
 mod models;
-#[path = "support/tui_app.rs"]
+#[path = "../support/tui_app.rs"]
 mod support;
 use async_trait::async_trait;
 use futures::FutureExt;

@@ -1,6 +1,7 @@
 //! device-preset-data with a preset file through the host's tools (M4 n-devices): Kumi's host reads an .xrdp from the
 //! User Library and sends the tool its text and name; a file outside Renoise's libraries is refused before the tool hears
 //! of it.
+#[path = "../common/mod.rs"]
 mod common;
 
 use common::Session;

@@ -2,6 +2,7 @@
 //! simulated Renoise tool that does what the real one does: saves the instrument into Kumi's work folder
 //! (`instrument_export`), loads the file the host packed beside it while the instrument is as the host read it, and
 //! loads the host's restore file the same way.
+#[path = "../common/mod.rs"]
 mod common;
 
 use common::Session;

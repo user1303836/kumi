@@ -1,6 +1,7 @@
 //! Catch-up and watch_me in the host (M6) against the simulated REAPER: what changed while Kumi was closed or REAPER was
 //! restarted, the unsaved project kept by its identity, a snapshot never kept again before it was compared, and what the
 //! producer did while Kumi watched, with the parameters they moved by name.
+#[path = "../common/mod.rs"]
 mod common;
 
 use common::Session;

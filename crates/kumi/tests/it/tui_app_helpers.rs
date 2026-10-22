@@ -30,7 +30,7 @@ fn picture(rows: Option<Vec<Vec<Span>>>) -> Value {
 }
 #[test]
 fn focus_paths_changes_and_piano_rolls_match_source_whole_results() {
-    let cases: Vec<Value> = serde_json::from_str(include_str!("support/app/reference.json")).unwrap();
+    let cases: Vec<Value> = serde_json::from_str(include_str!("../support/app/reference.json")).unwrap();
     for case in cases {
         let args = case["args"].as_array().unwrap();
         let value = match case["fn"].as_str().unwrap() {

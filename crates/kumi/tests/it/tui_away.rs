@@ -1,8 +1,8 @@
 //! A producer away from Kumi's window: the terminal's status as Kumi works, and a desktop notification and a
 //! line in the DAW's window only while Kumi's window is behind another.
-#[path = "support/models.rs"]
+#[path = "../support/models.rs"]
 mod models;
-#[path = "support/tui_app.rs"]
+#[path = "../support/tui_app.rs"]
 mod support;
 use base64::Engine;
 use kumi::tui::{

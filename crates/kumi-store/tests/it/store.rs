@@ -166,7 +166,7 @@ fn a_crash_mid_write_keeps_whole_transactions_only() {
     let path = folder.path().join("kumi.db");
     drop(Store::open(&path).unwrap());
     let mut child = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "crash_child", "--nocapture", "--test-threads=1"])
+        .args(["--exact", "store::crash_child", "--nocapture", "--test-threads=1"])
         .env("KUMI_STORE_CRASH_CHILD", &path)
         .stdout(std::process::Stdio::null())
         .spawn()

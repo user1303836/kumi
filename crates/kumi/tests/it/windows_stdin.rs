@@ -1,5 +1,3 @@
-#![cfg(windows)]
-
 use kumi::input::TerminalInput;
 use kumi::tui::tty::Stdin;
 use std::cell::{Cell, RefCell};
@@ -39,7 +37,7 @@ fn wait(child: &mut Child, timeout: Duration) -> std::process::ExitStatus {
 fn isolated(case: &str, run: impl FnOnce(File)) {
     if std::env::var(PROBE).as_deref() != Ok(case) {
         let child = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", case, "--nocapture"])
+            .args(["--exact", &format!("windows_stdin::{case}"), "--nocapture"])
             .env(PROBE, case)
             .creation_flags(CREATE_NEW_CONSOLE)
             .stdin(Stdio::null())
@@ -209,7 +207,7 @@ async fn received(probe: InputProbe, stage: &str) -> Vec<u8> {
 
 fn child_reads(console: &File, text: &str) {
     let child = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "console_child_reads_exact_line", "--nocapture"])
+        .args(["--exact", "windows_stdin::console_child_reads_exact_line", "--nocapture"])
         .env(CHILD, format!("{text}\r\n"))
         .stdin(Stdio::inherit())
         .stdout(Stdio::piped())

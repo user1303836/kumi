@@ -1,6 +1,6 @@
-#[path = "support/tui_app.rs"]
+#[path = "../support/tui_app.rs"]
 mod support;
-#[path = "support/voice.rs"]
+#[path = "../support/voice.rs"]
 mod voice;
 use kumi::{tui::voice::VoiceController, voice::VoiceChange};
 use kumi_runtime::voice::{VoiceError, VoiceTrouble};

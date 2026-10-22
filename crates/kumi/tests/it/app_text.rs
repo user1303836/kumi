@@ -10,7 +10,7 @@ use std::{
 };
 #[test]
 fn streaming_controls_credentials_web_and_library_words_match_the_source() {
-    let fixture: Value = serde_json::from_str(include_str!("support/text/reference.json")).unwrap();
+    let fixture: Value = serde_json::from_str(include_str!("../support/text/reference.json")).unwrap();
     for c in fixture["cases"].as_array().unwrap() {
         let mut text = StreamingText::new(&serde_json::from_value::<Vec<String>>(c["secrets"].clone()).unwrap());
         let output: Vec<_> = c["chunks"].as_array().unwrap().iter().map(|chunk| text.push(chunk.as_str().unwrap())).collect();

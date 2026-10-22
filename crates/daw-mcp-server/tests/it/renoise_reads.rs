@@ -1,6 +1,7 @@
 //! The wire of the read methods (`read`, `snapshot`, `focus`, `focus_body`) between the host's client and a bridge that
 //! answers like the Renoise tool's, as a golden transcript (tests/golden/renoise-reads-bridge.ndjson), and what the host's
 //! client does as it reads pages bigger than the bridge's credit.
+#[path = "../common/mod.rs"]
 mod common;
 
 use common::{golden, normalized};

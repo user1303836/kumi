@@ -116,7 +116,7 @@ fn stdin_fixture_process() {
             Some(input)
         };
         let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "stdin_fixture_process", "--nocapture"])
+            .args(["--exact", "stdin_handoff::stdin_fixture_process", "--nocapture"])
             .env(ROLE, "reopened")
             .kill_on_drop(true)
             .spawn()
@@ -188,7 +188,11 @@ impl Drop for Process {
 
 fn command(role: &str) -> Command {
     let mut command = Command::new(std::env::current_exe().unwrap());
-    command.args(["--exact", "stdin_fixture_process", "--nocapture"]).env(ROLE, role).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .args(["--exact", "stdin_handoff::stdin_fixture_process", "--nocapture"])
+        .env(ROLE, role)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     command
 }
 

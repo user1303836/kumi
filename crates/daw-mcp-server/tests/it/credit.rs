@@ -1,6 +1,7 @@
 //! A host whose receive buffer is small, and which stops reading in the middle of an answer. The bridge (the Renoise
 //! tool) must be held back by credit and never sent into a full socket, no line is torn, nothing is retired, and the
 //! answer is whole once the host reads again.
+#[path = "../common/mod.rs"]
 mod common;
 
 use daw_bridge::auth::Secret;

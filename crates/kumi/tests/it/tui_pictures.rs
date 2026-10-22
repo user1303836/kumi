@@ -1,6 +1,6 @@
 //! Changes' pictures in HISTORY (a row opens to show it), NOW and the narrow dock; images only where the terminal
 //! shows them.
-#[path = "support/tui_app.rs"]
+#[path = "../support/tui_app.rs"]
 mod support;
 use kumi::tui::pictures::Graphics;
 use serde_json::{json, Value};

@@ -1,5 +1,5 @@
 //! `kumi doctor`, and voice readiness checks.
-#[path = "support/live_words.rs"]
+#[path = "../support/live_words.rs"]
 mod live_words;
 use futures::FutureExt;
 use kumi::{doctor::*, live_app::InstalledLive, live_extension::install_extension, tui::tty::TtyOutput};

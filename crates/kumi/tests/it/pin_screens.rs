@@ -6,9 +6,9 @@
 //! The same bytes on every machine and at any moment: times are given relative to now (saved 3 hours ago, a job
 //! started 65.02 s ago, a goal 185.02 s in), so the app's own clock only adds the milliseconds a scene takes; the
 //! activity glyphs that turn with that clock go through `finish_steady`; icons, colours and pictures are fixed.
-#[path = "support/models.rs"]
+#[path = "../support/models.rs"]
 mod models;
-#[path = "support/tui_app.rs"]
+#[path = "../support/tui_app.rs"]
 mod support;
 use futures::FutureExt;
 use kumi::tui::activity::{activity_glyph, Activity};

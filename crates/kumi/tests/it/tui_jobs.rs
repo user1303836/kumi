@@ -1,4 +1,4 @@
-#[path = "support/tui_app.rs"]
+#[path = "../support/tui_app.rs"]
 mod support;
 use kumi::tui::alerts::{NotifyChannel, TerminalProfile};
 use serde_json::{json, Value};

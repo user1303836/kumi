@@ -2,11 +2,11 @@
 //! (connecting, idle, the DAW gone, no model, FOCUS of each view, the command menu, /help, /status, the panels, the
 //! goodbye), the plain terminal's lines, and the commands' messages (bridge, doctor, report, update, uninstall). Live's
 //! own screens keep their bytes: the pins say so.
-#[path = "support/live_words.rs"]
+#[path = "../support/live_words.rs"]
 mod live_words;
-#[path = "support/models.rs"]
+#[path = "../support/models.rs"]
 mod models;
-#[path = "support/tui_app.rs"]
+#[path = "../support/tui_app.rs"]
 mod support;
 use async_trait::async_trait;
 use kumi::daw::work_with;

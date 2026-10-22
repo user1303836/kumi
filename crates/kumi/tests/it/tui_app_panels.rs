@@ -1,6 +1,6 @@
-#[path = "support/models.rs"]
+#[path = "../support/models.rs"]
 mod models;
-#[path = "support/tui_app.rs"]
+#[path = "../support/tui_app.rs"]
 mod support;
 use futures::FutureExt;
 use kumi::{terminal::Terminal, tui::app::PanelTab};

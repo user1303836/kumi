@@ -1,5 +1,5 @@
 //! /slots in the app: the slots shown, a swap made and taken back, and a model Kumi can't run yet refused with why.
-#[path = "support/tui_app.rs"]
+#[path = "../support/tui_app.rs"]
 mod support;
 use kumi_runtime::{
     auth::store::{open_credential_store, CredentialStore},

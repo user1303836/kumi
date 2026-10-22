@@ -1,7 +1,7 @@
 use kumi::tui::{style::Style, transcript::*, wrap::Span};
 use serde_json::{json, Value};
 fn fixture() -> Value {
-    serde_json::from_str(include_str!("support/transcript/reference.json")).unwrap()
+    serde_json::from_str(include_str!("../support/transcript/reference.json")).unwrap()
 }
 fn style(s: &Style) -> Value {
     let mut v = json!({});

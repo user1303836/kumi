@@ -1,5 +1,6 @@
 //! The wire of the read methods (`read`, `snapshot`, `focus`, `focus_body`) between the host's client and a bridge
 //! that answers like REAPER's, as a golden transcript (tests/golden/reaper-reads-bridge.ndjson).
+#[path = "../common/mod.rs"]
 mod common;
 
 use common::{golden, normalized};

@@ -1,6 +1,7 @@
 //! The host's tools that read the DAW (`read`, `snapshot`, `focus`, `focus_body`) against a scripted REAPER project:
 //! a golden MCP transcript of a whole session, paging, the frame bound, a busy DAW, a gone one, and a cursor from
 //! before the tab changed.
+#[path = "../common/mod.rs"]
 mod common;
 
 use common::{golden, Session};

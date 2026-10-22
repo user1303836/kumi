@@ -1,5 +1,6 @@
 //! A host held back by credit that the bridge retires, a connection the bridge lost track of, and a grant that could not be
 //! written in time: none of them may leave the host waiting for ever.
+#[path = "../common/mod.rs"]
 mod common;
 
 use daw_bridge::auth::Secret;

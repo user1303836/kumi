@@ -65,7 +65,7 @@ fn check(focus: &DawFocus, label: &str) {
 
 #[test]
 fn filling_a_focus_twice_is_filling_it_once_and_the_app_reads_it_as_it_read_lives() {
-    let cases: Vec<Value> = serde_json::from_str(include_str!("support/app/reference.json")).unwrap();
+    let cases: Vec<Value> = serde_json::from_str(include_str!("../support/app/reference.json")).unwrap();
     let (mut touched, mut paths, mut focuses) = (0, 0, 0);
     for (index, case) in cases.iter().enumerate() {
         let args = case["args"].as_array().unwrap();

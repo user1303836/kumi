@@ -1,5 +1,3 @@
-#![cfg(windows)]
-
 //! Direct Win32 controls for the synthetic records used by windows_stdin.
 //! These observations deliberately do not use Kumi's input reader or assume
 //! that WriteConsoleInputW preserves records when VT input is enabled.
@@ -11,7 +9,8 @@ use std::time::{Duration, Instant};
 use windows_sys::Win32::System::Console::*;
 
 const PROBE: &str = "KUMI_WINDOWS_DIRECT_CONSOLE_CONTROL";
-const CASE: &str = "direct_console_reports_synthetic_input_with_and_without_vt";
+// The test re-run in a process of its own, by its name in the crate's test binary.
+const CASE: &str = "windows_console_control::direct_console_reports_synthetic_input_with_and_without_vt";
 const CREATE_NEW_CONSOLE: u32 = 0x10;
 
 struct Process(Option<Child>);

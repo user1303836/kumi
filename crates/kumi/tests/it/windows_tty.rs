@@ -1,5 +1,3 @@
-#![cfg(windows)]
-
 use kumi::input::TerminalInput;
 use kumi::tui::keys::{InputEvent, InputParser, Modifiers};
 use kumi::tui::tty::Stdin;
@@ -16,7 +14,8 @@ use windows_sys::Win32::System::Console::{
 };
 
 const PROBE: &str = "KUMI_TEST_WINDOWS_INPUT_CONSOLE";
-const CASE: &str = "raw_byte_input_enables_vt_and_restores_the_actual_windows_console";
+// The test re-run in a process of its own, by its name in the crate's test binary.
+const CASE: &str = "windows_tty::raw_byte_input_enables_vt_and_restores_the_actual_windows_console";
 const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
 
 fn mode(console: &File) -> u32 {
@@ -113,7 +112,7 @@ fn raw_byte_input_enables_vt_and_restores_the_actual_windows_console() {
 
 #[test]
 fn injected_console_navigation_reaches_the_input_parser_from_initially_disabled_vt() {
-    const CASE: &str = "injected_console_navigation_reaches_the_input_parser_from_initially_disabled_vt";
+    const CASE: &str = "windows_tty::injected_console_navigation_reaches_the_input_parser_from_initially_disabled_vt";
     const PROBE: &str = "KUMI_TEST_WINDOWS_NAVIGATION_CONSOLE";
     if std::env::var_os(PROBE).is_none() {
         let mut child = Command::new(std::env::current_exe().unwrap())

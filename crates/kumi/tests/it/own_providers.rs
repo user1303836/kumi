@@ -1,7 +1,7 @@
 //! REAPER's and Renoise's providers: Kumi's bridge goes into the DAW's own folder through the shared lifecycle, is
 //! found again (and chosen when it's the only bridge installed), and comes out; the doctor says nothing of a DAW this
 //! user has never used.
-#[path = "support/live_words.rs"]
+#[path = "../support/live_words.rs"]
 mod live_words;
 use futures::FutureExt;
 use kumi::daw::{chosen, own, DawProvider, RemovedBridge};

@@ -1,6 +1,6 @@
-#[path = "support/live_words.rs"]
+#[path = "../support/live_words.rs"]
 mod live_words;
-#[path = "support/models.rs"]
+#[path = "../support/models.rs"]
 mod models;
 use async_trait::async_trait;
 use futures::FutureExt;
@@ -366,7 +366,7 @@ async fn flush() {
 async fn whole_event_output_matches_typescript_reference() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let reference: Value = serde_json::from_str(include_str!("support/terminal/reference.json")).unwrap();
+            let reference: Value = serde_json::from_str(include_str!("../support/terminal/reference.json")).unwrap();
             let f = Fixture::new(false, false, None, None, None);
             flush().await;
             assert_eq!(f.text(), reference["header"].as_str().unwrap());

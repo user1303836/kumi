@@ -2,6 +2,7 @@
 //! against a simulated Renoise tool that does what the real one does with them: reads the preset data (`preset_read`),
 //! writes what the host composed while the device's shape is the one the host edited from, and puts the host's restore
 //! back the same way.
+#[path = "../common/mod.rs"]
 mod common;
 
 use common::Session;
@@ -13,7 +14,7 @@ use daw_mcp_server::simulator::{Simulator, SimulatorConfig};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
-const DOOFER: &str = include_str!("fixtures/renoise/doofer_eq5_gainer.xml");
+const DOOFER: &str = include_str!("../fixtures/renoise/doofer_eq5_gainer.xml");
 
 /// The Doofer on track 3 of a simulated song: its preset data, and every write the host asked for.
 #[derive(Default)]

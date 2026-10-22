@@ -1,6 +1,6 @@
 //! The plain terminal's goodbye is always its last line: a /status still working out its conversation when /quit
 //! comes says its second line first, and nothing is said after the goodbye.
-#[path = "support/models.rs"]
+#[path = "../support/models.rs"]
 mod models;
 use async_trait::async_trait;
 use kumi::{

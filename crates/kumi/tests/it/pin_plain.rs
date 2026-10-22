@@ -2,7 +2,7 @@
 //! app's goldens (pin_screens.rs): from its first line to its last, kept as text in tests/goldens/tui/plain;
 //! `KUMI_BLESS=1` writes them again. Times are given relative to now (saved 3 hours ago), so the words are the
 //! same at any moment.
-#[path = "support/models.rs"]
+#[path = "../support/models.rs"]
 mod models;
 use async_trait::async_trait;
 use kumi::{

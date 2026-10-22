@@ -1,5 +1,5 @@
 //! `kumi report`, with full redaction oracle results.
-#[path = "support/live_words.rs"]
+#[path = "../support/live_words.rs"]
 mod live_words;
 use futures::FutureExt;
 use kumi::{
@@ -54,7 +54,7 @@ fn doctor(out: Rc<Out>, env: Env) -> DoctorIo {
 }
 #[test]
 fn redaction_removes_keys_tokens_long_values_paths_and_account_names() {
-    let cases: Value = serde_json::from_str(include_str!("support/report-reference.json")).unwrap();
+    let cases: Value = serde_json::from_str(include_str!("../support/report-reference.json")).unwrap();
     for case in cases.as_array().unwrap() {
         let secrets: Vec<String> = serde_json::from_value(case["secrets"].clone()).unwrap();
         assert_eq!(
