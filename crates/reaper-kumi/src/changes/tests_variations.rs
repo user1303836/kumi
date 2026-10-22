@@ -23,6 +23,7 @@ fn an_audio_take_is_its_items_copy_with_its_own_settings_and_its_undo_takes_it_a
     assert!((value("D_VOL") - 10f64.powf(-3.0 / 20.0)).abs() < 1e-9);
     assert_eq!((take.extra["D_FADEINLEN"], take.extra["D_FADEOUTLEN"]), (0.005, 0.4));
     assert_eq!(take.takes[0].name, "V1 · kick");
+    assert_eq!(take.extra.get("B_LOOPSRC").copied(), Some(0.0), "a take never loops its source");
     // The producer moved it since: the undo is refused; moved back, it takes it away; then it's gone.
     state(|s| s.tracks[1].items.iter_mut().find(|i| i.guid == copy).unwrap().position = 31.0);
     assert_eq!(code(lab.undo("item-variation", &preview, &made)), "changed");
@@ -95,4 +96,11 @@ fn takes_dropped_together_are_one_change_and_its_undo_makes_each_again_with_its_
     assert_eq!(code(lab.apply_with("items-delete", &drop, &preview, "Kumi: x (kv2)")), "changed");
     assert!(item(&ga).is_some(), "nothing deleted");
     assert_eq!(code(lab.preview("items-delete", json!({"refs": [a["created"]["ref"], a["created"]["ref"]]}))), "bad-params");
+    // REAPER refuses the second delete: the first is made again, with its id, and nothing is deleted.
+    state(|s| s.tracks[1].items.iter_mut().find(|i| i.guid == gb).unwrap().position = 33.0);
+    let preview = lab.preview("items-delete", drop.clone()).unwrap();
+    state(|s| s.item_deletes_left = Some(1));
+    assert_eq!(code(lab.apply_with("items-delete", &drop, &preview, "Kumi: x (kv3)")), "failed");
+    state(|s| s.item_deletes_left = None);
+    assert!(item(&ga).is_some() && item(&gb).is_some(), "none was deleted");
 }

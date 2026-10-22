@@ -485,6 +485,8 @@ pub struct State {
     pub marker_lanes: HashMap<String, i32>,
     /// The tracks each region (by its number) renders in the region render matrix: their ids, "master" for the master.
     pub render_matrix: HashMap<i32, Vec<String>>,
+    /// How many more item deletes REAPER makes before it refuses one (None: never refuses).
+    pub item_deletes_left: Option<usize>,
     pub fx_made: u32,
     /// TrackFX_Delete answers false and does nothing.
     pub fail_fx_delete: bool,
@@ -588,6 +590,7 @@ impl Default for State {
             made: 0,
             marker_lanes: HashMap::new(),
             render_matrix: HashMap::new(),
+            item_deletes_left: None,
             fx_made: 0,
             fail_fx_delete: false,
             meter_params: false,

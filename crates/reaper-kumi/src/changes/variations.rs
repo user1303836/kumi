@@ -161,6 +161,8 @@ pub fn add_apply(ctx: &Ctx, input: &Value, fence: &Value) -> Done<Applied> {
     }
     reaper.set_item_value(item, "D_POSITION", position);
     reaper.set_item_value(item, "B_UISEL", 0.0);
+    // (a take is one sound: looped, its source's attack would play again inside it past the sound's end)
+    reaper.set_item_value(item, "B_LOOPSRC", 0.0);
     if let Err(fault) = write(ctx, item, reaper.active_take(item), &settings) {
         // Nothing half-made stays.
         reaper.delete_item(found.track, item);
@@ -308,10 +310,19 @@ pub fn drop_apply(ctx: &Ctx, input: &Value, fence: &Value) -> Done<Applied> {
     }
     let before: Vec<Value> = found.iter().map(|f| drawn(ctx, f.item)).collect();
     // (each found again by its id as it goes: a pointer taken before another item went may not be that item any more)
-    for f in &found {
+    for (k, f) in found.iter().enumerate() {
         let deleted = item_by_guid(ctx, &f.guid).is_some_and(|item| reaper.delete_item(f.track, item));
         if !deleted {
-            return Err(failed("REAPER wouldn't delete an item"));
+            // (nothing half-done stays: the ones deleted already are made again, with their ids)
+            for back in &kept[..k] {
+                let _ = remake(
+                    ctx,
+                    back["track"].as_str().unwrap_or_default(),
+                    back["chunk"].as_str().unwrap_or_default(),
+                    back["guid"].as_str().unwrap_or_default(),
+                );
+            }
+            return Err(failed("REAPER wouldn't delete an item: none was deleted"));
         }
     }
     let tracks: Vec<Option<crate::reaper::Track>> = found.iter().map(|f| Some(f.track)).collect();

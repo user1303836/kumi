@@ -261,6 +261,19 @@ fn settings(material: &ItemTake, name: Option<&str>) -> Value {
     input
 }
 
+/// Where a take of `length` seconds first fits after `from` with `gap` seconds clear of every span (an item's start and end).
+fn free_after(spans: &[(f64, f64)], from: f64, length: f64, gap: f64) -> f64 {
+    let mut spans: Vec<(f64, f64)> = spans.iter().copied().filter(|(_, end)| *end > from).collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut at = from + gap;
+    for (start, end) in spans {
+        if start < at + length + gap && end + gap > at {
+            at = at.max(end + gap);
+        }
+    }
+    at
+}
+
 /// An operator's amount, `factor` times as much (0 to 1).
 fn amount(op: &Value, factor: f64) -> f64 {
     (op.get("amount").and_then(Value::as_f64).unwrap_or(0.5) * factor).clamp(0., 1.)
@@ -279,6 +292,87 @@ fn sign(op: &Value, rng: &mut Rng) -> f64 {
 /// A share of `most`, from a third of it to all of it: never next to nothing.
 fn some_of(most: f64, rng: &mut Rng) -> f64 {
     most * (1. + 2. * rng.below(1000) as f64 / 1000.) / 3.
+}
+
+/// One operator applied to the take so far, `factor` times as much: what it did, in a few words.
+fn apply_one(op: &Value, factor: f64, take: &mut ItemTake, source: &ItemTake, rng: &mut Rng) -> Result<String, String> {
+    let name = op.get("op").and_then(Value::as_str).unwrap_or("");
+    let much = amount(op, factor);
+    match name {
+        "pitch" if take.midi => {
+            let semitones =
+                op.get("semitones").and_then(Value::as_f64).map(f64::round).unwrap_or_else(|| sign(op, rng) * (1. + (much * 4.).round()));
+            for note in take.notes.iter_mut().filter(|note| !source.anchors.iter().any(|anchor| anchor.same(note))) {
+                note.pitch = (note.pitch + semitones as i64).clamp(0, 127);
+            }
+            Ok(format!("notes {semitones:+} st"))
+        }
+        "pitch" => {
+            let semitones = op.get("semitones").and_then(Value::as_f64).unwrap_or_else(|| sign(op, rng) * some_of(2. * much, rng));
+            take.pitch += semitones;
+            Ok(format!("pitch {:+.2} st", semitones))
+        }
+        "rate" => {
+            let ratio = 1. + sign(op, rng) * some_of(0.15 * much, rng);
+            let was = take.playrate;
+            take.playrate = (was * ratio).clamp(0.01, 100.);
+            // (the whole sound still heard, and no more of it: the item as long as the take so far plays at its new rate)
+            take.length = (take.length * was / take.playrate).max(0.01);
+            Ok(format!("rate \u{d7}{ratio:.3}"))
+        }
+        "offset" => {
+            // (within the attack, however many offsets: never more than ATTACK from the source's start)
+            let later = some_of(ATTACK * much, rng).min((source.offset + ATTACK - take.offset).max(0.));
+            take.offset += later;
+            take.length = (take.length - later / take.playrate.max(0.01)).max(0.01);
+            Ok(format!("starts {:.0} ms later", later * 1000.))
+        }
+        "length" => {
+            let share = 1. - some_of(0.35 * much, rng);
+            take.length = (take.length * share).max(0.01);
+            take.fade_out = take.fade_out.min(take.length);
+            Ok(format!("{:.0}% as long", share * 100.))
+        }
+        "fades" => {
+            take.fade_out = (take.fade_out + some_of(0.4 * much, rng) * take.length).min(take.length);
+            take.fade_in = (take.fade_in + some_of(0.004 * much, rng)).min(take.length / 4.);
+            Ok(format!("fades {:.0} ms in, {:.0} ms out", take.fade_in * 1000., take.fade_out * 1000.))
+        }
+        "volume" => {
+            let db = sign(op, rng) * some_of(4. * much, rng);
+            take.volume_db = (take.volume_db + db).clamp(-150., 24.);
+            Ok(format!("volume {db:+.1} dB"))
+        }
+        "velocity" => {
+            for note in take.notes.iter_mut().filter(|note| !source.anchors.iter().any(|anchor| anchor.same(note))) {
+                let moved = (sign(op, rng) * some_of(30. * much, rng)).round() as i64;
+                note.velocity = (note.velocity + moved).clamp(1, 127);
+            }
+            Ok("velocities moved".into())
+        }
+        "timing" => {
+            for note in take.notes.iter_mut().filter(|note| !source.anchors.iter().any(|anchor| anchor.same(note))) {
+                note.start = (note.start + sign(op, rng) * some_of(0.06 * much, rng)).max(0.);
+            }
+            Ok("timing loosened".into())
+        }
+        "thin" => {
+            let free: Vec<usize> =
+                (0..take.notes.len()).filter(|k| !source.anchors.iter().any(|anchor| anchor.same(&take.notes[*k]))).collect();
+            // (at least one note goes, and one stays)
+            let most = if take.notes.len() > free.len() { free.len() } else { free.len().saturating_sub(1) };
+            let count = ((free.len() as f64 * 0.4 * much).round() as usize).max(1).min(most);
+            let dropped: BTreeSet<usize> = rng.choose(free.len(), count).into_iter().map(|k| free[k]).collect();
+            let mut k = 0;
+            take.notes.retain(|_| {
+                let keep = !dropped.contains(&k);
+                k += 1;
+                keep
+            });
+            Ok(format!("{} notes fewer", dropped.len()))
+        }
+        other => return Err(format!("{other} isn't one of REAPER's variation operators")),
+    }
 }
 
 const AUDIO_OPS: [&str; 6] = ["pitch", "rate", "offset", "length", "fades", "volume"];
@@ -367,88 +461,7 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
     }
 
     fn apply_ops(&self, ops: &[Value], factor: f64, take: &mut ItemTake, source: &ItemTake, rng: &mut Rng) -> Result<Vec<String>, String> {
-        let mut said = Vec::new();
-        for op in ops {
-            let name = op.get("op").and_then(Value::as_str).unwrap_or("");
-            let much = amount(op, factor);
-            match name {
-                "pitch" if take.midi => {
-                    let semitones = op
-                        .get("semitones")
-                        .and_then(Value::as_f64)
-                        .map(f64::round)
-                        .unwrap_or_else(|| sign(op, rng) * (1. + (much * 4.).round()));
-                    for note in take.notes.iter_mut().filter(|note| !source.anchors.iter().any(|anchor| anchor.same(note))) {
-                        note.pitch = (note.pitch + semitones as i64).clamp(0, 127);
-                    }
-                    said.push(format!("notes {semitones:+} st"));
-                }
-                "pitch" => {
-                    let semitones = op.get("semitones").and_then(Value::as_f64).unwrap_or_else(|| sign(op, rng) * some_of(2. * much, rng));
-                    take.pitch = source.pitch + semitones;
-                    said.push(format!("pitch {:+.2} st", semitones));
-                }
-                "rate" => {
-                    let ratio = 1. + sign(op, rng) * some_of(0.15 * much, rng);
-                    take.playrate = (source.playrate * ratio).clamp(0.01, 100.);
-                    // (the whole sound still heard: the item as long as the source plays at its new rate)
-                    take.length = (source.length * source.playrate / take.playrate).max(0.01);
-                    said.push(format!("rate \u{d7}{ratio:.3}"));
-                }
-                "offset" => {
-                    let later = some_of(ATTACK * much, rng);
-                    take.offset = source.offset + later;
-                    take.length = (source.length - later / source.playrate.max(0.01)).max(0.01);
-                    said.push(format!("starts {:.0} ms later", later * 1000.));
-                }
-                "length" => {
-                    let share = 1. - some_of(0.35 * much, rng);
-                    take.length = (source.length * share).max(0.01);
-                    take.fade_out = take.fade_out.min(take.length);
-                    said.push(format!("{:.0}% as long", share * 100.));
-                }
-                "fades" => {
-                    take.fade_out = (source.fade_out + some_of(0.4 * much, rng) * take.length).min(take.length);
-                    take.fade_in = (source.fade_in + some_of(0.004 * much, rng)).min(take.length / 4.);
-                    said.push(format!("fades {:.0} ms in, {:.0} ms out", take.fade_in * 1000., take.fade_out * 1000.));
-                }
-                "volume" => {
-                    let db = sign(op, rng) * some_of(4. * much, rng);
-                    take.volume_db = (source.volume_db + db).clamp(-150., 24.);
-                    said.push(format!("volume {db:+.1} dB"));
-                }
-                "velocity" => {
-                    for note in take.notes.iter_mut().filter(|note| !source.anchors.iter().any(|anchor| anchor.same(note))) {
-                        let moved = (sign(op, rng) * some_of(30. * much, rng)).round() as i64;
-                        note.velocity = (note.velocity + moved).clamp(1, 127);
-                    }
-                    said.push("velocities moved".into());
-                }
-                "timing" => {
-                    for note in take.notes.iter_mut().filter(|note| !source.anchors.iter().any(|anchor| anchor.same(note))) {
-                        note.start = (note.start + sign(op, rng) * some_of(0.06 * much, rng)).max(0.);
-                    }
-                    said.push("timing loosened".into());
-                }
-                "thin" => {
-                    let free: Vec<usize> =
-                        (0..take.notes.len()).filter(|k| !source.anchors.iter().any(|anchor| anchor.same(&take.notes[*k]))).collect();
-                    // (at least one note goes, and one stays)
-                    let most = if take.notes.len() > free.len() { free.len() } else { free.len().saturating_sub(1) };
-                    let count = ((free.len() as f64 * 0.4 * much).round() as usize).max(1).min(most);
-                    let dropped: BTreeSet<usize> = rng.choose(free.len(), count).into_iter().map(|k| free[k]).collect();
-                    let mut k = 0;
-                    take.notes.retain(|_| {
-                        let keep = !dropped.contains(&k);
-                        k += 1;
-                        keep
-                    });
-                    said.push(format!("{} notes fewer", dropped.len()));
-                }
-                other => return Err(format!("{other} isn't one of REAPER's variation operators")),
-            }
-        }
-        Ok(said)
+        ops.iter().map(|op| apply_one(op, factor, take, source, rng)).collect()
     }
 
     fn written(&self, _set: &ReaperSet, lines: &[Value], base: &ItemTake) -> Result<ItemTake, String> {
@@ -510,14 +523,17 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
         material: &ItemTake,
         signal: &Signal,
     ) -> Result<(String, Value, String), (String, bool)> {
-        // (after the source and every take there, gap seconds apart)
-        let after = set
-            .takes
+        // (the first free stretch after the source on its track, gap seconds clear of every item there: REAPER plays
+        // overlapping items together, and render_files would take an overlap for one sound)
+        let items = self.items_on(&set.source.data.track, signal).await.map_err(|why| (why, true))?;
+        let spans: Vec<(f64, f64)> = items
             .iter()
-            .filter(|take| take.state != crate::core::variations::TakeState::Dropped)
-            .filter_map(|take| Some(take.place.get("position")?.as_f64()? + take.place.get("length")?.as_f64()?))
-            .fold(set.source.data.end, f64::max);
-        let position = round(after + set.source.data.gap);
+            .filter_map(|row| {
+                let start = row.get("position")?.as_f64()?;
+                Some((start, start + row.get("length")?.as_f64()?))
+            })
+            .collect();
+        let position = round(free_after(&spans, set.source.data.end, material.length, set.source.data.gap));
         let name = names(number, &set.source.short)[0].clone();
         let mut input = settings(material, Some(&name));
         input["ref"] = json!(set.source.data.item);
@@ -664,7 +680,7 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
 
     fn end_note(&self, set: &ReaperSet) -> Option<String> {
         Some(format!(
-            "The takes are copies of the source after it on \u{201c}{}\u{201d}: render_files plans their regions and renders a file each.",
+            "The takes are copies of the source on \u{201c}{}\u{201d}, each in the first free stretch after it (clear of the items there): render_files plans their regions and renders a file each.",
             set.source.data.track_name
         ))
     }
@@ -757,6 +773,24 @@ mod tests {
             let kind = CHANGES.kinds.iter().find(|kind| kind.tool == tool).unwrap_or_else(|| panic!("{tool}"));
             assert_eq!(problem(&Value::Object(kind.input_schema()), &input), None, "{tool}: {input}");
         }
+    }
+
+    #[test]
+    fn a_take_goes_in_the_first_free_stretch_after_its_source_and_ops_build_on_each_other() {
+        // (the source ends at 2; the producer's items at 2.6–4 and 9–10; a 1-second take with half a second clear)
+        let spans = [(0.0, 2.0), (2.6, 4.0), (9.0, 10.0)];
+        assert_eq!(free_after(&spans, 2.0, 1.0, 0.5), 4.5, "not over the next item: after it");
+        assert_eq!(free_after(&spans, 2.0, 5.0, 0.5), 10.5, "too long for the gap before 9: after that one");
+        assert_eq!(free_after(&[], 2.0, 1.0, 0.5), 2.5);
+        // Rate then length: the length follows the take so far, not the source.
+        let backend_ops = [json!({"op": "rate", "amount": 1.0, "up": true}), json!({"op": "length", "amount": 1.0})];
+        let source = audio();
+        let mut take = source.clone();
+        let mut rng = Rng::new(7);
+        for op in &backend_ops {
+            apply_one(op, 1.0, &mut take, &source, &mut rng).unwrap();
+        }
+        assert!(take.length < source.length / take.playrate + 1e-9, "never longer than its sound at the new rate: {take:?}");
     }
 
     #[test]

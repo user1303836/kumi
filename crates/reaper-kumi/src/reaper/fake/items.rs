@@ -284,8 +284,11 @@ pub(super) unsafe extern "C" fn add_media_item_to_track(track: *mut MediaTrack) 
 pub(super) unsafe extern "C" fn delete_track_media_item(track: *mut MediaTrack, item: *mut MediaItem) -> bool {
     counted(|s| {
         let (_, t, i, _) = unpack(item as u64);
-        if item_of(s, item as u64).is_none() || unpack(track as u64).1 != t {
+        if item_of(s, item as u64).is_none() || unpack(track as u64).1 != t || s.item_deletes_left == Some(0) {
             return false;
+        }
+        if let Some(left) = s.item_deletes_left.as_mut() {
+            *left -= 1;
         }
         s.tracks[t as usize].items.remove(i as usize);
         s.undo_dirty = true;
