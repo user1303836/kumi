@@ -205,18 +205,8 @@ end
 
 pub const RENOISE_STATE: &str = r##"
 local R = renoise
+-- (the notes are counted by RENOISE_NOTES, in pages)
 local out = {notes = 0, tracks = {}, instruments = {}, sequence = {}}
-for _, p in ipairs(song.patterns) do
-  for t = 1, song.sequencer_track_count do
-    if song:track(t).type == R.Track.TRACK_TYPE_SEQUENCER then
-      for _, line in ipairs(p:track(t).lines) do
-        if not line.is_empty then
-          for c = 1, 12 do if line:note_column(c).note_value < 120 then out.notes = out.notes + 1 end end
-        end
-      end
-    end
-  end
-end
 local types = {[R.Track.TRACK_TYPE_SEQUENCER] = "sequencer", [R.Track.TRACK_TYPE_GROUP] = "group",
   [R.Track.TRACK_TYPE_SEND] = "send", [R.Track.TRACK_TYPE_MASTER] = "master"}
 for i, t in ipairs(song.tracks) do
@@ -256,6 +246,43 @@ local function notes_of(p, t, c)
   end
   return r
 end
+"##;
+
+/// The notes a Renoise song plays, counted from pattern `FROM` (set before it) for half a second at most, Renoise stopping a
+/// callback at 800 ms (#400 review D21): `next` is the pattern to go on from, none once every pattern is counted. Each
+/// sequencer track's lines are read one by one, an empty pattern track skipped, and an alias through its source, as
+/// Renoise plays it (up to the shorter pattern's length).
+pub const RENOISE_NOTES: &str = r##"
+local R = renoise
+local out = {notes = 0}
+local deadline = os.clock() + 0.5
+local p = FROM
+while p <= #song.patterns do
+  local pattern = song:pattern(p)
+  for t = 1, #song.tracks do
+    if song:track(t).type == R.Track.TRACK_TYPE_SEQUENCER then
+      local pt, lines = pattern:track(t), pattern.number_of_lines
+      if pt.is_alias then
+        local source = song:pattern(pt.alias_pattern_index)
+        pt, lines = source:track(t), math.min(lines, source.number_of_lines)
+      end
+      if not pt.is_empty then
+        for l = 1, lines do
+          local line = pt:line(l)
+          if not line.is_empty then
+            for c = 1, 12 do if line:note_column(c).note_value < 120 then out.notes = out.notes + 1 end end
+          end
+        end
+      end
+    end
+  end
+  p = p + 1
+  if p <= #song.patterns and os.clock() > deadline then
+    out.next = p
+    break
+  end
+end
+return out
 "##;
 
 // ---------------------------------------------------------------------------------------------------------------------

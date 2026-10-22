@@ -205,6 +205,30 @@ async fn host_call(host: &InProcess, name: &str, args: Value) -> Result<Value, S
 }
 
 /// Lua run in the DAW through the host as a run-lua change that no session keeps (no HISTORY row), and what it returned.
+/// The most pages Renoise's notes are counted in (each half a second of Renoise's time).
+const NOTE_PAGES: usize = 40;
+
+/// The state a scenario scores, read by `reader`; in Renoise its notes counted in pages, each inside a callback (D21).
+async fn state_of(host: &InProcess, daw: Daw, reader: &str, timeout_ms: u64) -> Result<Value, String> {
+    let mut state = lua(host, reader, timeout_ms).await?;
+    if daw != Daw::Renoise {
+        return Ok(state);
+    }
+    let (mut from, mut notes) = (1, 0);
+    for _ in 0..NOTE_PAGES {
+        let page = lua(host, &format!("local FROM = {from}\n{}", scenarios::RENOISE_NOTES), timeout_ms).await?;
+        notes += page["notes"].as_u64().unwrap_or(0);
+        match page["next"].as_u64() {
+            Some(next) => from = next,
+            None => {
+                state["notes"] = json!(notes);
+                return Ok(state);
+            }
+        }
+    }
+    Err(format!("the song's notes weren't counted in {NOTE_PAGES} pages"))
+}
+
 async fn lua(host: &InProcess, code: &str, timeout_ms: u64) -> Result<Value, String> {
     thread_local!(static NEXT: Cell<u64> = const { Cell::new(0) });
     // (a fixture that replaced every track reads as another project a moment later: the epoch moves, so read it again)
@@ -382,7 +406,7 @@ async fn run_scenario(model: &Model, scenario: &Scenario, home: &Path, dirs: &Di
         }
         last = epoch;
     }
-    let before = lua(&host, &reader, timeout).await.map_err(|e| failure(format!("state before: {e}")))?;
+    let before = state_of(&host, scenario.daw, &reader, timeout).await.map_err(|e| failure(format!("state before: {e}")))?;
     // EVAL_DRY=1: the fixture and its state only, no session (no model calls): to check the fixtures in the lab.
     if std::env::var_os("EVAL_DRY").is_some_and(|dry| !dry.is_empty()) {
         if let Some(teardown) = scenario.teardown {
@@ -517,7 +541,7 @@ async fn run_scenario(model: &Model, scenario: &Scenario, home: &Path, dirs: &Di
             _ => {}
         }
     }
-    let after = lua(&host, &reader, timeout).await.map_err(|e| failure(format!("state after: {e}")))?;
+    let after = state_of(&host, scenario.daw, &reader, timeout).await.map_err(|e| failure(format!("state after: {e}")))?;
     if let Some(teardown) = scenario.teardown {
         lua(&host, teardown, timeout).await.ok();
     }
