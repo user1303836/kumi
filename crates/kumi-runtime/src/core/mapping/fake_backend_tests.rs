@@ -4,6 +4,7 @@ use super::backend::{Held, MappingBackend, Words};
 use super::tool::Mapping;
 use super::Planned;
 use crate::core::contracts::KernelTool;
+use crate::core::daw::DawProfile;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
 use serde_json::{json, Value};
@@ -11,7 +12,7 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-static WORDS: Words = Words { app: "Fake", instrument: "instrument", notes: "a MIDI number", lowest: 12, highest: 131, first_key: 60 };
+static WORDS: Words = Words { app: "Fake", profile: &DawProfile::REAPER, instrument: "instrument", lowest: 0, highest: 127, first_key: 60 };
 
 #[derive(Default)]
 struct Fake {
@@ -27,17 +28,12 @@ impl MappingBackend for Rc<Fake> {
         &WORDS
     }
 
-    fn note_name(&self, midi: i32) -> String {
-        const CLASSES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-        format!("{}{}", CLASSES[midi.rem_euclid(12) as usize], midi.div_euclid(12) - 1)
-    }
-
-    fn note_of(&self, value: &Value) -> Option<i32> {
-        value.as_i64().map(|n| n as i32)
-    }
-
-    async fn samples_of(&self, _instrument: &str, _signal: &Signal) -> Result<(String, Vec<Held>), String> {
-        Ok(("Keys".into(), self.held.borrow().clone()))
+    async fn samples_of(&self, _instrument: &str, most: usize, _signal: &Signal) -> Result<(String, Vec<Held>), String> {
+        let held = self.held.borrow().clone();
+        if held.len() > most {
+            return Err("too many".into());
+        }
+        Ok(("Keys".into(), held))
     }
 
     async fn make(&self, planned: &Planned, name: &str, drums: bool, _signal: &Signal) -> Result<Value, String> {
@@ -65,6 +61,11 @@ fn tone(path: &Path, midi: f64, amplitude: f64, seconds: f64) {
     crate::audio::decode::write_test_wav(path, &mono, rate);
 }
 
+/// A sample the fake DAW holds, over every key and velocity as a new one is.
+fn held(reference: &str, name: &str, file: Result<String, String>) -> Held {
+    Held { reference: reference.into(), name: name.into(), file, zone: (0, 127), velocity: (0, 127), transpose: 0, note_off: false }
+}
+
 async fn run(tool: &Rc<dyn KernelTool>, input: Value) -> Result<Value, String> {
     let done = tool.execute(input.as_object().cloned().unwrap(), Signal::new()).await.unwrap();
     if done.is_error {
@@ -83,6 +84,8 @@ async fn a_folder_named_an_octave_low_is_heard_planned_and_made_in_one_change() 
         tone(&folder.path().join(format!("{name}.wav")), midi, amplitude, 1.0);
     }
     std::fs::write(folder.path().join("notes.txt"), "not a sound").unwrap();
+    // (macOS's "._" copy on another drive: not a sound either)
+    std::fs::write(folder.path().join("._Piano_C3_v1.wav"), "AppleDouble").unwrap();
     let fake = Rc::new(Fake::default());
     let tool = Mapping::new(fake.clone()).tool();
     let folder_text = folder.path().to_string_lossy().into_owned();
@@ -96,8 +99,12 @@ async fn a_folder_named_an_octave_low_is_heard_planned_and_made_in_one_change() 
     assert_eq!(first["velocity"], json!([0, 63]));
     assert!(planned["next"].as_str().unwrap().contains("action apply"), "{planned}");
     assert!(fake.made.borrow().is_empty(), "a plan makes nothing");
+    // Apply what was shown: a plan id that isn't this plan's is refused, and nothing is made.
+    let refused = run(&tool, json!({"folder": folder_text, "action": "apply", "plan": "m00000000"})).await.unwrap_err();
+    assert!(refused.contains("isn't the one shown"), "{refused}");
+    assert!(fake.made.borrow().is_empty());
     // Apply: one instrument, named for what the names share.
-    let made = run(&tool, json!({"folder": folder_text, "action": "apply"})).await.unwrap();
+    let made = run(&tool, json!({"folder": folder_text, "action": "apply", "plan": planned["planId"]})).await.unwrap();
     assert_eq!(made["made"], json!([{"change": "c1"}]), "{made}");
     let made = fake.made.borrow();
     let (name, planned, drums) = &made[0];
@@ -105,7 +112,7 @@ async fn a_folder_named_an_octave_low_is_heard_planned_and_made_in_one_change() 
     assert!(!drums);
     assert_eq!(planned.samples.len(), 4);
     let g = planned.samples.iter().find(|p| p.name == "Piano_G3_v2").unwrap();
-    assert_eq!((g.root, g.zone, g.velocity), (67, (64, 131), (64, 127)));
+    assert_eq!((g.root, g.zone, g.velocity), (67, (64, 127), (64, 127)));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -118,13 +125,19 @@ async fn an_instruments_own_samples_are_laid_out_and_articulations_need_a_part()
     };
     let fake = Rc::new(Fake::default());
     *fake.held.borrow_mut() = vec![
-        Held { reference: "s:1".into(), name: "Low".into(), file: Ok(file("low", 48.)) },
-        Held { reference: "s:2".into(), name: "High".into(), file: Ok(file("high", 72.)) },
-        Held { reference: "s:3".into(), name: "Broken".into(), file: Err("no audio".into()) },
+        held("s:1", "Low", Ok(file("low", 48.))),
+        held("s:2", "High", Ok(file("high", 72.))),
+        held("s:3", "Broken", Err("no audio".into())),
     ];
     let tool = Mapping::new(fake.clone()).tool();
     let laid = run(&tool, json!({"instrumentRef": "in:1", "action": "apply", "layout": "keys"})).await.unwrap();
     assert_eq!(laid["leftOut"][0]["sample"], "Broken", "{laid}");
+    assert!(
+        laid["decided"].as_array().unwrap().iter().any(|line| line.as_str().unwrap().starts_with("“Broken” couldn't be heard")),
+        "{laid}"
+    );
+    // What wasn't laid out still sounds over the new zones: said, so it can be moved or deleted.
+    assert_eq!(laid["stillSounding"], json!(["“Broken” (C-1 to G9)"]), "{laid}");
     let (instrument, roots): (String, Vec<(String, i32)>) = {
         let remapped = fake.remapped.borrow();
         (remapped[0].0.clone(), remapped[0].1.samples.iter().map(|p| (p.id.clone(), p.root)).collect())
@@ -132,14 +145,12 @@ async fn an_instruments_own_samples_are_laid_out_and_articulations_need_a_part()
     assert_eq!(instrument, "in:1");
     assert_eq!(roots, vec![("s:1".to_string(), 48), ("s:2".to_string(), 72)], "found by their pitch");
     // Two articulations in one instrument: say which.
-    *fake.held.borrow_mut() = vec![
-        Held { reference: "s:1".into(), name: "Vln sus C4".into(), file: Ok(file("a", 60.)) },
-        Held { reference: "s:2".into(), name: "Vln pizz C4".into(), file: Ok(file("b", 60.)) },
-    ];
+    *fake.held.borrow_mut() = vec![held("s:1", "Vln sus C4", Ok(file("a", 60.))), held("s:2", "Vln pizz C4", Ok(file("b", 60.)))];
     let refused = run(&tool, json!({"instrumentRef": "in:1", "action": "apply"})).await.unwrap_err();
-    assert!(refused.contains("2 articulations (pizzicato, sustain)"), "{refused}");
-    run(&tool, json!({"instrumentRef": "in:1", "action": "apply", "part": "pizzicato"})).await.unwrap();
+    assert!(refused.contains("2 parts (pizzicato, sustain)"), "{refused}");
+    let laid = run(&tool, json!({"instrumentRef": "in:1", "action": "apply", "part": "pizzicato"})).await.unwrap();
     assert_eq!(fake.remapped.borrow()[1].1.samples[0].id, "s:2");
+    assert!(laid["otherParts"].as_str().unwrap().starts_with("sustain stay as they were"), "{laid}");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -160,7 +171,7 @@ async fn roots_set_by_hand_and_bad_input_are_answered_in_words() {
         .unwrap_err()
         .contains("no sample is Other"));
     assert!(run(&tool, json!({})).await.unwrap_err().contains("give files"));
-    assert!(run(&tool, json!({"files": [path_text], "middleC": "C5"})).await.unwrap_err().contains("middleC is C3 or C4"));
+    assert!(run(&tool, json!({"files": [path_text], "middleC": "C6"})).await.unwrap_err().contains("middleC is C3, C4 or C5"));
     assert!(run(&tool, json!({"files": [path_text], "instrumentRef": "in:1"})).await.unwrap_err().contains("one of them"));
 }
 

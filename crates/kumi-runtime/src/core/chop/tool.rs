@@ -3,7 +3,7 @@
 //! offered as variations takes). The DAW's backend reads, cuts, lays out and renders.
 use super::backend::{ChopBackend, Key, Laid, Recording, Song, Step};
 use super::hits::{hits, Hit};
-use super::{break_tempo, hit_words, on_grid, place, rolls, same_tempo, Density, Tempo};
+use super::{beat_of, break_tempo, hit_words, on_grid, rolls, same_tempo, Density, Tempo};
 use crate::audio::decode::read_mono;
 use crate::core::contracts::{JsonObject, KernelTool, Reach, ToolResult};
 use crate::core::errors::RuntimeError;
@@ -116,27 +116,34 @@ impl<B: ChopBackend + 'static> Chop<B> {
         if chosen.is_empty() {
             return Err(format!("no hits of that density ({}) were found", density.words()));
         }
-        let ops = chosen.len() + if replace { recording.cuts.len() } else { 0 };
-        if ops > MOST_CUTS {
+        // (on the song's grid when the break plays at its tempo: laid out in order, the cuts are the recording again)
+        let unit = song.grid.filter(|_| same_tempo(heard.tempo.bpm, song.bpm));
+        let mut frames: Vec<usize> =
+            chosen.iter().map(|hit| unit.map_or(hit.frame, |unit| on_grid(hit.frame, recording.rate, song.bpm, unit))).collect();
+        frames.dedup();
+        // (a cut again keeps the cuts that stay where they are: only those that move are changes)
+        let added = frames.iter().filter(|frame| !recording.cuts.contains(frame)).count();
+        let removed = if replace { recording.cuts.iter().filter(|frame| !frames.contains(frame)).count() } else { 0 };
+        if added + removed == 0 {
+            return Ok(
+                json!({"made": Value::Null, "said": format!("{} is cut at these hits already", quoted(&recording.name)), "cuts": frames.len()}),
+            );
+        }
+        if added + removed > MOST_CUTS {
             return Err(format!(
                 "that is {} {cut} changes, more than one change makes ({MOST_CUTS}): density main cuts {}",
-                ops,
+                added + removed,
                 heard.hits.iter().zip(&heard.rolls).filter(|(hit, roll)| Density::Main.keeps(hit, **roll)).count()
             ));
         }
-        // (on the song's grid when the break plays at its tempo: laid out in order, the cuts are the recording again)
-        let grid = same_tempo(heard.tempo.bpm, song.bpm);
-        let mut frames: Vec<usize> =
-            chosen.iter().map(|hit| if grid { on_grid(hit.frame, recording.rate, song.bpm, song.lpb) } else { hit.frame }).collect();
-        frames.dedup();
         let answer = self.backend.cut(recording, &frames, replace, signal).await?;
         let keys = self.backend.keys(recording, signal).await.unwrap_or_default();
         let mut reply = json!({"made": answer, "density": density.words(), "cuts": frames.len()});
         if !keys.is_empty() {
             reply["keys"] = json!(self.key_lines(&keys, heard, recording.rate));
         }
-        if grid {
-            reply["grid"] = json!("each cut sits where a line and delay start exactly, so laid out in order it plays the recording again");
+        if unit.is_some() {
+            reply["grid"] = json!("each cut sits where a note can start exactly, so laid out in order it plays the recording again");
         }
         reply["next"] = json!("action lay writes them to play it as recorded (or write notes on these keys to play them another way)");
         Ok(reply)
@@ -163,18 +170,12 @@ impl<B: ChopBackend + 'static> Chop<B> {
         }
         let at = input.get("at").cloned().ok_or("at: where to lay the cuts out")?;
         let tempo = &heard.tempo;
-        let steps: Vec<Step> = keys
-            .iter()
-            .map(|key| {
-                let (line, delay) = place(key.frame as f64 / recording.rate, tempo.bpm, song.lpb);
-                Step { note: key.note.clone(), line, delay }
-            })
-            .collect();
-        // (a hair under a whole line is that line: a recording cut to whole bars is that many lines)
-        let length = (recording.frames as f64 / recording.rate * tempo.bpm / 60. * song.lpb as f64 - 1e-3).ceil().max(1.) as u32;
-        let laid = self.backend.lay(recording, &at, &steps, length, signal).await?;
-        let mut reply =
-            json!({"made": laid.answer, "lines": format!("{:02} to {:02}", laid.first, laid.last), "tempo": tempo_words(tempo)});
+        let steps: Vec<Step> =
+            keys.iter().map(|key| Step { note: key.note.clone(), beat: beat_of(key.frame as f64 / recording.rate, tempo.bpm) }).collect();
+        let beats = beat_of(recording.frames as f64 / recording.rate, tempo.bpm);
+        let replace = input.get("replace").and_then(Value::as_bool).unwrap_or(false);
+        let laid = self.backend.lay(recording, &at, &steps, beats, replace, signal).await?;
+        let mut reply = json!({"made": laid.answer, "at": laid.words, "tempo": tempo_words(tempo)});
         if !same_tempo(tempo.bpm, song.bpm) {
             reply["note"] = json!(format!(
                 "the song plays at {:.1} BPM, the break was played at {:.1}: each {cut} starts on its beat at the song's tempo, so {}",
@@ -220,27 +221,9 @@ impl<B: ChopBackend + 'static> Chop<B> {
             }
             seen.push(kept.clone());
             let chosen: Vec<Step> = kept.iter().map(|k| steps[*k].clone()).collect();
-            out.push(json!({"direction": density.words(), "lines": self.backend_lines(laid, &chosen)}));
+            out.push(json!({"direction": density.words(), "lines": self.backend.take_lines(laid, &chosen)}));
         }
         (!out.is_empty()).then_some(out)
-    }
-
-    fn backend_lines(&self, laid: &Laid, steps: &[Step]) -> Value {
-        // (the range's own lines: the laid answer says how its cells are written, the backend's notation)
-        let template = laid.answer.get("cell").cloned().unwrap_or(json!({}));
-        let lines: Vec<Value> = steps
-            .iter()
-            .map(|step| {
-                let mut cell = template.clone();
-                cell["col"] = json!(1);
-                cell["note"] = json!(step.note);
-                if step.delay > 0 {
-                    cell["delay"] = json!(step.delay);
-                }
-                json!({"line": laid.first + step.line, "notes": [cell]})
-            })
-            .collect();
-        Value::Array(lines)
     }
 
     /// The laid-out cuts rendered and heard: how close each hit lands to where the recording has it, and, at the break's own
@@ -369,7 +352,7 @@ fn description(words: &super::backend::Words, takes: bool) -> String {
         ""
     };
     format!(
-        "Chop a drum recording at its real hits and lay the {cut}s out to play it: ref is {source}. action plan (the default) finds every hit to the frame (a kick, snare or hat; a ghost, far quieter than its kind's loudest; a roll) and the break's own tempo (whole bars from its length, nearest the song's: bars or bpm tell it otherwise): tell the producer and offer the densities: every (ghosts and rolls too), main (no ghosts or rolls), kick-snare. action cut makes a {cut} at each hit of a density in one change, each on the song's grid when the break plays at the song's tempo (replace: true cuts one already cut again); its answer lists each {cut}'s key and what it starts with. action lay writes the {cut}s at {place}, in order as recorded, at the song's lines per beat (the delay column for what falls between lines), renders it and says how close its hits land to the recording's and how deep it nulls against it.{takes} Play them another way (a re-sequence) only when asked, writing notes on the keys cut lists.",
+        "Chop a drum recording at its real hits and lay the {cut}s out to play it: ref is {source}. action plan (the default) finds every hit to the frame (a kick, snare or hat; a ghost, far quieter than its kind's loudest; a roll) and the break's own tempo (whole bars from its length, nearest the song's: bars or bpm tell it otherwise): tell the producer and offer the densities: every (ghosts and rolls too), main (no ghosts or rolls), kick-snare. action cut makes a {cut} at each hit of a density in one change, each on the song's grid when the break plays at the song's tempo (replace: true cuts one already cut again); its answer lists each {cut}'s key and what it starts with. action lay writes the {cut}s at {place}, in order as recorded, each where it falls at the song's tempo (never over notes already there unless replace: true, which undo_change puts back), renders it and says how close its hits land to the recording's and how deep it nulls against it.{takes} Play them another way (a re-sequence) only when asked, writing notes on the keys cut lists.",
         source = words.source,
         place = words.place
     )

@@ -10,8 +10,10 @@ use std::sync::LazyLock;
 pub enum Written {
     /// "C3", "A#2", "Db4", "C-4" (a tracker's natural): the octave as written, whose convention a set settles.
     Named { class: u8, octave: i32 },
-    /// "060", "midi60", "note_60": a MIDI number, C4 = 60.
+    /// "midi60", "note_60", "nn60": a MIDI number, middle C = 60.
     Midi(u8),
+    /// "060": a zero-padded number, a MIDI note in some libraries and a take number in most; the set decides (`settle_padded`).
+    Padded(u8),
 }
 
 /// A velocity as a name writes it.
@@ -243,8 +245,8 @@ pub fn hints(stem: &str) -> Hints {
         } else if let Some(note) = note_word(word) {
             hints.note = Some(note);
         } else if word.len() == 3 && word.starts_with('0') && number_word(word).is_some_and(|n| n <= 127) {
-            // ("060": a zero-padded MIDI number; a bare "60" or "2" could be a take, a layer or a round robin)
-            hints.note = hints.note.or(Some(Written::Midi(number_word(word).unwrap_or(0) as u8)));
+            // ("060": maybe a MIDI number, maybe a take; a bare "60" or "2" could be a take, a layer or a round robin)
+            hints.note = hints.note.or(Some(Written::Padded(number_word(word).unwrap_or(0) as u8)));
         } else if let Some((_, level)) = DYNAMICS.iter().find(|(name, _)| *name == lower) {
             // ("p" and "f" alone count only where the set's other names use dynamics too: see `dynamics_alone`)
             hints.velocity = hints.velocity.or(Some(Velocity::Dynamic(*level)));
@@ -282,15 +284,22 @@ pub fn dynamics_alone(stems: &[&str], hints: &mut [Hints]) {
     }
 }
 
-/// The MIDI note a written note is, under a convention: where middle C (MIDI 60) is "C4" (`c4_is_60`) or "C3".
-pub fn midi_of(written: Written, c4_is_60: bool) -> Option<i32> {
+/// The MIDI note a written note is, under a convention: the octave number names give middle C (MIDI 60): 4 as scientific pitch
+/// writes it, 3 as many samplers do, 5 as Renoise and the trackers do.
+pub fn midi_of(written: Written, middle_c: i32) -> Option<i32> {
     match written {
-        Written::Midi(n) => Some(n as i32),
+        Written::Midi(n) | Written::Padded(n) => Some(n as i32),
         Written::Named { class, octave } => {
-            let midi = 12 * (octave + if c4_is_60 { 1 } else { 2 }) + class as i32;
+            let midi = 12 * (octave + 5 - middle_c) + class as i32;
             (0..=127).contains(&midi).then_some(midi)
         }
     }
+}
+
+/// A name's note in a tracker's spelling, a dash for a natural ("C-4"): what a tracker names middle C C-5 for.
+pub fn tracker_spelling(stem: &str) -> bool {
+    static TRACKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(^|[^a-z])[a-g]-[0-9]($|[^0-9])").unwrap());
+    TRACKER.is_match(stem)
 }
 
 #[cfg(test)]
@@ -312,7 +321,7 @@ mod tests {
         assert_eq!(hints("Rhodes_F#3_rr2").note, named(6, 3));
         assert_eq!(hints("Rhodes_F#3_rr2").round_robin, Some(2));
         assert_eq!(hints("VibeC3").note, named(0, 3), "a capital note after a word");
-        assert_eq!(hints("Piano_060_vel100").note, Some(Written::Midi(60)));
+        assert_eq!(hints("Piano_060_vel100").note, Some(Written::Padded(60)));
         assert_eq!(hints("Piano_060_vel100").velocity, Some(Velocity::Value(100)));
         assert_eq!(hints("Piano Vel 64 C2").velocity, Some(Velocity::Value(64)));
         assert_eq!(hints("Piano_v064_C2").velocity, Some(Velocity::Value(64)));
@@ -346,9 +355,11 @@ mod tests {
 
     #[test]
     fn a_convention_places_middle_c() {
-        assert_eq!(midi_of(Written::Named { class: 0, octave: 4 }, true), Some(60));
-        assert_eq!(midi_of(Written::Named { class: 0, octave: 3 }, false), Some(60));
-        assert_eq!(midi_of(Written::Midi(60), false), Some(60));
-        assert_eq!(midi_of(Written::Named { class: 0, octave: 10 }, true), None);
+        assert_eq!(midi_of(Written::Named { class: 0, octave: 4 }, 4), Some(60));
+        assert_eq!(midi_of(Written::Named { class: 0, octave: 3 }, 3), Some(60));
+        assert_eq!(midi_of(Written::Named { class: 0, octave: 5 }, 5), Some(60), "a tracker's C-5");
+        assert_eq!(midi_of(Written::Midi(60), 3), Some(60));
+        assert_eq!(midi_of(Written::Named { class: 0, octave: 10 }, 4), None);
+        assert!(tracker_spelling("Lead C-4") && !tracker_spelling("Lead C4") && !tracker_spelling("Kick-01"));
     }
 }

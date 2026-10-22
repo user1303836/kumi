@@ -43,6 +43,8 @@ const GAP: f64 = 0.02;
 const FLOOR_DB: f64 = 45.0;
 /// A hit this far under the loudest of its kind is a ghost (dB).
 const GHOST_DB: f64 = 9.0;
+/// A hit still stands this far over what sounded before it past its first 2 ms, in one band at least (twice the energy: 3 dB).
+const LASTING: f64 = 2.0;
 
 /// A follower's release (seconds): long enough that a 40 Hz sine's swing between its peaks stays under the rise a hit makes.
 const RELEASE: f64 = 0.03;
@@ -64,14 +66,44 @@ fn followed(values: impl Iterator<Item = f64>, rate: f64, hop: usize) -> Vec<f64
     out
 }
 
+/// A recording with its clicks taken out: a sample that stands out from the five around it (their median) by six times the level
+/// of the 32 around it is a click (a sample or two long), and gives way to that median. Noise and a drum's attack never stand
+/// out so from their own neighbourhood.
+fn despiked(mono: &[f32]) -> Vec<f32> {
+    let mut sums = vec![0f64; mono.len() + 1];
+    for (n, v) in mono.iter().enumerate() {
+        sums[n + 1] = sums[n] + v.abs() as f64;
+    }
+    (0..mono.len())
+        .map(|n| {
+            if n < 2 || n + 2 >= mono.len() {
+                return mono[n];
+            }
+            let mut five = [mono[n - 2], mono[n - 1], mono[n], mono[n + 1], mono[n + 2]];
+            five.sort_by(f32::total_cmp);
+            let median = five[2];
+            let (from, to) = (n.saturating_sub(16), (n + 17).min(mono.len()));
+            let around = (sums[to] - sums[from] - mono[n].abs() as f64) / (to - from - 1).max(1) as f64;
+            if ((mono[n] - median).abs() as f64) > 6. * around + 0.02 {
+                median
+            } else {
+                mono[n]
+            }
+        })
+        .collect()
+}
+
 /// The hits of a mono recording at `rate`.
 pub fn hits(mono: &[f32], rate: f64) -> Vec<Hit> {
     let hop = ((rate / 1000.).round() as usize).max(1);
     if mono.len() < hop * 32 {
         return Vec::new();
     }
-    let plain = followed(mono.iter().map(|v| *v as f64), rate, hop);
-    let edges = followed(std::iter::once(0.).chain(mono.windows(2).map(|pair| (pair[1] - pair[0]) as f64)), rate, hop);
+    // (the levels follow the recording with its clicks taken out: a crackle a sample or two long would hold the follower up
+    // for a tenth of a second and hide a ghost behind it)
+    let clean = despiked(mono);
+    let plain = followed(clean.iter().map(|v| *v as f64), rate, hop);
+    let edges = followed(std::iter::once(0.).chain(clean.windows(2).map(|pair| (pair[1] - pair[0]) as f64)), rate, hop);
     let frames = plain.len().min(edges.len());
     let loudest = plain.iter().copied().fold(f64::MIN, f64::max);
     // Each millisecond's rise over the next three, and which level rose (the signal's, or its first difference's: a hat's).
@@ -87,22 +119,40 @@ pub fn hits(mono: &[f32], rate: f64) -> Vec<Hit> {
         .collect();
     let gap = ((GAP * rate) as usize / hop).max(1);
     let mut found: Vec<(usize, f64, bool)> = Vec::new();
-    for (f, (value, edge)) in rise.iter().enumerate() {
-        let peak = *value >= RISE_DB
-            && (f == 0 || rise[f - 1].0 < *value)
-            && rise.get(f + 1).is_none_or(|next| next.0 <= *value)
-            && plain[f + 3] > loudest - FLOOR_DB;
-        if !peak {
-            continue;
-        }
+    // Every steep rise is a candidate; a click among them (over within 2 ms) is dropped before two close ones become one, so it
+    // never takes a hit's place.
+    let candidates: Vec<(usize, f64, bool)> = rise
+        .iter()
+        .enumerate()
+        .filter(|(f, (value, _))| {
+            *value >= RISE_DB
+                && (*f == 0 || rise[f - 1].0 < *value)
+                && rise.get(f + 1).is_none_or(|next| next.0 <= *value)
+                && plain[f + 3] > loudest - FLOOR_DB
+        })
+        .map(|(f, (value, edge))| (f, *value, *edge))
+        .collect();
+    let lasting: Vec<(usize, f64, bool)> = candidates
+        .iter()
+        .enumerate()
+        .filter(|(k, (f, _, edge))| {
+            let levels = if *edge { &edges } else { &plain };
+            let halfway = 10f64.powf((levels[*f] + levels[f + 3]) / 40.);
+            let frame = attack_start(mono, rate, *f * hop, hop, halfway, *edge, 0);
+            let next = candidates.get(k + 1).map_or(mono.len(), |(f, _, _)| f * hop);
+            shape(mono, rate, frame, next).lasting >= LASTING
+        })
+        .map(|(_, candidate)| *candidate)
+        .collect();
+    for (f, value, edge) in lasting {
         match found.last_mut() {
             // (of two within the gap, the steeper)
             Some((at, kept, which)) if f - *at < gap => {
-                if *value > *kept {
-                    (*at, *kept, *which) = (f, *value, *edge);
+                if value > *kept {
+                    (*at, *kept, *which) = (f, value, edge);
                 }
             }
-            _ => found.push((f, *value, *edge)),
+            _ => found.push((f, value, edge)),
         }
     }
     let mut out: Vec<Hit> = Vec::new();
@@ -158,44 +208,54 @@ fn attack_start(mono: &[f32], rate: f64, from: usize, hop: usize, halfway: f64, 
 }
 
 /// A hit's peak (dB) and, over its first 15 ms (or to the next hit) against the 15 ms before (what was sounding already: a
-/// kick's tail under a hat), how far each band rose (below 150 Hz, between, above 5 kHz) and each band's share after it.
+/// kick's tail under a hat), how far each band rose (below 150 Hz, between, above 5 kHz), how far the most risen band still
+/// stands past its first 2 ms (a click is over by then), and each band's share after it.
 fn shape(mono: &[f32], rate: f64, frame: usize, next: usize) -> Shape {
     let window = ((rate * 0.015) as usize).min(next.saturating_sub(frame)).max(1);
     let end = (frame + window).min(mono.len());
     let before = frame.saturating_sub(window);
     let settle = before.saturating_sub((rate * 0.01) as usize);
+    let late = (frame + (rate * 0.002) as usize).min(end);
     let mut lows = [low_pass(rate, 150.), low_pass(rate, 150.)];
     let mut highs = [high_pass(rate, 5000f64.min(rate * 0.4)), high_pass(rate, 5000f64.min(rate * 0.4))];
-    // (energy before and after the attack: all, lows, highs)
-    let mut sums = [[0f64; 3]; 2];
+    // (energy before the attack, after it, and from 2 ms after it: all, lows, highs)
+    let mut sums = [[0f64; 3]; 3];
     for (n, value) in mono.iter().enumerate().take(end).skip(settle) {
         let x = *value as f64;
         let l = lows.iter_mut().fold(x, |v, filter| filter.process(v));
         let h = highs.iter_mut().fold(x, |v, filter| filter.process(v));
-        let side = if n >= frame {
-            1
+        let sides: &[usize] = if n >= late {
+            &[1, 2]
+        } else if n >= frame {
+            &[1]
         } else if n >= before {
-            0
+            &[0]
         } else {
             continue;
         };
-        sums[side][0] += x * x;
-        sums[side][1] += l * l;
-        sums[side][2] += h * h;
+        for side in sides {
+            sums[*side][0] += x * x;
+            sums[*side][1] += l * l;
+            sums[*side][2] += h * h;
+        }
     }
     let bands = |side: usize| {
         let [all, low, high] = sums[side];
         [low, (all - low - high).max(0.), high]
     };
-    let (was, now) = (bands(0), bands(1));
+    let (was, now, after) = (bands(0), bands(1), bands(2));
     let all = now.iter().sum::<f64>().max(1e-12);
     // (a band from nearly nothing rises as far as a ten-thousandth of what sounds after: two tiny energies say nothing)
     let rose = |k: usize| now[k] / (was[k] + 1e-4 * all);
+    // (per sample, the windows being of different lengths)
+    let (was_len, late_len) = ((frame - before).max(1) as f64, (end - late).max(1) as f64);
+    let lasting = (0..3).map(|k| (after[k] / late_len) / (was[k] / was_len + 1e-4 * all / late_len)).fold(0., f64::max);
     let peak =
         mono[frame..mono.len().min(frame + (rate * 0.03) as usize).min(next.max(frame + 1))].iter().fold(0f32, |most, v| most.max(v.abs()));
     Shape {
         peak_db: 20. * (peak as f64).max(1e-9).log10(),
         rose: [rose(0), rose(1), rose(2)],
+        lasting,
         share: [now[0] / all, now[1] / all, now[2] / all],
     }
 }
@@ -204,6 +264,8 @@ struct Shape {
     peak_db: f64,
     /// How far the lows, the middle and the highs rose.
     rose: [f64; 3],
+    /// How far the band that stands highest past the first 2 ms stands over what sounded before (a ratio of energy).
+    lasting: f64,
     /// Their shares of the energy after the attack.
     share: [f64; 3],
 }
@@ -317,6 +379,18 @@ pub(crate) mod tests {
                 assert!((mono[n] >= 0.) != (mono[n - 1] >= 0.), "frame {n}: {} after {}", mono[n], mono[n - 1]);
             }
         }
+    }
+
+    #[test]
+    fn clicks_between_the_hits_are_no_hits() {
+        let rate = 44_100.;
+        let (mut mono, truth) = break_bar(rate);
+        // (single-sample ticks, as vinyl crackles, in the gaps, over tails, and just before hits)
+        for at in [2_000usize, 9_000, 25_000, 33_500, 50_000, truth[3].0 - 300, truth[6].0 - 150] {
+            mono[at] += 0.6;
+        }
+        let found = hits(&mono, rate);
+        assert_eq!(found.len(), truth.len(), "{:?}", found.iter().map(|hit| hit.frame).collect::<Vec<_>>());
     }
 
     #[test]

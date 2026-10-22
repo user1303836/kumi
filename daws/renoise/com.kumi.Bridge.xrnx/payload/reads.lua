@@ -215,29 +215,82 @@ local function one(params, epoch)
   return { items = array({ row }), epoch = epoch }
 end
 
--- The tidy's look at every instrument (#401, sample mapping): how many notes play it (one pass over the song's patterns, within
--- a budget of reads: none counted when the song is too big for one look) and a print of each sample's audio (its shape and 16
--- values through it), so instruments no note plays, copies and samples two instruments hold can be told.
-M.TIDY_READS = 400000
-M.TIDY_PROBES = 16
-local function sample_print(sample)
-  local buffer = sample.sample_buffer
-  if not buffer.has_sample_data then return nil end
-  local frames = buffer.number_of_frames
-  local sum = 5381
-  for k = 1, M.TIDY_PROBES do
-    local value = buffer:sample_data(1, math.max(1, math.floor(frames * k / (M.TIDY_PROBES + 1))))
-    local text = string.format("%.4f|", tonumber(type(value) == "table" and value[1] or value) or 0)
-    for i = 1, #text do sum = (sum * 33 + text:byte(i)) % 4294967296 end
-  end
-  -- (short: a song's every sample fits one answer)
-  return string.format("%d.%d.%d.%08x", frames, buffer.number_of_channels, buffer.sample_rate, sum)
+-- The tidy's look at the song's instruments (#401, sample mapping), in pages a callback can afford, each from `cursor` on:
+-- `tidy` reads instruments (from the one numbered `cursor`, 1 first): each sample's print, where the sound is (its shape, 256
+-- frames from the first that isn't silence, and 16 points over its first second), so padded hits don't print alike, and a
+-- print of the instrument's settings (its devices, macros and samples' settings, not their names); `tidy-notes` counts the
+-- notes of the song's patterns (from the one numbered `cursor`) that play each instrument, hidden columns too.
+M.TIDY_READS = 300000
+M.TIDY_CALLS = 120000
+M.TIDY_SEEK = 32768
+local function sum_of(sum, text)
+  for i = 1, #text do sum = (sum * 33 + text:byte(i)) % 4294967296 end
+  return sum
 end
 
-local function tidy_rows(song, epoch)
-  local counts, reads, counted = {}, 0, true
+local function sample_print(sample, spent)
+  local buffer = sample.sample_buffer
+  if not buffer.has_sample_data then return nil, spent end
+  local frames, rate = buffer.number_of_frames, buffer.sample_rate
+  local function value(f)
+    spent = spent + 1
+    local v = buffer:sample_data(1, f)
+    return tonumber(type(v) == "table" and v[1] or v) or 0
+  end
+  -- (where the sound starts: a coarse look, then frame by frame back to it)
+  local start
+  for f = 1, math.min(frames, M.TIDY_SEEK), 64 do
+    if math.abs(value(f)) > 1e-4 then start = f; break end
+  end
+  if start then
+    for f = math.max(1, start - 63), start do
+      if math.abs(value(f)) > 1e-4 then start = f; break end
+    end
+  else
+    start = 1
+  end
+  local sum = 5381
+  for f = start, math.min(frames, start + 255) do sum = sum_of(sum, string.format("%.4f|", value(f))) end
+  local reach = math.max(0, math.min(frames - start, math.floor(rate)))
+  for k = 1, 16 do sum = sum_of(sum, string.format("%.3f|", value(start + math.floor(reach * k / 17)))) end
+  return string.format("%d.%d.%d.%d.%08x", frames, buffer.number_of_channels, rate, start, sum), spent
+end
+
+local function settings_print(instruments_, instrument)
+  local work = instruments_.instrument_work(instrument)
+  work.name = nil
+  for _, sample in ipairs(work.sampleWork or {}) do sample.name = nil end
+  return string.format("%08x", sum_of(5381, json.encode(work, { sort_keys = true })))
+end
+
+local function tidy_page(song, epoch, from)
+  local instruments_ = import("instruments")
+  local out, spent, i = {}, 0, from
+  while i <= #song.instruments and spent <= M.TIDY_CALLS do
+    local instrument = song:instrument(i)
+    local samples = {}
+    for s = 1, #instrument.samples do
+      local sample = instrument:sample(s)
+      if not sample.is_slice_alias then
+        local print
+        print, spent = sample_print(sample, spent)
+        samples[#samples + 1] = { name = sample.name, print = print or json.null }
+      end
+    end
+    out[#out + 1] = {
+      ref = refs.make(epoch, "instrument", i), index = i - 1, name = instrument.name, samples = array(samples),
+      settings = settings_print(instruments_, instrument), plugin = instrument.plugin_properties.plugin_loaded,
+      phrases = #instrument.phrases,
+    }
+    i = i + 1
+  end
+  return { items = array(out), epoch = epoch, nextCursor = i <= #song.instruments and tostring(i) or nil }
+end
+
+local function notes_page(song, from)
+  local counts, reads, p = {}, 0, from
   local tracks = track_count(song)
-  for p = 1, #song.patterns do
+  while p <= #song.patterns and reads <= M.TIDY_READS do
     local pattern = song:pattern(p)
     for t = 1, tracks do
       local pattern_track = pattern:track(t)
@@ -253,31 +306,24 @@ local function tidy_rows(song, epoch)
               local column = line:note_column(c)
               reads = reads + 1
               local v = column.instrument_value
-              if v < 255 and column.note_value < 120 then counts[v] = (counts[v] or 0) + 1 end
+              if v < 255 and column.note_value < 120 then counts[tostring(v)] = (counts[tostring(v)] or 0) + 1 end
             end
           end
-          if reads > M.TIDY_READS then counted = false; break end
         end
       end
-      if not counted then break end
     end
-    if not counted then break end
+    p = p + 1
   end
-  local out = {}
-  for i = 1, #song.instruments do
-    local instrument = song:instrument(i)
-    local samples = {}
-    for s = 1, #instrument.samples do
-      local sample = instrument:sample(s)
-      if not sample.is_slice_alias then samples[#samples + 1] = { name = sample.name, print = sample_print(sample) or json.null } end
-    end
-    out[i] = {
-      ref = refs.make(epoch, "instrument", i), index = i - 1, name = instrument.name, samples = array(samples),
-      notes = counted and (counts[i - 1] or 0) or json.null, plugin = instrument.plugin_properties.plugin_loaded,
-      phrases = #instrument.phrases,
-    }
-  end
-  return out, counted
+  return {
+    counts = json.object(counts), to = p - 1, patterns = #song.patterns,
+    nextCursor = p <= #song.patterns and tostring(p) or nil,
+  }
+end
+
+local function tidy_from(params)
+  local from = tonumber(params.cursor or 1)
+  if not from or from < 1 or from ~= math.floor(from) then fail("bad-params", "cursor is where the last page ended") end
+  return from
 end
 
 -- read {kind, parent?, cursor?, limit?, track?} or {ref}
@@ -444,8 +490,9 @@ function M.read(job, params, epoch)
       return with_grid and with_grid(row, live:track(t):device(d):parameter(k)) or row
     end)
   elseif kind == "tidy" then
-    local items, counted = tidy_rows(song, epoch)
-    return { items = array(items), counted = counted, epoch = epoch }
+    return tidy_page(song, epoch, tidy_from(params))
+  elseif kind == "tidy-notes" then
+    return notes_page(song, tidy_from(params))
   elseif kind == "spans" then
     return reads_listening.spans(job, params, epoch, page)
   elseif kind == "modset" or kind == "chain" then

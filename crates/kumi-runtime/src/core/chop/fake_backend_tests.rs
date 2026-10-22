@@ -23,7 +23,7 @@ struct Fake {
     playing: bool,
     cuts: RefCell<Vec<usize>>,
     replaced: RefCell<Vec<bool>>,
-    laid: RefCell<Vec<(Vec<Step>, u32)>>,
+    laid: RefCell<Vec<(Vec<Step>, f64, bool)>>,
 }
 
 #[async_trait(?Send)]
@@ -44,7 +44,8 @@ impl ChopBackend for Rc<Fake> {
     }
 
     async fn song(&self, _signal: &Signal) -> Result<Song, String> {
-        Ok(Song { bpm: 170., lpb: 4, beats_per_bar: 4., playing: self.playing })
+        // (a tracker's grid: 256ths of a line at 4 lines a beat)
+        Ok(Song { bpm: 170., beats_per_bar: 4., grid: Some(1. / 1024.), playing: self.playing })
     }
 
     async fn cut(&self, _recording: &Recording, frames: &[usize], replace: bool, _signal: &Signal) -> Result<Value, String> {
@@ -57,15 +58,29 @@ impl ChopBackend for Rc<Fake> {
         Ok(self.cuts.borrow().iter().enumerate().map(|(k, frame)| Key { frame: *frame, note: format!("K{k}") }).collect())
     }
 
-    async fn lay(&self, _recording: &Recording, at: &Value, steps: &[Step], lines: u32, _signal: &Signal) -> Result<Laid, String> {
-        self.laid.borrow_mut().push((steps.to_vec(), lines));
-        let first = at.get("line").and_then(Value::as_u64).unwrap_or(0) as u32;
+    async fn lay(
+        &self,
+        _recording: &Recording,
+        at: &Value,
+        steps: &[Step],
+        beats: f64,
+        replace: bool,
+        _signal: &Signal,
+    ) -> Result<Laid, String> {
+        self.laid.borrow_mut().push((steps.to_vec(), beats, replace));
+        let first = at.get("line").and_then(Value::as_u64).unwrap_or(0);
+        let last = first + (beats * 4. - 1e-3).ceil() as u64 - 1;
         Ok(Laid {
-            answer: json!({"change": "c2", "cell": {"instrument": 3}}),
-            range: json!({"patternRef": "p", "trackRef": "t", "first": first, "last": first + lines - 1}),
-            first,
-            last: first + lines - 1,
+            answer: json!({"change": "c2"}),
+            range: json!({"patternRef": "p", "trackRef": "t", "first": first, "last": last}),
+            words: format!("lines {first:02} to {last:02}"),
+            data: json!({"first": first}),
         })
+    }
+
+    fn take_lines(&self, laid: &Laid, steps: &[Step]) -> Value {
+        let first = laid.data["first"].as_u64().unwrap_or(0);
+        Value::Array(steps.iter().map(|step| json!({"line": first + (step.beat * 4.) as u64, "note": step.note})).collect())
     }
 
     async fn render(&self, _laid: &Laid, _seconds: f64, _signal: &Signal) -> Result<(String, f64), String> {
@@ -146,10 +161,10 @@ async fn a_break_is_planned_cut_on_the_grid_laid_out_heard_back_and_its_lighter_
     assert!(cut["grid"].is_string(), "the break plays at the song's tempo: {cut}");
     let first = cut["keys"][0].as_str().unwrap();
     assert!(first.starts_with("K0: 0.0") && first.ends_with(" s kick"), "{cut}");
-    // Each cut on the grid: a line and delay start it exactly.
+    // Each cut on the grid: a whole number of its steps starts it exactly.
     for frame in fake.cuts.borrow().iter() {
-        let (line, delay) = super::place(*frame as f64 / RATE, 170., 4);
-        let back = (line as f64 + delay as f64 / 256.) * (60. / 170. / 4.) * RATE;
+        let steps = (super::beat_of(*frame as f64 / RATE, 170.) * 1024.).round();
+        let back = steps / 1024. * 60. / 170. * RATE;
         assert!((back - *frame as f64).abs() < 0.51, "{frame}");
     }
     // Cut again only when asked.
@@ -159,14 +174,18 @@ async fn a_break_is_planned_cut_on_the_grid_laid_out_heard_back_and_its_lighter_
     assert_eq!(again["cuts"], 10);
     assert_eq!(*fake.replaced.borrow(), vec![false, true]);
     run(&tool, json!({"ref": "s:1", "action": "cut", "replace": true})).await.unwrap();
+    // The same cut again changes nothing.
+    let same = run(&tool, json!({"ref": "s:1", "action": "cut", "replace": true})).await.unwrap();
+    assert!(same["made"].is_null() && same["said"].as_str().unwrap().contains("already"), "{same}");
+    assert_eq!(fake.replaced.borrow().len(), 3, "no change was asked of the DAW");
 
     let laid = run(&tool, json!({"ref": "s:1", "action": "lay", "at": {"patternRef": "p", "trackRef": "t", "line": 16}})).await.unwrap();
-    assert_eq!(laid["lines"], "16 to 31", "{laid}");
-    let (steps, lines) = fake.laid.borrow()[0].clone();
-    assert_eq!(lines, 16, "a bar at 4 lines a beat");
-    // (10 ms into the bar is line 00, delay 29 of 256; the snare on the second beat is line 04)
-    assert!(steps[0].line == 0 && (28..=30).contains(&steps[0].delay), "{:?}", steps[0]);
-    assert!(steps[3].line == 4 && (28..=30).contains(&steps[3].delay), "{:?}", steps[3]);
+    assert_eq!(laid["at"], "lines 16 to 31", "{laid}");
+    let (steps, beats, replace) = fake.laid.borrow()[0].clone();
+    assert!((beats - 4.).abs() < 1e-3 && !replace, "a bar, and nothing written over unless asked");
+    // (10 ms into the bar at 170 BPM is beat 0.028; the snare on the second beat is beat 1.028)
+    assert!((steps[0].beat - 0.0283).abs() < 0.002, "{:?}", steps[0]);
+    assert!((steps[3].beat - 1.0283).abs() < 0.002, "{:?}", steps[3]);
     let heard = laid["heard"].as_str().unwrap();
     assert!(heard.starts_with("every hit lands within"), "{heard}");
     assert!(heard.contains("nulls to"), "{heard}");
@@ -179,12 +198,7 @@ async fn a_break_is_planned_cut_on_the_grid_laid_out_heard_back_and_its_lighter_
     assert_eq!(takes[0]["direction"], "the main hits, no ghosts or rolls");
     assert_eq!(takes[0]["lines"].as_array().unwrap().len(), 10);
     assert_eq!(takes[1]["lines"].as_array().unwrap().len(), 4);
-    let cell = &takes[1]["lines"][0]["notes"][0];
-    assert_eq!(
-        (takes[1]["lines"][0]["line"].as_u64(), cell["note"].as_str(), cell["instrument"].as_u64()),
-        (Some(16), Some("K0"), Some(3))
-    );
-    assert!((28..=30).contains(&cell["delay"].as_u64().unwrap()), "{cell}");
+    assert_eq!(takes[1]["lines"][0], json!({"line": 16, "note": "K0"}), "the backend's lines of the takes' steps");
     assert_eq!(laid["takes"]["takes"][1]["take"], "V2");
 }
 
@@ -215,11 +229,15 @@ async fn a_break_slower_than_the_song_is_said_and_cut_where_it_hits() {
     assert!(cut.get("grid").is_none(), "{cut}");
     let laid = run(&tool, json!({"ref": "s:1", "action": "lay", "bpm": 85, "at": {"patternRef": "p", "trackRef": "t"}})).await.unwrap();
     assert!(laid["note"].as_str().unwrap().contains("cut short by the next"), "{laid}");
-    assert_eq!(fake.laid.borrow()[0].1, 8, "two beats of the song's lines");
+    assert!((fake.laid.borrow()[0].1 - 2.).abs() < 1e-3, "two beats at the break's own tempo");
     // Told it's two bars: twice the tempo, gaps between the slices.
-    let laid = run(&tool, json!({"ref": "s:1", "action": "lay", "bars": 2, "takes": false, "at": {"patternRef": "p", "trackRef": "t"}}))
-        .await
-        .unwrap();
+    let laid = run(
+        &tool,
+        json!({"ref": "s:1", "action": "lay", "bars": 2, "takes": false, "replace": true, "at": {"patternRef": "p", "trackRef": "t"}}),
+    )
+    .await
+    .unwrap();
     assert!(laid["note"].as_str().unwrap().contains("gaps open"), "{laid}");
-    assert_eq!(fake.laid.borrow()[1].1, 32, "two bars of lines");
+    let (_, beats, replace) = fake.laid.borrow()[1].clone();
+    assert!((beats - 8.).abs() < 1e-3 && replace, "two bars, written over what's there as asked");
 }

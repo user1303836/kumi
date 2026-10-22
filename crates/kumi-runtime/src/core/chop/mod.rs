@@ -1,7 +1,7 @@
 //! Chopping at real hits (#401), built once for every DAW: a drum recording's hits found to the frame (`hits`), the break's
-//! own tempo, the rolls and the densities (every hit, the main hits, kick and snare), and where each hit falls on the song's
-//! grid of lines. The tool (`tool`) cuts the recording at the hits, lays the cuts out to play it as recorded, checks that by
-//! ear, and offers lighter densities as takes of the variations loop; the DAW's backend (`backend`) holds only its own facts.
+//! own tempo, the rolls and the densities (every hit, the main hits, kick and snare), and where each hit falls in beats (and
+//! onto the DAW's grid). The tool (`tool`) cuts the recording at the hits, lays the cuts out to play it as recorded, checks that
+//! by ear, and offers lighter densities as takes of the variations loop; the DAW's backend (`backend`) holds only its own facts.
 pub mod backend;
 #[cfg(test)]
 mod fake_backend_tests;
@@ -97,19 +97,17 @@ impl Density {
     }
 }
 
-/// Where a moment `seconds` into the break falls at `bpm` (the break's own) on a grid of `lpb` lines a beat: whole lines and
-/// 256ths of a line (the delay column), from the range's first line.
-pub fn place(seconds: f64, bpm: f64, lpb: u32) -> (u32, u8) {
-    let units = (seconds * bpm / 60. * lpb as f64 * 256.).round().max(0.) as u64;
-    ((units / 256) as u32, (units % 256) as u8)
+/// Where a moment `seconds` into the break falls in beats, at `bpm` (the break's own tempo).
+pub fn beat_of(seconds: f64, bpm: f64) -> f64 {
+    seconds * bpm / 60.
 }
 
-/// A cut moved onto the grid, when the break plays at the song's own tempo: back (under a 256th of a line) to the frame a line
-/// and delay start exactly, so the cuts played in order are the recording again.
-pub fn on_grid(frame: usize, rate: f64, bpm: f64, lpb: u32) -> usize {
-    let unit = 60. / bpm / lpb as f64 / 256. * rate;
-    let units = (frame as f64 / unit + 1e-9).floor();
-    ((units * unit).round() as usize).min(frame)
+/// A cut moved onto the DAW's grid (a note starts on steps of `unit` beats), when the break plays at the song's own tempo: back,
+/// under one step, to the frame a note can start exactly, so the cuts played in order are the recording again.
+pub fn on_grid(frame: usize, rate: f64, bpm: f64, unit: f64) -> usize {
+    let step = unit * 60. / bpm * rate;
+    let steps = (frame as f64 / step + 1e-9).floor();
+    ((steps * step).round() as usize).min(frame)
 }
 
 /// Whether the break plays at the song's tempo (within a tenth of a percent).
@@ -167,17 +165,17 @@ mod tests {
     }
 
     #[test]
-    fn a_hit_lands_on_its_line_and_delay_and_a_cut_on_the_grid_starts_exactly_there() {
-        // At 170 BPM and 4 lines a beat, a sixteenth is a line: the fifth sixteenth is line 4, delay 0.
+    fn a_hit_lands_on_its_beat_and_a_cut_on_the_grid_starts_exactly_on_a_step() {
+        // At 170 BPM the fifth sixteenth is beat 1.
         let sixteenth = 60. / 170. / 4.;
-        assert_eq!(place(4. * sixteenth, 170., 4), (4, 0));
-        assert_eq!(place(4.5 * sixteenth, 170., 4), (4, 128));
-        let rate = 44_100.;
+        assert!((beat_of(4. * sixteenth, 170.) - 1.).abs() < 1e-9);
+        // A grid of 1,024 steps a beat (a tracker's 256ths of a line at 4 lines a beat).
+        let (rate, unit) = (44_100., 1. / 1024.);
         for frame in [441usize, 15_000, 77_777] {
-            let snapped = on_grid(frame, rate, 170., 4);
+            let snapped = on_grid(frame, rate, 170., unit);
             assert!(snapped <= frame && frame - snapped <= 16, "{frame} → {snapped}");
-            let (line, delay) = place(snapped as f64 / rate, 170., 4);
-            let back = (line as f64 + delay as f64 / 256.) * sixteenth * rate;
+            let steps = (beat_of(snapped as f64 / rate, 170.) / unit).round();
+            let back = steps * unit * 60. / 170. * rate;
             assert!((back - snapped as f64).abs() < 0.51, "{frame}: {back} vs {snapped}");
         }
     }

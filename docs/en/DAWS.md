@@ -252,13 +252,13 @@ saves the song, instruments and device presets.
   is fixed.
 - **Sample maps** (`map_samples`): a folder of sounds, or an instrument's own
   samples, laid across the keys in one step. Kumi reads each file name's note
-  ("C3", "A#2", "C-4", "060"), velocity ("v3", "vel64", "ff") and round robin
-  ("rr2"), hears each sample's pitch and loudness, and works out whether the
-  names put middle C at C3 or C4. It plans roots and zones, velocity layers in
+  ("C3", "A#2", "C-4"), velocity ("v3", "vel64", "ff") and round robin ("rr2"),
+  hears each sample's pitch and loudness, and works out whether the names put
+  middle C at C3, C4 or C5. It plans roots and zones, velocity layers in
   loudness order, round robins that take turns, and an instrument per
   articulation. It says what it decided and asks only what it can't tell. The
-  tidy finds instruments no note plays, copies, and samples two instruments
-  hold, and changes only what you accept.
+  tidy finds instruments no note plays, spare copies, and samples two
+  instruments hold, and changes only what you accept.
 - **Chops** (`chop`): a break cut at its real hits, each found to the frame
   and named as a kick, snare, hat, ghost or roll, with the break's own tempo
   worked out from its length. Kumi slices it in one step (on the song's grid

@@ -27,7 +27,7 @@ fn names_an_octave_low_are_found_out_by_their_pitch() {
     let plan = plan(&samples, &asked(), &name);
     assert_eq!(plan.layout, Layout::Keys);
     let convention = plan.convention.clone().unwrap();
-    assert!(!convention.c4_is_60, "{convention:?}");
+    assert_eq!(convention.middle_c, 3, "{convention:?}");
     assert_eq!(convention.how, "the pitch heard agrees in 4 of 4");
     assert_eq!(placed(&plan, "Piano_C3").root, 60);
     assert_eq!(placed(&plan, "Piano_C4").root, 72);
@@ -43,7 +43,7 @@ fn scientific_names_stay_where_they_say() {
     let samples: Vec<Sample> =
         [("Bass C2", 36.), ("Bass G2", 43.2)].iter().map(|(stem, pitch)| Sample::new(*stem, *stem, heard(Some(*pitch), -10.))).collect();
     let plan = plan(&samples, &asked(), &name);
-    assert!(plan.convention.as_ref().unwrap().c4_is_60);
+    assert_eq!(plan.convention.as_ref().unwrap().middle_c, 4);
     assert_eq!(placed(&plan, "Bass C2").root, 36);
 }
 
@@ -55,18 +55,42 @@ fn with_nothing_heard_the_convention_is_asked_and_c4_planned() {
     assert_eq!(plan.questions.len(), 1, "{plan:#?}");
     assert_eq!(placed(&plan, "Pad C4").root, 60);
     // Asked: C3.
-    let plan = super::plan(&samples, &Asked { c4_is_60: Some(false), ..asked() }, &name);
+    let plan = super::plan(&samples, &Asked { middle_c: Some(3), ..asked() }, &name);
     assert_eq!(placed(&plan, "Pad C3").root, 60);
     assert!(plan.questions.is_empty());
 }
 
 #[test]
-fn tracker_notes_are_c4_without_asking() {
+fn tracker_notes_put_middle_c_at_c5_when_nothing_is_heard_and_are_checked_by_ear_when_it_is() {
+    // A Renoise render named as Renoise names it: C-4 is MIDI 48.
     let samples: Vec<Sample> = ["Lead C-4", "Lead G-4"].iter().map(|stem| Sample::new(*stem, *stem, None)).collect();
     let plan = plan(&samples, &asked(), &name);
-    assert!(plan.convention.as_ref().unwrap().c4_is_60);
+    assert_eq!(plan.convention.as_ref().unwrap().middle_c, 5);
     assert!(plan.questions.is_empty());
+    assert_eq!(placed(&plan, "Lead G-4").root, 55);
+    // Heard at MIDI 60 and 67, the same names are scientific.
+    let heard_ones = vec![Sample::new("a", "Lead C-4", heard(Some(60.), -12.)), Sample::new("b", "Lead G-4", heard(Some(67.), -12.))];
+    let plan = super::plan(&heard_ones, &asked(), &name);
+    assert_eq!(plan.convention.as_ref().unwrap().middle_c, 4, "{plan:#?}");
     assert_eq!(placed(&plan, "Lead G-4").root, 67);
+}
+
+#[test]
+fn zero_padded_numbers_are_notes_only_when_heard_so_or_when_they_dont_count_takes() {
+    // Takes: 001 to 004, nothing heard.
+    let takes: Vec<Sample> = ["Vox_001", "Vox_002", "Vox_003", "Vox_004"].iter().map(|stem| Sample::new(*stem, *stem, None)).collect();
+    let plan = plan(&takes, &asked(), &name);
+    assert_eq!(plan.layout, Layout::Drums, "no notes: a key each: {plan:#?}");
+    assert!(plan.findings.iter().any(|f| f.contains("zero-padded")), "{:#?}", plan.findings);
+    // Notes: 048, 060, 072, nothing heard (not a run from 001).
+    let notes: Vec<Sample> = ["Piano_048", "Piano_060", "Piano_072"].iter().map(|stem| Sample::new(*stem, *stem, None)).collect();
+    let plan = super::plan(&notes, &asked(), &name);
+    assert_eq!(placed(&plan, "Piano_060").root, 60);
+    // Heard: a number the pitch agrees with stays (an octave off counts), one it doesn't is dropped for the pitch.
+    let heard_ones = vec![Sample::new("a", "Piano_060", heard(Some(72.), -12.)), Sample::new("b", "Piano_002", heard(Some(64.), -12.))];
+    let plan = super::plan(&heard_ones, &asked(), &name);
+    assert_eq!(placed(&plan, "Piano_060").found, Found::Named);
+    assert_eq!((placed(&plan, "Piano_002").root, placed(&plan, "Piano_002").found), (64, Found::Heard));
 }
 
 #[test]
@@ -146,13 +170,35 @@ fn articulations_become_an_instrument_each_and_releases_are_left_out() {
         Sample::new("d", "Cello_C3", heard(Some(48.), -12.)),
         Sample::new("e", "Cello_C3_rel", heard(Some(48.), -30.)),
     ];
-    let plan = plan(&samples, &Asked { c4_is_60: Some(true), ..asked() }, &name);
+    let plan = plan(&samples, &Asked { middle_c: Some(4), ..asked() }, &name);
     let parts: Vec<Option<&str>> = plan.instruments.iter().map(|i| i.part.as_deref()).collect();
-    assert_eq!(parts, vec![Some("pizzicato"), Some("sustain")]);
-    // The plain one goes with the articulation most samples have.
-    assert_eq!(plan.instruments[1].samples.len(), 3);
+    assert_eq!(parts, vec![Some("plain"), Some("pizzicato"), Some("sustain")]);
+    // An untagged sample is a part of its own: never a round robin of an articulation it may not be.
+    assert_eq!(plan.instruments[0].samples.len(), 1);
+    assert_eq!(plan.instruments[2].samples.len(), 2);
+    assert!(plan.findings.iter().any(|f| f.starts_with("3 parts (plain, pizzicato, sustain)")), "{:#?}", plan.findings);
     assert_eq!(plan.left_out.len(), 1);
     assert!(plan.left_out[0].1.contains("release"));
+}
+
+#[test]
+fn one_articulation_named_beside_plain_samples_is_two_instruments() {
+    let samples = vec![Sample::new("a", "Violin C4", heard(Some(60.), -12.)), Sample::new("b", "Violin C4 pizz", heard(Some(60.), -12.))];
+    let plan = plan(&samples, &asked(), &name);
+    assert_eq!(plan.instruments.len(), 2, "{plan:#?}");
+    assert!(plan.instruments.iter().all(|planned| !planned.cycle), "arco and pizz aren't round robins of each other");
+}
+
+#[test]
+fn a_sample_on_the_note_off_layer_is_left_and_a_transposed_one_gets_a_base_that_allows_for_it() {
+    let mut off = Sample::new("a", "Pad C4", heard(Some(60.), -12.));
+    off.note_off = true;
+    let mut moved = Sample::new("b", "Pad G4", heard(Some(67.), -12.));
+    moved.transpose = 2;
+    let plan = plan(&[off, moved, Sample::new("c", "Pad C5", heard(Some(72.), -12.))], &asked(), &name);
+    assert!(plan.left_out.iter().any(|(sample, why)| sample == "Pad C4" && why.contains("note-off")), "{:#?}", plan.left_out);
+    let placed = placed(&plan, "Pad G4");
+    assert_eq!((placed.root, placed.base), (67, 69), "it plays as recorded at its root");
 }
 
 #[test]
@@ -186,7 +232,7 @@ fn a_drum_kit_goes_in_role_order_or_on_gm_keys() {
     assert_eq!(placed(&plan, "Snare 01").root, 38);
     assert_eq!(placed(&plan, "Closed Hat").root, 42);
     assert_eq!(placed(&plan, "Open Hat").root, 46);
-    assert_eq!(placed(&plan, "Weird Zap").root, 60, "no GM key: from the first key up");
+    assert_eq!(placed(&plan, "Weird Zap").root, 82, "no GM key: past GM's keys, which a GM file's percussion plays");
 }
 
 #[test]

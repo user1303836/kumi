@@ -29,19 +29,22 @@ pub struct HeardSample {
     pub seconds: f64,
 }
 
-/// One sample to map: its id (a file's path, or the DAW's ref), its name, what the name says and what was heard.
+/// One sample to map: its id (a file's path, or the DAW's ref), its name, what the name says and what was heard; for a sample
+/// the DAW has, how far it's transposed and whether it plays as a key lets go (the note-off layer).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Sample {
     pub id: String,
     pub name: String,
     pub hints: Hints,
     pub heard: Option<HeardSample>,
+    pub transpose: i32,
+    pub note_off: bool,
 }
 
 impl Sample {
     pub fn new(id: impl Into<String>, name: impl Into<String>, heard: Option<HeardSample>) -> Self {
         let name = name.into();
-        Sample { id: id.into(), hints: names::hints(&name), name, heard }
+        Sample { id: id.into(), hints: names::hints(&name), name, heard, transpose: 0, note_off: false }
     }
 }
 
@@ -53,19 +56,23 @@ pub enum Layout {
     Drums,
 }
 
-/// Where middle C (MIDI 60) is in the names, and how that was settled.
+/// The octave number the names give middle C (MIDI 60): 3, 4 (scientific pitch) or 5 (Renoise and the trackers); and how
+/// that was settled.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Convention {
-    pub c4_is_60: bool,
+    pub middle_c: i32,
     pub how: String,
 }
+
+/// The octave numbers names give middle C.
+pub const MIDDLE_CS: [i32; 3] = [3, 4, 5];
 
 /// What the producer (or the model) settled before the plan: the layout, the convention, roots by sample, GM drum keys, and the
 /// DAW's note range and first key.
 #[derive(Debug, Clone, Default)]
 pub struct Asked {
     pub layout: Option<Layout>,
-    pub c4_is_60: Option<bool>,
+    pub middle_c: Option<i32>,
     pub roots: BTreeMap<String, i32>,
     pub gm: bool,
     /// The lowest and highest MIDI notes the DAW's sampler maps, and where a drum kit starts.
@@ -96,12 +103,14 @@ impl Found {
     }
 }
 
-/// A sample as it's placed: its root (the key it sounds as recorded), its zone, its velocity range and which round robin it is.
+/// A sample as it's placed: its root (the key it sounds as recorded), the base note that makes it so (its root and its
+/// transpose), its zone, its velocity range and which round robin it is.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Placed {
     pub id: String,
     pub name: String,
     pub root: i32,
+    pub base: i32,
     pub zone: (i32, i32),
     pub velocity: (u8, u8),
     pub round_robin: Option<usize>,
@@ -130,37 +139,77 @@ pub struct Plan {
     pub left_out: Vec<(String, String)>,
 }
 
-/// The convention the names use: middle C as "C4" (scientific, and every tracker) or as "C3", by the pitch heard where both
-/// are known. None when nothing can tell (no named note, or no pitch heard).
-fn convention(samples: &[Sample], asked: Option<bool>) -> Option<Convention> {
+/// The convention the names use: middle C as C3, C4 or C5, by the pitch heard where both a note and a pitch are known (the
+/// most that agree; on a tie, C5 for tracker spellings, else C4). None when nothing can tell (no named note, no pitch heard).
+fn convention(samples: &[Sample], asked: Option<i32>, tracker: bool) -> Option<Convention> {
     let named: Vec<&Sample> = samples.iter().filter(|s| matches!(s.hints.note, Some(Written::Named { .. }))).collect();
     if named.is_empty() {
         return None;
     }
-    if let Some(c4_is_60) = asked {
-        return Some(Convention { c4_is_60, how: "as asked".into() });
+    if let Some(middle_c) = asked {
+        return Some(Convention { middle_c, how: "as asked".into() });
     }
     let compared: Vec<f64> = named
         .iter()
         .filter_map(|s| {
             let heard = s.heard.filter(|heard| heard.sure >= SURE_PITCH)?.pitch?;
-            Some(heard - midi_of(s.hints.note?, true)? as f64)
+            Some(heard - midi_of(s.hints.note?, 4)? as f64)
         })
         .collect();
     if compared.is_empty() {
         return None;
     }
-    // (an octave off either way is the pitch tracker's own error as often as the names': count each convention's agreements)
-    let agree = |shift: f64| compared.iter().filter(|diff| (**diff - shift).abs() <= 1.0).count();
-    let (c4, c3) = (agree(0.), agree(12.));
-    let c4_is_60 = c4 >= c3;
-    let best = c4.max(c3);
+    // (each convention moves the names by whole octaves: count how many agree with each, the preferred first on a tie)
+    let agree = |middle_c: i32| compared.iter().filter(|diff| (**diff - 12. * (4 - middle_c) as f64).abs() <= 1.0).count();
+    let order: [i32; 3] = if tracker { [5, 4, 3] } else { [4, 3, 5] };
+    let mut middle_c = order[0];
+    for candidate in order {
+        if agree(candidate) > agree(middle_c) {
+            middle_c = candidate;
+        }
+    }
+    let best = agree(middle_c);
     let how = if best * 2 > compared.len() {
         format!("the pitch heard agrees in {best} of {}", compared.len())
     } else {
         format!("the pitch heard agrees in only {best} of {}: check a few by ear", compared.len())
     };
-    Some(Convention { c4_is_60, how })
+    Some(Convention { middle_c, how })
+}
+
+/// Zero-padded numbers ("001") are a sample's MIDI note only when its pitch agrees (an octave either way), or, with nothing
+/// heard, when the set's numbers aren't a run from 001 (take numbers, in most packs).
+fn settle_padded(samples: &mut [Sample], findings: &mut Vec<String>) {
+    let padded = |s: &Sample| match s.hints.note {
+        Some(Written::Padded(n)) => Some(n),
+        _ => None,
+    };
+    let heard = |s: &Sample| s.heard.filter(|heard| heard.sure >= SURE_PITCH).and_then(|heard| heard.pitch);
+    let mut unheard: Vec<u8> = samples.iter().filter(|s| heard(s).is_none()).filter_map(padded).collect();
+    unheard.sort_unstable();
+    unheard.dedup();
+    let run = !unheard.is_empty() && unheard.iter().enumerate().all(|(k, n)| *n as usize == k + 1);
+    let mut dropped = 0;
+    for sample in samples.iter_mut() {
+        let Some(n) = padded(sample) else { continue };
+        let keep = match heard(sample) {
+            Some(pitch) => {
+                let off = pitch - n as f64;
+                (off - 12. * (off / 12.).round()).abs() <= 1.0
+            }
+            None => !run,
+        };
+        if !keep {
+            sample.hints.note = None;
+            dropped += 1;
+        }
+    }
+    if dropped > 0 {
+        findings.push(format!(
+            "{dropped} name{} end in a zero-padded number that isn't the note heard, or that counts takes (001, 002…): not read as notes",
+            if dropped == 1 { "" } else { "s" }
+        ));
+    }
 }
 
 /// The order of a velocity hint within one key's samples (softest first), or None.
@@ -302,6 +351,9 @@ pub fn plan(samples: &[Sample], asked: &Asked, note_name: &dyn Fn(i32) -> String
     let mut findings = Vec::new();
     let mut questions = Vec::new();
     let mut left_out = Vec::new();
+    let mut samples = samples.to_vec();
+    settle_padded(&mut samples, &mut findings);
+    let samples = &samples[..];
     let pitched = samples
         .iter()
         .filter(|s| s.hints.note.is_some() || s.heard.is_some_and(|heard| heard.sure >= SURE_PITCH && heard.pitch.is_some()))
@@ -319,39 +371,40 @@ pub fn plan(samples: &[Sample], asked: &Asked, note_name: &dyn Fn(i32) -> String
             }
         });
     }
-    let tracker =
-        samples.iter().any(|s| s.name.contains('-') && matches!(s.hints.note, Some(Written::Named { .. })) && tracker_note(&s.name));
-    let convention = if tracker && asked.c4_is_60.is_none() {
-        Some(Convention { c4_is_60: true, how: "the names are tracker notes (C-4)".into() })
-    } else {
-        convention(samples, asked.c4_is_60)
-    };
+    let tracker = samples.iter().any(|s| matches!(s.hints.note, Some(Written::Named { .. })) && names::tracker_spelling(&s.name));
+    let convention = convention(samples, asked.middle_c, tracker).or_else(|| {
+        // (nothing heard to check: tracker spellings name middle C C-5)
+        tracker.then(|| Convention { middle_c: 5, how: "tracker notes, where middle C is C-5: no pitch was heard to check".into() })
+    });
     let named = samples.iter().any(|s| matches!(s.hints.note, Some(Written::Named { .. })));
     if named && convention.is_none() {
         questions.push(
-            "Do the names put middle C at C3 or C4? No pitch could be heard to check: planned as C4 (middle C, MIDI 60); say middleC C3 if the names are an octave low".into(),
+            "Do the names put middle C at C3, C4 or C5? No pitch could be heard to check: planned as C4 (MIDI 60); say middleC if the names are an octave off".into(),
         );
     }
-    let c4_is_60 = convention.as_ref().is_none_or(|c| c.c4_is_60);
+    let middle_c = convention.as_ref().map_or(4, |c| c.middle_c);
     let instruments = match layout {
-        Layout::Keys => keys(samples, asked, c4_is_60, note_name, &mut findings, &mut left_out),
+        Layout::Keys => keys(samples, asked, middle_c, note_name, &mut findings, &mut left_out),
         Layout::Drums => drum_kit(samples, asked, note_name, &mut findings, &mut left_out),
     };
     Plan { layout, convention, instruments, findings, questions, left_out }
 }
 
-/// A name whose note is written the tracker's way ("C-4", "C#4" beside them).
-fn tracker_note(name: &str) -> bool {
-    use regex::Regex;
-    use std::sync::LazyLock;
-    static TRACKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(^|[^a-z])[a-g]-[0-9]($|[^0-9])").unwrap());
-    TRACKER.is_match(name)
+/// Why a sample isn't laid out with the rest: it plays as a key lets go.
+fn released(sample: &Sample) -> Option<&'static str> {
+    if sample.note_off {
+        Some("it plays on the note-off layer, as a key lets go: left as it is")
+    } else if sample.hints.release {
+        Some("a release sample (it plays when a key lets go): map it on the note-off layer by hand")
+    } else {
+        None
+    }
 }
 
 fn keys(
     samples: &[Sample],
     asked: &Asked,
-    c4_is_60: bool,
+    middle_c: i32,
     note_name: &dyn Fn(i32) -> String,
     findings: &mut Vec<String>,
     left_out: &mut Vec<(String, String)>,
@@ -359,15 +412,14 @@ fn keys(
     // Each sample's root: as asked, by its name, else by its pitch.
     let mut rooted: Vec<(&Sample, i32, Found)> = Vec::new();
     for sample in samples {
-        if sample.hints.release {
-            left_out
-                .push((sample.name.clone(), "a release sample (it plays when a key lets go): map it on the note-off layer by hand".into()));
+        if let Some(why) = released(sample) {
+            left_out.push((sample.name.clone(), why.into()));
             continue;
         }
         let heard = sample.heard.filter(|heard| heard.sure >= SURE_PITCH).and_then(|heard| heard.pitch);
         let (root, found) = if let Some(root) = asked.roots.get(&sample.id).or_else(|| asked.roots.get(&sample.name)) {
             (*root, Found::Given)
-        } else if let Some(root) = sample.hints.note.and_then(|note| midi_of(note, c4_is_60)) {
+        } else if let Some(root) = sample.hints.note.and_then(|note| midi_of(note, middle_c)) {
             if let Some(heard) = heard {
                 let off = heard - root as f64;
                 // (an octave either way is the pitch tracker's as often as the name's)
@@ -397,22 +449,14 @@ fn keys(
         }
         rooted.push((sample, root, found));
     }
-    // An instrument per articulation (the plain samples with the most common one, when some have none).
+    // An instrument per articulation; samples whose names say none are a part of their own (an untagged sample may be any).
     let mut parts: BTreeMap<Option<&'static str>, Vec<usize>> = BTreeMap::new();
     for (k, (sample, _, _)) in rooted.iter().enumerate() {
         parts.entry(sample.hints.articulation).or_default().push(k);
     }
     if parts.len() > 1 {
-        if let Some(plain) = parts.remove(&None) {
-            let main = parts.iter().max_by_key(|(_, members)| members.len()).map(|(part, _)| *part).unwrap_or(None);
-            parts.entry(main).or_default().extend(plain);
-        }
-        let named: Vec<&str> = parts.keys().filter_map(|part| *part).collect();
-        findings.push(format!(
-            "{} articulations ({}): an instrument each, since one key can't choose between them",
-            named.len(),
-            named.join(", ")
-        ));
+        let named: Vec<&str> = parts.keys().map(|part| part.unwrap_or(PLAIN)).collect();
+        findings.push(format!("{} parts ({}): an instrument each, since one key can't choose between them", named.len(), named.join(", ")));
     }
     let single = parts.len() <= 1;
     let mut out = Vec::new();
@@ -438,6 +482,7 @@ fn keys(
                         id: sample.id.clone(),
                         name: sample.name.clone(),
                         root: *root,
+                        base: (*root + sample.transpose).clamp(asked.lowest, asked.highest),
                         zone: spans[root],
                         velocity: ranges[layer],
                         round_robin: (members.len() > 1).then_some(robin + 1),
@@ -447,11 +492,17 @@ fn keys(
             }
         }
         if !placed.is_empty() {
-            out.push(Planned { part: if single { None } else { part.map(str::to_owned) }, cycle, samples: placed });
+            out.push(Planned { part: if single { None } else { Some(part.unwrap_or(PLAIN).to_owned()) }, cycle, samples: placed });
         }
     }
     out
 }
+
+/// The part of samples whose names name no articulation.
+pub const PLAIN: &str = "plain";
+
+/// GM's percussion keys end here: sounds with no GM key of their own go above it.
+const PAST_GM: i32 = 82;
 
 /// The order drum roles come in a kit laid out key by key.
 const ROLE_ORDER: [&str; 14] = [
@@ -499,10 +550,13 @@ fn drum_kit(
     findings: &mut Vec<String>,
     left_out: &mut Vec<(String, String)>,
 ) -> Vec<Planned> {
-    let _ = left_out;
     // One key per sound (its velocity layers and round robins share it), in role order, then by name.
     let mut sounds: BTreeMap<String, Vec<&Sample>> = BTreeMap::new();
     for sample in samples {
+        if sample.note_off {
+            left_out.push((sample.name.clone(), released(sample).unwrap_or_default().into()));
+            continue;
+        }
         sounds.entry(sound_of(sample)).or_default().push(sample);
     }
     let mut order: Vec<(String, Vec<&Sample>)> = sounds.into_iter().collect();
@@ -528,7 +582,7 @@ fn drum_kit(
             rest.push(group);
         }
     }
-    let mut next = if asked.gm { asked.first_key.max(60) } else { asked.first_key };
+    let mut next = if asked.gm { asked.first_key.max(PAST_GM) } else { asked.first_key };
     if asked.gm && !rest.is_empty() {
         findings.push(format!("{} sounds have no GM key of their own: from {} up", rest.len(), note_name(next)));
     }
@@ -560,6 +614,7 @@ fn drum_kit(
                     id: sample.id.clone(),
                     name: sample.name.clone(),
                     root: key,
+                    base: (key + sample.transpose).clamp(asked.lowest, asked.highest),
                     zone: (key, key),
                     velocity: ranges[layer],
                     round_robin: (members.len() > 1).then_some(robin + 1),
