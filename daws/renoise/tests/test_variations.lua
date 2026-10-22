@@ -178,6 +178,35 @@ test("variations: where tells a variation pattern's own tracks: the varied one, 
   eq(own(), "1,3", "the bass the producer wrote")
 end)
 
+test("variations: a variation Renoise refused part of goes again: its slot, and a free pattern of the pool it took gets its name and length back", function()
+  seq_setup()
+  local S = T.load_payload_module("changes_sequence")
+  local song = mock.song
+  local function sequence() return table.concat(song.sequencer.pattern_sequence, ",") end
+  -- (a free pattern in the pool: made with a slot and a note, the slot deleted, then emptied)
+  song.sequencer:insert_new_pattern_at(5)
+  local free = song.sequencer.pattern_sequence[5]
+  mock.ops.set_note(free, 1, 1, 1, { note = 48, instrument = 0 })
+  song.sequencer:delete_sequence_at(5)
+  song:pattern(free):clear()
+  song:pattern(free).name, song:pattern(free).number_of_lines = "Old", 32
+  local before = {}
+  for s, p in ipairs(song.sequencer.pattern_sequence) do before[s] = p end
+  -- Renoise gave the variation's slot that free pattern, and the variation renamed and lengthened it before failing
+  song.sequencer:insert_sequence_at(5, free)
+  song:pattern(free).name, song:pattern(free).number_of_lines = "V1 \194\183 B", 64
+  mock.ops.set_note(free, 1, 1, 1, { note = 50, instrument = 0 })
+  S.unmake_variation(song, { index = 5, made = { p = free, reused = { name = "Old", lines = 32 } } }, before)
+  eq(sequence(), table.concat(before, ","), "the slot went")
+  eq(song:pattern(free).name, "Old")
+  eq(song:pattern(free).number_of_lines, 32)
+  ok(song:pattern(free).is_empty, "the variation's lines went")
+  -- (a slot not as the variation left it is left alone)
+  song.sequencer:insert_sequence_at(5, 1)
+  S.unmake_variation(song, { index = 5, made = { p = free } }, before)
+  eq(#song.sequencer.pattern_sequence, #before + 1, "another slot stays")
+end)
+
 test("variations: Kumi's undo of a variation refuses once the producer renamed the section its slot starts; with discard it goes", function()
   local _, peer = seq_setup()
   local record = K.change(peer, "slot-variation", variation_input((K.place(peer))), "Kumi: V1 (kv01)")

@@ -655,9 +655,13 @@ end
 -- written. Answers the pattern's number, the cells written and the columns shown.
 local function make_variation(song, plan, name)
   local sequencer = song.sequencer
+  local pool = #song.patterns
   sequencer:insert_new_pattern_at(plan.index)
   local np = sequencer.pattern_sequence[plan.index]
   local new, source = song:pattern(np), song:pattern(plan.p)
+  -- (what was made, for a cleanup if Renoise refuses part of it: the slot's pattern, and when Renoise gave it a free one of the
+  -- pool rather than a new one, that pattern's name and length)
+  plan.made = { p = np, reused = np <= pool and { name = new.name, lines = new.number_of_lines } or nil }
   if new.number_of_lines ~= source.number_of_lines then new.number_of_lines = source.number_of_lines end
   new.name = name
   for t = 1, rows.track_count(song) do
@@ -697,6 +701,25 @@ local function make_variation(song, plan, name)
   return np, after, hidden
 end
 
+-- A variation Renoise refused part of, taken back (#401: Renoise may give the slot a free pattern of the pool, not a new one at
+-- its end): the slot it inserted goes, its pattern emptied so Renoise lets go of a new one, a free one's name and length put back.
+local function unmake_variation(song, plan, before)
+  local now = song.sequencer.pattern_sequence
+  if not plan.made or #now ~= #before + 1 or now[plan.index] ~= plan.made.p then return end
+  local pattern = song:pattern(plan.made.p)
+  if plan.made.reused then
+    -- (a free pattern of the pool: its slot goes first, while it holds the variation's lines, so Renoise keeps it; then it's
+    -- emptied, with its name and length back)
+    song.sequencer:delete_sequence_at(plan.index)
+    pattern:clear()
+    pattern.name, pattern.number_of_lines = plan.made.reused.name, plan.made.reused.lines
+  else
+    pattern:clear()
+    song.sequencer:delete_sequence_at(plan.index)
+  end
+end
+M.unmake_variation = unmake_variation
+
 local function variation_apply(song, env, input, fence, desc)
   local ok, plan = pcall(variation_plan, song, env, input)
   if not ok then base.gone_is_changed(plan) end
@@ -711,13 +734,7 @@ local function variation_apply(song, env, input, fence, desc)
   if not made then
     -- (what was made goes again: the slot, its pattern emptied so Renoise lets go of it, the columns as they were)
     local why = np
-    pcall(function()
-      local p = song.sequencer.pattern_sequence[plan.index]
-      if #song.sequencer.pattern_sequence > #before and p and p > fence.patterns then
-        song:pattern(p):clear()
-        song.sequencer:delete_sequence_at(plan.index)
-      end
-    end)
+    pcall(unmake_variation, song, plan, before)
     cells.set_columns(plan.track, columns)
     fail("failed", "Renoise wouldn't make the variation: " .. tostring(type(why) == "table" and why.message or why):gsub("^[^%s:]*%.lua:%d+: ", ""))
   end
