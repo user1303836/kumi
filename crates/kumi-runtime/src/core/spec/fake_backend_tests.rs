@@ -135,6 +135,18 @@ async fn a_fader_never_pushes_peaks_past_the_ceiling_nor_past_its_most() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn an_acx_raise_stops_where_the_noise_floor_would_fail_and_aims_lower_in_the_range() {
+    // (RMS about -24 over the whole, room tone at -63: +4 to ACX's -20 would put the floor at -59)
+    let fake = Rc::new(Fake { tail: Some(0.000_708), ..Rc::try_unwrap(Fake::new(0.0998)).ok().unwrap() });
+    let tool = DeliverySpec::new(fake.clone()).tool();
+    let fixed = run(&tool, json!({"action": "fix", "spec": "acx"})).await.unwrap();
+    assert_eq!(fixed["ok"], true, "{fixed}");
+    assert!(fixed["said"][0].as_str().unwrap().starts_with("aimed lower in the range"), "{fixed}");
+    let floor: f64 = line(&fixed["after"], "noise floor")["measured"].as_str().unwrap().trim_end_matches(" dB").parse().unwrap();
+    assert!(floor <= -60., "{floor}");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn acx_reads_rms_and_the_noise_floor_and_says_noise_is_the_producers_call() {
     // A tone with a second of loud hiss after it: the noise floor fails ACX's -60.
     let fake = Rc::new(Fake { tail: Some(0.01), ..Rc::try_unwrap(Fake::new(0.1)).ok().unwrap() });

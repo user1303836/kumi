@@ -38,11 +38,12 @@ impl Leveller {
         Leveller { window: ((WINDOW * rate) as usize).max(1), total: 0., count: 0, held: 0., in_window: 0, floor: None, silent: 0 }
     }
 
-    /// A block of samples, its channels averaged.
+    /// A block of samples: each sample's power the mean of its channels' (a stereo pair's room tone is two noises, not
+    /// their mid).
     pub fn push(&mut self, left: &[f32], right: &[f32]) {
         for (l, r) in left.iter().zip(right) {
-            let sample = (*l as f64 + *r as f64) / 2.;
-            let power = sample * sample;
+            let (l, r) = (*l as f64, *r as f64);
+            let power = (l * l + r * r) / 2.;
             self.total += power;
             self.count += 1;
             self.held += power;
@@ -86,5 +87,10 @@ mod tests {
         assert!((found.noise_floor.unwrap() + 70.).abs() < 0.1, "{found:?}");
         assert_eq!(found.silence, 0.5);
         assert!((found.rms + 20.).abs() < 0.1, "the loud second over all two: {found:?}");
+        // Two channels that cancel in the mid are as loud as each one.
+        let mut leveller = Leveller::new(rate);
+        let (left, right): (Vec<f32>, Vec<f32>) = (0..1000).map(|k| if k % 2 == 0 { (0.1, -0.1) } else { (-0.1, 0.1) }).unzip();
+        leveller.push(&left, &right);
+        assert!((leveller.finish().rms + 20.).abs() < 0.01, "{:?}", leveller.finish());
     }
 }

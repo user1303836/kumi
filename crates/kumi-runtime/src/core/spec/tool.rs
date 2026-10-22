@@ -93,11 +93,18 @@ pub fn lines(spec: &Spec, measured: &Measured) -> Vec<Value> {
 
 /// The gain the spec's loudness needs (dB), aimed at its level.
 fn gain(spec: &Spec, measured: &Measured) -> Option<f64> {
-    match (spec.integrated, spec.rms) {
-        (Some((_, _, aim)), _) => measured.integrated.map(|value| aim - value),
-        (_, Some((_, _, aim))) => Some(aim - measured.levels.rms),
-        _ => None,
-    }
+    gains(spec, measured).map(|(aim, _)| aim)
+}
+
+/// The gains to the spec's aim and to the inside of its range's nearer edge (dB).
+fn gains(spec: &Spec, measured: &Measured) -> Option<(f64, f64)> {
+    let (low, high, aim, value) = match (spec.integrated, spec.rms) {
+        (Some((low, high, aim)), _) => (low, high, aim, measured.integrated?),
+        (_, Some((low, high, aim))) => (low, high, aim, measured.levels.rms),
+        _ => return None,
+    };
+    let edge = if value < low { low + 0.1 } else { high - 0.1 };
+    Some((aim - value, edge - value))
 }
 
 pub struct DeliverySpec<B: SpecBackend> {
@@ -161,25 +168,42 @@ impl<B: SpecBackend + 'static> DeliverySpec<B> {
             let lines = lines(spec, &measured);
             let failing = |what: &str| lines.iter().any(|line| line["what"] == what && line["ok"] == false);
             let step = if failing("integrated loudness") || failing("RMS") {
-                match gain(spec, &measured) {
-                    Some(gain) => gain,
-                    None => break,
+                let Some((aim, bottom)) = gains(spec, &measured) else { break };
+                // (down never hurts the peaks or the floor; up only as far as both leave room, the aim first, else as near it
+                // as they allow within the range)
+                let peak_room = spec.ceiling - MARGIN - measured.true_peak;
+                let floor_room = match (spec.noise_floor, measured.levels.noise_floor) {
+                    (Some(most), Some(floor)) => most - MARGIN - floor,
+                    _ => f64::INFINITY,
+                };
+                let room = peak_room.min(floor_room);
+                if aim <= 0. || aim <= room {
+                    aim
+                } else if bottom <= room {
+                    let by = if floor_room < peak_room { "noise floor" } else { "true peak" };
+                    said.push(format!("aimed lower in the range ({room:+.1} dB, not {aim:+.1}): the {by} leaves no more room"));
+                    room
+                } else if floor_room < peak_room {
+                    said.push(format!(
+                        "the noise floor would pass {} dB before the loudness reaches {}'s range: noise reduction comes first (the producer's call, a tool they trust), then fix again",
+                        spec.noise_floor.unwrap_or(0.),
+                        spec.name
+                    ));
+                    break;
+                } else {
+                    said.push(format!(
+                        "the fader can raise it {:+.1} dB at most before its true peak passes {} dBTP, and the spec needs {bottom:+.1} at least: limit the master's peaks first ({}), then fix again",
+                        peak_room.max(0.),
+                        spec.ceiling,
+                        words.limiter
+                    ));
+                    break;
                 }
             } else if failing("true peak") {
                 spec.ceiling - MARGIN - measured.true_peak
             } else {
                 break;
             };
-            if measured.true_peak + step > spec.ceiling - MARGIN + 1e-9 {
-                let most = spec.ceiling - MARGIN - measured.true_peak;
-                said.push(format!(
-                    "the fader can raise it {:+.1} dB at most before its true peak passes {} dBTP, and the spec needs {step:+.1}: limit the master's peaks first ({}), then fix again",
-                    most.max(0.),
-                    spec.ceiling,
-                    words.limiter
-                ));
-                break;
-            }
             let now = self.backend.master_db(signal).await?;
             let wanted = now + step;
             if wanted > words.fader_most {
