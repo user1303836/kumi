@@ -241,6 +241,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     };
     let tools_dir = load_tools_dir(&io.env)?;
     let library = create_library(LibraryOptions {
+        daws: kumi_runtime::integrations::LIBRARIES,
         dir: load_library_dir(&io.env)?,
         folders: Some(settings.library_folders),
         projects_dir: Some(projects_dir.clone()),

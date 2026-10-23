@@ -3,12 +3,12 @@ use super::{
     sources::{dirname, is_absolute, join},
     xml::{attribute, scan_xml_file, ScanOptions, TagHandler},
 };
-use crate::core::errors::RuntimeError;
 use indexmap::{IndexMap, IndexSet};
 use kumi_common::{
     abort::Signal,
     js::number::{parse, round, to_string},
 };
+use kumi_types::errors::RuntimeError;
 use serde::{Deserialize, Serialize};
 use std::{path::Path, sync::LazyLock};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -83,7 +83,7 @@ pub struct SetSummary {
     pub live: Option<String>,
     /// The DAW whose project it is; missing for Live's Sets (never written for them).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub daw: Option<crate::core::daw::DawId>,
+    pub daw: Option<kumi_types::daw::DawId>,
 }
 static DEVICE_NAMES: LazyLock<std::collections::HashMap<String, String>> =
     LazyLock::new(|| serde_json::from_str(include_str!("device-names.json")).expect("device names"));

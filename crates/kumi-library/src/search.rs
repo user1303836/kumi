@@ -681,7 +681,7 @@ pub fn search_presets<'a>(entries: impl IntoIterator<Item = &'a PresetEntry>, qu
         )
         .to_lowercase();
         // Another DAW's preset is found by what it holds too: a REAPER bank's preset names, the FX in a chain.
-        if super::presets::preset_daws(&entry.format) != vec![crate::core::daw::DawId::Ableton] {
+        if super::presets::preset_daws(&entry.format) != vec![kumi_types::daw::DawId::Ableton] {
             for inside in entry.inside.iter().flatten() {
                 hay.push(' ');
                 hay.push_str(&inside.to_lowercase());

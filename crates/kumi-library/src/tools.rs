@@ -7,15 +7,7 @@ use super::{
     sources::basename,
     store::unpack_vector,
 };
-use crate::core::daw::{asset_in_words, AssetPhrase, DawId, DawProfile, DawWords};
-use crate::{
-    audio::audio_path,
-    core::{
-        contracts::{JsonObject, KernelTool, Reach, SessionEvent, ToolResult},
-        errors::RuntimeError,
-    },
-    integrations::shared::samples::{default_sample_folders, find_samples, folder_path, FindSamplesOptions},
-};
+use crate::samples::{default_sample_folders, find_samples, folder_path, FindSamplesOptions};
 use async_trait::async_trait;
 use futures::future::LocalBoxFuture;
 use kumi_common::{
@@ -26,6 +18,10 @@ use kumi_common::{
         string::{head, trim},
     },
 };
+use kumi_media::audio::audio_path;
+use kumi_types::contracts::{JsonObject, KernelTool, Reach, ToolEvent, ToolResult};
+use kumi_types::daw::{asset_in_words, AssetPhrase, DawId, DawProfile, DawWords};
+use kumi_types::errors::RuntimeError;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{rc::Rc, sync::LazyLock};
@@ -59,20 +55,21 @@ pub trait LibraryAccess {
     }
 }
 pub type ResolveSound = Rc<dyn Fn(String, Signal) -> LocalBoxFuture<'static, Result<Option<String>, RuntimeError>>>;
-pub type OnEvent = Rc<dyn Fn(SessionEvent)>;
+pub type OnEvent = Rc<dyn Fn(ToolEvent)>;
 #[derive(Clone, Default)]
 pub struct LibraryToolsOptions {
     pub resolve: Option<ResolveSound>,
     pub on_event: Option<OnEvent>,
 }
+/// A tool's definition, as tool-definitions.json gives it: the library's tools', and Live's manual's.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct Definition {
+pub struct Definition {
     pub name: String,
     pub description: String,
     pub input_schema: JsonObject,
 }
-pub(crate) fn definition(name: &str) -> &'static Definition {
+pub fn definition(name: &str) -> &'static Definition {
     static DEFINITIONS: LazyLock<Vec<Definition>> = LazyLock::new(|| serde_json::from_str(include_str!("tool-definitions.json")).unwrap());
     DEFINITIONS.iter().find(|d| d.name == name).unwrap()
 }
@@ -140,9 +137,10 @@ fn definitions_in(profile: &DawProfile) -> Vec<Definition> {
     }
     serde_json::from_value(value).unwrap()
 }
-pub(crate) fn tell(callback: &Option<OnEvent>, text: String) {
+/// Tells the session what a tool is doing now ("searching your presets"), when it listens.
+pub fn tell(callback: &Option<OnEvent>, text: String) {
     if let Some(callback) = callback {
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(SessionEvent::Doing { text })));
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(ToolEvent::Doing { text })));
     }
 }
 fn strings(value: Option<&Value>) -> Vec<String> {
@@ -594,7 +592,7 @@ mod phrases {
     #[test]
     fn the_library_tools_phrases_are_all_there_and_lives_words_stay() {
         let value: Value = serde_json::from_str(include_str!("tool-definitions.json")).unwrap();
-        assert_eq!(crate::core::daw::check_asset_phrases(&value, LIBRARY_PHRASES), Ok(()));
+        assert_eq!(kumi_types::daw::check_asset_phrases(&value, LIBRARY_PHRASES), Ok(()));
         assert_eq!(
             asset_in_words(value.clone(), &DawProfile::ABLETON, LIBRARY_PHRASES),
             value,

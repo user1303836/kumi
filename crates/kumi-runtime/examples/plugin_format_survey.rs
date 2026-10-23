@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use kumi_runtime::plugins::formats::live_set::{self, PluginFormat as Host, PluginState};
+use kumi_runtime::integrations::live_set::{self, PluginFormat as Host, PluginState};
 use kumi_runtime::plugins::formats::ozone12::{OzonePreset, OzoneState};
 use kumi_runtime::plugins::formats::serum2::{SerumPreset, XferFile};
 use kumi_runtime::plugins::formats::structure::{builtin, merge_survey, to_text};

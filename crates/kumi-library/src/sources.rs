@@ -1,18 +1,17 @@
-//! Where the producer's sounds, presets and Sets are: Live's User Library and Places (as Live's own
-//! preferences name them), the packs Live installed and its Core Library, Splice's folder, and folders
-//! the producer named; and the libraries of the other DAWs Kumi works in (`daw_sources`). Only folders that exist; a
-//! folder inside another counts once, but a DAW's library stays a source of its own inside another folder.
+//! Where the producer's sounds, presets and Sets are: each DAW's places, as its integration says (Live's User Library
+//! and Places, its packs and Core Library, Splice's folder; REAPER's and Renoise's own libraries; see
+//! [`LibrarySources`](crate::daws::LibrarySources)), and folders the producer named. Only folders that exist; a folder
+//! inside another counts once, but a DAW's library stays a source of its own inside another folder.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf, Prefix};
-use std::sync::LazyLock;
 use std::time::UNIX_EPOCH;
 
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::core::daw::DawId;
+use crate::daws::{Daws, Places};
+use kumi_types::daw::DawId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -74,7 +73,7 @@ pub struct SourceOptions {
     pub program_data: Option<String>,
     /// The DAW whose places these are (Live's when None).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub daw: Option<crate::core::daw::DawId>,
+    pub daw: Option<DawId>,
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -443,23 +442,23 @@ pub fn dirname(path: &str) -> String {
 // ---------------------------------------------------------------------------------------------------
 
 /// `readdirSync`: a folder's names (sorted, as Node lists them), or none.
-pub(super) fn list(folder: &str) -> Vec<String> {
+pub fn list(folder: &str) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(folder) else { return Vec::new() };
     let mut names: Vec<String> = entries.flatten().map(|entry| entry.file_name().to_string_lossy().into_owned()).collect();
     names.sort();
     names
 }
 
-pub(super) fn is_folder(path: &str) -> bool {
+pub fn is_folder(path: &str) -> bool {
     std::fs::metadata(path).map(|info| info.is_dir()).unwrap_or(false)
 }
 
-fn exists(path: &str) -> bool {
+pub fn exists(path: &str) -> bool {
     Path::new(path).exists()
 }
 
 /// `statSync(path).mtimeMs`.
-fn mtime_ms(path: &str) -> f64 {
+pub fn mtime_ms(path: &str) -> f64 {
     std::fs::metadata(path)
         .ok()
         .and_then(|info| info.modified().ok())
@@ -468,7 +467,8 @@ fn mtime_ms(path: &str) -> f64 {
         .unwrap_or(0.0)
 }
 
-fn unescape(value: &str) -> String {
+/// XML's five entities, as text.
+pub fn unescape(value: &str) -> String {
     value.replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">").replace("&apos;", "'").replace("&amp;", "&")
 }
 
@@ -489,236 +489,48 @@ pub fn expand_folder(value: &str, home: &str) -> Option<String> {
     }
 }
 
-pub(super) fn platform_of(options: &SourceOptions) -> String {
+pub fn platform_of(options: &SourceOptions) -> String {
     options.platform.clone().unwrap_or_else(|| current_platform().to_string())
 }
 
-pub(super) fn home_of(options: &SourceOptions) -> String {
+pub fn home_of(options: &SourceOptions) -> String {
     options.home.clone().unwrap_or_else(homedir)
 }
 
 /// `env.NAME`, from the injected environment or the process's.
-pub(super) fn env_of(options: &SourceOptions, name: &str) -> Option<String> {
+pub fn env_of(options: &SourceOptions, name: &str) -> Option<String> {
     match &options.env {
         Some(env) => env.get(name).cloned(),
         None => std::env::var(name).ok(),
     }
 }
 
-static LIVE_FOLDER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^Live [0-9]").unwrap());
+/// A place where the library looks, as it keeps one: resolved, and spelled as the disk spells it. None for a path that
+/// isn't absolute.
+pub fn place(path: Option<&str>, label: &str, kind: SourceKind) -> Option<Source> {
+    let path = path.filter(|path| !path.is_empty() && is_absolute(path))?;
+    Some(Source { path: on_disk(&resolve(path)), label: label.to_string(), kind })
+}
 
-/// Live's preference folders, newest first ("Live 12.1.5", "Live 12.0.20"…).
-pub fn live_preference_folders(options: &SourceOptions) -> Vec<String> {
+/// Where everything is: each DAW's places before the folders the producer named (Live's User Library first), those
+/// folders, and each DAW's places after them.
+pub fn library_sources(daws: Daws, options: &SourceOptions) -> Vec<Source> {
+    debug_assert!(
+        daws.0.is_empty() || daws.iter().any(|daw| daw.profile().id == Some(options.daw.unwrap_or(DawId::Ableton))),
+        "a registered DAW's places"
+    );
     let home = home_of(options);
-    let platform = platform_of(options);
-    let root = if platform == "win32" {
-        join(&env_of(options, "APPDATA").unwrap_or_else(|| join(&join(&home, "AppData"), "Roaming")), "Ableton")
-    } else {
-        join(&join(&join(&home, "Library"), "Preferences"), "Ableton")
-    };
-    let mut folders: Vec<(String, f64)> = list(&root)
-        .into_iter()
-        .filter(|name| LIVE_FOLDER.is_match(name))
-        .map(|name| {
-            let folder = join(&root, &name);
-            if platform == "win32" {
-                join(&folder, "Preferences")
-            } else {
-                folder
-            }
-        })
-        .filter(|folder| exists(&join(folder, "Library.cfg")))
-        .map(|folder| {
-            let mtime = mtime_ms(&join(&folder, "Library.cfg"));
-            (folder, mtime)
-        })
-        .collect();
-    folders.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    folders.into_iter().map(|(folder, _)| folder).collect()
-}
-
-/// What Live's newest Library.cfg says.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct LibraryConfig {
-    pub user_library: Option<String>,
-    pub places: Vec<String>,
-    pub packs: Option<String>,
-    pub splice: Option<String>,
-}
-
-static USER_LIBRARY_BLOCK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<UserLibrary>(.*?)</UserLibrary>").unwrap());
-static PLACES_BLOCK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<UserFolderInfoList>(.*?)</UserFolderInfoList>").unwrap());
-static ANY_VALUE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"Value="([^"]+)""#).unwrap());
-static USER_FOLDER_ADDRESS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^userfolder:(.+?)(?:#.*)?$").unwrap());
-static FILE_EXTENSION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\.[A-Za-z0-9_]{2,4}$").unwrap());
-
-/// What Live's newest Library.cfg says: the User Library, Places, where packs and Splice's downloads go.
-pub fn read_library_config(text: &str) -> LibraryConfig {
-    let value = |block: &str, field: &str| -> Option<String> {
-        let pattern = Regex::new(&format!(r#"<{field} Value="([^"]*)""#)).expect("field pattern");
-        pattern.captures(block).map(|found| unescape(&found[1]))
-    };
-    let user = USER_LIBRARY_BLOCK.captures(text).map(|found| found[1].to_string()).unwrap_or_default();
-    let folder = value(&user, "ProjectPath");
-    let name = value(&user, "ProjectName").filter(|name| !name.is_empty()).unwrap_or_else(|| "User Library".to_string());
-    // Places are listed with their paths (or "userfolder:" addresses that hold them), whatever Live's version calls the fields.
-    let places_block = PLACES_BLOCK.captures(text).map(|found| found[1].to_string()).unwrap_or_default();
-    let mut places: Vec<String> = Vec::new();
-    for found in ANY_VALUE.captures_iter(&places_block) {
-        let raw = unescape(&found[1]);
-        let path = match USER_FOLDER_ADDRESS.captures(&raw) {
-            Some(address) => {
-                let address = &address[1];
-                percent_encoding::percent_decode_str(address)
-                    .decode_utf8()
-                    .map(|decoded| decoded.into_owned())
-                    .unwrap_or_else(|_| address.to_string())
-            }
-            None => raw,
-        };
-        if is_absolute(&path) && !FILE_EXTENSION.is_match(&path) && !places.contains(&path) {
-            places.push(path);
-        }
-    }
-    let packs = value(text, "PreferredFactoryPacksInstallationPath");
-    let splice = value(text, "CustomSpliceDownloadPathMember");
-    LibraryConfig {
-        user_library: folder.filter(|folder| !folder.is_empty() && is_absolute(folder)).map(|folder| join(&folder, &name)),
-        places,
-        packs: packs.filter(|packs| !packs.is_empty() && is_absolute(packs)),
-        splice: splice.filter(|splice| !splice.is_empty() && is_absolute(splice)),
-    }
-}
-
-/// The folders Live's indexer last said it looks after.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct IndexerLog {
-    pub places: Vec<Source>,
-    pub packs: Vec<Source>,
-}
-
-static INDEXED_FOLDER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"'([^']+)'\s*\[([^\]]*)\]").unwrap());
-static CORE_LIBRARY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)Core Library$").unwrap());
-
-/// The folders Live's indexer last said it looks after, from its log ("Configure: UserFolders:
-/// '/Users/me/Samples' [Samples]"): Places by `UserFolders`, packs by `FactoryPacks`.
-pub fn read_indexer_log(text: &str) -> IndexerLog {
-    let last = |kind: &str| -> Vec<(String, String)> {
-        let marker = format!("Configure: {kind}:");
-        let line =
-            text.split('\n').map(|line| line.strip_suffix('\r').unwrap_or(line)).filter(|line| line.contains(&marker)).last().unwrap_or("");
-        let key = format!("{kind}:");
-        let rest = match line.find(&key) {
-            Some(at) => &line[at + key.len()..],
-            None => "",
-        };
-        INDEXED_FOLDER
-            .captures_iter(rest)
-            .map(|found| {
-                let path = found[1].to_string();
-                let label = kumi_common::js::string::trim(&found[2]);
-                let label = if label.is_empty() { basename(&path) } else { label.to_string() };
-                (path, label)
-            })
-            .collect()
-    };
-    IndexerLog {
-        places: last("UserFolders").into_iter().map(|(path, label)| Source { path, label, kind: SourceKind::Place }).collect(),
-        packs: last("FactoryPacks")
-            .into_iter()
-            .chain(last("LegacyFactoryPacks"))
-            .map(|(path, label)| {
-                let kind = if CORE_LIBRARY.is_match(&path) { SourceKind::Core } else { SourceKind::Pack };
-                Source { path, label, kind }
-            })
-            .collect(),
-    }
-}
-
-static LIVE_PROGRAM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^Live ").unwrap());
-static LIVE_APP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^Ableton Live.*\.app$").unwrap());
-
-/// The Core Library inside Live (the newest found): the app's on macOS, ProgramData's on Windows.
-fn core_libraries(options: &SourceOptions) -> Vec<String> {
-    let platform = platform_of(options);
-    if platform == "win32" {
-        let program_data = options
-            .program_data
-            .clone()
-            .or_else(|| options.env.as_ref().and_then(|env| env.get("ProgramData").cloned()))
-            .or_else(|| std::env::var("ProgramData").ok())
-            .unwrap_or_else(|| "C:\\ProgramData".to_string());
-        let ableton = join(&program_data, "Ableton");
-        let mut names: Vec<String> = list(&ableton).into_iter().filter(|name| LIVE_PROGRAM.is_match(name)).collect();
-        names.sort();
-        names.reverse();
-        return names.into_iter().map(|name| join(&join(&join(&ableton, &name), "Resources"), "Core Library")).collect();
-    }
-    let applications = options.applications.clone().unwrap_or_else(|| "/Applications".to_string());
-    let mut names: Vec<String> = list(&applications).into_iter().filter(|name| LIVE_APP.is_match(name)).collect();
-    names.sort();
-    names.reverse();
-    names.into_iter().map(|name| join(&join(&join(&join(&applications, &name), "Contents"), "App-Resources"), "Core Library")).collect()
-}
-
-/// Where everything is, User Library first.
-pub fn library_sources(options: &SourceOptions) -> Vec<Source> {
-    let home = home_of(options);
-    let platform = platform_of(options);
-    let documents = if platform == "win32" { join(&home, "Documents") } else { join(&home, "Music") };
-    let mut found: Vec<Source> = Vec::new();
-    let add = |found: &mut Vec<Source>, path: Option<&str>, label: &str, kind: SourceKind| {
-        if let Some(path) = path.filter(|path| !path.is_empty() && is_absolute(path)) {
-            found.push(Source { path: on_disk(&resolve(path)), label: label.to_string(), kind });
-        }
-    };
-    let preferences = live_preference_folders(options).into_iter().next();
-    let mut config = LibraryConfig::default();
-    let mut indexer = IndexerLog::default();
-    if let Some(preferences) = preferences {
-        if let Ok(text) = std::fs::read(join(&preferences, "Library.cfg")) {
-            config = read_library_config(&String::from_utf8_lossy(&text));
-        }
-        if let Ok(text) = std::fs::read(join(&preferences, "Indexer.txt")) {
-            indexer = read_indexer_log(&String::from_utf8_lossy(&text));
-        }
-    }
-    let default_user_library = join(&join(&documents, "Ableton"), "User Library");
-    add(&mut found, Some(config.user_library.as_deref().unwrap_or(&default_user_library)), "User Library", SourceKind::UserLibrary);
-    for place in &indexer.places {
-        add(&mut found, Some(&place.path), &place.label, SourceKind::Place);
-    }
-    for place in &config.places {
-        add(&mut found, Some(place), &basename(place), SourceKind::Place);
-    }
+    let places: Vec<Places> = daws.iter().map(|daw| daw.places(options)).collect();
+    let mut found: Vec<Source> = places.iter().flat_map(|places| places.before.iter().cloned()).collect();
     for folder in options.folders.as_deref().unwrap_or_default() {
         let path = expand_folder(folder, &home);
         let label = match &path {
             Some(path) => basename(path),
             None => folder.clone(),
         };
-        add(&mut found, path.as_deref(), &label, SourceKind::Folder);
+        found.extend(place(path.as_deref(), &label, SourceKind::Folder));
     }
-    // Splice's own app keeps its downloads in ~/Splice (Documents on Windows); Live's Splice browser may keep them elsewhere.
-    add(&mut found, config.splice.as_deref(), "Splice", SourceKind::Splice);
-    let splice_folders = [join(&home, "Splice"), join(&join(&home, "Documents"), "Splice")];
-    add(&mut found, splice_folders.iter().find(|folder| is_folder(folder)).map(String::as_str), "Splice", SourceKind::Splice);
-    for pack in &indexer.packs {
-        add(&mut found, Some(&pack.path), &pack.label, pack.kind);
-    }
-    for folder in [config.packs.clone(), Some(join(&join(&documents, "Ableton"), "Factory Packs"))].into_iter().flatten() {
-        let mut names = list(&folder);
-        names.sort();
-        for name in names {
-            if !name.starts_with('.') && is_folder(&join(&folder, &name)) {
-                add(&mut found, Some(&join(&folder, &name)), &name, SourceKind::Pack);
-            }
-        }
-    }
-    if !found.iter().any(|source| source.kind == SourceKind::Core) {
-        let core = core_libraries(options).into_iter().find(|folder| is_folder(folder));
-        add(&mut found, core.as_deref(), "Core Library", SourceKind::Core);
-    }
+    found.extend(places.into_iter().flat_map(|places| places.after));
     // Each folder once, and not again inside another: the outer one is searched whole.
     let mut unique: Vec<Source> = Vec::new();
     for source in found {
@@ -733,12 +545,21 @@ pub fn library_sources(options: &SourceOptions) -> Vec<Source> {
     }
     // A DAW's own library is read by its layout, even inside a folder the producer named (that folder's walk leaves it
     // out); each once.
-    for source in super::daw_sources::daw_library_sources(options) {
+    for source in daws.iter().flat_map(|daw| daw.own_library(options)) {
         if is_folder(&source.path) && !unique.iter().any(|kept| kept.path == source.path) {
             unique.push(source);
         }
     }
     unique
+}
+
+/// The projects the DAWs opened lately, the producer's own (Live's Sets, from its log): each DAW's, in turn.
+pub fn recent_projects(daws: Daws, options: &SourceOptions) -> Vec<String> {
+    debug_assert!(
+        daws.0.is_empty() || daws.iter().any(|daw| daw.profile().id == Some(options.daw.unwrap_or(DawId::Ableton))),
+        "a registered DAW's projects"
+    );
+    daws.iter().flat_map(|daw| daw.recent_projects(options)).collect()
 }
 
 /// A sound's or preset's place in Live's Browser ("user_library/Samples/Kick.wav"), for the sources the Browser lists by path.
@@ -754,26 +575,4 @@ pub fn browser_path(source: &Source, relative_path: &str) -> Option<String> {
         _ => return None,
     };
     Some(root.into_iter().chain(parts).collect::<Vec<_>>().join("/"))
-}
-
-static LOADED_DOCUMENT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"Loading document "([^"\r\n]+\.als)""#).unwrap());
-static LIVES_OWN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[\\/](App-Resources|Resources)[\\/](Builtin|Core Library)[\\/]").unwrap());
-static INSIDE_APP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\.app[\\/]").unwrap());
-
-/// Sets Live opened lately, from its logs ("Loading document "/Users/me/Song Project/Song.als""): the
-/// producer's own, wherever they keep them. Live's own templates and lessons aren't the producer's.
-pub fn recent_sets(options: &SourceOptions) -> Vec<String> {
-    let mut found: Vec<String> = Vec::new();
-    for folder in live_preference_folders(options) {
-        let Ok(text) = std::fs::read(join(&folder, "Log.txt")) else { continue };
-        let text = String::from_utf8_lossy(&text);
-        for document in LOADED_DOCUMENT.captures_iter(&text) {
-            let path = &document[1];
-            if !LIVES_OWN.is_match(path) && !INSIDE_APP.is_match(path) && !found.iter().any(|known| known == path) {
-                found.push(path.to_string());
-            }
-        }
-    }
-    found.into_iter().filter(|path| exists(path)).collect()
 }

@@ -31,6 +31,7 @@ pub mod remember;
 pub mod views;
 pub mod watch;
 pub use inference::create_inference_only_integration;
+pub mod library;
 pub mod live_command;
 pub mod live_set;
 pub mod manual;

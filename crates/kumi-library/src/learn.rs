@@ -167,7 +167,6 @@ use super::{
     store::{pack_vector, write_json},
     taste::build_taste,
 };
-use crate::{audio::decode::AudioError, core::errors::RuntimeError};
 use futures::future::LocalBoxFuture;
 use indexmap::IndexMap;
 use kumi_common::{
@@ -175,6 +174,8 @@ use kumi_common::{
     js::string::head,
     time::now_ms,
 };
+use kumi_media::audio::decode::AudioError;
+use kumi_types::errors::RuntimeError;
 use regex::Regex;
 use std::{
     cell::{Cell, RefCell},
@@ -359,7 +360,7 @@ async fn walk(
                     _ => continue,
                 }
             // Formats Live accepts as samples, intentionally narrower than the general audio decoder.
-            } else if kinds.sounds && crate::integrations::shared::samples::SAMPLE_EXTENSIONS.contains(&ext.as_str()) {
+            } else if kinds.sounds && crate::samples::SAMPLE_EXTENSIONS.contains(&ext.as_str()) {
                 &mut found.sounds
             } else if kinds.presets && PRESET_EXTENSIONS.contains(&ext.as_str()) {
                 &mut found.presets

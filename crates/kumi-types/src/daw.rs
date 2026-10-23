@@ -15,6 +15,15 @@ pub enum DawId {
 impl DawId {
     pub const ALL: [DawId; 3] = [DawId::Ableton, DawId::Reaper, DawId::Renoise];
 
+    /// Its profile.
+    pub fn profile(self) -> &'static DawProfile {
+        match self {
+            DawId::Ableton => &DawProfile::ABLETON,
+            DawId::Reaper => &DawProfile::REAPER,
+            DawId::Renoise => &DawProfile::RENOISE,
+        }
+    }
+
     /// Its name as files, settings and `--daw` say it.
     pub fn as_str(self) -> &'static str {
         match self {

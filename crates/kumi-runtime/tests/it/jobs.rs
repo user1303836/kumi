@@ -434,6 +434,7 @@ local_test!(a_worker_gets_only_tools_away_from_the_daw_and_never_starts_a_job, {
     ];
     let dir = tempfile::tempdir().unwrap();
     let library = kumi_runtime::library::create_library(kumi_runtime::library::LibraryOptions {
+        daws: kumi_runtime::integrations::LIBRARIES,
         dir: dir.path().join("library").to_string_lossy().into(),
         find_sets: Some(false),
         fork: Some(false),
@@ -649,6 +650,7 @@ local_test!(a_session_with_everything_on_offers_the_model_at_most_128_tools, {
     };
     let (store, _) = StoreClient::open(at("kumi.db"), files, 1).await.unwrap();
     let library = create_library(LibraryOptions {
+        daws: kumi_runtime::integrations::LIBRARIES,
         dir: at("library").to_string_lossy().into(),
         find_sets: Some(false),
         fork: Some(false),

@@ -5,7 +5,7 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 
 ## Where things live
 - `crates/kumi`: the app. TUI (`src/tui/`), CLI, install/update/doctor; `src/daw/` wires each DAW in.
-- `crates/kumi-runtime`: the agent, listening, library and the DAW-neutral core.
+- `crates/kumi-runtime`: the agent, listening and the DAW-neutral core.
   - `src/kernel/`: the agent loop. `src/core/`: the DAW-neutral model (HISTORY, plans, sessions, places, FOCUS
     views, and workflows such as jam, layers and stems).
   - `src/integrations/ableton/`: Live, host side. `own_*` and `shared/`: what REAPER and Renoise share.
@@ -28,6 +28,9 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
   models Kumi runs itself (ONNX Runtime), a turn's timing and a failed call's words. Re-exported as `kumi_runtime::ai`…
 - `crates/kumi-web`: the web and video tools: searching and reading the web (pages, PDFs, GitHub, Max patches), and
   watching a tutorial for its words, frames and sound. Re-exported as `kumi_runtime::web` and `kumi_runtime::video`.
+- `crates/kumi-library`: the producer's library (learning, search, presets, Sets, taste), the plug-ins' formats and
+  roles, and finding samples on disk. Each DAW says where its library is (`LibrarySources`, implemented in its
+  integration; the registry's `LIBRARIES`). Re-exported as `kumi_runtime::library` and `kumi_runtime::plugins`.
 - `crates/kumi-store` (SQLite), `kumi-common` (shared utilities), `kumi-genexpr` (gen~ test interpreter).
 - `plugin-formats/`: the plug-in preset formats Kumi reads (data Kumi builds in).
 - `testdata/oracles/<crate>/`: the recorded oracles that crate's tests read, through `kumi_testkit::oracle`.

@@ -14,15 +14,16 @@ pub mod integrations;
 // Live's own parts, at the paths they always had.
 pub use integrations::{ears, hands};
 pub mod kernel;
-pub mod library;
+// The producer's library and the plug-ins (kumi-library), where the runtime's code and the app have always named them.
+pub use kumi_library as library;
 pub mod listening;
 pub mod mcp;
 pub use kumi_ai::models;
 // How Kumi reaches the network (kumi-net), where the runtime's code and the app have always named it.
 pub use kumi_net as net;
 pub mod notation;
-pub mod plugins;
 pub use kumi_ai::providers;
+pub use kumi_library::plugins;
 pub mod references;
 pub mod slots;
 pub use kumi_media::voice;
@@ -66,14 +67,16 @@ pub use core::techniques::{
 pub use ears::device::{install_ears, EARS_NAME};
 pub use hands::{can_build_hands, open_hands, Hands};
 pub use integrations::fallback::{with_fallback, with_fallback_failure};
+pub use integrations::library_sources;
+pub use integrations::live_manual::MANUAL_TOOL;
 pub use integrations::{
     create_ableton_integration, create_inference_only_integration, create_project_store, parse_focus, Baseline, ProjectStore, BRIDGE_TOOLS,
 };
 pub use kernel::agent::{create_agent_kernel, AgentKernel, AgentKernelOptions, Checkpoint, ModelBinding, ModelRequest};
 pub use kernel::budget::{budget_for, ContextBudget, DEFAULT_BUDGET};
 pub use library::{
-    create_library, library_logs, library_sources, read_state as read_library_state, LearnProgress, Library, LibraryOptions, LibraryState,
-    Source as LibrarySource, TasteLine, FIND_PRESETS_TOOL, FIND_SOUNDS_TOOL, MANUAL_TOOL, MY_SETS_TOOL,
+    create_library, library_logs, read_state as read_library_state, LearnProgress, Library, LibraryOptions, LibraryState,
+    Source as LibrarySource, TasteLine, FIND_PRESETS_TOOL, FIND_SOUNDS_TOOL, MY_SETS_TOOL,
 };
 pub use providers::local::{
     context_for, list_local_models, list_local_models_in, local_installed, local_servers, parse_local_model_id, probe_local,

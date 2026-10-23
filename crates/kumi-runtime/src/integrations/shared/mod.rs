@@ -2,6 +2,7 @@
 //! engine's DAW-neutral parts.
 pub mod changes;
 pub mod display;
-pub mod samples;
+// Finding samples on disk (kumi-library, which finds the producer's sounds with it).
+pub use kumi_library::samples;
 pub mod steps;
 pub mod undo;

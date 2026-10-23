@@ -1323,6 +1323,38 @@ name = "kumi-genexpr"
 version = "1.19.2"
 
 [[package]]
+name = "kumi-library"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "fancy-regex",
+ "flate2",
+ "futures",
+ "hex",
+ "home",
+ "indexmap",
+ "kumi-common",
+ "kumi-media",
+ "kumi-net",
+ "kumi-testkit",
+ "kumi-types",
+ "libc",
+ "md-5",
+ "memchr",
+ "rand 0.9.5",
+ "regex",
+ "ruzstd",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "kumi-media"
 version = "0.1.0"
 dependencies = [
@@ -1396,6 +1428,7 @@ dependencies = [
  "kumi-ai",
  "kumi-common",
  "kumi-genexpr",
+ "kumi-library",
  "kumi-media",
  "kumi-net",
  "kumi-store",

@@ -2,9 +2,9 @@ use super::{
     sets::device_name,
     xml::{attribute, scan_tags, xml_head, TagHandler},
 };
-use crate::core::daw::DawId;
 use indexmap::IndexSet;
 use kumi_common::js::string::{head, trim};
+use kumi_types::daw::DawId;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{self, SeekFrom},
@@ -56,11 +56,7 @@ pub enum PresetCategory {
 /// (REAPER takes a VST3 preset's path, as Live does), and Live for a format no DAW names (its own files, plug-ins'
 /// presets).
 pub fn preset_daws(format: &str) -> Vec<DawId> {
-    let named: Vec<DawId> = crate::integrations::REGISTERED
-        .iter()
-        .filter(|profile| profile.vocab.preset_formats.contains(&format))
-        .filter_map(|profile| profile.id)
-        .collect();
+    let named: Vec<DawId> = DawId::ALL.into_iter().filter(|daw| daw.profile().vocab.preset_formats.contains(&format)).collect();
     if named.is_empty() {
         vec![DawId::Ableton]
     } else {

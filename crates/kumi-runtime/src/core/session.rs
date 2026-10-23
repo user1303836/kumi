@@ -681,7 +681,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                 library.tools_for(
                     &options.profile,
                     LibraryToolsOptions {
-                        on_event: Some(emit.clone()),
+                        on_event: Some(tool_events(&emit)),
                         resolve: Some(Rc::new(move |named, signal| {
                             let integration = resolve.upgrade().and_then(|i| i.state.borrow().integration.clone());
                             async move {

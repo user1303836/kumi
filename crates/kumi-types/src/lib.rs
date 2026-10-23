@@ -10,6 +10,7 @@ pub mod daw;
 pub mod disk;
 pub mod errors;
 pub mod matching;
+pub mod notes;
 pub mod picture;
 pub mod place;
 pub mod private;

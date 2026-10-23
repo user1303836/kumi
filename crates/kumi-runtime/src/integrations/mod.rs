@@ -11,6 +11,7 @@ pub mod own_changes;
 mod own_ears;
 mod own_goal;
 mod own_groove;
+pub mod own_library;
 pub mod own_listening;
 pub mod own_phrases;
 pub mod own_pictures;
@@ -76,26 +77,22 @@ pub fn view(id: DawId) -> Option<&'static ViewPresentation> {
     }
 }
 
-/// A registered DAW's manual as a tool, for a DAW whose manual Kumi reads (Live's).
-pub fn manual_tool(id: DawId, options: live_manual::ManualOptions) -> Option<std::rc::Rc<dyn crate::core::contracts::KernelTool>> {
-    match id {
-        DawId::Ableton => Some(live_manual::manual_tool(options)),
-        _ => None,
-    }
-}
+/// What each registered DAW tells the library (its places, its own library, the projects it opened lately, its
+/// manual), in the registry's order.
+pub static LIBRARIES: kumi_library::daws::Daws =
+    kumi_library::daws::Daws(&[&ableton::library::LIBRARY, &own_library::REAPER, &own_library::RENOISE]);
 
-/// Where the DAW keeps the producer's sounds, presets and saved projects, beside the folders named: Live's layout (its
-/// User Library, Places, packs and Core Library) and Splice's folder. Live is the only DAW registered; another DAW's
-/// places come with it.
+/// Where the DAWs keep the producer's sounds, presets and saved projects, beside the folders named: Live's layout (its
+/// User Library, Places, packs and Core Library), Splice's folder, and REAPER's and Renoise's own libraries.
 pub fn library_sources(options: &crate::library::sources::SourceOptions) -> Vec<crate::library::sources::Source> {
     debug_assert!(profile(options.daw.unwrap_or(DawId::Ableton)).is_some(), "a registered DAW's places");
-    crate::library::sources::library_sources(options)
+    crate::library::sources::library_sources(LIBRARIES, options)
 }
 
-/// The DAW's saved projects it opened lately (Live's Sets, from its log).
+/// The DAWs' saved projects they opened lately (Live's Sets, from its log).
 pub fn recent_projects(options: &crate::library::sources::SourceOptions) -> Vec<String> {
     debug_assert!(profile(options.daw.unwrap_or(DawId::Ableton)).is_some(), "a registered DAW's projects");
-    crate::library::sources::recent_sets(options)
+    crate::library::sources::recent_projects(LIBRARIES, options)
 }
 
 /// REAPER's and Renoise's instructions, packs included, keep within the budget Live's instructions keep. (Here, because

@@ -94,7 +94,8 @@ fn a_place_at_a_drive_or_share_root_holds_its_sounds() {
 }
 #[test]
 fn a_folder_named_in_another_case_is_one_place() {
-    use kumi_runtime::library::sources::{library_sources, on_disk, SourceOptions};
+    use kumi_runtime::integrations::library_sources;
+    use kumi_runtime::library::sources::{on_disk, SourceOptions};
     let root = tempfile::tempdir().unwrap();
     let real = root.path().join("Music").join("Samples");
     std::fs::create_dir_all(&real).unwrap();

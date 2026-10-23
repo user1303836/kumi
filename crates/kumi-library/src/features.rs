@@ -1,13 +1,13 @@
 //! Compact measurements for sound classification and similarity search.
 use super::classify::{Heard, HeardKey, Pitch};
-use crate::audio::{
-    analyze::{estimate_key, estimate_tempo, track_pitch, Key, Tempo},
-    decode::{open_audio_to, AudioError},
-    dsp::{db_amplitude, fft, k_weighting, percentile, window, Window},
-};
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::number::round,
+};
+use kumi_media::audio::{
+    analyze::{estimate_key, estimate_tempo, track_pitch, Key, Tempo},
+    decode::{open_audio_to, AudioError},
+    dsp::{db_amplitude, fft, k_weighting, percentile, window, Window},
 };
 use serde::{Deserialize, Serialize};
 use std::{

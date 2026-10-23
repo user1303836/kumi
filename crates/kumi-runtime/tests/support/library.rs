@@ -130,7 +130,7 @@ impl Studio {
         }
         put(&user.join("Samples/Notes.txt"), "not audio");
         put(&user.join("Ableton Folder Info/Previews/Kick Preview.wav"), wav(&[kick(50., 0.5)], 44100));
-        let files: serde_json::Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/library-files-oracle.json")).unwrap();
+        let files: serde_json::Value = serde_json::from_str(&kumi_testkit::oracle("kumi-library/library-files-oracle.json")).unwrap();
         for (name, relative) in [
             ("Rolling Bass.adv", "Presets/Instruments/Wavetable/Rolling Bass.adv"),
             ("Vox Chain.adg", "Presets/Audio Effects/Vox Chain.adg"),
@@ -146,7 +146,8 @@ impl Studio {
         Self { home, user, extra, dir }
     }
     pub fn plan(&self, workers: usize) -> kumi_runtime::library::learn::LearnPlan {
-        use kumi_runtime::library::sources::{library_sources, SourceOptions};
+        use kumi_runtime::integrations::library_sources;
+        use kumi_runtime::library::sources::SourceOptions;
         kumi_runtime::library::learn::LearnPlan {
             dir: self.dir.to_string_lossy().into(),
             sources: library_sources(&SourceOptions {

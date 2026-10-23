@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
-use kumi_runtime::plugins::adapter::{matches, Pattern, PluginAdapter, PluginKind};
-use kumi_runtime::plugins::adapters::ADAPTERS;
-use kumi_runtime::plugins::registry::adapter_for;
+use kumi_library::plugins::adapter::{matches, Pattern, PluginAdapter, PluginKind};
+use kumi_library::plugins::adapters::ADAPTERS;
+use kumi_library::plugins::registry::adapter_for;
 
 /// The names Live shows for each plug-in's device.
 const LIVE_NAMES: &[(&str, &[&str])] = &[
