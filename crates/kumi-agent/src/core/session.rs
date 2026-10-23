@@ -2911,12 +2911,6 @@ impl SessionController for Session {
                 return;
             }
             WatchEvent::Action(_) => return,
-            WatchEvent::Heard(heard) => {
-                if let Some(memory) = &self.0.search_memory {
-                    memory.heard(heard);
-                }
-                return;
-            }
             WatchEvent::Judged(round) => {
                 use kumi_listening::round::RoundKind;
                 let mut s = self.0.state.borrow_mut();
@@ -3042,8 +3036,11 @@ impl SessionController for Session {
     fn library(&self) -> Option<LibraryStatus> {
         self.0.options.library.as_ref().map(|library| library.status())
     }
-    async fn remembered(&self) -> Option<(usize, usize)> {
-        self.0.search_memory.as_ref()?.counts().await.ok()
+    async fn remembered(&self) -> Option<crate::core::search_memory::SearchMemoryStatus> {
+        self.0.search_memory.as_ref()?.status().await.ok()
+    }
+    fn settings_memory(&self) -> Option<Rc<dyn kumi_listening::heard_settings::SettingsMemory>> {
+        self.0.search_memory.clone().map(|memory| memory as Rc<dyn kumi_listening::heard_settings::SettingsMemory>)
     }
     fn open_set(&self) -> Option<String> {
         self.0.state.borrow().integration.as_ref().and_then(|integration| integration.open_set())

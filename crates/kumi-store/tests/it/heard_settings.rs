@@ -21,6 +21,8 @@ fn setting(at: i64, device: &str, run: &str, cost: f64) -> HeardSetting {
         measured: json!({"bass": -7.2}),
         cost,
         best: false,
+        generation: Some(1),
+        remembered: None,
     }
 }
 
@@ -75,4 +77,51 @@ fn a_device_keeps_its_newest_settings_and_every_searchs_best() {
     assert_eq!(others.last(), Some(&12), "then the oldest of the full search's, two of them");
     assert_eq!(store.read(|c| heard_settings::on_device(c, "ableton", "AU: Pro-Q 3", 10)).unwrap(), vec![other]);
     assert_eq!(store.read(heard_settings::counts).unwrap(), (PER_DEVICE + 1, 2));
+}
+
+#[test]
+fn a_new_search_finds_each_past_searchs_best_on_its_device() {
+    let folder = tempfile::tempdir().unwrap();
+    let store = Store::open(folder.path().join("kumi.db")).unwrap();
+    let mut rows = vec![];
+    for (n, source) in [Source::Tune, Source::Tune, Source::Goal, Source::Match].into_iter().enumerate() {
+        let mut best = setting(100 * n as i64, "Eq8", &format!("run-{n}"), 1.);
+        (best.source, best.best) = (source, true);
+        let mut other = setting(100 * n as i64 + 1, "Eq8", &format!("run-{n}"), 2.);
+        other.source = source;
+        rows.extend([best, other]);
+    }
+    let mut elsewhere = setting(500, "Compressor2", "run-9", 1.);
+    elsewhere.best = true;
+    rows.push(elsewhere);
+    let kept = rows.clone();
+    store.write_wait(move |c| heard_settings::add(c, &kept)).unwrap();
+    let tuned = store.read(|c| heard_settings::bests_on_device(c, "ableton", "Eq8", &[Source::Tune], 10)).unwrap();
+    assert_eq!(tuned.iter().map(|row| row.run_id.as_str()).collect::<Vec<_>>(), ["run-1", "run-0"], "tune's, newest first");
+    assert!(tuned.iter().all(|row| row.best));
+    let searched = store.read(|c| heard_settings::bests_on_device(c, "ableton", "Eq8", &[Source::Goal, Source::Match], 1)).unwrap();
+    assert_eq!(searched.iter().map(|row| row.run_id.as_str()).collect::<Vec<_>>(), ["run-3"], "at most the limit");
+}
+
+#[test]
+fn a_remembered_setting_that_won_a_searchs_first_round_is_counted() {
+    let folder = tempfile::tempdir().unwrap();
+    let store = Store::open(folder.path().join("kumi.db")).unwrap();
+    let remembered = |mut row: HeardSetting, from: &str| {
+        row.remembered = Some(from.into());
+        row
+    };
+    let rows = vec![
+        // Won its first round.
+        remembered(setting(1, "Eq8", "won", 0.5), "old-1"),
+        setting(2, "Eq8", "won", 0.9),
+        // Tried, beaten in the first round (and its later best doesn't count).
+        remembered(setting(3, "Eq8", "lost", 2.0), "old-2"),
+        setting(4, "Eq8", "lost", 1.0),
+        HeardSetting { generation: Some(2), ..remembered(setting(5, "Eq8", "lost", 0.1), "old-3") },
+        // Started from nothing remembered.
+        setting(6, "Eq8", "cold", 0.2),
+    ];
+    store.write_wait(move |c| heard_settings::add(c, &rows)).unwrap();
+    assert_eq!(store.read(heard_settings::first_rounds).unwrap(), (2, 1), "two searches started from one; it won one first round");
 }

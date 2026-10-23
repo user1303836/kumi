@@ -15,4 +15,5 @@ mod slots;
 mod sound;
 mod style_references;
 mod transcribe;
+mod warm;
 mod words;

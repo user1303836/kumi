@@ -1,6 +1,12 @@
 //! A small CMA-ES for a few knobs that interact (a compressor's attack, release and ratio; a reverb's size, decay and
 //! damping): generations of a handful of candidates, each generation heard in one pass, the search's shape learned
 //! from which candidates did best. Knobs are searched in [0, 1] of their perceptual range.
+//!
+//! Points from elsewhere (what worked on the same device before) can be injected: a generation hears them in place of as
+//! many of its own samples, as they are, and they're repaired as Hansen's "Injecting External Solutions Into CMA-ES"
+//! (2011, INRIA RR-7748, arXiv:1110.4181, Figure 1) repairs them: an injected point's step y = (x − m)/σ is scaled by
+//! min(1, c_y / ‖C^−½ y‖), c_y = √n + 2n/(n + 2), before the mean and the shape learn from it (its equation 3), and a
+//! generation with injected points changes σ by at most a factor e (Δσ^max = 1, its equation 11).
 
 /// The search: its mean, step size and shape, and the best candidate heard.
 pub struct Cmaes {
@@ -26,6 +32,9 @@ pub struct Cmaes {
     random: Box<dyn FnMut() -> f64>,
     spare: Option<f64>,
     pub best: Option<(Vec<f64>, f64)>,
+    /// Points the next generation hears in place of its own samples, and the ones the last generation heard.
+    waiting: Vec<Vec<f64>>,
+    injected: Vec<Vec<f64>>,
 }
 
 impl Cmaes {
@@ -69,7 +78,37 @@ impl Cmaes {
             random: Box::new(random),
             spare: None,
             best: None,
+            waiting: vec![],
+            injected: vec![],
         }
+    }
+
+    /// Points for the next generation to hear in place of as many of its own samples (at most a generation's worth),
+    /// each in [0, 1]: heard as they are, repaired when the search learns from them (`tell`).
+    pub fn inject(&mut self, points: &[Vec<f64>]) {
+        let room = self.lambda.saturating_sub(self.waiting.len());
+        self.waiting.extend(points.iter().take(room).map(|point| {
+            let mut point: Vec<f64> = point.iter().take(self.n).map(|x| x.clamp(0., 1.)).collect();
+            point.resize(self.n, 0.5);
+            point
+        }));
+    }
+
+    /// A step's length in the search's own shape (its Mahalanobis length, ‖C^−½ y‖).
+    fn shaped_length(&self, step: &[f64]) -> f64 {
+        let n = self.n;
+        (0..n).map(|j| ((0..n).map(|i| self.b[i][j] * step[i]).sum::<f64>() / self.d[j].max(1e-12)).powi(2)).sum::<f64>().sqrt()
+    }
+
+    /// An injected point's step from the mean (in units of σ), as the search learns from it: scaled down to a Mahalanobis
+    /// length of at most c_y = √n + 2n/(n + 2), so a far one can't pull the search further than its own samples would.
+    pub fn repaired(&self, point: &[f64]) -> Vec<f64> {
+        let step: Vec<f64> = (0..self.n).map(|i| (point[i] - self.mean[i]) / self.sigma).collect();
+        let nf = self.n as f64;
+        let most = nf.sqrt() + 2. * nf / (nf + 2.);
+        let length = self.shaped_length(&step);
+        let scale = if length > most { most / length } else { 1. };
+        step.iter().map(|y| y * scale).collect()
     }
 
     fn gaussian(&mut self) -> f64 {
@@ -85,24 +124,27 @@ impl Cmaes {
         radius * angle.cos()
     }
 
-    /// A generation's candidates, each in [0, 1] (drawn again when one falls outside, then held at the edge).
+    /// A generation's candidates, each in [0, 1] (drawn again when one falls outside, then held at the edge): the points
+    /// injected for it first, then its own samples.
     pub fn ask(&mut self) -> Vec<Vec<f64>> {
-        (0..self.lambda)
-            .map(|_| {
-                let mut point = vec![0.; self.n];
-                for attempt in 0..20 {
-                    let z: Vec<f64> = (0..self.n).map(|_| self.gaussian()).collect();
-                    for (i, value) in point.iter_mut().enumerate() {
-                        let y: f64 = (0..self.n).map(|j| self.b[i][j] * self.d[j] * z[j]).sum();
-                        *value = self.mean[i] + self.sigma * y;
-                    }
-                    if point.iter().all(|x| (0. ..=1.).contains(x)) || attempt == 19 {
-                        break;
-                    }
+        self.injected = std::mem::take(&mut self.waiting);
+        let own = self.lambda - self.injected.len();
+        let mut points = self.injected.clone();
+        points.extend((0..own).map(|_| {
+            let mut point = vec![0.; self.n];
+            for attempt in 0..20 {
+                let z: Vec<f64> = (0..self.n).map(|_| self.gaussian()).collect();
+                for (i, value) in point.iter_mut().enumerate() {
+                    let y: f64 = (0..self.n).map(|j| self.b[i][j] * self.d[j] * z[j]).sum();
+                    *value = self.mean[i] + self.sigma * y;
                 }
-                point.iter().map(|x| x.clamp(0., 1.)).collect()
-            })
-            .collect()
+                if point.iter().all(|x| (0. ..=1.).contains(x)) || attempt == 19 {
+                    break;
+                }
+            }
+            point.iter().map(|x| x.clamp(0., 1.)).collect::<Vec<f64>>()
+        }));
+        points
     }
 
     /// What a generation's candidates cost (lower is better): the mean moves toward the best, and the shape learns.
@@ -124,8 +166,17 @@ impl Cmaes {
             let sum: f64 = self.weights[..mu].iter().sum();
             self.weights[..mu].iter().map(|w| w / sum).collect()
         };
+        // Each chosen candidate's step from the mean (in units of σ), an injected one's repaired.
+        let injected = std::mem::take(&mut self.injected);
+        let ys: Vec<Vec<f64>> = order[..mu]
+            .iter()
+            .map(|k| match injected.contains(&points[*k]) {
+                true => self.repaired(&points[*k]),
+                false => (0..n).map(|i| (points[*k][i] - old[i]) / self.sigma).collect(),
+            })
+            .collect();
         for i in 0..n {
-            self.mean[i] = order[..mu].iter().zip(&weights).map(|(k, w)| w * points[*k][i]).sum();
+            self.mean[i] = old[i] + self.sigma * ys.iter().zip(&weights).map(|(y, w)| w * y[i]).sum::<f64>();
         }
         let step: Vec<f64> = (0..n).map(|i| (self.mean[i] - old[i]) / self.sigma).collect();
         // C^(-1/2) · step = B · D^-1 · Bᵀ · step
@@ -143,7 +194,6 @@ impl Cmaes {
         for i in 0..n {
             self.pc[i] = (1. - self.cc) * self.pc[i] + hsig * cc_factor * step[i];
         }
-        let ys: Vec<Vec<f64>> = order[..mu].iter().map(|k| (0..n).map(|i| (points[*k][i] - old[i]) / self.sigma).collect()).collect();
         for i in 0..n {
             for j in 0..n {
                 let rank_one = self.pc[i] * self.pc[j] + (1. - hsig) * self.cc * (2. - self.cc) * self.c[i][j];
@@ -151,7 +201,10 @@ impl Cmaes {
                 self.c[i][j] = (1. - self.c1 - self.cmu) * self.c[i][j] + self.c1 * rank_one + self.cmu * rank_mu;
             }
         }
-        self.sigma = (self.sigma * ((self.cs / self.damps) * (ps_norm / self.chi_n - 1.)).exp()).clamp(1e-4, 0.5);
+        // With injected points, σ changes by at most a factor e a generation (Δσ^max = 1).
+        let change = (self.cs / self.damps) * (ps_norm / self.chi_n - 1.);
+        let change = if injected.is_empty() { change } else { change.min(1.) };
+        self.sigma = (self.sigma * change.exp()).clamp(1e-4, 0.5);
         let (values, vectors) = eigen(&self.c);
         self.d = values.iter().map(|v| v.max(1e-12).sqrt()).collect();
         self.b = vectors;
@@ -206,5 +259,58 @@ pub fn seeded(seed: u32) -> impl FnMut() -> f64 {
         let mut value = (state ^ (state >> 15)).wrapping_mul(1 | state);
         value = value.wrapping_add((value ^ (value >> 7)).wrapping_mul(61 | value)) ^ value;
         (value ^ (value >> 14)) as f64 / 4294967296.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn injected_points_are_heard_first_as_they_are() {
+        let mut search = Cmaes::new(&[0.5, 0.5, 0.5], 0.2, None, seeded(3));
+        search.inject(&[vec![1.2, 1.0, 1.0], vec![0.55, 0.5]]);
+        let points = search.ask();
+        assert_eq!(points.len(), search.lambda);
+        assert_eq!(points[..2], [vec![1.0, 1.0, 1.0], vec![0.55, 0.5, 0.5]], "first, held in range, one value a knob");
+        assert!(points[2..].iter().all(|point| point.iter().all(|x| (0. ..=1.).contains(x))));
+        // Only the next generation hears them.
+        search.tell(&points, &vec![1.; points.len()]);
+        let next = search.ask();
+        assert!(!next.contains(&points[0]) && !next.contains(&points[1]));
+        // At most a generation's worth.
+        search.inject(&vec![vec![0.1, 0.1, 0.1]; 20]);
+        assert_eq!(search.ask().iter().filter(|point| **point == [0.1, 0.1, 0.1]).count(), search.lambda);
+    }
+
+    #[test]
+    fn a_far_injected_point_is_repaired_to_the_mahalanobis_length_hansen_allows() {
+        let search = Cmaes::new(&[0.5, 0.5, 0.5], 0.2, None, seeded(3));
+        let most = 3f64.sqrt() + 6. / 5.;
+        // (1 − 0.5) / 0.2 = 2.5 a knob, √3 · 2.5 ≈ 4.33 long: scaled down to c_y, its direction kept.
+        let far = search.repaired(&[1.0, 1.0, 1.0]);
+        assert!((search.shaped_length(&far) - most).abs() < 1e-9, "{far:?}");
+        assert!(far.iter().all(|y| (y - most / 3f64.sqrt()).abs() < 1e-9));
+        // A near one is left as it is.
+        let near = search.repaired(&[0.55, 0.5, 0.45]);
+        assert!(near.iter().zip([0.25, 0., -0.25]).all(|(y, was)| (y - was).abs() < 1e-12), "{near:?}");
+    }
+
+    #[test]
+    fn the_search_learns_from_an_injected_point_only_as_far_as_its_repaired_step() {
+        let mut search = Cmaes::new(&[0.5, 0.5, 0.5], 0.2, None, seeded(3));
+        search.inject(&[vec![1.0, 1.0, 1.0]]);
+        let points = search.ask();
+        // The injected point heard best, then the others in their order.
+        let costs: Vec<f64> = (0..points.len()).map(|n| n as f64).collect();
+        let (old, sigma, mu) = (search.mean.clone(), search.sigma, search.mu);
+        let weights: Vec<f64> = search.weights[..mu].iter().map(|w| w / search.weights[..mu].iter().sum::<f64>()).collect();
+        let far = search.repaired(&points[0]);
+        search.tell(&points, &costs);
+        for i in 0..3 {
+            let step = weights[0] * far[i] + (1..mu).map(|k| weights[k] * (points[k][i] - old[i]) / sigma).sum::<f64>();
+            assert!((search.mean[i] - (old[i] + sigma * step)).abs() < 1e-12, "knob {i}: {} vs {}", search.mean[i], old[i] + sigma * step);
+        }
+        assert_eq!(search.best, Some((vec![1.0, 1.0, 1.0], 0.)), "heard as it was, it's the best");
     }
 }

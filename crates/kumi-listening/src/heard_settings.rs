@@ -1,10 +1,39 @@
-//! Every setting a search hears on a device, handed out as it's heard, for Kumi to remember: a later search on the same
-//! device can start from what worked there. Listening only says what it heard (`SettingsHeard`); Kumi's database keeps
-//! it.
+//! Every setting a search hears on a device, handed out as it's heard, for Kumi to remember, and what was heard before on
+//! a device, for a search there to start from what worked. Listening only says what it hears and asks what was heard
+//! (`SettingsMemory`); Kumi's database keeps it.
 
+use async_trait::async_trait;
 use indexmap::IndexMap;
 use kumi_types::daw::DawId;
 use serde_json::Value;
+
+/// What Kumi remembers of searches, as a search sees it (Kumi's database, through the agent).
+#[async_trait(?Send)]
+pub trait SettingsMemory {
+    /// Settings a search heard, or its end, to keep.
+    fn heard(&self, event: SettingsHeard);
+    /// The best setting of each past search of these kinds on a device, in a DAW (the session's own when it's None),
+    /// newest first.
+    async fn bests(&self, daw: Option<DawId>, device: &str, kinds: &[SearchKind]) -> Vec<Remembered>;
+}
+
+/// A past search's best setting on a device, as remembered.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Remembered {
+    /// Its row, to say a new search heard it again.
+    pub id: String,
+    /// When it was heard (ms).
+    pub at: i64,
+    /// The track it was on.
+    pub track: Option<String>,
+    pub kind: SearchKind,
+    /// Its knobs by name, each a fraction of its range (a perceptual one for tune's).
+    pub knobs: IndexMap<String, f64>,
+    /// What its search aimed at, and how the track sounded before that search (as `SettingsHeard::Heard` said them).
+    pub target: Value,
+    pub before: Option<Value>,
+    pub cost: f64,
+}
 
 /// Which search heard them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,12 +61,15 @@ impl DeviceIdentity {
 }
 
 /// One setting heard: its knobs by name (each a fraction of its range), how it sounded, and its cost (lower is better,
-/// within its search).
+/// within its search); which of its search's generations heard it (1 the first), and the remembered setting it is, when
+/// it was one heard again (`Remembered::id`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Setting {
     pub knobs: IndexMap<String, f64>,
     pub measured: Value,
     pub cost: f64,
+    pub generation: Option<u32>,
+    pub remembered: Option<String>,
 }
 
 /// What a search hands out as it goes.

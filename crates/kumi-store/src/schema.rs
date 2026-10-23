@@ -135,7 +135,15 @@ CREATE INDEX heard_settings_device ON heard_settings (daw, device, at);
 CREATE INDEX heard_settings_run ON heard_settings (run_id);
 ";
 
-const MIGRATIONS: &[&str] = &[V1, V2, V3, V4];
+/// Which generation of its search heard a setting (1 the first), and the remembered setting it was when a search started
+/// from one (a row's id): how often what worked before wins a search's first round.
+const V5: &str = "
+ALTER TABLE heard_settings ADD COLUMN generation INTEGER;
+ALTER TABLE heard_settings ADD COLUMN remembered TEXT;
+CREATE INDEX heard_settings_best ON heard_settings (daw, device, best, at);
+";
+
+const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5];
 /// The schema version this build writes.
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
 
@@ -203,6 +211,29 @@ mod tests {
         assert_eq!(connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION as i64);
         assert_eq!(connection.query_row("SELECT text FROM notes", [], |row| row.get::<_, String>(0)).unwrap(), "Likes dry drums");
         assert_eq!(connection.query_row("SELECT count(*) FROM observations", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+    }
+
+    #[test]
+    fn heard_settings_kept_before_generations_keep_their_rows_and_get_the_columns() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for migration in [V1, V2, V3, V4] {
+            connection.execute_batch(migration).unwrap();
+        }
+        connection.pragma_update(None, "user_version", 4).unwrap();
+        connection
+            .execute(
+                "INSERT INTO heard_settings (id, at, daw, device, source, run_id, knobs, target, measured, cost, best) VALUES ('h1', 1, 'ableton', 'Eq8', 'tune', 'r', jsonb('{}'), jsonb('{}'), jsonb('{}'), 1.5, 1)",
+                [],
+            )
+            .unwrap();
+        migrate(&mut connection).unwrap();
+        assert_eq!(connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION as i64);
+        let kept = connection
+            .query_row("SELECT cost, best, generation, remembered FROM heard_settings", [], |row| {
+                Ok((row.get::<_, f64>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<i64>>(2)?, row.get::<_, Option<String>>(3)?))
+            })
+            .unwrap();
+        assert_eq!(kept, (1.5, 1, None, None));
     }
 
     #[test]

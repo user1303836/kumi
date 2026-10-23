@@ -18,7 +18,11 @@ use super::{
     renderer::{bars_of, Renderer, Window},
     round::Round,
 };
-use crate::{heard_settings::SettingsHeard, listener::ListenerSource, references::store::ReferenceStore};
+use crate::{
+    heard_settings::{SettingsHeard, SettingsMemory},
+    listener::ListenerSource,
+    references::store::ReferenceStore,
+};
 use indexmap::IndexMap;
 use kumi_common::{abort::Signal, js::number::round};
 use kumi_media::audio::{self, analyze::Analysis};
@@ -33,8 +37,9 @@ use std::{
 pub struct Listening {
     pub(crate) host: Rc<dyn Renderer>,
     on_judge: Option<Rc<dyn Fn(Round)>>,
-    /// Each setting a search hears, handed out as it's heard (for Kumi to remember what worked on a device).
-    on_heard: Option<Rc<dyn Fn(SettingsHeard)>>,
+    /// What Kumi remembers of searches: each setting a search hears is handed to it as it's heard, and a search asks it
+    /// what worked on its device before.
+    pub(crate) memory: Option<Rc<dyn SettingsMemory>>,
     /// The judged run under way (or the last one).
     pub(crate) judge: RefCell<Option<JudgeRun>>,
     /// The groove run under way (or the last one).
@@ -66,12 +71,12 @@ impl Listening {
         on_audition: Option<Rc<dyn Fn(AuditionEvent)>>,
         listener_source: Option<ListenerSource>,
         references: Option<Rc<ReferenceStore>>,
-        on_heard: Option<Rc<dyn Fn(SettingsHeard)>>,
+        memory: Option<Rc<dyn SettingsMemory>>,
     ) -> Rc<Self> {
         Rc::new(Self {
             host,
             on_judge,
-            on_heard,
+            memory,
             judge: RefCell::new(None),
             groove: RefCell::new(None),
             on_audition,
@@ -145,13 +150,13 @@ impl Listening {
 
     /// Whether anyone keeps the settings searches hear.
     pub(crate) fn remembers(&self) -> bool {
-        self.on_heard.is_some()
+        self.memory.is_some()
     }
 
     /// Settings a search heard, handed out.
     pub(crate) fn heard(&self, event: SettingsHeard) {
-        if let Some(tell) = &self.on_heard {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tell(event)));
+        if let Some(memory) = &self.memory {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| memory.heard(event)));
         }
     }
 

@@ -17,6 +17,7 @@ use crate::{
     renderer::{DeviceKnob, Window},
     round::{Round, RoundKind},
     tools::{TuneHow, TuneRequest},
+    warm,
 };
 use indexmap::IndexMap;
 use kumi_common::{
@@ -584,7 +585,7 @@ impl Listening {
         let mut search = Cmaes::new(&start, 0.2, None, crate::cmaes::seeded(rand::random::<u32>()));
         // What the search hears is handed out, a generation at a time, for Kumi to remember what worked on this device:
         // who the device is (never its place), what the search aims at and how the track sounded before it.
-        let remembered = match self.remembers() {
+        let device = match self.remembers() {
             true => self.host.device_identity(&request.device, signal.clone()).await,
             false => None,
         };
@@ -593,6 +594,20 @@ impl Listening {
         let knobs_were: serde_json::Map<String, Value> =
             fractions(&chosen, &start).into_iter().map(|(name, at)| (name, json!(at))).collect();
         let was = json!({"values": readings(&checklist, &before), "knobs": knobs_were});
+        // What worked on this device before, from the past searches nearest this one: heard in its first generation.
+        let starts = match (&device, &self.memory) {
+            (Some(device), Some(memory)) => {
+                let past = memory.bests(self.host.profile().id, &device.name, &[SearchKind::Tune]).await;
+                let names: Vec<String> = chosen.iter().map(|(knob, _)| knob.name.clone()).collect();
+                let item = &checklist.items[index];
+                let sounds: Vec<(String, f64, f64)> =
+                    checklist.items.iter().zip(&before).filter_map(|(item, value)| Some((item.id.clone(), (*value)?, item.jnd))).collect();
+                let aim = item.aim().map(|(aim, _)| (aim, item.jnd));
+                warm::starts(&past, &warm::Now { knobs: &names, start: &start, target: &target, aim, sounds: &sounds })
+            }
+            _ => vec![],
+        };
+        search.inject(&starts.iter().map(|start| start.point.clone()).collect::<Vec<_>>());
         // What the copies can't hear (the focus track isn't with them) reads as it did before.
         let heard_alone = |values: Vec<Option<f64>>| -> Vec<Option<f64>> {
             values
@@ -644,9 +659,10 @@ impl Listening {
                         None => f64::INFINITY,
                     })
                     .collect();
+                let generation = search.generation + 1;
                 search.tell(&points, &costs);
-                if let Some(device) = &remembered {
-                    // Each setting heard (one that came through, and was read on its target).
+                if let Some(device) = &device {
+                    // Each setting heard (one that came through, and was read on its target), a remembered one said.
                     let settings = points
                         .iter()
                         .zip(&read)
@@ -654,7 +670,18 @@ impl Listening {
                         .filter(|(_, cost)| cost.is_finite())
                         .filter_map(|((point, values), cost)| {
                             let measured = Value::Object(readings(&checklist, values.as_ref()?));
-                            Some(Setting { knobs: fractions(&chosen, point), measured, cost: *cost })
+                            let remembered = starts
+                                .iter()
+                                .filter(|_| generation == 1)
+                                .find(|start| start.point.iter().zip(point).all(|(a, b)| a.clamp(0., 1.) == *b))
+                                .map(|start| start.remembered.id.clone());
+                            Some(Setting {
+                                knobs: fractions(&chosen, point),
+                                measured,
+                                cost: *cost,
+                                generation: Some(generation),
+                                remembered,
+                            })
                         })
                         .collect();
                     self.heard(SettingsHeard::Heard {
@@ -673,7 +700,7 @@ impl Listening {
         }
         .await;
         self.host.close_copies(copies).await;
-        if remembered.is_some() {
+        if device.is_some() {
             self.heard(SettingsHeard::Ended { run });
         }
         match searched? {
@@ -700,14 +727,26 @@ impl Listening {
             })
             .collect();
         let change = format!(
-            "{}{} on {scoped}, searched in {} generations of {} heard side by side",
+            "{}{} on {scoped}, searched in {} generations of {} heard side by side{}",
             said_first(request),
             said.join(", "),
             search.generation,
-            search.lambda
+            search.lambda,
+            started_from(&starts)
         );
         self.judge_round(Some(change), None, signal).await
     }
+}
+
+/// What a search started from, as its log says it: where the nearest remembered setting worked, and when.
+fn started_from(starts: &[warm::Start]) -> String {
+    let Some(first) = starts.first() else { return String::new() };
+    let day = chrono::DateTime::from_timestamp_millis(first.remembered.at)
+        .map(|at| format!(" on {}", at.with_timezone(&chrono::Local).format("%-d %b")))
+        .unwrap_or_default();
+    let track = first.remembered.track.as_deref().map(|track| format!(" on {track}")).unwrap_or_default();
+    let more = if starts.len() > 1 { format!(" (and {} more)", starts.len() - 1) } else { String::new() };
+    format!("; started from what worked{track}{day}{more}")
 }
 
 /// The knobs at a point of a search, by name: each the fraction of its perceptual range it's set to.
