@@ -284,7 +284,10 @@ impl TasteTool {
                     _ => {}
                 }
             } else {
-                file = expand_folder(like, &homedir()).filter(|path| folders::is_song(path) && Path::new(path).is_file());
+                // As the walk keeps paths: the system's own separators (a model may write / on Windows).
+                file = expand_folder(like, &homedir())
+                    .map(|path| kumi_library::sources::normalize(&path))
+                    .filter(|path| folders::is_song(path) && Path::new(path).is_file());
             }
         }
         // That file's vector, heard now (unless it's one of their songs, heard already).

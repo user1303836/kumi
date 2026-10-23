@@ -35,6 +35,11 @@ fn text(path: &Path) -> String {
     path.to_str().unwrap().to_string()
 }
 
+/// A path under `base`, a component at a time: the system's own separators, as the walk keeps them.
+fn at(base: &Path, relative: &str) -> PathBuf {
+    relative.split('/').fold(base.to_path_buf(), |path, part| path.join(part))
+}
+
 fn pass(store: &mut MusicStore, folders: &[String], skip: &[String]) -> TagsPassed {
     let signal = Signal::new();
     tags_pass(store, &TagsPass { folders, skip, signal: &signal, readers: 2, progress: &|_| {} }).unwrap()
@@ -43,13 +48,13 @@ fn pass(store: &mut MusicStore, folders: &[String], skip: &[String]) -> TagsPass
 /// A tree of songs as a producer keeps them, with what a walk leaves out beside them.
 fn tree(root: &Path) -> PathBuf {
     let music = root.join("Music");
-    song(&music.join("Burial/Untrue/02 Archangel.wav"), 3., Some(("Burial", "Archangel", "Untrue")));
-    song(&music.join("Someone/An Album/01 Untagged Song.wav"), 2., None);
+    song(&at(&music, "Burial/Untrue/02 Archangel.wav"), 3., Some(("Burial", "Archangel", "Untrue")));
+    song(&at(&music, "Someone/An Album/01 Untagged Song.wav"), 2., None);
     // A DAW project's folder: its bounce and samples are the project's.
-    song(&music.join("Project/Bounce.wav"), 1., None);
-    std::fs::write(music.join("Project/Song.als"), b"a project").unwrap();
-    song(&music.join(".hidden/Secret.wav"), 1., None);
-    song(&music.join("Samples/Kick.wav"), 1., None);
+    song(&at(&music, "Project/Bounce.wav"), 1., None);
+    std::fs::write(at(&music, "Project/Song.als"), b"a project").unwrap();
+    song(&at(&music, ".hidden/Secret.wav"), 1., None);
+    song(&at(&music, "Samples/Kick.wav"), 1., None);
     std::fs::write(music.join("Purchased.m4p"), b"protected audio").unwrap();
     std::fs::write(music.join("Clip.mp4"), b"a video").unwrap();
     std::fs::write(music.join("cover.jpg"), b"a picture").unwrap();
@@ -63,12 +68,12 @@ fn tree(root: &Path) -> PathBuf {
 fn songs_are_known_by_their_tags_or_their_paths() {
     let dir = tempfile::tempdir().unwrap();
     let music = tree(dir.path());
-    let mut store = MusicStore::open(&dir.path().join("kumi/music/music.db")).unwrap();
+    let mut store = MusicStore::open(&at(&dir.path(), "kumi/music/music.db")).unwrap();
     let skip = [text(&music.join("Samples"))];
     let passed = pass(&mut store, &[text(&music)], &skip);
     assert_eq!((passed.walked, passed.new, passed.gone), (3, 3, 0), "{passed:?}");
 
-    let tagged = store.song_at(&text(&music.join("Burial/Untrue/02 Archangel.wav"))).unwrap().unwrap();
+    let tagged = store.song_at(&text(&at(&music, "Burial/Untrue/02 Archangel.wav"))).unwrap().unwrap();
     assert_eq!(tagged.tags.names_from, NamesFrom::Tags);
     assert_eq!(
         (tagged.tags.artist.as_deref(), tagged.tags.title.as_deref(), tagged.tags.album.as_deref()),
@@ -78,7 +83,7 @@ fn songs_are_known_by_their_tags_or_their_paths() {
     assert!(tagged.tags.seconds.is_some_and(|seconds| (seconds - 3.).abs() < 0.1), "{:?}", tagged.tags.seconds);
     assert_eq!((tagged.folder, tagged.stage, tagged.skipped), (text(&music), 0, None));
 
-    let untagged = store.song_at(&text(&music.join("Someone/An Album/01 Untagged Song.wav"))).unwrap().unwrap();
+    let untagged = store.song_at(&text(&at(&music, "Someone/An Album/01 Untagged Song.wav"))).unwrap().unwrap();
     assert_eq!(untagged.tags.names_from, NamesFrom::Path);
     assert_eq!(
         (untagged.tags.artist.as_deref(), untagged.tags.album.as_deref(), untagged.tags.title.as_deref(), untagged.tags.track),
@@ -103,9 +108,9 @@ fn unchanged_files_write_nothing_and_changes_are_found() {
     assert_eq!(again, TagsPassed { walked: 4, ..Default::default() }, "nothing changed, nothing written");
 
     // Retagged: heard again from the start.
-    let archangel = music.join("Burial/Untrue/02 Archangel.wav");
+    let archangel = at(&music, "Burial/Untrue/02 Archangel.wav");
     song(&archangel, 3., Some(("Burial", "Archangel (Remix)", "Untrue")));
-    let untagged = music.join("Someone/An Album/01 Untagged Song.wav");
+    let untagged = at(&music, "Someone/An Album/01 Untagged Song.wav");
     let kept = std::fs::read(&untagged).unwrap();
     let modified = std::fs::metadata(&untagged).unwrap().modified().unwrap();
     std::fs::remove_file(&untagged).unwrap();
@@ -126,8 +131,8 @@ fn unchanged_files_write_nothing_and_changes_are_found() {
 fn a_folder_that_cant_be_read_loses_no_songs() {
     let dir = tempfile::tempdir().unwrap();
     let (first, second) = (dir.path().join("First"), dir.path().join("Second"));
-    song(&first.join("A/B/01 One.wav"), 1., None);
-    song(&second.join("C/D/01 Two.wav"), 1., None);
+    song(&at(&first, "A/B/01 One.wav"), 1., None);
+    song(&at(&second, "C/D/01 Two.wav"), 1., None);
     let mut store = MusicStore::open(&dir.path().join("music.db")).unwrap();
     let folders = [text(&first), text(&second)];
     assert_eq!(pass(&mut store, &folders, &[]).new, 2);
@@ -171,13 +176,13 @@ fn duplicates_are_one_song_kept_as_the_lossless_file() {
 #[test]
 fn the_first_usual_place_with_songs_is_offered() {
     let dir = tempfile::tempdir().unwrap();
-    let (apple, music) = (dir.path().join("Music/Music/Media.localized/Music"), dir.path().join("Music"));
+    let (apple, music) = (at(&dir.path(), "Music/Music/Media.localized/Music"), dir.path().join("Music"));
     std::fs::create_dir_all(&apple).unwrap();
-    song(&music.join("Artist/Album/01 One.wav"), 1., None);
-    song(&music.join("Artist/Album/02 Two.wav"), 1., None);
+    song(&at(&music, "Artist/Album/01 One.wav"), 1., None);
+    song(&at(&music, "Artist/Album/02 Two.wav"), 1., None);
     // The music app's folder is empty: the Music folder around it is offered.
     assert_eq!(found_in(vec![apple.clone(), music.clone()], &[]), Some(Found { folder: text(&music), songs: 2, capped: false }));
-    song(&apple.join("Someone/Else/01 Three.wav"), 1., None);
+    song(&at(&apple, "Someone/Else/01 Three.wav"), 1., None);
     assert_eq!(found_in(vec![apple.clone(), music.clone()], &[]), Some(Found { folder: text(&apple), songs: 1, capped: false }));
     assert_eq!(found_in(vec![dir.path().join("nowhere")], &[]), None);
 }
