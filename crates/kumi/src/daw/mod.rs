@@ -1,6 +1,6 @@
-//! The DAWs this Kumi works with (Live, the only one registered so far), and the one this run works with: what the
-//! app says of the DAW and shows of its tools, its focus and its devices comes from here, and each DAW's provider
-//! finds its bridge and makes the session's integration.
+//! The DAWs this Kumi works with (the DAW table, in `registry`), and the one this run works with: what the app says of
+//! the DAW and shows of its tools, its focus and its devices comes from here, and each DAW's provider finds its bridge
+//! and makes the session's integration.
 pub mod ableton;
 pub mod own;
 pub mod provider;
@@ -20,9 +20,9 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-/// Each registered DAW's provider: Live's first, then the DAWs whose bridges are Kumi's own.
-pub fn providers() -> [&'static dyn DawProvider; 3] {
-    [&ableton::provider::Ableton, &own::REAPER, &own::RENOISE]
+/// Each registered DAW's provider, in the DAW table's order: Live's first, then the DAWs whose bridges are Kumi's own.
+pub fn providers() -> impl Iterator<Item = &'static dyn DawProvider> + Clone {
+    registry::DAWS.iter().map(|daw| *daw as &'static dyn DawProvider)
 }
 
 /// A registered DAW's provider; None for one this Kumi doesn't integrate.
@@ -215,7 +215,7 @@ pub fn offer_here(here: Here) {
 pub fn daw_command_among(typed: &str, here: &dyn Fn(&dyn DawProvider) -> bool) -> DawCommand {
     let current = current().id();
     let app = |id: DawId| provider(id).map(|provider| provider.profile().words.app).unwrap_or_default();
-    let ids = providers().map(|provider| provider.id());
+    let ids: Vec<DawId> = providers().map(|provider| provider.id()).collect();
     let word = typed.trim().to_lowercase();
     if word.is_empty() {
         let others: Vec<DawId> =
@@ -232,7 +232,7 @@ pub fn daw_command_among(typed: &str, here: &dyn Fn(&dyn DawProvider) -> bool) -
             names.join(" or ")
         ));
     }
-    let Some(asked) = ids.into_iter().find(|id| command_name(*id) == word || id.as_str() == word) else {
+    let Some(asked) = ids.iter().copied().find(|id| command_name(*id) == word || id.as_str() == word) else {
         let commands: Vec<String> = ids.iter().map(|id| format!("/daw {}", command_name(*id))).collect();
         return DawCommand::Say(format!("Kumi doesn't know {}: {}.", typed.trim(), commands.join(", ")));
     };
@@ -312,11 +312,7 @@ pub fn used_names(env: &Env) -> String {
 
 /// Where the DAW is downloaded from, as setup names it.
 pub fn site() -> &'static str {
-    match current().id() {
-        DawId::Reaper => "reaper.fm",
-        DawId::Renoise => "renoise.com",
-        _ => "ableton.com",
-    }
+    current().site()
 }
 
 /// A word as a sentence starts it: "Set", "Project", "Song".

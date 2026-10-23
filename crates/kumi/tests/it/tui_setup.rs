@@ -1008,7 +1008,7 @@ case!(an_own_daws_setup_hands_the_session_its_bridge_and_reconnects_it, async {
     let controller: Rc<RefCell<Option<std::rc::Weak<dyn SessionController>>>> = Rc::default();
     let as_controller: Rc<dyn SessionController> = control.clone();
     *controller.borrow_mut() = Some(Rc::downgrade(&as_controller));
-    let setup = kumi::daw::own::REAPER.setup(&env, bridge.clone(), false, controller.clone());
+    let setup = kumi::daw::registry::REAPER.setup(&env, bridge.clone(), false, controller.clone());
     // The extension in place: its receipt says where its reference is.
     let paths = daw_bridge::paths::BridgePaths::new(&kumi_home, daw_bridge::Daw::Reaper);
     std::fs::create_dir_all(paths.receipt().parent().unwrap()).unwrap();

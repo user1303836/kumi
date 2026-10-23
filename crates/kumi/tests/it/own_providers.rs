@@ -4,7 +4,7 @@
 #[path = "../support/live_words.rs"]
 mod live_words;
 use futures::FutureExt;
-use kumi::daw::{chosen, own, DawProvider, RemovedBridge};
+use kumi::daw::{chosen, registry, DawProvider, RemovedBridge};
 use kumi_types::{daw::DawId, system::Env};
 use std::rc::Rc;
 
@@ -48,7 +48,7 @@ fn yes() -> kumi::daw::BridgeCommand {
 #[tokio::test(flavor = "current_thread")]
 async fn renoises_tool_goes_in_is_found_and_chosen_and_comes_out() {
     let (dir, env) = renoise_home();
-    let renoise: &dyn DawProvider = &own::RENOISE;
+    let renoise: &dyn DawProvider = &registry::RENOISE;
     assert!(!renoise.bridge_installed(&env));
     // Nothing installed: no bridge found, and a first run sets up the DAW here (Renoise, unless another is here too).
     assert_eq!(chosen(None, &env).1, None, "nothing installed");
@@ -96,7 +96,7 @@ async fn renoises_tool_goes_in_is_found_and_chosen_and_comes_out() {
 async fn a_tool_that_cant_come_out_is_named_with_what_to_delete_by_hand() {
     use std::os::unix::fs::PermissionsExt;
     let (dir, env) = renoise_home();
-    let renoise: &dyn DawProvider = &own::RENOISE;
+    let renoise: &dyn DawProvider = &registry::RENOISE;
     assert_eq!(renoise.setup_bridge(Rc::new(Out::default()), &env, yes()).await.unwrap(), 0);
     let tools = dir.path().join("Renoise/V3.5.4/Scripts/Tools");
     std::fs::set_permissions(&tools, std::fs::Permissions::from_mode(0o555)).unwrap();
@@ -122,11 +122,11 @@ async fn the_doctor_says_nothing_of_a_daw_this_user_never_used() {
         ("KUMI_REAPER_RESOURCE_DIR".into(), dir.path().join("REAPER").to_string_lossy().into_owned()),
     ]);
     let io = kumi::doctor::InstallationIo::default();
-    for provider in [&own::REAPER as &dyn DawProvider, &own::RENOISE] {
+    for provider in [&registry::REAPER as &dyn DawProvider, &registry::RENOISE] {
         assert!(provider.installation_checks(&env, &io, "darwin").await.is_empty(), "{:?}", provider.id());
     }
     let (_renoise_dir, renoise_env) = renoise_home();
-    let checks = own::RENOISE.installation_checks(&renoise_env, &io, "darwin").await;
+    let checks = registry::RENOISE.installation_checks(&renoise_env, &io, "darwin").await;
     assert_eq!(checks.len(), 1);
 }
 
@@ -137,7 +137,7 @@ async fn among_several_bridges_the_running_daw_then_the_last_used_is_chosen() {
     use kumi::daw::{chosen_with, remember_used};
     let (dir, mut env) = renoise_home();
     let out = Rc::new(Out::default());
-    assert_eq!(own::RENOISE.setup_bridge(out.clone(), &env, yes()).await.unwrap(), 0, "{}", out.0.borrow());
+    assert_eq!(registry::RENOISE.setup_bridge(out.clone(), &env, yes()).await.unwrap(), 0, "{}", out.0.borrow());
     // Kumi's extension in REAPER too, as its receipt says.
     let resource = dir.path().join("REAPER");
     env.insert("KUMI_REAPER_RESOURCE_DIR".into(), resource.to_string_lossy().into_owned());
@@ -158,7 +158,7 @@ async fn among_several_bridges_the_running_daw_then_the_last_used_is_chosen() {
         history: vec![],
     };
     std::fs::write(paths.receipt(), serde_json::to_string(&receipt).unwrap()).unwrap();
-    assert!(own::REAPER.bridge_installed(&env));
+    assert!(registry::REAPER.bridge_installed(&env));
     let only = |id: DawId| move |provider: &dyn DawProvider| provider.id() == id;
     assert_eq!(chosen_with(None, &env, &only(DawId::Renoise)).0.id(), DawId::Renoise, "the one running");
     assert_eq!(chosen_with(None, &env, &only(DawId::Reaper)).0.id(), DawId::Reaper, "the one running");
@@ -213,7 +213,7 @@ async fn reapers_and_renoises_bridge_messages_never_speak_lives_words() {
     let (dir, mut env) = renoise_home();
     env.insert("KUMI_REAPER_RESOURCE_DIR".into(), dir.path().join("REAPER").to_string_lossy().into_owned());
     std::fs::create_dir_all(dir.path().join("REAPER/UserPlugins")).unwrap();
-    for provider in [&own::REAPER as &dyn DawProvider, &own::RENOISE] {
+    for provider in [&registry::REAPER as &dyn DawProvider, &registry::RENOISE] {
         let out = Rc::new(Out::default());
         provider.setup_bridge(out.clone(), &env, yes()).await.unwrap();
         let io = kumi::install::InstalledIo::new(out.clone(), env.clone());
@@ -338,8 +338,8 @@ async fn an_update_follows_each_copy_and_never_puts_back_a_bridge_taken_out_or_m
     let home = env["KUMI_HOME"].clone();
     let out = Rc::new(Out::default());
     let io = kumi::install::InstalledIo::new(out.clone(), env.clone());
-    assert_eq!(own::RENOISE.setup_bridge(out.clone(), &env, yes()).await.unwrap(), 0, "{}", out.0.borrow());
-    for provider in [&own::REAPER as &dyn DawProvider, &own::RENOISE] {
+    assert_eq!(registry::RENOISE.setup_bridge(out.clone(), &env, yes()).await.unwrap(), 0, "{}", out.0.borrow());
+    for provider in [&registry::REAPER as &dyn DawProvider, &registry::RENOISE] {
         assert_eq!(provider.after_update(&io, &home, &now.to_string_lossy(), None).await, 0);
     }
     let extension = now.join("daws/reaper").join(daw_bridge::install::reaper_extension_name(daw_bridge::detect::Os::current()));
@@ -361,7 +361,7 @@ async fn an_update_follows_each_copy_and_never_puts_back_a_bridge_taken_out_or_m
     let tool = |version: &str| dir.path().join("Renoise").join(version).join("Scripts").join("Tools").join("com.kumi.Bridge.xrnx");
     copy_folder(&tool("V3.5.4"), &tool("V3.5.5"));
     out.0.borrow_mut().clear();
-    assert_eq!(own::RENOISE.after_update(&io, &home, &later.to_string_lossy(), None).await, 0);
+    assert_eq!(registry::RENOISE.after_update(&io, &home, &later.to_string_lossy(), None).await, 0);
     assert!(out.0.borrow().contains("Kumi's tool 1.0.1 is in Renoise now"), "{}", out.0.borrow());
     for version in ["V3.5.4", "V3.5.5"] {
         let lua = std::fs::read_to_string(tool(version).join("payload/version.lua")).unwrap();
@@ -379,7 +379,7 @@ async fn an_update_follows_each_copy_and_never_puts_back_a_bridge_taken_out_or_m
         std::fs::remove_dir_all(tool(version)).unwrap();
     }
     out.0.borrow_mut().clear();
-    assert_eq!(own::RENOISE.after_update(&io, &home, &later.to_string_lossy(), None).await, 0);
+    assert_eq!(registry::RENOISE.after_update(&io, &home, &later.to_string_lossy(), None).await, 0);
     let said = out.0.borrow().clone();
     assert!(said.starts_with("Kumi's tool isn't in Renoise any more (") && said.contains(" --daw renoise bridge puts it back."), "{said}");
     assert!(!tool("V3.5.4").exists() && !tool("V3.5.5").exists());
@@ -394,7 +394,7 @@ async fn an_update_follows_each_copy_and_never_puts_back_a_bridge_taken_out_or_m
     unset.remove("KUMI_REAPER_RESOURCE_DIR");
     let io = kumi::install::InstalledIo::new(out.clone(), unset);
     out.0.borrow_mut().clear();
-    assert_eq!(own::REAPER.after_update(&io, &home, &later.to_string_lossy(), None).await, 0);
+    assert_eq!(registry::REAPER.after_update(&io, &home, &later.to_string_lossy(), None).await, 0);
     let said = out.0.borrow().clone();
     assert!(
         said.starts_with("Kumi's extension isn't in REAPER any more (") && said.contains(" --daw reaper bridge puts it back."),
@@ -427,17 +427,17 @@ async fn a_kumi_an_earlier_updater_put_in_place_brings_its_bridge_as_it_starts()
     put_earlier();
     let out = Rc::new(Out::default());
     let io = kumi::install::InstalledIo::new(out.clone(), env.clone());
-    own::RENOISE.finish_transition(&io).await;
+    registry::RENOISE.finish_transition(&io).await;
     let tool = tool_version();
     assert!(out.0.borrow().contains(&format!("Kumi's tool {tool} is in Renoise now: restart Renoise if it's open.")), "{}", out.0.borrow());
     assert_eq!(receipt_of(&env, Daw::Renoise).version.as_deref(), Some(tool.as_str()));
     out.0.borrow_mut().clear();
-    own::RENOISE.finish_transition(&io).await;
+    registry::RENOISE.finish_transition(&io).await;
     assert_eq!(out.0.borrow().as_str(), "", "in already: nothing to do");
     // Taken out by the producer: starting doesn't put it back.
     put_earlier();
     std::fs::remove_dir_all(tools.join(folder)).unwrap();
-    own::RENOISE.finish_transition(&io).await;
+    registry::RENOISE.finish_transition(&io).await;
     assert!(!tools.join(folder).exists());
     assert_eq!(out.0.borrow().as_str(), "");
 }
@@ -474,7 +474,7 @@ async fn a_checkout_update_builds_reapers_extension_and_says_when_that_fails() {
     });
     let out = Rc::new(Out::default());
     let io = kumi::update::UpdateIo::new(out.clone(), env.clone());
-    assert_eq!(own::REAPER.after_checkout_update(&io, run, "/repo").await, 0);
+    assert_eq!(registry::REAPER.after_checkout_update(&io, run, "/repo").await, 0);
     let (command, args, cwd) = asked.borrow()[0].clone();
     assert_eq!((command.as_str(), cwd.as_deref()), ("cargo", Some("/repo")));
     assert!(args.windows(2).any(|pair| pair == ["-p", "reaper-kumi"]) && args[0] == "build", "{args:?}");
@@ -510,7 +510,7 @@ async fn an_update_keeps_the_bridges_in_place_and_a_rollback_takes_each_to_the_c
     let io = kumi::install::InstalledIo::new(out.clone(), env.clone());
 
     // Both in, as `kumi --daw renoise bridge` and `kumi --daw reaper bridge` put them (REAPER's from `now`).
-    assert_eq!(own::RENOISE.setup_bridge(out.clone(), &env, yes()).await.unwrap(), 0, "{}", out.0.borrow());
+    assert_eq!(registry::RENOISE.setup_bridge(out.clone(), &env, yes()).await.unwrap(), 0, "{}", out.0.borrow());
     let extension = now.join("daws/reaper").join(daw_bridge::install::reaper_extension_name(daw_bridge::detect::Os::current()));
     let target = daw_bridge::install::reaper_target(
         &daw_bridge::detect::ReaperInstall {
@@ -530,7 +530,7 @@ async fn an_update_keeps_the_bridges_in_place_and_a_rollback_takes_each_to_the_c
     // `kumi update` to a Kumi bringing the same bridges, twice: nothing changes, nothing is said.
     out.0.borrow_mut().clear();
     for _ in 0..2 {
-        for provider in [&own::REAPER as &dyn DawProvider, &own::RENOISE] {
+        for provider in [&registry::REAPER as &dyn DawProvider, &registry::RENOISE] {
             assert_eq!(provider.after_update(&io, &home, &now.to_string_lossy(), None).await, 0);
         }
     }
@@ -540,7 +540,7 @@ async fn an_update_keeps_the_bridges_in_place_and_a_rollback_takes_each_to_the_c
     // Rolled back to a Kumi carrying 0.0.9 and 0.9.0, then forward again.
     for (app, kumi_version, reaper, renoise) in [(&earlier, "1.19.2", "0.0.9", "0.9.0"), (&now, "1.19.3", "0.1.0", tool.as_str())] {
         out.0.borrow_mut().clear();
-        for provider in [&own::REAPER as &dyn DawProvider, &own::RENOISE] {
+        for provider in [&registry::REAPER as &dyn DawProvider, &registry::RENOISE] {
             let step = provider.prepare_rollback(&io, &home, &app.to_string_lossy(), kumi_version, false).await.unwrap();
             assert_eq!(step.after_swap(&io, &home, &app.to_string_lossy(), kumi_version, true).await, 0);
         }
@@ -568,7 +568,7 @@ async fn an_update_keeps_the_bridges_in_place_and_a_rollback_takes_each_to_the_c
     let mut asking = env.clone();
     asking.insert("KUMI_DAW".into(), "renoise".into());
     let asking = kumi::install::InstalledIo::new(out.clone(), asking);
-    for provider in [&own::REAPER as &dyn DawProvider, &own::RENOISE] {
+    for provider in [&registry::REAPER as &dyn DawProvider, &registry::RENOISE] {
         let step = provider.prepare_rollback(&asking, &home, &unknowing.to_string_lossy(), "1.19.1", false).await.unwrap();
         assert_eq!(step.after_swap(&asking, &home, &unknowing.to_string_lossy(), "1.19.1", true).await, 0);
     }
@@ -594,7 +594,7 @@ async fn an_update_keeps_the_bridges_in_place_and_a_rollback_takes_each_to_the_c
     unset.remove("KUMI_REAPER_RESOURCE_DIR");
     let io = kumi::install::InstalledIo::new(out.clone(), unset);
     out.0.borrow_mut().clear();
-    assert_eq!(own::REAPER.after_update(&io, &home, &earlier.to_string_lossy(), None).await, 0);
+    assert_eq!(registry::REAPER.after_update(&io, &home, &earlier.to_string_lossy(), None).await, 0);
     assert!(out.0.borrow().contains("Kumi's extension 0.0.9 is in REAPER now: restart REAPER if it's open."), "{}", out.0.borrow());
     assert_eq!(receipt_of(&env, Daw::Reaper).target, installed[0].target);
     for default in ["Library/Application Support/REAPER", "AppData/Roaming/REAPER", ".config/REAPER"] {
@@ -632,7 +632,7 @@ async fn setup_opens_the_app_it_found_and_names_an_older_reaper() {
             ("ProgramFiles".into(), dir.path().join("Program Files").to_string_lossy().into_owned()),
         ])
     };
-    let setup = |env: &Env| own::REAPER.setup(env, Rc::default(), false, Rc::default());
+    let setup = |env: &Env| registry::REAPER.setup(env, Rc::default(), false, Rc::default());
     // Installed, never opened (no resource folder yet): setup opens this app.
     let never = setup(&env(&dir.path().join("REAPER"))).installed().await;
     let Installed::NeverOpened(found) = never else { panic!("{never:?}") };
@@ -644,9 +644,10 @@ async fn setup_opens_the_app_it_found_and_names_an_older_reaper() {
         let older = setup(&env(&dir.path().join("Applications")));
         assert_eq!(older.installed().await, Installed::Older("6.83".into()));
         let version = older.version(Some(app.to_string_lossy().into_owned())).await.unwrap();
-        assert!(older_than(&version, DawProvider::min_version(&own::REAPER)), "{version}");
+        assert!(older_than(&version, DawProvider::min_version(&registry::REAPER)), "{version}");
         assert!(
-            !older_than("3.5.4", DawProvider::min_version(&own::RENOISE)) && older_than("3.4.4", DawProvider::min_version(&own::RENOISE))
+            !older_than("3.5.4", DawProvider::min_version(&registry::RENOISE))
+                && older_than("3.4.4", DawProvider::min_version(&registry::RENOISE))
         );
         assert!(older_than("11.3.21", "12") && !older_than("12.0b4", "12") && !older_than("unknown", "12"));
     }
@@ -663,7 +664,7 @@ async fn a_portable_reaper_is_found_by_its_receipt_and_otherwise_named_by_the_va
         ("KUMI_HOME".into(), dir.path().join(".kumi").to_string_lossy().into_owned()),
         ("ProgramFiles".into(), dir.path().join("Program Files").to_string_lossy().into_owned()),
     ]);
-    let reaper: &dyn DawProvider = &own::REAPER;
+    let reaper: &dyn DawProvider = &registry::REAPER;
     // A REAPER installed on this computer itself would be found anyway.
     let alone = !reaper.here(&env);
     let portable = dir.path().join("Stick/REAPER");
@@ -694,14 +695,14 @@ async fn a_portable_reaper_is_found_by_its_receipt_and_otherwise_named_by_the_va
 async fn the_doctor_names_each_fix_and_says_when_kumis_host_wont_start() {
     use kumi::doctor::{Check, CheckStatus, DoctorIo, LiveProbe};
     let (dir, env) = renoise_home();
-    assert_eq!(own::RENOISE.setup_bridge(Rc::new(Out::default()), &env, yes()).await.unwrap(), 0);
+    assert_eq!(registry::RENOISE.setup_bridge(Rc::new(Out::default()), &env, yes()).await.unwrap(), 0);
     // The producer deleted Kumi's tool from Renoise.
     std::fs::remove_dir_all(dir.path().join("Renoise/V3.5.4/Scripts/Tools/com.kumi.Bridge.xrnx")).unwrap();
     let mut io = DoctorIo::new(Rc::new(Out::default()), env.clone());
     io.probe_own = Some(Rc::new(|_| {
         async { LiveProbe { started: false, said: Some("daw-mcp-server wasn't found".into()), ..Default::default() } }.boxed_local()
     }));
-    let checks = own::RENOISE.doctor_checks(&io, &Check::ok("Kumi")).await;
+    let checks = registry::RENOISE.doctor_checks(&io, &Check::ok("Kumi")).await;
     let again = format!("{} --daw renoise bridge", *kumi_types::command::KUMI);
     let removed = checks.iter().find(|check| check.text.contains("was removed from")).unwrap_or_else(|| panic!("{checks:?}"));
     assert_eq!((removed.status.clone(), removed.next.as_deref()), (CheckStatus::Fix, Some(again.as_str())), "{checks:?}");
@@ -723,7 +724,7 @@ async fn the_report_reads_the_bridge_logs_oldest_first() {
         let file = std::fs::File::options().write(true).open(logs.join(name)).unwrap();
         file.set_modified(now - std::time::Duration::from_secs(hours_ago * 3600)).unwrap();
     }
-    let (heading, lines) = own::RENOISE.report_log(&env, "", None).await;
+    let (heading, lines) = registry::RENOISE.report_log(&env, "", None).await;
     assert_eq!(heading, "Renoise's bridge log");
     assert_eq!(lines, "b.log line\nc.log line\na.log line");
 }

@@ -154,7 +154,7 @@ pub(crate) fn daw_env_problem(env: &Env) -> Option<String> {
 
 /// The DAWs this Kumi integrates, by the names `--daw` and KUMI_DAW take.
 fn registered_daws() -> String {
-    crate::daw::registry::REGISTERED.iter().filter_map(|profile| profile.id).map(DawId::as_str).collect::<Vec<_>>().join(", ")
+    crate::daw::registry::registered().filter_map(|profile| profile.id).map(DawId::as_str).collect::<Vec<_>>().join(", ")
 }
 
 /// A DAW this Kumi integrates, by its name in any case: "live" is another name for Live's ("ableton", the one written), as

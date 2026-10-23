@@ -316,7 +316,7 @@ fn open(
     options.gaps = Some(text("gaps.jsonl"));
     options.conversations = Some(create_conversation_store(dir));
     options.library = Some(create_library(LibraryOptions {
-        daws: kumi::daw::registry::LIBRARIES,
+        daws: kumi::daw::registry::libraries(),
         dir: text("library"),
         find_sets: Some(false),
         fork: Some(false),

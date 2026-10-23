@@ -342,7 +342,7 @@ async fn find_sounds_in_each_daw_holds_only_the_sounds_offered_there() {
             put(&home.home.path().join("Music/Ableton/User Library/Samples/My Kick.wav"), wav(&[fixture::kick(50., 0.2)], 44100));
             learn(LearnOptions::new(home.plan(), Signal::new())).await.unwrap();
             let library = create_library(LibraryOptions {
-                daws: kumi::daw::registry::LIBRARIES,
+                daws: kumi::daw::registry::libraries(),
                 dir: home.dir.path().to_string_lossy().into(),
                 sources: Some(home.options()),
                 fork: Some(false),
@@ -401,7 +401,7 @@ async fn a_daws_library_inside_a_producers_folder_leaves_its_other_sounds_to_tha
                 assert_eq!(learned.iter().filter(|n| *n == name).count(), 1, "{name} learned once: {learned:?}");
             }
             let library = create_library(LibraryOptions {
-                daws: kumi::daw::registry::LIBRARIES,
+                daws: kumi::daw::registry::libraries(),
                 dir: home.dir.path().to_string_lossy().into(),
                 folders: Some(vec![documents]),
                 sources: Some(home.options()),

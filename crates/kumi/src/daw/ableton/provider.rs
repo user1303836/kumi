@@ -19,11 +19,17 @@ use kumi_agent::core::contracts::SessionController;
 use kumi_agent::core::{
     context::IntegrationContext,
     contracts::{ConnectionState, Integration},
+    presentation::ToolPresentation,
+    view::ViewPresentation,
 };
 use kumi_common::abort;
 use kumi_daw_ableton::AbletonOptions;
+use kumi_library::daws::LibrarySources;
 use kumi_types::errors::RuntimeError;
-use kumi_types::{daw::DawId, system::Env};
+use kumi_types::{
+    daw::{DawId, DawProfile},
+    system::Env,
+};
 use std::rc::Rc;
 use std::{cell::RefCell, rc::Weak};
 
@@ -40,6 +46,21 @@ pub(crate) const NO_LIVE: &str = "Kumi's bridge couldn't reach Live, so this is 
 impl DawProvider for Ableton {
     fn id(&self) -> DawId {
         DawId::Ableton
+    }
+    fn profile(&self) -> &'static DawProfile {
+        &DawProfile::ABLETON
+    }
+    fn presentation(&self) -> &'static ToolPresentation {
+        &kumi_daw_ableton::presentation::PRESENTATION
+    }
+    fn view(&self) -> &'static ViewPresentation {
+        &kumi_daw_ableton::presentation::VIEW
+    }
+    fn library(&self) -> &'static dyn LibrarySources {
+        &kumi_daw_ableton::library::LIBRARY
+    }
+    fn site(&self) -> &'static str {
+        "ableton.com"
     }
     fn bridge_config(&self, env: &Env) -> Option<String> {
         crate::config::find_bridge_config(env)
