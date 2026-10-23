@@ -17,7 +17,7 @@ ONNX Runtime, which runs them, is fetched from Microsoft's own releases, under t
 
 ## Basic Pitch (Spotify), Apache License 2.0
 
-`crates/kumi-runtime/src/listening/transcribe.rs` translates into Rust Basic Pitch's note decoding and windowing:
+`crates/kumi-listening/src/transcribe.rs` translates into Rust Basic Pitch's note decoding and windowing:
 `basic_pitch/note_creation.py`, `basic_pitch/inference.py` and `basic_pitch/constants.py` from
 https://github.com/spotify/basic-pitch at revision fa5997af0a8210982619003269994a1be25eddf3. Copyright 2022 Spotify AB,
 licensed under the Apache License, Version 2.0 (below).

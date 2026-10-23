@@ -10,13 +10,14 @@ How the repository fits together, how to work on each part, and how to release.
 | Folder | What's in it |
 | --- | --- |
 | `crates/kumi` | The native `kumi` command and terminal app (`src/tui/`), and opt-in checks against models or real Live (`examples/`) |
-| `crates/kumi-runtime` | Agent loop, sessions, listening, Live integration and MCP client |
+| `crates/kumi-runtime` | Agent loop, sessions, Live integration and MCP client |
 | `crates/kumi-types` | The types and settings every layer names: DAW profiles and words, the agent's contracts with its tools, errors, places, the system, the version |
 | `crates/kumi-net` | How Kumi reaches the network: its HTTP clients with the system's proxies and trust, why a request got no answer, the public-only web client and a model call's error |
 | `crates/kumi-media` | Audio (decoding, analysis, matching a sound, DSP), voice input, and the programs that decode media (ffmpeg, yt-dlp, whisper.cpp) with a video's frames, captions and speech |
 | `crates/kumi-ai` | The model clients: each provider's wire binding, the providers and their models, signing in, the models Kumi runs itself (ONNX Runtime), a turn's timing and how a failed call is told |
 | `crates/kumi-web` | The web and video tools: searching and reading the web (pages, PDFs, GitHub, Max patches), and watching a tutorial for its words, frames and sound |
 | `crates/kumi-library` | The producer's library (learning, search, presets, Sets, taste), the plug-ins' formats and roles, and finding samples on disk; each DAW says where its own library is |
+| `crates/kumi-listening` | Listening: what a listen measures, the judge and its checklist, the engine's rounds, the listening models and their slots, style references and notation; each DAW plays and renders for it |
 | `crates/kumi-common` | Shared runtime utilities and source-compatible value handling |
 | `daws/ableton/ableton-mcp-server` | Native MCP bridge, analysis worker, lifecycle, setup, migration and diagnostics |
 | `daws/ableton/remote-script` | The bridge's Remote Script, which runs inside Live (`ableton_mcp_remote_script.py`, the `AbletonMcpBridge/` entry point, Python tests) |

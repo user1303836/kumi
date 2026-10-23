@@ -16,17 +16,19 @@ pub use integrations::{ears, hands};
 pub mod kernel;
 // The producer's library and the plug-ins (kumi-library), where the runtime's code and the app have always named them.
 pub use kumi_library as library;
-pub mod listening;
+// Listening, its models' slots, style references and notation (kumi-listening), where the runtime's code and the app
+// have always named them.
+pub use kumi_listening as listening;
 pub mod mcp;
 pub use kumi_ai::models;
 // How Kumi reaches the network (kumi-net), where the runtime's code and the app have always named it.
-pub use kumi_net as net;
-pub mod notation;
 pub use kumi_ai::providers;
 pub use kumi_library::plugins;
-pub mod references;
-pub mod slots;
+pub use kumi_listening::notation;
+pub use kumi_listening::references;
+pub use kumi_listening::slots;
 pub use kumi_media::voice;
+pub use kumi_net as net;
 pub use kumi_web::video;
 // The web and video tools (kumi-web), where the runtime's code and the app have always named them.
 pub use kumi_web as web;

@@ -1,0 +1,211 @@
+//! A song's form, heard: sections found where the energy curve turns, their roles and repeats, the turns between
+//! them (a prepared drop and an unprepared one), the intro, outro and first hook; a flat song's plateau; and a
+//! reference at another tempo read in its own bars.
+use kumi_common::abort::Signal;
+use kumi_listening::{
+    form::{compare, file_grid, form, form_from, grid_of, Form},
+    measure::measure_samples,
+};
+
+const RATE: f64 = 48_000.;
+/// Bars of two seconds (120 BPM in 4/4).
+const BAR: f64 = 2.;
+
+/// A seeded noise source: the same "random" every run.
+struct Noise(u64);
+impl Noise {
+    fn next(&mut self) -> f64 {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((self.0 >> 11) as f64 / (1u64 << 53) as f64) * 2. - 1.
+    }
+}
+
+/// One stretch of a song: bars, its level at the start and end (dB of full scale), hits a beat, and how bright.
+struct Part {
+    bars: usize,
+    from: f64,
+    to: f64,
+    hits: f64,
+    bright: f64,
+}
+
+/// A song from its parts: a bed of filtered noise at the part's level (rising or falling across it) with short hits
+/// on the beat grid, brighter for a brighter part.
+fn song(parts: &[Part]) -> Vec<f64> {
+    song_at(parts, BAR, 1.)
+}
+
+/// The same, `bar` seconds a bar, each bar's first hit `accent` times as loud.
+fn song_at(parts: &[Part], bar: f64, accent: f64) -> Vec<f64> {
+    let mut noise = Noise(11);
+    let mut low = 0.;
+    let mut out = vec![];
+    for part in parts {
+        let samples = (part.bars as f64 * bar * RATE) as usize;
+        let beat = bar / 4.;
+        let every = (beat / part.hits.max(1e-6) * RATE) as usize;
+        for n in 0..samples {
+            let along = n as f64 / samples as f64;
+            let gain = 10f64.powf((part.from + (part.to - part.from) * along) / 20.);
+            let white = noise.next();
+            low += 0.05 * (white - low);
+            let bed = low * 4. * (1. - part.bright) + white * part.bright;
+            let stress = if n % ((bar * RATE) as usize) < 600 { accent } else { 1. };
+            let hit =
+                if part.hits > 0. && every > 0 && n % every < 600 { (1. - (n % every) as f64 / 600.) * white * 3. * stress } else { 0. };
+            out.push((bed + hit) * gain);
+        }
+    }
+    out
+}
+
+fn heard(samples: &[f64]) -> kumi_listening::measure::Heard {
+    let samples: Vec<f32> = samples.iter().map(|s| *s as f32).collect();
+    measure_samples(&samples, &samples, RATE)
+}
+
+fn edges(form: &Form) -> Vec<usize> {
+    form.sections.iter().skip(1).map(|section| section.from).collect()
+}
+
+#[test]
+fn a_song_falls_into_sections_with_their_roles_turns_and_problems() {
+    let parts = [
+        Part { bars: 8, from: -32., to: -32., hits: 1., bright: 0.2 },
+        Part { bars: 8, from: -26., to: -16., hits: 2., bright: 0.4 },
+        Part { bars: 16, from: -14., to: -14., hits: 4., bright: 0.6 },
+        Part { bars: 8, from: -30., to: -30., hits: 0.5, bright: 0.2 },
+        Part { bars: 16, from: -14., to: -14., hits: 4., bright: 0.6 },
+        Part { bars: 8, from: -32., to: -32., hits: 1., bright: 0.2 },
+    ];
+    let form = form(&heard(&song(&parts)), BAR);
+    assert_eq!(form.bars.len(), 64);
+    let found = edges(&form);
+    for expected in [8, 16, 32, 40, 56] {
+        assert!(found.iter().any(|at| at.abs_diff(expected) <= 1), "a section starts near bar {}: {found:?}", expected + 1);
+    }
+    let roles: Vec<&str> = form.sections.iter().map(|section| section.role.as_str()).collect();
+    assert_eq!((roles.first(), roles.last()), (Some(&"intro"), Some(&"outro")), "{roles:?}");
+    let peaks: Vec<_> = form.sections.iter().filter(|section| section.role == "peak").collect();
+    assert!(peaks.len() >= 2 && peaks.iter().all(|section| section.letter == peaks[0].letter), "the two drops repeat: {:?}", form.sections);
+    assert_eq!((form.intro, form.outro), (8, 8));
+    assert!(form.hook.is_some_and(|bar| bar.abs_diff(16) <= 1), "{:?}", form.hook);
+    // The first drop comes out of a build; the second straight out of a quiet break: unprepared.
+    let first = form.transitions.iter().find(|turn| turn.at.abs_diff(16) <= 1).unwrap();
+    assert!(first.kind == "drop" && !first.prepared.is_empty(), "{first:?}");
+    let second = form.transitions.iter().find(|turn| turn.at.abs_diff(40) <= 1).unwrap();
+    assert_eq!((second.kind.as_str(), second.prepared.is_empty()), ("drop", true), "{second:?} in {:?}", form.sections);
+    assert!(form.problems.iter().any(|problem| problem.contains("arrives unprepared")), "{:?}", form.problems);
+    assert!(!form.problems.iter().any(|problem| problem.contains("plateaus")), "{:?}", form.problems);
+}
+
+#[test]
+fn a_song_that_never_moves_plateaus_and_is_compared_with_one_that_does() {
+    // One bar looped 48 times, unchanged.
+    let bar = song(&[Part { bars: 1, from: -18., to: -18., hits: 2., bright: 0.4 }]);
+    let looped: Vec<f64> = (0..48).flat_map(|_| bar.iter().copied()).collect();
+    let flat = form(&heard(&looped), BAR);
+    assert!(flat.problems.iter().any(|problem| problem.contains("plateaus for")), "{:?}", flat.problems);
+    assert!(flat.problems.iter().any(|problem| problem.contains("barely change")), "{:?}", flat.problems);
+    let shaped = form(
+        &heard(&song(&[
+            Part { bars: 16, from: -32., to: -32., hits: 1., bright: 0.2 },
+            Part { bars: 16, from: -14., to: -14., hits: 4., bright: 0.6 },
+            Part { bars: 16, from: -30., to: -30., hits: 1., bright: 0.2 },
+        ])),
+        BAR,
+    );
+    let said = compare(&flat, &shaped);
+    assert!(said.iter().any(|line| line.starts_with("contrast between sections")), "{said:?}");
+    assert!(said.iter().any(|line| line.starts_with("intro")), "{said:?}");
+}
+
+#[test]
+fn silent_bars_dont_wipe_out_the_sections_around_them() {
+    // Intro, verse, break, drop and outro at -20, -15, -21, -10 and -20 dB, told apart by their level alone.
+    let part = |bars: usize, level: f64| Part { bars, from: level, to: level, hits: 2., bright: 0.4 };
+    let clean = song(&[part(16, -20.), part(16, -15.), part(8, -21.), part(16, -10.), part(8, -20.)]);
+    let bar = (BAR * RATE) as usize;
+    let cuts = |samples: &[f64]| edges(&form(&heard(samples), BAR));
+    let near = |found: &[usize], expected: &[usize]| {
+        found.len() == expected.len() && expected.iter().all(|at| found.iter().any(|cut| cut.abs_diff(*at) <= 1))
+    };
+    // As it is; with one silent bar before the drop (the gap ends the break); starting a bar in, as an Arrangement can;
+    // and with two silent bars at its end.
+    let mut gap = clean.clone();
+    gap[39 * bar..40 * bar].fill(0.);
+    let found =
+        [cuts(&clean), cuts(&gap), cuts(&[vec![0.; bar], clean.clone()].concat()), cuts(&[clean.clone(), vec![0.; 2 * bar]].concat())];
+    let expected = [[16, 32, 40, 56], [16, 32, 40, 56], [17, 33, 41, 57], [16, 32, 40, 56]];
+    assert!(found.iter().zip(&expected).all(|(found, expected)| near(found, expected)), "{found:?}");
+}
+
+#[test]
+fn a_form_too_short_for_a_section_has_no_contrast_to_compare() {
+    let bar = (BAR * RATE) as usize;
+    let short = form(&heard(&song(&[Part { bars: 1, from: -18., to: -18., hits: 2., bright: 0.4 }])[..bar / 4]), BAR);
+    assert!(short.sections.is_empty(), "{:?}", short.sections);
+    let shaped = form(
+        &heard(&song(&[
+            Part { bars: 4, from: -30., to: -30., hits: 1., bright: 0.2 },
+            Part { bars: 4, from: -14., to: -14., hits: 4., bright: 0.6 },
+        ])),
+        BAR,
+    );
+    for said in [compare(&short, &shaped), compare(&shaped, &short)] {
+        assert!(said.iter().all(|line| !line.starts_with("contrast") && !line.contains("9223372036854775808")), "{said:?}");
+    }
+}
+
+/// A 32-bit float WAV of one channel.
+fn wav(samples: &[f32], rate: u32) -> Vec<u8> {
+    let data: Vec<u8> = samples.iter().copied().flat_map(f32::to_le_bytes).collect();
+    let mut wav = Vec::with_capacity(44 + data.len());
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&3u16.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&rate.to_le_bytes());
+    wav.extend_from_slice(&(rate * 4).to_le_bytes());
+    wav.extend_from_slice(&4u16.to_le_bytes());
+    wav.extend_from_slice(&32u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    wav.extend_from_slice(&data);
+    wav
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_reference_at_another_tempo_is_read_in_its_own_bars() {
+    // A 128 BPM reference (bars of 1.875 s) after 0.3 s of silence, a hit on every beat, each bar's first louder: 8
+    // bars of intro, 16 building, 16 at its peak.
+    let bar = 60. / 128. * 4.;
+    let parts = [
+        Part { bars: 8, from: -32., to: -32., hits: 1., bright: 0.2 },
+        Part { bars: 16, from: -26., to: -16., hits: 1., bright: 0.4 },
+        Part { bars: 16, from: -14., to: -14., hits: 1., bright: 0.6 },
+    ];
+    let mut samples = vec![0.; (0.3 * RATE) as usize];
+    samples.extend(song_at(&parts, bar, 2.));
+    let heard = heard(&samples);
+    let mono: Vec<f32> = samples.iter().map(|sample| *sample as f32).collect();
+    // Its grid, from its file: the Set at 120 BPM.
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("reference.wav");
+    std::fs::write(&file, wav(&mono, RATE as u32)).unwrap();
+    let grid = file_grid(file.to_str().unwrap(), 4., Some(120.), Signal::new()).await.expect("its tempo is told");
+    assert!((grid.tempo - 128.).abs() < 0.3 && (grid.downbeat - 0.3).abs() < 0.03, "{grid:?}");
+    // Told its tempo roughly (127 BPM) or at half, the same grid.
+    for told in [127., 64.] {
+        let again = grid_of(&mono, RATE, told, 4., Some(120.));
+        assert!((again.tempo - grid.tempo).abs() < 0.3 && (again.downbeat - grid.downbeat).abs() < 0.03, "{told}: {again:?}");
+    }
+    // In its own bars: 40, its intro 8 and its peak from bar 25.
+    let own = form_from(&heard, 4. * 60. / grid.tempo, grid.downbeat);
+    assert_eq!(own.bars.len(), 40);
+    assert!(own.intro.abs_diff(8) <= 1 && own.hook.is_some_and(|at| at.abs_diff(24) <= 1), "{own:?}");
+    // Cut into a 120 BPM Set's bars from its first sample, it would read three bars short.
+    assert!(form(&heard, BAR).bars.len() <= 38);
+}

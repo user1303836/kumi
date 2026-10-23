@@ -1,4 +1,4 @@
-//! Parameter display text: the reader is shared (integrations/shared/display.rs); the script that maps a device's
+//! Parameter display text: the reader is shared (kumi-types' display); the script that maps a device's
 //! display values in Live stays here.
 pub use crate::integrations::shared::display::*;
 

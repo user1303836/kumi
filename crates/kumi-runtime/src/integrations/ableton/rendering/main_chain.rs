@@ -1,6 +1,7 @@
 //! Live's Main chain as the judge's masking reads it: which of Main's devices change the mix in a way the focus element
 //! (heard before Main) doesn't share, and the gain of the Utilities that only turn the level.
 use crate::listening::checklist::round1;
+pub use crate::listening::checklist::MainState;
 
 /// One of Main's devices as masking needs it: its name and class, whether it's on, and (a Utility's) its parameters
 /// by name and the text Live shows.
@@ -10,14 +11,6 @@ pub struct MainDevice {
     pub class: String,
     pub on: bool,
     pub parameters: Vec<(String, String)>,
-}
-
-/// Main's chain as masking reads it: the devices that change the mix in a way the focus element (heard before Main)
-/// doesn't share, and the gain of the Utilities that only turn the level (the focus is heard that much louder too).
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct MainState {
-    pub unfair: Vec<String>,
-    pub gain: f64,
 }
 
 /// Main's chain, read: devices that are off, Spectrum and Tuner change nothing; a Utility that only turns the level is

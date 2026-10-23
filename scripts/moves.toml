@@ -1832,3 +1832,289 @@ to = "kumi_library"
 [[rust]]
 from = "kumi_runtime::plugins"
 to = "kumi_library::plugins"
+
+# kumi-listening: listening, its models' slots, style references and notation; kumi-types' display (2026-10).
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/shared/display.rs"
+to = "crates/kumi-types/src/display.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/assets/audition.json"
+to = "crates/kumi-listening/src/assets/audition.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/assets/form.json"
+to = "crates/kumi-listening/src/assets/form.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/assets/groove.json"
+to = "crates/kumi-listening/src/assets/groove.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/assets/judge.json"
+to = "crates/kumi-listening/src/assets/judge.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/assets/sound.json"
+to = "crates/kumi-listening/src/assets/sound.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/assets/tune.json"
+to = "crates/kumi-listening/src/assets/tune.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/checklist.rs"
+to = "crates/kumi-listening/src/checklist.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/cmaes.rs"
+to = "crates/kumi-listening/src/cmaes.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/detect.rs"
+to = "crates/kumi-listening/src/detect.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/effects.rs"
+to = "crates/kumi-listening/src/effects.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/embed.rs"
+to = "crates/kumi-listening/src/embed.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/engine/audition.rs"
+to = "crates/kumi-listening/src/engine/audition.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/engine/call.rs"
+to = "crates/kumi-listening/src/engine/call.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/engine/form.rs"
+to = "crates/kumi-listening/src/engine/form.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/engine/groove.rs"
+to = "crates/kumi-listening/src/engine/groove.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/engine/judge.rs"
+to = "crates/kumi-listening/src/engine/judge.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/engine/mod.rs"
+to = "crates/kumi-listening/src/engine/mod.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/engine/probe.rs"
+to = "crates/kumi-listening/src/engine/probe.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/engine/roles.rs"
+to = "crates/kumi-listening/src/engine/roles.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/engine/sound.rs"
+to = "crates/kumi-listening/src/engine/sound.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/engine/tune.rs"
+to = "crates/kumi-listening/src/engine/tune.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/fit.rs"
+to = "crates/kumi-listening/src/fit.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/form.rs"
+to = "crates/kumi-listening/src/form.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/home.rs"
+to = "crates/kumi-listening/src/home.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/judging.rs"
+to = "crates/kumi-listening/src/judging.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/knobs.rs"
+to = "crates/kumi-listening/src/knobs.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/listener.rs"
+to = "crates/kumi-listening/src/listener.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/measure.rs"
+to = "crates/kumi-listening/src/measure.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/mod.rs"
+to = "crates/kumi-listening/src/lib.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/notes.rs"
+to = "crates/kumi-listening/src/notes.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/probes.rs"
+to = "crates/kumi-listening/src/probes.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/renderer.rs"
+to = "crates/kumi-listening/src/renderer.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/round.rs"
+to = "crates/kumi-listening/src/round.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/sound.rs"
+to = "crates/kumi-listening/src/sound.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/tools.rs"
+to = "crates/kumi-listening/src/tools.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/listening/transcribe.rs"
+to = "crates/kumi-listening/src/transcribe.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/notation/harmony.rs"
+to = "crates/kumi-listening/src/notation/harmony.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/notation/mod.rs"
+to = "crates/kumi-listening/src/notation/mod.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/notation/parse.rs"
+to = "crates/kumi-listening/src/notation/parse.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/notation/pitch.rs"
+to = "crates/kumi-listening/src/notation/pitch.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/notation/print.rs"
+to = "crates/kumi-listening/src/notation/print.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/notation/time.rs"
+to = "crates/kumi-listening/src/notation/time.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/references/fetch.rs"
+to = "crates/kumi-listening/src/references/fetch.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/references/mod.rs"
+to = "crates/kumi-listening/src/references/mod.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/references/sources.rs"
+to = "crates/kumi-listening/src/references/sources.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/references/store.rs"
+to = "crates/kumi-listening/src/references/store.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/references/tool.rs"
+to = "crates/kumi-listening/src/references/tool.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/slots.rs"
+to = "crates/kumi-listening/src/slots.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/effects.rs"
+to = "crates/kumi-listening/tests/it/effects.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/embed.rs"
+to = "crates/kumi-listening/tests/it/embed.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/feel.rs"
+to = "crates/kumi-listening/tests/it/feel.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/form.rs"
+to = "crates/kumi-listening/tests/it/form.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/listener.rs"
+to = "crates/kumi-listening/tests/it/listener.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/notation.rs"
+to = "crates/kumi-listening/tests/it/notation.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/slots.rs"
+to = "crates/kumi-listening/tests/it/slots.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/sound.rs"
+to = "crates/kumi-listening/tests/it/sound.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/style_references.rs"
+to = "crates/kumi-listening/tests/it/style_references.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/transcribe.rs"
+to = "crates/kumi-listening/tests/it/transcribe.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/afx-fixture.json"
+to = "crates/kumi-listening/tests/support/afx-fixture.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/clap-fixture.json"
+to = "crates/kumi-listening/tests/support/clap-fixture.json"
+
+[[rust]]
+from = "kumi_runtime::core::context::ListenerSource"
+to = "kumi_listening::listener::ListenerSource"
+
+[[rust]]
+from = "kumi_runtime::core::evolve::seeded"
+to = "kumi_listening::cmaes::seeded"
+
+[[rust]]
+from = "kumi_runtime::listening::checklist::main_chain"
+to = "kumi_runtime::integrations::live_main_chain::main_chain"
+
+[[rust]]
+from = "kumi_runtime::listening::checklist::utility_gain"
+to = "kumi_runtime::integrations::live_main_chain::utility_gain"
+
+[[rust]]
+from = "kumi_runtime::listening::checklist::MainDevice"
+to = "kumi_runtime::integrations::live_main_chain::MainDevice"
+
+[[rust]]
+from = "kumi_runtime::integrations::shared::display"
+to = "kumi_types::display"
+
+[[rust]]
+from = "kumi_runtime::listening"
+to = "kumi_listening"
+
+[[rust]]
+from = "kumi_runtime::references"
+to = "kumi_listening::references"
+
+[[rust]]
+from = "kumi_runtime::slots"
+to = "kumi_listening::slots"
+
+[[rust]]
+from = "kumi_runtime::notation"
+to = "kumi_listening::notation"

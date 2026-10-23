@@ -1,7 +1,8 @@
 //! The listening loop's ears and judge on synthetic sound: what they measure, what they find and where, and how a
 //! checklist decides whether a change stays.
+use kumi_runtime::integrations::live_main_chain::{main_chain, MainDevice};
 use kumi_runtime::listening::{
-    checklist::{main_chain, masking_unfair, Change, Checklist, Goal, Item, MainDevice, MainState, Profile, Quantity, Role, Target},
+    checklist::{masking_unfair, Change, Checklist, Goal, Item, MainState, Profile, Quantity, Role, Target},
     detect::{self, ProblemKind},
     measure::{measure_samples, Heard},
 };

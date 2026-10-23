@@ -277,7 +277,7 @@ impl Rendering {
     ) -> Rc<Self> {
         let live = LiveRenderer::new(history, observer, options, step, clip_file);
         // The tools reach Live through its renderer; they hold no more of Rendering than that.
-        let host: Rc<dyn crate::listening::renderer::Renderer> = Rc::new(live.clone());
+        let host: Rc<dyn crate::listening::renderer::Renderer> = Rc::new(host::LiveHost(live.clone()));
         let listening = Listening::new(
             host,
             options.on_judge.clone(),

@@ -464,20 +464,6 @@ mod tests {
         prune_takes(folder.path(), 100, std::time::Duration::from_secs(60)).await.unwrap();
         assert!(reading.exists() && !newer.exists() && !older.exists(), "past the budget, only what's fresh stays");
     }
-    #[tokio::test(flavor = "current_thread")]
-    async fn a_judged_runs_folder_keeps_only_what_the_run_stores() {
-        let folder = tempfile::tempdir().unwrap();
-        let [span, excerpt, dropped] = ["span.wav", "excerpt.wav", "dropped.wav"].map(|name| {
-            let path = folder.path().join(name);
-            std::fs::write(&path, b"take").unwrap();
-            path
-        });
-        crate::listening::engine::prune_unstored(folder.path(), &[span.clone(), excerpt.clone()]).await;
-        assert!(span.exists() && excerpt.exists() && !dropped.exists());
-        // A new run, or none, stores none of the old run's takes.
-        crate::listening::engine::prune_unstored(folder.path(), &[]).await;
-        assert!(!span.exists() && !excerpt.exists());
-    }
     #[test]
     fn only_kumis_own_recordings_go_from_the_project() {
         let tracks = vec!["Kumi · render 1 ab12".to_string()];

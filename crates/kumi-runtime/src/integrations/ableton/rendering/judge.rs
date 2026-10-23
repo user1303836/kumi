@@ -1,11 +1,9 @@
 //! Live's side of the judge: Main's chain as masking reads it, the faders and tracks it asks about, the gain stage
 //! rebalancing turns and the changes in HISTORY it counts. The judged run itself is `Listening`'s.
 use super::super::display::parse_display;
+use super::main_chain::{main_chain, MainDevice};
 use super::*;
-use crate::listening::{
-    checklist::{main_chain, MainDevice, MainState},
-    judging::Placed,
-};
+use crate::listening::{checklist::MainState, judging::Placed};
 use kumi_common::js::{number::to_string, string::head};
 
 /// Where rebalancing turns the level: a gain knob, and whether a limiter comes after it (then peaks stay put).

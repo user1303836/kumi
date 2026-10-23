@@ -9,12 +9,8 @@ use std::rc::Rc;
 /// Asks the producer to free disk space before a recording: what's recorded, the bytes needed, where.
 pub type LowDisk = Rc<dyn Fn(String, f64, String) -> LocalBoxFuture<'static, Option<String>>>;
 
-/// Finds the listening model: one, none (no provider has one), or why it couldn't tell (the network, Esc).
-pub type ListenerSource = Rc<
-    dyn Fn(
-        kumi_common::abort::Signal,
-    ) -> futures::future::LocalBoxFuture<'static, Result<Option<Rc<dyn crate::listening::listener::Listener>>, String>>,
->;
+// The listening model's finder (kumi-listening), beside the Listener it finds.
+pub use crate::listening::listener::ListenerSource;
 
 /// The sinks a DAW's integration reports to, and the services and timings the app gives it.
 #[derive(Clone)]
