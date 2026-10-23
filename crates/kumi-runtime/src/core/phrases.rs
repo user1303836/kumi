@@ -1,7 +1,7 @@
 //! Fixed one-liners Kumi runs with no model call ("tempo 124", "mute drums", "loop 9-16"), in words any DAW
 //! understands. Only a whole message that matches is one; anything else, or a track that isn't there or that two
 //! fit, goes to the model as it was written. Each integration turns an intent into its own change (Live's in
-//! integrations/ableton/instant.rs), which lands in HISTORY with its undo.
+//! kumi-daw-ableton's instant.rs), which lands in HISTORY with its undo.
 
 use std::sync::LazyLock;
 

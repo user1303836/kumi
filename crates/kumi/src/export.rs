@@ -398,7 +398,7 @@ pub struct ExportRequest {
 pub fn words_of(place: &str) -> ((&'static str, &'static str), impl Fn(&str) -> String) {
     use kumi_runtime::core::{daw::DawId, place::Place};
     let daw = Place::parse(place).and_then(|place| place.daw()).filter(|daw| *daw != DawId::Ableton);
-    let own = daw.and_then(|daw| kumi_runtime::integrations::profile(daw).zip(kumi_runtime::integrations::presentation(daw)));
+    let own = daw.and_then(|daw| crate::daw::registry::profile(daw).zip(crate::daw::registry::presentation(daw)));
     let words = own.map_or(WORDS, |(profile, _)| profile.word_pair());
     let label = move |tool: &str| match own {
         Some((profile, shown)) => kumi_runtime::core::presentation::step_label(shown, profile, tool),
@@ -413,7 +413,7 @@ fn kept(env: &Env) -> Result<Rc<FileConversationStore>, RuntimeError> {
     Ok(kumi_runtime::core::conversations::create_conversation_store_in(
         load_projects_dir(env)?,
         settings.conversations.as_ref().and_then(|c| c.keep_days),
-        kumi_runtime::integrations::PLACES,
+        crate::daw::registry::PLACES,
     ))
 }
 

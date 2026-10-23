@@ -11,13 +11,8 @@ use kumi_common::{
     abort::{self, Signal},
     js::string::{head, trim},
 };
-use kumi_runtime::{
-    create_ableton_integration,
-    integrations::ableton::{connection::Connect, AbletonOptions},
-    mcp::client,
-    system::Env,
-    Integration, JsonObject, KernelTool, Observation, RuntimeError, BRIDGE_TOOLS,
-};
+use kumi_daw_ableton::{connection::Connect, create_ableton_integration, AbletonOptions, BRIDGE_TOOLS};
+use kumi_runtime::{mcp::client, system::Env, Integration, JsonObject, KernelTool, Observation, RuntimeError};
 use serde_json::{json, Value};
 use std::{
     cell::RefCell,

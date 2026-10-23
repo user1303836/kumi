@@ -77,7 +77,7 @@ async fn library_command_original_source_scenario_inspects_and_rebuilds_real_fil
             ]
             .into();
             let library = create_library(LibraryOptions {
-                daws: kumi_runtime::integrations::LIBRARIES,
+                daws: kumi::daw::registry::LIBRARIES,
                 dir: env["KUMI_LIBRARY_DIR"].clone(),
                 folders: Some(vec![crate_dir.display().to_string()]),
                 sources: Some(SourceOptions {

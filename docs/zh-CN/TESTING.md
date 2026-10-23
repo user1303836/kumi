@@ -37,7 +37,7 @@ python3 -m unittest discover -s scripts/tests -p 'test_*release.py'
 | 命令 | 作用 |
 | --- | --- |
 | `sh scripts/test-isolated.sh`（Windows：`./scripts/test-isolated.ps1`） | 在独立的主目录中用 cargo-nextest 运行全部测试，每个测试一个进程；参数会传给 `cargo nextest run`（`KUMI_NEXTEST=0`：改用 `cargo test`，一个 crate 的测试共用一个进程） |
-| `sh scripts/test-isolated.sh -p kumi-runtime -E 'test(/^hands_transport::/)'` | 只运行一个 crate 的一个测试文件：一个 crate 的测试是一个二进制（`tests/it/`，每个文件一个模块） |
+| `sh scripts/test-isolated.sh -p kumi-daw-ableton -E 'test(/^hands_transport::/)'` | 只运行一个 crate 的一个测试文件：一个 crate 的测试是一个二进制（`tests/it/`，每个文件一个模块） |
 | `cargo fmt --all --check` | 按 CI 的方式检查格式 |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lint 检查；目前在 CI 中仅供参考 |
 | `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref` | 跨 await 持有的 `RefCell` 借用；会使 Lint CI 任务失败 |

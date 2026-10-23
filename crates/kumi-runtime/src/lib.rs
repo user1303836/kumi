@@ -9,10 +9,7 @@ pub use kumi_ai as ai;
 pub use kumi_ai::auth;
 pub use kumi_media::audio;
 pub mod core;
-pub mod devices;
 pub mod integrations;
-// Live's own parts, at the paths they always had.
-pub use integrations::{ears, hands};
 pub mod kernel;
 // The producer's library and the plug-ins (kumi-library), where the runtime's code and the app have always named them.
 pub use kumi_library as library;
@@ -66,14 +63,8 @@ pub use core::techniques::{
     check_technique, create_technique_store, technique_instructions, technique_tools, Technique, TechniqueBody, TechniqueDrafts,
     TechniqueSource, TechniqueStore, MAX_TECHNIQUES, TECHNIQUE_GUIDANCE, TECHNIQUE_TOOL,
 };
-pub use ears::device::{install_ears, EARS_NAME};
-pub use hands::{can_build_hands, open_hands, Hands};
 pub use integrations::fallback::{with_fallback, with_fallback_failure};
-pub use integrations::library_sources;
-pub use integrations::live_manual::MANUAL_TOOL;
-pub use integrations::{
-    create_ableton_integration, create_inference_only_integration, create_project_store, parse_focus, Baseline, ProjectStore, BRIDGE_TOOLS,
-};
+pub use integrations::{create_project_store, Baseline, ProjectStore};
 pub use kernel::agent::{create_agent_kernel, AgentKernel, AgentKernelOptions, Checkpoint, ModelBinding, ModelRequest};
 pub use kernel::budget::{budget_for, ContextBudget, DEFAULT_BUDGET};
 pub use library::{

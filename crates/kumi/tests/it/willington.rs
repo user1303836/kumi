@@ -1,7 +1,7 @@
 //! /willington's switch: finding Willington in the bridge in Live, and turning its bindings on and off.
 use ableton_mcp_server::lifecycle::delivery::{secret_permissions, SecretPermissions};
 use kumi::willington::{Willington, WillingtonControl, TURNED_OFF, TURNED_OFF_FOLLOW_STAYS, TURNED_ON, TURNED_ON_WITH_FOLLOW};
-use kumi_runtime::integrations::ableton::willington::WillingtonSwitch;
+use kumi_daw_ableton::willington::WillingtonSwitch;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{

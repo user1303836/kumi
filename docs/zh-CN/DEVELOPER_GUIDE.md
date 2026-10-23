@@ -9,7 +9,7 @@
 | 文件夹 | 内容 |
 | --- | --- |
 | `crates/kumi` | 原生的 `kumi` 命令和终端应用（`src/tui/`），以及针对模型或真实 Live、需要主动运行的检查（`examples/`） |
-| `crates/kumi-runtime` | 代理循环、会话、Live 集成和 MCP 客户端 |
+| `crates/kumi-runtime` | 代理循环、会话、MCP 客户端，以及使用 Kumi 自有桥接的 DAW 的集成 |
 | `crates/kumi-types` | 每一层都会用到的类型和设置：DAW 配置与用词、代理与工具之间的契约、错误、位置、系统、版本 |
 | `crates/kumi-net` | Kumi 访问网络的方式：遵循系统代理和信任的 HTTP 客户端、请求没有得到回应的原因、只访问公开地址的 Web 客户端，以及模型调用的错误 |
 | `crates/kumi-media` | 音频（解码、分析、声音匹配、DSP）、语音输入，以及解码媒体的程序（ffmpeg、yt-dlp、whisper.cpp）和视频的画面、字幕与语音 |
@@ -18,6 +18,7 @@
 | `crates/kumi-library` | 制作人的素材库（学习、搜索、预设、Set、偏好）、插件的格式与角色，以及在磁盘上查找采样；每个 DAW 说明自己的素材库在哪里 |
 | `crates/kumi-listening` | 聆听：一次聆听测量什么、评判及其检查清单、引擎的各轮、聆听模型及其槽位、风格参考和记谱；播放和渲染由各 DAW 负责 |
 | `crates/kumi-common` | 共享的运行时工具，以及与原实现兼容的值处理 |
+| `daws/ableton/kumi-daw-ableton` | Live 的主机端：Live 集成（Set 的观察、修改与 HISTORY、渲染与 Kumi Ears、Hands、素材库与手册）和 Max for Live 设备构建器 |
 | `daws/ableton/ableton-mcp-server` | 原生 MCP 桥接、分析工作进程、生命周期、设置、迁移和诊断 |
 | `daws/ableton/remote-script` | 桥接的 Remote Script，运行在 Live 内部（`ableton_mcp_remote_script.py`、`AbletonMcpBridge/` 入口、Python 测试） |
 | `daws/ableton/live-extension` | Kumi 的 Live 扩展，适用于 Live 12.4 及更高版本，基于 Live 的 Extensions SDK（TypeScript，有自己的 `package.json`） |
@@ -80,7 +81,7 @@ cargo run --release -p kumi -- bridge --allow-dirty   # 需先关闭 Live
 npm ci --prefix crates/kumi-runtime/tests/support   # 只需一次：部分测试运行的官方 SDK
 cargo build --locked --workspace --all-targets
 sh scripts/test-isolated.sh                 # PowerShell: ./scripts/test-isolated.ps1
-sh scripts/test-isolated.sh -p kumi-runtime -E 'test(/^hands_transport::/)'
+sh scripts/test-isolated.sh -p kumi-daw-ableton -E 'test(/^hands_transport::/)'
 python3 -m unittest discover -s scripts/tests -p 'test_*release.py'
 ```
 
@@ -97,7 +98,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 ## 开发 Kumi
 
-**一个修改类型**（一种拥有自己的 HISTORY 行和撤销的修改）是 `CHANGES`（`crates/kumi-runtime/src/integrations/ableton/changes.rs`）中的一个条目。元数据来自 `assets/changes.json`；摘要位于 `changes/summaries.rs` 和 `changes/more_summaries.rs`。每个条目写明 Kumi 的工具、桥接的 preview 和 apply、一个 family（HISTORY 和 NOW 所绘制的一组固定图形之一）、给模型的描述，以及通俗易懂的摘要。如果较旧的桥接会拒绝它，就给它加上 `since`（它适用的第一个桥接版本，定义在 `bridge_version.rs` 中）；如果 Live 没有办法撤回它，就加上 `permanent`。测试会检查每个修改类型：工具唯一、只凭最简的预览也能得出标题、描述绝不要求模型确认，以及所用的桥接工具仅限宿主使用。在提供它之前，先在真实 Live 上运行它及其撤销（`accept_live` 示例）。
+**一个修改类型**（一种拥有自己的 HISTORY 行和撤销的修改）是 `CHANGES`（`daws/ableton/kumi-daw-ableton/src/changes.rs`）中的一个条目。元数据来自 `assets/changes.json`；摘要位于 `changes/summaries.rs` 和 `changes/more_summaries.rs`。每个条目写明 Kumi 的工具、桥接的 preview 和 apply、一个 family（HISTORY 和 NOW 所绘制的一组固定图形之一）、给模型的描述，以及通俗易懂的摘要。如果较旧的桥接会拒绝它，就给它加上 `since`（它适用的第一个桥接版本，定义在 `bridge_version.rs` 中）；如果 Live 没有办法撤回它，就加上 `permanent`。测试会检查每个修改类型：工具唯一、只凭最简的预览也能得出标题、描述绝不要求模型确认，以及所用的桥接工具仅限宿主使用。在提供它之前，先在真实 Live 上运行它及其撤销（`accept_live` 示例）。
 
 **一个动作**（不是对工程的修改、没有可撤销的内容，比如播放）放在 `actions.rs` 的 `ACTIONS` 中，元数据位于 `assets/actions.json`。
 

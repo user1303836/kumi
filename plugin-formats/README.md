@@ -55,7 +55,7 @@ Live Sets (`.als`) and device presets (`.adv`). It checks each file's round trip
 new fields arrive as guessed.
 
 ```sh
-cargo run -p kumi-runtime --example plugin_format_survey -- serum-2 report.json \
+cargo run -p kumi-daw-ableton --example plugin_format_survey -- serum-2 report.json \
   --structure plugin-formats/serum-2/format-1/structure.json \
   "$HOME/Documents/Xfer/Serum 2 Presets/Presets" "$HOME/Music/Ableton/Projects" plugin-formats/serum-2/format-1/fixtures
 ```

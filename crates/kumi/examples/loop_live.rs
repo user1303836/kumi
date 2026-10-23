@@ -11,23 +11,22 @@ use kumi_common::{
     js::string::{head, trim},
     time::perf_now,
 };
+use kumi_daw_ableton::{connection::Connect, create_ableton_integration, options::ListenerSource, AbletonOptions, BRIDGE_TOOLS};
 use kumi_runtime::{
     auth::store::CredentialStore,
     core::{
         contracts::{ActionEvent, KernelEvent, KernelTool, ToolResult, WatchEvent},
         memory::MemoryStoreOptions,
     },
-    create_ableton_integration, create_agent_kernel, create_memory_store, create_recipe_store, create_session,
-    integrations::ableton::{connection::Connect, options::ListenerSource, AbletonOptions},
-    kernel::agent::AgentKernelOptions,
-    kernel::agent::ModelBinding,
+    create_agent_kernel, create_memory_store, create_recipe_store, create_session,
+    kernel::agent::{AgentKernelOptions, ModelBinding},
     mcp::client,
     open_credential_store,
     providers::{resolve_model, ResolveModelOptions},
     slots,
     system::process_env,
     ChangeRecord, IntegrationFactory, Kernel, KernelFactory, KernelOptions, RuntimeError, Session, SessionController, SessionEvent,
-    SessionOptions, BRIDGE_TOOLS,
+    SessionOptions,
 };
 use std::{
     cell::RefCell,

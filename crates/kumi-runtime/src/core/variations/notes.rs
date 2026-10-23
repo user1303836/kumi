@@ -215,7 +215,7 @@ pub fn anchors_in(anchors: &[Note], notes: &[Note]) -> Result<(), String> {
 /// anchor) that passes core's checks, drawn as the tool draws it (bolder after a near-copy, milder after one too far) and clear
 /// of the takes before it: a make of five gets five takes. `material` makes the backend's material of notes and anchors,
 /// `apply` is its operators', `notes` its notes.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn every_note_direction_makes_a_take<M: super::Material + Clone>(
     material: impl Fn(Vec<Note>, Vec<Note>) -> M,
     apply: impl Fn(&[Value], f64, &mut M, &M, &mut Rng) -> Result<Vec<String>, String>,

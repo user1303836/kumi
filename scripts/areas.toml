@@ -25,12 +25,12 @@ feeds = ["*"]
 # Live's operation registry: the bridge ships it, and the Remote Script, the host and Kumi read it.
 [protocol]
 paths = ["daws/ableton/protocol/**"]
-feeds = ["ableton-mcp-server", "kumi-common", "kumi-runtime"]
+feeds = ["ableton-mcp-server", "kumi-common", "kumi-runtime", "kumi-daw-ableton"]
 
 # The Remote Script, which runs inside Live: the bridge carries and installs it, and its hash is checked against it.
 [remote-script]
 paths = ["daws/ableton/remote-script/**"]
-feeds = ["ableton-mcp-server", "kumi-runtime", "kumi"]
+feeds = ["ableton-mcp-server", "kumi-runtime", "kumi-daw-ableton", "kumi"]
 
 # Kumi's Live extension (TypeScript), with its committed build.
 [live-extension]
@@ -60,23 +60,23 @@ paths = ["daws/reaper/reaper-kumi/**", "scripts/build-native-release.py"]
 # What Kumi builds in as data: the standard Max patchers are held to, and the plug-in formats it reads.
 [data]
 paths = ["daws/ableton/max-standard/**", "plugin-formats/**"]
-feeds = ["kumi-runtime", "kumi-library"]
+feeds = ["kumi-runtime", "kumi-library", "kumi-daw-ableton"]
 
 # The recorded oracles, which the tests of the crates their folders name read (through kumi-testkit), and the list of
 # those only Extended's tests read.
 [oracles]
 paths = ["testdata/oracles/**"]
-feeds = ["ableton-mcp-server", "kumi-common", "kumi-library", "kumi-runtime", "kumi"]
+feeds = ["ableton-mcp-server", "kumi-common", "kumi-library", "kumi-runtime", "kumi-daw-ableton", "kumi"]
 
 # The eval's fixtures: Live's own device parameters, which the runtime's listening tests read too.
 [eval-fixtures]
 paths = ["crates/kumi/examples/fixtures/**"]
-feeds = ["kumi-runtime"]
+feeds = ["kumi-runtime", "kumi-daw-ableton"]
 
 # Willington's runtime files, which the bridge ships (only the owner's willington/ pull requests change them).
 [willington]
 paths = ["vendor/willington/**"]
-feeds = ["ableton-mcp-server", "kumi-runtime", "kumi"]
+feeds = ["ableton-mcp-server", "kumi-runtime", "kumi-daw-ableton", "kumi"]
 
 # The installers.
 [installers]
@@ -110,8 +110,8 @@ paths = [
   "crates/kumi-net/src/lib.rs",
   "crates/kumi-net/src/proxy.rs",
   "crates/kumi-net/src/trust.rs",
-  "crates/kumi-runtime/src/integrations/ableton/hands/KumiHands.swift",
-  "crates/kumi-runtime/src/integrations/ableton/hands/mac.rs",
+  "daws/ableton/kumi-daw-ableton/src/hands/KumiHands.swift",
+  "daws/ableton/kumi-daw-ableton/src/hands/mac.rs",
   "daws/ableton/ableton-mcp-server/src/lifecycle.rs",
   "daws/ableton/ableton-mcp-server/src/lifecycle/**",
   "daws/own/daw-bridge/Cargo.toml",

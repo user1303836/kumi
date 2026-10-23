@@ -4,6 +4,7 @@
 pub mod ableton;
 pub mod own;
 pub mod provider;
+pub mod registry;
 
 pub use provider::{
     older_than, BridgeCommand, BridgeRollbackStep, BridgeState, DawFactory, DawProvider, DawSession, EnableStep, Installed, OwnHostFactory,

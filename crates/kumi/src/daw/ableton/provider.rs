@@ -16,6 +16,7 @@ use crate::tui::app::DawSetup;
 use crate::{install::InstalledIo, process::Run, tui::tty::TtyOutput, update::UpdateIo};
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_common::abort;
+use kumi_daw_ableton::AbletonOptions;
 use kumi_runtime::core::contracts::SessionController;
 use kumi_runtime::RuntimeError;
 use kumi_runtime::{
@@ -24,7 +25,6 @@ use kumi_runtime::{
         contracts::{ConnectionState, Integration},
         daw::DawId,
     },
-    integrations::ableton::AbletonOptions,
     system::Env,
 };
 use std::rc::Rc;
@@ -236,7 +236,7 @@ impl DawProvider for Ableton {
         Some(ToggleWords { tag: "willington", off_at_start: super::willington::OFF_AT_START })
     }
     fn without_daw(&self, on_connection: Rc<dyn Fn(ConnectionState)>) -> Rc<dyn Integration> {
-        kumi_runtime::integrations::create_inference_only_integration(on_connection)
+        kumi_daw_ableton::create_inference_only_integration(on_connection)
     }
 }
 

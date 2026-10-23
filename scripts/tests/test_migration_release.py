@@ -450,7 +450,7 @@ class MigrationRelease(unittest.TestCase):
         self.assertFalse((home / "node").exists(), "native commands must work without a bundled Node runtime")
         self.check_existing_data(home, markers)
         if platform.system() == "Darwin":
-            source = release.native.ROOT / "crates/kumi-runtime/src/integrations/ableton/hands/KumiHands.swift"
+            source = release.native.ROOT / "daws/ableton/kumi-daw-ableton/src/hands/KumiHands.swift"
             helper = app / "packages/runtime/hands" / ("kumi-hands-" + release.native.digest(source)[:12])
             self.assertTrue(helper.is_file(), "the signed helper retains its legacy installed path")
             subprocess.run(["codesign", "--verify", "--strict", str(helper)], check=True, capture_output=True)

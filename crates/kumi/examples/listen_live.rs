@@ -14,14 +14,14 @@ use kumi_common::{
     },
     time::{now_ms, perf_now},
 };
+use kumi_daw_ableton::{connection::Connect, create_ableton_integration, AbletonOptions, BRIDGE_TOOLS};
 use kumi_runtime::{
     audio::AnalyzeOptions,
     core::contracts::{ChangeState, HearRequest},
-    create_ableton_integration, hear,
-    integrations::ableton::{connection::Connect, AbletonOptions},
+    hear,
     mcp::client,
     system::Env,
-    ChangeRecord, Integration, JsonObject, KernelTool, Observation, RuntimeError, BRIDGE_TOOLS,
+    ChangeRecord, Integration, JsonObject, KernelTool, Observation, RuntimeError,
 };
 use serde_json::{json, Value};
 use std::{
