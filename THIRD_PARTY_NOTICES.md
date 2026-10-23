@@ -18,9 +18,11 @@ ONNX Runtime, which runs them, is fetched from Microsoft's own releases, under t
 ## Rust crates for the producer's music
 
 Kumi is built with crates from crates.io, each under its own license (Cargo.lock lists them all). Those it uses to learn
-the producer's own music:
+the producer's own music and play it:
 
 - lofty (https://github.com/Serial-ATA/lofty-rs), MIT License or Apache License 2.0: reading songs' tags.
+- cpal (https://github.com/RustAudio/cpal), Apache License 2.0: playing a song or a sound through the computer's output
+  (Core Audio on a Mac, WASAPI on Windows).
 
 ## Basic Pitch (Spotify), Apache License 2.0
 
