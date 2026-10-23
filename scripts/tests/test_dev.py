@@ -220,7 +220,7 @@ class ThisCheckout(unittest.TestCase):
                      "crates/reaper-kumi/shim/csurf.cpp", "vendor/willington/README.md", ".github/workflows/installer.yml"):
             self.assertTrue(install.holds(path), path)
         for path in ("crates/kumi/src/cli/native/session.rs", "scripts/tests/daw_bridges.py", "scripts/test-isolated.sh",
-                     "crates/daw-bridge/tests/system.rs", "crates/kumi/src/daw/ableton/willington.rs", "Cargo.lock"):
+                     "crates/daw-bridge/tests/it/system.rs", "crates/kumi/src/daw/ableton/willington.rs", "Cargo.lock"):
             self.assertFalse(install.holds(path), path)
 
 

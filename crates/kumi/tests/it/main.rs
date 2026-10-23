@@ -1,0 +1,56 @@
+//! kumi's integration tests, one module per file: one test binary for the crate, built and linked once.
+mod activity;
+mod app_sessions;
+mod app_text;
+mod app_voice;
+mod bridge_setup;
+mod cli;
+mod cli_binary;
+mod config;
+mod daw_choice;
+mod daw_neutral_guard;
+mod daw_words;
+mod doctor;
+mod export;
+mod focus_fill;
+mod history;
+mod icons;
+mod install;
+mod library;
+mod live_extension;
+mod login;
+mod markdown;
+mod models;
+mod native_editing_live;
+mod observed_names;
+mod own_providers;
+mod pin_plain;
+mod pin_screens;
+mod pin_startup;
+mod plain_farewell;
+mod report;
+mod spinner;
+mod stdin_handoff;
+mod terminal;
+mod transcript;
+mod tree;
+mod tui;
+mod tui_app;
+mod tui_app_helpers;
+mod tui_app_panels;
+mod tui_app_voice;
+mod tui_away;
+mod tui_jobs;
+mod tui_own_bodies;
+mod tui_pictures;
+mod tui_setup;
+mod tui_slots;
+mod update;
+mod voice_input;
+mod willington;
+#[cfg(windows)]
+mod windows_console_control;
+#[cfg(windows)]
+mod windows_stdin;
+#[cfg(windows)]
+mod windows_tty;

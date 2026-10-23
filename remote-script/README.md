@@ -295,7 +295,7 @@ Then, from the source checkout:
 ```sh
 KUMI_EDITING_LIVE_CONFIG=/private/tmp/kumi-editing-e2e.json \
 KUMI_EDITING_LIVE_REPORT=/private/tmp/kumi-editing-e2e-report.json \
-cargo test -p kumi --test native_editing_live -- --ignored
+cargo test -p kumi --test it -- native_editing_live:: --ignored
 ```
 
 Always finish on Live's main thread, including after a test failure:

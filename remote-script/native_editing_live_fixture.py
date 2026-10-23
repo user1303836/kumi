@@ -3,9 +3,10 @@
 start(song, package_path, endpoint_path) loads a staged AbletonMcpBridge package
 containing the verified official Willington bundle and a passing local receipt.
 The package's owner-only willington.json must request editing writes. Run the
-ignored crates/kumi/tests/native_editing_live.rs test with the returned endpoint
-file, then ALWAYS call stop(song), including after a test failure. Neither this
-helper nor the Rust fixture runs automatically or ships in the bridge package.
+ignored crates/kumi/tests/it/native_editing_live.rs test with the returned
+endpoint file, then ALWAYS call stop(song), including after a test failure.
+Neither this helper nor the Rust fixture runs automatically or ships in the
+bridge package.
 """
 import builtins
 import hashlib

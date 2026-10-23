@@ -75,12 +75,12 @@ class Sorting(unittest.TestCase):
                      "protocol/ableton-live-v1.operations.json", "apps/live-extension/src/extension.ts",
                      "vendor/willington/release.json"):
             self.assertTrue(release.ships_bridge(path), path)
-        for path in ("crates/ableton-mcp-server/tests/host_clip.rs", "remote-script/test_remote_script.py",
+        for path in ("crates/ableton-mcp-server/tests/it/host_clip.rs", "remote-script/test_remote_script.py",
                      "crates/ableton-mcp-server/README.md", "crates/kumi-runtime/src/agent.rs", ".github/workflows/ci.yml"):
             self.assertFalse(release.ships_bridge(path), path)
 
     def test_changelog_lines_and_where_they_go(self):
-        host = ["crates/ableton-mcp-server/src/host/clip.rs", "crates/ableton-mcp-server/tests/host_clip.rs"]
+        host = ["crates/ableton-mcp-server/src/host/clip.rs", "crates/ableton-mcp-server/tests/it/host_clip.rs"]
         both = host + ["crates/kumi-runtime/src/agent.rs"]
         self.assertEqual(release.classify(1, "Why.\n\nChangelog: A copy is refused.\n", host).lines,
                          [("bridge", "A copy is refused.")])
@@ -237,9 +237,9 @@ class DawSorting(unittest.TestCase):
         for path in ("crates/reaper-kumi/src/lib.rs", "crates/reaper-kumi/build.rs", "crates/reaper-kumi/sdk/reaper_plugin.h",
                      "crates/reaper-kumi/Cargo.toml", "crates/daw-bridge/src/wire.rs"):
             self.assertTrue(release.ships_reaper(path), path)
-        for path in ("crates/reaper-kumi/tests/loads.rs", "crates/reaper-kumi/src/changes/tests.rs",
+        for path in ("crates/reaper-kumi/tests/it/loads.rs", "crates/reaper-kumi/src/changes/tests.rs",
                      "crates/reaper-kumi/examples/accept_reaper.rs", "crates/reaper-kumi/sdk/SOURCE.md",
-                     "crates/daw-bridge/tests/vectors.rs", "crates/daw-mcp-server/src/host.rs", "daws/renoise/tests/test_changes.lua"):
+                     "crates/daw-bridge/tests/it/vectors.rs", "crates/daw-mcp-server/src/host.rs", "daws/renoise/tests/test_changes.lua"):
             self.assertFalse(release.ships_reaper(path), path)
         # daw-bridge's parts the extension doesn't link are Kumi's alone: a fix there is no new extension.
         for path in ("crates/daw-bridge/src/lifecycle.rs", "crates/daw-bridge/src/detect.rs", "crates/daw-bridge/src/doctor.rs",

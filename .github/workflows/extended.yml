@@ -194,7 +194,7 @@ jobs:
       - name: The extension builds with them, every function generated
         run: cargo build -p reaper-kumi --locked
       - name: The generated table is the newest header's every function
-        run: cargo test -p reaper-kumi --locked --test sdk -- the_generated_table_is_the_headers_every_function
+        run: cargo test -p reaper-kumi --locked --test it -- sdk::the_generated_table_is_the_headers_every_function
       - name: Functions gone or changed in the newest header fail the job (see the summary)
         if: ${{ !cancelled() && steps.sdk.outputs.breaking == 'true' }}
         run: exit 1
