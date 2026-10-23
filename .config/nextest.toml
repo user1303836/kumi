@@ -58,6 +58,7 @@ default-filter = '''
     (binary_id(kumi::it) & test(/^(install|cli_binary|cli|update|bridge_setup|doctor)::/))
   | (binary_id(ableton-mcp-server::it) & test(/^cli::/))
   | (binary_id(kumi::it) & test(/^(live_extension|report|login|config|history|library)::/))
+  | (binary_id(kumi-store::it) & test(/^history::/))
   | (binary_id(kumi::it) & test(/^(stdin_handoff|terminal|tui|voice_input)::/))
   | (binary_id(kumi-runtime::it) & test(/^(hands_transport|auth)::/))
   | (binary_id(daw-bridge::it) & test(/^system::/))
