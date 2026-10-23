@@ -296,6 +296,133 @@ pub fn asked(kind: Kind, point: &Point, action: Action) -> String {
     }
 }
 
+/// What the browser's page calls an action.
+fn action_called(action: Action) -> &'static str {
+    match action {
+        Action::More => "more",
+        Action::Reference => "reference",
+        Action::Grow => "grow",
+    }
+}
+
+/// The map as `/map open` serves it to the browser: read once as it opens, so the page's ids name the same points
+/// until it closes. A sound's id is `sounds:<its place on the map>`, a song's `songs:<its id in music.db>`.
+pub struct Page {
+    data: MapData,
+    songs: HashMap<i64, usize>,
+}
+
+#[derive(serde::Serialize)]
+struct PageMap<'a> {
+    layers: [PageLayer<'a>; 2],
+    actions: Vec<PageAction>,
+}
+
+#[derive(serde::Serialize)]
+struct PageLayer<'a> {
+    kind: &'static str,
+    title: &'static str,
+    empty: Option<&'a str>,
+    groups: Vec<PageGroup<'a>>,
+    places: &'a [String],
+    tags: &'a [String],
+    points: PagePoints<'a>,
+}
+
+#[derive(serde::Serialize)]
+struct PageGroup<'a> {
+    name: &'a str,
+    color: String,
+    count: usize,
+}
+
+/// The points column by column: 300,000 of them stay a few megabytes.
+#[derive(serde::Serialize)]
+struct PagePoints<'a> {
+    id: Vec<i64>,
+    x: Vec<f64>,
+    y: Vec<f64>,
+    group: Vec<u16>,
+    name: Vec<&'a str>,
+    place: Vec<u32>,
+    tags: Vec<u32>,
+}
+
+#[derive(serde::Serialize)]
+struct PageAction {
+    action: &'static str,
+    label: &'static str,
+}
+
+fn page_layer<'a>(layer: &'a Layer, title: &'static str) -> PageLayer<'a> {
+    let points = &layer.points;
+    // Five decimals, as the layout keeps a sound's place: far finer than the room between points.
+    let short = |value: f32| (value as f64 * 1e5).round() / 1e5;
+    PageLayer {
+        kind: match layer.kind {
+            Kind::Sounds => "sounds",
+            Kind::Songs => "songs",
+        },
+        title,
+        empty: layer.empty.as_deref(),
+        groups: layer
+            .groups
+            .iter()
+            .map(|group| PageGroup {
+                name: &group.name,
+                color: format!("#{:02x}{:02x}{:02x}", group.color[0], group.color[1], group.color[2]),
+                count: group.count,
+            })
+            .collect(),
+        places: &layer.places,
+        tags: &layer.tags,
+        points: PagePoints {
+            id: points.iter().map(|point| point.id).collect(),
+            x: points.iter().map(|point| short(point.x)).collect(),
+            y: points.iter().map(|point| short(point.y)).collect(),
+            group: points.iter().map(|point| point.group).collect(),
+            name: points.iter().map(|point| point.name.as_str()).collect(),
+            place: points.iter().map(|point| point.place).collect(),
+            tags: points.iter().map(|point| point.tags).collect(),
+        },
+    }
+}
+
+impl Page {
+    pub fn new(data: MapData) -> Page {
+        let songs = data.songs.points.iter().enumerate().map(|(at, point)| (point.id, at)).collect();
+        Page { data, songs }
+    }
+
+    /// What the page draws (JSON): each map's groups in their colours, the folders and tags its points name by number,
+    /// and its points (x and y in [0, 1], y up), with the actions the page offers.
+    pub fn points(&self) -> String {
+        let map = PageMap {
+            layers: [page_layer(&self.data.sounds, "Sounds"), page_layer(&self.data.songs, "Songs")],
+            actions: ACTIONS.iter().map(|(action, label)| PageAction { action: action_called(*action), label }).collect(),
+        };
+        serde_json::to_string(&map).unwrap_or_default()
+    }
+
+    /// A point by the id the page asks for it by.
+    pub fn point(&self, id: &str) -> Option<(Kind, &Point)> {
+        let (kind, number) = id.split_once(':')?;
+        let number: i64 = number.parse().ok()?;
+        match kind {
+            "sounds" => self.data.sounds.points.get(usize::try_from(number).ok()?).map(|point| (Kind::Sounds, point)),
+            "songs" => self.songs.get(&number).map(|at| (Kind::Songs, &self.data.songs.points[*at])),
+            _ => None,
+        }
+    }
+
+    /// What an action chosen on the page asks Kumi, for the input box: none for an action or a point it doesn't have.
+    pub fn asked(&self, action: &str, id: &str) -> Option<String> {
+        let (action, _) = ACTIONS.iter().find(|(each, _)| action_called(*each) == action)?;
+        let (kind, point) = self.point(id)?;
+        Some(asked(kind, point, *action))
+    }
+}
+
 /// How /map reads its data, each time it opens.
 pub type LoadMap = Rc<dyn Fn() -> LocalBoxFuture<'static, MapData>>;
 
