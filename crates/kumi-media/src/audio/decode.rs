@@ -1,6 +1,6 @@
 //! Reading audio files as blocks of samples, without loading a whole song into memory.
 
-use crate::video::programs::{find_ffmpeg, run, FfmpegOptions, RunOptions, VideoFailure};
+use crate::programs::{find_ffmpeg, run, FfmpegOptions, RunOptions, VideoFailure};
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::number::to_fixed,
@@ -149,7 +149,7 @@ async fn convert(input: &Path, output: &Path, signal: Option<Signal>, until: Opt
     // How long it is (ffprobe, or what ffmpeg says of it, decoding nothing): to ask room for what will be written, and to
     // keep the file's length when the copy stops short of it. A reading can be wrong, so where ffmpeg stops isn't up to it.
     let length = match until {
-        Some(_) => crate::video::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await,
+        Some(_) => crate::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await,
         None => None,
     };
     let until_text = until.map(|until| to_fixed(until, 3));
@@ -161,7 +161,7 @@ async fn convert(input: &Path, output: &Path, signal: Option<Signal>, until: Opt
         }
         match writes {
             Some(seconds) => {
-                if let Some(full) = crate::core::disk::low_disk(&folder, seconds * BYTES_A_SECOND, "Kumi reads audio on").await {
+                if let Some(full) = kumi_types::disk::low_disk(&folder, seconds * BYTES_A_SECOND, "Kumi reads audio on").await {
                     no_room = Some(full);
                     continue;
                 }
@@ -318,7 +318,7 @@ pub async fn read_stereo(path: impl AsRef<Path>, signal: &Signal, from: f64, mos
 }
 
 /// A 16-bit mono WAV of `mono` at `rate`: the tests' sound files.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn write_test_wav(path: &Path, mono: &[f32], rate: u32) {
     let frames = mono.len() as u32;
     let mut bytes = Vec::with_capacity(44 + mono.len() * 2);

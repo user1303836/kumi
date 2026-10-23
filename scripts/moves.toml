@@ -1160,3 +1160,105 @@ to = "kumi_net::web"
 [[rust]]
 from = "kumi_runtime::ai::error"
 to = "kumi_net::error"
+
+# kumi-media: audio, voice and the programs that decode media (2026-10).
+
+[[move]]
+from = "crates/kumi-runtime/src/audio/analyze.rs"
+to = "crates/kumi-media/src/audio/analyze.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/audio/decode.rs"
+to = "crates/kumi-media/src/audio/decode.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/audio/dsp.rs"
+to = "crates/kumi-media/src/audio/dsp.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/audio/listen-schema.json"
+to = "crates/kumi-media/src/audio/listen-schema.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/audio/matching.rs"
+to = "crates/kumi-media/src/audio/matching.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/audio/mod.rs"
+to = "crates/kumi-media/src/audio/mod.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/audio/structure.rs"
+to = "crates/kumi-media/src/audio/structure.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/audio/tools.rs"
+to = "crates/kumi-media/src/audio/tools.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/audio/wavetable.rs"
+to = "crates/kumi-media/src/audio/wavetable.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/audio/worker.rs"
+to = "crates/kumi-media/src/audio/worker.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/video/captions.rs"
+to = "crates/kumi-media/src/captions.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/video/frames.rs"
+to = "crates/kumi-media/src/frames.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/video/programs.rs"
+to = "crates/kumi-media/src/programs.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/video/programs/node_runtime.rs"
+to = "crates/kumi-media/src/programs/node_runtime.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/video/speech.rs"
+to = "crates/kumi-media/src/speech.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/voice/microphone.rs"
+to = "crates/kumi-media/src/voice/microphone.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/voice/mod.rs"
+to = "crates/kumi-media/src/voice/mod.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/voice.rs"
+to = "crates/kumi-media/tests/it/voice.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/voice/reference.json"
+to = "crates/kumi-media/tests/support/voice/reference.json"
+
+[[rust]]
+from = "kumi_runtime::audio"
+to = "kumi_media::audio"
+
+[[rust]]
+from = "kumi_runtime::voice"
+to = "kumi_media::voice"
+
+[[rust]]
+from = "kumi_runtime::video::programs"
+to = "kumi_media::programs"
+
+[[rust]]
+from = "kumi_runtime::video::frames"
+to = "kumi_media::frames"
+
+[[rust]]
+from = "kumi_runtime::video::speech"
+to = "kumi_media::speech"
+
+[[rust]]
+from = "kumi_runtime::video::captions"
+to = "kumi_media::captions"

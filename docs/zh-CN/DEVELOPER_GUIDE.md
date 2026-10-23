@@ -12,6 +12,7 @@
 | `crates/kumi-runtime` | 代理循环、模型提供方、登录、会话、素材库、Live 集成、媒体工具和 MCP 客户端 |
 | `crates/kumi-types` | 每一层都会用到的类型和设置：DAW 配置与用词、代理与工具之间的契约、错误、位置、系统、版本 |
 | `crates/kumi-net` | Kumi 访问网络的方式：遵循系统代理和信任的 HTTP 客户端、请求没有得到回应的原因、只访问公开地址的 Web 客户端，以及模型调用的错误 |
+| `crates/kumi-media` | 音频（解码、分析、声音匹配、DSP）、语音输入，以及解码媒体的程序（ffmpeg、yt-dlp、whisper.cpp）和视频的画面、字幕与语音 |
 | `crates/kumi-common` | 共享的运行时工具，以及与原实现兼容的值处理 |
 | `daws/ableton/ableton-mcp-server` | 原生 MCP 桥接、分析工作进程、生命周期、设置、迁移和诊断 |
 | `daws/ableton/remote-script` | 桥接的 Remote Script，运行在 Live 内部（`ableton_mcp_remote_script.py`、`AbletonMcpBridge/` 入口、Python 测试） |

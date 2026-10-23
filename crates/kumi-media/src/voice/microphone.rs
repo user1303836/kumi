@@ -1,9 +1,9 @@
-use crate::system::{self, Env};
 use kumi_common::abort::Signal;
 use kumi_common::js::{
     number::round,
     string::{head, slice, trim},
 };
+use kumi_types::system::{self, Env};
 use regex::Regex;
 use std::{
     process::Stdio,

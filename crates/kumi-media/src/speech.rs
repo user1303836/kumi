@@ -1,5 +1,5 @@
 //! whisper.cpp speech transcription on this computer.
-use super::{captions::Cue, programs::VideoFailure};
+use crate::{captions::Cue, programs::VideoFailure};
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::{
@@ -48,7 +48,7 @@ pub fn cues_from_whisper(text: &str) -> Vec<Cue> {
                 0.0
             }
         }
-        Some(v) => parse(&crate::web::net::js_string(v)).unwrap_or(f64::NAN),
+        Some(v) => parse(&kumi_net::web::js_string(v)).unwrap_or(f64::NAN),
         None => f64::NAN,
     };
     result["transcription"]
@@ -56,7 +56,7 @@ pub fn cues_from_whisper(text: &str) -> Vec<Cue> {
         .into_iter()
         .flatten()
         .filter_map(|segment| {
-            let text = segment.get("text").filter(|v| !v.is_null()).map(crate::web::net::js_string).unwrap_or_default();
+            let text = segment.get("text").filter(|v| !v.is_null()).map(kumi_net::web::js_string).unwrap_or_default();
             let text = trim(&SPACES.replace_all(&text, " ")).to_string();
             let start = number(segment["offsets"].get("from")) / 1000.0;
             let end = number(segment["offsets"].get("to")) / 1000.0;
@@ -65,10 +65,10 @@ pub fn cues_from_whisper(text: &str) -> Vec<Cue> {
         .collect()
 }
 pub fn speech_prompt(title: &str) -> String {
-    speech_prompt_for(&crate::core::daw::DawProfile::ABLETON, title)
+    speech_prompt_for(&kumi_types::daw::DawProfile::ABLETON, title)
 }
 /// `speech_prompt`, with what a tutorial for the DAW talks about.
-pub fn speech_prompt_for(profile: &crate::core::daw::DawProfile, title: &str) -> String {
+pub fn speech_prompt_for(profile: &kumi_types::daw::DawProfile, title: &str) -> String {
     format!("{}. {}", head(title, 200), profile.vocab.tutorial_words)
 }
 async fn cancelled(signal: &Option<Signal>) {
