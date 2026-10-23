@@ -17,7 +17,12 @@ use kumi_common::{
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+    time::Duration,
+};
 use tokio::{
     net::TcpListener,
     task::{spawn_local, LocalSet},
