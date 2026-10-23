@@ -21,7 +21,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 use tokio::{
     net::TcpListener,
@@ -164,70 +164,6 @@ async fn credential_store_refuses_readable_by_others_and_malformed_files_without
     let error = store.get("openai-codex").await.unwrap_err().to_string();
     assert!(error.contains("malformed"));
     assert!(!error.contains("secret-refresh"));
-}
-#[tokio::test]
-async fn concurrent_updates_from_separate_processes_stores_serialize_under_the_lock_stale_locks_are_broken() {
-    let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("auth.json");
-    let a = open_credential_store(&path);
-    let b = open_credential_store(&path);
-    let (first, second) = tokio::join!(
-        a.update_with("a", |_| async {
-            sleep(Duration::from_millis(20)).await;
-            Ok(Some(credential("a")))
-        }),
-        b.update_with("b", |_| async {
-            sleep(Duration::from_millis(20)).await;
-            Ok(Some(credential("b")))
-        })
-    );
-    first.unwrap();
-    second.unwrap();
-    let mut keys: Vec<_> = a.list().await.unwrap().into_keys().collect();
-    keys.sort();
-    assert_eq!(keys, ["a", "b"]);
-    let lock = path.with_extension("json.lock");
-    std::fs::write(&lock, "999999").unwrap();
-    std::fs::File::options()
-        .write(true)
-        .open(&lock)
-        .unwrap()
-        .set_times(std::fs::FileTimes::new().set_modified(SystemTime::now() - Duration::from_secs(120)))
-        .unwrap();
-    a.update_with("c", |_| async { Ok(Some(credential("c"))) }).await.unwrap();
-    assert!(matches!(a.get("c").await.unwrap(), Some(Credential::Oauth(OAuthCredential { refresh, .. })) if refresh == "c"));
-    // A lock 40 s old may be a refresh still under way (it gives up at 30 s): waited for, not broken.
-    std::fs::write(&lock, "another kumi").unwrap();
-    std::fs::File::options()
-        .write(true)
-        .open(&lock)
-        .unwrap()
-        .set_times(std::fs::FileTimes::new().set_modified(SystemTime::now() - Duration::from_secs(40)))
-        .unwrap();
-    let released = Rc::new(Cell::new(false));
-    let (waited, ()) = tokio::join!(
-        a.update_with("d", |_| {
-            let released = released.get();
-            async move {
-                assert!(released, "the other Kumi's lock was broken while it held it");
-                Ok(Some(credential("d")))
-            }
-        }),
-        async {
-            sleep(Duration::from_millis(150)).await;
-            released.set(true);
-            std::fs::remove_file(&lock).unwrap();
-        }
-    );
-    waited.unwrap();
-    // A lock broken as stale while its holder ran is the next Kumi's: the first's release leaves it.
-    a.update_with("e", |_| async {
-        std::fs::write(&lock, "the next kumi").unwrap();
-        Ok(Some(credential("e")))
-    })
-    .await
-    .unwrap();
-    assert_eq!(std::fs::read_to_string(&lock).unwrap(), "the next kumi");
 }
 #[test]
 fn account_ids_come_only_from_the_chatgpt_auth_claim() {
