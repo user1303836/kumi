@@ -1399,9 +1399,9 @@ fn not_kumis_said(home: &str, why: NotKumis, display: &dyn Fn(&str) -> String) -
     said
 }
 /// What Kumi keeps in its folder besides itself, by name: the producer's conversations, notes, recipes, sign-ins,
-/// library and references, and what Kumi remembers between runs. Only --all takes these, and only from a folder of
+/// library, music and references, and what Kumi remembers between runs. Only --all takes these, and only from a folder of
 /// Kumi's alone: elsewhere, names like projects and settings.json could be the producer's.
-const KUMI_S_DATA: [&str; 27] = [
+const KUMI_S_DATA: [&str; 28] = [
     "auth.json",
     "settings.json",
     "kumi.db",
@@ -1421,6 +1421,8 @@ const KUMI_S_DATA: [&str; 27] = [
     "projects",
     "recipes",
     "library",
+    // What Kumi learned of the producer's own music (music.db, its style vectors, the map).
+    "music",
     "references",
     "goals",
     "attachments",

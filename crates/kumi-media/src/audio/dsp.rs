@@ -195,6 +195,68 @@ impl TruePeak {
     }
 }
 
+/// Audio from one rate to another: a windowed sinc (Blackman, 32 zero crossings a side), its cutoff under the lower
+/// rate's half. Between whole rates, each output sample's kernel is one of a few made once (polyphase: 44.1 to 48 kHz
+/// is 160 kernels of 69 taps, 44.1 to 22.05 kHz one).
+pub fn resample(input: &[f32], from: f64, to: f64) -> Vec<f32> {
+    if (from - to).abs() < 1e-6 || input.is_empty() {
+        return input.to_vec();
+    }
+    let ratio = to / from;
+    // Cutoff in cycles per input sample.
+    let cutoff = 0.5 * ratio.min(1.) * 0.95;
+    let width = (32. / (2. * cutoff)).ceil();
+    let length = (input.len() as f64 * ratio).round() as usize;
+    let weight = |x: f64| {
+        let y = 2. * cutoff * x;
+        let sinc = if y.abs() < 1e-12 { 1. } else { (std::f64::consts::PI * y).sin() / (std::f64::consts::PI * y) };
+        let phase = std::f64::consts::PI * x / width;
+        2. * cutoff * sinc * (0.42 + 0.5 * phase.cos() + 0.08 * (2. * phase).cos())
+    };
+    // An output sample sits `up` phases between input samples, stepping `down` phases a sample.
+    let phases = (from.fract() == 0. && to.fract() == 0. && from >= 1. && to >= 1.)
+        .then(|| {
+            let (from, to) = (from as u64, to as u64);
+            let (mut a, mut b) = (from, to);
+            while b != 0 {
+                (a, b) = (b, a % b);
+            }
+            (to / a, from / a)
+        })
+        .filter(|(up, _)| *up <= 4096);
+    let Some((up, down)) = phases else {
+        return (0..length)
+            .map(|n| {
+                let at = n as f64 / ratio;
+                let (first, last) = ((at - width).ceil().max(0.) as usize, ((at + width).floor() as usize).min(input.len() - 1));
+                (first..=last).map(|k| input[k] as f64 * weight(at - k as f64)).sum::<f64>() as f32
+            })
+            .collect();
+    };
+    // Each phase's kernel: where its taps start against the input sample before it, and their weights.
+    let kernels: Vec<(i64, Vec<f64>)> = (0..up)
+        .map(|phase| {
+            let offset = phase as f64 / up as f64;
+            let (first, last) = ((offset - width).ceil() as i64, (offset + width).floor() as i64);
+            (first, (first..=last).map(|tap| weight(offset - tap as f64)).collect())
+        })
+        .collect();
+    (0..length as u64)
+        .map(|n| {
+            let before = (n * down / up) as i64;
+            let (first, taps) = &kernels[(n * down % up) as usize];
+            let mut sum = 0.;
+            for (tap, weight) in taps.iter().enumerate() {
+                let at = before + first + tap as i64;
+                if at >= 0 && (at as usize) < input.len() {
+                    sum += input[at as usize] as f64 * weight;
+                }
+            }
+            sum as f32
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

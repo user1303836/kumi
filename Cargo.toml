@@ -57,6 +57,9 @@ base64 = "0.22"
 blake3 = "1.8"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+# The computer's sound output, for Kumi's player: Core Audio on a Mac, WASAPI on Windows. On Linux it needs ALSA's
+# library to build and run, which Kumi's Linux bundle doesn't carry: kumi-media takes it there only with linux-player.
+cpal = "0.18"
 crossterm = { version = "0.28", features = ["event-stream"] }
 flate2 = "1"
 futures = "0.3"

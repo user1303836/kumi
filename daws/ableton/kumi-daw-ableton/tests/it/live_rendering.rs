@@ -146,6 +146,12 @@ fn normalized(value: &Value) -> String {
 fn eq(actual: &Value, expected: &Value, label: &str) {
     assert_eq!(normalized(actual), normalized(expected), "{label}");
 }
+/// A goal's slot as the oracle has it: who its devices are came after the port (for what Kumi remembers of a search);
+/// the rest compares exactly.
+fn as_ported(mut slot: GoalSlotInfo) -> GoalSlotInfo {
+    slot.devices.clear();
+    slot
+}
 fn wav(folder: &Path, kind: &str) {
     let frames = 48000 * 12;
     let mut bytes = vec![0u8; 44 + frames * 4];
@@ -327,9 +333,9 @@ async fn replay(chunk: usize, chunks: usize) {
     "audition"=>match rendering.audition(&serde_json::from_value(op["request"].clone()).unwrap(),signal).await?{Ok(mut value)=>{value.seconds=0.;json!(value)},Err(message)=>json!(message)},
     "hear"=>match rendering.hear_in_set(&serde_json::from_value(op["request"].clone()).unwrap(),signal).await?{Ok(value)=>json!(value),Err(message)=>json!(message)},
     "restore"=>json!(rendering.restore_after_crash(op["identity"].as_str().unwrap(),op["path"].as_str(),signal).await?),
-    "open"=>match rendering.open_goal(&serde_json::from_value(op["request"].clone()).unwrap(),signal).await?{Ok(value)=>{let result=json!({"slots":value.slots(),"screens":value.screens()});goal=Some(value);result},Err(message)=>json!(message)},
+    "open"=>match rendering.open_goal(&serde_json::from_value(op["request"].clone()).unwrap(),signal).await?{Ok(value)=>{let result=json!({"slots":value.slots().into_iter().map(as_ported).collect::<Vec<_>>(),"screens":value.screens()});goal=Some(value);result},Err(message)=>json!(message)},
     "generation"=>{let trials=op["trials"].as_array().unwrap().iter().map(|trial|GenerationTrial{slot:trial["slot"].as_str().unwrap().into(),knobs:serde_json::from_value(trial["knobs"].clone()).unwrap(),values:serde_json::from_value(trial["values"].clone()).unwrap(),fresh:trial["fresh"].as_bool()}).collect::<Vec<_>>();let v=goal.as_ref().unwrap().generation(&trials,signal,Some(GenerationOptions{screen:op["options"]["screen"].as_bool()})).await?;json!({"scores":v.scores,"gaps":v.gaps,"silent":v.silent,"frozen":v.frozen,"structural":v.structural,"screened":v.screened,"cached":v.cached})},
-    "add"=>match goal.as_ref().unwrap().add(&serde_json::from_value(op["candidate"].clone()).unwrap(),signal).await?{Ok(value)=>json!(value),Err(error)=>json!(error)},
+    "add"=>match goal.as_ref().unwrap().add(&serde_json::from_value(op["candidate"].clone()).unwrap(),signal).await?{Ok(value)=>json!(as_ported(value)),Err(error)=>json!(error)},
     "settle"=>json!(goal.as_ref().unwrap().settle(op["slot"].as_str().unwrap(),&serde_json::from_value::<Vec<_>>(op["knobs"].clone()).unwrap(),&serde_json::from_value::<Vec<_>>(op["values"].clone()).unwrap(),signal).await?),
     "keep"=>json!(goal.as_ref().unwrap().keep_best(op["slot"].as_str().unwrap(),&serde_json::from_value::<Vec<_>>(op["knobs"].clone()).unwrap(),&serde_json::from_value::<Vec<_>>(op["values"].clone()).unwrap(),signal).await?),
     "tidy"=>json!(goal.as_ref().unwrap().tidy(&serde_json::from_value::<Vec<_>>(op.get("top").cloned().unwrap_or(json!([]))).unwrap(),signal).await?),
