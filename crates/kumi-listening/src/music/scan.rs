@@ -273,8 +273,15 @@ pub fn next(
     Ok(one("stage = 1", "mtime DESC, id")?.map(|song| Next::Hear(song, Stage::Full)))
 }
 
-/// The clusters made again from the songs this style model heard: each song's, and their centres in `meta`.
-pub fn recluster(store: &mut MusicStore, music_dir: &Path, model: &str) -> Result<usize, MusicError> {
+/// The words that name the producer's styles: genres and moods, one a line.
+pub const STYLE_WORDS: &str = include_str!("style-words.txt");
+
+/// The style words, each with what it means to the style model (unit length): named by the two nearest a style's centre.
+pub type Named = [(String, Vec<f32>)];
+
+/// The clusters made again from the songs this style model heard: each song's, and their centres in `meta`, each with
+/// its songs nearest the centre, its two commonest genre tags and, given `words`, the two style words nearest it.
+pub fn recluster(store: &mut MusicStore, music_dir: &Path, model: &str, words: Option<&Named>) -> Result<usize, MusicError> {
     let reader = VectorReader::open(music_dir, store, model)?;
     let ids: Vec<i64> = store.heard_ids()?.into_iter().filter(|id| reader.has(*id)).collect();
     let read = |at: usize, buffer: &mut [f32]| {
@@ -300,7 +307,16 @@ pub fn recluster(store: &mut MusicStore, music_dir: &Path, model: &str) -> Resul
             near.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
             let examples: Vec<i64> = near.iter().take(EXAMPLES).map(|(_, id)| *id).collect();
             let tags = members.iter().filter_map(|at| genres.get(&ids[*at])).flat_map(|genre| genre.split("; "));
-            serde_json::json!({"songs": members.len(), "examples": examples, "genres": commonest(tags, 2)})
+            let mut cluster = serde_json::json!({"songs": members.len(), "examples": examples, "genres": commonest(tags, 2)});
+            if let Some(words) = words.filter(|words| !words.is_empty()) {
+                let mut near: Vec<(f64, &str)> = words
+                    .iter()
+                    .map(|(word, vector)| (vector.iter().zip(centre).map(|(a, b)| *a as f64 * *b as f64).sum::<f64>(), word.as_str()))
+                    .collect();
+                near.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(b.1)));
+                cluster["names"] = serde_json::json!(near.iter().take(2).map(|(_, word)| word).collect::<Vec<_>>());
+            }
+            cluster
         })
         .collect();
     let kept = serde_json::json!({"model": model, "heard": ids.len(), "centres": centres, "clusters": clusters});

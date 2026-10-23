@@ -75,7 +75,15 @@ pub trait Style {
         say: Say<'_>,
         signal: &Signal,
     ) -> Result<(Vec<f32>, String), String>;
+    /// What words mean to it, on the same map (unit length): only a model with a text side that matches it.
+    async fn words(&self, _text: &str, _say: Say<'_>, _signal: &Signal) -> Result<Vec<f32>, String> {
+        Err("this style model has no words".into())
+    }
 }
+
+/// Why words can't find songs when the embeddings slot runs another style model than Kumi's own.
+pub const SWAPPED: &str =
+    "the embeddings slot runs another style model than Kumi's own, and Kumi's words model only matches its own (/slots embeddings default swaps it back)";
 
 /// CLAP, as the embeddings slot runs it: the slot's model file, else Kumi's own.
 pub struct Clap {
@@ -110,6 +118,13 @@ impl Style for Clap {
         signal: &Signal,
     ) -> Result<(Vec<f32>, String), String> {
         embed::vibe_at(file, starts, loudness, self.slot.clone(), say, signal).await
+    }
+    /// The text side of Kumi's own model: a swapped slot's model has none that matches it.
+    async fn words(&self, text: &str, say: Say<'_>, signal: &Signal) -> Result<Vec<f32>, String> {
+        if self.slot.is_some() {
+            return Err(SWAPPED.into());
+        }
+        crate::words::words(text, say, signal).await
     }
 }
 
