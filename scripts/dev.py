@@ -9,7 +9,7 @@
     python3 scripts/dev.py areas [--in AREA] PATH...      # the areas each path belongs to
     python3 scripts/dev.py check [--base origin/main]     # Required CI's checks for what this branch changes
     python3 scripts/dev.py deps [--check]                 # each crate's layer and what it uses; --check: the layer rules
-    python3 scripts/dev.py select "PACKAGES" [-p NAME | --exclude NAME]...   # a CI part's affected packages, as -p options
+    python3 scripts/dev.py select [--tested-by PROFILE] "PACKAGES" [-p NAME | --exclude NAME]...   # a CI part's, as -p options
     python3 scripts/dev.py rebase-moves [--onto origin/main] [--merge] [--no-build]   # a branch from before a move, onto main
     python3 scripts/dev.py worktree new NAME [--lean] [--branch B] [--base origin/main]   # ../kumi-NAME, a worktree
     python3 scripts/dev.py worktree extended-only LIST.json...   # the oracles no test of these nextest lists reads
@@ -42,8 +42,10 @@ daws/own/. A DAW's crates use no other DAW's, only daws/own/. A bridge (the rest
 crates but kumi-common. kumi-testkit is a dev-dependency only. A new crate in crates/ needs its layer in LAYERS.
 
 `select` takes the affected packages (space-separated, as `affected --github-output` writes them) and a part of the
-workspace as cargo selects it (`-p` each package, or `--exclude` the rest's), and prints `-p` for each of that part's
-affected packages: the ones a CI job of that part tests. It prints nothing when none is.
+workspace as cargo selects it (`-p` each package, `--exclude` the rest's, or nothing: all of them), and prints `-p` for
+each of that part's affected packages: the ones a CI job of that part tests. It prints nothing when none is. With
+`--tested-by PROFILE`, the part is only the packages whose `it` binary that nextest profile's default-filter takes in
+(.config/nextest.toml; what its `& not (…)` leaves out doesn't count): the platform jobs' `ci-os` set builds only those.
 
 `rebase-moves` brings a branch that began before a move in scripts/moves.toml onto `--onto` (origin/main). It rebases
 the branch (or merges `--onto` into it, `--merge`) with git following moved folders, files the branch adds in them
@@ -379,17 +381,38 @@ def command_affected(args: argparse.Namespace) -> int:
     return 0
 
 
-def select(affected_packages: list[str], selection: list[str], packages: list[str]) -> list[str]:
+def select(affected_packages: list[str], selection: list[str], packages: list[str], tested: set[str] | None = None) -> list[str]:
     """The `-p` options for the affected packages within a part of the workspace that cargo's `-p` or `--exclude`
-    options name."""
+    options name (none: the whole workspace), and among `tested` when it's given."""
     pairs = list(zip(selection[::2], selection[1::2]))
     named = {value for flag, value in pairs if flag in ("-p", "--package")}
     excluded = {value for flag, value in pairs if flag == "--exclude"}
-    if (len(selection) % 2 or not pairs or any(flag not in ("-p", "--package", "--exclude") for flag, _ in pairs)
+    if (len(selection) % 2 or any(flag not in ("-p", "--package", "--exclude") for flag, _ in pairs)
             or (named and excluded) or (named | excluded) - set(packages)):
         raise Refused(f"a part is `-p` packages or `--exclude` packages of this workspace, not `{' '.join(selection)}`")
-    part = named or set(packages) - excluded
+    part = (named or set(packages) - excluded) & (set(packages) if tested is None else tested)
     return [arg for package in sorted(set(affected_packages) & part) for arg in ("-p", package)]
+
+
+def filter_packages(default_filter: str) -> set[str]:
+    """The packages whose `it` binary a nextest filterset takes in: the `binary_id(<package>::it)` it names, less those
+    only its top-level `& not (…)` names."""
+    depth, end = 0, len(default_filter)
+    for at, char in enumerate(default_filter):
+        depth += {"(": 1, ")": -1}.get(char, 0)
+        if depth == 0 and re.match(r"&\s*not\s*\(", default_filter[at:]):
+            end = at
+            break
+    return set(re.findall(r"binary_id\(([a-z0-9_-]+)::it\)", default_filter[:end]))
+
+
+def profile_packages(profile: str) -> set[str]:
+    """The packages whose `it` binary a nextest profile's default-filter takes in (.config/nextest.toml)."""
+    config = tomllib.loads((ROOT / ".config/nextest.toml").read_text(encoding="utf-8"))
+    found = filter_packages(config.get("profile", {}).get(profile, {}).get("default-filter", ""))
+    if not found:
+        raise Refused(f".config/nextest.toml's profile {profile} names no `binary_id(<package>::it)` to take in")
+    return found
 
 
 @dataclass
@@ -482,7 +505,8 @@ def command_deps(args: argparse.Namespace) -> int:
 
 
 def command_select(args: argparse.Namespace) -> int:
-    picked = select(args.affected.split(), args.selection, sorted(Workspace.read().folders))
+    tested = profile_packages(args.tested_by) if args.tested_by else None
+    picked = select(args.affected.split(), args.selection, sorted(Workspace.read().folders), tested)
     if picked:
         print(" ".join(picked))
     return 0
@@ -781,6 +805,7 @@ def main(argv: list[str] | None = None) -> int:
     layers.add_argument("--check", action="store_true", help="fail, naming them, on dependencies the layer rules refuse")
     layers.set_defaults(run=command_deps)
     part = commands.add_parser("select", help="a CI part's affected packages, as -p options")
+    part.add_argument("--tested-by", metavar="PROFILE", help="only the packages whose it binary this nextest profile takes in")
     part.add_argument("affected", help="the affected packages, space-separated")
     part.add_argument("selection", nargs=argparse.REMAINDER, help="the part: -p NAME... or --exclude NAME...")
     part.set_defaults(run=command_select)
