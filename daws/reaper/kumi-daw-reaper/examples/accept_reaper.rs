@@ -16,13 +16,10 @@ use daw_bridge::Daw;
 use daw_mcp_server::host::Host;
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_common::abort::Signal;
+use kumi_daw_reaper::{changes as reaper_changes, create_reaper_integration};
 use kumi_runtime::core::errors::RuntimeError;
 use kumi_runtime::core::{context::IntegrationContext, contracts::*};
-use kumi_runtime::integrations::{
-    own_bridge::{Connect, OwnOptions},
-    reaper::create_reaper_integration,
-    reaper_changes,
-};
+use kumi_runtime::integrations::own_bridge::{Connect, OwnOptions};
 use kumi_runtime::mcp::client::{McpEndpoint, StderrStatus};
 use kumi_runtime::mcp::types::{CallToolResult, ContentBlock, Implementation, ListToolsResult};
 use regex::Regex;

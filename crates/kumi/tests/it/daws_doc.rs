@@ -4,9 +4,10 @@
 //! named in that DAW's section, and every kind their own undo skips in its limits; each cell speaks the legend's forms.
 //! A new flag, FOCUS view, kind category or undo-skipped kind can't ship unlisted (the bridges' other tools aren't
 //! checked here).
-use super::{reaper, reaper_changes, renoise, renoise_changes};
-use crate::core::daw::{Capabilities, DawProfile};
-use crate::core::view::BodyKind;
+use kumi_daw_reaper::{self as reaper, changes as reaper_changes};
+use kumi_runtime::core::daw::{Capabilities, DawProfile};
+use kumi_runtime::core::view::BodyKind;
+use kumi_runtime::integrations::{renoise, renoise_changes};
 use std::collections::BTreeSet;
 
 const LANGUAGES: [&str; 3] = ["en", "ja", "zh-CN"];
@@ -56,19 +57,10 @@ const ROWS: &[(&str, &str)] = &[
     ("willington", "Live's Extensions SDK, Willington"),
 ];
 
-/// The words that start a FOCUS view's row in the English table.
+/// The words that start a FOCUS view's row in the English table (kept with BodyKind, whose match there names every
+/// kind: a new view can't ship unlisted).
 fn view_row(kind: BodyKind) -> &'static str {
-    match kind {
-        BodyKind::Tree => "A track's devices as a tree",
-        BodyKind::Notes => "The notes in the note editor",
-        BodyKind::Grid => "A launcher grid",
-        BodyKind::Timeline => "The timeline at a glance",
-        BodyKind::Tracker => "The Pattern and Phrase Editors' lines",
-        BodyKind::Matrix => "The Pattern Matrix",
-        BodyKind::Keyzones => "An instrument's keyzones",
-        BodyKind::Routing => "A track's routing",
-        BodyKind::Mixer => "The mixer",
-    }
+    kind.daws_doc_row()
 }
 
 /// How a cell may start in each language, as its legend names the forms (✓ first).

@@ -12,10 +12,10 @@ use daw_mcp_server::{
 };
 use futures::FutureExt;
 use kumi_common::abort::Signal;
+use kumi_daw_reaper::create_reaper_integration;
 use kumi_runtime::core::{context::IntegrationContext, contracts::*, errors::RuntimeError};
 use kumi_runtime::integrations::{
     own_bridge::{Connect, OwnOptions},
-    reaper::create_reaper_integration,
     renoise::create_renoise_integration,
 };
 use kumi_runtime::mcp::client::McpEndpoint;

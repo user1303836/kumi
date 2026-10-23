@@ -1,10 +1,13 @@
 //! REAPER, through Kumi's extension and host: its refs (REAPER's GUIDs, which hold across reloads), its read tool and
-//! its instructions. The integration itself is the one every bridge of Kumi's own shares (`own_bridge`).
-use super::own_bridge::{create_own_integration, OwnDaw, OwnOptions};
-use super::own_catchup::{as_read, CatchUpWords, Mixer, RecipeKinds};
-use super::own_phrases::{bar_span, track, OwnPhrases, PhraseLook, Phrased};
-use super::own_views::{self, body_args, focus_track, selected, view};
-use crate::core::{
+//! its instructions, the tools only REAPER has (variations of its items, delivery, routing), and where its library is.
+//! The integration itself is the one every bridge of Kumi's own shares (`own_bridge`).
+pub mod changes;
+mod delivery;
+pub mod library;
+mod routing;
+mod variations;
+
+use kumi_runtime::core::{
     contracts::{Integration, JsonObject},
     daw::DawProfile,
     describe::ProjectWords,
@@ -13,7 +16,11 @@ use crate::core::{
     refs::{Moved, RefScheme, Shift},
     view::{BodyKind, BodyRequest, DawFocus, FocusBody, FocusItem, FocusParameter, ItemKind, ViewKind, ViewPresentation},
 };
-use crate::mcp::client::BridgeDescriptor;
+use kumi_runtime::integrations::own_bridge::{create_own_integration, OwnDaw, OwnOptions, OwnTools};
+use kumi_runtime::integrations::own_catchup::{as_read, CatchUpWords, Mixer, RecipeKinds};
+use kumi_runtime::integrations::own_phrases::{bar_span, track, OwnPhrases, PhraseLook, Phrased};
+use kumi_runtime::integrations::own_views::{self, body_args, focus_track, selected, view};
+use kumi_runtime::mcp::client::BridgeDescriptor;
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{rc::Rc, sync::LazyLock};
@@ -47,7 +54,7 @@ pub const DAW: OwnDaw = OwnDaw {
     bodies: &[BodyKind::Tree, BodyKind::Notes, BodyKind::Timeline, BodyKind::Routing, BodyKind::Mixer],
     body_request,
     to_body,
-    changes: &super::reaper_changes::CHANGES,
+    changes: &crate::changes::CHANGES,
     catch_up: &CATCH_UP,
     phrases: &PHRASES,
     scripts: &SCRIPTS,
@@ -55,8 +62,8 @@ pub const DAW: OwnDaw = OwnDaw {
 };
 
 /// (#401) Delivery to a spec in REAPER: the master's row and fader, and what limits or raises it.
-static SPEC: super::own_spec::OwnSpecFacts = super::own_spec::OwnSpecFacts {
-    words: crate::core::spec::backend::Words {
+static SPEC: kumi_runtime::integrations::own_spec::OwnSpecFacts = kumi_runtime::integrations::own_spec::OwnSpecFacts {
+    words: kumi_runtime::core::spec::backend::Words {
         app: "REAPER",
         fader_most: 24.,
         limiter: "ReaLimit (Cockos) as the master's last FX, its Ceiling a few tenths under the spec's and its Threshold down by the gain still needed",
@@ -67,7 +74,7 @@ static SPEC: super::own_spec::OwnSpecFacts = super::own_spec::OwnSpecFacts {
 };
 
 /// (#401) Kept scripts in REAPER: ReaScript, kept as actions, and what takes a thing by its place there.
-static SCRIPTS: crate::core::scripts::backend::Words = crate::core::scripts::backend::Words {
+static SCRIPTS: kumi_runtime::core::scripts::backend::Words = kumi_runtime::core::scripts::backend::Words {
     app: "REAPER",
     language: "Lua (ReaScript: the reaper table)",
     action: "an action in REAPER's Action List (Scripts/Kumi), for a shortcut or a toolbar button",
@@ -347,7 +354,27 @@ pub const VIEW: ViewPresentation = ViewPresentation {
 
 /// REAPER's integration.
 pub fn create_reaper_integration(options: OwnOptions) -> Rc<dyn Integration> {
-    create_own_integration::<ReaperRefs>(&DAW, options)
+    create_own_integration::<ReaperRefs>(&DAW, options, |parts| {
+        let caps = &DAW.profile.caps;
+        OwnTools {
+            // (M7) the variations tool: REAPER's items (#401)
+            variations: caps.variations.then(|| {
+                let backend = variations::ReaperVariations::new(parts.changes.clone(), parts.renderer.clone());
+                kumi_runtime::core::variations::tool::Variations::new(backend, parts.kumi_home.clone()).tool()
+            }),
+            // (#401) delivery
+            delivery: caps.delivery.then(|| {
+                let backend = delivery::ReaperDelivery::new(parts.changes.clone(), parts.renderer.clone());
+                kumi_runtime::core::delivery::tool::Delivery::new(backend).tool()
+            }),
+            // (#401) routing
+            routing: caps.routing.then(|| {
+                let backend = routing::ReaperRouting::new(parts.changes.clone());
+                kumi_runtime::core::routing::tool::Routing::new(backend).tool()
+            }),
+            ..Default::default()
+        }
+    })
 }
 
 #[cfg(test)]
@@ -385,7 +412,7 @@ mod tests {
     /// m6-places: each phrase's steps in a project as the look found it.
     #[test]
     fn a_phrase_is_reapers_own_change_and_a_tempo_map_leaves_tempo_and_loops_to_the_model() {
-        use crate::core::phrases::{PhraseTrack, TrackPick};
+        use kumi_runtime::core::phrases::{PhraseTrack, TrackPick};
         let tracks = [
             PhraseTrack { reference: "track:1", name: "MASTER", own: false, master: true },
             PhraseTrack { reference: "track:2", name: "Drums", own: true, master: false },

@@ -81,7 +81,7 @@ struct Screen {
     reference: Analysis,
 }
 
-pub(super) struct OwnGoalRig<S: RefScheme + 'static> {
+pub struct OwnGoalRig<S: RefScheme + 'static> {
     renderer: Rc<OwnRenderer<S>>,
     slots: RefCell<Vec<Slot>>,
     /// Each slot's values as last set on its copy, by knob key.
@@ -111,7 +111,7 @@ fn text(value: &Value, key: &str) -> Option<String> {
 
 impl<S: RefScheme + 'static> OwnGoalRig<S> {
     /// A goal's rig over these candidates, toward the reference the request names; why not, when it can't be.
-    pub(super) async fn open(
+    pub async fn open(
         renderer: Rc<OwnRenderer<S>>,
         listening: &Listening,
         request: &AuditionRequest,

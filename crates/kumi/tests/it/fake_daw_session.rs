@@ -606,7 +606,7 @@ async fn a_reaper_session_changes_and_undoes_in_reapers_words() {
                 step(|_| call("groove", json!({"done": true}))),
                 step(|_| answer("Done.")),
             ];
-            let create = kumi_runtime::integrations::reaper::create_reaper_integration;
+            let create = kumi_daw_reaper::create_reaper_integration;
             let (said, changes, undone) = own_session(daw_bridge::Daw::Reaper, DawProfile::REAPER, config, create, steps).await;
             assert_eq!(script.volume(1), -6.0, "the plan ran");
             let rename = changes.iter().rev().find(|record| record.title == "Renamed track “Pad” → “Pads”").map(|record| record.state);

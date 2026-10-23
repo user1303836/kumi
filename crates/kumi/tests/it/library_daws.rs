@@ -436,7 +436,8 @@ async fn a_daws_library_inside_a_producers_folder_leaves_its_other_sounds_to_tha
 /// Every step find_presets names for loading a DAW's presets is one of that DAW's change steps.
 #[test]
 fn find_presets_names_only_steps_the_daw_has_and_lives_text_stays() {
-    use kumi_runtime::integrations::{reaper_changes, renoise_changes};
+    use kumi_daw_reaper::changes as reaper_changes;
+    use kumi_runtime::integrations::renoise_changes;
     let access = Rc::new(Learned { presets: vec![] });
     let description = |profile: &DawProfile| {
         let tools = library_tools_for(profile, access.clone(), LibraryToolsOptions::default());

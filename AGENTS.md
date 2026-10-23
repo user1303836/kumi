@@ -10,7 +10,7 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
   - `src/kernel/`: the agent loop. `src/core/`: the DAW-neutral model (HISTORY, plans, sessions, places, FOCUS
     views, and workflows such as jam, layers and stems).
   - `src/integrations/`: `own_*` and `shared/`, what REAPER and Renoise share (and `shared/` with Live).
-  - `src/integrations/reaper*.rs`, `renoise*.rs`: REAPER and Renoise, host side.
+  - `src/integrations/renoise*.rs`: Renoise, host side.
 - `daws/ableton/`: Live. `ableton-mcp-server/` is its bridge, an MCP server (`src/`: a module each for `protocol`,
   `host`, `live` with its `simulator/`, `lifecycle`, `analysis` and `project`); `remote-script/` runs inside Live
   (Python); `live-extension/` is Live's extension (TypeScript); `protocol/` is the only list of Live operations;
@@ -18,7 +18,8 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
   side: its integration and the Max for Live device builder.
 - `daws/own/`: Kumi's own bridges, for REAPER and Renoise: `daw-bridge/` (the `kumi-daw/1` wire) and
   `daw-mcp-server/` (the host; what's one DAW's alone is in its `src/reaper/` and `src/renoise/`).
-- `daws/reaper/reaper-kumi`: REAPER's extension (Rust, built against REAPER's SDK headers in its `sdk/`).
+- `daws/reaper/reaper-kumi`: REAPER's extension (Rust, built against REAPER's SDK headers in its `sdk/`);
+  `daws/reaper/kumi-daw-reaper`: REAPER, host side (its integration, the tools only REAPER has, its library).
 - `daws/renoise/`: Renoise's tool, `com.kumi.Bridge.xrnx` (Lua), and its tests against a mock of Renoise's API.
 - `crates/kumi-types`: what every layer names: DAW profiles and words, the contracts with the tools, errors, places,
   the system and the version. `kumi-runtime` re-exports it where its code always named it.

@@ -21,6 +21,7 @@ path = "src/main.rs"
 kumi-common.workspace = true
 kumi-runtime.workspace = true
 kumi-daw-ableton.workspace = true
+kumi-daw-reaper.workspace = true
 ableton-mcp-server.workspace = true
 daw-bridge.workspace = true
 async-trait.workspace = true
@@ -54,6 +55,8 @@ libc.workspace = true
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_IO", "Win32_System_Pipes", "Win32_System_Power", "Win32_System_Threading"] }
 
 [dev-dependencies]
+# The runtime's test helpers (a FOCUS view's row in DAWS.md, which daws_doc checks).
+kumi-runtime = { workspace = true, features = ["test-support"] }
 kumi-store.workspace = true
 uuid.workspace = true
 kumi-testkit.workspace = true
