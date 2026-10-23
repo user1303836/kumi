@@ -1,5 +1,5 @@
 //! Web reading, with complete-result oracles.
-use kumi_runtime::web::html::{html_to_text, read_html};
+use kumi_web::html::{html_to_text, read_html};
 use serde_json::Value;
 #[test]
 fn a_page_becomes_text_with_structure_code_formulas_links_and_no_furniture() {
@@ -74,8 +74,8 @@ fn tags_closed_out_of_order_never_cut_the_text_inside_a_character() {
 
 use async_trait::async_trait;
 use kumi_common::{abort::Signal, js::json::stringify};
-use kumi_runtime::core::contracts::{KernelTool, SessionEvent};
-use kumi_runtime::web::{
+use kumi_types::contracts::{KernelTool, ToolEvent};
+use kumi_web::{
     free::{Builtin, FreeServices},
     net::{WebClient, WebFailure, WebRequest, WebResponse},
     read::read_page,
@@ -188,13 +188,13 @@ async fn run_scenario(index: usize) {
                     "Keenable" => Builtin::Keenable,
                     "Firecrawl" => Builtin::Firecrawl,
                     _ => unreachable!(),
-                }) as Rc<dyn kumi_runtime::web::free::FreeService>
+                }) as Rc<dyn kumi_web::free::FreeService>
             })
             .collect(),
         now.clone(),
         0,
     ));
-    let events = Rc::new(RefCell::new(Vec::<SessionEvent>::new()));
+    let events = Rc::new(RefCell::new(Vec::<ToolEvent>::new()));
     let tools = web_tools(WebToolOptions {
         on_event: Rc::new({
             let events = events.clone();
@@ -312,7 +312,7 @@ async fn a_private_resolution_is_refused_before_connecting_and_redirects_are_che
     tokio::task::LocalSet::new()
         .run_until(async {
             use futures::FutureExt;
-            use kumi_runtime::web::net::{create_web_client, WebClientOptions};
+            use kumi_web::net::{create_web_client, WebClientOptions};
             use std::sync::Arc;
             let (port, requests, server) = local_site().await;
             let tricked = create_web_client(WebClientOptions {
@@ -334,7 +334,7 @@ async fn a_private_resolution_is_refused_before_connecting_and_redirects_are_che
 async fn native_client_redirects_decompresses_caps_skips_times_out_and_cancels() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            use kumi_runtime::web::net::{create_web_client, Method, WebClientOptions};
+            use kumi_web::net::{create_web_client, Method, WebClientOptions};
             use std::sync::Arc;
             let (port, requests, server) = local_site().await;
             let client = create_web_client(WebClientOptions { allow: Some(Arc::new(|_| true)), ..Default::default() });
@@ -382,7 +382,7 @@ async fn native_client_redirects_decompresses_caps_skips_times_out_and_cancels()
 
 #[test]
 fn github_addresses_distinguish_repositories_folders_files_and_other_pages() {
-    use kumi_runtime::web::github::github_target;
+    use kumi_web::github::github_target;
     for (address, expected) in [
         ("https://github.com/Afturmath/dm-Erbeverb", json!({"kind":"repo","owner":"Afturmath","repo":"dm-Erbeverb"})),
         ("https://github.com/dsp56300/gearmulator.git", json!({"kind":"repo","owner":"dsp56300","repo":"gearmulator"})),
@@ -409,7 +409,7 @@ fn github_addresses_distinguish_repositories_folders_files_and_other_pages() {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn addresses_carrying_keys_or_tokens_are_not_read_or_sent_to_readers() {
-    use kumi_runtime::web::net::carries_key;
+    use kumi_web::net::carries_key;
     for address in [
         "https://example.com/cb?api_key=abcdef123456",
         "https://example.com/#access_token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N",
@@ -449,13 +449,13 @@ fn a_max_box_whose_text_is_a_next_line_character_is_counted_as_it_is() {
         {"box":{"maxclass":"newobj","text":"\u{85}","patcher":{"boxes":[{"box":{"maxclass":"codebox","code":"out1 = in1;"}}]}}}
     ]}});
     assert_eq!(
-        kumi_runtime::web::read::max_patch_summary(&patch).unwrap(),
+        kumi_web::read::max_patch_summary(&patch).unwrap(),
         "Made of: \u{85} \u{d7}2.\n\nCode 1 of 1, a codebox in the patch \u{203a} \u{85}:\n```\nout1 = in1;\n```"
     );
 }
 #[test]
 fn picture_headers_and_exa_text_handle_the_sources_formats() {
-    use kumi_runtime::web::{
+    use kumi_web::{
         exa::parse_exa_results,
         free::wait_words,
         read::{picture_size, PictureSize},
@@ -470,7 +470,7 @@ fn picture_headers_and_exa_text_handle_the_sources_formats() {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn no_service_connection_is_said_as_offline() {
-    use kumi_runtime::web::net::{WebError, WebTrouble};
+    use kumi_web::net::{WebError, WebTrouble};
     struct Offline;
     #[async_trait(?Send)]
     impl WebClient for Offline {

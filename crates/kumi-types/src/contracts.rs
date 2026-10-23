@@ -17,6 +17,9 @@ pub use crate::picture::ChangePicture;
 
 pub type JsonObject = serde_json::Map<String, Value>;
 
+/// The most images a request carries; past this, this turn's earliest are put away.
+pub const MAX_IMAGES: usize = 40;
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Usage {
@@ -621,4 +624,22 @@ pub struct WebEvent {
     /// A repository's or folder's files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files: Option<usize>,
+}
+
+/// What a tool tells the session as it works: what it's doing now, a notice, and what it heard, watched or read on
+/// the web. The session sends each on as its own event (kumi-runtime's `SessionEvent`), whose other kinds name what
+/// these tools don't know; each is written as the session's event of its kind is.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case", rename_all_fields = "camelCase")]
+pub enum ToolEvent {
+    /// What the tool is doing now ("looking at 2:05"), for NOW; it ends with the tool.
+    Doing {
+        text: String,
+    },
+    Notice {
+        message: String,
+    },
+    Heard(HeardEvent),
+    Watched(WatchedEvent),
+    Web(WebEvent),
 }

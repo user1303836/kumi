@@ -182,8 +182,8 @@ const SMALL: usize = 1024;
 const HEAD: usize = 200;
 /// What an image costs, as bytes of conversation: a 1280×720 frame is about 1.2k tokens.
 const IMAGE_BYTES: usize = 4 * 1024;
-/// The most images a request carries; past this, this turn's earliest are put away.
-pub const MAX_IMAGES: usize = 40;
+// The most images a request carries (kumi-types, which the tools that show them name too).
+pub use kumi_types::contracts::MAX_IMAGES;
 
 /// Why a result's images were put away.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

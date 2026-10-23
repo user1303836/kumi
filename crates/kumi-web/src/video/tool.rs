@@ -3,16 +3,6 @@ use super::{
     captions::{format_time, parse_time},
     watch_video, Region, SoundSpan, VideoFailure, WatchOptions, WatchRequest, Watched, WatchedFrame,
 };
-use crate::core::daw::{asset_in_words, AssetPhrase, DawProfile};
-use crate::{
-    audio::{hear, tools::summary, Analysis, AnalyzeOptions},
-    core::{
-        contracts::{HeardEvent, JsonObject, KernelTool, Reach, SessionEvent, ToolImage, ToolResult, WatchedEvent, WordsSource},
-        errors::RuntimeError,
-    },
-    kernel::budget::MAX_IMAGES,
-    system::Env,
-};
 use async_trait::async_trait;
 use kumi_common::{
     abort::{Signal, SignalExt},
@@ -21,6 +11,13 @@ use kumi_common::{
         string::{head, trim},
     },
 };
+use kumi_media::audio::{hear, tools::summary, Analysis, AnalyzeOptions};
+use kumi_types::contracts::{
+    HeardEvent, JsonObject, KernelTool, Reach, ToolEvent, ToolImage, ToolResult, WatchedEvent, WordsSource, MAX_IMAGES,
+};
+use kumi_types::daw::{asset_in_words, AssetPhrase, DawProfile};
+use kumi_types::errors::RuntimeError;
+use kumi_types::system::Env;
 use serde_json::{json, Value};
 use std::{
     cell::RefCell,
@@ -125,7 +122,7 @@ pub struct VideoToolOptions {
     pub videos_dir: String,
     pub tools_dir: String,
     pub env: Option<Env>,
-    pub on_event: Rc<dyn Fn(SessionEvent)>,
+    pub on_event: Rc<dyn Fn(ToolEvent)>,
     /// Which answer this is (it changes when a new one starts), so what was shown is counted per answer;
     /// None counts over the tool's life.
     pub answer: Option<Rc<dyn Fn() -> u64>>,
@@ -232,7 +229,7 @@ impl VideoTool {
         note
     }
 }
-fn tell(callback: &Rc<dyn Fn(SessionEvent)>, event: SessionEvent) {
+fn tell(callback: &Rc<dyn Fn(ToolEvent)>, event: ToolEvent) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(event)));
 }
 #[async_trait(?Send)]
@@ -297,12 +294,12 @@ impl KernelTool for VideoTool {
             return Ok(ToolResult::error("listen_from and listen_to go together, the second after the first."));
         }
         let result:Result<ToolResult,VideoFailure>=async{
-            let(notices,mut received)=tokio::sync::mpsc::unbounded_channel();let event=self.options.on_event.clone();let watching=watch_video(WatchRequest{url:url.into(),from,to,look_at,zoom,views,frames:input.get("frames").and_then(Value::as_f64),listen:listen_from.zip(listen_to).map(|(from,to)|SoundSpan{from,to})},WatchOptions{videos_dir:self.options.videos_dir.clone(),tools_dir:self.options.tools_dir.clone(),env:self.options.env.clone(),signal:Some(signal.clone()),on_fetch:Some(Arc::new(move|message|{let _=notices.send(message.to_string());})),on_progress:Some(Rc::new(move|text|tell(&event,SessionEvent::Doing{text:text.into()}))),..Default::default()});tokio::pin!(watching);
-            let watched=loop{tokio::select!{result=&mut watching=>break result,Some(message)=received.recv()=>tell(&self.options.on_event,SessionEvent::Notice{message})}};while let Ok(message)=received.try_recv(){tell(&self.options.on_event,SessionEvent::Notice{message});}let mut watched=watched?;
+            let(notices,mut received)=tokio::sync::mpsc::unbounded_channel();let event=self.options.on_event.clone();let watching=watch_video(WatchRequest{url:url.into(),from,to,look_at,zoom,views,frames:input.get("frames").and_then(Value::as_f64),listen:listen_from.zip(listen_to).map(|(from,to)|SoundSpan{from,to})},WatchOptions{videos_dir:self.options.videos_dir.clone(),tools_dir:self.options.tools_dir.clone(),env:self.options.env.clone(),signal:Some(signal.clone()),on_fetch:Some(Arc::new(move|message|{let _=notices.send(message.to_string());})),on_progress:Some(Rc::new(move|text|tell(&event,ToolEvent::Doing{text:text.into()}))),..Default::default()});tokio::pin!(watching);
+            let watched=loop{tokio::select!{result=&mut watching=>break result,Some(message)=received.recv()=>tell(&self.options.on_event,ToolEvent::Notice{message})}};while let Ok(message)=received.try_recv(){tell(&self.options.on_event,ToolEvent::Notice{message});}let mut watched=watched?;
             if let Some(note)=self.ration(&mut watched){watched.notes.push(note);}
-            let mut heard=None;if let Some(sound)=&watched.sound{tell(&self.options.on_event,SessionEvent::Doing{text:"listening to the video's sound".into()});match hear(&sound.file,AnalyzeOptions{signal:Some(signal.clone()),..Default::default()}).await{Ok(analysis)=>heard=Some(analysis),Err(error)=>{signal.check()?;watched.notes.push(format!("Kumi couldn't listen to the video's sound ({}).",head(&error.to_string(),120)));}}}
-            tell(&self.options.on_event,SessionEvent::Watched(WatchedEvent{title:watched.title.clone(),channel:watched.channel.clone().filter(|s|!s.is_empty()),url:watched.url.clone(),duration:watched.duration.filter(|n|*n!=0.0),from:watched.from,to:watched.to,chapters:watched.chapters.iter().filter(|c|c.start>=watched.from&&c.start<=watched.to).map(|c|c.title.clone()).collect(),words:watched.words.as_ref().map_or(WordsSource::None,|w|w.source),lines:watched.lines.len(),frames:watched.frames.iter().map(|f|crate::core::contracts::WatchedFrame{at:f.at,zoom:f.region.map(|r|r.as_str().into()),thumb:crate::core::contracts::Thumb{width:f.thumb.width as u32,height:f.thumb.height as u32,rgb:f.thumb.rgb.clone()}}).collect(),sound:watched.sound.as_ref().map(|s|crate::core::contracts::SoundSpan{from:s.from,to:s.to}),notes:watched.notes.clone()}));
-            if let(Some(heard),Some(sound))=(&heard,&watched.sound){tell(&self.options.on_event,SessionEvent::Heard(HeardEvent{file:format!("the video's sound, {}–{}",format_time(sound.from),format_time(sound.to)),summary:summary(heard),bands:heard.balance.bands.iter().map(|b|b.db).collect(),compared:None}));}
+            let mut heard=None;if let Some(sound)=&watched.sound{tell(&self.options.on_event,ToolEvent::Doing{text:"listening to the video's sound".into()});match hear(&sound.file,AnalyzeOptions{signal:Some(signal.clone()),..Default::default()}).await{Ok(analysis)=>heard=Some(analysis),Err(error)=>{signal.check()?;watched.notes.push(format!("Kumi couldn't listen to the video's sound ({}).",head(&error.to_string(),120)));}}}
+            tell(&self.options.on_event,ToolEvent::Watched(WatchedEvent{title:watched.title.clone(),channel:watched.channel.clone().filter(|s|!s.is_empty()),url:watched.url.clone(),duration:watched.duration.filter(|n|*n!=0.0),from:watched.from,to:watched.to,chapters:watched.chapters.iter().filter(|c|c.start>=watched.from&&c.start<=watched.to).map(|c|c.title.clone()).collect(),words:watched.words.as_ref().map_or(WordsSource::None,|w|w.source),lines:watched.lines.len(),frames:watched.frames.iter().map(|f|kumi_types::contracts::WatchedFrame{at:f.at,zoom:f.region.map(|r|r.as_str().into()),thumb:kumi_types::contracts::Thumb{width:f.thumb.width as u32,height:f.thumb.height as u32,rgb:f.thumb.rgb.clone()}}).collect(),sound:watched.sound.as_ref().map(|s|kumi_types::contracts::SoundSpan{from:s.from,to:s.to}),notes:watched.notes.clone()}));
+            if let(Some(heard),Some(sound))=(&heard,&watched.sound){tell(&self.options.on_event,ToolEvent::Heard(HeardEvent{file:format!("the video's sound, {}–{}",format_time(sound.from),format_time(sound.to)),summary:summary(heard),bands:heard.balance.bands.iter().map(|b|b.db).collect(),compared:None}));}
             Ok(ToolResult{text:describe(&watched,heard.as_ref()),images:watched.frames.iter().map(|f|ToolImage{data:f.jpeg.clone(),media_type:"image/jpeg".into(),caption:Some(caption(f))}).collect(),..Default::default()})
         }.await;
         match result {
@@ -324,7 +321,7 @@ mod phrases {
 
     #[test]
     fn watch_videos_phrases_are_all_there_and_lives_words_stay() {
-        assert_eq!(crate::core::daw::check_asset_phrases(&DATA, VIDEO_PHRASES), Ok(()));
+        assert_eq!(kumi_types::daw::check_asset_phrases(&DATA, VIDEO_PHRASES), Ok(()));
         assert_eq!(asset_in_words(DATA.clone(), &DawProfile::ABLETON, VIDEO_PHRASES), *DATA);
         let said = asset_in_words(DATA.clone(), &DawProfile::UNKNOWN, VIDEO_PHRASES).to_string();
         assert!(VIDEO_PHRASES.iter().all(|phrase| !said.contains(phrase.live)));

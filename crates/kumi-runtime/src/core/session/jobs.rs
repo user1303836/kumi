@@ -289,7 +289,7 @@ impl Session {
         if options.web || options.web_client.is_some() {
             tools.extend(crate::web::tool::web_tools_for(
                 &options.profile,
-                WebToolOptions { on_event: on_event.clone(), client: options.web_client.clone(), ..Default::default() },
+                WebToolOptions { on_event: tool_events(&on_event), client: options.web_client.clone(), ..Default::default() },
             ));
         }
         if let Some(library) = &options.library {
@@ -303,7 +303,7 @@ impl Session {
                     videos_dir: dirs.videos_dir.clone(),
                     tools_dir: dirs.tools_dir.clone(),
                     env: None,
-                    on_event: on_event.clone(),
+                    on_event: tool_events(&on_event),
                     answer: None,
                 },
             ));

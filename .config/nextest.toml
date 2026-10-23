@@ -27,7 +27,8 @@ threads-required = "num-cpus"
 [profile.ci]
 default-filter = '''
 not (
-    (binary_id(kumi-runtime::it) & test(/^(live_rendering|form|video)::/))
+    (binary_id(kumi-runtime::it) & test(/^(live_rendering|form)::/))
+  | (binary_id(kumi-web::it) & test(/^video::/))
   | (binary_id(kumi-runtime::it) & test(/^(own_listening_e2e|fake_daw_listening)::/))
   | (binary_id(kumi::it) & test(/^(daw_words|app_sessions)::/))
   | (binary_id(kumi-runtime::it) & test(/^(listening|effects|sound)::/))
@@ -81,7 +82,8 @@ default-filter = '''
   | (binary_id(kumi::it) & test(/^own_providers::/))
   | (binary_id(daw-mcp-server::it) & test(/^(bridge|retire|credit)::/))
 ) & not (
-    (binary_id(kumi-runtime::it) & test(/^(live_rendering|form|video)::/))
+    (binary_id(kumi-runtime::it) & test(/^(live_rendering|form)::/))
+  | (binary_id(kumi-web::it) & test(/^video::/))
   | (binary_id(kumi-runtime::it) & test(/^(listening|effects|sound)::/))
   | (binary_id(kumi-runtime::it) & test(/^style_references::/))
   | (binary_id(kumi-ai::it) & test(/^ai_sdk::/))

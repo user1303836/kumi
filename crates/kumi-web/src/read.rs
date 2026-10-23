@@ -5,7 +5,6 @@ use super::{
     html::read_html,
     net::{carries_key, checked_url, decode_text, status_words, WebClient, WebError, WebFailure, WebRequest, WebResponse},
 };
-use crate::devices::amxd::decode_amxd;
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::{
@@ -14,6 +13,7 @@ use kumi_common::{
         string::trim,
     },
 };
+use kumi_types::amxd::decode_amxd;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
