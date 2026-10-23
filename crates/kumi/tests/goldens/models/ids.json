@@ -74,63 +74,93 @@
     },
     {
       "id": "openai/a/b",
-      "cloud": null,
+      "cloud": [
+        "openai",
+        "a/b"
+      ],
       "local": null,
-      "settings": false
+      "settings": true
     },
     {
       "id": "opencode/deepseek/v4",
-      "cloud": null,
+      "cloud": [
+        "opencode",
+        "deepseek/v4"
+      ],
       "local": null,
-      "settings": false
+      "settings": true
     },
     {
       "id": "openai//x",
-      "cloud": null,
+      "cloud": [
+        "openai",
+        "/x"
+      ],
       "local": null,
-      "settings": false
+      "settings": true
     },
     {
       "id": "openai-codex/has space",
-      "cloud": null,
+      "cloud": [
+        "openai-codex",
+        "has space"
+      ],
       "local": null,
-      "settings": false
+      "settings": true
     },
     {
       "id": "openai/é",
-      "cloud": null,
+      "cloud": [
+        "openai",
+        "é"
+      ],
       "local": null,
-      "settings": false
+      "settings": true
     },
     {
       "id": "openai/_x",
-      "cloud": null,
+      "cloud": [
+        "openai",
+        "_x"
+      ],
       "local": null,
-      "settings": false
+      "settings": true
     },
     {
       "id": "openai/-x",
-      "cloud": null,
+      "cloud": [
+        "openai",
+        "-x"
+      ],
       "local": null,
-      "settings": false
+      "settings": true
     },
     {
       "id": "openai/.x",
-      "cloud": null,
+      "cloud": [
+        "openai",
+        ".x"
+      ],
       "local": null,
-      "settings": false
+      "settings": true
     },
     {
       "id": "openai/x@q4",
-      "cloud": null,
+      "cloud": [
+        "openai",
+        "x@q4"
+      ],
       "local": null,
-      "settings": false
+      "settings": true
     },
     {
       "id": "openai/✦",
-      "cloud": null,
+      "cloud": [
+        "openai",
+        "✦"
+      ],
       "local": null,
-      "settings": false
+      "settings": true
     },
     {
       "id": "openai/ x",
@@ -296,25 +326,37 @@
     },
     {
       "id": "openai/aaaaaaaaa… (136 UTF-16 units)",
-      "cloud": null,
+      "cloud": [
+        "openai",
+        "aaaaaaaaaaaaaaaa… (129 UTF-16 units)"
+      ],
       "local": null,
-      "settings": false
+      "settings": true
     },
     {
       "id": "openai/aaaaaaaaa… (256 UTF-16 units)",
-      "cloud": null,
+      "cloud": [
+        "openai",
+        "aaaaaaaaaaaaaaaa… (249 UTF-16 units)"
+      ],
       "local": null,
-      "settings": false
+      "settings": true
     },
     {
       "id": "openai/aaaaaaaaa… (257 UTF-16 units)",
-      "cloud": null,
+      "cloud": [
+        "openai",
+        "aaaaaaaaaaaaaaaa… (250 UTF-16 units)"
+      ],
       "local": null,
       "settings": false
     },
     {
       "id": "openai/aaaaaaaaa… (263 UTF-16 units)",
-      "cloud": null,
+      "cloud": [
+        "openai",
+        "aaaaaaaaaaaaaaaa… (256 UTF-16 units)"
+      ],
       "local": null,
       "settings": false
     },

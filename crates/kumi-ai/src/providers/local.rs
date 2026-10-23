@@ -3,7 +3,7 @@ use super::{
     compat::mending_fetch,
     models::{EffortInfo, ModelInfo},
     ollama::{ollama_chat, FailurePhase, OllamaChatSettings, OllamaShape},
-    table, words_only, Effort, USER_AGENT,
+    split_model_id, table, words_only, Effort, USER_AGENT,
 };
 use crate::{
     binding::{budget_for, LanguageModel, ModelBinding, ModelRequest, BYTES_PER_TOKEN},
@@ -23,7 +23,7 @@ use kumi_common::{
     js::{
         json::stringify,
         number,
-        string::{head, trim, utf16_len},
+        string::{head, trim},
     },
 };
 use kumi_types::daw::DawProfile;
@@ -180,16 +180,7 @@ pub struct ParsedLocalModelId {
     pub model: String,
 }
 pub fn parse_local_model_id(value: &str, servers: &[LocalServer]) -> Option<ParsedLocalModelId> {
-    let (id, model) = value.split_once('/')?;
-    static ID: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^[a-z0-9][a-z0-9-]{0,39}$").unwrap());
-    if !ID.is_match(id)
-        || model.is_empty()
-        || utf16_len(model) > 256
-        || trim(model) != model
-        || model.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
-    {
-        return None;
-    }
+    let (id, model) = split_model_id(value)?;
     let server = servers.iter().find(|s| s.id == id)?.clone();
     Some(ParsedLocalModelId { server, model: model.into() })
 }

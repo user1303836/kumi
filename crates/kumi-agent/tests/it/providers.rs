@@ -430,7 +430,7 @@ async fn missing_keys_unknown_providers_and_unsupported_routes_never_echo_values
         ("opencode/gemini-3.5-pro", "Gemini"),
         ("gateway/secret-value", "KUMI_MODEL"),
         ("openai-codex/", "KUMI_MODEL"),
-        ("openai-codex/has space", "KUMI_MODEL"),
+        ("openai-codex/ has space", "KUMI_MODEL"),
         ("anthropic", "KUMI_MODEL"),
     ] {
         let (fetch, requests) = recorder(|_, _| rejection());
@@ -440,9 +440,10 @@ async fn missing_keys_unknown_providers_and_unsupported_routes_never_echo_values
         assert!(matches!(result,Err(error)if error.to_string().contains(message)&&!error.to_string().contains("secret-value")));
         assert!(requests.borrow().is_empty());
     }
-    assert!(parse_model_id(&format!("openai/{}", "a".repeat(128))).is_some());
-    assert!(parse_model_id(&format!("openai/{}", "a".repeat(129))).is_none());
+    assert!(parse_model_id(&format!("openai/{}", "a".repeat(256))).is_some());
+    assert!(parse_model_id(&format!("openai/{}", "a".repeat(257))).is_none());
     assert!(parse_model_id("openai/a\n").is_none());
+    assert_eq!(parse_model_id("opencode/deepseek/v4").map(|parsed| parsed.model).as_deref(), Some("deepseek/v4"));
 }
 #[tokio::test]
 async fn tool_images_follow_each_native_api_and_words_only_keeps_other_metadata() {

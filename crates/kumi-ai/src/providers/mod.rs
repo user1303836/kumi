@@ -19,6 +19,7 @@ use crate::{
     types::*,
 };
 use async_trait::async_trait;
+use kumi_common::js::string::{trim, utf16_len};
 use kumi_types::errors::{FailureKind, KumiError, RuntimeError};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -135,11 +136,25 @@ pub struct ParsedModelId {
     pub provider: ProviderId,
     pub model: String,
 }
+/// A model ID, `<provider>/<model>`, split at its first `/`: a provider's ID as Kumi makes them (`[a-z0-9][a-z0-9-]{0,39}`)
+/// and the model as its provider names it, `/` and all, in at most 256 UTF-16 units, with no control characters and no
+/// spaces at either end. Cloud providers and model servers alike.
+pub fn split_model_id(value: &str) -> Option<(&str, &str)> {
+    let (id, model) = value.split_once('/')?;
+    static ID: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^[a-z0-9][a-z0-9-]{0,39}$").unwrap());
+    if !ID.is_match(id)
+        || model.is_empty()
+        || utf16_len(model) > 256
+        || trim(model) != model
+        || model.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
+    {
+        return None;
+    }
+    Some((id, model))
+}
 pub fn parse_model_id(value: &str) -> Option<ParsedModelId> {
-    static MODEL_ID: LazyLock<regex::Regex> =
-        LazyLock::new(|| regex::Regex::new(r"^([a-z0-9-]+)/([a-zA-Z0-9][a-zA-Z0-9._:-]{0,127})$").unwrap());
-    let matched = MODEL_ID.captures(value)?;
-    Some(ParsedModelId { provider: ProviderId::parse(&matched[1])?, model: matched[2].into() })
+    let (provider, model) = split_model_id(value)?;
+    Some(ParsedModelId { provider: ProviderId::parse(provider)?, model: model.into() })
 }
 pub struct ResolveModelOptions {
     pub model: String,

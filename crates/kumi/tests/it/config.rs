@@ -25,7 +25,7 @@ fn models_are_provider_qualified_or_unset_and_need_no_gateway_key() {
     let expected =
         kumi_library::sources::join(&kumi_library::sources::normalize(&home::home_dir().unwrap().to_string_lossy()), ".kumi/auth.json");
     assert_eq!(load_inference_config(&env).unwrap(), InferenceConfig { model: None, auth_file: expected.clone() });
-    for model in ["", " \t\n", "guess", "gateway/model", "openai-codex/", "openai-codex/model\nInjected", "openai-codex/white space"] {
+    for model in ["", " \t\n", "guess", "gateway/model", "openai-codex/", "openai-codex/model\nInjected", "openai-codex/ white space"] {
         let mut env = env.clone();
         env.insert("KUMI_MODEL".into(), model.into());
         assert!(load_inference_config(&env).is_err());
@@ -36,6 +36,8 @@ fn models_are_provider_qualified_or_unset_and_need_no_gateway_key() {
         "anthropic/claude-haiku-4-5-20251001",
         "opencode/kimi-k2.6",
         "opencode-go/gpt-5.5",
+        "openai-codex/white space",
+        "opencode/deepseek/v4",
     ] {
         let mut env = env.clone();
         env.insert("KUMI_MODEL".into(), model.into());
