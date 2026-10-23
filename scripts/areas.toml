@@ -39,7 +39,7 @@ feeds = ["ableton-mcp-server", "kumi"]
 
 # Kumi's Renoise tool (Lua) and its tests against a mock of Renoise's API.
 [renoise-tool]
-paths = ["daws/renoise/**"]
+paths = ["daws/renoise/com.kumi.Bridge.xrnx/**", "daws/renoise/tests/**"]
 
 # What Kumi reads of the tool: its entry, manifest, version and change kinds (Kumi's list of them is checked against
 # them), and the folder as it's installed.

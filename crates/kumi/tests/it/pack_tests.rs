@@ -2,8 +2,8 @@
 //! tools' descriptions): held to the budget Live's instructions keep, in the DAW's own words, and claiming nothing the
 //! DAW lacks.
 use kumi_daw_reaper as reaper;
+use kumi_daw_renoise as renoise;
 use kumi_runtime::integrations::own_bridge::{instructions_of, OwnDaw};
-use kumi_runtime::integrations::renoise;
 use regex::Regex;
 
 const DAWS: [&OwnDaw; 2] = [&reaper::DAW, &renoise::DAW];
@@ -139,7 +139,7 @@ fn the_shared_rules_are_written_once_and_composed_into_each_daw() {
     let sources = [
         source("crates/kumi-runtime/src/integrations/own_bridge.rs"),
         source("daws/reaper/kumi-daw-reaper/src/lib.rs"),
-        source("crates/kumi-runtime/src/integrations/renoise.rs"),
+        source("daws/renoise/kumi-daw-renoise/src/lib.rs"),
     ];
     for rule in RULES.iter().skip(1) {
         let written: usize = sources.iter().map(|text| text.matches(rule).count()).sum();

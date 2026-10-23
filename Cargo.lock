@@ -1255,6 +1255,7 @@ dependencies = [
  "kumi-common",
  "kumi-daw-ableton",
  "kumi-daw-reaper",
+ "kumi-daw-renoise",
  "kumi-runtime",
  "kumi-store",
  "kumi-testkit",
@@ -1377,6 +1378,27 @@ dependencies = [
  "regex",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "kumi-daw-renoise"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "daw-bridge",
+ "daw-mcp-server",
+ "futures",
+ "kumi-common",
+ "kumi-library",
+ "kumi-listening",
+ "kumi-runtime",
+ "kumi-testkit",
+ "kumi-types",
+ "regex",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

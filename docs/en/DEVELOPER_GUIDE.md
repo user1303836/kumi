@@ -30,6 +30,7 @@ How the repository fits together, how to work on each part, and how to release.
 | `daws/reaper/reaper-kumi` | Kumi's REAPER extension (`reaper_kumi`), built against REAPER's SDK headers vendored in `sdk/` |
 | `daws/own/daw-bridge` | What the REAPER and Renoise bridges share: the loopback wire (`kumi-daw/1`), its handshake and auth, discovery, finding the DAWs, the doctor's checks and the bridge files' lifecycle |
 | `daws/renoise` | Kumi's Renoise tool (`com.kumi.Bridge.xrnx`, Lua) and its tests against a mock of Renoise's API |
+| `daws/renoise/kumi-daw-renoise` | Renoise, host side: its integration through Kumi's own bridge, the tools only Renoise has (variations of its lines and phrases, the sample map, chopping, cleaning up jams, layered breaks) and where its library is |
 | `install.sh`, `install.ps1` | The installers |
 
 The crates share the root Cargo workspace; there's no npm workspace. The

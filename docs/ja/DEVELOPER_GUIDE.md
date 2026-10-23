@@ -29,6 +29,7 @@
 | `daws/reaper/reaper-kumi` | Kumi の REAPER 拡張機能（`reaper_kumi`）。`sdk/` に同梱した REAPER の SDK ヘッダーでビルドします |
 | `daws/own/daw-bridge` | REAPER と Renoise のブリッジが共有するもの：ループバックの通信（`kumi-daw/1`）、そのハンドシェイクと認証、ディスカバリー、DAW の検出、doctor のチェック、ブリッジのファイルのライフサイクル |
 | `daws/renoise` | Kumi の Renoise ツール（`com.kumi.Bridge.xrnx`、Lua）と、Renoise の API のモックに対するそのテスト |
+| `daws/renoise/kumi-daw-renoise` | Renoise のホスト側：Kumi 独自のブリッジを通した連携、Renoise だけのツール（行とフレーズのバリエーション、サンプルマップ、チョップ、ジャムの整理、ブレイクのレイヤー）、ライブラリーの場所 |
 | `install.sh`、`install.ps1` | インストーラー |
 
 クレートはルートの Cargo ワークスペースを共有します。npm のワークスペースはありません。ブリッジは Kumi なしでも動きます。クレートの移植元である TypeScript 実装は、git タグ `v1.7.6` に残っています。

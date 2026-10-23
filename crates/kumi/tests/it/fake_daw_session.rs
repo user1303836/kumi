@@ -673,7 +673,7 @@ async fn a_renoise_session_changes_and_undoes_in_renoises_words() {
                 step(|_| call("groove", json!({"apply": true}))),
                 step(|_| answer("Done.")),
             ];
-            let create = kumi_runtime::integrations::renoise::create_renoise_integration;
+            let create = kumi_daw_renoise::create_renoise_integration;
             let (said, changes, undone) = own_session(daw_bridge::Daw::Renoise, DawProfile::RENOISE, config, create, steps).await;
             assert_eq!(undone.map(|record| record.title).as_deref(), Some("Track 1 volume -6 dB"));
             assert_eq!(script.track_state(1), (0.0, false, 0), "the device and the fader both taken back");

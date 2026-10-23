@@ -29,6 +29,7 @@
 | `daws/reaper/reaper-kumi` | Kumi 的 REAPER 扩展（`reaper_kumi`），用 `sdk/` 中附带的 REAPER SDK 头文件构建 |
 | `daws/own/daw-bridge` | REAPER 与 Renoise 桥接共用的部分：回环通信（`kumi-daw/1`）、它的握手与认证、发现、查找 DAW、doctor 的检查，以及桥接文件的生命周期 |
 | `daws/renoise` | Kumi 的 Renoise 工具（`com.kumi.Bridge.xrnx`，Lua）及其针对 Renoise API 模拟的测试 |
+| `daws/renoise/kumi-daw-renoise` | Renoise 的主机端：通过 Kumi 自有桥接的集成、只有 Renoise 才有的工具（行与乐句的变奏、采样映射、切片、整理即兴录音、叠层碎拍）以及它的素材库位置 |
 | `install.sh`、`install.ps1` | 安装程序 |
 
 这些 crate 共用根目录的 Cargo 工作区；没有 npm 工作区。桥接没有 Kumi 也能工作。这些 crate 移植自的 TypeScript 实现保留在 git 标签 `v1.7.6` 上。

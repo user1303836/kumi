@@ -2,9 +2,9 @@
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
 use kumi_daw_reaper::changes as reaper_changes;
+use kumi_daw_renoise::changes as renoise_changes;
 use kumi_runtime::integrations::own_bridge::OwnDaw;
 use kumi_runtime::integrations::own_changes::*;
-use kumi_runtime::integrations::renoise_changes;
 use kumi_runtime::{
     core::{
         contracts::*,
@@ -197,7 +197,7 @@ fn a_delete_copies_the_saved_project_beside_it_once_per_saved_version_and_keeps_
 /// engine has none to go to).
 #[tokio::test]
 async fn a_step_its_kinds_schema_doesnt_take_is_refused_in_words_before_the_bridge() {
-    let plan = engine::<kumi_runtime::integrations::renoise::RenoiseRefs>(&kumi_runtime::integrations::renoise::DAW, None);
+    let plan = engine::<kumi_daw_renoise::RenoiseRefs>(&kumi_daw_renoise::DAW, None);
     let volume = plan.change_kind("track_volume").unwrap();
     for (input, said) in [
         (json!({"ref": "track:1", "volumeDb": -6, "stag": "pre"}), "The input has no field `stag` (it takes "),
@@ -249,7 +249,7 @@ async fn a_copy_that_fails_is_said_not_taken_for_one_made_already() {
 
 #[test]
 fn what_the_daw_puts_back_is_followed_even_for_a_change_only_kumi_takes_back() {
-    let plan = engine::<kumi_runtime::integrations::renoise::RenoiseRefs>(&kumi_runtime::integrations::renoise::DAW, None);
+    let plan = engine::<kumi_daw_renoise::RenoiseRefs>(&kumi_daw_renoise::DAW, None);
     let mute = plan.change_kind("track_mute").unwrap();
     plan.link().outside_daw_undo.borrow_mut().insert("t-mute".into());
     let id = plan.remember(mute, ChangeSummary::title("Kick muted"), "t-mute", ChangeState::Applied, None);
@@ -282,7 +282,7 @@ fn a_change_kumi_kept_is_undone_by_the_daws_undo_of_its_step_and_put_back_by_its
 
 #[tokio::test]
 async fn renoise_adds_a_few_tracks_an_answer_and_says_so() {
-    let plan = engine::<kumi_runtime::integrations::renoise::RenoiseRefs>(&kumi_runtime::integrations::renoise::DAW, None);
+    let plan = engine::<kumi_daw_renoise::RenoiseRefs>(&kumi_daw_renoise::DAW, None);
     let add = plan.change_kind("track_add").unwrap();
     plan.added.set(32);
     let stopped = plan.one_change(add, JsonObject::new(), Signal::new()).await;
@@ -294,7 +294,8 @@ async fn renoise_adds_a_few_tracks_an_answer_and_says_so() {
 
 #[test]
 fn an_epoch_renoise_moved_only_for_devices_keeps_the_names_of_what_stayed() {
-    use kumi_runtime::integrations::{own_bridge::follow_epoch, renoise::RenoiseRefs};
+    use kumi_daw_renoise::RenoiseRefs;
+    use kumi_runtime::integrations::own_bridge::follow_epoch;
     let fresh = || {
         let mut book = Book::<RenoiseRefs>::default();
         for reference in ["1:track:3", "1:device:3.2", "1:seq:1"] {
@@ -321,8 +322,9 @@ fn an_epoch_renoise_moved_only_for_devices_keeps_the_names_of_what_stayed() {
 
 #[test]
 fn a_layout_goes_with_any_request_naming_a_track_anywhere_and_renoises_refs_follow_their_track() {
+    use kumi_daw_renoise::RenoiseRefs;
     use kumi_runtime::core::refs::{Moved, Shift};
-    use kumi_runtime::integrations::{own_bridge::names_tracks, renoise::RenoiseRefs};
+    use kumi_runtime::integrations::own_bridge::names_tracks;
     let asks = |value: Value| names_tracks(&RenoiseRefs, value.as_object().unwrap());
     assert!(asks(json!({"type": "sequencer", "group": "1:track:2"})), "track_add's group");
     assert!(asks(json!({"lines": [{"line": 1}], "track": "1:track:3", "pattern": "1:pattern:1"})));
@@ -439,11 +441,11 @@ async fn the_change_just_made_is_never_let_go_and_what_is_undone_goes_first() {
 }
 
 fn just_made_stays() {
-    let row = |plan: &OwnPlan<kumi_runtime::integrations::renoise::RenoiseRefs>, id: &str| {
+    let row = |plan: &OwnPlan<kumi_daw_renoise::RenoiseRefs>, id: &str| {
         plan.history.entries.borrow().get(id).map(|entry| entry.borrow().record.clone()).unwrap()
     };
     // A plan of 450 mutes (only Kumi takes them back), then a volume.
-    let plan = engine::<kumi_runtime::integrations::renoise::RenoiseRefs>(&kumi_runtime::integrations::renoise::DAW, None);
+    let plan = engine::<kumi_daw_renoise::RenoiseRefs>(&kumi_daw_renoise::DAW, None);
     let (mute, volume) = (plan.change_kind("track_mute").unwrap(), plan.change_kind("track_volume").unwrap());
     *plan.link().step_titles.borrow_mut() = Some(vec![]);
     let mutes: Vec<String> = (0..450)
@@ -463,7 +465,7 @@ fn just_made_stays() {
     assert!(note.starts_with("Past the 200 changes only Kumi can take back"), "{note}");
     assert_eq!(row(&plan, &mutes[51]).state, ChangeState::Applied, "only as many go as are over");
     // More changes after the flood: each stays undoable (changes only Kumi takes back hold at most half the window).
-    let held = |plan: &OwnPlan<kumi_runtime::integrations::renoise::RenoiseRefs>, id: &str| {
+    let held = |plan: &OwnPlan<kumi_daw_renoise::RenoiseRefs>, id: &str| {
         plan.history.entries.borrow().get(id).is_some_and(|entry| !entry.borrow().transaction_id.is_empty())
     };
     let more: Vec<String> = (0..3)
@@ -473,7 +475,7 @@ fn just_made_stays() {
         assert!(row(&plan, id).state == ChangeState::Applied && held(&plan, id), "{id} is still Kumi's to undo");
     }
     // 400 mutes one by one (an A/B leaving each on), then three volumes: the same.
-    let plan = engine::<kumi_runtime::integrations::renoise::RenoiseRefs>(&kumi_runtime::integrations::renoise::DAW, None);
+    let plan = engine::<kumi_daw_renoise::RenoiseRefs>(&kumi_daw_renoise::DAW, None);
     for n in 0..400 {
         plan.link().outside_daw_undo.borrow_mut().insert(format!("t-m{n}"));
         plan.remember(mute, ChangeSummary::title("Kick muted"), &format!("t-m{n}"), ChangeState::Applied, None);
@@ -485,7 +487,7 @@ fn just_made_stays() {
         assert!(row(&plan, id).state == ChangeState::Applied && held(&plan, id), "{id} is still Kumi's to undo");
     }
     // 400 mutes, each undone by Kumi, then a volume: the undone ones go, and the volume stays.
-    let plan = engine::<kumi_runtime::integrations::renoise::RenoiseRefs>(&kumi_runtime::integrations::renoise::DAW, None);
+    let plan = engine::<kumi_daw_renoise::RenoiseRefs>(&kumi_daw_renoise::DAW, None);
     for n in 0..400 {
         plan.link().outside_daw_undo.borrow_mut().insert(format!("t-m{n}"));
         plan.remember(mute, ChangeSummary::title("Kick muted"), &format!("t-m{n}"), ChangeState::Undone, None);
@@ -543,7 +545,7 @@ fn undone_stays() {
 
 #[test]
 fn lines_the_daw_may_have_put_back_are_unsure_not_put_back() {
-    let plan = engine::<kumi_runtime::integrations::renoise::RenoiseRefs>(&kumi_runtime::integrations::renoise::DAW, None);
+    let plan = engine::<kumi_daw_renoise::RenoiseRefs>(&kumi_daw_renoise::DAW, None);
     let notes = plan.change_kind("notes_write").unwrap();
     let id = plan.remember(notes, ChangeSummary::title("Bass lines"), "t-notes", ChangeState::Applied, None);
     let entry = plan.history.entries.borrow().get(&id).cloned().unwrap();
@@ -560,7 +562,7 @@ fn lines_the_daw_may_have_put_back_are_unsure_not_put_back() {
 
 #[test]
 fn an_unsure_row_stays_unsure_when_kumi_can_no_longer_undo_it() {
-    let plan = engine::<kumi_runtime::integrations::renoise::RenoiseRefs>(&kumi_runtime::integrations::renoise::DAW, None);
+    let plan = engine::<kumi_daw_renoise::RenoiseRefs>(&kumi_daw_renoise::DAW, None);
     let (notes, volume) = (plan.change_kind("notes_write").unwrap(), plan.change_kind("track_volume").unwrap());
     let row = |id: &str| plan.history.entries.borrow().get(id).map(|entry| entry.borrow().record.clone()).unwrap();
     // Renoise may have redone lines Kumi undid; an apply Kumi never heard back from; and lines the DAW settled.
@@ -599,7 +601,7 @@ fn an_undo_never_answered_is_settled_by_the_daws_undo_of_its_step() {
 }
 
 fn past_the_window() {
-    let plan = engine::<kumi_runtime::integrations::renoise::RenoiseRefs>(&kumi_runtime::integrations::renoise::DAW, None);
+    let plan = engine::<kumi_daw_renoise::RenoiseRefs>(&kumi_daw_renoise::DAW, None);
     let (mute, volume) = (plan.change_kind("track_mute").unwrap(), plan.change_kind("track_volume").unwrap());
     plan.link().outside_daw_undo.borrow_mut().insert("t-mute".into());
     let muted = plan.remember(mute, ChangeSummary::title("Kick muted"), "t-mute", ChangeState::Applied, None);
@@ -781,7 +783,7 @@ impl McpEndpoint for Refuses {
 async fn an_undo_refused_after_the_daws_own_redo_says_the_daw_put_it_back_not_that_it_went() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let plan = engine::<kumi_runtime::integrations::renoise::RenoiseRefs>(&kumi_runtime::integrations::renoise::DAW, None);
+            let plan = engine::<kumi_daw_renoise::RenoiseRefs>(&kumi_daw_renoise::DAW, None);
             *plan.link().endpoint.borrow_mut() = Some(Rc::new(Refuses("gone")));
             plan.link().connected.set(true);
             let add = plan.change_kind("track_add").unwrap();
@@ -814,7 +816,7 @@ async fn an_undo_refused_after_the_daws_own_redo_says_the_daw_put_it_back_not_th
 async fn an_undo_refused_in_another_song_says_another_song_is_open() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let plan = engine::<kumi_runtime::integrations::renoise::RenoiseRefs>(&kumi_runtime::integrations::renoise::DAW, None);
+            let plan = engine::<kumi_daw_renoise::RenoiseRefs>(&kumi_daw_renoise::DAW, None);
             *plan.link().endpoint.borrow_mut() = Some(Rc::new(Refuses("stale")));
             plan.link().connected.set(true);
             let rename = plan.change_kind("track_rename").unwrap();

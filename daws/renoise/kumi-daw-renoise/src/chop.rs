@@ -4,14 +4,14 @@
 //! delays (256ths of a line) at the song's lines per beat: slices that start on one line take a note column each, the track
 //! shows the columns and delays it needs (a change of its own when it doesn't yet), and notes already there are never written
 //! over unless asked. The render is of that track where a slot plays the pattern.
-use super::own_changes::OwnPlan;
-use super::own_listening::OwnRenderer;
-use super::renoise_lines::note_text;
-use crate::core::chop::backend::{ChopBackend, Key, Laid, Recording, Song, Step, Words};
-use crate::core::refs::RefScheme;
-use crate::listening::renderer::{Renderer, Window};
+use crate::lines::note_text;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_listening::renderer::{Renderer, Window};
+use kumi_runtime::core::chop::backend::{ChopBackend, Key, Laid, Recording, Song, Step, Words};
+use kumi_runtime::core::refs::RefScheme;
+use kumi_runtime::integrations::own_changes::OwnPlan;
+use kumi_runtime::integrations::own_listening::OwnRenderer;
 use serde_json::{json, Value};
 use std::rc::Rc;
 
@@ -387,8 +387,8 @@ fn lay_input(pattern: &str, track: &str, first: u64, last: u64, columns: u64, ce
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::integrations::renoise_changes::CHANGES;
-    use crate::kernel::schema::problem;
+    use crate::changes::CHANGES;
+    use kumi_runtime::kernel::schema::problem;
 
     fn schema_of(tool: &str) -> Value {
         Value::Object(CHANGES.kinds.iter().find(|kind| kind.tool == tool).unwrap().input_schema())

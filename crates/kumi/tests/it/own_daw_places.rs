@@ -15,6 +15,7 @@ use futures::stream::{self, StreamExt};
 use futures::FutureExt;
 use kumi::daw::registry::PLACES;
 use kumi_daw_reaper::create_reaper_integration;
+use kumi_daw_renoise::create_renoise_integration;
 use kumi_runtime::ai::error::LanguageModelError;
 use kumi_runtime::ai::types::{
     CallOptions, FinishReason, FinishReasonUnified, InputTokens, OutputTokens, StreamPart, StreamParts, ToolCall, Usage as ModelUsage,
@@ -25,10 +26,7 @@ use kumi_runtime::core::conversations::create_conversation_store_in;
 use kumi_runtime::core::jobs::{create_job_store, JobState};
 use kumi_runtime::core::memory::{create_memory_store_in, MemoryStoreOptions};
 use kumi_runtime::core::session::JobsOptions;
-use kumi_runtime::integrations::{
-    own_bridge::{Connect, OwnOptions},
-    renoise::create_renoise_integration,
-};
+use kumi_runtime::integrations::own_bridge::{Connect, OwnOptions};
 use kumi_runtime::kernel::agent::{create_agent_kernel, AgentKernel, AgentKernelOptions, LanguageModel, ModelBinding, ModelRequest};
 use kumi_runtime::{create_session, Session, SessionOptions};
 use regex::Regex;

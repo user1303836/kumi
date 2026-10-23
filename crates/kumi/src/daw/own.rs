@@ -64,7 +64,7 @@ pub static RENOISE: Own = Own {
     id: DawId::Renoise,
     daw: Daw::Renoise,
     bridge: "Kumi's tool",
-    create: kumi_runtime::integrations::renoise::create_renoise_integration,
+    create: kumi_daw_renoise::create_renoise_integration,
     instructions: "Renoise isn't connected, so Kumi can't see your song: answer from what you know, and say so.",
 };
 

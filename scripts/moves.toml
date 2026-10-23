@@ -3634,3 +3634,65 @@ to = "kumi_daw_reaper::library::LIBRARY"
 [[rust]]
 from = "kumi_runtime::integrations::own_library::ReaperLibrary"
 to = "kumi_daw_reaper::library::ReaperLibrary"
+
+# kumi-daw-renoise: Renoise, host side (2026-10).
+
+[[move]]
+from = "crates/kumi-runtime/examples/accept_renoise.rs"
+to = "daws/renoise/kumi-daw-renoise/examples/accept_renoise.rs"
+
+[[move]]
+from = "crates/kumi-runtime/examples/variations_lab.rs"
+to = "daws/renoise/kumi-daw-renoise/examples/variations_lab.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/renoise.rs"
+to = "daws/renoise/kumi-daw-renoise/src/lib.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/renoise_changes.rs"
+to = "daws/renoise/kumi-daw-renoise/src/changes.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/renoise_chop.rs"
+to = "daws/renoise/kumi-daw-renoise/src/chop.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/renoise_jam.rs"
+to = "daws/renoise/kumi-daw-renoise/src/jam.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/renoise_layers.rs"
+to = "daws/renoise/kumi-daw-renoise/src/layers.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/renoise_lines.rs"
+to = "daws/renoise/kumi-daw-renoise/src/lines.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/renoise_mapping.rs"
+to = "daws/renoise/kumi-daw-renoise/src/mapping.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/renoise_variations.rs"
+to = "daws/renoise/kumi-daw-renoise/src/variations.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/renoise_device_actions.rs"
+to = "daws/renoise/kumi-daw-renoise/tests/it/renoise_device_actions.rs"
+
+[[rust]]
+from = "kumi_runtime::integrations::renoise_changes"
+to = "kumi_daw_renoise::changes"
+
+[[rust]]
+from = "kumi_runtime::integrations::renoise"
+to = "kumi_daw_renoise"
+
+[[rust]]
+from = "kumi_runtime::integrations::own_library::RENOISE"
+to = "kumi_daw_renoise::library::LIBRARY"
+
+[[rust]]
+from = "kumi_runtime::integrations::own_library::RenoiseLibrary"
+to = "kumi_daw_renoise::library::RenoiseLibrary"

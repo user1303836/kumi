@@ -806,7 +806,7 @@ fn actions(words: &Words) -> Vec<&'static str> {
 }
 
 /// The tool's description in the DAW's words.
-pub(crate) fn description(words: &Words) -> String {
+pub fn description(words: &Words) -> String {
     let app = words.app;
     let mut text = format!(
         "Variations in {app}: numbered takes V1, V2… of a source, each its own object, never written over the source. make: source is {}; anchors are {}. \
@@ -843,7 +843,7 @@ Kumi wrote it, one named goes all the same. list: the set's takes.",
 }
 
 /// The tool's schema, with the DAW's parts.
-pub(crate) fn schema(words: &Words) -> JsonObject {
+pub fn schema(words: &Words) -> JsonObject {
     let part = |text: &str| serde_json::from_str::<Value>(text).expect("a backend's schema is JSON");
     let value = json!({"type": "object", "additionalProperties": false, "required": ["action"], "properties": {
         "action": {"type": "string", "enum": actions(words)},
