@@ -1,5 +1,6 @@
 //! The contracts between the agent and its tools: what a tool is (`KernelTool`) and returns (`ToolResult`), how far it
-//! reaches, and what the tools that hear, audition, render, read the web, watch videos and learn the library report.
+//! reaches, and what the tools that hear, audition, render, read the web, watch videos and learn the library report;
+//! and what a turn's model calls used (`Usage`), which the model clients count.
 //! The rest of the agent's contracts (the kernel, the session and its events, the stores, the DAW integrations) are
 //! kumi-runtime's `core::contracts`, which re-exports these.
 
@@ -15,6 +16,16 @@ pub use crate::matching::{Closeness, Focus};
 pub use crate::picture::ChangePicture;
 
 pub type JsonObject = serde_json::Map<String, Value>;
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Usage {
+    /// All prompt tokens, including cache reads and writes.
+    pub input_tokens: f64,
+    pub output_tokens: f64,
+    pub cache_read_tokens: f64,
+    pub cache_write_tokens: f64,
+}
 
 /// `reply`, from a tool that finished what the producer asked, is the answer: when every call in
 /// the step succeeded and no guidance is waiting, the turn ends there without another model call.

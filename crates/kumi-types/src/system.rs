@@ -100,3 +100,42 @@ fn win32_join(root: &str, parts: &[&str]) -> String {
     }
     joined
 }
+
+/// `process.kill(pid, 0)`, including a process that exists but belongs to another user.
+pub fn alive(pid: f64) -> bool {
+    if !pid.is_finite() || pid.fract() != 0. || pid < i32::MIN as f64 || pid > i32::MAX as f64 {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) }
+    }
+    #[cfg(windows)]
+    {
+        use std::ffi::c_void;
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
+            fn GetExitCodeProcess(handle: *mut c_void, code: *mut u32) -> i32;
+            fn CloseHandle(handle: *mut c_void) -> i32;
+            fn GetLastError() -> u32;
+        }
+        if pid <= 0. {
+            return false;
+        }
+        unsafe {
+            let handle = OpenProcess(0x1000, 0, pid as u32);
+            if handle.is_null() {
+                return GetLastError() == 5;
+            }
+            let mut code = 0;
+            let alive = GetExitCodeProcess(handle, &mut code) != 0 && code == 259;
+            CloseHandle(handle);
+            alive
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        pid == std::process::id() as f64
+    }
+}

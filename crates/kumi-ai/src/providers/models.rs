@@ -1,15 +1,12 @@
 //! Model lists come from the provider itself.
 use super::{api_key_for, provider_info, Effort, ProviderId, EFFORTS, USER_AGENT};
 use crate::{
-    ai::{
-        error::LanguageModelError,
-        http::{default_fetch, Fetch, FetchInit, Headers},
-    },
     auth::{
         openai_codex::{codex_token_source, TokenOptions},
         store::CredentialStore,
     },
-    core::errors::{FailureKind, KumiError, RuntimeError},
+    error::LanguageModelError,
+    http::{default_fetch, Fetch, FetchInit, Headers},
 };
 use kumi_common::{
     abort::Signal,
@@ -18,6 +15,7 @@ use kumi_common::{
         string::{head, trim},
     },
 };
+use kumi_types::errors::{FailureKind, KumiError, RuntimeError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, rc::Rc, sync::LazyLock};

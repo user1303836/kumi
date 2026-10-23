@@ -14,9 +14,9 @@ use kumi_common::{
 };
 use serde_json::{json, Value};
 
-use super::contracts::Usage;
-use crate::ai::types::{CallOptions, Reasoning, StreamPart, StreamParts};
-use crate::version::KUMI_VERSION;
+use crate::types::{CallOptions, Reasoning, StreamPart, StreamParts};
+use kumi_types::contracts::Usage;
+use kumi_types::version::KUMI_VERSION;
 
 const MAX_BYTES: u64 = 512 * 1024;
 const KEEP_LINES: usize = 1000;
@@ -521,7 +521,7 @@ mod tests {
 
     #[tokio::test]
     async fn each_call_logs_its_input_and_what_the_cache_held() {
-        use crate::ai::types::{FinishReason, FinishReasonUnified, InputTokens, OutputTokens, Usage as ModelUsage};
+        use crate::types::{FinishReason, FinishReasonUnified, InputTokens, OutputTokens, Usage as ModelUsage};
         use futures::{stream, StreamExt};
         let finish = |input: f64, cached: Option<f64>| StreamPart::Finish {
             usage: ModelUsage {

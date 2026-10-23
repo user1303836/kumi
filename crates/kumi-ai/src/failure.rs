@@ -8,9 +8,9 @@ use kumi_common::js::string::{head, trim};
 use regex::Regex;
 use serde_json::Value;
 
-use crate::ai::error::{ApiCallError, LanguageModelError};
-use crate::core::errors::{FailureKind, KumiError};
-use crate::web::cause::{self, NetCause};
+use crate::error::{ApiCallError, LanguageModelError};
+use kumi_net::cause::{self, NetCause};
+use kumi_types::errors::{FailureKind, KumiError};
 
 /// How many times a model call is tried again (a busy or overloaded provider usually answers soon).
 pub const MAX_RETRIES: u32 = 3;
@@ -108,7 +108,7 @@ fn requested(call: &ApiCallError, now_ms: f64) -> Option<f64> {
     if after_ms.is_finite() && after_ms > 0.0 {
         return Some(after_ms);
     }
-    crate::web::net::retry_after(headers, None, Some(now_ms)).filter(|ms| ms.is_finite() && *ms > 0.0)
+    kumi_net::web::retry_after(headers, None, Some(now_ms)).filter(|ms| ms.is_finite() && *ms > 0.0)
 }
 
 /// The plan limit a failed call reports: ChatGPT's `usage_limit_reached` (with when it resets), a plan that doesn't
@@ -202,7 +202,7 @@ pub fn retry_reason(error: &LanguageModelError, binding_id: &str) -> String {
         Some(status) if status >= 500 => format!("{name} is having trouble (HTTP {status})"),
         Some(status) => format!("{name} asked Kumi to wait (HTTP {status})"),
         None => match refused_on_the_way(error)
-            .and_then(|_| cause::refused_words(error, &crate::system::process_env(), &crate::net::proxy::current()))
+            .and_then(|_| cause::refused_words(error, &kumi_types::system::process_env(), &kumi_net::proxy::current()))
         {
             Some(words) => format!("{name} couldn't be reached: {words}"),
             None => format!("{name} couldn't be reached"),
@@ -289,8 +289,8 @@ pub fn describe_failure(error: &LanguageModelError, binding_id: &str) -> KumiErr
         );
     }
     // A certificate or a proxy in the way: the cause, its fix and the proxy that call went through.
-    let env = crate::system::process_env();
-    let system = crate::net::proxy::current();
+    let env = kumi_types::system::process_env();
+    let system = kumi_net::proxy::current();
     let on_the_way = refused_on_the_way(error).and_then(|_| {
         let url = failed_call(error).map(|call| call.url.clone()).unwrap_or_default();
         cause::unreachable_call(name, &url, error, &env, &system)

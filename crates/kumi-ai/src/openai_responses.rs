@@ -5,7 +5,7 @@ use super::{
     sse::{json_stream, safe_json},
     types::*,
 };
-use crate::kernel::agent::LanguageModel;
+use crate::binding::LanguageModel;
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use futures::{Stream, StreamExt};

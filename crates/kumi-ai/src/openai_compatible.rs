@@ -9,7 +9,7 @@ use super::{
         ProviderMetadata, Reasoning, StreamPart, StreamParts, ToolCall, ToolChoice, ToolPart, ToolResultOutput, Usage, UserPart,
     },
 };
-use crate::kernel::agent::LanguageModel;
+use crate::binding::LanguageModel;
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use futures::{Stream, StreamExt};

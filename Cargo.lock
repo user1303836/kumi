@@ -1274,6 +1274,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "kumi-ai"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
+ "hex",
+ "home",
+ "indexmap",
+ "kumi-common",
+ "kumi-net",
+ "kumi-testkit",
+ "kumi-types",
+ "libc",
+ "memchr",
+ "ort",
+ "rand 0.9.5",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "kumi-common"
 version = "1.21.1"
 dependencies = [
@@ -1363,6 +1393,7 @@ dependencies = [
  "hmac",
  "home",
  "indexmap",
+ "kumi-ai",
  "kumi-common",
  "kumi-genexpr",
  "kumi-media",

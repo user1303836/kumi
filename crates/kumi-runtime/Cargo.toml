@@ -31,6 +31,7 @@ kumi-store.workspace = true
 kumi-types.workspace = true
 kumi-net.workspace = true
 kumi-media.workspace = true
+kumi-ai.workspace = true
 # Where REAPER and Renoise keep their libraries (the library learns them): the same detection as their bridges' setup.
 daw-bridge.workspace = true
 async-trait.workspace = true

@@ -5,21 +5,13 @@ use super::{
     ollama::{ollama_chat, FailurePhase, OllamaChatSettings, OllamaShape},
     words_only, Effort, PROVIDERS, USER_AGENT,
 };
-use crate::core::daw::DawProfile;
 use crate::{
-    ai::{
-        error::{ApiCallError, LanguageModelError},
-        http::{model_server_fetch, Fetch, FetchInit, Response},
-        openai_compatible::{openai_compatible, CompatibleSettings},
-        types::*,
-    },
-    core::errors::{FailureKind, KumiError, RuntimeError},
-    kernel::{
-        agent::{LanguageModel, ModelBinding, ModelRequest},
-        budget::{budget_for, BYTES_PER_TOKEN},
-        failure::clean_detail,
-    },
-    system::{env_var, platform},
+    binding::{budget_for, LanguageModel, ModelBinding, ModelRequest, BYTES_PER_TOKEN},
+    error::{ApiCallError, LanguageModelError},
+    failure::clean_detail,
+    http::{model_server_fetch, Fetch, FetchInit, Response},
+    openai_compatible::{openai_compatible, CompatibleSettings},
+    types::*,
 };
 use async_trait::async_trait;
 use futures::{
@@ -34,6 +26,9 @@ use kumi_common::{
         string::{head, trim, utf16_len},
     },
 };
+use kumi_types::daw::DawProfile;
+use kumi_types::errors::{FailureKind, KumiError, RuntimeError};
+use kumi_types::system::{env_var, platform};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::{
@@ -210,7 +205,7 @@ pub fn start_hint(server: &LocalServer) -> String {
     }
 }
 pub fn local_installed(kind: LocalKind, env: Option<&HashMap<String, String>>) -> bool {
-    let process = crate::system::process_env();
+    let process = kumi_types::system::process_env();
     let env = env.unwrap_or(&process);
     let home = home::home_dir().unwrap_or_default();
     let on_path = |name: &str| {
@@ -241,7 +236,7 @@ async fn request_json(
     } else {
         options.signal.clone()
     };
-    let mut headers = [("user-agent".into(), USER_AGENT.clone())].into_iter().collect::<crate::ai::http::Headers>();
+    let mut headers = [("user-agent".into(), USER_AGENT.clone())].into_iter().collect::<crate::http::Headers>();
     if body.is_some() {
         headers.insert("content-type".into(), "application/json".into());
     }
@@ -549,7 +544,7 @@ pub struct LocalModelOptions {
     pub effort: Option<Effort>,
     pub on_note: Option<Rc<dyn Fn(String)>>,
 }
-crate::daw_text!(
+kumi_types::daw_text!(
     #[allow(dead_code)]
     NO_TOOLS, no_tools:
     "This model can't use tools here: you see the ", place, " only as it's described above, and can't read more of it or change anything. When asked for a change, say so plainly, and that /model chooses a model that can make it."
@@ -814,7 +809,7 @@ impl LanguageModel for LocalCompatible {
         })?;
         if let Some(level) = self.state.effort_of() {
             call.provider_options.get_or_insert_with(Map::new).insert(self.state.server.id.clone(), json!({"reasoningEffort":level}));
-            crate::core::timing::asked_effort(level.as_str());
+            crate::timing::asked_effort(level.as_str());
         }
         let provider = openai_compatible(CompatibleSettings {
             name: self.state.server.id.clone(),
@@ -890,7 +885,7 @@ pub fn resolve_local_model(server: LocalServer, model: String, options: LocalMod
                     let facts = facts.as_ref().expect("readied learned facts");
                     let asked = state.effort_of();
                     if let Some(effort) = asked {
-                        crate::core::timing::asked_effort(effort.as_str());
+                        crate::timing::asked_effort(effort.as_str());
                     }
                     let think = asked
                         .map(|effort| json!(effort))

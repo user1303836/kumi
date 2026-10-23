@@ -3,10 +3,11 @@
 // Kumi's shared settings and types (kumi-types), where the runtime's code and the app have always named them.
 pub use kumi_types::{command, daw_text, daw_word, live_word, system, version};
 
-pub mod ai;
+// The model clients (kumi-ai), where the runtime's code and the app have always named them.
+pub use kumi_ai as ai;
 // Audio and voice (kumi-media), where the runtime's code and the app have always named them.
+pub use kumi_ai::auth;
 pub use kumi_media::audio;
-pub mod auth;
 pub mod core;
 pub mod devices;
 pub mod integrations;
@@ -16,12 +17,12 @@ pub mod kernel;
 pub mod library;
 pub mod listening;
 pub mod mcp;
-pub mod models;
+pub use kumi_ai::models;
 // How Kumi reaches the network (kumi-net), where the runtime's code and the app have always named it.
 pub use kumi_net as net;
 pub mod notation;
 pub mod plugins;
-pub mod providers;
+pub use kumi_ai::providers;
 pub mod references;
 pub mod slots;
 pub mod video;

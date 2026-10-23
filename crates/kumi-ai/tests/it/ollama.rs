@@ -2,15 +2,13 @@
 
 use async_trait::async_trait;
 use futures::{future::FutureExt, stream, StreamExt};
-use kumi_runtime::{
-    ai::{
-        error::LanguageModelError,
-        http::{Fetch, FetchInit, Response},
-        types::{CallOptions, FinishReasonUnified, FunctionTool, Message, StreamPart},
-    },
-    core::errors::{FailureKind, KumiError},
+use kumi_ai::{
+    error::LanguageModelError,
+    http::{Fetch, FetchInit, Response},
     providers::ollama::{ollama_chat, FailurePhase, OllamaChatSettings, OllamaShape},
+    types::{CallOptions, FinishReasonUnified, FunctionTool, Message, StreamPart},
 };
+use kumi_types::errors::{FailureKind, KumiError};
 use serde_json::{json, Value};
 use std::{cell::RefCell, rc::Rc};
 

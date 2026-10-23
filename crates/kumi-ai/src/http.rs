@@ -1,10 +1,10 @@
 //! Part of the `@ai-sdk` replacement (see `ai/mod.rs`).
 
 use super::error::{ApiCallError, LanguageModelError};
-use crate::net::proxy;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use kumi_common::{abort::Signal, js::json::stringify};
+use kumi_net::proxy;
 use serde_json::Value;
 use std::{collections::BTreeMap, pin::Pin, rc::Rc, sync::Arc};
 
@@ -81,14 +81,14 @@ impl HttpFetch {
     pub fn with_timeouts(connect: std::time::Duration, read: std::time::Duration) -> Self {
         Self::through(Arc::new(proxy::current), connect, read)
     }
-    /// For a model server the producer names: the variables' proxies alone ([`crate::net::model_servers`]).
+    /// For a model server the producer names: the variables' proxies alone ([`kumi_net::model_servers`]).
     pub fn model_servers() -> Self {
         Self::through(Arc::new(proxy::environment), CONNECT, QUIET)
     }
     /// With the proxies `proxies` gives.
     pub fn through(proxies: Proxies, connect: std::time::Duration, read: std::time::Duration) -> Self {
         let asked = Arc::clone(&proxies);
-        let client = crate::net::client_through(move || asked()).connect_timeout(connect).read_timeout(read).build();
+        let client = kumi_net::client_through(move || asked()).connect_timeout(connect).read_timeout(read).build();
         Self::with_client(client.expect("an HTTP client"), proxies)
     }
     /// A client made already, which goes by `proxies`.
@@ -123,12 +123,12 @@ impl Fetch for HttpFetch {
         let response = tokio::select! {
             biased;
             _ = signal.cancelled() => return Err(LanguageModelError::other("This operation was aborted")),
-            response = crate::net::send_through(request, (self.proxies)()) => response,
+            response = kumi_net::send_through(request, (self.proxies)()) => response,
         };
         let response = response.map_err(|error| {
             let mut api = ApiCallError::new(format!("Cannot connect to API: {error}"), url, None, None);
             api.is_retryable = error.is_connect() || error.is_timeout() || error.is_body() || error.is_request();
-            api.cause = Some(crate::web::cause::chain(&error));
+            api.cause = Some(kumi_net::cause::chain(&error));
             LanguageModelError::from(api)
         })?;
         let status = response.status();
@@ -146,7 +146,7 @@ impl Fetch for HttpFetch {
                 biased;
                 _ = signal.cancelled() => Some(Err(LanguageModelError::other("This operation was aborted"))),
                 // What went wrong is kept with its causes: `web::cause` reads them.
-                chunk = source.next() => chunk.map(|chunk| chunk.map(|bytes| bytes.to_vec()).map_err(|error| LanguageModelError::other(crate::web::cause::chain(&error)))),
+                chunk = source.next() => chunk.map(|chunk| chunk.map(|bytes| bytes.to_vec()).map_err(|error| LanguageModelError::other(kumi_net::cause::chain(&error)))),
             };
             let ended = next.as_ref().is_some_and(Result::is_err);
             next.map(|next| (next, (source, signal, ended)))
@@ -171,7 +171,7 @@ pub async fn post_json(
     let mut headers = headers;
     headers.entry("content-type".into()).or_insert_with(|| "application/json".into());
     let text = stringify(&body);
-    crate::core::timing::sent(text.len());
+    crate::timing::sent(text.len());
     let mut response = fetch.fetch(url, FetchInit { method: "POST".into(), headers, body: Some(text), signal: signal.clone() }).await?;
     if response.ok() && response.body.is_some() {
         let status = response.status;
@@ -265,7 +265,7 @@ mod transport_tests {
             let api = failure.api_call().expect("an API call error");
             assert_eq!(api.status_code, Some(200));
             assert!(api.is_retryable, "dropped: {drop_connection}: {failure:?}");
-            assert_eq!(crate::kernel::failure::retry_delay_ms(&failure, 0), Some(750.0));
+            assert_eq!(crate::failure::retry_delay_ms(&failure, 0), Some(750.0));
         }
     }
 
@@ -290,9 +290,9 @@ mod transport_tests {
 
     #[tokio::test]
     async fn a_system_proxy_that_wants_a_sign_in_kumi_cant_give_is_passed_by() {
-        use crate::net::proxy::{pass_by, Settings};
-        let _turn = crate::net::proxy::PASSING_BY.lock().await;
-        crate::net::proxy::stop_passing_by();
+        use kumi_net::proxy::{pass_by, Settings};
+        let _turn = kumi_net::proxy::PASSING_BY.lock().await;
+        kumi_net::proxy::stop_passing_by();
         let wants = b"HTTP/1.1 407 Proxy Authentication Required\r\nproxy-authenticate: NTLM\r\ncontent-length: 0\r\n\r\n";
         let (proxy, asked) = answering(wants).await;
         let (target, _) = answering(b"HTTP/1.1 200 OK\r\ncontent-length: 6\r\n\r\ndirect").await;
@@ -302,7 +302,7 @@ mod transport_tests {
             let proxies: Proxies = std::sync::Arc::new(move || std::sync::Arc::clone(&settings));
             let asked = std::sync::Arc::clone(&proxies);
             // A name for this computer that isn't one by its name, so a proxy is asked for it.
-            let client = crate::net::client_through(move || asked()).resolve("kumi-pass-by.test", target).resolve("kumi-gone.test", gone);
+            let client = kumi_net::client_through(move || asked()).resolve("kumi-pass-by.test", target).resolve("kumi-gone.test", gone);
             HttpFetch::with_client(client.build().unwrap(), proxies)
         };
         let get = |fetch: HttpFetch, url: String| async move {
@@ -316,12 +316,12 @@ mod transport_tests {
         assert_eq!(get(through(system()), url.clone()).await, (200, "direct".to_string()));
         assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1, "passed by after its first 407");
         // A variable's proxy is the producer's to sign in to: its 407 stands.
-        let env = crate::system::Env::from([("HTTP_PROXY".to_string(), format!("http://{proxy}"))]);
+        let env = kumi_types::system::Env::from([("HTTP_PROXY".to_string(), format!("http://{proxy}"))]);
         let variables = Settings::from_env(&env).unwrap();
         assert!(!pass_by(&variables, &reqwest::Url::parse(&url).unwrap()));
         assert_eq!(get(through(variables), url.clone()).await.0, 407);
         // Directly fails too: its 407 is what's said, and the proxy is asked again next time.
-        crate::net::proxy::stop_passing_by();
+        kumi_net::proxy::stop_passing_by();
         let nowhere = format!("http://kumi-gone.test:{}/", gone.port());
         assert_eq!(get(through(system()), nowhere).await.0, 407);
         let before = asked.load(std::sync::atomic::Ordering::SeqCst);
@@ -334,8 +334,8 @@ mod transport_tests {
 #[cfg(test)]
 mod cause_tests {
     use super::*;
-    use crate::net::proxy;
-    use crate::web::cause::NetCause;
+    use kumi_net::cause::NetCause;
+    use kumi_net::proxy;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
