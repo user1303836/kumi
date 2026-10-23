@@ -4,8 +4,8 @@ Kumi is a terminal agent that drives DAWs: Ableton Live, REAPER and Renoise (Log
 It's one Cargo workspace. Each DAW is reached through a bridge that runs inside or beside it.
 
 ## Where things live
-- `crates/kumi`: the app. TUI (`src/tui/`), CLI, install/update/doctor; `src/daw/` wires each DAW in, and its
-  `registry` names the DAWs this build integrates (the only place that names them all).
+- `crates/kumi`: the app. TUI (`src/tui/`), CLI, install/update/doctor; `src/daw/` is wiring only: its `registry`, the
+  DAW table (each DAW's provider: the only place that names them all), and the DAW a run works with.
 - `crates/kumi-daw`: what a DAW's crate gives the app and gets from it: `DawProvider` (what the DAW is, its bridge
   found, installed, checked and taken out), the doctor's `Check`, setup's DAW side, and the small ports a DAW's steps
   use (`io`: what they say, ask and run, and `Answers`, a test's stand-ins by type). No terminal or UI types.
@@ -21,11 +21,14 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
   checked, its bridge put in, updated, rolled back and taken out, its part of the doctor, the report and setup).
 - `daws/own/`: Kumi's own bridges, for REAPER and Renoise: `daw-bridge/` (the `kumi-daw/1` wire) and
   `daw-mcp-server/` (the host; what's one DAW's alone is in its `src/reaper/` and `src/renoise/`); `kumi-daw-own/`
-  is what REAPER's and Renoise's integrations share, host side.
+  is what REAPER's and Renoise's integrations share, host side, and their provider (`provider`: one for both, configured
+  by the value each DAW's crate exports).
 - `daws/reaper/reaper-kumi`: REAPER's extension (Rust, built against REAPER's SDK headers in its `sdk/`);
-  `daws/reaper/kumi-daw-reaper`: REAPER, host side (its integration, the tools only REAPER has, its library).
+  `daws/reaper/kumi-daw-reaper`: REAPER, host side (its integration, the tools only REAPER has, its library, and its
+  provider's value, `PROVIDER`).
 - `daws/renoise/`: Renoise's tool, `com.kumi.Bridge.xrnx` (Lua), and its tests against a mock of Renoise's API;
-  `daws/renoise/kumi-daw-renoise`: Renoise, host side (its integration, the tools only Renoise has, its library).
+  `daws/renoise/kumi-daw-renoise`: Renoise, host side (its integration, the tools only Renoise has, its library, and
+  its provider's value, `PROVIDER`).
 - `crates/kumi-types`: what every layer names: DAW profiles and words, the contracts with the tools, errors, places,
   the system and the version.
 - `crates/kumi-net`: how Kumi reaches the network: its HTTP clients (proxies, trust), why a request got no answer

@@ -27,12 +27,12 @@ How the repository fits together, how to work on each part, and how to release.
 | `daws/ableton/protocol` | `ableton-live-v1.operations.json`, the operation registry the bridge and the Remote Script share |
 | `scripts` | Release builders, migration packaging, the Mac helper's build, the isolated test runners, and `native-kumi.mjs` behind `npm run kumi` and `npm run setup` |
 | `daws/own/daw-mcp-server` | Kumi's host for REAPER and Renoise (`daw-mcp-server --daw reaper\|renoise`): MCP over stdio, the changes' journal and undo, listening jobs, catch-up; also usable by other MCP clients |
-| `daws/own/kumi-daw-own` | What REAPER's and Renoise's integrations share, host side: the integration through Kumi's own bridges, the change engine and its undo, catching up, listening, audio to MIDI and stems, instant phrases, the pictures and FOCUS views, kept scripts and delivery to a spec |
-| `daws/reaper/kumi-daw-reaper` | REAPER, host side: its integration through Kumi's own bridge, the tools only REAPER has (variations of its items, delivery, routing) and where its library is |
+| `daws/own/kumi-daw-own` | What REAPER's and Renoise's integrations share, host side: the integration through Kumi's own bridges, the change engine and its undo, catching up, listening, audio to MIDI and stems, instant phrases, the pictures and FOCUS views, kept scripts and delivery to a spec, and the provider both DAWs' bridges are found, installed, checked and taken out through (`provider`) |
+| `daws/reaper/kumi-daw-reaper` | REAPER, host side: its integration through Kumi's own bridge, the tools only REAPER has (variations of its items, delivery, routing), where its library is, and its provider's value (`PROVIDER`) |
 | `daws/reaper/reaper-kumi` | Kumi's REAPER extension (`reaper_kumi`), built against REAPER's SDK headers vendored in `sdk/` |
 | `daws/own/daw-bridge` | What the REAPER and Renoise bridges share: the loopback wire (`kumi-daw/1`), its handshake and auth, discovery, finding the DAWs, the doctor's checks and the bridge files' lifecycle |
 | `daws/renoise` | Kumi's Renoise tool (`com.kumi.Bridge.xrnx`, Lua) and its tests against a mock of Renoise's API |
-| `daws/renoise/kumi-daw-renoise` | Renoise, host side: its integration through Kumi's own bridge, the tools only Renoise has (variations of its lines and phrases, the sample map, chopping, cleaning up jams, layered breaks) and where its library is |
+| `daws/renoise/kumi-daw-renoise` | Renoise, host side: its integration through Kumi's own bridge, the tools only Renoise has (variations of its lines and phrases, the sample map, chopping, cleaning up jams, layered breaks), where its library is, and its provider's value (`PROVIDER`) |
 | `install.sh`, `install.ps1` | The installers |
 
 The crates share the root Cargo workspace; there's no npm workspace. The

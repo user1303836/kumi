@@ -17,7 +17,6 @@ use daw_mcp_server::{
 use futures::FutureExt;
 use kumi::{
     cli::{run, CliIo},
-    daw::own::OwnHosts,
     input::{ByteListener, TerminalInput},
     tui::tty::TtyOutput,
 };
@@ -25,6 +24,7 @@ use kumi_agent::mcp::client::{McpEndpoint, StderrStatus};
 use kumi_agent::mcp::types::{CallToolResult, Implementation, ListToolsResult};
 use kumi_common::abort::Signal;
 use kumi_daw_ableton::app::AbletonFactory;
+use kumi_daw_own::provider::OwnHosts;
 use kumi_types::contracts::*;
 use kumi_types::system::Env;
 use kumi_types::{daw::DawId, errors::RuntimeError};

@@ -26,12 +26,12 @@
 | `daws/ableton/protocol` | `ableton-live-v1.operations.json`。ブリッジと Remote Script が共有する操作のレジストリ |
 | `scripts` | リリースのビルダー、移行用のパッケージング、Mac のヘルパーのビルド、分離テストランナー、そして `npm run kumi` と `npm run setup` が使う `native-kumi.mjs` |
 | `daws/own/daw-mcp-server` | REAPER と Renoise のための Kumi のホスト（`daw-mcp-server --daw reaper\|renoise`）：stdio 上の MCP、変更のジャーナルと取り消し、聴くジョブ、離れていた間の変化。ほかの MCP クライアントからも使えます |
-| `daws/own/kumi-daw-own` | REAPER と Renoise の連携が共有するホスト側：Kumi 独自のブリッジを通した連携、変更のエンジンとその取り消し、離れていた間の変化、聴くこと、オーディオから MIDI とステム、インスタントフレーズ、図と FOCUS ビュー、残したスクリプト、ラウドネス仕様に合わせた書き出し |
-| `daws/reaper/kumi-daw-reaper` | REAPER のホスト側：Kumi 独自のブリッジを通した連携、REAPER だけのツール（アイテムのバリエーション、書き出し、ルーティング）、ライブラリーの場所 |
+| `daws/own/kumi-daw-own` | REAPER と Renoise の連携が共有するホスト側：Kumi 独自のブリッジを通した連携、変更のエンジンとその取り消し、離れていた間の変化、聴くこと、オーディオから MIDI とステム、インスタントフレーズ、図と FOCUS ビュー、残したスクリプト、ラウドネス仕様に合わせた書き出し、両 DAW のブリッジの検出・インストール・確認・削除を担うプロバイダー（`provider`） |
+| `daws/reaper/kumi-daw-reaper` | REAPER のホスト側：Kumi 独自のブリッジを通した連携、REAPER だけのツール（アイテムのバリエーション、書き出し、ルーティング）、ライブラリーの場所、プロバイダーに渡す値（`PROVIDER`） |
 | `daws/reaper/reaper-kumi` | Kumi の REAPER 拡張機能（`reaper_kumi`）。`sdk/` に同梱した REAPER の SDK ヘッダーでビルドします |
 | `daws/own/daw-bridge` | REAPER と Renoise のブリッジが共有するもの：ループバックの通信（`kumi-daw/1`）、そのハンドシェイクと認証、ディスカバリー、DAW の検出、doctor のチェック、ブリッジのファイルのライフサイクル |
 | `daws/renoise` | Kumi の Renoise ツール（`com.kumi.Bridge.xrnx`、Lua）と、Renoise の API のモックに対するそのテスト |
-| `daws/renoise/kumi-daw-renoise` | Renoise のホスト側：Kumi 独自のブリッジを通した連携、Renoise だけのツール（行とフレーズのバリエーション、サンプルマップ、チョップ、ジャムの整理、ブレイクのレイヤー）、ライブラリーの場所 |
+| `daws/renoise/kumi-daw-renoise` | Renoise のホスト側：Kumi 独自のブリッジを通した連携、Renoise だけのツール（行とフレーズのバリエーション、サンプルマップ、チョップ、ジャムの整理、ブレイクのレイヤー）、ライブラリーの場所、プロバイダーに渡す値（`PROVIDER`） |
 | `install.sh`、`install.ps1` | インストーラー |
 
 クレートはルートの Cargo ワークスペースを共有します。npm のワークスペースはありません。ブリッジは Kumi なしでも動きます。クレートの移植元である TypeScript 実装は、git タグ `v1.7.6` に残っています。

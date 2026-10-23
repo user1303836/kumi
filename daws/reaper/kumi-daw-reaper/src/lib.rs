@@ -4,6 +4,7 @@
 pub mod changes;
 mod delivery;
 pub mod library;
+mod provider;
 mod routing;
 mod variations;
 
@@ -39,6 +40,8 @@ const INSTRUCTIONS: &str = concat!(
     " Keep the producer's colours and naming; colour tracks by family only in an uncoloured project.",
     " Corrective work takes ReaEQ, ReaComp, ReaLimit and JS; reverb, saturation and instruments come from what the producer has installed first (REAPER's own instruments are ReaSynth, ReaSynDr and ReaSamplOmatic5000). A multi-FX sound to keep goes in a container with macros; match levels before comparing."
 );
+
+pub use provider::PROVIDER;
 
 pub const DAW: OwnDaw = OwnDaw {
     profile: &DawProfile::REAPER,

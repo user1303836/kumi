@@ -10,6 +10,7 @@ publish = false
 
 [dependencies]
 kumi-common.workspace = true
+kumi-daw.workspace = true
 kumi-daw-own.workspace = true
 kumi-library.workspace = true
 kumi-listening.workspace = true
