@@ -12,7 +12,7 @@ use super::super::{
 };
 use super::drawing::{sp, st};
 use super::*;
-use kumi_ai::providers::{provider_info, SignIn};
+use kumi_ai::providers::{table, SignIn};
 use kumi_common::abort;
 use kumi_daw::{
     provider::{older_than, EnableStep, Installed as LiveInstalled},
@@ -136,12 +136,14 @@ pub fn waveform(width: usize, phase: Option<f64>) -> String {
 
 /// How the producer can sign in, as the setup offers it.
 fn sign_in_choices() -> Vec<Choice> {
-    vec![
-        choice("ChatGPT", "your ChatGPT plan · opens your browser", "openai-codex"),
-        choice("Anthropic", "paste an API key", "anthropic"),
-        choice("OpenAI", "paste an API key", "openai"),
-        choice("OpenCode", "paste an API key", "opencode"),
-    ]
+    table::first_choices()
+        .into_iter()
+        .map(|(provider, label)| {
+            let how =
+                if provider.row().sign_in == SignIn::Chatgpt { "your ChatGPT plan · opens your browser" } else { "paste an API key" };
+            choice(label, how, provider.as_str())
+        })
+        .collect()
 }
 
 /// Models on this computer, offered beside the providers while one of their servers runs.
@@ -502,7 +504,7 @@ impl TuiApp {
                 Ok(())
             }
         });
-        let browser = provider_info(provider).sign_in != SignIn::ApiKey;
+        let browser = provider.row().sign_in != SignIn::ApiKey;
         self.setup_show(move |s| {
             s.choices.clear();
             s.say.clear();
@@ -1036,7 +1038,7 @@ impl TuiApp {
         if let Some(panel) = panel.filter(|_| shown) {
             match &*panel.borrow() {
                 Panel::Key { provider, secret, checking, status, .. } => {
-                    let info = provider_info(*provider);
+                    let info = provider.row();
                     say(screen, &mut y, &format!("Paste your {} API key. It stays hidden, even here.", info.name), st::TEXT);
                     y += 1;
                     let count = secret.encode_utf16().count();

@@ -1,6 +1,6 @@
 use kumi_ai::providers::{
     local::{local_servers, parse_local_model_id, ServerSetting, LOCAL_PROVIDERS},
-    parse_model_id, provider_info, Effort, ProviderId, SignIn, PROVIDERS,
+    parse_model_id, table, Effort, ProviderId, SignIn,
 };
 use kumi_common::js::{
     json::file_text,
@@ -548,7 +548,7 @@ pub fn valid_model(model: Option<&str>, servers: &[ServerSetting]) -> bool {
     })
 }
 fn sources() -> String {
-    format!("{} (or a server in settings.json)", PROVIDERS.iter().map(|p| p.as_str()).chain(LOCAL_PROVIDERS).collect::<Vec<_>>().join(", "))
+    format!("{} (or a server in settings.json)", table::rows().map(|row| row.id).chain(LOCAL_PROVIDERS).collect::<Vec<_>>().join(", "))
 }
 pub fn load_inference_config(env: &Env) -> Result<InferenceConfig, RuntimeError> {
     let settings = read_settings(&load_settings_file(env)?);
@@ -769,7 +769,7 @@ pub fn load_config(args: &[String], env: &Env) -> Result<AppConfig, RuntimeError
             return Err(RuntimeError::plain(format!(
                 "Use: {} <provider>, with provider one of {}.",
                 first.unwrap(),
-                PROVIDERS.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ")
+                table::rows().map(|row| row.id).collect::<Vec<_>>().join(", ")
             )));
         };
         if first == Some("logout") {
@@ -778,7 +778,7 @@ pub fn load_config(args: &[String], env: &Env) -> Result<AppConfig, RuntimeError
             }
             return Ok(AppConfig::Logout { provider, auth_file: load_auth_file(env)? });
         }
-        let chatgpt = provider_info(provider).sign_in == SignIn::Chatgpt;
+        let chatgpt = provider.row().sign_in == SignIn::Chatgpt;
         let method = if chatgpt && args.len() <= 3 {
             match at(2).unwrap_or("") {
                 "" => Some(chatgpt_sign_in(env)),

@@ -590,7 +590,7 @@ case!(usage_status_api_plan_and_conversation_picker, async {
         let m = FakeModels::catalog();
         if keyed {
             *m.model.borrow_mut() = Some("anthropic/claude-sonnet-5-5".into());
-            m.signed_in.borrow_mut().insert(kumi_ai::providers::ProviderId::Anthropic);
+            m.signed_in.borrow_mut().insert(kumi_ai::providers::ProviderId::parse("anthropic").unwrap());
         }
         let h = model_harness(m, 240);
         h.start().await;

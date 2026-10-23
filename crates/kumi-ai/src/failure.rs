@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use kumi_common::js::json::stringify;
@@ -9,6 +8,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::error::{ApiCallError, LanguageModelError};
+use crate::providers::ProviderId;
 use kumi_net::cause::{self, NetCause};
 use kumi_types::errors::{FailureKind, KumiError};
 
@@ -219,7 +219,11 @@ pub fn refused_on_the_way(error: &LanguageModelError) -> Option<NetCause> {
 /// A provider by the name producers know it ("ChatGPT"), from a binding id ("openai-codex/gpt-6-sol").
 pub fn provider_name(binding_id: &str) -> &str {
     let provider = binding_id.split('/').next().unwrap_or(binding_id);
-    PROVIDER_NAMES.get(provider).copied().unwrap_or(provider)
+    said_name(provider)
+}
+/// A provider by the name producers know it in a sentence; its ID otherwise (a server's).
+fn said_name(provider: &str) -> &str {
+    ProviderId::parse(provider).map_or(provider, |id| id.row().short_name)
 }
 
 /// When a plan's limit resets, in the producer's words: "14:20", "Tue 09:00" past a day away.
@@ -233,17 +237,6 @@ pub fn reset_words(resets_at_ms: f64, now_ms: f64) -> String {
     }
 }
 
-/// Providers by the name producers know them; the binding id's prefix otherwise.
-static PROVIDER_NAMES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
-    HashMap::from([
-        ("openai-codex", "ChatGPT"),
-        ("openai", "OpenAI"),
-        ("anthropic", "Anthropic"),
-        ("opencode", "OpenCode Zen"),
-        ("opencode-go", "OpenCode Go"),
-    ])
-});
-
 /// Map any inference failure to a message Kumi wrote, tagged with the provider it concerns so the
 /// app can offer the fix (sign in again, choose another model). Provider detail is bounded and never
 /// includes credentials.
@@ -253,7 +246,7 @@ pub fn describe_failure(error: &LanguageModelError, binding_id: &str) -> KumiErr
     }
     let provider = binding_id.split('/').next().unwrap_or(binding_id);
     let model = binding_id.get(provider.len() + 1..).filter(|rest| !rest.is_empty()).unwrap_or(binding_id);
-    let name = PROVIDER_NAMES.get(provider).copied().unwrap_or(provider);
+    let name = said_name(provider);
     let now = kumi_common::time::now_ms_f64();
     match plan_limit(error, now) {
         Some(PlanLimit::Reached { resets_at_ms }) => {

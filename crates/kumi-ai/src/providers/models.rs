@@ -1,5 +1,9 @@
 //! Model lists come from the provider itself.
-use super::{api_key_for, provider_info, Effort, ProviderId, EFFORTS, USER_AGENT};
+use super::{
+    api_key_for,
+    table::{KeyCheck, KeyHeader, Listing},
+    Effort, ProviderId, ProviderRow, SignIn, EFFORTS, USER_AGENT,
+};
 use crate::{
     auth::{
         openai_codex::{codex_token_source, TokenOptions},
@@ -84,7 +88,7 @@ async fn get_json(url: &str, mut headers: Headers, options: &Transport, provider
         .fetch(url, FetchInit { headers, signal: options.signal.clone(), ..Default::default() })
         .await
         .map_err(error)?;
-    let name = provider_info(provider).name;
+    let name = provider.row().name;
     if matches!(response.status, 401 | 403) {
         return Err(KumiError::with_provider(
             FailureKind::Auth,
@@ -168,11 +172,12 @@ fn created(value: &Value) -> f64 {
 }
 pub async fn list_models(provider: ProviderId, options: ListOptions) -> Result<Vec<ModelInfo>, RuntimeError> {
     let transport = Transport { fetch: options.fetch.clone(), signal: options.signal };
-    if provider == ProviderId::OpenaiCodex {
+    let row = provider.row();
+    if row.sign_in == SignIn::Chatgpt {
         let token = codex_token_source(options.store, TokenOptions { fetch: options.fetch, now: None })();
         let token = token.await?;
         let body = get_json(
-            "https://chatgpt.com/backend-api/codex/models?client_version=1.0.0",
+            &list_url(row),
             [
                 ("authorization".into(), format!("Bearer {}", token.access)),
                 ("chatgpt-account-id".into(), token.account_id),
@@ -222,25 +227,29 @@ pub async fn list_models(provider: ProviderId, options: ListOptions) -> Result<V
         .await?
         .map(|k| k.key)
         .filter(|k| !k.is_empty())
-        .ok_or_else(|| {
-            KumiError::with_provider(FailureKind::Auth, format!("Not signed in to {}.", provider_info(provider).name), provider.as_str())
-        })?;
+        .ok_or_else(|| KumiError::with_provider(FailureKind::Auth, format!("Not signed in to {}.", row.name), provider.as_str()))?;
     list_with_key(provider, &key, &transport).await
 }
+/// Where a provider lists its models.
+fn list_url(row: &ProviderRow) -> String {
+    format!("{}{}", row.base_url, row.list.0)
+}
+/// The headers that carry a key to a provider's API.
+fn key_headers(row: &ProviderRow, key: &str) -> Headers {
+    match row.key_header {
+        KeyHeader::Bearer => [("authorization".into(), format!("Bearer {key}"))].into(),
+        KeyHeader::Anthropic => [("x-api-key".into(), key.into()), ("anthropic-version".into(), "2023-06-01".into())].into(),
+    }
+}
 async fn list_with_key(provider: ProviderId, key: &str, options: &Transport) -> Result<Vec<ModelInfo>, RuntimeError> {
-    let (url, headers) = match provider {
-        ProviderId::Anthropic => (
-            "https://api.anthropic.com/v1/models?limit=100",
-            [("x-api-key".into(), key.into()), ("anthropic-version".into(), "2023-06-01".into())].into(),
-        ),
-        ProviderId::Openai => ("https://api.openai.com/v1/models", [("authorization".into(), format!("Bearer {key}"))].into()),
-        ProviderId::Opencode => ("https://opencode.ai/zen/v1/models", [("authorization".into(), format!("Bearer {key}"))].into()),
-        ProviderId::OpencodeGo => ("https://opencode.ai/zen/go/v1/models", [("authorization".into(), format!("Bearer {key}"))].into()),
-        ProviderId::OpenaiCodex => return Ok(vec![]),
-    };
-    let body = get_json(url, headers, options, provider).await?;
+    let row = provider.row();
+    let listing = row.list.1;
+    if listing == Listing::Chatgpt {
+        return Ok(vec![]);
+    }
+    let body = get_json(&list_url(row), key_headers(row, key), options, provider).await?;
     let mut rows: Vec<_> = body["data"].as_array().into_iter().flatten().filter(|r| r["id"].is_string()).collect();
-    if provider == ProviderId::Openai {
+    if listing == Listing::OpenaiChat {
         static EXCLUDED: LazyLock<regex::Regex> =
             LazyLock::new(|| regex::Regex::new("audio|realtime|tts|transcribe|image|search|embedding|instruct|moderation").unwrap());
         rows.retain(|row| {
@@ -249,19 +258,17 @@ async fn list_with_key(provider: ProviderId, key: &str, options: &Transport) -> 
                 && !EXCLUDED.is_match(model)
         });
         rows.sort_by(|a, b| created(&b["created"]).partial_cmp(&created(&a["created"])).unwrap_or(std::cmp::Ordering::Equal));
-    } else if matches!(provider, ProviderId::Opencode | ProviderId::OpencodeGo) {
-        rows.retain(|row| !row["id"].as_str().unwrap().starts_with("gemini-"));
     }
+    // A model Kumi can't send a request to isn't offered.
+    rows.retain(|listed| row.format_for(listed["id"].as_str().unwrap()).is_ok());
     Ok(rows
         .into_iter()
-        .map(|row| {
-            let mut info = from_id(
-                provider,
-                row["id"].as_str().unwrap(),
-                if provider == ProviderId::Anthropic { text(&row["display_name"], 60) } else { None },
-            );
-            if provider == ProviderId::Anthropic {
-                let effort = &row["capabilities"]["effort"];
+        .map(|listed| {
+            let anthropic = listing == Listing::Anthropic;
+            let mut info =
+                from_id(provider, listed["id"].as_str().unwrap(), if anthropic { text(&listed["display_name"], 60) } else { None });
+            if anthropic {
+                let effort = &listed["capabilities"]["effort"];
                 if effort["supported"] == false {
                     info.efforts.clear();
                 } else if effort["supported"] == true {
@@ -280,8 +287,11 @@ pub enum ApiKeyCheck {
     Unreachable,
 }
 pub async fn check_api_key(provider: ProviderId, key: &str, options: Transport) -> ApiKeyCheck {
-    match list_with_key(provider, key, &options).await {
-        Ok(_) => ApiKeyCheck::Ok,
+    let checked = match provider.row().key_check {
+        KeyCheck::List => list_with_key(provider, key, &options).await.map(|_| ()),
+    };
+    match checked {
+        Ok(()) => ApiKeyCheck::Ok,
         Err(RuntimeError::Kumi(error)) if error.kind == FailureKind::Auth => ApiKeyCheck::Refused,
         Err(_) => ApiKeyCheck::Unreachable,
     }

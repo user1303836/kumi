@@ -3,7 +3,11 @@
 mod live_words;
 use futures::FutureExt;
 use kumi::{doctor::*, tui::tty::TtyOutput};
-use kumi_ai::providers::{local::local_servers, models::ModelInfo};
+use kumi_ai::providers::{
+    local::{local_servers, ServerSetting},
+    models::ModelInfo,
+    table::{add_test_rows, ProviderRow, API_KEY_ROW},
+};
 use kumi_common::time::now_ms;
 use kumi_daw::{
     check::{Bundled, Check, CheckStatus, Probe, Probes},
@@ -821,4 +825,34 @@ async fn a_kumi_daw_kumi_doesnt_know_is_a_fix_the_doctor_names() {
     assert_eq!(fix.status, CheckStatus::Fix);
     assert_eq!(fix.text, "Kumi won't start: KUMI_DAW must be one of: ableton, reaper, renoise.");
     assert_eq!(fix.next.as_deref(), Some("Set KUMI_DAW to one of those, or unset it"));
+}
+/// A provider added after the first five, as Venice would be: only this test's thread has it.
+static ADDED: [ProviderRow; 1] = [ProviderRow {
+    id: "venice",
+    name: "Venice AI",
+    short_name: "Venice",
+    credential: "venice",
+    key_env: &["VENICE_API_KEY"],
+    base_url: "https://api.venice.ai/api/v1",
+    ..API_KEY_ROW
+}];
+#[tokio::test(flavor = "current_thread")]
+async fn doctor_names_the_custom_server_that_hides_a_provider_added_later_and_says_how_to_switch() {
+    add_test_rows(&ADDED);
+    let s = Setup::new();
+    let setting = ServerSetting { name: "Venice".into(), base_url: "https://venice.example.test/v1".into(), api_key: None };
+    fs::write(&s.env["KUMI_SETTINGS_FILE"], json!({"modelServers":[setting]}).to_string()).unwrap();
+    let server = local_servers(&[setting], &Env::new()).unwrap().remove(2);
+    let mut io = s.io();
+    servers(&mut io, vec![ServerFinding { server, running: true, models: Some(vec![]) }]);
+    io.env.insert("KUMI_MODEL".into(), "venice/qwen3-coder".into());
+    let checks = doctor_checks(&io).await.unwrap();
+    assert_eq!(checks[1], Check::ok("Venice on venice.example.test · model venice/qwen3-coder"));
+    assert_eq!(
+        find(&checks, "Your server Venice"),
+        &Check::note(
+            "Your server Venice, in settings.json, has the ID venice, so Kumi's own Venice AI is hidden",
+            Some("To use Kumi's Venice AI, rename that server in settings.json (modelServers), then sign in with /login".into())
+        )
+    );
 }

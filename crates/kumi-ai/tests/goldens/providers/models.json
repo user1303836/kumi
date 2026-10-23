@@ -1,0 +1,570 @@
+{
+  "openai-codex": [
+    {
+      "id": "openai-codex/gpt-6-nova",
+      "provider": "openai-codex",
+      "model": "gpt-6-nova",
+      "name": "GPT-6 Nova ✦",
+      "efforts": []
+    },
+    {
+      "id": "openai-codex/gpt-6-astra",
+      "provider": "openai-codex",
+      "model": "gpt-6-astra",
+      "name": "GPT-6 Astra",
+      "efforts": [
+        {
+          "effort": "low"
+        },
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        },
+        {
+          "effort": "xhigh"
+        }
+      ],
+      "defaultEffort": "medium",
+      "serviceTiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "2x speed, increased usage"
+        }
+      ]
+    },
+    {
+      "id": "openai-codex/gpt-6-luna",
+      "provider": "openai-codex",
+      "model": "gpt-6-luna",
+      "name": "GPT-6 Luna",
+      "description": "Fast",
+      "efforts": [
+        {
+          "effort": "low",
+          "description": "Quick"
+        },
+        {
+          "effort": "medium"
+        }
+      ],
+      "defaultEffort": "low"
+    },
+    {
+      "id": "openai-codex/gpt-5.4-pro",
+      "provider": "openai-codex",
+      "model": "gpt-5.4-pro",
+      "name": "GPT-5.4 Pro",
+      "efforts": [
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        },
+        {
+          "effort": "xhigh"
+        }
+      ]
+    },
+    {
+      "id": "openai-codex/codex/mini beta",
+      "provider": "openai-codex",
+      "model": "codex/mini beta",
+      "name": "codex/mini beta",
+      "efforts": []
+    }
+  ],
+  "openai": [
+    {
+      "id": "openai/gpt-5.4-pro",
+      "provider": "openai",
+      "model": "gpt-5.4-pro",
+      "name": "gpt-5.4-pro",
+      "efforts": [
+        {
+          "effort": "low"
+        },
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        }
+      ]
+    },
+    {
+      "id": "openai/gpt-6-astra",
+      "provider": "openai",
+      "model": "gpt-6-astra",
+      "name": "gpt-6-astra",
+      "efforts": [
+        {
+          "effort": "low"
+        },
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        },
+        {
+          "effort": "xhigh"
+        },
+        {
+          "effort": "max"
+        }
+      ]
+    },
+    {
+      "id": "openai/gpt-6-luna",
+      "provider": "openai",
+      "model": "gpt-6-luna",
+      "name": "gpt-6-luna",
+      "efforts": [
+        {
+          "effort": "low"
+        },
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        },
+        {
+          "effort": "xhigh"
+        },
+        {
+          "effort": "max"
+        }
+      ]
+    },
+    {
+      "id": "openai/o5-mini",
+      "provider": "openai",
+      "model": "o5-mini",
+      "name": "o5-mini",
+      "efforts": [
+        {
+          "effort": "low"
+        },
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        }
+      ]
+    },
+    {
+      "id": "openai/gpt-5-nano",
+      "provider": "openai",
+      "model": "gpt-5-nano",
+      "name": "gpt-5-nano",
+      "efforts": [
+        {
+          "effort": "low"
+        },
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        }
+      ]
+    },
+    {
+      "id": "openai/o3",
+      "provider": "openai",
+      "model": "o3",
+      "name": "o3",
+      "efforts": [
+        {
+          "effort": "low"
+        },
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        }
+      ]
+    },
+    {
+      "id": "openai/gpt-4.1",
+      "provider": "openai",
+      "model": "gpt-4.1",
+      "name": "gpt-4.1",
+      "efforts": []
+    }
+  ],
+  "anthropic": [
+    {
+      "id": "anthropic/claude-sonnet-5-5",
+      "provider": "anthropic",
+      "model": "claude-sonnet-5-5",
+      "name": "Claude Sonnet 5.5",
+      "efforts": [
+        {
+          "effort": "low"
+        },
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        },
+        {
+          "effort": "xhigh"
+        },
+        {
+          "effort": "max"
+        }
+      ]
+    },
+    {
+      "id": "anthropic/claude-opus-4-5",
+      "provider": "anthropic",
+      "model": "claude-opus-4-5",
+      "name": "Claude Opus 4.5",
+      "efforts": [
+        {
+          "effort": "low"
+        },
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        }
+      ]
+    },
+    {
+      "id": "anthropic/claude-haiku-4-5",
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5",
+      "name": "Claude Haiku 4.5",
+      "efforts": []
+    },
+    {
+      "id": "anthropic/claude-fable-5-1",
+      "provider": "anthropic",
+      "model": "claude-fable-5-1",
+      "name": "Claude Fable 5.1",
+      "efforts": [
+        {
+          "effort": "low"
+        },
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        },
+        {
+          "effort": "xhigh"
+        },
+        {
+          "effort": "max"
+        }
+      ]
+    },
+    {
+      "id": "anthropic/claude-haiku-5",
+      "provider": "anthropic",
+      "model": "claude-haiku-5",
+      "name": "Claude Haiku 5 ✦",
+      "efforts": []
+    },
+    {
+      "id": "anthropic/claude-mythos-1",
+      "provider": "anthropic",
+      "model": "claude-mythos-1",
+      "name": "claude-mythos-1",
+      "efforts": [
+        {
+          "effort": "low"
+        },
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        },
+        {
+          "effort": "xhigh"
+        },
+        {
+          "effort": "max"
+        }
+      ]
+    }
+  ],
+  "opencode": [
+    {
+      "id": "opencode/claude-sonnet-5-5",
+      "provider": "opencode",
+      "model": "claude-sonnet-5-5",
+      "name": "claude-sonnet-5-5",
+      "efforts": [
+        {
+          "effort": "low"
+        },
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        },
+        {
+          "effort": "xhigh"
+        },
+        {
+          "effort": "max"
+        }
+      ]
+    },
+    {
+      "id": "opencode/gpt-5.5",
+      "provider": "opencode",
+      "model": "gpt-5.5",
+      "name": "gpt-5.5",
+      "efforts": [
+        {
+          "effort": "low"
+        },
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        }
+      ]
+    },
+    {
+      "id": "opencode/grok-4",
+      "provider": "opencode",
+      "model": "grok-4",
+      "name": "grok-4",
+      "efforts": []
+    },
+    {
+      "id": "opencode/kimi-k2.6",
+      "provider": "opencode",
+      "model": "kimi-k2.6",
+      "name": "kimi-k2.6",
+      "efforts": []
+    },
+    {
+      "id": "opencode/glm-5",
+      "provider": "opencode",
+      "model": "glm-5",
+      "name": "glm-5",
+      "efforts": []
+    },
+    {
+      "id": "opencode/muse-1",
+      "provider": "opencode",
+      "model": "muse-1",
+      "name": "muse-1",
+      "efforts": []
+    },
+    {
+      "id": "opencode/qwen3-coder 480b",
+      "provider": "opencode",
+      "model": "qwen3-coder 480b",
+      "name": "qwen3-coder 480b",
+      "efforts": []
+    },
+    {
+      "id": "opencode/deepseek/v4",
+      "provider": "opencode",
+      "model": "deepseek/v4",
+      "name": "deepseek/v4",
+      "efforts": []
+    },
+    {
+      "id": "opencode/claude-haiku-4-5",
+      "provider": "opencode",
+      "model": "claude-haiku-4-5",
+      "name": "claude-haiku-4-5",
+      "efforts": []
+    },
+    {
+      "id": "opencode/big-pickle",
+      "provider": "opencode",
+      "model": "big-pickle",
+      "name": "big-pickle",
+      "efforts": []
+    }
+  ],
+  "opencode-go": [
+    {
+      "id": "opencode-go/glm-5",
+      "provider": "opencode-go",
+      "model": "glm-5",
+      "name": "glm-5",
+      "efforts": []
+    },
+    {
+      "id": "opencode-go/kimi-k2.6",
+      "provider": "opencode-go",
+      "model": "kimi-k2.6",
+      "name": "kimi-k2.6",
+      "efforts": []
+    },
+    {
+      "id": "opencode-go/minimax-m2.5",
+      "provider": "opencode-go",
+      "model": "minimax-m2.5",
+      "name": "minimax-m2.5",
+      "efforts": []
+    },
+    {
+      "id": "opencode-go/gpt-5.5",
+      "provider": "opencode-go",
+      "model": "gpt-5.5",
+      "name": "gpt-5.5",
+      "efforts": [
+        {
+          "effort": "low"
+        },
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        }
+      ]
+    }
+  ],
+  "ollama": [
+    {
+      "id": "ollama/qwen3:8b",
+      "provider": "ollama",
+      "model": "qwen3:8b",
+      "name": "qwen3:8b",
+      "description": "8.2B · Q4_K_M",
+      "efforts": [
+        {
+          "effort": "low"
+        },
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        }
+      ],
+      "defaultEffort": "medium",
+      "tools": true,
+      "context": 40960.0,
+      "where": "on this computer"
+    },
+    {
+      "id": "ollama/llama3.2:1b",
+      "provider": "ollama",
+      "model": "llama3.2:1b",
+      "name": "llama3.2:1b",
+      "description": "1.2B · Q8_0 · can't change the Set",
+      "efforts": [],
+      "tools": false,
+      "context": 131072.0,
+      "where": "on this computer"
+    },
+    {
+      "id": "ollama/gemma3:27b",
+      "provider": "ollama",
+      "model": "gemma3:27b",
+      "name": "gemma3:27b",
+      "description": "27.4B · Q4_K_M · loaded",
+      "efforts": [],
+      "tools": true,
+      "context": 131072.0,
+      "loaded": true,
+      "where": "on this computer"
+    },
+    {
+      "id": "ollama/hf.co/unsloth/Qwen3-30B:Q4_K_M",
+      "provider": "ollama",
+      "model": "hf.co/unsloth/Qwen3-30B:Q4_K_M",
+      "name": "hf.co/unsloth/Qwen3-30B:Q4_K_M",
+      "efforts": [],
+      "where": "on this computer"
+    }
+  ],
+  "lmstudio": [
+    {
+      "id": "lmstudio/qwen/qwen3-8b",
+      "provider": "lmstudio",
+      "model": "qwen/qwen3-8b",
+      "name": "Qwen3 8B",
+      "description": "8B · Q4_K_M · loaded",
+      "efforts": [
+        {
+          "effort": "low"
+        },
+        {
+          "effort": "medium"
+        },
+        {
+          "effort": "high"
+        }
+      ],
+      "defaultEffort": "medium",
+      "tools": true,
+      "context": 32768.0,
+      "loaded": true,
+      "where": "on this computer"
+    },
+    {
+      "id": "lmstudio/google/gemma-3-1b",
+      "provider": "lmstudio",
+      "model": "google/gemma-3-1b",
+      "name": "Gemma 3 1B",
+      "description": "can't change the Set",
+      "efforts": [],
+      "tools": false,
+      "context": 32768.0,
+      "where": "on this computer"
+    },
+    {
+      "id": "lmstudio/mistral/devstral@q8_0",
+      "provider": "lmstudio",
+      "model": "mistral/devstral@q8_0",
+      "name": "Devstral (Q8) ✦",
+      "efforts": [],
+      "where": "on this computer"
+    }
+  ],
+  "my-server": [
+    {
+      "id": "my-server/llama-4",
+      "provider": "my-server",
+      "model": "llama-4",
+      "name": "llama-4",
+      "efforts": [],
+      "context": 65536.0,
+      "where": "on 192.168.1.20"
+    },
+    {
+      "id": "my-server/qwen/qwen3-coder",
+      "provider": "my-server",
+      "model": "qwen/qwen3-coder",
+      "name": "qwen/qwen3-coder",
+      "efforts": [],
+      "context": 131072.0,
+      "where": "on 192.168.1.20"
+    },
+    {
+      "id": "my-server/Odd Name ✦",
+      "provider": "my-server",
+      "model": "Odd Name ✦",
+      "name": "Odd Name ✦",
+      "efforts": [],
+      "where": "on 192.168.1.20"
+    }
+  ]
+}

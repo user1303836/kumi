@@ -16,7 +16,7 @@ use crate::{
 };
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_agent::core::export::Format;
-use kumi_ai::providers::ProviderId;
+use kumi_ai::providers::{table, SignIn};
 use kumi_common::{
     abort::{self, Signal},
     js::{number, string},
@@ -373,12 +373,17 @@ async fn dispatch(io: &CliIo, answers: Answers, secrets: &mut Vec<String>) -> Re
             Ok(0)
         }
         AppConfig::LoginChoose { auth_file, pi_auth_file, settings_file } => {
-            let choices = [
-                (ProviderId::OpenaiCodex, "ChatGPT: sign in with your ChatGPT plan (opens your browser)"),
-                (ProviderId::Anthropic, "Anthropic: paste an API key"),
-                (ProviderId::Openai, "OpenAI: paste an API key"),
-                (ProviderId::Opencode, "OpenCode: paste an API key"),
-            ];
+            let choices: Vec<_> = table::first_choices()
+                .into_iter()
+                .map(|(provider, label)| {
+                    let how = if provider.row().sign_in == SignIn::Chatgpt {
+                        "sign in with your ChatGPT plan (opens your browser)"
+                    } else {
+                        "paste an API key"
+                    };
+                    (provider, format!("{label}: {how}"))
+                })
+                .collect();
             if !io.input.is_tty() {
                 return Err(RuntimeError::plain(format!(
                     "Use: {} login <provider>, with provider one of {}.",
@@ -390,13 +395,13 @@ async fn dispatch(io: &CliIo, answers: Answers, secrets: &mut Vec<String>) -> Re
                 "How do you want to sign in?\n{}\n",
                 choices.iter().enumerate().map(|(i, (_, s))| format!("  {}  {s}", i + 1)).collect::<Vec<_>>().join("\n")
             ));
-            let answer = read_answer(io, "Choose 1–4: ").await;
+            let answer = read_answer(io, &format!("Choose 1–{}: ", choices.len())).await;
             let index = number::parse(string::trim(&answer)).unwrap_or(f64::NAN) - 1.0;
             let chosen = (index.is_finite() && index.fract() == 0.0 && index >= 0.0).then(|| choices.get(index as usize)).flatten();
             if let Some((provider, _)) = chosen {
                 let config = AppConfig::Login {
                     provider: *provider,
-                    method: if *provider == ProviderId::OpenaiCodex { chatgpt_sign_in(&io.env) } else { LoginMethod::Key },
+                    method: if provider.row().sign_in == SignIn::Chatgpt { chatgpt_sign_in(&io.env) } else { LoginMethod::Key },
                     auth_file: auth_file.clone(),
                     pi_auth_file: pi_auth_file.clone(),
                     settings_file: settings_file.clone(),

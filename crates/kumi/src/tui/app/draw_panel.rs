@@ -10,7 +10,6 @@ use super::super::{
 };
 use super::drawing::{sp, st};
 use super::*;
-use kumi_ai::providers::provider_info;
 struct Line {
     text: String,
     style: Style,
@@ -217,7 +216,7 @@ impl TuiApp {
                 }
             },
             Panel::Key { provider, secret, checking, status, .. } => {
-                let info = provider_info(*provider);
+                let info = provider.row();
                 lines.push(Line::new(format!("Sign in to {}", info.name), st::TITLE));
                 say(&mut lines, &format!("Paste your {} API key. It stays hidden, even here.", info.name), st::DIM, inner);
                 let count = secret.encode_utf16().count();
