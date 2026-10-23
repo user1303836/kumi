@@ -270,7 +270,7 @@ impl TasteLog {
 }
 
 /// A request as rows keep it: its first characters, or a mark in place of one that reads as a secret.
-fn kept_request(request: &str) -> String {
+pub(crate) fn kept_request(request: &str) -> String {
     if suspect_note(request) {
         return LEFT_OUT.to_owned();
     }

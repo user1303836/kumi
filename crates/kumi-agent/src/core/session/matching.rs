@@ -6,9 +6,13 @@ use crate::core::{
     loop_run::{loop_setup_for, wants_loop, LoopRun, LOOP_BUDGET, LOOP_HINT},
     match_run::{starts_match, MatchBudget, MatchDecision, MatchRun, MatchState, MatchStop, KEEP_GOING, MATCH_BUDGET},
     playbook::{lesson_from, lesson_line, playbook_brief, PlaybookStore, Reaction},
+    search_memory::{trials_heard, SlotSearch},
+    taste_log::kept_request,
     techniques::{waiting_note, NEGATIVE, POSITIVE},
 };
 use kumi_common::js::number::{round, to_string};
+use kumi_listening::heard_settings::{SearchKind, SettingsHeard};
+use std::collections::HashMap;
 
 pub(super) struct LastLesson {
     pub id: String,
@@ -398,7 +402,11 @@ impl Session {
             };
 
             let mut evolution = self.evolution();
+            // The search, remembered as it's heard (its settings on each of the winner's devices).
+            let target = json!({"kind": "reference", "reference": request.reference, "request": kept_request(&run.borrow().request)});
+            let mut searches = HashMap::new();
             for slot in rig.slots() {
+                searches.insert(slot.name.clone(), SlotSearch::new(&slot.name, &slot.knobs, slot.devices.clone()));
                 evolution.add(NewSlot { name: slot.name, label: slot.label, chain: slot.chain, knobs: slot.knobs, score: None, heard: None });
             }
             let winner = evolution.slots.first().cloned().ok_or_else(|| RuntimeError::plain("Empty goal rig"))?;
@@ -412,12 +420,10 @@ impl Session {
             let trial = |knobs, values, fresh| GenerationTrial { slot: winner.name.clone(), knobs, values, fresh };
 
             let search: Result<(), RuntimeError> = async {
-                from = rig
-                    .generation(&[trial(knobs.clone(), start.clone(), None)], op.signal.clone(), Some(GenerationOptions { screen: Some(false) }))
-                    .await?
-                    .scores
-                    .get(&winner.name)
-                    .copied();
+                let first = [trial(knobs.clone(), start.clone(), None)];
+                let heard = rig.generation(&first, op.signal.clone(), Some(GenerationOptions { screen: Some(false) })).await?;
+                self.remember_trials(SearchKind::Match, &searches, &first, &heard, &target);
+                from = heard.scores.get(&winner.name).copied();
 
                 let Some(score) = from else {
                     return Ok(());
@@ -432,6 +438,7 @@ impl Session {
                     let result = rig.generation(&requests, op.signal.clone(), Some(GenerationOptions { screen: Some(rig.screens()) })).await?;
 
                     evolution.scored(&trials, &result.scores);
+                    self.remember_trials(SearchKind::Match, &searches, &requests, &result, &target);
                     for (name, keys) in &result.frozen {
                         evolution.freeze(name, keys);
                     }
@@ -452,16 +459,10 @@ impl Session {
                         .any(|(i, k)| knobs.iter().position(|old| knob_key(old) == knob_key(k)).is_none_or(|at| best.elite[i] != start[at]));
 
                     if moved {
-                        to = rig
-                            .generation(
-                                &[trial(best.knobs.clone(), best.elite.clone(), Some(true))],
-                                op.signal.clone(),
-                                Some(GenerationOptions { screen: Some(false) }),
-                            )
-                            .await?
-                            .scores
-                            .get(&winner.name)
-                            .copied();
+                        let last = [trial(best.knobs.clone(), best.elite.clone(), Some(true))];
+                        let heard = rig.generation(&last, op.signal.clone(), Some(GenerationOptions { screen: Some(false) })).await?;
+                        self.remember_trials(SearchKind::Match, &searches, &last, &heard, &target);
+                        to = heard.scores.get(&winner.name).copied();
                     }
                     if to.is_some_and(|to| to >= score + 1.) {
                         kept = Some((best.knobs.clone(), best.elite.clone()));
@@ -471,6 +472,7 @@ impl Session {
             }
             .await;
 
+            self.searches_ended(&searches);
             let mut notes = rig
                 .close()
                 .await
@@ -532,6 +534,29 @@ impl Session {
     pub(super) fn evolution(&self) -> Evolution {
         let random = self.0.options.goal_random.clone();
         Evolution::new(move || random.as_ref().map(|r| r()).unwrap_or_else(rand::random::<f64>), EVOLVE)
+    }
+    /// A generation's trials, remembered: each scored trial's setting on each device of its slot.
+    pub(super) fn remember_trials(
+        &self,
+        kind: SearchKind,
+        searches: &HashMap<String, SlotSearch>,
+        trials: &[GenerationTrial],
+        generation: &Generation,
+        target: &Value,
+    ) {
+        if let Some(memory) = &self.0.search_memory {
+            for heard in trials_heard(kind, searches, trials, generation, target) {
+                memory.heard(heard);
+            }
+        }
+    }
+    /// The slots' searches ended: each one's best is marked.
+    pub(super) fn searches_ended(&self, searches: &HashMap<String, SlotSearch>) {
+        if let Some(memory) = &self.0.search_memory {
+            for search in searches.values() {
+                memory.heard(SettingsHeard::Ended { run: search.run.clone() });
+            }
+        }
     }
 }
 pub(super) fn knob_key(knob: &crate::core::evolve::Knob) -> String {

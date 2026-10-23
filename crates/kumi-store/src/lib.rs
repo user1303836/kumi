@@ -1,5 +1,5 @@
 //! Kumi's database, `~/.kumi/kumi.db`: what Kumi keeps between sessions (notes, techniques, lessons,
-//! gaps, and what the producer did in answer to Kumi), in SQLite.
+//! gaps, what the producer did in answer to Kumi, and the settings its searches heard), in SQLite.
 //!
 //! One thread writes, committing what's queued together; reads run beside it on their own
 //! connections. Kumi's runtime is a single thread, so nothing here is called from it directly: writes
@@ -7,6 +7,7 @@
 //! throughout; the async side lives in the runtime.
 
 pub mod gaps;
+pub mod heard_settings;
 pub mod history;
 pub mod ids;
 pub mod imports;

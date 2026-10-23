@@ -7,6 +7,7 @@ use crate::core::{
     memory::{memory_instructions_for, memory_tools_for, MemoryTools, MemoryToolsOptions},
     recall::{recall_tool_for, RecallOptions},
     recipes::{recipe_instructions, recipe_tools_for, RecipeStore, RecipeToolsOptions, RUN_RECIPE_TOOL},
+    search_memory::SearchMemory,
     store_client::StoreClient,
     taste_log::{TasteLog, UndoneBy, Whereabouts},
     techniques::{
@@ -397,6 +398,8 @@ struct Inner {
     gaps: Vec<Rc<dyn KernelTool>>,
     /// What the producer does in answer to Kumi, logged to Kumi's database (only when it's open).
     taste: Option<Rc<TasteLog>>,
+    /// The settings searches hear, kept in Kumi's database (only when it's open).
+    search_memory: Option<Rc<SearchMemory>>,
     timings: Option<String>,
     shelf: Vec<Rc<dyn KernelTool>>,
     /// Background jobs, when the session runs them.
@@ -669,6 +672,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             vec![]
         };
         let gaps = options.gaps.as_ref().map(|file| gap_tools_for(options.profile, file, options.store.clone())).unwrap_or_default();
+        let search_memory = options.store.clone().map(|store| SearchMemory::new(store, options.profile.id.unwrap_or(DawId::Ableton)));
         let taste = options.store.clone().map(|store| {
             let place = weak.clone();
             let hear = weak.clone();
@@ -740,6 +744,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             browsing,
             gaps,
             taste,
+            search_memory,
             timings,
             shelf,
             jobs,
@@ -2861,6 +2866,12 @@ impl SessionController for Session {
                 return;
             }
             WatchEvent::Action(_) => return,
+            WatchEvent::Heard(heard) => {
+                if let Some(memory) = &self.0.search_memory {
+                    memory.heard(heard);
+                }
+                return;
+            }
             WatchEvent::Judged(round) => {
                 use kumi_listening::round::RoundKind;
                 let mut s = self.0.state.borrow_mut();
@@ -2985,6 +2996,9 @@ impl SessionController for Session {
     }
     fn library(&self) -> Option<LibraryStatus> {
         self.0.options.library.as_ref().map(|library| library.status())
+    }
+    async fn remembered(&self) -> Option<(usize, usize)> {
+        self.0.search_memory.as_ref()?.counts().await.ok()
     }
     fn open_set(&self) -> Option<String> {
         self.0.state.borrow().integration.as_ref().and_then(|integration| integration.open_set())

@@ -18,6 +18,7 @@ use kumi_listening::{
     checklist::MainState,
     engine::Listening,
     fit::{Band, Shape},
+    heard_settings::DeviceIdentity,
     judging::Placed,
     knobs::Scale,
     notes::Kit,
@@ -159,6 +160,8 @@ pub struct DeviceRow {
     /// Its own name, whatever the producer named it: REAPER's FX as the plug-in is called (`originalName` once renamed),
     /// Renoise's device by its path's last part ("Audio/Effects/Native/Maximizer"). The tables' words are matched to it.
     pub own_name: String,
+    /// Who it is in every session (`identity_of`), for what Kumi remembers of a search on it.
+    pub identity: String,
     pub on: bool,
     pub plugin: bool,
     /// An instrument (REAPER's VSTi and the like): the track's sound starts there.
@@ -630,6 +633,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
                         .or_else(|| text(row, "path").and_then(|path| path.rsplit('/').next().map(str::to_owned)))
                         .or_else(|| text(row, "name"))
                         .unwrap_or_default(),
+                    identity: identity_of(row).unwrap_or_default(),
                     // REAPER says enabled and offline; Renoise says active.
                     on: row.get("enabled").or(row.get("active")).and_then(Value::as_bool).unwrap_or(true)
                         && row.get("offline") != Some(&Value::Bool(true)),
@@ -1619,6 +1623,11 @@ impl<S: RefScheme + 'static> Renderer for OwnRenderer<S> {
         }
         Ok(())
     }
+    async fn device_identity(&self, device: &str, signal: Signal) -> Option<DeviceIdentity> {
+        let long = self.link.book.borrow().lengthen(&json!({"ref": device}))["ref"].as_str().unwrap_or(device).to_owned();
+        let read = self.link.call("read", self.read_placed(json!({"ref": long})), signal).await.ok()?.ok()?;
+        identity_of(read.pointer("/items/0")?).map(DeviceIdentity::named)
+    }
     async fn device_kind(&self, device: &str, signal: Signal) -> Option<String> {
         let long = self.link.book.borrow().lengthen(&json!({"ref": device}))["ref"].as_str().unwrap_or(device).to_owned();
         let read = self.link.call("read", self.read_placed(json!({"ref": long})), signal).await.ok()?.ok()?;
@@ -2126,6 +2135,13 @@ fn seen(device: &DeviceRow) -> Seen {
 
 /// A plug-in's own name from REAPER's FX name ("VST3: Pro-Q 3 (FabFilter)" is "Pro-Q 3"; "JS: Volume Adjustment" is
 /// "Volume Adjustment"), or the name as it is.
+/// Who a device is, the same in every session and wherever it sits, from its row: REAPER's FX as the plug-in is called,
+/// with its format and maker ("VST3: Pro-Q 3 (FabFilter)", its `originalName` once the producer renamed it), Renoise's
+/// device by its path ("Audio/Effects/Native/Maximizer", a plug-in's naming its format too). Neither says a version.
+pub fn identity_of(row: &Value) -> Option<String> {
+    text(row, "originalName").or_else(|| text(row, "path")).or_else(|| text(row, "name")).filter(|identity| !identity.trim().is_empty())
+}
+
 pub fn plugin_name(name: &str) -> String {
     let name = name.trim();
     let name = ["VST3i: ", "VST3: ", "VSTi: ", "VST: ", "AUi: ", "AU: ", "CLAPi: ", "CLAP: ", "JS: ", "LV2i: ", "LV2: "]
@@ -2159,6 +2175,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             context.on_audition.clone(),
             context.listener.clone(),
             context.references.clone(),
+            context.on_heard.clone(),
         );
         Rc::new(Self { renderer, listening, busy: tokio::sync::Mutex::new(()), swept: RefCell::default() })
     }
@@ -2567,6 +2584,20 @@ mod tests {
         assert_eq!(plugin_name("JS: Volume Adjustment"), "Volume Adjustment");
         assert_eq!(plugin_name("VST: ReaEQ (Cockos)"), "ReaEQ");
         assert_eq!(plugin_name("EQ 10"), "EQ 10");
+    }
+
+    #[test]
+    fn a_device_is_who_it_is_whatever_the_producer_named_it() {
+        let row = |value: Value| identity_of(&value);
+        // REAPER: the plug-in as REAPER calls it, format and maker in its name; renamed, its own name is `originalName`.
+        assert_eq!(row(json!({"name": "VST3: Pro-Q 3 (FabFilter)"})).as_deref(), Some("VST3: Pro-Q 3 (FabFilter)"));
+        assert_eq!(row(json!({"name": "Bass EQ", "originalName": "VST: ReaEQ (Cockos)"})).as_deref(), Some("VST: ReaEQ (Cockos)"));
+        // Renoise: by its path, whatever its name says.
+        assert_eq!(
+            row(json!({"name": "Glue", "path": "Audio/Effects/Native/Bus Compressor"})).as_deref(),
+            Some("Audio/Effects/Native/Bus Compressor")
+        );
+        assert_eq!(row(json!({"name": " "})), None, "nothing to know it by");
     }
 
     #[test]

@@ -731,6 +731,11 @@ pub struct GoalSlotInfo {
     pub label: String,
     pub chain: String,
     pub knobs: Vec<Knob>,
+    /// Who each knob's device is (`Knob::device` to the device's identity: a built-in device's own name, a plug-in's
+    /// format, maker and name as far as the DAW says them), for what Kumi remembers of the search. A device the rig
+    /// doesn't name is known by its name.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub devices: std::collections::BTreeMap<String, String>,
 }
 
 /// One trial of a generation: a slot's knobs set to these values.
@@ -1283,6 +1288,8 @@ pub enum WatchEvent {
     Action(ActionEvent),
     Audition(AuditionEvent),
     Judged(kumi_listening::round::Round),
+    /// Settings a search heard (tune's), for Kumi to remember.
+    Heard(kumi_listening::heard_settings::SettingsHeard),
 }
 
 /// What Kumi remembers now: about the producer, and about the open Set when it's saved.
@@ -1487,6 +1494,10 @@ pub trait SessionController {
     }
     /// The producer's library: what Kumi knows of it, and how learning it is going.
     fn library(&self) -> Option<LibraryStatus> {
+        None
+    }
+    /// The settings Kumi's searches heard and remember, and on how many devices: None without its database.
+    async fn remembered(&self) -> Option<(usize, usize)> {
         None
     }
     /// The saved Set open in the DAW, by its file, once the session has read it.

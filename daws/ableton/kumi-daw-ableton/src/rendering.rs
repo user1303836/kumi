@@ -284,6 +284,7 @@ impl Rendering {
             options.on_audition.clone(),
             options.listener.clone(),
             options.references.clone(),
+            options.on_heard.clone(),
         );
         Rc::new(Self { live, listening })
     }

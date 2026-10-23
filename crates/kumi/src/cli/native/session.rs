@@ -451,6 +451,16 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
                     emit(SessionEvent::Judged(round));
                 })
             });
+            // What a search hears is kept, to start the next search on the same device from what worked.
+            options.on_heard = Some({
+                let controller = controller.clone();
+                Rc::new(move |heard| {
+                    let controller = controller.borrow().as_ref().and_then(Weak::upgrade);
+                    if let Some(c) = controller {
+                        c.watch(WatchEvent::Heard(heard));
+                    }
+                })
+            });
             options.references = Some(references.clone());
             options.listener = Some({
                 let store: Rc<dyn CredentialStore> = listener_store.clone();

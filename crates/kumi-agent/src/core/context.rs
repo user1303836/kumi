@@ -45,6 +45,8 @@ pub struct IntegrationContext {
     pub listener: Option<ListenerSource>,
     /// Measured references the judge can work toward by name.
     pub references: Option<Rc<kumi_listening::references::store::ReferenceStore>>,
+    /// Each setting a search hears (tune's), for Kumi to remember what worked on a device.
+    pub on_heard: Option<Rc<dyn Fn(kumi_listening::heard_settings::SettingsHeard)>>,
 }
 
 impl IntegrationContext {
@@ -72,6 +74,7 @@ impl IntegrationContext {
             on_judge: None,
             listener: None,
             references: None,
+            on_heard: None,
         }
     }
 }
