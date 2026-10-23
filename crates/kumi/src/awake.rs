@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use kumi_runtime::core::contracts::{SessionEvent, TurnState};
+use kumi_agent::core::contracts::{SessionEvent, TurnState};
 
 /// The name the system shows for Kumi's hold (`pmset -g assertions` on a Mac).
 pub const REASON: &str = "Kumi is working";
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn held_while_any_background_job_runs_after_the_answer_ends() {
-        use kumi_runtime::core::jobs::{JobKind, JobState, JobStatus, WhenDone};
+        use kumi_agent::core::jobs::{JobKind, JobState, JobStatus, WhenDone};
         let job = |id: u32, state: JobState| {
             SessionEvent::Job(JobStatus {
                 id,

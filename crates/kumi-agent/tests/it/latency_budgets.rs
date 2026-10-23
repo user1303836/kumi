@@ -10,14 +10,14 @@ use std::rc::Rc;
 
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
+use kumi_agent::core::contracts::StopReason;
+use kumi_agent::kernel::agent::{create_agent_kernel, AgentKernelOptions};
+use kumi_ai::binding::{LanguageModel, ModelBinding};
+use kumi_ai::error::LanguageModelError;
+use kumi_ai::types::{CallOptions, FinishReason, FinishReasonUnified, InputTokens, OutputTokens, StreamPart, StreamParts, ToolCall, Usage};
 use kumi_common::abort::{Controller, Signal};
-use kumi_runtime::ai::error::LanguageModelError;
-use kumi_runtime::ai::types::{
-    CallOptions, FinishReason, FinishReasonUnified, InputTokens, OutputTokens, StreamPart, StreamParts, ToolCall, Usage,
-};
-use kumi_runtime::core::contracts::{JsonObject, KernelTool, StopReason, ToolResult};
-use kumi_runtime::core::errors::RuntimeError;
-use kumi_runtime::kernel::agent::{create_agent_kernel, AgentKernelOptions, LanguageModel, ModelBinding};
+use kumi_types::contracts::{JsonObject, KernelTool, ToolResult};
+use kumi_types::errors::RuntimeError;
 use serde_json::json;
 
 fn signal() -> Signal {

@@ -20,26 +20,27 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
 
-use super::budget::{fit_for, opening, put_away_images, transcript_of, ContextBudget, PutAway, DEFAULT_BUDGET};
-use super::deferred::{self, Shelf, CALL_TOOL};
-use super::failure::{
+use crate::core::contracts::{
+    Kernel, KernelCheckpoint, KernelEmit, KernelEvent, OnText, Picture, StopReason, TranscriptLine, TurnResult, WaitFor,
+};
+use crate::kernel::budget::{fit_for, opening, put_away_images, transcript_of, PutAway};
+use crate::kernel::deferred::{self, Shelf, CALL_TOOL};
+use kumi_ai::binding::{ContextBudget, DEFAULT_BUDGET};
+use kumi_ai::error::LanguageModelError;
+use kumi_ai::failure::{
     describe_failure, plan_limit, provider_name, refused_on_the_way, reset_words, retry_reason, wait_for, PlanLimit, Wait, MAX_RETRIES,
 };
-use crate::ai::error::LanguageModelError;
-use crate::ai::types::{
+use kumi_ai::types::{
     AssistantPart, CallOptions, DataContent, FileData, FilePart, FinishReason, FinishReasonUnified, FunctionTool, Message,
     ProviderMetadata, ReasoningPart, StreamPart, StreamParts, TextPart, ToolCall, ToolCallPart, ToolPart, ToolResultContentItem,
     ToolResultOutput, ToolResultPart, Usage as ModelUsage, UserPart,
 };
-use crate::core::contracts::{
-    JsonObject, Kernel, KernelCheckpoint, KernelEmit, KernelEvent, KernelTool, OnText, Picture, StopReason, StreamingCall, ToolImage,
-    TranscriptLine, TurnResult, Usage, WaitFor,
-};
-use crate::core::daw::DawProfile;
-use crate::core::errors::{FailureKind, KumiError, RuntimeError};
+use kumi_types::contracts::{JsonObject, KernelTool, StreamingCall, ToolImage, Usage};
+use kumi_types::daw::DawProfile;
+use kumi_types::errors::{FailureKind, KumiError, RuntimeError};
 
-// What the loop asks of a model (kumi-ai), where the kernel's callers have always named it.
-pub use kumi_ai::binding::{LanguageModel, ModelBinding, ModelRequest};
+// What the loop asks of a model (kumi-ai).
+use kumi_ai::binding::{ModelBinding, ModelRequest};
 
 /// Plain JSON, owned by Kumi: settled messages only, including provider replay metadata.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -171,14 +172,14 @@ const ASIDE_NOTE: &str = "(A side question while you work. Answer it briefly, in
 /// What the model is told when its answer broke off and Kumi carries on. `[Kumi]` marks it as Kumi's, not the producer's.
 pub const CARRY_ON_NOTE: &str =
     "[Kumi] The connection dropped partway through your answer. Carry on from where it stopped, without repeating what you said.";
-crate::daw_text!(
+kumi_types::daw_text!(
     /// Ends a stopped turn's kept steps, for the model and in the transcript.
     pub STOPPED_NOTE, stopped_note:
     "(Stopped before finishing. The steps above happened; the one in progress may have too, so check ", app, " before carrying on.)"
 );
 /// The result of a call a stopped batch never ran, and of the one it was running.
 pub const STOPPED_BEFORE_RUNNING: &str = "Stopped before running; nothing was done.";
-crate::daw_text!(pub STOPPED_WHILE_RUNNING, stopped_while_running: "Stopped while running; it may have changed ", app, ", so check before running it again.");
+kumi_types::daw_text!(pub STOPPED_WHILE_RUNNING, stopped_while_running: "Stopped while running; it may have changed ", app, ", so check before running it again.");
 /// The result of a read away from Live that was stopped while it ran.
 pub const STOPPED_READING: &str = "Stopped while running; nothing came back.";
 
@@ -455,9 +456,9 @@ impl AgentKernel {
             let attempted: Result<StepResult, StepError> = async {
                 let mut call = request.clone();
                 call.abort_signal = Some(abort.signal());
-                let timed = crate::core::timing::model_call(&binding.id);
+                let timed = kumi_ai::timing::model_call(&binding.id);
                 let parts = binding.model.do_stream(call).await.map_err(StepError::Model)?;
-                consume(crate::core::timing::timed(parts, timed), &abort, &hear, None).await
+                consume(kumi_ai::timing::timed(parts, timed), &abort, &hear, None).await
             }
             .await;
             match attempted {
@@ -951,10 +952,10 @@ impl Turn {
             let attempted: Result<StepResult, StepError> = async {
                 let mut call = request.clone();
                 call.abort_signal = Some(self.abort.signal());
-                crate::core::timing::effort(&call);
-                let timed = crate::core::timing::model_call(&binding.id);
+                kumi_ai::timing::effort(&call);
+                let timed = kumi_ai::timing::model_call(&binding.id);
                 let parts = binding.model.do_stream(call).await.map_err(StepError::Model)?;
-                consume(crate::core::timing::timed(parts, timed), &self.abort, &on_text, Some(&input as &dyn InputStream)).await
+                consume(kumi_ai::timing::timed(parts, timed), &self.abort, &on_text, Some(&input as &dyn InputStream)).await
             }
             .await;
             match attempted {
@@ -995,7 +996,7 @@ impl Turn {
                     // A certificate or a proxy in the way is waited out as offline is (a Wi-Fi sign-in page clears),
                     // but named.
                     let cause = (kind == Some(WaitFor::Offline)).then(|| refused_on_the_way(model)).flatten();
-                    let proxy_down = cause.is_some() && crate::web::cause::proxy_down(model);
+                    let proxy_down = cause.is_some() && kumi_net::cause::proxy_down(model);
                     (self.deliver)(KernelEvent::Retry { reason, wait_ms: wait.round() as u64, wait: kind, cause, proxy_down });
                     // Nothing began, so the retry starts clean.
                     let entries: Vec<Rc<Early>> = self.early.borrow().values().cloned().collect();
@@ -1034,7 +1035,7 @@ impl Turn {
             let ran = if group.len() > 1 {
                 let began = perf_now();
                 let ran = join_all(group.iter().map(|call| self.call(call, false))).await;
-                crate::core::timing::tools(group.len() as u32, round(perf_now() - began).max(0.0) as u64);
+                kumi_ai::timing::tools(group.len() as u32, round(perf_now() - began).max(0.0) as u64);
                 ran
             } else {
                 vec![self.call(&group[0], true).await]
@@ -1181,9 +1182,9 @@ impl Turn {
     /// it ran alone (calls run together add their group's).
     fn timed(&self, name: &str, started: f64, alone: bool) -> u64 {
         let elapsed_ms = round(perf_now() - started).max(0.0) as u64;
-        crate::core::timing::tool_call(name, elapsed_ms);
+        kumi_ai::timing::tool_call(name, elapsed_ms);
         if alone {
-            crate::core::timing::tool(elapsed_ms);
+            kumi_ai::timing::tool(elapsed_ms);
         }
         elapsed_ms
     }
@@ -1230,7 +1231,7 @@ impl Prepared<'_> {
     fn concurrent(&self) -> bool {
         match &self.target {
             Target::Tool(tool) => tool.concurrent(),
-            Target::Refused(_) => crate::core::contracts::CONCURRENT.contains(&self.name.as_str()),
+            Target::Refused(_) => kumi_types::contracts::CONCURRENT.contains(&self.name.as_str()),
         }
     }
 }

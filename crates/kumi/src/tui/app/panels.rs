@@ -8,16 +8,15 @@ use crate::{
     voice::VoiceChange,
 };
 use base64::Engine;
-use kumi_common::time::since;
-use kumi_runtime::core::place::Place;
-use kumi_runtime::kernel::failure::reset_words;
-use kumi_runtime::{
-    core::{contracts::Picked, errors::FailureKind},
-    providers::{
-        models::{ApiKeyCheck, ModelInfo, ServiceTier},
-        provider_info, Effort, SignIn,
-    },
+use kumi_agent::core::contracts::Picked;
+use kumi_ai::failure::reset_words;
+use kumi_ai::providers::{
+    models::{ApiKeyCheck, ModelInfo, ServiceTier},
+    provider_info, Effort, SignIn,
 };
+use kumi_common::time::since;
+use kumi_types::errors::FailureKind;
+use kumi_types::place::Place;
 use std::collections::HashMap;
 
 /// What the conversations list says of its keys.
@@ -381,7 +380,7 @@ impl TuiApp {
                 None if matches!(Place::parse(&row.place), Some(Place::Unsaved(_))) => {
                     format!("A {} not saved yet", crate::daw::words().place)
                 }
-                None if row.place == kumi_runtime::IMPORTED => "Imported".into(),
+                None if row.place == kumi_types::place::IMPORTED => "Imported".into(),
                 None => format!("A saved {}", crate::daw::words().place),
             };
             let age = if row.current { "this one".into() } else { since(row.saved_at as f64, now) };
@@ -757,7 +756,7 @@ impl TuiApp {
         let weak = Rc::downgrade(&self.0);
         let shown = panel.clone();
         let how = if by_code {
-            let on_code = Rc::new(move |prompt: kumi_runtime::auth::openai_codex::DevicePrompt| {
+            let on_code = Rc::new(move |prompt: kumi_ai::auth::openai_codex::DevicePrompt| {
                 if let Panel::ChatGpt { code, .. } = &mut *shown.borrow_mut() {
                     *code = Some(prompt);
                 }
@@ -1523,7 +1522,7 @@ impl TuiApp {
             Some(model) => model.split('/').next().map(str::to_string),
             None => self.0.options.models.as_ref()?.current().provider,
         }?;
-        let window = kumi_runtime::providers::usage::nearest(&provider, 80.)?;
+        let window = kumi_ai::providers::usage::nearest(&provider, 80.)?;
         let resets = window.resets_at_ms.map(|at| format!(" · resets {}", reset_words(at, now_ms_f64()))).unwrap_or_default();
         Some((format!("plan {}%{resets}", window.used_percent.round()), window.used_percent >= 95.))
     }

@@ -68,9 +68,9 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: crates/kumi-runtime/tests/support/package-lock.json
+          cache-dependency-path: crates/kumi-agent/tests/support/package-lock.json
       - name: Install the official MCP and model SDKs the interoperability tests run beside Kumi's
-        run: npm ci --prefix crates/kumi-runtime/tests/support --ignore-scripts
+        run: npm ci --prefix crates/kumi-agent/tests/support --ignore-scripts
       - name: The published Kumi 1.7.5, fetched once for the migration tests
         shell: bash
         run: |

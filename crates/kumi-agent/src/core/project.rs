@@ -3,13 +3,10 @@
 //! project by its DAW, or the one its path gives. How a DAW tells a template from a song, and a song's folder, is its
 //! own (`ProjectRules`).
 
-use crate::core::{
-    contracts::JsonObject,
-    conversations::{modified_ms, remove, write_privately},
-    errors::RuntimeError,
-};
+use crate::core::conversations::{modified_ms, remove, write_privately};
 use async_trait::async_trait;
 use kumi_common::js::json::stringify;
+use kumi_types::{contracts::JsonObject, errors::RuntimeError};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};

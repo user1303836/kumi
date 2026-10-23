@@ -8,12 +8,8 @@ use kumi_common::{
     js::number,
     time::{now_ms, since},
 };
-use kumi_runtime::{
-    core::errors::RuntimeError,
-    library::{create_library, learn::LearnPhase, library_logs, read_state, LearnNowOptions, LearnProgress, Library, LibraryOptions},
-    system::Env,
-    KUMI,
-};
+use kumi_library::{create_library, learn::LearnPhase, library_logs, read_state, LearnNowOptions, LearnProgress, Library, LibraryOptions};
+use kumi_types::{command::KUMI, errors::RuntimeError, system::Env};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,

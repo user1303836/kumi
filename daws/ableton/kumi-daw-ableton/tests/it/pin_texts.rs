@@ -3,28 +3,12 @@
 //! (name → text); run with KUMI_BLESS=1 to write them again.
 use async_trait::async_trait;
 use futures::FutureExt;
-use kumi_common::abort::{self, Signal};
-use kumi_daw_ableton::hands::{persistent, Dialog, Hands, HandsError, HandsReply, KeysOptions, MenuItem, MenuOptions, Track, Window};
-use kumi_runtime::{
-    ai::{
-        error::LanguageModelError,
-        http::{Fetch, FetchInit, Response},
-        types::{
-            AssistantPart, DataContent, FileData, Message, TextPart, ToolCallPart, ToolPart, ToolResultContentItem, ToolResultOutput,
-            ToolResultPart, UserPart,
-        },
-    },
-    audio::{
-        analyze::HeardNote,
-        matching::STRUCTURE_MOVES,
-        tools::{listening_tools, transcription, ListeningOptions},
-    },
+use kumi_agent::{
     core::{
         contracts::{
-            AuditionEvent, ConversationStore, ConversationSummary, CurrentConversation, FoundExchange, HearRequest, HeardTake, JsonObject,
-            KernelTool, Memory, MemoryNote, MemoryStore, NoteChange, SavedConversation, ToolResult,
+            ConversationStore, ConversationSummary, CurrentConversation, FoundExchange, Memory, MemoryNote, MemoryStore, NoteChange,
+            SavedConversation,
         },
-        errors::{FailureKind, KumiError, RuntimeError},
         gaps::{gap_tools, GAP_GUIDANCE},
         goal::Best,
         goal_mode::{
@@ -47,33 +31,51 @@ use kumi_runtime::{
     },
     kernel::{
         agent::{
-            create_agent_kernel, AgentKernelOptions, ModelBinding, CARRY_ON_NOTE, STOPPED_BEFORE_RUNNING, STOPPED_NOTE, STOPPED_READING,
+            create_agent_kernel, AgentKernelOptions, CARRY_ON_NOTE, STOPPED_BEFORE_RUNNING, STOPPED_NOTE, STOPPED_READING,
             STOPPED_WHILE_RUNNING,
         },
-        budget::{
-            fit, job_report_block, put_away_images, without_observations, ContextBudget, PutAway, ASKED, OBSERVATION_MARKER, SHORTENED,
-        },
-    },
-    listening::{
-        checklist::{masking_unfair, Change, Checklist, Goal, Profile, Row, Verdict as Judged},
-        detect::{low_end, peaks},
-        judging::{processing, rebalance, take_back, Listen, Placed, RoundHost, Unheard},
-        measure::{Frames, Heard, Measures},
-        round::{Next, Round, RoundKind},
-    },
-    notation::pitch_name,
-    plugins::{
-        adapters::ADAPTERS,
-        registry::{plugin_guide, ExposedParameter},
-        roles::{find, job_for_item, plugin_fix, resolve, Found, Resolved, Seen},
-    },
-    providers::local::{local_servers, resolve_local_model, LocalModelOptions},
-    video::{
-        captions::Cue,
-        moments::{choose_moments, MomentOptions},
-        speech::speech_prompt,
+        budget::{fit, job_report_block, put_away_images, without_observations, PutAway, ASKED, OBSERVATION_MARKER, SHORTENED},
     },
 };
+use kumi_ai::{
+    binding::{ContextBudget, ModelBinding},
+    error::LanguageModelError,
+    http::{Fetch, FetchInit, Response},
+    providers::local::{local_servers, resolve_local_model, LocalModelOptions},
+    types::{
+        AssistantPart, DataContent, FileData, Message, TextPart, ToolCallPart, ToolPart, ToolResultContentItem, ToolResultOutput,
+        ToolResultPart, UserPart,
+    },
+};
+use kumi_common::abort::{self, Signal};
+use kumi_daw_ableton::hands::{persistent, Dialog, Hands, HandsError, HandsReply, KeysOptions, MenuItem, MenuOptions, Track, Window};
+use kumi_library::plugins::{
+    adapters::ADAPTERS,
+    registry::{plugin_guide, ExposedParameter},
+    roles::{find, job_for_item, plugin_fix, resolve, Found, Resolved, Seen},
+};
+use kumi_listening::{
+    checklist::{masking_unfair, Change, Checklist, Goal, Profile, Row, Verdict as Judged},
+    detect::{low_end, peaks},
+    judging::{processing, rebalance, take_back, Listen, Placed, RoundHost, Unheard},
+    measure::{Frames, Heard, Measures},
+    notation::pitch_name,
+    round::{Next, Round, RoundKind},
+};
+use kumi_media::{
+    audio::{
+        analyze::HeardNote,
+        matching::STRUCTURE_MOVES,
+        tools::{listening_tools, transcription, ListeningOptions},
+    },
+    captions::Cue,
+    speech::speech_prompt,
+};
+use kumi_types::{
+    contracts::{AuditionEvent, HearRequest, HeardTake, JsonObject, KernelTool, ToolResult},
+    errors::{FailureKind, KumiError, RuntimeError},
+};
+use kumi_web::video::moments::{choose_moments, MomentOptions};
 use serde_json::{json, Value};
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
@@ -324,7 +326,7 @@ async fn recall_texts_stay_word_for_word() {
     };
     let dir = tempfile::tempdir().unwrap();
     let techniques = create_technique_store(dir.path().join("techniques.json"));
-    use kumi_runtime::core::techniques::TechniqueStore;
+    use kumi_agent::core::techniques::TechniqueStore;
     techniques
         .save(&[technique("t1", "Parallel filter vocal reverb chain", "airy <vocal> pads"), technique("t2", "Glassy FM pluck", "plucks")])
         .await
@@ -442,7 +444,7 @@ async fn recipe_texts_stay_word_for_word() {
     add(&mut texts, "run: no Live", run(&run_it, json!({"name":"Drum bus","with":{"track":"track:2"}})).await);
     add(&mut texts, "forget: forgotten", run(&forget, json!({"name":"Drum bus"})).await);
     add(&mut texts, "forget: no such recipe", run(&forget, json!({"name":"Drum bus"})).await);
-    for n in 0..kumi_runtime::core::recipes::MAX_RECIPES {
+    for n in 0..kumi_agent::core::recipes::MAX_RECIPES {
         store.save(&recipe(&format!("Kept {n}"), "A kept recipe", &[], 1)).await.unwrap();
     }
     *connected.borrow_mut() = true;
@@ -1500,7 +1502,7 @@ done
         add(&mut texts, "stopped", failure(hanging.keys(&["hang".into()], stop).await.unwrap_err()));
         // The one text that differs by platform: pinned here as each platform says it.
         let untrusted = failure(hands.answer("untrusted", None).await.unwrap_err());
-        if kumi_runtime::system::platform() == "darwin" {
+        if kumi_types::system::platform() == "darwin" {
             assert_eq!(untrusted, "Kumi needs Accessibility access to use Live's menus: System Settings › Privacy & Security › Accessibility, then turn on the app Kumi runs in (your terminal). Then ask again. [untrusted]");
         } else {
             assert_eq!(untrusted, "Windows refused Kumi's access to Live's window. [untrusted]");
@@ -1642,16 +1644,18 @@ mod jobs_session {
     use super::{add, golden_texts, object, result_text, Texts};
     use async_trait::async_trait;
     use futures::{future::LocalBoxFuture, FutureExt};
-    use kumi_common::abort::Signal;
-    use kumi_runtime::core::{
+    use kumi_agent::core::{
         contracts::{
-            ConnectionListener, ConnectionState, Integration, IntegrationFactory, JsonObject, Kernel, KernelEmit, KernelEvent,
-            KernelFactory, KernelTool, Observation, ObserveHints, Picture, ProjectRef, Reach, SessionController, StopReason, ToolResult,
-            TurnResult, TurnState, Usage,
+            ConnectionListener, ConnectionState, Integration, IntegrationFactory, Kernel, KernelEmit, KernelEvent, KernelFactory,
+            Observation, ObserveHints, Picture, ProjectRef, SessionController, StopReason, TurnResult, TurnState,
         },
-        errors::RuntimeError,
         jobs::JobState,
         session::{create_session, JobsOptions, Session, SessionOptions},
+    };
+    use kumi_common::abort::Signal;
+    use kumi_types::{
+        contracts::{JsonObject, KernelTool, Reach, ToolResult, Usage},
+        errors::RuntimeError,
     };
     use serde_json::{json, Value};
     use std::{

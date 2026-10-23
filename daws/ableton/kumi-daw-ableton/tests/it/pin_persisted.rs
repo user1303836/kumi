@@ -2,38 +2,40 @@
 //! nothing: conversations and their index, notes, goals, objectives and jobs, recipes, techniques, lessons, gaps,
 //! timings, the library's Sets, baselines and kumi.db's rows about a Set. Hermetic, in temporary folders, with fixed
 //! times; what a writer stamps itself (file times, now, a fresh id, Kumi's version) is normalised on both sides.
+use kumi_agent::core::{
+    contracts::{ConversationStore, KernelCheckpoint, MemoryScope, MemoryStore, NoteChange, Picked, SavedConversation},
+    conversations::create_conversation_store_keeping,
+    evolve::{Knob, Slot},
+    gaps::gap_tools,
+    goal::{create_goal_store, Best, GoalRun, GoalState, GoalStore},
+    goal_mode::{create_objective_store, Check, Objective, ObjectiveBudget, ObjectiveState, ObjectiveStore, Verdict},
+    jobs::{create_job_store, JobKind, JobSpec, JobState, JobStatus, JobStore, KeptJob, WhenDone},
+    memory::{create_memory_store, MemoryStoreOptions, MAX_NOTES},
+    playbook::{create_playbook_store, Lesson, PlaybookStore, Reaction},
+    recipes::{create_recipe_store, Recipe, RecipeParam, RecipeStore},
+    store_backed::SqliteMemoryStore,
+    store_client::StoreClient,
+    taste_log::{TasteLog, UndoneBy, Whereabouts},
+    techniques::{create_technique_store, TechniqueBody, TechniqueDraft, TechniqueSource, TechniqueStore},
+};
+use kumi_ai::timing::{self, TurnTiming};
 use kumi_common::{abort, js::json::stringify};
 use kumi_daw_ableton::project::{create_project_store, project_id_of, Baseline, ProjectStore, PROJECT_KEY};
-use kumi_runtime::{
-    audio::matching::Focus,
-    core::{
-        contracts::{
-            AuditionCandidate, AuditionRequest, ChainPlacement, ChangeFamily, ChangeRecord, ChangeState, ClipNote, ClipPicture,
-            ColorChange, ConversationStore, DevicePlacement, KernelCheckpoint, MemoryScope, MemoryStore, NoteChange, Picked,
-            SavedConversation, TrackChip, Usage,
-        },
-        conversations::{create_conversation_store_keeping, IMPORTED},
-        evolve::{Knob, Slot},
-        gaps::gap_tools,
-        goal::{create_goal_store, Best, GoalRun, GoalState, GoalStore},
-        goal_mode::{create_objective_store, Check, Objective, ObjectiveBudget, ObjectiveState, ObjectiveStore, Verdict},
-        jobs::{create_job_store, JobKind, JobSpec, JobState, JobStatus, JobStore, KeptJob, WhenDone},
-        memory::{create_memory_store, MemoryStoreOptions, MAX_NOTES},
-        picture::{ChangePicture, Dynamics, EqBand, EqShape, MixLevels, MixSend, PictureValue},
-        playbook::{create_playbook_store, Lesson, PlaybookStore, Reaction},
-        recipes::{create_recipe_store, Recipe, RecipeParam, RecipeStore},
-        store_backed::SqliteMemoryStore,
-        store_client::StoreClient,
-        taste_log::{TasteLog, UndoneBy, Whereabouts},
-        techniques::{create_technique_store, TechniqueBody, TechniqueDraft, TechniqueSource, TechniqueStore},
-        timing::{self, TurnTiming},
+use kumi_library::{
+    learn::SetEntry,
+    library_logs,
+    sets::{Clips, DeviceRole, SetDevice, SetSummary, SetTrack, TrackKind},
+    store::Entry,
+};
+use kumi_media::audio::matching::Focus;
+use kumi_types::place::IMPORTED;
+use kumi_types::{
+    contracts::{
+        AuditionCandidate, AuditionRequest, ChainPlacement, ChangeFamily, ChangeRecord, ChangeState, ClipNote, ClipPicture, ColorChange,
+        DevicePlacement, TrackChip, Usage,
     },
-    library::{
-        learn::SetEntry,
-        sets::{Clips, DeviceRole, SetDevice, SetSummary, SetTrack, TrackKind},
-        store::Entry,
-    },
-    library_logs, KUMI_VERSION,
+    picture::{ChangePicture, Dynamics, EqBand, EqShape, MixLevels, MixSend, PictureValue},
+    version::KUMI_VERSION,
 };
 use serde_json::{json, Value};
 use std::{
@@ -769,7 +771,7 @@ async fn gaps_and_timings_logs_keep_their_keys() {
     put(again.path(), &files(&goldens("logs")));
     let db = again.path().join("kumi.db");
     let _open = kumi_store::Store::open(&db).unwrap();
-    let logged = kumi_runtime::core::gaps::logged_gaps(&db, &again.path().join("gaps.jsonl")).unwrap();
+    let logged = kumi_agent::core::gaps::logged_gaps(&db, &again.path().join("gaps.jsonl")).unwrap();
     let read = logged.iter().map(|line| format!("{line}\n")).collect::<String>();
     assert!(read == files(&goldens("logs"))["gaps.jsonl"], "gaps.jsonl changed when read back\n{read}");
 }

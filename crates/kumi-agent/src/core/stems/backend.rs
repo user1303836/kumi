@@ -1,8 +1,8 @@
 //! A DAW's side of stems: only its own facts. A track rendered over a stretch, where the stem files go, and the stems put
 //! back beside the track over the stretch (one plan).
-use crate::core::contracts::Render;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::contracts::Render;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 

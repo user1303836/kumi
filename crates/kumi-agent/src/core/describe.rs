@@ -1,12 +1,12 @@
 //! What changed in a saved project, in words: "Since you were last here" (catch-up, a few lines) and what watch_me saw
 //! (the changes, for the model to make a recipe of). Each DAW maps its own export and diff into `ProjectChange`s; the
 //! words and the order come from here, with the DAW's names for the kinds of things in a project.
-use crate::core::contracts::JsonObject;
 use indexmap::{IndexMap, IndexSet};
 use kumi_common::js::{
     json::stringify,
     string::{head, trim, utf16_len},
 };
+use kumi_types::contracts::JsonObject;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 

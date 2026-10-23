@@ -2,7 +2,7 @@
 //! filtering (a spectrogram's peaks along time are what sustains, along frequency what hits), masks from the mid applied
 //! to each channel, and the harmonic part cut at `BASS_HZ` into bass and the rest. Drums, bass and other add up to the
 //! input; voices stay in other (that takes a model).
-use crate::audio::dsp::{fft, window, Window};
+use kumi_media::audio::dsp::{fft, window, Window};
 
 /// The analysis frame and hop (samples): 2048 at 44.1–48 kHz is ~43 ms, a hop a quarter of it.
 const SIZE: usize = 2048;

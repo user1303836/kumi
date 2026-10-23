@@ -23,17 +23,13 @@ use daw_bridge::{
     paths::BridgePaths,
 };
 use futures::{future::LocalBoxFuture, FutureExt};
+use kumi_agent::core::{
+    context::IntegrationContext,
+    contracts::{ConnectionState, Integration, SessionController},
+};
 use kumi_common::abort::{self, Signal};
 use kumi_daw_own::bridge::OwnOptions;
-use kumi_runtime::{
-    core::{
-        context::IntegrationContext,
-        contracts::{ConnectionState, Integration, SessionController},
-        daw::DawId,
-    },
-    system::Env,
-    RuntimeError,
-};
+use kumi_types::{daw::DawId, errors::RuntimeError, system::Env};
 use std::{
     cell::RefCell,
     path::{Path, PathBuf},
@@ -172,7 +168,7 @@ impl Own {
                 self.bridge,
                 self.name(),
                 path.display(),
-                *kumi_runtime::KUMI,
+                *kumi_types::command::KUMI,
                 self.id.as_str()
             )
         })?;
@@ -407,7 +403,12 @@ impl DawProvider for Own {
         if self.receipt(&io.env).is_none() {
             let note = Check::note(
                 format!("{} isn't in {}", self.bridge, self.name()),
-                Some(format!("{} --daw {} bridge puts it in, if you want Kumi in {}", *kumi_runtime::KUMI, self.id.as_str(), self.name())),
+                Some(format!(
+                    "{} --daw {} bridge puts it in, if you want Kumi in {}",
+                    *kumi_types::command::KUMI,
+                    self.id.as_str(),
+                    self.name()
+                )),
             );
             return async move { vec![note] }.boxed_local();
         }
@@ -419,7 +420,7 @@ impl DawProvider for Own {
             Some(Bundled { version: self.bundled_version().unwrap_or_else(|| "dev".into()), sha256 })
         });
         // What puts each failure right: the bridge put in again, or the DAW opened once first.
-        let again = format!("{} --daw {} bridge", *kumi_runtime::KUMI, id.as_str());
+        let again = format!("{} --daw {} bridge", *kumi_types::command::KUMI, id.as_str());
         let next = move |id: &str| match id {
             "bridge" | "reference" | "secret" | "quarantine" | "arch" => Some(again.clone()),
             "opened" => Some(format!("Open {name} once, then run {again}")),
@@ -453,10 +454,10 @@ impl DawProvider for Own {
                 let host = probe(id).await;
                 if !host.started {
                     let said = host.said.map(|said| format!(": {said}")).unwrap_or_default();
-                    let repair = if *kumi_runtime::INSTALLED {
-                        format!("Run {} to repair Kumi", *kumi_runtime::KUMI_REPAIR)
+                    let repair = if *kumi_types::command::INSTALLED {
+                        format!("Run {} to repair Kumi", *kumi_types::command::KUMI_REPAIR)
                     } else {
-                        format!("Build it ({})", *kumi_runtime::KUMI_REPAIR)
+                        format!("Build it ({})", *kumi_types::command::KUMI_REPAIR)
                     };
                     checks.push(Check::fix(format!("Kumi's host for {name} didn't start{said}"), Some(repair)));
                 }
@@ -540,7 +541,7 @@ impl DawProvider for Own {
                 Err(why) => io.out.write(&format!(
                     "{} wasn't brought up to date: {why}. Run {} --daw {} bridge to try again.\n",
                     self.bridge,
-                    *kumi_runtime::KUMI,
+                    *kumi_types::command::KUMI,
                     self.id.as_str()
                 )),
             }
@@ -557,7 +558,7 @@ impl DawProvider for Own {
                 format!(
                     "{} wasn't brought up to date: {why}. Run {} --daw {} bridge to try again.\n",
                     self.bridge,
-                    *kumi_runtime::KUMI,
+                    *kumi_types::command::KUMI,
                     self.id.as_str()
                 )
             };
@@ -660,7 +661,7 @@ impl DawProvider for Own {
                 if !crate::process::ask_yes_no(command.input.clone(), out.clone(), &question, Some("add --yes")).await {
                     out.write(&format!(
                         "Nothing was changed. To put it in later: {} --daw {} bridge\n",
-                        *kumi_runtime::KUMI,
+                        *kumi_types::command::KUMI,
                         own.id.as_str()
                     ));
                     return Ok(1);
@@ -752,7 +753,7 @@ impl DawProvider for Own {
         None
     }
     fn without_daw(&self, on_connection: Rc<dyn Fn(ConnectionState)>) -> Rc<dyn Integration> {
-        kumi_runtime::integrations::none::create_no_daw_integration(*self.profile(), self.instructions, on_connection)
+        kumi_agent::integrations::none::create_no_daw_integration(*self.profile(), self.instructions, on_connection)
     }
 }
 

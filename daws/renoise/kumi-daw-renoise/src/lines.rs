@@ -1,7 +1,7 @@
 //! A pattern track's lines, or a phrase's, as Renoise's variations work on them (M7): each line's note cells and effect cells in
 //! Renoise's own text (read from the tool's rows, written back as notes_write and phrase_write cells), what sounds where (for
 //! the distance between two takes), and the variation operators: each seeded, each leaving the anchor lines alone.
-use kumi_runtime::core::variations::{Material, Rng};
+use kumi_agent::core::variations::{Material, Rng};
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 

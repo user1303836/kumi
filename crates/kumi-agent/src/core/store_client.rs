@@ -2,7 +2,7 @@
 //! store's writer and answered here once committed; a read runs on a blocking thread, at most as many
 //! at once as the store has read connections.
 
-use super::store_import::{import_json, Imported, JsonFiles};
+use crate::core::store_import::{import_json, Imported, JsonFiles};
 use kumi_store::{Connection, Store, StoreError};
 use std::{path::PathBuf, sync::Arc};
 

@@ -7,11 +7,9 @@ use kumi::{
     report::*,
     tui::tty::TtyOutput,
 };
+use kumi_agent::core::{gaps::gap_tools, store_client::StoreClient};
 use kumi_common::abort;
-use kumi_runtime::{
-    core::{gaps::gap_tools, store_client::StoreClient},
-    system::Env,
-};
+use kumi_types::system::Env;
 use serde_json::{json, Value};
 use std::{cell::RefCell, fs, rc::Rc};
 #[derive(Default)]
@@ -237,7 +235,7 @@ async fn the_gap_log_comes_from_kumis_database_with_what_an_older_kumi_logged_si
     let newer = gaps.find("Freezing a track").expect(gaps);
     assert!(older < newer, "oldest first: {gaps}");
     assert_eq!(
-        kumi_runtime::core::gaps::logged_gaps(&kumi.join("kumi.db"), &dir.path().join("none")).unwrap().len(),
+        kumi_agent::core::gaps::logged_gaps(&kumi.join("kumi.db"), &dir.path().join("none")).unwrap().len(),
         1,
         "and the report read the file's gap without writing it to the database"
     );
@@ -288,5 +286,5 @@ async fn a_reaper_only_report_never_speaks_lives_words() {
     let leaks = live_words::leaks(&said);
     assert!(leaks.is_empty(), "the report says Live's words:\n{}\n\nin:\n{said}", leaks.join("\n"));
     assert!(said.contains("REAPER"), "{said}");
-    kumi::daw::work_with(kumi_runtime::core::daw::DawId::Ableton);
+    kumi::daw::work_with(kumi_types::daw::DawId::Ableton);
 }

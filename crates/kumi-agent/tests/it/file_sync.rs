@@ -1,5 +1,5 @@
 //! Once a turn, Kumi looks at the files an older Kumi open beside it writes, and brings in what changed.
-use kumi_runtime::core::{file_sync::FileSync, store_client::StoreClient, store_import::JsonFiles};
+use kumi_agent::core::{file_sync::FileSync, store_client::StoreClient, store_import::JsonFiles};
 use kumi_store::{Connection, Kept};
 use std::path::Path;
 

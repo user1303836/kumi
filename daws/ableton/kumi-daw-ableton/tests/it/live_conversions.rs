@@ -2,6 +2,13 @@
 //! track waited for and named, Live brought forward when it hangs back, and the menus when a Live has no such API.
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi_agent::{
+    core::contracts::*,
+    mcp::{
+        client::{McpEndpoint, StderrStatus},
+        types::{CallToolResult, ListToolsResult},
+    },
+};
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_daw_ableton::history::LiveHistory;
 use kumi_daw_ableton::{
@@ -11,13 +18,8 @@ use kumi_daw_ableton::{
     options::HandsSetup,
     remember::Remember,
 };
-use kumi_runtime::{
-    core::{contracts::*, errors::RuntimeError},
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, ListToolsResult},
-    },
-};
+use kumi_types::contracts::*;
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -55,7 +57,7 @@ impl McpEndpoint for Live {
     fn pid(&self) -> Option<u32> {
         None
     }
-    fn server_info(&self) -> Option<kumi_runtime::mcp::types::Implementation> {
+    fn server_info(&self) -> Option<kumi_agent::mcp::types::Implementation> {
         Some(serde_json::from_value(json!({"name":"fixture","version":"1.0.80"})).unwrap())
     }
     async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {

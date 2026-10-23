@@ -1,7 +1,7 @@
 //! Transport and view actions, which report activity without creating change history.
 use super::more_changes::bars;
 use kumi_common::js::number::to_string;
-use kumi_runtime::core::contracts::{JsonObject, TrackChip};
+use kumi_types::contracts::{JsonObject, TrackChip};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -23,7 +23,7 @@ pub struct ActionKind {
     #[serde(default, skip_serializing)]
     pub core: bool,
 }
-pub use kumi_runtime::core::plan::ActionSummary;
+pub use kumi_agent::core::plan::ActionSummary;
 /// An action's summary with only its title.
 fn titled(title: impl Into<String>) -> ActionSummary {
     ActionSummary { title: title.into(), playing: None, recording: None }

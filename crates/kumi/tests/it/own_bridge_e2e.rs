@@ -4,17 +4,18 @@
 use daw_bridge::{files::ensure_secret, paths::BridgePaths, Daw};
 use daw_mcp_server::{host::Host, reaper::simulator::ReaperScript, renoise::simulator::RenoiseScript, simulator::Simulator};
 use futures::FutureExt;
+use kumi_agent::core::{
+    context::IntegrationContext,
+    contracts::*,
+    view::{BodyKind, BodyRequest, DawFocus, FocusBody},
+};
+use kumi_agent::mcp::client::McpEndpoint;
 use kumi_common::abort::Signal;
 use kumi_daw_own::bridge::{Connect, OwnOptions};
 use kumi_daw_reaper::create_reaper_integration;
 use kumi_daw_renoise::create_renoise_integration;
-use kumi_runtime::core::{
-    context::IntegrationContext,
-    contracts::*,
-    errors::RuntimeError,
-    view::{BodyKind, BodyRequest, DawFocus, FocusBody},
-};
-use kumi_runtime::mcp::client::McpEndpoint;
+use kumi_types::contracts::*;
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{cell::Cell, cell::RefCell, rc::Rc, sync::Arc};
 
@@ -818,13 +819,13 @@ impl McpEndpoint for Recorded {
     fn pid(&self) -> Option<u32> {
         self.inner.pid()
     }
-    fn server_info(&self) -> Option<kumi_runtime::mcp::types::Implementation> {
+    fn server_info(&self) -> Option<kumi_agent::mcp::types::Implementation> {
         self.inner.server_info()
     }
-    async fn list(&self, cursor: Option<&str>, signal: Signal) -> Result<kumi_runtime::mcp::types::ListToolsResult, RuntimeError> {
+    async fn list(&self, cursor: Option<&str>, signal: Signal) -> Result<kumi_agent::mcp::types::ListToolsResult, RuntimeError> {
         self.inner.list(cursor, signal).await
     }
-    async fn call(&self, name: &str, args: JsonObject, signal: Signal) -> Result<kumi_runtime::mcp::types::CallToolResult, RuntimeError> {
+    async fn call(&self, name: &str, args: JsonObject, signal: Signal) -> Result<kumi_agent::mcp::types::CallToolResult, RuntimeError> {
         let answer = self.inner.call(name, args.clone(), signal).await;
         let shown = answer.as_ref().ok().and_then(|result| serde_json::to_value(result).ok()).unwrap_or(Value::Null);
         self.calls.borrow_mut().push((name.to_string(), Value::Object(args), shown));
@@ -839,7 +840,7 @@ impl McpEndpoint for Recorded {
     fn on_live_event(&self, listener: Rc<dyn Fn(JsonObject)>) -> Box<dyn Fn()> {
         self.inner.on_live_event(listener)
     }
-    fn stderr_status(&self) -> kumi_runtime::mcp::client::StderrStatus {
+    fn stderr_status(&self) -> kumi_agent::mcp::client::StderrStatus {
         self.inner.stderr_status()
     }
     async fn close(&self) -> Result<(), RuntimeError> {

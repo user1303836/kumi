@@ -1,13 +1,5 @@
 //! Capabilities the producer needed that Kumi or Live does not offer, logged locally for developers.
-use super::daw::{DawId, DawProfile};
-use super::{
-    contracts::{with_final, JsonObject, KernelTool, ToolResult},
-    errors::RuntimeError,
-    memory::suspect_note,
-    store_client::StoreClient,
-    store_import::parse_gaps,
-};
-use crate::version::KUMI_VERSION;
+use crate::core::{store_client::StoreClient, store_import::parse_gaps};
 use async_trait::async_trait;
 use kumi_common::{
     abort::Signal,
@@ -15,6 +7,13 @@ use kumi_common::{
     time::{iso_string, now_ms},
 };
 use kumi_store::gaps;
+use kumi_types::daw::{DawId, DawProfile};
+use kumi_types::version::KUMI_VERSION;
+use kumi_types::{
+    contracts::{with_final, JsonObject, KernelTool, ToolResult},
+    errors::RuntimeError,
+    notes::suspect_note,
+};
 use serde_json::{json, Value};
 use std::{
     collections::HashSet,
@@ -23,13 +22,13 @@ use std::{
 };
 use tokio::io::AsyncWriteExt;
 pub const GAP_TOOL: &str = "note_gap";
-crate::daw_text!(
+kumi_types::daw_text!(
     pub GAP_GUIDANCE, gap_guidance:
     "When a request needs something Kumi's tools or ", app, "'s scripting don't offer, take the way round first (another tool, a plan of several, a recording, a device you make) and do it, cleanup included; then note the gap with note_gap beside your answer (final: true once nothing is left to do), and say in a sentence what you did instead."
 );
 const MAX_BYTES: u64 = 256 * 1024;
 const KEEP_LINES: usize = 500;
-crate::daw_text!(
+kumi_types::daw_text!(
     #[allow(dead_code)]
     DESCRIPTION, description:
     "When the producer asks for something you can't do because Kumi's tools or ", app, "'s API lack it (a device setting scripts can't reach, an operation no tool offers), note it here for Kumi's developers, then tell the producer and offer the way round. ",

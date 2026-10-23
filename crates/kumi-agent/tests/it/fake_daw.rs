@@ -5,19 +5,21 @@
 //! checked for Live's words too: each one left is listed below with why.
 use async_trait::async_trait;
 use indexmap::IndexMap;
-use kumi_common::abort::Signal;
-use kumi_runtime::core::{
-    contracts::{ChangeRecord, ChangeState, JsonObject, ToolResult},
-    daw::{DawProfile, DawWords, PromptVocab},
+use kumi_agent::core::{
     describe::{describe_changes, describe_watch_changes, Detail, ProjectChange, ProjectItem, ProjectWords},
-    errors::RuntimeError,
     fold::fold_tracks_with,
     history::{next_change_id, Applied, ChangeHost, Entry, History, Restore, UndoResult},
     phrases::{instant_steps, parse, InstantVocab, PhraseTrack, Switch},
-    picture::{curves, CurveReader, Dynamics, EqBand, ParameterRow, PictureValue},
     plan::{make_changes, ActionOutcome, ActionSummary, Batch, ChangeOutcome, PlanHost, StepKind},
     project::{decide_project_with, ProjectRules},
     refs::{moved_index, Book, Moved, RefScheme, Shift},
+};
+use kumi_common::abort::Signal;
+use kumi_types::{
+    contracts::{ChangeRecord, ChangeState, JsonObject, ToolResult},
+    daw::{DawProfile, DawWords, PromptVocab},
+    errors::RuntimeError,
+    picture::{curves, CurveReader, Dynamics, EqBand, ParameterRow, PictureValue},
 };
 use regex::Regex;
 use serde_json::{json, Value};
@@ -464,7 +466,7 @@ async fn session<const P: bool>(answers: Answers) -> Vec<String> {
     .unwrap();
     assert!(result.is_error);
     let reply: Value = serde_json::from_str(&result.text).unwrap();
-    assert_eq!(reply["refusedNote"], json!(kumi_runtime::core::plan::refused_note(&FAKE)));
+    assert_eq!(reply["refusedNote"], json!(kumi_agent::core::plan::refused_note(&FAKE)));
     assert!(reply["refusedNote"].as_str().unwrap().contains("or the song's tracks), so"), "{}", reply["refusedNote"]);
     assert_eq!(reply["heldBack"][0]["step"], json!(3));
     assert_eq!(reply["refused"][1]["error"], json!("That needs Fakeloop's bridge 9 or later."));
@@ -760,7 +762,7 @@ fn each_allowed_text_is_still_there() {
 /// ends the answer. Only a DAW whose undo takes discard passes it, through undo_change_with.
 #[tokio::test]
 async fn the_shared_undo_change_never_discards_unless_its_daw_says_so() {
-    use kumi_runtime::integrations::shared::undo::{undo_change, undo_change_with};
+    use kumi_agent::integrations::shared::undo::{undo_change, undo_change_with};
     let daw = FakeDaw::<false>::new(Answers { plan_steps: false, stops: false, reachable: true, batches: false, copies: false });
     let first = daw.record("tempo", "Tempo 120 → 124 BPM", "t-1", None);
     daw.record("tempo", "Tempo 124 → 126 BPM", "t-2", None);

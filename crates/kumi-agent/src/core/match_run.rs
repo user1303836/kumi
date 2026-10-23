@@ -4,10 +4,10 @@
 //! trying something genuinely different, or the budget spent) or sends the model back in with the
 //! score, what's left of the budget and the biggest gaps. A first draft can't end a run.
 
-use super::daw::DawProfile;
+use kumi_types::daw::DawProfile;
 use serde::{Deserialize, Serialize};
 
-use super::goal::Best;
+use crate::core::goal::Best;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -41,14 +41,12 @@ pub struct MatchStatus {
     pub stop: Option<MatchStop>,
 }
 
-use super::{
-    contracts::{AuditionCandidate, AuditionEvent, AuditionRequest, MIX_CANDIDATE},
-    techniques::MATCHING,
-};
+use crate::core::techniques::MATCHING;
 use kumi_common::{
     js::number::{round, to_string},
     time::now_ms,
 };
+use kumi_types::contracts::{AuditionCandidate, AuditionEvent, AuditionRequest, MIX_CANDIDATE};
 use regex::Regex;
 use std::{rc::Rc, sync::LazyLock};
 #[derive(Debug, Clone, Copy)]

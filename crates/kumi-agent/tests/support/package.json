@@ -1,5 +1,5 @@
 {
-  "name": "kumi-runtime-interop-tests",
+  "name": "kumi-agent-interop-tests",
   "private": true,
   "description": "The official SDKs the Rust tests run beside Kumi's own MCP client and providers. Test-only; nothing here ships.",
   "dependencies": {

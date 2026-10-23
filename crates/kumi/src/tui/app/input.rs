@@ -455,7 +455,7 @@ impl TuiApp {
         if command == "/changelog" {
             self.clear_editor();
             let since = self.0.state.borrow().news_since.clone();
-            match crate::whats_new::changelog(kumi_runtime::KUMI_VERSION, since.as_deref()) {
+            match crate::whats_new::changelog(kumi_types::version::KUMI_VERSION, since.as_deref()) {
                 Some(news) => {
                     let footer = Some(format!("Every release: {}", crate::whats_new::history_link()));
                     self.0.state.borrow_mut().transcript.add(Entry::News { title: news.title, items: news.items, footer });
@@ -683,7 +683,8 @@ impl TuiApp {
             self.clear_editor();
             let words = command["/slots".len()..].to_string();
             // One swap at a time: a model's fetch can take minutes.
-            if self.0.state.borrow().slots_check.is_some() && kumi_runtime::slots::parse(&words) != Ok(kumi_runtime::slots::Asked::Show) {
+            if self.0.state.borrow().slots_check.is_some() && kumi_listening::slots::parse(&words) != Ok(kumi_listening::slots::Asked::Show)
+            {
                 self.notice("Kumi is still trying a model for /slots: wait for it, or Esc stops it.", NoticeTone::Info);
                 return Ok(());
             }
@@ -694,13 +695,13 @@ impl TuiApp {
             let check = Rc::new(kumi_common::abort::Controller::new());
             let signal = check.signal.clone();
             self.0.state.borrow_mut().slots_check.get_or_insert_with(|| check.clone());
-            let said = kumi_runtime::slots::command(&words, &slots, &progress, signal).await;
+            let said = kumi_listening::slots::command(&words, &slots, &progress, signal).await;
             let ended = self.0.state.borrow().slots_check.as_ref().is_some_and(|current| Rc::ptr_eq(current, &check));
             if ended {
                 self.0.state.borrow_mut().slots_check = None;
             }
             match said {
-                kumi_runtime::slots::Said::Slots { lines, footer } => {
+                kumi_listening::slots::Said::Slots { lines, footer } => {
                     self.0.state.borrow_mut().transcript.add(Entry::News {
                         title: "Model slots".into(),
                         items: lines,
@@ -708,8 +709,8 @@ impl TuiApp {
                     });
                     self.0.scheduler.request();
                 }
-                kumi_runtime::slots::Said::Done(text) => self.notice(&text, NoticeTone::Info),
-                kumi_runtime::slots::Said::Refused(text) => self.notice(&text, NoticeTone::Warn),
+                kumi_listening::slots::Said::Done(text) => self.notice(&text, NoticeTone::Info),
+                kumi_listening::slots::Said::Refused(text) => self.notice(&text, NoticeTone::Warn),
             }
             return Ok(());
         }
@@ -741,7 +742,7 @@ impl TuiApp {
             // Where Kumi's lines reach a producer working in the DAW (Live's say so in its own settings): its status bar, or
             // none to write to.
             let profile = crate::daw::profile();
-            if !matches!(profile.id, Some(kumi_runtime::core::daw::DawId::Ableton) | None) {
+            if !matches!(profile.id, Some(kumi_types::daw::DawId::Ableton) | None) {
                 let app = profile.words.app;
                 self.notice(
                     &if profile.caps.status_line {
@@ -941,7 +942,7 @@ impl TuiApp {
             self.0.state.borrow_mut().activity = format!("connecting to {}", crate::daw::words().app);
             let result = controller.reconnect().await;
             // REAPER's and Renoise's integrations retire their rows as they close, each in its DAW's words.
-            if result.is_ok() && crate::daw::current().id() == kumi_runtime::core::daw::DawId::Ableton {
+            if result.is_ok() && crate::daw::current().id() == kumi_types::daw::DawId::Ableton {
                 for change in self.0.state.borrow_mut().records.changes_mut() {
                     if matches!(change.state, ChangeState::Applied | ChangeState::Unsure) {
                         change.state = ChangeState::Expired;
@@ -1026,7 +1027,7 @@ impl TuiApp {
         if !self.0.options.instant
             || !controller.has_instant()
             || !self.0.state.borrow().attachments.is_empty()
-            || kumi_runtime::core::phrases::parse(raw).is_none()
+            || kumi_agent::core::phrases::parse(raw).is_none()
         {
             return false;
         }
@@ -1243,7 +1244,7 @@ impl Command {
     /// What the menu says the command does, in the DAW's words (Live's as written, for Live).
     pub(super) fn about(&self) -> String {
         let words = crate::daw::words();
-        let live = crate::daw::current().id() == kumi_runtime::core::daw::DawId::Ableton;
+        let live = crate::daw::current().id() == kumi_types::daw::DawId::Ableton;
         match self.name {
             "/resume" => format!("Go back to a kept conversation, this {0}'s or any {0}'s: /resume <id or name>", words.place),
             "/reconnect" => format!("Connect to {} again, keeping the conversation", words.app),
@@ -1260,7 +1261,7 @@ pub(super) fn help(daw: bool) -> String {
     let daw = if daw { " · /daw says which DAW Kumi works with, and /daw <name> opens Kumi again with another" } else { "" };
     let (app, place, places) = (words.app, words.place, words.places);
     // Willington's bindings are Live's.
-    let willington = if crate::daw::current().id() == kumi_runtime::core::daw::DawId::Ableton {
+    let willington = if crate::daw::current().id() == kumi_types::daw::DawId::Ableton {
         " /willington turns Willington's bindings (macro mapping and more) on or off;"
     } else {
         ""
@@ -1310,5 +1311,5 @@ pub(super) const COMMANDS: &[Command] = &[
 /// is `pause`. None when the line isn't that command.
 fn subcommand(command: &str, name: &str) -> Option<String> {
     let rest = command.strip_prefix(name)?;
-    (rest.is_empty() || rest.starts_with(char::is_whitespace)).then(|| kumi_runtime::core::goal_mode::command_word(rest))
+    (rest.is_empty() || rest.starts_with(char::is_whitespace)).then(|| kumi_agent::core::goal_mode::command_word(rest))
 }

@@ -41,8 +41,8 @@ fn focus_paths_changes_and_piano_rolls_match_source_whole_results() {
                 json!(fit_crumbs(&serde_json::from_value::<Vec<String>>(args[0].clone()).unwrap(), args[1].as_i64().unwrap() as i32))
             }
             "touchedNext" => json!(touched_next(
-                serde_json::from_value::<Option<kumi_runtime::core::contracts::LiveFocus>>(args[0].clone()).unwrap().as_ref(),
-                serde_json::from_value::<Option<kumi_runtime::core::contracts::LiveFocus>>(args[1].clone()).unwrap().as_ref(),
+                serde_json::from_value::<Option<kumi_agent::core::contracts::LiveFocus>>(args[0].clone()).unwrap().as_ref(),
+                serde_json::from_value::<Option<kumi_agent::core::contracts::LiveFocus>>(args[1].clone()).unwrap().as_ref(),
                 serde_json::from_value(args[2].clone()).unwrap()
             )),
             "setNameFrom" => json!(set_name_from(args[0].as_str().unwrap())),

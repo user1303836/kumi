@@ -1,6 +1,6 @@
 //! The selected path open, other racks folded.
 use super::icons::{device_kind, role_kind, IconKind};
-use kumi_runtime::core::contracts::{ChainNode, DeviceForm, DeviceNode, DeviceTree};
+use kumi_agent::core::contracts::{ChainNode, DeviceForm, DeviceNode, DeviceTree};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TreeNode {
     Device,

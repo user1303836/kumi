@@ -31,9 +31,9 @@ use super::types::{
     CallToolResult, ContentBlock, ErrorCode, Implementation, InitializeResult, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
     ListToolsResult, McpError, Payload, RequestId, LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS,
 };
-use crate::core::contracts::JsonObject;
-use crate::core::errors::RuntimeError;
-use crate::version::KUMI_VERSION;
+use kumi_types::contracts::JsonObject;
+use kumi_types::errors::RuntimeError;
+use kumi_types::version::KUMI_VERSION;
 
 /// The most one message from the bridge may hold: a big Set's reads come in pages well under it.
 pub const MAX_BRIDGE_MESSAGE_BYTES: usize = 64 * 1024 * 1024;

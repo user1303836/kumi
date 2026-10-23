@@ -1,18 +1,20 @@
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi_agent::{
+    core::contracts::*,
+    mcp::{
+        client::{McpEndpoint, StderrStatus},
+        types::{CallToolResult, Implementation, ListToolsResult},
+    },
+};
 use kumi_common::abort::{Signal, SignalExt};
 use kumi_daw_ableton::{
     integration::Ableton,
     observation::ObservationHost,
     options::{AbletonOptions, HandsSetup},
 };
-use kumi_runtime::{
-    core::{contracts::*, errors::RuntimeError},
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, Implementation, ListToolsResult},
-    },
-};
+use kumi_types::contracts::*;
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{cell::Cell, rc::Rc};
 
@@ -91,8 +93,8 @@ async fn of_the_fullest_catalog_only_the_core_tools_go_with_every_request() {
             // The checker in front of every deferred tool takes what the tool's own schema allows.
             for tool in definitions.iter().filter(|tool| tool.deferred()) {
                 let schema = Value::Object(tool.input_schema());
-                let example = kumi_runtime::kernel::schema::example(&schema).unwrap_or_else(|| panic!("no example for {}", tool.name()));
-                assert_eq!(kumi_runtime::kernel::schema::problem(&schema, &example), None, "{} {example}", tool.name());
+                let example = kumi_agent::kernel::schema::example(&schema).unwrap_or_else(|| panic!("no example for {}", tool.name()));
+                assert_eq!(kumi_agent::kernel::schema::problem(&schema, &example), None, "{} {example}", tool.name());
             }
             // Every change and action that isn't core is a step make_changes lists with its input.
             let plan = definitions.iter().find(|tool| tool.name() == "make_changes").unwrap();

@@ -6,7 +6,7 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 ## Where things live
 - `crates/kumi`: the app. TUI (`src/tui/`), CLI, install/update/doctor; `src/daw/` wires each DAW in, and its
   `registry` names the DAWs this build integrates (the only place that names them all).
-- `crates/kumi-runtime`: the agent and the DAW-neutral core.
+- `crates/kumi-agent`: the agent and the DAW-neutral core, and the MCP client (`src/mcp/`).
   - `src/kernel/`: the agent loop. `src/core/`: the DAW-neutral model (HISTORY, plans, sessions, places, FOCUS
     views, and workflows such as jam, layers and stems).
   - `src/integrations/`: `shared/`, what every DAW's integration shares, and the DAW-neutral `none` and `fallback`.
@@ -23,21 +23,20 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 - `daws/renoise/`: Renoise's tool, `com.kumi.Bridge.xrnx` (Lua), and its tests against a mock of Renoise's API;
   `daws/renoise/kumi-daw-renoise`: Renoise, host side (its integration, the tools only Renoise has, its library).
 - `crates/kumi-types`: what every layer names: DAW profiles and words, the contracts with the tools, errors, places,
-  the system and the version. `kumi-runtime` re-exports it where its code always named it.
+  the system and the version.
 - `crates/kumi-net`: how Kumi reaches the network: its HTTP clients (proxies, trust), why a request got no answer
-  (`cause`), the public-only web client (`web`) and a model call's error. Re-exported as `kumi_runtime::net` and the rest.
+  (`cause`), the public-only web client (`web`) and a model call's error.
 - `crates/kumi-media`: audio (decoding, analysis, matching a sound, DSP), voice input, and the programs that decode
-  media (ffmpeg, yt-dlp, whisper.cpp) with a video's frames, captions and speech. Re-exported as `kumi_runtime::audio`…
+  media (ffmpeg, yt-dlp, whisper.cpp) with a video's frames, captions and speech.
 - `crates/kumi-ai`: the model clients: each provider's wire binding, the providers and their models, signing in, the
-  models Kumi runs itself (ONNX Runtime), a turn's timing and a failed call's words. Re-exported as `kumi_runtime::ai`…
+  models Kumi runs itself (ONNX Runtime), a turn's timing and a failed call's words, and what the loop asks of a model.
 - `crates/kumi-web`: the web and video tools: searching and reading the web (pages, PDFs, GitHub, Max patches), and
-  watching a tutorial for its words, frames and sound. Re-exported as `kumi_runtime::web` and `kumi_runtime::video`.
+  watching a tutorial for its words, frames and sound.
 - `crates/kumi-library`: the producer's library (learning, search, presets, Sets, taste), the plug-ins' formats and
   roles, and finding samples on disk. Each DAW says where its library is (`LibrarySources`, implemented in its
-  integration; the registry's `LIBRARIES`). Re-exported as `kumi_runtime::library` and `kumi_runtime::plugins`.
+  integration; the registry's `LIBRARIES`).
 - `crates/kumi-listening`: listening: what a listen measures, the judge and its checklist, the engine's rounds, the
   listening models and their slots, style references and notation. Each DAW plays and renders for it (`Renderer`).
-  Re-exported as `kumi_runtime::listening`, `references`, `slots` and `notation`.
 - `crates/kumi-store` (SQLite), `kumi-common` (shared utilities), `kumi-genexpr` (gen~ test interpreter).
 - `plugin-formats/`: the plug-in preset formats Kumi reads (data Kumi builds in).
 - `testdata/oracles/<crate>/`: the recorded oracles that crate's tests read, through `kumi_testkit::oracle`.
@@ -52,7 +51,7 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 - Tests, in a home of their own (never your real ~/.kumi or Live folders):
   `sh scripts/test-isolated.sh --profile ci -p <crate>` (Windows: `scripts/test-isolated.ps1`)
   - Needs cargo-nextest: each test runs in a process of its own. `KUMI_NEXTEST=0` runs `cargo test` instead.
-- One test file: `sh scripts/test-isolated.sh -p kumi-runtime -E 'test(/^<name>::/)'`. A crate's integration tests
+- One test file: `sh scripts/test-isolated.sh -p kumi-agent -E 'test(/^<name>::/)'`. A crate's integration tests
   are one binary, `tests/it/`, with a module for each file (`tests/it/main.rs` lists them).
 - Format and the gating lint:
   `cargo fmt --all --check`
@@ -88,7 +87,7 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 
 ## Pins and oracles
 - Goldens are byte-exact, and `KUMI_BLESS=1` rewrites them: the pins in `crates/kumi/tests/goldens`,
-  `crates/kumi-runtime/tests/goldens` and `daws/ableton/kumi-daw-ableton/tests/goldens`, the host's
+  `crates/kumi-agent/tests/goldens` and `daws/ableton/kumi-daw-ableton/tests/goldens`, the host's
   `daws/own/daw-mcp-server/tests/golden` and the wire vectors in `daws/own/daw-bridge/tests/vectors`. A refactor's proof is "goldens unchanged".
 - Oracles (`testdata/oracles/<crate>/`) were recorded from the TypeScript version (tag `v1.7.6`). Nothing regenerates
   them. A lean worktree leaves out the ones only Extended's tests read (`testdata/oracles/extended-only.txt`).

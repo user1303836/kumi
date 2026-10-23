@@ -41,18 +41,17 @@ use crate::{
     update::UpdateControl,
 };
 use futures::{future::LocalBoxFuture, FutureExt};
+use kumi_agent::core::contracts::*;
+use kumi_ai::providers::ProviderId;
 use kumi_common::{
     abort::Signal,
     js::{number, string},
     time::{now_ms_f64, perf_now},
 };
-use kumi_runtime::{
-    core::{contracts::*, errors::RuntimeError},
-    providers::ProviderId,
-    voice::VoiceTrouble,
-    web::cause::NetCause,
-    KUMI_START,
-};
+use kumi_media::voice::VoiceTrouble;
+use kumi_net::cause::NetCause;
+use kumi_types::contracts::*;
+use kumi_types::{command::KUMI_START, errors::RuntimeError};
 use serde_json::Value;
 use std::{
     cell::{Cell, RefCell},
@@ -84,18 +83,18 @@ pub struct TuiOptions {
     pub panel_tab: Option<PanelTab>,
     pub updates: Option<UpdateControl>,
     /// /daw <name>: Kumi closes and opens again with that DAW. None where the producer works with Live alone.
-    pub switch_daw: Option<Rc<dyn Fn(kumi_runtime::core::daw::DawId)>>,
+    pub switch_daw: Option<Rc<dyn Fn(kumi_types::daw::DawId)>>,
     /// A first run on a computer with several DAWs and no bridge yet: the DAWs setup asks the producer to choose among,
     /// and what it does with the one chosen (remembers it, and Kumi opens again with it when it isn't this run's).
-    pub ask_daw: Vec<kumi_runtime::core::daw::DawId>,
-    pub pick_daw: Option<Rc<dyn Fn(kumi_runtime::core::daw::DawId)>>,
+    pub ask_daw: Vec<kumi_types::daw::DawId>,
+    pub pick_daw: Option<Rc<dyn Fn(kumi_types::daw::DawId)>>,
     pub voice: Option<Rc<dyn VoiceController>>,
     /// Live's part of first-run setup; `None` when Kumi chats without Live by choice.
     pub connect_live: Option<ConnectDaw>,
     /// /willington, where Kumi's bridge can carry Willington.
     pub willington: Option<crate::daw::Toggle>,
     /// /slots: which model does each listening job, swapped and taken back.
-    pub slots: Option<Rc<kumi_runtime::slots::SlotsContext>>,
+    pub slots: Option<Rc<kumi_listening::slots::SlotsContext>>,
     /// What's new since the producer last opened Kumi, shown once as it starts.
     pub whats_new: Option<crate::whats_new::News>,
     /// How this terminal shows Kumi's status and notifications; read from the environment when None.
@@ -210,7 +209,7 @@ enum Panel {
     /// a browser anywhere.
     ChatGpt {
         url: Option<String>,
-        code: Option<kumi_runtime::auth::openai_codex::DevicePrompt>,
+        code: Option<kumi_ai::auth::openai_codex::DevicePrompt>,
         by_code: bool,
         abort: Signal,
         then: Option<Action>,
@@ -416,7 +415,7 @@ struct State {
     /// Counting down to Kumi taking its recommended answer; any key stops it.
     answer_countdown: Option<JoinHandle<()>>,
     /// Background jobs as they last stood, by id: JOBS, the header's count and the cards.
-    jobs: std::collections::BTreeMap<u32, kumi_runtime::core::jobs::JobStatus>,
+    jobs: std::collections::BTreeMap<u32, kumi_agent::core::jobs::JobStatus>,
     /// Jobs that ended whose request carries on, waiting for a moment the producer isn't in the middle of something.
     carry: Vec<u32>,
     /// Each job's record last written to the terminal's status (OSC 7501 `id=job-N`).

@@ -6,25 +6,29 @@
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use futures::FutureExt;
-use kumi_common::abort::{Signal, SignalExt};
-use kumi_runtime::ai::error::LanguageModelError;
-use kumi_runtime::ai::types::{
-    CallOptions, FinishReason, FinishReasonUnified, InputTokens, OutputTokens, StreamPart, StreamParts, ToolCall, Usage as ModelUsage,
-};
-use kumi_runtime::core::contracts::*;
-use kumi_runtime::core::daw::{Capabilities, PromptVocab, ScriptKind};
-use kumi_runtime::core::errors::{FailureKind, KumiError, RuntimeError};
-use kumi_runtime::core::memory::{create_memory_store, MemoryStoreOptions};
-use kumi_runtime::core::session::{JobsOptions, VideoDirectories};
-use kumi_runtime::core::techniques::create_technique_store;
-use kumi_runtime::integrations::none::create_no_daw_integration;
-use kumi_runtime::kernel::agent::{create_agent_kernel, AgentKernel, AgentKernelOptions, LanguageModel, ModelBinding, ModelRequest};
-use kumi_runtime::kernel::budget::ContextBudget;
-use kumi_runtime::library::{create_library, sources::SourceOptions, LibraryOptions};
-use kumi_runtime::{
+use kumi_agent::core::contracts::*;
+use kumi_agent::core::memory::{create_memory_store, MemoryStoreOptions};
+use kumi_agent::core::session::{JobsOptions, VideoDirectories};
+use kumi_agent::core::techniques::create_technique_store;
+use kumi_agent::integrations::none::create_no_daw_integration;
+use kumi_agent::kernel::agent::{create_agent_kernel, AgentKernel, AgentKernelOptions};
+use kumi_agent::{
     create_conversation_store, create_goal_store, create_objective_store, create_playbook_store, create_recipe_store, create_session,
     with_fallback, Session, SessionOptions,
 };
+use kumi_ai::binding::ContextBudget;
+use kumi_ai::binding::{LanguageModel, ModelBinding, ModelRequest};
+use kumi_ai::error::LanguageModelError;
+use kumi_ai::types::{
+    CallOptions, FinishReason, FinishReasonUnified, InputTokens, OutputTokens, StreamPart, StreamParts, ToolCall, Usage as ModelUsage,
+};
+use kumi_common::abort::{Signal, SignalExt};
+use kumi_library::{create_library, sources::SourceOptions, LibraryOptions};
+use kumi_types::contracts::*;
+use kumi_types::daw::DawProfile;
+use kumi_types::daw::DawWords;
+use kumi_types::daw::{Capabilities, PromptVocab, ScriptKind};
+use kumi_types::errors::{FailureKind, KumiError, RuntimeError};
 use regex::Regex;
 use serde_json::{json, Value};
 kumi_testkit::in_process!();
@@ -256,15 +260,15 @@ impl Integration for FakeIntegration {
     async fn close(&self) -> Result<(), RuntimeError> {
         Ok(())
     }
-    fn can_show(&self, kind: kumi_runtime::core::view::BodyKind) -> bool {
-        kind == kumi_runtime::core::view::BodyKind::Matrix
+    fn can_show(&self, kind: kumi_agent::core::view::BodyKind) -> bool {
+        kind == kumi_agent::core::view::BodyKind::Matrix
     }
     async fn focus_body(
         &self,
-        request: &kumi_runtime::core::view::BodyRequest,
+        request: &kumi_agent::core::view::BodyRequest,
         _: Signal,
-    ) -> Result<Option<kumi_runtime::core::view::FocusBody>, RuntimeError> {
-        use kumi_runtime::core::view::*;
+    ) -> Result<Option<kumi_agent::core::view::FocusBody>, RuntimeError> {
+        use kumi_agent::core::view::*;
         Ok((request == &BodyRequest::Matrix)
             .then(|| FocusBody::Matrix(SequenceMatrix { tracks: vec!["Kick".into()], slots: vec![], current: None, first: 0 })))
     }
@@ -307,7 +311,7 @@ fn open(
     options.web = true;
     options.recipes = Some(create_recipe_store(dir.join("recipes")));
     options.watch = Some(VideoDirectories { videos_dir: text("videos"), tools_dir: text("tools") });
-    options.references = Some(Rc::new(kumi_runtime::references::store::ReferenceStore::new(text("references"))));
+    options.references = Some(Rc::new(kumi_listening::references::store::ReferenceStore::new(text("references"))));
     options.techniques = Some(create_technique_store(dir.join("techniques.json")));
     options.gaps = Some(text("gaps.jsonl"));
     options.conversations = Some(create_conversation_store(dir));
@@ -496,8 +500,8 @@ async fn own_session(
 ) -> (Vec<String>, Vec<ChangeRecord>, Option<ChangeRecord>) {
     use daw_bridge::{files::ensure_secret, paths::BridgePaths};
     use daw_mcp_server::{host::Host, simulator::Simulator};
+    use kumi_agent::core::context::IntegrationContext;
     use kumi_daw_own::bridge::{Connect, OwnOptions};
-    use kumi_runtime::core::context::IntegrationContext;
     let dir = tempfile::tempdir().unwrap();
     let paths = BridgePaths::new(dir.path(), daw);
     let mut config = config(ensure_secret(&paths.secret()).unwrap());
@@ -511,7 +515,7 @@ async fn own_session(
         let host = host.clone();
         let connect: Connect = Rc::new(move |_| {
             let host = host.clone();
-            async move { Ok(host as Rc<dyn kumi_runtime::mcp::client::McpEndpoint>) }.boxed_local()
+            async move { Ok(host as Rc<dyn kumi_agent::mcp::client::McpEndpoint>) }.boxed_local()
         });
         let mut context = IntegrationContext::new(listener);
         let into = into.clone();
@@ -702,7 +706,7 @@ fn ceil(text: &str, mut at: usize) -> usize {
 async fn the_session_offers_another_daws_own_focus_bodies() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            use kumi_runtime::core::view::{BodyKind, BodyRequest, FocusBody};
+            use kumi_agent::core::view::{BodyKind, BodyRequest, FocusBody};
             let dir = tempfile::tempdir().unwrap();
             let (main, worker) = (Rc::new(Recorded::default()), Rc::new(Recorded::default()));
             let (session, _, _, _) = open(&main, &worker, dir.path(), false);

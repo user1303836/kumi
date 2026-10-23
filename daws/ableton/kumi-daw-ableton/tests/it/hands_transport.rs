@@ -136,7 +136,7 @@ async fn requests_correlate_out_of_order_and_errors_timeout_and_cancellation_do_
     assert_eq!(second.unwrap().fields["request"]["op"], "keys");
     let error = hands.answer("untrusted", None).await.unwrap_err();
     assert_eq!(error.kind, HandsErrorKind::Untrusted);
-    assert!(error.message.contains(if kumi_runtime::system::platform() == "darwin" { "Accessibility" } else { "Windows refused" }));
+    assert!(error.message.contains(if kumi_types::system::platform() == "darwin" { "Accessibility" } else { "Windows refused" }));
     let error = hands.answer("no-live", None).await.unwrap_err();
     assert_eq!(error.kind, HandsErrorKind::NoLive);
     assert_eq!(error.message, "Live isn't running.");

@@ -72,7 +72,7 @@ REAPER 7.82 和 Renoise 3.5.4 已在 macOS 上验证。在 Windows 和 Linux 上
 ```sh
 cargo build --release --locked --workspace --bins
 cargo run --release -p kumi --                     # 在 -- 后添加 bridge、doctor 等参数
-npm ci --prefix crates/kumi-runtime/tests/support  # 只需一次：部分测试运行的官方 SDK
+npm ci --prefix crates/kumi-agent/tests/support  # 只需一次：部分测试运行的官方 SDK
 sh scripts/test-isolated.sh                        # 无需 Live 或登录
 ```
 
@@ -83,7 +83,9 @@ sh scripts/test-isolated.sh                        # 无需 Live 或登录
 | 文件夹 | 内容 |
 | --- | --- |
 | `crates/kumi` | 终端应用和 `kumi` 命令 |
-| `crates/kumi-runtime` | Kumi 的代理核心：模型提供方、记忆、音频分析、视频、网络，以及与 Live、REAPER 和 Renoise 的集成 |
+| `crates/kumi-agent` | Kumi 的代理：循环、会话、记忆、HISTORY 和 MCP 客户端 |
+| `crates/kumi-ai`、`kumi-media`、`kumi-web`、`kumi-library`、`kumi-listening` | 模型提供方、音频分析与语音输入、网络与视频、制作人的素材库，以及聆听 |
+| `daws/<daw>/kumi-daw-<daw>` | 与 Live、REAPER 和 Renoise 的集成 |
 | `daws/ableton/ableton-mcp-server` | 桥接：由 Kumi 启动的本地 MCP 服务器，也可单独与其他 MCP 客户端配合使用（[桥接指南（英文）](daws/ableton/ableton-mcp-server/README.md)） |
 | `daws/ableton/remote-script` | 桥接的 Remote Script，运行在 Live 内部 |
 | `daws/ableton/live-extension` | Kumi 的 Live 扩展（Live 12.4 及更高版本） |

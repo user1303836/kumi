@@ -1,7 +1,8 @@
 kumi_testkit::fixture_paths!();
 use kumi_common::{abort::Signal, js::string::locale_compare_numeric_base};
 use kumi_daw_ableton::{change_context::SampleBank, changes::NoSample, samples::*};
-use kumi_runtime::{library::sources::join, RuntimeError};
+use kumi_library::sources::join;
+use kumi_types::errors::RuntimeError;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 fn oracle() -> Value {
@@ -169,7 +170,7 @@ async fn ranked_queries_skip_metadata_hidden_files_and_links_and_describe_only_r
 }
 #[test]
 fn folder_expansion_and_windows_defaults_use_host_path_rules() {
-    assert_eq!(folder_path("~/Samples", Some("/home/me")), Some(kumi_runtime::library::sources::resolve(&join("/home/me", "Samples"))));
+    assert_eq!(folder_path("~/Samples", Some("/home/me")), Some(kumi_library::sources::resolve(&join("/home/me", "Samples"))));
     assert_eq!(folder_path("Samples", Some("/home/me")), None);
     assert_eq!(user_library(Some("darwin"), Some("/Users/me")), join("/Users/me", "Music/Ableton/User Library"));
     assert_eq!(user_library(Some("win32"), Some("C:\\Users\\me")), join("C:\\Users\\me", "Documents/Ableton/User Library"));

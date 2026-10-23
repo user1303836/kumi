@@ -1,5 +1,5 @@
 use kumi_common::js;
-use kumi_runtime::core::contracts::{LibraryState, LibraryStatus, WebAction, WebEvent, WebWhere};
+use kumi_types::contracts::{LibraryState, LibraryStatus, WebAction, WebEvent, WebWhere};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum State {
@@ -271,7 +271,7 @@ pub fn library_line(status: Option<&LibraryStatus>) -> Option<String> {
         return Some(format!("Learning your library in the background{progress}"));
     }
     // Sets are Live's own files: another DAW's projects aren't learned yet.
-    let sets = if crate::daw::current().id() == kumi_runtime::core::daw::DawId::Ableton {
+    let sets = if crate::daw::current().id() == kumi_types::daw::DawId::Ableton {
         format!(" · {} Sets", count(status.sets))
     } else {
         String::new()

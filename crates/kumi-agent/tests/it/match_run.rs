@@ -1,11 +1,7 @@
 //! Controller and playbook cases.
 //! Session orchestration cases remain with the session port.
-use kumi_runtime::core::{
-    contracts::{AuditionEvent, MIX_CANDIDATE},
-    goal::Best,
-    match_run::*,
-    playbook::*,
-};
+use kumi_agent::core::{goal::Best, match_run::*, playbook::*};
+use kumi_types::contracts::{AuditionEvent, MIX_CANDIDATE};
 use serde_json::{json, Value};
 use std::rc::Rc;
 fn event(score: f64) -> Value {

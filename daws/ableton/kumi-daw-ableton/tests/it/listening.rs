@@ -1,7 +1,7 @@
 //! The listening loop's ears and judge on synthetic sound: what they measure, what they find and where, and how a
 //! checklist decides whether a change stays.
 use kumi_daw_ableton::rendering::main_chain::{main_chain, MainDevice};
-use kumi_runtime::listening::{
+use kumi_listening::{
     checklist::{masking_unfair, Change, Checklist, Goal, Item, MainState, Profile, Quantity, Role, Target},
     detect::{self, ProblemKind},
     measure::{measure_samples, Heard},
@@ -68,7 +68,7 @@ fn loudness_and_peaks_read_as_meters_do() {
     assert_eq!(measured.clipped, 0);
     // All of it in the 1 kHz third-octave, none of it side.
     let at = measured.balance.iter().copied().enumerate().max_by(|a, b| a.1.total_cmp(&b.1)).unwrap().0;
-    assert_eq!(kumi_runtime::listening::measure::THIRDS[at], 1000.);
+    assert_eq!(kumi_listening::measure::THIRDS[at], 1000.);
     assert!(measured.width[at] < 0.01);
     // A true peak between samples: a sine at a quarter of the rate, phase-shifted, peaks over its samples.
     let between: Vec<f64> = (0..48_000).map(|n| 0.9 * (2. * PI * 12_000. * n as f64 / RATE + PI / 4.).sin()).collect();
@@ -405,21 +405,21 @@ struct Biased {
     asked: std::cell::RefCell<Vec<usize>>,
 }
 #[async_trait::async_trait(?Send)]
-impl kumi_runtime::listening::listener::Listener for Biased {
+impl kumi_listening::listener::Listener for Biased {
     fn name(&self) -> String {
         "biased".into()
     }
-    async fn ask(&self, wav: &[u8], _: &str, _: kumi_common::abort::Signal) -> Result<kumi_runtime::listening::listener::Answer, String> {
+    async fn ask(&self, wav: &[u8], _: &str, _: kumi_common::abort::Signal) -> Result<kumi_listening::listener::Answer, String> {
         self.asked.borrow_mut().push(wav.len());
         let first_is_change = self.asked.borrow().len() == 2;
         let (first, second) = if first_is_change { (vec!["distorted".into()], vec![]) } else { (vec![], vec!["distorted".into()]) };
-        Ok(kumi_runtime::listening::listener::Answer { closer: "first".into(), first, second })
+        Ok(kumi_listening::listener::Answer { closer: "first".into(), first, second })
     }
 }
 
 #[tokio::test]
 async fn the_listening_model_counts_only_what_holds_both_ways() {
-    use kumi_runtime::listening::listener::{compare, parse_answer, Choice, Take};
+    use kumi_listening::listener::{compare, parse_answer, Choice, Take};
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("take.wav");
     let tone: Vec<f32> = sine(3., 440., 0.2).iter().map(|s| *s as f32).collect();
@@ -452,7 +452,7 @@ async fn the_listening_model_counts_only_what_holds_both_ways() {
 
 #[test]
 fn a_cut_at_a_resonance_reads_as_the_resonance_going_down_and_a_planned_cut_lands_near_its_prediction() {
-    use kumi_runtime::listening::{
+    use kumi_listening::{
         checklist::{plan_cut, region_excess},
         fit::{filter, Band, Shape},
     };
@@ -482,7 +482,7 @@ fn a_cut_at_a_resonance_reads_as_the_resonance_going_down_and_a_planned_cut_land
 
 #[test]
 fn a_resonance_is_judged_where_it_stands_out_most() {
-    use kumi_runtime::listening::checklist::worst_stretch;
+    use kumi_listening::checklist::worst_stretch;
     // Pink noise throughout, and a 1.1 kHz tone 12 dB over its third-octave from 12 s to 16 s only.
     let noise = pink(20., -20., 7);
     let mut tone = vec![0.; noise.len()];
@@ -499,7 +499,7 @@ fn a_resonance_is_judged_where_it_stands_out_most() {
 
 #[test]
 fn an_eq_is_fitted_to_a_gap_instead_of_tried() {
-    use kumi_runtime::listening::fit::{fit, total, Band, Shape, MASTER_LIMITS};
+    use kumi_listening::fit::{fit, total, Band, Shape, MASTER_LIMITS};
     // The gap two known bands would close: a 4 dB dip at 800 Hz and 2.5 dB more air.
     let truth = [Band { shape: Shape::Bell, hz: 800., db: -4., q: 1.2 }, Band { shape: Shape::HighShelf, hz: 9000., db: 2.5, q: 0.7 }];
     let points: Vec<(f64, f64, f64)> =
@@ -515,7 +515,7 @@ fn an_eq_is_fitted_to_a_gap_instead_of_tried() {
 
 #[test]
 fn a_frequency_live_shows_reads_in_hz_with_either_decimal_mark() {
-    use kumi_runtime::listening::knobs::shown_hz;
+    use kumi_listening::knobs::shown_hz;
     // A European Live writes "1,5 kHz": a decimal comma, not a thousands separator.
     assert_eq!(shown_hz("1,5 kHz"), Some(1500.));
     assert_eq!(shown_hz("2.50 kHz"), Some(2500.));
@@ -526,7 +526,7 @@ fn a_frequency_live_shows_reads_in_hz_with_either_decimal_mark() {
 
 #[test]
 fn knob_units_come_from_the_text_live_shows() {
-    use kumi_runtime::listening::knobs::{Scale, Unit};
+    use kumi_listening::knobs::{Scale, Unit};
     // A frequency knob, logarithmic over its raw range, read in octaves.
     let grid: Vec<(f64, String)> = (0..=64)
         .map(|i| {
@@ -556,7 +556,7 @@ fn knob_units_come_from_the_text_live_shows() {
 
 #[test]
 fn homing_in_takes_a_few_listens_and_learns_which_way_the_knob_goes() {
-    use kumi_runtime::listening::home::{Homed, Homing};
+    use kumi_listening::home::{Homed, Homing};
     let run = |measure: &dyn Fn(f64) -> f64, aim: f64, slope: Option<f64>| {
         let mut homing = Homing::new(aim, (aim - 0.4, aim + 0.4), (0., 24.), 0., Some(measure(0.)), 4);
         let stop = loop {
@@ -593,7 +593,7 @@ fn homing_in_takes_a_few_listens_and_learns_which_way_the_knob_goes() {
 
 #[test]
 fn a_small_cma_es_finds_knobs_that_interact_in_a_few_generations() {
-    use kumi_runtime::listening::cmaes::Cmaes;
+    use kumi_listening::cmaes::Cmaes;
     // Three knobs whose best settings depend on each other (a tilted valley), searched from the middle.
     let cost = |x: &[f64]| {
         let (a, b, c) = (x[0] - 0.7, x[1] - 0.25, x[2] - 0.6);
@@ -619,7 +619,7 @@ fn a_small_cma_es_finds_knobs_that_interact_in_a_few_generations() {
 
 #[test]
 fn homing_stops_short_of_a_setting_that_makes_something_else_worse() {
-    use kumi_runtime::listening::home::{Homed, Homing};
+    use kumi_listening::home::{Homed, Homing};
     // More gain closes the gap, but past +4 dB it hurts something else: the answer stays under it.
     let mut homing = Homing::new(-9., (-9.4, -8.6), (0., 24.), 0., Some(-14.), 4);
     let mut stop = None;
@@ -638,7 +638,7 @@ fn homing_stops_short_of_a_setting_that_makes_something_else_worse() {
 
 #[test]
 fn a_sounds_envelope_brightness_and_noisiness_are_measured_and_judged_against_a_reference_sound() {
-    use kumi_runtime::listening::checklist::Goal;
+    use kumi_listening::checklist::Goal;
     // Plucks: a fast attack and a decay of about 150 ms to 20 dB under, every half second; one bright, one dark.
     let pluck = |hz: f64, attack_ms: f64, decay_db_per_s: f64| -> Vec<f64> {
         (0..(4. * RATE) as usize)

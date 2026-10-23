@@ -3,7 +3,7 @@
 mod fixture;
 use fixture::Studio;
 use kumi_common::abort::Signal;
-use kumi_runtime::library::learn::{learn, LearnOptions, LearnPhase};
+use kumi_library::learn::{learn, LearnOptions, LearnPhase};
 use std::{rc::Rc, time::Duration};
 
 #[tokio::test]

@@ -1,6 +1,6 @@
 //! Kept conversations found by id or name across every Set, with names, pins and copies beside them, an index made
 //! again from the files, locks between Kumis, and keeping at least what Kumi 1.16 kept: hermetic, in temporary folders.
-use kumi_runtime::core::{
+use kumi_agent::core::{
     contracts::{Claim, ConversationMatch, ConversationStore, ConversationSummary, SavedConversation},
     conversations::{create_conversation_store, create_conversation_store_keeping, fresh_id, title},
 };
@@ -695,7 +695,7 @@ async fn what_a_later_kumi_adds_to_the_index_or_beside_a_conversation_is_read_pa
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_conversation_from_a_file_and_every_copy_of_it_say_so() {
-    use kumi_runtime::core::conversations::IMPORTED;
+    use kumi_types::place::IMPORTED;
     let dir = tempfile::tempdir().unwrap();
     let store = create_conversation_store(dir.path());
     store.create(IMPORTED, "imported0001", &said("from a file", 10), Some("Theirs (imported)"), None).await.unwrap();
@@ -715,7 +715,7 @@ async fn a_conversation_from_a_file_and_every_copy_of_it_say_so() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_conversation_from_a_file_keeps_its_set_and_an_earlier_kumi_writing_the_index_back_loses_nothing() {
-    use kumi_runtime::core::conversations::IMPORTED;
+    use kumi_types::place::IMPORTED;
     let dir = tempfile::tempdir().unwrap();
     let store = create_conversation_store(dir.path());
     store.create(IMPORTED, "imported0001", &said("from a file", 10), None, None).await.unwrap();

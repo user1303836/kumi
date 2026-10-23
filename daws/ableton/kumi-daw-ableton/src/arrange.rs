@@ -12,7 +12,7 @@ use kumi_common::{
         string::{head, trim, utf16_len},
     },
 };
-use kumi_runtime::core::{
+use kumi_types::{
     contracts::{JsonObject, ToolResult},
     errors::RuntimeError,
 };

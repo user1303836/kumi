@@ -17,11 +17,9 @@ pub use crate::daw::Installed;
 /// What of Live is on this computer, as setup has always named it.
 pub use crate::daw::Installed as LiveInstalled;
 use async_trait::async_trait;
+use kumi_ai::providers::{provider_info, SignIn};
 use kumi_common::abort;
-use kumi_runtime::{
-    providers::{provider_info, SignIn},
-    KUMI_VERSION,
-};
+use kumi_types::version::KUMI_VERSION;
 use tokio::sync::oneshot;
 
 /// The DAW's side of setup, which the app can't do on its own: the DAW the app, and Kumi's bridge in it. Its methods
@@ -218,7 +216,7 @@ const LOCAL_LOOK: Duration = Duration::from_secs(3);
 /// Where the Set is that Kumi's restart closed, when Kumi didn't know it to open it again.
 fn open_recent() -> String {
     let words = crate::daw::words();
-    if crate::daw::current().id() == kumi_runtime::core::daw::DawId::Ableton {
+    if crate::daw::current().id() == kumi_types::daw::DawId::Ableton {
         "If you saved your Set, it's in Live's File › Open Recent Set.".into()
     } else {
         format!("If you saved your {}, {} lists it with its recent {}.", words.place, words.app, words.places)
@@ -351,7 +349,7 @@ impl TuiApp {
 
     /// "Which DAW do you work in?", among the DAWs here (`ask_daw`): the one chosen, given to `pick_daw`; None when
     /// there's nothing to ask, or the producer put it off (this run's DAW goes on).
-    async fn ask_daw(&self) -> Option<kumi_runtime::core::daw::DawId> {
+    async fn ask_daw(&self) -> Option<kumi_types::daw::DawId> {
         let (asked, pick) = (self.0.options.ask_daw.clone(), self.0.options.pick_daw.clone()?);
         if asked.len() < 2 {
             return None;
@@ -360,7 +358,7 @@ impl TuiApp {
         let choices = asked.iter().map(|daw| choice(app(*daw), "", daw.as_str())).collect();
         let said = vec!["Which DAW do you work in? Kumi sets itself up for it.".to_string()];
         let picked = self.setup_choose("now", said, choices).await?;
-        let daw = kumi_runtime::core::daw::DawId::parse(&picked)?;
+        let daw = kumi_types::daw::DawId::parse(&picked)?;
         pick(daw);
         Some(daw)
     }
@@ -743,7 +741,7 @@ impl TuiApp {
         let min = crate::daw::current().min_version();
         let daw = crate::daw::words().app;
         // Live keeps the bridge in its User Library; another DAW in a folder of its own it makes on its first run.
-        let (folder, made) = if crate::daw::current().id() == kumi_runtime::core::daw::DawId::Ableton {
+        let (folder, made) = if crate::daw::current().id() == kumi_types::daw::DawId::Ableton {
             ("no User Library for the bridge", "Live makes its User Library as it starts.")
         } else {
             ("no folder for Kumi's bridge yet", "")

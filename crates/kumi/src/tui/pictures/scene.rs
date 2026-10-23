@@ -4,7 +4,8 @@
 
 use std::f64::consts::PI;
 
-use kumi_runtime::core::contracts::{ChangePicture, ClipNote, Dynamics, EqBand, EqShape, PictureItem, PictureZone};
+use kumi_types::contracts::{ChangePicture, ClipNote};
+use kumi_types::picture::{Dynamics, EqBand, EqShape, PictureItem, PictureZone};
 
 use super::super::style::{palette, Rgb};
 

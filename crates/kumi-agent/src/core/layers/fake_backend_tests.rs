@@ -4,9 +4,9 @@
 //! its compressor first (before adding one, or bypassed) and moves the threshold until the glue measures as asked.
 use super::backend::{Compressor, Dynamics, LayersBackend, Words};
 use super::tool::Layers;
-use crate::core::contracts::{KernelTool, Render};
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::contracts::{KernelTool, Render};
 use serde_json::{json, Value};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
@@ -135,7 +135,7 @@ impl LayersBackend for Rc<Fake> {
             let mono = self.master(if track == "g" { self.group() } else { self.layer(track) });
             self.renders.set(self.renders.get() + 1);
             let path = self.dir.path().join(format!("r{}.wav", self.renders.get()));
-            crate::audio::decode::write_test_wav(&path, &mono, RATE);
+            kumi_media::audio::decode::write_test_wav(&path, &mono, RATE);
             renders.push(Render { file: path.to_string_lossy().into_owned(), start: 0., seconds: None });
         }
         Ok(renders)

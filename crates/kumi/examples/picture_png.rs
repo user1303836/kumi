@@ -5,7 +5,8 @@
 //! is written at the size HISTORY shows it (60 × 8 cells), as Kitty's image and as cells (half-blocks as pixels).
 
 use kumi::tui::pictures::{cells, raster::Raster, scene_of};
-use kumi_runtime::core::contracts::{ChangePicture, ClipNote, Dynamics, EqBand, EqShape};
+use kumi_types::contracts::{ChangePicture, ClipNote};
+use kumi_types::picture::{Dynamics, EqBand, EqShape};
 use serde_json::Value;
 
 fn samples() -> Vec<(String, ChangePicture)> {

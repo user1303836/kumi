@@ -2,7 +2,7 @@
 mod fixture;
 use fixture::{put, Studio};
 use kumi_common::abort::Signal;
-use kumi_runtime::library::{
+use kumi_library::{
     features::MeasureOptions,
     learn::{learn, learn_sound, library_logs, songs_of, LearnOptions, LearnPhase, SoundEntry},
     measure_worker::{MeasureJob, MeasurePool},
@@ -102,7 +102,7 @@ async fn a_folder_that_cant_be_read_keeps_what_was_learned_inside_it() {
 }
 #[tokio::test]
 async fn discovery_keeps_unavailable_roots_and_skips_links_copies_backups_and_unfinished_depth() {
-    use kumi_runtime::library::sources::{Source, SourceKind};
+    use kumi_library::sources::{Source, SourceKind};
     let studio = Studio::new();
     let logs = library_logs(studio.dir.to_str().unwrap());
     let missing = studio.home.path().join("Detached/Kick.wav");
@@ -285,12 +285,12 @@ async fn a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it_
     let child: u32 = std::fs::read_to_string(root.path().join("child")).expect("the child held the copy").trim().parse().unwrap();
     let temp = std::fs::read_to_string(root.path().join("temp")).unwrap();
     assert!(!std::path::Path::new(temp.trim()).exists(), "{temp} is still there");
-    assert!(!kumi_runtime::library::state::alive(child as f64), "the worker's child is still running");
+    assert!(!kumi_library::state::alive(child as f64), "the worker's child is still running");
     pool.close().await;
 }
 #[test]
 fn only_newest_version_of_each_project_contributes_to_taste() {
-    use kumi_runtime::library::{learn::SetEntry, sets::SetSummary};
+    use kumi_library::{learn::SetEntry, sets::SetSummary};
     let entry = |path: &str, mtime, name: &str| SetEntry {
         file: Entry { path: path.into(), mtime, size: 1, gone: None },
         set: Some(SetSummary { name: name.into(), ..Default::default() }),

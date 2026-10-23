@@ -8,12 +8,12 @@ use super::{
 };
 use async_trait::async_trait;
 use indexmap::IndexMap;
+use kumi_agent::core::plan::{self, ActionOutcome, Batch, ChangeOutcome, PlanHost, StepKind};
+pub use kumi_agent::core::plan::{expand_step, Plan, Stop};
 use kumi_common::abort::Signal;
-pub use kumi_runtime::core::plan::{expand_step, Plan, Stop};
-use kumi_runtime::core::{
+use kumi_types::{
     contracts::{ChangeFamily, JsonObject, StreamingCall, ToolResult},
     errors::RuntimeError,
-    plan::{self, ActionOutcome, Batch, ChangeOutcome, PlanHost, StepKind},
 };
 use serde_json::{json, Value};
 use std::{cell::RefCell, rc::Rc};

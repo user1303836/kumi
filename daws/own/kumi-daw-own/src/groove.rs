@@ -6,12 +6,13 @@
 //! far as its own line goes), with notes_write.
 
 use crate::listening::OwnRenderer;
+use kumi_agent::core::refs::RefScheme;
 use kumi_common::abort::Signal;
 use kumi_listening::{
     notes::{Kit, Note},
     renderer::{ClipNotes, NotePatch, Renderer, Window},
 };
-use kumi_runtime::core::{contracts::ChangeState, refs::RefScheme};
+use kumi_types::contracts::ChangeState;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};

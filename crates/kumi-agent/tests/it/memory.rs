@@ -1,8 +1,9 @@
-use kumi_common::abort;
-use kumi_runtime::core::{
-    contracts::{Memory, MemoryEvent, MemoryNote, MemoryScope, MemoryStore, NoteChange, ToolResult},
+use kumi_agent::core::{
+    contracts::{Memory, MemoryEvent, MemoryNote, MemoryScope, MemoryStore, NoteChange},
     memory::*,
 };
+use kumi_common::abort;
+use kumi_types::contracts::ToolResult;
 use serde_json::{json, Value};
 use std::{cell::RefCell, rc::Rc};
 const PROJECT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";

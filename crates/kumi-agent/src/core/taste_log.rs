@@ -7,16 +7,16 @@
 //! taken with Enter. Each row keeps its kind's default weight and every fact behind it, so a learner can weigh it
 //! again. Each also says where it happened: the conversation, the Set's project and fingerprint, and the producer's
 //! latest requests.
-use super::{
-    contracts::{with_final, ChangeRecord, JsonObject, KernelTool, Picked, ToolResult},
-    errors::RuntimeError,
-    memory::suspect_note,
-    store_client::StoreClient,
-};
+use crate::core::{contracts::Picked, store_client::StoreClient};
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use kumi_common::{abort::Signal, js::json::stringify, time::now_ms};
 use kumi_store::observations::{self, Kind, Observation};
+use kumi_types::{
+    contracts::{with_final, ChangeRecord, JsonObject, KernelTool, ToolResult},
+    errors::RuntimeError,
+    notes::suspect_note,
+};
 use serde_json::{json, Value};
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
@@ -53,7 +53,7 @@ pub struct Whereabouts {
     pub project: Option<String>,
     pub set: Option<Value>,
     /// The DAW it's in, when it isn't Live (never written for Live).
-    pub daw: Option<crate::core::daw::DawId>,
+    pub daw: Option<kumi_types::daw::DawId>,
 }
 
 /// Who undid one of Kumi's changes.
@@ -366,7 +366,7 @@ impl KernelTool for UndoWatch {
         }
         Ok(result)
     }
-    fn role(&self) -> Option<crate::core::contracts::ToolRole> {
+    fn role(&self) -> Option<kumi_types::contracts::ToolRole> {
         self.tool.role()
     }
     fn concurrent(&self) -> bool {
@@ -377,7 +377,7 @@ impl KernelTool for UndoWatch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::contracts::{ChangeFamily, ChangeState, TrackChip};
+    use kumi_types::contracts::{ChangeFamily, ChangeState, TrackChip};
     use std::cell::Cell;
 
     fn record(id: &str, at: i64) -> ChangeRecord {

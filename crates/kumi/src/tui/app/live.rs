@@ -169,7 +169,7 @@ impl TuiApp {
             // so another selection reads them again at once.
             let key = if kind == BodyKind::Grid {
                 format!("s\0{reference}\0{}", number::to_string(scene))
-            } else if crate::daw::current().id() == kumi_runtime::core::daw::DawId::Ableton {
+            } else if crate::daw::current().id() == kumi_types::daw::DawId::Ableton {
                 "a".into()
             } else {
                 format!("a\0{reference}")
@@ -549,7 +549,7 @@ impl TuiApp {
 /// Whether the beat light is Live's, which keeps its lights on whole beats (a 7/8 bar's start between beats isn't lit):
 /// the other DAWs light a bar's first beat wherever it falls.
 fn lives_light() -> bool {
-    crate::daw::current().id() == kumi_runtime::core::daw::DawId::Ableton
+    crate::daw::current().id() == kumi_types::daw::DawId::Ableton
 }
 
 /// The kind of view the producer works in.

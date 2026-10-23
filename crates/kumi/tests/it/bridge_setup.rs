@@ -5,7 +5,7 @@ use kumi::{
     input::{ByteListener, TerminalInput},
     tui::tty::TtyOutput,
 };
-use kumi_runtime::system::{self, Env, SystemProgram};
+use kumi_types::system::{self, Env, SystemProgram};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
@@ -197,7 +197,7 @@ async fn without_a_terminal_the_question_is_said_with_how_to_answer_it_beforehan
     io.env.insert("KUMI_BRIDGE_AFTER".into(), "1".into());
     assert_eq!(setup_bridge(io).await.unwrap(), 0);
     let said = w.out.0.borrow().clone();
-    let next = format!("The bridge wasn't updated yet. {}.", *kumi_runtime::CONNECT_LIVE);
+    let next = format!("The bridge wasn't updated yet. {}.", *kumi_types::command::CONNECT_LIVE);
     assert!(said.contains(&format!("Is Live closed, with your work saved? (no terminal to answer in)\n{next}\n")), "{said}");
     assert!(w.calls.borrow().is_empty());
 }
@@ -211,7 +211,7 @@ async fn after_an_update_a_bridge_left_for_later_says_so_and_isnt_a_failure() {
     io.confirm = Some(Rc::new(|_| async { false }.boxed_local()));
     assert_eq!(setup_bridge(io).await.unwrap(), 0);
     let said = w.out.0.borrow().clone();
-    assert!(said.contains(&format!("The bridge wasn't updated yet. {}.", *kumi_runtime::CONNECT_LIVE)), "{said}");
+    assert!(said.contains(&format!("The bridge wasn't updated yet. {}.", *kumi_types::command::CONNECT_LIVE)), "{said}");
     assert!(!said.contains("Nothing was changed"), "{said}");
     assert!(w.calls.borrow().is_empty());
     let w = World::new(Some("1.0.33"));
@@ -219,7 +219,11 @@ async fn after_an_update_a_bridge_left_for_later_says_so_and_isnt_a_failure() {
     io.env.insert("KUMI_BRIDGE_AFTER".into(), "1".into());
     io.live_running = Some(Rc::new(|| async { true }.boxed_local()));
     assert_eq!(setup_bridge(io).await.unwrap(), 0);
-    assert!(w.out.0.borrow().contains(&format!("The bridge wasn't updated yet, because Live is open. {}.", *kumi_runtime::CONNECT_LIVE)));
+    assert!(w
+        .out
+        .0
+        .borrow()
+        .contains(&format!("The bridge wasn't updated yet, because Live is open. {}.", *kumi_types::command::CONNECT_LIVE)));
     assert!(w.calls.borrow().is_empty());
     // The shim marks every command it forwards with KUMI_LEGACY_HANDOFF: alone, it's a kumi bridge the
     // producer runs through an older launcher.

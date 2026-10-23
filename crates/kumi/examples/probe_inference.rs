@@ -14,6 +14,14 @@ use std::{
 
 use async_trait::async_trait;
 use kumi::config::{load_inference_config, safe_error};
+use kumi_agent::{
+    core::contracts::{KernelEmit, StopReason},
+    create_agent_kernel, AgentKernel, AgentKernelOptions, KernelEvent,
+};
+use kumi_ai::{
+    auth::store::open_credential_store,
+    providers::{resolve_model, ResolveModelOptions},
+};
 use kumi_common::{
     abort::{Controller, Signal, SignalExt},
     js::{
@@ -23,10 +31,12 @@ use kumi_common::{
     },
     time::{iso_string, now_ms, perf_now},
 };
-use kumi_runtime::{
-    core::contracts::{KernelEmit, StopReason},
-    create_agent_kernel, open_credential_store, resolve_model, system, AgentKernel, AgentKernelOptions, JsonObject, KernelEvent,
-    KernelTool, ResolveModelOptions, RuntimeError, ToolResult, KUMI, KUMI_VERSION,
+use kumi_types::{
+    command::KUMI,
+    contracts::{JsonObject, KernelTool, ToolResult},
+    errors::RuntimeError,
+    system,
+    version::KUMI_VERSION,
 };
 use serde_json::{json, Value};
 
@@ -185,13 +195,13 @@ async fn gate_a(probe: &Probe) -> Result<(), RuntimeError> {
         "aarch64" => "arm64",
         other => other,
     };
-    // Natively there's no Node or AI SDK: Kumi's version stands for Node's, and its providers are kumi-runtime's own.
+    // Natively there's no Node or AI SDK: Kumi's version stands for Node's, and its providers are kumi-ai's own.
     report(json!({
         "timestamp": iso_string(now_ms()),
         "kumi": KUMI_VERSION,
         "platform": format!("{}-{arch}", system::platform()),
         "kernel": "kumi",
-        "providers": { "kumi-runtime": KUMI_VERSION },
+        "providers": { "kumi-ai": KUMI_VERSION },
     }));
     probe.stage.set("configuration");
     let env = system::process_env();

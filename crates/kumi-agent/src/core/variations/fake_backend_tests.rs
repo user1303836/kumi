@@ -5,9 +5,9 @@ use super::backend::{Rendered, Rewritten, Set, Source, Undroppable, VariationsBa
 use super::heard::Heard;
 use super::tool::{names, Variations};
 use super::{Material, Rng};
-use crate::core::contracts::{JsonObject, KernelTool};
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::contracts::{JsonObject, KernelTool};
 use serde_json::{json, Value};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;

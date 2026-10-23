@@ -1,15 +1,13 @@
 //! Validate the bounded Live observations the integration gives the model.
+use kumi_agent::mcp::types::{CallToolResult, ContentBlock};
 use kumi_common::js::{json::stringify, string::utf16_len};
-use kumi_runtime::{
-    core::contracts::JsonObject,
-    mcp::types::{CallToolResult, ContentBlock},
-};
+use kumi_types::contracts::JsonObject;
 use serde_json::{json, Value};
 use std::sync::LazyLock;
 pub const INSTRUCTIONS: &str = include_str!("assets/instructions.txt");
 pub static FIELDS: LazyLock<JsonObject> = LazyLock::new(|| serde_json::from_str(include_str!("assets/fields.json")).unwrap());
 pub static PARENTS: LazyLock<JsonObject> = LazyLock::new(|| serde_json::from_str(include_str!("assets/parents.json")).unwrap());
-pub use kumi_runtime::core::refs::{query_key, ObservationError};
+pub use kumi_agent::core::refs::{query_key, ObservationError};
 fn error(message: &str) -> ObservationError {
     ObservationError(message.into())
 }

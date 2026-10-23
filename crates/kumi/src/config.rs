@@ -1,17 +1,17 @@
+use kumi_ai::providers::{
+    local::{local_servers, parse_local_model_id, ServerSetting, LOCAL_PROVIDERS},
+    parse_model_id, provider_info, Effort, ProviderId, SignIn, PROVIDERS,
+};
 use kumi_common::js::{
     json::file_text,
     string::{trim, utf16_len},
 };
-use kumi_runtime::core::daw::DawId;
-use kumi_runtime::{
-    core::errors::RuntimeError,
-    library::sources::{is_absolute, join},
-    providers::{
-        local::{local_servers, parse_local_model_id, ServerSetting, LOCAL_PROVIDERS},
-        parse_model_id, provider_info, Effort, ProviderId, SignIn, PROVIDERS,
-    },
+use kumi_library::sources::{is_absolute, join};
+use kumi_types::daw::DawId;
+use kumi_types::{
+    command::{KUMI, KUMI_START},
+    errors::RuntimeError,
     system::{self, Env},
-    KUMI, KUMI_START,
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -294,8 +294,8 @@ location!(load_projects_dir, "KUMI_PROJECTS_DIR", "projects");
 location!(load_library_dir, "KUMI_LIBRARY_DIR", "library");
 /// The files Kumi kept notes, techniques, lessons and gaps in before its database, where the producer's
 /// settings put them.
-pub fn json_files(env: &Env) -> Result<kumi_runtime::core::store_import::JsonFiles, RuntimeError> {
-    Ok(kumi_runtime::core::store_import::JsonFiles {
+pub fn json_files(env: &Env) -> Result<kumi_agent::core::store_import::JsonFiles, RuntimeError> {
+    Ok(kumi_agent::core::store_import::JsonFiles {
         memory: load_memory_file(env)?.into(),
         projects: load_projects_dir(env)?.into(),
         techniques: load_techniques_file(env)?.into(),

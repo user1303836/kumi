@@ -6,7 +6,7 @@ vendor/willington/** -text -whitespace
 # line-ending conversion, and no whitespace checks.
 plugin-formats/*/format-*/fixtures/** -text -whitespace
 # Exports as Kumi writes them, compared byte for byte by their tests: Markdown's line breaks end in two spaces.
-crates/kumi-runtime/tests/support/export/** -whitespace
+crates/kumi-agent/tests/support/export/** -whitespace
 # Pin tests' goldens are the bytes Kumi's code wrote, read back exactly (a screen keeps its empty bottom rows): no
 # whitespace checks.
 crates/*/tests/goldens/** -whitespace

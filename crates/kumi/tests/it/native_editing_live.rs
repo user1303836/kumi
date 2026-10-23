@@ -7,16 +7,16 @@ use ableton_mcp_server::{
 };
 use async_trait::async_trait;
 use futures::FutureExt;
-use kumi_common::abort::Signal;
-use kumi_daw_ableton::{integration::Ableton, options::AbletonOptions};
-use kumi_runtime::{
-    core::contracts::JsonObject,
+use kumi_agent::{
     mcp::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, Implementation, ListToolsResult},
     },
-    Integration, RuntimeError,
+    Integration,
 };
+use kumi_common::abort::Signal;
+use kumi_daw_ableton::{integration::Ableton, options::AbletonOptions};
+use kumi_types::{contracts::JsonObject, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::{path::Path, rc::Rc};
 struct HostEndpoint(Rc<McpHost>);

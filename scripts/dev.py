@@ -591,7 +591,7 @@ def rebase_moves(repo: Path, onto: str, merge: bool = False, build: bool = True)
 
 
 def selected_tests(lists: list[dict]) -> dict[str, set[str]]:
-    """The tests `cargo nextest list --message-format json` lists select, by suite (`kumi-runtime`, `kumi::it`…)."""
+    """The tests `cargo nextest list --message-format json` lists select, by suite (`kumi-agent`, `kumi::it`…)."""
     selected: dict[str, set[str]] = {}
     for data in lists:
         for suite_id, suite in data["rust-suites"].items():

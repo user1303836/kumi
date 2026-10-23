@@ -10,7 +10,7 @@ How the repository fits together, how to work on each part, and how to release.
 | Folder | What's in it |
 | --- | --- |
 | `crates/kumi` | The native `kumi` command and terminal app (`src/tui/`), and opt-in checks against models or real Live (`examples/`) |
-| `crates/kumi-runtime` | Agent loop, sessions, MCP client, and the integrations of the DAWs whose bridges are Kumi's own |
+| `crates/kumi-agent` | The agent: its loop, sessions, the DAW-neutral core (HISTORY, plans, places, FOCUS views, workflows), the MCP client, and what every DAW's integration shares |
 | `crates/kumi-types` | The types and settings every layer names: DAW profiles and words, the agent's contracts with its tools, errors, places, the system, the version |
 | `crates/kumi-net` | How Kumi reaches the network: its HTTP clients with the system's proxies and trust, why a request got no answer, the public-only web client and a model call's error |
 | `crates/kumi-media` | Audio (decoding, analysis, matching a sound, DSP), voice input, and the programs that decode media (ffmpeg, yt-dlp, whisper.cpp) with a video's frames, captions and speech |
@@ -47,7 +47,7 @@ old path, build errors) is listed.
 ## How the parts talk
 
 ```text
-kumi (crates/kumi, crates/kumi-runtime)
+kumi (crates/kumi, crates/kumi-agent)
   │  MCP over stdio: Kumi starts the bridge as a child process
   ▼
 bridge (daws/ableton/ableton-mcp-server)
@@ -56,7 +56,7 @@ bridge (daws/ableton/ableton-mcp-server)
   │  local channel to the Extension Host
   └──► Kumi's Live extension (daws/ableton/live-extension), Live 12.4+
 
-kumi (crates/kumi, crates/kumi-runtime)
+kumi (crates/kumi, crates/kumi-agent)
   │  MCP over stdio: Kumi starts its host for REAPER or Renoise
   ▼
 host (daws/own/daw-mcp-server --daw reaper|renoise)
@@ -67,7 +67,7 @@ host (daws/own/daw-mcp-server --daw reaper|renoise)
 
 - Kumi starts the bridge with the `full` deployment policy and an allow list of
   exactly the tools it uses (`ABLETON_MCP_TOOL_ALLOW`). The model calls a few
-  bridge reads directly (`MODEL_TOOLS` in `crates/kumi-runtime/src/mcp/allowed_tools.rs`);
+  bridge reads directly (`MODEL_TOOLS` in `crates/kumi-agent/src/mcp/allowed_tools.rs`);
   Kumi's own tools call the rest.
 - The bridge's router (`daws/ableton/ableton-mcp-server/src/bridge/router.rs`) sends each
   operation to the Remote Script, or to the extension when only the extension
@@ -103,7 +103,7 @@ Run native checks from the repository root. The isolated runner runs every test
 with cargo-nextest, each in a process of its own, with a temporary home:
 
 ```sh
-npm ci --prefix crates/kumi-runtime/tests/support   # once: the official SDKs some tests run
+npm ci --prefix crates/kumi-agent/tests/support   # once: the official SDKs some tests run
 cargo build --locked --workspace --all-targets
 sh scripts/test-isolated.sh                 # PowerShell: ./scripts/test-isolated.ps1
 sh scripts/test-isolated.sh -p kumi-daw-ableton -E 'test(/^hands_transport::/)'
@@ -330,8 +330,8 @@ python3 scripts/release.py --go     # the release
   another.
 - **With `--go`** it commits "Kumi X.Y.Z: the changelog, READMEs and versions"
   on `release/vX.Y.Z`: the version in the root `package.json`,
-  `crates/kumi-types/src/version.rs`, the `kumi`, `kumi-common`, `kumi-runtime`
-  and `kumi-types` Cargo manifests and `Cargo.lock` (the packaging tests hold
+  `crates/kumi-types/src/version.rs`, the `kumi`, `kumi-common` and
+  `kumi-types` Cargo manifests and `Cargo.lock` (the packaging tests hold
   these equal), and the bridge's when it changed; the Status line of the three
   READMEs; the ships-with line under "Bridge versions" in the three
   `KUMI_CHANGES.md`; and a `## X.Y.Z — date` entry in `CHANGELOG.md`. It opens

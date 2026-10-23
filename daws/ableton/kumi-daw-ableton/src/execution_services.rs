@@ -16,7 +16,7 @@ use kumi_common::{
         string::{head, trim},
     },
 };
-use kumi_runtime::core::{contracts::JsonObject, errors::RuntimeError};
+use kumi_types::{contracts::JsonObject, errors::RuntimeError};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{cell::Cell, path::Path, rc::Rc, sync::LazyLock, time::UNIX_EPOCH};

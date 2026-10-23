@@ -1,7 +1,7 @@
 //! Files the producer adds to a message: dragged in or pasted as paths, or a picture on the
 //! clipboard (ctrl+v). Each shows as a chip above the box and goes with the next message.
 
-use kumi_runtime::core::contracts::Attachment;
+use kumi_agent::core::contracts::Attachment;
 use std::path::{Path, PathBuf};
 
 /// A file's media type, by its extension.
@@ -175,7 +175,7 @@ pub(crate) async fn bounded(program: &str, args: &[&str]) -> Result<std::process
 }
 
 /// This process's environment, a name or value that isn't Unicode read as near as it can be.
-pub fn lossy_env() -> kumi_runtime::system::Env {
+pub fn lossy_env() -> kumi_types::system::Env {
     std::env::vars_os().map(|(name, value)| (name.to_string_lossy().into_owned(), value.to_string_lossy().into_owned())).collect()
 }
 
@@ -217,7 +217,7 @@ async fn clipboard_png(file: &Path) -> Result<Option<Option<Vec<u8>>>, String> {
     );
     // Windows' own PowerShell, wherever PATH points.
     let env = lossy_env();
-    let powershell = kumi_runtime::system::system_program(kumi_runtime::system::SystemProgram::Powershell, &env, "win32");
+    let powershell = kumi_types::system::system_program(kumi_types::system::SystemProgram::Powershell, &env, "win32");
     let output = bounded(&powershell, &["-NoProfile", "-NonInteractive", "-STA", "-Command", &script]).await?;
     Ok(String::from_utf8_lossy(&output.stdout).contains("saved").then_some(None))
 }

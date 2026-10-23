@@ -7,11 +7,12 @@ use daw_mcp_server::{
     simulator::{Respond, Simulator},
 };
 use futures::FutureExt;
+use kumi_agent::core::{context::IntegrationContext, contracts::*};
+use kumi_agent::mcp::client::McpEndpoint;
 use kumi_common::abort::Signal;
 use kumi_daw_own::bridge::{Connect, OwnOptions};
 use kumi_daw_renoise::create_renoise_integration;
-use kumi_runtime::core::{context::IntegrationContext, contracts::*};
-use kumi_runtime::mcp::client::McpEndpoint;
+use kumi_types::contracts::*;
 use serde_json::{json, Value};
 use std::{
     cell::Cell,

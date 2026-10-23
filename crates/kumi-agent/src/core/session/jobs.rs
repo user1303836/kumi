@@ -7,9 +7,10 @@ use crate::{
         JOB_MS, START_JOB_TOOL, WORKER_INSTRUCTIONS,
     },
     kernel::budget::job_report_block,
-    video::tool::{video_tools_for, VideoToolOptions},
 };
 use kumi_common::js::number::to_string;
+use kumi_types::daw::DawProfile;
+use kumi_web::video::tool::{video_tools_for, VideoToolOptions};
 use std::{collections::VecDeque, sync::LazyLock};
 
 /// How a session runs background jobs.
@@ -22,12 +23,12 @@ pub struct JobsOptions {
     pub store: Option<Rc<dyn crate::core::jobs::JobStore>>,
 }
 
-crate::daw_text!(
+kumi_types::daw_text!(
     #[allow(dead_code)]
     START_JOB_TASK, start_job_task:
     "A worker's task. It can't see the DAW: give it every fact about the ", place, " it needs (track and device names, key, tempo, what the producer wants)."
 );
-crate::daw_text!(
+kumi_types::daw_text!(
     #[allow(dead_code)]
     START_JOB_ONE_TOOL, start_job_one_tool:
     "Instead of task: one tool that works away from the DAW (the web, the producer's library", (if manual: ", the manual"), ", earlier conversations, a video", (if max_for_live_devices: ", a device's file"), "), run once with args and no model."
@@ -46,7 +47,7 @@ fn start_job_schema(profile: &DawProfile) -> JsonObject {
     }))
     .expect("start_job schema")
 }
-crate::daw_text!(
+kumi_types::daw_text!(
     #[allow(dead_code)]
     START_JOB_DESCRIPTION, start_job_description:
     "Start work in the background for anything that takes more than about 30 seconds and doesn't change the DAW: research on the web, a tutorial video", (if manual: ", the manual"), ", the producer's library or earlier conversations", (if max_for_live_devices: ", or a device's file"), ". It returns at once: say in one line what's running, then keep going or end your answer. A worker (task) has only tools away from the DAW and can't see or change it; whatever it finds comes back to you as words, and only you change the ", place, ". Independent jobs run together. Never for an ordinary edit."
@@ -287,7 +288,7 @@ impl Session {
         let options = &self.0.options;
         let mut tools: Vec<Rc<dyn KernelTool>> = vec![];
         if options.web || options.web_client.is_some() {
-            tools.extend(crate::web::tool::web_tools_for(
+            tools.extend(kumi_web::tool::web_tools_for(
                 &options.profile,
                 WebToolOptions { on_event: tool_events(&on_event), client: options.web_client.clone(), ..Default::default() },
             ));

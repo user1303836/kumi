@@ -221,9 +221,7 @@ case!(update_offers_checks_and_closes_after_confirmation, async {
                 let u = u.clone();
                 async move {
                     if u.get() {
-                        Err(kumi_runtime::core::errors::RuntimeError::plain(
-                            "Kumi couldn't reach GitHub to ask; check your internet connection",
-                        ))
+                        Err(kumi_types::errors::RuntimeError::plain("Kumi couldn't reach GitHub to ask; check your internet connection"))
                     } else {
                         Ok(None)
                     }
@@ -592,7 +590,7 @@ case!(usage_status_api_plan_and_conversation_picker, async {
         let m = FakeModels::catalog();
         if keyed {
             *m.model.borrow_mut() = Some("anthropic/claude-sonnet-5-5".into());
-            m.signed_in.borrow_mut().insert(kumi_runtime::providers::ProviderId::Anthropic);
+            m.signed_in.borrow_mut().insert(kumi_ai::providers::ProviderId::Anthropic);
         }
         let h = model_harness(m, 240);
         h.start().await;
@@ -1110,8 +1108,8 @@ case!(a_chat_that_keeps_no_conversations_says_so, async {
     h.close().await;
 });
 /// A conversation as the session gives it to /export: the producer's words and an answer `long` characters long.
-fn to_export(words: &str, long: usize) -> kumi_runtime::core::contracts::ConversationToExport {
-    use kumi_runtime::core::contracts::{ConversationToExport, KernelCheckpoint, SavedConversation};
+fn to_export(words: &str, long: usize) -> kumi_agent::core::contracts::ConversationToExport {
+    use kumi_agent::core::contracts::{ConversationToExport, KernelCheckpoint, SavedConversation};
     let messages = vec![
         json!({"role": "user", "content": [{"type": "text", "text": words}]}),
         json!({"role": "assistant", "content": [{"type": "text", "text": format!("Done. {}", "la ".repeat(long / 3))}]}),

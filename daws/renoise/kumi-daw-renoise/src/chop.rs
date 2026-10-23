@@ -6,12 +6,12 @@
 //! over unless asked. The render is of that track where a slot plays the pattern.
 use crate::lines::note_text;
 use async_trait::async_trait;
+use kumi_agent::core::chop::backend::{ChopBackend, Key, Laid, Recording, Song, Step, Words};
+use kumi_agent::core::refs::RefScheme;
 use kumi_common::abort::Signal;
 use kumi_daw_own::changes::OwnPlan;
 use kumi_daw_own::listening::OwnRenderer;
 use kumi_listening::renderer::{Renderer, Window};
-use kumi_runtime::core::chop::backend::{ChopBackend, Key, Laid, Recording, Song, Step, Words};
-use kumi_runtime::core::refs::RefScheme;
 use serde_json::{json, Value};
 use std::rc::Rc;
 
@@ -388,7 +388,7 @@ fn lay_input(pattern: &str, track: &str, first: u64, last: u64, columns: u64, ce
 mod tests {
     use super::*;
     use crate::changes::CHANGES;
-    use kumi_runtime::kernel::schema::problem;
+    use kumi_agent::kernel::schema::problem;
 
     fn schema_of(tool: &str) -> Value {
         Value::Object(CHANGES.kinds.iter().find(|kind| kind.tool == tool).unwrap().input_schema())

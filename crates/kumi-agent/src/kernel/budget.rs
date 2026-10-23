@@ -5,7 +5,7 @@
 //! a short list where the conversation now starts. Clearing happens past thresholds, not on every
 //! request, so providers' prompt caches keep working in between.
 
-use crate::core::daw::DawProfile;
+use kumi_types::daw::DawProfile;
 use std::borrow::Cow;
 
 use kumi_common::js::json::stringify;
@@ -13,14 +13,14 @@ use kumi_common::js::string::{head, trim, utf16_len};
 use serde_json::Value;
 
 use super::agent::CARRY_ON_NOTE;
-use crate::ai::types::{
-    AssistantPart, DataContent, FileData, Message, Role, TextPart, ToolPart, ToolResultContentItem, ToolResultOutput, UserPart,
-};
 use crate::core::contracts::{TranscriptLine, TranscriptRole};
 use crate::core::playbook::PLAYBOOK_OPEN;
+use kumi_ai::types::{
+    AssistantPart, DataContent, FileData, Message, Role, TextPart, ToolPart, ToolResultContentItem, ToolResultOutput, UserPart,
+};
 
 // How much conversation a model takes (kumi-ai, where a model's binding names it).
-pub use kumi_ai::binding::{budget_for, ContextBudget, BYTES_PER_TOKEN, DEFAULT_BUDGET};
+use kumi_ai::binding::ContextBudget;
 
 /// How the session attaches each turn's Live observation to the producer's words.
 pub const OBSERVATION_MARKER: &str = "\n\n<current_observation_untrusted>";
@@ -175,7 +175,7 @@ pub fn without_observations(messages: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-crate::daw_text!(#[allow(dead_code)] CLEARED, cleared: " … [Kumi cleared the rest of this earlier result to save room; read ", app, " again if you need it.]");
+kumi_types::daw_text!(#[allow(dead_code)] CLEARED, cleared: " … [Kumi cleared the rest of this earlier result to save room; read ", app, " again if you need it.]");
 /// Results this small stay whole: change confirmations, refusals, short answers.
 const SMALL: usize = 1024;
 /// What's kept of a cleared result; change results start with what changed.
@@ -183,7 +183,7 @@ const HEAD: usize = 200;
 /// What an image costs, as bytes of conversation: a 1280×720 frame is about 1.2k tokens.
 const IMAGE_BYTES: usize = 4 * 1024;
 // The most images a request carries (kumi-types, which the tools that show them name too).
-pub use kumi_types::contracts::MAX_IMAGES;
+use kumi_types::contracts::MAX_IMAGES;
 
 /// Why a result's images were put away.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

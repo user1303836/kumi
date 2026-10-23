@@ -21,11 +21,12 @@ use kumi::{
     input::{ByteListener, TerminalInput},
     tui::tty::TtyOutput,
 };
+use kumi_agent::mcp::client::{McpEndpoint, StderrStatus};
+use kumi_agent::mcp::types::{CallToolResult, Implementation, ListToolsResult};
 use kumi_common::abort::Signal;
-use kumi_runtime::core::{contracts::*, daw::DawId, errors::RuntimeError};
-use kumi_runtime::mcp::client::{McpEndpoint, StderrStatus};
-use kumi_runtime::mcp::types::{CallToolResult, Implementation, ListToolsResult};
-use kumi_runtime::system::Env;
+use kumi_types::contracts::*;
+use kumi_types::system::Env;
+use kumi_types::{daw::DawId, errors::RuntimeError};
 use serde_json::json;
 use std::{
     cell::{Cell, RefCell},

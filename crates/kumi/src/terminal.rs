@@ -14,21 +14,18 @@ use crate::{
     update::UpdateControl,
 };
 use futures::{future::LocalBoxFuture, FutureExt};
+use kumi_agent::core::{
+    contracts::{
+        ConversationMatch, ConversationSummary, KeptLine, NoteChange, SessionController, SessionEvent, SetAsk, SetChoice, TurnState,
+    },
+    export::Format,
+};
+use kumi_ai::providers::{Effort, ProviderId, EFFORTS, PROVIDERS};
 use kumi_common::{
     js::{number, string},
     time::{now_ms_f64, perf_now, since},
 };
-use kumi_runtime::{
-    core::{
-        contracts::{
-            ConversationMatch, ConversationSummary, KeptLine, NoteChange, SessionController, SessionEvent, SetAsk, SetChoice, TurnState,
-        },
-        errors::RuntimeError,
-        export::Format,
-    },
-    providers::{Effort, ProviderId, EFFORTS, PROVIDERS},
-    KUMI,
-};
+use kumi_types::{command::KUMI, errors::RuntimeError};
 use serde_json::Value;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 pub trait Terminal {
@@ -51,7 +48,7 @@ pub struct TerminalOptions {
     pub history: Option<Rc<RefCell<InputHistory>>>,
     pub updates: Option<UpdateControl>,
     /// /daw <name>: Kumi closes and opens again with that DAW. None where the producer works with Live alone.
-    pub switch_daw: Option<Rc<dyn Fn(kumi_runtime::core::daw::DawId)>>,
+    pub switch_daw: Option<Rc<dyn Fn(kumi_types::daw::DawId)>>,
     /// /willington, where Kumi's bridge can carry Willington.
     pub willington: Option<crate::daw::Toggle>,
     /// What's new since the producer last opened Kumi, said once as it starts.
@@ -127,7 +124,7 @@ const COMMANDS: [&str; 22] = [
     "/new",
 ];
 fn help(daw: bool) -> String {
-    format!("/help · /status · /undo · /stop · /refresh · /reconnect (connect to {app} again, keeping the conversation){daw} · /new [name] (start a fresh conversation; the last one is kept) · /resume [number, id or name] (list kept conversations, or go back to one; /conversations too) · /rename <name> · /fork [name] (carry on in a copy) · /export [md|html|json] (save this conversation; keys and paths taken out) · /share (save it as a web page) · /model [provider/model] · /effort [level|default] · /logout <provider> · /memory · /forget <id> · /note <id> <new words> · /pin <id> · /unpin <id> · /recipes{willington} · /update (get the newest Kumi) · /changelog (what's new in it) · /quit | Ctrl-C: cancel work; idle: exit. EOF exits. Sign in with: {kumi} login <provider>.", app = crate::daw::words().app, daw = if daw { " · /daw [name] (which DAW Kumi works with, or open Kumi again with another)" } else { "" }, kumi = *KUMI, willington = if crate::daw::current().id() == kumi_runtime::core::daw::DawId::Ableton { " · /willington (Willington's bindings on or off)" } else { "" })
+    format!("/help · /status · /undo · /stop · /refresh · /reconnect (connect to {app} again, keeping the conversation){daw} · /new [name] (start a fresh conversation; the last one is kept) · /resume [number, id or name] (list kept conversations, or go back to one; /conversations too) · /rename <name> · /fork [name] (carry on in a copy) · /export [md|html|json] (save this conversation; keys and paths taken out) · /share (save it as a web page) · /model [provider/model] · /effort [level|default] · /logout <provider> · /memory · /forget <id> · /note <id> <new words> · /pin <id> · /unpin <id> · /recipes{willington} · /update (get the newest Kumi) · /changelog (what's new in it) · /quit | Ctrl-C: cancel work; idle: exit. EOF exits. Sign in with: {kumi} login <provider>.", app = crate::daw::words().app, daw = if daw { " · /daw [name] (which DAW Kumi works with, or open Kumi again with another)" } else { "" }, kumi = *KUMI, willington = if crate::daw::current().id() == kumi_types::daw::DawId::Ableton { " · /willington (Willington's bindings on or off)" } else { "" })
 }
 fn head(text: &str, limit: usize) -> String {
     String::from_utf16_lossy(&text.encode_utf16().take(limit).collect::<Vec<_>>())
@@ -648,7 +645,7 @@ impl PlainTerminal {
         }
         if command == "/changelog" {
             let since = self.0.options.whats_new.as_ref().and_then(|news| news.since.clone());
-            match crate::whats_new::changelog(kumi_runtime::KUMI_VERSION, since.as_deref()) {
+            match crate::whats_new::changelog(kumi_types::version::KUMI_VERSION, since.as_deref()) {
                 Some(news) => self.news(&news, Some(format!("Every release: {}", crate::whats_new::history_link()))),
                 None => self.notice("[new] Kumi's changelog has no notes for this version."),
             }
@@ -767,7 +764,7 @@ impl PlainTerminal {
  "/model"=>{self.model_command(argument).await?;},
  "/effort"=>{let choices=EFFORTS.map(|e|e.as_str()).join(", ");if let Some(argument)=argument{let effort=Effort::parse(argument);if argument!="default"&&effort.is_none(){self.notice(&format!("[effort] Choose one of {choices} or default."));}else{models.set_effort(effort).await?;self.notice(&format!("[effort] {argument}."));}}else{self.notice(&format!("[effort] {}. Choose one of {choices} or default.",models.current().effort.map(|e|e.as_str()).unwrap_or("the model's default")));}},
  "/fast"=>{let current=models.current();let on=!models.fast_enabled();match models.set_fast(on).await?{Some(tier)=>self.notice(&format!("[fast] {} is on{}.",tier.name,tier.description.map(|d|format!(": {d}")).unwrap_or_default())),None if on=>self.notice(&format!("[fast] {} has no faster tier.",current.name.or(current.model).unwrap_or_else(||"This model".into()))),None=>self.notice("[fast] Back to the standard tier."),}},
- "/memory"=>{let Some(memory)=controller.memory().await?else{self.notice("[memory] Kumi keeps no notes here.");return Ok(());};let list=|notes:&[kumi_runtime::core::contracts::MemoryNote]|{if notes.is_empty(){"none".into()}else{notes.iter().map(|n|format!("{}{} {}",n.id,if n.pinned{" (pinned)"}else{""},n.text)).collect::<Vec<_>>().join(" · ")}};self.notice(&format!("[memory] About you: {}",list(&memory.memory.producer)));self.notice(&if memory.saved{format!("[memory] About {}: {}",memory.set_name.clone().unwrap_or_else(||format!("this {}",crate::daw::words().place)),list(&memory.memory.set))}else{format!("[memory] This {} isn't saved yet; notes about it are kept once it is.",crate::daw::words().place)});if controller.has_techniques(){let techniques=controller.techniques().await?;self.notice(&format!("[memory] Techniques: {}",if techniques.is_empty(){"none yet".into()}else{techniques.iter().map(|t|format!("{} {} (for {})",t.id,t.name,t.fits)).collect::<Vec<_>>().join(" · ")}));}if controller.has_taste(){let taste=controller.taste().await?;self.notice(&format!("[memory] From your {}: {}",crate::daw::words().places,if taste.is_empty(){"nothing yet".into()}else{taste.iter().enumerate().map(|(i,l)|format!("u{} {}",i+1,l.line)).collect::<Vec<_>>().join(" · ")}));self.0.state.borrow_mut().taste=taste;}},
+ "/memory"=>{let Some(memory)=controller.memory().await?else{self.notice("[memory] Kumi keeps no notes here.");return Ok(());};let list=|notes:&[kumi_agent::core::contracts::MemoryNote]|{if notes.is_empty(){"none".into()}else{notes.iter().map(|n|format!("{}{} {}",n.id,if n.pinned{" (pinned)"}else{""},n.text)).collect::<Vec<_>>().join(" · ")}};self.notice(&format!("[memory] About you: {}",list(&memory.memory.producer)));self.notice(&if memory.saved{format!("[memory] About {}: {}",memory.set_name.clone().unwrap_or_else(||format!("this {}",crate::daw::words().place)),list(&memory.memory.set))}else{format!("[memory] This {} isn't saved yet; notes about it are kept once it is.",crate::daw::words().place)});if controller.has_techniques(){let techniques=controller.techniques().await?;self.notice(&format!("[memory] Techniques: {}",if techniques.is_empty(){"none yet".into()}else{techniques.iter().map(|t|format!("{} {} (for {})",t.id,t.name,t.fits)).collect::<Vec<_>>().join(" · ")}));}if controller.has_taste(){let taste=controller.taste().await?;self.notice(&format!("[memory] From your {}: {}",crate::daw::words().places,if taste.is_empty(){"nothing yet".into()}else{taste.iter().enumerate().map(|(i,l)|format!("u{} {}",i+1,l.line)).collect::<Vec<_>>().join(" · ")}));self.0.state.borrow_mut().taste=taste;}},
  "/recipes"=>{let recipes=controller.recipes().await?;self.notice(&if recipes.is_empty(){format!("[recipes] None yet. Ask Kumi to save a way of working, or say \"watch me\" and do it in {}.",crate::daw::words().app)}else{format!("[recipes] {}",recipes.iter().map(|r|format!("{}{}: {}",r.name,if r.params.is_empty(){String::new()}else{format!(" (needs {})",r.params.iter().map(|p|p.name.as_str()).collect::<Vec<_>>().join(", "))},r.about)).collect::<Vec<_>>().join(" · "))});},
  "/resume"|"/conversations"|"/rename"|"/fork" if !controller.has_conversations()=>self.notice(&format!("[conversations] {}",crate::tui::app::not_kept())),
  "/resume"|"/conversations"=>{let words=string::trim(command.strip_prefix(verb).unwrap_or("")).to_string();self.resume_command(&words).await?;},
@@ -838,7 +835,7 @@ impl PlainTerminal {
             let title = head(&sanitize_text(&row.title(), &self.0.options.secrets), 80);
             let when = if row.current { "this one".into() } else { since(row.saved_at as f64, now_ms_f64()) };
             let set = row.set.as_deref().map(|set| head(&sanitize_text(set, &self.0.options.secrets), 40)).unwrap_or_else(|| {
-                if row.place == kumi_runtime::IMPORTED {
+                if row.place == kumi_types::place::IMPORTED {
                     "imported".into()
                 } else {
                     format!("a {}", crate::daw::words().place)
@@ -924,9 +921,9 @@ impl PlainTerminal {
         Ok(())
     }
     /// A fixed phrase ("tempo 124", "mute drums") run at once with no model call; None sends it to the model.
-    async fn instant(&self, input: &str) -> Option<kumi_runtime::core::contracts::InstantOutcome> {
+    async fn instant(&self, input: &str) -> Option<kumi_agent::core::contracts::InstantOutcome> {
         let controller = &self.0.options.controller;
-        if !self.0.options.instant || !controller.has_instant() || kumi_runtime::core::phrases::parse(input).is_none() {
+        if !self.0.options.instant || !controller.has_instant() || kumi_agent::core::phrases::parse(input).is_none() {
             return None;
         }
         controller.instant(input).await.ok().flatten()
@@ -1147,7 +1144,7 @@ impl Terminal for PlainTerminal {
             }
             "job" => {
                 if let SessionEvent::Job(status) = &event {
-                    use kumi_runtime::core::jobs::{JobState, WhenDone};
+                    use kumi_agent::core::jobs::{JobState, WhenDone};
                     let line = status.line.clone().map(|line| format!(": {line}")).unwrap_or_default();
                     match status.state {
                         JobState::Running if status.steps == 0 && status.tool.is_none() && status.doing.as_deref() == Some("starting") => {
@@ -1385,11 +1382,7 @@ impl Terminal for PlainTerminal {
                     let wait = value["waitMs"].as_f64().unwrap_or(0.);
                     self.notice(&if value["wait"] == "limit" {
                         let at = kumi_common::time::now_ms_f64() + wait;
-                        format!(
-                            "[wait] {}; carrying on at {} (Ctrl-C stops)",
-                            get("reason"),
-                            kumi_runtime::kernel::failure::reset_words(at, at - wait)
-                        )
+                        format!("[wait] {}; carrying on at {} (Ctrl-C stops)", get("reason"), kumi_ai::failure::reset_words(at, at - wait))
                     } else if value["wait"] == "offline" {
                         // A certificate or a proxy in the way names itself in the reason.
                         let offline = if value["cause"].is_string() { "" } else { "offline: " };

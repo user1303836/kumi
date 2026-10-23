@@ -5,11 +5,11 @@
 //! with the master's limiters and compressors bypassed meanwhile (every render passes through them) and on again after.
 use super::backend::{Compressor, Dynamics, LayersBackend};
 use super::{compare, plr};
-use crate::core::contracts::{JsonObject, KernelTool, Reach, Render, ToolResult};
-use crate::core::errors::RuntimeError;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
 use kumi_common::js::json::stringify;
+use kumi_types::contracts::{JsonObject, KernelTool, Reach, Render, ToolResult};
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::rc::Rc;
 
@@ -36,8 +36,9 @@ pub struct Layers<B: LayersBackend> {
 /// A render as one mono channel, and its rate.
 async fn mono_of(render: &Render, signal: &Signal) -> Result<(Vec<f32>, f64), String> {
     let seconds = render.seconds.unwrap_or(f64::MAX / 4.);
-    let (mono, rate, _) =
-        crate::audio::decode::read_mono(&render.file, signal, render.start, seconds.min(MOST_BEATS * 2.)).await.map_err(|error| error.0)?;
+    let (mono, rate, _) = kumi_media::audio::decode::read_mono(&render.file, signal, render.start, seconds.min(MOST_BEATS * 2.))
+        .await
+        .map_err(|error| error.0)?;
     Ok((mono, rate))
 }
 

@@ -1,9 +1,9 @@
 //! Kumi's own ears for REAPER and Renoise: their steps fit each DAW's kinds (from own_ears' tests: the app is where both
 //! DAWs' integrations meet).
+use kumi_agent::core::to_midi::MidiNote;
+use kumi_agent::kernel::schema::problem;
 use kumi_daw_own::ears::*;
 use kumi_daw_renoise::changes::CHANGES as RENOISE;
-use kumi_runtime::core::to_midi::MidiNote;
-use kumi_runtime::kernel::schema::problem;
 use serde_json::{json, Value};
 use std::path::Path;
 

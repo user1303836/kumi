@@ -2,20 +2,18 @@
 //! Arrangement clip's start and drum names filled in), and read_notes prints a clip's notes in its frame.
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi_agent::mcp::{
+    client::{McpEndpoint, StderrStatus},
+    types::{CallToolResult, Implementation, ListToolsResult},
+};
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_daw_ableton::{
     connection::{ConnectionOptions, LiveConnection},
     more_changes::{set_meter, set_scale},
     notes::{expand, read_notes},
 };
-use kumi_runtime::{
-    core::{contracts::JsonObject, errors::RuntimeError},
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, Implementation, ListToolsResult},
-    },
-    notation::{parse, Frame},
-};
+use kumi_listening::notation::{parse, Frame};
+use kumi_types::{contracts::JsonObject, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::{cell::RefCell, rc::Rc};
 

@@ -2,7 +2,7 @@
 //! reaches, and what the tools that hear, audition, render, read the web, watch videos and learn the library report;
 //! and what a turn's model calls used (`Usage`), which the model clients count.
 //! The rest of the agent's contracts (the kernel, the session and its events, the stores, the DAW integrations) are
-//! kumi-runtime's `core::contracts`, which re-exports these.
+//! kumi-agent's `core::contracts`.
 
 use std::rc::Rc;
 
@@ -627,7 +627,7 @@ pub struct WebEvent {
 }
 
 /// What a tool tells the session as it works: what it's doing now, a notice, and what it heard, watched or read on
-/// the web. The session sends each on as its own event (kumi-runtime's `SessionEvent`), whose other kinds name what
+/// the web. The session sends each on as its own event (kumi-agent's `SessionEvent`), whose other kinds name what
 /// these tools don't know; each is written as the session's event of its kind is.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", rename_all_fields = "camelCase")]

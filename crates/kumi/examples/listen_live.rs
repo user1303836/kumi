@@ -6,6 +6,7 @@
 //!   KUMI_TIMING=1 cargo run --release -p kumi --example listen_live -- --set "<Set name>" [--bars 8] [--song-bars 96] [--tempos 90,128]
 use futures::FutureExt;
 use kumi::config::find_bridge_config;
+use kumi_agent::{mcp::client, Integration, Observation};
 use kumi_common::{
     abort::{self, Signal},
     js::{
@@ -15,13 +16,11 @@ use kumi_common::{
     time::{now_ms, perf_now},
 };
 use kumi_daw_ableton::{connection::Connect, create_ableton_integration, AbletonOptions, BRIDGE_TOOLS};
-use kumi_runtime::{
-    audio::AnalyzeOptions,
-    core::contracts::{ChangeState, HearRequest},
-    hear,
-    mcp::client,
+use kumi_media::audio::{hear, AnalyzeOptions};
+use kumi_types::{
+    contracts::{ChangeRecord, ChangeState, HearRequest, JsonObject, KernelTool},
+    errors::RuntimeError,
     system::Env,
-    ChangeRecord, Integration, JsonObject, KernelTool, Observation, RuntimeError,
 };
 use serde_json::{json, Value};
 use std::{

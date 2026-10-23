@@ -4,11 +4,12 @@ use crate::tui::{
     width::{text_width, truncate},
     wrap::Span,
 };
+use kumi_agent::core::contracts::*;
 use kumi_common::{
     js::{number, string},
     time::since,
 };
-use kumi_runtime::core::contracts::*;
+use kumi_types::contracts::*;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::LazyLock};
 

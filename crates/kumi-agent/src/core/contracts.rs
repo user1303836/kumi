@@ -7,18 +7,13 @@ use kumi_common::abort::Signal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub use super::daw::{Capabilities, DawId, DawProfile, DawWords, ScriptKind};
-use super::errors::{FailureKind, RuntimeError};
-use super::evolve::Knob;
-use super::goal::GoalStatus;
-use super::match_run::MatchStatus;
-// The contracts with the tools, in kumi-types, as the agent's own.
-pub use super::picture::{
-    ChangePicture, Dynamics, EqBand, EqShape, MixLevels, MixSend, PictureItem, PictureLine, PictureRoute, PictureValue, PictureZone,
-    RouteChange,
-};
-pub use super::view::*;
-pub use kumi_types::contracts::*;
+use crate::core::evolve::Knob;
+use crate::core::goal::GoalStatus;
+use crate::core::match_run::MatchStatus;
+pub use crate::core::view::*;
+use kumi_types::contracts::*;
+use kumi_types::daw::{DawId, DawProfile};
+use kumi_types::errors::{FailureKind, RuntimeError};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", rename_all_fields = "camelCase")]
@@ -55,7 +50,7 @@ pub enum KernelEvent {
         /// What refused the call on the way, when that's what it waits out as offline: a certificate (TLS) or a
         /// proxy. The wait is the same; the words say which.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        cause: Option<crate::web::cause::NetCause>,
+        cause: Option<kumi_net::cause::NetCause>,
         /// A proxy `cause` that isn't answering (its address refused, its name not found) rather than one that answered
         /// no: the words say to start it again.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -334,7 +329,7 @@ pub struct ConversationSummary {
 impl ConversationSummary {
     /// What it's called: the producer's name for it, else its first request.
     pub fn title(&self) -> String {
-        super::conversations::title(self.name.as_deref(), &self.first)
+        crate::core::conversations::title(self.name.as_deref(), &self.first)
     }
 }
 
@@ -472,7 +467,7 @@ pub trait ConversationStore {
     }
     /// An id no kept conversation has.
     async fn new_id(&self) -> String {
-        super::conversations::new_conversation_id(kumi_common::time::now_ms())
+        crate::core::conversations::new_conversation_id(kumi_common::time::now_ms())
     }
     /// The producer's name for a kept conversation (None takes it away); false when it isn't kept.
     async fn rename(&self, place: &str, id: &str, name: Option<&str>) -> Result<bool, RuntimeError> {
@@ -963,15 +958,15 @@ pub enum SessionEvent {
     Match(MatchStatus),
     Goal(GoalStatus),
     /// A /goal objective's status: where it is, turns and time against its budget, and the last check.
-    Objective(super::goal_mode::ObjectiveStatus),
+    Objective(crate::core::goal_mode::ObjectiveStatus),
     /// No goal to show: there's none here, or another Set is open.
     ObjectiveCleared,
     Heard(HeardEvent),
     Auditioned(AuditionEvent),
     /// A round of a judged run: its target, change, numbers before and after, keep or revert, and what's next.
-    Judged(crate::listening::round::Round),
+    Judged(kumi_listening::round::Round),
     /// Where the loop is: rounds, kept and taken back, listens, time, the next target.
-    Loop(super::loop_run::LoopStatus),
+    Loop(crate::core::loop_run::LoopStatus),
     Watched(WatchedEvent),
     Web(WebEvent),
     Library(LibraryEvent),
@@ -992,7 +987,7 @@ pub enum SessionEvent {
         on: bool,
     },
     /// A background job started, moved on or ended: its whole status, by its id.
-    Job(super::jobs::JobStatus),
+    Job(crate::core::jobs::JobStatus),
     /// Kumi carries on by itself with a job's result, as the request it was started for asked: an answer follows.
     CarryOn {
         job: u32,
@@ -1126,7 +1121,7 @@ pub trait MemoryStore {
     ) -> Result<Remembering, RuntimeError> {
         let memory = self.load(project).await?;
         let mut notes = if scope == MemoryScope::Set { memory.set } else { memory.producer };
-        let remembering = super::memory::remember_in(&mut notes, scope, text, replaces, at);
+        let remembering = crate::core::memory::remember_in(&mut notes, scope, text, replaces, at);
         if matches!(remembering, Remembering::Kept { .. }) {
             self.save(scope, project, &notes).await?;
         }
@@ -1161,7 +1156,7 @@ pub trait MemoryStore {
     async fn add(&self, scope: MemoryScope, project: Option<&str>, texts: &[String], at: i64) -> Result<(), RuntimeError> {
         let memory = self.load(project).await?;
         let mut notes = if scope == MemoryScope::Set { memory.set } else { memory.producer };
-        super::memory::add_in(&mut notes, scope, texts, at);
+        crate::core::memory::add_in(&mut notes, scope, texts, at);
         self.save(scope, project, &notes).await
     }
     /// Forget a note the producer no longer wants: the note, if there was one.
@@ -1287,7 +1282,7 @@ pub enum WatchEvent {
     Change(ChangeRecord),
     Action(ActionEvent),
     Audition(AuditionEvent),
-    Judged(crate::listening::round::Round),
+    Judged(kumi_listening::round::Round),
 }
 
 /// What Kumi remembers now: about the producer, and about the open Set when it's saved.
@@ -1656,11 +1651,11 @@ pub trait SessionController {
         false
     }
     /// The background jobs, oldest first (the latest that ended, and every one running).
-    fn jobs(&self) -> Vec<super::jobs::JobStatus> {
+    fn jobs(&self) -> Vec<crate::core::jobs::JobStatus> {
         Vec::new()
     }
     /// One job with its steps and report.
-    fn job(&self, id: u32) -> Option<super::jobs::JobDetail> {
+    fn job(&self, id: u32) -> Option<crate::core::jobs::JobDetail> {
         let _ = id;
         None
     }

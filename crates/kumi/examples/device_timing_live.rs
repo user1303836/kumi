@@ -15,10 +15,11 @@
 //! --encode <folder> <file>.json makes that file from recordings already made (no Live).
 //! No model and no sign-in. It works in the open Set (it never opens or closes one): name it, and use a disposable
 //! one. It sets the tempo to 120 and takes everything back after.
-//!   cargo build -p ableton-mcp-server -p kumi-runtime --bins
+//!   cargo build -p ableton-mcp-server -p kumi-daw-ableton --bins
 //!   cargo run -p kumi --example device_timing_live -- --set "<Set name>" [--file <path>.amxd --rate Rate --from 4 --to 3]
 use futures::FutureExt;
 use kumi::config::find_bridge_config;
+use kumi_agent::{mcp::client, Integration, Observation};
 use kumi_common::{
     abort::{self, Signal},
     js::string::{head, trim},
@@ -31,8 +32,9 @@ use kumi_daw_ableton::{
     samples::user_library,
     AbletonOptions, BRIDGE_TOOLS,
 };
-use kumi_runtime::{
-    core::contracts::ChangeState, mcp::client, ChangeRecord, Integration, JsonObject, KernelTool, Observation, RuntimeError,
+use kumi_types::{
+    contracts::{ChangeRecord, ChangeState, JsonObject, KernelTool},
+    errors::RuntimeError,
 };
 use serde_json::{json, Value};
 use std::{
@@ -90,7 +92,7 @@ fn main() {
     let bridge = bridge_program();
     let harness = bridge.with_file_name(if cfg!(windows) { "kumi-harness.exe" } else { "kumi-harness" });
     if !bridge.is_file() || !harness.is_file() {
-        eprintln!("Build the bridge and Kumi's check first: cargo build -p ableton-mcp-server -p kumi-runtime --bins");
+        eprintln!("Build the bridge and Kumi's check first: cargo build -p ableton-mcp-server -p kumi-daw-ableton --bins");
         std::process::exit(2);
     }
     if std::env::var_os("KUMI_HARNESS_BIN").is_none() {

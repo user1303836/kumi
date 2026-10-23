@@ -1,8 +1,8 @@
 //! Bound the visible track list while retaining the tracks in focus: the tracks the model reads each turn, folded to
 //! one line each (and then left out) when they don't fit, the tracks in focus kept whole. The DAW says, in its words,
 //! that the list is folded and how to read what's left out.
-use crate::core::contracts::JsonObject;
 use kumi_common::js::{json::stringify, string::head};
+use kumi_types::contracts::JsonObject;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 pub const OBSERVATION_TRACK_BYTES: usize = 12 * 1024;

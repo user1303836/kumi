@@ -1,14 +1,6 @@
 //! Kumi's change records and its guarded undo, over the DAW's ChangeHost: HISTORY's lifecycle (records, groups,
 //! quiet audition steps, what changed outside it, refusals) is the same for every DAW; each DAW's ways back are its own.
-use crate::{
-    core::{
-        contracts::*,
-        daw::DawProfile,
-        errors::RuntimeError,
-        refs::{Book, Moved, RefScheme, Shift},
-    },
-    notation::thousands,
-};
+use crate::core::refs::{Book, Moved, RefScheme, Shift};
 use async_trait::async_trait;
 use futures::{future::LocalBoxFuture, FutureExt};
 use indexmap::IndexMap;
@@ -16,6 +8,10 @@ use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::{json::stringify, string::head},
 };
+use kumi_listening::notation::thousands;
+use kumi_types::contracts::*;
+use kumi_types::picture::PictureValue;
+use kumi_types::{daw::DawProfile, errors::RuntimeError};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{

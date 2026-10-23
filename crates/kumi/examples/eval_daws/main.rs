@@ -25,6 +25,23 @@ use daw_bridge::Daw;
 use daw_mcp_server::host::Host;
 use futures::FutureExt;
 use kumi::config::{load_inference_config, load_tools_dir, safe_error};
+use kumi_agent::{
+    core::{context::IntegrationContext, contracts::WatchEvent, memory::MemoryStoreOptions, session::VideoDirectories},
+    create_agent_kernel, create_memory_store, create_session,
+    mcp::{
+        client::McpEndpoint,
+        types::{CallToolResult, ContentBlock},
+    },
+    AgentKernel, AgentKernelOptions, IntegrationFactory, Kernel, KernelEvent, KernelFactory, KernelOptions, Session, SessionController,
+    SessionEvent, SessionOptions,
+};
+use kumi_ai::{
+    auth::store::open_credential_store,
+    binding::{LanguageModel, ModelBinding},
+    error::LanguageModelError,
+    providers::{resolve_model, ResolveModelOptions},
+    types::{CallOptions, StreamPart, StreamParts},
+};
 use kumi_common::{
     abort::Signal,
     js::{json::stringify, string::head},
@@ -32,23 +49,7 @@ use kumi_common::{
 use kumi_daw_own::bridge::{Connect, OwnOptions};
 use kumi_daw_reaper::create_reaper_integration;
 use kumi_daw_renoise::create_renoise_integration;
-use kumi_runtime::{
-    ai::{
-        error::LanguageModelError,
-        types::{CallOptions, StreamPart, StreamParts},
-    },
-    core::{context::IntegrationContext, contracts::WatchEvent, daw::DawProfile, memory::MemoryStoreOptions, session::VideoDirectories},
-    create_agent_kernel, create_memory_store, create_session,
-    kernel::agent::LanguageModel,
-    mcp::{
-        client::McpEndpoint,
-        types::{CallToolResult, ContentBlock},
-    },
-    open_credential_store, resolve_model,
-    system::process_env,
-    AgentKernel, AgentKernelOptions, ChangeRecord, IntegrationFactory, Kernel, KernelEvent, KernelFactory, KernelOptions, ModelBinding,
-    ResolveModelOptions, RuntimeError, Session, SessionController, SessionEvent, SessionOptions,
-};
+use kumi_types::{contracts::ChangeRecord, daw::DawProfile, errors::RuntimeError, system::process_env};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{

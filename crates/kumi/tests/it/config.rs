@@ -1,9 +1,7 @@
 //! Configuration, with full command, settings and error oracles.
 use kumi::config::*;
-use kumi_runtime::{
-    providers::Effort,
-    system::{self, Env},
-};
+use kumi_ai::providers::Effort;
+use kumi_types::system::{self, Env};
 use serde_json::{json, Value};
 fn env() -> Env {
     Env::from([
@@ -23,10 +21,8 @@ fn fixture() -> Value {
 #[test]
 fn models_are_provider_qualified_or_unset_and_need_no_gateway_key() {
     let env = env();
-    let expected = kumi_runtime::library::sources::join(
-        &kumi_runtime::library::sources::normalize(&home::home_dir().unwrap().to_string_lossy()),
-        ".kumi/auth.json",
-    );
+    let expected =
+        kumi_library::sources::join(&kumi_library::sources::normalize(&home::home_dir().unwrap().to_string_lossy()), ".kumi/auth.json");
     assert_eq!(load_inference_config(&env).unwrap(), InferenceConfig { model: None, auth_file: expected.clone() });
     for model in ["", " \t\n", "guess", "gateway/model", "openai-codex/", "openai-codex/model\nInjected", "openai-codex/white space"] {
         let mut env = env.clone();
@@ -78,7 +74,7 @@ fn sign_in_commands_and_update_bridge_library_flags_match_all_source_results() {
             let mut expected = case["expected"].clone();
             if expected.get("piAuthFile").is_some() {
                 expected["piAuthFile"] =
-                    json!(kumi_runtime::library::sources::join(&home::home_dir().unwrap().to_string_lossy(), ".pi/agent/auth.json"));
+                    json!(kumi_library::sources::join(&home::home_dir().unwrap().to_string_lossy(), ".pi/agent/auth.json"));
             }
             assert_eq!(serde_json::to_value(result.unwrap()).unwrap(), expected, "{input:?}");
         }
@@ -86,7 +82,7 @@ fn sign_in_commands_and_update_bridge_library_flags_match_all_source_results() {
     assert_eq!(kumi_dir(&Env::from([("KUMI_HOME".into(), "/kumi-home".into())])), "/kumi-home");
     assert_eq!(
         value(&["auth"], &Env::from([("KUMI_HOME".into(), "/kumi-home".into())]))["authFile"],
-        kumi_runtime::library::sources::join("/kumi-home", "auth.json")
+        kumi_library::sources::join("/kumi-home", "auth.json")
     );
 }
 #[test]

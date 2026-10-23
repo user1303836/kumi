@@ -1,8 +1,8 @@
 //! A sample heard for mapping: its pitch (as a MIDI note, from the pitch tracker over its first seconds) and how sure, its
 //! loudness (K-weighted, over its loudest 400 ms: what decides velocity order) and its peak. Off Kumi's thread.
 use super::HeardSample;
-use crate::audio::{analyze::track_pitch, decode::read_mono, dsp::k_weighting};
 use kumi_common::abort::Signal;
+use kumi_media::audio::{analyze::track_pitch, decode::read_mono, dsp::k_weighting};
 
 /// How much of a sample is heard: enough for a note's pitch and its attack's loudness.
 const HEARD_SECONDS: f64 = 6.0;

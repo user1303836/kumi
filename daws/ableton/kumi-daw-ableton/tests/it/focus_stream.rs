@@ -1,7 +1,8 @@
 use futures::FutureExt;
+use kumi_agent::{core::contracts::LiveFocus, mcp::types::CallToolResult};
 use kumi_common::abort::Signal;
 use kumi_daw_ableton::{focus::*, plan_stream::*};
-use kumi_runtime::{core::contracts::LiveFocus, mcp::types::CallToolResult, RuntimeError};
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},

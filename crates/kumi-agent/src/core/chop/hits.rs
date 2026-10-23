@@ -3,7 +3,7 @@
 //! never does), placed on the sample where its energy steps up and onto the zero crossing before it (a slice cut there never
 //! clicks), with its peak and how its energy splits between lows and highs: a kick, a snare or a hat, and a ghost when it's far
 //! quieter than its kind's loudest. Rolls need the tempo and are the plan's.
-use crate::audio::dsp::{high_pass, low_pass};
+use kumi_media::audio::dsp::{high_pass, low_pass};
 
 /// A hit: where its attack starts (frame, from 0), how loud it peaks, its kind, and whether it's a ghost.
 #[derive(Debug, Clone, PartialEq)]

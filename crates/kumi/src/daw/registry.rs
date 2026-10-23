@@ -3,15 +3,15 @@
 //! library. The DAWs' own crates (Live's kumi-daw-ableton, and the integrations of the DAWs whose bridges are Kumi's
 //! own) don't name each other; this registry names them all.
 
+use kumi_agent::core::presentation::ToolPresentation;
+use kumi_agent::core::view::ViewPresentation;
 use kumi_daw_ableton as ableton;
 use kumi_daw_reaper as reaper;
 use kumi_daw_renoise as renoise;
-use kumi_runtime::core::daw::{DawId, DawProfile};
-use kumi_runtime::core::place::Places;
-use kumi_runtime::core::presentation::ToolPresentation;
-use kumi_runtime::core::view::ViewPresentation;
-use kumi_runtime::library::daws::Daws;
-use kumi_runtime::library::sources::{Source, SourceOptions};
+use kumi_library::daws::Daws;
+use kumi_library::sources::{Source, SourceOptions};
+use kumi_types::daw::{DawId, DawProfile};
+use kumi_types::place::Places;
 
 /// The DAWs this build integrates, by profile: Live, and the DAWs whose bridges are Kumi's own.
 pub const REGISTERED: &[&DawProfile] = &[&DawProfile::ABLETON, &DawProfile::REAPER, &DawProfile::RENOISE];
@@ -50,13 +50,13 @@ pub static LIBRARIES: Daws = Daws(&[&ableton::library::LIBRARY, &reaper::library
 /// User Library, Places, packs and Core Library), Splice's folder, and REAPER's and Renoise's own libraries.
 pub fn library_sources(options: &SourceOptions) -> Vec<Source> {
     debug_assert!(profile(options.daw.unwrap_or(DawId::Ableton)).is_some(), "a registered DAW's places");
-    kumi_runtime::library::sources::library_sources(LIBRARIES, options)
+    kumi_library::sources::library_sources(LIBRARIES, options)
 }
 
 /// The DAWs' saved projects they opened lately (Live's Sets, from its log).
 pub fn recent_projects(options: &SourceOptions) -> Vec<String> {
     debug_assert!(profile(options.daw.unwrap_or(DawId::Ableton)).is_some(), "a registered DAW's projects");
-    kumi_runtime::library::sources::recent_projects(LIBRARIES, options)
+    kumi_library::sources::recent_projects(LIBRARIES, options)
 }
 
 /// REAPER's and Renoise's instructions, packs included, keep within the budget Live's instructions keep. (Here, because

@@ -1,9 +1,12 @@
 use async_trait::async_trait;
-use kumi_common::abort::{self, Signal};
-use kumi_runtime::core::{
-    contracts::{JsonObject, KernelTool, RecipeAction, RecipeEvent, ToolResult},
-    errors::RuntimeError,
+use kumi_agent::core::{
+    contracts::{RecipeAction, RecipeEvent},
     recipes::*,
+};
+use kumi_common::abort::{self, Signal};
+use kumi_types::{
+    contracts::{JsonObject, KernelTool, ToolResult},
+    errors::RuntimeError,
 };
 use serde_json::{json, Value};
 use std::{
@@ -193,7 +196,7 @@ fn file_keys_follow_javascript_nfkd_normalization() {
 
 /// The recipe tools of another DAW over the same store, with a plan whose steps are that DAW's kinds.
 fn tools_in(
-    profile: kumi_runtime::core::daw::DawProfile,
+    profile: kumi_types::daw::DawProfile,
     store: Rc<FileRecipeStore>,
     kinds: &'static [&'static str],
 ) -> (Vec<Rc<dyn KernelTool>>, Rc<RefCell<Vec<JsonObject>>>) {
@@ -227,7 +230,7 @@ async fn call(tools: &[Rc<dyn KernelTool>], name: &str, input: Value) -> ToolRes
 
 #[tokio::test]
 async fn each_daw_keeps_its_own_recipes_and_never_offers_another_daws() {
-    use kumi_runtime::core::daw::{DawId, DawProfile};
+    use kumi_types::daw::{DawId, DawProfile};
     let f = Fixture::new();
     f.run("save_recipe", json!({"name":"Drum bus","about":"Glue on the drums","steps":[{"tool":"set_mixer","input":{"volume":0.5}}]}))
         .await;
@@ -264,7 +267,7 @@ async fn each_daw_keeps_its_own_recipes_and_never_offers_another_daws() {
 // Each DAW keeps its own MAX_RECIPES: REAPER's newer recipes never push Live's oldest out, nor fill the room Live's take.
 #[tokio::test]
 async fn each_daw_keeps_its_own_number_of_recipes() {
-    use kumi_runtime::core::daw::{DawId, DawProfile};
+    use kumi_types::daw::{DawId, DawProfile};
     let f = Fixture::new();
     let kept = |name: String, created: f64, daw: Option<DawId>| Recipe {
         version: 1,
@@ -298,7 +301,7 @@ async fn each_daw_keeps_its_own_number_of_recipes() {
 
 #[tokio::test]
 async fn a_daws_recipe_kept_beside_lives_by_an_earlier_kumi_is_found_as_that_daws_and_moves_to_its_folder() {
-    use kumi_runtime::core::daw::{DawId, DawProfile};
+    use kumi_types::daw::{DawId, DawProfile};
     let f = Fixture::new();
     std::fs::create_dir_all(f.dir.path().join("recipes")).unwrap();
     // (as a Kumi before DAW folders wrote it: REAPER's tag, in Live's folder)

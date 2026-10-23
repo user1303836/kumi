@@ -4,12 +4,12 @@
 use super::backend::{ChopBackend, Key, Laid, Recording, Song, Step};
 use super::hits::{hits, Hit};
 use super::{beat_of, break_tempo, hit_words, on_grid, rolls, same_tempo, Density, Tempo};
-use crate::audio::decode::read_mono;
-use crate::core::contracts::{JsonObject, KernelTool, Reach, ToolResult};
-use crate::core::errors::RuntimeError;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
 use kumi_common::js::json::stringify;
+use kumi_media::audio::decode::read_mono;
+use kumi_types::contracts::{JsonObject, KernelTool, Reach, ToolResult};
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::rc::Rc;
 

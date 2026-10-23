@@ -1,13 +1,15 @@
 use chrono::FixedOffset;
-use kumi_runtime::ai::types::Message;
-use kumi_runtime::core::contracts::{ChangeRecord, ConversationStore, KernelCheckpoint, SavedConversation, TranscriptLine, TranscriptRole};
-use kumi_runtime::core::export::{file_name, html, import, json, markdown, Format, Options, Source, IMPORT_MAX_BYTES, LEFT_OUT, PARTIAL};
-use kumi_runtime::core::goal::goal_setup;
-use kumi_runtime::core::goal_mode::objective_audit;
-use kumi_runtime::core::loop_run::loop_setup;
-use kumi_runtime::kernel::agent::CARRY_ON_NOTE;
-use kumi_runtime::kernel::budget::{transcript_of, ASKED, OBSERVATION_MARKER, SHORTENED};
-use kumi_runtime::{create_conversation_store, IMPORTED};
+use kumi_agent::core::contracts::{ConversationStore, KernelCheckpoint, SavedConversation, TranscriptLine, TranscriptRole};
+use kumi_agent::core::export::{file_name, html, import, json, markdown, Format, Options, Source, IMPORT_MAX_BYTES, LEFT_OUT, PARTIAL};
+use kumi_agent::core::goal::goal_setup;
+use kumi_agent::core::goal_mode::objective_audit;
+use kumi_agent::core::loop_run::loop_setup;
+use kumi_agent::create_conversation_store;
+use kumi_agent::kernel::agent::CARRY_ON_NOTE;
+use kumi_agent::kernel::budget::{transcript_of, ASKED, OBSERVATION_MARKER, SHORTENED};
+use kumi_ai::types::Message;
+use kumi_types::contracts::ChangeRecord;
+use kumi_types::place::IMPORTED;
 use serde_json::{json, Value};
 
 /// What the test's redactor takes out, planted in every kind of word an export carries.

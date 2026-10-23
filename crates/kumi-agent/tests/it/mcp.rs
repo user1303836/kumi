@@ -1,13 +1,11 @@
 use async_trait::async_trait;
-use kumi_common::abort::{self, Controller, Signal};
-use kumi_runtime::{
-    core::{contracts::JsonObject, errors::RuntimeError},
-    mcp::{
-        allowed_tools::{AllowedTools, CallOptions},
-        client::{connect_mcp, LinearReadBuffer, McpEndpoint, Options, StderrStatus},
-        types::{CallToolResult, Implementation, ListToolsResult},
-    },
+use kumi_agent::mcp::{
+    allowed_tools::{AllowedTools, CallOptions},
+    client::{connect_mcp, LinearReadBuffer, McpEndpoint, Options, StderrStatus},
+    types::{CallToolResult, Implementation, ListToolsResult},
 };
+use kumi_common::abort::{self, Controller, Signal};
+use kumi_types::{contracts::JsonObject, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -36,7 +34,7 @@ fn node() -> PathBuf {
     std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
         .map(|directory| directory.join(if cfg!(windows) { "node.exe" } else { "node" }))
         .find(|path| path.is_file())
-        .expect("MCP SDK interoperability tests need Node and: npm ci --prefix crates/kumi-runtime/tests/support")
+        .expect("MCP SDK interoperability tests need Node and: npm ci --prefix crates/kumi-agent/tests/support")
 }
 fn options(mode: &str, timeout: u64) -> Options {
     let root = kumi_testkit::workspace();

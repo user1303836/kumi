@@ -8,6 +8,7 @@
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi::config::find_bridge_config;
+use kumi_agent::{create_project_store, mcp::client, Baseline, Integration, Observation, ProjectStore};
 use kumi_common::{
     abort::{self, Signal},
     js::{
@@ -18,9 +19,12 @@ use kumi_common::{
     time::{now_ms, perf_now},
 };
 use kumi_daw_ableton::{connection::Connect, create_ableton_integration, AbletonOptions, BRIDGE_TOOLS};
-use kumi_runtime::{
-    audio::AnalyzeOptions, core::contracts::ChangeState, create_project_store, hear, mcp::client, system::Env, Baseline, ChangeRecord,
-    Integration, JsonObject, KernelTool, Observation, ProjectStore, RuntimeError, KUMI,
+use kumi_media::audio::{hear, AnalyzeOptions};
+use kumi_types::{
+    command::KUMI,
+    contracts::{ChangeRecord, ChangeState, JsonObject, KernelTool},
+    errors::RuntimeError,
+    system::Env,
 };
 use regex::Regex;
 use serde_json::{json, Value};

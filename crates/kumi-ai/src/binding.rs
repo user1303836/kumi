@@ -1,5 +1,5 @@
 //! What the agent's loop asks of a model: a model that streams, a request shaped for its provider, and how much
-//! conversation it takes beside the instructions and tools. The loop itself (kumi-runtime's kernel) is provider-neutral.
+//! conversation it takes beside the instructions and tools. The loop itself (kumi-agent's kernel) is provider-neutral.
 use std::rc::Rc;
 
 use async_trait::async_trait;

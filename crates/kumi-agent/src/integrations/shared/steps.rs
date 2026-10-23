@@ -1,7 +1,7 @@
 //! The line each step that isn't a tool of its own gets in a DAW's plan tool description.
 
-use crate::core::contracts::JsonObject;
 use kumi_common::js::string::{head, trim};
+use kumi_types::contracts::JsonObject;
 use serde_json::{json, Value};
 
 /// The most of a step's line, and of what it does: its fields come before more words about it.

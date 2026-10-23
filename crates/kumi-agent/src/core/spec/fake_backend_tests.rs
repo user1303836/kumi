@@ -3,9 +3,9 @@
 //! says what a fader can't do (peaks past the ceiling, a fader at its most, a noise floor).
 use super::backend::{SpecBackend, Words};
 use super::tool::DeliverySpec;
-use crate::core::contracts::{KernelTool, Render};
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::contracts::{KernelTool, Render};
 use serde_json::{json, Value};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -63,7 +63,7 @@ impl SpecBackend for Rc<Fake> {
         let mono: Vec<f32> = mono.into_iter().map(|s| s * gain).collect();
         self.renders.set(self.renders.get() + 1);
         let path = self.dir.path().join(format!("mix{}.wav", self.renders.get()));
-        crate::audio::decode::write_test_wav(&path, &mono, RATE);
+        kumi_media::audio::decode::write_test_wav(&path, &mono, RATE);
         Ok(Render { file: path.to_string_lossy().into_owned(), start: 0., seconds: None })
     }
 

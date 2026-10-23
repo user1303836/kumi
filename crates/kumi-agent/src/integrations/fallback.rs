@@ -1,10 +1,10 @@
 //! Continue without the DAW when the primary integration reports a DAW setup failure.
-use crate::core::{
-    contracts::*,
-    errors::{FailureKind, KumiError, RuntimeError},
-};
+use crate::core::contracts::*;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::contracts::*;
+use kumi_types::daw::DawProfile;
+use kumi_types::errors::{FailureKind, KumiError, RuntimeError};
 use serde_json::Value;
 use std::{cell::RefCell, rc::Rc};
 

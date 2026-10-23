@@ -14,9 +14,9 @@ use kumi_common::js::string::{head, trim};
 use serde_json::{json, Value};
 
 use super::schema;
-use crate::ai::types::FunctionTool;
-use crate::core::contracts::{JsonObject, KernelTool, ToolResult};
-use crate::core::errors::RuntimeError;
+use kumi_ai::types::FunctionTool;
+use kumi_types::contracts::{JsonObject, KernelTool, ToolResult};
+use kumi_types::errors::RuntimeError;
 
 pub const FIND_TOOLS: &str = "find_tools";
 pub const CALL_TOOL: &str = "call_tool";

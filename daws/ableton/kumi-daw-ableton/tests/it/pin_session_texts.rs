@@ -1,13 +1,10 @@
 //! What the session says, word for word, as Live comes and goes, and what Kumi says it can't do without Live.
 use async_trait::async_trait;
 use futures::{future::LocalBoxFuture, FutureExt};
-use kumi_common::abort::Signal;
-use kumi_daw_ableton::create_inference_only_integration;
-use kumi_runtime::{
+use kumi_agent::{
     core::{
         contracts::*,
         conversations::create_conversation_store,
-        errors::{FailureKind, KumiError, RuntimeError},
         evolve::Knob,
         goal::{GoalBudget, GOAL_BUDGET},
         match_run::{MatchBudget, MATCH_BUDGET},
@@ -16,6 +13,10 @@ use kumi_runtime::{
     kernel::budget::{transcript_of, OBSERVATION_MARKER},
     with_fallback,
 };
+use kumi_common::abort::Signal;
+use kumi_daw_ableton::create_inference_only_integration;
+use kumi_types::contracts::*;
+use kumi_types::errors::{FailureKind, KumiError, RuntimeError};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -424,7 +425,7 @@ local_test!(undo_reconnect_and_listening_without_live_say_these_texts, {
     // The listen tool asked to hear the Set, with an integration that can't.
     let h = harness(None, |o| o.listen = true);
     h.session.start().await.unwrap();
-    let listen = h.record.created.borrow()[0].tools.iter().find(|t| t.name() == kumi_runtime::LISTEN_TOOL).cloned().unwrap();
+    let listen = h.record.created.borrow()[0].tools.iter().find(|t| t.name() == kumi_media::audio::tools::LISTEN_TOOL).cloned().unwrap();
     let heard = listen.execute(json!({"mix":true}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
     texts.insert("listen without live".into(), serde_json::to_value(heard).unwrap());
     h.session.close().await.unwrap();
@@ -562,7 +563,7 @@ impl GoalRig for StuckRig {
     }
 }
 fn seeded(o: &mut SessionOptions) {
-    let random = Rc::new(RefCell::new(kumi_runtime::core::evolve::seeded(123)));
+    let random = Rc::new(RefCell::new(kumi_listening::cmaes::seeded(123)));
     o.goal_random = Some(Rc::new(move || (random.borrow_mut())()));
 }
 local_test!(a_knob_search_whose_render_tracks_stay_says_these_texts, {

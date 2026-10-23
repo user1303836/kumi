@@ -1,9 +1,8 @@
 //! Finding what was said and done before: earlier conversations in every Set, and the techniques
 //! and recipes Kumi kept, by their words. Local and quick: no model call and no embeddings.
 
-use super::{
-    contracts::{ConversationStore, FoundExchange, JsonObject, KernelTool, Reach, ToolResult},
-    errors::RuntimeError,
+use crate::core::{
+    contracts::{ConversationStore, FoundExchange},
     recipes::RecipeStore,
     techniques::TechniqueStore,
 };
@@ -16,14 +15,18 @@ use kumi_common::{
     },
     time::{iso_string, now_ms, since},
 };
+use kumi_types::{
+    contracts::{JsonObject, KernelTool, Reach, ToolResult},
+    errors::RuntimeError,
+};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{rc::Rc, sync::LazyLock};
 
-use super::daw::DawProfile;
+use kumi_types::daw::DawProfile;
 
 pub const SEARCH_CONVERSATIONS_TOOL: &str = "search_conversations";
-crate::daw_text!(
+kumi_types::daw_text!(
     #[allow(dead_code)]
     DESCRIPTION, description:
     "Search earlier conversations with the producer, in every ", place, ", and the techniques and recipes Kumi kept, by their words. ",
@@ -215,10 +218,10 @@ struct Recall(RecallOptions, DawProfile, String);
 fn where_of(hit: &FoundExchange, here: Option<&str>, place: &str) -> String {
     let set = match &hit.set {
         Some(name) => format!("“{}”", plain(name, 80)),
-        None if matches!(crate::core::place::Place::parse(&hit.place), Some(crate::core::place::Place::Unsaved(_))) => {
+        None if matches!(kumi_types::place::Place::parse(&hit.place), Some(kumi_types::place::Place::Unsaved(_))) => {
             format!("a {place} not saved yet")
         }
-        None if hit.place == super::conversations::IMPORTED => "a conversation imported from a file".into(),
+        None if hit.place == kumi_types::place::IMPORTED => "a conversation imported from a file".into(),
         None => format!("a saved {place}"),
     };
     if here == Some(hit.place.as_str()) {
@@ -290,7 +293,7 @@ impl KernelTool for Recall {
         let mut recipes = vec![];
         if let Some(store) = &self.0.recipes {
             // (only this DAW's: another's steps are its own tools')
-            let daw = self.1.id.unwrap_or(crate::core::daw::DawId::Ableton);
+            let daw = self.1.id.unwrap_or(kumi_types::daw::DawId::Ableton);
             for recipe in store.list().await?.into_iter().filter(|recipe| recipe.daw() == daw) {
                 let params: Vec<_> = recipe.params.iter().map(|p| format!("{} {}", p.name, p.about)).collect();
                 let steps: Vec<_> = recipe.steps.iter().map(|s| stringify(&Value::Object(s.clone()))).collect();

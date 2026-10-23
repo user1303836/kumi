@@ -4,7 +4,7 @@
 //! even those don't show, a two-letter badge stands in. The tint goes on the icon only, never the
 //! row's text. What follows an icon leaves one space after its two cells.
 
-use kumi_runtime::core::view::{DeviceForm, DeviceRole, DeviceSignal};
+use kumi_agent::core::view::{DeviceForm, DeviceRole, DeviceSignal};
 use std::collections::HashMap;
 
 use super::style::{process_platform, Rgb, Style};
@@ -205,7 +205,7 @@ pub fn icon(kind: IconKind, style: IconStyle, color: Option<Rgb>) -> Span {
     }
 }
 
-pub use kumi_runtime::core::view::DeviceRow;
+pub use kumi_agent::core::view::DeviceRow;
 
 /// What kind of device a device row is, as the DAW says from what its bridge says about it (Live: its class, and its
 /// device type when sent).

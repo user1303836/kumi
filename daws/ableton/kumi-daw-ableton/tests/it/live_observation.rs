@@ -1,6 +1,13 @@
 use async_trait::async_trait;
 use futures::FutureExt;
 use indexmap::IndexMap;
+use kumi_agent::{
+    core::contracts::*,
+    mcp::{
+        client::{McpEndpoint, StderrStatus},
+        types::{CallToolResult, Implementation, ListToolsResult},
+    },
+};
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
@@ -10,13 +17,8 @@ use kumi_daw_ableton::{
     observation::{ObservationHost, ObservedChange, Observer},
     remember::Remember,
 };
-use kumi_runtime::{
-    core::{contracts::*, errors::RuntimeError},
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, Implementation, ListToolsResult},
-    },
-};
+use kumi_types::contracts::*;
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},

@@ -1,16 +1,12 @@
 //! The loop decides, not the model: it stops when the checklist is met, when changes stop helping, or at its budget,
 //! and otherwise sends the model back with the round's numbers and the next target.
-use kumi_runtime::{
-    core::{
-        goal_mode::{
-            after_turn, audit_against, gap_closed, measured_check, read_audit, Objective, ObjectiveBudget, ObjectiveState, Verdict,
-        },
-        loop_run::{wants_loop, LoopBudget, LoopDecision, LoopRun, LoopStop},
-    },
-    listening::{
-        checklist::{Change, Row},
-        round::{Next, Round, RoundKind},
-    },
+use kumi_agent::core::{
+    goal_mode::{after_turn, audit_against, gap_closed, measured_check, read_audit, Objective, ObjectiveBudget, ObjectiveState, Verdict},
+    loop_run::{wants_loop, LoopBudget, LoopDecision, LoopRun, LoopStop},
+};
+use kumi_listening::{
+    checklist::{Change, Row},
+    round::{Next, Round, RoundKind},
 };
 use std::{cell::Cell, rc::Rc};
 
@@ -73,7 +69,7 @@ fn the_loop_goes_on_with_the_next_target_and_stops_when_the_checklist_is_met() {
         LoopDecision::Stop { stop: LoopStop::Met, wrap_up: Some(text) } => assert!(text.contains("done: true"), "{text}"),
         other => panic!("{other:?}"),
     }
-    let status = run.status(kumi_runtime::core::loop_run::LoopState::Done, Some(LoopStop::Met));
+    let status = run.status(kumi_agent::core::loop_run::LoopState::Done, Some(LoopStop::Met));
     assert_eq!((status.rounds, status.kept, status.reverted, status.listens), (2, 2, 0, 3));
 }
 
@@ -103,7 +99,7 @@ fn the_loop_stops_when_changes_stop_helping_or_at_its_budget() {
     let mut run = LoopRun::with_clock("master it", BUDGET, Rc::new(move || now.get()));
     run.judged(round(0, RoundKind::Start, None, 0., false));
     run.judged(round(1, RoundKind::Judged, Some(true), 2., false));
-    let later = run.status(kumi_runtime::core::loop_run::LoopState::Running, None);
+    let later = run.status(kumi_agent::core::loop_run::LoopState::Running, None);
     assert_eq!(later.rounds_left, 4);
 }
 
@@ -235,7 +231,7 @@ fn a_new_judged_run_inside_the_loop_keeps_its_counts_and_an_early_done_is_held_b
     }
     assert_eq!(run.over(), Some("its budget is spent"));
     assert!(run.holds_done().is_none(), "over: done goes through");
-    let status = run.status(kumi_runtime::core::loop_run::LoopState::Running, None);
+    let status = run.status(kumi_agent::core::loop_run::LoopState::Running, None);
     assert_eq!((status.rounds, status.kept, status.listens), (5, 5, 2 + 5));
     // Once its run has ended, nothing is held.
     run.judged(round(5, RoundKind::Done, None, 0., false));
@@ -286,10 +282,10 @@ fn a_run_hearing_its_bars_again_goes_on_with_its_own_listens() {
     let mut next = round(2, RoundKind::Judged, Some(true), 1., false);
     next.listens = 5;
     run.judged(next);
-    assert_eq!(run.status(kumi_runtime::core::loop_run::LoopState::Running, None).listens, 5);
+    assert_eq!(run.status(kumi_agent::core::loop_run::LoopState::Running, None).listens, 5);
     // A new run inside the loop starts its own count: the loop adds the last run's to it.
     run.judged(round(0, RoundKind::Start, None, 0., false));
-    assert_eq!(run.status(kumi_runtime::core::loop_run::LoopState::Running, None).listens, 6);
+    assert_eq!(run.status(kumi_agent::core::loop_run::LoopState::Running, None).listens, 6);
 }
 
 #[test]

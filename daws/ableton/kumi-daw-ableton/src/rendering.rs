@@ -27,6 +27,7 @@ use futures::{
     FutureExt,
 };
 use indexmap::IndexMap;
+use kumi_agent::core::contracts::*;
 use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::{json::stringify, number::to_fixed},
@@ -38,7 +39,7 @@ use kumi_listening::{
     round::Round,
 };
 use kumi_media::audio::{self, matching::Focus, tools::ResolveAudio};
-use kumi_runtime::core::contracts::*;
+use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{

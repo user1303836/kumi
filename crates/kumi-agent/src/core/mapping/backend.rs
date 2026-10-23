@@ -2,9 +2,9 @@
 //! and audio), the change that makes an instrument of planned files or lays out one the song has, and what its songs'
 //! instruments are for the tidy. Note names come from the DAW's profile. Core does the rest, the same in every DAW.
 use super::Planned;
-use crate::core::daw::DawProfile;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::daw::DawProfile;
 use serde_json::Value;
 
 /// The DAW's words and keys.

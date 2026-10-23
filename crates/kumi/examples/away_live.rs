@@ -7,12 +7,17 @@
 //!   cargo run --release -p kumi --example away_live -- --set "<Set name>"
 use futures::FutureExt;
 use kumi::config::find_bridge_config;
+use kumi_agent::{mcp::client, Integration, Observation};
 use kumi_common::{
     abort::{self, Signal},
     js::string::{head, trim},
 };
 use kumi_daw_ableton::{connection::Connect, create_ableton_integration, AbletonOptions, BRIDGE_TOOLS};
-use kumi_runtime::{mcp::client, system::Env, Integration, JsonObject, KernelTool, Observation, RuntimeError};
+use kumi_types::{
+    contracts::{JsonObject, KernelTool},
+    errors::RuntimeError,
+    system::Env,
+};
 use serde_json::{json, Value};
 use std::{
     cell::RefCell,

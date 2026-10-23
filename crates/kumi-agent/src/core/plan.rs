@@ -1,8 +1,6 @@
 //! Plans run in arrival order, batching adjacent changes and settling the DAW when interrupted, over the DAW's
 //! PlanHost: its change kinds and actions, each step's change, its batches and its safety copy.
 use crate::core::{
-    contracts::{JsonObject, StreamingCall, ToolResult},
-    errors::RuntimeError,
     history::{ChangeHost, History},
     plan_stream::{step_scanner, StepScanner},
     refs::RefScheme,
@@ -20,6 +18,10 @@ use kumi_common::{
         number::{round, to_string},
         string::head,
     },
+};
+use kumi_types::{
+    contracts::{JsonObject, StreamingCall, ToolResult},
+    errors::RuntimeError,
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -40,7 +42,7 @@ pub fn too_many_changes() -> String {
     format!("That's {MAX_CHANGES} changes in one answer; carry on in the next one")
 }
 const STEP_COUNT: &str = "Give 1 to 5000 steps in all.";
-crate::daw_text!(
+kumi_types::daw_text!(
     /// Said with a plan's refused steps.
     pub REFUSED_NOTE, refused_note: "Nothing changed for the refused steps. The held-back ones needed one of them (its @name, its track, or the ", place, "'s ", structure, "), so they didn't run; every other step did. Fix what was refused and send only those steps, with the held-back ones, in one more ", plan_tool, ": the @names this answer made still work there."
 );

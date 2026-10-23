@@ -2,12 +2,12 @@
 //! this turn's discovery may be changed), their short names (`track:5`, a name keeps naming one object), discovery
 //! cursors, and, for a DAW whose refs are positions, where a restructure moved them. How a ref is spelled and what it
 //! points at is the DAW's (`RefScheme`).
-use crate::core::contracts::{JsonObject, TrackChip};
 use indexmap::{IndexMap, IndexSet};
 use kumi_common::js::{
     json::stringify,
     string::{head, locale_compare, utf16_len},
 };
+use kumi_types::contracts::{JsonObject, TrackChip};
 use serde_json::{json, Value};
 
 /// A read or a change the turn can't trust: a ref not from this turn, a stale cursor, a parent of the wrong kind.
@@ -15,9 +15,9 @@ use serde_json::{json, Value};
 #[error("{0}")]
 pub struct ObservationError(pub String);
 
-impl From<ObservationError> for crate::core::errors::RuntimeError {
+impl From<ObservationError> for kumi_types::errors::RuntimeError {
     fn from(error: ObservationError) -> Self {
-        crate::core::errors::RuntimeError::Observation(error.0)
+        kumi_types::errors::RuntimeError::Observation(error.0)
     }
 }
 

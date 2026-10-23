@@ -1,7 +1,7 @@
 //! How a take's render sounded (M7): its peak, its level and where its hits start, against the source's render. A take that is
 //! silent, or clips where the source doesn't, can't be shown; its hits against the source's say how much of its rhythm it keeps.
-use crate::core::contracts::Render;
 use kumi_common::abort::Signal;
+use kumi_types::contracts::Render;
 
 /// What a render sounded like: its peak and level (dBFS) and where its hits start (s).
 #[derive(Debug, Clone, PartialEq)]
@@ -29,7 +29,7 @@ impl Heard {
         let db = |value: f64| 20. * value.max(1e-9).log10();
         let peak = samples.iter().fold(0f32, |peak, sample| peak.max(sample.abs())) as f64;
         let power = samples.iter().map(|sample| (*sample as f64).powi(2)).sum::<f64>() / samples.len().max(1) as f64;
-        Heard { peak: db(peak), level: db(power.sqrt()), onsets: crate::listening::notes::onsets(samples, rate) }
+        Heard { peak: db(peak), level: db(power.sqrt()), onsets: kumi_listening::notes::onsets(samples, rate) }
     }
 
     /// Why it can't be shown, or None: silent where the source isn't, or clipping where the source doesn't (a source that clips
@@ -70,7 +70,7 @@ impl Heard {
 
 /// A render's part heard: mono, from where the part starts, as long as it lasts (two minutes at most).
 pub async fn heard_of(render: &Render, signal: &Signal) -> Result<Heard, String> {
-    let mut source = crate::audio::decode::open_audio(&render.file, Some(signal.clone())).await.map_err(|error| error.0)?;
+    let mut source = kumi_media::audio::decode::open_audio(&render.file, Some(signal.clone())).await.map_err(|error| error.0)?;
     let rate = source.sample_rate;
     source.seek(render.start * rate);
     let most = render.seconds.map_or(60. * rate, |seconds| seconds * rate).min(120. * rate) as usize;

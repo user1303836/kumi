@@ -1,5 +1,5 @@
 //! What sound matching reports: how close a render is to a reference (`Closeness`), feature by feature, and the gap no
-//! knob closes (`Structural`). Measuring it is kumi-runtime's `audio::matching`.
+//! knob closes (`Structural`). Measuring it is kumi-media's `audio::matching`.
 
 use serde::{Deserialize, Serialize};
 

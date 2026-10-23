@@ -2,10 +2,8 @@
 //! A row a full list sets aside is archived, not dropped; a forgotten one is deleted, and its id kept so
 //! no import brings it back.
 
-use super::place::Places;
-use super::{
+use crate::core::{
     contracts::{Memory, MemoryNote, MemoryScope, MemoryStore, NoteChange, Remembering},
-    errors::RuntimeError,
     memory::{add_in, checked_note, fit, remember_in},
     playbook::{checked_lesson, Lesson, PlaybookStore, Reaction, MAX_LESSONS},
     store_client::StoreClient,
@@ -15,6 +13,8 @@ use super::{
 use async_trait::async_trait;
 use kumi_common::time::now_ms;
 use kumi_store::{lessons, notes, techniques, Scope, StoreError};
+use kumi_types::errors::RuntimeError;
+use kumi_types::place::Places;
 
 fn error(why: StoreError) -> RuntimeError {
     RuntimeError::plain(why.to_string())

@@ -3,9 +3,9 @@
 use super::backend::{Installed, ScriptsBackend, Words};
 use super::store::Saved;
 use super::tool::Scripts;
-use crate::core::contracts::KernelTool;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::contracts::KernelTool;
 use serde_json::{json, Value};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

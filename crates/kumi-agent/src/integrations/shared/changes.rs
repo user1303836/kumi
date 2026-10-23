@@ -1,7 +1,7 @@
 //! What a change did, as HISTORY shows it: neutral, so every DAW's integration summarises its changes the same way.
-use crate::core::contracts::*;
 use crate::core::history::next_change_id;
 use crate::core::refs::KnownTrack;
+use kumi_types::contracts::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

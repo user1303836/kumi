@@ -2,7 +2,7 @@
 //! brings back, two takes brought to one loudness, rebalancing heard and judged again, and a round taken back without
 //! touching the producer's own devices.
 use async_trait::async_trait;
-use kumi_runtime::listening::{
+use kumi_listening::{
     checklist::{Change, Checklist, Goal, Item, Quantity, Role, Target},
     detect,
     judging::{decide, matched, predict, processing, rebalance, removable, renamed, take_back, Listen, Placed, RoundHost, Unheard},
@@ -114,8 +114,7 @@ fn a_guard_stays_beside_a_number_asked_for_unless_the_two_couldnt_both_pass() {
     let tone: Vec<f64> = (0..(6. * RATE) as usize).map(|n| 0.2 * (2. * std::f64::consts::PI * 440. * n as f64 / RATE).sin()).collect();
     let mix = heard(&tone);
     let guards = |target: Target| {
-        let goal =
-            Goal { targets: vec![kumi_runtime::listening::checklist::Explicit { measure: Quantity::Crest, target }], ..Default::default() };
+        let goal = Goal { targets: vec![kumi_listening::checklist::Explicit { measure: Quantity::Crest, target }], ..Default::default() };
         Checklist::new(&goal, &mix, &[])
             .items
             .iter()
@@ -132,14 +131,12 @@ fn the_style_guards_step_is_half_the_references_own_spread() {
     let tone: Vec<f64> = (0..(2. * RATE) as usize).map(|n| 0.3 * (2. * std::f64::consts::PI * 440. * n as f64 / RATE).sin()).collect();
     let mut heard = heard(&tone);
     heard.embedding =
-        Some(kumi_runtime::listening::measure::Embedding { vibe: Some(vec![1., 0.]), vibe_model: Some("sha256:a".into()), effects: None });
-    let mut reference = kumi_runtime::listening::checklist::Profile::of("style", &heard);
+        Some(kumi_listening::measure::Embedding { vibe: Some(vec![1., 0.]), vibe_model: Some("sha256:a".into()), effects: None });
+    let mut reference = kumi_listening::checklist::Profile::of("style", &heard);
     reference.vibe = Some(vec![0., 1.]);
     let step = |spread: Option<f64>| {
-        let goal = Goal {
-            reference: Some(kumi_runtime::listening::checklist::Profile { vibe_spread: spread, ..reference.clone() }),
-            ..Default::default()
-        };
+        let goal =
+            Goal { reference: Some(kumi_listening::checklist::Profile { vibe_spread: spread, ..reference.clone() }), ..Default::default() };
         Checklist::new(&goal, &heard, &[]).items.into_iter().find(|item| item.id == "vibe").map(|item| item.jnd)
     };
     assert_eq!((step(Some(0.12)), step(Some(0.5)), step(Some(0.01)), step(None)), (Some(0.06), Some(0.1), Some(0.02), Some(0.03)));
@@ -153,21 +150,19 @@ fn a_style_is_guarded_only_against_a_listen_the_same_model_heard() {
     let listen = |model: Option<&str>, vibe: Vec<f32>| {
         let mut heard = heard(&tone);
         heard.embedding =
-            Some(kumi_runtime::listening::measure::Embedding { vibe: Some(vibe), vibe_model: model.map(str::to_owned), effects: None });
+            Some(kumi_listening::measure::Embedding { vibe: Some(vibe), vibe_model: model.map(str::to_owned), effects: None });
         heard
     };
     let kept = listen(Some("sha256:kept"), vec![1., 0.]);
-    let reference = kumi_runtime::listening::checklist::Profile::of("kept", &kept);
+    let reference = kumi_listening::checklist::Profile::of("kept", &kept);
     assert_eq!(reference.vibe_model.as_deref(), Some("sha256:kept"));
     let goal = Goal { reference: Some(reference.clone()), ..Default::default() };
-    let guarded =
-        |heard: &kumi_runtime::listening::measure::Heard| Checklist::new(&goal, heard, &[]).items.iter().any(|item| item.id == "vibe");
+    let guarded = |heard: &kumi_listening::measure::Heard| Checklist::new(&goal, heard, &[]).items.iter().any(|item| item.id == "vibe");
     assert!(guarded(&listen(Some("sha256:kept"), vec![1., 0.])));
     let before = listen(Some("sha256:swapped"), vec![1., 0.]);
     assert!(!guarded(&before));
     // A vibe kept before models were recorded compares with nothing either.
-    let unknown =
-        Goal { reference: Some(kumi_runtime::listening::checklist::Profile { vibe_model: None, ..reference }), ..Default::default() };
+    let unknown = Goal { reference: Some(kumi_listening::checklist::Profile { vibe_model: None, ..reference }), ..Default::default() };
     assert!(!Checklist::new(&unknown, &before, &[]).items.iter().any(|item| item.id == "vibe"));
     // The swapped model's numbers move as far as they like: the change stands on its measures.
     let checklist = Checklist::new(&goal, &before, &[]);

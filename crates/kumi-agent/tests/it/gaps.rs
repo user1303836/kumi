@@ -1,6 +1,6 @@
 //! The note_gap case.
+use kumi_agent::core::gaps::*;
 use kumi_common::abort;
-use kumi_runtime::core::gaps::*;
 use serde_json::{json, Value};
 #[tokio::test]
 async fn note_gap_logs_missing_capabilities_privately_and_bounded_and_never_a_secret() {

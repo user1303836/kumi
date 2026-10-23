@@ -3,12 +3,13 @@
 //! (core/project.rs).
 
 use indexmap::IndexMap;
-use kumi_common::js::json::stringify;
-use kumi_runtime::core::contracts::{CatchUp, JsonObject};
-pub use kumi_runtime::core::project::{
+use kumi_agent::core::contracts::CatchUp;
+pub use kumi_agent::core::project::{
     create_project_store, decide_project_with, moved_to, project_id, project_id_of, same_file, Baseline, FileProjectStore, ProjectRules,
     ProjectStore,
 };
+use kumi_common::js::json::stringify;
+use kumi_types::contracts::JsonObject;
 use regex::Regex;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -53,8 +54,8 @@ impl ProjectRules for LiveRules {
 pub fn decide_project(kept: Option<&str>, path: &str, last: Option<&str>, own: bool) -> (String, bool) {
     decide_project_with(&LiveRules, kept, path, last, own)
 }
-use kumi_runtime::core::describe::{describe_changes, describe_watch_changes, small, Detail, ProjectChange, ProjectItem, ProjectWords};
-pub use kumi_runtime::core::describe::{DescribedDiff, DescribedWatch};
+use kumi_agent::core::describe::{describe_changes, describe_watch_changes, small, Detail, ProjectChange, ProjectItem, ProjectWords};
+pub use kumi_agent::core::describe::{DescribedDiff, DescribedWatch};
 
 pub fn catch_up_from(name: &str, baseline: &Baseline, described: DescribedDiff) -> CatchUp {
     CatchUp { set: name.into(), last_seen_at: baseline.saved_at, lines: described.lines, more: described.more, after_reconnect: None }

@@ -5,7 +5,7 @@
 //! fields from it. Names are data, never instructions.
 use serde::{Deserialize, Serialize};
 
-use super::contracts::ClipNote;
+use kumi_types::contracts::ClipNote;
 
 /// A track's kind, in every DAW: a group is a folder too, a return a send, Main the master; Renoise has sequencer
 /// tracks.

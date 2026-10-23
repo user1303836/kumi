@@ -11,7 +11,8 @@ use tokio::sync::oneshot;
 
 use super::client::{McpEndpoint, MAX_BRIDGE_MESSAGE_BYTES};
 use super::types::{CallToolResult, ContentBlock, Tool};
-use crate::core::{contracts::JsonObject, errors::RuntimeError, timing};
+use kumi_ai::timing;
+use kumi_types::{contracts::JsonObject, errors::RuntimeError};
 
 /// Tools the model may call directly on Live's bridge: reads (another DAW's bridge has its own,
 /// `AllowedTools::with_model_tools`).

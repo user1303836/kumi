@@ -14,23 +14,10 @@ use crate::{
 };
 use futures::future::{join_all, LocalBoxFuture};
 pub use installation::{installation_checks, kumi_on_path, InstallationIo, PortOwner};
-use kumi_common::{
-    js::{
-        number,
-        string::{head, trim},
-    },
-    time::{now_ms, since},
-};
-use kumi_runtime::{
+use kumi_ai::{
     auth::{
         openai_codex::OPENAI_CODEX,
         store::{open_credential_store, Credential, CredentialStore},
-    },
-    core::{daw::DawId, errors::RuntimeError},
-    library::{
-        learn::LearnPhase,
-        sources::{dirname, join},
-        state::read_state,
     },
     providers::{
         api_key_for,
@@ -38,10 +25,29 @@ use kumi_runtime::{
         models::{ModelInfo, Transport},
         parse_model_id, provider_info, KeySource, ProviderId, SignIn,
     },
-    system::{self, Env},
-    video::programs::{ffmpeg_hint, find_ffmpeg, find_whisper, whisper_hint, FfmpegOptions, ProgramOptions},
+};
+use kumi_common::{
+    js::{
+        number,
+        string::{head, trim},
+    },
+    time::{now_ms, since},
+};
+use kumi_library::{
+    learn::LearnPhase,
+    sources::{dirname, join},
+    state::read_state,
+};
+use kumi_media::{
+    programs::{ffmpeg_hint, find_ffmpeg, find_whisper, whisper_hint, FfmpegOptions, ProgramOptions},
     voice::{microphone::terminal_app, voice_readiness, ReadinessOptions, VoiceReadiness},
-    INSTALLED, KUMI, KUMI_REPAIR, KUMI_VERSION,
+};
+use kumi_types::{
+    command::{INSTALLED, KUMI, KUMI_REPAIR},
+    daw::DawId,
+    errors::RuntimeError,
+    system::{self, Env},
+    version::KUMI_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

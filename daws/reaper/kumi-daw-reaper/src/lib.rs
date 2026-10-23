@@ -7,20 +7,20 @@ pub mod library;
 mod routing;
 mod variations;
 
-use kumi_daw_own::bridge::{create_own_integration, OwnDaw, OwnOptions, OwnTools};
-use kumi_daw_own::catchup::{as_read, CatchUpWords, Mixer, RecipeKinds};
-use kumi_daw_own::phrases::{bar_span, track, OwnPhrases, PhraseLook, Phrased};
-use kumi_daw_own::views::{self as own_views, body_args, focus_track, selected, view};
-use kumi_runtime::core::{
-    contracts::{Integration, JsonObject},
-    daw::DawProfile,
+use kumi_agent::core::{
+    contracts::Integration,
     describe::ProjectWords,
     phrases::{Intent, Switch},
     presentation::{ToolActivity, ToolPresentation},
     refs::{Moved, RefScheme, Shift},
     view::{BodyKind, BodyRequest, DawFocus, FocusBody, FocusItem, FocusParameter, ItemKind, ViewKind, ViewPresentation},
 };
-use kumi_runtime::mcp::client::BridgeDescriptor;
+use kumi_agent::mcp::client::BridgeDescriptor;
+use kumi_daw_own::bridge::{create_own_integration, OwnDaw, OwnOptions, OwnTools};
+use kumi_daw_own::catchup::{as_read, CatchUpWords, Mixer, RecipeKinds};
+use kumi_daw_own::phrases::{bar_span, track, OwnPhrases, PhraseLook, Phrased};
+use kumi_daw_own::views::{self as own_views, body_args, focus_track, selected, view};
+use kumi_types::{contracts::JsonObject, daw::DawProfile};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{rc::Rc, sync::LazyLock};
@@ -63,7 +63,7 @@ pub const DAW: OwnDaw = OwnDaw {
 
 /// (#401) Delivery to a spec in REAPER: the master's row and fader, and what limits or raises it.
 static SPEC: kumi_daw_own::spec::OwnSpecFacts = kumi_daw_own::spec::OwnSpecFacts {
-    words: kumi_runtime::core::spec::backend::Words {
+    words: kumi_agent::core::spec::backend::Words {
         app: "REAPER",
         fader_most: 24.,
         limiter: "ReaLimit (Cockos) as the master's last FX, its Ceiling a few tenths under the spec's and its Threshold down by the gain still needed",
@@ -74,7 +74,7 @@ static SPEC: kumi_daw_own::spec::OwnSpecFacts = kumi_daw_own::spec::OwnSpecFacts
 };
 
 /// (#401) Kept scripts in REAPER: ReaScript, kept as actions, and what takes a thing by its place there.
-static SCRIPTS: kumi_runtime::core::scripts::backend::Words = kumi_runtime::core::scripts::backend::Words {
+static SCRIPTS: kumi_agent::core::scripts::backend::Words = kumi_agent::core::scripts::backend::Words {
     app: "REAPER",
     language: "Lua (ReaScript: the reaper table)",
     action: "an action in REAPER's Action List (Scripts/Kumi), for a shortcut or a toolbar button",
@@ -360,17 +360,17 @@ pub fn create_reaper_integration(options: OwnOptions) -> Rc<dyn Integration> {
             // (M7) the variations tool: REAPER's items (#401)
             variations: caps.variations.then(|| {
                 let backend = variations::ReaperVariations::new(parts.changes.clone(), parts.renderer.clone());
-                kumi_runtime::core::variations::tool::Variations::new(backend, parts.kumi_home.clone()).tool()
+                kumi_agent::core::variations::tool::Variations::new(backend, parts.kumi_home.clone()).tool()
             }),
             // (#401) delivery
             delivery: caps.delivery.then(|| {
                 let backend = delivery::ReaperDelivery::new(parts.changes.clone(), parts.renderer.clone());
-                kumi_runtime::core::delivery::tool::Delivery::new(backend).tool()
+                kumi_agent::core::delivery::tool::Delivery::new(backend).tool()
             }),
             // (#401) routing
             routing: caps.routing.then(|| {
                 let backend = routing::ReaperRouting::new(parts.changes.clone());
-                kumi_runtime::core::routing::tool::Routing::new(backend).tool()
+                kumi_agent::core::routing::tool::Routing::new(backend).tool()
             }),
             ..Default::default()
         }
@@ -412,7 +412,7 @@ mod tests {
     /// m6-places: each phrase's steps in a project as the look found it.
     #[test]
     fn a_phrase_is_reapers_own_change_and_a_tempo_map_leaves_tempo_and_loops_to_the_model() {
-        use kumi_runtime::core::phrases::{PhraseTrack, TrackPick};
+        use kumi_agent::core::phrases::{PhraseTrack, TrackPick};
         let tracks = [
             PhraseTrack { reference: "track:1", name: "MASTER", own: false, master: true },
             PhraseTrack { reference: "track:2", name: "Drums", own: true, master: false },

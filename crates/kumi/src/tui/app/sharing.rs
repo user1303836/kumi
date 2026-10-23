@@ -2,8 +2,8 @@
 //! `kumi report` takes out taken out.
 use super::*;
 use crate::export::{conversation_now, redactor_now, save_in, saved_words, Exported, COPY_MOST};
-use kumi_runtime::core::export::Format;
-use kumi_runtime::system;
+use kumi_agent::core::export::Format;
+use kumi_types::system;
 use std::path::PathBuf;
 
 impl TuiApp {

@@ -1,7 +1,7 @@
 //! How the app shows a tool at work: the step's words in the transcript ("looked for sounds"), what NOW says while it
 //! runs ("looking for sounds"), the kind of task it is (the glyph that turns beside it), and how NOW treats it. Kumi's
 //! own tools are shown alike in every DAW, in its words; a DAW's integration shows its own (`ToolPresentation`).
-use super::daw::DawProfile;
+use kumi_types::daw::DawProfile;
 
 /// The kind of task a tool's step is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

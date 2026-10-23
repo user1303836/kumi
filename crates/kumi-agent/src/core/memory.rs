@@ -1,18 +1,17 @@
 //! Notes kept between conversations, in the producer's words, about the producer and each saved Set.
 
-use super::{
-    contracts::{
-        with_final, DawProfile, JsonObject, KernelTool, Memory, MemoryEvent, MemoryNote, MemoryScope, MemoryStore, NoteChange, Remembering,
-        ToolResult,
-    },
-    errors::RuntimeError,
-    place::Places,
-};
+use crate::core::contracts::{Memory, MemoryEvent, MemoryNote, MemoryScope, MemoryStore, NoteChange, Remembering};
 use async_trait::async_trait;
 use kumi_common::{
     abort::Signal,
     js::{json, string},
     time::now_ms,
+};
+use kumi_types::daw::DawProfile;
+use kumi_types::{
+    contracts::{with_final, JsonObject, KernelTool, ToolResult},
+    errors::RuntimeError,
+    place::Places,
 };
 use regex::Regex;
 use serde_json::{json, Value};
@@ -36,7 +35,7 @@ fn clean(text: &str) -> String {
     string::head(SPACE.replace_all(&controls, " ").trim(), MAX_NOTE).trim().to_string()
 }
 // Whether a note reads like an instruction to Kumi or carries a secret (kumi-types, which the library asks too).
-pub use kumi_types::notes::suspect_note;
+use kumi_types::notes::suspect_note;
 /// The note a full store drops to make room: the oldest one not pinned.
 fn droppable(notes: &[MemoryNote]) -> Option<usize> {
     notes.iter().enumerate().filter(|(_, n)| !n.pinned).min_by_key(|(_, n)| n.at).map(|(i, _)| i)
@@ -234,7 +233,7 @@ pub fn memory_instructions_for(profile: &DawProfile, memory: &Memory, set_name: 
     lines.join("\n")
 }
 
-crate::daw_text!(
+kumi_types::daw_text!(
     #[allow(dead_code)]
     REMEMBER_DESCRIPTION, remember_description:
     "Keep a note for later conversations, as a short fact (\"The Reese is the main bass\", \"Prefers short, dark reverbs on drums\"), not an instruction to yourself. ",

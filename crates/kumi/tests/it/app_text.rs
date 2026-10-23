@@ -23,7 +23,7 @@ fn streaming_controls_credentials_web_and_library_words_match_the_source() {
         assert_eq!(serde_json::json!({"lead":words.lead,"title":words.title,"detail":words.detail}), c["expected"]);
     }
     for c in fixture["library"].as_array().unwrap() {
-        let status: Option<kumi_runtime::core::contracts::LibraryStatus> = serde_json::from_value(c["status"].clone()).unwrap();
+        let status: Option<kumi_types::contracts::LibraryStatus> = serde_json::from_value(c["status"].clone()).unwrap();
         assert_eq!(serde_json::to_value(library_line(status.as_ref())).unwrap(), c["expected"]);
     }
     assert_eq!(sanitize_text("bad\r\u{8}\0\u{9b}31m text\u{202e}", &[]), "bad text");

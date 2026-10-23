@@ -1,14 +1,7 @@
 //! Learned sound-building ideas: drafted by the model when something it built is worth reusing, kept
 //! only when the producer says yes, and read back when a request leaves the approach open.
 
-use super::daw::DawProfile;
-use super::{
-    contracts::{
-        with_final, ChangeRecord, ChangeState, JsonObject, KernelTool, TechniqueAction, TechniqueEvent, TechniqueSummary, ToolResult,
-    },
-    errors::RuntimeError,
-    memory::suspect_note,
-};
+use crate::core::contracts::{TechniqueAction, TechniqueEvent, TechniqueSummary};
 use async_trait::async_trait;
 use futures::{
     future::{LocalBoxFuture, Shared},
@@ -18,6 +11,12 @@ use kumi_common::{
     abort::Signal,
     js::{json, string},
     time::now_ms,
+};
+use kumi_types::daw::DawProfile;
+use kumi_types::{
+    contracts::{with_final, ChangeRecord, ChangeState, JsonObject, KernelTool, ToolResult},
+    errors::RuntimeError,
+    notes::suspect_note,
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -67,8 +66,8 @@ pub struct Technique {
 }
 impl Technique {
     /// The DAW it was learned in: Live's, since kumi.db keeps no DAW for it yet (another DAW's tag comes with that DAW).
-    pub fn daw(&self) -> crate::core::daw::DawId {
-        crate::core::daw::DawId::Ableton
+    pub fn daw(&self) -> kumi_types::daw::DawId {
+        kumi_types::daw::DawId::Ableton
     }
 }
 fn is_zero(value: &f64) -> bool {
@@ -365,7 +364,7 @@ pub fn waiting_note(name: &str) -> String {
     let name = name.replace('<', "‹").replace('>', "›");
     format!("\n\n[Kumi] After your last answer, the producer was asked whether to keep “{name}” as a technique, and they didn't pick an answer. Keep it (technique with only action keep) only if what they say now clearly asks to keep it as a technique, such as \"keep the technique\"; a bare yes answers your own last question, if you asked one. Otherwise leave it, and it isn't kept.")
 }
-crate::daw_text!(
+kumi_types::daw_text!(
     pub TECHNIQUE_GUIDANCE, technique_guidance:
     "When something you built is a reusable idea for a kind of sound (devices loaded and set up to a purpose, or a tutorial's chain), give it a technique in the same reply as the ", plan_tool, " that builds it (technique, or technique action draft): after your answer Kumi asks the producer whether to keep it, so don't ask or mention it yourself. Not for one-off or routine changes, fixes, or work toward a goal. A technique already kept never overrides what the producer asks for now: a tutorial, a reference or steps they give come first."
 );

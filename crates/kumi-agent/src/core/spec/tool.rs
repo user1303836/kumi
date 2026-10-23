@@ -4,11 +4,11 @@
 use super::backend::SpecBackend;
 use super::levels::{Leveller, Levels};
 use super::table::{find, Spec, SPECS};
-use crate::core::contracts::{JsonObject, KernelTool, Reach, Render, ToolResult};
-use crate::core::errors::RuntimeError;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
 use kumi_common::js::json::stringify;
+use kumi_types::contracts::{JsonObject, KernelTool, Reach, Render, ToolResult};
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::rc::Rc;
 
@@ -32,11 +32,11 @@ pub struct Measured {
 /// A render measured: its loudness and peaks (BS.1770, 8× true peak), and its RMS and noise floor as the file streams by.
 pub async fn measure(render: &Render, signal: &Signal) -> Result<Measured, String> {
     let options =
-        crate::listening::measure::MeasureOptions { start: Some(render.start), seconds: render.seconds, signal: Some(signal.clone()) };
-    let heard = crate::listening::measure::measure_file(&render.file, options).await.map_err(|error| error.0)?;
+        kumi_listening::measure::MeasureOptions { start: Some(render.start), seconds: render.seconds, signal: Some(signal.clone()) };
+    let heard = kumi_listening::measure::measure_file(&render.file, options).await.map_err(|error| error.0)?;
     let measures = heard.measures;
     let seconds = render.seconds.unwrap_or(measures.seconds);
-    let mut source = crate::audio::decode::open_audio_to(&render.file, Some(signal.clone()), Some(render.start + seconds + 1.))
+    let mut source = kumi_media::audio::decode::open_audio_to(&render.file, Some(signal.clone()), Some(render.start + seconds + 1.))
         .await
         .map_err(|error| error.0)?;
     let rate = source.sample_rate;

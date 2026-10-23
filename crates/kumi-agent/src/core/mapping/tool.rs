@@ -4,12 +4,12 @@
 //! writes.
 use super::backend::{Held, MappingBackend};
 use super::{heard::hear_file, names, plan, Asked, Layout, Plan, Planned, Sample, MIDDLE_CS, MOST_SAMPLES, PLAIN};
-use crate::core::contracts::{JsonObject, KernelTool, Reach, ToolResult};
-use crate::core::daw::DawProfile;
-use crate::core::errors::RuntimeError;
 use async_trait::async_trait;
 use kumi_common::abort::{Signal, SignalExt};
 use kumi_common::js::json::stringify;
+use kumi_types::contracts::{JsonObject, KernelTool, Reach, ToolResult};
+use kumi_types::daw::DawProfile;
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -586,10 +586,10 @@ pub fn common_name(samples: &[Sample], folder: Option<&str>, drums: bool) -> Str
 fn files_of(input: &JsonObject) -> Result<Vec<String>, String> {
     let mut files: Vec<String> = Vec::new();
     if let Some(list) = input.get("files").and_then(Value::as_array) {
-        files.extend(list.iter().filter_map(Value::as_str).map(crate::audio::audio_path));
+        files.extend(list.iter().filter_map(Value::as_str).map(kumi_media::audio::audio_path));
     }
     if let Some(folder) = input.get("folder").and_then(Value::as_str) {
-        let folder = crate::audio::audio_path(folder);
+        let folder = kumi_media::audio::audio_path(folder);
         let entries = std::fs::read_dir(&folder).map_err(|_| format!("Kumi can't read the folder {folder}"))?;
         let mut found: Vec<String> = entries
             .filter_map(Result::ok)
@@ -598,7 +598,7 @@ fn files_of(input: &JsonObject) -> Result<Vec<String>, String> {
             .filter(|path| !path.file_name().is_some_and(|name| name.to_string_lossy().starts_with('.')))
             .filter(|path| {
                 let extension = path.extension().map(|e| format!(".{}", e.to_string_lossy().to_lowercase())).unwrap_or_default();
-                crate::audio::AUDIO_EXTENSIONS.contains(&extension.as_str())
+                kumi_media::audio::AUDIO_EXTENSIONS.contains(&extension.as_str())
             })
             .map(|path| path.to_string_lossy().into_owned())
             .collect();

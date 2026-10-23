@@ -1,15 +1,16 @@
 //! Repeatable plans of changes with named blanks, saved privately and replayed through make_changes.
-use super::daw::{DawId, DawProfile, DawWords};
-use super::{
-    contracts::{with_final, JsonObject, KernelTool, RecipeAction, RecipeEvent, ToolResult},
-    errors::RuntimeError,
-    memory::suspect_note,
-};
+use crate::core::contracts::{RecipeAction, RecipeEvent};
 use async_trait::async_trait;
 use kumi_common::{
     abort::Signal,
     js::{json, string},
     time::now_ms,
+};
+use kumi_types::daw::{DawId, DawProfile, DawWords};
+use kumi_types::{
+    contracts::{with_final, JsonObject, KernelTool, ToolResult},
+    errors::RuntimeError,
+    notes::suspect_note,
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -105,7 +106,7 @@ pub fn slug(name: &str) -> String {
 /// A recipe's file name: its slug, and on Windows a "_" after a slug Windows takes for a device ("con.json" would open
 /// the console there). No slug has a "_", so the name can't be another recipe's.
 pub fn recipe_file(key: &str, windows: bool) -> String {
-    if windows && crate::system::windows_device_name(key) {
+    if windows && kumi_types::system::windows_device_name(key) {
         format!("{key}_.json")
     } else {
         format!("{key}.json")
@@ -157,7 +158,7 @@ impl FileRecipeStore {
         if key.is_empty() {
             Err(RuntimeError::plain("A recipe needs a name."))
         } else {
-            Ok(self.folder(daw).join(recipe_file(&key, crate::system::platform() == "win32")))
+            Ok(self.folder(daw).join(recipe_file(&key, kumi_types::system::platform() == "win32")))
         }
     }
     async fn read(path: &Path) -> Option<Recipe> {
@@ -349,7 +350,7 @@ fn fill(value: &Value, values: &JsonObject) -> Value {
 pub const SAVE_RECIPE_TOOL: &str = "save_recipe";
 pub const RUN_RECIPE_TOOL: &str = "run_recipe";
 pub const FORGET_RECIPE_TOOL: &str = "forget_recipe";
-crate::daw_text!(
+kumi_types::daw_text!(
     #[allow(dead_code)]
     SAVE_DESCRIPTION, save_description:
     "Save a way of working as a recipe the producer can replay any time, in any project: a chain on a track, a drum bus, a vocal chain, a sidechain, a resampling loop, a session layout. ",
@@ -357,7 +358,7 @@ crate::daw_text!(
     "Save one when the producer asks to keep something as a recipe, describes a routine they repeat, has just had you do a routine they'll clearly want again, or showed you one while you watched (watch_me); then say it's saved, in a few words. ",
     "Saving under an existing name replaces it."
 );
-crate::daw_text!(
+kumi_types::daw_text!(
     #[allow(dead_code)]
     RUN_DESCRIPTION, run_description:
     "Run a saved recipe: its steps as one plan, the blanks filled from with ({\"track\": \"", ref_example, "\"}). Faster than planning the same changes again. With final: true and every step done, Kumi tells the producer what changed."

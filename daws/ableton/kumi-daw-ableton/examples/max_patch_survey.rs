@@ -3,7 +3,7 @@
 //! Only counts leave the machine: how often each rule was broken in how many things it looked at, how the patchers are
 //! laid out, which of Max's objects they use and how often, how their parameters are kept. No names, text or code.
 //!
-//! cargo run -p kumi-runtime --example max_patch_survey -- <report.json> [--into daws/ableton/max-standard/standard.json] [--findings]
+//! cargo run -p kumi-daw-ableton --example max_patch_survey -- <report.json> [--into daws/ableton/max-standard/standard.json] [--findings]
 //!     <file or folder>...
 //!
 //! --findings prints each device's broken rules here, to read them; they never go into the report.

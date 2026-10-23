@@ -1,16 +1,17 @@
 //! What a DAW's integration tells the app and asks of it, whichever DAW it is: the neutral half of a DAW's options
 //! (Live's are `AbletonOptions`, built from this plus what only Live has: its bridge, User Library, Ears, hands).
-use super::contracts::{ActionEvent, AuditionEvent, CatchUp, ChangeRecord, ConnectionListener, PinnedNode};
-use super::view::{DawFocus, Transport};
+use crate::core::contracts::{ActionEvent, CatchUp, ConnectionListener, PinnedNode};
+use crate::core::view::{DawFocus, Transport};
 use chrono::{DateTime, Utc};
 use futures::future::LocalBoxFuture;
+use kumi_types::contracts::{AuditionEvent, ChangeRecord};
 use std::rc::Rc;
 
 /// Asks the producer to free disk space before a recording: what's recorded, the bytes needed, where.
 pub type LowDisk = Rc<dyn Fn(String, f64, String) -> LocalBoxFuture<'static, Option<String>>>;
 
 // The listening model's finder (kumi-listening), beside the Listener it finds.
-pub use crate::listening::listener::ListenerSource;
+use kumi_listening::listener::ListenerSource;
 
 /// The sinks a DAW's integration reports to, and the services and timings the app gives it.
 #[derive(Clone)]
@@ -39,11 +40,11 @@ pub struct IntegrationContext {
     pub restore_file: Option<String>,
     pub on_audition: Option<Rc<dyn Fn(AuditionEvent)>>,
     /// Each round the judge logs (`judge`): its target, change, numbers before and after, keep or revert, and what's next.
-    pub on_judge: Option<Rc<dyn Fn(crate::listening::round::Round)>>,
+    pub on_judge: Option<Rc<dyn Fn(kumi_listening::round::Round)>>,
     /// Finds an audio-capable model among the producer's providers to listen beside the meters (asked once).
     pub listener: Option<ListenerSource>,
     /// Measured references the judge can work toward by name.
-    pub references: Option<Rc<crate::references::store::ReferenceStore>>,
+    pub references: Option<Rc<kumi_listening::references::store::ReferenceStore>>,
 }
 
 impl IntegrationContext {

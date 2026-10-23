@@ -4,6 +4,10 @@
 //! reference that can't be heard (a file that isn't there, a stale or MIDI clip) says which, before anything is heard.
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi_agent::mcp::{
+    client::{McpEndpoint, StderrStatus},
+    types::{CallToolResult, Implementation, ListToolsResult},
+};
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_daw_ableton::history::LiveHistory;
 use kumi_daw_ableton::{
@@ -18,17 +22,11 @@ use kumi_daw_ableton::{
     remember::Remember,
     rendering::{FormRequest, GrooveRequest, Rendering},
 };
-use kumi_runtime::{
-    audio::tools::ResolveAudio,
-    core::{
-        contracts::{ChangeRecord, ChangeState, JsonObject},
-        errors::RuntimeError,
-    },
-    listening::round::RoundKind,
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, Implementation, ListToolsResult},
-    },
+use kumi_listening::round::RoundKind;
+use kumi_media::audio::tools::ResolveAudio;
+use kumi_types::{
+    contracts::{ChangeRecord, ChangeState, JsonObject},
+    errors::RuntimeError,
 };
 use serde_json::{json, Value};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
@@ -264,8 +262,7 @@ async fn groove_moves_the_notes_live_plays_by_their_ids_and_keeps_them_in_the_cl
             let Groove { rendering, made, .. } = groove(live.clone()).await;
             let start =
                 rendering.groove(&request(json!({"clip":"7:clip:0:0","reference":"7:clip:1:0"})), Signal::new()).await.unwrap().unwrap();
-            let gap =
-                |rows: &[kumi_runtime::listening::checklist::Row], id: &str| rows.iter().find(|row| row.id == id).map(|row| row.gap_after);
+            let gap = |rows: &[kumi_listening::checklist::Row], id: &str| rows.iter().find(|row| row.id == id).map(|row| row.gap_after);
             assert!(gap(&start.rows, "timing hats").is_some_and(|gap| gap > 0.), "{:?}", start.rows);
             assert!(gap(&start.rows, "velocity hats").is_some_and(|gap| gap > 0.), "{:?}", start.rows);
             let round = rendering.groove(&request(json!({"apply":true})), Signal::new()).await.unwrap().unwrap();

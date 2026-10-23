@@ -306,7 +306,7 @@ fn with_models(width: i32, settings: AwaySettings) -> (Harness, Rc<models::FakeM
 
 fn with_models_on(control: Rc<Control>, width: i32, settings: AwaySettings) -> (Harness, Rc<models::FakeModels>) {
     let fake = models::FakeModels::catalog();
-    fake.signed_in.borrow_mut().insert(kumi_runtime::providers::ProviderId::Anthropic);
+    fake.signed_in.borrow_mut().insert(kumi_ai::providers::ProviderId::Anthropic);
     let m = fake.clone();
     let h = Harness::with(width, 36, control, move |o| {
         o.terminal = Some(profile(NotifyChannel::Osc777));
@@ -371,7 +371,7 @@ case!(a_plans_limit_shows_when_kumi_carries_on_and_the_fallback_is_named_while_i
 
 case!(near_a_plans_limit_the_header_says_how_much_is_used_and_when_it_resets, async {
     let (h, _) = with_models(140, AwaySettings::default());
-    kumi_runtime::providers::usage::forget();
+    kumi_ai::providers::usage::forget();
     h.start().await;
     h.connect();
     let at = (kumi_common::time::now_ms_f64() / 1000. + 3600.) as i64;
@@ -380,13 +380,13 @@ case!(near_a_plans_limit_the_header_says_how_much_is_used_and_when_it_resets, as
             .into_iter()
             .collect()
     };
-    kumi_runtime::providers::usage::record("openai-codex", &headers("62"));
+    kumi_ai::providers::usage::record("openai-codex", &headers("62"));
     h.emit(json!({"type":"notice","message":"redraw"}));
     assert!(!h.screen()[0].contains("plan "), "below 80% it says nothing: {}", h.screen()[0]);
-    kumi_runtime::providers::usage::record("openai-codex", &headers("84"));
+    kumi_ai::providers::usage::record("openai-codex", &headers("84"));
     h.emit(json!({"type":"notice","message":"redraw again"}));
     h.has("plan 84% · resets");
-    kumi_runtime::providers::usage::forget();
+    kumi_ai::providers::usage::forget();
     h.close().await;
 });
 

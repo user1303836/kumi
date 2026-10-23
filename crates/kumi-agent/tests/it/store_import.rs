@@ -1,4 +1,4 @@
-use kumi_runtime::core::store_import::{import_json, Imported, JsonFiles};
+use kumi_agent::core::store_import::{import_json, Imported, JsonFiles};
 use kumi_store::{gaps, lessons, notes, techniques, Kept, Scope, Store};
 use serde_json::json;
 use std::{path::Path, sync::Arc, time::SystemTime};

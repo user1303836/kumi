@@ -82,8 +82,6 @@ pub fn searchable(knobs: &[Knob], most: usize) -> Vec<Knob> {
         .cloned()
         .collect()
 }
-// The seeded random source evolution and listening's optimizer share (kumi-listening).
-pub use crate::listening::cmaes::seeded;
 #[derive(Debug, Clone, Copy)]
 pub struct EvolveOptions {
     pub recheck: u32,

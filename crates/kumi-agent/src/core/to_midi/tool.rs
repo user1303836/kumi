@@ -2,11 +2,11 @@
 //! with Kumi's own ears (drums by the chop's hit detector, pitched parts by Basic Pitch) and writes the notes on a new track.
 use super::backend::ToMidiBackend;
 use super::{drums, pitched, said};
-use crate::core::contracts::{JsonObject, KernelTool, Reach, ToolResult};
-use crate::core::errors::RuntimeError;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
 use kumi_common::js::json::stringify;
+use kumi_types::contracts::{JsonObject, KernelTool, Reach, ToolResult};
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::rc::Rc;
 
@@ -50,13 +50,12 @@ impl<B: ToMidiBackend + 'static> ToMidi<B> {
         let moving = (average - tempo).abs() > tempo * 0.005;
         let notes = if what == "drums" {
             let (mono, rate, _) =
-                crate::audio::decode::read_mono(&render.file, &signal, render.start, seconds).await.map_err(|error| error.0)?;
+                kumi_media::audio::decode::read_mono(&render.file, &signal, render.start, seconds).await.map_err(|error| error.0)?;
             drums(&crate::core::chop::hits::hits(&mono, rate), per_second, beats)
         } else {
             let say = |_: &str| {};
             let heard =
-                crate::listening::transcribe::pitched_notes(std::path::Path::new(&render.file), render.start, seconds, &say, &signal)
-                    .await?;
+                kumi_listening::transcribe::pitched_notes(std::path::Path::new(&render.file), render.start, seconds, &say, &signal).await?;
             pitched(&heard, per_second, beats, what == "melody")
         };
         let words = said(&notes, what == "drums", |pitch| self.backend.note_name(pitch));

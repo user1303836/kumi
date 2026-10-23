@@ -12,20 +12,22 @@ use kumi_common::js::string::{head, trim, trim_end, trim_start, utf16_len};
 use serde_json::{json, Map, Value};
 use unicode_normalization::UnicodeNormalization;
 
-use super::contracts::{ChangePicture, ChangeRecord, ChangeState, KernelCheckpoint, MixLevels, PictureValue, SavedConversation};
-use super::gaps::GAP_TOOL;
-use super::goal::goal_setup;
-use super::loop_run::loop_setup;
-use super::memory::{FORGET_TOOL, REMEMBER_TOOL};
-use super::playbook::PLAYBOOK_OPEN;
-use super::recall::SEARCH_CONVERSATIONS_TOOL;
-use super::recipes::{FORGET_RECIPE_TOOL, SAVE_RECIPE_TOOL};
-use super::taste_log::REACTION_TOOL;
-use super::techniques::TECHNIQUE_TOOL;
-use crate::ai::types::{AssistantPart, Message, ToolPart, ToolResultContentItem, ToolResultOutput, UserPart};
+use crate::core::contracts::{KernelCheckpoint, SavedConversation};
+use crate::core::gaps::GAP_TOOL;
+use crate::core::goal::goal_setup;
+use crate::core::loop_run::loop_setup;
+use crate::core::memory::{FORGET_TOOL, REMEMBER_TOOL};
+use crate::core::playbook::PLAYBOOK_OPEN;
+use crate::core::recall::SEARCH_CONVERSATIONS_TOOL;
+use crate::core::recipes::{FORGET_RECIPE_TOOL, SAVE_RECIPE_TOOL};
+use crate::core::taste_log::REACTION_TOOL;
+use crate::core::techniques::TECHNIQUE_TOOL;
 use crate::kernel::agent::CARRY_ON_NOTE;
 use crate::kernel::budget::{split_asks, OBSERVATION_MARKER, SHORTENED};
 use crate::kernel::deferred::{shown, FIND_TOOLS};
+use kumi_ai::types::{AssistantPart, Message, ToolPart, ToolResultContentItem, ToolResultOutput, UserPart};
+use kumi_types::contracts::{ChangePicture, ChangeRecord, ChangeState};
+use kumi_types::picture::{MixLevels, PictureValue};
 
 /// What a Kumi JSON export says it is, and the version of its format.
 pub const FORMAT: &str = "kumi-conversation";
@@ -1072,9 +1074,9 @@ fn values_of(picture: &ChangePicture) -> Vec<String> {
             .iter()
             .flat_map(|route| {
                 let what = match route.change {
-                    super::picture::RouteChange::Made => " (new)",
-                    super::picture::RouteChange::Removed => " (taken away)",
-                    super::picture::RouteChange::Changed => "",
+                    kumi_types::picture::RouteChange::Made => " (new)",
+                    kumi_types::picture::RouteChange::Removed => " (taken away)",
+                    kumi_types::picture::RouteChange::Changed => "",
                 };
                 std::iter::once(one_line(&format!("{} → {}{what}", route.from, route.to))).chain(route.values.iter().map(value))
             })

@@ -7,18 +7,18 @@ use kumi::{
     install::*,
     tui::tty::TtyOutput,
 };
-use kumi_runtime::{
-    ai::{
-        error::LanguageModelError,
-        http::{Fetch, FetchInit, Response},
-    },
-    core::{
-        contracts::{MemoryScope, MemoryStore},
-        store_backed::SqliteMemoryStore,
-        store_client::StoreClient,
-    },
+use kumi_agent::core::{
+    contracts::{MemoryScope, MemoryStore},
+    store_backed::SqliteMemoryStore,
+    store_client::StoreClient,
+};
+use kumi_ai::{
+    error::LanguageModelError,
+    http::{Fetch, FetchInit, Response},
+};
+use kumi_types::{
     system::{self, Env, SystemProgram},
-    KUMI_VERSION,
+    version::KUMI_VERSION,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -1239,7 +1239,7 @@ fn an_updates_bridge_step_asks_nothing_more_and_waits_for_no_live() {
     // and doesn't wait ten minutes for a Live nobody has opened.
     let command = kumi::install::bridge_command("/kumi/app", "/kumi");
     let command = command.as_std();
-    assert_eq!(command.get_program(), std::ffi::OsStr::new(&kumi_runtime::library::sources::join("/kumi/app", &executable_name("kumi"))));
+    assert_eq!(command.get_program(), std::ffi::OsStr::new(&kumi_library::sources::join("/kumi/app", &executable_name("kumi"))));
     assert_eq!(command.get_args().collect::<Vec<_>>(), ["bridge", "--yes"]);
     let envs: std::collections::HashMap<String, Option<String>> = command
         .get_envs()
@@ -1266,7 +1266,7 @@ fn says_no_bridge_yet(said: &str) {
 }
 #[test]
 fn with_no_bridge_in_live_an_update_says_how_to_connect_it_only_where_live_runs() {
-    let words = format!("The bridge isn't in Live yet. {}.", *kumi_runtime::CONNECT_LIVE);
+    let words = format!("The bridge isn't in Live yet. {}.", *kumi_types::command::CONNECT_LIVE);
     for platform in ["darwin", "win32"] {
         assert_eq!(kumi::install::no_bridge_yet(platform).as_deref(), Some(words.as_str()), "{platform}");
     }

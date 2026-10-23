@@ -6,11 +6,11 @@ use super::heard::Heard;
 use super::{
     bolder_or_milder, check, kept_name, roll, seed_of, take_name, Bounds, Material, Purpose, Rng, Take, TakeSet, TakeState, TRIES,
 };
-use crate::core::contracts::{JsonObject, KernelTool, Reach, ToolResult};
-use crate::core::errors::RuntimeError;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
 use kumi_common::js::json::stringify;
+use kumi_types::contracts::{JsonObject, KernelTool, Reach, ToolResult};
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};

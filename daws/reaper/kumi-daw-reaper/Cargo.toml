@@ -13,7 +13,7 @@ kumi-common.workspace = true
 kumi-daw-own.workspace = true
 kumi-library.workspace = true
 kumi-listening.workspace = true
-kumi-runtime.workspace = true
+kumi-agent.workspace = true
 kumi-types.workspace = true
 # Where REAPER keeps its library: the same detection as its bridge's setup.
 daw-bridge.workspace = true
@@ -22,8 +22,8 @@ regex.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-# The runtime's test helpers (core's checks of a backend's note variations).
-kumi-runtime = { workspace = true, features = ["test-support"] }
+# The agent's test helpers (core's checks of a backend's note variations).
+kumi-agent = { workspace = true, features = ["test-support"] }
 # The acceptance run against REAPER: Kumi's host and the semantic diff it reads.
 daw-mcp-server = { path = "../../own/daw-mcp-server" }
 futures.workspace = true

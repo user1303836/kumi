@@ -3,9 +3,9 @@
 use super::assets::Item;
 use super::backend::{DeliveryBackend, NewRegion, Region, Rendered, Targets, Words};
 use super::tool::Delivery;
-use crate::core::contracts::KernelTool;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::contracts::KernelTool;
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::rc::Rc;

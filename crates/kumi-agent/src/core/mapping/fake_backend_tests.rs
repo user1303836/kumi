@@ -3,10 +3,10 @@
 use super::backend::{Held, MappingBackend, Words};
 use super::tool::Mapping;
 use super::Planned;
-use crate::core::contracts::KernelTool;
-use crate::core::daw::DawProfile;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::contracts::KernelTool;
+use kumi_types::daw::DawProfile;
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::path::Path;
@@ -58,7 +58,7 @@ fn tone(path: &Path, midi: f64, amplitude: f64, seconds: f64) {
     let mono: Vec<f32> = (0..(rate as f64 * seconds) as usize)
         .map(|k| (amplitude * (2. * std::f64::consts::PI * hz * k as f64 / rate as f64).sin()) as f32)
         .collect();
-    crate::audio::decode::write_test_wav(path, &mono, rate);
+    kumi_media::audio::decode::write_test_wav(path, &mono, rate);
 }
 
 /// A sample the fake DAW holds, over every key and velocity as a new one is.

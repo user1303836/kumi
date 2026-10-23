@@ -2,15 +2,13 @@
 //! refused in the older-bridge words, before anything is sent; a bridge that can takes it as it is.
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi_agent::mcp::{
+    client::{McpEndpoint, StderrStatus},
+    types::{CallToolResult, Implementation, ListToolsResult},
+};
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_daw_ableton::{changes::CHANGES, integration::Ableton, options::AbletonOptions};
-use kumi_runtime::{
-    core::{contracts::JsonObject, errors::RuntimeError},
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, Implementation, ListToolsResult},
-    },
-};
+use kumi_types::{contracts::JsonObject, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::{cell::RefCell, rc::Rc};
 

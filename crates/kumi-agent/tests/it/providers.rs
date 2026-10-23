@@ -1,19 +1,21 @@
 use async_trait::async_trait;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use kumi_common::{abort::Signal, time::now_ms};
-use kumi_runtime::{
-    ai::{
-        error::LanguageModelError,
-        http::{Fetch, FetchInit, Headers, Response},
-        types::*,
-    },
+use kumi_agent::{
+    core::contracts::KernelEvent,
+    kernel::agent::{create_agent_kernel, AgentKernel, AgentKernelOptions},
+};
+use kumi_ai::{
     auth::store::{open_credential_store, Credential, CredentialStore, FileCredentialStore, OAuthCredential},
-    core::{
-        contracts::{JsonObject, KernelEvent, KernelTool, ToolResult},
-        errors::RuntimeError,
-    },
-    kernel::agent::{create_agent_kernel, AgentKernel, AgentKernelOptions, ModelBinding, ModelRequest},
+    binding::{ModelBinding, ModelRequest},
+    error::LanguageModelError,
+    http::{Fetch, FetchInit, Headers, Response},
     providers::{parse_model_id, resolve_model, words_only, Effort, ResolveModelOptions},
+    types::*,
+};
+use kumi_common::{abort::Signal, time::now_ms};
+use kumi_types::{
+    contracts::{JsonObject, KernelTool, ToolResult},
+    errors::RuntimeError,
 };
 use serde_json::{json, Value};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};

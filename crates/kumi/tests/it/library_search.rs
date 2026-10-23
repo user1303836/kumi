@@ -1,6 +1,6 @@
 #[path = "../support/library_fixture_paths.rs"]
 mod library_fixture_paths;
-use kumi_runtime::library::{
+use kumi_library::{
     classify::{ClassFrom, SoundClass, SoundKind},
     features::VECTOR_LENGTH,
     learn::{PresetEntry, SetEntry, SoundEntry},
@@ -59,7 +59,7 @@ async fn rankings_explanations_float32_similarity_and_rows_match_typescript() {
 }
 #[test]
 fn a_place_at_a_drive_or_share_root_holds_its_sounds() {
-    use kumi_runtime::library::sources::below;
+    use kumi_library::sources::below;
     assert_eq!(below("/Drums/Kicks/808.wav", "/"), Some("Drums/Kicks/808.wav"));
     assert_eq!(below("/Samples/808.wav", "/Samples"), Some("808.wav"));
     assert_eq!(below("/Samples Extra/808.wav", "/Samples"), None);
@@ -95,7 +95,7 @@ fn a_place_at_a_drive_or_share_root_holds_its_sounds() {
 #[test]
 fn a_folder_named_in_another_case_is_one_place() {
     use kumi::daw::registry::library_sources;
-    use kumi_runtime::library::sources::{on_disk, SourceOptions};
+    use kumi_library::sources::{on_disk, SourceOptions};
     let root = tempfile::tempdir().unwrap();
     let real = root.path().join("Music").join("Samples");
     std::fs::create_dir_all(&real).unwrap();

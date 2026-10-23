@@ -1,5 +1,4 @@
-use kumi_common::abort;
-use kumi_runtime::core::{
+use kumi_agent::core::{
     contracts::{MemoryEvent, MemoryScope, MemoryStore, NoteChange},
     gaps::gap_tools,
     goal::Best,
@@ -12,6 +11,7 @@ use kumi_runtime::core::{
         create_technique_store, technique_instructions, Technique, TechniqueBody, TechniqueDraft, TechniqueSource, TechniqueStore,
     },
 };
+use kumi_common::abort;
 use kumi_store::{gaps, Store};
 use serde_json::{json, Value};
 use std::{cell::RefCell, collections::HashSet, path::Path, rc::Rc};

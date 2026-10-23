@@ -28,7 +28,7 @@ fn native_entrypoint_serves_version_help_and_errors() {
     let home = tempfile::tempdir().unwrap();
     let version = run(home.path(), &["--version"], false);
     assert!(version.status.success(), "{}", String::from_utf8_lossy(&version.stderr));
-    assert_eq!(String::from_utf8_lossy(&version.stdout), format!("Kumi {}\n", kumi_runtime::KUMI_VERSION));
+    assert_eq!(String::from_utf8_lossy(&version.stdout), format!("Kumi {}\n", kumi_types::version::KUMI_VERSION));
     assert!(version.stderr.is_empty());
     for installed in [false, true] {
         let help = run(home.path(), &["--help"], installed);

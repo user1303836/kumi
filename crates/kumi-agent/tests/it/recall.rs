@@ -1,15 +1,13 @@
 //! Finding earlier conversations in every Set, and kept recipes, by their words.
 use async_trait::async_trait;
-use kumi_common::{abort, time::now_ms};
-use kumi_runtime::{
-    core::conversations::create_conversation_store,
-    core::{
-        contracts::{ConversationStore, KernelTool, SavedConversation},
-        errors::RuntimeError,
-        recall::*,
-        recipes::{Recipe, RecipeStore},
-    },
+use kumi_agent::core::{
+    contracts::{ConversationStore, SavedConversation},
+    conversations::create_conversation_store,
+    recall::*,
+    recipes::{Recipe, RecipeStore},
 };
+use kumi_common::{abort, time::now_ms};
+use kumi_types::{contracts::KernelTool, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::rc::Rc;
 
@@ -180,14 +178,14 @@ fn words_in_two_scripts_are_split_where_the_script_changes() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_search_finds_only_this_daws_recipes() {
-    use kumi_runtime::core::daw::DawProfile;
+    use kumi_types::daw::DawProfile;
     let recipes: Vec<Recipe> = serde_json::from_value(json!([
         {"version":1,"name":"Vocal chain","about":"EQ, compression and a short reverb for a vocal","params":[],"steps":[{"tool":"load_device"}],"created":1,"used":0},
         {"version":1,"name":"Vocal chain REAPER","about":"ReaEQ, ReaComp and a short ReaVerbate for a vocal","params":[],"steps":[{"tool":"fx_add"}],"created":1,"used":0,"daw":"reaper"}
     ]))
     .unwrap();
     let tool = |profile: DawProfile| {
-        kumi_runtime::core::recall::recall_tool_for(
+        kumi_agent::core::recall::recall_tool_for(
             profile,
             RecallOptions {
                 conversations: None,

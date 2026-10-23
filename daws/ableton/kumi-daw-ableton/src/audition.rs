@@ -2,7 +2,7 @@
 use kumi_common::js::json::file_text;
 use kumi_listening::tools::{audition_tool, render_tool, ToolDef};
 pub use kumi_listening::tools::{AUDITION_TOOL, RENDER_TOOL};
-use kumi_runtime::core::contracts::{AuditionRequest, JsonObject};
+use kumi_types::contracts::{AuditionRequest, JsonObject};
 use kumi_types::daw::DawProfile;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

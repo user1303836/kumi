@@ -2,7 +2,7 @@
 //! and ticks per line, a track's DSP devices and their parameters, a pattern track's lines, the pattern sequence's slots
 //! and the loop; and Lua run in Renoise for the rest (M4). Each kind is the tool's (`payload/changes_*.lua`).
 use kumi_daw_own::changes::{OwnAction, OwnChangeSet, OwnKind, Picture};
-use kumi_runtime::core::contracts::ChangeFamily::*;
+use kumi_types::contracts::ChangeFamily::*;
 
 const PLAN: &str = "Make changes in Renoise in one call, in order: each step is one of your change tools or a step below with its input, and \"@name\" in an input stands for what an earlier step marked as: \"name\" made (a new device). A wait step ({\"beats\": 8} or {\"seconds\": 4}) pauses between steps. Each change is one step of Renoise's undo. It stops at the first step that fails and says what was done. With final: true and every step done, Kumi tells the producer what changed and the answer ends there, with no reply from you: use it when the changes complete the request, even a single change.";
 const UNDO: &str = "Undo one of your changes from this session: pass its change id (such as c3), or \"last\" for the latest one. Kumi puts back exactly what that change set, as a new step of Renoise's undo; it only works while nobody changed the same thing in Renoise since, and if so, say what happened (discard: true puts it back anyway, only when the producer asks). With final: true, when the undo is all that was asked, Kumi tells the producer and the answer ends there, with no reply from you.";

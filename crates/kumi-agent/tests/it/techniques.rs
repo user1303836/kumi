@@ -1,9 +1,12 @@
 use async_trait::async_trait;
-use kumi_common::abort::Signal;
-use kumi_runtime::core::{
-    contracts::{ChangeRecord, TechniqueAction, TechniqueEvent, TechniqueSummary, ToolResult},
-    errors::RuntimeError,
+use kumi_agent::core::{
+    contracts::{TechniqueAction, TechniqueEvent, TechniqueSummary},
     techniques::*,
+};
+use kumi_common::abort::Signal;
+use kumi_types::{
+    contracts::{ChangeRecord, ToolResult},
+    errors::RuntimeError,
 };
 use serde_json::{json, Value};
 use std::{cell::RefCell, rc::Rc};
@@ -14,7 +17,7 @@ fn neuro() -> Value {
 
 #[test]
 fn cleaning_and_feedback_signals_match_the_typescript_reference() {
-    let oracle: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/techniques-oracle.json")).unwrap();
+    let oracle: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-agent/techniques-oracle.json")).unwrap();
     for case in oracle["checks"].as_array().unwrap() {
         let actual = match check_technique(&case["input"]) {
             Ok(technique) => json!({"technique":technique}),

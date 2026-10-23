@@ -5,10 +5,8 @@ use kumi::{
     voice::{VoiceChange, VoiceChoices, VoiceIo},
 };
 use kumi_common::abort::{Aborted, Signal};
-use kumi_runtime::{
-    core::errors::RuntimeError,
-    voice::{Heard, VoiceError, VoiceFailure, VoiceTrouble},
-};
+use kumi_media::voice::{Heard, VoiceError, VoiceFailure, VoiceTrouble};
+use kumi_types::errors::RuntimeError;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,

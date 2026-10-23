@@ -2,7 +2,7 @@
 #[path = "../support/library.rs"]
 mod fixtures;
 use fixtures::*;
-use kumi_runtime::library::{
+use kumi_library::{
     classify::{classify, name_hints, ClassFrom, SoundClass, SoundKind},
     features::{measure_samples, measure_sound, MeasureOptions, VECTOR_LENGTH},
 };
@@ -82,7 +82,7 @@ fn measurements_decide_class_kind_tempo_and_note() {
     assert_eq!(looping.bpm, Some(120.));
     assert_eq!(looping.class, Some(SoundClass::Drums));
     let mut heard = low.heard();
-    heard.pitch = Some(kumi_runtime::library::classify::Pitch { hz: 261.6, confidence: 0.9 });
+    heard.pitch = Some(kumi_library::classify::Pitch { hz: 261.6, confidence: 0.9 });
     assert_eq!(classify(&name_hints("Stab Gabon C.wav"), &heard).note.as_deref(), Some("C4"));
     assert_eq!(classify(&name_hints("Hihat Closed Break 2.wav"), &bright.heard()).kind, SoundKind::OneShot);
 }

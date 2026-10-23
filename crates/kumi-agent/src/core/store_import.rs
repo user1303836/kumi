@@ -5,9 +5,8 @@
 //! written back to the files for the older Kumi (`write_back`), after bringing in what changed in them.
 //! Reading in never writes the files.
 
-use super::{
+use crate::core::{
     contracts::MemoryNote,
-    errors::RuntimeError,
     memory::{notes_file, parse_notes},
     playbook::{lessons_file, parse_lessons, Lesson},
     store_rows::{lesson_of, lesson_row, note_of, note_row, technique_of, technique_row},
@@ -18,6 +17,7 @@ use kumi_store::{
     imports::{self, Source},
     lessons, notes, techniques as stored, Connection, Kept, Scope, Store, StoreError,
 };
+use kumi_types::errors::RuntimeError;
 use serde_json::Value;
 use std::{
     io::Write,
@@ -247,7 +247,7 @@ fn sync(c: &Connection, source: &Source, rows: &Rows, now: i64) -> Result<Import
 
 /// A project folder's name from before kumi.db: a Set's, 32 lowercase hex digits.
 fn project_id(name: &str) -> bool {
-    super::place::is_project_id(name)
+    kumi_types::place::is_project_id(name)
 }
 
 /// The gaps a gaps log holds: a line that isn't a whole entry (time and what was missing) is left out.

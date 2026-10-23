@@ -1,12 +1,15 @@
 //! Running without a DAW, explicitly or while the DAW is away: the observation says there's no access, in the DAW's
 //! own words, and offers no tools. A DAW's integration gives its profile and its instructions.
-use crate::core::{contracts::*, errors::RuntimeError};
+use crate::core::contracts::*;
 use async_trait::async_trait;
 use chrono::{DateTime, SecondsFormat, Utc};
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
 };
+use kumi_types::daw::DawProfile;
+use kumi_types::daw::DawWords;
+use kumi_types::errors::RuntimeError;
 use serde_json::json;
 use std::{cell::Cell, rc::Rc};
 

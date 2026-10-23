@@ -1,9 +1,9 @@
 //! A DAW's side of layering breaks: only its own facts. Tracks rendered over a stretch (each as the producer hears it alone),
 //! a layer nudged earlier or later and its polarity flipped (a change each), the group's compressor found (or added) and its
 //! threshold set, the master's dynamics (what every render passes through) found, and a device bypassed or on again.
-use crate::core::contracts::Render;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::contracts::Render;
 use serde_json::Value;
 
 pub struct Words {

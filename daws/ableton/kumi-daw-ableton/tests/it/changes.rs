@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use kumi_common::js::json::stringify;
 use kumi_daw_ableton::changes::*;
-use kumi_runtime::RuntimeError;
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{cell::RefCell, collections::HashSet};
 fn oracle() -> Value {

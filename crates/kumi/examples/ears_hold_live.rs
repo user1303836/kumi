@@ -9,6 +9,7 @@
 //!   cargo run --release -p kumi --example ears_hold_live -- --set "<Set name>"
 use futures::FutureExt;
 use kumi::config::find_bridge_config;
+use kumi_agent::{mcp::client, Integration, Observation};
 use kumi_common::{
     abort::{self, Signal},
     js::string::{head, trim},
@@ -25,12 +26,11 @@ use kumi_daw_ableton::{
     samples::user_library,
     AbletonOptions, BRIDGE_TOOLS,
 };
-use kumi_runtime::{
-    audio::analyze::{analyze_file, AnalyzeOptions},
-    core::contracts::ChangeState,
-    mcp::client,
+use kumi_media::audio::analyze::{analyze_file, AnalyzeOptions};
+use kumi_types::{
+    contracts::{ChangeRecord, ChangeState, JsonObject, KernelTool},
+    errors::RuntimeError,
     system::Env,
-    ChangeRecord, Integration, JsonObject, KernelTool, Observation, RuntimeError,
 };
 use serde_json::{json, Value};
 use std::{

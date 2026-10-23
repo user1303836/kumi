@@ -7,11 +7,13 @@ use chrono::FixedOffset;
 use kumi::export::{export_command, import_command, picture_of, redactor_maker, render, svg_of, write_new, ExportRequest};
 use kumi::report::redactor;
 use kumi::tui::tty::TtyOutput;
-use kumi_runtime::core::contracts::{ChangePicture, ChangeRecord, ConversationStore, KernelCheckpoint, SavedConversation, TranscriptRole};
-use kumi_runtime::core::export::{Format, Source};
-use kumi_runtime::kernel::budget::transcript_of;
-use kumi_runtime::system::Env;
-use kumi_runtime::{create_conversation_store, IMPORTED};
+use kumi_agent::core::contracts::{ConversationStore, KernelCheckpoint, SavedConversation, TranscriptRole};
+use kumi_agent::core::export::{Format, Source};
+use kumi_agent::create_conversation_store;
+use kumi_agent::kernel::budget::transcript_of;
+use kumi_types::contracts::{ChangePicture, ChangeRecord};
+use kumi_types::place::IMPORTED;
+use kumi_types::system::Env;
 use serde_json::{json, Value};
 
 const HOME: &str = "/Users/janedoe";
@@ -337,7 +339,7 @@ async fn kumi_export_saves_a_kept_conversation_and_kumi_import_keeps_it_to_carry
 fn file_names_and_ordinary_words_come_out_right() {
     let redact = redactor(&[], HOME, USER);
     let title = redact("user hidden pw=hunter2hunter2");
-    assert_eq!(kumi_runtime::core::export::file_name(&title, "k3x9a1b2", Format::Markdown), "kumi-user-hidden-pw-secret-k3x9a1b2.md");
+    assert_eq!(kumi_agent::core::export::file_name(&title, "k3x9a1b2", Format::Markdown), "kumi-user-hidden-pw-secret-k3x9a1b2.md");
     // Words that name a secret without holding one stay as they are.
     for words in [
         "token: abc",

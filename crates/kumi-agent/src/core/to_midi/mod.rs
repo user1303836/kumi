@@ -10,7 +10,7 @@ pub mod tool;
 mod fake_backend_tests;
 
 use crate::core::chop::hits::{Hit, Role};
-use crate::listening::transcribe::Heard;
+use kumi_listening::transcribe::Heard;
 
 /// A note as the DAW gets it: MIDI pitch, start and length in beats from the stretch's start, velocity 1 to 127.
 #[derive(Debug, Clone, PartialEq)]

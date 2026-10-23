@@ -3,16 +3,13 @@ use kumi::{
     tui::tty::TtyOutput,
 };
 use kumi_common::{abort::Signal, js::number::round};
-use kumi_runtime::{
-    library::{
-        create_library,
-        learn::{Counts, LearnPhase, LearnProgress},
-        sources::SourceOptions,
-        LibraryOptions,
-    },
-    system::Env,
-    KUMI,
+use kumi_library::{
+    create_library,
+    learn::{Counts, LearnPhase, LearnProgress},
+    sources::SourceOptions,
+    LibraryOptions,
 };
+use kumi_types::{command::KUMI, system::Env};
 use std::{cell::RefCell, fs, io::Write, path::Path, rc::Rc};
 #[derive(Default)]
 struct Out(RefCell<String>);

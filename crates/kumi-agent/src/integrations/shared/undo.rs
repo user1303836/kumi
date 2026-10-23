@@ -1,8 +1,8 @@
 //! undo_change: every DAW's way back for one of Kumi's changes, through its HISTORY.
-use crate::core::contracts::{JsonObject, ToolResult};
-use crate::core::errors::RuntimeError;
 use crate::core::history::{ChangeHost, History};
 use kumi_common::abort::Signal;
+use kumi_types::contracts::{JsonObject, ToolResult};
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 
 /// undo_change's answer: HISTORY's undo of the change asked for (the last when none is named), with the producer's

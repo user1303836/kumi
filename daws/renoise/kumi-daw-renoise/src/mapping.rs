@@ -4,17 +4,17 @@
 //! samples are laid out by one keyzone_map change, and the song's instruments for the tidy come in pages of reads. Core's tool
 //! does the rest.
 use async_trait::async_trait;
-use kumi_common::abort::Signal;
-use kumi_daw_own::changes::OwnPlan;
-use kumi_daw_own::listening::OwnRenderer;
-use kumi_listening::renderer::Renderer;
-use kumi_runtime::core::{
+use kumi_agent::core::{
     mapping::{
         backend::{Held, MappingBackend, Words},
         Planned,
     },
     refs::RefScheme,
 };
+use kumi_common::abort::Signal;
+use kumi_daw_own::changes::OwnPlan;
+use kumi_daw_own::listening::OwnRenderer;
+use kumi_listening::renderer::Renderer;
 use kumi_types::daw::DawProfile;
 use serde_json::{json, Map, Value};
 use std::rc::Rc;
@@ -211,8 +211,8 @@ fn map_input(instrument: &str, planned: &Planned) -> Value {
 mod tests {
     use super::*;
     use crate::changes::CHANGES;
-    use kumi_runtime::core::mapping::{Found, Placed};
-    use kumi_runtime::kernel::schema::problem;
+    use kumi_agent::core::mapping::{Found, Placed};
+    use kumi_agent::kernel::schema::problem;
 
     fn placed(id: &str, root: i32, base: i32, zone: (i32, i32), velocity: (u8, u8)) -> Placed {
         Placed { id: id.into(), name: id.into(), root, base, zone, velocity, round_robin: None, found: Found::Named }

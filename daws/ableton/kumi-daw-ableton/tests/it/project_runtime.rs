@@ -1,10 +1,11 @@
 //! Pure catch-up/storage cases; real integration cases remain in the integration parity work.
-use kumi_common::{js::json::stringify, time::since};
-use kumi_daw_ableton::project::*;
-use kumi_runtime::core::{
-    contracts::{ConversationStore, JsonObject, SavedConversation},
+use kumi_agent::core::{
+    contracts::{ConversationStore, SavedConversation},
     conversations::create_conversation_store,
 };
+use kumi_common::{js::json::stringify, time::since};
+use kumi_daw_ableton::project::*;
+use kumi_types::contracts::JsonObject;
 use serde_json::{json, Value};
 use std::sync::LazyLock;
 static ORACLE: LazyLock<Value> =

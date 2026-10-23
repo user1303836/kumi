@@ -1,17 +1,15 @@
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi_agent::mcp::{
+    client::{McpEndpoint, StderrStatus},
+    types::{CallToolResult, Implementation, ListToolsResult},
+};
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
 };
 use kumi_daw_ableton::connection::{ConnectionOptions, LiveConnection};
-use kumi_runtime::{
-    core::{contracts::JsonObject, errors::RuntimeError},
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, Implementation, ListToolsResult},
-    },
-};
+use kumi_types::{contracts::JsonObject, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -319,7 +317,7 @@ async fn connection_start_close_disconnection_and_reconnection_match_source() {
                         Ok(Value::Null)
                     }
                     .await;
-                    let value = result.unwrap_or_else(|e| json!({"error":e.to_string().replace(*kumi_runtime::command::KUMI,"<kumi>")}));
+                    let value = result.unwrap_or_else(|e| json!({"error":e.to_string().replace(*kumi_types::command::KUMI,"<kumi>")}));
                     for _ in 0..8 {
                         tokio::task::yield_now().await;
                     }

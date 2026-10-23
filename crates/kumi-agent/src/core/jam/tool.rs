@@ -3,11 +3,11 @@
 //! the jam. The DAW's backend reads the parts and writes the fixes.
 use super::backend::{Edit, JamBackend};
 use super::{feel, mistakes, quantized, Hit, Mistake, Part};
-use crate::core::contracts::{JsonObject, KernelTool, Reach, ToolResult};
-use crate::core::errors::RuntimeError;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
 use kumi_common::js::json::stringify;
+use kumi_types::contracts::{JsonObject, KernelTool, Reach, ToolResult};
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::collections::BTreeMap;

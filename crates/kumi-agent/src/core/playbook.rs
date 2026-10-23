@@ -1,11 +1,12 @@
 //! Lessons from matching sounds, with the scores that support them, kept privately between runs.
-use super::{errors::RuntimeError, goal::Best, match_run::MatchRun};
+use crate::core::{goal::Best, match_run::MatchRun};
 use async_trait::async_trait;
 use kumi_common::js::{
     json,
     number::{round, to_string},
     string,
 };
+use kumi_types::errors::RuntimeError;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -36,8 +37,8 @@ pub struct Lesson {
 }
 impl Lesson {
     /// The DAW it was learned in: Live's, since kumi.db keeps no DAW for it yet (another DAW's tag comes with that DAW).
-    pub fn daw(&self) -> crate::core::daw::DawId {
-        crate::core::daw::DawId::Ableton
+    pub fn daw(&self) -> kumi_types::daw::DawId {
+        kumi_types::daw::DawId::Ableton
     }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

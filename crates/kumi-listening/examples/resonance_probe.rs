@@ -1,14 +1,12 @@
 //! What the judge reads for a peak in a capture, and what a cut there would read as: for checking the resonance measure
 //! and a planned cut against real audio. resonance_probe <wav> <low hz> <high hz> [<cut hz> <cut dB> <cut Q>]
-use kumi_runtime::{
-    audio::decode::open_audio,
-    listening::{
-        checklist::{plan_cut, region_excess, worst_stretch},
-        detect,
-        fit::{filter, Band, Shape},
-        measure::{fine_hz, measure_file, measure_samples, MeasureOptions, FINE_BINS},
-    },
+use kumi_listening::{
+    checklist::{plan_cut, region_excess, worst_stretch},
+    detect,
+    fit::{filter, Band, Shape},
+    measure::{fine_hz, measure_file, measure_samples, MeasureOptions, FINE_BINS},
 };
+use kumi_media::audio::decode::open_audio;
 
 fn main() {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");

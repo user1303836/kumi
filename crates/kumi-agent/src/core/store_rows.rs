@@ -1,6 +1,6 @@
 //! Kumi's database rows as the runtime knows them, both ways: a note, a technique, a lesson.
 
-use super::{
+use crate::core::{
     contracts::MemoryNote,
     goal::Best,
     playbook::{Lesson, Reaction},

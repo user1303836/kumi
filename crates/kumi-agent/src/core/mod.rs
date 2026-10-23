@@ -1,5 +1,4 @@
 // What kumi-types holds now, where the runtime's code has always named it.
-pub use kumi_types::{daw, disk, errors, picture, place, private};
 
 pub mod chop;
 pub mod context;
@@ -43,7 +42,6 @@ pub mod store_rows;
 pub mod taste_log;
 pub mod techniques;
 // Where a turn's time went (kumi-ai, whose model calls it times first).
-pub use kumi_ai::timing;
 pub mod to_midi;
 pub mod variations;
 pub mod view;

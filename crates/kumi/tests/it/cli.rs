@@ -5,7 +5,7 @@ use kumi::{
     tui::tty::TtyOutput,
 };
 use kumi_daw_ableton::create_inference_only_integration;
-use kumi_runtime::system::Env;
+use kumi_types::system::Env;
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -132,7 +132,7 @@ macro_rules! case {
 case!(help_version_errors_and_checkout_commands, async {
     let f = Fixture::new(false);
     assert_eq!(run(f.io(&["--version"]), unused_factory()).await, 0);
-    assert_eq!(f.output(), format!("Kumi {}\n", kumi_runtime::KUMI_VERSION));
+    assert_eq!(f.output(), format!("Kumi {}\n", kumi_types::version::KUMI_VERSION));
     assert!(f.err.0.borrow().is_empty());
     assert!(!f.folder.path().join("settings.json").exists());
     f.out.0.borrow_mut().clear();
@@ -200,7 +200,7 @@ case!(sign_in_choice_non_tty_and_invalid_choice, async {
     assert!(!f.folder.path().join("auth.json").exists());
 });
 case!(existing_credentials_remain_usable_and_logout_keeps_other_providers, async {
-    use kumi_runtime::auth::store::{open_credential_store, CredentialStore};
+    use kumi_ai::auth::store::{open_credential_store, CredentialStore};
     let f = Fixture::new(false);
     let auth = f.folder.path().join("auth.json");
     std::fs::write(&auth,serde_json::to_vec(&json!({"version":1,"credentials":{"anthropic":{"type":"api-key","key":"sk-ant-saved-private-000000"},"openai":{"type":"api-key","key":"sk-saved-private-000000"}}})).unwrap()).unwrap();
@@ -277,8 +277,8 @@ case!(live_binding_passes_callbacks_and_stores_to_native_session, async {
     assert!(called.get());
     assert!(f.err.0.borrow().is_empty());
 });
-fn judged_round() -> kumi_runtime::listening::round::Round {
-    use kumi_runtime::listening::round::{Round, RoundKind};
+fn judged_round() -> kumi_listening::round::Round {
+    use kumi_listening::round::{Round, RoundKind};
     Round {
         round: 1,
         kind: RoundKind::Judged,
@@ -337,19 +337,16 @@ case!(a_database_that_cant_open_leaves_notes_in_their_files_and_says_so, async {
 });
 case!(continue_and_resume_in_live_leave_another_daws_conversation_to_that_daw, async {
     // Review L4: the newest conversation is REAPER's; Live's -c takes up Live's, and -r of REAPER's says whose it is.
-    use kumi_runtime::ConversationStore;
+    use kumi_agent::ConversationStore;
     let f = Fixture::new(false);
     f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"libraryFolders":[]}));
     let (set, project) = ("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "reaper-b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2");
-    let said = |text: &str, at: i64| -> kumi_runtime::SavedConversation {
+    let said = |text: &str, at: i64| -> kumi_agent::SavedConversation {
         serde_json::from_value(json!({"savedAt":at,"checkpoint":{"version":1,"messages":[{"role":"user","content":text},{"role":"assistant","content":"done"}]}}))
             .unwrap()
     };
-    let store = kumi_runtime::core::conversations::create_conversation_store_in(
-        f.folder.path().join("projects"),
-        None,
-        kumi::daw::registry::PLACES,
-    );
+    let store =
+        kumi_agent::core::conversations::create_conversation_store_in(f.folder.path().join("projects"), None, kumi::daw::registry::PLACES);
     store.save(set, "mv66me0m3fa91c", &said("make the bass wider", 1)).await.unwrap();
     store.save(project, "mv66zz0m3fa91c", &said("Mix notes for the song", 2)).await.unwrap();
     drop(store);
@@ -369,15 +366,15 @@ case!(continue_and_resume_in_live_leave_another_daws_conversation_to_that_daw, a
     assert_eq!(tokio::time::timeout(std::time::Duration::from_secs(10), task).await.unwrap().unwrap(), 0);
 });
 case!(continue_and_resume_take_up_a_kept_conversation_or_say_why_not, async {
-    use kumi_runtime::ConversationStore;
+    use kumi_agent::ConversationStore;
     let f = Fixture::new(false);
     f.settings(json!({"model":"anthropic/claude-sonnet-5-5","updateCheck":false,"libraryFolders":[]}));
     let (a, b) = ("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2");
-    let said = |text: &str, at: i64| -> kumi_runtime::SavedConversation {
+    let said = |text: &str, at: i64| -> kumi_agent::SavedConversation {
         serde_json::from_value(json!({"savedAt":at,"checkpoint":{"version":1,"messages":[{"role":"user","content":text},{"role":"assistant","content":"done"}]}}))
             .unwrap()
     };
-    let store = kumi_runtime::create_conversation_store(f.folder.path().join("projects"));
+    let store = kumi_agent::create_conversation_store(f.folder.path().join("projects"));
     store.save(a, "mv66me0m3fa91c", &said("make the bass wider", 1)).await.unwrap();
     store.save(b, "mv66zz0m3fa91c", &said("tighten the drums", 2)).await.unwrap();
     store.rename(a, "mv66me0m3fa91c", Some("Bass ideas")).await.unwrap();

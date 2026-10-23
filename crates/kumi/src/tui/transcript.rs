@@ -851,10 +851,10 @@ impl Transcript {
 
 /// A step's words in the transcript, as Kumi and the DAW show its tool: "looked at your Set".
 pub fn step_label(tool: &str) -> String {
-    kumi_runtime::core::presentation::step_label(crate::daw::presentation(), crate::daw::profile(), tool)
+    kumi_agent::core::presentation::step_label(crate::daw::presentation(), crate::daw::profile(), tool)
 }
 
 /// What NOW says while a tool runs: "looking at your Set".
 pub fn doing_label(tool: Option<&str>, fallback: &str) -> String {
-    kumi_runtime::core::presentation::doing_label(crate::daw::presentation(), crate::daw::profile(), tool, fallback)
+    kumi_agent::core::presentation::doing_label(crate::daw::presentation(), crate::daw::profile(), tool, fallback)
 }

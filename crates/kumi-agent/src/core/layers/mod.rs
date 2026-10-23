@@ -54,7 +54,7 @@ fn median(values: &mut [f64]) -> Option<f64> {
 
 /// The integrated loudness of a mono render (LUFS), None when it's too quiet or short to tell.
 pub fn loudness(mono: &[f32], rate: f64) -> Option<f64> {
-    crate::listening::measure::measure_samples(mono, mono, rate).measures.integrated
+    kumi_listening::measure::measure_samples(mono, mono, rate).measures.integrated
 }
 
 /// A layer (`layer`, mono at `rate`) against the main (`main`, the same rate and stretch).
@@ -92,7 +92,7 @@ pub fn compare(main: &[f32], layer: &[f32], rate: f64) -> Compared {
 /// A render's peak-to-loudness ratio and its true peak (dB), None when it's too quiet or short to tell; the glue a compressor
 /// adds is how much ratio it takes.
 pub fn plr(mono: &[f32], rate: f64) -> Option<(f64, f64)> {
-    let measures = crate::listening::measure::measure_samples(mono, mono, rate).measures;
+    let measures = kumi_listening::measure::measure_samples(mono, mono, rate).measures;
     measures.integrated.map(|integrated| (measures.true_peak - integrated, measures.true_peak))
 }
 

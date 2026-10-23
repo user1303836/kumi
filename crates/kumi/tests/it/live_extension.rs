@@ -1,6 +1,6 @@
 //! Live extension folders, as bridge setup and doctor find them.
 use kumi::live_extension::*;
-use kumi_runtime::system::Env;
+use kumi_types::system::Env;
 use serde_json::json;
 use std::{fs, path::Path};
 fn extension(folder: &Path, code: &str) {

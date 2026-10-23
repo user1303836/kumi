@@ -4,15 +4,10 @@
 //! conversation. `conversation-index.json` lists every place's conversations, to find one by its id or name: it's
 //! read again from the files wherever they changed, and made again from them when it's gone.
 
-use super::daw::DawId;
-use super::place::{Place, Places};
 use crate::{
-    core::{
-        contracts::{
-            ChangeState, Claim, ConversationMatch, ConversationStore, ConversationSummary, CurrentConversation, FoundExchange,
-            SavedConversation, TranscriptRole,
-        },
-        errors::RuntimeError,
+    core::contracts::{
+        Claim, ConversationMatch, ConversationStore, ConversationSummary, CurrentConversation, FoundExchange, SavedConversation,
+        TranscriptRole,
     },
     kernel::budget::transcript_of,
 };
@@ -21,6 +16,9 @@ use kumi_common::js::{
     json::stringify,
     string::{head, trim, utf16_len},
 };
+use kumi_types::daw::DawId;
+use kumi_types::place::{Place, Places};
+use kumi_types::{contracts::ChangeState, errors::RuntimeError};
 use rand::TryRngCore;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -108,8 +106,7 @@ pub fn new_conversation_id(at: i64) -> String {
     rand::rngs::OsRng.try_fill_bytes(&mut bytes).expect("OS randomness");
     format!("{}{}", digits.into_iter().rev().collect::<String>(), hex::encode(bytes))
 }
-/// Where `kumi import` keeps conversations from files: made on another computer, they carry on in a copy.
-pub use super::place::IMPORTED;
+use kumi_types::place::IMPORTED;
 /// What a place is called, kept beside its conversations (its DAW's baseline is its DAW's own).
 const PLACE_FILE: &str = "place.json";
 /// `place.json`: the place's name, and its DAW when it isn't Live.
@@ -318,7 +315,7 @@ fn say(handle: &mut std::fs::File, lock: Option<&Lock>) -> std::io::Result<()> {
 /// it. An error when the file can't be opened, or the file system can't lock (some network drives).
 fn lock_file(file: &Path) -> std::io::Result<Option<std::fs::File>> {
     if let Some(folder) = file.parent() {
-        crate::core::private::create_dir_all(folder)?;
+        kumi_types::private::create_dir_all(folder)?;
     }
     let mut options = std::fs::OpenOptions::new();
     options.read(true).write(true).create(true).truncate(false);
@@ -1083,8 +1080,8 @@ impl ConversationStore for FileConversationStore {
         }
         // Gone from under another window, it would come back with its next save, without its name or pin.
         if self.open_elsewhere(place, id) {
-            return Err(crate::core::errors::KumiError::new(
-                crate::core::errors::FailureKind::Request,
+            return Err(kumi_types::errors::KumiError::new(
+                kumi_types::errors::FailureKind::Request,
                 "That conversation is open in another Kumi window: close it there, then delete it.",
             )
             .into());
@@ -1160,7 +1157,7 @@ impl ConversationStore for FileConversationStore {
                     return Claim::Taken;
                 }
                 let mine = Lock::mine();
-                if crate::core::private::write(&file, stringify(&json!(mine)).as_bytes()).is_err() {
+                if kumi_types::private::write(&file, stringify(&json!(mine)).as_bytes()).is_err() {
                     return Claim::Ours;
                 }
                 // Two Kumis naming themselves at once: the one whose words stayed has it.

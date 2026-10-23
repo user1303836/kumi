@@ -227,7 +227,7 @@ impl Session {
                     status.clone()
                 };
                 self.emit(status.into());
-                self.notice(format!("A sound-match search needs something to reach: with no reference, Kumi did this as a regular request. To search, give /loop a reference too (an audio file, {} in the {}, or a video).", crate::core::daw::with_article(self.0.options.profile.vocab.clip), self.0.options.profile.words.place));
+                self.notice(format!("A sound-match search needs something to reach: with no reference, Kumi did this as a regular request. To search, give /loop a reference too (an audio file, {} in the {}, or a video).", kumi_types::daw::with_article(self.0.options.profile.vocab.clip), self.0.options.profile.words.place));
                 return Ok(Some(TurnResult { stop_reason: StopReason::Completed, usage: Some(usage) }));
             }
             let heard = heard.unwrap();

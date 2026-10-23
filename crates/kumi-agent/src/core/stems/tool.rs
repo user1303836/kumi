@@ -2,11 +2,11 @@
 //! bass and other with Kumi's own splitter, writes each as a sound file and puts them back beside the track.
 use super::backend::StemsBackend;
 use super::split::{split, BASS_HZ};
-use crate::core::contracts::{JsonObject, KernelTool, Reach, ToolResult};
-use crate::core::errors::RuntimeError;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
 use kumi_common::js::json::stringify;
+use kumi_types::contracts::{JsonObject, KernelTool, Reach, ToolResult};
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -51,7 +51,7 @@ impl<B: StemsBackend + 'static> Stems<B> {
             return Err(format!("that stretch lasts {seconds:.0} s: Kumi splits {MOST_SECONDS:.0} s at most at once; split it in parts"));
         }
         let ([left, right], rate) =
-            crate::audio::decode::read_stereo(&render.file, &signal, render.start, seconds).await.map_err(|error| error.0)?;
+            kumi_media::audio::decode::read_stereo(&render.file, &signal, render.start, seconds).await.map_err(|error| error.0)?;
         // (in Kumi's listening folder, which Kumi clears, and gone once placed: the DAW keeps its own copy)
         let folder = self.backend.folder();
         let base = format!("{} {}", plain(&name), kumi_common::time::now_ms());
@@ -63,7 +63,7 @@ impl<B: StemsBackend + 'static> Stems<B> {
             let mut files = Vec::new();
             for (stem, channels) in [("drums", &parts.drums), ("bass", &parts.bass), ("other", &parts.other)] {
                 let path = folder.join(format!("{base} {stem}.wav"));
-                std::fs::write(&path, crate::audio::decode::float_wav(&channels[..], rate as u32))
+                std::fs::write(&path, kumi_media::audio::decode::float_wav(&channels[..], rate as u32))
                     .map_err(|error| format!("Kumi couldn't write the {stem} stem: {error}"))?;
                 files.push((format!("{stem_names} {stem}"), path));
             }

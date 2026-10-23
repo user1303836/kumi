@@ -5,7 +5,7 @@
 use super::{args, delay, CommandError, CommandTools};
 use crate::views::ViewHost;
 use kumi_common::{abort::Signal, js::json::stringify};
-use kumi_runtime::core::contracts::{ChangeRecord, JsonObject, ToolResult};
+use kumi_types::contracts::{ChangeRecord, JsonObject, ToolResult};
 use serde_json::{json, Value};
 use std::time::Duration;
 // Tokio's clock, which a test can pause and run ahead.
@@ -234,7 +234,7 @@ impl CommandTools {
 }
 
 /// The reason in a bridge error ({"reason", "remediation"}), or its whole text.
-fn reason(result: &kumi_runtime::mcp::types::CallToolResult) -> String {
+fn reason(result: &kumi_agent::mcp::types::CallToolResult) -> String {
     let text = super::result_text(result);
     serde_json::from_str::<Value>(&text).ok().and_then(|error| Some(error.get("reason")?.as_str()?.to_owned())).unwrap_or(text)
 }

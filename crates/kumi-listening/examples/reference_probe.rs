@@ -1,10 +1,8 @@
 //! Runs the reference tool once, for checking it against the real services: reference_probe <folder> "<what>" [tracks]
 //! The folder keeps the measured reference and its audio; yt-dlp comes from KUMI_YTDLP or is fetched into it.
 use kumi_common::abort::Signal;
-use kumi_runtime::{
-    references::{store::ReferenceStore, tool::reference_tools},
-    video::programs::ProgramOptions,
-};
+use kumi_listening::references::{store::ReferenceStore, tool::reference_tools};
+use kumi_media::programs::ProgramOptions;
 use std::rc::Rc;
 
 fn main() {

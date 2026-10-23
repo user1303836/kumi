@@ -5,6 +5,10 @@
 //! Python in Live, changes stay as they were: Live's own undo takes them back.
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi_agent::mcp::{
+    client::{McpEndpoint, StderrStatus},
+    types::{CallToolResult, Implementation, ListToolsResult},
+};
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_daw_ableton::{
     changes::CHANGES,
@@ -14,15 +18,9 @@ use kumi_daw_ableton::{
     remember::CurrentProject,
     snapshots::{Captured, SetHistory, CODE_LIMIT},
 };
-use kumi_runtime::{
-    core::{
-        contracts::{ChangeState, JsonObject},
-        errors::RuntimeError,
-    },
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, Implementation, ListToolsResult},
-    },
+use kumi_types::{
+    contracts::{ChangeState, JsonObject},
+    errors::RuntimeError,
 };
 use serde_json::{json, Value};
 use std::{

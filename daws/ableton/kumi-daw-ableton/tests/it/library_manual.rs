@@ -3,7 +3,7 @@ use kumi_common::abort::Signal;
 use kumi_daw_ableton::manual::{
     chapter_addresses, chapter_sections, fetch_manual, manual_tool, search_manual, stems, ManualOptions, ManualSection,
 };
-use kumi_runtime::web::net::{WebClient, WebError, WebFailure, WebRequest, WebResponse};
+use kumi_net::web::{WebClient, WebError, WebFailure, WebRequest, WebResponse};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},

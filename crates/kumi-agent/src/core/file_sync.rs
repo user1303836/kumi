@@ -3,7 +3,7 @@
 //! one changed, brings in what changed (`store_import::import_json`), so the next turn knows it. The
 //! turn never waits for the look.
 
-use super::{
+use crate::core::{
     store_client::StoreClient,
     store_import::{every_path, import_json, Imported, JsonFiles},
 };

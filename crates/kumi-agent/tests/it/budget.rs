@@ -1,14 +1,13 @@
 use std::borrow::Cow;
 
-use kumi_common::js::json::stringify;
-use kumi_runtime::ai::types::{
+use kumi_agent::kernel::agent::CARRY_ON_NOTE;
+use kumi_agent::kernel::budget::{drop_earliest, fit, job_report_block, transcript_of, ASKED, OBSERVATION_MARKER, SHORTENED};
+use kumi_ai::binding::ContextBudget;
+use kumi_ai::types::{
     AssistantPart, DataContent, FileData, Message, ReasoningPart, TextPart, ToolCallPart, ToolPart, ToolResultContentItem,
     ToolResultOutput, ToolResultPart, UserPart,
 };
-use kumi_runtime::kernel::agent::CARRY_ON_NOTE;
-use kumi_runtime::kernel::budget::{
-    drop_earliest, fit, job_report_block, transcript_of, ContextBudget, ASKED, OBSERVATION_MARKER, SHORTENED,
-};
+use kumi_common::js::json::stringify;
 use serde::Serialize;
 use serde_json::json;
 
@@ -233,7 +232,7 @@ fn the_producers_words_outlive_repeated_reductions_kumis_own_prompts_and_observa
 
 #[test]
 fn a_loops_request_is_listed_without_kumis_framing_and_its_rounds_notes_arent_listed() {
-    use kumi_runtime::core::{goal_mode::objective_audit, loop_run::loop_setup};
+    use kumi_agent::core::{goal_mode::objective_audit, loop_run::loop_setup};
     let budget = budget(4096.0, 16.0 * 1024.0);
     let mut history = vec![user(&observed(&loop_setup("make the drop hit harder"))), said(&"w".repeat(900))];
     for round in 0..40 {

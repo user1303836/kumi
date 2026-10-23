@@ -1,9 +1,9 @@
 //! A DAW's side of audio to MIDI: only its own facts. A track rendered over a stretch, the tempo there, and the notes written
 //! on a new track beside it (one plan).
 use super::MidiNote;
-use crate::core::contracts::{JsonObject, Render};
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::contracts::{JsonObject, Render};
 use serde_json::Value;
 
 pub struct Words {

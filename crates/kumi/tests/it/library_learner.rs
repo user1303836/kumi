@@ -1,7 +1,7 @@
 #[path = "../support/library.rs"]
 mod fixture;
 use fixture::Studio;
-use kumi_runtime::library::{
+use kumi_library::{
     learn::library_logs,
     learner::{LearnerMessage, LearnerOptions, LearnerReply},
     plan::PlanOptions,
@@ -71,7 +71,7 @@ async fn child_waits_while_paused_reports_progress_and_persists_completed_state(
     child.send(LearnerMessage::Learn { options: options(&studio, true) }).await;
     loop {
         if let LearnerReply::Progress { progress } = child.next().await {
-            if progress.phase == kumi_runtime::library::learn::LearnPhase::Presets {
+            if progress.phase == kumi_library::learn::LearnPhase::Presets {
                 break;
             }
         }
@@ -109,7 +109,7 @@ async fn stop_and_parent_disconnect_end_paused_children_and_release_locks() {
         child.send(LearnerMessage::Learn { options: options(&studio, true) }).await;
         loop {
             if let LearnerReply::Progress { progress } = child.next().await {
-                if progress.phase == kumi_runtime::library::learn::LearnPhase::Presets {
+                if progress.phase == kumi_library::learn::LearnPhase::Presets {
                     break;
                 }
             }

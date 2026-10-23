@@ -3,18 +3,19 @@
 //! the model's read pages in short refs and passes them back long; a DAW that isn't there is said in its words.
 use async_trait::async_trait;
 use futures::FutureExt;
+use kumi_agent::core::{
+    context::IntegrationContext,
+    contracts::*,
+    view::{BodyRequest, FocusBody},
+};
+use kumi_agent::mcp::client::{McpEndpoint, StderrStatus};
+use kumi_agent::mcp::types::{CallToolResult, Implementation, ListToolsResult};
 use kumi_common::abort::Signal;
 use kumi_daw_own::bridge::{Connect, OwnOptions};
 use kumi_daw_reaper::create_reaper_integration;
 use kumi_daw_renoise::create_renoise_integration;
-use kumi_runtime::core::{
-    context::IntegrationContext,
-    contracts::*,
-    errors::RuntimeError,
-    view::{BodyRequest, FocusBody},
-};
-use kumi_runtime::mcp::client::{McpEndpoint, StderrStatus};
-use kumi_runtime::mcp::types::{CallToolResult, Implementation, ListToolsResult};
+use kumi_types::contracts::*;
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{cell::RefCell, rc::Rc};
 
@@ -358,7 +359,7 @@ async fn reapers_focus_is_read_while_focus_shows_and_its_bodies_come_neutral() {
                 answers: RefCell::new(vec![("status", json!({"connected": true}), false), ("focus", focus, false)]),
                 asked: RefCell::default(),
             });
-            let seen: Rc<RefCell<Vec<Option<kumi_runtime::core::view::DawFocus>>>> = Rc::default();
+            let seen: Rc<RefCell<Vec<Option<kumi_agent::core::view::DawFocus>>>> = Rc::default();
             let beats: Rc<RefCell<Vec<Option<f64>>>> = Rc::default();
             let mut options = options(host.clone(), Rc::new(RefCell::new(vec![])));
             let (into, ticks) = (seen.clone(), beats.clone());
@@ -379,7 +380,7 @@ async fn reapers_focus_is_read_while_focus_shows_and_its_bodies_come_neutral() {
             assert_eq!(focus.device.as_deref(), Some("ReaComp"));
             assert_eq!(focus.parameter.as_ref().map(|p| p.name.as_str()), Some("Thresh"));
 
-            use kumi_runtime::core::view::{BodyKind, BodyRequest, FocusBody, RouteKind};
+            use kumi_agent::core::view::{BodyKind, BodyRequest, FocusBody, RouteKind};
             assert!(reaper.can_show(BodyKind::Notes) && reaper.can_show(BodyKind::Routing) && !reaper.can_show(BodyKind::Tracker));
             host.answers.borrow_mut().push((
                 "focus_body",
@@ -430,7 +431,7 @@ async fn reapers_focus_is_read_while_focus_shows_and_its_bodies_come_neutral() {
 async fn renoises_bodies_are_its_pattern_matrix_and_keyzones_in_its_own_notation() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            use kumi_runtime::core::view::{BodyRequest, FocusBody};
+            use kumi_agent::core::view::{BodyRequest, FocusBody};
             let host = Rc::new(Host { answers: RefCell::new(vec![("status", json!({"connected": true}), false)]), asked: RefCell::default() });
             let renoise = create_renoise_integration(options(host.clone(), Rc::new(RefCell::new(vec![]))));
             renoise.start(Signal::new()).await.unwrap();
@@ -484,7 +485,7 @@ async fn renoises_bodies_are_its_pattern_matrix_and_keyzones_in_its_own_notation
 async fn renoises_focus_is_its_middle_frame_with_the_panes_open_beside_it() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            use kumi_runtime::core::view::ViewKind;
+            use kumi_agent::core::view::ViewKind;
             let focus = json!({
                 "epoch": "3", "view": "pattern", "matrixVisible": true, "dspVisible": true, "changed": 2,
                 "selection": {"trackRef": "3:track:2", "track": {"name": "Bass", "type": "sequencer"}, "patternRef": "3:pattern:4", "patternName": "Drop", "sequence": 3, "deviceRef": "3:device:2.2", "deviceName": "Delay", "line": 12},
@@ -494,7 +495,7 @@ async fn renoises_focus_is_its_middle_frame_with_the_panes_open_beside_it() {
                 answers: RefCell::new(vec![("status", json!({"connected": true}), false), ("focus", focus, false)]),
                 asked: RefCell::default(),
             });
-            let seen: Rc<RefCell<Vec<Option<kumi_runtime::core::view::DawFocus>>>> = Rc::default();
+            let seen: Rc<RefCell<Vec<Option<kumi_agent::core::view::DawFocus>>>> = Rc::default();
             let mut options = options(host.clone(), Rc::new(RefCell::new(vec![])));
             let into = seen.clone();
             options.context.on_focus = Some(Rc::new(move |focus| into.borrow_mut().push(focus)));
@@ -503,7 +504,7 @@ async fn renoises_focus_is_its_middle_frame_with_the_panes_open_beside_it() {
             renoise.start(Signal::new()).await.unwrap();
             tokio::time::sleep(std::time::Duration::from_millis(120)).await;
             let focus = seen.borrow().first().cloned().flatten().expect("the focus");
-            let kind = |view: Option<&kumi_runtime::core::view::FocusView>| view.map(|v| v.kind);
+            let kind = |view: Option<&kumi_agent::core::view::FocusView>| view.map(|v| v.kind);
             assert_eq!(kind(focus.main_view.as_ref()), Some(ViewKind::PatternEditor), "the middle frame");
             assert_eq!(focus.editor_view.as_ref().map(|v| v.label.as_str()), Some("Track DSPs"), "the DSP frame below it");
             assert_eq!(focus.panes.iter().flatten().map(|v| v.kind).collect::<Vec<_>>(), [ViewKind::Sequencer], "the matrix beside it");
@@ -669,7 +670,7 @@ async fn a_fixed_phrase_after_a_failed_look_goes_to_the_model_not_the_last_look(
             host.answers.borrow_mut().push(("snapshot", json!({"error": "a dialog is open", "code": "busy", "connected": true}), true));
             renoise.observe(Signal::new(), None).await.unwrap();
             let asked = host.asked.borrow().len();
-            let intent = kumi_runtime::core::phrases::parse("mute drums").expect("a fixed phrase");
+            let intent = kumi_agent::core::phrases::parse("mute drums").expect("a fixed phrase");
             assert!(renoise.instant(&intent, Signal::new()).await.unwrap().is_none(), "the model takes it");
             assert_eq!(host.asked.borrow().len(), asked, "nothing asked of Renoise");
             assert_eq!(renoise.fingerprint().unwrap()["name"], "Acid", "the song's fingerprint stays");

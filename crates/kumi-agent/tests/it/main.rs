@@ -1,4 +1,4 @@
-//! kumi-runtime's integration tests, one module per file: one test binary for the crate, built and linked once.
+//! kumi-agent's integration tests, one module per file: one test binary for the crate, built and linked once.
 mod budget;
 mod conversations;
 mod daw_neutral_guard;

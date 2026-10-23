@@ -4,10 +4,10 @@
 //! (never discarding what's done), and is kept on disk so it survives a restart. The listen, assess, adjust loop is one
 //! of its tools: a turn that starts a judged run runs the loop inside it.
 
-use super::daw::DawProfile;
-use super::errors::{FailureKind, RuntimeError};
-use crate::listening::round::{Round, RoundKind};
 use async_trait::async_trait;
+use kumi_listening::round::{Round, RoundKind};
+use kumi_types::daw::DawProfile;
+use kumi_types::errors::{FailureKind, RuntimeError};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, rc::Rc, sync::LazyLock};
@@ -326,7 +326,7 @@ pub fn gap_closed(before: Option<&Round>, after: Option<&Round>) -> Option<f64> 
     }
     // Where each round left an item: as it was when its change was taken back, else as it ended. An item either round
     // couldn't read (hidden by an effect, or not there yet) counts on neither side.
-    let at = |round: &Round, row: &crate::listening::checklist::Row| {
+    let at = |round: &Round, row: &kumi_listening::checklist::Row| {
         if round.kept == Some(false) {
             (row.before, row.gap_before)
         } else {

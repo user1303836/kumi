@@ -3,9 +3,9 @@
 //! and renders takes, and its words for the tool. Core does the rest, the same in every DAW.
 use super::heard::Heard;
 use super::{Material, Rng, TakeSet};
-use crate::core::contracts::JsonObject;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::contracts::JsonObject;
 use serde_json::Value;
 use std::collections::BTreeMap;
 

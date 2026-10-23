@@ -10,19 +10,16 @@ use super::mutations::Mutations;
 use super::notes::{clip_and_track, read_notes};
 use super::observation::Observer;
 use async_trait::async_trait;
-use kumi_common::abort::Signal;
-use kumi_runtime::core::{
-    contracts::JsonObject,
-    variations::{
-        backend::{Rendered, Rewritten, Source, Undroppable, VariationsBackend, Words},
-        notes::{
-            amount, anchors_in, foreign_classes, note_direction_ops, note_op, notes_apart, round, with_anchors, Note, NOTE_DIRECTIONS,
-            NOTE_OPS,
-        },
-        tool::{names, names_to_find},
-        Material, Rng, TakeSet,
+use kumi_agent::core::variations::{
+    backend::{Rendered, Rewritten, Source, Undroppable, VariationsBackend, Words},
+    notes::{
+        amount, anchors_in, foreign_classes, note_direction_ops, note_op, notes_apart, round, with_anchors, Note, NOTE_DIRECTIONS, NOTE_OPS,
     },
+    tool::{names, names_to_find},
+    Material, Rng, TakeSet,
 };
+use kumi_common::abort::Signal;
+use kumi_types::contracts::JsonObject;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
@@ -741,7 +738,7 @@ mod tests {
     /// notes a few hundredths of a beat, a near-copy, and "higher" and "lower" moved every note, too far).
     #[test]
     fn every_direction_kumi_picks_makes_a_take_of_an_ordinary_clip() {
-        kumi_runtime::core::variations::notes::every_note_direction_makes_a_take(
+        kumi_agent::core::variations::notes::every_note_direction_makes_a_take(
             |notes, anchors| ClipTake { notes, length: 4., anchors },
             applied,
             |take| take.notes.as_slice(),
@@ -773,7 +770,7 @@ mod tests {
                 .collect();
             assert!(!schemas.is_empty(), "{tool}: {} isn't in the fixtures", kind.preview);
             for schema in schemas {
-                assert_eq!(kumi_runtime::kernel::schema::problem(schema, &input), None, "{tool}: {input}");
+                assert_eq!(kumi_agent::kernel::schema::problem(schema, &input), None, "{tool}: {input}");
             }
         }
     }

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_daw_ableton::arrange::*;
-use kumi_runtime::{core::contracts::JsonObject, RuntimeError};
+use kumi_types::{contracts::JsonObject, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},

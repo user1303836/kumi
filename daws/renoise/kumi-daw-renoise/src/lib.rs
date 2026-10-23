@@ -11,19 +11,20 @@ mod lines;
 mod mapping;
 mod variations;
 
-use kumi_daw_own::bridge::{create_own_integration, OwnDaw, OwnOptions, OwnTools};
-use kumi_daw_own::catchup::{as_read, CatchUpWords, Mixer, RecipeKinds};
-use kumi_daw_own::phrases::{bar_span, slots_spanning, track, OwnPhrases, PhraseLook, Phrased};
-use kumi_daw_own::views::{self as own_views, body_args, focus_track, selected, view};
-use kumi_runtime::core::{
-    contracts::{Integration, JsonObject},
+use kumi_agent::core::{
+    contracts::Integration,
     describe::ProjectWords,
     phrases::{Intent, Switch},
     presentation::{ToolActivity, ToolPresentation},
     refs::{moved_index, Moved, RefScheme, Shift},
     view::{BodyKind, BodyRequest, DawFocus, FocusBody, FocusItem, FocusSection, ItemKind, SectionKind, ViewKind, ViewPresentation},
 };
-use kumi_runtime::mcp::client::BridgeDescriptor;
+use kumi_agent::mcp::client::BridgeDescriptor;
+use kumi_daw_own::bridge::{create_own_integration, OwnDaw, OwnOptions, OwnTools};
+use kumi_daw_own::catchup::{as_read, CatchUpWords, Mixer, RecipeKinds};
+use kumi_daw_own::phrases::{bar_span, slots_spanning, track, OwnPhrases, PhraseLook, Phrased};
+use kumi_daw_own::views::{self as own_views, body_args, focus_track, selected, view};
+use kumi_types::contracts::JsonObject;
 use kumi_types::daw::DawProfile;
 use regex::Regex;
 use serde_json::{json, Value};
@@ -67,7 +68,7 @@ pub const DAW: OwnDaw = OwnDaw {
 
 /// (#401) Delivery to a spec in Renoise: the master's row and post-FX fader, and what limits or raises it.
 static SPEC: kumi_daw_own::spec::OwnSpecFacts = kumi_daw_own::spec::OwnSpecFacts {
-    words: kumi_runtime::core::spec::backend::Words {
+    words: kumi_agent::core::spec::backend::Words {
         app: "Renoise",
         fader_most: 3.,
         limiter:
@@ -79,7 +80,7 @@ static SPEC: kumi_daw_own::spec::OwnSpecFacts = kumi_daw_own::spec::OwnSpecFacts
 };
 
 /// (#401) Kept scripts in Renoise: its Lua, kept as entries of the Tools menu, and what takes a thing by its place there.
-static SCRIPTS: kumi_runtime::core::scripts::backend::Words = kumi_runtime::core::scripts::backend::Words {
+static SCRIPTS: kumi_agent::core::scripts::backend::Words = kumi_agent::core::scripts::backend::Words {
     app: "Renoise",
     language: "Lua (the renoise API, with song for renoise.song())",
     action: "an entry in Renoise's Tools menu (Tools > Kumi), with a shortcut to set in its Keys preferences",
@@ -427,28 +428,28 @@ pub fn create_renoise_integration(options: OwnOptions) -> Rc<dyn Integration> {
         // (M7) the variations tool: Renoise's patterns and phrases (#401)
         let variations = caps.variations.then(|| {
             let backend = crate::variations::RenoiseBackend::new(parts.changes.clone(), parts.renderer.clone());
-            kumi_runtime::core::variations::tool::Variations::new(backend, parts.kumi_home.clone()).tool()
+            kumi_agent::core::variations::tool::Variations::new(backend, parts.kumi_home.clone()).tool()
         });
         OwnTools {
             // (#401) the sample map
             mapping: caps.sample_mapping.then(|| {
                 let backend = crate::mapping::RenoiseMapping::new(parts.changes.clone(), parts.renderer.clone());
-                kumi_runtime::core::mapping::tool::Mapping::new(backend).tool()
+                kumi_agent::core::mapping::tool::Mapping::new(backend).tool()
             }),
             // (#401) chopping: its lighter densities go to the variations tool as takes
             chop: caps.chop.then(|| {
                 let backend = crate::chop::RenoiseChop::new(parts.changes.clone(), parts.renderer.clone());
-                kumi_runtime::core::chop::tool::Chop::new(backend, variations.clone()).tool()
+                kumi_agent::core::chop::tool::Chop::new(backend, variations.clone()).tool()
             }),
             // (#401) cleaning up a jam
             jam: caps.jam.then(|| {
                 let backend = crate::jam::RenoiseJam::new(parts.changes.clone());
-                kumi_runtime::core::jam::tool::Jam::new(backend).tool()
+                kumi_agent::core::jam::tool::Jam::new(backend).tool()
             }),
             // (#401) layering breaks
             layers: caps.layers.then(|| {
                 let backend = crate::layers::RenoiseLayers::new(parts.changes.clone(), parts.renderer.clone());
-                kumi_runtime::core::layers::tool::Layers::new(backend).tool()
+                kumi_agent::core::layers::tool::Layers::new(backend).tool()
             }),
             variations,
             ..Default::default()
@@ -495,7 +496,7 @@ mod tests {
     /// m6-places: each phrase's steps in a song as the look found it.
     #[test]
     fn a_phrase_is_renoises_own_change_its_loop_is_whole_slots_and_it_arms_no_tracks() {
-        use kumi_runtime::core::phrases::{PhraseTrack, TrackPick};
+        use kumi_agent::core::phrases::{PhraseTrack, TrackPick};
         use serde_json::json;
         let tracks = [
             PhraseTrack { reference: "track:1", name: "Kick", own: true, master: false },

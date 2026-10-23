@@ -5,7 +5,7 @@ pub use crate::process::{
 use crate::{input::TerminalInput, tui::tty::TtyOutput};
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_common::{abort::Signal, js::string::trim};
-use kumi_runtime::system::{self, Env, SystemProgram};
+use kumi_types::system::{self, Env, SystemProgram};
 use serde_json::Value;
 use std::{rc::Rc, time::Duration};
 pub async fn remote_script_answers(config_path: &str) -> bool {
@@ -61,10 +61,10 @@ use crate::{
 };
 use kumi_common::{js::string::head, time::now_ms};
 use kumi_daw_ableton::ears::device::{install_ears, EARS_NAME};
-use kumi_runtime::{
-    core::errors::RuntimeError,
-    library::sources::{dirname, join},
-    CONNECT_LIVE, KUMI, KUMI_REPAIR, KUMI_START,
+use kumi_library::sources::{dirname, join};
+use kumi_types::{
+    command::{CONNECT_LIVE, KUMI, KUMI_REPAIR, KUMI_START},
+    errors::RuntimeError,
 };
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path};

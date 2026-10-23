@@ -1,16 +1,13 @@
 //! Session behavior.
 use async_trait::async_trait;
 use futures::{future::LocalBoxFuture, FutureExt};
-use kumi_common::abort::Signal;
-use kumi_runtime::{
-    core::{
-        contracts::*,
-        conversations::create_conversation_store,
-        errors::{FailureKind, KumiError, RuntimeError},
-        session::*,
-    },
+use kumi_agent::{
+    core::{contracts::*, conversations::create_conversation_store, session::*},
     kernel::budget::{transcript_of, OBSERVATION_MARKER},
 };
+use kumi_common::abort::Signal;
+use kumi_types::contracts::*;
+use kumi_types::errors::{FailureKind, KumiError, RuntimeError};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -127,7 +124,7 @@ impl Kernel for TestKernel {
         true
     }
     async fn aside(&self, _: &str, _: Signal, _: OnText) -> Result<String, RuntimeError> {
-        use kumi_runtime::core::timing;
+        use kumi_ai::timing;
         drop(timing::model_call("openai/a-side-question"));
         timing::sent(500_000);
         Ok("aside".into())
@@ -263,7 +260,7 @@ fn harness(run: Option<Run>, config: impl FnOnce(&mut SessionOptions)) -> Harnes
         r.listeners.borrow_mut().push(listener.clone());
         let bare = Rc::new(TestIntegration { record: r.clone(), observation: obs.clone(), listener });
         if r.wrapped.get() {
-            kumi_runtime::with_fallback(bare, Rc::new(|| panic!("no fallback")), Rc::new(|_| {})) as Rc<dyn Integration>
+            kumi_agent::with_fallback(bare, Rc::new(|| panic!("no fallback")), Rc::new(|_| {})) as Rc<dyn Integration>
         } else {
             bare
         }
@@ -892,10 +889,10 @@ async fn saved(store: &dyn ConversationStore, place: &str, turns: u32) -> Curren
 // What every request carries stays small: with every one of the session's own tools on, those it sends with each
 // request (not deferred behind find_tools) stay few and short. Live's side has its own ceiling (live_integration.rs).
 local_test!(with_every_session_tool_on_only_a_few_go_with_every_request, {
-    use kumi_runtime::core::memory::{create_memory_store, MemoryStoreOptions};
-    use kumi_runtime::core::session::VideoDirectories;
-    use kumi_runtime::core::techniques::create_technique_store;
-    use kumi_runtime::library::{create_library, sources::SourceOptions, LibraryOptions};
+    use kumi_agent::core::memory::{create_memory_store, MemoryStoreOptions};
+    use kumi_agent::core::session::VideoDirectories;
+    use kumi_agent::core::techniques::create_technique_store;
+    use kumi_library::{create_library, sources::SourceOptions, LibraryOptions};
     let dir = tempfile::tempdir().unwrap();
     let text = |name: &str| dir.path().join(name).to_string_lossy().into_owned();
     let library = create_library(LibraryOptions {
@@ -913,7 +910,7 @@ local_test!(with_every_session_tool_on_only_a_few_go_with_every_request, {
         }));
         o.listen = true;
         o.web = true;
-        o.recipes = Some(kumi_runtime::create_recipe_store(dir.path().join("recipes")));
+        o.recipes = Some(kumi_agent::create_recipe_store(dir.path().join("recipes")));
         o.watch = Some(VideoDirectories { videos_dir: text("videos"), tools_dir: text("tools") });
         o.techniques = Some(create_technique_store(dir.path().join("techniques.json")));
         o.gaps = Some(text("gaps.jsonl"));
@@ -958,8 +955,8 @@ local_test!(with_every_session_tool_on_only_a_few_go_with_every_request, {
     // The checker in front of every deferred tool takes what the tool's own schema allows.
     for tool in tools.iter().filter(|tool| tool.deferred()) {
         let schema = Value::Object(tool.input_schema());
-        let example = kumi_runtime::kernel::schema::example(&schema).unwrap_or_else(|| panic!("no example for {}", tool.name()));
-        assert_eq!(kumi_runtime::kernel::schema::problem(&schema, &example), None, "{} {example}", tool.name());
+        let example = kumi_agent::kernel::schema::example(&schema).unwrap_or_else(|| panic!("no example for {}", tool.name()));
+        assert_eq!(kumi_agent::kernel::schema::problem(&schema, &example), None, "{} {example}", tool.name());
     }
     h.session.close().await.unwrap();
 });
@@ -1143,7 +1140,7 @@ local_test!(settled_history_is_recovered_after_uncooperative_work, {
     h.session.close().await.unwrap();
 });
 local_test!(memory_instructions_tools_and_forgetting, {
-    use kumi_runtime::core::memory::{create_memory_store, MemoryStoreOptions};
+    use kumi_agent::core::memory::{create_memory_store, MemoryStoreOptions};
     let dir = tempfile::tempdir().unwrap();
     let store = create_memory_store(MemoryStoreOptions {
         projects_dir: dir.path().join("projects"),
@@ -1174,7 +1171,7 @@ local_test!(memory_instructions_tools_and_forgetting, {
 // or effort), so the provider's cache of it still holds: a note the model keeps meanwhile is in the conversation already.
 // The producer changing what it holds (forgetting a note in /memory) makes the next kernel read it again.
 local_test!(a_rebuilt_kernel_keeps_the_conversations_system_text_until_the_producer_changes_it, {
-    use kumi_runtime::core::memory::{create_memory_store, MemoryStoreOptions};
+    use kumi_agent::core::memory::{create_memory_store, MemoryStoreOptions};
     let dir = tempfile::tempdir().unwrap();
     let store = create_memory_store(MemoryStoreOptions {
         projects_dir: dir.path().join("projects"),
@@ -1272,7 +1269,7 @@ fn draft() -> Value {
     json!({"name":"Reese stack","fits":"wide Reese basses","idea":"Two detuned saws with glide, then saturation and a low cut."})
 }
 local_test!(technique_is_taken_out_of_whole_and_streamed_plans_and_offered_after_the_answer, {
-    use kumi_runtime::core::techniques::{create_technique_store, TechniqueStore};
+    use kumi_agent::core::techniques::{create_technique_store, TechniqueStore};
     let dir = tempfile::tempdir().unwrap();
     let store = create_technique_store(dir.path().join("techniques.json"));
     let received = Rc::new(RefCell::new(vec![]));
@@ -1370,7 +1367,7 @@ local_test!(technique_is_taken_out_of_whole_and_streamed_plans_and_offered_after
     h.session.close().await.unwrap();
 });
 local_test!(a_save_or_silence_keeps_nothing_a_failed_answer_offers_nothing_and_a_yes_in_words_keeps_it, {
-    use kumi_runtime::core::techniques::{create_technique_store, TechniqueStore, TECHNIQUE_TOOL};
+    use kumi_agent::core::techniques::{create_technique_store, TechniqueStore, TECHNIQUE_TOOL};
     for fail in [false, true] {
         let dir = tempfile::tempdir().unwrap();
         let store = create_technique_store(dir.path().join("techniques.json"));
@@ -1432,7 +1429,7 @@ local_test!(a_save_or_silence_keeps_nothing_a_failed_answer_offers_nothing_and_a
     }
 });
 local_test!(a_new_or_resumed_conversation_lets_a_waiting_offer_go, {
-    use kumi_runtime::core::techniques::{create_technique_store, TechniqueStore, TECHNIQUE_TOOL};
+    use kumi_agent::core::techniques::{create_technique_store, TechniqueStore, TECHNIQUE_TOOL};
     let dir = tempfile::tempdir().unwrap();
     let store = create_technique_store(dir.path().join("techniques.json"));
     let tools = Rc::new(RefCell::new(Vec::<Rc<dyn KernelTool>>::new()));
@@ -1475,7 +1472,7 @@ local_test!(a_new_or_resumed_conversation_lets_a_waiting_offer_go, {
     assert!(store.list().await.unwrap().is_empty());
 });
 
-use kumi_runtime::core::match_run::{MatchBudget, MatchState, MatchStop, MATCH_BUDGET};
+use kumi_agent::core::match_run::{MatchBudget, MatchState, MatchStop, MATCH_BUDGET};
 fn audition(score: f64, label: &str) -> AuditionEvent {
     serde_json::from_value(json!({"round":1,"best":{"label":label,"score":score},"takes":[{"label":label,"score":score,"where":{"track":"Candidate"}},{"label":"Other","score":score-10.}],"gaps":["attack too slow"],"request":{"candidates":[{"track":"track:1","label":"Drift"}],"fromBeat":16,"beats":4,"reference":"~/ref.wav"}})).unwrap()
 }
@@ -1634,7 +1631,7 @@ local_test!(match_reauditions_changed_candidate_before_deciding_and_can_cancel, 
     h.session.close().await.unwrap();
 });
 local_test!(match_lessons_are_learned_updated_judged_read_and_forgotten, {
-    use kumi_runtime::core::playbook::{create_playbook_store, PlaybookStore, Reaction};
+    use kumi_agent::core::playbook::{create_playbook_store, PlaybookStore, Reaction};
     let dir = tempfile::tempdir().unwrap();
     let store = create_playbook_store(dir.path().join("lessons.json"));
     let h = match_harness(
@@ -1675,7 +1672,7 @@ local_test!(match_lessons_are_learned_updated_judged_read_and_forgotten, {
     two.session.close().await.unwrap();
 });
 
-use kumi_runtime::core::{
+use kumi_agent::core::{
     evolve::Knob,
     goal::{create_goal_store, GoalBudget, GoalPhase, GoalRun, GoalStore, GOAL_BUDGET},
 };
@@ -1803,7 +1800,7 @@ async fn generation(session: &Session, n: u32) {
 local_test!(goal_reaches_target_cleans_in_order_keeps_best_and_lesson, {
     let dir = tempfile::tempdir().unwrap();
     let store = create_goal_store(dir.path().join("goals"));
-    let playbook = kumi_runtime::core::playbook::create_playbook_store(dir.path().join("lessons.json"));
+    let playbook = kumi_agent::core::playbook::create_playbook_store(dir.path().join("lessons.json"));
     let rig = Rc::new(SearchRig::new(vec![60., 75., 96.]));
     let h = goal_harness(rig.clone(), true, |o| {
         o.goals = Some(store.clone());
@@ -2043,15 +2040,13 @@ local_test!(goal_full_length_checks_control_reported_scores_and_time_cap, {
     assert_eq!(h.session.goal_status().unwrap().why.as_deref(), Some("the safety cap on its time"));
     h.session.close().await.unwrap();
 });
-use kumi_runtime::{
-    core::{
-        goal_mode::{
-            create_objective_store, Objective, ObjectiveBudget, ObjectiveState, ObjectiveStatus, ObjectiveStore, Verdict, OBJECTIVE_BUDGET,
-        },
-        loop_run::LoopState,
+use kumi_agent::core::{
+    goal_mode::{
+        create_objective_store, Objective, ObjectiveBudget, ObjectiveState, ObjectiveStatus, ObjectiveStore, Verdict, OBJECTIVE_BUDGET,
     },
-    listening::round::{Round, RoundKind},
+    loop_run::LoopState,
 };
+use kumi_listening::round::{Round, RoundKind};
 /// A model for /goal: it works, and its own check answers with the lines given, in turn.
 fn auditing(lines: &'static [&'static str]) -> Run {
     let audits = Rc::new(Cell::new(0));
@@ -2073,9 +2068,9 @@ fn objectives(h: &Harness) -> Vec<ObjectiveStatus> {
     h.events.borrow().iter().filter_map(|e| if let SessionEvent::Objective(s) = e { Some(s.clone()) } else { None }).collect()
 }
 async fn kept_goal(
-    store: &Rc<kumi_runtime::core::goal_mode::FileObjectiveStore>,
+    store: &Rc<kumi_agent::core::goal_mode::FileObjectiveStore>,
     state: ObjectiveState,
-) -> kumi_runtime::core::goal_mode::Objective {
+) -> kumi_agent::core::goal_mode::Objective {
     for _ in 0..1000 {
         if let Some(kept) = store.load("unsaved").await.unwrap().filter(|kept| kept.state == state) {
             return kept;
@@ -2501,10 +2496,10 @@ local_test!(a_goal_whose_check_fails_is_kept_paused_and_blocked_on_what_the_prod
 });
 /// Polls the store until `place` holds the goal in `state`.
 async fn kept_at(
-    store: &Rc<kumi_runtime::core::goal_mode::FileObjectiveStore>,
+    store: &Rc<kumi_agent::core::goal_mode::FileObjectiveStore>,
     place: &str,
     state: ObjectiveState,
-) -> kumi_runtime::core::goal_mode::Objective {
+) -> kumi_agent::core::goal_mode::Objective {
     for _ in 0..1000 {
         if let Some(kept) = store.load(place).await.unwrap().filter(|kept| kept.state == state) {
             return kept;
@@ -2671,7 +2666,7 @@ local_test!(a_goal_stopped_during_its_check_reads_nothing_from_the_half_answer, 
 });
 /// A judged run's listen that only measured: one item, `gap` steps off.
 fn measured(number: u32, gap: f64) -> Round {
-    use kumi_runtime::listening::checklist::{Change, Row};
+    use kumi_listening::checklist::{Change, Row};
     let row = Row {
         id: "loudness".into(),
         label: "Loudness".into(),
@@ -3053,7 +3048,7 @@ local_test!(match_polish_confirms_improvement_at_full_length_and_restores_if_not
         let rig = Rc::new(raw);
         let h = match_harness(vec![Some(("Drift", 50.)), None], |o| {
             o.match_budget = Some(MatchBudget { rounds: 0, polish_ms: Some(50), ..MATCH_BUDGET });
-            let random = Rc::new(RefCell::new(kumi_runtime::core::evolve::seeded(123)));
+            let random = Rc::new(RefCell::new(kumi_listening::cmaes::seeded(123)));
             o.goal_random = Some(Rc::new(move || (random.borrow_mut())()));
         });
         *h.record.goal_rig.borrow_mut() = Some(rig.clone());
@@ -3089,11 +3084,11 @@ impl KernelTool for NamesOnly {
     }
 }
 local_test!(library_tools_preferences_status_and_forgetting_follow_session_lifecycle, {
-    use kumi_runtime::library::{create_library, sources::SourceOptions, LibraryOptions};
+    use kumi_library::{create_library, sources::SourceOptions, LibraryOptions};
     let temp = tempfile::tempdir().unwrap();
     let samples = temp.path().join("samples");
     std::fs::create_dir(&samples).unwrap();
-    kumi_runtime::library::library_logs(&temp.path().to_string_lossy())
+    kumi_library::library_logs(&temp.path().to_string_lossy())
         .sounds
         .append(&[json!({"path":samples.join("Kick.wav"),"size":100,"mtime":1,"seconds":1,"features":1})])
         .await
@@ -3159,7 +3154,7 @@ local_test!(library_tools_preferences_status_and_forgetting_follow_session_lifec
 });
 
 local_test!(each_turn_logs_where_its_time_went, {
-    use kumi_runtime::core::timing;
+    use kumi_ai::timing;
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("timings.jsonl");
     let fail = Rc::new(Cell::new(false));
@@ -3206,7 +3201,7 @@ local_test!(each_turn_logs_where_its_time_went, {
 });
 
 local_test!(a_side_question_asked_during_an_answer_isnt_part_of_its_timing, {
-    use kumi_runtime::core::timing;
+    use kumi_ai::timing;
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("timings.jsonl");
     let gate = Rc::new(Notify::new());
@@ -3235,7 +3230,7 @@ local_test!(a_side_question_asked_during_an_answer_isnt_part_of_its_timing, {
     h.session.close().await.unwrap();
 });
 local_test!(a_turn_brings_in_what_an_older_kumi_changed_beside_it_and_never_waits_for_it, {
-    use kumi_runtime::core::{file_sync::FileSync, store_client::StoreClient, store_import::JsonFiles};
+    use kumi_agent::core::{file_sync::FileSync, store_client::StoreClient, store_import::JsonFiles};
     let dir = tempfile::tempdir().unwrap();
     let files = JsonFiles {
         memory: dir.path().join("memory.json"),
@@ -3371,7 +3366,7 @@ impl KernelTool for UndoTool {
     }
 }
 local_test!(the_producers_reactions_are_kept_in_kumis_database_and_kumis_own_steps_are_not, {
-    use kumi_runtime::core::{store_client::StoreClient, store_import::JsonFiles};
+    use kumi_agent::core::{store_client::StoreClient, store_import::JsonFiles};
     use kumi_store::observations::{self, Kind};
     let dir = tempfile::tempdir().unwrap();
     let files = JsonFiles {
@@ -3596,8 +3591,8 @@ local_test!(another_sets_conversation_asks_first_and_a_copy_carries_on_here_with
     h.session.close().await.unwrap();
 });
 local_test!(an_imported_conversation_carries_on_here_in_a_copy_and_the_model_hears_it_came_from_a_file, {
-    use kumi_runtime::core::conversations::IMPORTED;
-    use kumi_runtime::core::export::{import, json as saved_for_kumi, Options, Source};
+    use kumi_agent::core::export::{import, json as saved_for_kumi, Options, Source};
+    use kumi_types::place::IMPORTED;
     let dir = tempfile::tempdir().unwrap();
     let store = create_conversation_store(dir.path());
     // Saved for Kumi on another computer, then imported here.
@@ -3666,7 +3661,7 @@ local_test!(an_export_says_when_its_conversation_was_last_saved_not_when_it_was_
     h.session.close().await.unwrap();
 });
 local_test!(an_imported_conversation_taken_up_and_left_keeps_no_copy_and_its_first_request_keeps_one, {
-    use kumi_runtime::core::conversations::IMPORTED;
+    use kumi_types::place::IMPORTED;
     let dir = tempfile::tempdir().unwrap();
     let store = create_conversation_store(dir.path());
     imported_here(store.as_ref()).await;
@@ -3718,8 +3713,8 @@ local_test!(a_chat_that_keeps_no_conversations_still_exports_what_was_said, {
 });
 /// A conversation exported on another computer and imported here, kept where `kumi import` keeps it.
 async fn imported_here(store: &dyn ConversationStore) {
-    use kumi_runtime::core::conversations::IMPORTED;
-    use kumi_runtime::core::export::{import, json as saved_for_kumi, Options, Source};
+    use kumi_agent::core::export::{import, json as saved_for_kumi, Options, Source};
+    use kumi_types::place::IMPORTED;
     let elsewhere = kept_about("make the bass wider", Some("openai/gpt-test"));
     let same = |text: &str| text.to_string();
     let none = |_: &ChangeRecord| -> Option<String> { None };
@@ -3746,7 +3741,7 @@ async fn imported_here(store: &dyn ConversationStore) {
 }
 /// `kumi -r <imported id>` (or `-c` when the import is the latest): the copy goes on, and Kumi asks nothing.
 async fn taken_up_at_start(place: Option<&str>) {
-    use kumi_runtime::core::conversations::IMPORTED;
+    use kumi_types::place::IMPORTED;
     let dir = tempfile::tempdir().unwrap();
     let store = create_conversation_store(dir.path());
     imported_here(store.as_ref()).await;

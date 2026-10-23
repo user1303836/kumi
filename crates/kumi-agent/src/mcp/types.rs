@@ -12,7 +12,7 @@ use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::core::contracts::JsonObject;
+use kumi_types::contracts::JsonObject;
 
 pub const JSONRPC_VERSION: &str = "2.0";
 pub const LATEST_PROTOCOL_VERSION: &str = "2025-11-25";

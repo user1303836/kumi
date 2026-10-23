@@ -29,12 +29,19 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use futures::{stream, StreamExt};
+    use kumi_agent::{
+        core::contracts::StopReason,
+        kernel::agent::{create_agent_kernel, AgentKernelOptions},
+    };
+    use kumi_ai::{
+        binding::{LanguageModel, ModelBinding},
+        error::LanguageModelError,
+        types::*,
+    };
     use kumi_common::abort::Signal;
-    use kumi_runtime::{
-        ai::{error::LanguageModelError, types::*},
-        core::contracts::{JsonObject, KernelTool, StopReason, ToolResult},
-        kernel::agent::{create_agent_kernel, AgentKernelOptions, LanguageModel, ModelBinding},
-        RuntimeError,
+    use kumi_types::{
+        contracts::{JsonObject, KernelTool, ToolResult},
+        errors::RuntimeError,
     };
     use std::{
         cell::RefCell,

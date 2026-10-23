@@ -1,8 +1,8 @@
 //! A DAW's side of delivery to a spec: only its own facts. The mix rendered offline (the whole of it, or a stretch), its master
 //! fader as it is and set by a gain (one change), and its words for what a fader can't do (a limiter, a gainer).
-use crate::core::contracts::Render;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::contracts::Render;
 use serde_json::Value;
 
 pub struct Words {

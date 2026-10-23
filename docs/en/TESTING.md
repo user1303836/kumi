@@ -10,7 +10,7 @@ CI runs. None of the ordinary tests need Live or a sign-in.
 From the repository root:
 
 ```sh
-npm ci --prefix crates/kumi-runtime/tests/support   # once: the official SDKs some Rust tests run
+npm ci --prefix crates/kumi-agent/tests/support   # once: the official SDKs some Rust tests run
 cargo build --workspace --all-targets --locked
 sh scripts/test-isolated.sh                        # Windows: ./scripts/test-isolated.ps1
 python3 -m unittest discover -s daws/ableton/remote-script -p 'test_*.py'
@@ -54,7 +54,7 @@ temporary folder, and `KUMI_REMOTE_SCRIPTS_DIR` and `KUMI_LIVE_EXTENSIONS_DIR`
 are dropped, so no test can reach your Live folders or `~/.kumi`.
 
 The tests that run the official MCP and model SDKs beside Kumi's own client and
-providers fail until `npm ci --prefix crates/kumi-runtime/tests/support` has
+providers fail until `npm ci --prefix crates/kumi-agent/tests/support` has
 run. The loudness and true-peak tests hold the analysis to FFmpeg's `ebur128`
 results for generated audio.
 

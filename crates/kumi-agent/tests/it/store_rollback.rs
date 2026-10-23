@@ -1,7 +1,7 @@
 //! Kumi's database and the files an older Kumi uses, kept in step: what the database keeps is written
 //! back to the files before a rollback, and what an older Kumi changes in them (after a rollback, or
 //! running beside this one) comes back in, by a three-way merge with each file's base.
-use kumi_runtime::core::{
+use kumi_agent::core::{
     contracts::MemoryStore,
     memory::{create_memory_store, parse_notes, MemoryStoreOptions, MAX_NOTES},
     store_backed::SqliteMemoryStore,

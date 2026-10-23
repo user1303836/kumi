@@ -1,12 +1,10 @@
 //! Session ownership, cancellation, context refresh and conversation recovery.
 
-use super::{
+use crate::core::{
     contracts::*,
-    errors::{FailureKind, KumiError, RuntimeError},
     file_sync::FileSync,
     gaps::{gap_guidance, gap_tools_for},
     memory::{memory_instructions_for, memory_tools_for, MemoryTools, MemoryToolsOptions},
-    place::{kept_for, Place},
     recall::{recall_tool_for, RecallOptions},
     recipes::{recipe_instructions, recipe_tools_for, RecipeStore, RecipeToolsOptions, RUN_RECIPE_TOOL},
     store_client::StoreClient,
@@ -15,27 +13,34 @@ use super::{
         technique_guidance, technique_instructions_for, technique_tools_for, TechniqueStore, TechniqueTools, TechniqueToolsOptions,
         PLAN_TECHNIQUE,
     },
-    timing,
 };
 use crate::{
-    audio::tools::{listening_tools_for, ListeningOptions},
-    core::conversations::{new_conversation_id, IMPORTED},
+    core::conversations::new_conversation_id,
     kernel::budget::{transcript_of, OBSERVATION_MARKER},
-    library::{Library, LibraryToolsOptions},
-    web::{
-        net::WebClient,
-        tool::{web_tools_for, WebToolOptions},
-    },
 };
 use async_trait::async_trait;
 use futures::{
     future::{LocalBoxFuture, Shared},
     FutureExt,
 };
+use kumi_ai::timing;
 use kumi_common::{
     abort::{self, Signal},
     js::string::{head, trim},
 };
+use kumi_library::{Library, LibraryToolsOptions};
+use kumi_media::audio::tools::{listening_tools_for, ListeningOptions};
+use kumi_net::web::WebClient;
+use kumi_types::contracts::*;
+use kumi_types::daw::DawId;
+use kumi_types::daw::DawProfile;
+use kumi_types::daw::DawWords;
+use kumi_types::place::IMPORTED;
+use kumi_types::{
+    errors::{FailureKind, KumiError, RuntimeError},
+    place::{kept_for, Place},
+};
+use kumi_web::tool::{web_tools_for, WebToolOptions};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -53,8 +58,8 @@ mod jobs;
 mod looping;
 mod matching;
 mod objective;
-use super::goal::{GoalBudget, GoalState, GoalStatus, GoalStore};
-use super::{
+use crate::core::goal::{GoalBudget, GoalState, GoalStatus, GoalStore};
+use crate::core::{
     match_run::{MatchBudget, MatchRun},
     playbook::PlaybookStore,
 };
@@ -95,7 +100,7 @@ pub struct SessionOptions {
     pub recipes: Option<Rc<dyn RecipeStore>>,
     pub watch: Option<VideoDirectories>,
     /// Where measured references are kept (the reference tool is offered with listening when it's set).
-    pub references: Option<Rc<crate::references::store::ReferenceStore>>,
+    pub references: Option<Rc<kumi_listening::references::store::ReferenceStore>>,
     pub web: bool,
     pub web_client: Option<Rc<dyn WebClient>>,
     pub techniques: Option<Rc<dyn TechniqueStore>>,
@@ -115,8 +120,8 @@ pub struct SessionOptions {
     pub goals: Option<Rc<dyn GoalStore>>,
     pub goal_budget: Option<GoalBudget>,
     /// Where /goal keeps its objective, per Set, so it survives a restart.
-    pub objectives: Option<Rc<dyn super::goal_mode::ObjectiveStore>>,
-    pub objective_budget: Option<super::goal_mode::ObjectiveBudget>,
+    pub objectives: Option<Rc<dyn crate::core::goal_mode::ObjectiveStore>>,
+    pub objective_budget: Option<crate::core::goal_mode::ObjectiveBudget>,
     /// Background jobs (workers and tool calls beside the conversation); none offers the model no job tools.
     pub jobs: Option<JobsOptions>,
     /// A kept conversation the producer asked for as Kumi starts (`kumi -c`, `kumi -r`): where it's kept, and its id.
@@ -280,13 +285,13 @@ struct State {
     goal_stopped: bool,
     goal_reference: Option<String>,
     /// The judge's last round this session: what /goal and the loop check after a turn.
-    judged_last: Option<crate::listening::round::Round>,
+    judged_last: Option<kumi_listening::round::Round>,
     /// The judge's rounds this session, counted: a goal's turn compares readings only when it logged one.
     judged_rounds: u64,
     /// The loop running this turn (an explicit /loop, a request that calls for it, or the model's own judged change).
-    looping: Option<Rc<RefCell<super::loop_run::LoopRun>>>,
+    looping: Option<Rc<RefCell<crate::core::loop_run::LoopRun>>>,
     /// A judged run's first listen, kept until the model judges a change (which starts the loop with it).
-    judge_start: Option<crate::listening::round::Round>,
+    judge_start: Option<kumi_listening::round::Round>,
     /// What the judge's kept changes closed, in steps, and how many changes it judged: a goal's turn progresses when
     /// it closes a step or more.
     judged_closed: f64,
@@ -294,7 +299,7 @@ struct State {
     /// The request of the turn running now, for a loop the model starts by judging.
     turn_request: Option<String>,
     /// The /goal objective for a place (the Set it belongs to), and the operation pursuing it.
-    objective: Option<(String, super::goal_mode::Objective)>,
+    objective: Option<(String, crate::core::goal_mode::Objective)>,
     objective_op: Option<Rc<Operation>>,
     objective_stopped: bool,
     /// When the running goal's time is up (ms since the epoch): a loop inside it ends by then.
@@ -411,10 +416,10 @@ fn now() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 /// A loop's budget: its own, but no longer than the goal it runs in has left.
-fn loop_budget(until: Option<i64>) -> super::loop_run::LoopBudget {
-    let budget = super::loop_run::LOOP_BUDGET;
+fn loop_budget(until: Option<i64>) -> crate::core::loop_run::LoopBudget {
+    let budget = crate::core::loop_run::LOOP_BUDGET;
     match until {
-        Some(until) => super::loop_run::LoopBudget { ms: budget.ms.min((until - now()).max(0)), ..budget },
+        Some(until) => crate::core::loop_run::LoopBudget { ms: budget.ms.min((until - now()).max(0)), ..budget },
         None => budget,
     }
 }
@@ -612,12 +617,12 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
         let listening = match (&options.references, options.listen) {
             (Some(store), true) => {
                 let mut listening = listening;
-                let programs = crate::video::programs::ProgramOptions {
+                let programs = kumi_media::programs::ProgramOptions {
                     tools_dir: options.watch.as_ref().map(|dirs| dirs.tools_dir.clone()).unwrap_or_default(),
                     ..Default::default()
                 };
                 let resolve = weak.clone();
-                let clips: crate::audio::tools::ResolveAudio = Rc::new(move |named, signal| {
+                let clips: kumi_media::audio::tools::ResolveAudio = Rc::new(move |named, signal| {
                     let integration = resolve.upgrade().and_then(|i| i.state.borrow().integration.clone());
                     async move {
                         match integration {
@@ -627,7 +632,12 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                     }
                     .boxed_local()
                 });
-                listening.extend(crate::references::tool::reference_tools_for(options.profile, store.clone(), programs, Some(clips)));
+                listening.extend(kumi_listening::references::tool::reference_tools_for(
+                    options.profile,
+                    store.clone(),
+                    programs,
+                    Some(clips),
+                ));
                 listening
             }
             _ => listening,
@@ -638,9 +648,9 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             .as_ref()
             .map(|dirs| {
                 let answers = answers.clone();
-                crate::video::tool::video_tools_for(
+                kumi_web::video::tool::video_tools_for(
                     &options.profile,
-                    crate::video::tool::VideoToolOptions {
+                    kumi_web::video::tool::VideoToolOptions {
                         videos_dir: dirs.videos_dir.clone(),
                         tools_dir: dirs.tools_dir.clone(),
                         env: None,
@@ -820,7 +830,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
 impl Session {
     /// Where the session's DAW keeps conversations about a project not saved yet: "unsaved" for Live's.
     fn unsaved(&self) -> &'static str {
-        crate::core::place::unsaved(self.0.options.profile.id.unwrap_or(DawId::Ableton))
+        kumi_types::place::unsaved(self.0.options.profile.id.unwrap_or(DawId::Ableton))
     }
     fn emit(&self, event: SessionEvent) {
         // A step moved to the background (ctrl-b): what its tools say from then on is its job's. Only what tools say: the
@@ -2767,7 +2777,7 @@ impl SessionController for Session {
         Some(ConversationNow {
             title: match &row {
                 Some(row) if name.is_none() => row.title(),
-                _ => super::conversations::title(name.as_deref(), first.as_deref().unwrap_or("")),
+                _ => crate::core::conversations::title(name.as_deref(), first.as_deref().unwrap_or("")),
             },
             kept: row.is_some(),
             touched,
@@ -2826,7 +2836,7 @@ impl SessionController for Session {
         }
         let title = match &row {
             Some(row) if name.is_none() => row.title(),
-            _ => super::conversations::title(name.as_deref(), first.as_deref().or(conversation.first.as_deref()).unwrap_or("")),
+            _ => crate::core::conversations::title(name.as_deref(), first.as_deref().or(conversation.first.as_deref()).unwrap_or("")),
         };
         Some(ConversationToExport {
             id,
@@ -2852,7 +2862,7 @@ impl SessionController for Session {
             }
             WatchEvent::Action(_) => return,
             WatchEvent::Judged(round) => {
-                use crate::listening::round::RoundKind;
+                use kumi_listening::round::RoundKind;
                 let mut s = self.0.state.borrow_mut();
                 if round.kind == RoundKind::Judged {
                     s.judged_changes += 1;
@@ -2874,7 +2884,7 @@ impl SessionController for Session {
                         RoundKind::Start => s.judge_start = Some(round.clone()),
                         RoundKind::Judged => {
                             let request = s.turn_request.clone().unwrap_or_default();
-                            let mut run = super::loop_run::LoopRun::new(request, loop_budget(s.objective_until));
+                            let mut run = crate::core::loop_run::LoopRun::new(request, loop_budget(s.objective_until));
                             run.steers = s.turn_steers;
                             if let Some(start) = s.judge_start.take() {
                                 run.judged(start);
@@ -3068,7 +3078,7 @@ impl SessionController for Session {
         true
     }
     async fn instant(&self, text: &str) -> Result<Option<InstantOutcome>, RuntimeError> {
-        let Some(intent) = super::phrases::parse(text) else { return Ok(None) };
+        let Some(intent) = crate::core::phrases::parse(text) else { return Ok(None) };
         let integration = self.0.state.borrow().integration.clone();
         if !self.0.state.borrow().started || !integration.as_ref().is_some_and(|integration| integration.has_instant()) {
             return Ok(None);
@@ -3290,7 +3300,7 @@ impl SessionController for Session {
             .unwrap_or_default()
             .into_iter()
             .rev()
-            .map(|l| LessonEntry { line: super::playbook::lesson_line(&l), id: l.id, at: l.at })
+            .map(|l| LessonEntry { line: crate::core::playbook::lesson_line(&l), id: l.id, at: l.at })
             .collect())
     }
     fn has_forget_lesson(&self) -> bool {
@@ -3305,7 +3315,7 @@ impl SessionController for Session {
                     let Some(gone) = store.forget(&id).await? else {
                         return Ok(false);
                     };
-                    this.emit(SessionEvent::Lesson { action: LessonAction::Forgot, id, line: super::playbook::lesson_line(&gone) });
+                    this.emit(SessionEvent::Lesson { action: LessonAction::Forgot, id, line: crate::core::playbook::lesson_line(&gone) });
                     Ok(true)
                 }
                 .boxed_local()

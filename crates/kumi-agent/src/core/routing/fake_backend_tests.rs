@@ -3,9 +3,9 @@
 use super::backend::{Build, RoutingBackend, Steps, Words};
 use super::graph::{Edge, Graph, Node, Route, MASTER};
 use super::tool::Routing;
-use crate::core::contracts::KernelTool;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::contracts::KernelTool;
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::rc::Rc;

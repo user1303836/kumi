@@ -1,5 +1,9 @@
 use async_trait::async_trait;
 use futures::{future::LocalBoxFuture, FutureExt};
+use kumi_agent::mcp::{
+    client::{McpEndpoint, StderrStatus},
+    types::{CallToolResult, ListToolsResult},
+};
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
@@ -10,15 +14,9 @@ use kumi_daw_ableton::{
     history::{Applied, FastResult, History, MAX_ENTRIES},
     remember::Remember,
 };
-use kumi_runtime::{
-    core::{
-        contracts::{ChangeRecord, JsonObject},
-        errors::RuntimeError,
-    },
-    mcp::{
-        client::{McpEndpoint, StderrStatus},
-        types::{CallToolResult, ListToolsResult},
-    },
+use kumi_types::{
+    contracts::{ChangeRecord, JsonObject},
+    errors::RuntimeError,
 };
 use serde_json::{json, Value};
 use std::{cell::RefCell, rc::Rc};
@@ -32,7 +30,7 @@ impl McpEndpoint for Fixture {
     fn pid(&self) -> Option<u32> {
         None
     }
-    fn server_info(&self) -> Option<kumi_runtime::mcp::types::Implementation> {
+    fn server_info(&self) -> Option<kumi_agent::mcp::types::Implementation> {
         None
     }
     async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {

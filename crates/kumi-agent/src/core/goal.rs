@@ -4,14 +4,14 @@
 //! the structural leaps, every few generations or when the search stalls. A goal is kept on disk as it
 //! goes, so it survives a restart and /goal picks it up again.
 
-use super::daw::DawProfile;
+use kumi_types::daw::DawProfile;
 use serde::{Deserialize, Serialize};
 
-use super::contracts::AuditionRequest;
-use super::errors::RuntimeError;
-use super::evolve::Slot;
+use crate::core::evolve::Slot;
 use async_trait::async_trait;
 use kumi_common::js::{json::stringify, number::to_string};
+use kumi_types::contracts::AuditionRequest;
+use kumi_types::errors::RuntimeError;
 use serde_json::Value;
 use std::{path::PathBuf, rc::Rc};
 use tokio::io::AsyncWriteExt;
@@ -220,7 +220,7 @@ pub fn goal_leap(
     best: Option<&Best>,
     gaps: &[String],
     stalled: bool,
-    structural: Option<&super::contracts::StructuralMove>,
+    structural: Option<&kumi_types::contracts::StructuralMove>,
 ) -> String {
     goal_leap_for(&DawProfile::ABLETON, state, best, gaps, stalled, structural)
 }
@@ -232,7 +232,7 @@ pub fn goal_leap_for(
     best: Option<&Best>,
     gaps: &[String],
     stalled: bool,
-    structural: Option<&super::contracts::StructuralMove>,
+    structural: Option<&kumi_types::contracts::StructuralMove>,
 ) -> String {
     let trend = state.trend[state.trend.len().saturating_sub(8)..].iter().map(|v| to_string(*v)).collect::<Vec<_>>().join("% → ");
     let best = best.map(|b| format!("{}% ({})", to_string(b.score), b.label)).unwrap_or_else(|| "none yet".into());

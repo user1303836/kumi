@@ -9,8 +9,7 @@ use crate::{
     voice::{create_voice_control, VoiceControlOptions},
 };
 use async_trait::async_trait;
-use kumi_runtime::{
-    auth::store::{open_credential_store, Credential, CredentialStore},
+use kumi_agent::{
     core::{
         context::IntegrationContext,
         contracts::*,
@@ -21,11 +20,14 @@ use kumi_runtime::{
         store_backed::{SqliteMemoryStore, SqlitePlaybookStore, SqliteTechniqueStore},
         store_client::StoreClient,
     },
-    library::{create_library, LibraryOptions},
-    slots,
-    video::programs::{configure_programs, ProgramDefaults},
     *,
 };
+use kumi_ai::auth::store::{open_credential_store, Credential, CredentialStore};
+use kumi_library::{create_library, LibraryOptions};
+use kumi_listening::slots;
+use kumi_media::programs::{configure_programs, ProgramDefaults};
+use kumi_types::errors::KumiError;
+use kumi_types::errors::SetupFailure;
 use std::{cell::Cell, rc::Weak, sync::Arc};
 struct UnavailableKernel {
     error: RuntimeError,
@@ -158,7 +160,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         _ => unreachable!(),
     };
     // The DAW this session works with: the one chosen (config), else Live.
-    let provider = crate::daw::provider(daw.unwrap_or(kumi_runtime::core::daw::DawId::Ableton)).expect("a chosen DAW is registered");
+    let provider = crate::daw::provider(daw.unwrap_or(kumi_types::daw::DawId::Ableton)).expect("a chosen DAW is registered");
     crate::daw::work_with(provider.id());
     // The DAW used last decides only among several bridges: a producer with one (Live alone) never gets the file.
     if bridge_config.is_some() && crate::daw::providers().into_iter().filter(|p| p.bridge_installed(&io.env)).count() > 1 {
@@ -209,10 +211,10 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     // go on saving where they're kept, Live or not).
     let keep_days = settings.conversations.as_ref().and_then(|c| c.keep_days);
     let conversations = (bridge_config.is_some() || bridge_missing || resume.is_some())
-        .then(|| kumi_runtime::core::conversations::create_conversation_store_in(&projects_dir, keep_days, crate::daw::registry::PLACES));
+        .then(|| kumi_agent::core::conversations::create_conversation_store_in(&projects_dir, keep_days, crate::daw::registry::PLACES));
     // The conversation asked for is found before anything shows: a word that names none says so, and Kumi stops there.
     // Only this DAW's conversations (and imported ones) go on here: another DAW's goes on in that DAW (review L4).
-    let ours = |place: &str| kumi_runtime::core::place::kept_for(place, provider.id());
+    let ours = |place: &str| kumi_types::place::kept_for(place, provider.id());
     let (taken_up, choose, resume_notice) = match (&resume, &conversations) {
         (Some(Resume::Named(word)), Some(store)) => match store.find(word).await? {
             ConversationMatch::One(row) if !ours(&row.place) => {
@@ -257,7 +259,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         profile: Some(provider.profile()),
     });
     // Measured references: the reference tool keeps them, the judge works toward them by name.
-    let references = Rc::new(kumi_runtime::references::store::ReferenceStore::new(load_references_dir(&io.env)?));
+    let references = Rc::new(kumi_listening::references::store::ReferenceStore::new(load_references_dir(&io.env)?));
     let models = Rc::new(create_model_control(ModelControlOptions {
         store,
         settings_file: settings_file.clone(),
@@ -552,7 +554,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     let database = database.ok().map(|(client, _)| client);
     options.memory = Some(match &database {
         Some(client) => Rc::new(SqliteMemoryStore::with_places(client.clone(), crate::daw::registry::PLACES)) as Rc<dyn MemoryStore>,
-        None => kumi_runtime::core::memory::create_memory_store_in(
+        None => kumi_agent::core::memory::create_memory_store_in(
             MemoryStoreOptions { projects_dir: projects_dir.clone().into(), producer_file: load_memory_file(&io.env)?.into() },
             crate::daw::registry::PLACES,
         ),
@@ -610,7 +612,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         (bridge, database) => bridge.or(database),
     };
     // An older credential file that couldn't be made readable only by the producer (Windows), said once.
-    let notice = match (notice, kumi_runtime::auth::store::unprotected_notice()) {
+    let notice = match (notice, kumi_ai::auth::store::unprotected_notice()) {
         (Some(notice), Some(credentials)) => Some(format!("{notice} {credentials}")),
         (notice, credentials) => notice.or(credentials),
     };
@@ -634,14 +636,14 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     let connect_why = bridge.why;
     let update_after = Rc::new(Cell::new(false));
     // /daw <name>: Kumi closes and opens again with that DAW. Offered once the producer works with more than Live.
-    let daw_after: Rc<Cell<Option<kumi_runtime::core::daw::DawId>>> = Rc::default();
-    let offers_daw = provider.id() != kumi_runtime::core::daw::DawId::Ableton
+    let daw_after: Rc<Cell<Option<kumi_types::daw::DawId>>> = Rc::default();
+    let offers_daw = provider.id() != kumi_types::daw::DawId::Ableton
         || crate::daw::providers()
             .into_iter()
-            .any(|other| other.id() != kumi_runtime::core::daw::DawId::Ableton && other.bridge_installed(&io.env));
+            .any(|other| other.id() != kumi_types::daw::DawId::Ableton && other.bridge_installed(&io.env));
     let switch_daw = offers_daw.then(|| {
         let daw_after = daw_after.clone();
-        Rc::new(move |daw| daw_after.set(Some(daw))) as Rc<dyn Fn(kumi_runtime::core::daw::DawId)>
+        Rc::new(move |daw| daw_after.set(Some(daw))) as Rc<dyn Fn(kumi_types::daw::DawId)>
     });
     // What /daw offers: the DAWs on this computer (or with a bridge in), by this session's environment.
     crate::daw::offer_here(io.daws_here.clone().unwrap_or_else(|| {
@@ -658,7 +660,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             if daw != current {
                 daw_after.set(Some(daw));
             }
-        }) as Rc<dyn Fn(kumi_runtime::core::daw::DawId)>
+        }) as Rc<dyn Fn(kumi_types::daw::DawId)>
     });
     let updates = update::UpdateControl {
         current: KUMI_VERSION.into(),
@@ -862,8 +864,8 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     }
 }
 /// What `-r` says of a conversation kept in another DAW's place: whose it is, and the command that carries it on there.
-fn elsewhere_words(row: &kumi_runtime::core::contracts::ConversationSummary, command: &str) -> String {
-    let daw = kumi_runtime::core::place::Place::parse(&row.place).and_then(|place| place.daw());
+fn elsewhere_words(row: &kumi_agent::core::contracts::ConversationSummary, command: &str) -> String {
+    let daw = kumi_types::place::Place::parse(&row.place).and_then(|place| place.daw());
     let (app, noun) = daw.and_then(crate::daw::registry::profile).map_or(("another DAW", "project"), |profile| profile.word_pair());
     let title: String = row.title().chars().filter(|c| !c.is_control()).collect();
     format!(
@@ -888,7 +890,7 @@ fn reopened_args(args: &[String], going: Option<&str>) -> Vec<String> {
 
 /// What Kumi opens again with after /daw: the same arguments, with that DAW asked for and no conversation (each DAW's
 /// project has its own).
-fn switched_args(args: &[String], daw: kumi_runtime::core::daw::DawId) -> Vec<String> {
+fn switched_args(args: &[String], daw: kumi_types::daw::DawId) -> Vec<String> {
     let rest = crate::config::take_resume(args).map(|(rest, _)| rest).unwrap_or_else(|_| args.to_vec());
     let rest = crate::config::take_daw(&rest, &Env::new()).map(|(rest, _)| rest).unwrap_or(rest);
     ["--daw".to_string(), daw.as_str().to_string()].into_iter().chain(rest).collect()
@@ -897,7 +899,7 @@ fn switched_args(args: &[String], daw: kumi_runtime::core::daw::DawId) -> Vec<St
 #[cfg(test)]
 mod reopen_tests {
     use super::{reopened_args, switched_args};
-    use kumi_runtime::core::daw::DawId;
+    use kumi_types::daw::DawId;
     #[test]
     fn opened_again_with_another_daw_kumi_asks_for_it_and_no_conversation() {
         let args = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
@@ -921,7 +923,8 @@ mod reopen_tests {
 #[cfg(test)]
 mod watch_tests {
     use super::*;
-    use kumi_runtime::core::contracts::{ChangeRecord, PinnedNode, SessionStatus, TurnState};
+    use kumi_agent::core::contracts::{PinnedNode, SessionStatus, TurnState};
+    use kumi_types::contracts::ChangeRecord;
 
     struct Fake {
         reconnects: Cell<u32>,

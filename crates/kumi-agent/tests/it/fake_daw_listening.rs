@@ -4,15 +4,15 @@
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use kumi_common::abort::Signal;
-use kumi_runtime::core::{
-    contracts::{AuditionCandidate, JsonObject, Render},
-    daw::{DawProfile, DawWords, PromptVocab},
-};
-use kumi_runtime::listening::{
+use kumi_listening::{
     checklist::MainState,
     engine::Listening,
     judging::Placed,
     renderer::{Audible, AuditionOptions, AuditionPass, AuditionRender, AuditionSource, Captured, ListenFlag, Pass, Renderer, Window},
+};
+use kumi_types::{
+    contracts::{AuditionCandidate, JsonObject, Render},
+    daw::{DawProfile, DawWords, PromptVocab},
 };
 use regex::Regex;
 use serde_json::{json, Value};

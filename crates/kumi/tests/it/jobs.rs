@@ -1,16 +1,17 @@
 //! Background jobs: workers and moved steps beside the conversation.
 use async_trait::async_trait;
 use futures::{future::LocalBoxFuture, FutureExt};
-use kumi_common::abort::Signal;
-use kumi_runtime::{
+use kumi_agent::{
     core::{
         contracts::*,
-        errors::RuntimeError,
         jobs::{JobState, WhenDone},
         session::*,
     },
     kernel::budget::OBSERVATION_MARKER,
 };
+use kumi_common::abort::Signal;
+use kumi_types::contracts::*;
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -196,7 +197,7 @@ fn harness_with(
 }
 
 impl Harness {
-    fn statuses(&self, id: u32) -> Vec<kumi_runtime::core::jobs::JobStatus> {
+    fn statuses(&self, id: u32) -> Vec<kumi_agent::core::jobs::JobStatus> {
         self.events
             .borrow()
             .iter()
@@ -206,7 +207,7 @@ impl Harness {
             })
             .collect()
     }
-    fn last(&self, id: u32) -> Option<kumi_runtime::core::jobs::JobStatus> {
+    fn last(&self, id: u32) -> Option<kumi_agent::core::jobs::JobStatus> {
         self.statuses(id).last().cloned()
     }
     fn carried_on(&self) -> Vec<u32> {
@@ -433,7 +434,7 @@ local_test!(a_worker_gets_only_tools_away_from_the_daw_and_never_starts_a_job, {
         Rc::new(Fake { name: "live_discover", reach: Reach::DawRead, gate: None, finish: None, on_event: None }),
     ];
     let dir = tempfile::tempdir().unwrap();
-    let library = kumi_runtime::library::create_library(kumi_runtime::library::LibraryOptions {
+    let library = kumi_library::create_library(kumi_library::LibraryOptions {
         daws: kumi::daw::registry::LIBRARIES,
         dir: dir.path().join("library").to_string_lossy().into(),
         find_sets: Some(false),
@@ -491,7 +492,7 @@ local_test!(ctrl_b_moves_a_step_away_from_the_daw_to_a_job_and_the_answer_carrie
     let shown: Rc<RefCell<Vec<String>>> = Rc::default();
     let on_event: Rc<dyn Fn(SessionEvent)> = {
         let shown = shown.clone();
-        Rc::new(move |event| match kumi_runtime::core::jobs::route() {
+        Rc::new(move |event| match kumi_agent::core::jobs::route() {
             Some(job) => job.on_event()(event),
             None => {
                 if let SessionEvent::Doing { text } = event {
@@ -608,19 +609,17 @@ impl KernelTool for Named {
 }
 
 local_test!(a_session_with_everything_on_offers_the_model_at_most_128_tools, {
-    use kumi_runtime::{
-        core::{
-            conversations::create_conversation_store,
-            gaps::GAP_GUIDANCE,
-            memory::{create_memory_store, MemoryStoreOptions},
-            recipes::create_recipe_store,
-            store_client::StoreClient,
-            store_import::JsonFiles,
-            techniques::create_technique_store,
-        },
-        library::{create_library, LibraryOptions},
-        references::store::ReferenceStore,
+    use kumi_agent::core::{
+        conversations::create_conversation_store,
+        gaps::GAP_GUIDANCE,
+        memory::{create_memory_store, MemoryStoreOptions},
+        recipes::create_recipe_store,
+        store_client::StoreClient,
+        store_import::JsonFiles,
+        techniques::create_technique_store,
     };
+    use kumi_library::{create_library, LibraryOptions};
+    use kumi_listening::references::store::ReferenceStore;
     let _ = GAP_GUIDANCE;
     let dir = tempfile::tempdir().unwrap();
     let at = |name: &str| dir.path().join(name);
@@ -681,7 +680,7 @@ local_test!(a_session_with_everything_on_offers_the_model_at_most_128_tools, {
 });
 
 local_test!(jobs_interrupted_by_closing_come_back_next_time_to_run_again, {
-    use kumi_runtime::core::jobs::create_job_store;
+    use kumi_agent::core::jobs::create_job_store;
     let dir = tempfile::tempdir().unwrap();
     let store = create_job_store(dir.path());
     let first = harness(starts_a_worker("tell"), worker_waiting(Rc::new(Notify::new())), |o| {
@@ -722,7 +721,7 @@ local_test!(jobs_interrupted_by_closing_come_back_next_time_to_run_again, {
 
 #[test]
 fn a_reports_first_line_is_plain_words() {
-    use kumi_runtime::core::jobs::first_line;
+    use kumi_agent::core::jobs::first_line;
     assert_eq!(
         first_line("**Found and watched:** “How To Make A Reese Bass” — **Ableton Tips**, `4:44`.\nMore."),
         "Found and watched: “How To Make A Reese Bass” — Ableton Tips, 4:44."

@@ -72,7 +72,7 @@ REAPER 7.82 と Renoise 3.5.4 は macOS で確認しています。Windows と L
 ```sh
 cargo build --release --locked --workspace --bins
 cargo run --release -p kumi --                     # -- の後に bridge、doctor などを追加
-npm ci --prefix crates/kumi-runtime/tests/support  # 初回のみ：一部のテストが使う公式 SDK
+npm ci --prefix crates/kumi-agent/tests/support  # 初回のみ：一部のテストが使う公式 SDK
 sh scripts/test-isolated.sh                        # Live もサインインも不要
 ```
 
@@ -84,7 +84,9 @@ sh scripts/test-isolated.sh                        # Live もサインインも�
 | フォルダー | 内容 |
 | --- | --- |
 | `crates/kumi` | ターミナルアプリと `kumi` コマンド |
-| `crates/kumi-runtime` | Kumi のエージェントコア：モデルのプロバイダー、メモリー、音声解析、ビデオ、ウェブ、Live・REAPER・Renoise との連携 |
+| `crates/kumi-agent` | Kumi のエージェント：ループ、セッション、メモリー、HISTORY、MCP クライアント |
+| `crates/kumi-ai`、`kumi-media`、`kumi-web`、`kumi-library`、`kumi-listening` | モデルのプロバイダー、音声解析と音声入力、ウェブとビデオ、プロデューサーのライブラリー、聴くこと |
+| `daws/<daw>/kumi-daw-<daw>` | Live・REAPER・Renoise との連携 |
 | `daws/ableton/ableton-mcp-server` | ブリッジ：Kumi が起動するローカルの MCP サーバー。ほかの MCP クライアントからも単独で使えます（[ブリッジのガイド（英語）](daws/ableton/ableton-mcp-server/README.md)） |
 | `daws/ableton/remote-script` | Live の中で動く、ブリッジの Remote Script |
 | `daws/ableton/live-extension` | Kumi の Live 拡張機能（Live 12.4 以降） |

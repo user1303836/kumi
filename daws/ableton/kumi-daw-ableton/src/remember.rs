@@ -9,11 +9,9 @@ use futures::{
     future::{LocalBoxFuture, Shared},
     FutureExt,
 };
+use kumi_agent::core::contracts::CatchUp;
 use kumi_common::abort::{self, Signal};
-use kumi_runtime::core::{
-    contracts::{CatchUp, JsonObject},
-    errors::RuntimeError,
-};
+use kumi_types::{contracts::JsonObject, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},

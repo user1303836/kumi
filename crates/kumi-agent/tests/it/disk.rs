@@ -1,4 +1,4 @@
-use kumi_runtime::core::disk::{free_bytes, low_disk_with, MB};
+use kumi_types::disk::{free_bytes, low_disk_with, MB};
 
 #[tokio::test]
 async fn free_space_is_read_for_a_paths_disk_from_its_nearest_folder_that_exists() {

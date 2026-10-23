@@ -11,8 +11,10 @@ use kumi::{
     update::UpdateControl,
     willington::WillingtonControl,
 };
+use kumi_agent::core::contracts::*;
 use kumi_common::abort::Signal;
-use kumi_runtime::core::{contracts::*, errors::RuntimeError};
+use kumi_types::contracts::*;
+use kumi_types::errors::RuntimeError;
 use models::FakeModels;
 use serde_json::{json, Value};
 use std::{
@@ -906,7 +908,7 @@ async fn export_and_share_save_this_conversation_where_kumi_was_started_with_sec
 async fn plain_mode_in_reaper_and_renoise_never_speaks_lives_words() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            for (daw, app, place) in [(kumi_runtime::core::daw::DawId::Reaper, "REAPER", "project"), (kumi_runtime::core::daw::DawId::Renoise, "Renoise", "song")] {
+            for (daw, app, place) in [(kumi_types::daw::DawId::Reaper, "REAPER", "project"), (kumi_types::daw::DawId::Renoise, "Renoise", "song")] {
                 kumi::daw::work_with(daw);
                 for mode in ["live", "inference-only"] {
                     let f = Fixture::with(false, false, None, None, None, |o| o.mode = mode.into());
@@ -935,7 +937,7 @@ async fn plain_mode_in_reaper_and_renoise_never_speaks_lives_words() {
                     }
                 }
             }
-            kumi::daw::work_with(kumi_runtime::core::daw::DawId::Ableton);
+            kumi::daw::work_with(kumi_types::daw::DawId::Ableton);
         })
         .await;
 }

@@ -2,9 +2,9 @@
 //! written as files that play back as the track did, and put back beside it.
 use super::backend::{StemsBackend, Words};
 use super::tool::Stems;
-use crate::core::contracts::{KernelTool, Render};
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::contracts::{KernelTool, Render};
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -47,7 +47,7 @@ impl StemsBackend for Rc<Fake> {
 
     async fn render(&self, _track: &str, _from: f64, _beats: f64, _signal: &Signal) -> Result<(Render, String), String> {
         let file = self.dir.path().join("track.wav");
-        crate::audio::decode::write_test_wav(&file, &the_track(), RATE);
+        kumi_media::audio::decode::write_test_wav(&file, &the_track(), RATE);
         Ok((Render { file: file.to_string_lossy().into_owned(), start: 0., seconds: Some(2.) }, "Loop".into()))
     }
 
@@ -89,7 +89,7 @@ async fn a_tracks_stems_are_files_that_play_back_as_it_did() {
     // (the three files add back up to the track, away from its edges)
     let mut sum = vec![0f32; RATE as usize * 2];
     for (_, path) in placed.iter() {
-        let ([left, _], rate) = crate::audio::decode::read_stereo(path, &Signal::new(), 0., 2.).await.unwrap();
+        let ([left, _], rate) = kumi_media::audio::decode::read_stereo(path, &Signal::new(), 0., 2.).await.unwrap();
         assert_eq!(rate, RATE as f64);
         for (total, value) in sum.iter_mut().zip(&left) {
             *total += value;

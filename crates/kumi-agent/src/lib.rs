@@ -1,53 +1,21 @@
-//! The crate root.
+//! Kumi's agent: the kernel (the agent loop), the DAW-neutral core (sessions, HISTORY, plans, places, FOCUS views and
+//! the workflows), the MCP client, and what every DAW's integration shares (with none and the fallback). It names
+//! what the other layers define (kumi-types, kumi-ai, kumi-media, kumi-net, kumi-web, kumi-library, kumi-listening)
+//! by their crates; its root names what other crates use most of its own.
 
-// Kumi's shared settings and types (kumi-types), where the runtime's code and the app have always named them.
-pub use kumi_types::{command, daw_text, daw_word, live_word, system, version};
-
-// The model clients (kumi-ai), where the runtime's code and the app have always named them.
-pub use kumi_ai as ai;
-// Audio and voice (kumi-media), where the runtime's code and the app have always named them.
-pub use kumi_ai::auth;
-pub use kumi_media::audio;
 pub mod core;
 pub mod integrations;
 pub mod kernel;
-// The producer's library and the plug-ins (kumi-library), where the runtime's code and the app have always named them.
-pub use kumi_library as library;
-// Listening, its models' slots, style references and notation (kumi-listening), where the runtime's code and the app
-// have always named them.
-pub use kumi_listening as listening;
 pub mod mcp;
-pub use kumi_ai::models;
-// How Kumi reaches the network (kumi-net), where the runtime's code and the app have always named it.
-pub use kumi_ai::providers;
-pub use kumi_library::plugins;
-pub use kumi_listening::notation;
-pub use kumi_listening::references;
-pub use kumi_listening::slots;
-pub use kumi_media::voice;
-pub use kumi_net as net;
-pub use kumi_web::video;
-// The web and video tools (kumi-web), where the runtime's code and the app have always named them.
-pub use kumi_web as web;
 
-pub use audio::tools::{listening_tools, LISTEN_TOOL};
-pub use audio::{analyze_file, closeness, compare, hear, Analysis, Closeness, Comparison};
-pub use auth::openai_codex::{
-    login_codex_browser, login_codex_device, login_hint, read_pi_codex_login, DEVICE_VERIFICATION_URL, LOGIN_HINT, OPENAI_CODEX,
-};
-pub use auth::store::{open_credential_store, valid_api_key, ApiKeyCredential, Credential, CredentialStore, OAuthCredential};
-pub use command::{CONNECT_LIVE, INSTALLED, INSTALL_PS1, INSTALL_SH, KUMI, KUMI_REPAIR, KUMI_START, REINSTALL};
 pub use core::contracts::{
-    ArrangementStrip, AuditionEvent, AuditionRequest, AuditionResult, CatchUp, ChainNode, ChangeFamily, ChangeRecord, Claim, ClipNote,
-    ClipView, ConnectionState, ConversationMatch, ConversationNow, ConversationStore, ConversationSummary, DeviceNode, DevicePlacement,
-    DeviceTree, DisconnectCause, HeardEvent, Integration, IntegrationFactory, JsonObject, Kernel, KernelCheckpoint, KernelEvent,
-    KernelFactory, KernelOptions, KernelTool, LibraryEvent, LibraryStatus, LiveFocus, LiveTransport, Memory, MemoryEvent, MemoryNote,
-    MemoryScope, MemoryStore, NoteChange, Observation, PinnedNode, RecipeEvent, RecipeSummary, SavedConversation, SessionController,
-    SessionEvent, SessionStatus, SessionStrip, SetAsk, SetChoice, StreamingCall, TechniqueEvent, TechniqueSummary, ToolImage, ToolResult,
-    TranscriptLine, TurnResult, TurnState, Usage, WatchedEvent, WebEvent,
+    ArrangementStrip, CatchUp, ChainNode, Claim, ClipView, ConnectionState, ConversationMatch, ConversationNow, ConversationStore,
+    ConversationSummary, DeviceNode, DeviceTree, DisconnectCause, Integration, IntegrationFactory, Kernel, KernelCheckpoint, KernelEvent,
+    KernelFactory, KernelOptions, LibraryEvent, LiveFocus, LiveTransport, Memory, MemoryEvent, MemoryNote, MemoryScope, MemoryStore,
+    NoteChange, Observation, PinnedNode, RecipeEvent, RecipeSummary, SavedConversation, SessionController, SessionEvent, SessionStatus,
+    SessionStrip, SetAsk, SetChoice, TechniqueEvent, TechniqueSummary, TranscriptLine, TurnResult, TurnState,
 };
-pub use core::conversations::{create_conversation_store, create_conversation_store_keeping, gone_words, IMPORTED, KEEP_DAYS};
-pub use core::errors::{FailureKind, KumiError, RuntimeError, SetupFailure};
+pub use core::conversations::{create_conversation_store, create_conversation_store_keeping, gone_words, KEEP_DAYS};
 pub use core::gaps::{gap_tools, GAP_GUIDANCE, GAP_TOOL};
 pub use core::goal::{create_goal_store, GoalBudget, GoalState, GoalStatus, GoalStore, GOAL_BUDGET};
 pub use core::goal_mode::{create_objective_store, Objective, ObjectiveBudget, ObjectiveStatus, ObjectiveStore, OBJECTIVE_BUDGET};
@@ -65,29 +33,4 @@ pub use core::techniques::{
 };
 pub use integrations::fallback::{with_fallback, with_fallback_failure};
 pub use integrations::{create_project_store, Baseline, ProjectStore};
-pub use kernel::agent::{create_agent_kernel, AgentKernel, AgentKernelOptions, Checkpoint, ModelBinding, ModelRequest};
-pub use kernel::budget::{budget_for, ContextBudget, DEFAULT_BUDGET};
-pub use library::{
-    create_library, library_logs, read_state as read_library_state, LearnProgress, Library, LibraryOptions, LibraryState,
-    Source as LibrarySource, TasteLine, FIND_PRESETS_TOOL, FIND_SOUNDS_TOOL, MY_SETS_TOOL,
-};
-pub use providers::local::{
-    context_for, list_local_models, list_local_models_in, local_installed, local_servers, parse_local_model_id, probe_local,
-    resolve_local_model, start_hint, LocalBinding, LocalKind, LocalServer, ServerSetting, LOCAL_PROVIDERS,
-};
-pub use providers::models::{check_api_key, list_models, ModelInfo};
-pub use providers::{
-    api_key_for, parse_model_id, resolve_model, Effort, ProviderId, ProviderInfo, ResolveModelOptions, API_KEY_ENV, EFFORTS, PROVIDERS,
-    PROVIDER_INFO, USER_AGENT,
-};
-pub use system::system_program;
-pub use version::KUMI_VERSION;
-pub use video::programs::{configure_programs, ffmpeg_hint, whisper_hint};
-pub use video::tool::{video_tools, WATCH_VIDEO_TOOL};
-pub use video::{find_ffmpeg, find_whisper, find_yt_dlp, watch_video, youtube_id, WatchRequest, Watched};
-pub use voice::{
-    list_microphones, listen, microphone_allowed, prepare_voice, terminal_app, voice_prompt, voice_readiness, write_down, Heard, Listening,
-    VoiceError, VoiceReadiness, VoiceTrouble,
-};
-pub use web::net::{create_web_client, WebClient};
-pub use web::tool::{web_tools, READ_WEB_TOOL, SEARCH_WEB_TOOL};
+pub use kernel::agent::{create_agent_kernel, AgentKernel, AgentKernelOptions, Checkpoint};

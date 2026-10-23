@@ -14,7 +14,7 @@ use kumi_common::{
         number::{round, to_string},
     },
 };
-use kumi_runtime::core::{
+use kumi_types::{
     contracts::{JsonObject, ToolResult},
     errors::RuntimeError,
 };

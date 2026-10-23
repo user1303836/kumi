@@ -11,7 +11,9 @@ use kumi::{
         tty::TtyOutput,
     },
 };
-use kumi_runtime::core::{contracts::*, errors::RuntimeError};
+use kumi_agent::core::contracts::*;
+use kumi_types::contracts::*;
+use kumi_types::errors::RuntimeError;
 use serde_json::Value;
 use std::{
     cell::{Cell, RefCell},
@@ -380,11 +382,11 @@ impl SessionController for Control {
     fn has_jobs(&self) -> bool {
         self.enabled("jobs")
     }
-    fn jobs(&self) -> Vec<kumi_runtime::core::jobs::JobStatus> {
+    fn jobs(&self) -> Vec<kumi_agent::core::jobs::JobStatus> {
         self.get("jobs").unwrap_or_default()
     }
-    fn job(&self, id: u32) -> Option<kumi_runtime::core::jobs::JobDetail> {
-        self.get::<Vec<kumi_runtime::core::jobs::JobDetail>>("job-details").unwrap_or_default().into_iter().find(|d| d.status.id == id)
+    fn job(&self, id: u32) -> Option<kumi_agent::core::jobs::JobDetail> {
+        self.get::<Vec<kumi_agent::core::jobs::JobDetail>>("job-details").unwrap_or_default().into_iter().find(|d| d.status.id == id)
     }
     fn stop_job(&self, id: u32) -> bool {
         self.call(format!("stop-job:{id}"));

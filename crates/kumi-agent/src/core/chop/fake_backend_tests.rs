@@ -4,10 +4,10 @@
 use super::backend::{ChopBackend, Key, Laid, Recording, Song, Step, Words};
 use super::hits::tests::break_bar;
 use super::tool::Chop;
-use crate::core::contracts::{JsonObject, KernelTool, ToolResult};
-use crate::core::errors::RuntimeError;
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::contracts::{JsonObject, KernelTool, ToolResult};
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -124,7 +124,7 @@ fn the_break(folder: &std::path::Path) -> (PathBuf, usize) {
     let bar = (60. / 170. * 4. * RATE).round() as usize;
     mono.truncate(bar);
     let file = folder.join("think.wav");
-    crate::audio::decode::write_test_wav(&file, &mono, RATE as u32);
+    kumi_media::audio::decode::write_test_wav(&file, &mono, RATE as u32);
     (file, bar)
 }
 

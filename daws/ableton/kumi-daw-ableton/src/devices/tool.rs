@@ -17,7 +17,7 @@ use kumi_common::{
     js::{json::stringify, number::to_string},
     time::now_ms,
 };
-use kumi_runtime::core::contracts::{JsonObject, KernelTool, Reach, ToolResult};
+use kumi_types::contracts::{JsonObject, KernelTool, Reach, ToolResult};
 use kumi_types::{errors::RuntimeError, system::windows_device_name};
 use serde_json::{json, Value};
 use std::{
