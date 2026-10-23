@@ -80,7 +80,7 @@ jobs:
       - name: The tests that need nothing of the system's
         run: cargo test -p kumi-net --test it --locked -- "network::"
       - name: Passing a proxy by and the system's check, on this system's own errors (a pull request's CI runs no unit tests here)
-        run: cargo test -p kumi-net --lib --locked -- --skip cause:: --skip error::
+        run: cargo test -p kumi-net --lib --locked -- --skip "cause::" --skip "error::"
       - name: Make a certificate authority of the network's own
         run: cargo test -p kumi-net --test it --locked -- --ignored --exact network::make_test_authority
 
