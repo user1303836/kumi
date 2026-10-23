@@ -1,6 +1,6 @@
 use std::f64::consts::PI;
 
-use ableton_mcp_server::reference_analysis::{
+use ableton_mcp_server::analysis::reference::{
     compare_reference_audio, resample_pcm, AlignmentMode, AlignmentOptions, ReferenceComparisonInput, ReferencePcmSource,
     MAX_COMPARISON_TOTAL_SAMPLES,
 };

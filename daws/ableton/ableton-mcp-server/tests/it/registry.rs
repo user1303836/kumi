@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use ableton_mcp_server::registry::{
+use ableton_mcp_server::protocol::registry::{
     live_registry_hash, load_live_registry, validate_live_operation_request, validate_live_operation_result, LiveRegistryMethod,
 };
 use serde_json::{json, Map, Value};
@@ -360,7 +360,7 @@ fn guarded_audition_and_emergency_operations_replace_generic_audible_invocation(
 #[test]
 fn data_set_takes_one_key_or_entries_alone() {
     // The registry's dialect has no oneOf: the host holds data.set to one form or the other.
-    use ableton_mcp_server::registry::{validate_live_operation_request, validate_live_operation_result};
+    use ableton_mcp_server::protocol::registry::{validate_live_operation_request, validate_live_operation_result};
     let one = json!({"ref":"live:1:track:0","key":"kumi.track","value":"id"});
     let entries = json!({"entries":[{"ref":"live:1:track:0","key":"kumi.track","value":"id","expectedObjectIdentity":"live:1"}]});
     assert!(validate_live_operation_request("data.set", &one).is_ok());

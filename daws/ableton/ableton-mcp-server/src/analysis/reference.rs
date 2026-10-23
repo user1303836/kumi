@@ -3,8 +3,8 @@ use std::f64::consts::PI;
 use kumi_common::js::number;
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::standards::{is_integer, ConventionalChannelLabel};
 use crate::analysis::{analyze_pcm, analyze_reconstructed_pcm, BoundaryCount, PcmAnalysis, PcmAnalysisInput, Privacy, RangeError};
-use crate::audio_standards::{is_integer, ConventionalChannelLabel};
 
 pub const REFERENCE_ANALYSIS_VERSION: &str = "reference-analysis/v2";
 pub const MAX_COMPARISON_TOTAL_SAMPLES: usize = 4_000_000;

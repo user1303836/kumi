@@ -1,6 +1,6 @@
 //! Read-only semantic/offline project tools and manifest-bound file backups.
 use super::*;
-use crate::{als::*, project as project_files, project_semantic::*, project_semantic_diff::*};
+use crate::{project as project_files, project::als::*, project::semantic::*, project::semantic_diff::*};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use kumi_common::{abort::Signal, js::json as js_json, time::now_ms};
 use rand::RngCore;
@@ -55,7 +55,7 @@ fn file_authority(path: &Value, root: &Value) -> Result<(PathBuf, PathBuf), Live
     }
     fn realpath(value: &str) -> Result<PathBuf, LiveError> {
         let error_path = crate::command::resolve(value)?;
-        let path = std::fs::canonicalize(value).map_err(|e| crate::delivery::io_error(&e, "lstat", &[&error_path]))?;
+        let path = std::fs::canonicalize(value).map_err(|e| crate::lifecycle::delivery::io_error(&e, "lstat", &[&error_path]))?;
         let text = path.to_string_lossy();
         Ok(PathBuf::from(
             text.strip_prefix(r"\\?\UNC\")
@@ -72,7 +72,7 @@ fn file_authority(path: &Value, root: &Value) -> Result<(PathBuf, PathBuf), Live
     if !path.extension().is_some_and(|s| s.to_string_lossy().eq_ignore_ascii_case("als")) {
         return Err(LiveError::error("path must be an .als file"));
     }
-    let stats = std::fs::metadata(&path).map_err(|e| crate::delivery::io_error(&e, "stat", &[&path]))?;
+    let stats = std::fs::metadata(&path).map_err(|e| crate::lifecycle::delivery::io_error(&e, "stat", &[&path]))?;
     if !stats.is_file() {
         return Err(LiveError::error("path is not a regular file"));
     }

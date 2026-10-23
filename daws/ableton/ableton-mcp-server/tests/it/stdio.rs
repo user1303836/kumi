@@ -6,7 +6,7 @@ use std::future::Future;
 use std::rc::Rc;
 use std::time::Duration;
 
-use ableton_mcp_server::stdio::{serve_stdio, HandlerOutcome, Notify, RecordContext, RecordHandler, StdioOptions};
+use ableton_mcp_server::protocol::stdio::{serve_stdio, HandlerOutcome, Notify, RecordContext, RecordHandler, StdioOptions};
 use futures::FutureExt;
 use kumi_common::abort::Signal;
 use serde_json::{json, Value};

@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 
 use serde_json::{Map, Value};
 
-use crate::registry::load_live_registry;
+use crate::protocol::registry::load_live_registry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FollowSchemaType {

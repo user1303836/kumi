@@ -1,4 +1,4 @@
-use ableton_mcp_server::sqlite_reader::{SqliteReader, SqliteValue, DEFAULT_SCAN_MAX_ROWS};
+use ableton_mcp_server::project::sqlite_reader::{SqliteReader, SqliteValue, DEFAULT_SCAN_MAX_ROWS};
 
 fn write_u16(bytes: &mut [u8], offset: usize, value: u16) {
     bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());

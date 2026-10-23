@@ -89,7 +89,7 @@ pub(super) fn single_link(path: &Path, meta: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {
         let _ = meta;
-        fs::File::open(path).and_then(|f| crate::platform::windows_file_identity(&f)).is_ok_and(|(_, _, links)| links == 1)
+        fs::File::open(path).and_then(|f| crate::lifecycle::platform::windows_file_identity(&f)).is_ok_and(|(_, _, links)| links == 1)
     }
     #[cfg(not(any(unix, windows)))]
     {
@@ -285,7 +285,7 @@ pub(super) fn write_owner_json(path: &Path, value: &Value) -> Result<(), LiveErr
                 // Stop: without it a failed Replace ends only its own statement, and the script exits 0. Once the swap
                 // is done the backup's removal is best effort.
                 let script="$ErrorActionPreference='Stop';$t=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:MCP_TEMP));$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:MCP_PATH));$b=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:MCP_BACKUP));[IO.File]::Replace($t,$p,$b,$true);try{[IO.File]::Delete($b)}catch{}";
-                let status = std::process::Command::new(crate::platform::windows_powershell(None))
+                let status = std::process::Command::new(crate::lifecycle::platform::windows_powershell(None))
                     .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
                     .env("MCP_TEMP", base64::engine::general_purpose::STANDARD.encode(temporary.to_string_lossy().as_bytes()))
                     .env("MCP_PATH", base64::engine::general_purpose::STANDARD.encode(path.to_string_lossy().as_bytes()))
@@ -460,7 +460,7 @@ pub(super) fn verify_files(root: &Path, expected: &Value) -> Result<Value, LiveE
     // The producer's files (Willington's switch, which /willington writes and removes, and its self-test
     // receipt) come and go after an install: they aren't drift.
     for files in [&mut required, &mut current] {
-        for name in crate::delivery::PRODUCER_FILES {
+        for name in crate::lifecycle::delivery::PRODUCER_FILES {
             files.remove(name);
         }
     }

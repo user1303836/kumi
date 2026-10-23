@@ -1,4 +1,4 @@
-use crate::{command::CommandOutput, delivery::diagnostics_async};
+use crate::{command::CommandOutput, lifecycle::delivery::diagnostics_async};
 use std::path::Path;
 pub async fn run(args: &[String]) -> CommandOutput {
     run_with_package_root(args, None).await

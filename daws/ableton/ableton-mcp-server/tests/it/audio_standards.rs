@@ -1,9 +1,9 @@
 use std::f64::consts::PI;
 
-use ableton_mcp_server::analysis::{analyze_pcm, PcmAnalysisInput};
-use ableton_mcp_server::audio_standards::{
+use ableton_mcp_server::analysis::standards::{
     analyze_standards_audio, ChannelLayout, ConventionalChannelLabel, StandardsAudioInput, STANDARDS_AUDIO_VERSION,
 };
+use ableton_mcp_server::analysis::{analyze_pcm, PcmAnalysisInput};
 use kumi_common::js::number;
 
 const SAMPLE_RATE: f64 = 48_000.0;

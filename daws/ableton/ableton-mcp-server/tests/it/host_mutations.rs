@@ -1,7 +1,7 @@
 use ableton_mcp_server::{
     host::{helpers::canonical_mutation_identity, mutations::*, McpHost, McpHostOptions},
     live::*,
-    registry::live_registry_operations,
+    protocol::registry::live_registry_operations,
 };
 use futures::FutureExt;
 use kumi_common::abort::Signal;

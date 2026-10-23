@@ -129,7 +129,7 @@ pub fn bundled_bridge_version() -> Option<String> {
     if Path::new(&join(&folder, "package.json")).exists() {
         bridge_version(&folder)
     } else {
-        Some(ableton_mcp_server::delivery::PACKAGE_VERSION.into())
+        Some(ableton_mcp_server::lifecycle::delivery::PACKAGE_VERSION.into())
     }
 }
 pub fn bridge_version(root: &str) -> Option<String> {

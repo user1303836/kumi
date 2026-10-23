@@ -62,7 +62,7 @@ fn main() {
     // Cargo doesn't rebuild a dependency's binaries for an example, so an older build could answer instead.
     let reported = std::process::Command::new(&bridge).arg("--version").output().ok();
     let reported = reported.map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned()).unwrap_or_default();
-    let expected = format!("ableton-mcp-server {}", ableton_mcp_server::delivery::PACKAGE_VERSION);
+    let expected = format!("ableton-mcp-server {}", ableton_mcp_server::lifecycle::delivery::PACKAGE_VERSION);
     if reported != expected {
         eprintln!("The Ableton bridge at {} says \"{reported}\", not \"{expected}\"; rebuild it: {build}", bridge.display());
         std::process::exit(2);

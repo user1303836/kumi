@@ -1,4 +1,4 @@
-use ableton_mcp_server::{project_semantic::*, project_semantic_diff::*};
+use ableton_mcp_server::{project::semantic::*, project::semantic_diff::*};
 use serde::Deserialize;
 use serde_json::{json, Value};
 fn fixture() -> Value {

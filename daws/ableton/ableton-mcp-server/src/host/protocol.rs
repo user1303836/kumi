@@ -1,6 +1,6 @@
 //! Lifecycle and request bookkeeping precede every tool family. A pending tool retains its wire lease.
 use super::*;
-use crate::mcp_protocol::{format_mcp_response, prepare_mcp_request, LEGACY_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS};
+use crate::protocol::mcp::{format_mcp_response, prepare_mcp_request, LEGACY_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS};
 use kumi_common::js::json as js_json;
 
 #[derive(Debug, Clone, PartialEq)]

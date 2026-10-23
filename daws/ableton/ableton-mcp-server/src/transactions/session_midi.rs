@@ -1,7 +1,7 @@
 //! Guarded Session MIDI creation, exact content verification and owned undo.
 use crate::{
     live::*,
-    registry::{canonical_json, UNBOUNDED_CANONICAL_LIMITS},
+    protocol::registry::{canonical_json, UNBOUNDED_CANONICAL_LIMITS},
     transactions::batch::compensation_context,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};

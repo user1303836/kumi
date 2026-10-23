@@ -651,3 +651,384 @@ to = "testdata/oracles/ableton-mcp-server/project_semantic_oracle.json"
 [[move]]
 from = "daws/ableton/ableton-mcp-server/tests/support/project_semantic_paths_oracle.json"
 to = "testdata/oracles/ableton-mcp-server/project_semantic_paths_oracle.json"
+
+# Live's bridge's files, into its modules' folders: simulator, analysis, lifecycle, project, protocol (2026-10).
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/als.rs"
+to = "daws/ableton/ableton-mcp-server/src/project/als.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/analysis_job_worker.rs"
+to = "daws/ableton/ableton-mcp-server/src/analysis/job_worker.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/analysis_runner.rs"
+to = "daws/ableton/ableton-mcp-server/src/analysis/runner.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/analysis_worker.rs"
+to = "daws/ableton/ableton-mcp-server/src/analysis/worker.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/audio_diagnosis.rs"
+to = "daws/ableton/ableton-mcp-server/src/analysis/diagnosis.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/audio_standards.rs"
+to = "daws/ableton/ableton-mcp-server/src/analysis/standards.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/delivery.rs"
+to = "daws/ableton/ableton-mcp-server/src/lifecycle/delivery.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/delivery_acl.rs"
+to = "daws/ableton/ableton-mcp-server/src/lifecycle/delivery/acl.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/delivery_diagnostics.rs"
+to = "daws/ableton/ableton-mcp-server/src/lifecycle/delivery/diagnostics.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/delivery_install.rs"
+to = "daws/ableton/ableton-mcp-server/src/lifecycle/delivery/install.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/diagnostics.rs"
+to = "daws/ableton/ableton-mcp-server/src/lifecycle/diagnostics.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/install_remote_script.rs"
+to = "daws/ableton/ableton-mcp-server/src/lifecycle/install_remote_script.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/key_estimation.rs"
+to = "daws/ableton/ableton-mcp-server/src/analysis/key_estimation.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/library_search.rs"
+to = "daws/ableton/ableton-mcp-server/src/project/library_search.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/lifecycle_actions.rs"
+to = "daws/ableton/ableton-mcp-server/src/lifecycle/actions.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/lifecycle_cli.rs"
+to = "daws/ableton/ableton-mcp-server/src/lifecycle/cli.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/lifecycle_fs.rs"
+to = "daws/ableton/ableton-mcp-server/src/lifecycle/fs.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/lifecycle_release.rs"
+to = "daws/ableton/ableton-mcp-server/src/lifecycle/release.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/live_simulator.json"
+to = "daws/ableton/ableton-mcp-server/src/simulator/initial-state.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/live_simulator_automation.rs"
+to = "daws/ableton/ableton-mcp-server/src/simulator/automation.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/live_simulator_clips.rs"
+to = "daws/ableton/ableton-mcp-server/src/simulator/clips.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/live_simulator_device_state.rs"
+to = "daws/ableton/ableton-mcp-server/src/simulator/device_state.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/live_simulator_devices.rs"
+to = "daws/ableton/ableton-mcp-server/src/simulator/devices.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/live_simulator_extensions.rs"
+to = "daws/ableton/ableton-mcp-server/src/simulator/extensions.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/live_simulator_lom.rs"
+to = "daws/ableton/ableton-mcp-server/src/simulator/lom.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/live_simulator_observe.rs"
+to = "daws/ableton/ableton-mcp-server/src/simulator/observe.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/live_simulator_racks.rs"
+to = "daws/ableton/ableton-mcp-server/src/simulator/racks.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/live_simulator_session.rs"
+to = "daws/ableton/ableton-mcp-server/src/simulator/session.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/live_simulator_structure.rs"
+to = "daws/ableton/ableton-mcp-server/src/simulator/structure.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/live_simulator_views.rs"
+to = "daws/ableton/ableton-mcp-server/src/simulator/views.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/mcp_protocol.rs"
+to = "daws/ableton/ableton-mcp-server/src/protocol/mcp.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/migrate.rs"
+to = "daws/ableton/ableton-mcp-server/src/lifecycle/migrate.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/platform.rs"
+to = "daws/ableton/ableton-mcp-server/src/lifecycle/platform.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/project_semantic.rs"
+to = "daws/ableton/ableton-mcp-server/src/project/semantic.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/project_semantic_diff.rs"
+to = "daws/ableton/ableton-mcp-server/src/project/semantic_diff.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/project_semantic_validate.rs"
+to = "daws/ableton/ableton-mcp-server/src/project/semantic/validation.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/reference_analysis.rs"
+to = "daws/ableton/ableton-mcp-server/src/analysis/reference.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/registry.rs"
+to = "daws/ableton/ableton-mcp-server/src/protocol/registry.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/setup.rs"
+to = "daws/ableton/ableton-mcp-server/src/lifecycle/setup.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/sqlite_reader.rs"
+to = "daws/ableton/ableton-mcp-server/src/project/sqlite_reader.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/stdio.rs"
+to = "daws/ableton/ableton-mcp-server/src/protocol/stdio.rs"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/tool-catalog-data.json"
+to = "daws/ableton/ableton-mcp-server/src/protocol/tool-catalog-data.json"
+
+[[move]]
+from = "daws/ableton/ableton-mcp-server/src/tool_catalog.rs"
+to = "daws/ableton/ableton-mcp-server/src/protocol/tool_catalog.rs"
+
+[[rust]]
+from = "ableton_mcp_server::analysis_job_worker"
+to = "ableton_mcp_server::analysis::job_worker"
+
+[[rust]]
+from = "ableton_mcp_server::analysis_runner"
+to = "ableton_mcp_server::analysis::runner"
+
+[[rust]]
+from = "ableton_mcp_server::analysis_worker"
+to = "ableton_mcp_server::analysis::worker"
+
+[[rust]]
+from = "ableton_mcp_server::audio_diagnosis"
+to = "ableton_mcp_server::analysis::diagnosis"
+
+[[rust]]
+from = "ableton_mcp_server::audio_standards"
+to = "ableton_mcp_server::analysis::standards"
+
+[[rust]]
+from = "ableton_mcp_server::key_estimation"
+to = "ableton_mcp_server::analysis::key_estimation"
+
+[[rust]]
+from = "ableton_mcp_server::reference_analysis"
+to = "ableton_mcp_server::analysis::reference"
+
+[[rust]]
+from = "ableton_mcp_server::lifecycle_cli"
+to = "ableton_mcp_server::lifecycle::cli"
+
+[[rust]]
+from = "ableton_mcp_server::delivery"
+to = "ableton_mcp_server::lifecycle::delivery"
+
+[[rust]]
+from = "ableton_mcp_server::setup"
+to = "ableton_mcp_server::lifecycle::setup"
+
+[[rust]]
+from = "ableton_mcp_server::migrate"
+to = "ableton_mcp_server::lifecycle::migrate"
+
+[[rust]]
+from = "ableton_mcp_server::diagnostics"
+to = "ableton_mcp_server::lifecycle::diagnostics"
+
+[[rust]]
+from = "ableton_mcp_server::install_remote_script"
+to = "ableton_mcp_server::lifecycle::install_remote_script"
+
+[[rust]]
+from = "ableton_mcp_server::platform"
+to = "ableton_mcp_server::lifecycle::platform"
+
+[[rust]]
+from = "ableton_mcp_server::als"
+to = "ableton_mcp_server::project::als"
+
+[[rust]]
+from = "ableton_mcp_server::project_semantic"
+to = "ableton_mcp_server::project::semantic"
+
+[[rust]]
+from = "ableton_mcp_server::project_semantic_diff"
+to = "ableton_mcp_server::project::semantic_diff"
+
+[[rust]]
+from = "ableton_mcp_server::library_search"
+to = "ableton_mcp_server::project::library_search"
+
+[[rust]]
+from = "ableton_mcp_server::sqlite_reader"
+to = "ableton_mcp_server::project::sqlite_reader"
+
+[[rust]]
+from = "ableton_mcp_server::mcp_protocol"
+to = "ableton_mcp_server::protocol::mcp"
+
+[[rust]]
+from = "ableton_mcp_server::stdio"
+to = "ableton_mcp_server::protocol::stdio"
+
+[[rust]]
+from = "ableton_mcp_server::tool_catalog"
+to = "ableton_mcp_server::protocol::tool_catalog"
+
+[[rust]]
+from = "ableton_mcp_server::registry"
+to = "ableton_mcp_server::protocol::registry"
+
+[[rust]]
+from = "crate::analysis_job_worker"
+to = "crate::analysis::job_worker"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::analysis_runner"
+to = "crate::analysis::runner"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::analysis_worker"
+to = "crate::analysis::worker"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::audio_diagnosis"
+to = "crate::analysis::diagnosis"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::audio_standards"
+to = "crate::analysis::standards"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::key_estimation"
+to = "crate::analysis::key_estimation"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::reference_analysis"
+to = "crate::analysis::reference"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::lifecycle_cli"
+to = "crate::lifecycle::cli"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::delivery"
+to = "crate::lifecycle::delivery"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::setup"
+to = "crate::lifecycle::setup"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::migrate"
+to = "crate::lifecycle::migrate"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::diagnostics"
+to = "crate::lifecycle::diagnostics"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::install_remote_script"
+to = "crate::lifecycle::install_remote_script"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::platform"
+to = "crate::lifecycle::platform"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::als"
+to = "crate::project::als"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::project_semantic"
+to = "crate::project::semantic"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::project_semantic_diff"
+to = "crate::project::semantic_diff"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::library_search"
+to = "crate::project::library_search"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::sqlite_reader"
+to = "crate::project::sqlite_reader"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::mcp_protocol"
+to = "crate::protocol::mcp"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::stdio"
+to = "crate::protocol::stdio"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::tool_catalog"
+to = "crate::protocol::tool_catalog"
+in = "daws/ableton/ableton-mcp-server"
+
+[[rust]]
+from = "crate::registry"
+to = "crate::protocol::registry"
+in = "daws/ableton/ableton-mcp-server"

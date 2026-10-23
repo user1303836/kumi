@@ -1,11 +1,11 @@
 //! Observational semantic Set comparison with explicit ambiguity and bounded paging.
 use crate::{
-    project::ProjectError,
-    project_semantic::{
+    project::semantic::{
         self as semantic, array, canonical_semantic_json as canonical, compare_semantic_strings as cmp, digest, fail, js_equal,
         validate_semantic_project_artifact, SemanticPageOptions, SEMANTIC_PROJECT_MAX_PAGE_BYTES, SEMANTIC_PROJECT_MAX_PAGE_RECORDS,
         SEMANTIC_PROJECT_SNAPSHOT_SCHEMA,
     },
+    project::ProjectError,
 };
 use regex::Regex;
 use serde_json::{json, Value};
@@ -638,11 +638,11 @@ pub(crate) fn page_audited_semantic_project_diff(diff: &Value, options: &Semanti
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::project_semantic::{canonical_lengths, page_length};
+    use crate::project::semantic::{canonical_lengths, page_length};
     #[test]
     fn a_diff_page_measured_from_its_frame_and_items_is_as_long_as_its_json() {
-        let before = crate::project_semantic::tests::artifact(3, false);
-        let after = crate::project_semantic::tests::artifact(14, false);
+        let before = crate::project::semantic::tests::artifact(3, false);
+        let after = crate::project::semantic::tests::artifact(14, false);
         let diff = diff_semantic_project_snapshots(&before, &after).unwrap();
         let items = array(&diff["items"]);
         assert!(items.len() > 8, "{}", items.len());

@@ -1,8 +1,8 @@
 //! Launch and share Live's Extension Host, without installing a second host into Live.
 use super::extension_channel::read_extension_endpoint;
 use crate::{
+    lifecycle::platform::{current_platform, windows_powershell},
     live::LiveError,
-    platform::{current_platform, windows_powershell},
 };
 use base64::{
     alphabet,

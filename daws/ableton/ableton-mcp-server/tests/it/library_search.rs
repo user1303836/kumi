@@ -9,12 +9,12 @@ mod library_fixtures;
 use std::collections::HashMap;
 use std::fs;
 
-use ableton_mcp_server::library_search::{
+use ableton_mcp_server::project::library_search::{
     assert_supported_files_schema, assert_supported_plugins_schema, query_library_files, query_library_plugins,
     query_library_tag_vocabulary, LibraryItem, LibraryKind, LibraryMode, LibraryPluginItem, LibraryQuery, LibrarySearchError, LibrarySort,
     LibraryTagEntry, PluginFormat, SUPPORTED_FILES_SCHEMA_VERSIONS,
 };
-use ableton_mcp_server::sqlite_reader::SqliteReader;
+use ableton_mcp_server::project::sqlite_reader::SqliteReader;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 

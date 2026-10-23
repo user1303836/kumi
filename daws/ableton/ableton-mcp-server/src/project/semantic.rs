@@ -1042,7 +1042,6 @@ pub(crate) fn js_equal(a: &Value, b: &Value) -> bool {
         _ => a == b,
     }
 }
-#[path = "project_semantic_validate.rs"]
 mod validation;
 pub use validation::validate_semantic_project_artifact;
 fn authority_audit(value: &Value, depth: usize) -> Result<(), ProjectError> {

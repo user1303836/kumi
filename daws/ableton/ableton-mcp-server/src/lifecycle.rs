@@ -1,16 +1,22 @@
 //! Receipt-bound native installation, with strict legacy release compatibility.
-use crate::{delivery::*, live::LiveError};
+
+pub mod cli;
+pub mod delivery;
+pub mod diagnostics;
+pub mod install_remote_script;
+pub mod migrate;
+pub mod platform;
+pub mod setup;
+
+use crate::{lifecycle::delivery::*, live::LiveError};
 use serde_json::{json, Value};
-#[path = "lifecycle_fs.rs"]
 mod fs;
-#[path = "lifecycle_release.rs"]
 mod release;
 pub use fs::assert_no_linked_ancestors;
 use fs::*;
 pub use release::{verify_artifact_binding, verify_release_package, verify_retained_package, ReleaseEvidence};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-#[path = "lifecycle_actions.rs"]
 mod actions;
 pub const LIFECYCLE_RECEIPT_VERSION: u8 = 1;
 pub const LIFECYCLE_ACTIONS: &[&str] = &["install", "activate", "upgrade", "repair", "rollback", "uninstall", "status"];

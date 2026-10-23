@@ -10,7 +10,7 @@ use crate::analysis::{
 };
 use crate::host::{McpHost, McpHostOptions};
 use crate::live::UnavailableLiveAdapter;
-use crate::mcp_protocol::LEGACY_PROTOCOL_VERSION;
+use crate::protocol::mcp::LEGACY_PROTOCOL_VERSION;
 use kumi_common::js::json::stringify;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};

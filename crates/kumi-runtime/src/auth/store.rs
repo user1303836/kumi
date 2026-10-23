@@ -82,13 +82,13 @@ fn auth(message: impl Into<String>) -> RuntimeError {
 }
 
 // On Windows the credential file is made owner-only as the bridge makes its own files: a protected DACL whose one rule
-// gives the current user full control, then checked. These are the twins of delivery_acl.rs's WINDOWS_ACL_TARGET,
+// gives the current user full control, then checked. These are the twins of the bridge's lifecycle/delivery/acl.rs's WINDOWS_ACL_TARGET,
 // WINDOWS_ACL_CHECKS and SECURE_FILE (in ableton-mcp-server): keep them in step. KUMI_HOME or KUMI_AUTH_FILE can put
 // auth.json where other accounts read (D:\kumi), and login says it's owner-only.
 const ACL_TARGET: &str = "$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:KUMI_ACL_PATH));$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User;";
 const ACL_CHECKS: &str = "$c=[System.IO.File]::GetAccessControl($p);if ($c.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { exit 2 }if (-not $c.AreAccessRulesProtected) { exit 3 }$rules=@($c.Access); if ($rules.Count -ne 1) { exit 4 }$rule=$rules[0];if ($rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { exit 5 }if ($rule.IsInherited) { exit 6 }if ($rule.AccessControlType.ToString() -ne 'Allow') { exit 7 }if (($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne [System.Security.AccessControl.FileSystemRights]::FullControl) { exit 8 }exit 0";
 const SECURE_FILE: &str = "$a=New-Object System.Security.AccessControl.FileSecurity;$a.SetAccessRuleProtection($true,$false);$rule=New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList @($sid,[System.Security.AccessControl.FileSystemRights]::FullControl,[System.Security.AccessControl.AccessControlType]::Allow);[void]$a.AddAccessRule($rule);[System.IO.File]::SetAccessControl($p,$a);if ([System.IO.File]::GetAccessControl($p).GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { $o=New-Object System.Security.AccessControl.FileSecurity;$o.SetOwner($sid);[System.IO.File]::SetAccessControl($p,$o) };";
-/// What a check that failed found, by its exit code (as delivery_acl.rs says them).
+/// What a check that failed found, by its exit code (as the bridge's lifecycle/delivery/acl.rs says them).
 fn acl_reason(code: i32) -> Option<&'static str> {
     match code {
         2 => Some("its owner isn't you"),

@@ -1,4 +1,4 @@
-use ableton_mcp_server::{live::LiveStatus, tool_catalog::*};
+use ableton_mcp_server::{live::LiveStatus, protocol::tool_catalog::*};
 use kumi_common::js::json::stringify;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};

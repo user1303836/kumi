@@ -1,6 +1,6 @@
 use ableton_mcp_server::{
     live::*,
-    registry::{canonical_json, UNBOUNDED_CANONICAL_LIMITS},
+    protocol::registry::{canonical_json, UNBOUNDED_CANONICAL_LIMITS},
 };
 use serde_json::{json, Value};
 use std::cell::RefCell;

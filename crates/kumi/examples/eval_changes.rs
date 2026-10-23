@@ -8,7 +8,7 @@
 //!
 //! EVAL_TIMINGS=<file> writes each turn's timings.jsonl line (model calls, first parts, tokens) after a line naming
 //! its case.
-use ableton_mcp_server::{delivery::PACKAGE_VERSION, tool_catalog::TOOL_CATALOG};
+use ableton_mcp_server::{lifecycle::delivery::PACKAGE_VERSION, protocol::tool_catalog::TOOL_CATALOG};
 use async_trait::async_trait;
 use futures::{FutureExt, StreamExt};
 use kumi::config::{load_inference_config, safe_error};

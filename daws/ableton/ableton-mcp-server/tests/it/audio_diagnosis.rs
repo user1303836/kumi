@@ -3,11 +3,11 @@
 
 use std::f64::consts::PI;
 
-use ableton_mcp_server::analysis::{analyze_pcm, PcmAnalysisInput};
-use ableton_mcp_server::audio_diagnosis::{
+use ableton_mcp_server::analysis::diagnosis::{
     diagnose_audio_with_live_context, AudioSourceKind, AudioSourceProvenance, CaptureTap, Device, LiveSet, LiveSnapshot, MixerState,
     Parameter, RelationshipToLive, Track,
 };
+use ableton_mcp_server::analysis::{analyze_pcm, PcmAnalysisInput};
 
 fn snapshot() -> LiveSnapshot {
     LiveSnapshot {

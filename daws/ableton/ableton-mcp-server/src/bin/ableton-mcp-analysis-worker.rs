@@ -5,8 +5,8 @@ static ALLOCATOR: ableton_mcp_server::benchmark::memory::MeasuredAllocator = abl
 fn main() {
     let args: Vec<_> = kumi_common::env::args().skip(1).collect();
     std::process::exit(if args.first().is_some_and(|arg| arg == "--benchmark") {
-        ableton_mcp_server::analysis_worker::main(&args[1..])
+        ableton_mcp_server::analysis::worker::main(&args[1..])
     } else {
-        ableton_mcp_server::analysis_job_worker::main()
+        ableton_mcp_server::analysis::job_worker::main()
     });
 }

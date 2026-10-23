@@ -1,5 +1,5 @@
 //! Native bridge configuration and retained legacy configuration compatibility.
-use crate::{live::LiveError, platform::current_platform};
+use crate::{lifecycle::platform::current_platform, live::LiveError};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -9,11 +9,8 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
 };
-#[path = "delivery_acl.rs"]
 mod acl;
-#[path = "delivery_diagnostics.rs"]
 mod diagnostics;
-#[path = "delivery_install.rs"]
 mod install;
 pub use diagnostics::{default_package_root, diagnostics, diagnostics_async, native_entrypoint, DiagnosticReport};
 pub use install::{install_remote_script, registry_digest, reject_symlink_tree, InstallOptions, InstallResult};
@@ -222,7 +219,7 @@ fn validate_diagnostics_file(path: &Path) -> Result<(), LiveError> {
     #[cfg(windows)]
     let links = {
         let file = fs::File::open(path).map_err(|e| io_error(&e, "open", &[path]))?;
-        crate::platform::windows_file_identity(&file).map_err(|e| io_error(&e, "fstat", &[path]))?.2
+        crate::lifecycle::platform::windows_file_identity(&file).map_err(|e| io_error(&e, "fstat", &[path]))?.2
     };
     #[cfg(not(any(unix, windows)))]
     let links = 0;

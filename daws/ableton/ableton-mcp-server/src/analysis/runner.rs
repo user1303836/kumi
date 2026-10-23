@@ -16,8 +16,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::oneshot;
 
-use crate::audio_standards::ConventionalChannelLabel;
-use crate::reference_analysis::AlignmentOptions;
+use crate::analysis::reference::AlignmentOptions;
+use crate::analysis::standards::ConventionalChannelLabel;
 
 pub const MAX_CONCURRENT_ANALYSIS_JOBS: usize = 2;
 pub const MAX_QUEUED_ANALYSIS_JOBS: usize = 4;

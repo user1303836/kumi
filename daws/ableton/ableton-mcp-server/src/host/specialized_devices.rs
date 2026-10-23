@@ -448,7 +448,7 @@ mod tests {
     }
     #[test]
     fn the_catalog_describes_each_choice_as_the_bridge_bounds_it() {
-        let entry = crate::tool_catalog::TOOL_CATALOG.iter().find(|e| e.name == "live_device_specialized_preview").unwrap();
+        let entry = crate::protocol::tool_catalog::TOOL_CATALOG.iter().find(|e| e.name == "live_device_specialized_preview").unwrap();
         let properties = &entry.input_schema["properties"];
         for field in
             ["unison", "polyphony", "filterRouting", "oscillator1EffectMode", "oscillator2EffectMode", "unisonMode", "unisonVoiceCount"]

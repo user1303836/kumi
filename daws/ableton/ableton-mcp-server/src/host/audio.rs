@@ -1,6 +1,6 @@
 //! Bounded PCM request validation and isolated analysis/diagnosis execution.
 use super::*;
-use crate::audio_diagnosis::{diagnose_audio_with_live_context_value, AudioSourceKind, AudioSourceProvenance};
+use crate::analysis::diagnosis::{diagnose_audio_with_live_context_value, AudioSourceKind, AudioSourceProvenance};
 use kumi_common::abort::Signal;
 
 #[derive(Debug, Clone, PartialEq)]

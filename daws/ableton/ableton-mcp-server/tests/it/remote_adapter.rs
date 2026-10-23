@@ -1,7 +1,7 @@
 use ableton_mcp_server::{
     bridge::remote_adapter::*,
     live::*,
-    registry::{canonical_json, WIRE_CANONICAL_LIMITS},
+    protocol::registry::{canonical_json, WIRE_CANONICAL_LIMITS},
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use hmac::{Hmac, Mac};
@@ -777,7 +777,7 @@ async fn refusal_classification_and_terminal_retirement_removes_cleanup() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn delivery_probe_preserves_fake_real_and_missing_discovery_evidence() {
-    use ableton_mcp_server::delivery::*;
+    use ableton_mcp_server::lifecycle::delivery::*;
     LocalSet::new()
         .run_until(async {
             for (provenance, empty_scenes, expected_authenticated, expected_live) in

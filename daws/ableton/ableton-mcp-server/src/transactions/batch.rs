@@ -1,7 +1,7 @@
 //! Compound mutation batches and the exact hierarchy authority shared with device-state recall.
 use crate::{
     live::*,
-    registry::{canonical_json, UNBOUNDED_CANONICAL_LIMITS},
+    protocol::registry::{canonical_json, UNBOUNDED_CANONICAL_LIMITS},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};

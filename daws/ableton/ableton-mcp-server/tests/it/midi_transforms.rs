@@ -1,5 +1,5 @@
 use ableton_mcp_server::midi_transforms::*;
-use ableton_mcp_server::registry::{canonical_json, UNBOUNDED_CANONICAL_LIMITS};
+use ableton_mcp_server::protocol::registry::{canonical_json, UNBOUNDED_CANONICAL_LIMITS};
 use serde_json::Value;
 fn canonical(value: Value) -> String {
     canonical_json(&value, &UNBOUNDED_CANONICAL_LIMITS).unwrap()

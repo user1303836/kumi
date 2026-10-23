@@ -4,7 +4,7 @@ use super::wire;
 use crate::{
     live::*,
     loopback::LOOPBACK_PROTOCOL_VERSION,
-    registry::{validate_live_operation_request, validate_live_operation_result},
+    protocol::registry::{validate_live_operation_request, validate_live_operation_result},
 };
 use futures::{
     future::{LocalBoxFuture, Shared},

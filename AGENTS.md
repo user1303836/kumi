@@ -10,7 +10,8 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
     views, and workflows such as jam, layers and stems).
   - `src/integrations/ableton/`: Live, host side. `own_*` and `shared/`: what REAPER and Renoise share.
   - `src/integrations/reaper*.rs`, `renoise*.rs`: REAPER and Renoise, host side.
-- `daws/ableton/`: Live. `ableton-mcp-server/` is its bridge (an MCP server); `remote-script/` runs inside Live
+- `daws/ableton/`: Live. `ableton-mcp-server/` is its bridge, an MCP server (`src/`: a module each for `protocol`,
+  `host`, `live` with its `simulator/`, `lifecycle`, `analysis` and `project`); `remote-script/` runs inside Live
   (Python); `live-extension/` is Live's extension (TypeScript); `protocol/` is the only list of Live operations;
   `max-standard/` is the standard Kumi holds Max patches to (data Kumi builds in).
 - `daws/own/`: Kumi's own bridges, for REAPER and Renoise: `daw-bridge/` (the `kumi-daw/1` wire) and

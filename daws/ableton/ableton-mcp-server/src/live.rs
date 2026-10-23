@@ -16,7 +16,7 @@ use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
-use crate::registry::{live_registry_hash, live_registry_operations, RegistryError};
+use crate::protocol::registry::{live_registry_hash, live_registry_operations, RegistryError};
 
 pub const LIVE_PROTOCOL_VERSION: &str = "ableton-live/v1";
 // SHA-256 of canonical sorted-key JSON, so negotiation is invariant to the
@@ -3412,8 +3412,9 @@ pub static DEVICE_PROPERTIES: LazyLock<HashMap<String, DeviceProperty>> = LazyLo
 });
 
 fn simulator_revision(value: &Value) -> String {
-    crate::registry::sha256_hex(
-        &crate::registry::canonical_json(value, &crate::registry::UNBOUNDED_CANONICAL_LIMITS).expect("JSON has a canonical form"),
+    crate::protocol::registry::sha256_hex(
+        &crate::protocol::registry::canonical_json(value, &crate::protocol::registry::UNBOUNDED_CANONICAL_LIMITS)
+            .expect("JSON has a canonical form"),
     )
 }
 fn live_json<T: Serialize>(value: &T) -> Value {
@@ -3524,7 +3525,7 @@ impl Default for DeterministicLiveSimulator {
 }
 impl DeterministicLiveSimulator {
     pub fn new() -> Self {
-        let mut state: Value = serde_json::from_str(include_str!("live_simulator.json")).expect("simulator initial state");
+        let mut state: Value = serde_json::from_str(include_str!("simulator/initial-state.json")).expect("simulator initial state");
         state["tuning"]["system"]["noteTunings"] =
             Value::Array((0..128).map(|note| serde_json::json!({"note":note,"deviation":0})).collect());
         Self {
@@ -5286,7 +5287,7 @@ impl DeterministicLiveSimulator {
 impl DeterministicLiveSimulator {
     fn require_structure_revision(&self, args: &Map<String, Value>) -> Result<(), LiveError> {
         let state = self.state.borrow();
-        let revision = crate::registry::sha256_hex(&kumi_common::js::json::stringify(
+        let revision = crate::protocol::registry::sha256_hex(&kumi_common::js::json::stringify(
             &serde_json::json!({"tracks":array(&state["tracks"]).iter().enumerate().map(|(index,item)|serde_json::json!([item["ref"],item["objectIdentity"],item["name"],item["kind"],index])).collect::<Vec<_>>(),"scenes":array(&state["scenes"]).iter().enumerate().map(|(index,item)|serde_json::json!([item["ref"],item["objectIdentity"],item["name"],index])).collect::<Vec<_>>()}),
         ));
         if args.get("expectedStructureRevision") != Some(&Value::String(revision)) {
@@ -5602,35 +5603,35 @@ impl DeterministicLiveSimulator {
     }
 }
 
-#[path = "live_simulator_devices.rs"]
+#[path = "simulator/devices.rs"]
 mod simulator_devices;
 
-#[path = "live_simulator_automation.rs"]
+#[path = "simulator/automation.rs"]
 mod simulator_automation;
 
-#[path = "live_simulator_views.rs"]
+#[path = "simulator/views.rs"]
 mod simulator_views;
 
-#[path = "live_simulator_structure.rs"]
+#[path = "simulator/structure.rs"]
 mod simulator_structure;
 
-#[path = "live_simulator_clips.rs"]
+#[path = "simulator/clips.rs"]
 mod simulator_clips;
 
-#[path = "live_simulator_device_state.rs"]
+#[path = "simulator/device_state.rs"]
 mod simulator_device_state;
 
-#[path = "live_simulator_racks.rs"]
+#[path = "simulator/racks.rs"]
 mod simulator_racks;
 
-#[path = "live_simulator_lom.rs"]
+#[path = "simulator/lom.rs"]
 mod simulator_lom;
 
-#[path = "live_simulator_session.rs"]
+#[path = "simulator/session.rs"]
 mod simulator_session;
 
-#[path = "live_simulator_observe.rs"]
+#[path = "simulator/observe.rs"]
 mod simulator_observe;
 
-#[path = "live_simulator_extensions.rs"]
+#[path = "simulator/extensions.rs"]
 mod simulator_extensions;
