@@ -223,6 +223,11 @@ When you agree, Kumi hears your own music in the background, to know your taste
   your music, not into the judge's targets.
 - `taste` with `keep` keeps your nearest 5 to 10 songs, heard in full, as a
   reference the judge works toward by name ("your music near Archangel").
+- **Words:** the style model's text side puts words on the same map as your
+  songs, so `taste` with `words` gives the songs nearest them. Each style is
+  named by the two nearest of about 200 genre and mood words. Only Kumi's own
+  style model has it: with another one in `/slots`, words match genre tags, and
+  the answer says so.
 
 ## Limits
 

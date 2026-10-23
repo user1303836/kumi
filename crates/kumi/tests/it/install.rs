@@ -1829,6 +1829,7 @@ async fn uninstall_takes_kumis_names_by_their_case_and_leaves_folders_holding_mo
         ("tools/ffmpeg/ffmpeg", "Kumi's"),
         ("tools/mixdown.sh", "theirs"),
         ("models/basic-pitch.onnx", "Kumi's"),
+        ("models/clap-music-vocab.json", "Kumi's"),
         ("models/slots/0123456789ab/model.onnx", "Kumi's"),
     ] {
         put(home.join(file), text);

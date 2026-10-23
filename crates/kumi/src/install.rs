@@ -1444,7 +1444,7 @@ fn litter(name: &str) -> bool {
 /// it fetched, one of the bridge's generations. Nothing in `node` tells Kumi's old Node from the producer's own, so
 /// its entries count as Kumi's only in a folder of Kumi's alone.
 fn kumis_entry(part: &str, name: &str, path: &Path, alone: bool) -> bool {
-    use kumi_ai::models::pinned::{AFX_REP, BASIC_PITCH, CLAP};
+    use kumi_ai::models::pinned::{AFX_REP, BASIC_PITCH, CLAP, CLAP_MERGES, CLAP_TEXT, CLAP_VOCAB};
     let inside = |folder: &Path| -> Vec<String> {
         fs::read_dir(folder)
             .into_iter()
@@ -1475,7 +1475,7 @@ fn kumis_entry(part: &str, name: &str, path: &Path, alone: bool) -> bool {
                     || [".ffmpeg-", ".whisper-", ".yt-dlp"].iter().any(|start| name.starts_with(start))
             }
             "models" => {
-                [CLAP.name, AFX_REP.name, BASIC_PITCH.name, "slots"].contains(&name)
+                [CLAP.name, CLAP_TEXT.name, CLAP_VOCAB.name, CLAP_MERGES.name, AFX_REP.name, BASIC_PITCH.name, "slots"].contains(&name)
                     || name.starts_with("onnxruntime")
                     || name.contains(".partial-")
                     || name.contains(".unpacking-")

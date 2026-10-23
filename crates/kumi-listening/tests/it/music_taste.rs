@@ -112,6 +112,29 @@ impl Style for Fixed {
     }
 }
 
+/// The test's style model with a text side: words for a style point where its songs do.
+struct Worded;
+
+#[async_trait(?Send)]
+impl Style for Worded {
+    fn model(&self) -> &str {
+        MODEL
+    }
+    async fn embed(&self, _: &Path, _: &[f64], _: Option<f64>, _: Say<'_>, _: &Signal) -> Result<(Vec<f32>, String), String> {
+        Ok((direction(3, 0, 0), MODEL.into()))
+    }
+    async fn words(&self, text: &str, _: Say<'_>, _: &Signal) -> Result<Vec<f32>, String> {
+        let style = match text {
+            text if text.contains("pop") || text.contains("bright") => STYLES[2].direction,
+            text if text.contains("techno") || text.contains("dub") => STYLES[1].direction,
+            text if text.contains("halftime") || text.contains("dark") => STYLES[0].direction,
+            // Words for no style of theirs.
+            _ => 400,
+        };
+        Ok(kumi_listening::embed::normalized((0..DIMS).map(|at| if at == style { 1. } else { 0.01 }).collect()))
+    }
+}
+
 /// A unit vector pointing mostly at `at` (a style), leaning toward its artist's own, a little apart for each song.
 fn direction(at: usize, artist: usize, song: usize) -> Vec<f32> {
     let mut vector = vec![0f32; DIMS];
@@ -159,7 +182,7 @@ fn library(root: &Path) -> (PathBuf, String) {
         writer.put(&store, id, &direction(STYLES[*style].direction, *n % 3, *n)).unwrap();
     }
     writer.settle(&store).unwrap();
-    recluster(&mut store, &dir, MODEL).unwrap();
+    recluster(&mut store, &dir, MODEL, None).unwrap();
     (dir, archangel)
 }
 
@@ -299,6 +322,33 @@ fn its_answers_say_the_producers_styles_and_their_songs_nearest_what_they_named(
         // The songs it named are heard in full first.
         let store = MusicStore::open_read(&database(&kumi)).unwrap().unwrap();
         assert!(store.song_at(&archangel).unwrap().unwrap().used_at.is_some());
+    });
+}
+
+#[test]
+fn words_find_the_songs_that_sound_like_them_and_name_the_styles() {
+    local(async {
+        let dir = tempfile::tempdir().unwrap();
+        let (kumi, _) = library(dir.path());
+        // The style words as the test's model reads them: two for each style, and one for none of them that names none.
+        let words: Vec<(String, Vec<f32>)> = ["sunny pop", "bright", "deep techno", "dub", "dark halftime", "dark", "calm"]
+            .iter()
+            .map(|word| {
+                let vector = futures::executor::block_on(Worded.words(word, &|_| {}, &Signal::new())).unwrap();
+                (word.to_string(), vector)
+            })
+            .collect();
+        let mut store = MusicStore::open(&database(&kumi)).unwrap();
+        recluster(&mut store, &kumi, MODEL, Some(&words)).unwrap();
+        drop(store);
+        let (taste, _) = music(&kumi, Some(vec!["/library".into()]), true, vec![]);
+        let mut options = MusicOptions::new(kumi.clone(), Some(vec!["/library".into()]), Default::default());
+        options.style = Some(Rc::new(Worded) as Rc<dyn Style>);
+        let worded = create_music(options);
+        counted(&worded).await;
+        counted(&taste).await;
+        golden("words-vector.json", &pinned(&ask(&worded, json!({"words": "sunny pop for a summer night", "count": 4})).await, dir.path()));
+        golden("styles-named.json", &pinned(&ask(&worded, json!({})).await, dir.path()));
     });
 }
 
