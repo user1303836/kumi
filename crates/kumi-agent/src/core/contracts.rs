@@ -970,6 +970,8 @@ pub enum SessionEvent {
     Watched(WatchedEvent),
     Web(WebEvent),
     Library(LibraryEvent),
+    /// How learning the producer's own music is going.
+    Music(MusicEvent),
     Recipe(RecipeEvent),
     Technique(TechniqueEvent),
     /// What a tool at work is doing now ("looking at 2:05"), for NOW; it ends with the tool.
@@ -1176,6 +1178,12 @@ pub trait MemoryStore {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LibraryEvent {
     pub status: LibraryStatus,
+}
+
+/// How learning the producer's own music is going, for the app to show (a `{ type: "music" }` session event).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MusicEvent {
+    pub status: kumi_listening::music::learning::MusicStatus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

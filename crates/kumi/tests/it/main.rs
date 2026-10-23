@@ -36,6 +36,7 @@ mod live_extension;
 mod login;
 mod markdown;
 mod models;
+mod music_learner;
 mod native_editing_live;
 mod observed_names;
 mod own_bridge;

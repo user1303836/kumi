@@ -1,11 +1,14 @@
 //! The scan of the producer's music folders. Its first pass reads every song's tags, 300,000 songs in minutes: it
 //! touches only the files that changed since the last walk (by size and time changed), marks the ones gone that are
-//! gone, and finds duplicates again. The songs are heard after it.
+//! gone, and finds duplicates again. Then the songs are heard, in the order that makes taste useful soonest: the songs
+//! taste used, a spread sample across artists in full, every song lightly (newest first), then every song in full.
 
 use super::{
+    clusters::{clusters_for, kmeans, SEED},
     folders::{folders_to_walk, walk, Walked},
-    store::{MusicError, MusicStore, BATCH},
+    store::{folded, MusicError, MusicStore, Song, Stage, BATCH, LIVE},
     tags::{self, Tags},
+    vectors::{VectorReader, DIMS},
 };
 use kumi_common::abort::Signal;
 use std::{
@@ -155,4 +158,138 @@ pub fn apply_walk(
 
 fn stopped() -> MusicError {
     MusicError("stopped".into())
+}
+
+/// The spread sample's size: songs heard in full first, so the first hour of hearing covers the whole library.
+pub const SPREAD: usize = 2_000;
+
+/// Up to `size` songs taken in turn from each artist (or, for songs named by their path, each top folder), newest
+/// first within each.
+pub fn spread_sample(store: &MusicStore, size: usize) -> Result<Vec<i64>, MusicError> {
+    let mut groups: indexmap::IndexMap<String, std::collections::VecDeque<i64>> = indexmap::IndexMap::new();
+    let mut statement = store
+        .connection()
+        .prepare(&format!("SELECT id, artist, album_artist, names_from, path, folder FROM songs WHERE {LIVE} ORDER BY mtime DESC, id"))?;
+    let mut rows = statement.query([])?;
+    while let Some(row) = rows.next()? {
+        let (id, artist, album_artist, names_from): (i64, Option<String>, Option<String>, String) =
+            (row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?);
+        let (path, folder): (String, String) = (row.get(4)?, row.get(5)?);
+        let key = match album_artist.or(artist).filter(|_| names_from == "tags") {
+            Some(artist) => format!("artist:{}", folded(&artist)),
+            None => {
+                let relative = Path::new(&path).strip_prefix(&folder).unwrap_or(Path::new(&path));
+                let top = relative.components().next().filter(|_| relative.components().count() > 1);
+                format!("folder:{}", top.map(|top| folded(&top.as_os_str().to_string_lossy())).unwrap_or_default())
+            }
+        };
+        groups.entry(key).or_default().push_back(id);
+    }
+    let mut sample = vec![];
+    while sample.len() < size && groups.values().any(|group| !group.is_empty()) {
+        for group in groups.values_mut() {
+            if let Some(id) = group.pop_front() {
+                sample.push(id);
+                if sample.len() >= size {
+                    break;
+                }
+            }
+        }
+    }
+    Ok(sample)
+}
+
+/// The spread sample kept in music.db: made when there's none, and again once the songs have grown by a tenth.
+pub fn spread(store: &MusicStore) -> Result<Vec<i64>, MusicError> {
+    let songs = store.counts()?.songs;
+    let kept = store.meta("spread")?.and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+    if let Some(kept) = kept.filter(|kept| songs * 10 <= kept["songs"].as_u64().unwrap_or(0) as usize * 11) {
+        return Ok(kept["ids"].as_array().into_iter().flatten().filter_map(|id| id.as_i64()).collect());
+    }
+    let sample = spread_sample(store, SPREAD)?;
+    store.set_meta("spread", &serde_json::json!({"songs": songs, "ids": sample}).to_string())?;
+    Ok(sample)
+}
+
+/// What to hear next.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Next {
+    /// A song to hear at a stage.
+    Hear(Song, Stage),
+    /// A song heard by another style model, to hear again by this one (its windows only).
+    Restyle(Song, Stage),
+}
+
+impl Next {
+    pub fn song(&self) -> &Song {
+        match self {
+            Next::Hear(song, _) | Next::Restyle(song, _) => song,
+        }
+    }
+}
+
+/// The next song to hear, best first: one taste used (in full), one this style model hasn't heard yet (its windows
+/// only), the spread sample (in full), every song lightly (newest first), then every song in full (newest first).
+/// `busy` are being heard now, `missing` waits for this style model, and `spread_at` is how far into the spread sample
+/// every song is heard in full.
+pub fn next(
+    store: &MusicStore,
+    busy: &HashSet<i64>,
+    missing: &mut std::collections::VecDeque<i64>,
+    spread: &[i64],
+    spread_at: &mut usize,
+) -> Result<Option<Next>, MusicError> {
+    let not_busy = match busy.is_empty() {
+        true => "1".to_string(),
+        false => format!("id NOT IN ({})", busy.iter().map(i64::to_string).collect::<Vec<_>>().join(",")),
+    };
+    let one = |condition: &str, order: &str| -> Result<Option<Song>, MusicError> {
+        Ok(store.songs_where(&format!("({condition}) AND {not_busy}"), order, 1)?.into_iter().next())
+    };
+    if let Some(song) = one("used_at IS NOT NULL AND stage < 2", "used_at DESC, id")? {
+        return Ok(Some(Next::Hear(song, Stage::Full)));
+    }
+    while let Some(id) = missing.front().copied() {
+        missing.pop_front();
+        if let Some(song) = store.songs_by_id(&[id])?.into_iter().find(|song| song.stage >= 1 && !busy.contains(&song.id)) {
+            let stage = if song.stage >= 2 { Stage::Full } else { Stage::Light };
+            return Ok(Some(Next::Restyle(song, stage)));
+        }
+    }
+    while *spread_at < spread.len() {
+        let chunk: Vec<i64> = spread[*spread_at..(*spread_at + 200).min(spread.len())].to_vec();
+        let mut waiting: Vec<Song> =
+            store.songs_by_id(&chunk)?.into_iter().filter(|song| song.stage < 2 && !busy.contains(&song.id)).collect();
+        if waiting.is_empty() {
+            *spread_at += chunk.len();
+            continue;
+        }
+        waiting.sort_by_key(|song| chunk.iter().position(|id| *id == song.id));
+        return Ok(Some(Next::Hear(waiting.remove(0), Stage::Full)));
+    }
+    if let Some(song) = one("stage = 0", "mtime DESC, id")? {
+        return Ok(Some(Next::Hear(song, Stage::Light)));
+    }
+    Ok(one("stage = 1", "mtime DESC, id")?.map(|song| Next::Hear(song, Stage::Full)))
+}
+
+/// The clusters made again from the songs this style model heard: each song's, and their centres in `meta`.
+pub fn recluster(store: &mut MusicStore, music_dir: &Path, model: &str) -> Result<usize, MusicError> {
+    let reader = VectorReader::open(music_dir, store, model)?;
+    let ids: Vec<i64> = store.heard_ids()?.into_iter().filter(|id| reader.has(*id)).collect();
+    let read = |at: usize, buffer: &mut [f32]| {
+        if let Some(vector) = reader.get(ids[at]) {
+            buffer.copy_from_slice(&vector[..DIMS]);
+        }
+    };
+    let (centres, assigned) = kmeans(ids.len(), DIMS, clusters_for(ids.len()), &read, SEED);
+    store.set_clusters(&ids.iter().copied().zip(assigned).collect::<Vec<_>>())?;
+    store.set_meta("clusters", &serde_json::json!({"model": model, "heard": ids.len(), "centres": centres}).to_string())?;
+    Ok(ids.len())
+}
+
+/// How many songs the clusters were made from (by this style model), from `meta`.
+pub fn clustered(store: &MusicStore, model: &str) -> Result<usize, MusicError> {
+    let kept = store.meta("clusters")?.and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+    Ok(kept.filter(|kept| kept["model"] == model).and_then(|kept| kept["heard"].as_u64()).unwrap_or(0) as usize)
 }

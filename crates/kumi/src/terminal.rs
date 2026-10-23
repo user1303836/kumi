@@ -295,6 +295,7 @@ struct State {
     newer: Option<String>,
     taste: Vec<KeptLine>,
     told_library: bool,
+    told_music: bool,
     suppress: bool,
     displayed_bytes: usize,
     started_at: f64,
@@ -344,6 +345,7 @@ pub fn create_terminal(options: TerminalOptions) -> PlainTerminal {
             newer: None,
             taste: vec![],
             told_library: false,
+            told_music: false,
             suppress: false,
             displayed_bytes: 0,
             started_at: perf_now(),
@@ -1200,6 +1202,20 @@ impl Terminal for PlainTerminal {
                     state.told_library = true;
                     drop(state);
                     self.notice("Learning your library in the background…");
+                }
+            }
+            "music" => {
+                let mut state = self.0.state.borrow_mut();
+                // The first time Kumi learns their music: nothing heard yet.
+                let heard = value["status"]["light"].as_u64().unwrap_or(0) + value["status"]["full"].as_u64().unwrap_or(0);
+                if !state.told_music
+                    && value["status"]["state"].as_str() == Some("learning")
+                    && heard == 0
+                    && value["status"]["learnedAt"].as_f64().unwrap_or(0.) == 0.
+                {
+                    state.told_music = true;
+                    drop(state);
+                    self.notice("Learning your music in the background…");
                 }
             }
             "resumed" => {

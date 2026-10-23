@@ -47,7 +47,9 @@ pub enum LearnerReply {
     Busy,
     Failed { message: String },
 }
-fn low_priority() {
+/// The learner's priority, the system's lowest: the producer's work (and their DAW) always comes first. The music
+/// scan, a job of the same worker, takes it too.
+pub fn low_priority() {
     #[cfg(unix)]
     unsafe {
         libc::setpriority(libc::PRIO_PROCESS, 0, 19);

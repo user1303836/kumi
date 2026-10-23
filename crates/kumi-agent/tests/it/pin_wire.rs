@@ -7,9 +7,9 @@ use kumi_agent::core::{
         ActionEvent, ArrangementLoop, ArrangementStrip, CatchUp, ChainNode, ClipView, ClipViewNote, ConnectionState, ConversationNow,
         ConversationSummary, DeviceNode, DeviceTree, DeviceType, DisconnectCause, FocusParameter, FocusTrack, KernelEvent, LessonAction,
         LibraryEvent, LiveDetail, LiveFocus, LiveTransport, LiveView, Locator, Memory, MemoryEvent, MemoryNote, MemoryScope, MemoryView,
-        PinKind, PinnedNode, PinnedTime, RecipeAction, RecipeEvent, SessionEvent, SessionSlot, SessionStatus, SessionStrip, SetAsk,
-        SetChoice, SlotClip, StopReason, TechniqueAction, TechniqueEvent, TechniqueSummary, TrackKind, TranscriptLine, TranscriptRole,
-        TurnResult, TurnState, WaitFor,
+        MusicEvent, PinKind, PinnedNode, PinnedTime, RecipeAction, RecipeEvent, SessionEvent, SessionSlot, SessionStatus, SessionStrip,
+        SetAsk, SetChoice, SlotClip, StopReason, TechniqueAction, TechniqueEvent, TechniqueSummary, TrackKind, TranscriptLine,
+        TranscriptRole, TurnResult, TurnState, WaitFor,
     },
     goal::{Best, GoalPhase, GoalStatus},
     goal_mode::{ObjectiveState, ObjectiveStatus, Verdict},
@@ -20,6 +20,7 @@ use kumi_agent::core::{
 use kumi_listening::{
     checklist::{Change as RowChange, Row},
     detect::{Problem, ProblemKind},
+    music::learning::{MusicState, MusicStatus},
     round::{Next, Round, RoundKind},
 };
 use kumi_media::audio::matching::Focus;
@@ -670,6 +671,23 @@ fn events() -> Vec<SessionEvent> {
             status: LibraryStatus { state, sounds: 0, presets: 0, sets: 0, todo: None, done: None, learned_at: None },
         })
     }));
+    events.push(SessionEvent::Music(MusicEvent {
+        status: MusicStatus {
+            state: MusicState::Learning,
+            folders: vec!["~/Music".into()],
+            songs: 2400,
+            light: 900,
+            full: 300,
+            skipped: 12,
+            learned_at: Some(AT),
+            said: Some("Kumi is fetching its style model, LAION-CLAP…".into()),
+        },
+    }));
+    events.extend([MusicState::Off, MusicState::Learning, MusicState::Paused, MusicState::Done, MusicState::Elsewhere].map(|state| {
+        SessionEvent::Music(MusicEvent {
+            status: MusicStatus { state, folders: vec![], songs: 0, light: 0, full: 0, skipped: 0, learned_at: None, said: None },
+        })
+    }));
     events.extend(
         [RecipeAction::Saved, RecipeAction::Updated, RecipeAction::Running, RecipeAction::Forgotten]
             .map(|action| SessionEvent::Recipe(RecipeEvent { action, name: "sidechain-pump".into(), steps: 3 })),
@@ -806,6 +824,7 @@ fn variant(event: &SessionEvent) -> &'static str {
         SessionEvent::Watched(_) => "Watched",
         SessionEvent::Web(_) => "Web",
         SessionEvent::Library(_) => "Library",
+        SessionEvent::Music(_) => "Music",
         SessionEvent::Recipe(_) => "Recipe",
         SessionEvent::Technique(_) => "Technique",
         SessionEvent::Doing { .. } => "Doing",
@@ -830,7 +849,7 @@ fn variant(event: &SessionEvent) -> &'static str {
     }
 }
 
-const VARIANTS: [&str; 42] = [
+const VARIANTS: [&str; 43] = [
     "Focus",
     "Pointed",
     "Change",
@@ -856,6 +875,7 @@ const VARIANTS: [&str; 42] = [
     "Watched",
     "Web",
     "Library",
+    "Music",
     "Recipe",
     "Technique",
     "Doing",

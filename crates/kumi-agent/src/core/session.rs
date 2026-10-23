@@ -113,6 +113,8 @@ pub struct SessionOptions {
     /// Where each turn's timing goes (`timings.jsonl`); none keeps no log.
     pub timings: Option<String>,
     pub library: Option<Rc<Library>>,
+    /// The producer's own music, when Kumi knows where it is: how learning it goes reaches the app.
+    pub music: Option<Rc<kumi_listening::music::learning::Music>>,
     pub matching: bool,
     pub match_budget: Option<MatchBudget>,
     pub playbook: Option<Rc<dyn PlaybookStore>>,
@@ -159,6 +161,7 @@ impl SessionOptions {
             files: None,
             timings: None,
             library: None,
+            music: None,
             matching: true,
             match_budget: None,
             playbook: None,
@@ -404,6 +407,7 @@ struct Inner {
     /// Answers begun in this session: tools that count per answer (watch_video) read it.
     answers: Rc<Cell<u64>>,
     unlisten_library: RefCell<Option<Box<dyn FnOnce()>>>,
+    unlisten_music: RefCell<Option<Box<dyn FnOnce()>>>,
     timeout_ms: u64,
     idle_ms: u64,
     turn_limit_ms: u64,
@@ -720,6 +724,10 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             }));
             registry
         });
+        let unlisten_music = options.music.as_ref().map(|music| {
+            let emit = emit.clone();
+            music.on_status(Rc::new(move |status| emit(SessionEvent::Music(MusicEvent { status }))))
+        });
         let unlisten_library = options
             .library
             .as_ref()
@@ -745,6 +753,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             jobs,
             answers,
             unlisten_library: RefCell::new(unlisten_library),
+            unlisten_music: RefCell::new(unlisten_music),
             saving: RefCell::new(ready()),
             playbook_queue: RefCell::new(ready()),
             state: RefCell::new(State {
@@ -3488,6 +3497,9 @@ impl SessionController for Session {
             jobs.interrupt_all();
         }
         if let Some(unlisten) = self.0.unlisten_library.borrow_mut().take() {
+            unlisten();
+        }
+        if let Some(unlisten) = self.0.unlisten_music.borrow_mut().take() {
             unlisten();
         }
         let this = self.clone();
