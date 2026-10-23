@@ -190,9 +190,14 @@ impl Own {
     /// The bridge this Kumi brings: beside Kumi in a release, or this checkout's own build.
     fn bundled_source(&self) -> Option<PathBuf> {
         let exe = std::env::current_exe().ok()?;
-        let beside = exe.parent()?.to_path_buf();
-        let built = (self.built)(&beside)?;
-        self.carried_by(&beside).or_else(|| built.exists().then_some(built))
+        self.bundled_beside(exe.parent()?)
+    }
+
+    /// The bridge a Kumi whose executable is in `beside` brings: the copy a release carries there, else this checkout's
+    /// build. A release isn't a checkout, so where the build is only the checkout's (Renoise's tool), the carried copy
+    /// is the one there is.
+    pub fn bundled_beside(&self, beside: &Path) -> Option<PathBuf> {
+        self.carried_by(beside).or_else(|| (self.built)(beside).filter(|built| built.exists()))
     }
 
     /// The bundled bridge's version, where it says one (Renoise's tool does; REAPER's build gets a version file with
