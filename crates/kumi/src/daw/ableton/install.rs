@@ -439,7 +439,7 @@ pub async fn checkout_bridge(repo: &str) -> i32 {
 /// After a checkout's update: Live's bridge brought up to date with the checkout's own build, where Live is closed.
 pub(crate) async fn after_checkout_update(io: &UpdateIo, run: Run, repo: &str) -> i32 {
     let say = |s: String| io.out.write(&format!("{s}\n"));
-    let bundled = crate::update::read_cargo_version(&join(repo, "crates/ableton-mcp-server/Cargo.toml"));
+    let bundled = crate::update::read_cargo_version(&join(repo, "daws/ableton/ableton-mcp-server/Cargo.toml"));
     let bundled = bundled.as_deref();
     let bridge = older_bridge(&io.env, bundled);
     if find_bridge_config(&io.env).is_none() {

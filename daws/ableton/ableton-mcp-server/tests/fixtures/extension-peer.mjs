@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 const [storage, repository] = process.argv.slice(2);
-const directory = join(repository, "apps", "live-extension");
+const directory = join(repository, "daws", "ableton", "live-extension");
 const { fakeLive } = await import(pathToFileURL(join(directory, "test", "fake-live.mjs")));
 const fake = fakeLive({ storage, temp: join(storage, "temp"), liveTemp: join(storage, "live-temp") });
 const extension = createRequire(import.meta.url)(join(directory, "dist", "extension.js"));

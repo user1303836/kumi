@@ -166,7 +166,7 @@ Live 不给脚本提供并轨（bounce），所以 Kumi 在一个计划中进行
 
 ## 进入 Live 的两条通道
 
-Kumi 通过桥接的 Remote Script（Live 的 Python API，上面的每项修改都用它）访问 Live；在 Live 12.4 及更高版本上，还通过 Kumi 的 Live 扩展（`apps/live-extension`，基于 Live 的 Extensions SDK 构建）访问。扩展做 Remote Script 做不到的事：带音符的编曲视图 MIDI 片段、清除一段范围、离线渲染，以及右键菜单中的 **Ask Kumi about this**。
+Kumi 通过桥接的 Remote Script（Live 的 Python API，上面的每项修改都用它）访问 Live；在 Live 12.4 及更高版本上，还通过 Kumi 的 Live 扩展（`daws/ableton/live-extension`，基于 Live 的 Extensions SDK 构建）访问。扩展做 Remote Script 做不到的事：带音符的编曲视图 MIDI 片段、清除一段范围、离线渲染，以及右键菜单中的 **Ask Kumi about this**。
 
 - `kumi bridge` 把扩展复制到 Live 的 Extensions 文件夹中，Live 打开时会启动它。开启 Developer Mode 时，由桥接自己启动它。
 - 只有当 Remote Script 不具备某项操作时，桥接才会把它发给扩展。Kumi 的读取仍然走 Remote Script，因为它了解 Live 的设备类别和对象身份。

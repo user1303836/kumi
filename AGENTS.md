@@ -10,12 +10,13 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
     views, and workflows such as jam, layers and stems).
   - `src/integrations/ableton/`: Live, host side. `own_*` and `shared/`: what REAPER and Renoise share.
   - `src/integrations/reaper*.rs`, `renoise*.rs`: REAPER and Renoise, host side.
-- `crates/ableton-mcp-server`: Live's bridge (an MCP server). `remote-script/` runs inside Live (Python);
-  `apps/live-extension/` is Live's extension (TypeScript); `protocol/` is the only list of Live operations.
+- `daws/ableton/`: Live. `ableton-mcp-server/` is its bridge (an MCP server); `remote-script/` runs inside Live
+  (Python); `live-extension/` is Live's extension (TypeScript); `protocol/` is the only list of Live operations;
+  `max-standard/` is the standard Kumi holds Max patches to (data Kumi builds in).
 - `crates/daw-bridge` (the `kumi-daw/1` wire) and `crates/daw-mcp-server` (the host): Kumi's own bridges.
 - `crates/reaper-kumi`: REAPER's extension. `daws/renoise/com.kumi.Bridge.xrnx`: Renoise's tool (Lua).
 - `crates/kumi-store` (SQLite), `kumi-common` (shared utilities), `kumi-genexpr` (gen~ test interpreter).
-- `max-standard/` (Max patch rules) and `plugin-formats/` (plug-in preset formats): data Kumi builds in.
+- `plugin-formats/`: the plug-in preset formats Kumi reads (data Kumi builds in).
 - `crates/kumi-testkit`: what tests share (a dev-dependency only): `workspace_path`, `chunked!`, `fixture_paths!`,
   `in_process!`. It depends on nothing: support that needs Kumi's crates is a macro the test's crate expands.
 - `scripts/`: release and packaging (Python), the isolated test runners, and `dev.py` with `areas.toml` (what a change
@@ -49,14 +50,14 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 - Use worktrees. On long tasks, open a PR early and keep pushing at a regular cadence.
 - Commit subjects are plain English and say what changed. No conventional-commit prefixes.
 - Every PR body has `Changelog:` lines (`Changelog: none` for internal work); `scripts/release.py` reads them.
-- A bridge or Remote Script change bumps `crates/ableton-mcp-server`'s version (DEVELOPER_GUIDE, "Releasing").
+- A bridge or Remote Script change bumps `daws/ableton/ableton-mcp-server`'s version (DEVELOPER_GUIDE, "Releasing").
 - A docs change goes into `docs/en`, `docs/ja` and `docs/zh-CN` in the same PR.
 - Docs are concise and factual, bulleted where possible.
 - Docs that aren't for users (design docs, agent notes, prompts, PRDs) stay out of git; `.hermes/` is ignored.
   AGENTS.md and CLAUDE.md are the exceptions.
 - Never change binary names, the installed bundle layout or the wire protocols.
 - Every tracked file belongs to a crate or an area in `scripts/areas.toml`; CI fails on one that doesn't.
-- Never copy Live operation names or the registry hash out of `protocol/`.
+- Never copy Live operation names or the registry hash out of `daws/ableton/protocol/`.
 - `vendor/willington/` changes only in the owner's PRs from a `willington/` branch that change nothing else.
 - Tests never need a running DAW, a sign-in or anything from this machine.
 

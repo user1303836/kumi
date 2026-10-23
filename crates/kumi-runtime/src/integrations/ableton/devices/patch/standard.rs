@@ -1,4 +1,4 @@
-//! The standard Kumi holds Max patchers to, from `max-standard/standard.json`: each rule's level, and what measuring
+//! The standard Kumi holds Max patchers to, from `daws/ableton/max-standard/standard.json`: each rule's level, and what measuring
 //! well-made devices found for it.
 
 use std::collections::HashMap;
@@ -47,7 +47,8 @@ pub struct Standard {
 
 static STANDARD: LazyLock<Standard> = LazyLock::new(|| {
     Standard::from_value(
-        &serde_json::from_str(include_str!(concat!(env!("KUMI_WORKSPACE"), "/max-standard/standard.json"))).expect("standard.json"),
+        &serde_json::from_str(include_str!(concat!(env!("KUMI_WORKSPACE"), "/daws/ableton/max-standard/standard.json")))
+            .expect("standard.json"),
     )
 });
 

@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const sdk = join(here, "..", "..", "vendor", "ableton-extensions-sdk-1.0.0-beta.1", "package 3", "dist", "index.cjs");
+const sdk = join(here, "..", "..", "..", "vendor", "ableton-extensions-sdk-1.0.0-beta.1", "package 3", "dist", "index.cjs");
 if (!existsSync(sdk)) {
   console.error(`The Extensions SDK isn't here (${sdk}); the committed dist/extension.js stays as it is.`);
   process.exit(1);

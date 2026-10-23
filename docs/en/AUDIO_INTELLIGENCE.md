@@ -185,7 +185,7 @@ Don't start another capture while anything is left.
 
 The standards analysis is checked against FFmpeg's independent `ebur128`
 filter with generated audio (no third-party recordings): the bridge's tests
-(`crates/ableton-mcp-server/tests/it/audio_standards.rs`) hold it to FFmpeg's
+(`daws/ableton/ableton-mcp-server/tests/it/audio_standards.rs`) hold it to FFmpeg's
 results for those signals, from the tracked report
 [phase-8-audio-oracle.json](../evidence/phase-8-audio-oracle.json)
 (2026-07-27). The tolerance is 0.1 LU or dB at 48 kHz and 0.15 dBTP for

@@ -3,7 +3,7 @@
 //! same JSON. A box's own patcher (a [p], an embedded bpatcher, a gen~) is read with it, and the file an abstraction, a
 //! bpatcher or a code box names is read through [`Files`] (a frozen device's own files, or none).
 //!
-//! The standard Kumi holds patchers to is data in `max-standard/` at the repository's root: each rule's level, what
+//! The standard Kumi holds patchers to is data in `daws/ableton/max-standard/`: each rule's level, what
 //! the rules know of Max's objects, and what measuring well-made devices found. The model never reads it: it hears a
 //! broken rule in one line, with the fix.
 

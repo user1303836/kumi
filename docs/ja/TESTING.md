@@ -12,9 +12,9 @@
 npm ci --prefix crates/kumi-runtime/tests/support   # 初回のみ：一部の Rust テストが使う公式 SDK
 cargo build --workspace --all-targets --locked
 sh scripts/test-isolated.sh                        # Windows: ./scripts/test-isolated.ps1
-python3 -m unittest discover -s remote-script -p 'test_*.py'
-npm ci --prefix apps/live-extension
-npm test --prefix apps/live-extension
+python3 -m unittest discover -s daws/ableton/remote-script -p 'test_*.py'
+npm ci --prefix daws/ableton/live-extension
+npm test --prefix daws/ableton/live-extension
 python3 -m unittest discover -s scripts/tests -p 'test_*release.py'
 ```
 
@@ -56,15 +56,15 @@ Windows では、いくつかのテストがシンボリックリンクを作成
 リポジトリのルートから：
 
 ```sh
-python3 -m unittest discover -s remote-script -p 'test_*.py'
-python3 -m compileall -q remote-script/AbletonMcpBridge
+python3 -m unittest discover -s daws/ableton/remote-script -p 'test_*.py'
+python3 -m compileall -q daws/ableton/remote-script/AbletonMcpBridge
 ```
 
 テストは Remote Script を偽の Live オブジェクトに対して実行します：認証、シーケンス、メインスレッドのキュー、レジストリとそのハッシュ、ディスカバリー、トランザクション、キャプチャとリアルタイムの安全性、そしてオプションの Willington プロバイダーです。
 
 ## Kumi の Live 拡張機能
 
-`apps/live-extension` には独自の `package.json` があります。`npm ci --prefix apps/live-extension` を実行した後、`npm test --prefix apps/live-extension` は、コミットされた `dist/extension.js` を偽の Live に対して読み込み、記録された sha256 と照合します。そこでのビルド（`npm run build`）と型チェック（`npm run typecheck`）には `vendor/` 内の Extensions SDK が必要です。それがなければ、コミットされたビルドがそのまま残ります。再ビルドした後は、`dist/extension.js` をその `.sha256` と一緒にコミットしてください。
+`daws/ableton/live-extension` には独自の `package.json` があります。`npm ci --prefix daws/ableton/live-extension` を実行した後、`npm test --prefix daws/ableton/live-extension` は、コミットされた `dist/extension.js` を偽の Live に対して読み込み、記録された sha256 と照合します。そこでのビルド（`npm run build`）と型チェック（`npm run typecheck`）には `vendor/` 内の Extensions SDK が必要です。それがなければ、コミットされたビルドがそのまま残ります。再ビルドした後は、`dist/extension.js` をその `.sha256` と一緒にコミットしてください。
 
 ## リリーススクリプト
 
@@ -75,7 +75,7 @@ python3 -m compileall -q remote-script/AbletonMcpBridge
 | `KUMI_LEGACY_APP` | 展開済みの Kumi 1.7.5。`python3 scripts/fetch-legacy-release.py [folder]` がダウンロードし、SHA-256 を確認して展開し、そのフォルダーを出力します |
 | `KUMI_NATIVE_RELEASES` | ビルド済みのリリースアーティファクトのフォルダー（[リリース](DEVELOPER_GUIDE.md#リリース)を参照） |
 
-`KUMI_LEGACY_APP` は、ブリッジ自身の移行テスト `crates/ableton-mcp-server/tests/it/lifecycle_migration.rs` にも使われます。このテストは変数がなくてもスキップされず、公開済みの Kumi 1.7.5 のバンドルをダウンロードして SHA-256 を確認します。変数を設定しておけば、バンドルを一度取得したあとはオフラインで実行できます。
+`KUMI_LEGACY_APP` は、ブリッジ自身の移行テスト `daws/ableton/ableton-mcp-server/tests/it/lifecycle_migration.rs` にも使われます。このテストは変数がなくてもスキップされず、公開済みの Kumi 1.7.5 のバンドルをダウンロードして SHA-256 を確認します。変数を設定しておけば、バンドルを一度取得したあとはオフラインで実行できます。
 
 ## Live やモデルを使うチェック
 

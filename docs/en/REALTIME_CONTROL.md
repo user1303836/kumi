@@ -19,7 +19,7 @@ configuration has a `realtimePort` that differs from `port`:
 ```
 
 The whole file is described in the Remote Script's README
-([remote-script/README.md](../../remote-script/README.md)).
+([daws/ableton/remote-script/README.md](../../daws/ableton/remote-script/README.md)).
 
 - `ableton-mcp-lifecycle install`, and so `kumi bridge`, sets `realtimePort` to
   9766 unless `--realtime-port` names another port. Install checks that both

@@ -13,9 +13,9 @@ From the repository root:
 npm ci --prefix crates/kumi-runtime/tests/support   # once: the official SDKs some Rust tests run
 cargo build --workspace --all-targets --locked
 sh scripts/test-isolated.sh                        # Windows: ./scripts/test-isolated.ps1
-python3 -m unittest discover -s remote-script -p 'test_*.py'
-npm ci --prefix apps/live-extension
-npm test --prefix apps/live-extension
+python3 -m unittest discover -s daws/ableton/remote-script -p 'test_*.py'
+npm ci --prefix daws/ableton/live-extension
+npm test --prefix daws/ableton/live-extension
 python3 -m unittest discover -s scripts/tests -p 'test_*release.py'
 ```
 
@@ -73,8 +73,8 @@ changes no golden file.
 From the repository root:
 
 ```sh
-python3 -m unittest discover -s remote-script -p 'test_*.py'
-python3 -m compileall -q remote-script/AbletonMcpBridge
+python3 -m unittest discover -s daws/ableton/remote-script -p 'test_*.py'
+python3 -m compileall -q daws/ableton/remote-script/AbletonMcpBridge
 ```
 
 The tests run the Remote Script against fake Live objects: authentication,
@@ -83,8 +83,8 @@ transactions, capture and realtime safety, and the optional Willington provider.
 
 ## Kumi's Live extension
 
-`apps/live-extension` has its own `package.json`. After
-`npm ci --prefix apps/live-extension`, `npm test --prefix apps/live-extension`
+`daws/ableton/live-extension` has its own `package.json`. After
+`npm ci --prefix daws/ableton/live-extension`, `npm test --prefix daws/ableton/live-extension`
 loads the committed `dist/extension.js` against a fake Live and checks it
 against its recorded sha256. Building it (`npm run build`) and type-checking it
 (`npm run typecheck`) there need the Extensions SDK in `vendor/`; without it,
@@ -105,7 +105,7 @@ bundles. Without these variables, the tests that need them skip:
 | `KUMI_NATIVE_RELEASES` | A folder of built release artifacts (see [releasing](DEVELOPER_GUIDE.md#releasing)) |
 
 `KUMI_LEGACY_APP` serves the bridge's own migration test too,
-`crates/ableton-mcp-server/tests/it/lifecycle_migration.rs`. That test doesn't
+`daws/ableton/ableton-mcp-server/tests/it/lifecycle_migration.rs`. That test doesn't
 skip without it: it downloads the published Kumi 1.7.5 bundle and checks its
 SHA-256. With the variable set, it runs offline once the bundle is fetched.
 

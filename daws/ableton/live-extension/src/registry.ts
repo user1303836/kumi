@@ -1,7 +1,7 @@
-// The operation registry both channels share (protocol/ableton-live-v1.operations.json), embedded in
+// The operation registry both channels share (daws/ableton/protocol/ableton-live-v1.operations.json), embedded in
 // the bundle. The host refuses a channel whose registry hash differs from its own.
 import { createHash } from "node:crypto";
-import registryJson from "../../../protocol/ableton-live-v1.operations.json";
+import registryJson from "../../protocol/ableton-live-v1.operations.json";
 
 type Schema = Record<string, unknown>;
 interface Operation { id: string; method: string; request: Schema; result: Schema }
@@ -29,7 +29,7 @@ function matchesType(value: unknown, type: string): boolean {
   return typeof value === type;
 }
 
-/** The bridge's validate_registry_value (crates/ableton-mcp-server/src/registry.rs), for one value against one schema. */
+/** The bridge's validate_registry_value (daws/ableton/ableton-mcp-server/src/registry.rs), for one value against one schema. */
 export function validate(schema: Schema, value: unknown, path = "$"): void {
   const declared = Array.isArray(schema.type) ? schema.type as string[] : [schema.type as string];
   if (!declared.some((type) => matchesType(value, type))) throw new Error(`${path} does not match registry type`);

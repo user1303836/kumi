@@ -164,12 +164,12 @@ Apple Silicon 上的 Live 12.4.15b7 需要 Willington `5361914b1b79230e51c8f051b
 {"version":1,"followActions":false,"deviceTools":false,"editing":true,"enableWrites":false}
 ```
 
-已安装的桥接包不包含此脚本。请克隆 [Kumi](https://github.com/user1303836/kumi)，检出与已安装 Kumi 版本一致的发布标签，并使用该源码中的 `remote-script/native_editing_self_test.py`。将下面的 `/absolute/kumi` 替换为源码目录的绝对路径。开发期间应使用对应的功能分支，而不是发布标签。
+已安装的桥接包不包含此脚本。请克隆 [Kumi](https://github.com/user1303836/kumi)，检出与已安装 Kumi 版本一致的发布标签，并使用该源码中的 `daws/ableton/remote-script/native_editing_self_test.py`（1.21.1 及更早的版本为 `remote-script/native_editing_self_test.py`）。将下面的 `/absolute/kumi` 替换为源码目录的绝对路径。开发期间应使用对应的功能分支，而不是发布标签。
 
 ```python
 import importlib.util, sys, Live
 spec = importlib.util.spec_from_file_location(
-    "editing_fixture", "/absolute/kumi/remote-script/native_editing_self_test.py")
+    "editing_fixture", "/absolute/kumi/daws/ableton/remote-script/native_editing_self_test.py")
 fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 provider = Live._kumi_willington_owner

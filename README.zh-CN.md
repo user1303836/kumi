@@ -84,10 +84,10 @@ sh scripts/test-isolated.sh                        # 无需 Live 或登录
 | --- | --- |
 | `crates/kumi` | 终端应用和 `kumi` 命令 |
 | `crates/kumi-runtime` | Kumi 的代理核心：模型提供方、记忆、音频分析、视频、网络，以及与 Live、REAPER 和 Renoise 的集成 |
-| `crates/ableton-mcp-server` | 桥接：由 Kumi 启动的本地 MCP 服务器，也可单独与其他 MCP 客户端配合使用（[桥接指南（英文）](crates/ableton-mcp-server/README.md)） |
-| `remote-script` | 桥接的 Remote Script，运行在 Live 内部 |
-| `apps/live-extension` | Kumi 的 Live 扩展（Live 12.4 及更高版本） |
-| `protocol` | 桥接与 Remote Script 共用的操作列表 |
+| `daws/ableton/ableton-mcp-server` | 桥接：由 Kumi 启动的本地 MCP 服务器，也可单独与其他 MCP 客户端配合使用（[桥接指南（英文）](daws/ableton/ableton-mcp-server/README.md)） |
+| `daws/ableton/remote-script` | 桥接的 Remote Script，运行在 Live 内部 |
+| `daws/ableton/live-extension` | Kumi 的 Live 扩展（Live 12.4 及更高版本） |
+| `daws/ableton/protocol` | 桥接与 Remote Script 共用的操作列表 |
 | `crates/daw-mcp-server` | Kumi 为 REAPER 和 Renoise 准备的宿主程序，由 Kumi 启动；其他 MCP 客户端也能使用 |
 | `crates/reaper-kumi` | Kumi 的 REAPER 扩展 |
 | `daws/renoise` | Kumi 的 Renoise 工具 |

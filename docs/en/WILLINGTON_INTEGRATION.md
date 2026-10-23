@@ -293,12 +293,12 @@ Use a disposable stopped Set named `Willington Native Editing`, with two ungroup
 {"version":1,"followActions":false,"deviceTools":false,"editing":true,"enableWrites":false}
 ```
 
-The runner is not included in the installed bridge bundle. Clone [Kumi](https://github.com/user1303836/kumi), check out the tag matching your installed Kumi release, and use `remote-script/native_editing_self_test.py` from that checkout. Set `/absolute/kumi` below to the absolute checkout directory. During development, use the matching feature branch instead of a release tag.
+The runner is not included in the installed bridge bundle. Clone [Kumi](https://github.com/user1303836/kumi), check out the tag matching your installed Kumi release, and use `daws/ableton/remote-script/native_editing_self_test.py` from that checkout (`remote-script/native_editing_self_test.py` in releases up to 1.21.1). Set `/absolute/kumi` below to the absolute checkout directory. During development, use the matching feature branch instead of a release tag.
 
 ```python
 import importlib.util, sys, Live
 spec = importlib.util.spec_from_file_location(
-    "editing_fixture", "/absolute/kumi/remote-script/native_editing_self_test.py")
+    "editing_fixture", "/absolute/kumi/daws/ableton/remote-script/native_editing_self_test.py")
 fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 provider = Live._kumi_willington_owner

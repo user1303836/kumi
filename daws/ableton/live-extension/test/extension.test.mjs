@@ -12,7 +12,7 @@ import { fakeLive } from "./fake-live.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const bundle = join(here, "..", "dist", "extension.js");
-const registryPath = join(here, "..", "..", "..", "protocol", "ableton-live-v1.operations.json");
+const registryPath = join(here, "..", "..", "protocol", "ableton-live-v1.operations.json");
 const canonical = (value) => value === null || typeof value !== "object" ? JSON.stringify(Object.is(value, -0) ? 0 : value) : Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
 
 let root, storage, extension, live, secret, endpoint;
@@ -61,7 +61,7 @@ test("the committed bundle is the one its checksum names, built from the current
   const [recorded] = readFileSync(join(here, "..", "dist", "extension.js.sha256"), "utf8").split(/\s+/);
   assert.equal(createHash("sha256").update(readFileSync(bundle)).digest("hex"), recorded);
   const client = await connect();
-  // A registry change needs the bundle rebuilt (node apps/live-extension/build.mjs, with the SDK in vendor/).
+  // A registry change needs the bundle rebuilt (node daws/ableton/live-extension/build.mjs, with the SDK in vendor/).
   assert.equal(client.hello.result.registryHash, createHash("sha256").update(canonical(JSON.parse(readFileSync(registryPath, "utf8")))).digest("hex"));
   client.close();
 });

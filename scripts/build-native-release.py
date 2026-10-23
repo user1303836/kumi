@@ -45,7 +45,7 @@ GLIBC_MOST = (2, 35)
 # The C runtime as Windows DLLs: REAPER's extension links it in (+crt-static), so a REAPER without the Visual C++
 # runtime installed loads it.
 WINDOWS_CRT = re.compile(r"(vcruntime\d+.*|msvcp\d+.*|msvcr\d+.*|ucrtbase.*|api-ms-win-crt-.*)\.dll", re.I)
-DOCUMENTS = [("crates/ableton-mcp-server/README.md", "README.md")] + [(f"docs/en/{name}.md", f"{name}.md") for name in (
+DOCUMENTS = [("daws/ableton/ableton-mcp-server/README.md", "README.md")] + [(f"docs/en/{name}.md", f"{name}.md") for name in (
     "USER_GUIDE", "USER_JOURNEYS", "OPERATIONS", "RECOVERY", "LIVE_SAFETY", "AUDIO_INTELLIGENCE",
     "REALTIME_CONTROL", "DELIVERY", "DEVELOPER_GUIDE", "TESTING", "IMPLEMENTATION_STATUS",
     "DISTRIBUTION_POLICY", "SUPPORT_MATRIX", "CAPABILITY_MATRIX")]
@@ -137,7 +137,7 @@ def document_target(root: Path, source: str, target: str, revision: str, kind: s
             raise ValueError(f"documentation target escapes repository: {source} -> {target}")
         mapped = dict(DOCUMENTS).get(normalized)
         relative = {"LICENSE.md": "../LICENSE.md",
-                    "protocol/ableton-live-v1.operations.json": "../remote-script/AbletonMcpBridge/ableton-live-v1.operations.json"}
+                    "daws/ableton/protocol/ableton-live-v1.operations.json": "../remote-script/AbletonMcpBridge/ableton-live-v1.operations.json"}
         if mapped or normalized in relative:
             result = (mapped or relative[normalized]) + suffix
         else:
@@ -238,10 +238,10 @@ def stage_willington(root: Path, remote: Path, target: str) -> None:
 
 def stage_assets(root: Path, package: Path, revision: str, target: str) -> str:
     remote = package / "remote-script" / "AbletonMcpBridge"
-    for source, dest in [("remote-script/README.md", "remote-script/README.md"),
-                         ("remote-script/AbletonMcpBridge/__init__.py", "remote-script/AbletonMcpBridge/__init__.py"),
-                         ("remote-script/ableton_mcp_remote_script.py", "remote-script/AbletonMcpBridge/ableton_mcp_remote_script.py"),
-                         ("protocol/ableton-live-v1.operations.json", "remote-script/AbletonMcpBridge/ableton-live-v1.operations.json")]:
+    for source, dest in [("daws/ableton/remote-script/README.md", "remote-script/README.md"),
+                         ("daws/ableton/remote-script/AbletonMcpBridge/__init__.py", "remote-script/AbletonMcpBridge/__init__.py"),
+                         ("daws/ableton/remote-script/ableton_mcp_remote_script.py", "remote-script/AbletonMcpBridge/ableton_mcp_remote_script.py"),
+                         ("daws/ableton/protocol/ableton-live-v1.operations.json", "remote-script/AbletonMcpBridge/ableton-live-v1.operations.json")]:
         copy(root / source, package / dest)
     stage_willington(root, remote, target)
     registry = json.loads((remote / "ableton-live-v1.operations.json").read_text())
@@ -249,7 +249,7 @@ def stage_assets(root: Path, package: Path, revision: str, target: str) -> str:
     registry_hash = hashlib.sha256(canonical.encode()).hexdigest()
     json_write(remote / "manifest.json", {"package": "AbletonMcpBridge", "algorithm": "sha256", "registryHash": registry_hash,
         "files": {name: digest(remote / name) for name in ("__init__.py", "ableton_mcp_remote_script.py", "ableton-live-v1.operations.json")}}, False)
-    extension = root / "apps/live-extension"
+    extension = root / "daws/ableton/live-extension"
     expected = (extension / "dist/extension.js.sha256").read_text().split()[0]
     if digest(extension / "dist/extension.js") != expected:
         raise ValueError("Live extension build does not match its committed SHA-256")
@@ -261,7 +261,7 @@ def stage_assets(root: Path, package: Path, revision: str, target: str) -> str:
     copy(root / "LICENSE.md", package / "LICENSE.md")
     if digest(package / "LICENSE.md") != MIT_SHA256:
         raise ValueError("release license differs from the receipt policy's MIT license")
-    copy(root / "crates/ableton-mcp-server/README.md", package / "README.md")
+    copy(root / "daws/ableton/ableton-mcp-server/README.md", package / "README.md")
     for source, destination in DOCUMENTS:
         target = package / "release-docs" / destination
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -272,7 +272,7 @@ def stage_bridge(root: Path, package: Path, binary: Path, target: str, source: d
     if package.exists() and any(package.iterdir()):
         raise ValueError("bridge staging folder must be empty")
     package.mkdir(parents=True, exist_ok=True)
-    metadata = tomllib.loads((root / "crates/ableton-mcp-server/Cargo.toml").read_text())["package"]
+    metadata = tomllib.loads((root / "daws/ableton/ableton-mcp-server/Cargo.toml").read_text())["package"]
     extension = ".exe" if "windows" in target else ""
     for command in BRIDGE_BINARIES:
         name = command + extension

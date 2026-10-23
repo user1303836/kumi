@@ -24,17 +24,17 @@ feeds = ["*"]
 
 # Live's operation registry: the bridge ships it, and the Remote Script, the host and Kumi read it.
 [protocol]
-paths = ["protocol/**"]
+paths = ["daws/ableton/protocol/**"]
 feeds = ["ableton-mcp-server", "kumi-common", "kumi-runtime"]
 
 # The Remote Script, which runs inside Live: the bridge carries and installs it, and its hash is checked against it.
 [remote-script]
-paths = ["remote-script/**"]
+paths = ["daws/ableton/remote-script/**"]
 feeds = ["ableton-mcp-server", "kumi-runtime", "kumi"]
 
 # Kumi's Live extension (TypeScript), with its committed build.
 [live-extension]
-paths = ["apps/live-extension/**"]
+paths = ["daws/ableton/live-extension/**"]
 feeds = ["ableton-mcp-server", "kumi"]
 
 # Kumi's Renoise tool (Lua) and its tests against a mock of Renoise's API.
@@ -59,7 +59,7 @@ paths = ["crates/reaper-kumi/**", "scripts/build-native-release.py"]
 
 # What Kumi builds in as data: the standard Max patchers are held to, and the plug-in formats it reads.
 [data]
-paths = ["max-standard/**", "plugin-formats/**"]
+paths = ["daws/ableton/max-standard/**", "plugin-formats/**"]
 feeds = ["kumi-runtime"]
 
 # The eval's fixtures: Live's own device parameters, which the runtime's listening tests read too.
@@ -104,18 +104,18 @@ paths = [
   "crates/kumi-runtime/src/net/**",
   "crates/kumi-runtime/src/integrations/ableton/hands/KumiHands.swift",
   "crates/kumi-runtime/src/integrations/ableton/hands/mac.rs",
-  "crates/ableton-mcp-server/src/install_remote_script*",
-  "crates/ableton-mcp-server/src/install_remote_script*/**",
-  "crates/ableton-mcp-server/src/lifecycle*",
-  "crates/ableton-mcp-server/src/lifecycle*/**",
-  "crates/ableton-mcp-server/src/delivery*",
-  "crates/ableton-mcp-server/src/delivery*/**",
-  "crates/ableton-mcp-server/src/setup*",
-  "crates/ableton-mcp-server/src/setup*/**",
-  "crates/ableton-mcp-server/src/migrate*",
-  "crates/ableton-mcp-server/src/migrate*/**",
-  "crates/ableton-mcp-server/src/platform*",
-  "crates/ableton-mcp-server/src/platform*/**",
+  "daws/ableton/ableton-mcp-server/src/install_remote_script*",
+  "daws/ableton/ableton-mcp-server/src/install_remote_script*/**",
+  "daws/ableton/ableton-mcp-server/src/lifecycle*",
+  "daws/ableton/ableton-mcp-server/src/lifecycle*/**",
+  "daws/ableton/ableton-mcp-server/src/delivery*",
+  "daws/ableton/ableton-mcp-server/src/delivery*/**",
+  "daws/ableton/ableton-mcp-server/src/setup*",
+  "daws/ableton/ableton-mcp-server/src/setup*/**",
+  "daws/ableton/ableton-mcp-server/src/migrate*",
+  "daws/ableton/ableton-mcp-server/src/migrate*/**",
+  "daws/ableton/ableton-mcp-server/src/platform*",
+  "daws/ableton/ableton-mcp-server/src/platform*/**",
   "crates/daw-bridge/Cargo.toml",
   "crates/daw-bridge/src/lifecycle.rs",
   "crates/daw-bridge/src/install.rs",

@@ -215,7 +215,7 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: remote-script
+        working-directory: daws/ableton/remote-script
     steps:
       - name: Stop Windows Defender scanning the workspace
         if: runner.os == 'Windows'
@@ -238,14 +238,14 @@ jobs:
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: apps/live-extension
+        working-directory: daws/ableton/live-extension
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (Node 24)
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: apps/live-extension/package-lock.json
+          cache-dependency-path: daws/ableton/live-extension/package-lock.json
       - run: npm ci --ignore-scripts
       - run: npm test
 

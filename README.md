@@ -84,10 +84,10 @@ After that handoff, `kumi` runs the native application directly.
 | --- | --- |
 | `crates/kumi` | The native terminal app and `kumi` command |
 | `crates/kumi-runtime` | Model providers, memory, audio analysis, video, the web, and the integrations with Live, REAPER and Renoise |
-| `crates/ableton-mcp-server` | The native bridge, also usable by other MCP clients ([bridge guide](crates/ableton-mcp-server/README.md)) |
-| `remote-script` | The bridge's Remote Script, which runs inside Live |
-| `apps/live-extension` | Kumi's Live extension (Live 12.4 and later) |
-| `protocol` | The list of operations the bridge and the Remote Script share |
+| `daws/ableton/ableton-mcp-server` | The native bridge, also usable by other MCP clients ([bridge guide](daws/ableton/ableton-mcp-server/README.md)) |
+| `daws/ableton/remote-script` | The bridge's Remote Script, which runs inside Live |
+| `daws/ableton/live-extension` | Kumi's Live extension (Live 12.4 and later) |
+| `daws/ableton/protocol` | The list of operations the bridge and the Remote Script share |
 | `crates/daw-mcp-server` | Kumi's host for REAPER and Renoise, which Kumi starts; also usable by other MCP clients |
 | `crates/reaper-kumi` | Kumi's REAPER extension |
 | `daws/renoise` | Kumi's Renoise tool |

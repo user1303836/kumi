@@ -22,7 +22,7 @@ fn the_remote_script_and_the_host_compute_the_same_registry_hash() {
         eprintln!("skipped: python3 is unavailable");
         return;
     }
-    let remote_script = repository_root().join("remote-script");
+    let remote_script = repository_root().join("daws/ableton/remote-script");
     let python = Command::new("python3")
         .arg("-c")
         .arg("import sys; sys.path.insert(0, sys.argv[1]); from ableton_mcp_remote_script import operation_registry; print(operation_registry()[1])")

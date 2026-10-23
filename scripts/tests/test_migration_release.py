@@ -415,7 +415,7 @@ class MigrationRelease(unittest.TestCase):
             launcher.chmod(0o755)
         legacy_root = home / "legacy bridge"
         legacy_root.mkdir()
-        installed = subprocess.run(["node", str(release.native.ROOT / "crates/ableton-mcp-server/tests/support/legacy_install.mjs"),
+        installed = subprocess.run(["node", str(release.native.ROOT / "daws/ableton/ableton-mcp-server/tests/support/legacy_install.mjs"),
                                     json.dumps({"root":str(legacy_root),"version":"1.0.74","custom":False,"clean":True,"bundle":str(legacy_app)})],
                                    cwd=release.native.ROOT, capture_output=True, text=True, encoding="utf-8", timeout=60)
         self.assertEqual(installed.returncode, 0, installed.stderr)
@@ -495,7 +495,7 @@ class MigrationRelease(unittest.TestCase):
         config_before, secret_before = config.read_bytes(), secret.read_bytes()
         registry_path = Path(old["remoteScriptDirectory"]) / "ableton-live-v1.operations.json"
         registry_before = registry_path.read_bytes()
-        expected_registry = (release.native.ROOT / "protocol/ableton-live-v1.operations.json").read_bytes()
+        expected_registry = (release.native.ROOT / "daws/ableton/protocol/ableton-live-v1.operations.json").read_bytes()
         canonical = json.dumps(json.loads(expected_registry), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         expected_hash = hashlib.sha256(canonical.encode()).hexdigest()
         self.assertNotEqual(old["registryHash"], expected_hash, "this installer transition must cross the registry change")

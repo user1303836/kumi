@@ -309,7 +309,7 @@ peak, break, outro). The model mirrors it with `arrange`.
 
 Kumi reaches Live through the bridge's Remote Script (Live's Python API, which
 every change above uses) and, on Live 12.4 and later, through Kumi's Live
-extension (`apps/live-extension`, built on Live's Extensions SDK). The extension
+extension (`daws/ableton/live-extension`, built on Live's Extensions SDK). The extension
 does what the Remote Script can't: Arrangement MIDI clips with notes, clearing
 a range, offline renders, and the right-click **Ask Kumi about this**.
 

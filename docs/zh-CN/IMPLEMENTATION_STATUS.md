@@ -6,7 +6,7 @@
 
 ## 版本
 
-[更新日志](../../CHANGELOG.md)中的每个版本都写明了随附的桥接；[桥接版本](KUMI_CHANGES.md#桥接版本)列出了全部桥接版本。版本号本身记在各 crate 的 `Cargo.toml` 文件（Kumi、桥接）、根目录的 `package.json`（Kumi）和 `apps/live-extension/manifest.json`（扩展）中；REAPER 扩展的版本号在 `crates/reaper-kumi/Cargo.toml` 中，Renoise 工具的版本号在 `daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua` 及其 `manifest.xml` 中。哪个 Kumi 附带哪个版本，见[连接 REAPER 或 Renoise](KUMI_GUIDE.md#连接-reaper-或-renoise)。
+[更新日志](../../CHANGELOG.md)中的每个版本都写明了随附的桥接；[桥接版本](KUMI_CHANGES.md#桥接版本)列出了全部桥接版本。版本号本身记在各 crate 的 `Cargo.toml` 文件（Kumi、桥接）、根目录的 `package.json`（Kumi）和 `daws/ableton/live-extension/manifest.json`（扩展）中；REAPER 扩展的版本号在 `crates/reaper-kumi/Cargo.toml` 中，Renoise 工具的版本号在 `daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua` 及其 `manifest.xml` 中。哪个 Kumi 附带哪个版本，见[连接 REAPER 或 Renoise](KUMI_GUIDE.md#连接-reaper-或-renoise)。
 
 | 组成部分 | 版本 |
 | --- | --- |

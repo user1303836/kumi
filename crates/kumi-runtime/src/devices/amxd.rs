@@ -180,7 +180,7 @@ pub struct DevicePatcherOptions {
 
 /// A device's top-level patcher, as Live's templates have it: opened in presentation (the device's
 /// face), `width` pixels wide, with `description` as its info text. Its boxes are laid out by Kumi's layout, so the
-/// patcher keeps Kumi's standard for Max patchers (`max-standard/`).
+/// patcher keeps Kumi's standard for Max patchers (`daws/ableton/max-standard/`).
 pub fn device_patcher(kind: DeviceType, options: DevicePatcherOptions) -> Value {
     let amxdtype = u32::from_be_bytes(kind.code().as_bytes().try_into().expect("a four-letter code"));
     let project = json!({

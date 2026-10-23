@@ -11,10 +11,10 @@
 | `crates/kumi` | ネイティブの `kumi` コマンドとターミナルアプリ（`src/tui/`）、そしてモデルや実際の Live に対して任意で実行するチェック（`examples/`） |
 | `crates/kumi-runtime` | エージェントループ、プロバイダー、サインイン、セッション、ライブラリー、Live との連携、メディアのツール、MCP クライアント |
 | `crates/kumi-common` | ランタイムの共通処理と、ソース互換の値の扱い |
-| `crates/ableton-mcp-server` | ネイティブの MCP ブリッジ、解析ワーカー、ライフサイクル、セットアップ、移行、診断 |
-| `remote-script` | Live の中で動く、ブリッジの Remote Script（`ableton_mcp_remote_script.py`、`AbletonMcpBridge/` エントリーポイント、Python のテスト） |
-| `apps/live-extension` | Live 12.4 以降向けの Kumi の Live 拡張機能。Live の Extensions SDK の上に作られています（TypeScript で、独自の `package.json` を持ちます） |
-| `protocol` | `ableton-live-v1.operations.json`。ブリッジと Remote Script が共有する操作のレジストリ |
+| `daws/ableton/ableton-mcp-server` | ネイティブの MCP ブリッジ、解析ワーカー、ライフサイクル、セットアップ、移行、診断 |
+| `daws/ableton/remote-script` | Live の中で動く、ブリッジの Remote Script（`ableton_mcp_remote_script.py`、`AbletonMcpBridge/` エントリーポイント、Python のテスト） |
+| `daws/ableton/live-extension` | Live 12.4 以降向けの Kumi の Live 拡張機能。Live の Extensions SDK の上に作られています（TypeScript で、独自の `package.json` を持ちます） |
+| `daws/ableton/protocol` | `ableton-live-v1.operations.json`。ブリッジと Remote Script が共有する操作のレジストリ |
 | `scripts` | リリースのビルダー、移行用のパッケージング、Mac のヘルパーのビルド、分離テストランナー、そして `npm run kumi` と `npm run setup` が使う `native-kumi.mjs` |
 | `crates/daw-mcp-server` | REAPER と Renoise のための Kumi のホスト（`daw-mcp-server --daw reaper\|renoise`）：stdio 上の MCP、変更のジャーナルと取り消し、聴くジョブ、離れていた間の変化。ほかの MCP クライアントからも使えます |
 | `crates/reaper-kumi` | Kumi の REAPER 拡張機能（`reaper_kumi`）。`sdk/` に同梱した REAPER の SDK ヘッダーでビルドします |
@@ -32,11 +32,11 @@
 kumi (crates/kumi, crates/kumi-runtime)
   │  MCP over stdio: Kumi starts the bridge as a child process
   ▼
-bridge (crates/ableton-mcp-server)
+bridge (daws/ableton/ableton-mcp-server)
   │  ableton-loopback/v1: authenticated TCP on 127.0.0.1
-  ├──► Remote Script inside Live (remote-script/)
+  ├──► Remote Script inside Live (daws/ableton/remote-script/)
   │  local channel to the Extension Host
-  └──► Kumi's Live extension (apps/live-extension), Live 12.4+
+  └──► Kumi's Live extension (daws/ableton/live-extension), Live 12.4+
 
 kumi (crates/kumi, crates/kumi-runtime)
   │  MCP over stdio: Kumi starts its host for REAPER or Renoise
@@ -48,7 +48,7 @@ host (crates/daw-mcp-server --daw reaper|renoise)
 ```
 
 - Kumi は、`full` デプロイメントポリシーと、使うツールだけをちょうど並べた許可リスト（`ABLETON_MCP_TOOL_ALLOW`）を指定してブリッジを起動します。モデルはいくつかのブリッジの読み取りを直接呼び出し（`crates/kumi-runtime/src/mcp/allowed_tools.rs` の `MODEL_TOOLS`）、残りは Kumi 自身のツールが呼び出します。
-- ブリッジのルーター（`crates/ableton-mcp-server/src/bridge/router.rs`）は、各操作を Remote Script に送るか、その操作を拡張機能しか持っていない場合は拡張機能に送ります。Live の Developer Mode のせいで拡張機能が起動されない場合、ブリッジは Live の Extension Host を自分で起動できます。
+- ブリッジのルーター（`daws/ableton/ableton-mcp-server/src/bridge/router.rs`）は、各操作を Remote Script に送るか、その操作を拡張機能しか持っていない場合は拡張機能に送ります。Live の Developer Mode のせいで拡張機能が起動されない場合、ブリッジは Live の Extension Host を自分で起動できます。
 - `kumi bridge` はブリッジのライフサイクルコマンドを通じてブリッジを Live にインストールし、その後は `Remote Scripts/AbletonMcpBridge/bridge-reference.json` を通じてブリッジを見つけます。
 
 ## セットアップ
@@ -100,7 +100,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 ## ブリッジの開発
 
-以下のパスは `crates/ableton-mcp-server` からの相対パスです。
+以下のパスは `daws/ableton/ableton-mcp-server` からの相対パスです。
 
 | パス | 内容 |
 | --- | --- |
@@ -117,8 +117,8 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 **契約ルール。**
 
-- ワイヤープロトコルは `ableton-loopback/v1` です。正規 JSON（キーはソート、負のゼロは正規化）、リクエストとレスポンスの HMAC-SHA256、上限のあるフレームとコレクション、シーケンス番号、そして Remote Script が起動するたびに変わるエポックを使います。詳細は `remote-script/README.md` にあります。
-- `protocol/` のレジストリが唯一の操作一覧です。ホストと Remote Script はそれぞれこれをハッシュし、両者が一致しなければ Live は接続しません。ホストのテストが Remote Script のハッシュ処理を実行して、両者が等しいことを保ちます。操作名やハッシュをほかのソースファイルに決してコピーしないでください。
+- ワイヤープロトコルは `ableton-loopback/v1` です。正規 JSON（キーはソート、負のゼロは正規化）、リクエストとレスポンスの HMAC-SHA256、上限のあるフレームとコレクション、シーケンス番号、そして Remote Script が起動するたびに変わるエポックを使います。詳細は `daws/ableton/remote-script/README.md` にあります。
+- `daws/ableton/protocol/` のレジストリが唯一の操作一覧です。ホストと Remote Script はそれぞれこれをハッシュし、両者が一致しなければ Live は接続しません。ホストのテストが Remote Script のハッシュ処理を実行して、両者が等しいことを保ちます。操作名やハッシュをほかのソースファイルに決してコピーしないでください。
 - 変更は、プレビュー、適用、取り消しを持つ用途別の操作を通じて行います。唯一の例外は `python.run`（`live_run_python`）で、Live のメインスレッドで Python を実行し、元に戻す手段は Live の取り消しだけです。これには独自のポリシークラス `python` があり、`full` プロファイルでのみ許可されます。
 - ブリッジ内部の `get(ref)` は固定の行に対する上限付きのシリアライザーであり、Live のオブジェクトモデルの汎用リーダーではありません。MCP の読み取りは用途別のままにします。
 - Remote Script は Live に関わる作業をすべて Live のメインスレッドで行います。Live の表示ティックの中で（ティックの合間は Live 自身のタイマーで）、時間の上限内に、ソケットを自分で処理します。ほかのスレッドは、診断ファイルの書き込みとリアルタイム UDP の受信だけです。新しいエポックは、それ以前のすべての参照とカーソルを無効にします。Remote Script が認識できない Live の形状は利用不可として報告し、決して偽装しません。
@@ -130,7 +130,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 ## Live 拡張機能の開発
 
-`apps/live-extension` は TypeScript で書かれ、esbuild でバンドルされ、独自の `package.json` を持ちます。Live の Extensions SDK に対してビルドしますが、この SDK のライセンスは再配布を禁じているため、リポジトリには含まれていません。リポジトリのルートの `vendor/ableton-extensions-sdk-1.0.0-beta.1/` にコピーを置いてください（ビルドはその中の `package 3/dist/index.cjs` を読みます）。`apps/live-extension` で `npm ci` を実行してから `npm run build` を実行すると、`dist/extension.js` とその `.sha256` が書き出されるので、両方をコミットします。`npm run typecheck` にも SDK が必要です。SDK がない場合、ビルドは止まり、コミット済みのバンドルがそのまま残ります。`npm test` はバンドルをそのチェックサムと照合します。Live が拡張機能をどう実行するかの測定結果は[エビデンス](../evidence/live-extension.md)にあります。
+`daws/ableton/live-extension` は TypeScript で書かれ、esbuild でバンドルされ、独自の `package.json` を持ちます。Live の Extensions SDK に対してビルドしますが、この SDK のライセンスは再配布を禁じているため、リポジトリには含まれていません。リポジトリのルートの `vendor/ableton-extensions-sdk-1.0.0-beta.1/` にコピーを置いてください（ビルドはその中の `package 3/dist/index.cjs` を読みます）。`daws/ableton/live-extension` で `npm ci` を実行してから `npm run build` を実行すると、`dist/extension.js` とその `.sha256` が書き出されるので、両方をコミットします。`npm run typecheck` にも SDK が必要です。SDK がない場合、ビルドは止まり、コミット済みのバンドルがそのまま残ります。`npm test` はバンドルをそのチェックサムと照合します。Live が拡張機能をどう実行するかの測定結果は[エビデンス](../evidence/live-extension.md)にあります。
 
 ## Willington のファイル
 
@@ -157,7 +157,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 ## リリース
 
-**コミット**の件名は、プロデューサーにとって何が変わったかを平易な英語で書きます（"Kumi: talk to it while it works"）。ブリッジまたは Remote Script の変更では、`crates/ableton-mcp-server/Cargo.toml` と `Cargo.lock` のバージョンを上げ、件名を新しいバージョンで始め（"Bridge 1.0.71: …"）、`CHANGELOG.md` の `## Unreleased` の下に `### Bridge x.y.z` ブロックを追加します。拡張機能が変わったら、そのバンドルを再ビルドしてコミットします。作業はブランチで行い、プルリクエストで `main` に入れます。
+**コミット**の件名は、プロデューサーにとって何が変わったかを平易な英語で書きます（"Kumi: talk to it while it works"）。ブリッジまたは Remote Script の変更では、`daws/ableton/ableton-mcp-server/Cargo.toml` と `Cargo.lock` のバージョンを上げ、件名を新しいバージョンで始め（"Bridge 1.0.71: …"）、`CHANGELOG.md` の `## Unreleased` の下に `### Bridge x.y.z` ブロックを追加します。拡張機能が変わったら、そのバンドルを再ビルドしてコミットします。作業はブランチで行い、プルリクエストで `main` に入れます。
 
 **Kumi のリリース**は、`gh` にリポジトリの管理者としてサインインした状態で、どのチェックアウトからでも実行できる一つのコマンドです。プルリクエストがマージされたらすぐに実行します：
 
@@ -168,7 +168,7 @@ python3 scripts/release.py --go     # リリース
 
 - **出荷するもの**は、前回のタグ以降の `main` から読み取ります。マージされた各プルリクエストの `Changelog:` の行を、書かれたとおりに使います（"none" は何も加えません）。プルリクエストがブリッジを変え、Kumi のクレートやインストーラーを変えていない場合、その行はブリッジの見出しの下に入ります。両方を変えるプルリクエストでは、ブリッジについての行を `Changelog (bridge):` と書きます。ドライランは各行の入る場所を表示します。
 - **What's new**：Kumi は `CHANGELOG.md` を組み込み、アップデート後に初めて起動したとき、リリースのリスト項目を **What's new** として表示します（最大 5 件、新しいリリースから。残りは `/changelog`）。段落（同梱ブリッジやテスト環境の行など）は表示されないので、`Changelog:` の各行がそこで読まれる一つの項目になります。プロデューサーが気づくことを、重要なものから書きます。
-- **ブリッジ**は、プルリクエストが Live の読み込むもの（`crates/ableton-mcp-server`、ホストがリンクする `crates/kumi-common`、`remote-script`、`protocol`、`apps/live-extension`、`vendor/willington`。テストと Markdown は除く）を変えたときに新しいバージョンになります。`Cargo.lock` にあるホストの依存関係が変わるとドライランがそう伝えるので、そのときは `--bridge` でブリッジを新しいバージョンにします。
+- **ブリッジ**は、プルリクエストが Live の読み込むもの（`daws/ableton/ableton-mcp-server`、ホストがリンクする `crates/kumi-common`、`daws/ableton/remote-script`、`daws/ableton/protocol`、`daws/ableton/live-extension`、`vendor/willington`。テストと Markdown は除く）を変えたときに新しいバージョンになります。`Cargo.lock` にあるホストの依存関係が変わるとドライランがそう伝えるので、そのときは `--bridge` でブリッジを新しいバージョンにします。
 - **REAPER の拡張機能と Renoise のツール**も同じように、プルリクエストがその DAW の読み込むもの（`crates/reaper-kumi` と `crates/daw-bridge`、または `daws/renoise/com.kumi.Bridge.xrnx`）を変えたときに新しいバージョンになります。`--reaper` と `--renoise` はどの場合でも新しいバージョンにし、`--no-reaper` と `--no-renoise` はそのままにします。`--no-bridge` は Live のものだけです。`Changelog (reaper):` か `Changelog (renoise):` と書いた行は、その見出しの下に入ります。`--go` では、`crates/reaper-kumi/Cargo.toml` と `Cargo.lock`、ツールの `payload/version.lua` と `manifest.xml` のバージョンが進み、三つの `KUMI_GUIDE.md` にあるそれぞれの ships-with の行も進みます。前のリリースになかったものはそのバージョンのまま出荷され、その行にはすでにこのリリースが書かれています。
 - **バージョン**は次のパッチです。`--minor` か `--version X.Y.Z` で別のものを選べます。
 - **`--go` を付けると**、`release/vX.Y.Z` に "Kumi X.Y.Z: the changelog, READMEs and versions" をコミットします。ルートの `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common`、`kumi-runtime` の Cargo マニフェスト、`Cargo.lock` のバージョン（パッケージングのテストがこれらが等しいことを確認します）と、変わった場合はブリッジのバージョン、3 つの README の Status の行、3 つの `KUMI_CHANGES.md` の「Bridge versions」の下にある同梱するブリッジの行、`CHANGELOG.md` の `## X.Y.Z — date` の項目です。続いてプルリクエスト "Kumi X.Y.Z" を開き、その CI を待たずに管理者のバイパスで "Kumi X.Y.Z (#PR)" としてマージし、マージコミットに `vX.Y.Z` のタグを付けてプッシュし、リリースノート付きの下書きのリリースを作ります（`--summary` でノートの冒頭に一文を加えられます）。

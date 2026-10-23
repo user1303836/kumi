@@ -222,7 +222,7 @@ class ThisCheckout(unittest.TestCase):
 
     def test_the_install_surface_holds_the_installs_files_and_not_their_tests_or_the_cli(self):
         install = self.area("install")
-        for path in ("install.sh", "crates/kumi/src/install/migration.rs", "crates/ableton-mcp-server/src/lifecycle_cli.rs",
+        for path in ("install.sh", "crates/kumi/src/install/migration.rs", "daws/ableton/ableton-mcp-server/src/lifecycle_cli.rs",
                      "crates/reaper-kumi/shim/csurf.cpp", "vendor/willington/README.md", ".github/workflows/installer.yml"):
             self.assertTrue(install.holds(path), path)
         for path in ("crates/kumi/src/cli/native/session.rs", "scripts/tests/daw_bridges.py", "scripts/test-isolated.sh",
