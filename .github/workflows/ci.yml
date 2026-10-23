@@ -233,8 +233,8 @@ jobs:
   rust-windows:
     # The `ci-os` set on Windows, on each push to main: Required CI doesn't wait for Windows on a pull request (one
     # labelled full-tests runs every Windows test in Extended). In two parts at once, of about the same test time: the
-    # app's tests, and the rest. The slowest (9 to 16 s each on Windows: the bridges' update and rollback, Hands' Win32
-    # dialog, the library worker, Willington's receipt) run in Extended only (KUMI_WINDOWS_EXTENDED_ONLY).
+    # app's tests, and the rest. The slowest (9 to 16 s each on Windows: the bridges' update and rollback, the library
+    # worker, Willington's receipt) run in Extended only (KUMI_WINDOWS_EXTENDED_ONLY).
     name: Rust / ${{ matrix.label }}
     needs: changes
     if: needs.changes.outputs.rust == 'true' && github.event_name == 'push'
@@ -257,7 +257,6 @@ jobs:
         | (binary_id(kumi::it) & test(=own_providers::reapers_and_renoises_bridge_messages_never_speak_lives_words))
         | (binary_id(kumi::it) & test(=own_providers::an_update_follows_each_copy_and_never_puts_back_a_bridge_taken_out_or_moves_it_to_another_reaper))
         | (binary_id(kumi::it) & test(=own_providers::a_kumi_an_earlier_updater_put_in_place_brings_its_bridge_as_it_starts))
-        | (binary_id(kumi-daw-ableton::it) & test(=hands_transport::on_windows_the_helper_uses_the_win32_menu_finds_the_owned_dialog_and_fills_a_save_dialog))
         | (binary_id(kumi::it) & test(=library_learn::a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it_on_windows))
         | (binary_id(kumi::it) & test(=willington::native_editing_requires_an_owner_only_receipt_for_the_loaded_package))
     steps:
