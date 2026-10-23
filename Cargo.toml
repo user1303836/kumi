@@ -70,6 +70,10 @@ indexmap = "2"
 icu_collator = "2.3"
 icu_locale_core = "2.3"
 libc = "0.2"
+# Audio files' tags (ID3, Vorbis comments, MP4 atoms, RIFF INFO) in pure Rust: the producer's songs by their names.
+lofty = "0.25"
+# The songs' style vectors, read through a memory map rather than loaded whole.
+memmap2 = "0.9"
 # MD5: the checksum Serum 2 keeps over a preset's compressed body.
 md-5 = "0.10"
 memchr = "2"

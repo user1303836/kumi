@@ -11,7 +11,7 @@ threads-required = "num-cpus"
 # - the recorded-source oracles (a host workflow replayed against what the TypeScript host did, `…_match_source` and the
 #   like): long replays of behaviour the port froze, which the unit tests beside them check in pieces;
 # - the long listening, form and rendering simulations (whole songs analysed), the video tests (ffmpeg) and the
-#   benchmarks;
+#   benchmarks, among them the music scan's at a big library's size (music_scale: 300,000 songs);
 # - the interoperability tests run beside the official MCP and model SDKs (npm), and the migration from the published
 #   1.7.5 (downloaded);
 # - the long sample-by-sample sweeps of the timing building blocks (kit::clock), each in every way Live and Max can differ:
@@ -36,6 +36,7 @@ not (
   | (binary_id(kumi-daw-ableton::it) & test(/^listening::/))
   | (binary_id(kumi-listening::it) & test(/^(effects|sound)::/))
   | (binary_id(kumi-listening::it) & test(/^style_references::/))
+  | (binary_id(kumi-listening::it) & test(/^music_scale::/))
   | (binary_id(kumi-ai::it) & test(/^ai_sdk::/))
   | (binary_id(ableton-mcp-server::it) & test(/^(benchmark|lifecycle_migration)::/))
   | ((binary_id(kumi-agent::it) & test(/^mcp::/)) & not test(/read_buffer_looks_at_each_byte/))

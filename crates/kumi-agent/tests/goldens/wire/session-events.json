@@ -1593,6 +1593,76 @@
     }
   },
   {
+    "type": "music",
+    "status": {
+      "state": "learning",
+      "folders": [
+        "~/Music"
+      ],
+      "songs": 2400,
+      "light": 900,
+      "full": 300,
+      "skipped": 12,
+      "learnedAt": 1760000000000,
+      "said": "Kumi is fetching its style model, LAION-CLAP…"
+    }
+  },
+  {
+    "type": "music",
+    "status": {
+      "state": "off",
+      "folders": [],
+      "songs": 0,
+      "light": 0,
+      "full": 0,
+      "skipped": 0
+    }
+  },
+  {
+    "type": "music",
+    "status": {
+      "state": "learning",
+      "folders": [],
+      "songs": 0,
+      "light": 0,
+      "full": 0,
+      "skipped": 0
+    }
+  },
+  {
+    "type": "music",
+    "status": {
+      "state": "paused",
+      "folders": [],
+      "songs": 0,
+      "light": 0,
+      "full": 0,
+      "skipped": 0
+    }
+  },
+  {
+    "type": "music",
+    "status": {
+      "state": "done",
+      "folders": [],
+      "songs": 0,
+      "light": 0,
+      "full": 0,
+      "skipped": 0
+    }
+  },
+  {
+    "type": "music",
+    "status": {
+      "state": "elsewhere",
+      "folders": [],
+      "songs": 0,
+      "light": 0,
+      "full": 0,
+      "skipped": 0
+    }
+  },
+  {
     "type": "recipe",
     "action": "saved",
     "name": "sidechain-pump",

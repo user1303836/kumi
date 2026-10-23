@@ -1,0 +1,22 @@
+{
+  "learned": 150,
+  "learning": {
+    "heard": 150,
+    "of": 150
+  },
+  "seed": "Kode9",
+  "songs": [
+    {
+      "artist": "Kode9",
+      "title": "Dubstep Track 25",
+      "album": "Black Sun"
+    },
+    {
+      "artist": "Burial",
+      "title": "Archangel",
+      "album": "Untrue"
+    }
+  ],
+  "traits": "Loud (about -9 LUFS, -10 to -8), warm (tilt -2 dB/oct), mono lows, firm dynamics (peak to loudness 9.5 dB), long reverb (2.2 s), echoes at 375 ms.",
+  "note": "The producer's own music: lean on it only where they left the style open, never over what they asked."
+}

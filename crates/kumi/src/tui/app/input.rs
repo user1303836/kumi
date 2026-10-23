@@ -404,6 +404,7 @@ impl TuiApp {
                         "/voice" => self.0.voice.is_some(),
                         "/willington" => self.willington().is_some(),
                         "/slots" => self.0.options.slots.is_some(),
+                        "/music" => self.0.options.music.is_some(),
                         _ => true,
                     }
             })
@@ -712,6 +713,11 @@ impl TuiApp {
                 kumi_listening::slots::Said::Done(text) => self.notice(&text, NoticeTone::Info),
                 kumi_listening::slots::Said::Refused(text) => self.notice(&text, NoticeTone::Warn),
             }
+            return Ok(());
+        }
+        if let Some(music) = self.0.options.music.clone().filter(|_| command == "/music" || command.starts_with("/music ")) {
+            self.clear_editor();
+            self.music_command(music, &command["/music".len()..]).await;
             return Ok(());
         }
         if command == "/status" {
@@ -1270,7 +1276,7 @@ pub(super) fn help(daw: bool) -> String {
         ""
     };
     format!(
-        "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · ctrl+b moves a slow step that doesn't use {app} (a video, pages) to the background (press it twice in tmux), and /jobs shows, stops or reruns background jobs · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, /resume goes back to one kept (this {place}'s, or any {place}'s by its id or name), /rename names this one, and /fork carries on in a copy · /reconnect connects to {app} again, keeping the conversation{daw} · /copy copies the last answer, /export copies or saves the whole conversation, and /share saves it as a web page to send; to select text yourself, hold Shift while dragging (Option in iTerm2) · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one;{willington} /slots shows which model does each listening job (stems, transcription, listening, embeddings), swaps one in plain words after a quick test, and /slots back <job> takes a swap back; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your {places}), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi, and /changelog says what's new in it · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands"
+        "enter sends · ctrl+j or alt+enter starts a new line · ctrl+t talks instead of typing: press it again to stop, or hold it while you talk, and what you said lands in the box (enter stops and sends at once); /voice chooses the language and the microphone · ↑ and ↓ go through what you sent before · while Kumi works, enter sends a message it reads after the step under way, tab one for after the answer, and alt+↑ takes the last waiting one back · /btw asks something on the side without interrupting · ctrl+b moves a slow step that doesn't use {app} (a video, pages) to the background (press it twice in tmux), and /jobs shows, stops or reruns background jobs · esc stops Kumi · page up/down or the mouse wheel scroll, ctrl+home goes to the start and ctrl+end back · click undo in HISTORY, or /undo, to take back a change · /new starts a fresh conversation, /resume goes back to one kept (this {place}'s, or any {place}'s by its id or name), /rename names this one, and /fork carries on in a copy · /reconnect connects to {app} again, keeping the conversation{daw} · /copy copies the last answer, /export copies or saves the whole conversation, and /share saves it as a web page to send; to select text yourself, hold Shift while dragging (Option in iTerm2) · /model and /effort choose the model and how hard it thinks, and /fast turns on its faster tier when it has one;{willington} /slots shows which model does each listening job (stems, transcription, listening, embeddings), swaps one in plain words after a quick test, and /slots back <job> takes a swap back; /music shows your own music, which Kumi learns your taste from on this computer, and adds or removes a folder, pauses or forgets it; /login and /logout sign in and out · /memory shows what Kumi remembers (notes, techniques, recipes and what it learned from your {places}), and forget in MEMORY drops one; /recipes your saved ways of working · /update gets the newest Kumi, and /changelog says what's new in it · drag files in, or ctrl+v a picture, to send them with your next message (backspace in an empty box takes the last one back) · ctrl+c clears the box, then quits · type / for commands"
     )
 }
 pub(super) const COMMANDS: &[Command] = &[
@@ -1294,6 +1300,7 @@ pub(super) const COMMANDS: &[Command] = &[
     Command { name: "/fast", about: "The model's faster tier, when its provider offers one" },
     Command { name: "/willington", about: "Willington's bindings in Live: macro mapping, zones" },
     Command { name: "/slots", about: "Which model does each listening job: /slots listening gemini, /slots back <job>" },
+    Command { name: "/music", about: "Your own music, which Kumi learns your taste from: folders, songs, pause, forget" },
     Command { name: "/login", about: "Sign in to a provider" },
     Command { name: "/loop", about: "Listen, judge and adjust in rounds until the goal is met: /loop <what>, then stop" },
     Command { name: "/goal", about: "Keep at one goal until it's met: /goal <what>, then resume, edit, pause, clear" },
