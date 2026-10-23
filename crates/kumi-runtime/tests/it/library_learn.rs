@@ -13,7 +13,7 @@ use std::{cell::Cell, rc::Rc, time::Duration};
 #[tokio::test]
 async fn learned_entries_match_typescript_including_classification_and_vectors() {
     let root = tempfile::tempdir().unwrap();
-    let expected: Value = serde_json::from_str(include_str!("../support/library-learn-oracle.json")).unwrap();
+    let expected: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/library-learn-oracle.json")).unwrap();
     for ((name, channels), expected) in fixture::sound_cases().into_iter().zip(expected.as_array().unwrap()) {
         let path = root.path().join(name);
         let bytes = fixture::wav(&channels, 44100);

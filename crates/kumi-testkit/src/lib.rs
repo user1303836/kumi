@@ -2,6 +2,7 @@
 //! checkout that built it.
 //!
 //! - `workspace_path`: a file in this checkout, named from its root.
+//! - `oracle`, `oracle_bytes`, `oracle_path`: a recorded oracle in `testdata/oracles/<crate>/`.
 //! - `chunked!`: a fixture's cases as several tests that nextest runs side by side.
 //! - `fixture_paths!`: recorded paths made native (separators, roots, Windows' verbatim prefix).
 //! - `in_process!`: Kumi's host as an MCP endpoint called in process, for the own DAWs' end-to-end tests.
@@ -26,4 +27,27 @@ pub fn workspace() -> PathBuf {
 /// A path in this checkout, from its root: `workspace_path("daws/ableton/protocol/ableton-live-v1.operations.json")`.
 pub fn workspace_path(relative: impl AsRef<Path>) -> PathBuf {
     workspace().join(relative)
+}
+
+/// A recorded oracle, by its crate's folder and its name: `oracle_path("kumi-runtime/views-oracle.json")` is
+/// `testdata/oracles/kumi-runtime/views-oracle.json` in this checkout.
+pub fn oracle_path(name: &str) -> PathBuf {
+    workspace_path("testdata/oracles").join(name)
+}
+
+/// A recorded oracle's text (see [`oracle_path`]).
+pub fn oracle(name: &str) -> String {
+    String::from_utf8(oracle_bytes(name)).unwrap_or_else(|_| panic!("{} isn't UTF-8", oracle_path(name).display()))
+}
+
+/// A recorded oracle's bytes (see [`oracle_path`]), for the gzipped ones.
+pub fn oracle_bytes(name: &str) -> Vec<u8> {
+    let path = oracle_path(name);
+    std::fs::read(&path).unwrap_or_else(|error| {
+        panic!(
+            "{}: {error}. A lean worktree (dev.py worktree new --lean) leaves out the oracles only Extended's tests read; \
+             `git sparse-checkout disable` brings them back",
+            path.display()
+        )
+    })
 }

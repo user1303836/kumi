@@ -229,6 +229,13 @@ class ThisCheckout(unittest.TestCase):
                      "daws/own/daw-bridge/tests/it/system.rs", "crates/kumi/src/daw/ableton/willington.rs", "Cargo.lock"):
             self.assertFalse(install.holds(path), path)
 
+    def test_the_extended_only_oracles_are_oracles_here(self):
+        listed = [line for line in (ROOT / dev.EXTENDED_ONLY).read_text(encoding="utf-8").splitlines() if line and not line.startswith("#")]
+        self.assertEqual(listed, sorted(set(listed)))
+        tracked = set(dev.tracked())  # with what a lean worktree leaves out
+        for oracle in listed:
+            self.assertIn(f"{dev.ORACLES}/{oracle}", tracked)
+
     def test_the_moves_map_names_paths_that_moved(self):
         rewrites = dev.load_moves((ROOT / dev.MOVES).read_text(encoding="utf-8"))
         tracked = dev.tracked()
@@ -287,6 +294,28 @@ class Moves(unittest.TestCase):
                           "-q", "+r", "@@ -20,2 +22,0 @@", "-gone", "-gone", "diff --git a/y b/y", "deleted file mode 100644",
                           "--- a/y", "+++ /dev/null", "@@ -1 +0,0 @@", "-y"])
         self.assertEqual(dev.added_lines(diff), {"x": [2, 3, 12]})
+
+
+class Oracles(unittest.TestCase):
+    SELECTED = {"bridge::it": {"host_racks::racks_match", "als::reads"}, "bridge": {"host::probes::tests::match"},
+                "runtime::it": {"views::views_match"}}
+
+    def test_a_test_modules_tests_are_its_selected_ones_and_other_files_are_unknown(self):
+        self.assertEqual(dev.tests_in("daws/live/bridge/tests/it/host_racks.rs", self.SELECTED), ["host_racks::racks_match"])
+        self.assertEqual(dev.tests_in("daws/live/bridge/tests/it/host_looper.rs", self.SELECTED), [])
+        # host/recovery_tests.rs is `host::recovery::tests` through #[path]: a src file can't say whose tests it holds.
+        self.assertIsNone(dev.tests_in("daws/live/bridge/src/host/probes.rs", self.SELECTED))
+        self.assertIsNone(dev.tests_in("crates/runtime/tests/support/library.rs", self.SELECTED))
+
+    def test_an_oracle_only_unselected_tests_read_is_extended_only(self):
+        sources = {"daws/live/bridge/tests/it/host_racks.rs": 'oracle("bridge/racks-oracle.json")',
+                   "daws/live/bridge/tests/it/host_looper.rs": 'oracle("bridge/looper-oracle.json")',
+                   "daws/live/bridge/src/host/recovery_tests.rs": 'oracle("bridge/recovery-oracle.json")',
+                   "crates/runtime/tests/support/library.rs": 'oracle("runtime/library-oracle.json")',
+                   "crates/runtime/tests/it/views.rs": 'oracle("runtime/library-oracle.json")'}
+        oracles = ["bridge/racks-oracle.json", "bridge/looper-oracle.json", "bridge/recovery-oracle.json", "runtime/library-oracle.json",
+                   "runtime/unread-oracle.json"]
+        self.assertEqual(dev.extended_only(oracles, sources, self.SELECTED), ["bridge/looper-oracle.json"])
 
 
 class RebaseMoves(unittest.TestCase):

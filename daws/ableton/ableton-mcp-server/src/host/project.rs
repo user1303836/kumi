@@ -444,9 +444,7 @@ mod tests {
     use super::*;
     #[tokio::test]
     async fn expired_and_wrong_kind_backup_transactions_match_source_traces() {
-        let fixture: Value =
-            serde_json::from_slice(&std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/host_project_oracle.json")).unwrap())
-                .unwrap();
+        let fixture: Value = serde_json::from_slice(&kumi_testkit::oracle_bytes("ableton-mcp-server/host_project_oracle.json")).unwrap();
         for mode in ["expired", "wrong-kind"] {
             let host = McpHost::default();
             host.clip_lifecycle_transactions.insert("backup_ID",json!({"id":"backup_ID","kind":if mode=="expired"{"backup"}else{"other"},"state":"previewed","expiresAt":if mode=="expired"{0.}else{now_ms() as f64+10000.}})).unwrap();

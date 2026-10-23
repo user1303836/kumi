@@ -27,7 +27,7 @@ fn same(left: &Value, right: &Value, label: &str) {
 }
 #[tokio::test]
 async fn batch_preview_validation_and_authority_plans_match_typescript() {
-    let fixture: Value = serde_json::from_str(include_str!("../fixtures/batch-oracle.json")).unwrap();
+    let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/batch-oracle.json")).unwrap();
     for row in fixture["validation"].as_array().unwrap() {
         let sim = Rc::new(DeterministicLiveSimulator::new());
         if let Some(patches) = row.get("patch") {
@@ -127,7 +127,7 @@ impl AsyncLiveAdapter for Adapter {
 }
 #[tokio::test]
 async fn batch_results_dispatches_recovery_and_state_match_typescript() {
-    let fixture: Value = serde_json::from_str(include_str!("../fixtures/batch-oracle.json")).unwrap();
+    let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/batch-oracle.json")).unwrap();
     for scenario in fixture["scenarios"].as_array().unwrap() {
         let sim = Rc::new(DeterministicLiveSimulator::new());
         let faults = Rc::new(Faults::default());

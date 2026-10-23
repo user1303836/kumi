@@ -10,6 +10,8 @@
     python3 scripts/dev.py check [--base origin/main]     # Required CI's checks for what this branch changes
     python3 scripts/dev.py select "PACKAGES" [-p NAME | --exclude NAME]...   # a CI part's affected packages, as -p options
     python3 scripts/dev.py rebase-moves [--onto origin/main] [--merge] [--no-build]   # a branch from before a move, onto main
+    python3 scripts/dev.py worktree new NAME [--lean] [--branch B] [--base origin/main]   # ../kumi-NAME, a worktree
+    python3 scripts/dev.py worktree extended-only LIST.json...   # the oracles no test of these nextest lists reads
 
 `affected` reads the changed files from `git diff <base>...HEAD`. A file's package is the Cargo package whose folder
 holds it (the longest such folder); its areas are the ones in scripts/areas.toml whose globs match it. The affected
@@ -43,6 +45,14 @@ away (git follows a moved folder, not files moved out of one); and builds every 
 `--no-build`), listing the errors. It reads the map from `--onto` and works on the checkout it's run in, so a branch
 older than this command runs main's copy: `python3 <(git show origin/main:scripts/dev.py) rebase-moves`. When the rebase
 stops on a conflict, resolve it, `git rebase --continue`, and run it again.
+
+`worktree new NAME` adds a worktree beside this checkout, `../kumi-NAME`, on a new branch (NAME, or `--branch`) from
+`--base` (origin/main, fetched first). With `--lean` it leaves out the recorded oracles in
+testdata/oracles/extended-only.txt, which only Extended's tests read (a sparse checkout; `git sparse-checkout disable`
+in it brings them back). `worktree extended-only [--write]` lists those oracles again from `cargo nextest list
+--message-format json` lists of the `ci` and `ci-os` sets (CI keeps them as its nextest-list-ci-* artifacts): an oracle
+stays when a file that names it holds a test those lists select, or isn't a test module (support code any test may
+call).
 """
 from __future__ import annotations
 
@@ -65,6 +75,15 @@ JOBS = ("rust_linux", "rust_lint", "rust_platforms", "remote_script", "live_exte
         "renoise_tool", "installer", "network")
 # Where the repository's paths moved, oldest first: `rebase-moves` reads it from the branch it rebases onto.
 MOVES = "scripts/moves.toml"
+# The recorded oracles, a folder for each crate whose tests read them, and the ones only Extended's tests read.
+ORACLES = "testdata/oracles"
+EXTENDED_ONLY = "testdata/oracles/extended-only.txt"
+EXTENDED_ONLY_HEADER = """\
+# The recorded oracles only Extended's tests read: a lean worktree (python3 scripts/dev.py worktree new NAME --lean)
+# leaves them out. Written by: python3 scripts/dev.py worktree extended-only --write <lists>, from CI's nextest-list-ci-*
+# artifacts (the `ci` and `ci-os` sets). A test that starts reading one of these in those sets fails in lean worktrees
+# only, naming the file.
+"""
 WORD = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
 PATH = WORD | frozenset("-./")
 
@@ -571,6 +590,73 @@ def rebase_moves(repo: Path, onto: str, merge: bool = False, build: bool = True)
     return 1 if left else 0
 
 
+def selected_tests(lists: list[dict]) -> dict[str, set[str]]:
+    """The tests `cargo nextest list --message-format json` lists select, by suite (`kumi-runtime`, `kumi::it`…)."""
+    selected: dict[str, set[str]] = {}
+    for data in lists:
+        for suite_id, suite in data["rust-suites"].items():
+            names = {name for name, case in suite["testcases"].items() if case["filter-match"]["status"] == "matches"}
+            selected.setdefault(suite_id, set()).update(names)
+    return selected
+
+
+def tests_in(path: str, selected: dict[str, set[str]]) -> list[str] | None:
+    """The selected tests a crate's integration-test module holds (`tests/it/<module>.rs`; folder name = package name).
+    None for any other file: support code may serve any test, and a `src/` file's module can be another's (`#[path]`)."""
+    found = re.match(r"(?:crates|daws/[^/]+)/([^/]+)/tests/it/([a-z0-9_]+)\.rs$", path)
+    if not found:
+        return None
+    return [name for name in selected.get(f"{found[1]}::it", ()) if name.startswith(found[2] + "::")]
+
+
+def extended_only(oracles: list[str], sources: dict[str, str], selected: dict[str, set[str]]) -> list[str]:
+    """The oracles (paths under testdata/oracles) that no selected test reads: no Rust source naming one holds a
+    selected test or is support code."""
+    left = []
+    for oracle in oracles:
+        name = oracle.rsplit("/", 1)[-1]
+        users = [path for path, text in sources.items() if name in text]
+        if users and all(tests_in(path, selected) == [] for path in users):
+            left.append(oracle)
+    return sorted(left)
+
+
+def command_worktree(args: argparse.Namespace) -> int:
+    if args.action == "extended-only":
+        lists = [json.loads(Path(name).read_text(encoding="utf-8-sig")) for name in args.lists]
+        oracles = [path[len(ORACLES) + 1:] for path in tracked() if path.startswith(ORACLES + "/") and path.endswith((".json", ".json.gz"))]
+        sources = {path: (ROOT / path).read_text(encoding="utf-8") for path in tracked() if path.endswith(".rs")}
+        left = extended_only(oracles, sources, selected_tests(lists))
+        if args.write:
+            (ROOT / EXTENDED_ONLY).write_text(EXTENDED_ONLY_HEADER + "".join(f"{oracle}\n" for oracle in left), encoding="utf-8")
+            print(f"{EXTENDED_ONLY}: {len(left)} oracles")
+        else:
+            print("\n".join(left))
+        return 0
+    name = args.name
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name or ""):
+        raise Refused("worktree new takes a NAME of letters, digits, dots, dashes and underscores")
+    folder = ROOT.parent / f"kumi-{name}"
+    if folder.exists():
+        raise Refused(f"{folder} is already there")
+    if args.base.startswith("origin/"):
+        git(ROOT, "fetch", "--quiet", "origin")
+    branch = ["-b", args.branch or name]
+    if not args.lean:
+        git(ROOT, "worktree", "add", "--quiet", *branch, str(folder), args.base)
+    else:
+        left = [line.strip() for line in (ROOT / EXTENDED_ONLY).read_text(encoding="utf-8").splitlines()
+                if line.strip() and not line.startswith("#")]
+        git(ROOT, "worktree", "add", "--quiet", "--no-checkout", *branch, str(folder), args.base)
+        # Non-cone patterns name files: the whole tree, but these.
+        git(folder, "sparse-checkout", "set", "--no-cone", "/*", *(f"!/{ORACLES}/{oracle}" for oracle in left))
+        git(folder, "checkout", "--quiet")
+    size = sum(path.stat().st_size for path in folder.rglob("*") if path.is_file() and ".git" not in path.parts)
+    print(f"{folder}: branch {args.branch or name} from {args.base}, {size / 1e6:.0f} MB checked out"
+          + (f", without {len(left)} oracles only Extended's tests read" if args.lean else ""))
+    return 0
+
+
 def command_rebase_moves(args: argparse.Namespace) -> int:
     return rebase_moves(Path(git(Path.cwd(), "rev-parse", "--show-toplevel").strip()), args.onto, args.merge, not args.no_build)
 
@@ -603,6 +689,17 @@ def main(argv: list[str] | None = None) -> int:
     rebase.add_argument("--merge", action="store_true", help="merge --onto into the branch instead of rebasing it")
     rebase.add_argument("--no-build", action="store_true", help="don't run cargo check afterwards")
     rebase.set_defaults(run=command_rebase_moves)
+    worktree = commands.add_parser("worktree", help="add a worktree beside this checkout (lean: without Extended's oracles)")
+    actions = worktree.add_subparsers(dest="action", required=True)
+    new = actions.add_parser("new", help="../kumi-NAME on a new branch from --base")
+    new.add_argument("name")
+    new.add_argument("--branch", help="the new branch's name (default NAME)")
+    new.add_argument("--base", default="origin/main", help="what it starts from (default origin/main, fetched first)")
+    new.add_argument("--lean", action="store_true", help=f"leave out the oracles in {EXTENDED_ONLY}")
+    listing = actions.add_parser("extended-only", help="the oracles no test of these nextest lists reads")
+    listing.add_argument("--write", action="store_true", help=f"write them to {EXTENDED_ONLY}")
+    listing.add_argument("lists", nargs="+", metavar="LIST.json", help="`cargo nextest list --message-format json` output")
+    worktree.set_defaults(run=command_worktree)
     args = parser.parse_args(argv)
     try:
         return args.run(args)

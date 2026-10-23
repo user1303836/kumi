@@ -188,7 +188,8 @@ async fn re_enabling_an_overridden_parameters_automation_fences_on_its_own_state
 async fn advanced_devices_and_chains_match_source_workflows() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let fixture: Value = serde_json::from_str(include_str!("../fixtures/host-advanced-devices-oracle.json")).unwrap();
+            let fixture: Value =
+                serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host-advanced-devices-oracle.json")).unwrap();
             for case in fixture["cases"].as_array().unwrap() {
                 let label = case["label"].as_str().unwrap();
                 if std::env::var("KUMI_DEVICE_CASE").ok().is_some_and(|v| v != label) {

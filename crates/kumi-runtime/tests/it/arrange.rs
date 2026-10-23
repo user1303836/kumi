@@ -8,7 +8,7 @@ use std::{
     rc::Rc,
 };
 fn oracle() -> Value {
-    serde_json::from_str(include_str!("../support/arrange-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/arrange-oracle.json")).unwrap()
 }
 fn cases(data: &Value, kind: &str) -> Vec<Value> {
     data["cases"]

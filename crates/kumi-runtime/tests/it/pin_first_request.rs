@@ -88,7 +88,7 @@ fn version_of(case: &Value) -> Vec<u64> {
 }
 
 fn bridge(catalog: Catalog) -> (Rc<Bridge>, bool) {
-    let source: Value = serde_json::from_str(include_str!("../support/public-tools-oracle.json")).unwrap();
+    let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/public-tools-oracle.json")).unwrap();
     let cases = source["cases"].as_array().unwrap();
     let size = |case: &&Value| case["definitions"].as_array().unwrap().len();
     // The first of the most tools, so a tie picks the same case every time.
@@ -105,7 +105,7 @@ fn bridge(catalog: Catalog) -> (Rc<Bridge>, bool) {
     };
     let tools =
         Value::Array(case["catalog"].as_array().unwrap().iter().map(|id| source["pool"][id.as_u64().unwrap() as usize].clone()).collect());
-    let observed: Value = serde_json::from_str(include_str!("../support/observation-oracle.json")).unwrap();
+    let observed: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/observation-oracle.json")).unwrap();
     let basic = observed["cases"].as_array().unwrap().iter().find(|case| case["label"] == "basic").unwrap();
     let replies = basic["calls"]
         .as_array()

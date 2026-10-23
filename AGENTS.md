@@ -19,6 +19,7 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 - `daws/renoise/`: Renoise's tool, `com.kumi.Bridge.xrnx` (Lua), and its tests against a mock of Renoise's API.
 - `crates/kumi-store` (SQLite), `kumi-common` (shared utilities), `kumi-genexpr` (gen~ test interpreter).
 - `plugin-formats/`: the plug-in preset formats Kumi reads (data Kumi builds in).
+- `testdata/oracles/<crate>/`: the recorded oracles that crate's tests read, through `kumi_testkit::oracle`.
 - `crates/kumi-testkit`: what tests share (a dev-dependency only): `workspace_path`, `chunked!`, `fixture_paths!`,
   `in_process!`. It depends on nothing: support that needs Kumi's crates is a macro the test's crate expands.
 - `scripts/`: release and packaging (Python), the isolated test runners, and `dev.py` with `areas.toml` (what a change
@@ -49,7 +50,8 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 - Search them on purpose with `rg -u`, or `rg --no-ignore-dot`, which still skips what git ignores (`target/`).
 
 ## Rules
-- Use worktrees. On long tasks, open a PR early and keep pushing at a regular cadence.
+- Use worktrees: `python3 scripts/dev.py worktree new <name> --lean` makes `../kumi-<name>` from origin/main without
+  the 98 MB of oracles only Extended reads. On long tasks, open a PR early and keep pushing at a regular cadence.
 - Commit subjects are plain English and say what changed. No conventional-commit prefixes.
 - Every PR body has `Changelog:` lines (`Changelog: none` for internal work); `scripts/release.py` reads them.
 - A bridge or Remote Script change bumps `daws/ableton/ableton-mcp-server`'s version (DEVELOPER_GUIDE, "Releasing").
@@ -67,8 +69,8 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 - Goldens are byte-exact, and `KUMI_BLESS=1` rewrites them: the pins in `crates/kumi/tests/goldens` and
   `crates/kumi-runtime/tests/goldens`, the host's `daws/own/daw-mcp-server/tests/golden` and the wire vectors in
   `daws/own/daw-bridge/tests/vectors`. A refactor's proof is "goldens unchanged".
-- Oracles (`*-oracle.json`, `*_oracle.json`, the TUI's `screens.json`) were recorded from the TypeScript version
-  (tag `v1.7.6`). Nothing regenerates them.
+- Oracles (`testdata/oracles/<crate>/`) were recorded from the TypeScript version (tag `v1.7.6`). Nothing regenerates
+  them. A lean worktree leaves out the ones only Extended's tests read (`testdata/oracles/extended-only.txt`).
 
 ## Glossary
 - own bridge: Kumi's own bridge for REAPER, Renoise and Logic over `kumi-daw/1` (Live uses its MCP bridge).

@@ -56,7 +56,8 @@ fn eq(actual: &Value, expected: &Value, label: &str) {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn paged_collections_and_all_focus_views_match_source_results_and_dispatches() {
-    let mut parser = serde_json::Deserializer::from_str(include_str!("../support/views-oracle.json"));
+    let recorded = kumi_testkit::oracle("kumi-runtime/views-oracle.json");
+    let mut parser = serde_json::Deserializer::from_str(&recorded);
     parser.disable_recursion_limit();
     let fixture: Value = serde::Deserialize::deserialize(&mut parser).unwrap();
     for case in fixture["cases"].as_array().unwrap() {

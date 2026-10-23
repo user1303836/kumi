@@ -403,8 +403,7 @@ mod tests {
     use super::*;
     #[test]
     fn routing_cycles_match_source_for_transitive_routes_and_duplicate_names() {
-        let fixture: Value =
-            serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/host-routing-oracle.json"))).unwrap();
+        let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host-routing-oracle.json")).unwrap();
         for (index, row) in fixture["graphs"].as_array().unwrap().iter().enumerate() {
             assert_eq!(
                 routing_cycle(&row["snapshot"], row["target"].as_str().unwrap(), &row["proposed"]),

@@ -7,7 +7,7 @@ use base64::Engine;
 use serde_json::{json, Value};
 use std::rc::Rc;
 fn fixture() -> Value {
-    serde_json::from_str(include_str!("../fixtures/host-audio-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host-audio-oracle.json")).unwrap()
 }
 fn same(got: &Value, expected: &Value, label: &str) {
     assert_eq!(canonical_mutation_identity(got).unwrap(), canonical_mutation_identity(expected).unwrap(), "{label}");
@@ -157,7 +157,7 @@ fn same_worker_value(got: &Value, expected: &Value, path: &str) {
 async fn worker_coercion_and_semantic_validation_match_source_process() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let fixture: Value = serde_json::from_str(include_str!("../fixtures/analysis-worker-oracle.json")).unwrap();
+            let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/analysis-worker-oracle.json")).unwrap();
             let runner = ableton_mcp_server::analysis_runner::AnalysisRunner::new();
             for (i, row) in fixture["rows"].as_array().unwrap().iter().enumerate() {
                 let text =

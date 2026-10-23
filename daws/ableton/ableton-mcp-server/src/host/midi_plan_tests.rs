@@ -10,7 +10,7 @@ use std::{
 };
 fn fixture() -> Value {
     serde_json::from_reader(flate2::read::GzDecoder::new(
-        &include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/host-midi-transform-oracle.json.gz"))[..],
+        &kumi_testkit::oracle_bytes("ableton-mcp-server/host-midi-transform-oracle.json.gz")[..],
     ))
     .unwrap()
 }

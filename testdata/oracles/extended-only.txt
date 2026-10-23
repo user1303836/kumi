@@ -1,0 +1,41 @@
+# The recorded oracles only Extended's tests read: a lean worktree (python3 scripts/dev.py worktree new NAME --lean)
+# leaves them out. Written by: python3 scripts/dev.py worktree extended-only --write <lists>, from CI's nextest-list-ci-*
+# artifacts (the `ci` and `ci-os` sets). A test that starts reading one of these in those sets fails in lean worktrees
+# only, naming the file.
+ableton-mcp-server/benchmark-oracle.json
+ableton-mcp-server/host-audio-clip-oracle.json
+ableton-mcp-server/host-audition-oracle.json
+ableton-mcp-server/host-browser-load-oracle.json
+ableton-mcp-server/host-catalog-routes-oracle.json
+ableton-mcp-server/host-clip-action-oracle.json.gz
+ableton-mcp-server/host-clip-launch-oracle.json
+ableton-mcp-server/host-device-basic-oracle.json
+ableton-mcp-server/host-device-copy-oracle.json
+ableton-mcp-server/host-device-edit-oracle.json
+ableton-mcp-server/host-dialog-oracle.json
+ableton-mcp-server/host-dispatch-oracle.json
+ableton-mcp-server/host-fire-button-oracle.json
+ableton-mcp-server/host-follow-oracle.json
+ableton-mcp-server/host-looper-oracle.json
+ableton-mcp-server/host-managed-oracle.json
+ableton-mcp-server/host-mixer-oracle.json
+ableton-mcp-server/host-object-view-oracle.json
+ableton-mcp-server/host-parameter-oracle.json
+ableton-mcp-server/host-reads-oracle.json
+ableton-mcp-server/host-recording-realtime-oracle.json
+ableton-mcp-server/host-rename-oracle.json
+ableton-mcp-server/host-scene-oracle.json.gz
+ableton-mcp-server/host-song-settings-oracle.json
+ableton-mcp-server/host-specialized-devices-oracle.json
+ableton-mcp-server/host-tempo-oracle.json
+ableton-mcp-server/host-track-properties-oracle.json
+ableton-mcp-server/host-track-view-oracle.json
+ableton-mcp-server/host-transport-action-oracle.json
+ableton-mcp-server/host-ui-oracle.json
+ableton-mcp-server/host-willington-oracle.json
+kumi-runtime/arrange-oracle.json
+kumi-runtime/library-taste-oracle.json
+kumi-runtime/library-tools-oracle.json
+kumi-runtime/references-oracle.json
+kumi-runtime/remember-oracle.json
+kumi-runtime/rendering-oracle.json

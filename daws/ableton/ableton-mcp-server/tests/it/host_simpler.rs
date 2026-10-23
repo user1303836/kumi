@@ -273,7 +273,7 @@ async fn a_simpler_that_holds_a_sample_takes_another_and_gives_it_back() {
 async fn simpler_sample_replacement_preserves_source_file_and_recovery_authority() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let fixture: Value = serde_json::from_str(include_str!("../fixtures/host-simpler-oracle.json")).unwrap();
+            let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host-simpler-oracle.json")).unwrap();
             for case in fixture["cases"].as_array().unwrap() {
                 let label = case["label"].as_str().unwrap();
                 if std::env::var("KUMI_SIMPLER_CASE").ok().is_some_and(|v| v != label) {

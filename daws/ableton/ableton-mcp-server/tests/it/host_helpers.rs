@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use std::{cell::RefCell, rc::Rc};
 
 fn fixture() -> Value {
-    serde_json::from_str(include_str!("../fixtures/host-helpers-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host-helpers-oracle.json")).unwrap()
 }
 #[test]
 fn host_validation_authority_and_result_helpers_match_source() {

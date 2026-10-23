@@ -8,7 +8,7 @@ use kumi_runtime::{
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 fn oracle() -> Value {
-    serde_json::from_str(include_str!("../support/samples-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/samples-oracle.json")).unwrap()
 }
 #[test]
 fn wav_aiff_partial_odd_streamed_and_malformed_headers_match_source() {

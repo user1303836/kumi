@@ -229,7 +229,7 @@ async fn drum_pad_workflows_preserve_source_loading_file_authority_and_recovery(
         .run_until(async {
             // Unpacked whole, then parsed: serde_json reads a reader a byte at a time.
             let mut bytes = Vec::new();
-            flate2::read::MultiGzDecoder::new(include_bytes!("../fixtures/host-drum-pad-oracle.json.gz").as_slice())
+            flate2::read::MultiGzDecoder::new(kumi_testkit::oracle_bytes("ableton-mcp-server/host-drum-pad-oracle.json.gz").as_slice())
                 .read_to_end(&mut bytes)
                 .unwrap();
             let fixture: Value = serde_json::from_slice(&bytes).unwrap();

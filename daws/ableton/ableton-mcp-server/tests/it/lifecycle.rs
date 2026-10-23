@@ -525,6 +525,6 @@ async fn lifecycle_results_match_normalized_typescript_sequence_oracle() {
         }
     }
     let actual = normalize(json!(rows), f.folder.path().to_str().unwrap());
-    let expected: Value = serde_json::from_str(include_str!("../support/lifecycle_oracle.json")).unwrap();
+    let expected: Value = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/lifecycle_oracle.json")).unwrap();
     assert_eq!(actual, expected);
 }

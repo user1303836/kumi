@@ -88,7 +88,7 @@ fn adapter(case: Value) -> Rc<Adapter> {
     })
 }
 fn fixture() -> Value {
-    serde_json::from_str(include_str!("../support/host_project_oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host_project_oracle.json")).unwrap()
 }
 fn parsed(mut v: Value) -> Value {
     if let Some(text) = v["result"]["content"][0]["text"].as_str() {

@@ -9,7 +9,7 @@ use kumi_runtime::{
 };
 use serde_json::{json, Value};
 use std::sync::LazyLock;
-static ORACLE: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("../support/project-oracle.json")).unwrap());
+static ORACLE: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/project-oracle.json")).unwrap());
 fn pages(value: &Value) -> Vec<JsonObject> {
     serde_json::from_value(value.clone()).unwrap()
 }

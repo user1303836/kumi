@@ -101,7 +101,7 @@ fn eq(actual: &Value, expected: &Value, label: &str) {
 #[tokio::test(flavor = "current_thread")]
 async fn model_reads_match_source_authority_epoch_errors_and_dispatches() {
     tokio::task::LocalSet::new().run_until(async{
- let fixture:Value=serde_json::from_str(include_str!("../support/connection-oracle.json")).unwrap();
+ let fixture:Value=serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/connection-oracle.json")).unwrap();
  for original in fixture["cases"].as_array().unwrap(){
   let mut case=original.clone();case["responses"]=json!(case["responses"].as_array().unwrap().iter().map(|id|fixture["values"][id.as_u64().unwrap() as usize].clone()).collect::<Vec<_>>());
   let endpoint=Rc::new(Fixture{case:case.clone(),calls:RefCell::new(Vec::new()),disconnects:RefCell::new(Vec::new()),closes:Cell::new(0),owner:RefCell::new(Weak::new())});
@@ -195,7 +195,7 @@ fn state(connection: &LiveConnection) -> Value {
 async fn connection_start_close_disconnection_and_reconnection_match_source() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let fixture: Value = serde_json::from_str(include_str!("../support/connection-oracle.json")).unwrap();
+            let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/connection-oracle.json")).unwrap();
             for case in fixture["lifecycle"].as_array().unwrap() {
                 let calls = Rc::new(RefCell::new(Vec::new()));
                 let states = Rc::new(RefCell::new(Vec::new()));

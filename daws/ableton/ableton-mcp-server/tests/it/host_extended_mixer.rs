@@ -223,7 +223,7 @@ async fn a_device_without_inputs_or_a_sidechain_is_refused_at_preview_as_live_sh
 async fn extended_mixers_and_device_routing_match_source_workflows() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let fixture: Value = serde_json::from_str(include_str!("../fixtures/host-extended-mixer-oracle.json")).unwrap();
+            let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host-extended-mixer-oracle.json")).unwrap();
             for case in fixture["cases"].as_array().unwrap() {
                 let label = case["label"].as_str().unwrap();
                 if std::env::var("KUMI_MIXER_CASE").ok().is_some_and(|v| v != label) {

@@ -904,7 +904,7 @@ case!(input_history_new_conversation_and_frame_budget, async {
     h.close().await;
 });
 case!(whole_screens_match_source, async {
-    let cases: Vec<serde_json::Value> = serde_json::from_str(include_str!("../support/app/screens.json")).unwrap();
+    let cases: Vec<serde_json::Value> = serde_json::from_str(&kumi_testkit::oracle("kumi/screens.json")).unwrap();
     for case in cases {
         let h = Harness::new(case["width"].as_i64().unwrap() as i32, case["height"].as_i64().unwrap() as i32);
         h.start().await;

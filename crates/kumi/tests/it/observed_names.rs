@@ -26,7 +26,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-const ORACLE: &str = include_str!(concat!(env!("KUMI_WORKSPACE"), "/crates/kumi-runtime/tests/support/observation-oracle.json"));
+static ORACLE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| kumi_testkit::oracle("kumi-runtime/observation-oracle.json"));
 
 #[derive(Clone)]
 struct Listener {
@@ -178,7 +178,7 @@ fn same_name(observation: &Observation, label: &str) -> bool {
 async fn every_oracle_case_names_the_set_as_its_label_did() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let fixture: Value = serde_json::from_str(ORACLE).unwrap();
+            let fixture: Value = serde_json::from_str(&ORACLE).unwrap();
             let (mut observed, mut named, mut shown) = (0, 0, std::collections::BTreeSet::new());
             for original in fixture["cases"].as_array().unwrap() {
                 let mut case = original.clone();
@@ -267,7 +267,7 @@ fn named(fixture: &Value, name: &Value, file: &str) -> HashMap<String, Value> {
 async fn odd_untitled_and_template_set_names_read_as_their_labels_did() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let fixture: Value = serde_json::from_str(ORACLE).unwrap();
+            let fixture: Value = serde_json::from_str(&ORACLE).unwrap();
             let folder = tempfile::tempdir().unwrap();
             let file = |path: &str| {
                 let path = folder.path().join(path);

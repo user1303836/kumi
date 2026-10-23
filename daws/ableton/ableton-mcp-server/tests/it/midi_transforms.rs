@@ -7,7 +7,7 @@ fn canonical(value: Value) -> String {
 
 #[test]
 fn all_transform_families_match_typescript_outcomes_errors_digests_and_diffs() {
-    let cases: Vec<Value> = serde_json::from_str(include_str!("../fixtures/midi-transform-oracle.json")).unwrap();
+    let cases: Vec<Value> = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/midi-transform-oracle.json")).unwrap();
     for case in cases {
         let notes: Vec<Note> = serde_json::from_value(case["notes"].clone()).unwrap();
         let spec = MidiTransformSpec {

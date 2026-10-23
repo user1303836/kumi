@@ -12,7 +12,7 @@ use std::{
     rc::Rc,
 };
 fn oracle() -> Value {
-    serde_json::from_str(include_str!("../fixtures/device-state-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/device-state-oracle.json")).unwrap()
 }
 fn same(left: &Value, right: &Value, label: &str) {
     assert_eq!(canonical(left).unwrap(), canonical(right).unwrap(), "{label}");

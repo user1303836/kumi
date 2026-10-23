@@ -1,6 +1,6 @@
 use super::*;
 fn fixture() -> Value {
-    serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/host-capture-oracle.json"))).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host-capture-oracle.json")).unwrap()
 }
 #[test]
 fn capture_fixture_normalizes_the_temporary_path_separator() {

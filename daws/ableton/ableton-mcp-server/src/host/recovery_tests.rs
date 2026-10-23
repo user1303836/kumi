@@ -133,8 +133,7 @@ fn args() -> Value {
 }
 #[tokio::test]
 async fn recovery_finalization_safety_identity_retirement_and_refusal_match_source() {
-    let fixture: Value =
-        serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/host-recovery-oracle.json"))).unwrap();
+    let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host-recovery-oracle.json")).unwrap();
     for (index, row) in fixture["rows"].as_array().unwrap().iter().enumerate() {
         let o = &row["options"];
         let adapter = Rc::new(Adapter::new(o));
@@ -250,8 +249,7 @@ async fn recovery_finalization_retires_manager_owned_records_without_undoing_liv
 
 #[tokio::test]
 async fn undo_watches_include_other_live_invocations_but_exclude_reads_and_proven_refusals() {
-    let fixture: Value =
-        serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/host-recovery-oracle.json"))).unwrap();
+    let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host-recovery-oracle.json")).unwrap();
     for row in fixture["watches"].as_array().unwrap() {
         let mut adapter = Adapter::new(&json!({"watchFault":row["fault"]}));
         adapter.status.operations = Some(crate::registry::live_registry_operations().to_vec());

@@ -120,7 +120,7 @@ fn difference(a: &Value, b: &Value, path: &str) -> Option<String> {
     ))
 }
 fn oracle() -> Value {
-    serde_json::from_str(include_str!("../fixtures/host-catalog-routes-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host-catalog-routes-oracle.json")).unwrap()
 }
 #[test]
 fn source_oracle_covers_complete_catalog() {

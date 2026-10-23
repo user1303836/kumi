@@ -79,9 +79,12 @@ class Moves(unittest.TestCase):
             self.assertEqual(release.then("crates/kumi/Cargo.toml"), ["crates/kumi/Cargo.toml"])
 
     def test_this_checkouts_moves_lead_to_paths_it_has(self):
+        # A lean worktree leaves out the oracles only Extended reads, which are the checkout's all the same.
+        lean = {f"testdata/oracles/{line}" for line in (ROOT / "testdata/oracles/extended-only.txt").read_text(encoding="utf-8").splitlines()
+                if line and not line.startswith("#")}
         for old, new in release.MOVES:
             here = release.now(new)
-            self.assertTrue((ROOT / here).exists(), f"{old} moved to {new}, now {here}, which isn't here")
+            self.assertTrue((ROOT / here).exists() or here in lean, f"{old} moved to {new}, now {here}, which isn't here")
 
 
 class Sorting(unittest.TestCase):

@@ -58,9 +58,12 @@ providers fail until `npm ci --prefix crates/kumi-runtime/tests/support` has
 run. The loudness and true-peak tests hold the analysis to FFmpeg's `ebur128`
 results for generated audio.
 
-The JSON oracle files in the crates' tests are golden files recorded from the
+The JSON oracle files in `testdata/oracles/<crate>/`, which that crate's tests
+read with `kumi_testkit::oracle`, are golden files recorded from the
 TypeScript implementation; it and the scripts that generated them stay at the
-git tag `v1.7.6`, and nothing in this tree regenerates them. After an
+git tag `v1.7.6`, and nothing in this tree regenerates them. A lean worktree
+(`python3 scripts/dev.py worktree new <name> --lean`) leaves out the ones only
+Extended's tests read, listed in `testdata/oracles/extended-only.txt`. After an
 intentional change in behavior, rewrite the affected oracle entries from the
 native output: the failing assertion prints what it got, and for a SHA-256
 entry, hash that output. Review the diff, and say in the commit message that

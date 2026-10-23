@@ -3,7 +3,7 @@ use kumi_runtime::{core::contracts::StructuralMove as Structural, core::goal::*}
 use serde_json::{json, Value};
 
 fn fixture() -> Value {
-    serde_json::from_str(include_str!("../support/goal-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/goal-oracle.json")).unwrap()
 }
 #[test]
 fn setup_and_structural_leap_prompts_match_typescript_exactly() {

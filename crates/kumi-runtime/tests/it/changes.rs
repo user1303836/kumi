@@ -4,7 +4,7 @@ use kumi_runtime::{integrations::ableton::changes::*, RuntimeError};
 use serde_json::{json, Value};
 use std::{cell::RefCell, collections::HashSet};
 fn oracle() -> Value {
-    serde_json::from_str(include_str!("../support/changes-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/changes-oracle.json")).unwrap()
 }
 struct Context {
     calls: RefCell<Vec<Value>>,
@@ -106,7 +106,7 @@ fn change_schemas_outputs_permanence_and_human_messages_match_source() {
 
 #[test]
 fn all_change_summaries_match_complete_source_outputs() {
-    let data: Value = serde_json::from_str(include_str!("../support/change-summaries-oracle.json")).unwrap();
+    let data: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/change-summaries-oracle.json")).unwrap();
     let track =
         |value: &Value| value.as_str().and_then(|key| data["tracks"].get(key)).map(|value| serde_json::from_value(value.clone()).unwrap());
     let values = data["values"].as_array().unwrap();
