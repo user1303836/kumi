@@ -4,6 +4,7 @@ members = [
     "crates/kumi-common",
     "crates/kumi-store",
     "crates/kumi-genexpr",
+    "crates/kumi-layout",
     "crates/kumi-agent",
     "daws/ableton/ableton-mcp-server",
     "crates/kumi",
@@ -35,6 +36,7 @@ rust-version = "1.89"
 kumi-common = { path = "crates/kumi-common" }
 kumi-store = { path = "crates/kumi-store" }
 kumi-genexpr = { path = "crates/kumi-genexpr" }
+kumi-layout = { path = "crates/kumi-layout" }
 kumi-agent = { path = "crates/kumi-agent" }
 ableton-mcp-server = { path = "daws/ableton/ableton-mcp-server" }
 daw-bridge = { path = "daws/own/daw-bridge" }
@@ -144,6 +146,10 @@ opt-level = 3
 # The GenExpr interpreter runs Kumi's building blocks a sample at a time in their tests: optimized, a song's worth of
 # samples takes a moment instead of minutes.
 [profile.dev.package.kumi-genexpr]
+opt-level = 3
+
+# And the map's layout: t-SNE over thousands of points in its tests, and 300,000 in Extended's, takes seconds optimized.
+[profile.dev.package.kumi-layout]
 opt-level = 3
 
 [profile.release]

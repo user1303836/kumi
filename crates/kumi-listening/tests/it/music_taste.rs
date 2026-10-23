@@ -471,3 +471,42 @@ fn a_reference_kept_by_an_older_kumi_is_measured_again() {
         assert!(references.load("dub techno").await.is_some());
     });
 }
+
+#[test]
+fn the_songs_sit_on_the_map_by_how_they_sound() {
+    use kumi_layout::Layout;
+    use kumi_listening::music::map::{lay_out, made};
+    let dir = tempfile::tempdir().unwrap();
+    let (kumi, _) = library(dir.path());
+    let mut store = MusicStore::open(&database(&kumi)).unwrap();
+    assert_eq!(lay_out(&mut store, &kumi, MODEL, &Layout { threads: 2, ..Layout::default() }).unwrap(), 150);
+    let places = |store: &MusicStore| -> Vec<(i64, String, f64, f64)> {
+        let mut statement = store.connection().prepare("SELECT id, genre, x, y FROM songs WHERE x IS NOT NULL ORDER BY id").unwrap();
+        statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).unwrap().map(Result::unwrap).collect()
+    };
+    let first = places(&store);
+    assert_eq!(first.len(), 150);
+    // Each style's songs sit nearer their own style's middle than another's.
+    let middle = |genre: &str| {
+        let mine: Vec<&(i64, String, f64, f64)> = first.iter().filter(|song| song.1 == genre).collect();
+        (mine.iter().map(|song| song.2).sum::<f64>() / mine.len() as f64, mine.iter().map(|song| song.3).sum::<f64>() / mine.len() as f64)
+    };
+    let middles: Vec<(&str, (f64, f64))> = STYLES.iter().map(|style| (style.genre, middle(style.genre))).collect();
+    let nearest = |song: &(i64, String, f64, f64)| {
+        middles
+            .iter()
+            .min_by(|a, b| {
+                ((a.1 .0 - song.2).powi(2) + (a.1 .1 - song.3).powi(2)).total_cmp(&((b.1 .0 - song.2).powi(2) + (b.1 .1 - song.3).powi(2)))
+            })
+            .unwrap()
+            .0
+    };
+    assert!(first.iter().all(|song| nearest(song) == song.1), "every song by its own style");
+    assert_eq!(made(&store).unwrap().map(|made| (made.model, made.songs)), Some((MODEL.to_string(), 150)));
+    // The same songs make the same map, and a song gone is off it the next time.
+    assert_eq!(lay_out(&mut store, &kumi, MODEL, &Layout { threads: 1, ..Layout::default() }).unwrap(), 150);
+    assert_eq!(places(&store), first);
+    store.set_gone(&[first[0].0], true).unwrap();
+    assert_eq!(lay_out(&mut store, &kumi, MODEL, &Layout { threads: 1, ..Layout::default() }).unwrap(), 149);
+    assert!(places(&store).iter().all(|song| song.0 != first[0].0));
+}

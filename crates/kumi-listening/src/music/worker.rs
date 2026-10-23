@@ -6,6 +6,7 @@
 use super::{
     database,
     hear::{hear, restyle, Clap, Ears, Heard, Style},
+    map,
     scan::{clustered, next as next_song, recluster, spread, tags_pass, Next, TagsPass, STYLE_WORDS},
     store::{MusicError, MusicStore, LIVE},
     vectors::{VectorReader, VectorWriter},
@@ -16,6 +17,7 @@ use kumi_common::{
     js::{json::stringify, string::head},
     time::now_ms,
 };
+use kumi_layout::Layout;
 use kumi_library::{
     daws::Daws,
     sources::{library_sources, SourceOptions},
@@ -322,6 +324,7 @@ pub async fn run(
     };
     let mut styled = store.heard_ids()?.len().saturating_sub(missing.len());
     let mut clusters = clustered(&store, &model)?;
+    let mut mapped = map::mapped(&store, &model)?;
     let spread = spread(&store)?;
     let mut spread_at = 0;
     let say = |text: &str| report(ScanReply::Said { text: text.to_string() });
@@ -413,6 +416,15 @@ pub async fn run(
             .await?;
             (store, clusters) = (back, made);
         }
+        // The map again too, by the same rule.
+        if style.is_some() && map::due(mapped, styled, false) {
+            let (back, laid) = blocking(store, {
+                let (dir, model) = (dir.clone(), model.clone());
+                move |store| map::lay_out(store, &dir, &model, &Layout::default())
+            })
+            .await?;
+            (store, mapped) = (back, Some(laid));
+        }
         if told.elapsed() >= Duration::from_secs(1) {
             told = Instant::now();
             counts(&store, &mut progress)?;
@@ -424,7 +436,15 @@ pub async fn run(
     if !control.stop.is_cancelled() {
         writer.settle(&store)?;
         if style.is_some() && styled != clusters {
-            let (back, _) = blocking(store, move |store| recluster(store, &dir, &model, named.as_deref().map(Vec::as_slice))).await?;
+            let (back, _) = blocking(store, {
+                let (dir, model) = (dir.clone(), model.clone());
+                move |store| recluster(store, &dir, &model, named.as_deref().map(Vec::as_slice))
+            })
+            .await?;
+            store = back;
+        }
+        if style.is_some() && map::due(mapped, styled, true) {
+            let (back, _) = blocking(store, move |store| map::lay_out(store, &dir, &model, &Layout::default())).await?;
             store = back;
         }
         progress.phase = ScanPhase::Done;

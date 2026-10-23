@@ -3,6 +3,7 @@ use super::{
     daws::Daws,
     learn::{learn, LearnOptions, LearnPhase, LearnProgress},
     plan::{plan_learning, PlanOptions},
+    sounds_map::lay_out_sounds,
     state::{acquire_lock, write_state},
 };
 use kumi_common::{
@@ -119,7 +120,9 @@ pub async fn main(daws: Daws) -> io::Result<()> {
             let latest = Rc::new(RefCell::new(None::<LearnProgress>));
             let last = Rc::new(Cell::new(0));
             let (report_latest, report_last, report_output, report_dir) = (latest.clone(), last.clone(), output.clone(), dir.clone());
-            let mut learning = LearnOptions::new(plan_learning(PlanOptions { daws, ..options.plan }).await, stop.clone());
+            let plan = plan_learning(PlanOptions { daws, ..options.plan }).await;
+            let sources = plan.sources.clone();
+            let mut learning = LearnOptions::new(plan, stop.clone());
             learning.rebuild = options.rebuild;
             learning.daws = daws;
             learning.gate = Some(Rc::new(move || {
@@ -146,6 +149,10 @@ pub async fn main(daws: Daws) -> io::Result<()> {
                     *latest.borrow_mut() = Some(progress.clone());
                     let _ = write_state(&dir, &progress, false).await;
                     send(&output, LearnerReply::Done { progress });
+                    // Then the sounds' map, when it's due, while the library is still this learner's.
+                    if !stop.is_cancelled() {
+                        let _ = lay_out_sounds(std::path::Path::new(&dir), &sources, &kumi_layout::Layout::default()).await;
+                    }
                 }
                 Err(error) => {
                     if !stop.is_cancelled() {

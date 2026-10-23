@@ -1608,6 +1608,10 @@ name = "kumi-genexpr"
 version = "1.19.2"
 
 [[package]]
+name = "kumi-layout"
+version = "0.1.0"
+
+[[package]]
 name = "kumi-library"
 version = "0.1.0"
 dependencies = [
@@ -1621,6 +1625,7 @@ dependencies = [
  "home",
  "indexmap",
  "kumi-common",
+ "kumi-layout",
  "kumi-media",
  "kumi-net",
  "kumi-testkit",
@@ -1654,6 +1659,7 @@ dependencies = [
  "indexmap",
  "kumi-ai",
  "kumi-common",
+ "kumi-layout",
  "kumi-library",
  "kumi-media",
  "kumi-net",

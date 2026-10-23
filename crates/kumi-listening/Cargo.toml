@@ -11,6 +11,7 @@ publish = false
 [dependencies]
 kumi-ai.workspace = true
 kumi-common.workspace = true
+kumi-layout.workspace = true
 kumi-library.workspace = true
 kumi-media.workspace = true
 kumi-net.workspace = true

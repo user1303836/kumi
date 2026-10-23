@@ -16,6 +16,7 @@ pub mod presets;
 pub mod samples;
 pub mod search;
 pub mod sets;
+pub mod sounds_map;
 pub mod sources;
 pub mod state;
 pub mod store;

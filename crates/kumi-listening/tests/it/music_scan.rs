@@ -205,6 +205,21 @@ async fn the_scan_hears_measures_and_embeds_songs_and_says_why_it_skips_one() {
     assert!(reader.distance(low.id, &reader.get(high.id).unwrap()).unwrap() > 0.5, "the two folders sound apart");
     assert_eq!(style.heard.borrow().len(), 4, "each song heard once: {:?}", style.heard.borrow());
     assert!(store.meta("clusters").unwrap().is_some_and(|clusters| clusters.contains("\"heard\":4")));
+    // On the map: the four songs heard, made at the scan's end; the songs skipped aren't.
+    let place = |id: i64| {
+        store
+            .connection()
+            .query_row("SELECT x, y FROM songs WHERE id = ?1", [id], |row| {
+                Ok((row.get::<_, Option<f64>>(0)?, row.get::<_, Option<f64>>(1)?))
+            })
+            .unwrap()
+    };
+    assert!([low.id, high.id]
+        .iter()
+        .all(|id| matches!(place(*id), (Some(x), Some(y)) if (0. ..=1.).contains(&x) && (0. ..=1.).contains(&y))));
+    assert_eq!(place(store.song_at(&at(&music, "Short/Album/01 Short.wav")).unwrap().unwrap().id), (None, None));
+    let made = kumi_listening::music::map::made(&store).unwrap().unwrap();
+    assert_eq!((made.model.as_str(), made.songs), ("test-model", 4));
 }
 
 #[tokio::test(flavor = "current_thread")]
