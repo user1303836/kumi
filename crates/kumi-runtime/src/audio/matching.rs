@@ -4,95 +4,11 @@
 //! their weighted mean, weighted for a single sound (timbre, envelope, pitch) or a section (balance,
 //! density and rhythm too). The target is a similar character: a patch rarely matches a finished mix.
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum FeatureName {
-    Balance,
-    Tilt,
-    Brightness,
-    Movement,
-    Envelope,
-    Pitch,
-    Density,
-    Width,
-    Rhythm,
-    Contour,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Feature {
-    pub name: FeatureName,
-    /// 0 to 100.
-    pub similarity: f64,
-    /// What to change, when it's far enough off to matter.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gap: Option<String>,
-    pub weight: f64,
-}
-
-/// What a comparison weighs for: a single sound, or a section of a mix.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Focus {
-    Sound,
-    Section,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum StructuralKind {
-    MissingLow,
-    ExcessLow,
-    MissingTop,
-    ExcessTop,
-    MissingMids,
-    ExcessMids,
-    Envelope,
-    Register,
-    Pitched,
-    Width,
-    Density,
-}
-
-/// A gap no knob closes (a band 9 dB or more off, an attack three times off, the wrong register, far
-/// too wide or narrow), when it's the largest part of what's lost: what it is, and the structural
-/// change that closes it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Structural {
-    pub kind: StructuralKind,
-    pub gap: String,
-    pub r#move: String,
-    pub share: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Closeness {
-    /// 0 to 100: the weighted mean of the features both sides have.
-    pub score: f64,
-    pub focus: Focus,
-    pub features: Vec<Feature>,
-    /// The biggest gaps, in words, biggest first.
-    pub gaps: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub structural: Option<Structural>,
-}
+pub use kumi_types::daw::STRUCTURE_MOVES;
+pub use kumi_types::matching::{Closeness, Feature, FeatureName, Focus, Structural, StructuralKind};
 
 use super::analyze::{Analysis, Timeline};
 use kumi_common::js::number::{round, to_fixed, to_string};
-pub const STRUCTURE_MOVES:&[(StructuralKind,&str)]=&[
-(StructuralKind::MissingLow,"add a sub layer (an Operator sine or a Drift one octave down, in a rack chain), an EQ Eight low shelf, or change the base instrument"),
-(StructuralKind::ExcessLow,"high-pass it (EQ Eight), take the low layer out, or change the base"),
-(StructuralKind::MissingTop,"add saturation (Saturator, Roar), an exciter or a brighter base (a saw or noise layer)"),
-(StructuralKind::ExcessTop,"low-pass it (Auto Filter), use a darker base (sine, triangle), or take a layer out"),
-(StructuralKind::MissingMids,"add a layer for the body (a second oscillator or a rack chain), or change the base"),
-(StructuralKind::ExcessMids,"cut the mids (EQ Eight), change the base, or thin the layers"),
-(StructuralKind::Envelope,"change the instrument family (a plucked or struck model against a sustained one), or add a transient shaper (Drum Buss, Compressor)"),
-(StructuralKind::Register,"transpose it (the MIDI, or the instrument's octave), or change the base"),
-(StructuralKind::Pitched,"change the kind of source: a tonal oscillator against noise or a sample"),
-(StructuralKind::Width,"widen or narrow it: Utility width, Chorus-Ensemble, or parallel chains panned apart"),
-(StructuralKind::Density,"change the MIDI: more or fewer notes, another rhythm")];
 pub fn structure_move(kind: StructuralKind) -> &'static str {
     structure_move_for(&crate::core::daw::DawProfile::ABLETON, kind)
 }

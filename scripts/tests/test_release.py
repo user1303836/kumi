@@ -21,7 +21,7 @@ SPEC.loader.exec_module(release)
 
 FILES = ["package.json", "Cargo.lock", "CHANGELOG.md", "README.md", "README.ja.md", "README.zh-CN.md",
          "crates/kumi/Cargo.toml", "crates/kumi-common/Cargo.toml", "crates/kumi-runtime/Cargo.toml", "daws/own/daw-mcp-server/Cargo.toml",
-         "crates/kumi-runtime/src/version.rs", "daws/ableton/ableton-mcp-server/Cargo.toml",
+         "crates/kumi-types/src/version.rs", "crates/kumi-types/Cargo.toml", "daws/ableton/ableton-mcp-server/Cargo.toml",
          "docs/en/KUMI_CHANGES.md", "docs/ja/KUMI_CHANGES.md", "docs/zh-CN/KUMI_CHANGES.md",
          release.REAPER_CARGO, release.RENOISE_VERSION, release.RENOISE_MANIFEST]
 LONG = ("Kumi does a new thing, described at enough length that its changelog bullet wraps onto a second line, "
@@ -188,7 +188,7 @@ class Edits(unittest.TestCase):
     def test_a_release_with_the_same_bridge(self):
         plan, texts = self.released(new_bridge=False)
         self.assertEqual(json.loads(texts["package.json"])["version"], plan.new)
-        self.assertIn(f'"{plan.new}"', texts["crates/kumi-runtime/src/version.rs"])
+        self.assertIn(f'"{plan.new}"', texts["crates/kumi-types/src/version.rs"])
         for crate, folder in release.CRATES.items():
             self.assertIn(f'version = "{plan.new}"', texts[f"{folder}/Cargo.toml"])
             self.assertIn(f'name = "{crate}"\nversion = "{plan.new}"', texts["Cargo.lock"])
@@ -414,7 +414,7 @@ class DawEdits(unittest.TestCase):
     def test_daw_bridges_as_they_were_say_nothing(self):
         plan, texts, changed, really = self.released()
         self.assertEqual(sorted(changed), really)
-        self.assertEqual(len(changed), 14)  # what a release changed before REAPER and Renoise, and the host for them
+        self.assertEqual(len(changed), 15)  # what a release changed before REAPER and Renoise, the host for them and kumi-types
         new = entry(texts["CHANGELOG.md"], plan.new)
         self.assertNotIn("REAPER", new)
         self.assertNotIn("Renoise", new)

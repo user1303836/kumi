@@ -256,16 +256,15 @@ fn automation(preview: &JsonObject, input: &JsonObject) -> Option<ChangePicture>
 
 pub use crate::core::picture::{amount, asked_apart, name_lane, CurveReader, ParameterRow};
 
-impl ParameterRow {
-    pub fn from_row(row: &JsonObject) -> Option<ParameterRow> {
-        Some(ParameterRow {
-            name: label(row.get("name"))?,
-            value: finite(row.get("value"))?,
-            min: finite(row.get("min")).unwrap_or(0.),
-            max: finite(row.get("max")).unwrap_or(1.),
-            text: label(coalesce(row.get("displayValue"), row.get("display"))),
-        })
-    }
+/// One of a Live device's parameters, as the bridge reads it.
+pub fn parameter_row(row: &JsonObject) -> Option<ParameterRow> {
+    Some(ParameterRow {
+        name: label(row.get("name"))?,
+        value: finite(row.get("value"))?,
+        min: finite(row.get("min")).unwrap_or(0.),
+        max: finite(row.get("max")).unwrap_or(1.),
+        text: label(coalesce(row.get("displayValue"), row.get("display"))),
+    })
 }
 
 /// Live's equalisers (EQ Eight, Channel EQ) and compressors, by their parameters' names.

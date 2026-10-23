@@ -104,7 +104,7 @@ paths = [
   "crates/kumi/src/daw/ableton/live_extension.rs",
   "crates/kumi/src/daw/ableton/live_app.rs",
   "crates/kumi/src/daw/own.rs",
-  "crates/kumi-runtime/src/system.rs",
+  "crates/kumi-types/src/system.rs",
   "crates/kumi-runtime/src/ai/http.rs",
   "crates/kumi-runtime/src/library/sources.rs",
   "crates/kumi-runtime/src/net/**",

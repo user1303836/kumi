@@ -18,6 +18,8 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
   `daw-mcp-server/` (the host; what's one DAW's alone is in its `src/reaper/` and `src/renoise/`).
 - `daws/reaper/reaper-kumi`: REAPER's extension (Rust, built against REAPER's SDK headers in its `sdk/`).
 - `daws/renoise/`: Renoise's tool, `com.kumi.Bridge.xrnx` (Lua), and its tests against a mock of Renoise's API.
+- `crates/kumi-types`: what every layer names: DAW profiles and words, the contracts with the tools, errors, places,
+  the system and the version. `kumi-runtime` re-exports it where its code always named it.
 - `crates/kumi-store` (SQLite), `kumi-common` (shared utilities), `kumi-genexpr` (gen~ test interpreter).
 - `plugin-formats/`: the plug-in preset formats Kumi reads (data Kumi builds in).
 - `testdata/oracles/<crate>/`: the recorded oracles that crate's tests read, through `kumi_testkit::oracle`.

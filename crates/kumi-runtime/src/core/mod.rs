@@ -1,12 +1,12 @@
+// What kumi-types holds now, where the runtime's code has always named it.
+pub use kumi_types::{daw, disk, errors, picture, place, private};
+
 pub mod chop;
 pub mod context;
 pub mod contracts;
 pub mod conversations;
-pub mod daw;
 pub mod delivery;
 pub mod describe;
-pub mod disk;
-pub mod errors;
 pub mod evolve;
 pub mod export;
 pub mod file_sync;
@@ -23,13 +23,10 @@ pub mod mapping;
 pub mod match_run;
 pub mod memory;
 pub mod phrases;
-pub mod picture;
-pub mod place;
 pub mod plan;
 pub mod plan_stream;
 pub mod playbook;
 pub mod presentation;
-pub mod private;
 pub mod project;
 pub mod recall;
 pub mod recipes;

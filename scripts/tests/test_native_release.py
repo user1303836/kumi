@@ -142,14 +142,14 @@ class NativeRelease(unittest.TestCase):
         version = cargo_version("crates/kumi/Cargo.toml")
         self.assertEqual(read_json("package.json")["version"], version)
         # Kumi's host for REAPER and Renoise ships beside it and moves with it (its MCP serverInfo and hello say it).
-        for name in ("crates/kumi-common/Cargo.toml", "crates/kumi-runtime/Cargo.toml", "daws/own/daw-mcp-server/Cargo.toml"):
+        for name in ("crates/kumi-common/Cargo.toml", "crates/kumi-runtime/Cargo.toml", "crates/kumi-types/Cargo.toml", "daws/own/daw-mcp-server/Cargo.toml"):
             self.assertEqual(cargo_version(name), version, name)
-        declared = re.search(r'KUMI_VERSION[^=]*=\s*"([^"\n]+)"', (root / "crates/kumi-runtime/src/version.rs").read_text())
+        declared = re.search(r'KUMI_VERSION[^=]*=\s*"([^"\n]+)"', (root / "crates/kumi-types/src/version.rs").read_text())
         self.assertIsNotNone(declared)
         self.assertEqual(declared[1], version)
         cargo_lock = tomllib.loads((root / "Cargo.lock").read_text())["package"]
         for package in cargo_lock:
-            if package["name"] in ("kumi", "kumi-runtime", "kumi-common", "daw-mcp-server"):
+            if package["name"] in ("kumi", "kumi-runtime", "kumi-types", "kumi-common", "daw-mcp-server"):
                 self.assertEqual(package["version"], version, package["name"])
         bridge = cargo_version("daws/ableton/ableton-mcp-server/Cargo.toml")
         self.assertEqual(next(p["version"] for p in cargo_lock if p["name"] == "ableton-mcp-server"), bridge)

@@ -1314,6 +1314,7 @@ dependencies = [
  "kumi-genexpr",
  "kumi-store",
  "kumi-testkit",
+ "kumi-types",
  "libc",
  "md-5",
  "memchr",
@@ -1360,6 +1361,22 @@ dependencies = [
 [[package]]
 name = "kumi-testkit"
 version = "0.1.0"
+
+[[package]]
+name = "kumi-types"
+version = "1.21.1"
+dependencies = [
+ "async-trait",
+ "futures",
+ "kumi-common",
+ "libc",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "lazy_static"
