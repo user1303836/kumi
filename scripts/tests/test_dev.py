@@ -1,10 +1,16 @@
 """scripts/dev.py: globs, packages and their dependents, and what a change affects, on a made-up workspace and on this
-checkout's own (git and cargo read it).
+checkout's own (git and cargo read it); and rebase-moves, on repositories of its own.
 """
+import contextlib
 import importlib.util
+import io
+import os
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("dev_script", ROOT / "scripts/dev.py")
@@ -222,6 +228,149 @@ class ThisCheckout(unittest.TestCase):
         for path in ("crates/kumi/src/cli/native/session.rs", "scripts/tests/daw_bridges.py", "scripts/test-isolated.sh",
                      "crates/daw-bridge/tests/it/system.rs", "crates/kumi/src/daw/ableton/willington.rs", "Cargo.lock"):
             self.assertFalse(install.holds(path), path)
+
+    def test_the_moves_map_names_paths_that_moved(self):
+        rewrites = dev.load_moves((ROOT / dev.MOVES).read_text(encoding="utf-8"))
+        tracked = dev.tracked()
+        for at, move in enumerate(rewrites):
+            if move.rust:
+                continue
+            gone, there = move.old, dev.moved_to(move.new, rewrites[at + 1:])
+            self.assertFalse(any(path == gone or path.startswith(gone + "/") for path in tracked), f"{gone} still holds files")
+            self.assertTrue(any(path == there or path.startswith(there + "/") for path in tracked), f"{there} holds none")
+
+
+class Moves(unittest.TestCase):
+    def test_a_moved_folder_is_rewritten_where_a_path_names_it_from_the_root(self):
+        move = dev.Rewrite("crates/bridge", "daws/live/bridge")
+        self.assertEqual(move.apply("cd crates/bridge && cargo test -p bridge"), "cd daws/live/bridge && cargo test -p bridge")
+        self.assertEqual(move.apply("`crates/bridge/src/lib.rs`, ./crates/bridge."), "`daws/live/bridge/src/lib.rs`, ./daws/live/bridge.")
+        self.assertEqual(move.apply('concat!(env!("KUMI_WORKSPACE"), "/crates/bridge/x")'),
+                         'concat!(env!("KUMI_WORKSPACE"), "/daws/live/bridge/x")')
+        for line in ('path = "../crates/bridge"', "crates/bridge-kit", "crates/bridges", "old/crates/bridge", "daws/live/bridge"):
+            self.assertEqual(move.apply(line), line)
+
+    def test_a_one_word_path_moves_only_as_a_folder(self):
+        move = dev.Rewrite("protocol", "daws/live/protocol")
+        self.assertEqual(move.apply("protocol/ops.json, /protocol/x"), "daws/live/protocol/ops.json, /daws/live/protocol/x")
+        for line in ("the wire protocol", '"protocol"', "protocol.json", "daws/live/protocol/ops.json"):
+            self.assertEqual(move.apply(line), line)
+
+    def test_a_rust_path_moves_whole_and_never_inside_a_longer_name(self):
+        rust = dev.Rewrite("kumi_runtime::core::daw", "kumi_types::daw", rust=True)
+        self.assertEqual(rust.apply("use kumi_runtime::core::daw::{Daw, Kind};"), "use kumi_types::daw::{Daw, Kind};")
+        self.assertEqual(rust.apply("::kumi_runtime::core::daw::Daw"), "::kumi_types::daw::Daw")
+        for line in ("use kumi_runtime::core::daws;", "my_kumi_runtime::core::daw::Daw"):
+            self.assertEqual(rust.apply(line), line)
+
+    def test_moves_follow_one_another_in_order(self):
+        rewrites = dev.load_moves('[[move]]\nfrom = "a"\nto = "b/a"\n\n[[move]]\nfrom = "b/a/x.rs"\nto = "b/a/y/x.rs"\n')
+        self.assertEqual(dev.moved_to("a/x.rs", rewrites), "b/a/y/x.rs")
+        self.assertEqual(dev.moved_to("a/z.rs", rewrites), "b/a/z.rs")
+        self.assertEqual(dev.moved_to("ab/x.rs", rewrites), "ab/x.rs")
+
+    def test_the_map_takes_moves_and_rust_paths_each_from_and_to(self):
+        for text in ('[[moves]]\nfrom = "a"\nto = "b"\n', '[[move]]\nfrom = "a"\n', '[[rust]]\nfrom = "a"\nto = "b"\nwhy = "c"\n'):
+            with self.assertRaises(dev.Refused, msg=text):
+                dev.load_moves(text)
+
+    def test_the_lines_a_diff_adds_by_file(self):
+        diff = "\n".join(["diff --git a/x b/x", "--- a/x", "+++ b/x", "@@ -1,0 +2,2 @@ fn", "+a", "+++ b/not-a-file", "@@ -9 +12 @@",
+                          "-q", "+r", "@@ -20,2 +22,0 @@", "-gone", "-gone", "diff --git a/y b/y", "deleted file mode 100644",
+                          "--- a/y", "+++ /dev/null", "@@ -1 +0,0 @@", "-y"])
+        self.assertEqual(dev.added_lines(diff), {"x": [2, 3, 12]})
+
+
+class RebaseMoves(unittest.TestCase):
+    """A branch from before a move, brought across it in a repository of its own."""
+
+    MAP = '[[move]]\nfrom = "crates/a"\nto = "daws/x/a"\n\n[[rust]]\nfrom = "kumi_runtime::core::daw"\nto = "kumi_types::daw"\n'
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.repo = Path(folder.name) / "repo"
+        (Path(folder.name) / "gitconfig").write_text("")
+        identity = {f"GIT_{who}_{what}": value for who in ("AUTHOR", "COMMITTER")
+                    for what, value in (("NAME", "Test"), ("EMAIL", "test@example.com"))}
+        environment = mock.patch.dict(os.environ, {**identity, "GIT_CONFIG_GLOBAL": str(Path(folder.name) / "gitconfig"),
+                                                   "GIT_CONFIG_NOSYSTEM": "1"})
+        environment.start()
+        self.addCleanup(environment.stop)
+        self.repo.mkdir()
+        self.git("init", "-q", "-b", "main")
+        self.write("crates/a/src/lib.rs", "pub fn a() {}\n")
+        self.write("README.md", "See crates/a/src/lib.rs.\n\nOne.\n\nBefore the move, crates/a held it.\n")
+        self.write("scripts/moves.toml", "")
+        self.commit("Start")
+        self.git("checkout", "-q", "-b", "feature")
+        self.write("crates/a/src/new.rs", "use kumi_runtime::core::daw::Daw;\n")
+        self.write("crates/a/src/lib.rs", "pub fn a() {}\npub fn b() {}\n")
+        self.write("README.md", self.read("README.md") + "\nAlso crates/a/src/new.rs, in protocol and kumi_runtime::core::daws.\n")
+        self.commit("Feature")
+        self.git("checkout", "-q", "main")
+        (self.repo / "daws/x").mkdir(parents=True)
+        self.git("mv", "crates/a", "daws/x/a")
+        self.write("README.md", self.read("README.md").replace("See crates/a", "See daws/x/a"))
+        self.write("scripts/moves.toml", self.MAP)
+        self.commit("Move")
+        self.git("checkout", "-q", "feature")
+
+    def git(self, *args: str) -> str:
+        return subprocess.run(["git", *args], cwd=self.repo, capture_output=True, text=True, check=True).stdout
+
+    def write(self, path: str, text: str):
+        (self.repo / path).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / path).write_text(text, encoding="utf-8")
+
+    def read(self, path: str) -> str:
+        return (self.repo / path).read_text(encoding="utf-8")
+
+    def commit(self, subject: str):
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", subject)
+
+    def bring(self, merge: bool = False) -> tuple[int, str]:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = dev.rebase_moves(self.repo, "main", merge=merge, build=False)
+        return code, out.getvalue()
+
+    def test_a_branch_lands_where_its_folder_moved_with_the_lines_it_adds_rewritten(self):
+        code, out = self.bring()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.git("log", "--format=%s").split(), ["Feature", "Move", "Start"])
+        self.assertFalse((self.repo / "crates").exists(), out)
+        self.assertEqual(self.read("daws/x/a/src/lib.rs"), "pub fn a() {}\npub fn b() {}\n")
+        self.assertEqual(self.read("daws/x/a/src/new.rs"), "use kumi_types::daw::Daw;\n")
+        # Main's own lines stay as main has them, history included.
+        self.assertEqual(self.read("README.md"), "See daws/x/a/src/lib.rs.\n\nOne.\n\nBefore the move, crates/a held it.\n"
+                                                 "\nAlso daws/x/a/src/new.rs, in protocol and kumi_runtime::core::daws.\n")
+        self.assertIn("README.md: 7", out)
+        code, out = self.bring()
+        self.assertEqual(code, 0, out)
+        self.assertIn("HEAD already has main", out)
+        self.assertIn("the lines the branch adds: 0 lines", out, "a second run finds nothing left to do")
+
+    def test_merging_keeps_the_branch_and_names_a_file_added_at_the_old_path_since(self):
+        code, out = self.bring(merge=True)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.read("daws/x/a/src/new.rs"), "use kumi_types::daw::Daw;\n")
+        self.commit("Rewritten")
+        self.write("crates/a/src/late.rs", "")
+        self.commit("Late")
+        code, out = self.bring(merge=True)
+        self.assertEqual(code, 1, out)
+        self.assertIn("crates/a/src/late.rs -> daws/x/a/src/late.rs", out)
+
+    def test_a_conflict_stops_it_and_names_the_file(self):
+        self.write("README.md", self.read("README.md").replace("See crates/a/src/lib.rs.", "Read crates/a/src/lib.rs."))
+        self.commit("Reworded")
+        code, out = self.bring()
+        self.assertEqual(code, 1, out)
+        self.assertIn("1 file in conflict:\n  README.md", out)
+        with self.assertRaises(dev.Refused):
+            self.bring()
 
 
 if __name__ == "__main__":

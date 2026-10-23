@@ -1,0 +1,14 @@
+# Where the repository's paths moved, oldest first. `python3 scripts/dev.py rebase-moves` reads it to bring a branch
+# that began before a move onto main (see dev.py's docstring).
+#
+# - [[move]]: a file or folder that moved, from the repository's root. Git follows a moved folder when it rebases (files
+#   the branch adds in it included); dev.py rewrites the old path where the lines the branch adds name it.
+# - [[rust]]: a Rust path that moved with its code. dev.py rewrites it in the lines the branch adds.
+#
+# [[move]]
+# from = "crates/ableton-mcp-server"
+# to = "daws/ableton/ableton-mcp-server"
+#
+# [[rust]]
+# from = "kumi_runtime::core::daw"
+# to = "kumi_types::daw"

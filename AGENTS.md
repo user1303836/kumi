@@ -36,6 +36,7 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
   the gating lint, the affected crates' `ci` tests, the changed areas' tests; `--dry-run` lists them).
 - Release scripts' tests: `python3 -m unittest discover -s scripts/tests -p 'test_*release.py'`
 - What a branch affects, and the CI jobs that test it: `python3 scripts/dev.py affected --base origin/main`
+- A branch begun before a move: `python3 scripts/dev.py rebase-moves` (`scripts/moves.toml` lists the moves).
 - Wait for CI: watch the CI run of the commit you pushed. Only "Required CI" (its last job) and "Willington files" are
   required. `gh pr checks --required --watch` can return early: "Required CI" is listed only once the jobs it needs end.
   `gh run watch --exit-status "$(gh run list -c "$(git rev-parse HEAD)" -w CI --json databaseId -q '.[0].databaseId')"`

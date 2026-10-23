@@ -24,6 +24,8 @@
 
 这些 crate 共用根目录的 Cargo 工作区；没有 npm 工作区。桥接没有 Kumi 也能工作。这些 crate 移植自的 TypeScript 实现保留在 git 标签 `v1.7.6` 上。
 
+文件夹移动后，`scripts/moves.toml` 会记下它的新位置。在移动之前开始的分支可以用 `python3 scripts/dev.py rebase-moves` 跟上（`--merge` 改为合并 main 而不是变基）：git 会跟随移动的文件夹，分支自己的行中的旧路径会被改写，剩下的问题（冲突、留在旧路径的文件、构建错误）会列出来。
+
 ## 各部分如何通信
 
 ```text
