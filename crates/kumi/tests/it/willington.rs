@@ -1,6 +1,6 @@
 //! /willington's switch: finding Willington in the bridge in Live, and turning its bindings on and off.
 use ableton_mcp_server::lifecycle::delivery::{secret_permissions, SecretPermissions};
-use kumi::willington::{Willington, WillingtonControl, TURNED_OFF, TURNED_OFF_FOLLOW_STAYS, TURNED_ON, TURNED_ON_WITH_FOLLOW};
+use kumi::willington::{control, Willington, TURNED_OFF, TURNED_OFF_FOLLOW_STAYS, TURNED_ON, TURNED_ON_WITH_FOLLOW};
 use kumi_daw_ableton::willington::WillingtonSwitch;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -42,7 +42,7 @@ async fn the_switch_turns_every_binding_on_owner_only_and_off_by_going() {
     let scripts = folder.path();
     put(&scripts.join("AbletonMcpBridge/__init__.py"), "");
     put(&scripts.join("AbletonMcpBridge/willington/WillingtonRuntime/__init__.py"), "");
-    let control = WillingtonControl::new(scripts_env(scripts));
+    let control = control(scripts_env(scripts));
     let switch = scripts.join("AbletonMcpBridge/willington.json");
     assert_eq!((control.on)(), Some(false));
     assert_eq!((control.set)(true).await.unwrap(), TURNED_ON);
@@ -75,7 +75,7 @@ async fn follow_actions_come_on_with_a_passing_self_test_for_the_bindings_the_br
     let scripts = folder.path();
     put(&scripts.join("AbletonMcpBridge/__init__.py"), "");
     put(&scripts.join("AbletonMcpBridge/willington/WillingtonRuntime/__init__.py"), "");
-    let control = WillingtonControl::new(scripts_env(scripts));
+    let control = control(scripts_env(scripts));
     let switch = scripts.join("AbletonMcpBridge/willington.json");
     let follow = || serde_json::from_slice::<Value>(&fs::read(&switch).unwrap()).unwrap()["followActions"].clone();
     let receipt = |status: &str, digest: &str| format!(r#"{{"status": "{status}", "library_sha256": "{digest}"}}"#);
@@ -122,7 +122,7 @@ async fn the_switch_is_read_again_only_when_its_file_changes_and_is_just_on_whil
     put(&scripts.join("AbletonMcpBridge/__init__.py"), "");
     put(&scripts.join("AbletonMcpBridge/willington/WillingtonRuntime/__init__.py"), "");
     let willington = Willington::in_remote_scripts(scripts).unwrap();
-    let control = WillingtonControl::new(scripts_env(scripts));
+    let control = control(scripts_env(scripts));
     assert_eq!(willington.switch(), WillingtonSwitch::Off);
     (control.set)(true).await.unwrap();
     // Just written: the bridge may still be loading the bindings.
@@ -152,7 +152,7 @@ async fn the_switch_is_read_again_only_when_its_file_changes_and_is_just_on_whil
 async fn without_willington_in_the_bridge_there_is_nothing_to_switch() {
     let folder = tempfile::tempdir().unwrap();
     put(&folder.path().join("AbletonMcpBridge/__init__.py"), "");
-    let control = WillingtonControl::new(scripts_env(folder.path()));
+    let control = control(scripts_env(folder.path()));
     assert_eq!((control.on)(), None);
     assert!((control.set)(true).await.unwrap_err().contains("doesn't carry Willington"));
     assert!(!folder.path().join("AbletonMcpBridge/willington.json").exists());

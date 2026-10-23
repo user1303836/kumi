@@ -17,6 +17,7 @@
 | `crates/kumi-web` | Web と動画のツール：Web の検索と読み取り（ページ、PDF、GitHub、Max のパッチ）、チュートリアル動画の言葉・フレーム・音の視聴 |
 | `crates/kumi-library` | プロデューサーのライブラリー（学習、検索、プリセット、Set、好み）、プラグインのフォーマットと役割、ディスク上のサンプル探し。各 DAW が自分のライブラリーの場所を伝える |
 | `crates/kumi-listening` | リスニング：聴いて測るもの、ジャッジとチェックリスト、エンジンのラウンド、リスニングモデルとそのスロット、スタイルの参照、記譜。再生とレンダリングは各 DAW が受け持つ |
+| `crates/kumi-daw` | DAW のクレートがアプリに渡すものと受け取るもの：DAW のプロバイダー（DAW が何か、そしてブリッジの検出・インストール・確認・削除）、doctor のチェック、初回セットアップの DAW 側、各ステップが使う小さなポート（表示・質問・プログラムの実行） |
 | `crates/kumi-common` | ランタイムの共通処理と、ソース互換の値の扱い |
 | `daws/ableton/kumi-daw-ableton` | Live のホスト側：Live との連携（Set の観察、変更と HISTORY、レンダリングと Kumi Ears、Hands、ライブラリーとマニュアル）と Max for Live デバイスのビルダー |
 | `daws/ableton/ableton-mcp-server` | ネイティブの MCP ブリッジ、解析ワーカー、ライフサイクル、セットアップ、移行、診断 |

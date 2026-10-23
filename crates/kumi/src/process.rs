@@ -1,72 +1,11 @@
-//! Running programs and asking in the terminal, for whatever Kumi installs or updates: a command's output, a yes/no
-//! line, where Kumi's executables are, and copying a folder.
+//! Asking in the terminal, for whatever Kumi installs or updates: a yes/no line read in the terminal's line mode, and
+//! the terminal as a DAW's steps ask through it. Running programs is kumi-daw's (`kumi_daw::process`).
 use crate::{input::TerminalInput, tui::tty::TtyOutput};
-use futures::{future::LocalBoxFuture, FutureExt};
-use kumi_common::{abort::Signal, js::string::trim};
-use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    path::Path,
-    rc::Rc,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-use tokio::io::AsyncReadExt;
-/// Asks something that answers yes or no later (whether an app is running, say).
-pub type AsyncBool = Rc<dyn Fn() -> LocalBoxFuture<'static, bool>>;
+use futures::future::LocalBoxFuture;
+use kumi_common::js::string::trim;
+use std::rc::Rc;
 /// Asks the producer a yes/no question.
 pub type Confirm = Rc<dyn Fn(String) -> LocalBoxFuture<'static, bool>>;
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Ran {
-    pub code: i32,
-    pub stdout: String,
-    pub stderr: String,
-}
-pub type Run = Rc<dyn Fn(String, Vec<String>, Option<String>) -> LocalBoxFuture<'static, Ran>>;
-pub fn default_run() -> Run {
-    Rc::new(|command, args, cwd| async move { run_program(&command, &args, cwd.as_deref()).await }.boxed_local())
-}
-/// Run one command, preserving partial output on timeout and limiting each output stream to 16 MiB.
-pub async fn run_program(command: &str, args: &[String], cwd: Option<&str>) -> Ran {
-    let mut process = tokio::process::Command::new(command);
-    process.args(args);
-    if let Some(cwd) = cwd {
-        process.current_dir(cwd);
-    }
-    process.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
-    #[cfg(windows)]
-    process.creation_flags(0x0800_0000);
-    let Ok(mut child) = process.spawn() else { return Ran { code: 1, ..Default::default() } };
-    let stdout = Arc::new(Mutex::new(vec![]));
-    let stderr = Arc::new(Mutex::new(vec![]));
-    let full = Signal::new();
-    async fn read(mut source: impl tokio::io::AsyncRead + Unpin, data: Arc<Mutex<Vec<u8>>>, full: Signal) {
-        let mut buffer = [0; 65536];
-        loop {
-            let Ok(n) = source.read(&mut buffer).await else { return };
-            if n == 0 {
-                return;
-            }
-            let mut data = data.lock().unwrap();
-            let left = (16 * 1024 * 1024usize).saturating_sub(data.len());
-            data.extend_from_slice(&buffer[..n.min(left)]);
-            if n > left {
-                full.cancel();
-                return;
-            }
-        }
-    }
-    let out = tokio::spawn(read(child.stdout.take().unwrap(), stdout.clone(), full.clone()));
-    let err = tokio::spawn(read(child.stderr.take().unwrap(), stderr.clone(), full.clone()));
-    let status = tokio::select! {status=child.wait()=>status.ok(),_=full.cancelled()=>{let _=child.kill().await;None},_=tokio::time::sleep(Duration::from_secs(600))=>{let _=child.kill().await;None}};
-    let _ = tokio::join!(out, err);
-    let result = Ran {
-        code: status.and_then(|s| s.code()).unwrap_or(1),
-        stdout: String::from_utf8_lossy(&stdout.lock().unwrap()).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr.lock().unwrap()).into_owned(),
-    };
-    result
-}
 struct InputGuard(Option<Rc<dyn TerminalInput>>);
 impl Drop for InputGuard {
     fn drop(&mut self) {
@@ -118,48 +57,42 @@ pub async fn ask_yes_no(input: Option<Rc<dyn TerminalInput>>, out: Rc<dyn TtyOut
     }));
     receive.await.is_ok_and(|answer| matches!(trim(&answer).to_ascii_lowercase().as_str(), "y" | "yes"))
 }
-pub fn executable_name(name: &str) -> String {
-    format!("{name}{}", if cfg!(windows) { ".exe" } else { "" })
+/// The terminal as a DAW's steps ask through it ([`kumi_daw::io::Ask`]): a test's answers (`confirm`), else a yes/no
+/// line read from `input` and said on `out`, which nobody at a terminal answers no.
+pub struct TerminalAsk {
+    pub input: Option<Rc<dyn TerminalInput>>,
+    pub out: Rc<dyn TtyOutput>,
+    pub confirm: Option<Confirm>,
 }
-pub fn executable_dir() -> String {
-    std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.display().to_string())).unwrap_or(".".into())
-}
-/// The checkout this build was made from; for a release's, a folder that isn't there (this crate's own, where it was
-/// built), so that what's looked for in it isn't found.
-pub fn repository_dir() -> String {
-    kumi_common::dev::checkout()
-        .and_then(|checkout| checkout.canonicalize().ok())
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf())
-        .display()
-        .to_string()
-}
-pub async fn copy_tree(from: &str, to: &str) -> std::io::Result<()> {
-    let from = from.to_string();
-    let to = to.to_string();
-    tokio::task::spawn_blocking(move || {
-        let mut stack = vec![(std::path::PathBuf::from(from), std::path::PathBuf::from(to))];
-        while let Some((from, to)) = stack.pop() {
-            let metadata = fs::symlink_metadata(&from)?;
-            if metadata.is_symlink() {
-                return Err(std::io::Error::other("native bridge packages cannot contain symbolic links"));
+
+impl kumi_daw::io::Ask for TerminalAsk {
+    fn answers(&self) -> bool {
+        self.confirm.is_some() || self.input.as_ref().is_some_and(|input| input.is_tty())
+    }
+    fn yes_no<'a>(&'a self, question: &'a str, ahead: Option<&'a str>) -> LocalBoxFuture<'a, bool> {
+        Box::pin(async move {
+            match &self.confirm {
+                Some(confirm) => confirm(question.to_string()).await,
+                None => ask_yes_no(self.input.clone(), self.out.clone(), question, ahead).await,
             }
-            if metadata.is_dir() {
-                fs::create_dir_all(&to)?;
-                for entry in fs::read_dir(&from)? {
-                    let entry = entry?;
-                    stack.push((entry.path(), to.join(entry.file_name())));
+        })
+    }
+    /// In raw mode, so the key needs no Enter after it: Enter, Esc or Ctrl-C.
+    fn stop_key(&self) -> kumi_daw::io::StopKey {
+        let Some(input) = self.input.clone().filter(|input| input.is_tty()) else { return kumi_daw::io::StopKey::never() };
+        let signal = kumi_common::abort::Signal::new();
+        let _ = input.set_raw_mode(true);
+        input.resume(Rc::new({
+            let signal = signal.clone();
+            move |chunk| {
+                if chunk.iter().any(|b| matches!(b, 3 | 27 | b'\r' | b'\n')) {
+                    signal.cancel();
                 }
-            } else if metadata.is_file() {
-                if let Some(parent) = to.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                fs::copy(&from, &to)?;
-            } else {
-                return Err(std::io::Error::other("native bridge packages cannot contain special files"));
             }
-        }
-        Ok(())
-    })
-    .await
-    .map_err(std::io::Error::other)?
+        }));
+        kumi_daw::io::StopKey::new(signal, move || {
+            let _ = input.set_raw_mode(false);
+            input.pause();
+        })
+    }
 }

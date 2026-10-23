@@ -2,6 +2,7 @@
 #[path = "../support/live_words.rs"]
 mod live_words;
 use futures::FutureExt;
+use kumi::daw::ableton::answers::{ExtensionHost, Hands, LiveLogs, LiveRunning, Lives, PortOwners};
 use kumi::{
     doctor::{DoctorIo, InstallationIo, TerminalInfo, VideoPrograms},
     report::*,
@@ -9,6 +10,7 @@ use kumi::{
 };
 use kumi_agent::core::{gaps::gap_tools, store_client::StoreClient};
 use kumi_common::abort;
+use kumi_daw::io::Answers;
 use kumi_types::system::Env;
 use serde_json::{json, Value};
 use std::{cell::RefCell, fs, rc::Rc};
@@ -33,7 +35,7 @@ fn doctor(out: Rc<Out>, env: Env) -> DoctorIo {
     let mut doctor = DoctorIo::new(out, env);
     doctor.terminal = Some(TerminalInfo::default());
     doctor.video_programs = Some(Rc::new(|| async { Ok(VideoPrograms::default()) }.boxed_local()));
-    doctor.hands = Some(Rc::new(|| async { Ok(None) }.boxed_local()));
+    doctor.answers = doctor.answers.clone().with(Hands(Rc::new(|| async { Ok(None) }.boxed_local())));
     doctor.model_servers = Some(Rc::new(|| async { Ok(vec![]) }.boxed_local()));
     doctor.voice = Some(Rc::new(|| {
         async { Ok(serde_json::from_value(json!({"model":{"name":"ggml-small.en-q5_1.bin"},"fetches":true})).unwrap()) }.boxed_local()
@@ -41,12 +43,13 @@ fn doctor(out: Rc<Out>, env: Env) -> DoctorIo {
     // The Installation section's look at this computer, answered: no ports tried, no programs run, no Live looked for.
     doctor.installation = InstallationIo {
         platform: Some("darwin".into()),
-        lives: Some(Rc::new(Vec::new)),
         free: Some(Rc::new(|_| async { Some(50e9) }.boxed_local())),
-        port: Some(Rc::new(|_| async { None }.boxed_local())),
-        live_running: Some(Rc::new(|| async { false }.boxed_local())),
-        live_extension_host: Some(Rc::new(|| async { false }.boxed_local())),
         now: None,
+        answers: Answers::default()
+            .with(Lives(Rc::new(Vec::new)))
+            .with(PortOwners(Rc::new(|_| async { None }.boxed_local())))
+            .with(LiveRunning(Rc::new(|| async { false }.boxed_local())))
+            .with(ExtensionHost(Rc::new(|| async { false }.boxed_local()))),
     };
     doctor
 }
@@ -140,10 +143,10 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
     io.folder = Some(home.clone());
     io.user = Some("fixtureuser".into());
     io.now = Some(Rc::new(|| "2026-09-29T20:00:00Z".parse().unwrap()));
-    io.live_logs = Some(Rc::new(move || {
+    io.answers = io.answers.clone().with(LiveLogs(Rc::new(move || {
         let log = log.display().to_string();
         async move { Ok(vec![log]) }.boxed_local()
-    }));
+    })));
     assert_eq!(write_report(io).await.unwrap(), 0);
     let file = dir.path().join("kumi-report-2026-09-29T20-00-00.txt");
     #[cfg(unix)]
@@ -227,7 +230,7 @@ async fn the_gap_log_comes_from_kumis_database_with_what_an_older_kumi_logged_si
     io.folder = Some(home);
     io.user = Some("fixtureuser".into());
     io.now = Some(Rc::new(|| "2026-10-05T20:00:00Z".parse().unwrap()));
-    io.live_logs = Some(Rc::new(|| async { Ok(vec![]) }.boxed_local()));
+    io.answers = io.answers.clone().with(LiveLogs(Rc::new(|| async { Ok(vec![]) }.boxed_local())));
     assert_eq!(write_report(io).await.unwrap(), 0);
     let text = fs::read_to_string(dir.path().join("kumi-report-2026-10-05T20-00-00.txt")).unwrap();
     let gaps = text.split("## What Kumi couldn't do (gap log)").nth(1).unwrap().split("\n## ").next().unwrap();
@@ -279,7 +282,7 @@ async fn a_reaper_only_report_never_speaks_lives_words() {
     io.folder = Some(home);
     io.user = Some("fixtureuser".into());
     io.now = Some(Rc::new(|| "2026-10-05T20:00:00Z".parse().unwrap()));
-    io.live_logs = Some(Rc::new(|| async { Ok(vec![]) }.boxed_local()));
+    io.answers = io.answers.clone().with(LiveLogs(Rc::new(|| async { Ok(vec![]) }.boxed_local())));
     assert_eq!(write_report(io).await.unwrap(), 0);
     let text = fs::read_to_string(dir.path().join("kumi-report-2026-10-05T20-00-00.txt")).unwrap();
     let said = format!("{}\n{text}", out.0.borrow());

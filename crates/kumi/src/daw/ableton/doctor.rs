@@ -2,37 +2,46 @@
 //! reaches Live through it, Kumi's Live Extension), what Live needs from this computer (Live installed and opened,
 //! its User Library, the bridge's ports, Developer Mode), and Kumi's hands in Live's menus.
 use super::{
-    bridge_setup::{default_run, is_live_running},
-    live_app::{installed_lives, installed_with, runs_on, InstalledLive, LiveInstalled, MIN_LIVE_MAJOR},
+    answers::{ExtensionHost, Hands, LiveRunning, Lives, NodeVersions, PortOwners},
+    bridge_setup::is_live_running,
+    live_app::{installed_lives, installed_with, runs_on, InstalledLive, MIN_LIVE_MAJOR},
     live_extension::*,
 };
 use crate::{
     config::{find_bridge_config, live_user_library, remote_scripts_dir},
-    doctor::{
-        access, major, newer, node_version, read_bridge_server, tilde, BridgeServer, Check, CheckStatus, DoctorIo, InstallationIo,
-        LiveProbe, PortOwner,
-    },
+    doctor::{access, major, newer, node_version, read_bridge_server, tilde, BridgeServer},
 };
 use futures::{future::join_all, FutureExt};
+use kumi_daw::{
+    check::{Bundled, Check, CheckStatus, Probe, Probes},
+    io::DawIo,
+    process::default_run,
+    provider::Installed as LiveInstalled,
+};
 use kumi_daw_ableton::hands::{can_build_hands, open_hands, HandsErrorKind, OpenHandsOptions};
 use kumi_library::sources::{dirname, join};
 use kumi_types::{
     command::{CONNECT_LIVE, INSTALLED, KUMI, KUMI_REPAIR, KUMI_START},
+    daw::DawId,
     errors::RuntimeError,
     system::{self, Env},
 };
 use serde_json::Value;
 use std::{path::Path, time::Duration};
 
+/// Who listens on one of this computer's ports: nobody (None), or a program, named when the system says.
+pub type PortOwner = Option<Option<String>>;
+
 /// Live's bridge and whether Kumi reaches Live through it; `node` is the doctor's check of Kumi itself.
-pub(crate) async fn bridge_checks(io: &DoctorIo, node: &Check) -> Vec<Check> {
+pub(crate) async fn bridge_checks(io: &DawIo, node: &Check) -> Vec<Check> {
     let env = &io.env;
+    let bundled = io.answers.get::<Bundled>().and_then(|bundled| (bundled.0)(DawId::Ableton));
     let mut checks = vec![];
     if let Some(config) = find_bridge_config(env) {
         let server = read_bridge_server(&config).unwrap_or_default();
         let version = server.version.as_ref().map(|s| format!(" {s}")).unwrap_or_default();
         checks.push(Check::ok(format!("Ableton bridge{version} ({})", tilde(&config))));
-        if let (Some(installed), Some(bundled)) = (&server.version, &io.bundled_bridge_version) {
+        if let (Some(installed), Some(bundled)) = (&server.version, &bundled) {
             if newer(bundled, installed) {
                 checks.push(older_bridge(system::platform(), installed, bundled))
             }
@@ -56,8 +65,10 @@ pub(crate) async fn bridge_checks(io: &DoctorIo, node: &Check) -> Vec<Check> {
                 ))
             } else {
                 if !server.native() {
-                    let bridge_node =
-                        if let Some(version) = &io.node_version_of { version(command.clone()).await } else { node_version(command).await };
+                    let bridge_node = match io.answers.get::<NodeVersions>() {
+                        Some(version) => (version.0)(command.clone()).await,
+                        None => node_version(command).await,
+                    };
                     if let Some(version) = bridge_node {
                         if ![22., 24.].contains(&major(&version)) {
                             checks.push(Check::note(
@@ -84,7 +95,10 @@ pub(crate) async fn bridge_checks(io: &DoctorIo, node: &Check) -> Vec<Check> {
         } else {
             checks.push(Check::note("The bridge configuration names no Node for other MCP apps", Some(later)))
         }
-        let live = if let Some(probe) = &io.probe_live { probe(config.clone()).await.unwrap_or_default() } else { LiveProbe::default() };
+        let live = match io.answers.get::<Probes>() {
+            Some(probe) => (probe.0)(DawId::Ableton, config.clone()).await.unwrap_or_default(),
+            None => Probe::default(),
+        };
         if !live.started && live.said.as_deref().is_some_and(|said| said.contains(kumi_common::bridge::ANOTHER_BRIDGE)) {
             checks.push(Check::fix(
                 "Live is running another version of Kumi's bridge",
@@ -94,11 +108,7 @@ pub(crate) async fn bridge_checks(io: &DoctorIo, node: &Check) -> Vec<Check> {
                 )),
             ))
         } else if !live.started {
-            let current = server
-                .version
-                .as_ref()
-                .zip(io.bundled_bridge_version.as_ref())
-                .is_some_and(|(installed, bundled)| !newer(bundled, installed));
+            let current = server.version.as_ref().zip(bundled.as_ref()).is_some_and(|(installed, bundled)| !newer(bundled, installed));
             checks.push(if node.status==CheckStatus::Fix{Check::note("The bridge didn't start; it needs Node 22 or 24 too",None)}else if current{Check::fix("Kumi's bridge couldn't reach Live",Some(format!("Open Live and choose AbletonMcpBridge as a Control Surface (Settings → Link, Tempo & MIDI); if Live is showing a dialog, answer it first. Then: {} doctor",*KUMI)))}else{Check::fix("The bridge didn't start",Some(format!("{}, and bring Live's part up to date: quit Live, then run {} bridge. Then: {} doctor",if *INSTALLED{format!("Run {} to repair Kumi",*KUMI_REPAIR)}else{format!("Build it ({})",*KUMI_REPAIR)},*KUMI,*KUMI)))})
         } else if live.connected != Some(true) {
             checks.push(Check::fix(
@@ -154,7 +164,7 @@ pub fn older_bridge(platform: &str, installed: &str, bundled: &str) -> Check {
         Check::note(text, Some(format!("{} bridge --yes brings its files up to date", *KUMI)))
     }
 }
-async fn extension_check(env: &Env, config: &str, server: &BridgeServer, live: &LiveProbe) -> Option<Check> {
+async fn extension_check(env: &Env, config: &str, server: &BridgeServer, live: &Probe) -> Option<Check> {
     let folder = live_extensions_dir(env, system::platform())?;
     let version = live.live_version.as_deref().unwrap_or("");
     let parts: Vec<_> = version
@@ -204,8 +214,8 @@ async fn extension_check(env: &Env, config: &str, server: &BridgeServer, live: &
     })
 }
 /// Kumi's hands in Live's menus: a test's answer, or this computer's.
-pub(crate) async fn extra_checks(io: &DoctorIo) -> Result<Vec<Check>, RuntimeError> {
-    let hands = if let Some(hands) = &io.hands { hands().await? } else { hands_check().await };
+pub(crate) async fn extra_checks(io: &DawIo) -> Result<Vec<Check>, RuntimeError> {
+    let hands = if let Some(hands) = io.answers.get::<Hands>() { (hands.0)().await? } else { hands_check().await };
     Ok(hands.into_iter().collect())
 }
 async fn hands_check() -> Option<Check> {
@@ -260,14 +270,14 @@ async fn hands_check() -> Option<Check> {
 
 /// What Live needs from this computer, for the Installation section: Live installed and opened, its User Library,
 /// the bridge's ports, Developer Mode.
-pub(crate) async fn installation_checks(env: &Env, io: &InstallationIo, platform: &str) -> Vec<Check> {
+pub(crate) async fn installation_checks(env: &Env, io: &DawIo, platform: &str) -> Vec<Check> {
     let mut checks = vec![];
     // Where Live doesn't run (Linux), nothing below applies; the bridge's check says Kumi chats without Live.
     if !runs_on(platform) {
         return checks;
     }
-    let lives = match &io.lives {
-        Some(lives) => lives(),
+    let lives = match io.answers.get::<Lives>() {
+        Some(lives) => (lives.0)(),
         None => installed_lives(env, platform),
     };
     let ports = bridge_ports(env);
@@ -275,15 +285,15 @@ pub(crate) async fn installation_checks(env: &Env, io: &InstallationIo, platform
         join_all(ports.iter().map(|port| {
             let port = *port;
             let platform = platform.to_string();
-            match &io.port {
-                Some(owner) => owner(port),
+            match io.answers.get::<PortOwners>() {
+                Some(owner) => (owner.0)(port),
                 None => async move { port_owner(port, &platform).await }.boxed_local(),
             }
             .map(move |owner| (port, owner))
         })),
         async {
-            match &io.live_running {
-                Some(running) => running().await,
+            match io.answers.get::<LiveRunning>() {
+                Some(running) => (running.0)().await,
                 None => is_live_running(default_run()).await,
             }
         }
@@ -434,7 +444,7 @@ fn capitalized(text: &str) -> String {
 
 /// Live's Developer Mode, when it shows: who started Kumi's extension, or, with Live open, whether Live runs
 /// its own Extension Host (it doesn't with Developer Mode on). None while it can't be told.
-async fn developer_mode(env: &Env, platform: &str, io: &InstallationIo, live_running: bool) -> Option<Check> {
+async fn developer_mode(env: &Env, platform: &str, io: &DawIo, live_running: bool) -> Option<Check> {
     let extensions = live_extensions_dir(env, platform)?;
     let off = || Check::ok("Live's Developer Mode is off: Live starts Kumi's extension when it opens");
     let on = || Check::ok("Live's Developer Mode is on: Kumi's bridge starts Kumi's extension while Kumi runs");
@@ -448,8 +458,8 @@ async fn developer_mode(env: &Env, platform: &str, io: &InstallationIo, live_run
     if !live_running || installed_extension(&extensions).is_none() {
         return None;
     }
-    let own_host = match &io.live_extension_host {
-        Some(host) => host().await,
+    let own_host = match io.answers.get::<ExtensionHost>() {
+        Some(host) => (host.0)().await,
         None => ableton_mcp_server::bridge::extension_launcher::running_extension_hosts().await.live,
     };
     Some(if own_host { off() } else { on() })

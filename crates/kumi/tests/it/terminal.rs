@@ -9,7 +9,6 @@ use kumi::{
     terminal::{create_terminal, PlainTerminal, Terminal, TerminalOptions},
     tui::tty::TtyOutput,
     update::UpdateControl,
-    willington::WillingtonControl,
 };
 use kumi_agent::core::contracts::*;
 use kumi_common::abort::Signal;
@@ -649,7 +648,7 @@ async fn willington_is_said_off_at_the_start_and_switched_by_its_command() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let on = Rc::new(Cell::new(false));
-            let willington = WillingtonControl {
+            let willington = kumi_daw::provider::Toggle {
                 on: {
                     let on = on.clone();
                     Rc::new(move || Some(on.get()))

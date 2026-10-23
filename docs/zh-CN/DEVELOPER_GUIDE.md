@@ -17,6 +17,7 @@
 | `crates/kumi-web` | 网页与视频工具：搜索并阅读网页（页面、PDF、GitHub、Max 补丁），以及观看教程视频，获取其中的讲解、画面和声音 |
 | `crates/kumi-library` | 制作人的素材库（学习、搜索、预设、Set、偏好）、插件的格式与角色，以及在磁盘上查找采样；每个 DAW 说明自己的素材库在哪里 |
 | `crates/kumi-listening` | 聆听：一次聆听测量什么、评判及其检查清单、引擎的各轮、聆听模型及其槽位、风格参考和记谱；播放和渲染由各 DAW 负责 |
+| `crates/kumi-daw` | DAW 的 crate 交给应用和从应用得到的东西：DAW 的 provider（DAW 是什么，以及其桥接的查找、安装、检查和移除）、doctor 的检查项、首次设置中 DAW 的一侧，以及各步骤所用的小型端口（输出、提问和运行程序） |
 | `crates/kumi-common` | 共享的运行时工具，以及与原实现兼容的值处理 |
 | `daws/ableton/kumi-daw-ableton` | Live 的主机端：Live 集成（Set 的观察、修改与 HISTORY、渲染与 Kumi Ears、Hands、素材库与手册）和 Max for Live 设备构建器 |
 | `daws/ableton/ableton-mcp-server` | 原生 MCP 桥接、分析工作进程、生命周期、设置、迁移和诊断 |

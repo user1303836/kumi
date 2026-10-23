@@ -1255,6 +1255,7 @@ dependencies = [
  "kumi-agent",
  "kumi-ai",
  "kumi-common",
+ "kumi-daw",
  "kumi-daw-ableton",
  "kumi-daw-own",
  "kumi-daw-reaper",
@@ -1368,6 +1369,21 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "kumi-daw"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "home",
+ "kumi-agent",
+ "kumi-common",
+ "kumi-library",
+ "kumi-types",
+ "serde",
+ "tokio",
 ]
 
 [[package]]

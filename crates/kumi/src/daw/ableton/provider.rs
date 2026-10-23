@@ -2,18 +2,11 @@
 //! with what only Live has (its User Library, the Set opener, whether Live runs, Willington's switch), and the words
 //! for watching it answer.
 use super::{
+    answers::{AbletonFactory, LiveLogs},
     bridge_setup, live_app,
     setup::{live_here, LiveSide},
     willington::Willington,
 };
-use crate::daw::provider::{
-    BridgeCommand, BridgeRollbackStep, BridgeState, DawFactory, DawProvider, DawSession, EnableStep, RemovedBridge, Toggle, ToggleWords,
-    WatchWords,
-};
-use crate::doctor::{Check, DoctorIo, InstallationIo, LiveProbe};
-use crate::report::LogFiles;
-use crate::tui::app::DawSetup;
-use crate::{install::InstalledIo, process::Run, tui::tty::TtyOutput, update::UpdateIo};
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_agent::core::contracts::SessionController;
 use kumi_agent::core::{
@@ -23,6 +16,15 @@ use kumi_agent::core::{
     view::ViewPresentation,
 };
 use kumi_common::abort;
+use kumi_daw::{
+    check::{Check, Probe},
+    io::{Answers, DawIo},
+    provider::{
+        BridgeCommand, BridgeRollbackStep, BridgeState, DawProvider, DawSession, EnableStep, Installed, RemovedBridge, Toggle, ToggleWords,
+        WatchWords,
+    },
+    setup::DawSetup,
+};
 use kumi_daw_ableton::AbletonOptions;
 use kumi_library::daws::LibrarySources;
 use kumi_types::errors::RuntimeError;
@@ -77,13 +79,14 @@ impl DawProvider for Ableton {
     }
     fn app_open(&self, env: &Env) -> LocalBoxFuture<'static, bool> {
         let env = env.clone();
-        async move { live_app::open_live(&bridge_setup::default_run(), kumi_types::system::platform(), &env).await.is_some() }.boxed_local()
+        async move { live_app::open_live(&kumi_daw::process::default_run(), kumi_types::system::platform(), &env).await.is_some() }
+            .boxed_local()
     }
     fn here(&self, env: &Env) -> bool {
-        live_here() && live_app::installed(env, kumi_types::system::platform()) != crate::daw::provider::Installed::Missing
+        live_here() && live_app::installed(env, kumi_types::system::platform()) != Installed::Missing
     }
-    fn running_now(&self) -> bool {
-        crate::daw::processes().iter().any(|(_, name)| {
+    fn running_now(&self, processes: &[(u32, String)]) -> bool {
+        processes.iter().any(|(_, name)| {
             let name = name.rsplit(['/', '\\']).next().unwrap_or(name);
             name == "Live" || (name.starts_with("Ableton Live") && name.ends_with(".exe"))
         })
@@ -114,18 +117,19 @@ impl DawProvider for Ableton {
             let env = env.clone();
             Rc::new(move |set| {
                 let env = env.clone();
-                async move { live_app::open_set_file(&bridge_setup::default_run(), kumi_types::system::platform(), &env, &set).await }
+                async move { live_app::open_set_file(&kumi_daw::process::default_run(), kumi_types::system::platform(), &env, &set).await }
                     .boxed_local()
             })
         });
         // With Live still running, losing it means it's opening another Set, not that it closed (#188).
-        options.live_running = Some(Rc::new(|| async { bridge_setup::is_live_running(bridge_setup::default_run()).await }.boxed_local()));
+        options.live_running =
+            Some(Rc::new(|| async { bridge_setup::is_live_running(kumi_daw::process::default_run()).await }.boxed_local()));
         // How Willington's bindings stand, read again for each new model session.
         options.willington = Some(Rc::new(move || Willington::find(&env).map(|willington| willington.switch())));
-        (session.factory.ableton)(options)
+        integration(session.answers.get::<AbletonFactory>(), options)
     }
-    fn probe(&self, bridge_config: String, factory: &DawFactory, _env: &Env) -> LocalBoxFuture<'static, LiveProbe> {
-        probe_live(bridge_config, factory.ableton.clone()).boxed_local()
+    fn probe(&self, bridge_config: String, answers: &Answers, _env: &Env) -> LocalBoxFuture<'static, Probe> {
+        probe_live(bridge_config, answers.get::<AbletonFactory>().cloned()).boxed_local()
     }
     fn bridge_state(&self, env: &Env, found: bool, missing: bool, bundled: Option<&str>, command: &str) -> BridgeState {
         // A switch from a JavaScript bridge with the same Remote Script changes only the host, which Kumi
@@ -175,36 +179,36 @@ impl DawProvider for Ableton {
         given: bool,
         controller: Rc<RefCell<Option<Weak<dyn SessionController>>>>,
     ) -> Rc<dyn DawSetup> {
-        Rc::new(LiveSide { env: env.clone(), run: bridge_setup::default_run(), bridge, given, controller })
+        Rc::new(LiveSide { env: env.clone(), run: kumi_daw::process::default_run(), bridge, given, controller })
     }
-    fn doctor_checks<'a>(&'a self, io: &'a DoctorIo, node: &'a Check) -> LocalBoxFuture<'a, Vec<Check>> {
+    fn doctor_checks<'a>(&'a self, io: &'a DawIo, node: &'a Check) -> LocalBoxFuture<'a, Vec<Check>> {
         super::doctor::bridge_checks(io, node).boxed_local()
     }
-    fn installation_checks<'a>(&'a self, env: &'a Env, io: &'a InstallationIo, platform: &'a str) -> LocalBoxFuture<'a, Vec<Check>> {
-        super::doctor::installation_checks(env, io, platform).boxed_local()
+    fn installation_checks<'a>(&'a self, io: &'a DawIo, platform: &'a str) -> LocalBoxFuture<'a, Vec<Check>> {
+        super::doctor::installation_checks(&io.env, io, platform).boxed_local()
     }
-    fn extra_checks<'a>(&'a self, io: &'a DoctorIo) -> LocalBoxFuture<'a, Result<Vec<Check>, RuntimeError>> {
+    fn extra_checks<'a>(&'a self, io: &'a DawIo) -> LocalBoxFuture<'a, Result<Vec<Check>, RuntimeError>> {
         super::doctor::extra_checks(io).boxed_local()
     }
-    fn report_log<'a>(&'a self, env: &'a Env, home: &'a str, logs: Option<&'a LogFiles>) -> LocalBoxFuture<'a, (String, String)> {
+    fn report_log<'a>(&'a self, io: &'a DawIo, home: &'a str) -> LocalBoxFuture<'a, (String, String)> {
         async move {
-            let logs = match logs {
-                Some(logs) => Some(logs().await.unwrap_or_default()),
+            let logs = match io.answers.get::<LiveLogs>() {
+                Some(logs) => Some((logs.0)().await.unwrap_or_default()),
                 None => None,
             };
-            super::report::log_section(env, home, logs).await
+            super::report::log_section(&io.env, home, logs).await
         }
         .boxed_local()
     }
-    fn after_update<'a>(&'a self, io: &'a InstalledIo, home: &'a str, app: &'a str, back_to: Option<&'a str>) -> LocalBoxFuture<'a, i32> {
+    fn after_update<'a>(&'a self, io: &'a DawIo, home: &'a str, app: &'a str, back_to: Option<&'a str>) -> LocalBoxFuture<'a, i32> {
         super::install::after_update(io, home, app, back_to).boxed_local()
     }
-    fn after_checkout_update<'a>(&'a self, io: &'a UpdateIo, run: Run, repo: &'a str) -> LocalBoxFuture<'a, i32> {
-        super::install::after_checkout_update(io, run, repo).boxed_local()
+    fn after_checkout_update<'a>(&'a self, io: &'a DawIo, repo: &'a str) -> LocalBoxFuture<'a, i32> {
+        super::install::after_checkout_update(io, repo).boxed_local()
     }
     fn prepare_rollback<'a>(
         &'a self,
-        io: &'a InstalledIo,
+        io: &'a DawIo,
         home: &'a str,
         previous: &'a str,
         version: &'a str,
@@ -212,17 +216,14 @@ impl DawProvider for Ableton {
     ) -> LocalBoxFuture<'a, Result<Box<dyn BridgeRollbackStep>, RuntimeError>> {
         super::install::prepare_rollback(io, home, previous, version, legacy).boxed_local()
     }
-    fn finish_transition<'a>(&'a self, io: &'a InstalledIo) -> LocalBoxFuture<'a, ()> {
+    fn finish_transition<'a>(&'a self, io: &'a DawIo) -> LocalBoxFuture<'a, ()> {
         super::install::finish_legacy_transition(io).boxed_local()
     }
-    fn setup_bridge(
-        &self,
-        out: Rc<dyn TtyOutput>,
-        env: &Env,
-        command: BridgeCommand,
-    ) -> LocalBoxFuture<'static, Result<i32, RuntimeError>> {
-        let mut options = bridge_setup::BridgeSetupIo::new(out, env.clone());
-        options.input = command.input;
+    fn setup_bridge(&self, io: DawIo, command: BridgeCommand) -> LocalBoxFuture<'static, Result<i32, RuntimeError>> {
+        let mut options = bridge_setup::BridgeSetupIo::new(io.out.clone(), io.env.clone());
+        options.ask = io.ask.clone();
+        options.run = Some(io.run.clone());
+        options.live_running = io.answers.get::<super::answers::LiveRunning>().map(|running| running.0.clone());
         options.yes = command.yes;
         options.allow_dirty = command.allow_dirty;
         options.wait_ms = command.wait_ms;
@@ -237,8 +238,8 @@ impl DawProvider for Ableton {
     fn bridge_files_in_use(&self, folder: &str, env: &Env) -> bool {
         super::install::bridge_uses(folder, env)
     }
-    fn remove_bridge<'a>(&'a self, io: &'a InstalledIo, run: Run) -> LocalBoxFuture<'a, Result<RemovedBridge, RuntimeError>> {
-        super::install::remove_bridge(io, run).boxed_local()
+    fn remove_bridge<'a>(&'a self, io: &'a DawIo) -> LocalBoxFuture<'a, Result<RemovedBridge, RuntimeError>> {
+        super::install::remove_bridge(io).boxed_local()
     }
     fn removal_question(&self) -> &'static str {
         "ask whether to take the bridge out of Live too (its files stay while Live uses it)"
@@ -257,22 +258,30 @@ impl DawProvider for Ableton {
     }
 }
 
+/// Live's integration: a test's stand-in, or kumi-daw-ableton's.
+fn integration(stand_in: Option<&AbletonFactory>, options: AbletonOptions) -> Rc<dyn Integration> {
+    match stand_in {
+        Some(factory) => (factory.0)(options),
+        None => kumi_daw_ableton::create_ableton_integration(options),
+    }
+}
+
 /// Starts Live's integration on a bridge configuration and looks once, for the doctor.
-async fn probe_live(config: String, factory: super::AbletonFactory) -> LiveProbe {
+async fn probe_live(config: String, stand_in: Option<AbletonFactory>) -> Probe {
     let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
     options.bridge_config = Some(config);
-    let integration = factory(options);
+    let integration = integration(stand_in.as_ref(), options);
     if let Err(error) = integration.start(abort::timeout(20000)).await {
         let _ = integration.close().await;
-        return LiveProbe { started: false, said: Some(error.to_string()), ..Default::default() };
+        return Probe { started: false, said: Some(error.to_string()), ..Default::default() };
     }
     let result = async {
         let observation = integration.observe(abort::timeout(20000), None).await?;
         let context: serde_json::Value = serde_json::from_str(&observation.context).map_err(|e| RuntimeError::plain(e.to_string()))?;
         if context["mode"] == "inference-only" || observation.tools.is_empty() {
-            return Ok::<_, RuntimeError>(LiveProbe { started: true, connected: Some(false), ..Default::default() });
+            return Ok::<_, RuntimeError>(Probe { started: true, connected: Some(false), ..Default::default() });
         }
-        Ok(LiveProbe {
+        Ok(Probe {
             started: true,
             connected: Some(true),
             live_version: context["liveVersion"].as_str().map(str::to_string),
@@ -283,5 +292,5 @@ async fn probe_live(config: String, factory: super::AbletonFactory) -> LiveProbe
     }
     .await;
     let _ = integration.close().await;
-    result.unwrap_or(LiveProbe { started: true, connected: Some(false), ..Default::default() })
+    result.unwrap_or(Probe { started: true, connected: Some(false), ..Default::default() })
 }

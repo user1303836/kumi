@@ -3,13 +3,12 @@ mod migration;
 pub use crate::config::kumi_dir as kumi_home;
 /// Live's part, where install has always had it.
 pub use crate::daw::ableton::install::{bridge_command, finish_legacy_transition, no_bridge_yet, only_the_host_differs};
-use crate::daw::RemovedBridge;
 pub use crate::update::newer as newer_version;
 use crate::{
     config::{json_files, load_db_file},
     input::TerminalInput,
-    process::{ask_yes_no, default_run, executable_name, AsyncBool, Confirm, Run},
-    spinner::step,
+    process::{ask_yes_no, Confirm, TerminalAsk},
+    spinner::{step, Terminal},
     tui::tty::TtyOutput,
 };
 use futures::{future::LocalBoxFuture, StreamExt};
@@ -22,6 +21,11 @@ use kumi_common::{
     abort,
     js::{json::stringify, string::trim},
     time::now_ms,
+};
+use kumi_daw::{
+    io::{Answers, DawIo},
+    process::{default_run, executable_name, Run},
+    provider::RemovedBridge,
 };
 use kumi_library::sources::{basename, dirname, join};
 use kumi_net::{
@@ -234,9 +238,10 @@ pub struct InstalledIo {
     pub input: Option<Rc<dyn TerminalInput>>,
     pub run: Option<Run>,
     pub fetcher: Option<Rc<dyn Fetch>>,
-    pub live_running: Option<AsyncBool>,
     pub confirm: Option<Confirm>,
-    pub update_bridge: Option<Rc<dyn Fn(String) -> LocalBoxFuture<'static, i32>>>,
+    /// What each DAW's steps read beyond the environment (`kumi_daw::io::Answers`): a test's answers (whether the DAW
+    /// runs, `kumi bridge` after an update).
+    pub answers: Answers,
     /// The producer's Ctrl-C while an update downloads: it stops the download, and nothing changes.
     pub cancel: Option<kumi_common::abort::Signal>,
     /// `update --version`: that release, newer or older, in place of the newest.
@@ -256,14 +261,23 @@ impl InstalledIo {
             input: None,
             run: None,
             fetcher: None,
-            live_running: None,
             confirm: None,
-            update_bridge: None,
+            answers: Answers::default(),
             cancel: None,
             version: None,
             free: None,
             others: None,
             runner: None,
+        }
+    }
+    /// What each DAW's steps get: the terminal they say things on and ask through, this run's programs, the answers.
+    pub fn daw(&self) -> DawIo {
+        DawIo {
+            out: Rc::new(Terminal::new(self.out.clone(), &self.env)),
+            ask: Rc::new(TerminalAsk { input: self.input.clone(), out: self.out.clone(), confirm: self.confirm.clone() }),
+            env: self.env.clone(),
+            run: self.run.clone().unwrap_or_else(default_run),
+            answers: self.answers.clone(),
         }
     }
 }
@@ -341,8 +355,9 @@ pub(crate) async fn ask(io: &InstalledIo, question: &str, ahead: Option<&str>) -
 /// or how to. The exit code is the first one that isn't 0.
 async fn bridges_after(io: &InstalledIo, home: &str, app: &str, back_to: Option<&str>) -> i32 {
     let mut code = 0;
+    let daw = io.daw();
     for provider in crate::daw::providers() {
-        let done = provider.after_update(io, home, app, back_to).await;
+        let done = provider.after_update(&daw, home, app, back_to).await;
         if code == 0 {
             code = done;
         }
@@ -832,7 +847,7 @@ pub async fn others_running(exe: &str) -> usize {
         return 0;
     }
     let ps = if Path::new("/bin/ps").exists() { "/bin/ps" } else { "ps" };
-    let listing = crate::process::run_program(ps, &["-axo".into(), "uid=,pid=,args=".into()], None).await.stdout;
+    let listing = kumi_daw::process::run_program(ps, &["-axo".into(), "uid=,pid=,args=".into()], None).await.stdout;
     #[cfg(unix)]
     // SAFETY: getuid has no preconditions.
     let uid = unsafe { libc::getuid() }.to_string();
@@ -920,8 +935,9 @@ pub async fn rollback_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
         .unwrap_or("the one before".into());
     // Each DAW's bridge, readied for the rollback: what goes back before the swap, and after it.
     let mut bridges = vec![];
+    let daw = io.daw();
     for provider in crate::daw::providers() {
-        bridges.push(provider.prepare_rollback(&io, &home, &previous, &version, legacy).await?);
+        bridges.push(provider.prepare_rollback(&daw, &home, &previous, &version, legacy).await?);
     }
     write_back_for_older(&io).await;
     write_launcher(&home).map_err(error)?;
@@ -957,7 +973,7 @@ pub async fn rollback_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
     let native = Path::new(&join(&app, &executable_name("kumi"))).exists();
     let mut code = 0;
     for bridge in &bridges {
-        let done = bridge.after_swap(&io, &home, &app, &version, native).await;
+        let done = bridge.after_swap(&daw, &home, &app, &version, native).await;
         if code == 0 {
             code = done;
         }
@@ -1846,9 +1862,10 @@ pub async fn uninstall_installed(io: InstalledIo, options: UninstallOptions) -> 
     }
     // Each DAW's bridge, taken out when the producer says so; the files of one that stays stay too, while it uses them.
     let mut staying = vec![];
+    let daw = DawIo { run: run.clone(), ..io.daw() };
     for provider in crate::daw::providers() {
         // One DAW's bridge that can't come out stays, said; the rest of Kumi still goes.
-        let removed = match provider.remove_bridge(&io, run.clone()).await {
+        let removed = match provider.remove_bridge(&daw).await {
             Ok(removed) => removed,
             // (whether its files stay is said below, for a DAW that still uses them)
             Err(why) => {

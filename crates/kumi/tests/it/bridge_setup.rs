@@ -3,7 +3,13 @@ use futures::FutureExt;
 use kumi::{
     bridge_setup::*,
     input::{ByteListener, TerminalInput},
+    process::TerminalAsk,
+    spinner::Terminal,
     tui::tty::TtyOutput,
+};
+use kumi_daw::{
+    io::Answering,
+    process::{copy_tree, executable_name, run_program, Ran, Run},
 };
 use kumi_types::system::{self, Env, SystemProgram};
 use serde_json::json;
@@ -101,13 +107,11 @@ impl World {
         }
     }
     fn io(&self) -> BridgeSetupIo {
-        let mut io = BridgeSetupIo::new(
-            self.out.clone(),
-            Env::from([
-                ("KUMI_REMOTE_SCRIPTS_DIR".into(), self.scripts.display().to_string()),
-                ("KUMI_LIVE_EXTENSIONS_DIR".into(), self.root.path().join("Ableton/Extensions").display().to_string()),
-            ]),
-        );
+        let env = Env::from([
+            ("KUMI_REMOTE_SCRIPTS_DIR".into(), self.scripts.display().to_string()),
+            ("KUMI_LIVE_EXTENSIONS_DIR".into(), self.root.path().join("Ableton/Extensions").display().to_string()),
+        ]);
+        let mut io = BridgeSetupIo::new(Rc::new(Terminal::new(self.out.clone(), &env)), env);
         io.bridge_dir = Some(self.bridge.display().to_string());
         io.home = Some(self.root.path().join("kumi").display().to_string());
         io.prepared = Some(self.prepared.display().to_string());
@@ -166,7 +170,7 @@ async fn current_bridge_is_left_alone_and_live_open_or_confirmation_declined_cha
     assert!(w.calls.borrow().is_empty());
     let mut io = w.io();
     io.yes = false;
-    io.confirm = Some(Rc::new(|_| async { false }.boxed_local()));
+    io.ask = Rc::new(Answering(Rc::new(|_| async { false }.boxed_local())));
     assert_eq!(setup_bridge(io).await.unwrap(), 1);
     assert!(w.out.0.borrow().contains("Nothing was changed"));
     assert!(w.calls.borrow().is_empty());
@@ -182,7 +186,7 @@ async fn without_a_terminal_the_question_is_said_with_how_to_answer_it_beforehan
     let w = World::new(Some("1.0.33"));
     let mut io = w.io();
     io.yes = false;
-    io.input = Some(Rc::new(Piped));
+    io.ask = Rc::new(TerminalAsk { input: Some(Rc::new(Piped)), out: w.out.clone(), confirm: None });
     assert_eq!(setup_bridge(io).await.unwrap(), 1);
     let said = w.out.0.borrow().clone();
     assert!(said.contains("Is Live closed, with your work saved? (no terminal to answer in; add --yes)\nNothing was changed.\n"), "{said}");
@@ -193,7 +197,7 @@ async fn without_a_terminal_the_question_is_said_with_how_to_answer_it_beforehan
     let w = World::new(Some("1.0.33"));
     let mut io = w.io();
     io.yes = false;
-    io.input = Some(Rc::new(Piped));
+    io.ask = Rc::new(TerminalAsk { input: Some(Rc::new(Piped)), out: w.out.clone(), confirm: None });
     io.env.insert("KUMI_BRIDGE_AFTER".into(), "1".into());
     assert_eq!(setup_bridge(io).await.unwrap(), 0);
     let said = w.out.0.borrow().clone();
@@ -208,7 +212,7 @@ async fn after_an_update_a_bridge_left_for_later_says_so_and_isnt_a_failure() {
     let mut io = w.io();
     io.env.insert("KUMI_BRIDGE_AFTER".into(), "1".into());
     io.yes = false;
-    io.confirm = Some(Rc::new(|_| async { false }.boxed_local()));
+    io.ask = Rc::new(Answering(Rc::new(|_| async { false }.boxed_local())));
     assert_eq!(setup_bridge(io).await.unwrap(), 0);
     let said = w.out.0.borrow().clone();
     assert!(said.contains(&format!("The bridge wasn't updated yet. {}.", *kumi_types::command::CONNECT_LIVE)), "{said}");
@@ -231,7 +235,7 @@ async fn after_an_update_a_bridge_left_for_later_says_so_and_isnt_a_failure() {
     let mut io = w.io();
     io.env.insert("KUMI_LEGACY_HANDOFF".into(), "1".into());
     io.yes = false;
-    io.confirm = Some(Rc::new(|_| async { false }.boxed_local()));
+    io.ask = Rc::new(Answering(Rc::new(|_| async { false }.boxed_local())));
     assert_eq!(setup_bridge(io).await.unwrap(), 1);
     assert!(w.out.0.borrow().contains("Nothing was changed. Quit Live, then run:"));
 }
@@ -430,7 +434,7 @@ async fn enter_control_c_or_escape_stops_waiting_and_restores_raw_mode() {
         let w = World::new(Some("1.0.33"));
         let input = Rc::new(Input::default());
         let mut io = w.io();
-        io.input = Some(input.clone());
+        io.ask = Rc::new(TerminalAsk { input: Some(input.clone()), out: w.out.clone(), confirm: None });
         io.wait_ms = Some(60000);
         io.remote_script_answers = Some(Rc::new({
             let input = input.clone();
@@ -651,13 +655,13 @@ async fn after_an_app_rollback_live_open_a_no_or_a_refused_rollback_changes_noth
     assert!(w.out.0.borrow().contains("Live is open. To put back 1.0.34, save your work, quit Live, then run this again:"));
     let mut io = w.io();
     io.yes = false;
-    io.confirm = Some(Rc::new(|_| async { false }.boxed_local()));
+    io.ask = Rc::new(Answering(Rc::new(|_| async { false }.boxed_local())));
     assert_eq!(setup_bridge(io).await.unwrap(), 1);
     assert!(w.out.0.borrow().contains("Nothing was changed. To put back 1.0.34, quit Live, then run:"));
     // Closed at the first look, open again once the question is answered.
     let mut io = w.io();
     io.yes = false;
-    io.confirm = Some(Rc::new(|_| async { true }.boxed_local()));
+    io.ask = Rc::new(Answering(Rc::new(|_| async { true }.boxed_local())));
     let looks = Rc::new(Cell::new(0));
     io.live_running = Some(Rc::new(move || {
         looks.set(looks.get() + 1);

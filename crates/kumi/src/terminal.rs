@@ -50,7 +50,7 @@ pub struct TerminalOptions {
     /// /daw <name>: Kumi closes and opens again with that DAW. None where the producer works with Live alone.
     pub switch_daw: Option<Rc<dyn Fn(kumi_types::daw::DawId)>>,
     /// /willington, where Kumi's bridge can carry Willington.
-    pub willington: Option<crate::daw::Toggle>,
+    pub willington: Option<kumi_daw::provider::Toggle>,
     /// What's new since the producer last opened Kumi, said once as it starts.
     pub whats_new: Option<crate::whats_new::News>,
     /// Fixed phrases ("tempo 124", "mute drums") change Live at once, with no model call (`instantPhrases`).

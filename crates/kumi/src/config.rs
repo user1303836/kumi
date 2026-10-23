@@ -265,8 +265,9 @@ pub fn release_version(text: &str) -> Option<String> {
         _ => None,
     }
 }
+/// Kumi's own folder (kumi-daw's, which a DAW's steps read too).
 pub fn kumi_dir(env: &Env) -> String {
-    env.get("KUMI_HOME").filter(|s| !s.is_empty()).cloned().unwrap_or_else(|| join(&home(), ".kumi"))
+    kumi_daw::io::kumi_home(env)
 }
 macro_rules! location {
     ($name:ident,$var:literal,$path:literal) => {

@@ -3,15 +3,10 @@
 //! and makes the session's integration.
 pub mod ableton;
 pub mod own;
-pub mod provider;
 pub mod registry;
 
-pub use provider::{
-    older_than, BridgeCommand, BridgeRollbackStep, BridgeState, DawFactory, DawProvider, DawSession, EnableStep, Installed, OwnHostFactory,
-    RemovedBridge, Toggle, ToggleWords, WatchWords,
-};
-
 use kumi_agent::core::{presentation::ToolPresentation, view::ViewPresentation};
+use kumi_daw::provider::DawProvider;
 use kumi_types::{
     daw::{DawId, DawProfile},
     system::Env,
@@ -37,7 +32,7 @@ pub fn provider(id: DawId) -> Option<&'static dyn DawProvider> {
 /// 4. with none installed, the DAW on this computer, for first-run setup to set up: the only one here, else the one
 ///    the producer picked last, else Live, else the first (setup asks which, `to_ask`); with none here, Live's words.
 pub fn chosen(asked: Option<DawId>, env: &Env) -> (&'static dyn DawProvider, Option<String>) {
-    chosen_with(asked, env, &|provider| provider.running_now())
+    chosen_with(asked, env, &|provider| provider.running_now(&processes()))
 }
 
 /// `chosen`, with whether each DAW runs now given (a test's answer, or one process listing each).

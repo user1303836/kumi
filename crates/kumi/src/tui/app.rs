@@ -12,7 +12,8 @@ mod live;
 mod panels;
 mod records;
 mod setup;
-pub use setup::{waveform, DawSetup, Installed, LiveInstalled, LiveSetup, WAVE_WIDTH};
+use kumi_daw::setup::DawSetup;
+pub use setup::{waveform, WAVE_WIDTH};
 mod sharing;
 mod shown;
 
@@ -92,7 +93,7 @@ pub struct TuiOptions {
     /// Live's part of first-run setup; `None` when Kumi chats without Live by choice.
     pub connect_live: Option<ConnectDaw>,
     /// /willington, where Kumi's bridge can carry Willington.
-    pub willington: Option<crate::daw::Toggle>,
+    pub willington: Option<kumi_daw::provider::Toggle>,
     /// /slots: which model does each listening job, swapped and taken back.
     pub slots: Option<Rc<kumi_listening::slots::SlotsContext>>,
     /// What's new since the producer last opened Kumi, shown once as it starts.

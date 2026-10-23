@@ -2,8 +2,8 @@
 /// Live's part, where update has always had it.
 pub use crate::daw::ableton::install::{checkout_bridge, older_bridge, OlderBridge};
 use crate::{
-    process::{default_run, repository_dir, AsyncBool, Ran, Run},
-    spinner::step,
+    process::TerminalAsk,
+    spinner::{step, Terminal},
     tui::tty::TtyOutput,
 };
 use futures::future::LocalBoxFuture;
@@ -14,6 +14,10 @@ use kumi_common::{
         string::{head, trim},
     },
     time::now_ms,
+};
+use kumi_daw::{
+    io::{Answers, DawIo},
+    process::{default_run, repository_dir, Ran, Run},
 };
 use kumi_library::sources::{dirname, join};
 use kumi_types::{
@@ -127,14 +131,25 @@ pub struct UpdateIo {
     pub env: Env,
     pub run: Option<Run>,
     pub repo_dir: Option<String>,
-    pub live_running: Option<AsyncBool>,
-    pub update_bridge: Option<Rc<dyn Fn(String) -> LocalBoxFuture<'static, i32>>>,
+    /// What each DAW's steps read beyond the environment (`kumi_daw::io::Answers`): a test's answers (whether the DAW
+    /// runs, `kumi bridge` after an update).
+    pub answers: Answers,
     /// How many other Kumi processes run this build (tests say how many).
     pub others: Option<Rc<dyn Fn() -> LocalBoxFuture<'static, usize>>>,
 }
 impl UpdateIo {
     pub fn new(out: Rc<dyn TtyOutput>, env: Env) -> Self {
-        Self { out, env, run: None, repo_dir: None, live_running: None, update_bridge: None, others: None }
+        Self { out, env, run: None, repo_dir: None, answers: Answers::default(), others: None }
+    }
+    /// What each DAW's steps get: the terminal they say things on, nobody to ask (an update asks nothing), `run`.
+    pub fn daw(&self, run: Run) -> DawIo {
+        DawIo {
+            out: Rc::new(Terminal::new(self.out.clone(), &self.env)),
+            ask: Rc::new(TerminalAsk { input: None, out: self.out.clone(), confirm: None }),
+            env: self.env.clone(),
+            run,
+            answers: self.answers.clone(),
+        }
     }
 }
 fn last(ran: &Ran) -> String {
@@ -206,8 +221,9 @@ pub async fn run_update(io: UpdateIo) -> i32 {
     }
     // Each DAW's bridge, brought up to date where it can be, or how to.
     let mut code = 0;
+    let daw = io.daw(run.clone());
     for provider in crate::daw::providers() {
-        let done = provider.after_checkout_update(&io, run.clone(), &repo).await;
+        let done = provider.after_checkout_update(&daw, &repo).await;
         if code == 0 {
             code = done;
         }

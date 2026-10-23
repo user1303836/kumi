@@ -6,7 +6,6 @@
 
 use super::ableton::provider::Ableton;
 use super::own::{self, Own};
-use super::provider::{DawProvider, WatchWords};
 use daw_bridge::{
     daw::Daw,
     detect::{self, Os},
@@ -14,6 +13,7 @@ use daw_bridge::{
 };
 use kumi_agent::core::presentation::ToolPresentation;
 use kumi_agent::core::view::ViewPresentation;
+use kumi_daw::provider::{DawProvider, WatchWords};
 use kumi_daw_reaper as reaper;
 use kumi_daw_renoise as renoise;
 use kumi_library::daws::{Daws, LibrarySources};

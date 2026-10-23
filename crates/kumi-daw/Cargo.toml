@@ -1,0 +1,24 @@
+[package]
+name = "kumi-daw"
+version = "0.1.0"
+description = "What a DAW's crate gives Kumi's app and gets from it: the provider (what the DAW is, its bridge found, installed, checked and taken out), the doctor's checks, setup's DAW side, and the small ports a DAW's steps use (what they say, ask, run and are answered)."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "kumi_daw"
+path = "src/lib.rs"
+
+[dependencies]
+kumi-common.workspace = true
+kumi-types.workspace = true
+kumi-library.workspace = true
+kumi-agent.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+home.workspace = true
+serde.workspace = true
+tokio.workspace = true

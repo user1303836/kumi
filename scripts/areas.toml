@@ -98,6 +98,7 @@ paths = [
   "crates/kumi/src/install/**",
   "crates/kumi/src/update.rs",
   "crates/kumi/src/process.rs",
+  "crates/kumi-daw/src/process.rs",
   "crates/kumi/src/doctor.rs",
   "crates/kumi/src/doctor/installation.rs",
   "crates/kumi/src/daw/ableton/bridge_setup.rs",

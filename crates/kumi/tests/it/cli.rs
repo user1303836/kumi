@@ -119,7 +119,7 @@ impl Fixture {
     }
 }
 fn unused_factory() -> AbletonFactory {
-    Rc::new(|_| panic!("this command must not create an Ableton integration"))
+    AbletonFactory(Rc::new(|_| panic!("this command must not create an Ableton integration")))
 }
 macro_rules! case {
     ($name:ident,$body:expr) => {
@@ -244,7 +244,7 @@ case!(live_binding_passes_callbacks_and_stores_to_native_session, async {
     let mark = called.clone();
     let judged = Rc::new(RefCell::new(None));
     let tell = judged.clone();
-    let factory: AbletonFactory = Rc::new(move |options| {
+    let factory = AbletonFactory(Rc::new(move |options: kumi_daw_ableton::AbletonOptions| {
         mark.set(true);
         *tell.borrow_mut() = options.on_judge.clone();
         assert!(options.bridge_config.is_some());
@@ -263,7 +263,7 @@ case!(live_binding_passes_callbacks_and_stores_to_native_session, async {
         );
         let connection = options.on_connection;
         create_inference_only_integration(Rc::new(move |state| connection(state, None)))
-    });
+    }));
     let task = tokio::task::spawn_local(run(f.io(&["--bridge-config", config.to_str().unwrap()]), factory));
     f.input.wait_ready().await;
     // The judge's rounds reach the session (the loop's decisions) and the screen.

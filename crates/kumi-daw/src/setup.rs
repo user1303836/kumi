@@ -1,0 +1,60 @@
+//! The DAW's side of first-run setup, which the app's setup screen can't do on its own: the DAW the app, and Kumi's
+//! bridge in it.
+use crate::provider::Installed;
+use async_trait::async_trait;
+use kumi_common::abort::Signal;
+use std::time::Duration;
+
+/// The DAW's side of setup, which the app can't do on its own: the DAW the app, and Kumi's bridge in it. Its methods
+/// keep Live's names (the app's Live side and setup's tests implement them).
+#[async_trait(?Send)]
+pub trait DawSetup {
+    /// The open Live's app (a `.app` on macOS, an `.exe` on Windows), if Live is open.
+    async fn open_live(&self) -> Option<String>;
+    /// Ask Live to quit as its own menu does, so unsaved work makes it ask to save first. Returns once asked; false
+    /// when the system didn't let Kumi ask (macOS's Automation off for this terminal), so the producer quits Live.
+    async fn ask_to_quit(&self) -> bool;
+    /// Wait until Live has closed: true once it has, false when `stop` comes first.
+    async fn closed(&self, stop: &Signal) -> bool;
+    /// Put Kumi's bridge in place, with Live closed: the bridge's version, or what went wrong, in words.
+    async fn install(&self) -> Result<String, String>;
+    /// Open Live: `app`, the one that was open, or else the newest one installed; with `set`, the Set it had open.
+    async fn start(&self, app: Option<String>, set: Option<String>) -> bool;
+    /// Connect the session to Live through the bridge just put in place.
+    async fn connect(&self);
+    /// Live's version ("12.4"), when it can be read from its app.
+    async fn version(&self, app: Option<String>) -> Option<String>;
+    /// Which Live is on this computer, from its files: whether one can take the bridge yet.
+    async fn installed(&self) -> Installed {
+        Installed::Ready
+    }
+    /// The saved Set open in Live, when the session has read it (through a bridge already there).
+    fn open_set(&self) -> Option<String> {
+        None
+    }
+    /// Whether Live runs on this computer at all (it doesn't on Linux): without it, setup only signs in.
+    fn here(&self) -> bool {
+        true
+    }
+    /// The app macOS names when it asks whether Kumi may ask Live to quit (the terminal); None where nothing asks.
+    fn asks_permission(&self) -> Option<String> {
+        None
+    }
+    /// Where Live keeps its Settings, said once the Control Surface step has waited a while.
+    fn settings_menu(&self) -> Option<String> {
+        None
+    }
+    /// Whether Kumi can ask the DAW to quit (Live's own menu, through macOS): when it can't, the producer quits it.
+    fn can_ask_to_quit(&self) -> bool {
+        true
+    }
+    /// How long Live gets to quit once asked, before Kumi says it's still open (its save dialog
+    /// cancelled, say) and offers to ask again.
+    fn quit_wait(&self) -> Duration {
+        Duration::from_secs(15)
+    }
+    /// How long the Control Surface step waits before it says where Live's Settings are.
+    fn surface_wait(&self) -> Duration {
+        Duration::from_secs(45)
+    }
+}

@@ -174,13 +174,13 @@ fn a_bridge_configuration_given_is_lives_unless_daw_says_whose() {
 fn every_daw_is_asked_whether_it_runs_from_one_process_listing() {
     let before = kumi::daw::process_listings();
     for provider in kumi::daw::providers() {
-        provider.running_now();
+        provider.running_now(&kumi::daw::processes());
     }
     let env = env();
-    let chosen = kumi::daw::chosen_with(None, &env, &|provider| provider.running_now()).0.id();
-    kumi::daw::also_running(chosen, &env, &|provider| provider.running_now());
+    let chosen = kumi::daw::chosen_with(None, &env, &|provider| provider.running_now(&kumi::daw::processes())).0.id();
+    kumi::daw::also_running(chosen, &env, &|provider| provider.running_now(&kumi::daw::processes()));
     for provider in kumi::daw::providers() {
-        provider.running_now();
+        provider.running_now(&kumi::daw::processes());
     }
     assert_eq!(kumi::daw::process_listings() - before, 1, "one listing for every DAW");
 }
@@ -193,7 +193,7 @@ fn without_a_bridge_the_daw_here_is_the_one_a_first_run_sets_up() {
     let home = tempfile::tempdir().unwrap();
     let mut env = env();
     env.insert("KUMI_HOME".into(), home.path().to_string_lossy().into_owned());
-    let not_running = |_: &dyn kumi::daw::DawProvider| false;
+    let not_running = |_: &dyn kumi_daw::provider::DawProvider| false;
     let first = |here: &[DawId], env: &Env| {
         let here = here.to_vec();
         kumi::daw::chosen_among(None, env, &not_running, &move |provider| here.contains(&provider.id())).0.id()

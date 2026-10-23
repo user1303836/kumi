@@ -1,12 +1,8 @@
 //! Original installed-update scenarios, using native bundle layout and executable startup probes.
 use async_trait::async_trait;
 use futures::FutureExt;
-use kumi::{
-    bridge_setup::{executable_name, run_program, Ran},
-    config::json_files,
-    install::*,
-    tui::tty::TtyOutput,
-};
+use kumi::daw::ableton::answers::{BridgeAfterUpdate, LiveRunning};
+use kumi::{config::json_files, install::*, tui::tty::TtyOutput};
 use kumi_agent::core::{
     contracts::{MemoryScope, MemoryStore},
     store_backed::SqliteMemoryStore,
@@ -16,6 +12,7 @@ use kumi_ai::{
     error::LanguageModelError,
     http::{Fetch, FetchInit, Response},
 };
+use kumi_daw::process::{executable_name, run_program, Ran};
 use kumi_types::{
     system::{self, Env, SystemProgram},
     version::KUMI_VERSION,
@@ -420,7 +417,7 @@ async fn bridge_files_stay_while_live_uses_them() {
         if kind != "no-input" {
             io.confirm = Some(Rc::new(move |_| async move { kind != "declined" }.boxed_local()));
         }
-        io.live_running = Some(Rc::new(move || async move { kind == "live-open" }.boxed_local()));
+        io.answers = io.answers.clone().with(LiveRunning(Rc::new(move || async move { kind == "live-open" }.boxed_local())));
         let calls = Rc::new(RefCell::new(vec![]));
         let seen = calls.clone();
         io.run = Some(Rc::new(move |command, args, _| {
@@ -467,7 +464,7 @@ async fn an_ears_device_that_wont_come_out_is_said_with_where_it_is() {
     fs::set_permissions(&library, fs::Permissions::from_mode(0o555)).unwrap();
     let (mut io, out) = io(&env);
     io.confirm = Some(Rc::new(|_| async { true }.boxed_local()));
-    io.live_running = Some(Rc::new(|| async { false }.boxed_local()));
+    io.answers = io.answers.clone().with(LiveRunning(Rc::new(|| async { false }.boxed_local())));
     io.run = Some(Rc::new(|_, _, _| async { Ran { code: 0, stdout: "".into(), stderr: "".into() } }.boxed_local()));
     let code = uninstall_installed(io, UninstallOptions { yes: true, ..Default::default() }).await.unwrap();
     fs::set_permissions(&library, fs::Permissions::from_mode(0o755)).unwrap();
@@ -600,15 +597,15 @@ async fn installed_update_migrates_equal_version_legacy_bridge_after_live_closes
     for live in [true, false] {
         let (mut io, out) = io(&env);
         io.fetcher = Some(Serve::new(manifest(KUMI_VERSION)));
-        io.live_running = Some(Rc::new(move || async move { live }.boxed_local()));
+        io.answers = io.answers.clone().with(LiveRunning(Rc::new(move || async move { live }.boxed_local())));
         let calls = Rc::new(RefCell::new(Vec::new()));
-        io.update_bridge = Some(Rc::new({
+        io.answers = io.answers.clone().with(BridgeAfterUpdate(Rc::new({
             let calls = calls.clone();
             move |app| {
                 calls.borrow_mut().push(app);
                 async { 0 }.boxed_local()
             }
-        }));
+        })));
         assert_eq!(update_installed(io).await.unwrap(), 0);
         assert_eq!(calls.borrow().len(), usize::from(!live));
         assert!(out.0.borrow().contains("includes the native bridge (1.0.73)"));
@@ -711,7 +708,7 @@ async fn rollback_to_legacy_requires_closed_live_and_retained_legacy_bridge_gene
             fs::set_permissions(&receipt, fs::Permissions::from_mode(0o600)).unwrap();
         }
         let (mut io, _) = io(&env);
-        io.live_running = Some(Rc::new(move || async move { scenario == "open" }.boxed_local()));
+        io.answers = io.answers.clone().with(LiveRunning(Rc::new(move || async move { scenario == "open" }.boxed_local())));
         let calls = Rc::new(RefCell::new(Vec::new()));
         io.run = Some(Rc::new({
             let calls = calls.clone();
@@ -775,10 +772,12 @@ async fn startup_switch_waits_quietly_while_live_has_the_old_remote_script() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let (env, config) = legacy_bridge(dir.path(), listener.local_addr().unwrap().port());
     let (mut installed, out) = io(&env);
-    installed.live_running =
-        Some(Rc::new(|| async { panic!("Live's process list is not needed while the Remote Script answers") }.boxed_local()));
+    installed.answers = installed
+        .answers
+        .clone()
+        .with(LiveRunning(Rc::new(|| async { panic!("Live's process list is not needed while the Remote Script answers") }.boxed_local())));
     installed.run = Some(Rc::new(|command, _, _| async move { panic!("nothing runs while Live is open: {command}") }.boxed_local()));
-    finish_legacy_transition(&installed).await;
+    finish_legacy_transition(&installed.daw()).await;
     assert_eq!(*out.0.borrow(), "");
     assert_eq!(fs::read_to_string(dir.path().join("state/bridge-config.json")).unwrap(), config);
 }
@@ -789,18 +788,18 @@ async fn startup_switch_failure_never_stops_kumi_and_leaves_no_partial_bridge() 
     let (env, config) = legacy_bridge(dir.path(), free_port());
     put(dir.path().join(".kumi/bridge"), "a file where the bridge folder goes");
     let (mut installed, out) = io(&env);
-    installed.live_running = Some(Rc::new(|| async { false }.boxed_local()));
-    finish_legacy_transition(&installed).await;
+    installed.answers = installed.answers.clone().with(LiveRunning(Rc::new(|| async { false }.boxed_local())));
+    finish_legacy_transition(&installed.daw()).await;
     assert!(out.0.borrow().contains("Kumi can still open; the bridge couldn't switch ("), "{}", out.0.borrow());
     assert_eq!(fs::read_to_string(dir.path().join("state/bridge-config.json")).unwrap(), config);
     // Stopped after its folder was made: the folder goes too.
     let dir = tempfile::tempdir().unwrap();
     let (env, config) = legacy_bridge(dir.path(), free_port());
     let (mut installed, out) = io(&env);
-    installed.live_running = Some(Rc::new(|| async { false }.boxed_local()));
+    installed.answers = installed.answers.clone().with(LiveRunning(Rc::new(|| async { false }.boxed_local())));
     installed.run =
         Some(Rc::new(|_, _, _| async { Ran { code: 1, stdout: String::new(), stderr: "no space left on device".into() } }.boxed_local()));
-    finish_legacy_transition(&installed).await;
+    finish_legacy_transition(&installed.daw()).await;
     assert!(
         out.0.borrow().contains("Kumi can still open. To finish switching the bridge, close Live and run: kumi bridge"),
         "{}",
@@ -832,9 +831,10 @@ async fn startup_switch_with_the_same_remote_script_is_quiet_and_never_moves_a_l
     assert!(only_the_host_differs(&env), "the session has nothing to ask");
     // Live has it loaded (the port answers): its folder isn't touched, and nothing is said.
     let (mut open, out) = io(&env);
-    open.live_running = Some(Rc::new(|| async { panic!("the port already says Live has it loaded") }.boxed_local()));
+    open.answers =
+        open.answers.clone().with(LiveRunning(Rc::new(|| async { panic!("the port already says Live has it loaded") }.boxed_local())));
     open.run = Some(Rc::new(|command, _, _| async move { panic!("nothing runs while Live has it loaded: {command}") }.boxed_local()));
-    finish_legacy_transition(&open).await;
+    finish_legacy_transition(&open.daw()).await;
     assert_eq!(*out.0.borrow(), "");
     assert_eq!(fs::read_to_string(dir.path().join("state/bridge-config.json")).unwrap(), config);
     // Live closed: the switch runs, quietly, and a failure is quiet too (a later start tries again).
@@ -843,7 +843,7 @@ async fn startup_switch_with_the_same_remote_script_is_quiet_and_never_moves_a_l
         let calls = Rc::new(RefCell::new(Vec::<Vec<String>>::new()));
         let seen = calls.clone();
         let (mut closed, out) = io(&env);
-        closed.live_running = Some(Rc::new(|| async { false }.boxed_local()));
+        closed.answers = closed.answers.clone().with(LiveRunning(Rc::new(|| async { false }.boxed_local())));
         closed.run = Some(Rc::new(move |_, args, _| {
             let apply = args.iter().any(|a| a == "--apply");
             seen.borrow_mut().push(args);
@@ -854,7 +854,7 @@ async fn startup_switch_with_the_same_remote_script_is_quiet_and_never_moves_a_l
             };
             async move { Ran { code, stdout: answer.to_string(), stderr: String::new() } }.boxed_local()
         }));
-        finish_legacy_transition(&closed).await;
+        finish_legacy_transition(&closed.daw()).await;
         assert_eq!(*out.0.borrow(), "", "code {code}");
         assert_eq!(calls.borrow()[0][..2].join(" "), "lifecycle upgrade");
         assert_eq!(calls.borrow().len(), if code == 0 { 2 } else { 1 });
@@ -965,11 +965,11 @@ async fn roll_back(
 ) -> RolledBack {
     let (mut io, out) = io(env);
     let looks = Rc::new(std::cell::Cell::new(0));
-    io.live_running = Some(Rc::new(move || {
+    io.answers = io.answers.clone().with(LiveRunning(Rc::new(move || {
         looks.set(looks.get() + 1);
         let open = live(looks.get());
         async move { open }.boxed_local()
-    }));
+    })));
     let asked = Rc::new(RefCell::new(Vec::new()));
     if let Some(answers) = answers {
         let answers = Rc::new(RefCell::new(std::collections::VecDeque::from(answers)));
@@ -1080,7 +1080,7 @@ async fn a_failed_app_swap_changes_nothing_and_leaves_the_bridge_alone() {
     let (mut io, out) = io(&env);
     // The earlier app goes missing just before the swap (here, as Kumi looks for Live), so the swap fails.
     let (previous, aside) = (home.join("app.previous"), home.join("app.previous.aside"));
-    io.live_running = Some(Rc::new({
+    io.answers = io.answers.clone().with(LiveRunning(Rc::new({
         let (previous, aside) = (previous.clone(), aside.clone());
         move || {
             if previous.exists() {
@@ -1088,7 +1088,7 @@ async fn a_failed_app_swap_changes_nothing_and_leaves_the_bridge_alone() {
             }
             async { false }.boxed_local()
         }
-    }));
+    })));
     let ran = calls();
     io.run = Some(Rc::new({
         let ran = ran.clone();
@@ -1424,8 +1424,8 @@ async fn update_version_installs_that_release_and_keeps_this_one_to_go_back_to()
     assert_eq!(written["notes"][0]["text"], "Sidechains with Ableton's Compressor");
     // update --rollback returns to the Kumi that was there.
     let (mut rollback, out) = io(&env);
-    rollback.live_running = Some(Rc::new(|| async { false }.boxed_local()));
-    rollback.update_bridge = Some(Rc::new(|_| async { 0 }.boxed_local()));
+    rollback.answers = rollback.answers.clone().with(LiveRunning(Rc::new(|| async { false }.boxed_local())));
+    rollback.answers = rollback.answers.clone().with(BridgeAfterUpdate(Rc::new(|_| async { 0 }.boxed_local())));
     rollback.others = Some(Rc::new(|| async { 1 }.boxed_local()));
     assert_eq!(rollback_installed(rollback).await.unwrap(), 0, "{}", out.0.borrow());
     assert!(
@@ -1451,7 +1451,7 @@ async fn update_version_installs_that_release_and_keeps_this_one_to_go_back_to()
         pinned.version = Some(version.into());
         let served = serve(answer, status);
         pinned.fetcher = Some(served.clone());
-        pinned.live_running = Some(Rc::new(|| async { true }.boxed_local()));
+        pinned.answers = pinned.answers.clone().with(LiveRunning(Rc::new(|| async { true }.boxed_local())));
         let code = update_installed(pinned).await.unwrap();
         assert!(out.0.borrow().contains(words), "{version}: {}", out.0.borrow());
         assert_eq!(code, if version == KUMI_VERSION { 0 } else { 1 }, "{version}");
@@ -1463,7 +1463,7 @@ async fn update_version_installs_that_release_and_keeps_this_one_to_go_back_to()
     let (mut current, out) = io(&env);
     current.version = Some(KUMI_VERSION.into());
     current.fetcher = Some(Rc::new(Serve { offline: true, ..Rc::try_unwrap(Serve::new(Value::Null)).ok().unwrap() }));
-    current.live_running = Some(Rc::new(|| async { true }.boxed_local()));
+    current.answers = current.answers.clone().with(LiveRunning(Rc::new(|| async { true }.boxed_local())));
     assert_eq!(update_installed(current).await.unwrap(), 0, "{}", out.0.borrow());
     assert!(out.0.borrow().contains(&format!("Kumi is {KUMI_VERSION} already.")), "{}", out.0.borrow());
     // Pinned without KUMI_RELEASES: the release's own downloads on GitHub.
@@ -1476,7 +1476,7 @@ async fn update_version_installs_that_release_and_keeps_this_one_to_go_back_to()
     let (mut pinned, out) = io(&env);
     pinned.version = Some("1.15.0".into());
     pinned.fetcher = Some(Rc::new(Serve { manifest: newer_bridge, bytes, status: 200, offline: false, calls: RefCell::new(vec![]) }));
-    pinned.live_running = Some(Rc::new(|| async { true }.boxed_local()));
+    pinned.answers = pinned.answers.clone().with(LiveRunning(Rc::new(|| async { true }.boxed_local())));
     assert_eq!(update_installed(pinned).await.unwrap(), 0, "{}", out.0.borrow());
     let said = out.0.borrow().clone();
     assert!(said.contains("The bridge in Live is 1.0.52; this Kumi's is 1.0.60.") && !said.contains("stays"), "{said}");

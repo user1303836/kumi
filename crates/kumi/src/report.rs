@@ -1,12 +1,11 @@
 //! `kumi report`, with native runtime version information.
 use crate::{
     config::{load_auth_file, load_db_file, load_gaps_file, load_projects_dir, load_settings_file, load_timings_file, read_settings},
-    doctor::{doctor_sections, format_doctor, format_sections, Check, DoctorIo},
+    doctor::{doctor_sections, format_doctor, format_sections, DoctorIo},
     spinner::step,
     tui::style::os_release,
 };
 use chrono::{DateTime, Utc};
-use futures::future::LocalBoxFuture;
 use kumi_agent::core::gaps::logged_gaps;
 use kumi_ai::auth::store::{open_credential_store, CredentialStore};
 use kumi_common::js::{
@@ -14,6 +13,7 @@ use kumi_common::js::{
     number,
     string::{trim, trim_end, utf16_len},
 };
+use kumi_daw::check::Check;
 use kumi_library::sources::join;
 use kumi_types::place::IMPORTED;
 use kumi_types::{
@@ -29,11 +29,13 @@ pub struct ReportIo {
     pub home: Option<String>,
     pub user: Option<String>,
     pub now: Option<Rc<dyn Fn() -> DateTime<Utc>>>,
-    pub live_logs: Option<LogFiles>,
+    /// What each DAW's log section reads beyond the environment (`kumi_daw::io::Answers`): a test's stand-in for the
+    /// DAW's log files.
+    pub answers: kumi_daw::io::Answers,
 }
 impl ReportIo {
     pub fn new(doctor: DoctorIo) -> Self {
-        Self { doctor, folder: None, home: None, user: None, now: None, live_logs: None }
+        Self { doctor, folder: None, home: None, user: None, now: None, answers: kumi_daw::io::Answers::default() }
     }
 }
 /// Secrets are removed first: known ones (sign-ins, keys in the environment), then by their shapes (Bearer tokens, provider
@@ -538,13 +540,13 @@ async fn compose(io: &ReportIo, redact: &dyn Fn(&str) -> String, home: &str, now
     );
     // Each DAW's log: its bridge's lines and errors.
     // Each DAW's log the producer has: Live's as always, another DAW's once its bridge is in (none for a Live-only
-    // producer). Live's logs (a test's stand-in for them) are Live's alone.
-    let has_log = |provider: &&dyn crate::daw::DawProvider| {
+    // producer).
+    let has_log = |provider: &&dyn kumi_daw::provider::DawProvider| {
         crate::daw::in_use(*provider, env) && (provider.id() == kumi_types::daw::DawId::Ableton || provider.bridge_installed(env))
     };
+    let daw = kumi_daw::io::DawIo { answers: io.answers.clone(), ..kumi_daw::io::DawIo::new(env.clone()) };
     for provider in crate::daw::providers().into_iter().filter(has_log) {
-        let logs = if provider.id() == kumi_types::daw::DawId::Ableton { io.live_logs.as_ref() } else { None };
-        let (heading, body) = provider.report_log(env, home, logs).await;
+        let (heading, body) = provider.report_log(&daw, home).await;
         section(&heading, body);
     }
     let text=redact(&format!("# Kumi report\n\nSend this file with a few words about what happened. Keys and tokens are taken out; your home folder shows as ~.\n\n{}\n",sections.join("\n\n")));
@@ -561,5 +563,3 @@ async fn compose(io: &ReportIo, redact: &dyn Fn(&str) -> String, home: &str, now
     output.flush().await.map_err(|e| RuntimeError::plain(e.to_string()))?;
     Ok(file)
 }
-/// The DAW's log files, newest first: a test's, in place of the DAW's own.
-pub type LogFiles = Rc<dyn Fn() -> LocalBoxFuture<'static, Result<Vec<String>, RuntimeError>>>;

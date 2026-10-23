@@ -9,14 +9,11 @@ use std::path::{Path, PathBuf};
 const LIVE: [&str; 6] = ["ableton", "ableton_mcp_server", "live_app", "live_extension", "bridge_setup", "willington"];
 
 /// Uses allowed by file and phrase, with why.
-const ALLOWED: &[(&str, &str, &str)] = &[
-    ("doctor/installation.rs", "live_app::InstalledLive", "InstallationIo.lives, which the doctor's tests answer, lists Lives"),
-    (
-        "cli/native/session.rs",
-        "crate::daw::ableton::provider::Ableton.watch_words()",
-        "the watch with Live's words, as its unit tests drive it",
-    ),
-];
+const ALLOWED: &[(&str, &str, &str)] = &[(
+    "cli/native/session.rs",
+    "crate::daw::ableton::provider::Ableton.watch_words()",
+    "the watch with Live's words, as its unit tests drive it",
+)];
 
 fn sources(folder: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(folder).unwrap() {

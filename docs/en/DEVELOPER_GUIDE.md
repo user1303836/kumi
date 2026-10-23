@@ -18,6 +18,7 @@ How the repository fits together, how to work on each part, and how to release.
 | `crates/kumi-web` | The web and video tools: searching and reading the web (pages, PDFs, GitHub, Max patches), and watching a tutorial for its words, frames and sound |
 | `crates/kumi-library` | The producer's library (learning, search, presets, Sets, taste), the plug-ins' formats and roles, and finding samples on disk; each DAW says where its own library is |
 | `crates/kumi-listening` | Listening: what a listen measures, the judge and its checklist, the engine's rounds, the listening models and their slots, style references and notation; each DAW plays and renders for it |
+| `crates/kumi-daw` | What a DAW's crate gives the app and gets from it: the DAW's provider (what it is, and its bridge found, installed, checked and taken out), the doctor's checks, setup's DAW side, and the small ports its steps use (what they say, ask and run) |
 | `crates/kumi-common` | Shared runtime utilities and source-compatible value handling |
 | `daws/ableton/kumi-daw-ableton` | Live, host side: its integration (the Set's observation, changes and history, rendering and Kumi Ears, Hands, its library and manual) and the Max for Live device builder |
 | `daws/ableton/ableton-mcp-server` | Native MCP bridge, analysis worker, lifecycle, setup, migration and diagnostics |
