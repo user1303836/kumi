@@ -760,6 +760,9 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         options.willington = provider.toggle(&io.env);
         options.slots = Some(slots_context);
         options.music = Some(music.clone());
+        // /map: the library's sounds and the songs, read each time it opens; Space plays through Kumi's player.
+        options.map = Some(crate::map::loader(library.clone(), load_library_dir(&io.env)?.into(), music.clone()));
+        options.player = Some(Rc::new(kumi_media::audio::player::Player::new()));
         options.voice = Some(Rc::new(create_voice_control(VoiceControlOptions {
             env: Some(io.env.clone()),
             tools_dir,

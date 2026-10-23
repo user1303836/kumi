@@ -1,0 +1,40 @@
+ Map   Sounds 72   Songs 24
+ ● c1 · dark rainy 8  ● c2 · warm dusty 8  ● c3 · Techno 8
+
+
+
+
+
+
+
+
+
+                                                                                    ⠁ Artist 1 – Song 06
+                                                                                               ⠐ Artist 1 – Song 01
+                                                                                              ⠂⠁Artist 1 – Song 05
+                                                                    ⠂ Artist 0 – Song 07
+                                                                 ⠂          ◉             ⠂    ⢀ Artist 1 – Song 08
+                                                         ⠁            ⠠⠄ Artist 0 – Song 04
+                                                                   ⢀ Artist 0 – Song 06          ⠈ Artist 1 – Song 02
+                                                              ⠐ Artist 0 – Song 05           ⠁ Artist 1 – Song 04
+
+
+
+
+                                                                                    ⡀ Artist 2 – Song 07
+                                                                         ⠈ Artist 2 – Song 03
+                                                                                  ⠐ Artist 2 – Song 02
+
+                                                                                    ⠈ Artist 2 – Song 01
+                                                                                    ⠈ Artist 2 – Song 08
+                                                                                 ⠠ Artist 2 – Song 04
+                                                                                    ⠂    ⠁ Artist 2 – Song 05
+
+
+
+
+
+
+ ● Artist 0 – Song 08  c1 · dark rainy  /Music/Artist 0
+ Near  Artist 0 – Song 04 · Artist 0 – Song 01 · Artist 0 – Song 07 · Artist 0 – Song 06
+ arrows move · shift+arrows pan · + − zoom · / filters · space plays · enter asks Kumi · tab sounds · esc closes

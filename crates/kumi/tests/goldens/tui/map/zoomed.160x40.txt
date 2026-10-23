@@ -1,0 +1,40 @@
+ Map   Sounds 72   Songs 24                                                                                                                               ×11.4
+ ● kick 12  ● snare 12  ● hat 12  ● bass 12  ● pad 12  ● vocal 12
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                             ◉ Snare 09
+                                           ⠠ Snare 07
+
+
+
+
+
+
+
+                                                                                                        ⠐  Snare 05
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ● Snare 09  snare one-shot · 0.5 s  Samples / Snares
+ Near  Snare 05 · Snare 07 · Snare 01 · Snare 10
+ arrows move · shift+arrows pan · + − zoom · / filters · space plays · enter asks Kumi · tab songs · esc closes

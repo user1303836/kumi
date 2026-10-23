@@ -39,7 +39,7 @@ impl Images {
     }
 
     /// The id the image for `key` shows under, uploading it first if it isn't up yet.
-    fn id(&mut self, key: &str, upload: impl FnOnce(u32) -> String) -> u32 {
+    pub(super) fn id(&mut self, key: &str, upload: impl FnOnce(u32) -> String) -> u32 {
         let now = perf_now();
         if let Some((id, seen)) = self.shown.get_mut(key) {
             *seen = now;
