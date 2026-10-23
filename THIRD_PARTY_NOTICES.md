@@ -20,7 +20,8 @@ ONNX Runtime, which runs them, is fetched from Microsoft's own releases, under t
 Kumi is built with crates from crates.io, each under its own license (Cargo.lock lists them all). Those it uses to learn
 the producer's own music:
 
-- lofty (https://github.com/Serial-ATA/lofty-rs), MIT License or Apache License 2.0: reading songs' tags.
+- lofty (https://github.com/Serial-ATA/lofty-rs), MIT License or Apache License 2.0: reading songs' tags;
+- memmap2 (https://github.com/RazrFalcon/memmap2-rs), MIT License or Apache License 2.0: reading their style vectors.
 
 ## Basic Pitch (Spotify), Apache License 2.0
 

@@ -193,24 +193,37 @@ fn windows(total: usize, length: usize, count: usize) -> Vec<usize> {
     (0..count).map(|k| if count == 1 { room / 2 } else { room * k / (count - 1) }).collect()
 }
 
-/// Up to `count` windows of `length` seconds spread over a stretch of a file, each as channels at `rate` (stereo when
-/// it has two or more). Only the windows are read, and they're resampled off the app's thread. Silence is refused.
-async fn read_windows(
-    file: &Path,
-    (start, seconds): (f64, f64),
-    (length, count): (f64, usize),
-    rate: f64,
-    signal: &Signal,
-) -> Result<Vec<Vec<Vec<f32>>>, String> {
-    let mut source = open_audio_to(file, Some(signal.clone()), Some(start + seconds + 1.)).await.map_err(|error| error.to_string())?;
+/// Where windows are read: up to `count` spread over a stretch (`start`, `seconds`), or starting at given seconds.
+enum Windows<'a> {
+    Spread { start: f64, seconds: f64, count: usize },
+    At(&'a [f64]),
+}
+
+/// Windows of `length` seconds of a file, each as channels at `rate` (stereo when it has two or more). Only the windows
+/// are read, and they're resampled off the app's thread. Silence is refused; a window past the file's end is left out.
+async fn read_windows(file: &Path, place: Windows<'_>, length: f64, rate: f64, signal: &Signal) -> Result<Vec<Vec<Vec<f32>>>, String> {
+    let until = match place {
+        Windows::Spread { start, seconds, .. } => start + seconds + 1.,
+        Windows::At(starts) => starts.iter().fold(0f64, |last, start| last.max(*start)) + length + 1.,
+    };
+    let mut source = open_audio_to(file, Some(signal.clone()), Some(until)).await.map_err(|error| error.to_string())?;
     let native = source.sample_rate;
     let channels = source.channels.clamp(1, 2);
-    let total = (seconds * native).round() as usize;
     let span = (length * native).round() as usize;
+    // Each window: where it starts (in frames) and how many frames it wants.
+    let plan: Vec<(f64, usize)> = match place {
+        Windows::Spread { start, seconds, count } => {
+            let total = (seconds * native).round() as usize;
+            windows(total, span, count)
+                .into_iter()
+                .map(|at| (start * native + at as f64, span.min(total.saturating_sub(at)).max(1)))
+                .collect()
+        }
+        Windows::At(starts) => starts.iter().map(|start| (start.max(0.) * native, span.max(1))).collect(),
+    };
     let mut raw: Vec<Vec<Vec<f32>>> = vec![];
-    for at in windows(total, span, count) {
-        source.seek(start * native + at as f64);
-        let wanted = span.min(total.saturating_sub(at)).max(1);
+    for (at, wanted) in plan {
+        source.seek(at);
         let mut audio: Vec<Vec<f32>> = vec![vec![]; channels];
         while audio[0].len() < wanted {
             let Some(chunk) = source.read((wanted - audio[0].len()).min(65_536)).await.map_err(|error| error.to_string())? else { break };
@@ -218,9 +231,14 @@ async fn read_windows(
                 samples.extend_from_slice(&chunk[channel.min(chunk.len() - 1)]);
             }
         }
-        raw.push(audio);
+        if !audio[0].is_empty() {
+            raw.push(audio);
+        }
     }
     let _ = source.close().await;
+    if raw.is_empty() {
+        return Err("there's no audio there".into());
+    }
     if raw.iter().flatten().flatten().all(|sample| sample.abs() < 1e-4) {
         return Err("there's only silence there".into());
     }
@@ -326,10 +344,35 @@ pub async fn vibe(
     say: Say<'_>,
     signal: &Signal,
 ) -> Result<(Vec<f32>, String), String> {
+    let place = Windows::Spread { start, seconds, count: MOST_WINDOWS };
+    vibe_of(file, place, loudness, slot, say, signal).await
+}
+
+/// What a file sounds like to CLAP from windows starting at `starts` (seconds): as `vibe`, but where the windows are is
+/// chosen (a song's quarter, half and three quarters).
+pub async fn vibe_at(
+    file: &Path,
+    starts: &[f64],
+    loudness: Option<f64>,
+    slot: Option<PathBuf>,
+    say: Say<'_>,
+    signal: &Signal,
+) -> Result<(Vec<f32>, String), String> {
+    vibe_of(file, Windows::At(starts), loudness, slot, say, signal).await
+}
+
+async fn vibe_of(
+    file: &Path,
+    place: Windows<'_>,
+    loudness: Option<f64>,
+    slot: Option<PathBuf>,
+    say: Say<'_>,
+    signal: &Signal,
+) -> Result<(Vec<f32>, String), String> {
     models::runtime(say, signal).await?;
     let model = clap_model(slot.clone(), say, signal).await?;
     let id = if slot.as_deref() == Some(model.as_path()) { file_id(&model, signal).await } else { own_style_id() };
-    let heard = read_windows(file, (start, seconds), (CLAP_SAMPLES as f64 / CLAP_RATE, MOST_WINDOWS), CLAP_RATE, signal).await?;
+    let heard = read_windows(file, place, CLAP_SAMPLES as f64 / CLAP_RATE, CLAP_RATE, signal).await?;
     let gain = loudness.filter(|loudness| loudness.is_finite()).map_or(1., |loudness| 10f64.powf((STYLE_LOUDNESS - loudness) / 20.)) as f32;
     // Each window as one channel, its log-mel made off the app's thread.
     let features: Vec<Vec<f32>> = tokio::task::spawn_blocking(move || {
@@ -360,7 +403,8 @@ pub async fn effects(file: &Path, start: f64, seconds: f64, say: Say<'_>, signal
     models::runtime(say, signal).await?;
     let model = models::dir().join(pinned::AFX_REP.name);
     models::fetch(&pinned::AFX_REP, &model, "its effects model, AFx-Rep", say, signal).await?;
-    let heard = read_windows(file, (start, seconds), (AFX_SAMPLES as f64 / AFX_RATE, MOST_WINDOWS), AFX_RATE, signal).await?;
+    let place = Windows::Spread { start, seconds, count: MOST_WINDOWS };
+    let heard = read_windows(file, place, AFX_SAMPLES as f64 / AFX_RATE, AFX_RATE, signal).await?;
     let (mut mids, mut sides) = (vec![], vec![]);
     for window in &heard {
         let (left, right) = (&window[0], window.get(1).unwrap_or(&window[0]));
