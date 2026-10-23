@@ -22,14 +22,20 @@ impl Raster {
     pub fn draw(scene: &Scene, width: u32, height: u32) -> Raster {
         let mut raster = Raster::new(width.max(1), height.max(1));
         for shape in &scene.shapes {
-            // Each shape's cover is worked out whole, then laid on once: joins in a line aren't laid twice.
+            // A dot is laid straight on, around itself only: a map draws thousands.
+            if let Shape::Dot { x, y, radius, color, alpha } = shape {
+                raster.dot((*x, *y), radius / 1000. * raster.height as f64, *color, *alpha);
+                continue;
+            }
+            // Each other shape's cover is worked out whole, then laid on once: joins in a line aren't laid twice.
             let mut cover = vec![0f32; (raster.width * raster.height) as usize];
             match shape {
                 Shape::Line { points, width, .. } => raster.line(&mut cover, points, (width / 1000. * raster.height as f64).max(1.)),
                 Shape::Rect { x0, y0, x1, y1, .. } => raster.rect(&mut cover, *x0, *y0, *x1, *y1),
+                Shape::Dot { .. } => {}
             }
             let (color, alpha) = match shape {
-                Shape::Line { color, alpha, .. } | Shape::Rect { color, alpha, .. } => (*color, *alpha),
+                Shape::Line { color, alpha, .. } | Shape::Rect { color, alpha, .. } | Shape::Dot { color, alpha, .. } => (*color, *alpha),
             };
             raster.lay(&cover, color, alpha);
         }
@@ -78,21 +84,45 @@ impl Raster {
         }
     }
 
+    /// A disc `radius` pixels round its centre, smoothed at its edge.
+    fn dot(&mut self, at: (f64, f64), radius: f64, color: [u8; 3], alpha: f64) {
+        let (x, y) = self.to_pixel(at);
+        let radius = radius.max(0.5);
+        let span = |middle: f64, size: u32| {
+            let (low, high) = ((middle - radius - 1.).floor().max(0.), (middle + radius + 1.).ceil().min(size as f64 - 1.));
+            (low as u32)..=(high.max(low - 1.) as u32)
+        };
+        if !(x.is_finite() && y.is_finite()) || x < -radius - 1. || y < -radius - 1. {
+            return;
+        }
+        for py in span(y, self.height) {
+            for px in span(x, self.width) {
+                let distance = ((px as f64 - x).powi(2) + (py as f64 - y).powi(2)).sqrt();
+                let covered = (radius + 0.5 - distance).clamp(0., 1.);
+                self.blend((py * self.width + px) as usize, color, covered * alpha);
+            }
+        }
+    }
+
     fn lay(&mut self, cover: &[f32], color: [u8; 3], alpha: f64) {
         for (i, covered) in cover.iter().enumerate() {
-            let a = *covered as f64 * alpha;
-            if a <= 0. {
-                continue;
-            }
-            let pixel = &mut self.rgba[i * 4..i * 4 + 4];
-            let under = pixel[3] as f64 / 255.;
-            let out = a + under * (1. - a);
-            for c in 0..3 {
-                let mixed = (color[c] as f64 * a + pixel[c] as f64 * under * (1. - a)) / out.max(1e-9);
-                pixel[c] = mixed.round().clamp(0., 255.) as u8;
-            }
-            pixel[3] = (out * 255.).round().clamp(0., 255.) as u8;
+            self.blend(i, color, *covered as f64 * alpha);
         }
+    }
+
+    /// `color` laid over pixel `i` at `a` (0 to 1).
+    fn blend(&mut self, i: usize, color: [u8; 3], a: f64) {
+        if a <= 0. {
+            return;
+        }
+        let pixel = &mut self.rgba[i * 4..i * 4 + 4];
+        let under = pixel[3] as f64 / 255.;
+        let out = a + under * (1. - a);
+        for c in 0..3 {
+            let mixed = (color[c] as f64 * a + pixel[c] as f64 * under * (1. - a)) / out.max(1e-9);
+            pixel[c] = mixed.round().clamp(0., 255.) as u8;
+        }
+        pixel[3] = (out * 255.).round().clamp(0., 255.) as u8;
     }
 
     /// The pixels as a PNG file.
@@ -161,6 +191,20 @@ mod tests {
         assert_eq!(raster.at(20, 1)[3], 0, "clear away from it");
         assert_eq!(raster.at(2, 18), [0, 0, 255, 255], "the box is at the bottom left");
         assert_eq!(raster.at(30, 18)[3], 0);
+    }
+
+    #[test]
+    fn a_dot_is_a_disc_where_it_should_be_and_nowhere_else() {
+        let dot = |x: f64, y: f64, color: [u8; 3]| Shape::Dot { x, y, radius: 100., color, alpha: 1. };
+        let scene = Scene { shapes: vec![dot(0.25, 0.75, [255, 0, 0]), dot(2., 0.5, [0, 255, 0]), dot(1., 0., [0, 0, 255])], lines: false };
+        let raster = Raster::draw(&scene, 41, 21);
+        // 2.1 pixels round (a tenth of 21), at (10, 5) from the top left.
+        assert_eq!(raster.at(10, 5), [255, 0, 0, 255], "its middle");
+        assert_eq!(raster.at(11, 5), [255, 0, 0, 255], "a pixel along");
+        assert!((1..255).contains(&raster.at(12, 5)[3]), "its edge, smoothed: {:?}", raster.at(12, 5));
+        assert_eq!(raster.at(14, 5)[3], 0, "four along: clear");
+        assert_eq!(raster.at(40, 20), [0, 0, 255, 255], "a dot in the corner is drawn as far as it shows");
+        assert!(raster.rgba.chunks(4).all(|pixel| pixel[1] == 0), "one off the picture draws nothing");
     }
 
     #[test]
