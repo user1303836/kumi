@@ -3,6 +3,18 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.21.2 — 2026-10-23
+
+Ships with bridge 1.0.94, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+Ships with REAPER extension 0.1.2, which REAPER loads when it restarts; `kumi update` puts it in.
+
+- Nothing new to try: Kumi's code is reorganized so each DAW's parts live together. Live's bridge and
+  REAPER's extension are rebuilt from it, and each loads when its DAW restarts.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.21.1 — 2026-10-22
 
 Ships with bridge 1.0.93, as 1.21.0 did.
