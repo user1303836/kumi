@@ -6,11 +6,6 @@ use super::{
     structure::{form_in_words, hear_form, FormOptions},
     AudioError,
 };
-use crate::core::daw::{asset_in_words, AssetPhrase, DawProfile, DawWords};
-use crate::core::{
-    contracts::{HearRequest, HeardComparison, HeardEvent, HeardTake, JsonObject, KernelTool, ToolResult},
-    errors::RuntimeError,
-};
 use async_trait::async_trait;
 use futures::{future::try_join_all, future::LocalBoxFuture};
 use kumi_common::{
@@ -21,11 +16,16 @@ use kumi_common::{
         string::head,
     },
 };
+use kumi_types::daw::{asset_in_words, AssetPhrase, DawProfile, DawWords};
+use kumi_types::{
+    contracts::{HearRequest, HeardComparison, HeardEvent, HeardTake, JsonObject, KernelTool, ToolResult},
+    errors::RuntimeError,
+};
 use serde_json::{json, Value};
 use std::rc::Rc;
 
 pub const LISTEN_TOOL: &str = "listen";
-crate::daw_text!(
+kumi_types::daw_text!(
     #[allow(dead_code)]
     DESCRIPTION, description:
     "Hear audio the producer points you to: a reference track, a sample, a bounce or a recording, by its file path (find_sounds finds audio files by words in folders the producer names, such as ~/Downloads) or, for ", audio_clip, " in the ", place, ", its ", clip_ref, ". Hear the ", place, " itself with track (or tracks, to hear several together and what clashes between them) or mix: true. ", listen_method, " Measures loudness (integrated LUFS, true peak, loudness range), tonal balance in named bands, stereo width per band, dynamics, tempo, key and the energy over time as a small text spectrogram; for a single sound (a note, a hit, a short sample), also its pitch, harmonics (which waveform it's like), envelope and movement (filter opening or closing, wobble or tremolo rate, at the tempo when known). With compare_to, sets file against the reference with loudness matched and lists what differs most (bands, brightness, width, compression, loudness). Use it before matching a mix to a reference (EQ, compression, width, loudness moves) or rebuilding a sound (harmonics to oscillators and filter, envelope to the amp and filter envelopes, movement to an LFO's rate and target). With form, hears a song's sections instead (in bars, with their energy and which are alike), to arrange like it. Say what you heard in the producer's terms, not as a data dump."
@@ -405,7 +405,7 @@ mod phrases {
     #[test]
     fn the_listen_schemas_phrases_are_all_there_and_lives_words_stay() {
         let schema: Value = serde_json::from_str(include_str!("listen-schema.json")).unwrap();
-        assert_eq!(crate::core::daw::check_asset_phrases(&schema, LISTEN_PHRASES), Ok(()));
+        assert_eq!(kumi_types::daw::check_asset_phrases(&schema, LISTEN_PHRASES), Ok(()));
         for profile in [DawProfile::ABLETON, DawProfile::UNKNOWN, DawProfile::REAPER, DawProfile::RENOISE] {
             let said = asset_in_words(schema.clone(), &profile, LISTEN_PHRASES);
             if profile == DawProfile::ABLETON {

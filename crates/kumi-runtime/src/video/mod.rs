@@ -1,8 +1,6 @@
-pub mod captions;
-pub mod frames;
+// The programs that decode media and what a video's frames, captions and speech give (kumi-media), as video's own.
+pub use kumi_media::{captions, frames, programs, speech};
 pub mod moments;
-pub mod programs;
-pub mod speech;
 pub mod tool;
 
 use crate::{audio::audio_path, system::Env};

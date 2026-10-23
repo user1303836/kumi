@@ -13,6 +13,7 @@ members = [
     "crates/kumi-testkit",
     "crates/kumi-types",
     "crates/kumi-net",
+    "crates/kumi-media",
 ]
 
 [workspace.package]
@@ -31,6 +32,7 @@ daw-bridge = { path = "daws/own/daw-bridge" }
 kumi-testkit = { path = "crates/kumi-testkit" }
 kumi-types = { path = "crates/kumi-types" }
 kumi-net = { path = "crates/kumi-net" }
+kumi-media = { path = "crates/kumi-media" }
 
 async-trait = "0.1"
 base64 = "0.22"

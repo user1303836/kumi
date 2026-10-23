@@ -1,11 +1,7 @@
 pub mod microphone;
-use crate::core::daw::DawProfile;
 use crate::{
-    system::{self, Env},
-    video::{
-        programs::{self, FfmpegOptions, OnFetch, OnProgress, ProgramOptions, VideoFailure},
-        speech::{speech_model_for, transcribe, TranscribeOptions},
-    },
+    programs::{self, FfmpegOptions, OnFetch, OnProgress, ProgramOptions, VideoFailure},
+    speech::{speech_model_for, transcribe, TranscribeOptions},
 };
 use kumi_common::{
     abort::{Aborted, Signal, SignalExt},
@@ -14,6 +10,8 @@ use kumi_common::{
         string::{head, trim, utf16_len},
     },
 };
+use kumi_types::daw::DawProfile;
+use kumi_types::system::{self, Env};
 pub use microphone::{list_microphones, microphone_allowed, parse_microphones, terminal_app, Capture};
 use microphone::{microphone_input, start_capture, RATE};
 use regex::Regex;

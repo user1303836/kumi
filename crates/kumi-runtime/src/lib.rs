@@ -4,7 +4,8 @@
 pub use kumi_types::{command, daw_text, daw_word, live_word, system, version};
 
 pub mod ai;
-pub mod audio;
+// Audio and voice (kumi-media), where the runtime's code and the app have always named them.
+pub use kumi_media::audio;
 pub mod auth;
 pub mod core;
 pub mod devices;
@@ -24,7 +25,7 @@ pub mod providers;
 pub mod references;
 pub mod slots;
 pub mod video;
-pub mod voice;
+pub use kumi_media::voice;
 pub mod web;
 
 pub use audio::tools::{listening_tools, LISTEN_TOOL};

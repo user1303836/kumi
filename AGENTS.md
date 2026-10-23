@@ -22,6 +22,8 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
   the system and the version. `kumi-runtime` re-exports it where its code always named it.
 - `crates/kumi-net`: how Kumi reaches the network: its HTTP clients (proxies, trust), why a request got no answer
   (`cause`), the public-only web client (`web`) and a model call's error. Re-exported as `kumi_runtime::net` and the rest.
+- `crates/kumi-media`: audio (decoding, analysis, matching a sound, DSP), voice input, and the programs that decode
+  media (ffmpeg, yt-dlp, whisper.cpp) with a video's frames, captions and speech. Re-exported as `kumi_runtime::audio`…
 - `crates/kumi-store` (SQLite), `kumi-common` (shared utilities), `kumi-genexpr` (gen~ test interpreter).
 - `plugin-formats/`: the plug-in preset formats Kumi reads (data Kumi builds in).
 - `testdata/oracles/<crate>/`: the recorded oracles that crate's tests read, through `kumi_testkit::oracle`.

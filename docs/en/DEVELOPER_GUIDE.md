@@ -13,6 +13,7 @@ How the repository fits together, how to work on each part, and how to release.
 | `crates/kumi-runtime` | Agent loop, providers, sign-in, sessions, library, Live integration, media tools and MCP client |
 | `crates/kumi-types` | The types and settings every layer names: DAW profiles and words, the agent's contracts with its tools, errors, places, the system, the version |
 | `crates/kumi-net` | How Kumi reaches the network: its HTTP clients with the system's proxies and trust, why a request got no answer, the public-only web client and a model call's error |
+| `crates/kumi-media` | Audio (decoding, analysis, matching a sound, DSP), voice input, and the programs that decode media (ffmpeg, yt-dlp, whisper.cpp) with a video's frames, captions and speech |
 | `crates/kumi-common` | Shared runtime utilities and source-compatible value handling |
 | `daws/ableton/ableton-mcp-server` | Native MCP bridge, analysis worker, lifecycle, setup, migration and diagnostics |
 | `daws/ableton/remote-script` | The bridge's Remote Script, which runs inside Live (`ableton_mcp_remote_script.py`, the `AbletonMcpBridge/` entry point, Python tests) |

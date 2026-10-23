@@ -1,5 +1,5 @@
 //! Frames and stretches of sound taken by ffmpeg, with atomic cache writes.
-use super::programs::{ffmpeg_reads_in_pieces, run, RunOptions, VideoFailure};
+use crate::programs::{ffmpeg_reads_in_pieces, run, RunOptions, VideoFailure};
 use kumi_common::{abort::Signal, js::number::to_fixed};
 use regex::Regex;
 use serde::{Deserialize, Serialize};

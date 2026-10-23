@@ -10,10 +10,10 @@ pub use kumi_types::matching::{Closeness, Feature, FeatureName, Focus, Structura
 use super::analyze::{Analysis, Timeline};
 use kumi_common::js::number::{round, to_fixed, to_string};
 pub fn structure_move(kind: StructuralKind) -> &'static str {
-    structure_move_for(&crate::core::daw::DawProfile::ABLETON, kind)
+    structure_move_for(&kumi_types::daw::DawProfile::ABLETON, kind)
 }
 /// The structural change for a gap, with the DAW's own devices.
-pub fn structure_move_for(profile: &crate::core::daw::DawProfile, kind: StructuralKind) -> &'static str {
+pub fn structure_move_for(profile: &kumi_types::daw::DawProfile, kind: StructuralKind) -> &'static str {
     profile.vocab.structure_moves.iter().find(|(k, _)| *k == kind).unwrap().1
 }
 fn near(distance: f64, scale: f64) -> f64 {

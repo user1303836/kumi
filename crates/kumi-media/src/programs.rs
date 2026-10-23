@@ -25,8 +25,8 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
-use crate::core::disk::{low_disk, low_disk_with, MB};
-use crate::system::{platform, process_env, system_program_default, Env, SystemProgram};
+use kumi_types::disk::{low_disk, low_disk_with, MB};
+use kumi_types::system::{platform, process_env, system_program_default, Env, SystemProgram};
 
 /// A failure watching a video, said so the producer knows what to do.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -333,14 +333,14 @@ pub struct ProgramOptions {
 
 // GitHub's API answers 403 to a request without a User-Agent (Node's fetch sent "node").
 static CLIENT: LazyLock<reqwest::Client> =
-    LazyLock::new(|| crate::net::client().user_agent(format!("kumi/{}", crate::KUMI_VERSION)).build().expect("an HTTP client"));
+    LazyLock::new(|| kumi_net::client().user_agent(format!("kumi/{}", kumi_types::version::KUMI_VERSION)).build().expect("an HTTP client"));
 
 fn last_segment(url: &str) -> &str {
     url.rsplit('/').next().unwrap_or(url)
 }
 
 async fn download(url: &str, signal: Option<Signal>) -> Result<Vec<u8>, VideoFailure> {
-    let response = with_signal(&signal, crate::net::send(CLIENT.get(url))).await??;
+    let response = with_signal(&signal, kumi_net::send(CLIENT.get(url))).await??;
     if !response.status().is_success() {
         return Err(VideoFailure::video(format!("Downloading {} failed ({}).", last_segment(url), response.status().as_u16())));
     }
@@ -1008,7 +1008,7 @@ async fn write_download(url: &str, path: &Path, fetching: &Fetching<'_>, size: O
             on_progress(1.0);
         }
     } else {
-        let response = with_signal(&fetching.signal, crate::net::send(CLIENT.get(url))).await??;
+        let response = with_signal(&fetching.signal, kumi_net::send(CLIENT.get(url))).await??;
         if !response.status().is_success() {
             return Err(VideoFailure::video(format!("Downloading {} failed ({}).", last_segment(url), response.status().as_u16())));
         }
@@ -1260,6 +1260,6 @@ mod user_agent_tests {
         });
         super::CLIENT.get(&url).send().await.unwrap();
         let request = server.await.unwrap();
-        assert!(request.contains(&format!("user-agent: kumi/{}\r\n", crate::KUMI_VERSION)), "{request}");
+        assert!(request.contains(&format!("user-agent: kumi/{}\r\n", kumi_types::version::KUMI_VERSION)), "{request}");
     }
 }
