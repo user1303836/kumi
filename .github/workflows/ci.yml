@@ -185,8 +185,8 @@ jobs:
       matrix:
         include:
           - { os: macos-15, label: macOS }
-          - { os: windows-2025, label: Windows, part: "-app", crates: "-p kumi" }
-          - { os: windows-2025, label: "Windows (Kumi's crates and bridges)", part: "-rest", crates: "--exclude kumi" }
+          - { os: windows-2025, label: Windows, part: "-app", cache: app, crates: "-p kumi" }
+          - { os: windows-2025, label: "Windows (Kumi's crates and bridges)", part: "-rest", cache: rest, crates: "--exclude kumi" }
     timeout-minutes: 10
     env:
       # Rust's own linker: Microsoft's is a large part of linking two hundred test binaries.
@@ -205,9 +205,12 @@ jobs:
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.18.0
-      # Saved from main only (see Rust / Linux).
+      # Saved from main only (see Rust / Linux). Windows' two parts build some crates from crates.io differently (cargo
+      # unifies their features over the packages a build selects), so each keeps its own: with one shared, the second part
+      # compiled those again on every run.
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
+          key: ${{ matrix.cache }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
         with:
