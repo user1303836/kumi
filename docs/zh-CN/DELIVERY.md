@@ -29,7 +29,7 @@
 
 ## REAPER 的扩展和 Renoise 的工具
 
-Kumi 在 REAPER 和 Renoise 中的桥接，不经由桥接的 CLI，而是通过 Kumi 自己的生命周期流程（`crates/daw-bridge`）安装。设置、`kumi --daw reaper bridge`（或 `renoise`）和 `kumi update` 都会运行它；从制作人角度的说明见 [Kumi 指南](KUMI_GUIDE.md#连接-reaper-或-renoise)。
+Kumi 在 REAPER 和 Renoise 中的桥接，不经由桥接的 CLI，而是通过 Kumi 自己的生命周期流程（`daws/own/daw-bridge`）安装。设置、`kumi --daw reaper bridge`（或 `renoise`）和 `kumi update` 都会运行它；从制作人角度的说明见 [Kumi 指南](KUMI_GUIDE.md#连接-reaper-或-renoise)。
 
 - **发行包中：** `kumi` 旁边的 `daw-mcp-server`，以及 `daws` 文件夹：`daws/reaper/reaper_kumi.dylib`（Windows 上为 `.dll`，Linux 上为 `.so`）及 `reaper_kumi.version`，还有 `daws/renoise/com.kumi.Bridge.xrnx/`。发行包的 `package.json` 和 `kumi-install.json`，以及发布版本的 `kumi-release.json`，用 `reaper` 和 `renoise` 记录它们的版本；`bridge` 仍指 Live 的桥接。
 - **装入 DAW：** REAPER 的扩展装入 Kumi 找到的那个 REAPER（便携版，或 `KUMI_REAPER_RESOURCE_DIR` 指定的文件夹）的 `UserPlugins`，旁边放 `kumi-bridge-reference.json`；Renoise 的工具装入它 3.5 及更高版本中最新的偏好设置文件夹里的 `Scripts/Tools`，里面放 `bridge-reference.json`。更新和回滚都保持在 Kumi 放入的位置，并一并更新回执 `copies` 中列出的每个 Kumi 副本（例如新版 Renoise 在它自己的版本文件夹中复制的那一个）；卸载时也会把它们一并移除。制作人移除的桥接不会被放回。两者都先以另一个名字复制，再改名就位，从不原地覆盖（正在运行的 REAPER 会保留旧文件；Windows 会锁定它）。在 macOS 上，Kumi 放入的副本会去掉下载标记。

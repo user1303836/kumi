@@ -54,7 +54,7 @@ Script.
 ## REAPER's extension and Renoise's tool
 
 Kumi's bridges in REAPER and Renoise go in through a lifecycle of Kumi's own
-(`crates/daw-bridge`), not the bridge's CLI. Setup, `kumi --daw reaper bridge`
+(`daws/own/daw-bridge`), not the bridge's CLI. Setup, `kumi --daw reaper bridge`
 (or `renoise`) and `kumi update` run it; the
 [Kumi guide](KUMI_GUIDE.md#connect-to-reaper-or-renoise) covers this from a
 producer's side.

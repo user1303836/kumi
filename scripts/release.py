@@ -58,17 +58,19 @@ BRIDGE = ("daws/ableton/ableton-mcp-server/", "crates/kumi-common/", "daws/ablet
 # The same for REAPER's extension, and the parts of daw-bridge it links (its own wire, handshake, auth, discovery and
 # files: `rg daw_bridge:: crates/reaper-kumi/src`, and what those use), and for Renoise's tool (their tests and examples
 # aside too). The rest of daw-bridge (the lifecycle, detection, the doctor, installing) is Kumi's alone.
-REAPER = (native.REAPER_CRATE + "/", "crates/daw-bridge/Cargo.toml", *(f"crates/daw-bridge/src/{name}.rs" for name in (
+REAPER = (native.REAPER_CRATE + "/", "daws/own/daw-bridge/Cargo.toml", *(f"daws/own/daw-bridge/src/{name}.rs" for name in (
     "lib", "auth", "contract", "daw", "files", "frame", "handshake", "loopback", "owner", "paths", "wire")))
 RENOISE = (native.RENOISE_TOOL_SOURCE + "/",)
 REAPER_CARGO = native.REAPER_CRATE + "/Cargo.toml"
 RENOISE_VERSION = native.RENOISE_TOOL_SOURCE + "/payload/version.lua"
 RENOISE_MANIFEST = native.RENOISE_TOOL_SOURCE + "/manifest.xml"
 # Kumi's own, daw-bridge and its host for REAPER and Renoise (daw-mcp-server) among them.
-KUMI = ("crates/kumi/", "crates/kumi-runtime/", "crates/kumi-common/", "crates/kumi-store/", "crates/daw-bridge/",
-        "crates/daw-mcp-server/", "install.sh", "install.ps1")
-# Kumi's own crates, at Kumi's version: Kumi, its runtime and common parts, and its host for REAPER and Renoise.
-CRATES = ("kumi", "kumi-common", "kumi-runtime", "daw-mcp-server")
+KUMI = ("crates/kumi/", "crates/kumi-runtime/", "crates/kumi-common/", "crates/kumi-store/", "daws/own/daw-bridge/",
+        "daws/own/daw-mcp-server/", "install.sh", "install.ps1")
+# Kumi's own crates, at Kumi's version, and their folders: Kumi, its runtime and common parts, and its host for REAPER
+# and Renoise.
+CRATES = {"kumi": "crates/kumi", "kumi-common": "crates/kumi-common", "kumi-runtime": "crates/kumi-runtime",
+          "daw-mcp-server": "daws/own/daw-mcp-server"}
 # Where paths moved in the repository, oldest first (scripts/moves.toml, which `dev.py rebase-moves` reads too).
 MOVES = [(move["from"], move["to"]) for move in
          tomllib.loads((ROOT / "scripts/moves.toml").read_text(encoding="utf-8")).get("move", [])]
@@ -415,8 +417,8 @@ def apply(root: Path, plan: Plan) -> list[str]:
             changed.append(name)
         return root / name
 
-    for crate in CRATES:
-        replace_once(edit(f"crates/{crate}/Cargo.toml"), f'version = "{plan.old}"', f'version = "{plan.new}"')
+    for folder in CRATES.values():
+        replace_once(edit(f"{folder}/Cargo.toml"), f'version = "{plan.old}"', f'version = "{plan.new}"')
     replace_once(edit("crates/kumi-runtime/src/version.rs"), f'"{plan.old}"', f'"{plan.new}"')
     replace_once(edit("package.json"), f'"version": "{plan.old}"', f'"version": "{plan.new}"')
     moves = {crate: (plan.old, plan.new) for crate in CRATES}

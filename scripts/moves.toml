@@ -27,3 +27,12 @@ to = "daws/ableton/protocol"
 [[move]]
 from = "max-standard"
 to = "daws/ableton/max-standard"
+
+# Kumi's own bridges (REAPER and Renoise), into daws/own (2026-10).
+[[move]]
+from = "crates/daw-bridge"
+to = "daws/own/daw-bridge"
+
+[[move]]
+from = "crates/daw-mcp-server"
+to = "daws/own/daw-mcp-server"

@@ -66,9 +66,9 @@ jobs:
             crates/kumi-runtime/src/integrations/ableton/hands/mac.rs crates/kumi-runtime/src/system.rs crates/kumi-runtime/src/ai/http.rs \
             crates/kumi-runtime/src/library/sources.rs daws/ableton/ableton-mcp-server/src/install_remote_script.rs \
             daws/ableton/ableton-mcp-server/src/lifecycle.rs daws/ableton/ableton-mcp-server/src/delivery_install.rs \
-            crates/kumi/src/daw/own.rs crates/daw-bridge/src/lifecycle.rs crates/daw-bridge/src/install.rs crates/daw-bridge/src/detect.rs \
-            crates/reaper-kumi/build.rs crates/reaper-kumi/src/lib.rs crates/daw-mcp-server/src/bin/daw-mcp-server.rs \
-            crates/daw-bridge/src/files.rs crates/daw-bridge/src/owner.rs crates/daw-bridge/src/paths.rs crates/reaper-kumi/shim/csurf.cpp \
+            crates/kumi/src/daw/own.rs daws/own/daw-bridge/src/lifecycle.rs daws/own/daw-bridge/src/install.rs daws/own/daw-bridge/src/detect.rs \
+            crates/reaper-kumi/build.rs crates/reaper-kumi/src/lib.rs daws/own/daw-mcp-server/src/bin/daw-mcp-server.rs \
+            daws/own/daw-bridge/src/files.rs daws/own/daw-bridge/src/owner.rs daws/own/daw-bridge/src/paths.rs crates/reaper-kumi/shim/csurf.cpp \
             daws/renoise/com.kumi.Bridge.xrnx/manifest.xml daws/renoise/com.kumi.Bridge.xrnx/main.lua daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua; do
             test -e "$path" || { echo "::error::$path, which the installs depend on, isn't there: point this check at its new name"; exit 1; }
             python3 scripts/dev.py areas --in install "$path" > /dev/null || { echo "::error::$path must count as installing (scripts/areas.toml)"; exit 1; }

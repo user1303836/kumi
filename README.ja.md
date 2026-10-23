@@ -89,7 +89,7 @@ sh scripts/test-isolated.sh                        # Live もサインインも�
 | `daws/ableton/remote-script` | Live の中で動く、ブリッジの Remote Script |
 | `daws/ableton/live-extension` | Kumi の Live 拡張機能（Live 12.4 以降） |
 | `daws/ableton/protocol` | ブリッジと Remote Script が共有する操作の一覧 |
-| `crates/daw-mcp-server` | Kumi が起動する、REAPER と Renoise のための Kumi のホスト。ほかの MCP クライアントからも使えます |
+| `daws/own/daw-mcp-server` | Kumi が起動する、REAPER と Renoise のための Kumi のホスト。ほかの MCP クライアントからも使えます |
 | `crates/reaper-kumi` | Kumi の REAPER 拡張機能 |
 | `daws/renoise` | Kumi の Renoise ツール |
 
