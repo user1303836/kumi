@@ -20,8 +20,8 @@ pub struct KeptTrack {
 
 /// The kept references' version: one kept by an older Kumi, whose measures meant something else, is measured again.
 /// 2: width stops at −30 dB, top is kept to a third-octave, no echoes reads as a 60 dB fall, and a sound's pumping and
-/// each hit's crest are kept.
-pub const KEPT_VERSION: u32 = 2;
+/// each hit's crest are kept. 3: the music in it is kept too (its tempo, key, busyness and groove).
+pub const KEPT_VERSION: u32 = 3;
 
 /// A measured reference.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

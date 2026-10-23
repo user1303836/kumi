@@ -22,6 +22,13 @@ const LONG_REVERB: f64 = 1.8;
 const SOME_REVERB: f64 = 0.8;
 /// An echo's fall a repeat (dB) under which its echoes are heard (60 is none).
 const ECHOES: f64 = 30.;
+/// Onsets a bar under which the music reads as sparse, and at or above which as busy; between, steady.
+const SPARSE: f64 = 4.;
+const BUSY: f64 = 10.;
+/// A swing ratio at or above which it reads as swung; under, straight.
+const SWUNG: f64 = 1.25;
+/// How far ahead of or behind the beat (ms) it sits, at least, to read as pushed or laid back.
+const PUSHED: f64 = 8.;
 
 fn spread(value: &Spread, unit: &str) -> String {
     format!("{} {unit}, {} to {}", number(value.mid), number(value.low), number(value.high))
@@ -31,9 +38,38 @@ fn word(value: f64, words: &[(f64, &'static str)], below: &'static str) -> &'sta
     words.iter().find(|(from, _)| value >= *from).map_or(below, |(_, word)| word)
 }
 
-/// A profile in one sentence: `Loud (about -9 LUFS, -11 to -7), warm (tilt -1.4 dB/oct), mono lows, ...`.
+/// A profile in one sentence: `Around 128 BPM in A minor, busy (12 onsets a bar), swung (1.5), loud (about -9 LUFS,
+/// -11 to -7), warm (tilt -1.4 dB/oct), mono lows, ...`.
 pub fn describe(profile: &Profile) -> String {
     let mut parts = vec![];
+    match (&profile.tempo, &profile.key) {
+        (Some(tempo), Some(key)) => parts.push(format!("around {} BPM in {key}", number(tempo.mid.round()))),
+        (Some(tempo), None) => parts.push(format!("around {} BPM", number(tempo.mid.round()))),
+        (None, Some(key)) => parts.push(format!("in {key}")),
+        (None, None) => {}
+    }
+    if let Some(busy) = &profile.busyness {
+        let word = if busy.mid < SPARSE {
+            "sparse"
+        } else if busy.mid >= BUSY {
+            "busy"
+        } else {
+            "steady"
+        };
+        parts.push(format!("{word} ({} onsets a bar)", number(busy.mid.round())));
+    }
+    if let Some(groove) = &profile.groove {
+        parts.push(match groove.swing_ratio.mid >= SWUNG {
+            true => format!("swung ({})", number(groove.swing_ratio.mid)),
+            false => "straight".into(),
+        });
+        if groove.push_ms.mid.abs() >= PUSHED {
+            parts.push(match groove.push_ms.mid < 0. {
+                true => format!("ahead of the beat ({} ms)", number(groove.push_ms.mid)),
+                false => format!("laid back (+{} ms)", number(groove.push_ms.mid)),
+            });
+        }
+    }
     if let Some(loudness) = &profile.integrated {
         parts.push(format!("{} (about {})", word(loudness.mid, &LOUDNESS, "quiet"), spread(loudness, "LUFS")));
     }
