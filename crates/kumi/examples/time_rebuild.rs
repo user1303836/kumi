@@ -5,7 +5,6 @@
 //!   cargo build --release -p ableton-mcp-server --bins
 //!   cargo run --release -p kumi --example time_rebuild
 use futures::FutureExt;
-use kumi::config::find_bridge_config;
 use kumi_agent::{mcp::client, Integration, Observation};
 use kumi_ai::timing;
 use kumi_common::{
@@ -13,6 +12,7 @@ use kumi_common::{
     js::string::head,
     time::{now_ms, perf_now},
 };
+use kumi_daw_ableton::app::folders::find_bridge_config;
 use kumi_daw_ableton::{connection::Connect, create_ableton_integration, AbletonOptions, BRIDGE_TOOLS};
 use kumi_types::{
     contracts::{ChangeRecord, JsonObject, KernelTool},

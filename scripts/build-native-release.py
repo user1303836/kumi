@@ -22,28 +22,22 @@ from urllib.parse import quote
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "ableton-mcp-native-release/v1"
 BRIDGE_BINARIES = ("ableton-mcp-server", "ableton-mcp-analysis-worker")
-# daw-mcp-server is Kumi's host for REAPER and Renoise: Kumi starts it from beside its own binary.
+# daw-mcp-server is Kumi's host for the other DAWs: Kumi starts it from beside its own binary.
 BINARIES = ("kumi", *BRIDGE_BINARIES, "daw-mcp-server", "kumi-harness", "kumi-library-measure", "kumi-library-learner")
-# REAPER's extension and Renoise's tool, where Kumi installs them from (crates/kumi/src/daw/own.rs): daws/reaper and
-# daws/renoise in the bundle. REAPER loads `reaper_*` libraries from UserPlugins; a Renoise tool is a folder named for its
-# id. The extension's version is its crate's, in a file beside it.
+# The other DAWs' bridges, by the DAW's id (scripts/daws.toml, which release.py and build-migration-release.py read
+# through here). Each is in daws/<id> in the bundle, where Kumi installs it from (daws/own/kumi-daw-own/src/provider.rs):
+# a library with its version, its crate's, in a file beside it, or a Renoise tool's folder.
 DAWS = "daws"
-REAPER_EXTENSION = "reaper_kumi"
-REAPER_CRATE = "daws/reaper/reaper-kumi"
-RENOISE_TOOL = "com.kumi.Bridge.xrnx"
-RENOISE_TOOL_SOURCE = "daws/renoise/com.kumi.Bridge.xrnx"
-RENOISE_TOOL_ID = "com.kumi.Bridge"
-RENOISE_API = "6.2"
+DAW_BRIDGES = {daw["id"]: daw for daw in tomllib.loads((ROOT / "scripts/daws.toml").read_text(encoding="utf-8"))["daw"]}
 # What Kumi's installer or the DAW writes into a bridge's folder: never shipped (daw-bridge's NOT_PAYLOAD).
 NOT_PAYLOAD = ("bridge-reference.json", "preferences.xml")
-RENOISE_SUFFIXES = (".lua", ".xml", ".json")
-# The macOS extension's own name for itself; the linker's default would be the folder it was built in.
-REAPER_INSTALL_NAME = "@rpath/reaper_kumi.dylib"
-# The newest glibc the Linux extension may need: what Kumi's own Linux binaries need, built on the same Ubuntu 22.04
-# runners. A newer runner would quietly raise it, and REAPER on an older Linux would then refuse the extension.
+# A Renoise tool's own files.
+TOOL_SUFFIXES = (".lua", ".xml", ".json")
+# The newest glibc a Linux extension may need: what Kumi's own Linux binaries need, built on the same Ubuntu 22.04
+# runners. A newer runner would quietly raise it, and a DAW on an older Linux would then refuse the extension.
 GLIBC_MOST = (2, 35)
-# The C runtime as Windows DLLs: REAPER's extension links it in (+crt-static), so a REAPER without the Visual C++
-# runtime installed loads it.
+# The C runtime as Windows DLLs: an extension links it in (+crt-static), so a DAW without the Visual C++ runtime
+# installed loads it.
 WINDOWS_CRT = re.compile(r"(vcruntime\d+.*|msvcp\d+.*|msvcr\d+.*|ucrtbase.*|api-ms-win-crt-.*)\.dll", re.I)
 DOCUMENTS = [("daws/ableton/ableton-mcp-server/README.md", "README.md")] + [(f"docs/en/{name}.md", f"{name}.md") for name in (
     "USER_GUIDE", "USER_JOURNEYS", "OPERATIONS", "RECOVERY", "LIVE_SAFETY", "AUDIO_INTELLIGENCE",
@@ -324,7 +318,7 @@ def stage_hands(root: Path, bundle: Path, target: str) -> None:
 
 # ── What a built library holds ───────────────────────────────────────────────────────────────────────────────────
 # Read here, the same way on every system, rather than with each system's tools (nm, objdump, dumpbin): each
-# architecture's exported names, and what REAPER's loader cares about on that system.
+# architecture's exported names, and what a DAW's loader cares about on that system.
 
 MACHO_ARCHS = {0x01000007: "x86_64", 0x0100000C: "arm64"}
 ELF_ARCHS = {62: "x86_64", 183: "arm64"}
@@ -495,7 +489,7 @@ def binary_facts(path: Path) -> list[dict]:
         raise ValueError(f"{path.name} can't be read as a library: {error}") from None
     raise ValueError(f"{path.name} isn't a Mach-O, ELF or PE library")
 
-# ── REAPER's extension and Renoise's tool ────────────────────────────────────────────────────────────────────────
+# ── The other DAWs' bridges: a library or a Renoise tool ─────────────────────────────────────────────────────────
 
 def system_of(target: str) -> str:
     if target.endswith("-apple-darwin"):
@@ -504,16 +498,26 @@ def system_of(target: str) -> str:
         return "windows"
     if target.endswith("-unknown-linux-gnu"):
         return "linux"
-    raise ValueError(f"no REAPER extension is built for {target}")
+    raise ValueError(f"no extension is built for {target}")
 
-def extension_name(target: str) -> str:
-    """The file REAPER loads on the target's system."""
-    return REAPER_EXTENSION + {"macos": ".dylib", "windows": ".dll", "linux": ".so"}[system_of(target)]
+def crate_names(daw: dict) -> tuple[str, str]:
+    """A library bridge's crate's package name and its library's (reaper-kumi, reaper_kumi)."""
+    manifest = tomllib.loads((ROOT / daw["library"]["crate"] / "Cargo.toml").read_text(encoding="utf-8"))
+    package = manifest["package"]["name"]
+    return package, manifest.get("lib", {}).get("name", package.replace("-", "_"))
+
+def extension_name(daw: dict, target: str) -> str:
+    """The file the DAW loads on the target's system."""
+    return crate_names(daw)[1] + {"macos": ".dylib", "windows": ".dll", "linux": ".so"}[system_of(target)]
+
+def install_name(daw: dict) -> str:
+    """The macOS extension's own name for itself; the linker's default would be the folder it was built in."""
+    return f"@rpath/{crate_names(daw)[1]}.dylib"
 
 def extension_builds(target: str) -> list[str]:
-    """What the target's bundle builds REAPER's extension for. On a Mac both architectures, in one file: REAPER may run
-    under Rosetta (x86_64) on an Apple silicon Mac whatever Kumi runs as. On Windows x64: REAPER for Windows on Arm is an
-    ARM64EC build, which loads x64 libraries, as an x64 REAPER under emulation does."""
+    """What the target's bundle builds an extension for. On a Mac both architectures, in one file: the DAW may run under
+    Rosetta (x86_64) on an Apple silicon Mac whatever Kumi runs as. On Windows x64: a DAW for Windows on Arm may be an
+    ARM64EC build (REAPER's is), which loads x64 libraries, as an x64 DAW under emulation does."""
     system = system_of(target)
     if system == "macos":
         return ["aarch64-apple-darwin", "x86_64-apple-darwin"]
@@ -525,23 +529,25 @@ def extension_archs(target: str) -> list[str]:
     arch = {"aarch64": "arm64", "x86_64": "x86_64"}
     return sorted(arch[build.split("-")[0]] for build in extension_builds(target))
 
-def check_extension(path: Path, target: str, archs: list[str] | None = None) -> dict:
-    """The extension as the target's REAPER loads it: the architectures the bundle promises (`archs`, else the target's
-    builds), each exporting ReaperPluginEntry; on macOS signed (Apple silicon runs no unsigned code) and named for itself,
-    not for the build folder; on Windows with the C runtime linked in; on Linux needing no newer glibc than Kumi does."""
+def check_extension(daw: dict, path: Path, target: str, archs: list[str] | None = None) -> dict:
+    """The extension as the target's DAW loads it: the architectures the bundle promises (`archs`, else the target's
+    builds), each exporting the DAW's entry point; on macOS signed (Apple silicon runs no unsigned code) and named for
+    itself, not for the build folder; on Windows with the C runtime linked in; on Linux needing no newer glibc than Kumi
+    does."""
     system = system_of(target)
+    entry = daw["library"]["entry"]
     slices = binary_facts(path)
     found, expected = sorted(piece["arch"] for piece in slices), sorted(archs or extension_archs(target))
     if found != expected:
         raise ValueError(f"{path.name} holds {', '.join(found)}, not {', '.join(expected)}")
     for piece in slices:
         where = f"{path.name} ({piece['arch']})"
-        if "ReaperPluginEntry" not in piece["exports"]:
-            raise ValueError(f"{where} doesn't export ReaperPluginEntry, so REAPER wouldn't load it")
+        if entry not in piece["exports"]:
+            raise ValueError(f"{where} doesn't export {entry}, so {daw['name']} wouldn't load it")
         if system == "macos" and not piece["signed"]:
             raise ValueError(f"{where} isn't signed: macOS on Apple silicon refuses unsigned code")
-        if system == "macos" and piece["install_name"] != REAPER_INSTALL_NAME:
-            raise ValueError(f"{where} names itself {piece['install_name']}, not {REAPER_INSTALL_NAME}")
+        if system == "macos" and piece["install_name"] != install_name(daw):
+            raise ValueError(f"{where} names itself {piece['install_name']}, not {install_name(daw)}")
         crt = sorted(name for name in piece.get("imports", ()) if WINDOWS_CRT.fullmatch(name))
         if system == "windows" and crt:
             raise ValueError(f"{where} needs the C runtime installed ({', '.join(crt)}): build it with +crt-static")
@@ -549,6 +555,15 @@ def check_extension(path: Path, target: str, archs: list[str] | None = None) -> 
             raise ValueError(f"{where} needs glibc {'.'.join(map(str, piece['glibc']))}, newer than Kumi's "
                              f"{'.'.join(map(str, GLIBC_MOST))}: build it on the bundle's Ubuntu 22.04 runner")
     return {"archs": found, "sha256": digest(path)}
+
+def extension_of(path: Path) -> dict:
+    """The DAW a built library is the extension of, by its name as Cargo builds it or as it ships (libreaper_kumi.dylib,
+    reaper_kumi.dll)."""
+    stem = path.name.split(".")[0]
+    for daw in DAW_BRIDGES.values():
+        if "library" in daw and crate_names(daw)[1] in (stem, stem.removeprefix("lib")):
+            return daw
+    raise ValueError(f"{path.name} isn't the extension of a DAW in scripts/daws.toml")
 
 def crate_version(root: Path, crate: str) -> str:
     return tomllib.loads((root / crate / "Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
@@ -563,50 +578,56 @@ def renoise_manifest_version(version: str) -> str:
         raise ValueError(f"the Renoise tool's version {version} doesn't fit its manifest's number (minor and patch under 100)")
     return f"{major}.{minor:02d}" + (f"{patch:02d}" if patch else "")
 
-def renoise_tool(root: Path) -> tuple[Path, str, dict[str, str]]:
-    """The tool's folder, version and files, checked: its manifest names its id and API, its version file and manifest
-    agree, and it holds only the tool's own files (no preferences or reference a Renoise or a Kumi wrote into it)."""
-    folder = root / RENOISE_TOOL_SOURCE
+def renoise_tool(daw: dict, root: Path) -> tuple[Path, str, dict[str, str]]:
+    """A Renoise tool's folder, version and files, checked: its manifest names its id (the folder's name) and API, its
+    version file and manifest agree, and it holds only the tool's own files (no preferences or reference a Renoise or a
+    Kumi wrote into it)."""
+    folder, api = root / daw["tool"]["folder"], daw["tool"]["api"]
     files = inventory(folder)
     manifest = (folder / "manifest.xml").read_text(encoding="utf-8")
     field = lambda name: (re.findall(rf"<{name}>\s*([^<]*?)\s*</{name}>", manifest) or [None])[0]
-    if field("Id") != RENOISE_TOOL_ID or folder.name != f"{RENOISE_TOOL_ID}.xrnx":
-        raise ValueError(f"the Renoise tool's manifest names {field('Id')}, not {RENOISE_TOOL_ID}: song tool_data is keyed by it")
-    if field("ApiVersion") != RENOISE_API:
-        raise ValueError(f"the Renoise tool declares API {field('ApiVersion')}, not {RENOISE_API} (Renoise 3.5)")
+    tool_id = folder.name.removesuffix(".xrnx")
+    if field("Id") != tool_id or folder.name != f"{tool_id}.xrnx":
+        raise ValueError(f"the Renoise tool's manifest names {field('Id')}, not {tool_id}: song tool_data is keyed by it")
+    if field("ApiVersion") != api:
+        raise ValueError(f"the Renoise tool declares API {field('ApiVersion')}, not {api} (scripts/daws.toml)")
     declared = re.search(r'return\s+"([^"]+)"', (folder / "payload/version.lua").read_text(encoding="utf-8"))
     version = declared[1] if declared else ""
     if field("Version") != renoise_manifest_version(version):
         raise ValueError(f"the Renoise tool's manifest says Version {field('Version')}, and payload/version.lua {version} "
                          f"(its manifest number is {renoise_manifest_version(version)})")
     for name in files:
-        if name in NOT_PAYLOAD or any(part.startswith(".") for part in name.split("/")) or not name.endswith(RENOISE_SUFFIXES):
-            raise ValueError(f"{RENOISE_TOOL_SOURCE}/{name} isn't one of the tool's own files (Lua, XML, JSON)")
+        if name in NOT_PAYLOAD or any(part.startswith(".") for part in name.split("/")) or not name.endswith(TOOL_SUFFIXES):
+            raise ValueError(f"{daw['tool']['folder']}/{name} isn't one of the tool's own files (Lua, XML, JSON)")
     return folder, version, files
 
-def stage_daws(root: Path, bundle: Path, target: str, extension: Path) -> dict[str, str]:
-    """REAPER's extension (checked, with its version beside it) and Renoise's tool, into the bundle's daws folder;
-    their versions."""
-    reaper = bundle / DAWS / "reaper"
-    check_extension(extension, target)
-    copy(extension, reaper / extension_name(target))
-    (reaper / extension_name(target)).chmod(0o755)
-    version = crate_version(root, REAPER_CRATE)
-    (reaper / f"{REAPER_EXTENSION}.version").write_text(version + "\n", encoding="ascii")
-    folder, tool_version, files = renoise_tool(root)
-    for name in files:
-        copy(folder / name, bundle / DAWS / "renoise" / RENOISE_TOOL / name)
-    return {"reaper": version, "renoise": tool_version}
+def stage_daws(root: Path, bundle: Path, target: str, extensions: dict[str, Path]) -> dict[str, str]:
+    """Each other DAW's bridge into the bundle's daws/<id> folder: a library from `extensions` (checked, with its
+    version beside it) or a Renoise tool; their versions, by the DAW's id."""
+    versions = {}
+    for daw_id, daw in DAW_BRIDGES.items():
+        folder = bundle / DAWS / daw_id
+        if "library" in daw:
+            check_extension(daw, extensions[daw_id], target)
+            copy(extensions[daw_id], folder / extension_name(daw, target))
+            (folder / extension_name(daw, target)).chmod(0o755)
+            versions[daw_id] = crate_version(root, daw["library"]["crate"])
+            (folder / f"{crate_names(daw)[1]}.version").write_text(versions[daw_id] + "\n", encoding="ascii")
+        else:
+            source, versions[daw_id], files = renoise_tool(daw, root)
+            for name in files:
+                copy(source / name, folder / source.name / name)
+    return versions
 
-def cargo_library(rust_target: str) -> str:
-    return {"macos": f"lib{REAPER_EXTENSION}.dylib", "windows": f"{REAPER_EXTENSION}.dll",
-            "linux": f"lib{REAPER_EXTENSION}.so"}[system_of(rust_target)]
+def cargo_library(daw: dict, rust_target: str) -> str:
+    name = crate_names(daw)[1]
+    return {"macos": f"lib{name}.dylib", "windows": f"{name}.dll", "linux": f"lib{name}.so"}[system_of(rust_target)]
 
-def build_extension(root: Path, target: str, profile: str, out: Path) -> tuple[Path, list[str]]:
-    """REAPER's extension for the target's bundle, finished as it ships, in `out`; the commands that built it.
+def build_extension(daw: dict, root: Path, target: str, profile: str, out: Path) -> tuple[Path, list[str]]:
+    """A DAW's extension for the target's bundle, finished as it ships, in `out`; the commands that built it.
 
     Never stripped by rustc: on macOS 27 a rustc strip can misalign the library's LINKEDIT string pool, and dyld then
-    refuses it (Cargo.toml keeps reaper-kumi at strip = "none"). The platform's own strip runs afterwards instead. A Mac
+    refuses it (Cargo.toml keeps the crate at strip = "none"). The platform's own strip runs afterwards instead. A Mac
     gets one universal file, signed again after lipo and strip; Windows links the C runtime in.
     """
     profile_args = ["--release"] if profile == "release" else ["--profile", profile]
@@ -618,13 +639,13 @@ def build_extension(root: Path, target: str, profile: str, out: Path) -> tuple[P
             # In a target folder of its own: the flag changes every crate's build, and the workspace's has none.
             environment["RUSTFLAGS"] = (environment.get("RUSTFLAGS", "") + " -C target-feature=+crt-static").strip()
             target_dir = target_dir / "crt-static"
-        command = ["cargo", "build", "--locked", *profile_args, "--target", rust_target, "-p", "reaper-kumi",
+        command = ["cargo", "build", "--locked", *profile_args, "--target", rust_target, "-p", crate_names(daw)[0],
                    "--target-dir", str(target_dir)]
         subprocess.run(command, cwd=root, env=environment, check=True)
         commands.append(" ".join(command))
-        built.append(target_dir / rust_target / profile / cargo_library(rust_target))
+        built.append(target_dir / rust_target / profile / cargo_library(daw, rust_target))
     out.mkdir(parents=True, exist_ok=True)
-    final = out / extension_name(target)
+    final = out / extension_name(daw, target)
     final.unlink(missing_ok=True)
     system = system_of(target)
     if system == "macos":
@@ -638,12 +659,14 @@ def build_extension(root: Path, target: str, profile: str, out: Path) -> tuple[P
     return final, commands
 
 def build_release(root: Path, binaries: Path, out: Path, target: str, source: dict, builder: dict, recipe: str, bridge_only=False,
-                  reaper_extension: Path | None = None) -> dict:
-    """The target's bundle in `out` (or, `bridge_only`, the Ableton bridge's artifact alone). A bundle carries REAPER's
-    extension, built for it (`reaper_extension`), and Renoise's tool."""
+                  extensions: dict[str, Path] | None = None) -> dict:
+    """The target's bundle in `out` (or, `bridge_only`, the Ableton bridge's artifact alone). A bundle carries each other
+    DAW's bridge: a library built for it (`extensions`, by the DAW's id) or a Renoise tool."""
     out.mkdir(parents=True, exist_ok=True)
-    if not bridge_only and reaper_extension is None:
-        raise ValueError("a bundle carries REAPER's extension: build it (build_extension) or name it")
+    extensions = extensions or {}
+    unbuilt = [daw for daw in DAW_BRIDGES.values() if "library" in daw and extensions.get(daw["id"]) is None]
+    if not bridge_only and unbuilt:
+        raise ValueError(f"a bundle carries {unbuilt[0]['name']}'s {unbuilt[0]['bridge']}: build it (build_extension) or name it")
     extension = ".exe" if "windows" in target else ""
     timestamp = int(datetime.datetime.fromisoformat(source["commitTimestamp"]).timestamp())
     with tempfile.TemporaryDirectory(prefix="kumi-native-stage-", dir=out) as temp:
@@ -668,9 +691,9 @@ def build_release(root: Path, binaries: Path, out: Path, target: str, source: di
         for folder in ("remote-script", "live-extension"):
             shutil.copytree(package / folder, bundle / folder)
         stage_hands(root, bundle, target)
-        daws = stage_daws(root, bundle, target, reaper_extension)
+        daws = stage_daws(root, bundle, target, extensions)
         version = tomllib.loads((root / "crates/kumi/Cargo.toml").read_text())["package"]["version"]
-        # `bridge` is Live's bridge, as every earlier Kumi reads it; REAPER's extension and Renoise's tool are new keys.
+        # `bridge` is Live's bridge, as every earlier Kumi reads it; each other DAW's bridge is a key of its own, its id.
         metadata = {"name": "kumi", "version": version, "bridge": manifest["package"]["version"], **daws, "runtime": "rust-native", "target": target}
         json_write(bundle / "package.json", metadata)
         # Existing JavaScript applications use this entry to return from an explicit rollback.
@@ -702,9 +725,12 @@ def main() -> None:
     parser.add_argument("--bridge-only", action="store_true", help="build only the receipt-bound bridge artifact")
     parser.add_argument("--profile", default="release",
                         help="Cargo profile: release (the default, what's published) or ci-release (CI's quicker build)")
-    parser.add_argument("--reaper-extension", type=Path, help="REAPER's extension, already built for the target's bundle")
+    for daw in DAW_BRIDGES.values():
+        if "library" in daw:
+            parser.add_argument(f"--{daw['id']}-extension", type=Path,
+                                help=f"{daw['name']}'s {daw['bridge']}, already built for the target's bundle")
     parser.add_argument("--check-extension", type=Path, metavar="LIBRARY",
-                        help="only check a built REAPER extension as the target's bundle would carry it, then stop")
+                        help="only check a DAW's extension, as built, as the target's bundle would carry it, then stop")
     parser.add_argument("--thin", action="store_true", help="with --check-extension: one build for the target's own architecture")
     args = parser.parse_args()
     target = args.target or re.search(r"^host: (.+)$", run(["rustc", "-vV"]), re.M)[1]
@@ -712,7 +738,7 @@ def main() -> None:
         raise ValueError("invalid Rust target triple")
     if args.check_extension:
         archs = [{"aarch64": "arm64", "x86_64": "x86_64"}[target.split("-")[0]]] if args.thin else None
-        print(json.dumps(check_extension(args.check_extension, target, archs)))
+        print(json.dumps(check_extension(extension_of(args.check_extension), args.check_extension, target, archs)))
         return
     source = source_evidence(ROOT)
     if not re.fullmatch(r"[a-z][a-z0-9-]*", args.profile):
@@ -722,23 +748,26 @@ def main() -> None:
     command += ["-p", "ableton-mcp-server", "--bin", "ableton-mcp-server", "--bin", "ableton-mcp-analysis-worker"] if args.bridge_only else ["--workspace", "--bins"]
     recipe = " ".join(command)
     out = args.out or ROOT / "release/native" / target
-    extension = args.reaper_extension
+    extensions = {daw_id: getattr(args, daw_id.replace("-", "_") + "_extension")
+                  for daw_id, daw in DAW_BRIDGES.items() if "library" in daw}
+    unbuilt = [] if args.bridge_only else [DAW_BRIDGES[daw_id] for daw_id, built in extensions.items() if built is None]
     if args.binaries_dir is None:
         subprocess.run(command, cwd=ROOT, check=True)
         binaries = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / target / args.profile
-        if not args.bridge_only and extension is None:
-            extension, _ = build_extension(ROOT, target, args.profile, Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / "reaper-extension" / target)
+        for daw in unbuilt:
+            extensions[daw["id"]], _ = build_extension(daw, ROOT, target, args.profile, Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / f"{daw['id']}-extension" / target)
     else:
         binaries = args.binaries_dir.resolve()
         recipe = "prebuilt binaries supplied with --binaries-dir; expected build: " + recipe
-        if not args.bridge_only and extension is None:
-            raise ValueError("with --binaries-dir, name REAPER's extension built for the bundle with --reaper-extension")
+        if unbuilt:
+            raise ValueError(f"with --binaries-dir, name {unbuilt[0]['name']}'s {unbuilt[0]['bridge']} built for the bundle with "
+                             f"--{unbuilt[0]['id']}-extension")
     builder = {"rustc": run(["rustc", "--version"]), "cargo": run(["cargo", "--version"]),
         "platform": {"Darwin": "darwin", "Windows": "win32"}.get(platform.system(), platform.system().lower()),
         "architecture": platform.machine(), "runnerImage": os.environ.get("ImageOS", "local"),
         "runnerImageVersion": os.environ.get("ImageVersion", "local"), "cargoLockSha256": digest(ROOT / "Cargo.lock"),
         "workflowSha256": digest(ROOT / ".github/workflows/installer.yml")}
-    result = build_release(ROOT, binaries, out, target, source, builder, recipe, args.bridge_only, extension)
+    result = build_release(ROOT, binaries, out, target, source, builder, recipe, args.bridge_only, extensions)
     print(json.dumps({key: value for key, value in result.items() if key != "manifest"}, indent=2))
 
 if __name__ == "__main__":

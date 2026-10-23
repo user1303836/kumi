@@ -16,23 +16,23 @@ How the repository fits together, how to work on each part, and how to release.
 | `crates/kumi-media` | Audio (decoding, analysis, matching a sound, DSP), voice input, and the programs that decode media (ffmpeg, yt-dlp, whisper.cpp) with a video's frames, captions and speech |
 | `crates/kumi-ai` | The model clients: each provider's wire binding, the providers and their models, signing in, the models Kumi runs itself (ONNX Runtime), a turn's timing and how a failed call is told |
 | `crates/kumi-web` | The web and video tools: searching and reading the web (pages, PDFs, GitHub, Max patches), and watching a tutorial for its words, frames and sound |
-| `crates/kumi-library` | The producer's library (learning, search, presets, Sets, taste), the plug-ins' formats and roles, and finding samples on disk; each DAW says where its own library is |
+| `crates/kumi-library` | The producer's library (learning, search, presets, Sets, taste), the plug-ins' formats and roles, and finding samples on disk; each DAW says where its own library is and how it's laid out |
 | `crates/kumi-listening` | Listening: what a listen measures, the judge and its checklist, the engine's rounds, the listening models and their slots, style references and notation; each DAW plays and renders for it |
 | `crates/kumi-daw` | What a DAW's crate gives the app and gets from it: the DAW's provider (what it is, and its bridge found, installed, checked and taken out), the doctor's checks, setup's DAW side, and the small ports its steps use (what they say, ask and run) |
 | `crates/kumi-common` | Shared runtime utilities and source-compatible value handling |
-| `daws/ableton/kumi-daw-ableton` | Live, host side: its integration (the Set's observation, changes and history, rendering and Kumi Ears, Hands, its library and manual) and the Max for Live device builder |
+| `daws/ableton/kumi-daw-ableton` | Live, host side: its integration (the Set's observation, changes and history, rendering and Kumi Ears, Hands, its library and manual), the Max for Live device builder, and its provider (`src/app/`: finding, opening and checking Live, its bridge put in, updated, rolled back and taken out, its part of the doctor, the report and first-run setup) |
 | `daws/ableton/ableton-mcp-server` | Native MCP bridge, analysis worker, lifecycle, setup, migration and diagnostics |
 | `daws/ableton/remote-script` | The bridge's Remote Script, which runs inside Live (`ableton_mcp_remote_script.py`, the `AbletonMcpBridge/` entry point, Python tests) |
 | `daws/ableton/live-extension` | Kumi's Live extension for Live 12.4 and later, on Live's Extensions SDK (TypeScript, with its own `package.json`) |
 | `daws/ableton/protocol` | `ableton-live-v1.operations.json`, the operation registry the bridge and the Remote Script share |
 | `scripts` | Release builders, migration packaging, the Mac helper's build, the isolated test runners, and `native-kumi.mjs` behind `npm run kumi` and `npm run setup` |
 | `daws/own/daw-mcp-server` | Kumi's host for REAPER and Renoise (`daw-mcp-server --daw reaper\|renoise`): MCP over stdio, the changes' journal and undo, listening jobs, catch-up; also usable by other MCP clients |
-| `daws/own/kumi-daw-own` | What REAPER's and Renoise's integrations share, host side: the integration through Kumi's own bridges, the change engine and its undo, catching up, listening, audio to MIDI and stems, instant phrases, the pictures and FOCUS views, kept scripts and delivery to a spec |
-| `daws/reaper/kumi-daw-reaper` | REAPER, host side: its integration through Kumi's own bridge, the tools only REAPER has (variations of its items, delivery, routing) and where its library is |
+| `daws/own/kumi-daw-own` | What REAPER's and Renoise's integrations share, host side: the integration through Kumi's own bridges, the change engine and its undo, catching up, listening, audio to MIDI and stems, instant phrases, the pictures and FOCUS views, kept scripts and delivery to a spec, and the provider both DAWs' bridges are found, installed, checked and taken out through (`provider`) |
+| `daws/reaper/kumi-daw-reaper` | REAPER, host side: its integration through Kumi's own bridge, the tools only REAPER has (variations of its items, delivery, routing), where its library is, and its provider's value (`PROVIDER`) |
 | `daws/reaper/reaper-kumi` | Kumi's REAPER extension (`reaper_kumi`), built against REAPER's SDK headers vendored in `sdk/` |
 | `daws/own/daw-bridge` | What the REAPER and Renoise bridges share: the loopback wire (`kumi-daw/1`), its handshake and auth, discovery, finding the DAWs, the doctor's checks and the bridge files' lifecycle |
 | `daws/renoise` | Kumi's Renoise tool (`com.kumi.Bridge.xrnx`, Lua) and its tests against a mock of Renoise's API |
-| `daws/renoise/kumi-daw-renoise` | Renoise, host side: its integration through Kumi's own bridge, the tools only Renoise has (variations of its lines and phrases, the sample map, chopping, cleaning up jams, layered breaks) and where its library is |
+| `daws/renoise/kumi-daw-renoise` | Renoise, host side: its integration through Kumi's own bridge, the tools only Renoise has (variations of its lines and phrases, the sample map, chopping, cleaning up jams, layered breaks), where its library is, and its provider's value (`PROVIDER`) |
 | `install.sh`, `install.ps1` | The installers |
 
 The crates share the root Cargo workspace; there's no npm workspace. The
@@ -326,7 +326,9 @@ python3 scripts/release.py --go     # the release
   `daws/reaper/reaper-kumi/Cargo.toml` and `Cargo.lock`, and in the tool's
   `payload/version.lua` and `manifest.xml`, and each one's ships-with line moves
   on in the three `KUMI_GUIDE.md`. One the last release didn't have ships at its
-  version, and its line names this release already.
+  version, and its line names this release already. `scripts/daws.toml` lists
+  these bridges for the release and packaging scripts: a DAW added there gets
+  its own flags, heading and ships-with line.
 - **The version** is the next patch; `--minor` or `--version X.Y.Z` choose
   another.
 - **With `--go`** it commits "Kumi X.Y.Z: the changelog, READMEs and versions"

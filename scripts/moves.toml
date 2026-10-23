@@ -4796,3 +4796,92 @@ to = "kumi_ai"
 [[rust]]
 from = "kumi_runtime"
 to = "kumi_agent"
+
+# Live's provider, from the app into kumi-daw-ableton's `app` module (P3.8 follow-up C, 2026-10-23), with Live's folders
+# (from the app's config) and the bridge's server (from its doctor) beside it.
+[[move]]
+from = "crates/kumi/src/daw/ableton"
+to = "daws/ableton/kumi-daw-ableton/src/app"
+
+[[rust]]
+from = "kumi::config::live_preferences_dir"
+to = "kumi_daw_ableton::app::folders::live_preferences_dir"
+
+[[rust]]
+from = "kumi::config::live_user_library"
+to = "kumi_daw_ableton::app::folders::live_user_library"
+
+[[rust]]
+from = "kumi::config::remote_scripts_dir"
+to = "kumi_daw_ableton::app::folders::remote_scripts_dir"
+
+[[rust]]
+from = "kumi::config::find_bridge_config"
+to = "kumi_daw_ableton::app::folders::find_bridge_config"
+
+[[rust]]
+from = "kumi::doctor::read_bridge_server"
+to = "kumi_daw_ableton::app::folders::read_bridge_server"
+
+[[rust]]
+from = "kumi::doctor::BridgeServer"
+to = "kumi_daw_ableton::app::folders::BridgeServer"
+
+[[rust]]
+from = "kumi::bridge_setup"
+to = "kumi_daw_ableton::app::bridge_setup"
+
+[[rust]]
+from = "kumi::live_app"
+to = "kumi_daw_ableton::app::live_app"
+
+[[rust]]
+from = "kumi::live_extension"
+to = "kumi_daw_ableton::app::live_extension"
+
+[[rust]]
+from = "kumi::willington"
+to = "kumi_daw_ableton::app::willington"
+
+[[rust]]
+from = "kumi::daw::ableton"
+to = "kumi_daw_ableton::app"
+
+# Kumi's own bridges' provider, from the app into kumi-daw-own (P3.8 follow-up D, 2026-10-23); REAPER's and Renoise's
+# values, from the app's DAW table into their crates (`PROVIDER`).
+[[move]]
+from = "crates/kumi/src/daw/own.rs"
+to = "daws/own/kumi-daw-own/src/provider.rs"
+
+[[rust]]
+from = "kumi::daw::registry::REAPER"
+to = "kumi_daw_reaper::PROVIDER"
+
+[[rust]]
+from = "kumi::daw::registry::RENOISE"
+to = "kumi_daw_renoise::PROVIDER"
+
+[[rust]]
+from = "kumi::daw::own"
+to = "kumi_daw_own::provider"
+
+# REAPER's and Renoise's ears, from kumi-daw-own into their crates (P3.8's later items, 2026-10-23).
+[[rust]]
+from = "kumi_daw_own::ears::reaper_steps"
+to = "kumi_daw_reaper::ears::reaper_steps"
+
+[[rust]]
+from = "kumi_daw_own::ears::reaper_stem_steps"
+to = "kumi_daw_reaper::ears::reaper_stem_steps"
+
+[[rust]]
+from = "kumi_daw_own::ears::renoise_cells"
+to = "kumi_daw_renoise::ears::renoise_cells"
+
+[[rust]]
+from = "kumi_daw_own::ears::renoise_stem_steps"
+to = "kumi_daw_renoise::ears::renoise_stem_steps"
+
+[[rust]]
+from = "kumi_daw_own::ears::Slot"
+to = "kumi_daw_renoise::ears::Slot"

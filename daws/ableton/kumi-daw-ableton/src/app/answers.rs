@@ -1,10 +1,10 @@
 //! Answers to what Live's steps would otherwise find out for themselves: each a type a test gives in
 //! `kumi_daw::io::Answers` (which Lives are installed, whether Live runs, a stand-in for Live's integration).
 use super::{doctor::PortOwner, live_app::InstalledLive};
+use crate::AbletonOptions;
 use futures::future::LocalBoxFuture;
 use kumi_agent::core::contracts::Integration;
 use kumi_daw::{check::Check, process::AsyncBool};
-use kumi_daw_ableton::AbletonOptions;
 use kumi_types::errors::RuntimeError;
 use std::rc::Rc;
 

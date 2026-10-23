@@ -1,5 +1,6 @@
 pub mod action_execution;
 pub mod actions;
+pub mod app;
 pub mod arrange;
 pub mod audition;
 pub mod bridge_version;

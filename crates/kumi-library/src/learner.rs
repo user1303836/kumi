@@ -119,6 +119,7 @@ pub async fn main(daws: Daws) -> io::Result<()> {
             let (report_latest, report_last, report_output, report_dir) = (latest.clone(), last.clone(), output.clone(), dir.clone());
             let mut learning = LearnOptions::new(plan_learning(PlanOptions { daws, ..options.plan }).await, stop.clone());
             learning.rebuild = options.rebuild;
+            learning.daws = daws;
             learning.gate = Some(Rc::new(move || {
                 let (paused, wake) = (paused.clone(), wake.clone());
                 Box::pin(async move {

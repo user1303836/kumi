@@ -1,8 +1,6 @@
 //! The DAWs this Kumi works with (the DAW table, in `registry`), and the one this run works with: what the app says of
 //! the DAW and shows of its tools, its focus and its devices comes from here, and each DAW's provider finds its bridge
 //! and makes the session's integration.
-pub mod ableton;
-pub mod own;
 pub mod registry;
 
 use kumi_agent::core::{presentation::ToolPresentation, view::ViewPresentation};
@@ -81,7 +79,7 @@ pub fn chosen_among(
             let found = found_here(env, here);
             let picked = last_used(env);
             let first = match found.as_slice() {
-                [] => &ableton::provider::Ableton as &'static dyn DawProvider,
+                [] => provider(DawId::Ableton).expect("Live is registered"),
                 [one] => *one,
                 several => several
                     .iter()

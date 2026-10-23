@@ -562,69 +562,6 @@ pub fn load_inference_config(env: &Env) -> Result<InferenceConfig, RuntimeError>
         auth_file: load_auth_file(env)?,
     })
 }
-/// Where Live keeps its settings, a folder for each version it's been opened as ("Live 12.4.15").
-pub fn live_preferences_dir(env: &Env) -> String {
-    let home = env.get("HOME").cloned().unwrap_or_else(home);
-    if cfg!(windows) {
-        join(&env.get("APPDATA").cloned().unwrap_or_else(|| join(&home, "AppData/Roaming")), "Ableton")
-    } else {
-        join(&home, "Library/Preferences/Ableton")
-    }
-}
-pub fn live_user_library(env: &Env) -> Option<String> {
-    let mut configs = Vec::new();
-    for entry in std::fs::read_dir(live_preferences_dir(env)).ok()? {
-        let entry = entry.ok()?;
-        if !entry.file_name().to_string_lossy().starts_with("Live ") {
-            continue;
-        }
-        let file = entry.path().join(if cfg!(windows) { "Preferences/Library.cfg" } else { "Library.cfg" });
-        if file.exists() {
-            let mtime = std::fs::metadata(&file).ok()?.modified().ok()?;
-            configs.push((file, mtime));
-        }
-    }
-    configs.sort_by(|a, b| b.1.cmp(&a.1));
-    static USER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<UserLibrary>(.*?)</UserLibrary>").unwrap());
-    for (file, _) in configs {
-        let text = std::fs::read_to_string(file).ok()?;
-        let block = USER.captures(&text).and_then(|c| c.get(1)).map(|m| m.as_str()).unwrap_or("");
-        let value = |field: &str| {
-            Regex::new(&format!(r#"<{field} Value="([^"]*)""#))
-                .unwrap()
-                .captures(block)
-                .map(|c| c[1].replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
-        };
-        let name = value("ProjectName").filter(|s| !s.is_empty()).unwrap_or("User Library".into());
-        if let Some(folder) = value("ProjectPath").filter(|s| !s.is_empty() && is_absolute(s)) {
-            return Some(join(&folder, &name));
-        }
-    }
-    None
-}
-pub fn remote_scripts_dir(env: &Env) -> String {
-    if let Some(folder) = env.get("KUMI_REMOTE_SCRIPTS_DIR").filter(|s| !s.is_empty()) {
-        return folder.clone();
-    }
-    if let Some(library) = live_user_library(env) {
-        return join(&library, "Remote Scripts");
-    }
-    let home = home();
-    let documents = if cfg!(windows) {
-        [join(&home, "OneDrive/Documents"), join(&home, "Documents")]
-            .into_iter()
-            .find(|p| Path::new(&join(p, "Ableton")).exists())
-            .unwrap_or_else(|| join(&home, "Documents"))
-    } else {
-        join(&home, "Music")
-    };
-    join(&documents, "Ableton/User Library/Remote Scripts")
-}
-pub fn find_bridge_config(env: &Env) -> Option<String> {
-    let value = read_json(&join(&remote_scripts_dir(env), "AbletonMcpBridge/bridge-reference.json"))?;
-    let config = value["config"].as_str()?;
-    (is_absolute(config) && Path::new(config).is_file()).then(|| config.into())
-}
 /// How ChatGPT signs in when nothing says: in this computer's browser, or over SSH, where the browser isn't the
 /// producer's, with a code entered in a browser anywhere.
 pub fn chatgpt_sign_in(env: &Env) -> LoginMethod {

@@ -657,7 +657,11 @@ async fn willington_is_said_off_at_the_start_and_switched_by_its_command() {
                     let on = on.clone();
                     Rc::new(move |value| {
                         on.set(value);
-                        let said = if value { kumi::willington::TURNED_ON } else { kumi::willington::TURNED_OFF };
+                        let said = if value {
+                            kumi_daw_ableton::app::willington::TURNED_ON
+                        } else {
+                            kumi_daw_ableton::app::willington::TURNED_OFF
+                        };
                         async move { Ok(said) }.boxed_local()
                     })
                 },

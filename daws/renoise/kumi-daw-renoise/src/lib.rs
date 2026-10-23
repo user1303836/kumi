@@ -4,11 +4,14 @@
 //! own shares (`kumi_daw_own::bridge`).
 pub mod changes;
 mod chop;
+pub mod ears;
 mod jam;
 mod layers;
 pub mod library;
 mod lines;
+mod listening;
 mod mapping;
+mod provider;
 mod variations;
 
 use kumi_agent::core::{
@@ -45,6 +48,8 @@ const INSTRUCTIONS: &str = concat!(
     " Prefer native devices for sample work; render plug-in instruments before a song is shared; a bypassed plug-in keeps its latency. Never depend on tools such as xStream or Duplex; when Paketti is installed the producer may name its commands."
 );
 
+pub use provider::PROVIDER;
+
 pub const DAW: OwnDaw = OwnDaw {
     profile: &DawProfile::RENOISE,
     descriptor: BridgeDescriptor::RENOISE,
@@ -64,6 +69,8 @@ pub const DAW: OwnDaw = OwnDaw {
     phrases: &PHRASES,
     scripts: &SCRIPTS,
     spec: &SPEC,
+    listening: &listening::LISTENING,
+    outside_code: "Lua run in Renoise",
 };
 
 /// (#401) Delivery to a spec in Renoise: the master's row and post-FX fader, and what limits or raises it.
@@ -452,6 +459,8 @@ pub fn create_renoise_integration(options: OwnOptions) -> Rc<dyn Integration> {
                 kumi_agent::core::layers::tool::Layers::new(backend).tool()
             }),
             variations,
+            // (#401) its ears, for the shared audio to MIDI and stems
+            ears: Some(Rc::new(ears::RenoiseEars)),
             ..Default::default()
         }
     })

@@ -107,8 +107,8 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 
 | 工作流 | 作业 | 运行内容 |
 | --- | --- | --- |
-| **CI** | `Rust / Linux`、`Rust / Linux (Live's bridge)`、`Rust / Linux (DAW bridges)` | 通过隔离运行器运行 `.config/nextest.toml` 的 `ci` 集合，按 crate 分成三个部分同时运行（Kumi 及其运行时；`ableton-mcp-server`；`daw-bridge`、`daw-mcp-server` 和 `reaper-kumi`），所以没有哪个运行器要构建全部测试二进制：除 Extended 工作流运行的长测试（其中包括 REAPER 和 Renoise 的完整流程模拟，配置文件中列出并说明原因）之外的全部测试。在拉取请求上，每个部分只测试改动影响到的本部分 crate（由 `scripts/dev.py` 选出，与 `dev.py check` 相同），没有受影响 crate 的部分会跳过。运行超过 30 秒的测试会按名称失败。然后运行 `git diff --check`。每个 Rust 作业（包括 Extended 的）都会把它选中的测试列表保存为构件（`nextest-list-*`），以便比较不同运行的测试 |
-| | `Rust / macOS`、`Rust / Windows` | `ci-os` 集合：因平台而异的测试（安装、启动和更新；终端、stdin 和 Windows 控制台；Hands；路径、文件和子进程；存储），也只构建这些测试 |
+| **CI** | `Rust / Linux`、`Rust / Linux (Kumi's crates)`、`Rust / Linux (bridges)` | 通过隔离运行器运行 `.config/nextest.toml` 的 `ci` 集合，按 crate 分成测试时间大致相同的三个部分同时运行（应用；Kumi 的其他 crate；`ableton-mcp-server`、`daw-bridge`、`daw-mcp-server` 和 `reaper-kumi`），所以没有哪个运行器要构建全部测试二进制：除 Extended 工作流运行的长测试（其中包括 REAPER 和 Renoise 的完整流程模拟，配置文件中列出并说明原因）之外的全部测试。在拉取请求上，每个部分只测试改动影响到的本部分 crate（由 `scripts/dev.py` 选出，与 `dev.py check` 相同），没有受影响 crate 的部分会跳过。运行超过 30 秒的测试会按名称失败。然后运行 `git diff --check`。每个 Rust 作业（包括 Extended 的）都会把它选中的测试列表保存为构件（`nextest-list-*`），以便比较不同运行的测试 |
+| | `Rust / macOS`、`Rust / Windows`、`Rust / Windows (Kumi's crates and bridges)` | `ci-os` 集合：因平台而异的测试（安装、启动和更新；终端、stdin 和 Windows 控制台；Hands；路径、文件和子进程；存储），也只构建这些测试。在 Windows 上分成测试时间大致相同的两个部分同时运行：应用的测试，以及其余的测试 |
 | | `Rust / Lint`（Ubuntu） | `cargo fmt --check`、示例的构建和 Clippy（仅供参考，但跨 await 持有 `RefCell` 借用会使该任务失败） |
 | | `Python Remote Script / ubuntu-24.04`、`macos-15`、`windows-2025`（Python 3.11） | Remote Script 的测试；编译该包 |
 | | `Live extension`（Ubuntu，Node 24） | 针对已提交的构建运行扩展的测试 |

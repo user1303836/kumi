@@ -1,6 +1,4 @@
 //! `kumi update` for a checkout: pulls, rebuilds and launches native binaries.
-/// Live's part, where update has always had it.
-pub use crate::daw::ableton::install::{checkout_bridge, older_bridge, OlderBridge};
 use crate::{
     process::TerminalAsk,
     spinner::{step, Terminal},
@@ -18,6 +16,7 @@ use kumi_common::{
 use kumi_daw::{
     io::{Answers, DawIo},
     process::{default_run, repository_dir, Ran, Run},
+    provider::newer,
 };
 use kumi_library::sources::{dirname, join};
 use kumi_types::{
@@ -29,29 +28,6 @@ use kumi_types::{
 use serde_json::{json, Value};
 use std::{fs, path::Path, rc::Rc};
 const DAY: f64 = 86400000.;
-pub fn newer(left: &str, right: &str) -> bool {
-    fn parts(text: &str) -> Vec<f64> {
-        text.split(['.', '-'])
-            .map(|s| {
-                let s = trim(s);
-                let sign = if s.starts_with('-') { -1. } else { 1. };
-                let s = s.strip_prefix(['+', '-']).unwrap_or(s);
-                let digits: String = s.chars().take_while(char::is_ascii_digit).collect();
-                sign * digits.parse::<f64>().unwrap_or(0.)
-            })
-            .collect()
-    }
-    let a = parts(left);
-    let b = parts(right);
-    for i in 0..3 {
-        let a = a.get(i).copied().unwrap_or(0.);
-        let b = b.get(i).copied().unwrap_or(0.);
-        if a != b {
-            return a > b;
-        }
-    }
-    false
-}
 #[derive(Clone)]
 pub struct UpdateControl {
     pub current: String,
@@ -232,13 +208,4 @@ pub async fn run_update(io: UpdateIo) -> i32 {
 }
 fn read_version(file: &str) -> Option<String> {
     serde_json::from_slice::<Value>(&fs::read(file).ok()?).ok()?.get("version")?.as_str().map(str::to_string)
-}
-/// A Cargo.toml's `[package]` version, as written there (`version = "1.0.74"`).
-pub(crate) fn read_cargo_version(file: &str) -> Option<String> {
-    let text = fs::read_to_string(file).ok()?;
-    let package = text.split("[package]").nth(1)?.split("\n[").next()?;
-    package.lines().find_map(|line| {
-        let (key, value) = line.split_once('=')?;
-        (key.trim() == "version").then(|| value.trim().trim_matches('"').to_string())
-    })
 }

@@ -16,7 +16,7 @@ Words: **own bridge** = Kumi's `kumi-daw/1` bridge, for every DAW but Live. **in
 
 ```text
 crates/                     Kumi itself; DAW-neutral
-  kumi/                     L6 the app: CLI, TUI (src/tui/), install, update, doctor; src/daw/ wires the DAWs in
+  kumi/                     L6 the app: CLI, TUI (src/tui/), install, update, doctor; src/daw/ is wiring only (the DAW table)
   kumi-daw/                 L4 the contract between the app and a DAW's crate (no terminal or UI types)
   kumi-agent/               L3 agent loop (src/kernel/), DAW-neutral core (src/core/), MCP client (src/mcp/),
                                what every DAW's integration shares (src/integrations/shared/)
@@ -33,13 +33,14 @@ daws/                       everything DAW-specific, one folder per DAW
                             ableton-mcp-server/ (bridge), remote-script/ (Python, in Live),
                             live-extension/ (TypeScript), protocol/ (the only list of Live's operations), max-standard/
   own/                      Kumi's own bridge: daw-bridge/ (kumi-daw/1 wire), daw-mcp-server/ (host),
-                            kumi-daw-own/ (L5: what the own-bridge integrations share)
+                            kumi-daw-own/ (L5: what the own-bridge integrations share, their provider among it)
   reaper/                   reaper-kumi/ (REAPER's extension; SDK in sdk/), kumi-daw-reaper/ (L5)
   renoise/                  com.kumi.Bridge.xrnx/ (Lua tool), tests/ (against a mock Renoise), kumi-daw-renoise/ (L5)
 testdata/oracles/<crate>/   recorded oracles; .ignore hides them from search (rg -u finds them)
 plugin-formats/             plug-in preset formats Kumi builds in
 vendor/willington/          Willington's files: owner only
-scripts/                    dev.py, areas.toml, moves.toml; release.py and packaging; test-isolated.sh/.ps1
+scripts/                    dev.py, areas.toml, moves.toml; release.py and packaging, daws.toml (their DAW list);
+                            test-isolated.sh/.ps1
 docs/{en,ja,zh-CN}/         user docs in three languages
 install.sh, install.ps1     the installers
 .config/nextest.toml        CI's test sets: ci, ci-os, extended
@@ -49,7 +50,7 @@ install.sh, install.ps1     the installers
 Why it's shaped this way (keep it so):
 - **One DAW, one folder.** DAW-specific code lives in `daws/<daw>/` so a DAW's work doesn't spread across the repo. Nothing in `crates/` uses `daws/` but the app (it wires the DAWs in) and tests (`daws/own/` only). A DAW's crates use no other DAW's, only `daws/own/`.
 - **Dependencies point down** (`LAYERS` in `scripts/dev.py`, checked by Required CI). Small acyclic crates mean a change rebuilds and tests only what depends on it; `dev.py affected` reads the graph and CI picks its jobs from it.
-- **The app reaches a DAW only through `kumi-daw`**, which each `kumi-daw-<daw>` implements; `crates/kumi/src/daw/registry.rs` is the table of DAWs. The aim: outside its folder, a new DAW adds only its `DawId`, profile and place names in `kumi-types`, one table entry, and (own-bridge DAWs) its entry in `daw-bridge`'s DAW list and its module in `daw-mcp-server`. Today the release and packaging scripts also name each DAW's bridge.
+- **The app reaches a DAW only through `kumi-daw`**, which each `kumi-daw-<daw>` implements; `crates/kumi/src/daw/registry.rs` is the table of DAWs. Outside its folder, a new DAW adds only its `DawId`, profile and place names in `kumi-types`, one table entry, and (own-bridge DAWs) its entry in `daw-bridge`'s DAW list, its module in `daw-mcp-server` and its entry in `scripts/daws.toml`, the list the release and packaging scripts read.
 - **Bridges are separate programs.** They run in or beside a DAW, work without Kumi (other MCP clients use them), use nothing of Kumi's but `kumi-common`, and have their own versions. Updating one means restarting the DAW.
 - **Frozen:** binary names, the installed bundle layout and the wire protocols. Installed copies update, roll back and talk across versions through them.
 
@@ -57,7 +58,7 @@ Where new code goes:
 - A DAW feature: `daws/<daw>/kumi-daw-<daw>/`, plus its bridge if it needs new operations. Shared by own-bridge DAWs: `daws/own/kumi-daw-own/`.
 - DAW-neutral behaviour (history, plans, sessions, workflows): `crates/kumi-agent/src/core/`. Model providers: `crates/kumi-ai/`.
 - A Live operation: `daws/ableton/protocol/` first (never copy operation names or the registry hash out of it), then the bridge and the Remote Script, tested as TESTING.md's "Writing tests" says. A change family: `CHANGES` in `daws/ableton/kumi-daw-ableton/src/changes.rs`.
-- Anything else: the lowest crate that can hold it. Don't add DAW-specific code to `crates/` (what's still in `crates/kumi/src/daw/` and `kumi-library` is due to move out).
+- Anything else: the lowest crate that can hold it. Don't add DAW-specific code to `crates/` (kumi-library's REAPER and Renoise preset readers and one search boost are due to move out).
 - A new crate gets its layer in `LAYERS` and a line in the tree above. A new top-level file or folder gets an area in `scripts/areas.toml`: CI fails on a file that belongs to no crate or area.
 
 ## 3. Conventions
@@ -72,6 +73,7 @@ Tests:
 - They never need a running DAW, a sign-in, the network or anything from this machine, and never touch `~/.kumi` or a DAW's folders.
 - A crate's integration tests are one binary: `tests/it/<file>.rs`, listed in `tests/it/main.rs`. Shared support goes in `kumi-testkit`.
 - `ci` is the fast set; long simulations, oracle replays and SDK interop belong in Extended (`.config/nextest.toml` says what `ci` leaves out).
+- CI tests what a change affects (`dev.py affected`): Rust / Linux in three parts and Rust / macOS gate a merge; Rust / Windows runs on main's pushes; `full-tests` runs every test on every system.
 - Goldens (`tests/goldens/` in `kumi`, `kumi-agent`, `kumi-daw-ableton`; `daw-mcp-server/tests/golden`; `daw-bridge/tests/vectors`) are byte-exact. `KUMI_BLESS=1` rewrites them: bless only an intended change, and say why in the PR. Oracles are never regenerated or edited.
 - A refactor's proof: goldens unchanged, the same test list, an unchanged release dry run.
 
@@ -105,7 +107,7 @@ Label every issue and PR you open (`--label` on `gh issue create` / `gh pr creat
 - Kumi ships as GitHub releases: `install.sh`, `install.ps1` and `kumi update` install the latest published one. Nothing else is deployed.
 - Kumi has one version, `X.Y.Z`. Live's bridge, REAPER's extension and Renoise's tool have their own, bumped when what that DAW loads changes (tests and Markdown aside):
   - Live: `daws/ableton/` (bridge, Remote Script, protocol, Live extension), `crates/kumi-common`, `vendor/willington`.
-  - REAPER: `daws/reaper/reaper-kumi`, `daws/own/daw-bridge`. Renoise: `daws/renoise/com.kumi.Bridge.xrnx`.
+  - REAPER and Renoise: what `scripts/daws.toml` says each loads: REAPER's extension (`daws/reaper/reaper-kumi`) and the parts of `daws/own/daw-bridge` it links; Renoise's tool (`daws/renoise/com.kumi.Bridge.xrnx`).
 - **In a PR, never bump a version or edit CHANGELOG.md.** Write `Changelog:` lines: they become the release notes and the app's What's new, so each is one thing a producer will notice, most important first. `Changelog: none` for internal work; `Changelog (bridge):`, `Changelog (reaper):` or `Changelog (renoise):` files a line under that heading.
 - Releasing is for the owner, or an agent asked to (`gh` signed in as a repository admin), right after a merge:
   - `python3 scripts/release.py`: the dry run (version, CHANGELOG entry, notes, checks).

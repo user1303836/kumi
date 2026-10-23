@@ -3,7 +3,10 @@
 //! The integration itself is the one every bridge of Kumi's own shares (`kumi_daw_own::bridge`).
 pub mod changes;
 mod delivery;
+pub mod ears;
 pub mod library;
+mod listening;
+mod provider;
 mod routing;
 mod variations;
 
@@ -40,6 +43,8 @@ const INSTRUCTIONS: &str = concat!(
     " Corrective work takes ReaEQ, ReaComp, ReaLimit and JS; reverb, saturation and instruments come from what the producer has installed first (REAPER's own instruments are ReaSynth, ReaSynDr and ReaSamplOmatic5000). A multi-FX sound to keep goes in a container with macros; match levels before comparing."
 );
 
+pub use provider::PROVIDER;
+
 pub const DAW: OwnDaw = OwnDaw {
     profile: &DawProfile::REAPER,
     descriptor: BridgeDescriptor::REAPER,
@@ -59,6 +64,8 @@ pub const DAW: OwnDaw = OwnDaw {
     phrases: &PHRASES,
     scripts: &SCRIPTS,
     spec: &SPEC,
+    listening: &listening::LISTENING,
+    outside_code: "Lua or a call to REAPER's API",
 };
 
 /// (#401) Delivery to a spec in REAPER: the master's row and fader, and what limits or raises it.
@@ -372,6 +379,8 @@ pub fn create_reaper_integration(options: OwnOptions) -> Rc<dyn Integration> {
                 let backend = routing::ReaperRouting::new(parts.changes.clone());
                 kumi_agent::core::routing::tool::Routing::new(backend).tool()
             }),
+            // (#401) its ears, for the shared audio to MIDI and stems
+            ears: Some(Rc::new(ears::ReaperEars)),
             ..Default::default()
         }
     })

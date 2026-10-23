@@ -60,14 +60,15 @@ jobs:
           # A change to any of these gets every system's install and transition jobs before it merges: main broke once
           # when the Mac helper's didn't. Each has to be there, so a renamed one can't drop out unnoticed.
           for path in install.sh install.ps1 crates/kumi/src/install.rs crates/kumi/src/update.rs crates/kumi/src/install/migration.rs \
-            crates/kumi/src/daw/ableton/bridge_setup.rs crates/kumi/src/daw/ableton/live_extension.rs \
-            crates/kumi/src/daw/ableton/live_app.rs crates/kumi/src/process.rs crates/kumi-daw/src/process.rs \
+            daws/ableton/kumi-daw-ableton/src/app/bridge_setup.rs daws/ableton/kumi-daw-ableton/src/app/live_extension.rs \
+            daws/ableton/kumi-daw-ableton/src/app/live_app.rs crates/kumi/src/process.rs crates/kumi-daw/src/process.rs \
             crates/kumi/src/doctor.rs \
             crates/kumi/src/doctor/installation.rs daws/ableton/kumi-daw-ableton/src/hands/KumiHands.swift \
             daws/ableton/kumi-daw-ableton/src/hands/mac.rs crates/kumi-types/src/system.rs crates/kumi-ai/src/http.rs \
             crates/kumi-library/src/sources.rs daws/ableton/ableton-mcp-server/src/lifecycle/install_remote_script.rs \
             daws/ableton/ableton-mcp-server/src/lifecycle.rs daws/ableton/ableton-mcp-server/src/lifecycle/delivery/install.rs \
-            crates/kumi/src/daw/own.rs crates/kumi/src/daw/registry.rs daws/own/daw-bridge/src/lifecycle.rs daws/own/daw-bridge/src/install.rs daws/own/daw-bridge/src/detect.rs \
+            daws/own/kumi-daw-own/src/provider.rs daws/reaper/kumi-daw-reaper/src/provider.rs daws/renoise/kumi-daw-renoise/src/provider.rs \
+            daws/own/daw-bridge/src/lifecycle.rs daws/own/daw-bridge/src/install.rs daws/own/daw-bridge/src/detect.rs \
             daws/reaper/reaper-kumi/build.rs daws/reaper/reaper-kumi/src/lib.rs daws/own/daw-mcp-server/src/bin/daw-mcp-server.rs \
             daws/own/daw-bridge/src/files.rs daws/own/daw-bridge/src/owner.rs daws/own/daw-bridge/src/paths.rs daws/reaper/reaper-kumi/shim/csurf.cpp \
             daws/renoise/com.kumi.Bridge.xrnx/manifest.xml daws/renoise/com.kumi.Bridge.xrnx/main.lua daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua; do

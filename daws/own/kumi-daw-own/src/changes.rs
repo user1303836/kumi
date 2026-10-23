@@ -78,13 +78,22 @@ pub struct OwnKind {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Picture {
     None,
-    Meter { field: &'static str, min: f64, max: f64 },
-    Colors { field: &'static str },
+    Meter {
+        field: &'static str,
+        min: f64,
+        max: f64,
+    },
+    Colors {
+        field: &'static str,
+    },
     Lines,
     Curve,
     Params,
     Route,
-    Zone,
+    /// A keyzone, its keys in its DAW's names.
+    Zone {
+        profile: &'static kumi_types::daw::DawProfile,
+    },
     Items,
     Settings,
     Chain,
@@ -141,7 +150,7 @@ impl OwnKind {
             Picture::Curve => crate::pictures::curve(&answers),
             Picture::Params => crate::pictures::params(&answers),
             Picture::Route => crate::pictures::route(&answers),
-            Picture::Zone => crate::pictures::zone(&answers),
+            Picture::Zone { profile } => crate::pictures::zone(&answers, profile),
             Picture::Items => crate::pictures::items(&answers),
             Picture::Settings => crate::pictures::settings(&answers),
             Picture::Midi => crate::pictures::midi(&answers),
@@ -1098,12 +1107,7 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
         }
         // Code run in the DAW may have changed anything, outside what HISTORY can take back: a judged run hears again.
         if matches!(kind.kind, "run-lua" | "api-call") {
-            let what = if self.link().daw.profile.id == Some(kumi_types::daw::DawId::Renoise) {
-                "Lua run in Renoise"
-            } else {
-                "Lua or a call to REAPER's API"
-            };
-            self.history.outside.borrow_mut().push(what);
+            self.history.outside.borrow_mut().push(self.link().daw.outside_code);
         }
         if skipped {
             self.link().outside_daw_undo.borrow_mut().insert(transaction.clone());

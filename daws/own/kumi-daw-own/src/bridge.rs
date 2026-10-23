@@ -90,6 +90,11 @@ pub struct OwnDaw {
     pub scripts: &'static kumi_agent::core::scripts::backend::Words,
     /// (#401) Its facts for delivery to a spec: its master's row and fader, and what limits or raises the master.
     pub spec: &'static crate::spec::OwnSpecFacts,
+    /// What Kumi knows of its listening: what its sources hold, its gain stage and equaliser, the change kinds the
+    /// listening tools use.
+    pub listening: &'static crate::listening::Table,
+    /// What code run in it is, as HISTORY notes what it can't take back ("Lua run in Renoise").
+    pub outside_code: &'static str,
 }
 
 /// Starts Kumi's host for a DAW: the production one runs `daw-mcp-server`; a test's stand-in answers in its place.
@@ -306,9 +311,8 @@ pub struct OwnParts<S: RefScheme + 'static> {
 
 /// The tools a DAW adds to the shared ones, where it offers them (its profile's caps): Renoise's variations of its
 /// patterns and phrases, sample map, chopping, jams and layered breaks; REAPER's variations of its items, delivery and
-/// routing.
-#[derive(Default)]
-pub struct OwnTools {
+/// routing. And its ears, for the shared audio to MIDI and stems.
+pub struct OwnTools<S: RefScheme + 'static> {
     pub variations: Option<Rc<dyn KernelTool>>,
     pub mapping: Option<Rc<dyn KernelTool>>,
     pub chop: Option<Rc<dyn KernelTool>>,
@@ -316,13 +320,20 @@ pub struct OwnTools {
     pub routing: Option<Rc<dyn KernelTool>>,
     pub jam: Option<Rc<dyn KernelTool>>,
     pub layers: Option<Rc<dyn KernelTool>>,
+    pub ears: Option<Rc<dyn crate::ears::EarsDaw<S>>>,
+}
+
+impl<S: RefScheme + 'static> Default for OwnTools<S> {
+    fn default() -> Self {
+        OwnTools { variations: None, mapping: None, chop: None, delivery: None, routing: None, jam: None, layers: None, ears: None }
+    }
 }
 
 /// The shared integration of a DAW whose bridge is Kumi's own, with the tools only that DAW has (`own_tools`).
 pub fn create_own_integration<S: RefScheme + 'static>(
     daw: &'static OwnDaw,
     options: OwnOptions,
-    own_tools: impl FnOnce(&OwnParts<S>) -> OwnTools,
+    own_tools: impl FnOnce(&OwnParts<S>) -> OwnTools<S>,
 ) -> Rc<dyn Integration> {
     let link = Rc::new(Link {
         daw,
@@ -362,7 +373,7 @@ pub fn create_own_integration<S: RefScheme + 'static>(
     let listening = OwnListening::new(link.clone(), changes.clone(), context, &options.kumi_home);
     // (#401) the DAW's own tools, where it offers them: variations, the sample map, chopping, delivery, routing, jams
     // and layered breaks (each DAW's own, from its own integration)
-    let OwnTools { variations, mapping, chop, delivery, routing, jam, layers } =
+    let OwnTools { variations, mapping, chop, delivery, routing, jam, layers, ears } =
         own_tools(&OwnParts { changes: changes.clone(), renderer: listening.renderer.clone(), kumi_home: options.kumi_home.clone() });
     // (#401) kept scripts, where the DAW offers them: Kumi's copies in its folder, one a DAW
     let scripts: Option<Rc<dyn KernelTool>> = daw.profile.caps.scripts.then(|| {
@@ -374,24 +385,14 @@ pub fn create_own_integration<S: RefScheme + 'static>(
         let backend = crate::spec::OwnSpec::new(changes.clone(), listening.renderer.clone(), daw.spec);
         kumi_agent::core::spec::tool::DeliverySpec::new(backend).tool()
     });
-    // (#401) audio to MIDI, where the DAW offers it through Kumi's own ears
-    let to_midi: Option<Rc<dyn KernelTool>> = match (daw.profile.caps.audio_to_midi, daw.profile.id) {
-        (true, Some(kumi_types::daw::DawId::Reaper)) => Some(crate::ears::Daw::Reaper),
-        (true, Some(kumi_types::daw::DawId::Renoise)) => Some(crate::ears::Daw::Renoise),
-        _ => None,
-    }
-    .map(|which| {
-        let backend = crate::ears::OwnEars::new(changes.clone(), listening.renderer.clone(), which);
+    // (#401) audio to MIDI, where the DAW offers it through Kumi's own ears (its own, from its own tools)
+    let to_midi: Option<Rc<dyn KernelTool>> = ears.clone().filter(|_| daw.profile.caps.audio_to_midi).map(|ears| {
+        let backend = crate::ears::OwnEars::new(changes.clone(), listening.renderer.clone(), ears);
         kumi_agent::core::to_midi::tool::ToMidi::new(backend).tool()
     });
     // (#401) stems, where the DAW splits by Kumi's own splitter
-    let stems: Option<Rc<dyn KernelTool>> = match (daw.profile.caps.stems, daw.profile.id) {
-        (true, Some(kumi_types::daw::DawId::Reaper)) => Some(crate::ears::Daw::Reaper),
-        (true, Some(kumi_types::daw::DawId::Renoise)) => Some(crate::ears::Daw::Renoise),
-        _ => None,
-    }
-    .map(|which| {
-        let backend = crate::ears::OwnEars::new(changes.clone(), listening.renderer.clone(), which);
+    let stems: Option<Rc<dyn KernelTool>> = ears.filter(|_| daw.profile.caps.stems).map(|ears| {
+        let backend = crate::ears::OwnEars::new(changes.clone(), listening.renderer.clone(), ears);
         kumi_agent::core::stems::tool::Stems::new(backend).tool()
     });
     let kumi_home = options.kumi_home.clone();

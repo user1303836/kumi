@@ -22,10 +22,11 @@ pub enum SourceKind {
     Core,
     Splice,
     Folder,
-    /// REAPER's resource folder: its FX chains, track and project templates, JSFX and FX preset banks.
-    Reaper,
-    /// One of Renoise's libraries (its own, the User Library): instruments, multi-samples, chains, presets, phrases, samples.
-    Renoise,
+    /// A DAW's own library (REAPER's resource folder, one of Renoise's libraries), read by its DAW's layout
+    /// ([`LibrarySources::layout`](crate::daws::LibrarySources::layout)). Written as the DAW's id ("reaper"), as each was
+    /// before.
+    #[serde(untagged)]
+    Daw(DawId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,8 +43,7 @@ impl Source {
     pub fn daw(&self) -> Option<DawId> {
         match self.kind {
             SourceKind::Pack | SourceKind::Core => Some(DawId::Ableton),
-            SourceKind::Reaper => Some(DawId::Reaper),
-            SourceKind::Renoise => Some(DawId::Renoise),
+            SourceKind::Daw(daw) => Some(daw),
             SourceKind::UserLibrary | SourceKind::Place | SourceKind::Splice | SourceKind::Folder => None,
         }
     }
@@ -55,7 +55,7 @@ impl Source {
 
     /// A DAW's own library, read by that DAW's layout rather than by file type alone.
     pub fn is_daw_library(&self) -> bool {
-        matches!(self.kind, SourceKind::Reaper | SourceKind::Renoise)
+        matches!(self.kind, SourceKind::Daw(_))
     }
 }
 

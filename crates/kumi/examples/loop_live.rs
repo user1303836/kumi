@@ -5,7 +5,7 @@
 //!   cargo run --profile ci-release -p kumi --example loop_live -- --set "<Set name>" [--listener] "<request>" […]
 //! With --listener, the judge asks the listening model as the app would: the listening slot (/slots), or KUMI_LISTENER.
 use futures::FutureExt;
-use kumi::config::{find_bridge_config, kumi_dir, load_inference_config, safe_error};
+use kumi::config::{kumi_dir, load_inference_config, safe_error};
 use kumi_agent::{
     core::{
         contracts::{ActionEvent, KernelEvent, WatchEvent},
@@ -26,6 +26,7 @@ use kumi_common::{
     js::string::{head, trim},
     time::perf_now,
 };
+use kumi_daw_ableton::app::folders::find_bridge_config;
 use kumi_daw_ableton::{connection::Connect, create_ableton_integration, options::ListenerSource, AbletonOptions, BRIDGE_TOOLS};
 use kumi_listening::slots;
 use kumi_types::{

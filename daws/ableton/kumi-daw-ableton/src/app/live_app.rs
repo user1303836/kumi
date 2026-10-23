@@ -1,7 +1,7 @@
 //! Live, the app: which one is open, asking it to quit the way its own menu does (unsaved work makes
 //! it ask to save first), opening it again, and which Live is on this computer at all.
 
-use crate::bridge_setup::is_live_running_on;
+use super::bridge_setup::is_live_running_on;
 use kumi_common::abort::Signal;
 use kumi_daw::process::Run;
 use kumi_library::sources::join;
@@ -151,7 +151,7 @@ pub fn installed_with(env: &Env, platform: &str, lives: &[InstalledLive]) -> Liv
             .into(),
         _ => return LiveInstalled::Missing,
     };
-    decide(lives, &opened_versions(&crate::config::live_preferences_dir(env)), &libraries)
+    decide(lives, &opened_versions(&super::folders::live_preferences_dir(env)), &libraries)
 }
 
 /// The versions Live has been opened as here, from its settings folders ("Live 12.4.15b6"): newest major first.
@@ -264,7 +264,7 @@ pub fn installed_lives(env: &Env, platform: &str) -> Vec<InstalledLive> {
         }
         _ => vec![],
     };
-    installed_lives_in(&roots, &crate::config::live_preferences_dir(env), platform)
+    installed_lives_in(&roots, &super::folders::live_preferences_dir(env), platform)
 }
 
 /// `installed_lives` in these folders, with Live's settings in `preferences`.

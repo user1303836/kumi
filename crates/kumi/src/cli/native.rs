@@ -1,7 +1,6 @@
 //! Command dispatch and native process I/O.
 mod session;
 mod shutdown;
-pub use crate::daw::ableton::AbletonFactory;
 use crate::{
     config::*,
     doctor::{self, DoctorIo},
@@ -563,7 +562,7 @@ mod doctor_io_tests {
         crate::daw::work_with(DawId::Reaper);
         let probed = Rc::new(Cell::new(0));
         let count = probed.clone();
-        let factory = AbletonFactory(Rc::new(move |options| {
+        let factory = kumi_daw_ableton::app::AbletonFactory(Rc::new(move |options| {
             count.set(count.get() + 1);
             kumi_daw_ableton::create_ableton_integration(options)
         }));
@@ -587,7 +586,7 @@ mod doctor_io_tests {
     async fn probe_own_hosts() {
         let asked = Rc::new(std::cell::RefCell::new(vec![]));
         let seen = asked.clone();
-        let hosts = crate::daw::own::OwnHosts(Rc::new(move |daw| {
+        let hosts = kumi_daw_own::provider::OwnHosts(Rc::new(move |daw| {
             seen.borrow_mut().push(daw);
             Rc::new(|_| async { Err(RuntimeError::plain("daw-mcp-server wasn't found")) }.boxed_local())
         }));

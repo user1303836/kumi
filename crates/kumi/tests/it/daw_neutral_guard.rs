@@ -1,19 +1,26 @@
-//! The app reaches Live's own parts only through its DAW providers: outside src/daw/, nothing names Live's integration,
-//! Live's bridge crate, or the app's Live modules (live_app, live_extension, bridge_setup, willington). Allowed: the
-//! re-exports that keep their old paths (`pub use crate::daw::ableton::…`), imports only unit tests use
-//! (`#[cfg(test)] use …`), and the few uses listed below, each with why.
+//! The app reaches each DAW only through its provider in the DAW table: outside src/daw/, nothing names a DAW's crates
+//! (kumi-daw-ableton, whose `app` module is Live's provider; kumi-daw-own, with REAPER's and Renoise's; kumi-daw-reaper;
+//! kumi-daw-renoise; Live's bridge) or Live's modules (live_app, live_extension, bridge_setup, willington). Allowed:
+//! imports only unit tests use (`#[cfg(test)] use …`), and the uses listed below, each with why.
 
 use std::path::{Path, PathBuf};
 
-/// What names Live's parts.
-const LIVE: [&str; 6] = ["ableton", "ableton_mcp_server", "live_app", "live_extension", "bridge_setup", "willington"];
+/// What names a DAW's parts.
+const DAW_PARTS: [&str; 10] = [
+    "ableton",
+    "ableton_mcp_server",
+    "kumi_daw_ableton",
+    "kumi_daw_own",
+    "kumi_daw_reaper",
+    "kumi_daw_renoise",
+    "live_app",
+    "live_extension",
+    "bridge_setup",
+    "willington",
+];
 
 /// Uses allowed by file and phrase, with why.
-const ALLOWED: &[(&str, &str, &str)] = &[(
-    "cli/native/session.rs",
-    "crate::daw::ableton::provider::Ableton.watch_words()",
-    "the watch with Live's words, as its unit tests drive it",
-)];
+const ALLOWED: &[(&str, &str, &str)] = &[];
 
 fn sources(folder: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(folder).unwrap() {
@@ -79,12 +86,12 @@ fn nothing_outside_the_daw_providers_names_lives_own_parts() {
             let code = code(line);
             let trimmed = code.trim_start();
             if using.is_none() && trimmed.trim_start_matches("pub ").trim_start_matches("pub(crate) ").starts_with("use ") {
-                using = Some(test_only || trimmed.starts_with("pub use crate::daw::ableton::"));
+                using = Some(test_only);
             }
             if !trimmed.is_empty() {
                 test_only = trimmed.starts_with("#[cfg(test)]");
             }
-            let named = words(code).into_iter().any(|(word, path)| LIVE.contains(&word.as_str()) && (path || using.is_some()));
+            let named = words(code).into_iter().any(|(word, path)| DAW_PARTS.contains(&word.as_str()) && (path || using.is_some()));
             let allowed = using == Some(true) || ALLOWED.iter().any(|(file, phrase, _)| name == *file && code.contains(phrase));
             if named && !allowed {
                 found.push(format!("{name}:{}: {}", n + 1, line.trim()));
@@ -94,7 +101,7 @@ fn nothing_outside_the_daw_providers_names_lives_own_parts() {
             }
         }
     }
-    assert!(found.is_empty(), "these reach Live's own parts outside src/daw/; go through the DAW's provider:\n{}", found.join("\n"));
+    assert!(found.is_empty(), "these reach a DAW's own parts outside src/daw/; go through the DAW's provider:\n{}", found.join("\n"));
 }
 
 #[test]

@@ -15,23 +15,23 @@
 | `crates/kumi-media` | 音频（解码、分析、声音匹配、DSP）、语音输入，以及解码媒体的程序（ffmpeg、yt-dlp、whisper.cpp）和视频的画面、字幕与语音 |
 | `crates/kumi-ai` | 模型客户端：各模型提供方的通信、提供方及其模型、登录、Kumi 自己运行的模型（ONNX Runtime）、每轮的用时，以及如何说明一次失败的调用 |
 | `crates/kumi-web` | 网页与视频工具：搜索并阅读网页（页面、PDF、GitHub、Max 补丁），以及观看教程视频，获取其中的讲解、画面和声音 |
-| `crates/kumi-library` | 制作人的素材库（学习、搜索、预设、Set、偏好）、插件的格式与角色，以及在磁盘上查找采样；每个 DAW 说明自己的素材库在哪里 |
+| `crates/kumi-library` | 制作人的素材库（学习、搜索、预设、Set、偏好）、插件的格式与角色，以及在磁盘上查找采样；每个 DAW 说明自己的素材库在哪里、如何组织 |
 | `crates/kumi-listening` | 聆听：一次聆听测量什么、评判及其检查清单、引擎的各轮、聆听模型及其槽位、风格参考和记谱；播放和渲染由各 DAW 负责 |
 | `crates/kumi-daw` | DAW 的 crate 交给应用和从应用得到的东西：DAW 的 provider（DAW 是什么，以及其桥接的查找、安装、检查和移除）、doctor 的检查项、首次设置中 DAW 的一侧，以及各步骤所用的小型端口（输出、提问和运行程序） |
 | `crates/kumi-common` | 共享的运行时工具，以及与原实现兼容的值处理 |
-| `daws/ableton/kumi-daw-ableton` | Live 的主机端：Live 集成（Set 的观察、修改与 HISTORY、渲染与 Kumi Ears、Hands、素材库与手册）和 Max for Live 设备构建器 |
+| `daws/ableton/kumi-daw-ableton` | Live 的主机端：Live 集成（Set 的观察、修改与 HISTORY、渲染与 Kumi Ears、Hands、素材库与手册）、Max for Live 设备构建器，以及 Live 的 provider（`src/app/`：查找、打开和检查 Live，桥接的安装、更新、回滚和移除，doctor、报告和首次设置中 Live 的部分） |
 | `daws/ableton/ableton-mcp-server` | 原生 MCP 桥接、分析工作进程、生命周期、设置、迁移和诊断 |
 | `daws/ableton/remote-script` | 桥接的 Remote Script，运行在 Live 内部（`ableton_mcp_remote_script.py`、`AbletonMcpBridge/` 入口、Python 测试） |
 | `daws/ableton/live-extension` | Kumi 的 Live 扩展，适用于 Live 12.4 及更高版本，基于 Live 的 Extensions SDK（TypeScript，有自己的 `package.json`） |
 | `daws/ableton/protocol` | `ableton-live-v1.operations.json`，桥接与 Remote Script 共用的操作注册表 |
 | `scripts` | 发布构建器、迁移打包、Mac 辅助程序的构建、隔离测试运行器，以及 `npm run kumi` 和 `npm run setup` 背后的 `native-kumi.mjs` |
 | `daws/own/daw-mcp-server` | Kumi 为 REAPER 和 Renoise 准备的宿主程序（`daw-mcp-server --daw reaper\|renoise`）：基于 stdio 的 MCP、修改的日志与撤销、聆听任务、离开期间的变化；其他 MCP 客户端也能使用 |
-| `daws/own/kumi-daw-own` | REAPER 和 Renoise 的集成在主机端共享的部分：通过 Kumi 自有桥接的集成、修改引擎及其撤销、离开期间的变化、聆听、音频转 MIDI 与分离音轨、即时短语、图示与 FOCUS 视图、保留的脚本，以及按规格交付 |
-| `daws/reaper/kumi-daw-reaper` | REAPER 的主机端：通过 Kumi 自有桥接的集成、只有 REAPER 才有的工具（条目的变奏、交付、路由）以及它的素材库位置 |
+| `daws/own/kumi-daw-own` | REAPER 和 Renoise 的集成在主机端共享的部分：通过 Kumi 自有桥接的集成、修改引擎及其撤销、离开期间的变化、聆听、音频转 MIDI 与分离音轨、即时短语、图示与 FOCUS 视图、保留的脚本、按规格交付，以及两个 DAW 的桥接借以查找、安装、检查和移除的 provider（`provider`） |
+| `daws/reaper/kumi-daw-reaper` | REAPER 的主机端：通过 Kumi 自有桥接的集成、只有 REAPER 才有的工具（条目的变奏、交付、路由）、它的素材库位置，以及它给 provider 的值（`PROVIDER`） |
 | `daws/reaper/reaper-kumi` | Kumi 的 REAPER 扩展（`reaper_kumi`），用 `sdk/` 中附带的 REAPER SDK 头文件构建 |
 | `daws/own/daw-bridge` | REAPER 与 Renoise 桥接共用的部分：回环通信（`kumi-daw/1`）、它的握手与认证、发现、查找 DAW、doctor 的检查，以及桥接文件的生命周期 |
 | `daws/renoise` | Kumi 的 Renoise 工具（`com.kumi.Bridge.xrnx`，Lua）及其针对 Renoise API 模拟的测试 |
-| `daws/renoise/kumi-daw-renoise` | Renoise 的主机端：通过 Kumi 自有桥接的集成、只有 Renoise 才有的工具（行与乐句的变奏、采样映射、切片、整理即兴录音、叠层碎拍）以及它的素材库位置 |
+| `daws/renoise/kumi-daw-renoise` | Renoise 的主机端：通过 Kumi 自有桥接的集成、只有 Renoise 才有的工具（行与乐句的变奏、采样映射、切片、整理即兴录音、叠层碎拍）、它的素材库位置，以及它给 provider 的值（`PROVIDER`） |
 | `install.sh`、`install.ps1` | 安装程序 |
 
 这些 crate 共用根目录的 Cargo 工作区；没有 npm 工作区。桥接没有 Kumi 也能工作。这些 crate 移植自的 TypeScript 实现保留在 git 标签 `v1.7.6` 上。
@@ -180,7 +180,7 @@ python3 scripts/release.py --go     # 正式发布
 - **发布内容**读取自上一个标签以来的 `main`：每个已合并拉取请求的 `Changelog:` 行，按原文使用（“none” 不添加任何内容）。如果拉取请求修改了桥接，而没有修改 Kumi 的 crate 或安装程序，它的行会放在桥接的标题下；同时修改两者的拉取请求，请把关于桥接的行写成 `Changelog (bridge):`。试运行会显示每一行放在哪里。
 - **What's new**：Kumi 内置 `CHANGELOG.md`，更新后第一次启动时，把一个版本的列表项显示为 **What's new**（最多五条，从最新版本开始；其余见 `/changelog`）。段落（例如附带桥接和测试环境的说明）不会显示，所以每一行 `Changelog:` 就是用户在那里读到的一条：写他们会注意到的变化，重要的放在前面。
 - **桥接**在拉取请求修改了 Live 加载的内容时获得新版本：`daws/ableton/ableton-mcp-server`、主机链接的 `crates/kumi-common`、`daws/ableton/remote-script`、`daws/ableton/protocol`、`daws/ableton/live-extension` 或 `vendor/willington`（测试和 Markdown 除外）。`Cargo.lock` 中主机的依赖变化时，试运行会提示，这时用 `--bridge` 给桥接一个新版本。
-- **REAPER 的扩展和 Renoise 的工具**也按同样的方式获得新版本：拉取请求修改了该 DAW 加载的内容时（`daws/reaper/reaper-kumi` 和 `daws/own/daw-bridge`，或 `daws/renoise/com.kumi.Bridge.xrnx`）。`--reaper` 和 `--renoise` 无论如何都给它新版本，`--no-reaper` 和 `--no-renoise` 保持原版本；`--no-bridge` 只针对 Live。写成 `Changelog (reaper):` 或 `Changelog (renoise):` 的行会放到它的标题下。使用 `--go` 时，`daws/reaper/reaper-kumi/Cargo.toml` 和 `Cargo.lock`、工具的 `payload/version.lua` 和 `manifest.xml` 中的版本会前进，三个 `KUMI_GUIDE.md` 中各自的 ships-with 行也会前进。上一个版本没有的桥接按它自己的版本发布，它那一行已经写着本次版本。
+- **REAPER 的扩展和 Renoise 的工具**也按同样的方式获得新版本：拉取请求修改了该 DAW 加载的内容时（`daws/reaper/reaper-kumi` 和 `daws/own/daw-bridge`，或 `daws/renoise/com.kumi.Bridge.xrnx`）。`--reaper` 和 `--renoise` 无论如何都给它新版本，`--no-reaper` 和 `--no-renoise` 保持原版本；`--no-bridge` 只针对 Live。写成 `Changelog (reaper):` 或 `Changelog (renoise):` 的行会放到它的标题下。使用 `--go` 时，`daws/reaper/reaper-kumi/Cargo.toml` 和 `Cargo.lock`、工具的 `payload/version.lua` 和 `manifest.xml` 中的版本会前进，三个 `KUMI_GUIDE.md` 中各自的 ships-with 行也会前进。上一个版本没有的桥接按它自己的版本发布，它那一行已经写着本次版本。`scripts/daws.toml` 为发布和打包脚本列出这些桥接：在那里添加的 DAW 会有自己的标志、标题和 ships-with 行。
 - **版本**是下一个补丁版本；`--minor` 或 `--version X.Y.Z` 可以选择其他版本。
 - **加上 `--go`**，它会在 `release/vX.Y.Z` 上提交 “Kumi X.Y.Z: the changelog, READMEs and versions”：根目录的 `package.json`、`crates/kumi-types/src/version.rs`、`kumi`、`kumi-common` 和 `kumi-types` 的 Cargo 清单以及 `Cargo.lock` 中的版本（打包测试会确保这些相等），桥接变化时还有桥接的版本；三个 README 中当前状态（Status）的那一行；三个 `KUMI_CHANGES.md` 中“桥接版本”（Bridge versions）下说明随附哪个桥接的那一行；以及 `CHANGELOG.md` 中的 `## X.Y.Z — date` 条目。然后它打开拉取请求 “Kumi X.Y.Z”，不等其 CI，用管理员绕过将其合并为 “Kumi X.Y.Z (#PR)”，给合并提交打上标签 `vX.Y.Z` 并推送，再创建带发布说明的草稿发布（`--summary` 可以在说明开头加一句话）。
 - **标签触发的 Installer 运行**会为 macOS、Linux 和 Windows 的 Intel 与 ARM 构建原生发行包，测试安装和迁移，附加各平台的发行包和清单以及兼容用的 `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS` 和安装程序，并在说明由 `release.py` 撰写（说明以 `<!-- kumi:release-notes -->` 结尾）且两个安装程序都已附加时发布该版本。只有在此之后，安装程序、`kumi update` 和更新检查才能看到它。其他草稿，例如手动推送、说明“待补充”的标签，在有人发布之前一直是草稿。

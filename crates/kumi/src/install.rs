@@ -1,9 +1,6 @@
 //! Installed Kumi and its native release bundles.
 mod migration;
 pub use crate::config::kumi_dir as kumi_home;
-/// Live's part, where install has always had it.
-pub use crate::daw::ableton::install::{bridge_command, finish_legacy_transition, no_bridge_yet, only_the_host_differs};
-pub use crate::update::newer as newer_version;
 use crate::{
     config::{json_files, load_db_file},
     input::TerminalInput,
@@ -22,6 +19,7 @@ use kumi_common::{
     js::{json::stringify, string::trim},
     time::now_ms,
 };
+use kumi_daw::{files::remove, provider::newer as newer_version};
 use kumi_daw::{
     io::{Answers, DawIo},
     process::{default_run, executable_name, Run},
@@ -423,14 +421,6 @@ async fn rename_in(folders: &impl Folders, from: &str, to: &str) -> std::io::Res
         }
     }
     unreachable!()
-}
-pub fn remove(path: &str) -> std::io::Result<()> {
-    match fs::symlink_metadata(path) {
-        Ok(m) if m.is_dir() => fs::remove_dir_all(path),
-        Ok(_) => fs::remove_file(path),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e),
-    }
 }
 /// Puts the Kumi that was there (in `previous`) back in `app`, unless `app` already holds a whole one: `app` can
 /// be missing, or hold part of a move, which is cleared first. Waits out a busy folder a few times over; says

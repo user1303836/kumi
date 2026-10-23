@@ -49,6 +49,31 @@ pub fn older_than(version: &str, min: &str) -> bool {
     !version.is_empty() && version < numbers(min)
 }
 
+/// Whether release `left` ("1.0.94") is newer than `right`, by its first three numbers (a part after a `-` counts as one).
+pub fn newer(left: &str, right: &str) -> bool {
+    fn parts(text: &str) -> Vec<f64> {
+        text.split(['.', '-'])
+            .map(|s| {
+                let s = kumi_common::js::string::trim(s);
+                let sign = if s.starts_with('-') { -1. } else { 1. };
+                let s = s.strip_prefix(['+', '-']).unwrap_or(s);
+                let digits: String = s.chars().take_while(char::is_ascii_digit).collect();
+                sign * digits.parse::<f64>().unwrap_or(0.)
+            })
+            .collect()
+    }
+    let a = parts(left);
+    let b = parts(right);
+    for i in 0..3 {
+        let a = a.get(i).copied().unwrap_or(0.);
+        let b = b.get(i).copied().unwrap_or(0.);
+        if a != b {
+            return a > b;
+        }
+    }
+    false
+}
+
 /// What of the DAW is on this computer, read from its files without opening it: whether it can take Kumi's bridge yet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Installed {
