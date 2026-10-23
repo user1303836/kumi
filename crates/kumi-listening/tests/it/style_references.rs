@@ -533,6 +533,10 @@ fn profile(loudness: f64) -> Profile {
         vibe_spread: None,
         vibe_model: None,
         effects: None,
+        tempo: None,
+        key: None,
+        busyness: None,
+        groove: None,
     }
 }
 
