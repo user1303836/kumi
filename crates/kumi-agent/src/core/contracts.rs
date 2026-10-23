@@ -1296,8 +1296,6 @@ pub enum WatchEvent {
     Action(ActionEvent),
     Audition(AuditionEvent),
     Judged(kumi_listening::round::Round),
-    /// Settings a search heard (tune's), for Kumi to remember.
-    Heard(kumi_listening::heard_settings::SettingsHeard),
 }
 
 /// What Kumi remembers now: about the producer, and about the open Set when it's saved.
@@ -1504,8 +1502,14 @@ pub trait SessionController {
     fn library(&self) -> Option<LibraryStatus> {
         None
     }
-    /// The settings Kumi's searches heard and remember, and on how many devices: None without its database.
-    async fn remembered(&self) -> Option<(usize, usize)> {
+    /// What Kumi's searches remember (settings heard, their devices, how often one won a search's first round): None
+    /// without its database.
+    async fn remembered(&self) -> Option<crate::core::search_memory::SearchMemoryStatus> {
+        None
+    }
+    /// What Kumi remembers of searches, for a DAW's listening to hand what it hears to and start from: None without its
+    /// database.
+    fn settings_memory(&self) -> Option<Rc<dyn kumi_listening::heard_settings::SettingsMemory>> {
         None
     }
     /// The saved Set open in the DAW, by its file, once the session has read it.

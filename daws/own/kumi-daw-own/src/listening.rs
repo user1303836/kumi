@@ -2175,7 +2175,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             context.on_audition.clone(),
             context.listener.clone(),
             context.references.clone(),
-            context.on_heard.clone(),
+            context.search_memory.clone(),
         );
         Rc::new(Self { renderer, listening, busy: tokio::sync::Mutex::new(()), swept: RefCell::default() })
     }

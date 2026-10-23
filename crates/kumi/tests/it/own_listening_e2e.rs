@@ -1376,11 +1376,34 @@ async fn reaper_measures_sounds_lays_out_the_form_and_tunes_a_reaeq_on_scratch_c
         .await;
 }
 
+/// What a search hands Kumi's memory, kept beside a real one (a database of the test's own).
+struct Recorded {
+    memory: Rc<kumi_agent::core::search_memory::SearchMemory>,
+    heard: RefCell<Vec<kumi_listening::heard_settings::SettingsHeard>>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl kumi_listening::heard_settings::SettingsMemory for Recorded {
+    fn heard(&self, event: kumi_listening::heard_settings::SettingsHeard) {
+        self.heard.borrow_mut().push(event.clone());
+        self.memory.heard(event);
+    }
+    async fn bests(
+        &self,
+        daw: Option<kumi_types::daw::DawId>,
+        device: &str,
+        kinds: &[kumi_listening::heard_settings::SearchKind],
+    ) -> Vec<kumi_listening::heard_settings::Remembered> {
+        self.memory.bests(daw, device, kinds).await
+    }
+}
+
 /// What tune's search hears is handed out a generation at a time, for Kumi to remember what worked: the FX by who it is
 /// (the plug-in REAPER calls it, whatever the producer named it), each setting's knobs as fractions of their ranges and
-/// what it measured, and then the search's end.
+/// what it measured, and then the search's end. The next search on that FX starts from what worked: its first generation
+/// hears the remembered setting, and its log says so.
 #[tokio::test(flavor = "current_thread")]
-async fn a_tune_search_hands_out_what_it_heard_on_the_fx_by_who_it_is() {
+async fn a_tune_search_hands_out_what_it_heard_and_the_next_starts_from_what_worked() {
     use kumi_listening::heard_settings::{SearchKind, SettingsHeard};
     tokio::task::LocalSet::new()
         .run_until(async {
@@ -1390,22 +1413,23 @@ async fn a_tune_search_hands_out_what_it_heard_on_the_fx_by_who_it_is() {
             script.rename_fx(&eq, "Bass EQ");
             script.listening().set_steps(0);
             let simulator = reaper_lab(&script, home.path(), |_| {}).await;
-            let heard: Rc<RefCell<Vec<SettingsHeard>>> = Rc::default();
-            let into = heard.clone();
+            let client = kumi_agent::core::store_client::StoreClient::new(kumi_store::Store::open(home.path().join("kumi.db")).unwrap());
+            let memory = kumi_agent::core::search_memory::SearchMemory::new(client.clone(), kumi_types::daw::DawId::Reaper);
+            let recorded = Rc::new(Recorded { memory, heard: RefCell::default() });
+            let kept = recorded.clone();
             let (reaper, _) = integration_with(Daw::Reaper, home.path(), create_reaper_integration, |context| {
-                context.on_heard = Some(Rc::new(move |event| into.borrow_mut().push(event)));
+                context.search_memory = Some(kept);
             });
             reaper.start(Signal::new()).await.unwrap();
             let observed = reaper.observe(Signal::new(), None).await.unwrap();
             let goal = json!({"goal": {"loudness": -14, "problems": false}, "track": "Track 2", "from_beat": 0, "beats": 2});
             assert!(!tool(&observed, "judge").execute(object(goal), Signal::new()).await.unwrap().is_error);
-            let tuned = tool(&observed, "tune")
-                .execute(object(json!({"device": eq, "how": "search", "knobs": ["Gain-Band 2", "Gain-Band 3"]})), Signal::new())
-                .await
-                .unwrap();
+            let search = json!({"device": eq, "how": "search", "knobs": ["Gain-Band 2", "Gain-Band 3"]});
+            let tuned = tool(&observed, "tune").execute(object(search.clone()), Signal::new()).await.unwrap();
             assert!(!tuned.is_error, "{}", tuned.text);
-            let heard = heard.borrow();
-            let (generations, ended): (Vec<_>, Vec<_>) = heard.iter().partition(|event| matches!(event, SettingsHeard::Heard { .. }));
+            assert!(!tuned.text.contains("started from what worked"), "nothing remembered yet: {}", tuned.text);
+            let first: Vec<SettingsHeard> = recorded.heard.borrow_mut().drain(..).collect();
+            let (generations, ended): (Vec<_>, Vec<_>) = first.iter().partition(|event| matches!(event, SettingsHeard::Heard { .. }));
             assert!(!generations.is_empty() && generations.len() <= 4, "a generation at a time: {}", generations.len());
             let mut runs = std::collections::BTreeSet::new();
             for event in &generations {
@@ -1423,10 +1447,24 @@ async fn a_tune_search_hands_out_what_it_heard_on_the_fx_by_who_it_is() {
                     assert_eq!(setting.knobs.keys().collect::<Vec<_>>(), ["Gain-Band 2", "Gain-Band 3"]);
                     assert!(setting.knobs.values().all(|at| (0. ..=1.).contains(at)), "{:?}", setting.knobs);
                     assert!(setting.cost.is_finite() && setting.measured["loudness"].is_number(), "{setting:?}");
+                    assert_eq!(setting.remembered, None, "nothing remembered to start from");
                 }
             }
             assert_eq!(runs.len(), 1, "one search");
             assert_eq!(ended, [&SettingsHeard::Ended { run: runs.into_iter().next().unwrap() }], "then its end");
+            // The producer puts the bands back where they were; the next search on that FX starts from what worked.
+            let guid = eq.strip_prefix("r:fx:").unwrap();
+            script.set_param(guid, 4, 0.5);
+            script.set_param(guid, 7, 0.5);
+            client.store().write_wait(|_| Ok(())).unwrap();
+            let again = tool(&observed, "tune").execute(object(search), Signal::new()).await.unwrap();
+            assert!(!again.is_error, "{}", again.text);
+            assert!(again.text.contains("started from what worked on Track 2 on "), "{}", again.text);
+            let second = recorded.heard.borrow();
+            let SettingsHeard::Heard { settings, .. } = &second[0] else { panic!("{second:?}") };
+            let remembered: Vec<_> = settings.iter().filter(|setting| setting.remembered.is_some()).collect();
+            assert_eq!(remembered.len(), 1, "the first generation heard the remembered setting: {settings:?}");
+            assert_eq!(remembered[0].generation, Some(1));
             reaper.close().await.unwrap();
             simulator.stop();
         })

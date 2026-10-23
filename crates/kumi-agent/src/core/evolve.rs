@@ -57,6 +57,8 @@ pub enum TrialHow {
     Cross,
     Random,
     Recheck,
+    /// A setting suggested for the slot (what worked on its devices before), heard once its own start was.
+    Remembered,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Trial {
@@ -114,6 +116,8 @@ pub struct Evolution {
     last_improved: u32,
     random: Box<dyn FnMut() -> f64>,
     options: EvolveOptions,
+    /// Settings to try on slots (by name), each once its own start has been heard.
+    suggested: HashMap<String, Vec<f64>>,
 }
 impl Default for Evolution {
     fn default() -> Self {
@@ -122,7 +126,23 @@ impl Default for Evolution {
 }
 impl Evolution {
     pub fn new(random: impl FnMut() -> f64 + 'static, options: EvolveOptions) -> Self {
-        Self { slots: vec![], generation: 0, trend: vec![], rendered: 0, last_improved: 0, random: Box::new(random), options }
+        Self {
+            slots: vec![],
+            generation: 0,
+            trend: vec![],
+            rendered: 0,
+            last_improved: 0,
+            random: Box::new(random),
+            options,
+            suggested: HashMap::new(),
+        }
+    }
+    /// A setting to try on a slot (one value for each of its knobs): its next trial once its own start has been heard,
+    /// kept as its best only when it scores better.
+    pub fn suggest(&mut self, slot: &str, values: Vec<f64>) {
+        if self.slots.iter().any(|s| s.name == slot && s.knobs.len() == values.len()) {
+            self.suggested.insert(slot.into(), values);
+        }
     }
     pub fn add(&mut self, slot: NewSlot) -> &Slot {
         let knobs = searchable(&slot.knobs, MOST_KNOBS);
@@ -174,6 +194,11 @@ impl Evolution {
             let start = || Trial { slot: slot.name.clone(), values: slot.elite.clone(), how: TrialHow::Start };
             if slot.score.is_none() || slot.knobs.is_empty() {
                 trials.push(start());
+                continue;
+            }
+            // (One knob each still: a knob the DAW refused since was frozen out.)
+            if let Some(values) = self.suggested.remove(&slot.name).filter(|values| values.len() == slot.knobs.len()) {
+                trials.push(Trial { slot: slot.name.clone(), values, how: TrialHow::Remembered });
                 continue;
             }
             if slot.stale > 0 && self.options.recheck > 0 && slot.stale % self.options.recheck == 0 && slot.heard.unwrap_or(1) < 4 {

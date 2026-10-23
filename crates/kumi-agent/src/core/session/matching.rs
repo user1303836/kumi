@@ -11,7 +11,7 @@ use crate::core::{
     techniques::{waiting_note, NEGATIVE, POSITIVE},
 };
 use kumi_common::js::number::{round, to_string};
-use kumi_listening::heard_settings::{SearchKind, SettingsHeard};
+use kumi_listening::heard_settings::{SearchKind, SettingsHeard, SettingsMemory};
 use std::collections::HashMap;
 
 pub(super) struct LastLesson {
@@ -402,12 +402,18 @@ impl Session {
             };
 
             let mut evolution = self.evolution();
-            // The search, remembered as it's heard (its settings on each of the winner's devices).
+            // The search, remembered as it's heard (its settings on each of the winner's devices), starting from what
+            // worked on them before.
             let target = json!({"kind": "reference", "reference": request.reference, "request": kept_request(&run.borrow().request)});
             let mut searches = HashMap::new();
+            let mut names = vec![];
             for slot in rig.slots() {
                 searches.insert(slot.name.clone(), SlotSearch::new(&slot.name, &slot.knobs, slot.devices.clone()));
+                names.push(slot.name.clone());
                 evolution.add(NewSlot { name: slot.name, label: slot.label, chain: slot.chain, knobs: slot.knobs, score: None, heard: None });
+            }
+            for name in names {
+                self.suggest_remembered(&mut evolution, &mut searches, &name).await;
             }
             let winner = evolution.slots.first().cloned().ok_or_else(|| RuntimeError::plain("Empty goal rig"))?;
 
@@ -422,7 +428,7 @@ impl Session {
             let search: Result<(), RuntimeError> = async {
                 let first = [trial(knobs.clone(), start.clone(), None)];
                 let heard = rig.generation(&first, op.signal.clone(), Some(GenerationOptions { screen: Some(false) })).await?;
-                self.remember_trials(SearchKind::Match, &searches, &first, &heard, &target);
+                self.remember_trials(SearchKind::Match, &searches, &first, &heard, &target, None, &[]);
                 from = heard.scores.get(&winner.name).copied();
 
                 let Some(score) = from else {
@@ -434,11 +440,12 @@ impl Session {
                 while began.elapsed().as_millis() < ms as u128 && !op.signal.is_cancelled() {
                     let trials = evolution.propose();
                     let requests = generation_trials(&evolution, &trials);
+                    let remembered = remembered_slots(&trials);
 
                     let result = rig.generation(&requests, op.signal.clone(), Some(GenerationOptions { screen: Some(rig.screens()) })).await?;
 
                     evolution.scored(&trials, &result.scores);
-                    self.remember_trials(SearchKind::Match, &searches, &requests, &result, &target);
+                    self.remember_trials(SearchKind::Match, &searches, &requests, &result, &target, Some(evolution.generation), &remembered);
                     for (name, keys) in &result.frozen {
                         evolution.freeze(name, keys);
                     }
@@ -461,7 +468,7 @@ impl Session {
                     if moved {
                         let last = [trial(best.knobs.clone(), best.elite.clone(), Some(true))];
                         let heard = rig.generation(&last, op.signal.clone(), Some(GenerationOptions { screen: Some(false) })).await?;
-                        self.remember_trials(SearchKind::Match, &searches, &last, &heard, &target);
+                        self.remember_trials(SearchKind::Match, &searches, &last, &heard, &target, None, &[]);
                         to = heard.scores.get(&winner.name).copied();
                     }
                     if to.is_some_and(|to| to >= score + 1.) {
@@ -535,7 +542,9 @@ impl Session {
         let random = self.0.options.goal_random.clone();
         Evolution::new(move || random.as_ref().map(|r| r()).unwrap_or_else(rand::random::<f64>), EVOLVE)
     }
-    /// A generation's trials, remembered: each scored trial's setting on each device of its slot.
+    /// A generation's trials, remembered: each scored trial's setting on each device of its slot, which generation heard
+    /// it (none for a listen outside the generations), and, for the slots in `remembered`, the remembered setting tried.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn remember_trials(
         &self,
         kind: SearchKind,
@@ -543,10 +552,27 @@ impl Session {
         trials: &[GenerationTrial],
         generation: &Generation,
         target: &Value,
+        heard_in: Option<u32>,
+        remembered: &[String],
     ) {
         if let Some(memory) = &self.0.search_memory {
-            for heard in trials_heard(kind, searches, trials, generation, target) {
+            for heard in trials_heard(kind, searches, trials, generation, target, heard_in, remembered) {
                 memory.heard(heard);
+            }
+        }
+    }
+    /// A new slot starts from what worked on its devices before: the best a past goal or match run heard there, tried
+    /// once the slot's own start is heard (it's kept only if it scores better).
+    pub(super) async fn suggest_remembered(&self, evolution: &mut Evolution, searches: &mut HashMap<String, SlotSearch>, slot: &str) {
+        let Some(memory) = self.0.search_memory.clone() else { return };
+        let Some((knobs, elite)) = evolution.slots.iter().find(|s| s.name == slot).map(|s| (s.knobs.clone(), s.elite.clone())) else {
+            return;
+        };
+        let Some(search) = searches.get(slot) else { return };
+        if let Some((values, from)) = memory.suggestion(search, &knobs, &elite).await {
+            evolution.suggest(slot, values);
+            if let Some(search) = searches.get_mut(slot) {
+                search.suggested = from;
             }
         }
     }
@@ -558,6 +584,10 @@ impl Session {
             }
         }
     }
+}
+/// The slots whose trial this generation is the remembered setting their search suggested.
+pub(super) fn remembered_slots(trials: &[crate::core::evolve::Trial]) -> Vec<String> {
+    trials.iter().filter(|trial| trial.how == TrialHow::Remembered).map(|trial| trial.slot.clone()).collect()
 }
 pub(super) fn knob_key(knob: &crate::core::evolve::Knob) -> String {
     format!("{}|{}", knob.device, knob.name)
