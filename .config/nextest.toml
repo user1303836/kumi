@@ -57,6 +57,8 @@ fail-fast = false
 # into the DAWs' own folders (own_providers), Kumi's host on its loopback sockets to them (bridge, retire, credit), and
 # what each system decides for them (daw-bridge's system: a bridge's process, macOS's downloaded mark).
 # The extension REAPER loads is built, loaded and called through its C++ shim on every platform by CI's REAPER job.
+# Windows' job leaves out the slowest of these there (9 to 16 s each: ci.yml's KUMI_WINDOWS_EXTENDED_ONLY); `extended`
+# runs them.
 [profile.ci-os]
 default-filter = '''
 (

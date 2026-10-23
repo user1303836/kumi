@@ -180,6 +180,33 @@ class Select(unittest.TestCase):
             with self.assertRaises(dev.Refused, msg=selection):
                 dev.select(["wire"], selection, self.PACKAGES)
 
+    def test_no_part_named_is_the_whole_workspace(self):
+        self.assertEqual(dev.select(["wire", "app"], [], self.PACKAGES), ["-p", "app", "-p", "wire"])
+
+    def test_a_part_tested_by_a_profile_is_its_packages_that_profile_builds(self):
+        # The platform jobs' `ci-os` set: the packages whose `it` binary it takes in, not those only its `& not (…)` names.
+        ci_os = """
+(
+    (binary_id(app::it) & test(/^(install|cli)::/))
+  | (binary_id(wire::it) & test(/^system::/))
+) & not (
+    (binary_id(store::it) & test(/^slow::/))
+  | (binary_id(app::it) & test(/^long::/))
+)
+"""
+        self.assertEqual(dev.filter_packages(ci_os), {"app", "wire"})
+        self.assertEqual(dev.filter_packages("binary_id(host::it) | binary_id(wire::it)"), {"host", "wire"})
+        tested = dev.filter_packages(ci_os)
+        self.assertEqual(dev.select(["app", "store", "wire"], ["--exclude", "app"], self.PACKAGES, tested), ["-p", "wire"])
+        self.assertEqual(dev.select(["store", "runtime"], [], self.PACKAGES, tested), [])
+
+    def test_this_checkouts_platform_set_takes_in_the_app_and_not_what_it_leaves_out(self):
+        tested = dev.profile_packages("ci-os")
+        self.assertTrue({"kumi", "ableton-mcp-server", "daw-bridge"} <= tested, tested)
+        self.assertFalse({"kumi-listening", "kumi-web"} & tested, tested)
+        with self.assertRaises(dev.Refused):
+            dev.profile_packages("no-such-profile")
+
 
 class Check(unittest.TestCase):
     def steps(self, *changes: str, windows: bool = False) -> list[str]:

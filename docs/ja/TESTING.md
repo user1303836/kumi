@@ -108,7 +108,7 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 | ワークフロー | ジョブ | 実行内容 |
 | --- | --- | --- |
 | **CI** | `Rust / Linux`、`Rust / Linux (Kumi's crates)`、`Rust / Linux (bridges)` | `.config/nextest.toml` の `ci` セットを分離ランナーで、テスト時間がほぼ同じになるようクレートごとに三つのパートに分けて同時に実行します（アプリ、Kumi のほかのクレート、`ableton-mcp-server` と `daw-bridge` と `daw-mcp-server` と `reaper-kumi`）。どのランナーもすべてのテストバイナリをビルドすることはありません。Extended ワークフローが実行する長いテスト（REAPER と Renoise の流れ全体のシミュレーションを含み、設定ファイルに理由とともに列挙）以外のすべてのテストです。プルリクエストでは、各パートは変更が影響する自分のクレートだけをテストし（`scripts/dev.py` が `dev.py check` と同じように選びます）、該当するものがないパートは省かれます。30 秒を超えたテストは名前つきで失敗します。続いて `git diff --check`。各 Rust ジョブ（Extended のものも）は、選んだテストの一覧をアーティファクト（`nextest-list-*`）として残し、実行どうしでテストを比べられるようにします |
-| | `Rust / macOS`、`Rust / Windows`、`Rust / Windows (Kumi's crates and bridges)` | `ci-os` セット：プラットフォームによって異なるテスト（インストール、起動、更新、ターミナル、stdin と Windows のコンソール、Hands、パス、ファイル、子プロセス、ストア）。ビルドするのもそれらだけです。Windows ではテスト時間がほぼ同じ二つのパート（アプリのテストと、それ以外）に分けて同時に実行します |
+| | `Rust / macOS`、`Rust / Windows`、`Rust / Windows (Kumi's crates and bridges)` | `ci-os` セット：プラットフォームによって異なるテスト（インストール、起動、更新、ターミナル、stdin と Windows のコンソール、Hands、パス、ファイル、子プロセス、ストア）。ビルドするのもそれらだけです。プルリクエストでは、macOS は Linux のパートと同じように、そのうち変更が影響するパッケージだけをテストし、Required CI に数えられるのは macOS だけです。Windows は main へのプッシュごとに、テスト時間がほぼ同じ二つのパート（アプリのテストと、それ以外）に分けて同時に実行し、最も遅いテストは Extended に任せます。`full-tests` ラベルのついたプルリクエストでは、Extended がすべての Windows テストを実行します |
 | | `Rust / Lint`（Ubuntu） | `cargo fmt --check`、サンプルのビルド、Clippy（参考扱い。ただし await をまたいで保持される `RefCell` の借用はジョブを失敗させます） |
 | | `Python Remote Script / ubuntu-24.04`、`macos-15`、`windows-2025`（Python 3.11） | Remote Script のテストを実行し、パッケージをコンパイルします |
 | | `Live extension`（Ubuntu、Node 24） | コミットされたビルドに対する、拡張機能のテスト |
