@@ -654,6 +654,15 @@ pub struct PresetHit {
     pub score: f64,
     pub why: Vec<String>,
 }
+impl SoundIndex {
+    /// Each measured sound's row and its numbers as the search compares them: standardized, each group weighted.
+    pub fn compared(&self) -> impl Iterator<Item = (usize, &[f32])> + '_ {
+        (0..self.entries.len())
+            .filter(|row| self.has_vector[*row])
+            .map(|row| (row, &self.vectors[row * VECTOR_LENGTH..(row + 1) * VECTOR_LENGTH]))
+    }
+}
+
 pub fn search_presets<'a>(entries: impl IntoIterator<Item = &'a PresetEntry>, query: &PresetQuery) -> SearchResult<PresetHit> {
     let words = words(&query.words);
     let device = query.device.as_ref().map(|d| trim(d).to_lowercase()).filter(|d| !d.is_empty());

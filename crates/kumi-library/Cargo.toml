@@ -10,6 +10,7 @@ publish = false
 
 [dependencies]
 kumi-common.workspace = true
+kumi-layout.workspace = true
 kumi-media.workspace = true
 kumi-net.workspace = true
 kumi-types.workspace = true

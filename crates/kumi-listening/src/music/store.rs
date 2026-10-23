@@ -401,6 +401,20 @@ impl MusicStore {
         Ok(())
     }
 
+    /// Each laid out song's place on the map (x, y in [0, 1]); every other song has none.
+    pub fn set_places(&mut self, places: &[(i64, [f32; 2])]) -> Result<(), MusicError> {
+        let transaction = self.connection.transaction()?;
+        transaction.execute("UPDATE songs SET x = NULL, y = NULL WHERE x IS NOT NULL OR y IS NOT NULL", [])?;
+        {
+            let mut statement = transaction.prepare_cached("UPDATE songs SET x = ?2, y = ?3 WHERE id = ?1")?;
+            for (id, [x, y]) in places {
+                statement.execute(params![id, *x as f64, *y as f64])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Taste used these songs now: they're heard in full before others.
     pub fn mark_used(&self, ids: &[i64], at: i64) -> Result<(), MusicError> {
         for chunk in ids.chunks(500) {

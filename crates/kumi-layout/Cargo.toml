@@ -1,0 +1,9 @@
+[package]
+name = "kumi-layout"
+version = "0.1.0"
+description = "Where the producer's sounds and songs sit on Kumi's map: t-SNE, the same for the same points, built optimized even in tests."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false

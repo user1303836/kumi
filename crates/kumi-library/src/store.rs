@@ -381,10 +381,19 @@ pub async fn read_json<T: DeserializeOwned>(file: &Path) -> Option<T> {
 }
 
 pub async fn write_json<V: Serialize>(file: &Path, value: &V) -> io::Result<()> {
+    write_whole(file, &format!("{}\n", stringify_pretty(&serde_json::to_value(value).map_err(as_io)?, 1))).await
+}
+
+/// The same on one line, for a big file only code reads (the sounds' map).
+pub async fn write_compact_json<V: Serialize>(file: &Path, value: &V) -> io::Result<()> {
+    write_whole(file, &format!("{}\n", serde_json::to_string(value).map_err(as_io)?)).await
+}
+
+/// A file written whole beside it, then put in its place, readable only by the producer.
+async fn write_whole(file: &Path, text: &str) -> io::Result<()> {
     let folder = file.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
     make_private_dir(&folder).await?;
     let temporary = folder.join(format!(".{}.json", uuid::Uuid::new_v4()));
-    let text = format!("{}\n", stringify_pretty(&serde_json::to_value(value).map_err(as_io)?, 1));
     let written = async {
         write_private(&temporary, &text).await?;
         replace(&temporary, file).await
