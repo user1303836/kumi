@@ -166,7 +166,7 @@ Live はスクリプトにバウンスの手段を用意していないので、
 
 ## Live への二つの経路
 
-Kumi は、ブリッジの Remote Script（Live の Python API。上のすべての変更がこれを使います）を通じて、そして Live 12.4 以降では Kumi の Live 拡張機能（`apps/live-extension`。Live の Extensions SDK で作られています）を通じて Live にアクセスします。拡張機能は Remote Script にできないことを行います：ノート入りのアレンジメントの MIDI クリップ、範囲のクリア、オフラインレンダリング、右クリックの **Ask Kumi about this**。
+Kumi は、ブリッジの Remote Script（Live の Python API。上のすべての変更がこれを使います）を通じて、そして Live 12.4 以降では Kumi の Live 拡張機能（`daws/ableton/live-extension`。Live の Extensions SDK で作られています）を通じて Live にアクセスします。拡張機能は Remote Script にできないことを行います：ノート入りのアレンジメントの MIDI クリップ、範囲のクリア、オフラインレンダリング、右クリックの **Ask Kumi about this**。
 
 - `kumi bridge` は拡張機能を Live の Extensions フォルダーにコピーし、Live は起動時にそれを開始します。Developer Mode がオンなら、ブリッジが自分でそれを開始します。
 - ブリッジは、Remote Script にない操作だけを拡張機能に送ります。Kumi の読み取りは Remote Script のままです。Remote Script は Live のデバイスクラスとオブジェクトのアイデンティティを知っているからです。

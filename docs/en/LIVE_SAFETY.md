@@ -3,7 +3,7 @@
 English · [简体中文](../zh-CN/LIVE_SAFETY.md) · [日本語](../ja/LIVE_SAFETY.md)
 
 What the bridge guarantees when it reads and changes your Live Set, and what it
-doesn't. The bridge is the MCP server in `crates/ableton-mcp-server` together
+doesn't. The bridge is the MCP server in `daws/ableton/ableton-mcp-server` together
 with its Remote Script inside Live. Kumi drives it, and so can any MCP client
 ([user guide](USER_GUIDE.md)). Read this before you point a client at a Set you
 care about.
@@ -211,8 +211,8 @@ Live's main thread reads the socket and runs every request itself, a little in
 each display tick, so nothing touches Live from another thread. On Windows,
 owner-only means an access list with a single entry for you. The Remote Script
 can write a small diagnostics file when you ask for one at install.
-`remote-script/README.md` has the details:
-[the Remote Script README](../../remote-script/README.md).
+`daws/ableton/remote-script/README.md` has the details:
+[the Remote Script README](../../daws/ableton/remote-script/README.md).
 
 ## What's been checked on real Live
 

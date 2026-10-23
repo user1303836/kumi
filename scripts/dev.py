@@ -327,11 +327,11 @@ def check_steps(result: Affected, base: str, windows: bool = sys.platform == "wi
             Step(f"the ci tests of {', '.join(result.packages)}", [*runner, "--profile", "ci", *picked], {"KUMI_NEXTEST": "1"}),
         ]
     if "remote-script" in result.areas:
-        steps += [Step("the Remote Script's tests", [python, "-m", "unittest", "discover", "-s", "remote-script", "-p", "test_*.py"]),
-                  Step("the Remote Script compiles", [python, "-m", "compileall", "-q", "remote-script/AbletonMcpBridge"])]
+        steps += [Step("the Remote Script's tests", [python, "-m", "unittest", "discover", "-s", "daws/ableton/remote-script", "-p", "test_*.py"]),
+                  Step("the Remote Script compiles", [python, "-m", "compileall", "-q", "daws/ableton/remote-script/AbletonMcpBridge"])]
     if "live-extension" in result.areas:
-        steps += [Step("the Live extension's packages", ["npm", "ci", "--prefix", "apps/live-extension", "--ignore-scripts"], needs=("npm",)),
-                  Step("the Live extension's tests", ["npm", "test", "--prefix", "apps/live-extension"], needs=("npm",))]
+        steps += [Step("the Live extension's packages", ["npm", "ci", "--prefix", "daws/ableton/live-extension", "--ignore-scripts"], needs=("npm",)),
+                  Step("the Live extension's tests", ["npm", "test", "--prefix", "daws/ableton/live-extension"], needs=("npm",))]
     if "renoise-tool" in result.areas:
         steps.append(Step("the Renoise tool's tests", ["sh", "daws/renoise/tests/run.sh"], needs=("luajit",)))
     steps += [Step("the release scripts' tests", [python, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_*release.py"]),

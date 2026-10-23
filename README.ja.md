@@ -85,10 +85,10 @@ sh scripts/test-isolated.sh                        # Live もサインインも�
 | --- | --- |
 | `crates/kumi` | ターミナルアプリと `kumi` コマンド |
 | `crates/kumi-runtime` | Kumi のエージェントコア：モデルのプロバイダー、メモリー、音声解析、ビデオ、ウェブ、Live・REAPER・Renoise との連携 |
-| `crates/ableton-mcp-server` | ブリッジ：Kumi が起動するローカルの MCP サーバー。ほかの MCP クライアントからも単独で使えます（[ブリッジのガイド（英語）](crates/ableton-mcp-server/README.md)） |
-| `remote-script` | Live の中で動く、ブリッジの Remote Script |
-| `apps/live-extension` | Kumi の Live 拡張機能（Live 12.4 以降） |
-| `protocol` | ブリッジと Remote Script が共有する操作の一覧 |
+| `daws/ableton/ableton-mcp-server` | ブリッジ：Kumi が起動するローカルの MCP サーバー。ほかの MCP クライアントからも単独で使えます（[ブリッジのガイド（英語）](daws/ableton/ableton-mcp-server/README.md)） |
+| `daws/ableton/remote-script` | Live の中で動く、ブリッジの Remote Script |
+| `daws/ableton/live-extension` | Kumi の Live 拡張機能（Live 12.4 以降） |
+| `daws/ableton/protocol` | ブリッジと Remote Script が共有する操作の一覧 |
 | `crates/daw-mcp-server` | Kumi が起動する、REAPER と Renoise のための Kumi のホスト。ほかの MCP クライアントからも使えます |
 | `crates/reaper-kumi` | Kumi の REAPER 拡張機能 |
 | `daws/renoise` | Kumi の Renoise ツール |

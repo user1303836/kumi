@@ -5,4 +5,4 @@
 *_oracle.json
 crates/kumi/tests/support/app/screens.json
 # The Live extension's committed build.
-apps/live-extension/dist/
+daws/ableton/live-extension/dist/

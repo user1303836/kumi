@@ -64,8 +64,8 @@ jobs:
             crates/kumi/src/daw/ableton/live_app.rs crates/kumi/src/process.rs crates/kumi/src/doctor.rs \
             crates/kumi/src/doctor/installation.rs crates/kumi-runtime/src/integrations/ableton/hands/KumiHands.swift \
             crates/kumi-runtime/src/integrations/ableton/hands/mac.rs crates/kumi-runtime/src/system.rs crates/kumi-runtime/src/ai/http.rs \
-            crates/kumi-runtime/src/library/sources.rs crates/ableton-mcp-server/src/install_remote_script.rs \
-            crates/ableton-mcp-server/src/lifecycle.rs crates/ableton-mcp-server/src/delivery_install.rs \
+            crates/kumi-runtime/src/library/sources.rs daws/ableton/ableton-mcp-server/src/install_remote_script.rs \
+            daws/ableton/ableton-mcp-server/src/lifecycle.rs daws/ableton/ableton-mcp-server/src/delivery_install.rs \
             crates/kumi/src/daw/own.rs crates/daw-bridge/src/lifecycle.rs crates/daw-bridge/src/install.rs crates/daw-bridge/src/detect.rs \
             crates/reaper-kumi/build.rs crates/reaper-kumi/src/lib.rs crates/daw-mcp-server/src/bin/daw-mcp-server.rs \
             crates/daw-bridge/src/files.rs crates/daw-bridge/src/owner.rs crates/daw-bridge/src/paths.rs crates/reaper-kumi/shim/csurf.cpp \

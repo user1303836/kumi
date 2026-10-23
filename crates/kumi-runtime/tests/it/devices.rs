@@ -1121,7 +1121,7 @@ fn each_kind_of_device_is_made_in_a_folder_the_bridge_reads_as_that_kind() {
     // The bridge knows what a User Library item loads as only by a folder on its path named for its kind (as Live's own
     // preset folders are), and loads an item that might be an instrument onto no track that has one: an effect made in
     // a folder of no kind never went after an instrument. Read from the bridge's own table, so the two can't drift.
-    let script = kumi_testkit::workspace_path("remote-script/ableton_mcp_remote_script.py");
+    let script = kumi_testkit::workspace_path("daws/ableton/remote-script/ableton_mcp_remote_script.py");
     let script = std::fs::read_to_string(script).unwrap();
     let table = script.lines().find(|line| line.trim_start().starts_with("_PRESET_FOLDER_TYPES = ")).expect("the bridge's folder table");
     let folders: Vec<(Regex, u64)> = Regex::new(r#"re\.compile\(r"([^"]+)", re\.I\), (\d)\)"#)

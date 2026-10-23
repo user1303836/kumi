@@ -11,7 +11,7 @@
     "noEmit": true,
     "types": ["node"],
     "baseUrl": ".",
-    "paths": { "@ableton-extensions/sdk": ["../../vendor/ableton-extensions-sdk-1.0.0-beta.1/package 3/dist/index.d.mts"] }
+    "paths": { "@ableton-extensions/sdk": ["../../../vendor/ableton-extensions-sdk-1.0.0-beta.1/package 3/dist/index.d.mts"] }
   },
   "include": ["src/**/*"]
 }

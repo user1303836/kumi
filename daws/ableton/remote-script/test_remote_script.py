@@ -429,7 +429,7 @@ class RemoteScriptTests(unittest.TestCase):
         # Unmocked: a file secured by the bridge's own script (delivery_acl.rs, as its setup runs it), one left with the
         # rules it inherits and one that isn't there, in one run, each verdict at its own place.
         package = __import__("AbletonMcpBridge")
-        source = (Path(__file__).resolve().parent.parent / "crates" / "ableton-mcp-server" / "src" / "delivery_acl.rs").read_text(encoding="utf-8")
+        source = (Path(__file__).resolve().parent.parent / "ableton-mcp-server" / "src" / "delivery_acl.rs").read_text(encoding="utf-8")
         target, secure, checks = (re.search(rf'const {name}\s*:\s*&str\s*=\s*"([^"\\]*)";', source).group(1) for name in ("WINDOWS_ACL_TARGET", "SECURE_FILE", "WINDOWS_ACL_CHECKS"))
         with tempfile.TemporaryDirectory() as directory:
             owner_only, inherited, missing = Path(directory, "secret"), Path(directory, "inherited"), Path(directory, "missing")
@@ -8516,7 +8516,7 @@ class KumiMovedRefTests(unittest.TestCase):
     again, as the bridge does before it acts there. Kumi's scripts have the places read again first
     (crates/kumi-runtime/src/integrations/ableton/assets/moved-places.py)."""
 
-    ASSETS = Path(__file__).resolve().parent.parent / "crates" / "kumi-runtime" / "src" / "integrations" / "ableton" / "assets"
+    ASSETS = Path(__file__).resolve().parents[3] / "crates" / "kumi-runtime" / "src" / "integrations" / "ableton" / "assets"
 
     def setUp(self):
         self.song = FakeUndoSong(); self.song.tracks = []

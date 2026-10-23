@@ -164,12 +164,12 @@ Apple Silicon の Live 12.4.15b7 には Willington `5361914b1b79230e51c8f051b8b2
 {"version":1,"followActions":false,"deviceTools":false,"editing":true,"enableWrites":false}
 ```
 
-ランナーはインストール済みブリッジには含まれません。[Kumi](https://github.com/user1303836/kumi) をクローンし、インストールした Kumi リリースと一致するタグをチェックアウトして、その `remote-script/native_editing_self_test.py` を使用してください。以下の `/absolute/kumi` をチェックアウト先の絶対パスに置き換えます。開発中はリリースタグの代わりに対応する機能ブランチを使用します。
+ランナーはインストール済みブリッジには含まれません。[Kumi](https://github.com/user1303836/kumi) をクローンし、インストールした Kumi リリースと一致するタグをチェックアウトして、その `daws/ableton/remote-script/native_editing_self_test.py`（1.21.1 までのリリースでは `remote-script/native_editing_self_test.py`）を使用してください。以下の `/absolute/kumi` をチェックアウト先の絶対パスに置き換えます。開発中はリリースタグの代わりに対応する機能ブランチを使用します。
 
 ```python
 import importlib.util, sys, Live
 spec = importlib.util.spec_from_file_location(
-    "editing_fixture", "/absolute/kumi/remote-script/native_editing_self_test.py")
+    "editing_fixture", "/absolute/kumi/daws/ableton/remote-script/native_editing_self_test.py")
 fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 provider = Live._kumi_willington_owner

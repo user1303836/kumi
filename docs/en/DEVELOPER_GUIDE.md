@@ -12,10 +12,10 @@ How the repository fits together, how to work on each part, and how to release.
 | `crates/kumi` | The native `kumi` command and terminal app (`src/tui/`), and opt-in checks against models or real Live (`examples/`) |
 | `crates/kumi-runtime` | Agent loop, providers, sign-in, sessions, library, Live integration, media tools and MCP client |
 | `crates/kumi-common` | Shared runtime utilities and source-compatible value handling |
-| `crates/ableton-mcp-server` | Native MCP bridge, analysis worker, lifecycle, setup, migration and diagnostics |
-| `remote-script` | The bridge's Remote Script, which runs inside Live (`ableton_mcp_remote_script.py`, the `AbletonMcpBridge/` entry point, Python tests) |
-| `apps/live-extension` | Kumi's Live extension for Live 12.4 and later, on Live's Extensions SDK (TypeScript, with its own `package.json`) |
-| `protocol` | `ableton-live-v1.operations.json`, the operation registry the bridge and the Remote Script share |
+| `daws/ableton/ableton-mcp-server` | Native MCP bridge, analysis worker, lifecycle, setup, migration and diagnostics |
+| `daws/ableton/remote-script` | The bridge's Remote Script, which runs inside Live (`ableton_mcp_remote_script.py`, the `AbletonMcpBridge/` entry point, Python tests) |
+| `daws/ableton/live-extension` | Kumi's Live extension for Live 12.4 and later, on Live's Extensions SDK (TypeScript, with its own `package.json`) |
+| `daws/ableton/protocol` | `ableton-live-v1.operations.json`, the operation registry the bridge and the Remote Script share |
 | `scripts` | Release builders, migration packaging, the Mac helper's build, the isolated test runners, and `native-kumi.mjs` behind `npm run kumi` and `npm run setup` |
 | `crates/daw-mcp-server` | Kumi's host for REAPER and Renoise (`daw-mcp-server --daw reaper\|renoise`): MCP over stdio, the changes' journal and undo, listening jobs, catch-up; also usable by other MCP clients |
 | `crates/reaper-kumi` | Kumi's REAPER extension (`reaper_kumi`), built against REAPER's SDK headers vendored in `sdk/` |
@@ -39,11 +39,11 @@ old path, build errors) is listed.
 kumi (crates/kumi, crates/kumi-runtime)
   │  MCP over stdio: Kumi starts the bridge as a child process
   ▼
-bridge (crates/ableton-mcp-server)
+bridge (daws/ableton/ableton-mcp-server)
   │  ableton-loopback/v1: authenticated TCP on 127.0.0.1
-  ├──► Remote Script inside Live (remote-script/)
+  ├──► Remote Script inside Live (daws/ableton/remote-script/)
   │  local channel to the Extension Host
-  └──► Kumi's Live extension (apps/live-extension), Live 12.4+
+  └──► Kumi's Live extension (daws/ableton/live-extension), Live 12.4+
 
 kumi (crates/kumi, crates/kumi-runtime)
   │  MCP over stdio: Kumi starts its host for REAPER or Renoise
@@ -58,7 +58,7 @@ host (crates/daw-mcp-server --daw reaper|renoise)
   exactly the tools it uses (`ABLETON_MCP_TOOL_ALLOW`). The model calls a few
   bridge reads directly (`MODEL_TOOLS` in `crates/kumi-runtime/src/mcp/allowed_tools.rs`);
   Kumi's own tools call the rest.
-- The bridge's router (`crates/ableton-mcp-server/src/bridge/router.rs`) sends each
+- The bridge's router (`daws/ableton/ableton-mcp-server/src/bridge/router.rs`) sends each
   operation to the Remote Script, or to the extension when only the extension
   has it. The bridge can start Live's Extension Host itself when Live's
   Developer Mode keeps it from starting extensions.
@@ -141,7 +141,7 @@ The terminal app's design and foundations are in
 
 ## Working on the bridge
 
-Paths below are relative to `crates/ableton-mcp-server`.
+Paths below are relative to `daws/ableton/ableton-mcp-server`.
 
 | Path | What it is |
 | --- | --- |
@@ -161,8 +161,8 @@ Paths below are relative to `crates/ableton-mcp-server`.
 - The wire protocol is `ableton-loopback/v1`: canonical JSON (sorted keys,
   negative zero normalized), HMAC-SHA256 on requests and responses, bounded
   frames and collections, sequence numbers, and an epoch that changes each time
-  the Remote Script starts. The details are in `remote-script/README.md`.
-- The registry in `protocol/` is the only list of operations. The host and the
+  the Remote Script starts. The details are in `daws/ableton/remote-script/README.md`.
+- The registry in `daws/ableton/protocol/` is the only list of operations. The host and the
   Remote Script each hash it and must agree, or Live never connects; a host
   test runs the Remote Script's hashing to hold them equal. Never copy
   operation names or the hash into another source file.
@@ -196,12 +196,12 @@ clients poll. Client metadata never grants access to Live. See the
 
 ## Working on the Live extension
 
-`apps/live-extension` is TypeScript, bundled with esbuild, with its own
+`daws/ableton/live-extension` is TypeScript, bundled with esbuild, with its own
 `package.json`. It builds against Live's Extensions SDK, whose licence forbids
 redistributing it, so it isn't in the repository: put a copy at
 `vendor/ableton-extensions-sdk-1.0.0-beta.1/` in the repository root (the build
 reads `package 3/dist/index.cjs` inside it). Run `npm ci` in
-`apps/live-extension`, then `npm run build`, which writes `dist/extension.js`
+`daws/ableton/live-extension`, then `npm run build`, which writes `dist/extension.js`
 and its `.sha256`; commit both. `npm run typecheck` needs the SDK too. Without
 the SDK, the build stops and the committed bundle stays; `npm test` checks the
 bundle against its checksum. Measurements of how Live runs the extension are in
@@ -274,7 +274,7 @@ for its library.
 
 **Commits** have plain-English subjects that say what changed for the producer
 ("Kumi: talk to it while it works"). A bridge or Remote Script change bumps
-the version in `crates/ableton-mcp-server/Cargo.toml` and `Cargo.lock`, starts
+the version in `daws/ableton/ableton-mcp-server/Cargo.toml` and `Cargo.lock`, starts
 its subject with the new version ("Bridge 1.0.71: …"), and adds a
 `### Bridge x.y.z` block under `## Unreleased` in `CHANGELOG.md`. If the
 extension changed, rebuild and commit its bundle. Work goes on a branch and
@@ -301,8 +301,8 @@ python3 scripts/release.py --go     # the release
   is one item a producer reads there: say what they'll notice, the ones that
   matter most first.
 - **The bridge** gets a new version when a pull request changes what Live
-  loads: `crates/ableton-mcp-server`, `crates/kumi-common` (the host links it),
-  `remote-script`, `protocol`, `apps/live-extension` or `vendor/willington`
+  loads: `daws/ableton/ableton-mcp-server`, `crates/kumi-common` (the host links it),
+  `daws/ableton/remote-script`, `daws/ableton/protocol`, `daws/ableton/live-extension` or `vendor/willington`
   (tests and Markdown aside). When the host's dependencies in `Cargo.lock`
   change, the dry run says so; `--bridge` gives the bridge a new version then.
 - **REAPER's extension and Renoise's tool** get new versions the same way, each

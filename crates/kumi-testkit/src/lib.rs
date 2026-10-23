@@ -23,7 +23,7 @@ pub fn workspace() -> PathBuf {
         .collect()
 }
 
-/// A path in this checkout, from its root: `workspace_path("protocol/ableton-live-v1.operations.json")`.
+/// A path in this checkout, from its root: `workspace_path("daws/ableton/protocol/ableton-live-v1.operations.json")`.
 pub fn workspace_path(relative: impl AsRef<Path>) -> PathBuf {
     workspace().join(relative)
 }

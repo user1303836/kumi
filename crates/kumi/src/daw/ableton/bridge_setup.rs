@@ -113,13 +113,13 @@ fn error(e: impl std::fmt::Display) -> RuntimeError {
     RuntimeError::plain(e.to_string())
 }
 /// The folder of the bridge this Kumi brings: an installed app's (its package.json is beside the
-/// executable), or, for a checkout's build, the checkout's apps folder, whose live-extension it places.
+/// executable), or, for a checkout's build, the checkout's bridge crate, beside which is the live-extension it places.
 pub fn bundled_bridge_dir() -> String {
     let folder = executable_dir();
     if Path::new(&join(&folder, "package.json")).exists() {
         folder
     } else {
-        join(&repository_dir(), "apps")
+        join(&repository_dir(), "daws/ableton/ableton-mcp-server")
     }
 }
 /// The version of the bridge this Kumi brings: an installed app names it in its package.json; a

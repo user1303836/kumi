@@ -1,4 +1,4 @@
-// The loopback wire the Remote Script speaks (remote-script/ableton_mcp_remote_script.py): one JSON
+// The loopback wire the Remote Script speaks (daws/ableton/remote-script/ableton_mcp_remote_script.py): one JSON
 // object per line, each signed with HMAC-SHA256 over its canonical text. The bridge host talks to
 // this extension exactly as it talks to the Remote Script.
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";

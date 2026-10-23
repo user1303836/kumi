@@ -14,7 +14,7 @@ Remote Script 中的一个 UDP 端点，供控制器脚本、OSC 应用或 Max p
 "bridge": {"host": "127.0.0.1", "port": 9765, "realtimePort": 9766, "secretFile": "/absolute/path/to/bridge.secret", "timeoutMs": 5000}
 ```
 
-完整的配置文件在 Remote Script 的 README 中说明（[remote-script/README.md](../../remote-script/README.md)）。
+完整的配置文件在 Remote Script 的 README 中说明（[daws/ableton/remote-script/README.md](../../daws/ableton/remote-script/README.md)）。
 
 - `ableton-mcp-lifecycle install`（因此也包括 `kumi bridge`）会把 `realtimePort` 设为 9766，除非 `--realtime-port` 指定了别的端口。安装前会先检查两个端口是否都空闲。
 - `ableton-mcp-setup` 只有在你随其他桥接选项一起传入 `--realtime-port` 时才会写入它（[用户指南](USER_GUIDE.md)）。

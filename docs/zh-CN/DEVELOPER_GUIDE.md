@@ -11,10 +11,10 @@
 | `crates/kumi` | 原生的 `kumi` 命令和终端应用（`src/tui/`），以及针对模型或真实 Live、需要主动运行的检查（`examples/`） |
 | `crates/kumi-runtime` | 代理循环、模型提供方、登录、会话、素材库、Live 集成、媒体工具和 MCP 客户端 |
 | `crates/kumi-common` | 共享的运行时工具，以及与原实现兼容的值处理 |
-| `crates/ableton-mcp-server` | 原生 MCP 桥接、分析工作进程、生命周期、设置、迁移和诊断 |
-| `remote-script` | 桥接的 Remote Script，运行在 Live 内部（`ableton_mcp_remote_script.py`、`AbletonMcpBridge/` 入口、Python 测试） |
-| `apps/live-extension` | Kumi 的 Live 扩展，适用于 Live 12.4 及更高版本，基于 Live 的 Extensions SDK（TypeScript，有自己的 `package.json`） |
-| `protocol` | `ableton-live-v1.operations.json`，桥接与 Remote Script 共用的操作注册表 |
+| `daws/ableton/ableton-mcp-server` | 原生 MCP 桥接、分析工作进程、生命周期、设置、迁移和诊断 |
+| `daws/ableton/remote-script` | 桥接的 Remote Script，运行在 Live 内部（`ableton_mcp_remote_script.py`、`AbletonMcpBridge/` 入口、Python 测试） |
+| `daws/ableton/live-extension` | Kumi 的 Live 扩展，适用于 Live 12.4 及更高版本，基于 Live 的 Extensions SDK（TypeScript，有自己的 `package.json`） |
+| `daws/ableton/protocol` | `ableton-live-v1.operations.json`，桥接与 Remote Script 共用的操作注册表 |
 | `scripts` | 发布构建器、迁移打包、Mac 辅助程序的构建、隔离测试运行器，以及 `npm run kumi` 和 `npm run setup` 背后的 `native-kumi.mjs` |
 | `crates/daw-mcp-server` | Kumi 为 REAPER 和 Renoise 准备的宿主程序（`daw-mcp-server --daw reaper\|renoise`）：基于 stdio 的 MCP、修改的日志与撤销、聆听任务、离开期间的变化；其他 MCP 客户端也能使用 |
 | `crates/reaper-kumi` | Kumi 的 REAPER 扩展（`reaper_kumi`），用 `sdk/` 中附带的 REAPER SDK 头文件构建 |
@@ -32,11 +32,11 @@
 kumi (crates/kumi, crates/kumi-runtime)
   │  MCP over stdio: Kumi starts the bridge as a child process
   ▼
-bridge (crates/ableton-mcp-server)
+bridge (daws/ableton/ableton-mcp-server)
   │  ableton-loopback/v1: authenticated TCP on 127.0.0.1
-  ├──► Remote Script inside Live (remote-script/)
+  ├──► Remote Script inside Live (daws/ableton/remote-script/)
   │  local channel to the Extension Host
-  └──► Kumi's Live extension (apps/live-extension), Live 12.4+
+  └──► Kumi's Live extension (daws/ableton/live-extension), Live 12.4+
 
 kumi (crates/kumi, crates/kumi-runtime)
   │  MCP over stdio: Kumi starts its host for REAPER or Renoise
@@ -48,7 +48,7 @@ host (crates/daw-mcp-server --daw reaper|renoise)
 ```
 
 - Kumi 以 `full` 部署策略启动桥接，并附带一个只包含它所用工具的允许列表（`ABLETON_MCP_TOOL_ALLOW`）。模型直接调用少数几个桥接读取工具（`crates/kumi-runtime/src/mcp/allowed_tools.rs` 中的 `MODEL_TOOLS`）；其余的由 Kumi 自己的工具调用。
-- 桥接的路由器（`crates/ableton-mcp-server/src/bridge/router.rs`）把每个操作发送给 Remote Script，或者在只有扩展具备该操作时发送给扩展。当 Live 的 Developer Mode 让 Live 不启动扩展时，桥接可以自己启动 Live 的 Extension Host。
+- 桥接的路由器（`daws/ableton/ableton-mcp-server/src/bridge/router.rs`）把每个操作发送给 Remote Script，或者在只有扩展具备该操作时发送给扩展。当 Live 的 Developer Mode 让 Live 不启动扩展时，桥接可以自己启动 Live 的 Extension Host。
 - `kumi bridge` 通过桥接的生命周期命令把桥接安装到 Live 中，之后通过 `Remote Scripts/AbletonMcpBridge/bridge-reference.json` 找到它。
 
 ## 环境搭建
@@ -100,7 +100,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 ## 开发桥接
 
-下面的路径都相对于 `crates/ableton-mcp-server`。
+下面的路径都相对于 `daws/ableton/ableton-mcp-server`。
 
 | 路径 | 说明 |
 | --- | --- |
@@ -117,8 +117,8 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 **契约规则。**
 
-- 传输协议是 `ableton-loopback/v1`：规范 JSON（键排序、负零归一化）、请求和响应上的 HMAC-SHA256、有界的帧和集合、序列号，以及每次 Remote Script 启动时都会改变的 epoch。详情见 `remote-script/README.md`。
-- `protocol/` 中的注册表是唯一的操作列表。宿主和 Remote Script 各自计算它的哈希，两者必须一致，否则 Live 永远不会连接；有一个宿主测试会运行 Remote Script 的哈希计算，确保两者相等。绝不要把操作名称或哈希复制到其他源文件中。
+- 传输协议是 `ableton-loopback/v1`：规范 JSON（键排序、负零归一化）、请求和响应上的 HMAC-SHA256、有界的帧和集合、序列号，以及每次 Remote Script 启动时都会改变的 epoch。详情见 `daws/ableton/remote-script/README.md`。
+- `daws/ableton/protocol/` 中的注册表是唯一的操作列表。宿主和 Remote Script 各自计算它的哈希，两者必须一致，否则 Live 永远不会连接；有一个宿主测试会运行 Remote Script 的哈希计算，确保两者相等。绝不要把操作名称或哈希复制到其他源文件中。
 - 修改通过各有专门用途的操作进行，每个操作都有预览、应用和撤销。唯一的例外是 `python.run`（`live_run_python`），它在 Live 的主线程上运行 Python，唯一的回退方式是 Live 的撤销；它有自己的策略类别 `python`，只有 `full` 配置文件允许使用。
 - 桥接内部的 `get(ref)` 是基于固定行的有界序列化器，而不是 Live 对象模型的通用读取器；MCP 读取保持各有专门用途。
 - Remote Script 在 Live 的主线程上完成它与 Live 打交道的全部工作：它在 Live 的显示刷新周期内（两次刷新之间借助 Live 自己的计时器）、在限定的时间预算内自己处理套接字。它仅有的其他线程用于写入诊断文件和接收实时 UDP。新的 epoch 会使之前的所有引用和游标失效。Remote Script 无法识别的 Live 结构会被报告为不可用，绝不伪造。
@@ -130,7 +130,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 ## 开发 Live 扩展
 
-`apps/live-extension` 使用 TypeScript 编写，用 esbuild 打包，有自己的 `package.json`。它基于 Live 的 Extensions SDK 构建，而这个 SDK 的许可证禁止再分发，所以它不在仓库中：请把一份副本放到仓库根目录的 `vendor/ableton-extensions-sdk-1.0.0-beta.1/`（构建会读取其中的 `package 3/dist/index.cjs`）。在 `apps/live-extension` 中运行 `npm ci`，然后运行 `npm run build`，它会写出 `dist/extension.js` 及其 `.sha256`；两者都要提交。`npm run typecheck` 同样需要 SDK。没有 SDK 时，构建会停止，已提交的包保持不变；`npm test` 会根据校验和检查这个包。关于 Live 如何运行该扩展的测量数据，见[证据](../evidence/live-extension.md)。
+`daws/ableton/live-extension` 使用 TypeScript 编写，用 esbuild 打包，有自己的 `package.json`。它基于 Live 的 Extensions SDK 构建，而这个 SDK 的许可证禁止再分发，所以它不在仓库中：请把一份副本放到仓库根目录的 `vendor/ableton-extensions-sdk-1.0.0-beta.1/`（构建会读取其中的 `package 3/dist/index.cjs`）。在 `daws/ableton/live-extension` 中运行 `npm ci`，然后运行 `npm run build`，它会写出 `dist/extension.js` 及其 `.sha256`；两者都要提交。`npm run typecheck` 同样需要 SDK。没有 SDK 时，构建会停止，已提交的包保持不变；`npm test` 会根据校验和检查这个包。关于 Live 如何运行该扩展的测量数据，见[证据](../evidence/live-extension.md)。
 
 ## Willington 的文件
 
@@ -157,7 +157,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 ## 发布
 
-**提交**的标题用通俗的英文，说明对制作人来说改变了什么（“Kumi: talk to it while it works”）。桥接或 Remote Script 的修改要提升 `crates/ableton-mcp-server/Cargo.toml` 和 `Cargo.lock` 中的版本，标题以新版本开头（“Bridge 1.0.71: …”），并在 `CHANGELOG.md` 的 `## Unreleased` 下添加一个 `### Bridge x.y.z` 块。如果扩展变了，重新构建并提交它的包。工作在分支上进行，通过拉取请求合并到 `main`。
+**提交**的标题用通俗的英文，说明对制作人来说改变了什么（“Kumi: talk to it while it works”）。桥接或 Remote Script 的修改要提升 `daws/ableton/ableton-mcp-server/Cargo.toml` 和 `Cargo.lock` 中的版本，标题以新版本开头（“Bridge 1.0.71: …”），并在 `CHANGELOG.md` 的 `## Unreleased` 下添加一个 `### Bridge x.y.z` 块。如果扩展变了，重新构建并提交它的包。工作在分支上进行，通过拉取请求合并到 `main`。
 
 **一次 Kumi 发布**只需一条命令，可在任意源码副本中运行，`gh` 需以仓库管理员身份登录。在拉取请求合并后立即运行：
 
@@ -168,7 +168,7 @@ python3 scripts/release.py --go     # 正式发布
 
 - **发布内容**读取自上一个标签以来的 `main`：每个已合并拉取请求的 `Changelog:` 行，按原文使用（“none” 不添加任何内容）。如果拉取请求修改了桥接，而没有修改 Kumi 的 crate 或安装程序，它的行会放在桥接的标题下；同时修改两者的拉取请求，请把关于桥接的行写成 `Changelog (bridge):`。试运行会显示每一行放在哪里。
 - **What's new**：Kumi 内置 `CHANGELOG.md`，更新后第一次启动时，把一个版本的列表项显示为 **What's new**（最多五条，从最新版本开始；其余见 `/changelog`）。段落（例如附带桥接和测试环境的说明）不会显示，所以每一行 `Changelog:` 就是用户在那里读到的一条：写他们会注意到的变化，重要的放在前面。
-- **桥接**在拉取请求修改了 Live 加载的内容时获得新版本：`crates/ableton-mcp-server`、主机链接的 `crates/kumi-common`、`remote-script`、`protocol`、`apps/live-extension` 或 `vendor/willington`（测试和 Markdown 除外）。`Cargo.lock` 中主机的依赖变化时，试运行会提示，这时用 `--bridge` 给桥接一个新版本。
+- **桥接**在拉取请求修改了 Live 加载的内容时获得新版本：`daws/ableton/ableton-mcp-server`、主机链接的 `crates/kumi-common`、`daws/ableton/remote-script`、`daws/ableton/protocol`、`daws/ableton/live-extension` 或 `vendor/willington`（测试和 Markdown 除外）。`Cargo.lock` 中主机的依赖变化时，试运行会提示，这时用 `--bridge` 给桥接一个新版本。
 - **REAPER 的扩展和 Renoise 的工具**也按同样的方式获得新版本：拉取请求修改了该 DAW 加载的内容时（`crates/reaper-kumi` 和 `crates/daw-bridge`，或 `daws/renoise/com.kumi.Bridge.xrnx`）。`--reaper` 和 `--renoise` 无论如何都给它新版本，`--no-reaper` 和 `--no-renoise` 保持原版本；`--no-bridge` 只针对 Live。写成 `Changelog (reaper):` 或 `Changelog (renoise):` 的行会放到它的标题下。使用 `--go` 时，`crates/reaper-kumi/Cargo.toml` 和 `Cargo.lock`、工具的 `payload/version.lua` 和 `manifest.xml` 中的版本会前进，三个 `KUMI_GUIDE.md` 中各自的 ships-with 行也会前进。上一个版本没有的桥接按它自己的版本发布，它那一行已经写着本次版本。
 - **版本**是下一个补丁版本；`--minor` 或 `--version X.Y.Z` 可以选择其他版本。
 - **加上 `--go`**，它会在 `release/vX.Y.Z` 上提交 “Kumi X.Y.Z: the changelog, READMEs and versions”：根目录的 `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common` 和 `kumi-runtime` 的 Cargo 清单以及 `Cargo.lock` 中的版本（打包测试会确保这些相等），桥接变化时还有桥接的版本；三个 README 中当前状态（Status）的那一行；三个 `KUMI_CHANGES.md` 中“桥接版本”（Bridge versions）下说明随附哪个桥接的那一行；以及 `CHANGELOG.md` 中的 `## X.Y.Z — date` 条目。然后它打开拉取请求 “Kumi X.Y.Z”，不等其 CI，用管理员绕过将其合并为 “Kumi X.Y.Z (#PR)”，给合并提交打上标签 `vX.Y.Z` 并推送，再创建带发布说明的草稿发布（`--summary` 可以在说明开头加一句话）。

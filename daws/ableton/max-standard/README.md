@@ -4,7 +4,7 @@ What Kumi holds Max for Live patchers to, as data. The checker is in `crates/kum
 its tests run off these files, and Kumi carries them in its binary.
 
 ```
-max-standard/
+daws/ableton/max-standard/
   standard.json   each rule's level (error, warn, advice, off) and what measuring well-made devices found for it
   objects.json    what the rules know of Max's objects: aliases, hot inlets, objects that defer, names copies share
 ```
@@ -21,7 +21,7 @@ max-standard/
 ## Survey
 
 ```
-cargo run -p kumi-runtime --example max_patch_survey -- report.json --into max-standard/standard.json <device or folder>...
+cargo run -p kumi-runtime --example max_patch_survey -- report.json --into daws/ableton/max-standard/standard.json <device or folder>...
 ```
 
 - `--into` replaces the measured counts, it doesn't add to them: survey every device measured so far at once.

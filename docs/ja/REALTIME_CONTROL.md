@@ -14,7 +14,7 @@ Remote Script は、バージョン 2 の設定の `bridge` セクションに�
 "bridge": {"host": "127.0.0.1", "port": 9765, "realtimePort": 9766, "secretFile": "/absolute/path/to/bridge.secret", "timeoutMs": 5000}
 ```
 
-ファイル全体については、Remote Script の README（[remote-script/README.md](../../remote-script/README.md)）で説明しています。
+ファイル全体については、Remote Script の README（[daws/ableton/remote-script/README.md](../../daws/ableton/remote-script/README.md)）で説明しています。
 
 - `ableton-mcp-lifecycle install`、つまり `kumi bridge` は、`--realtime-port` で別のポートを指定しない限り、`realtimePort` を 9766 に設定します。インストールは、まず両方のポートが空いていることを確認します。
 - `ableton-mcp-setup` がこれを書くのは、ほかのブリッジのオプションと一緒に `--realtime-port` を渡したときだけです（[ユーザーガイド](USER_GUIDE.md)）。

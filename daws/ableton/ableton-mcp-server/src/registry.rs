@@ -1,4 +1,4 @@
-//! The canonical Live operation registry (`protocol/ableton-live-v1.operations.json`): its hash,
+//! The canonical Live operation registry (`daws/ableton/protocol/ableton-live-v1.operations.json`): its hash,
 //! which the Remote Script must match before Live connects, and validation of production wire
 //! values against the exact schema subset the registry uses.
 
@@ -227,11 +227,12 @@ pub fn sha256_hex(text: &str) -> String {
     hex::encode(Sha256::digest(text.as_bytes()))
 }
 
-/// The registry this code was built with: the repository's `protocol/ableton-live-v1.operations.json`,
+/// The registry this code was built with: the repository's `daws/ableton/protocol/ableton-live-v1.operations.json`,
 /// embedded at build time. Never one found from the working directory: a bridge started from a checkout
 /// of another version would take that one's registry and no longer agree with its own Remote Script in
 /// Live.
-pub const LIVE_REGISTRY_TEXT: &str = include_str!(concat!(env!("KUMI_WORKSPACE"), "/protocol/ableton-live-v1.operations.json"));
+pub const LIVE_REGISTRY_TEXT: &str =
+    include_str!(concat!(env!("KUMI_WORKSPACE"), "/daws/ableton/protocol/ableton-live-v1.operations.json"));
 
 static REGISTRY: LazyLock<LiveRegistry> =
     LazyLock::new(|| parse_live_registry(LIVE_REGISTRY_TEXT).unwrap_or_else(|error| panic!("{error}")));

@@ -12,9 +12,9 @@
 npm ci --prefix crates/kumi-runtime/tests/support   # 只需一次：部分 Rust 测试运行的官方 SDK
 cargo build --workspace --all-targets --locked
 sh scripts/test-isolated.sh                        # Windows: ./scripts/test-isolated.ps1
-python3 -m unittest discover -s remote-script -p 'test_*.py'
-npm ci --prefix apps/live-extension
-npm test --prefix apps/live-extension
+python3 -m unittest discover -s daws/ableton/remote-script -p 'test_*.py'
+npm ci --prefix daws/ableton/live-extension
+npm test --prefix daws/ableton/live-extension
 python3 -m unittest discover -s scripts/tests -p 'test_*release.py'
 ```
 
@@ -56,15 +56,15 @@ python3 -m unittest discover -s scripts/tests -p 'test_*release.py'
 在仓库根目录运行：
 
 ```sh
-python3 -m unittest discover -s remote-script -p 'test_*.py'
-python3 -m compileall -q remote-script/AbletonMcpBridge
+python3 -m unittest discover -s daws/ableton/remote-script -p 'test_*.py'
+python3 -m compileall -q daws/ableton/remote-script/AbletonMcpBridge
 ```
 
 这些测试针对假 Live 对象运行 Remote Script，覆盖：认证、顺序控制、主线程队列、注册表及其哈希、探查、事务、捕获与实时安全，以及可选的 Willington 提供方。
 
 ## Kumi 的 Live 扩展
 
-`apps/live-extension` 有自己的 `package.json`。运行 `npm ci --prefix apps/live-extension` 之后，`npm test --prefix apps/live-extension` 会针对假 Live 加载已提交的 `dist/extension.js`，并对照记录的 sha256 检查它。在该目录中构建（`npm run build`）和类型检查（`npm run typecheck`）都需要 `vendor/` 中的 Extensions SDK；没有 SDK 时，已提交的构建保持原样。重新构建之后，请把 `dist/extension.js` 连同它的 `.sha256` 一起提交。
+`daws/ableton/live-extension` 有自己的 `package.json`。运行 `npm ci --prefix daws/ableton/live-extension` 之后，`npm test --prefix daws/ableton/live-extension` 会针对假 Live 加载已提交的 `dist/extension.js`，并对照记录的 sha256 检查它。在该目录中构建（`npm run build`）和类型检查（`npm run typecheck`）都需要 `vendor/` 中的 Extensions SDK；没有 SDK 时，已提交的构建保持原样。重新构建之后，请把 `dist/extension.js` 连同它的 `.sha256` 一起提交。
 
 ## 发布脚本
 
@@ -75,7 +75,7 @@ python3 -m compileall -q remote-script/AbletonMcpBridge
 | `KUMI_LEGACY_APP` | 解包后的 Kumi 1.7.5：`python3 scripts/fetch-legacy-release.py [folder]` 会下载它、检查其 SHA-256、解包并打印所在文件夹 |
 | `KUMI_NATIVE_RELEASES` | 存放已构建发布产物的文件夹（见[发布](DEVELOPER_GUIDE.md#发布)） |
 
-`KUMI_LEGACY_APP` 也用于桥接自己的迁移测试 `crates/ableton-mcp-server/tests/it/lifecycle_migration.rs`。缺少该变量时，这个测试不会跳过，而是下载已发布的 Kumi 1.7.5 发行包并检查其 SHA-256。设置该变量后，只要发行包已下载过一次，它就可以离线运行。
+`KUMI_LEGACY_APP` 也用于桥接自己的迁移测试 `daws/ableton/ableton-mcp-server/tests/it/lifecycle_migration.rs`。缺少该变量时，这个测试不会跳过，而是下载已发布的 Kumi 1.7.5 发行包并检查其 SHA-256。设置该变量后，只要发行包已下载过一次，它就可以离线运行。
 
 ## 需要 Live 或模型的检查
 

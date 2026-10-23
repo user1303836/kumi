@@ -1,4 +1,4 @@
-//! What Kumi's checks know of Max's objects beyond what a patcher says about them, from `max-standard/objects.json`:
+//! What Kumi's checks know of Max's objects beyond what a patcher says about them, from `daws/ableton/max-standard/objects.json`:
 //! aliases, which inlets make an object send, which objects send later, which name something every copy of a device
 //! shares. A class it doesn't list follows Max's convention, its left inlet the only hot one.
 
@@ -39,7 +39,8 @@ pub struct Catalog {
 
 static CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
     Catalog::from_value(
-        &serde_json::from_str(include_str!(concat!(env!("KUMI_WORKSPACE"), "/max-standard/objects.json"))).expect("objects.json"),
+        &serde_json::from_str(include_str!(concat!(env!("KUMI_WORKSPACE"), "/daws/ableton/max-standard/objects.json")))
+            .expect("objects.json"),
     )
 });
 

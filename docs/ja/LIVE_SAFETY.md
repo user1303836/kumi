@@ -2,7 +2,7 @@
 
 [English](../en/LIVE_SAFETY.md) · [简体中文](../zh-CN/LIVE_SAFETY.md) · 日本語
 
-ブリッジが Live の Set を読み取り、変更するときに保証すること、保証しないことをまとめます。ブリッジとは、`crates/ableton-mcp-server` にある MCP サーバーと、Live の中で動くその Remote Script のことです。ブリッジを操作するのは Kumi ですが、どの MCP クライアントからも操作できます（[ユーザーガイド](USER_GUIDE.md)）。大事な Set にクライアントを向ける前に、このページを読んでください。
+ブリッジが Live の Set を読み取り、変更するときに保証すること、保証しないことをまとめます。ブリッジとは、`daws/ableton/ableton-mcp-server` にある MCP サーバーと、Live の中で動くその Remote Script のことです。ブリッジを操作するのは Kumi ですが、どの MCP クライアントからも操作できます（[ユーザーガイド](USER_GUIDE.md)）。大事な Set にクライアントを向ける前に、このページを読んでください。
 
 ## 信頼の境界
 
@@ -100,7 +100,7 @@ Live はインポートしたオーディオをその場所から再生するの
 
 ## ブリッジと Remote Script
 
-Remote Script へのリクエストはすべて HMAC で署名され、1 つの Remote Script セッションと 1 つの接続に結び付けられ、厳密に増えていくシーケンスと期限を持ちます。ソケットを読むのは Live のメインスレッドで、表示のティックごとに少しずつ、すべてのリクエストを自分で実行するので、別のスレッドから Live に触れるものはありません。Windows では、オーナー専用とは、あなた 1 人だけのエントリを持つアクセスリストのことです。インストール時に頼めば、Remote Script は小さな診断ファイルを書き出せます。詳しくは `remote-script/README.md` にあります：[Remote Script の README](../../remote-script/README.md)。
+Remote Script へのリクエストはすべて HMAC で署名され、1 つの Remote Script セッションと 1 つの接続に結び付けられ、厳密に増えていくシーケンスと期限を持ちます。ソケットを読むのは Live のメインスレッドで、表示のティックごとに少しずつ、すべてのリクエストを自分で実行するので、別のスレッドから Live に触れるものはありません。Windows では、オーナー専用とは、あなた 1 人だけのエントリを持つアクセスリストのことです。インストール時に頼めば、Remote Script は小さな診断ファイルを書き出せます。詳しくは `daws/ableton/remote-script/README.md` にあります：[Remote Script の README](../../daws/ableton/remote-script/README.md)。
 
 ## 実際の Live で確認したこと
 

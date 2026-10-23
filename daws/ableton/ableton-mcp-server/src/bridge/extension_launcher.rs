@@ -126,7 +126,7 @@ pub fn find_extension_bundle() -> Option<PathBuf> {
         }
     }
     if let Some(checkout) = kumi_common::dev::checkout() {
-        candidates.push(checkout.join("apps/live-extension"));
+        candidates.push(checkout.join("daws/ableton/live-extension"));
     }
     candidates.into_iter().find(|path| is_extension(path)).map(|path| std::fs::canonicalize(&path).unwrap_or(path))
 }

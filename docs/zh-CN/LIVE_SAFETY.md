@@ -2,7 +2,7 @@
 
 [English](../en/LIVE_SAFETY.md) · 简体中文 · [日本語](../ja/LIVE_SAFETY.md)
 
-桥接在读取和修改你的 Live 工程时保证什么、不保证什么。桥接指 `crates/ableton-mcp-server` 中的 MCP 服务器，以及它在 Live 内运行的 Remote Script。Kumi 驱动它，任何 MCP 客户端也可以驱动它（[用户指南](USER_GUIDE.md)）。在让客户端操作一个你在乎的工程之前，请先读完本文。
+桥接在读取和修改你的 Live 工程时保证什么、不保证什么。桥接指 `daws/ableton/ableton-mcp-server` 中的 MCP 服务器，以及它在 Live 内运行的 Remote Script。Kumi 驱动它，任何 MCP 客户端也可以驱动它（[用户指南](USER_GUIDE.md)）。在让客户端操作一个你在乎的工程之前，请先读完本文。
 
 ## 信任边界
 
@@ -100,7 +100,7 @@ Live 从导入音频所在的位置播放它，所以应用成功之后，这份
 
 ## 桥接与 Remote Script
 
-发给 Remote Script 的每个请求都经过 HMAC 签名，并绑定到一个 Remote Script 会话和一个连接，带有严格递增的序号和一个截止时间。Live 的主线程读取套接字并亲自执行每个请求，每次显示刷新执行一部分，因此没有任何东西会从其他线程触碰 Live。在 Windows 上，“仅所有者”指一份只含你一个条目的访问控制列表。如果你在安装时提出要求，Remote Script 可以写一个小的诊断文件。详情见 `remote-script/README.md`：[Remote Script 的 README](../../remote-script/README.md)。
+发给 Remote Script 的每个请求都经过 HMAC 签名，并绑定到一个 Remote Script 会话和一个连接，带有严格递增的序号和一个截止时间。Live 的主线程读取套接字并亲自执行每个请求，每次显示刷新执行一部分，因此没有任何东西会从其他线程触碰 Live。在 Windows 上，“仅所有者”指一份只含你一个条目的访问控制列表。如果你在安装时提出要求，Remote Script 可以写一个小的诊断文件。详情见 `daws/ableton/remote-script/README.md`：[Remote Script 的 README](../../daws/ableton/remote-script/README.md)。
 
 ## 在真实 Live 上验证过什么
 

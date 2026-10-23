@@ -1,9 +1,9 @@
 //! Measure Max for Live devices (and Max patchers) on this machine against Kumi's standard for Max patchers, and fold
-//! what it finds into max-standard/standard.json. Each device is read where it lies, a frozen one with its own files.
+//! what it finds into daws/ableton/max-standard/standard.json. Each device is read where it lies, a frozen one with its own files.
 //! Only counts leave the machine: how often each rule was broken in how many things it looked at, how the patchers are
 //! laid out, which of Max's objects they use and how often, how their parameters are kept. No names, text or code.
 //!
-//! cargo run -p kumi-runtime --example max_patch_survey -- <report.json> [--into max-standard/standard.json] [--findings]
+//! cargo run -p kumi-runtime --example max_patch_survey -- <report.json> [--into daws/ableton/max-standard/standard.json] [--findings]
 //!     <file or folder>...
 //!
 //! --findings prints each device's broken rules here, to read them; they never go into the report.
@@ -46,7 +46,7 @@ struct Survey {
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {
-        eprintln!("usage: max_patch_survey <report.json> [--into max-standard/standard.json] <file or folder>...");
+        eprintln!("usage: max_patch_survey <report.json> [--into daws/ableton/max-standard/standard.json] <file or folder>...");
         std::process::exit(2);
     }
     let report_path = PathBuf::from(args.remove(0));

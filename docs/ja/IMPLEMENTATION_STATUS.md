@@ -6,7 +6,7 @@
 
 ## バージョン
 
-[変更履歴](../../CHANGELOG.md)の各リリースには、同梱されるブリッジのバージョンが記載されています。すべてのブリッジのバージョンは[ブリッジのバージョン](KUMI_CHANGES.md#ブリッジのバージョン)に一覧があります。バージョン番号そのものは、クレートの `Cargo.toml` ファイル（Kumi、ブリッジ）、ルートの `package.json`（Kumi）、`apps/live-extension/manifest.json`（拡張機能）にあります。REAPER の拡張機能のものは `crates/reaper-kumi/Cargo.toml` に、Renoise のツールのものは `daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua` とその `manifest.xml` にあります。どの Kumi にどれが付属するかは [REAPER や Renoise につなぐ](KUMI_GUIDE.md#reaper-や-renoise-につなぐ)にあります。
+[変更履歴](../../CHANGELOG.md)の各リリースには、同梱されるブリッジのバージョンが記載されています。すべてのブリッジのバージョンは[ブリッジのバージョン](KUMI_CHANGES.md#ブリッジのバージョン)に一覧があります。バージョン番号そのものは、クレートの `Cargo.toml` ファイル（Kumi、ブリッジ）、ルートの `package.json`（Kumi）、`daws/ableton/live-extension/manifest.json`（拡張機能）にあります。REAPER の拡張機能のものは `crates/reaper-kumi/Cargo.toml` に、Renoise のツールのものは `daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua` とその `manifest.xml` にあります。どの Kumi にどれが付属するかは [REAPER や Renoise につなぐ](KUMI_GUIDE.md#reaper-や-renoise-につなぐ)にあります。
 
 | 部分 | バージョン |
 | --- | --- |

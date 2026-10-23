@@ -3,7 +3,7 @@
 AbletonMcpBridge is the half of the Ableton bridge that runs inside Live: a
 Control Surface script that reads and changes the Set through Live's own
 Python API. The other half is the MCP server in the `@ableton-mcp/mcp-server`
-package (crates/ableton-mcp-server in the repository), which Kumi and other MCP
+package (daws/ableton/ableton-mcp-server in the repository), which Kumi and other MCP
 clients start. The two talk over an authenticated loopback socket. On Live 12.4
 and later, the server also reaches Kumi's Live extension, a separate channel
 this script isn't part of.
@@ -158,7 +158,7 @@ Newline-delimited JSON over TCP on the configured loopback port, protocol
   1 GiB is closed.
 
 Which operations exist, and what each takes, is in the registry
-(protocol/ableton-live-v1.operations.json in the repository). The script offers
+(daws/ableton/protocol/ableton-live-v1.operations.json in the repository). The script offers
 an operation only when the Live it runs in has what it needs; `status` lists
 them. The safety rules every change follows are in docs/en/LIVE_SAFETY.md:
 https://github.com/user1303836/kumi/blob/main/docs/en/LIVE_SAFETY.md
@@ -226,7 +226,7 @@ a missing validated component profile skips only that component. Artifact or
 integrity failures tear down all native providers; ordinary Kumi stays active.
 The existing owner-only `willington.json` opt-in and write controls still apply.
 
-Live 12.4.15b6 ARM64 support requires Willington `03b6efccd1c72ef816ae5be6f28ad33115ef3e9a` or a later bundle retaining its validated profile. All four components are included. Check the installed `willington/WillingtonRuntime/matrix.json` for a `live-12.4.15b6-arm64` row with `status: "validated"` and the required component; older bundled copies need updating. `willington/release.json` identifies the bundle commit. Follow Actions and Native Editing still require local self-tests for the selected library hashes. See the [integration guide](../docs/en/WILLINGTON_INTEGRATION.md#native-editing-and-its-self-test).
+Live 12.4.15b6 ARM64 support requires Willington `03b6efccd1c72ef816ae5be6f28ad33115ef3e9a` or a later bundle retaining its validated profile. All four components are included. Check the installed `willington/WillingtonRuntime/matrix.json` for a `live-12.4.15b6-arm64` row with `status: "validated"` and the required component; older bundled copies need updating. `willington/release.json` identifies the bundle commit. Follow Actions and Native Editing still require local self-tests for the selected library hashes. See the [integration guide](../../../docs/en/WILLINGTON_INTEGRATION.md#native-editing-and-its-self-test).
 
 Follow Action evidence must match the selected library, so rerun its self-test
 after switching builds, following the [standalone self-test procedure](https://github.com/user1303836/kumi/blob/main/docs/en/WILLINGTON_INTEGRATION.md#follow-action-self-test).
@@ -256,7 +256,7 @@ checks to the earlier Kumi transaction tests. See the
 
 Native editing requires an installed validated component, explicit opt-in and an
 owner-only receipt matching the library selected inside Live. See the
-[operator self-test procedure](../docs/en/WILLINGTON_INTEGRATION.md#native-editing-and-its-self-test).
+[operator self-test procedure](../../../docs/en/WILLINGTON_INTEGRATION.md#native-editing-and-its-self-test).
 The fixture runner is `native_editing_self_test.py`; it is not run at startup.
 
 ## Tests
@@ -264,7 +264,7 @@ The fixture runner is `native_editing_self_test.py`; it is not run at startup.
 From the repository, with Python 3.11 (Live 12's version):
 
 ```sh
-cd remote-script
+cd daws/ableton/remote-script
 python -m unittest discover -s . -p 'test_*.py'
 ```
 
@@ -283,7 +283,7 @@ verified Willington files and a passing local receipt; its owner-only
 ```python
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location(
-    "editing_e2e_fixture", "/absolute/kumi/remote-script/native_editing_live_fixture.py")
+    "editing_e2e_fixture", "/absolute/kumi/daws/ableton/remote-script/native_editing_live_fixture.py")
 fixture = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = fixture
 spec.loader.exec_module(fixture)
@@ -311,4 +311,4 @@ checks HISTORY refusal; cleanup explicitly ungroups it. Cleanup also restores
 the original Set state, provider and display hook and deletes the endpoint
 secret file. This does not test model inference, a released installer or chat UI.
 
-Live 12.4.15b7 on Apple Silicon requires Willington `5361914b1b79230e51c8f051b8b2122176e94adb` or a later bundle retaining the validated `live-12.4.15b7-arm64` row and its required components in `willington/WillingtonRuntime/matrix.json`. Older Kumi bundles need updating; `willington/release.json` identifies the imported commit. Windows support remains limited to its b5 profiles. See the [b7 CI-bundle checks](../docs/evidence/willington-b7-import.json). Macro removal's single undo is validated from Live timers and Max LiveAPI; a `_Framework.ControlSurface.update_display` callback can add a separate Custom Action undo entry. Local self-test receipts must match the selected library hash.
+Live 12.4.15b7 on Apple Silicon requires Willington `5361914b1b79230e51c8f051b8b2122176e94adb` or a later bundle retaining the validated `live-12.4.15b7-arm64` row and its required components in `willington/WillingtonRuntime/matrix.json`. Older Kumi bundles need updating; `willington/release.json` identifies the imported commit. Windows support remains limited to its b5 profiles. See the [b7 CI-bundle checks](../../../docs/evidence/willington-b7-import.json). Macro removal's single undo is validated from Live timers and Max LiveAPI; a `_Framework.ControlSurface.update_display` callback can add a separate Custom Action undo entry. Local self-test receipts must match the selected library hash.

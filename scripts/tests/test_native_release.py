@@ -151,7 +151,7 @@ class NativeRelease(unittest.TestCase):
         for package in cargo_lock:
             if package["name"] in ("kumi", "kumi-runtime", "kumi-common", "daw-mcp-server"):
                 self.assertEqual(package["version"], version, package["name"])
-        bridge = cargo_version("crates/ableton-mcp-server/Cargo.toml")
+        bridge = cargo_version("daws/ableton/ableton-mcp-server/Cargo.toml")
         self.assertEqual(next(p["version"] for p in cargo_lock if p["name"] == "ableton-mcp-server"), bridge)
         # REAPER's extension and Renoise's tool: each version a release can bump, said once (and Renoise's manifest
         # number agreeing with its version file).
@@ -794,7 +794,7 @@ class NativeRelease(unittest.TestCase):
         # packaged document or to this revision on GitHub.
         for source, _ in release.DOCUMENTS:
             release.transform_document((release.ROOT / source).read_text(encoding="utf-8"), release.ROOT, source, revision)
-        self.assertEqual(release.document_target(release.ROOT, "docs/en/test.md", "../../crates/ableton-mcp-server/README.md", revision, "href"), "README.md")
+        self.assertEqual(release.document_target(release.ROOT, "docs/en/test.md", "../../daws/ableton/ableton-mcp-server/README.md", revision, "href"), "README.md")
         for target in ("../../../../outside", "/absolute", "C:/user", "a\\b", "x\0y"):
             with self.assertRaises(ValueError):
                 release.document_target(release.ROOT, "docs/en/test.md", target, revision, "href")

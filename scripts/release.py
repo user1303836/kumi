@@ -53,8 +53,8 @@ if native is None:
     sys.modules["native_release"] = native
     SPEC.loader.exec_module(native)
 # A change under these, besides tests and Markdown, is a new bridge for Live to load. The host links kumi-common.
-BRIDGE = ("crates/ableton-mcp-server/", "crates/kumi-common/", "remote-script/", "protocol/", "apps/live-extension/",
-          "vendor/willington/")
+BRIDGE = ("daws/ableton/ableton-mcp-server/", "crates/kumi-common/", "daws/ableton/remote-script/", "daws/ableton/protocol/",
+          "daws/ableton/live-extension/", "vendor/willington/")
 # The same for REAPER's extension, and the parts of daw-bridge it links (its own wire, handshake, auth, discovery and
 # files: `rg daw_bridge:: crates/reaper-kumi/src`, and what those use), and for Renoise's tool (their tests and examples
 # aside too). The rest of daw-bridge (the lifecycle, detection, the doctor, installing) is Kumi's alone.
@@ -421,7 +421,7 @@ def apply(root: Path, plan: Plan) -> list[str]:
     replace_once(edit("package.json"), f'"version": "{plan.old}"', f'"version": "{plan.new}"')
     moves = {crate: (plan.old, plan.new) for crate in CRATES}
     if not plan.same_bridge:
-        replace_once(edit("crates/ableton-mcp-server/Cargo.toml"), f'version = "{plan.bridge}"', f'version = "{plan.new_bridge}"')
+        replace_once(edit("daws/ableton/ableton-mcp-server/Cargo.toml"), f'version = "{plan.bridge}"', f'version = "{plan.new_bridge}"')
         moves["ableton-mcp-server"] = (plan.bridge, plan.new_bridge)
     if not plan.same_reaper:
         replace_once(edit(REAPER_CARGO), f'version = "{plan.reaper}"', f'version = "{plan.new_reaper}"')
@@ -572,7 +572,7 @@ def versions_at(ref: str) -> tuple[str, str | None, str | None]:
     def shown(path: str) -> str | None:
         held = next((name for name in then(path) if run(["git", "ls-tree", "--name-only", ref, "--", name])), None)
         return run(["git", "show", f"{ref}:{held}"]) if held else None
-    bridge = re.search(r'^version = "([^"]+)"', shown("crates/ableton-mcp-server/Cargo.toml"), re.M)[1]
+    bridge = re.search(r'^version = "([^"]+)"', shown("daws/ableton/ableton-mcp-server/Cargo.toml"), re.M)[1]
     reaper, renoise = shown(REAPER_CARGO), shown(RENOISE_VERSION)
     return (bridge, reaper and re.search(r'^version = "([^"]+)"', reaper, re.M)[1],
             renoise and re.search(r'return "([^"]+)"', renoise)[1])

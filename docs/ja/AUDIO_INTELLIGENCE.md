@@ -106,7 +106,7 @@ Live 内のウォッチドッグは、最大 10 秒（要求された長さ + 3 
 
 ## 解析の検証
 
-規格に沿った解析は、生成したオーディオ（第三者の録音は使いません）で、FFmpeg の独立した `ebur128` フィルターと照らし合わせて確認しています。ブリッジのテスト（`crates/ableton-mcp-server/tests/it/audio_standards.rs`）が、記録されているレポート [phase-8-audio-oracle.json](../evidence/phase-8-audio-oracle.json)（2026-07-27）にある、それらの信号に対する FFmpeg の結果と解析を照らし合わせます。許容誤差は、48 kHz で 0.1 LU または dB、44.1 kHz のトゥルーピークで 0.15 dBTP です。定義はあくまで公開された規格で、FFmpeg は照合のためのものです。
+規格に沿った解析は、生成したオーディオ（第三者の録音は使いません）で、FFmpeg の独立した `ebur128` フィルターと照らし合わせて確認しています。ブリッジのテスト（`daws/ableton/ableton-mcp-server/tests/it/audio_standards.rs`）が、記録されているレポート [phase-8-audio-oracle.json](../evidence/phase-8-audio-oracle.json)（2026-07-27）にある、それらの信号に対する FFmpeg の結果と解析を照らし合わせます。許容誤差は、48 kHz で 0.1 LU または dB、44.1 kHz のトゥルーピークで 0.15 dBTP です。定義はあくまで公開された規格で、FFmpeg は照合のためのものです。
 
 実際の Live では、Kumi のオプトインの受け入れテスト（`accept_live`。[テスト](TESTING.md)を参照）が再生、バウンス、聴き取りを行います。以前のキャプチャ検証ツールで記録されている最後の実行 [phase-8-audio-live.json](../evidence/phase-8-audio-live.json) は、macOS 上の Live 12.4.5b8（2026-07-27、ブリッジ 0.1.0）でのもので、現在のブリッジより前のものです。Windows での実行は記録されていません。
 

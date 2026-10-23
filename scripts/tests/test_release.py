@@ -21,7 +21,7 @@ SPEC.loader.exec_module(release)
 
 FILES = ["package.json", "Cargo.lock", "CHANGELOG.md", "README.md", "README.ja.md", "README.zh-CN.md",
          "crates/kumi/Cargo.toml", "crates/kumi-common/Cargo.toml", "crates/kumi-runtime/Cargo.toml", "crates/daw-mcp-server/Cargo.toml",
-         "crates/kumi-runtime/src/version.rs", "crates/ableton-mcp-server/Cargo.toml",
+         "crates/kumi-runtime/src/version.rs", "daws/ableton/ableton-mcp-server/Cargo.toml",
          "docs/en/KUMI_CHANGES.md", "docs/ja/KUMI_CHANGES.md", "docs/zh-CN/KUMI_CHANGES.md",
          release.REAPER_CARGO, release.RENOISE_VERSION, release.RENOISE_MANIFEST]
 LONG = ("Kumi does a new thing, described at enough length that its changelog bullet wraps onto a second line, "
@@ -30,7 +30,7 @@ LONG = ("Kumi does a new thing, described at enough length that its changelog bu
 
 def current() -> tuple[str, str]:
     kumi = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["version"]
-    cargo = (ROOT / "crates/ableton-mcp-server/Cargo.toml").read_text(encoding="utf-8")
+    cargo = (ROOT / "daws/ableton/ableton-mcp-server/Cargo.toml").read_text(encoding="utf-8")
     return kumi, re.search(r'^version = "([^"]+)"', cargo, re.M)[1]
 
 
@@ -86,17 +86,17 @@ class Moves(unittest.TestCase):
 
 class Sorting(unittest.TestCase):
     def test_what_live_loads_is_the_bridge(self):
-        for path in ("crates/ableton-mcp-server/src/host/clip.rs", "crates/kumi-common/src/lib.rs",
-                     "remote-script/AbletonMcpBridge/__init__.py",
-                     "protocol/ableton-live-v1.operations.json", "apps/live-extension/src/extension.ts",
+        for path in ("daws/ableton/ableton-mcp-server/src/host/clip.rs", "crates/kumi-common/src/lib.rs",
+                     "daws/ableton/remote-script/AbletonMcpBridge/__init__.py",
+                     "daws/ableton/protocol/ableton-live-v1.operations.json", "daws/ableton/live-extension/src/extension.ts",
                      "vendor/willington/release.json"):
             self.assertTrue(release.ships_bridge(path), path)
-        for path in ("crates/ableton-mcp-server/tests/it/host_clip.rs", "remote-script/test_remote_script.py",
-                     "crates/ableton-mcp-server/README.md", "crates/kumi-runtime/src/agent.rs", ".github/workflows/ci.yml"):
+        for path in ("daws/ableton/ableton-mcp-server/tests/it/host_clip.rs", "daws/ableton/remote-script/test_remote_script.py",
+                     "daws/ableton/ableton-mcp-server/README.md", "crates/kumi-runtime/src/agent.rs", ".github/workflows/ci.yml"):
             self.assertFalse(release.ships_bridge(path), path)
 
     def test_changelog_lines_and_where_they_go(self):
-        host = ["crates/ableton-mcp-server/src/host/clip.rs", "crates/ableton-mcp-server/tests/it/host_clip.rs"]
+        host = ["daws/ableton/ableton-mcp-server/src/host/clip.rs", "daws/ableton/ableton-mcp-server/tests/it/host_clip.rs"]
         both = host + ["crates/kumi-runtime/src/agent.rs"]
         self.assertEqual(release.classify(1, "Why.\n\nChangelog: A copy is refused.\n", host).lines,
                          [("bridge", "A copy is refused.")])
@@ -190,7 +190,7 @@ class Edits(unittest.TestCase):
             self.assertIn(f'version = "{plan.new}"', texts[f"crates/{crate}/Cargo.toml"])
             self.assertIn(f'name = "{crate}"\nversion = "{plan.new}"', texts["Cargo.lock"])
         self.assertIn(f'name = "ableton-mcp-server"\nversion = "{plan.bridge}"', texts["Cargo.lock"])
-        self.assertIn(f'version = "{plan.bridge}"', texts["crates/ableton-mcp-server/Cargo.toml"])
+        self.assertIn(f'version = "{plan.bridge}"', texts["daws/ableton/ableton-mcp-server/Cargo.toml"])
         new = entry(texts["CHANGELOG.md"], plan.new)
         self.assertTrue(new.startswith(f"## {plan.new} — 2026-10-07\n\nShips with bridge {plan.bridge}, as {plan.old} did.\n\n- Kumi does"))
         self.assertIn("\n\nTested with Live", new)
@@ -209,7 +209,7 @@ class Edits(unittest.TestCase):
     def test_a_release_with_a_new_bridge(self):
         plan, texts = self.released(new_bridge=True)
         self.assertIn(f'name = "ableton-mcp-server"\nversion = "{plan.new_bridge}"', texts["Cargo.lock"])
-        self.assertIn(f'version = "{plan.new_bridge}"', texts["crates/ableton-mcp-server/Cargo.toml"])
+        self.assertIn(f'version = "{plan.new_bridge}"', texts["daws/ableton/ableton-mcp-server/Cargo.toml"])
         new = entry(texts["CHANGELOG.md"], plan.new)
         self.assertIn(f"Ships with bridge {plan.new_bridge}, which Live loads when it restarts.", new)
         self.assertIn(f"\n\n### Bridge {plan.new_bridge}\n\n- The bridge does a new thing.", new)
@@ -282,7 +282,7 @@ class DawSorting(unittest.TestCase):
             with self.subTest(paths=paths):
                 self.assertEqual(release.classify(3, line, paths).lines, [("kumi", "A new thing.")])
         # Live's bridge's rule is as it was: its own changes with REAPER's put the lines under Live's bridge.
-        self.assertEqual(release.classify(4, line, reaper + ["crates/ableton-mcp-server/src/host/clip.rs"]).lines,
+        self.assertEqual(release.classify(4, line, reaper + ["daws/ableton/ableton-mcp-server/src/host/clip.rs"]).lines,
                          [("bridge", "A new thing.")])
         tagged = release.classify(5, "Changelog (reaper): R.\nChangelog (Renoise): N.\nChangelog: K.", ["crates/kumi/src/lib.rs"])
         self.assertEqual(tagged.lines, [("reaper", "R."), ("renoise", "N."), ("kumi", "K.")])
@@ -304,7 +304,7 @@ class DawPlans(unittest.TestCase):
 
     REAPER = ("Changelog: The extension does Y.", ["crates/reaper-kumi/src/changes/items.rs"])
     RENOISE = ("Changelog: The tool does Z.", ["daws/renoise/com.kumi.Bridge.xrnx/payload/changes.lua"])
-    LIVE = ("Changelog: The bridge does X.", ["crates/ableton-mcp-server/src/host/clip.rs"])
+    LIVE = ("Changelog: The bridge does X.", ["daws/ableton/ableton-mcp-server/src/host/clip.rs"])
     KUMI = ("Changelog: Kumi does W.", ["crates/kumi/src/lib.rs"])
 
     def test_a_daw_bridge_gets_a_new_version_when_what_it_loads_changed(self):
