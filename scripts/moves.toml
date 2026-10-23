@@ -1114,3 +1114,49 @@ to = "kumi_types::command"
 [[rust]]
 from = "kumi_runtime::audio::matching::Closeness"
 to = "kumi_types::matching::Closeness"
+
+# kumi-net: how Kumi reaches the network (2026-10).
+
+[[move]]
+from = "crates/kumi-runtime/src/ai/error.rs"
+to = "crates/kumi-net/src/error.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/net/mod.rs"
+to = "crates/kumi-net/src/lib.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/net/proxy.rs"
+to = "crates/kumi-net/src/proxy.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/net/trust.rs"
+to = "crates/kumi-net/src/trust.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/web/cause.rs"
+to = "crates/kumi-net/src/cause.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/web/net.rs"
+to = "crates/kumi-net/src/web.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/network.rs"
+to = "crates/kumi-net/tests/it/network.rs"
+
+[[rust]]
+from = "kumi_runtime::net"
+to = "kumi_net"
+
+[[rust]]
+from = "kumi_runtime::web::cause"
+to = "kumi_net::cause"
+
+[[rust]]
+from = "kumi_runtime::web::net"
+to = "kumi_net::web"
+
+[[rust]]
+from = "kumi_runtime::ai::error"
+to = "kumi_net::error"

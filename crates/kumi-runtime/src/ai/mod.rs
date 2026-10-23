@@ -3,7 +3,8 @@
 //! (`anthropic`, `openai_responses`, `openai_compatible`), with SSE and HTTP helpers.
 
 pub mod anthropic;
-pub mod error;
+// A model call's error (kumi-net, which classifies why a call got no answer), as ai's own.
+pub use kumi_net::error;
 pub mod http;
 pub mod openai_compatible;
 pub mod openai_responses;

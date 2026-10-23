@@ -1,0 +1,41 @@
+[package]
+name = "kumi-net"
+version = "0.1.0"
+description = "How Kumi reaches the network: its HTTP clients with the system's proxies and trust, why a request got no answer, the public-only web client, and a model call's error."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+# What other crates' tests use of the proxies: a lock for tests that pass a proxy by, and the system's settings made
+# up. Only as a dev-dependency.
+[features]
+test-support = []
+
+[dependencies]
+kumi-common.workspace = true
+kumi-types.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+encoding_rs.workspace = true
+fancy-regex.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+rustls-native-certs.workspace = true
+rustls-platform-verifier.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+url.workspace = true
+webpki-roots.workspace = true
+
+[dev-dependencies]
+base64.workspace = true
+kumi-testkit.workspace = true
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

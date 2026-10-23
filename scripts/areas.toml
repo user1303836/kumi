@@ -107,7 +107,9 @@ paths = [
   "crates/kumi-types/src/system.rs",
   "crates/kumi-runtime/src/ai/http.rs",
   "crates/kumi-runtime/src/library/sources.rs",
-  "crates/kumi-runtime/src/net/**",
+  "crates/kumi-net/src/lib.rs",
+  "crates/kumi-net/src/proxy.rs",
+  "crates/kumi-net/src/trust.rs",
   "crates/kumi-runtime/src/integrations/ableton/hands/KumiHands.swift",
   "crates/kumi-runtime/src/integrations/ableton/hands/mac.rs",
   "daws/ableton/ableton-mcp-server/src/lifecycle.rs",
@@ -144,7 +146,7 @@ except = ["**/tests/**", "**/examples/**", "**/tests.rs", "daws/ableton/ableton-
 
 # How Kumi's HTTP clients are made, which the Network workflow checks on each system's own trust store and proxies.
 [network]
-paths = ["crates/kumi-runtime/src/net/**", "crates/kumi-runtime/tests/it/network.rs", ".github/workflows/network.yml"]
+paths = ["crates/kumi-net/src/lib.rs", "crates/kumi-net/src/proxy.rs", "crates/kumi-net/src/trust.rs", "crates/kumi-net/tests/it/network.rs", ".github/workflows/network.yml"]
 
 # The release, packaging and migration scripts and their tests.
 [release-scripts]

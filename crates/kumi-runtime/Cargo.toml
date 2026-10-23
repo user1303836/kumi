@@ -29,6 +29,7 @@ path = "src/bin/kumi-library-learner.rs"
 kumi-common.workspace = true
 kumi-store.workspace = true
 kumi-types.workspace = true
+kumi-net.workspace = true
 # Where REAPER and Renoise keep their libraries (the library learns them): the same detection as their bridges' setup.
 daw-bridge.workspace = true
 async-trait.workspace = true
@@ -73,6 +74,7 @@ webpki-roots.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
+kumi-net = { workspace = true, features = ["test-support"] }
 kumi-testkit.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 # The GenExpr interpreter the building blocks' tests run their gen~ code in (optimized even in tests).

@@ -11,7 +11,7 @@
 //!   system keeps), that isn't answering (a crashed ClashX, an office's proxy set on a laptop at home), or that shows a
 //!   certificate this computer doesn't trust (one that inspects secure connections, its authority not installed).
 //!   After its 407, its refusal, its name not found or its certificate refused, requests go directly while the system
-//!   names it, as they did before Kumi read the settings ([`crate::net::send`]).
+//!   names it, as they did before Kumi read the settings ([`crate::send`]).
 
 use std::net::IpAddr;
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use url::{Host, Url};
 
-use crate::system::{process_env, Env};
+use kumi_types::system::{process_env, Env};
 
 /// How long the system's settings are kept before they're read again: a laptop moves between networks.
 const FRESH: Duration = Duration::from_secs(30);
@@ -89,8 +89,8 @@ impl Settings {
     }
 
     /// The system's settings with `proxy` for every address and nothing excepted, or none and an auto-config file.
-    #[cfg(test)]
-    pub(crate) fn system_for_tests(proxy: Option<&str>, auto_config: bool) -> Self {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn system_for_tests(proxy: Option<&str>, auto_config: bool) -> Self {
         let proxy = proxy.map(str::to_string);
         Self::from_system(Found { http: proxy.clone(), https: proxy, auto_config, ..Found::default() }, "")
     }
@@ -120,8 +120,8 @@ impl Settings {
 static PASSED_BY: Mutex<Option<Url>> = Mutex::new(None);
 
 /// Tests that pass a proxy by take turns: the one passed by is the whole process's.
-#[cfg(test)]
-pub(crate) static PASSING_BY: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+#[cfg(any(test, feature = "test-support"))]
+pub static PASSING_BY: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn passed_by() -> std::sync::MutexGuard<'static, Option<Url>> {
     PASSED_BY.lock().unwrap_or_else(PoisonError::into_inner)
@@ -142,7 +142,7 @@ pub fn pass_by(settings: &Settings, url: &Url) -> bool {
 /// says none of these: the network may just be slow. What reached Kumi directly says nothing of a proxy, so
 /// [`pass_by`] decides from the settings whether there was one.
 pub fn in_the_way(error: &reqwest::Error) -> bool {
-    let chain = crate::web::cause::chain(error);
+    let chain = crate::cause::chain(error);
     !chain.contains("timed out") && (chain.contains("proxy authorization required") || not_answering(&chain) || certificate_refused(&chain))
 }
 
@@ -241,8 +241,8 @@ fn this_network(host: &Host<&str>) -> bool {
             let name = name.trim_end_matches('.');
             name == "local" || name.ends_with(".local")
         }
-        Host::Ipv4(address) => crate::web::net::private_address(&address.to_string()),
-        Host::Ipv6(address) => crate::web::net::private_address(&address.to_string()),
+        Host::Ipv4(address) => crate::web::private_address(&address.to_string()),
+        Host::Ipv6(address) => crate::web::private_address(&address.to_string()),
     }
 }
 

@@ -551,6 +551,6 @@ mod tests {
         let trust = Trust::with(roots(&[&public]), OnceLock::from(Some(kept)), unused, provider());
         let refused = check(&trust, &server("api.openai.com", &office_issuer), "api.openai.com").err();
         assert_eq!(refused, Some(slow()));
-        assert_eq!(crate::web::cause::NetCause::of_text(&refused.unwrap().to_string()), Some(crate::web::cause::NetCause::Timeout));
+        assert_eq!(crate::cause::NetCause::of_text(&refused.unwrap().to_string()), Some(crate::cause::NetCause::Timeout));
     }
 }
