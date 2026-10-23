@@ -15,6 +15,13 @@ SHA-256, from its `models-1` release (https://github.com/user1303836/kumi/releas
 
 ONNX Runtime, which runs them, is fetched from Microsoft's own releases, under the MIT License.
 
+## Rust crates for the producer's music
+
+Kumi is built with crates from crates.io, each under its own license (Cargo.lock lists them all). Those it uses to learn
+the producer's own music:
+
+- lofty (https://github.com/Serial-ATA/lofty-rs), MIT License or Apache License 2.0: reading songs' tags.
+
 ## Basic Pitch (Spotify), Apache License 2.0
 
 `crates/kumi-listening/src/transcribe.rs` translates into Rust Basic Pitch's note decoding and windowing:

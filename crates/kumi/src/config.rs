@@ -293,6 +293,7 @@ location!(load_tools_dir, "KUMI_TOOLS_DIR", "tools");
 location!(load_input_history_file, "KUMI_INPUT_HISTORY_FILE", "input-history");
 location!(load_projects_dir, "KUMI_PROJECTS_DIR", "projects");
 location!(load_library_dir, "KUMI_LIBRARY_DIR", "library");
+location!(load_music_dir, "KUMI_MUSIC_DIR", "music");
 /// The files Kumi kept notes, techniques, lessons and gaps in before its database, where the producer's
 /// settings put them.
 pub fn json_files(env: &Env) -> Result<kumi_agent::core::store_import::JsonFiles, RuntimeError> {
@@ -363,6 +364,13 @@ pub struct Settings {
     /// How long kept conversations stay.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversations: Option<ConversationSettings>,
+    /// The folders Kumi learns the producer's taste from (their own music): none until they agree, and empty once they
+    /// took every one away.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub music_folders: Option<Vec<String>>,
+    /// Kumi has offered to learn their music (once).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub music_offered: Option<bool>,
 }
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -408,6 +416,18 @@ fn voice_settings(value: &Value) -> Option<VoiceSettings> {
         .map(str::to_string);
     (send.is_some() || language.is_some() || microphone.is_some()).then_some(VoiceSettings { send, language, microphone })
 }
+/// A list of folders as settings keep it: words of a sensible length, at most 64.
+fn folder_list(value: &Value) -> Vec<String> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|s| !s.is_empty() && utf16_len(s) <= 1024)
+        .take(64)
+        .map(str::to_string)
+        .collect()
+}
 fn read_json(file: &str) -> Option<Value> {
     serde_json::from_str(&String::from_utf8_lossy(&std::fs::read(file).ok()?)).ok()
 }
@@ -425,15 +445,7 @@ pub fn read_settings(file: &str) -> Settings {
         update_check: (value["updateCheck"] == false).then_some(false),
         whats_new: (value["whatsNew"] == false).then_some(false),
         instant_phrases: (value["instantPhrases"] == false).then_some(false),
-        library_folders: value["libraryFolders"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .filter(|s| !s.is_empty() && utf16_len(s) <= 1024)
-            .take(64)
-            .map(str::to_string)
-            .collect(),
+        library_folders: folder_list(&value["libraryFolders"]),
         voice: voice_settings(&value["voice"]),
         notifications: (value["notifications"] == "off").then(|| "off".to_string()),
         live_status_bar: (value["liveStatusBar"] == false).then_some(false),
@@ -446,9 +458,34 @@ pub fn read_settings(file: &str) -> Settings {
             .as_u64()
             .filter(|days| *days <= MAX_KEEP_DAYS)
             .map(|days| ConversationSettings { keep_days: Some(days as u32) }),
+        music_folders: value["musicFolders"].is_array().then(|| folder_list(&value["musicFolders"])),
+        music_offered: (value["musicOffered"] == true).then_some(true),
         model_servers,
     }
 }
+/// The settings this Kumi reads: any other key in the file is a newer Kumi's, kept as it is when this one writes.
+const KNOWN_SETTINGS: [&str; 20] = [
+    "model",
+    "effort",
+    "fast",
+    "panelTab",
+    "updateCheck",
+    "whatsNew",
+    "instantPhrases",
+    "libraryFolders",
+    "modelServers",
+    "voice",
+    "notifications",
+    "liveStatusBar",
+    "keepAwake",
+    "answerAfter",
+    "fallbackModel",
+    "maxJobs",
+    "workerModel",
+    "conversations",
+    "musicFolders",
+    "musicOffered",
+];
 /// The longest wait before Kumi answers for the producer: an hour.
 const MAX_ANSWER_AFTER: u64 = 3600;
 /// A JSON object preserves the difference between omitting a setting and explicitly clearing it.
@@ -505,6 +542,20 @@ pub fn write_settings(file: &str, next: &Value) -> Result<(), RuntimeError> {
     }
     if let Some(days) = kept("conversations").and_then(|v| v["keepDays"].as_u64()).filter(|days| *days <= MAX_KEEP_DAYS) {
         settings.insert("conversations".into(), json!({ "keepDays": days }));
+    }
+    if let Some(value) = kept("musicFolders").filter(|v| v.is_array()) {
+        settings.insert("musicFolders".into(), json!(folder_list(value)));
+    }
+    if kept("musicOffered") == Some(&Value::Bool(true)) {
+        settings.insert("musicOffered".into(), json!(true));
+    }
+    // A newer Kumi's settings stay, so going back to this one and forward again loses none of them.
+    if let Some(Value::Object(raw)) = &raw {
+        for (key, value) in raw {
+            if !KNOWN_SETTINGS.contains(&key.as_str()) && !settings.contains_key(key) {
+                settings.insert(key.clone(), value.clone());
+            }
+        }
     }
     let parent = Path::new(file).parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let mut mkdir = std::fs::DirBuilder::new();
