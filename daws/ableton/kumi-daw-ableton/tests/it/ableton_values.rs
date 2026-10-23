@@ -1,8 +1,6 @@
 use kumi_common::js::json::stringify;
-use kumi_runtime::{
-    integrations::ableton::{context, display::*, fast::*},
-    mcp::types::CallToolResult,
-};
+use kumi_daw_ableton::{context, display::*, fast::*};
+use kumi_runtime::mcp::types::CallToolResult;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -10,7 +8,7 @@ use std::{
     process::{Command, Stdio},
 };
 fn oracle() -> Value {
-    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/ableton-values-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/ableton-values-oracle.json")).unwrap()
 }
 fn hash(text: &str) -> String {
     hex::encode(Sha256::digest(text.as_bytes()))

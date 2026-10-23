@@ -1,17 +1,16 @@
 use kumi_common::{abort::Signal, js::json::stringify};
-use kumi_runtime::{
+use kumi_daw_ableton::references::LiveBook;
+use kumi_daw_ableton::{
     create_inference_only_integration,
-    integrations::ableton::{
-        references::{slim_mixers, References},
-        BRIDGE_TOOLS,
-    },
-    ConnectionState, RuntimeError,
+    references::{slim_mixers, References},
+    BRIDGE_TOOLS,
 };
+use kumi_runtime::{ConnectionState, RuntimeError};
 use serde_json::{json, Value};
 use std::{cell::RefCell, rc::Rc};
 #[test]
 fn authoritative_reference_lifetimes_short_names_and_cursor_queries_match_source() {
-    let data: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/references-oracle.json")).unwrap();
+    let data: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/references-oracle.json")).unwrap();
     assert_eq!(json!(&*BRIDGE_TOOLS), data["bridgeTools"]);
     let mut book = References::default();
     for case in data["cases"].as_array().unwrap() {
@@ -73,7 +72,7 @@ async fn inference_only_observation_and_closed_cancellation_order_match_source()
     assert_eq!(observation.key, "inference-only");
     assert_eq!(observation.revision.as_deref(), Some("no-live"));
     assert_eq!(observation.label, "Inference-only — No Live access");
-    assert_eq!(observation.instructions, kumi_runtime::integrations::ableton::context::INSTRUCTIONS);
+    assert_eq!(observation.instructions, kumi_daw_ableton::context::INSTRUCTIONS);
     assert_eq!(context["mode"], "inference-only");
     assert!(observation.tools.is_empty() && observation.project.is_none() && observation.tracks.is_none());
     integration.start(Signal::new()).await.unwrap();

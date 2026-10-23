@@ -9,11 +9,9 @@ use super::{
     history::{FastResult, History},
     views::ViewHost,
 };
-use crate::{
-    command::KUMI,
-    core::{contracts::*, errors::RuntimeError, timing},
-};
+use crate::history::LiveHistory;
 use indexmap::IndexMap;
+use kumi_ai::timing;
 use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::{
@@ -23,6 +21,8 @@ use kumi_common::{
     },
     time::perf_now,
 };
+use kumi_runtime::core::contracts::*;
+use kumi_types::{command::KUMI, errors::RuntimeError};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
@@ -31,7 +31,7 @@ use std::{
     rc::Rc,
 };
 
-pub use crate::core::plan::ChangeOutcome;
+pub use kumi_runtime::core::plan::ChangeOutcome;
 #[derive(Clone, Serialize)]
 pub struct Found {
     pub index: f64,

@@ -5,15 +5,15 @@ use super::{
     project::{self, Baseline, DescribedDiff, ProjectStore},
     views::ViewHost,
 };
-use crate::core::{
-    contracts::{CatchUp, JsonObject},
-    errors::RuntimeError,
-};
 use futures::{
     future::{LocalBoxFuture, Shared},
     FutureExt,
 };
 use kumi_common::abort::{self, Signal};
+use kumi_runtime::core::{
+    contracts::{CatchUp, JsonObject},
+    errors::RuntimeError,
+};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},

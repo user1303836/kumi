@@ -5,21 +5,24 @@
 use std::rc::Rc;
 use std::sync::LazyLock;
 
-use kumi_library::daws::{LibrarySources, ManualOptions, Places};
+use kumi_library::daws::{Daws, LibrarySources, ManualOptions, Places};
 use kumi_library::sources::{
     basename, env_of, exists, home_of, is_absolute, is_folder, join, list, mtime_ms, place, platform_of, unescape, Source, SourceKind,
     SourceOptions,
 };
 use regex::Regex;
 
-use crate::core::contracts::KernelTool;
-use crate::core::daw::DawProfile;
+use kumi_runtime::core::contracts::KernelTool;
+use kumi_types::daw::DawProfile;
 
 /// Live's library.
 pub struct LiveLibrary;
 
 /// Live's library, as the registry gives it to the library.
 pub static LIBRARY: LiveLibrary = LiveLibrary;
+
+/// Live's library alone, for what only Live reads of it (its Places, as Library.cfg and its indexer name them).
+pub static ALONE: Daws = Daws(&[&LIBRARY]);
 
 impl LibrarySources for LiveLibrary {
     fn profile(&self) -> &'static DawProfile {

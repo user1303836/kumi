@@ -21,16 +21,7 @@ use super::{
     options::{AbletonOptions, EarsSetup},
     views::ViewHost,
 };
-use crate::{
-    audio::{self, matching::Focus, tools::ResolveAudio},
-    core::{contracts::*, errors::RuntimeError},
-    ears::link::EarsLink,
-    listening::{
-        engine::{Listening, Named},
-        renderer::{ListenFlag, ListenNow},
-        round::Round,
-    },
-};
+use crate::ears::link::EarsLink;
 use futures::{
     future::{LocalBoxFuture, Shared},
     FutureExt,
@@ -41,6 +32,14 @@ use kumi_common::{
     js::{json::stringify, number::to_fixed},
     time::now_ms,
 };
+use kumi_listening::{
+    engine::{Listening, Named},
+    renderer::{ListenFlag, ListenNow},
+    round::Round,
+};
+use kumi_media::audio::{self, matching::Focus, tools::ResolveAudio};
+use kumi_runtime::core::contracts::*;
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -94,8 +93,8 @@ impl std::ops::Deref for Rendering {
         &self.live
     }
 }
-pub use crate::listening::tools::{FormRequest, GoalRequest, GrooveRequest, JudgeRequest, SoundRequest, TuneHow, TuneRequest};
 pub use judge::{gain_device, gain_parameter};
+pub use kumi_listening::tools::{FormRequest, GoalRequest, GrooveRequest, JudgeRequest, SoundRequest, TuneHow, TuneRequest};
 /// Kumi playing the Set to listen (see `ListenNow`).
 pub type RenderingNow<'a> = ListenNow<'a>;
 
@@ -277,7 +276,7 @@ impl Rendering {
     ) -> Rc<Self> {
         let live = LiveRenderer::new(history, observer, options, step, clip_file);
         // The tools reach Live through its renderer; they hold no more of Rendering than that.
-        let host: Rc<dyn crate::listening::renderer::Renderer> = Rc::new(host::LiveHost(live.clone()));
+        let host: Rc<dyn kumi_listening::renderer::Renderer> = Rc::new(host::LiveHost(live.clone()));
         let listening = Listening::new(
             host,
             options.on_judge.clone(),

@@ -6,21 +6,19 @@
 use super::super::bridge_version::RENDER_BRIDGE;
 use super::super::connection::NO_CURRENT_LIVE;
 use super::{pass::RECORD_LEAD, rig::BEFORE_MAIN, roles::bands_of, *};
-use crate::{
-    core::daw::DawProfile,
-    listening::{
-        checklist::MainState,
-        fit::Band,
-        judging::Placed,
-        notes::Kit,
-        renderer::{
-            AuditionOptions, AuditionPass, Captured, ClipNotes, Copies, DeviceKnob, EqFit, ListenFlag, NotePatch, Pass, Renderer, Window,
-        },
-    },
-    plugins::roles::Seen,
-};
 use async_trait::async_trait;
 use kumi_common::js::string::head;
+use kumi_library::plugins::roles::Seen;
+use kumi_listening::{
+    checklist::MainState,
+    fit::Band,
+    judging::Placed,
+    notes::Kit,
+    renderer::{
+        AuditionOptions, AuditionPass, Captured, ClipNotes, Copies, DeviceKnob, EqFit, ListenFlag, NotePatch, Pass, Renderer, Window,
+    },
+};
+use kumi_types::daw::DawProfile;
 
 /// Live's renderer as the listening tools hold it: the `Rc` (listening's `Renderer` is another crate's trait, so it's
 /// this crate's type that answers it).

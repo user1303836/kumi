@@ -1,11 +1,9 @@
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
-use kumi_runtime::{
-    integrations::live_manual::{
-        chapter_addresses, chapter_sections, fetch_manual, manual_tool, search_manual, stems, ManualOptions, ManualSection,
-    },
-    web::net::{WebClient, WebError, WebFailure, WebRequest, WebResponse},
+use kumi_daw_ableton::manual::{
+    chapter_addresses, chapter_sections, fetch_manual, manual_tool, search_manual, stems, ManualOptions, ManualSection,
 };
+use kumi_runtime::web::net::{WebClient, WebError, WebFailure, WebRequest, WebResponse};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -45,7 +43,7 @@ impl WebClient for Client {
     }
 }
 fn fixture() -> Value {
-    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/library-manual-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/library-manual-oracle.json")).unwrap()
 }
 fn client(fixture: &Value) -> Rc<Client> {
     Rc::new(Client {

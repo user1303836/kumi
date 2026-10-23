@@ -123,6 +123,9 @@ pub struct SessionOptions {
     pub resume: Option<(String, String)>,
     /// The DAW the session is about, for the words in Kumi's own texts and tools: Live's unless the app chose another.
     pub profile: DawProfile,
+    /// The DAWs the app registers, by id: a conversation kept in another one's place is worded with its profile. Every
+    /// DAW Kumi knows unless the app says.
+    pub registered: fn(DawId) -> Option<&'static DawProfile>,
 }
 impl SessionOptions {
     pub fn new(kernel_factory: KernelFactory, integration_factory: IntegrationFactory, on_event: Rc<dyn Fn(SessionEvent)>) -> Self {
@@ -162,6 +165,7 @@ impl SessionOptions {
             jobs: None,
             resume: None,
             profile: DawProfile::ABLETON,
+            registered: |daw| Some(daw.profile()),
         }
     }
 }
@@ -1180,7 +1184,7 @@ impl Session {
         if kept_for(place, daw) {
             return None;
         }
-        let other = Place::parse(place).and_then(|place| place.daw()).and_then(crate::integrations::profile)?;
+        let other = Place::parse(place).and_then(|place| place.daw()).and_then(self.0.options.registered)?;
         let (app, noun) = other.word_pair();
         Some(format!(
             "That conversation is about {} {app} {noun}: open Kumi with {app} (/daw {}) to carry it on there.",

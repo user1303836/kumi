@@ -7,14 +7,15 @@ use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
 };
+use kumi_daw_ableton::history::Audible;
+use kumi_daw_ableton::{
+    actions::ACTIONS, arrange::ArrangeHost, changes::CHANGES, connection::LiveConnection, integration::Ableton, mutations::Mutations,
+    observation::ObservationHost, options::AbletonOptions, remember::CurrentProject, watch::Watch,
+};
 use kumi_runtime::{
     core::{
         contracts::{Integration, JsonObject, ToolResult},
         errors::RuntimeError,
-    },
-    integrations::ableton::{
-        actions::ACTIONS, arrange::ArrangeHost, changes::CHANGES, connection::LiveConnection, integration::Ableton, mutations::Mutations,
-        observation::ObservationHost, options::AbletonOptions, remember::CurrentProject, watch::Watch,
     },
     mcp::{
         client::{McpEndpoint, StderrStatus},
@@ -145,7 +146,7 @@ async fn replay() {
     std::fs::write(directory.path().join("Set.als"), "last saved Set").unwrap();
     let root = directory.path().to_string_lossy().replace('\\', "/");
     FIXTURE_ROOT.with(|value| *value.borrow_mut() = root.clone());
-    let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/mutations-oracle.json")).unwrap();
+    let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/mutations-oracle.json")).unwrap();
     for (case_index, original) in fixture["cases"].as_array().unwrap().iter().enumerate() {
         let mut case = original.clone();
         case["responses"] = json!(case["responses"]
@@ -220,7 +221,7 @@ async fn replay() {
             let path = project["path"].as_str().map(|s| s.replace("<fixture>", &root));
             *remember.current.borrow_mut() = Some(Rc::new(CurrentProject {
                 identity: project["identity"].as_str().unwrap().into(),
-                project: path.as_deref().map(kumi_runtime::integrations::ableton::project::project_id_of),
+                project: path.as_deref().map(kumi_daw_ableton::project::project_id_of),
                 path,
                 name: project["name"].as_str().unwrap().into(),
                 unsaved: false,

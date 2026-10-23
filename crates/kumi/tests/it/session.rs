@@ -3,9 +3,9 @@ use async_trait::async_trait;
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_common::abort::Signal;
 use kumi_runtime::{
-    core::conversations::create_conversation_store,
     core::{
         contracts::*,
+        conversations::create_conversation_store,
         errors::{FailureKind, KumiError, RuntimeError},
         session::*,
     },
@@ -899,7 +899,7 @@ local_test!(with_every_session_tool_on_only_a_few_go_with_every_request, {
     let dir = tempfile::tempdir().unwrap();
     let text = |name: &str| dir.path().join(name).to_string_lossy().into_owned();
     let library = create_library(LibraryOptions {
-        daws: kumi_runtime::integrations::LIBRARIES,
+        daws: kumi::daw::registry::LIBRARIES,
         dir: text("library"),
         find_sets: Some(false),
         fork: Some(false),
@@ -3104,7 +3104,7 @@ local_test!(library_tools_preferences_status_and_forgetting_follow_session_lifec
     )
     .unwrap();
     let library = create_library(LibraryOptions {
-        daws: kumi_runtime::integrations::LIBRARIES,
+        daws: kumi::daw::registry::LIBRARIES,
         dir: temp.path().to_string_lossy().into(),
         folders: Some(vec![samples.to_string_lossy().into()]),
         find_sets: Some(false),

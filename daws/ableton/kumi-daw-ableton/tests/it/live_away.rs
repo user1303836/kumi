@@ -7,9 +7,9 @@ use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_common::abort::{self, Signal};
 use kumi_common::js::json::stringify;
+use kumi_daw_ableton::{integration::Ableton, options::AbletonOptions};
 use kumi_runtime::core::contracts::{Integration, JsonObject};
 use kumi_runtime::core::errors::RuntimeError;
-use kumi_runtime::integrations::ableton::{integration::Ableton, options::AbletonOptions};
 use kumi_runtime::mcp::{
     client::{McpEndpoint, StderrStatus},
     types::{CallToolResult, Implementation, ListToolsResult},

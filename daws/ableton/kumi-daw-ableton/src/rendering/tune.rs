@@ -2,12 +2,12 @@
 //! probe hears (made, journalled and swept in Live), and Live's undo step around them. What tune does with them is
 //! `Listening`'s.
 use super::*;
-use crate::listening::{
+use kumi_common::js::string::head;
+use kumi_listening::{
     fit::{Band, Shape},
     knobs::Scale,
     renderer::{DeviceKnob, EqFit},
 };
-use kumi_common::js::string::head;
 use std::path::Path;
 
 const KNOBS_SCRIPT: &str = include_str!("../assets/device-knobs.py");
@@ -244,7 +244,7 @@ impl LiveRenderer {
                     Some(saved) => Some(saved) == path,
                     None => entry["set"].as_str() == Some(identity),
                 };
-                let theirs = entry["pid"].as_f64().is_some_and(|pid| pid as u32 != std::process::id() && crate::library::state::alive(pid));
+                let theirs = entry["pid"].as_f64().is_some_and(|pid| pid as u32 != std::process::id() && kumi_library::state::alive(pid));
                 let in_use = self.copies_live.borrow().iter().any(|live| live == prefix);
                 if !here || theirs || in_use {
                     continue;
@@ -369,5 +369,5 @@ fn write_journal(file: &Path, entries: &[Value]) {
         let _ = std::fs::remove_file(file);
         return;
     }
-    let _ = crate::core::private::write(file, &serde_json::to_vec(entries).unwrap_or_default());
+    let _ = kumi_types::private::write(file, &serde_json::to_vec(entries).unwrap_or_default());
 }

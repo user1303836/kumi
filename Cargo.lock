@@ -1253,7 +1253,9 @@ dependencies = [
  "hex",
  "home",
  "kumi-common",
+ "kumi-daw-ableton",
  "kumi-runtime",
+ "kumi-store",
  "kumi-testkit",
  "libc",
  "memchr",
@@ -1270,6 +1272,7 @@ dependencies = [
  "unicode-segmentation",
  "unicode-width",
  "url",
+ "uuid",
  "windows-sys 0.61.2",
 ]
 
@@ -1316,6 +1319,44 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "kumi-daw-ableton"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "fancy-regex",
+ "flate2",
+ "futures",
+ "hex",
+ "home",
+ "indexmap",
+ "kumi-ai",
+ "kumi-common",
+ "kumi-genexpr",
+ "kumi-library",
+ "kumi-listening",
+ "kumi-media",
+ "kumi-net",
+ "kumi-runtime",
+ "kumi-store",
+ "kumi-testkit",
+ "kumi-types",
+ "kumi-web",
+ "libc",
+ "percent-encoding",
+ "regex",
+ "rquickjs",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -1475,7 +1516,6 @@ dependencies = [
  "rcgen",
  "regex",
  "reqwest",
- "rquickjs",
  "rustls",
  "rustls-native-certs",
  "rustls-platform-verifier",

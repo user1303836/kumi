@@ -2,13 +2,13 @@
 //! and the semantic catch-up and watch descriptions from its bridge's snapshots. The store itself is core's
 //! (core/project.rs).
 
-use crate::core::contracts::{CatchUp, JsonObject};
-pub use crate::core::project::{
+use indexmap::IndexMap;
+use kumi_common::js::json::stringify;
+use kumi_runtime::core::contracts::{CatchUp, JsonObject};
+pub use kumi_runtime::core::project::{
     create_project_store, decide_project_with, moved_to, project_id, project_id_of, same_file, Baseline, FileProjectStore, ProjectRules,
     ProjectStore,
 };
-use indexmap::IndexMap;
-use kumi_common::js::json::stringify;
 use regex::Regex;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -53,8 +53,8 @@ impl ProjectRules for LiveRules {
 pub fn decide_project(kept: Option<&str>, path: &str, last: Option<&str>, own: bool) -> (String, bool) {
     decide_project_with(&LiveRules, kept, path, last, own)
 }
-use crate::core::describe::{describe_changes, describe_watch_changes, small, Detail, ProjectChange, ProjectItem, ProjectWords};
-pub use crate::core::describe::{DescribedDiff, DescribedWatch};
+use kumi_runtime::core::describe::{describe_changes, describe_watch_changes, small, Detail, ProjectChange, ProjectItem, ProjectWords};
+pub use kumi_runtime::core::describe::{DescribedDiff, DescribedWatch};
 
 pub fn catch_up_from(name: &str, baseline: &Baseline, described: DescribedDiff) -> CatchUp {
     CatchUp { set: name.into(), last_seen_at: baseline.saved_at, lines: described.lines, more: described.more, after_reconnect: None }

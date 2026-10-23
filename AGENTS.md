@@ -4,16 +4,18 @@ Kumi is a terminal agent that drives DAWs: Ableton Live, REAPER and Renoise (Log
 It's one Cargo workspace. Each DAW is reached through a bridge that runs inside or beside it.
 
 ## Where things live
-- `crates/kumi`: the app. TUI (`src/tui/`), CLI, install/update/doctor; `src/daw/` wires each DAW in.
+- `crates/kumi`: the app. TUI (`src/tui/`), CLI, install/update/doctor; `src/daw/` wires each DAW in, and its
+  `registry` names the DAWs this build integrates (the only place that names them all).
 - `crates/kumi-runtime`: the agent and the DAW-neutral core.
   - `src/kernel/`: the agent loop. `src/core/`: the DAW-neutral model (HISTORY, plans, sessions, places, FOCUS
     views, and workflows such as jam, layers and stems).
-  - `src/integrations/ableton/`: Live, host side. `own_*` and `shared/`: what REAPER and Renoise share.
+  - `src/integrations/`: `own_*` and `shared/`, what REAPER and Renoise share (and `shared/` with Live).
   - `src/integrations/reaper*.rs`, `renoise*.rs`: REAPER and Renoise, host side.
 - `daws/ableton/`: Live. `ableton-mcp-server/` is its bridge, an MCP server (`src/`: a module each for `protocol`,
   `host`, `live` with its `simulator/`, `lifecycle`, `analysis` and `project`); `remote-script/` runs inside Live
   (Python); `live-extension/` is Live's extension (TypeScript); `protocol/` is the only list of Live operations;
-  `max-standard/` is the standard Kumi holds Max patches to (data Kumi builds in).
+  `max-standard/` is the standard Kumi holds Max patches to (data Kumi builds in); `kumi-daw-ableton/` is Live, host
+  side: its integration and the Max for Live device builder.
 - `daws/own/`: Kumi's own bridges, for REAPER and Renoise: `daw-bridge/` (the `kumi-daw/1` wire) and
   `daw-mcp-server/` (the host; what's one DAW's alone is in its `src/reaper/` and `src/renoise/`).
 - `daws/reaper/reaper-kumi`: REAPER's extension (Rust, built against REAPER's SDK headers in its `sdk/`).
@@ -83,9 +85,9 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 - Tests never need a running DAW, a sign-in or anything from this machine.
 
 ## Pins and oracles
-- Goldens are byte-exact, and `KUMI_BLESS=1` rewrites them: the pins in `crates/kumi/tests/goldens` and
-  `crates/kumi-runtime/tests/goldens`, the host's `daws/own/daw-mcp-server/tests/golden` and the wire vectors in
-  `daws/own/daw-bridge/tests/vectors`. A refactor's proof is "goldens unchanged".
+- Goldens are byte-exact, and `KUMI_BLESS=1` rewrites them: the pins in `crates/kumi/tests/goldens`,
+  `crates/kumi-runtime/tests/goldens` and `daws/ableton/kumi-daw-ableton/tests/goldens`, the host's
+  `daws/own/daw-mcp-server/tests/golden` and the wire vectors in `daws/own/daw-bridge/tests/vectors`. A refactor's proof is "goldens unchanged".
 - Oracles (`testdata/oracles/<crate>/`) were recorded from the TypeScript version (tag `v1.7.6`). Nothing regenerates
   them. A lean worktree leaves out the ones only Extended's tests read (`testdata/oracles/extended-only.txt`).
 

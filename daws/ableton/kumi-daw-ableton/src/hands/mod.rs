@@ -1,9 +1,9 @@
 pub mod mac;
 mod paths;
 pub mod windows;
-use crate::system;
 use async_trait::async_trait;
 use kumi_common::{abort::Signal, js::json::stringify};
+use kumi_types::system;
 pub use mac::HANDS_VERSION;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};

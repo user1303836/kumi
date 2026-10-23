@@ -212,7 +212,7 @@ fn a_run_met_with_something_unread_names_it() {
         "{:?}",
         done.lines()
     );
-    let note = kumi_runtime::integrations::ableton::judge_tool::judge_reply(&done)["note"].as_str().unwrap().to_string();
+    let note = kumi_daw_ableton::judge_tool::judge_reply(&done)["note"].as_str().unwrap().to_string();
     assert!(note.starts_with("Every item Kumi could read is within tolerance, but it couldn't read decay, as the reference"), "{note}");
 }
 

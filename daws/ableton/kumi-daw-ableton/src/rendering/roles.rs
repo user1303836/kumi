@@ -2,12 +2,10 @@
 //! parameters Live lets Kumi turn, and for a plug-in every name Live lists for it), and EQ Eight's bands from its knobs.
 //! What is made of them is `Listening`'s.
 use super::*;
-use crate::{
-    listening::{
-        knobs::{shown_hz, Unit},
-        renderer::DeviceKnob,
-    },
-    plugins::roles::Seen,
+use kumi_library::plugins::roles::Seen;
+use kumi_listening::{
+    knobs::{shown_hz, Unit},
+    renderer::DeviceKnob,
 };
 use regex::Regex;
 use std::sync::LazyLock;

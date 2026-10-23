@@ -9,11 +9,11 @@ use std::rc::Rc;
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_common::abort::{Signal, SignalExt};
+use kumi_daw_ableton::integration::Ableton;
+use kumi_daw_ableton::options::{AbletonOptions, HandsSetup};
+use kumi_daw_ableton::willington::WillingtonSwitch;
 use kumi_runtime::core::contracts::*;
 use kumi_runtime::core::errors::RuntimeError;
-use kumi_runtime::integrations::ableton::integration::Ableton;
-use kumi_runtime::integrations::ableton::options::{AbletonOptions, HandsSetup};
-use kumi_runtime::integrations::ableton::willington::WillingtonSwitch;
 use kumi_runtime::mcp::client::{McpEndpoint, StderrStatus};
 use kumi_runtime::mcp::types::{CallToolResult, Implementation, ListToolsResult};
 use kumi_runtime::{create_session, SessionOptions};
@@ -29,13 +29,13 @@ struct Bridge {
 }
 impl Bridge {
     fn new() -> Rc<Self> {
-        let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/public-tools-oracle.json")).unwrap();
+        let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/public-tools-oracle.json")).unwrap();
         let cases = source["cases"].as_array().unwrap();
         let size = |case: &Value| case["definitions"].as_array().unwrap().len();
         let fullest = cases.iter().fold(&cases[0], |best, case| if size(case) > size(best) { case } else { best });
         let catalog =
             fullest["catalog"].as_array().unwrap().iter().map(|id| source["pool"][id.as_u64().unwrap() as usize].clone()).collect();
-        let observed: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/observation-oracle.json")).unwrap();
+        let observed: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/observation-oracle.json")).unwrap();
         let basic = observed["cases"].as_array().unwrap().iter().find(|case| case["label"] == "basic").unwrap();
         let replies = basic["calls"]
             .as_array()

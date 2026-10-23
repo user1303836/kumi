@@ -9,7 +9,7 @@
 | フォルダー | 内容 |
 | --- | --- |
 | `crates/kumi` | ネイティブの `kumi` コマンドとターミナルアプリ（`src/tui/`）、そしてモデルや実際の Live に対して任意で実行するチェック（`examples/`） |
-| `crates/kumi-runtime` | エージェントループ、セッション、Live との連携、MCP クライアント |
+| `crates/kumi-runtime` | エージェントループ、セッション、MCP クライアント、Kumi 独自のブリッジを使う DAW との連携 |
 | `crates/kumi-types` | すべての層が名指す型と設定：DAW のプロファイルと言葉、エージェントとツールの契約、エラー、場所、システム、バージョン |
 | `crates/kumi-net` | Kumi がネットワークに届く方法：システムのプロキシと信頼に従う HTTP クライアント、リクエストに答えがなかった理由、公開アドレスだけの Web クライアント、モデル呼び出しのエラー |
 | `crates/kumi-media` | オーディオ（デコード、解析、音のマッチング、DSP）、音声入力、メディアをデコードするプログラム（ffmpeg、yt-dlp、whisper.cpp）と、動画のフレーム、字幕、音声 |
@@ -18,6 +18,7 @@
 | `crates/kumi-library` | プロデューサーのライブラリー（学習、検索、プリセット、Set、好み）、プラグインのフォーマットと役割、ディスク上のサンプル探し。各 DAW が自分のライブラリーの場所を伝える |
 | `crates/kumi-listening` | リスニング：聴いて測るもの、ジャッジとチェックリスト、エンジンのラウンド、リスニングモデルとそのスロット、スタイルの参照、記譜。再生とレンダリングは各 DAW が受け持つ |
 | `crates/kumi-common` | ランタイムの共通処理と、ソース互換の値の扱い |
+| `daws/ableton/kumi-daw-ableton` | Live のホスト側：Live との連携（Set の観察、変更と HISTORY、レンダリングと Kumi Ears、Hands、ライブラリーとマニュアル）と Max for Live デバイスのビルダー |
 | `daws/ableton/ableton-mcp-server` | ネイティブの MCP ブリッジ、解析ワーカー、ライフサイクル、セットアップ、移行、診断 |
 | `daws/ableton/remote-script` | Live の中で動く、ブリッジの Remote Script（`ableton_mcp_remote_script.py`、`AbletonMcpBridge/` エントリーポイント、Python のテスト） |
 | `daws/ableton/live-extension` | Live 12.4 以降向けの Kumi の Live 拡張機能。Live の Extensions SDK の上に作られています（TypeScript で、独自の `package.json` を持ちます） |
@@ -80,7 +81,7 @@ cargo run --release -p kumi -- bridge --allow-dirty   # Live を閉じた状態�
 npm ci --prefix crates/kumi-runtime/tests/support   # 初回のみ：一部のテストが使う公式 SDK
 cargo build --locked --workspace --all-targets
 sh scripts/test-isolated.sh                 # PowerShell: ./scripts/test-isolated.ps1
-sh scripts/test-isolated.sh -p kumi-runtime -E 'test(/^hands_transport::/)'
+sh scripts/test-isolated.sh -p kumi-daw-ableton -E 'test(/^hands_transport::/)'
 python3 -m unittest discover -s scripts/tests -p 'test_*release.py'
 ```
 
@@ -97,7 +98,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 ## Kumi の開発
 
-**変更ファミリー**（独自の HISTORY の行と取り消しを持つ、変更の種類）は、`CHANGES`（`crates/kumi-runtime/src/integrations/ableton/changes.rs`）のエントリーです。メタデータは `assets/changes.json` から読み込み、要約は `changes/summaries.rs` と `changes/more_summaries.rs` にあります。エントリーには、Kumi のツール、ブリッジのプレビューと適用、ファミリー（HISTORY と NOW が描く、決まった絵柄のうちの一つ）、モデル向けの説明、そしてわかりやすい言葉の要約が入ります。古いブリッジが拒否する場合は `since`（それが動作する最初のブリッジのリリース。`bridge_version.rs` にあります）を、Live に元に戻す手段がない場合は `permanent` を付けます。テストはすべてのファミリーについて、ツールが一意であること、素のプレビューからタイトルが作れること、説明がモデルに確認を求めないこと、ブリッジのツールがホスト専用であることを確認します。提供する前に、実際の Live で取り消しも含めて実行してください（`accept_live` の example）。
+**変更ファミリー**（独自の HISTORY の行と取り消しを持つ、変更の種類）は、`CHANGES`（`daws/ableton/kumi-daw-ableton/src/changes.rs`）のエントリーです。メタデータは `assets/changes.json` から読み込み、要約は `changes/summaries.rs` と `changes/more_summaries.rs` にあります。エントリーには、Kumi のツール、ブリッジのプレビューと適用、ファミリー（HISTORY と NOW が描く、決まった絵柄のうちの一つ）、モデル向けの説明、そしてわかりやすい言葉の要約が入ります。古いブリッジが拒否する場合は `since`（それが動作する最初のブリッジのリリース。`bridge_version.rs` にあります）を、Live に元に戻す手段がない場合は `permanent` を付けます。テストはすべてのファミリーについて、ツールが一意であること、素のプレビューからタイトルが作れること、説明がモデルに確認を求めないこと、ブリッジのツールがホスト専用であることを確認します。提供する前に、実際の Live で取り消しも含めて実行してください（`accept_live` の example）。
 
 **アクション**（Set への変更ではなく、取り消すものがないもの。再生など）は、`actions.rs` の `ACTIONS` に入れ、メタデータは `assets/actions.json` に置きます。
 

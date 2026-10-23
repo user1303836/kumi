@@ -60,9 +60,9 @@ use crate::{
     spinner::{spin, step},
 };
 use kumi_common::{js::string::head, time::now_ms};
+use kumi_daw_ableton::ears::device::{install_ears, EARS_NAME};
 use kumi_runtime::{
     core::errors::RuntimeError,
-    ears::device::{install_ears, EARS_NAME},
     library::sources::{dirname, join},
     CONNECT_LIVE, KUMI, KUMI_REPAIR, KUMI_START,
 };

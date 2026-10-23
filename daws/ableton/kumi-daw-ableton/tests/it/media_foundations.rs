@@ -1,10 +1,7 @@
 //! Native audio formats and transport fixtures for audio, listening and video.
 use futures::FutureExt;
-use kumi_runtime::{
-    audio::decode::open_audio,
-    ears::{capture::*, osc::*},
-    video::programs::*,
-};
+use kumi_daw_ableton::ears::{capture::*, osc::*};
+use kumi_runtime::{audio::decode::open_audio, video::programs::*};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
@@ -743,7 +740,7 @@ async fn when_github_lists_no_ffmpeg_builds_kumi_says_so_in_plain_words_and_a_ma
 }
 #[test]
 fn kumi_ears_passes_the_sound_through_records_four_channels_and_every_patch_cord_joins_real_inlets_and_outlets() {
-    use kumi_runtime::ears::device::*;
+    use kumi_daw_ableton::ears::device::*;
     let patch = ears_patcher();
     let patch = &patch["patcher"];
     let boxes: std::collections::HashMap<_, _> =
@@ -784,12 +781,15 @@ fn kumi_ears_passes_the_sound_through_records_four_channels_and_every_patch_cord
         assert_eq!(boxes[format!("obj-send-{index}").as_str()]["text"], format!("udpsend 127.0.0.1 {port}"));
         assert!(cord("obj-code", 5 + index as u64, &format!("obj-send-{index}"), 0));
     }
-    assert_eq!(kumi_runtime::devices::amxd::decode_amxd(&ears_file()).unwrap().kind, kumi_runtime::devices::amxd::DeviceType::AudioEffect);
+    assert_eq!(
+        kumi_daw_ableton::devices::amxd::decode_amxd(&ears_file()).unwrap().kind,
+        kumi_daw_ableton::devices::amxd::DeviceType::AudioEffect
+    );
     assert_eq!(EARS_ITEM, "user_library/Kumi/Audio Effects/Kumi Ears");
 }
 #[tokio::test]
 async fn the_device_goes_into_the_user_librarys_kumi_audio_effects_folder_once_and_again_only_when_it_differs() {
-    use kumi_runtime::ears::device::*;
+    use kumi_daw_ableton::ears::device::*;
     let library = tempfile::tempdir().unwrap();
     // An older Kumi's copy, straight in the Kumi folder, goes; another device there stays.
     let older = library.path().join("Kumi");
@@ -807,7 +807,7 @@ async fn the_device_goes_into_the_user_librarys_kumi_audio_effects_folder_once_a
 }
 #[tokio::test]
 async fn kumis_socket_hears_devices_hellos_and_arms_writes_and_stops_them_by_token() {
-    use kumi_runtime::ears::{device::EARS_VERSION, link::*};
+    use kumi_daw_ableton::ears::{device::EARS_VERSION, link::*};
     use std::rc::Rc;
     tokio::task::LocalSet::new().run_until(async{
         let link=open_ears_link(EarsOptions{port:Some(0),..Default::default()}).await.unwrap();let device=Rc::new(tokio::net::UdpSocket::bind(("127.0.0.1",0)).await.unwrap());let port=device.local_addr().unwrap().port();let root=tempfile::tempdir().unwrap();let raw=root.path().join("device.raw").to_string_lossy().into_owned();let answering=device.clone();let stop=kumi_common::abort::Signal::new();let quiet_seen=Rc::new(std::cell::RefCell::new(Vec::<Option<f64>>::new()));let armed_quiet=quiet_seen.clone();let closed=stop.clone();

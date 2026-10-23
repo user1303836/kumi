@@ -1,17 +1,15 @@
 //! The producer's current selection, read without overlapping bridge requests.
 use super::context::{object, payload};
-use crate::{
-    core::{
-        contracts::{JsonObject, LiveFocus},
-        errors::RuntimeError,
-    },
-    mcp::types::CallToolResult,
-};
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_common::{
     abort::Signal,
     js::{number::is_safe_integer, string::head},
 };
+use kumi_runtime::{
+    core::contracts::{JsonObject, LiveFocus},
+    mcp::types::CallToolResult,
+};
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},

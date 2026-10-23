@@ -1,20 +1,15 @@
 //! Validate the bounded Live observations the integration gives the model.
-use crate::{
-    core::{contracts::JsonObject, errors::RuntimeError},
+use kumi_common::js::{json::stringify, string::utf16_len};
+use kumi_runtime::{
+    core::contracts::JsonObject,
     mcp::types::{CallToolResult, ContentBlock},
 };
-use kumi_common::js::{json::stringify, string::utf16_len};
 use serde_json::{json, Value};
 use std::sync::LazyLock;
 pub const INSTRUCTIONS: &str = include_str!("assets/instructions.txt");
 pub static FIELDS: LazyLock<JsonObject> = LazyLock::new(|| serde_json::from_str(include_str!("assets/fields.json")).unwrap());
 pub static PARENTS: LazyLock<JsonObject> = LazyLock::new(|| serde_json::from_str(include_str!("assets/parents.json")).unwrap());
-pub use crate::core::refs::{query_key, ObservationError};
-impl From<ObservationError> for RuntimeError {
-    fn from(error: ObservationError) -> Self {
-        RuntimeError::Observation(error.0)
-    }
-}
+pub use kumi_runtime::core::refs::{query_key, ObservationError};
 fn error(message: &str) -> ObservationError {
     ObservationError(message.into())
 }

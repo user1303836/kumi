@@ -1,9 +1,7 @@
 //! The Set model: built from the observation's track and device rows, found by id, ref or name, and diffed
 //! between builds.
-use kumi_runtime::{
-    core::contracts::JsonObject,
-    integrations::ableton::set_model::{normalize, Diff, SetModel},
-};
+use kumi_daw_ableton::set_model::{normalize, Diff, SetModel};
+use kumi_runtime::core::contracts::JsonObject;
 use serde_json::{json, Value};
 
 const BASS: &str = "01J9ZQ3V6M8K2D7X4N5P0R1S2A";

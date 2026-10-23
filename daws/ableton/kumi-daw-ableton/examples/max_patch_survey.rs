@@ -14,13 +14,13 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use kumi_runtime::devices::patch::catalog::catalog;
-use kumi_runtime::devices::patch::check::{check_with, RULES};
-use kumi_runtime::devices::patch::frozen::read_device;
-use kumi_runtime::devices::patch::measure::{quantile, shape, Shape};
-use kumi_runtime::devices::patch::reference;
-use kumi_runtime::devices::patch::standard::standard;
-use kumi_runtime::devices::patch::{Files, MaxBox, NoFiles, Patcher};
+use kumi_daw_ableton::devices::patch::catalog::catalog;
+use kumi_daw_ableton::devices::patch::check::{check_with, RULES};
+use kumi_daw_ableton::devices::patch::frozen::read_device;
+use kumi_daw_ableton::devices::patch::measure::{quantile, shape, Shape};
+use kumi_daw_ableton::devices::patch::reference;
+use kumi_daw_ableton::devices::patch::standard::standard;
+use kumi_daw_ableton::devices::patch::{Files, MaxBox, NoFiles, Patcher};
 use serde_json::{json, Map, Value};
 
 #[derive(Default)]

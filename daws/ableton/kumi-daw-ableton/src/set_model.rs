@@ -3,7 +3,7 @@
 //! lists them) with their devices one rack level down. It finds them by Kumi's own track id (item 3b) or their
 //! current ref, and by name. It tells what changed between two builds: each track keeps the generation it last
 //! changed in.
-use crate::core::contracts::JsonObject;
+use kumi_runtime::core::contracts::JsonObject;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;

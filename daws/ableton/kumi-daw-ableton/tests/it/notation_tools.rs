@@ -3,13 +3,13 @@
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_common::{abort::Signal, js::json::stringify};
+use kumi_daw_ableton::{
+    connection::{ConnectionOptions, LiveConnection},
+    more_changes::{set_meter, set_scale},
+    notes::{expand, read_notes},
+};
 use kumi_runtime::{
     core::{contracts::JsonObject, errors::RuntimeError},
-    integrations::ableton::{
-        connection::{ConnectionOptions, LiveConnection},
-        more_changes::{set_meter, set_scale},
-        notes::{expand, read_notes},
-    },
     mcp::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, Implementation, ListToolsResult},

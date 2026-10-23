@@ -1,13 +1,12 @@
 //! The judge, tune, groove, form and sound tools in Live's words: the model's side of a judged run (a goal in, a round's
 //! log out). The requests, their parsing and the replies are Kumi's own (`listening::tools`).
-pub use crate::listening::tools::{
+pub use kumi_listening::tools::{
     form_request, groove_request, judge_reply, judge_request, sound_request, tune_request, FORM_TOOL, GROOVE_TOOL, JUDGE_TOOL, SOUND_TOOL,
     TUNE_TOOL,
 };
-use crate::{
-    core::{contracts::JsonObject, daw::DawProfile},
-    listening::tools::{form_tool, groove_tool, judge_tool, sound_tool, tune_tool, ToolDef},
-};
+use kumi_listening::tools::{form_tool, groove_tool, judge_tool, sound_tool, tune_tool, ToolDef};
+use kumi_runtime::core::contracts::JsonObject;
+use kumi_types::daw::DawProfile;
 use std::sync::LazyLock;
 
 static JUDGE: LazyLock<ToolDef> = LazyLock::new(|| judge_tool(&DawProfile::ABLETON));

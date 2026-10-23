@@ -1,15 +1,14 @@
 //! Pure catch-up/storage cases; real integration cases remain in the integration parity work.
 use kumi_common::{js::json::stringify, time::since};
-use kumi_runtime::{
-    core::{
-        contracts::{ConversationStore, JsonObject, SavedConversation},
-        conversations::create_conversation_store,
-    },
-    integrations::ableton::project::*,
+use kumi_daw_ableton::project::*;
+use kumi_runtime::core::{
+    contracts::{ConversationStore, JsonObject, SavedConversation},
+    conversations::create_conversation_store,
 };
 use serde_json::{json, Value};
 use std::sync::LazyLock;
-static ORACLE: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/project-oracle.json")).unwrap());
+static ORACLE: LazyLock<Value> =
+    LazyLock::new(|| serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/project-oracle.json")).unwrap());
 fn pages(value: &Value) -> Vec<JsonObject> {
     serde_json::from_value(value.clone()).unwrap()
 }

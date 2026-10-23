@@ -1,14 +1,15 @@
 use async_trait::async_trait;
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_common::{abort::Signal, js::json::stringify};
-use kumi_runtime::{core::contracts::JsonObject, integrations::ableton::arrange::*, RuntimeError};
+use kumi_daw_ableton::arrange::*;
+use kumi_runtime::{core::contracts::JsonObject, RuntimeError};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
 fn oracle() -> Value {
-    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/arrange-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/arrange-oracle.json")).unwrap()
 }
 fn cases(data: &Value, kind: &str) -> Vec<Value> {
     data["cases"]

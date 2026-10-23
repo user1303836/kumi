@@ -4,16 +4,14 @@ use super::{
     bridge_version::{at_least, SCALE_BRIDGE},
     context::payload,
 };
-use crate::{
-    core::{contracts::*, errors::RuntimeError},
-    mcp::types::CallToolResult,
-};
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::{json::stringify, string::head},
 };
+use kumi_runtime::{core::contracts::*, mcp::types::CallToolResult};
+use kumi_types::errors::RuntimeError;
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{collections::HashSet, sync::LazyLock};

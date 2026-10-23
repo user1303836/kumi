@@ -9,14 +9,7 @@ use super::{
     patched::patched_device,
     spec::{check_spec, kept_unrun, Control, DeviceSpec},
 };
-use crate::{
-    core::{
-        contracts::{JsonObject, KernelTool, Reach, ToolResult},
-        errors::RuntimeError,
-    },
-    ears::device::EARS_NAME,
-    system::windows_device_name,
-};
+use crate::ears::device::EARS_NAME;
 use async_trait::async_trait;
 use futures::future::LocalBoxFuture;
 use kumi_common::{
@@ -24,6 +17,8 @@ use kumi_common::{
     js::{json::stringify, number::to_string},
     time::now_ms,
 };
+use kumi_runtime::core::contracts::{JsonObject, KernelTool, Reach, ToolResult};
+use kumi_types::{errors::RuntimeError, system::windows_device_name};
 use serde_json::{json, Value};
 use std::{
     cell::RefCell,
@@ -377,7 +372,7 @@ impl KernelTool for DeviceTool {
         // A device this conversation made is replaced; any other keeps its file, and this one is numbered past it.
         let asked_name = input.get("name").and_then(Value::as_str).unwrap_or("").trim().to_string();
         let ours = self.options.made.borrow().ours(&folder, &asked_name, spec.kind());
-        let windows = crate::system::platform() == "win32";
+        let windows = kumi_types::system::platform() == "win32";
         // Kumi Ears is kept beside the audio effects, and Kumi writes it again whenever it differs: its name is its own.
         let reserved: &[&str] = if spec.kind() == DeviceType::AudioEffect { &[EARS_NAME] } else { &[] };
         let name = match &ours {

@@ -12,18 +12,10 @@ publish = false
 name = "kumi_runtime"
 path = "src/lib.rs"
 
-# The device harness's isolated child.
-[[bin]]
-name = "kumi-harness"
-path = "src/bin/kumi-harness.rs"
-
-[[bin]]
-name = "kumi-library-measure"
-path = "src/bin/kumi-library-measure.rs"
-
-[[bin]]
-name = "kumi-library-learner"
-path = "src/bin/kumi-library-learner.rs"
+# What other crates' tests use of the runtime's own test helpers (a DAW's variations' directions). Only as a
+# dev-dependency.
+[features]
+test-support = []
 
 [dependencies]
 kumi-common.workspace = true
@@ -60,8 +52,6 @@ rustls.workspace = true
 rustls-native-certs.workspace = true
 rustls-platform-verifier.workspace = true
 ruzstd.workspace = true
-# Max for Live device code, run in a sandbox.
-rquickjs = { version = "0.9", features = ["bindgen", "classes", "properties"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

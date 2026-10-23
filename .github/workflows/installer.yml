@@ -62,8 +62,8 @@ jobs:
           for path in install.sh install.ps1 crates/kumi/src/install.rs crates/kumi/src/update.rs crates/kumi/src/install/migration.rs \
             crates/kumi/src/daw/ableton/bridge_setup.rs crates/kumi/src/daw/ableton/live_extension.rs \
             crates/kumi/src/daw/ableton/live_app.rs crates/kumi/src/process.rs crates/kumi/src/doctor.rs \
-            crates/kumi/src/doctor/installation.rs crates/kumi-runtime/src/integrations/ableton/hands/KumiHands.swift \
-            crates/kumi-runtime/src/integrations/ableton/hands/mac.rs crates/kumi-types/src/system.rs crates/kumi-ai/src/http.rs \
+            crates/kumi/src/doctor/installation.rs daws/ableton/kumi-daw-ableton/src/hands/KumiHands.swift \
+            daws/ableton/kumi-daw-ableton/src/hands/mac.rs crates/kumi-types/src/system.rs crates/kumi-ai/src/http.rs \
             crates/kumi-library/src/sources.rs daws/ableton/ableton-mcp-server/src/lifecycle/install_remote_script.rs \
             daws/ableton/ableton-mcp-server/src/lifecycle.rs daws/ableton/ableton-mcp-server/src/lifecycle/delivery/install.rs \
             crates/kumi/src/daw/own.rs daws/own/daw-bridge/src/lifecycle.rs daws/own/daw-bridge/src/install.rs daws/own/daw-bridge/src/detect.rs \

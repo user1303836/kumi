@@ -9,7 +9,9 @@ use super::history::History;
 use super::mutations::Mutations;
 use super::notes::{clip_and_track, read_notes};
 use super::observation::Observer;
-use crate::core::{
+use async_trait::async_trait;
+use kumi_common::abort::Signal;
+use kumi_runtime::core::{
     contracts::JsonObject,
     variations::{
         backend::{Rendered, Rewritten, Source, Undroppable, VariationsBackend, Words},
@@ -21,8 +23,6 @@ use crate::core::{
         Material, Rng, TakeSet,
     },
 };
-use async_trait::async_trait;
-use kumi_common::abort::Signal;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
@@ -225,7 +225,7 @@ impl LiveVariations {
     /// Rows of a discovery read (their refs registered for this turn's changes, given short).
     async fn rows(&self, kind: &str, extra: Value, signal: &Signal) -> Result<Vec<JsonObject>, String> {
         self.connection.rows(kind, extra.as_object().cloned().unwrap_or_default(), signal.clone()).await.map_err(|error| {
-            let error: crate::core::errors::RuntimeError = error.into();
+            let error: kumi_types::errors::RuntimeError = error.into();
             error.to_string()
         })
     }
@@ -741,7 +741,7 @@ mod tests {
     /// notes a few hundredths of a beat, a near-copy, and "higher" and "lower" moved every note, too far).
     #[test]
     fn every_direction_kumi_picks_makes_a_take_of_an_ordinary_clip() {
-        crate::core::variations::notes::every_note_direction_makes_a_take(
+        kumi_runtime::core::variations::notes::every_note_direction_makes_a_take(
             |notes, anchors| ClipTake { notes, length: 4., anchors },
             applied,
             |take| take.notes.as_slice(),
@@ -751,7 +751,7 @@ mod tests {
     /// The bridge's own schemas for each change a take makes, as every bridge in the fixtures has them.
     #[test]
     fn every_change_a_take_makes_fits_the_bridges_schema() {
-        let oracle: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/public-tools-oracle.json")).unwrap();
+        let oracle: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/public-tools-oracle.json")).unwrap();
         let take =
             ClipTake { notes: vec![Note { pitch: 60, start: 0., length: 0.5, velocity: 100, channel: 1 }], length: 4., anchors: vec![] };
         for (tool, input) in [
@@ -773,7 +773,7 @@ mod tests {
                 .collect();
             assert!(!schemas.is_empty(), "{tool}: {} isn't in the fixtures", kind.preview);
             for schema in schemas {
-                assert_eq!(crate::kernel::schema::problem(schema, &input), None, "{tool}: {input}");
+                assert_eq!(kumi_runtime::kernel::schema::problem(schema, &input), None, "{tool}: {input}");
             }
         }
     }

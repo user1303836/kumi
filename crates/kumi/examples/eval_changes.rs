@@ -21,6 +21,7 @@ use kumi_common::{
     },
     time::{now_ms, perf_now},
 };
+use kumi_daw_ableton::{create_ableton_integration, AbletonOptions, BRIDGE_TOOLS};
 use kumi_runtime::{
     ai::{
         error::LanguageModelError,
@@ -31,9 +32,7 @@ use kumi_runtime::{
         memory::MemoryStoreOptions,
         session::VideoDirectories,
     },
-    create_ableton_integration, create_agent_kernel, create_memory_store, create_recipe_store, create_session, create_technique_store,
-    find_ffmpeg,
-    integrations::ableton::AbletonOptions,
+    create_agent_kernel, create_memory_store, create_recipe_store, create_session, create_technique_store, find_ffmpeg,
     kernel::agent::{LanguageModel, ModelRequest},
     mcp::{
         client::{McpEndpoint, StderrStatus},
@@ -44,7 +43,7 @@ use kumi_runtime::{
     video::programs::FfmpegOptions,
     AgentKernel, AgentKernelOptions, ChangeRecord, ContextBudget, Effort, HeardEvent, IntegrationFactory, JsonObject, Kernel, KernelEvent,
     KernelFactory, KernelOptions, ModelBinding, Recipe, RecipeStore, ResolveModelOptions, RuntimeError, Session, SessionController,
-    SessionEvent, SessionOptions, BRIDGE_TOOLS, EFFORTS,
+    SessionEvent, SessionOptions, EFFORTS,
 };
 use regex::Regex;
 use serde::Deserialize;

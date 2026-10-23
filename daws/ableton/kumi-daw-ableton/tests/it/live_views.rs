@@ -3,9 +3,9 @@ use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
 };
+use kumi_daw_ableton::views::{self, ViewHost};
 use kumi_runtime::{
     core::{contracts::JsonObject, errors::RuntimeError},
-    integrations::ableton::views::{self, ViewHost},
     mcp::types::CallToolResult,
 };
 use serde_json::{json, Value};
@@ -56,7 +56,7 @@ fn eq(actual: &Value, expected: &Value, label: &str) {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn paged_collections_and_all_focus_views_match_source_results_and_dispatches() {
-    let recorded = kumi_testkit::oracle("kumi-runtime/views-oracle.json");
+    let recorded = kumi_testkit::oracle("kumi-daw-ableton/views-oracle.json");
     let mut parser = serde_json::Deserializer::from_str(&recorded);
     parser.disable_recursion_limit();
     let fixture: Value = serde::Deserialize::deserialize(&mut parser).unwrap();
@@ -76,9 +76,7 @@ async fn paged_collections_and_all_focus_views_match_source_results_and_dispatch
             "clipView" => {
                 views::clip_view(&host, args[0].as_str().unwrap(), signal.clone()).await.map(|v| serde_json::to_value(v).unwrap())
             }
-            "_pointed" => {
-                Ok(serde_json::to_value(kumi_runtime::integrations::ableton::pins::pointed_pin(args[0].as_object().unwrap())).unwrap())
-            }
+            "_pointed" => Ok(serde_json::to_value(kumi_daw_ableton::pins::pointed_pin(args[0].as_object().unwrap())).unwrap()),
             "_pin" => {
                 let pin: kumi_runtime::core::contracts::PinnedNode = serde_json::from_value(args[0].clone()).unwrap();
                 let tree = if pin.live == Some(true) {
@@ -86,8 +84,8 @@ async fn paged_collections_and_all_focus_views_match_source_results_and_dispatch
                 } else {
                     views::device_tree(&host, &pin.track_ref, signal.clone()).await.ok().flatten()
                 };
-                let mut book = kumi_runtime::integrations::ableton::references::References::default();
-                let value = kumi_runtime::integrations::ableton::pins::pin_context(&pin, Some(7.), tree.as_ref(), &mut book);
+                let mut book = kumi_daw_ableton::references::References::default();
+                let value = kumi_daw_ableton::pins::pin_context(&pin, Some(7.), tree.as_ref(), &mut book);
                 Ok(json!({"value":value,"refs":book.refs.iter().collect::<Vec<_>>()}))
             }
             name => panic!("Unknown fixture method {name}"),

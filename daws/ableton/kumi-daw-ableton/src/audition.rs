@@ -1,13 +1,9 @@
 //! Audition requests, render timing, and the crash journal of what a cut-off listen leaves to put right.
-pub use crate::listening::tools::{AUDITION_TOOL, RENDER_TOOL};
-use crate::{
-    core::{
-        contracts::{AuditionRequest, JsonObject},
-        daw::DawProfile,
-    },
-    listening::tools::{audition_tool, render_tool, ToolDef},
-};
 use kumi_common::js::json::file_text;
+use kumi_listening::tools::{audition_tool, render_tool, ToolDef};
+pub use kumi_listening::tools::{AUDITION_TOOL, RENDER_TOOL};
+use kumi_runtime::core::contracts::{AuditionRequest, JsonObject};
+use kumi_types::daw::DawProfile;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{fs, io::Write, path::PathBuf, sync::LazyLock};
@@ -19,9 +15,9 @@ pub static RENDER_DESCRIPTION: LazyLock<String> = LazyLock::new(|| RENDER.descri
 pub static RENDER_SCHEMA: LazyLock<JsonObject> = LazyLock::new(|| RENDER.schema.clone());
 /// The audition tool's input as a request, or what's wrong with it.
 pub fn audition_request(input: &JsonObject) -> Result<AuditionRequest, String> {
-    crate::listening::tools::audition_request(&DawProfile::ABLETON, input)
+    kumi_listening::tools::audition_request(&DawProfile::ABLETON, input)
 }
-pub use crate::listening::engine::silent_render;
+pub use kumi_listening::engine::silent_render;
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct RenderSpan {
     pub position: f64,

@@ -1,6 +1,6 @@
 //! Transport, routing, clip, Arrangement and device change descriptions.
 use super::{summaries::*, *};
-use crate::integrations::ableton::more_changes::{bars, span};
+use crate::more_changes::{bars, span};
 fn text(value: Option<&Value>) -> String {
     match value {
         None => "undefined".into(),

@@ -6,12 +6,12 @@ use super::{
     context::{payload, PARENTS},
     mutations::track_index_of,
 };
-pub use crate::core::refs::{Book, KeptRefs, KnownParameter, Moved, RefScheme, ReferenceError, Shift};
-use crate::{
+use kumi_common::js::{json::stringify, string::utf16_len};
+pub use kumi_runtime::core::refs::{Book, KeptRefs, KnownParameter, Moved, RefScheme, ReferenceError, Shift};
+use kumi_runtime::{
     core::contracts::{JsonObject, ToolResult},
     mcp::types::CallToolResult,
 };
-use kumi_common::js::{json::stringify, string::utf16_len};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::sync::LazyLock;
@@ -86,9 +86,13 @@ pub fn retired_by_shift(reference: &str, tracks: &[f64]) -> bool {
     DEVICE.is_match(reference) && !reference.contains(":mixer:") && track_index_of(reference).is_some_and(|index| tracks.contains(&index))
 }
 
-impl Shift {
+/// Where Live's refs point after a restructure.
+pub trait LiveShift {
     /// Where a Live ref points after the change: the same, another place, or nowhere (what it named was deleted).
-    pub fn reference(&self, reference: &str) -> Moved {
+    fn reference(&self, reference: &str) -> Moved;
+}
+impl LiveShift for Shift {
+    fn reference(&self, reference: &str) -> Moved {
         live_moved(self, reference, 0)
     }
 }
@@ -184,10 +188,15 @@ fn place_of(reference: &str) -> String {
         None => reference.to_owned(),
     }
 }
-impl Book<LiveRefs> {
+/// What Live's book of refs keeps across a move or a delete of a track's devices.
+pub trait LiveBook {
     /// What a move or a delete of a device on `track` retires (`retired_by_shift`), with its short names: kept to put
     /// back once the track's devices are where they were again.
-    pub fn keep(&self, track: &str) -> KeptRefs {
+    fn keep(&self, track: &str) -> KeptRefs;
+    fn encode(&mut self, result: &CallToolResult, epoch: f64, slim: bool, observed_at: &str, generation: &str) -> ToolResult;
+}
+impl LiveBook for Book<LiveRefs> {
+    fn keep(&self, track: &str) -> KeptRefs {
         let long = self.lengthen(&json!({"ref": track}));
         let Some(index) = long["ref"].as_str().and_then(track_index_of) else { return KeptRefs::default() };
         let on = |reference: &String| retired_by_shift(reference, &[index]);
@@ -196,7 +205,7 @@ impl Book<LiveRefs> {
             names: self.short.iter().filter(|(reference, _)| on(reference)).map(|(a, b)| (a.clone(), b.clone())).collect(),
         }
     }
-    pub fn encode(&mut self, result: &CallToolResult, epoch: f64, slim: bool, observed_at: &str, generation: &str) -> ToolResult {
+    fn encode(&mut self, result: &CallToolResult, epoch: f64, slim: bool, observed_at: &str, generation: &str) -> ToolResult {
         if result.is_error == Some(true) {
             return ToolResult::error(stringify(&serde_json::to_value(result).unwrap()));
         }

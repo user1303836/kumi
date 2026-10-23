@@ -11,24 +11,23 @@ use super::{
     snapshots::{self, Material},
     views::ViewHost,
 };
-pub use crate::core::history::{CurveRun, OnShift, Restore, UndoResult, MAX_ENTRIES, PICTURES_KEPT};
-use crate::{
-    core::{
-        contracts::*,
-        daw::DawProfile,
-        errors::RuntimeError,
-        history::{cant_reach_to_undo, ChangeHost},
-    },
-    mcp::types::{CallToolResult, ContentBlock},
-};
 use async_trait::async_trait;
 use indexmap::IndexSet;
 use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::{json::stringify, number::to_string, string::head},
 };
+pub use kumi_runtime::core::history::{CurveRun, OnShift, Restore, UndoResult, MAX_ENTRIES, PICTURES_KEPT};
+use kumi_runtime::{
+    core::{
+        contracts::*,
+        history::{cant_reach_to_undo, ChangeHost},
+    },
+    mcp::types::{CallToolResult, ContentBlock},
+};
+use kumi_types::{daw::DawProfile, errors::RuntimeError};
 use serde_json::{json, Value};
-use std::{cell::RefCell, future::Future, ops::Deref, rc::Rc};
+use std::{cell::RefCell, future::Future, rc::Rc};
 
 /// The most each call to Live of Kumi's undo of a cut waits.
 const RESTORE_MS: u64 = 30_000;
@@ -36,14 +35,18 @@ const RESTORE_MS: u64 = 30_000;
 const MISSING_FILE: &str = "audio file isn't there any more (";
 
 /// HISTORY over Live.
-pub type History = crate::core::history::History<LiveChanges>;
+pub type History = kumi_runtime::core::history::History<LiveChanges>;
 /// A change as Live's HISTORY keeps it, with the clips it cut.
-pub type Applied = crate::core::history::Applied<Material>;
+pub type Applied = kumi_runtime::core::history::Applied<Material>;
 
-impl Applied {
+/// Whether a change Live's HISTORY keeps can change what's heard.
+pub trait Audible {
     /// Whether the change can change what's heard: not one that only names, colours or marks things, sets the
     /// transport, or adds empty tracks and scenes (or captures one). The scale can: tunings and devices follow it.
-    pub fn audible(&self) -> bool {
+    fn audible(&self) -> bool;
+}
+impl Audible for Applied {
+    fn audible(&self) -> bool {
         const SILENT: [&str; 7] =
             ["rename", "set_track_color", "set_locators", "delete_locator", "set_transport", "add_tracks_and_scenes", "capture_scene"];
         match &self.tool {
@@ -64,12 +67,6 @@ pub enum FastResult {
 pub struct LiveChanges {
     pub connection: Rc<LiveConnection>,
     pub remember: Rc<Remember>,
-}
-impl Deref for History {
-    type Target = LiveChanges;
-    fn deref(&self) -> &LiveChanges {
-        &self.host
-    }
 }
 #[async_trait(?Send)]
 impl ChangeHost for LiveChanges {
@@ -158,8 +155,67 @@ impl ChangeHost for LiveChanges {
     }
 }
 
-impl History {
-    pub fn new(
+/// What Live's HISTORY does that only Live's does: running Live's fast code, putting a change back in Live, its undo.
+#[allow(async_fn_in_trait)]
+pub trait LiveHistory {
+    fn new(
+        connection: Rc<LiveConnection>,
+        remember: Rc<Remember>,
+        timeout_ms: Option<u64>,
+        on_change: Option<Rc<dyn Fn(ChangeRecord)>>,
+    ) -> Self;
+    fn observed(&self) -> Vec<ObservedChange>;
+    async fn run_fast(&self, code: String, signal: Signal) -> Result<FastResult, RuntimeError>;
+    /// Undo a change by the parameters its revert script puts back, unless Live changed them since.
+    async fn revert_in_live(&self, entry: &Rc<RefCell<Applied>>, revert: Vec<Value>, signal: Signal) -> Result<UndoResult, RuntimeError>;
+    /// The change's own undo, through the bridge: None once it's undone, else what stopped it.
+    async fn bridge_undo(
+        &self,
+        entry: &Rc<RefCell<Applied>>,
+        snapshot: &Applied,
+        undo_key: &str,
+        discard: bool,
+    ) -> Result<Option<UndoResult>, RuntimeError>;
+    /// Undo a change that cut or deleted clips. What it cut is checked first, so nothing changes when it can't come
+    /// back. Then, inside one Live undo step, the change's own undo (when it has one) and the clips made again whole.
+    /// Live is asked on the connection's lifetime and a time limit, not the turn's, so an Esc doesn't stop it halfway.
+    /// If Live stops partway anyway, the step is taken back when what the track holds shows it's Live's last.
+    async fn undo_material(
+        &self,
+        entry: &Rc<RefCell<Applied>>,
+        snapshot: &Applied,
+        material: Material,
+        undo_key: &str,
+        discard: bool,
+        _signal: Signal,
+    ) -> Result<UndoResult, RuntimeError>;
+    /// Kumi can't bring the clips back: the change stays, Live's undo's to take back.
+    fn left(&self, entry: &Rc<RefCell<Applied>>, names: &str, why: &str) -> UndoResult;
+    /// A restore's checks refused, so nothing changed. What the producer can clear (a clip in the way, a file moved, a
+    /// frozen or renamed track) leaves the change for Kumi's undo once they have; anything else leaves it to Live's.
+    fn refused(&self, entry: &Rc<RefCell<Applied>>, material: &Material, names: &str, why: &str) -> UndoResult;
+    /// Kumi's undo stopped partway, its step closed by now. One Live undo takes all of the step back: made right away
+    /// when Kumi knows its step changed something (its answer says what it removed or made, or the change's own undo
+    /// ran), or else once the track shows it changed. Then the track has to be back as it was before. If the producer
+    /// changed something in Live in that moment, Live's last step is theirs and the track isn't back: Kumi says so.
+    /// Without what the track held before, Kumi doesn't touch Live's undo, and says what the producer can do.
+    async fn roll_back(
+        &self,
+        entry: &Rc<RefCell<Applied>>,
+        material: &Material,
+        names: &str,
+        before: Option<Value>,
+        stopped: snapshots::Stopped,
+        bound: impl Fn() -> Signal,
+    ) -> UndoResult;
+    /// Live's own undo, once: whether Live did one.
+    async fn live_undo_once(&self, signal: Signal) -> bool;
+    /// One Live undo step around what follows, when the bridge offers it: its id, to close it by.
+    async fn open_undo_step(&self, signal: Signal) -> Option<String>;
+    async fn close_undo_step(&self, step: Option<String>);
+}
+impl LiveHistory for History {
+    fn new(
         connection: Rc<LiveConnection>,
         remember: Rc<Remember>,
         timeout_ms: Option<u64>,
@@ -167,7 +223,7 @@ impl History {
     ) -> Self {
         Self::over(LiveChanges { connection, remember }, timeout_ms, on_change)
     }
-    pub fn observed(&self) -> Vec<ObservedChange> {
+    fn observed(&self) -> Vec<ObservedChange> {
         self.entries
             .borrow()
             .values()
@@ -177,7 +233,7 @@ impl History {
             })
             .collect()
     }
-    pub async fn run_fast(&self, code: String, signal: Signal) -> Result<FastResult, RuntimeError> {
+    async fn run_fast(&self, code: String, signal: Signal) -> Result<FastResult, RuntimeError> {
         let called =
             match self.connection.call("live_run_python", object(json!({"code":code,"mode":"exec","timeoutMs":10000})), signal).await {
                 Ok(v) => v,
@@ -200,7 +256,6 @@ impl History {
         }
         Ok(FastResult::Result(body.get("result").cloned().unwrap_or(Value::Null)))
     }
-    /// Undo a change by the parameters its revert script puts back, unless Live changed them since.
     async fn revert_in_live(&self, entry: &Rc<RefCell<Applied>>, revert: Vec<Value>, signal: Signal) -> Result<UndoResult, RuntimeError> {
         if !self.connection.available.get() || self.connection.lost.get() || !self.connection.has("live_run_python") {
             return Ok(UndoResult::error(cant_reach_to_undo(self.host.profile())));
@@ -265,7 +320,6 @@ impl History {
         let note = format!("{}.", parts.join("; "));
         Ok(UndoResult::with(self.update(entry, ChangeState::Kept, Some(note.clone())), note, true))
     }
-    /// The change's own undo, through the bridge: None once it's undone, else what stopped it.
     async fn bridge_undo(
         &self,
         entry: &Rc<RefCell<Applied>>,
@@ -309,10 +363,6 @@ impl History {
         }
         Ok(None)
     }
-    /// Undo a change that cut or deleted clips. What it cut is checked first, so nothing changes when it can't come
-    /// back. Then, inside one Live undo step, the change's own undo (when it has one) and the clips made again whole.
-    /// Live is asked on the connection's lifetime and a time limit, not the turn's, so an Esc doesn't stop it halfway.
-    /// If Live stops partway anyway, the step is taken back when what the track holds shows it's Live's last.
     async fn undo_material(
         &self,
         entry: &Rc<RefCell<Applied>>,
@@ -375,14 +425,11 @@ impl History {
             Ok(Err(stopped)) => self.roll_back(entry, &material, &names, before, stopped, bound).await,
         })
     }
-    /// Kumi can't bring the clips back: the change stays, Live's undo's to take back.
     fn left(&self, entry: &Rc<RefCell<Applied>>, names: &str, why: &str) -> UndoResult {
         let note =
             format!("Kumi can't bring back {names}: {why}. It left the change as it is; Live's own undo (Cmd-Z in Live) can take it back.");
         UndoResult::with(self.update(entry, ChangeState::Kept, Some(note.clone())), note, true)
     }
-    /// A restore's checks refused, so nothing changed. What the producer can clear (a clip in the way, a file moved, a
-    /// frozen or renamed track) leaves the change for Kumi's undo once they have; anything else leaves it to Live's.
     fn refused(&self, entry: &Rc<RefCell<Applied>>, material: &Material, names: &str, why: &str) -> UndoResult {
         if why.contains("again at its length") {
             // Its clips were made aside and deleted: Live's history keeps that empty step of Kumi's.
@@ -417,11 +464,6 @@ impl History {
             None => self.left(entry, names, why),
         }
     }
-    /// Kumi's undo stopped partway, its step closed by now. One Live undo takes all of the step back: made right away
-    /// when Kumi knows its step changed something (its answer says what it removed or made, or the change's own undo
-    /// ran), or else once the track shows it changed. Then the track has to be back as it was before. If the producer
-    /// changed something in Live in that moment, Live's last step is theirs and the track isn't back: Kumi says so.
-    /// Without what the track held before, Kumi doesn't touch Live's undo, and says what the producer can do.
     async fn roll_back(
         &self,
         entry: &Rc<RefCell<Applied>>,
@@ -475,7 +517,6 @@ impl History {
         let note = format!("Kumi's undo didn't finish ({why}). Cmd-Z in Live once puts back what it changed.");
         UndoResult::with(self.update(entry, ChangeState::Unsure, Some(note.clone())), note, true)
     }
-    /// Live's own undo, once: whether Live did one.
     async fn live_undo_once(&self, signal: Signal) -> bool {
         let args = object(json!({"confirmation":"undo-in-live","idempotencyKey":uuid::Uuid::new_v4().to_string()}));
         match self.connection.call("live_song_undo", args, signal).await {
@@ -485,7 +526,6 @@ impl History {
             _ => false,
         }
     }
-    /// One Live undo step around what follows, when the bridge offers it: its id, to close it by.
     async fn open_undo_step(&self, signal: Signal) -> Option<String> {
         if !self.connection.has("live_undo_step_begin") || !self.connection.has("live_undo_step_end") {
             return None;

@@ -1,10 +1,11 @@
 use async_trait::async_trait;
 use kumi_common::js::json::stringify;
-use kumi_runtime::{integrations::ableton::changes::*, RuntimeError};
+use kumi_daw_ableton::changes::*;
+use kumi_runtime::RuntimeError;
 use serde_json::{json, Value};
 use std::{cell::RefCell, collections::HashSet};
 fn oracle() -> Value {
-    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/changes-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/changes-oracle.json")).unwrap()
 }
 struct Context {
     calls: RefCell<Vec<Value>>,
@@ -106,7 +107,7 @@ fn change_schemas_outputs_permanence_and_human_messages_match_source() {
 
 #[test]
 fn all_change_summaries_match_complete_source_outputs() {
-    let data: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/change-summaries-oracle.json")).unwrap();
+    let data: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/change-summaries-oracle.json")).unwrap();
     let track =
         |value: &Value| value.as_str().and_then(|key| data["tracks"].get(key)).map(|value| serde_json::from_value(value.clone()).unwrap());
     let values = data["values"].as_array().unwrap();
@@ -118,7 +119,7 @@ fn all_change_summaries_match_complete_source_outputs() {
             }
         }
         let meter = &case["meter"];
-        kumi_runtime::integrations::ableton::more_changes::set_meter(meter[0].as_f64().unwrap(), meter[1].as_f64().unwrap());
+        kumi_daw_ableton::more_changes::set_meter(meter[0].as_f64().unwrap(), meter[1].as_f64().unwrap());
         let result = kind(&case).summarize(
             case["preview"].as_object().unwrap(),
             case["input"].as_object().unwrap(),
@@ -168,7 +169,7 @@ fn set_audio_clip_offers_no_fades_live_cant_set() {
 #[test]
 fn a_new_arrangement_clip_says_what_it_replaced() {
     // Live lays a new clip over the clips it lands on, as a drop does: the summary names each, with the bars it cut.
-    kumi_runtime::integrations::ableton::more_changes::set_meter(4.0, 4.0);
+    kumi_daw_ableton::more_changes::set_meter(4.0, 4.0);
     let kind = CHANGES.iter().find(|kind| kind.tool == "add_arrangement_clip").unwrap();
     let clips: Vec<_> = [("Hats", 16.0, 24.0), ("Fill", 26.0, 28.0), ("Hook", 40.0, 44.0)]
         .iter()
@@ -210,7 +211,7 @@ fn a_new_clip_whose_cut_kumi_couldnt_tell_leaves_its_undo_to_live() {
 
 #[test]
 fn an_arrangement_copy_says_so_and_another_track_is_named() {
-    kumi_runtime::integrations::ableton::more_changes::set_meter(4.0, 4.0);
+    kumi_daw_ableton::more_changes::set_meter(4.0, 4.0);
     let kind = CHANGES.iter().find(|kind| kind.tool == "move_clip").unwrap();
     let bass = |value: &Value| (value == "7:track:2").then(|| serde_json::from_value(json!({"name":"Bass"})).unwrap());
     let summary = |input: Value| kind.summarize(json!({}).as_object().unwrap(), input.as_object().unwrap(), &bass, None).title;
@@ -248,7 +249,7 @@ fn every_change_kind_has_a_history_summary() {
 
 #[test]
 fn native_titles_use_visible_targets_and_only_changed_scene_settings() {
-    kumi_runtime::integrations::ableton::more_changes::set_meter(4.0, 4.0);
+    kumi_daw_ableton::more_changes::set_meter(4.0, 4.0);
     let scene = CHANGES.iter().find(|kind| kind.tool == "set_scene_follow_actions").unwrap();
     let preview = json!({"prior":{"value":{"action_a":4,"chance_a":100,"chance_b":0,"loop_count":1,"time":4}},
         "proposed":{"value":{"action_a":4,"chance_a":35,"chance_b":65,"loop_count":2,"time":0.3333333333333333}}});

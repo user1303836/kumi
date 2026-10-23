@@ -9,6 +9,7 @@ use futures::future::LocalBoxFuture;
 use futures::stream::{self, StreamExt};
 use kumi_common::abort::{Controller, Signal};
 use kumi_common::js::json::stringify;
+use kumi_daw_ableton::{integration::Ableton, observation::ObservationHost, options::AbletonOptions};
 use kumi_runtime::ai::error::{ApiCallError, LanguageModelError};
 use kumi_runtime::ai::types::{
     AssistantPart, CallOptions, DataContent, FileData, FinishReason, FinishReasonUnified, InputTokens, Message, OutputTokens,
@@ -20,7 +21,6 @@ use kumi_runtime::core::contracts::{
     ToolImage, ToolResult, TranscriptLine, TranscriptRole, Usage,
 };
 use kumi_runtime::core::errors::{FailureKind, RuntimeError};
-use kumi_runtime::integrations::ableton::{integration::Ableton, observation::ObservationHost, options::AbletonOptions};
 use kumi_runtime::kernel::agent::{
     create_agent_kernel, plain_words, AgentKernel, AgentKernelOptions, LanguageModel, ModelBinding, CARRY_ON_NOTE, STOPPED_BEFORE_RUNNING,
     STOPPED_NOTE, STOPPED_READING, STOPPED_WHILE_RUNNING,

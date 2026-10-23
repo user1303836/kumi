@@ -11,7 +11,6 @@ use super::{
     references::{retired_by_shift, Shift},
     views::ViewHost,
 };
-use crate::core::{contracts::*, errors::RuntimeError};
 use indexmap::{IndexMap, IndexSet};
 use kumi_common::{
     abort::{self, Signal, SignalExt},
@@ -21,6 +20,7 @@ use kumi_common::{
         string::{head, utf16_len},
     },
 };
+use kumi_runtime::core::{contracts::*, errors::RuntimeError};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{cell::RefCell, collections::HashSet, rc::Rc, sync::LazyLock};
@@ -199,8 +199,8 @@ impl Mutations {
                 connection.version().as_deref().unwrap_or("older")
             )));
         }
-        if history.changes_this_turn.get() >= crate::core::plan::MAX_CHANGES {
-            return Err(observation(&crate::core::plan::too_many_changes()));
+        if history.changes_this_turn.get() >= kumi_runtime::core::plan::MAX_CHANGES {
+            return Err(observation(&kumi_runtime::core::plan::too_many_changes()));
         }
         if let Err(stale) = connection.references.borrow().require_fresh_references(&input) {
             return Ok(ChangeOutcome::error(stale.0));

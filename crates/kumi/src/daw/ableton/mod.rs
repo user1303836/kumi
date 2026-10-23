@@ -10,7 +10,8 @@ pub mod report;
 pub mod setup;
 pub mod willington;
 
-use kumi_runtime::{core::contracts::Integration, integrations::ableton::AbletonOptions};
+use kumi_daw_ableton::AbletonOptions;
+use kumi_runtime::core::contracts::Integration;
 use std::rc::Rc;
 
 /// Makes Live's integration from its options: the app's own, or a test's stand-in.

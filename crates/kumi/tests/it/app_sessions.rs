@@ -282,7 +282,7 @@ async fn screens(
         consumed.set(written.len());
         term.borrow().lines().join("\n")
     };
-    let app = kumi_runtime::integrations::profile(daw).unwrap().words.app;
+    let app = kumi::daw::registry::profile(daw).unwrap().words.app;
     let mut seen = vec![];
     until("the session", &screen, |s| s.contains(&format!("● {app}"))).await;
     seen.push(("connected".to_string(), screen()));

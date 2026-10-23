@@ -161,7 +161,7 @@ fn knob_text_reads_signs_decimal_commas_factors_and_quiet_ends() {
 
 #[test]
 fn a_device_and_a_track_are_compared_by_their_long_refs() {
-    use kumi_runtime::integrations::ableton::{mutations::same_track, references::References};
+    use kumi_daw_ableton::{mutations::same_track, references::References};
     let mut book = References::default();
     let track = book.short_ref("7:track:3");
     let other = book.short_ref("7:track:4");

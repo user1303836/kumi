@@ -8,9 +8,9 @@ use ableton_mcp_server::{
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_common::abort::Signal;
+use kumi_daw_ableton::{integration::Ableton, options::AbletonOptions};
 use kumi_runtime::{
     core::contracts::JsonObject,
-    integrations::ableton::{integration::Ableton, options::AbletonOptions},
     mcp::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, Implementation, ListToolsResult},

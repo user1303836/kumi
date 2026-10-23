@@ -4,16 +4,17 @@ use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
 };
+use kumi_daw_ableton::history::LiveHistory;
+use kumi_daw_ableton::{
+    command_tools::{CommandTools, CommandToolsOptions},
+    connection::{ConnectionOptions, LiveConnection},
+    hands::*,
+    history::History,
+    options::HandsSetup,
+    remember::Remember,
+};
 use kumi_runtime::{
     core::{contracts::*, errors::RuntimeError},
-    hands::*,
-    integrations::ableton::{
-        command_tools::{CommandTools, CommandToolsOptions},
-        connection::{ConnectionOptions, LiveConnection},
-        history::History,
-        options::HandsSetup,
-        remember::Remember,
-    },
     mcp::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, ListToolsResult},
@@ -199,7 +200,7 @@ fn eq(a: Value, b: &Value, label: &str) {
 async fn command_and_plugin_traces_match_typescript() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/command-tools-oracle.json")).unwrap();
+            let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/command-tools-oracle.json")).unwrap();
             for case in fixture["cases"].as_array().unwrap() {
                 let label = case["label"].as_str().unwrap();
                 let config = &case["config"];

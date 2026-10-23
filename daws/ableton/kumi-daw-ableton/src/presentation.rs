@@ -1,7 +1,7 @@
 //! How the app shows Live's own tools (each step's words, what NOW says while it runs and its kind; Kumi's own tools
 //! are shown alike in every DAW, core/presentation.rs), and how it reads Live's focus and devices.
-use crate::core::presentation::{ToolActivity, ToolPresentation};
-use crate::core::view::{
+use kumi_runtime::core::presentation::{ToolActivity, ToolPresentation};
+use kumi_runtime::core::view::{
     BodyKind, DawFocus, DeviceForm, DeviceRole, DeviceRow, DeviceSignal, FocusItem, FocusSection, FocusView, ItemKind, LiveDetail,
     LiveView, SectionKind, ViewKind, ViewPresentation,
 };

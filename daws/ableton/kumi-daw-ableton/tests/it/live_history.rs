@@ -4,15 +4,16 @@ use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
 };
+use kumi_daw_ableton::history::LiveHistory;
+use kumi_daw_ableton::{
+    connection::{ConnectionOptions, LiveConnection},
+    history::{Applied, FastResult, History, MAX_ENTRIES},
+    remember::Remember,
+};
 use kumi_runtime::{
     core::{
         contracts::{ChangeRecord, JsonObject},
         errors::RuntimeError,
-    },
-    integrations::ableton::{
-        connection::{ConnectionOptions, LiveConnection},
-        history::{Applied, FastResult, History, MAX_ENTRIES},
-        remember::Remember,
     },
     mcp::{
         client::{McpEndpoint, StderrStatus},
@@ -161,7 +162,7 @@ fn eq(actual: &Value, expected: &Value, label: &str) {
 #[tokio::test(flavor = "current_thread")]
 async fn undo_quiet_groups_retirement_and_emergency_stop_match_source() {
     tokio::task::LocalSet::new().run_until(async{
- let fixture:Value=serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/history-oracle.json")).unwrap();
+ let fixture:Value=serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/history-oracle.json")).unwrap();
  for case in fixture["cases"].as_array().unwrap(){
   let config=&case["config"];let endpoint=Rc::new(Fixture{config:config.clone(),calls:RefCell::new(Vec::new()),original:RefCell::new(Signal::new())});
   let mut options=ConnectionOptions::new(Rc::new(|_,_|{}));let out=endpoint.clone();options.connect=Some(Rc::new(move |_|{let endpoint:Rc<dyn McpEndpoint>=out.clone();async move{Ok(endpoint)}.boxed_local()}));options.now=Some(Rc::new(||chrono::DateTime::parse_from_rfc3339("2026-10-03T12:00:00Z").unwrap().with_timezone(&chrono::Utc)));

@@ -15,6 +15,7 @@ use super::{
     project::ProjectStore,
     remember::CurrentProject,
 };
+use crate::history::LiveHistory;
 use indexmap::IndexMap;
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_store::{

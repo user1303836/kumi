@@ -11,14 +11,8 @@ use kumi_common::{
     js::string::head,
     time::{now_ms, perf_now},
 };
-use kumi_runtime::{
-    core::timing,
-    create_ableton_integration,
-    integrations::ableton::{connection::Connect, AbletonOptions},
-    mcp::client,
-    system::Env,
-    ChangeRecord, Integration, JsonObject, KernelTool, Observation, BRIDGE_TOOLS,
-};
+use kumi_daw_ableton::{connection::Connect, create_ableton_integration, AbletonOptions, BRIDGE_TOOLS};
+use kumi_runtime::{core::timing, mcp::client, system::Env, ChangeRecord, Integration, JsonObject, KernelTool, Observation};
 use serde_json::{json, Value};
 use std::{
     cell::RefCell,

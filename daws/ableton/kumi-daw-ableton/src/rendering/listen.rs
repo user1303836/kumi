@@ -10,14 +10,12 @@ use super::ears::RawFile;
 use super::ears_pass::PASS_SECONDS;
 use super::rig::{Rig, Source, Window};
 use super::*;
-use crate::{
-    ears::capture::{read_capture, write_capture_wav},
-    listening::renderer::{Audible, AuditionOptions, AuditionPass, AuditionRender, AuditionSource},
-};
+use crate::ears::capture::{read_capture, write_capture_wav};
 use kumi_common::js::{
     number::{round, to_string},
     string::head,
 };
+use kumi_listening::renderer::{Audible, AuditionOptions, AuditionPass, AuditionRender, AuditionSource};
 impl LiveRenderer {
     /// Plays the candidates over the part and captures each (see `Renderer::audition_pass`).
     pub(super) async fn audition_pass_of(

@@ -17,14 +17,10 @@ use kumi_common::{
     },
     time::{now_ms, perf_now},
 };
+use kumi_daw_ableton::{connection::Connect, create_ableton_integration, AbletonOptions, BRIDGE_TOOLS};
 use kumi_runtime::{
-    audio::AnalyzeOptions,
-    core::contracts::ChangeState,
-    create_ableton_integration, create_project_store, hear,
-    integrations::ableton::{connection::Connect, AbletonOptions},
-    mcp::client,
-    system::Env,
-    Baseline, ChangeRecord, Integration, JsonObject, KernelTool, Observation, ProjectStore, RuntimeError, BRIDGE_TOOLS, KUMI,
+    audio::AnalyzeOptions, core::contracts::ChangeState, create_project_store, hear, mcp::client, system::Env, Baseline, ChangeRecord,
+    Integration, JsonObject, KernelTool, Observation, ProjectStore, RuntimeError, KUMI,
 };
 use regex::Regex;
 use serde_json::{json, Value};

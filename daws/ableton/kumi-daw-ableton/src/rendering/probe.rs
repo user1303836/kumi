@@ -1,8 +1,8 @@
 //! Live's side of probing a device: the scratch copies of its track a probe or a search hears (made and taken away in
 //! one Live undo step) and what kind of device it is. What a probe does with them is `Listening`'s.
 use super::{tune::COPIES_BUDGET, *};
-use crate::listening::renderer::{Copies, Window};
 use kumi_common::js::string::head;
+use kumi_listening::renderer::{Copies, Window};
 
 /// What Live keeps of scratch copies of a device's track, made for one search or probe and taken away after it, in one
 /// Live undo step.

@@ -5,14 +5,12 @@
 //!   cargo run --release -p kumi-runtime --example time_observation -- <bridge-config.json> [turns] [--whole]
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
-use kumi_runtime::{
-    core::{contracts::KernelTool, errors::RuntimeError, timing},
-    integrations::ableton::{
-        connection::{ConnectionOptions, LiveConnection},
-        observation::{ObservationHost, ObservedChange, Observer},
-        remember::Remember,
-    },
+use kumi_daw_ableton::{
+    connection::{ConnectionOptions, LiveConnection},
+    observation::{ObservationHost, ObservedChange, Observer},
+    remember::Remember,
 };
+use kumi_runtime::core::{contracts::KernelTool, errors::RuntimeError, timing};
 use std::{rc::Rc, time::Instant};
 
 struct Host;

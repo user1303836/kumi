@@ -1,5 +1,5 @@
 //! The plug-in guide and wavetable tool's model-facing shape.
-use crate::core::contracts::JsonObject;
+use kumi_runtime::core::contracts::JsonObject;
 use serde_json::Value;
 use std::sync::LazyLock;
 pub const PLUGIN_TOOL: &str = "plugin";

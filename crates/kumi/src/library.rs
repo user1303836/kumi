@@ -86,7 +86,7 @@ pub async fn run_library(io: LibraryIo) -> Result<i32, RuntimeError> {
         library
     } else {
         create_library(LibraryOptions {
-            daws: kumi_runtime::integrations::LIBRARIES,
+            daws: crate::daw::registry::LIBRARIES,
             dir: dir.clone(),
             folders: Some(read_settings(&load_settings_file(&io.env)?).library_folders),
             projects_dir: Some(load_projects_dir(&io.env)?),

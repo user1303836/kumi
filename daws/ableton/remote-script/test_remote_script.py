@@ -8514,9 +8514,9 @@ class KumiMovedRefTests(unittest.TestCase):
     """Kumi's own Python gets Live's objects by ref string. After a restructure, Kumi moves its refs to their new
     places, but the registry keeps whatever was last read at each place under its string until that place is read
     again, as the bridge does before it acts there. Kumi's scripts have the places read again first
-    (crates/kumi-runtime/src/integrations/ableton/assets/moved-places.py)."""
+    (daws/ableton/kumi-daw-ableton/src/assets/moved-places.py)."""
 
-    ASSETS = Path(__file__).resolve().parents[3] / "crates" / "kumi-runtime" / "src" / "integrations" / "ableton" / "assets"
+    ASSETS = Path(__file__).resolve().parents[1] / "kumi-daw-ableton" / "src" / "assets"
 
     def setUp(self):
         self.song = FakeUndoSong(); self.song.tracks = []

@@ -3,12 +3,12 @@
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_common::{abort::Signal, js::json::stringify};
+use kumi_daw_ableton::{integration::Ableton, observation::ObservationHost, options::AbletonOptions};
 use kumi_runtime::{
     core::{
         contracts::{JsonObject, ToolResult},
         errors::RuntimeError,
     },
-    integrations::ableton::{integration::Ableton, observation::ObservationHost, options::AbletonOptions},
     mcp::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, Implementation, ListToolsResult},

@@ -1,18 +1,4 @@
 //! Live's manual, cached locally and searched by section with cited passages.
-use crate::library::{
-    store::{read_json, write_json},
-    tools::{definition, tell},
-};
-use crate::{
-    core::{
-        contracts::{JsonObject, KernelTool, Reach, ToolResult},
-        errors::RuntimeError,
-    },
-    web::{
-        html::html_to_text,
-        net::{create_web_client, decode_text, status_words, WebClient, WebClientOptions, WebError, WebFailure, WebRequest},
-    },
-};
 use async_trait::async_trait;
 use futures::{
     future::{LocalBoxFuture, Shared},
@@ -27,6 +13,14 @@ use kumi_common::{
     },
     time::now_ms,
 };
+use kumi_library::{
+    store::{read_json, write_json},
+    tools::{definition, tell},
+};
+use kumi_net::web::{create_web_client, decode_text, status_words, WebClient, WebClientOptions, WebError, WebFailure, WebRequest};
+use kumi_runtime::core::contracts::{JsonObject, KernelTool, Reach, ToolResult};
+use kumi_types::errors::RuntimeError;
+use kumi_web::html::html_to_text;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -288,7 +282,7 @@ pub async fn fetch_manual(client: Rc<dyn WebClient>, signal: Signal, base: Optio
     Ok(rows.into_iter().flat_map(|r| r.1).collect())
 }
 // What the library gives a DAW's manual tool (kumi-library).
-pub use crate::library::daws::ManualOptions;
+pub use kumi_library::daws::ManualOptions;
 type Reading = Shared<LocalBoxFuture<'static, Result<Rc<Kept>, WebFailure>>>;
 #[derive(Default)]
 struct ManualState {

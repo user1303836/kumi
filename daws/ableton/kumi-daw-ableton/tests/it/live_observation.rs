@@ -5,13 +5,13 @@ use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
 };
+use kumi_daw_ableton::{
+    connection::{ConnectionOptions, LiveConnection},
+    observation::{ObservationHost, ObservedChange, Observer},
+    remember::Remember,
+};
 use kumi_runtime::{
     core::{contracts::*, errors::RuntimeError},
-    integrations::ableton::{
-        connection::{ConnectionOptions, LiveConnection},
-        observation::{ObservationHost, ObservedChange, Observer},
-        remember::Remember,
-    },
     mcp::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, Implementation, ListToolsResult},
@@ -146,7 +146,7 @@ fn observation(value: Observation) -> Value {
 #[tokio::test(flavor = "current_thread")]
 async fn observation_context_dispatches_and_authority_match_source() {
     tokio::task::LocalSet::new().run_until(async{
-        let fixture:Value=serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/observation-oracle.json")).unwrap();
+        let fixture:Value=serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/observation-oracle.json")).unwrap();
         let(named_turns,whole_turns)=(std::cell::Cell::new(0),std::cell::Cell::new(0));
         for original in fixture["cases"].as_array().unwrap(){
             let mut case=original.clone();case["responses"]=json!(case["responses"].as_array().unwrap().iter().map(|id|fixture["values"][id.as_u64().unwrap() as usize].clone()).collect::<Vec<_>>());
@@ -254,7 +254,7 @@ impl ObservationHost for Replies {
 async fn a_turn_that_fails_part_way_leaves_the_set_model_marked_out_of_date() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/observation-oracle.json")).unwrap();
+            let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/observation-oracle.json")).unwrap();
             let case = fixture["cases"].as_array().unwrap().iter().find(|case| case["label"] == "time-signature").unwrap();
             let replies = case["calls"]
                 .as_array()
@@ -296,7 +296,7 @@ async fn a_turn_that_fails_part_way_leaves_the_set_model_marked_out_of_date() {
 async fn once_live_reports_track_ids_the_next_look_reads_them_with_the_tracks() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/observation-oracle.json")).unwrap();
+            let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/observation-oracle.json")).unwrap();
             let case = fixture["cases"].as_array().unwrap().iter().find(|case| case["label"] == "time-signature").unwrap();
             let mut replies: std::collections::HashMap<String, Value> = case["calls"]
                 .as_array()

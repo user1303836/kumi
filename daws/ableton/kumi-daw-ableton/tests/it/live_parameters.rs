@@ -6,15 +6,16 @@ use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
 };
+use kumi_daw_ableton::history::LiveHistory;
+use kumi_daw_ableton::{
+    changes::CHANGES,
+    connection::{ConnectionOptions, LiveConnection},
+    history::{FastResult, History, PYTHON_RAN},
+    parameters::Parameters,
+    remember::Remember,
+};
 use kumi_runtime::{
     core::{contracts::JsonObject, errors::RuntimeError},
-    integrations::ableton::{
-        changes::CHANGES,
-        connection::{ConnectionOptions, LiveConnection},
-        history::{FastResult, History, PYTHON_RAN},
-        parameters::Parameters,
-        remember::Remember,
-    },
     mcp::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, Implementation, ListToolsResult},
@@ -126,7 +127,7 @@ async fn a_python_failure_after_the_code_ran_counts_as_sent() {
 #[tokio::test(flavor = "current_thread")]
 async fn parameter_lookup_display_cache_and_atomic_changes_match_source() {
     tokio::task::LocalSet::new().run_until(async{
- let fixture:Value=serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/parameters-oracle.json")).unwrap();
+ let fixture:Value=serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/parameters-oracle.json")).unwrap();
  for (case_index,original) in fixture["cases"].as_array().unwrap().iter().enumerate(){
   let mut case=original.clone();case["responses"]=json!(case["responses"].as_array().unwrap().iter().map(|id|fixture["values"][id.as_u64().unwrap() as usize].clone()).collect::<Vec<_>>());
   let endpoint=Rc::new(Fixture{case:case.clone(),calls:RefCell::new(Vec::new()),original:RefCell::new(Signal::new())});let config=&case["config"];

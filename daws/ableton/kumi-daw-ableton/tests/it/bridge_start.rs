@@ -1,10 +1,8 @@
 //! When Kumi's bridge can't start: its own words when it gave them, the usual way back after an update otherwise.
 use futures::FutureExt;
 use kumi_common::abort::Signal;
-use kumi_runtime::{
-    core::errors::RuntimeError,
-    integrations::ableton::connection::{ConnectionOptions, LiveConnection},
-};
+use kumi_daw_ableton::connection::{ConnectionOptions, LiveConnection};
+use kumi_runtime::core::errors::RuntimeError;
 use std::rc::Rc;
 
 async fn start_with(said: String) -> String {

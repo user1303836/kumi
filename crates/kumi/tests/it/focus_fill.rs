@@ -7,11 +7,10 @@ use kumi::tui::app::{focus_path, touched_next};
 use kumi_runtime::core::contracts::{
     filled, BodyKind, DawFocus, FocusItem, FocusSection, FocusView, ItemKind, LiveDetail, LiveView, SectionKind, ViewKind,
 };
-use kumi_runtime::integrations;
 use serde_json::{json, Value};
 
 fn live() -> &'static kumi_runtime::core::view::ViewPresentation {
-    integrations::view(kumi_runtime::core::daw::DawId::Ableton).unwrap()
+    kumi::daw::registry::view(kumi_runtime::core::daw::DawId::Ableton).unwrap()
 }
 
 /// The neutral fields cleared: Live's wire form alone.

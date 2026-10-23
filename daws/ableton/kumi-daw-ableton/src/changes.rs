@@ -2,19 +2,19 @@
 mod more_summaries;
 pub(crate) mod pictures;
 mod summaries;
-use crate::core::{contracts::*, errors::RuntimeError};
 use async_trait::async_trait;
 use kumi_common::js::{
     json::stringify,
     number,
     string::{head, trim},
 };
+use kumi_runtime::core::{contracts::*, errors::RuntimeError};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{collections::HashSet, sync::LazyLock};
 pub type KnownTrack = TrackChip;
-pub use crate::integrations::shared::changes::ChangeSummary;
+pub use kumi_runtime::integrations::shared::changes::ChangeSummary;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SampleFile {
     pub path: String,
@@ -106,14 +106,14 @@ pub static REFERENCE_FIELDS: LazyLock<Vec<String>> = LazyLock::new(|| serde_json
 pub static UNDO_DESCRIPTION: LazyLock<String> = LazyLock::new(|| DATA["undoDescription"].as_str().unwrap().into());
 pub const UNDO_TOOL: &str = "undo_change";
 pub const EMERGENCY_STOP: &str = "live_session_emergency_stop";
-pub use crate::core::picture::format_number;
+pub use kumi_types::picture::format_number;
 pub fn note_name(note: f64) -> String {
     let index = note % 12.0;
     let notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     let name = if index >= 0.0 && index < 12.0 && index.fract() == 0.0 { notes[index as usize] } else { "undefined" };
     format!("{name}{}", number::to_string((note / 12.0).floor() - 2.0))
 }
-pub use crate::core::refs::hex_color;
+pub use kumi_runtime::core::refs::hex_color;
 pub(crate) fn record(value: Option<&Value>) -> &JsonObject {
     static EMPTY: LazyLock<JsonObject> = LazyLock::new(JsonObject::new);
     value.and_then(Value::as_object).unwrap_or(&EMPTY)
@@ -755,7 +755,7 @@ pub fn undo_note(message: &str) -> String {
         .unwrap_or("Live didn't accept the undo, so Kumi left it as it is.")
         .into()
 }
-pub use crate::core::history::next_change_id;
+pub use kumi_runtime::core::history::next_change_id;
 pub fn new_record(kind: &ChangeKind, summary: ChangeSummary, state: ChangeState, at: i64) -> ChangeRecord {
-    crate::integrations::shared::changes::new_record(kind.family, summary, state, at)
+    kumi_runtime::integrations::shared::changes::new_record(kind.family, summary, state, at)
 }

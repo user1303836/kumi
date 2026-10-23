@@ -29,8 +29,8 @@ pub fn workspace_path(relative: impl AsRef<Path>) -> PathBuf {
     workspace().join(relative)
 }
 
-/// A recorded oracle, by its crate's folder and its name: `oracle_path("kumi-runtime/views-oracle.json")` is
-/// `testdata/oracles/kumi-runtime/views-oracle.json` in this checkout.
+/// A recorded oracle, by its crate's folder and its name: `oracle_path("kumi-daw-ableton/views-oracle.json")` is
+/// `testdata/oracles/kumi-daw-ableton/views-oracle.json` in this checkout.
 pub fn oracle_path(name: &str) -> PathBuf {
     workspace_path("testdata/oracles").join(name)
 }

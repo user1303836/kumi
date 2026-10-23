@@ -8,8 +8,8 @@ use super::{
     project::ProjectStore,
     views::{self, ViewHost},
 };
-use crate::core::{contracts::JsonObject, errors::RuntimeError};
 use kumi_common::abort::Signal;
+use kumi_runtime::core::{contracts::JsonObject, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},

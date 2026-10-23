@@ -649,7 +649,7 @@ fn a_run_follows_its_own_tracks_renames_not_a_namesakes() {
 
 #[test]
 fn rebalancing_turns_a_limiters_input_and_a_utilitys_output() {
-    use kumi_runtime::integrations::ableton::rendering::gain_parameter;
+    use kumi_daw_ableton::rendering::gain_parameter;
     // A Limiter whose parameters list Output before Input Gain: its Output comes after the ceiling, so it isn't the one.
     let limiter = ["Device On", "Output", "Ceiling", "Release", "Input Gain", "Maximize On", "Threshold"];
     assert_eq!(gain_parameter(true, false, &limiter), Some("Input Gain"));
@@ -663,7 +663,7 @@ fn rebalancing_turns_a_limiters_input_and_a_utilitys_output() {
 
 #[test]
 fn rebalancing_turns_only_a_device_thats_on() {
-    use kumi_runtime::integrations::ableton::rendering::gain_device;
+    use kumi_daw_ableton::rendering::gain_device;
     let row = |name: &str, on: bool| {
         serde_json::json!({"ref": name, "name": name, "className": name, "enabled": on}).as_object().unwrap().clone()
     };
@@ -692,7 +692,7 @@ fn rebalancing_turns_only_a_device_thats_on() {
 
 #[test]
 fn an_explicit_target_that_couldnt_be_met_is_refused_or_read_as_its_point() {
-    use kumi_runtime::integrations::ableton::judge_tool::judge_request;
+    use kumi_daw_ableton::judge_tool::judge_request;
     let request = |target: serde_json::Value| {
         let input = serde_json::json!({ "goal": { "targets": [target] } });
         judge_request(input.as_object().unwrap())

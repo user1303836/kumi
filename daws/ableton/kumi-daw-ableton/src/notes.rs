@@ -5,12 +5,12 @@ use super::{
     context, more_changes,
     views::{self, ViewHost},
 };
-use crate::{
+use kumi_common::{abort::Signal, js::json::stringify};
+use kumi_listening::notation::{self, Frame, Note};
+use kumi_runtime::{
     core::contracts::{JsonObject, ToolResult},
     mcp::types::CallToolResult,
-    notation::{self, Frame, Note},
 };
-use kumi_common::{abort::Signal, js::json::stringify};
 use serde_json::{json, Value};
 
 /// The fields `read_notes` reads of each note: its id too, which edits by id (change_notes) name it by.

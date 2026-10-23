@@ -208,9 +208,8 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     // Each Set's kept conversations, while Live may come in this session, or when the producer asked for one (then they
     // go on saving where they're kept, Live or not).
     let keep_days = settings.conversations.as_ref().and_then(|c| c.keep_days);
-    let conversations = (bridge_config.is_some() || bridge_missing || resume.is_some()).then(|| {
-        kumi_runtime::core::conversations::create_conversation_store_in(&projects_dir, keep_days, kumi_runtime::integrations::PLACES)
-    });
+    let conversations = (bridge_config.is_some() || bridge_missing || resume.is_some())
+        .then(|| kumi_runtime::core::conversations::create_conversation_store_in(&projects_dir, keep_days, crate::daw::registry::PLACES));
     // The conversation asked for is found before anything shows: a word that names none says so, and Kumi stops there.
     // Only this DAW's conversations (and imported ones) go on here: another DAW's goes on in that DAW (review L4).
     let ours = |place: &str| kumi_runtime::core::place::kept_for(place, provider.id());
@@ -241,7 +240,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     };
     let tools_dir = load_tools_dir(&io.env)?;
     let library = create_library(LibraryOptions {
-        daws: kumi_runtime::integrations::LIBRARIES,
+        daws: crate::daw::registry::LIBRARIES,
         dir: load_library_dir(&io.env)?,
         folders: Some(settings.library_folders),
         projects_dir: Some(projects_dir.clone()),
@@ -552,10 +551,10 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     };
     let database = database.ok().map(|(client, _)| client);
     options.memory = Some(match &database {
-        Some(client) => Rc::new(SqliteMemoryStore::with_places(client.clone(), kumi_runtime::integrations::PLACES)) as Rc<dyn MemoryStore>,
+        Some(client) => Rc::new(SqliteMemoryStore::with_places(client.clone(), crate::daw::registry::PLACES)) as Rc<dyn MemoryStore>,
         None => kumi_runtime::core::memory::create_memory_store_in(
             MemoryStoreOptions { projects_dir: projects_dir.clone().into(), producer_file: load_memory_file(&io.env)?.into() },
-            kumi_runtime::integrations::PLACES,
+            crate::daw::registry::PLACES,
         ),
     });
     options.listen = true;
@@ -865,7 +864,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
 /// What `-r` says of a conversation kept in another DAW's place: whose it is, and the command that carries it on there.
 fn elsewhere_words(row: &kumi_runtime::core::contracts::ConversationSummary, command: &str) -> String {
     let daw = kumi_runtime::core::place::Place::parse(&row.place).and_then(|place| place.daw());
-    let (app, noun) = daw.and_then(kumi_runtime::integrations::profile).map_or(("another DAW", "project"), |profile| profile.word_pair());
+    let (app, noun) = daw.and_then(crate::daw::registry::profile).map_or(("another DAW", "project"), |profile| profile.word_pair());
     let title: String = row.title().chars().filter(|c| !c.is_control()).collect();
     format!(
         "“{}” is about {} {app} {noun}: {command} --daw {} -r {} carries it on in {app}.",

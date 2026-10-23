@@ -3,7 +3,7 @@
 //! moves notes. What the judge makes of them is `Listening`'s.
 use super::super::notes::{clip_and_track, drum_rack, read_notes, track_name};
 use super::*;
-use crate::listening::{
+use kumi_listening::{
     notes::{Kit, Note},
     renderer::{ClipNotes, NotePatch},
 };

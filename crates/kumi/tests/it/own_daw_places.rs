@@ -13,6 +13,7 @@ use daw_mcp_server::{
 };
 use futures::stream::{self, StreamExt};
 use futures::FutureExt;
+use kumi::daw::registry::PLACES;
 use kumi_runtime::ai::error::LanguageModelError;
 use kumi_runtime::ai::types::{
     CallOptions, FinishReason, FinishReasonUnified, InputTokens, OutputTokens, StreamPart, StreamParts, ToolCall, Usage as ModelUsage,
@@ -27,7 +28,6 @@ use kumi_runtime::integrations::{
     own_bridge::{Connect, OwnOptions},
     reaper::create_reaper_integration,
     renoise::create_renoise_integration,
-    PLACES,
 };
 use kumi_runtime::kernel::agent::{create_agent_kernel, AgentKernel, AgentKernelOptions, LanguageModel, ModelBinding, ModelRequest};
 use kumi_runtime::{create_session, Session, SessionOptions};

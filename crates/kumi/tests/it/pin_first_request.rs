@@ -12,6 +12,9 @@ use futures::stream::{self, StreamExt};
 use futures::FutureExt;
 use kumi_common::abort::{Signal, SignalExt};
 use kumi_common::js::json::stringify;
+use kumi_daw_ableton::options::{AbletonOptions, HandsSetup};
+use kumi_daw_ableton::willington::WillingtonSwitch;
+use kumi_daw_ableton::{create_ableton_integration, create_inference_only_integration};
 use kumi_runtime::ai::error::LanguageModelError;
 use kumi_runtime::ai::types::{
     CallOptions, FinishReason, FinishReasonUnified, InputTokens, OutputTokens, StreamPart, StreamParts, ToolCall, Usage as ModelUsage,
@@ -22,15 +25,13 @@ use kumi_runtime::core::memory::{create_memory_store, MemoryStoreOptions};
 use kumi_runtime::core::session::JobsOptions;
 use kumi_runtime::core::session::VideoDirectories;
 use kumi_runtime::core::techniques::create_technique_store;
-use kumi_runtime::integrations::ableton::options::{AbletonOptions, HandsSetup};
-use kumi_runtime::integrations::ableton::willington::WillingtonSwitch;
 use kumi_runtime::kernel::agent::{create_agent_kernel, AgentKernel, AgentKernelOptions, LanguageModel, ModelBinding, ModelRequest};
 use kumi_runtime::library::{create_library, sources::SourceOptions, LibraryOptions};
 use kumi_runtime::mcp::client::{McpEndpoint, StderrStatus};
 use kumi_runtime::mcp::types::{CallToolResult, Implementation, ListToolsResult};
 use kumi_runtime::{
-    create_ableton_integration, create_conversation_store, create_goal_store, create_inference_only_integration, create_objective_store,
-    create_playbook_store, create_recipe_store, create_session, with_fallback, SessionOptions, DEFAULT_BUDGET,
+    create_conversation_store, create_goal_store, create_objective_store, create_playbook_store, create_recipe_store, create_session,
+    with_fallback, SessionOptions, DEFAULT_BUDGET,
 };
 use serde_json::{json, Value};
 
@@ -88,7 +89,7 @@ fn version_of(case: &Value) -> Vec<u64> {
 }
 
 fn bridge(catalog: Catalog) -> (Rc<Bridge>, bool) {
-    let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/public-tools-oracle.json")).unwrap();
+    let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/public-tools-oracle.json")).unwrap();
     let cases = source["cases"].as_array().unwrap();
     let size = |case: &&Value| case["definitions"].as_array().unwrap().len();
     // The first of the most tools, so a tie picks the same case every time.
@@ -105,7 +106,7 @@ fn bridge(catalog: Catalog) -> (Rc<Bridge>, bool) {
     };
     let tools =
         Value::Array(case["catalog"].as_array().unwrap().iter().map(|id| source["pool"][id.as_u64().unwrap() as usize].clone()).collect());
-    let observed: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/observation-oracle.json")).unwrap();
+    let observed: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/observation-oracle.json")).unwrap();
     let basic = observed["cases"].as_array().unwrap().iter().find(|case| case["label"] == "basic").unwrap();
     let replies = basic["calls"]
         .as_array()
@@ -306,7 +307,7 @@ async fn run(setup: Setup, script: Script) -> Run {
         options.gaps = Some(text("gaps.jsonl"));
         options.conversations = Some(create_conversation_store(dir.path()));
         options.library = Some(create_library(LibraryOptions {
-            daws: kumi_runtime::integrations::LIBRARIES,
+            daws: kumi::daw::registry::LIBRARIES,
             dir: text("library"),
             find_sets: Some(false),
             fork: Some(false),

@@ -58,7 +58,7 @@ print(json.dumps({{'left': [str(t.name) for t in song.tracks], 'levels': levels,
         names = serde_json::to_string(names).unwrap(),
         ids = serde_json::to_string(ids).unwrap(),
         args = serde_json::to_string(&args.to_string()).unwrap(),
-        body = serde_json::to_string(include_str!("../../src/integrations/ableton/assets/tune-copies.py")).unwrap(),
+        body = serde_json::to_string(include_str!("../../src/assets/tune-copies.py")).unwrap(),
     );
     let mut child = Command::new("python3").arg("-").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     child.stdin.take().unwrap().write_all(fake.as_bytes()).unwrap();

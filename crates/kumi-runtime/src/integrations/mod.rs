@@ -1,6 +1,6 @@
-//! The DAWs Kumi integrates, and what their integrations share. Outside Live's own integration, only this registry
-//! and the crate root name it: the crate root's constructors for Live come through here.
-pub mod ableton;
+//! The integrations of the DAWs whose bridges are Kumi's own (REAPER's and Renoise's, and what they share), what every
+//! DAW's integration shares, and the DAW-neutral ones (none, the fallback). Live's is kumi-daw-ableton's; the registry of
+//! the DAWs this build integrates is the app's.
 #[cfg(test)]
 mod daws_doc;
 pub mod fallback;
@@ -35,74 +35,4 @@ mod renoise_mapping;
 mod renoise_variations;
 pub mod shared;
 
-use crate::core::daw::{DawId, DawProfile};
-use crate::core::presentation::ToolPresentation;
-use crate::core::view::ViewPresentation;
-
 pub use crate::core::project::{create_project_store, Baseline, ProjectStore};
-pub use ableton::devices as live_devices;
-pub use ableton::focus::parse_focus;
-pub use ableton::live_set;
-pub use ableton::manual as live_manual;
-pub use ableton::rendering::main_chain as live_main_chain;
-pub use ableton::{create_ableton_integration, create_inference_only_integration, BRIDGE_TOOLS};
-pub use ableton::{ears, hands};
-
-/// The DAWs this build integrates, by profile: Live, and the DAWs whose bridges are Kumi's own.
-pub const REGISTERED: &[&DawProfile] = &[&DawProfile::ABLETON, &DawProfile::REAPER, &DawProfile::RENOISE];
-
-/// The places a store takes: every registered DAW's.
-pub const PLACES: crate::core::place::Places = crate::core::place::Places(&[DawId::Ableton, DawId::Reaper, DawId::Renoise]);
-
-/// A registered DAW's profile; None for one this build doesn't integrate.
-pub fn profile(id: DawId) -> Option<&'static DawProfile> {
-    REGISTERED.iter().copied().find(|profile| profile.id == Some(id))
-}
-
-/// How the app shows a registered DAW's own tools.
-pub fn presentation(id: DawId) -> Option<&'static ToolPresentation> {
-    match id {
-        DawId::Ableton => Some(&ableton::presentation::PRESENTATION),
-        DawId::Reaper => Some(&reaper::PRESENTATION),
-        DawId::Renoise => Some(&renoise::PRESENTATION),
-    }
-}
-
-/// How the app reads a registered DAW's focus and devices.
-pub fn view(id: DawId) -> Option<&'static ViewPresentation> {
-    match id {
-        DawId::Ableton => Some(&ableton::presentation::VIEW),
-        DawId::Reaper => Some(&reaper::VIEW),
-        DawId::Renoise => Some(&renoise::VIEW),
-    }
-}
-
-/// What each registered DAW tells the library (its places, its own library, the projects it opened lately, its
-/// manual), in the registry's order.
-pub static LIBRARIES: kumi_library::daws::Daws =
-    kumi_library::daws::Daws(&[&ableton::library::LIBRARY, &own_library::REAPER, &own_library::RENOISE]);
-
-/// Where the DAWs keep the producer's sounds, presets and saved projects, beside the folders named: Live's layout (its
-/// User Library, Places, packs and Core Library), Splice's folder, and REAPER's and Renoise's own libraries.
-pub fn library_sources(options: &crate::library::sources::SourceOptions) -> Vec<crate::library::sources::Source> {
-    debug_assert!(profile(options.daw.unwrap_or(DawId::Ableton)).is_some(), "a registered DAW's places");
-    crate::library::sources::library_sources(LIBRARIES, options)
-}
-
-/// The DAWs' saved projects they opened lately (Live's Sets, from its log).
-pub fn recent_projects(options: &crate::library::sources::SourceOptions) -> Vec<String> {
-    debug_assert!(profile(options.daw.unwrap_or(DawId::Ableton)).is_some(), "a registered DAW's projects");
-    crate::library::sources::recent_projects(LIBRARIES, options)
-}
-
-/// REAPER's and Renoise's instructions, packs included, keep within the budget Live's instructions keep. (Here, because
-/// only the registry may name Live's integration outside it.)
-#[cfg(test)]
-#[test]
-fn each_own_daws_instructions_keep_within_lives() {
-    let live = ableton::context::INSTRUCTIONS.len();
-    for daw in [&reaper::DAW, &renoise::DAW] {
-        let text = own_bridge::instructions_of(daw);
-        assert!(text.len() <= live, "{}'s instructions are {} bytes, over Live's {live}", daw.profile.words.app, text.len());
-    }
-}

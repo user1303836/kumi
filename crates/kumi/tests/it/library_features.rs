@@ -28,7 +28,7 @@ fn compare(actual: &Value, expected: &Value, path: &str) {
 }
 #[test]
 fn complete_measurements_match_typescript_across_sounds_and_sample_rates() {
-    let cases: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/library-features-oracle.json")).unwrap();
+    let cases: Value = serde_json::from_str(&kumi_testkit::oracle("kumi/library-features-oracle.json")).unwrap();
     for case in cases.as_array().unwrap() {
         let kind = case["kind"].as_str().unwrap();
         let rate = case["rate"].as_f64().unwrap();

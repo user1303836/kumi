@@ -4,6 +4,7 @@
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_common::abort::{self, Signal};
+use kumi_daw_ableton::hands::{persistent, Dialog, Hands, HandsError, HandsReply, KeysOptions, MenuItem, MenuOptions, Track, Window};
 use kumi_runtime::{
     ai::{
         error::LanguageModelError,
@@ -44,7 +45,6 @@ use kumi_runtime::{
             TechniqueSource, TechniqueToolsOptions, PLAN_TECHNIQUE, TECHNIQUE_GUIDANCE,
         },
     },
-    hands::{persistent, Dialog, Hands, HandsError, HandsReply, KeysOptions, MenuItem, MenuOptions, Track, Window},
     kernel::{
         agent::{
             create_agent_kernel, AgentKernelOptions, ModelBinding, CARRY_ON_NOTE, STOPPED_BEFORE_RUNNING, STOPPED_NOTE, STOPPED_READING,

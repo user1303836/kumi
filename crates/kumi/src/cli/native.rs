@@ -552,7 +552,7 @@ mod doctor_io_tests {
         let factory = DawFactory {
             ableton: Rc::new(move |options| {
                 count.set(count.get() + 1);
-                kumi_runtime::integrations::create_ableton_integration(options)
+                kumi_daw_ableton::create_ableton_integration(options)
             }),
             own_host: None,
         };
@@ -576,7 +576,7 @@ mod doctor_io_tests {
         let asked = Rc::new(std::cell::RefCell::new(vec![]));
         let seen = asked.clone();
         let factory = DawFactory {
-            ableton: Rc::new(kumi_runtime::integrations::create_ableton_integration),
+            ableton: Rc::new(kumi_daw_ableton::create_ableton_integration),
             own_host: Some(Rc::new(move |daw| {
                 seen.borrow_mut().push(daw);
                 Rc::new(|_| async { Err(RuntimeError::plain("daw-mcp-server wasn't found")) }.boxed_local())

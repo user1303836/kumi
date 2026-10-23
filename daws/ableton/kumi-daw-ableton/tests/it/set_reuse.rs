@@ -3,19 +3,19 @@
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_common::{abort::Signal, js::json::stringify};
+use kumi_daw_ableton::{
+    connection::{ConnectionOptions, LiveConnection},
+    integration::Ableton,
+    observation::{ObservationHost, ObservedChange, Observer},
+    options::AbletonOptions,
+    references::Shift,
+    remember::Remember,
+};
 use kumi_runtime::{
     core::{
         contracts::{Integration, JsonObject, KernelTool, ToolResult},
         errors::RuntimeError,
         timing,
-    },
-    integrations::ableton::{
-        connection::{ConnectionOptions, LiveConnection},
-        integration::Ableton,
-        observation::{ObservationHost, ObservedChange, Observer},
-        options::AbletonOptions,
-        references::Shift,
-        remember::Remember,
     },
     mcp::{
         client::{McpEndpoint, StderrStatus},

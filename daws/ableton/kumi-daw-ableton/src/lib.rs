@@ -59,7 +59,7 @@ pub mod willington;
 pub static BRIDGE_TOOLS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
     let data: serde_json::Value = serde_json::from_str(include_str!("assets/changes.json")).unwrap();
     let mut seen = std::collections::HashSet::new();
-    crate::mcp::allowed_tools::MODEL_TOOLS
+    kumi_runtime::mcp::allowed_tools::MODEL_TOOLS
         .iter()
         .copied()
         .chain(data["hostTools"].as_array().unwrap().iter().filter_map(serde_json::Value::as_str))

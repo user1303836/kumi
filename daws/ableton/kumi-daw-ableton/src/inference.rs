@@ -1,7 +1,7 @@
 //! Kumi without Live (integrations/none.rs) in Live's words and with Live's instructions, explicitly or while Live is away.
-use crate::core::contracts::*;
-use crate::integrations::none;
 use chrono::{DateTime, Utc};
+use kumi_runtime::core::contracts::*;
+use kumi_runtime::integrations::none;
 use std::rc::Rc;
 
 pub(crate) fn no_access(key: &str, now: DateTime<Utc>, project: Option<ProjectRef>) -> Observation {

@@ -15,6 +15,12 @@ use serde_json::{json, Value};
 #[error("{0}")]
 pub struct ObservationError(pub String);
 
+impl From<ObservationError> for crate::core::errors::RuntimeError {
+    fn from(error: ObservationError) -> Self {
+        crate::core::errors::RuntimeError::Observation(error.0)
+    }
+}
+
 /// Overflow also requires the owner to invalidate its observation lease.
 #[derive(Debug, Clone)]
 pub struct ReferenceError {
@@ -191,7 +197,7 @@ pub struct Book<S: RefScheme> {
     pub known: IndexMap<String, KnownTrack>,
     /// Parameters as discovery last read them, by ref: a picture of one's automation is drawn to its range.
     pub parameters: IndexMap<String, KnownParameter>,
-    pub(crate) short: IndexMap<String, String>,
+    pub short: IndexMap<String, String>,
     long: IndexMap<String, String>,
     counts: IndexMap<String, u64>,
     /// Refs a restructure moved to a place the DAW hasn't been read at since. A DAW whose registry keeps objects by

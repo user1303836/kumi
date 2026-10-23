@@ -154,7 +154,7 @@ pub(crate) fn daw_env_problem(env: &Env) -> Option<String> {
 
 /// The DAWs this Kumi integrates, by the names `--daw` and KUMI_DAW take.
 fn registered_daws() -> String {
-    kumi_runtime::integrations::REGISTERED.iter().filter_map(|profile| profile.id).map(DawId::as_str).collect::<Vec<_>>().join(", ")
+    crate::daw::registry::REGISTERED.iter().filter_map(|profile| profile.id).map(DawId::as_str).collect::<Vec<_>>().join(", ")
 }
 
 /// A DAW this Kumi integrates, by its name in any case: "live" is another name for Live's ("ableton", the one written), as
@@ -162,7 +162,7 @@ fn registered_daws() -> String {
 fn known_daw(text: &str) -> Option<DawId> {
     let text = text.trim().to_ascii_lowercase();
     let daw = if text == "live" { Some(DawId::Ableton) } else { DawId::parse(&text) };
-    daw.filter(|daw| kumi_runtime::integrations::profile(*daw).is_some())
+    daw.filter(|daw| crate::daw::registry::profile(*daw).is_some())
 }
 
 /// The DAW asked for with `--daw <id>` (or `--daw=<id>`) alone, and the arguments left: what `bridge` and

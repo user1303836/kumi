@@ -1,10 +1,7 @@
-use kumi_runtime::{
-    hands::MenuItem,
-    integrations::ableton::{audition::*, live_command::*, plugin_tool::*},
-};
+use kumi_daw_ableton::{audition::*, hands::MenuItem, live_command::*, plugin_tool::*};
 use serde_json::{json, Value};
 fn oracle() -> Value {
-    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/audition-menu-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/audition-menu-oracle.json")).unwrap()
 }
 fn equivalent(a: &Value, b: &Value) {
     if let (Some(a), Some(b)) = (a.as_f64(), b.as_f64()) {

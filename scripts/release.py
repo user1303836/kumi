@@ -67,7 +67,7 @@ RENOISE_MANIFEST = native.RENOISE_TOOL_SOURCE + "/manifest.xml"
 # Kumi's own, daw-bridge and its host for REAPER and Renoise (daw-mcp-server) among them.
 KUMI = ("crates/kumi/", "crates/kumi-runtime/", "crates/kumi-types/", "crates/kumi-net/", "crates/kumi-media/", "crates/kumi-ai/",
         "crates/kumi-web/", "crates/kumi-library/",
-        "crates/kumi-listening/", "crates/kumi-common/", "crates/kumi-store/",
+        "crates/kumi-listening/", "crates/kumi-common/", "crates/kumi-store/", "daws/ableton/kumi-daw-ableton/",
         "daws/own/daw-bridge/", "daws/own/daw-mcp-server/", "install.sh", "install.ps1")
 # Kumi's own crates, at Kumi's version, and their folders: Kumi, its runtime, common parts and shared types, and its host
 # for REAPER and Renoise.

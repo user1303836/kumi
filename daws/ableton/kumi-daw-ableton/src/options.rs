@@ -3,13 +3,11 @@ use super::{
     connection::{Connect, ConnectionOptions},
     project::ProjectStore,
 };
-use crate::{
-    core::{contracts::*, errors::RuntimeError},
-    ears::link::EarsLink,
-    hands::Hands,
-};
+use crate::{ears::link::EarsLink, hands::Hands};
 use chrono::{DateTime, Utc};
 use futures::future::LocalBoxFuture;
+use kumi_runtime::core::contracts::*;
+use kumi_types::errors::RuntimeError;
 use std::rc::Rc;
 
 pub enum EarsSetup {
@@ -20,7 +18,7 @@ pub enum HandsSetup {
     Disabled,
     Open(Rc<dyn Fn() -> LocalBoxFuture<'static, Result<Option<Rc<dyn Hands>>, RuntimeError>>>),
 }
-pub use crate::core::context::{IntegrationContext, ListenerSource, LowDisk};
+pub use kumi_runtime::core::context::{IntegrationContext, ListenerSource, LowDisk};
 
 pub struct AbletonOptions {
     pub on_connection: ConnectionListener,
@@ -45,11 +43,11 @@ pub struct AbletonOptions {
     pub restore_file: Option<String>,
     pub on_audition: Option<Rc<dyn Fn(AuditionEvent)>>,
     /// Each round the judge logs (`judge`): its target, change, numbers before and after, keep or revert, and what's next.
-    pub on_judge: Option<Rc<dyn Fn(crate::listening::round::Round)>>,
+    pub on_judge: Option<Rc<dyn Fn(kumi_listening::round::Round)>>,
     /// Finds an audio-capable model among the producer's providers to listen beside the meters (asked once).
     pub listener: Option<ListenerSource>,
     /// Measured references the judge can work toward by name.
-    pub references: Option<Rc<crate::references::store::ReferenceStore>>,
+    pub references: Option<Rc<kumi_listening::references::store::ReferenceStore>>,
     pub ears: Option<EarsSetup>,
     pub hands: Option<HandsSetup>,
     pub fast: Option<bool>,

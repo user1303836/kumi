@@ -8,19 +8,7 @@ use super::{
     remember::Remember,
     views::ViewHost,
 };
-use crate::{
-    audio::{
-        audio_path,
-        wavetable::{self, FromAudio, Keyframe, Shape, WavetableSpec},
-    },
-    core::{
-        contracts::{ActionEvent, ChangeRecord, JsonObject, ToolResult},
-        errors::RuntimeError,
-    },
-    hands::{self, Hands, HandsError, KeysOptions, MenuItem, MenuOptions, OpenHandsOptions, Toggle, ToggleSet, Track},
-    mcp::allowed_tools::CallOptions,
-    plugins::registry::{adapter_for, folder_for, plugin_guide, ExposedParameter},
-};
+use crate::hands::{self, Hands, HandsError, KeysOptions, MenuItem, MenuOptions, OpenHandsOptions, Toggle, ToggleSet, Track};
 use futures::{
     future::{LocalBoxFuture, Shared},
     FutureExt,
@@ -32,6 +20,16 @@ use kumi_common::{
         string::{head, trim},
     },
 };
+use kumi_library::plugins::registry::{adapter_for, folder_for, plugin_guide, ExposedParameter};
+use kumi_media::audio::{
+    audio_path,
+    wavetable::{self, FromAudio, Keyframe, Shape, WavetableSpec},
+};
+use kumi_runtime::{
+    core::contracts::{ActionEvent, ChangeRecord, JsonObject, ToolResult},
+    mcp::allowed_tools::CallOptions,
+};
+use kumi_types::errors::RuntimeError;
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{
@@ -336,8 +334,8 @@ impl From<std::io::Error> for CommandError {
         Self::Other(e.to_string())
     }
 }
-impl From<crate::audio::decode::AudioError> for CommandError {
-    fn from(e: crate::audio::decode::AudioError) -> Self {
+impl From<kumi_media::audio::decode::AudioError> for CommandError {
+    fn from(e: kumi_media::audio::decode::AudioError) -> Self {
         Self::Other(e.to_string())
     }
 }
@@ -1199,7 +1197,7 @@ impl CommandTools {
             (_, None) => None,
         };
         // Kumi's hands fill Live's Save and Open dialogs on Windows only; on a Mac nothing is pressed.
-        if path.is_some() && crate::system::platform() == "darwin" {
+        if path.is_some() && kumi_types::system::platform() == "darwin" {
             return Ok(ToolResult::error(format!(
                 "On a Mac, Kumi can't fill in Live's Save and Open dialogs yet, so nothing was pressed. Ask the producer to {} in Live.",
                 match name {
@@ -1300,8 +1298,10 @@ impl CommandTools {
                     };
                     // The prompt's own button: Yes / No on Windows, Save / Don't Save on a Mac.
                     let (titles, usual): (&[&str], &str) = match answer {
-                        "yes" => (&["save", "yes"], if crate::system::platform() == "darwin" { "Save" } else { "Yes" }),
-                        "no" => (&["don't save", "no", "discard"], if crate::system::platform() == "darwin" { "Don't Save" } else { "No" }),
+                        "yes" => (&["save", "yes"], if kumi_types::system::platform() == "darwin" { "Save" } else { "Yes" }),
+                        "no" => {
+                            (&["don't save", "no", "discard"], if kumi_types::system::platform() == "darwin" { "Don't Save" } else { "No" })
+                        }
                         _ => (&["cancel"], "Cancel"),
                     };
                     let buttons = dialog.buttons.clone().unwrap_or_default();

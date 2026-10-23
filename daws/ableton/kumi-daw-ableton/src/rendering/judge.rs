@@ -3,8 +3,9 @@
 use super::super::display::parse_display;
 use super::main_chain::{main_chain, MainDevice};
 use super::*;
-use crate::listening::{checklist::MainState, judging::Placed};
+use crate::history::Audible;
 use kumi_common::js::{number::to_string, string::head};
+use kumi_listening::{checklist::MainState, judging::Placed};
 
 /// Where rebalancing turns the level: a gain knob, and whether a limiter comes after it (then peaks stay put).
 #[derive(Debug, Clone)]

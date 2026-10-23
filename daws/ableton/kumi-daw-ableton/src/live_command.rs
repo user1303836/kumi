@@ -1,6 +1,7 @@
 //! Live menu command shapes and matching, independent of the live integration.
-use crate::{core::contracts::JsonObject, hands::MenuItem};
+use crate::hands::MenuItem;
 use kumi_common::js::string::trim;
+use kumi_runtime::core::contracts::JsonObject;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

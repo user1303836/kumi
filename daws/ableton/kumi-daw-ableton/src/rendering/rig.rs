@@ -20,7 +20,7 @@ pub(super) struct Held {
     pub recording: bool,
     pub rearm: Vec<String>,
 }
-pub(super) use crate::listening::renderer::Window;
+pub(super) use kumi_listening::renderer::Window;
 #[derive(Default)]
 pub(super) struct Transport {
     pub position: Option<f64>,
@@ -73,7 +73,7 @@ impl Rig {
 impl LiveRenderer {
     /// The bars `window` covers, as said while Live plays them: "bars 17–24", or "bar 17".
     pub(super) fn bars_of(&self, window: Window) -> String {
-        crate::listening::renderer::bars_of(self.observer.beats_per_bar.get(), window)
+        kumi_listening::renderer::bars_of(self.observer.beats_per_bar.get(), window)
     }
     pub(super) async fn transport_now(&self, signal: Signal) -> Transport {
         let rows = self.rows("set", json!({"fields":["position","loop"]}), signal).await.unwrap_or_default();

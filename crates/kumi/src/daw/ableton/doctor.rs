@@ -14,9 +14,9 @@ use crate::{
     },
 };
 use futures::{future::join_all, FutureExt};
+use kumi_daw_ableton::hands::{can_build_hands, open_hands, HandsErrorKind, OpenHandsOptions};
 use kumi_runtime::{
     core::errors::RuntimeError,
-    hands::{can_build_hands, open_hands, HandsErrorKind, OpenHandsOptions},
     library::sources::{dirname, join},
     system::{self, Env},
     CONNECT_LIVE, INSTALLED, KUMI, KUMI_REPAIR, KUMI_START,

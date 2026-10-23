@@ -1,6 +1,6 @@
 //! Live's device builder (make_device): Max for Live devices made, played in a harness and checked. The .amxd format
 //! itself is shared (crate::devices::amxd).
-pub use crate::devices::amxd;
+pub mod amxd;
 pub mod face;
 pub mod findings;
 pub mod gen;

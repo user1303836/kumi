@@ -297,7 +297,7 @@ impl LiveRenderer {
     /// out with some to spare, when there isn't.
     pub(super) async fn no_room(&self, seconds: f64, takes: usize, folder: &std::path::Path) -> Option<String> {
         let needed = (seconds + 10.) * TAKE_BYTES_PER_SECOND * 2. * takes.max(1) as f64 + 200e6;
-        crate::core::disk::low_disk(&folder.to_string_lossy(), needed, "for Kumi to hear this").await
+        kumi_types::disk::low_disk(&folder.to_string_lossy(), needed, "for Kumi to hear this").await
     }
 
     /// Where Live records a record pass's takes: in the Set's project, else (an unsaved Set) in a project of its own

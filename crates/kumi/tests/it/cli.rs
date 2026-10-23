@@ -4,7 +4,8 @@ use kumi::{
     input::{ByteListener, TerminalInput},
     tui::tty::TtyOutput,
 };
-use kumi_runtime::{create_inference_only_integration, system::Env};
+use kumi_daw_ableton::create_inference_only_integration;
+use kumi_runtime::system::Env;
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -347,7 +348,7 @@ case!(continue_and_resume_in_live_leave_another_daws_conversation_to_that_daw, a
     let store = kumi_runtime::core::conversations::create_conversation_store_in(
         f.folder.path().join("projects"),
         None,
-        kumi_runtime::integrations::PLACES,
+        kumi::daw::registry::PLACES,
     );
     store.save(set, "mv66me0m3fa91c", &said("make the bass wider", 1)).await.unwrap();
     store.save(project, "mv66zz0m3fa91c", &said("Mix notes for the song", 2)).await.unwrap();

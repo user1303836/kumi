@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use std::{cell::RefCell, rc::Rc, time::Duration};
 fn make(studio: &Studio, fork: bool) -> Rc<Library> {
     create_library(LibraryOptions {
-        daws: kumi_runtime::integrations::LIBRARIES,
+        daws: kumi::daw::registry::LIBRARIES,
         dir: studio.dir.to_string_lossy().into(),
         folders: Some(vec![studio.extra.to_string_lossy().into()]),
         sources: Some(SourceOptions {

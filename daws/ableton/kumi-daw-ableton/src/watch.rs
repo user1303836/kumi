@@ -6,10 +6,6 @@ use super::{
     project::describe_watch,
     views::{self, ViewHost},
 };
-use crate::core::{
-    contracts::{JsonObject, ToolResult},
-    errors::RuntimeError,
-};
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_common::{
     abort::{self, Signal, SignalExt},
@@ -17,6 +13,10 @@ use kumi_common::{
         json::stringify,
         number::{round, to_string},
     },
+};
+use kumi_runtime::core::{
+    contracts::{JsonObject, ToolResult},
+    errors::RuntimeError,
 };
 use serde_json::{json, Value};
 use std::{

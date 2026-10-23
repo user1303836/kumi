@@ -1,7 +1,7 @@
 //! Transport and view actions, which report activity without creating change history.
 use super::more_changes::bars;
-use crate::core::contracts::{JsonObject, TrackChip};
 use kumi_common::js::number::to_string;
+use kumi_runtime::core::contracts::{JsonObject, TrackChip};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -23,11 +23,10 @@ pub struct ActionKind {
     #[serde(default, skip_serializing)]
     pub core: bool,
 }
-pub use crate::core::plan::ActionSummary;
-impl ActionSummary {
-    fn title(title: impl Into<String>) -> Self {
-        Self { title: title.into(), playing: None, recording: None }
-    }
+pub use kumi_runtime::core::plan::ActionSummary;
+/// An action's summary with only its title.
+fn titled(title: impl Into<String>) -> ActionSummary {
+    ActionSummary { title: title.into(), playing: None, recording: None }
 }
 pub static ACTIONS: LazyLock<Vec<ActionKind>> = LazyLock::new(|| serde_json::from_str(include_str!("assets/actions.json")).unwrap());
 fn safety() -> Value {
@@ -93,7 +92,7 @@ impl ActionKind {
         let action = input.get("action").and_then(Value::as_str);
         let name = |key: &str| track(input.get(key).unwrap_or(&Value::Null)).map(|v| v.name);
         let mut result = match self.tool.as_str() {
-            "play" => ActionSummary::title(match action {
+            "play" => titled(match action {
                 Some("start") => "Playing from the start marker",
                 Some("continue") => "Playing on from where it stopped",
                 Some("stop") => "Stopped",
@@ -107,18 +106,18 @@ impl ActionKind {
                 Some("back-to-arrangement") => "Back to the Arrangement",
                 _ => "Transport",
             }),
-            "fire_scene" => ActionSummary::title("Launched a scene"),
+            "fire_scene" => titled("Launched a scene"),
             "launch_clip" => {
                 static SLOT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([0-9]+):(?:clip_slot|slot):([0-9]+):([0-9]+)").unwrap());
                 let found = input.get("slotRef").and_then(Value::as_str).and_then(|s| SLOT.captures(s));
                 let known = found.as_ref().and_then(|m| track(&json!(format!("{}:track:{}", &m[1], &m[2]))));
-                ActionSummary::title(format!(
+                titled(format!(
                     "Playing the clip in {}{}",
                     known.map(|v| v.name).unwrap_or_else(|| "its slot".into()),
                     found.map(|m| format!(", scene {}", to_string(m[3].parse::<f64>().unwrap_or(f64::INFINITY) + 1.0))).unwrap_or_default()
                 ))
             }
-            "record" => ActionSummary::title(if action == Some("start") {
+            "record" => titled(if action == Some("start") {
                 format!(
                     "Recording{}{}",
                     if input.get("lane").and_then(Value::as_str) == Some("arrangement") { " in the Arrangement" } else { "" },
@@ -127,14 +126,14 @@ impl ActionKind {
             } else {
                 "Recording stopped".into()
             }),
-            "jump_to_locator" => ActionSummary::title(
+            "jump_to_locator" => titled(
                 preview
                     .get("target")
                     .and_then(Value::as_f64)
                     .map(|n| format!("Playhead to {}", bars(n)))
                     .unwrap_or_else(|| "Playhead to the next locator".into()),
             ),
-            "select" => ActionSummary::title(name("trackRef").map(|s| format!("Selected {s}")).unwrap_or_else(|| {
+            "select" => titled(name("trackRef").map(|s| format!("Selected {s}")).unwrap_or_else(|| {
                 if input.get("detailClipRef").is_some_and(truthy) {
                     "Showing the clip"
                 } else if input.get("chainRef").is_some_and(truthy) {
@@ -147,7 +146,7 @@ impl ActionKind {
             "show" => {
                 let view =
                     input.get("view").and_then(Value::as_str).map(|s| s.replacen("Arranger", "Arrangement", 1).replacen("Detail/", "", 1));
-                ActionSummary::title(if action == Some("focus-view") && view.as_ref().is_some_and(|s| !s.is_empty()) {
+                titled(if action == Some("focus-view") && view.as_ref().is_some_and(|s| !s.is_empty()) {
                     format!("Showing the {}", view.unwrap())
                 } else {
                     format!(

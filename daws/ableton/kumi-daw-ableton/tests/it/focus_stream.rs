@@ -1,11 +1,7 @@
 use futures::FutureExt;
 use kumi_common::abort::Signal;
-use kumi_runtime::{
-    core::contracts::LiveFocus,
-    integrations::ableton::{focus::*, plan_stream::*},
-    mcp::types::CallToolResult,
-    RuntimeError,
-};
+use kumi_daw_ableton::{focus::*, plan_stream::*};
+use kumi_runtime::{core::contracts::LiveFocus, mcp::types::CallToolResult, RuntimeError};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -13,7 +9,7 @@ use std::{
     time::Duration,
 };
 fn oracle() -> Value {
-    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/focus-stream-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/focus-stream-oracle.json")).unwrap()
 }
 #[test]
 fn focus_fields_and_incremental_step_delivery_match_source_outputs() {

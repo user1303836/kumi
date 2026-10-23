@@ -23,22 +23,14 @@ use super::{
     views::ViewHost,
     watch::Watch,
 };
-use crate::{
-    core::{
-        contracts::*,
-        errors::{FailureKind, KumiError, RuntimeError},
-        timing,
-        variations::tool::Variations,
-    },
-    devices::tool::{device_tool, DeviceToolOptions, Made},
-    integrations::shared::steps,
-    mcp::allowed_tools::CallOptions,
-};
+use crate::devices::tool::{device_tool, DeviceToolOptions, Made};
+use crate::history::LiveHistory;
 use async_trait::async_trait;
 use futures::{
     future::{LocalBoxFuture, Shared},
     FutureExt,
 };
+use kumi_ai::timing;
 use kumi_common::{
     abort::{self, Signal},
     js::{
@@ -47,6 +39,12 @@ use kumi_common::{
         string::{head, utf16_len},
     },
 };
+use kumi_runtime::{
+    core::{contracts::*, variations::tool::Variations},
+    integrations::shared::steps,
+    mcp::allowed_tools::CallOptions,
+};
+use kumi_types::errors::{FailureKind, KumiError, RuntimeError};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{
@@ -377,7 +375,7 @@ impl KernelTool for LiveTool {
     fn reach(&self) -> Reach {
         if AWAY_FROM_LIVE.contains(&self.name.as_str()) {
             Reach::AwayFromDaw
-        } else if self.name == "read_notes" || crate::mcp::allowed_tools::MODEL_TOOLS.contains(&self.name.as_str()) {
+        } else if self.name == "read_notes" || kumi_runtime::mcp::allowed_tools::MODEL_TOOLS.contains(&self.name.as_str()) {
             Reach::DawRead
         } else {
             Reach::DawWrite
@@ -438,7 +436,7 @@ impl KernelTool for LiveTool {
             "make_changes" => owner.mutations.make_changes(input, signal).await,
             "watch_me" => owner.watch.execute(input, signal).await,
             "arrange" => arrange::arrange(input, &owner.mutations.arrange_host(), owner.combined(signal)).await,
-            "undo_change" => crate::integrations::shared::undo::undo_change(&owner.history, &input, signal).await,
+            "undo_change" => kumi_runtime::integrations::shared::undo::undo_change(&owner.history, &input, signal).await,
             "audition" | "judge" | "tune" | "groove" | "form" | "sound" | "render" => {
                 match owner.rendering.call(&self.name, input, signal).await {
                     Some(result) => result,
@@ -842,7 +840,7 @@ impl Integration for Ableton {
         let on = |key: &str| transport.get(key) == Some(&Value::Bool(true));
         Ok(Some(on("playing") && (on("sessionRecord") || on("arrangementRecord"))))
     }
-    async fn instant(&self, intent: &crate::core::phrases::Intent, signal: Signal) -> Result<Option<InstantOutcome>, RuntimeError> {
+    async fn instant(&self, intent: &kumi_runtime::core::phrases::Intent, signal: Signal) -> Result<Option<InstantOutcome>, RuntimeError> {
         let Some(plan) = instant::steps(intent, &self.observer.model(), self.observer.beats_per_bar.get()) else { return Ok(None) };
         // One Live call at a time, as every Live tool takes it; the plan says what it changed (final).
         let signal = self.combined(signal);

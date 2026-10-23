@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     if platform.system() != "Darwin":
         raise SystemExit("The macOS helper must be built on macOS.")
-    source = ROOT / "crates/kumi-runtime/src/integrations/ableton/hands/KumiHands.swift"
+    source = ROOT / "daws/ableton/kumi-daw-ableton/src/hands/KumiHands.swift"
     digest = hashlib.sha256(source.read_bytes()).hexdigest()[:12]
     with tempfile.TemporaryDirectory(prefix="kumi-hands-") as directory:
         slices = []

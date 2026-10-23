@@ -1,17 +1,15 @@
 use async_trait::async_trait;
 use kumi_common::{abort::Signal, js::json::stringify};
+use kumi_daw_ableton::{
+    bridge_version::at_least,
+    fold::{fold_tracks, track_line},
+};
 use kumi_runtime::{
     core::{
         contracts::*,
         errors::{FailureKind, KumiError, RuntimeError},
     },
-    integrations::{
-        ableton::{
-            bridge_version::at_least,
-            fold::{fold_tracks, track_line},
-        },
-        fallback::with_fallback,
-    },
+    integrations::fallback::with_fallback,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -20,7 +18,7 @@ use std::{
     rc::Rc,
 };
 fn fixture() -> Value {
-    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/integration-foundations-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/integration-foundations-oracle.json")).unwrap()
 }
 #[test]
 fn folded_tracks_and_version_gates_match_complete_source_outputs() {

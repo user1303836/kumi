@@ -4,15 +4,15 @@ use std::sync::Once;
 use std::time::Instant;
 
 use kumi_common::js::json::stringify;
-use kumi_runtime::devices::amxd::{decode_amxd, encode_amxd, DecodedAmxd, DeviceType};
-use kumi_runtime::devices::findings::Findings;
-use kumi_runtime::devices::gen::{
+use kumi_daw_ableton::devices::amxd::{decode_amxd, encode_amxd, DecodedAmxd, DeviceType};
+use kumi_daw_ableton::devices::findings::Findings;
+use kumi_daw_ableton::devices::gen::{
     after_functions, audio_effect_patcher, effect_code, inputs_read, instrument_patcher, param_name, voice_code, GenSpec,
 };
-use kumi_runtime::devices::harness::{check_midi_device, check_midi_device_isolated, Checked, IsolatedOptions};
-use kumi_runtime::devices::midi::{midi_device_code, midi_device_patcher};
-use kumi_runtime::devices::spec::{check_spec, kept_unrun, DeviceSpec, MidiSpec};
-use kumi_runtime::devices::tool::{device_tool, kind_folder, DeviceToolOptions, Made};
+use kumi_daw_ableton::devices::harness::{check_midi_device, check_midi_device_isolated, Checked, IsolatedOptions};
+use kumi_daw_ableton::devices::midi::{midi_device_code, midi_device_patcher};
+use kumi_daw_ableton::devices::spec::{check_spec, kept_unrun, DeviceSpec, MidiSpec};
+use kumi_daw_ableton::devices::tool::{device_tool, kind_folder, DeviceToolOptions, Made};
 use regex::Regex;
 use rquickjs::context::EvalOptions;
 use rquickjs::prelude::{Coerced, Rest};
@@ -423,7 +423,7 @@ fn what_kumi_once_refused_is_made_the_nearest_way_it_can_be_and_said() {
     assert_eq!(made.controls().iter().map(|control| control.name()).collect::<Vec<_>>(), ["Window", "Big"]);
     let said = found.changed.join("\n");
     assert!(said.contains("controls: given by name") && said.contains("unit 5 isn't text, so it shows none"), "{said}");
-    let kumi_runtime::devices::spec::Control::Number(big) = &made.controls()[1] else { panic!() };
+    let kumi_daw_ableton::devices::spec::Control::Number(big) = &made.controls()[1] else { panic!() };
     assert!(big.max > big.min, "{big:?}");
     assert!(matches(
         &findings_of(check_spec(&with(lowest(), json!({ "controls": "Rate" })))).join(" "),
@@ -1005,7 +1005,7 @@ async fn make_device_keeps_code_that_never_stops_in_the_device_without_running_i
 #[tokio::test(flavor = "current_thread")]
 async fn make_device_answers_what_maxs_objects_take_and_send_and_makes_a_device_given_beside_them() {
     use kumi_common::abort::Signal;
-    use kumi_runtime::devices::patch::page::NO_MAX;
+    use kumi_daw_ableton::devices::patch::page::NO_MAX;
     let folder = tempfile::tempdir().unwrap();
     let library = folder.path().join("library");
     let tool = tool_in(&library, Default::default());
@@ -1219,9 +1219,9 @@ async fn make_device_makes_a_device_from_a_patch_of_max_objects_and_says_whats_w
 
 #[test]
 fn kumis_own_devices_keep_its_standard_for_max_patchers() {
-    use kumi_runtime::devices::patch::check::check;
-    use kumi_runtime::devices::patch::standard::Level;
-    use kumi_runtime::devices::patch::{NoFiles, Patcher};
+    use kumi_daw_ableton::devices::patch::check::check;
+    use kumi_daw_ableton::devices::patch::standard::Level;
+    use kumi_daw_ableton::devices::patch::{NoFiles, Patcher};
     let midi = midi_device_patcher(&spec(
         json!({ "controls": [{ "name": "Window", "type": "number", "min": 1, "max": 50, "default": 15, "unit": "ms" }, { "name": "Mode", "type": "choice", "options": ["Lowest", "Highest"], "default": "Lowest" }, { "name": "Bypass Drums", "type": "switch", "default": false }] }),
     ));

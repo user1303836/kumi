@@ -5,17 +5,15 @@ use super::{
     parameters::Parameters,
     samples::{self, Sample},
 };
-use crate::{
-    core::errors::RuntimeError,
-    integrations::library_sources,
-    library::sources::{below, homedir, SourceKind, SourceOptions},
-};
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use kumi_common::{
     abort::{Signal, SignalExt},
     path::network_or_device,
 };
+use kumi_library::sources::library_sources;
+use kumi_library::sources::{below, homedir, SourceKind, SourceOptions};
+use kumi_types::errors::RuntimeError;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
@@ -62,7 +60,7 @@ struct Places {
 /// indexer) list them. It opens each, so it's read off Kumi's thread.
 fn live_places() -> Places {
     let options = SourceOptions::default();
-    let readable: Vec<String> = library_sources(&options)
+    let readable: Vec<String> = library_sources(super::library::ALONE, &options)
         .into_iter()
         .filter(|source| matches!(source.kind, SourceKind::Place | SourceKind::UserLibrary))
         .map(|source| source.path)

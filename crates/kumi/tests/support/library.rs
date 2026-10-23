@@ -146,7 +146,7 @@ impl Studio {
         Self { home, user, extra, dir }
     }
     pub fn plan(&self, workers: usize) -> kumi_runtime::library::learn::LearnPlan {
-        use kumi_runtime::integrations::library_sources;
+        use kumi::daw::registry::library_sources;
         use kumi_runtime::library::sources::SourceOptions;
         kumi_runtime::library::learn::LearnPlan {
             dir: self.dir.to_string_lossy().into(),

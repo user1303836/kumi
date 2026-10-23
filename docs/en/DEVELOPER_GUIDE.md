@@ -10,7 +10,7 @@ How the repository fits together, how to work on each part, and how to release.
 | Folder | What's in it |
 | --- | --- |
 | `crates/kumi` | The native `kumi` command and terminal app (`src/tui/`), and opt-in checks against models or real Live (`examples/`) |
-| `crates/kumi-runtime` | Agent loop, sessions, Live integration and MCP client |
+| `crates/kumi-runtime` | Agent loop, sessions, MCP client, and the integrations of the DAWs whose bridges are Kumi's own |
 | `crates/kumi-types` | The types and settings every layer names: DAW profiles and words, the agent's contracts with its tools, errors, places, the system, the version |
 | `crates/kumi-net` | How Kumi reaches the network: its HTTP clients with the system's proxies and trust, why a request got no answer, the public-only web client and a model call's error |
 | `crates/kumi-media` | Audio (decoding, analysis, matching a sound, DSP), voice input, and the programs that decode media (ffmpeg, yt-dlp, whisper.cpp) with a video's frames, captions and speech |
@@ -19,6 +19,7 @@ How the repository fits together, how to work on each part, and how to release.
 | `crates/kumi-library` | The producer's library (learning, search, presets, Sets, taste), the plug-ins' formats and roles, and finding samples on disk; each DAW says where its own library is |
 | `crates/kumi-listening` | Listening: what a listen measures, the judge and its checklist, the engine's rounds, the listening models and their slots, style references and notation; each DAW plays and renders for it |
 | `crates/kumi-common` | Shared runtime utilities and source-compatible value handling |
+| `daws/ableton/kumi-daw-ableton` | Live, host side: its integration (the Set's observation, changes and history, rendering and Kumi Ears, Hands, its library and manual) and the Max for Live device builder |
 | `daws/ableton/ableton-mcp-server` | Native MCP bridge, analysis worker, lifecycle, setup, migration and diagnostics |
 | `daws/ableton/remote-script` | The bridge's Remote Script, which runs inside Live (`ableton_mcp_remote_script.py`, the `AbletonMcpBridge/` entry point, Python tests) |
 | `daws/ableton/live-extension` | Kumi's Live extension for Live 12.4 and later, on Live's Extensions SDK (TypeScript, with its own `package.json`) |
@@ -102,7 +103,7 @@ with cargo-nextest, each in a process of its own, with a temporary home:
 npm ci --prefix crates/kumi-runtime/tests/support   # once: the official SDKs some tests run
 cargo build --locked --workspace --all-targets
 sh scripts/test-isolated.sh                 # PowerShell: ./scripts/test-isolated.ps1
-sh scripts/test-isolated.sh -p kumi-runtime -E 'test(/^hands_transport::/)'
+sh scripts/test-isolated.sh -p kumi-daw-ableton -E 'test(/^hands_transport::/)'
 python3 -m unittest discover -s scripts/tests -p 'test_*release.py'
 ```
 
@@ -125,7 +126,7 @@ models and real Live.
 ## Working on Kumi
 
 **A change family** (a kind of change with its own HISTORY row and undo) is an
-entry in `CHANGES` (`crates/kumi-runtime/src/integrations/ableton/changes.rs`).
+entry in `CHANGES` (`daws/ableton/kumi-daw-ableton/src/changes.rs`).
 Metadata comes from `assets/changes.json`; summaries live in
 `changes/summaries.rs` and `changes/more_summaries.rs`. Each entry names the Kumi
 tool, the bridge's preview and apply, a family (one of the fixed set of pictures

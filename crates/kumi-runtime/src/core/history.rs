@@ -231,13 +231,20 @@ pub struct History<H: ChangeHost> {
     pub curve_runs: RefCell<HashMap<String, CurveRun>>,
     pub changes_this_turn: Cell<usize>,
     quiet: RefCell<Option<Vec<String>>>,
-    pub(crate) timeout_ms: u64,
+    pub timeout_ms: u64,
     on_change: Option<Rc<dyn Fn(ChangeRecord)>>,
     /// What else follows a restructure Kumi's undo takes back (what the turns showed of the project's devices).
     pub on_shift: RefCell<Option<OnShift>>,
     /// What changed the DAW outside HISTORY, oldest first (code run in it, a command, its own undo): nothing a judged
     /// round can take back.
     pub outside: RefCell<Vec<&'static str>>,
+}
+/// A HISTORY reads as its host: Live's connection and its memory of the Set, or the own bridges' host.
+impl<H: ChangeHost> std::ops::Deref for History<H> {
+    type Target = H;
+    fn deref(&self) -> &H {
+        &self.host
+    }
 }
 impl<H: ChangeHost> History<H> {
     pub fn change_signal(&self) -> Signal {

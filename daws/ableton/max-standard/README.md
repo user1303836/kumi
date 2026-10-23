@@ -1,6 +1,6 @@
 # Max standard
 
-What Kumi holds Max for Live patchers to, as data. The checker is in `crates/kumi-runtime/src/devices/patch/`; it and
+What Kumi holds Max for Live patchers to, as data. The checker is in `daws/ableton/kumi-daw-ableton/src/devices/patch/`; it and
 its tests run off these files, and Kumi carries them in its binary.
 
 ```
@@ -21,7 +21,7 @@ daws/ableton/max-standard/
 ## Survey
 
 ```
-cargo run -p kumi-runtime --example max_patch_survey -- report.json --into daws/ableton/max-standard/standard.json <device or folder>...
+cargo run -p kumi-daw-ableton --example max_patch_survey -- report.json --into daws/ableton/max-standard/standard.json <device or folder>...
 ```
 
 - `--into` replaces the measured counts, it doesn't add to them: survey every device measured so far at once.

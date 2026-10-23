@@ -308,7 +308,7 @@ def archive(folder: Path, destination: Path, prefix: str, timestamp: int) -> str
     return digest(destination)
 
 def stage_hands(root: Path, bundle: Path, target: str) -> None:
-    name = "kumi-hands-" + digest(root / "crates/kumi-runtime/src/integrations/ableton/hands/KumiHands.swift")[:12]
+    name = "kumi-hands-" + digest(root / "daws/ableton/kumi-daw-ableton/src/hands/KumiHands.swift")[:12]
     hands = root / "target/hands"
     files = inventory(hands) if hands.exists() else {}
     if any(candidate != name for candidate in files):

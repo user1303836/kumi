@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_common::{abort::Signal, js::json::stringify};
+use kumi_daw_ableton::{
+    connection::{ConnectionOptions, LiveConnection},
+    project::{Baseline, ProjectStore},
+    remember::{CurrentProject, Remember},
+};
 use kumi_runtime::{
     core::{contracts::JsonObject, errors::RuntimeError},
-    integrations::ableton::{
-        connection::{ConnectionOptions, LiveConnection},
-        project::{Baseline, ProjectStore},
-        remember::{CurrentProject, Remember},
-    },
     mcp::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, Implementation, ListToolsResult},
@@ -127,7 +127,7 @@ fn eq(actual: &Value, expected: &Value, label: &str) {
 async fn saved_set_memory_export_queue_and_catch_up_match_source() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/remember-oracle.json")).unwrap();
+            let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/remember-oracle.json")).unwrap();
             for case in fixture["cases"].as_array().unwrap() {
                 let config = &case["config"];
                 let endpoint = Rc::new(Fixture {

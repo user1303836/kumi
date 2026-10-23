@@ -1,0 +1,60 @@
+[package]
+name = "kumi-daw-ableton"
+version = "0.1.0"
+description = "Kumi's Live integration: its bridge connection, the Set's observation, changes and history, rendering and Kumi Ears, Hands, Live's library and manual, and the Max for Live device builder."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+# The device harness's isolated child.
+[[bin]]
+name = "kumi-harness"
+path = "src/bin/kumi-harness.rs"
+
+[dependencies]
+kumi-ai.workspace = true
+kumi-common.workspace = true
+kumi-library.workspace = true
+kumi-listening.workspace = true
+kumi-media.workspace = true
+kumi-net.workspace = true
+kumi-runtime.workspace = true
+kumi-store.workspace = true
+kumi-types.workspace = true
+kumi-web.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+fancy-regex.workspace = true
+flate2.workspace = true
+futures.workspace = true
+hex.workspace = true
+home.workspace = true
+indexmap.workspace = true
+percent-encoding.workspace = true
+regex.workspace = true
+# Max for Live device code, run in a sandbox.
+rquickjs = { version = "0.9", features = ["bindgen", "classes", "properties"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+kumi-runtime = { workspace = true, features = ["test-support"] }
+# The GenExpr interpreter the building blocks' tests run their gen~ code in (optimized even in tests).
+kumi-genexpr.workspace = true
+kumi-media = { workspace = true, features = ["test-support"] }
+kumi-net = { workspace = true, features = ["test-support"] }
+kumi-testkit.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+# live_views reads deep Set snapshots, as the bridge does.
+serde_json = { workspace = true, features = ["unbounded_depth"] }

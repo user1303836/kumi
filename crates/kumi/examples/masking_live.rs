@@ -16,13 +16,12 @@ use kumi_common::{
     js::string::{head, trim},
     time::now_ms,
 };
+use kumi_daw_ableton::{connection::Connect, create_ableton_integration, AbletonOptions, BRIDGE_TOOLS};
 use kumi_runtime::{
     core::contracts::{ActionEvent, ChangeState},
-    create_ableton_integration,
-    integrations::ableton::{connection::Connect, AbletonOptions},
     mcp::client,
     system::Env,
-    ChangeRecord, Integration, JsonObject, KernelTool, Observation, RuntimeError, BRIDGE_TOOLS,
+    ChangeRecord, Integration, JsonObject, KernelTool, Observation, RuntimeError,
 };
 use serde_json::{json, Value};
 use std::{

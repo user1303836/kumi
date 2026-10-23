@@ -16,9 +16,9 @@ use crate::{
     spinner::step,
     update::{newer, UpdateIo},
 };
+use kumi_daw_ableton::ears::device::EARS_NAME;
 use kumi_runtime::{
     core::errors::RuntimeError,
-    ears::device::EARS_NAME,
     library::sources::{basename, dirname, join, resolve},
     system::{self, Env},
     CONNECT_LIVE, KUMI,

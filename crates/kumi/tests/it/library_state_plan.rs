@@ -127,7 +127,7 @@ async fn plan_reads_bounded_project_records_remembers_folders_and_excludes_pack_
     put(&dir.join("folders.json"), json!([remembered, null, 12]).to_string());
     assert_eq!(remembered_folders(dir.to_str().unwrap()).await, vec![remembered.to_string_lossy()]);
     let options = PlanOptions {
-        daws: kumi_runtime::integrations::LIBRARIES,
+        daws: kumi::daw::registry::LIBRARIES,
         dir: dir.to_string_lossy().into(),
         folders: Some(vec![named.to_string_lossy().into()]),
         projects_dir: Some(projects.to_string_lossy().into()),

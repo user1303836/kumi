@@ -254,7 +254,7 @@ fn automation(preview: &JsonObject, input: &JsonObject) -> Option<ChangePicture>
     Some(ChangePicture::Automation { parameter: String::new(), min, max, before, after, words: None })
 }
 
-pub use crate::core::picture::{amount, asked_apart, name_lane, CurveReader, ParameterRow};
+pub use kumi_types::picture::{amount, asked_apart, name_lane, CurveReader, ParameterRow};
 
 /// One of a Live device's parameters, as the bridge reads it.
 pub fn parameter_row(row: &JsonObject) -> Option<ParameterRow> {
@@ -282,7 +282,7 @@ impl CurveReader for LiveCurves {
 /// Each change's curve on a Live device (core's `curves`), as the unit tests below draw it.
 #[cfg(test)]
 pub fn curves(read: &[ParameterRow], changes: &[(String, Vec<PictureValue>)]) -> Vec<(String, ChangePicture)> {
-    crate::core::picture::curves(&LiveCurves, read, changes)
+    kumi_types::picture::curves(&LiveCurves, read, changes)
 }
 
 /// The curves one read of a Live device gives the changes it was for (core's `curves_for`).
@@ -292,7 +292,7 @@ pub fn curves_for(
     newer: &[(String, Vec<PictureValue>)],
     applied: impl Fn(&str) -> bool,
 ) -> Vec<(String, ChangePicture)> {
-    crate::core::picture::curves_for(&LiveCurves, read, ours, newer, applied)
+    kumi_types::picture::curves_for(&LiveCurves, read, ours, newer, applied)
 }
 
 /// Whether a parameter of this name may be an equaliser's or a compressor's: worth reading its device's others for

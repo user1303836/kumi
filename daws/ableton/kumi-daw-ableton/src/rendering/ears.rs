@@ -5,6 +5,7 @@ use crate::ears::{
     device::{install_ears, EARS_ITEM},
     link::{open_ears_link, EarsOptions, Tap},
 };
+use crate::references::LiveBook;
 use regex::Regex;
 use std::path::Path;
 /// How long a listening device that couldn't be set up is left alone: one wait (up to about 9 s) each

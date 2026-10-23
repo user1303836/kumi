@@ -2118,3 +2118,1445 @@ to = "kumi_listening::slots"
 [[rust]]
 from = "kumi_runtime::notation"
 to = "kumi_listening::notation"
+
+# kumi-daw-ableton: Live, host side; the app takes the DAWs' registry and the tests of the DAWs together (2026-10).
+
+[[move]]
+from = "crates/kumi-runtime/examples/max_patch_survey.rs"
+to = "daws/ableton/kumi-daw-ableton/examples/max_patch_survey.rs"
+
+[[move]]
+from = "crates/kumi-runtime/examples/plugin_format_survey.rs"
+to = "daws/ableton/kumi-daw-ableton/examples/plugin_format_survey.rs"
+
+[[move]]
+from = "crates/kumi-runtime/examples/time_observation.rs"
+to = "daws/ableton/kumi-daw-ableton/examples/time_observation.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/bin/kumi-harness.rs"
+to = "daws/ableton/kumi-daw-ableton/src/bin/kumi-harness.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/bin/kumi-library-learner.rs"
+to = "crates/kumi/src/bin/kumi-library-learner.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/bin/kumi-library-measure.rs"
+to = "crates/kumi/src/bin/kumi-library-measure.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/devices/amxd.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/amxd.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/action_execution.rs"
+to = "daws/ableton/kumi-daw-ableton/src/action_execution.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/actions.rs"
+to = "daws/ableton/kumi-daw-ableton/src/actions.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/arrange-data.json"
+to = "daws/ableton/kumi-daw-ableton/src/arrange-data.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/arrange.rs"
+to = "daws/ableton/kumi-daw-ableton/src/arrange.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/arrange/compile.rs"
+to = "daws/ableton/kumi-daw-ableton/src/arrange/compile.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/arrange/run.rs"
+to = "daws/ableton/kumi-daw-ableton/src/arrange/run.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/actions.json"
+to = "daws/ableton/kumi-daw-ableton/src/assets/actions.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/changes.json"
+to = "daws/ableton/kumi-daw-ableton/src/assets/changes.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/device-knobs.py"
+to = "daws/ableton/kumi-daw-ableton/src/assets/device-knobs.py"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/display-map.py"
+to = "daws/ableton/kumi-daw-ableton/src/assets/display-map.py"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/fast-find.py"
+to = "daws/ableton/kumi-daw-ableton/src/assets/fast-find.py"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/fast-revert.py"
+to = "daws/ableton/kumi-daw-ableton/src/assets/fast-revert.py"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/fast-set.py"
+to = "daws/ableton/kumi-daw-ableton/src/assets/fast-set.py"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/fields.json"
+to = "daws/ableton/kumi-daw-ableton/src/assets/fields.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/instructions.txt"
+to = "daws/ableton/kumi-daw-ableton/src/assets/instructions.txt"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/live-command.json"
+to = "daws/ableton/kumi-daw-ableton/src/assets/live-command.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/map-modulator.py"
+to = "daws/ableton/kumi-daw-ableton/src/assets/map-modulator.py"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/moved-places.py"
+to = "daws/ableton/kumi-daw-ableton/src/assets/moved-places.py"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/parents.json"
+to = "daws/ableton/kumi-daw-ableton/src/assets/parents.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/plugin-tool.json"
+to = "daws/ableton/kumi-daw-ableton/src/assets/plugin-tool.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/public-tools.json"
+to = "daws/ableton/kumi-daw-ableton/src/assets/public-tools.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/snapshots.py"
+to = "daws/ableton/kumi-daw-ableton/src/assets/snapshots.py"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/assets/tune-copies.py"
+to = "daws/ableton/kumi-daw-ableton/src/assets/tune-copies.py"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/audition.rs"
+to = "daws/ableton/kumi-daw-ableton/src/audition.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/bridge_version.rs"
+to = "daws/ableton/kumi-daw-ableton/src/bridge_version.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/catalog.rs"
+to = "daws/ableton/kumi-daw-ableton/src/catalog.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/change_context.rs"
+to = "daws/ableton/kumi-daw-ableton/src/change_context.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/changes.rs"
+to = "daws/ableton/kumi-daw-ableton/src/changes.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/changes/more_summaries.rs"
+to = "daws/ableton/kumi-daw-ableton/src/changes/more_summaries.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/changes/pictures.rs"
+to = "daws/ableton/kumi-daw-ableton/src/changes/pictures.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/changes/summaries.rs"
+to = "daws/ableton/kumi-daw-ableton/src/changes/summaries.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/command_tools.rs"
+to = "daws/ableton/kumi-daw-ableton/src/command_tools.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/command_tools/conversions.rs"
+to = "daws/ableton/kumi-daw-ableton/src/command_tools/conversions.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/concurrent.rs"
+to = "daws/ableton/kumi-daw-ableton/src/concurrent.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/connection.rs"
+to = "daws/ableton/kumi-daw-ableton/src/connection.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/context.rs"
+to = "daws/ableton/kumi-daw-ableton/src/context.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/cuts.rs"
+to = "daws/ableton/kumi-daw-ableton/src/cuts.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/face.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/face.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/findings.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/findings.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/gen.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/gen.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/harness.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/harness.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/harness_child.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/harness_child.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/kit/clock.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/kit/clock.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/kit/mod.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/kit/mod.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/look.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/look.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/mapping.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/mapping.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/midi.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/midi.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/mod.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/mod.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/patch/catalog.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/patch/catalog.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/patch/check.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/patch/check.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/patch/code.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/patch/code.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/patch/frozen.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/patch/frozen.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/patch/geometry.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/patch/geometry.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/patch/layout.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/patch/layout.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/patch/measure.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/patch/measure.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/patch/mod.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/patch/mod.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/patch/notation.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/patch/notation.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/patch/page.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/patch/page.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/patch/reference.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/patch/reference.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/patch/standard.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/patch/standard.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/patched.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/patched.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/spec.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/spec.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/tool-data.json"
+to = "daws/ableton/kumi-daw-ableton/src/devices/tool-data.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/devices/tool.rs"
+to = "daws/ableton/kumi-daw-ableton/src/devices/tool.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/display.rs"
+to = "daws/ableton/kumi-daw-ableton/src/display.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/ears/capture.rs"
+to = "daws/ableton/kumi-daw-ableton/src/ears/capture.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/ears/device-patcher.json"
+to = "daws/ableton/kumi-daw-ableton/src/ears/device-patcher.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/ears/device.rs"
+to = "daws/ableton/kumi-daw-ableton/src/ears/device.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/ears/link.rs"
+to = "daws/ableton/kumi-daw-ableton/src/ears/link.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/ears/mod.rs"
+to = "daws/ableton/kumi-daw-ableton/src/ears/mod.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/ears/osc.rs"
+to = "daws/ableton/kumi-daw-ableton/src/ears/osc.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/execution_services.rs"
+to = "daws/ableton/kumi-daw-ableton/src/execution_services.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/fast.rs"
+to = "daws/ableton/kumi-daw-ableton/src/fast.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/focus.rs"
+to = "daws/ableton/kumi-daw-ableton/src/focus.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/fold.rs"
+to = "daws/ableton/kumi-daw-ableton/src/fold.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/hands/KumiHands.swift"
+to = "daws/ableton/kumi-daw-ableton/src/hands/KumiHands.swift"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/hands/kumi-hands.ps1"
+to = "daws/ableton/kumi-daw-ableton/src/hands/kumi-hands.ps1"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/hands/mac.rs"
+to = "daws/ableton/kumi-daw-ableton/src/hands/mac.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/hands/mod.rs"
+to = "daws/ableton/kumi-daw-ableton/src/hands/mod.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/hands/paths.rs"
+to = "daws/ableton/kumi-daw-ableton/src/hands/paths.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/hands/windows.rs"
+to = "daws/ableton/kumi-daw-ableton/src/hands/windows.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/history.rs"
+to = "daws/ableton/kumi-daw-ableton/src/history.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/inference.rs"
+to = "daws/ableton/kumi-daw-ableton/src/inference.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/instant.rs"
+to = "daws/ableton/kumi-daw-ableton/src/instant.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/integration.rs"
+to = "daws/ableton/kumi-daw-ableton/src/integration.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/judge_tool.rs"
+to = "daws/ableton/kumi-daw-ableton/src/judge_tool.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/library.rs"
+to = "daws/ableton/kumi-daw-ableton/src/library.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/live_command.rs"
+to = "daws/ableton/kumi-daw-ableton/src/live_command.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/live_set.rs"
+to = "daws/ableton/kumi-daw-ableton/src/live_set.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/manual.rs"
+to = "daws/ableton/kumi-daw-ableton/src/manual.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/mod.rs"
+to = "daws/ableton/kumi-daw-ableton/src/lib.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/modulation.rs"
+to = "daws/ableton/kumi-daw-ableton/src/modulation.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/more-change-tools.json"
+to = "daws/ableton/kumi-daw-ableton/src/more-change-tools.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/more_changes.rs"
+to = "daws/ableton/kumi-daw-ableton/src/more_changes.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/mutations.rs"
+to = "daws/ableton/kumi-daw-ableton/src/mutations.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/notes.rs"
+to = "daws/ableton/kumi-daw-ableton/src/notes.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/observation.rs"
+to = "daws/ableton/kumi-daw-ableton/src/observation.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/options.rs"
+to = "daws/ableton/kumi-daw-ableton/src/options.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/parameters.rs"
+to = "daws/ableton/kumi-daw-ableton/src/parameters.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/pins.rs"
+to = "daws/ableton/kumi-daw-ableton/src/pins.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/plan_execution.rs"
+to = "daws/ableton/kumi-daw-ableton/src/plan_execution.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/plan_stream.rs"
+to = "daws/ableton/kumi-daw-ableton/src/plan_stream.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/plugin_tool.rs"
+to = "daws/ableton/kumi-daw-ableton/src/plugin_tool.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/presentation.rs"
+to = "daws/ableton/kumi-daw-ableton/src/presentation.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/project.rs"
+to = "daws/ableton/kumi-daw-ableton/src/project.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/references.rs"
+to = "daws/ableton/kumi-daw-ableton/src/references.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/remember.rs"
+to = "daws/ableton/kumi-daw-ableton/src/remember.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/rendering.rs"
+to = "daws/ableton/kumi-daw-ableton/src/rendering.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/rendering/ears.rs"
+to = "daws/ableton/kumi-daw-ableton/src/rendering/ears.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/rendering/ears_pass.rs"
+to = "daws/ableton/kumi-daw-ableton/src/rendering/ears_pass.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/rendering/goal.rs"
+to = "daws/ableton/kumi-daw-ableton/src/rendering/goal.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/rendering/groove.rs"
+to = "daws/ableton/kumi-daw-ableton/src/rendering/groove.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/rendering/host.rs"
+to = "daws/ableton/kumi-daw-ableton/src/rendering/host.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/rendering/judge.rs"
+to = "daws/ableton/kumi-daw-ableton/src/rendering/judge.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/rendering/listen.rs"
+to = "daws/ableton/kumi-daw-ableton/src/rendering/listen.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/rendering/main_chain.rs"
+to = "daws/ableton/kumi-daw-ableton/src/rendering/main_chain.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/rendering/pass.rs"
+to = "daws/ableton/kumi-daw-ableton/src/rendering/pass.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/rendering/probe.rs"
+to = "daws/ableton/kumi-daw-ableton/src/rendering/probe.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/rendering/rig.rs"
+to = "daws/ableton/kumi-daw-ableton/src/rendering/rig.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/rendering/roles.rs"
+to = "daws/ableton/kumi-daw-ableton/src/rendering/roles.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/rendering/tune.rs"
+to = "daws/ableton/kumi-daw-ableton/src/rendering/tune.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/samples.rs"
+to = "daws/ableton/kumi-daw-ableton/src/samples.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/set_model.rs"
+to = "daws/ableton/kumi-daw-ableton/src/set_model.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/snapshots.rs"
+to = "daws/ableton/kumi-daw-ableton/src/snapshots.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/track_ids.rs"
+to = "daws/ableton/kumi-daw-ableton/src/track_ids.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/variations.rs"
+to = "daws/ableton/kumi-daw-ableton/src/variations.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/views.rs"
+to = "daws/ableton/kumi-daw-ableton/src/views.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/watch.rs"
+to = "daws/ableton/kumi-daw-ableton/src/watch.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/integrations/ableton/willington.rs"
+to = "daws/ableton/kumi-daw-ableton/src/willington.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/full/message.txt"
+to = "crates/kumi/tests/goldens/first-request/full/message.txt"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/full/messages.json"
+to = "crates/kumi/tests/goldens/first-request/full/messages.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/full/meta.json"
+to = "crates/kumi/tests/goldens/first-request/full/meta.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/full/sent.json"
+to = "crates/kumi/tests/goldens/first-request/full/sent.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/full/system.txt"
+to = "crates/kumi/tests/goldens/first-request/full/system.txt"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/full/tools.json"
+to = "crates/kumi/tests/goldens/first-request/full/tools.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/minimal/message.txt"
+to = "crates/kumi/tests/goldens/first-request/minimal/message.txt"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/minimal/messages.json"
+to = "crates/kumi/tests/goldens/first-request/minimal/messages.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/minimal/meta.json"
+to = "crates/kumi/tests/goldens/first-request/minimal/meta.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/minimal/sent.json"
+to = "crates/kumi/tests/goldens/first-request/minimal/sent.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/minimal/system.txt"
+to = "crates/kumi/tests/goldens/first-request/minimal/system.txt"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/minimal/tools.json"
+to = "crates/kumi/tests/goldens/first-request/minimal/tools.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/newest-bridge/message.txt"
+to = "crates/kumi/tests/goldens/first-request/newest-bridge/message.txt"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/newest-bridge/messages.json"
+to = "crates/kumi/tests/goldens/first-request/newest-bridge/messages.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/newest-bridge/meta.json"
+to = "crates/kumi/tests/goldens/first-request/newest-bridge/meta.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/newest-bridge/sent.json"
+to = "crates/kumi/tests/goldens/first-request/newest-bridge/sent.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/newest-bridge/system.txt"
+to = "crates/kumi/tests/goldens/first-request/newest-bridge/system.txt"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/newest-bridge/tools.json"
+to = "crates/kumi/tests/goldens/first-request/newest-bridge/tools.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/oldest-bridge/message.txt"
+to = "crates/kumi/tests/goldens/first-request/oldest-bridge/message.txt"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/oldest-bridge/messages.json"
+to = "crates/kumi/tests/goldens/first-request/oldest-bridge/messages.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/oldest-bridge/meta.json"
+to = "crates/kumi/tests/goldens/first-request/oldest-bridge/meta.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/oldest-bridge/sent.json"
+to = "crates/kumi/tests/goldens/first-request/oldest-bridge/sent.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/oldest-bridge/system.txt"
+to = "crates/kumi/tests/goldens/first-request/oldest-bridge/system.txt"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/oldest-bridge/tools.json"
+to = "crates/kumi/tests/goldens/first-request/oldest-bridge/tools.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/willington-off/message.txt"
+to = "crates/kumi/tests/goldens/first-request/willington-off/message.txt"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/willington-off/messages.json"
+to = "crates/kumi/tests/goldens/first-request/willington-off/messages.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/willington-off/meta.json"
+to = "crates/kumi/tests/goldens/first-request/willington-off/meta.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/willington-off/sent.json"
+to = "crates/kumi/tests/goldens/first-request/willington-off/sent.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/willington-off/system.txt"
+to = "crates/kumi/tests/goldens/first-request/willington-off/system.txt"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/willington-off/tools.json"
+to = "crates/kumi/tests/goldens/first-request/willington-off/tools.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/without-live/message.txt"
+to = "crates/kumi/tests/goldens/first-request/without-live/message.txt"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/without-live/messages.json"
+to = "crates/kumi/tests/goldens/first-request/without-live/messages.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/without-live/meta.json"
+to = "crates/kumi/tests/goldens/first-request/without-live/meta.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/without-live/sent.json"
+to = "crates/kumi/tests/goldens/first-request/without-live/sent.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/without-live/system.txt"
+to = "crates/kumi/tests/goldens/first-request/without-live/system.txt"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/without-live/tools.json"
+to = "crates/kumi/tests/goldens/first-request/without-live/tools.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/worker/message.txt"
+to = "crates/kumi/tests/goldens/first-request/worker/message.txt"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/worker/messages.json"
+to = "crates/kumi/tests/goldens/first-request/worker/messages.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/worker/meta.json"
+to = "crates/kumi/tests/goldens/first-request/worker/meta.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/worker/sent.json"
+to = "crates/kumi/tests/goldens/first-request/worker/sent.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/worker/system.txt"
+to = "crates/kumi/tests/goldens/first-request/worker/system.txt"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/first-request/worker/tools.json"
+to = "crates/kumi/tests/goldens/first-request/worker/tools.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/conversations/a2dfd5f2cf329c593c5fdc7448524087/conversations/mgj6k3cw0a0b0c.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/conversations/a2dfd5f2cf329c593c5fdc7448524087/conversations/mgj6k3cw0a0b0c.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/conversations/a2dfd5f2cf329c593c5fdc7448524087/conversations/mgj6wybk1a2b3c.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/conversations/a2dfd5f2cf329c593c5fdc7448524087/conversations/mgj6wybk1a2b3c.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/conversations/a2dfd5f2cf329c593c5fdc7448524087/conversations/mgj6wybk1a2b3c.meta"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/conversations/a2dfd5f2cf329c593c5fdc7448524087/conversations/mgj6wybk1a2b3c.meta"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/conversations/a2dfd5f2cf329c593c5fdc7448524087/current"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/conversations/a2dfd5f2cf329c593c5fdc7448524087/current"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/conversations/a2dfd5f2cf329c593c5fdc7448524087/last-seen.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/conversations/a2dfd5f2cf329c593c5fdc7448524087/last-seen.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/conversations/a2dfd5f2cf329c593c5fdc7448524087/track-ids.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/conversations/a2dfd5f2cf329c593c5fdc7448524087/track-ids.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/conversations/conversation-index.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/conversations/conversation-index.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/conversations/imported/conversations/mgj7mo8w3c4d5e.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/conversations/imported/conversations/mgj7mo8w3c4d5e.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/conversations/imported/conversations/mgj7mo8w3c4d5e.meta"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/conversations/imported/conversations/mgj7mo8w3c4d5e.meta"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/conversations/imported/current"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/conversations/imported/current"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/conversations/unsaved/conversations/mgj79ta82b3c4d.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/conversations/unsaved/conversations/mgj79ta82b3c4d.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/conversations/unsaved/current"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/conversations/unsaved/current"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/goals/goals/a2dfd5f2cf329c593c5fdc7448524087-2ed684ef6f57.goal.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/goals/goals/a2dfd5f2cf329c593c5fdc7448524087-2ed684ef6f57.goal.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/goals/goals/a2dfd5f2cf329c593c5fdc7448524087-2ed684ef6f57.jobs.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/goals/goals/a2dfd5f2cf329c593c5fdc7448524087-2ed684ef6f57.jobs.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/goals/goals/a2dfd5f2cf329c593c5fdc7448524087.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/goals/goals/a2dfd5f2cf329c593c5fdc7448524087.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/goals/goals/unsaved_7f3a-59ab11b0e023.goal.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/goals/goals/unsaved_7f3a-59ab11b0e023.goal.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/kumi-db/rows.jsonl"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/kumi-db/rows.jsonl"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/learned/playbook.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/learned/playbook.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/learned/recipes/dark-reese-bass.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/learned/recipes/dark-reese-bass.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/learned/recipes/sidechain-pump.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/learned/recipes/sidechain-pump.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/learned/techniques.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/learned/techniques.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/library/library/sets.jsonl"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/library/library/sets.jsonl"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/logs/gaps.jsonl"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/logs/gaps.jsonl"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/logs/timings.jsonl"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/logs/timings.jsonl"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/memory/memory.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/memory/memory.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/persisted/memory/projects/a2dfd5f2cf329c593c5fdc7448524087/memory.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/persisted/memory/projects/a2dfd5f2cf329c593c5fdc7448524087/memory.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/session/connection.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/session/connection.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/session/fallback.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/session/fallback.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/session/goal.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/session/goal.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/session/inference_only.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/session/inference_only.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/session/knob_search.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/session/knob_search.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/session/session_texts.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/session/session_texts.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/session/set_changed.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/session/set_changed.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/gaps.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/gaps.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/goal_mode.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/goal_mode.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/hands.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/hands.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/jobs.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/jobs.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/jobs_session.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/jobs_session.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/judging.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/judging.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/kernel.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/kernel.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/listening.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/listening.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/local.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/local.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/loop.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/loop.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/match.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/match.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/memory.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/memory.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/plugins.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/plugins.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/reaction.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/reaction.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/recall.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/recall.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/recipes.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/recipes.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/techniques.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/techniques.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/goldens/texts/video.json"
+to = "daws/ableton/kumi-daw-ableton/tests/goldens/texts/video.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/ableton_values.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/ableton_values.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/actions.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/actions.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/agent.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/agent.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/arrange.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/arrange.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/audition_menu.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/audition_menu.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/bridge_start.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/bridge_start.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/changes.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/changes.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/copies_script.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/copies_script.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/devices.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/devices.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/fake_daw_session.rs"
+to = "crates/kumi/tests/it/fake_daw_session.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/focus_stream.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/focus_stream.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/groove.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/groove.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/hands_transport.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/hands_transport.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/heard.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/heard.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/integration_foundations.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/integration_foundations.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/jobs.rs"
+to = "crates/kumi/tests/it/jobs.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/judging.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/judging.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/library_daws.rs"
+to = "crates/kumi/tests/it/library_daws.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/library_features.rs"
+to = "crates/kumi/tests/it/library_features.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/library_handle.rs"
+to = "crates/kumi/tests/it/library_handle.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/library_learn.rs"
+to = "crates/kumi/tests/it/library_learn.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/library_learner.rs"
+to = "crates/kumi/tests/it/library_learner.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/library_manual.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/library_manual.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/library_room.rs"
+to = "crates/kumi/tests/it/library_room.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/library_search.rs"
+to = "crates/kumi/tests/it/library_search.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/library_state_plan.rs"
+to = "crates/kumi/tests/it/library_state_plan.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/library_stop.rs"
+to = "crates/kumi/tests/it/library_stop.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/library_tools.rs"
+to = "crates/kumi/tests/it/library_tools.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/listening.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/listening.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/live_away.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/live_away.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/live_command_tools.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/live_command_tools.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/live_connection.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/live_connection.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/live_conversions.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/live_conversions.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/live_history.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/live_history.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/live_integration.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/live_integration.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/live_mutations.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/live_mutations.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/live_observation.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/live_observation.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/live_parameters.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/live_parameters.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/live_remember.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/live_remember.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/live_rendering.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/live_rendering.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/live_snapshots.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/live_snapshots.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/live_views.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/live_views.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/loop_run.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/loop_run.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/media_foundations.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/media_foundations.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/notation_tools.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/notation_tools.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/older_bridge.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/older_bridge.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/own_daw_places.rs"
+to = "crates/kumi/tests/it/own_daw_places.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/pin_first_request.rs"
+to = "crates/kumi/tests/it/pin_first_request.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/pin_persisted.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/pin_persisted.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/pin_session_texts.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/pin_session_texts.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/pin_texts.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/pin_texts.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/plan_refusals.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/plan_refusals.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/project_identity.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/project_identity.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/project_runtime.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/project_runtime.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/project_watch_cost.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/project_watch_cost.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/references.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/references.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/samples.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/samples.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/session.rs"
+to = "crates/kumi/tests/it/session.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/set_model.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/set_model.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/set_reuse.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/set_reuse.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/snapshot_scripts.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/snapshot_scripts.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/take_lanes.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/take_lanes.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/track_ids.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/track_ids.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/tune.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/tune.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/willington_instructions.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/it/willington_instructions.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/change_pictures.rs"
+to = "daws/ableton/kumi-daw-ableton/tests/support/change_pictures.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/fast-live.py"
+to = "daws/ableton/kumi-daw-ableton/tests/support/fast-live.py"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/library.rs"
+to = "crates/kumi/tests/support/library.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/library_fixture_paths.rs"
+to = "crates/kumi/tests/support/library_fixture_paths.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/live-transport.json"
+to = "daws/ableton/kumi-daw-ableton/tests/support/live-transport.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/media/analysis-reference.json"
+to = "daws/ableton/kumi-daw-ableton/tests/support/media/analysis-reference.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/snapshot-live.py"
+to = "daws/ableton/kumi-daw-ableton/tests/support/snapshot-live.py"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/ableton-values-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/ableton-values-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/actions-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/actions-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/arrange-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/arrange-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/audition-menu-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/audition-menu-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/change-summaries-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/change-summaries-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/changes-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/changes-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/command-tools-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/command-tools-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/connection-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/connection-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/focus-stream-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/focus-stream-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/history-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/history-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/integration-foundations-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/integration-foundations-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/library-features-oracle.json"
+to = "testdata/oracles/kumi/library-features-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/library-learn-oracle.json"
+to = "testdata/oracles/kumi/library-learn-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/library-manual-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/library-manual-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/library-search-oracle.json"
+to = "testdata/oracles/kumi/library-search-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/library-tools-oracle.json"
+to = "testdata/oracles/kumi/library-tools-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/mutations-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/mutations-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/observation-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/observation-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/parameters-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/parameters-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/project-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/project-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/public-tools-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/public-tools-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/references-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/references-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/remember-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/remember-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/rendering-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/rendering-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/samples-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/samples-oracle.json"
+
+[[move]]
+from = "testdata/oracles/kumi-runtime/views-oracle.json"
+to = "testdata/oracles/kumi-daw-ableton/views-oracle.json"
+
+[[rust]]
+from = "kumi_runtime::integrations::ableton"
+to = "kumi_daw_ableton"
+
+[[rust]]
+from = "kumi_runtime::integrations::live_devices"
+to = "kumi_daw_ableton::devices"
+
+[[rust]]
+from = "kumi_runtime::integrations::live_set"
+to = "kumi_daw_ableton::live_set"
+
+[[rust]]
+from = "kumi_runtime::integrations::live_manual"
+to = "kumi_daw_ableton::manual"
+
+[[rust]]
+from = "kumi_runtime::integrations::live_main_chain"
+to = "kumi_daw_ableton::rendering::main_chain"
+
+[[rust]]
+from = "kumi_runtime::integrations::ears"
+to = "kumi_daw_ableton::ears"
+
+[[rust]]
+from = "kumi_runtime::integrations::hands"
+to = "kumi_daw_ableton::hands"
+
+[[rust]]
+from = "kumi_runtime::integrations::parse_focus"
+to = "kumi_daw_ableton::focus::parse_focus"
+
+[[rust]]
+from = "kumi_runtime::integrations::create_ableton_integration"
+to = "kumi_daw_ableton::create_ableton_integration"
+
+[[rust]]
+from = "kumi_runtime::integrations::create_inference_only_integration"
+to = "kumi_daw_ableton::create_inference_only_integration"
+
+[[rust]]
+from = "kumi_runtime::integrations::BRIDGE_TOOLS"
+to = "kumi_daw_ableton::BRIDGE_TOOLS"
+
+[[rust]]
+from = "kumi_runtime::integrations::REGISTERED"
+to = "kumi::daw::registry::REGISTERED"
+
+[[rust]]
+from = "kumi_runtime::integrations::PLACES"
+to = "kumi::daw::registry::PLACES"
+
+[[rust]]
+from = "kumi_runtime::integrations::profile"
+to = "kumi::daw::registry::profile"
+
+[[rust]]
+from = "kumi_runtime::integrations::presentation"
+to = "kumi::daw::registry::presentation"
+
+[[rust]]
+from = "kumi_runtime::integrations::view"
+to = "kumi::daw::registry::view"
+
+[[rust]]
+from = "kumi_runtime::integrations::LIBRARIES"
+to = "kumi::daw::registry::LIBRARIES"
+
+[[rust]]
+from = "kumi_runtime::integrations::library_sources"
+to = "kumi::daw::registry::library_sources"
+
+[[rust]]
+from = "kumi_runtime::integrations::recent_projects"
+to = "kumi::daw::registry::recent_projects"
+
+[[rust]]
+from = "kumi_runtime::ears"
+to = "kumi_daw_ableton::ears"
+
+[[rust]]
+from = "kumi_runtime::hands"
+to = "kumi_daw_ableton::hands"
+
+[[rust]]
+from = "kumi_runtime::devices"
+to = "kumi_daw_ableton::devices"
+
+[[rust]]
+from = "kumi_runtime::create_ableton_integration"
+to = "kumi_daw_ableton::create_ableton_integration"
+
+[[rust]]
+from = "kumi_runtime::create_inference_only_integration"
+to = "kumi_daw_ableton::create_inference_only_integration"
+
+[[rust]]
+from = "kumi_runtime::parse_focus"
+to = "kumi_daw_ableton::focus::parse_focus"
+
+[[rust]]
+from = "kumi_runtime::BRIDGE_TOOLS"
+to = "kumi_daw_ableton::BRIDGE_TOOLS"
+
+[[rust]]
+from = "kumi_runtime::install_ears"
+to = "kumi_daw_ableton::ears::device::install_ears"
+
+[[rust]]
+from = "kumi_runtime::EARS_NAME"
+to = "kumi_daw_ableton::ears::device::EARS_NAME"
+
+[[rust]]
+from = "kumi_runtime::can_build_hands"
+to = "kumi_daw_ableton::hands::can_build_hands"
+
+[[rust]]
+from = "kumi_runtime::open_hands"
+to = "kumi_daw_ableton::hands::open_hands"
+
+[[rust]]
+from = "kumi_runtime::Hands"
+to = "kumi_daw_ableton::hands::Hands"
+
+[[rust]]
+from = "kumi_runtime::MANUAL_TOOL"
+to = "kumi_daw_ableton::manual::MANUAL_TOOL"
+
+[[rust]]
+from = "kumi_runtime::library_sources"
+to = "kumi::daw::registry::library_sources"

@@ -9,8 +9,8 @@ use super::{
     snapshots::{capture, Captured, KeptClip, Material, Remnant},
     views::ViewHost,
 };
-use crate::core::contracts::JsonObject;
 use kumi_common::abort::Signal;
+use kumi_runtime::core::contracts::JsonObject;
 use serde_json::{json, Value};
 
 /// The most later clips an audio clip laid over others is read with (its length shows only once it's made).

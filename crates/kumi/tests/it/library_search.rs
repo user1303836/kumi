@@ -21,7 +21,7 @@ fn normalized(value: impl Serialize) -> Value {
 async fn rankings_explanations_float32_similarity_and_rows_match_typescript() {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("Nested")).unwrap();
-    let fixture = library_fixture_paths::load(&kumi_testkit::oracle("kumi-runtime/library-search-oracle.json"), root.path());
+    let fixture = library_fixture_paths::load(&kumi_testkit::oracle("kumi/library-search-oracle.json"), root.path());
     let entries: Vec<SoundEntry> = serde_json::from_value(fixture["entries"].clone()).unwrap();
     let sources: Vec<Source> = serde_json::from_value(fixture["sources"].clone()).unwrap();
     let index = SoundIndex::new(entries.clone(), &sources);
@@ -94,7 +94,7 @@ fn a_place_at_a_drive_or_share_root_holds_its_sounds() {
 }
 #[test]
 fn a_folder_named_in_another_case_is_one_place() {
-    use kumi_runtime::integrations::library_sources;
+    use kumi::daw::registry::library_sources;
     use kumi_runtime::library::sources::{on_disk, SourceOptions};
     let root = tempfile::tempdir().unwrap();
     let real = root.path().join("Music").join("Samples");

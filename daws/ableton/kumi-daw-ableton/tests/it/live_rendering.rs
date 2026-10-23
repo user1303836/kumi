@@ -7,19 +7,20 @@ use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
 };
-use kumi_runtime::ears::link::{Armed, EarsError, EarsLink, Tap, Transport, Written};
+use kumi_daw_ableton::ears::link::{Armed, EarsError, EarsLink, Tap, Transport, Written};
+use kumi_daw_ableton::history::LiveHistory;
+use kumi_daw_ableton::{
+    connection::LiveConnection,
+    history::History,
+    mutations::Mutations,
+    observation::Observer,
+    options::{AbletonOptions, EarsSetup},
+    parameters::Parameters,
+    remember::{CurrentProject, Remember},
+    rendering::Rendering,
+};
 use kumi_runtime::{
     core::{contracts::*, errors::RuntimeError},
-    integrations::ableton::{
-        connection::LiveConnection,
-        history::History,
-        mutations::Mutations,
-        observation::Observer,
-        options::{AbletonOptions, EarsSetup},
-        parameters::Parameters,
-        remember::{CurrentProject, Remember},
-        rendering::Rendering,
-    },
     mcp::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, Implementation, ListToolsResult},
@@ -203,7 +204,7 @@ async fn replay(chunk: usize, chunks: usize) {
     for kind in ["square", "noise", "silence", "vanishing"] {
         wav(folder.path(), kind);
     }
-    let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/rendering-oracle.json")).unwrap();
+    let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/rendering-oracle.json")).unwrap();
     let fixture = fixture_paths::map_strings(&source, &|text| text.replace("$AUDIO", folder.path().to_str().unwrap()));
     for (case_index, case) in fixture["cases"].as_array().unwrap().iter().enumerate().skip(chunk).step_by(chunks) {
         if std::env::var("KUMI_RENDERING_CASE").is_ok_and(|label| case["label"].as_str() != Some(&label)) {
@@ -289,7 +290,7 @@ async fn replay(chunk: usize, chunks: usize) {
             identity: "fixture".into(),
             path: config["path"].as_str().map(str::to_owned),
             name: "Fixture Set".into(),
-            project: config["path"].as_str().map(kumi_runtime::integrations::ableton::project::project_id_of),
+            project: config["path"].as_str().map(kumi_daw_ableton::project::project_id_of),
             unsaved: false,
         }));
         let history = Rc::new(History::new(connection.clone(), remember.clone(), options.change_timeout_ms, options.on_change.clone()));
@@ -458,12 +459,12 @@ impl EarsLink for EarsReplay {
 #[tokio::test(flavor = "current_thread")]
 async fn cancelled_kernel_audition_removes_scratch_tracks_and_clears_its_journal_after_close() {
     use futures::StreamExt;
+    use kumi_daw_ableton::{integration::Ableton, observation::ObservationHost};
     use kumi_runtime::{
         ai::{
             error::LanguageModelError,
             types::{CallOptions, FinishReason, FinishReasonUnified, StreamPart, StreamParts, ToolCall},
         },
-        integrations::ableton::{integration::Ableton, observation::ObservationHost},
         kernel::agent::{create_agent_kernel, AgentKernelOptions, LanguageModel, ModelBinding},
     };
     use std::time::Duration;
@@ -495,7 +496,7 @@ async fn cancelled_kernel_audition_removes_scratch_tracks_and_clears_its_journal
         .run_until(async {
             let folder = tempfile::tempdir().unwrap();
             wav(folder.path(), "square");
-            let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/rendering-oracle.json")).unwrap();
+            let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/rendering-oracle.json")).unwrap();
             let source_case =
                 source["cases"].as_array().unwrap().iter().find(|case| case["label"] == "cancel-live_recording_apply").unwrap();
             let case = fixture_paths::map_strings(source_case, &|text| text.replace("$AUDIO", folder.path().to_str().unwrap()));

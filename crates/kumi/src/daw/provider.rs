@@ -41,7 +41,7 @@ pub struct DawFactory {
 impl DawFactory {
     /// Each DAW's production integration.
     pub fn native() -> Self {
-        DawFactory { ableton: Rc::new(kumi_runtime::integrations::create_ableton_integration), own_host: None }
+        DawFactory { ableton: Rc::new(kumi_daw_ableton::create_ableton_integration), own_host: None }
     }
 }
 
@@ -165,13 +165,13 @@ pub struct WatchWords {
 pub trait DawProvider {
     fn id(&self) -> DawId;
     fn profile(&self) -> &'static DawProfile {
-        kumi_runtime::integrations::profile(self.id()).expect("a provider's DAW is registered")
+        crate::daw::registry::profile(self.id()).expect("a provider's DAW is registered")
     }
     fn presentation(&self) -> &'static ToolPresentation {
-        kumi_runtime::integrations::presentation(self.id()).expect("a provider's DAW is registered")
+        crate::daw::registry::presentation(self.id()).expect("a provider's DAW is registered")
     }
     fn view(&self) -> &'static ViewPresentation {
-        kumi_runtime::integrations::view(self.id()).expect("a provider's DAW is registered")
+        crate::daw::registry::view(self.id()).expect("a provider's DAW is registered")
     }
     /// Where Kumi's bridge for the DAW says how to reach it, when the bridge is installed.
     fn bridge_config(&self, env: &Env) -> Option<String>;

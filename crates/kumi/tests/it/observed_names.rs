@@ -7,13 +7,13 @@ use async_trait::async_trait;
 use futures::FutureExt;
 use kumi::tui::app::{observed_name, set_name_from, shown_name};
 use kumi_common::abort::{Signal, SignalExt};
+use kumi_daw_ableton::{
+    connection::{ConnectionOptions, LiveConnection},
+    observation::{ObservationHost, ObservedChange, Observer},
+    remember::Remember,
+};
 use kumi_runtime::{
     core::{contracts::*, errors::RuntimeError},
-    integrations::ableton::{
-        connection::{ConnectionOptions, LiveConnection},
-        observation::{ObservationHost, ObservedChange, Observer},
-        remember::Remember,
-    },
     mcp::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, Implementation, ListToolsResult},
@@ -26,7 +26,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-static ORACLE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| kumi_testkit::oracle("kumi-runtime/observation-oracle.json"));
+static ORACLE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| kumi_testkit::oracle("kumi-daw-ableton/observation-oracle.json"));
 
 #[derive(Clone)]
 struct Listener {

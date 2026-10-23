@@ -1,8 +1,4 @@
 //! Compile the producer's clips into a form, then build it as one guarded change.
-use crate::core::{
-    contracts::{JsonObject, ToolResult},
-    errors::RuntimeError,
-};
 use async_trait::async_trait;
 use futures::{
     future::{join_all, LocalBoxFuture},
@@ -15,6 +11,10 @@ use kumi_common::{
         number::{round, to_string},
         string::{head, trim, utf16_len},
     },
+};
+use kumi_runtime::core::{
+    contracts::{JsonObject, ToolResult},
+    errors::RuntimeError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};

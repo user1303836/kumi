@@ -6,18 +6,18 @@
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_common::{abort::Signal, js::json::stringify};
+use kumi_daw_ableton::{
+    changes::CHANGES,
+    integration::Ableton,
+    options::AbletonOptions,
+    project::{create_project_store, ProjectStore},
+    remember::CurrentProject,
+    snapshots::{Captured, SetHistory, CODE_LIMIT},
+};
 use kumi_runtime::{
     core::{
         contracts::{ChangeState, JsonObject},
         errors::RuntimeError,
-    },
-    integrations::ableton::{
-        changes::CHANGES,
-        integration::Ableton,
-        options::AbletonOptions,
-        project::{create_project_store, ProjectStore},
-        remember::CurrentProject,
-        snapshots::{Captured, SetHistory, CODE_LIMIT},
     },
     mcp::{
         client::{McpEndpoint, StderrStatus},

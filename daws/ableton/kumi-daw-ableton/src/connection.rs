@@ -7,18 +7,7 @@ use super::{
     views::{self, ViewHost},
     BRIDGE_TOOLS,
 };
-use crate::{
-    command::KUMI,
-    core::{
-        contracts::*,
-        errors::{FailureKind, KumiError, RuntimeError, SetupFailure},
-    },
-    mcp::{
-        allowed_tools::{AllowedTools, CallOptions},
-        client::{self, McpEndpoint},
-        types::CallToolResult,
-    },
-};
+use crate::references::LiveBook;
 use async_trait::async_trait;
 use chrono::{DateTime, SecondsFormat, Utc};
 use futures::{
@@ -28,6 +17,18 @@ use futures::{
 use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::{json::stringify, number::to_string},
+};
+use kumi_runtime::{
+    core::contracts::*,
+    mcp::{
+        allowed_tools::{AllowedTools, CallOptions},
+        client::{self, McpEndpoint},
+        types::CallToolResult,
+    },
+};
+use kumi_types::{
+    command::KUMI,
+    errors::{FailureKind, KumiError, RuntimeError, SetupFailure},
 };
 use serde_json::{json, Value};
 use std::{
@@ -329,7 +330,7 @@ impl LiveConnection {
         *self.endpoint.borrow_mut() = Some(endpoint.clone());
         *self.tools.borrow_mut() = Some(AllowedTools::with_model_tools(
             endpoint.clone(),
-            &crate::mcp::allowed_tools::MODEL_TOOLS,
+            &kumi_runtime::mcp::allowed_tools::MODEL_TOOLS,
             BRIDGE_TOOLS.iter().cloned().collect::<HashSet<_>>(),
         ));
         let weak = self.weak.clone();
@@ -699,7 +700,7 @@ impl LiveConnection {
     fn spawn_transport(&self) {
         if let Some(this) = self.weak.upgrade() {
             // The transport clock reads Live on a timer, for the producer's view, not for a turn.
-            tokio::task::spawn_local(crate::core::timing::background(async move {
+            tokio::task::spawn_local(kumi_ai::timing::background(async move {
                 this.read_transport().await;
             }));
         }
@@ -963,7 +964,7 @@ impl LiveConnection {
         let args = context::discovery_args(&input)?;
         let read = views::pages(self, args.clone(), abort::any([signal, self.lifetime.clone()])).await?;
         if read.is_error == Some(true) {
-            use crate::mcp::types::ContentBlock;
+            use kumi_runtime::mcp::types::ContentBlock;
             let text = read
                 .content
                 .iter()

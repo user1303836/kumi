@@ -1,5 +1,5 @@
-//! Kumi's core never reaches into Live's integration: outside integrations/ableton, only the registry
-//! (integrations/mod.rs) names it, and the crate root takes Live's constructors from the registry.
+//! Kumi's runtime never reaches into Live's integration (kumi-daw-ableton, which depends on it): nothing in its sources
+//! names it. Only the app's registry does.
 
 use std::path::{Path, PathBuf};
 
@@ -28,9 +28,6 @@ fn nothing_outside_lives_integration_and_the_registry_names_it() {
     let mut found = vec![];
     for file in files {
         let name = file.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
-        if name.starts_with("integrations/ableton/") || name == "integrations/mod.rs" {
-            continue;
-        }
         let text = std::fs::read_to_string(&file).unwrap();
         let mut using: Option<usize> = None;
         for (n, line) in text.lines().enumerate() {

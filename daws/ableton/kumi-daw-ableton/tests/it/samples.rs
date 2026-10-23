@@ -1,14 +1,11 @@
 kumi_testkit::fixture_paths!();
 use kumi_common::{abort::Signal, js::string::locale_compare_numeric_base};
-use kumi_runtime::{
-    integrations::ableton::{change_context::SampleBank, changes::NoSample, samples::*},
-    library::sources::join,
-    RuntimeError,
-};
+use kumi_daw_ableton::{change_context::SampleBank, changes::NoSample, samples::*};
+use kumi_runtime::{library::sources::join, RuntimeError};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 fn oracle() -> Value {
-    serde_json::from_str(&kumi_testkit::oracle("kumi-runtime/samples-oracle.json")).unwrap()
+    serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/samples-oracle.json")).unwrap()
 }
 #[test]
 fn wav_aiff_partial_odd_streamed_and_malformed_headers_match_source() {

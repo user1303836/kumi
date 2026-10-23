@@ -1,6 +1,6 @@
 //! The listening loop's ears and judge on synthetic sound: what they measure, what they find and where, and how a
 //! checklist decides whether a change stays.
-use kumi_runtime::integrations::live_main_chain::{main_chain, MainDevice};
+use kumi_daw_ableton::rendering::main_chain::{main_chain, MainDevice};
 use kumi_runtime::listening::{
     checklist::{masking_unfair, Change, Checklist, Goal, Item, MainState, Profile, Quantity, Role, Target},
     detect::{self, ProblemKind},
@@ -423,7 +423,7 @@ async fn the_listening_model_counts_only_what_holds_both_ways() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("take.wav");
     let tone: Vec<f32> = sine(3., 440., 0.2).iter().map(|s| *s as f32).collect();
-    let capture = kumi_runtime::ears::capture::Capture {
+    let capture = kumi_daw_ableton::ears::capture::Capture {
         left: tone.clone(),
         right: tone,
         sync: vec![1.5; 144_000],
@@ -431,7 +431,7 @@ async fn the_listening_model_counts_only_what_holds_both_ways() {
         sample_rate: RATE,
         raw: None,
     };
-    kumi_runtime::ears::capture::write_capture_wav(&file, &capture, 0., 144_000.).await.unwrap();
+    kumi_daw_ableton::ears::capture::write_capture_wav(&file, &capture, 0., 144_000.).await.unwrap();
     let take = Take { file: file.clone(), start: 0.5, seconds: 2., gain: 0. };
     let biased = Biased { asked: Default::default() };
     let opinion =
