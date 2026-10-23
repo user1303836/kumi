@@ -879,6 +879,36 @@ reference", "my usual vocal chain" or "the bass from my Night Drive Set".
   `kumi library` say; `kumi library --rebuild` learns everything again. It's kept
   in `~/.kumi/library`, readable only by you.
 
+## Your music
+
+Kumi can learn your taste from your own music, on your computer, and lean on it
+when you leave the style open: "make me a beat", "something dark". When you name
+a reference, sounds or values, it goes by those instead.
+
+- **Asked once.** The first time a request leaves the style open, Kumi may say
+  how many songs it found (in Music's folder, iTunes' or `~/Music`; on Windows,
+  your Music folder) and ask whether to learn your taste from them. Say no and it
+  doesn't ask again; `/music add <folder>` starts it any time.
+- **What it learns.** Each song's tags (artist, album, title, genre, year), or
+  names from its folders when it has none; then, in the background, how it
+  sounds: its loudness, brightness, low end, dynamics and room, and a style
+  fingerprint. A spread of songs across your artists is heard first (about an
+  hour), then every song for a minute, newest first, then each in full.
+- **Out of the way.** It runs in Kumi's library learner at the lowest priority,
+  waits while Kumi listens or plays and while your computer runs on its battery,
+  and carries on where it stopped. Songs under 30 seconds or near silence are
+  skipped; Apple's protected purchases are named but never heard.
+- **Like your own music.** Ask for something in your own style ("like my
+  stuff") and Kumi keeps your nearest songs (5 to 10, heard in full) as a
+  reference, then works toward it as it does toward any reference.
+- **What the model sees.** The names of the songs nearest what you asked for
+  (artist, title, album) and a sentence about what they share, never your files
+  or their fingerprints. Song and artist names reach the model when Kumi uses
+  your taste.
+- **Where it's kept.** `~/.kumi/music`, readable only by you. `/music` shows the
+  folders, how many songs are heard and how it's going; it adds or removes a
+  folder, pauses and resumes, and `/music forget` deletes all of it.
+
 ## What Kumi remembers
 
 Everything Kumi keeps shows as it happens, as a line in the conversation and a
@@ -1253,6 +1283,9 @@ says which need which.
   soon as it is; only the words leave, when you send them.
 - **Your library** is learned on your computer; only the manual's pages come from
   ableton.com.
+- **Your music** is learned on your computer. When Kumi uses your taste, the
+  names of the songs it picks (artist, title, album) and a sentence about how
+  they sound go to your model provider, never the files.
 
 Track, clip and device names, tool results and web pages are data for Kumi,
 never instructions. Kumi keeps its files in `~/.kumi`, readable only by you;
@@ -1305,6 +1338,8 @@ Kumi keeps everything in `~/.kumi`. `~/.kumi/settings.json` holds:
 | `instantPhrases` | `false`: fixed phrases ("tempo 124", "mute drums") go to the model like any other message ([instant phrases](KUMI_TUI.md#instant-phrases)) |
 | `modelServers` | OpenAI-compatible model servers: `[{ "name", "baseURL", "apiKey" }]` ([models on your computer](#models-on-your-computer)) |
 | `libraryFolders` | More folders for Kumi to learn sounds, presets and Sets from |
+| `musicFolders` | The folders of your own music Kumi learns your taste from (`/music add`); absent until you agree |
+| `musicOffered` | `true` once Kumi has asked whether to learn your music: it asks once |
 | `voice` | Talking: `send` (send when you stop), `language`, `microphone` (`/voice`) |
 | `maxJobs` | How many background jobs run at once: 1–8, three by default |
 | `workerModel` | The model background jobs use, `<provider>/<model>` from `/model`'s list; the conversation's when absent |

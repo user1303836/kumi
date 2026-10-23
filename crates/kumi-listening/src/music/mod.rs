@@ -3,12 +3,14 @@
 //! a request leaves the style open. Kept in `music` in Kumi's folder; never sent anywhere.
 
 pub mod clusters;
+pub mod describe;
 pub mod folders;
 pub mod hear;
 pub mod learning;
 pub mod scan;
 pub mod store;
 pub mod tags;
+pub mod tool;
 pub mod vectors;
 pub mod worker;
 

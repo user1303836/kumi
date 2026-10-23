@@ -235,6 +235,46 @@ impl VectorReader {
         self.waiting.contains_key(&id) || self.row(id).is_some()
     }
 
+    /// The `count` songs whose vectors point nearest a unit `target`, nearest first, with how far each lies (as
+    /// `distance` reads it). One pass over the file: 300,000 songs in a few tens of milliseconds.
+    pub fn nearest(&self, target: &[f32], count: usize) -> Vec<(i64, f64)> {
+        let length = target.iter().map(|value| (*value as f64).powi(2)).sum::<f64>().sqrt();
+        if count == 0 || length == 0. || target.len() < DIMS {
+            return vec![];
+        }
+        // Only the order matters: each row's cosine with the target, the target's length left out.
+        let mut best: Vec<(f64, i64)> = Vec::with_capacity(count + 1);
+        let mut offer = |alike: f64, id: i64| {
+            if best.len() == count && best.last().is_some_and(|(worst, _)| alike <= *worst) {
+                return;
+            }
+            let at = best.partition_point(|(other, _)| *other >= alike);
+            best.insert(at, (alike, id));
+            best.truncate(count);
+        };
+        if let Some(map) = &self.map {
+            let rows = map.len().saturating_sub(HEADER) / DIMS;
+            for id in 0..rows {
+                let row = &map[HEADER + id * DIMS..HEADER + (id + 1) * DIMS];
+                let (mut dot, mut squares) = (0f32, 0i32);
+                for (value, wanted) in row.iter().zip(target) {
+                    let value = *value as i8;
+                    dot += value as f32 * wanted;
+                    squares += value as i32 * value as i32;
+                }
+                if squares > 0 && !self.waiting.contains_key(&(id as i64)) {
+                    offer(dot as f64 / (squares as f64).sqrt(), id as i64);
+                }
+            }
+        }
+        for (id, vector) in &self.waiting {
+            if let Some(far) = crate::embed::distance(vector, target) {
+                offer((1. - far) * length, *id);
+            }
+        }
+        best.into_iter().map(|(alike, id)| (id, 1. - alike / length)).collect()
+    }
+
     /// How far a song lies from a unit `target`, as `embed::distance` reads it (0 alike, 2 opposite).
     pub fn distance(&self, id: i64, target: &[f32]) -> Option<f64> {
         if let Some(waiting) = self.waiting.get(&id) {

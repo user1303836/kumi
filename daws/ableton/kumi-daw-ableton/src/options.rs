@@ -50,6 +50,8 @@ pub struct AbletonOptions {
     pub listener: Option<ListenerSource>,
     /// Measured references the judge can work toward by name.
     pub references: Option<Rc<kumi_listening::references::store::ReferenceStore>>,
+    /// Each setting a search hears (tune's), for Kumi to remember what worked on a device.
+    pub on_heard: Option<Rc<dyn Fn(kumi_listening::heard_settings::SettingsHeard)>>,
     pub ears: Option<EarsSetup>,
     pub hands: Option<HandsSetup>,
     pub fast: Option<bool>,
@@ -89,6 +91,7 @@ impl AbletonOptions {
             on_judge: None,
             listener: None,
             references: None,
+            on_heard: None,
             ears: None,
             hands: None,
             fast: None,
@@ -119,6 +122,7 @@ impl AbletonOptions {
         options.on_judge = context.on_judge;
         options.listener = context.listener;
         options.references = context.references;
+        options.on_heard = context.on_heard;
         options
     }
     /// The neutral half of these options.
@@ -146,6 +150,7 @@ impl AbletonOptions {
             on_judge: self.on_judge.clone(),
             listener: self.listener.clone(),
             references: self.references.clone(),
+            on_heard: self.on_heard.clone(),
         }
     }
     pub fn connection_options(&self) -> ConnectionOptions {
@@ -191,6 +196,7 @@ mod tests {
         context.on_audition = Some(Rc::new(|_| {}));
         context.on_judge = Some(Rc::new(|_| {}));
         context.listener = Some(Rc::new(|_| Box::pin(async { Ok(None) })));
+        context.on_heard = Some(Rc::new(|_| {}));
         let options = AbletonOptions::with_context(context.clone());
         let back = options.context();
         fn same<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
@@ -211,6 +217,7 @@ mod tests {
         assert!(same(&context.on_watch, &back.on_watch) && same(&context.on_catch_up, &back.on_catch_up));
         assert!(same(&context.on_audition, &back.on_audition) && same(&context.on_judge, &back.on_judge));
         assert!(same(&context.listener, &back.listener) && same(&context.references, &back.references));
+        assert!(same(&context.on_heard, &back.on_heard));
         assert_eq!(
             (back.generation, back.focus_interval_ms, back.change_timeout_ms, back.reconnect_interval_ms, back.restore_file),
             (Some("g".into()), Some(7), Some(8), Some(9), Some("/r".into()))

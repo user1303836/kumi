@@ -65,17 +65,29 @@ impl MusicStatus {
     }
 }
 
+/// Keeps the producer's answer (settings.json's `musicFolders` and `musicOffered`): the folders they agreed Kumi may
+/// learn from (none until they agree), and whether Kumi offered.
+pub type SaveMusic = Rc<dyn Fn(Option<&[String]>, bool) -> Result<(), String>>;
+
 #[derive(Clone)]
 pub struct MusicOptions {
     /// Kumi's music folder.
     pub dir: PathBuf,
-    /// The producer's music folders (`musicFolders`): none, and Kumi doesn't learn their music.
-    pub folders: Vec<String>,
+    /// The producer's music folders (`musicFolders`): none until they agree, and Kumi doesn't learn their music without
+    /// any.
+    pub folders: Option<Vec<String>>,
+    /// Kumi offered to learn their music (`musicOffered`).
+    pub offered: bool,
+    /// Where their answer is kept (none: nowhere, as in tests).
+    pub save: Option<SaveMusic>,
     /// Their sample folders (`libraryFolders`), which the walk leaves out with the library's places.
     pub library_folders: Vec<String>,
-    /// false: the scan runs in this process (tests), with `style` as its style model when there's one.
+    /// false: the scan runs in this process (tests), with `style` as its style model when there's one (taste hears
+    /// with it too).
     pub fork: bool,
     pub style: Option<Rc<dyn Style>>,
+    /// Where to look for music before the producer names a folder (tests); none, the usual places.
+    pub places: Option<Vec<PathBuf>>,
     /// How long after Kumi starts the first scan begins, and how long between scans.
     pub delay_ms: u64,
     pub every_ms: u64,
@@ -84,8 +96,24 @@ pub struct MusicOptions {
 }
 
 impl MusicOptions {
-    pub fn new(dir: PathBuf, folders: Vec<String>, daws: Daws) -> MusicOptions {
-        MusicOptions { dir, folders, library_folders: vec![], fork: true, style: None, delay_ms: 4_000, every_ms: 30 * 60_000, daws }
+    pub fn new(dir: PathBuf, folders: Option<Vec<String>>, daws: Daws) -> MusicOptions {
+        MusicOptions {
+            dir,
+            folders,
+            offered: false,
+            save: None,
+            library_folders: vec![],
+            fork: true,
+            style: None,
+            places: None,
+            delay_ms: 4_000,
+            every_ms: 30 * 60_000,
+            daws,
+        }
+    }
+    /// The folders a scan walks: none until the producer agreed.
+    fn walked(&self) -> Vec<String> {
+        self.folders.clone().unwrap_or_default()
     }
 }
 
@@ -130,9 +158,8 @@ fn cancel(timer: &RefCell<Option<JoinHandle<()>>>) {
 
 /// Create inside the runtime's LocalSet: its scan reports through local tasks.
 pub fn create_music(options: MusicOptions) -> Rc<Music> {
-    let state = if options.folders.is_empty() { MusicState::Off } else { MusicState::Done };
-    let status =
-        MusicStatus { state, folders: options.folders.clone(), songs: 0, light: 0, full: 0, skipped: 0, learned_at: None, said: None };
+    let state = if options.walked().is_empty() { MusicState::Off } else { MusicState::Done };
+    let status = MusicStatus { state, folders: options.walked(), songs: 0, light: 0, full: 0, skipped: 0, learned_at: None, said: None };
     let music = Rc::new_cyclic(|weak| Music {
         options: RefCell::new(options),
         weak: weak.clone(),
@@ -155,8 +182,99 @@ impl Music {
         self.options.borrow().dir.clone()
     }
 
+    /// The folders Kumi learns from (none: it doesn't).
     pub fn folders(&self) -> Vec<String> {
-        self.options.borrow().folders.clone()
+        self.options.borrow().walked()
+    }
+
+    /// Whether the producer agreed Kumi may learn their music (they may have taken every folder away since).
+    pub fn agreed(&self) -> bool {
+        self.options.borrow().folders.is_some()
+    }
+
+    /// Whether Kumi offered to learn it.
+    pub fn offered(&self) -> bool {
+        self.options.borrow().offered
+    }
+
+    /// The style model a test gave (none: CLAP, as the embeddings slot runs it).
+    pub fn style(&self) -> Option<Rc<dyn Style>> {
+        self.options.borrow().style.clone()
+    }
+
+    /// Where to look for their music before they name a folder.
+    pub fn places(&self) -> Vec<PathBuf> {
+        self.options.borrow().places.clone().unwrap_or_else(super::folders::usual_places)
+    }
+
+    /// The producer's sample folders, which a walk (and the count for the offer) leaves out.
+    pub fn library_folders(&self) -> Vec<String> {
+        self.options.borrow().library_folders.clone()
+    }
+
+    fn save(&self) -> Result<(), String> {
+        let options = self.options.borrow().clone();
+        match &options.save {
+            Some(save) => save(options.folders.as_deref(), options.offered),
+            None => Ok(()),
+        }
+    }
+
+    /// Kumi offered to learn their music: it's kept, so it's offered once.
+    pub fn offer_made(&self) -> Result<(), String> {
+        self.options.borrow_mut().offered = true;
+        self.save()
+    }
+
+    /// The producer said yes: these folders are kept as theirs, and learning starts now.
+    pub fn learn(self: &Rc<Self>, folders: Vec<String>) -> Result<(), String> {
+        self.options.borrow_mut().offered = true;
+        self.set_folders(Some(folders))
+    }
+
+    /// Forget what Kumi learned of their music (music.db, the style vectors, the map): the scan stops, the folder goes,
+    /// and Kumi learns nothing more until they add a folder again (it doesn't offer again).
+    pub async fn forget(self: &Rc<Self>) -> Result<(), String> {
+        self.set_folders(None)?;
+        self.stopped().await;
+        let dir = self.dir();
+        let mut removed = tokio::fs::remove_dir_all(&dir).await;
+        // A file the scan held a moment longer (Windows): once more, shortly.
+        if removed.as_ref().is_err_and(|error| error.kind() != std::io::ErrorKind::NotFound) {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            removed = tokio::fs::remove_dir_all(&dir).await;
+        }
+        self.update(|status| (status.songs, status.light, status.full, status.skipped, status.learned_at) = (0, 0, 0, 0, None));
+        match removed {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(format!("Kumi couldn't delete {}: {error}", dir.display())),
+            _ => Ok(()),
+        }
+    }
+
+    /// Waits (a moment and a half at most, then ends it) for the scan under way to stop.
+    async fn stopped(&self) {
+        let child = match self.running.borrow().as_ref() {
+            Some(Running::Child { done, kill, .. }) => Some((done.clone(), kill.clone())),
+            _ => None,
+        };
+        if let Some((mut done, kill)) = child {
+            let wait = async {
+                while !*done.borrow() {
+                    if done.changed().await.is_err() {
+                        break;
+                    }
+                }
+            };
+            if tokio::time::timeout(Duration::from_millis(1500), wait).await.is_err() {
+                kill.cancel();
+            }
+        }
+        for _ in 0..100 {
+            if self.running.borrow().is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     pub fn status(&self) -> MusicStatus {
@@ -261,23 +379,25 @@ impl Music {
         self.held.get()
     }
 
-    /// Learn from these folders from now on: the scan under way stops, and one over the new folders starts (none: Kumi
-    /// stops learning).
-    pub fn set_folders(self: &Rc<Self>, folders: Vec<String>) {
-        self.options.borrow_mut().folders = folders.clone();
-        self.update(|status| status.folders = folders.clone());
-        if folders.is_empty() {
+    /// Learn from these folders from now on (kept as the producer's): the scan under way stops, and one over the new
+    /// folders starts. None, or none left: Kumi stops learning.
+    pub fn set_folders(self: &Rc<Self>, folders: Option<Vec<String>>) -> Result<(), String> {
+        self.options.borrow_mut().folders = folders;
+        let walked = self.folders();
+        self.update(|status| status.folders = walked.clone());
+        if walked.is_empty() {
             cancel(&self.timer);
             self.send(ScanMessage::Stop);
             self.update(|status| status.state = MusicState::Off);
         } else {
             self.learn_now();
         }
+        self.save()
     }
 
     /// Start learning a moment after Kumi starts (nothing, without music folders).
     pub fn start(self: &Rc<Self>) {
-        if self.closed.get() || self.options.borrow().folders.is_empty() {
+        if self.closed.get() || self.folders().is_empty() {
             return;
         }
         cancel(&self.timer);
@@ -318,7 +438,7 @@ impl Music {
 
     fn start_now(&self) {
         let options = self.options.borrow().clone();
-        if self.closed.get() || options.folders.is_empty() || self.running.borrow().is_some() {
+        if self.closed.get() || options.walked().is_empty() || self.running.borrow().is_some() {
             return;
         }
         cancel(&self.timer);
@@ -328,7 +448,7 @@ impl Music {
         self.update(|status| status.state = if paused { MusicState::Paused } else { MusicState::Learning });
         let scan = ScanOptions {
             dir: options.dir.to_string_lossy().into_owned(),
-            folders: options.folders.clone(),
+            folders: options.walked(),
             library_folders: options.library_folders.clone(),
             paused,
         };
@@ -417,7 +537,7 @@ impl Music {
         self.running.borrow_mut().take();
         self.read_counts();
         let options = self.options.borrow().clone();
-        if self.closed.get() || options.folders.is_empty() {
+        if self.closed.get() || options.walked().is_empty() {
             return;
         }
         let paused = self.paused();

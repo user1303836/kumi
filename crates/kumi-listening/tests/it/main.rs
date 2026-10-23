@@ -8,6 +8,8 @@ mod listener;
 mod music;
 mod music_scale;
 mod music_scan;
+mod music_taste;
+mod musical;
 mod notation;
 mod slots;
 mod sound;
