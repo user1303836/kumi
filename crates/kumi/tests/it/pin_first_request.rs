@@ -317,6 +317,12 @@ async fn run(setup: Setup, script: Script) -> Run {
             sources: Some(SourceOptions { home: Some(text("home")), ..Default::default() }),
             ..Default::default()
         }));
+        // The producer's own music, before they're asked to have it learned: taste is offered all the same.
+        options.music = Some(kumi_listening::music::learning::create_music(kumi_listening::music::learning::MusicOptions::new(
+            dir.path().join("music"),
+            None,
+            kumi::daw::registry::libraries(),
+        )));
         options.playbook = Some(create_playbook_store(text("playbook.json")));
         options.goals = Some(create_goal_store(text("goals")));
         options.objectives = Some(create_objective_store(text("objectives")));

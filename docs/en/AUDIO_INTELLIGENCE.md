@@ -199,6 +199,25 @@ earlier capture verifier,
 12.4.5b8 on macOS (2026-07-27, bridge 0.1.0) and predates the current bridge.
 No Windows run is tracked.
 
+## Your music
+
+When you agree, Kumi hears your own music in the background, to know your taste
+(`/music`; [your music](KUMI_GUIDE.md#your-music)):
+
+- **Lightly:** the style model (LAION-CLAP) on 10 seconds at the song's middle,
+  and the measurements of a minute from 30% in.
+- **In full:** the style model on 10 seconds at a quarter, half and three
+  quarters, and the measurements as a reference's (up to 6 minutes).
+- **In order:** songs your taste was just used for, a spread of up to 2,000
+  songs across your artists in full, every song lightly (newest first), then
+  every song in full. On an Apple M4, about half a second a song lightly and
+  under two seconds in full.
+- Songs fall into up to eight styles by how they sound. An answer names the
+  songs and says their measurements in a sentence: loudness, brightness, the low
+  end, dynamics, contrast, reverb and echo.
+- Another embeddings model in `/slots` hears your songs again with it; the
+  measurements stay.
+
 ## Limits
 
 - True peak only at 44.1 and 48 kHz.

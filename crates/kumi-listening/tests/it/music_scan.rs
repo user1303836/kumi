@@ -387,7 +387,7 @@ async fn the_app_sees_the_scan_wait_while_kumi_listens_then_learn_and_finish() {
         .run_until(async {
             let dir = tempfile::tempdir().unwrap();
             let music = library(dir.path());
-            let mut options = MusicOptions::new(dir.path().join("kumi/music"), vec![music.clone()], Default::default());
+            let mut options = MusicOptions::new(dir.path().join("kumi/music"), Some(vec![music.clone()]), Default::default());
             (options.fork, options.style, options.delay_ms) = (false, Some(Fake::new("test-model") as Rc<dyn Style>), 0);
             let handle = create_music(options);
             let told = Rc::new(RefCell::new(vec![]));
@@ -408,7 +408,7 @@ async fn the_app_sees_the_scan_wait_while_kumi_listens_then_learn_and_finish() {
             assert!(status.learned_at.is_some());
             assert!(told.borrow().contains(&MusicState::Learning), "{:?}", told.borrow());
             // No folders: Kumi stops learning the music.
-            handle.set_folders(vec![]);
+            handle.set_folders(Some(vec![])).unwrap();
             assert_eq!(handle.status().state, MusicState::Off);
             handle.close().await;
         })

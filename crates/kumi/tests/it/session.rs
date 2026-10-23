@@ -3083,6 +3083,51 @@ impl KernelTool for NamesOnly {
         panic!("replaced by library")
     }
 }
+local_test!(taste_is_offered_in_every_session_and_the_system_text_says_so_once_songs_are_heard, {
+    use kumi_listening::music::{
+        database,
+        folders::Walked,
+        learning::{create_music, MusicOptions},
+        store::{MusicStore, Stage},
+        tags::{NamesFrom, Tags},
+    };
+    let temp = tempfile::tempdir().unwrap();
+    let said = "The producer's own music is learned";
+    // Nothing learned yet (nor asked): taste is offered all the same, and the system text says nothing of it.
+    let music = create_music(MusicOptions::new(temp.path().join("none"), None, kumi::daw::registry::libraries()));
+    let h = harness(None, |o| o.music = Some(music.clone()));
+    h.session.start().await.unwrap();
+    assert!(h.record.created.borrow()[0].tools.iter().any(|tool| tool.name() == "taste"));
+    assert!(!h.record.created.borrow()[0].instructions.contains(said));
+    h.session.close().await.unwrap();
+    // Two songs heard.
+    let dir = temp.path().join("music");
+    let mut store = MusicStore::open(&database(&dir)).unwrap();
+    let song = |n: i64| {
+        let file = Walked { path: format!("/m/{n}.mp3"), folder: "/m".into(), size: 1, mtime: n, protected: false };
+        (file, Tags { artist: Some("A".into()), title: Some(format!("{n}")), names_from: NamesFrom::Tags, ..Default::default() })
+    };
+    store.write_songs(&[song(1), song(2)]).unwrap();
+    for n in [1, 2] {
+        let id = store.song_at(&format!("/m/{n}.mp3")).unwrap().unwrap().id;
+        store.heard(id, Stage::Light, "{}", 1).unwrap();
+    }
+    let music = create_music(MusicOptions::new(dir, Some(vec!["/m".into()]), kumi::daw::registry::libraries()));
+    for _ in 0..200 {
+        if music.status().songs == 2 {
+            break;
+        }
+        delay(10).await;
+    }
+    let h = harness(None, |o| o.music = Some(music.clone()));
+    h.session.start().await.unwrap();
+    let instructions = h.record.created.borrow()[0].instructions.clone();
+    assert!(
+        instructions.contains("The producer's own music is learned (2 songs): when a request leaves the style open, call taste first; never when they named a reference, specific sounds or exact values."),
+        "{instructions}"
+    );
+    h.session.close().await.unwrap();
+});
 local_test!(library_tools_preferences_status_and_forgetting_follow_session_lifecycle, {
     use kumi_library::{create_library, sources::SourceOptions, LibraryOptions};
     let temp = tempfile::tempdir().unwrap();

@@ -1,7 +1,7 @@
 {
-  "toolsKey": "MtVJY9IAc8Rf8iZyOkaVhl",
-  "fixed": 73306,
-  "fixedByHand": 73306,
+  "toolsKey": "G1AJ6q-LSEu780pHvkTijH",
+  "fixed": 74666,
+  "fixedByHand": 74666,
   "sent": [
     "live_discover",
     "live_browser_search",
@@ -26,6 +26,7 @@
     "run_python",
     "remember",
     "listen",
+    "taste",
     "watch_video",
     "search_web",
     "read_web",

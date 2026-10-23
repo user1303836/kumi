@@ -69,6 +69,7 @@ mod tui_app_panels;
 mod tui_app_voice;
 mod tui_away;
 mod tui_jobs;
+mod tui_music;
 mod tui_own_bodies;
 mod tui_pictures;
 mod tui_setup;

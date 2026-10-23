@@ -283,9 +283,51 @@ pub fn recluster(store: &mut MusicStore, music_dir: &Path, model: &str) -> Resul
         }
     };
     let (centres, assigned) = kmeans(ids.len(), DIMS, clusters_for(ids.len()), &read, SEED);
-    store.set_clusters(&ids.iter().copied().zip(assigned).collect::<Vec<_>>())?;
-    store.set_meta("clusters", &serde_json::json!({"model": model, "heard": ids.len(), "centres": centres}).to_string())?;
+    store.set_clusters(&ids.iter().copied().zip(assigned.iter().copied()).collect::<Vec<_>>())?;
+    // Each cluster's songs nearest its centre (the examples taste names) and its two commonest genre tags.
+    let genres: std::collections::HashMap<i64, String> = {
+        let mut statement =
+            store.connection().prepare(&format!("SELECT id, genre FROM songs WHERE {LIVE} AND stage >= 1 AND genre IS NOT NULL"))?;
+        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let clusters: Vec<serde_json::Value> = centres
+        .iter()
+        .enumerate()
+        .map(|(cluster, centre)| {
+            let members: Vec<usize> = (0..ids.len()).filter(|at| assigned[*at] == cluster).collect();
+            let mut near: Vec<(f64, i64)> = members.iter().filter_map(|at| Some((reader.distance(ids[*at], centre)?, ids[*at]))).collect();
+            near.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            let examples: Vec<i64> = near.iter().take(EXAMPLES).map(|(_, id)| *id).collect();
+            let tags = members.iter().filter_map(|at| genres.get(&ids[*at])).flat_map(|genre| genre.split("; "));
+            serde_json::json!({"songs": members.len(), "examples": examples, "genres": commonest(tags, 2)})
+        })
+        .collect();
+    let kept = serde_json::json!({"model": model, "heard": ids.len(), "centres": centres, "clusters": clusters});
+    store.set_meta("clusters", &kept.to_string())?;
     Ok(ids.len())
+}
+
+/// The songs nearest each cluster's centre kept with it.
+pub const EXAMPLES: usize = 10;
+
+/// The `most` commonest tags, any case (each as most of its songs spell it), the commonest first.
+pub fn commonest<'a>(tags: impl Iterator<Item = &'a str>, most: usize) -> Vec<String> {
+    let mut counts: indexmap::IndexMap<String, (usize, std::collections::HashMap<&'a str, usize>)> = indexmap::IndexMap::new();
+    for tag in tags.map(str::trim).filter(|tag| !tag.is_empty()) {
+        let (count, spellings) = counts.entry(folded(tag)).or_default();
+        *count += 1;
+        *spellings.entry(tag).or_default() += 1;
+    }
+    let mut ranked: Vec<(String, usize, String)> = counts
+        .into_iter()
+        .map(|(key, (count, spellings))| {
+            let spelling = spellings.into_iter().max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(a.0))).map(|(tag, _)| tag.to_string()).unwrap();
+            (key, count, spelling)
+        })
+        .collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    ranked.into_iter().take(most).map(|(_, _, spelling)| spelling).collect()
 }
 
 /// How many songs the clusters were made from (by this style model), from `meta`.

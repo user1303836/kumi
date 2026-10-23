@@ -9,10 +9,12 @@ mod events;
 mod input;
 mod jobs;
 mod live;
+mod music;
 mod panels;
 mod records;
 mod setup;
 use kumi_daw::setup::DawSetup;
+pub use music::{music_lines, parse_music, MusicAsked, MUSIC_FOOTER};
 pub use setup::{waveform, WAVE_WIDTH};
 mod sharing;
 mod shown;
@@ -96,6 +98,8 @@ pub struct TuiOptions {
     pub willington: Option<kumi_daw::provider::Toggle>,
     /// /slots: which model does each listening job, swapped and taken back.
     pub slots: Option<Rc<kumi_listening::slots::SlotsContext>>,
+    /// /music: the producer's own music, which Kumi learns their taste from.
+    pub music: Option<Rc<kumi_listening::music::learning::Music>>,
     /// What's new since the producer last opened Kumi, shown once as it starts.
     pub whats_new: Option<crate::whats_new::News>,
     /// How this terminal shows Kumi's status and notifications; read from the environment when None.
@@ -170,6 +174,7 @@ impl TuiOptions {
             connect_live: None,
             willington: None,
             slots: None,
+            music: None,
             whats_new: None,
             terminal: None,
             away: AwaySettings::default(),

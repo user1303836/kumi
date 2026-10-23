@@ -1,0 +1,28 @@
+{
+  "learned": 150,
+  "seed": "<root>/Music/Burial/Untrue/01 Archangel.wav",
+  "songs": [
+    {
+      "artist": "Burial",
+      "title": "Archangel",
+      "album": "Untrue"
+    },
+    {
+      "artist": "Burial",
+      "title": "Dubstep Track 21",
+      "album": "Untrue"
+    },
+    {
+      "artist": "Burial",
+      "title": "Dubstep Track 42",
+      "album": "Untrue"
+    },
+    {
+      "artist": "Burial",
+      "title": "Dubstep Track 15",
+      "album": "Untrue"
+    }
+  ],
+  "traits": "Loud (about -9.1 LUFS, -10.1 to -8.1), warm (tilt -2.1 dB/oct), mono lows, firm dynamics (peak to loudness 9.6 dB), long reverb (2.2 s), echoes at 375 ms.",
+  "note": "The producer's own music: lean on it only where they left the style open, never over what they asked."
+}
