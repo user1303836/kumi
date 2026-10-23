@@ -19,7 +19,7 @@
 | `crates/kumi-listening` | 聆听：一次聆听测量什么、评判及其检查清单、引擎的各轮、聆听模型及其槽位、风格参考和记谱；播放和渲染由各 DAW 负责 |
 | `crates/kumi-daw` | DAW 的 crate 交给应用和从应用得到的东西：DAW 的 provider（DAW 是什么，以及其桥接的查找、安装、检查和移除）、doctor 的检查项、首次设置中 DAW 的一侧，以及各步骤所用的小型端口（输出、提问和运行程序） |
 | `crates/kumi-common` | 共享的运行时工具，以及与原实现兼容的值处理 |
-| `daws/ableton/kumi-daw-ableton` | Live 的主机端：Live 集成（Set 的观察、修改与 HISTORY、渲染与 Kumi Ears、Hands、素材库与手册）和 Max for Live 设备构建器 |
+| `daws/ableton/kumi-daw-ableton` | Live 的主机端：Live 集成（Set 的观察、修改与 HISTORY、渲染与 Kumi Ears、Hands、素材库与手册）、Max for Live 设备构建器，以及 Live 的 provider（`src/app/`：查找、打开和检查 Live，桥接的安装、更新、回滚和移除，doctor、报告和首次设置中 Live 的部分） |
 | `daws/ableton/ableton-mcp-server` | 原生 MCP 桥接、分析工作进程、生命周期、设置、迁移和诊断 |
 | `daws/ableton/remote-script` | 桥接的 Remote Script，运行在 Live 内部（`ableton_mcp_remote_script.py`、`AbletonMcpBridge/` 入口、Python 测试） |
 | `daws/ableton/live-extension` | Kumi 的 Live 扩展，适用于 Live 12.4 及更高版本，基于 Live 的 Extensions SDK（TypeScript，有自己的 `package.json`） |

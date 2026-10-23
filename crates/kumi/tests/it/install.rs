@@ -1,7 +1,6 @@
 //! Original installed-update scenarios, using native bundle layout and executable startup probes.
 use async_trait::async_trait;
 use futures::FutureExt;
-use kumi::daw::ableton::answers::{BridgeAfterUpdate, LiveRunning};
 use kumi::{config::json_files, install::*, tui::tty::TtyOutput};
 use kumi_agent::core::{
     contracts::{MemoryScope, MemoryStore},
@@ -13,6 +12,9 @@ use kumi_ai::{
     http::{Fetch, FetchInit, Response},
 };
 use kumi_daw::process::{executable_name, run_program, Ran};
+use kumi_daw::provider::newer as newer_version;
+use kumi_daw_ableton::app::answers::{BridgeAfterUpdate, LiveRunning};
+use kumi_daw_ableton::app::install::{finish_legacy_transition, only_the_host_differs};
 use kumi_types::{
     system::{self, Env, SystemProgram},
     version::KUMI_VERSION,
@@ -1237,7 +1239,7 @@ fn started_by_the_installer_kumi_says_how_to_start_it_next_time() {
 fn an_updates_bridge_step_asks_nothing_more_and_waits_for_no_live() {
     // Live was just found closed: kumi bridge goes ahead (its lifecycle looks for Live again before it changes anything),
     // and doesn't wait ten minutes for a Live nobody has opened.
-    let command = kumi::install::bridge_command("/kumi/app", "/kumi");
+    let command = kumi_daw_ableton::app::install::bridge_command("/kumi/app", "/kumi");
     let command = command.as_std();
     assert_eq!(command.get_program(), std::ffi::OsStr::new(&kumi_library::sources::join("/kumi/app", &executable_name("kumi"))));
     assert_eq!(command.get_args().collect::<Vec<_>>(), ["bridge", "--yes"]);
@@ -1253,13 +1255,13 @@ fn an_updates_bridge_step_asks_nothing_more_and_waits_for_no_live() {
 /// out of its environment, so the child sets up Live's bridge whatever the producer exported (review L1).
 #[test]
 fn an_updates_bridge_step_is_lives_whatever_kumi_daw_says() {
-    let command = kumi::install::bridge_command("/kumi/app", "/kumi");
+    let command = kumi_daw_ableton::app::install::bridge_command("/kumi/app", "/kumi");
     let removed = command.as_std().get_envs().find(|(name, _)| *name == "KUMI_DAW").map(|(_, value)| value);
     assert_eq!(removed, Some(None), "KUMI_DAW taken out of the child's environment");
 }
 /// After an update, with no bridge in Live: how to connect it where Live runs, and on Linux nothing about Live at all.
 fn says_no_bridge_yet(said: &str) {
-    match kumi::install::no_bridge_yet(system::platform()) {
+    match kumi_daw_ableton::app::install::no_bridge_yet(system::platform()) {
         Some(words) => assert!(said.contains(&words), "{said}"),
         None => assert!(!said.contains("Live"), "nothing about Live where it doesn't run: {said}"),
     }
@@ -1268,9 +1270,9 @@ fn says_no_bridge_yet(said: &str) {
 fn with_no_bridge_in_live_an_update_says_how_to_connect_it_only_where_live_runs() {
     let words = format!("The bridge isn't in Live yet. {}.", *kumi_types::command::CONNECT_LIVE);
     for platform in ["darwin", "win32"] {
-        assert_eq!(kumi::install::no_bridge_yet(platform).as_deref(), Some(words.as_str()), "{platform}");
+        assert_eq!(kumi_daw_ableton::app::install::no_bridge_yet(platform).as_deref(), Some(words.as_str()), "{platform}");
     }
-    assert_eq!(kumi::install::no_bridge_yet("linux"), None, "no Live for Linux");
+    assert_eq!(kumi_daw_ableton::app::install::no_bridge_yet("linux"), None, "no Live for Linux");
 }
 
 /// Everything a producer keeps in Kumi's folder, which no uninstall without --all may touch.

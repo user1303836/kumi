@@ -14,8 +14,10 @@ name = "kumi-harness"
 path = "src/bin/kumi-harness.rs"
 
 [dependencies]
+ableton-mcp-server.workspace = true
 kumi-ai.workspace = true
 kumi-common.workspace = true
+kumi-daw.workspace = true
 kumi-library.workspace = true
 kumi-listening.workspace = true
 kumi-media.workspace = true

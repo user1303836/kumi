@@ -2,13 +2,19 @@
 #[path = "../support/live_words.rs"]
 mod live_words;
 use futures::FutureExt;
-use kumi::daw::ableton::answers::{ExtensionHost, Hands, LiveRunning, Lives, NodeVersions, PortOwners};
-use kumi::{doctor::*, live_app::InstalledLive, live_extension::install_extension, tui::tty::TtyOutput};
+use kumi::{doctor::*, tui::tty::TtyOutput};
 use kumi_ai::providers::{local::local_servers, models::ModelInfo};
 use kumi_common::time::now_ms;
 use kumi_daw::{
     check::{Bundled, Check, CheckStatus, Probe, Probes},
     io::Answers,
+};
+use kumi_daw_ableton::app::answers::{ExtensionHost, Hands, LiveRunning, Lives, NodeVersions, PortOwners};
+use kumi_daw_ableton::app::{
+    doctor::{missing_bridge, older_bridge},
+    folders::read_bridge_server,
+    live_app::InstalledLive,
+    live_extension::install_extension,
 };
 use kumi_media::voice::VoiceReadiness;
 use kumi_types::{
@@ -151,7 +157,7 @@ async fn doctor_says_whats_fine_and_exact_fixes_without_secrets() {
     let printed = out.0.borrow().clone();
     // An older bridge in Live: the one way Kumi says to connect it, which can restart Live for the producer. Where Live
     // doesn't run (Linux), a note (older_bridge's test has its words).
-    let live = kumi::live_app::runs_on(kumi_types::system::platform());
+    let live = kumi_daw_ableton::app::live_app::runs_on(kumi_types::system::platform());
     let older = find(&doctor_checks(&io).await.unwrap(), "The installed bridge (1.0.9) is older than this Kumi's (1.0.10)").clone();
     if live {
         assert_eq!(older.next.as_deref(), Some(kumi_types::command::CONNECT_LIVE.as_str()));
@@ -555,7 +561,7 @@ async fn installation_checks_room_live_its_user_library_and_the_bridges_ports() 
     assert!(!installation(&io).await.iter().any(|c| c.text.contains("Live")), "nothing about Live where it doesn't run");
     // The User Library Live's settings name, there or not.
     io.installation = quiet_installation();
-    let settings = PathBuf::from(kumi::config::live_preferences_dir(&io.env)).join("Live 12.4.15");
+    let settings = PathBuf::from(kumi_daw_ableton::app::folders::live_preferences_dir(&io.env)).join("Live 12.4.15");
     let library = s.root.path().join("Music Library");
     let config = format!(
         "<Ableton><UserLibrary><ProjectPath Value=\"{}\" /><ProjectName Value=\"User Library\" /></UserLibrary></Ableton>",

@@ -7,6 +7,7 @@ use super::{
     setup::{live_here, LiveSide},
     willington::Willington,
 };
+use crate::AbletonOptions;
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_agent::core::contracts::SessionController;
 use kumi_agent::core::{
@@ -25,7 +26,6 @@ use kumi_daw::{
     },
     setup::DawSetup,
 };
-use kumi_daw_ableton::AbletonOptions;
 use kumi_library::daws::LibrarySources;
 use kumi_types::errors::RuntimeError;
 use kumi_types::{
@@ -53,25 +53,25 @@ impl DawProvider for Ableton {
         &DawProfile::ABLETON
     }
     fn presentation(&self) -> &'static ToolPresentation {
-        &kumi_daw_ableton::presentation::PRESENTATION
+        &crate::presentation::PRESENTATION
     }
     fn view(&self) -> &'static ViewPresentation {
-        &kumi_daw_ableton::presentation::VIEW
+        &crate::presentation::VIEW
     }
     fn library(&self) -> &'static dyn LibrarySources {
-        &kumi_daw_ableton::library::LIBRARY
+        &crate::library::LIBRARY
     }
     fn site(&self) -> &'static str {
         "ableton.com"
     }
     fn bridge_config(&self, env: &Env) -> Option<String> {
-        crate::config::find_bridge_config(env)
+        super::folders::find_bridge_config(env)
     }
     fn bundled_bridge_version(&self) -> Option<String> {
         bridge_setup::bundled_bridge_version()
     }
     fn installed_bridge_version(&self, bridge_config: &str, _env: &Env) -> Option<String> {
-        crate::doctor::read_bridge_server(bridge_config).ok().and_then(|s| s.version)
+        super::folders::read_bridge_server(bridge_config).ok().and_then(|s| s.version)
     }
     fn bridge_answers(&self, bridge_config: &str, _env: &Env) -> LocalBoxFuture<'static, bool> {
         let config = bridge_config.to_string();
@@ -111,7 +111,7 @@ impl DawProvider for Ableton {
         let mut options = AbletonOptions::with_context(context);
         options.bridge_config = Some(session.bridge_config.clone());
         options.project_store = Some(session.project_store.clone());
-        options.user_library = crate::config::live_user_library(&env);
+        options.user_library = super::folders::live_user_library(&env);
         // A kept conversation's Set opens in Live as a double-click would.
         options.open_file = Some({
             let env = env.clone();
@@ -135,9 +135,9 @@ impl DawProvider for Ableton {
         // A switch from a JavaScript bridge with the same Remote Script changes only the host, which Kumi
         // already runs natively: nothing to ask of the producer (a start with Live closed finishes it).
         let stale = found
-            .then(|| crate::update::older_bridge(env, bundled))
+            .then(|| super::install::older_bridge(env, bundled))
             .flatten()
-            .filter(|stale| !(stale.runtime_migration && crate::install::only_the_host_differs(env)));
+            .filter(|stale| !(stale.runtime_migration && super::install::only_the_host_differs(env)));
         // Plain mode has no setup to put the bridge in: the way by hand comes first.
         let connect = kumi_types::command::connect_live_by_hand(command);
         let notice = if missing {
@@ -230,7 +230,7 @@ impl DawProvider for Ableton {
         bridge_setup::setup_bridge(options).boxed_local()
     }
     fn bridge_installed(&self, env: &Env) -> bool {
-        crate::config::find_bridge_config(env).is_some()
+        super::folders::find_bridge_config(env).is_some()
     }
     fn bridge_folder(&self) -> &'static str {
         "bridge"
@@ -254,7 +254,7 @@ impl DawProvider for Ableton {
         Some(ToggleWords { tag: "willington", off_at_start: super::willington::OFF_AT_START })
     }
     fn without_daw(&self, on_connection: Rc<dyn Fn(ConnectionState)>) -> Rc<dyn Integration> {
-        kumi_daw_ableton::create_inference_only_integration(on_connection)
+        crate::create_inference_only_integration(on_connection)
     }
 }
 
@@ -262,7 +262,7 @@ impl DawProvider for Ableton {
 fn integration(stand_in: Option<&AbletonFactory>, options: AbletonOptions) -> Rc<dyn Integration> {
     match stand_in {
         Some(factory) => (factory.0)(options),
-        None => kumi_daw_ableton::create_ableton_integration(options),
+        None => crate::create_ableton_integration(options),
     }
 }
 

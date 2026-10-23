@@ -1,6 +1,7 @@
 //! Configuration, with full command, settings and error oracles.
 use kumi::config::*;
 use kumi_ai::providers::Effort;
+use kumi_daw_ableton::app::folders::{find_bridge_config, live_user_library, remote_scripts_dir};
 use kumi_types::system::{self, Env};
 use serde_json::{json, Value};
 fn env() -> Env {

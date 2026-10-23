@@ -13,7 +13,10 @@ use kumi_common::js::{
     number,
     string::{trim, trim_end, utf16_len},
 };
-use kumi_daw::check::Check;
+use kumi_daw::{
+    check::Check,
+    files::{clip, modified, names, read},
+};
 use kumi_library::sources::join;
 use kumi_types::place::IMPORTED;
 use kumi_types::{
@@ -22,7 +25,7 @@ use kumi_types::{
     version::KUMI_VERSION,
 };
 use serde_json::Value;
-use std::{path::Path, rc::Rc, time::UNIX_EPOCH};
+use std::{path::Path, rc::Rc};
 pub struct ReportIo {
     pub doctor: DoctorIo,
     pub folder: Option<String>,
@@ -151,14 +154,6 @@ fn strings(value: &Value, out: &mut Vec<String>) {
 fn head(text: &str, most: usize) -> String {
     String::from_utf16_lossy(&text.encode_utf16().take(most).collect::<Vec<_>>())
 }
-pub(crate) fn clip(text: &str, most: usize) -> String {
-    let len = utf16_len(text);
-    if len > most {
-        format!("{}… ({} more characters)", head(text, most), len - most)
-    } else {
-        text.into()
-    }
-}
 fn string(value: Option<&Value>) -> String {
     match value {
         None => "undefined".into(),
@@ -168,25 +163,6 @@ fn string(value: Option<&Value>) -> String {
         Some(Value::Number(n)) => number::to_string(n.as_f64().unwrap_or(f64::NAN)),
         Some(Value::Array(a)) => a.iter().map(|v| if v.is_null() { "".into() } else { string(Some(v)) }).collect::<Vec<_>>().join(","),
         Some(Value::Object(_)) => "[object Object]".into(),
-    }
-}
-pub(crate) async fn read(file: &str) -> Option<String> {
-    tokio::fs::read(file).await.ok().map(|b| String::from_utf8_lossy(&b).into_owned())
-}
-pub(crate) async fn names(folder: &str) -> Vec<String> {
-    let Ok(mut reader) = tokio::fs::read_dir(folder).await else { return vec![] };
-    let mut result = vec![];
-    while let Ok(Some(entry)) = reader.next_entry().await {
-        result.push(entry.file_name().to_string_lossy().into_owned())
-    }
-    result.sort();
-    result
-}
-pub(crate) async fn modified(file: &str) -> Option<f64> {
-    let time = tokio::fs::metadata(file).await.ok()?.modified().ok()?;
-    match time.duration_since(UNIX_EPOCH) {
-        Ok(time) => Some(time.as_secs_f64() * 1000.),
-        Err(error) => Some(-error.duration().as_secs_f64() * 1000.),
     }
 }
 /// The newest kept conversation in any Set's folder: when it was saved, its id and the conversation. Only `<id>.json`

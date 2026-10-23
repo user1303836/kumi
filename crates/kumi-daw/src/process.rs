@@ -109,3 +109,13 @@ pub async fn copy_tree(from: &str, to: &str) -> std::io::Result<()> {
     .await
     .map_err(std::io::Error::other)?
 }
+
+/// The version a crate's `Cargo.toml` gives its package (a checkout's build of the bridge says its version so).
+pub fn read_cargo_version(file: &str) -> Option<String> {
+    let text = fs::read_to_string(file).ok()?;
+    let package = text.split("[package]").nth(1)?.split("\n[").next()?;
+    package.lines().find_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        (key.trim() == "version").then(|| value.trim().trim_matches('"').to_string())
+    })
+}

@@ -2,14 +2,14 @@
 //! until the producer turns them on with /willington. The switch is `willington.json` beside the bridge's
 //! Remote Script, which the bridge reads again within a second of it changing, Live running.
 
-use crate::config::remote_scripts_dir;
+use super::folders::remote_scripts_dir;
+use crate::willington::WillingtonSwitch;
 use ableton_mcp_server::lifecycle::delivery::{
     secret_permissions, write_owner_file, SecretPermissions, REMOTE_SCRIPT_PACKAGE, WILLINGTON_CONFIG, WILLINGTON_FOLDER,
 };
 use futures::future::FutureExt;
 use kumi_common::time::now_ms_f64;
 use kumi_daw::provider::Toggle;
-use kumi_daw_ableton::willington::WillingtonSwitch;
 use kumi_types::system::Env;
 use serde_json::Value;
 use sha2::{Digest, Sha256};

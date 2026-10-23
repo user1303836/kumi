@@ -8,13 +8,13 @@
 //!   cargo build --release -p ableton-mcp-server --bins
 //!   cargo run --release -p kumi --example ears_hold_live -- --set "<Set name>"
 use futures::FutureExt;
-use kumi::config::find_bridge_config;
 use kumi_agent::{mcp::client, Integration, Observation};
 use kumi_common::{
     abort::{self, Signal},
     js::string::{head, trim},
     time::now_ms,
 };
+use kumi_daw_ableton::app::folders::find_bridge_config;
 use kumi_daw_ableton::{
     connection::Connect,
     create_ableton_integration,

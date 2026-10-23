@@ -20,4 +20,3 @@ pub mod update;
 pub mod voice;
 pub mod whats_new;
 // Live's own parts of the app, at the paths they always had.
-pub use daw::ableton::{bridge_setup, live_app, live_extension, willington};

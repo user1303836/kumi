@@ -1,19 +1,15 @@
-//! The app reaches Live's own parts only through its DAW providers: outside src/daw/, nothing names Live's integration,
-//! Live's bridge crate, or the app's Live modules (live_app, live_extension, bridge_setup, willington). Allowed: the
-//! re-exports that keep their old paths (`pub use crate::daw::ableton::…`), imports only unit tests use
-//! (`#[cfg(test)] use …`), and the few uses listed below, each with why.
+//! The app reaches Live's own parts only through its DAW providers: outside src/daw/ (the DAW table), nothing names
+//! Live's crates (kumi-daw-ableton, whose `app` module is Live's provider, and Live's bridge) or Live's modules
+//! (live_app, live_extension, bridge_setup, willington). Allowed: imports only unit tests use (`#[cfg(test)] use …`),
+//! and the uses listed below, each with why.
 
 use std::path::{Path, PathBuf};
 
 /// What names Live's parts.
-const LIVE: [&str; 6] = ["ableton", "ableton_mcp_server", "live_app", "live_extension", "bridge_setup", "willington"];
+const LIVE: [&str; 7] = ["ableton", "ableton_mcp_server", "kumi_daw_ableton", "live_app", "live_extension", "bridge_setup", "willington"];
 
 /// Uses allowed by file and phrase, with why.
-const ALLOWED: &[(&str, &str, &str)] = &[(
-    "cli/native/session.rs",
-    "crate::daw::ableton::provider::Ableton.watch_words()",
-    "the watch with Live's words, as its unit tests drive it",
-)];
+const ALLOWED: &[(&str, &str, &str)] = &[];
 
 fn sources(folder: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(folder).unwrap() {
@@ -79,7 +75,7 @@ fn nothing_outside_the_daw_providers_names_lives_own_parts() {
             let code = code(line);
             let trimmed = code.trim_start();
             if using.is_none() && trimmed.trim_start_matches("pub ").trim_start_matches("pub(crate) ").starts_with("use ") {
-                using = Some(test_only || trimmed.starts_with("pub use crate::daw::ableton::"));
+                using = Some(test_only);
             }
             if !trimmed.is_empty() {
                 test_only = trimmed.starts_with("#[cfg(test)]");

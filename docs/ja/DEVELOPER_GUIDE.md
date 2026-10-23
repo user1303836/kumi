@@ -19,7 +19,7 @@
 | `crates/kumi-listening` | リスニング：聴いて測るもの、ジャッジとチェックリスト、エンジンのラウンド、リスニングモデルとそのスロット、スタイルの参照、記譜。再生とレンダリングは各 DAW が受け持つ |
 | `crates/kumi-daw` | DAW のクレートがアプリに渡すものと受け取るもの：DAW のプロバイダー（DAW が何か、そしてブリッジの検出・インストール・確認・削除）、doctor のチェック、初回セットアップの DAW 側、各ステップが使う小さなポート（表示・質問・プログラムの実行） |
 | `crates/kumi-common` | ランタイムの共通処理と、ソース互換の値の扱い |
-| `daws/ableton/kumi-daw-ableton` | Live のホスト側：Live との連携（Set の観察、変更と HISTORY、レンダリングと Kumi Ears、Hands、ライブラリーとマニュアル）と Max for Live デバイスのビルダー |
+| `daws/ableton/kumi-daw-ableton` | Live のホスト側：Live との連携（Set の観察、変更と HISTORY、レンダリングと Kumi Ears、Hands、ライブラリーとマニュアル）、Max for Live デバイスのビルダー、そして Live のプロバイダー（`src/app/`：Live の検出・起動・確認、ブリッジのインストール・更新・ロールバック・削除、doctor・レポート・初回セットアップの Live 側） |
 | `daws/ableton/ableton-mcp-server` | ネイティブの MCP ブリッジ、解析ワーカー、ライフサイクル、セットアップ、移行、診断 |
 | `daws/ableton/remote-script` | Live の中で動く、ブリッジの Remote Script（`ableton_mcp_remote_script.py`、`AbletonMcpBridge/` エントリーポイント、Python のテスト） |
 | `daws/ableton/live-extension` | Live 12.4 以降向けの Kumi の Live 拡張機能。Live の Extensions SDK の上に作られています（TypeScript で、独自の `package.json` を持ちます） |

@@ -1,6 +1,7 @@
 //! Live's part of installing, updating, rolling back and removing Kumi: Kumi's bridge in Live after an update (and the
 //! receipt-bound switch from a JavaScript bridge), the bridge going back with a rollback, and the bridge taken out of
 //! Live when Kumi is removed.
+use super::folders::{find_bridge_config, read_bridge_server, remote_scripts_dir};
 use super::{
     answers::{BridgeAfterUpdate, LiveRunning},
     bridge_setup::{bridge_version, is_live_running, kept_generation, BridgeRollback},
@@ -8,18 +9,17 @@ use super::{
         extension_data_dir, former_extensions_dir, live_extensions_dir, remove_extension, remove_former_extension, KUMI_EXTENSION_ID,
     },
 };
-use crate::{
-    config::{find_bridge_config, remote_scripts_dir},
-    doctor::read_bridge_server,
-    install::{error, newer_version, remove},
-    update::newer,
-};
+use kumi_daw::{files::remove, provider::newer, provider::newer as newer_version};
+
+fn error(e: impl std::fmt::Display) -> RuntimeError {
+    RuntimeError::plain(e.to_string())
+}
+use crate::ears::device::EARS_NAME;
 use kumi_daw::{
     io::{kumi_home, step, DawIo, Kept},
     process::{executable_dir, executable_name},
     provider::{BridgeRollbackStep, RemovedBridge},
 };
-use kumi_daw_ableton::ears::device::EARS_NAME;
 use kumi_library::sources::{basename, dirname, join, resolve};
 use kumi_types::{
     command::{CONNECT_LIVE, KUMI},
@@ -94,7 +94,7 @@ pub(crate) async fn bridge_after(io: &DawIo, home: &str, app: &str) -> i32 {
 /// With no bridge in Live yet, an update ends by saying how to connect it, where Live runs: on Linux there's no Live,
 /// so nothing is said.
 pub fn no_bridge_yet(platform: &str) -> Option<String> {
-    crate::live_app::runs_on(platform).then(|| format!("The bridge isn't in Live yet. {}.", *CONNECT_LIVE))
+    super::live_app::runs_on(platform).then(|| format!("The bridge isn't in Live yet. {}.", *CONNECT_LIVE))
 }
 /// `kumi bridge` as an update's last step, Live just found closed: it asks nothing more (its lifecycle looks for
 /// Live again before changing anything) and doesn't wait for a Live nobody has opened.
@@ -244,13 +244,13 @@ pub async fn finish_legacy_transition(io: &DawIo) {
     // under it. A connect is instant; asking the system about Live is not (Windows). With the same
     // Remote Script nothing is missing meanwhile (Kumi runs its own native host), so the session
     // doesn't mention it either.
-    if crate::bridge_setup::remote_script_answers(&config).await || live_open(io).await {
+    if super::bridge_setup::remote_script_answers(&config).await || live_open(io).await {
         return;
     }
     // Byte for byte the same Remote Script (1.7.5's 1.0.74 for this release's): only the host and its
     // receipt change, so the switch is quiet, failing included (a later start tries again).
     let said = Rc::new(Kept::default());
-    let mut setup = crate::bridge_setup::BridgeSetupIo::new(if unchanged { said.clone() } else { io.out.clone() }, io.env.clone());
+    let mut setup = super::bridge_setup::BridgeSetupIo::new(if unchanged { said.clone() } else { io.out.clone() }, io.env.clone());
     setup.ask = io.ask.clone();
     setup.bridge_dir = Some(app.clone());
     setup.prepared = Some(join(&app, "bridge"));
@@ -258,7 +258,7 @@ pub async fn finish_legacy_transition(io: &DawIo) {
     setup.wait_ms = Some(0);
     setup.run = Some(io.run.clone());
     setup.live_running = io.answers.get::<LiveRunning>().map(|running| running.0.clone());
-    match crate::bridge_setup::setup_bridge(setup).await {
+    match super::bridge_setup::setup_bridge(setup).await {
         Ok(0) => {}
         _ if unchanged => {}
         Ok(_) => io.out.write("Kumi can still open. To finish switching the bridge, close Live and run: kumi bridge\n"),
@@ -270,12 +270,12 @@ pub async fn finish_legacy_transition(io: &DawIo) {
 
 /// Whether the Remote Script installed for a JavaScript bridge is, byte for byte, the one the app at
 /// `app` brings: then switching changes only the host, which native Kumi already runs.
-fn remote_script_unchanged(env: &Env, app: &str, config: &str, server: &crate::doctor::BridgeServer) -> bool {
+fn remote_script_unchanged(env: &Env, app: &str, config: &str, server: &super::folders::BridgeServer) -> bool {
     let scripts = server
         .package_root()
-        .and_then(|package| crate::bridge_setup::owner_paths(config, &package, &kumi_home(env)))
-        .map_or_else(|| crate::config::remote_scripts_dir(env), |(_, _, scripts)| scripts);
-    crate::bridge_setup::remote_script_unchanged(&join(app, "bridge/package"), &scripts)
+        .and_then(|package| super::bridge_setup::owner_paths(config, &package, &kumi_home(env)))
+        .map_or_else(|| super::folders::remote_scripts_dir(env), |(_, _, scripts)| scripts);
+    super::bridge_setup::remote_script_unchanged(&join(app, "bridge/package"), &scripts)
 }
 
 /// Whether a pending switch from a JavaScript bridge would change only its host (the installed Remote
@@ -294,7 +294,7 @@ pub(crate) async fn prepare_legacy_rollback(io: &DawIo, home: &str) -> Result<Op
         return Ok(None);
     }
     let package = server.package_root().ok_or_else(|| RuntimeError::plain("The bridge's package could not be found."))?;
-    let Some((state, secret, scripts)) = crate::bridge_setup::owner_paths(&config, &package, home) else {
+    let Some((state, secret, scripts)) = super::bridge_setup::owner_paths(&config, &package, home) else {
         return Err(RuntimeError::plain(
             "The earlier Kumi needs its JavaScript bridge, but its owner receipt could not be found. Nothing was changed.",
         ));
@@ -357,9 +357,9 @@ pub(crate) async fn earlier_bridge(io: &DawIo, home: &str, previous: &str, earli
         ["app", "app.previous", "app.rollback"].iter().any(|folder| Path::new(command).starts_with(join(home, folder)))
     });
     let package = server.package_root();
-    let owner = package.as_deref().and_then(|package| crate::bridge_setup::owner_paths(&config, package, home));
+    let owner = package.as_deref().and_then(|package| super::bridge_setup::owner_paths(&config, package, home));
     // That Kumi's own bridge: its version and, when its bundle lists it, its artifact.
-    let artifact = crate::bridge_setup::prepared_sha256(&join(previous, "bridge"));
+    let artifact = super::bridge_setup::prepared_sha256(&join(previous, "bridge"));
     let kept = owner.as_ref().and_then(|(state, _, _)| kept_generation(state)).filter(|kept| kept.is(&bundled, artifact.as_deref()));
     let (false, Some(command), Some(package), Some(owner), Some(kept)) = (in_app, server.command.clone(), package, owner, kept) else {
         return EarlierBridge { rollback: None, said: Some(stays), later: None };
@@ -427,11 +427,11 @@ pub async fn checkout_bridge(repo: &str) -> i32 {
 /// After a checkout's update: Live's bridge brought up to date with the checkout's own build, where Live is closed.
 pub(crate) async fn after_checkout_update(io: &DawIo, repo: &str) -> i32 {
     let say = |s: String| io.out.write(&format!("{s}\n"));
-    let bundled = crate::update::read_cargo_version(&join(repo, "daws/ableton/ableton-mcp-server/Cargo.toml"));
+    let bundled = kumi_daw::process::read_cargo_version(&join(repo, "daws/ableton/ableton-mcp-server/Cargo.toml"));
     let bundled = bundled.as_deref();
     let bridge = older_bridge(&io.env, bundled);
     if find_bridge_config(&io.env).is_none() {
-        if let Some(words) = crate::install::no_bridge_yet(kumi_types::system::platform()) {
+        if let Some(words) = super::install::no_bridge_yet(kumi_types::system::platform()) {
             say(words);
         }
         return 0;
