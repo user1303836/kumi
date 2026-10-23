@@ -1,7 +1,5 @@
 //! `kumi doctor`; native installs also diagnose legacy bridge configurations.
 mod installation;
-/// Live's checks, where the doctor has always had them.
-pub use crate::daw::ableton::doctor::{missing_bridge, older_bridge, port_owner};
 use crate::{
     config::*,
     models::OFFER_ORDER,
@@ -27,21 +25,14 @@ use kumi_ai::{
     },
 };
 use kumi_common::{
-    js::{
-        number,
-        string::{head, trim},
-    },
+    js::string::head,
     time::{now_ms, since},
 };
 use kumi_daw::{
-    check::{Check, CheckStatus},
+    check::{access, major, tilde, Check, CheckStatus},
     io::{Answers, DawIo, NoAnswer},
 };
-use kumi_library::{
-    learn::LearnPhase,
-    sources::{dirname, join},
-    state::read_state,
-};
+use kumi_library::{learn::LearnPhase, sources::dirname, state::read_state};
 use kumi_media::{
     programs::{ffmpeg_hint, find_ffmpeg, find_whisper, whisper_hint, FfmpegOptions, ProgramOptions},
     voice::{microphone::terminal_app, voice_readiness, ReadinessOptions, VoiceReadiness},
@@ -53,8 +44,7 @@ use kumi_types::{
     version::KUMI_VERSION,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::{fs, path::Path, rc::Rc, time::Duration};
+use std::rc::Rc;
 #[derive(Debug, Clone, Default)]
 pub struct TerminalInfo {
     pub is_tty: bool,
@@ -117,29 +107,6 @@ pub struct ServerFinding {
     pub running: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub models: Option<Vec<ModelInfo>>,
-}
-pub(crate) fn tilde(path: &str) -> String {
-    let home = home::home_dir().unwrap_or_default().display().to_string();
-    if !home.is_empty() {
-        path.strip_prefix(&home).map(|tail| format!("~{tail}")).unwrap_or_else(|| path.into())
-    } else {
-        path.into()
-    }
-}
-pub(crate) fn major(version: &str) -> f64 {
-    number::parse(version.strip_prefix('v').unwrap_or(version).split('.').next().unwrap_or("")).unwrap_or(f64::NAN)
-}
-pub(crate) fn newer(left: &str, right: &str) -> bool {
-    let a: Vec<_> = left.split('.').map(|s| number::parse(s).unwrap_or(f64::NAN)).collect();
-    let b: Vec<_> = right.split('.').map(|s| number::parse(s).unwrap_or(f64::NAN)).collect();
-    for i in 0..3 {
-        let x = a.get(i).copied().unwrap_or(0.);
-        let y = b.get(i).copied().unwrap_or(0.);
-        if x != y {
-            return x > y;
-        }
-    }
-    false
 }
 fn node_check(version: &str) -> Check {
     let name = version.strip_prefix('v').unwrap_or(version);
@@ -236,50 +203,6 @@ async fn sign_in_check(env: &Env, servers: &[ServerFinding]) -> Result<Check, Ru
             "saved in Kumi".into()
         }
     )))
-}
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct BridgeServer {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub command: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub entry: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
-}
-impl BridgeServer {
-    pub fn native(&self) -> bool {
-        self.command.as_ref().is_some_and(|c| Path::new(c).file_stem().is_some_and(|s| s == "ableton-mcp-server"))
-    }
-    pub fn package_root(&self) -> Option<String> {
-        if self.native() {
-            self.command.as_ref().map(|c| dirname(c))
-        } else {
-            self.entry.as_ref().map(|entry| dirname(&dirname(&dirname(entry))))
-        }
-    }
-}
-/// Read legacy Node entry metadata or the native server's sibling package metadata.
-pub fn read_bridge_server(config_path: &str) -> Result<BridgeServer, RuntimeError> {
-    let config: Value = serde_json::from_slice(&fs::read(config_path).map_err(|e| RuntimeError::plain(e.to_string()))?)
-        .map_err(|e| RuntimeError::plain(e.to_string()))?;
-    let nonempty = |v: &Value| v.as_str().filter(|s| !s.is_empty()).map(str::to_string);
-    let mut server = BridgeServer {
-        command: nonempty(&config["server"]["command"]),
-        entry: config["server"]["args"].as_array().and_then(|a| a.first()).and_then(nonempty),
-        version: None,
-    };
-    if server.native() {
-        server.entry = server.command.clone();
-    }
-    if let Some(root) = server.package_root() {
-        server.version =
-            fs::read(join(&root, "package.json")).ok().and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok()).and_then(|v| {
-                let version =
-                    if server.native() { v.get("bridge").filter(|v| v.is_string()).or_else(|| v.get("version")) } else { v.get("version") };
-                version.and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string)
-            });
-    }
-    Ok(server)
 }
 fn grouped(n: usize) -> String {
     let raw = n.to_string();
@@ -536,29 +459,6 @@ pub async fn doctor_checks(io: &DoctorIo) -> Result<Vec<Check>, RuntimeError> {
         })
     }
     Ok(checks)
-}
-pub(crate) fn access(path: &str, execute: bool) -> bool {
-    #[cfg(unix)]
-    {
-        let Ok(path) = std::ffi::CString::new(path) else { return false };
-        unsafe { libc::access(path.as_ptr(), if execute { libc::X_OK } else { libc::W_OK }) == 0 }
-    }
-    #[cfg(not(unix))]
-    {
-        fs::metadata(path).is_ok_and(|m| execute || !m.permissions().readonly())
-    }
-}
-pub(crate) async fn node_version(command: &str) -> Option<String> {
-    let mut process = tokio::process::Command::new(command);
-    process.arg("--version").env_clear().env("PATH", dirname(command)).kill_on_drop(true);
-    #[cfg(windows)]
-    process.creation_flags(0x0800_0000);
-    let result = tokio::time::timeout(Duration::from_secs(5), process.output()).await.ok()?.ok()?;
-    if !result.status.success() {
-        return None;
-    }
-    let text = head(trim(&String::from_utf8_lossy(&result.stdout)), 32);
-    (!text.is_empty()).then_some(text)
 }
 /// Checks under a heading.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -17,7 +17,8 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
   `host`, `live` with its `simulator/`, `lifecycle`, `analysis` and `project`); `remote-script/` runs inside Live
   (Python); `live-extension/` is Live's extension (TypeScript); `protocol/` is the only list of Live operations;
   `max-standard/` is the standard Kumi holds Max patches to (data Kumi builds in); `kumi-daw-ableton/` is Live, host
-  side: its integration and the Max for Live device builder.
+  side: its integration, the Max for Live device builder, and its provider (`src/app/`: Live found, opened and
+  checked, its bridge put in, updated, rolled back and taken out, its part of the doctor, the report and setup).
 - `daws/own/`: Kumi's own bridges, for REAPER and Renoise: `daw-bridge/` (the `kumi-daw/1` wire) and
   `daw-mcp-server/` (the host; what's one DAW's alone is in its `src/reaper/` and `src/renoise/`); `kumi-daw-own/`
   is what REAPER's and Renoise's integrations share, host side.

@@ -137,18 +137,14 @@ async fn connect_when_live_answers<F, A, O, B>(
     O: FnOnce() -> B,
     B: std::future::Future<Output = bool>,
 {
-    use kumi_daw::provider::DawProvider;
-    let words = crate::daw::ableton::provider::Ableton.watch_words();
+    let words = live_words();
     connect_when_daw_answers(answers, live_open, words, controller, emit, watching, told, pace).await
 }
-// What the unit tests below drive: Live's watch words and Live's side of setup.
+/// Live's words for its watch, as the DAW table has them.
 #[cfg(test)]
-use crate::daw::ableton::{
-    provider::{LIVE_STARTING, NO_LIVE},
-    setup::LiveSide,
-};
-#[cfg(test)]
-use kumi_daw::setup::DawSetup as LiveSetup;
+fn live_words() -> WatchWords {
+    crate::daw::provider(kumi_types::daw::DawId::Ableton).expect("Live is registered").watch_words()
+}
 pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<String>, answers: Answers) -> Result<i32, RuntimeError> {
     let (inference, bridge_config, bridge_missing, resume, daw) = match config {
         AppConfig::InferenceOnly { inference, bridge_missing, resume, daw } => {
@@ -1005,30 +1001,6 @@ mod watch_tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn a_given_bridge_config_stays_once_setup_puts_the_bridge_in_place() {
-        let dir = tempfile::tempdir().unwrap();
-        let reference = dir.path().join("Remote Scripts/AbletonMcpBridge");
-        std::fs::create_dir_all(&reference).unwrap();
-        let found = dir.path().join("bridge-config.json");
-        std::fs::write(&found, "{}").unwrap();
-        std::fs::write(reference.join("bridge-reference.json"), serde_json::json!({ "config": found }).to_string()).unwrap();
-        let env = Env::from([("KUMI_REMOTE_SCRIPTS_DIR".to_string(), dir.path().join("Remote Scripts").display().to_string())]);
-        let side = |given| LiveSide {
-            env: env.clone(),
-            run: kumi_daw::process::default_run(),
-            bridge: Rc::new(RefCell::new(Some("/given/bridge-config.json".into()))),
-            given,
-            controller: Rc::new(RefCell::new(None)),
-        };
-        let given = side(true);
-        given.connect().await;
-        assert_eq!(given.bridge.borrow().as_deref(), Some("/given/bridge-config.json"), "--bridge-config stays");
-        let looked_up = side(false);
-        looked_up.connect().await;
-        assert_eq!(looked_up.bridge.borrow().as_deref(), found.to_str(), "the one put in place");
-    }
-
-    #[tokio::test(flavor = "current_thread")]
     async fn told_to_restart_live_the_watch_says_nothing_else_and_connects_once_live_answers() {
         // Live runs another version of the bridge (right after kumi bridge, the installed one is current): the
         // session has said to restart Live, so the watch never says to choose AbletonMcpBridge, and connects once
@@ -1043,7 +1015,7 @@ mod watch_tests {
     async fn a_live_already_answering_is_reconnected_and_tried_again_until_connected() {
         let (reconnects, notices, watching) = watch(3, true, false, 0).await;
         assert_eq!(reconnects, 3, "at once, then again while Live answers and the session isn't connected");
-        assert_eq!(notices, [NO_LIVE, "Live answered, so Kumi is connected to it now."]);
+        assert_eq!(notices, [live_words().unreachable, "Live answered, so Kumi is connected to it now."]);
         assert!(!watching);
         // A Live that answers but never connects gets a bounded number of tries.
         let (reconnects, _, _) = watch(u32::MAX, true, false, 0).await;
@@ -1057,12 +1029,12 @@ mod watch_tests {
         // First-run setup has just opened Live: Kumi says it's waiting, and it connects within the hold.
         let (reconnects, notices, watching) = watch(1, true, true, 60_000).await;
         assert_eq!((reconnects, watching), (1, false));
-        assert_eq!(notices, [LIVE_STARTING, "Live answered, so Kumi is connected to it now."]);
+        assert_eq!(notices, [live_words().starting, "Live answered, so Kumi is connected to it now."]);
         // An open Live that doesn't answer (AbletonMcpBridge not chosen, say): how to fix it, once the hold is over.
         let (_, notices, _) = watch(1, false, true, 20).await;
-        assert_eq!(notices, [LIVE_STARTING, NO_LIVE]);
+        assert_eq!(notices, [live_words().starting, live_words().unreachable]);
         // A Live that isn't open is said at once.
         let (_, notices, _) = watch(1, false, false, 60_000).await;
-        assert_eq!(notices, [NO_LIVE]);
+        assert_eq!(notices, [live_words().unreachable]);
     }
 }

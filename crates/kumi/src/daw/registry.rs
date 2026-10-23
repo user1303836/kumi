@@ -4,7 +4,6 @@
 //! bridge in it. The DAWs' own crates (Live's kumi-daw-ableton, and the integrations of the DAWs whose bridges are
 //! Kumi's own) don't name each other; this table names them all.
 
-use super::ableton::provider::Ableton;
 use super::own::{self, Own};
 use daw_bridge::{
     daw::Daw,
@@ -14,6 +13,7 @@ use daw_bridge::{
 use kumi_agent::core::presentation::ToolPresentation;
 use kumi_agent::core::view::ViewPresentation;
 use kumi_daw::provider::{DawProvider, WatchWords};
+use kumi_daw_ableton::app::provider::Ableton;
 use kumi_daw_reaper as reaper;
 use kumi_daw_renoise as renoise;
 use kumi_library::daws::{Daws, LibrarySources};

@@ -1,9 +1,10 @@
 //! Native CLI dispatch and session binding: production stores, I/O and model controller.
 use kumi::{
-    cli::{help, run, AbletonFactory, CliIo},
+    cli::{help, run, CliIo},
     input::{ByteListener, TerminalInput},
     tui::tty::TtyOutput,
 };
+use kumi_daw_ableton::app::AbletonFactory;
 use kumi_daw_ableton::create_inference_only_integration;
 use kumi_types::system::Env;
 use serde_json::{json, Value};

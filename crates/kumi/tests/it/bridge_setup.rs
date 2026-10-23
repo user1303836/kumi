@@ -1,7 +1,6 @@
 //! Source bridge setup scenarios, with npm packaging replaced by native receipt-bound artifacts.
 use futures::FutureExt;
 use kumi::{
-    bridge_setup::*,
     input::{ByteListener, TerminalInput},
     process::TerminalAsk,
     spinner::Terminal,
@@ -11,6 +10,7 @@ use kumi_daw::{
     io::Answering,
     process::{copy_tree, executable_name, run_program, Ran, Run},
 };
+use kumi_daw_ableton::app::bridge_setup::*;
 use kumi_types::system::{self, Env, SystemProgram};
 use serde_json::json;
 use sha2::{Digest, Sha256};

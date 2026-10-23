@@ -10,13 +10,13 @@
 //!   cargo build -p ableton-mcp-server -p kumi-daw-ableton --bins
 //!   cargo run -p kumi --example device_sound_live -- --set "<Set name>" [--file <path>.amxd]…
 use futures::FutureExt;
-use kumi::config::find_bridge_config;
 use kumi_agent::{mcp::client, Integration, Observation};
 use kumi_common::{
     abort::{self, Signal},
     js::string::{head, trim},
     time::now_ms,
 };
+use kumi_daw_ableton::app::folders::find_bridge_config;
 use kumi_daw_ableton::{
     connection::Connect,
     create_ableton_integration,

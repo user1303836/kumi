@@ -1,12 +1,13 @@
 //! How Kumi starts, word for word: which integration it picks, and what it says when it carries on without Live.
 use kumi::{
-    cli::{run, AbletonFactory, CliIo},
+    cli::{run, CliIo},
     config::load_config,
     input::{ByteListener, TerminalInput},
     tui::tty::TtyOutput,
 };
 use kumi_agent::core::contracts::*;
 use kumi_common::abort::Signal;
+use kumi_daw_ableton::app::AbletonFactory;
 use kumi_types::{
     errors::{FailureKind, KumiError, RuntimeError},
     system::Env,

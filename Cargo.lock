@@ -1382,6 +1382,7 @@ dependencies = [
  "kumi-common",
  "kumi-library",
  "kumi-types",
+ "libc",
  "serde",
  "tokio",
 ]
@@ -1390,6 +1391,7 @@ dependencies = [
 name = "kumi-daw-ableton"
 version = "0.1.0"
 dependencies = [
+ "ableton-mcp-server",
  "async-trait",
  "chrono",
  "fancy-regex",
@@ -1401,6 +1403,7 @@ dependencies = [
  "kumi-agent",
  "kumi-ai",
  "kumi-common",
+ "kumi-daw",
  "kumi-genexpr",
  "kumi-library",
  "kumi-listening",

@@ -1,8 +1,10 @@
 //! `kumi update` for a checkout, rebuilding with Cargo.
 use futures::FutureExt;
-use kumi::daw::ableton::answers::{BridgeAfterUpdate, LiveRunning};
 use kumi::{tui::tty::TtyOutput, update::*};
 use kumi_daw::process::{executable_name, Ran, Run};
+use kumi_daw::provider::newer;
+use kumi_daw_ableton::app::answers::{BridgeAfterUpdate, LiveRunning};
+use kumi_daw_ableton::app::install::older_bridge;
 use kumi_types::system::Env;
 use serde_json::json;
 use std::{
@@ -261,7 +263,7 @@ async fn dirty_checkout_is_preserved_and_current_or_missing_bridge_is_explained(
     assert_eq!(run_update(io).await, 0);
     // How to connect it where Live runs; on Linux, nothing about Live.
     let said = out.0.borrow().clone();
-    match kumi::install::no_bridge_yet(kumi_types::system::platform()) {
+    match kumi_daw_ableton::app::install::no_bridge_yet(kumi_types::system::platform()) {
         Some(words) => assert!(said.contains(&words), "{said}"),
         None => assert!(!said.contains("Live"), "{said}"),
     }

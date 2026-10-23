@@ -7,7 +7,6 @@
 //!   cargo run --release -p kumi --example accept_live -- --set "Kumi Focus Demo"
 use async_trait::async_trait;
 use futures::FutureExt;
-use kumi::config::find_bridge_config;
 use kumi_agent::{create_project_store, mcp::client, Baseline, Integration, Observation, ProjectStore};
 use kumi_common::{
     abort::{self, Signal},
@@ -18,6 +17,7 @@ use kumi_common::{
     },
     time::{now_ms, perf_now},
 };
+use kumi_daw_ableton::app::folders::find_bridge_config;
 use kumi_daw_ableton::{connection::Connect, create_ableton_integration, AbletonOptions, BRIDGE_TOOLS};
 use kumi_media::audio::{hear, AnalyzeOptions};
 use kumi_types::{

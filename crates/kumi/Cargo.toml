@@ -31,7 +31,6 @@ kumi-daw-ableton.workspace = true
 kumi-daw-reaper.workspace = true
 kumi-daw-renoise.workspace = true
 kumi-daw-own.workspace = true
-ableton-mcp-server.workspace = true
 daw-bridge.workspace = true
 async-trait.workspace = true
 base64.workspace = true
@@ -64,6 +63,9 @@ libc.workspace = true
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_IO", "Win32_System_Pipes", "Win32_System_Power", "Win32_System_Threading"] }
 
 [dev-dependencies]
+# Live's bridge, as the tests of Live's provider (Willington's owner file, the native editing check) and the live examples
+# read it.
+ableton-mcp-server.workspace = true
 # The agent's test helpers (a FOCUS view's row in DAWS.md, which daws_doc checks).
 kumi-agent = { workspace = true, features = ["test-support"] }
 kumi-store.workspace = true

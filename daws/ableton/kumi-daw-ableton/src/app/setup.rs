@@ -1,10 +1,10 @@
 //! Live's side of first-run setup, for the app: Live the app (open, quit, start, its version, what's installed),
 //! Kumi's bridge put in it, and the session connecting through the bridge once it's in place.
+use super::folders::find_bridge_config;
 use super::{
     bridge_setup::{self, BridgeSetupIo},
     live_app,
 };
-use crate::config::find_bridge_config;
 use async_trait::async_trait;
 use kumi_agent::core::contracts::SessionController;
 use kumi_common::abort::Signal;
@@ -84,4 +84,33 @@ impl DawSetup for LiveSide {
 /// Live runs on macOS and Windows only: elsewhere Kumi chats without it, and setup only signs in.
 pub(crate) fn live_here() -> bool {
     live_app::runs_on(kumi_types::system::platform())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_given_bridge_config_stays_once_setup_puts_the_bridge_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let reference = dir.path().join("Remote Scripts/AbletonMcpBridge");
+        std::fs::create_dir_all(&reference).unwrap();
+        let found = dir.path().join("bridge-config.json");
+        std::fs::write(&found, "{}").unwrap();
+        std::fs::write(reference.join("bridge-reference.json"), serde_json::json!({ "config": found }).to_string()).unwrap();
+        let env = Env::from([("KUMI_REMOTE_SCRIPTS_DIR".to_string(), dir.path().join("Remote Scripts").display().to_string())]);
+        let side = |given| LiveSide {
+            env: env.clone(),
+            run: kumi_daw::process::default_run(),
+            bridge: Rc::new(RefCell::new(Some("/given/bridge-config.json".into()))),
+            given,
+            controller: Rc::new(RefCell::new(None)),
+        };
+        let given = side(true);
+        given.connect().await;
+        assert_eq!(given.bridge.borrow().as_deref(), Some("/given/bridge-config.json"), "--bridge-config stays");
+        let looked_up = side(false);
+        looked_up.connect().await;
+        assert_eq!(looked_up.bridge.borrow().as_deref(), found.to_str(), "the one put in place");
+    }
 }

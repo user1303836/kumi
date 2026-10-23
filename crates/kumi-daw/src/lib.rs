@@ -7,7 +7,9 @@
 //! - [`setup`]: the DAW's side of first-run setup.
 //! - [`io`]: what a DAW's steps get from the app: where they say things, how they ask, a test's answers.
 //! - [`process`]: running programs, where Kumi's executables are, copying a folder.
+//! - [`files`]: a file's text, a folder's names, when a file changed, a long line clipped, removing.
 pub mod check;
+pub mod files;
 pub mod io;
 pub mod process;
 pub mod provider;

@@ -1,24 +1,22 @@
 //! Live's part of `kumi doctor`: its bridge (the configuration, the server other MCP apps start, whether Kumi
 //! reaches Live through it, Kumi's Live Extension), what Live needs from this computer (Live installed and opened,
 //! its User Library, the bridge's ports, Developer Mode), and Kumi's hands in Live's menus.
+use super::folders::{find_bridge_config, live_user_library, read_bridge_server, remote_scripts_dir, BridgeServer};
 use super::{
     answers::{ExtensionHost, Hands, LiveRunning, Lives, NodeVersions, PortOwners},
     bridge_setup::is_live_running,
     live_app::{installed_lives, installed_with, runs_on, InstalledLive, MIN_LIVE_MAJOR},
     live_extension::*,
 };
-use crate::{
-    config::{find_bridge_config, live_user_library, remote_scripts_dir},
-    doctor::{access, major, newer, node_version, read_bridge_server, tilde, BridgeServer},
-};
+use crate::hands::{can_build_hands, open_hands, HandsErrorKind, OpenHandsOptions};
 use futures::{future::join_all, FutureExt};
+use kumi_daw::check::{access, major, newer, node_version, tilde};
 use kumi_daw::{
     check::{Bundled, Check, CheckStatus, Probe, Probes},
     io::DawIo,
     process::default_run,
     provider::Installed as LiveInstalled,
 };
-use kumi_daw_ableton::hands::{can_build_hands, open_hands, HandsErrorKind, OpenHandsOptions};
 use kumi_library::sources::{dirname, join};
 use kumi_types::{
     command::{CONNECT_LIVE, INSTALLED, KUMI, KUMI_REPAIR, KUMI_START},
@@ -134,7 +132,7 @@ pub(crate) async fn bridge_checks(io: &DawIo, node: &Check) -> Vec<Check> {
         }
     } else {
         let platform = system::platform();
-        checks.push(missing_bridge(platform, || crate::live_app::installed(env, platform)))
+        checks.push(missing_bridge(platform, || super::live_app::installed(env, platform)))
     }
     checks
 }
@@ -143,7 +141,7 @@ pub(crate) async fn bridge_checks(io: &DawIo, node: &Check) -> Vec<Check> {
 /// aren't read at all, or no Live 12 here) is a note.
 pub fn missing_bridge(platform: &str, installed: impl FnOnce() -> LiveInstalled) -> Check {
     let live_12 = || Some(format!("Kumi works with Live {MIN_LIVE_MAJOR}: once it's installed and opened once, run: {}", *KUMI_START));
-    match crate::live_app::runs_on(platform).then(installed) {
+    match super::live_app::runs_on(platform).then(installed) {
         None => Check::note("There's no Live for this system, so Kumi chats without it", None),
         Some(LiveInstalled::Missing) => {
             Check::note(format!("Live {MIN_LIVE_MAJOR} isn't on this computer, so Kumi chats without Live"), live_12())
@@ -158,7 +156,7 @@ pub fn missing_bridge(platform: &str, installed: impl FnOnce() -> LiveInstalled)
 /// no Live to load it, so it's a note, with what this system can do: bring the bridge's files up to date.
 pub fn older_bridge(platform: &str, installed: &str, bundled: &str) -> Check {
     let text = format!("The installed bridge ({installed}) is older than this Kumi's ({bundled})");
-    if crate::live_app::runs_on(platform) {
+    if super::live_app::runs_on(platform) {
         Check::fix(text, Some(CONNECT_LIVE.to_string()))
     } else {
         Check::note(text, Some(format!("{} bridge --yes brings its files up to date", *KUMI)))
@@ -463,4 +461,27 @@ async fn developer_mode(env: &Env, platform: &str, io: &DawIo, live_running: boo
         None => ableton_mcp_server::bridge::extension_launcher::running_extension_hosts().await.live,
     };
     Some(if own_host { off() } else { on() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ports_held_by_live_are_fine_and_by_another_program_need_fixing() {
+        assert_eq!(ports_check(&[(9765, None), (9766, None)], false).text, "Ports 9765 and 9766 free for Live's bridge");
+        assert_eq!(ports_check(&[(9765, None), (9766, None)], true).status, kumi_daw::check::CheckStatus::Ok);
+        let live = ports_check(&[(9765, Some(Some("Live".into()))), (9766, None)], true);
+        assert_eq!(live, Check::ok("Live's bridge has port 9765 (Live is open)"));
+        let windows =
+            ports_check(&[(9765, Some(Some("Ableton Live 12 Suite".into()))), (9766, Some(Some("Ableton Live 12 Suite".into())))], true);
+        assert_eq!(windows.text, "Live's bridge has ports 9765 and 9766 (Live is open)");
+        // Unnamed while Live runs: Live's. Unnamed with Live closed: another program's.
+        assert_eq!(ports_check(&[(9765, Some(None))], true).status, kumi_daw::check::CheckStatus::Ok);
+        let unnamed = ports_check(&[(9765, Some(None))], false);
+        assert_eq!(unnamed.status, kumi_daw::check::CheckStatus::Fix);
+        assert!(unnamed.next.unwrap().starts_with("Quit it, then restart Live"));
+        let other = ports_check(&[(9765, Some(Some("Live".into()))), (9766, Some(Some("node".into())))], true);
+        assert_eq!(other, Check::fix("node holds port 9766, which Live's bridge needs", Some("Quit node, then restart Live".into())));
+    }
 }

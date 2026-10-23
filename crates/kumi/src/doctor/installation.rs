@@ -2,18 +2,17 @@
 //! the shell finds `kumi`, whether a newer Kumi is out, free space, and what Live needs from this computer.
 //! Files and the system are read; nothing goes over the network: whether a newer Kumi is out comes from
 //! the daily check's note, and the bridge's ports are tried on this computer (127.0.0.1) only.
-use super::tilde;
 use crate::{
     config::{kumi_dir, load_settings_file, read_settings},
     install::{app_version, chown_line, has_app, not_yours, startup_files, PATH_MARKER, UPDATE_SPACE},
-    update::newer,
 };
 use futures::future::LocalBoxFuture;
 use kumi_common::time::{now_ms, since};
 use kumi_daw::{
-    check::Check,
+    check::{tilde, Check},
     io::{Answers, DawIo},
     process::repository_dir,
+    provider::newer,
 };
 use kumi_library::sources::{dirname, join};
 use kumi_types::{
@@ -149,10 +148,6 @@ fn space_check(free: Option<f64>, home: &str) -> Option<Check> {
     })
 }
 
-// What the unit tests below drive: Live's check of the bridge's ports.
-#[cfg(test)]
-use crate::daw::ableton::doctor::ports_check;
-
 pub async fn installation_checks(env: &Env, io: &InstallationIo) -> Vec<Check> {
     let platform = io.platform.clone().unwrap_or_else(|| system::platform().into());
     let home = kumi_dir(env);
@@ -188,27 +183,4 @@ pub async fn installation_checks(env: &Env, io: &InstallationIo) -> Vec<Check> {
         checks.extend(provider.installation_checks(&daw, &platform).await);
     }
     checks
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ports_held_by_live_are_fine_and_by_another_program_need_fixing() {
-        assert_eq!(ports_check(&[(9765, None), (9766, None)], false).text, "Ports 9765 and 9766 free for Live's bridge");
-        assert_eq!(ports_check(&[(9765, None), (9766, None)], true).status, kumi_daw::check::CheckStatus::Ok);
-        let live = ports_check(&[(9765, Some(Some("Live".into()))), (9766, None)], true);
-        assert_eq!(live, Check::ok("Live's bridge has port 9765 (Live is open)"));
-        let windows =
-            ports_check(&[(9765, Some(Some("Ableton Live 12 Suite".into()))), (9766, Some(Some("Ableton Live 12 Suite".into())))], true);
-        assert_eq!(windows.text, "Live's bridge has ports 9765 and 9766 (Live is open)");
-        // Unnamed while Live runs: Live's. Unnamed with Live closed: another program's.
-        assert_eq!(ports_check(&[(9765, Some(None))], true).status, kumi_daw::check::CheckStatus::Ok);
-        let unnamed = ports_check(&[(9765, Some(None))], false);
-        assert_eq!(unnamed.status, kumi_daw::check::CheckStatus::Fix);
-        assert!(unnamed.next.unwrap().starts_with("Quit it, then restart Live"));
-        let other = ports_check(&[(9765, Some(Some("Live".into()))), (9766, Some(Some("node".into())))], true);
-        assert_eq!(other, Check::fix("node holds port 9766, which Live's bridge needs", Some("Quit node, then restart Live".into())));
-    }
 }

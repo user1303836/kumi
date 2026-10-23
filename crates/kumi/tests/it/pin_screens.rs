@@ -874,7 +874,7 @@ fn willington_off() -> kumi_daw::provider::Toggle {
         },
         set: Rc::new(move |value| {
             on.set(value);
-            async move { Ok(if value { kumi::willington::TURNED_ON } else { kumi::willington::TURNED_OFF }) }.boxed_local()
+            async move { Ok(if value { kumi_daw_ableton::app::willington::TURNED_ON } else { kumi_daw_ableton::app::willington::TURNED_OFF }) }.boxed_local()
         }),
     }
 }

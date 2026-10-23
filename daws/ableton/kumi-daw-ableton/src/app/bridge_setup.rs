@@ -53,13 +53,13 @@ pub async fn is_live_running_on(run: Run, platform: &str, env: &Env) -> bool {
     }
     false
 }
-use crate::{
-    config::{find_bridge_config, kumi_dir, remote_scripts_dir},
-    doctor::read_bridge_server,
+use super::{
+    folders::{find_bridge_config, read_bridge_server, remote_scripts_dir},
     live_extension::{extension_source, install_extension, live_extensions_dir, remove_former_extension},
 };
+use crate::ears::device::{install_ears, EARS_NAME};
 use kumi_common::{js::string::head, time::now_ms};
-use kumi_daw_ableton::ears::device::{install_ears, EARS_NAME};
+use kumi_daw::io::kumi_home as kumi_dir;
 use kumi_library::sources::{dirname, join};
 use kumi_types::{
     command::{CONNECT_LIVE, KUMI, KUMI_REPAIR, KUMI_START},
@@ -338,7 +338,7 @@ impl BridgeRollback {
         let folder = live_extensions_dir(env, system::platform())?;
         let again = format!("run {} bridge once to put it back", *KUMI);
         let Some(source) = extension_source(&self.previous) else {
-            return crate::live_extension::installed_extension(&folder)
+            return super::live_extension::installed_extension(&folder)
                 .map(|_| format!("Kumi's extension in Live is this version's, which that bridge won't use: {again}."));
         };
         Some(match install_extension(&source, &folder) {
@@ -473,7 +473,7 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
     // An app rollback can leave a newer Kumi's bridge in Live: it serves this Kumi too, and the lifecycle never
     // updates to an older bridge. Its own rollback puts this Kumi's back when that's the generation it kept.
     if let Some(newer) =
-        installed.as_ref().filter(|s| s.native()).and_then(|s| s.version.clone()).filter(|v| crate::update::newer(v, &bundled))
+        installed.as_ref().filter(|s| s.native()).and_then(|s| s.version.clone()).filter(|v| kumi_daw::provider::newer(v, &bundled))
     {
         let package = installed.as_ref().and_then(|s| s.package_root());
         let prepared = io.prepared.clone().unwrap_or_else(|| join(&executable_dir(), "bridge"));
