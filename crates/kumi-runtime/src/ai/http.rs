@@ -329,3 +329,79 @@ mod transport_tests {
         assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), before + 1, "asked again, then passed by");
     }
 }
+
+/// Why a call got no answer (kumi-net's `cause`), as Kumi's own HTTP client keeps it for each cause.
+#[cfg(test)]
+mod cause_tests {
+    use super::*;
+    use crate::net::proxy;
+    use crate::web::cause::NetCause;
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    /// A local server that does `answer` with each connection.
+    async fn server(answer: &'static [u8], close: bool) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut request = vec![0; 4096];
+                    let _ = socket.read(&mut request).await;
+                    let _ = socket.write_all(answer).await;
+                    if !close {
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                    }
+                });
+            }
+        });
+        address
+    }
+
+    /// An address nothing listens on.
+    async fn closed_port() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        drop(listener);
+        address
+    }
+
+    async fn failed(fetch: &HttpFetch, url: &str) -> LanguageModelError {
+        match fetch.fetch(url, FetchInit::default()).await {
+            Ok(response) => response.text().await.expect_err("a broken body"),
+            Err(error) => error,
+        }
+    }
+
+    #[tokio::test]
+    async fn kumis_own_http_keeps_what_went_wrong_for_each_cause() {
+        // No proxy, whatever this machine has set: each cause as the network gives it.
+        let direct =
+            |read| HttpFetch::through(std::sync::Arc::new(|| std::sync::Arc::new(proxy::Settings::none())), Duration::from_secs(5), read);
+        let fetch = direct(Duration::from_millis(300));
+        // The read timeout counts from the request on, connecting and looking the name up included, and Windows tries a
+        // closed port again for a second or two before it says refused: these two wait as long as they need.
+        let patient = direct(Duration::from_secs(5));
+        // Refused.
+        let refused = failed(&patient, &format!("http://{}/", closed_port().await)).await;
+        assert_eq!(NetCause::of_call(&refused), Some(NetCause::Offline), "{refused:?}");
+        // A name that never resolves (RFC 6761).
+        let unknown = failed(&patient, "http://kumi-net-cause.invalid/").await;
+        assert_eq!(NetCause::of_call(&unknown), Some(NetCause::Dns), "{unknown:?}");
+        // Something that answers HTTPS with plain words: a captive portal, say.
+        let portal = server(b"HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\n\r\n", true).await;
+        let tls = failed(&fetch, &format!("https://{portal}/")).await;
+        assert_eq!(NetCause::of_call(&tls), Some(NetCause::Tls), "{tls:?}");
+        // A server that accepts but never answers.
+        let silent = server(b"", false).await;
+        let slow = failed(&fetch, &format!("http://{silent}/")).await;
+        assert_eq!(NetCause::of_call(&slow), Some(NetCause::Timeout), "{slow:?}");
+        // A body that stops partway, then the connection goes.
+        let partial = server(b"HTTP/1.1 200 OK\r\ncontent-length: 1000\r\n\r\npartial", true).await;
+        let cut = failed(&fetch, &format!("http://{partial}/")).await;
+        assert!(matches!(NetCause::of_call(&cut), Some(NetCause::Offline)), "{cut:?}");
+        let LanguageModelError::Other(words) = &cut else { panic!("{cut:?}") };
+        assert!(words.starts_with("error decoding response body"), "the first words stay as they were: {words}");
+    }
+}

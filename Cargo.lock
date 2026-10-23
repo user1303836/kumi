@@ -1293,6 +1293,34 @@ name = "kumi-genexpr"
 version = "1.19.2"
 
 [[package]]
+name = "kumi-net"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "encoding_rs",
+ "fancy-regex",
+ "futures",
+ "kumi-common",
+ "kumi-testkit",
+ "kumi-types",
+ "rcgen",
+ "regex",
+ "reqwest",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-platform-verifier",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "url",
+ "webpki-roots",
+]
+
+[[package]]
 name = "kumi-runtime"
 version = "1.21.1"
 dependencies = [
@@ -1312,6 +1340,7 @@ dependencies = [
  "indexmap",
  "kumi-common",
  "kumi-genexpr",
+ "kumi-net",
  "kumi-store",
  "kumi-testkit",
  "kumi-types",

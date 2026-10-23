@@ -23,8 +23,8 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_ENCODIN
 use serde_json::Value;
 use url::Url;
 
-use crate::core::errors::RuntimeError;
-use crate::version::KUMI_VERSION;
+use kumi_types::errors::RuntimeError;
+use kumi_types::version::KUMI_VERSION;
 
 /// What kind of trouble a web error is, for trying elsewhere: none of it is shown as is.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -817,7 +817,7 @@ impl WebClient for NetClient {
 /// auto-config file finds), they say the web tool doesn't: it checks each address is public, and a proxy would look the
 /// name up again (`net::direct`).
 fn unreachable(words: String) -> WebError {
-    let settings = crate::net::proxy::current();
+    let settings = crate::proxy::current();
     let through = settings.https.is_some() || settings.auto_config;
     let words = if through { format!("{words} Kumi reads the web directly, never through a proxy.") } else { words };
     WebError::with_trouble(words, None, WebTrouble::UNREACHABLE)
@@ -840,14 +840,14 @@ fn system_lookup() -> Lookup {
 /// A client's beginning for Kumi's other fetches from addresses a page gave (a video's captions): as the web client's,
 /// a name any of whose addresses isn't public is refused, and no proxy stands in between. Redirects are its own to
 /// check, hop by hop.
-pub(crate) fn guarded_http() -> reqwest::ClientBuilder {
-    crate::net::direct().dns_resolver(Arc::new(GuardedLookup { resolve: system_lookup(), allow: public_only() }))
+pub fn guarded_http() -> reqwest::ClientBuilder {
+    crate::direct().dns_resolver(Arc::new(GuardedLookup { resolve: system_lookup(), allow: public_only() }))
 }
 
 pub fn create_web_client(options: WebClientOptions) -> Rc<dyn WebClient> {
     let allow: Allow = options.allow.unwrap_or_else(public_only);
     let resolve: Lookup = options.lookup.unwrap_or_else(system_lookup);
-    let http = crate::net::direct_http1()
+    let http = crate::direct_http1()
         .dns_resolver(Arc::new(GuardedLookup { resolve, allow: Arc::clone(&allow) }))
         .redirect(reqwest::redirect::Policy::none())
         .gzip(true)
@@ -893,7 +893,7 @@ pub fn decode_text(body: &[u8], charset: Option<&str>) -> String {
 }
 
 /// `String(value)` for a JSON value, as a template writes it.
-pub(crate) fn js_string(value: &Value) -> String {
+pub fn js_string(value: &Value) -> String {
     match value {
         Value::Null => "null".to_string(),
         Value::Bool(flag) => flag.to_string(),

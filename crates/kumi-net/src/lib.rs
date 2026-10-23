@@ -3,8 +3,11 @@
 //! and user agent. [`model_servers`] is for a model server the producer names, [`direct`] for the web tool's guarded
 //! lookups, which a proxy would get around.
 
+pub mod cause;
+pub mod error;
 pub mod proxy;
 mod trust;
+pub mod web;
 
 use std::sync::Arc;
 
@@ -180,7 +183,7 @@ mod tests {
     async fn text(sent: reqwest::Result<reqwest::Response>) -> Result<(u16, String), String> {
         match sent {
             Ok(answer) => Ok((answer.status().as_u16(), answer.text().await.unwrap_or_default())),
-            Err(error) => Err(crate::web::cause::chain(&error)),
+            Err(error) => Err(crate::cause::chain(&error)),
         }
     }
 
@@ -219,7 +222,7 @@ mod tests {
             (format!("http://{refused}"), "refused"),
             (format!("http://{inspects}"), "invalid peer certificate"),
         ] {
-            let env = crate::system::Env::from([("HTTPS_PROXY".to_string(), proxy.clone())]);
+            let env = kumi_types::system::Env::from([("HTTPS_PROXY".to_string(), proxy.clone())]);
             let (client, settings) = through(Settings::from_env(&env).unwrap(), roots.clone(), "kumi-send.test", target);
             let said = text(send_through(client.get(&url), settings).await).await.unwrap_err();
             assert!(said.contains(says), "{proxy}: {said}");
@@ -271,12 +274,14 @@ mod tests {
     #[test]
     fn every_client_begins_here() {
         let here = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let crates = here.parent().unwrap();
-        let mut sources = vec![crates.to_path_buf()];
+        // Every crate of the workspace, Kumi's own and each DAW's, but this one.
+        let root = kumi_testkit::workspace();
+        let mut sources = vec![root.join("crates"), root.join("daws")];
         let mut elsewhere = Vec::new();
         while let Some(path) = sources.pop() {
             if path.is_dir() {
-                if path != here.join("src").join("net") && path.file_name().is_some_and(|name| name != "tests" && name != "target") {
+                let skipped = |name: &std::ffi::OsStr| ["tests", "target", "node_modules"].iter().any(|skip| name == *skip);
+                if path != here.join("src") && path.file_name().is_some_and(|name| !skipped(name)) {
                     sources.extend(std::fs::read_dir(&path).unwrap().map(|entry| entry.unwrap().path()));
                 }
             } else if path.extension().is_some_and(|extension| extension == "rs") {
@@ -284,11 +289,11 @@ mod tests {
                 let code = text.split("#[cfg(test)]").next().unwrap_or("");
                 for made in ["Client::builder()", "Client::new()", "ClientBuilder::new()", "reqwest::get(", "reqwest::blocking"] {
                     if code.contains(made) {
-                        elsewhere.push(format!("{}: {made}", path.strip_prefix(crates).unwrap().display()));
+                        elsewhere.push(format!("{}: {made}", path.strip_prefix(&root).unwrap().display()));
                     }
                 }
             }
         }
-        assert!(elsewhere.is_empty(), "begin these at kumi_runtime::net::client (or direct): {elsewhere:#?}");
+        assert!(elsewhere.is_empty(), "begin these at kumi_net::client (or direct): {elsewhere:#?}");
     }
 }

@@ -16,7 +16,8 @@ pub mod library;
 pub mod listening;
 pub mod mcp;
 pub mod models;
-pub mod net;
+// How Kumi reaches the network (kumi-net), where the runtime's code and the app have always named it.
+pub use kumi_net as net;
 pub mod notation;
 pub mod plugins;
 pub mod providers;

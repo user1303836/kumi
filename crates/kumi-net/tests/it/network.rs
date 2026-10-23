@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use chrono::{Datelike, Utc};
-use kumi_runtime::net::{self, proxy::Settings};
+use kumi_net::{self as net, proxy::Settings};
 use rcgen::{BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, KeyUsagePurpose};
 use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 

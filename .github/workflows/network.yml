@@ -3,7 +3,7 @@ name: Network
 # Kumi's HTTP as a school's or an office's network has it, on each system, beside reqwest as Kumi made its clients
 # before: a certificate authority installed in the system's own trust store (what a network that inspects secure
 # connections asks for), and a proxy in the system's own settings with an exception (on Linux, which has none, in
-# HTTPS_PROXY and NO_PROXY). The tests are the ignored ones in kumi-runtime's tests/it/network.rs. Only for changes to
+# HTTPS_PROXY and NO_PROXY). The tests are the ignored ones in kumi-net's tests/it/network.rs. Only for changes to
 # how Kumi's HTTP clients are made (the `network` area in scripts/areas.toml): macOS runners are scarce.
 
 on:
@@ -76,13 +76,13 @@ jobs:
           key: network
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build the tests
-        run: cargo test -p kumi-runtime --test it --locked --no-run
+        run: cargo test -p kumi-net --test it --locked --no-run
       - name: The tests that need nothing of the system's
-        run: cargo test -p kumi-runtime --test it --locked -- "network::"
+        run: cargo test -p kumi-net --test it --locked -- "network::"
       - name: Passing a proxy by and the system's check, on this system's own errors (a pull request's CI runs no unit tests here)
-        run: cargo test -p kumi-runtime --lib --locked -- "net::"
+        run: cargo test -p kumi-net --lib --locked -- --skip cause:: --skip error::
       - name: Make a certificate authority of the network's own
-        run: cargo test -p kumi-runtime --test it --locked -- --ignored --exact network::make_test_authority
+        run: cargo test -p kumi-net --test it --locked -- --ignored --exact network::make_test_authority
 
       - name: Install it in the system's trust store (Linux)
         if: runner.os == 'Linux'
@@ -101,14 +101,14 @@ jobs:
         run: certutil -addstore -f Root "$env:KUMI_TEST_AUTHORITY\authority.pem"
 
       - name: Trusted by the system's trust store
-        run: cargo test -p kumi-runtime --test it --locked -- --ignored --exact network::the_systems_trust_store_is_trusted --nocapture
+        run: cargo test -p kumi-net --test it --locked -- --ignored --exact network::the_systems_trust_store_is_trusted --nocapture
 
       - name: Through the proxy in HTTPS_PROXY, but for NO_PROXY's exception (Linux)
         if: runner.os == 'Linux'
         env:
           HTTPS_PROXY: http://127.0.0.1:18080
           NO_PROXY: bypass.kumi-network.test
-        run: cargo test -p kumi-runtime --test it --locked -- --ignored --exact network::the_systems_proxy_is_followed_with_its_exceptions --nocapture
+        run: cargo test -p kumi-net --test it --locked -- --ignored --exact network::the_systems_proxy_is_followed_with_its_exceptions --nocapture
       - name: Through the proxy in the system's settings, but for its exception (macOS)
         if: runner.os == 'macOS'
         run: |
@@ -122,7 +122,7 @@ jobs:
             sudo networksetup -setproxybypassdomains "$service" "*.local" "169.254/16" bypass.kumi-network.test
           done <<<"$services"
           scutil --proxy
-          cargo test -p kumi-runtime --test it --locked -- --ignored --exact network::the_systems_proxy_is_followed_with_its_exceptions --nocapture
+          cargo test -p kumi-net --test it --locked -- --ignored --exact network::the_systems_proxy_is_followed_with_its_exceptions --nocapture
       - name: Through the proxy in the system's settings, but for its exception (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -134,7 +134,7 @@ jobs:
             New-ItemProperty $settings -Name ProxyOverride -Value 'bypass.kumi-network.test;<local>' -PropertyType String -Force | Out-Null
             New-ItemProperty $settings -Name ProxyEnable -Value 1 -PropertyType DWord -Force | Out-Null
             Get-ItemProperty $settings | Select-Object ProxyEnable, ProxyServer, ProxyOverride | Format-List
-            cargo test -p kumi-runtime --test it --locked -- --ignored --exact network::the_systems_proxy_is_followed_with_its_exceptions --nocapture
+            cargo test -p kumi-net --test it --locked -- --ignored --exact network::the_systems_proxy_is_followed_with_its_exceptions --nocapture
             $code = $LASTEXITCODE
           } finally {
             New-ItemProperty $settings -Name ProxyEnable -Value 0 -PropertyType DWord -Force | Out-Null

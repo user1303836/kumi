@@ -7,7 +7,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::core::errors::KumiError;
+use kumi_types::errors::KumiError;
 
 /// `APICallError` from `@ai-sdk/provider`: a provider's HTTP call that failed, with what the SDK
 /// kept of the request and the response. Header names are lowercase.
