@@ -237,7 +237,7 @@ jobs:
     # dialog, the library worker, Willington's receipt) run in Extended only (KUMI_WINDOWS_EXTENDED_ONLY).
     name: Rust / ${{ matrix.label }}
     needs: changes
-    if: needs.changes.outputs.rust == 'true' && (github.event_name == 'push' || github.head_ref == 'reorg/p4.3-platform-jobs')
+    if: needs.changes.outputs.rust == 'true' && github.event_name == 'push'
     runs-on: windows-2025
     strategy:
       fail-fast: false
