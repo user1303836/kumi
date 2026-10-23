@@ -10,6 +10,7 @@
 | --- | --- |
 | `crates/kumi` | 原生的 `kumi` 命令和终端应用（`src/tui/`），以及针对模型或真实 Live、需要主动运行的检查（`examples/`） |
 | `crates/kumi-runtime` | 代理循环、模型提供方、登录、会话、素材库、Live 集成、媒体工具和 MCP 客户端 |
+| `crates/kumi-types` | 每一层都会用到的类型和设置：DAW 配置与用词、代理与工具之间的契约、错误、位置、系统、版本 |
 | `crates/kumi-common` | 共享的运行时工具，以及与原实现兼容的值处理 |
 | `daws/ableton/ableton-mcp-server` | 原生 MCP 桥接、分析工作进程、生命周期、设置、迁移和诊断 |
 | `daws/ableton/remote-script` | 桥接的 Remote Script，运行在 Live 内部（`ableton_mcp_remote_script.py`、`AbletonMcpBridge/` 入口、Python 测试） |
@@ -170,7 +171,7 @@ python3 scripts/release.py --go     # 正式发布
 - **桥接**在拉取请求修改了 Live 加载的内容时获得新版本：`daws/ableton/ableton-mcp-server`、主机链接的 `crates/kumi-common`、`daws/ableton/remote-script`、`daws/ableton/protocol`、`daws/ableton/live-extension` 或 `vendor/willington`（测试和 Markdown 除外）。`Cargo.lock` 中主机的依赖变化时，试运行会提示，这时用 `--bridge` 给桥接一个新版本。
 - **REAPER 的扩展和 Renoise 的工具**也按同样的方式获得新版本：拉取请求修改了该 DAW 加载的内容时（`daws/reaper/reaper-kumi` 和 `daws/own/daw-bridge`，或 `daws/renoise/com.kumi.Bridge.xrnx`）。`--reaper` 和 `--renoise` 无论如何都给它新版本，`--no-reaper` 和 `--no-renoise` 保持原版本；`--no-bridge` 只针对 Live。写成 `Changelog (reaper):` 或 `Changelog (renoise):` 的行会放到它的标题下。使用 `--go` 时，`daws/reaper/reaper-kumi/Cargo.toml` 和 `Cargo.lock`、工具的 `payload/version.lua` 和 `manifest.xml` 中的版本会前进，三个 `KUMI_GUIDE.md` 中各自的 ships-with 行也会前进。上一个版本没有的桥接按它自己的版本发布，它那一行已经写着本次版本。
 - **版本**是下一个补丁版本；`--minor` 或 `--version X.Y.Z` 可以选择其他版本。
-- **加上 `--go`**，它会在 `release/vX.Y.Z` 上提交 “Kumi X.Y.Z: the changelog, READMEs and versions”：根目录的 `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common` 和 `kumi-runtime` 的 Cargo 清单以及 `Cargo.lock` 中的版本（打包测试会确保这些相等），桥接变化时还有桥接的版本；三个 README 中当前状态（Status）的那一行；三个 `KUMI_CHANGES.md` 中“桥接版本”（Bridge versions）下说明随附哪个桥接的那一行；以及 `CHANGELOG.md` 中的 `## X.Y.Z — date` 条目。然后它打开拉取请求 “Kumi X.Y.Z”，不等其 CI，用管理员绕过将其合并为 “Kumi X.Y.Z (#PR)”，给合并提交打上标签 `vX.Y.Z` 并推送，再创建带发布说明的草稿发布（`--summary` 可以在说明开头加一句话）。
+- **加上 `--go`**，它会在 `release/vX.Y.Z` 上提交 “Kumi X.Y.Z: the changelog, READMEs and versions”：根目录的 `package.json`、`crates/kumi-types/src/version.rs`、`kumi`、`kumi-common`、`kumi-runtime` 和 `kumi-types` 的 Cargo 清单以及 `Cargo.lock` 中的版本（打包测试会确保这些相等），桥接变化时还有桥接的版本；三个 README 中当前状态（Status）的那一行；三个 `KUMI_CHANGES.md` 中“桥接版本”（Bridge versions）下说明随附哪个桥接的那一行；以及 `CHANGELOG.md` 中的 `## X.Y.Z — date` 条目。然后它打开拉取请求 “Kumi X.Y.Z”，不等其 CI，用管理员绕过将其合并为 “Kumi X.Y.Z (#PR)”，给合并提交打上标签 `vX.Y.Z` 并推送，再创建带发布说明的草稿发布（`--summary` 可以在说明开头加一句话）。
 - **标签触发的 Installer 运行**会为 macOS、Linux 和 Windows 的 Intel 与 ARM 构建原生发行包，测试安装和迁移，附加各平台的发行包和清单以及兼容用的 `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS` 和安装程序，并在说明由 `release.py` 撰写（说明以 `<!-- kumi:release-notes -->` 结尾）且两个安装程序都已附加时发布该版本。只有在此之后，安装程序、`kumi update` 和更新检查才能看到它。其他草稿，例如手动推送、说明“待补充”的标签，在有人发布之前一直是草稿。
 
 **在本地准备原生发布**，需从一个干净的提交开始：

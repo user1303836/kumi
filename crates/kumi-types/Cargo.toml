@@ -1,0 +1,26 @@
+[package]
+name = "kumi-types"
+version = "1.21.1"
+description = "Kumi's shared types and settings: the DAW profiles, the contracts between the agent and its tools, errors, timing, and the system and version every layer names."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+kumi-common.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+regex.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

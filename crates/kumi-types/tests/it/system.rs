@@ -1,4 +1,4 @@
-use kumi_runtime::system::{env_var, system_program, windows_device_name, Env, SystemProgram};
+use kumi_types::system::{env_var, system_program, windows_device_name, Env, SystemProgram};
 
 fn env(pairs: &[(&str, &str)]) -> Env {
     pairs.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect()

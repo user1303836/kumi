@@ -1,9 +1,11 @@
 //! The crate root.
 
+// Kumi's shared settings and types (kumi-types), where the runtime's code and the app have always named them.
+pub use kumi_types::{command, daw_text, daw_word, live_word, system, version};
+
 pub mod ai;
 pub mod audio;
 pub mod auth;
-pub mod command;
 pub mod core;
 pub mod devices;
 pub mod integrations;
@@ -20,8 +22,6 @@ pub mod plugins;
 pub mod providers;
 pub mod references;
 pub mod slots;
-pub mod system;
-pub mod version;
 pub mod video;
 pub mod voice;
 pub mod web;

@@ -11,6 +11,7 @@ How the repository fits together, how to work on each part, and how to release.
 | --- | --- |
 | `crates/kumi` | The native `kumi` command and terminal app (`src/tui/`), and opt-in checks against models or real Live (`examples/`) |
 | `crates/kumi-runtime` | Agent loop, providers, sign-in, sessions, library, Live integration, media tools and MCP client |
+| `crates/kumi-types` | The types and settings every layer names: DAW profiles and words, the agent's contracts with its tools, errors, places, the system, the version |
 | `crates/kumi-common` | Shared runtime utilities and source-compatible value handling |
 | `daws/ableton/ableton-mcp-server` | Native MCP bridge, analysis worker, lifecycle, setup, migration and diagnostics |
 | `daws/ableton/remote-script` | The bridge's Remote Script, which runs inside Live (`ableton_mcp_remote_script.py`, the `AbletonMcpBridge/` entry point, Python tests) |
@@ -319,8 +320,8 @@ python3 scripts/release.py --go     # the release
   another.
 - **With `--go`** it commits "Kumi X.Y.Z: the changelog, READMEs and versions"
   on `release/vX.Y.Z`: the version in the root `package.json`,
-  `crates/kumi-runtime/src/version.rs`, the `kumi`, `kumi-common` and
-  `kumi-runtime` Cargo manifests and `Cargo.lock` (the packaging tests hold
+  `crates/kumi-types/src/version.rs`, the `kumi`, `kumi-common`, `kumi-runtime`
+  and `kumi-types` Cargo manifests and `Cargo.lock` (the packaging tests hold
   these equal), and the bridge's when it changed; the Status line of the three
   READMEs; the ships-with line under "Bridge versions" in the three
   `KUMI_CHANGES.md`; and a `## X.Y.Z — date` entry in `CHANGELOG.md`. It opens

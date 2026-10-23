@@ -28,6 +28,7 @@ path = "src/bin/kumi-library-learner.rs"
 [dependencies]
 kumi-common.workspace = true
 kumi-store.workspace = true
+kumi-types.workspace = true
 # Where REAPER and Renoise keep their libraries (the library learns them): the same detection as their bridges' setup.
 daw-bridge.workspace = true
 async-trait.workspace = true

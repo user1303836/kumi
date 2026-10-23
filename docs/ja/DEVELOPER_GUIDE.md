@@ -10,6 +10,7 @@
 | --- | --- |
 | `crates/kumi` | ネイティブの `kumi` コマンドとターミナルアプリ（`src/tui/`）、そしてモデルや実際の Live に対して任意で実行するチェック（`examples/`） |
 | `crates/kumi-runtime` | エージェントループ、プロバイダー、サインイン、セッション、ライブラリー、Live との連携、メディアのツール、MCP クライアント |
+| `crates/kumi-types` | すべての層が名指す型と設定：DAW のプロファイルと言葉、エージェントとツールの契約、エラー、場所、システム、バージョン |
 | `crates/kumi-common` | ランタイムの共通処理と、ソース互換の値の扱い |
 | `daws/ableton/ableton-mcp-server` | ネイティブの MCP ブリッジ、解析ワーカー、ライフサイクル、セットアップ、移行、診断 |
 | `daws/ableton/remote-script` | Live の中で動く、ブリッジの Remote Script（`ableton_mcp_remote_script.py`、`AbletonMcpBridge/` エントリーポイント、Python のテスト） |
@@ -170,7 +171,7 @@ python3 scripts/release.py --go     # リリース
 - **ブリッジ**は、プルリクエストが Live の読み込むもの（`daws/ableton/ableton-mcp-server`、ホストがリンクする `crates/kumi-common`、`daws/ableton/remote-script`、`daws/ableton/protocol`、`daws/ableton/live-extension`、`vendor/willington`。テストと Markdown は除く）を変えたときに新しいバージョンになります。`Cargo.lock` にあるホストの依存関係が変わるとドライランがそう伝えるので、そのときは `--bridge` でブリッジを新しいバージョンにします。
 - **REAPER の拡張機能と Renoise のツール**も同じように、プルリクエストがその DAW の読み込むもの（`daws/reaper/reaper-kumi` と `daws/own/daw-bridge`、または `daws/renoise/com.kumi.Bridge.xrnx`）を変えたときに新しいバージョンになります。`--reaper` と `--renoise` はどの場合でも新しいバージョンにし、`--no-reaper` と `--no-renoise` はそのままにします。`--no-bridge` は Live のものだけです。`Changelog (reaper):` か `Changelog (renoise):` と書いた行は、その見出しの下に入ります。`--go` では、`daws/reaper/reaper-kumi/Cargo.toml` と `Cargo.lock`、ツールの `payload/version.lua` と `manifest.xml` のバージョンが進み、三つの `KUMI_GUIDE.md` にあるそれぞれの ships-with の行も進みます。前のリリースになかったものはそのバージョンのまま出荷され、その行にはすでにこのリリースが書かれています。
 - **バージョン**は次のパッチです。`--minor` か `--version X.Y.Z` で別のものを選べます。
-- **`--go` を付けると**、`release/vX.Y.Z` に "Kumi X.Y.Z: the changelog, READMEs and versions" をコミットします。ルートの `package.json`、`crates/kumi-runtime/src/version.rs`、`kumi`、`kumi-common`、`kumi-runtime` の Cargo マニフェスト、`Cargo.lock` のバージョン（パッケージングのテストがこれらが等しいことを確認します）と、変わった場合はブリッジのバージョン、3 つの README の Status の行、3 つの `KUMI_CHANGES.md` の「Bridge versions」の下にある同梱するブリッジの行、`CHANGELOG.md` の `## X.Y.Z — date` の項目です。続いてプルリクエスト "Kumi X.Y.Z" を開き、その CI を待たずに管理者のバイパスで "Kumi X.Y.Z (#PR)" としてマージし、マージコミットに `vX.Y.Z` のタグを付けてプッシュし、リリースノート付きの下書きのリリースを作ります（`--summary` でノートの冒頭に一文を加えられます）。
+- **`--go` を付けると**、`release/vX.Y.Z` に "Kumi X.Y.Z: the changelog, READMEs and versions" をコミットします。ルートの `package.json`、`crates/kumi-types/src/version.rs`、`kumi`、`kumi-common`、`kumi-runtime`、`kumi-types` の Cargo マニフェスト、`Cargo.lock` のバージョン（パッケージングのテストがこれらが等しいことを確認します）と、変わった場合はブリッジのバージョン、3 つの README の Status の行、3 つの `KUMI_CHANGES.md` の「Bridge versions」の下にある同梱するブリッジの行、`CHANGELOG.md` の `## X.Y.Z — date` の項目です。続いてプルリクエスト "Kumi X.Y.Z" を開き、その CI を待たずに管理者のバイパスで "Kumi X.Y.Z (#PR)" としてマージし、マージコミットに `vX.Y.Z` のタグを付けてプッシュし、リリースノート付きの下書きのリリースを作ります（`--summary` でノートの冒頭に一文を加えられます）。
 - **タグの Installer の実行**が、macOS、Linux、Windows の Intel と ARM 向けのネイティブバンドルをビルドし、インストールと移行をテストし、ターゲットごとのバンドルとマニフェスト、互換用の `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS`、インストーラーを添付し、`release.py` がノートを書いていて（ノートの最後に `<!-- kumi:release-notes -->` があります）、インストーラーが両方添付されている場合はリリースを公開します。そうして初めて、インストーラー、`kumi update`、更新確認がそのリリースを認識します。手でプッシュした「ノートは後で」のタグなど、ほかの下書きは、だれかが公開するまで下書きのままです。
 
 **ネイティブリリースのローカルでの準備**（コミット済みの変更がない状態で）：

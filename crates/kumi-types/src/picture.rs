@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::contracts::ClipNote;
+use crate::contracts::ClipNote;
 use kumi_common::js::{
     number,
     string::{head, trim},
@@ -826,7 +826,7 @@ mod tests {
 
     #[test]
     fn records_without_a_picture_still_read() {
-        let old: super::super::contracts::ChangeRecord = serde_json::from_value(serde_json::json!({
+        let old: crate::contracts::ChangeRecord = serde_json::from_value(serde_json::json!({
             "id":"c1","family":"tempo","title":"Tempo 120 → 124 BPM","from":120.0,"to":124.0,"state":"applied","at":1
         }))
         .unwrap();
@@ -864,7 +864,7 @@ mod tests {
     #[test]
     fn a_picture_this_kumi_cant_read_leaves_its_record_readable() {
         let record = |picture: serde_json::Value| {
-            serde_json::from_value::<super::super::contracts::ChangeRecord>(serde_json::json!({
+            serde_json::from_value::<crate::contracts::ChangeRecord>(serde_json::json!({
                 "id":"c1","family":"parameter","title":"t","state":"applied","at":1,"picture":picture
             }))
         };

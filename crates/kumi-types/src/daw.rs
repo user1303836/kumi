@@ -1,5 +1,6 @@
 //! Which DAW an integration drives, and what Kumi says and offers for it: what the producer calls the DAW and its
 //! parts, and what the DAW can ever do through Kumi. The bridge and its version still decide what's there right now.
+use crate::matching::StructuralKind;
 use serde::{Deserialize, Serialize};
 
 /// The DAWs Kumi knows. Serde names are what files and settings keep.
@@ -86,7 +87,7 @@ pub struct PromptVocab {
     /// Notes named as a tracker writes them, three characters with a dash for a natural ("C-5", "C#5"): Renoise's.
     pub tracker_notes: bool,
     /// For each gap no knob closes, the structural change that closes it, with the DAW's own devices.
-    pub structure_moves: &'static [(crate::audio::matching::StructuralKind, &'static str)],
+    pub structure_moves: &'static [(StructuralKind, &'static str)],
     /// Where the producer's sounds are, as find_sounds names them: "Live's User Library and Places, Splice, packs, folders
     /// they named".
     pub library_places: &'static str,
@@ -166,8 +167,8 @@ pub struct PromptVocab {
 }
 
 /// The structural changes for a DAW Kumi doesn't know: no device names.
-const UNKNOWN_STRUCTURE_MOVES: &[(crate::audio::matching::StructuralKind, &str)] = {
-    use crate::audio::matching::StructuralKind::*;
+const UNKNOWN_STRUCTURE_MOVES: &[(StructuralKind, &str)] = {
+    use StructuralKind::*;
     &[
         (MissingLow, "add a sub layer (a sine one octave down, in a parallel chain), a low-shelf EQ, or change the base instrument"),
         (ExcessLow, "high-pass it (an EQ), take the low layer out, or change the base"),
@@ -551,7 +552,7 @@ macro_rules! daw_text {
         $(#[$meta])*
         $vis const $konst: &str = concat!($($crate::daw_text!(@live $piece)),+);
         $(#[$meta])*
-        $vis fn $func(profile: &$crate::core::daw::DawProfile) -> String {
+        $vis fn $func(profile: &$crate::daw::DawProfile) -> String {
             [$($crate::daw_text!(@of profile, $piece)),+].concat()
         }
     };
@@ -822,7 +823,7 @@ impl DawProfile {
             eq: crate::live_word!(eq),
             middle_c_octave: 3,
             tracker_notes: false,
-            structure_moves: crate::audio::matching::STRUCTURE_MOVES,
+            structure_moves: STRUCTURE_MOVES,
             library_places: crate::live_word!(library_places),
             preset_sources: crate::live_word!(preset_sources),
             preset_examples: crate::live_word!(preset_examples),
@@ -1081,7 +1082,8 @@ impl DawProfile {
     /// A MIDI note by the name the DAW gives it: "C3" for 60 in Live.
     pub fn note_name(&self, midi: u8) -> String {
         if self.vocab.middle_c_octave == 3 {
-            return crate::notation::pitch_name(midi);
+            // Live's own names, as notation's pitch names are (C3 is 60).
+            return format!("{}{}", NAMES[midi as usize % 12], midi as i32 / 12 - 2);
         }
         const NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
         const TRACKER: [&str; 12] = ["C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"];
@@ -1274,7 +1276,7 @@ mod tests {
     #[test]
     fn every_profile_has_a_structural_change_for_every_gap() {
         for profile in [DawProfile::ABLETON, DawProfile::UNKNOWN, DawProfile::REAPER, DawProfile::RENOISE] {
-            for (kind, _) in crate::audio::matching::STRUCTURE_MOVES {
+            for (kind, _) in STRUCTURE_MOVES {
                 assert!(profile.vocab.structure_moves.iter().any(|(k, _)| k == kind), "{kind:?}");
             }
         }
@@ -1309,3 +1311,17 @@ mod tests {
         assert_eq!(serde_json::to_string(&[DawId::Ableton, DawId::Reaper, DawId::Renoise]).unwrap(), r#"["ableton","reaper","renoise"]"#);
     }
 }
+
+/// Live's structural change for each kind of gap, with its own devices (`DawProfile::ABLETON`'s).
+pub const STRUCTURE_MOVES: &[(StructuralKind, &str)]=&[
+(StructuralKind::MissingLow,"add a sub layer (an Operator sine or a Drift one octave down, in a rack chain), an EQ Eight low shelf, or change the base instrument"),
+(StructuralKind::ExcessLow,"high-pass it (EQ Eight), take the low layer out, or change the base"),
+(StructuralKind::MissingTop,"add saturation (Saturator, Roar), an exciter or a brighter base (a saw or noise layer)"),
+(StructuralKind::ExcessTop,"low-pass it (Auto Filter), use a darker base (sine, triangle), or take a layer out"),
+(StructuralKind::MissingMids,"add a layer for the body (a second oscillator or a rack chain), or change the base"),
+(StructuralKind::ExcessMids,"cut the mids (EQ Eight), change the base, or thin the layers"),
+(StructuralKind::Envelope,"change the instrument family (a plucked or struck model against a sustained one), or add a transient shaper (Drum Buss, Compressor)"),
+(StructuralKind::Register,"transpose it (the MIDI, or the instrument's octave), or change the base"),
+(StructuralKind::Pitched,"change the kind of source: a tonal oscillator against noise or a sample"),
+(StructuralKind::Width,"widen or narrow it: Utility width, Chorus-Ensemble, or parallel chains panned apart"),
+(StructuralKind::Density,"change the MIDI: more or fewer notes, another rhythm")];

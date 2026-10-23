@@ -526,7 +526,7 @@ pub fn curve_later(history: &Rc<History>, kind: &ChangeKind, device: Option<&Val
                 run.waiting.clone()
             };
             if let Ok(rows) = read {
-                let rows: Vec<pictures::ParameterRow> = rows.iter().filter_map(pictures::ParameterRow::from_row).collect();
+                let rows: Vec<pictures::ParameterRow> = rows.iter().filter_map(pictures::parameter_row).collect();
                 let applied =
                     |id: &str| history.entries.borrow().get(id).is_some_and(|entry| entry.borrow().record.state == ChangeState::Applied);
                 for (id, curve) in pictures::curves_for(&rows, &changes, &newer, applied) {

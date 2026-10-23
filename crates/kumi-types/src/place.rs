@@ -2,7 +2,7 @@
 //! conversations imported from files. Live's places are as they always were (a project id of 32 lowercase hex digits,
 //! "unsaved"); another DAW's carry its name ("reaper-<id>", "reaper-unsaved"), without ":" since a place names a
 //! folder. A store takes only the places of the DAWs it's told this Kumi integrates: Live's unless it's told more.
-use super::daw::DawId;
+use crate::daw::DawId;
 
 /// The DAWs whose places a store takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

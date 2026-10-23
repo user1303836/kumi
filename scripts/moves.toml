@@ -1032,3 +1032,85 @@ in = "daws/ableton/ableton-mcp-server"
 from = "crate::registry"
 to = "crate::protocol::registry"
 in = "daws/ableton/ableton-mcp-server"
+
+# kumi-types, the lowest of Kumi's own crates: the runtime's shared types and settings (2026-10).
+
+[[move]]
+from = "crates/kumi-runtime/src/command.rs"
+to = "crates/kumi-types/src/command.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/core/daw.rs"
+to = "crates/kumi-types/src/daw.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/core/disk.rs"
+to = "crates/kumi-types/src/disk.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/core/errors.rs"
+to = "crates/kumi-types/src/errors.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/core/picture.rs"
+to = "crates/kumi-types/src/picture.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/core/place.rs"
+to = "crates/kumi-types/src/place.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/core/private.rs"
+to = "crates/kumi-types/src/private.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/system.rs"
+to = "crates/kumi-types/src/system.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/version.rs"
+to = "crates/kumi-types/src/version.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/system.rs"
+to = "crates/kumi-types/tests/it/system.rs"
+
+[[rust]]
+from = "kumi_runtime::core::daw"
+to = "kumi_types::daw"
+
+[[rust]]
+from = "kumi_runtime::core::errors"
+to = "kumi_types::errors"
+
+[[rust]]
+from = "kumi_runtime::core::disk"
+to = "kumi_types::disk"
+
+[[rust]]
+from = "kumi_runtime::core::place"
+to = "kumi_types::place"
+
+[[rust]]
+from = "kumi_runtime::core::private"
+to = "kumi_types::private"
+
+[[rust]]
+from = "kumi_runtime::core::picture"
+to = "kumi_types::picture"
+
+[[rust]]
+from = "kumi_runtime::system"
+to = "kumi_types::system"
+
+[[rust]]
+from = "kumi_runtime::version"
+to = "kumi_types::version"
+
+[[rust]]
+from = "kumi_runtime::command"
+to = "kumi_types::command"
+
+[[rust]]
+from = "kumi_runtime::audio::matching::Closeness"
+to = "kumi_types::matching::Closeness"
