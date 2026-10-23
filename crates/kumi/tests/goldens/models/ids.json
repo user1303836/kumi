@@ -1,0 +1,420 @@
+{
+  "ids": [
+    {
+      "id": "openai-codex/gpt-5.5",
+      "cloud": [
+        "openai-codex",
+        "gpt-5.5"
+      ],
+      "local": null,
+      "settings": true
+    },
+    {
+      "id": "openai/gpt-6-luna",
+      "cloud": [
+        "openai",
+        "gpt-6-luna"
+      ],
+      "local": null,
+      "settings": true
+    },
+    {
+      "id": "anthropic/claude-sonnet-5-5",
+      "cloud": [
+        "anthropic",
+        "claude-sonnet-5-5"
+      ],
+      "local": null,
+      "settings": true
+    },
+    {
+      "id": "opencode/kimi-k2.6",
+      "cloud": [
+        "opencode",
+        "kimi-k2.6"
+      ],
+      "local": null,
+      "settings": true
+    },
+    {
+      "id": "opencode-go/glm-5",
+      "cloud": [
+        "opencode-go",
+        "glm-5"
+      ],
+      "local": null,
+      "settings": true
+    },
+    {
+      "id": "openai/o5-mini",
+      "cloud": [
+        "openai",
+        "o5-mini"
+      ],
+      "local": null,
+      "settings": true
+    },
+    {
+      "id": "openai/ft:gpt-4.1:acme::x1",
+      "cloud": [
+        "openai",
+        "ft:gpt-4.1:acme::x1"
+      ],
+      "local": null,
+      "settings": true
+    },
+    {
+      "id": "opencode/qwen3.5_coder",
+      "cloud": [
+        "opencode",
+        "qwen3.5_coder"
+      ],
+      "local": null,
+      "settings": true
+    },
+    {
+      "id": "openai/a/b",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "opencode/deepseek/v4",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai//x",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai-codex/has space",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai/é",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai/_x",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai/-x",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai/.x",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai/x@q4",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai/✦",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai/ x",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai/x ",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai/a\n",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai/a\tb",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai/a",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai/",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "/gpt-5",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "OpenAI/gpt-5",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "open ai/x",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openrouter/moonshotai/kimi-k3.1-pro",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "venice/x",
+      "cloud": null,
+      "local": [
+        "venice",
+        "x"
+      ],
+      "settings": true
+    },
+    {
+      "id": "venice-2/x",
+      "cloud": null,
+      "local": [
+        "venice-2",
+        "x"
+      ],
+      "settings": true
+    },
+    {
+      "id": "venice-3/x",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai-2/gpt-5",
+      "cloud": null,
+      "local": [
+        "openai-2",
+        "gpt-5"
+      ],
+      "settings": true
+    },
+    {
+      "id": "my-server/llama 4",
+      "cloud": null,
+      "local": [
+        "my-server",
+        "llama 4"
+      ],
+      "settings": true
+    },
+    {
+      "id": "server/x",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "ollama/qwen3:8b",
+      "cloud": null,
+      "local": [
+        "ollama",
+        "qwen3:8b"
+      ],
+      "settings": true
+    },
+    {
+      "id": "ollama/hf.co/unsloth/Qwen3-30B:Q4_K_M",
+      "cloud": null,
+      "local": [
+        "ollama",
+        "hf.co/unsloth/Qwen3-30B:Q4_K_M"
+      ],
+      "settings": true
+    },
+    {
+      "id": "lmstudio/qwen/qwen3-8b@q4_k_m",
+      "cloud": null,
+      "local": [
+        "lmstudio",
+        "qwen/qwen3-8b@q4_k_m"
+      ],
+      "settings": true
+    },
+    {
+      "id": "lmstudio/ x",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai/aaaaaaaaa… (135 UTF-16 units)",
+      "cloud": [
+        "openai",
+        "aaaaaaaaaaaaaaaa… (128 UTF-16 units)"
+      ],
+      "local": null,
+      "settings": true
+    },
+    {
+      "id": "openai/aaaaaaaaa… (136 UTF-16 units)",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai/aaaaaaaaa… (256 UTF-16 units)",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai/aaaaaaaaa… (257 UTF-16 units)",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "openai/aaaaaaaaa… (263 UTF-16 units)",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "ollama/aaaaaaaaa… (256 UTF-16 units)",
+      "cloud": null,
+      "local": [
+        "ollama",
+        "aaaaaaaaaaaaaaaa… (249 UTF-16 units)"
+      ],
+      "settings": true
+    },
+    {
+      "id": "ollama/aaaaaaaaa… (263 UTF-16 units)",
+      "cloud": null,
+      "local": [
+        "ollama",
+        "aaaaaaaaaaaaaaaa… (256 UTF-16 units)"
+      ],
+      "settings": false
+    },
+    {
+      "id": "ollama/aaaaaaaaa… (264 UTF-16 units)",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "ollama/ééééééééé… (263 UTF-16 units)",
+      "cloud": null,
+      "local": [
+        "ollama",
+        "éééééééééééééééé… (256 UTF-16 units)"
+      ],
+      "settings": false
+    },
+    {
+      "id": "ollama/😀😀😀😀😀😀😀😀😀… (263 UTF-16 units)",
+      "cloud": null,
+      "local": [
+        "ollama",
+        "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀… (256 UTF-16 units)"
+      ],
+      "settings": false
+    },
+    {
+      "id": "ollama/😀😀😀😀😀😀😀😀😀… (265 UTF-16 units)",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/x",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    },
+    {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/x",
+      "cloud": null,
+      "local": null,
+      "settings": false
+    }
+  ],
+  "servers": [
+    {
+      "name": "Ollama",
+      "id": "ollama",
+      "where": "on this computer"
+    },
+    {
+      "name": "LM Studio",
+      "id": "lmstudio",
+      "where": "on this computer"
+    },
+    {
+      "name": "OpenAI",
+      "id": "openai-2",
+      "where": "on this computer"
+    },
+    {
+      "name": "Venice",
+      "id": "venice",
+      "where": "on venice.example.test"
+    },
+    {
+      "name": "Venice",
+      "id": "venice-2",
+      "where": "on 10.0.0.2"
+    },
+    {
+      "name": "My Server",
+      "id": "my-server",
+      "where": "on 192.168.1.20"
+    }
+  ],
+  "errors": {
+    "KUMI_MODEL=nope": "KUMI_MODEL must be <provider>/<model> with provider one of openai-codex, openai, anthropic, opencode, opencode-go, ollama, lmstudio (or a server in settings.json).",
+    "login nope": "Use: login <provider>, with provider one of openai-codex, openai, anthropic, opencode, opencode-go.",
+    "logout nope": "Use: logout <provider>, with provider one of openai-codex, openai, anthropic, opencode, opencode-go.",
+    "model nope": "Use: model <provider>/<model>, with provider one of openai-codex, openai, anthropic, opencode, opencode-go, ollama, lmstudio (or a server in settings.json)."
+  }
+}

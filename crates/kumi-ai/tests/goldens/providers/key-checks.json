@@ -1,0 +1,75 @@
+{
+  "openai": {
+    "request": {
+      "method": "GET",
+      "url": "https://api.openai.com/v1/models",
+      "headers": {
+        "authorization": "Bearer key-fixture-value",
+        "user-agent": "kumi/<version> (<system>)"
+      }
+    },
+    "verdicts": {
+      "200": "ok",
+      "401": "refused",
+      "403": "refused",
+      "429": "unreachable",
+      "500": "unreachable",
+      "no answer": "unreachable"
+    }
+  },
+  "anthropic": {
+    "request": {
+      "method": "GET",
+      "url": "https://api.anthropic.com/v1/models?limit=100",
+      "headers": {
+        "anthropic-version": "2023-06-01",
+        "user-agent": "kumi/<version> (<system>)",
+        "x-api-key": "key-fixture-value"
+      }
+    },
+    "verdicts": {
+      "200": "ok",
+      "401": "refused",
+      "403": "refused",
+      "429": "unreachable",
+      "500": "unreachable",
+      "no answer": "unreachable"
+    }
+  },
+  "opencode": {
+    "request": {
+      "method": "GET",
+      "url": "https://opencode.ai/zen/v1/models",
+      "headers": {
+        "authorization": "Bearer key-fixture-value",
+        "user-agent": "kumi/<version> (<system>)"
+      }
+    },
+    "verdicts": {
+      "200": "ok",
+      "401": "refused",
+      "403": "refused",
+      "429": "unreachable",
+      "500": "unreachable",
+      "no answer": "unreachable"
+    }
+  },
+  "opencode-go": {
+    "request": {
+      "method": "GET",
+      "url": "https://opencode.ai/zen/go/v1/models",
+      "headers": {
+        "authorization": "Bearer key-fixture-value",
+        "user-agent": "kumi/<version> (<system>)"
+      }
+    },
+    "verdicts": {
+      "200": "ok",
+      "401": "refused",
+      "403": "refused",
+      "429": "unreachable",
+      "500": "unreachable",
+      "no answer": "unreachable"
+    }
+  }
+}

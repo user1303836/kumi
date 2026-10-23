@@ -50,6 +50,7 @@ mod own_providers;
 mod own_session_catchup;
 mod pack_tests;
 mod pin_first_request;
+mod pin_model_ids;
 mod pin_plain;
 mod pin_screens;
 mod pin_startup;

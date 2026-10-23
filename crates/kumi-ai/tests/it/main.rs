@@ -7,3 +7,4 @@ mod local;
 mod model_fetch;
 mod models;
 mod ollama;
+mod pin_providers;
