@@ -7,8 +7,8 @@ members = [
     "crates/kumi-runtime",
     "daws/ableton/ableton-mcp-server",
     "crates/kumi",
-    "crates/daw-bridge",
-    "crates/daw-mcp-server",
+    "daws/own/daw-bridge",
+    "daws/own/daw-mcp-server",
     "crates/reaper-kumi",
     "crates/kumi-testkit",
 ]
@@ -25,7 +25,7 @@ kumi-store = { path = "crates/kumi-store" }
 kumi-genexpr = { path = "crates/kumi-genexpr" }
 kumi-runtime = { path = "crates/kumi-runtime" }
 ableton-mcp-server = { path = "daws/ableton/ableton-mcp-server" }
-daw-bridge = { path = "crates/daw-bridge" }
+daw-bridge = { path = "daws/own/daw-bridge" }
 kumi-testkit = { path = "crates/kumi-testkit" }
 
 async-trait = "0.1"

@@ -11,8 +11,8 @@
 
 use serde_json::{json, Map, Value};
 
-use crate::presets::{bad, changed, print_of, q, refusal_answer, scaling_word, Refusal, SCALINGS};
-use crate::xml::{self, Element};
+use crate::renoise::presets::{bad, changed, print_of, q, refusal_answer, scaling_word, Refusal, SCALINGS};
+use crate::renoise::xml::{self, Element};
 
 pub const KIND: &str = "instrument-macro-map";
 /// The most mappings Kumi gives one macro.
@@ -490,7 +490,8 @@ fn failed(message: &str) -> Value {
 /// The edited Instrument.xml packed with the saved file's other entries, written beside it for the tool to load.
 fn write_beside(export: &Value, bytes: &[u8], text: &str) -> Result<String, Value> {
     let file = export.get("file").and_then(Value::as_str).ok_or_else(|| failed("the bridge didn't say where it saved the instrument"))?;
-    let archive = crate::zip::Archive::read(bytes).map_err(|e| failed(&format!("the instrument Renoise saved doesn't read ({e})")))?;
+    let archive =
+        crate::renoise::zip::Archive::read(bytes).map_err(|e| failed(&format!("the instrument Renoise saved doesn't read ({e})")))?;
     let packed = archive
         .with_replaced("Instrument.xml", text.as_bytes())
         .map_err(|e| failed(&format!("Kumi couldn't pack the instrument ({e})")))?;
@@ -537,7 +538,8 @@ impl crate::host::Host {
         let bytes = std::fs::read(file);
         let _ = std::fs::remove_file(file);
         let bytes = bytes.map_err(|e| failed(&format!("Kumi couldn't read the instrument Renoise saved ({e})")))?;
-        let archive = crate::zip::Archive::read(&bytes).map_err(|e| failed(&format!("the instrument Renoise saved doesn't read ({e})")))?;
+        let archive =
+            crate::renoise::zip::Archive::read(&bytes).map_err(|e| failed(&format!("the instrument Renoise saved doesn't read ({e})")))?;
         let entry = archive.entry("Instrument.xml").ok_or_else(|| failed("the instrument Renoise saved has no Instrument.xml"))?;
         let contents = archive.contents(entry).map_err(|e| failed(&format!("its Instrument.xml doesn't read ({e})")))?;
         let text = String::from_utf8(contents).map_err(|_| failed("its Instrument.xml isn't UTF-8"))?;

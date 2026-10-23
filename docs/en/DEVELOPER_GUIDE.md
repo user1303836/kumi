@@ -17,9 +17,9 @@ How the repository fits together, how to work on each part, and how to release.
 | `daws/ableton/live-extension` | Kumi's Live extension for Live 12.4 and later, on Live's Extensions SDK (TypeScript, with its own `package.json`) |
 | `daws/ableton/protocol` | `ableton-live-v1.operations.json`, the operation registry the bridge and the Remote Script share |
 | `scripts` | Release builders, migration packaging, the Mac helper's build, the isolated test runners, and `native-kumi.mjs` behind `npm run kumi` and `npm run setup` |
-| `crates/daw-mcp-server` | Kumi's host for REAPER and Renoise (`daw-mcp-server --daw reaper\|renoise`): MCP over stdio, the changes' journal and undo, listening jobs, catch-up; also usable by other MCP clients |
+| `daws/own/daw-mcp-server` | Kumi's host for REAPER and Renoise (`daw-mcp-server --daw reaper\|renoise`): MCP over stdio, the changes' journal and undo, listening jobs, catch-up; also usable by other MCP clients |
 | `crates/reaper-kumi` | Kumi's REAPER extension (`reaper_kumi`), built against REAPER's SDK headers vendored in `sdk/` |
-| `crates/daw-bridge` | What the REAPER and Renoise bridges share: the loopback wire (`kumi-daw/1`), its handshake and auth, discovery, finding the DAWs, the doctor's checks and the bridge files' lifecycle |
+| `daws/own/daw-bridge` | What the REAPER and Renoise bridges share: the loopback wire (`kumi-daw/1`), its handshake and auth, discovery, finding the DAWs, the doctor's checks and the bridge files' lifecycle |
 | `daws/renoise` | Kumi's Renoise tool (`com.kumi.Bridge.xrnx`, Lua) and its tests against a mock of Renoise's API |
 | `install.sh`, `install.ps1` | The installers |
 
@@ -48,8 +48,8 @@ bridge (daws/ableton/ableton-mcp-server)
 kumi (crates/kumi, crates/kumi-runtime)
   │  MCP over stdio: Kumi starts its host for REAPER or Renoise
   ▼
-host (crates/daw-mcp-server --daw reaper|renoise)
-  │  kumi-daw/1: authenticated TCP on 127.0.0.1 (crates/daw-bridge)
+host (daws/own/daw-mcp-server --daw reaper|renoise)
+  │  kumi-daw/1: authenticated TCP on 127.0.0.1 (daws/own/daw-bridge)
   ├──► Kumi's REAPER extension (crates/reaper-kumi), in REAPER's UserPlugins
   └──► Kumi's Renoise tool (daws/renoise), in Renoise's Scripts/Tools
 ```
@@ -307,7 +307,7 @@ python3 scripts/release.py --go     # the release
   change, the dry run says so; `--bridge` gives the bridge a new version then.
 - **REAPER's extension and Renoise's tool** get new versions the same way, each
   when a pull request changes what its DAW loads: `crates/reaper-kumi` and
-  `crates/daw-bridge`, or `daws/renoise/com.kumi.Bridge.xrnx`. `--reaper` and
+  `daws/own/daw-bridge`, or `daws/renoise/com.kumi.Bridge.xrnx`. `--reaper` and
   `--renoise` give one a new version anyway, `--no-reaper` and `--no-renoise`
   keep it; `--no-bridge` is only Live's. A line written `Changelog (reaper):`
   or `Changelog (renoise):` goes under its heading. With `--go` they move in

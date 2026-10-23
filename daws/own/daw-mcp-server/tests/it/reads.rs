@@ -6,7 +6,7 @@ mod common;
 use common::{golden, normalized};
 use daw_bridge::auth::Secret;
 use daw_mcp_server::client::{BridgeClient, RequestError};
-use daw_mcp_server::simulator::reaper::ReaperScript;
+use daw_mcp_server::reaper::simulator::ReaperScript;
 use daw_mcp_server::simulator::Simulator;
 use serde_json::json;
 use std::time::Duration;
@@ -33,7 +33,7 @@ async fn the_read_methods_on_the_wire() {
         "undo_step_end",
         "digest",
     ];
-    methods.extend(daw_mcp_server::simulator::reaper::LISTENING_METHODS);
+    methods.extend(daw_mcp_server::reaper::simulator::LISTENING_METHODS);
     assert_eq!(client.welcome().methods, methods);
 
     let page = client.request("read", json!({"kind": "track", "limit": 2}), WAIT).await.unwrap();

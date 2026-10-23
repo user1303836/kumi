@@ -4,7 +4,7 @@
 //! library or the producer's User Library, once every link is resolved; only files of the kind's type and size, and not of
 //! a newer Renoise than the one whose library is here (a file Renoise can't load shows a dialog that holds Renoise).
 
-use crate::presets::{Refusal, MAX_PRESET_BYTES};
+use crate::renoise::presets::{Refusal, MAX_PRESET_BYTES};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::io::Read;

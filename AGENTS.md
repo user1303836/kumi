@@ -13,7 +13,8 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 - `daws/ableton/`: Live. `ableton-mcp-server/` is its bridge (an MCP server); `remote-script/` runs inside Live
   (Python); `live-extension/` is Live's extension (TypeScript); `protocol/` is the only list of Live operations;
   `max-standard/` is the standard Kumi holds Max patches to (data Kumi builds in).
-- `crates/daw-bridge` (the `kumi-daw/1` wire) and `crates/daw-mcp-server` (the host): Kumi's own bridges.
+- `daws/own/`: Kumi's own bridges, for REAPER and Renoise: `daw-bridge/` (the `kumi-daw/1` wire) and
+  `daw-mcp-server/` (the host; what's one DAW's alone is in its `src/reaper/` and `src/renoise/`).
 - `crates/reaper-kumi`: REAPER's extension. `daws/renoise/com.kumi.Bridge.xrnx`: Renoise's tool (Lua).
 - `crates/kumi-store` (SQLite), `kumi-common` (shared utilities), `kumi-genexpr` (gen~ test interpreter).
 - `plugin-formats/`: the plug-in preset formats Kumi reads (data Kumi builds in).
@@ -63,8 +64,8 @@ It's one Cargo workspace. Each DAW is reached through a bridge that runs inside 
 
 ## Pins and oracles
 - Goldens are byte-exact, and `KUMI_BLESS=1` rewrites them: the pins in `crates/kumi/tests/goldens` and
-  `crates/kumi-runtime/tests/goldens`, the host's `crates/daw-mcp-server/tests/golden` and the wire vectors in
-  `crates/daw-bridge/tests/vectors`. A refactor's proof is "goldens unchanged".
+  `crates/kumi-runtime/tests/goldens`, the host's `daws/own/daw-mcp-server/tests/golden` and the wire vectors in
+  `daws/own/daw-bridge/tests/vectors`. A refactor's proof is "goldens unchanged".
 - Oracles (`*-oracle.json`, `*_oracle.json`, the TUI's `screens.json`) were recorded from the TypeScript version
   (tag `v1.7.6`). Nothing regenerates them.
 

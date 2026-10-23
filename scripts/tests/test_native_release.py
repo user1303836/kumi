@@ -142,7 +142,7 @@ class NativeRelease(unittest.TestCase):
         version = cargo_version("crates/kumi/Cargo.toml")
         self.assertEqual(read_json("package.json")["version"], version)
         # Kumi's host for REAPER and Renoise ships beside it and moves with it (its MCP serverInfo and hello say it).
-        for name in ("crates/kumi-common/Cargo.toml", "crates/kumi-runtime/Cargo.toml", "crates/daw-mcp-server/Cargo.toml"):
+        for name in ("crates/kumi-common/Cargo.toml", "crates/kumi-runtime/Cargo.toml", "daws/own/daw-mcp-server/Cargo.toml"):
             self.assertEqual(cargo_version(name), version, name)
         declared = re.search(r'KUMI_VERSION[^=]*=\s*"([^"\n]+)"', (root / "crates/kumi-runtime/src/version.rs").read_text())
         self.assertIsNotNone(declared)

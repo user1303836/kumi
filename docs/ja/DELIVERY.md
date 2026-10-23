@@ -29,7 +29,7 @@
 
 ## REAPER の拡張機能と Renoise のツール
 
-REAPER と Renoise に入る Kumi のブリッジは、ブリッジの CLI ではなく Kumi 自身のライフサイクル（`crates/daw-bridge`）を通じてインストールされます。セットアップ、`kumi --daw reaper bridge`（または `renoise`）、`kumi update` がそれを実行します。プロデューサー側から見た説明は [Kumi ガイド](KUMI_GUIDE.md#reaper-や-renoise-につなぐ)にあります。
+REAPER と Renoise に入る Kumi のブリッジは、ブリッジの CLI ではなく Kumi 自身のライフサイクル（`daws/own/daw-bridge`）を通じてインストールされます。セットアップ、`kumi --daw reaper bridge`（または `renoise`）、`kumi update` がそれを実行します。プロデューサー側から見た説明は [Kumi ガイド](KUMI_GUIDE.md#reaper-や-renoise-につなぐ)にあります。
 
 - **バンドルの中：** `kumi` の隣に `daw-mcp-server`、そして `daws` フォルダー。`daws/reaper/reaper_kumi.dylib`（Windows では `.dll`、Linux では `.so`）と `reaper_kumi.version`、`daws/renoise/com.kumi.Bridge.xrnx/` です。バンドルの `package.json` と `kumi-install.json`、リリースの `kumi-release.json` は、それぞれのバージョンを `reaper` と `renoise` として持ちます。`bridge` は Live のもののままです。
 - **DAW の中へ：** REAPER の拡張機能は、Kumi が見つけた REAPER（ポータブル版、または `KUMI_REAPER_RESOURCE_DIR` で指定したフォルダー）の `UserPlugins` へ、隣に `kumi-bridge-reference.json` を置いて入れます。Renoise のツールは、3.5 以降でいちばん新しい設定フォルダーの `Scripts/Tools` へ、中に `bridge-reference.json` を置いて入れます。更新とロールバックはどちらも Kumi が入れた場所のまま行い、レシートの `copies` に載っている Kumi のコピー（新しい Renoise が自分のバージョンフォルダーに作ったものなど）も一緒に進めます。アンインストールはそれらも取り除きます。プロデューサーが取り除いたブリッジは入れ直しません。どちらも別の名前でコピーしてから名前を変えて配置し、その場で上書きすることはありません（動いている REAPER は古いファイルを保ち、Windows ではロックされます）。macOS では、Kumi のコピーからダウンロードの印を外します。

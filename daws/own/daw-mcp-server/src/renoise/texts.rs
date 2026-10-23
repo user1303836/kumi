@@ -1,5 +1,5 @@
 //! How a Renoise parameter's value reads as text, and text as a value (M4 n-devices): the kinds of text Renoise 3.5.4 shows
-//! for its native devices' parameters, as measured in the lab (renoise_devices.rs says each parameter's). A device inside
+//! for its native devices' parameters, as measured in the lab (devices.rs says each parameter's). A device inside
 //! a Doofer or Splitter is no Lua object, so Renoise can't read text for it: Kumi does, from these.
 
 /// One parameter's kind of text.
@@ -183,9 +183,9 @@ fn trim(value: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::renoise_devices::{by_name, text_of};
+    use crate::renoise::devices::{by_name, text_of};
 
-    fn param(device: &str, name: &str) -> (usize, &'static crate::renoise_devices::Param) {
+    fn param(device: &str, name: &str) -> (usize, &'static crate::renoise::devices::Param) {
         let d = by_name(device).unwrap();
         let k = d.params.iter().position(|p| p.name == name).unwrap();
         (k + 1, &d.params[k])
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn every_measured_parameter_has_a_kind_of_text_and_its_points_run_one_way() {
         let mut unknown = 0;
-        for device in crate::renoise_devices::DEVICES {
+        for device in crate::renoise::devices::DEVICES {
             for p in device.params {
                 match p.text {
                     Text::None => unknown += 1,

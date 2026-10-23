@@ -7,14 +7,17 @@
 //! have pages as big as the tool makes them (pages by limit and cursor, cut at the frame bound), and the song can be
 //! switched, which moves the epoch as Renoise's tool does: refs and cursors from before are refused as `stale`, and
 //! the answers carry the new epoch.
-use super::listening::SimListening;
-use super::reaper::LISTENING_METHODS;
-use super::renoise_dsp::Chains;
-use super::renoise_takes::Takes;
-use super::{Respond, SimulatorConfig};
+mod dsp;
+mod takes;
+
+use crate::reaper::simulator::LISTENING_METHODS;
+use crate::simulator::listening::SimListening;
+use crate::simulator::{Respond, SimulatorConfig};
 use daw_bridge::auth::Secret;
+use dsp::Chains;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
+use takes::Takes;
 
 const VECTORS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/vectors/renoise-reads.json"));
 /// The epoch the vectors were made in.

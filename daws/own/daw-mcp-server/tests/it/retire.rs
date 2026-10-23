@@ -9,7 +9,7 @@ use daw_bridge::paths::BridgePaths;
 use daw_bridge::Daw;
 use daw_mcp_server::client::BridgeClient;
 use daw_mcp_server::host::{CallError, Host, Pick};
-use daw_mcp_server::simulator::renoise::RenoiseScript;
+use daw_mcp_server::renoise::simulator::RenoiseScript;
 use daw_mcp_server::simulator::Simulator;
 use serde_json::json;
 use std::time::Duration;

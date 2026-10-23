@@ -7,7 +7,7 @@ mod common;
 use common::{golden, normalized};
 use daw_bridge::auth::Secret;
 use daw_mcp_server::client::{BridgeClient, RequestError};
-use daw_mcp_server::simulator::renoise::RenoiseScript;
+use daw_mcp_server::renoise::simulator::RenoiseScript;
 use daw_mcp_server::simulator::Simulator;
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -26,7 +26,7 @@ async fn the_read_methods_on_the_wire() {
     let simulator = Simulator::start(script.config(secret.clone(), "/lab/Renoise")).await.unwrap();
     let client = BridgeClient::connect(simulator.address(), secret, "daw-mcp-server/test").await.unwrap();
     let mut methods = vec!["ping", "status", "read", "snapshot", "focus", "focus_body", "show_status", "digest"];
-    methods.extend(daw_mcp_server::simulator::reaper::LISTENING_METHODS);
+    methods.extend(daw_mcp_server::reaper::simulator::LISTENING_METHODS);
     assert_eq!(client.welcome().methods, methods);
     assert_eq!(client.welcome().credit_bytes, Some(64 * 1024), "the tool starts with a floor of credit");
 

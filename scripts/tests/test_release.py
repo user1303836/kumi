@@ -20,7 +20,7 @@ sys.modules[SPEC.name] = release  # dataclasses look their module up there
 SPEC.loader.exec_module(release)
 
 FILES = ["package.json", "Cargo.lock", "CHANGELOG.md", "README.md", "README.ja.md", "README.zh-CN.md",
-         "crates/kumi/Cargo.toml", "crates/kumi-common/Cargo.toml", "crates/kumi-runtime/Cargo.toml", "crates/daw-mcp-server/Cargo.toml",
+         "crates/kumi/Cargo.toml", "crates/kumi-common/Cargo.toml", "crates/kumi-runtime/Cargo.toml", "daws/own/daw-mcp-server/Cargo.toml",
          "crates/kumi-runtime/src/version.rs", "daws/ableton/ableton-mcp-server/Cargo.toml",
          "docs/en/KUMI_CHANGES.md", "docs/ja/KUMI_CHANGES.md", "docs/zh-CN/KUMI_CHANGES.md",
          release.REAPER_CARGO, release.RENOISE_VERSION, release.RENOISE_MANIFEST]
@@ -186,8 +186,8 @@ class Edits(unittest.TestCase):
         plan, texts = self.released(new_bridge=False)
         self.assertEqual(json.loads(texts["package.json"])["version"], plan.new)
         self.assertIn(f'"{plan.new}"', texts["crates/kumi-runtime/src/version.rs"])
-        for crate in release.CRATES:
-            self.assertIn(f'version = "{plan.new}"', texts[f"crates/{crate}/Cargo.toml"])
+        for crate, folder in release.CRATES.items():
+            self.assertIn(f'version = "{plan.new}"', texts[f"{folder}/Cargo.toml"])
             self.assertIn(f'name = "{crate}"\nversion = "{plan.new}"', texts["Cargo.lock"])
         self.assertIn(f'name = "ableton-mcp-server"\nversion = "{plan.bridge}"', texts["Cargo.lock"])
         self.assertIn(f'version = "{plan.bridge}"', texts["daws/ableton/ableton-mcp-server/Cargo.toml"])
@@ -251,17 +251,17 @@ class Notes(unittest.TestCase):
 class DawSorting(unittest.TestCase):
     def test_what_reaper_and_renoise_load_is_their_bridges(self):
         for path in ("crates/reaper-kumi/src/lib.rs", "crates/reaper-kumi/build.rs", "crates/reaper-kumi/sdk/reaper_plugin.h",
-                     "crates/reaper-kumi/Cargo.toml", "crates/daw-bridge/src/wire.rs"):
+                     "crates/reaper-kumi/Cargo.toml", "daws/own/daw-bridge/src/wire.rs"):
             self.assertTrue(release.ships_reaper(path), path)
         for path in ("crates/reaper-kumi/tests/it/loads.rs", "crates/reaper-kumi/src/changes/tests.rs",
                      "crates/reaper-kumi/examples/accept_reaper.rs", "crates/reaper-kumi/sdk/SOURCE.md",
-                     "crates/daw-bridge/tests/it/vectors.rs", "crates/daw-mcp-server/src/host.rs", "daws/renoise/tests/test_changes.lua"):
+                     "daws/own/daw-bridge/tests/it/vectors.rs", "daws/own/daw-mcp-server/src/host.rs", "daws/renoise/tests/test_changes.lua"):
             self.assertFalse(release.ships_reaper(path), path)
         # daw-bridge's parts the extension doesn't link are Kumi's alone: a fix there is no new extension.
-        for path in ("crates/daw-bridge/src/lifecycle.rs", "crates/daw-bridge/src/detect.rs", "crates/daw-bridge/src/doctor.rs",
-                     "crates/daw-bridge/src/install.rs", "crates/daw-bridge/src/probe.rs"):
+        for path in ("daws/own/daw-bridge/src/lifecycle.rs", "daws/own/daw-bridge/src/detect.rs", "daws/own/daw-bridge/src/doctor.rs",
+                     "daws/own/daw-bridge/src/install.rs", "daws/own/daw-bridge/src/probe.rs"):
             self.assertFalse(release.ships_reaper(path), path)
-        for path in ("crates/daw-bridge/src/handshake.rs", "crates/daw-bridge/src/owner.rs", "crates/daw-bridge/Cargo.toml"):
+        for path in ("daws/own/daw-bridge/src/handshake.rs", "daws/own/daw-bridge/src/owner.rs", "daws/own/daw-bridge/Cargo.toml"):
             self.assertTrue(release.ships_reaper(path), path)
         for path in ("daws/renoise/com.kumi.Bridge.xrnx/payload/changes.lua", "daws/renoise/com.kumi.Bridge.xrnx/manifest.xml",
                      "daws/renoise/com.kumi.Bridge.xrnx/main.lua"):
@@ -277,8 +277,8 @@ class DawSorting(unittest.TestCase):
         self.assertEqual(release.classify(1, line, reaper + ["crates/reaper-kumi/src/changes/tests.rs", "docs/en/X.md"]).lines,
                          [("reaper", "A new thing.")])
         self.assertEqual(release.classify(2, line, renoise + ["daws/renoise/tests/test_changes.lua"]).lines, [("renoise", "A new thing.")])
-        for paths in (reaper + renoise, reaper + ["crates/kumi/src/daw/own.rs"], renoise + ["crates/daw-mcp-server/src/tools.rs"],
-                      ["crates/daw-bridge/src/wire.rs"]):  # daw-bridge is Kumi's too
+        for paths in (reaper + renoise, reaper + ["crates/kumi/src/daw/own.rs"], renoise + ["daws/own/daw-mcp-server/src/tools.rs"],
+                      ["daws/own/daw-bridge/src/wire.rs"]):  # daw-bridge is Kumi's too
             with self.subTest(paths=paths):
                 self.assertEqual(release.classify(3, line, paths).lines, [("kumi", "A new thing.")])
         # Live's bridge's rule is as it was: its own changes with REAPER's put the lines under Live's bridge.

@@ -1,4 +1,4 @@
--- The kumi-daw/1 conformance vectors in crates/daw-bridge/tests/vectors, which every implementation passes.
+-- The kumi-daw/1 conformance vectors in daws/own/daw-bridge/tests/vectors, which every implementation passes.
 local T = ...
 local wire = T.load_payload_module("wire")
 local json = T.load_payload_module("json")
@@ -6,7 +6,7 @@ local sha256 = T.load_payload_module("sha256")
 local discovery = T.load_payload_module("discovery")
 local test, eq, ok, same = T.test, T.eq, T.ok, T.same
 
-local dir = os.getenv("KUMI_DAW_VECTORS") or (T.tests_dir .. "../../../crates/daw-bridge/tests/vectors/")
+local dir = os.getenv("KUMI_DAW_VECTORS") or (T.tests_dir .. "../../own/daw-bridge/tests/vectors/")
 if dir:sub(-1) ~= "/" then dir = dir .. "/" end
 
 local function vectors(name)

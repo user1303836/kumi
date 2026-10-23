@@ -8,8 +8,8 @@
 //! inside a Doofer, and doesn't clamp values. Kumi's undo is the edit taken back from what is there now: a structural edit
 //! (a device added, deleted, moved) only while nothing structural changed in the device since (the shape), a value only
 //! while it still holds what Kumi wrote.
-use crate::renoise_devices;
-use crate::xml::{self, Element};
+use crate::renoise::devices;
+use crate::renoise::xml::{self, Element};
 use serde_json::{json, Map, Value};
 
 /// The change kinds made here, as the tool registers them (`changes_presets.lua`).
@@ -31,7 +31,7 @@ pub fn is_host_kind(daw: daw_bridge::Daw, kind: &str) -> bool {
 
 /// Whether the host makes this change: the kinds above, and an instrument's macro mappings added or removed.
 pub fn host_makes(daw: daw_bridge::Daw, kind: &str, input: &Value) -> bool {
-    is_host_kind(daw, kind) || crate::instruments::is_host_change(daw, kind, input)
+    is_host_kind(daw, kind) || crate::renoise::instruments::is_host_change(daw, kind, input)
 }
 
 /// Whether the host takes this change back too (doofer-make's undo is the tool's own: it makes the devices again).
@@ -393,7 +393,7 @@ fn inner_label(device: &Element) -> String {
             return name;
         }
     }
-    renoise_devices::by_xml(device.name()).map_or_else(|| device.name().trim_end_matches("Device").to_string(), |d| d.name.to_string())
+    devices::by_xml(device.name()).map_or_else(|| device.name().trim_end_matches("Device").to_string(), |d| d.name.to_string())
 }
 
 /// Where a place is, in words: "place 2", "lane 2, place 1", "place 3 > place 1".
@@ -561,7 +561,7 @@ fn drivers(container: &Element, kind: &str, lane: usize, place: usize, parameter
     found
 }
 
-// Parameters of the devices inside: Renoise's table (renoise_devices.rs) for native devices, a nested container's macros.
+// Parameters of the devices inside: Renoise's table (devices.rs) for native devices, a nested container's macros.
 
 /// How many parameters a device inside has (a mapping's parameter index runs to it; 0 is its on/off), or why Kumi can't
 /// tell.
@@ -573,9 +573,7 @@ fn parameter_count(device: &Element) -> Result<usize, Refusal> {
             "Kumi can't tell how many parameters the plug-in {} inside has, so it maps no macro to it (map it in Renoise)",
             q(&inner_label(device))
         )),
-        other => {
-            renoise_devices::by_xml(other).map(|d| d.params.len()).map_or_else(|| bad(format!("Kumi doesn't know the device {other}")), Ok)
-        }
+        other => devices::by_xml(other).map(|d| d.params.len()).map_or_else(|| bad(format!("Kumi doesn't know the device {other}")), Ok),
     }
 }
 
@@ -639,7 +637,7 @@ fn parameter_names(device: &Element) -> Vec<Vec<String>> {
             }
             names
         }
-        other => renoise_devices::by_xml(other)
+        other => devices::by_xml(other)
             .map(|d| {
                 d.params
                     .iter()
@@ -661,7 +659,7 @@ fn parameter_spec(device: &Element, k: usize) -> Option<(String, f64, f64)> {
             19 => Some(("SplitFrequency".into(), 0.0, 1.0)),
             _ => None,
         },
-        other => renoise_devices::by_xml(other).and_then(|d| d.params.get(k - 1)).map(|p| {
+        other => devices::by_xml(other).and_then(|d| d.params.get(k - 1)).map(|p| {
             // (a meta device's destinations take -1 for none, below their range)
             let min = if p.element.ends_with("DestTrack") || p.element.ends_with("DestEffect") || p.element.ends_with("DestParameter") {
                 -1.0
@@ -687,7 +685,7 @@ const AU: &str = "Audio/Effects/AU/";
 
 fn new_device(asked: &str, device: &Device) -> Result<Element, Refusal> {
     let name = asked.strip_prefix(NATIVE).unwrap_or(asked);
-    if let Some(native) = renoise_devices::by_name(name) {
+    if let Some(native) = devices::by_name(name) {
         if !native.nests {
             return bad(format!("{} can't go inside a Doofer or Splitter (Renoise crashes on routing devices there)", q(native.name)));
         }
@@ -705,7 +703,7 @@ fn new_device(asked: &str, device: &Device) -> Result<Element, Refusal> {
     if asked.starts_with("Audio/Effects/") {
         return bad("only native devices and Audio Units go inside a Doofer or Splitter for now");
     }
-    let near: Vec<&str> = renoise_devices::DEVICES
+    let near: Vec<&str> = devices::DEVICES
         .iter()
         .filter(|d| d.nests && d.name.to_lowercase().contains(&name.to_lowercase()))
         .map(|d| d.name)
@@ -1484,12 +1482,12 @@ fn set_name(device: &mut Element, name: &str) {
 }
 
 /// A parameter's value from text as Renoise shows it ("-6 dB", "Saw", "800 Hz"), read with Renoise's own kinds of text
-/// (renoise_texts.rs), and whether it may land a little off (a curve read between measured points).
+/// (texts.rs), and whether it may land a little off (a curve read between measured points).
 fn value_from_text(target: &Element, k: usize, text: &str) -> Result<(f64, bool), Refusal> {
     let label = inner_label(target);
     let name = parameter_name(target, k);
-    let spec = renoise_devices::by_xml(target.name()).and_then(|device| device.params.get(k - 1));
-    let Some(spec) = spec.filter(|spec| spec.text != renoise_devices::Text::None) else {
+    let spec = devices::by_xml(target.name()).and_then(|device| device.params.get(k - 1));
+    let Some(spec) = spec.filter(|spec| spec.text != devices::Text::None) else {
         return bad(format!("give {} of {} as value (in its own range): Kumi can't read its text", q(&name), q(&label)));
     };
     match spec.text.value(text, spec.min) {
@@ -1597,8 +1595,8 @@ fn write_paragraphs(element: &mut Element, lines: &[String]) {
 // order (a Splitter's second lane too), meta devices aimed at each other inside, and the macros asked; the tool puts it in
 // and takes the devices out in one step.
 
-const DOOFER_DEFAULT: &str = include_str!("../tests/fixtures/renoise/doofer_default.xml");
-const SPLITTER_DEFAULT: &str = include_str!("../tests/fixtures/renoise/splitter_default.xml");
+const DOOFER_DEFAULT: &str = include_str!("../../tests/fixtures/renoise/doofer_default.xml");
+const SPLITTER_DEFAULT: &str = include_str!("../../tests/fixtures/renoise/splitter_default.xml");
 
 /// A device's place from its ref (`E:device:t.d`): its track and its place on it.
 fn device_numbers(reference: &str) -> Option<(i64, i64)> {
@@ -1616,7 +1614,7 @@ fn inner_from(read: &Value, own_track: i64, chain: &[(i64, i64)]) -> Result<Elem
     let document = xml::parse(text).map_err(|e| Refusal::Bad(format!("the preset data of {} can't be read: {e}", q(&label))))?;
     let slot_ = slot(&document)?;
     let kind = type_of(slot_, true).to_string();
-    if let Some(native) = renoise_devices::by_xml(&kind) {
+    if let Some(native) = devices::by_xml(&kind) {
         if !native.nests {
             return bad(format!("{} can't go inside a Doofer or Splitter (Renoise crashes on routing devices there)", q(&label)));
         }
@@ -2068,7 +2066,7 @@ fn describe_device(device: &Element, at: &[i64], with_params: bool) -> Value {
     let mut row = json!({
         "at": at,
         "name": inner_label(device),
-        "device": renoise_devices::by_xml(device.name()).map_or_else(|| device.name().to_string(), |d| d.name.to_string()),
+        "device": devices::by_xml(device.name()).map_or_else(|| device.name().to_string(), |d| d.name.to_string()),
         "bypassed": value_of(device, "IsActive").is_some_and(|v| v < 0.5),
     });
     if device.name() == PLUGIN {
@@ -2078,7 +2076,7 @@ fn describe_device(device: &Element, at: &[i64], with_params: bool) -> Value {
         row["text"] = paragraphs_of(device).join("\n").into();
     }
     if with_params {
-        if let Some(native) = renoise_devices::by_xml(device.name()) {
+        if let Some(native) = devices::by_xml(device.name()) {
             let params: Vec<Value> = native
                 .params
                 .iter()
@@ -2414,7 +2412,7 @@ impl crate::host::Host {
         if kind == "doofer-make" {
             return self.make_preview(pick, input, epoch, layout).await;
         }
-        if kind == crate::instruments::KIND {
+        if kind == crate::renoise::instruments::KIND {
             return self.mapping_preview(pick, input, epoch, layout).await;
         }
         if !input.get("ref").is_some_and(Value::is_string) {
@@ -2456,7 +2454,7 @@ impl crate::host::Host {
         if record.kind == "doofer-make" {
             return self.make_apply_params(record).await;
         }
-        if record.kind == crate::instruments::KIND {
+        if record.kind == crate::renoise::instruments::KIND {
             return self.mapping_apply_params(record).await;
         }
         let mut params = read_params(&record.input, &record.kind);
@@ -2641,7 +2639,7 @@ impl crate::host::Host {
         desc: &str,
         discard: bool,
     ) -> Result<Result<Value, Value>, Value> {
-        if record.kind == crate::instruments::KIND {
+        if record.kind == crate::renoise::instruments::KIND {
             return self.mapping_restore_params(record, desc).await;
         }
         let material = record.material.clone().unwrap_or(Value::Null);

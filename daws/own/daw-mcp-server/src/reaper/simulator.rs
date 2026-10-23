@@ -2,8 +2,8 @@
 //! from a table of rows, the way the extension answers them (the M2 contract): pages by limit and cursor, a page that
 //! stops at the frame bound, an epoch that refuses a cursor from before it changed. Small on purpose: what the host
 //! tests are about is the plumbing, not what REAPER holds.
-use super::listening::SimListening;
-use super::{Respond, SimulatorConfig};
+use crate::simulator::listening::SimListening;
+use crate::simulator::{Respond, SimulatorConfig};
 use daw_bridge::auth::Secret;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};

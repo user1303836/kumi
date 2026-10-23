@@ -9,7 +9,7 @@ use common::Session;
 use daw_bridge::files::ensure_secret;
 use daw_bridge::paths::BridgePaths;
 use daw_bridge::Daw;
-use daw_mcp_server::presets::shape_of;
+use daw_mcp_server::renoise::presets::shape_of;
 use daw_mcp_server::simulator::{Simulator, SimulatorConfig};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};

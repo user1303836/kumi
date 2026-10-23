@@ -9,9 +9,9 @@ use common::Session;
 use daw_bridge::files::ensure_secret;
 use daw_bridge::paths::BridgePaths;
 use daw_bridge::Daw;
-use daw_mcp_server::presets::print_of;
+use daw_mcp_server::renoise::presets::print_of;
+use daw_mcp_server::renoise::zip::Archive;
 use daw_mcp_server::simulator::{Simulator, SimulatorConfig};
-use daw_mcp_server::zip::Archive;
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::PathBuf;
@@ -30,7 +30,7 @@ fn chains() -> Value {
 
 /// The macros as Renoise's API reads them from the instrument: each mapping's parameter name, range and scaling.
 fn api_macros(xml: &str) -> Value {
-    let document = daw_mcp_server::xml::parse(xml).unwrap();
+    let document = daw_mcp_server::renoise::xml::parse(xml).unwrap();
     let global = document.root.child("GlobalProperties").unwrap();
     let chains = chains();
     let macros: Vec<Value> = (0..2)

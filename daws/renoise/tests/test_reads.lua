@@ -1058,7 +1058,7 @@ test("reads: a read whose deadline passes is ended, not finished for nobody", fu
 end)
 
 -- What the tool answers to a fixed set of requests over the demo song, kept in a file the host's simulator replays
--- (crates/daw-mcp-server/tests/vectors/renoise-reads.json), so the simulator can't drift from the tool. KUMI_BLESS=1
+-- (daws/own/daw-mcp-server/tests/vectors/renoise-reads.json), so the simulator can't drift from the tool. KUMI_BLESS=1
 -- writes the file; without it a difference fails the test.
 local function pretty(value, indent)
   indent = indent or ""
@@ -1132,7 +1132,7 @@ test("reads: the answers are the vectors the host's simulator replays", function
   ask("focus_body", { kind = "pattern", window = { from = 5, to = 2 } })
   H.no_dialogs()
   local made = { epoch = E, cases = json.array(cases) }
-  local path = T.tests_dir .. "../../../crates/daw-mcp-server/tests/vectors/renoise-reads.json"
+  local path = T.tests_dir .. "../../own/daw-mcp-server/tests/vectors/renoise-reads.json"
   if os.getenv("KUMI_BLESS") == "1" then
     assert(os.execute("mkdir -p '" .. path:match("^(.*)/[^/]*$") .. "'") == 0)
     local file = assert(io.open(path, "wb"))

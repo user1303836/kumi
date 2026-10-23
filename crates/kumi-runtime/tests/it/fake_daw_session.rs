@@ -568,7 +568,7 @@ async fn own_session(
 /// with /undo. Nothing the model is sent or the producer told is in Live's words.
 #[tokio::test(flavor = "current_thread")]
 async fn a_reaper_session_changes_and_undoes_in_reapers_words() {
-    use daw_mcp_server::simulator::reaper::ReaperScript;
+    use daw_mcp_server::reaper::simulator::ReaperScript;
     tokio::task::LocalSet::new()
         .run_until(async {
             let script = ReaperScript::new(3, 0);
@@ -626,7 +626,7 @@ async fn a_reaper_session_changes_and_undoes_in_reapers_words() {
 /// model, the fader by the producer's /undo.
 #[tokio::test(flavor = "current_thread")]
 async fn a_renoise_session_changes_and_undoes_in_renoises_words() {
-    use daw_mcp_server::simulator::renoise::RenoiseScript;
+    use daw_mcp_server::renoise::simulator::RenoiseScript;
     tokio::task::LocalSet::new()
         .run_until(async {
             let script = RenoiseScript::new();
