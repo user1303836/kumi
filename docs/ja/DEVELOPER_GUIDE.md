@@ -9,11 +9,12 @@
 | フォルダー | 内容 |
 | --- | --- |
 | `crates/kumi` | ネイティブの `kumi` コマンドとターミナルアプリ（`src/tui/`）、そしてモデルや実際の Live に対して任意で実行するチェック（`examples/`） |
-| `crates/kumi-runtime` | エージェントループ、セッション、ライブラリー、Live との連携、メディアのツール、MCP クライアント |
+| `crates/kumi-runtime` | エージェントループ、セッション、リスニング、ライブラリー、Live との連携、MCP クライアント |
 | `crates/kumi-types` | すべての層が名指す型と設定：DAW のプロファイルと言葉、エージェントとツールの契約、エラー、場所、システム、バージョン |
 | `crates/kumi-net` | Kumi がネットワークに届く方法：システムのプロキシと信頼に従う HTTP クライアント、リクエストに答えがなかった理由、公開アドレスだけの Web クライアント、モデル呼び出しのエラー |
 | `crates/kumi-media` | オーディオ（デコード、解析、音のマッチング、DSP）、音声入力、メディアをデコードするプログラム（ffmpeg、yt-dlp、whisper.cpp）と、動画のフレーム、字幕、音声 |
 | `crates/kumi-ai` | モデルのクライアント：各プロバイダーとの通信、プロバイダーとそのモデル、サインイン、Kumi 自身が動かすモデル（ONNX Runtime）、ターンの所要時間、失敗した呼び出しの伝え方 |
+| `crates/kumi-web` | Web と動画のツール：Web の検索と読み取り（ページ、PDF、GitHub、Max のパッチ）、チュートリアル動画の言葉・フレーム・音の視聴 |
 | `crates/kumi-common` | ランタイムの共通処理と、ソース互換の値の扱い |
 | `daws/ableton/ableton-mcp-server` | ネイティブの MCP ブリッジ、解析ワーカー、ライフサイクル、セットアップ、移行、診断 |
 | `daws/ableton/remote-script` | Live の中で動く、ブリッジの Remote Script（`ableton_mcp_remote_script.py`、`AbletonMcpBridge/` エントリーポイント、Python のテスト） |

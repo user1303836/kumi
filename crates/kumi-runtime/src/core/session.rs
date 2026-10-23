@@ -640,7 +640,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                         videos_dir: dirs.videos_dir.clone(),
                         tools_dir: dirs.tools_dir.clone(),
                         env: None,
-                        on_event: emit.clone(),
+                        on_event: tool_events(&emit),
                         answer: Some(Rc::new(move || answers.get())),
                     },
                 )
@@ -649,7 +649,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
         let browsing = if options.web || options.web_client.is_some() {
             web_tools_for(
                 &options.profile,
-                WebToolOptions { on_event: emit.clone(), client: options.web_client.clone(), ..Default::default() },
+                WebToolOptions { on_event: tool_events(&emit), client: options.web_client.clone(), ..Default::default() },
             )
         } else {
             vec![]

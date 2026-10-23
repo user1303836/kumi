@@ -5,11 +5,6 @@ use super::{
     read::{read_page, Page},
     search::{search_web, SearchCache, SearchWebOptions, SearchWhere},
 };
-use crate::core::daw::{asset_in_words, AssetPhrase, DawProfile};
-use crate::core::{
-    contracts::{JsonObject, KernelTool, Reach, SessionEvent, ToolImage, ToolResult, WebAction, WebEvent, WebWhere},
-    errors::RuntimeError,
-};
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use kumi_common::{
@@ -21,6 +16,9 @@ use kumi_common::{
     },
     time::now_ms_f64,
 };
+use kumi_types::contracts::{JsonObject, KernelTool, Reach, ToolEvent, ToolImage, ToolResult, WebAction, WebEvent, WebWhere};
+use kumi_types::daw::{asset_in_words, AssetPhrase, DawProfile};
+use kumi_types::errors::RuntimeError;
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{cell::RefCell, rc::Rc, sync::LazyLock};
@@ -67,7 +65,7 @@ fn heading(page: &Page) -> String {
 }
 #[derive(Clone)]
 pub struct WebToolOptions {
-    pub on_event: Rc<dyn Fn(SessionEvent)>,
+    pub on_event: Rc<dyn Fn(ToolEvent)>,
     pub client: Option<Rc<dyn WebClient>>,
     pub services: Option<Rc<FreeServices>>,
     pub now: Option<Rc<dyn Fn() -> f64>>,
@@ -84,7 +82,7 @@ struct Kept {
     lines: Vec<String>,
 }
 struct State {
-    on_event: Rc<dyn Fn(SessionEvent)>,
+    on_event: Rc<dyn Fn(ToolEvent)>,
     client: Rc<dyn WebClient>,
     services: Option<Rc<FreeServices>>,
     now: Rc<dyn Fn() -> f64>,
@@ -122,7 +120,7 @@ pub fn web_tools_for(profile: &DawProfile, options: WebToolOptions) -> Vec<Rc<dy
     vec![Rc::new(WebTool { state: state.clone(), search: true, data: data.clone() }), Rc::new(WebTool { state, search: false, data })]
 }
 impl State {
-    fn tell(&self, event: SessionEvent) {
+    fn tell(&self, event: ToolEvent) {
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (self.on_event)(event)));
     }
     async fn page(&self, address: &str, signal: Signal) -> Result<(Kept, bool), WebFailure> {
@@ -138,7 +136,7 @@ impl State {
         let shown = url::Url::parse(&key)
             .map(|url| format!("{}{}", url.host_str().unwrap_or(""), if url.path().len() > 1 { url.path() } else { "" }))
             .unwrap_or_else(|_| key.clone());
-        self.tell(SessionEvent::Doing { text: format!("reading {}", clip(&shown, 70)) });
+        self.tell(ToolEvent::Doing { text: format!("reading {}", clip(&shown, 70)) });
         let page = read_page(self.client.as_ref(), &key, Some(signal), self.services.clone()).await?;
         let entry = Kept { at: (self.now)(), lines: lines_of(&page.text), page };
         self.kept.borrow_mut().shift_remove(&key);
@@ -203,7 +201,7 @@ impl WebTool {
             .filter(|n| n.is_finite() && n.fract() == 0.0)
             .map_or(8, |n| n.clamp(1.0, 10.0) as usize);
         let about = input.get("about").and_then(Value::as_str).map(collapse).unwrap_or_default();
-        self.state.tell(SessionEvent::Doing {
+        self.state.tell(ToolEvent::Doing {
             text: format!("searching {} for “{}”", if github { "GitHub" } else { "the web" }, clip(&query, 60)),
         });
         let key = stringify(&json!([where_, count, about, query.to_lowercase()]));
@@ -222,7 +220,7 @@ impl WebTool {
                 .await
             })
             .await?;
-        self.state.tell(SessionEvent::Web(WebEvent {
+        self.state.tell(ToolEvent::Web(WebEvent {
             action: WebAction::Searched,
             title: query.clone(),
             url: None,
@@ -275,7 +273,7 @@ impl WebTool {
         let page = &held.page;
         let lines = &held.lines;
         if fresh {
-            self.state.tell(SessionEvent::Web(WebEvent {
+            self.state.tell(ToolEvent::Web(WebEvent {
                 action: WebAction::Read,
                 title: page.title.clone().unwrap_or_else(|| page.url.clone()),
                 url: Some(page.url.clone()),
@@ -378,7 +376,7 @@ mod phrases {
 
     #[test]
     fn the_web_tools_phrases_are_all_there_and_lives_words_stay() {
-        assert_eq!(crate::core::daw::check_asset_phrases(&DATA, WEB_PHRASES), Ok(()));
+        assert_eq!(kumi_types::daw::check_asset_phrases(&DATA, WEB_PHRASES), Ok(()));
         assert_eq!(asset_in_words(DATA.clone(), &DawProfile::ABLETON, WEB_PHRASES), *DATA);
         let said = asset_in_words(DATA.clone(), &DawProfile::UNKNOWN, WEB_PHRASES).to_string();
         assert!(WEB_PHRASES.iter().all(|phrase| !said.contains(phrase.live)));

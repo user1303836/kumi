@@ -25,9 +25,10 @@ pub mod plugins;
 pub use kumi_ai::providers;
 pub mod references;
 pub mod slots;
-pub mod video;
 pub use kumi_media::voice;
-pub mod web;
+pub use kumi_web::video;
+// The web and video tools (kumi-web), where the runtime's code and the app have always named them.
+pub use kumi_web as web;
 
 pub use audio::tools::{listening_tools, LISTEN_TOOL};
 pub use audio::{analyze_file, closeness, compare, hear, Analysis, Closeness, Comparison};

@@ -1428,3 +1428,125 @@ to = "kumi_types::contracts::Usage"
 [[rust]]
 from = "kumi_runtime::library::state::alive"
 to = "kumi_types::system::alive"
+
+# kumi-web: the web and video tools (2026-10).
+
+[[move]]
+from = "crates/kumi-runtime/src/video/mod.rs"
+to = "crates/kumi-web/src/video/mod.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/video/moment-words.json"
+to = "crates/kumi-web/src/video/moment-words.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/video/moments.rs"
+to = "crates/kumi-web/src/video/moments.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/video/tool-data.json"
+to = "crates/kumi-web/src/video/tool-data.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/video/tool.rs"
+to = "crates/kumi-web/src/video/tool.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/web/entities.json"
+to = "crates/kumi-web/src/entities.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/web/exa.rs"
+to = "crates/kumi-web/src/exa.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/web/free.rs"
+to = "crates/kumi-web/src/free.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/web/github.rs"
+to = "crates/kumi-web/src/github.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/web/html.rs"
+to = "crates/kumi-web/src/html.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/web/mcp_call.rs"
+to = "crates/kumi-web/src/mcp_call.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/web/mod.rs"
+to = "crates/kumi-web/src/lib.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/web/read.rs"
+to = "crates/kumi-web/src/read.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/web/search.rs"
+to = "crates/kumi-web/src/search.rs"
+
+[[move]]
+from = "crates/kumi-runtime/src/web/tool-data.json"
+to = "crates/kumi-web/src/tool-data.json"
+
+[[move]]
+from = "crates/kumi-runtime/src/web/tool.rs"
+to = "crates/kumi-web/src/tool.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/video.rs"
+to = "crates/kumi-web/tests/it/video.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/it/web.rs"
+to = "crates/kumi-web/tests/it/web.rs"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/video/reference.json"
+to = "crates/kumi-web/tests/support/video/reference.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/web/html-fastpaths.json"
+to = "crates/kumi-web/tests/support/web/html-fastpaths.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/web/html-reference.json"
+to = "crates/kumi-web/tests/support/web/html-reference.json"
+
+[[move]]
+from = "crates/kumi-runtime/tests/support/web/reference.json"
+to = "crates/kumi-web/tests/support/web/reference.json"
+
+[[rust]]
+from = "kumi_runtime::web"
+to = "kumi_web"
+
+[[rust]]
+from = "kumi_runtime::video"
+to = "kumi_web::video"
+
+[[rust]]
+from = "kumi_runtime::kernel::budget::MAX_IMAGES"
+to = "kumi_types::contracts::MAX_IMAGES"
+
+[[rust]]
+from = "kumi_runtime::devices::amxd::DeviceType"
+to = "kumi_types::amxd::DeviceType"
+
+[[rust]]
+from = "kumi_runtime::devices::amxd::encode_amxd"
+to = "kumi_types::amxd::encode_amxd"
+
+[[rust]]
+from = "kumi_runtime::devices::amxd::decode_amxd"
+to = "kumi_types::amxd::decode_amxd"
+
+[[rust]]
+from = "kumi_runtime::devices::amxd::DecodedAmxd"
+to = "kumi_types::amxd::DecodedAmxd"
+
+[[rust]]
+from = "kumi_runtime::devices::amxd::patcher_chunk"
+to = "kumi_types::amxd::patcher_chunk"

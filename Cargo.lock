@@ -1401,6 +1401,7 @@ dependencies = [
  "kumi-store",
  "kumi-testkit",
  "kumi-types",
+ "kumi-web",
  "libc",
  "md-5",
  "memchr",
@@ -1462,6 +1463,35 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "kumi-web"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "encoding_rs",
+ "fancy-regex",
+ "flate2",
+ "futures",
+ "hex",
+ "indexmap",
+ "kumi-common",
+ "kumi-media",
+ "kumi-net",
+ "kumi-types",
+ "percent-encoding",
+ "rand 0.9.5",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "url",
 ]
 
 [[package]]

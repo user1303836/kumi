@@ -1,7 +1,7 @@
 //! Video watching, with complete-result caption and moment oracles.
 use futures::FutureExt;
 use kumi_common::{abort::Signal, js::json::stringify};
-use kumi_runtime::video::{
+use kumi_web::video::{
     captions::{said_around, TranscriptOptions},
     moments::MomentOptions,
     programs::{run, Download, FfmpegOptions, RunOptions},
@@ -172,7 +172,7 @@ async fn offline_a_saved_transcript_still_answers_and_its_note_says_why_ffmpeg_c
         channel: None,
         duration: Some(12.0),
         chapters: Vec::new(),
-        words: Some(Words { language: "en".into(), source: kumi_runtime::core::contracts::WordsSource::Captions }),
+        words: Some(Words { language: "en".into(), source: kumi_types::contracts::WordsSource::Captions }),
     };
     std::fs::write(saved.join("meta.json"), serde_json::to_vec(&meta).unwrap()).unwrap();
     let cues = [Cue { start: 1.0, end: 3.0, text: "load Operator and set the coarse to 1".into() }];
@@ -268,7 +268,7 @@ async fn a_private_address_isnt_given_to_yt_dlp() {
     // A yt-dlp that writes down what it's given.
     let ytdlp =
         fake(folder.path(), "yt-dlp", "printf '%s\\n' \"$@\" >> \"$(dirname \"$0\")/asked\"\nexit 1", "echo %*>>\"%~dp0asked\"\nexit /b 1");
-    let mut env = kumi_runtime::system::process_env();
+    let mut env = kumi_types::system::process_env();
     env.insert("KUMI_YTDLP".into(), ytdlp);
     let mut options = watch_options(folder.path(), "videos");
     options.env = Some(env);
@@ -330,7 +330,7 @@ async fn video_files_have_captions_frames_closeups_sound_and_are_kept() {
     .unwrap();
     assert_eq!(watched.title, "tutorial");
     assert!((watched.duration.unwrap_or(0.0) - 12.0).abs() < 0.5);
-    assert_eq!(watched.words, Some(Words { language: String::new(), source: kumi_runtime::core::contracts::WordsSource::Captions }));
+    assert_eq!(watched.words, Some(Words { language: String::new(), source: kumi_types::contracts::WordsSource::Captions }));
     assert_eq!(watched.lines.iter().map(|l| l.at).collect::<Vec<_>>(), [1.0, 6.0]);
     assert_eq!(watched.frames.len(), 3, "{:?}", watched.notes);
     for frame in &watched.frames {
@@ -377,10 +377,8 @@ async fn video_files_have_captions_frames_closeups_sound_and_are_kept() {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn video_tool_shows_the_model_frames_and_app_thumbnails_and_heard_sound() {
-    use kumi_runtime::{
-        core::contracts::SessionEvent,
-        video::tool::{video_tools, VideoToolOptions, WATCH_VIDEO_TOOL},
-    };
+    use kumi_types::contracts::ToolEvent;
+    use kumi_web::video::tool::{video_tools, VideoToolOptions, WATCH_VIDEO_TOOL};
     let folder = tempfile::tempdir().unwrap();
     let Some(video) = test_video(folder.path(), "tool-tutorial", true).await else {
         eprintln!("ffmpeg makes the test video; unavailable");
@@ -412,12 +410,12 @@ async fn video_tool_shows_the_model_frames_and_app_thumbnails_and_heard_sound() 
     assert_eq!(result.images[0].media_type, "image/jpeg");
     assert!(result.images[0].caption.as_deref().unwrap().starts_with("Frame at 0:0"));
     let noted = events.borrow();
-    let watched = noted.iter().find_map(|e| if let SessionEvent::Watched(w) = e { Some(w) } else { None }).unwrap();
+    let watched = noted.iter().find_map(|e| if let ToolEvent::Watched(w) = e { Some(w) } else { None }).unwrap();
     assert_eq!(watched.frames.len(), 2);
-    assert_eq!(watched.words, kumi_runtime::core::contracts::WordsSource::Captions);
-    assert_eq!(watched.sound, Some(kumi_runtime::core::contracts::SoundSpan { from: 2.0, to: 5.0 }));
-    assert!(noted.iter().any(|e| matches!(e,SessionEvent::Heard(h)if h.file.contains("0:02–0:05"))));
-    assert!(noted.iter().any(|e| matches!(e, SessionEvent::Doing { .. })));
+    assert_eq!(watched.words, kumi_types::contracts::WordsSource::Captions);
+    assert_eq!(watched.sound, Some(kumi_types::contracts::SoundSpan { from: 2.0, to: 5.0 }));
+    assert!(noted.iter().any(|e| matches!(e,ToolEvent::Heard(h)if h.file.contains("0:02–0:05"))));
+    assert!(noted.iter().any(|e| matches!(e, ToolEvent::Doing { .. })));
     drop(noted);
     for (input, phrase) in [
         (json!({"url":video,"zoom":"bottom"}), "zoom goes with look_at"),
@@ -434,7 +432,7 @@ async fn video_tool_shows_the_model_frames_and_app_thumbnails_and_heard_sound() 
 }
 #[tokio::test(flavor = "current_thread")]
 async fn one_look_shows_each_moment_in_each_part_asked_for() {
-    use kumi_runtime::video::tool::{video_tools, VideoToolOptions};
+    use kumi_web::video::tool::{video_tools, VideoToolOptions};
     let folder = tempfile::tempdir().unwrap();
     let Some(video) = test_video(folder.path(), "views", true).await else {
         eprintln!("ffmpeg makes the test video; unavailable");
@@ -493,7 +491,7 @@ async fn one_look_shows_each_moment_in_each_part_asked_for() {
 #[tokio::test(flavor = "current_thread")]
 async fn moments_shown_again_in_one_answer_are_said_so_and_past_three_times_not_shown_again() {
     // #193: frames put away to make room were asked for again and again, 205 looks at one tutorial.
-    use kumi_runtime::video::tool::{video_tools, VideoToolOptions};
+    use kumi_web::video::tool::{video_tools, VideoToolOptions};
     let folder = tempfile::tempdir().unwrap();
     let Some(video) = test_video(folder.path(), "again", true).await else {
         eprintln!("ffmpeg makes the test video; unavailable");
@@ -548,7 +546,7 @@ async fn a_video_without_captions_says_how_it_could_be_transcribed() {
         return;
     };
     let mut options = watch_options(folder.path(), "silent-videos");
-    let mut env = kumi_runtime::system::process_env();
+    let mut env = kumi_types::system::process_env();
     env.insert("KUMI_WHISPER".into(), folder.path().join("no-whisper").to_string_lossy().into());
     options.env = Some(env);
     let watched = watch_video(WatchRequest { url: video, frames: Some(2.0), ..Default::default() }, options).await.unwrap();
@@ -649,7 +647,7 @@ async fn piece_server(body: Vec<u8>, piece: u64) -> String {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn a_stream_its_site_wants_in_pieces_is_asked_for_in_pieces() {
-    use kumi_runtime::video::frames::{frame_at, sound_between, Input};
+    use kumi_web::video::frames::{frame_at, sound_between, Input};
     let folder = tempfile::tempdir().unwrap();
     let Some(video) = test_video(folder.path(), "pieces", false).await else {
         eprintln!("ffmpeg makes the test video; unavailable");
@@ -674,7 +672,7 @@ async fn a_stream_its_site_wants_in_pieces_is_asked_for_in_pieces() {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn a_frame_whose_thumbnail_cant_be_made_keeps_its_picture() {
-    use kumi_runtime::video::frames::frame_at;
+    use kumi_web::video::frames::frame_at;
     let folder = tempfile::tempdir().unwrap();
     // Frames already taken, and an ffmpeg that can't make their thumbnails.
     let ffmpeg = fake(folder.path(), "ffmpeg", "exit 1", "exit /b 1");
@@ -800,7 +798,7 @@ async fn a_youtube_stream_is_asked_for_in_its_pieces_and_an_older_ffmpeg_says_so
             "if \"%~1\"==\"--version\" (\n  echo 2025.01.01\n  exit /b 0\n)\ntype \"%~dp0page.json\"",
         );
         std::fs::write(tools.join("model.bin"), "").unwrap();
-        let mut env = kumi_runtime::system::process_env();
+        let mut env = kumi_types::system::process_env();
         env.insert("KUMI_FFMPEG".into(), ffmpeg.clone());
         env.insert("KUMI_YTDLP".into(), ytdlp);
         // whisper.cpp is there, and never runs: taking the speech fails first.
@@ -867,7 +865,7 @@ async fn ffmpeg_reads_a_stream_at_the_host_kumi_checked() {
         "if [ \"$1\" = --version ]; then echo 2025.01.01; exit 0; fi\ncat \"$(dirname \"$0\")/page.json\"",
         "if \"%~1\"==\"--version\" (\n  echo 2025.01.01\n  exit /b 0\n)\ntype \"%~dp0page.json\"",
     );
-    let mut env = kumi_runtime::system::process_env();
+    let mut env = kumi_types::system::process_env();
     env.insert("KUMI_FFMPEG".into(), refused_ffmpeg(&tools));
     env.insert("KUMI_YTDLP".into(), ytdlp);
     env.insert("KUMI_WHISPER".into(), tools.join("no-whisper").to_string_lossy().into());
@@ -923,7 +921,7 @@ async fn speech_that_couldnt_be_transcribed_is_tried_again_only_in_the_next_requ
     };
     let whisper = program(folder.path(), "whisper", "echo 'error: the model ran out of memory' >&2\nexit 1");
     std::fs::write(folder.path().join("model.bin"), "").unwrap();
-    let mut env = kumi_runtime::system::process_env();
+    let mut env = kumi_types::system::process_env();
     env.insert("KUMI_WHISPER".into(), whisper);
     env.insert("KUMI_WHISPER_MODEL".into(), folder.path().join("model.bin").to_string_lossy().into());
     let mut options = watch_options(folder.path(), "unheard-videos");
@@ -986,7 +984,7 @@ async fn speech_that_couldnt_be_taken_leaves_a_note_and_the_frames() {
     }
     let whisper = program(folder.path(), "whisper", "exit 1");
     std::fs::write(folder.path().join("model.bin"), "").unwrap();
-    let mut env = kumi_runtime::system::process_env();
+    let mut env = kumi_types::system::process_env();
     env.insert("KUMI_FFMPEG".into(), ffmpeg);
     env.insert("KUMI_WHISPER".into(), whisper);
     env.insert("KUMI_WHISPER_MODEL".into(), folder.path().join("model.bin").to_string_lossy().into());
@@ -1024,7 +1022,7 @@ if [ ! -f "$(dirname "$0")/allowed" ]; then echo 'ERROR: Unable to download vide
 while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then shift; out="$1"; fi; shift; done
 printf 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nload Operator\n' > "$(printf '%s' "$out" | sed 's/%(ext)s/vtt/')""#,
     );
-    let mut env = kumi_runtime::system::process_env();
+    let mut env = kumi_types::system::process_env();
     env.insert("KUMI_YTDLP".into(), ytdlp);
     env.insert("KUMI_FFMPEG".into(), program(&tools, "ffmpeg", "exit 1"));
     env.insert("KUMI_WHISPER".into(), tools.join("no-whisper").to_string_lossy().into());
@@ -1079,7 +1077,7 @@ async fn a_video_has_its_duration_from_an_ffmpeg_without_ffprobe() {
     // As Kumi keeps its own: ffmpeg alone, no ffprobe beside it.
     let tools = folder.path().join("own");
     std::fs::create_dir_all(&tools).unwrap();
-    let mut env = kumi_runtime::system::process_env();
+    let mut env = kumi_types::system::process_env();
     env.insert("KUMI_FFMPEG".into(), program(&tools, "ffmpeg", &format!("exec '{real}' \"$@\"")));
     let mut options = watch_options(folder.path(), "videos");
     options.env = Some(env);
@@ -1108,7 +1106,7 @@ async fn a_video_without_a_duration_is_as_long_as_its_transcribed_words() {
 printf '%s' '{"transcription":[{"offsets":{"from":1000,"to":3000},"text":" load Operator "},{"offsets":{"from":6000,"to":8000},"text":" then a Saturator "}]}' > "$out.json""#,
     );
     std::fs::write(folder.path().join("model.bin"), "").unwrap();
-    let mut env = kumi_runtime::system::process_env();
+    let mut env = kumi_types::system::process_env();
     env.insert("KUMI_FFMPEG".into(), ffmpeg);
     env.insert("KUMI_WHISPER".into(), whisper);
     env.insert("KUMI_WHISPER_MODEL".into(), folder.path().join("model.bin").to_string_lossy().into());
@@ -1128,7 +1126,7 @@ async fn a_speech_model_kumi_cant_get_leaves_a_note_and_the_frames() {
         eprintln!("ffmpeg makes the test video; unavailable");
         return;
     };
-    let mut env = kumi_runtime::system::process_env();
+    let mut env = kumi_types::system::process_env();
     env.insert("KUMI_WHISPER".into(), program(folder.path(), "whisper", "exit 1"));
     env.insert("KUMI_WHISPER_MODEL".into(), folder.path().join("gone.bin").to_string_lossy().into());
     let mut options = watch_options(folder.path(), "videos");
@@ -1143,7 +1141,7 @@ async fn a_speech_model_kumi_cant_get_leaves_a_note_and_the_frames() {
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
 async fn speech_process_receives_options_reports_progress_and_cleans_up_after_success_timeout_and_abort() {
-    use kumi_runtime::video::speech::{transcribe, TranscribeOptions};
+    use kumi_web::video::speech::{transcribe, TranscribeOptions};
     use std::os::unix::fs::PermissionsExt;
     let folder = tempfile::tempdir().unwrap();
     let command = folder.path().join("whisper");

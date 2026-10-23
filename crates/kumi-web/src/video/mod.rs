@@ -3,7 +3,6 @@ pub use kumi_media::{captions, frames, programs, speech};
 pub mod moments;
 pub mod tool;
 
-use crate::{audio::audio_path, system::Env};
 pub use captions::{format_time, parse_captions, parse_time, transcript_lines, Cue, TranscriptLine};
 use captions::{said_around, TranscriptOptions};
 use frames::{duration_of, frame_at, sound_between, Input};
@@ -18,6 +17,8 @@ use kumi_common::{
     },
     time::now_ms,
 };
+use kumi_media::audio::audio_path;
+use kumi_types::system::Env;
 use moments::MomentOptions;
 pub use moments::{choose_moments, Chapter};
 use programs::{
@@ -64,7 +65,7 @@ pub struct WatchOptions {
     /// How ffmpeg is found and fetched (for tests: the network and the computer); env and signal are the watch's.
     pub ffmpeg: FfmpegOptions,
     /// The DAW the tutorials are for, for the speech recogniser's hint; Live when not given.
-    pub profile: Option<crate::core::daw::DawProfile>,
+    pub profile: Option<kumi_types::daw::DawProfile>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SoundSpan {
@@ -74,7 +75,7 @@ pub struct SoundSpan {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Words {
     pub language: String,
-    pub source: crate::core::contracts::WordsSource,
+    pub source: kumi_types::contracts::WordsSource,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VideoMeta {
@@ -332,7 +333,7 @@ fn streams(info: &Value) -> Sources {
 /// refuses a name that resolves to this computer or a private network, and checks each redirect as the first address
 /// was: a public address that sends Kumi to a private one (127.0.0.1, 169.254.169.254) isn't followed.
 static CAPTIONS: LazyLock<reqwest::Client> = LazyLock::new(|| {
-    crate::web::net::guarded_http()
+    crate::net::guarded_http()
         .redirect(reqwest::redirect::Policy::custom(|hop| {
             if hop.previous().len() < 10 && public_address(hop.url().as_str()) {
                 hop.follow()
@@ -635,7 +636,7 @@ fn stretch(duration: Option<f64>, cues: &[Cue], from: Option<f64>, to: Option<f6
 }
 /// Watch a video's words, selected frames, close-ups and a requested stretch of its sound.
 pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result<Watched, VideoFailure> {
-    use crate::core::contracts::WordsSource;
+    use kumi_types::contracts::WordsSource;
     let signal = options.signal.clone();
     let mut address = trim(&request.url).to_string();
     if address.to_ascii_lowercase().starts_with("file://") {
@@ -651,7 +652,7 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
     // given as Kumi read it, so yt-dlp reads the host Kumi checked: in `http://public.example\@127.0.0.1/` the URL
     // standard's host is public.example, and Python's (yt-dlp's) is 127.0.0.1.
     if remote {
-        address = crate::web::net::checked_url(&address, None).map_err(|error| VideoFailure::video(error.to_string()))?.to_string();
+        address = crate::net::checked_url(&address, None).map_err(|error| VideoFailure::video(error.to_string()))?.to_string();
     }
     let file = if remote {
         None
@@ -759,7 +760,7 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                     title: head(info["title"].as_str().unwrap_or("Untitled video"), 200),
                     channel: channel
                         .filter(|v| v.as_str().is_none_or(|s| !s.is_empty()) && !v.is_null())
-                        .map(|v| head(&crate::web::net::js_string(v), 120)),
+                        .map(|v| head(&crate::net::js_string(v), 120)),
                     duration: info["duration"].as_f64(),
                     chapters: info["chapters"]
                         .as_array()
@@ -768,10 +769,7 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                         .filter_map(|c| {
                             c["start_time"].as_f64().map(|start| Chapter {
                                 start,
-                                title: head(
-                                    &c.get("title").filter(|v| !v.is_null()).map(crate::web::net::js_string).unwrap_or_default(),
-                                    120,
-                                ),
+                                title: head(&c.get("title").filter(|v| !v.is_null()).map(crate::net::js_string).unwrap_or_default(), 120),
                             })
                         })
                         .take(64)
@@ -866,7 +864,7 @@ pub async fn watch_video(request: WatchRequest, options: WatchOptions) -> Result
                             TranscribeOptions {
                                 language: Some(language.clone()),
                                 prompt: Some(speech::speech_prompt_for(
-                                    options.profile.as_ref().unwrap_or(&crate::core::daw::DawProfile::ABLETON),
+                                    options.profile.as_ref().unwrap_or(&kumi_types::daw::DawProfile::ABLETON),
                                     &meta.title,
                                 )),
                                 signal: signal.clone(),

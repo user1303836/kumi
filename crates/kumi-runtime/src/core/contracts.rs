@@ -1003,6 +1003,26 @@ pub enum SessionEvent {
     #[serde(untagged)]
     Memory(MemoryEvent),
 }
+
+/// A tool's event, as the session's own.
+impl From<ToolEvent> for SessionEvent {
+    fn from(event: ToolEvent) -> Self {
+        match event {
+            ToolEvent::Doing { text } => SessionEvent::Doing { text },
+            ToolEvent::Notice { message } => SessionEvent::Notice { message },
+            ToolEvent::Heard(heard) => SessionEvent::Heard(heard),
+            ToolEvent::Watched(watched) => SessionEvent::Watched(watched),
+            ToolEvent::Web(web) => SessionEvent::Web(web),
+        }
+    }
+}
+
+/// Where a tool's events go: on to `emit`, as the session's own.
+pub fn tool_events(emit: &Rc<dyn Fn(SessionEvent)>) -> Rc<dyn Fn(ToolEvent)> {
+    let emit = emit.clone();
+    Rc::new(move |event| emit(event.into()))
+}
+
 impl SessionEvent {
     /// What the app is told of an observation: its label, and the project's name as the DAW gives it.
     pub fn observed(observation: &Observation) -> SessionEvent {
