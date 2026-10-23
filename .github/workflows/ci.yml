@@ -53,8 +53,11 @@ jobs:
     # The tests that guard producers' Sets and Kumi's wire, the unit tests and Live's pins: the `ci` set in
     # .config/nextest.toml. The long simulations, the recorded-source oracles, the SDK interoperability and migration
     # tests and the benchmarks are the Extended workflow's. Three runners at once, by crate, so no one builds every test
-    # binary: Kumi and its runtime; Live's bridge (which needs only kumi-common); REAPER's and Renoise's bridges
-    # (daw-bridge, the host, the extension; Kumi links the first two but none of their tests).
+    # binary, in parts of about the same test time (each test's time added up, in minutes, on main's runs of 2026-10-23):
+    # the app, 2 to 3; Kumi's other crates, 1.5 to 3 (kumi-daw-ableton 1 to 1.7, kumi-agent 0.4 to 0.7, the rest under
+    # 10 s each); the bridges, 2.5 to 3 (Live's, which needs only kumi-common, 1 to 1.2; REAPER's extension 1; Kumi's host
+    # for REAPER and Renoise 0.6; Kumi links daw-bridge and the host but none of their tests). Kumi's crates are every
+    # package the other two don't name, so a new crate is tested there.
     name: Rust / ${{ matrix.label }}
     needs: changes
     if: needs.changes.outputs.rust == 'true'
@@ -70,9 +73,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { part: kumi, label: Linux, crates: "--exclude ableton-mcp-server --exclude daw-bridge --exclude daw-mcp-server --exclude reaper-kumi" }
-          - { part: live-bridge, label: "Linux (Live's bridge)", crates: "-p ableton-mcp-server" }
-          - { part: daw-bridges, label: "Linux (DAW bridges)", crates: "-p daw-bridge -p daw-mcp-server -p reaper-kumi" }
+          - { part: app, label: Linux, cache: kumi, crates: "-p kumi" }
+          - { part: crates, label: "Linux (Kumi's crates)", cache: kumi, crates: "--exclude kumi --exclude ableton-mcp-server --exclude daw-bridge --exclude daw-mcp-server --exclude reaper-kumi" }
+          - { part: bridges, label: "Linux (bridges)", cache: bridges, crates: "-p ableton-mcp-server -p daw-bridge -p daw-mcp-server -p reaper-kumi" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # This part's packages that the change affects, as `dev.py check` picks them (main's pushes: all of them). A part
@@ -91,11 +94,12 @@ jobs:
         with:
           version: v0.18.0
       # Saved from main only. A pull request restores main's; caches saved from pull requests (about 300 MB a job)
-      # pushed main's out of the repository's 10 GB. One cache per part: each builds other crates.
+      # pushed main's out of the repository's 10 GB. The app's and Kumi's crates' parts build the same crates from
+      # crates.io, so they share one cache (the first to finish on main saves it); the bridges build others.
       - if: steps.part.outputs.picked != ''
         uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
-          key: ${{ matrix.part }}
+          key: ${{ matrix.cache }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - if: steps.part.outputs.picked != ''
         uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
@@ -125,7 +129,7 @@ jobs:
           path: ${{ runner.temp }}/nextest-list.json
           if-no-files-found: ignore
           retention-days: 14
-      - if: matrix.part == 'kumi'
+      - if: matrix.part == 'app'
         run: git diff --check
 
   rust-lint:
