@@ -1,16 +1,14 @@
 //! Learned embeddings, to catch what the measures miss: LAION-CLAP's music model for how alike two sounds or mixes
 //! are in style and vibe, and AFx-Rep for the effects a sound went through. The models run in Kumi's own runtime
-//! (`crate::models`, fetched the first time they're needed); this side reads the audio, shapes it as each model takes
+//! (`kumi_ai::models`, fetched the first time they're needed); this side reads the audio, shapes it as each model takes
 //! it, and compares what comes out.
 
-use crate::{
-    audio::{decode::open_audio_to, dsp::fft},
-    models::{self, pinned, Tensor},
-};
+use kumi_ai::models::{self, pinned, Tensor};
 use kumi_common::abort::Signal;
+use kumi_media::audio::{decode::open_audio_to, dsp::fft};
 use std::path::{Path, PathBuf};
 
-pub use crate::models::Say;
+pub use kumi_ai::models::Say;
 
 /// CLAP hears 10 s at 48 kHz: 1001 frames of 64 mel bands.
 pub const CLAP_RATE: f64 = 48_000.;

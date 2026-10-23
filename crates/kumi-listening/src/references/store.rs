@@ -1,7 +1,7 @@
 //! Measured references, kept: each reference is measured once, then read back by what was asked for (a file or folder
 //! only while its files are as they were), or, for words, by its name. One file per reference (`<key>.json`).
 
-use crate::listening::checklist::Profile;
+use crate::checklist::Profile;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;

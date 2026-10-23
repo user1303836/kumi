@@ -5,10 +5,10 @@
 //! tried stands; a model file is found by its full path, and a link fetched over https only.
 use async_trait::async_trait;
 use base64::Engine;
+use kumi_ai::auth::store::{open_credential_store, CredentialStore};
 use kumi_common::abort::Signal;
-use kumi_runtime::{
-    auth::store::{open_credential_store, CredentialStore},
-    listening::listener::{Answer, Listener},
+use kumi_listening::{
+    listener::{Answer, Listener},
     slots::{self, command, fits, hears_known_clip, parse, Asked, Choice, Job, Said, Slots, SlotsContext, Wanted},
 };
 use std::{collections::HashMap, rc::Rc};
@@ -423,7 +423,7 @@ async fn a_model_file_is_found_by_its_full_path_and_a_link_only_over_https() {
 
 #[test]
 fn a_model_link_is_kept_in_its_own_folder_whatever_its_name() {
-    let slots_folder = kumi_runtime::models::dir().join("slots");
+    let slots_folder = kumi_ai::models::dir().join("slots");
     for (link, name) in [
         ("https://huggingface.co/o/r/resolve/main/clap.onnx", "clap.onnx"),
         ("https://example.com/..\\..\\evil.onnx", "evil.onnx"),
@@ -432,7 +432,7 @@ fn a_model_link_is_kept_in_its_own_folder_whatever_its_name() {
         ("https://example.com/.onnx", "model.onnx"),
         ("https://example.com/weights.bin", "model.onnx"),
     ] {
-        let path = kumi_runtime::listening::embed::link_path(link);
+        let path = kumi_listening::embed::link_path(link);
         assert!(path.starts_with(&slots_folder) && path.parent().unwrap().parent() == Some(slots_folder.as_path()), "{link}: {path:?}");
         assert_eq!(path.file_name().unwrap(), name, "{link}");
     }

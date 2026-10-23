@@ -35,7 +35,7 @@ mod print;
 mod time;
 
 pub use harmony::{chord, Key};
-pub(crate) use parse::past_the_end;
+pub use parse::past_the_end;
 pub use parse::{errors_text, names_drums, parse, read, thousands, Reading, MOST};
 pub use pitch::{drum_pitch, name as pitch_name, parse as parse_pitch};
 pub use print::{print, Printed};

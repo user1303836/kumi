@@ -10,12 +10,10 @@
 //! bends, contours or MIDI files), resampled with Kumi's own resampler, and each frame timed exactly from the window
 //! layout rather than by Basic Pitch's approximation. THIRD_PARTY_NOTICES.md carries its notices.
 
-use crate::{
-    audio::decode::open_audio_to,
-    listening::embed::resample,
-    models::{self, pinned, Say, Tensor},
-};
+use crate::embed::resample;
+use kumi_ai::models::{self, pinned, Say, Tensor};
 use kumi_common::abort::Signal;
+use kumi_media::audio::decode::open_audio_to;
 use std::path::Path;
 
 const RATE: f64 = 22_050.;

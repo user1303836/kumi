@@ -3,16 +3,14 @@
 
 use super::Listening;
 use crate::{
-    core::errors::RuntimeError,
-    listening::{
-        effects::{self, effects, note_value},
-        measure::Heard,
-        renderer::Window,
-        sound::{against_key, bandwidth, ducking, harmonics, interlock, key_classes, kit, noise_floor, problems, tail, width},
-        tools::SoundRequest,
-    },
+    effects::{self, effects, note_value},
+    measure::Heard,
+    renderer::Window,
+    sound::{against_key, bandwidth, ducking, harmonics, interlock, key_classes, kit, noise_floor, problems, tail, width},
+    tools::SoundRequest,
 };
 use kumi_common::abort::{self, Signal};
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::rc::Rc;
 

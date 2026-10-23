@@ -2,16 +2,7 @@
 //! compared with a reference, and the best of the round kept. The DAW plays and records them; scoring is the same
 //! whichever DAW it is.
 use super::{too_long, Listening};
-use crate::{
-    audio::{
-        self,
-        analyze::{Analysis, AnalyzeOptions},
-        matching::{closeness, Focus},
-        tools::summary,
-    },
-    core::{contracts::*, errors::RuntimeError},
-    listening::renderer::{Audible, AuditionOptions},
-};
+use crate::renderer::{Audible, AuditionOptions};
 use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::{
@@ -21,6 +12,13 @@ use kumi_common::{
     },
     time::now_ms,
 };
+use kumi_media::audio::{
+    self,
+    analyze::{Analysis, AnalyzeOptions},
+    matching::{closeness, Focus},
+    tools::summary,
+};
+use kumi_types::{contracts::*, errors::RuntimeError};
 use serde_json::json;
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},

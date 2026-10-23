@@ -3,8 +3,8 @@
 //! named by its video id, and let go once it's measured.
 
 use super::sources::{folded, watch_url, Wanted};
-use crate::video::programs::{find_yt_dlp, run, yt_dlp_extras, ProgramOptions, RunOptions};
 use kumi_common::abort::Signal;
+use kumi_media::programs::{find_yt_dlp, run, yt_dlp_extras, ProgramOptions, RunOptions};
 use serde_json::Value;
 use std::{
     cell::RefCell,
@@ -137,7 +137,7 @@ impl Fetcher {
 
     /// A YouTube video's sound, downloaded into the folder by its id (once: a copy already there is used).
     async fn download(&self, url: &str, signal: &Signal) -> Result<PathBuf, String> {
-        let id = crate::video::youtube_id(url).ok_or("Kumi fetches a reference's audio from YouTube videos only.")?;
+        let id = kumi_web::video::youtube_id(url).ok_or("Kumi fetches a reference's audio from YouTube videos only.")?;
         if let Some(kept) = kept(&self.folder, &id) {
             return Ok(kept);
         }
@@ -184,7 +184,7 @@ fn entries(listed: &Value) -> Vec<(&Value, String)> {
         .into_iter()
         .flatten()
         .filter(|entry| entry["duration"].as_f64().is_none_or(|seconds| seconds < LONGEST_VIDEO))
-        .filter_map(|entry| Some((entry, watch_url(&crate::video::youtube_id(entry["url"].as_str()?)?))))
+        .filter_map(|entry| Some((entry, watch_url(&kumi_web::video::youtube_id(entry["url"].as_str()?)?))))
         .collect()
 }
 

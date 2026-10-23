@@ -11,7 +11,7 @@ use super::{
     measure::{fine_hz, percentile, Heard, Measures, FINE_BINS, THIRDS},
     sound,
 };
-use crate::core::daw::{with_article, DawProfile};
+use kumi_types::daw::{with_article, DawProfile};
 use serde::{Deserialize, Serialize};
 
 /// The regions tonal balance is judged in: third-octave bands, first to last.
@@ -1206,8 +1206,13 @@ impl Checklist {
     }
 }
 
-/// Main's chain as masking reads it, Live's (it lives with Live's integration), at the path it always had.
-pub use crate::integrations::live_main_chain::{main_chain, utility_gain, MainDevice, MainState};
+/// Main's chain as masking reads it: the devices that change the mix in a way the focus element (heard before Main)
+/// doesn't share, and the gain of the Utilities that only turn the level (the focus is heard that much louder too).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MainState {
+    pub unfair: Vec<String>,
+    pub gain: f64,
+}
 
 /// Why masking can't be read fairly on a run over the mix, when it can't: without Kumi Ears' tap first on Main, the mix
 /// is heard after Main's chain but `focus` before it, so a device there (a limiter's gain, its limiting, an EQ) moves
@@ -1499,7 +1504,7 @@ fn round2(value: f64) -> f64 {
     (value * 100.).round() / 100.
 }
 
-pub(crate) fn round1(value: f64) -> f64 {
+pub fn round1(value: f64) -> f64 {
     (value * 10.).round() / 10.
 }
 

@@ -1355,6 +1355,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "kumi-listening"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
+ "hex",
+ "home",
+ "indexmap",
+ "kumi-ai",
+ "kumi-common",
+ "kumi-library",
+ "kumi-media",
+ "kumi-net",
+ "kumi-types",
+ "kumi-web",
+ "rand 0.9.5",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "kumi-media"
 version = "0.1.0"
 dependencies = [
@@ -1429,6 +1459,7 @@ dependencies = [
  "kumi-common",
  "kumi-genexpr",
  "kumi-library",
+ "kumi-listening",
  "kumi-media",
  "kumi-net",
  "kumi-store",
@@ -1487,6 +1518,7 @@ name = "kumi-types"
 version = "1.21.1"
 dependencies = [
  "async-trait",
+ "fancy-regex",
  "futures",
  "kumi-common",
  "libc",

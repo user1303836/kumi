@@ -1,17 +1,15 @@
 //! The listening tools as the model calls them: a tool's input becomes a request, the engine answers, and the reply is
 //! what the model reads.
 use super::Listening;
-use crate::{
-    core::{
-        contracts::{JsonObject, ToolResult},
-        errors::RuntimeError,
-    },
-    listening::tools::{
-        audition_request, form_request, groove_request, judge_reply, judge_request, sound_request, tune_request, AUDITION_TOOL, FORM_TOOL,
-        GROOVE_TOOL, JUDGE_TOOL, RENDER_TOOL, SOUND_TOOL, TUNE_TOOL,
-    },
+use crate::tools::{
+    audition_request, form_request, groove_request, judge_reply, judge_request, sound_request, tune_request, AUDITION_TOOL, FORM_TOOL,
+    GROOVE_TOOL, JUDGE_TOOL, RENDER_TOOL, SOUND_TOOL, TUNE_TOOL,
 };
 use kumi_common::{abort::Signal, js::json::stringify};
+use kumi_types::{
+    contracts::{JsonObject, ToolResult},
+    errors::RuntimeError,
+};
 use serde_json::{json, Value};
 use std::rc::Rc;
 

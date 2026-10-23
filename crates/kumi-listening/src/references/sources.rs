@@ -104,8 +104,8 @@ impl Sources {
     pub fn new(musicbrainz: &str, listenbrainz: &str, spotify: &str) -> Self {
         // Kumi's own sources are https: nothing is followed off it to plain http (stand-in servers in tests are http).
         let secure = [musicbrainz, listenbrainz, spotify].iter().all(|base| base.starts_with("https://"));
-        let client = crate::net::client()
-            .user_agent(format!("Kumi/{} ( https://github.com/user1303836/kumi )", crate::KUMI_VERSION))
+        let client = kumi_net::client()
+            .user_agent(format!("Kumi/{} ( https://github.com/user1303836/kumi )", kumi_types::version::KUMI_VERSION))
             .timeout(Duration::from_secs(20))
             .https_only(secure)
             .build()
@@ -163,12 +163,12 @@ impl Sources {
             };
         }
         if looks_like_path(what) {
-            return files(&crate::audio::audio_path(what), count);
+            return files(&kumi_media::audio::audio_path(what), count);
         }
         // An audio file's name, or a Windows path, that isn't there is said so, not searched for as words (a name with
         // a slash, AC/DC say, still is).
         if audio(Path::new(what.trim())) || what.contains('\\') {
-            return Err(format!("There's no such file: {}.", crate::audio::audio_path(what)));
+            return Err(format!("There's no such file: {}.", kumi_media::audio::audio_path(what)));
         }
         self.words(what, count, signal).await
     }
@@ -209,7 +209,7 @@ impl Sources {
             self.last.set(Some(Instant::now()));
         }
         let sent = tokio::select! {
-            sent = crate::net::send(self.client.get(url).header("Accept", "application/json")) => sent.map_err(|error| format!("{} didn't answer: {error}", host(url)))?,
+            sent = kumi_net::send(self.client.get(url).header("Accept", "application/json")) => sent.map_err(|error| format!("{} didn't answer: {error}", host(url)))?,
             _ = signal.cancelled() => return Err("stopped".into()),
         };
         if !sent.status().is_success() {
@@ -217,7 +217,7 @@ impl Sources {
         }
         // A page is read up to 8 MB: a longer answer is refused rather than held in memory.
         tokio::select! {
-            body = crate::web::net::body_at_most(sent, 8_000_000) => body
+            body = kumi_net::web::body_at_most(sent, 8_000_000) => body
                 .map(|body| String::from_utf8_lossy(&body).into_owned())
                 .map_err(|why| format!("{}: {why}", host(url))),
             _ = signal.cancelled() => Err("stopped".into()),
@@ -488,8 +488,8 @@ impl Sources {
     /// ListenBrainz's popularity rows for recordings or artists (none when it doesn't answer).
     async fn popularity(&self, of: &str, body: Value, signal: &Signal) -> Value {
         let asked = async {
-            let sent = crate::net::send(self.client.post(format!("{}/1/popularity/{of}", self.listenbrainz)).json(&body)).await.ok()?;
-            let body = crate::web::net::body_at_most(sent, 8_000_000).await.ok()?;
+            let sent = kumi_net::send(self.client.post(format!("{}/1/popularity/{of}", self.listenbrainz)).json(&body)).await.ok()?;
+            let body = kumi_net::web::body_at_most(sent, 8_000_000).await.ok()?;
             serde_json::from_slice::<Value>(&body).ok()
         };
         tokio::select! {
@@ -666,7 +666,7 @@ fn link(what: &str) -> Option<Link> {
     match url.host_str()?.to_lowercase().as_str() {
         "open.spotify.com" | "play.spotify.com" => spotify_parts(what).map(|(kind, id)| Link::Spotify(kind, id)),
         "youtube.com" | "www.youtube.com" | "m.youtube.com" | "music.youtube.com" | "youtu.be" => {
-            if let Some(id) = crate::video::youtube_id(what) {
+            if let Some(id) = kumi_web::video::youtube_id(what) {
                 return Some(Link::Video(watch_url(&id)));
             }
             if url.path() != "/playlist" {
@@ -708,7 +708,7 @@ pub fn looks_like_path(what: &str) -> bool {
         || what.starts_with("..\\")
         || what.starts_with("\\\\")
         || (bytes.len() > 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/'));
-    rooted || ((what.contains(['/', '\\']) || audio(Path::new(what))) && Path::new(&crate::audio::audio_path(what)).exists())
+    rooted || ((what.contains(['/', '\\']) || audio(Path::new(what))) && Path::new(&kumi_media::audio::audio_path(what)).exists())
 }
 
 /// Whether what was asked for is a place (a path or a link), found again only by itself, never by a name.
@@ -764,7 +764,7 @@ fn files(path: &str, count: usize) -> Result<Resolved, String> {
 /// How a file or a folder's audio files are now (names, sizes, times changed), to tell when they change; none for
 /// what isn't a file or folder.
 pub fn stamp(what: &str) -> Option<String> {
-    let path = PathBuf::from(crate::audio::audio_path(what.trim()));
+    let path = PathBuf::from(kumi_media::audio::audio_path(what.trim()));
     let files = if path.is_dir() {
         audio_files(&path).ok()?
     } else if path.is_file() {

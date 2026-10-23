@@ -7,24 +7,22 @@
 
 use super::Listening;
 use crate::{
-    audio,
-    core::{
-        contracts::AuditionCandidate,
-        daw::{with_article, DawProfile},
-        errors::RuntimeError,
-    },
-    listening::{
-        checklist::{Change, Row},
-        notes::{feel, fit_grid, gaps, high_onsets, lines, onsets, refine_kit, toward, Feel, Kit, Line, Note},
-        renderer::{NotePatch, Window},
-        round::{Next, Round, RoundKind},
-        tools::GrooveRequest,
-    },
+    checklist::{Change, Row},
+    notes::{feel, fit_grid, gaps, high_onsets, lines, onsets, refine_kit, toward, Feel, Kit, Line, Note},
+    renderer::{NotePatch, Window},
+    round::{Next, Round, RoundKind},
+    tools::GrooveRequest,
 };
 use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::{number::to_string, string::head},
     time::now_ms,
+};
+use kumi_media::audio;
+use kumi_types::{
+    contracts::AuditionCandidate,
+    daw::{with_article, DawProfile},
+    errors::RuntimeError,
 };
 use std::{collections::HashMap, rc::Rc};
 
@@ -136,9 +134,9 @@ impl Listening {
     async fn file_notes(&self, file: &str, tempo: Option<f64>, signal: Signal) -> Result<Read, String> {
         let base = match tempo {
             Some(tempo) => tempo,
-            None => crate::audio::analyze::analyze_file(
+            None => kumi_media::audio::analyze::analyze_file(
                 file,
-                crate::audio::analyze::AnalyzeOptions { seconds: Some(120.), signal: Some(signal.clone()), ..Default::default() },
+                kumi_media::audio::analyze::AnalyzeOptions { seconds: Some(120.), signal: Some(signal.clone()), ..Default::default() },
             )
             .await
             .ok()
@@ -147,7 +145,7 @@ impl Listening {
             .ok_or("Kumi couldn't tell its tempo: give reference_tempo (its BPM).")?,
         };
         let say = |said: &str| self.tell(said.to_string(), None);
-        let heard = crate::listening::transcribe::pitched_notes(std::path::Path::new(file), 0., 120., &say, &signal).await?;
+        let heard = crate::transcribe::pitched_notes(std::path::Path::new(file), 0., 120., &say, &signal).await?;
         if heard.is_empty() {
             return Err("Basic Pitch heard no notes in it.".into());
         }
@@ -231,7 +229,7 @@ impl Listening {
         self.tell("Listened", Some(false));
         let files = pass.rendered.map(|captured| captured.files).map_err(|error| error.to_string())?;
         let render = files.values().next().cloned().ok_or("Nothing came through from the drum stem.")?;
-        let mut source = crate::audio::decode::open_audio(&render.file, Some(signal)).await.map_err(|error| error.0)?;
+        let mut source = kumi_media::audio::decode::open_audio(&render.file, Some(signal)).await.map_err(|error| error.0)?;
         let rate = source.sample_rate;
         source.seek(render.start * rate);
         let mut samples: Vec<f32> = vec![];

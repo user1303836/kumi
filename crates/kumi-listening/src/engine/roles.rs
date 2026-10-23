@@ -4,15 +4,13 @@
 
 use super::Listening;
 use crate::{
-    core::errors::RuntimeError,
-    listening::{
-        renderer::DeviceKnob,
-        round::Round,
-        tools::{TuneHow, TuneRequest},
-    },
-    plugins::roles::{self, is_plugin, Found, Resolved},
+    renderer::DeviceKnob,
+    round::Round,
+    tools::{TuneHow, TuneRequest},
 };
 use kumi_common::abort::{Signal, SignalExt};
+use kumi_library::plugins::roles::{self, is_plugin, Found, Resolved};
+use kumi_types::errors::RuntimeError;
 use std::rc::Rc;
 
 impl Listening {

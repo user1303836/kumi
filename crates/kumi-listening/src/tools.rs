@@ -1,16 +1,14 @@
 //! The judge, tune, groove, form and sound tools as the model meets them: what each asks, how an input becomes a
 //! request, what a round answers, and each tool's definition in the DAW's words.
 use crate::{
-    core::{
-        contracts::{AuditionCandidate, AuditionRequest, JsonObject, MIX_CANDIDATE},
-        daw::{asset_in_words, parenthetical, with_article, AssetPhrase, DawProfile},
-    },
-    listening::{
-        checklist::{Explicit, Quantity, Target},
-        round::{Round, RoundKind},
-    },
+    checklist::{Explicit, Quantity, Target},
+    round::{Round, RoundKind},
 };
 use kumi_common::js::string::{head, trim};
+use kumi_types::{
+    contracts::{AuditionCandidate, AuditionRequest, JsonObject, MIX_CANDIDATE},
+    daw::{asset_in_words, parenthetical, with_article, AssetPhrase, DawProfile},
+};
 use serde_json::{json, Value};
 use std::sync::LazyLock;
 
@@ -244,7 +242,7 @@ pub fn groove_tool(profile: &DawProfile) -> ToolDef {
     let mut def = definition(&GROOVE, profile, GROOVE_PHRASES);
     // The part is taken by the DAW's word for it, where the schema has it.
     let field = profile.vocab.clip_field;
-    if field != crate::live_word!(clip_field) {
+    if field != kumi_types::live_word!(clip_field) {
         if let Some(properties) = def.schema.get_mut("properties").and_then(Value::as_object_mut) {
             *properties = std::mem::take(properties)
                 .into_iter()
@@ -553,7 +551,7 @@ pub(crate) const AUDITION_PHRASES: &[AssetPhrase] = &[
 pub fn audition_tool(profile: &DawProfile) -> ToolDef {
     let mut def = definition(&AUDITION, profile, AUDITION_PHRASES);
     let field = profile.vocab.clip_field;
-    if field != crate::live_word!(clip_field) {
+    if field != kumi_types::live_word!(clip_field) {
         if let Some(properties) =
             def.schema.get_mut("properties").and_then(|p| p.pointer_mut("/candidates/items/properties")).and_then(Value::as_object_mut)
         {
@@ -645,7 +643,7 @@ pub fn audition_request(profile: &DawProfile, input: &JsonObject) -> Result<Audi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::daw::check_asset_phrases;
+    use kumi_types::daw::check_asset_phrases;
 
     const ASSETS: [(&LazyLock<Value>, &[AssetPhrase]); 6] = [
         (&JUDGE, JUDGE_PHRASES),

@@ -1,7 +1,7 @@
 //! Effects, read off synthetic sounds: a reverb's decay time and how its tail darkens and widens, echoes found (and a
 //! rhythm not taken for them), a tremolo's depth, a filter's sweep, pumping against the beat, the tail's share, a tail
 //! cut off, and a dry sound judged against a wet reference, a change toward it kept and one past it taken back.
-use kumi_runtime::listening::{
+use kumi_listening::{
     checklist::{Change, Checklist, Explicit, Goal, Profile, Quantity, Role, Spread, Target},
     effects::{self, cut_tails, decay_time, echo, echo_falls, effects, note_value, pump, sweep, swing, tail_share, NO_ECHO},
     measure::{measure_samples, Heard},

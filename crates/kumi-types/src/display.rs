@@ -1,4 +1,4 @@
-//! Place a parameter value using the text Live shows across its range.
+//! Place a parameter value using the text the DAW shows across its range.
 use fancy_regex::Regex;
 use kumi_common::js::{number, string::trim};
 use serde::{Deserialize, Serialize};

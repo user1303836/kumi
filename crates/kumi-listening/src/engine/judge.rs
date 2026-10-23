@@ -6,19 +6,16 @@
 
 use super::Listening;
 use crate::{
-    core::{contracts::*, daw::DawProfile, errors::RuntimeError},
-    listening::{
-        checklist::{masking_unfair_in, note_stretch, worst_stretch, Checklist, Goal, Profile, Quantity, Row, REGIONS},
-        detect::{self, Problem, ProblemKind},
-        embed,
-        judging::{self, Listen, Placed, RoundHost, Unheard},
-        listener::{compare, Listener, Opinion, Take},
-        measure::{measure_file, percentile, Embedding, Heard, MeasureOptions},
-        renderer::{Captured, Window},
-        round::{Next, Round, RoundKind},
-        tools::{GoalRequest, JudgeRequest},
-    },
+    checklist::{masking_unfair_in, note_stretch, worst_stretch, Checklist, Goal, Profile, Quantity, Row, REGIONS},
+    detect::{self, Problem, ProblemKind},
+    embed,
+    judging::{self, Listen, Placed, RoundHost, Unheard},
+    listener::{compare, Listener, Opinion, Take},
+    measure::{measure_file, percentile, Embedding, Heard, MeasureOptions},
     references::{store::KeptReference, tool::MEASURED},
+    renderer::{Captured, Window},
+    round::{Next, Round, RoundKind},
+    tools::{GoalRequest, JudgeRequest},
 };
 use async_trait::async_trait;
 use kumi_common::{
@@ -26,6 +23,7 @@ use kumi_common::{
     js::string::head,
     time::now_ms,
 };
+use kumi_types::{contracts::*, daw::DawProfile, errors::RuntimeError};
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},
     path::{Path, PathBuf},
@@ -352,7 +350,7 @@ impl Listening {
                 after: value.map(round1),
                 gap_before: 0.,
                 gap_after: round1(item.gap(*value)),
-                change: crate::listening::checklist::Change::Same,
+                change: crate::checklist::Change::Same,
             })
             .collect();
         // Said once a run: whether a listening model will hear the changes beside the meters, and which one, since what
@@ -456,7 +454,7 @@ impl Listening {
             let run = self.judge.borrow();
             match run.as_ref().unwrap().checklist.items[index].quantity {
                 Quantity::LowWidth => true,
-                Quantity::Region { region } => crate::listening::measure::THIRDS[REGIONS[region].2] >= 8_000.,
+                Quantity::Region { region } => crate::measure::THIRDS[REGIONS[region].2] >= 8_000.,
                 _ => false,
             }
         });
@@ -1493,4 +1491,24 @@ fn round1(value: f64) -> f64 {
 /// Whether the learned models may be used: the embeddings slot isn't off.
 fn models_on() -> bool {
     crate::slots::kept().now(crate::slots::Job::Embeddings) != crate::slots::Choice::Off
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prune_unstored;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_judged_runs_folder_keeps_only_what_the_run_stores() {
+        let folder = tempfile::tempdir().unwrap();
+        let [span, excerpt, dropped] = ["span.wav", "excerpt.wav", "dropped.wav"].map(|name| {
+            let path = folder.path().join(name);
+            std::fs::write(&path, b"take").unwrap();
+            path
+        });
+        prune_unstored(folder.path(), &[span.clone(), excerpt.clone()]).await;
+        assert!(span.exists() && excerpt.exists() && !dropped.exists());
+        // A new run, or none, stores none of the old run's takes.
+        prune_unstored(folder.path(), &[]).await;
+        assert!(!span.exists() && !excerpt.exists());
+    }
 }

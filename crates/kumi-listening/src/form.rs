@@ -9,11 +9,11 @@ use super::{
     measure::{Heard, THIRDS},
     notes::{fit_grid, onsets, Grid},
 };
-use crate::audio::{
+use kumi_common::abort::Signal;
+use kumi_media::audio::{
     analyze::{analyze_file, AnalyzeOptions},
     decode::open_audio,
 };
-use kumi_common::abort::Signal;
 use serde::{Deserialize, Serialize};
 
 /// One bar of the energy curve.

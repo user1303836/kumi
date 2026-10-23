@@ -8,6 +8,7 @@ pub mod command;
 pub mod contracts;
 pub mod daw;
 pub mod disk;
+pub mod display;
 pub mod errors;
 pub mod matching;
 pub mod notes;

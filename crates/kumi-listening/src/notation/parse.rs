@@ -133,7 +133,7 @@ pub fn read(text: &str, frame: &Frame) -> Result<Reading, Vec<NotationError>> {
 }
 /// What leaving out the notes at or past a clip's end (by where they started) and cutting those that ran past it
 /// says, if anything.
-pub(crate) fn past_the_end(left_out: &[String], cut: usize, end: &str) -> Vec<String> {
+pub fn past_the_end(left_out: &[String], cut: usize, end: &str) -> Vec<String> {
     let mut said = vec![];
     if !left_out.is_empty() {
         let mut at: Vec<&str> = left_out.iter().map(String::as_str).collect();

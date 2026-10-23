@@ -1,7 +1,7 @@
 //! A part's feel measured on its notes: swing fitted on the right grid, each lane's timing, velocity and where it
 //! plays (lanes by a Drum Rack's pads, one lane for anything else), the notes moved toward a reference's feel closing
 //! the gaps, a recording's grid fitted to its notes, and a drum stem's hits found per band and refined lane by lane.
-use kumi_runtime::listening::notes::{
+use kumi_listening::notes::{
     feel, fit_grid, fit_swing, gaps, high_onsets, lines, onsets, pad_lane, refine, refine_kit, toward, Feel, Kit, Note,
 };
 
@@ -72,7 +72,7 @@ fn moving_a_part_toward_a_reference_closes_its_gaps() {
     let part = drums(&notes, tempo);
     let before = gaps(&part, &reference);
     assert!(before.swing >= 9., "{before:?}");
-    let hats = |gaps: &kumi_runtime::listening::notes::Gaps| gaps.timing.iter().find(|(name, _)| name == "hats").unwrap().1;
+    let hats = |gaps: &kumi_listening::notes::Gaps| gaps.timing.iter().find(|(name, _)| name == "hats").unwrap().1;
     assert!(hats(&before) > 5., "{before:?}");
     // Halfway, then all the way: each closes more.
     let half = drums(&toward(&notes, &part, &reference, 4., 0.5), tempo);

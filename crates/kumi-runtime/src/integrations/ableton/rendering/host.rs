@@ -1,8 +1,8 @@
 //! Live as the listening tools meet it: what `Renderer` asks, answered with Live's bridge, its render rigs and Kumi
-//! Ears. The renderer is the `Rc` itself, since the rigs are made and closed through it.
+//! Ears. The renderer is the `Rc` itself ([`LiveHost`]), since the rigs are made and closed through it.
 //!
 //! Inside this impl the inherent methods are called by their path (`LiveRenderer::tell(self, …)`): a method call on the
-//! `Rc` finds `Renderer`'s first.
+//! host finds `Renderer`'s first.
 use super::super::bridge_version::RENDER_BRIDGE;
 use super::super::connection::NO_CURRENT_LIVE;
 use super::{pass::RECORD_LEAD, rig::BEFORE_MAIN, roles::bands_of, *};
@@ -22,8 +22,20 @@ use crate::{
 use async_trait::async_trait;
 use kumi_common::js::string::head;
 
+/// Live's renderer as the listening tools hold it: the `Rc` (listening's `Renderer` is another crate's trait, so it's
+/// this crate's type that answers it).
+#[derive(Clone)]
+pub struct LiveHost(pub Rc<LiveRenderer>);
+
+impl std::ops::Deref for LiveHost {
+    type Target = Rc<LiveRenderer>;
+    fn deref(&self) -> &Rc<LiveRenderer> {
+        &self.0
+    }
+}
+
 #[async_trait(?Send)]
-impl Renderer for Rc<LiveRenderer> {
+impl Renderer for LiveHost {
     fn profile(&self) -> &DawProfile {
         &DawProfile::ABLETON
     }

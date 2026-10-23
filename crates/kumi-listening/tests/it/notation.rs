@@ -1,6 +1,6 @@
 //! The notation reads back what it prints: random notes of every kind, in several meters and frames, print and read
 //! back as the same notes (times to float noise, everything else exactly), and on-grid parts print short.
-use kumi_runtime::notation::{parse, print, Frame, Note};
+use kumi_listening::notation::{parse, print, Frame, Note};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
 const EPSILON: f64 = 1e-9;

@@ -2,7 +2,7 @@
 //! rate, clicks at note edges and dust, harmonics (warmth) on either side of 250 Hz, width and top, a noise floor and
 //! digital silence, a kit that piles up and one that doesn't, a pad ducking under a kick, hats interlocking with it, a
 //! bass note off the key and a lead that isn't a bass line, and a sound judged against a reference sound.
-use kumi_runtime::listening::{
+use kumi_listening::{
     checklist::{Checklist, Goal, Profile},
     measure::{measure_samples, Heard},
     sound::{against_key, bandwidth, ducking, harmonics, interlock, key_classes, kit, noise_floor, problems, tail, width},

@@ -2,7 +2,7 @@
 //! them (a prepared drop and an unprepared one), the intro, outro and first hook; a flat song's plateau; and a
 //! reference at another tempo read in its own bars.
 use kumi_common::abort::Signal;
-use kumi_runtime::listening::{
+use kumi_listening::{
     form::{compare, file_grid, form, form_from, grid_of, Form},
     measure::measure_samples,
 };
@@ -59,7 +59,7 @@ fn song_at(parts: &[Part], bar: f64, accent: f64) -> Vec<f64> {
     out
 }
 
-fn heard(samples: &[f64]) -> kumi_runtime::listening::measure::Heard {
+fn heard(samples: &[f64]) -> kumi_listening::measure::Heard {
     let samples: Vec<f32> = samples.iter().map(|s| *s as f32).collect();
     measure_samples(&samples, &samples, RATE)
 }

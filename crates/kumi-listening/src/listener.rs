@@ -8,10 +8,10 @@
 //! models with an OpenAI API key, each picked from the provider's own model list. `KUMI_LISTENER=off`, or any value
 //! that isn't `<base url>#<model>`, leaves the meters alone: an opt-out never falls through to a cloud model.
 
-use crate::audio::decode::open_audio;
 use async_trait::async_trait;
 use base64::Engine;
 use kumi_common::abort::{Signal, SignalExt};
+use kumi_media::audio::decode::open_audio;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -173,7 +173,7 @@ pub struct ChatListener {
     pub model: String,
     pub client: reqwest::Client,
     /// The proxy settings the client goes by: OpenAI's, or the variables' alone for an address the producer named.
-    pub proxies: fn() -> std::sync::Arc<crate::net::proxy::Settings>,
+    pub proxies: fn() -> std::sync::Arc<kumi_net::proxy::Settings>,
 }
 
 #[async_trait(?Send)]
@@ -196,7 +196,7 @@ impl Listener for ChatListener {
         }
         // The whole exchange, sending and reading back, gives way to Esc.
         let sent = tokio::select! {
-            sent = crate::net::send_through(request, (self.proxies)()) => sent.map_err(|error| format!("the listening model didn't answer: {error}"))?,
+            sent = kumi_net::send_through(request, (self.proxies)()) => sent.map_err(|error| format!("the listening model didn't answer: {error}"))?,
             _ = signal.cancelled() => return Err("stopped".into()),
         };
         let status = sent.status();
@@ -215,13 +215,13 @@ impl Listener for ChatListener {
 
 /// A listening model's answer as JSON, read up to a megabyte (an answer is a few lines).
 async fn answer(sent: reqwest::Response) -> Result<Value, String> {
-    let body = crate::web::net::body_at_most(sent, 1_000_000).await.map_err(|why| format!("the listening model's answer: {why}"))?;
+    let body = kumi_net::web::body_at_most(sent, 1_000_000).await.map_err(|why| format!("the listening model's answer: {why}"))?;
     serde_json::from_slice(&body).map_err(|error| format!("the listening model's answer wasn't JSON: {error}"))
 }
 
 /// A provider's model list as JSON, read up to 8 MB.
 async fn model_list(listed: reqwest::Response) -> Result<Value, String> {
-    let body = crate::web::net::body_at_most(listed, 8_000_000).await.map_err(|why| format!("the model list: {why}"))?;
+    let body = kumi_net::web::body_at_most(listed, 8_000_000).await.map_err(|why| format!("the model list: {why}"))?;
     serde_json::from_slice(&body).map_err(|error| error.to_string())
 }
 
@@ -260,7 +260,7 @@ pub fn from_env(env: &std::collections::HashMap<String, String>) -> FromEnv {
                 key: env.get("KUMI_LISTENER_KEY").cloned(),
                 model: model.trim().into(),
                 client: named_client(),
-                proxies: crate::net::proxy::environment,
+                proxies: kumi_net::proxy::environment,
             })
         }
         _ => FromEnv::Off("KUMI_LISTENER is neither off nor a model's address (<base url>#<model>), so listening is off".into()),
@@ -270,13 +270,13 @@ pub fn from_env(env: &std::collections::HashMap<String, String>) -> FromEnv {
 /// A client for a listening model: one that gives up on a model that stops answering (a minute and a half: it hears
 /// 20 s of audio), and follows no redirect, so a key never goes on to another host.
 pub(crate) fn client() -> reqwest::Client {
-    listening(crate::net::client())
+    listening(kumi_net::client())
 }
 
 /// [`client`] for a listening model at an address the producer named (KUMI_LISTENER, a slot): on their computer or
 /// network, so the variables' proxies alone, never the system's.
 pub(crate) fn named_client() -> reqwest::Client {
-    listening(crate::net::model_servers())
+    listening(kumi_net::model_servers())
 }
 
 fn listening(client: reqwest::ClientBuilder) -> reqwest::Client {
@@ -289,7 +289,7 @@ fn listening(client: reqwest::ClientBuilder) -> reqwest::Client {
 pub async fn openai_listener(key: &str, signal: Signal) -> Result<Option<ChatListener>, String> {
     let client = client();
     let listed = tokio::select! {
-        listed = crate::net::send(client.get("https://api.openai.com/v1/models").bearer_auth(key).timeout(std::time::Duration::from_secs(20))) => listed.map_err(|error| error.to_string())?,
+        listed = kumi_net::send(client.get("https://api.openai.com/v1/models").bearer_auth(key).timeout(std::time::Duration::from_secs(20))) => listed.map_err(|error| error.to_string())?,
         _ = signal.cancelled() => return Err("stopped".into()),
     };
     if !listed.status().is_success() {
@@ -312,7 +312,7 @@ pub async fn openai_listener(key: &str, signal: Signal) -> Result<Option<ChatLis
         key: Some(key.into()),
         model,
         client,
-        proxies: crate::net::proxy::current,
+        proxies: kumi_net::proxy::current,
     }))
 }
 
@@ -345,7 +345,7 @@ impl Listener for GeminiListener {
         });
         let address = format!("{}/v1beta/{}:generateContent", self.base.trim_end_matches('/'), self.model);
         let sent = tokio::select! {
-            sent = crate::net::send(self.client.post(address).header("x-goog-api-key", &self.key).json(&body)) => sent.map_err(|error| format!("the listening model didn't answer: {error}"))?,
+            sent = kumi_net::send(self.client.post(address).header("x-goog-api-key", &self.key).json(&body)) => sent.map_err(|error| format!("the listening model didn't answer: {error}"))?,
             _ = signal.cancelled() => return Err("stopped".into()),
         };
         let status = sent.status();
@@ -371,7 +371,7 @@ pub async fn gemini_listener(base: &str, key: &str, signal: Signal) -> Result<Op
     let client = client();
     let address = format!("{}/v1beta/models?pageSize=1000", base.trim_end_matches('/'));
     let listed = tokio::select! {
-        listed = crate::net::send(client.get(address).header("x-goog-api-key", key).timeout(std::time::Duration::from_secs(20))) => listed.map_err(|error| error.to_string())?,
+        listed = kumi_net::send(client.get(address).header("x-goog-api-key", key).timeout(std::time::Duration::from_secs(20))) => listed.map_err(|error| error.to_string())?,
         _ = signal.cancelled() => return Err("stopped".into()),
     };
     if !listed.status().is_success() {
@@ -413,10 +413,10 @@ fn gemini_rank(name: &str) -> (Vec<u32>, bool, bool) {
 
 /// Gemini's API key: saved under "gemini", else GEMINI_API_KEY or GOOGLE_API_KEY.
 pub async fn gemini_key(
-    store: &dyn crate::auth::store::CredentialStore,
+    store: &dyn kumi_ai::auth::store::CredentialStore,
     env: &std::collections::HashMap<String, String>,
 ) -> Option<String> {
-    if let Ok(Some(crate::auth::store::Credential::ApiKey { key })) = store.get("gemini").await {
+    if let Ok(Some(kumi_ai::auth::store::Credential::ApiKey { key })) = store.get("gemini").await {
         return Some(key);
     }
     ["GEMINI_API_KEY", "GOOGLE_API_KEY"].iter().find_map(|name| env.get(*name).filter(|key| !key.trim().is_empty()).cloned())
@@ -424,3 +424,8 @@ pub async fn gemini_key(
 
 /// Gemini's public address.
 pub const GEMINI: &str = "https://generativelanguage.googleapis.com";
+
+/// Finds the listening model: one, none (no provider has one), or why it couldn't tell (the network, Esc).
+pub type ListenerSource = std::rc::Rc<
+    dyn Fn(kumi_common::abort::Signal) -> futures::future::LocalBoxFuture<'static, Result<Option<std::rc::Rc<dyn Listener>>, String>>,
+>;

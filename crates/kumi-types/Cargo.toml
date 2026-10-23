@@ -11,6 +11,7 @@ publish = false
 [dependencies]
 kumi-common.workspace = true
 async-trait.workspace = true
+fancy-regex.workspace = true
 futures.workspace = true
 regex.workspace = true
 serde.workspace = true

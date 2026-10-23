@@ -638,10 +638,10 @@ pub fn cut_tails(heard: &Heard) -> Vec<f64> {
 
 /// A problem as the DAW says it: what holds a part on its timeline goes by the DAW's word (Live's clip, REAPER's item).
 /// Live's are what they were.
-pub fn problem_in_words(text: &str, profile: &crate::core::daw::DawProfile) -> String {
+pub fn problem_in_words(text: &str, profile: &kumi_types::daw::DawProfile) -> String {
     text.replace(
         "a gate, a choke or a clip ending under it",
-        &format!("a gate, a choke or {} ending under it", crate::core::daw::with_article(profile.vocab.clip)),
+        &format!("a gate, a choke or {} ending under it", kumi_types::daw::with_article(profile.vocab.clip)),
     )
 }
 

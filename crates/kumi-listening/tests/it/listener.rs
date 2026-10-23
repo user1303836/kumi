@@ -1,7 +1,7 @@
 //! The listening model through Gemini: picked from Gemini's own model list by what each model does, asked with the
 //! audio in a generateContent request, its JSON answer read back; and kept off questions about width or air.
 use kumi_common::abort::Signal;
-use kumi_runtime::listening::listener::{from_env, gemini_listener, parse_answer, ChatListener, FromEnv, Listener};
+use kumi_listening::listener::{from_env, gemini_listener, parse_answer, ChatListener, FromEnv, Listener};
 use std::{cell::RefCell, rc::Rc};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -78,7 +78,7 @@ async fn gemini_listens_with_the_newest_model_that_takes_what_its_given_and_answ
                 key: None,
                 model: "audio".into(),
                 client: reqwest::Client::new(),
-                proxies: kumi_runtime::net::proxy::environment,
+                proxies: kumi_net::proxy::environment,
             };
             assert!(!chat.hears_width());
             let heard = listener.ask(b"RIFF....WAVE", "punch toward 10 dB", Signal::new()).await.unwrap();

@@ -6,14 +6,14 @@
 //! only when it passes; every swap is said, and `/slots back` takes it back. A slots file Kumi can't read turns
 //! listening off rather than guess, and is never written over.
 
-use crate::{
+use crate::listener::{self, gemini_key, gemini_listener, openai_listener, Answer, ChatListener, FromEnv, Listener, GEMINI};
+use async_trait::async_trait;
+use kumi_ai::{
     auth::store::CredentialStore,
-    core::daw::DawProfile,
-    listening::listener::{self, gemini_key, gemini_listener, openai_listener, Answer, ChatListener, FromEnv, Listener, GEMINI},
     providers::{api_key_for, ProviderId},
 };
-use async_trait::async_trait;
 use kumi_common::abort::Signal;
+use kumi_types::daw::DawProfile;
 use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
@@ -94,10 +94,10 @@ pub fn describe_for(profile: &DawProfile, job: Job, choice: &Choice) -> String {
     let app = profile.words.app;
     match (job, choice) {
         (_, Choice::File { path }) => format!("the model file {path}"),
-        (Job::Stems, _) if profile.caps.stems && profile.id == Some(crate::core::daw::DawId::Ableton) => format!("{app}'s own splitter"),
+        (Job::Stems, _) if profile.caps.stems && profile.id == Some(kumi_types::daw::DawId::Ableton) => format!("{app}'s own splitter"),
         (Job::Stems, _) if profile.caps.stems => format!("Kumi's own splitter: drums, bass and other from a track's stretch, put back in {app} (stems)"),
         (Job::Stems, _) => format!("none: {app} has no stem splitter Kumi can use"),
-        (Job::Transcription, _) if profile.caps.audio_to_midi && profile.id == Some(crate::core::daw::DawId::Ableton) => {
+        (Job::Transcription, _) if profile.caps.audio_to_midi && profile.id == Some(kumi_types::daw::DawId::Ableton) => {
             format!("{app}'s conversions (drums, melody and harmony to MIDI), and Basic Pitch for a pitched part in a file that isn't in {app}")
         }
         (Job::Transcription, _) if profile.caps.audio_to_midi => {
@@ -137,7 +137,7 @@ pub fn file_in(kumi_dir: &Path) -> PathBuf {
 
 /// The slots as kept in Kumi's own folder (KUMI_HOME, or ~/.kumi); listening off when the file can't be read.
 pub fn kept() -> Slots {
-    let models = crate::models::dir();
+    let models = kumi_ai::models::dir();
     Slots::load(&file_in(models.parent().unwrap_or(&models)))
 }
 
@@ -174,7 +174,7 @@ impl Slots {
         };
         let text = serde_json::to_string_pretty(self).map_err(|error| error.to_string())?;
         // Only the producer's, as Kumi's other stores are.
-        crate::core::private::write(file, (text + "\n").as_bytes()).map_err(|error| error.to_string())?;
+        kumi_types::private::write(file, (text + "\n").as_bytes()).map_err(|error| error.to_string())?;
         Ok(aside)
     }
 
@@ -227,7 +227,7 @@ fn set_aside(file: &Path, why: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("{why}, and it has no free name beside it to keep it under, so it isn't written over"))?;
     let bytes = std::fs::read(file)
         .map_err(|error| format!("{why}, and it couldn't be copied to {} ({error}), so it isn't written over", aside.display()))?;
-    crate::core::private::write(&aside, &bytes)
+    kumi_types::private::write(&aside, &bytes)
         .map_err(|error| format!("{why}, and it couldn't be copied to {} ({error}), so it isn't written over", aside.display()))?;
     Ok(aside)
 }
@@ -510,7 +510,7 @@ fn local(base: &str, model: &str, env: &HashMap<String, String>) -> Rc<dyn Liste
         key: env.get("KUMI_LISTENER_KEY").cloned(),
         model: model.into(),
         client: listener::named_client(),
-        proxies: crate::net::proxy::environment,
+        proxies: kumi_net::proxy::environment,
     })
 }
 
@@ -822,7 +822,7 @@ pub async fn command(words: &str, context: &SlotsContext, progress: &dyn Fn(Stri
             let choice = match (choice, &wanted) {
                 (Choice::File { .. }, Wanted::Link(link)) => {
                     progress(format!("Fetching {link} (Esc stops it)…"));
-                    match crate::listening::embed::fetch_link(link, &signal).await {
+                    match crate::embed::fetch_link(link, &signal).await {
                         Ok(fetched) => Choice::File { path: fetched.to_string_lossy().into_owned() },
                         Err(why) => return stays(why),
                     }
@@ -841,10 +841,10 @@ pub async fn command(words: &str, context: &SlotsContext, progress: &dyn Fn(Stri
                 progress(format!("Trying {path} on two known tones…"));
                 let say = |said: &str| progress(said.to_string());
                 // The runtime first: one that can't be had says nothing about the model.
-                if let Err(why) = crate::models::runtime(&say, &signal).await {
+                if let Err(why) = kumi_ai::models::runtime(&say, &signal).await {
                     return stays(format!("{}.", why.trim_end_matches('.')));
                 }
-                match crate::listening::embed::tells_tones_apart(Path::new(path), &say, &signal).await {
+                match crate::embed::tells_tones_apart(Path::new(path), &say, &signal).await {
                     Ok(heard) => Some(heard),
                     Err(why) => {
                         // Kumi's copy of a link that fails goes, so the next try fetches it again.

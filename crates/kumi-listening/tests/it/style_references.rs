@@ -2,20 +2,18 @@
 //! stood in for by a local server, yt-dlp by a script), one question when words could mean more than one thing and its
 //! answer settling it, profiles with spread, kept while their files stay as they were.
 use kumi_common::abort::Signal;
-use kumi_runtime::{
-    core::contracts::KernelTool,
-    listening::{
-        checklist::{Profile, Spread},
-        measure::measure_samples,
-    },
+use kumi_listening::{
+    checklist::{Profile, Spread},
+    measure::measure_samples,
     references::{
         fetch::{kept, Fetcher},
         sources::{embed_entity, spotify_parts, stamp, Kind, Resolved, Sources},
         store::{KeptReference, KeptTrack, ReferenceStore, KEPT_VERSION},
         tool::{reference_tools, ReferenceTool},
     },
-    video::programs::ProgramOptions,
 };
+use kumi_media::programs::ProgramOptions;
+use kumi_types::contracts::KernelTool;
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -697,7 +695,7 @@ fn calls(folder: &std::path::Path) -> Vec<Vec<String>> {
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
 async fn audio_comes_from_youtube_videos_only_by_length_or_name_and_goes_once_measured() {
-    use kumi_runtime::references::sources::Wanted;
+    use kumi_listening::references::sources::Wanted;
     tokio::task::LocalSet::new()
         .run_until(async {
             let place = tempfile::tempdir().unwrap();

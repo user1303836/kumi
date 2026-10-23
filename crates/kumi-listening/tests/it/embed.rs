@@ -2,7 +2,7 @@
 //! known signal, and audio resampled without moving its pitch. With KUMI_TEST_MODELS naming a folder that holds the
 //! runtime and the models (Kumi's models folder layout), whole embeddings are checked against what the shipped models
 //! gave for the same signal; tests never fetch. A style vector names the model that made it.
-use kumi_runtime::listening::embed::{clap_features, distance, own_style_id, resample, style_id, CLAP_MELS};
+use kumi_listening::embed::{clap_features, distance, own_style_id, resample, style_id, CLAP_MELS};
 use serde_json::Value;
 use std::f64::consts::PI;
 
@@ -68,7 +68,7 @@ async fn a_known_signal_embeds_as_the_converted_model_did() {
     assert!(std::path::Path::new(&folder).ends_with("models"), "KUMI_TEST_MODELS has to be a folder named models: {folder}");
     std::env::set_var("KUMI_HOME", std::path::Path::new(&folder).parent().unwrap());
     let signal = kumi_common::abort::Signal::new();
-    let (got, model) = kumi_runtime::listening::embed::vibe(&file, 0., 3., None, None, &|said| eprintln!("{said}"), &signal).await.unwrap();
+    let (got, model) = kumi_listening::embed::vibe(&file, 0., 3., None, None, &|said| eprintln!("{said}"), &signal).await.unwrap();
     assert_eq!(model, own_style_id());
     let apart = distance(&got, &expected).unwrap();
     assert!(apart < 1e-3, "{apart}");
@@ -77,7 +77,7 @@ async fn a_known_signal_embeds_as_the_converted_model_did() {
     std::fs::write(&louder, wav(&[known_signal().iter().map(|sample| sample * 10f32.powf(0.2)).collect()], 48_000)).unwrap();
     let vibe = |file: std::path::PathBuf, loudness: Option<f64>| {
         let signal = signal.clone();
-        async move { kumi_runtime::listening::embed::vibe(&file, 0., 3., loudness, None, &|_| {}, &signal).await.unwrap().0 }
+        async move { kumi_listening::embed::vibe(&file, 0., 3., loudness, None, &|_| {}, &signal).await.unwrap().0 }
     };
     let matched = distance(&vibe(file.clone(), Some(-20.)).await, &vibe(louder.clone(), Some(-16.)).await).unwrap();
     let unmatched = distance(&got, &vibe(louder, None).await).unwrap();
@@ -94,7 +94,7 @@ async fn a_known_signals_effects_embed_as_the_converted_model_did() {
     let fixture: Value = serde_json::from_str(include_str!("../support/afx-fixture.json")).unwrap();
     let unit = |key: &str| {
         let values: Vec<f32> = fixture[key].as_array().unwrap().iter().map(|value| value.as_f64().unwrap() as f32).collect();
-        kumi_runtime::listening::embed::normalized(values)
+        kumi_listening::embed::normalized(values)
     };
     let expected: Vec<f32> = unit("mid").into_iter().chain(unit("side")).collect();
     // The right side 10 ms behind the left and 2 dB down, as the fixture was made.
@@ -107,7 +107,7 @@ async fn a_known_signals_effects_embed_as_the_converted_model_did() {
     assert!(std::path::Path::new(&folder).ends_with("models"), "KUMI_TEST_MODELS has to be a folder named models: {folder}");
     std::env::set_var("KUMI_HOME", std::path::Path::new(&folder).parent().unwrap());
     let signal = kumi_common::abort::Signal::new();
-    let got = kumi_runtime::listening::embed::effects(&file, 0., 3., &|said| eprintln!("{said}"), &signal).await.unwrap();
+    let got = kumi_listening::embed::effects(&file, 0., 3., &|said| eprintln!("{said}"), &signal).await.unwrap();
     let apart = distance(&got, &expected).unwrap();
     assert!(apart < 1e-3, "{apart}");
 }

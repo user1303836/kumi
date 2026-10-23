@@ -4,7 +4,7 @@
 //! element and the rest of the mix as a target-to-mask ratio.
 
 use super::measure::{band_edges, fine_hz, percentile, Frames, Heard, FINE_BINS, THIRDS};
-use crate::core::daw::{parenthetical, DawProfile};
+use kumi_types::daw::{parenthetical, DawProfile};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -280,7 +280,7 @@ pub fn fix_in_words(fix: &str, profile: &DawProfile) -> String {
         &format!("mono below about 120 Hz{}", parenthetical(profile.vocab.bass_mono)),
     );
     // (a DAW whose parts aren't clips hears "clips" as one of them: the overload is said another way)
-    if profile.vocab.clips == crate::live_word!(clips) {
+    if profile.vocab.clips == kumi_types::live_word!(clips) {
         fix
     } else {
         fix.replace("lower the level into whatever clips (", "lower the level into whatever overloads (")

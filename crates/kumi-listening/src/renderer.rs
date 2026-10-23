@@ -2,23 +2,21 @@
 //! history and the level a judged run keeps. The tools themselves (a judged run, a tune, a groove, a form, a sound) are
 //! the same whichever DAW is there; a DAW answers these.
 use crate::{
-    core::{
-        contracts::{AuditionCandidate, ChangeRecord, JsonObject, Render},
-        daw::DawProfile,
-        errors::RuntimeError,
-    },
-    listening::{
-        checklist::MainState,
-        fit::Band,
-        judging::Placed,
-        knobs::Scale,
-        notes::{Kit, Note},
-    },
-    plugins::roles::Seen,
+    checklist::MainState,
+    fit::Band,
+    judging::Placed,
+    knobs::Scale,
+    notes::{Kit, Note},
 };
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use kumi_common::abort::Signal;
+use kumi_library::plugins::roles::Seen;
+use kumi_types::{
+    contracts::{AuditionCandidate, ChangeRecord, JsonObject, Render},
+    daw::DawProfile,
+    errors::RuntimeError,
+};
 use std::{any::Any, cell::Cell, path::PathBuf};
 
 /// A stretch of the timeline, in beats.

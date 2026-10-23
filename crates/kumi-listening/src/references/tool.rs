@@ -6,25 +6,22 @@ use super::{
     sources::{stamp, Choice, Kind, Resolved, Sources, Wanted},
     store::{KeptReference, KeptTrack, ReferenceStore, KEPT_VERSION},
 };
-use crate::core::daw::DawProfile;
 use crate::{
-    audio::tools::ResolveAudio,
-    core::{
-        contracts::{JsonObject, KernelTool, ToolResult},
-        errors::RuntimeError,
-    },
-    listening::{
-        checklist::{Profile, Spread, REGIONS},
-        embed,
-        measure::{measure_file, MeasureOptions},
-    },
-    video::programs::ProgramOptions,
+    checklist::{Profile, Spread, REGIONS},
+    embed,
+    measure::{measure_file, MeasureOptions},
 };
 use async_trait::async_trait;
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::{json::stringify, string::head},
     time::now_ms,
+};
+use kumi_media::{audio::tools::ResolveAudio, programs::ProgramOptions};
+use kumi_types::daw::DawProfile;
+use kumi_types::{
+    contracts::{JsonObject, KernelTool, ToolResult},
+    errors::RuntimeError,
 };
 use serde_json::{json, Value};
 use std::rc::Rc;
@@ -33,7 +30,7 @@ pub const REFERENCE_TOOL: &str = "reference";
 /// What the reference tool says it does; how to take one element of a reference only for a DAW that splits stems.
 fn description(profile: &DawProfile) -> String {
     // (Live's splitter gives a stem's clip; Kumi's own, elsewhere, puts stems on tracks a reference doesn't take)
-    let stems = if profile.caps.stems && profile.id == Some(crate::core::daw::DawId::Ableton) {
+    let stems = if profile.caps.stems && profile.id == Some(kumi_types::daw::DawId::Ableton) {
         format!("For one element of a reference (its bass, its drums), put the track in the {}, separate its stems (live_command separate_stems) and give a stem's clipRef. ", profile.words.place)
     } else {
         String::new()
@@ -107,7 +104,7 @@ impl KernelTool for InDaw {
     fn input_schema(&self) -> JsonObject {
         what_schema(&self.profile)
     }
-    fn reach(&self) -> crate::core::contracts::Reach {
+    fn reach(&self) -> kumi_types::contracts::Reach {
         self.tool.reach()
     }
     fn deferred(&self) -> bool {
@@ -128,7 +125,7 @@ impl KernelTool for InDaw {
         }
         self.tool.execute(input, signal).await
     }
-    fn role(&self) -> Option<crate::core::contracts::ToolRole> {
+    fn role(&self) -> Option<kumi_types::contracts::ToolRole> {
         self.tool.role()
     }
     fn concurrent(&self) -> bool {
@@ -137,7 +134,7 @@ impl KernelTool for InDaw {
 }
 
 fn what_schema(profile: &DawProfile) -> JsonObject {
-    let (place, clip, clip_ref) = (profile.words.place, crate::core::daw::with_article(profile.vocab.clip), profile.vocab.clip_ref);
+    let (place, clip, clip_ref) = (profile.words.place, kumi_types::daw::with_article(profile.vocab.clip), profile.vocab.clip_ref);
     json!({
         "type": "object",
         "additionalProperties": false,

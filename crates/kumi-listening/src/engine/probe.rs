@@ -4,18 +4,16 @@
 
 use super::{tune::said_first, Listening};
 use crate::{
-    core::errors::RuntimeError,
-    listening::{
-        checklist::Quantity,
-        detect::ProblemKind,
-        judging::predict,
-        probes::{Probes, Response},
-        renderer::{DeviceKnob, Window},
-        round::Round,
-        tools::TuneRequest,
-    },
+    checklist::Quantity,
+    detect::ProblemKind,
+    judging::predict,
+    probes::{Probes, Response},
+    renderer::{DeviceKnob, Window},
+    round::Round,
+    tools::TuneRequest,
 };
 use kumi_common::{abort::Signal, js::number::to_string};
+use kumi_types::errors::RuntimeError;
 use serde_json::json;
 use std::rc::Rc;
 

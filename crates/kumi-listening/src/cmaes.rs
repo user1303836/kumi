@@ -197,3 +197,14 @@ fn eigen(matrix: &[Vec<f64>]) -> (Vec<f64>, Vec<Vec<f64>>) {
     }
     ((0..n).map(|i| a[i][i]).collect(), v)
 }
+
+/// Mulberry32, with the same wrapping integer arithmetic as JavaScript's Math.imul.
+pub fn seeded(seed: u32) -> impl FnMut() -> f64 {
+    let mut state = seed;
+    move || {
+        state = state.wrapping_add(0x6d2b79f5);
+        let mut value = (state ^ (state >> 15)).wrapping_mul(1 | state);
+        value = value.wrapping_add((value ^ (value >> 7)).wrapping_mul(61 | value)) ^ value;
+        (value ^ (value >> 14)) as f64 / 4294967296.0
+    }
+}

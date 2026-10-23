@@ -1,7 +1,7 @@
 //! Pitched parts as notes with Basic Pitch: its decoding of the model's activations into notes (a predicted onset
 //! followed while it sounds, and a note no onset was predicted for traced from its strongest point), and its frame
 //! times. With KUMI_TEST_MODELS naming a local models folder, a known melody is transcribed whole; tests never fetch.
-use kumi_runtime::listening::transcribe::{frame_time, notes_from, pitched_notes};
+use kumi_listening::transcribe::{frame_time, notes_from, pitched_notes};
 
 /// Activations for `count` frames: a note on key `key` (MIDI − 21) over `span`, and an onset at its first frame when
 /// `onset`.

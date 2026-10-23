@@ -169,5 +169,5 @@ impl Probes {
 /// Written whole through a temporary file of this write's own, so a reader never sees half of it, and only the
 /// producer's.
 fn write(file: &Path, all: &[Response]) -> std::io::Result<()> {
-    crate::core::private::write(file, &serde_json::to_vec_pretty(all).map_err(std::io::Error::other)?)
+    kumi_types::private::write(file, &serde_json::to_vec_pretty(all).map_err(std::io::Error::other)?)
 }

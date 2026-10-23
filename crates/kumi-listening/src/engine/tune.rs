@@ -4,27 +4,25 @@
 
 use super::{judge::JudgeHeard, masking_items, Listening};
 use crate::{
-    core::{contracts::AuditionCandidate, errors::RuntimeError},
-    listening::{
-        checklist::{masking_unfair_in, plan_cut, Quantity, Target, REGIONS},
-        cmaes::Cmaes,
-        detect::ProblemKind,
-        fit::{fit, Band, Limits, Shape},
-        home::{Homed, Homing},
-        judging::{candidate_cost, predict},
-        knobs::{Scale, Unit},
-        measure::{measure_file, Heard, MeasureOptions, THIRDS},
-        probes::Probes,
-        renderer::{DeviceKnob, Window},
-        round::{Round, RoundKind},
-        tools::{TuneHow, TuneRequest},
-    },
+    checklist::{masking_unfair_in, plan_cut, Quantity, Target, REGIONS},
+    cmaes::Cmaes,
+    detect::ProblemKind,
+    fit::{fit, Band, Limits, Shape},
+    home::{Homed, Homing},
+    judging::{candidate_cost, predict},
+    knobs::{Scale, Unit},
+    measure::{measure_file, Heard, MeasureOptions, THIRDS},
+    probes::Probes,
+    renderer::{DeviceKnob, Window},
+    round::{Round, RoundKind},
+    tools::{TuneHow, TuneRequest},
 };
 use indexmap::IndexMap;
 use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::{number::to_string, string::head},
 };
+use kumi_types::{contracts::AuditionCandidate, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::rc::Rc;
 
@@ -226,7 +224,7 @@ impl Listening {
     }
 
     /// The excerpt's sound before the change, measured again for its frames (what a fit predicts from).
-    async fn before_heard(&self, window: Window, signal: Signal) -> Result<crate::listening::measure::Heard, RuntimeError> {
+    async fn before_heard(&self, window: Window, signal: Signal) -> Result<crate::measure::Heard, RuntimeError> {
         let (file, start) = {
             let run = self.judge.borrow();
             let run = run.as_ref().unwrap();
@@ -582,7 +580,7 @@ impl Listening {
         let start: Vec<f64> = chosen.iter().map(|(knob, scale)| fraction(scale, knob.raw)).collect();
         // Where the knobs are now costs no listen: its gap as the run reads it. A search has to beat it.
         let standing = candidate_cost(&checklist, index, &before, &whole, &before, &start, &start);
-        let mut search = Cmaes::new(&start, 0.2, None, crate::core::evolve::seeded(rand::random::<u32>()));
+        let mut search = Cmaes::new(&start, 0.2, None, crate::cmaes::seeded(rand::random::<u32>()));
         // What the copies can't hear (the focus track isn't with them) reads as it did before.
         let heard_alone = |values: Vec<Option<f64>>| -> Vec<Option<f64>> {
             values

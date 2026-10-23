@@ -11,8 +11,6 @@ mod sound;
 mod tune;
 pub use audition::{analysis_focus, heard_options, silent_render};
 pub(crate) use judge::masking_items;
-#[cfg(test)]
-pub(crate) use judge::prune_unstored;
 pub use judge::{JudgeRun, Named};
 
 use super::{
@@ -20,13 +18,11 @@ use super::{
     renderer::{bars_of, Renderer, Window},
     round::Round,
 };
-use crate::{
-    audio::{self, analyze::Analysis},
-    core::{context::ListenerSource, contracts::AuditionEvent, errors::RuntimeError},
-    references::store::ReferenceStore,
-};
+use crate::{listener::ListenerSource, references::store::ReferenceStore};
 use indexmap::IndexMap;
 use kumi_common::{abort::Signal, js::number::round};
+use kumi_media::audio::{self, analyze::Analysis};
+use kumi_types::{contracts::AuditionEvent, errors::RuntimeError};
 use std::{
     cell::{Cell, RefCell},
     path::PathBuf,
@@ -182,7 +178,7 @@ impl Listening {
 pub(crate) const LONGEST_LISTEN: f64 = 3600.;
 
 /// Why a stretch of `beats` is too long to hear at once, when it is, and what to do instead.
-pub(crate) fn too_long(beats: f64, tempo: f64, instead: &str) -> Option<String> {
+pub fn too_long(beats: f64, tempo: f64, instead: &str) -> Option<String> {
     let seconds = beats * 60. / tempo;
     (seconds > LONGEST_LISTEN || !seconds.is_finite())
         .then(|| format!("That's {} of music; Kumi listens to at most an hour at once, so {instead}.", clock(seconds)))
@@ -197,17 +193,15 @@ fn clock(seconds: f64) -> String {
 mod tests {
     use super::*;
     use crate::{
-        core::{
-            contracts::{AuditionCandidate, JsonObject, Render},
-            daw::DawProfile,
-        },
-        listening::{
-            checklist::MainState,
-            judging::Placed,
-            renderer::{Captured, ListenFlag, Pass},
-        },
+        checklist::MainState,
+        judging::Placed,
+        renderer::{Captured, ListenFlag, Pass},
     };
     use async_trait::async_trait;
+    use kumi_types::{
+        contracts::{AuditionCandidate, JsonObject, Render},
+        daw::DawProfile,
+    };
     use serde_json::{json, Value};
 
     /// A DAW with nothing in it, in an unknown DAW's words: only what every DAW must answer.

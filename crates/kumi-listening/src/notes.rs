@@ -3,7 +3,7 @@
 //! much it plays off the beat (syncopation) and how its phrase ends differ (fills). A part on a Drum Rack splits into
 //! lanes (kick, snare, hats, cymbals, perc), named from its pads; any other part is one lane.
 
-use crate::audio::dsp::high_pass;
+use kumi_media::audio::dsp::high_pass;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::TAU;
 

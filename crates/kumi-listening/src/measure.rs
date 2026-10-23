@@ -3,11 +3,11 @@
 //! and the low end, plus what the detectors place in time: each frame's bands and fine spectrum, and the bass
 //! notes. Everything a goal checklist compares is level-independent or compared level-matched.
 
-use crate::audio::{
+use kumi_common::abort::{Signal, SignalExt};
+use kumi_media::audio::{
     decode::{open_audio_to, AudioError, AudioSource},
     dsp::{fft, k_weighting, Biquad},
 };
-use kumi_common::abort::{Signal, SignalExt};
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
@@ -211,7 +211,7 @@ pub struct MeasureOptions {
 
 /// Measures a file (any format Kumi reads).
 pub async fn measure_file(path: &str, options: MeasureOptions) -> Result<Heard, AudioError> {
-    let until = options.start.unwrap_or(0.).max(0.) + options.seconds.unwrap_or(crate::audio::analyze::LONGEST) + 1.;
+    let until = options.start.unwrap_or(0.).max(0.) + options.seconds.unwrap_or(kumi_media::audio::analyze::LONGEST) + 1.;
     let mut source = open_audio_to(path, options.signal.clone(), Some(until)).await?;
     let result = measure_source(&mut source, &options).await;
     source.close().await?;
@@ -225,7 +225,7 @@ async fn measure_source(source: &mut AudioSource, options: &MeasureOptions) -> R
     }
     let start = options.start.unwrap_or(0.).max(0.);
     let total = source.frames as f64 / rate;
-    let length = options.seconds.unwrap_or(crate::audio::analyze::LONGEST).min(total - start);
+    let length = options.seconds.unwrap_or(kumi_media::audio::analyze::LONGEST).min(total - start);
     if !(length > 0.05) {
         return Err(AudioError("There's no audio in that part of the file.".into()));
     }
